@@ -50,7 +50,7 @@
           {{ ansible_distribution_version }}
 
   roles:
-    - role: ros2
+    - role: ros2_installation
       vars:
         ros2_distro: "{{ ros2_distro }}"
         ros2_install_dev_tools: "{{ install_dev_tools }}"

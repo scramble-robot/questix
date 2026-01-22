@@ -1,0 +1,15 @@
+---
+# Development Environment Variables
+# Override variables for development/testing environment
+# Usage: ansible-playbook setup_kit.yaml -e @vars/dev.yaml
+
+# Use development-friendly settings
+ros_domain_id: 99 # Different domain for dev to avoid conflicts
+
+# Workspace path for development
+workspace_path: /home/{{ ansible_user | default(ansible_env.SUDO_USER) }}/robot_ws_dev
+
+# Disable hardware configurations for testing in containers or non-Pi environments
+enable_i2c: false
+enable_spi: false
+configure_udev_rules: false

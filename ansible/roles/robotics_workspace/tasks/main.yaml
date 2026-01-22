@@ -1,0 +1,28 @@
+---
+# Robotics Workspace Setup Tasks
+
+- name: Create robotics workspace directory
+  ansible.builtin.file:
+    path: "{{ workspace_path }}/src"
+    state: directory
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: "0755"
+  become: false
+
+- name: Add ROS2 robotics workspace setup to bashrc
+  ansible.builtin.blockinfile:
+    path: "{{ bashrc_path }}"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - ROS2 Robotics Kit"
+    block: |
+      # ROS2 Robotics Kit Environment (Raspberry Pi 5)
+      export ROS_DOMAIN_ID={{ ros_domain_id }}
+      export ROBOT_WS={{ workspace_path }}
+      alias rw='cd $ROBOT_WS'
+      alias rs='cd $ROBOT_WS/src'
+      alias rb='cd $ROBOT_WS && colcon build --symlink-install'
+      alias rt='cd $ROBOT_WS && colcon test'
+      alias gpio_status='raspi-gpio get'
+    state: present
+    create: true
+  become: false

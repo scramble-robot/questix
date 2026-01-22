@@ -1,0 +1,35 @@
+---
+# Hardware Interfaces Configuration Tasks
+
+- name: Enable I2C interface
+  ansible.builtin.lineinfile:
+    path: "{{ boot_config_path }}"
+    regexp: "^#?dtparam=i2c_arm="
+    line: "dtparam=i2c_arm=on"
+    state: present
+  notify: reboot_required
+  when: enable_i2c | bool
+
+- name: Enable SPI interface
+  ansible.builtin.lineinfile:
+    path: "{{ boot_config_path }}"
+    regexp: "^#?dtparam=spi="
+    line: "dtparam=spi=on"
+    state: present
+  notify: reboot_required
+  when: enable_spi | bool
+
+- name: Create udev rules for common robotics hardware
+  ansible.builtin.copy:
+    content: |
+      # USB Serial devices
+      SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="55d3", MODE="0660"
+      SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="servo", MODE="0660"
+      SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", SYMLINK+="lidar"
+
+      # Common USB camera
+      SUBSYSTEM=="video4linux", KERNEL=="video[0-9]*", ATTRS{product}=="USB Camera", SYMLINK+="robot_camera"
+    dest: "{{ udev_rules_path }}"
+    mode: "0644"
+  notify: reload_udev
+  when: configure_udev_rules | bool

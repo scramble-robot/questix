@@ -1,0 +1,41 @@
+---
+# ROS2 Robotics Kit Setup Variables
+# This file contains the main configuration variables for the setup playbook
+
+# ROS2 Configuration
+ros2_distro: jazzy
+target_architecture: arm64
+install_dev_tools: true
+
+# Target System Configuration
+target_ubuntu_version: "24.04"
+
+# ROS2 Additional Packages
+ros2_additional_packages:
+  - ros-jazzy-example-interfaces
+  - ros-jazzy-demo-nodes-cpp
+  - ros-jazzy-demo-nodes-py
+  - ros-jazzy-rqt-common-plugins
+  - ros-jazzy-robot-state-publisher
+  - ros-jazzy-joint-state-publisher
+  - ros-jazzy-tf2-tools
+  - ros-jazzy-tf2-ros
+  - ros-jazzy-geometry-msgs
+  - ros-jazzy-sensor-msgs
+  - ros-jazzy-std-msgs
+  - python3-colcon-common-extensions
+  - python3-rosdep
+  - python3-vcstool
+  - python3-argcomplete
+
+# Production/Default Settings
+# ROS domain ID for production
+ros_domain_id: 42
+
+# Workspace path
+workspace_path: /home/{{ ansible_user | default(ansible_env.SUDO_USER) }}/robot_ws
+
+# Hardware interface settings
+enable_i2c: true
+enable_spi: true
+configure_udev_rules: true
