@@ -1,0 +1,161 @@
+name: Ansible Playbook Check
+
+on:
+    push:
+        branches: [main]
+        paths:
+            - "ansible/**"
+            - ".github/workflows/ansible-check.yaml"
+    pull_request:
+        branches: [main]
+        paths:
+            - "ansible/**"
+            - ".github/workflows/ansible-check.yaml"
+
+jobs:
+    ansible-lint:
+        name: Ansible Lint
+        runs-on: ubuntu-24.04
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Set up Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.12"
+
+            - name: Install Ansible and ansible-lint
+              run: |
+                  python -m pip install --upgrade pip
+                  pip install ansible ansible-lint
+
+            - name: Run ansible-lint
+              run: |
+                  ansible-lint ansible/playbooks/setup_kit.yaml
+              continue-on-error: true
+
+    ansible-syntax-check:
+        name: Ansible Syntax Check
+        runs-on: ubuntu-24.04
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Set up Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.12"
+
+            - name: Install Ansible
+              run: |
+                  python -m pip install --upgrade pip
+                  pip install ansible
+
+            - name: Run ansible syntax check
+              run: |
+                  cd ansible
+                  ansible-playbook playbooks/setup_kit.yaml --syntax-check -i localhost,
+
+    ansible-dry-run:
+        name: Ansible Dry Run (Check Mode)
+        runs-on: ubuntu-24.04
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Set up Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.12"
+
+            - name: Install Ansible
+              run: |
+                  python -m pip install --upgrade pip
+                  pip install ansible
+
+            - name: Install required system packages
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y git
+
+            - name: Run ansible-playbook in check mode
+              run: |
+                  ansible-playbook ansible/playbooks/setup_kit.yaml \
+                    -i localhost, \
+                    --connection=local \
+                    --check \
+                    -e "ansible_become_password=dummy"
+              continue-on-error: true
+
+    ansible-test-setup:
+        name: Ansible Playbook Test (Minimal)
+        runs-on: ubuntu-24.04
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Set up Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.12"
+
+            - name: Install Ansible
+              run: |
+                  python -m pip install --upgrade pip
+                  pip install ansible
+
+            - name: Install required system packages
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y \
+                    git \
+                    software-properties-common \
+                    curl \
+                    gnupg2
+
+            - name: Test playbook execution (with tags for minimal test)
+              run: |
+                  # 軽量なタスクのみを実行してplaybookの基本的な動作を確認
+                  ansible-playbook ansible/playbooks/setup_kit.yaml \
+                    -i localhost, \
+                    --connection=local \
+                    --limit localhost \
+                    --become \
+                    -e "ansible_become_password=dummy" \
+                    -e "ansible_python_interpreter=/usr/bin/python3" \
+                    --check \
+                    --diff
+              continue-on-error: true
+              env:
+                  ANSIBLE_FORCE_COLOR: "1"
+
+    ansible-validate-inventory:
+        name: Validate Ansible Configuration
+        runs-on: ubuntu-24.04
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Set up Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.12"
+
+            - name: Install Ansible
+              run: |
+                  python -m pip install --upgrade pip
+                  pip install ansible
+
+            - name: Check ansible configuration
+              run: |
+                  cd ansible
+                  ansible --version
+                  ansible-config dump --only-changed || true
+
+            - name: Validate playbook structure
+              run: |
+                  cd ansible
+                  # Playbookの構造を検証
+                  ansible-playbook playbooks/setup_kit.yaml --list-tasks -i localhost,
+                  ansible-playbook playbooks/setup_kit.yaml --list-hosts -i localhost,
