@@ -32,7 +32,8 @@ jobs:
 
             - name: Run ansible-lint
               run: |
-                  ansible-lint ansible/playbooks/setup_kit.yaml
+                  cd ansible
+                  ansible-lint playbooks/setup_kit.yaml
               continue-on-error: true
 
     ansible-syntax-check:
@@ -81,7 +82,8 @@ jobs:
 
             - name: Run ansible-playbook in check mode
               run: |
-                  ansible-playbook ansible/playbooks/setup_kit.yaml \
+                  cd ansible
+                  ansible-playbook playbooks/setup_kit.yaml \
                     -i localhost, \
                     --connection=local \
                     --check \
@@ -117,7 +119,8 @@ jobs:
             - name: Test playbook execution (with tags for minimal test)
               run: |
                   # 軽量なタスクのみを実行してplaybookの基本的な動作を確認
-                  ansible-playbook ansible/playbooks/setup_kit.yaml \
+                  cd ansible
+                  ansible-playbook playbooks/setup_kit.yaml \
                     -i localhost, \
                     --connection=local \
                     --limit localhost \
