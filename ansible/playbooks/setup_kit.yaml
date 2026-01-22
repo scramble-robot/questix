@@ -6,27 +6,8 @@
   hosts: all
   become: true
   gather_facts: true
-  vars:
-    ros2_distro: jazzy
-    target_architecture: arm64
-    install_dev_tools: true
-    target_ubuntu_version: "24.04"
-    ros2_additional_packages:
-      - ros-jazzy-example-interfaces
-      - ros-jazzy-demo-nodes-cpp
-      - ros-jazzy-demo-nodes-py
-      - ros-jazzy-rqt-common-plugins
-      - ros-jazzy-robot-state-publisher
-      - ros-jazzy-joint-state-publisher
-      - ros-jazzy-tf2-tools
-      - ros-jazzy-tf2-ros
-      - ros-jazzy-geometry-msgs
-      - ros-jazzy-sensor-msgs
-      - ros-jazzy-std-msgs
-      - python3-colcon-common-extensions
-      - python3-rosdep
-      - python3-vcstool
-      - python3-argcomplete
+  vars_files:
+    - vars/setup_kit_vars.yaml
 
   pre_tasks:
     - name: Verify target architecture
@@ -73,103 +54,14 @@
         msg: "Detected device: {{ pi_model.stdout }}"
 
   roles:
-    - role: ../roles/ros2
+    - role: ros2_installation
       vars:
         ros2_install_dev_tools: "{{ install_dev_tools }}"
+    - role: raspberry_pi_setup
+    - role: hardware_interfaces
+    - role: robotics_workspace
 
   post_tasks:
-    - name: Install Raspberry Pi specific utilities
-      ansible.builtin.apt:
-        name:
-          - git
-          - wget
-          - curl
-          - vim
-          - nano
-          - htop
-          - tree
-          - build-essential
-          - cmake
-          - gdb
-          - i2c-tools
-          - python3-pip
-          - python3-dev
-          - python3-setuptools
-          - python3-wheel
-          - python3-rpi.gpio
-          - python3-gpiozero
-          - libraspberrypi-bin
-          - libserial-dev
-        state: present
-        update_cache: true
-
-    - name: Enable I2C interface
-      ansible.builtin.lineinfile:
-        path: /boot/firmware/config.txt
-        regexp: "^#?dtparam=i2c_arm="
-        line: "dtparam=i2c_arm=on"
-        state: present
-      notify: reboot_required
-
-    - name: Enable SPI interface
-      ansible.builtin.lineinfile:
-        path: /boot/firmware/config.txt
-        regexp: "^#?dtparam=spi="
-        line: "dtparam=spi=on"
-        state: present
-      notify: reboot_required
-
-    - name: Create gpio group
-      ansible.builtin.group:
-        name: gpio
-        state: present
-
-    - name: Add user to gpio group
-      ansible.builtin.user:
-        name: "{{ ansible_user | default(ansible_env.USER) }}"
-        groups: gpio,input,dialout
-        append: true
-
-    - name: Create robotics workspace directory
-      ansible.builtin.file:
-        path: "/home/{{ ansible_user | default(ansible_env.SUDO_USER) }}/robot_ws/src"
-        state: directory
-        owner: "{{ ansible_user | default(ansible_env.SUDO_USER) }}"
-        group: "{{ ansible_user | default(ansible_env.SUDO_USER) }}"
-        mode: "0755"
-      become: false
-
-    - name: Add ROS2 robotics workspace setup to bashrc
-      ansible.builtin.lineinfile:
-        path: "/home/{{ ansible_user | default(ansible_env.SUDO_USER) }}/.bashrc"
-        line: "{{ item }}"
-        state: present
-        create: true
-      become: false
-      loop:
-        - "# ROS2 Robotics Kit Environment (Raspberry Pi 5)"
-        - "export ROS_DOMAIN_ID=42"
-        - "export ROBOT_WS=/home/{{ ansible_user | default(ansible_env.SUDO_USER) }}/robot_ws"
-        - "alias rw='cd $ROBOT_WS'"
-        - "alias rs='cd $ROBOT_WS/src'"
-        - "alias rb='cd $ROBOT_WS && colcon build --symlink-install'"
-        - "alias rt='cd $ROBOT_WS && colcon test'"
-        - "alias gpio_status='raspi-gpio get'"
-
-    - name: Create udev rules for common robotics hardware
-      ansible.builtin.copy:
-        content: |
-          # USB Serial devices
-          SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="55d3", MODE="0660"
-          SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="servo", MODE="0660"
-          SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", SYMLINK+="lidar"
-
-          # Common USB camera
-          SUBSYSTEM=="video4linux", KERNEL=="video[0-9]*", ATTRS{product}=="USB Camera", SYMLINK+="robot_camera"
-        dest: /etc/udev/rules.d/99-robot-hardware.rules
-        mode: "0644"
-      notify: reload_udev
-
     - name: Display completion message
       ansible.builtin.debug:
         msg:
@@ -186,13 +78,3 @@
           - "3. Navigate to workspace: rw"
           - "4. Test GPIO access: gpio_status"
           - "5. Test ROS2: ros2 topic list"
-
-  handlers:
-    - name: reboot_required
-      ansible.builtin.debug:
-        msg: "System reboot is required to enable hardware interfaces"
-
-    - name: reload_udev
-      ansible.builtin.systemd:
-        name: udev
-        state: reloaded

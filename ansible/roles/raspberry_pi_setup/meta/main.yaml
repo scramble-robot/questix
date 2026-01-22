@@ -1,0 +1,15 @@
+---
+# Role metadata for raspberry_pi_setup
+
+galaxy_info:
+  author: Scramble Robot Team
+  description: Setup Raspberry Pi 5 specific utilities and configurations
+  license: MIT
+  min_ansible_version: "2.14"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+        - noble
+
+dependencies: []

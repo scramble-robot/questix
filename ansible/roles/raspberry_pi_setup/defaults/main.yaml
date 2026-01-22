@@ -1,0 +1,4 @@
+---
+# Default variables for raspberry_pi_setup role
+
+target_user: "{{ ansible_user | default(ansible_env.SUDO_USER) }}"

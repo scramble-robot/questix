@@ -1,0 +1,15 @@
+---
+# Role metadata for robotics_workspace
+
+galaxy_info:
+  author: Scramble Robot Team
+  description: Setup ROS2 robotics workspace and bash environment
+  license: MIT
+  min_ansible_version: "2.14"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+        - noble
+
+dependencies: []

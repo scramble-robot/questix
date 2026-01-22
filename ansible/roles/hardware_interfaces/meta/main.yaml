@@ -1,0 +1,15 @@
+---
+# Role metadata for hardware_interfaces
+
+galaxy_info:
+  author: Scramble Robot Team
+  description: Configure hardware interfaces (I2C, SPI) and udev rules for robotics hardware
+  license: MIT
+  min_ansible_version: "2.14"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+        - noble
+
+dependencies: []

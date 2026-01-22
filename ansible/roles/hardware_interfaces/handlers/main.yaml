@@ -1,0 +1,11 @@
+---
+# Handlers for hardware_interfaces role
+
+- name: reboot_required
+  ansible.builtin.debug:
+    msg: "System reboot is required to enable hardware interfaces"
+
+- name: reload_udev
+  ansible.builtin.systemd:
+    name: udev
+    state: reloaded

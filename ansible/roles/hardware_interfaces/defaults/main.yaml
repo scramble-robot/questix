@@ -1,0 +1,9 @@
+---
+# Default variables for hardware_interfaces role
+
+boot_config_path: /boot/firmware/config.txt
+udev_rules_path: /etc/udev/rules.d/99-robot-hardware.rules
+
+enable_i2c: true
+enable_spi: true
+configure_udev_rules: true

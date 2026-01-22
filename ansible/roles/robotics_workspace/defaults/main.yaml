@@ -1,0 +1,7 @@
+---
+# Default variables for robotics_workspace role
+
+target_user: "{{ ansible_user | default(ansible_env.SUDO_USER) }}"
+workspace_path: "/home/{{ target_user }}/robot_ws"
+bashrc_path: "/home/{{ target_user }}/.bashrc"
+ros_domain_id: 42
