@@ -2,24 +2,26 @@ name: ROS2 Build and Test
 
 on:
   push:
-    branches: [ master, main ]
+    branches: [main]
     paths-ignore:
-      - '**.md'
-      - 'ansible/**'
-      - 'docker/**'
-      - 'scripts/**'
+      - ".github/**"
+      - "**.md"
+      - "ansible/**"
+      - "docker/**"
+      - "scripts/**"
   pull_request:
-    branches: [ master, main ]
+    branches: [main]
     paths-ignore:
-      - '**.md'
-      - 'ansible/**'
-      - 'docker/**'
-      - 'scripts/**'
+      - ".github/**"
+      - "**.md"
+      - "ansible/**"
+      - "docker/**"
+      - "scripts/**"
 
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-    container: 
+    container:
       image: ros:${{ matrix.ros_distro }}-ros-base
       options: --platform linux/${{ matrix.architecture }}
     env:
@@ -29,132 +31,132 @@ jobs:
         ros_distro: [humble, jazzy]
         architecture: [amd64, arm64]
       fail-fast: false
-    
+
     steps:
-    - name: Suppress git warnings
-      run: |
-        git config --global --add safe.directory '*'
-        
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-        token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Suppress git warnings
+        run: |
+          git config --global --add safe.directory '*'
 
-    - name: Install build dependencies
-      run: |
-        apt-get update && apt-get install -y \
-          python3-colcon-common-extensions \
-          python3-pip \
-          python3-vcstool \
-          ccache \
-          git \
-          wget \
-          && rm -rf /var/lib/apt/lists/*
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Configure git
-      run: |
-        git config --global user.email "action@github.com"
-        git config --global user.name "GitHub Action"
-        git config --global init.defaultBranch main
-        git config --global --add safe.directory $(pwd)
+      - name: Install build dependencies
+        run: |
+          apt-get update && apt-get install -y \
+            python3-colcon-common-extensions \
+            python3-pip \
+            python3-vcstool \
+            ccache \
+            git \
+            wget \
+            && rm -rf /var/lib/apt/lists/*
 
-    - name: Setup workspace and dependencies
-      run: |
-        # Create workspace structure
-        mkdir -p src
-        
-        # Copy ROS2 package directories to workspace
-        for pkg in ddt_motor_control esc_motor_control joy_controller servo_control_ros2; do
-          if [ -d "$pkg" ]; then
-            cp -r "$pkg" src/
+      - name: Configure git
+        run: |
+          git config --global user.email "action@github.com"
+          git config --global user.name "GitHub Action"
+          git config --global init.defaultBranch main
+          git config --global --add safe.directory $(pwd)
+
+      - name: Setup workspace and dependencies
+        run: |
+          # Create workspace structure
+          mkdir -p src
+
+          # Copy ROS2 package directories to workspace
+          for pkg in ddt_motor_control esc_motor_control joy_controller servo_control_ros2; do
+            if [ -d "$pkg" ]; then
+              cp -r "$pkg" src/
+            fi
+          done
+
+          # Import additional repositories if dependency.repos exists
+          if [ -f dependency.repos ]; then
+            # Configure git to use HTTPS instead of SSH for GitHub
+            git config --global url."https://github.com/".insteadOf "git@github.com:"
+            git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+            vcs import src < dependency.repos
           fi
-        done
-        
-        # Import additional repositories if dependency.repos exists
-        if [ -f dependency.repos ]; then
-          # Configure git to use HTTPS instead of SSH for GitHub
-          git config --global url."https://github.com/".insteadOf "git@github.com:"
-          git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
-          vcs import src < dependency.repos
-        fi
 
-    - name: Generate rosdep keys
-      run: |
-        rosdep init || true
-        rosdep update
-        colcon list -p --base-paths src > packages.txt
-        rosdep keys --from-paths $(cat packages.txt) --rosdistro ${{ matrix.ros_distro }} > rosdep_keys.txt || echo "No rosdep keys found"
+      - name: Generate rosdep keys
+        run: |
+          rosdep init || true
+          rosdep update
+          colcon list -p --base-paths src > packages.txt
+          rosdep keys --from-paths $(cat packages.txt) --rosdistro ${{ matrix.ros_distro }} > rosdep_keys.txt || echo "No rosdep keys found"
 
-    - name: Cache rosdep
-      id: cache-rosdep
-      uses: actions/cache@v4
-      with:
-        path: |
-          /var/lib/apt/lists
-          /root/.ros/rosdep
-        key: rosdep-${{ matrix.ros_distro }}-${{ runner.os }}-${{ hashFiles('rosdep_keys.txt') }}
-        restore-keys: |
-          rosdep-${{ matrix.ros_distro }}-${{ runner.os }}-
+      - name: Cache rosdep
+        id: cache-rosdep
+        uses: actions/cache@v4
+        with:
+          path: |
+            /var/lib/apt/lists
+            /root/.ros/rosdep
+          key: rosdep-${{ matrix.ros_distro }}-${{ runner.os }}-${{ hashFiles('rosdep_keys.txt') }}
+          restore-keys: |
+            rosdep-${{ matrix.ros_distro }}-${{ runner.os }}-
 
-    - name: Install package dependencies
-      run: |
-        if [[ "${{ steps.cache-rosdep.outputs.cache-hit }}" == "true" ]]; then
-          echo "Rosdep cache hit. Skipping rosdep install."
-        else
-          echo "Rosdep cache miss. Running rosdep install."
-          apt-get -yqq update
-          rosdep install -yqq --from-paths src --ignore-src --rosdistro ${{ matrix.ros_distro }} || true
-        fi
+      - name: Install package dependencies
+        run: |
+          if [[ "${{ steps.cache-rosdep.outputs.cache-hit }}" == "true" ]]; then
+            echo "Rosdep cache hit. Skipping rosdep install."
+          else
+            echo "Rosdep cache miss. Running rosdep install."
+            apt-get -yqq update
+            rosdep install -yqq --from-paths src --ignore-src --rosdistro ${{ matrix.ros_distro }} || true
+          fi
 
-    - name: Install Python dependencies
-      run: pip3 install pyserial
+      - name: Install Python dependencies
+        run: pip3 install pyserial
 
-    - name: Setup colcon mixin
-      run: |
-        colcon mixin add default https://raw.githubusercontent.com/colcon/colcon-mixin-repository/master/index.yaml || true
-        colcon mixin update default || true
+      - name: Setup colcon mixin
+        run: |
+          colcon mixin add default https://raw.githubusercontent.com/colcon/colcon-mixin-repository/master/index.yaml || true
+          colcon mixin update default || true
 
-    - name: Cache build artifacts
-      uses: actions/cache@v4
-      with:
-        path: |
-          build
-          install
-        key: build-${{ matrix.ros_distro }}-${{ runner.os }}-${{ matrix.architecture }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', '**/package.xml') }}
-        restore-keys: |
-          build-${{ matrix.ros_distro }}-${{ runner.os }}-${{ matrix.architecture }}-
+      - name: Cache build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            build
+            install
+          key: build-${{ matrix.ros_distro }}-${{ runner.os }}-${{ matrix.architecture }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', '**/package.xml') }}
+          restore-keys: |
+            build-${{ matrix.ros_distro }}-${{ runner.os }}-${{ matrix.architecture }}-
 
-    - name: Build ROS2 packages
-      run: |
-        source /opt/ros/${{ matrix.ros_distro }}/setup.bash
-        
-        # Use optimized parallel workers for GitHub Actions
-        PARALLEL_WORKERS=$(nproc)
-        echo "Using $PARALLEL_WORKERS parallel workers for build"
-        
-        # Build with optimizations
-        colcon build \
-          --event-handlers console_cohesion+ \
-          --parallel-workers $PARALLEL_WORKERS \
-          --cmake-args -DCMAKE_BUILD_TYPE=Release \
-          --symlink-install
+      - name: Build ROS2 packages
+        run: |
+          source /opt/ros/${{ matrix.ros_distro }}/setup.bash
 
-    - name: Run tests
-      run: |
-        source /opt/ros/${{ matrix.ros_distro }}/setup.bash
-        source install/setup.bash
-        colcon test \
-          --event-handlers console_cohesion+ \
-          --parallel-workers $(nproc) \
-          --return-code-on-test-failure
+          # Use optimized parallel workers for GitHub Actions
+          PARALLEL_WORKERS=$(nproc)
+          echo "Using $PARALLEL_WORKERS parallel workers for build"
 
-    - name: Show test results
-      if: always()
-      run: |
-        source /opt/ros/${{ matrix.ros_distro }}/setup.bash
-        source install/setup.bash
-        colcon test-result --verbose || echo "No test results found"
+          # Build with optimizations
+          colcon build \
+            --event-handlers console_cohesion+ \
+            --parallel-workers $PARALLEL_WORKERS \
+            --cmake-args -DCMAKE_BUILD_TYPE=Release \
+            --symlink-install
+
+      - name: Run tests
+        run: |
+          source /opt/ros/${{ matrix.ros_distro }}/setup.bash
+          source install/setup.bash
+          colcon test \
+            --event-handlers console_cohesion+ \
+            --parallel-workers $(nproc) \
+            --return-code-on-test-failure
+
+      - name: Show test results
+        if: always()
+        run: |
+          source /opt/ros/${{ matrix.ros_distro }}/setup.bash
+          source install/setup.bash
+          colcon test-result --verbose || echo "No test results found"
 
   static-analysis:
     runs-on: ubuntu-latest
@@ -166,26 +168,26 @@ jobs:
       matrix:
         ros_distro: [humble, jazzy]
     steps:
-    - name: Suppress git warnings
-      run: git config --global --add safe.directory '*'
-        
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
+      - name: Suppress git warnings
+        run: git config --global --add safe.directory '*'
 
-    - name: Install linting tools
-      run: |
-        apt-get update && apt-get install -y python3-pip && rm -rf /var/lib/apt/lists/*
-        pip3 install flake8 pep257
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - name: Run flake8 (Python style check)
-      run: |
-        find . -name "*.py" -not -path "./__pycache__/*" -not -path "./build/*" -not -path "./install/*" -not -path "./log/*" | xargs -r flake8 --max-line-length=100 --ignore=E501,W503
+      - name: Install linting tools
+        run: |
+          apt-get update && apt-get install -y python3-pip && rm -rf /var/lib/apt/lists/*
+          pip3 install flake8 pep257
 
-    - name: Run pep257 (Python docstring check)
-      run: |
-        find . -name "*.py" -not -path "./__pycache__/*" -not -path "./build/*" -not -path "./install/*" -not -path "./log/*" | xargs -r pep257 --ignore=D100,D101,D102,D103,D104,D105,D107,D203,D213
+      - name: Run flake8 (Python style check)
+        run: |
+          find . -name "*.py" -not -path "./__pycache__/*" -not -path "./build/*" -not -path "./install/*" -not -path "./log/*" | xargs -r flake8 --max-line-length=100 --ignore=E501,W503
+
+      - name: Run pep257 (Python docstring check)
+        run: |
+          find . -name "*.py" -not -path "./__pycache__/*" -not -path "./build/*" -not -path "./install/*" -not -path "./log/*" | xargs -r pep257 --ignore=D100,D101,D102,D103,D104,D105,D107,D203,D213
 
   format-check:
     runs-on: ubuntu-latest
@@ -198,25 +200,25 @@ jobs:
         ros_distro: [humble, jazzy]
     if: github.event_name == 'pull_request'
     steps:
-    - name: Suppress git warnings
-      run: git config --global --add safe.directory '*'
-        
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
+      - name: Suppress git warnings
+        run: git config --global --add safe.directory '*'
 
-    - name: Install ament_clang_format
-      run: |
-        apt-get update && apt-get install -y \
-          python3-pip \
-          ros-dev-tools \
-          && rm -rf /var/lib/apt/lists/*
-        pip3 install ament_clang_format
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - name: Check C++ formatting
-      run: |
-        find . -name "*.cpp" -o -name "*.hpp" | xargs -r ament_clang_format --config .clang-format --reformat-code=false
+      - name: Install ament_clang_format
+        run: |
+          apt-get update && apt-get install -y \
+            python3-pip \
+            ros-dev-tools \
+            && rm -rf /var/lib/apt/lists/*
+          pip3 install ament_clang_format
+
+      - name: Check C++ formatting
+        run: |
+          find . -name "*.cpp" -o -name "*.hpp" | xargs -r ament_clang_format --config .clang-format --reformat-code=false
 
   build-summary:
     needs: [build-and-test, static-analysis, format-check]
@@ -227,24 +229,24 @@ jobs:
       DEBIAN_FRONTEND: noninteractive
     if: always()
     steps:
-    - name: Build Summary
-      run: |
-        echo "## Build Results" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        if [ "${{ needs.build-and-test.result }}" == "success" ]; then
-          echo "✅ **Build and Test**: Passed" >> $GITHUB_STEP_SUMMARY
-        else
-          echo "❌ **Build and Test**: Failed" >> $GITHUB_STEP_SUMMARY
-        fi
-        
-        if [ "${{ needs.static-analysis.result }}" == "success" ]; then
-          echo "✅ **Static Analysis**: Passed" >> $GITHUB_STEP_SUMMARY
-        else
-          echo "❌ **Static Analysis**: Failed" >> $GITHUB_STEP_SUMMARY
-        fi
-        
-        if [ "${{ needs.format-check.result }}" == "success" ] || [ "${{ needs.format-check.result }}" == "skipped" ]; then
-          echo "✅ **Format Check**: Passed" >> $GITHUB_STEP_SUMMARY
-        else
-          echo "❌ **Format Check**: Failed" >> $GITHUB_STEP_SUMMARY
-        fi
+      - name: Build Summary
+        run: |
+          echo "## Build Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ needs.build-and-test.result }}" == "success" ]; then
+            echo "✅ **Build and Test**: Passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Build and Test**: Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.static-analysis.result }}" == "success" ]; then
+            echo "✅ **Static Analysis**: Passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Static Analysis**: Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.format-check.result }}" == "success" ] || [ "${{ needs.format-check.result }}" == "skipped" ]; then
+            echo "✅ **Format Check**: Passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Format Check**: Failed" >> $GITHUB_STEP_SUMMARY
+          fi
