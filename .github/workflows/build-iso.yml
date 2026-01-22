@@ -59,17 +59,22 @@ jobs:
 
       - name: Validate YAML syntax
         run: |
-          yamllint ansible/
+          cd ansible
+          yamllint .
 
       - name: Lint Ansible playbooks
         run: |
-          ansible-lint ansible/playbooks/setup_kit.yaml
-          ansible-lint ansible/playbooks/setup_dev.yaml
+          cd ansible
+          ansible-lint playbooks/setup_kit.yaml
+          ansible-lint playbooks/setup_dev.yaml
+        env:
+          ANSIBLE_ROLES_PATH: roles:~/.ansible/roles:/usr/share/ansible/roles:/etc/ansible/roles
 
       - name: Syntax check playbooks
         run: |
-          ansible-playbook --syntax-check ansible/playbooks/setup_kit.yaml
-          ansible-playbook --syntax-check ansible/playbooks/setup_dev.yaml
+          cd ansible
+          ansible-playbook --syntax-check playbooks/setup_kit.yaml
+          ansible-playbook --syntax-check playbooks/setup_dev.yaml
 
   build-iso:
     name: Build Custom Ubuntu ISO
