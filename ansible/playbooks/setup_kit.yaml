@@ -58,6 +58,7 @@
     - { role: raspberry_pi_setup }
     - { role: hardware_interfaces }
     - { role: robotics_workspace }
+    - { role: display_settings }
 
   post_tasks:
     - name: Display completion message

@@ -1,0 +1,90 @@
+---
+# Display Settings Tasks
+# - Automatic login (GDM3 + systemd-getty fallback)
+# - Screen blank / screensaver / power-saving disable (dconf system-wide)
+
+# ============================================================
+#  Automatic Login
+# ============================================================
+
+- name: Check if GDM3 is installed
+  ansible.builtin.stat:
+    path: /etc/gdm3/custom.conf
+  register: gdm3_conf
+  when: enable_autologin
+
+- name: Enable GDM3 automatic login
+  ansible.builtin.blockinfile:
+    path: /etc/gdm3/custom.conf
+    marker: "# {mark} ANSIBLE MANAGED - display_settings autologin"
+    insertafter: '^\[daemon\]'
+    block: |
+      AutomaticLoginEnable=True
+      AutomaticLogin={{ target_user }}
+  when: enable_autologin and gdm3_conf.stat.exists
+
+- name: Create getty autologin override directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/getty@tty1.service.d
+    state: directory
+    mode: "0755"
+  when: enable_autologin and not gdm3_conf.stat.exists
+
+- name: Configure getty automatic login (fallback when GDM3 is absent)
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/getty@tty1.service.d/autologin.conf
+    mode: "0644"
+    content: |
+      [Service]
+      ExecStart=
+      ExecStart=-/sbin/agetty --autologin {{ target_user }} --noclear %I $TERM
+  when: enable_autologin and not gdm3_conf.stat.exists
+
+# ============================================================
+#  Disable Screen Blanking (dconf system-wide override)
+# ============================================================
+
+- name: Ensure dconf CLI is available
+  ansible.builtin.apt:
+    name: dconf-cli
+    state: present
+  when: disable_screen_blank
+
+- name: Create dconf profile for user
+  ansible.builtin.copy:
+    dest: /etc/dconf/profile/user
+    mode: "0644"
+    content: |
+      user-db:user
+      system-db:local
+  when: disable_screen_blank
+  notify: update_dconf
+
+- name: Create dconf local database directory
+  ansible.builtin.file:
+    path: /etc/dconf/db/local.d
+    state: directory
+    mode: "0755"
+  when: disable_screen_blank
+
+- name: Write dconf overrides to disable screen blanking
+  ansible.builtin.copy:
+    dest: /etc/dconf/db/local.d/00-disable-screen-blank
+    mode: "0644"
+    content: |
+      # Managed by Ansible – display_settings role
+      # Disable screen blanking, screensaver, and power-saving idle
+
+      [org/gnome/desktop/session]
+      idle-delay=uint32 0
+
+      [org/gnome/desktop/screensaver]
+      lock-enabled=false
+      idle-activation-enabled=false
+
+      [org/gnome/settings-daemon/plugins/power]
+      idle-dim=false
+      sleep-inactive-ac-type='nothing'
+      sleep-inactive-battery-type='nothing'
+  when: disable_screen_blank
+  notify: update_dconf

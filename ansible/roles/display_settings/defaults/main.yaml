@@ -1,0 +1,10 @@
+---
+# Default variables for display_settings role
+
+target_user: "{{ ansible_user | default(ansible_env.SUDO_USER) }}"
+
+# Enable automatic login via GDM3 / getty
+enable_autologin: true
+
+# Disable screen blanking, screensaver, and power-saving idle
+disable_screen_blank: true

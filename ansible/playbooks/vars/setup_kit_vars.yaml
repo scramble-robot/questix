@@ -39,3 +39,7 @@ workspace_path: /home/{{ ansible_user | default(ansible_env.SUDO_USER) }}/robot_
 enable_i2c: true
 enable_spi: true
 configure_udev_rules: true
+
+# Display settings
+enable_autologin: true
+disable_screen_blank: true
