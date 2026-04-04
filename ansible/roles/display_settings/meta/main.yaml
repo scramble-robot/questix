@@ -1,0 +1,15 @@
+---
+# Role metadata for display_settings
+
+galaxy_info:
+  author: Scramble Robot Team
+  description: Configure automatic login and disable screen blanking for kiosk/robot use
+  license: MIT
+  min_ansible_version: "2.14"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+        - noble
+
+dependencies: []

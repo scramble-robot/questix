@@ -59,6 +59,7 @@
     - { role: hardware_interfaces }
     - { role: robotics_workspace }
     - { role: robot_autostart }
+    - { role: display_settings }
 
   post_tasks:
     - name: Display completion message

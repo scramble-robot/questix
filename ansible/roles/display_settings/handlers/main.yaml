@@ -1,0 +1,7 @@
+---
+# Handlers for display_settings role
+
+- name: update_dconf
+  ansible.builtin.command: dconf update
+  changed_when: false
+  become: true
