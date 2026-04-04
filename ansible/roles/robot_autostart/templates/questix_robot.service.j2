@@ -1,0 +1,26 @@
+[Unit]
+Description=Questix Robot ROS2 Launch Service
+After=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User={{ target_user }}
+Group={{ target_user }}
+EnvironmentFile=-/etc/questix_robot/launch.env
+Environment=ROS_DISTRO={{ ros2_distro }}
+Environment=ROBOT_WS={{ workspace_path }}
+ExecStart=/opt/questix_robot/questix_robot_launcher.sh
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=questix_robot
+
+TimeoutStopSec=15
+KillMode=mixed
+KillSignal=SIGINT
+
+[Install]
+WantedBy=multi-user.target

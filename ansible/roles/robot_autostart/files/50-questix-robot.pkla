@@ -1,0 +1,13 @@
+[Questix Robot Service Management]
+Identity=unix-user:ubuntu
+Action=org.freedesktop.systemd1.manage-units
+ResultAny=yes
+ResultInactive=yes
+ResultActive=yes
+
+[Questix Robot Config Write]
+Identity=unix-user:ubuntu
+Action=org.freedesktop.policykit.exec
+ResultAny=yes
+ResultInactive=yes
+ResultActive=yes

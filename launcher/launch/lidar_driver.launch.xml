@@ -6,7 +6,7 @@ Dual YDLiDAR T-semi Driver Launch File
 <launch>
   <!-- Launch Arguments -->
   <arg name="use_sim_time" default="false" description="Use simulation time" />
-  <arg name="lidar_config" default="$(find-pkg-share shr_launcher)/config/lidar_params.yaml" description="Config file for first LiDAR" />
+  <arg name="lidar_config" default="$(find-pkg-share questix_launcher)/config/lidar_params.yaml" description="Config file for first LiDAR" />
 
 
   <!-- First YDLiDAR T-semi -->

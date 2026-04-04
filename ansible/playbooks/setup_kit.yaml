@@ -58,6 +58,7 @@
     - { role: raspberry_pi_setup }
     - { role: hardware_interfaces }
     - { role: robotics_workspace }
+    - { role: robot_autostart }
 
   post_tasks:
     - name: Display completion message
@@ -69,6 +70,8 @@
           - "🔌 GPIO, I2C, and SPI interfaces enabled"
           - "📝 Environment aliases added to .bashrc"
           - "⚙️  Hardware udev rules configured"
+          - "🚀 Robot autostart service installed (mode: {{ robot_mode }})"
+          - "   Change mode: echo competition | sudo tee /etc/questix_robot/mode"
           - ""
           - "Next steps:"
           - "1. Reboot the system: sudo reboot"
@@ -76,3 +79,4 @@
           - "3. Navigate to workspace: rw"
           - "4. Test GPIO access: gpio_status"
           - "5. Test ROS2: ros2 topic list"
+          - "6. Switch to competition mode: echo competition | sudo tee /etc/questix_robot/mode"

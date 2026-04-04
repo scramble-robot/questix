@@ -1,0 +1,14 @@
+---
+galaxy_info:
+  role_name: robot_autostart
+  author: scramble-robot
+  description: Setup systemd autostart for Questix Robot ROS2 launch
+  license: MIT
+  min_ansible_version: "2.14"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - all
+
+dependencies:
+  - role: robotics_workspace

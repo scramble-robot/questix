@@ -1,0 +1,72 @@
+---
+# Robot Autostart Setup Tasks
+
+- name: Create robot config directory
+  ansible.builtin.file:
+    path: /etc/questix_robot
+    state: directory
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: "0755"
+
+- name: Deploy robot mode file
+  ansible.builtin.copy:
+    content: "{{ robot_mode }}\n"
+    dest: /etc/questix_robot/mode
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: "0644"
+    force: false
+
+- name: Deploy launch environment file
+  ansible.builtin.template:
+    src: launch.env.j2
+    dest: /etc/questix_robot/launch.env
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: "0644"
+    force: false
+
+- name: Create launcher script directory
+  ansible.builtin.file:
+    path: /opt/questix_robot
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy launcher script
+  ansible.builtin.copy:
+    src: questix_robot_launcher.sh
+    dest: /opt/questix_robot/questix_robot_launcher.sh
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy questix_robot systemd service
+  ansible.builtin.template:
+    src: questix_robot.service.j2
+    dest: /etc/systemd/system/questix_robot.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: reload_systemd
+
+- name: Enable questix_robot service
+  ansible.builtin.systemd:
+    name: questix_robot
+    enabled: true
+    daemon_reload: true
+
+- name: Deploy polkit rules for passwordless service management
+  ansible.builtin.copy:
+    src: 50-questix-robot.pkla
+    dest: /etc/polkit-1/localauthority/50-local.d/50-questix-robot.pkla
+    owner: root
+    group: root
+    mode: "0644"
+
+# Robot Manager Web UI (optional, skip by default)
+- name: Install robot-manager Web UI
+  ansible.builtin.include_tasks: robot_manager.yaml
+  when: install_robot_manager | bool

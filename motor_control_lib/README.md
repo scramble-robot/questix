@@ -298,4 +298,4 @@ MIT License
 ## 作者
 
 - リファクタリング: GitHub Copilot
-- 元コード: shr_core プロジェクト
+- 元コード: questix_core プロジェクト

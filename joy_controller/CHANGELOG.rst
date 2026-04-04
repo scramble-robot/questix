@@ -37,6 +37,6 @@ Changelog for package joy_controller
   * feat: update ESC motor control configuration and launch files for joystick integration
   * fix: remove unused dependencies from dependency.repos
   ---------
-* feat: add launch files and scripts for SHR Core system components
+* feat: add launch files and scripts for Questix system components
 * Add joy_controller package with core functionality and configuration files
 * Contributors: Akihisa Nagata, asa-naki

@@ -1,5 +1,5 @@
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Changelog for package shr_launcher
+Changelog for package questix_launcher
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 1.0.0 (2025-11-17)
@@ -37,5 +37,5 @@ Changelog for package shr_launcher
 * refactor: remove symbolic link creation from CMakeLists.txt and update servo configuration in launch file
 * feat: update servo control launch files and integrate into main launch configuration
 * refactor: remove unused launch files
-* feat: add launch files and scripts for SHR Core system components
+* feat: add launch files and scripts for Questix system components
 * Contributors: Akihisa Nagata, asa-naki

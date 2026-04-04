@@ -29,7 +29,7 @@ This project provides a complete automation pipeline using Ansible and GitHub Ac
 
    ```bash
    # Check latest releases
-   wget https://github.com/your-username/shr_core/releases/latest
+   wget https://github.com/your-username/questix_core/releases/latest
    ```
 
 2. **Flash to Storage**
@@ -52,8 +52,8 @@ This project provides a complete automation pipeline using Ansible and GitHub Ac
 1. **Setup Dependencies**
 
    ```bash
-   git clone https://github.com/your-username/shr_core.git
-   cd shr_core
+   git clone https://github.com/your-username/questix_core.git
+   cd questix_core
    ansible-playbook ansible/playbooks/setup_kit.yaml -i localhost, --connection=local --ask-become-pass
    ```
 
@@ -83,7 +83,7 @@ This project provides a complete automation pipeline using Ansible and GitHub Ac
 ## 📁 Project Structure
 
 ```
-shr_core/
+questix_core/
 ├── .github/workflows/     # GitHub Actions CI/CD
 │   └── build-iso.yml     # Automated ISO building
 ├── ansible/              # Ansible automation

@@ -1,0 +1,17 @@
+[Unit]
+Description=Questix Robot Manager Web UI
+After=network.target
+
+[Service]
+Type=simple
+User={{ target_user }}
+Group={{ target_user }}
+ExecStart=/usr/bin/python3 -m uvicorn robot_manager.app:app --host 127.0.0.1 --port {{ robot_manager_port }}
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=questix_robot_manager
+
+[Install]
+WantedBy=multi-user.target

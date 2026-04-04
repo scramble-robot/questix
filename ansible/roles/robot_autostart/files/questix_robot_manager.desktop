@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Questix Robot Manager
+Comment=Questix Robot Mode and Launch Configuration
+Exec=xdg-open http://localhost:8888
+Icon=preferences-system
+Terminal=false
+Categories=Utility;
+StartupNotify=false

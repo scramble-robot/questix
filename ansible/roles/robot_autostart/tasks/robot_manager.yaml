@@ -1,0 +1,52 @@
+---
+# Robot Manager Web UI Installation (optional)
+# Only runs when install_robot_manager is true
+
+- name: Install python3-pip
+  ansible.builtin.apt:
+    name:
+      - python3-pip
+    state: present
+    update_cache: true
+
+- name: Install robot-manager from private repository
+  ansible.builtin.pip:
+    name: "{{ robot_manager_repo }}@{{ robot_manager_version }}"
+    state: present
+    extra_args: "--break-system-packages"
+
+- name: Deploy questix_robot_manager systemd service
+  ansible.builtin.template:
+    src: questix_robot_manager.service.j2
+    dest: /etc/systemd/system/questix_robot_manager.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: reload_systemd
+
+- name: Enable and start questix_robot_manager service
+  ansible.builtin.systemd:
+    name: questix_robot_manager
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Ensure Desktop directory exists
+  ansible.builtin.file:
+    path: "/home/{{ target_user }}/Desktop"
+    state: directory
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: "0755"
+  become: false
+  failed_when: false
+
+- name: Deploy desktop shortcut
+  ansible.builtin.copy:
+    src: questix_robot_manager.desktop
+    dest: "/home/{{ target_user }}/Desktop/questix_robot_manager.desktop"
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: "0755"
+  become: false
+  failed_when: false

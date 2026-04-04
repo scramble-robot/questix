@@ -40,7 +40,7 @@ pip3 install gpiozero pigpio
 2. パッケージのビルド:
 
 ```bash
-cd /home/asahi/shr_core
+cd /home/asahi/questix_core
 colcon build --packages-select esc_motor_control_python
 source install/setup.bash
 ```

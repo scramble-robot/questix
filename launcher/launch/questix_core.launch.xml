@@ -2,20 +2,20 @@
 <launch>
   <!-- Launch Arguments -->
   <arg name="use_sim_time" default="false" description="Use simulation time" />
-  <arg name="enable_lidar" default="true" description="Enable YDLiDAR" />
-  <arg name="enable_shot" default="true" description="Enable Shot component"/>
-  <arg name="enable_drive" default="true" description="Enable drive component"/>
-  <arg name="enable_gpio_ref" default="false" description="Enable GPIO reference system (gpio_reader + joy_gate)"/>
-  <arg name="enable_rviz" default="false" description="Enable RViz visualization" />
+  <arg name="enable_lidar" default="$(env ENABLE_LIDAR true)" description="Enable YDLiDAR" />
+  <arg name="enable_shot" default="$(env ENABLE_SHOT true)" description="Enable Shot component"/>
+  <arg name="enable_drive" default="$(env ENABLE_DRIVE true)" description="Enable drive component"/>
+  <arg name="enable_gpio_ref" default="$(env ENABLE_GPIO_REF false)" description="Enable GPIO reference system (gpio_reader + joy_gate)"/>
+  <arg name="enable_rviz" default="$(env ENABLE_RVIZ false)" description="Enable RViz visualization" />
 
   <group if="$(var enable_shot)">
-    <include file="$(find-pkg-share shr_launcher)/launch/shot_component.launch.xml">
+    <include file="$(find-pkg-share questix_launcher)/launch/shot_component.launch.xml">
       <arg name="enable_gpio_ref" value="$(var enable_gpio_ref)"/>
     </include>
   </group>
 
   <group if="$(var enable_drive)">
-    <include file="$(find-pkg-share shr_launcher)/launch/drive_component.launch.xml">
+    <include file="$(find-pkg-share questix_launcher)/launch/drive_component.launch.xml">
       <arg name="enable_gpio_ref" value="$(var enable_gpio_ref)"/>
     </include>
   </group>

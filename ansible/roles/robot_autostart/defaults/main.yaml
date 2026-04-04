@@ -1,0 +1,17 @@
+---
+# Default variables for robot_autostart role
+
+target_user: "{{ ansible_user | default(ansible_env.SUDO_USER) }}"
+workspace_path: "/home/{{ target_user }}/robot_ws"
+ros2_distro: jazzy
+ros_domain_id: 42
+
+# Robot mode: "practice" (default, safe) or "competition" (auto-launch on boot)
+robot_mode: practice
+
+# Robot manager Web UI (separate private repository)
+# Set to true to install robot-manager GUI
+install_robot_manager: false
+robot_manager_repo: "git+ssh://git@github.com/scramble-robot/robot-manager.git"
+robot_manager_version: "main"
+robot_manager_port: 8888

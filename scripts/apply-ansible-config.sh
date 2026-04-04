@@ -168,7 +168,7 @@ echo "  1. Change password: passwd"
 echo "  2. Configure WiFi: sudo nmtui"
 echo "  3. Update system: sudo apt update && sudo apt upgrade"
 echo ""
-echo "📚 Documentation: https://github.com/your-repo/shr_core"
+echo "📚 Documentation: https://github.com/your-repo/questix_core"
 
 # Disable autologin after first boot
 sudo rm -f /etc/systemd/system/getty@tty1.service.d/autologin.conf
