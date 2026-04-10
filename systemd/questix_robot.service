@@ -6,9 +6,13 @@ StartLimitBurst=3
 
 [Service]
 Type=simple
+# Change User/Group to match your system username
 User=ubuntu
 Group=ubuntu
 EnvironmentFile=-/etc/questix_robot/launch.env
+# Defaults — override via launch.env or questix_robot.env
+Environment=ROS_DISTRO=jazzy
+Environment=ROBOT_WS=/home/ubuntu/robot_ws
 ExecStart=/opt/questix_robot/questix_robot_launcher.sh
 Restart=on-failure
 RestartSec=5

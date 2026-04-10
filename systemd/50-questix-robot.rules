@@ -1,0 +1,13 @@
+// Questix Robot — polkit rules (JavaScript format, Ubuntu 24.04+)
+// Grants the service user permission to manage questix_robot.service
+// without an interactive password prompt.
+polkit.addRule(function(action, subject) {
+    if (action.id === "org.freedesktop.systemd1.manage-units" &&
+        subject.user === "ubuntu" &&
+        action.lookup("unit") === "questix_robot.service" &&
+        (action.lookup("verb") === "start" ||
+         action.lookup("verb") === "stop" ||
+         action.lookup("verb") === "restart")) {
+        return polkit.Result.YES;
+    }
+});

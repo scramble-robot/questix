@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Questix Robot Manager</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>Questix Robot Manager</h1>
+    <div id="service-indicator" class="indicator inactive" title="Service status">
+      <span class="dot"></span>
+      <span id="service-status-text">unknown</span>
+    </div>
+  </header>
+
+  <main>
+    <!-- Mode Card -->
+    <section class="card mode-card">
+      <h2>動作モード</h2>
+      <div class="mode-display">
+        <span id="mode-label" class="mode-badge practice">practice</span>
+      </div>
+      <div class="toggle-row">
+        <span class="toggle-label">練習</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="mode-toggle">
+          <span class="slider"></span>
+        </label>
+        <span class="toggle-label">大会</span>
+      </div>
+    </section>
+
+    <!-- Service Control -->
+    <section class="card">
+      <h2>サービス制御</h2>
+      <div class="btn-group">
+        <button class="btn btn-start" data-action="start">起動</button>
+        <button class="btn btn-restart" data-action="restart">再起動</button>
+        <button class="btn btn-stop" data-action="stop">停止</button>
+      </div>
+    </section>
+
+    <!-- Launch Config -->
+    <section class="card">
+      <h2>Launch 設定</h2>
+      <div class="config-grid">
+        <div class="config-item">
+          <label>LiDAR</label>
+          <label class="toggle-switch small">
+            <input type="checkbox" data-config="ENABLE_LIDAR">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="config-item">
+          <label>射出 (Shot)</label>
+          <label class="toggle-switch small">
+            <input type="checkbox" data-config="ENABLE_SHOT">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="config-item">
+          <label>駆動 (Drive)</label>
+          <label class="toggle-switch small">
+            <input type="checkbox" data-config="ENABLE_DRIVE">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="config-item">
+          <label>GPIO Ref</label>
+          <label class="toggle-switch small">
+            <input type="checkbox" data-config="ENABLE_GPIO_REF">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="config-item">
+          <label>RViz</label>
+          <label class="toggle-switch small">
+            <input type="checkbox" data-config="ENABLE_RVIZ">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="config-item wide">
+          <label for="ros-domain-id">ROS_DOMAIN_ID</label>
+          <input type="number" id="ros-domain-id" min="0" max="232" value="42">
+        </div>
+        <div class="config-item wide">
+          <label for="robot-ws">ROBOT_WS</label>
+          <input type="text" id="robot-ws" value="/home/ubuntu/robot_ws">
+        </div>
+      </div>
+      <button class="btn btn-save" id="save-config">設定を保存</button>
+    </section>
+
+    <!-- Log Viewer -->
+    <section class="card log-card">
+      <h2>
+        ログ
+        <button class="btn btn-small" id="refresh-logs">更新</button>
+      </h2>
+      <pre id="log-output" class="log-viewer">ログを読み込み中...</pre>
+    </section>
+  </main>
+
+  <!-- Toast container -->
+  <div id="toast-container"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

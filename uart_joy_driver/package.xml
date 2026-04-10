@@ -1,22 +1,18 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-    <name>joy_controller</name>
-    <version>0.0.0</version>
-    <description>Integrated Joy Controller for ROS2 with enhanced joystick functionality</description>
+    <name>uart_joy_driver</name>
+    <version>0.1.0</version>
+    <description>UART serial joystick driver for Switch-style controllers. Reads 7-byte hex protocol from UART and publishes sensor_msgs/Joy.</description>
     <maintainer email="aki.grade2580@outlook.jp">asa-naki</maintainer>
     <license>Apache License 2.0</license>
 
     <buildtool_depend>ament_cmake_auto</buildtool_depend>
 
-    <depend>joy</depend>
-    <depend>geometry_msgs</depend>
     <depend>rclcpp</depend>
     <depend>rclcpp_components</depend>
     <depend>sensor_msgs</depend>
     <depend>std_msgs</depend>
-
-    <exec_depend>uart_joy_driver</exec_depend>
 
     <test_depend>ament_lint_auto</test_depend>
     <test_depend>ament_lint_common</test_depend>

@@ -6,20 +6,35 @@ dual_stick引数でシングルスティック/デュアルスティックモー
 -->
 <launch>
     <!-- Launch Arguments -->
-    <arg name="dual_stick" default="true" description="Use dual stick differential drive mode (true) or single stick mode (false)" />
+    <arg name="dual_stick" default="false" description="Use dual stick differential drive mode (true) or single stick mode (false)" />
     <arg name="config_file" default="$(find-pkg-share joy_controller)/config/joy_controller_params.yaml" description="Path to the joy controller configuration file" />
     <arg name="use_sim_time" default="false" description="Use simulation time" />
     <arg name="joy_device" default="/dev/input/js0" description="Joystick device path" />
     <arg name="joy_topic" default="/joy_gated" description="Joy input topic (can be /joy or /joy_gated)" />
     <arg name="debug_mode" default="false" description="Enable debug mode" />
+    <arg name="controller_type" default="dualshock" description="Controller type: dualshock or uart" />
+    <arg name="uart_port" default="/dev/ttyAMA0" description="UART serial port for uart controller" />
+    <arg name="uart_baud_rate" default="115200" description="UART baud rate for uart controller" />
 
-    <!-- Joy node (from joy package) -->
-    <node pkg="joy" exec="joy_node" name="joy_node" output="screen">
-        <param name="dev" value="$(var joy_device)" />
-        <param name="deadzone" value="0.05" />
-        <param name="autorepeat_rate" value="20.0" />
-        <param name="use_sim_time" value="$(var use_sim_time)" />
-    </node>
+    <!-- Joy node (from joy package) - DualShock mode -->
+    <group unless="$(eval '$(var controller_type)' == 'uart')">
+        <node pkg="joy" exec="joy_node" name="joy_node" output="screen">
+            <param name="dev" value="$(var joy_device)" />
+            <param name="deadzone" value="0.05" />
+            <param name="autorepeat_rate" value="20.0" />
+            <param name="use_sim_time" value="$(var use_sim_time)" />
+        </node>
+    </group>
+
+    <!-- UART Joy Driver node - UART mode -->
+    <group if="$(eval '$(var controller_type)' == 'uart')">
+        <node pkg="uart_joy_driver" exec="uart_joy_driver_node" name="uart_joy_driver" output="screen">
+            <param name="serial_port" value="$(var uart_port)" />
+            <param name="baud_rate" value="$(var uart_baud_rate)" />
+            <param name="use_sim_time" value="$(var use_sim_time)" />
+            <param from="$(find-pkg-share uart_joy_driver)/config/uart_joy_driver_params.yaml" />
+        </node>
+    </group>
 
     <!-- Joy Gate node -->
     <node pkg="joy_gate" exec="joy_gate_node" name="joy_gate" output="screen">

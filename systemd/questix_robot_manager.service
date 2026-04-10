@@ -4,6 +4,7 @@ After=network.target
 
 [Service]
 Type=simple
+# Change User/Group to match your system username
 User=ubuntu
 Group=ubuntu
 ExecStart=/usr/bin/python3 -m uvicorn robot_manager.app:app --host 127.0.0.1 --port 8888

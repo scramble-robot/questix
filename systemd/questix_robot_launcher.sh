@@ -28,17 +28,19 @@ if [ -f "${ENV_FILE}" ]; then
   set +a
 fi
 
-# Determine ROS2 distro and workspace
+# Determine ROS2 distro and workspace (env vars or defaults)
 ROS_DISTRO="${ROS_DISTRO:-jazzy}"
-WORKSPACE="${ROBOT_WS:-/home/ubuntu/robot_ws}"
+ROBOT_WS="${ROBOT_WS:-/home/ubuntu/robot_ws}"
 
-# Source ROS2 environment
+# Source ROS2 environment (disable -u temporarily as setup.bash uses unset vars)
+set +u
 # shellcheck disable=SC1090
 source "/opt/ros/${ROS_DISTRO}/setup.bash"
-if [ -f "${WORKSPACE}/install/setup.bash" ]; then
+if [ -f "${ROBOT_WS}/install/setup.bash" ]; then
   # shellcheck disable=SC1090
-  source "${WORKSPACE}/install/setup.bash"
+  source "${ROBOT_WS}/install/setup.bash"
 fi
+set -u
 
 # Build launch arguments
 LAUNCH_ARGS=""

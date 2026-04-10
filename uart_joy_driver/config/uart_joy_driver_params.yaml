@@ -1,0 +1,14 @@
+# UART Joy Driver Configuration
+# Switch-style controller connected via UART serial
+
+uart_joy_driver:
+  ros__parameters:
+    # Serial port settings
+    serial_port: "/dev/ttyAMA0"   # RPi built-in UART (GPIO14/15)
+    baud_rate: 115200
+
+    # Publishing rate (Hz)
+    publish_rate: 50.0
+
+    # Stick deadzone (0.0-1.0)
+    deadzone: 0.05
