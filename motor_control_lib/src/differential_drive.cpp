@@ -122,8 +122,8 @@ std::pair<double, double> DifferentialDrive::twistToMotorVelocities(double linea
   double v_left = linear_x - (angular_z * wheel_separation_ / 2.0);
   double v_right = linear_x + (angular_z * wheel_separation_ / 2.0);
 
-  double rpm_left = -1 * (v_left / (2.0 * M_PI * wheel_radius_)) * 60.0;
-  double rpm_right = (v_right / (2.0 * M_PI * wheel_radius_)) * 60.0;
+  double rpm_left = (v_left / (2.0 * M_PI * wheel_radius_)) * 60.0;
+  double rpm_right = -1 * (v_right / (2.0 * M_PI * wheel_radius_)) * 60.0;
 
   return std::make_pair(rpm_left, rpm_right);
 }
@@ -131,8 +131,8 @@ std::pair<double, double> DifferentialDrive::twistToMotorVelocities(double linea
 std::pair<double, double> DifferentialDrive::motorVelocitiesToTwist(int left_rpm,
                                                                     int right_rpm) const {
   // RPMから並進・角速度に変換
-  double left_velocity = -1 * (left_rpm / 60.0) * (2.0 * M_PI * wheel_radius_);
-  double right_velocity = (right_rpm / 60.0) * (2.0 * M_PI * wheel_radius_);
+  double left_velocity = (left_rpm / 60.0) * (2.0 * M_PI * wheel_radius_);
+  double right_velocity = -1 * (right_rpm / 60.0) * (2.0 * M_PI * wheel_radius_);
 
   double linear_x = (left_velocity + right_velocity) / 2.0;
   double angular_z = (right_velocity - left_velocity) / wheel_separation_;
