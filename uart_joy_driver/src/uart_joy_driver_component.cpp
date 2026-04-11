@@ -143,6 +143,16 @@ void UartJoyDriverComponent::readTimerCallback() {
   char buf[256];
   ssize_t n = read(serial_fd_, buf, sizeof(buf) - 1);
   if (n > 0) {
+    // Debug: print raw bytes as hex
+    buf[n] = '\0';
+    std::string raw_hex;
+    for (ssize_t i = 0; i < n; ++i) {
+      char hex[8];
+      snprintf(hex, sizeof(hex), "%02X ", static_cast<unsigned char>(buf[i]));
+      raw_hex += hex;
+    }
+    RCLCPP_INFO(this->get_logger(), "Raw(%zd bytes): %s", n, raw_hex.c_str());
+
     read_buffer_.append(buf, static_cast<size_t>(n));
   }
 
@@ -158,12 +168,9 @@ void UartJoyDriverComponent::readTimerCallback() {
     latest_line = line;
   }
 
-  if (latest_line.empty()) {
-    return;
+  if (!latest_line.empty()) {
+    RCLCPP_INFO(this->get_logger(), "Line: %s", latest_line.c_str());
   }
-
-  // Print raw serial data as-is
-  RCLCPP_INFO(this->get_logger(), "%s", latest_line.c_str());
 }
 
 bool UartJoyDriverComponent::readLine(std::string& line) {
