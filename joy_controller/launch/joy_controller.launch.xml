@@ -17,7 +17,7 @@ dual_stick引数でシングルスティック/デュアルスティックモー
     <arg name="uart_baud_rate" default="115200" description="UART baud rate for uart controller" />
 
     <!-- Joy node (from joy package) - DualShock mode -->
-    <group unless="$(eval '$(var controller_type)' == 'uart')">
+    <group unless="$(equals '$(var controller_type)' 'uart')">
         <node pkg="joy" exec="joy_node" name="joy_node" output="screen">
             <param name="dev" value="$(var joy_device)" />
             <param name="deadzone" value="0.05" />
@@ -27,7 +27,7 @@ dual_stick引数でシングルスティック/デュアルスティックモー
     </group>
 
     <!-- UART Joy Driver node - UART mode -->
-    <group if="$(eval '$(var controller_type)' == 'uart')">
+    <group if="$(equals '$(var controller_type)' 'uart')">
         <node pkg="uart_joy_driver" exec="uart_joy_driver_node" name="uart_joy_driver" output="screen">
             <param name="serial_port" value="$(var uart_port)" />
             <param name="baud_rate" value="$(var uart_baud_rate)" />
