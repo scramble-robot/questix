@@ -22,6 +22,9 @@
   <group if="$(var enable_lidar)">
     <include file="$(find-pkg-share ydlidar_ros2_driver)/launch/ydlidar_launch.py"/>
   </group>
+  <group if="$(var enable_gpio_ref)">
+    <include file="$(find-pkg-share gpio_reader)/launch/gpio_reader.launch.xml"/>
+  </group>
   <!-- RViz Visualization -->
   <node pkg="rviz2" exec="rviz2" name="rviz2" output="screen" if="$(var enable_rviz)" args="-d $(find-pkg-share ydlidar_ros2_driver)/config/ydlidar.rviz">
     <param name="use_sim_time" value="$(var use_sim_time)" />
