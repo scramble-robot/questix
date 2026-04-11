@@ -20,9 +20,9 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
   this->declare_parameter<double>("full_speed_value", 1.0);
   this->declare_parameter<bool>("test_mode", false);
   this->declare_parameter<std::string>("joy_topic", "/joy");
-  this->declare_parameter<int>("min_pulse_width", 1000);      // μs
-  this->declare_parameter<int>("max_pulse_width", 2000);      // μs
-  this->declare_parameter<int>("neutral_pulse_width", 1500);  // μs
+  this->declare_parameter<int>("min_pulse_width", 0);         // μs (speed=-1.0)
+  this->declare_parameter<int>("max_pulse_width", 2000);      // μs (speed=1.0)
+  this->declare_parameter<int>("neutral_pulse_width", 1000);  // μs (ESC arm/idle)
   this->declare_parameter<std::string>("pwm_backend",
                                        "auto");      // "auto","pigpio","lgpio","simulation"
   this->declare_parameter<int>("gpio_chip_num", 4);  // 0=Pi4, 4=Pi5
