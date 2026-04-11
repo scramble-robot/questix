@@ -52,12 +52,9 @@ extern "C" {
 }  // extern "C"
 #endif
 
-#include <memory>
 #include <string>
-#include <vector>
 
 #include <rclcpp/rclcpp.hpp>
-#include <sensor_msgs/msg/joy.hpp>
 
 namespace uart_joy_driver {
 
@@ -78,36 +75,17 @@ private:
   // Read a complete line from serial buffer
   bool readLine(std::string & line);
 
-  // Parse "HH,HH,HH,HH,HH,HH,HH" into 7 bytes
-  bool parseLine(const std::string & line, std::vector<uint8_t> & bytes);
-
-  // Convert parsed bytes to Joy message
-  sensor_msgs::msg::Joy bytesToJoyMsg(const std::vector<uint8_t> & bytes);
-
-  // Apply deadzone to axis value
-  double applyDeadzone(double value, double deadzone);
-
   // Parameters
   std::string serial_port_;
   int baud_rate_;
   double publish_rate_;
-  double deadzone_;
 
   // Serial
   int serial_fd_;
   std::string read_buffer_;
 
   // ROS interfaces
-  rclcpp::Publisher<sensor_msgs::msg::Joy>::SharedPtr joy_pub_;
   rclcpp::TimerBase::SharedPtr read_timer_;
-
-  // DPAD lookup table: index 0-8 → (hat_x, hat_y)
-  static constexpr double DPAD_X[9] = {0, 0, 1, 1, 1, 0, -1, -1, -1};
-  static constexpr double DPAD_Y[9] = {0, 1, 1, 0, -1, -1, -1, 0, 1};
-
-  // Constants
-  static constexpr int NUM_AXES = 8;      // axes[0-7]: sticks + ZL/ZR triggers + DPAD
-  static constexpr int NUM_BUTTONS = 14;  // A,B,X,Y,L,R,ZL,ZR,-,+,Home,Cap,LS,RS
 };
 
 }  // namespace uart_joy_driver
