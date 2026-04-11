@@ -160,7 +160,9 @@ class ESCMotorControlNode(Node):
                 self.get_logger().info('シミュレーションモードで動作中')
                 
         except Exception as e:
-            self.get_logger().error(f'ESC初期化エラー: {str(e)}')
+            self.get_logger().fatal(f'ESC初期化エラー: {str(e)}')
+            self.get_logger().fatal('GPIO初期化に失敗しました。シミュレーションモードで動作します。')
+            self.get_logger().fatal('systemd環境の場合: HOME環境変数、SupplementaryGroups=gpio の設定を確認してください')
             self.servo = None
     
     def set_motor_speed(self, speed: float):
@@ -297,7 +299,10 @@ def main(args=None):
         node.get_logger().info('Ctrl+Cが押されました。安全に終了します。')
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        try:
+            rclpy.shutdown()
+        except Exception:
+            pass
 
 
 if __name__ == '__main__':

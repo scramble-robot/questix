@@ -1,0 +1,30 @@
+esc_motor_control:
+  ros__parameters:
+    # PWM settings
+    pwm_pin: 13 # GPIO pin for PWM output
+
+    # ESC pulse width settings (microseconds)
+    min_pulse_width: 1000 # Minimum pulse width (1.0ms)
+    max_pulse_width: 2000 # Maximum pulse width (2.0ms)
+    neutral_pulse_width: 1500 # Neutral/arm position (1.5ms)
+
+    # Motor speed limits
+    max_speed: 1.0 # Maximum forward speed (maps to max_pulse_width)
+    min_speed: -1.0 # Maximum reverse speed (maps to min_pulse_width)
+
+    # Joystick settings
+    full_speed_button: 3 # Button index for full speed (0=A, 1=B, 2=X, 3=Y)
+    full_speed_value: 1.0 # Speed value when full speed button is pressed
+
+    # Safety settings
+    enable_safety_stop: true # Enable automatic safety stop
+    safety_timeout: 1.0 # Seconds without command before safety stop
+
+    # Test mode (disables actual GPIO – pure simulation)
+    test_mode: false
+
+    # PWM backend: "auto" (try pigpio→lgpio→sim), "pigpio", "lgpio", "simulation"
+    pwm_backend: "auto"
+
+    # GPIO chip number for lgpio backend (0 = Pi4, 4 = Pi5)
+    gpio_chip_num: 4

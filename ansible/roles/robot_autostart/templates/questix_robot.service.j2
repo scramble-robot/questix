@@ -8,9 +8,12 @@ StartLimitBurst=3
 Type=simple
 User={{ target_user }}
 Group={{ target_user }}
+SupplementaryGroups=gpio input dialout
 EnvironmentFile=-/etc/questix_robot/launch.env
 Environment=ROS_DISTRO={{ ros2_distro }}
 Environment=ROBOT_WS={{ workspace_path }}
+Environment=HOME=/home/{{ target_user }}
+WorkingDirectory=/home/{{ target_user }}
 ExecStart=/opt/questix_robot/questix_robot_launcher.sh
 Restart=on-failure
 RestartSec=5

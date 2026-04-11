@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<launch>
+    <!-- Launch arguments -->
+    <arg name="use_sim_time" default="false" description="Use simulation time" />
+    <arg name="test_mode" default="false" description="Run in test mode (no actual GPIO)" />
+    <arg name="joy_topic" default="/joy" description="Joy topic name" />
+    <arg name="pwm_backend" default="auto" description="PWM backend: auto, pigpio, lgpio, simulation" />
+
+    <!-- Config file path -->
+    <let name="config_file" value="$(find-pkg-share esc_motor_control_cpp)/config/esc_motor_control_cpp.yaml" />
+
+    <!-- ESC Motor Control Node (C++) -->
+    <node pkg="esc_motor_control_cpp" exec="esc_motor_control_node" name="esc_motor_control" output="screen">
+
+        <!-- Parameters from YAML -->
+        <param from="$(var config_file)" />
+        <param name="use_sim_time" value="$(var use_sim_time)" />
+        <param name="test_mode" value="$(var test_mode)" />
+        <param name="joy_topic" value="$(var joy_topic)" />
+        <param name="pwm_backend" value="$(var pwm_backend)" />
+    </node>
+</launch>

@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+    <name>esc_motor_control_cpp</name>
+    <version>0.0.0</version>
+    <description>C++ ROS2 ESC motor control node with pigpio/lgpio backend support</description>
+    <maintainer email="aki.grade2580@outlook.jp">asa-naki</maintainer>
+    <license>MIT</license>
+
+    <buildtool_depend>ament_cmake_auto</buildtool_depend>
+
+    <depend>rclcpp</depend>
+    <depend>rclcpp_components</depend>
+    <depend>std_msgs</depend>
+    <depend>sensor_msgs</depend>
+
+    <test_depend>ament_lint_auto</test_depend>
+    <test_depend>ament_lint_common</test_depend>
+
+    <export>
+        <build_type>ament_cmake</build_type>
+    </export>
+</package>
