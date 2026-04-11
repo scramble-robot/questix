@@ -52,16 +52,15 @@ extern "C" {
 }  // extern "C"
 #endif
 
-#include <string>
-
 #include <rclcpp/rclcpp.hpp>
+#include <string>
 
 namespace uart_joy_driver {
 
 class UartJoyDriverComponent : public rclcpp::Node {
 public:
   UART_JOY_DRIVER_PUBLIC
-  explicit UartJoyDriverComponent(const rclcpp::NodeOptions & options);
+  explicit UartJoyDriverComponent(const rclcpp::NodeOptions& options);
   ~UartJoyDriverComponent() override;
 
 private:
@@ -73,7 +72,7 @@ private:
   void readTimerCallback();
 
   // Read a complete line from serial buffer
-  bool readLine(std::string & line);
+  bool readLine(std::string& line);
 
   // Parameters
   std::string serial_port_;
