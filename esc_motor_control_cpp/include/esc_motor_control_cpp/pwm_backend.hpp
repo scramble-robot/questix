@@ -105,9 +105,9 @@ public:
 
   bool set_servo_pulse(int gpio_pin, int pulse_width_us) override {
     if (!initialized_ || handle_ < 0) return false;
-    // lgTxServo(handle, gpio, pulseWidth, servoFrequency, offset)
-    // pulseWidth: 0 (off) or 500-2500, frequency: 50Hz for standard servo/ESC
-    int rc = lgTxServo(handle_, gpio_pin, pulse_width_us, 50, 0);
+    // lgTxServo(handle, gpio, pulseWidth, servoFrequency, offset, cycles)
+    // pulseWidth: 0 (off) or 500-2500, frequency: 50Hz, offset: 0, cycles: 0 (infinite)
+    int rc = lgTxServo(handle_, gpio_pin, pulse_width_us, 50, 0, 0);
     return rc >= 0;
   }
 
