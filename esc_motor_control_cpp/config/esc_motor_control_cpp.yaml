@@ -5,8 +5,8 @@ esc_motor_control:
 
     # ESC pulse width settings (microseconds)
     # speed=0.0 maps to (min+max)/2. With 0/2000, speed=0 → 1000μs (stopped)
-    min_pulse_width: 0     # Minimum pulse width (speed=-1.0)
-    max_pulse_width: 2000  # Maximum pulse width (speed=1.0)
+    min_pulse_width: 0 # Minimum pulse width (speed=-1.0)
+    max_pulse_width: 2000 # Maximum pulse width (speed=1.0)
     neutral_pulse_width: 1000 # ESC arm/idle position (1.0ms = stopped)
 
     # Motor speed limits
