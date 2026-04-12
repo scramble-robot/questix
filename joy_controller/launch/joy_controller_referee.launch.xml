@@ -12,7 +12,7 @@ dual_stick引数でシングルスティック/デュアルスティックモー
     <arg name="joy_device" default="/dev/input/js0" description="Joystick device path" />
     <arg name="joy_topic" default="/joy_gated" description="Joy input topic (can be /joy or /joy_gated)" />
     <arg name="debug_mode" default="false" description="Enable debug mode" />
-    <arg name="controller_type" default="dualshock" description="Controller type: dualshock or uart" />
+    <arg name="controller_type" default="uart" description="Controller type: dualshock or uart" />
     <arg name="uart_port" default="/dev/ttyAMA0" description="UART serial port for uart controller" />
     <arg name="uart_baud_rate" default="115200" description="UART baud rate for uart controller" />
 
