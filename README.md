@@ -52,9 +52,11 @@ This project provides a complete automation pipeline using Ansible and GitHub Ac
 1. **Setup Dependencies**
 
    ```bash
-   git clone https://github.com/your-username/questix_core.git
-   cd questix_core
+   git clone https://github.com/scramble-robot/questix.git
+   cd questix
    ansible-playbook ansible/playbooks/setup_kit.yaml -i localhost, --connection=local --ask-become-pass
+   mkdir src
+   vcs import src < dependency.repos
    ```
 
 2. **Build ISOs**
