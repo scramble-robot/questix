@@ -110,7 +110,7 @@ jobs:
           fi
 
       - name: Install Python dependencies
-        run: pip3 install pyserial
+        run: pipx install pyserial
 
       - name: Setup colcon mixin
         run: |
