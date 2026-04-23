@@ -1,0 +1,24 @@
+<robot name="questix" xmlns:xacro="http://ros.org/wiki/xacro">
+  <xacro:property name="side" value="0.5" />
+
+    <!-- questix-->
+    <!--<link name="base_link">
+    <visual>
+      <origin xyz="0 0 0.1" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://description_launch/meshes/questix.dae"/>
+      </geometry>
+    </visual>
+    </link>-->
+
+    <!-- test用の箱表示 -->
+    <link name="base_link">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <box size="0.5 0.5 0.5"/>
+        </geometry>
+      </visual>
+    </link>
+
+</robot>

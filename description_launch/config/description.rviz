@@ -1,0 +1,32 @@
+Panels:
+  - Class: rviz_common::DisplaysPanel
+    Name: Displays
+    Property Tree Widget:
+      Expanded: ~
+      Splitter Ratio: 0.5
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/RobotModel
+      Enabled: true
+      Name: RobotModel
+      Description Topic: /robot_description
+      Visual Enabled: true
+      Collision Enabled: false
+      Update Interval: 0.0
+      Alpha: 1.0
+      Show Axes: false
+      Show Trail: false
+    - Class: rviz_default_plugins/TF
+      Enabled: true
+      Name: TF
+      Show Names: true
+      Show Axes: true
+      Show Arrows: true
+      Marker Scale: 1.0
+      Update Interval: 0.0
+      Frame Timeout: 15.0
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: base_link
+    Frame Rate: 30

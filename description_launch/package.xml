@@ -3,14 +3,23 @@
 <package format="3">
   <name>description_launch</name>
   <version>0.0.0</version>
-  <description>TODO: Package description</description>
+  <description>Questix description package</description>
   <maintainer email="manami.bean14@gmail.com">kajimame</maintainer>
-  <license>TODO: License declaration</license>
+  <license>Apache-2.0</license>
 
+  <buildtool_depend>ament_cmake_auto</buildtool_depend>
+
+  <!--　テスト用の依存関係は、必要に応じて追加してください。
   <test_depend>ament_cmake_copyright</test_depend>
   <test_depend>ament_cmake_flake8</test_depend>
   <test_depend>ament_cmake_pep257</test_depend>
   <test_depend>ament_cmake_pytest</test_depend>
+  -->
+
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>joint_state_publisher</exec_depend>
+  <exec_depend>xacro</exec_depend>
+  <exec_depend>rviz2</exec_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

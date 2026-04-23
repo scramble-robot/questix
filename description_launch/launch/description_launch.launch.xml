@@ -1,0 +1,16 @@
+<?xml version='1.0' ?>
+<launch>
+    <arg name="description_pkg" default="description_launch" />
+    <arg name="xacro_file" default="$(find-pkg-share $(var description_pkg))/urdf/questix.xacro" />
+
+    <let name="robot_description_content" value="$(command 'xacro $(var xacro_file)')"/>
+
+    <node pkg="robot_state_publisher" exec="robot_state_publisher" name="robot_state_publisher" output="screen">
+        <param name="robot_description" value="$(var robot_description_content)"/>
+    </node>
+
+    <node pkg="joint_state_publisher" exec="joint_state_publisher" name="joint_state_publisher" />
+
+    <node pkg="rviz2" exec="rviz2" name="rviz2" output="screen" />
+    <!-- <node pkg="rviz2" exec="rviz2" name="rviz2" output="screen" args="-d $(find-pkg-share description_launch)/config/description.rviz" /> -->
+</launch>
