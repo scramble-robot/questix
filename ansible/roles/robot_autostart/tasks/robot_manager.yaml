@@ -9,11 +9,41 @@
     state: present
     update_cache: true
 
-- name: Install robot-manager from private repository
+- name: Copy robot-manager source to target
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../scripts/robot_manager/"
+    dest: /tmp/robot_manager_pkg/robot_manager/
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Create pyproject.toml for robot-manager
+  ansible.builtin.copy:
+    content: |
+      [build-system]
+      requires = ["setuptools"]
+      build-backend = "setuptools.build_meta"
+
+      [project]
+      name = "robot_manager"
+      version = "0.1.0"
+      dependencies = ["fastapi", "uvicorn[standard]"]
+
+      [tool.setuptools.packages.find]
+      where = ["."]
+
+      [tool.setuptools.package-data]
+      robot_manager = ["static/*", "static/**/*"]
+    dest: /tmp/robot_manager_pkg/pyproject.toml
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install robot-manager from local scripts directory
   ansible.builtin.pip:
-    name: "{{ robot_manager_repo }}@{{ robot_manager_version }}"
-    state: present
-    extra_args: "--break-system-packages"
+    name: /tmp/robot_manager_pkg
+    extra_args: "--break-system-packages --ignore-installed"
+    executable: pip3
 
 - name: Deploy questix_robot_manager systemd service
   ansible.builtin.template:

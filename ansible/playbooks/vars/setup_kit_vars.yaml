@@ -33,7 +33,7 @@ ros2_additional_packages:
 ros_domain_id: 42
 
 # Workspace path
-workspace_path: /home/{{ ansible_user | default(ansible_env.SUDO_USER) }}/robot_ws
+workspace_path: /home/{{ ansible_user | default(ansible_env.SUDO_USER) }}/questix
 
 # Hardware interface settings
 enable_i2c: true

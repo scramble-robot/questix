@@ -19,6 +19,32 @@
   notify: reboot_required
   when: enable_spi | bool
 
+- name: Enable UART interface
+  ansible.builtin.lineinfile:
+    path: "{{ boot_config_path }}"
+    regexp: "^#?enable_uart="
+    line: "enable_uart=1"
+    state: present
+  notify: reboot_required
+  when: enable_uart | bool
+
+- name: Enable UART overlay for Raspberry Pi 5
+  ansible.builtin.lineinfile:
+    path: "{{ boot_config_path }}"
+    regexp: "^#?dtoverlay=uart0-pi5"
+    line: "dtoverlay=uart0-pi5"
+    state: present
+  notify: reboot_required
+  when: enable_uart | bool
+
+- name: Disable serial console on UART (remove console=serial0 from cmdline)
+  ansible.builtin.replace:
+    path: /boot/firmware/cmdline.txt
+    regexp: 'console=serial0,\d+ '
+    replace: ''
+  notify: reboot_required
+  when: enable_uart | bool
+
 - name: Create udev rules for common robotics hardware
   ansible.builtin.copy:
     content: |

@@ -58,15 +58,8 @@
     enabled: true
     daemon_reload: true
 
-- name: Deploy polkit rules for passwordless service management (legacy .pkla, Ubuntu 22.04)
-  ansible.builtin.copy:
-    src: 50-questix-robot.pkla
-    dest: /etc/polkit-1/localauthority/50-local.d/50-questix-robot.pkla
-    owner: root
-    group: root
-    mode: "0644"
-
-- name: Deploy polkit rules for passwordless service management (.rules, Ubuntu 24.04+)
+- name: Deploy polkit rules for passwordless service management (.rules, Ubuntu
+    24.04+)
   ansible.builtin.template:
     src: 50-questix-robot.rules.j2
     dest: /etc/polkit-1/rules.d/50-questix-robot.rules
@@ -77,4 +70,3 @@
 # Robot Manager Web UI (optional, skip by default)
 - name: Install robot-manager Web UI
   ansible.builtin.include_tasks: robot_manager.yaml
-  when: install_robot_manager | bool

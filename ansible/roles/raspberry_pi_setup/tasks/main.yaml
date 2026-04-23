@@ -24,6 +24,10 @@
       - libraspberrypi-bin
       - libserial-dev
       - libgpiod-dev
+      - libpigpio-dev
+      - gpiod
+      - liblgpio-dev
+      - liblgpio1
     state: present
     update_cache: true
 

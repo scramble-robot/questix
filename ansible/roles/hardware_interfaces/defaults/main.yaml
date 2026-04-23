@@ -6,4 +6,5 @@ udev_rules_path: /etc/udev/rules.d/99-robot-hardware.rules
 
 enable_i2c: true
 enable_spi: true
+enable_uart: true
 configure_udev_rules: true
