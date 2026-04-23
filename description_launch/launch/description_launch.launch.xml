@@ -12,5 +12,6 @@
     <node pkg="joint_state_publisher" exec="joint_state_publisher" name="joint_state_publisher" />
 
     <node pkg="rviz2" exec="rviz2" name="rviz2" output="screen" />
+    <!-- configファイルを指定していない場合は、rviz2のデフォルト設定で起動されます。 -->
     <!-- <node pkg="rviz2" exec="rviz2" name="rviz2" output="screen" args="-d $(find-pkg-share description_launch)/config/description.rviz" /> -->
 </launch>
