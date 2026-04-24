@@ -24,7 +24,7 @@
       - libraspberrypi-bin
       - libserial-dev
       - libgpiod-dev
-      - libpigpio-dev
+      - libpigpio-if-dev
       - gpiod
       - liblgpio-dev
       - liblgpio1
