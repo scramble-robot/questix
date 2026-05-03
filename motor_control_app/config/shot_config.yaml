@@ -5,14 +5,18 @@ shot_component:
     pan_servo_id: 11
     trigger_servo_id: 10
     # Disc fire button / ディスク射出ボタン
-    # DualShock: X button, UART(Switch2): remapped from R button.
-    # DualShock: ×ボタン, UART(Switch2): Rボタンをここへ変換します。
-    fire_button: 0
+    # Switch2 native index: R button = 5
+    fire_button: 5
     fire_duration_ms: 300 # 射撃持続時間（ミリ秒）
-    # Tilt axis / 仰角軸
-    # DualShock: D-pad up/down, UART(Switch2): remapped from L / ZL buttons.
-    # DualShock: 十字キー上下, UART(Switch2): L / ZLボタンをここへ変換します。
-    pan_axis: 7
+    # Pan input mode / パン入力モード
+    # - pan_axis >= 0 : use that analog axis (e.g. D-pad vertical = 7).
+    # - pan_axis < 0  : use pan_up_button_index / pan_down_button_index (button mode).
+    # 軸で動かしたいときは pan_axis に軸番号を、ボタンで動かしたいときは
+    # pan_axis: -1 にして下の button_index を使ってください。
+    pan_axis: -1
+    # Switch2 native indices: L=4 (up), ZL=6 (down)
+    pan_up_button_index: 4
+    pan_down_button_index: 6
     fire_angle: 145.0 # 射撃角度（度）
     home_angle: 245.0 # ホーム角度（度）
     pan_max_angle: 120.0 # パン最大角度（度）

@@ -40,6 +40,8 @@ private:
   int trigger_servo_id_;
   int fire_button_;
   int pan_axis_;
+  int pan_up_button_index_;
+  int pan_down_button_index_;
   double pan_step_angle_;
   double pan_min_angle_;
   double pan_max_angle_;
@@ -51,6 +53,8 @@ private:
   bool is_shooting_;
   bool last_button_state_;
   float last_pan_value_;
+  bool last_pan_up_state_;
+  bool last_pan_down_state_;
   int current_pan_position_;
   double current_pan_angle_;
   rclcpp::Time last_command_time_;

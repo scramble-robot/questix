@@ -34,21 +34,9 @@ uart_joy_driver:
     # Print raw UART frames for debugging when true.
     debug_raw_input: false
 
-    # UART special button remap / UARTの特別キー割り当て
-    # These input button indices are the raw Switch2 button numbers from UART.
-    # これらの入力ボタン番号は、UARTで届くSwitch2の生ボタン番号です。
-    pan_up_button_index: 4      # L button / Lボタン
-    pan_down_button_index: 6    # ZL button / ZLボタン
-    fire_input_button_index: 5  # R button / Rボタン
-    roller_input_button_index: 7 # ZR button / ZRボタン
-
-    # Semantic output remap / 意味ベースの出力先
-    # Downstream nodes read these Joy positions, so users can change only this file.
-    # 下流ノードはこのJoy位置を読むので、ユーザーはこのファイルだけ変更すればOKです。
-    pan_output_axis_index: 7     # Tilt axis / 仰角軸
-    # Tilt direction sign / 仰角方向の符号
-    # Use 1.0 for normal, -1.0 for inverted.
-    # 通常方向は1.0、上下が逆なら-1.0にします。
-    pan_output_axis_scale: -1.0
-    fire_output_button_index: 0  # Disc fire button / ディスク射出ボタン
-    roller_output_button_index: 3 # Roller spin button / ローラー回転ボタン
+    # /joy publishes raw Switch2-native indices (matches /joy_raw_uart):
+    #   buttons: A=0, B=1, X=2, Y=3, L=4, R=5, ZL=6, ZR=7,
+    #            Minus=8, Plus=9, Home=10, Capture=11, LStick=12, RStick=13
+    #   axes:    LX=0, LY=1, RX=3, RY=4, D-pad H=6, D-pad V=7
+    # /joy は /joy_raw_uart と同じ Switch2 ネイティブ配列で配信されます。
+    # 下流ノード側でボタン/軸番号を直接指定してください。

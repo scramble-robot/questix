@@ -16,7 +16,7 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
   this->declare_parameter<double>("min_speed", -1.0);
   this->declare_parameter<bool>("enable_safety_stop", true);
   this->declare_parameter<double>("safety_timeout", 1.0);
-  this->declare_parameter<int>("full_speed_button", 3);
+  this->declare_parameter<int>("full_speed_button", 7);
   this->declare_parameter<double>("full_speed_value", 1.0);
   this->declare_parameter<bool>("test_mode", false);
   this->declare_parameter<std::string>("joy_topic", "/joy");

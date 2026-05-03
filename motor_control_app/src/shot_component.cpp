@@ -9,15 +9,23 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
     : Node("shot_component", options),
       is_shooting_(false),
       last_button_state_(false),
-      last_pan_value_(0.0),
+      last_pan_value_(0.0F),
+      last_pan_up_state_(false),
+      last_pan_down_state_(false),
       current_pan_position_(2048) {
   // パラメーター宣言
   this->declare_parameter("port", "/dev/servo");
   this->declare_parameter("baudrate", 115200);
   this->declare_parameter("pan_servo_id", 1);
   this->declare_parameter("trigger_servo_id", 3);
-  this->declare_parameter("fire_button", 0);             // 射撃ボタン（Aボタンなど）
-  this->declare_parameter("pan_axis", 7);                // パン軸（十字キー上下など）
+  this->declare_parameter("fire_button", 5);             // R button (Switch2 native index)
+  // Pan input mode / パン入力モード
+  // - If pan_axis >= 0: use the analog axis (D-pad / stick).
+  // - Otherwise: use pan_up_button_index / pan_down_button_index (button edge).
+  // pan_axis が 0 以上なら軸モード、それ以外はボタンモードで動いて上下します。
+  this->declare_parameter("pan_axis", -1);               // -1 = disabled (button mode)
+  this->declare_parameter("pan_up_button_index", 4);     // L button (Switch2 native index)
+  this->declare_parameter("pan_down_button_index", 6);   // ZL button (Switch2 native index)
   this->declare_parameter("pan_step_angle", 5.0);        // パンステップサイズ（度）
   this->declare_parameter("pan_min_angle", 0.0);         // パン最小角度（度）
   this->declare_parameter("pan_max_angle", 70.0);       // パン最大角度（度）
@@ -34,6 +42,8 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
   trigger_servo_id_ = this->get_parameter("trigger_servo_id").as_int();
   fire_button_ = this->get_parameter("fire_button").as_int();
   pan_axis_ = this->get_parameter("pan_axis").as_int();
+  pan_up_button_index_ = this->get_parameter("pan_up_button_index").as_int();
+  pan_down_button_index_ = this->get_parameter("pan_down_button_index").as_int();
   pan_step_angle_ = this->get_parameter("pan_step_angle").as_double();
   pan_min_angle_ = this->get_parameter("pan_min_angle").as_double();
   pan_max_angle_ = this->get_parameter("pan_max_angle").as_double();
@@ -96,8 +106,15 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
   }
 
   RCLCPP_INFO(this->get_logger(), "Shot component started");
-  RCLCPP_INFO(this->get_logger(), "Fire button: %d, Pan axis: %d, Pan step: %.1f degrees",
-              fire_button_, pan_axis_, pan_step_angle_);
+  if (pan_axis_ >= 0) {
+    RCLCPP_INFO(this->get_logger(),
+                "Fire button: %d, Pan mode: axis=%d, Pan step: %.1f degrees",
+                fire_button_, pan_axis_, pan_step_angle_);
+  } else {
+    RCLCPP_INFO(this->get_logger(),
+                "Fire button: %d, Pan mode: buttons up=%d down=%d, Pan step: %.1f degrees",
+                fire_button_, pan_up_button_index_, pan_down_button_index_, pan_step_angle_);
+  }
   RCLCPP_INFO(this->get_logger(), "Pan range: %.1f - %.1f degrees", pan_min_angle_, pan_max_angle_);
   RCLCPP_INFO(this->get_logger(),
               "Fire angle: %.1f deg, Home angle: %.1f deg, Current pan: %.1f deg", fire_angle_,
@@ -132,44 +149,49 @@ void ShotComponent::joyCallback(const sensor_msgs::msg::Joy::SharedPtr msg) {
     return;
   }
 
-  // パン軸の処理
+  // Pan input: axis mode if pan_axis >= 0, otherwise button mode (L / ZL).
+  // pan_axis が 0 以上なら軸モード、それ以外はボタンモード。
+  const auto step_pan = [this](double delta_deg, const char* direction) {
+    if (!canSendCommand()) {
+      RCLCPP_DEBUG(this->get_logger(), "Pan command rate limited");
+      return;
+    }
+    double new_angle = current_pan_angle_ + delta_deg;
+    current_pan_angle_ = clampAngle(new_angle);
+    current_pan_position_ = angleToServoPosition(current_pan_angle_);
+    if (servo_controller_->setPosition(pan_servo_id_, current_pan_position_, false)) {
+      RCLCPP_INFO(this->get_logger(), "Pan %s: angle=%.1f deg", direction, current_pan_angle_);
+      last_command_time_ = this->now();
+    } else {
+      RCLCPP_ERROR(this->get_logger(), "Failed to move pan %s", direction);
+    }
+  };
+
   if (pan_axis_ >= 0 && pan_axis_ < static_cast<int>(msg->axes.size())) {
-    float current_pan_value = msg->axes[pan_axis_];
-
-    // 軸の値が+1.0になった瞬間を検出（パン上）
-    if (current_pan_value > 0.5 && last_pan_value_ <= 0.5) {
-      if (canSendCommand()) {
-        double new_angle = current_pan_angle_ + pan_step_angle_;
-        current_pan_angle_ = clampAngle(new_angle);
-        current_pan_position_ = angleToServoPosition(current_pan_angle_);
-        if (servo_controller_->setPosition(pan_servo_id_, current_pan_position_, false)) {
-          RCLCPP_INFO(this->get_logger(), "Pan up: angle=%.1f deg", current_pan_angle_);
-          last_command_time_ = this->now();
-        } else {
-          RCLCPP_ERROR(this->get_logger(), "Failed to move pan up");
-        }
-      } else {
-        RCLCPP_DEBUG(this->get_logger(), "Pan command rate limited");
-      }
+    // Axis mode: rising edge detection at ±0.5
+    const float current_pan_value = msg->axes[pan_axis_];
+    if (current_pan_value > 0.5F && last_pan_value_ <= 0.5F) {
+      step_pan(pan_step_angle_, "up");
+    } else if (current_pan_value < -0.5F && last_pan_value_ >= -0.5F) {
+      step_pan(-pan_step_angle_, "down");
     }
-    // 軸の値が-1.0になった瞬間を検出（パン下）
-    else if (current_pan_value < -0.5 && last_pan_value_ >= -0.5) {
-      if (canSendCommand()) {
-        double new_angle = current_pan_angle_ - pan_step_angle_;
-        current_pan_angle_ = clampAngle(new_angle);
-        current_pan_position_ = angleToServoPosition(current_pan_angle_);
-        if (servo_controller_->setPosition(pan_servo_id_, current_pan_position_, false)) {
-          RCLCPP_INFO(this->get_logger(), "Pan down: angle=%.1f deg", current_pan_angle_);
-          last_command_time_ = this->now();
-        } else {
-          RCLCPP_ERROR(this->get_logger(), "Failed to move pan down");
-        }
-      } else {
-        RCLCPP_DEBUG(this->get_logger(), "Pan command rate limited");
-      }
-    }
-
     last_pan_value_ = current_pan_value;
+  } else {
+    // Button mode: L = up, ZL = down (rising edge)
+    const auto button_pressed = [&msg](int index) {
+      return index >= 0 && static_cast<size_t>(index) < msg->buttons.size() &&
+             msg->buttons[static_cast<size_t>(index)] == 1;
+    };
+    const bool pan_up_pressed = button_pressed(pan_up_button_index_);
+    const bool pan_down_pressed = button_pressed(pan_down_button_index_);
+
+    if (pan_up_pressed && !last_pan_up_state_) {
+      step_pan(pan_step_angle_, "up");
+    } else if (pan_down_pressed && !last_pan_down_state_) {
+      step_pan(-pan_step_angle_, "down");
+    }
+    last_pan_up_state_ = pan_up_pressed;
+    last_pan_down_state_ = pan_down_pressed;
   }
 }
 

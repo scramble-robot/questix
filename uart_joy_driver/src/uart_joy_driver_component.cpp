@@ -66,14 +66,6 @@ UartJoyDriverComponent::UartJoyDriverComponent(const rclcpp::NodeOptions& option
   declare_parameter("axis_release_confirm_frames", 2);
   declare_parameter("button_release_confirm_frames", 2);
   declare_parameter("debug_raw_input", false);
-  declare_parameter("pan_up_button_index", 4);
-  declare_parameter("pan_down_button_index", 6);
-  declare_parameter("fire_input_button_index", 5);
-  declare_parameter("fire_output_button_index", 0);
-  declare_parameter("roller_input_button_index", 7);
-  declare_parameter("roller_output_button_index", 3);
-  declare_parameter("pan_output_axis_index", 7);
-  declare_parameter("pan_output_axis_scale", -1.0);
 
   get_parameter("serial_port", serial_port_);
   get_parameter("baud_rate", baud_rate_);
@@ -85,14 +77,6 @@ UartJoyDriverComponent::UartJoyDriverComponent(const rclcpp::NodeOptions& option
   get_parameter("axis_release_confirm_frames", axis_release_confirm_frames_);
   get_parameter("button_release_confirm_frames", button_release_confirm_frames_);
   get_parameter("debug_raw_input", debug_raw_input_);
-  get_parameter("pan_up_button_index", pan_up_button_index_);
-  get_parameter("pan_down_button_index", pan_down_button_index_);
-  get_parameter("fire_input_button_index", fire_input_button_index_);
-  get_parameter("fire_output_button_index", fire_output_button_index_);
-  get_parameter("roller_input_button_index", roller_input_button_index_);
-  get_parameter("roller_output_button_index", roller_output_button_index_);
-  get_parameter("pan_output_axis_index", pan_output_axis_index_);
-  get_parameter("pan_output_axis_scale", pan_output_axis_scale_);
 
   joy_pub_ = this->create_publisher<sensor_msgs::msg::Joy>("/joy", 1);
   joy_raw_pub_ = this->create_publisher<sensor_msgs::msg::Joy>("/joy_raw_uart", 1);
@@ -244,7 +228,6 @@ void UartJoyDriverComponent::readTimerCallback() {
 
     auto joy_msg = raw_joy_msg;
     applyDropoutFilter(joy_msg);
-    applySemanticRemap(joy_msg);
     joy_msg.header.stamp = now;
     last_valid_joy_msg_ = joy_msg;
     last_frame_time_ = now;
@@ -411,40 +394,6 @@ void UartJoyDriverComponent::applyDropoutFilter(sensor_msgs::msg::Joy& joy_msg) 
       button_release_counts_[i] = 0;
     }
     joy_msg.buttons[i] = filtered_buttons_[i];
-  }
-}
-
-void UartJoyDriverComponent::applySemanticRemap(sensor_msgs::msg::Joy& joy_msg) const {
-  const auto is_pressed = [&joy_msg](int index) {
-    return index >= 0 && index < static_cast<int>(joy_msg.buttons.size()) &&
-           joy_msg.buttons[static_cast<size_t>(index)] == 1;
-  };
-
-  if (pan_output_axis_index_ >= 0 &&
-      pan_output_axis_index_ < static_cast<int>(joy_msg.axes.size()) &&
-      (pan_up_button_index_ >= 0 || pan_down_button_index_ >= 0)) {
-    float pan_axis_value = 0.0F;
-    if (is_pressed(pan_up_button_index_) && !is_pressed(pan_down_button_index_)) {
-      pan_axis_value = 1.0F;
-    } else if (is_pressed(pan_down_button_index_) && !is_pressed(pan_up_button_index_)) {
-      pan_axis_value = -1.0F;
-    }
-    joy_msg.axes[static_cast<size_t>(pan_output_axis_index_)] =
-        static_cast<float>(pan_axis_value * pan_output_axis_scale_);
-  }
-
-  if (fire_output_button_index_ >= 0 &&
-      fire_output_button_index_ < static_cast<int>(joy_msg.buttons.size()) &&
-      fire_input_button_index_ >= 0) {
-    joy_msg.buttons[static_cast<size_t>(fire_output_button_index_)] =
-        is_pressed(fire_input_button_index_) ? 1 : 0;
-  }
-
-  if (roller_output_button_index_ >= 0 &&
-      roller_output_button_index_ < static_cast<int>(joy_msg.buttons.size()) &&
-      roller_input_button_index_ >= 0) {
-    joy_msg.buttons[static_cast<size_t>(roller_output_button_index_)] =
-        is_pressed(roller_input_button_index_) ? 1 : 0;
   }
 }
 

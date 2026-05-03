@@ -83,7 +83,6 @@ private:
   double normalizeAxis(uint8_t value, bool invert) const;
   void fillDpadAxes(uint8_t dpad_value, sensor_msgs::msg::Joy& joy_msg) const;
   void applyDropoutFilter(sensor_msgs::msg::Joy& joy_msg);
-  void applySemanticRemap(sensor_msgs::msg::Joy& joy_msg) const;
   void publishNeutralJoy();
 
   // Parameters
@@ -97,14 +96,6 @@ private:
   int axis_release_confirm_frames_;
   int button_release_confirm_frames_;
   bool debug_raw_input_;
-  int pan_up_button_index_;
-  int pan_down_button_index_;
-  int fire_input_button_index_;
-  int fire_output_button_index_;
-  int roller_input_button_index_;
-  int roller_output_button_index_;
-  int pan_output_axis_index_;
-  double pan_output_axis_scale_;
 
   // Serial
   int serial_fd_;

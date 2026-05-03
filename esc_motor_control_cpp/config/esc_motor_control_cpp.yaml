@@ -14,9 +14,8 @@ esc_motor_control:
     min_speed: -1.0 # Maximum reverse speed (maps to min_pulse_width)
 
     # Roller spin button / ローラー回転ボタン
-    # DualShock: Square button, UART(Switch2): remapped from ZR button.
-    # DualShock: □ボタン, UART(Switch2): ZRボタンをここへ変換します。
-    full_speed_button: 3
+    # Switch2 native index: ZR button = 7
+    full_speed_button: 7
     full_speed_value: 1.0 # Speed value when full speed button is pressed
     # ローラモータのコマンド状態出力先
     # ここには実測回転数ではなく、ESCへ送っている現在の指令値が出ます。

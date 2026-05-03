@@ -2,8 +2,8 @@
 <launch>
   <!-- Launch arguments -->
   <arg name="fire_button" 
-       default="0" 
-       description="Fire button number" />
+       default="5" 
+       description="Fire button number (Switch2 native: R=5)" />
 
   <!-- Shot Component Node -->
   <node pkg="motor_control_app" 

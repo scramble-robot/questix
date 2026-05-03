@@ -17,8 +17,8 @@ def generate_launch_description():
     
     fire_button_arg = DeclareLaunchArgument(
         'fire_button',
-        default_value='0',
-        description='Fire button number'
+        default_value='5',
+        description='Fire button number (Switch2 native: R=5)'
     )
     
     joy_topic_arg = DeclareLaunchArgument(
