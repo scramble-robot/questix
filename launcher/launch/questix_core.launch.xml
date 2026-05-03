@@ -2,11 +2,11 @@
 <launch>
   <!-- Launch Arguments -->
   <arg name="use_sim_time" default="false" description="Use simulation time" />
-  <arg name="enable_lidar" default="$(env ENABLE_LIDAR true)" description="Enable YDLiDAR" />
+  <arg name="enable_lidar" default="$(env ENABLE_LIDAR false)" description="Enable YDLiDAR" />
   <arg name="enable_shot" default="$(env ENABLE_SHOT true)" description="Enable Shot component"/>
   <arg name="enable_drive" default="$(env ENABLE_DRIVE true)" description="Enable drive component"/>
   <arg name="enable_gpio_ref" default="$(env ENABLE_GPIO_REF true)" description="Enable GPIO reference system (gpio_reader + joy_gate)"/>
-  <arg name="controller_type" default="$(env CONTROLLER_TYPE uart)" description="Controller type: dualshock or uart" />
+  <arg name="controller_type" default="$(env CONTROLLER_TYPE dualshock)" description="Controller type: dualshock or uart" />
   <arg name="enable_rviz" default="$(env ENABLE_RVIZ false)" description="Enable RViz visualization" />
 
   <group if="$(var enable_shot)">

@@ -45,6 +45,7 @@ dual_stick引数でシングルスティック/デュアルスティックモー
     <node pkg="joy_controller" exec="joy_controller_node" name="joy_controller" output="screen" unless="$(var dual_stick)">
         <param name="use_sim_time" value="$(var use_sim_time)" />
         <param name="debug_mode" value="$(var debug_mode)" />
+        <param name="joy_topic" value="$(var joy_topic)" />
         <!-- Load parameters from YAML file -->
         <param from="$(var config_file)" />
     </node>

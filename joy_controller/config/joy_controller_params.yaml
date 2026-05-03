@@ -12,7 +12,7 @@ joy_controller:
     # Rotation direction and speed / 旋回の向きと速度
     # Positive and negative switch the turning direction. Smaller absolute values reduce turning speed.
     # 符号で旋回方向、絶対値で旋回速度が決まります。逆回転なら符号を反転してください。
-    angular_input_ratio: -0.1
+    angular_input_ratio: 0.1
 
     # Controller mapping (button and axis indices)
     linear_x_axis: 1 # Axis for forward/backward (typically left stick Y)
