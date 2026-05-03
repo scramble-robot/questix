@@ -6,3 +6,4 @@ build
 scripts/robot_manager.*
 docs
 rosbag2_*
+make_slide/*

@@ -323,9 +323,11 @@ bool UartJoyDriverComponent::parseControllerLine(const std::string& line,
   joy_msg.axes.assign(kJoyAxisCount, 0.0F);
   joy_msg.buttons.assign(kJoyButtonCount, 0);
 
-  joy_msg.axes[0] = static_cast<float>(normalizeAxis(lx, false));
+  // Right-hand coordinate frame: stick left = +1, stick right = -1.
+  // 右手座標系: スティック左を +1、右を -1 として出力します。
+  joy_msg.axes[0] = static_cast<float>(normalizeAxis(lx, true));
   joy_msg.axes[1] = static_cast<float>(normalizeAxis(ly, true));
-  joy_msg.axes[3] = static_cast<float>(normalizeAxis(rx, false));
+  joy_msg.axes[3] = static_cast<float>(normalizeAxis(rx, true));
   joy_msg.axes[4] = static_cast<float>(normalizeAxis(ry, true));
   fillDpadAxes(dpad, joy_msg);
 
@@ -426,6 +428,8 @@ double UartJoyDriverComponent::normalizeAxis(uint8_t value, bool invert) const {
 
 void UartJoyDriverComponent::fillDpadAxes(uint8_t dpad_value,
                                           sensor_msgs::msg::Joy& joy_msg) const {
+  // Right-hand coordinate frame: D-pad left = +1, right = -1.
+  // 右手座標系: 十字キー左を +1、右を -1 として出力します。
   double horizontal = 0.0;
   double vertical = 0.0;
 
@@ -434,28 +438,28 @@ void UartJoyDriverComponent::fillDpadAxes(uint8_t dpad_value,
       vertical = 1.0;
       break;
     case 2:
-      horizontal = 1.0;
+      horizontal = -1.0;
       vertical = 1.0;
       break;
     case 3:
-      horizontal = 1.0;
+      horizontal = -1.0;
       break;
     case 4:
-      horizontal = 1.0;
+      horizontal = -1.0;
       vertical = -1.0;
       break;
     case 5:
       vertical = -1.0;
       break;
     case 6:
-      horizontal = -1.0;
+      horizontal = 1.0;
       vertical = -1.0;
       break;
     case 7:
-      horizontal = -1.0;
+      horizontal = 1.0;
       break;
     case 8:
-      horizontal = -1.0;
+      horizontal = 1.0;
       vertical = 1.0;
       break;
     default:

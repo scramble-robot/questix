@@ -13,7 +13,7 @@ shot_component:
     # - pan_axis < 0  : use pan_up_button_index / pan_down_button_index (button mode).
     # 軸で動かしたいときは pan_axis に軸番号を、ボタンで動かしたいときは
     # pan_axis: -1 にして下の button_index を使ってください。
-    pan_axis: -1
+    pan_axis: 7
     # Switch2 native indices: L=4 (up), ZL=6 (down)
     pan_up_button_index: 4
     pan_down_button_index: 6
