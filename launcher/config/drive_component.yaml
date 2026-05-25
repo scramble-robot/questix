@@ -13,5 +13,14 @@ drive_component:
     right_motor_id: 5 # 右モータID
     max_motor_rpm: 1000 # 最大RPM
 
+    # 制御モード設定
+    # "velocity": M0602Cファーム内蔵の速度ループを使用（従来挙動）
+    # "current" : ソフトウェアPI制御で目標RPM→電流指令に変換（精密操縦向け）
+    control_mode: "current"
+    current_kp: 0.005           # [A/rpm]   比例ゲイン
+    current_ki: 0.02            # [A/(rpm·s)] 積分ゲイン
+    max_current_amp: 2.0        # [A] 電流指令の絶対値上限（安全クランプ）
+    integral_limit_amp: 1.5     # [A] 積分項寄与の絶対値上限（アンチワインドアップ）
+
     # パブリッシュ設定
     status_publish_rate: 10.0 # ステータスパブリッシュ頻度 [Hz]
