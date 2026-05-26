@@ -17,6 +17,7 @@ on:
       - "ansible/**"
       - "docker/**"
       - "scripts/**"
+  workflow_dispatch:
 
 defaults:
   run:
