@@ -79,7 +79,7 @@ jobs:
 
       - name: Configure git
         run: |
-          docker exec ros_build bash << 'EOF'
+          docker exec -i ros_build bash << 'EOF'
           git config --global user.email "action@github.com"
           git config --global user.name "GitHub Action"
           git config --global init.defaultBranch main
@@ -89,7 +89,7 @@ jobs:
       - name: Setup workspace and dependencies
         run: |
           if [ -f dependency.repos ]; then
-            docker exec ros_build bash << 'EOF'
+            docker exec -i ros_build bash << 'EOF'
             git config --global url."https://github.com/".insteadOf "git@github.com:"
             git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
             vcs import . < dependency.repos
@@ -98,7 +98,7 @@ jobs:
 
       - name: Generate rosdep keys
         run: |
-          docker exec ros_build bash << 'EOF'
+          docker exec -i ros_build bash << 'EOF'
           rosdep init || true
           rosdep update
           rosdep keys --from-paths . --rosdistro $ROS_DISTRO > rosdep_keys.txt || echo "No rosdep keys found"
@@ -116,14 +116,14 @@ jobs:
 
       - name: Install package dependencies
         run: |
-          docker exec ros_build bash << 'EOF'
+          docker exec -i ros_build bash << 'EOF'
           apt-get -yqq update
           rosdep install -yqq --from-paths . --ignore-src --rosdistro $ROS_DISTRO || true
           EOF
 
       - name: Setup colcon mixin
         run: |
-          docker exec ros_build bash << 'EOF'
+          docker exec -i ros_build bash << 'EOF'
           colcon mixin add default https://raw.githubusercontent.com/colcon/colcon-mixin-repository/master/index.yaml || true
           colcon mixin update default || true
           EOF
@@ -131,7 +131,7 @@ jobs:
       - name: Build ROS2 packages
         run: |
           set +e
-          docker exec ros_build bash << 'EOF'
+          docker exec -i ros_build bash << 'EOF'
           source /opt/ros/$ROS_DISTRO/setup.bash
           PARALLEL_WORKERS=$(nproc)
           echo "Using $PARALLEL_WORKERS parallel workers for build"
@@ -162,7 +162,7 @@ jobs:
             exit 1
           fi
           set +e
-          docker exec ros_build bash << 'EOF'
+          docker exec -i ros_build bash << 'EOF'
           source /opt/ros/$ROS_DISTRO/setup.bash
           source install/setup.bash
           colcon test \
@@ -186,7 +186,7 @@ jobs:
             echo "No install/setup.bash found; skipping test result summary"
             exit 0
           fi
-          docker exec ros_build bash << 'EOF'
+          docker exec -i ros_build bash << 'EOF'
           source /opt/ros/$ROS_DISTRO/setup.bash
           source install/setup.bash
           colcon test-result --verbose || echo "No test results found"
