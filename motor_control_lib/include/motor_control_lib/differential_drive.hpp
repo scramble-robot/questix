@@ -1,3 +1,5 @@
+// Copyright 2026 scramble-robot
+//
 #ifndef MOTOR_CONTROL_LIB__DIFFERENTIAL_DRIVE_HPP_
 #define MOTOR_CONTROL_LIB__DIFFERENTIAL_DRIVE_HPP_
 

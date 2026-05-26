@@ -1,3 +1,5 @@
+// Copyright 2026 scramble-robot
+//
 #include <memory>
 
 #include "gpio_reader/gpio_reader_component.hpp"

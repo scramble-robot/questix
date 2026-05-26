@@ -1,3 +1,5 @@
+// Copyright 2026 scramble-robot
+//
 #include "motor_control_lib/ddt_motor_lib.hpp"
 
 #include <algorithm>

@@ -1,3 +1,5 @@
+// Copyright 2026 scramble-robot
+//
 #include <geometry_msgs/msg/twist.hpp>
 #include <iostream>
 #include <memory>

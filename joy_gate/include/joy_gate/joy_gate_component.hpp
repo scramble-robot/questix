@@ -1,3 +1,5 @@
+// Copyright 2026 scramble-robot
+//
 #pragma once
 
 #include <memory>

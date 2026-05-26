@@ -1,3 +1,5 @@
+// Copyright 2026 scramble-robot
+//
 #include "joy_gate/joy_gate_component.hpp"
 
 #include <rclcpp_components/register_node_macro.hpp>

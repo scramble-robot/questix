@@ -14,9 +14,10 @@
 
 #include <algorithm>
 #include <cmath>
-#include <joy_controller/joy_controller_dual_stick_component.hpp>
 #include <memory>
 #include <vector>
+
+#include <joy_controller/joy_controller_dual_stick_component.hpp>
 
 namespace joy_controller {
 

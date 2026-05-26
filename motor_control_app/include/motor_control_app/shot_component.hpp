@@ -1,9 +1,12 @@
+// Copyright 2026 scramble-robot
+//
 #ifndef MOTOR_CONTROL_APP__SHOT_COMPONENT_HPP_
 #define MOTOR_CONTROL_APP__SHOT_COMPONENT_HPP_
 
 #include <chrono>
-#include <geometry_msgs/msg/point.hpp>
 #include <memory>
+
+#include <geometry_msgs/msg/point.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_components/register_node_macro.hpp>
 #include <sensor_msgs/msg/joy.hpp>

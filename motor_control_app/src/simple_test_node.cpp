@@ -1,3 +1,5 @@
+// Copyright 2026 scramble-robot
+//
 #include <iostream>
 #include <memory>
 

@@ -1,3 +1,5 @@
+// Copyright 2026 scramble-robot
+//
 #ifndef MOTOR_CONTROL_APP__DRIVE_COMPONENT_HPP_
 #define MOTOR_CONTROL_APP__DRIVE_COMPONENT_HPP_
 

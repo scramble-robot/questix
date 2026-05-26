@@ -23,10 +23,12 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cstdint>
 #include <sstream>
 #include <string>
-#include <uart_joy_driver/uart_joy_driver_component.hpp>
 #include <vector>
+
+#include <uart_joy_driver/uart_joy_driver_component.hpp>
 
 namespace uart_joy_driver {
 
@@ -405,7 +407,7 @@ bool UartJoyDriverComponent::parseHexByte(const std::string& token, uint8_t& val
   }
 
   char* end_ptr = nullptr;
-  const unsigned long parsed = std::strtoul(token.c_str(), &end_ptr, 16);
+  const uint64_t parsed = static_cast<uint64_t>(std::strtoul(token.c_str(), &end_ptr, 16));
   if (end_ptr == nullptr || *end_ptr != '\0' || parsed > 0xFFUL) {
     return false;
   }

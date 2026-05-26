@@ -52,13 +52,14 @@ extern "C" {
 }  // extern "C"
 #endif
 
-#include <geometry_msgs/msg/twist.hpp>
 #include <map>
 #include <memory>
+#include <vector>
+
+#include <geometry_msgs/msg/twist.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/joy.hpp>
 #include <std_msgs/msg/int32.hpp>
-#include <vector>
 
 namespace joy_controller {
 

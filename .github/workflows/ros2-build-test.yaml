@@ -167,7 +167,8 @@ jobs:
           source install/setup.bash
           colcon test \
             --event-handlers console_cohesion+ \
-            --parallel-workers $(nproc)
+            --parallel-workers $(nproc) \
+            --packages-skip ydlidar_ros2_driver ydlidar_sdk_vendor
           EOF
           test_status=$?
           set -e

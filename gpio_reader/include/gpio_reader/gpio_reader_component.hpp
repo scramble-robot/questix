@@ -1,3 +1,5 @@
+// Copyright 2026 scramble-robot
+//
 #ifndef GPIO_READER__GPIO_READER_COMPONENT_HPP_
 #define GPIO_READER__GPIO_READER_COMPONENT_HPP_
 

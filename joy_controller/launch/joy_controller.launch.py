@@ -1,3 +1,5 @@
+# Copyright 2026 scramble-robot
+#
 #!/usr/bin/env python3
 
 from launch import LaunchDescription
@@ -18,13 +20,13 @@ def generate_launch_description():
         ]),
         description='Path to the joy controller configuration file'
     )
-    
+
     use_sim_time_arg = DeclareLaunchArgument(
         'use_sim_time',
         default_value='false',
         description='Use simulation time'
     )
-    
+
     joy_device_arg = DeclareLaunchArgument(
         'joy_device',
         default_value='/dev/input/js0',

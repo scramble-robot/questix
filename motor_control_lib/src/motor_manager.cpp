@@ -1,3 +1,5 @@
+// Copyright 2026 scramble-robot
+//
 #include "motor_control_lib/motor_manager.hpp"
 
 #include <algorithm>

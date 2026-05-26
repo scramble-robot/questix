@@ -1,3 +1,5 @@
+// Copyright 2026 scramble-robot
+//
 #include "gpio_reader/gpio_reader_component.hpp"
 
 #include <chrono>
