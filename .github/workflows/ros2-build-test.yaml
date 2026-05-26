@@ -28,7 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ros:${{ matrix.ros_distro }}-ros-base
-      options: --platform linux/${{ matrix.architecture }}
+      options: --platform linux/${{ matrix.architecture }} --init
     env:
       DEBIAN_FRONTEND: noninteractive
     strategy:
