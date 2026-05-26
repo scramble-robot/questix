@@ -115,7 +115,7 @@ bool UartJoyDriverComponent::initializeSerial() {
     return false;
   }
 
-  struct termios tty{};
+  struct termios tty {};
   if (tcgetattr(serial_fd_, &tty) != 0) {
     RCLCPP_ERROR(this->get_logger(), "tcgetattr エラー");
     closeSerial();

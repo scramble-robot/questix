@@ -81,11 +81,11 @@ private:
   int right_motor_id_;
   int max_motor_rpm_;
   double status_publish_rate_;
-  int left_axis_index_;   // 左モータを制御するaxis番号
-  int right_axis_index_;  // 右モータを制御するaxis番号
-  bool invert_left_axis_;  // 左axisの反転フラグ
-  bool invert_right_axis_; // 右axisの反転フラグ
-  bool publish_twist_;     // Twistメッセージをパブリッシュするか
+  int left_axis_index_;     // 左モータを制御するaxis番号
+  int right_axis_index_;    // 右モータを制御するaxis番号
+  bool invert_left_axis_;   // 左axisの反転フラグ
+  bool invert_right_axis_;  // 右axisの反転フラグ
+  bool publish_twist_;      // Twistメッセージをパブリッシュするか
 
   // 状態フラグ
   bool motor_initialized_;

@@ -163,14 +163,12 @@ void JoyControllerDualStickComponent::publishTwist(const sensor_msgs::msg::Joy::
   twist_pub_->publish(twist);
 
   if (debug_mode_ && message_count_ % 50 == 0) {
-    RCLCPP_INFO(this->get_logger(),
-                "Input axes - Left[%d]: %.3f, Right[%d]: %.3f",
+    RCLCPP_INFO(this->get_logger(), "Input axes - Left[%d]: %.3f, Right[%d]: %.3f",
                 left_stick_vertical_axis_, msg->axes[left_stick_vertical_axis_],
                 right_stick_vertical_axis_, msg->axes[right_stick_vertical_axis_]);
-    RCLCPP_INFO(this->get_logger(), "Wheel velocities - Left: %.3f, Right: %.3f", 
+    RCLCPP_INFO(this->get_logger(), "Wheel velocities - Left: %.3f, Right: %.3f",
                 left_wheel_velocity, right_wheel_velocity);
-    RCLCPP_INFO(this->get_logger(),
-                "Published twist: linear.x=%.3f, angular.z=%.3f",
+    RCLCPP_INFO(this->get_logger(), "Published twist: linear.x=%.3f, angular.z=%.3f",
                 twist.linear.x, twist.angular.z);
   }
 }

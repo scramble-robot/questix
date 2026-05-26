@@ -12,14 +12,23 @@ ROS2 package for reading GPIO values on Raspberry Pi 5 using libgpiod.
 
 ## Dependencies
 
-- ROS2 Humble or later
-- libgpiod (version 1.6 or later)
+- Ubuntu 24.04 with ROS 2 Jazzy
+- Build dependency: `libgpiod-dev` (libgpiod headers and libraries)
+- Optional GPIO inspection tools: `gpiod`
 
-### Installing libgpiod on Raspberry Pi 5
+### Installing Dependencies on Raspberry Pi 5
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y libgpiod-dev gpiod
+sudo apt-get install -y libgpiod-dev
+```
+
+Install `gpiod` only when you want command-line GPIO inspection tools such as
+`gpiodetect` and `gpioinfo`:
+
+```bash
+sudo apt-get install -y gpiod
+gpiodetect
 ```
 
 ## Configuration

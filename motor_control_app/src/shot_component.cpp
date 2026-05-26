@@ -18,7 +18,7 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
   this->declare_parameter("baudrate", 115200);
   this->declare_parameter("pan_servo_id", 1);
   this->declare_parameter("trigger_servo_id", 3);
-  this->declare_parameter("fire_button", 5);             // R button (Switch2 native index)
+  this->declare_parameter("fire_button", 5);  // R button (Switch2 native index)
   // Pan input mode / パン入力モード
   // - If pan_axis >= 0: use the analog axis (D-pad / stick).
   // - Otherwise: use pan_up_button_index / pan_down_button_index (button edge).
@@ -28,12 +28,12 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
   this->declare_parameter("pan_down_button_index", 6);   // ZL button (Switch2 native index)
   this->declare_parameter("pan_step_angle", 5.0);        // パンステップサイズ（度）
   this->declare_parameter("pan_min_angle", 0.0);         // パン最小角度（度）
-  this->declare_parameter("pan_max_angle", 70.0);       // パン最大角度（度）
+  this->declare_parameter("pan_max_angle", 70.0);        // パン最大角度（度）
   this->declare_parameter("fire_angle", 130.0);          // 射撃角度（度）
   this->declare_parameter("home_angle", 100.0);          // ホーム角度（度）
   this->declare_parameter("fire_duration_ms", 300);      // 射撃持続時間（ミリ秒）
   this->declare_parameter("command_rate_limit_ms", 50);  // コマンド間隔制限（ミリ秒）
-  this->declare_parameter("joy_topic", "/joy");           // joyトピック名
+  this->declare_parameter("joy_topic", "/joy");          // joyトピック名
 
   // パラメーター取得
   std::string port = this->get_parameter("port").as_string();
@@ -107,8 +107,7 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
 
   RCLCPP_INFO(this->get_logger(), "Shot component started");
   if (pan_axis_ >= 0) {
-    RCLCPP_INFO(this->get_logger(),
-                "Fire button: %d, Pan mode: axis=%d, Pan step: %.1f degrees",
+    RCLCPP_INFO(this->get_logger(), "Fire button: %d, Pan mode: axis=%d, Pan step: %.1f degrees",
                 fire_button_, pan_axis_, pan_step_angle_);
   } else {
     RCLCPP_INFO(this->get_logger(),
@@ -284,7 +283,7 @@ int ShotComponent::angleToServoPosition(double angle_deg) {
   // 角度を0-360度の範囲で正規化
   while (angle_deg < 0) angle_deg += 360.0;
   while (angle_deg >= 360.0) angle_deg -= 360.0;
-  
+
   // サーボ位置に変換
   double normalized = angle_deg / 360.0;
   int position = static_cast<int>(normalized * 4096.0);

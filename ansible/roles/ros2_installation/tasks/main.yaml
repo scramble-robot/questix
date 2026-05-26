@@ -1,11 +1,10 @@
 ---
 # ROS2 Installation Tasks (Following official Ubuntu deb packages installation)
 # Based on: https://docs.ros.org/en/jazzy/Installation/Ubuntu-Install-Debs.html
-# Based on: https://docs.ros.org/en/humble/Installation/Ubuntu-Install-Debs.html
 
-- name: Determine ROS2 distribution based on Ubuntu version
+- name: Set ROS2 distribution
   ansible.builtin.set_fact:
-    ros2_distro_to_use: "{{ 'jazzy' if ansible_distribution_version == '24.04' else 'humble' }}"
+    ros2_distro_to_use: "jazzy"
 
 - name: Display ROS2 distribution selection
   ansible.builtin.debug:

@@ -4,14 +4,14 @@
 .PHONY: help test-ansible build-dev build-kit clean setup-deps
 
 # Variables
-ROS2_DISTRO ?= humble
-UBUNTU_VERSION ?= 22.04
+ROS2_DISTRO ?= jazzy
+UBUNTU_VERSION ?= 24.04
 ARCHITECTURE ?= amd64
 
 # Architecture-specific configurations
-UBUNTU_VERSION_AMD64 ?= 22.04
+UBUNTU_VERSION_AMD64 ?= 24.04
 UBUNTU_VERSION_ARM64 ?= 24.04
-ROS2_DISTRO_AMD64 ?= humble
+ROS2_DISTRO_AMD64 ?= jazzy
 ROS2_DISTRO_ARM64 ?= jazzy
 
 help: ## Show this help message
@@ -21,8 +21,8 @@ help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Variables:"
-	@echo "  ROS2_DISTRO      ROS2 distribution (default: humble)"
-	@echo "  UBUNTU_VERSION   Ubuntu version (default: 22.04)"
+	@echo "  ROS2_DISTRO      ROS2 distribution (default: jazzy)"
+	@echo "  UBUNTU_VERSION   Ubuntu version (default: 24.04)"
 	@echo "  ARCHITECTURE     Target architecture (default: amd64)"
 
 setup-deps: ## Install build dependencies
@@ -143,7 +143,7 @@ release-notes: ## Generate release notes template
 	@echo "- Development environment for PC/laptop (AMD64)" >> /tmp/release-notes.md
 	@echo "" >> /tmp/release-notes.md
 	@echo "## 📦 Images" >> /tmp/release-notes.md
-	@echo "- AMD64: Ubuntu 22.04 + ROS2 Humble (Development)" >> /tmp/release-notes.md
+	@echo "- AMD64: Ubuntu 24.04 + ROS2 Jazzy (Development)" >> /tmp/release-notes.md
 	@echo "- ARM64: Ubuntu 24.04 + ROS2 Jazzy (Raspberry Pi 5)" >> /tmp/release-notes.md
 	@echo "" >> /tmp/release-notes.md
 	@echo "## 🔧 Installation" >> /tmp/release-notes.md

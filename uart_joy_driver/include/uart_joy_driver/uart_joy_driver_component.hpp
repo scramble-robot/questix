@@ -54,7 +54,6 @@ extern "C" {
 
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/joy.hpp>
-
 #include <string>
 #include <vector>
 

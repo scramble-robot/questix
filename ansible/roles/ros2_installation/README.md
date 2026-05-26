@@ -1,19 +1,17 @@
 # ROS2 Ansible Role
 
-このAnsibleロールは、Ubuntu系のLinuxディストリビューションにROS2をインストールします。[ROS2公式ドキュメント](https://docs.ros.org/en/humble/Installation/Alternatives/Ubuntu-Development-Setup.html)の手順に従い、`ros2-apt-source`パッケージを使用した最新の推奨方法を採用しています。
+このAnsibleロールは、Ubuntu 24.04にROS 2 Jazzyをインストールします。[ROS2公式ドキュメント](https://docs.ros.org/en/jazzy/Installation/Ubuntu-Install-Debs.html)の手順に従い、`ros2-apt-source`パッケージを使用した最新の推奨方法を採用しています。
 
 ## 要件
 
-- Ubuntu 20.04 (Focal), 22.04 (Jammy), 24.04 (Noble)
+- Ubuntu 24.04 (Noble)
 - Ansible 2.9以上
 - sudo権限
 - インターネット接続
 
 ## サポートされているROS2ディストリビューション
 
-- Humble (デフォルト)
-- Iron  
-- Jazzy
+- Jazzy (デフォルト)
 
 ## 変数
 
@@ -21,7 +19,7 @@
 
 | 変数名 | デフォルト値 | 説明 |
 |--------|--------------|------|
-| `ros2_distro` | `humble` | インストールするROS2のディストリビューション |
+| `ros2_distro` | `jazzy` | インストールするROS2のディストリビューション |
 | `ros2_additional_packages` | `[]` | 追加でインストールするパッケージのリスト |
 | `install_dev_tools` | `true` | 開発ツールをインストールするかどうか |
 
@@ -33,10 +31,10 @@
   hosts: all
   become: true
   vars:
-    ros2_distro: humble
+    ros2_distro: jazzy
     ros2_additional_packages:
-      - ros-humble-navigation2
-      - ros-humble-slam-toolbox
+      - ros-jazzy-navigation2
+      - ros-jazzy-slam-toolbox
   roles:
     - ros2
 ```
@@ -54,7 +52,7 @@
 - python3-pytest-cov: テストカバレッジ
 - ros-dev-tools: ROS開発ツール一式
 
-### Ubuntu 22.04以降の追加パッケージ
+### Ubuntu 24.04の追加パッケージ
 
 - python3-flake8-*: 各種Flake8プラグイン
 - python3-pytest-*: 各種Pytestプラグイン

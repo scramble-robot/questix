@@ -78,11 +78,11 @@ ansible-playbook -i inventory.ini setup_kit.yaml --ask-become-pass
 プレイブック実行時に変数を上書き可能：
 
 ```bash
-# 異なるROS2ディストリビューションを指定
-ansible-playbook -i inventory.ini setup_dev.yaml -e "ros2_distro=iron"
+# Jazzy / Ubuntu 24.04 がサポート対象
+ansible-playbook -i inventory.ini setup_dev.yaml -e "ros2_distro=jazzy"
 
 # 追加パッケージを指定
-ansible-playbook -i inventory.ini setup_kit.yaml -e "ros2_additional_packages=['ros-humble-navigation2']"
+ansible-playbook -i inventory.ini setup_kit.yaml -e "ros2_additional_packages=['ros-jazzy-navigation2']"
 ```
 
 ## セットアップ後の確認
@@ -167,21 +167,19 @@ ls -la
 
 ```yaml
 ros2_additional_packages:
-  - ros-humble-navigation2
-  - ros-humble-slam-toolbox
-  - ros-humble-moveit
+  - ros-jazzy-navigation2
+  - ros-jazzy-slam-toolbox
+  - ros-jazzy-moveit
 ```
 
-### 異なるROS2ディストリビューション
+### ROS2ディストリビューション
 
-`ros2_distro`変数を変更：
+このブランチではUbuntu 24.04 + ROS 2 Jazzyのみをサポートします：
 
 ```bash
-ansible-playbook -i inventory.ini setup_dev.yaml -e "ros2_distro=iron"
+ansible-playbook -i inventory.ini setup_dev.yaml -e "ros2_distro=jazzy"
 ```
 
 サポートされているディストリビューション:
 
-- humble (デフォルト)
-- iron
-- jazzy
+- jazzy (デフォルト)

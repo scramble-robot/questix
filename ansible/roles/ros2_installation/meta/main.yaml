@@ -8,8 +8,6 @@ galaxy_info:
   platforms:
     - name: Ubuntu
       versions:
-        - focal # 20.04
-        - jammy # 22.04
         - noble # 24.04
   galaxy_tags:
     - robotics

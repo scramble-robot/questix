@@ -16,19 +16,18 @@
 #include <memory>
 #include <rclcpp/rclcpp.hpp>
 
-int main(int argc, char *argv[])
-{
-    rclcpp::init(argc, argv);
+int main(int argc, char *argv[]) {
+  rclcpp::init(argc, argv);
 
-    rclcpp::NodeOptions options;
-    auto component = std::make_shared<joy_controller::JoyControllerComponent>(options);
+  rclcpp::NodeOptions options;
+  auto component = std::make_shared<joy_controller::JoyControllerComponent>(options);
 
-    RCLCPP_INFO(component->get_logger(), "Joy Controller Node started");
+  RCLCPP_INFO(component->get_logger(), "Joy Controller Node started");
 
-    rclcpp::spin(component);
+  rclcpp::spin(component);
 
-    RCLCPP_INFO(component->get_logger(), "Joy Controller Node shutting down");
-    rclcpp::shutdown();
+  RCLCPP_INFO(component->get_logger(), "Joy Controller Node shutting down");
+  rclcpp::shutdown();
 
-    return 0;
+  return 0;
 }

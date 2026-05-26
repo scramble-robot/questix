@@ -1,9 +1,9 @@
 ---
 # Default variables for ROS2 role
 
-# ROS2 distribution to install (humble, iron, jazzy, etc.)
-# This will be dynamically set in tasks based on Ubuntu version
-ros2_distro: humble
+# ROS2 distribution to install
+# This role targets ROS2 Jazzy on Ubuntu 24.04
+ros2_distro: jazzy
 
 # Architecture support
 ros2_architecture:

@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <uart_joy_driver/uart_joy_driver_component.hpp>
 #include <memory>
 #include <rclcpp/rclcpp.hpp>
+#include <uart_joy_driver/uart_joy_driver_component.hpp>
 
-int main(int argc, char * argv[])
-{
+int main(int argc, char* argv[]) {
   rclcpp::init(argc, argv);
 
   rclcpp::NodeOptions options;
