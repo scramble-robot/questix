@@ -52,11 +52,10 @@ extern "C" {
 }  // extern "C"
 #endif
 
-#include <string>
-#include <vector>
-
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/joy.hpp>
+#include <string>
+#include <vector>
 
 namespace uart_joy_driver {
 

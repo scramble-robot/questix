@@ -4,9 +4,8 @@
 #define MOTOR_CONTROL_APP__SHOT_COMPONENT_HPP_
 
 #include <chrono>
-#include <memory>
-
 #include <geometry_msgs/msg/point.hpp>
+#include <memory>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_components/register_node_macro.hpp>
 #include <sensor_msgs/msg/joy.hpp>

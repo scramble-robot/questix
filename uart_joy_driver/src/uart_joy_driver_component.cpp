@@ -20,15 +20,14 @@
 #include <cerrno>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cstdint>
 #include <sstream>
 #include <string>
-#include <vector>
-
 #include <uart_joy_driver/uart_joy_driver_component.hpp>
+#include <vector>
 
 namespace uart_joy_driver {
 
