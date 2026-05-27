@@ -1,3 +1,5 @@
+// Copyright 2026 scramble-robot
+//
 #include "esc_motor_control_cpp/esc_motor_control_component.hpp"
 
 #include <chrono>

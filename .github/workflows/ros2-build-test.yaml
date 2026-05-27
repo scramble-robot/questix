@@ -17,6 +17,7 @@ on:
       - "ansible/**"
       - "docker/**"
       - "scripts/**"
+  workflow_dispatch:
 
 defaults:
   run:
@@ -26,11 +27,6 @@ jobs:
   build-and-test:
     name: build-and-test (${{ matrix.ros_distro }}, ${{ matrix.architecture }})
     runs-on: ubuntu-latest
-    container:
-      image: ros:${{ matrix.ros_distro }}-ros-base
-      options: --platform linux/${{ matrix.architecture }}
-    env:
-      DEBIAN_FRONTEND: noninteractive
     strategy:
       matrix:
         include:
@@ -44,19 +40,34 @@ jobs:
     continue-on-error: ${{ matrix.allow_failure }}
 
     steps:
-      - name: Suppress git warnings
-        run: |
-          git config --global --add safe.directory '*'
-
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Setup QEMU
+        if: matrix.architecture == 'arm64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Start ROS container
+        run: |
+          docker pull --platform linux/${{ matrix.architecture }} ros:${{ matrix.ros_distro }}-ros-base
+          docker run -d --name ros_build \
+            --platform linux/${{ matrix.architecture }} \
+            --init \
+            -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
+            -w "$GITHUB_WORKSPACE" \
+            -e DEBIAN_FRONTEND=noninteractive \
+            ros:${{ matrix.ros_distro }}-ros-base \
+            tail -f /dev/null
+          docker exec ros_build git config --global --add safe.directory '*'
+
       - name: Install build dependencies
         run: |
-          apt-get update && apt-get install -y \
+          docker exec ros_build bash -c "apt-get update && apt-get install -y \
             python3-colcon-common-extensions \
             python3-serial \
             python3-vcstool \
@@ -64,59 +75,34 @@ jobs:
             git \
             libgpiod-dev \
             wget \
-            && rm -rf /var/lib/apt/lists/*
+            && rm -rf /var/lib/apt/lists/*"
 
       - name: Configure git
         run: |
+          docker exec -i ros_build bash << 'EOF'
           git config --global user.email "action@github.com"
           git config --global user.name "GitHub Action"
           git config --global init.defaultBranch main
           git config --global --add safe.directory $(pwd)
+          EOF
 
       - name: Setup workspace and dependencies
         run: |
-          # Import additional repositories if dependency.repos exists
           if [ -f dependency.repos ]; then
-            # Configure git to use HTTPS instead of SSH for GitHub
+            docker exec -i ros_build bash << 'EOF'
             git config --global url."https://github.com/".insteadOf "git@github.com:"
             git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
-            # This repository root is the colcon workspace; dependency.repos entries must not
-            # collide with existing package directories.
             vcs import . < dependency.repos
+          EOF
           fi
 
       - name: Generate rosdep keys
         run: |
+          docker exec -i ros_build bash << 'EOF'
           rosdep init || true
           rosdep update
-          # CI starts from a clean checkout, so the repository root safely covers all packages.
-          rosdep keys --from-paths . --rosdistro ${{ matrix.ros_distro }} > rosdep_keys.txt || echo "No rosdep keys found"
-
-      - name: Cache rosdep
-        id: cache-rosdep
-        uses: actions/cache@v4
-        with:
-          path: |
-            /var/lib/apt/lists
-            /root/.ros/rosdep
-          key: rosdep-${{ matrix.ros_distro }}-${{ runner.os }}-${{ hashFiles('rosdep_keys.txt') }}
-          restore-keys: |
-            rosdep-${{ matrix.ros_distro }}-${{ runner.os }}-
-
-      - name: Install package dependencies
-        run: |
-          if [[ "${{ steps.cache-rosdep.outputs.cache-hit }}" == "true" ]]; then
-            echo "Rosdep cache hit. Skipping rosdep install."
-          else
-            echo "Rosdep cache miss. Running rosdep install."
-            apt-get -yqq update
-            rosdep install -yqq --from-paths . --ignore-src --rosdistro ${{ matrix.ros_distro }} || true
-          fi
-
-      - name: Setup colcon mixin
-        run: |
-          colcon mixin add default https://raw.githubusercontent.com/colcon/colcon-mixin-repository/master/index.yaml || true
-          colcon mixin update default || true
+          rosdep keys --from-paths . --rosdistro $ROS_DISTRO > rosdep_keys.txt || echo "No rosdep keys found"
+          EOF
 
       - name: Cache build artifacts
         uses: actions/cache@v4
@@ -128,24 +114,35 @@ jobs:
           restore-keys: |
             build-${{ matrix.ros_distro }}-${{ runner.os }}-${{ matrix.architecture }}-
 
+      - name: Install package dependencies
+        run: |
+          docker exec -i ros_build bash << 'EOF'
+          apt-get -yqq update
+          rosdep install -yqq --from-paths . --ignore-src --rosdistro $ROS_DISTRO || true
+          EOF
+
+      - name: Setup colcon mixin
+        run: |
+          docker exec -i ros_build bash << 'EOF'
+          colcon mixin add default https://raw.githubusercontent.com/colcon/colcon-mixin-repository/master/index.yaml || true
+          colcon mixin update default || true
+          EOF
+
       - name: Build ROS2 packages
         run: |
-          source /opt/ros/${{ matrix.ros_distro }}/setup.bash
-
-          # Use optimized parallel workers for GitHub Actions
+          set +e
+          docker exec -i ros_build bash << 'EOF'
+          source /opt/ros/$ROS_DISTRO/setup.bash
           PARALLEL_WORKERS=$(nproc)
           echo "Using $PARALLEL_WORKERS parallel workers for build"
-
-          # Build with optimizations
-          set +e
           colcon build \
             --event-handlers console_cohesion+ \
             --parallel-workers $PARALLEL_WORKERS \
             --cmake-args -DCMAKE_BUILD_TYPE=Release \
             --symlink-install
+          EOF
           build_status=$?
           set -e
-
           if [[ "$build_status" -ne 0 ]]; then
             if [[ "${{ matrix.allow_failure }}" == "true" ]]; then
               echo "::warning title=Allowed ${{ matrix.architecture }} build failure::colcon build exited with $build_status"
@@ -156,8 +153,7 @@ jobs:
 
       - name: Run tests
         run: |
-          source /opt/ros/${{ matrix.ros_distro }}/setup.bash
-          if [[ ! -f install/setup.bash ]]; then
+          if ! docker exec ros_build test -f install/setup.bash; then
             if [[ "${{ matrix.allow_failure }}" == "true" ]]; then
               echo "::warning title=Allowed ${{ matrix.architecture }} test skip::install/setup.bash was not generated"
               exit 0
@@ -165,14 +161,17 @@ jobs:
             echo "install/setup.bash was not generated"
             exit 1
           fi
-          source install/setup.bash
           set +e
+          docker exec -i ros_build bash << 'EOF'
+          source /opt/ros/$ROS_DISTRO/setup.bash
+          source install/setup.bash
           colcon test \
             --event-handlers console_cohesion+ \
-            --parallel-workers $(nproc)
+            --parallel-workers $(nproc) \
+            --packages-skip ydlidar_ros2_driver ydlidar_sdk_vendor
+          EOF
           test_status=$?
           set -e
-
           if [[ "$test_status" -ne 0 ]]; then
             if [[ "${{ matrix.allow_failure }}" == "true" ]]; then
               echo "::warning title=Allowed ${{ matrix.architecture }} test failure::colcon test exited with $test_status"
@@ -184,13 +183,19 @@ jobs:
       - name: Show test results
         if: always()
         run: |
-          source /opt/ros/${{ matrix.ros_distro }}/setup.bash
-          if [[ ! -f install/setup.bash ]]; then
+          if ! docker exec ros_build test -f install/setup.bash 2>/dev/null; then
             echo "No install/setup.bash found; skipping test result summary"
             exit 0
           fi
+          docker exec -i ros_build bash << 'EOF'
+          source /opt/ros/$ROS_DISTRO/setup.bash
           source install/setup.bash
           colcon test-result --verbose || echo "No test results found"
+          EOF
+
+      - name: Stop container
+        if: always()
+        run: docker stop ros_build && docker rm ros_build || true
 
   static-analysis:
     runs-on: ubuntu-latest

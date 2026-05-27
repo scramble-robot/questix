@@ -1,3 +1,5 @@
+// Copyright 2026 scramble-robot
+//
 #include <memory>
 
 #include "motor_control_app/drive_component.hpp"

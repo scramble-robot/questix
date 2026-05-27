@@ -1,3 +1,5 @@
+// Copyright 2026 scramble-robot
+//
 #include "motor_control_lib/differential_drive.hpp"
 
 #include <cmath>

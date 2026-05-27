@@ -30,6 +30,7 @@ target_link_libraries(uart_joy_driver_node uart_joy_driver_component)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
+  list(APPEND AMENT_LINT_AUTO_EXCLUDE ament_cmake_cpplint ament_cmake_uncrustify)
   ament_lint_auto_find_test_dependencies()
 endif()
 

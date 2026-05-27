@@ -1,3 +1,5 @@
+// Copyright 2026 scramble-robot
+//
 #include <rclcpp/rclcpp.hpp>
 
 #include "joy_gate/joy_gate_component.hpp"

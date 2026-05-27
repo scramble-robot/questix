@@ -1,3 +1,5 @@
+// Copyright 2026 scramble-robot
+//
 #ifndef ESC_MOTOR_CONTROL_CPP__PWM_BACKEND_HPP_
 #define ESC_MOTOR_CONTROL_CPP__PWM_BACKEND_HPP_
 

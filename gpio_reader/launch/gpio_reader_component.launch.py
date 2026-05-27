@@ -1,8 +1,10 @@
+# Copyright 2026 scramble-robot
+#
 from launch import LaunchDescription
-from launch_ros.actions import ComposableNodeContainer
-from launch_ros.descriptions import ComposableNode
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch_ros.actions import ComposableNodeContainer
+from launch_ros.descriptions import ComposableNode
 from launch_ros.substitutions import FindPackageShare
 
 

@@ -1,3 +1,5 @@
+// Copyright 2026 scramble-robot
+//
 #include "motor_control_app/joy_axis_drive_component.hpp"
 
 #include <chrono>
