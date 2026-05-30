@@ -5,7 +5,7 @@
     <version>0.0.0</version>
     <description>Integrated Joy Controller for ROS2 with enhanced joystick functionality</description>
     <maintainer email="aki.grade2580@outlook.jp">asa-naki</maintainer>
-    <license>Apache License 2.0</license>
+    <license>MIT</license>
 
     <buildtool_depend>ament_cmake_auto</buildtool_depend>
 

@@ -5,7 +5,7 @@
   <version>0.0.0</version>
   <description>Questix description package</description>
   <maintainer email="manami.bean14@gmail.com">kajimame</maintainer>
-  <license>Apache-2.0</license>
+  <license>MIT</license>
 
   <buildtool_depend>ament_cmake_auto</buildtool_depend>
 
