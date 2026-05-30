@@ -17,17 +17,12 @@ def generate_launch_description():
     # 設定ファイルのパス
     config_file = os.path.join(package_dir, 'config', 'drive_component.yaml')
 
-    # Launch引数を定義
+    # config_file が Single Source of Truth。
+    # 個別の serial_port 等の launch 引数は廃止。
     config_file_arg = DeclareLaunchArgument(
         'config_file',
         default_value=config_file,
-        description='Path to the configuration file'
-    )
-
-    serial_port_arg = DeclareLaunchArgument(
-        'serial_port',
-        default_value='/dev/ttyACM0',
-        description='Serial port for motor communication'
+        description='Path to the drive component configuration YAML'
     )
 
     container_name_arg = DeclareLaunchArgument(
@@ -36,7 +31,6 @@ def generate_launch_description():
         description='Name of the component container'
     )
 
-    # コンポーネントコンテナを作成
     container = ComposableNodeContainer(
         name=LaunchConfiguration('container_name'),
         namespace='',
@@ -47,12 +41,7 @@ def generate_launch_description():
                 package='motor_control_app',
                 plugin='motor_control_app::DriveComponent',
                 name='drive_component',
-                parameters=[
-                    LaunchConfiguration('config_file'),
-                    {
-                        'serial_port': LaunchConfiguration('serial_port')
-                    }
-                ],
+                parameters=[LaunchConfiguration('config_file')],
             ),
         ],
         output='screen',
@@ -60,7 +49,6 @@ def generate_launch_description():
 
     return LaunchDescription([
         config_file_arg,
-        serial_port_arg,
         container_name_arg,
         container,
     ])

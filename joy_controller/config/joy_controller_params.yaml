@@ -4,6 +4,9 @@
 # Movement control parameters
 joy_controller:
   ros__parameters:
+    # Use simulation time
+    use_sim_time: false
+
     # Input scaling ratios / 入力スケール
     # Lower these values to make the robot slower and easier to control.
     # 数値を小さくすると、ロボットの最高速度を抑えて扱いやすくできます。

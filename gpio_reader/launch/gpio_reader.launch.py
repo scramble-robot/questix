@@ -22,19 +22,17 @@ def generate_launch_description():
     use_sim_time_arg = DeclareLaunchArgument(
         'use_sim_time',
         default_value='false',
-        description='Use simulation time'
+        description='Use simulation time (deprecated: prefer YAML)'
     )
 
     # GPIO Reader Node
+    # config_file が Single Source of Truth。launch 引数によるインライン上書きは廃止。
     gpio_reader_node = Node(
         package='gpio_reader',
         executable='gpio_reader_node',
         name='gpio_reader_node',
         output='screen',
-        parameters=[
-            LaunchConfiguration('config_file'),
-            {'use_sim_time': LaunchConfiguration('use_sim_time')}
-        ]
+        parameters=[LaunchConfiguration('config_file')]
     )
 
     return LaunchDescription([

@@ -3,6 +3,9 @@
 
 uart_joy_driver:
   ros__parameters:
+    # Use simulation time (rosbag/Gazebo 等のシミュ時刻を使うか)
+    use_sim_time: false
+
     # Serial port settings
     serial_port: "/dev/ttyAMA0"   # RPi built-in UART (GPIO14/15)
     baud_rate: 115200

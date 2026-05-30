@@ -17,15 +17,17 @@ def generate_launch_description():
     config_file = os.path.join(pkg_dir, 'config', 'shot_config.yaml')
 
     fire_button_arg = DeclareLaunchArgument(
-        'fire_button',
-        default_value='5',
-        description='Fire button number (Switch2 native: R=5)'
+        'config_file',
+        default_value=config_file,
+        description='Path to the shot component configuration YAML'
     )
 
+    # joy_topic は launcher が /joy <-> /joy_gated を切替えるための唯一の override。
+    # parameters リストで YAML の後に置くので launcher の指定が勝つ。
     joy_topic_arg = DeclareLaunchArgument(
         'joy_topic',
         default_value='/joy',
-        description='Joy topic name'
+        description='Joy input topic (override-only, default matches YAML)'
     )
 
     # shot componentノード
@@ -34,11 +36,8 @@ def generate_launch_description():
         executable='shot_component_node',
         name='shot_component',
         parameters=[
-            config_file,
-            {
-                'fire_button': LaunchConfiguration('fire_button'),
-                'joy_topic': LaunchConfiguration('joy_topic')
-            }
+            LaunchConfiguration('config_file'),
+            {'joy_topic': LaunchConfiguration('joy_topic')},
         ],
         output='screen'
     )

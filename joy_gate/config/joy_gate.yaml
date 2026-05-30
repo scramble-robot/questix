@@ -1,5 +1,8 @@
-/**:
+joy_gate:
   ros__parameters:
+    # Use simulation time
+    use_sim_time: false
+
     # Topic names
     gpio_controllable_topic: "/gpio/controllable"
     joy_input_topic: "/joy"
@@ -7,6 +10,3 @@
 
     # QoS settings
     qos_depth: 10
-
-    # Logging
-    use_sim_time: false

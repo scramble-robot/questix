@@ -2,19 +2,18 @@
 <!--
 UART Joy Driver standalone launch file
 UARTシリアル接続のSwitch系コントローラーをJoyメッセージとして配信
+
+パラメータは uart_joy_driver_params.yaml が Single Source of Truth。
+個別の launch 引数によるインライン上書きは廃止しているため、
+値を変えたい場合は YAML を編集するか、`config_file:=...` で別 YAML を指定すること。
 -->
 <launch>
-    <!-- Launch Arguments -->
-    <arg name="serial_port" default="/dev/ttyAMA0" description="UART serial port path" />
-    <arg name="baud_rate" default="115200" description="UART baud rate" />
-    <arg name="use_sim_time" default="false" description="Use simulation time" />
-    <arg name="config_file" default="$(find-pkg-share uart_joy_driver)/config/uart_joy_driver_params.yaml" description="Path to the UART joy driver configuration file" />
+    <arg name="config_file"
+         default="$(find-pkg-share uart_joy_driver)/config/uart_joy_driver_params.yaml"
+         description="Path to the UART joy driver configuration YAML" />
 
     <!-- UART Joy Driver node -->
     <node pkg="uart_joy_driver" exec="uart_joy_driver_node" name="uart_joy_driver" output="screen">
-        <param name="use_sim_time" value="$(var use_sim_time)" />
-        <param name="serial_port" value="$(var serial_port)" />
-        <param name="baud_rate" value="$(var baud_rate)" />
         <param from="$(var config_file)" />
     </node>
 </launch>

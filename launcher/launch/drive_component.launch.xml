@@ -1,46 +1,33 @@
 <?xml version="1.0"?>
 <!--
 DDT Motor Controller単体起動用ランチファイル
+YAML を Single Source of Truth とし、個別パラメータの launch 引数は廃止。
+値を変えたい場合は config_file 引数で別 YAML を指定すること。
 -->
 <launch>
-  <!-- Launch Arguments -->
-  <arg name="use_sim_time" default="false" description="Use simulation time" />
-  <arg name="joy_device" default="/dev/input/js0" description="Joystick device path" />
-  <arg name="joy_config_file" default="$(find-pkg-share joy_controller)/config/joy_controller_params.yaml" description="Configuration file path" />
-  <arg name="drive_config_file" default="$(find-pkg-share motor_control_app)/config/drive_component.yaml" description="Configuration file path" />
+  <arg name="joy_config_file" default="$(find-pkg-share joy_controller)/config/joy_controller_params.yaml" description="joy_controller configuration YAML" />
+  <arg name="drive_config_file" default="$(find-pkg-share motor_control_app)/config/drive_component.yaml" description="drive_component configuration YAML" />
   <arg name="enable_gpio_ref" default="false" description="Enable GPIO reference system (gpio_reader + joy_gate)" />
-  <arg name="gpio_config_file" default="$(find-pkg-share gpio_reader)/config/gpio_reader.yaml" description="GPIO reader configuration file path" />
   <arg name="controller_type" default="uart" description="Controller type: dualshock or uart" />
-  <arg name="uart_port" default="/dev/ttyAMA0" description="UART serial port for uart controller" />
-  <arg name="uart_baud_rate" default="115200" description="UART baud rate for uart controller" />
 
   <!-- Joy Controller component launch (without GPIO ref) -->
   <group unless="$(var enable_gpio_ref)">
     <include file="$(find-pkg-share joy_controller)/launch/joy_controller.launch.xml">
-      <arg name="use_sim_time" value="$(var use_sim_time)" />
-      <arg name="joy_device" value="$(var joy_device)" />
       <arg name="config_file" value="$(var joy_config_file)" />
       <arg name="controller_type" value="$(var controller_type)" />
-      <arg name="uart_port" value="$(var uart_port)" />
-      <arg name="uart_baud_rate" value="$(var uart_baud_rate)" />
     </include>
   </group>
 
   <!-- Joy Controller with GPIO reference system (gpio_reader + joy_gate + operation_manager) -->
   <group if="$(var enable_gpio_ref)">
     <include file="$(find-pkg-share joy_controller)/launch/joy_controller_referee.launch.xml">
-      <arg name="use_sim_time" value="$(var use_sim_time)" />
-      <arg name="joy_device" value="$(var joy_device)" />
       <arg name="config_file" value="$(var joy_config_file)" />
       <arg name="controller_type" value="$(var controller_type)" />
-      <arg name="uart_port" value="$(var uart_port)" />
-      <arg name="uart_baud_rate" value="$(var uart_baud_rate)" />
     </include>
   </group>
 
   <!-- Include drive Component Launch -->
   <include file="$(find-pkg-share motor_control_app)/launch/drive_component.launch.py">
-    <arg name="use_sim_time" value="$(var use_sim_time)" />
     <arg name="config_file" value="$(var drive_config_file)" />
   </include>
 </launch>

@@ -48,13 +48,13 @@ JoyControllerComponent::JoyControllerComponent(const rclcpp::NodeOptions &option
 
 void JoyControllerComponent::loadParameters() {
   // Movement parameters
-  declare_parameter("longitudinal_input_ratio", 1.0);
+  declare_parameter("longitudinal_input_ratio", 0.1);
   get_parameter("longitudinal_input_ratio", longitudinal_input_ratio_);
 
   declare_parameter("lateral_input_ratio", 0.3);
   get_parameter("lateral_input_ratio", lateral_input_ratio_);
 
-  declare_parameter("angular_input_ratio", 1.0);
+  declare_parameter("angular_input_ratio", 0.1);
   get_parameter("angular_input_ratio", angular_input_ratio_);
 
   // Controller mapping

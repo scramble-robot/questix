@@ -1,22 +1,20 @@
 <?xml version="1.0"?>
+<!--
+ESC Motor Control (C++) standalone launch file
+パラメータは esc_motor_control_cpp.yaml が Single Source of Truth。
+例外: joy_topic は launcher が /joy <-> /joy_gated を切替えるための唯一の override。
+YAML の後に置くことで launcher からの指定が勝つようにする。
+-->
 <launch>
-    <!-- Launch arguments -->
-    <arg name="use_sim_time" default="false" description="Use simulation time" />
-    <arg name="test_mode" default="false" description="Run in test mode (no actual GPIO)" />
-    <arg name="joy_topic" default="/joy" description="Joy topic name" />
-    <arg name="pwm_backend" default="auto" description="PWM backend: auto, pigpio, lgpio, simulation" />
+    <arg name="config_file"
+         default="$(find-pkg-share esc_motor_control_cpp)/config/esc_motor_control_cpp.yaml"
+         description="Path to the ESC motor control configuration YAML" />
+    <arg name="joy_topic"
+         default="/joy"
+         description="Joy input topic (override-only, default matches YAML)" />
 
-    <!-- Config file path -->
-    <let name="config_file" value="$(find-pkg-share esc_motor_control_cpp)/config/esc_motor_control_cpp.yaml" />
-
-    <!-- ESC Motor Control Node (C++) -->
     <node pkg="esc_motor_control_cpp" exec="esc_motor_control_node" name="esc_motor_control" output="screen">
-
-        <!-- Parameters from YAML -->
         <param from="$(var config_file)" />
-        <param name="use_sim_time" value="$(var use_sim_time)" />
-        <param name="test_mode" value="$(var test_mode)" />
         <param name="joy_topic" value="$(var joy_topic)" />
-        <param name="pwm_backend" value="$(var pwm_backend)" />
     </node>
 </launch>

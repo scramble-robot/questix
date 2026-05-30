@@ -1,5 +1,11 @@
 esc_motor_control:
   ros__parameters:
+    # Use simulation time
+    use_sim_time: false
+
+    # Joy input topic
+    joy_topic: "/joy"
+
     # PWM settings
     pwm_pin: 13 # GPIO pin for PWM output
 
