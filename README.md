@@ -23,63 +23,100 @@ This project provides a complete automation pipeline using Ansible and GitHub Ac
 
 ## 🚀 Quick Start
 
-### Using Pre-built ISOs (Recommended)
+There are two setup paths: the AMD64 development machine is configured locally,
+while the Raspberry Pi 5 (ARM64) robot is provisioned remotely with Ansible
+from that development machine.
 
-1. **Download from Releases**
+### 1. AMD64 Development Machine (local provisioning)
+
+On an x86_64 machine running Ubuntu 24.04, run Ansible against `localhost`.
+
+1. **Install prerequisites**
 
    ```bash
-   # Check latest releases
-   wget https://github.com/your-username/questix_core/releases/latest
+   sudo apt update
+   sudo apt install -y git ansible python3-vcstool
    ```
 
-2. **Flash to Storage**
-
-   ```bash
-   # For Raspberry Pi 5 (ARM64)
-   sudo dd if=ros2-robotics-kit-arm64-ubuntu24.04-ros2jazzy.iso of=/dev/sdX bs=4M status=progress
-   
-   # For PC/Laptop (AMD64) 
-   sudo dd if=ros2-robotics-kit-amd64-ubuntu24.04-ros2jazzy.iso of=/dev/sdX bs=4M status=progress
-   ```
-
-3. **Boot and Install**
-   - Boot from USB/SD card
-   - Follow installation wizard
-   - System ready for ROS2 development!
-
-### Building Locally
-
-1. **Setup Dependencies**
+2. **Clone the repository**
 
    ```bash
    git clone https://github.com/scramble-robot/questix.git
    cd questix
-   ansible-playbook ansible/playbooks/setup_kit.yaml -i localhost, --connection=local --ask-become-pass
-   mkdir src
+   ```
+
+3. **Run the development playbook (AMD64)**
+
+   ```bash
+   ansible-playbook ansible/playbooks/setup_dev.yaml \
+     -i localhost, --connection=local --ask-become-pass
+   ```
+
+   This installs ROS 2 Jazzy Desktop, colcon, developer tooling, and creates
+   `~/ros2_ws`.
+
+4. **Fetch workspace dependencies and build**
+
+   ```bash
+   mkdir -p src
    vcs import src < dependency.repos
+   source /opt/ros/jazzy/setup.bash
+   colcon build --symlink-install
+   source install/setup.bash
    ```
 
-2. **Build ISOs**
+5. **Verify**
 
    ```bash
-   # Build development environment ISO (AMD64)
-   make build-dev
-   
-   # Build robotics kit ISO (ARM64)
-   make build-kit
-   
-   # Build both
-   make build-both
+   ros2 --version
+   ros2 topic list
    ```
 
-3. **Test Build**
+### 2. Raspberry Pi 5 (ARM64) Setup (run on the Pi itself)
+
+Flash Ubuntu 24.04 (64-bit) onto the Raspberry Pi 5 and boot it. The setup is
+performed **on the Pi itself** by running the bundled `setup.sh`, which invokes
+the kit playbook against `localhost`.
+
+1. **Prepare the Raspberry Pi 5**
+
+   - Use Raspberry Pi Imager (or similar) to flash Ubuntu 24.04 Server (arm64)
+     to the microSD card / SSD.
+   - On first boot, create a user and connect to the network.
+
+2. **Install Git and Ansible on the Pi**
 
    ```bash
-   # Test Ansible playbooks
-   make test-ansible
-   
-   # Test ISO with QEMU (AMD64 only)
-   make test-iso-amd64
+   sudo apt update
+   sudo apt install -y git ansible
+   ```
+
+3. **Clone the repository on the Pi**
+
+   ```bash
+   git clone https://github.com/scramble-robot/questix.git
+   cd questix
+   ```
+
+4. **Run the setup script**
+
+   ```bash
+   ./setup.sh
+   ```
+
+   This runs `ansible-playbook ansible/playbooks/setup_kit.yaml` locally and
+   installs ROS 2 Jazzy, enables GPIO/I2C/SPI, applies udev rules, and creates
+   `~/robot_ws`.
+
+5. **Reboot and verify**
+
+   ```bash
+   sudo reboot
+   # After logging back in:
+   source ~/.bashrc
+   ros2 --version
+   gpio_status
+   rw   # cd into ~/robot_ws
    ```
 
 ## 📁 Project Structure
