@@ -133,27 +133,31 @@ ros2_additional_packages:
 
 ### Automated Builds
 
-The GitHub Actions workflow automatically:
+The ISO build workflow is manual-only and runs when manually dispatched via GitHub Actions.
+When started, it:
 
-1. ✅ Validates Ansible playbooks
-2. 🏗️ Builds ISOs for both architectures
-3. 🧪 Tests ISO integrity
-4. 📦 Creates GitHub releases
-5. 🔐 Generates checksums
+1. 🏗️ Builds Ubuntu 24.04 + ROS 2 Jazzy ISOs for AMD64 and ARM64
+2. 🧪 Tests the AMD64 ISO boot path in QEMU
+3. 📦 Uploads ISO artifacts
+4. 🔐 Generates checksums
+
+Baseline upgrade note: the current workflow builds Ubuntu 24.04 + ROS 2 Jazzy
+for both AMD64 and ARM64. A future move to Ubuntu 26.04 + ROS 2 Lyrical should
+update the workflow matrix, ISO artifact names, release notes, dependency
+compatibility notes, and this README together. This PR does not change the
+baseline to Lyrical.
+
+The release job is present but disabled; manual dispatch does not publish GitHub releases.
 
 ### Triggers
 
-- **Push to main/develop**: Build and test
-- **Tags (v*)**: Build and create release
-- **Manual dispatch**: Custom parameters
-- **Pull requests**: Validation only
+- **Manual dispatch**: Build and test ISO artifacts
 
 ### Manual Trigger
 
 ```bash
 # Trigger manual build via GitHub CLI
-gh workflow run build-iso.yml \
-  --field architecture=arm64
+gh workflow run build-iso.yml
 ```
 
 ## 🧪 Testing
@@ -238,10 +242,9 @@ workspace. They are source/workspace dependencies, not apt packages:
 - `esc_motor_control`
 - `ddt_motor_control`
 
-`dependency.repos` currently references `ydlidar_ros2_driver` with `version: humble`.
-For Jazzy operation, confirm that the selected branch or tag is compatible with ROS 2
-Jazzy before using it. A successful `vcs import` only confirms that the repository was
-fetched; it does not guarantee runtime behavior.
+For Jazzy operation, confirm that each selected branch or tag in `dependency.repos`
+is compatible with ROS 2 Jazzy before using it. A successful `vcs import` only
+confirms that the repositories were fetched; it does not guarantee runtime behavior.
 
 ### Runtime (Generated ISOs)
 
