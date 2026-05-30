@@ -12,7 +12,7 @@
 
 # System setup - Set locale
 - name: Check current locale
-  ansible.builtin.shell: locale
+  ansible.builtin.command: locale
   register: current_locale
   changed_when: false
 
@@ -30,7 +30,7 @@
   changed_when: false
 
 - name: Verify locale setting
-  ansible.builtin.shell: locale
+  ansible.builtin.command: locale
   register: locale_verification
   changed_when: false
 
@@ -47,7 +47,7 @@
   become: true
 
 - name: Enable universe repository
-  ansible.builtin.shell: sudo add-apt-repository universe -y
+  ansible.builtin.command: add-apt-repository universe -y
   become: true
   changed_when: false
 
@@ -59,20 +59,33 @@
   become: true
 
 - name: Get latest ros2-apt-source version
-  ansible.builtin.shell: |
-    curl -s https://api.github.com/repos/ros-infrastructure/ros-apt-source/releases/latest | grep -F "tag_name" | awk -F\" '{print $4}'
-  register: ros_apt_source_version
+  ansible.builtin.uri:
+    url: https://api.github.com/repos/ros-infrastructure/ros-apt-source/releases/latest
+    return_content: true
+  register: ros_apt_source_release
   changed_when: false
+
+- name: Set ros2-apt-source version
+  ansible.builtin.set_fact:
+    ros_apt_source_version: "{{ ros_apt_source_release.json.tag_name }}"
+
+- name: Set ros2-apt-source package metadata
+  ansible.builtin.set_fact:
+    ros_apt_source_package_name: >-
+      ros2-apt-source_{{ ros_apt_source_version }}.{{ ansible_distribution_release }}_all.deb
+    ros_apt_source_download_base_url: >-
+      https://github.com/ros-infrastructure/ros-apt-source/releases/download/{{ ros_apt_source_version }}
 
 - name: Download ros2-apt-source package
-  ansible.builtin.shell: |
-    curl -L -o /tmp/ros2-apt-source.deb "https://github.com/ros-infrastructure/ros-apt-source/releases/download/{{ ros_apt_source_version.stdout }}/ros2-apt-source_{{ ros_apt_source_version.stdout }}.$(. /etc/os-release && echo $VERSION_CODENAME)_all.deb"
-  changed_when: false
+  ansible.builtin.get_url:
+    url: "{{ ros_apt_source_download_base_url }}/{{ ros_apt_source_package_name }}"
+    dest: /tmp/ros2-apt-source.deb
+    mode: "0644"
 
 - name: Install ros2-apt-source package
-  ansible.builtin.shell: sudo dpkg -i /tmp/ros2-apt-source.deb
+  ansible.builtin.apt:
+    deb: /tmp/ros2-apt-source.deb
   become: true
-  changed_when: false
 
 # Install ROS 2 packages
 - name: Update apt repository caches after setting up repositories
@@ -156,14 +169,15 @@
 
 # Initialize rosdep for workspace development
 - name: Initialize rosdep
-  ansible.builtin.shell: sudo rosdep init
+  ansible.builtin.command: rosdep init
   become: true
   register: rosdep_init_result
   failed_when: rosdep_init_result.rc != 0 and "already exists" not in rosdep_init_result.stderr
   changed_when: rosdep_init_result.rc == 0
 
 - name: Update rosdep
-  ansible.builtin.shell: rosdep update
+  ansible.builtin.command: rosdep update
+  become: false
   changed_when: false
 
 # Clean up temporary files

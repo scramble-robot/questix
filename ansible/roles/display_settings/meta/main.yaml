@@ -9,7 +9,8 @@ galaxy_info:
   platforms:
     - name: Ubuntu
       versions:
-        - jammy
-        - noble
+        # ansible-lint's bundled Galaxy schema does not yet include noble.
+        # The kit playbook still enforces Ubuntu 24.04 before applying this role.
+        - all
 
 dependencies: []
