@@ -6,6 +6,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/joy.hpp>
 #include <std_msgs/msg/bool.hpp>
+#include <string>
 
 namespace joy_gate {
 
@@ -21,6 +22,11 @@ private:
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr gpio_controllable_sub_;
   rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joy_input_sub_;
   rclcpp::Publisher<sensor_msgs::msg::Joy>::SharedPtr joy_output_pub_;
+
+  // Topic names (loaded from YAML)
+  std::string gpio_controllable_topic_;
+  std::string joy_input_topic_;
+  std::string joy_output_topic_;
 
   // Internal state
   bool is_controllable_;

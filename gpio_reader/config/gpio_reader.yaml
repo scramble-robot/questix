@@ -1,5 +1,8 @@
-/**:
+gpio_reader_node:
   ros__parameters:
+    # Use simulation time
+    use_sim_time: false
+
     # GPIO chip device path (for Raspberry Pi 5, use /dev/gpiochip4)
     chip_name: "/dev/gpiochip4"
 

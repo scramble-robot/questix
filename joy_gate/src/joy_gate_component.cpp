@@ -8,6 +8,15 @@ namespace joy_gate {
 
 JoyGateComponent::JoyGateComponent(const rclcpp::NodeOptions& options)
     : Node("joy_gate", options), is_controllable_(false), has_received_joy_(false) {
+  // Declare and load parameters from YAML
+  gpio_controllable_topic_ =
+      this->declare_parameter<std::string>("gpio_controllable_topic", "/gpio/controllable");
+  joy_input_topic_ = this->declare_parameter<std::string>("joy_input_topic", "/joy");
+  joy_output_topic_ = this->declare_parameter<std::string>("joy_output_topic", "/joy_gated");
+  // qos_depth applies to the gpio_controllable subscription (RELIABLE).
+  // Joy input/output intentionally use depth 1 to avoid stale-input latency.
+  const int qos_depth = this->declare_parameter<int>("qos_depth", 10);
+
   // Initialize last joy message with empty state
   last_joy_msg_.header.stamp = this->now();
   last_joy_msg_.axes.clear();
@@ -15,20 +24,23 @@ JoyGateComponent::JoyGateComponent(const rclcpp::NodeOptions& options)
 
   // Subscribe to GPIO controllable status
   gpio_controllable_sub_ = this->create_subscription<std_msgs::msg::Bool>(
-      "/gpio/controllable", rclcpp::QoS(10).reliability(RMW_QOS_POLICY_RELIABILITY_RELIABLE),
+      gpio_controllable_topic_,
+      rclcpp::QoS(qos_depth).reliability(RMW_QOS_POLICY_RELIABILITY_RELIABLE),
       std::bind(&JoyGateComponent::gpio_controllable_callback, this, std::placeholders::_1));
 
   // Subscribe to input joy messages
   joy_input_sub_ = this->create_subscription<sensor_msgs::msg::Joy>(
-      "/joy", rclcpp::QoS(1),
+      joy_input_topic_, rclcpp::QoS(1),
       std::bind(&JoyGateComponent::joy_input_callback, this, std::placeholders::_1));
 
   // Publish gated joy messages
-  joy_output_pub_ = this->create_publisher<sensor_msgs::msg::Joy>("/joy_gated", rclcpp::QoS(1));
+  joy_output_pub_ =
+      this->create_publisher<sensor_msgs::msg::Joy>(joy_output_topic_, rclcpp::QoS(1));
 
   RCLCPP_INFO(this->get_logger(), "Joy Gate Node initialized");
-  RCLCPP_INFO(this->get_logger(), "Subscribing to: /gpio/controllable, /joy");
-  RCLCPP_INFO(this->get_logger(), "Publishing to: /joy_gated");
+  RCLCPP_INFO(this->get_logger(), "Subscribing to: %s, %s", gpio_controllable_topic_.c_str(),
+              joy_input_topic_.c_str());
+  RCLCPP_INFO(this->get_logger(), "Publishing to: %s", joy_output_topic_.c_str());
 }
 
 void JoyGateComponent::gpio_controllable_callback(const std_msgs::msg::Bool::SharedPtr msg) {

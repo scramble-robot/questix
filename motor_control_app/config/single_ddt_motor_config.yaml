@@ -1,21 +1,23 @@
 # Single DDT Motor Component Configuration
+# 全パラメータは ROS2 標準形式 (<node_name>: ros__parameters: ...) で記述する。
+# このファイルが Single Source of Truth。launch 側ではインライン上書きしないこと。
+single_ddt_motor_node:
+  ros__parameters:
+    # シリアル通信設定
+    serial_port: "/dev/ttyACM0"
+    baud_rate: 57600
 
-# シリアル通信設定
-serial_port: "/dev/ttyACM0"
-baud_rate: 56700
+    # モータ設定
+    motor_id: 4
+    max_motor_rpm: 100
+    wheel_radius: 0.1  # meters
 
-# モータ設定
-motor_id: 4
-max_motor_rpm: 100
-wheel_radius: 0.1 # meters
+    # 制御パラメータ
+    # RPM = linear_x * velocity_scale_factor
+    velocity_scale_factor: 60.0
 
-# 制御パラメータ
-velocity_scale_factor:
-  60.0 # 線形速度 (m/s) から RPM への変換係数
-  # RPM = linear_x * velocity_scale_factor
+    # 安全設定
+    watchdog_timeout: 1.0  # seconds - この時間 Twist が来ないとモータ停止
 
-# 安全設定
-watchdog_timeout: 1.0 # seconds - この時間Twistメッセージが受信されないとモータ停止
-
-# ステータス公開設定
-status_publish_rate: 5.0 # Hz
+    # ステータス公開設定
+    status_publish_rate: 5.0  # Hz

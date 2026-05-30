@@ -1,19 +1,18 @@
 <?xml version="1.0"?>
+<!--
+GPIO Reader standalone launch (XML)
+パラメータは gpio_reader.yaml が Single Source of Truth。
+値を変えたい場合は YAML を編集するか config_file 引数で別 YAML を指定すること。
+-->
 <launch>
-  <!-- Launch arguments -->
-  <arg name="config_file" 
-       default="$(find-pkg-share gpio_reader)/config/gpio_reader.yaml" 
+  <arg name="config_file"
+       default="$(find-pkg-share gpio_reader)/config/gpio_reader.yaml"
        description="Path to the GPIO reader configuration file" />
-  <arg name="use_sim_time" 
-       default="false" 
-       description="Use simulation time" />
 
-  <!-- GPIO Reader Node -->
-  <node pkg="gpio_reader" 
-        exec="gpio_reader_node" 
-        name="gpio_reader_node" 
+  <node pkg="gpio_reader"
+        exec="gpio_reader_node"
+        name="gpio_reader_node"
         output="screen">
     <param from="$(var config_file)" />
-    <param name="use_sim_time" value="$(var use_sim_time)" />
   </node>
 </launch>

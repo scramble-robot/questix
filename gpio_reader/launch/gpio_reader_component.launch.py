@@ -23,10 +23,11 @@ def generate_launch_description():
     use_sim_time_arg = DeclareLaunchArgument(
         'use_sim_time',
         default_value='false',
-        description='Use simulation time'
+        description='Use simulation time (deprecated: prefer YAML)'
     )
 
     # Create container with GPIO Reader component
+    # config_file が Single Source of Truth。
     container = ComposableNodeContainer(
         name='gpio_reader_container',
         namespace='',
@@ -37,10 +38,7 @@ def generate_launch_description():
                 package='gpio_reader',
                 plugin='gpio_reader::GpioReaderComponent',
                 name='gpio_reader_node',
-                parameters=[
-                    LaunchConfiguration('config_file'),
-                    {'use_sim_time': LaunchConfiguration('use_sim_time')}
-                ],
+                parameters=[LaunchConfiguration('config_file')],
                 extra_arguments=[{'use_intra_process_comms': True}]
             ),
         ],

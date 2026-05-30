@@ -16,30 +16,18 @@ def generate_launch_description():
     # 設定ファイルのパス
     config_file = os.path.join(package_dir, 'config', 'joy_axis_drive_params.yaml')
 
-    # Launch引数を定義
+    # config_file が Single Source of Truth。serial_port 等の個別 arg は廃止。
     config_file_arg = DeclareLaunchArgument(
         'config_file',
         default_value=config_file,
-        description='Path to the configuration file'
+        description='Path to the joy axis drive configuration YAML'
     )
 
-    serial_port_arg = DeclareLaunchArgument(
-        'serial_port',
-        default_value='/dev/ttyACM0',
-        description='Serial port for motor communication'
-    )
-
-    # JoyAxisDriveComponentノードを起動
     joy_axis_drive_node = Node(
         package='motor_control_app',
         executable='joy_axis_drive_node',
         name='joy_axis_drive',
-        parameters=[
-            LaunchConfiguration('config_file'),
-            {
-                'serial_port': LaunchConfiguration('serial_port')
-            }
-        ],
+        parameters=[LaunchConfiguration('config_file')],
         output='screen',
         emulate_tty=True,
         respawn=True,
@@ -48,6 +36,5 @@ def generate_launch_description():
 
     return LaunchDescription([
         config_file_arg,
-        serial_port_arg,
         joy_axis_drive_node,
     ])

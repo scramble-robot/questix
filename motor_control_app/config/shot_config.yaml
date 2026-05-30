@@ -1,5 +1,8 @@
 shot_component:
   ros__parameters:
+    # Joy input topic
+    joy_topic: "/joy"
+
     port: "/dev/servo"
     baudrate: 115200
     pan_servo_id: 11

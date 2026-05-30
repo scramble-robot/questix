@@ -1,0 +1,11 @@
+# joy パッケージ (joy_node) 用パラメータ
+# joy_controller.launch.py から参照する。Single Source of Truth。
+joy_node:
+  ros__parameters:
+    use_sim_time: false
+    # ジョイスティックデバイス
+    dev: "/dev/input/js0"
+    # ステック中央付近の不感帯 (0.0-1.0)
+    deadzone: 0.05
+    # ボタン/軸の自動再送レート (Hz)
+    autorepeat_rate: 20.0

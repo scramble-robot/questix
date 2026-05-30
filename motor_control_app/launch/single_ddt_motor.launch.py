@@ -4,56 +4,38 @@
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
+    # config_file は YAML を Single Source of Truth として読み込む。
+    # 個別のパラメータ launch 引数は廃止。値を変えたい場合は YAML を編集するか、
+    # 別 YAML を `config_file:=...` で指定すること。
+    config_file_arg = DeclareLaunchArgument(
+        'config_file',
+        default_value=PathJoinSubstitution([
+            FindPackageShare('motor_control_app'),
+            'config',
+            'single_ddt_motor_config.yaml',
+        ]),
+        description='Path to the single DDT motor configuration YAML',
+    )
+
+    single_ddt_motor_node = Node(
+        package='motor_control_app',
+        executable='single_ddt_motor_node',
+        name='single_ddt_motor_node',
+        output='screen',
+        parameters=[LaunchConfiguration('config_file')],
+        remappings=[
+            ('cmd_vel', '/cmd_vel'),
+            ('motor_status', '/motor_status'),
+        ],
+    )
+
     return LaunchDescription([
-        # Launch arguments
-        DeclareLaunchArgument(
-            'serial_port',
-            default_value='/dev/ttyACM0',
-            description='Serial port for DDT motor communication'
-        ),
-
-        DeclareLaunchArgument(
-            'motor_id',
-            default_value='4',
-            description='DDT motor ID'
-        ),
-
-        DeclareLaunchArgument(
-            'max_motor_rpm',
-            default_value='30',
-            description='Maximum motor RPM'
-        ),
-
-        DeclareLaunchArgument(
-            'velocity_scale_factor',
-            default_value='5.0',
-            description='Scale factor to convert linear velocity (m/s) to RPM'
-        ),
-
-        # Single DDT Motor Component Node
-        Node(
-            package='motor_control_app',
-            executable='single_ddt_motor_node',
-            name='single_ddt_motor_node',
-            output='screen',
-            parameters=[{
-                'serial_port': LaunchConfiguration('serial_port'),
-                'motor_id': LaunchConfiguration('motor_id'),
-                'max_motor_rpm': LaunchConfiguration('max_motor_rpm'),
-                'velocity_scale_factor': LaunchConfiguration('velocity_scale_factor'),
-                'baud_rate': 57600,
-                'wheel_radius': 0.1,
-                'status_publish_rate': 5.0,
-                'watchdog_timeout': 1.0
-            }],
-            remappings=[
-                ('cmd_vel', '/cmd_vel'),
-                ('motor_status', '/motor_status')
-            ]
-        )
+        config_file_arg,
+        single_ddt_motor_node,
     ])

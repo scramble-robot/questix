@@ -1,27 +1,24 @@
 <?xml version="1.0"?>
+<!--
+GPIO Reader component-container launch (XML)
+パラメータは gpio_reader.yaml が Single Source of Truth。
+-->
 <launch>
-  <!-- Launch arguments -->
-  <arg name="config_file" 
-       default="$(find-pkg-share gpio_reader)/config/gpio_reader.yaml" 
+  <arg name="config_file"
+       default="$(find-pkg-share gpio_reader)/config/gpio_reader.yaml"
        description="Path to the GPIO reader configuration file" />
-  <arg name="use_sim_time" 
-       default="false" 
-       description="Use simulation time" />
 
   <!-- GPIO Reader Container -->
-  <node pkg="rclcpp_components" 
-        exec="component_container" 
-        name="gpio_reader_container" 
-        output="screen">
-    <param name="use_sim_time" value="$(var use_sim_time)" />
-  </node>
+  <node pkg="rclcpp_components"
+        exec="component_container"
+        name="gpio_reader_container"
+        output="screen" />
 
   <!-- Load GPIO Reader Component -->
-  <node pkg="ros2component" 
-        exec="load" 
-        name="gpio_reader_loader" 
+  <node pkg="ros2component"
+        exec="load"
+        name="gpio_reader_loader"
         args="gpio_reader_container gpio_reader gpio_reader::GpioReaderComponent">
     <param from="$(var config_file)" />
-    <param name="use_sim_time" value="$(var use_sim_time)" />
   </node>
 </launch>
