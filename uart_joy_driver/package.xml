@@ -5,7 +5,7 @@
     <version>0.1.0</version>
     <description>UART serial joystick driver for Switch-style controllers. Reads 7-byte hex protocol from UART and publishes sensor_msgs/Joy.</description>
     <maintainer email="aki.grade2580@outlook.jp">asa-naki</maintainer>
-    <license>Apache License 2.0</license>
+    <license>MIT</license>
 
     <buildtool_depend>ament_cmake_auto</buildtool_depend>
 

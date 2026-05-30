@@ -4,7 +4,7 @@
   <version>0.0.0</version>
   <description>Determine whether GPIO IO is controllable by subscribing to GPIO topics.</description>
   <maintainer email="aki.grade2580@outlook.jp">asa-naki</maintainer>
-  <license>Apache-2.0</license>
+  <license>MIT</license>
 
   <buildtool_depend>ament_cmake_auto</buildtool_depend>
   <depend>rclcpp</depend>
