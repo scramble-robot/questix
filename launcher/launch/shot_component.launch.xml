@@ -1,9 +1,18 @@
 <launch>
   <!-- Launch Arguments -->
-
-  <arg name="shot_config_file" default="$(find-pkg-share motor_control_app)/config/shot_config.yaml" description="Configuration file path" />
+  <arg name="controller_type" default="dualshock" description="Controller type: dualshock or uart" />
   <arg name="enable_gpio_ref" default="false" description="Enable GPIO reference system (gpio_reader + joy_gate)" />
   <arg name="use_sim_time" default="false" description="Use simulation time" />
+
+  <!-- Per-controller YAML profiles (auto-selected from controller_type).
+       Override shot_config_file / esc_config_file to bypass selection. -->
+  <arg name="shot_config_file"
+       default="$(find-pkg-share motor_control_app)/config/shot_config.$(var controller_type).yaml"
+       description="Shot component YAML (defaults to controller-specific profile)" />
+  <arg name="esc_config_file"
+       default="$(find-pkg-share esc_motor_control_cpp)/config/esc_motor_control_cpp.$(var controller_type).yaml"
+       description="ESC motor control YAML (defaults to controller-specific profile)" />
+
   <!-- joy topic selection based on enable_gpio_ref -->
   <let name="joy_topic_name" value="/joy_gated" if="$(var enable_gpio_ref)" />
   <let name="joy_topic_name" value="/joy" unless="$(var enable_gpio_ref)" />
@@ -16,6 +25,7 @@
 
   <!-- ESC Motor Control (C++) -->
   <include file="$(find-pkg-share esc_motor_control_cpp)/launch/esc_motor_control_cpp.launch.xml">
+    <arg name="config_file" value="$(var esc_config_file)"/>
     <arg name="joy_topic" value="$(var joy_topic_name)"/>
   </include>
 </launch>

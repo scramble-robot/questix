@@ -1,0 +1,28 @@
+esc_motor_control:
+  ros__parameters:
+    use_sim_time: false
+    joy_topic: "/joy"
+
+    pwm_pin: 13
+
+    min_pulse_width: 0
+    max_pulse_width: 2000
+    neutral_pulse_width: 1000
+
+    max_speed: 1.0
+    min_speed: -1.0
+
+    # Roller spin button / ローラー回転ボタン
+    # Switch2 (uart_joy_driver) native index: ZR = 7
+    full_speed_button: 7
+    full_speed_value: 1.0
+
+    status_topic: "/roller_motor_status"
+    emergency_status_topic: "/roller_emergency_status"
+
+    enable_safety_stop: true
+    safety_timeout: 1.0
+
+    test_mode: false
+    pwm_backend: "auto"
+    gpio_chip_num: 4

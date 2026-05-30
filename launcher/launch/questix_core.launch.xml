@@ -12,6 +12,7 @@
   <group if="$(var enable_shot)">
     <include file="$(find-pkg-share questix_launcher)/launch/shot_component.launch.xml">
       <arg name="enable_gpio_ref" value="$(var enable_gpio_ref)"/>
+      <arg name="controller_type" value="$(var controller_type)"/>
     </include>
   </group>
 

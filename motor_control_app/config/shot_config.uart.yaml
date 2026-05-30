@@ -1,0 +1,22 @@
+shot_component:
+  ros__parameters:
+    # Joy input topic
+    joy_topic: "/joy"
+
+    port: "/dev/servo"
+    baudrate: 115200
+    pan_servo_id: 11
+    trigger_servo_id: 10
+    # Disc fire button / ディスク射出ボタン
+    # Switch2 (uart_joy_driver) native index: R = 5
+    fire_button: 5
+    fire_duration_ms: 300
+    # Pan input mode
+    # Switch2: D-pad vertical = axis 7
+    pan_axis: 7
+    # Switch2 native indices: L = 4 (up), ZL = 6 (down)
+    pan_up_button_index: 4
+    pan_down_button_index: 6
+    fire_angle: 145.0
+    home_angle: 245.0
+    pan_max_angle: 120.0
