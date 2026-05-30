@@ -16,7 +16,7 @@ def generate_launch_description():
     # 設定ファイルのパス
     config_file = os.path.join(pkg_dir, 'config', 'shot_config.yaml')
 
-    fire_button_arg = DeclareLaunchArgument(
+    config_file_arg = DeclareLaunchArgument(
         'config_file',
         default_value=config_file,
         description='Path to the shot component configuration YAML'
@@ -43,7 +43,7 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        fire_button_arg,
+        config_file_arg,
         joy_topic_arg,
         shot_component_node
     ])

@@ -50,7 +50,7 @@ GPIO ref モードでは joy_topic = /joy_gated をデフォルトとする (唯
     </node>
 
     <!-- Joy controller dual stick node (dual stick mode) -->
-    <node pkg="joy_controller" exec="joy_controller_dual_stick_node" name="joy_controller_dual_stick" output="screen" if="$(var dual_stick)">
+    <node pkg="joy_controller" exec="joy_controller_dual_stick_node" name="joy_controller" output="screen" if="$(var dual_stick)">
         <param from="$(var config_file)" />
         <param name="joy_topic" value="$(var joy_topic)" />
     </node>

@@ -8,17 +8,16 @@ GPIO Reader component-container launch (XML)
        default="$(find-pkg-share gpio_reader)/config/gpio_reader.yaml"
        description="Path to the GPIO reader configuration file" />
 
-  <!-- GPIO Reader Container -->
-  <node pkg="rclcpp_components"
-        exec="component_container"
-        name="gpio_reader_container"
-        output="screen" />
-
-  <!-- Load GPIO Reader Component -->
-  <node pkg="ros2component"
-        exec="load"
-        name="gpio_reader_loader"
-        args="gpio_reader_container gpio_reader gpio_reader::GpioReaderComponent">
-    <param from="$(var config_file)" />
-  </node>
+  <node_container pkg="rclcpp_components"
+                  exec="component_container"
+                  name="gpio_reader_container"
+                  namespace=""
+                  output="screen">
+    <composable_node pkg="gpio_reader"
+                     plugin="gpio_reader::GpioReaderComponent"
+                     name="gpio_reader_node">
+      <param from="$(var config_file)" />
+      <extra_arg name="use_intra_process_comms" value="true" />
+    </composable_node>
+  </node_container>
 </launch>
