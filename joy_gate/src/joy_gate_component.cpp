@@ -34,7 +34,8 @@ JoyGateComponent::JoyGateComponent(const rclcpp::NodeOptions& options)
       std::bind(&JoyGateComponent::joy_input_callback, this, std::placeholders::_1));
 
   // Publish gated joy messages
-  joy_output_pub_ = this->create_publisher<sensor_msgs::msg::Joy>(joy_output_topic_, rclcpp::QoS(1));
+  joy_output_pub_ =
+      this->create_publisher<sensor_msgs::msg::Joy>(joy_output_topic_, rclcpp::QoS(1));
 
   RCLCPP_INFO(this->get_logger(), "Joy Gate Node initialized");
   RCLCPP_INFO(this->get_logger(), "Subscribing to: %s, %s", gpio_controllable_topic_.c_str(),

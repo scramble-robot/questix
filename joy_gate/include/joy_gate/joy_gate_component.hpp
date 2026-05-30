@@ -3,10 +3,10 @@
 #pragma once
 
 #include <memory>
-#include <string>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/joy.hpp>
 #include <std_msgs/msg/bool.hpp>
+#include <string>
 
 namespace joy_gate {
 
