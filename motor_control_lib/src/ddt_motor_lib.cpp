@@ -381,19 +381,22 @@ bool DdtMotorLib::sendMotorCurrentRaw(int motor_id, int16_t current_raw) {
   // Protocol 1 (0x64) を電流指令として送信。
   // 仕様: DATA[2]=指令上位, DATA[3]=指令下位（電流モードでは -32767..32767 が -8A..8A）
   // 電流モードでは acceleration / brake バイトは無効。
-  // ※ 既存 sendMotorVelocity がリトルエンディアン (low,high) で実機動作している実績に合わせ、
-  //   こちらも (low,high) で送る。実機挙動が逆なら入替えること。
-  uint8_t cur_low = static_cast<uint8_t>(current_raw & 0xFF);
+  // マルチバイトは big-endian (high, low)。
   uint8_t cur_high = static_cast<uint8_t>((current_raw >> 8) & 0xFF);
+  uint8_t cur_low = static_cast<uint8_t>(current_raw & 0xFF);
 
   std::vector<uint8_t> data_fields = {
-      static_cast<uint8_t>(motor_id), 0x64, cur_low, cur_high, 0, 0, 0, 0, 0};
+      static_cast<uint8_t>(motor_id), 0x64, cur_high, cur_low, 0, 0, 0, 0, 0};
   uint8_t crc = crc8Maxim(data_fields);
   data_fields.push_back(crc);
 
   if (serial_fd_ < 0) {
     return false;
   }
+
+  // 送信前に入力バッファをクリア: 前サイクルの未取応答や遷移ゴミでの
+  // フレーム同期ずれを防ぐ（CRC 不一致ログの主原因対策）。
+  tcflush(serial_fd_, TCIFLUSH);
 
   // 書込: 応答待ちで代替するため sleep は入れない。応答が来なければリトライ最大2回。
   for (int attempt = 0; attempt < 3; ++attempt) {
@@ -510,7 +513,18 @@ bool DdtMotorLib::readFeedbackFrame(int expected_motor_id, std::vector<uint8_t>&
       }
       out_frame.push_back(buf[i]);
       if (out_frame.size() >= 10) {
-        break;
+        // 10バイト揃った段階で CRC を検証し、失敗なら先頭 1バイトを捨てて
+        // 残りを保持したまま再同期を試みる（スライド同期）。
+        std::vector<uint8_t> payload(out_frame.begin(), out_frame.begin() + 9);
+        if (crc8Maxim(payload) == out_frame[9]) {
+          return true;
+        }
+        out_frame.erase(out_frame.begin());
+        // 残りに先頭以外の expected_motor_id以外バイトが先頭に来ていたらそこまで捨てる
+        while (!out_frame.empty() && out_frame.front() != static_cast<uint8_t>(expected_motor_id)) {
+          out_frame.erase(out_frame.begin());
+        }
+        // ループを続けて不足分を読む
       }
     }
   }
@@ -524,7 +538,7 @@ bool DdtMotorLib::parseFeedback(int expected_motor_id, const std::vector<uint8_t
   if (frame[0] != static_cast<uint8_t>(expected_motor_id)) {
     return false;
   }
-  // CRC8 検証
+  // CRC8 検証（readFeedbackFrame 側でも検証済みだが、二重ガード）
   std::vector<uint8_t> payload(frame.begin(), frame.begin() + 9);
   uint8_t expected_crc = crc8Maxim(payload);
   if (expected_crc != frame[9]) {
