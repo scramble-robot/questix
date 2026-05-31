@@ -130,6 +130,13 @@ if [ "${INSTALL_GUI}" = true ]; then
     install -o "${TARGET_USER}" -g "${TARGET_USER}" -m 0755 \
       "${REPO_DIR}/systemd/questix_robot_manager.desktop" "${DESKTOP_DIR}/"
     echo "  -> Desktop shortcut created"
+    # Mark as trusted so GNOME allows launching without manual permission grant
+    if command -v gio &>/dev/null; then
+      su -s /bin/bash -c \
+        "gio set '${DESKTOP_DIR}/questix_robot_manager.desktop' metadata::trusted true" \
+        "${TARGET_USER}" 2>/dev/null || true
+      echo "  -> Desktop shortcut marked as trusted"
+    fi
   fi
 else
   echo "[5/5] Skipping Robot Manager Web UI (use --with-gui to install)"

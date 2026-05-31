@@ -22,6 +22,36 @@
       - python3-argcomplete
 
   pre_tasks:
+    - name: Get connection user (no become)
+      ansible.builtin.command: whoami
+      register: conn_user_whoami
+      become: false
+      changed_when: false
+
+    - name: Set connection user fact
+      ansible.builtin.set_fact:
+        conn_user_name: "{{ conn_user_whoami.stdout }}"
+
+    - name: Look up connection user home directory via getent
+      ansible.builtin.getent:
+        database: passwd
+        key: "{{ conn_user_name }}"
+
+    - name: Set connection user home directory fact
+      ansible.builtin.set_fact:
+        conn_user_home: "{{ ansible_facts.getent_passwd[conn_user_name][4] }}"
+
+    - name: Ensure connection user home is under /home
+      ansible.builtin.assert:
+        that:
+          - conn_user_home is defined
+          - conn_user_home is match('^/home/.+')
+        fail_msg: >-
+          conn_user_home must be under /home/. Got: {{ conn_user_home | default('<undefined>') }}
+          (user: {{ conn_user_name }}). Run this playbook as a regular user (with sudo for become),
+          not as root.
+        success_msg: "Connection user home resolved: {{ conn_user_home }} ({{ conn_user_name }})"
+
     - name: Verify target architecture
       ansible.builtin.assert:
         that:
@@ -52,9 +82,7 @@
   roles:
     - role: ros2_installation
       vars:
-        ros2_distro: "{{ ros2_distro }}"
         ros2_install_dev_tools: "{{ install_dev_tools }}"
-        ros2_additional_packages: "{{ ros2_additional_packages }}"
 
   post_tasks:
     - name: Install development utilities
@@ -73,18 +101,9 @@
         state: present
         update_cache: true
 
-    - name: Create development workspace directory
-      ansible.builtin.file:
-        path: "{{ ansible_env.HOME }}/ros2_ws/src"
-        state: directory
-        owner: "{{ ansible_user | default(ansible_env.USER) }}"
-        group: "{{ ansible_user | default(ansible_env.USER) }}"
-        mode: "0755"
-      become: false
-
     - name: Add ROS2 workspace setup to bashrc
       ansible.builtin.lineinfile:
-        path: "{{ ansible_env.HOME }}/.bashrc"
+        path: "{{ conn_user_home }}/.bashrc"
         line: "{{ item }}"
         state: present
         create: true
@@ -92,7 +111,7 @@
       loop:
         - "# ROS2 Development Environment"
         - "export ROS_DOMAIN_ID=42"
-        - "export COLCON_WS={{ ansible_env.HOME }}/ros2_ws"
+        - "export COLCON_WS={{ conn_user_home }}/ros2_ws"
         - "alias cw='cd $COLCON_WS'"
         - "alias cs='cd $COLCON_WS/src'"
         - "alias cb='cd $COLCON_WS && colcon build'"
@@ -102,11 +121,10 @@
       ansible.builtin.debug:
         msg:
           - "✅ ROS2 development environment setup completed!"
-          - "🏗️  Workspace created at: {{ ansible_env.HOME }}/ros2_ws"
           - "🔧 Development tools installed"
-          - "📝 Environment aliases added to .bashrc"
+          - "📝 Environment aliases added to ~/.bashrc for {{ conn_user_name }}"
           - ""
           - "Next steps:"
           - "1. Source your bashrc: source ~/.bashrc"
-          - "2. Navigate to workspace: cw"
+          - "2. Create your workspace: mkdir -p ~/ros2_ws/src"
           - "3. Test installation: ros2 topic list"

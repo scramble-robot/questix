@@ -80,3 +80,10 @@
     mode: "0755"
   become: false
   failed_when: false
+
+- name: Mark desktop shortcut as trusted (GNOME)
+  ansible.builtin.command:
+    cmd: gio set "/home/{{ target_user }}/Desktop/questix_robot_manager.desktop" metadata::trusted true
+  become: false
+  failed_when: false
+  changed_when: false
