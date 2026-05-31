@@ -101,7 +101,7 @@ the kit playbook against `localhost`.
 4. **Run the setup script**
 
    ```bash
-   ./setup.sh
+   bash setup.sh
    ```
 
    This runs `ansible-playbook ansible/playbooks/setup_kit.yaml` locally and
