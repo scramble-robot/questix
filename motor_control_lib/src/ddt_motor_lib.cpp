@@ -20,6 +20,7 @@ DdtMotorLib::DdtMotorLib(const std::string& serial_port, int baud_rate)
       current_ki_(0.02),
       max_current_amp_(2.0),
       integral_limit_amp_(1.5),
+      current_zero_deadband_rpm_(5),
       serial_fd_(-1) {
   logger_ = rclcpp::get_logger("DdtMotorLib");
 }
@@ -104,6 +105,23 @@ bool DdtMotorLib::setMotorVelocity(int motor_id, int velocity_rpm) {
   motor_velocities_[motor_id] = rpm_ref;
 
   if (mode == ControlMode::Current) {
+    // 静止デッドバンド: ref=0 かつ実測がノイズ帯内なら、PI を走らず raw=0 を送る。
+    // これがないと measured の量子化ノイズを積分が拾い、静止時にトルクが出て微振動する。
+    if (rpm_ref == 0) {
+      int measured_rpm = 0;
+      auto fb_it = motor_feedbacks_.find(motor_id);
+      if (fb_it != motor_feedbacks_.end()) {
+        measured_rpm = static_cast<int>(fb_it->second.speed);
+      }
+      if (std::abs(measured_rpm) <= current_zero_deadband_rpm_) {
+        auto pi_it = pi_states_.find(motor_id);
+        if (pi_it != pi_states_.end()) {
+          pi_it->second.integral_amp = 0.0;
+          pi_it->second.has_last_t = false;
+        }
+        return sendMotorCurrentRaw(motor_id, 0);
+      }
+    }
     int16_t current_raw = runCurrentLoopStep(motor_id, rpm_ref);
     return sendMotorCurrentRaw(motor_id, current_raw);
   }
@@ -329,6 +347,11 @@ void DdtMotorLib::setCurrentControlParams(double kp, double ki, double max_curre
   RCLCPP_INFO(logger_,
               "電流制御パラメータ更新: Kp=%.4f, Ki=%.4f, max_current=%.2fA, integral_limit=%.2fA",
               current_kp_, current_ki_, max_current_amp_, integral_limit_amp_);
+}
+
+void DdtMotorLib::setCurrentZeroDeadbandRpm(int deadband_rpm) {
+  current_zero_deadband_rpm_ = std::max(0, deadband_rpm);
+  RCLCPP_INFO(logger_, "電流モード ゼロ近傍デッドバンド: %d RPM", current_zero_deadband_rpm_);
 }
 
 bool DdtMotorLib::sendMotorVelocity(int motor_id, int velocity_rpm) {

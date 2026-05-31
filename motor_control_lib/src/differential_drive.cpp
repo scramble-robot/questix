@@ -21,6 +21,14 @@ bool DifferentialDrive::setVelocity(double linear_x, double angular_z) {
     return false;
   }
 
+  // ゼロ twist は stopMotor 経路へ。これにより current モードの PI 積分が確実にリセットされる。
+  if (linear_x == 0.0 && angular_z == 0.0) {
+    bool success = true;
+    success &= motor_lib_->stopMotor(left_motor_id_);
+    success &= motor_lib_->stopMotor(right_motor_id_);
+    return success;
+  }
+
   auto [left_rpm, right_rpm] = twistToMotorVelocities(linear_x, angular_z);
 
   RCLCPP_DEBUG(rclcpp::get_logger("DifferentialDrive"),

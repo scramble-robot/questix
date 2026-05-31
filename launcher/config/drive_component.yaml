@@ -21,6 +21,7 @@ drive_component:
     current_ki: 0.02            # [A/(rpm·s)] 積分ゲイン
     max_current_amp: 2.0        # [A] 電流指令の絶対値上限（安全クランプ）
     integral_limit_amp: 1.5     # [A] 積分項寄与の絶対値上限（アンチワインドアップ）
+    current_zero_deadband_rpm: 5  # [RPM] 目標0かつ実測がこの範囲内ならPIを停止して積分リセット（静止時の微振動防止）
 
     # パブリッシュ設定
     status_publish_rate: 10.0 # ステータスパブリッシュ頻度 [Hz]

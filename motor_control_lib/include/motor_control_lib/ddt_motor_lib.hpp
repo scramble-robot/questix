@@ -74,6 +74,13 @@ public:
   void setCurrentControlParams(double kp, double ki, double max_current_amp,
                                double integral_limit_amp);
 
+  /**
+   * @brief Current モードのゼロ近傍デッドバンド設定
+   *  - 目標 RPM が 0 かつ実測 RPM の絶対値が deadband_rpm 以下のとき、PI を停止し
+   *    電流指令を 0、積分項をリセットする（静止時の微振動防止）。
+   */
+  void setCurrentZeroDeadbandRpm(int deadband_rpm);
+
   // DDT motor control methods (deprecated - use IIndividualMotor interface)
 
   // Multi-motor status
@@ -115,6 +122,7 @@ private:
   double current_ki_;
   double max_current_amp_;
   double integral_limit_amp_;
+  int current_zero_deadband_rpm_;  // 静止デッドバンド [RPM]
 
   // Serial communication
   int serial_fd_;

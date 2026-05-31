@@ -66,6 +66,7 @@ void DriveComponent::initializeParameters() {
   this->declare_parameter("current_ki", 0.02);
   this->declare_parameter("max_current_amp", 2.0);
   this->declare_parameter("integral_limit_amp", 1.5);
+  this->declare_parameter("current_zero_deadband_rpm", 5);
 
   // パラメータを取得
   serial_port_ = this->get_parameter("serial_port").as_string();
@@ -82,6 +83,7 @@ void DriveComponent::initializeParameters() {
   current_ki_ = this->get_parameter("current_ki").as_double();
   max_current_amp_ = this->get_parameter("max_current_amp").as_double();
   integral_limit_amp_ = this->get_parameter("integral_limit_amp").as_double();
+  current_zero_deadband_rpm_ = this->get_parameter("current_zero_deadband_rpm").as_int();
 
   RCLCPP_INFO(this->get_logger(), "Parameters initialized:");
   RCLCPP_INFO(this->get_logger(), "  serial_port: %s", serial_port_.c_str());
@@ -98,6 +100,7 @@ void DriveComponent::initializeParameters() {
     RCLCPP_INFO(this->get_logger(),
                 "  current_kp: %.4f  current_ki: %.4f  max_current_amp: %.2f  integral_limit_amp: %.2f",
                 current_kp_, current_ki_, max_current_amp_, integral_limit_amp_);
+    RCLCPP_INFO(this->get_logger(), "  current_zero_deadband_rpm: %d", current_zero_deadband_rpm_);
   }
 }
 
@@ -124,6 +127,7 @@ bool DriveComponent::initializeMotorLib() {
       mode = motor_control_lib::ControlMode::Current;
       motor_lib_->setCurrentControlParams(current_kp_, current_ki_, max_current_amp_,
                                           integral_limit_amp_);
+      motor_lib_->setCurrentZeroDeadbandRpm(current_zero_deadband_rpm_);
     } else if (control_mode_ != "velocity") {
       RCLCPP_WARN(this->get_logger(),
                   "未知の control_mode '%s' - velocity モードにフォールバック",

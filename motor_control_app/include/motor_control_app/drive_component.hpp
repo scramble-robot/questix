@@ -83,6 +83,7 @@ private:
   double current_ki_;
   double max_current_amp_;
   double integral_limit_amp_;
+  int current_zero_deadband_rpm_;
 
   // 状態フラグ
   bool motor_initialized_;
