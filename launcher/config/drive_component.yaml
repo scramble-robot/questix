@@ -22,6 +22,7 @@ drive_component:
     max_current_amp: 1.0        # [A] 電流指令の絶対値上限（安全クランプ）
     integral_limit_amp: 0.3     # [A] 積分項寄与の絶対値上限（アンチワインドアップ）
     current_zero_deadband_rpm: 5  # [RPM] 目標0かつ実測がこの範囲内ならPIを停止して積分リセット（静止時の微振動防止）
+    current_invert_measured: true # PI内でmeasured RPMを符号反転（指令と測定の物理符号が逆=正帰還になっている場合のみtrue）
 
     # パブリッシュ設定
     status_publish_rate: 10.0 # ステータスパブリッシュ頻度 [Hz]

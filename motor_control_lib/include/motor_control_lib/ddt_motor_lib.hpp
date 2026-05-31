@@ -81,6 +81,12 @@ public:
    */
   void setCurrentZeroDeadbandRpm(int deadband_rpm);
 
+  /**
+   * @brief Current モード PI 内で measured RPM を符号反転するか設定。
+   *  指令とフィードバックの物理符号が逆だと正帰還となり発振するため、その補正用。
+   */
+  void setCurrentInvertMeasured(bool invert);
+
   // DDT motor control methods (deprecated - use IIndividualMotor interface)
 
   // Multi-motor status
@@ -123,6 +129,7 @@ private:
   double max_current_amp_;
   double integral_limit_amp_;
   int current_zero_deadband_rpm_;  // 静止デッドバンド [RPM]
+  bool current_invert_measured_;   // measured RPM 符号反転（正帰還押さえ用）
 
   // Serial communication
   int serial_fd_;

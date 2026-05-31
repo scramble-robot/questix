@@ -21,6 +21,7 @@ DdtMotorLib::DdtMotorLib(const std::string& serial_port, int baud_rate)
       max_current_amp_(2.0),
       integral_limit_amp_(1.5),
       current_zero_deadband_rpm_(5),
+      current_invert_measured_(false),
       serial_fd_(-1) {
   logger_ = rclcpp::get_logger("DdtMotorLib");
 }
@@ -354,6 +355,11 @@ void DdtMotorLib::setCurrentZeroDeadbandRpm(int deadband_rpm) {
   RCLCPP_INFO(logger_, "電流モード ゼロ近傍デッドバンド: %d RPM", current_zero_deadband_rpm_);
 }
 
+void DdtMotorLib::setCurrentInvertMeasured(bool invert) {
+  current_invert_measured_ = invert;
+  RCLCPP_INFO(logger_, "電流モード measured符号反転: %s", invert ? "ON" : "OFF");
+}
+
 bool DdtMotorLib::sendMotorVelocity(int motor_id, int velocity_rpm) {
   int velocity_int = std::clamp(velocity_rpm, -max_motor_rpm_, max_motor_rpm_);
 
@@ -443,6 +449,9 @@ int16_t DdtMotorLib::runCurrentLoopStep(int motor_id, int rpm_ref) {
   auto fb_it = motor_feedbacks_.find(motor_id);
   if (fb_it != motor_feedbacks_.end()) {
     measured_rpm = static_cast<int>(fb_it->second.speed);
+  }
+  if (current_invert_measured_) {
+    measured_rpm = -measured_rpm;
   }
 
   double error = static_cast<double>(rpm_ref - measured_rpm);
