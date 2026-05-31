@@ -32,9 +32,8 @@ jobs:
 
             - name: Run ansible-lint
               run: |
-                  cd ansible
-                  ansible-lint playbooks/setup_kit.yaml
-                  ansible-lint playbooks/setup_dev.yaml
+                  ansible-lint ansible/playbooks/setup_kit.yaml
+                  ansible-lint ansible/playbooks/setup_dev.yaml
               continue-on-error: true
 
     ansible-syntax-check:
@@ -56,9 +55,8 @@ jobs:
 
             - name: Run ansible syntax check
               run: |
-                  cd ansible
-                  ansible-playbook playbooks/setup_kit.yaml --syntax-check -i localhost,
-                  ansible-playbook playbooks/setup_dev.yaml --syntax-check -i localhost,
+                  ansible-playbook ansible/playbooks/setup_kit.yaml --syntax-check -i localhost,
+                  ansible-playbook ansible/playbooks/setup_dev.yaml --syntax-check -i localhost,
 
     ansible-dry-run:
         name: Ansible Dry Run (Check Mode)
@@ -84,8 +82,7 @@ jobs:
 
             - name: Run ansible-playbook in check mode
               run: |
-                  cd ansible
-                  ansible-playbook playbooks/setup_kit.yaml \
+                  ansible-playbook ansible/playbooks/setup_kit.yaml \
                     -i localhost, \
                     --connection=local \
                     --check \
@@ -121,8 +118,7 @@ jobs:
             - name: Test playbook execution (with tags for minimal test)
               run: |
                   # 軽量なタスクのみを実行してplaybookの基本的な動作を確認
-                  cd ansible
-                  ansible-playbook playbooks/setup_kit.yaml \
+                  ansible-playbook ansible/playbooks/setup_kit.yaml \
                     -i localhost, \
                     --connection=local \
                     --limit localhost \
@@ -154,15 +150,13 @@ jobs:
 
             - name: Check ansible configuration
               run: |
-                  cd ansible
                   ansible --version
                   ansible-config dump --only-changed || true
 
             - name: Validate playbook structure
               run: |
-                  cd ansible
                   # Playbookの構造を検証
-                  ansible-playbook playbooks/setup_kit.yaml --list-tasks -i localhost,
-                  ansible-playbook playbooks/setup_kit.yaml --list-hosts -i localhost,
-                  ansible-playbook playbooks/setup_dev.yaml --list-tasks -i localhost,
-                  ansible-playbook playbooks/setup_dev.yaml --list-hosts -i localhost,
+                  ansible-playbook ansible/playbooks/setup_kit.yaml --list-tasks -i localhost,
+                  ansible-playbook ansible/playbooks/setup_kit.yaml --list-hosts -i localhost,
+                  ansible-playbook ansible/playbooks/setup_dev.yaml --list-tasks -i localhost,
+                  ansible-playbook ansible/playbooks/setup_dev.yaml --list-hosts -i localhost,
