@@ -410,7 +410,7 @@ bool DdtMotorLib::sendMotorCurrentRaw(int motor_id, int16_t current_raw) {
     fsync(serial_fd_);
 
     std::vector<uint8_t> frame;
-    if (readFeedbackFrame(motor_id, frame, /*timeout_ms=*/50)) {
+    if (readFeedbackFrame(motor_id, frame, /*timeout_ms=*/10)) {
       parseFeedback(motor_id, frame);
       RCLCPP_DEBUG(logger_, "モーター %d 電流指令: raw=%d", motor_id,
                    static_cast<int>(current_raw));
@@ -464,9 +464,9 @@ int16_t DdtMotorLib::runCurrentLoopStep(int motor_id, int rpm_ref) {
   int raw = static_cast<int>(std::lround(raw_d));
   raw = std::clamp(raw, -32767, 32767);
 
-  RCLCPP_DEBUG(logger_,
-               "PI motor=%d ref=%d meas=%d err=%.1f integ=%.3fA i_cmd=%.3fA raw=%d dt=%.4f",
-               motor_id, rpm_ref, measured_rpm, error, st.integral_amp, i_cmd_amp, raw, dt);
+  RCLCPP_INFO_THROTTLE(logger_, *rclcpp::Clock::make_shared(), 200,
+                       "PI motor=%d ref=%d meas=%d err=%.1f integ=%.3fA i_cmd=%.3fA raw=%d dt=%.4f",
+                       motor_id, rpm_ref, measured_rpm, error, st.integral_amp, i_cmd_amp, raw, dt);
   return static_cast<int16_t>(raw);
 }
 

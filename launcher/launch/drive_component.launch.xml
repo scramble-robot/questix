@@ -6,7 +6,7 @@ YAML を Single Source of Truth とし、個別パラメータの launch 引数�
 -->
 <launch>
   <arg name="joy_config_file" default="$(find-pkg-share joy_controller)/config/joy_controller_params.yaml" description="joy_controller configuration YAML" />
-  <arg name="drive_config_file" default="$(find-pkg-share motor_control_app)/config/drive_component.yaml" description="drive_component configuration YAML" />
+  <arg name="drive_config_file" default="$(find-pkg-share questix_launcher)/config/drive_component.yaml" description="drive_component configuration YAML" />
   <arg name="enable_gpio_ref" default="false" description="Enable GPIO reference system (gpio_reader + joy_gate)" />
   <arg name="controller_type" default="uart" description="Controller type: dualshock or uart" />
 
