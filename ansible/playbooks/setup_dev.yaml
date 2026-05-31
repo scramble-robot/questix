@@ -75,8 +75,8 @@
       ansible.builtin.file:
         path: "{{ ansible_user_dir }}/ros2_ws/src"
         state: directory
-        owner: "{{ ansible_user | default(ansible_env.USER) }}"
-        group: "{{ ansible_user | default(ansible_env.USER) }}"
+        owner: "{{ ansible_user_id }}"
+        group: "{{ ansible_user_id }}"
         mode: "0755"
       become: false
 
