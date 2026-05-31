@@ -534,15 +534,14 @@ bool DdtMotorLib::parseFeedback(int expected_motor_id, const std::vector<uint8_t
     return false;
   }
 
-  // Protocol 1 応答フォーマット:
+  // Protocol 1 応答フォーマット (DDT M0602C 仕様):
   //  DATA[1]=mode, DATA[2..3]=torque current, DATA[4..5]=speed (signed),
   //  DATA[6..7]=position, DATA[8]=fault code
-  // ※ 送信側がリトルエンディアン (low,high) で動作している実績に合わせ、応答も
-  //   リトルエンディアンとして解釈する。
+  // マルチバイトは big-endian (high, low)。
   MotorFeedback& fb = motor_feedbacks_[expected_motor_id];
   fb.mode = frame[1];
-  fb.current = static_cast<uint16_t>(frame[2] | (frame[3] << 8));
-  fb.speed = static_cast<int16_t>(frame[4] | (frame[5] << 8));
+  fb.current = static_cast<uint16_t>((frame[2] << 8) | frame[3]);
+  fb.speed = static_cast<int16_t>((frame[4] << 8) | frame[5]);
   // 位置はここでは使わないが、temperature 取得は Protocol 2 (0x74) が必要。
   // 暫定で前回値保持（既存挙動）。
   fb.fault_code = frame[8];
