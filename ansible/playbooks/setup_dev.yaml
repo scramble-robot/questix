@@ -22,6 +22,12 @@
       - python3-argcomplete
 
   pre_tasks:
+    - name: Capture connection user info before privilege escalation
+      ansible.builtin.set_fact:
+        conn_user_home: "{{ ansible_env.HOME }}"
+        conn_user_name: "{{ ansible_env.USER }}"
+      become: false
+
     - name: Verify target architecture
       ansible.builtin.assert:
         that:
@@ -73,16 +79,16 @@
 
     - name: Create development workspace directory
       ansible.builtin.file:
-        path: "{{ ansible_user_dir }}/ros2_ws/src"
+        path: "{{ conn_user_home }}/ros2_ws/src"
         state: directory
-        owner: "{{ ansible_user_id }}"
-        group: "{{ ansible_user_id }}"
+        owner: "{{ conn_user_name }}"
+        group: "{{ conn_user_name }}"
         mode: "0755"
       become: false
 
     - name: Add ROS2 workspace setup to bashrc
       ansible.builtin.lineinfile:
-        path: "{{ ansible_user_dir }}/.bashrc"
+        path: "{{ conn_user_home }}/.bashrc"
         line: "{{ item }}"
         state: present
         create: true
@@ -90,7 +96,7 @@
       loop:
         - "# ROS2 Development Environment"
         - "export ROS_DOMAIN_ID=42"
-        - "export COLCON_WS={{ ansible_user_dir }}/ros2_ws"
+        - "export COLCON_WS={{ conn_user_home }}/ros2_ws"
         - "alias cw='cd $COLCON_WS'"
         - "alias cs='cd $COLCON_WS/src'"
         - "alias cb='cd $COLCON_WS && colcon build'"
@@ -100,7 +106,7 @@
       ansible.builtin.debug:
         msg:
           - "✅ ROS2 development environment setup completed!"
-          - "🏗️  Workspace created at: {{ ansible_user_dir }}/ros2_ws"
+          - "🏗️  Workspace created at: {{ conn_user_home }}/ros2_ws"
           - "🔧 Development tools installed"
           - "📝 Environment aliases added to .bashrc"
           - ""
