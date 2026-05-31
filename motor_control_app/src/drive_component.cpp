@@ -10,7 +10,13 @@ using namespace std::chrono_literals;
 namespace motor_control_app {
 
 DriveComponent::DriveComponent(const rclcpp::NodeOptions& options)
-    : Node("drive_component", options), motor_initialized_(false), emergency_stop_active_(false) {
+    : Node("drive_component", options),
+      last_cmd_linear_(0.0),
+      last_cmd_angular_(0.0),
+      last_cmd_time_(0, 0, RCL_ROS_TIME),
+      has_last_cmd_(false),
+      motor_initialized_(false),
+      emergency_stop_active_(false) {
   RCLCPP_INFO(this->get_logger(), "Initializing Drive Component");
 
   // パラメータを初期化
@@ -68,6 +74,8 @@ void DriveComponent::initializeParameters() {
   this->declare_parameter("integral_limit_amp", 1.5);
   this->declare_parameter("current_zero_deadband_rpm", 5);
   this->declare_parameter("current_invert_measured", false);
+  this->declare_parameter("max_linear_accel", 0.0);
+  this->declare_parameter("max_angular_accel", 0.0);
 
   // パラメータを取得
   serial_port_ = this->get_parameter("serial_port").as_string();
@@ -86,6 +94,8 @@ void DriveComponent::initializeParameters() {
   integral_limit_amp_ = this->get_parameter("integral_limit_amp").as_double();
   current_zero_deadband_rpm_ = this->get_parameter("current_zero_deadband_rpm").as_int();
   current_invert_measured_ = this->get_parameter("current_invert_measured").as_bool();
+  max_linear_accel_ = this->get_parameter("max_linear_accel").as_double();
+  max_angular_accel_ = this->get_parameter("max_angular_accel").as_double();
 
   RCLCPP_INFO(this->get_logger(), "Parameters initialized:");
   RCLCPP_INFO(this->get_logger(), "  serial_port: %s", serial_port_.c_str());
@@ -171,15 +181,41 @@ void DriveComponent::twistCallback(const geometry_msgs::msg::Twist::SharedPtr ms
     return;
   }
 
+  // 加速度クランプ（スルーレート制限）。max_*_accel<=0 のとき無効。
+  double target_linear = msg->linear.x;
+  double target_angular = msg->angular.z;
+  rclcpp::Time now = this->now();
+  if (has_last_cmd_) {
+    double dt = (now - last_cmd_time_).seconds();
+    if (dt > 0.0 && dt < 1.0) {
+      if (max_linear_accel_ > 0.0) {
+        double max_delta = max_linear_accel_ * dt;
+        double delta = target_linear - last_cmd_linear_;
+        if (delta > max_delta) target_linear = last_cmd_linear_ + max_delta;
+        else if (delta < -max_delta) target_linear = last_cmd_linear_ - max_delta;
+      }
+      if (max_angular_accel_ > 0.0) {
+        double max_delta = max_angular_accel_ * dt;
+        double delta = target_angular - last_cmd_angular_;
+        if (delta > max_delta) target_angular = last_cmd_angular_ + max_delta;
+        else if (delta < -max_delta) target_angular = last_cmd_angular_ - max_delta;
+      }
+    }
+  }
+  last_cmd_linear_ = target_linear;
+  last_cmd_angular_ = target_angular;
+  last_cmd_time_ = now;
+  has_last_cmd_ = true;
+
   // 速度指令をモータライブラリに送信
-  if (!diff_drive_->setVelocity(msg->linear.x, msg->angular.z)) {
+  if (!diff_drive_->setVelocity(target_linear, target_angular)) {
     RCLCPP_ERROR_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
                           "Failed to set motor velocity");
     return;
   }
 
   RCLCPP_DEBUG(this->get_logger(), "Velocity command sent: linear=%.3f, angular=%.3f",
-               msg->linear.x, msg->angular.z);
+               target_linear, target_angular);
 }
 
 void DriveComponent::statusTimerCallback() {

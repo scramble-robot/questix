@@ -22,6 +22,7 @@ DdtMotorLib::DdtMotorLib(const std::string& serial_port, int baud_rate)
       integral_limit_amp_(1.5),
       current_zero_deadband_rpm_(5),
       current_invert_measured_(false),
+      current_max_accel_rpm_per_sec_(0.0),
       serial_fd_(-1) {
   logger_ = rclcpp::get_logger("DdtMotorLib");
 }
@@ -102,10 +103,36 @@ bool DdtMotorLib::setMotorVelocity(int motor_id, int velocity_rpm) {
   ControlMode mode = (mode_it != motor_modes_.end()) ? mode_it->second : ControlMode::Velocity;
 
   // 目標 RPM は常に max_motor_rpm_ でクランプ
-  int rpm_ref = std::clamp(velocity_rpm, -max_motor_rpm_, max_motor_rpm_);
-  motor_velocities_[motor_id] = rpm_ref;
+  int rpm_ref_raw = std::clamp(velocity_rpm, -max_motor_rpm_, max_motor_rpm_);
+  motor_velocities_[motor_id] = rpm_ref_raw;
 
   if (mode == ControlMode::Current) {
+    // スルーレート制限（加速度制限）: 目標 RPM を 1ステップあたり max_accel * dt だけ変化させる。
+    // これにより起動ステップ時の電流飽和を抑え、急加速を抑制する。
+    int rpm_ref = rpm_ref_raw;
+    if (current_max_accel_rpm_per_sec_ > 0.0) {
+      auto& st = pi_states_[motor_id];
+      auto now = std::chrono::steady_clock::now();
+      double dt = 0.01;
+      if (st.has_last_ref_t) {
+        dt = std::chrono::duration<double>(now - st.last_ref_t).count();
+        if (dt <= 0.0 || dt > 0.2) {
+          dt = 0.01;
+        }
+      } else {
+        st.ref_rpm_filtered = static_cast<double>(rpm_ref_raw);
+      }
+      st.last_ref_t = now;
+      st.has_last_ref_t = true;
+
+      double max_step = current_max_accel_rpm_per_sec_ * dt;
+      double delta = static_cast<double>(rpm_ref_raw) - st.ref_rpm_filtered;
+      if (delta > max_step) delta = max_step;
+      if (delta < -max_step) delta = -max_step;
+      st.ref_rpm_filtered += delta;
+      rpm_ref = static_cast<int>(std::lround(st.ref_rpm_filtered));
+    }
+
     // 静止デッドバンド: ref=0 かつ実測がノイズ帯内なら、PI を走らず raw=0 を送る。
     // これがないと measured の量子化ノイズを積分が拾い、静止時にトルクが出て微振動する。
     if (rpm_ref == 0) {
@@ -127,7 +154,7 @@ bool DdtMotorLib::setMotorVelocity(int motor_id, int velocity_rpm) {
     return sendMotorCurrentRaw(motor_id, current_raw);
   }
 
-  return sendMotorVelocity(motor_id, rpm_ref);
+  return sendMotorVelocity(motor_id, rpm_ref_raw);
 }
 
 bool DdtMotorLib::getMotorStatus(int motor_id, int& velocity_rpm, uint8_t& temperature,
@@ -175,7 +202,8 @@ bool DdtMotorLib::initializeMotor(int motor_id, ControlMode mode) {
   motor_modes_[motor_id] = mode;
   motor_velocities_[motor_id] = 0;
   motor_feedbacks_[motor_id] = MotorFeedback{};
-  pi_states_[motor_id] = PiState{0.0, 0, std::chrono::steady_clock::now(), false};
+  pi_states_[motor_id] = PiState{0.0, 0, std::chrono::steady_clock::now(), false,
+                                  0.0, std::chrono::steady_clock::now(), false};
 
   RCLCPP_INFO(logger_, "モーター %d が初期化されました (mode=%s)", motor_id,
               mode == ControlMode::Current ? "current" : "velocity");
@@ -358,6 +386,15 @@ void DdtMotorLib::setCurrentZeroDeadbandRpm(int deadband_rpm) {
 void DdtMotorLib::setCurrentInvertMeasured(bool invert) {
   current_invert_measured_ = invert;
   RCLCPP_INFO(logger_, "電流モード measured符号反転: %s", invert ? "ON" : "OFF");
+}
+
+void DdtMotorLib::setCurrentMaxAccelRpmPerSec(double rpm_per_sec) {
+  current_max_accel_rpm_per_sec_ = rpm_per_sec;
+  if (rpm_per_sec > 0.0) {
+    RCLCPP_INFO(logger_, "電流モード 加速度制限: %.1f RPM/s", rpm_per_sec);
+  } else {
+    RCLCPP_INFO(logger_, "電流モード 加速度制限: 無効");
+  }
 }
 
 bool DdtMotorLib::sendMotorVelocity(int motor_id, int velocity_rpm) {

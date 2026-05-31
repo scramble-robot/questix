@@ -87,6 +87,13 @@ public:
    */
   void setCurrentInvertMeasured(bool invert);
 
+  /**
+   * @brief Current モードの目標RPMスルーレート制限（加速度制限）
+   *  - 1秒あたりに許容する目標RPMの変化量を指定する。
+   *  - 0 以下の値で制限を無効化。
+   */
+  void setCurrentMaxAccelRpmPerSec(double rpm_per_sec);
+
   // DDT motor control methods (deprecated - use IIndividualMotor interface)
 
   // Multi-motor status
@@ -116,6 +123,9 @@ private:
     int16_t last_measured_rpm;                      // 直近のフィードバックRPM（受信失敗時の保持値）
     std::chrono::steady_clock::time_point last_t;  // 前回更新時刻
     bool has_last_t;                                // 初回判定
+    double ref_rpm_filtered;                        // スルーレート制限後の目標RPM
+    std::chrono::steady_clock::time_point last_ref_t;  // 前回 ref 更新時刻
+    bool has_last_ref_t;
   };
 
   // Configuration
@@ -130,6 +140,7 @@ private:
   double integral_limit_amp_;
   int current_zero_deadband_rpm_;  // 静止デッドバンド [RPM]
   bool current_invert_measured_;   // measured RPM 符号反転（正帰還押さえ用）
+  double current_max_accel_rpm_per_sec_;  // 目標RPMスルーレート上限 [RPM/s]。0以下で無効
 
   // Serial communication
   int serial_fd_;

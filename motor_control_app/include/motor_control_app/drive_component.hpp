@@ -86,6 +86,14 @@ private:
   int current_zero_deadband_rpm_;
   bool current_invert_measured_;
 
+  // 加速度制限（スルーレート）
+  double max_linear_accel_;   // [m/s^2] 負値または0で制限無効
+  double max_angular_accel_;  // [rad/s^2] 負値または0で制限無効
+  double last_cmd_linear_;
+  double last_cmd_angular_;
+  rclcpp::Time last_cmd_time_;
+  bool has_last_cmd_;
+
   // 状態フラグ
   bool motor_initialized_;
   bool emergency_stop_active_;

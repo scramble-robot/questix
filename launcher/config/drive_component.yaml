@@ -24,5 +24,10 @@ drive_component:
     current_zero_deadband_rpm: 5  # [RPM] 目標0かつ実測がこの範囲内ならPIを停止して積分リセット（静止時の微振動防止）
     current_invert_measured: true # PI内でmeasured RPMを符号反転（指令と測定の物理符号が逆=正帰還になっている場合のみtrue）
 
+    # 加速度クランプ（スルーレート制限）。0 以下で無効。
+    # スティック満倒からの起動トルクを抑え、急加速感をやわらげる。
+    max_linear_accel: 1.0    # [m/s^2] 線形加速度の上限
+    max_angular_accel: 2.0   # [rad/s^2] 角加速度の上限
+
     # パブリッシュ設定
     status_publish_rate: 10.0 # ステータスパブリッシュ頻度 [Hz]
