@@ -52,9 +52,7 @@
   roles:
     - role: ros2_installation
       vars:
-        ros2_distro: "{{ ros2_distro }}"
         ros2_install_dev_tools: "{{ install_dev_tools }}"
-        ros2_additional_packages: "{{ ros2_additional_packages }}"
 
   post_tasks:
     - name: Install development utilities
