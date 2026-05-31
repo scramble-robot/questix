@@ -45,11 +45,10 @@ On an x86_64 machine running Ubuntu 24.04, run Ansible against `localhost`.
    cd questix
    ```
 
-3. **Run the development playbook (AMD64)**
+3. **Run the setup script (AMD64)**
 
    ```bash
-   ansible-playbook ansible/playbooks/setup_dev.yaml \
-     -i localhost, --connection=local --ask-become-pass
+   bash setup_dev.sh
    ```
 
    This installs ROS 2 Jazzy Desktop, colcon, developer tooling, and creates
