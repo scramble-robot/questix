@@ -73,7 +73,7 @@
 
     - name: Create development workspace directory
       ansible.builtin.file:
-        path: "{{ ansible_env.HOME }}/ros2_ws/src"
+        path: "{{ ansible_user_dir }}/ros2_ws/src"
         state: directory
         owner: "{{ ansible_user | default(ansible_env.USER) }}"
         group: "{{ ansible_user | default(ansible_env.USER) }}"
@@ -82,7 +82,7 @@
 
     - name: Add ROS2 workspace setup to bashrc
       ansible.builtin.lineinfile:
-        path: "{{ ansible_env.HOME }}/.bashrc"
+        path: "{{ ansible_user_dir }}/.bashrc"
         line: "{{ item }}"
         state: present
         create: true
@@ -90,7 +90,7 @@
       loop:
         - "# ROS2 Development Environment"
         - "export ROS_DOMAIN_ID=42"
-        - "export COLCON_WS={{ ansible_env.HOME }}/ros2_ws"
+        - "export COLCON_WS={{ ansible_user_dir }}/ros2_ws"
         - "alias cw='cd $COLCON_WS'"
         - "alias cs='cd $COLCON_WS/src'"
         - "alias cb='cd $COLCON_WS && colcon build'"
@@ -100,7 +100,7 @@
       ansible.builtin.debug:
         msg:
           - "✅ ROS2 development environment setup completed!"
-          - "🏗️  Workspace created at: {{ ansible_env.HOME }}/ros2_ws"
+          - "🏗️  Workspace created at: {{ ansible_user_dir }}/ros2_ws"
           - "🔧 Development tools installed"
           - "📝 Environment aliases added to .bashrc"
           - ""
