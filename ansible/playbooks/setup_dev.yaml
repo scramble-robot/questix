@@ -22,9 +22,15 @@
       - python3-argcomplete
 
   pre_tasks:
-    - name: Determine connection user
+    - name: Get connection user (no become)
+      ansible.builtin.command: whoami
+      register: conn_user_whoami
+      become: false
+      changed_when: false
+
+    - name: Set connection user fact
       ansible.builtin.set_fact:
-        conn_user_name: "{{ ansible_user | default(lookup('env', 'SUDO_USER') or ansible_env.USER) }}"
+        conn_user_name: "{{ conn_user_whoami.stdout }}"
 
     - name: Look up connection user home directory via getent
       ansible.builtin.getent:
@@ -34,6 +40,17 @@
     - name: Set connection user home directory fact
       ansible.builtin.set_fact:
         conn_user_home: "{{ ansible_facts.getent_passwd[conn_user_name][4] }}"
+
+    - name: Ensure connection user home is under /home
+      ansible.builtin.assert:
+        that:
+          - conn_user_home is defined
+          - conn_user_home is match('^/home/.+')
+        fail_msg: >-
+          conn_user_home must be under /home/. Got: {{ conn_user_home | default('<undefined>') }}
+          (user: {{ conn_user_name }}). Run this playbook as a regular user (with sudo for become),
+          not as root.
+        success_msg: "Connection user home resolved: {{ conn_user_home }} ({{ conn_user_name }})"
 
     - name: Verify target architecture
       ansible.builtin.assert:
