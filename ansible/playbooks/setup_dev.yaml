@@ -22,11 +22,18 @@
       - python3-argcomplete
 
   pre_tasks:
-    - name: Capture connection user info before privilege escalation
+    - name: Determine connection user
       ansible.builtin.set_fact:
-        conn_user_home: "{{ ansible_env.HOME }}"
-        conn_user_name: "{{ ansible_env.USER }}"
-      become: false
+        conn_user_name: "{{ ansible_user | default(lookup('env', 'SUDO_USER') or ansible_env.USER) }}"
+
+    - name: Look up connection user home directory via getent
+      ansible.builtin.getent:
+        database: passwd
+        key: "{{ conn_user_name }}"
+
+    - name: Set connection user home directory fact
+      ansible.builtin.set_fact:
+        conn_user_home: "{{ ansible_facts.getent_passwd[conn_user_name][4] }}"
 
     - name: Verify target architecture
       ansible.builtin.assert:
@@ -77,15 +84,6 @@
         state: present
         update_cache: true
 
-    - name: Create development workspace directory
-      ansible.builtin.file:
-        path: "{{ conn_user_home }}/ros2_ws/src"
-        state: directory
-        owner: "{{ conn_user_name }}"
-        group: "{{ conn_user_name }}"
-        mode: "0755"
-      become: false
-
     - name: Add ROS2 workspace setup to bashrc
       ansible.builtin.lineinfile:
         path: "{{ conn_user_home }}/.bashrc"
@@ -106,11 +104,10 @@
       ansible.builtin.debug:
         msg:
           - "✅ ROS2 development environment setup completed!"
-          - "🏗️  Workspace created at: {{ conn_user_home }}/ros2_ws"
           - "🔧 Development tools installed"
-          - "📝 Environment aliases added to .bashrc"
+          - "📝 Environment aliases added to ~/.bashrc for {{ conn_user_name }}"
           - ""
           - "Next steps:"
           - "1. Source your bashrc: source ~/.bashrc"
-          - "2. Navigate to workspace: cw"
+          - "2. Create your workspace: mkdir -p ~/ros2_ws/src"
           - "3. Test installation: ros2 topic list"
