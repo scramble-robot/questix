@@ -191,7 +191,9 @@ bool DdtMotorLib::getMotorStatus(int motor_id, int& velocity_rpm, uint8_t& tempe
   return true;
 }
 
-bool DdtMotorLib::initializeMotor(int motor_id) { return initializeMotor(motor_id, ControlMode::Velocity); }
+bool DdtMotorLib::initializeMotor(int motor_id) {
+  return initializeMotor(motor_id, ControlMode::Velocity);
+}
 
 bool DdtMotorLib::initializeMotor(int motor_id, ControlMode mode) {
   if (!setControlMode(motor_id, mode)) {
@@ -202,8 +204,9 @@ bool DdtMotorLib::initializeMotor(int motor_id, ControlMode mode) {
   motor_modes_[motor_id] = mode;
   motor_velocities_[motor_id] = 0;
   motor_feedbacks_[motor_id] = MotorFeedback{};
-  pi_states_[motor_id] = PiState{0.0, 0, std::chrono::steady_clock::now(), false,
-                                  0.0, std::chrono::steady_clock::now(), false};
+  pi_states_[motor_id] = PiState{0.0,   0,   std::chrono::steady_clock::now(),
+                                 false, 0.0, std::chrono::steady_clock::now(),
+                                 false};
 
   RCLCPP_INFO(logger_, "モーター %d が初期化されました (mode=%s)", motor_id,
               mode == ControlMode::Current ? "current" : "velocity");
@@ -338,7 +341,9 @@ void DdtMotorLib::closeSerial() {
   }
 }
 
-bool DdtMotorLib::setModeVelocity(int motor_id) { return setControlMode(motor_id, ControlMode::Velocity); }
+bool DdtMotorLib::setModeVelocity(int motor_id) {
+  return setControlMode(motor_id, ControlMode::Velocity);
+}
 
 bool DdtMotorLib::setControlMode(int motor_id, ControlMode mode) {
   // Protocol 3 (モード切替)
@@ -493,7 +498,8 @@ int16_t DdtMotorLib::runCurrentLoopStep(int motor_id, int rpm_ref) {
 
   double error = static_cast<double>(rpm_ref - measured_rpm);
 
-  // 積分項更新 (アンチワインドアップ: 積分項寄与 = Ki * integral を ±integral_limit_amp_ にクランプ)
+  // 積分項更新 (アンチワインドアップ: 積分項寄与 = Ki * integral を ±integral_limit_amp_
+  // にクランプ)
   st.integral_amp += error * dt;
   if (current_ki_ > 1e-9) {
     double integ_clip = integral_limit_amp_ / current_ki_;

@@ -78,7 +78,7 @@ private:
   std::string status_topic_;
 
   // 制御モード関連
-  std::string control_mode_;       // "velocity" | "current"
+  std::string control_mode_;  // "velocity" | "current"
   double current_kp_;
   double current_ki_;
   double max_current_amp_;

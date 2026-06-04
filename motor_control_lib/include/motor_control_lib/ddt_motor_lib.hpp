@@ -119,11 +119,11 @@ private:
 
   // Current モード用 PI 状態（モータ毎）
   struct PiState {
-    double integral_amp;                            // 積分項（A 単位）
-    int16_t last_measured_rpm;                      // 直近のフィードバックRPM（受信失敗時の保持値）
-    std::chrono::steady_clock::time_point last_t;  // 前回更新時刻
-    bool has_last_t;                                // 初回判定
-    double ref_rpm_filtered;                        // スルーレート制限後の目標RPM
+    double integral_amp;        // 積分項（A 単位）
+    int16_t last_measured_rpm;  // 直近のフィードバックRPM（受信失敗時の保持値）
+    std::chrono::steady_clock::time_point last_t;      // 前回更新時刻
+    bool has_last_t;                                   // 初回判定
+    double ref_rpm_filtered;                           // スルーレート制限後の目標RPM
     std::chrono::steady_clock::time_point last_ref_t;  // 前回 ref 更新時刻
     bool has_last_ref_t;
   };
@@ -138,8 +138,8 @@ private:
   double current_ki_;
   double max_current_amp_;
   double integral_limit_amp_;
-  int current_zero_deadband_rpm_;  // 静止デッドバンド [RPM]
-  bool current_invert_measured_;   // measured RPM 符号反転（正帰還押さえ用）
+  int current_zero_deadband_rpm_;         // 静止デッドバンド [RPM]
+  bool current_invert_measured_;          // measured RPM 符号反転（正帰還押さえ用）
   double current_max_accel_rpm_per_sec_;  // 目標RPMスルーレート上限 [RPM/s]。0以下で無効
 
   // Serial communication
@@ -154,8 +154,9 @@ private:
   // Private methods
   bool initializeSerial();
   void closeSerial();
-  bool setModeVelocity(int motor_id);  // 後方互換のため残置（内部で setControlMode(Velocity) を呼ぶ）
-  bool sendMotorVelocity(int motor_id, int velocity_rpm);  // velocity モード送信
+  bool setModeVelocity(
+      int motor_id);  // 後方互換のため残置（内部で setControlMode(Velocity) を呼ぶ）
+  bool sendMotorVelocity(int motor_id, int velocity_rpm);       // velocity モード送信
   bool sendMotorCurrentRaw(int motor_id, int16_t current_raw);  // current モード送信＋応答受信
   int16_t runCurrentLoopStep(int motor_id, int rpm_ref);        // PI 1ステップ
   bool requestMotorFeedback(int motor_id);

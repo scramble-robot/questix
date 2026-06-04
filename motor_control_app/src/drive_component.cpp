@@ -109,9 +109,10 @@ void DriveComponent::initializeParameters() {
   RCLCPP_INFO(this->get_logger(), "  status_topic: %s", status_topic_.c_str());
   RCLCPP_INFO(this->get_logger(), "  control_mode: %s", control_mode_.c_str());
   if (control_mode_ == "current") {
-    RCLCPP_INFO(this->get_logger(),
-                "  current_kp: %.4f  current_ki: %.4f  max_current_amp: %.2f  integral_limit_amp: %.2f",
-                current_kp_, current_ki_, max_current_amp_, integral_limit_amp_);
+    RCLCPP_INFO(
+        this->get_logger(),
+        "  current_kp: %.4f  current_ki: %.4f  max_current_amp: %.2f  integral_limit_amp: %.2f",
+        current_kp_, current_ki_, max_current_amp_, integral_limit_amp_);
     RCLCPP_INFO(this->get_logger(), "  current_zero_deadband_rpm: %d", current_zero_deadband_rpm_);
   }
 }
@@ -142,8 +143,7 @@ bool DriveComponent::initializeMotorLib() {
       motor_lib_->setCurrentZeroDeadbandRpm(current_zero_deadband_rpm_);
       motor_lib_->setCurrentInvertMeasured(current_invert_measured_);
     } else if (control_mode_ != "velocity") {
-      RCLCPP_WARN(this->get_logger(),
-                  "未知の control_mode '%s' - velocity モードにフォールバック",
+      RCLCPP_WARN(this->get_logger(), "未知の control_mode '%s' - velocity モードにフォールバック",
                   control_mode_.c_str());
     }
 
@@ -191,14 +191,18 @@ void DriveComponent::twistCallback(const geometry_msgs::msg::Twist::SharedPtr ms
       if (max_linear_accel_ > 0.0) {
         double max_delta = max_linear_accel_ * dt;
         double delta = target_linear - last_cmd_linear_;
-        if (delta > max_delta) target_linear = last_cmd_linear_ + max_delta;
-        else if (delta < -max_delta) target_linear = last_cmd_linear_ - max_delta;
+        if (delta > max_delta)
+          target_linear = last_cmd_linear_ + max_delta;
+        else if (delta < -max_delta)
+          target_linear = last_cmd_linear_ - max_delta;
       }
       if (max_angular_accel_ > 0.0) {
         double max_delta = max_angular_accel_ * dt;
         double delta = target_angular - last_cmd_angular_;
-        if (delta > max_delta) target_angular = last_cmd_angular_ + max_delta;
-        else if (delta < -max_delta) target_angular = last_cmd_angular_ - max_delta;
+        if (delta > max_delta)
+          target_angular = last_cmd_angular_ + max_delta;
+        else if (delta < -max_delta)
+          target_angular = last_cmd_angular_ - max_delta;
       }
     }
   }
