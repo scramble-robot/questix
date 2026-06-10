@@ -22,7 +22,6 @@
     <exec_depend>ddt_motor_control</exec_depend>
     <exec_depend>esc_motor_control</exec_depend>
     <exec_depend>joy_controller</exec_depend>
-    <exec_depend>servo_control_ros2</exec_depend>
     <exec_depend>ydlidar_ros2_driver</exec_depend>
 
     <!-- Standard ROS2 packages -->
