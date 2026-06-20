@@ -15,8 +15,7 @@ Questixシステムの各ノードを起動するためのlauncherファイル�
 ### 各パッケージ用launchファイル
 
 - `joy_controller/launch/joy_controller.launch.xml` - ジョイスティックコントローラ
-- `esc_motor_control/launch/esc_motor_control.launch.xml` - ESCモータコントローラ  
-- `servo_control_ros2/launch/servo_launch.xml` - サーボコントローラ
+- `esc_motor_control_cpp/launch/esc_motor_control_cpp.launch.xml` - ESCモータコントローラ
 - `ydlidar_ros2_driver/launch/ydlidar_launch.xml` - YDLiDAR
 - `ydlidar_ros2_driver/launch/ydlidar_launch_view.xml` - YDLiDAR + RViz
 
@@ -26,8 +25,7 @@ Questixシステムの各ノードを起動するためのlauncherファイル�
 これらはaptで入る依存ではなく、source/workspace依存です。
 
 - `ydlidar_ros2_driver`
-- `servo_control_ros2`
-- `esc_motor_control`
+- `esc_motor_control_cpp`
 - `ddt_motor_control`
 
 LiDARなど実機依存のパッケージは追加取得とJazzy互換性確認が必要です。取得できても、

@@ -70,13 +70,6 @@ On an x86_64 machine running Ubuntu 24.04, run Ansible against `localhost`.
    `package.xml` files. In the current tree, this includes packages such as
    `libgpiod-dev`, `joint_state_publisher`, and `xacro`.
 
-   Known issue: `rosdep install` may report `questix_launcher: Cannot locate
-   rosdep definition for [servo_control_ros2]`. This package is listed as a
-   source/workspace dependency of `questix_launcher`, but it is not currently
-   included in `dependency.repos`. This does not block the observed AMD64 build,
-   but the dependency should be clarified separately before relying on
-   servo-related launch paths.
-
 5. **Verify**
 
    ```bash
@@ -291,8 +284,7 @@ The launcher package expects the following packages to be available in the same 
 workspace. They are source/workspace dependencies, not apt packages:
 
 - `ydlidar_ros2_driver`
-- `servo_control_ros2`
-- `esc_motor_control`
+- `esc_motor_control_cpp`
 - `ddt_motor_control`
 
 For Jazzy operation, confirm that each selected branch or tag in `dependency.repos`
