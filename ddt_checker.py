@@ -317,7 +317,43 @@ root = tk.Tk()
 root.title("モーター状態表示 & ID設定")
 root.geometry("400x420")
 
-frame_info = ttk.LabelFrame(root, text="モーター情報", padding=10)
+main_container = ttk.Frame(root)
+main_container.pack(fill="both", expand=True)
+
+canvas = tk.Canvas(main_container, highlightthickness=0)
+scrollbar = ttk.Scrollbar(main_container, orient="vertical", command=canvas.yview)
+scrollable_frame = ttk.Frame(canvas)
+
+scrollable_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+canvas.configure(yscrollcommand=scrollbar.set)
+
+def update_scroll_region(event=None):
+    canvas.configure(scrollregion=canvas.bbox("all"))
+
+def resize_scrollable_frame(event):
+    canvas.itemconfigure(scrollable_window, width=event.width)
+
+def scroll_with_mousewheel(event):
+    canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+
+def scroll_up(event):
+    canvas.yview_scroll(-1, "units")
+
+
+def scroll_down(event):
+    canvas.yview_scroll(1, "units")
+
+
+scrollable_frame.bind("<Configure>", update_scroll_region)
+canvas.bind("<Configure>", resize_scrollable_frame)
+canvas.bind_all("<MouseWheel>", scroll_with_mousewheel)
+canvas.bind_all("<Button-4>", scroll_up)
+canvas.bind_all("<Button-5>", scroll_down)
+canvas.pack(side="left", fill="both", expand=True)
+scrollbar.pack(side="right", fill="y")
+
+frame_info = ttk.LabelFrame(scrollable_frame, text="モーター情報", padding=10)
 frame_info.pack(padx=10, pady=10, fill="x")
 
 labels = {}
@@ -332,7 +368,7 @@ ttk.Button(frame_info, text="ポート選択", command=select_port).grid(row=10,
 ttk.Button(frame_info, text="ボーレート選択", command=select_baudrate).grid(row=11, columnspan=2, pady=2)
 ttk.Button(frame_info, text="ボーレート自動検出", command=auto_detect_baudrate, style="Accent.TButton").grid(row=12, columnspan=2, pady=5)
 
-frame_set = ttk.LabelFrame(root, text="ID設定", padding=10)
+frame_set = ttk.LabelFrame(scrollable_frame, text="ID設定", padding=10)
 frame_set.pack(padx=10, pady=10, fill="x")
 
 ttk.Label(frame_set, text="新しいID (0〜255):").pack(side="left")
@@ -343,7 +379,7 @@ ttk.Button(frame_set, text="ID変更", command=set_motor_id).pack(side="left", p
 
 # ポート状態表示用ラベル
 port_list = tk.StringVar()
-ttk.Label(root, textvariable=port_list, foreground="blue").pack(pady=5)
+ttk.Label(scrollable_frame, textvariable=port_list, foreground="blue").pack(pady=5)
 
 refresh_port_status()  # 初期状態のポートチェック
 root.mainloop()
