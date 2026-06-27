@@ -235,7 +235,7 @@ def get_motor_info():
             labels["Mode"].config(text=str(mode))
             labels["Current"].config(text=f"{current:.3f} A (raw: {current_raw})")
             labels["Velocity"].config(text=f"{velocity} rpm")
-            labels["Temperature"].config(text="N/A (Protocol 2 required)")
+            labels["Temperature"].config(text="N/A (not in this response)")
             labels["Position"].config(text=f"0x{position_raw:04X}")
             labels["Fault"].config(text=f"0x{fault_value:02X}")
 
