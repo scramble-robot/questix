@@ -218,28 +218,25 @@ def get_motor_info():
                 raise Exception(f"CRCエラー: 受信={received_crc:02X}, 計算={calculated_crc:02X}")
 
             # フィードバックデータの解析
+            # Protocol 1 応答は DATA[2..3]=電流、DATA[4..5]=速度、DATA[6..7]=位置、
+            # DATA[8]=故障コード。温度はこの応答には含まれない。
             id_ = data[0]
             mode = data[1]
-            current_high = data[2]
-            current_low = data[3]
-            velocity_high = data[4]
-            velocity_low = data[5]
-            stator_temp = data[6]
-            angle_8bits = data[7]
+            current_raw = int.from_bytes(response[2:4], byteorder="big", signed=True)
+            velocity = int.from_bytes(response[4:6], byteorder="big", signed=True)
+            position_raw = int.from_bytes(response[6:8], byteorder="big", signed=False)
             fault_value = data[8]
 
             # データの変換
-            current = ((current_high << 8) | current_low) / 1000.0  # mA → A
-            velocity = ((velocity_high << 8) | velocity_low)  # rpm
-            angle = angle_8bits * 360.0 / 256.0  # 8bit → 度
+            current = current_raw / 1000.0  # mA → A
 
             # 表示更新
             labels["ID"].config(text=str(id_))
             labels["Mode"].config(text=str(mode))
-            labels["Current"].config(text=f"{current:.3f} A")
+            labels["Current"].config(text=f"{current:.3f} A (raw: {current_raw})")
             labels["Velocity"].config(text=f"{velocity} rpm")
-            labels["Temperature"].config(text=f"{stator_temp} ℃")
-            labels["Angle"].config(text=f"{angle:.1f} °")
+            labels["Temperature"].config(text="N/A (Protocol 2 required)")
+            labels["Position"].config(text=f"0x{position_raw:04X}")
             labels["Fault"].config(text=f"0x{fault_value:02X}")
 
     except Exception as e:
@@ -357,7 +354,7 @@ frame_info = ttk.LabelFrame(scrollable_frame, text="モーター情報", padding
 frame_info.pack(padx=10, pady=10, fill="x")
 
 labels = {}
-for i, key in enumerate(["ID", "Mode", "Current", "Velocity", "Temperature", "Angle", "Fault", "Port Status"]):
+for i, key in enumerate(["ID", "Mode", "Current", "Velocity", "Temperature", "Position", "Fault", "Port Status"]):
     ttk.Label(frame_info, text=f"{key}:").grid(row=i, column=0, sticky="e")
     labels[key] = ttk.Label(frame_info, text="---")
     labels[key].grid(row=i, column=1, sticky="w")
