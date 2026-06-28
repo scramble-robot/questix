@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>QUESTiX DDTモータ ID設定マニュアル</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f8fb;
+      --panel: #ffffff;
+      --ink: #1f2937;
+      --muted: #4b5563;
+      --brand: #2563eb;
+      --ok: #15803d;
+      --warn: #b45309;
+      --danger: #b91c1c;
+      --line: #d1d5db;
+      --code-bg: #111827;
+      --code-ink: #e5e7eb;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans JP", sans-serif;
+      line-height: 1.7;
+    }
+
+    main {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 32px 20px 64px;
+    }
+
+    header {
+      background: linear-gradient(135deg, #1e3a8a, #2563eb);
+      color: white;
+      padding: 32px 20px;
+      border-radius: 18px;
+      box-shadow: 0 14px 35px rgb(37 99 235 / 20%);
+    }
+
+    h1, h2, h3 { line-height: 1.35; }
+    h1 { margin: 0 0 12px; font-size: clamp(1.8rem, 4vw, 2.8rem); }
+    h2 { margin-top: 40px; padding-bottom: 8px; border-bottom: 2px solid var(--line); }
+    h3 { margin-top: 28px; }
+
+    .subtitle { margin: 0; opacity: .9; }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 20px;
+      margin: 20px 0;
+      box-shadow: 0 8px 24px rgb(15 23 42 / 6%);
+    }
+
+    .notice {
+      border-left: 6px solid var(--warn);
+      background: #fff7ed;
+    }
+
+    .danger {
+      border-left: 6px solid var(--danger);
+      background: #fef2f2;
+    }
+
+    .success {
+      border-left: 6px solid var(--ok);
+      background: #f0fdf4;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 16px;
+    }
+
+    code, pre {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    }
+
+    pre {
+      overflow-x: auto;
+      background: var(--code-bg);
+      color: var(--code-ink);
+      padding: 14px 16px;
+      border-radius: 12px;
+      line-height: 1.5;
+    }
+
+    .checklist {
+      list-style: none;
+      padding-left: 0;
+    }
+
+    .checklist li {
+      position: relative;
+      padding-left: 34px;
+      margin: 10px 0;
+    }
+
+    .checklist li::before {
+      content: "☐";
+      position: absolute;
+      left: 0;
+      top: 0;
+      color: var(--brand);
+      font-weight: 700;
+    }
+
+    figure {
+      margin: 22px 0;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      overflow: hidden;
+      background: white;
+    }
+
+    figure img {
+      display: block;
+      width: 100%;
+      height: auto;
+      background: #e5e7eb;
+    }
+
+    figcaption {
+      padding: 12px 16px;
+      color: var(--muted);
+      border-top: 1px solid var(--line);
+      font-size: .95rem;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0;
+      background: white;
+    }
+
+    th, td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      vertical-align: top;
+    }
+
+    th { background: #eff6ff; text-align: left; }
+
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #dbeafe;
+      color: #1e40af;
+      font-size: .85rem;
+      font-weight: 700;
+    }
+
+    .small { color: var(--muted); font-size: .92rem; }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>QUESTiX DDTモータ ID設定マニュアル</h1>
+    <p class="subtitle">ddt_checker.py を使用して、新品または交換用DDTモータのIDを確認・変更する手順です。</p>
+  </header>
+
+  <section class="card danger">
+    <h2>安全な作業のために</h2>
+    <ul class="checklist">
+      <li>ID設定作業中は、<strong>DDTモータを1台だけ</strong>接続してください。</li>
+      <li>複数台を同じRS485バスへ接続したままID変更すると、複数モータが同じIDになるおそれがあります。</li>
+      <li>QUESTiX Launcher、ROS 2の走行ノード、他のシリアル通信ツール、別の ddt_checker.py は終了してください。</li>
+      <li>非常停止ボタンを押せる状態で作業してください。</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2>作業の前提</h2>
+    <div class="grid">
+      <div>
+        <h3>使用ツール</h3>
+        <p><code>ddt_checker.py</code></p>
+      </div>
+      <div>
+        <h3>標準ポート</h3>
+        <p><code>/dev/ttyACM0</code></p>
+      </div>
+      <div>
+        <h3>標準ボーレート</h3>
+        <p><code>57600</code></p>
+      </div>
+      <div>
+        <h3>走行用DDTモータID</h3>
+        <p>左モータ: <code>4</code><br>右モータ: <code>5</code></p>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>1. ddt_checker.py を起動する</h2>
+    <p>端末でQUESTiXリポジトリへ移動し、<code>ddt_checker.py</code> を起動します。</p>
+    <pre><code>cd questix
+python3 ddt_checker.py</code></pre>
+    <figure>
+      <img src="Screenshot01.png" alt="ddt_checker.py 起動直後の画面。ポート情報が自動取得されている。">
+      <figcaption>Screenshot01.png: 起動直後の状態です。ポート情報が自動取得され、<code>/dev/ttyACM0@57600</code> が利用可能として表示されています。</figcaption>
+    </figure>
+    <ul class="checklist">
+      <li><code>Port Status: 利用可能 (/dev/ttyACM0@57600)</code> と表示されることを確認します。</li>
+      <li>表示されない場合は、モータ電源 (非常停止解除状態)、USB/RS485変換器、ポート名、権限を確認します。</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2>2. 「情報更新」で現在IDを確認する</h2>
+    <p>GUIの「情報更新」ボタンを押します。端末には送信コマンド、受信バイト数、受信データが表示されます。</p>
+    <figure>
+      <img src="Screenshot02.png" alt="情報更新押下後にID 4が表示された画面。">
+      <figcaption>Screenshot02.png: 「情報更新」を押した後の状態です。例では <code>ID: 4</code>、<code>Fault: 0x00</code> が表示されています。</figcaption>
+    </figure>
+
+    <h3>表示値の見方</h3>
+    <table>
+      <thead>
+        <tr><th>項目</th><th>意味</th><th>確認ポイント</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>ID</td><td>現在モータID</td><td>変更前後で期待値になっているか確認します。</td></tr>
+        <tr><td>Mode</td><td>モータの応答モード値</td><td>通常確認用です。</td></tr>
+        <tr><td>Current</td><td>電流値とraw値</td><td>停止中は小さい値になる想定です。</td></tr>
+        <tr><td>Velocity</td><td>速度RPM</td><td>停止中は <code>0 rpm</code> になる想定です。</td></tr>
+        <tr><td>Temperature</td><td>この応答には温度が含まれません</td><td><code>N/A (not in this response)</code> と表示されます。</td></tr>
+        <tr><td>Position</td><td>位置フィールドのraw値</td><td>16進数で表示されます。</td></tr>
+        <tr><td>Fault</td><td>故障コード</td><td><code>0x00</code> ならエラーなしです。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="card notice">
+    <h2>3. ID設定欄へスクロールする</h2>
+    <p>ウィンドウ右側のスクロールバーを下へ動かすと、下部の「ID設定」欄が表示されます。</p>
+    <figure>
+      <img src="Screenshot03.png" alt="ID設定欄で新しいID 5を入力した画面。">
+      <figcaption>Screenshot03.png: ID設定欄を表示し、新しいIDとして <code>5</code> を入力した状態です。</figcaption>
+    </figure>
+    <ul class="checklist">
+      <li>対象モータが1台だけ接続されていることを再確認します。</li>
+      <li>「新しいID (0〜255)」欄に設定したいIDを入力します。</li>
+      <li>右モータとして使う場合は <code>5</code> を入力します。</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2>4. 「ID変更」を押す</h2>
+    <p>「ID変更」ボタンを押すと、完了ダイアログが表示されます。</p>
+    <figure>
+      <img src="Screenshot04.png" alt="ID変更押下後に完了ダイアログが表示された画面。">
+      <figcaption>Screenshot04.png: 「ID変更」押下後の状態です。例では <code>IDを5に変更しました。再接続時に有効になります。</code> と表示されています。</figcaption>
+    </figure>
+    <ul class="checklist">
+      <li>完了ダイアログが表示されたら、内容を確認して <code>OK</code> を押します。</li>
+      <li>モータ電源を入れ直す、またはモータを再接続します。</li>
+      <li>再接続後、再度「情報更新」を押してIDが変更されていることを確認します。</li>
+    </ul>
+  </section>
+
+  <section class="card success">
+    <h2>5. ID変更後の確認</h2>
+    <ul class="checklist">
+      <li>「情報更新」を押します。</li>
+      <li>ID欄が設定した値、例では <code>5</code> になっていることを確認します。</li>
+      <li><code>Fault: 0x00</code> であることを確認します。</li>
+      <li>右モータをID 5にした後、左モータID 4と同時接続する場合はID重複がないことを確認します。</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2>トラブルシュート</h2>
+    <h3>ポートが利用不可になる</h3>
+    <pre><code>ls -l /dev/ttyACM* /dev/ttyUSB* 2&gt;/dev/null || true
+fuser -v /dev/ttyACM0</code></pre>
+    <ul>
+      <li>別プロセスがポートを使用していないか確認してください。</li>
+      <li>USB/RS485変換器を抜き差しした場合、ポート名が変わることがあります。</li>
+    </ul>
+
+    <h3>「情報更新」で応答がない</h3>
+    <ul>
+      <li>モータ電源を確認してください。非常停止解除状態にしてください。</li>
+      <li>RS485のA/B配線が逆でないか確認してください。</li>
+      <li>ボーレートが <code>57600</code> で合っているか確認してください。</li>
+      <li>対象モータが1台だけ接続されているか確認してください。</li>
+    </ul>
+
+    <h3>Temperature が N/A と表示される</h3>
+    <p>現在の「情報更新」応答には温度フィールドが含まれていないため、<code>N/A (not in this response)</code> と表示されます。異常ではありません。</p>
+  </section>
+
+</main>
+</body>
+</html>
