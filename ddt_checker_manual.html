@@ -172,12 +172,12 @@
   </header>
 
   <section class="card danger">
-    <h2>最重要の安全確認</h2>
+    <h2>安全な作業のために</h2>
     <ul class="checklist">
-      <li>ID変更作業中は、対象のDDTモータを<strong>必ず1台だけ</strong>接続してください。</li>
+      <li>ID設定作業中は、<strong>DDTモータを1台だけ</strong>接続してください。</li>
       <li>複数台を同じRS485バスへ接続したままID変更すると、複数モータが同じIDになるおそれがあります。</li>
-      <li>ROS 2の走行ノード、他のシリアル通信ツール、別の ddt_checker.py は終了してください。</li>
-      <li>モータ電源をすぐ切れる状態で作業してください。</li>
+      <li>QUESTiX Launcher、ROS 2の走行ノード、他のシリアル通信ツール、別の ddt_checker.py は終了してください。</li>
+      <li>非常停止ボタンを押せる状態で作業してください。</li>
     </ul>
   </section>
 
@@ -197,7 +197,7 @@
         <p><code>57600</code></p>
       </div>
       <div>
-        <h3>QUESTiX走行用ID</h3>
+        <h3>走行用DDTモータID</h3>
         <p>左モータ: <code>4</code><br>右モータ: <code>5</code></p>
       </div>
     </div>
@@ -214,7 +214,7 @@ python3 ddt_checker.py</code></pre>
     </figure>
     <ul class="checklist">
       <li><code>Port Status: 利用可能 (/dev/ttyACM0@57600)</code> と表示されることを確認します。</li>
-      <li>表示されない場合は、モータ電源、USB/RS485変換器、ポート名、権限を確認します。</li>
+      <li>表示されない場合は、モータ電源 (非常停止解除状態)、USB/RS485変換器、ポート名、権限を確認します。</li>
     </ul>
   </section>
 
@@ -293,7 +293,7 @@ fuser -v /dev/ttyACM0</code></pre>
 
     <h3>「情報更新」で応答がない</h3>
     <ul>
-      <li>モータ電源を確認してください。</li>
+      <li>モータ電源を確認してください。非常停止解除状態にしてください。</li>
       <li>RS485のA/B配線が逆でないか確認してください。</li>
       <li>ボーレートが <code>57600</code> で合っているか確認してください。</li>
       <li>対象モータが1台だけ接続されているか確認してください。</li>
@@ -303,21 +303,6 @@ fuser -v /dev/ttyACM0</code></pre>
     <p>現在の「情報更新」応答には温度フィールドが含まれていないため、<code>N/A (not in this response)</code> と表示されます。異常ではありません。</p>
   </section>
 
-  <section class="card">
-    <h2>作業記録欄</h2>
-    <table>
-      <tbody>
-        <tr><th>作業日</th><td></td></tr>
-        <tr><th>作業者</th><td></td></tr>
-        <tr><th>対象モータ</th><td>左 / 右 / その他</td></tr>
-        <tr><th>変更前ID</th><td></td></tr>
-        <tr><th>変更後ID</th><td></td></tr>
-        <tr><th>確認結果</th><td>OK / NG</td></tr>
-      </tbody>
-    </table>
-  </section>
-
-  <p class="small">このHTMLは画像ファイル <code>Screenshot01.png</code>〜<code>Screenshot04.png</code> を同じディレクトリに配置して閲覧する想定です。</p>
 </main>
 </body>
 </html>
