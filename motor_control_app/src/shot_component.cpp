@@ -14,7 +14,8 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
       last_tilt_value_(0.0F),
       last_tilt_up_state_(false),
       last_tilt_down_state_(false),
-      current_tilt_position_(2048) {
+      current_tilt_position_(2048),
+      current_tilt_angle_(0.0) {
   // パラメーター宣言
   this->declare_parameter("port", "/dev/servo");
   this->declare_parameter("baudrate", 115200);
