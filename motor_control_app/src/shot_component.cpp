@@ -25,12 +25,12 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
   // - If tilt_axis >= 0: use the analog axis (D-pad / stick).
   // - Otherwise: use tilt_up_button_index / tilt_down_button_index (button edge).
   // tilt_axis が 0 以上なら軸モード、それ以外はボタンモードで動いて上下します。
-  this->declare_parameter("tilt_axis", -1);               // -1 = disabled (button mode)
-  this->declare_parameter("tilt_up_button_index", 4);     // L button (Switch2 native index)
-  this->declare_parameter("tilt_down_button_index", 6);   // ZL button (Switch2 native index)
-  this->declare_parameter("tilt_step_angle", 5.0);        // チルトステップサイズ（度）
-  this->declare_parameter("tilt_min_angle", 0.0);         // チルト最小角度（度）
-  this->declare_parameter("tilt_max_angle", 70.0);        // チルト最大角度（度）
+  this->declare_parameter("tilt_axis", -1);              // -1 = disabled (button mode)
+  this->declare_parameter("tilt_up_button_index", 4);    // L button (Switch2 native index)
+  this->declare_parameter("tilt_down_button_index", 6);  // ZL button (Switch2 native index)
+  this->declare_parameter("tilt_step_angle", 5.0);       // チルトステップサイズ（度）
+  this->declare_parameter("tilt_min_angle", 0.0);        // チルト最小角度（度）
+  this->declare_parameter("tilt_max_angle", 70.0);       // チルト最大角度（度）
   this->declare_parameter("fire_angle", 130.0);          // 射撃角度（度）
   this->declare_parameter("home_angle", 100.0);          // ホーム角度（度）
   this->declare_parameter("fire_duration_ms", 300);      // 射撃持続時間（ミリ秒）
@@ -116,7 +116,8 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
                 "Fire button: %d, Tilt mode: buttons up=%d down=%d, Tilt step: %.1f degrees",
                 fire_button_, tilt_up_button_index_, tilt_down_button_index_, tilt_step_angle_);
   }
-  RCLCPP_INFO(this->get_logger(), "Tilt range: %.1f - %.1f degrees", tilt_min_angle_, tilt_max_angle_);
+  RCLCPP_INFO(this->get_logger(), "Tilt range: %.1f - %.1f degrees", tilt_min_angle_,
+              tilt_max_angle_);
   RCLCPP_INFO(this->get_logger(),
               "Fire angle: %.1f deg, Home angle: %.1f deg, Current tilt: %.1f deg", fire_angle_,
               home_angle_, current_tilt_angle_);
