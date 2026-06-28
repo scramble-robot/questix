@@ -11,26 +11,26 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
     : Node("shot_component", options),
       is_shooting_(false),
       last_button_state_(false),
-      last_pan_value_(0.0F),
-      last_pan_up_state_(false),
-      last_pan_down_state_(false),
-      current_pan_position_(2048) {
+      last_tilt_value_(0.0F),
+      last_tilt_up_state_(false),
+      last_tilt_down_state_(false),
+      current_tilt_position_(2048) {
   // パラメーター宣言
   this->declare_parameter("port", "/dev/servo");
   this->declare_parameter("baudrate", 115200);
-  this->declare_parameter("pan_servo_id", 1);
+  this->declare_parameter("tilt_servo_id", 1);
   this->declare_parameter("trigger_servo_id", 3);
   this->declare_parameter("fire_button", 5);  // R button (Switch2 native index)
-  // Pan input mode / パン入力モード
-  // - If pan_axis >= 0: use the analog axis (D-pad / stick).
-  // - Otherwise: use pan_up_button_index / pan_down_button_index (button edge).
-  // pan_axis が 0 以上なら軸モード、それ以外はボタンモードで動いて上下します。
-  this->declare_parameter("pan_axis", -1);               // -1 = disabled (button mode)
-  this->declare_parameter("pan_up_button_index", 4);     // L button (Switch2 native index)
-  this->declare_parameter("pan_down_button_index", 6);   // ZL button (Switch2 native index)
-  this->declare_parameter("pan_step_angle", 5.0);        // パンステップサイズ（度）
-  this->declare_parameter("pan_min_angle", 0.0);         // パン最小角度（度）
-  this->declare_parameter("pan_max_angle", 70.0);        // パン最大角度（度）
+  // Tilt input mode / チルト入力モード
+  // - If tilt_axis >= 0: use the analog axis (D-pad / stick).
+  // - Otherwise: use tilt_up_button_index / tilt_down_button_index (button edge).
+  // tilt_axis が 0 以上なら軸モード、それ以外はボタンモードで動いて上下します。
+  this->declare_parameter("tilt_axis", -1);               // -1 = disabled (button mode)
+  this->declare_parameter("tilt_up_button_index", 4);     // L button (Switch2 native index)
+  this->declare_parameter("tilt_down_button_index", 6);   // ZL button (Switch2 native index)
+  this->declare_parameter("tilt_step_angle", 5.0);        // チルトステップサイズ（度）
+  this->declare_parameter("tilt_min_angle", 0.0);         // チルト最小角度（度）
+  this->declare_parameter("tilt_max_angle", 70.0);        // チルト最大角度（度）
   this->declare_parameter("fire_angle", 130.0);          // 射撃角度（度）
   this->declare_parameter("home_angle", 100.0);          // ホーム角度（度）
   this->declare_parameter("fire_duration_ms", 300);      // 射撃持続時間（ミリ秒）
@@ -40,15 +40,15 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
   // パラメーター取得
   std::string port = this->get_parameter("port").as_string();
   int baudrate = this->get_parameter("baudrate").as_int();
-  pan_servo_id_ = this->get_parameter("pan_servo_id").as_int();
+  tilt_servo_id_ = this->get_parameter("tilt_servo_id").as_int();
   trigger_servo_id_ = this->get_parameter("trigger_servo_id").as_int();
   fire_button_ = this->get_parameter("fire_button").as_int();
-  pan_axis_ = this->get_parameter("pan_axis").as_int();
-  pan_up_button_index_ = this->get_parameter("pan_up_button_index").as_int();
-  pan_down_button_index_ = this->get_parameter("pan_down_button_index").as_int();
-  pan_step_angle_ = this->get_parameter("pan_step_angle").as_double();
-  pan_min_angle_ = this->get_parameter("pan_min_angle").as_double();
-  pan_max_angle_ = this->get_parameter("pan_max_angle").as_double();
+  tilt_axis_ = this->get_parameter("tilt_axis").as_int();
+  tilt_up_button_index_ = this->get_parameter("tilt_up_button_index").as_int();
+  tilt_down_button_index_ = this->get_parameter("tilt_down_button_index").as_int();
+  tilt_step_angle_ = this->get_parameter("tilt_step_angle").as_double();
+  tilt_min_angle_ = this->get_parameter("tilt_min_angle").as_double();
+  tilt_max_angle_ = this->get_parameter("tilt_max_angle").as_double();
   fire_angle_ = this->get_parameter("fire_angle").as_double();
   home_angle_ = this->get_parameter("home_angle").as_double();
   fire_duration_ms_ = this->get_parameter("fire_duration_ms").as_int();
@@ -96,30 +96,30 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
     RCLCPP_WARN(this->get_logger(), "Failed to move to initial home position");
   }
 
-  // 現在のパン位置を取得して初期化
-  int32_t current_pos = servo_controller_->getCurrentPosition(pan_servo_id_);
+  // 現在のチルト位置を取得して初期化
+  int32_t current_pos = servo_controller_->getCurrentPosition(tilt_servo_id_);
   if (current_pos != -1) {
-    current_pan_position_ = current_pos;
-    current_pan_angle_ = clampAngle(servoPositionToAngle(current_pos));
+    current_tilt_position_ = current_pos;
+    current_tilt_angle_ = clampAngle(servoPositionToAngle(current_pos));
   } else {
-    RCLCPP_WARN(this->get_logger(), "Failed to get current pan position, using default");
-    current_pan_angle_ = clampAngle(180.0);  // デフォルト角度
-    current_pan_position_ = angleToServoPosition(current_pan_angle_);
+    RCLCPP_WARN(this->get_logger(), "Failed to get current tilt position, using default");
+    current_tilt_angle_ = clampAngle(180.0);  // デフォルト角度
+    current_tilt_position_ = angleToServoPosition(current_tilt_angle_);
   }
 
   RCLCPP_INFO(this->get_logger(), "Shot component started");
-  if (pan_axis_ >= 0) {
-    RCLCPP_INFO(this->get_logger(), "Fire button: %d, Pan mode: axis=%d, Pan step: %.1f degrees",
-                fire_button_, pan_axis_, pan_step_angle_);
+  if (tilt_axis_ >= 0) {
+    RCLCPP_INFO(this->get_logger(), "Fire button: %d, Tilt mode: axis=%d, Tilt step: %.1f degrees",
+                fire_button_, tilt_axis_, tilt_step_angle_);
   } else {
     RCLCPP_INFO(this->get_logger(),
-                "Fire button: %d, Pan mode: buttons up=%d down=%d, Pan step: %.1f degrees",
-                fire_button_, pan_up_button_index_, pan_down_button_index_, pan_step_angle_);
+                "Fire button: %d, Tilt mode: buttons up=%d down=%d, Tilt step: %.1f degrees",
+                fire_button_, tilt_up_button_index_, tilt_down_button_index_, tilt_step_angle_);
   }
-  RCLCPP_INFO(this->get_logger(), "Pan range: %.1f - %.1f degrees", pan_min_angle_, pan_max_angle_);
+  RCLCPP_INFO(this->get_logger(), "Tilt range: %.1f - %.1f degrees", tilt_min_angle_, tilt_max_angle_);
   RCLCPP_INFO(this->get_logger(),
-              "Fire angle: %.1f deg, Home angle: %.1f deg, Current pan: %.1f deg", fire_angle_,
-              home_angle_, current_pan_angle_);
+              "Fire angle: %.1f deg, Home angle: %.1f deg, Current tilt: %.1f deg", fire_angle_,
+              home_angle_, current_tilt_angle_);
 }
 
 ShotComponent::~ShotComponent() {
@@ -150,49 +150,49 @@ void ShotComponent::joyCallback(const sensor_msgs::msg::Joy::SharedPtr msg) {
     return;
   }
 
-  // Pan input: axis mode if pan_axis >= 0, otherwise button mode (L / ZL).
-  // pan_axis が 0 以上なら軸モード、それ以外はボタンモード。
-  const auto step_pan = [this](double delta_deg, const char* direction) {
+  // Tilt input: axis mode if tilt_axis >= 0, otherwise button mode (L / ZL).
+  // tilt_axis が 0 以上なら軸モード、それ以外はボタンモード。
+  const auto step_tilt = [this](double delta_deg, const char* direction) {
     if (!canSendCommand()) {
-      RCLCPP_DEBUG(this->get_logger(), "Pan command rate limited");
+      RCLCPP_DEBUG(this->get_logger(), "Tilt command rate limited");
       return;
     }
-    double new_angle = current_pan_angle_ + delta_deg;
-    current_pan_angle_ = clampAngle(new_angle);
-    current_pan_position_ = angleToServoPosition(current_pan_angle_);
-    if (servo_controller_->setPosition(pan_servo_id_, current_pan_position_, false)) {
-      RCLCPP_INFO(this->get_logger(), "Pan %s: angle=%.1f deg", direction, current_pan_angle_);
+    double new_angle = current_tilt_angle_ + delta_deg;
+    current_tilt_angle_ = clampAngle(new_angle);
+    current_tilt_position_ = angleToServoPosition(current_tilt_angle_);
+    if (servo_controller_->setPosition(tilt_servo_id_, current_tilt_position_, false)) {
+      RCLCPP_INFO(this->get_logger(), "Tilt %s: angle=%.1f deg", direction, current_tilt_angle_);
       last_command_time_ = this->now();
     } else {
-      RCLCPP_ERROR(this->get_logger(), "Failed to move pan %s", direction);
+      RCLCPP_ERROR(this->get_logger(), "Failed to move tilt %s", direction);
     }
   };
 
-  if (pan_axis_ >= 0 && pan_axis_ < static_cast<int>(msg->axes.size())) {
+  if (tilt_axis_ >= 0 && tilt_axis_ < static_cast<int>(msg->axes.size())) {
     // Axis mode: rising edge detection at ±0.5
-    const float current_pan_value = msg->axes[pan_axis_];
-    if (current_pan_value > 0.5F && last_pan_value_ <= 0.5F) {
-      step_pan(pan_step_angle_, "up");
-    } else if (current_pan_value < -0.5F && last_pan_value_ >= -0.5F) {
-      step_pan(-pan_step_angle_, "down");
+    const float current_tilt_value = msg->axes[tilt_axis_];
+    if (current_tilt_value > 0.5F && last_tilt_value_ <= 0.5F) {
+      step_tilt(tilt_step_angle_, "up");
+    } else if (current_tilt_value < -0.5F && last_tilt_value_ >= -0.5F) {
+      step_tilt(-tilt_step_angle_, "down");
     }
-    last_pan_value_ = current_pan_value;
+    last_tilt_value_ = current_tilt_value;
   } else {
     // Button mode: L = up, ZL = down (rising edge)
     const auto button_pressed = [&msg](int index) {
       return index >= 0 && static_cast<size_t>(index) < msg->buttons.size() &&
              msg->buttons[static_cast<size_t>(index)] == 1;
     };
-    const bool pan_up_pressed = button_pressed(pan_up_button_index_);
-    const bool pan_down_pressed = button_pressed(pan_down_button_index_);
+    const bool tilt_up_pressed = button_pressed(tilt_up_button_index_);
+    const bool tilt_down_pressed = button_pressed(tilt_down_button_index_);
 
-    if (pan_up_pressed && !last_pan_up_state_) {
-      step_pan(pan_step_angle_, "up");
-    } else if (pan_down_pressed && !last_pan_down_state_) {
-      step_pan(-pan_step_angle_, "down");
+    if (tilt_up_pressed && !last_tilt_up_state_) {
+      step_tilt(tilt_step_angle_, "up");
+    } else if (tilt_down_pressed && !last_tilt_down_state_) {
+      step_tilt(-tilt_step_angle_, "down");
     }
-    last_pan_up_state_ = pan_up_pressed;
-    last_pan_down_state_ = pan_down_pressed;
+    last_tilt_up_state_ = tilt_up_pressed;
+    last_tilt_down_state_ = tilt_down_pressed;
   }
 }
 
@@ -228,14 +228,14 @@ void ShotComponent::executeShotSequence() {
 }
 
 void ShotComponent::aimCallback(const geometry_msgs::msg::Point::SharedPtr msg) {
-  // Point.x = pan角度 (制限範囲内)
-  double pan_angle = clampAngle(msg->x);
-  int pan_position = angleToServoPosition(pan_angle);
+  // Point.x = tilt角度 (制限範囲内)
+  double tilt_angle = clampAngle(msg->x);
+  int tilt_position = angleToServoPosition(tilt_angle);
 
-  if (servo_controller_->setPosition(pan_servo_id_, pan_position, false)) {
-    current_pan_angle_ = pan_angle;
-    current_pan_position_ = pan_position;  // 内部状態も更新
-    RCLCPP_INFO(this->get_logger(), "Aiming at pan=%.1f deg", pan_angle);
+  if (servo_controller_->setPosition(tilt_servo_id_, tilt_position, false)) {
+    current_tilt_angle_ = tilt_angle;
+    current_tilt_position_ = tilt_position;  // 内部状態も更新
+    RCLCPP_INFO(this->get_logger(), "Aiming at tilt=%.1f deg", tilt_angle);
   } else {
     RCLCPP_ERROR(this->get_logger(), "Failed to aim at target position");
   }
@@ -261,15 +261,15 @@ void ShotComponent::homeCallback(const std_msgs::msg::Bool::SharedPtr msg) {
 
 void ShotComponent::publishCurrentAim() {
   auto msg = std::make_unique<geometry_msgs::msg::Point>();
-  msg->x = current_pan_angle_;  // 角度で公開
-  msg->y = 0.0;                 // tilt機構なし
+  msg->x = current_tilt_angle_;  // 角度で公開
+  msg->y = 0.0;                  // pan機構なし
   msg->z = 0.0;
   current_aim_publisher_->publish(std::move(msg));
 }
 
 // 角度制限関数
 double ShotComponent::clampAngle(double angle_deg) {
-  return std::max(pan_min_angle_, std::min(pan_max_angle_, angle_deg));
+  return std::max(tilt_min_angle_, std::min(tilt_max_angle_, angle_deg));
 }
 
 // コマンド送信レート制限チェック

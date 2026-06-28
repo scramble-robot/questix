@@ -5,21 +5,21 @@ shot_component:
 
     port: "/dev/servo"
     baudrate: 115200
-    pan_servo_id: 11
+    tilt_servo_id: 11
     trigger_servo_id: 10
     # Disc fire button / ディスク射出ボタン
     # Switch2 (uart) native index: R = 5 / DualShock: R1 = 5
     fire_button: 5
     fire_duration_ms: 300 # 射撃持続時間（ミリ秒）
-    # Pan input mode / パン入力モード
-    # - pan_axis >= 0 : use that analog axis (e.g. D-pad vertical = 7).
-    # - pan_axis < 0  : use pan_up_button_index / pan_down_button_index (button mode).
-    # 軸で動かしたいときは pan_axis に軸番号を、ボタンで動かしたいときは
-    # pan_axis: -1 にして下の button_index を使ってください。
-    pan_axis: 7
+    # Tilt input mode / チルト入力モード
+    # - tilt_axis >= 0 : use that analog axis (e.g. D-pad vertical = 7).
+    # - tilt_axis < 0  : use tilt_up_button_index / tilt_down_button_index (button mode).
+    # 軸で動かしたいときは tilt_axis に軸番号を、ボタンで動かしたいときは
+    # tilt_axis: -1 にして下の button_index を使ってください。
+    tilt_axis: 7
     # Switch2 native indices: L=4 (up), ZL=6 (down)
-    pan_up_button_index: 4
-    pan_down_button_index: 6
+    tilt_up_button_index: 4
+    tilt_down_button_index: 6
     fire_angle: 145.0 # 射撃角度（度）
     home_angle: 245.0 # ホーム角度（度）
-    pan_max_angle: 120.0 # パン最大角度（度）
+    tilt_max_angle: 120.0 # チルト最大角度（度）

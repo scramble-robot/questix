@@ -38,15 +38,15 @@ private:
   std::shared_ptr<motor_control_lib::FeetechServoController> servo_controller_;
   std::unique_ptr<motor_control_lib::ShotController> shot_controller_;
 
-  int pan_servo_id_;
+  int tilt_servo_id_;
   int trigger_servo_id_;
   int fire_button_;
-  int pan_axis_;
-  int pan_up_button_index_;
-  int pan_down_button_index_;
-  double pan_step_angle_;
-  double pan_min_angle_;
-  double pan_max_angle_;
+  int tilt_axis_;
+  int tilt_up_button_index_;
+  int tilt_down_button_index_;
+  double tilt_step_angle_;
+  double tilt_min_angle_;
+  double tilt_max_angle_;
   double fire_angle_;
   double home_angle_;
   int fire_duration_ms_;
@@ -54,11 +54,11 @@ private:
 
   bool is_shooting_;
   bool last_button_state_;
-  float last_pan_value_;
-  bool last_pan_up_state_;
-  bool last_pan_down_state_;
-  int current_pan_position_;
-  double current_pan_angle_;
+  float last_tilt_value_;
+  bool last_tilt_up_state_;
+  bool last_tilt_down_state_;
+  int current_tilt_position_;
+  double current_tilt_angle_;
   rclcpp::Time last_command_time_;
 
   rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joy_subscription_;
