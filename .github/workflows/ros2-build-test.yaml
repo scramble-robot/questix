@@ -26,16 +26,18 @@ defaults:
 jobs:
   build-and-test:
     name: build-and-test (${{ matrix.ros_distro }}, ${{ matrix.architecture }})
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
         include:
           - ros_distro: jazzy
             architecture: amd64
+            runner: ubuntu-24.04
             allow_failure: false
           - ros_distro: jazzy
             architecture: arm64
-            allow_failure: true
+            runner: ubuntu-24.04-arm
+            allow_failure: false
       fail-fast: false
     continue-on-error: ${{ matrix.allow_failure }}
 
@@ -46,17 +48,10 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Setup QEMU
-        if: matrix.architecture == 'arm64'
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
-
       - name: Start ROS container
         run: |
-          docker pull --platform linux/${{ matrix.architecture }} ros:${{ matrix.ros_distro }}-ros-base
+          docker pull ros:${{ matrix.ros_distro }}-ros-base
           docker run -d --name ros_build \
-            --platform linux/${{ matrix.architecture }} \
             --init \
             -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
             -w "$GITHUB_WORKSPACE" \
