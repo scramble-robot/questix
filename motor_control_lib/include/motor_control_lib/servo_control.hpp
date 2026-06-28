@@ -5,7 +5,6 @@
 
 #include <cstdint>
 #include <map>
-#include <memory>
 #include <string>
 
 namespace motor_control_lib {
@@ -155,69 +154,6 @@ private:
    * @brief レジスタマップを初期化
    */
   void initializeRegisterMap();
-};
-
-/**
- * @brief 射撃制御クラス
- */
-class ShotController {
-public:
-  /**
-   * @brief コンストラクタ
-   * @param servo_controller サーボコントローラー
-   */
-  explicit ShotController(std::shared_ptr<ServoControllerBase> servo_controller);
-
-  /**
-   * @brief 射撃位置設定
-   * @param pan_servo_id パンサーボID
-   * @param tilt_servo_id チルトサーボID
-   * @param pan_position パン位置
-   * @param tilt_position チルト位置
-   * @param timeout タイムアウト時間
-   * @return 成功時true
-   */
-  bool aimAt(uint8_t pan_servo_id, uint8_t tilt_servo_id, uint16_t pan_position,
-             uint16_t tilt_position, double timeout = 5.0);
-
-  /**
-   * @brief 射撃実行
-   * @param trigger_servo_id トリガーサーボID
-   * @param fire_position 射撃位置
-   * @param return_position 復帰位置
-   * @param fire_duration 射撃持続時間（秒）
-   * @return 成功時true
-   */
-  bool fire(uint8_t trigger_servo_id, uint16_t fire_position, uint16_t return_position,
-            double fire_duration = 0.5);
-
-  /**
-   * @brief ホーム位置に戻る
-   * @param pan_servo_id パンサーボID
-   * @param tilt_servo_id チルトサーボID
-   * @param trigger_servo_id トリガーサーボID
-   * @param pan_home パンホーム位置
-   * @param tilt_home チルトホーム位置
-   * @param trigger_home トリガーホーム位置
-   * @return 成功時true
-   */
-  bool returnHome(uint8_t pan_servo_id, uint8_t tilt_servo_id, uint8_t trigger_servo_id,
-                  uint16_t pan_home = 2048, uint16_t tilt_home = 2048,
-                  uint16_t trigger_home = 2048);
-
-  /**
-   * @brief 現在の狙い位置を取得
-   * @param pan_servo_id パンサーボID
-   * @param tilt_servo_id チルトサーボID
-   * @param pan_position パン位置出力
-   * @param tilt_position チルト位置出力
-   * @return 成功時true
-   */
-  bool getCurrentAim(uint8_t pan_servo_id, uint8_t tilt_servo_id, int32_t& pan_position,
-                     int32_t& tilt_position);
-
-private:
-  std::shared_ptr<ServoControllerBase> servo_controller_;
 };
 
 }  // namespace motor_control_lib

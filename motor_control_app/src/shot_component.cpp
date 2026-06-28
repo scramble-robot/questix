@@ -65,29 +65,9 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
     return;
   }
 
-  // 射撃コントローラー初期化
-  shot_controller_ = std::make_unique<motor_control_lib::ShotController>(servo_controller_);
-
   // joyサブスクライバー作成
   joy_subscription_ = this->create_subscription<sensor_msgs::msg::Joy>(
       joy_topic, 1, std::bind(&ShotComponent::joyCallback, this, std::placeholders::_1));
-
-  // 既存のサブスクライバー（互換性のため）
-  aim_subscription_ = this->create_subscription<geometry_msgs::msg::Point>(
-      "aim_target", 1, std::bind(&ShotComponent::aimCallback, this, std::placeholders::_1));
-
-  fire_subscription_ = this->create_subscription<std_msgs::msg::Bool>(
-      "fire_trigger", 1, std::bind(&ShotComponent::fireCallback, this, std::placeholders::_1));
-
-  home_subscription_ = this->create_subscription<std_msgs::msg::Bool>(
-      "return_home", 1, std::bind(&ShotComponent::homeCallback, this, std::placeholders::_1));
-
-  // パブリッシャー作成
-  current_aim_publisher_ = this->create_publisher<geometry_msgs::msg::Point>("current_aim", 1);
-
-  // 現在位置を定期的に公開（一時的に無効化）
-  // timer_ = this->create_wall_timer(std::chrono::milliseconds(100),
-  //                                  std::bind(&ShotComponent::publishCurrentAim, this));
 
   // 最初にホーム位置に移動
   std::this_thread::sleep_for(std::chrono::milliseconds(500));  // 初期化待機
@@ -226,46 +206,6 @@ void ShotComponent::executeShotSequence() {
 
   is_shooting_ = false;
   RCLCPP_INFO(this->get_logger(), "Shot sequence completed");
-}
-
-void ShotComponent::aimCallback(const geometry_msgs::msg::Point::SharedPtr msg) {
-  // Point.x = tilt角度 (制限範囲内)
-  double tilt_angle = clampAngle(msg->x);
-  int tilt_position = angleToServoPosition(tilt_angle);
-
-  if (servo_controller_->setPosition(tilt_servo_id_, tilt_position, false)) {
-    current_tilt_angle_ = tilt_angle;
-    current_tilt_position_ = tilt_position;  // 内部状態も更新
-    RCLCPP_INFO(this->get_logger(), "Aiming at tilt=%.1f deg", tilt_angle);
-  } else {
-    RCLCPP_ERROR(this->get_logger(), "Failed to aim at target position");
-  }
-}
-
-void ShotComponent::fireCallback(const std_msgs::msg::Bool::SharedPtr msg) {
-  if (msg->data) {
-    executeShotSequence();
-  }
-}
-
-void ShotComponent::homeCallback(const std_msgs::msg::Bool::SharedPtr msg) {
-  if (msg->data) {
-    // ホーム位置に戻る
-    int home_position = angleToServoPosition(home_angle_);
-    if (servo_controller_->setPosition(trigger_servo_id_, home_position, false)) {
-      RCLCPP_INFO(this->get_logger(), "Returned to home position (%.1f deg)", home_angle_);
-    } else {
-      RCLCPP_ERROR(this->get_logger(), "Failed to return home");
-    }
-  }
-}
-
-void ShotComponent::publishCurrentAim() {
-  auto msg = std::make_unique<geometry_msgs::msg::Point>();
-  msg->x = current_tilt_angle_;  // 角度で公開
-  msg->y = 0.0;                  // pan機構なし
-  msg->z = 0.0;
-  current_aim_publisher_->publish(std::move(msg));
 }
 
 // 角度制限関数
