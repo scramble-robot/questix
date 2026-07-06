@@ -1,12 +1,16 @@
 // Copyright 2026 scramble-robot
 //
+// Use of this source code is governed by an MIT-style
+// license that can be found in the LICENSE file or at
+// https://opensource.org/licenses/MIT.
 #pragma once
 
 #include <memory>
-#include <rclcpp/rclcpp.hpp>
-#include <sensor_msgs/msg/joy.hpp>
-#include <std_msgs/msg/bool.hpp>
 #include <string>
+
+#include "rclcpp/rclcpp.hpp"
+#include "sensor_msgs/msg/joy.hpp"
+#include "std_msgs/msg/bool.hpp"
 
 namespace joy_gate {
 

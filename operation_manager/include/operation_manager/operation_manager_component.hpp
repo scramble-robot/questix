@@ -1,3 +1,9 @@
+// Copyright 2026 scramble-robot
+//
+// Use of this source code is governed by an MIT-style
+// license that can be found in the LICENSE file or at
+// https://opensource.org/licenses/MIT.
+
 #ifndef OPERATION_MANAGER__OPERATION_MANAGER_COMPONENT_HPP_
 #define OPERATION_MANAGER__OPERATION_MANAGER_COMPONENT_HPP_
 

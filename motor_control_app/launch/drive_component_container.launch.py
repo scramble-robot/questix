@@ -1,5 +1,8 @@
 # Copyright 2026 scramble-robot
 #
+# Use of this source code is governed by an MIT-style
+# license that can be found in the LICENSE file or at
+# https://opensource.org/licenses/MIT.
 import os
 
 from ament_index_python.packages import get_package_share_directory

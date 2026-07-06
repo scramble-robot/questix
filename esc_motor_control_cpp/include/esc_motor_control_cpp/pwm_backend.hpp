@@ -1,5 +1,8 @@
 // Copyright 2026 scramble-robot
 //
+// Use of this source code is governed by an MIT-style
+// license that can be found in the LICENSE file or at
+// https://opensource.org/licenses/MIT.
 #ifndef ESC_MOTOR_CONTROL_CPP__PWM_BACKEND_HPP_
 #define ESC_MOTOR_CONTROL_CPP__PWM_BACKEND_HPP_
 

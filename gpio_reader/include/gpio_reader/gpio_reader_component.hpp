@@ -1,5 +1,8 @@
 // Copyright 2026 scramble-robot
 //
+// Use of this source code is governed by an MIT-style
+// license that can be found in the LICENSE file or at
+// https://opensource.org/licenses/MIT.
 #ifndef GPIO_READER__GPIO_READER_COMPONENT_HPP_
 #define GPIO_READER__GPIO_READER_COMPONENT_HPP_
 

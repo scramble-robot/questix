@@ -1,5 +1,8 @@
 // Copyright 2026 scramble-robot
 //
+// Use of this source code is governed by an MIT-style
+// license that can be found in the LICENSE file or at
+// https://opensource.org/licenses/MIT.
 #include "esc_motor_control_cpp/esc_motor_control_component.hpp"
 
 #include <chrono>
