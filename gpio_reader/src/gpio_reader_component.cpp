@@ -38,7 +38,8 @@ GpioReaderComponent::GpioReaderComponent(const rclcpp::NodeOptions& options)
   // Create publishers
   for (const auto& pin : gpio_pins_) {
     std::string topic_name = "gpio_" + std::to_string(pin);
-    individual_pubs_[pin] = this->create_publisher<std_msgs::msg::Bool>(topic_name, 10);
+    individual_pubs_[static_cast<unsigned int>(pin)] =
+        this->create_publisher<std_msgs::msg::Bool>(topic_name, 10);
   }
 
   // Create timer
@@ -64,7 +65,8 @@ bool GpioReaderComponent::initialize_gpio() {
 
   // Open and configure GPIO lines
   for (const auto& pin : gpio_pins_) {
-    struct gpiod_line* line = gpiod_chip_get_line(chip_, pin);
+    unsigned int p = static_cast<unsigned int>(pin);
+    struct gpiod_line* line = gpiod_chip_get_line(chip_, p);
     if (!line) {
       RCLCPP_ERROR(this->get_logger(), "Failed to get GPIO line %ld", pin);
       cleanup_gpio();
@@ -79,7 +81,7 @@ bool GpioReaderComponent::initialize_gpio() {
       return false;
     }
 
-    lines_[pin] = line;
+    lines_[p] = line;
     RCLCPP_INFO(this->get_logger(), "GPIO pin %ld configured as input", pin);
   }
 
@@ -121,12 +123,13 @@ int GpioReaderComponent::read_gpio_value(unsigned int pin) {
 void GpioReaderComponent::timer_callback() {
   // Read all GPIO values and publish individual topics
   for (const auto& pin : gpio_pins_) {
-    int value = read_gpio_value(pin);
+    unsigned int p = static_cast<unsigned int>(pin);
+    int value = read_gpio_value(p);
 
     if (value >= 0) {
       auto msg = std_msgs::msg::Bool();
       msg.data = (value == 1);
-      individual_pubs_[pin]->publish(msg);
+      individual_pubs_[p]->publish(msg);
     }
   }
 }
