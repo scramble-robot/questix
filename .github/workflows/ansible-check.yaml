@@ -5,11 +5,19 @@ on:
         branches: [main]
         paths:
             - "ansible/**"
+            - "scripts/**"
+            - "systemd/**"
+            - "setup.sh"
+            - "setup_dev.sh"
             - ".github/workflows/ansible-check.yaml"
     pull_request:
         branches: [main]
         paths:
             - "ansible/**"
+            - "scripts/**"
+            - "systemd/**"
+            - "setup.sh"
+            - "setup_dev.sh"
             - ".github/workflows/ansible-check.yaml"
 
 jobs:
@@ -30,11 +38,11 @@ jobs:
                   python -m pip install --upgrade pip
                   pip install ansible ansible-lint
 
+            # Makefile の test-ansible と同じ設定 (.ansible-lint.yml) で実行し、違反は fail させる
             - name: Run ansible-lint
               run: |
-                  ansible-lint ansible/playbooks/setup_kit.yaml
-                  ansible-lint ansible/playbooks/setup_dev.yaml
-              continue-on-error: true
+                  ansible-lint -c .ansible-lint.yml ansible/playbooks/setup_kit.yaml
+                  ansible-lint -c .ansible-lint.yml ansible/playbooks/setup_dev.yaml
 
     ansible-syntax-check:
         name: Ansible Syntax Check
@@ -80,6 +88,8 @@ jobs:
                   sudo apt-get update
                   sudo apt-get install -y git
 
+            # check mode はインストーラ系タスクを完走できない既知の制約があるため
+            # 参考情報として実行する（AGENTS.md "Ansible check mode limits" を参照）
             - name: Run ansible-playbook in check mode
               run: |
                   ansible-playbook ansible/playbooks/setup_kit.yaml \
@@ -115,6 +125,8 @@ jobs:
                     curl \
                     gnupg2
 
+            # check mode はインストーラ系タスクを完走できない既知の制約があるため
+            # 参考情報として実行する（AGENTS.md "Ansible check mode limits" を参照）
             - name: Test playbook execution (with tags for minimal test)
               run: |
                   # 軽量なタスクのみを実行してplaybookの基本的な動作を確認
@@ -130,6 +142,17 @@ jobs:
               continue-on-error: true
               env:
                   ANSIBLE_FORCE_COLOR: "1"
+
+    shell-syntax-check:
+        name: Shell Script Syntax Check
+        runs-on: ubuntu-24.04
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Run bash -n on shell scripts
+              run: |
+                  git ls-files -z -- '*.sh' | xargs -0 -r -n1 bash -n
 
     ansible-validate-inventory:
         name: Validate Ansible Configuration
