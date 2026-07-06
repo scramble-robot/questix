@@ -60,7 +60,7 @@ private:
   double current_speed_{0.0};
   bool emergency_stop_active_{false};
   bool full_speed_active_{false};
-  rclcpp::Time last_command_time_;
+  rclcpp::Time last_command_time_{0, 0, RCL_ROS_TIME};
   std::mutex lock_;
 
   // ---------- PWM ----------
