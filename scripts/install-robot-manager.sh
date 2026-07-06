@@ -76,6 +76,8 @@ sed \
   -e "s|^Group=.*|Group=${TARGET_USER}|" \
   -e "s|Environment=ROS_DISTRO=.*|Environment=ROS_DISTRO=${ROS_DISTRO}|" \
   -e "s|Environment=ROBOT_WS=.*|Environment=ROBOT_WS=${ROBOT_WS}|" \
+  -e "s|Environment=HOME=.*|Environment=HOME=/home/${TARGET_USER}|" \
+  -e "s|^WorkingDirectory=.*|WorkingDirectory=/home/${TARGET_USER}|" \
   "${REPO_DIR}/systemd/questix_robot.service" > /etc/systemd/system/questix_robot.service
 
 systemctl daemon-reload
