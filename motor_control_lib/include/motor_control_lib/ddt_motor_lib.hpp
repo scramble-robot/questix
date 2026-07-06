@@ -13,6 +13,7 @@
 #include <chrono>
 #include <cmath>
 #include <map>
+#include <mutex>
 #include <vector>
 
 #include "motor_control_lib/base_motor_controller.hpp"
@@ -152,10 +153,14 @@ private:
   int current_zero_deadband_rpm_;         // 静止デッドバンド [RPM]
   bool current_invert_measured_;          // measured RPM 符号反転（正帰還押さえ用）
   double current_max_accel_rpm_per_sec_;  // 目標RPMスルーレート上限 [RPM/s]。0以下で無効
-  bool brake_on_stop_;                    // 停止時に電気ブレーキを使う（velocity モードのみ）
+  bool brake_on_stop_;  // 停止時に電気ブレーキを使う（velocity モードのみ）
 
   // Serial communication
   int serial_fd_;
+
+  // 公開APIから触る状態マップとシリアル送受信の保護。
+  // 公開メソッド同士が内部で呼び合うため recursive_mutex を使う。
+  mutable std::recursive_mutex state_mutex_;
 
   // Motor state tracking
   std::map<int, int> motor_velocities_;           // motor_id -> target velocity_rpm

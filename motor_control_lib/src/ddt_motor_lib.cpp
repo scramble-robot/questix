@@ -34,6 +34,7 @@ DdtMotorLib::DdtMotorLib(const std::string& serial_port, int baud_rate)
 DdtMotorLib::~DdtMotorLib() { shutdown(); }
 
 bool DdtMotorLib::initialize() {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
   if (initialized_) {
     return true;
   }
@@ -51,6 +52,7 @@ bool DdtMotorLib::initialize() {
 }
 
 void DdtMotorLib::shutdown() {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
   if (initialized_) {
     emergencyStop();
     closeSerial();
@@ -64,6 +66,7 @@ void DdtMotorLib::shutdown() {
 }
 
 bool DdtMotorLib::isHealthy() const {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
   if (!initialized_) {
     return false;
   }
@@ -87,6 +90,7 @@ void DdtMotorLib::resetCurrentPiStateForStop(int motor_id) {
 }
 
 void DdtMotorLib::emergencyStop() {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
   for (const auto& [motor_id, velocity] : motor_velocities_) {
     auto mode_it = motor_modes_.find(motor_id);
     if (mode_it != motor_modes_.end() && mode_it->second == ControlMode::Current) {
@@ -103,14 +107,23 @@ void DdtMotorLib::emergencyStop() {
 }
 
 bool DdtMotorLib::setMotorVelocity(int motor_id, int velocity_rpm) {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
   if (!initialized_) {
     RCLCPP_ERROR(logger_, "モータが初期化されていません");
     return false;
   }
 
-  // モード別に分岐。未登録モータは Velocity 既定。
+  // 未登録モータはファーム側モードが不明なまま指令すると誤解釈され得るため、
+  // Velocity モードを明示的に設定してから送信する。
   auto mode_it = motor_modes_.find(motor_id);
-  ControlMode mode = (mode_it != motor_modes_.end()) ? mode_it->second : ControlMode::Velocity;
+  if (mode_it == motor_modes_.end()) {
+    RCLCPP_WARN(logger_, "モーター %d は未初期化のため Velocity モードで初期化します", motor_id);
+    if (!initializeMotor(motor_id, ControlMode::Velocity)) {
+      return false;
+    }
+    mode_it = motor_modes_.find(motor_id);
+  }
+  ControlMode mode = mode_it->second;
 
   // 目標 RPM は常に max_motor_rpm_ でクランプ
   int rpm_ref_raw = std::clamp(velocity_rpm, -max_motor_rpm_, max_motor_rpm_);
@@ -179,6 +192,7 @@ bool DdtMotorLib::setMotorVelocity(int motor_id, int velocity_rpm) {
 
 bool DdtMotorLib::getMotorStatus(int motor_id, int& velocity_rpm, uint8_t& temperature,
                                  uint8_t& fault_code) {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
   if (!initialized_) {
     RCLCPP_ERROR(logger_, "モータが初期化されていません");
     return false;
@@ -216,6 +230,7 @@ bool DdtMotorLib::initializeMotor(int motor_id) {
 }
 
 bool DdtMotorLib::initializeMotor(int motor_id, ControlMode mode) {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
   if (!setControlMode(motor_id, mode)) {
     RCLCPP_ERROR(logger_, "モーター %d の初期化（モード設定）に失敗しました", motor_id);
     return false;
@@ -232,6 +247,7 @@ bool DdtMotorLib::initializeMotor(int motor_id, ControlMode mode) {
 }
 
 bool DdtMotorLib::stopMotor(int motor_id) {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
   auto mode_it = motor_modes_.find(motor_id);
   if (mode_it != motor_modes_.end() && mode_it->second == ControlMode::Current) {
     resetCurrentPiStateForStop(motor_id);
@@ -243,6 +259,7 @@ bool DdtMotorLib::stopMotor(int motor_id) {
 }
 
 bool DdtMotorLib::stopAllMotors() {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
   bool success = true;
   for (const auto& [motor_id, velocity] : motor_velocities_) {
     success &= stopMotor(motor_id);
@@ -254,11 +271,13 @@ bool DdtMotorLib::stopAllMotors() {
 int DdtMotorLib::getMaxRpm() const { return max_motor_rpm_; }
 
 bool DdtMotorLib::setMaxRpm(int max_rpm) {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
   max_motor_rpm_ = max_rpm;
   return true;
 }
 
 std::vector<DdtMotorLib::MotorStatus> DdtMotorLib::getAllMotorStatus() const {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
   std::vector<MotorStatus> statuses;
 
   for (const auto& [motor_id, velocity] : motor_velocities_) {
@@ -361,6 +380,7 @@ bool DdtMotorLib::setModeVelocity(int motor_id) {
 }
 
 bool DdtMotorLib::setControlMode(int motor_id, ControlMode mode) {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
   // Protocol 3 (モード切替)
   // 仕様書: {ID, 0xA0, 0,0,0,0,0,0, 0, mode_value} （DATA[9] が mode_value で CRC 無し）
   // 既存実装互換: DATA[8] に mode_value を入れ DATA[9] を CRC8(data[0..8]) とする独自レイアウト。
@@ -389,6 +409,7 @@ bool DdtMotorLib::setControlMode(int motor_id, ControlMode mode) {
 
 void DdtMotorLib::setCurrentControlParams(double kp, double ki, double max_current_amp,
                                           double integral_limit_amp) {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
   current_kp_ = kp;
   current_ki_ = ki;
   max_current_amp_ = std::max(0.0, max_current_amp);
@@ -399,16 +420,19 @@ void DdtMotorLib::setCurrentControlParams(double kp, double ki, double max_curre
 }
 
 void DdtMotorLib::setCurrentZeroDeadbandRpm(int deadband_rpm) {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
   current_zero_deadband_rpm_ = std::max(0, deadband_rpm);
   RCLCPP_INFO(logger_, "電流モード ゼロ近傍デッドバンド: %d RPM", current_zero_deadband_rpm_);
 }
 
 void DdtMotorLib::setCurrentInvertMeasured(bool invert) {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
   current_invert_measured_ = invert;
   RCLCPP_INFO(logger_, "電流モード measured符号反転: %s", invert ? "ON" : "OFF");
 }
 
 void DdtMotorLib::setCurrentMaxAccelRpmPerSec(double rpm_per_sec) {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
   current_max_accel_rpm_per_sec_ = rpm_per_sec;
   if (rpm_per_sec > 0.0) {
     RCLCPP_INFO(logger_, "電流モード 加速度制限: %.1f RPM/s", rpm_per_sec);
@@ -418,6 +442,7 @@ void DdtMotorLib::setCurrentMaxAccelRpmPerSec(double rpm_per_sec) {
 }
 
 void DdtMotorLib::setBrakeOnStop(bool enable) {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
   brake_on_stop_ = enable;
   RCLCPP_INFO(logger_, "停止時電気ブレーキ: %s", enable ? "ON" : "OFF");
 }
