@@ -1,0 +1,783 @@
+# !/usr/bin/python3
+# -*- coding: utf-8 -*-
+"""FEETECH サーボ（shot / tilt・trigger）用のデバッグ GUI ツール。
+
+ddt_checker.py と同じ構成の単一ファイル tkinter アプリだが、対象は DDT モーターではなく
+motor_control_lib の FeetechServoController が話す Modbus-RTU プロトコルのサーボ。
+
+主な機能:
+  - 現在位置(Present Position, addr 256)を読み取り、0-4095 / 0-360deg で可視化。
+  - Error Reset(addr 134)に値 4 を書き込み、現在位置を中点(2047)に再設定するキャリブレーション。
+  - 速度・電圧・温度・電流・トルク状態などのテレメトリ表示。
+
+プロトコルは motor_control_lib/src/servo_control.cpp を Python に移植したもの。
+"""
+
+import sys
+import time
+import tkinter as tk
+from tkinter import ttk, messagebox
+
+import serial
+import serial.tools.list_ports
+
+PORT = "/dev/servo"  # CH340 RS485 アダプタの udev シンボリックリンク（fallback: /dev/ttyUSB0）
+BAUDRATE = 115200
+DEFAULT_SERVO_ID = 11  # tilt サーボ（trigger は 10）
+# ボーレート候補（サーボ既定値 115200 を先頭に、servo_control.cpp が対応するレートを列挙）
+COMMON_BAUDRATES = [115200, 57600, 38400, 19200, 9600, 230400, 460800, 921600]
+
+# Modbus ファンクションコード
+FUNC_READ = 0x03   # Read Holding Registers
+FUNC_WRITE = 0x06  # Write Single Register
+
+# サーボのレジスタアドレス（servo_control.cpp initializeRegisterMap のキー = 実際に送るアドレス）
+REG_GOAL_POSITION = 128
+REG_TORQUE_ENABLE = 129
+REG_ERROR_RESET = 134       # 値 4 で現在位置を中点(2047)に設定
+REG_PRESENT_POSITION = 256
+REG_PRESENT_VELOCITY = 258
+REG_PRESENT_VOLTAGE = 260
+REG_PRESENT_TEMPERATURE = 261
+REG_MOVING_STATUS = 262
+REG_PRESENT_CURRENT = 263
+
+ERROR_RESET_MIDPOINT = 4    # Error Reset に書き込むと現在位置を中点(2047)へ
+POSITION_MAX = 4095         # 12bit 位置レンジ
+POSITION_MIDPOINT = 2047    # 中点
+
+
+# ---------------------------------------------------------------------------
+# ポート / ボーレート選択状態（ddt_checker.py と同じホルダー方式）
+# ---------------------------------------------------------------------------
+def get_current_port():
+    """現在選択されているポートを取得。"""
+    if hasattr(get_current_port, "selected_port") and get_current_port.selected_port:
+        return get_current_port.selected_port
+    return PORT
+
+
+def get_current_baudrate():
+    """現在選択されているボーレートを取得。"""
+    if hasattr(get_current_baudrate, "selected_baudrate") and get_current_baudrate.selected_baudrate:
+        return get_current_baudrate.selected_baudrate
+    return BAUDRATE
+
+
+def get_current_servo_id():
+    """入力欄からサーボ ID を取得（不正な場合はデフォルトにフォールバック）。"""
+    try:
+        value = int(entry_servo_id.get())
+        if 0 <= value <= 253:
+            return value
+    except (ValueError, NameError):
+        pass
+    return DEFAULT_SERVO_ID
+
+
+# ---------------------------------------------------------------------------
+# Modbus-RTU プロトコル（servo_control.cpp の移植）
+# ---------------------------------------------------------------------------
+def calculate_crc16(data: bytes) -> int:
+    """CRC16-MODBUS を計算する（init 0xFFFF, poly 0xA001）。servo_control.cpp calculateCRC16 相当。"""
+    crc = 0xFFFF
+    for b in data:
+        crc ^= b
+        for _ in range(8):
+            if crc & 1:
+                crc = (crc >> 1) ^ 0xA001
+            else:
+                crc >>= 1
+    return crc
+
+
+def build_frame(servo_id: int, func: int, address: int, value: int) -> bytes:
+    """Modbus コマンドフレームを組み立てる。servo_control.cpp createModbusCommand 相当。
+
+    [id][func][addrHi][addrLo][valHi][valLo][crcLo][crcHi]
+    （アドレス・値はビッグエンディアン、CRC はリトルエンディアン）
+    """
+    payload = bytes(
+        [
+            servo_id & 0xFF,
+            func & 0xFF,
+            (address >> 8) & 0xFF,
+            address & 0xFF,
+            (value >> 8) & 0xFF,
+            value & 0xFF,
+        ]
+    )
+    crc = calculate_crc16(payload)
+    return payload + bytes([crc & 0xFF, (crc >> 8) & 0xFF])
+
+
+def verify_checksum(data: bytes) -> bool:
+    """応答末尾 2 バイトの CRC を検証する。servo_control.cpp verifyChecksum 相当。"""
+    if len(data) < 3:
+        return False
+    received_crc = data[-2] | (data[-1] << 8)
+    return received_crc == calculate_crc16(data[:-2])
+
+
+def _hex(data: bytes) -> str:
+    """デバッグ表示用の 16 進文字列。"""
+    return " ".join(f"{b:02X}" for b in data)
+
+
+def _transact(ser: serial.Serial, frame: bytes, expected_len: int) -> bytes:
+    """1 フレーム送信し、応答を受信する（ddt_checker.py と同じくソフト RTS 制御なし）。"""
+    ser.reset_input_buffer()
+    ser.reset_output_buffer()
+    ser.write(frame)
+    ser.flush()
+    time.sleep(0.02)  # サーボの応答待ち
+    return ser.read(expected_len)
+
+
+def read_register(ser: serial.Serial, servo_id: int, address: int) -> int:
+    """レジスタを 1 つ読み取り、値を返す。失敗時は例外を送出する。
+
+    応答: [id][03][byteCount=2][dataHi][dataLo][crcLo][crcHi] = 7 バイト
+    """
+    frame = build_frame(servo_id, FUNC_READ, address, 1)
+    response = _transact(ser, frame, 7)
+
+    if len(response) != 7:
+        raise IOError(
+            f"レジスタ {address} 読み取り失敗: {len(response)}バイト受信（期待値: 7バイト）"
+            f"\n受信データ: {_hex(response)}"
+        )
+    if not verify_checksum(response):
+        raise IOError(f"CRCエラー（addr {address}）\n受信データ: {_hex(response)}")
+    if response[0] != servo_id or response[1] != FUNC_READ or response[2] != 2:
+        raise IOError(f"不正な応答（addr {address}）\n受信データ: {_hex(response)}")
+
+    return (response[3] << 8) | response[4]
+
+
+def read_register_signed(ser: serial.Serial, servo_id: int, address: int) -> int:
+    """符号付き(16bit)としてレジスタを読み取る（速度・電流など）。"""
+    value = read_register(ser, servo_id, address)
+    return value - 0x10000 if value >= 0x8000 else value
+
+
+def write_register(ser: serial.Serial, servo_id: int, address: int, value: int) -> bytes:
+    """レジスタに値を書き込む。エコー確認に失敗した場合は例外を送出する。
+
+    応答は要求のエコー: [id][06][addrHi][addrLo][valHi][valLo][crcLo][crcHi] = 8 バイト
+    """
+    frame = build_frame(servo_id, FUNC_WRITE, address, value)
+    response = _transact(ser, frame, 8)
+
+    if len(response) != 8:
+        raise IOError(
+            f"レジスタ {address} 書き込み失敗: {len(response)}バイト受信（期待値: 8バイト）"
+            f"\n受信データ: {_hex(response)}"
+        )
+    if not verify_checksum(response):
+        raise IOError(f"CRCエラー（addr {address}）\n受信データ: {_hex(response)}")
+
+    echo_addr = (response[2] << 8) | response[3]
+    echo_value = (response[4] << 8) | response[5]
+    if response[0] != servo_id or response[1] != FUNC_WRITE or echo_addr != address \
+            or echo_value != (value & 0xFFFF):
+        raise IOError(f"書き込みエコー不一致（addr {address}）\n受信データ: {_hex(response)}")
+
+    return response
+
+
+def open_serial() -> serial.Serial:
+    """現在のポート・ボーレートで 8N1 のシリアルポートを開く。"""
+    return serial.Serial(get_current_port(), get_current_baudrate(), timeout=0.5)
+
+
+# ---------------------------------------------------------------------------
+# 位置 <-> 角度 変換（shot_component.cpp servoPositionToAngle 相当）
+# ---------------------------------------------------------------------------
+def position_to_angle(position: int) -> float:
+    """サーボ位置(0-4095)を角度(0-360deg)に変換する。"""
+    position = max(0, min(POSITION_MAX, position))
+    return position / 4096.0 * 360.0
+
+
+# ---------------------------------------------------------------------------
+# ポート状態ユーティリティ（ddt_checker.py と同じ）
+# ---------------------------------------------------------------------------
+def check_port_availability():
+    """利用可能なシリアルポートをチェックする。"""
+    available_ports = []
+    for port in serial.tools.list_ports.comports():
+        try:
+            with serial.Serial(port.device, get_current_baudrate(), timeout=0.1):
+                available_ports.append(port.device)
+        except (serial.SerialException, OSError):
+            continue
+    return available_ports
+
+
+def is_port_available(port_name):
+    """指定されたポートが利用可能かチェックする。"""
+    try:
+        with serial.Serial(port_name, get_current_baudrate(), timeout=0.1):
+            return True
+    except (serial.SerialException, OSError):
+        return False
+
+
+def refresh_port_status():
+    """ポート状態を更新する。"""
+    current_port = get_current_port()
+    current_baudrate = get_current_baudrate()
+    if is_port_available(current_port):
+        labels["Port Status"].config(
+            text=f"利用可能 ({current_port}@{current_baudrate})", foreground="green"
+        )
+    else:
+        labels["Port Status"].config(
+            text=f"利用不可 ({current_port}@{current_baudrate})", foreground="red"
+        )
+
+    available_ports = check_port_availability()
+    if available_ports:
+        port_list.set("利用可能ポート: " + ", ".join(available_ports))
+    else:
+        port_list.set("利用可能なポートがありません")
+
+
+def select_port():
+    """ポートを選択する。"""
+    available_ports = check_port_availability()
+    if not available_ports:
+        messagebox.showwarning("警告", "利用可能なポートがありません")
+        return
+
+    selection_window = tk.Toplevel(root)
+    selection_window.title("ポート選択")
+    selection_window.geometry("300x220")
+
+    tk.Label(selection_window, text="使用するポートを選択してください:").pack(pady=10)
+
+    selected_port = tk.StringVar(value=available_ports[0])
+    for port in available_ports:
+        tk.Radiobutton(
+            selection_window, text=port, variable=selected_port, value=port
+        ).pack(anchor="w", padx=20)
+
+    def confirm_selection():
+        get_current_port.selected_port = selected_port.get()
+        selection_window.destroy()
+        refresh_port_status()
+        messagebox.showinfo("確認", f"ポート {selected_port.get()} を選択しました")
+
+    tk.Button(selection_window, text="確定", command=confirm_selection).pack(pady=10)
+
+
+def select_baudrate():
+    """ボーレートを選択する。"""
+    selection_window = tk.Toplevel(root)
+    selection_window.title("ボーレート選択")
+    selection_window.geometry("300x420")
+
+    tk.Label(selection_window, text="使用するボーレートを選択してください:").pack(pady=10)
+
+    selected_baudrate = tk.StringVar(value=str(get_current_baudrate()))
+    for baudrate in COMMON_BAUDRATES:
+        tk.Radiobutton(
+            selection_window,
+            text=str(baudrate),
+            variable=selected_baudrate,
+            value=str(baudrate),
+        ).pack(anchor="w", padx=20)
+
+    def confirm_selection():
+        get_current_baudrate.selected_baudrate = int(selected_baudrate.get())
+        selection_window.destroy()
+        refresh_port_status()
+        messagebox.showinfo("確認", f"ボーレート {selected_baudrate.get()} を選択しました")
+
+    tk.Button(selection_window, text="確定", command=confirm_selection).pack(pady=10)
+
+
+# ---------------------------------------------------------------------------
+# 位置ビジュアライザ（水平バー）
+# ---------------------------------------------------------------------------
+_last_position = None  # 最後に読み取った位置（リサイズ再描画用）
+
+
+def draw_position_bar(position=None):
+    """水平バーに現在位置を描画する。position が None なら最後の値を再描画。"""
+    global _last_position
+    if position is not None:
+        _last_position = position
+
+    canvas = position_canvas
+    canvas.delete("all")
+
+    width = canvas.winfo_width()
+    height = canvas.winfo_height()
+    if width <= 1 or height <= 1:
+        return  # まだレイアウトされていない
+
+    margin = 30
+    bar_left = margin
+    bar_right = width - margin
+    bar_top = 25
+    bar_bottom = height - 30
+    bar_width = bar_right - bar_left
+
+    def pos_to_x(pos):
+        pos = max(0, min(POSITION_MAX, pos))
+        return bar_left + bar_width * pos / POSITION_MAX
+
+    # バー枠
+    canvas.create_rectangle(bar_left, bar_top, bar_right, bar_bottom, outline="#888", fill="#f0f0f0")
+
+    # 目盛（0, 中点, 最大）
+    canvas.create_text(bar_left, bar_bottom + 12, text="0", fill="#555")
+    canvas.create_text(bar_right, bar_bottom + 12, text=str(POSITION_MAX), fill="#555")
+
+    # 中点 2047 基準線（強調）
+    mid_x = pos_to_x(POSITION_MIDPOINT)
+    canvas.create_line(mid_x, bar_top - 8, mid_x, bar_bottom + 4, fill="#d00", width=2, dash=(4, 2))
+    canvas.create_text(mid_x, bar_top - 15, text="中点 2047", fill="#d00", font=("Arial", 9, "bold"))
+
+    if _last_position is None:
+        canvas.create_text(
+            (bar_left + bar_right) / 2, (bar_top + bar_bottom) / 2,
+            text="---", fill="#999",
+        )
+        return
+
+    # 現在位置マーカー（バーの塗り + 三角）
+    marker_x = pos_to_x(_last_position)
+    canvas.create_rectangle(bar_left, bar_top, marker_x, bar_bottom, outline="", fill="#4a90d9")
+    canvas.create_polygon(
+        marker_x - 7, bar_top - 6, marker_x + 7, bar_top - 6, marker_x, bar_top + 4,
+        fill="#1a5c9c",
+    )
+    canvas.create_line(marker_x, bar_top, marker_x, bar_bottom, fill="#1a5c9c", width=2)
+
+    angle = position_to_angle(_last_position)
+    canvas.create_text(
+        (bar_left + bar_right) / 2, bar_bottom + 14,
+        text=f"Pos: {_last_position} (0x{_last_position:04X})   Angle: {angle:.1f} deg",
+        font=("Arial", 10, "bold"),
+    )
+
+
+def on_canvas_resize(event):
+    """キャンバスリサイズ時にバーを再描画する。"""
+    draw_position_bar()
+
+
+# ---------------------------------------------------------------------------
+# 読み取り / キャリブレーション動作
+# ---------------------------------------------------------------------------
+def read_all_info(show_errors=True):
+    """全テレメトリを読み取り、ラベルとバーを更新する。成功時 True。"""
+    servo_id = get_current_servo_id()
+    try:
+        with open_serial() as ser:
+            position = read_register(ser, servo_id, REG_PRESENT_POSITION)
+            velocity = read_register_signed(ser, servo_id, REG_PRESENT_VELOCITY)
+            voltage = read_register(ser, servo_id, REG_PRESENT_VOLTAGE)
+            temperature = read_register(ser, servo_id, REG_PRESENT_TEMPERATURE)
+            moving = read_register(ser, servo_id, REG_MOVING_STATUS)
+            current = read_register_signed(ser, servo_id, REG_PRESENT_CURRENT)
+            torque = read_register(ser, servo_id, REG_TORQUE_ENABLE)
+
+        angle = position_to_angle(position)
+        labels["ID"].config(text=str(servo_id))
+        labels["Position"].config(text=f"{position} (0x{position:04X})")
+        labels["Angle"].config(text=f"{angle:.1f} deg")
+        labels["Velocity"].config(text=f"{velocity}")
+        labels["Voltage"].config(text=f"{voltage / 10.0:.1f} V (raw: {voltage})")
+        labels["Temperature"].config(text=f"{temperature} C")
+        labels["Current"].config(text=f"{current}")
+        labels["Moving"].config(text="動作中" if moving else "停止")
+        labels["Torque"].config(
+            text="ON" if torque else "OFF", foreground="green" if torque else "gray"
+        )
+
+        draw_position_bar(position)
+        return True
+    except Exception as e:  # noqa: BLE001 - GUI にまとめて表示する
+        if show_errors:
+            messagebox.showerror("通信エラー", str(e))
+        return False
+
+
+def read_position_only(show_errors=False):
+    """位置のみを読み取ってバーを更新する（自動更新の軽量版）。成功時 True。"""
+    servo_id = get_current_servo_id()
+    try:
+        with open_serial() as ser:
+            position = read_register(ser, servo_id, REG_PRESENT_POSITION)
+        angle = position_to_angle(position)
+        labels["Position"].config(text=f"{position} (0x{position:04X})")
+        labels["Angle"].config(text=f"{angle:.1f} deg")
+        draw_position_bar(position)
+        return True
+    except Exception as e:  # noqa: BLE001
+        if show_errors:
+            messagebox.showerror("通信エラー", str(e))
+        return False
+
+
+def set_midpoint():
+    """Error Reset(134) に 4 を書き込み、現在位置を中点(2047)に設定する。"""
+    servo_id = get_current_servo_id()
+    if not messagebox.askyesno(
+        "確認",
+        f"サーボ ID {servo_id} の現在位置を中点(2047)に設定します。\n"
+        "（Error Reset レジスタ 134 に 4 を書き込みます）\n\n"
+        "これはサーボのキャリブレーションを変更します。実行しますか？",
+    ):
+        return
+
+    try:
+        with open_serial() as ser:
+            write_register(ser, servo_id, REG_ERROR_RESET, ERROR_RESET_MIDPOINT)
+            time.sleep(0.05)
+            # 反映確認のため位置を再読み取り
+            position = read_register(ser, servo_id, REG_PRESENT_POSITION)
+
+        draw_position_bar(position)
+        labels["Position"].config(text=f"{position} (0x{position:04X})")
+        labels["Angle"].config(text=f"{position_to_angle(position):.1f} deg")
+        messagebox.showinfo(
+            "完了", f"中点に設定しました。\n現在位置: {position} (中点は {POSITION_MIDPOINT})"
+        )
+    except Exception as e:  # noqa: BLE001
+        messagebox.showerror("キャリブレーションエラー", str(e))
+
+
+def toggle_torque():
+    """トルク有効(129)を ON/OFF トグルする。手でホーンを動かして中点合わせする際に使う。"""
+    servo_id = get_current_servo_id()
+    try:
+        with open_serial() as ser:
+            current = read_register(ser, servo_id, REG_TORQUE_ENABLE)
+            new_value = 0 if current else 1
+            write_register(ser, servo_id, REG_TORQUE_ENABLE, new_value)
+        labels["Torque"].config(
+            text="ON" if new_value else "OFF",
+            foreground="green" if new_value else "gray",
+        )
+        messagebox.showinfo("完了", f"トルクを {'ON' if new_value else 'OFF'} にしました")
+    except Exception as e:  # noqa: BLE001
+        messagebox.showerror("通信エラー", str(e))
+
+
+# ---------------------------------------------------------------------------
+# 位置指令（Goal Position, addr 128）
+# ---------------------------------------------------------------------------
+def _refresh_goal_angle_label():
+    """現在のスライダ値に対応する角度ラベルを更新する。"""
+    goal = int(float(goal_scale.get()))
+    goal_angle_label.config(text=f"Angle: {position_to_angle(goal):.1f} deg")
+
+
+def on_goal_slider(value):
+    """スライダ操作時: 入力欄と角度ラベルを同期する（送信はしない）。"""
+    goal = int(float(value))
+    goal_entry.delete(0, tk.END)
+    goal_entry.insert(0, str(goal))
+    goal_angle_label.config(text=f"Angle: {position_to_angle(goal):.1f} deg")
+
+
+def apply_goal_entry(event=None):
+    """入力欄の値をスライダへ反映する（Enter または「移動」前に呼ぶ）。"""
+    try:
+        goal = int(goal_entry.get())
+    except ValueError:
+        return
+    goal = max(0, min(POSITION_MAX, goal))
+    goal_scale.set(goal)
+    _refresh_goal_angle_label()
+
+
+def get_goal_position():
+    """入力欄から目標位置を取得し 0-POSITION_MAX にクランプする。不正な場合は None。"""
+    try:
+        goal = int(goal_entry.get())
+    except ValueError:
+        return None
+    return max(0, min(POSITION_MAX, goal))
+
+
+def move_to_goal():
+    """Goal Position(128) に目標位置を書き込み、サーボを動作させる。"""
+    goal = get_goal_position()
+    if goal is None:
+        messagebox.showerror("入力エラー", f"目標位置は 0〜{POSITION_MAX} の整数で入力してください")
+        return
+
+    # 入力欄をクランプ後の値に揃える
+    goal_scale.set(goal)
+    goal_entry.delete(0, tk.END)
+    goal_entry.insert(0, str(goal))
+    _refresh_goal_angle_label()
+
+    servo_id = get_current_servo_id()
+    enable_torque = torque_on_var.get()
+    try:
+        with open_serial() as ser:
+            if enable_torque:
+                write_register(ser, servo_id, REG_TORQUE_ENABLE, 1)
+            write_register(ser, servo_id, REG_GOAL_POSITION, goal)
+            time.sleep(0.05)
+            # 到達位置を確認のため読み取り（失敗しても指令自体は成功扱い）
+            try:
+                position = read_register(ser, servo_id, REG_PRESENT_POSITION)
+            except Exception:  # noqa: BLE001
+                position = goal
+
+        if enable_torque:
+            labels["Torque"].config(text="ON", foreground="green")
+        labels["Position"].config(text=f"{position} (0x{position:04X})")
+        labels["Angle"].config(text=f"{position_to_angle(position):.1f} deg")
+        draw_position_bar(position)
+    except Exception as e:  # noqa: BLE001
+        messagebox.showerror("通信エラー", str(e))
+
+
+# ---------------------------------------------------------------------------
+# 自動更新ポーリング
+# ---------------------------------------------------------------------------
+_poll_job = None  # root.after のジョブ ID
+_poll_busy = False  # 読み取り中フラグ（オーバーラップ防止）
+
+
+def poll_tick():
+    """自動更新の 1 サイクル。位置を読み取り、次サイクルを予約する。"""
+    global _poll_job, _poll_busy
+    if not auto_refresh_var.get():
+        _poll_job = None
+        return
+
+    if not _poll_busy:
+        _poll_busy = True
+        try:
+            read_position_only(show_errors=False)
+        finally:
+            _poll_busy = False
+
+    _poll_job = root.after(200, poll_tick)
+
+
+def toggle_auto_refresh():
+    """自動更新チェックボックスの ON/OFF を処理する。"""
+    global _poll_job
+    if auto_refresh_var.get():
+        if _poll_job is None:
+            poll_tick()
+    else:
+        if _poll_job is not None:
+            root.after_cancel(_poll_job)
+            _poll_job = None
+
+
+def on_close():
+    """ウィンドウを閉じる際にポーリングを止めてから破棄する。"""
+    global _poll_job
+    auto_refresh_var.set(False)
+    if _poll_job is not None:
+        root.after_cancel(_poll_job)
+        _poll_job = None
+    root.destroy()
+
+
+# ---------------------------------------------------------------------------
+# セルフテスト（--selftest）: ハードウェア無しでプロトコルヘルパーを検証
+# ---------------------------------------------------------------------------
+def _selftest():
+    """フレーム生成 / CRC / 変換の整合性を検証する。"""
+    # Present Position 読み取り（ID 11）は 0B 03 01 00 00 01 <crc>
+    frame = build_frame(DEFAULT_SERVO_ID, FUNC_READ, REG_PRESENT_POSITION, 1)
+    assert frame[:6] == bytes([0x0B, 0x03, 0x01, 0x00, 0x00, 0x01]), _hex(frame)
+    # 自身の CRC を検証（ラウンドトリップ）
+    assert verify_checksum(frame), "read frame CRC round-trip failed"
+
+    # Error Reset 書き込み（ID 11, addr 134, val 4）は 0B 06 00 86 00 04 <crc>
+    wframe = build_frame(DEFAULT_SERVO_ID, FUNC_WRITE, REG_ERROR_RESET, ERROR_RESET_MIDPOINT)
+    assert wframe[:6] == bytes([0x0B, 0x06, 0x00, 0x86, 0x00, 0x04]), _hex(wframe)
+    assert verify_checksum(wframe), "write frame CRC round-trip failed"
+
+    # Goal Position 書き込み（ID 11, addr 128, val 2047）は 0B 06 00 80 07 FF <crc>
+    gframe = build_frame(DEFAULT_SERVO_ID, FUNC_WRITE, REG_GOAL_POSITION, POSITION_MIDPOINT)
+    assert gframe[:6] == bytes([0x0B, 0x06, 0x00, 0x80, 0x07, 0xFF]), _hex(gframe)
+    assert verify_checksum(gframe), "goal frame CRC round-trip failed"
+
+    # 既知のベクトル: Modbus CRC16 of {0x01,0x03,0x00,0x00,0x00,0x01} = 0x0A84 -> LO 84 HI 0A
+    crc = calculate_crc16(bytes([0x01, 0x03, 0x00, 0x00, 0x00, 0x01]))
+    assert crc == 0x0A84, f"CRC16 mismatch: 0x{crc:04X}"
+
+    # 位置 <-> 角度
+    assert abs(position_to_angle(0) - 0.0) < 1e-6
+    assert abs(position_to_angle(2048) - 180.0) < 1e-6
+    assert abs(position_to_angle(4095) - 360.0) < 0.1
+
+    print("selftest OK")
+
+
+# ---------------------------------------------------------------------------
+# GUI 構築（ddt_checker.py と同じスクロール可能レイアウト）
+# ---------------------------------------------------------------------------
+def build_gui():
+    """GUI を構築して起動する（tkinter）。"""
+    global root, labels, port_list, entry_servo_id, position_canvas, auto_refresh_var
+    global goal_scale, goal_entry, goal_angle_label, torque_on_var
+
+    root = tk.Tk()
+    root.title("サーボ状態表示 & 中点設定")
+    root.geometry("440x760")
+    root.protocol("WM_DELETE_WINDOW", on_close)
+
+    main_container = ttk.Frame(root)
+    main_container.pack(fill="both", expand=True)
+
+    canvas = tk.Canvas(main_container, highlightthickness=0)
+    scrollbar = ttk.Scrollbar(main_container, orient="vertical", command=canvas.yview)
+    scrollable_frame = ttk.Frame(canvas)
+
+    scrollable_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+    canvas.configure(yscrollcommand=scrollbar.set)
+
+    def update_scroll_region(event=None):
+        canvas.configure(scrollregion=canvas.bbox("all"))
+
+    def resize_scrollable_frame(event):
+        canvas.itemconfigure(scrollable_window, width=event.width)
+
+    def scroll_with_mousewheel(event):
+        canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    scrollable_frame.bind("<Configure>", update_scroll_region)
+    canvas.bind("<Configure>", resize_scrollable_frame)
+    canvas.bind_all("<MouseWheel>", scroll_with_mousewheel)
+    canvas.bind_all("<Button-4>", lambda e: canvas.yview_scroll(-1, "units"))
+    canvas.bind_all("<Button-5>", lambda e: canvas.yview_scroll(1, "units"))
+    canvas.pack(side="left", fill="both", expand=True)
+    scrollbar.pack(side="right", fill="y")
+
+    labels = {}
+
+    # --- 接続 ---
+    frame_conn = ttk.LabelFrame(scrollable_frame, text="接続", padding=10)
+    frame_conn.pack(padx=10, pady=(10, 5), fill="x")
+
+    ttk.Label(frame_conn, text="Port Status:").grid(row=0, column=0, sticky="e")
+    labels["Port Status"] = ttk.Label(frame_conn, text="---")
+    labels["Port Status"].grid(row=0, column=1, sticky="w", columnspan=2)
+
+    ttk.Label(frame_conn, text="サーボ ID:").grid(row=1, column=0, sticky="e", pady=3)
+    entry_servo_id = ttk.Entry(frame_conn, width=8)
+    entry_servo_id.insert(0, str(DEFAULT_SERVO_ID))
+    entry_servo_id.grid(row=1, column=1, sticky="w", pady=3)
+    ttk.Label(frame_conn, text="(tilt=11 / trigger=10)", foreground="gray").grid(
+        row=1, column=2, sticky="w"
+    )
+
+    ttk.Button(frame_conn, text="ポート選択", command=select_port).grid(
+        row=2, column=0, pady=3, padx=2
+    )
+    ttk.Button(frame_conn, text="ボーレート選択", command=select_baudrate).grid(
+        row=2, column=1, pady=3, padx=2
+    )
+    ttk.Button(frame_conn, text="ポート状態更新", command=refresh_port_status).grid(
+        row=2, column=2, pady=3, padx=2
+    )
+
+    # --- サーボ情報 ---
+    frame_info = ttk.LabelFrame(scrollable_frame, text="サーボ情報", padding=10)
+    frame_info.pack(padx=10, pady=5, fill="x")
+
+    info_keys = ["ID", "Position", "Angle", "Velocity", "Voltage", "Temperature", "Current",
+                 "Moving", "Torque"]
+    for i, key in enumerate(info_keys):
+        ttk.Label(frame_info, text=f"{key}:").grid(row=i, column=0, sticky="e")
+        labels[key] = ttk.Label(frame_info, text="---")
+        labels[key].grid(row=i, column=1, sticky="w")
+
+    ttk.Button(frame_info, text="情報更新", command=read_all_info).grid(
+        row=len(info_keys), columnspan=2, pady=(8, 2)
+    )
+
+    auto_refresh_var = tk.BooleanVar(value=False)
+    ttk.Checkbutton(
+        frame_info,
+        text="自動更新 (200ms)",
+        variable=auto_refresh_var,
+        command=toggle_auto_refresh,
+    ).grid(row=len(info_keys) + 1, columnspan=2, pady=2)
+
+    # --- 位置ビジュアライザ ---
+    frame_vis = ttk.LabelFrame(scrollable_frame, text="位置ビジュアライザ", padding=10)
+    frame_vis.pack(padx=10, pady=5, fill="x")
+
+    position_canvas = tk.Canvas(frame_vis, height=110, highlightthickness=0, bg="white")
+    position_canvas.pack(fill="x", expand=True)
+    position_canvas.bind("<Configure>", on_canvas_resize)
+
+    # --- 位置指令（Goal Position） ---
+    frame_goal = ttk.LabelFrame(scrollable_frame, text="位置指令 (Goal Position)", padding=10)
+    frame_goal.pack(padx=10, pady=5, fill="x")
+
+    goal_scale = tk.Scale(
+        frame_goal,
+        from_=0,
+        to=POSITION_MAX,
+        orient="horizontal",
+        command=on_goal_slider,
+        showvalue=False,
+    )
+    goal_scale.set(POSITION_MIDPOINT)
+    goal_scale.pack(fill="x", expand=True)
+
+    goal_row = ttk.Frame(frame_goal)
+    goal_row.pack(fill="x", pady=(4, 0))
+    ttk.Label(goal_row, text=f"目標位置 (0〜{POSITION_MAX}):").pack(side="left")
+    goal_entry = ttk.Entry(goal_row, width=8)
+    goal_entry.insert(0, str(POSITION_MIDPOINT))
+    goal_entry.bind("<Return>", apply_goal_entry)
+    goal_entry.pack(side="left", padx=5)
+    goal_angle_label = ttk.Label(goal_row, text="Angle: 180.0 deg", foreground="gray")
+    goal_angle_label.pack(side="left", padx=5)
+
+    torque_on_var = tk.BooleanVar(value=True)
+    ttk.Checkbutton(frame_goal, text="送信時にトルクON", variable=torque_on_var).pack(
+        anchor="w", pady=(4, 0)
+    )
+    ttk.Button(frame_goal, text="移動", command=move_to_goal).pack(fill="x", pady=(4, 0))
+
+    # --- キャリブレーション ---
+    frame_cal = ttk.LabelFrame(scrollable_frame, text="キャリブレーション", padding=10)
+    frame_cal.pack(padx=10, pady=5, fill="x")
+
+    ttk.Button(
+        frame_cal, text="現在位置を中点(2047)に設定", command=set_midpoint
+    ).pack(fill="x", pady=3)
+    ttk.Button(frame_cal, text="トルク ON/OFF", command=toggle_torque).pack(fill="x", pady=3)
+    ttk.Label(
+        frame_cal,
+        text="※ トルクを OFF にして手でホーンを目標位置へ動かし、\n"
+             "  「中点(2047)に設定」を押すとその位置が中点になります。",
+        foreground="gray",
+        justify="left",
+    ).pack(anchor="w", pady=(3, 0))
+
+    # ポート状態表示
+    port_list = tk.StringVar()
+    ttk.Label(scrollable_frame, textvariable=port_list, foreground="blue").pack(pady=5)
+
+    refresh_port_status()
+    root.after(100, lambda: draw_position_bar())  # 初期描画
+    root.mainloop()
+
+
+if __name__ == "__main__":
+    if "--selftest" in sys.argv:
+        _selftest()
+    else:
+        build_gui()
