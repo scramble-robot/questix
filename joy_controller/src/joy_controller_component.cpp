@@ -127,7 +127,14 @@ bool JoyControllerComponent::isButtonJustPressed(int button_index) {
 
 void JoyControllerComponent::publishTwist(const sensor_msgs::msg::Joy::SharedPtr msg) {
   // joy_to_twist style implementation - simplified and direct mapping
-  if (msg->axes.size() < 4) {
+  // Axis indices are configurable, so validate them against this message size
+  // instead of assuming a fixed axis count.
+  if (linear_x_axis_ < 0 || static_cast<size_t>(linear_x_axis_) >= msg->axes.size() ||
+      angular_z_axis_ < 0 || static_cast<size_t>(angular_z_axis_) >= msg->axes.size()) {
+    RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
+                         "Configured axis index out of range (linear_x_axis=%d, angular_z_axis=%d, "
+                         "axes=%zu); skipping twist publish",
+                         linear_x_axis_, angular_z_axis_, msg->axes.size());
     return;
   }
 
@@ -166,6 +173,12 @@ rcl_interfaces::msg::SetParametersResult JoyControllerComponent::paramCallback(
         lateral_input_ratio_ = param.get_value<double>();
       } else if (name == "angular_input_ratio") {
         angular_input_ratio_ = param.get_value<double>();
+      } else if (name == "linear_x_axis") {
+        linear_x_axis_ = static_cast<int>(param.get_value<int64_t>());
+      } else if (name == "linear_y_axis") {
+        linear_y_axis_ = static_cast<int>(param.get_value<int64_t>());
+      } else if (name == "angular_z_axis") {
+        angular_z_axis_ = static_cast<int>(param.get_value<int64_t>());
       } else if (name == "debug_mode") {
         debug_mode_ = param.get_value<bool>();
       }
