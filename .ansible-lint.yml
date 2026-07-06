@@ -13,6 +13,10 @@ skip_list:
   - yaml[line-length] # Allow longer lines for readability
   - name[casing] # Allow descriptive task names
   - risky-file-permissions # We manage permissions explicitly
+  # Roles intentionally share cross-role config vars (target_user,
+  # workspace_path, ros2_distro, ...) defined in playbook vars_files;
+  # renaming them per-role would break that design.
+  - var-naming[no-role-prefix]
 
 # Use specific rules
 use_default_rules: true
