@@ -1,4 +1,4 @@
-# !/usr/bin/python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """FEETECH サーボ（shot / tilt・trigger）用のデバッグ GUI ツール。
 
@@ -16,10 +16,23 @@ motor_control_lib の FeetechServoController が話す Modbus-RTU プロトコ�
 import sys
 import time
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox  # ttk は起動時に ttkbootstrap へ差し替えられる場合がある
 
-import serial
-import serial.tools.list_ports
+try:
+    import serial
+    import serial.tools.list_ports
+except ImportError as e:
+    print(f"pyserial が見つかりません ({e})。\n"
+          "`pip3 install pyserial` または `sudo apt install python3-serial` で導入してください。",
+          file=sys.stderr)
+    sys.exit(1)
+
+# GUI テーマ関連（ttkbootstrap があればモダンテーマ、無ければ stock ttk にフォールバック）
+HAS_TB = False
+style = None
+current_theme = "light"
+DARK_THEME = "darkly"
+LIGHT_THEME = "flatly"
 
 PORT = "/dev/servo"  # CH340 RS485 アダプタの udev シンボリックリンク（fallback: /dev/ttyUSB0）
 BAUDRATE = 115200
@@ -48,6 +61,46 @@ POSITION_MIDPOINT = 2047    # 中点
 
 
 # ---------------------------------------------------------------------------
+# GUI ツールキット準備（ttkbootstrap の有効化）
+# ---------------------------------------------------------------------------
+def ensure_gui_toolkit():
+    """GUI 起動時に ttkbootstrap があれば有効化する。無ければ stock ttk にフォールバックする。
+
+    ttkbootstrap のインストールは Ansible（raspberry_pi_setup ロール, pip3）で行う想定。
+    未導入・破損（依存の Pillow 不整合など）の環境でも stock ttk で GUI 自体は起動する。
+    """
+    global ttk, HAS_TB
+    try:
+        import ttkbootstrap as tb
+    except Exception as e:  # noqa: BLE001 - import 失敗の種類を問わず stock ttk で継続する
+        print(f"ttkbootstrap を利用できないため stock ttk で続行します: {e}\n"
+              "（`pip3 install ttkbootstrap` または Ansible の raspberry_pi_setup で導入できます）")
+        return
+    ttk = tb  # ttk.Button/Label/Frame/Window/... が themed 版になる
+    HAS_TB = True
+
+
+def _mk(cls, *args, bootstyle=None, **kwargs):
+    """ウィジェット生成ヘルパー。bootstyle は ttkbootstrap 使用時のみ付与する。"""
+    if HAS_TB and bootstyle:
+        kwargs["bootstyle"] = bootstyle
+    return cls(*args, **kwargs)
+
+
+def _make_toplevel(title: str):
+    """選択ダイアログ用の Toplevel を生成する。
+
+    ttkbootstrap の Toplevel は第 1 引数が master ではなく title のため、
+    tk.Toplevel と同じ感覚で位置引数を渡さないようここに集約する。
+    """
+    if HAS_TB:
+        return ttk.Toplevel(title=title, transient=root)
+    window = tk.Toplevel(root)
+    window.title(title)
+    return window
+
+
+# ---------------------------------------------------------------------------
 # ポート / ボーレート選択状態（ddt_checker.py と同じホルダー方式）
 # ---------------------------------------------------------------------------
 def get_current_port():
@@ -65,14 +118,31 @@ def get_current_baudrate():
 
 
 def get_current_servo_id():
-    """入力欄からサーボ ID を取得（不正な場合はデフォルトにフォールバック）。"""
+    """入力欄からサーボ ID を取得する。
+
+    不正な入力（数値でない・範囲外）の場合は None を返し、呼び出し側で中断させる。
+    黙ってデフォルト ID にフォールバックすると意図しないサーボへ書き込む恐れがあるため。
+    入力欄が未生成の段階のみデフォルト ID を返す。
+    """
     try:
         value = int(entry_servo_id.get())
-        if 0 <= value <= 253:
-            return value
-    except (ValueError, NameError):
-        pass
-    return DEFAULT_SERVO_ID
+    except NameError:
+        return DEFAULT_SERVO_ID
+    except ValueError:
+        return None
+    if 0 <= value <= 253:
+        return value
+    return None
+
+
+def _require_servo_id():
+    """サーボ ID を取得し、不正ならエラーダイアログを表示して None を返す。"""
+    servo_id = get_current_servo_id()
+    if servo_id is None:
+        messagebox.showerror(
+            "入力エラー", "サーボ ID は 0〜253 の整数で入力してください"
+        )
+    return servo_id
 
 
 # ---------------------------------------------------------------------------
@@ -251,15 +321,14 @@ def select_port():
         messagebox.showwarning("警告", "利用可能なポートがありません")
         return
 
-    selection_window = tk.Toplevel(root)
-    selection_window.title("ポート選択")
+    selection_window = _make_toplevel("ポート選択")
     selection_window.geometry("300x220")
 
-    tk.Label(selection_window, text="使用するポートを選択してください:").pack(pady=10)
+    ttk.Label(selection_window, text="使用するポートを選択してください:").pack(pady=10)
 
     selected_port = tk.StringVar(value=available_ports[0])
     for port in available_ports:
-        tk.Radiobutton(
+        ttk.Radiobutton(
             selection_window, text=port, variable=selected_port, value=port
         ).pack(anchor="w", padx=20)
 
@@ -269,20 +338,20 @@ def select_port():
         refresh_port_status()
         messagebox.showinfo("確認", f"ポート {selected_port.get()} を選択しました")
 
-    tk.Button(selection_window, text="確定", command=confirm_selection).pack(pady=10)
+    _mk(ttk.Button, selection_window, text="確定", command=confirm_selection,
+        bootstyle="success").pack(pady=10)
 
 
 def select_baudrate():
     """ボーレートを選択する。"""
-    selection_window = tk.Toplevel(root)
-    selection_window.title("ボーレート選択")
+    selection_window = _make_toplevel("ボーレート選択")
     selection_window.geometry("300x420")
 
-    tk.Label(selection_window, text="使用するボーレートを選択してください:").pack(pady=10)
+    ttk.Label(selection_window, text="使用するボーレートを選択してください:").pack(pady=10)
 
     selected_baudrate = tk.StringVar(value=str(get_current_baudrate()))
     for baudrate in COMMON_BAUDRATES:
-        tk.Radiobutton(
+        ttk.Radiobutton(
             selection_window,
             text=str(baudrate),
             variable=selected_baudrate,
@@ -295,13 +364,43 @@ def select_baudrate():
         refresh_port_status()
         messagebox.showinfo("確認", f"ボーレート {selected_baudrate.get()} を選択しました")
 
-    tk.Button(selection_window, text="確定", command=confirm_selection).pack(pady=10)
+    _mk(ttk.Button, selection_window, text="確定", command=confirm_selection,
+        bootstyle="success").pack(pady=10)
 
 
 # ---------------------------------------------------------------------------
 # 位置ビジュアライザ（水平バー）
 # ---------------------------------------------------------------------------
 _last_position = None  # 最後に読み取った位置（リサイズ再描画用）
+
+# stock ttk フォールバック時（ライト）のパレット
+_FALLBACK_PALETTE = {
+    "bg": "white",
+    "fg": "#333333",
+    "muted": "#555555",
+    "track": "#f0f0f0",
+    "border": "#888888",
+    "marker": "#4a90d9",
+    "marker_edge": "#1a5c9c",
+    "danger": "#d00000",
+}
+
+
+def _palette():
+    """現在のテーマに応じた描画用カラーパレットを返す。"""
+    if HAS_TB and style is not None:
+        c = style.colors
+        return {
+            "bg": c.bg,
+            "fg": c.fg,
+            "muted": c.secondary,
+            "track": c.inputbg,
+            "border": c.border,
+            "marker": c.primary,
+            "marker_edge": c.info,
+            "danger": c.danger,
+        }
+    return _FALLBACK_PALETTE
 
 
 def draw_position_bar(position=None):
@@ -310,7 +409,9 @@ def draw_position_bar(position=None):
     if position is not None:
         _last_position = position
 
+    pal = _palette()
     canvas = position_canvas
+    canvas.configure(bg=pal["bg"])
     canvas.delete("all")
 
     width = canvas.winfo_width()
@@ -330,37 +431,44 @@ def draw_position_bar(position=None):
         return bar_left + bar_width * pos / POSITION_MAX
 
     # バー枠
-    canvas.create_rectangle(bar_left, bar_top, bar_right, bar_bottom, outline="#888", fill="#f0f0f0")
+    canvas.create_rectangle(
+        bar_left, bar_top, bar_right, bar_bottom, outline=pal["border"], fill=pal["track"]
+    )
 
     # 目盛（0, 中点, 最大）
-    canvas.create_text(bar_left, bar_bottom + 12, text="0", fill="#555")
-    canvas.create_text(bar_right, bar_bottom + 12, text=str(POSITION_MAX), fill="#555")
+    canvas.create_text(bar_left, bar_bottom + 12, text="0", fill=pal["muted"])
+    canvas.create_text(bar_right, bar_bottom + 12, text=str(POSITION_MAX), fill=pal["muted"])
 
     # 中点 2047 基準線（強調）
     mid_x = pos_to_x(POSITION_MIDPOINT)
-    canvas.create_line(mid_x, bar_top - 8, mid_x, bar_bottom + 4, fill="#d00", width=2, dash=(4, 2))
-    canvas.create_text(mid_x, bar_top - 15, text="中点 2047", fill="#d00", font=("Arial", 9, "bold"))
+    canvas.create_line(
+        mid_x, bar_top - 8, mid_x, bar_bottom + 4, fill=pal["danger"], width=2, dash=(4, 2)
+    )
+    canvas.create_text(
+        mid_x, bar_top - 15, text="中点 2047", fill=pal["danger"], font=("Arial", 9, "bold")
+    )
 
     if _last_position is None:
         canvas.create_text(
             (bar_left + bar_right) / 2, (bar_top + bar_bottom) / 2,
-            text="---", fill="#999",
+            text="---", fill=pal["muted"],
         )
         return
 
     # 現在位置マーカー（バーの塗り + 三角）
     marker_x = pos_to_x(_last_position)
-    canvas.create_rectangle(bar_left, bar_top, marker_x, bar_bottom, outline="", fill="#4a90d9")
+    canvas.create_rectangle(bar_left, bar_top, marker_x, bar_bottom, outline="", fill=pal["marker"])
     canvas.create_polygon(
         marker_x - 7, bar_top - 6, marker_x + 7, bar_top - 6, marker_x, bar_top + 4,
-        fill="#1a5c9c",
+        fill=pal["marker_edge"],
     )
-    canvas.create_line(marker_x, bar_top, marker_x, bar_bottom, fill="#1a5c9c", width=2)
+    canvas.create_line(marker_x, bar_top, marker_x, bar_bottom, fill=pal["marker_edge"], width=2)
 
     angle = position_to_angle(_last_position)
     canvas.create_text(
         (bar_left + bar_right) / 2, bar_bottom + 14,
         text=f"Pos: {_last_position} (0x{_last_position:04X})   Angle: {angle:.1f} deg",
+        fill=pal["fg"],
         font=("Arial", 10, "bold"),
     )
 
@@ -375,7 +483,9 @@ def on_canvas_resize(event):
 # ---------------------------------------------------------------------------
 def read_all_info(show_errors=True):
     """全テレメトリを読み取り、ラベルとバーを更新する。成功時 True。"""
-    servo_id = get_current_servo_id()
+    servo_id = _require_servo_id()
+    if servo_id is None:
+        return False
     try:
         with open_serial() as ser:
             position = read_register(ser, servo_id, REG_PRESENT_POSITION)
@@ -410,6 +520,9 @@ def read_all_info(show_errors=True):
 def read_position_only(show_errors=False):
     """位置のみを読み取ってバーを更新する（自動更新の軽量版）。成功時 True。"""
     servo_id = get_current_servo_id()
+    if servo_id is None:
+        # 自動更新中の入力途中などで ID が不正になるのは正常系。ダイアログは出さない。
+        return False
     try:
         with open_serial() as ser:
             position = read_register(ser, servo_id, REG_PRESENT_POSITION)
@@ -426,7 +539,9 @@ def read_position_only(show_errors=False):
 
 def set_midpoint():
     """Error Reset(134) に 4 を書き込み、現在位置を中点(2047)に設定する。"""
-    servo_id = get_current_servo_id()
+    servo_id = _require_servo_id()
+    if servo_id is None:
+        return
     if not messagebox.askyesno(
         "確認",
         f"サーボ ID {servo_id} の現在位置を中点(2047)に設定します。\n"
@@ -454,7 +569,9 @@ def set_midpoint():
 
 def toggle_torque():
     """トルク有効(129)を ON/OFF トグルする。手でホーンを動かして中点合わせする際に使う。"""
-    servo_id = get_current_servo_id()
+    servo_id = _require_servo_id()
+    if servo_id is None:
+        return
     try:
         with open_serial() as ser:
             current = read_register(ser, servo_id, REG_TORQUE_ENABLE)
@@ -519,7 +636,9 @@ def move_to_goal():
     goal_entry.insert(0, str(goal))
     _refresh_goal_angle_label()
 
-    servo_id = get_current_servo_id()
+    servo_id = _require_servo_id()
+    if servo_id is None:
+        return
     enable_torque = torque_on_var.get()
     try:
         with open_serial() as ser:
@@ -578,6 +697,18 @@ def toggle_auto_refresh():
             _poll_job = None
 
 
+def toggle_theme():
+    """ダーク / ライトテーマを切り替える（ttkbootstrap 使用時のみ有効）。"""
+    global current_theme
+    if not HAS_TB or style is None:
+        return
+    current_theme = "light" if current_theme == "dark" else "dark"
+    style.theme_use(LIGHT_THEME if current_theme == "light" else DARK_THEME)
+    theme_button.config(text="☀ ライト" if current_theme == "dark" else "🌙 ダーク")
+    # テーマ非対応のキャンバス背景を再適用してバーを再描画
+    draw_position_bar()
+
+
 def on_close():
     """ウィンドウを閉じる際にポーリングを止めてから破棄する。"""
     global _poll_job
@@ -627,17 +758,37 @@ def _selftest():
 def build_gui():
     """GUI を構築して起動する（tkinter）。"""
     global root, labels, port_list, entry_servo_id, position_canvas, auto_refresh_var
-    global goal_scale, goal_entry, goal_angle_label, torque_on_var
+    global goal_scale, goal_entry, goal_angle_label, torque_on_var, style, theme_button
 
-    root = tk.Tk()
+    ensure_gui_toolkit()  # ttkbootstrap を有効化（無ければ stock ttk）
+
+    try:
+        if HAS_TB:
+            root = ttk.Window(themename=LIGHT_THEME)
+            style = root.style
+        else:
+            root = tk.Tk()
+            style = ttk.Style()
+            try:
+                style.theme_use("clam")
+            except tk.TclError:
+                pass
+    except tk.TclError as e:
+        print(f"GUI を初期化できません（ディスプレイに接続できない環境の可能性があります）: {e}\n"
+              "DISPLAY 環境変数の設定、または X 転送 / デスクトップ環境上での実行を確認してください。",
+              file=sys.stderr)
+        sys.exit(1)
+
     root.title("サーボ状態表示 & 中点設定")
-    root.geometry("440x760")
+    root.geometry("460x800")
     root.protocol("WM_DELETE_WINDOW", on_close)
 
     main_container = ttk.Frame(root)
     main_container.pack(fill="both", expand=True)
 
     canvas = tk.Canvas(main_container, highlightthickness=0)
+    if HAS_TB:
+        canvas.configure(bg=style.colors.bg)
     scrollbar = ttk.Scrollbar(main_container, orient="vertical", command=canvas.yview)
     scrollable_frame = ttk.Frame(canvas)
 
@@ -664,7 +815,7 @@ def build_gui():
     labels = {}
 
     # --- 接続 ---
-    frame_conn = ttk.LabelFrame(scrollable_frame, text="接続", padding=10)
+    frame_conn = ttk.Labelframe(scrollable_frame, text="接続", padding=10)
     frame_conn.pack(padx=10, pady=(10, 5), fill="x")
 
     ttk.Label(frame_conn, text="Port Status:").grid(row=0, column=0, sticky="e")
@@ -679,18 +830,22 @@ def build_gui():
         row=1, column=2, sticky="w"
     )
 
-    ttk.Button(frame_conn, text="ポート選択", command=select_port).grid(
-        row=2, column=0, pady=3, padx=2
+    _mk(ttk.Button, frame_conn, text="ポート選択", command=select_port,
+        bootstyle="primary-outline").grid(row=2, column=0, pady=3, padx=2, sticky="ew")
+    _mk(ttk.Button, frame_conn, text="ボーレート選択", command=select_baudrate,
+        bootstyle="primary-outline").grid(row=2, column=1, pady=3, padx=2, sticky="ew")
+    _mk(ttk.Button, frame_conn, text="ポート状態更新", command=refresh_port_status,
+        bootstyle="primary-outline").grid(row=2, column=2, pady=3, padx=2, sticky="ew")
+
+    # テーマ切り替え（ttkbootstrap 使用時のみ）
+    theme_button = _mk(
+        ttk.Button, frame_conn, text="🌙 ダーク", command=toggle_theme, bootstyle="secondary"
     )
-    ttk.Button(frame_conn, text="ボーレート選択", command=select_baudrate).grid(
-        row=2, column=1, pady=3, padx=2
-    )
-    ttk.Button(frame_conn, text="ポート状態更新", command=refresh_port_status).grid(
-        row=2, column=2, pady=3, padx=2
-    )
+    if HAS_TB:
+        theme_button.grid(row=3, column=0, columnspan=3, pady=(6, 0), sticky="ew")
 
     # --- サーボ情報 ---
-    frame_info = ttk.LabelFrame(scrollable_frame, text="サーボ情報", padding=10)
+    frame_info = ttk.Labelframe(scrollable_frame, text="サーボ情報", padding=10)
     frame_info.pack(padx=10, pady=5, fill="x")
 
     info_keys = ["ID", "Position", "Angle", "Velocity", "Voltage", "Temperature", "Current",
@@ -700,39 +855,42 @@ def build_gui():
         labels[key] = ttk.Label(frame_info, text="---")
         labels[key].grid(row=i, column=1, sticky="w")
 
-    ttk.Button(frame_info, text="情報更新", command=read_all_info).grid(
+    _mk(ttk.Button, frame_info, text="情報更新", command=read_all_info, bootstyle="primary").grid(
         row=len(info_keys), columnspan=2, pady=(8, 2)
     )
 
     auto_refresh_var = tk.BooleanVar(value=False)
-    ttk.Checkbutton(
+    _mk(
+        ttk.Checkbutton,
         frame_info,
         text="自動更新 (200ms)",
         variable=auto_refresh_var,
         command=toggle_auto_refresh,
+        bootstyle="round-toggle",
     ).grid(row=len(info_keys) + 1, columnspan=2, pady=2)
 
     # --- 位置ビジュアライザ ---
-    frame_vis = ttk.LabelFrame(scrollable_frame, text="位置ビジュアライザ", padding=10)
+    frame_vis = ttk.Labelframe(scrollable_frame, text="位置ビジュアライザ", padding=10)
     frame_vis.pack(padx=10, pady=5, fill="x")
 
-    position_canvas = tk.Canvas(frame_vis, height=110, highlightthickness=0, bg="white")
+    vis_bg = style.colors.bg if HAS_TB else "white"
+    position_canvas = tk.Canvas(frame_vis, height=110, highlightthickness=0, bg=vis_bg)
     position_canvas.pack(fill="x", expand=True)
     position_canvas.bind("<Configure>", on_canvas_resize)
 
     # --- 位置指令（Goal Position） ---
-    frame_goal = ttk.LabelFrame(scrollable_frame, text="位置指令 (Goal Position)", padding=10)
+    frame_goal = ttk.Labelframe(scrollable_frame, text="位置指令 (Goal Position)", padding=10)
     frame_goal.pack(padx=10, pady=5, fill="x")
 
-    goal_scale = tk.Scale(
+    goal_scale = _mk(
+        ttk.Scale,
         frame_goal,
         from_=0,
         to=POSITION_MAX,
         orient="horizontal",
         command=on_goal_slider,
-        showvalue=False,
+        bootstyle="info",
     )
-    goal_scale.set(POSITION_MIDPOINT)
     goal_scale.pack(fill="x", expand=True)
 
     goal_row = ttk.Frame(frame_goal)
@@ -745,20 +903,33 @@ def build_gui():
     goal_angle_label = ttk.Label(goal_row, text="Angle: 180.0 deg", foreground="gray")
     goal_angle_label.pack(side="left", padx=5)
 
+    # goal_entry / goal_angle_label 生成後に初期値を設定（.set が on_goal_slider を発火するため）
+    goal_scale.set(POSITION_MIDPOINT)
+
     torque_on_var = tk.BooleanVar(value=True)
-    ttk.Checkbutton(frame_goal, text="送信時にトルクON", variable=torque_on_var).pack(
-        anchor="w", pady=(4, 0)
+    _mk(
+        ttk.Checkbutton,
+        frame_goal,
+        text="送信時にトルクON",
+        variable=torque_on_var,
+        bootstyle="round-toggle",
+    ).pack(anchor="w", pady=(4, 0))
+    _mk(ttk.Button, frame_goal, text="移動", command=move_to_goal, bootstyle="success").pack(
+        fill="x", pady=(4, 0)
     )
-    ttk.Button(frame_goal, text="移動", command=move_to_goal).pack(fill="x", pady=(4, 0))
 
     # --- キャリブレーション ---
-    frame_cal = ttk.LabelFrame(scrollable_frame, text="キャリブレーション", padding=10)
+    frame_cal = ttk.Labelframe(scrollable_frame, text="キャリブレーション", padding=10)
     frame_cal.pack(padx=10, pady=5, fill="x")
 
-    ttk.Button(
-        frame_cal, text="現在位置を中点(2047)に設定", command=set_midpoint
+    _mk(
+        ttk.Button, frame_cal, text="現在位置を中点(2047)に設定", command=set_midpoint,
+        bootstyle="info",
     ).pack(fill="x", pady=3)
-    ttk.Button(frame_cal, text="トルク ON/OFF", command=toggle_torque).pack(fill="x", pady=3)
+    _mk(
+        ttk.Button, frame_cal, text="トルク ON/OFF", command=toggle_torque,
+        bootstyle="secondary-outline",
+    ).pack(fill="x", pady=3)
     ttk.Label(
         frame_cal,
         text="※ トルクを OFF にして手でホーンを目標位置へ動かし、\n"

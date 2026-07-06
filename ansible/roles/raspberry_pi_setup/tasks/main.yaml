@@ -19,6 +19,8 @@
       - python3-dev
       - python3-setuptools
       - python3-wheel
+      - python3-tk  # Tkinter GUI (servo_checker.py / ddt_checker.py debug tools)
+      - python3-serial  # pyserial for serial debug tools
       - python3-rpi.gpio
       - python3-gpiozero
       - libraspberrypi-bin
@@ -30,6 +32,13 @@
       - liblgpio1
     state: present
     update_cache: true
+
+- name: Install ttkbootstrap for the servo/motor debug GUIs
+  ansible.builtin.pip:
+    name: ttkbootstrap
+    state: present
+    extra_args: "--break-system-packages"
+    executable: pip3
 
 - name: Create gpio group
   ansible.builtin.group:
