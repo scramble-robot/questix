@@ -16,7 +16,7 @@
 - `target_ubuntu_version`: 対象 Ubuntu バージョン（デフォルト: `"24.04"`）
 - `ros2_additional_packages`: インストールする追加の ROS2 パッケージのリスト
 - `ros_domain_id`: ROS2 ドメイン ID（デフォルト: `42`）
-- `workspace_path`: ワークスペースパス（デフォルト: `/home/{{ ansible_user }}/robot_ws`）
+- `workspace_path`: ワークスペースパス（デフォルト: `/home/{{ ansible_user }}/questix`。リポジトリのcloneをそのままcolconワークスペースとして使う）
 - `enable_i2c`: I2C を有効化（デフォルト: `true`）
 - `enable_spi`: SPI を有効化（デフォルト: `true`）
 - `configure_udev_rules`: udev ルールを設定（デフォルト: `true`）
