@@ -26,7 +26,7 @@ Questixシステムの各ノードを起動するためのlauncherファイル�
 
 - `ydlidar_ros2_driver`
 - `esc_motor_control_cpp`
-- `ddt_motor_control`
+- `motor_control_app`
 
 LiDARなど実機依存のパッケージは追加取得とJazzy互換性確認が必要です。取得できても、
 対象ハードウェアでの動作を保証するものではありません。

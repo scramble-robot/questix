@@ -16,6 +16,8 @@
     <depend>sensor_msgs</depend>
     <depend>std_msgs</depend>
 
+    <exec_depend>joy_gate</exec_depend>
+    <exec_depend>operation_manager</exec_depend>
     <exec_depend>uart_joy_driver</exec_depend>
 
     <test_depend>ament_lint_auto</test_depend>

@@ -16,9 +16,9 @@
     <param name="use_sim_time" value="$(var use_sim_time)" />
   </node>
 
-  <!-- DDT Motor Controller Node (basic test) -->
-  <node pkg="ddt_motor_control" exec="ddt_motor_controller_node.py" name="ddt_motor_controller" output="screen">
-    <param name="use_sim_time" value="$(var use_sim_time)" />
-  </node>
+  <!-- Drive component (basic test) -->
+  <include file="$(find-pkg-share questix_launcher)/launch/drive_component.launch.xml">
+    <arg name="use_sim_time" value="$(var use_sim_time)" />
+  </include>
 
 </launch>
