@@ -23,18 +23,37 @@
 
 - `motor_control_lib/`: Shared library for motor control.
 - `motor_control_app/`: ROS 2 nodes and components for drive, shot, single DDT, and related motor-control applications.
+- `esc_motor_control_cpp/`: C++ package for ESC/DDT motor control.
 - `joy_controller/`, `uart_joy_driver/`, `joy_gate/`, `gpio_reader/`: Input, gating, and GPIO-related packages.
 - `operation_manager/`: Operational state management.
 - `launcher/`: Integrated entry point for ROS launch files. The ROS package name is `questix_launcher`.
 - `description_launch/`: URDF, RViz, and xacro assets.
 - `ansible/`, `scripts/`, `systemd/`: OS setup, ISO build tooling, and resident services.
 - `scripts/robot_manager/`: FastAPI web management UI.
+- `src/`: External packages imported via `dependency.repos` (`ydlidar_ros2`, `ydlidar_sdk_vendor`). Not part of the core QUESTiX codebase; do not edit unless explicitly requested.
 
 ## Pre-work checks
 
 - Always verify consistency across `package.xml`, `CMakeLists.txt`, `launch/`, and `config/` before and after changes.
 - Do not assume directory names always match ROS package names. For example, `launcher/` maps to the ROS package name `questix_launcher`.
 - Hardware-dependent code is likely impossible to validate fully without the physical robot or target hardware.
+
+## Defect-prevention checklist
+
+Recurring bug classes from this repository's fix history. Check each relevant item before submitting changes.
+
+- **C++ member initialization**: Initialize every new class data member in the constructor initializer list (or with an in-class default). Uninitialized primitives have caused undefined servo/motor behavior (cf. #73).
+- **Parameter renames**: When renaming a ROS parameter, grep and update `.cpp`, `.hpp`, `config/*.yaml`, and `launch/` together in one change. A stale name in YAML fails silently: the node falls back to the code default with no error (cf. #71 pan→tilt).
+- **Single source of truth for defaults**: Do not keep defaults for the same parameter in both YAML and launch arguments. Before removing a launch-file default, check whether it is the effective value that has been overriding YAML (cf. #47 fire_button).
+- **Binary protocols**: Document the byte order of multi-byte fields in code comments, and centralize packing/unpacking in helper functions instead of inline bit shifts. On an unknown or unsupported protocol response, log and skip instead of asserting (cf. byte-order and feedback-parsing fixes in the DDT motor protocol).
+- **Control-loop state**: Give PI integrators and similar control state an explicit reset function, and call it on mode transitions, stop, and feedback timeout. Any feedback retry loop must have a timeout and a clear exit condition (cf. #66).
+- **Package renames/removals**: When renaming or removing a package, update every `package.xml` (`build_depend`/`exec_depend`/`test_depend`), `CMakeLists.txt` (`find_package`), and launch reference (`pkg=`, `find-pkg-share`). A stale dependency name breaks `rosdep install` on fresh setups (cf. #64).
+- **Mode-specific parameters**: If a parameter only takes effect in one control mode, state the applicable mode in the YAML comment and the header doc comment, and log when the parameter is ignored in the current mode (cf. `brake_on_stop`, velocity mode only).
+- **Configurable index bounds**: When an array index (joy axis, button, pin) comes from a parameter, bounds-check it against the actual message/array size right before use. A fixed-size check such as `axes.size() < 4` does not cover configurable indices.
+- **Single config copy**: Do not keep divergent copies of the same node's parameter YAML in multiple packages (cf. `drive_component.yaml` in `launcher/config/` and `motor_control_app/config/`). If duplication is unavoidable, add a cross-reference comment in both files and keep them identical.
+- **Launch dependencies in package.xml**: Every package referenced by a launch file via `pkg=` or `find-pkg-share` must be listed as `exec_depend` in that package's `package.xml`, and must actually exist in the workspace or ROS repos.
+- **CI must fail on failure**: Do not mask checks with `continue-on-error: true` or `|| true`. If a check cannot be enforced (e.g. Ansible check-mode limitations), leave a comment explaining why it is advisory.
+- **Installer/unit consistency**: Static `systemd/` unit files and their install-time substitutions (`scripts/install-robot-manager.sh`) and the Ansible templates in `ansible/roles/robot_autostart/templates/` describe the same services; when changing a user, path, or environment variable in one, update all three.
 
 ## Pull request titles
 
@@ -136,10 +155,19 @@ The following commands are standard validation candidates. Whether they can run 
 
 - `git diff --check`
 - `colcon build --symlink-install` (run from the workspace root)
-- `colcon test` (run from the workspace root)
+- `colcon test --packages-skip ydlidar_ros2_driver ydlidar_sdk_vendor` (run from the workspace root; the skip list matches CI)
 - For Ansible changes: `make test-ansible`
 - For Ansible/YAML changes: `yamllint ansible/`
 - For GitHub Actions changes: `yamllint .github/workflows/` and `actionlint` if available.
+
+## CI checks
+
+What CI actually runs; reproduce the relevant parts locally before pushing.
+
+- `ros2-build-test.yaml`: `colcon build` and `colcon test` on amd64 and arm64 (tests skip `ydlidar_ros2_driver` and `ydlidar_sdk_vendor`), plus Python lint with `flake8 --select=F --max-line-length=100` and `pydocstyle`. On pull requests it also runs the `ament_clang_format` check described in "C++ formatting".
+- `ansible-check.yaml`: `ansible-lint`, playbook syntax checks, and a check-mode dry run for `ansible/` changes.
+- `semantic-pull_request.yaml`: Conventional Commits PR title check (see "Pull request titles").
+- Changes touching only `**.md`, `ansible/**`, `scripts/**`, `docker/**`, or `.github/**` do not trigger the ROS 2 build/test workflow.
 
 ## Cross-reference caution
 
