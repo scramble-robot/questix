@@ -39,6 +39,8 @@ BAUDRATE = 115200
 DEFAULT_SERVO_ID = 11  # tilt サーボ（trigger は 10）
 # ボーレート候補（サーボ既定値 115200 を先頭に、servo_control.cpp が対応するレートを列挙）
 COMMON_BAUDRATES = [115200, 57600, 38400, 19200, 9600, 230400, 460800, 921600]
+# ポート候補（自動検出できない・ビジー中でも選べるように既知の候補を常に列挙する）
+COMMON_PORTS = ["/dev/servo", "/dev/ttyUSB0", "/dev/ttyUSB1", "/dev/ttyACM0", "/dev/ttyAMA0"]
 
 # Modbus ファンクションコード
 FUNC_READ = 0x03   # Read Holding Registers
@@ -48,7 +50,8 @@ FUNC_WRITE = 0x06  # Write Single Register
 REG_GOAL_POSITION = 128
 REG_TORQUE_ENABLE = 129
 REG_ERROR_RESET = 134       # 値 4 で現在位置を中点(2047)に設定
-REG_PRESENT_POSITION = 256
+# Present Position はレジスタ 257（servo_control.cpp の有効エントリ。256 は別値を返す）
+REG_PRESENT_POSITION = 257
 REG_PRESENT_VELOCITY = 258
 REG_PRESENT_VOLTAGE = 260
 REG_PRESENT_TEMPERATURE = 261
@@ -194,35 +197,91 @@ def _hex(data: bytes) -> str:
     return " ".join(f"{b:02X}" for b in data)
 
 
-def _transact(ser: serial.Serial, frame: bytes, expected_len: int) -> bytes:
-    """1 フレーム送信し、応答を受信する（ddt_checker.py と同じくソフト RTS 制御なし）。"""
+def _transact(ser: serial.Serial, frame: bytes) -> bytes:
+    """1 フレーム送信し、受信できたバイトをすべて返す（ddt_checker.py と同方式）。
+
+    半二重 RS485 アダプタでは送信バイトがそのまま受信側にエコーされたり、
+    ライン切替時のノイズが先頭に乗ることがある。固定長で読むとエコーや
+    ノイズを応答と誤認して値が壊れるため、「その時点で受信済みのバイトを
+    すべて」読み取り、上位の探索関数で正しい応答フレームを取り出す。
+    """
     ser.reset_input_buffer()
     ser.reset_output_buffer()
     ser.write(frame)
     ser.flush()
     time.sleep(0.02)  # サーボの応答待ち
-    return ser.read(expected_len)
+
+    waiting = ser.in_waiting
+    if waiting == 0:
+        time.sleep(0.03)  # 応答が遅い場合に備えて追加待機
+        waiting = ser.in_waiting
+
+    if waiting > 0:
+        data = ser.read(waiting)
+        time.sleep(0.005)  # 末尾バイトの取りこぼし防止
+        trailing = ser.in_waiting
+        if trailing:
+            data += ser.read(trailing)
+        return data
+
+    # in_waiting が 0 のままでも、タイムアウトまでブロッキングで待ってみる
+    return ser.read(16)
+
+
+def _find_read_frame(data: bytes, servo_id: int):
+    """受信バッファから読み取り応答 [id][03][02][H][L][crcL][crcH] を探す。
+
+    エコーされた送信フレームは 3 バイト目が 0x01（レジスタ数）なので、
+    3 バイト目が 0x02（バイト数）で CRC が一致するフレームだけを採用する。
+    見つからなければ None。
+    """
+    for i in range(0, len(data) - 7 + 1):
+        if data[i] == servo_id and data[i + 1] == FUNC_READ and data[i + 2] == 2:
+            candidate = data[i:i + 7]
+            if verify_checksum(candidate):
+                return candidate
+    return None
+
+
+def _find_write_frame(data: bytes, servo_id: int, address: int, value: int):
+    """受信バッファから書き込みエコー [id][06][addrHi][addrLo][valHi][valLo][crcL][crcH] を探す。
+
+    アドレス・値のエコーが一致し CRC も一致するフレームだけを採用する。見つからなければ None。
+    """
+    for i in range(0, len(data) - 8 + 1):
+        if data[i] == servo_id and data[i + 1] == FUNC_WRITE:
+            candidate = data[i:i + 8]
+            if not verify_checksum(candidate):
+                continue
+            echo_addr = (candidate[2] << 8) | candidate[3]
+            echo_value = (candidate[4] << 8) | candidate[5]
+            if echo_addr == address and echo_value == (value & 0xFFFF):
+                return candidate
+    return None
 
 
 def read_register(ser: serial.Serial, servo_id: int, address: int) -> int:
     """レジスタを 1 つ読み取り、値を返す。失敗時は例外を送出する。
 
-    応答: [id][03][byteCount=2][dataHi][dataLo][crcLo][crcHi] = 7 バイト
+    応答: [id][03][byteCount=2][dataHi][dataLo][crcLo][crcHi] = 7 バイト。
+    半二重 RS485 のエコーや先頭ノイズに備え、受信バッファ内から正しい
+    フレームを探索して抽出する。生の受信データは read_register.last_raw に保持する。
     """
     frame = build_frame(servo_id, FUNC_READ, address, 1)
-    response = _transact(ser, frame, 7)
+    response = _transact(ser, frame)
+    read_register.last_raw = _hex(response)
 
-    if len(response) != 7:
+    reg_frame = _find_read_frame(response, servo_id)
+    if reg_frame is None:
         raise IOError(
-            f"レジスタ {address} 読み取り失敗: {len(response)}バイト受信（期待値: 7バイト）"
+            f"レジスタ {address} 読み取り失敗: 有効な応答フレームがありません（id={servo_id}）"
             f"\n受信データ: {_hex(response)}"
         )
-    if not verify_checksum(response):
-        raise IOError(f"CRCエラー（addr {address}）\n受信データ: {_hex(response)}")
-    if response[0] != servo_id or response[1] != FUNC_READ or response[2] != 2:
-        raise IOError(f"不正な応答（addr {address}）\n受信データ: {_hex(response)}")
 
-    return (response[3] << 8) | response[4]
+    return (reg_frame[3] << 8) | reg_frame[4]
+
+
+read_register.last_raw = ""
 
 
 def read_register_signed(ser: serial.Serial, servo_id: int, address: int) -> int:
@@ -237,23 +296,16 @@ def write_register(ser: serial.Serial, servo_id: int, address: int, value: int) 
     応答は要求のエコー: [id][06][addrHi][addrLo][valHi][valLo][crcLo][crcHi] = 8 バイト
     """
     frame = build_frame(servo_id, FUNC_WRITE, address, value)
-    response = _transact(ser, frame, 8)
+    response = _transact(ser, frame)
 
-    if len(response) != 8:
+    write_frame = _find_write_frame(response, servo_id, address, value)
+    if write_frame is None:
         raise IOError(
-            f"レジスタ {address} 書き込み失敗: {len(response)}バイト受信（期待値: 8バイト）"
+            f"レジスタ {address} 書き込み失敗: エコー応答が一致しません（id={servo_id}）"
             f"\n受信データ: {_hex(response)}"
         )
-    if not verify_checksum(response):
-        raise IOError(f"CRCエラー（addr {address}）\n受信データ: {_hex(response)}")
 
-    echo_addr = (response[2] << 8) | response[3]
-    echo_value = (response[4] << 8) | response[5]
-    if response[0] != servo_id or response[1] != FUNC_WRITE or echo_addr != address \
-            or echo_value != (value & 0xFFFF):
-        raise IOError(f"書き込みエコー不一致（addr {address}）\n受信データ: {_hex(response)}")
-
-    return response
+    return write_frame
 
 
 def open_serial() -> serial.Serial:
@@ -315,21 +367,31 @@ def refresh_port_status():
 
 
 def select_port():
-    """ポートを選択する。"""
+    """ポートを選択する。
+
+    自動検出されたポートに加えて COMMON_PORTS の既知候補を常に列挙する。
+    これにより /dev/ttyUSB0 などが未検出・ビジー中でも選択できる。
+    """
     available_ports = check_port_availability()
-    if not available_ports:
-        messagebox.showwarning("警告", "利用可能なポートがありません")
-        return
+    # 自動検出ポート + 既知候補（重複除去・順序維持）
+    port_options = list(available_ports)
+    for port in COMMON_PORTS:
+        if port not in port_options:
+            port_options.append(port)
 
     selection_window = _make_toplevel("ポート選択")
-    selection_window.geometry("300x220")
+    selection_window.geometry("320x300")
 
     ttk.Label(selection_window, text="使用するポートを選択してください:").pack(pady=10)
 
-    selected_port = tk.StringVar(value=available_ports[0])
-    for port in available_ports:
+    available_set = set(available_ports)
+    current_port = get_current_port()
+    default_port = current_port if current_port in port_options else port_options[0]
+    selected_port = tk.StringVar(value=default_port)
+    for port in port_options:
+        suffix = " (利用可能)" if port in available_set else " (未検出)"
         ttk.Radiobutton(
-            selection_window, text=port, variable=selected_port, value=port
+            selection_window, text=port + suffix, variable=selected_port, value=port
         ).pack(anchor="w", padx=20)
 
     def confirm_selection():
@@ -489,6 +551,7 @@ def read_all_info(show_errors=True):
     try:
         with open_serial() as ser:
             position = read_register(ser, servo_id, REG_PRESENT_POSITION)
+            position_raw = read_register.last_raw
             velocity = read_register_signed(ser, servo_id, REG_PRESENT_VELOCITY)
             voltage = read_register(ser, servo_id, REG_PRESENT_VOLTAGE)
             temperature = read_register(ser, servo_id, REG_PRESENT_TEMPERATURE)
@@ -509,6 +572,7 @@ def read_all_info(show_errors=True):
             text="ON" if torque else "OFF", foreground="green" if torque else "gray"
         )
 
+        labels["Raw"].config(text="Raw: " + position_raw)
         draw_position_bar(position)
         return True
     except Exception as e:  # noqa: BLE001 - GUI にまとめて表示する
@@ -529,6 +593,7 @@ def read_position_only(show_errors=False):
         angle = position_to_angle(position)
         labels["Position"].config(text=f"{position} (0x{position:04X})")
         labels["Angle"].config(text=f"{angle:.1f} deg")
+        labels["Raw"].config(text="Raw: " + read_register.last_raw)
         draw_position_bar(position)
         return True
     except Exception as e:  # noqa: BLE001
@@ -724,9 +789,9 @@ def on_close():
 # ---------------------------------------------------------------------------
 def _selftest():
     """フレーム生成 / CRC / 変換の整合性を検証する。"""
-    # Present Position 読み取り（ID 11）は 0B 03 01 00 00 01 <crc>
+    # Present Position 読み取り（ID 11, addr 257=0x0101）は 0B 03 01 01 00 01 <crc>
     frame = build_frame(DEFAULT_SERVO_ID, FUNC_READ, REG_PRESENT_POSITION, 1)
-    assert frame[:6] == bytes([0x0B, 0x03, 0x01, 0x00, 0x00, 0x01]), _hex(frame)
+    assert frame[:6] == bytes([0x0B, 0x03, 0x01, 0x01, 0x00, 0x01]), _hex(frame)
     # 自身の CRC を検証（ラウンドトリップ）
     assert verify_checksum(frame), "read frame CRC round-trip failed"
 
@@ -748,6 +813,34 @@ def _selftest():
     assert abs(position_to_angle(0) - 0.0) < 1e-6
     assert abs(position_to_angle(2048) - 180.0) < 1e-6
     assert abs(position_to_angle(4095) - 360.0) < 0.1
+
+    # フレーム探索: クリーンな応答から読み取りフレームを抽出（position=2047）
+    def _read_response(servo_id, value):
+        payload = bytes([servo_id, FUNC_READ, 2, (value >> 8) & 0xFF, value & 0xFF])
+        c = calculate_crc16(payload)
+        return payload + bytes([c & 0xFF, (c >> 8) & 0xFF])
+
+    clean = _read_response(DEFAULT_SERVO_ID, POSITION_MIDPOINT)
+    found = _find_read_frame(clean, DEFAULT_SERVO_ID)
+    assert found is not None and ((found[3] << 8) | found[4]) == POSITION_MIDPOINT, _hex(clean)
+
+    # 半二重 RS485 のエコー（送信フレーム）が先頭に付いても正しい応答を抽出できる
+    echo = build_frame(DEFAULT_SERVO_ID, FUNC_READ, REG_PRESENT_POSITION, 1)
+    with_echo = echo + clean
+    found2 = _find_read_frame(with_echo, DEFAULT_SERVO_ID)
+    assert found2 is not None and ((found2[3] << 8) | found2[4]) == POSITION_MIDPOINT, _hex(with_echo)
+
+    # 先頭ノイズ 1 バイトが乗っても抽出できる
+    noisy = bytes([0x00]) + clean
+    found3 = _find_read_frame(noisy, DEFAULT_SERVO_ID)
+    assert found3 is not None and ((found3[3] << 8) | found3[4]) == POSITION_MIDPOINT, _hex(noisy)
+
+    # 書き込みエコー探索: エコー（=応答）を抽出できる
+    wresp = build_frame(DEFAULT_SERVO_ID, FUNC_WRITE, REG_GOAL_POSITION, POSITION_MIDPOINT)
+    wfound = _find_write_frame(wresp, DEFAULT_SERVO_ID, REG_GOAL_POSITION, POSITION_MIDPOINT)
+    assert wfound is not None, _hex(wresp)
+    # アドレス/値が一致しないフレームは採用しない
+    assert _find_write_frame(wresp, DEFAULT_SERVO_ID, REG_GOAL_POSITION, 0) is None
 
     print("selftest OK")
 
@@ -877,6 +970,12 @@ def build_gui():
     position_canvas = tk.Canvas(frame_vis, height=110, highlightthickness=0, bg=vis_bg)
     position_canvas.pack(fill="x", expand=True)
     position_canvas.bind("<Configure>", on_canvas_resize)
+
+    # 現在位読み取りの生応答（hex）を表示し、値がおかしい場合の診断を助ける
+    labels["Raw"] = ttk.Label(
+        frame_vis, text="Raw: ---", foreground="gray", font=("Courier", 9), justify="left"
+    )
+    labels["Raw"].pack(anchor="w", pady=(4, 0))
 
     # --- 位置指令（Goal Position） ---
     frame_goal = ttk.Labelframe(scrollable_frame, text="位置指令 (Goal Position)", padding=10)
