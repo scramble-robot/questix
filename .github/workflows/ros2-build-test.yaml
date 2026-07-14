@@ -166,12 +166,20 @@ jobs:
             --packages-skip ydlidar_ros2_driver ydlidar_sdk_vendor
           EOF
           test_status=$?
+          # colcon test may exit 0 even when tests failed; colcon test-result
+          # is the authoritative pass/fail signal.
+          docker exec -i ros_build bash << 'EOF'
+          source /opt/ros/$ROS_DISTRO/setup.bash
+          source install/setup.bash
+          colcon test-result
+          EOF
+          result_status=$?
           set -e
-          if [[ "$test_status" -ne 0 ]]; then
+          if [[ "$test_status" -ne 0 || "$result_status" -ne 0 ]]; then
             if [[ "${{ matrix.allow_failure }}" == "true" ]]; then
-              echo "::warning title=Allowed ${{ matrix.architecture }} test failure::colcon test exited with $test_status"
+              echo "::warning title=Allowed ${{ matrix.architecture }} test failure::colcon test exited with $test_status, colcon test-result exited with $result_status"
             else
-              exit "$test_status"
+              exit 1
             fi
           fi
 
@@ -256,10 +264,6 @@ jobs:
   build-summary:
     needs: [build-and-test, static-analysis, format-check]
     runs-on: ubuntu-latest
-    container:
-      image: ros:jazzy-ros-base
-    env:
-      DEBIAN_FRONTEND: noninteractive
     if: always()
     steps:
       - name: Build Summary
@@ -269,17 +273,35 @@ jobs:
           if [ "${{ needs.build-and-test.result }}" == "success" ]; then
             echo "✅ **Build and Test**: Passed" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ **Build and Test**: Failed" >> $GITHUB_STEP_SUMMARY
+            echo "❌ **Build and Test**: ${{ needs.build-and-test.result }}" >> $GITHUB_STEP_SUMMARY
           fi
 
           if [ "${{ needs.static-analysis.result }}" == "success" ]; then
             echo "✅ **Static Analysis**: Passed" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ **Static Analysis**: Failed" >> $GITHUB_STEP_SUMMARY
+            echo "❌ **Static Analysis**: ${{ needs.static-analysis.result }}" >> $GITHUB_STEP_SUMMARY
           fi
 
           if [ "${{ needs.format-check.result }}" == "success" ] || [ "${{ needs.format-check.result }}" == "skipped" ]; then
             echo "✅ **Format Check**: Passed" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ **Format Check**: Failed" >> $GITHUB_STEP_SUMMARY
+            echo "❌ **Format Check**: ${{ needs.format-check.result }}" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      # This job is the single gate for branch protection: it must fail
+      # whenever any required upstream job fails or is cancelled.
+      # format-check is allowed to be skipped (it only runs on pull_request).
+      - name: Fail if any required job failed
+        run: |
+          if [ "${{ needs.build-and-test.result }}" != "success" ]; then
+            echo "build-and-test result: ${{ needs.build-and-test.result }}"
+            exit 1
+          fi
+          if [ "${{ needs.static-analysis.result }}" != "success" ]; then
+            echo "static-analysis result: ${{ needs.static-analysis.result }}"
+            exit 1
+          fi
+          if [ "${{ needs.format-check.result }}" != "success" ] && [ "${{ needs.format-check.result }}" != "skipped" ]; then
+            echo "format-check result: ${{ needs.format-check.result }}"
+            exit 1
           fi
