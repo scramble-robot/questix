@@ -18,10 +18,18 @@ on:
       - ".github/workflows/**"
       - ".yamllint.yml"
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   yamllint:
     name: yamllint
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -34,7 +42,8 @@ jobs:
       - name: Install yamllint
         run: |
           python -m pip install --upgrade pip
-          pip install yamllint
+          # Pinned for reproducibility; bump deliberately (see AGENTS.md).
+          pip install "yamllint==1.38.0"
 
       - name: Run yamllint on workflow files
         run: yamllint -c .yamllint.yml .github/workflows/
@@ -42,6 +51,7 @@ jobs:
   actionlint:
     name: actionlint
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     env:
       # Pinned release; ACTIONLINT_SHA256 is the official linux_amd64 checksum
       # from actionlint_${ACTIONLINT_VERSION}_checksums.txt.

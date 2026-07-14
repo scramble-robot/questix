@@ -27,9 +27,17 @@ on:
       - "docker/**"
       - "scripts/**"
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build-summary:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Report skipped build as passing
         run: |

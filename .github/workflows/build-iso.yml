@@ -3,6 +3,14 @@ name: Build ROS2 Robotics Kit ISO
 on:
   workflow_dispatch:
 
+# Least-privilege default; the release job raises this to contents: write.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   ISO_NAME: ros2-robotics-kit
   BUILD_DIR: /tmp/iso-build
@@ -12,6 +20,7 @@ jobs:
   build-iso:
     name: Build Custom Ubuntu ISO
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     strategy:
       # Current baseline: Ubuntu 24.04 + ROS 2 Jazzy for AMD64 and ARM64.
       # Future baseline example: Ubuntu 26.04 + ROS 2 Lyrical.
@@ -103,6 +112,7 @@ jobs:
   test-iso:
     name: Test ISO in QEMU
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: build-iso
     strategy:
       matrix:
@@ -117,9 +127,15 @@ jobs:
       - name: Install QEMU
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-system-x86-64 qemu-utils
+          # Package is qemu-system-x86 (provides qemu-system-x86_64);
+          # qemu-system-x86-64 does not exist in apt.
+          sudo apt-get install -y qemu-system-x86 qemu-utils
 
-      - name: Test ISO boot
+      # Advisory only: this boots the ISO for 300s and never asserts a
+      # successful install, so "|| true" keeps a non-zero QEMU exit from
+      # failing the job. Treat the serial log as reference output; a real
+      # pass/fail gate would need to grep the log for a boot/install marker.
+      - name: Test ISO boot (advisory)
         run: |
           timeout 300 qemu-system-x86_64 \
             -m 2048 \
@@ -132,6 +148,10 @@ jobs:
   release:
     name: Create Release
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Publishing a GitHub Release needs write access to repository contents.
+    permissions:
+      contents: write
     needs: [build-iso, test-iso]
     if: false # リリース機能は無効化（必要に応じて手動で有効化）
 

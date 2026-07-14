@@ -11,6 +11,13 @@ on:
       - edited
       - synchronize
 
+# Minimal permissions for the title check. NOTE: this file is auto-synced
+# from autowarefoundation/sync-file-templates; if the sync overwrites this
+# block, re-apply it (or upstream it).
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
   semantic-pull-request:
     uses: autowarefoundation/autoware-github-actions/.github/workflows/semantic-pull-request.yaml@v1

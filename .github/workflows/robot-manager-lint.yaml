@@ -1,0 +1,64 @@
+---
+name: Robot Manager Lint
+
+# The ROS 2 build/test workflow ignores "scripts/**", and its static-analysis
+# job excludes "./scripts/*" from flake8/pydocstyle, so the FastAPI-based
+# robot_manager and other scripts/ Python were never linted in CI. This job
+# fills that gap. Same flake8/pydocstyle configuration as the ROS workflow's
+# static-analysis job, scoped to scripts/.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/**"
+      - ".github/workflows/robot-manager-lint.yaml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "scripts/**"
+      - ".github/workflows/robot-manager-lint.yaml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  python-lint:
+    name: flake8 + pydocstyle (scripts/)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Pinned to keep CI reproducible; bump deliberately (see AGENTS.md).
+      - name: Install linting tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install "flake8==7.1.1" "pydocstyle==6.3.0"
+
+      - name: Run flake8 (Python style check)
+        run: |
+          find scripts -name "*.py" \
+            -not -path "*/__pycache__/*" \
+            -not -path "*/build/*" \
+            -not -path "*/install/*" \
+            -not -path "*/log/*" \
+            | xargs -r python -m flake8 --select=F --max-line-length=100 --ignore=E501,W503
+
+      - name: Run pydocstyle (Python docstring check)
+        run: |
+          find scripts -name "*.py" \
+            -not -path "*/__pycache__/*" \
+            -not -path "*/build/*" \
+            -not -path "*/install/*" \
+            -not -path "*/log/*" \
+            | xargs -r python -m pydocstyle --ignore=D100,D101,D102,D103,D104,D105,D107,D203,D213,D400,D415

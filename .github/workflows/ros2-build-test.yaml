@@ -22,6 +22,16 @@ on:
       - "scripts/**"
   workflow_dispatch:
 
+# Least-privilege default: no job needs write access to the repository.
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same PR; keep every push to main building so
+# each commit on the default branch is validated.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 defaults:
   run:
     shell: bash
@@ -30,6 +40,7 @@ jobs:
   build-and-test:
     name: build-and-test (${{ matrix.ros_distro }}, ${{ matrix.architecture }})
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
     strategy:
       matrix:
         include:
@@ -102,15 +113,20 @@ jobs:
           rosdep keys --from-paths . --rosdistro $ROS_DISTRO > rosdep_keys.txt || echo "No rosdep keys found"
           EOF
 
+      # Bump the "build-v1-" epoch in the key/restore-keys below (v1 -> v2 ...)
+      # to force-invalidate every cache; a whole build/install tree is the usual
+      # suspect for inexplicable build errors after a branch switch. The key also
+      # hashes dependency.repos and the vcs-imported src/ packages so ydlidar
+      # version bumps bust the cache (top-level '*/…' globs never matched src/).
       - name: Cache build artifacts
         uses: actions/cache@v4
         with:
           path: |
             build
             install
-          key: build-${{ matrix.ros_distro }}-${{ runner.os }}-${{ matrix.architecture }}-${{ hashFiles('*/CMakeLists.txt', '*/*.cmake', '*/package.xml') }}
+          key: build-v1-${{ matrix.ros_distro }}-${{ runner.os }}-${{ matrix.architecture }}-${{ hashFiles('*/CMakeLists.txt', '*/*.cmake', '*/package.xml', 'src/**/CMakeLists.txt', 'src/**/package.xml', 'dependency.repos') }}
           restore-keys: |
-            build-${{ matrix.ros_distro }}-${{ runner.os }}-${{ matrix.architecture }}-
+            build-v1-${{ matrix.ros_distro }}-${{ runner.os }}-${{ matrix.architecture }}-
 
       - name: Install package dependencies
         run: |
@@ -205,6 +221,7 @@ jobs:
 
   static-analysis:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     container:
       image: ros:${{ matrix.ros_distro }}-ros-base
     env:
@@ -235,6 +252,7 @@ jobs:
 
   format-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     container:
       image: ros:${{ matrix.ros_distro }}-ros-base
     env:
@@ -267,6 +285,7 @@ jobs:
   build-summary:
     needs: [build-and-test, static-analysis, format-check]
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     if: always()
     steps:
       - name: Build Summary
