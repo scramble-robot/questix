@@ -109,42 +109,6 @@ jobs:
             ${{ env.OUTPUT_DIR }}/checksums.*
           retention-days: 30
 
-  test-iso:
-    name: Test ISO in QEMU
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    needs: build-iso
-    strategy:
-      matrix:
-        architecture: [amd64] # ARM64 testing requires special setup
-
-    steps:
-      - name: Download ISO artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ env.ISO_NAME }}-${{ matrix.architecture }}-ubuntu24.04-ros2jazzy
-
-      - name: Install QEMU
-        run: |
-          sudo apt-get update
-          # Package is qemu-system-x86 (provides qemu-system-x86_64);
-          # qemu-system-x86-64 does not exist in apt.
-          sudo apt-get install -y qemu-system-x86 qemu-utils
-
-      # Advisory only: this boots the ISO for 300s and never asserts a
-      # successful install, so "|| true" keeps a non-zero QEMU exit from
-      # failing the job. Treat the serial log as reference output; a real
-      # pass/fail gate would need to grep the log for a boot/install marker.
-      - name: Test ISO boot (advisory)
-        run: |
-          timeout 300 qemu-system-x86_64 \
-            -m 2048 \
-            -cdrom *.iso \
-            -boot d \
-            -display none \
-            -serial stdio \
-            -no-reboot || true
-
   release:
     name: Create Release
     runs-on: ubuntu-latest
@@ -152,7 +116,7 @@ jobs:
     # Publishing a GitHub Release needs write access to repository contents.
     permissions:
       contents: write
-    needs: [build-iso, test-iso]
+    needs: [build-iso]
     if: false # リリース機能は無効化（必要に応じて手動で有効化）
 
     steps:
