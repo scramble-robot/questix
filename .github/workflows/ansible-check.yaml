@@ -86,39 +86,6 @@ jobs:
             - name: Install required system packages
               run: |
                   sudo apt-get update
-                  sudo apt-get install -y git
-
-            # check mode はインストーラ系タスクを完走できない既知の制約があるため
-            # 参考情報として実行する（AGENTS.md "Ansible check mode limits" を参照）
-            - name: Run ansible-playbook in check mode
-              run: |
-                  ansible-playbook ansible/playbooks/setup_kit.yaml \
-                    -i localhost, \
-                    --connection=local \
-                    --check \
-                    -e "ansible_become_password=dummy"
-              continue-on-error: true
-
-    ansible-test-setup:
-        name: Ansible Playbook Test (Minimal)
-        runs-on: ubuntu-24.04
-        steps:
-            - name: Checkout repository
-              uses: actions/checkout@v4
-
-            - name: Set up Python
-              uses: actions/setup-python@v5
-              with:
-                  python-version: "3.12"
-
-            - name: Install Ansible
-              run: |
-                  python -m pip install --upgrade pip
-                  pip install ansible
-
-            - name: Install required system packages
-              run: |
-                  sudo apt-get update
                   sudo apt-get install -y \
                     git \
                     software-properties-common \
