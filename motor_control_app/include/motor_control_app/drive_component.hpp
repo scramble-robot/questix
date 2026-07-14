@@ -98,7 +98,7 @@ private:
   bool has_last_cmd_;
 
   // 停止時の電気ブレーキ（velocity モードのみ）
-  bool brake_on_stop_;
+  bool brake_on_stop_{true};
 
   // 状態フラグ
   bool motor_initialized_;

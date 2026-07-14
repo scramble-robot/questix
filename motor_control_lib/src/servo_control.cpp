@@ -126,8 +126,8 @@ int32_t FeetechServoController::getCurrentPosition(uint8_t servo_id) {
   std::cout << "Reading current position for servo " << static_cast<int>(servo_id) << "..."
             << std::endl;
 
-  // Read Present Position (register 256 according to initializeRegisterMap)
-  int32_t position = readRegister(servo_id, 256);
+  // Read Present Position (register 257 according to initializeRegisterMap)
+  int32_t position = readRegister(servo_id, 257);
 
   if (position != -1) {
     std::cout << "Position read successfully: " << position << std::endl;
@@ -412,7 +412,7 @@ void FeetechServoController::initializeRegisterMap() {
   known_registers_[129] = {"Torque Enable", 1, "read_write", "トルク有効"};
   known_registers_[130] = {"Goal Acceleration", 0, "read_write", "目標加速度"};
   known_registers_[131] = {"Goal Velocity", 250, "read_write", "目標速度"};
-  known_registers_[256] = {"Present Position", 2128, "read", "現在位置"};
+  // known_registers_[256] = {"Present Position", 2128, "read", "現在位置"};
   known_registers_[257] = {"Present Position", 2128, "read", "現在位置"};
   known_registers_[258] = {"Present Velocity", 500, "read", "現在速度"};
   known_registers_[259] = {"Present PWM", 500, "read", "現在PWM"};
