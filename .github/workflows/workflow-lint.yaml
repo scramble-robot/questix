@@ -1,0 +1,65 @@
+---
+name: Workflow Lint
+
+# Lints the repository's own GitHub Actions workflow files. The ROS 2
+# build/test workflow deliberately ignores ".github/**", so without this
+# job the workflow YAML is never checked in CI. AGENTS.md only recommends
+# running yamllint and actionlint locally; this enforces them for changes
+# under .github/workflows/.
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/**"
+      - ".yamllint.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/**"
+      - ".yamllint.yml"
+
+jobs:
+  yamllint:
+    name: yamllint
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install yamllint
+        run: |
+          python -m pip install --upgrade pip
+          pip install yamllint
+
+      - name: Run yamllint on workflow files
+        run: yamllint -c .yamllint.yml .github/workflows/
+
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-24.04
+    env:
+      # Pinned release; ACTIONLINT_SHA256 is the official linux_amd64 checksum
+      # from actionlint_${ACTIONLINT_VERSION}_checksums.txt.
+      ACTIONLINT_VERSION: "1.7.7"
+      ACTIONLINT_SHA256: "023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download actionlint (pinned, checksum verified)
+        run: |
+          url="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -sSL "$url" -o actionlint.tar.gz
+          echo "${ACTIONLINT_SHA256}  actionlint.tar.gz" | sha256sum -c -
+          tar -xzf actionlint.tar.gz actionlint
+
+      # shellcheck is preinstalled on GitHub-hosted ubuntu runners, so
+      # actionlint runs it on each "run:" script. Limit it to warning+
+      # severity so style-only info notes (e.g. SC2086) do not fail the gate.
+      - name: Run actionlint
+        run: ./actionlint -color -shellcheck="shellcheck --severity=warning"
