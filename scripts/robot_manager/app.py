@@ -4,13 +4,15 @@ import os
 import re
 import subprocess
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
+
+from robot_manager import logs, recorder
 
 CONFIG_DIR = Path(os.environ.get("QUESTIX_CONFIG_DIR", "/etc/questix_robot"))
 MODE_FILE = CONFIG_DIR / "mode"
@@ -33,9 +35,12 @@ app.add_middleware(
         f"http://127.0.0.1:{MANAGER_PORT}",
         f"http://localhost:{MANAGER_PORT}",
     ],
-    allow_methods=["GET", "POST", "PUT"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["Content-Type"],
 )
+
+app.include_router(recorder.router)
+app.include_router(logs.router)
 
 
 @app.middleware("http")
@@ -44,6 +49,9 @@ async def security_headers(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Content-Security-Policy"] = "default-src 'self'"
+    # Force revalidation so updated static assets (HTML/JS/CSS) are picked up
+    # immediately after an edit instead of being served stale from browser cache.
+    response.headers["Cache-Control"] = "no-cache"
     return response
 
 
@@ -207,19 +215,6 @@ def set_launch_config(config: LaunchConfig):
     except PermissionError:
         raise HTTPException(status_code=403, detail="Permission denied writing launch.env")
     return current
-
-
-@app.get("/api/logs")
-def get_logs(n: int = 50):
-    n = min(max(n, 1), 500)
-    try:
-        r = subprocess.run(
-            ["journalctl", "-u", SERVICE_NAME, "--no-pager", "-n", str(n)],
-            capture_output=True, text=True, timeout=10,
-        )
-        return {"logs": r.stdout}
-    except Exception:
-        raise HTTPException(status_code=500, detail="Failed to retrieve logs")
 
 
 # ---------------------------------------------------------------------------

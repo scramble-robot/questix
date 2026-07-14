@@ -77,11 +77,76 @@ header h1 {
   box-shadow: 0 0 8px var(--yellow);
 }
 
+/* Tab bar */
+.tabbar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  gap: 0.25rem;
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 0.5rem 1rem 0;
+  background: var(--bg);
+}
+
+.tab {
+  flex: 1;
+  min-height: 44px;
+  padding: 0.6rem 0.5rem;
+  border: none;
+  border-radius: 10px 10px 0 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: background 0.2s, color 0.2s, border-color 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+}
+
+.tab:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.tab.active {
+  color: var(--accent);
+  background: var(--bg-card);
+  border-bottom-color: var(--accent);
+}
+
+/* Recording dot on the 録画 tab (visible across tabs while recording) */
+.tab-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.tab-dot.recording {
+  background: var(--red);
+  box-shadow: 0 0 8px var(--red);
+  animation: rec-blink 1s steps(1) infinite;
+}
+
 /* Main layout */
 main {
-  max-width: 720px;
+  max-width: 860px;
   margin: 0 auto;
-  padding: 1.5rem 1rem;
+  padding: 1rem;
+}
+
+.tab-panel {
+  display: none;
+}
+
+.tab-panel.active {
   display: flex;
   flex-direction: column;
   gap: 1rem;
@@ -333,19 +398,471 @@ main {
   border-color: var(--accent);
 }
 
-/* Log viewer */
-.log-viewer {
-  background: #0a0a1a;
-  border-radius: 8px;
-  padding: 1rem;
+/* Log collection */
+.log-help {
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  margin: 0 0 1rem;
+  line-height: 1.5;
+}
+
+.log-help code {
   font-family: "JetBrains Mono", "Fira Code", "Consolas", monospace;
   font-size: 0.75rem;
-  line-height: 1.5;
-  max-height: 360px;
-  overflow-y: auto;
-  white-space: pre-wrap;
+  background: var(--bg-input);
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+}
+
+.log-result {
+  margin-top: 1rem;
+  padding: 0.9rem 1rem;
+  background: var(--bg-input);
+  border-radius: 8px;
+  font-size: 0.8rem;
+}
+
+.log-result-head {
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 0.4rem;
+}
+
+.log-result-path {
+  font-family: "JetBrains Mono", "Fira Code", "Consolas", monospace;
+  font-size: 0.75rem;
   word-break: break-all;
-  color: #b0bec5;
+  color: var(--text);
+}
+
+.log-result-size {
+  color: var(--text-dim);
+  margin: 0.2rem 0 0.6rem;
+}
+
+.log-note {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.25rem 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.log-note-label {
+  color: var(--text-dim);
+  flex: 0 0 auto;
+}
+
+.log-note-text {
+  text-align: right;
+  word-break: break-word;
+}
+
+/* rosbag recorder card */
+.rec-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.rec-indicator .rec-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-dim);
+}
+
+.rec-indicator.recording {
+  color: var(--red);
+}
+
+.rec-indicator.recording .rec-dot {
+  background: var(--red);
+  box-shadow: 0 0 8px var(--red);
+  animation: rec-blink 1s steps(1) infinite;
+}
+
+@keyframes rec-blink {
+  50% { opacity: 0.25; }
+}
+
+.rec-status {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.75rem 0.9rem;
+  background: var(--bg-input);
+  border-radius: 8px;
+  margin-bottom: 0.9rem;
+}
+
+.rec-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.rec-status-label {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
+.rec-status-value {
+  font-size: 0.85rem;
+  font-family: "JetBrains Mono", "Consolas", monospace;
+}
+
+/* Disk gauge */
+.disk-gauge {
+  margin-bottom: 0.9rem;
+}
+
+.disk-gauge-head,
+.disk-gauge-sub {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  margin-bottom: 0.35rem;
+}
+
+.disk-gauge-sub {
+  margin-top: 0.35rem;
+  margin-bottom: 0;
+}
+
+.disk-bar {
+  height: 10px;
+  background: #3a3a5c;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.disk-bar-fill {
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  border-radius: 6px;
+  transition: width 0.4s ease, background 0.3s;
+}
+
+.disk-bar-fill.low {
+  background: var(--red);
+}
+
+.rec-controls {
+  margin-bottom: 1rem;
+}
+
+.rec-config {
+  margin-bottom: 0;
+}
+
+.rec-bag-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.rec-bag-empty {
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  padding: 0.5rem 0;
+}
+
+.rec-bag-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.6rem 0.8rem;
+  background: var(--bg-input);
+  border-radius: 8px;
+}
+
+.rec-bag-item.recording {
+  border: 1px solid var(--red);
+}
+
+.rec-bag-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.rec-bag-main .rec-bag-name {
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.rec-bag-meta {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+.rec-bag-path {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  font-family: "JetBrains Mono", "Consolas", monospace;
+  word-break: break-all;
+}
+
+.btn-del {
+  flex: none;
+  background: var(--red);
+}
+
+.btn-del:hover:not(:disabled) {
+  background: #d50032;
+}
+
+/* Output folder field (input + browse button) */
+.output-field {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.output-field input[type="text"] {
+  width: 240px;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  background: var(--bg-card);
+  color: var(--text);
+  font-size: 0.85rem;
+  text-align: right;
+}
+
+.output-field input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* Folder picker modal */
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  padding: 1rem;
+}
+
+.modal.hidden {
+  display: none;
+}
+
+.modal-box {
+  background: var(--bg-card);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  width: 100%;
+  max-width: 480px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  padding: 1.1rem;
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.8rem;
+}
+
+.modal-head h3 {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.3rem;
+}
+
+.modal-close:hover {
+  color: var(--text);
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* Shortcut chips (home / default / USB) */
+.shortcut-chips {
+  display: flex;
+  gap: 0.4rem;
+  overflow-x: auto;
+  padding-bottom: 0.2rem;
+  margin-bottom: 0.5rem;
+}
+
+.chip {
+  flex: none;
+  padding: 0.4rem 0.8rem;
+  border: 1px solid rgba(0, 180, 216, 0.4);
+  border-radius: 999px;
+  background: rgba(0, 180, 216, 0.12);
+  color: var(--accent);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.2s;
+}
+
+.chip:hover {
+  background: rgba(0, 180, 216, 0.28);
+}
+
+.folder-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.15rem;
+  margin-bottom: 0.6rem;
+  font-size: 0.78rem;
+  line-height: 1.6;
+}
+
+.crumb {
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0 0.15rem;
+  border-radius: 4px;
+}
+
+.crumb:hover {
+  background: var(--bg-input);
+  text-decoration: underline;
+}
+
+.crumb-sep {
+  color: var(--text-dim);
+}
+
+.folder-list {
+  list-style: none;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 120px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  margin-bottom: 0.7rem;
+}
+
+.folder-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.65rem 0.7rem;
+  cursor: pointer;
+  font-size: 0.88rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  border-left: 3px solid transparent;
+}
+
+.folder-item:hover {
+  background: var(--bg-input);
+}
+
+.folder-item.selected {
+  background: rgba(0, 180, 216, 0.18);
+  border-left-color: var(--accent);
+}
+
+.folder-item-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-open-btn {
+  flex: none;
+}
+
+.folder-empty {
+  padding: 0.7rem;
+  color: var(--text-dim);
+  font-size: 0.82rem;
+}
+
+.mkdir-row {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 0.7rem;
+}
+
+.mkdir-row input {
+  flex: 1;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.mkdir-row input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* Picker footer: current selection + confirm */
+.picker-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.picker-selected {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  padding: 0.55rem 0.7rem;
+  background: var(--bg-input);
+  border-radius: 6px;
+  border-left: 3px solid var(--accent);
+}
+
+.picker-selected-label {
+  flex: none;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+
+.picker-selected-path {
+  font-family: "JetBrains Mono", "Consolas", monospace;
+  font-size: 0.8rem;
+  word-break: break-all;
+}
+
+.picker-selected-warn {
+  flex: none;
+  color: var(--orange);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.picker-footer .folder-pick-btn {
+  margin-top: 0;
 }
 
 /* Toast notifications */
