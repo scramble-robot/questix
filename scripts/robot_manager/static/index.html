@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Questix Robot Manager</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v=8">
 </head>
 
 <body>
@@ -17,7 +17,19 @@
     </div>
   </header>
 
+  <!-- Tab bar -->
+  <nav class="tabbar" role="tablist">
+    <button class="tab active" data-tab="control" role="tab">制御</button>
+    <button class="tab" data-tab="rec" role="tab">
+      録画
+      <span id="tab-rec-dot" class="tab-dot"></span>
+    </button>
+    <button class="tab" data-tab="log" role="tab">ログ回収</button>
+  </nav>
+
   <main>
+    <!-- ===== Control tab ===== -->
+    <div class="tab-panel active" data-panel="control">
     <!-- Mode Card -->
     <section class="card mode-card">
       <h2>動作モード</h2>
@@ -105,21 +117,181 @@
       </div>
       <button class="btn btn-save" id="save-config">設定を保存</button>
     </section>
+    </div><!-- /control panel -->
 
-    <!-- Log Viewer -->
-    <section class="card log-card">
+    <!-- ===== Recording tab ===== -->
+    <div class="tab-panel" data-panel="rec">
+    <!-- rosbag Recording: live status + disk + controls -->
+    <section class="card">
       <h2>
-        ログ
-        <button class="btn btn-small" id="refresh-logs">更新</button>
+        rosbag 録画
+        <span id="rec-indicator" class="rec-indicator idle">
+          <span class="rec-dot"></span>
+          <span id="rec-state-text">停止中</span>
+        </span>
       </h2>
-      <pre id="log-output" class="log-viewer">ログを読み込み中...</pre>
+
+      <!-- Live recording status -->
+      <div id="rec-status" class="rec-status">
+        <div class="rec-status-row">
+          <span class="rec-status-label">バッグ名</span>
+          <span id="rec-bag-name" class="rec-status-value">—</span>
+        </div>
+        <div class="rec-status-row">
+          <span class="rec-status-label">経過</span>
+          <span id="rec-elapsed" class="rec-status-value">—</span>
+        </div>
+        <div class="rec-status-row">
+          <span class="rec-status-label">サイズ</span>
+          <span id="rec-size" class="rec-status-value">—</span>
+        </div>
+      </div>
+
+      <!-- Disk gauge -->
+      <div class="disk-gauge">
+        <div class="disk-gauge-head">
+          <span>ディスク空き</span>
+          <span id="disk-text" class="rec-status-value">—</span>
+        </div>
+        <div class="disk-bar">
+          <div id="disk-bar-fill" class="disk-bar-fill"></div>
+        </div>
+        <div class="disk-gauge-sub">
+          <span>録画フォルダ使用量</span>
+          <span id="disk-used-text">—</span>
+        </div>
+      </div>
+
+      <!-- Start / stop -->
+      <div class="btn-group rec-controls">
+        <button class="btn btn-start" id="rec-start">録画開始</button>
+        <button class="btn btn-stop" id="rec-stop" disabled>録画停止</button>
+      </div>
     </section>
+
+    <!-- Recorder settings -->
+    <section class="card">
+      <h2>録画設定</h2>
+      <div class="config-grid rec-config">
+        <div class="config-item wide">
+          <label for="rec-vehicle">車両名 (号機)</label>
+          <input type="text" id="rec-vehicle" data-rec-config="VEHICLE_NAME"
+            placeholder="robot1">
+        </div>
+        <div class="config-item wide">
+          <label for="rec-output">出力フォルダ</label>
+          <div class="output-field">
+            <input type="text" id="rec-output" data-rec-config="OUTPUT_DIR"
+              placeholder="/var/lib/questix/rosbags">
+            <button type="button" class="btn btn-small" id="rec-browse">選択</button>
+          </div>
+        </div>
+        <div class="config-item wide">
+          <label for="rec-exclude">除外トピック</label>
+          <input type="text" id="rec-exclude" data-rec-config="EXCLUDE_TOPICS"
+            placeholder="/camera/image_raw /scan">
+        </div>
+        <div class="config-item">
+          <label for="rec-min-free">最小空き(GB)</label>
+          <input type="number" id="rec-min-free" data-rec-config="MIN_FREE_GB" min="0" value="5">
+        </div>
+        <div class="config-item">
+          <label for="rec-max-split">分割(MB)</label>
+          <input type="number" id="rec-max-split" data-rec-config="MAX_SPLIT_MB" min="0" value="0">
+        </div>
+        <div class="config-item wide">
+          <label for="rec-max-duration">録画上限(秒 / 0=無制限)</label>
+          <input type="number" id="rec-max-duration" data-rec-config="MAX_DURATION_SEC" min="0"
+            value="0">
+        </div>
+      </div>
+      <button class="btn btn-save" id="rec-save-config">録画設定を保存</button>
+    </section>
+
+    <!-- Saved bags -->
+    <section class="card">
+      <h2 class="rec-list-head">
+        保存済みバッグ
+        <button class="btn btn-small" id="rec-refresh-list">更新</button>
+      </h2>
+      <ul id="rec-bag-list" class="rec-bag-list">
+        <li class="rec-bag-empty">読み込み中...</li>
+      </ul>
+    </section>
+    </div><!-- /rec panel -->
+
+    <!-- ===== Log collection tab ===== -->
+    <div class="tab-panel" data-panel="log">
+    <section class="card">
+      <h2>ログ回収</h2>
+      <p class="log-help">
+        診断用ログをまとめて <code>.tar.gz</code> に固め、選択したフォルダ（USBメモリ等）へ保存します。
+      </p>
+      <div class="config-grid">
+        <div class="config-item wide">
+          <label for="log-dest">保存先フォルダ</label>
+          <div class="output-field">
+            <input type="text" id="log-dest" placeholder="/media/ubuntu/USB など">
+            <button type="button" class="btn btn-small" id="log-browse">選択</button>
+          </div>
+        </div>
+        <div class="config-item">
+          <label>questix_robot journal</label>
+          <label class="toggle-switch small">
+            <input type="checkbox" data-log-source="service" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="config-item">
+          <label>システム全体 journal</label>
+          <label class="toggle-switch small">
+            <input type="checkbox" data-log-source="system" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="config-item">
+          <label>syslog</label>
+          <label class="toggle-switch small">
+            <input type="checkbox" data-log-source="syslog" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+      <button class="btn btn-save" id="log-collect">ログを回収</button>
+      <div id="log-result" class="log-result hidden"></div>
+    </section>
+    </div><!-- /log panel -->
   </main>
+
+  <!-- Folder picker modal -->
+  <div id="folder-modal" class="modal hidden">
+    <div class="modal-box">
+      <div class="modal-head">
+        <h3>出力フォルダを選択</h3>
+        <button type="button" class="modal-close" id="folder-close">×</button>
+      </div>
+      <div id="folder-shortcuts" class="shortcut-chips"></div>
+      <div id="folder-breadcrumb" class="folder-breadcrumb"></div>
+      <ul id="folder-list" class="folder-list"></ul>
+      <div class="mkdir-row">
+        <input type="text" id="folder-newname" placeholder="新規フォルダ名">
+        <button type="button" class="btn btn-small" id="folder-mkdir">作成</button>
+      </div>
+      <div class="picker-footer">
+        <div class="picker-selected">
+          <span class="picker-selected-label">選択中</span>
+          <span id="folder-selected-path" class="picker-selected-path">—</span>
+          <span id="folder-selected-warn" class="picker-selected-warn hidden">書き込み不可</span>
+        </div>
+        <button type="button" class="btn btn-save folder-pick-btn" id="folder-pick">この場所に決定</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Toast container -->
   <div id="toast-container"></div>
 
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=8"></script>
 </body>
 
 </html>
