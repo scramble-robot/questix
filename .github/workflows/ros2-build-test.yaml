@@ -113,7 +113,7 @@ jobs:
         run: |
           docker exec -i ros_build bash << 'EOF'
           apt-get -yqq update
-          rosdep install -yqq --from-paths . --ignore-src --rosdistro $ROS_DISTRO || true
+          rosdep install -yqq --from-paths . --ignore-src --rosdistro $ROS_DISTRO
           EOF
 
       - name: Setup colcon mixin
