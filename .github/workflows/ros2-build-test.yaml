@@ -1,5 +1,8 @@
 name: ROS2 Build and Test
 
+# The paths-ignore lists below must stay identical to the paths lists in
+# ros2-build-test-skipped.yaml, which reports a passing "build-summary"
+# check for PRs this workflow skips (see that file for details).
 on:
   push:
     branches: [main]
