@@ -10,6 +10,8 @@
 #include <algorithm>
 #include <thread>
 
+#include "motor_control_lib/ddt_protocol.hpp"
+
 using namespace std::chrono_literals;
 
 namespace motor_control_lib {
@@ -381,21 +383,14 @@ bool DdtMotorLib::setModeVelocity(int motor_id) {
 
 bool DdtMotorLib::setControlMode(int motor_id, ControlMode mode) {
   std::lock_guard<std::recursive_mutex> lock(state_mutex_);
-  // Protocol 3 (モード切替)
-  // 仕様書: {ID, 0xA0, 0,0,0,0,0,0, 0, mode_value} （DATA[9] が mode_value で CRC 無し）
-  // 既存実装互換: DATA[8] に mode_value を入れ DATA[9] を CRC8(data[0..8]) とする独自レイアウト。
-  //   既存 velocity 切替 (mode_value=0) はこの形で実機動作実績がある。
-  //   電流モードで意図通り切替できない場合は仕様書通りの形 (DATA[9]=mode_value, CRC無し) に
-  //   フォールバックすること。
+  // フレーム組み立ては ddt_protocol::packModeFrame に集約（バイト列レイアウトは同関数を参照）。
   uint8_t mode_value = 0x02;  // 速度ループ
   if (mode == ControlMode::Current) {
     mode_value = 0x01;  // 電流ループ
   }
 
-  std::vector<uint8_t> data_fields = {
-      static_cast<uint8_t>(motor_id), 0xA0, 0, 0, 0, 0, 0, 0, mode_value};
-  uint8_t crc = crc8Maxim(data_fields);
-  data_fields.push_back(crc);
+  std::vector<uint8_t> data_fields =
+      ddt_protocol::packModeFrame(static_cast<uint8_t>(motor_id), mode_value);
 
   bool success = sendCommand(data_fields);
   if (success) {
@@ -450,18 +445,9 @@ void DdtMotorLib::setBrakeOnStop(bool enable) {
 bool DdtMotorLib::sendMotorVelocity(int motor_id, int velocity_rpm, bool brake) {
   int velocity_int = std::clamp(velocity_rpm, -max_motor_rpm_, max_motor_rpm_);
 
-  // 仕様 (M0602C プロトコル1): DATA[2]=指令上位8bit, DATA[3]=指令下位8bit。
-  // マルチバイトは big-endian (high, low)。sendMotorCurrentRaw と同じ並び。
-  uint8_t vel_high = static_cast<uint8_t>((velocity_int >> 8) & 0xFF);
-  uint8_t vel_low = static_cast<uint8_t>(velocity_int & 0xFF);
-
-  // DATA[6]=加速時間, DATA[7]=ブレーキ（0xFF でブレーキ、速度ループモードのみ有効）。
-  uint8_t brake_byte = brake ? 0xFF : 0x00;
-  std::vector<uint8_t> data_fields = {
-      static_cast<uint8_t>(motor_id), 0x64, vel_high, vel_low, 0, 0, 10, brake_byte, 0};
-
-  uint8_t crc = crc8Maxim(data_fields);
-  data_fields.push_back(crc);
+  // フレーム組み立ては ddt_protocol::packVelocityFrame に集約。加速時間は従来通り 10 固定。
+  std::vector<uint8_t> data_fields = ddt_protocol::packVelocityFrame(
+      static_cast<uint8_t>(motor_id), static_cast<int16_t>(velocity_int), /*accel_time=*/10, brake);
 
   bool success = sendCommand(data_fields);
   if (success) {
@@ -475,17 +461,9 @@ bool DdtMotorLib::sendMotorVelocity(int motor_id, int velocity_rpm, bool brake) 
 }
 
 bool DdtMotorLib::sendMotorCurrentRaw(int motor_id, int16_t current_raw) {
-  // Protocol 1 (0x64) を電流指令として送信。
-  // 仕様: DATA[2]=指令上位, DATA[3]=指令下位（電流モードでは -32767..32767 が -8A..8A）
-  // 電流モードでは acceleration / brake バイトは無効。
-  // マルチバイトは big-endian (high, low)。
-  uint8_t cur_high = static_cast<uint8_t>((current_raw >> 8) & 0xFF);
-  uint8_t cur_low = static_cast<uint8_t>(current_raw & 0xFF);
-
-  std::vector<uint8_t> data_fields = {
-      static_cast<uint8_t>(motor_id), 0x64, cur_high, cur_low, 0, 0, 0, 0, 0};
-  uint8_t crc = crc8Maxim(data_fields);
-  data_fields.push_back(crc);
+  // フレーム組み立ては ddt_protocol::packCurrentFrame に集約（バイト列レイアウトは同関数を参照）。
+  std::vector<uint8_t> data_fields =
+      ddt_protocol::packCurrentFrame(static_cast<uint8_t>(motor_id), current_raw);
 
   if (serial_fd_ < 0) {
     return false;
@@ -615,7 +593,7 @@ bool DdtMotorLib::readFeedbackFrame(int expected_motor_id, std::vector<uint8_t>&
         // 10バイト揃った段階で CRC を検証し、失敗なら先頭 1バイトを捨てて
         // 残りを保持したまま再同期を試みる（スライド同期）。
         std::vector<uint8_t> payload(out_frame.begin(), out_frame.begin() + 9);
-        if (crc8Maxim(payload) == out_frame[9]) {
+        if (ddt_protocol::crc8Maxim(payload) == out_frame[9]) {
           return true;
         }
         out_frame.erase(out_frame.begin());
@@ -631,19 +609,20 @@ bool DdtMotorLib::readFeedbackFrame(int expected_motor_id, std::vector<uint8_t>&
 }
 
 bool DdtMotorLib::parseFeedback(int expected_motor_id, const std::vector<uint8_t>& frame) {
-  if (frame.size() != 10) {
-    return false;
-  }
-  if (frame[0] != static_cast<uint8_t>(expected_motor_id)) {
-    return false;
-  }
-  // CRC8 検証（readFeedbackFrame 側でも検証済みだが、二重ガード）
-  std::vector<uint8_t> payload(frame.begin(), frame.begin() + 9);
-  uint8_t expected_crc = crc8Maxim(payload);
-  if (expected_crc != frame[9]) {
-    RCLCPP_WARN_THROTTLE(logger_, *rclcpp::Clock::make_shared(), 1000,
-                         "CRC不一致 motor=%d expected=0x%02X got=0x%02X", expected_motor_id,
-                         expected_crc, frame[9]);
+  // フレーム分解・検証は ddt_protocol::parseFeedbackFrame に集約（readFeedbackFrame 側でも
+  // 検証済みだが、二重ガード）。
+  ddt_protocol::Feedback decoded{};
+  ddt_protocol::ParseResult result =
+      ddt_protocol::parseFeedbackFrame(static_cast<uint8_t>(expected_motor_id), frame, decoded);
+  if (result != ddt_protocol::ParseResult::kOk) {
+    if (result == ddt_protocol::ParseResult::kCrcMismatch) {
+      // ログ用に payload の期待 CRC を再計算する。
+      std::vector<uint8_t> payload(frame.begin(), frame.begin() + 9);
+      uint8_t expected_crc = ddt_protocol::crc8Maxim(payload);
+      RCLCPP_WARN_THROTTLE(logger_, *rclcpp::Clock::make_shared(), 1000,
+                           "CRC不一致 motor=%d expected=0x%02X got=0x%02X", expected_motor_id,
+                           expected_crc, frame[9]);
+    }
     return false;
   }
 
@@ -652,12 +631,12 @@ bool DdtMotorLib::parseFeedback(int expected_motor_id, const std::vector<uint8_t
   //  DATA[6..7]=position, DATA[8]=fault code
   // マルチバイトは big-endian (high, low)。
   MotorFeedback& fb = motor_feedbacks_[expected_motor_id];
-  fb.mode = frame[1];
-  fb.current = static_cast<uint16_t>((frame[2] << 8) | frame[3]);
-  fb.speed = static_cast<int16_t>((frame[4] << 8) | frame[5]);
+  fb.mode = decoded.mode;
+  fb.current = decoded.current;
+  fb.speed = decoded.speed;
   // 位置はここでは使わないが、temperature 取得は Protocol 2 (0x74) が必要。
   // 暫定で前回値保持（既存挙動）。
-  fb.fault_code = frame[8];
+  fb.fault_code = decoded.fault_code;
 
   // PI 状態側にも保存（受信失敗時のフォールバック用）
   auto pi_it = pi_states_.find(expected_motor_id);
@@ -665,21 +644,6 @@ bool DdtMotorLib::parseFeedback(int expected_motor_id, const std::vector<uint8_t
     pi_it->second.last_measured_rpm = fb.speed;
   }
   return true;
-}
-
-uint8_t DdtMotorLib::crc8Maxim(const std::vector<uint8_t>& data) {
-  uint8_t crc = 0x00;
-  for (uint8_t byte : data) {
-    crc ^= byte;
-    for (int i = 0; i < 8; i++) {
-      if (crc & 0x01) {
-        crc = (crc >> 1) ^ 0x8C;
-      } else {
-        crc >>= 1;
-      }
-    }
-  }
-  return crc;
 }
 
 bool DdtMotorLib::sendCommand(const std::vector<uint8_t>& command, int retry_count) {

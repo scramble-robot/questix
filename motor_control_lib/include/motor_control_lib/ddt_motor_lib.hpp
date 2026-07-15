@@ -183,8 +183,7 @@ private:
   bool readFeedbackFrame(int expected_motor_id, std::vector<uint8_t>& out_frame, int timeout_ms);
   bool parseFeedback(int expected_motor_id, const std::vector<uint8_t>& frame);
 
-  // Utility methods (M15 datasheet compliant)
-  uint8_t crc8Maxim(const std::vector<uint8_t>& data);
+  // Utility methods
   bool sendCommand(const std::vector<uint8_t>& command, int retry_count = 3);
   ssize_t writeSerial(const void* data, size_t size);
   ssize_t readSerial(void* data, size_t size);
