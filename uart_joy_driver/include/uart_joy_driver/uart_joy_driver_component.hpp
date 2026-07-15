@@ -55,7 +55,8 @@ extern "C" {
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/joy.hpp>
 #include <string>
-#include <vector>
+#include <uart_joy_driver/dropout_filter.hpp>
+#include <uart_joy_driver/joy_line_parser.hpp>
 
 namespace uart_joy_driver {
 
@@ -76,12 +77,6 @@ private:
   // Read a complete line from serial buffer
   bool readLine(std::string& line);
 
-  // Convert one ASCII line from the receiver module into a Joy message.
-  bool parseControllerLine(const std::string& line, sensor_msgs::msg::Joy& joy_msg);
-  bool parseHexByte(const std::string& token, uint8_t& value) const;
-  double normalizeAxis(uint8_t value, bool invert) const;
-  void fillDpadAxes(uint8_t dpad_value, sensor_msgs::msg::Joy& joy_msg) const;
-  void applyDropoutFilter(sensor_msgs::msg::Joy& joy_msg);
   void publishNeutralJoy();
 
   // Parameters
@@ -108,10 +103,7 @@ private:
   bool have_received_frame_;
   bool neutral_published_;
   sensor_msgs::msg::Joy last_valid_joy_msg_;
-  std::vector<float> filtered_axes_;
-  std::vector<int> filtered_buttons_;
-  std::vector<int> axis_release_counts_;
-  std::vector<int> button_release_counts_;
+  DropoutFilter dropout_filter_;
 };
 
 }  // namespace uart_joy_driver

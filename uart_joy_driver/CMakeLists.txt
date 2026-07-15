@@ -11,6 +11,8 @@ ament_auto_find_build_dependencies()
 
 # Create the component library
 ament_auto_add_library(uart_joy_driver_component SHARED
+  src/dropout_filter.cpp
+  src/joy_line_parser.cpp
   src/uart_joy_driver_component.cpp
 )
 
@@ -32,6 +34,9 @@ if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   list(APPEND AMENT_LINT_AUTO_EXCLUDE ament_cmake_cpplint ament_cmake_uncrustify)
   ament_lint_auto_find_test_dependencies()
+
+  ament_auto_add_gtest(test_joy_line_parser test/test_joy_line_parser.cpp)
+  ament_auto_add_gtest(test_dropout_filter test/test_dropout_filter.cpp)
 endif()
 
 ament_auto_package(INSTALL_TO_SHARE launch config)

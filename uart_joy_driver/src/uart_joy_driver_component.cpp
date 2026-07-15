@@ -19,37 +19,12 @@
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
-#include <cmath>
-#include <cstdint>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
-#include <sstream>
 #include <string>
 #include <uart_joy_driver/uart_joy_driver_component.hpp>
-#include <vector>
 
 namespace uart_joy_driver {
-
-namespace {
-
-constexpr size_t kJoyAxisCount = 8;
-constexpr size_t kJoyButtonCount = 16;
-constexpr int kExpectedFunctionId = 0x01;
-
-std::vector<std::string> splitString(const std::string& input, char delimiter) {
-  std::vector<std::string> tokens;
-  std::stringstream ss(input);
-  std::string token;
-
-  while (std::getline(ss, token, delimiter)) {
-    tokens.push_back(token);
-  }
-
-  return tokens;
-}
-
-}  // namespace
 
 UartJoyDriverComponent::UartJoyDriverComponent(const rclcpp::NodeOptions& options)
     : Node("uart_joy_driver", options),
@@ -81,10 +56,12 @@ UartJoyDriverComponent::UartJoyDriverComponent(const rclcpp::NodeOptions& option
 
   joy_pub_ = this->create_publisher<sensor_msgs::msg::Joy>("/joy", 1);
   joy_raw_pub_ = this->create_publisher<sensor_msgs::msg::Joy>("/joy_raw_uart", 1);
-  filtered_axes_.assign(kJoyAxisCount, 0.0F);
-  filtered_buttons_.assign(kJoyButtonCount, 0);
-  axis_release_counts_.assign(kJoyAxisCount, 0);
-  button_release_counts_.assign(kJoyButtonCount, 0);
+  DropoutFilter::Config filter_config;
+  filter_config.hold_axis_threshold = hold_axis_threshold_;
+  filter_config.axis_release_confirm_frames = axis_release_confirm_frames_;
+  filter_config.button_release_confirm_frames = button_release_confirm_frames_;
+  dropout_filter_.configure(filter_config);
+  dropout_filter_.reset(kJoyAxisCount, kJoyButtonCount);
   last_valid_joy_msg_.axes.assign(kJoyAxisCount, 0.0F);
   last_valid_joy_msg_.buttons.assign(kJoyButtonCount, 0);
   last_frame_time_ = this->now();
@@ -217,7 +194,7 @@ void UartJoyDriverComponent::readTimerCallback() {
   std::string line;
   while (readLine(line)) {
     sensor_msgs::msg::Joy raw_joy_msg;
-    if (!parseControllerLine(line, raw_joy_msg)) {
+    if (!parseControllerLine(line, deadzone_, raw_joy_msg)) {
       RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
                            "Failed to parse UART controller line: %s", line.c_str());
       continue;
@@ -228,7 +205,7 @@ void UartJoyDriverComponent::readTimerCallback() {
     joy_raw_pub_->publish(raw_joy_msg);
 
     auto joy_msg = raw_joy_msg;
-    applyDropoutFilter(joy_msg);
+    dropout_filter_.apply(joy_msg);
     joy_msg.header.stamp = now;
     last_valid_joy_msg_ = joy_msg;
     last_frame_time_ = now;
@@ -282,204 +259,12 @@ bool UartJoyDriverComponent::readLine(std::string& line) {
   return !line.empty();
 }
 
-bool UartJoyDriverComponent::parseControllerLine(const std::string& line,
-                                                 sensor_msgs::msg::Joy& joy_msg) {
-  std::string payload = line;
-  const auto separator_pos = payload.find(':');
-  if (separator_pos != std::string::npos) {
-    payload = payload.substr(separator_pos + 1);
-  }
-
-  const auto tokens = splitString(payload, ',');
-  size_t data_start_index = 0;
-  if (tokens.size() == 8) {
-    uint8_t function_id = 0;
-    if (!parseHexByte(tokens[0], function_id) || function_id != kExpectedFunctionId) {
-      return false;
-    }
-    data_start_index = 1;
-  } else if (tokens.size() != 7) {
-    return false;
-  }
-
-  uint8_t byte0 = 0;
-  uint8_t byte1 = 0;
-  uint8_t dpad = 0;
-  uint8_t lx = 0x80;
-  uint8_t ly = 0x80;
-  uint8_t rx = 0x80;
-  uint8_t ry = 0x80;
-
-  if (!parseHexByte(tokens[data_start_index + 0], byte0) ||
-      !parseHexByte(tokens[data_start_index + 1], byte1) ||
-      !parseHexByte(tokens[data_start_index + 2], dpad) ||
-      !parseHexByte(tokens[data_start_index + 3], lx) ||
-      !parseHexByte(tokens[data_start_index + 4], ly) ||
-      !parseHexByte(tokens[data_start_index + 5], rx) ||
-      !parseHexByte(tokens[data_start_index + 6], ry)) {
-    return false;
-  }
-
-  joy_msg.header.stamp = this->now();
-  joy_msg.axes.assign(kJoyAxisCount, 0.0F);
-  joy_msg.buttons.assign(kJoyButtonCount, 0);
-
-  // Right-hand coordinate frame: stick left = +1, stick right = -1.
-  // 右手座標系: スティック左を +1、右を -1 として出力します。
-  joy_msg.axes[0] = static_cast<float>(normalizeAxis(lx, true));
-  joy_msg.axes[1] = static_cast<float>(normalizeAxis(ly, true));
-  joy_msg.axes[3] = static_cast<float>(normalizeAxis(rx, true));
-  joy_msg.axes[4] = static_cast<float>(normalizeAxis(ry, true));
-  fillDpadAxes(dpad, joy_msg);
-
-  joy_msg.buttons[0] = (byte0 & 0x01) ? 1 : 0;   // A
-  joy_msg.buttons[1] = (byte0 & 0x02) ? 1 : 0;   // B
-  joy_msg.buttons[2] = (byte0 & 0x04) ? 1 : 0;   // X
-  joy_msg.buttons[3] = (byte0 & 0x08) ? 1 : 0;   // Y
-  joy_msg.buttons[4] = (byte0 & 0x10) ? 1 : 0;   // L
-  joy_msg.buttons[5] = (byte0 & 0x20) ? 1 : 0;   // R
-  joy_msg.buttons[6] = (byte0 & 0x40) ? 1 : 0;   // ZL
-  joy_msg.buttons[7] = (byte0 & 0x80) ? 1 : 0;   // ZR
-  joy_msg.buttons[8] = (byte1 & 0x01) ? 1 : 0;   // Minus
-  joy_msg.buttons[9] = (byte1 & 0x02) ? 1 : 0;   // Plus
-  joy_msg.buttons[10] = (byte1 & 0x04) ? 1 : 0;  // Home
-  joy_msg.buttons[11] = (byte1 & 0x08) ? 1 : 0;  // Capture
-  joy_msg.buttons[12] = (byte1 & 0x10) ? 1 : 0;  // LStick
-  joy_msg.buttons[13] = (byte1 & 0x20) ? 1 : 0;  // RStick
-
-  return true;
-}
-
-void UartJoyDriverComponent::applyDropoutFilter(sensor_msgs::msg::Joy& joy_msg) {
-  if (filtered_axes_.size() != joy_msg.axes.size()) {
-    filtered_axes_.assign(joy_msg.axes.size(), 0.0F);
-    axis_release_counts_.assign(joy_msg.axes.size(), 0);
-  }
-  if (filtered_buttons_.size() != joy_msg.buttons.size()) {
-    filtered_buttons_.assign(joy_msg.buttons.size(), 0);
-    button_release_counts_.assign(joy_msg.buttons.size(), 0);
-  }
-
-  const int axis_release_frames = std::max(1, axis_release_confirm_frames_);
-  const int button_release_frames = std::max(1, button_release_confirm_frames_);
-
-  for (size_t i = 0; i < joy_msg.axes.size(); ++i) {
-    const float raw_axis = joy_msg.axes[i];
-    if (std::abs(raw_axis) >= hold_axis_threshold_) {
-      filtered_axes_[i] = raw_axis;
-      axis_release_counts_[i] = 0;
-    } else if (std::abs(filtered_axes_[i]) >= hold_axis_threshold_) {
-      axis_release_counts_[i] += 1;
-      if (axis_release_counts_[i] >= axis_release_frames) {
-        filtered_axes_[i] = 0.0F;
-        axis_release_counts_[i] = 0;
-      }
-    } else {
-      filtered_axes_[i] = 0.0F;
-      axis_release_counts_[i] = 0;
-    }
-    joy_msg.axes[i] = filtered_axes_[i];
-  }
-
-  for (size_t i = 0; i < joy_msg.buttons.size(); ++i) {
-    const bool raw_pressed = joy_msg.buttons[i] == 1;
-    if (raw_pressed) {
-      filtered_buttons_[i] = 1;
-      button_release_counts_[i] = 0;
-    } else if (filtered_buttons_[i] == 1) {
-      button_release_counts_[i] += 1;
-      if (button_release_counts_[i] >= button_release_frames) {
-        filtered_buttons_[i] = 0;
-        button_release_counts_[i] = 0;
-      }
-    } else {
-      filtered_buttons_[i] = 0;
-      button_release_counts_[i] = 0;
-    }
-    joy_msg.buttons[i] = filtered_buttons_[i];
-  }
-}
-
-bool UartJoyDriverComponent::parseHexByte(const std::string& token, uint8_t& value) const {
-  if (token.empty() || token.size() > 2) {
-    return false;
-  }
-
-  char* end_ptr = nullptr;
-  const uint64_t parsed = static_cast<uint64_t>(std::strtoul(token.c_str(), &end_ptr, 16));
-  if (end_ptr == nullptr || *end_ptr != '\0' || parsed > 0xFFUL) {
-    return false;
-  }
-
-  value = static_cast<uint8_t>(parsed);
-  return true;
-}
-
-double UartJoyDriverComponent::normalizeAxis(uint8_t value, bool invert) const {
-  double normalized = (static_cast<int>(value) - 128) / 127.0;
-  normalized = std::clamp(normalized, -1.0, 1.0);
-  if (invert) {
-    normalized = -normalized;
-  }
-  if (std::abs(normalized) < deadzone_) {
-    normalized = 0.0;
-  }
-  return normalized;
-}
-
-void UartJoyDriverComponent::fillDpadAxes(uint8_t dpad_value,
-                                          sensor_msgs::msg::Joy& joy_msg) const {
-  // Right-hand coordinate frame: D-pad left = +1, right = -1.
-  // 右手座標系: 十字キー左を +1、右を -1 として出力します。
-  double horizontal = 0.0;
-  double vertical = 0.0;
-
-  switch (dpad_value) {
-    case 1:
-      vertical = 1.0;
-      break;
-    case 2:
-      horizontal = -1.0;
-      vertical = 1.0;
-      break;
-    case 3:
-      horizontal = -1.0;
-      break;
-    case 4:
-      horizontal = -1.0;
-      vertical = -1.0;
-      break;
-    case 5:
-      vertical = -1.0;
-      break;
-    case 6:
-      horizontal = 1.0;
-      vertical = -1.0;
-      break;
-    case 7:
-      horizontal = 1.0;
-      break;
-    case 8:
-      horizontal = 1.0;
-      vertical = 1.0;
-      break;
-    default:
-      break;
-  }
-
-  joy_msg.axes[6] = static_cast<float>(horizontal);
-  joy_msg.axes[7] = static_cast<float>(vertical);
-}
-
 void UartJoyDriverComponent::publishNeutralJoy() {
   sensor_msgs::msg::Joy neutral_msg;
   neutral_msg.header.stamp = this->now();
   neutral_msg.axes.assign(kJoyAxisCount, 0.0F);
   neutral_msg.buttons.assign(kJoyButtonCount, 0);
-  filtered_axes_.assign(kJoyAxisCount, 0.0F);
-  filtered_buttons_.assign(kJoyButtonCount, 0);
-  axis_release_counts_.assign(kJoyAxisCount, 0);
-  button_release_counts_.assign(kJoyButtonCount, 0);
+  dropout_filter_.reset(kJoyAxisCount, kJoyButtonCount);
   last_valid_joy_msg_ = neutral_msg;
   joy_pub_->publish(neutral_msg);
 
