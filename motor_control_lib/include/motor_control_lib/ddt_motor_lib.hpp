@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "motor_control_lib/base_motor_controller.hpp"
+#include "motor_control_lib/ddt_current_pi.hpp"
 
 namespace motor_control_lib {
 
@@ -131,7 +132,7 @@ private:
 
   // Current モード用 PI 状態（モータ毎）
   struct PiState {
-    double integral_amp{0.0};
+    ddt_current_pi::State pi;
     int16_t last_measured_rpm{0};
     std::chrono::steady_clock::time_point last_t{};
     bool has_last_t{false};

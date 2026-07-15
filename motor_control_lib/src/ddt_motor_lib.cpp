@@ -84,7 +84,7 @@ bool DdtMotorLib::isHealthy() const {
 
 void DdtMotorLib::resetCurrentPiStateForStop(int motor_id) {
   auto& pi_state = pi_states_[motor_id];
-  pi_state.integral_amp = 0.0;
+  pi_state.pi.integral_amp = 0.0;
   pi_state.has_last_t = false;
   pi_state.ref_rpm_filtered = 0.0;
   pi_state.last_ref_t = {};
@@ -176,10 +176,10 @@ bool DdtMotorLib::setMotorVelocity(int motor_id, int velocity_rpm) {
       if (fb_it != motor_feedbacks_.end()) {
         measured_rpm = static_cast<int>(fb_it->second.speed);
       }
-      if (std::abs(measured_rpm) <= current_zero_deadband_rpm_) {
+      if (ddt_current_pi::inZeroDeadband(rpm_ref, measured_rpm, current_zero_deadband_rpm_)) {
         auto pi_it = pi_states_.find(motor_id);
         if (pi_it != pi_states_.end()) {
-          pi_it->second.integral_amp = 0.0;
+          pi_it->second.pi.integral_amp = 0.0;
           pi_it->second.has_last_t = false;
         }
         return sendMotorCurrentRaw(motor_id, 0);
@@ -504,47 +504,32 @@ int16_t DdtMotorLib::runCurrentLoopStep(int motor_id, int rpm_ref) {
   double dt = 0.01;  // 初回および異常時のフォールバック [s]
   if (st.has_last_t) {
     dt = std::chrono::duration<double>(now - st.last_t).count();
-    if (dt <= 0.0 || dt > 0.2) {
-      dt = 0.01;  // 異常値クリップ
-    }
   }
   st.last_t = now;
   st.has_last_t = true;
+  dt = ddt_current_pi::sanitizeDt(dt);
 
-  // 実測 RPM: フィードバック未取得なら前回保持値（受信失敗時は最新フィードバックがそのまま残る）
+  // 実測 RPM: フィードバック未取得なら前回保持値（受信失敗時は最新フィードバックがそのまま残る）。
+  // 符号反転は stepToRaw 内で行うため、ここでは生値を渡す。
   int measured_rpm = 0;
   auto fb_it = motor_feedbacks_.find(motor_id);
   if (fb_it != motor_feedbacks_.end()) {
     measured_rpm = static_cast<int>(fb_it->second.speed);
   }
-  if (current_invert_measured_) {
-    measured_rpm = -measured_rpm;
-  }
 
-  double error = static_cast<double>(rpm_ref - measured_rpm);
+  ddt_current_pi::Params params{current_kp_, current_ki_, max_current_amp_, integral_limit_amp_,
+                                current_invert_measured_};
+  double i_cmd_amp = 0.0;
+  int16_t raw = ddt_current_pi::stepToRaw(st.pi, params, rpm_ref, measured_rpm, dt, &i_cmd_amp);
 
-  // 積分項更新 (アンチワインドアップ: 積分項寄与 = Ki * integral を ±integral_limit_amp_
-  // にクランプ)
-  st.integral_amp += error * dt;
-  if (current_ki_ > 1e-9) {
-    double integ_clip = integral_limit_amp_ / current_ki_;
-    st.integral_amp = std::clamp(st.integral_amp, -integ_clip, integ_clip);
-  } else {
-    st.integral_amp = 0.0;
-  }
-
-  double i_cmd_amp = current_kp_ * error + current_ki_ * st.integral_amp;
-  i_cmd_amp = std::clamp(i_cmd_amp, -max_current_amp_, max_current_amp_);
-
-  // -8A..8A が -32767..32767 に対応（仕様書）
-  double raw_d = (i_cmd_amp / 8.0) * 32767.0;
-  int raw = static_cast<int>(std::lround(raw_d));
-  raw = std::clamp(raw, -32767, 32767);
-
+  // ログは従来通り符号反転後の実測値と、それに基づく error を表示する。
+  int meas_logged = current_invert_measured_ ? -measured_rpm : measured_rpm;
+  double error = static_cast<double>(rpm_ref - meas_logged);
   RCLCPP_INFO_THROTTLE(logger_, *rclcpp::Clock::make_shared(), 200,
                        "PI motor=%d ref=%d meas=%d err=%.1f integ=%.3fA i_cmd=%.3fA raw=%d dt=%.4f",
-                       motor_id, rpm_ref, measured_rpm, error, st.integral_amp, i_cmd_amp, raw, dt);
-  return static_cast<int16_t>(raw);
+                       motor_id, rpm_ref, meas_logged, error, st.pi.integral_amp, i_cmd_amp,
+                       static_cast<int>(raw), dt);
+  return raw;
 }
 
 bool DdtMotorLib::readFeedbackFrame(int expected_motor_id, std::vector<uint8_t>& out_frame,
