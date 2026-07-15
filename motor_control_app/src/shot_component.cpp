@@ -8,6 +8,8 @@
 #include <chrono>
 #include <thread>
 
+#include "motor_control_app/shot_angle.hpp"
+
 namespace motor_control_app {
 
 ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
@@ -214,7 +216,7 @@ void ShotComponent::executeShotSequence() {
 
 // 角度制限関数
 double ShotComponent::clampAngle(double angle_deg) {
-  return std::max(tilt_min_angle_, std::min(tilt_max_angle_, angle_deg));
+  return shot_angle::clampAngle(angle_deg, tilt_min_angle_, tilt_max_angle_);
 }
 
 // コマンド送信レート制限チェック
@@ -226,24 +228,12 @@ bool ShotComponent::canSendCommand() {
 
 // 角度からサーボ位置への変換（角度 -> 0-4095）
 int ShotComponent::angleToServoPosition(double angle_deg) {
-  // 角度を直接サーボ位置に変換（0度=0, 360度=4095）
-  // 角度を0-360度の範囲で正規化
-  while (angle_deg < 0) angle_deg += 360.0;
-  while (angle_deg >= 360.0) angle_deg -= 360.0;
-
-  // サーボ位置に変換
-  double normalized = angle_deg / 360.0;
-  int position = static_cast<int>(normalized * 4096.0);
-  return std::max(0, std::min(4095, position));
+  return shot_angle::angleToServoPosition(angle_deg);
 }
 
 // サーボ位置から角度への変換（0-4095 -> 角度）
 double ShotComponent::servoPositionToAngle(int position) {
-  // 位置を0-4095の範囲にクランプ
-  position = std::max(0, std::min(4095, position));
-  // 角度に変換（0-4095 -> 0-360度）
-  double normalized = static_cast<double>(position) / 4096.0;
-  return normalized * 360.0;
+  return shot_angle::servoPositionToAngle(position);
 }
 
 }  // namespace motor_control_app
