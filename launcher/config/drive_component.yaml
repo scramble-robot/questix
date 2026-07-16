@@ -39,6 +39,12 @@ drive_component:
     # 惰性で緩やかに減速して止まりにくい場合に有効。false で従来挙動（目標0のみ）。
     brake_on_stop: true
 
+    # /target_twist 受信ウォッチドッグ。
+    # 指令がこの秒数途絶えたら走行モータを停止する（velocity/current 両モードで有効）。
+    # 上流（uart_joy_driver/joy_gate/joy_controller）が停止しても暴走を防ぐ安全機能。
+    # 0以下で無効（安全機能のため通常は無効化しないこと）。
+    cmd_timeout_sec: 0.5
+
     # パブリッシュ設定
     status_publish_rate: 10.0 # ステータスパブリッシュ頻度 [Hz]
     # 左右モータのフィードバック出力先

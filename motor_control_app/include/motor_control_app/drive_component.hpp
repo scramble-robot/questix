@@ -10,6 +10,7 @@
 #include <string>
 
 #include "geometry_msgs/msg/twist.hpp"
+#include "motor_control_app/drive_watchdog.hpp"
 #include "motor_control_lib/ddt_motor_lib.hpp"
 #include "motor_control_lib/differential_drive.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -50,6 +51,13 @@ private:
   void statusTimerCallback();
 
   /**
+   * @brief コマンド受信ウォッチドッグのタイマーコールバック
+   *
+   * /target_twist が cmd_timeout_sec_ 秒以上途絶えたらモータを停止します。
+   */
+  void watchdogTimerCallback();
+
+  /**
    * @brief パラメータを初期化
    */
   void initializeParameters();
@@ -64,6 +72,7 @@ private:
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr twist_subscription_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_publisher_;
   rclcpp::TimerBase::SharedPtr status_timer_;
+  rclcpp::TimerBase::SharedPtr watchdog_timer_;
 
   // モータ制御ライブラリ
   std::shared_ptr<motor_control_lib::DdtMotorLib> motor_lib_;
@@ -96,6 +105,10 @@ private:
   double last_cmd_angular_;
   rclcpp::Time last_cmd_time_;
   bool has_last_cmd_;
+
+  // コマンド受信ウォッチドッグ（velocity/current 両モードで有効）
+  // /target_twist がこの秒数途絶えたら走行モータを停止する。0 以下で無効。
+  double cmd_timeout_sec_;
 
   // 停止時の電気ブレーキ（velocity モードのみ）
   bool brake_on_stop_{true};

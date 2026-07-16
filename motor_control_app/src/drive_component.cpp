@@ -18,6 +18,7 @@ DriveComponent::DriveComponent(const rclcpp::NodeOptions& options)
       last_cmd_angular_(0.0),
       last_cmd_time_(0, 0, RCL_ROS_TIME),
       has_last_cmd_(false),
+      cmd_timeout_sec_(0.5),
       motor_initialized_(false),
       emergency_stop_active_(false) {
   RCLCPP_INFO(this->get_logger(), "Initializing Drive Component");
@@ -42,6 +43,16 @@ DriveComponent::DriveComponent(const rclcpp::NodeOptions& options)
   status_timer_ =
       this->create_wall_timer(std::chrono::duration_cast<std::chrono::milliseconds>(timer_period),
                               std::bind(&DriveComponent::statusTimerCallback, this));
+
+  // コマンド受信ウォッチドッグ（100ms 周期）。cmd_timeout_sec_ <= 0 で無効。
+  if (drive_watchdog::isEnabled(cmd_timeout_sec_)) {
+    watchdog_timer_ =
+        this->create_wall_timer(100ms, std::bind(&DriveComponent::watchdogTimerCallback, this));
+  } else {
+    RCLCPP_WARN(this->get_logger(),
+                "Command timeout watchdog disabled (cmd_timeout_sec <= 0); motors will keep the "
+                "last command if /target_twist stops");
+  }
 
   RCLCPP_INFO(this->get_logger(), "Drive Component initialized successfully");
 }
@@ -83,6 +94,9 @@ void DriveComponent::initializeParameters() {
   // 停止時の電気ブレーキ（velocity モードのみ有効）
   this->declare_parameter("brake_on_stop", true);
 
+  // コマンド受信ウォッチドッグのタイムアウト [s]（velocity/current 両モードで有効）
+  this->declare_parameter("cmd_timeout_sec", 0.5);
+
   // パラメータを取得
   serial_port_ = this->get_parameter("serial_port").as_string();
   baud_rate_ = this->get_parameter("baud_rate").as_int();
@@ -103,6 +117,7 @@ void DriveComponent::initializeParameters() {
   max_linear_accel_ = this->get_parameter("max_linear_accel").as_double();
   max_angular_accel_ = this->get_parameter("max_angular_accel").as_double();
   brake_on_stop_ = this->get_parameter("brake_on_stop").as_bool();
+  cmd_timeout_sec_ = this->get_parameter("cmd_timeout_sec").as_double();
 
   RCLCPP_INFO(this->get_logger(), "Parameters initialized:");
   RCLCPP_INFO(this->get_logger(), "  serial_port: %s", serial_port_.c_str());
@@ -114,6 +129,7 @@ void DriveComponent::initializeParameters() {
   RCLCPP_INFO(this->get_logger(), "  max_motor_rpm: %d", max_motor_rpm_);
   RCLCPP_INFO(this->get_logger(), "  status_publish_rate: %.1f", status_publish_rate_);
   RCLCPP_INFO(this->get_logger(), "  status_topic: %s", status_topic_.c_str());
+  RCLCPP_INFO(this->get_logger(), "  cmd_timeout_sec: %.2f", cmd_timeout_sec_);
   RCLCPP_INFO(this->get_logger(), "  control_mode: %s", control_mode_.c_str());
   if (control_mode_ == "current") {
     RCLCPP_INFO(
@@ -179,16 +195,25 @@ bool DriveComponent::initializeMotorLib() {
 }
 
 void DriveComponent::twistCallback(const geometry_msgs::msg::Twist::SharedPtr msg) {
-  if (!motor_initialized_ || emergency_stop_active_ || !diff_drive_) {
-    RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
-                         "Motor not initialized or emergency stop active, ignoring twist command");
-    return;
-  }
-
-  if (!diff_drive_->isHealthy()) {
-    RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
-                         "Motor not healthy, ignoring twist command");
-    return;
+  bool motor_ready = motor_initialized_ && diff_drive_ != nullptr;
+  switch (drive_watchdog::decideTwistAction(motor_ready, emergency_stop_active_,
+                                            motor_ready && diff_drive_->isHealthy())) {
+    case drive_watchdog::TwistAction::kIgnore:
+      RCLCPP_WARN_THROTTLE(
+          this->get_logger(), *this->get_clock(), 1000,
+          "Motor not initialized or emergency stop active, ignoring twist command");
+      return;
+    case drive_watchdog::TwistAction::kFaultStop:
+      // モータ異常中は最後の指令を保持せず、明示的に停止指令を送る。
+      diff_drive_->stop();
+      has_last_cmd_ = false;
+      last_cmd_linear_ = 0.0;
+      last_cmd_angular_ = 0.0;
+      RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                           "Motor not healthy: sending stop command");
+      return;
+    case drive_watchdog::TwistAction::kDrive:
+      break;
   }
 
   // 加速度クランプ（スルーレート制限）。max_*_accel<=0 のとき無効。
@@ -230,6 +255,28 @@ void DriveComponent::twistCallback(const geometry_msgs::msg::Twist::SharedPtr ms
 
   RCLCPP_DEBUG(this->get_logger(), "Velocity command sent: linear=%.3f, angular=%.3f",
                target_linear, target_angular);
+}
+
+void DriveComponent::watchdogTimerCallback() {
+  if (!motor_initialized_ || !diff_drive_) {
+    return;
+  }
+
+  // 単一スレッドエグゼキュータ（コンポーネントコンテナ／単体 spin）前提のため、
+  // last_cmd_time_ / has_last_cmd_ の共有状態にミューテックスは不要。
+  double elapsed = (this->now() - last_cmd_time_).seconds();
+  if (drive_watchdog::shouldTimeoutStop(elapsed, cmd_timeout_sec_, has_last_cmd_)) {
+    RCLCPP_WARN(this->get_logger(),
+                "Command timeout: no /target_twist for %.2fs (limit %.2fs), stopping motors",
+                elapsed, cmd_timeout_sec_);
+    // stop() は各ホイールの stopMotor を通り電流PI積分状態をリセットする。
+    diff_drive_->stop();
+    // 再発火防止（イベント毎に WARN 1回）。次の /target_twist で自動的に再武装し、
+    // スルーレートクランプもゼロから再スタートする。
+    has_last_cmd_ = false;
+    last_cmd_linear_ = 0.0;
+    last_cmd_angular_ = 0.0;
+  }
 }
 
 void DriveComponent::statusTimerCallback() {
