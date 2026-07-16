@@ -9,8 +9,7 @@
 
 namespace joy_gate {
 
-JoyGateComponent::JoyGateComponent(const rclcpp::NodeOptions& options)
-    : Node("joy_gate", options), is_controllable_(false), has_received_joy_(false) {
+JoyGateComponent::JoyGateComponent(const rclcpp::NodeOptions& options) : Node("joy_gate", options) {
   // Declare and load parameters from YAML
   gpio_controllable_topic_ =
       this->declare_parameter<std::string>("gpio_controllable_topic", "/gpio/controllable");
@@ -19,6 +18,11 @@ JoyGateComponent::JoyGateComponent(const rclcpp::NodeOptions& options)
   // qos_depth applies to the gpio_controllable subscription (RELIABLE).
   // Joy input/output intentionally use depth 1 to avoid stale-input latency.
   const int qos_depth = this->declare_parameter<int>("qos_depth", 10);
+  // /gpio/controllable normally arrives at ~20 Hz; 1.0s default leaves a large
+  // margin. <= 0 disables the timeout fallback.
+  controllable_timeout_sec_ = this->declare_parameter<double>("controllable_timeout_sec", 1.0);
+
+  gate_.configure(controllable_timeout_sec_);
 
   // Initialize last joy message with empty state
   last_joy_msg_.header.stamp = this->now();
@@ -40,6 +44,15 @@ JoyGateComponent::JoyGateComponent(const rclcpp::NodeOptions& options)
   joy_output_pub_ =
       this->create_publisher<sensor_msgs::msg::Joy>(joy_output_topic_, rclcpp::QoS(1));
 
+  if (controllable_timeout_sec_ > 0.0) {
+    timeout_timer_ = this->create_wall_timer(
+        std::chrono::milliseconds(100), std::bind(&JoyGateComponent::timeout_check_callback, this));
+  } else {
+    RCLCPP_WARN(this->get_logger(),
+                "controllable_timeout_sec <= 0: %s reception timeout is disabled",
+                gpio_controllable_topic_.c_str());
+  }
+
   RCLCPP_INFO(this->get_logger(), "Joy Gate Node initialized");
   RCLCPP_INFO(this->get_logger(), "Subscribing to: %s, %s", gpio_controllable_topic_.c_str(),
               joy_input_topic_.c_str());
@@ -47,30 +60,51 @@ JoyGateComponent::JoyGateComponent(const rclcpp::NodeOptions& options)
 }
 
 void JoyGateComponent::gpio_controllable_callback(const std_msgs::msg::Bool::SharedPtr msg) {
-  bool prev_controllable = is_controllable_;
-  is_controllable_ = msg->data;
+  const auto r = gate_.onControllableMsg(msg->data, this->now().seconds());
 
-  if (prev_controllable != is_controllable_) {
+  if (r.recovered) {
+    RCLCPP_INFO(this->get_logger(), "%s reception recovered", gpio_controllable_topic_.c_str());
+  }
+
+  if (r.changed) {
     RCLCPP_INFO(this->get_logger(), "GPIO controllable status changed to: %s",
-                is_controllable_ ? "TRUE" : "FALSE");
+                gate_.isControllable() ? "TRUE" : "FALSE");
   }
 
   // If we just became uncontrollable, publish a zero joy message
-  if (!is_controllable_ && has_received_joy_) {
-    sensor_msgs::msg::Joy zero_joy = last_joy_msg_;
-    zero_joy.header.stamp = this->now();
-
-    // Set all axes and buttons to zero
-    for (auto& axis : zero_joy.axes) {
-      axis = 0.0;
-    }
-    for (auto& button : zero_joy.buttons) {
-      button = 0;
-    }
-
-    joy_output_pub_->publish(zero_joy);
+  if (r.publish_zero && has_received_joy_) {
+    publish_zero_joy();
     RCLCPP_DEBUG(this->get_logger(), "Published zero joy message due to uncontrollable state");
   }
+}
+
+void JoyGateComponent::timeout_check_callback() {
+  const auto r = gate_.onTimerCheck(this->now().seconds());
+
+  if (r.timed_out) {
+    RCLCPP_WARN(this->get_logger(),
+                "no %s update for more than %.2fs: falling back to uncontrollable",
+                gpio_controllable_topic_.c_str(), controllable_timeout_sec_);
+
+    if (has_received_joy_) {
+      publish_zero_joy();
+    }
+  }
+}
+
+void JoyGateComponent::publish_zero_joy() {
+  sensor_msgs::msg::Joy zero_joy = last_joy_msg_;
+  zero_joy.header.stamp = this->now();
+
+  // Set all axes and buttons to zero
+  for (auto& axis : zero_joy.axes) {
+    axis = 0.0;
+  }
+  for (auto& button : zero_joy.buttons) {
+    button = 0;
+  }
+
+  joy_output_pub_->publish(zero_joy);
 }
 
 void JoyGateComponent::joy_input_callback(const sensor_msgs::msg::Joy::SharedPtr msg) {
@@ -78,24 +112,13 @@ void JoyGateComponent::joy_input_callback(const sensor_msgs::msg::Joy::SharedPtr
   last_joy_msg_ = *msg;
   has_received_joy_ = true;
 
-  if (is_controllable_) {
+  if (gate_.isControllable()) {
     // If controllable, pass through the joy message
     joy_output_pub_->publish(*msg);
     RCLCPP_DEBUG(this->get_logger(), "Joy message passed through (controllable=true)");
   } else {
     // If not controllable, publish a zero message with the same structure
-    sensor_msgs::msg::Joy zero_joy = *msg;
-    zero_joy.header.stamp = this->now();
-
-    // Set all axes and buttons to zero
-    for (auto& axis : zero_joy.axes) {
-      axis = 0.0;
-    }
-    for (auto& button : zero_joy.buttons) {
-      button = 0;
-    }
-
-    joy_output_pub_->publish(zero_joy);
+    publish_zero_joy();
     RCLCPP_DEBUG(this->get_logger(),
                  "Joy message blocked (controllable=false), published zero message");
   }

@@ -113,6 +113,9 @@ private:
   // 停止時の電気ブレーキ（velocity モードのみ）
   bool brake_on_stop_{true};
 
+  // 指令送信後の追加待機 [ms]。0で無効（DDT M0602C の間隔要件用の保険）
+  int command_wait_ms_{0};
+
   // 状態フラグ
   bool motor_initialized_;
   bool emergency_stop_active_;

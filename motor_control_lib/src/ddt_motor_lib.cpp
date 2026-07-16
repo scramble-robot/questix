@@ -29,6 +29,7 @@ DdtMotorLib::DdtMotorLib(const std::string& serial_port, int baud_rate)
       current_invert_measured_(false),
       current_max_accel_rpm_per_sec_(0.0),
       brake_on_stop_(true),
+      command_wait_ms_(0),
       serial_fd_(-1) {
   logger_ = rclcpp::get_logger("DdtMotorLib");
 }
@@ -442,6 +443,16 @@ void DdtMotorLib::setBrakeOnStop(bool enable) {
   RCLCPP_INFO(logger_, "停止時電気ブレーキ: %s", enable ? "ON" : "OFF");
 }
 
+void DdtMotorLib::setCommandWaitMs(int wait_ms) {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+  command_wait_ms_ = std::max(0, wait_ms);
+  if (command_wait_ms_ > 0) {
+    RCLCPP_INFO(logger_, "指令送信後の追加待機: %d ms", command_wait_ms_);
+  } else {
+    RCLCPP_INFO(logger_, "指令送信後の追加待機: 無効");
+  }
+}
+
 bool DdtMotorLib::sendMotorVelocity(int motor_id, int velocity_rpm, bool brake) {
   int velocity_int = std::clamp(velocity_rpm, -max_motor_rpm_, max_motor_rpm_);
 
@@ -449,7 +460,9 @@ bool DdtMotorLib::sendMotorVelocity(int motor_id, int velocity_rpm, bool brake) 
   std::vector<uint8_t> data_fields = ddt_protocol::packVelocityFrame(
       static_cast<uint8_t>(motor_id), static_cast<int16_t>(velocity_int), /*accel_time=*/10, brake);
 
-  bool success = sendCommand(data_fields);
+  // 固定スリープ付きの sendCommand は使わない（50Hz 指令に追従できなくなる）。
+  // 応答フレームの消費により motor_feedbacks_ も更新される。
+  bool success = sendFrameWithFeedback(motor_id, data_fields);
   if (success) {
     motor_velocities_[motor_id] = velocity_int;
     RCLCPP_DEBUG(logger_, "モーター %d 速度設定: %d RPM", motor_id, velocity_int);
@@ -465,6 +478,14 @@ bool DdtMotorLib::sendMotorCurrentRaw(int motor_id, int16_t current_raw) {
   std::vector<uint8_t> data_fields =
       ddt_protocol::packCurrentFrame(static_cast<uint8_t>(motor_id), current_raw);
 
+  bool success = sendFrameWithFeedback(motor_id, data_fields);
+  if (success) {
+    RCLCPP_DEBUG(logger_, "モーター %d 電流指令: raw=%d", motor_id, static_cast<int>(current_raw));
+  }
+  return success;
+}
+
+bool DdtMotorLib::sendFrameWithFeedback(int motor_id, const std::vector<uint8_t>& frame) {
   if (serial_fd_ < 0) {
     return false;
   }
@@ -474,24 +495,27 @@ bool DdtMotorLib::sendMotorCurrentRaw(int motor_id, int16_t current_raw) {
   tcflush(serial_fd_, TCIFLUSH);
 
   // 書込は最大3回まで再試行する。書込成功後はフィードバックを1回だけ待つ。
+  // 固定スリープは行わない: 応答待ち（最大10ms）が自然なコマンド間隔になる。
   for (int attempt = 0; attempt < 3; ++attempt) {
-    ssize_t written = writeSerial(data_fields.data(), data_fields.size());
-    if (written != static_cast<ssize_t>(data_fields.size())) {
-      RCLCPP_WARN_THROTTLE(logger_, *rclcpp::Clock::make_shared(), 1000,
-                           "電流指令書込失敗 motor=%d", motor_id);
+    ssize_t written = writeSerial(frame.data(), frame.size());
+    if (written != static_cast<ssize_t>(frame.size())) {
+      RCLCPP_WARN_THROTTLE(logger_, *rclcpp::Clock::make_shared(), 1000, "指令書込失敗 motor=%d",
+                           motor_id);
       std::this_thread::sleep_for(5ms);
       continue;
     }
     fsync(serial_fd_);
 
-    std::vector<uint8_t> frame;
-    if (readFeedbackFrame(motor_id, frame, /*timeout_ms=*/10)) {
-      parseFeedback(motor_id, frame);
-      RCLCPP_DEBUG(logger_, "モーター %d 電流指令: raw=%d", motor_id,
-                   static_cast<int>(current_raw));
-      return true;
+    std::vector<uint8_t> feedback_frame;
+    if (readFeedbackFrame(motor_id, feedback_frame, /*timeout_ms=*/10)) {
+      parseFeedback(motor_id, feedback_frame);
+    } else {
+      RCLCPP_DEBUG(logger_, "モーター %d フィードバック未受信 (10ms timeout)", motor_id);
     }
-    RCLCPP_DEBUG(logger_, "モーター %d フィードバック未受信 (10ms timeout)", motor_id);
+    // 実機の最小コマンド間隔要件が判明した場合の保険（既定 0 = 待機なし）。
+    if (command_wait_ms_ > 0) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(command_wait_ms_));
+    }
     return true;
   }
   return false;
@@ -631,6 +655,9 @@ bool DdtMotorLib::parseFeedback(int expected_motor_id, const std::vector<uint8_t
   return true;
 }
 
+// 低頻度の設定系コマンド（setControlMode 等）専用。書込成功後にモード反映待ちとして
+// 固定 50ms スリープする（呼び出し元が state_mutex_ 保持中のためその間ブロックする）。
+// 高頻度の指令送信には使わず sendFrameWithFeedback を使うこと（cf. issue #84）。
 bool DdtMotorLib::sendCommand(const std::vector<uint8_t>& command, int retry_count) {
   for (int attempt = 0; attempt < retry_count; attempt++) {
     try {

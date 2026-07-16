@@ -97,6 +97,9 @@ void DriveComponent::initializeParameters() {
   // コマンド受信ウォッチドッグのタイムアウト [s]（velocity/current 両モードで有効）
   this->declare_parameter("cmd_timeout_sec", 0.5);
 
+  // 指令送信後の追加待機 [ms]。0で無効。実機の最小コマンド間隔要件用の保険
+  this->declare_parameter("command_wait_ms", 0);
+
   // パラメータを取得
   serial_port_ = this->get_parameter("serial_port").as_string();
   baud_rate_ = this->get_parameter("baud_rate").as_int();
@@ -118,6 +121,7 @@ void DriveComponent::initializeParameters() {
   max_angular_accel_ = this->get_parameter("max_angular_accel").as_double();
   brake_on_stop_ = this->get_parameter("brake_on_stop").as_bool();
   cmd_timeout_sec_ = this->get_parameter("cmd_timeout_sec").as_double();
+  command_wait_ms_ = static_cast<int>(this->get_parameter("command_wait_ms").as_int());
 
   RCLCPP_INFO(this->get_logger(), "Parameters initialized:");
   RCLCPP_INFO(this->get_logger(), "  serial_port: %s", serial_port_.c_str());
@@ -153,6 +157,9 @@ bool DriveComponent::initializeMotorLib() {
 
     // 停止時の電気ブレーキ設定（velocity モードのみ有効）
     motor_lib_->setBrakeOnStop(brake_on_stop_);
+
+    // 指令送信後の追加待機（既定 0 = 無効）
+    motor_lib_->setCommandWaitMs(command_wait_ms_);
 
     // モータライブラリを初期化
     if (!motor_lib_->initialize()) {
