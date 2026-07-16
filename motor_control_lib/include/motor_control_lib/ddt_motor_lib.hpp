@@ -107,6 +107,15 @@ public:
    */
   void setBrakeOnStop(bool enable);
 
+  /**
+   * @brief 指令送信後の追加待機時間 [ms] を設定（velocity / current 送信経路共通）。
+   *  - 既定 0（待機なし）。応答待ち（最大10ms）が自然なコマンド間隔になるため通常は不要。
+   *  - DDT M0602C の最小コマンド間隔が実機検証で必要と判明した場合のみ >0 を設定する。
+   *  - 注意: 待機は state_mutex_ 保持中に行われるため、>0 にするとその分呼び出し元を
+   *    ブロックする（50Hz 指令なら 20ms 未満に収めること）。
+   */
+  void setCommandWaitMs(int wait_ms);
+
   // DDT motor control methods (deprecated - use IIndividualMotor interface)
 
   // Multi-motor status
@@ -155,6 +164,7 @@ private:
   bool current_invert_measured_;          // measured RPM 符号反転（正帰還押さえ用）
   double current_max_accel_rpm_per_sec_;  // 目標RPMスルーレート上限 [RPM/s]。0以下で無効
   bool brake_on_stop_;  // 停止時に電気ブレーキを使う（velocity モードのみ）
+  int command_wait_ms_;  // 指令送信後の追加待機 [ms]。0で無効（実機の間隔要件用の保険）
 
   // Serial communication
   int serial_fd_;
@@ -177,7 +187,10 @@ private:
   bool sendMotorVelocity(int motor_id, int velocity_rpm,
                          bool brake = false);                   // velocity モード送信
   bool sendMotorCurrentRaw(int motor_id, int16_t current_raw);  // current モード送信＋応答受信
-  int16_t runCurrentLoopStep(int motor_id, int rpm_ref);        // PI 1ステップ
+  // 高頻度指令の共通送受信: 固定スリープなしで送信し、応答フィードバックを短い
+  // タイムアウトで1回だけ待つ（タイムアウトしても送信成功として扱う）。
+  bool sendFrameWithFeedback(int motor_id, const std::vector<uint8_t>& frame);
+  int16_t runCurrentLoopStep(int motor_id, int rpm_ref);  // PI 1ステップ
   void resetCurrentPiStateForStop(int motor_id);
   bool requestMotorFeedback(int motor_id);
   void processFeedbackResponse(int motor_id, const std::vector<uint8_t>& response);
