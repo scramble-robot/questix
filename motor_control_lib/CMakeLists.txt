@@ -11,8 +11,11 @@ ament_auto_find_build_dependencies()
 
 # Create shared library with implementation
 ament_auto_add_library(motor_control_lib SHARED
+  src/ddt_current_pi.cpp
   src/ddt_motor_lib.cpp
+  src/ddt_protocol.cpp
   src/differential_drive.cpp
+  src/feetech_protocol.cpp
   src/motor_manager.cpp
   src/servo_control.cpp
 )
@@ -23,6 +26,10 @@ if(BUILD_TESTING)
     ament_cmake_cpplint
     ament_cmake_uncrustify)
   ament_lint_auto_find_test_dependencies()
+
+  ament_auto_add_gtest(test_ddt_protocol test/test_ddt_protocol.cpp)
+  ament_auto_add_gtest(test_ddt_current_pi test/test_ddt_current_pi.cpp)
+  ament_auto_add_gtest(test_feetech_protocol test/test_feetech_protocol.cpp)
 endif()
 
 ament_auto_package(INSTALL_TO_SHARE)
