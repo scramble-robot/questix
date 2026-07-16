@@ -164,11 +164,10 @@ The following commands are standard validation candidates. Whether they can run 
 
 What CI actually runs; reproduce the relevant parts locally before pushing.
 
-- `ros2-build-test.yaml`: `colcon build` and `colcon test` on amd64 and arm64 (tests skip `ydlidar_ros2_driver` and `ydlidar_sdk_vendor`), plus Python lint with `flake8 --select=F --max-line-length=100` and `pydocstyle`. On pull requests it also runs the `ament_clang_format` check described in "C++ formatting".
+- `ros2-build-test.yaml`: always triggers on push/pull_request to `main` (plus `workflow_dispatch`). Its first job, `changes`, detects whether the changed paths are build-relevant; changes touching only `**.md`, `ansible/**`, `scripts/**`, `docker/**`, or `.github/**` skip the `build-and-test`, `static-analysis`, and `format-check` jobs, while `build-summary` still runs and reports as the single required check (no separate no-op companion workflow). When the build jobs run: `colcon build` and `colcon test` on amd64 and arm64 (tests skip `ydlidar_ros2_driver` and `ydlidar_sdk_vendor`), plus Python lint with `flake8 --select=F --max-line-length=100` and `pydocstyle`. On pull requests it also runs the `ament_clang_format` check described in "C++ formatting".
 - `ansible-check.yaml`: `ansible-lint`, playbook syntax checks, and a check-mode dry run for `ansible/` changes.
 - `semantic-pull_request.yaml`: Conventional Commits PR title check (see "Pull request titles").
 - `workflow-lint.yaml`: `yamllint` (repo `.yamllint.yml`) and `actionlint` (pinned, checksum-verified; shellcheck limited to warning+ severity) over `.github/workflows/**`. Runs when workflow files or `.yamllint.yml` change.
-- Changes touching only `**.md`, `ansible/**`, `scripts/**`, `docker/**`, or `.github/**` do not trigger the ROS 2 build/test workflow (but workflow-file changes do trigger `workflow-lint.yaml`).
 
 ## Cross-reference caution
 
