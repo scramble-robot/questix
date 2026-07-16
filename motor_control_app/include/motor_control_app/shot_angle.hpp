@@ -7,6 +7,7 @@
 #define MOTOR_CONTROL_APP__SHOT_ANGLE_HPP_
 
 #include <algorithm>
+#include <cmath>
 
 namespace motor_control_app::shot_angle {
 
@@ -17,10 +18,16 @@ inline double clampAngle(double angle_deg, double min_deg, double max_deg) {
 
 // 角度からサーボ位置への変換（角度 -> 0-4095）
 inline int angleToServoPosition(double angle_deg) {
+  if (!std::isfinite(angle_deg)) {
+    return 0;
+  }
+
   // 角度を直接サーボ位置に変換（0度=0, 360度=4095）
   // 角度を0-360度の範囲で正規化
-  while (angle_deg < 0) angle_deg += 360.0;
-  while (angle_deg >= 360.0) angle_deg -= 360.0;
+  angle_deg = std::fmod(angle_deg, 360.0);
+  if (angle_deg < 0.0) {
+    angle_deg += 360.0;
+  }
 
   // サーボ位置に変換
   double normalized = angle_deg / 360.0;

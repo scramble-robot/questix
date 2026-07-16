@@ -11,7 +11,7 @@
 namespace motor_control_lib::ddt_current_pi {
 
 double sanitizeDt(double dt_seconds) {
-  if (dt_seconds <= 0.0 || dt_seconds > 0.2) {
+  if (!(dt_seconds > 0.0 && dt_seconds <= 0.2)) {
     return 0.01;  // 異常値クリップ（初回および異常時のフォールバック [s]）
   }
   return dt_seconds;

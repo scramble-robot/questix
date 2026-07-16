@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <limits>
 
 #include "motor_control_lib/ddt_current_pi.hpp"
 
@@ -85,6 +86,9 @@ TEST(SanitizeDt, ClipsAbnormalValues) {
   EXPECT_DOUBLE_EQ(pi::sanitizeDt(0.25), 0.01);
   EXPECT_DOUBLE_EQ(pi::sanitizeDt(0.05), 0.05);
   EXPECT_DOUBLE_EQ(pi::sanitizeDt(0.2), 0.2);  // 境界は保持
+  EXPECT_DOUBLE_EQ(pi::sanitizeDt(std::numeric_limits<double>::quiet_NaN()), 0.01);
+  EXPECT_DOUBLE_EQ(pi::sanitizeDt(std::numeric_limits<double>::infinity()), 0.01);
+  EXPECT_DOUBLE_EQ(pi::sanitizeDt(-std::numeric_limits<double>::infinity()), 0.01);
 }
 
 TEST(InZeroDeadband, Boundaries) {

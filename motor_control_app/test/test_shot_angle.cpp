@@ -5,6 +5,8 @@
 // https://opensource.org/licenses/MIT.
 #include <gtest/gtest.h>
 
+#include <limits>
+
 #include "motor_control_app/shot_angle.hpp"
 
 namespace {
@@ -45,6 +47,17 @@ TEST(ShotAngle, AngleToServoPositionWrapsPositive) {
 TEST(ShotAngle, AngleToServoPositionWrapsNegative) {
   // -90 degrees wraps to 270 degrees -> 0.75 * 4096 = 3072.
   EXPECT_EQ(angleToServoPosition(-90.0), 3072);
+}
+
+TEST(ShotAngle, AngleToServoPositionRejectsNonFinite) {
+  EXPECT_EQ(angleToServoPosition(std::numeric_limits<double>::quiet_NaN()), 0);
+  EXPECT_EQ(angleToServoPosition(std::numeric_limits<double>::infinity()), 0);
+  EXPECT_EQ(angleToServoPosition(-std::numeric_limits<double>::infinity()), 0);
+}
+
+TEST(ShotAngle, AngleToServoPositionWrapsLargeFiniteValues) {
+  EXPECT_EQ(angleToServoPosition(360000090.0), 1024);
+  EXPECT_EQ(angleToServoPosition(-360000090.0), 3072);
 }
 
 TEST(ShotAngle, AngleToServoPositionUpperClamp) {
