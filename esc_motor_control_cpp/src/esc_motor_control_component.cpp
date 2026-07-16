@@ -53,7 +53,7 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
   gpio_chip_num_ = this->get_parameter("gpio_chip_num").as_int();
 
   // ---- Internal state ----
-  last_command_time_ = this->now();
+  full_speed_logic_.configure(safety_timeout_);
 
   // ---- QoS ----
   rclcpp::QoS qos_transient(10);
@@ -170,7 +170,6 @@ void EscMotorControlComponent::set_motor_speed(double speed) {
   speed = std::max(min_speed_, std::min(max_speed_, speed));
 
   current_speed_ = speed;
-  last_command_time_ = this->now();
 
   if (pwm_ && pwm_->name() != "simulation") {
     int pulse_us = speed_to_pulse_us(speed);
@@ -191,19 +190,22 @@ void EscMotorControlComponent::joy_callback(const sensor_msgs::msg::Joy::SharedP
 
   bool full_speed_pressed = (msg->buttons[full_speed_button_] == 1);
 
-  if (full_speed_pressed && !full_speed_active_) {
-    RCLCPP_INFO(this->get_logger(), "Full-speed button PRESSED");
-    full_speed_active_ = true;
-    set_motor_speed(full_speed_value_);
-
-  } else if (full_speed_pressed && full_speed_active_) {
+  FullSpeedLogic::Result r;
+  {
     std::lock_guard<std::mutex> guard(lock_);
-    last_command_time_ = this->now();
+    r = full_speed_logic_.onButton(full_speed_pressed, this->now().seconds());
+  }
+  // Lock released before set_motor_speed(), which takes lock_ itself.
 
-  } else if (!full_speed_pressed && full_speed_active_) {
+  if (r.start_full_speed) {
+    RCLCPP_INFO(this->get_logger(), "Full-speed button PRESSED");
+    set_motor_speed(full_speed_value_);
+  } else if (r.stop) {
     RCLCPP_INFO(this->get_logger(), "Full-speed button RELEASED");
-    full_speed_active_ = false;
     set_motor_speed(0.0);
+  } else if (r.ignored_press) {
+    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
+                         "Full-speed press ignored after safety timeout: release and press again");
   }
 }
 
@@ -213,14 +215,17 @@ void EscMotorControlComponent::joy_callback(const sensor_msgs::msg::Joy::SharedP
 void EscMotorControlComponent::safety_check() {
   if (!enable_safety_stop_) return;
 
-  double elapsed;
+  FullSpeedLogic::Result r;
   {
     std::lock_guard<std::mutex> guard(lock_);
-    elapsed = (this->now() - last_command_time_).seconds();
+    r = full_speed_logic_.onTimerCheck(this->now().seconds());
   }
+  // Lock released before set_motor_speed(), which takes lock_ itself.
 
-  if (elapsed > safety_timeout_ && !emergency_stop_active_) {
+  if (r.timed_out) {
     RCLCPP_WARN(this->get_logger(), "Safety timeout: stopping motor");
+  }
+  if (r.stop && !emergency_stop_active_) {
     set_motor_speed(0.0);
   }
 }

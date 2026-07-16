@@ -10,6 +10,7 @@
 #include <mutex>
 #include <string>
 
+#include "esc_motor_control_cpp/full_speed_logic.hpp"
 #include "esc_motor_control_cpp/pwm_backend.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/joy.hpp"
@@ -59,8 +60,7 @@ private:
   // ---------- State ----------
   double current_speed_{0.0};
   bool emergency_stop_active_{false};
-  bool full_speed_active_{false};
-  rclcpp::Time last_command_time_{0, 0, RCL_ROS_TIME};
+  FullSpeedLogic full_speed_logic_;
   std::mutex lock_;
 
   // ---------- PWM ----------

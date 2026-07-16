@@ -62,6 +62,8 @@ if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   list(APPEND AMENT_LINT_AUTO_EXCLUDE ament_cmake_uncrustify)
   ament_lint_auto_find_test_dependencies()
+
+  ament_auto_add_gtest(test_full_speed_logic test/test_full_speed_logic.cpp)
 endif()
 
 ament_auto_package(INSTALL_TO_SHARE launch config)
