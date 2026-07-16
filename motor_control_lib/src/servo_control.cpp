@@ -5,8 +5,6 @@
 // https://opensource.org/licenses/MIT.
 #include "motor_control_lib/servo_control.hpp"
 
-#include "motor_control_lib/feetech_protocol.hpp"
-
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include <sys/select.h>
@@ -19,6 +17,8 @@
 #include <iostream>
 #include <thread>
 #include <vector>
+
+#include "motor_control_lib/feetech_protocol.hpp"
 
 namespace motor_control_lib {
 
