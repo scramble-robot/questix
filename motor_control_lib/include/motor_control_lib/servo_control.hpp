@@ -114,34 +114,6 @@ private:
   std::map<uint16_t, RegisterInfo> known_registers_;
 
   /**
-   * @brief Modbus CRC16計算
-   * @param data データ配列
-   * @param length データ長
-   * @return CRC16値
-   */
-  uint16_t calculateCRC16(const uint8_t* data, size_t length);
-
-  /**
-   * @brief Modbusコマンド作成
-   * @param slave_id スレーブID
-   * @param function_code ファンクションコード
-   * @param address アドレス
-   * @param value 値
-   * @param command 出力バッファ
-   * @return コマンド長
-   */
-  size_t createModbusCommand(uint8_t slave_id, uint8_t function_code, uint16_t address,
-                             uint16_t value, uint8_t* command);
-
-  /**
-   * @brief チェックサム検証
-   * @param data データ配列
-   * @param length データ長
-   * @return 検証成功時true
-   */
-  bool verifyChecksum(const uint8_t* data, size_t length);
-
-  /**
    * @brief コマンド送信
    * @param cmd_bytes コマンドバイト配列
    * @param cmd_length コマンド長
