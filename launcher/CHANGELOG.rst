@@ -1,6 +1,24 @@
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Changelog for package questix_launcher
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+2.0.0 (2026-07-16)
+------------------
+* chore: unify package versions to 2.0.0 (`#108 <https://github.com/scramble-robot/questix/issues/108>`_)
+* fix: resolve repository audit defects and harden ci checks (`#75 <https://github.com/scramble-robot/questix/issues/75>`_)
+* fix: add brake on stop parameter for improved motor control
+* fix: questix_launcher の esc 依存名を修正 (`#64 <https://github.com/scramble-robot/questix/issues/64>`_)
+* fix: remove unnecessary dependency on servo_control_ros2 from package.xml (`#63 <https://github.com/scramble-robot/questix/issues/63>`_)
+* feat: add current motor mode (`#57 <https://github.com/scramble-robot/questix/issues/57>`_)
+* fix(launcher): restore fire_button=5 and add per-controller YAML profiles (`#47 <https://github.com/scramble-robot/questix/issues/47>`_)
+* fix: fix launch files and parameters for consistency and clarity (`#45 <https://github.com/scramble-robot/questix/issues/45>`_)
+* feat: Ubuntu 24.04 / ROS 2 Jazzy 前提のベースラインへ統一 (`#39 <https://github.com/scramble-robot/questix/issues/39>`_)
+* fix: correct angular input ratio and update launch arguments for joy controller (`#37 <https://github.com/scramble-robot/questix/issues/37>`_)
+* feat: add controller type configuration for UART and DualShock support
+* feat: add UART Switch2 joy driver and stabilize robot control path (`#30 <https://github.com/scramble-robot/questix/issues/30>`_)
+* merge feature test in 0411 (`#29 <https://github.com/scramble-robot/questix/issues/29>`_)
+* refactor: rename project from shr to Questix and add auto_start script (`#28 <https://github.com/scramble-robot/questix/issues/28>`_)
+* Contributors: Akihisa Nagata, Yuichiroh Kobayashi
 
 1.0.0 (2025-11-17)
 ------------------

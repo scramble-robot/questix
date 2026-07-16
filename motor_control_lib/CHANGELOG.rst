@@ -2,6 +2,23 @@
 Changelog for package motor_control_lib
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.0.0 (2026-07-16)
+------------------
+* chore: unify package versions to 2.0.0 (`#108 <https://github.com/scramble-robot/questix/issues/108>`_)
+* test: add feetech modbus protocol unit tests (`#104 <https://github.com/scramble-robot/questix/issues/104>`_)
+* test: add ddt current-loop pi unit tests (`#103 <https://github.com/scramble-robot/questix/issues/103>`_)
+* test: add ddt protocol pack/parse unit tests (`#102 <https://github.com/scramble-robot/questix/issues/102>`_)
+* feat: add servo gui tool for calibration (`#76 <https://github.com/scramble-robot/questix/issues/76>`_)
+* fix: resolve repository audit defects and harden ci checks (`#75 <https://github.com/scramble-robot/questix/issues/75>`_)
+* fix: add brake on stop parameter for improved motor control
+* fix: correct byte order in sendMotorVelocity function for proper protocol compliance
+* fix: rename pan parameters to tilt in configuration and implementation (`#71 <https://github.com/scramble-robot/questix/issues/71>`_)
+* fix: harden current-mode PI state handling (`#66 <https://github.com/scramble-robot/questix/issues/66>`_)
+* feat: add current motor mode (`#57 <https://github.com/scramble-robot/questix/issues/57>`_)
+* fix: fix ci fail (`#41 <https://github.com/scramble-robot/questix/issues/41>`_)
+* refactor: rename project from shr to Questix and add auto_start script (`#28 <https://github.com/scramble-robot/questix/issues/28>`_)
+* Contributors: Akihisa Nagata, Yuichiroh Kobayashi
+
 1.0.0 (2025-11-17)
 ------------------
 * refactor: add ref system and delete unused packages (`#21 <https://github.com/asa-naki/questy/issues/21>`_)

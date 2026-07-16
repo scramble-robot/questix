@@ -2,6 +2,25 @@
 Changelog for package motor_control_app
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.0.0 (2026-07-16)
+------------------
+* chore: unify package versions to 2.0.0 (`#108 <https://github.com/scramble-robot/questix/issues/108>`_)
+* test: add shot component angle conversion unit tests (`#106 <https://github.com/scramble-robot/questix/issues/106>`_)
+* fix: address fork PR15 review comments (`#77 <https://github.com/scramble-robot/questix/issues/77>`_)
+* fix: resolve repository audit defects and harden ci checks (`#75 <https://github.com/scramble-robot/questix/issues/75>`_)
+* fix: add brake on stop parameter for improved motor control
+* fix: initialize current tilt angle (`#73 <https://github.com/scramble-robot/questix/issues/73>`_)
+* fix: rename pan parameters to tilt in configuration and implementation (`#71 <https://github.com/scramble-robot/questix/issues/71>`_)
+* feat: add current motor mode (`#57 <https://github.com/scramble-robot/questix/issues/57>`_)
+* fix: improve launch parameter consistency after controller profiles (`#48 <https://github.com/scramble-robot/questix/issues/48>`_)
+* fix(launcher): restore fire_button=5 and add per-controller YAML profiles (`#47 <https://github.com/scramble-robot/questix/issues/47>`_)
+* fix: fix launch files and parameters for consistency and clarity (`#45 <https://github.com/scramble-robot/questix/issues/45>`_)
+* fix: fix ci fail (`#41 <https://github.com/scramble-robot/questix/issues/41>`_)
+* feat: Ubuntu 24.04 / ROS 2 Jazzy 前提のベースラインへ統一 (`#39 <https://github.com/scramble-robot/questix/issues/39>`_)
+* Fix/uart joy (`#38 <https://github.com/scramble-robot/questix/issues/38>`_)
+* feat: add UART Switch2 joy driver and stabilize robot control path (`#30 <https://github.com/scramble-robot/questix/issues/30>`_)
+* Contributors: Akihisa Nagata, Yuichiroh Kobayashi
+
 1.0.0 (2025-11-17)
 ------------------
 * refactor: add ref system and delete unused packages (`#21 <https://github.com/asa-naki/questy/issues/21>`_)

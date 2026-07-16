@@ -2,6 +2,13 @@
 Changelog for package operation_manager
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.0.0 (2026-07-16)
+------------------
+* chore: unify package versions to 2.0.0 (`#108 <https://github.com/scramble-robot/questix/issues/108>`_)
+* fix: resolve repository audit defects and harden ci checks (`#75 <https://github.com/scramble-robot/questix/issues/75>`_)
+* feat: update licenses to MIT across all packages and add LICENSE file (`#46 <https://github.com/scramble-robot/questix/issues/46>`_)
+* Contributors: Akihisa Nagata
+
 1.0.0 (2025-11-17)
 ------------------
 * refactor: add ref system and delete unused packages (`#21 <https://github.com/asa-naki/questy/issues/21>`_)

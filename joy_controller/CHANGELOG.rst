@@ -2,6 +2,21 @@
 Changelog for package joy_controller
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.0.0 (2026-07-16)
+------------------
+* chore: unify package versions to 2.0.0 (`#108 <https://github.com/scramble-robot/questix/issues/108>`_)
+* fix: resolve repository audit defects and harden ci checks (`#75 <https://github.com/scramble-robot/questix/issues/75>`_)
+* fix: improve launch parameter consistency after controller profiles (`#48 <https://github.com/scramble-robot/questix/issues/48>`_)
+* feat: update licenses to MIT across all packages and add LICENSE file (`#46 <https://github.com/scramble-robot/questix/issues/46>`_)
+* fix: fix launch files and parameters for consistency and clarity (`#45 <https://github.com/scramble-robot/questix/issues/45>`_)
+* fix: fix ci fail (`#41 <https://github.com/scramble-robot/questix/issues/41>`_)
+* feat: Ubuntu 24.04 / ROS 2 Jazzy 前提のベースラインへ統一 (`#39 <https://github.com/scramble-robot/questix/issues/39>`_)
+* fix: correct angular input ratio and update launch arguments for joy controller (`#37 <https://github.com/scramble-robot/questix/issues/37>`_)
+* feat: add UART Switch2 joy driver and stabilize robot control path (`#30 <https://github.com/scramble-robot/questix/issues/30>`_)
+* merge feature test in 0411 (`#29 <https://github.com/scramble-robot/questix/issues/29>`_)
+* refactor: rename project from shr to Questix and add auto_start script (`#28 <https://github.com/scramble-robot/questix/issues/28>`_)
+* Contributors: Akihisa Nagata, Yuichiroh Kobayashi
+
 1.0.0 (2025-11-17)
 ------------------
 * refactor: add ref system and delete unused packages (`#21 <https://github.com/asa-naki/questy/issues/21>`_)

@@ -2,6 +2,11 @@
 Changelog for package motor_control_lib_simple
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.0.0 (2026-07-16)
+------------------
+* chore: unify package versions to 2.0.0 (`#108 <https://github.com/scramble-robot/questix/issues/108>`_)
+* No functional changes; version aligned to the repository-wide 2.0.0 baseline
+
 1.0.0 (2025-11-17)
 ------------------
 * refactor: add ref system and delete unused packages (`#21 <https://github.com/asa-naki/questy/issues/21>`_)
