@@ -10,3 +10,8 @@ joy_gate:
 
     # QoS settings
     qos_depth: 10
+
+    # /gpio/controllable 受信タイムアウト[s]、operation_manager 停止で受信が途絶したら
+    # uncontrollable にフォールバックしゼロ joy を publish、0以下で無効
+    # （安全機能のため通常は無効化しないこと）
+    controllable_timeout_sec: 1.0
