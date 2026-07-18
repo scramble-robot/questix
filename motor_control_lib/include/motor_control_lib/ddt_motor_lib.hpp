@@ -14,6 +14,7 @@
 #include <cmath>
 #include <map>
 #include <mutex>
+#include <rclcpp/clock.hpp>
 #include <vector>
 
 #include "motor_control_lib/base_motor_controller.hpp"
@@ -168,6 +169,7 @@ private:
 
   // Serial communication
   int serial_fd_;
+  rclcpp::Clock throttle_clock_{RCL_STEADY_TIME};
 
   // 公開APIから触る状態マップとシリアル送受信の保護。
   // 公開メソッド同士が内部で呼び合うため recursive_mutex を使う。
