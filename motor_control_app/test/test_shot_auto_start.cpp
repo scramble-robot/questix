@@ -15,13 +15,12 @@ namespace {
 using lifecycle_msgs::msg::State;
 using motor_control_app::shot_auto_start::AutoStartAction;
 using motor_control_app::shot_auto_start::decideAutoStartAction;
-using motor_control_app::shot_auto_start::decideControllableTimeout;
 using motor_control_app::shot_auto_start::decideSafetyTeardownAction;
+using motor_control_app::shot_auto_start::isControllableSignalStale;
 using motor_control_app::shot_auto_start::normalizeControllableTimeout;
 using motor_control_app::shot_auto_start::normalizePositivePeriod;
 using motor_control_app::shot_auto_start::SafetyTeardownAction;
 using motor_control_app::shot_auto_start::shouldHoldManualLifecycle;
-using motor_control_app::shot_auto_start::shouldLogControllableRecovery;
 
 // /gpio/controllable 未受信（enable_gpio_ref=false 等）は周期リトライにフォールバック
 TEST(ShotAutoStart, UnconfiguredWithoutControllableFallsBackToConfigure) {
@@ -79,29 +78,22 @@ TEST(ShotAutoStart, ConfigureFailureRetriesFromUnconfigured) {
 }
 
 TEST(ShotControllableTimeout, DisabledNeverFailsSafe) {
-  EXPECT_FALSE(decideControllableTimeout(0.0, true, true, 10.0).fail_safe);
-  EXPECT_FALSE(decideControllableTimeout(-1.0, true, true, 10.0).fail_safe);
+  EXPECT_FALSE(isControllableSignalStale(0.0, true, 10.0));
+  EXPECT_FALSE(isControllableSignalStale(-1.0, true, 10.0));
+  EXPECT_FALSE(isControllableSignalStale(std::numeric_limits<double>::infinity(), true, 10.0));
 }
 
-TEST(ShotControllableTimeout, TrueSignalTimesOutFailSafe) {
-  const auto decision = decideControllableTimeout(1.0, true, true, 1.01);
-  EXPECT_TRUE(decision.fail_safe);
-  EXPECT_TRUE(decision.latch_timeout);
+TEST(ShotControllableTimeout, StaleTrueSignalFailsSafe) {
+  EXPECT_TRUE(isControllableSignalStale(1.0, true, 1.01));
 }
 
-TEST(ShotControllableTimeout, FalseSignalTimeoutDoesNotLatch) {
-  const auto decision = decideControllableTimeout(1.0, true, false, 2.0);
-  EXPECT_FALSE(decision.fail_safe);
-  EXPECT_FALSE(decision.latch_timeout);
-  EXPECT_FALSE(shouldLogControllableRecovery(decision.latch_timeout));
-}
-
-TEST(ShotControllableTimeout, NeverReceivedPreservesFallback) {
-  EXPECT_FALSE(decideControllableTimeout(1.0, false, false, 100.0).fail_safe);
+// false（非常停止押下）は teardown 済みのため受信途絶でも fail-safe 対象にしない
+TEST(ShotControllableTimeout, FalseSignalNeverFailsSafe) {
+  EXPECT_FALSE(isControllableSignalStale(1.0, false, 2.0));
 }
 
 TEST(ShotControllableTimeout, FreshOrRecoveredSignalIsNotStale) {
-  EXPECT_FALSE(decideControllableTimeout(1.0, true, true, 0.1).fail_safe);
+  EXPECT_FALSE(isControllableSignalStale(1.0, true, 0.1));
 }
 
 TEST(ShotSafetyTeardown, StableStatesSelectSafeRetryAction) {
