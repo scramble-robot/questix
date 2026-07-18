@@ -98,9 +98,11 @@ void DriveComponent::autoStartTimerCallback() {
                            static_cast<unsigned int>(state_id));
     }
   } catch (const std::exception& error) {
-    RCLCPP_ERROR(this->get_logger(), "Drive auto-start transition failed: %s", error.what());
+    RCLCPP_ERROR_THROTTLE(this->get_logger(), *this->get_clock(), 30000,
+                          "Drive auto-start transition failed: %s", error.what());
   } catch (...) {
-    RCLCPP_ERROR(this->get_logger(), "Drive auto-start transition failed with unknown exception");
+    RCLCPP_ERROR_THROTTLE(this->get_logger(), *this->get_clock(), 30000,
+                          "Drive auto-start transition failed with unknown exception");
   }
 }
 
