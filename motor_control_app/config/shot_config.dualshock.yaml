@@ -9,6 +9,15 @@ shot_component:
     auto_start: true
     connect_retry_period_sec: 3.0
 
+    # E-stop linkage / 非常停止連動（auto_start=true のときのみ有効）
+    # operation_manager が配信する /gpio/controllable を購読し、
+    # 非常停止解除 (false→true) で即時に configure→activate、
+    # 押下 (true→false) で deactivate→cleanup してサーボ接続を解放する。
+    # トピック未受信の環境（enable_gpio_ref=false 等）では
+    # connect_retry_period_sec の周期リトライにフォールバックする。
+    # "" で連動無効（周期リトライのみ）。
+    controllable_topic: "/gpio/controllable"
+
     port: "/dev/servo"
     baudrate: 115200
     tilt_servo_id: 11

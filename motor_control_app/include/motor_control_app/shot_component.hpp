@@ -13,6 +13,8 @@
 #include <rclcpp_components/register_node_macro.hpp>
 #include <rclcpp_lifecycle/lifecycle_node.hpp>
 #include <sensor_msgs/msg/joy.hpp>
+#include <std_msgs/msg/bool.hpp>
+#include <string>
 
 #include "motor_control_lib/servo_control.hpp"
 
@@ -25,6 +27,12 @@ namespace motor_control_app {
 // → activate（ホーム移動 + joy 受付開始）で運用状態に遷移する。
 // auto_start=true（既定）の場合、内蔵タイマーが configure/activate を成功するまで
 // 再試行するので、外部の lifecycle manager なしで systemd 起動に耐える。
+//
+// さらに controllable_topic（既定 /gpio/controllable、operation_manager が配信）を
+// 購読し、非常停止解除（false→true）で即時に configure→activate、押下（true→false）で
+// deactivate→cleanup する。トピック未受信の環境では従来の周期リトライにフォールバック。
+// 連動は auto_start=true のときのみ有効で、手動 deactivate 済み（タイマー停止中）の
+// ノードは非常停止解除でも再 activate しない。
 class ShotComponent : public rclcpp_lifecycle::LifecycleNode {
 public:
   using CallbackReturn = rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
@@ -45,6 +53,8 @@ private:
   void fireTimerCallback();
   void cancelShotSequence();
   void autoStartTimerCallback();
+  void controllableCallback(const std_msgs::msg::Bool::SharedPtr msg);
+  void tryAutoStart();
   void triggerAutoRecovery();
   void disconnectServo();
 
@@ -71,6 +81,12 @@ private:
   int command_rate_limit_ms_;
   bool auto_start_;
   double connect_retry_period_sec_;
+  // 非常停止連動トピック（空文字で連動無効、周期リトライのみ）
+  std::string controllable_topic_;
+  // /gpio/controllable の受信状況。未受信（have_controllable_=false）なら
+  // 非常停止状態が分からないため周期リトライにフォールバックする。
+  bool have_controllable_;
+  bool controllable_;
   // ACTIVE 中に検出したサーボ通信故障のフラグ。autoStartTimerCallback が拾って
   // deactivate→cleanup→再接続の自動復帰を行う。
   std::atomic<bool> runtime_fault_;
@@ -85,6 +101,8 @@ private:
   rclcpp::Time last_command_time_;
 
   rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joy_subscription_;
+  // lifecycle 状態に依存せず常時生かす（unconfigured でも非常停止解除を検知するため）
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr controllable_sub_;
   rclcpp::TimerBase::SharedPtr auto_start_timer_;
   // 射撃シーケンス用ワンショットタイマー。fire 位置到達後 fire_duration_ms で
   // 発火し home 復帰する。executor をブロックしないための置き換え（issue #83）。

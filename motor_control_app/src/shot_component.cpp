@@ -13,6 +13,7 @@
 #include <thread>
 
 #include "motor_control_app/shot_angle.hpp"
+#include "motor_control_app/shot_auto_start.hpp"
 
 namespace motor_control_app {
 
@@ -33,6 +34,9 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
       command_rate_limit_ms_(50),
       auto_start_(true),
       connect_retry_period_sec_(3.0),
+      controllable_topic_("/gpio/controllable"),
+      have_controllable_(false),
+      controllable_(false),
       runtime_fault_(false),
       is_shooting_(false),
       last_button_state_(false),
@@ -66,19 +70,28 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
   // Lifecycle 自動遷移。非常停止解除でサーボが通電するまで configure を再試行する。
   this->declare_parameter("auto_start", true);
   this->declare_parameter("connect_retry_period_sec", 3.0);
+  // 非常停止連動トピック（auto_start=true のときのみ有効、空文字で連動無効）
+  this->declare_parameter("controllable_topic", "/gpio/controllable");
 
   auto_start_ = this->get_parameter("auto_start").as_bool();
   connect_retry_period_sec_ = this->get_parameter("connect_retry_period_sec").as_double();
+  controllable_topic_ = this->get_parameter("controllable_topic").as_string();
 
   if (auto_start_) {
     const auto period = std::chrono::duration<double>(std::max(0.5, connect_retry_period_sec_));
     auto_start_timer_ =
         this->create_wall_timer(std::chrono::duration_cast<std::chrono::nanoseconds>(period),
                                 std::bind(&ShotComponent::autoStartTimerCallback, this));
+    if (!controllable_topic_.empty()) {
+      controllable_sub_ = this->create_subscription<std_msgs::msg::Bool>(
+          controllable_topic_, 1,
+          std::bind(&ShotComponent::controllableCallback, this, std::placeholders::_1));
+    }
     RCLCPP_INFO(this->get_logger(),
-                "Shot component created (auto_start=true, retry=%.1fs). "
+                "Shot component created (auto_start=true, retry=%.1fs, estop_topic=%s). "
                 "サーボ通電（非常停止解除）を待って自動起動します",
-                connect_retry_period_sec_);
+                connect_retry_period_sec_,
+                controllable_topic_.empty() ? "<disabled>" : controllable_topic_.c_str());
   } else {
     RCLCPP_INFO(this->get_logger(),
                 "Shot component created (auto_start=false). "
@@ -97,28 +110,98 @@ ShotComponent::~ShotComponent() {
 }
 
 void ShotComponent::autoStartTimerCallback() {
-  const uint8_t state_id = this->get_current_state().id();
-  if (state_id == lifecycle_msgs::msg::State::PRIMARY_STATE_UNCONFIGURED) {
+  if (this->get_current_state().id() == lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE &&
+      runtime_fault_.exchange(false)) {
+    // ACTIVE 中に検出したサーボ通信故障からの自動復帰。一旦 deactivate→cleanup
+    // で解体し、次周期以降の configure→activate で接続とサーボ応答を確認し直す。
+    RCLCPP_WARN(this->get_logger(), "サーボ通信故障を検出。deactivate→cleanup して再接続を試みます");
+    this->deactivate();
+    this->cleanup();
+    // on_deactivate がタイマーを止めるため、自動復帰経路のみここで再開する
+    auto_start_timer_->reset();
+    return;
+  }
+  tryAutoStart();
+}
+
+void ShotComponent::tryAutoStart() {
+  using shot_auto_start::AutoStartAction;
+  using shot_auto_start::decideAutoStartAction;
+
+  auto action =
+      decideAutoStartAction(this->get_current_state().id(), have_controllable_, controllable_);
+  if (action == AutoStartAction::kWaitEstopRelease) {
+    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 30000,
+                         "非常停止中のため接続試行を保留しています（解除で自動再開します）");
+    return;
+  }
+  if (action == AutoStartAction::kStopTimer) {
+    // 正常稼働中はタイマーを止め、手動 deactivate/cleanup を尊重する。
+    if (auto_start_timer_) {
+      auto_start_timer_->cancel();
+    }
+    return;
+  }
+  if (action == AutoStartAction::kConfigure) {
     RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 30000,
                          "サーボ接続を試行します（非常停止中は失敗し、解除後に自動復帰します）");
     this->configure();
-  } else if (state_id == lifecycle_msgs::msg::State::PRIMARY_STATE_INACTIVE) {
+    // 接続に成功したら同一周期内で activate まで進める（非常停止解除エッジからの
+    // 即時起動と、タイマー経路の起動を同じ動きにする）
+    action =
+        decideAutoStartAction(this->get_current_state().id(), have_controllable_, controllable_);
+  }
+  if (action == AutoStartAction::kActivate) {
     this->activate();
-  } else if (state_id == lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE) {
-    if (runtime_fault_.exchange(false)) {
-      // ACTIVE 中に検出したサーボ通信故障からの自動復帰。一旦 deactivate→cleanup
-      // で解体し、次周期以降の configure→activate で接続とサーボ応答を確認し直す。
+  }
+}
+
+void ShotComponent::controllableCallback(const std_msgs::msg::Bool::SharedPtr msg) {
+  const bool first = !have_controllable_;
+  const bool prev = controllable_;
+  have_controllable_ = true;
+  controllable_ = msg->data;
+  if (!first && controllable_ == prev) {
+    return;  // 値に変化なし（~20Hz で配信されるため、エッジのみ処理する）
+  }
+
+  if (!controllable_) {
+    // 非常停止押下。サーボバスが断たれるため、ACTIVE / 自動起動途中の INACTIVE は
+    // 解体してサーボ接続を解放し、unconfigured で解除を待つ。
+    // 手動 deactivate 済み（タイマー停止中）のノードは操作者の制御を尊重して触らない。
+    const uint8_t state_id = this->get_current_state().id();
+    if (state_id == lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE) {
       RCLCPP_WARN(this->get_logger(),
-                  "サーボ通信故障を検出。deactivate→cleanup して再接続を試みます");
+                  "非常停止押下を検出（%s=false）。deactivate→cleanup してサーボ接続を解放します",
+                  controllable_topic_.c_str());
       this->deactivate();
       this->cleanup();
-      // on_deactivate がタイマーを止めるため、自動復帰経路のみここで再開する
+      runtime_fault_ = false;
+      // on_deactivate がタイマーを止めるため、解除待ちのためここで再開する
       auto_start_timer_->reset();
-    } else {
-      // 正常稼働中はタイマーを止め、手動 deactivate/cleanup を尊重する。
-      auto_start_timer_->cancel();
+    } else if (state_id == lifecycle_msgs::msg::State::PRIMARY_STATE_INACTIVE &&
+               auto_start_timer_ && !auto_start_timer_->is_canceled()) {
+      RCLCPP_WARN(this->get_logger(),
+                  "非常停止押下を検出（%s=false）。cleanup してサーボ接続を解放します",
+                  controllable_topic_.c_str());
+      this->cleanup();
     }
+    return;
   }
+
+  // 非常停止解除（または初回受信が解除状態）。タイマー停止中は手動運用
+  //（手動 deactivate 済み or 正常 ACTIVE）なので自動遷移しない。
+  if (!auto_start_timer_ || auto_start_timer_->is_canceled()) {
+    return;
+  }
+  if (!first) {
+    RCLCPP_INFO(this->get_logger(), "非常停止解除を検出（%s=true）。起動シーケンスを開始します",
+                controllable_topic_.c_str());
+  }
+  // 周期を仕切り直してから即時試行する。失敗時（サーボ起動中など）は
+  // connect_retry_period_sec 周期のリトライに引き継ぐ。
+  auto_start_timer_->reset();
+  tryAutoStart();
 }
 
 ShotComponent::CallbackReturn ShotComponent::on_configure(const rclcpp_lifecycle::State&) {

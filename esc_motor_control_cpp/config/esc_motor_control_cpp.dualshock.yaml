@@ -20,6 +20,13 @@ esc_motor_control:
     status_topic: "/roller_motor_status"
     emergency_status_topic: "/roller_emergency_status"
 
+    # Safety / timeout-stop behavior:
+    # If no full-speed command arrives within safety_timeout seconds (e.g. the
+    # joy stream drops), the motor is stopped automatically. After a timeout
+    # stop the full-speed latch is cleared and the button must be RELEASED and
+    # PRESSED AGAIN to restart; holding it down will NOT auto-resume
+    # (safety: no motion resumes without a fresh operator press).
+    # Set enable_safety_stop=false to disable the timeout stop entirely.
     enable_safety_stop: true
     safety_timeout: 1.0
 
