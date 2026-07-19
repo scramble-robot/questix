@@ -109,6 +109,10 @@ private:
   void resetCommandState();
 
   // ROS 2 通信
+  // Twist/status/watchdog/auto-start callbacks intentionally share the node's default
+  // MutuallyExclusive callback group, so callbacks do not run concurrently. If entities are
+  // split across callback groups, synchronize motor_initialized_, diff_drive_, command state,
+  // timer pointers, and all motor serial operations before enabling concurrent execution.
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr twist_subscription_;
   rclcpp_lifecycle::LifecyclePublisher<std_msgs::msg::String>::SharedPtr status_publisher_;
   rclcpp::TimerBase::SharedPtr status_timer_;

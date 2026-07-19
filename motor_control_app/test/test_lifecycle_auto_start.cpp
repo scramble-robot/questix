@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <lifecycle_msgs/msg/state.hpp>
+#include <limits>
 
 #include "motor_control_app/lifecycle_auto_start.hpp"
 
@@ -14,6 +15,9 @@ namespace {
 using lifecycle_msgs::msg::State;
 using motor_control_app::lifecycle_auto_start::AutoStartAction;
 using motor_control_app::lifecycle_auto_start::decideAutoStartAction;
+using motor_control_app::lifecycle_auto_start::isValidStatusPublishRate;
+using motor_control_app::lifecycle_auto_start::normalizeRetryPeriod;
+using motor_control_app::lifecycle_auto_start::statusTimerPeriodNanoseconds;
 
 TEST(LifecycleAutoStart, UnconfiguredTriggersConfigure) {
   EXPECT_EQ(decideAutoStartAction(State::PRIMARY_STATE_UNCONFIGURED), AutoStartAction::kConfigure);
@@ -29,8 +33,8 @@ TEST(LifecycleAutoStart, ActiveStopsTimer) {
   EXPECT_EQ(decideAutoStartAction(State::PRIMARY_STATE_ACTIVE), AutoStartAction::kStopTimer);
 }
 
-TEST(LifecycleAutoStart, FinalizedDoesNothing) {
-  EXPECT_EQ(decideAutoStartAction(State::PRIMARY_STATE_FINALIZED), AutoStartAction::kNone);
+TEST(LifecycleAutoStart, FinalizedStopsTimer) {
+  EXPECT_EQ(decideAutoStartAction(State::PRIMARY_STATE_FINALIZED), AutoStartAction::kStopTimer);
 }
 
 TEST(LifecycleAutoStart, TransitionStatesDoNothing) {
@@ -56,6 +60,34 @@ TEST(LifecycleAutoStart, UnpoweredStartupRetriesConfigure) {
   // 未通電起動: configure 失敗で unconfigured に戻り、次ティックも kConfigure。
   EXPECT_EQ(decideAutoStartAction(State::PRIMARY_STATE_UNCONFIGURED), AutoStartAction::kConfigure);
   EXPECT_EQ(decideAutoStartAction(State::PRIMARY_STATE_UNCONFIGURED), AutoStartAction::kConfigure);
+}
+
+TEST(LifecycleAutoStart, UnexpectedStateDoesNothing) {
+  EXPECT_EQ(decideAutoStartAction(State::PRIMARY_STATE_UNKNOWN), AutoStartAction::kNone);
+}
+
+TEST(LifecycleParameters, InvalidRetryPeriodFallsBackToDefault) {
+  EXPECT_DOUBLE_EQ(normalizeRetryPeriod(2.5, 1.0), 2.5);
+  EXPECT_DOUBLE_EQ(normalizeRetryPeriod(0.0, 1.0), 1.0);
+  EXPECT_DOUBLE_EQ(normalizeRetryPeriod(-1.0, 1.0), 1.0);
+  EXPECT_DOUBLE_EQ(normalizeRetryPeriod(std::numeric_limits<double>::quiet_NaN(), 1.0), 1.0);
+  EXPECT_DOUBLE_EQ(normalizeRetryPeriod(std::numeric_limits<double>::infinity(), 1.0), 1.0);
+}
+
+TEST(LifecycleParameters, StatusPublishRateMustBeFiniteAndPositive) {
+  EXPECT_TRUE(isValidStatusPublishRate(10.0));
+  EXPECT_FALSE(isValidStatusPublishRate(0.0));
+  EXPECT_FALSE(isValidStatusPublishRate(-1.0));
+  EXPECT_FALSE(isValidStatusPublishRate(std::numeric_limits<double>::quiet_NaN()));
+  EXPECT_FALSE(isValidStatusPublishRate(std::numeric_limits<double>::infinity()));
+}
+
+TEST(LifecycleParameters, StatusTimerPeriodMustRemainPositiveAfterConversion) {
+  EXPECT_EQ(statusTimerPeriodNanoseconds(10.0), 100000000);
+  EXPECT_EQ(statusTimerPeriodNanoseconds(1000.0), 1000000);
+  EXPECT_EQ(statusTimerPeriodNanoseconds(1000000000.0), 1);
+  EXPECT_EQ(statusTimerPeriodNanoseconds(2000000000.0), 0);
+  EXPECT_FALSE(isValidStatusPublishRate(2000000000.0));
 }
 
 }  // namespace

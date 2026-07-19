@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <exception>
 #include <filesystem>
 #include <functional>
 #include <lifecycle_msgs/msg/state.hpp>
@@ -30,7 +31,14 @@ DriveComponent::DriveComponent(const rclcpp::NodeOptions& options)
   declareParameters();
 
   auto_start_ = this->get_parameter("auto_start").as_bool();
-  connect_retry_period_sec_ = this->get_parameter("connect_retry_period_sec").as_double();
+  const double requested_retry_period = this->get_parameter("connect_retry_period_sec").as_double();
+  connect_retry_period_sec_ =
+      lifecycle_auto_start::normalizeRetryPeriod(requested_retry_period, 1.0);
+  if (!lifecycle_auto_start::isValidPositiveValue(requested_retry_period)) {
+    RCLCPP_WARN(this->get_logger(),
+                "Invalid connect_retry_period_sec=%g; using the default 1.0 seconds",
+                requested_retry_period);
+  }
 
   if (auto_start_) {
     const auto period = std::chrono::duration<double>(std::max(0.5, connect_retry_period_sec_));
@@ -65,25 +73,49 @@ void DriveComponent::autoStartTimerCallback() {
   using lifecycle_auto_start::AutoStartAction;
   using lifecycle_auto_start::decideAutoStartAction;
 
-  AutoStartAction action = decideAutoStartAction(this->get_current_state().id());
-  if (action == AutoStartAction::kConfigure) {
-    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 30000,
-                         "モータ接続を試行します（未通電時は失敗し、通電後に自動復帰します）");
-    this->configure();
-    // 通電済みの通常起動で従来同等のタイミングで走行可能にするため、
-    // configure 成功時は同一ティックで activate まで進める。
-    action = decideAutoStartAction(this->get_current_state().id());
+  if (!auto_start_timer_) {
+    return;
   }
-  if (action == AutoStartAction::kActivate) {
-    this->activate();
-  } else if (action == AutoStartAction::kStopTimer) {
-    // 正常稼働中はタイマーを止め、手動 deactivate/cleanup を尊重する。
-    auto_start_timer_->cancel();
+  try {
+    uint8_t state_id = this->get_current_state().id();
+    AutoStartAction action = decideAutoStartAction(state_id);
+    if (action == AutoStartAction::kConfigure) {
+      RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 30000,
+                           "モータ接続を試行します（未通電時は失敗し、通電後に自動復帰します）");
+      state_id = this->configure().id();
+      action = decideAutoStartAction(state_id);
+    }
+    if (action == AutoStartAction::kActivate) {
+      state_id = this->activate().id();
+      action = decideAutoStartAction(state_id);
+    }
+    if (action == AutoStartAction::kStopTimer) {
+      auto_start_timer_->cancel();
+    } else if (action == AutoStartAction::kNone &&
+               !lifecycle_auto_start::isTransitionState(state_id)) {
+      RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 30000,
+                           "Unexpected lifecycle state during drive auto-start: %u",
+                           static_cast<unsigned int>(state_id));
+    }
+  } catch (const std::exception& error) {
+    RCLCPP_ERROR_THROTTLE(this->get_logger(), *this->get_clock(), 30000,
+                          "Drive auto-start transition failed: %s", error.what());
+  } catch (...) {
+    RCLCPP_ERROR_THROTTLE(this->get_logger(), *this->get_clock(), 30000,
+                          "Drive auto-start transition failed with unknown exception");
   }
 }
 
 DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecycle::State&) {
   readParameters();
+
+  if (!lifecycle_auto_start::isValidStatusPublishRate(status_publish_rate_)) {
+    RCLCPP_ERROR(this->get_logger(),
+                 "Invalid status_publish_rate=%g; value must produce a positive, representable "
+                 "nanosecond timer period",
+                 status_publish_rate_);
+    return CallbackReturn::FAILURE;
+  }
 
   // 未通電（非常停止中）は USB CDC デバイス自体が存在しない。ライブラリを構築する前に
   // デバイスの有無を確認し、リトライ毎のライブラリ内 ERROR ログで journald を汚さない。
@@ -150,10 +182,10 @@ DriveComponent::CallbackReturn DriveComponent::on_activate(const rclcpp_lifecycl
   resetCommandState();
 
   // ステータスパブリッシュタイマー
-  auto timer_period = std::chrono::duration<double>(1.0 / status_publish_rate_);
+  const auto timer_period = std::chrono::nanoseconds(
+      lifecycle_auto_start::statusTimerPeriodNanoseconds(status_publish_rate_));
   status_timer_ =
-      this->create_wall_timer(std::chrono::duration_cast<std::chrono::milliseconds>(timer_period),
-                              std::bind(&DriveComponent::statusTimerCallback, this));
+      this->create_wall_timer(timer_period, std::bind(&DriveComponent::statusTimerCallback, this));
 
   // コマンド受信ウォッチドッグ（100ms 周期）。cmd_timeout_sec_ <= 0 で無効。
   if (drive_watchdog::isEnabled(cmd_timeout_sec_)) {
@@ -202,6 +234,9 @@ DriveComponent::CallbackReturn DriveComponent::on_cleanup(const rclcpp_lifecycle
 }
 
 DriveComponent::CallbackReturn DriveComponent::on_shutdown(const rclcpp_lifecycle::State&) {
+  if (auto_start_timer_) {
+    auto_start_timer_->cancel();
+  }
   status_timer_.reset();
   watchdog_timer_.reset();
   twist_subscription_.reset();
