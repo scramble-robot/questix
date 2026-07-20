@@ -97,6 +97,7 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 
   ament_auto_add_gtest(test_shot_angle test/test_shot_angle.cpp)
+  ament_auto_add_gtest(test_shot_auto_start test/test_shot_auto_start.cpp)
   ament_auto_add_gtest(test_drive_watchdog test/test_drive_watchdog.cpp)
   ament_auto_add_gtest(test_lifecycle_auto_start test/test_lifecycle_auto_start.cpp)
 endif()

@@ -16,7 +16,8 @@ int main(int argc, char *argv[]) {
 
   RCLCPP_INFO(component->get_logger(), "Shot Component Node started");
 
-  rclcpp::spin(component);
+  // LifecycleNode は Node を継承しないため base interface 経由で spin する
+  rclcpp::spin(component->get_node_base_interface());
 
   RCLCPP_INFO(component->get_logger(), "Shot Component Node shutting down");
   rclcpp::shutdown();
