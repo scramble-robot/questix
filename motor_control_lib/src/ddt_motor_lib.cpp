@@ -8,6 +8,8 @@
 #include <sys/select.h>
 
 #include <algorithm>
+#include <cerrno>
+#include <cstring>
 #include <thread>
 
 #include "motor_control_lib/ddt_protocol.hpp"
@@ -499,12 +501,13 @@ bool DdtMotorLib::sendFrameWithFeedback(int motor_id, const std::vector<uint8_t>
   for (int attempt = 0; attempt < 3; ++attempt) {
     ssize_t written = writeSerial(frame.data(), frame.size());
     if (written != static_cast<ssize_t>(frame.size())) {
-      RCLCPP_WARN_THROTTLE(logger_, *rclcpp::Clock::make_shared(), 1000, "指令書込失敗 motor=%d",
-                           motor_id);
+      RCLCPP_WARN_THROTTLE(logger_, throttle_clock_, 1000, "指令書込失敗 motor=%d", motor_id);
       std::this_thread::sleep_for(5ms);
       continue;
     }
-    fsync(serial_fd_);
+    if (!drainSerialOutput()) {
+      return false;
+    }
 
     std::vector<uint8_t> feedback_frame;
     if (readFeedbackFrame(motor_id, feedback_frame, /*timeout_ms=*/10)) {
@@ -549,7 +552,7 @@ int16_t DdtMotorLib::runCurrentLoopStep(int motor_id, int rpm_ref) {
   // ログは従来通り符号反転後の実測値と、それに基づく error を表示する。
   int meas_logged = current_invert_measured_ ? -measured_rpm : measured_rpm;
   double error = static_cast<double>(rpm_ref - meas_logged);
-  RCLCPP_INFO_THROTTLE(logger_, *rclcpp::Clock::make_shared(), 200,
+  RCLCPP_INFO_THROTTLE(logger_, throttle_clock_, 200,
                        "PI motor=%d ref=%d meas=%d err=%.1f integ=%.3fA i_cmd=%.3fA raw=%d dt=%.4f",
                        motor_id, rpm_ref, meas_logged, error, st.pi.integral_amp, i_cmd_amp,
                        static_cast<int>(raw), dt);
@@ -628,7 +631,7 @@ bool DdtMotorLib::parseFeedback(int expected_motor_id, const std::vector<uint8_t
       // ログ用に payload の期待 CRC を再計算する。
       std::vector<uint8_t> payload(frame.begin(), frame.begin() + 9);
       uint8_t expected_crc = ddt_protocol::crc8Maxim(payload);
-      RCLCPP_WARN_THROTTLE(logger_, *rclcpp::Clock::make_shared(), 1000,
+      RCLCPP_WARN_THROTTLE(logger_, throttle_clock_, 1000,
                            "CRC不一致 motor=%d expected=0x%02X got=0x%02X", expected_motor_id,
                            expected_crc, frame[9]);
     }
@@ -663,7 +666,10 @@ bool DdtMotorLib::sendCommand(const std::vector<uint8_t>& command, int retry_cou
     try {
       ssize_t written = writeSerial(command.data(), command.size());
       if (written == static_cast<ssize_t>(command.size())) {
-        fsync(serial_fd_);
+        // 書込済みcommandの重複送信を避けるため、drain失敗時は再試行しない。
+        if (!drainSerialOutput()) {
+          return false;
+        }
         std::this_thread::sleep_for(50ms);
         return true;
       }
@@ -673,6 +679,28 @@ bool DdtMotorLib::sendCommand(const std::vector<uint8_t>& command, int retry_cou
     }
   }
   return false;
+}
+
+bool DdtMotorLib::drainSerialOutput() {
+  if (serial_fd_ < 0) {
+    return false;
+  }
+
+  int result;
+  int saved_errno = 0;
+  do {
+    result = tcdrain(serial_fd_);
+    saved_errno = result == -1 ? errno : 0;
+  } while (result == -1 && saved_errno == EINTR);
+
+  if (result != 0) {
+    RCLCPP_WARN_THROTTLE(logger_, throttle_clock_, 1000,
+                         "シリアル送信完了待機に失敗: errno=%d (%s)", saved_errno,
+                         std::strerror(saved_errno));
+    return false;
+  }
+
+  return true;
 }
 
 ssize_t DdtMotorLib::writeSerial(const void* data, size_t size) {
