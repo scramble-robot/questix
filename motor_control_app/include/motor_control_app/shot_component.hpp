@@ -52,7 +52,11 @@ private:
   void executeShotSequence();
   void autoStartTimerCallback();
   void controllableCallback(const std_msgs::msg::Bool::SharedPtr msg);
+  void controllableTimeoutCallback();
   void tryAutoStart();
+  void transitionToUnconfiguredForAutoRecovery(const char* reason) noexcept;
+  void handleSafetyTeardownState(const char* reason, uint8_t state_id) noexcept;
+  void stopAutoStartTimers();
   void triggerAutoRecovery();
   void disconnectServo();
 
@@ -79,15 +83,21 @@ private:
   int command_rate_limit_ms_;
   bool auto_start_;
   double connect_retry_period_sec_;
+  double controllable_timeout_sec_;
   // 非常停止連動トピック（空文字で連動無効、周期リトライのみ）
   std::string controllable_topic_;
   // /gpio/controllable の受信状況。未受信（have_controllable_=false）なら
   // 非常停止状態が分からないため周期リトライにフォールバックする。
   bool have_controllable_;
   bool controllable_;
+  bool controllable_timed_out_;
+  std::chrono::steady_clock::time_point last_controllable_time_;
   // ACTIVE 中に検出したサーボ通信故障のフラグ。autoStartTimerCallback が拾って
   // deactivate→cleanup→再接続の自動復帰を行う。
   std::atomic<bool> runtime_fault_;
+  // 非常停止や通信故障によるdeactivate/cleanupが完了していない状態。
+  // ACTIVEではdeactivate、INACTIVEではcleanupをtimerから再試行する。
+  std::atomic<bool> teardown_pending_;
 
   bool is_shooting_;
   bool last_button_state_;
@@ -99,9 +109,15 @@ private:
   rclcpp::Time last_command_time_;
 
   rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joy_subscription_;
+  // All callbacks intentionally use the node's default MutuallyExclusive callback group:
+  // auto-start, controllable input/timeout, joy input, and the future fire timer added by PR #117.
+  // If these entities are split across callback groups, synchronize lifecycle/controllable state,
+  // timer pointers, runtime_fault_, teardown_pending_, is_shooting_, servo_controller_, and servo
+  // serial I/O.
   // lifecycle 状態に依存せず常時生かす（unconfigured でも非常停止解除を検知するため）
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr controllable_sub_;
   rclcpp::TimerBase::SharedPtr auto_start_timer_;
+  rclcpp::TimerBase::SharedPtr controllable_timeout_timer_;
 };
 
 }  // namespace motor_control_app
