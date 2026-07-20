@@ -18,7 +18,7 @@ shot_component:
     # connect_retry_period_sec の周期リトライにフォールバックする。
     # "" で連動無効（周期リトライのみ）。
     controllable_topic: "/gpio/controllable"
-    controllable_timeout_sec: 1.0  # <= 0 disables stale-signal fail-safe
+    controllable_timeout_sec: 1.0  # 受信途絶でfail-safe teardownするまでの秒数（0以下で無効）
 
     port: "/dev/servo"
     baudrate: 115200

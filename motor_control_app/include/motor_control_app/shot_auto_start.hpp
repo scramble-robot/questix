@@ -23,11 +23,6 @@ enum class SafetyTeardownAction {
   kNone
 };
 
-struct ControllableTimeoutDecision {
-  bool latch_timeout;
-  bool fail_safe;
-};
-
 // 現在の lifecycle 状態と /gpio/controllable の受信状況から自動起動アクションを決定する。
 // have_controllable: /gpio/controllable を1回でも受信したか。未受信の環境
 //                    （enable_gpio_ref=false 等で publisher が居ない）では
@@ -94,18 +89,13 @@ inline bool shouldHoldManualLifecycle(uint8_t state_id, bool auto_start_timer_ca
          state_id == lifecycle_msgs::msg::State::PRIMARY_STATE_UNCONFIGURED;
 }
 
-// /gpio/controllable 未受信時は publisher のない環境との互換性のため timeout にしない。
-// 一度受信後は、最後に true だった信号だけを fail-safe teardown の対象にする。
-inline ControllableTimeoutDecision decideControllableTimeout(double timeout_sec,
-                                                             bool have_controllable,
-                                                             bool controllable,
-                                                             double elapsed_sec) {
-  const bool stale_true_signal = std::isfinite(timeout_sec) && timeout_sec > 0.0 &&
-                                 have_controllable && controllable && elapsed_sec > timeout_sec;
-  return {stale_true_signal, stale_true_signal};
+// /gpio/controllable の受信途絶判定。最後に true だった信号だけを fail-safe teardown の
+// 対象にする（false = 非常停止押下は teardown 済みのため latch 不要）。未受信環境
+// （publisher なし）を timeout にしない互換動作は呼び出し側の have_controllable_ ガードが担う。
+inline bool isControllableSignalStale(double timeout_sec, bool controllable, double elapsed_sec) {
+  return std::isfinite(timeout_sec) && timeout_sec > 0.0 && controllable &&
+         elapsed_sec > timeout_sec;
 }
-
-inline bool shouldLogControllableRecovery(bool timeout_latched) { return timeout_latched; }
 
 inline bool isValidPositivePeriod(double value) { return std::isfinite(value) && value > 0.0; }
 

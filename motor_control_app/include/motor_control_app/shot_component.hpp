@@ -56,6 +56,7 @@ private:
   void tryAutoStart();
   void transitionToUnconfiguredForAutoRecovery(const char* reason) noexcept;
   void handleSafetyTeardownState(const char* reason, uint8_t state_id) noexcept;
+  uint8_t currentStateIdOrUnknown(const char* reason) noexcept;
   void stopAutoStartTimers();
   void triggerAutoRecovery();
   void disconnectServo();
