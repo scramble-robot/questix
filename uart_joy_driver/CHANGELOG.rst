@@ -2,6 +2,10 @@
 Changelog for package uart_joy_driver
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+3.0.0 (2026-07-23)
+------------------
+* Version bump only for package uart_joy_driver
+
 2.2.0 (2026-07-23)
 ------------------
 * Version bump only for package uart_joy_driver

@@ -2,6 +2,10 @@
 Changelog for package description_launch
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+3.0.0 (2026-07-23)
+------------------
+* Version bump only for package description_launch
+
 2.2.0 (2026-07-23)
 ------------------
 * Version bump only for package description_launch
