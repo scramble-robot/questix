@@ -2,6 +2,10 @@
 Changelog for package motor_control_lib
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+3.0.0 (2026-07-23)
+------------------
+* Version bump only for package motor_control_lib
+
 2.2.0 (2026-07-23)
 ------------------
 * refactor: migrate string status topics to typed messages (`#127 <https://github.com/scramble-robot/questix/issues/127>`_)

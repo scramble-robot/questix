@@ -2,6 +2,11 @@
 Changelog for package operation_manager
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+3.0.0 (2026-07-23)
+------------------
+* refactor: remove deprecated string status topics and esc bool mirror (`#130 <https://github.com/scramble-robot/questix/issues/130>`_)
+* Contributors: Akihisa Nagata
+
 2.2.0 (2026-07-23)
 ------------------
 * refactor: migrate string status topics to typed messages (`#127 <https://github.com/scramble-robot/questix/issues/127>`_)

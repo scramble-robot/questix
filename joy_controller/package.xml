@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
     <name>joy_controller</name>
-    <version>2.2.0</version>
+    <version>3.0.0</version>
     <description>Integrated Joy Controller for ROS2 with enhanced joystick functionality</description>
     <maintainer email="aki.grade2580@outlook.jp">asa-naki</maintainer>
     <license>MIT</license>
