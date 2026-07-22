@@ -66,6 +66,9 @@ ament_auto_add_executable(shot_component_node src/shot_component_node.cpp)
 target_link_libraries(shot_component_node shot_component)
 ament_target_dependencies(shot_component_node motor_control_lib)
 
+# DDT Feedback Monitor (read-only CLI, subscribes to typed status topics)
+ament_auto_add_executable(ddt_feedback_monitor src/ddt_feedback_monitor_node.cpp)
+
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   list(APPEND AMENT_LINT_AUTO_EXCLUDE ament_cmake_cpplint ament_cmake_uncrustify)
@@ -78,6 +81,8 @@ if(BUILD_TESTING)
   ament_auto_add_gtest(test_lifecycle_auto_start test/test_lifecycle_auto_start.cpp)
   ament_auto_add_gtest(test_motor_status_msg test/test_motor_status_msg.cpp)
   ament_target_dependencies(test_motor_status_msg motor_control_lib)
+
+  ament_auto_add_gtest(test_ddt_feedback_format test/test_ddt_feedback_format.cpp)
 endif()
 
 ament_auto_package(INSTALL_TO_SHARE config launch)
