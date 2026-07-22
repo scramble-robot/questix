@@ -8,6 +8,7 @@
 #define OPERATION_MANAGER__OPERATION_MANAGER_COMPONENT_HPP_
 
 #include <map>
+#include <questix_msgs/msg/emergency_stop.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/string.hpp>
@@ -31,11 +32,13 @@ private:
 
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr controllable_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr diagnostic_pub_;
+  rclcpp::Publisher<questix_msgs::msg::EmergencyStop>::SharedPtr emergency_stop_pub_;
 
   rclcpp::TimerBase::SharedPtr eval_timer_;
 
   double timeout_seconds_;
   std::vector<int64_t> monitored_pins_;
+  std::string emergency_stop_topic_;
 };
 
 }  // namespace operation_manager

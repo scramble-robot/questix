@@ -2,3 +2,6 @@ operation_manager_node:
   ros__parameters:
     monitored_pins: [27]
     timeout_seconds: 1.0
+    # 統一緊急停止トピック (questix_msgs/EmergencyStop, reliable + transient_local)。
+    # active = !controllable として毎評価時に発行される。契約: questix_msgs/README.md
+    emergency_stop_topic: "/emergency_stop"

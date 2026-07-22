@@ -16,13 +16,19 @@ OperationManagerComponent::OperationManagerComponent(const rclcpp::NodeOptions& 
     : Node("operation_manager_node", options) {
   this->declare_parameter<std::vector<int64_t>>("monitored_pins", std::vector<int64_t>{27});
   this->declare_parameter<double>("timeout_seconds", 1.0);
+  this->declare_parameter<std::string>("emergency_stop_topic", "/emergency_stop");
 
   monitored_pins_ = this->get_parameter("monitored_pins").as_integer_array();
   timeout_seconds_ = this->get_parameter("timeout_seconds").as_double();
+  emergency_stop_topic_ = this->get_parameter("emergency_stop_topic").as_string();
 
   controllable_pub_ = this->create_publisher<std_msgs::msg::Bool>("/gpio/controllable", 1);
   diagnostic_pub_ =
       this->create_publisher<std_msgs::msg::String>("/gpio/controllable_diagnostic", 1);
+  // Latched so late-joining subscribers immediately receive the current state
+  // (topic contract: see questix_msgs/README.md).
+  emergency_stop_pub_ = this->create_publisher<questix_msgs::msg::EmergencyStop>(
+      emergency_stop_topic_, rclcpp::QoS(1).reliable().transient_local());
 
   for (const auto& pin : monitored_pins_) {
     unsigned int p = static_cast<unsigned int>(pin);
@@ -82,6 +88,13 @@ void OperationManagerComponent::evaluate_controllability() {
     diag_msg.data = "not_controllable: " + diagnostic;
   }
   diagnostic_pub_->publish(diag_msg);
+
+  questix_msgs::msg::EmergencyStop estop_msg;
+  estop_msg.header.stamp = now;
+  estop_msg.active = !controllable;
+  estop_msg.source = "operation_manager";
+  estop_msg.reason = controllable ? "released" : diagnostic;
+  emergency_stop_pub_->publish(estop_msg);
 }
 
 }  // namespace operation_manager
