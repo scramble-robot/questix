@@ -293,11 +293,11 @@ DriveComponent::CallbackReturn DriveComponent::on_error(const rclcpp_lifecycle::
 void DriveComponent::declareParameters() {
   // DDTモータライブラリのパラメータを宣言
   this->declare_parameter("serial_port", "/dev/ttyACM0");
-  this->declare_parameter("baud_rate", 115200);
+  this->declare_parameter("baud_rate", 57600);
   this->declare_parameter("wheel_radius", 0.1);
   this->declare_parameter("wheel_separation", 0.5);
-  this->declare_parameter("left_motor_id", 1);
-  this->declare_parameter("right_motor_id", 2);
+  this->declare_parameter("left_motor_id", 4);
+  this->declare_parameter("right_motor_id", 5);
   this->declare_parameter("max_motor_rpm", 1000);
   this->declare_parameter("status_publish_rate", 10.0);
   // 型付きステータストピック（questix_msgs/DriveStatus）
@@ -305,14 +305,14 @@ void DriveComponent::declareParameters() {
 
   // 制御モード関連 (後方互換のため velocity 既定)
   this->declare_parameter("control_mode", std::string("velocity"));
-  this->declare_parameter("current_kp", 0.005);
-  this->declare_parameter("current_ki", 0.02);
-  this->declare_parameter("max_current_amp", 2.0);
-  this->declare_parameter("integral_limit_amp", 1.5);
+  this->declare_parameter("current_kp", 0.001);
+  this->declare_parameter("current_ki", 0.0);
+  this->declare_parameter("max_current_amp", 1.0);
+  this->declare_parameter("integral_limit_amp", 0.3);
   this->declare_parameter("current_zero_deadband_rpm", 5);
-  this->declare_parameter("current_invert_measured", false);
-  this->declare_parameter("max_linear_accel", 0.0);
-  this->declare_parameter("max_angular_accel", 0.0);
+  this->declare_parameter("current_invert_measured", true);
+  this->declare_parameter("max_linear_accel", 1.0);
+  this->declare_parameter("max_angular_accel", 2.0);
 
   // 停止時の電気ブレーキ（velocity モードのみ有効）
   this->declare_parameter("brake_on_stop", true);
