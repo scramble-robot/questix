@@ -86,8 +86,9 @@ ParseResult parseFeedbackFrame(uint8_t expected_motor_id, const std::vector<uint
   //  DATA[6..7]=position, DATA[8]=fault code
   // マルチバイトは big-endian (high, low)。
   out.mode = frame[1];
-  out.current = static_cast<uint16_t>((frame[2] << 8) | frame[3]);
+  out.current = static_cast<int16_t>((frame[2] << 8) | frame[3]);
   out.speed = static_cast<int16_t>((frame[4] << 8) | frame[5]);
+  out.position = static_cast<uint16_t>((frame[6] << 8) | frame[7]);
   out.fault_code = frame[8];
   return ParseResult::kOk;
 }

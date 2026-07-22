@@ -8,6 +8,8 @@
 #include <chrono>
 #include <functional>
 
+#include "motor_control_app/motor_status_msg.hpp"
+
 using namespace std::chrono_literals;
 
 namespace motor_control_app {
@@ -29,7 +31,11 @@ JoyAxisDriveComponent::JoyAxisDriveComponent(const rclcpp::NodeOptions& options)
   joy_subscription_ = this->create_subscription<sensor_msgs::msg::Joy>(
       "/joy", 1, std::bind(&JoyAxisDriveComponent::joyCallback, this, std::placeholders::_1));
 
+  // 旧 String（JSON, deprecated #87）と型付き DriveStatus を並行 publish する。
+  // 型付きは相対名を分離し、旧 motor_status との同名衝突を避ける。
   status_publisher_ = this->create_publisher<std_msgs::msg::String>("motor_status", 10);
+  drive_status_publisher_ =
+      this->create_publisher<questix_msgs::msg::DriveStatus>("joy_axis_drive_status", 10);
 
   // デバッグ用Twistパブリッシャー(オプション)
   if (publish_twist_) {
@@ -206,6 +212,27 @@ void JoyAxisDriveComponent::statusTimerCallback() {
   }
 
   try {
+    // 型付き publish 用に、左右モータのフィードバックを（古ければ）1回ポーリングして更新する。
+    motor_lib_->refreshMotorFeedback(left_motor_id_);
+    motor_lib_->refreshMotorFeedback(right_motor_id_);
+
+    // 型付きステータス（questix_msgs/DriveStatus）を publish。
+    // このノードは車輪ジオメトリを持たないため linear/angular_velocity は 0.0（msg 契約）。
+    rclcpp::Time now = this->now();
+    motor_control_lib::DdtMotorLib::MotorFeedbackData left_fb, right_fb;
+    motor_lib_->getMotorFeedbackData(left_motor_id_, left_fb);
+    motor_lib_->getMotorFeedbackData(right_motor_id_, right_fb);
+
+    questix_msgs::msg::DriveStatus typed_msg;
+    typed_msg.header.stamp = now;
+    typed_msg.left = toMotorFeedbackMsg(left_fb, now);
+    typed_msg.right = toMotorFeedbackMsg(right_fb, now);
+    typed_msg.linear_velocity = 0.0;
+    typed_msg.angular_velocity = 0.0;
+    typed_msg.emergency_stop = emergency_stop_active_;
+    drive_status_publisher_->publish(typed_msg);
+
+    // 以下は旧 String JSON（deprecated, #87。1リリース並行 publish 後に削除予定）。
     // 左モータのステータスを取得
     int left_rpm = 0;
     uint8_t left_temperature = 0;

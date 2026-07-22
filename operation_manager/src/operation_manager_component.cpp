@@ -23,8 +23,11 @@ OperationManagerComponent::OperationManagerComponent(const rclcpp::NodeOptions& 
   emergency_stop_topic_ = this->get_parameter("emergency_stop_topic").as_string();
 
   controllable_pub_ = this->create_publisher<std_msgs::msg::Bool>("/gpio/controllable", 1);
+  // 旧 String 診断（deprecated, #87。次リリースで削除予定）と標準 DiagnosticArray を並行 publish。
   diagnostic_pub_ =
       this->create_publisher<std_msgs::msg::String>("/gpio/controllable_diagnostic", 1);
+  diagnostics_pub_ =
+      this->create_publisher<diagnostic_msgs::msg::DiagnosticArray>("/diagnostics", 1);
   // Latched so late-joining subscribers immediately receive the current state
   // (topic contract: see questix_msgs/README.md).
   emergency_stop_pub_ = this->create_publisher<questix_msgs::msg::EmergencyStop>(
@@ -63,6 +66,11 @@ void OperationManagerComponent::evaluate_controllability() {
   std::string diagnostic = "";
   rclcpp::Time now = this->now();
 
+  // 標準 DiagnosticArray 用に、ピンごとの状態を KeyValue として収集する。
+  diagnostic_msgs::msg::DiagnosticStatus status;
+  status.name = "operation_manager: gpio_controllability";
+  status.hardware_id = "gpio";
+
   for (const auto& pair : gpio_states_) {
     unsigned int pin = pair.first;
     bool state = pair.second;
@@ -75,6 +83,15 @@ void OperationManagerComponent::evaluate_controllability() {
       controllable = false;
       diagnostic += "pin " + std::to_string(pin) + " is false; ";
     }
+
+    diagnostic_msgs::msg::KeyValue kv_state;
+    kv_state.key = "pin_" + std::to_string(pin) + "_state";
+    kv_state.value = state ? "true" : "false";
+    status.values.push_back(kv_state);
+    diagnostic_msgs::msg::KeyValue kv_age;
+    kv_age.key = "pin_" + std::to_string(pin) + "_age_sec";
+    kv_age.value = std::to_string(elapsed);
+    status.values.push_back(kv_age);
   }
 
   std_msgs::msg::Bool out;
@@ -88,6 +105,15 @@ void OperationManagerComponent::evaluate_controllability() {
     diag_msg.data = "not_controllable: " + diagnostic;
   }
   diagnostic_pub_->publish(diag_msg);
+
+  // 標準 DiagnosticArray（deprecated な自由文 String の置換, #87）。
+  status.level = controllable ? diagnostic_msgs::msg::DiagnosticStatus::OK
+                              : diagnostic_msgs::msg::DiagnosticStatus::ERROR;
+  status.message = controllable ? "controllable" : "not_controllable: " + diagnostic;
+  diagnostic_msgs::msg::DiagnosticArray diag_array;
+  diag_array.header.stamp = now;
+  diag_array.status.push_back(status);
+  diagnostics_pub_->publish(diag_array);
 
   questix_msgs::msg::EmergencyStop estop_msg;
   estop_msg.header.stamp = now;

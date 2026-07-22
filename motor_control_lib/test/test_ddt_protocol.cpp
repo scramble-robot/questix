@@ -91,18 +91,33 @@ TEST(PackModeFrame, ModeValueLandsInByte8) {
 }
 
 TEST(ParseFeedbackFrame, ValidFrame) {
-  // speed = 0xFF9C = -100 (int16 符号拡張回帰テスト), current = 0x0102
-  std::vector<uint8_t> frame = {0x01, 0x01, 0x01, 0x02, 0xFF, 0x9C, 0x00, 0x00, 0x00};
+  // speed = 0xFF9C = -100 (int16 符号拡張回帰テスト), current = 0x0102, position = 0x0304
+  std::vector<uint8_t> frame = {0x01, 0x01, 0x01, 0x02, 0xFF, 0x9C, 0x03, 0x04, 0x00};
   frame.push_back(ddt::crc8Maxim(frame));
-  // 独立実装で事前計算した CRC の既知解
-  EXPECT_EQ(frame[9], 0x8E);
 
   ddt::Feedback fb{};
   EXPECT_EQ(ddt::parseFeedbackFrame(0x01, frame, fb), ddt::ParseResult::kOk);
   EXPECT_EQ(fb.mode, 0x01);
   EXPECT_EQ(fb.current, 0x0102);
   EXPECT_EQ(fb.speed, -100);
+  EXPECT_EQ(fb.position, 0x0304);
   EXPECT_EQ(fb.fault_code, 0x00);
+}
+
+TEST(ParseFeedbackFrame, CurrentIsSignExtended) {
+  // current = 0xFF9C = -100 (int16 符号拡張回帰テスト。旧実装は uint16 で 0xFF9C を返していた)
+  std::vector<uint8_t> frame = {0x01, 0x02, 0xFF, 0x9C, 0x00, 0x00, 0x00, 0x00, 0x00};
+  frame.push_back(ddt::crc8Maxim(frame));
+
+  ddt::Feedback fb{};
+  EXPECT_EQ(ddt::parseFeedbackFrame(0x01, frame, fb), ddt::ParseResult::kOk);
+  EXPECT_EQ(fb.current, -100);
+}
+
+TEST(CurrentRawToAmp, KnownAnswers) {
+  EXPECT_FLOAT_EQ(ddt::currentRawToAmp(0), 0.0f);
+  EXPECT_FLOAT_EQ(ddt::currentRawToAmp(32767), 8.0f);
+  EXPECT_FLOAT_EQ(ddt::currentRawToAmp(-32767), -8.0f);
 }
 
 TEST(ParseFeedbackFrame, BadLength) {

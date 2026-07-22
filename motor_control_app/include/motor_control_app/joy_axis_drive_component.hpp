@@ -11,6 +11,7 @@
 
 #include "geometry_msgs/msg/twist.hpp"
 #include "motor_control_lib/ddt_motor_lib.hpp"
+#include "questix_msgs/msg/drive_status.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_components/register_node_macro.hpp"
 #include "sensor_msgs/msg/joy.hpp"
@@ -73,7 +74,10 @@ private:
 
   // ROS 2パブリッシャー/サブスクライバー
   rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joy_subscription_;
+  // 旧 String ステータス（JSON）。1リリース並行 publish 後に削除予定（deprecated, #87）。
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_publisher_;
+  // 型付きステータス（questix_msgs/DriveStatus）。契約は questix_msgs/README.md。
+  rclcpp::Publisher<questix_msgs::msg::DriveStatus>::SharedPtr drive_status_publisher_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr twist_publisher_;  // デバッグ用
 
   // タイマー

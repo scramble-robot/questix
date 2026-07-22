@@ -13,6 +13,7 @@
 #include <lifecycle_msgs/msg/state.hpp>
 
 #include "motor_control_app/lifecycle_auto_start.hpp"
+#include "motor_control_app/motor_status_msg.hpp"
 
 using namespace std::chrono_literals;
 
@@ -157,7 +158,8 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
   RCLCPP_INFO(this->get_logger(), "  right_motor_id: %d", right_motor_id_);
   RCLCPP_INFO(this->get_logger(), "  max_motor_rpm: %d", max_motor_rpm_);
   RCLCPP_INFO(this->get_logger(), "  status_publish_rate: %.1f", status_publish_rate_);
-  RCLCPP_INFO(this->get_logger(), "  status_topic: %s", status_topic_.c_str());
+  RCLCPP_INFO(this->get_logger(), "  status_topic: %s (deprecated)", status_topic_.c_str());
+  RCLCPP_INFO(this->get_logger(), "  typed_status_topic: %s", typed_status_topic_.c_str());
   RCLCPP_INFO(this->get_logger(), "  cmd_timeout_sec: %.2f", cmd_timeout_sec_);
   RCLCPP_INFO(this->get_logger(), "  control_mode: %s", control_mode_.c_str());
   if (control_mode_ == "current") {
@@ -173,7 +175,10 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
       "/target_twist", 1, std::bind(&DriveComponent::twistCallback, this, std::placeholders::_1));
 
   // LifecyclePublisher のため on_activate まで publish は無効
+  // 旧 String JSON（deprecated, #87）と型付き DriveStatus を並行 publish する。
   status_publisher_ = this->create_publisher<std_msgs::msg::String>(status_topic_, 1);
+  typed_status_publisher_ =
+      this->create_publisher<questix_msgs::msg::DriveStatus>(typed_status_topic_, 1);
 
   RCLCPP_INFO(this->get_logger(), "Drive component configured");
   return CallbackReturn::SUCCESS;
@@ -238,6 +243,7 @@ DriveComponent::CallbackReturn DriveComponent::on_cleanup(const rclcpp_lifecycle
   watchdog_timer_.reset();
   twist_subscription_.reset();
   status_publisher_.reset();
+  typed_status_publisher_.reset();
   shutdownMotorLib();
   RCLCPP_INFO(this->get_logger(), "Drive component cleaned up");
   return CallbackReturn::SUCCESS;
@@ -251,6 +257,7 @@ DriveComponent::CallbackReturn DriveComponent::on_shutdown(const rclcpp_lifecycl
   watchdog_timer_.reset();
   twist_subscription_.reset();
   status_publisher_.reset();
+  typed_status_publisher_.reset();
   shutdownMotorLib();
   RCLCPP_INFO(this->get_logger(), "Drive component shut down");
   return CallbackReturn::SUCCESS;
@@ -263,6 +270,7 @@ DriveComponent::CallbackReturn DriveComponent::on_error(const rclcpp_lifecycle::
   watchdog_timer_.reset();
   twist_subscription_.reset();
   status_publisher_.reset();
+  typed_status_publisher_.reset();
   shutdownMotorLib();
   if (auto_start_ && auto_start_timer_) {
     auto_start_timer_->reset();
@@ -281,7 +289,10 @@ void DriveComponent::declareParameters() {
   this->declare_parameter("right_motor_id", 2);
   this->declare_parameter("max_motor_rpm", 1000);
   this->declare_parameter("status_publish_rate", 10.0);
+  // 旧 String JSON トピック（deprecated, #87。次リリースで削除予定）
   this->declare_parameter("status_topic", "/drive_motor_status");
+  // 型付きステータストピック（questix_msgs/DriveStatus）
+  this->declare_parameter("typed_status_topic", "/drive_status");
 
   // 制御モード関連 (後方互換のため velocity 既定)
   this->declare_parameter("control_mode", std::string("velocity"));
@@ -321,6 +332,7 @@ void DriveComponent::readParameters() {
   max_motor_rpm_ = this->get_parameter("max_motor_rpm").as_int();
   status_publish_rate_ = this->get_parameter("status_publish_rate").as_double();
   status_topic_ = this->get_parameter("status_topic").as_string();
+  typed_status_topic_ = this->get_parameter("typed_status_topic").as_string();
   control_mode_ = this->get_parameter("control_mode").as_string();
   current_kp_ = this->get_parameter("current_kp").as_double();
   current_ki_ = this->get_parameter("current_ki").as_double();
@@ -534,8 +546,29 @@ void DriveComponent::statusTimerCallback() {
   }
 
   try {
+    // 型付き publish 用に、左右モータのフィードバックを（古ければ）1回ポーリングして更新する。
+    // 走行中は新鮮なので実質 no-op。アイドル時のみ最後のフレームを再送して実測を取り直す。
+    motor_lib_->refreshMotorFeedback(left_motor_id_);
+    motor_lib_->refreshMotorFeedback(right_motor_id_);
+
     auto status = diff_drive_->getDriveStatus();
 
+    // 型付きステータス（questix_msgs/DriveStatus）を publish
+    rclcpp::Time now = this->now();
+    motor_control_lib::DdtMotorLib::MotorFeedbackData left_fb, right_fb;
+    motor_lib_->getMotorFeedbackData(left_motor_id_, left_fb);
+    motor_lib_->getMotorFeedbackData(right_motor_id_, right_fb);
+
+    questix_msgs::msg::DriveStatus typed_msg;
+    typed_msg.header.stamp = now;
+    typed_msg.left = toMotorFeedbackMsg(left_fb, now);
+    typed_msg.right = toMotorFeedbackMsg(right_fb, now);
+    typed_msg.linear_velocity = status.current_linear_velocity;
+    typed_msg.angular_velocity = status.current_angular_velocity;
+    typed_msg.emergency_stop = emergency_stop_active_;
+    typed_status_publisher_->publish(typed_msg);
+
+    // 以下は旧 String JSON（deprecated, #87。1リリース並行 publish 後に削除予定）。
     // ステータス情報をJSON風の文字列として作成
     std::string status_str =
         "{"

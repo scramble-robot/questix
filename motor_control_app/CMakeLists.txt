@@ -75,6 +75,8 @@ if(BUILD_TESTING)
   ament_auto_add_gtest(test_shot_auto_start test/test_shot_auto_start.cpp)
   ament_auto_add_gtest(test_drive_watchdog test/test_drive_watchdog.cpp)
   ament_auto_add_gtest(test_lifecycle_auto_start test/test_lifecycle_auto_start.cpp)
+  ament_auto_add_gtest(test_motor_status_msg test/test_motor_status_msg.cpp)
+  ament_target_dependencies(test_motor_status_msg motor_control_lib)
 endif()
 
 ament_auto_package(INSTALL_TO_SHARE config launch)

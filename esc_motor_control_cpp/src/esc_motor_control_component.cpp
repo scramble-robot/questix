@@ -77,8 +77,7 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
   if (!emergency_stop_topic_.empty()) {
     emergency_stop_sub_ = this->create_subscription<questix_msgs::msg::EmergencyStop>(
         emergency_stop_topic_, rclcpp::QoS(1).reliable().transient_local(),
-        std::bind(&EscMotorControlComponent::emergency_stop_callback, this,
-                  std::placeholders::_1));
+        std::bind(&EscMotorControlComponent::emergency_stop_callback, this, std::placeholders::_1));
   }
 
   // ---- Publishers ----

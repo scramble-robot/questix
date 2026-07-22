@@ -75,10 +75,17 @@ std::vector<uint8_t> packCurrentFrame(uint8_t motor_id, int16_t current_raw);
  */
 struct Feedback {
   uint8_t mode;
-  uint16_t current;
-  int16_t speed;
+  int16_t current;    // トルク電流の生値（符号付き）: -32767..32767 <-> -8..+8 A
+  int16_t speed;      // 実測 RPM（符号付き）
+  uint16_t position;  // ロータ位置: 0..32767 <-> 0..360 deg
   uint8_t fault_code;
 };
+
+/**
+ * @brief トルク電流の生値 [-32767..32767] を電流 [A] に変換する。
+ *  仕様: 生値 32767 が +8A、-32767 が -8A に対応する。
+ */
+constexpr float currentRawToAmp(int16_t raw) { return static_cast<float>(raw) * 8.0f / 32767.0f; }
 
 /**
  * @brief parseFeedbackFrame の結果コード。
