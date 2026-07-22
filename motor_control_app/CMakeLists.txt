@@ -10,27 +10,6 @@ find_package(ament_cmake_auto REQUIRED)
 find_package(motor_control_lib REQUIRED)  # Manual find for local library
 ament_auto_find_build_dependencies()
 
-# Unified motor control node (コメントアウト)
-# add_executable(unified_motor_control_node src/unified_motor_control_node.cpp)
-# target_include_directories(unified_motor_control_node PUBLIC
-#   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-#   $<INSTALL_INTERFACE:include>
-# )
-# ament_target_dependencies(unified_motor_control_node
-#   rclcpp
-#   std_msgs
-#   geometry_msgs
-#   sensor_msgs
-#   motor_control_lib
-# )
-
-# Simple test node
-ament_auto_add_executable(simple_test_node src/simple_test_node.cpp)
-ament_target_dependencies(simple_test_node motor_control_lib)
-
-# Simple motor app
-ament_auto_add_executable(simple_motor_app src/simple_motor_app.cpp)
-
 # Drive Component (as a shared library for component loading)
 ament_auto_add_library(drive_component SHARED
   src/drive_component.cpp
@@ -72,10 +51,6 @@ ament_target_dependencies(joy_axis_drive_node motor_control_lib)
 ament_auto_add_executable(drive_component_node src/drive_component_node.cpp)
 target_link_libraries(drive_component_node drive_component)
 ament_target_dependencies(drive_component_node motor_control_lib)
-
-# Unified Motor App (using MotorManager)
-ament_auto_add_executable(unified_motor_app src/unified_motor_app.cpp)
-ament_target_dependencies(unified_motor_app motor_control_lib)
 
 # Shot Component (as a shared library for component loading)
 ament_auto_add_library(shot_component SHARED
