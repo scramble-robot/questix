@@ -108,15 +108,8 @@ controller.addMotor(servo_config);
 ### 起動方法
 
 ```bash
-# デフォルト設定で起動
-ros2 run motor_control_app unified_motor_control_node
-
-# カスタム設定で起動
-ros2 run motor_control_app unified_motor_control_node \
-  --ros-args \
-  -p drive_port:="/dev/ttyACM1" \
-  -p esc_pin:=18 \
-  -p servo_port:="/dev/ttyUSB1"
+# 統合起動（launcher 経由）
+ros2 launch questix_launcher questix_core.launch.xml
 ```
 
 ### トピック
@@ -232,8 +225,8 @@ source install/setup.bash
 ## テスト
 
 ```bash
-# 基本機能テスト
-ros2 run motor_control_app unified_motor_control_node
+# 基本機能テスト（launcher 経由で起動）
+ros2 launch questix_launcher questix_core.launch.xml
 
 # Drive制御テスト
 ros2 topic pub /cmd_vel geometry_msgs/Twist "linear: {x: 0.5}" --once
