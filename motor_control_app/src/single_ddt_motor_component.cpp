@@ -35,10 +35,7 @@ SingleDdtMotorComponent::SingleDdtMotorComponent(const rclcpp::NodeOptions& opti
       rclcpp::QoS(10),
       std::bind(&SingleDdtMotorComponent::twistCallback, this, std::placeholders::_1));
 
-  // ステータスパブリッシャーを作成
-  // 旧 String（自由文, deprecated #87）と型付き MotorFeedback を並行 publish する。
-  // 型付きは相対名を分離し、旧 motor_status との同名衝突を避ける。
-  status_publisher_ = this->create_publisher<std_msgs::msg::String>("motor_status", 10);
+  // ステータスパブリッシャーを作成（型付き MotorFeedback）。
   feedback_publisher_ =
       this->create_publisher<questix_msgs::msg::MotorFeedback>("single_ddt_motor_feedback", 10);
 
@@ -191,29 +188,15 @@ void SingleDdtMotorComponent::statusTimerCallback() {
   motor_control_lib::DdtMotorLib::MotorFeedbackData fb;
   if (motor_lib_->getMotorFeedbackData(motor_id_, fb)) {
     feedback_publisher_->publish(toMotorFeedbackMsg(fb, this->now()));
-  }
-
-  int velocity_rpm = 0;
-  uint8_t temperature = 0;
-  uint8_t fault_code = 0;
-
-  if (motor_lib_->getMotorStatus(motor_id_, velocity_rpm, temperature, fault_code)) {
-    // 旧 String（自由文, deprecated #87）
-    auto status_msg = std_msgs::msg::String();
-    status_msg.data =
-        "Motor ID: " + std::to_string(motor_id_) + ", RPM: " + std::to_string(velocity_rpm) +
-        ", Temp: " + std::to_string(temperature) + "°C" + ", Fault: " + std::to_string(fault_code);
-
-    status_publisher_->publish(status_msg);
 
     // 故障コードをチェック
-    if (fault_code != 0) {
+    if (fb.fault_code != 0) {
       RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
-                           "Motor %d fault detected: code %d", motor_id_, fault_code);
+                           "Motor %d fault detected: code %d", motor_id_, fb.fault_code);
     }
   } else {
     RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
-                         "Failed to get motor status for motor %d", motor_id_);
+                         "Failed to get motor feedback for motor %d", motor_id_);
   }
 }
 

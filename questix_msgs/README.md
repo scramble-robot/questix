@@ -91,17 +91,16 @@ DDT M0602C の Protocol 1 応答フレームをデコードした 1 モータ分
 
 ## 移行メモ
 
-- ESC の `/roller_emergency_status`(`std_msgs/Bool`, transient_local)は
-  `/emergency_stop` の `active` のミラーとして 1 リリース並行 publish され、
-  次リリースで削除予定(deprecated)。新規購読は `/emergency_stop` を使うこと。
-- 旧 String ステータストピック(下記)は上表の型付きトピックへ移行済み。
-  互換のため 1 リリース並行 publish し、次リリースで削除予定(deprecated, #87)。
-  | 旧トピック | 型 | 発行元 | 置換先 |
+- 旧 String ステータストピックと ESC の `/roller_emergency_status`(`std_msgs/Bool`)は
+  v2.2.0 で上表の型付きトピックと 1 リリース並行 publish したのち削除済み(#87)。
+  購読は下表の置換先を使うこと。
+  | 削除された旧トピック | 型 | 発行元 | 置換先 |
   |---|---|---|---|
   | `/drive_motor_status` | `std_msgs/String`(JSON) | `drive_component` | `/drive_status` |
   | `motor_status` | `std_msgs/String`(自由文) | `single_ddt_motor` | `single_ddt_motor_feedback` |
   | `motor_status` | `std_msgs/String`(JSON) | `joy_axis_drive` | `joy_axis_drive_status` |
   | `/gpio/controllable_diagnostic` | `std_msgs/String`(自由文) | `operation_manager` | `/diagnostics` |
+  | `/roller_emergency_status` | `std_msgs/Bool`(transient_local) | `esc_motor_control` | `/emergency_stop`(`active`) |
 - `joy_gate` は従来どおり `/gpio/controllable` を購読する(スコープ外)。
 - drive_component の受信 staleness タイムアウトは未実装
   (既存のコマンド watchdog と物理電源断がフェイルセーフを担う)。

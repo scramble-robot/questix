@@ -28,7 +28,6 @@
     <param name="status_publish_rate" value="5.0" />
     <param name="watchdog_timeout" value="1.0" />
     <remap from="cmd_vel" to="/cmd_vel" />
-    <remap from="motor_status" to="/motor_status" />
     <remap from="single_ddt_motor_feedback" to="/single_ddt_motor_feedback" />
   </node>
 </launch>

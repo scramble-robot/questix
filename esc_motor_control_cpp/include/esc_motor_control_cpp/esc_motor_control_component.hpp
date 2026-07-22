@@ -15,7 +15,6 @@
 #include "questix_msgs/msg/emergency_stop.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/joy.hpp"
-#include "std_msgs/msg/bool.hpp"
 #include "std_msgs/msg/float32.hpp"
 
 namespace esc_motor_control_cpp {
@@ -54,9 +53,6 @@ private:
   std::string status_topic_;
   // 統一緊急停止トピック（questix_msgs/EmergencyStop, 入力）。空文字で連動無効。
   std::string emergency_stop_topic_;
-  // Deprecated: /emergency_stop の active フラグをミラーする出力（std_msgs/Bool）。
-  // 1リリースだけ並行 publish し、次リリースで削除予定。新規購読は /emergency_stop を使うこと。
-  std::string emergency_status_topic_;
   int min_pulse_width_us_;
   int max_pulse_width_us_;
   int neutral_pulse_width_us_;
@@ -76,8 +72,6 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joy_sub_;
   rclcpp::Subscription<questix_msgs::msg::EmergencyStop>::SharedPtr emergency_stop_sub_;
   rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr status_pub_;
-  // Deprecated: 下記の /roller_emergency_status（std_msgs/Bool）。上記コメント参照。
-  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr emergency_pub_;
   rclcpp::TimerBase::SharedPtr status_timer_;
   rclcpp::TimerBase::SharedPtr safety_timer_;
 };

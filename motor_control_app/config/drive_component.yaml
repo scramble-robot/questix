@@ -63,9 +63,6 @@ drive_component:
     # 型付きステータス出力先（questix_msgs/DriveStatus）。契約は questix_msgs/README.md。
     # 左右モータの電流/速度/位置/fault を型付きで確認したいときはこちらを echo してください。
     typed_status_topic: "/drive_status"
-    # 旧 String(JSON) ステータス出力先（deprecated, #87。1リリース並行 publish 後に削除予定）。
-    # 新規購読は typed_status_topic を使ってください。
-    status_topic: "/drive_motor_status"
 
     # 統一緊急停止トピック（questix_msgs/EmergencyStop, reliable + transient_local）。
     # active=true 受信で即時停止＋twist 無視、active=false で twist 受付を再開する
