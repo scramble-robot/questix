@@ -24,6 +24,8 @@
 #include <string>
 #include <uart_joy_driver/uart_joy_driver_component.hpp>
 
+#include "serial_utils/serial_port.hpp"
+
 namespace uart_joy_driver {
 
 UartJoyDriverComponent::UartJoyDriverComponent(const rclcpp::NodeOptions& options)
@@ -87,60 +89,9 @@ UartJoyDriverComponent::UartJoyDriverComponent(const rclcpp::NodeOptions& option
 UartJoyDriverComponent::~UartJoyDriverComponent() { closeSerial(); }
 
 bool UartJoyDriverComponent::initializeSerial() {
-  serial_fd_ = open(serial_port_.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
+  serial_utils::SerialConfig cfg{O_RDWR | O_NOCTTY | O_NONBLOCK, baud_rate_, 0, 0};
+  serial_fd_ = serial_utils::openSerial(serial_port_, cfg, this->get_logger());
   if (serial_fd_ < 0) {
-    RCLCPP_ERROR(this->get_logger(), "シリアルポートが開けませんでした: %s", serial_port_.c_str());
-    return false;
-  }
-
-  struct termios tty {};
-  if (tcgetattr(serial_fd_, &tty) != 0) {
-    RCLCPP_ERROR(this->get_logger(), "tcgetattr エラー");
-    closeSerial();
-    return false;
-  }
-
-  speed_t speed = B115200;
-  switch (baud_rate_) {
-    case 9600:
-      speed = B9600;
-      break;
-    case 19200:
-      speed = B19200;
-      break;
-    case 38400:
-      speed = B38400;
-      break;
-    case 57600:
-      speed = B57600;
-      break;
-    case 115200:
-      speed = B115200;
-      break;
-    default:
-      RCLCPP_WARN(this->get_logger(), "未対応のボーレート %d、115200を使用", baud_rate_);
-      break;
-  }
-  cfsetospeed(&tty, speed);
-  cfsetispeed(&tty, speed);
-
-  tty.c_cflag = (tty.c_cflag & ~CSIZE) | CS8;
-  tty.c_cflag |= (CLOCAL | CREAD);
-  tty.c_cflag &= ~(PARENB | PARODD);
-  tty.c_cflag &= ~CSTOPB;
-  tty.c_cflag &= ~CRTSCTS;
-
-  tty.c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR | ICRNL);
-  tty.c_iflag &= ~(IXON | IXOFF | IXANY);
-  tty.c_lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
-  tty.c_oflag &= ~OPOST;
-
-  tty.c_cc[VMIN] = 0;
-  tty.c_cc[VTIME] = 0;
-
-  if (tcsetattr(serial_fd_, TCSANOW, &tty) != 0) {
-    RCLCPP_ERROR(this->get_logger(), "tcsetattr エラー");
-    closeSerial();
     return false;
   }
 
