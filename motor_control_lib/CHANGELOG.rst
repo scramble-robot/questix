@@ -2,6 +2,13 @@
 Changelog for package motor_control_lib
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.0.1 (2026-07-22)
+------------------
+* fix: drain DDT serial output with tcdrain (`#116 <https://github.com/scramble-robot/questix/issues/116>`_)
+* fix: reject non-finite control inputs (`#114 <https://github.com/scramble-robot/questix/issues/114>`_)
+* fix: remove 50ms blocking sleep from ddt velocity send path (`#113 <https://github.com/scramble-robot/questix/issues/113>`_)
+* Contributors: Akihisa Nagata, Yuichiroh Kobayashi
+
 2.0.0 (2026-07-16)
 ------------------
 * chore: unify package versions to 2.0.0 (`#108 <https://github.com/scramble-robot/questix/issues/108>`_)

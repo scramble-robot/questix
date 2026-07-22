@@ -2,6 +2,10 @@
 Changelog for package description_launch
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.0.1 (2026-07-22)
+------------------
+* Version bump only for package description_launch
+
 2.0.0 (2026-07-16)
 ------------------
 * chore: unify package versions to 2.0.0 (`#108 <https://github.com/scramble-robot/questix/issues/108>`_)

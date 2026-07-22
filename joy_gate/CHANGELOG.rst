@@ -2,6 +2,11 @@
 Changelog for package joy_gate
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.0.1 (2026-07-22)
+------------------
+* fix: add gpio controllable reception timeout to joy_gate (`#112 <https://github.com/scramble-robot/questix/issues/112>`_)
+* Contributors: Akihisa Nagata
+
 2.0.0 (2026-07-16)
 ------------------
 * chore: unify package versions to 2.0.0 (`#108 <https://github.com/scramble-robot/questix/issues/108>`_)
