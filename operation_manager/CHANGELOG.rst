@@ -2,6 +2,11 @@
 Changelog for package operation_manager
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.1.0 (2026-07-23)
+------------------
+* feat: add questix_msgs and publish /emergency_stop from operation_manager (`#124 <https://github.com/scramble-robot/questix/issues/124>`_)
+* Contributors: Akihisa Nagata
+
 2.0.1 (2026-07-22)
 ------------------
 * Version bump only for package operation_manager

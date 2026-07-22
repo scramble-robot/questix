@@ -2,6 +2,11 @@
 Changelog for package esc_motor_control_cpp
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.1.0 (2026-07-23)
+------------------
+* feat: link esc_motor_control to the unified /emergency_stop topic (`#125 <https://github.com/scramble-robot/questix/issues/125>`_)
+* Contributors: Akihisa Nagata
+
 2.0.1 (2026-07-22)
 ------------------
 * fix: clear esc full-speed latch on safety timeout and require re-press (`#115 <https://github.com/scramble-robot/questix/issues/115>`_)

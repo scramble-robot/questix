@@ -2,6 +2,12 @@
 Changelog for package motor_control_app
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.1.0 (2026-07-23)
+------------------
+* feat: link drive and shot components to /emergency_stop (`#125 <https://github.com/scramble-robot/questix/issues/125>`_)
+* chore: remove unused legacy motor apps (`#123 <https://github.com/scramble-robot/questix/issues/123>`_)
+* Contributors: Akihisa Nagata
+
 2.0.1 (2026-07-22)
 ------------------
 * feat: convert drive_component to a lifecycle node (`#118 <https://github.com/scramble-robot/questix/issues/118>`_)

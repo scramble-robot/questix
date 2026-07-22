@@ -2,6 +2,10 @@
 Changelog for package gpio_reader
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.1.0 (2026-07-23)
+------------------
+* Version bump only for package gpio_reader
+
 2.0.1 (2026-07-22)
 ------------------
 * Version bump only for package gpio_reader
