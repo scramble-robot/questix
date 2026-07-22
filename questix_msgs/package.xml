@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package format="3">
   <name>questix_msgs</name>
-  <version>2.1.0</version>
+  <version>2.2.0</version>
   <description>Common message definitions for QUESTiX, including the unified emergency stop interface.</description>
   <maintainer email="aki.grade2580@outlook.jp">asa-naki</maintainer>
   <license>MIT</license>

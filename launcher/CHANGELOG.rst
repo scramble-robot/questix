@@ -2,6 +2,11 @@
 Changelog for package questix_launcher
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.2.0 (2026-07-23)
+------------------
+* refactor: migrate string status topics to typed messages (`#127 <https://github.com/scramble-robot/questix/issues/127>`_)
+* Contributors: Akihisa Nagata
+
 2.1.0 (2026-07-23)
 ------------------
 * feat: link drive, shot, and esc components to /emergency_stop (`#125 <https://github.com/scramble-robot/questix/issues/125>`_)

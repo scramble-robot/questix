@@ -2,6 +2,11 @@
 Changelog for package operation_manager
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.2.0 (2026-07-23)
+------------------
+* refactor: migrate string status topics to typed messages (`#127 <https://github.com/scramble-robot/questix/issues/127>`_)
+* Contributors: Akihisa Nagata
+
 2.1.0 (2026-07-23)
 ------------------
 * feat: add questix_msgs and publish /emergency_stop from operation_manager (`#124 <https://github.com/scramble-robot/questix/issues/124>`_)
