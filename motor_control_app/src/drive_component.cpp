@@ -40,6 +40,16 @@ DriveComponent::DriveComponent(const rclcpp::NodeOptions& options)
                 requested_retry_period);
   }
 
+  // /emergency_stop 購読は lifecycle 状態に依存せず常時生かす（on_cleanup で
+  // 破棄される twist 購読と異なり、unconfigured での configure リトライ中も
+  // 状態を追従する）。transient_local なので起動時に最新のラッチ状態を受信する。
+  emergency_stop_topic_ = this->get_parameter("emergency_stop_topic").as_string();
+  if (!emergency_stop_topic_.empty()) {
+    emergency_stop_sub_ = this->create_subscription<questix_msgs::msg::EmergencyStop>(
+        emergency_stop_topic_, rclcpp::QoS(1).reliable().transient_local(),
+        std::bind(&DriveComponent::emergencyStopCallback, this, std::placeholders::_1));
+  }
+
   if (auto_start_) {
     const auto period = std::chrono::duration<double>(std::max(0.5, connect_retry_period_sec_));
     auto_start_timer_ =
@@ -296,6 +306,9 @@ void DriveComponent::declareParameters() {
   // Lifecycle 自動遷移。非常停止解除でモータが通電するまで configure を再試行する。
   this->declare_parameter("auto_start", true);
   this->declare_parameter("connect_retry_period_sec", 1.0);
+
+  // 統一緊急停止トピック（questix_msgs/EmergencyStop）。空文字で連動無効。
+  this->declare_parameter("emergency_stop_topic", "/emergency_stop");
 }
 
 void DriveComponent::readParameters() {
@@ -462,6 +475,37 @@ void DriveComponent::twistCallback(const geometry_msgs::msg::Twist::SharedPtr ms
 
   RCLCPP_DEBUG(this->get_logger(), "Velocity command sent: linear=%.3f, angular=%.3f",
                target_linear, target_angular);
+}
+
+void DriveComponent::emergencyStopCallback(const questix_msgs::msg::EmergencyStop::SharedPtr msg) {
+  const bool was_active = emergency_stop_active_;
+  emergency_stop_active_ = msg->active;
+
+  const bool motor_ready = motor_initialized_ && diff_drive_ != nullptr;
+  switch (drive_watchdog::decideEstopAction(was_active, msg->active, motor_ready)) {
+    case drive_watchdog::EstopAction::kStopNow:
+      RCLCPP_WARN(this->get_logger(), "非常停止を受信 (source=%s, reason=%s)。モータを停止します",
+                  msg->source.c_str(), msg->reason.c_str());
+      // best-effort の即時停止。物理非常停止でモータ電源が落ちている場合は
+      // シリアル書込みが失敗し得るが、teardown へはエスカレートしない
+      // （デバイス消失は既存の configure リトライ経路が処理する）。
+      diff_drive_->stop();
+      resetCommandState();
+      break;
+    case drive_watchdog::EstopAction::kClear:
+      RCLCPP_INFO(this->get_logger(),
+                  "非常停止が解除されました (source=%s)。twist 受付を再開します"
+                  "（モータは次の指令まで停止のまま）",
+                  msg->source.c_str());
+      break;
+    case drive_watchdog::EstopAction::kNone:
+      if (msg->active && !was_active) {
+        RCLCPP_WARN(this->get_logger(),
+                    "非常停止を受信 (source=%s, reason=%s)。モータ未初期化のため指令なし",
+                    msg->source.c_str(), msg->reason.c_str());
+      }
+      break;
+  }
 }
 
 void DriveComponent::watchdogTimerCallback() {

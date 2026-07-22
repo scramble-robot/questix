@@ -64,6 +64,7 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 
   ament_auto_add_gtest(test_full_speed_logic test/test_full_speed_logic.cpp)
+  ament_auto_add_gtest(test_estop_logic test/test_estop_logic.cpp)
 endif()
 
 ament_auto_package(INSTALL_TO_SHARE launch config)

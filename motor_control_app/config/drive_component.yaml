@@ -63,3 +63,9 @@ drive_component:
     # 左右モータのフィードバック出力先
     # 左右RPMや現在速度を見たいときは、このトピックを ros2 topic echo してください。
     status_topic: "/drive_motor_status"
+
+    # 統一緊急停止トピック（questix_msgs/EmergencyStop, reliable + transient_local）。
+    # active=true 受信で即時停止＋twist 無視、active=false で twist 受付を再開する
+    # （モータは次の指令まで停止のまま）。空文字 "" で連動無効。
+    # 発行元は operation_manager（契約: questix_msgs/README.md）。
+    emergency_stop_topic: "/emergency_stop"

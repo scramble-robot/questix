@@ -13,6 +13,7 @@
 #include "motor_control_app/drive_watchdog.hpp"
 #include "motor_control_lib/ddt_motor_lib.hpp"
 #include "motor_control_lib/differential_drive.hpp"
+#include "questix_msgs/msg/emergency_stop.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_components/register_node_macro.hpp"
 #include "rclcpp_lifecycle/lifecycle_node.hpp"
@@ -32,6 +33,10 @@ namespace motor_control_app {
  * 運用状態に遷移する。auto_start=true（既定）の場合、内蔵タイマーが
  * configure/activate を成功するまで再試行するので、外部の lifecycle manager
  * なしで systemd 起動に耐える（shot_component と同パターン）。
+ *
+ * /emergency_stop（questix_msgs/EmergencyStop、契約は questix_msgs/README.md）を
+ * 常時購読し、active=true で即時停止 + 以後の twist を無視、active=false で
+ * twist 受付を再開する（モータは次の twist まで停止のまま = 自動復帰）。
  */
 class DriveComponent : public rclcpp_lifecycle::LifecycleNode {
 public:
@@ -75,6 +80,15 @@ private:
   void watchdogTimerCallback();
 
   /**
+   * @brief /emergency_stop メッセージのコールバック関数
+   *
+   * ライフサイクル状態に依存せず常時受信する。立ち上がりエッジで即時停止
+   * （best-effort）、立ち下がりエッジで twist 受付を再開する。
+   * @param msg 受信した EmergencyStop メッセージ
+   */
+  void emergencyStopCallback(const questix_msgs::msg::EmergencyStop::SharedPtr msg);
+
+  /**
    * @brief auto_start タイマーコールバック
    *
    * unconfigured なら configure、inactive なら activate を試行し、
@@ -114,6 +128,8 @@ private:
   // split across callback groups, synchronize motor_initialized_, diff_drive_, command state,
   // timer pointers, and all motor serial operations before enabling concurrent execution.
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr twist_subscription_;
+  // lifecycle 状態に依存せず常時生かす（コンストラクタで作成、on_cleanup でも破棄しない）
+  rclcpp::Subscription<questix_msgs::msg::EmergencyStop>::SharedPtr emergency_stop_sub_;
   rclcpp_lifecycle::LifecyclePublisher<std_msgs::msg::String>::SharedPtr status_publisher_;
   rclcpp::TimerBase::SharedPtr status_timer_;
   rclcpp::TimerBase::SharedPtr watchdog_timer_;
@@ -133,6 +149,8 @@ private:
   int max_motor_rpm_;
   double status_publish_rate_;
   std::string status_topic_;
+  // 統一緊急停止トピック（空文字で連動無効）。コンストラクタで一度だけ読む。
+  std::string emergency_stop_topic_;
 
   // 制御モード関連
   std::string control_mode_;  // "velocity" | "current"

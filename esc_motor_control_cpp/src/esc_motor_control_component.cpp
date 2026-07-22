@@ -5,9 +5,12 @@
 // https://opensource.org/licenses/MIT.
 #include "esc_motor_control_cpp/esc_motor_control_component.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <functional>
 #include <thread>
+
+#include "esc_motor_control_cpp/estop_logic.hpp"
 
 using namespace std::chrono_literals;
 
@@ -26,6 +29,10 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
   this->declare_parameter<bool>("test_mode", false);
   this->declare_parameter<std::string>("joy_topic", "/joy");
   this->declare_parameter<std::string>("status_topic", "/roller_motor_status");
+  // 統一緊急停止トピック（questix_msgs/EmergencyStop, 入力）。空文字で連動無効。
+  this->declare_parameter<std::string>("emergency_stop_topic", "/emergency_stop");
+  // Deprecated: /emergency_stop の active フラグをミラーする出力（std_msgs/Bool）。
+  // 次リリースで削除予定。新規購読は /emergency_stop を使うこと。
   this->declare_parameter<std::string>("emergency_status_topic", "/roller_emergency_status");
   this->declare_parameter<int>("min_pulse_width", 0);         // μs (speed=-1.0)
   this->declare_parameter<int>("max_pulse_width", 2000);      // μs (speed=1.0)
@@ -45,6 +52,7 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
   test_mode_ = this->get_parameter("test_mode").as_bool();
   joy_topic_ = this->get_parameter("joy_topic").as_string();
   status_topic_ = this->get_parameter("status_topic").as_string();
+  emergency_stop_topic_ = this->get_parameter("emergency_stop_topic").as_string();
   emergency_status_topic_ = this->get_parameter("emergency_status_topic").as_string();
   min_pulse_width_us_ = this->get_parameter("min_pulse_width").as_int();
   max_pulse_width_us_ = this->get_parameter("max_pulse_width").as_int();
@@ -64,8 +72,19 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
       joy_topic_, 1,
       std::bind(&EscMotorControlComponent::joy_callback, this, std::placeholders::_1));
 
+  // 統一緊急停止トピック。transient_local なので起動時に最新のラッチ状態を受信する
+  // （契約: questix_msgs/README.md）。
+  if (!emergency_stop_topic_.empty()) {
+    emergency_stop_sub_ = this->create_subscription<questix_msgs::msg::EmergencyStop>(
+        emergency_stop_topic_, rclcpp::QoS(1).reliable().transient_local(),
+        std::bind(&EscMotorControlComponent::emergency_stop_callback, this,
+                  std::placeholders::_1));
+  }
+
   // ---- Publishers ----
   status_pub_ = this->create_publisher<std_msgs::msg::Float32>(status_topic_, 10);
+  // Deprecated: /roller_emergency_status（std_msgs/Bool）。/emergency_stop の active を
+  // ミラーするだけの出力で、次リリースで削除予定。新規購読は /emergency_stop を使うこと。
   emergency_pub_ =
       this->create_publisher<std_msgs::msg::Bool>(emergency_status_topic_, qos_transient);
 
@@ -188,11 +207,13 @@ void EscMotorControlComponent::joy_callback(const sensor_msgs::msg::Joy::SharedP
     return;
   }
 
-  bool full_speed_pressed = (msg->buttons[full_speed_button_] == 1);
-
   FullSpeedLogic::Result r;
   {
     std::lock_guard<std::mutex> guard(lock_);
+    // 非常停止中はボタンを離した扱いにして、ラッチが armed になるのを防ぐ。
+    // （解除後に押しっぱなしのまま再始動しないようにする。復帰には離す→押すが必要。）
+    const bool full_speed_pressed =
+        (msg->buttons[full_speed_button_] == 1) && !emergency_stop_active_;
     r = full_speed_logic_.onButton(full_speed_pressed, this->now().seconds());
   }
   // Lock released before set_motor_speed(), which takes lock_ itself.
@@ -206,6 +227,35 @@ void EscMotorControlComponent::joy_callback(const sensor_msgs::msg::Joy::SharedP
   } else if (r.ignored_press) {
     RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
                          "Full-speed press ignored after safety timeout: release and press again");
+  }
+}
+
+// --------------------------------------------------------------------------
+// Emergency stop callback
+// --------------------------------------------------------------------------
+void EscMotorControlComponent::emergency_stop_callback(
+    const questix_msgs::msg::EmergencyStop::SharedPtr msg) {
+  if (!msg) {
+    return;
+  }
+
+  EstopTransition transition;
+  {
+    std::lock_guard<std::mutex> guard(lock_);
+    // set_motor_speed() は lock_ を取り直すため、ここでは保持したまま呼ばない。
+    // 保持したまま呼ぶとデッドロックする。フラグ更新だけ行い、停止指令はロック解放後。
+    transition = decideEstopTransition(emergency_stop_active_, msg->active);
+    emergency_stop_active_ = msg->active;
+  }
+
+  if (transition.send_stop) {
+    RCLCPP_WARN(this->get_logger(), "非常停止を受信 (source=%s, reason=%s)。モータを停止します",
+                msg->source.c_str(), msg->reason.c_str());
+    set_motor_speed(0.0);
+  } else if (transition.log_release) {
+    RCLCPP_INFO(this->get_logger(),
+                "非常停止が解除されました (source=%s)。フルスピードボタンの再押下まで停止のまま",
+                msg->source.c_str());
   }
 }
 
@@ -238,6 +288,8 @@ void EscMotorControlComponent::publish_status() {
   status_msg.data = static_cast<float>(current_speed_);
   status_pub_->publish(status_msg);
 
+  // Deprecated: /roller_emergency_status は /emergency_stop の active フラグをミラーする
+  // だけの互換出力。1リリースだけ並行 publish し、次リリースで削除予定。
   auto emergency_msg = std_msgs::msg::Bool();
   emergency_msg.data = emergency_stop_active_;
   emergency_pub_->publish(emergency_msg);
