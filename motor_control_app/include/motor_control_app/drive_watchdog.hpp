@@ -35,6 +35,23 @@ inline TwistAction decideTwistAction(bool motor_ready, bool emergency_stop, bool
   return TwistAction::kDrive;
 }
 
+// /emergency_stop 受信時に取るべきアクション
+enum class EstopAction { kStopNow, kClear, kNone };
+
+// /emergency_stop メッセージ受信時のアクションを決定する。
+// 立ち上がりエッジかつモータ準備完了 -> kStopNow（即時停止指令）
+// 立ち下がりエッジ -> kClear（解除。モータは次の指令まで停止のまま）
+// それ以外（変化なし、または未準備での発動）-> kNone
+inline EstopAction decideEstopAction(bool was_active, bool now_active, bool motor_ready) {
+  if (now_active && !was_active && motor_ready) {
+    return EstopAction::kStopNow;
+  }
+  if (!now_active && was_active) {
+    return EstopAction::kClear;
+  }
+  return EstopAction::kNone;
+}
+
 }  // namespace motor_control_app::drive_watchdog
 
 #endif  // MOTOR_CONTROL_APP__DRIVE_WATCHDOG_HPP_

@@ -18,6 +18,13 @@ esc_motor_control:
     full_speed_value: 1.0
 
     status_topic: "/roller_motor_status"
+    # 統一緊急停止トピック（questix_msgs/EmergencyStop, reliable + transient_local, 入力）。
+    # active=true 受信で即時停止＋ボタン無視、active=false で解除する
+    # （復帰にはフルスピードボタンの再押下が必要）。空文字 "" で連動無効。
+    # 発行元は operation_manager（契約: questix_msgs/README.md）。
+    emergency_stop_topic: "/emergency_stop"
+    # Deprecated: /emergency_stop の active フラグをミラーする出力（std_msgs/Bool）。
+    # 次リリースで削除予定。新規購読は /emergency_stop を使うこと。
     emergency_status_topic: "/roller_emergency_status"
 
     # Safety / timeout-stop behavior:

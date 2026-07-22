@@ -23,11 +23,12 @@ enum class SafetyTeardownAction {
   kNone
 };
 
-// 現在の lifecycle 状態と /gpio/controllable の受信状況から自動起動アクションを決定する。
-// have_controllable: /gpio/controllable を1回でも受信したか。未受信の環境
+// 現在の lifecycle 状態と /emergency_stop の受信状況から自動起動アクションを決定する。
+// have_controllable: /emergency_stop を1回でも受信したか。未受信の環境
 //                    （enable_gpio_ref=false 等で publisher が居ない）では
 //                    非常停止状態が分からないため、従来どおり周期リトライで接続を試す。
-// controllable:      最終受信値。true = 非常停止解除（通電・操作可）。
+// controllable:      「操作可」状態。true = 非常停止解除（通電・操作可）。
+//                    呼び出し側は EmergencyStop.active の否定を渡す。
 // unconfigured -> kConfigure（接続を試行。非常停止中は kWaitEstopRelease で保留）
 // inactive     -> kActivate（運用状態へ遷移。非常停止中は kWaitEstopRelease で保留）
 // active       -> kStopTimer（正常稼働中。手動 deactivate/cleanup を尊重して停止）
@@ -89,9 +90,10 @@ inline bool shouldHoldManualLifecycle(uint8_t state_id, bool auto_start_timer_ca
          state_id == lifecycle_msgs::msg::State::PRIMARY_STATE_UNCONFIGURED;
 }
 
-// /gpio/controllable の受信途絶判定。最後に true だった信号だけを fail-safe teardown の
-// 対象にする（false = 非常停止押下は teardown 済みのため latch 不要）。未受信環境
-// （publisher なし）を timeout にしない互換動作は呼び出し側の have_controllable_ ガードが担う。
+// /emergency_stop の受信途絶判定。最後に「操作可」（active=false）だった信号だけを
+// fail-safe teardown の対象にする（非常停止押下は teardown 済みのため latch 不要）。
+// 呼び出し側は controllable に EmergencyStop.active の否定を渡す。未受信環境
+// （publisher なし）を timeout にしない互換動作は呼び出し側の have_estop_msg_ ガードが担う。
 inline bool isControllableSignalStale(double timeout_sec, bool controllable, double elapsed_sec) {
   return std::isfinite(timeout_sec) && timeout_sec > 0.0 && controllable &&
          elapsed_sec > timeout_sec;

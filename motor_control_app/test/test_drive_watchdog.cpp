@@ -9,7 +9,9 @@
 
 namespace {
 
+using motor_control_app::drive_watchdog::decideEstopAction;
 using motor_control_app::drive_watchdog::decideTwistAction;
+using motor_control_app::drive_watchdog::EstopAction;
 using motor_control_app::drive_watchdog::isEnabled;
 using motor_control_app::drive_watchdog::shouldTimeoutStop;
 using motor_control_app::drive_watchdog::TwistAction;
@@ -90,6 +92,30 @@ TEST(DriveWatchdog, DecideTwistActionReadyUnhealthyIsFaultStop) {
 
 TEST(DriveWatchdog, DecideTwistActionReadyHealthyIsDrive) {
   EXPECT_EQ(decideTwistAction(true, false, true), TwistAction::kDrive);
+}
+
+TEST(DriveWatchdog, DecideEstopActionRisingEdgeWithMotorReadyStopsNow) {
+  // was=false, now=true, motor ready -> actively stop the motors.
+  EXPECT_EQ(decideEstopAction(false, true, true), EstopAction::kStopNow);
+}
+
+TEST(DriveWatchdog, DecideEstopActionRisingEdgeMotorNotReadyIsNone) {
+  // Emergency stop asserted before the motor is initialized: no stop command to
+  // send (the flag alone gates future twists). Must not touch the motor.
+  EXPECT_EQ(decideEstopAction(false, true, false), EstopAction::kNone);
+}
+
+TEST(DriveWatchdog, DecideEstopActionFallingEdgeClears) {
+  // Release re-enables twist input; motor readiness is irrelevant to clearing.
+  EXPECT_EQ(decideEstopAction(true, false, true), EstopAction::kClear);
+  EXPECT_EQ(decideEstopAction(true, false, false), EstopAction::kClear);
+}
+
+TEST(DriveWatchdog, DecideEstopActionNoChangeIsNone) {
+  // Repeated same-state messages (published every evaluation) produce no action.
+  EXPECT_EQ(decideEstopAction(false, false, true), EstopAction::kNone);
+  EXPECT_EQ(decideEstopAction(true, true, true), EstopAction::kNone);
+  EXPECT_EQ(decideEstopAction(true, true, false), EstopAction::kNone);
 }
 
 }  // namespace
