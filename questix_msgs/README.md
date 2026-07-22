@@ -89,6 +89,31 @@ DDT M0602C の Protocol 1 応答フレームをデコードした 1 モータ分
 | `joy_axis_drive_status` | `DriveStatus` | `joy_axis_drive` | 相対名。`linear/angular_velocity = 0.0` |
 | `/diagnostics` | `diagnostic_msgs/DiagnosticArray` | `operation_manager` | 標準集約トピック。rqt_runtime_monitor が設定なしで表示 |
 
+## モータ調整時のフィードバック監視
+
+DDT モータの調整中は、上記トピックを購読して current / velocity / position / fault を確認する。
+QUESTiX Launcher / `drive_component` 起動中でも、`/dev/ttyACM0` を別プロセスから直接開かずに
+安全にモニタリングできる(シリアル直開きは Launcher 側の応答と混線するため不可)。
+
+- **推奨(ライブ表示 CLI)**: モータ ID ごとに整形テーブルをその場更新表示する読み取り専用ツール。
+
+  ```bash
+  ros2 run motor_control_app ddt_feedback_monitor
+  # 例: 単体モータも併せて監視し、更新レートを上げる
+  ros2 run motor_control_app ddt_feedback_monitor --ros-args \
+    -p motor_feedback_topics:="['/single_ddt_motor_feedback']" -p rate_hz:=10.0
+  ```
+
+  パラメータ: `drive_status_topics`(既定 `['/drive_status']`) / `motor_feedback_topics`(既定 `[]`)は
+  複数指定可。`rate_hz`(既定 5.0) / `stale_sec`(既定 0.5) / `color`(既定 true)。`Age[s]` に `!` が
+  付くと鮮度切れ、`--` は未受信(`header.stamp == 0`)。**副作用なし(購読のみ)**。
+
+- **簡易確認**: `ros2 topic echo /drive_status` / `ros2 topic hz /drive_status`。
+
+- **`ddt_checker.py`**(リポジトリ直下の Tkinter 診断ツール)は `/dev/ttyACM0` を直接開くため、
+  **Launcher / `drive_component` 停止中のメンテナンス専用**(PR #68 の整理どおり)。運転中の監視には
+  上記 CLI を使うこと。
+
 ## 移行メモ
 
 - 旧 String ステータストピックと ESC の `/roller_emergency_status`(`std_msgs/Bool`)は
