@@ -2,6 +2,13 @@
 Changelog for package questix_launcher
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.0.1 (2026-07-22)
+------------------
+* feat: convert drive_component to a lifecycle node (`#118 <https://github.com/scramble-robot/questix/issues/118>`_)
+* fix: remove 50ms blocking sleep from ddt velocity send path (`#113 <https://github.com/scramble-robot/questix/issues/113>`_)
+* fix: add command timeout watchdog and fault stop to drive_component (`#111 <https://github.com/scramble-robot/questix/issues/111>`_)
+* Contributors: Akihisa Nagata
+
 2.0.0 (2026-07-16)
 ------------------
 * chore: unify package versions to 2.0.0 (`#108 <https://github.com/scramble-robot/questix/issues/108>`_)

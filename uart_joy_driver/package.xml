@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
     <name>uart_joy_driver</name>
-    <version>2.0.0</version>
+    <version>2.0.1</version>
     <description>UART serial joystick driver for Switch-style controllers. Reads 7-byte hex protocol from UART and publishes sensor_msgs/Joy.</description>
     <maintainer email="aki.grade2580@outlook.jp">asa-naki</maintainer>
     <license>MIT</license>
