@@ -14,7 +14,6 @@
 #include "questix_msgs/msg/motor_feedback.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_components/register_node_macro.hpp"
-#include "std_msgs/msg/string.hpp"
 
 namespace motor_control_app {
 
@@ -69,8 +68,6 @@ private:
 
   // ROS 2 通信
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr twist_subscription_;
-  // 旧 String ステータス（自由文）。1リリース並行 publish 後に削除予定（deprecated, #87）。
-  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_publisher_;
   // 型付きステータス（questix_msgs/MotorFeedback）。契約は questix_msgs/README.md。
   rclcpp::Publisher<questix_msgs::msg::MotorFeedback>::SharedPtr feedback_publisher_;
   rclcpp::TimerBase::SharedPtr status_timer_;

@@ -23,9 +23,6 @@ OperationManagerComponent::OperationManagerComponent(const rclcpp::NodeOptions& 
   emergency_stop_topic_ = this->get_parameter("emergency_stop_topic").as_string();
 
   controllable_pub_ = this->create_publisher<std_msgs::msg::Bool>("/gpio/controllable", 1);
-  // 旧 String 診断（deprecated, #87。次リリースで削除予定）と標準 DiagnosticArray を並行 publish。
-  diagnostic_pub_ =
-      this->create_publisher<std_msgs::msg::String>("/gpio/controllable_diagnostic", 1);
   diagnostics_pub_ =
       this->create_publisher<diagnostic_msgs::msg::DiagnosticArray>("/diagnostics", 1);
   // Latched so late-joining subscribers immediately receive the current state
@@ -98,15 +95,7 @@ void OperationManagerComponent::evaluate_controllability() {
   out.data = controllable;
   controllable_pub_->publish(out);
 
-  std_msgs::msg::String diag_msg;
-  if (controllable) {
-    diag_msg.data = "controllable";
-  } else {
-    diag_msg.data = "not_controllable: " + diagnostic;
-  }
-  diagnostic_pub_->publish(diag_msg);
-
-  // 標準 DiagnosticArray（deprecated な自由文 String の置換, #87）。
+  // 標準 DiagnosticArray（rqt_runtime_monitor が設定なしで消費可）。
   status.level = controllable ? diagnostic_msgs::msg::DiagnosticStatus::OK
                               : diagnostic_msgs::msg::DiagnosticStatus::ERROR;
   status.message = controllable ? "controllable" : "not_controllable: " + diagnostic;

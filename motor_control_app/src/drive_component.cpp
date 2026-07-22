@@ -158,7 +158,6 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
   RCLCPP_INFO(this->get_logger(), "  right_motor_id: %d", right_motor_id_);
   RCLCPP_INFO(this->get_logger(), "  max_motor_rpm: %d", max_motor_rpm_);
   RCLCPP_INFO(this->get_logger(), "  status_publish_rate: %.1f", status_publish_rate_);
-  RCLCPP_INFO(this->get_logger(), "  status_topic: %s (deprecated)", status_topic_.c_str());
   RCLCPP_INFO(this->get_logger(), "  typed_status_topic: %s", typed_status_topic_.c_str());
   RCLCPP_INFO(this->get_logger(), "  cmd_timeout_sec: %.2f", cmd_timeout_sec_);
   RCLCPP_INFO(this->get_logger(), "  control_mode: %s", control_mode_.c_str());
@@ -175,8 +174,6 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
       "/target_twist", 1, std::bind(&DriveComponent::twistCallback, this, std::placeholders::_1));
 
   // LifecyclePublisher のため on_activate まで publish は無効
-  // 旧 String JSON（deprecated, #87）と型付き DriveStatus を並行 publish する。
-  status_publisher_ = this->create_publisher<std_msgs::msg::String>(status_topic_, 1);
   typed_status_publisher_ =
       this->create_publisher<questix_msgs::msg::DriveStatus>(typed_status_topic_, 1);
 
@@ -242,7 +239,6 @@ DriveComponent::CallbackReturn DriveComponent::on_cleanup(const rclcpp_lifecycle
   status_timer_.reset();
   watchdog_timer_.reset();
   twist_subscription_.reset();
-  status_publisher_.reset();
   typed_status_publisher_.reset();
   shutdownMotorLib();
   RCLCPP_INFO(this->get_logger(), "Drive component cleaned up");
@@ -256,7 +252,6 @@ DriveComponent::CallbackReturn DriveComponent::on_shutdown(const rclcpp_lifecycl
   status_timer_.reset();
   watchdog_timer_.reset();
   twist_subscription_.reset();
-  status_publisher_.reset();
   typed_status_publisher_.reset();
   shutdownMotorLib();
   RCLCPP_INFO(this->get_logger(), "Drive component shut down");
@@ -269,7 +264,6 @@ DriveComponent::CallbackReturn DriveComponent::on_error(const rclcpp_lifecycle::
   status_timer_.reset();
   watchdog_timer_.reset();
   twist_subscription_.reset();
-  status_publisher_.reset();
   typed_status_publisher_.reset();
   shutdownMotorLib();
   if (auto_start_ && auto_start_timer_) {
@@ -289,8 +283,6 @@ void DriveComponent::declareParameters() {
   this->declare_parameter("right_motor_id", 2);
   this->declare_parameter("max_motor_rpm", 1000);
   this->declare_parameter("status_publish_rate", 10.0);
-  // 旧 String JSON トピック（deprecated, #87。次リリースで削除予定）
-  this->declare_parameter("status_topic", "/drive_motor_status");
   // 型付きステータストピック（questix_msgs/DriveStatus）
   this->declare_parameter("typed_status_topic", "/drive_status");
 
@@ -331,7 +323,6 @@ void DriveComponent::readParameters() {
   right_motor_id_ = this->get_parameter("right_motor_id").as_int();
   max_motor_rpm_ = this->get_parameter("max_motor_rpm").as_int();
   status_publish_rate_ = this->get_parameter("status_publish_rate").as_double();
-  status_topic_ = this->get_parameter("status_topic").as_string();
   typed_status_topic_ = this->get_parameter("typed_status_topic").as_string();
   control_mode_ = this->get_parameter("control_mode").as_string();
   current_kp_ = this->get_parameter("current_kp").as_double();
@@ -567,50 +558,6 @@ void DriveComponent::statusTimerCallback() {
     typed_msg.angular_velocity = status.current_angular_velocity;
     typed_msg.emergency_stop = emergency_stop_active_;
     typed_status_publisher_->publish(typed_msg);
-
-    // 以下は旧 String JSON（deprecated, #87。1リリース並行 publish 後に削除予定）。
-    // ステータス情報をJSON風の文字列として作成
-    std::string status_str =
-        "{"
-        "\"left_motor_id\":" +
-        std::to_string(status.left_motor_id) +
-        ","
-        "\"right_motor_id\":" +
-        std::to_string(status.right_motor_id) +
-        ","
-        "\"left_rpm\":" +
-        std::to_string(status.left_rpm) +
-        ","
-        "\"right_rpm\":" +
-        std::to_string(status.right_rpm) +
-        ","
-        "\"linear_velocity\":" +
-        std::to_string(status.current_linear_velocity) +
-        ","
-        "\"angular_velocity\":" +
-        std::to_string(status.current_angular_velocity) +
-        ","
-        "\"left_temperature\":" +
-        std::to_string(status.left_temperature) +
-        ","
-        "\"right_temperature\":" +
-        std::to_string(status.right_temperature) +
-        ","
-        "\"left_fault_code\":" +
-        std::to_string(status.left_fault_code) +
-        ","
-        "\"right_fault_code\":" +
-        std::to_string(status.right_fault_code) +
-        ","
-        "\"healthy\":" +
-        (status.is_healthy ? "true" : "false") +
-        ","
-        "\"emergency_stop\":" +
-        (emergency_stop_active_ ? "true" : "false") + "}";
-
-    auto status_msg = std_msgs::msg::String();
-    status_msg.data = status_str;
-    status_publisher_->publish(status_msg);
 
     RCLCPP_DEBUG(this->get_logger(), "Current velocity: linear=%.3f, angular=%.3f",
                  status.current_linear_velocity, status.current_angular_velocity);

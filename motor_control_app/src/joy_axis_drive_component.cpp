@@ -31,9 +31,7 @@ JoyAxisDriveComponent::JoyAxisDriveComponent(const rclcpp::NodeOptions& options)
   joy_subscription_ = this->create_subscription<sensor_msgs::msg::Joy>(
       "/joy", 1, std::bind(&JoyAxisDriveComponent::joyCallback, this, std::placeholders::_1));
 
-  // 旧 String（JSON, deprecated #87）と型付き DriveStatus を並行 publish する。
-  // 型付きは相対名を分離し、旧 motor_status との同名衝突を避ける。
-  status_publisher_ = this->create_publisher<std_msgs::msg::String>("motor_status", 10);
+  // 型付きステータス（questix_msgs/DriveStatus）を publish する。
   drive_status_publisher_ =
       this->create_publisher<questix_msgs::msg::DriveStatus>("joy_axis_drive_status", 10);
 
@@ -232,62 +230,8 @@ void JoyAxisDriveComponent::statusTimerCallback() {
     typed_msg.emergency_stop = emergency_stop_active_;
     drive_status_publisher_->publish(typed_msg);
 
-    // 以下は旧 String JSON（deprecated, #87。1リリース並行 publish 後に削除予定）。
-    // 左モータのステータスを取得
-    int left_rpm = 0;
-    uint8_t left_temperature = 0;
-    uint8_t left_fault_code = 0;
-    bool left_ok =
-        motor_lib_->getMotorStatus(left_motor_id_, left_rpm, left_temperature, left_fault_code);
-
-    // 右モータのステータスを取得
-    int right_rpm = 0;
-    uint8_t right_temperature = 0;
-    uint8_t right_fault_code = 0;
-    bool right_ok =
-        motor_lib_->getMotorStatus(right_motor_id_, right_rpm, right_temperature, right_fault_code);
-
-    bool is_healthy = left_ok && right_ok && motor_lib_->isHealthy();
-
-    // ステータス情報をJSON風の文字列として作成
-    std::string status_str =
-        "{"
-        "\"left_motor_id\":" +
-        std::to_string(left_motor_id_) +
-        ","
-        "\"right_motor_id\":" +
-        std::to_string(right_motor_id_) +
-        ","
-        "\"left_rpm\":" +
-        std::to_string(left_rpm) +
-        ","
-        "\"right_rpm\":" +
-        std::to_string(right_rpm) +
-        ","
-        "\"left_temperature\":" +
-        std::to_string(left_temperature) +
-        ","
-        "\"right_temperature\":" +
-        std::to_string(right_temperature) +
-        ","
-        "\"left_fault_code\":" +
-        std::to_string(left_fault_code) +
-        ","
-        "\"right_fault_code\":" +
-        std::to_string(right_fault_code) +
-        ","
-        "\"healthy\":" +
-        (is_healthy ? "true" : "false") +
-        ","
-        "\"emergency_stop\":" +
-        (emergency_stop_active_ ? "true" : "false") + "}";
-
-    auto status_msg = std_msgs::msg::String();
-    status_msg.data = status_str;
-    status_publisher_->publish(status_msg);
-
-    RCLCPP_DEBUG(this->get_logger(), "Motor status: left_rpm=%d, right_rpm=%d", left_rpm,
-                 right_rpm);
+    RCLCPP_DEBUG(this->get_logger(), "Motor status: left_rpm=%d, right_rpm=%d",
+                 typed_msg.left.velocity_rpm, typed_msg.right.velocity_rpm);
 
   } catch (const std::exception& e) {
     RCLCPP_ERROR_THROTTLE(this->get_logger(), *this->get_clock(), 5000,

@@ -24,7 +24,6 @@ joy_axis_drive:
 
     # パブリッシュ設定
     # 型付き questix_msgs/DriveStatus を joy_axis_drive_status へ publish する
-    # （車輪ジオメトリを持たないため linear/angular_velocity は 0.0）。旧 String(JSON) の
-    # motor_status は deprecated（#87、1リリース並行 publish 後に削除予定）。
+    # （車輪ジオメトリを持たないため linear/angular_velocity は 0.0）。
     status_publish_rate: 10.0 # ステータスパブリッシュ頻度 [Hz]
     publish_twist: true # デバッグ用Twistメッセージをパブリッシュするか

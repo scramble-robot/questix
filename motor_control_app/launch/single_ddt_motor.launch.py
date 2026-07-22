@@ -33,7 +33,6 @@ def generate_launch_description():
         parameters=[LaunchConfiguration('config_file')],
         remappings=[
             ('cmd_vel', '/cmd_vel'),
-            ('motor_status', '/motor_status'),
             ('single_ddt_motor_feedback', '/single_ddt_motor_feedback'),
         ],
     )

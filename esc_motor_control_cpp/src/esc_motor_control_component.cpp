@@ -31,9 +31,6 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
   this->declare_parameter<std::string>("status_topic", "/roller_motor_status");
   // 統一緊急停止トピック（questix_msgs/EmergencyStop, 入力）。空文字で連動無効。
   this->declare_parameter<std::string>("emergency_stop_topic", "/emergency_stop");
-  // Deprecated: /emergency_stop の active フラグをミラーする出力（std_msgs/Bool）。
-  // 次リリースで削除予定。新規購読は /emergency_stop を使うこと。
-  this->declare_parameter<std::string>("emergency_status_topic", "/roller_emergency_status");
   this->declare_parameter<int>("min_pulse_width", 0);         // μs (speed=-1.0)
   this->declare_parameter<int>("max_pulse_width", 2000);      // μs (speed=1.0)
   this->declare_parameter<int>("neutral_pulse_width", 1000);  // μs (ESC arm/idle)
@@ -53,7 +50,6 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
   joy_topic_ = this->get_parameter("joy_topic").as_string();
   status_topic_ = this->get_parameter("status_topic").as_string();
   emergency_stop_topic_ = this->get_parameter("emergency_stop_topic").as_string();
-  emergency_status_topic_ = this->get_parameter("emergency_status_topic").as_string();
   min_pulse_width_us_ = this->get_parameter("min_pulse_width").as_int();
   max_pulse_width_us_ = this->get_parameter("max_pulse_width").as_int();
   neutral_pulse_width_us_ = this->get_parameter("neutral_pulse_width").as_int();
@@ -62,10 +58,6 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
 
   // ---- Internal state ----
   full_speed_logic_.configure(safety_timeout_);
-
-  // ---- QoS ----
-  rclcpp::QoS qos_transient(10);
-  qos_transient.reliable().transient_local();
 
   // ---- Subscribers ----
   joy_sub_ = this->create_subscription<sensor_msgs::msg::Joy>(
@@ -82,10 +74,6 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
 
   // ---- Publishers ----
   status_pub_ = this->create_publisher<std_msgs::msg::Float32>(status_topic_, 10);
-  // Deprecated: /roller_emergency_status（std_msgs/Bool）。/emergency_stop の active を
-  // ミラーするだけの出力で、次リリースで削除予定。新規購読は /emergency_stop を使うこと。
-  emergency_pub_ =
-      this->create_publisher<std_msgs::msg::Bool>(emergency_status_topic_, qos_transient);
 
   // ---- Timers ----
   status_timer_ =
@@ -103,7 +91,6 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
   RCLCPP_INFO(this->get_logger(), "PWM backend: %s", pwm_ ? pwm_->name().c_str() : "none");
   RCLCPP_INFO(this->get_logger(), "Test Mode: %s", test_mode_ ? "true" : "false");
   RCLCPP_INFO(this->get_logger(), "Status topic: %s", status_topic_.c_str());
-  RCLCPP_INFO(this->get_logger(), "Emergency topic: %s", emergency_status_topic_.c_str());
   RCLCPP_INFO(this->get_logger(), "Pulse range: %d - %d μs  (neutral %d μs)", min_pulse_width_us_,
               max_pulse_width_us_, neutral_pulse_width_us_);
 
@@ -286,12 +273,6 @@ void EscMotorControlComponent::publish_status() {
   auto status_msg = std_msgs::msg::Float32();
   status_msg.data = static_cast<float>(current_speed_);
   status_pub_->publish(status_msg);
-
-  // Deprecated: /roller_emergency_status は /emergency_stop の active フラグをミラーする
-  // だけの互換出力。1リリースだけ並行 publish し、次リリースで削除予定。
-  auto emergency_msg = std_msgs::msg::Bool();
-  emergency_msg.data = emergency_stop_active_;
-  emergency_pub_->publish(emergency_msg);
 }
 
 }  // namespace esc_motor_control_cpp

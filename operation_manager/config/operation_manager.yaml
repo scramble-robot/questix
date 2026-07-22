@@ -3,8 +3,7 @@ operation_manager_node:
     monitored_pins: [27]
     timeout_seconds: 1.0
     # 診断は標準 diagnostic_msgs/DiagnosticArray を /diagnostics へ publish する
-    # （rqt_runtime_monitor が消費可）。旧 String の /gpio/controllable_diagnostic は
-    # deprecated（#87、1リリース並行 publish 後に削除予定）。契約: questix_msgs/README.md。
+    # （rqt_runtime_monitor が消費可）。契約: questix_msgs/README.md。
     # 統一緊急停止トピック (questix_msgs/EmergencyStop, reliable + transient_local)。
     # active = !controllable として毎評価時に発行される。契約: questix_msgs/README.md
     emergency_stop_topic: "/emergency_stop"
