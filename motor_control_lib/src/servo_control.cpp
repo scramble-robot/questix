@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "motor_control_lib/feetech_protocol.hpp"
+#include "serial_utils/serial_port.hpp"
 
 namespace motor_control_lib {
 
@@ -30,83 +31,11 @@ FeetechServoController::FeetechServoController(const std::string& port, int baud
 FeetechServoController::~FeetechServoController() { disconnect(); }
 
 bool FeetechServoController::connect() {
-  // シリアルポートを開く
-  serial_fd_ = open(port_.c_str(), O_RDWR | O_NOCTTY | O_NDELAY);
+  // シリアルポートを開いて 8N1 raw 設定を適用（共通処理）
+  serial_utils::SerialConfig cfg{O_RDWR | O_NOCTTY | O_NDELAY, baudrate_, 1, 100};
+  serial_fd_ = serial_utils::openSerial(port_, cfg);
   if (serial_fd_ == -1) {
     std::cerr << "Failed to open serial port: " << port_ << " - " << strerror(errno) << std::endl;
-    return false;
-  }
-
-  // シリアルポート設定
-  struct termios options;
-  tcgetattr(serial_fd_, &options);
-
-  // ボーレート設定
-  speed_t speed;
-  switch (baudrate_) {
-    case 9600:
-      speed = B9600;
-      break;
-    case 19200:
-      speed = B19200;
-      break;
-    case 38400:
-      speed = B38400;
-      break;
-    case 57600:
-      speed = B57600;
-      break;
-    case 115200:
-      speed = B115200;
-      break;
-    case 230400:
-      speed = B230400;
-      break;
-    case 460800:
-      speed = B460800;
-      break;
-    case 921600:
-      speed = B921600;
-      break;
-    default:
-      std::cerr << "Unsupported baudrate: " << baudrate_ << std::endl;
-      close(serial_fd_);
-      return false;
-  }
-
-  cfsetispeed(&options, speed);
-  cfsetospeed(&options, speed);
-
-  // 8N1設定
-  options.c_cflag &= ~PARENB;  // パリティなし
-  options.c_cflag &= ~CSTOPB;  // ストップビット1
-  options.c_cflag &= ~CSIZE;   // データビットマスクをクリア
-  options.c_cflag |= CS8;      // データビット8
-
-  // ハードウェアフロー制御無効
-  options.c_cflag &= ~CRTSCTS;
-
-  // ローカルライン、受信有効
-  options.c_cflag |= CREAD | CLOCAL;
-
-  // 入力処理フラグ
-  options.c_iflag &= ~(IXON | IXOFF | IXANY);          // ソフトウェアフロー制御無効
-  options.c_iflag &= ~(ICANON | ECHO | ECHOE | ISIG);  // Raw入力
-  options.c_iflag &= ~(INLCR | IGNCR | ICRNL);         // 改行文字変換無効
-
-  // ライン処理フラグ
-  options.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);  // Raw入力
-
-  // 出力処理フラグ
-  options.c_oflag &= ~OPOST;  // Raw出力
-
-  // タイムアウト設定
-  options.c_cc[VMIN] = 1;     // 最小読み取り文字数（1文字以上待つ）
-  options.c_cc[VTIME] = 100;  // タイムアウト（0.1秒単位、10秒）
-
-  if (tcsetattr(serial_fd_, TCSANOW, &options) != 0) {
-    std::cerr << "Failed to set serial attributes: " << strerror(errno) << std::endl;
-    close(serial_fd_);
     return false;
   }
 
