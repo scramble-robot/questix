@@ -1,6 +1,11 @@
-# NOTE: 同名の設定ファイルが launcher/config と motor_control_app/config の2箇所にあります。
-# 統合起動（questix_launcher）ではこの launcher 側が使われ、motor_control_app 単体launchでは
-# motor_control_app 側が使われます。変更時は必ず両方を同期してください。
+# NOTE: このファイルが drive_component の設定の単一ソース（Single Source of Truth）です。
+# 統合起動（questix_launcher）ではこの launcher/config が params-file として渡されます。
+# 以前 motor_control_app/config にあった重複コピーは廃止しました。
+# motor_control_app 単体launch は params-file を渡さず、drive_component ノードの宣言デフォルト
+# （drive_component.cpp の declare_parameter）で起動します。宣言デフォルトはこの yaml の値と同値に
+# 更新済みなので、単体launch は従来と同じ挙動になります。
+# 設定を変更する場合はこの1箇所を編集してください（統合起動に反映）。単体launch のデフォルトも
+# 変えたい場合は drive_component.cpp の declare_parameter を同じ値に合わせてください。
 drive_component:
   ros__parameters:
     # シリアル通信設定

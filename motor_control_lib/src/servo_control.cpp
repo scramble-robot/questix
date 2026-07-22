@@ -14,99 +14,31 @@
 #include <cerrno>
 #include <chrono>
 #include <cstring>
-#include <iostream>
+#include <iomanip>
+#include <rclcpp/logging.hpp>
+#include <sstream>
 #include <thread>
 #include <vector>
 
 #include "motor_control_lib/feetech_protocol.hpp"
+#include "serial_utils/serial_port.hpp"
 
 namespace motor_control_lib {
 
-FeetechServoController::FeetechServoController(const std::string& port, int baudrate)
-    : port_(port), baudrate_(baudrate), serial_fd_(-1), connected_(false) {
+FeetechServoController::FeetechServoController(const std::string& port, int baudrate,
+                                               const rclcpp::Logger& logger)
+    : port_(port), baudrate_(baudrate), serial_fd_(-1), connected_(false), logger_(logger) {
   initializeRegisterMap();
 }
 
 FeetechServoController::~FeetechServoController() { disconnect(); }
 
 bool FeetechServoController::connect() {
-  // シリアルポートを開く
-  serial_fd_ = open(port_.c_str(), O_RDWR | O_NOCTTY | O_NDELAY);
+  // シリアルポートを開いて 8N1 raw 設定を適用（共通処理）
+  serial_utils::SerialConfig cfg{O_RDWR | O_NOCTTY | O_NDELAY, baudrate_, 1, 100};
+  serial_fd_ = serial_utils::openSerial(port_, cfg, logger_);
   if (serial_fd_ == -1) {
-    std::cerr << "Failed to open serial port: " << port_ << " - " << strerror(errno) << std::endl;
-    return false;
-  }
-
-  // シリアルポート設定
-  struct termios options;
-  tcgetattr(serial_fd_, &options);
-
-  // ボーレート設定
-  speed_t speed;
-  switch (baudrate_) {
-    case 9600:
-      speed = B9600;
-      break;
-    case 19200:
-      speed = B19200;
-      break;
-    case 38400:
-      speed = B38400;
-      break;
-    case 57600:
-      speed = B57600;
-      break;
-    case 115200:
-      speed = B115200;
-      break;
-    case 230400:
-      speed = B230400;
-      break;
-    case 460800:
-      speed = B460800;
-      break;
-    case 921600:
-      speed = B921600;
-      break;
-    default:
-      std::cerr << "Unsupported baudrate: " << baudrate_ << std::endl;
-      close(serial_fd_);
-      return false;
-  }
-
-  cfsetispeed(&options, speed);
-  cfsetospeed(&options, speed);
-
-  // 8N1設定
-  options.c_cflag &= ~PARENB;  // パリティなし
-  options.c_cflag &= ~CSTOPB;  // ストップビット1
-  options.c_cflag &= ~CSIZE;   // データビットマスクをクリア
-  options.c_cflag |= CS8;      // データビット8
-
-  // ハードウェアフロー制御無効
-  options.c_cflag &= ~CRTSCTS;
-
-  // ローカルライン、受信有効
-  options.c_cflag |= CREAD | CLOCAL;
-
-  // 入力処理フラグ
-  options.c_iflag &= ~(IXON | IXOFF | IXANY);          // ソフトウェアフロー制御無効
-  options.c_iflag &= ~(ICANON | ECHO | ECHOE | ISIG);  // Raw入力
-  options.c_iflag &= ~(INLCR | IGNCR | ICRNL);         // 改行文字変換無効
-
-  // ライン処理フラグ
-  options.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);  // Raw入力
-
-  // 出力処理フラグ
-  options.c_oflag &= ~OPOST;  // Raw出力
-
-  // タイムアウト設定
-  options.c_cc[VMIN] = 1;     // 最小読み取り文字数（1文字以上待つ）
-  options.c_cc[VTIME] = 100;  // タイムアウト（0.1秒単位、10秒）
-
-  if (tcsetattr(serial_fd_, TCSANOW, &options) != 0) {
-    std::cerr << "Failed to set serial attributes: " << strerror(errno) << std::endl;
-    close(serial_fd_);
+    RCLCPP_ERROR(logger_, "Failed to open serial port: %s - %s", port_.c_str(), strerror(errno));
     return false;
   }
 
@@ -116,25 +48,23 @@ bool FeetechServoController::connect() {
   // RS485設定確認
   int status;
   ioctl(serial_fd_, TIOCMGET, &status);
-  std::cout << "Serial port status: 0x" << std::hex << status << std::dec << std::endl;
+  RCLCPP_DEBUG(logger_, "Serial port status: 0x%x", status);
 
   connected_ = true;
-  std::cout << "Connected to servo controller: " << port_ << " @ " << baudrate_ << " bps"
-            << std::endl;
+  RCLCPP_INFO(logger_, "Connected to servo controller: %s @ %d bps", port_.c_str(), baudrate_);
   return true;
 }
 
 int32_t FeetechServoController::getCurrentPosition(uint8_t servo_id) {
-  std::cout << "Reading current position for servo " << static_cast<int>(servo_id) << "..."
-            << std::endl;
+  RCLCPP_DEBUG(logger_, "Reading current position for servo %d...", static_cast<int>(servo_id));
 
   // Read Present Position (register 257 according to initializeRegisterMap)
   int32_t position = readRegister(servo_id, 257);
 
   if (position != -1) {
-    std::cout << "Position read successfully: " << position << std::endl;
+    RCLCPP_DEBUG(logger_, "Position read successfully: %d", position);
   } else {
-    std::cout << "Failed to read position" << std::endl;
+    RCLCPP_ERROR(logger_, "Failed to read position");
   }
 
   return position;
@@ -145,7 +75,7 @@ void FeetechServoController::disconnect() {
     close(serial_fd_);
     serial_fd_ = -1;
     connected_ = false;
-    std::cout << "Disconnected from servo controller" << std::endl;
+    RCLCPP_INFO(logger_, "Disconnected from servo controller");
   }
 }
 
@@ -155,17 +85,19 @@ int FeetechServoController::sendCommand(const uint8_t* cmd_bytes, size_t cmd_len
                                         uint8_t* response, size_t max_response_length,
                                         bool expect_response) {
   if (!connected_ || serial_fd_ == -1) {
+    RCLCPP_ERROR(logger_, "Not connected to servo controller");
     return -1;
   }
 
   try {
-    // デバッグ: 送信コマンドを表示（高速コマンド時は出力を削減）
+    // デバッグ: 送信コマンドを16進ダンプ（高速コマンド時は出力を削減）
     if (cmd_bytes[1] != 6) {  // 書き込みコマンド以外のみ表示
-      std::cout << "Sending command: ";
+      std::ostringstream oss;
+      oss << std::hex << std::uppercase << std::setfill('0');
       for (size_t i = 0; i < cmd_length; i++) {
-        printf("%02X ", cmd_bytes[i]);
+        oss << std::setw(2) << static_cast<int>(cmd_bytes[i]) << ' ';
       }
-      std::cout << std::endl;
+      RCLCPP_DEBUG(logger_, "Sending command: %s", oss.str().c_str());
     }
 
     // バッファクリア
@@ -175,13 +107,14 @@ int FeetechServoController::sendCommand(const uint8_t* cmd_bytes, size_t cmd_len
     int rts = TIOCM_RTS;
     ioctl(serial_fd_, TIOCMBIS, &rts);  // RTS有効
 
-    // RTS制御後の短い待機（通信安定化）
+    // RTS制御後の短い待機（通信安定化）: RTS 立ち上げ後にドライバが送信方向へ
+    // 切り替わるまでの安定化待ち。挙動維持のため据え置き（500us）。
     std::this_thread::sleep_for(std::chrono::microseconds(500));
 
     // コマンド送信
     ssize_t bytes_written = write(serial_fd_, cmd_bytes, cmd_length);
     if (bytes_written != static_cast<ssize_t>(cmd_length)) {
-      std::cerr << "Failed to write complete command" << std::endl;
+      RCLCPP_ERROR(logger_, "Failed to write complete command");
       ioctl(serial_fd_, TIOCMBIC, &rts);  // RTS無効（エラー時も必ず実行）
       return -1;
     }
@@ -189,7 +122,8 @@ int FeetechServoController::sendCommand(const uint8_t* cmd_bytes, size_t cmd_len
     // 送信完了待機
     tcdrain(serial_fd_);
 
-    // 送信後の待機時間を延長（高速コマンドに対応）
+    // 送信後の待機（tcdrain 後もドライバ側 FIFO が空になるまでのマージン）。
+    // 挙動維持のため据え置き（2ms）。
     std::this_thread::sleep_for(std::chrono::milliseconds(2));
 
     // RS485受信制御
@@ -199,67 +133,113 @@ int FeetechServoController::sendCommand(const uint8_t* cmd_bytes, size_t cmd_len
       return 0;
     }
 
-    // 応答受信待機（高速コマンドに対応して待機時間を調整）
+    // 応答受信待機（サーボが応答を返し始めるまでのターンアラウンド待ち）。
+    // TODO(#89): 読み溜め化により縮小検討可。実機タイミング依存のため据え置き（5ms）。
     std::this_thread::sleep_for(std::chrono::milliseconds(5));
 
-    // 応答受信（ブロッキング読み取りに変更）
-    ssize_t bytes_read = 0;
-    int retry_count = 0;
-    const int max_retries = 3;  // リトライ回数を削減
+    // 応答受信: RS485 では応答フレームが分割到着し得るため、期待長に達するまで
+    // select() でタイムアウト監視しつつ read() を累積する。
+    // 期待応答長は Modbus ファンクションコードから算出:
+    //   read (0x03) : [ID][03][byte_count][data...][CRC_L][CRC_H] = 3 + byte_count + 2
+    //                 （本コードの read は 1 レジスタ=2 バイトなので既定 7 バイト。
+    //                  3 バイト目 byte_count 受信後に 3 + byte_count + 2 で再確定）
+    //   write(0x06) : [ID][06][addr_H][addr_L][val_H][val_L][CRC_L][CRC_H] = 8 バイト
+    //   error       : [ID][func|0x80][err][CRC_L][CRC_H] = 5 バイト（func の bit7 で検出）
+    const uint8_t function_code = cmd_bytes[1];
+    size_t expected_length = (function_code == 3) ? 7 : 8;  // read=7 / write=8 を初期値
+    if (expected_length > max_response_length) {
+      expected_length = max_response_length;
+    }
 
-    while (retry_count < max_retries && bytes_read <= 0) {
-      // タイムアウト付きブロッキング読み取り
+    // 全体タイムアウト: 従来の 500ms x 最大 3 リトライ相当を上限として維持する。
+    const auto overall_deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(1500);
+
+    size_t total = 0;
+    bool timed_out = false;
+    bool error_frame = false;
+
+    while (total < expected_length) {
+      auto now = std::chrono::steady_clock::now();
+      if (now >= overall_deadline) {
+        timed_out = true;
+        break;
+      }
+      auto remaining =
+          std::chrono::duration_cast<std::chrono::microseconds>(overall_deadline - now);
+
       fd_set read_fds;
       struct timeval timeout_val;
       FD_ZERO(&read_fds);
       FD_SET(serial_fd_, &read_fds);
-      timeout_val.tv_sec = 0;
-      timeout_val.tv_usec = 500000;  // 500ms（高速コマンド対応でタイムアウトを短縮）
+      timeout_val.tv_sec = remaining.count() / 1000000;
+      timeout_val.tv_usec = remaining.count() % 1000000;
 
       int select_result = select(serial_fd_ + 1, &read_fds, NULL, NULL, &timeout_val);
       if (select_result > 0 && FD_ISSET(serial_fd_, &read_fds)) {
-        bytes_read = read(serial_fd_, response, max_response_length);
-      } else if (select_result == 0) {
-        std::cout << "Read timeout on attempt " << (retry_count + 1) << std::endl;
-      } else {
-        std::cerr << "Select error: " << strerror(errno) << std::endl;
-      }
+        ssize_t n = read(serial_fd_, response + total, max_response_length - total);
+        if (n > 0) {
+          total += static_cast<size_t>(n);
 
-      if (bytes_read <= 0) {
-        retry_count++;
-        if (retry_count < max_retries) {
-          std::this_thread::sleep_for(std::chrono::milliseconds(20));  // リトライ間隔を短縮
+          // 2 バイト目まで受信したらファンクションコードを確認し、
+          // エラーレスポンス（bit7 立ち）なら期待長を 5 バイトへ切り替える。
+          if (!error_frame && total >= 2 && (response[1] & 0x80)) {
+            error_frame = true;
+            expected_length = 5;
+            if (expected_length > max_response_length) {
+              expected_length = max_response_length;
+            }
+          }
+
+          // read レスポンスは 3 バイト目 byte_count 確定後に期待長を再計算する。
+          if (!error_frame && function_code == 3 && total >= 3) {
+            size_t recalculated = 3 + static_cast<size_t>(response[2]) + 2;
+            expected_length =
+                (recalculated <= max_response_length) ? recalculated : max_response_length;
+          }
+        } else if (n == 0) {
+          // EOF 相当（切断など）。これ以上読めないためループを終了。
+          break;
+        } else {
+          RCLCPP_ERROR(logger_, "Read error: %s", strerror(errno));
+          break;
         }
+      } else if (select_result == 0) {
+        RCLCPP_WARN(logger_, "Read timeout while waiting for response (received %zu/%zu bytes)",
+                    total, expected_length);
+        timed_out = true;
+        break;
+      } else {
+        RCLCPP_ERROR(logger_, "Select error: %s", strerror(errno));
+        break;
       }
     }
-    if (bytes_read > 0) {
-      // デバッグ: 受信レスポンスを表示（読み取りコマンドのみ）
-      if (cmd_bytes[1] == 3) {  // 読み取りコマンドのみ表示
-        std::cout << "Received response (" << bytes_read << " bytes): ";
-        for (ssize_t i = 0; i < bytes_read; i++) {
-          printf("%02X ", response[i]);
-        }
-        std::cout << std::endl;
-      }
 
-      // チェックサム検証
-      if (feetech_protocol::verifyChecksum(response, bytes_read)) {
-        return bytes_read;
-      } else {
-        std::cerr << "Checksum verification failed" << std::endl;
-        return -1;
-      }
-    } else {
-      std::cerr << "No response received after " << max_retries
-                << " attempts. bytes_read = " << bytes_read << std::endl;
-      if (bytes_read < 0) {
-        std::cerr << "Read error: " << strerror(errno) << std::endl;
-      }
+    if (total == 0) {
+      RCLCPP_ERROR(logger_, "No response received (timeout=%s)", timed_out ? "true" : "false");
       return -1;
     }
 
+    // デバッグ: 受信レスポンスを16進ダンプ（読み取りコマンドのみ）
+    if (function_code == 3) {
+      std::ostringstream oss;
+      oss << std::hex << std::uppercase << std::setfill('0');
+      for (size_t i = 0; i < total; i++) {
+        oss << std::setw(2) << static_cast<int>(response[i]) << ' ';
+      }
+      RCLCPP_DEBUG(logger_, "Received response (%zu bytes): %s", total, oss.str().c_str());
+    }
+
+    // チェックサム検証（累積した total バイトに対して実施）
+    if (feetech_protocol::verifyChecksum(response, total)) {
+      return static_cast<int>(total);
+    }
+
+    RCLCPP_ERROR(logger_, "Checksum verification failed (received %zu bytes)", total);
+    return -1;
+
   } catch (const std::exception& e) {
-    std::cerr << "Communication error: " << e.what() << std::endl;
+    RCLCPP_ERROR(logger_, "Communication error: %s", e.what());
     return -1;
   }
 }
@@ -279,16 +259,14 @@ int32_t FeetechServoController::readRegister(uint8_t servo_id, uint16_t address)
     // Modbus読み取りレスポンス: [ID][03][バイト数][データH][データL][CRCL][CRCH]
     // レジスタ値を抽出（ビッグエンディアン）
     uint16_t value = (response[3] << 8) | response[4];
-    std::cout << "Read register " << address << " = " << value << " (0x" << std::hex << value
-              << std::dec << ")" << std::endl;
+    RCLCPP_DEBUG(logger_, "Read register %u = %u (0x%X)", address, value, value);
     return static_cast<int32_t>(value);
   } else if (response_length > 0 && (response[1] & 0x80)) {
     // エラーレスポンス
-    std::cerr << "Error response: 0x" << std::hex << static_cast<int>(response[1]) << std::dec
-              << std::endl;
+    RCLCPP_ERROR(logger_, "Error response: 0x%X", static_cast<int>(response[1]));
     return -1;
   } else {
-    std::cerr << "Invalid response length: " << response_length << std::endl;
+    RCLCPP_ERROR(logger_, "Invalid response length: %d", response_length);
     return -1;
   }
 }
@@ -310,16 +288,15 @@ bool FeetechServoController::writeRegister(uint8_t servo_id, uint16_t address, u
     uint16_t echo_value = (response[4] << 8) | response[5];
 
     bool success = (echo_addr == address && echo_value == value);
-    std::cout << "Write register " << address << " = " << value << " -> "
-              << (success ? "SUCCESS" : "FAILED") << std::endl;
+    RCLCPP_DEBUG(logger_, "Write register %u = %u -> %s", address, value,
+                 success ? "SUCCESS" : "FAILED");
     return success;
   } else if (response_length > 0 && (response[1] & 0x80)) {
     // エラーレスポンス
-    std::cerr << "Write error response: 0x" << std::hex << static_cast<int>(response[1]) << std::dec
-              << std::endl;
+    RCLCPP_ERROR(logger_, "Write error response: 0x%X", static_cast<int>(response[1]));
     return false;
   } else {
-    std::cerr << "Invalid write response length: " << response_length << std::endl;
+    RCLCPP_ERROR(logger_, "Invalid write response length: %d", response_length);
     return false;
   }
 }
@@ -327,27 +304,27 @@ bool FeetechServoController::writeRegister(uint8_t servo_id, uint16_t address, u
 bool FeetechServoController::setPosition(uint8_t servo_id, uint16_t position, bool enable_torque,
                                          double timeout) {
   if (!connected_) {
-    std::cerr << "Not connected to servo controller" << std::endl;
+    RCLCPP_ERROR(logger_, "Not connected to servo controller");
     return false;
   }
 
-  std::cout << "Setting position for servo " << static_cast<int>(servo_id) << " to " << position
-            << std::endl;
+  RCLCPP_DEBUG(logger_, "Setting position for servo %d to %u", static_cast<int>(servo_id),
+               position);
 
   try {
     // 位置コマンド送信（応答確認を簡素化）
     if (!writeRegister(servo_id, 128, position)) {  // Goal Position
-      std::cerr << "Failed to set position for servo " << static_cast<int>(servo_id) << std::endl;
+      RCLCPP_ERROR(logger_, "Failed to set position for servo %d", static_cast<int>(servo_id));
       return false;
     }
 
     // 高速コマンド対応：位置確認は省略して迅速に処理
-    std::cout << "Position set successfully for servo " << static_cast<int>(servo_id) << " to "
-              << position << std::endl;
+    RCLCPP_DEBUG(logger_, "Position set successfully for servo %d to %u",
+                 static_cast<int>(servo_id), position);
     return true;
 
   } catch (const std::exception& e) {
-    std::cerr << "setPosition error: " << e.what() << std::endl;
+    RCLCPP_ERROR(logger_, "setPosition error: %s", e.what());
     return false;
   }
 }

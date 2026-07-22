@@ -13,6 +13,7 @@
 #include <thread>
 
 #include "motor_control_lib/ddt_protocol.hpp"
+#include "serial_utils/serial_port.hpp"
 
 using namespace std::chrono_literals;
 
@@ -319,69 +320,15 @@ std::vector<DdtMotorLib::MotorStatus> DdtMotorLib::getAllMotorStatus() const {
 }
 
 bool DdtMotorLib::initializeSerial() {
-  try {
-    serial_fd_ = open(serial_port_.c_str(), O_RDWR | O_NOCTTY | O_SYNC);
-    if (serial_fd_ < 0) {
-      throw std::runtime_error("シリアルポートが開けませんでした: " + serial_port_);
-    }
-
-    struct termios tty;
-    if (tcgetattr(serial_fd_, &tty) != 0) {
-      throw std::runtime_error("tcgetattr エラー");
-    }
-
-    // ボーレート設定
-    speed_t speed = B115200;
-    switch (baud_rate_) {
-      case 9600:
-        speed = B9600;
-        break;
-      case 19200:
-        speed = B19200;
-        break;
-      case 38400:
-        speed = B38400;
-        break;
-      case 57600:
-        speed = B57600;
-        break;
-      case 115200:
-        speed = B115200;
-        break;
-      default:
-        RCLCPP_WARN(logger_, "未対応のボーレート %d、115200を使用", baud_rate_);
-        speed = B115200;
-        break;
-    }
-
-    cfsetospeed(&tty, speed);
-    cfsetispeed(&tty, speed);
-
-    // 8N1設定
-    tty.c_cflag = (tty.c_cflag & ~CSIZE) | CS8;
-    tty.c_iflag &= ~IGNBRK;
-    tty.c_lflag = 0;
-    tty.c_oflag = 0;
-    tty.c_cc[VMIN] = 0;
-    tty.c_cc[VTIME] = 5;
-
-    tty.c_iflag &= ~(IXON | IXOFF | IXANY);
-    tty.c_cflag |= (CLOCAL | CREAD);
-    tty.c_cflag &= ~(PARENB | PARODD);
-    tty.c_cflag &= ~CSTOPB;
-    tty.c_cflag &= ~CRTSCTS;
-
-    if (tcsetattr(serial_fd_, TCSANOW, &tty) != 0) {
-      throw std::runtime_error("tcsetattr エラー");
-    }
-
-    RCLCPP_INFO(logger_, "シリアルポートが開きました: %s", serial_port_.c_str());
-    return true;
-
-  } catch (const std::exception& e) {
-    RCLCPP_ERROR(logger_, "シリアルポートの初期化に失敗しました: %s", e.what());
+  serial_utils::SerialConfig cfg{O_RDWR | O_NOCTTY | O_SYNC, baud_rate_, 0, 5};
+  serial_fd_ = serial_utils::openSerial(serial_port_, cfg, logger_);
+  if (serial_fd_ < 0) {
+    RCLCPP_ERROR(logger_, "シリアルポートの初期化に失敗しました: %s", serial_port_.c_str());
     return false;
   }
+
+  RCLCPP_INFO(logger_, "シリアルポートが開きました: %s", serial_port_.c_str());
+  return true;
 }
 
 void DdtMotorLib::closeSerial() {
