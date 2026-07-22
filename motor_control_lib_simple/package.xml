@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package format="3">
     <name>motor_control_lib_simple</name>
-    <version>2.1.0</version>
+    <version>2.2.0</version>
     <description>シンプルなモータ制御ライブラリ</description>
 
     <maintainer email="aki.grade2580@outlook.jp">asa-naki</maintainer>

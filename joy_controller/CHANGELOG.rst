@@ -2,6 +2,10 @@
 Changelog for package joy_controller
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.2.0 (2026-07-23)
+------------------
+* Version bump only for package joy_controller
+
 2.1.0 (2026-07-23)
 ------------------
 * Version bump only for package joy_controller

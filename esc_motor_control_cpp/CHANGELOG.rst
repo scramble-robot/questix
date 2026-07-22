@@ -2,6 +2,11 @@
 Changelog for package esc_motor_control_cpp
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+2.2.0 (2026-07-23)
+------------------
+* refactor: migrate string status topics to typed messages (`#127 <https://github.com/scramble-robot/questix/issues/127>`_)
+* Contributors: Akihisa Nagata
+
 2.1.0 (2026-07-23)
 ------------------
 * feat: link esc_motor_control to the unified /emergency_stop topic (`#125 <https://github.com/scramble-robot/questix/issues/125>`_)
