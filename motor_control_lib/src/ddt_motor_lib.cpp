@@ -65,6 +65,7 @@ void DdtMotorLib::shutdown() {
     motor_feedbacks_.clear();
     motor_modes_.clear();
     pi_states_.clear();
+    last_sent_frames_.clear();
     initialized_ = false;
     RCLCPP_INFO(logger_, "DDTモータライブラリが終了されました");
   }
@@ -211,11 +212,11 @@ bool DdtMotorLib::getMotorStatus(int motor_id, int& velocity_rpm, uint8_t& tempe
     return false;
   }
 
-  // Current モードでフィードバックがあれば実測 RPM を返す。それ以外は目標値を返す（既存互換）。
-  auto mode_it = motor_modes_.find(motor_id);
+  // 有効フィードバックがあれば実測 RPM を返す（velocity/current 両モード）。
+  // velocity モードでも sendMotorVelocity が毎コマンド応答を取り込むため実測が使える。
+  // フィードバック未受信のときのみ目標値にフォールバックする（既存互換）。
   bool prefer_measured =
-      (mode_it != motor_modes_.end() && mode_it->second == ControlMode::Current) &&
-      (feedback_it != motor_feedbacks_.end());
+      (feedback_it != motor_feedbacks_.end() && feedback_it->second.has_feedback);
 
   velocity_rpm = prefer_measured ? static_cast<int>(feedback_it->second.speed) : vel_it->second;
 
@@ -245,6 +246,16 @@ bool DdtMotorLib::initializeMotor(int motor_id, ControlMode mode) {
   motor_velocities_[motor_id] = 0;
   motor_feedbacks_[motor_id] = MotorFeedback{};
   pi_states_[motor_id] = PiState{};
+
+  // フィードバックをプライミング: ゼロ指令を 1 回通常経路で送り、last_sent_frames_ を
+  // 埋めつつ初回フィードバックを取得する（モータは動かない）。未通電時など失敗しても
+  // 致命ではないため WARN に留めて初期化は成功させる。
+  bool primed = (mode == ControlMode::Current) ? sendMotorCurrentRaw(motor_id, 0)
+                                               : sendMotorVelocity(motor_id, 0, brake_on_stop_);
+  if (!primed) {
+    RCLCPP_WARN(logger_, "モーター %d のフィードバックプライミングに失敗しました（続行）",
+                motor_id);
+  }
 
   RCLCPP_INFO(logger_, "モーター %d が初期化されました (mode=%s)", motor_id,
               mode == ControlMode::Current ? "current" : "velocity");
@@ -467,6 +478,8 @@ bool DdtMotorLib::sendMotorVelocity(int motor_id, int velocity_rpm, bool brake) 
   bool success = sendFrameWithFeedback(motor_id, data_fields);
   if (success) {
     motor_velocities_[motor_id] = velocity_int;
+    // refreshMotorFeedback の再送用に、実行中フレームをそのまま保存（ブレーキ等の状態を保持）。
+    last_sent_frames_[motor_id] = data_fields;
     RCLCPP_DEBUG(logger_, "モーター %d 速度設定: %d RPM", motor_id, velocity_int);
   } else {
     RCLCPP_ERROR(logger_, "モーター %d の速度設定に失敗しました (目標: %d RPM)", motor_id,
@@ -482,6 +495,8 @@ bool DdtMotorLib::sendMotorCurrentRaw(int motor_id, int16_t current_raw) {
 
   bool success = sendFrameWithFeedback(motor_id, data_fields);
   if (success) {
+    // refreshMotorFeedback の再送用に、実行中フレームをそのまま保存。
+    last_sent_frames_[motor_id] = data_fields;
     RCLCPP_DEBUG(logger_, "モーター %d 電流指令: raw=%d", motor_id, static_cast<int>(current_raw));
   }
   return success;
@@ -646,9 +661,11 @@ bool DdtMotorLib::parseFeedback(int expected_motor_id, const std::vector<uint8_t
   fb.mode = decoded.mode;
   fb.current = decoded.current;
   fb.speed = decoded.speed;
-  // 位置はここでは使わないが、temperature 取得は Protocol 2 (0x74) が必要。
-  // 暫定で前回値保持（既存挙動）。
+  fb.position = decoded.position;
+  // temperature は Protocol 2 (0x74) が必要なため未取得（常に 0 のまま保持）。
   fb.fault_code = decoded.fault_code;
+  fb.has_feedback = true;
+  fb.last_feedback_time = std::chrono::steady_clock::now();
 
   // PI 状態側にも保存（受信失敗時のフォールバック用）
   auto pi_it = pi_states_.find(expected_motor_id);
@@ -717,15 +734,65 @@ ssize_t DdtMotorLib::readSerial(void* data, size_t size) {
   return read(serial_fd_, data, size);
 }
 
-// TODO: Implement feedback methods
-bool DdtMotorLib::requestMotorFeedback(int /*motor_id*/) {
-  // Implementation from original code can be added here
+bool DdtMotorLib::getMotorFeedbackData(int motor_id, MotorFeedbackData& out) const {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+  if (!initialized_) {
+    return false;
+  }
+  auto vel_it = motor_velocities_.find(motor_id);
+  if (vel_it == motor_velocities_.end()) {
+    return false;
+  }
+
+  out = MotorFeedbackData{};
+  out.motor_id = static_cast<uint8_t>(motor_id);
+  out.target_rpm = static_cast<int16_t>(vel_it->second);
+
+  auto fb_it = motor_feedbacks_.find(motor_id);
+  if (fb_it != motor_feedbacks_.end() && fb_it->second.has_feedback) {
+    const MotorFeedback& fb = fb_it->second;
+    out.mode = fb.mode;
+    out.current_raw = fb.current;
+    out.velocity_rpm = fb.speed;
+    out.position_raw = fb.position;
+    out.temperature = fb.temperature;  // 常に 0（Protocol 2 未実装）
+    out.fault_code = fb.fault_code;
+    out.has_feedback = true;
+    out.feedback_age_sec =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - fb.last_feedback_time)
+            .count();
+  }
   return true;
 }
 
-void DdtMotorLib::processFeedbackResponse(int /*motor_id*/,
-                                          const std::vector<uint8_t>& /*response*/) {
-  // Implementation from original code can be added here
+bool DdtMotorLib::refreshMotorFeedback(int motor_id, double max_age_sec) {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+  if (!initialized_) {
+    return false;
+  }
+
+  auto fb_it = motor_feedbacks_.find(motor_id);
+  if (fb_it != motor_feedbacks_.end() && fb_it->second.has_feedback) {
+    double age = std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                               fb_it->second.last_feedback_time)
+                     .count();
+    if (age <= max_age_sec) {
+      return true;  // 十分新鮮: 何もしない
+    }
+  }
+
+  // 古い/未受信: ファームが実行中の最後のフレームをそのまま再送してフィードバックを引き出す。
+  auto frame_it = last_sent_frames_.find(motor_id);
+  if (frame_it == last_sent_frames_.end()) {
+    return false;  // 送信履歴なし（未指令）
+  }
+  sendFrameWithFeedback(motor_id, frame_it->second);
+
+  fb_it = motor_feedbacks_.find(motor_id);
+  return fb_it != motor_feedbacks_.end() && fb_it->second.has_feedback &&
+         std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                       fb_it->second.last_feedback_time)
+                 .count() <= max_age_sec;
 }
 
 }  // namespace motor_control_lib

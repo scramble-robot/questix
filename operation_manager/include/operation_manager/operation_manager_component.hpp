@@ -7,6 +7,7 @@
 #ifndef OPERATION_MANAGER__OPERATION_MANAGER_COMPONENT_HPP_
 #define OPERATION_MANAGER__OPERATION_MANAGER_COMPONENT_HPP_
 
+#include <diagnostic_msgs/msg/diagnostic_array.hpp>
 #include <map>
 #include <questix_msgs/msg/emergency_stop.hpp>
 #include <rclcpp/rclcpp.hpp>
@@ -31,7 +32,10 @@ private:
   std::map<unsigned int, rclcpp::Time> gpio_last_update_;
 
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr controllable_pub_;
+  // 旧 String 診断（自由文）。1リリース並行 publish 後に削除予定（deprecated, #87）。
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr diagnostic_pub_;
+  // 標準診断集約トピック（rqt_runtime_monitor 等がそのまま消費できる）。
+  rclcpp::Publisher<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr diagnostics_pub_;
   rclcpp::Publisher<questix_msgs::msg::EmergencyStop>::SharedPtr emergency_stop_pub_;
 
   rclcpp::TimerBase::SharedPtr eval_timer_;

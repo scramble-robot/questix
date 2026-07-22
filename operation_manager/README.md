@@ -4,7 +4,13 @@ ROS2 package that subscribes to GPIO topics (published by `gpio_reader`) and dec
 
 Publishers:
 - `/gpio/controllable` (std_msgs/Bool): true if controllable
-- `/gpio/controllable_diagnostic` (std_msgs/String): diagnostic message (timeout/false value)
+- `/diagnostics` (diagnostic_msgs/DiagnosticArray): standard diagnostic aggregation
+  topic. One `DiagnosticStatus` (name `operation_manager: gpio_controllability`,
+  hardware_id `gpio`) with `level` OK/ERROR and per-pin `KeyValue` entries
+  (`pin_<N>_state`, `pin_<N>_age_sec`). Consumable by `rqt_runtime_monitor`.
+- `/gpio/controllable_diagnostic` (std_msgs/String): **deprecated (#87)**, replaced
+  by `/diagnostics`. Kept as a parallel free-text publish for one release, removed
+  next release. See `questix_msgs/README.md` 移行メモ.
 - `/emergency_stop` (questix_msgs/EmergencyStop, reliable + transient_local, keep-last(1)):
   unified emergency stop state, `active = !controllable`, published on every
   controllability evaluation (each GPIO update plus the 1 s timer heartbeat).

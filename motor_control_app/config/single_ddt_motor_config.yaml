@@ -20,4 +20,7 @@ single_ddt_motor_node:
     watchdog_timeout: 1.0  # seconds - この時間 Twist が来ないとモータ停止
 
     # ステータス公開設定
+    # 型付き questix_msgs/MotorFeedback を single_ddt_motor_feedback（launch で
+    # /single_ddt_motor_feedback に remap）へ publish する。旧 String の /motor_status は
+    # deprecated（#87、1リリース並行 publish 後に削除予定）。契約: questix_msgs/README.md。
     status_publish_rate: 5.0  # Hz

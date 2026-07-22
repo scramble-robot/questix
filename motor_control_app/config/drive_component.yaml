@@ -60,8 +60,11 @@ drive_component:
 
     # パブリッシュ設定
     status_publish_rate: 10.0 # ステータスパブリッシュ頻度 [Hz]
-    # 左右モータのフィードバック出力先
-    # 左右RPMや現在速度を見たいときは、このトピックを ros2 topic echo してください。
+    # 型付きステータス出力先（questix_msgs/DriveStatus）。契約は questix_msgs/README.md。
+    # 左右モータの電流/速度/位置/fault を型付きで確認したいときはこちらを echo してください。
+    typed_status_topic: "/drive_status"
+    # 旧 String(JSON) ステータス出力先（deprecated, #87。1リリース並行 publish 後に削除予定）。
+    # 新規購読は typed_status_topic を使ってください。
     status_topic: "/drive_motor_status"
 
     # 統一緊急停止トピック（questix_msgs/EmergencyStop, reliable + transient_local）。

@@ -34,6 +34,7 @@ def generate_launch_description():
         remappings=[
             ('cmd_vel', '/cmd_vel'),
             ('motor_status', '/motor_status'),
+            ('single_ddt_motor_feedback', '/single_ddt_motor_feedback'),
         ],
     )
 

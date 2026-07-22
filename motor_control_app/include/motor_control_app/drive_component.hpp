@@ -13,6 +13,7 @@
 #include "motor_control_app/drive_watchdog.hpp"
 #include "motor_control_lib/ddt_motor_lib.hpp"
 #include "motor_control_lib/differential_drive.hpp"
+#include "questix_msgs/msg/drive_status.hpp"
 #include "questix_msgs/msg/emergency_stop.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_components/register_node_macro.hpp"
@@ -130,7 +131,11 @@ private:
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr twist_subscription_;
   // lifecycle 状態に依存せず常時生かす（コンストラクタで作成、on_cleanup でも破棄しない）
   rclcpp::Subscription<questix_msgs::msg::EmergencyStop>::SharedPtr emergency_stop_sub_;
+  // 旧 String ステータス（JSON）。1リリース並行 publish 後に削除予定（deprecated, #87）。
   rclcpp_lifecycle::LifecyclePublisher<std_msgs::msg::String>::SharedPtr status_publisher_;
+  // 型付きステータス（questix_msgs/DriveStatus）。契約は questix_msgs/README.md。
+  rclcpp_lifecycle::LifecyclePublisher<questix_msgs::msg::DriveStatus>::SharedPtr
+      typed_status_publisher_;
   rclcpp::TimerBase::SharedPtr status_timer_;
   rclcpp::TimerBase::SharedPtr watchdog_timer_;
   rclcpp::TimerBase::SharedPtr auto_start_timer_;
@@ -148,7 +153,8 @@ private:
   int right_motor_id_;
   int max_motor_rpm_;
   double status_publish_rate_;
-  std::string status_topic_;
+  std::string status_topic_;        // 旧 String JSON トピック（deprecated, #87）
+  std::string typed_status_topic_;  // 型付き DriveStatus トピック
   // 統一緊急停止トピック（空文字で連動無効）。コンストラクタで一度だけ読む。
   std::string emergency_stop_topic_;
 

@@ -8,6 +8,8 @@
 #include <chrono>
 #include <cmath>
 
+#include "motor_control_app/motor_status_msg.hpp"
+
 using namespace std::chrono_literals;
 
 namespace motor_control_app {
@@ -34,7 +36,11 @@ SingleDdtMotorComponent::SingleDdtMotorComponent(const rclcpp::NodeOptions& opti
       std::bind(&SingleDdtMotorComponent::twistCallback, this, std::placeholders::_1));
 
   // ステータスパブリッシャーを作成
+  // 旧 String（自由文, deprecated #87）と型付き MotorFeedback を並行 publish する。
+  // 型付きは相対名を分離し、旧 motor_status との同名衝突を避ける。
   status_publisher_ = this->create_publisher<std_msgs::msg::String>("motor_status", 10);
+  feedback_publisher_ =
+      this->create_publisher<questix_msgs::msg::MotorFeedback>("single_ddt_motor_feedback", 10);
 
   // ステータスタイマーを作成
   auto status_timer_period = std::chrono::duration<double>(1.0 / status_publish_rate_);
@@ -180,11 +186,19 @@ void SingleDdtMotorComponent::statusTimerCallback() {
     return;
   }
 
+  // 型付き publish 用にフィードバックを（古ければ）1回ポーリングして更新する。
+  motor_lib_->refreshMotorFeedback(motor_id_);
+  motor_control_lib::DdtMotorLib::MotorFeedbackData fb;
+  if (motor_lib_->getMotorFeedbackData(motor_id_, fb)) {
+    feedback_publisher_->publish(toMotorFeedbackMsg(fb, this->now()));
+  }
+
   int velocity_rpm = 0;
   uint8_t temperature = 0;
   uint8_t fault_code = 0;
 
   if (motor_lib_->getMotorStatus(motor_id_, velocity_rpm, temperature, fault_code)) {
+    // 旧 String（自由文, deprecated #87）
     auto status_msg = std_msgs::msg::String();
     status_msg.data =
         "Motor ID: " + std::to_string(motor_id_) + ", RPM: " + std::to_string(velocity_rpm) +

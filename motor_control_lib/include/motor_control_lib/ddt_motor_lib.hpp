@@ -129,15 +129,56 @@ public:
   };
   std::vector<MotorStatus> getAllMotorStatus() const;
 
+  /**
+   * @brief 1 モータ分の詳細フィードバック（型付きステータストピック publish 用）。
+   *  getMotorStatus よりリッチな内容（mode / 電流生値 / 位置 / 目標 RPM / 鮮度）を返す。
+   */
+  struct MotorFeedbackData {
+    uint8_t motor_id{0};
+    uint8_t mode{0};
+    int16_t current_raw{0};    // トルク電流生値（符号付き）
+    int16_t velocity_rpm{0};   // 実測 RPM
+    int16_t target_rpm{0};     // 最終指令値（クランプ後）
+    uint16_t position_raw{0};  // ロータ位置
+    uint8_t temperature{0};    // 常に 0（Protocol 2 (0x74) 未実装）
+    uint8_t fault_code{0};
+    bool has_feedback{false};      // 一度でも有効フィードバックを受信したか
+    double feedback_age_sec{0.0};  // has_feedback のときのみ有効な受信経過秒
+  };
+
+  /**
+   * @brief 指定モータの詳細フィードバックを取得する。
+   * @return 登録済みモータなら true（out を更新）。未登録/未初期化なら false。
+   */
+  bool getMotorFeedbackData(int motor_id, MotorFeedbackData& out) const;
+
+  /**
+   * @brief 鮮度ゲート付きフィードバックポーリング。
+   *  保持フィードバックが max_age_sec より新しければ何もしない。古ければ、
+   *  ファームが既に実行中の「最後に送ったフレーム」をそのまま再送し、既存の
+   *  10ms タイムアウト内で新しいフィードバック応答を引き出す。新規プロトコル
+   *  コマンドは発行せず、固定スリープもしない（呼び出しは 1 回の
+   *  sendFrameWithFeedback で上限付き）。
+   *
+   *  保持フレームをそのまま再送するため、ブレーキバイト等のコマンド状態を厳密に
+   *  保持する。走行中はフィードバックが新鮮なので実質 no-op。アイドル時のみ
+   *  1 モータあたり最悪 ~10ms のシリアル待ちが加わる点に注意（呼び出し元が
+   *  単一スレッドエグゼキュータでステータスタイマーから呼ぶ前提）。
+   * @return 呼び出し後にフィードバックが新鮮なら true。
+   */
+  bool refreshMotorFeedback(int motor_id, double max_age_sec = 0.05);
+
 private:
   // Motor feedback structure
   struct MotorFeedback {
-    uint8_t mode;
-    uint16_t current;
-    int16_t speed;
-    uint8_t angle;
-    uint8_t temperature;
-    uint8_t fault_code;
+    uint8_t mode{0};
+    int16_t current{0};      // トルク電流生値（符号付き）: DATA[2..3]
+    int16_t speed{0};        // 実測 RPM（符号付き）: DATA[4..5]
+    uint16_t position{0};    // ロータ位置: DATA[6..7]
+    uint8_t temperature{0};  // 常に 0（Protocol 2 (0x74) 未実装）
+    uint8_t fault_code{0};
+    bool has_feedback{false};  // 一度でも有効フィードバックを parse したか
+    std::chrono::steady_clock::time_point last_feedback_time{};  // 最終受信時刻
   };
 
   // Current モード用 PI 状態（モータ毎）
@@ -180,6 +221,8 @@ private:
   std::map<int, MotorFeedback> motor_feedbacks_;  // motor_id -> feedback
   std::map<int, ControlMode> motor_modes_;        // motor_id -> control mode
   std::map<int, PiState> pi_states_;              // motor_id -> PI state
+  // motor_id -> 最後に送った駆動フレーム（refreshMotorFeedback の再送用）
+  std::map<int, std::vector<uint8_t>> last_sent_frames_;
 
   // Private methods
   bool initializeSerial();
@@ -194,8 +237,6 @@ private:
   bool sendFrameWithFeedback(int motor_id, const std::vector<uint8_t>& frame);
   int16_t runCurrentLoopStep(int motor_id, int rpm_ref);  // PI 1ステップ
   void resetCurrentPiStateForStop(int motor_id);
-  bool requestMotorFeedback(int motor_id);
-  void processFeedbackResponse(int motor_id, const std::vector<uint8_t>& response);
   bool readFeedbackFrame(int expected_motor_id, std::vector<uint8_t>& out_frame, int timeout_ms);
   bool parseFeedback(int expected_motor_id, const std::vector<uint8_t>& frame);
 
