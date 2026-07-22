@@ -1,14 +1,13 @@
 <?xml version="1.0"?>
 <launch>
   <!-- Launch arguments -->
-  <arg name="config_file" 
-       default="$(find-pkg-share motor_control_app)/config/drive_component.yaml" 
-       description="Path to the configuration file" />
-  <arg name="serial_port" 
-       default="/dev/ttyACM0" 
+  <!-- 単体launch はノード宣言デフォルトで起動する（launcher/config/drive_component.yaml と同値）。 -->
+  <!-- 設定を変えたい場合は launcher/config/drive_component.yaml を編集する（単一ソース）。 -->
+  <arg name="serial_port"
+       default="/dev/ttyACM0"
        description="Serial port for motor communication" />
-  <arg name="container_name" 
-       default="drive_container" 
+  <arg name="container_name"
+       default="drive_container"
        description="Name of the component container" />
 
   <!-- Drive Component Container -->
@@ -23,7 +22,6 @@
         exec="load" 
         name="drive_component_loader" 
         args="$(var container_name) motor_control_app motor_control_app::DriveComponent">
-    <param from="$(var config_file)" />
     <param name="serial_port" value="$(var serial_port)" />
   </node>
 </launch>
