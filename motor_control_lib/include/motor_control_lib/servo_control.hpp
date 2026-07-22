@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <map>
+#include <rclcpp/logger.hpp>
 #include <string>
 
 namespace motor_control_lib {
@@ -82,8 +83,11 @@ public:
    * @brief コンストラクタ
    * @param port シリアルポート
    * @param baudrate ボーレート
+   * @param logger ログ出力に使用するロガー（呼び出し元ノードの get_logger() を注入可能）
    */
-  FeetechServoController(const std::string& port = "/dev/ttyUSB0", int baudrate = 115200);
+  FeetechServoController(
+      const std::string& port = "/dev/ttyUSB0", int baudrate = 115200,
+      const rclcpp::Logger& logger = rclcpp::get_logger("FeetechServoController"));
 
   virtual ~FeetechServoController();
 
@@ -109,6 +113,9 @@ private:
   int baudrate_;
   int serial_fd_;
   bool connected_;
+
+  // ログ出力用ロガー（デフォルトは "FeetechServoController"、コンストラクタで注入可能）
+  rclcpp::Logger logger_{rclcpp::get_logger("FeetechServoController")};
 
   // 既知のレジスタマップ
   std::map<uint16_t, RegisterInfo> known_registers_;
