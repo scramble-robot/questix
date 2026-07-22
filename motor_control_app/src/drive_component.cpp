@@ -159,6 +159,10 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
   RCLCPP_INFO(this->get_logger(), "  max_motor_rpm: %d", max_motor_rpm_);
   RCLCPP_INFO(this->get_logger(), "  status_publish_rate: %.1f", status_publish_rate_);
   RCLCPP_INFO(this->get_logger(), "  typed_status_topic: %s", typed_status_topic_.c_str());
+  RCLCPP_INFO(this->get_logger(), "  publish_tf: %s", publish_tf_ ? "true" : "false");
+  RCLCPP_INFO(this->get_logger(), "  odom_topic: %s", odom_topic_.c_str());
+  RCLCPP_INFO(this->get_logger(), "  odom_frame_id: %s", odom_frame_id_.c_str());
+  RCLCPP_INFO(this->get_logger(), "  base_frame_id: %s", base_frame_id_.c_str());
   RCLCPP_INFO(this->get_logger(), "  cmd_timeout_sec: %.2f", cmd_timeout_sec_);
   RCLCPP_INFO(this->get_logger(), "  control_mode: %s", control_mode_.c_str());
   if (control_mode_ == "current") {
@@ -177,6 +181,12 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
   typed_status_publisher_ =
       this->create_publisher<questix_msgs::msg::DriveStatus>(typed_status_topic_, 1);
 
+  // オドメトリ publisher（LifecyclePublisher が ACTIVE ゲートを担う）と TF broadcaster。
+  odom_publisher_ = this->create_publisher<nav_msgs::msg::Odometry>(odom_topic_, 10);
+  if (publish_tf_) {
+    tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
+  }
+
   RCLCPP_INFO(this->get_logger(), "Drive component configured");
   return CallbackReturn::SUCCESS;
 }
@@ -192,6 +202,10 @@ DriveComponent::CallbackReturn DriveComponent::on_activate(const rclcpp_lifecycl
 
   // inactive 中の残留指令でスルーレートクランプが誤動作しないようリセット
   resetCommandState();
+
+  // オドメトリの時刻アンカーをクリアする（ポーズは維持 = 一時停止でありテレポート
+  // ではない）。deactivate 中のギャップを次サンプルで積分しないため。
+  has_last_odom_time_ = false;
 
   // ステータスパブリッシュタイマー
   const auto timer_period = std::chrono::nanoseconds(
@@ -240,6 +254,7 @@ DriveComponent::CallbackReturn DriveComponent::on_cleanup(const rclcpp_lifecycle
   watchdog_timer_.reset();
   twist_subscription_.reset();
   typed_status_publisher_.reset();
+  resetOdometry();
   shutdownMotorLib();
   RCLCPP_INFO(this->get_logger(), "Drive component cleaned up");
   return CallbackReturn::SUCCESS;
@@ -253,6 +268,7 @@ DriveComponent::CallbackReturn DriveComponent::on_shutdown(const rclcpp_lifecycl
   watchdog_timer_.reset();
   twist_subscription_.reset();
   typed_status_publisher_.reset();
+  resetOdometry();
   shutdownMotorLib();
   RCLCPP_INFO(this->get_logger(), "Drive component shut down");
   return CallbackReturn::SUCCESS;
@@ -265,6 +281,7 @@ DriveComponent::CallbackReturn DriveComponent::on_error(const rclcpp_lifecycle::
   watchdog_timer_.reset();
   twist_subscription_.reset();
   typed_status_publisher_.reset();
+  resetOdometry();
   shutdownMotorLib();
   if (auto_start_ && auto_start_timer_) {
     auto_start_timer_->reset();
@@ -312,6 +329,12 @@ void DriveComponent::declareParameters() {
 
   // 統一緊急停止トピック（questix_msgs/EmergencyStop）。空文字で連動無効。
   this->declare_parameter("emergency_stop_topic", "/emergency_stop");
+
+  // オドメトリ出力（実測 twist を積分して /odom を publish）。
+  this->declare_parameter("publish_tf", true);
+  this->declare_parameter("odom_topic", "/odom");
+  this->declare_parameter("odom_frame_id", "odom");
+  this->declare_parameter("base_frame_id", "base_link");
 }
 
 void DriveComponent::readParameters() {
@@ -336,6 +359,10 @@ void DriveComponent::readParameters() {
   brake_on_stop_ = this->get_parameter("brake_on_stop").as_bool();
   cmd_timeout_sec_ = this->get_parameter("cmd_timeout_sec").as_double();
   command_wait_ms_ = static_cast<int>(this->get_parameter("command_wait_ms").as_int());
+  publish_tf_ = this->get_parameter("publish_tf").as_bool();
+  odom_topic_ = this->get_parameter("odom_topic").as_string();
+  odom_frame_id_ = this->get_parameter("odom_frame_id").as_string();
+  base_frame_id_ = this->get_parameter("base_frame_id").as_string();
 }
 
 bool DriveComponent::initializeMotorLib() {
@@ -412,6 +439,13 @@ void DriveComponent::resetCommandState() {
   has_last_cmd_ = false;
   last_cmd_linear_ = 0.0;
   last_cmd_angular_ = 0.0;
+}
+
+void DriveComponent::resetOdometry() {
+  odom_publisher_.reset();
+  tf_broadcaster_.reset();
+  odom_pose_ = {};
+  has_last_odom_time_ = false;
 }
 
 void DriveComponent::twistCallback(const geometry_msgs::msg::Twist::SharedPtr msg) {
@@ -559,12 +593,93 @@ void DriveComponent::statusTimerCallback() {
     typed_msg.emergency_stop = emergency_stop_active_;
     typed_status_publisher_->publish(typed_msg);
 
+    // 左右両輪のフィードバックが新鮮なときのみ実測 twist を積分する。stale（非常停止・
+    // 未通電を含む）なら twist ゼロ扱いで積分せず、現在ポーズで publish を継続する。
+    const bool feedback_fresh =
+        odometry::isFeedbackFresh(left_fb.has_feedback, left_fb.feedback_age_sec,
+                                  odometry::kMaxFeedbackAgeSec) &&
+        odometry::isFeedbackFresh(right_fb.has_feedback, right_fb.feedback_age_sec,
+                                  odometry::kMaxFeedbackAgeSec);
+    publishOdometry(status.current_linear_velocity, status.current_angular_velocity, feedback_fresh,
+                    now);
+
     RCLCPP_DEBUG(this->get_logger(), "Current velocity: linear=%.3f, angular=%.3f",
                  status.current_linear_velocity, status.current_angular_velocity);
 
   } catch (const std::exception& e) {
     RCLCPP_ERROR_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
                           "Exception in status timer callback: %s", e.what());
+  }
+}
+
+void DriveComponent::publishOdometry(double linear, double angular, bool feedback_fresh,
+                                     const rclcpp::Time& now) {
+  if (!odom_publisher_) {
+    return;
+  }
+
+  // 初回（activate 直後）は時刻アンカーのみ設定し、現在ポーズ・ゼロ twist で publish する。
+  if (has_last_odom_time_) {
+    const double dt = (now - last_odom_time_).seconds();
+    if (odometry::isValidDt(dt, odometry::kMaxOdomDtSec)) {
+      // stale なら twist ゼロ扱いで積分しない（stale RPM によるポーズドリフト防止）。
+      const double eff_linear = feedback_fresh ? linear : 0.0;
+      const double eff_angular = feedback_fresh ? angular : 0.0;
+      odom_pose_ = odometry::integrate(odom_pose_, eff_linear, eff_angular, dt);
+    }
+    // dt が無効（<=0 または kMaxOdomDtSec 超過）ならこのサンプルは積分せず再アンカーのみ。
+  }
+  last_odom_time_ = now;
+  has_last_odom_time_ = true;
+
+  // publish に載せる twist は stale 時ゼロ（ポーズと整合させ、下流の誤積分を防ぐ）。
+  const double reported_linear = feedback_fresh ? linear : 0.0;
+  const double reported_angular = feedback_fresh ? angular : 0.0;
+  const odometry::YawQuaternion q = odometry::yawToQuaternion(odom_pose_.theta);
+
+  nav_msgs::msg::Odometry odom;
+  odom.header.stamp = now;
+  odom.header.frame_id = odom_frame_id_;
+  odom.child_frame_id = base_frame_id_;
+  odom.pose.pose.position.x = odom_pose_.x;
+  odom.pose.pose.position.y = odom_pose_.y;
+  odom.pose.pose.position.z = 0.0;
+  odom.pose.pose.orientation.x = 0.0;
+  odom.pose.pose.orientation.y = 0.0;
+  odom.pose.pose.orientation.z = q.z;
+  odom.pose.pose.orientation.w = q.w;
+  odom.twist.twist.linear.x = reported_linear;
+  odom.twist.twist.angular.z = reported_angular;
+
+  // 固定共分散（issue 指定）。z/roll/pitch は非観測、vy は非ホロノミックで非観測。
+  odom.pose.covariance[0] = 0.01;    // x
+  odom.pose.covariance[7] = 0.01;    // y
+  odom.pose.covariance[14] = 1e6;    // z
+  odom.pose.covariance[21] = 1e6;    // roll
+  odom.pose.covariance[28] = 1e6;    // pitch
+  odom.pose.covariance[35] = 0.05;   // yaw
+  odom.twist.covariance[0] = 0.01;   // vx
+  odom.twist.covariance[7] = 1e6;    // vy
+  odom.twist.covariance[14] = 1e6;   // vz
+  odom.twist.covariance[21] = 1e6;   // wx
+  odom.twist.covariance[28] = 1e6;   // wy
+  odom.twist.covariance[35] = 0.05;  // wz
+  odom_publisher_->publish(odom);
+
+  // odom->base_link TF（Odometry と同一 stamp / フレーム）。
+  if (publish_tf_ && tf_broadcaster_) {
+    geometry_msgs::msg::TransformStamped tf;
+    tf.header.stamp = now;
+    tf.header.frame_id = odom_frame_id_;
+    tf.child_frame_id = base_frame_id_;
+    tf.transform.translation.x = odom_pose_.x;
+    tf.transform.translation.y = odom_pose_.y;
+    tf.transform.translation.z = 0.0;
+    tf.transform.rotation.x = 0.0;
+    tf.transform.rotation.y = 0.0;
+    tf.transform.rotation.z = q.z;
+    tf.transform.rotation.w = q.w;
+    tf_broadcaster_->sendTransform(tf);
   }
 }
 

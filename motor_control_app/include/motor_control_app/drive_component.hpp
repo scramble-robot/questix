@@ -9,16 +9,20 @@
 #include <memory>
 #include <string>
 
+#include "geometry_msgs/msg/transform_stamped.hpp"
 #include "geometry_msgs/msg/twist.hpp"
 #include "motor_control_app/drive_watchdog.hpp"
+#include "motor_control_app/odometry_integrator.hpp"
 #include "motor_control_lib/ddt_motor_lib.hpp"
 #include "motor_control_lib/differential_drive.hpp"
+#include "nav_msgs/msg/odometry.hpp"
 #include "questix_msgs/msg/drive_status.hpp"
 #include "questix_msgs/msg/emergency_stop.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_components/register_node_macro.hpp"
 #include "rclcpp_lifecycle/lifecycle_node.hpp"
 #include "rclcpp_lifecycle/lifecycle_publisher.hpp"
+#include "tf2_ros/transform_broadcaster.h"
 
 namespace motor_control_app {
 
@@ -80,6 +84,20 @@ private:
   void watchdogTimerCallback();
 
   /**
+   * @brief 実測 twist を積分して /odom を publish し、odom->base_link TF を broadcast する。
+   *
+   * statusTimerCallback から呼ばれる。初回は時刻アンカーのみ設定し、現在ポーズ・
+   * ゼロ twist で publish する。dt が無効（<=0 または kMaxOdomDtSec 超過）なら積分を
+   * スキップして再アンカー。フィードバックが stale なら twist をゼロ扱いで積分せず、
+   * 現在ポーズで publish を継続する（RViz でフレームが消えないため）。
+   * @param linear 実測前進速度 [m/s]
+   * @param angular 実測角速度 [rad/s]
+   * @param feedback_fresh 左右両輪のフィードバックが新鮮か
+   * @param now 積分・publish に使う共通タイムスタンプ
+   */
+  void publishOdometry(double linear, double angular, bool feedback_fresh, const rclcpp::Time& now);
+
+  /**
    * @brief /emergency_stop メッセージのコールバック関数
    *
    * ライフサイクル状態に依存せず常時受信する。立ち上がりエッジで即時停止
@@ -122,6 +140,12 @@ private:
    */
   void resetCommandState();
 
+  /**
+   * @brief オドメトリの publisher / TF broadcaster を解放し、ポーズと時刻アンカーを
+   * ゼロにリセットする（cleanup / shutdown / error のフル解体時に呼ぶ）。
+   */
+  void resetOdometry();
+
   // ROS 2 通信
   // Twist/status/watchdog/auto-start callbacks intentionally share the node's default
   // MutuallyExclusive callback group, so callbacks do not run concurrently. If entities are
@@ -133,6 +157,9 @@ private:
   // 型付きステータス（questix_msgs/DriveStatus）。契約は questix_msgs/README.md。
   rclcpp_lifecycle::LifecyclePublisher<questix_msgs::msg::DriveStatus>::SharedPtr
       typed_status_publisher_;
+  // ホイールオドメトリ（nav_msgs/Odometry）と odom->base_link TF。
+  rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::Odometry>::SharedPtr odom_publisher_;
+  std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   rclcpp::TimerBase::SharedPtr status_timer_;
   rclcpp::TimerBase::SharedPtr watchdog_timer_;
   rclcpp::TimerBase::SharedPtr auto_start_timer_;
@@ -184,6 +211,17 @@ private:
   // Lifecycle 自動起動（モータ通電まで configure を再試行する）
   bool auto_start_{true};
   double connect_retry_period_sec_{1.0};
+
+  // オドメトリ（実測 twist を積分）。パラメータは on_configure で読む。
+  bool publish_tf_{true};      // odom->base_link TF を broadcast するか
+  std::string odom_topic_;     // Odometry publish 先
+  std::string odom_frame_id_;  // Odometry header / TF 親フレーム
+  std::string base_frame_id_;  // child_frame_id（URDF ルートと一致）
+  // 積分状態。deactivate->activate ではポーズ維持（時刻アンカーのみクリア）、
+  // cleanup/shutdown/error ではゼロにリセットする（詳細は publishOdometry 参照）。
+  odometry::Pose2D odom_pose_{};
+  rclcpp::Time last_odom_time_{0, 0, RCL_ROS_TIME};
+  bool has_last_odom_time_{false};
 
   // 状態フラグ
   bool motor_initialized_;
