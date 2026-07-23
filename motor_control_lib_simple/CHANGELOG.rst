@@ -2,6 +2,10 @@
 Changelog for package motor_control_lib_simple
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+3.1.0 (2026-07-23)
+------------------
+* Version bump only for package motor_control_lib_simple
+
 3.0.0 (2026-07-23)
 ------------------
 * Version bump only for package motor_control_lib_simple
