@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
     <name>joy_gate</name>
-    <version>3.0.0</version>
+    <version>3.1.0</version>
     <description>Joy message gating based on GPIO controllable status</description>
     <maintainer email="aki.grade2580@outlook.jp">asa-naki</maintainer>
     <license>MIT</license>

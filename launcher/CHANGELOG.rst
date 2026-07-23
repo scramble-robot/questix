@@ -2,6 +2,12 @@
 Changelog for package questix_launcher
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+3.1.0 (2026-07-23)
+------------------
+* feat: publish wheel odometry and odom->base_link tf from drive component (`#132 <https://github.com/scramble-robot/questix/issues/132>`_)
+* refactor: unify drive_component config to launcher single source (`#133 <https://github.com/scramble-robot/questix/issues/133>`_)
+* Contributors: Akihisa Nagata
+
 3.0.0 (2026-07-23)
 ------------------
 * refactor: remove deprecated string status topics and esc bool mirror (`#130 <https://github.com/scramble-robot/questix/issues/130>`_)

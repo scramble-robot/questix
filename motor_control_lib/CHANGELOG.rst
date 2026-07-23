@@ -2,6 +2,12 @@
 Changelog for package motor_control_lib
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+3.1.0 (2026-07-23)
+------------------
+* refactor: inject logger and accumulate modbus response in servo_control (`#135 <https://github.com/scramble-robot/questix/issues/135>`_)
+* refactor: extract serial port initialization into serial_utils package (`#134 <https://github.com/scramble-robot/questix/issues/134>`_)
+* Contributors: Akihisa Nagata
+
 3.0.0 (2026-07-23)
 ------------------
 * Version bump only for package motor_control_lib

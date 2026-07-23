@@ -2,6 +2,10 @@
 Changelog for package questix_msgs
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+3.1.0 (2026-07-23)
+------------------
+* Version bump only for package questix_msgs
+
 3.0.0 (2026-07-23)
 ------------------
 * refactor: remove deprecated string status topics and esc bool mirror (`#130 <https://github.com/scramble-robot/questix/issues/130>`_)
