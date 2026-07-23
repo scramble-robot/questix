@@ -4,7 +4,8 @@ Changelog for package questix_msgs
 
 3.1.0 (2026-07-23)
 ------------------
-* Version bump only for package questix_msgs
+* docs: document tuning-time ddt monitoring workflow (`#136 <https://github.com/scramble-robot/questix/issues/136>`_)
+* Contributors: Akihisa Nagata
 
 3.0.0 (2026-07-23)
 ------------------

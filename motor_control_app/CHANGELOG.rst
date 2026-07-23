@@ -5,6 +5,7 @@ Changelog for package motor_control_app
 3.1.0 (2026-07-23)
 ------------------
 * feat: publish wheel odometry and odom->base_link tf from drive component (`#132 <https://github.com/scramble-robot/questix/issues/132>`_)
+* feat: add ddt motor feedback monitor cli for tuning (`#136 <https://github.com/scramble-robot/questix/issues/136>`_)
 * refactor: unify drive_component config to launcher single source (`#133 <https://github.com/scramble-robot/questix/issues/133>`_)
 * Contributors: Akihisa Nagata
 
