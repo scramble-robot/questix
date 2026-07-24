@@ -6,6 +6,8 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -87,6 +89,36 @@ TEST(GpioSafetyEvaluatorTest, AnyStaleInputStopsCompetitionMode) {
   EXPECT_GT(stale.pins[0].age_seconds, 1.0);
 }
 
+TEST(GpioSafetyEvaluatorTest, TimeMovingBackwardsIsFailSafe) {
+  GpioSafetyEvaluator evaluator({5}, {}, 1.0);
+  evaluator.update(5, false, 10.0);
+
+  const auto backwards = evaluator.evaluate(9.0);
+  EXPECT_FALSE(backwards.controllable);
+  EXPECT_EQ(backwards.reason, "pin 5 time moved backwards; ");
+  ASSERT_EQ(backwards.pins.size(), 1U);
+  EXPECT_TRUE(std::isinf(backwards.pins[0].age_seconds));
+}
+
+TEST(GpioSafetyEvaluatorTest, NonFiniteTimeIsFailSafe) {
+  constexpr double nan = std::numeric_limits<double>::quiet_NaN();
+  constexpr double infinity = std::numeric_limits<double>::infinity();
+
+  GpioSafetyEvaluator update_nan({5}, {}, 1.0);
+  update_nan.update(5, false, nan);
+  EXPECT_EQ(update_nan.evaluate(1.0).reason, "pin 5 time is not finite; ");
+
+  GpioSafetyEvaluator evaluate_nan({5}, {}, 1.0);
+  evaluate_nan.update(5, false, 1.0);
+  EXPECT_EQ(evaluate_nan.evaluate(nan).reason, "pin 5 time is not finite; ");
+
+  const auto evaluate_infinity = evaluate_nan.evaluate(infinity);
+  EXPECT_FALSE(evaluate_infinity.controllable);
+  EXPECT_EQ(evaluate_infinity.reason, "pin 5 time is not finite; ");
+  ASSERT_EQ(evaluate_infinity.pins.size(), 1U);
+  EXPECT_TRUE(std::isinf(evaluate_infinity.pins[0].age_seconds));
+}
+
 TEST(GpioSafetyEvaluatorTest, RejectsOverlappingPolarity) {
   EXPECT_THROW(GpioSafetyEvaluator({5}, {5}, 1.0), std::invalid_argument);
 }
@@ -105,6 +137,10 @@ TEST(GpioSafetyEvaluatorTest, RejectsUnsafeEmptyOrInvalidTimeoutConfiguration) {
   EXPECT_THROW(GpioSafetyEvaluator({}, {}, 1.0), std::invalid_argument);
   EXPECT_THROW(GpioSafetyEvaluator({5}, {}, 0.0), std::invalid_argument);
   EXPECT_THROW(GpioSafetyEvaluator({5}, {}, -1.0), std::invalid_argument);
+  EXPECT_THROW(GpioSafetyEvaluator({5}, {}, std::numeric_limits<double>::quiet_NaN()),
+               std::invalid_argument);
+  EXPECT_THROW(GpioSafetyEvaluator({5}, {}, std::numeric_limits<double>::infinity()),
+               std::invalid_argument);
 }
 
 }  // namespace

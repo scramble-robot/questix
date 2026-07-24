@@ -6,8 +6,8 @@
 
 #include "operation_manager/gpio_safety_evaluator.hpp"
 
-#include <algorithm>
 #include <cmath>
+#include <limits>
 #include <set>
 #include <stdexcept>
 
@@ -50,31 +50,44 @@ void GpioSafetyEvaluator::add_pins(const std::vector<int64_t>& pins, bool expect
   }
 }
 
-void GpioSafetyEvaluator::update(unsigned int pin, bool value, double now_seconds) {
+void GpioSafetyEvaluator::update(unsigned int pin, bool value, double monotonic_now_seconds) {
   auto it = pins_.find(pin);
   if (it == pins_.end()) {
     throw std::invalid_argument("received update for unmonitored pin " + std::to_string(pin));
   }
   it->second.received = true;
   it->second.value = value;
-  it->second.last_update_seconds = now_seconds;
+  it->second.last_update_seconds = monotonic_now_seconds;
 }
 
-GpioSafetyEvaluation GpioSafetyEvaluator::evaluate(double now_seconds) const {
+GpioSafetyEvaluation GpioSafetyEvaluator::evaluate(double monotonic_now_seconds) const {
   GpioSafetyEvaluation result{true, "", {}};
   result.pins.reserve(pins_.size());
 
   for (const auto& pair : pins_) {
     const auto pin = pair.first;
     const auto& state = pair.second;
+    const bool invalid_time =
+        state.received &&
+        (!std::isfinite(monotonic_now_seconds) || !std::isfinite(state.last_update_seconds));
+    const bool time_moved_backwards =
+        state.received && !invalid_time && monotonic_now_seconds < state.last_update_seconds;
     const double age_seconds =
-        state.received ? std::max(0.0, now_seconds - state.last_update_seconds) : 0.0;
+        state.received && !invalid_time && !time_moved_backwards
+            ? monotonic_now_seconds - state.last_update_seconds
+            : (state.received ? std::numeric_limits<double>::infinity() : 0.0);
     result.pins.push_back(
         GpioPinEvaluation{pin, state.expected_value, state.received, state.value, age_seconds});
 
     if (!state.received) {
       result.controllable = false;
       result.reason += "pin " + std::to_string(pin) + " not received; ";
+    } else if (invalid_time) {
+      result.controllable = false;
+      result.reason += "pin " + std::to_string(pin) + " time is not finite; ";
+    } else if (time_moved_backwards) {
+      result.controllable = false;
+      result.reason += "pin " + std::to_string(pin) + " time moved backwards; ";
     } else if (age_seconds > timeout_seconds_) {
       result.controllable = false;
       result.reason += "pin " + std::to_string(pin) + " timeout; ";

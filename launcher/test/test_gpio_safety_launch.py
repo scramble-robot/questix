@@ -54,6 +54,25 @@ def test_profiles_select_the_expected_gpio_inputs_and_polarities():
 def test_core_defaults_to_practice_and_selects_both_profile_files():
     core = load_xml('launcher/launch/questix_core.launch.xml')
     assert find_arg(core, 'enable_autoreferee').get('default') == 'false'
+    invalid_condition = (
+        '$(and $(var enable_autoreferee) $(not $(var enable_gpio_ref)))')
+    fail_fast_group = next(
+        group for group in core.findall('./group')
+        if group.find('./timer/shutdown') is not None
+    )
+    assert fail_fast_group.get('if') == invalid_condition
+    warning = fail_fast_group.find('./log')
+    assert warning is not None
+    assert warning.get('message') == (
+        'ERROR: enable_autoreferee=true requires enable_gpio_ref=true')
+    timer = fail_fast_group.find('./timer')
+    assert timer is not None
+    assert timer.get('period') == '0.01'
+    shutdown = timer.find('./shutdown')
+    assert shutdown is not None
+    assert shutdown.get('reason') == (
+        'Invalid configuration: enable_autoreferee=true requires '
+        'enable_gpio_ref=true')
 
     lets = {(
         item.get('name'),
@@ -143,11 +162,53 @@ def test_core_owns_exactly_one_operation_manager_when_gpio_ref_is_enabled():
     assert integrated_manager_count(True, True, True) == 1
 
 
-def test_competition_service_launchers_always_enable_autoreferee():
-    for relative_path in (
+def test_competition_service_launchers_always_enable_gpio_safety():
+    launcher_paths = (
         'systemd/questix_robot_launcher.sh',
         'ansible/roles/robot_autostart/files/questix_robot_launcher.sh',
-    ):
+    )
+    launcher_texts = []
+    for relative_path in launcher_paths:
         text = (SOURCE_ROOT / relative_path).read_text(encoding='utf-8')
-        assert 'enable_autoreferee:=true' in text
+        launcher_texts.append(text)
+        assert 'LAUNCH_ARGS="${LAUNCH_ARGS} enable_gpio_ref:=true"' in text
+        assert 'LAUNCH_ARGS="${LAUNCH_ARGS} enable_autoreferee:=true"' in text
+        assert 'enable_gpio_ref:=${ENABLE_GPIO_REF' not in text
         assert 'if [ "${MODE}" != "competition" ]' in text
+
+    safety_lines = [
+        [
+            line.strip() for line in text.splitlines()
+            if 'enable_gpio_ref:=' in line or 'enable_autoreferee:=' in line
+        ]
+        for text in launcher_texts
+    ]
+    assert safety_lines[0] == safety_lines[1]
+
+
+def test_launch_environment_defaults_enable_gpio_safety():
+    systemd_env = (
+        SOURCE_ROOT / 'systemd/questix_robot.env').read_text(encoding='utf-8')
+    ansible_env = (
+        SOURCE_ROOT / 'ansible/roles/robot_autostart/templates/launch.env.j2'
+    ).read_text(encoding='utf-8')
+
+    assert 'ENABLE_GPIO_REF=true' in systemd_env.splitlines()
+    assert 'ENABLE_GPIO_REF=true' in ansible_env.splitlines()
+
+
+def test_installers_preserve_existing_environment_but_launcher_is_safe():
+    installer = (
+        SOURCE_ROOT / 'scripts/install-robot-manager.sh'
+    ).read_text(encoding='utf-8')
+    ansible_tasks = (
+        SOURCE_ROOT / 'ansible/roles/robot_autostart/tasks/main.yaml'
+    ).read_text(encoding='utf-8')
+
+    assert (
+        '"${REPO_DIR}/systemd/questix_robot.env" > '
+        '/etc/questix_robot/launch.env'
+    ) in installer
+    assert 'launch.env already exists, skipping' in installer
+    assert 'src: launch.env.j2' in ansible_tasks
+    assert 'force: false' in ansible_tasks

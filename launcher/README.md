@@ -17,7 +17,13 @@ drive が使う `joy_controller_referee.launch.xml` 内の operation_manager は
   safe-highとして追加判定
 
 `/etc/questix_robot/mode` が `competition` のときだけ実行される
-`questix_robot_launcher.sh` は、必ず `enable_autoreferee:=true` を渡します。
+`questix_robot_launcher.sh` は、必ず `enable_gpio_ref:=true` と
+`enable_autoreferee:=true` を固定値で渡します。既存の `launch.env` に
+`ENABLE_GPIO_REF=false` が残っていても competition 起動では無視され、GPIO5と
+GPIO27の安全系は常時有効です。`enable_gpio_ref:=false` は手動の開発・診断用途に
+限定されます。`enable_autoreferee:=true` と `enable_gpio_ref:=false` の組合せは
+通常運用上無効であり、`questix_core.launch.xml` はその組合せを検出して起動を
+中止します。
 
 GPIO5の物理非常停止回路はRLY1で左右DDT駆動モーター、ローラー用ESC、Shot用サーボ、
 Tilt用サーボの動力をハードウェア遮断します。Raspberry Pi、5 V I/O、3.3 V I/Oは

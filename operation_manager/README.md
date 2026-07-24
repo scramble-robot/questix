@@ -53,8 +53,16 @@ operation_manager and is reported in diagnostics as `pin_27_signal_limit`.
 
 No pin is considered safe until its first message has arrived. Every required
 pin must be received, fresh, and equal to its configured safe value. Reasons
-distinguish `not received`, `timeout`, and actual/expected value mismatch.
+distinguish `not received`, `timeout`, actual/expected value mismatch,
+non-finite time, and time moving backwards.
 `/emergency_stop.active` is always the inverse of `/gpio/controllable`.
+
+GPIO freshness uses `std::chrono::steady_clock`, which is monotonic and is
+independent of ROS or system-clock adjustments. ROS time remains in the
+`/diagnostics` and `/emergency_stop` message header stamps. The evaluator also
+treats a backwards or NaN/infinite freshness timestamp as not controllable,
+with an infinite diagnostic age, so an invalid time source cannot extend the
+fresh period.
 
 | Mode | GPIO5 physical E-stop | GPIO27 AutoReferee | Controllable |
 |---|---:|---:|---:|

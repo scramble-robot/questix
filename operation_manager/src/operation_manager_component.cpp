@@ -10,6 +10,15 @@
 #include <functional>
 #include <rclcpp_components/register_node_macro.hpp>
 
+namespace {
+
+double steady_now_seconds() {
+  return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
+
+}  // namespace
+
 namespace operation_manager {
 
 OperationManagerComponent::OperationManagerComponent(const rclcpp::NodeOptions& options)
@@ -59,14 +68,16 @@ rclcpp::QoS OperationManagerComponent::emergency_stop_qos() {
 
 void OperationManagerComponent::gpio_callback(const std_msgs::msg::Bool::SharedPtr msg,
                                               unsigned int pin) {
-  safety_evaluator_->update(pin, msg->data, this->now().seconds());
+  safety_evaluator_->update(pin, msg->data, steady_now_seconds());
   // Immediately evaluate on update
   evaluate_controllability();
 }
 
 void OperationManagerComponent::evaluate_controllability() {
+  // ROS time remains authoritative for message stamps. Freshness uses a monotonic
+  // clock so a ROS/system-clock adjustment cannot make stale GPIO data look fresh.
   rclcpp::Time now = this->now();
-  const auto evaluation = safety_evaluator_->evaluate(now.seconds());
+  const auto evaluation = safety_evaluator_->evaluate(steady_now_seconds());
 
   // 標準 DiagnosticArray 用に、ピンごとの状態を KeyValue として収集する。
   diagnostic_msgs::msg::DiagnosticStatus status;

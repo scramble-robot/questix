@@ -1,12 +1,13 @@
 # robot_autostart
 
-systemd による ROS2 ノードの自動起動を設定するロール。
+systemd による ROS 2 ノードの自動起動を設定するロール。
 
 ## 動作概要
 
-- `/etc/questix_robot/mode` が `competition` の時のみ、ブート時に `ros2 launch questix_launcher questix_core.launch.xml` を `enable_autoreferee:=true` 付きで自動実行
+- `/etc/questix_robot/mode` が `competition` の時のみ、ブート時に `ros2 launch questix_launcher questix_core.launch.xml` を `enable_gpio_ref:=true`、`enable_autoreferee:=true` 付きで自動実行
 - `practice`（デフォルト）の時はサービスは即正常終了し、ノードは起動しない
-- Launch 引数は `/etc/questix_robot/launch.env` で制御
+- その他の Launch 引数は `/etc/questix_robot/launch.env` で制御
+- competition では GPIO5 physical E-stop と GPIO27 AutoReferee が必須のため、`launch.env` の `ENABLE_GPIO_REF` は無視して GPIO 安全系を常時有効化
 
 ## 変数
 
@@ -52,8 +53,14 @@ sudo systemctl restart questix_robot
 | `ENABLE_LIDAR` | `true` | YDLiDAR の有効化 |
 | `ENABLE_SHOT` | `true` | 射出コンポーネントの有効化 |
 | `ENABLE_DRIVE` | `true` | 駆動コンポーネントの有効化 |
-| `ENABLE_GPIO_REF` | `true` | GPIO レフェリーシステムの有効化 |
+| `ENABLE_GPIO_REF` | `true` | 手動開発・診断用の GPIO 安全系設定。competition systemd 起動では値を無視して常に有効 |
 | `ENABLE_RVIZ` | `false` | RViz 可視化の有効化 |
+
+Ansible は `launch.env` を `force: false` で配置するため、既存ファイルを上書きしません。
+既存環境に `ENABLE_GPIO_REF=false` が残っていても、competition ランチャーは
+`enable_gpio_ref:=true` を固定で渡すため安全系を無効化できません。
+`enable_autoreferee:=true` かつ `enable_gpio_ref:=false` は通常運用上の無効な
+組合せです。後者を明示的に無効化する操作は手動の開発・診断に限定してください。
 
 ## 手動デプロイ
 

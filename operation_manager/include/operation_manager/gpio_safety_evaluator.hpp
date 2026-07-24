@@ -36,8 +36,10 @@ public:
   GpioSafetyEvaluator(const std::vector<int64_t>& safe_low_pins,
                       const std::vector<int64_t>& safe_high_pins, double timeout_seconds);
 
-  void update(unsigned int pin, bool value, double now_seconds);
-  GpioSafetyEvaluation evaluate(double now_seconds) const;
+  // Timestamps must use the same monotonic time source. The evaluator fails safe
+  // if a received pin has a non-finite timestamp or time moves backwards.
+  void update(unsigned int pin, bool value, double monotonic_now_seconds);
+  GpioSafetyEvaluation evaluate(double monotonic_now_seconds) const;
   std::vector<unsigned int> monitored_pins() const;
 
 private:
