@@ -58,6 +58,7 @@ def test_core_defaults_to_practice_and_selects_both_profile_files():
     assert find_arg(core, 'enable_autoreferee').get('default') == 'false'
     invalid_condition = (
         '$(and $(var enable_autoreferee) $(not $(var enable_gpio_ref)))')
+
     fail_fast_group = next(
         group for group in core.findall('./group')
         if group.find('./timer/shutdown') is not None
@@ -75,6 +76,24 @@ def test_core_defaults_to_practice_and_selects_both_profile_files():
     assert shutdown.get('reason') == (
         'Invalid configuration: enable_autoreferee=true requires '
         'enable_gpio_ref=true')
+
+    valid_group = next(
+        group for group in core.findall('./group')
+        if group.get('unless') == invalid_condition
+    )
+    assert fail_fast_group.find('.//include') is None
+    assert fail_fast_group.find('.//node') is None
+    assert len(valid_group.findall('.//include')) == len(core.findall('.//include'))
+    assert len(valid_group.findall('.//node')) == len(core.findall('.//node'))
+    guarded_files = {
+        include.get('file') for include in valid_group.findall('.//include')
+    }
+    assert any('shot_component.launch.xml' in path for path in guarded_files)
+    assert any('drive_component.launch.xml' in path for path in guarded_files)
+    assert any('ydlidar_launch.py' in path for path in guarded_files)
+    assert any('gpio_reader.launch.xml' in path for path in guarded_files)
+    assert any('operation_manager.launch.xml' in path for path in guarded_files)
+    assert valid_group.find(".//node[@name='rviz2']") is not None
 
     lets = {(
         item.get('name'),
@@ -116,7 +135,7 @@ def test_core_owns_exactly_one_operation_manager_when_gpio_ref_is_enabled():
     ]
     assert len(manager_includes) == 1
     manager_group = next(
-        group for group in core.findall('./group')
+        group for group in core.findall('.//group')
         if manager_includes[0] in list(group)
     )
     assert manager_group.get('if') == '$(var enable_gpio_ref)'

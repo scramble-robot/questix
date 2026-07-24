@@ -131,6 +131,49 @@ def test_installed_profiles_load_with_typed_integer_arrays(profile_name, expecte
     assert 'parameter_value_from failed' not in output
 
 
+def test_invalid_autoreferee_configuration_starts_no_child_processes():
+    """Reject the invalid profile before any hardware-facing child can start."""
+    environment = isolated_ros_environment(3)
+    process = start_process(
+        [
+            'ros2', 'launch', 'questix_launcher', 'questix_core.launch.xml',
+            'enable_lidar:=true',
+            'enable_shot:=true',
+            'enable_drive:=true',
+            'enable_gpio_ref:=false',
+            'enable_autoreferee:=true',
+            'enable_rviz:=true',
+        ],
+        environment,
+    )
+    forbidden_nodes = {
+        '/gpio_reader_node',
+        '/operation_manager_node',
+        '/drive_component',
+        '/shot_component',
+        '/esc_motor_control',
+        '/ydlidar_ros2_driver_node',
+        '/rviz2',
+    }
+    observed_nodes = set()
+    deadline = time.monotonic() + STARTUP_TIMEOUT_SECONDS
+    while process.poll() is None and time.monotonic() < deadline:
+        result = run_command(['ros2', 'node', 'list', '--no-daemon'], environment)
+        if result.returncode == 0:
+            observed_nodes.update(result.stdout.splitlines())
+        time.sleep(0.02)
+
+    try:
+        assert process.poll() is not None, 'invalid questix_core launch did not exit'
+        assert process.returncode == 0
+    finally:
+        output = stop_process(process)
+
+    assert 'ERROR: enable_autoreferee=true requires enable_gpio_ref=true' in output
+    assert forbidden_nodes.isdisjoint(observed_nodes)
+    assert 'process started with pid' not in output
+
+
 def test_practice_core_launch_keeps_gpio_safety_nodes_alive():
     """Start the installed practice safety-only launch and verify both nodes survive."""
     environment = isolated_ros_environment(2)

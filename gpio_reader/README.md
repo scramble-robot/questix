@@ -139,11 +139,18 @@ complete QUESTiX Raspberry Pi 5 HAT allocation in BCM order.
 | 24 | 18 | CN9 pin 3 / IO2 | Unassigned |
 | 25 | 22 | CN8 pin 3 / IO1 | Unassigned |
 | 26 | 37 | HAT SW1-3 | DIP Switch 3 |
-| 27 | 13 | AutoReferee AR_in, U2/R2; client connector CN7 | Competition AutoReferee; true=permission, false=stop |
+| 27 | 13 | AutoReferee AR_in, U2/R2; client connector CN7 | Competition AutoReferee; CN7 0 V becomes true/permission, CN7 5 V becomes false/stop |
 
 Connector pin assignments:
 
-- CN2--CN11: pin 1 = +3.3 V, pin 2 = GND, pin 3 = signal
+- CN2–CN6 and CN8–CN11: pin 1 = +3.3 V, pin 2 = GND, pin 3 = signal
+- CN7: AutoReferee client input
+  - pin 1 = defeat-state input
+    - 0 V: not defeated
+    - 5 V: defeated / operation prohibited
+  - pin 2 = GND
+  - The HAT optocoupler inverts this signal before passing it to GPIO27/`AR_in`.
+  - CN7 is not a normal three-pin GPIO breakout.
 - CN13/CN14: pin 1 = +3.3 V, pin 2 = GND, pin 3 = SDA, pin 4 = SCL
 - CN15/CN16: pin 1 = SCK, pin 2 = MISO, pin 3 = MOSI, pin 4 = GND
 - CN12: pin 1 = ConVcc, pin 2 = GND, pin 3 = TXD, pin 4 = RXD
