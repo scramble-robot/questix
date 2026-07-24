@@ -49,6 +49,9 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_gpio_safety_launch test/test_gpio_safety_launch.py
     ENV "QUESTIX_SOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/.."
   )
+  ament_add_pytest_test(test_gpio_safety_runtime test/test_gpio_safety_runtime.py
+    TIMEOUT 90
+  )
 endif()
 
 ament_auto_package()

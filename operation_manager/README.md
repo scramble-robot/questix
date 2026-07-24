@@ -33,10 +33,13 @@ timeout.
 Profiles:
 
 - `config/operation_manager.practice.yaml`: `safe_low_pins: [5]`,
-  `safe_high_pins: []`
+  with `safe_high_pins` omitted so the node uses its typed empty integer-array
+  default. Do not write an untyped YAML `[]`: the ROS 2 parameter parser treats
+  it as `PARAMETER_NOT_SET` rather than an empty integer array.
 - `config/operation_manager.competition.yaml`: `safe_low_pins: [5]`,
   `safe_high_pins: [27]`
-- `config/operation_manager.yaml`: backward-compatible safe practice default
+- `config/operation_manager.yaml`: backward-compatible safe practice default,
+  also omitting `safe_high_pins`
 
 GPIO5 is the raw indication from the physical emergency-stop circuit. The
 circuit independently removes motor power through RLY1; GPIO5 reports its state

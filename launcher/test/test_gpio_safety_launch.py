@@ -45,9 +45,11 @@ def test_profiles_select_the_expected_gpio_inputs_and_polarities():
     competition_parameters = competition_manager[
         'operation_manager_node']['ros__parameters']
     assert practice_parameters['safe_low_pins'] == [5]
-    assert practice_parameters['safe_high_pins'] == []
+    assert 'safe_high_pins' not in practice_parameters
     assert competition_parameters['safe_low_pins'] == [5]
     assert competition_parameters['safe_high_pins'] == [27]
+    assert 'safe_high_pins' not in default_manager[
+        'operation_manager_node']['ros__parameters']
     assert default_manager == practice_manager
 
 
