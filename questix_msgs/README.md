@@ -12,7 +12,7 @@ QUESTiX 共通メッセージ定義パッケージ。統一緊急停止インタ
 | `header` | `std_msgs/Header` | `stamp` = 判定時刻。`frame_id` は未使用(`""`) |
 | `active` | `bool` | `true` = 緊急停止発動 |
 | `source` | `string` | 発行元識別子(例: `"operation_manager"`) |
-| `reason` | `string` | 原因(例: `"pin 27 is false; "`、`"pin 27 timeout; "`)。解除時は `"released"` |
+| `reason` | `string` | 原因(例: `"pin 5 not received; "`、`"pin 27 is false, expected true; "`、`"pin 27 timeout; "`)。解除時は `"released"` |
 
 ### `MotorFeedback.msg`
 
@@ -57,10 +57,11 @@ DDT M0602C の Protocol 1 応答フレームをデコードした 1 モータ分
   購読側も同一 QoS を使うこと。late-join した購読者は最新のラッチ状態を即時受信する。
 - **発行元**: `operation_manager`。GPIO controllability 判定
   (`evaluate_controllability()`)の毎回実行時に発行する。
-  すなわち GPIO 更新毎(公称 ~20 Hz)+ 1 秒周期タイマーがハートビート下限。
+  すなわち GPIO 更新毎(公称 ~20 Hz)+ 100 ms watchdog timer。
   `active = !controllable`。
 - **発行者不在環境**: operation_manager は `enable_gpio_ref=true` の構成
-  (`joy_controller_referee.launch.xml`)でのみ起動する。購読側は
+  でdrive/shotの有無に依存せず `questix_core.launch.xml` から起動する。
+  standalone `joy_controller_referee.launch.xml` も互換性のため起動できる。購読側は
   メッセージを一度も受信していない間は通常動作を継続しなければならない
   (発行者不在で停止してはならない)。
 - **staleness 検出**: 購読側は「一度以上受信した後に」タイムアウト
@@ -88,6 +89,10 @@ DDT M0602C の Protocol 1 応答フレームをデコードした 1 モータ分
 | `single_ddt_motor_feedback` | `MotorFeedback` | `single_ddt_motor` | 相対名。launch で `/single_ddt_motor_feedback` に remap |
 | `joy_axis_drive_status` | `DriveStatus` | `joy_axis_drive` | 相対名。`linear/angular_velocity = 0.0` |
 | `/diagnostics` | `diagnostic_msgs/DiagnosticArray` | `operation_manager` | 標準集約トピック。rqt_runtime_monitor が設定なしで表示 |
+
+`operation_manager` の GPIO27 診断には `pin_27_signal_limit` が含まれる。
+GPIO27=`true` は許可だけでなく、AutoReferee未接続、クライアント無通電、
+一次側断線でも発生し、現行ハードウェアでは区別できないことを示す。
 
 ## モータ調整時のフィードバック監視
 

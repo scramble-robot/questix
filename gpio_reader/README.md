@@ -33,13 +33,42 @@ gpiodetect
 
 ## Configuration
 
-Edit `config/gpio_reader.yaml` to configure:
+The launch profiles are the single source of truth for monitored pins:
+
+- `config/gpio_reader.practice.yaml`: GPIO5 only
+- `config/gpio_reader.competition.yaml`: GPIO5 and GPIO27
+- `config/gpio_reader.yaml`: backward-compatible safe default, identical to
+  the practice profile
+
+`questix_core.launch.xml` selects the practice profile by default and the
+competition profile only when `enable_autoreferee:=true`.
+
+GPIO values are published as raw electrical Bool values; this package does not
+invert either input:
+
+- GPIO5: physical emergency-stop indication, `false` = released/safe and
+  `true` = pressed/stop (safe-low, stop-high)
+- GPIO27: AutoReferee `AR_in`, `true` = permission/safe and `false` =
+  stop (safe-high, stop-low), competition only
+
+The AutoReferee client defeat output is 5 V when defeated and 0 V otherwise.
+The HAT optocoupler inverts it: defeated turns the optocoupler on and produces
+GPIO27 `false`; not defeated leaves it off and R2 (10 kΩ) pulls GPIO27 to
+3.3 V/`true`. AutoReferee disconnected, client unpowered, and a primary-side
+open circuit also produce `true`. Current hardware cannot distinguish those
+conditions from a genuine not-defeated/permission state.
+
+The physical emergency-stop circuit cuts actuator power in hardware through
+RLY1. It removes power from both DDT drive motors, the roller ESC, the Shot
+servo, and the Tilt servo. Raspberry Pi, 5 V I/O, and 3.3 V I/O remain powered,
+so GPIO5 continues reporting the physical E-stop state to ROS. Hardware power
+removal and the independent ROS software stop are two separate safety paths.
+
+Each YAML configures:
 
 - `chip_name`: GPIO chip name (default: "gpiochip4" for Raspberry Pi 5)
 - `gpio_pins`: List of GPIO pins to monitor (BCM numbering)
 - `publish_rate`: Publishing frequency in Hz
-- `publish_individual`: Publish individual Bool topics for each pin
-- `publish_joy`: Publish combined Joy message
 
 ## Building
 
@@ -78,13 +107,10 @@ ros2 launch gpio_reader gpio_reader.launch.py config_file:=/path/to/custom_confi
 
 ## GPIO Pin Numbering
 
-This package uses BCM (Broadcom) GPIO numbering. Common pins on Raspberry Pi 5:
+This package uses BCM (Broadcom) GPIO numbering. QUESTiX safety inputs:
 
-- GPIO 17 (Physical pin 11)
-- GPIO 27 (Physical pin 13)
-- GPIO 22 (Physical pin 15)
-- GPIO 23 (Physical pin 16)
-- GPIO 24 (Physical pin 18)
+- GPIO5: physical emergency stop (HAT CN10 pin 3 / IO3)
+- GPIO27: competition AutoReferee `AR_in`
 
 ## Permissions
 
@@ -99,11 +125,11 @@ Then log out and log back in for the changes to take effect.
 ## Example: Reading GPIO States
 
 ```bash
-# Monitor combined GPIO state
-ros2 topic echo /gpio/state
+# GPIO5 is present in both profiles
+ros2 topic echo /gpio_5
 
-# Monitor individual GPIO pin
-ros2 topic echo /gpio_17
+# GPIO27 is present only in the competition profile
+ros2 topic echo /gpio_27
 ```
 
 ## Component Composition

@@ -4,7 +4,7 @@ systemd による ROS2 ノードの自動起動を設定するロール。
 
 ## 動作概要
 
-- `/etc/questix_robot/mode` が `competition` の時のみ、ブート時に `ros2 launch questix_launcher questix_core.launch.xml` を自動実行
+- `/etc/questix_robot/mode` が `competition` の時のみ、ブート時に `ros2 launch questix_launcher questix_core.launch.xml` を `enable_autoreferee:=true` 付きで自動実行
 - `practice`（デフォルト）の時はサービスは即正常終了し、ノードは起動しない
 - Launch 引数は `/etc/questix_robot/launch.env` で制御
 

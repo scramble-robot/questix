@@ -1,0 +1,13 @@
+operation_manager_node:
+  ros__parameters:
+    # Competition profile:
+    # safe_low_pins are safe when false (GPIO5 physical E-stop).
+    # safe_high_pins are safe when true (GPIO27 AutoReferee AR_in).
+    # Hardware also reads true when AutoReferee is disconnected/unpowered or
+    # its primary side is open, so software cannot distinguish those states.
+    safe_low_pins: [5]
+    safe_high_pins: [27]
+    timeout_seconds: 1.0
+    # questix_msgs/EmergencyStop, reliable + transient_local + keep-last 1.
+    # active is always the inverse of /gpio/controllable.
+    emergency_stop_topic: "/emergency_stop"

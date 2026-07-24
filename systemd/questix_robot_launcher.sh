@@ -48,6 +48,7 @@ LAUNCH_ARGS="${LAUNCH_ARGS} enable_lidar:=${ENABLE_LIDAR:-true}"
 LAUNCH_ARGS="${LAUNCH_ARGS} enable_shot:=${ENABLE_SHOT:-true}"
 LAUNCH_ARGS="${LAUNCH_ARGS} enable_drive:=${ENABLE_DRIVE:-true}"
 LAUNCH_ARGS="${LAUNCH_ARGS} enable_gpio_ref:=${ENABLE_GPIO_REF:-true}"
+LAUNCH_ARGS="${LAUNCH_ARGS} enable_autoreferee:=true"
 LAUNCH_ARGS="${LAUNCH_ARGS} enable_rviz:=${ENABLE_RVIZ:-false}"
 LAUNCH_ARGS="${LAUNCH_ARGS} controller_type:=${CONTROLLER_TYPE:-uart}"
 

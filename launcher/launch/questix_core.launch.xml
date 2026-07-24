@@ -6,8 +6,23 @@
   <arg name="enable_shot" default="$(env ENABLE_SHOT true)" description="Enable Shot component"/>
   <arg name="enable_drive" default="$(env ENABLE_DRIVE true)" description="Enable drive component"/>
   <arg name="enable_gpio_ref" default="$(env ENABLE_GPIO_REF true)" description="Enable GPIO reference system (gpio_reader + joy_gate)"/>
+  <arg name="enable_autoreferee" default="false" description="Use competition GPIO profile with AutoReferee GPIO27"/>
   <arg name="controller_type" default="$(env CONTROLLER_TYPE dualshock)" description="Controller type: dualshock or uart" />
   <arg name="enable_rviz" default="$(env ENABLE_RVIZ false)" description="Enable RViz visualization" />
+
+  <!-- Profile YAML files are the single source of truth for GPIO pins and polarity. -->
+  <let name="gpio_reader_config_file"
+       value="$(find-pkg-share gpio_reader)/config/gpio_reader.practice.yaml"
+       unless="$(var enable_autoreferee)" />
+  <let name="gpio_reader_config_file"
+       value="$(find-pkg-share gpio_reader)/config/gpio_reader.competition.yaml"
+       if="$(var enable_autoreferee)" />
+  <let name="operation_manager_config_file"
+       value="$(find-pkg-share operation_manager)/config/operation_manager.practice.yaml"
+       unless="$(var enable_autoreferee)" />
+  <let name="operation_manager_config_file"
+       value="$(find-pkg-share operation_manager)/config/operation_manager.competition.yaml"
+       if="$(var enable_autoreferee)" />
 
   <group if="$(var enable_shot)">
     <include file="$(find-pkg-share questix_launcher)/launch/shot_component.launch.xml">
@@ -19,6 +34,8 @@
   <group if="$(var enable_drive)">
     <include file="$(find-pkg-share questix_launcher)/launch/drive_component.launch.xml">
       <arg name="enable_gpio_ref" value="$(var enable_gpio_ref)"/>
+      <!-- questix_core owns the single integrated operation_manager process. -->
+      <arg name="enable_operation_manager" value="false"/>
       <arg name="controller_type" value="$(var controller_type)"/>
     </include>
   </group>
@@ -26,7 +43,12 @@
     <include file="$(find-pkg-share ydlidar_ros2_driver)/launch/ydlidar_launch.py"/>
   </group>
   <group if="$(var enable_gpio_ref)">
-    <include file="$(find-pkg-share gpio_reader)/launch/gpio_reader.launch.xml"/>
+    <include file="$(find-pkg-share gpio_reader)/launch/gpio_reader.launch.xml">
+      <arg name="config_file" value="$(var gpio_reader_config_file)" />
+    </include>
+    <include file="$(find-pkg-share operation_manager)/launch/operation_manager.launch.xml">
+      <arg name="config_file" value="$(var operation_manager_config_file)" />
+    </include>
   </group>
   <!-- RViz Visualization -->
   <node pkg="rviz2" exec="rviz2" name="rviz2" output="screen" if="$(var enable_rviz)" args="-d $(find-pkg-share ydlidar_ros2_driver)/config/ydlidar.rviz">

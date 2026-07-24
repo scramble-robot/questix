@@ -8,6 +8,7 @@ YAML を Single Source of Truth とし、個別パラメータの launch 引数�
   <arg name="joy_config_file" default="$(find-pkg-share joy_controller)/config/joy_controller_params.yaml" description="joy_controller configuration YAML" />
   <arg name="drive_config_file" default="$(find-pkg-share questix_launcher)/config/drive_component.yaml" description="drive_component configuration YAML" />
   <arg name="enable_gpio_ref" default="false" description="Enable GPIO reference system (gpio_reader + joy_gate)" />
+  <arg name="enable_operation_manager" default="true" description="Start operation_manager in standalone referee launch" />
   <arg name="controller_type" default="uart" description="Controller type: dualshock or uart" />
 
   <!-- Joy Controller component launch (without GPIO ref) -->
@@ -23,6 +24,7 @@ YAML を Single Source of Truth とし、個別パラメータの launch 引数�
     <include file="$(find-pkg-share joy_controller)/launch/joy_controller_referee.launch.xml">
       <arg name="config_file" value="$(var joy_config_file)" />
       <arg name="controller_type" value="$(var controller_type)" />
+      <arg name="enable_operation_manager" value="$(var enable_operation_manager)" />
     </include>
   </group>
 

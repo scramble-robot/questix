@@ -1,0 +1,11 @@
+gpio_reader_node:
+  ros__parameters:
+    # Competition profile:
+    # GPIO5 = physical E-stop raw input (safe-low, stop-high).
+    # GPIO27 = AutoReferee AR_in raw input (safe-high, stop-low).
+    # true also represents disconnected, client unpowered, or primary-side open;
+    # current hardware cannot distinguish those states from permission.
+    use_sim_time: false
+    chip_name: "/dev/gpiochip4"
+    gpio_pins: [5, 27]
+    publish_rate: 20.0
