@@ -67,9 +67,9 @@ GpioSafetyEvaluation GpioSafetyEvaluator::evaluate(double monotonic_now_seconds)
   for (const auto& pair : pins_) {
     const auto pin = pair.first;
     const auto& state = pair.second;
-    const bool invalid_time =
-        state.received &&
-        (!std::isfinite(monotonic_now_seconds) || !std::isfinite(state.last_update_seconds));
+    const bool invalid_time = state.received &&
+        (!std::isfinite(monotonic_now_seconds) ||
+                                                 !std::isfinite(state.last_update_seconds));
     const bool time_moved_backwards =
         state.received && !invalid_time && monotonic_now_seconds < state.last_update_seconds;
     const double age_seconds =

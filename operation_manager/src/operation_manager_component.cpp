@@ -13,8 +13,7 @@
 namespace {
 
 double steady_now_seconds() {
-  return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch())
-      .count();
+  return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
 }  // namespace
