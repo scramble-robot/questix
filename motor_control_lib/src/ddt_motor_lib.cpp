@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cmath>
 #include <cstring>
 #include <thread>
 
@@ -35,6 +36,7 @@ DdtMotorLib::DdtMotorLib(const std::string& serial_port, int baud_rate)
       accel_time_0p1ms_per_rpm_(50),
       command_wait_ms_(0),
       stop_resend_interval_ms_(200),
+      measured_lpf_tau_sec_(0.0),
       serial_fd_(-1) {
   logger_ = rclcpp::get_logger("DdtMotorLib");
 }
@@ -221,7 +223,8 @@ bool DdtMotorLib::getMotorStatus(int motor_id, int& velocity_rpm, uint8_t& tempe
   bool prefer_measured =
       (feedback_it != motor_feedbacks_.end() && feedback_it->second.has_feedback);
 
-  velocity_rpm = prefer_measured ? static_cast<int>(feedback_it->second.speed) : vel_it->second;
+  // レポート／オドメトリ経路ではローパス済みの実測 RPM を返す（tau<=0 で生値）。
+  velocity_rpm = prefer_measured ? measuredRpmForReport(feedback_it->second) : vel_it->second;
 
   if (feedback_it != motor_feedbacks_.end()) {
     temperature = feedback_it->second.temperature;
@@ -461,6 +464,24 @@ void DdtMotorLib::setStopResendIntervalMs(int interval_ms) {
   }
 }
 
+void DdtMotorLib::setMeasuredLowpassTau(double tau_sec) {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+  measured_lpf_tau_sec_ = (tau_sec > 0.0) ? tau_sec : 0.0;
+  if (measured_lpf_tau_sec_ > 0.0) {
+    RCLCPP_INFO(logger_, "実測RPMローパス: tau=%.3fs (fc≒%.2fHz)", measured_lpf_tau_sec_,
+                1.0 / (2.0 * M_PI * measured_lpf_tau_sec_));
+  } else {
+    RCLCPP_INFO(logger_, "実測RPMローパス: 無効（生値を使用）");
+  }
+}
+
+int DdtMotorLib::measuredRpmForReport(const MotorFeedback& fb) const {
+  if (measured_lpf_tau_sec_ > 0.0) {
+    return static_cast<int>(std::lround(fb.speed_filtered));
+  }
+  return static_cast<int>(fb.speed);
+}
+
 bool DdtMotorLib::sendMotorVelocity(int motor_id, int velocity_rpm, bool brake) {
   int velocity_int = std::clamp(velocity_rpm, -max_motor_rpm_, max_motor_rpm_);
 
@@ -654,6 +675,18 @@ bool DdtMotorLib::parseFeedback(int expected_motor_id, const std::vector<uint8_t
   //  DATA[6..7]=position, DATA[8]=fault code
   // マルチバイトは big-endian (high, low)。
   MotorFeedback& fb = motor_feedbacks_[expected_motor_id];
+  // 実測 RPM の一次ローパス（レポート用途）。tau<=0 または初回受信なら生値で初期化する。
+  // 可変サンプル間隔対応: alpha = dt / (tau + dt)。dt は前回受信からの経過。
+  const auto feedback_now = std::chrono::steady_clock::now();
+  if (measured_lpf_tau_sec_ > 0.0 && fb.has_feedback) {
+    const double dt =
+        std::chrono::duration<double>(feedback_now - fb.last_feedback_time).count();
+    const double alpha =
+        (dt > 0.0) ? std::clamp(dt / (measured_lpf_tau_sec_ + dt), 0.0, 1.0) : 0.0;
+    fb.speed_filtered += alpha * (static_cast<double>(decoded.speed) - fb.speed_filtered);
+  } else {
+    fb.speed_filtered = static_cast<double>(decoded.speed);
+  }
   fb.mode = decoded.mode;
   fb.current = decoded.current;
   fb.speed = decoded.speed;
@@ -661,7 +694,7 @@ bool DdtMotorLib::parseFeedback(int expected_motor_id, const std::vector<uint8_t
   // temperature は Protocol 2 (0x74) が必要なため未取得（常に 0 のまま保持）。
   fb.fault_code = decoded.fault_code;
   fb.has_feedback = true;
-  fb.last_feedback_time = std::chrono::steady_clock::now();
+  fb.last_feedback_time = feedback_now;
 
   // PI 状態側にも保存（受信失敗時のフォールバック用）
   auto pi_it = pi_states_.find(expected_motor_id);
@@ -749,7 +782,8 @@ bool DdtMotorLib::getMotorFeedbackData(int motor_id, MotorFeedbackData& out) con
     const MotorFeedback& fb = fb_it->second;
     out.mode = fb.mode;
     out.current_raw = fb.current;
-    out.velocity_rpm = fb.speed;
+    // レポート用途はローパス済み実測 RPM を返す（tau<=0 で生値）。
+    out.velocity_rpm = static_cast<int16_t>(measuredRpmForReport(fb));
     out.position_raw = fb.position;
     out.temperature = fb.temperature;  // 常に 0（Protocol 2 未実装）
     out.fault_code = fb.fault_code;

@@ -175,6 +175,10 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
   }
   RCLCPP_INFO(this->get_logger(), "  max_linear_accel: %.3f  max_angular_accel: %.3f",
               max_linear_accel_, max_angular_accel_);
+  RCLCPP_INFO(
+      this->get_logger(),
+      "  demand-scaled accel: linear[min=%.3f ref=%.3f] angular[min=%.3f ref=%.3f] (0=無効)",
+      min_linear_accel_, accel_demand_ref_linear_, min_angular_accel_, accel_demand_ref_angular_);
   RCLCPP_INFO(this->get_logger(), "  slew_taper_band_linear: %.3f  slew_taper_band_angular: %.3f",
               slew_taper_band_linear_, slew_taper_band_angular_);
 
@@ -325,7 +329,7 @@ void DriveComponent::declareParameters() {
   this->declare_parameter("left_motor_id", 4);
   this->declare_parameter("right_motor_id", 5);
   this->declare_parameter("max_motor_rpm", 475);
-  this->declare_parameter("status_publish_rate", 10.0);
+  this->declare_parameter("status_publish_rate", 50.0);
   // 型付きステータストピック（questix_msgs/DriveStatus）
   this->declare_parameter("typed_status_topic", "/drive_status");
 
@@ -337,23 +341,31 @@ void DriveComponent::declareParameters() {
   this->declare_parameter("integral_limit_amp", 0.3);
   this->declare_parameter("current_zero_deadband_rpm", 5);
   this->declare_parameter("current_invert_measured", true);
-  this->declare_parameter("max_linear_accel", 1.0);
+  this->declare_parameter("max_linear_accel", 3.0);
   this->declare_parameter("max_angular_accel", 2.0);
+
+  // デマンド適応加速度。スティックを速く/大きく倒すほど加速度上限を max へ、ゆっくり/わずか
+  // なら min へ寄せる。min_*_accel<=0 または accel_demand_ref_*<=0 で適応無効＝max の一定
+  // クランプ（従来挙動）。詳細は drive_slew::demandScaledAccel。
+  this->declare_parameter("min_linear_accel", 0.5);
+  this->declare_parameter("min_angular_accel", 0.35);
+  this->declare_parameter("accel_demand_ref_linear", 0.3);
+  this->declare_parameter("accel_demand_ref_angular", 0.5);
 
   // 目標接近時のレート絞り幅（実効ジャーク制限）。0 で無効＝従来の一次レート制限。
   // 詳細は drive_slew::clampRateTapered。
-  this->declare_parameter("slew_taper_band_linear", 0.15);
-  this->declare_parameter("slew_taper_band_angular", 0.3);
+  this->declare_parameter("slew_taper_band_linear", 0.4);
+  this->declare_parameter("slew_taper_band_angular", 0.9);
 
   // 停止時の電気ブレーキ（velocity モードのみ有効）
-  this->declare_parameter("brake_on_stop", true);
+  this->declare_parameter("brake_on_stop", false);
 
   // ファーム側加速時間 [0.1ms/rpm]（velocity モードのみ有効）。ホスト側スルーレート制限が
   // 生む階段状の目標変化をファームが補間する平滑化機構。詳細は DdtMotorLib::setAccelTime。
-  this->declare_parameter("accel_time_0p1ms_per_rpm", 50);
+  this->declare_parameter("accel_time_0p1ms_per_rpm", 1);
 
   // 指令を許す最低車輪 RPM（低速不感帯）。詳細は DifferentialDrive::setMinCommandRpm。
-  this->declare_parameter("min_command_rpm", 8);
+  this->declare_parameter("min_command_rpm", 5);
 
   // コマンド受信ウォッチドッグのタイムアウト [s]（velocity/current 両モードで有効）
   this->declare_parameter("cmd_timeout_sec", 1.0);
@@ -364,7 +376,11 @@ void DriveComponent::declareParameters() {
   // 停止継続中のブレーキ再送間隔 [ms]。高頻度でブレーキを再送し続けると、残留回転が
   // ある間は毎回新規の制動として作用し、収束せず持続的な振動を起こすことがある。
   // 0で無効（毎回送信、従来挙動）。
-  this->declare_parameter("stop_resend_interval_ms", 200);
+  this->declare_parameter("stop_resend_interval_ms", 0);
+
+  // 実測RPMローパスの時定数 [s]。フィードバック速度のノイズを平滑化する（レポート/オドメトリ
+  // 経路のみ、PI制御は生値のまま）。0以下で無効。詳細は DdtMotorLib::setMeasuredLowpassTau。
+  this->declare_parameter("measured_lpf_tau_sec", 0.1);
 
   // Lifecycle 自動遷移。非常停止解除でモータが通電するまで configure を再試行する。
   this->declare_parameter("auto_start", true);
@@ -399,6 +415,10 @@ void DriveComponent::readParameters() {
   current_invert_measured_ = this->get_parameter("current_invert_measured").as_bool();
   max_linear_accel_ = this->get_parameter("max_linear_accel").as_double();
   max_angular_accel_ = this->get_parameter("max_angular_accel").as_double();
+  min_linear_accel_ = this->get_parameter("min_linear_accel").as_double();
+  min_angular_accel_ = this->get_parameter("min_angular_accel").as_double();
+  accel_demand_ref_linear_ = this->get_parameter("accel_demand_ref_linear").as_double();
+  accel_demand_ref_angular_ = this->get_parameter("accel_demand_ref_angular").as_double();
   slew_taper_band_linear_ = this->get_parameter("slew_taper_band_linear").as_double();
   slew_taper_band_angular_ = this->get_parameter("slew_taper_band_angular").as_double();
   brake_on_stop_ = this->get_parameter("brake_on_stop").as_bool();
@@ -409,6 +429,7 @@ void DriveComponent::readParameters() {
   command_wait_ms_ = static_cast<int>(this->get_parameter("command_wait_ms").as_int());
   stop_resend_interval_ms_ =
       static_cast<int>(this->get_parameter("stop_resend_interval_ms").as_int());
+  measured_lpf_tau_sec_ = this->get_parameter("measured_lpf_tau_sec").as_double();
   publish_tf_ = this->get_parameter("publish_tf").as_bool();
   odom_topic_ = this->get_parameter("odom_topic").as_string();
   odom_frame_id_ = this->get_parameter("odom_frame_id").as_string();
@@ -437,6 +458,9 @@ bool DriveComponent::initializeMotorLib() {
 
     // 停止継続中のブレーキ再送間隔（停止直後の持続振動の緩和用）
     motor_lib_->setStopResendIntervalMs(stop_resend_interval_ms_);
+
+    // 実測RPMローパス（フィードバック速度のノイズ平滑化。レポート/オドメトリ経路のみ）
+    motor_lib_->setMeasuredLowpassTau(measured_lpf_tau_sec_);
 
     // モータライブラリを初期化（シリアルポートを開く。未通電なら失敗して再試行に回る）
     if (!motor_lib_->initialize()) {
@@ -540,10 +564,15 @@ void DriveComponent::twistCallback(const geometry_msgs::msg::Twist::SharedPtr ms
                                       has_last_cmd_ ? (now - last_cmd_time_).seconds() : 0.0);
   // 目標接近時はレートを絞る（slew_taper_band_* > 0 のとき）。飽和点で加速度がステップで
   // 0 に落ちるのを避け、ファーム速度ループのランプ終端オーバーシュートを励起しない。
-  double target_linear = drive_slew::clampRateTapered(
-      msg->linear.x, last_cmd_linear_, max_linear_accel_, dt, slew_taper_band_linear_);
-  double target_angular = drive_slew::clampRateTapered(
-      msg->angular.z, last_cmd_angular_, max_angular_accel_, dt, slew_taper_band_angular_);
+  // 加速度上限はデマンド（残差 = |目標 - 前回指令|）に応じて min_*_accel..max_*_accel へ
+  // 適応させる。スティックを速く倒すほど残差が大きく加速度が強くなる。適応無効時（min<=0 /
+  // ref<=0）は max_*_accel 一定の従来挙動。
+  double target_linear = drive_slew::clampRateAdaptive(
+      msg->linear.x, last_cmd_linear_, min_linear_accel_, max_linear_accel_,
+      accel_demand_ref_linear_, dt, slew_taper_band_linear_);
+  double target_angular = drive_slew::clampRateAdaptive(
+      msg->angular.z, last_cmd_angular_, min_angular_accel_, max_angular_accel_,
+      accel_demand_ref_angular_, dt, slew_taper_band_angular_);
   last_cmd_linear_ = target_linear;
   last_cmd_angular_ = target_angular;
   last_cmd_time_ = now;

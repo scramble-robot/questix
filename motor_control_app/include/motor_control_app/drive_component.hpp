@@ -193,6 +193,14 @@ private:
   // 加速度制限（スルーレート）
   double max_linear_accel_;   // [m/s^2] 負値または0で制限無効
   double max_angular_accel_;  // [rad/s^2] 負値または0で制限無効
+  // デマンド適応加速度の下限。スティックをゆっくり/わずかに倒したときの加速度上限。
+  // 0 以下で適応無効＝max_*_accel の一定クランプ（従来挙動）。詳細は drive_slew::demandScaledAccel。
+  double min_linear_accel_{0.0};   // [m/s^2]
+  double min_angular_accel_{0.0};  // [rad/s^2]
+  // 加速度が min から max へ達するデマンド基準（残差 = |目標 - 前回指令|）。
+  // 0 以下で適応無効。詳細は drive_slew::demandScaledAccel。
+  double accel_demand_ref_linear_{0.0};   // [m/s]
+  double accel_demand_ref_angular_{0.0};  // [rad/s]
   // 目標接近時のレート絞り幅（実効的なジャーク制限）。残差がこの幅に入ると 1 ステップの
   // 上限を残差比例で縮め、飽和点で加速度がステップで 0 に落ちないようにする。0 で無効
   // （従来の一次レート制限）。詳細は drive_slew::clampRateTapered。
@@ -221,6 +229,9 @@ private:
 
   // 停止継続中のブレーキ再送間隔 [ms]。0で無効（毎回送信、従来挙動）
   int stop_resend_interval_ms_{200};
+
+  // 実測RPMローパスの時定数 [s]。<=0で無効（生値）。レポート/オドメトリ経路のみ平滑化する
+  double measured_lpf_tau_sec_{0.0};
 
   // Lifecycle 自動起動（モータ通電まで configure を再試行する）
   bool auto_start_{true};

@@ -142,6 +142,19 @@ public:
    */
   void setStopResendIntervalMs(int interval_ms);
 
+  /**
+   * @brief 実測 RPM に掛ける一次ローパスフィルタの時定数 [s] を設定する。
+   *  - M0602C のフィードバック速度はサンプル毎の量子化・振動でノイズが大きい。レポート用途
+   *    （getMotorStatus / getMotorFeedbackData 経由の型付きステータス・オドメトリ）で使う実測
+   *    RPM を平滑化する。
+   *  - 一次ローパス（可変サンプル間隔対応）: filtered += dt/(tau+dt) * (raw - filtered)。
+   *    遮断周波数の目安 fc ≒ 1 / (2π·tau) [Hz]（例: tau=0.1s → fc≒1.6Hz）。
+   *  - tau <= 0 で無効（生値をそのまま返す = 従来挙動）。
+   *  - フィルタは制御ループには掛からない: current モードの PI は生の実測 RPM を使い続けるため
+   *    制御の位相遅れは増えない。平滑化はあくまでレポート／オドメトリ側にのみ効く。
+   */
+  void setMeasuredLowpassTau(double tau_sec);
+
   // DDT motor control methods (deprecated - use IIndividualMotor interface)
 
   // Multi-motor status
@@ -200,10 +213,11 @@ private:
   // Motor feedback structure
   struct MotorFeedback {
     uint8_t mode{0};
-    int16_t current{0};      // トルク電流生値（符号付き）: DATA[2..3]
-    int16_t speed{0};        // 実測 RPM（符号付き）: DATA[4..5]
-    uint16_t position{0};    // ロータ位置: DATA[6..7]
-    uint8_t temperature{0};  // 常に 0（Protocol 2 (0x74) 未実装）
+    int16_t current{0};        // トルク電流生値（符号付き）: DATA[2..3]
+    int16_t speed{0};          // 実測 RPM（符号付き, 生値）: DATA[4..5]
+    double speed_filtered{0.0};  // 実測 RPM の一次ローパス出力（レポート用途）
+    uint16_t position{0};      // ロータ位置: DATA[6..7]
+    uint8_t temperature{0};    // 常に 0（Protocol 2 (0x74) 未実装）
     uint8_t fault_code{0};
     bool has_feedback{false};  // 一度でも有効フィードバックを parse したか
     std::chrono::steady_clock::time_point last_feedback_time{};  // 最終受信時刻
@@ -236,6 +250,7 @@ private:
   bool brake_on_stop_;  // 停止時に電気ブレーキを使う（velocity モードのみ）
   int accel_time_0p1ms_per_rpm_;  // ファーム加速時間 DATA[6] [0.1ms/rpm]（velocity モードのみ）
   int command_wait_ms_;  // 指令送信後の追加待機 [ms]。0で無効（実機の間隔要件用の保険）
+  double measured_lpf_tau_sec_;  // 実測RPMローパスの時定数 [s]。<=0で無効（生値）
   int stop_resend_interval_ms_;  // 停止継続中のブレーキ再送間隔 [ms]。0で無効（毎回送信）
 
   // Serial communication
@@ -271,6 +286,9 @@ private:
   void resetCurrentPiStateForStop(int motor_id);
   bool readFeedbackFrame(int expected_motor_id, std::vector<uint8_t>& out_frame, int timeout_ms);
   bool parseFeedback(int expected_motor_id, const std::vector<uint8_t>& frame);
+  // レポート／オドメトリ用途で返す実測 RPM。measured_lpf_tau_sec_ > 0 ならローパス済み
+  // 値を四捨五入し、そうでなければ生値を返す（PI 制御は生値を別途参照するため無影響）。
+  int measuredRpmForReport(const MotorFeedback& fb) const;
 
   // Utility methods
   bool drainSerialOutput();
