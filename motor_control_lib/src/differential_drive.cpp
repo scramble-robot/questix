@@ -21,10 +21,6 @@ constexpr double kStopEnterLinearMps = 0.005;
 constexpr double kStopEnterAngularRadps = 0.005;
 constexpr double kStopExitLinearMps = 0.02;
 constexpr double kStopExitAngularRadps = 0.02;
-
-// 電気ブレーキ投入を許す実測RPMの上限。これより速く回っている間にブレーキを送ると
-// 毎回新規の制動として作用し、収束しない振動（リミットサイクル）を起こすことがある。
-constexpr int kBrakeMaxMeasuredRpm = 15;
 }  // namespace
 
 DifferentialDrive::DifferentialDrive(std::shared_ptr<DdtMotorLib> motor_lib, int left_motor_id,
@@ -72,25 +68,14 @@ bool DifferentialDrive::setVelocity(double linear_x, double angular_z) {
 }
 
 bool DifferentialDrive::commandStop() {
-  // 残留回転が大きい間に電気ブレーキを送ると毎回新規の制動として作用し、収束しない
-  // 振動（リミットサイクル）を起こすことがある。実測RPMが閾値を超える間は目標0
-  // （無ブレーキ）を送ってファーム側の accel_time ランプで減速させ、閾値未満に
-  // なってから stopMotor（ブレーキ+再送スロットル）へ移行する。
-  // フィードバック未受信時は getMotorStatus が目標値を返すため、そのままブレーキ経路に入る。
-  int left_rpm = 0;
-  int right_rpm = 0;
-  uint8_t temp, fault;
-  bool have_status = motor_lib_->getMotorStatus(left_motor_id_, left_rpm, temp, fault) &&
-                     motor_lib_->getMotorStatus(right_motor_id_, right_rpm, temp, fault);
-  if (have_status &&
-      (std::abs(left_rpm) > kBrakeMaxMeasuredRpm || std::abs(right_rpm) > kBrakeMaxMeasuredRpm)) {
-    bool success = true;
-    success &= motor_lib_->setMotorVelocity(left_motor_id_, 0);
-    success &= motor_lib_->setMotorVelocity(right_motor_id_, 0);
-    return success;
-  }
-
-  // stopMotor は current モードの PI 積分リセットと velocity モードの brake_on_stop を担う。
+  // 停止は必ずブレーキ経路（stopMotor）を通す。
+  // 実測RPMで「まだ回っているうちはブレーキを送らない」ゲートを一度入れたが、これは
+  // 危険な回帰だった: 速度ループでブレーキ無しの目標0は能動的な0保持にならないため、
+  // 車輪を浮かせて摩擦が無い状態では減速せず、実測が閾値を超えたままブレーキが永久に
+  // 入らず回り続ける（実機で確認）。加えて getMotorStatus には鮮度ゲートが無く、
+  // 固まった古い実測値でも同じラッチに入る。
+  // 残留回転中のブレーキ連打によるリミットサイクルは、DdtMotorLib 側の
+  // stop_resend_interval_ms（再送スロットル）で抑える方針に一本化する。
   bool success = true;
   success &= motor_lib_->stopMotor(left_motor_id_);
   success &= motor_lib_->stopMotor(right_motor_id_);
