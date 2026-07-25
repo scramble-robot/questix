@@ -188,6 +188,9 @@ public:
    *  保持する。走行中はフィードバックが新鮮なので実質 no-op。アイドル時のみ
    *  1 モータあたり最悪 ~10ms のシリアル待ちが加わる点に注意（呼び出し元が
    *  単一スレッドエグゼキュータでステータスタイマーから呼ぶ前提）。
+   *  停止フレーム（指令値0）の再送は stopMotor と同じ stop_resend_interval_ms
+   *  スロットルに従う（残留回転中のブレーキ連打防止）。スロットル中は再送せず
+   *  false を返す（停止中の実測は多少古くても許容する）。
    * @return 呼び出し後にフィードバックが新鮮なら true。
    */
   bool refreshMotorFeedback(int motor_id, double max_age_sec = 0.05);

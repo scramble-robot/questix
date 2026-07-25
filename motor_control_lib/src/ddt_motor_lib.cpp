@@ -782,7 +782,26 @@ bool DdtMotorLib::refreshMotorFeedback(int motor_id, double max_age_sec) {
   if (frame_it == last_sent_frames_.end()) {
     return false;  // 送信履歴なし（未指令）
   }
+
+  // 停止フレーム（指令値0）の再送は stopMotor と同じ再送間隔スロットルに従う。
+  // ステータスタイマ（~10Hz）経由の再送がスロットルをバイパスすると、残留回転がある間
+  // ブレーキが毎回新規の制動として作用し続けてしまう。スロットル中は再送せず、保持
+  // フィードバックのまま返す（停止中の実測は多少古くても許容。鮮度は feedback_age_sec
+  // で観測できる）。
+  const bool stop_frame = ddt_protocol::isZeroVelocityFrame(frame_it->second);
+  if (stop_frame && stop_resend_interval_ms_ > 0) {
+    auto now = std::chrono::steady_clock::now();
+    auto last_it = last_stop_send_time_.find(motor_id);
+    if (last_it != last_stop_send_time_.end() &&
+        std::chrono::duration_cast<std::chrono::milliseconds>(now - last_it->second).count() <
+            stop_resend_interval_ms_) {
+      return false;
+    }
+  }
   sendFrameWithFeedback(motor_id, frame_it->second);
+  if (stop_frame) {
+    last_stop_send_time_[motor_id] = std::chrono::steady_clock::now();
+  }
 
   fb_it = motor_feedbacks_.find(motor_id);
   return fb_it != motor_feedbacks_.end() && fb_it->second.has_feedback &&

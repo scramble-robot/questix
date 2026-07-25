@@ -71,6 +71,17 @@ std::vector<uint8_t> packVelocityFrame(uint8_t motor_id, int16_t velocity_rpm, u
 std::vector<uint8_t> packCurrentFrame(uint8_t motor_id, int16_t current_raw);
 
 /**
+ * @brief Protocol 1 (0x64) の指令値 0 フレーム（停止指令）かを判定する。
+ *
+ * DATA[1]==0x64 かつ DATA[2..3]（指令値）が 0 のとき true。ブレーキバイトの有無は問わない
+ * （brake_on_stop 無効時の停止フレームも対象）。refreshMotorFeedback が停止フレームの
+ * 再送を stopMotor と同じ再送間隔スロットルに従わせるための判定に使う。
+ *
+ * @param frame 送信フレーム（全 10 バイトを期待。異なる長さは false）
+ */
+bool isZeroVelocityFrame(const std::vector<uint8_t>& frame);
+
+/**
  * @brief Protocol 1 応答フレームのデコード結果。
  */
 struct Feedback {
