@@ -55,6 +55,14 @@ TEST(PackVelocityFrame, BrakeSetsByte7) {
   EXPECT_EQ(frame[9], ddt::crc8Maxim(payloadOf(frame)));
 }
 
+TEST(PackVelocityFrame, AccelTimeSetsByte6) {
+  // DATA[6] = 加速時間（0.1 ms/rpm 単位、M0602C 仕様）
+  auto frame = ddt::packVelocityFrame(1, 100, 50, false);
+  ASSERT_EQ(frame.size(), 10u);
+  EXPECT_EQ(frame[6], 50);
+  EXPECT_EQ(frame[9], ddt::crc8Maxim(payloadOf(frame)));
+}
+
 TEST(PackCurrentFrame, NegativeRawIsBigEndian) {
   auto frame = ddt::packCurrentFrame(1, -100);
   ASSERT_EQ(frame.size(), 10u);

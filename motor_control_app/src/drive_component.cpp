@@ -299,7 +299,7 @@ void DriveComponent::declareParameters() {
   this->declare_parameter("wheel_separation", 0.5);
   this->declare_parameter("left_motor_id", 4);
   this->declare_parameter("right_motor_id", 5);
-  this->declare_parameter("max_motor_rpm", 1000);
+  this->declare_parameter("max_motor_rpm", 475);
   this->declare_parameter("status_publish_rate", 10.0);
   // 型付きステータストピック（questix_msgs/DriveStatus）
   this->declare_parameter("typed_status_topic", "/drive_status");
@@ -320,6 +320,10 @@ void DriveComponent::declareParameters() {
 
   // 停止時の電気ブレーキ（velocity モードのみ有効）
   this->declare_parameter("brake_on_stop", true);
+
+  // ファーム側加速時間 [0.1ms/rpm]（velocity モードのみ有効）。ホスト側スルーレート制限が
+  // 生む階段状の目標変化をファームが補間する平滑化機構。詳細は DdtMotorLib::setAccelTime。
+  this->declare_parameter("accel_time_0p1ms_per_rpm", 50);
 
   // コマンド受信ウォッチドッグのタイムアウト [s]（velocity/current 両モードで有効）
   this->declare_parameter("cmd_timeout_sec", 1.0);
@@ -367,6 +371,8 @@ void DriveComponent::readParameters() {
   max_linear_accel_ = this->get_parameter("max_linear_accel").as_double();
   max_angular_accel_ = this->get_parameter("max_angular_accel").as_double();
   brake_on_stop_ = this->get_parameter("brake_on_stop").as_bool();
+  accel_time_0p1ms_per_rpm_ =
+      static_cast<int>(this->get_parameter("accel_time_0p1ms_per_rpm").as_int());
   cmd_timeout_sec_ = this->get_parameter("cmd_timeout_sec").as_double();
   command_wait_ms_ = static_cast<int>(this->get_parameter("command_wait_ms").as_int());
   stop_resend_interval_ms_ =
@@ -390,6 +396,9 @@ bool DriveComponent::initializeMotorLib() {
 
     // 停止時の電気ブレーキ設定（velocity モードのみ有効）
     motor_lib_->setBrakeOnStop(brake_on_stop_);
+
+    // ファーム側加速時間（velocity モードのみ有効）
+    motor_lib_->setAccelTime(accel_time_0p1ms_per_rpm_);
 
     // 送信目標RPMへのヒステリシス（velocity/current 両モード共通）
     motor_lib_->setCommandRpmHysteresis(command_rpm_hysteresis_);

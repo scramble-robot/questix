@@ -208,6 +208,9 @@ private:
   // 停止時の電気ブレーキ（velocity モードのみ）
   bool brake_on_stop_{true};
 
+  // ファーム側加速時間 [0.1ms/rpm]（velocity モードのみ）
+  int accel_time_0p1ms_per_rpm_{50};
+
   // 指令送信後の追加待機 [ms]。0で無効（DDT M0602C の間隔要件用の保険）
   int command_wait_ms_{0};
 

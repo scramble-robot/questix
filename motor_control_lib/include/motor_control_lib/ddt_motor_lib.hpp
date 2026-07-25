@@ -38,6 +38,9 @@ enum class ControlMode {
  */
 class DdtMotorLib : public BaseMotorController, public IIndividualMotor {
 public:
+  // M0602C 仕様の速度ループ指令範囲上限 [rpm]（-475..475）。これを超える指令は仕様外。
+  static constexpr int kSpecVelocityMaxRpm = 475;
+
   explicit DdtMotorLib(const std::string& serial_port = "/dev/ttyACM0", int baud_rate = 115200);
   virtual ~DdtMotorLib();
 
@@ -116,6 +119,16 @@ public:
    *  - ブレーキは速度ループモードでのみ有効（仕様）。current モードは対象外。
    */
   void setBrakeOnStop(bool enable);
+
+  /**
+   * @brief ファーム側加速時間（Protocol 1 の DATA[6]）を設定（velocity モードのみ有効）。
+   *  - 単位は 0.1 ms/rpm（M0602C 仕様）。1 rpm の目標変化あたりのランプ時間を表す。
+   *    例: 50 -> 5 ms/rpm（100 rpm のステップを 0.5 s かけてランプ）。
+   *  - ホスト側スルーレート制限が生む階段状の目標変化をファームが補間する唯一の
+   *    平滑化機構。小さすぎると各ステップがほぼステップ入力になり微振動の原因になる。
+   *  - 1..255 にクランプする（0 はファーム既定 = 0.1 ms/rpm 扱いのため使わない）。
+   */
+  void setAccelTime(int accel_time_0p1ms_per_rpm);
 
   /**
    * @brief 指令送信後の追加待機時間 [ms] を設定（velocity / current 送信経路共通）。
@@ -227,6 +240,7 @@ private:
   bool current_invert_measured_;          // measured RPM 符号反転（正帰還押さえ用）
   double current_max_accel_rpm_per_sec_;  // 目標RPMスルーレート上限 [RPM/s]。0以下で無効
   bool brake_on_stop_;  // 停止時に電気ブレーキを使う（velocity モードのみ）
+  int accel_time_0p1ms_per_rpm_;  // ファーム加速時間 DATA[6] [0.1ms/rpm]（velocity モードのみ）
   int command_wait_ms_;  // 指令送信後の追加待機 [ms]。0で無効（実機の間隔要件用の保険）
   int stop_resend_interval_ms_;  // 停止継続中のブレーキ再送間隔 [ms]。0で無効（毎回送信）
 

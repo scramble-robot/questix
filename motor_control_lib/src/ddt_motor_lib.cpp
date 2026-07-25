@@ -33,6 +33,7 @@ DdtMotorLib::DdtMotorLib(const std::string& serial_port, int baud_rate)
       current_invert_measured_(false),
       current_max_accel_rpm_per_sec_(0.0),
       brake_on_stop_(true),
+      accel_time_0p1ms_per_rpm_(50),
       command_wait_ms_(0),
       stop_resend_interval_ms_(200),
       serial_fd_(-1) {
@@ -322,6 +323,13 @@ int DdtMotorLib::getMaxRpm() const { return max_motor_rpm_; }
 
 bool DdtMotorLib::setMaxRpm(int max_rpm) {
   std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+  // M0602C の速度ループ指令範囲は ±475 rpm（仕様）。範囲外の指令はファーム挙動が未定義の
+  // ため、上限として機能しない値を黙って受け付けず仕様上限にクランプする。
+  if (max_rpm > kSpecVelocityMaxRpm) {
+    RCLCPP_WARN(logger_, "max_rpm %d は M0602C 速度指令範囲 ±%d rpm を超えるためクランプします",
+                max_rpm, kSpecVelocityMaxRpm);
+    max_rpm = kSpecVelocityMaxRpm;
+  }
   max_motor_rpm_ = max_rpm;
   return true;
 }
@@ -442,6 +450,13 @@ void DdtMotorLib::setBrakeOnStop(bool enable) {
   RCLCPP_INFO(logger_, "停止時電気ブレーキ: %s", enable ? "ON" : "OFF");
 }
 
+void DdtMotorLib::setAccelTime(int accel_time_0p1ms_per_rpm) {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+  accel_time_0p1ms_per_rpm_ = std::clamp(accel_time_0p1ms_per_rpm, 1, 255);
+  RCLCPP_INFO(logger_, "ファーム加速時間: %d (0.1ms/rpm 単位 = %.1f ms/rpm)",
+              accel_time_0p1ms_per_rpm_, accel_time_0p1ms_per_rpm_ * 0.1);
+}
+
 void DdtMotorLib::setCommandWaitMs(int wait_ms) {
   std::lock_guard<std::recursive_mutex> lock(state_mutex_);
   command_wait_ms_ = std::max(0, wait_ms);
@@ -465,9 +480,10 @@ void DdtMotorLib::setStopResendIntervalMs(int interval_ms) {
 bool DdtMotorLib::sendMotorVelocity(int motor_id, int velocity_rpm, bool brake) {
   int velocity_int = std::clamp(velocity_rpm, -max_motor_rpm_, max_motor_rpm_);
 
-  // フレーム組み立ては ddt_protocol::packVelocityFrame に集約。加速時間は従来通り 10 固定。
+  // フレーム組み立ては ddt_protocol::packVelocityFrame に集約。
   std::vector<uint8_t> data_fields = ddt_protocol::packVelocityFrame(
-      static_cast<uint8_t>(motor_id), static_cast<int16_t>(velocity_int), /*accel_time=*/10, brake);
+      static_cast<uint8_t>(motor_id), static_cast<int16_t>(velocity_int),
+      static_cast<uint8_t>(accel_time_0p1ms_per_rpm_), brake);
 
   // 固定スリープ付きの sendCommand は使わない（50Hz 指令に追従できなくなる）。
   // 応答フレームの消費により motor_feedbacks_ も更新される。
