@@ -5,23 +5,13 @@
 // https://opensource.org/licenses/MIT.
 #include "motor_control_lib/differential_drive.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <rclcpp/rclcpp.hpp>
 
-namespace motor_control_lib {
+#include "motor_control_lib/drive_stop_gate.hpp"
 
-namespace {
-// 停止/走行モードの2閾値ヒステリシス。
-// 入り（走行->停止）: 両軸ともこの値未満。減速スルーレート制限がゼロへ収束する途中の
-// 微小な非ゼロ指令を「停止」とみなすため、厳密な == 0.0 ではなく閾値判定にする。
-// 抜け（停止->走行）: どちらかの軸がこの値を超える。入りと同じ閾値だと境界付近の
-// ノイズやランプのディザで停止/走行フレームが指令レートでトグルするため、抜けは
-// 高めに取る（0.02 m/s は車輪約 2 RPM 相当で、実用上の最低速度指令より十分小さい）。
-constexpr double kStopEnterLinearMps = 0.005;
-constexpr double kStopEnterAngularRadps = 0.005;
-constexpr double kStopExitLinearMps = 0.02;
-constexpr double kStopExitAngularRadps = 0.02;
-}  // namespace
+namespace motor_control_lib {
 
 DifferentialDrive::DifferentialDrive(std::shared_ptr<DdtMotorLib> motor_lib, int left_motor_id,
                                      int right_motor_id, double wheel_radius,
@@ -37,34 +27,34 @@ bool DifferentialDrive::setVelocity(double linear_x, double angular_z) {
     return false;
   }
 
-  // 停止/走行モードを2閾値で更新（境界でのフレームトグル防止。閾値は冒頭の定数参照）。
-  if (stop_mode_) {
-    if (std::abs(linear_x) > kStopExitLinearMps || std::abs(angular_z) > kStopExitAngularRadps) {
-      stop_mode_ = false;
-    }
-  } else {
-    if (std::abs(linear_x) < kStopEnterLinearMps && std::abs(angular_z) < kStopEnterAngularRadps) {
-      stop_mode_ = true;
-    }
-  }
+  auto [left_rpm, right_rpm] = twistToMotorVelocities(linear_x, angular_z);
+
+  // ゼロ方向への切り捨ては左右で量子化が非対称になるため最近接整数へ丸める
+  const int left_cmd = static_cast<int>(std::lround(left_rpm));
+  const int right_cmd = static_cast<int>(std::lround(right_rpm));
+
+  // 停止/走行モードを車輪 RPM で判定する（前後と旋回が合成された実際の車輪速度で見る）。
+  // ヒステリシス付き。詳細は drive_stop_gate.hpp。
+  const int max_abs_rpm = std::max(std::abs(left_cmd), std::abs(right_cmd));
+  stop_mode_ = drive_stop_gate::updateStopMode(stop_mode_, max_abs_rpm, min_command_rpm_);
 
   if (stop_mode_) {
     return commandStop();
   }
 
-  auto [left_rpm, right_rpm] = twistToMotorVelocities(linear_x, angular_z);
-
   RCLCPP_DEBUG(rclcpp::get_logger("DifferentialDrive"),
-               "速度指令 - 線形: %.3f m/s, 角速度: %.3f rad/s -> 左: %.1f RPM, 右: %.1f RPM",
-               linear_x, angular_z, left_rpm, right_rpm);
+               "速度指令 - 線形: %.3f m/s, 角速度: %.3f rad/s -> 左: %d RPM, 右: %d RPM", linear_x,
+               angular_z, left_cmd, right_cmd);
 
-  // ゼロ方向への切り捨ては左右で量子化が非対称になるため最近接整数へ丸める
   bool success = true;
-  success &= motor_lib_->setMotorVelocity(left_motor_id_, static_cast<int>(std::lround(left_rpm)));
-  success &=
-      motor_lib_->setMotorVelocity(right_motor_id_, static_cast<int>(std::lround(right_rpm)));
+  success &= motor_lib_->setMotorVelocity(left_motor_id_, left_cmd);
+  success &= motor_lib_->setMotorVelocity(right_motor_id_, right_cmd);
 
   return success;
+}
+
+void DifferentialDrive::setMinCommandRpm(int min_command_rpm) {
+  min_command_rpm_ = std::max(0, min_command_rpm);
 }
 
 bool DifferentialDrive::commandStop() {

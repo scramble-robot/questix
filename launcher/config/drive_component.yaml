@@ -61,7 +61,17 @@ drive_component:
     # ホスト側スルーレート制限（max_*_accel）が生む階段状の目標変化をファームが補間する
     # 平滑化機構。小さすぎると各ステップがほぼステップ入力になり加減速中の微振動の原因に
     # なる。1..255 にクランプ。実機で 30..100 を目安に調整する。
-    accel_time_0p1ms_per_rpm: 50
+    accel_time_0p1ms_per_rpm: 100
+
+    # 指令を許す最低車輪RPM（低速不感帯）。左右輪の指令RPMがいずれもこの値未満なら停止扱い。
+    # M0602Cのファーム速度ループは低速域ほど減衰が悪く、わずかな速度を保持させようとすると
+    # 収束せず振動し続ける（実機ログ: 目標95RPM一定で実測59〜118RPMを約1.8Hzで往復、
+    # 低速側はさらに悪化）。その領域を指令しないための不感帯。0で無効。
+    # 換算: 1 RPM ≒ 0.0105 m/s（wheel_radius 0.1）。8 RPM ≒ 0.084 m/s。
+    # 注意: 旋回のみの指令では車輪RPMは最大でも angular_z × wheel_separation/2 相当
+    # （angular_input_ratio 1.0 なら約24RPM）しか出ないため、上げすぎると旋回の低速側が
+    # 丸ごと使えなくなる。実機で 5〜15 を目安に調整する。
+    min_command_rpm: 8
 
     # /target_twist 受信ウォッチドッグ。
     # 指令がこの秒数途絶えたら走行モータを停止する（velocity/current 両モードで有効）。
@@ -84,7 +94,7 @@ drive_component:
     stop_resend_interval_ms: 200
 
     # パブリッシュ設定
-    status_publish_rate: 10.0 # ステータスパブリッシュ頻度 [Hz]
+    status_publish_rate: 50.0 # ステータスパブリッシュ頻度 [Hz]
     # 型付きステータス出力先（questix_msgs/DriveStatus）。契約は questix_msgs/README.md。
     # 左右モータの電流/速度/位置/fault を型付きで確認したいときはこちらを echo してください。
     typed_status_topic: "/drive_status"

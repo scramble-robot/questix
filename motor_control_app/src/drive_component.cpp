@@ -174,6 +174,7 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
     RCLCPP_INFO(this->get_logger(), "  current_zero_deadband_rpm: %d", current_zero_deadband_rpm_);
   }
   RCLCPP_INFO(this->get_logger(), "  accel_time_0p1ms_per_rpm: %d", accel_time_0p1ms_per_rpm_);
+  RCLCPP_INFO(this->get_logger(), "  min_command_rpm: %d", min_command_rpm_);
 
   // twist 購読（コールバックは ACTIVE のときのみ処理する）
   twist_subscription_ = this->create_subscription<geometry_msgs::msg::Twist>(
@@ -323,6 +324,9 @@ void DriveComponent::declareParameters() {
   // 生む階段状の目標変化をファームが補間する平滑化機構。詳細は DdtMotorLib::setAccelTime。
   this->declare_parameter("accel_time_0p1ms_per_rpm", 50);
 
+  // 指令を許す最低車輪 RPM（低速不感帯）。詳細は DifferentialDrive::setMinCommandRpm。
+  this->declare_parameter("min_command_rpm", 8);
+
   // コマンド受信ウォッチドッグのタイムアウト [s]（velocity/current 両モードで有効）
   this->declare_parameter("cmd_timeout_sec", 1.0);
 
@@ -370,6 +374,7 @@ void DriveComponent::readParameters() {
   brake_on_stop_ = this->get_parameter("brake_on_stop").as_bool();
   accel_time_0p1ms_per_rpm_ =
       static_cast<int>(this->get_parameter("accel_time_0p1ms_per_rpm").as_int());
+  min_command_rpm_ = static_cast<int>(this->get_parameter("min_command_rpm").as_int());
   cmd_timeout_sec_ = this->get_parameter("cmd_timeout_sec").as_double();
   command_wait_ms_ = static_cast<int>(this->get_parameter("command_wait_ms").as_int());
   stop_resend_interval_ms_ =
@@ -431,6 +436,9 @@ bool DriveComponent::initializeMotorLib() {
     // 差動駆動コントローラーを作成
     diff_drive_ = std::make_unique<motor_control_lib::DifferentialDrive>(
         motor_lib_, left_motor_id_, right_motor_id_, wheel_radius_, wheel_separation_);
+
+    // 低速不感帯（ファーム速度ループが低速域で振動するため、その領域を指令しない）
+    diff_drive_->setMinCommandRpm(min_command_rpm_);
 
     motor_initialized_ = true;
     RCLCPP_INFO(this->get_logger(), "Motor library initialized successfully");

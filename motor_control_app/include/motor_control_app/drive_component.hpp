@@ -208,6 +208,9 @@ private:
   // ファーム側加速時間 [0.1ms/rpm]（velocity モードのみ）
   int accel_time_0p1ms_per_rpm_{50};
 
+  // 指令を許す最低車輪 RPM（低速不感帯）。0 で不感帯なし
+  int min_command_rpm_{8};
+
   // 指令送信後の追加待機 [ms]。0で無効（DDT M0602C の間隔要件用の保険）
   int command_wait_ms_{0};
 

@@ -29,6 +29,7 @@ if(BUILD_TESTING)
 
   ament_auto_add_gtest(test_ddt_protocol test/test_ddt_protocol.cpp)
   ament_auto_add_gtest(test_ddt_current_pi test/test_ddt_current_pi.cpp)
+  ament_auto_add_gtest(test_drive_stop_gate test/test_drive_stop_gate.cpp)
   ament_auto_add_gtest(test_feetech_protocol test/test_feetech_protocol.cpp)
 endif()
 
