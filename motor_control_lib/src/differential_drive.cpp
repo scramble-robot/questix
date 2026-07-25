@@ -51,9 +51,11 @@ bool DifferentialDrive::setVelocity(double linear_x, double angular_z) {
                "速度指令 - 線形: %.3f m/s, 角速度: %.3f rad/s -> 左: %.1f RPM, 右: %.1f RPM",
                linear_x, angular_z, left_rpm, right_rpm);
 
+  // ゼロ方向への切り捨ては左右で量子化が非対称になるため最近接整数へ丸める
   bool success = true;
-  success &= motor_lib_->setMotorVelocity(left_motor_id_, static_cast<int>(left_rpm));
-  success &= motor_lib_->setMotorVelocity(right_motor_id_, static_cast<int>(right_rpm));
+  success &= motor_lib_->setMotorVelocity(left_motor_id_, static_cast<int>(std::lround(left_rpm)));
+  success &=
+      motor_lib_->setMotorVelocity(right_motor_id_, static_cast<int>(std::lround(right_rpm)));
 
   return success;
 }

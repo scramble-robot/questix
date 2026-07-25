@@ -43,11 +43,6 @@ drive_component:
     current_zero_deadband_rpm: 5  # [RPM] 目標0かつ実測がこの範囲内ならPIを停止して積分リセット（静止時の微振動防止）
     current_invert_measured: true # PI内でmeasured RPMを符号反転（指令と測定の物理符号が逆=正帰還になっている場合のみtrue）
 
-    # 送信目標RPMへのヒステリシス（velocity/current 両モード共通、0指令は対象外）。
-    # 前回送信RPMからの変化がこの値未満ならファームへ再送せず前回値を維持する。
-    # accel_time が速いため、ジョイスティック入力ノイズが微振動として現れるのを防ぐ。
-    command_rpm_hysteresis: 2  # [RPM]
-
     # 加速度クランプ（スルーレート制限）。0 以下で無効。
     # スティック満倒からの起動トルクを抑え、急加速感をやわらげる。
     max_linear_accel: 1.0    # [m/s^2] 線形加速度の上限

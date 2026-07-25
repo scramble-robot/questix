@@ -172,7 +172,7 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
         current_kp_, current_ki_, max_current_amp_, integral_limit_amp_);
     RCLCPP_INFO(this->get_logger(), "  current_zero_deadband_rpm: %d", current_zero_deadband_rpm_);
   }
-  RCLCPP_INFO(this->get_logger(), "  command_rpm_hysteresis: %d", command_rpm_hysteresis_);
+  RCLCPP_INFO(this->get_logger(), "  accel_time_0p1ms_per_rpm: %d", accel_time_0p1ms_per_rpm_);
 
   // twist 購読（コールバックは ACTIVE のときのみ処理する）
   twist_subscription_ = this->create_subscription<geometry_msgs::msg::Twist>(
@@ -312,9 +312,6 @@ void DriveComponent::declareParameters() {
   this->declare_parameter("integral_limit_amp", 0.3);
   this->declare_parameter("current_zero_deadband_rpm", 5);
   this->declare_parameter("current_invert_measured", true);
-  // 送信目標RPMへのヒステリシス（velocity/current 両モード共通）。ジョイスティック等の
-  // 入力ノイズによる微小な目標揺らぎが、走行中の足回り微振動になるのを防ぐ。
-  this->declare_parameter("command_rpm_hysteresis", 2);
   this->declare_parameter("max_linear_accel", 1.0);
   this->declare_parameter("max_angular_accel", 2.0);
 
@@ -367,7 +364,6 @@ void DriveComponent::readParameters() {
   integral_limit_amp_ = this->get_parameter("integral_limit_amp").as_double();
   current_zero_deadband_rpm_ = this->get_parameter("current_zero_deadband_rpm").as_int();
   current_invert_measured_ = this->get_parameter("current_invert_measured").as_bool();
-  command_rpm_hysteresis_ = this->get_parameter("command_rpm_hysteresis").as_int();
   max_linear_accel_ = this->get_parameter("max_linear_accel").as_double();
   max_angular_accel_ = this->get_parameter("max_angular_accel").as_double();
   brake_on_stop_ = this->get_parameter("brake_on_stop").as_bool();
@@ -399,9 +395,6 @@ bool DriveComponent::initializeMotorLib() {
 
     // ファーム側加速時間（velocity モードのみ有効）
     motor_lib_->setAccelTime(accel_time_0p1ms_per_rpm_);
-
-    // 送信目標RPMへのヒステリシス（velocity/current 両モード共通）
-    motor_lib_->setCommandRpmHysteresis(command_rpm_hysteresis_);
 
     // 指令送信後の追加待機（既定 0 = 無効）
     motor_lib_->setCommandWaitMs(command_wait_ms_);
