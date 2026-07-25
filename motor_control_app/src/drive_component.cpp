@@ -322,7 +322,7 @@ void DriveComponent::declareParameters() {
   this->declare_parameter("brake_on_stop", true);
 
   // コマンド受信ウォッチドッグのタイムアウト [s]（velocity/current 両モードで有効）
-  this->declare_parameter("cmd_timeout_sec", 0.5);
+  this->declare_parameter("cmd_timeout_sec", 1.0);
 
   // 指令送信後の追加待機 [ms]。0で無効。実機の最小コマンド間隔要件用の保険
   this->declare_parameter("command_wait_ms", 0);
