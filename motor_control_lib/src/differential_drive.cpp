@@ -11,13 +11,20 @@
 namespace motor_control_lib {
 
 namespace {
-// 減速スルーレート制限（drive_component の加減速クランプ）でゼロへ収束する途中の
-// 微小な非ゼロ指令を「停止」とみなすための閾値。厳密な == 0.0 比較だと、収束の
-// 最終ステップまでブレーキ(stopMotor)経路に入らず、低RPM・無ブレーキの指令が
-// ファーム側速度クローズドループに送られ続けて微振動する（cf. スティックニュートラル
-// 復帰時の足回り振動）。
-constexpr double kZeroLinearEpsMps = 0.01;
-constexpr double kZeroAngularEpsRadps = 0.01;
+// 停止/走行モードの2閾値ヒステリシス。
+// 入り（走行->停止）: 両軸ともこの値未満。減速スルーレート制限がゼロへ収束する途中の
+// 微小な非ゼロ指令を「停止」とみなすため、厳密な == 0.0 ではなく閾値判定にする。
+// 抜け（停止->走行）: どちらかの軸がこの値を超える。入りと同じ閾値だと境界付近の
+// ノイズやランプのディザで停止/走行フレームが指令レートでトグルするため、抜けは
+// 高めに取る（0.02 m/s は車輪約 2 RPM 相当で、実用上の最低速度指令より十分小さい）。
+constexpr double kStopEnterLinearMps = 0.005;
+constexpr double kStopEnterAngularRadps = 0.005;
+constexpr double kStopExitLinearMps = 0.02;
+constexpr double kStopExitAngularRadps = 0.02;
+
+// 電気ブレーキ投入を許す実測RPMの上限。これより速く回っている間にブレーキを送ると
+// 毎回新規の制動として作用し、収束しない振動（リミットサイクル）を起こすことがある。
+constexpr int kBrakeMaxMeasuredRpm = 15;
 }  // namespace
 
 DifferentialDrive::DifferentialDrive(std::shared_ptr<DdtMotorLib> motor_lib, int left_motor_id,
@@ -34,15 +41,20 @@ bool DifferentialDrive::setVelocity(double linear_x, double angular_z) {
     return false;
   }
 
-  // ほぼゼロの twist は stopMotor 経路へ。これにより current モードの PI 積分が確実に
-  // リセットされ、velocity モードでも brake_on_stop が効く。厳密な == 0.0 ではなく閾値
-  // 判定にすることで、減速スルーレート制限が漸近的に 0 へ収束する間の微小な非ゼロ指令
-  // （無ブレーキで低RPM指令を送り続け、微振動の原因になる）も停止として扱う。
-  if (std::abs(linear_x) < kZeroLinearEpsMps && std::abs(angular_z) < kZeroAngularEpsRadps) {
-    bool success = true;
-    success &= motor_lib_->stopMotor(left_motor_id_);
-    success &= motor_lib_->stopMotor(right_motor_id_);
-    return success;
+  // 停止/走行モードを2閾値で更新（境界でのフレームトグル防止。閾値は冒頭の定数参照）。
+  if (stop_mode_) {
+    if (std::abs(linear_x) > kStopExitLinearMps || std::abs(angular_z) > kStopExitAngularRadps) {
+      stop_mode_ = false;
+    }
+  } else {
+    if (std::abs(linear_x) < kStopEnterLinearMps &&
+        std::abs(angular_z) < kStopEnterAngularRadps) {
+      stop_mode_ = true;
+    }
+  }
+
+  if (stop_mode_) {
+    return commandStop();
   }
 
   auto [left_rpm, right_rpm] = twistToMotorVelocities(linear_x, angular_z);
@@ -60,8 +72,37 @@ bool DifferentialDrive::setVelocity(double linear_x, double angular_z) {
   return success;
 }
 
+bool DifferentialDrive::commandStop() {
+  // 残留回転が大きい間に電気ブレーキを送ると毎回新規の制動として作用し、収束しない
+  // 振動（リミットサイクル）を起こすことがある。実測RPMが閾値を超える間は目標0
+  // （無ブレーキ）を送ってファーム側の accel_time ランプで減速させ、閾値未満に
+  // なってから stopMotor（ブレーキ+再送スロットル）へ移行する。
+  // フィードバック未受信時は getMotorStatus が目標値を返すため、そのままブレーキ経路に入る。
+  int left_rpm = 0;
+  int right_rpm = 0;
+  uint8_t temp, fault;
+  bool have_status = motor_lib_->getMotorStatus(left_motor_id_, left_rpm, temp, fault) &&
+                     motor_lib_->getMotorStatus(right_motor_id_, right_rpm, temp, fault);
+  if (have_status &&
+      (std::abs(left_rpm) > kBrakeMaxMeasuredRpm || std::abs(right_rpm) > kBrakeMaxMeasuredRpm)) {
+    bool success = true;
+    success &= motor_lib_->setMotorVelocity(left_motor_id_, 0);
+    success &= motor_lib_->setMotorVelocity(right_motor_id_, 0);
+    return success;
+  }
+
+  // stopMotor は current モードの PI 積分リセットと velocity モードの brake_on_stop を担う。
+  bool success = true;
+  success &= motor_lib_->stopMotor(left_motor_id_);
+  success &= motor_lib_->stopMotor(right_motor_id_);
+  return success;
+}
+
 void DifferentialDrive::stop() {
+  // ウォッチドッグ・非常停止・シャットダウン用の即時停止。安全経路のため実測RPMに
+  // よるゲートは通さず、常に即座にブレーキ（stopMotor）を送る。
   if (motor_lib_) {
+    stop_mode_ = true;
     motor_lib_->stopMotor(left_motor_id_);
     motor_lib_->stopMotor(right_motor_id_);
   }

@@ -56,6 +56,15 @@ private:
   double wheel_radius_;
   double wheel_separation_;
 
+  // 停止/走行モード状態（2閾値ヒステリシス）。単一閾値だと境界付近で
+  // {目標0+ブレーキ} と {目標N+無ブレーキ} のフレームが指令レートでトグルし
+  // 振動の原因になるため、入り/抜けで別の閾値を使う。初期状態は停止。
+  bool stop_mode_{true};
+
+  // 停止モード中の停止指令送信。残留回転が大きい間は目標0（無ブレーキ）で
+  // ファームランプに減速させ、実測RPMが閾値未満になってからブレーキを投入する。
+  bool commandStop();
+
   // Conversion methods
   std::pair<double, double> twistToMotorVelocities(double linear_x, double angular_z) const;
   std::pair<double, double> motorVelocitiesToTwist(int left_rpm, int right_rpm) const;
