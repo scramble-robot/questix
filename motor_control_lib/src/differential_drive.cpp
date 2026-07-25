@@ -47,8 +47,7 @@ bool DifferentialDrive::setVelocity(double linear_x, double angular_z) {
       stop_mode_ = false;
     }
   } else {
-    if (std::abs(linear_x) < kStopEnterLinearMps &&
-        std::abs(angular_z) < kStopEnterAngularRadps) {
+    if (std::abs(linear_x) < kStopEnterLinearMps && std::abs(angular_z) < kStopEnterAngularRadps) {
       stop_mode_ = true;
     }
   }

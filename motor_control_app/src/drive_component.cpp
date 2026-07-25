@@ -500,10 +500,10 @@ void DriveComponent::twistCallback(const geometry_msgs::msg::Twist::SharedPtr ms
   rclcpp::Time now = this->now();
   double dt = drive_slew::normalizeDt(has_last_cmd_,
                                       has_last_cmd_ ? (now - last_cmd_time_).seconds() : 0.0);
-  double target_linear = drive_slew::clampRate(msg->linear.x, last_cmd_linear_, max_linear_accel_,
-                                               dt);
-  double target_angular = drive_slew::clampRate(msg->angular.z, last_cmd_angular_,
-                                                max_angular_accel_, dt);
+  double target_linear =
+      drive_slew::clampRate(msg->linear.x, last_cmd_linear_, max_linear_accel_, dt);
+  double target_angular =
+      drive_slew::clampRate(msg->angular.z, last_cmd_angular_, max_angular_accel_, dt);
   last_cmd_linear_ = target_linear;
   last_cmd_angular_ = target_angular;
   last_cmd_time_ = now;
