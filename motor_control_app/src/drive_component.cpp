@@ -12,6 +12,7 @@
 #include <functional>
 #include <lifecycle_msgs/msg/state.hpp>
 
+#include "motor_control_app/drive_slew.hpp"
 #include "motor_control_app/lifecycle_auto_start.hpp"
 #include "motor_control_app/motor_status_msg.hpp"
 
@@ -494,30 +495,15 @@ void DriveComponent::twistCallback(const geometry_msgs::msg::Twist::SharedPtr ms
   }
 
   // 加速度クランプ（スルーレート制限）。max_*_accel<=0 のとき無効。
-  double target_linear = msg->linear.x;
-  double target_angular = msg->angular.z;
+  // リセット直後（has_last_cmd_ == false）は last_cmd_* が 0 のため、0 からのランプに
+  // なる（以前はクランプ自体をスキップしてステップ指令が素通りしていた）。
   rclcpp::Time now = this->now();
-  if (has_last_cmd_) {
-    double dt = (now - last_cmd_time_).seconds();
-    if (dt > 0.0 && dt < 1.0) {
-      if (max_linear_accel_ > 0.0) {
-        double max_delta = max_linear_accel_ * dt;
-        double delta = target_linear - last_cmd_linear_;
-        if (delta > max_delta)
-          target_linear = last_cmd_linear_ + max_delta;
-        else if (delta < -max_delta)
-          target_linear = last_cmd_linear_ - max_delta;
-      }
-      if (max_angular_accel_ > 0.0) {
-        double max_delta = max_angular_accel_ * dt;
-        double delta = target_angular - last_cmd_angular_;
-        if (delta > max_delta)
-          target_angular = last_cmd_angular_ + max_delta;
-        else if (delta < -max_delta)
-          target_angular = last_cmd_angular_ - max_delta;
-      }
-    }
-  }
+  double dt = drive_slew::normalizeDt(has_last_cmd_,
+                                      has_last_cmd_ ? (now - last_cmd_time_).seconds() : 0.0);
+  double target_linear = drive_slew::clampRate(msg->linear.x, last_cmd_linear_, max_linear_accel_,
+                                               dt);
+  double target_angular = drive_slew::clampRate(msg->angular.z, last_cmd_angular_,
+                                                max_angular_accel_, dt);
   last_cmd_linear_ = target_linear;
   last_cmd_angular_ = target_angular;
   last_cmd_time_ = now;
