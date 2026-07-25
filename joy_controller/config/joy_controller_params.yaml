@@ -10,12 +10,12 @@ joy_controller:
     # Input scaling ratios / 入力スケール
     # Lower these values to make the robot slower and easier to control.
     # 数値を小さくすると、ロボットの最高速度を抑えて扱いやすくできます。
-    longitudinal_input_ratio: 0.1 # Forward/backward speed / 前後移動の速度
+    longitudinal_input_ratio: 1.0 # Forward/backward speed / 前後移動の速度
     lateral_input_ratio: 0.3 # Left/right speed for holonomic robots / 全方向移動の左右速度
     # Rotation direction and speed / 旋回の向きと速度
     # Positive and negative switch the turning direction. Smaller absolute values reduce turning speed.
     # 符号で旋回方向、絶対値で旋回速度が決まります。逆回転なら符号を反転してください。
-    angular_input_ratio: 0.1
+    angular_input_ratio: 1.0
 
     # Controller mapping (button and axis indices)
     linear_x_axis: 1 # Axis for forward/backward (typically left stick Y)

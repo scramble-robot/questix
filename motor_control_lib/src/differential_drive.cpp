@@ -10,6 +10,16 @@
 
 namespace motor_control_lib {
 
+namespace {
+// 減速スルーレート制限（drive_component の加減速クランプ）でゼロへ収束する途中の
+// 微小な非ゼロ指令を「停止」とみなすための閾値。厳密な == 0.0 比較だと、収束の
+// 最終ステップまでブレーキ(stopMotor)経路に入らず、低RPM・無ブレーキの指令が
+// ファーム側速度クローズドループに送られ続けて微振動する（cf. スティックニュートラル
+// 復帰時の足回り振動）。
+constexpr double kZeroLinearEpsMps = 0.01;
+constexpr double kZeroAngularEpsRadps = 0.01;
+}  // namespace
+
 DifferentialDrive::DifferentialDrive(std::shared_ptr<DdtMotorLib> motor_lib, int left_motor_id,
                                      int right_motor_id, double wheel_radius,
                                      double wheel_separation)
@@ -24,8 +34,11 @@ bool DifferentialDrive::setVelocity(double linear_x, double angular_z) {
     return false;
   }
 
-  // ゼロ twist は stopMotor 経路へ。これにより current モードの PI 積分が確実にリセットされる。
-  if (linear_x == 0.0 && angular_z == 0.0) {
+  // ほぼゼロの twist は stopMotor 経路へ。これにより current モードの PI 積分が確実に
+  // リセットされ、velocity モードでも brake_on_stop が効く。厳密な == 0.0 ではなく閾値
+  // 判定にすることで、減速スルーレート制限が漸近的に 0 へ収束する間の微小な非ゼロ指令
+  // （無ブレーキで低RPM指令を送り続け、微振動の原因になる）も停止として扱う。
+  if (std::abs(linear_x) < kZeroLinearEpsMps && std::abs(angular_z) < kZeroAngularEpsRadps) {
     bool success = true;
     success &= motor_lib_->stopMotor(left_motor_id_);
     success &= motor_lib_->stopMotor(right_motor_id_);
