@@ -193,6 +193,11 @@ private:
   // 加速度制限（スルーレート）
   double max_linear_accel_;   // [m/s^2] 負値または0で制限無効
   double max_angular_accel_;  // [rad/s^2] 負値または0で制限無効
+  // 目標接近時のレート絞り幅（実効的なジャーク制限）。残差がこの幅に入ると 1 ステップの
+  // 上限を残差比例で縮め、飽和点で加速度がステップで 0 に落ちないようにする。0 で無効
+  // （従来の一次レート制限）。詳細は drive_slew::clampRateTapered。
+  double slew_taper_band_linear_{0.15};  // [m/s]
+  double slew_taper_band_angular_{0.3};  // [rad/s]
   double last_cmd_linear_;
   double last_cmd_angular_;
   rclcpp::Time last_cmd_time_;

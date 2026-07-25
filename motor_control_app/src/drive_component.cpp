@@ -173,7 +173,30 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
         current_kp_, current_ki_, max_current_amp_, integral_limit_amp_);
     RCLCPP_INFO(this->get_logger(), "  current_zero_deadband_rpm: %d", current_zero_deadband_rpm_);
   }
-  RCLCPP_INFO(this->get_logger(), "  accel_time_0p1ms_per_rpm: %d", accel_time_0p1ms_per_rpm_);
+  RCLCPP_INFO(this->get_logger(), "  max_linear_accel: %.3f  max_angular_accel: %.3f",
+              max_linear_accel_, max_angular_accel_);
+  RCLCPP_INFO(this->get_logger(), "  slew_taper_band_linear: %.3f  slew_taper_band_angular: %.3f",
+              slew_taper_band_linear_, slew_taper_band_angular_);
+
+  // ホスト側スルーレートとファーム側 accel_time は同じ加速プロファイルを二重に持っている。
+  // 傾きが緩い（ms/rpm が大きい）側が実効的に支配するため、両方を同じ単位で並べて出す。
+  const double firmware_ramp_ms_per_rpm = accel_time_0p1ms_per_rpm_ * 0.1;
+  const double host_ramp_ms_per_rpm =
+      drive_slew::hostRampMsPerRpm(max_linear_accel_, wheel_radius_);
+  RCLCPP_INFO(this->get_logger(), "  accel_time_0p1ms_per_rpm: %d (= %.1f ms/rpm, firmware ramp)",
+              accel_time_0p1ms_per_rpm_, firmware_ramp_ms_per_rpm);
+  if (host_ramp_ms_per_rpm > 0.0) {
+    RCLCPP_INFO(this->get_logger(),
+                "    host slew equivalent: %.1f ms/rpm "
+                "(max_linear_accel=%.3f, wheel_radius=%.3f) -> 加速プロファイル支配側: %s",
+                host_ramp_ms_per_rpm, max_linear_accel_, wheel_radius_,
+                firmware_ramp_ms_per_rpm >= host_ramp_ms_per_rpm ? "firmware (accel_time)"
+                                                                 : "host (max_linear_accel)");
+  } else {
+    RCLCPP_INFO(this->get_logger(),
+                "    host slew disabled (max_linear_accel<=0) -> "
+                "加速プロファイル支配側: firmware (accel_time)");
+  }
   RCLCPP_INFO(this->get_logger(), "  min_command_rpm: %d", min_command_rpm_);
 
   // twist 購読（コールバックは ACTIVE のときのみ処理する）
@@ -317,6 +340,11 @@ void DriveComponent::declareParameters() {
   this->declare_parameter("max_linear_accel", 1.0);
   this->declare_parameter("max_angular_accel", 2.0);
 
+  // 目標接近時のレート絞り幅（実効ジャーク制限）。0 で無効＝従来の一次レート制限。
+  // 詳細は drive_slew::clampRateTapered。
+  this->declare_parameter("slew_taper_band_linear", 0.15);
+  this->declare_parameter("slew_taper_band_angular", 0.3);
+
   // 停止時の電気ブレーキ（velocity モードのみ有効）
   this->declare_parameter("brake_on_stop", true);
 
@@ -371,6 +399,8 @@ void DriveComponent::readParameters() {
   current_invert_measured_ = this->get_parameter("current_invert_measured").as_bool();
   max_linear_accel_ = this->get_parameter("max_linear_accel").as_double();
   max_angular_accel_ = this->get_parameter("max_angular_accel").as_double();
+  slew_taper_band_linear_ = this->get_parameter("slew_taper_band_linear").as_double();
+  slew_taper_band_angular_ = this->get_parameter("slew_taper_band_angular").as_double();
   brake_on_stop_ = this->get_parameter("brake_on_stop").as_bool();
   accel_time_0p1ms_per_rpm_ =
       static_cast<int>(this->get_parameter("accel_time_0p1ms_per_rpm").as_int());
@@ -508,10 +538,12 @@ void DriveComponent::twistCallback(const geometry_msgs::msg::Twist::SharedPtr ms
   rclcpp::Time now = this->now();
   double dt = drive_slew::normalizeDt(has_last_cmd_,
                                       has_last_cmd_ ? (now - last_cmd_time_).seconds() : 0.0);
-  double target_linear =
-      drive_slew::clampRate(msg->linear.x, last_cmd_linear_, max_linear_accel_, dt);
-  double target_angular =
-      drive_slew::clampRate(msg->angular.z, last_cmd_angular_, max_angular_accel_, dt);
+  // 目標接近時はレートを絞る（slew_taper_band_* > 0 のとき）。飽和点で加速度がステップで
+  // 0 に落ちるのを避け、ファーム速度ループのランプ終端オーバーシュートを励起しない。
+  double target_linear = drive_slew::clampRateTapered(
+      msg->linear.x, last_cmd_linear_, max_linear_accel_, dt, slew_taper_band_linear_);
+  double target_angular = drive_slew::clampRateTapered(
+      msg->angular.z, last_cmd_angular_, max_angular_accel_, dt, slew_taper_band_angular_);
   last_cmd_linear_ = target_linear;
   last_cmd_angular_ = target_angular;
   last_cmd_time_ = now;
