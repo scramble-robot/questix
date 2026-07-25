@@ -23,6 +23,7 @@
     <exec_depend>gpio_reader</exec_depend>
     <exec_depend>joy_controller</exec_depend>
     <exec_depend>motor_control_app</exec_depend>
+    <exec_depend>operation_manager</exec_depend>
     <exec_depend>ydlidar_ros2_driver</exec_depend>
 
     <!-- Standard ROS2 packages -->
@@ -36,6 +37,13 @@
     <!-- Test dependencies -->
     <test_depend>ament_lint_auto</test_depend>
     <test_depend>ament_lint_common</test_depend>
+    <test_depend>ament_cmake_pytest</test_depend>
+    <test_depend>python3-yaml</test_depend>
+    <test_depend>ros2launch</test_depend>
+    <test_depend>ros2node</test_depend>
+    <test_depend>ros2param</test_depend>
+    <test_depend>ros2pkg</test_depend>
+    <test_depend>ros2run</test_depend>
 
     <export>
         <build_type>ament_cmake</build_type>

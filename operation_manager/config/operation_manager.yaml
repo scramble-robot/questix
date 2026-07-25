@@ -1,6 +1,11 @@
 operation_manager_node:
   ros__parameters:
-    monitored_pins: [27]
+    # Safe standalone/default profile: practice mode.
+    # false is safe for GPIO5; GPIO27 is not subscribed to or evaluated.
+    # safe_high_pins is intentionally omitted. ROS 2 cannot infer an integer-array
+    # type from YAML []; use the node's typed empty integer-array default instead.
+    # Keep this compatibility config identical to operation_manager.practice.yaml.
+    safe_low_pins: [5]
     timeout_seconds: 1.0
     # 診断は標準 diagnostic_msgs/DiagnosticArray を /diagnostics へ publish する
     # （rqt_runtime_monitor が消費可）。契約: questix_msgs/README.md。

@@ -1,7 +1,7 @@
 <launch>
   <!-- Launch Arguments -->
   <arg name="controller_type" default="dualshock" description="Controller type: dualshock or uart" />
-  <arg name="enable_gpio_ref" default="false" description="Enable GPIO reference system (gpio_reader + joy_gate)" />
+  <arg name="enable_gpio_ref" default="false" description="Use the gated joy topic supplied by the parent GPIO safety path" />
   <arg name="use_sim_time" default="false" description="Use simulation time" />
 
   <!-- Per-controller YAML profiles (auto-selected from controller_type).

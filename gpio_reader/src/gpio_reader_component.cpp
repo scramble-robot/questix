@@ -13,7 +13,7 @@ GpioReaderComponent::GpioReaderComponent(const rclcpp::NodeOptions& options)
     : Node("gpio_reader_node", options), chip_(nullptr) {
   // Declare parameters
   this->declare_parameter<std::string>("chip_name", "/dev/gpiochip4");
-  this->declare_parameter<std::vector<int64_t>>("gpio_pins", std::vector<int64_t>{17, 27, 22});
+  this->declare_parameter<std::vector<int64_t>>("gpio_pins", std::vector<int64_t>{5});
   this->declare_parameter<double>("publish_rate", 20.0);
 
   // Get parameters

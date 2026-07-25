@@ -21,6 +21,9 @@ GPIO ref モードでは joy_topic = /joy_gated をデフォルトとする (唯
     <arg name="operation_manager_config_file"
          default="$(find-pkg-share operation_manager)/config/operation_manager.yaml"
          description="Path to the operation_manager configuration YAML" />
+    <arg name="enable_operation_manager"
+         default="true"
+         description="Start operation_manager (disable when an integrated parent launch owns it)" />
     <arg name="controller_type" default="uart" description="Controller type: dualshock or uart" />
     <arg name="joy_topic" default="/joy_gated" description="Joy input topic (override only)" />
 
@@ -56,7 +59,11 @@ GPIO ref モードでは joy_topic = /joy_gated をデフォルトとする (唯
     </node>
 
     <!-- Operation Manager Node -->
-    <node pkg="operation_manager" exec="operation_manager_node" name="operation_manager_node" output="screen">
+    <node pkg="operation_manager"
+          exec="operation_manager_node"
+          name="operation_manager_node"
+          output="screen"
+          if="$(var enable_operation_manager)">
         <param from="$(var operation_manager_config_file)" />
     </node>
 </launch>

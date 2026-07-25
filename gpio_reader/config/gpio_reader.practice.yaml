@@ -1,0 +1,8 @@
+gpio_reader_node:
+  ros__parameters:
+    # Practice profile. GPIO5 is the raw physical E-stop indication:
+    # false = released/safe, true = pressed/stop.
+    use_sim_time: false
+    chip_name: "/dev/gpiochip4"
+    gpio_pins: [5]
+    publish_rate: 20.0

@@ -8,12 +8,14 @@
 #define OPERATION_MANAGER__OPERATION_MANAGER_COMPONENT_HPP_
 
 #include <diagnostic_msgs/msg/diagnostic_array.hpp>
-#include <map>
+#include <map>     // NOLINT(build/include_order)
+#include <memory>  // NOLINT(build/include_order)
 #include <questix_msgs/msg/emergency_stop.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/bool.hpp>
-#include <string>
-#include <vector>
+#include <string>  // NOLINT(build/include_order)
+
+#include "operation_manager/gpio_safety_evaluator.hpp"
 
 namespace operation_manager {
 
@@ -21,14 +23,14 @@ class OperationManagerComponent : public rclcpp::Node {
 public:
   explicit OperationManagerComponent(const rclcpp::NodeOptions& options);
   virtual ~OperationManagerComponent();
+  static rclcpp::QoS emergency_stop_qos();
 
 private:
   void gpio_callback(const std_msgs::msg::Bool::SharedPtr msg, unsigned int pin);
   void evaluate_controllability();
 
-  std::map<unsigned int, bool> gpio_states_;
   std::map<unsigned int, rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr> gpio_subs_;
-  std::map<unsigned int, rclcpp::Time> gpio_last_update_;
+  std::unique_ptr<GpioSafetyEvaluator> safety_evaluator_;
 
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr controllable_pub_;
   // 標準診断集約トピック（rqt_runtime_monitor 等がそのまま消費できる）。
@@ -37,8 +39,6 @@ private:
 
   rclcpp::TimerBase::SharedPtr eval_timer_;
 
-  double timeout_seconds_;
-  std::vector<int64_t> monitored_pins_;
   std::string emergency_stop_topic_;
 };
 

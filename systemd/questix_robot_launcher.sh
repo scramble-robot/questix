@@ -47,7 +47,10 @@ LAUNCH_ARGS=""
 LAUNCH_ARGS="${LAUNCH_ARGS} enable_lidar:=${ENABLE_LIDAR:-true}"
 LAUNCH_ARGS="${LAUNCH_ARGS} enable_shot:=${ENABLE_SHOT:-true}"
 LAUNCH_ARGS="${LAUNCH_ARGS} enable_drive:=${ENABLE_DRIVE:-true}"
-LAUNCH_ARGS="${LAUNCH_ARGS} enable_gpio_ref:=${ENABLE_GPIO_REF:-true}"
+# Competition always requires both physical E-stop and AutoReferee GPIO safety inputs.
+# ENABLE_GPIO_REF from launch.env is intentionally ignored in this mode.
+LAUNCH_ARGS="${LAUNCH_ARGS} enable_gpio_ref:=true"
+LAUNCH_ARGS="${LAUNCH_ARGS} enable_autoreferee:=true"
 LAUNCH_ARGS="${LAUNCH_ARGS} enable_rviz:=${ENABLE_RVIZ:-false}"
 LAUNCH_ARGS="${LAUNCH_ARGS} controller_type:=${CONTROLLER_TYPE:-uart}"
 

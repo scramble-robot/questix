@@ -6,8 +6,10 @@ gpio_reader_node:
     # GPIO chip device path (for Raspberry Pi 5, use /dev/gpiochip4)
     chip_name: "/dev/gpiochip4"
 
-    # GPIO pins to monitor (BCM numbering)
-    gpio_pins: [27]
+    # Safe standalone/default profile: practice mode.
+    # GPIO5 is the raw physical E-stop indication (safe-low, stop-high).
+    # Keep this compatibility config identical to gpio_reader.practice.yaml.
+    gpio_pins: [5]
 
     # Publishing rate in Hz
     publish_rate: 20.0

@@ -8,6 +8,16 @@ uvicorn on `127.0.0.1:8888`.
 - `logs.py` — log collection console (`/api/logs/*`).
 - `static/` — vanilla HTML/CSS/JS frontend (no build step).
 
+## Competition GPIO safety
+
+The `ENABLE_GPIO_REF` field in `launch.env` is retained for manual development and
+diagnostics. When `/etc/questix_robot/mode` is `competition`, the production launcher
+ignores that field and always passes `enable_gpio_ref:=true` together with
+`enable_autoreferee:=true`. Therefore an existing `launch.env` containing
+`ENABLE_GPIO_REF=false` cannot disable the GPIO5 physical E-stop and GPIO27
+AutoReferee safety path. `enable_autoreferee:=true` with `enable_gpio_ref:=false` is
+not a valid operational configuration.
+
 ## Running (dev)
 
 ```bash

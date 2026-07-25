@@ -1,0 +1,11 @@
+operation_manager_node:
+  ros__parameters:
+    # Practice profile. GPIO5 is the physical E-stop indication:
+    # false = released/safe, true = pressed/stop.
+    # safe_high_pins is intentionally omitted. ROS 2 cannot infer an integer-array
+    # type from YAML []; use the node's typed empty integer-array default instead.
+    safe_low_pins: [5]
+    timeout_seconds: 1.0
+    # questix_msgs/EmergencyStop, reliable + transient_local + keep-last 1.
+    # active is always the inverse of /gpio/controllable.
+    emergency_stop_topic: "/emergency_stop"

@@ -1,12 +1,65 @@
-# Questix Launcher
+# QUESTiX Launcher
 
-Questixシステムの各ノードを起動するためのlauncherファイル群です。XMLベースのROS2 launchファイルを使用しており、Pythonよりも読みやすく設定が直感的です。
+QUESTiXシステムの各ノードを起動するためのlauncherファイル群です。XMLベースのROS 2 launchファイルを使用します。
+
+## GPIO安全系
+
+`questix_core.launch.xml` の `enable_gpio_ref:=true` は、drive/shot の有無に
+関係なく `gpio_reader` と `operation_manager` をそれぞれ1プロセス起動します。
+drive が使う `joy_controller_referee.launch.xml` 内の operation_manager は統合時に
+無効化されるため、同名ノードは重複しません。standalone referee launch は互換性の
+ため既定で operation_manager を起動します。
+
+`enable_autoreferee` の既定値は `false` です。
+
+- `false` (practice): GPIO5だけを読み、physical E-stopをsafe-lowとして判定
+- `true` (competition): GPIO5とGPIO27を読み、GPIO27 AutoRefereeを
+  safe-highとして追加判定
+
+`/etc/questix_robot/mode` が `competition` のときだけ実行される
+`questix_robot_launcher.sh` は、必ず `enable_gpio_ref:=true` と
+`enable_autoreferee:=true` を固定値で渡します。既存の `launch.env` に
+`ENABLE_GPIO_REF=false` が残っていても competition 起動では無視され、GPIO5と
+GPIO27の安全系は常時有効です。`enable_gpio_ref:=false` は手動の開発・診断用途に
+限定されます。`enable_autoreferee:=true` と `enable_gpio_ref:=false` の組合せは
+通常運用上無効であり、`questix_core.launch.xml` はその組合せを検出して起動を
+中止します。
+
+GPIO5の物理非常停止回路はRLY1で左右DDT駆動モーター、ローラー用ESC、Shot用サーボ、
+Tilt用サーボの動力をハードウェア遮断します。Raspberry Pi、5 V I/O、3.3 V I/Oは
+通電を維持するため、GPIO5は状態をROSへ通知し続けます。GPIO5のraw値は解除時
+`false`、押下時 `true` です。物理遮断とROSソフトウェア停止は独立した二重の
+安全経路です。
+
+GPIO27は大会用AutoReferee `AR_in` で、クライアント撃破出力（撃破時5 V、
+非撃破時0 V）をHATのフォトカプラで反転します。撃破時は `false`/停止、
+非撃破時はR2（10 kΩ）の3.3 Vプルアップにより `true`/許可です。ただし
+AutoReferee未接続、クライアント無通電、一次側断線も `true` となり、現行
+ハードウェアでは非撃破と区別できません。この制約は `/diagnostics` の
+`pin_27_signal_limit` にも表示されます。
+
+| Mode | GPIO5 physical E-stop | GPIO27 AutoReferee | Controllable |
+|---|---:|---:|---:|
+| practice | false | not monitored | true |
+| practice | true | not monitored | false |
+| competition | false | true | true |
+| competition | true | any | false |
+| competition | any | false | false |
+| any | missing or stale required input | - | false |
+
+安全系だけを非通電で起動するコマンド例:
+
+```bash
+ros2 launch questix_launcher questix_core.launch.xml \
+  enable_lidar:=false enable_shot:=false enable_drive:=false \
+  enable_gpio_ref:=true enable_autoreferee:=false enable_rviz:=false
+```
 
 ## ファイル構成
 
 ### メインlaunchファイル
 
-- `launch/questix_core_launch.xml` - 全システムを起動するメインファイル
+- `launch/questix_core.launch.xml` - 全システムを起動するメインファイル
 - `launch/navigation_launch.xml` - ナビゲーション用システム（LiDAR + モータ + Joy）
 - `launch/test_launch.xml` - テスト・デバッグ用の最小構成
 - `launch/servo_system_launch.xml` - サーボ制御システム
@@ -41,7 +94,7 @@ LiDARなど実機依存のパッケージは追加取得とJazzy互換性確認�
 
 ```bash
 # 全システムを起動
-ros2 launch questix_launcher questix_core_launch.xml
+ros2 launch questix_launcher questix_core.launch.xml
 
 # ナビゲーションシステムを起動
 ros2 launch questix_launcher navigation_launch.xml
