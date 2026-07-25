@@ -190,6 +190,9 @@ private:
   int current_zero_deadband_rpm_;
   bool current_invert_measured_;
 
+  // 送信目標RPMへのヒステリシス [RPM]（velocity/current 両モード共通、0指令は対象外）
+  int command_rpm_hysteresis_{2};
+
   // 加速度制限（スルーレート）
   double max_linear_accel_;   // [m/s^2] 負値または0で制限無効
   double max_angular_accel_;  // [rad/s^2] 負値または0で制限無効

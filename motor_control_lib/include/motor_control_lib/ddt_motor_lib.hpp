@@ -88,6 +88,15 @@ public:
   void setCurrentZeroDeadbandRpm(int deadband_rpm);
 
   /**
+   * @brief 送信する目標RPMへのヒステリシス（不感帯）を設定（velocity/current 両モード共通）。
+   *  - 前回コミットした目標RPMからの変化量が hysteresis_rpm 未満なら、新しい値ではなく
+   *    前回送信値を使い続ける。ジョイスティック等の入力ノイズによる微小な目標揺らぎが
+   *    そのままファームへ伝わり、実回転数の微振動になるのを防ぐ。
+   *  - 明示的な 0（停止）指令には適用しない（常に即座に反映する）。
+   */
+  void setCommandRpmHysteresis(int hysteresis_rpm);
+
+  /**
    * @brief Current モード PI 内で measured RPM を符号反転するか設定。
    *  指令とフィードバックの物理符号が逆だと正帰還となり発振するため、その補正用。
    */
@@ -203,6 +212,7 @@ private:
   double max_current_amp_;
   double integral_limit_amp_;
   int current_zero_deadband_rpm_;         // 静止デッドバンド [RPM]
+  int command_rpm_hysteresis_;  // 送信目標RPMへのヒステリシス [RPM]（0以外の指令のみ対象）
   bool current_invert_measured_;          // measured RPM 符号反転（正帰還押さえ用）
   double current_max_accel_rpm_per_sec_;  // 目標RPMスルーレート上限 [RPM/s]。0以下で無効
   bool brake_on_stop_;  // 停止時に電気ブレーキを使う（velocity モードのみ）

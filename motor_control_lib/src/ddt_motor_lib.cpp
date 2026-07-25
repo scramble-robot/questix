@@ -29,6 +29,7 @@ DdtMotorLib::DdtMotorLib(const std::string& serial_port, int baud_rate)
       max_current_amp_(2.0),
       integral_limit_amp_(1.5),
       current_zero_deadband_rpm_(5),
+      command_rpm_hysteresis_(2),
       current_invert_measured_(false),
       current_max_accel_rpm_per_sec_(0.0),
       brake_on_stop_(true),
@@ -134,6 +135,15 @@ bool DdtMotorLib::setMotorVelocity(int motor_id, int velocity_rpm) {
 
   // 目標 RPM は常に max_motor_rpm_ でクランプ
   int rpm_ref_raw = std::clamp(velocity_rpm, -max_motor_rpm_, max_motor_rpm_);
+
+  // ノイズによる微小な目標揺らぎがそのままファームへ伝わり実回転数の微振動になるのを防ぐ。
+  // accel_time が高速（既定 1ms/rpm）なため、ヒステリシス未満の変化は前回送信値を維持する。
+  // 明示的な 0（停止）指令は常に即座に反映する（stopMotor 経路と挙動を揃える）。
+  auto prev_it = motor_velocities_.find(motor_id);
+  if (rpm_ref_raw != 0 && prev_it != motor_velocities_.end() &&
+      std::abs(rpm_ref_raw - prev_it->second) < command_rpm_hysteresis_) {
+    rpm_ref_raw = prev_it->second;
+  }
   motor_velocities_[motor_id] = rpm_ref_raw;
 
   if (mode == ControlMode::Current) {
@@ -379,6 +389,12 @@ void DdtMotorLib::setCurrentZeroDeadbandRpm(int deadband_rpm) {
   std::lock_guard<std::recursive_mutex> lock(state_mutex_);
   current_zero_deadband_rpm_ = std::max(0, deadband_rpm);
   RCLCPP_INFO(logger_, "電流モード ゼロ近傍デッドバンド: %d RPM", current_zero_deadband_rpm_);
+}
+
+void DdtMotorLib::setCommandRpmHysteresis(int hysteresis_rpm) {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+  command_rpm_hysteresis_ = std::max(0, hysteresis_rpm);
+  RCLCPP_INFO(logger_, "送信目標RPMヒステリシス: %d RPM", command_rpm_hysteresis_);
 }
 
 void DdtMotorLib::setCurrentInvertMeasured(bool invert) {
