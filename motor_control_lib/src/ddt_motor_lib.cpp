@@ -34,6 +34,7 @@ DdtMotorLib::DdtMotorLib(const std::string& serial_port, int baud_rate)
       current_max_accel_rpm_per_sec_(0.0),
       brake_on_stop_(true),
       command_wait_ms_(0),
+      stop_resend_interval_ms_(200),
       serial_fd_(-1) {
   logger_ = rclcpp::get_logger("DdtMotorLib");
 }
@@ -281,8 +282,30 @@ bool DdtMotorLib::stopMotor(int motor_id) {
     motor_velocities_[motor_id] = 0;
     return sendMotorCurrentRaw(motor_id, 0);
   }
-  // 速度モード: 目標0 + 電気ブレーキでしっかり停止・保持
-  return sendMotorVelocity(motor_id, 0, brake_on_stop_);
+  // 速度モード: 目標0 + 電気ブレーキでしっかり停止・保持する。
+  // 既に停止（目標RPM=0）と分かっている状態が続く間、高頻度（~20Hz）でブレーキ指令を
+  // 再送し続けると、残留回転がある間は毎回新規の制動として作用し、収束せず持続的な振動
+  // （リミットサイクル）を起こすことがある（cf. 停止直後の足回り振動の rosbag 解析）。
+  // 停止状態が続いている間は、再送間隔未満の呼び出しは実際のシリアル送信をスキップする。
+  auto vel_it = motor_velocities_.find(motor_id);
+  bool already_stopped = vel_it != motor_velocities_.end() && vel_it->second == 0;
+  if (already_stopped && stop_resend_interval_ms_ > 0) {
+    auto now = std::chrono::steady_clock::now();
+    auto last_it = last_stop_send_time_.find(motor_id);
+    if (last_it != last_stop_send_time_.end()) {
+      auto elapsed_ms =
+          std::chrono::duration_cast<std::chrono::milliseconds>(now - last_it->second).count();
+      if (elapsed_ms < stop_resend_interval_ms_) {
+        return true;  // 直近で送信済み。ブレーキは保持されているとみなしスキップする。
+      }
+    }
+  }
+
+  bool success = sendMotorVelocity(motor_id, 0, brake_on_stop_);
+  if (success) {
+    last_stop_send_time_[motor_id] = std::chrono::steady_clock::now();
+  }
+  return success;
 }
 
 bool DdtMotorLib::stopAllMotors() {
@@ -426,6 +449,16 @@ void DdtMotorLib::setCommandWaitMs(int wait_ms) {
     RCLCPP_INFO(logger_, "指令送信後の追加待機: %d ms", command_wait_ms_);
   } else {
     RCLCPP_INFO(logger_, "指令送信後の追加待機: 無効");
+  }
+}
+
+void DdtMotorLib::setStopResendIntervalMs(int interval_ms) {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+  stop_resend_interval_ms_ = std::max(0, interval_ms);
+  if (stop_resend_interval_ms_ > 0) {
+    RCLCPP_INFO(logger_, "停止中のブレーキ再送間隔: %d ms", stop_resend_interval_ms_);
+  } else {
+    RCLCPP_INFO(logger_, "停止中のブレーキ再送間隔スロットリング: 無効");
   }
 }
 

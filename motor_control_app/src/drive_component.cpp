@@ -327,6 +327,11 @@ void DriveComponent::declareParameters() {
   // 指令送信後の追加待機 [ms]。0で無効。実機の最小コマンド間隔要件用の保険
   this->declare_parameter("command_wait_ms", 0);
 
+  // 停止継続中のブレーキ再送間隔 [ms]。高頻度でブレーキを再送し続けると、残留回転が
+  // ある間は毎回新規の制動として作用し、収束せず持続的な振動を起こすことがある。
+  // 0で無効（毎回送信、従来挙動）。
+  this->declare_parameter("stop_resend_interval_ms", 200);
+
   // Lifecycle 自動遷移。非常停止解除でモータが通電するまで configure を再試行する。
   this->declare_parameter("auto_start", true);
   this->declare_parameter("connect_retry_period_sec", 1.0);
@@ -364,6 +369,8 @@ void DriveComponent::readParameters() {
   brake_on_stop_ = this->get_parameter("brake_on_stop").as_bool();
   cmd_timeout_sec_ = this->get_parameter("cmd_timeout_sec").as_double();
   command_wait_ms_ = static_cast<int>(this->get_parameter("command_wait_ms").as_int());
+  stop_resend_interval_ms_ =
+      static_cast<int>(this->get_parameter("stop_resend_interval_ms").as_int());
   publish_tf_ = this->get_parameter("publish_tf").as_bool();
   odom_topic_ = this->get_parameter("odom_topic").as_string();
   odom_frame_id_ = this->get_parameter("odom_frame_id").as_string();
@@ -389,6 +396,9 @@ bool DriveComponent::initializeMotorLib() {
 
     // 指令送信後の追加待機（既定 0 = 無効）
     motor_lib_->setCommandWaitMs(command_wait_ms_);
+
+    // 停止継続中のブレーキ再送間隔（停止直後の持続振動の緩和用）
+    motor_lib_->setStopResendIntervalMs(stop_resend_interval_ms_);
 
     // モータライブラリを初期化（シリアルポートを開く。未通電なら失敗して再試行に回る）
     if (!motor_lib_->initialize()) {

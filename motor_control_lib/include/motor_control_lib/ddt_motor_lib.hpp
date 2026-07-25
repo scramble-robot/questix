@@ -126,6 +126,17 @@ public:
    */
   void setCommandWaitMs(int wait_ms);
 
+  /**
+   * @brief 停止状態が継続している間の、ブレーキ指令の再送間隔 [ms] を設定（velocity モードのみ）。
+   *  - stopMotor() は呼ばれるたびに毎回ブレーキ（Protocol 1 の DATA[7]=0xFF）を送信していたが、
+   *    高頻度（~20Hz）で送り続けると、残留回転がある間は毎回新規の制動として作用し、収束せず
+   *    持続的な振動（リミットサイクル）を起こすことがある（cf. 停止直後の足回り振動の rosbag 解析）。
+   *  - 既に停止（目標RPM=0）と分かっている状態が続く間は、この間隔未満の再呼び出しは実際の
+   *    シリアル送信をスキップする。0 で無効（従来通り毎回送信）。
+   *  - 停止直後の最初の1回、および emergencyStop() には適用されない（常に即座に送信する）。
+   */
+  void setStopResendIntervalMs(int interval_ms);
+
   // DDT motor control methods (deprecated - use IIndividualMotor interface)
 
   // Multi-motor status
@@ -217,6 +228,7 @@ private:
   double current_max_accel_rpm_per_sec_;  // 目標RPMスルーレート上限 [RPM/s]。0以下で無効
   bool brake_on_stop_;  // 停止時に電気ブレーキを使う（velocity モードのみ）
   int command_wait_ms_;  // 指令送信後の追加待機 [ms]。0で無効（実機の間隔要件用の保険）
+  int stop_resend_interval_ms_;  // 停止継続中のブレーキ再送間隔 [ms]。0で無効（毎回送信）
 
   // Serial communication
   int serial_fd_;
@@ -233,6 +245,8 @@ private:
   std::map<int, PiState> pi_states_;              // motor_id -> PI state
   // motor_id -> 最後に送った駆動フレーム（refreshMotorFeedback の再送用）
   std::map<int, std::vector<uint8_t>> last_sent_frames_;
+  // motor_id -> stopMotor() が実際にシリアル送信した直近時刻（再送間隔スロットリング用）
+  std::map<int, std::chrono::steady_clock::time_point> last_stop_send_time_;
 
   // Private methods
   bool initializeSerial();
