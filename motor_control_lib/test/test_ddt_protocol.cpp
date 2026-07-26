@@ -55,6 +55,26 @@ TEST(PackVelocityFrame, BrakeSetsByte7) {
   EXPECT_EQ(frame[9], ddt::crc8Maxim(payloadOf(frame)));
 }
 
+TEST(IsZeroVelocityFrame, ClassifiesStopFrames) {
+  // 停止フレーム: 指令値0（ブレーキ有無は問わない）
+  EXPECT_TRUE(ddt::isZeroVelocityFrame(ddt::packVelocityFrame(1, 0, 10, true)));
+  EXPECT_TRUE(ddt::isZeroVelocityFrame(ddt::packVelocityFrame(1, 0, 10, false)));
+  // 非停止フレーム: 指令値が非ゼロ
+  EXPECT_FALSE(ddt::isZeroVelocityFrame(ddt::packVelocityFrame(1, 100, 10, true)));
+  EXPECT_FALSE(ddt::isZeroVelocityFrame(ddt::packVelocityFrame(1, -1, 10, false)));
+  // Protocol 1 以外や不正長は対象外
+  EXPECT_FALSE(ddt::isZeroVelocityFrame(ddt::packModeFrame(1, 0x02)));
+  EXPECT_FALSE(ddt::isZeroVelocityFrame(std::vector<uint8_t>{}));
+}
+
+TEST(PackVelocityFrame, AccelTimeSetsByte6) {
+  // DATA[6] = 加速時間（0.1 ms/rpm 単位、M0602C 仕様）
+  auto frame = ddt::packVelocityFrame(1, 100, 50, false);
+  ASSERT_EQ(frame.size(), 10u);
+  EXPECT_EQ(frame[6], 50);
+  EXPECT_EQ(frame[9], ddt::crc8Maxim(payloadOf(frame)));
+}
+
 TEST(PackCurrentFrame, NegativeRawIsBigEndian) {
   auto frame = ddt::packCurrentFrame(1, -100);
   ASSERT_EQ(frame.size(), 10u);

@@ -66,6 +66,11 @@ std::vector<uint8_t> packCurrentFrame(uint8_t motor_id, int16_t current_raw) {
   return data_fields;
 }
 
+bool isZeroVelocityFrame(const std::vector<uint8_t>& frame) {
+  // Protocol 1 (0x64) で指令値 DATA[2..3] (big-endian) が 0 のフレーム。
+  return frame.size() == 10 && frame[1] == 0x64 && frame[2] == 0x00 && frame[3] == 0x00;
+}
+
 ParseResult parseFeedbackFrame(uint8_t expected_motor_id, const std::vector<uint8_t>& frame,
                                Feedback& out) {
   if (frame.size() != 10) {

@@ -12,6 +12,7 @@
 #include <functional>
 #include <lifecycle_msgs/msg/state.hpp>
 
+#include "motor_control_app/drive_slew.hpp"
 #include "motor_control_app/lifecycle_auto_start.hpp"
 #include "motor_control_app/motor_status_msg.hpp"
 
@@ -172,6 +173,35 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
         current_kp_, current_ki_, max_current_amp_, integral_limit_amp_);
     RCLCPP_INFO(this->get_logger(), "  current_zero_deadband_rpm: %d", current_zero_deadband_rpm_);
   }
+  RCLCPP_INFO(this->get_logger(), "  max_linear_accel: %.3f  max_angular_accel: %.3f",
+              max_linear_accel_, max_angular_accel_);
+  RCLCPP_INFO(
+      this->get_logger(),
+      "  demand-scaled accel: linear[min=%.3f ref=%.3f] angular[min=%.3f ref=%.3f] (0=無効)",
+      min_linear_accel_, accel_demand_ref_linear_, min_angular_accel_, accel_demand_ref_angular_);
+  RCLCPP_INFO(this->get_logger(), "  slew_taper_band_linear: %.3f  slew_taper_band_angular: %.3f",
+              slew_taper_band_linear_, slew_taper_band_angular_);
+
+  // ホスト側スルーレートとファーム側 accel_time は同じ加速プロファイルを二重に持っている。
+  // 傾きが緩い（ms/rpm が大きい）側が実効的に支配するため、両方を同じ単位で並べて出す。
+  const double firmware_ramp_ms_per_rpm = accel_time_0p1ms_per_rpm_ * 0.1;
+  const double host_ramp_ms_per_rpm =
+      drive_slew::hostRampMsPerRpm(max_linear_accel_, wheel_radius_);
+  RCLCPP_INFO(this->get_logger(), "  accel_time_0p1ms_per_rpm: %d (= %.1f ms/rpm, firmware ramp)",
+              accel_time_0p1ms_per_rpm_, firmware_ramp_ms_per_rpm);
+  if (host_ramp_ms_per_rpm > 0.0) {
+    RCLCPP_INFO(this->get_logger(),
+                "    host slew equivalent: %.1f ms/rpm "
+                "(max_linear_accel=%.3f, wheel_radius=%.3f) -> 加速プロファイル支配側: %s",
+                host_ramp_ms_per_rpm, max_linear_accel_, wheel_radius_,
+                firmware_ramp_ms_per_rpm >= host_ramp_ms_per_rpm ? "firmware (accel_time)"
+                                                                 : "host (max_linear_accel)");
+  } else {
+    RCLCPP_INFO(this->get_logger(),
+                "    host slew disabled (max_linear_accel<=0) -> "
+                "加速プロファイル支配側: firmware (accel_time)");
+  }
+  RCLCPP_INFO(this->get_logger(), "  min_command_rpm: %d", min_command_rpm_);
 
   // twist 購読（コールバックは ACTIVE のときのみ処理する）
   twist_subscription_ = this->create_subscription<geometry_msgs::msg::Twist>(
@@ -298,8 +328,8 @@ void DriveComponent::declareParameters() {
   this->declare_parameter("wheel_separation", 0.5);
   this->declare_parameter("left_motor_id", 4);
   this->declare_parameter("right_motor_id", 5);
-  this->declare_parameter("max_motor_rpm", 1000);
-  this->declare_parameter("status_publish_rate", 10.0);
+  this->declare_parameter("max_motor_rpm", 475);
+  this->declare_parameter("status_publish_rate", 50.0);
   // 型付きステータストピック（questix_msgs/DriveStatus）
   this->declare_parameter("typed_status_topic", "/drive_status");
 
@@ -311,17 +341,46 @@ void DriveComponent::declareParameters() {
   this->declare_parameter("integral_limit_amp", 0.3);
   this->declare_parameter("current_zero_deadband_rpm", 5);
   this->declare_parameter("current_invert_measured", true);
-  this->declare_parameter("max_linear_accel", 1.0);
+  this->declare_parameter("max_linear_accel", 3.0);
   this->declare_parameter("max_angular_accel", 2.0);
 
+  // デマンド適応加速度。スティックを速く/大きく倒すほど加速度上限を max へ、ゆっくり/わずか
+  // なら min へ寄せる。min_*_accel<=0 または accel_demand_ref_*<=0 で適応無効＝max の一定
+  // クランプ（従来挙動）。詳細は drive_slew::demandScaledAccel。
+  this->declare_parameter("min_linear_accel", 0.5);
+  this->declare_parameter("min_angular_accel", 0.35);
+  this->declare_parameter("accel_demand_ref_linear", 0.3);
+  this->declare_parameter("accel_demand_ref_angular", 0.5);
+
+  // 目標接近時のレート絞り幅（実効ジャーク制限）。0 で無効＝従来の一次レート制限。
+  // 詳細は drive_slew::clampRateTapered。
+  this->declare_parameter("slew_taper_band_linear", 0.4);
+  this->declare_parameter("slew_taper_band_angular", 0.9);
+
   // 停止時の電気ブレーキ（velocity モードのみ有効）
-  this->declare_parameter("brake_on_stop", true);
+  this->declare_parameter("brake_on_stop", false);
+
+  // ファーム側加速時間 [0.1ms/rpm]（velocity モードのみ有効）。ホスト側スルーレート制限が
+  // 生む階段状の目標変化をファームが補間する平滑化機構。詳細は DdtMotorLib::setAccelTime。
+  this->declare_parameter("accel_time_0p1ms_per_rpm", 1);
+
+  // 指令を許す最低車輪 RPM（低速不感帯）。詳細は DifferentialDrive::setMinCommandRpm。
+  this->declare_parameter("min_command_rpm", 5);
 
   // コマンド受信ウォッチドッグのタイムアウト [s]（velocity/current 両モードで有効）
-  this->declare_parameter("cmd_timeout_sec", 0.5);
+  this->declare_parameter("cmd_timeout_sec", 1.0);
 
   // 指令送信後の追加待機 [ms]。0で無効。実機の最小コマンド間隔要件用の保険
   this->declare_parameter("command_wait_ms", 0);
+
+  // 停止継続中のブレーキ再送間隔 [ms]。高頻度でブレーキを再送し続けると、残留回転が
+  // ある間は毎回新規の制動として作用し、収束せず持続的な振動を起こすことがある。
+  // 0で無効（毎回送信、従来挙動）。
+  this->declare_parameter("stop_resend_interval_ms", 0);
+
+  // 実測RPMローパスの時定数 [s]。フィードバック速度のノイズを平滑化する（レポート/オドメトリ
+  // 経路のみ、PI制御は生値のまま）。0以下で無効。詳細は DdtMotorLib::setMeasuredLowpassTau。
+  this->declare_parameter("measured_lpf_tau_sec", 0.1);
 
   // Lifecycle 自動遷移。非常停止解除でモータが通電するまで configure を再試行する。
   this->declare_parameter("auto_start", true);
@@ -356,9 +415,21 @@ void DriveComponent::readParameters() {
   current_invert_measured_ = this->get_parameter("current_invert_measured").as_bool();
   max_linear_accel_ = this->get_parameter("max_linear_accel").as_double();
   max_angular_accel_ = this->get_parameter("max_angular_accel").as_double();
+  min_linear_accel_ = this->get_parameter("min_linear_accel").as_double();
+  min_angular_accel_ = this->get_parameter("min_angular_accel").as_double();
+  accel_demand_ref_linear_ = this->get_parameter("accel_demand_ref_linear").as_double();
+  accel_demand_ref_angular_ = this->get_parameter("accel_demand_ref_angular").as_double();
+  slew_taper_band_linear_ = this->get_parameter("slew_taper_band_linear").as_double();
+  slew_taper_band_angular_ = this->get_parameter("slew_taper_band_angular").as_double();
   brake_on_stop_ = this->get_parameter("brake_on_stop").as_bool();
+  accel_time_0p1ms_per_rpm_ =
+      static_cast<int>(this->get_parameter("accel_time_0p1ms_per_rpm").as_int());
+  min_command_rpm_ = static_cast<int>(this->get_parameter("min_command_rpm").as_int());
   cmd_timeout_sec_ = this->get_parameter("cmd_timeout_sec").as_double();
   command_wait_ms_ = static_cast<int>(this->get_parameter("command_wait_ms").as_int());
+  stop_resend_interval_ms_ =
+      static_cast<int>(this->get_parameter("stop_resend_interval_ms").as_int());
+  measured_lpf_tau_sec_ = this->get_parameter("measured_lpf_tau_sec").as_double();
   publish_tf_ = this->get_parameter("publish_tf").as_bool();
   odom_topic_ = this->get_parameter("odom_topic").as_string();
   odom_frame_id_ = this->get_parameter("odom_frame_id").as_string();
@@ -379,8 +450,17 @@ bool DriveComponent::initializeMotorLib() {
     // 停止時の電気ブレーキ設定（velocity モードのみ有効）
     motor_lib_->setBrakeOnStop(brake_on_stop_);
 
+    // ファーム側加速時間（velocity モードのみ有効）
+    motor_lib_->setAccelTime(accel_time_0p1ms_per_rpm_);
+
     // 指令送信後の追加待機（既定 0 = 無効）
     motor_lib_->setCommandWaitMs(command_wait_ms_);
+
+    // 停止継続中のブレーキ再送間隔（停止直後の持続振動の緩和用）
+    motor_lib_->setStopResendIntervalMs(stop_resend_interval_ms_);
+
+    // 実測RPMローパス（フィードバック速度のノイズ平滑化。レポート/オドメトリ経路のみ）
+    motor_lib_->setMeasuredLowpassTau(measured_lpf_tau_sec_);
 
     // モータライブラリを初期化（シリアルポートを開く。未通電なら失敗して再試行に回る）
     if (!motor_lib_->initialize()) {
@@ -410,6 +490,9 @@ bool DriveComponent::initializeMotorLib() {
     // 差動駆動コントローラーを作成
     diff_drive_ = std::make_unique<motor_control_lib::DifferentialDrive>(
         motor_lib_, left_motor_id_, right_motor_id_, wheel_radius_, wheel_separation_);
+
+    // 低速不感帯（ファーム速度ループが低速域で振動するため、その領域を指令しない）
+    diff_drive_->setMinCommandRpm(min_command_rpm_);
 
     motor_initialized_ = true;
     RCLCPP_INFO(this->get_logger(), "Motor library initialized successfully");
@@ -474,30 +557,22 @@ void DriveComponent::twistCallback(const geometry_msgs::msg::Twist::SharedPtr ms
   }
 
   // 加速度クランプ（スルーレート制限）。max_*_accel<=0 のとき無効。
-  double target_linear = msg->linear.x;
-  double target_angular = msg->angular.z;
+  // リセット直後（has_last_cmd_ == false）は last_cmd_* が 0 のため、0 からのランプに
+  // なる（以前はクランプ自体をスキップしてステップ指令が素通りしていた）。
   rclcpp::Time now = this->now();
-  if (has_last_cmd_) {
-    double dt = (now - last_cmd_time_).seconds();
-    if (dt > 0.0 && dt < 1.0) {
-      if (max_linear_accel_ > 0.0) {
-        double max_delta = max_linear_accel_ * dt;
-        double delta = target_linear - last_cmd_linear_;
-        if (delta > max_delta)
-          target_linear = last_cmd_linear_ + max_delta;
-        else if (delta < -max_delta)
-          target_linear = last_cmd_linear_ - max_delta;
-      }
-      if (max_angular_accel_ > 0.0) {
-        double max_delta = max_angular_accel_ * dt;
-        double delta = target_angular - last_cmd_angular_;
-        if (delta > max_delta)
-          target_angular = last_cmd_angular_ + max_delta;
-        else if (delta < -max_delta)
-          target_angular = last_cmd_angular_ - max_delta;
-      }
-    }
-  }
+  double dt = drive_slew::normalizeDt(has_last_cmd_,
+                                      has_last_cmd_ ? (now - last_cmd_time_).seconds() : 0.0);
+  // 目標接近時はレートを絞る（slew_taper_band_* > 0 のとき）。飽和点で加速度がステップで
+  // 0 に落ちるのを避け、ファーム速度ループのランプ終端オーバーシュートを励起しない。
+  // 加速度上限はデマンド（残差 = |目標 - 前回指令|）に応じて min_*_accel..max_*_accel へ
+  // 適応させる。スティックを速く倒すほど残差が大きく加速度が強くなる。適応無効時（min<=0 /
+  // ref<=0）は max_*_accel 一定の従来挙動。
+  double target_linear = drive_slew::clampRateAdaptive(
+      msg->linear.x, last_cmd_linear_, min_linear_accel_, max_linear_accel_,
+      accel_demand_ref_linear_, dt, slew_taper_band_linear_);
+  double target_angular = drive_slew::clampRateAdaptive(
+      msg->angular.z, last_cmd_angular_, min_angular_accel_, max_angular_accel_,
+      accel_demand_ref_angular_, dt, slew_taper_band_angular_);
   last_cmd_linear_ = target_linear;
   last_cmd_angular_ = target_angular;
   last_cmd_time_ = now;

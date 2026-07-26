@@ -5,8 +5,11 @@
 // https://opensource.org/licenses/MIT.
 #include "motor_control_lib/differential_drive.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <rclcpp/rclcpp.hpp>
+
+#include "motor_control_lib/drive_stop_gate.hpp"
 
 namespace motor_control_lib {
 
@@ -24,29 +27,56 @@ bool DifferentialDrive::setVelocity(double linear_x, double angular_z) {
     return false;
   }
 
-  // ゼロ twist は stopMotor 経路へ。これにより current モードの PI 積分が確実にリセットされる。
-  if (linear_x == 0.0 && angular_z == 0.0) {
-    bool success = true;
-    success &= motor_lib_->stopMotor(left_motor_id_);
-    success &= motor_lib_->stopMotor(right_motor_id_);
-    return success;
-  }
-
   auto [left_rpm, right_rpm] = twistToMotorVelocities(linear_x, angular_z);
 
+  // ゼロ方向への切り捨ては左右で量子化が非対称になるため最近接整数へ丸める
+  const int left_cmd = static_cast<int>(std::lround(left_rpm));
+  const int right_cmd = static_cast<int>(std::lround(right_rpm));
+
+  // 停止/走行モードを車輪 RPM で判定する（前後と旋回が合成された実際の車輪速度で見る）。
+  // ヒステリシス付き。詳細は drive_stop_gate.hpp。
+  const int max_abs_rpm = std::max(std::abs(left_cmd), std::abs(right_cmd));
+  stop_mode_ = drive_stop_gate::updateStopMode(stop_mode_, max_abs_rpm, min_command_rpm_);
+
+  if (stop_mode_) {
+    return commandStop();
+  }
+
   RCLCPP_DEBUG(rclcpp::get_logger("DifferentialDrive"),
-               "速度指令 - 線形: %.3f m/s, 角速度: %.3f rad/s -> 左: %.1f RPM, 右: %.1f RPM",
-               linear_x, angular_z, left_rpm, right_rpm);
+               "速度指令 - 線形: %.3f m/s, 角速度: %.3f rad/s -> 左: %d RPM, 右: %d RPM", linear_x,
+               angular_z, left_cmd, right_cmd);
 
   bool success = true;
-  success &= motor_lib_->setMotorVelocity(left_motor_id_, static_cast<int>(left_rpm));
-  success &= motor_lib_->setMotorVelocity(right_motor_id_, static_cast<int>(right_rpm));
+  success &= motor_lib_->setMotorVelocity(left_motor_id_, left_cmd);
+  success &= motor_lib_->setMotorVelocity(right_motor_id_, right_cmd);
 
   return success;
 }
 
+void DifferentialDrive::setMinCommandRpm(int min_command_rpm) {
+  min_command_rpm_ = std::max(0, min_command_rpm);
+}
+
+bool DifferentialDrive::commandStop() {
+  // 停止は必ずブレーキ経路（stopMotor）を通す。
+  // 実測RPMで「まだ回っているうちはブレーキを送らない」ゲートを一度入れたが、これは
+  // 危険な回帰だった: 速度ループでブレーキ無しの目標0は能動的な0保持にならないため、
+  // 車輪を浮かせて摩擦が無い状態では減速せず、実測が閾値を超えたままブレーキが永久に
+  // 入らず回り続ける（実機で確認）。加えて getMotorStatus には鮮度ゲートが無く、
+  // 固まった古い実測値でも同じラッチに入る。
+  // 残留回転中のブレーキ連打によるリミットサイクルは、DdtMotorLib 側の
+  // stop_resend_interval_ms（再送スロットル）で抑える方針に一本化する。
+  bool success = true;
+  success &= motor_lib_->stopMotor(left_motor_id_);
+  success &= motor_lib_->stopMotor(right_motor_id_);
+  return success;
+}
+
 void DifferentialDrive::stop() {
+  // ウォッチドッグ・非常停止・シャットダウン用の即時停止。安全経路のため実測RPMに
+  // よるゲートは通さず、常に即座にブレーキ（stopMotor）を送る。
   if (motor_lib_) {
+    stop_mode_ = true;
     motor_lib_->stopMotor(left_motor_id_);
     motor_lib_->stopMotor(right_motor_id_);
   }

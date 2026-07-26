@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cmath>
 #include <cstring>
 #include <thread>
 
@@ -32,7 +33,10 @@ DdtMotorLib::DdtMotorLib(const std::string& serial_port, int baud_rate)
       current_invert_measured_(false),
       current_max_accel_rpm_per_sec_(0.0),
       brake_on_stop_(true),
+      accel_time_0p1ms_per_rpm_(50),
       command_wait_ms_(0),
+      stop_resend_interval_ms_(200),
+      measured_lpf_tau_sec_(0.0),
       serial_fd_(-1) {
   logger_ = rclcpp::get_logger("DdtMotorLib");
 }
@@ -219,7 +223,8 @@ bool DdtMotorLib::getMotorStatus(int motor_id, int& velocity_rpm, uint8_t& tempe
   bool prefer_measured =
       (feedback_it != motor_feedbacks_.end() && feedback_it->second.has_feedback);
 
-  velocity_rpm = prefer_measured ? static_cast<int>(feedback_it->second.speed) : vel_it->second;
+  // レポート／オドメトリ経路ではローパス済みの実測 RPM を返す（tau<=0 で生値）。
+  velocity_rpm = prefer_measured ? measuredRpmForReport(feedback_it->second) : vel_it->second;
 
   if (feedback_it != motor_feedbacks_.end()) {
     temperature = feedback_it->second.temperature;
@@ -271,8 +276,30 @@ bool DdtMotorLib::stopMotor(int motor_id) {
     motor_velocities_[motor_id] = 0;
     return sendMotorCurrentRaw(motor_id, 0);
   }
-  // 速度モード: 目標0 + 電気ブレーキでしっかり停止・保持
-  return sendMotorVelocity(motor_id, 0, brake_on_stop_);
+  // 速度モード: 目標0 + 電気ブレーキでしっかり停止・保持する。
+  // 既に停止（目標RPM=0）と分かっている状態が続く間、高頻度（~20Hz）でブレーキ指令を
+  // 再送し続けると、残留回転がある間は毎回新規の制動として作用し、収束せず持続的な振動
+  // （リミットサイクル）を起こすことがある（cf. 停止直後の足回り振動の rosbag 解析）。
+  // 停止状態が続いている間は、再送間隔未満の呼び出しは実際のシリアル送信をスキップする。
+  auto vel_it = motor_velocities_.find(motor_id);
+  bool already_stopped = vel_it != motor_velocities_.end() && vel_it->second == 0;
+  if (already_stopped && stop_resend_interval_ms_ > 0) {
+    auto now = std::chrono::steady_clock::now();
+    auto last_it = last_stop_send_time_.find(motor_id);
+    if (last_it != last_stop_send_time_.end()) {
+      auto elapsed_ms =
+          std::chrono::duration_cast<std::chrono::milliseconds>(now - last_it->second).count();
+      if (elapsed_ms < stop_resend_interval_ms_) {
+        return true;  // 直近で送信済み。ブレーキは保持されているとみなしスキップする。
+      }
+    }
+  }
+
+  bool success = sendMotorVelocity(motor_id, 0, brake_on_stop_);
+  if (success) {
+    last_stop_send_time_[motor_id] = std::chrono::steady_clock::now();
+  }
+  return success;
 }
 
 bool DdtMotorLib::stopAllMotors() {
@@ -289,6 +316,13 @@ int DdtMotorLib::getMaxRpm() const { return max_motor_rpm_; }
 
 bool DdtMotorLib::setMaxRpm(int max_rpm) {
   std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+  // M0602C の速度ループ指令範囲は ±475 rpm（仕様）。範囲外の指令はファーム挙動が未定義の
+  // ため、上限として機能しない値を黙って受け付けず仕様上限にクランプする。
+  if (max_rpm > kSpecVelocityMaxRpm) {
+    RCLCPP_WARN(logger_, "max_rpm %d は M0602C 速度指令範囲 ±%d rpm を超えるためクランプします",
+                max_rpm, kSpecVelocityMaxRpm);
+    max_rpm = kSpecVelocityMaxRpm;
+  }
   max_motor_rpm_ = max_rpm;
   return true;
 }
@@ -403,6 +437,13 @@ void DdtMotorLib::setBrakeOnStop(bool enable) {
   RCLCPP_INFO(logger_, "停止時電気ブレーキ: %s", enable ? "ON" : "OFF");
 }
 
+void DdtMotorLib::setAccelTime(int accel_time_0p1ms_per_rpm) {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+  accel_time_0p1ms_per_rpm_ = std::clamp(accel_time_0p1ms_per_rpm, 1, 255);
+  RCLCPP_INFO(logger_, "ファーム加速時間: %d (0.1ms/rpm 単位 = %.1f ms/rpm)",
+              accel_time_0p1ms_per_rpm_, accel_time_0p1ms_per_rpm_ * 0.1);
+}
+
 void DdtMotorLib::setCommandWaitMs(int wait_ms) {
   std::lock_guard<std::recursive_mutex> lock(state_mutex_);
   command_wait_ms_ = std::max(0, wait_ms);
@@ -413,12 +454,41 @@ void DdtMotorLib::setCommandWaitMs(int wait_ms) {
   }
 }
 
+void DdtMotorLib::setStopResendIntervalMs(int interval_ms) {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+  stop_resend_interval_ms_ = std::max(0, interval_ms);
+  if (stop_resend_interval_ms_ > 0) {
+    RCLCPP_INFO(logger_, "停止中のブレーキ再送間隔: %d ms", stop_resend_interval_ms_);
+  } else {
+    RCLCPP_INFO(logger_, "停止中のブレーキ再送間隔スロットリング: 無効");
+  }
+}
+
+void DdtMotorLib::setMeasuredLowpassTau(double tau_sec) {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+  measured_lpf_tau_sec_ = (tau_sec > 0.0) ? tau_sec : 0.0;
+  if (measured_lpf_tau_sec_ > 0.0) {
+    RCLCPP_INFO(logger_, "実測RPMローパス: tau=%.3fs (fc≒%.2fHz)", measured_lpf_tau_sec_,
+                1.0 / (2.0 * M_PI * measured_lpf_tau_sec_));
+  } else {
+    RCLCPP_INFO(logger_, "実測RPMローパス: 無効（生値を使用）");
+  }
+}
+
+int DdtMotorLib::measuredRpmForReport(const MotorFeedback& fb) const {
+  if (measured_lpf_tau_sec_ > 0.0) {
+    return static_cast<int>(std::lround(fb.speed_filtered));
+  }
+  return static_cast<int>(fb.speed);
+}
+
 bool DdtMotorLib::sendMotorVelocity(int motor_id, int velocity_rpm, bool brake) {
   int velocity_int = std::clamp(velocity_rpm, -max_motor_rpm_, max_motor_rpm_);
 
-  // フレーム組み立ては ddt_protocol::packVelocityFrame に集約。加速時間は従来通り 10 固定。
+  // フレーム組み立ては ddt_protocol::packVelocityFrame に集約。
   std::vector<uint8_t> data_fields = ddt_protocol::packVelocityFrame(
-      static_cast<uint8_t>(motor_id), static_cast<int16_t>(velocity_int), /*accel_time=*/10, brake);
+      static_cast<uint8_t>(motor_id), static_cast<int16_t>(velocity_int),
+      static_cast<uint8_t>(accel_time_0p1ms_per_rpm_), brake);
 
   // 固定スリープ付きの sendCommand は使わない（50Hz 指令に追従できなくなる）。
   // 応答フレームの消費により motor_feedbacks_ も更新される。
@@ -605,6 +675,16 @@ bool DdtMotorLib::parseFeedback(int expected_motor_id, const std::vector<uint8_t
   //  DATA[6..7]=position, DATA[8]=fault code
   // マルチバイトは big-endian (high, low)。
   MotorFeedback& fb = motor_feedbacks_[expected_motor_id];
+  // 実測 RPM の一次ローパス（レポート用途）。tau<=0 または初回受信なら生値で初期化する。
+  // 可変サンプル間隔対応: alpha = dt / (tau + dt)。dt は前回受信からの経過。
+  const auto feedback_now = std::chrono::steady_clock::now();
+  if (measured_lpf_tau_sec_ > 0.0 && fb.has_feedback) {
+    const double dt = std::chrono::duration<double>(feedback_now - fb.last_feedback_time).count();
+    const double alpha = (dt > 0.0) ? std::clamp(dt / (measured_lpf_tau_sec_ + dt), 0.0, 1.0) : 0.0;
+    fb.speed_filtered += alpha * (static_cast<double>(decoded.speed) - fb.speed_filtered);
+  } else {
+    fb.speed_filtered = static_cast<double>(decoded.speed);
+  }
   fb.mode = decoded.mode;
   fb.current = decoded.current;
   fb.speed = decoded.speed;
@@ -612,7 +692,7 @@ bool DdtMotorLib::parseFeedback(int expected_motor_id, const std::vector<uint8_t
   // temperature は Protocol 2 (0x74) が必要なため未取得（常に 0 のまま保持）。
   fb.fault_code = decoded.fault_code;
   fb.has_feedback = true;
-  fb.last_feedback_time = std::chrono::steady_clock::now();
+  fb.last_feedback_time = feedback_now;
 
   // PI 状態側にも保存（受信失敗時のフォールバック用）
   auto pi_it = pi_states_.find(expected_motor_id);
@@ -700,7 +780,8 @@ bool DdtMotorLib::getMotorFeedbackData(int motor_id, MotorFeedbackData& out) con
     const MotorFeedback& fb = fb_it->second;
     out.mode = fb.mode;
     out.current_raw = fb.current;
-    out.velocity_rpm = fb.speed;
+    // レポート用途はローパス済み実測 RPM を返す（tau<=0 で生値）。
+    out.velocity_rpm = static_cast<int16_t>(measuredRpmForReport(fb));
     out.position_raw = fb.position;
     out.temperature = fb.temperature;  // 常に 0（Protocol 2 未実装）
     out.fault_code = fb.fault_code;
@@ -733,7 +814,26 @@ bool DdtMotorLib::refreshMotorFeedback(int motor_id, double max_age_sec) {
   if (frame_it == last_sent_frames_.end()) {
     return false;  // 送信履歴なし（未指令）
   }
+
+  // 停止フレーム（指令値0）の再送は stopMotor と同じ再送間隔スロットルに従う。
+  // ステータスタイマ（~10Hz）経由の再送がスロットルをバイパスすると、残留回転がある間
+  // ブレーキが毎回新規の制動として作用し続けてしまう。スロットル中は再送せず、保持
+  // フィードバックのまま返す（停止中の実測は多少古くても許容。鮮度は feedback_age_sec
+  // で観測できる）。
+  const bool stop_frame = ddt_protocol::isZeroVelocityFrame(frame_it->second);
+  if (stop_frame && stop_resend_interval_ms_ > 0) {
+    auto now = std::chrono::steady_clock::now();
+    auto last_it = last_stop_send_time_.find(motor_id);
+    if (last_it != last_stop_send_time_.end() &&
+        std::chrono::duration_cast<std::chrono::milliseconds>(now - last_it->second).count() <
+            stop_resend_interval_ms_) {
+      return false;
+    }
+  }
   sendFrameWithFeedback(motor_id, frame_it->second);
+  if (stop_frame) {
+    last_stop_send_time_[motor_id] = std::chrono::steady_clock::now();
+  }
 
   fb_it = motor_feedbacks_.find(motor_id);
   return fb_it != motor_feedbacks_.end() && fb_it->second.has_feedback &&
