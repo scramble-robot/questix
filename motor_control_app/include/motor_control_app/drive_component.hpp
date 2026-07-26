@@ -194,7 +194,8 @@ private:
   double max_linear_accel_;   // [m/s^2] 負値または0で制限無効
   double max_angular_accel_;  // [rad/s^2] 負値または0で制限無効
   // デマンド適応加速度の下限。スティックをゆっくり/わずかに倒したときの加速度上限。
-  // 0 以下で適応無効＝max_*_accel の一定クランプ（従来挙動）。詳細は drive_slew::demandScaledAccel。
+  // 0 以下で適応無効＝max_*_accel の一定クランプ（従来挙動）。詳細は
+  // drive_slew::demandScaledAccel。
   double min_linear_accel_{0.0};   // [m/s^2]
   double min_angular_accel_{0.0};  // [rad/s^2]
   // 加速度が min から max へ達するデマンド基準（残差 = |目標 - 前回指令|）。

@@ -679,10 +679,8 @@ bool DdtMotorLib::parseFeedback(int expected_motor_id, const std::vector<uint8_t
   // 可変サンプル間隔対応: alpha = dt / (tau + dt)。dt は前回受信からの経過。
   const auto feedback_now = std::chrono::steady_clock::now();
   if (measured_lpf_tau_sec_ > 0.0 && fb.has_feedback) {
-    const double dt =
-        std::chrono::duration<double>(feedback_now - fb.last_feedback_time).count();
-    const double alpha =
-        (dt > 0.0) ? std::clamp(dt / (measured_lpf_tau_sec_ + dt), 0.0, 1.0) : 0.0;
+    const double dt = std::chrono::duration<double>(feedback_now - fb.last_feedback_time).count();
+    const double alpha = (dt > 0.0) ? std::clamp(dt / (measured_lpf_tau_sec_ + dt), 0.0, 1.0) : 0.0;
     fb.speed_filtered += alpha * (static_cast<double>(decoded.speed) - fb.speed_filtered);
   } else {
     fb.speed_filtered = static_cast<double>(decoded.speed);

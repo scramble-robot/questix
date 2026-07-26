@@ -213,11 +213,11 @@ private:
   // Motor feedback structure
   struct MotorFeedback {
     uint8_t mode{0};
-    int16_t current{0};        // トルク電流生値（符号付き）: DATA[2..3]
-    int16_t speed{0};          // 実測 RPM（符号付き, 生値）: DATA[4..5]
+    int16_t current{0};          // トルク電流生値（符号付き）: DATA[2..3]
+    int16_t speed{0};            // 実測 RPM（符号付き, 生値）: DATA[4..5]
     double speed_filtered{0.0};  // 実測 RPM の一次ローパス出力（レポート用途）
-    uint16_t position{0};      // ロータ位置: DATA[6..7]
-    uint8_t temperature{0};    // 常に 0（Protocol 2 (0x74) 未実装）
+    uint16_t position{0};        // ロータ位置: DATA[6..7]
+    uint8_t temperature{0};      // 常に 0（Protocol 2 (0x74) 未実装）
     uint8_t fault_code{0};
     bool has_feedback{false};  // 一度でも有効フィードバックを parse したか
     std::chrono::steady_clock::time_point last_feedback_time{};  // 最終受信時刻
