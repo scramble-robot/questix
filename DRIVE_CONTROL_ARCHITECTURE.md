@@ -256,23 +256,57 @@ Jazzy なら `diff_drive_controller` + 自作 `hardware_interface` という選�
 - `controller_manager` プロセスの導入で、systemd / ansible / `robot_manager` 側の起動シーケンスに影響が出る（`AGENTS.md` の「installer/unit consistency」3点セット更新が必要）。
 - 学習コストと、大会運用中の移行リスク。
 
-### 推奨（当初）: 「A を実装し、B に写せる形にしておく」
+### nav2 は ros2_control を要求しない
 
-> **更新（nav2 方針確定後）**: nav2 での自律走行を視野に入れる方針が確定したため、**Step 2 の直後に ros2_control へ移行する**方針に改める。具体的な実装案は [`DRIVE_CONTROL_ROS2_CONTROL_PLAN.md`](DRIVE_CONTROL_ROS2_CONTROL_PLAN.md) を参照。下記 A 案の記述は、Step 1〜2 の設計根拠（純粋な制御層と、シリアルを制御パスから外す境界）として引き続き有効であり、その境界がそのまま `controller_interface` / `hardware_interface` の移植面になる。本節末の「逆に B を先に選ぶべき条件」に該当したため、§6 の Step 3〜5 は移行計画 B1〜B8 に吸収される。
+一度「nav2 を視野に入れるなら Step 2 の直後に ros2_control へ跳ぶ」と結論したが、**これは誤りだったので取り下げる**。nav2 が要求するのは契約だけである。
 
-**（当初案）今は自作制御層（案 A）で進める。ただしインターフェースを ros2_control に一対一で写せる形に揃える。**
+- `/odom`（`nav_msgs/Odometry`）
+- `odom → base_link` の TF
+- `/cmd_vel` を購読すること
+- `/scan` と、それを `base_link` に結ぶ TF ツリー
 
-- 制御層の `step(dt, ref, fb, safety)` は `controller_interface::update(time, period)` に対応
-- `/wheel_cmd` `/wheel_state`（左右の rad/s）は command/state interface に対応
-- `ddt_bus_driver` は `SystemInterface::read()/write()` に対応
+`/odom` と TF は**現在の `drive_component` がすでに出している**。nav2 に必要なものは ros2_control なしで揃う。nav2 の実際のブロッカーは URDF/TF の未整備（`DRIVE_CONTROL_ROS2_CONTROL_PLAN.md` §1）であり、これはどちらの案でも同じだけ必要になる。
 
-根拠:
+また「Step 3〜5 を自作してから捨てるのが一番高い」という論拠も内訳を数えると成立しない。
 
-1. いま実機で困っている主因（P1, P2, P4）は A で解ける。B の導入コストを払っても、3-2 のためのカスタムコントローラは結局自作する。
-2. 既存の Lifecycle / 非常停止 / auto_start 資産を捨てずに段階移行できる。PR を小さく保てる（`CLAUDE.md` の方針に合う）。
-3. `ddt_bus_driver` を作った時点で `hardware_interface` 相当の境界ができるので、nav2 が本当に必要になった段階で B へ差し替えられる。
+- **Step 3（リミッタ統合）**: 既存 `drive_slew` の整理。テスト済み資産のリファクタで新規実装ではない
+- **Step 4（閉ループ）**: `diff_drive_controller` は車体速度の閉ループを持たないので、**どちらの案でも自作**
+- **Step 5（調停）**: `twist_mux` を使うので、**どちらの案でもコードを書かない**
 
-**逆に B を先に選ぶべき条件**: 近い将来 nav2 での自律走行が確定していて、そのために odom / TF / joint state の標準化が必須になる場合。その場合は Step 1〜2 の後にまとめて B へ跳ぶほうが総コストは安い。
+`odometry_integrator` と `drive_watchdog` は既にテスト付きで存在する。結局 ros2_control が肩代わりする純増分は「固定周期タイマーの薄いラッパ」と「リミッタの一本化」程度で、捨てることになる自作コードはほとんど無い。
+
+### 依存リスクの非対称性
+
+依存は「何に依存するか」でリスクの桁が違う。
+
+| 依存の種類 | 対象 | 破壊的変更の曝露 |
+|---|---|---|
+| トピック／メッセージ契約 | nav2, `twist_mux`, `robot_state_publisher`, `slam_toolbox` | 小。ノードとして話すだけ |
+| **C++ 基底クラスを実装** | ros2_control（`SystemInterface`, `ChainableControllerInterface`） | **大。upstream のクラスを継承する** |
+
+ros2_control は本スタックで**唯一「upstream のクラスを継承する」依存**であり、実際に `configure/start/stop` → lifecycle コールバック、`read()/write()` への `(time, period)` 追加、`export_state_interfaces` → `on_export_state_interfaces`（戻り値型も変更）、`export_reference_interfaces` → `on_export_reference_interfaces`、`on_init` の引数型変更、`robot_description` のパラメータ → トピック化と、ほぼ全ディストロで hardware_interface API が動いている。`DRIVE_CONTROL_ROS2_CONTROL_PLAN.md` §11 の要確認リストが長いのは調査不足ではなく、この依存の性質そのものの症状である。
+
+緩和要因もある。Jazzy は LTS で、本リポジトリは ISO を自前ビルドしてディストロを固定している。pin している間 API は動かず、曝露するのは次の LTS へ上げる一度きりのイベント、影響範囲は hardware component と custom controller の 2 ファイルに限定される（プロトコル codec・PI・運動学は無関係）。
+
+### 決定的な不適合サイン
+
+`DRIVE_CONTROL_ROS2_CONTROL_PLAN.md` §3-4 で、デバイス消失時に `read()` が `return_type::ERROR` を返さず OK を返す設計を推奨した。これは**ros2_control のエラー契約を意図的に破っている**。第一設計の段階でフレームワークの契約と戦う必要があるのは適合していないサインである。加えて `is_async` は ros2_control の中でも踏まれていない道であり、本案件はそこに最も体重を預ける構成になっていた。
+
+### 推奨: Plan A を既定とし、再実装に耐えるインターフェースで扉を開けておく
+
+**自作制御層（案 A）で進める。ただし §7 の契約に従い、将来 ros2_control（あるいは別の何か）へ載せ替えるときに書き直しではなくアダプタで済む形にインターフェースを固定する。**
+
+- nav2 はトピック契約で直結する（`twist_mux` → `/cmd_vel` → `drive_controller`、`/odom` + TF を返す）
+- 副産物として **URDF の車輪ジョイントを `fixed` にできる**（ナビゲーションに車輪の回転は不要）。`joint_states` が不要になり、B0 相当の URDF 整備が軽くなる
+- `/cmd_vel` の `Twist` / `TwistStamped` 問題は nav2 側の事情なので、ros2_control をやめても残る。ここは避けられない
+
+**ros2_control を再検討するトリガー**（起きたら §5 をもう一度読む）:
+
+1. マニピュレータなど**多関節のアクチュエータ系**を追加する（`joint_trajectory_controller` 等の既製品が欲しくなる）
+2. ロボットを外部へ渡す、標準構成を期待される
+3. 電源設計が変わって**デバイスが消えなくなる**（上記の不適合が解消する）
+
+詳細な実装案は [`DRIVE_CONTROL_ROS2_CONTROL_PLAN.md`](DRIVE_CONTROL_ROS2_CONTROL_PLAN.md) に残す。採用しない前提でも、「何を自作するとどうなるか」の設計材料として有効であり、トリガーを引いたときにそのまま使える。
 
 ---
 
@@ -293,11 +327,25 @@ Jazzy なら `diff_drive_controller` + 自作 `hardware_interface` という選�
 
 シリアル + プロトコル + デバイスセッションを専用スレッド／ノードへ。`drive_component` は `/wheel_cmd` を publish するだけになる。→ **P2 解決**。この時点で「同じ指令列を同じレートで出す」ことをオフラインリプレイで確認する。
 
-### Step 2: `drive_controller` の固定周期化（挙動不変が目標）
+### Step 2: `drive_controller` の固定周期化（挙動不変が目標）— **この refactor の最優先項目**
 
-`twistCallback` は最新値の保持だけにし、100 Hz の制御タイマーで `step(dt, ...)` を回す。dt が定数になる。→ **P1 解決**。ここで初めてパラメータの意味が安定する。
+コード量は数十行だが、効き方が他のどの項目とも桁が違う。**チューニングが成立するかどうかがここで決まる**ため、他を後回しにしてもこれだけは入れる。
 
-**注意**: 固定周期化すると既存の `max_*_accel` が「設定値どおりに」効くようになる。つまり実効加速度が上がる = 挙動が変わる。Step 2 では加速度の**実効値**を Step 0 の実測に合わせて再設定し、体感を変えないこと。
+現状は `max_angular_accel: 3.0` が「3.0 rad/s²」を意味していない。実際は「3.0 を上限として、joy の到着間隔とエグゼキュータ負荷で決まる何か」である。つまり**パラメータを 1 つ動かすとプラントも一緒に動く**ので、二分探索が効かない。PR #141 が 16 コミットかかったのはこれが原因で、腕の問題ではない。
+
+実装の要点（薄いが、意味は自明ではない）:
+
+1. **購読は latch にする**。`/cmd_vel` のコールバックは「最新値と到着時刻を保存する」だけ。モータ I/O も制御計算もしない。
+2. **制御タイマー（100 Hz 目安）が唯一の制御ステップ**。新しい指令が来ていなくても毎周期回す（ランプの継続、ウォッチドッグ、停止フレームの再送はすべて時間駆動であって指令駆動ではない）。
+3. **`dt` には計測経過時間ではなく公称周期を渡す**。ここが肝心。計測 dt を使うとタイマージッタが制御式に入り込み、除去したはずの非決定性が戻る。公称固定なら設定値が設定どおりの意味を持つ。
+   - トレードオフ: 実際にタイマーが遅れたとき、ランプは壁時計上で設定より遅くなる。これは**安全側かつ再現可能**なので望ましい方向である。シリアルを制御パスから外した（Step 1）後はそもそも遅延自体が稀になる。
+4. **オーバーランは制御式に混ぜず、別に観測する**。`計測経過 - 公称周期` を監視して閾値超過を throttle ログ + 診断に出す。「ループが X ms 遅れた」と見えるようになるので、チューニング中の異常が黙って挙動を汚さない。
+5. **リセット関数を 1 箇所から呼ぶ**。activate / 非常停止 / ウォッチドッグ / フォールトのすべてで `reset()` を制御ループ側から呼ぶ。現状は各コールバックに散っている（`AGENTS.md` の「制御ループ状態」チェックリスト対応）。
+6. **レートを 3 つに分離する**。制御ループ（100 Hz）／バス周期（`ddt_bus_driver` 側、50 Hz）／ステータス・オドメトリ publish（50 Hz）を独立したパラメータにする。現状はステータスタイマーが指令とバスを取り合っていて絡んでいる。
+
+**副次的だが大きい効果**: 公称 dt が固定になると、`step()` は同じ入力列に対してビット一致の出力を返す。つまり **rosbag をオフラインでリプレイしてチューニングの当たりを付けられる**ようになる。実機は最終確認だけになり、「実機で試す以外に検証手段がない」状態から抜ける。これが Step 3・4 の前提になる。
+
+**注意**: 固定周期化すると既存の `max_*_accel` が「設定値どおりに」効くようになる。つまり実効加速度が上がる = 挙動が変わる。Step 2 では加速度の**実効値**を Step 0 の実測に合わせて再設定し、体感を変えないこと。同様に `slew_taper_band_*` の効き方も変わる（1 ステップ上限 `accel × dt` が一定になるため）。
 
 ### Step 3: リミッタ統合（挙動を変える）
 
@@ -311,13 +359,111 @@ accel / demand-adaptive / taper の3層を、速度・加速度・ジャーク�
 
 指令調停と `/emergency_stop` 解釈の単一ソース化。→ **P5 解決**。
 
-### Step 6: ros2_control 化
+### Step B0（Step 1〜2 と並行可）: URDF / TF 整備
 
-> **更新（nav2 方針確定後）**: nav2 が視野に入るため任意ではなくなった。**Step 2 の直後**に移行し、上記 Step 3〜5 は移行計画 B1〜B8 に吸収する（Step 3〜5 を自作してから捨てるのが最も高い）。詳細は [`DRIVE_CONTROL_ROS2_CONTROL_PLAN.md`](DRIVE_CONTROL_ROS2_CONTROL_PLAN.md)。同ドキュメント §1 のとおり、**nav2 の前提条件（URDF の車輪ジョイント / `base_link→laser_frame` TF / `robot_state_publisher` の統合起動）が現状ほぼ未整備**であり、そこが ros2_control 本体よりクリティカルパスになり得る。
+nav2 を使うかどうかに関わらず必要で、かつ**現状ほぼ未整備**なので早めに独立 PR で出す。詳細は [`DRIVE_CONTROL_ROS2_CONTROL_PLAN.md`](DRIVE_CONTROL_ROS2_CONTROL_PLAN.md) §1。
+
+- `questix.xacro` は `base_link` 1 リンクのみ。車輪リンク・`laser_frame`・footprint 用 collision が無い
+- `questix_core.launch.xml` が `description_launch` を include していないため `robot_state_publisher` が動いておらず、`base_link → laser_frame` の TF が存在しない（`/scan` が孤立している）
+- `description_launch.launch.xml` は自前で rviz2 を起動するため、そのまま include すると二重起動になる。rviz2 を含まない description-only launch を切り出す
+- Plan A なら**車輪ジョイントは `fixed` でよい**（ナビゲーションに回転は不要）。`joint_states` の供給が不要になる
+
+### Step 6: ros2_control 化 — 採用しない（トリガー待ち）
+
+§5 のとおり **nav2 は ros2_control を要求しない**ため、既定の計画からは外す。実装案は [`DRIVE_CONTROL_ROS2_CONTROL_PLAN.md`](DRIVE_CONTROL_ROS2_CONTROL_PLAN.md) に保存し、§5 の再検討トリガー（多関節系の追加 / 外部への引き渡し / デバイスが消えなくなる電源設計）を引いたときに読み直す。
+
+Step 1〜5 を §7 の契約どおりに作れば、そのときの移行は書き直しではなくアダプタで済む。
 
 ---
 
-## 7. 検証方法
+## 7. 再実装に耐えるインターフェース契約
+
+Plan A で自作する以上、**将来の載せ替え（ros2_control でも、それ以外でも）がアダプタ 1 枚で済む**ようにインターフェースを固定しておく。これは ros2_control を採用しない場合でも良い設計であり、**追加コストはほぼゼロ**である。
+
+### 契約 1: 制御層は ROS を知らない
+
+```cpp
+// questix_drive_control（純 C++ ライブラリ。rclcpp に依存しない）
+namespace questix::drive_control {
+
+struct ChassisRef  { double v;            double w; };            // [m/s], [rad/s]
+struct WheelVel    { double left;         double right; };        // [rad/s]（RPM ではない）
+struct WheelState  { WheelVel measured; double left_current_a; double right_current_a;
+                     uint8_t left_fault; uint8_t right_fault;
+                     bool connected;      double feedback_age_sec; };
+struct SafetyInput { bool estop_active;  bool cmd_stale; };
+struct WheelCmd    { WheelVel velocity;  bool brake; };
+
+class DriveController {
+public:
+  // dt は公称周期 [s]。時刻型も ROS 型も受け取らない。
+  WheelCmd step(double dt, const ChassisRef& ref, const WheelState& fb, const SafetyInput& safety);
+  void reset();   // activate / estop / watchdog / fault で呼ぶ唯一のリセット
+};
+
+}  // namespace questix::drive_control
+```
+
+守るべき規則:
+
+- **純 C++ のみ**。`rclcpp::Time` も msg 型も使わない（時間は `double` 秒、状態は POD）。これで同じクラスが自作ノードでも `controller_interface` でもそのままコンパイルできる
+- **単位は車輪 rad/s**。RPM は使わない（ros2_control の慣習と一致するので境界に変換が生まれない）
+- **段（stage）を分ける**: `SafetyGate` → `Limiter`（速度/加速度/ジャーク） → `ChassisLoop`（FF + PI） → `Kinematics` → `OutputShaper`。各段を個別にテストできる状態を保つ
+- **`step()` は副作用を持たない**（ログ・publish・I/O をしない）。呼び出し側が観測する
+
+### 契約 2: バス層は狭いインターフェースの裏に置く
+
+```cpp
+// questix_ddt_bus
+class IWheelBus {
+public:
+  virtual ~IWheelBus() = default;
+  virtual bool writeWheelCommand(const WheelCmd& cmd) = 0;  // rad/s → RPM 変換は実装側
+  virtual bool readWheelState(WheelState& out) = 0;
+  virtual bool connected() const = 0;
+};
+
+class ISerialTransport {   // fake 差し替え用（遅延・タイムアウト・CRC 不一致の注入）
+public:
+  virtual ssize_t write(const void* data, size_t n) = 0;
+  virtual ssize_t read(void* data, size_t n, int timeout_ms) = 0;
+  virtual bool reopen() = 0;
+};
+```
+
+**デバイスの癖はすべてこの裏に閉じ込める**: 右モータの符号反転、RPM 変換、`min_command_rpm` 不感帯、`brake_on_stop`、`accel_time`、停止再送スロットル、再接続。制御層からは見えなくする。これで `diff_drive_controller` に載せ替えても、載せ替えなくても、置き場所が変わらない。
+
+### 契約 3: トピック名と単位を先に決める
+
+| トピック | 型 | 向き | 将来の対応先 |
+|---|---|---|---|
+| `/cmd_vel` | `geometry_msgs/Twist(Stamped)` | in | `diff_drive_controller` の入力そのまま |
+| `/wheel_cmd` | `questix_msgs/WheelCommand`（左右 rad/s + brake） | out | command interface `<joint>/velocity`, `ddt_bus/brake` |
+| `/wheel_state` | `questix_msgs/WheelState`（左右 rad/s + 電流 + fault + connected） | in | state interface 群 |
+| `/odom` + TF | `nav_msgs/Odometry` | out | `diff_drive_controller` の odom 出力 |
+| `/drive_status` | `questix_msgs/DriveStatus` | out | `drive_status_broadcaster`（契約不変） |
+| `/emergency_stop` | `questix_msgs/EmergencyStop` | in | 変更なし |
+
+**ジョイント名を今のうちに決めておく**（`left_wheel_joint` / `right_wheel_joint`）。URDF・メッセージのコメント・パラメータ名で同じ語を使えば、将来 `<ros2_control>` タグを書くときに名前の付け替えが発生しない。
+
+### 対応表: いま作るもの → 将来の ros2_control 相当物
+
+| Plan A の実装 | ros2_control 相当 | 載せ替え時の作業 |
+|---|---|---|
+| `DriveController::step(dt, ...)` | `ChainableControllerInterface::update(time, period)` | アダプタで `period` → `dt` を渡すだけ。中身は無変更 |
+| `Limiter` 段 | `diff_drive_controller` の limits | 設定値の移設（自作を捨てるか併用するか選べる） |
+| `Kinematics` 段 | `diff_drive_controller` の運動学 | 同上 |
+| `ChassisLoop` 段 | custom chainable controller | **どちらでも自作。無変更で載る** |
+| `IWheelBus` 実装 | `SystemInterface::read()/write()` | アダプタ 1 枚。プロトコル codec は無変更 |
+| `ISerialTransport` | 同じものをそのまま使う | 無変更 |
+| `odometry_integrator` | `diff_drive_controller` の odom | 捨てるか残すか選べる |
+| ノード本体（タイマー・publish・パラメータ） | `controller_manager` + spawner | **ここだけ書き直す**（薄いので安い） |
+
+書き直しになるのは「ノード本体の薄いアダプタ」だけで、制御則・運動学・プロトコル・PI はすべて無変更で載る。これが「扉を開けておく」の具体的な意味である。
+
+---
+
+## 8. 検証方法
 
 ### 実機なしでできること（新アーキではこれが大幅に増える）
 
@@ -337,7 +483,7 @@ accel / demand-adaptive / taper の3層を、速度・加速度・ジャーク�
 
 ---
 
-## 8. 非目標・リスク
+## 9. 非目標・リスク
 
 **非目標**
 
@@ -354,7 +500,7 @@ accel / demand-adaptive / taper の3層を、速度・加速度・ジャーク�
 
 ---
 
-## 9. 議論したい点
+## 10. 議論したい点
 
 1. ~~**nav2 での自律走行は視野に入っているか**~~ → **視野に入る方針で確定**。Step 2 の後に ros2_control へ移行する（[`DRIVE_CONTROL_ROS2_CONTROL_PLAN.md`](DRIVE_CONTROL_ROS2_CONTROL_PLAN.md)）。追加の論点は同ドキュメント §13 に移した。
 2. **`control_mode: "current"` は残すか**。車体速度閉ループ（Step 4）を入れると、電流モードの per-wheel RPM PI は役割が重複する。残すならモード切替の責務を制御層に統合したい。

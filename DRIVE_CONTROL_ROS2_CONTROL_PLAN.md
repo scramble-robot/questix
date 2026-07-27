@@ -1,22 +1,43 @@
-# ros2_control 移行実装案（Step 2 以降）
+# ros2_control 移行実装案（将来の選択肢 / 現時点では採用しない）
 
-前提: nav2 での自律走行を視野に入れる方針が確定した。
-親ドキュメント: [`DRIVE_CONTROL_ARCHITECTURE.md`](DRIVE_CONTROL_ARCHITECTURE.md)（Step 0〜2 と現状分析はそちら）
-状態: 設計提案（コード変更は含まない）。Jazzy の実 API 名は §11 の要確認リストで実機確認する前提。
+親ドキュメント: [`DRIVE_CONTROL_ARCHITECTURE.md`](DRIVE_CONTROL_ARCHITECTURE.md)（現状分析・Plan A の計画・インターフェース契約はそちら）
+状態: 設計提案。**既定の計画からは外している。** Jazzy の実 API 名は §11 の要確認リストで実機確認する前提。
 
 ---
 
-## 0. 方針の更新
+## 0. このドキュメントの位置づけ
 
-親ドキュメント §5 では「自作で進め、後から ros2_control へ写せる形にする」を推奨としたが、**nav2 が視野に入るなら Step 2 の直後に ros2_control へ跳ぶ方が総コストは安い**。理由:
+> **採用は必須ではない。** 一度「nav2 を視野に入れるなら Step 2 の直後に ros2_control へ跳ぶ」と結論したが、以下の理由で取り下げた。詳細な議論は親ドキュメント §5。
 
-- Step 3（リミッタ統合）・Step 4（閉ループ）・Step 5（調停）で自作しようとしているものは、`diff_drive_controller` / chainable controller / `twist_mux` にほぼ対応物がある。**自作してから捨てるのが一番高い**。
-- nav2 は odom・TF・`/cmd_vel`・joint state の標準形を要求する。`diff_drive_controller` はそれをそのまま満たす。
-- 一方で **nav2 の前提条件（§1）が現状ほぼ未整備**であり、そこの工数が ros2_control 本体より大きい可能性がある。先に見積もる必要がある。
+**1. nav2 は ros2_control を要求しない。** nav2 が要求するのは `/odom`・`odom → base_link` TF・`/cmd_vel` の購読・`/scan` と TF ツリーという契約だけで、`/odom` と TF は現在の `drive_component` がすでに出している。nav2 の実際のブロッカーは §1 の URDF/TF 未整備であり、これは**どちらの案でも同じだけ必要**である。
 
-したがって順序は **Step 0 → Step 1 → Step 2 → (B1〜B8) → nav2** とし、親ドキュメントの Step 3〜5 は B 系列に吸収する。
+**2. 「自作してから捨てるのが一番高い」は成立しなかった。** Step 3（リミッタ統合）は既存 `drive_slew` の整理、Step 4（閉ループ）は `diff_drive_controller` に対応物が無いので**どちらでも自作**、Step 5（調停）は `twist_mux` を使うので**どちらでもコードを書かない**。`odometry_integrator` と `drive_watchdog` は既にテスト付きで存在する。純増分は「固定周期タイマーの薄いラッパ」と「リミッタの一本化」程度しかない。
 
-Step 1・Step 2 は捨てにならない。Step 1 で切り出した `ddt_bus_driver` の中身が B2 の `SystemInterface` 実装にほぼそのまま入り、Step 2 の固定周期化は `controller_manager` の update ループに置き換わるだけである。
+**3. 依存リスクが非対称である。** ros2_control は本スタックで唯一「upstream の C++ 基底クラスを継承する」依存であり、ほぼ全ディストロで hardware_interface API に破壊的変更が入っている（§11 の要確認リストが長いのは調査不足ではなく、この依存の性質そのものの症状）。nav2 / `twist_mux` / `robot_state_publisher` はトピック契約で話すだけなので曝露が桁違いに小さい。
+
+**4. 第一設計の段階で契約と戦っている。** §3-4 でデバイス消失時に `return_type::ERROR` を返さない設計を推奨した。これは ros2_control のエラー契約を意図的に破るもので、適合していないサインである。加えて `is_async` は ros2_control の中でも踏まれていない道であり、本案件はそこに最も体重を預ける構成になっていた。
+
+### それでも残す理由
+
+- **「何を自作するとどうなるか」の設計材料**として有効。§4 の `diff_drive_controller` 設定案は Plan A のリミッタ設計にそのまま流用でき、§7 のマッピング表は責務の置き場所の議論に使える。
+- 親ドキュメント §5 の**再検討トリガー**を引いたとき、そのまま実装計画として使える。
+  1. マニピュレータなど多関節のアクチュエータ系を追加する
+  2. ロボットを外部へ渡す、標準構成を期待される
+  3. 電源設計が変わってデバイスが消えなくなる（上記 4 の不適合が解消する）
+- 親ドキュメント §7 の**インターフェース契約**どおりに Plan A を作れば、そのときの移行は書き直しではなく**アダプタ 1 枚**で済む。制御則・運動学・プロトコル・PI は無変更で載る。
+
+### 読み替えの対応
+
+| このドキュメントの記述 | Plan A での扱い |
+|---|---|
+| §1 nav2 前提条件（URDF / TF） | **そのまま必要。** 親ドキュメント Step B0 |
+| §3 hardware component | `ddt_bus_driver`（Step 1）＋ `IWheelBus` / `ISerialTransport` として実装 |
+| §3-4 デバイス消失の内部吸収 | **そのまま採用。** 自作なら契約違反にもならない |
+| §3-5 デバイス癖の置き場 | **そのまま採用。** `IWheelBus` の裏に閉じ込める |
+| §4 `diff_drive_controller` 設定案 | 自作 `Limiter` のパラメータ設計として流用（ジャーク換算も含む） |
+| §5 `wheel_velocity_controller` | `DriveController` の `ChassisLoop` 段（Plan V / Plan C の分岐はそのまま有効） |
+| §6 `drive_status_broadcaster` | 自作ノード内の publish タイマー。契約は不変 |
+| §9 B0〜B8 | B0 は必要。B1〜B8 は Step 1〜5 に読み替え |
 
 ---
 
