@@ -256,9 +256,11 @@ Jazzy なら `diff_drive_controller` + 自作 `hardware_interface` という選�
 - `controller_manager` プロセスの導入で、systemd / ansible / `robot_manager` 側の起動シーケンスに影響が出る（`AGENTS.md` の「installer/unit consistency」3点セット更新が必要）。
 - 学習コストと、大会運用中の移行リスク。
 
-### 推奨: 「A を実装し、B に写せる形にしておく」
+### 推奨（当初）: 「A を実装し、B に写せる形にしておく」
 
-**今は自作制御層（案 A）で進める。ただしインターフェースを ros2_control に一対一で写せる形に揃える。**
+> **更新（nav2 方針確定後）**: nav2 での自律走行を視野に入れる方針が確定したため、**Step 2 の直後に ros2_control へ移行する**方針に改める。具体的な実装案は [`DRIVE_CONTROL_ROS2_CONTROL_PLAN.md`](DRIVE_CONTROL_ROS2_CONTROL_PLAN.md) を参照。下記 A 案の記述は、Step 1〜2 の設計根拠（純粋な制御層と、シリアルを制御パスから外す境界）として引き続き有効であり、その境界がそのまま `controller_interface` / `hardware_interface` の移植面になる。本節末の「逆に B を先に選ぶべき条件」に該当したため、§6 の Step 3〜5 は移行計画 B1〜B8 に吸収される。
+
+**（当初案）今は自作制御層（案 A）で進める。ただしインターフェースを ros2_control に一対一で写せる形に揃える。**
 
 - 制御層の `step(dt, ref, fb, safety)` は `controller_interface::update(time, period)` に対応
 - `/wheel_cmd` `/wheel_state`（左右の rad/s）は command/state interface に対応
@@ -309,9 +311,9 @@ accel / demand-adaptive / taper の3層を、速度・加速度・ジャーク�
 
 指令調停と `/emergency_stop` 解釈の単一ソース化。→ **P5 解決**。
 
-### Step 6（任意）: ros2_control 化
+### Step 6: ros2_control 化
 
-必要になったら。Step 1〜4 の境界がそのまま移植面になる。
+> **更新（nav2 方針確定後）**: nav2 が視野に入るため任意ではなくなった。**Step 2 の直後**に移行し、上記 Step 3〜5 は移行計画 B1〜B8 に吸収する（Step 3〜5 を自作してから捨てるのが最も高い）。詳細は [`DRIVE_CONTROL_ROS2_CONTROL_PLAN.md`](DRIVE_CONTROL_ROS2_CONTROL_PLAN.md)。同ドキュメント §1 のとおり、**nav2 の前提条件（URDF の車輪ジョイント / `base_link→laser_frame` TF / `robot_state_publisher` の統合起動）が現状ほぼ未整備**であり、そこが ros2_control 本体よりクリティカルパスになり得る。
 
 ---
 
@@ -354,7 +356,7 @@ accel / demand-adaptive / taper の3層を、速度・加速度・ジャーク�
 
 ## 9. 議論したい点
 
-1. **nav2 での自律走行は視野に入っているか**。入っているなら Step 2 の後に ros2_control へ跳ぶ判断があり得る（第5節）。
+1. ~~**nav2 での自律走行は視野に入っているか**~~ → **視野に入る方針で確定**。Step 2 の後に ros2_control へ移行する（[`DRIVE_CONTROL_ROS2_CONTROL_PLAN.md`](DRIVE_CONTROL_ROS2_CONTROL_PLAN.md)）。追加の論点は同ドキュメント §13 に移した。
 2. **`control_mode: "current"` は残すか**。車体速度閉ループ（Step 4）を入れると、電流モードの per-wheel RPM PI は役割が重複する。残すならモード切替の責務を制御層に統合したい。
 3. **シリアル baud を上げられるか**。走行だけ 57600、他は 115200 になっている理由（ハード制約か歴史的経緯か）。
 4. **Step 0 の計測をいつ実機で取れるか**。ここが全ての前提になる。
