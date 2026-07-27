@@ -85,7 +85,7 @@ flowchart TD
   TT -->|/cmd_vel/teleop 優先度 高| TM["twist_mux"]
   NAV -->|/cmd_vel/nav 優先度 低| TM
   TM -->|/cmd_vel| DDC
-  subgraph cm["ros2_control_node (controller_manager, update_rate 100 Hz)"]
+  subgraph cm["ros2_control_node (controller_manager, update_rate 50 Hz)"]
     DDC["diff_drive_controller<br/>運動学 / 速度・加速度・ジャーク制限<br/>cmd_vel_timeout / odom + TF"]
     WVC["wheel_velocity_controller ★新規<br/>chainable: 車輪速 閉ループ + 安全ゲート"]
     JSB["joint_state_broadcaster"]
@@ -141,8 +141,8 @@ questix_ddt_hardware/
     <param name="right_motor_invert">true</param>   <!-- 鏡像取付の符号反転はここ -->
     <param name="max_motor_rpm">475</param>
     <param name="control_mode">velocity</param>      <!-- velocity | current -->
-    <param name="bus_rate">50.0</param>              <!-- 非同期スレッドのバス周期 [Hz] -->
-    <param name="feedback_timeout_ms">10</param>
+    <param name="bus_rate">50.0</param>              <!-- 非同期スレッドのバス周期 [Hz]。バス固定のため上限 -->
+    <param name="feedback_timeout_ms">5</param>       <!-- 実測 T_fw から決める。親ドキュメント §4 決定 2 -->
     <param name="accel_time_0p1ms_per_rpm">1</param>
     <param name="min_command_rpm">5</param>
     <param name="brake_on_stop">false</param>
@@ -193,9 +193,8 @@ questix_ddt_hardware/
 |---|---|---|
 | 100 Hz | 2 モータ × 20 B = 40 B | **69 %** |
 | 50 Hz | 40 B | 35 % |
-| 50 Hz @115200 baud | 40 B | 17 % |
 
-  → `controller_manager` は 100 Hz、バスは 50 Hz から始める。baud を上げられるならバス周期も上げられる（親ドキュメント §3-4 の要確認事項）。
+  → **バスは変更不可（57600 固定）** なので帯域に伸びしろはない。平均帯域よりフィードバック取りこぼし時のタイムアウトが先に効くため、`controller_manager` も **50 Hz** でバス周期に合わせる。詳細な worst-case 予算は親ドキュメント §4「シリアルバス制約が決めるレート設計」。
 
 ### 3-4. デバイス消失（非常停止で USB CDC が消える）の扱い
 
@@ -229,7 +228,7 @@ questix_ddt_hardware/
 ```yaml
 controller_manager:
   ros__parameters:
-    update_rate: 100  # Hz
+    update_rate: 50  # Hz（バス周期に一致。親ドキュメント §4 決定 1）
     joint_state_broadcaster:
       type: joint_state_broadcaster/JointStateBroadcaster
     wheel_velocity_controller:
@@ -451,7 +450,7 @@ B2 に到達すれば `use_ros2_control:=false` で現行に戻せる状態が�
 
 - ファーム速度ループの周波数特性同定（親ドキュメント Step 0）→ B6 のゲイン上限
 - `is_async` の実効性（`controller_manager` の update 周期がシリアル待ちで崩れないか）→ B1
-- シリアル帯域と baud 引き上げ可否 → B1
+- ファーム応答遅延 `T_fw` の分布とフィードバックタイムアウトの決定 → B1（baud 引き上げは不可）
 - 非常停止時のデバイス消失・再接続シーケンス（§3-4）→ **B4、安全に直結**
 - Plan C の停止保持と過電流挙動 → B6
 - nav2 の実走（LiDAR 品質、costmap、footprint）→ B8
@@ -497,6 +496,6 @@ Twist / TwistStamped の型不一致は Jazzy 前後で変わっている箇所�
 1. **nav2 の地図戦略**: SLAM（`slam_toolbox`）か、事前地図 + `amcl` か。競技フィールドが既知なら後者だが、`map → odom` の運用が変わる。
 2. **B0 の URDF 整備を誰がやるか**。車輪ジョイント・LiDAR 取付位置・footprint は実機の実寸が必要で、ここが全体のクリティカルパスになる可能性が高い。
 3. **Plan V か Plan C か**（§5）。電流モードでホストが速度ループを持つのが構造的には正しいが、停止保持と過電流の責任が移る。実機での判断。
-4. **シリアル baud を上げられるか**。57600 → 115200 でバス周期の余裕が倍になり、B6 の選択肢が広がる。
+4. ~~シリアル baud を上げられるか~~ → **解決済み: バスは変更不可**。
 5. **デマンド適応加速度を捨ててよいか**（§4-1）。操縦者の体感として必要なら `joy_controller` 側に持つ形で残す。
 6. **`single_ddt_motor` / `joy_axis_drive` / `esc_motor_control_cpp`** を ros2_control に載せるか、デバッグ用として現行のまま残すか。`/dev/ttyACM0` を複数ノードが開く現状のバス競合は別途整理が必要。
