@@ -26,7 +26,7 @@ DriveComponent::DriveComponent(const rclcpp::NodeOptions& options)
       last_cmd_angular_(0.0),
       last_cmd_time_(0, 0, RCL_ROS_TIME),
       has_last_cmd_(false),
-      cmd_timeout_sec_(0.5),
+      cmd_timeout_sec_(1.0),
       motor_initialized_(false),
       emergency_stop_active_(false) {
   // パラメーター宣言（取得は on_configure で行い、cleanup→configure で再読込できるようにする）
@@ -321,6 +321,10 @@ DriveComponent::CallbackReturn DriveComponent::on_error(const rclcpp_lifecycle::
 }
 
 void DriveComponent::declareParameters() {
+  // 既定値は launcher/config/drive_component.yaml（統合起動の Single Source of Truth）と
+  // 同値に保つこと。乖離すると単体 launch と統合起動で走行挙動が変わる。
+  // 値を変更するときは必ず両方（+ drive_component.hpp のクラス内初期化子）を更新する。
+
   // DDTモータライブラリのパラメータを宣言
   this->declare_parameter("serial_port", "/dev/ttyACM0");
   this->declare_parameter("baud_rate", 57600);
@@ -342,20 +346,20 @@ void DriveComponent::declareParameters() {
   this->declare_parameter("current_zero_deadband_rpm", 5);
   this->declare_parameter("current_invert_measured", true);
   this->declare_parameter("max_linear_accel", 3.0);
-  this->declare_parameter("max_angular_accel", 2.0);
+  this->declare_parameter("max_angular_accel", 3.0);
 
   // デマンド適応加速度。スティックを速く/大きく倒すほど加速度上限を max へ、ゆっくり/わずか
   // なら min へ寄せる。min_*_accel<=0 または accel_demand_ref_*<=0 で適応無効＝max の一定
   // クランプ（従来挙動）。詳細は drive_slew::demandScaledAccel。
   this->declare_parameter("min_linear_accel", 0.5);
-  this->declare_parameter("min_angular_accel", 0.35);
+  this->declare_parameter("min_angular_accel", 0.15);
   this->declare_parameter("accel_demand_ref_linear", 0.3);
   this->declare_parameter("accel_demand_ref_angular", 0.5);
 
   // 目標接近時のレート絞り幅（実効ジャーク制限）。0 で無効＝従来の一次レート制限。
   // 詳細は drive_slew::clampRateTapered。
-  this->declare_parameter("slew_taper_band_linear", 0.4);
-  this->declare_parameter("slew_taper_band_angular", 0.9);
+  this->declare_parameter("slew_taper_band_linear", 0.2);
+  this->declare_parameter("slew_taper_band_angular", 0.2);
 
   // 停止時の電気ブレーキ（velocity モードのみ有効）
   this->declare_parameter("brake_on_stop", false);
@@ -380,7 +384,7 @@ void DriveComponent::declareParameters() {
 
   // 実測RPMローパスの時定数 [s]。フィードバック速度のノイズを平滑化する（レポート/オドメトリ
   // 経路のみ、PI制御は生値のまま）。0以下で無効。詳細は DdtMotorLib::setMeasuredLowpassTau。
-  this->declare_parameter("measured_lpf_tau_sec", 0.1);
+  this->declare_parameter("measured_lpf_tau_sec", 0.15);
 
   // Lifecycle 自動遷移。非常停止解除でモータが通電するまで configure を再試行する。
   this->declare_parameter("auto_start", true);

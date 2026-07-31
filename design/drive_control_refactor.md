@@ -126,7 +126,9 @@ double dt = drive_slew::normalizeDt(has_last_cmd_, has_last_cmd_ ? (now - last_c
 | `slew_taper_band_angular` | 0.9 | 0.2 |
 | `measured_lpf_tau_sec` | 0.1 | 0.15 |
 
-つまり**単体 launch と統合起動で走行フィーリングが違う**。さらに `drive_component.hpp` のクラス内デフォルト（`brake_on_stop_{true}`, `accel_time_0p1ms_per_rpm_{50}`, `min_command_rpm_{8}`, `stop_resend_interval_ms_{200}`, `slew_taper_band_*{0.15/0.3}`）は `readParameters()` で必ず上書きされるデッド値だが、3 種類目の「デフォルトらしき値」としてコードを読む人を誤導する。AGENTS.md の defect-prevention checklist「Single source of truth for defaults」の違反そのものであり、Phase 0 で先に潰す（§5）。
+つまり**単体 launch と統合起動で走行フィーリングが違う**。さらに `drive_component.hpp` のクラス内デフォルト（`brake_on_stop_{true}`, `accel_time_0p1ms_per_rpm_{50}`, `min_command_rpm_{8}`, `stop_resend_interval_ms_{200}`, `slew_taper_band_*{0.15/0.3}`）とコンストラクタ初期化子（`cmd_timeout_sec_(0.5)` vs 宣言 1.0）は `readParameters()` で必ず上書きされるデッド値だが、3 種類目の「デフォルトらしき値」としてコードを読む人を誤導する。AGENTS.md の defect-prevention checklist「Single source of truth for defaults」の違反そのものであり、Phase 0 で先に潰す（§5）。
+
+**→ 対応済み（本ブランチ）**: 宣言デフォルト 5 件を YAML（実機チューニング済みの値）に合わせ、クラス内初期化子・コンストラクタ初期化子も同値に揃えた。両ファイルに「YAML が単一ソース、変更時は両方更新」の相互参照コメントを追加。
 
 ---
 
@@ -187,11 +189,11 @@ statusTimerCallback: 快照の publish のみ（シリアルに触らない）
 
 各 Phase は独立にレビュー・ロールバック可能な小さい PR にする。Phase 0–3 は AMD64 の `colcon build` / `colcon test` で検証可能。実機（Raspberry Pi 5 + 実車）検証が必須なのは Phase 1 以降の走行フィーリング確認のみ。
 
-### Phase 0: デフォルトの単一ソース化（実機不要・リスク極小）
+### Phase 0: デフォルトの単一ソース化（実機不要・リスク極小）— 実施済み（本ブランチ）
 
-- §2 P8 の乖離 5 件を解消する。`launcher/config/drive_component.yaml` を正として `declare_parameter` を合わせる（YAML が実機チューニングの結果であるため）。
-- `drive_component.hpp` のクラス内初期化子を `declare_parameter` と同値に揃える（またはコメントで「宣言側が正」と明記）。
-- 検証: 既存テスト + `ros2 param dump` の比較手順を YAML コメントに追記。
+- §2 P8 の乖離 5 件を解消した。`launcher/config/drive_component.yaml` を正として `declare_parameter` を合わせた（YAML が実機チューニングの結果であるため）。統合起動（launcher 経由）の挙動は不変で、単体 launch のみ統合起動と同じチューニング済み挙動に変わる。
+- `drive_component.hpp` のクラス内初期化子とコンストラクタの `cmd_timeout_sec_` を `declare_parameter` と同値に揃え、両ファイルに相互参照コメントを追加した。
+- 検証: `clang-format --dry-run -Werror`（リポジトリ `.clang-format`）/ `git diff --check` パス。デフォルト値を参照するテスト・ドキュメントが無いことを grep で確認。colcon build/test は実機側 CI に委ねる。
 
 ### Phase 1: 固定周期制御ループ（意味論の最小変更で dt を固定化）
 
