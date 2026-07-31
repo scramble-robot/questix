@@ -11,6 +11,7 @@
 
 #include "geometry_msgs/msg/transform_stamped.hpp"
 #include "geometry_msgs/msg/twist.hpp"
+#include "motor_control_app/drive_control_tick.hpp"
 #include "motor_control_app/drive_watchdog.hpp"
 #include "motor_control_app/odometry_integrator.hpp"
 #include "motor_control_lib/ddt_motor_lib.hpp"
@@ -30,6 +31,12 @@ namespace motor_control_app {
  * @brief DDTモータを使用したドライブコンポーネント（Lifecycle ノード）
  *
  * geometry_msgs/Twistメッセージを受信してDDTモータを制御します。
+ *
+ * 制御は固定周期の制御 tick（control_rate、既定 50 Hz）で実行する。
+ * twistCallback は最新目標の保存のみを行い、スルーレート制限・シリアル送信・
+ * コマンドタイムアウト判定はすべて controlTimerCallback に集約されている。
+ * これにより制御周期（= スルーレートの dt）が上流の publish レートから独立し、
+ * シリアルバスの利用者が制御 tick の1箇所になる。
  *
  * 非常停止中はモータが通電されず、シリアル接続（/dev/ttyACM0 の USB CDC）が
  * 得られない。そのため起動時は unconfigured で待機し、通電後に
@@ -67,21 +74,31 @@ public:
 private:
   /**
    * @brief Twistメッセージのコールバック関数
+   *
+   * 最新目標と受信時刻の保存のみを行う（I/O・スルーレート計算なし）。
+   * 制御実行は controlTimerCallback（固定周期）に集約されている。
    * @param msg 受信したTwistメッセージ
    */
   void twistCallback(const geometry_msgs::msg::Twist::SharedPtr msg);
 
   /**
-   * @brief モータステータスをパブリッシュするタイマーコールバック
+   * @brief 制御 tick（固定周期 control_rate）のタイマーコールバック
+   *
+   * コマンドタイムアウト判定（旧ウォッチドッグ）、フォールト停止、
+   * 固定 dt のスルーレート制限、シリアル送信（指令+フィードバック往復）を
+   * 1箇所で実行する。シリアルバスの利用者はこの tick のみ。
+   * 未武装（目標未受信）の間は駆動指令を送らず、フィードバックが古ければ
+   * 低頻度で再取得のみ行う。
    */
-  void statusTimerCallback();
+  void controlTimerCallback();
 
   /**
-   * @brief コマンド受信ウォッチドッグのタイマーコールバック
+   * @brief モータステータスをパブリッシュするタイマーコールバック
    *
-   * /target_twist が cmd_timeout_sec_ 秒以上途絶えたらモータを停止します。
+   * 制御 tick が取り込んだフィードバック快照を読んで publish するだけで、
+   * シリアルには触らない。
    */
-  void watchdogTimerCallback();
+  void statusTimerCallback();
 
   /**
    * @brief 実測 twist を積分して /odom を publish し、odom->base_link TF を broadcast する。
@@ -147,7 +164,7 @@ private:
   void resetOdometry();
 
   // ROS 2 通信
-  // Twist/status/watchdog/auto-start callbacks intentionally share the node's default
+  // Twist/control/status/auto-start callbacks intentionally share the node's default
   // MutuallyExclusive callback group, so callbacks do not run concurrently. If entities are
   // split across callback groups, synchronize motor_initialized_, diff_drive_, command state,
   // timer pointers, and all motor serial operations before enabling concurrent execution.
@@ -160,8 +177,8 @@ private:
   // ホイールオドメトリ（nav_msgs/Odometry）と odom->base_link TF。
   rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::Odometry>::SharedPtr odom_publisher_;
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
+  rclcpp::TimerBase::SharedPtr control_timer_;
   rclcpp::TimerBase::SharedPtr status_timer_;
-  rclcpp::TimerBase::SharedPtr watchdog_timer_;
   rclcpp::TimerBase::SharedPtr auto_start_timer_;
 
   // モータ制御ライブラリ
@@ -210,12 +227,23 @@ private:
   // （従来の一次レート制限）。詳細は drive_slew::clampRateTapered。
   double slew_taper_band_linear_{0.2};   // [m/s]
   double slew_taper_band_angular_{0.2};  // [rad/s]
-  double last_cmd_linear_;
-  double last_cmd_angular_;
-  rclcpp::Time last_cmd_time_;
-  bool has_last_cmd_;
 
-  // コマンド受信ウォッチドッグ（velocity/current 両モードで有効）
+  // 制御 tick の周期 [Hz]。スルーレート制限の dt は 1/control_rate の定数になる
+  double control_rate_{50.0};
+
+  // 最新の目標 twist（twistCallback が保存、controlTimerCallback が消費）。
+  // has_target_ = false は未武装（起動直後・タイムアウト/非常停止/フォールト停止後）で、
+  // 制御 tick は駆動指令を送らない。次の /target_twist 受信で再武装される。
+  double target_linear_{0.0};
+  double target_angular_{0.0};
+  rclcpp::Time last_cmd_time_;
+  bool has_target_{false};
+
+  // スルーレート制限の状態（前回 tick で送った指令）。リセット後は 0 からのランプになる
+  double last_cmd_linear_{0.0};
+  double last_cmd_angular_{0.0};
+
+  // コマンド受信タイムアウト（velocity/current 両モードで有効。制御 tick 内で判定）
   // /target_twist がこの秒数途絶えたら走行モータを停止する。0 以下で無効。
   double cmd_timeout_sec_;
 
