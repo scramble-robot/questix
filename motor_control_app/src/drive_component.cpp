@@ -520,8 +520,13 @@ bool DriveComponent::initializeMotorLib() {
     diff_drive_ = std::make_unique<motor_control_lib::DifferentialDrive>(
         motor_lib_, left_motor_id_, right_motor_id_, wheel_radius_, wheel_separation_);
 
-    // 低速不感帯（ファーム速度ループが低速域で振動するため、その領域を指令しない）
+    // 低速不感帯（ファーム速度ループが低速域で振動するため、その領域を指令しない）。
+    // 通常経路の判定は control_core_ が行うが、自己完結パス（setVelocity）でも同じ
+    // 不感帯が効くように両方へ設定する。
     diff_drive_->setMinCommandRpm(min_command_rpm_);
+
+    // ホスト側の制御コア（スルーレート・運動学・停止判定）を構築する。
+    control_core_ = std::make_unique<control_core::ControlCore>(makeControlCoreConfig());
 
     motor_initialized_ = true;
     RCLCPP_INFO(this->get_logger(), "Motor library initialized successfully");
@@ -542,19 +547,37 @@ void DriveComponent::shutdownMotorLib() {
     motor_lib_->emergencyStop();
     motor_lib_->shutdown();
   }
+  control_core_.reset();
   diff_drive_.reset();
   motor_lib_.reset();
   motor_initialized_ = false;
 }
 
+control_core::Config DriveComponent::makeControlCoreConfig() const {
+  control_core::Config config;
+  config.max_linear_accel = max_linear_accel_;
+  config.max_angular_accel = max_angular_accel_;
+  config.min_linear_accel = min_linear_accel_;
+  config.min_angular_accel = min_angular_accel_;
+  config.accel_demand_ref_linear = accel_demand_ref_linear_;
+  config.accel_demand_ref_angular = accel_demand_ref_angular_;
+  config.slew_taper_band_linear = slew_taper_band_linear_;
+  config.slew_taper_band_angular = slew_taper_band_angular_;
+  config.wheel_radius = wheel_radius_;
+  config.wheel_separation = wheel_separation_;
+  config.min_command_rpm = min_command_rpm_;
+  return config;
+}
+
 void DriveComponent::resetCommandState() {
   // 武装解除（制御 tick は次の /target_twist まで駆動指令を送らない）+
-  // スルーレート状態のリセット（次の駆動は 0 からのランプになる）。
+  // 制御コアのリセット（次の駆動は 0 からのランプ、停止モードから再開）。
   has_target_ = false;
   target_linear_ = 0.0;
   target_angular_ = 0.0;
-  last_cmd_linear_ = 0.0;
-  last_cmd_angular_ = 0.0;
+  if (control_core_) {
+    control_core_->reset();
+  }
 }
 
 void DriveComponent::resetOdometry() {
@@ -590,7 +613,9 @@ void DriveComponent::twistCallback(const geometry_msgs::msg::Twist::SharedPtr ms
 void DriveComponent::controlTimerCallback() {
   const auto tick_start = std::chrono::steady_clock::now();
 
-  const bool motor_ready = motor_initialized_ && diff_drive_ != nullptr;
+  // control_core_ は diff_drive_ と同じライフサイクル（initializeMotorLib で構築、
+  // shutdownMotorLib で破棄）だが、kDrive 経路で参照するため準備判定に含める。
+  const bool motor_ready = motor_initialized_ && diff_drive_ != nullptr && control_core_ != nullptr;
   const double elapsed = has_target_ ? (this->now() - last_cmd_time_).seconds() : 0.0;
   // isHealthy はキャッシュ済みフィードバックの fault コードを見るだけでシリアルには触らない
   const bool healthy = motor_ready && diff_drive_->isHealthy();
@@ -627,32 +652,25 @@ void DriveComponent::controlTimerCallback() {
       break;
   }
 
-  // 加速度クランプ（スルーレート制限）。max_*_accel<=0 のとき無効。dt は固定周期の定数。
-  // リセット直後は last_cmd_* が 0 のため、0 からのランプになる。
-  // 目標接近時はレートを絞る（slew_taper_band_* > 0 のとき）。飽和点で加速度がステップで
-  // 0 に落ちるのを避け、ファーム速度ループのランプ終端オーバーシュートを励起しない。
-  // 加速度上限はデマンド（残差 = |目標 - 前回指令|）に応じて min_*_accel..max_*_accel へ
-  // 適応させる。スティックを速く倒すほど残差が大きく加速度が強くなる。適応無効時（min<=0 /
-  // ref<=0）は max_*_accel 一定の従来挙動。
+  // ホスト側の制御コアで 1 ステップ進める（スルーレート制限 -> 運動学 -> 停止判定）。
+  // dt は固定周期の定数なので、実効加速度プロファイルが上流の publish レートに依存しない。
+  // 制御則の詳細は control_core.hpp / drive_slew.hpp を参照。
   const double dt = drive_control_tick::tickDtSec(control_rate_);
-  const double cmd_linear = drive_slew::clampRateAdaptive(
-      target_linear_, last_cmd_linear_, min_linear_accel_, max_linear_accel_,
-      accel_demand_ref_linear_, dt, slew_taper_band_linear_);
-  const double cmd_angular = drive_slew::clampRateAdaptive(
-      target_angular_, last_cmd_angular_, min_angular_accel_, max_angular_accel_,
-      accel_demand_ref_angular_, dt, slew_taper_band_angular_);
-  last_cmd_linear_ = cmd_linear;
-  last_cmd_angular_ = cmd_angular;
+  const auto out = control_core_->step(target_linear_, target_angular_, dt);
 
-  // 速度指令をモータライブラリに送信（応答フレームでフィードバック快照も更新される）
-  if (!diff_drive_->setVelocity(cmd_linear, cmd_angular)) {
+  // 指令送信（応答フレームでフィードバック快照も更新される）。停止判定は制御コアが
+  // 済ませているため、送信先は停止指令か生の車輪 RPM のどちらかになる。
+  const bool sent =
+      out.stop ? diff_drive_->commandStop() : diff_drive_->setWheelRpm(out.left_rpm, out.right_rpm);
+  if (!sent) {
     RCLCPP_ERROR_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
                           "Failed to set motor velocity");
     return;
   }
 
-  RCLCPP_DEBUG(this->get_logger(), "Velocity command sent: linear=%.3f, angular=%.3f", cmd_linear,
-               cmd_angular);
+  RCLCPP_DEBUG(this->get_logger(),
+               "Command sent: linear=%.3f, angular=%.3f -> left=%d RPM, right=%d RPM, stop=%s",
+               out.linear, out.angular, out.left_rpm, out.right_rpm, out.stop ? "true" : "false");
 
   // tick 所要時間の監視。シリアル応答待ち（最悪 10ms × 2）が周期予算を超えると
   // 制御周期が崩れるため、超過を可視化する（実機での control_rate 選定の材料）。

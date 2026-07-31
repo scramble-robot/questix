@@ -9,6 +9,7 @@
 #include <cmath>
 #include <rclcpp/rclcpp.hpp>
 
+#include "motor_control_lib/differential_kinematics.hpp"
 #include "motor_control_lib/drive_stop_gate.hpp"
 
 namespace motor_control_lib {
@@ -57,6 +58,25 @@ void DifferentialDrive::setMinCommandRpm(int min_command_rpm) {
   min_command_rpm_ = std::max(0, min_command_rpm);
 }
 
+bool DifferentialDrive::setWheelRpm(int left_rpm, int right_rpm) {
+  if (!motor_lib_) {
+    return false;
+  }
+
+  // ホスト側の制御コア（control_core）が運動学変換・不感帯・停止判定まで済ませた結果を
+  // そのまま送る経路。停止判定は呼び出し側の責務なのでここでは stop gate を通さない。
+  // 自己完結パス（setVelocity）へ切り替わっても整合するよう走行モードを記録する。
+  stop_mode_ = false;
+
+  RCLCPP_DEBUG(rclcpp::get_logger("DifferentialDrive"), "車輪RPM指令 - 左: %d RPM, 右: %d RPM",
+               left_rpm, right_rpm);
+
+  bool success = true;
+  success &= motor_lib_->setMotorVelocity(left_motor_id_, left_rpm);
+  success &= motor_lib_->setMotorVelocity(right_motor_id_, right_rpm);
+  return success;
+}
+
 bool DifferentialDrive::commandStop() {
   // 停止は必ずブレーキ経路（stopMotor）を通す。
   // 実測RPMで「まだ回っているうちはブレーキを送らない」ゲートを一度入れたが、これは
@@ -66,6 +86,10 @@ bool DifferentialDrive::commandStop() {
   // 固まった古い実測値でも同じラッチに入る。
   // 残留回転中のブレーキ連打によるリミットサイクルは、DdtMotorLib 側の
   // stop_resend_interval_ms（再送スロットル）で抑える方針に一本化する。
+  if (!motor_lib_) {
+    return false;
+  }
+  stop_mode_ = true;
   bool success = true;
   success &= motor_lib_->stopMotor(left_motor_id_);
   success &= motor_lib_->stopMotor(right_motor_id_);
@@ -162,25 +186,15 @@ DifferentialDrive::DriveStatus DifferentialDrive::getDriveStatus() const {
 
 std::pair<double, double> DifferentialDrive::twistToMotorVelocities(double linear_x,
                                                                     double angular_z) const {
-  double v_left = linear_x - (angular_z * wheel_separation_ / 2.0);
-  double v_right = linear_x + (angular_z * wheel_separation_ / 2.0);
-
-  double rpm_left = (v_left / (2.0 * M_PI * wheel_radius_)) * 60.0;
-  double rpm_right = -1 * (v_right / (2.0 * M_PI * wheel_radius_)) * 60.0;
-
-  return std::make_pair(rpm_left, rpm_right);
+  // 変換式は differential_kinematics の純粋関数が単一ソース（control_core と共有）。
+  return differential_kinematics::twistToWheelRpm(linear_x, angular_z, wheel_radius_,
+                                                  wheel_separation_);
 }
 
 std::pair<double, double> DifferentialDrive::motorVelocitiesToTwist(int left_rpm,
                                                                     int right_rpm) const {
-  // RPMから並進・角速度に変換
-  double left_velocity = (left_rpm / 60.0) * (2.0 * M_PI * wheel_radius_);
-  double right_velocity = -1 * (right_rpm / 60.0) * (2.0 * M_PI * wheel_radius_);
-
-  double linear_x = (left_velocity + right_velocity) / 2.0;
-  double angular_z = (right_velocity - left_velocity) / wheel_separation_;
-
-  return std::make_pair(linear_x, angular_z);
+  return differential_kinematics::wheelRpmToTwist(left_rpm, right_rpm, wheel_radius_,
+                                                  wheel_separation_);
 }
 
 }  // namespace motor_control_lib

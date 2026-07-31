@@ -11,6 +11,7 @@
 
 #include "geometry_msgs/msg/transform_stamped.hpp"
 #include "geometry_msgs/msg/twist.hpp"
+#include "motor_control_app/control_core.hpp"
 #include "motor_control_app/drive_control_tick.hpp"
 #include "motor_control_app/drive_watchdog.hpp"
 #include "motor_control_app/odometry_integrator.hpp"
@@ -153,6 +154,11 @@ private:
   void shutdownMotorLib();
 
   /**
+   * @brief 現在のパラメータから制御コアの設定を組み立てる（readParameters の後に呼ぶ）
+   */
+  control_core::Config makeControlCoreConfig() const;
+
+  /**
    * @brief スルーレート制限用のコマンド状態をリセット
    */
   void resetCommandState();
@@ -184,6 +190,11 @@ private:
   // モータ制御ライブラリ
   std::shared_ptr<motor_control_lib::DdtMotorLib> motor_lib_;
   std::unique_ptr<motor_control_lib::DifferentialDrive> diff_drive_;
+
+  // ホスト側の制御コア（スルーレート・運動学・停止判定）。ROS/シリアル非依存の純粋な
+  // 状態機械で、閉ループシミュレーションテスト（test_control_core）と同じコードを通る。
+  // diff_drive_ と同じライフサイクル（initializeMotorLib で構築、shutdown で破棄）。
+  std::unique_ptr<control_core::ControlCore> control_core_;
 
   // パラメータ
   // クラス内初期化子は declareParameters の既定値（= launcher/config/drive_component.yaml）と
@@ -239,9 +250,7 @@ private:
   rclcpp::Time last_cmd_time_;
   bool has_target_{false};
 
-  // スルーレート制限の状態（前回 tick で送った指令）。リセット後は 0 からのランプになる
-  double last_cmd_linear_{0.0};
-  double last_cmd_angular_{0.0};
+  // スルーレート制限と停止判定の状態は control_core_ が保持する。
 
   // コマンド受信タイムアウト（velocity/current 両モードで有効。制御 tick 内で判定）
   // /target_twist がこの秒数途絶えたら走行モータを停止する。0 以下で無効。
