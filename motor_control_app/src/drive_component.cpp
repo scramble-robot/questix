@@ -385,7 +385,7 @@ void DriveComponent::declareParameters() {
   this->declare_parameter("slew_taper_band_angular", 0.2);
 
   // 停止時の電気ブレーキ（velocity モードのみ有効）
-  this->declare_parameter("brake_on_stop", true);
+  this->declare_parameter("brake_on_stop", false);
 
   // ファーム側加速時間 [0.1ms/rpm]（velocity モードのみ有効）。ホスト側スルーレート制限が
   // 生む階段状の目標変化をファームが補間する平滑化機構。詳細は DdtMotorLib::setAccelTime。
@@ -409,7 +409,7 @@ void DriveComponent::declareParameters() {
   // 停止継続中のブレーキ再送間隔 [ms]。高頻度でブレーキを再送し続けると、残留回転が
   // ある間は毎回新規の制動として作用し、収束せず持続的な振動を起こすことがある。
   // 0で無効（毎回送信、従来挙動）。
-  this->declare_parameter("stop_resend_interval_ms", 200);
+  this->declare_parameter("stop_resend_interval_ms", 300);
 
   // 実測RPMローパスの時定数 [s]。フィードバック速度のノイズを平滑化する（レポート/オドメトリ
   // 経路のみ、PI制御は生値のまま）。0以下で無効。詳細は DdtMotorLib::setMeasuredLowpassTau。

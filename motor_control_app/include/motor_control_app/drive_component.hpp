@@ -273,7 +273,7 @@ private:
   double cmd_timeout_sec_;
 
   // 停止時の電気ブレーキ（velocity モードのみ）
-  bool brake_on_stop_{true};
+  bool brake_on_stop_{false};
 
   // ファーム側加速時間 [0.1ms/rpm]（velocity モードのみ）
   int accel_time_0p1ms_per_rpm_{1};
@@ -285,7 +285,7 @@ private:
   int command_wait_ms_{0};
 
   // 停止継続中のブレーキ再送間隔 [ms]。0で無効（毎回送信、従来挙動）
-  int stop_resend_interval_ms_{200};
+  int stop_resend_interval_ms_{300};
 
   // 実測RPMローパスの時定数 [s]。<=0で無効（生値）。レポート/オドメトリ経路のみ平滑化する
   double measured_lpf_tau_sec_{0.15};
