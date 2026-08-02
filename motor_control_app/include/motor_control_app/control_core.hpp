@@ -123,6 +123,17 @@ public:
     stop_mode_ = true;
   }
 
+  /**
+   * @brief 設定を差し替える（制御状態は保持する）。
+   *
+   * 実機でのチューニングを再起動なしに行うため、ROS パラメータ変更から呼ばれる。
+   * スルーレートの前回指令と停止モードは維持するので、走行中に変更しても指令が
+   * 飛ばない（次のステップから新しい加速度上限で継続する）。
+   */
+  void setConfig(const Config& config) { config_ = config; }
+
+  const Config& config() const { return config_; }
+
   // 現在のスルーレート状態（ログ・テスト用）
   double lastLinear() const { return last_linear_; }
   double lastAngular() const { return last_angular_; }

@@ -8,6 +8,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "geometry_msgs/msg/transform_stamped.hpp"
 #include "geometry_msgs/msg/twist.hpp"
@@ -20,6 +21,7 @@
 #include "nav_msgs/msg/odometry.hpp"
 #include "questix_msgs/msg/drive_status.hpp"
 #include "questix_msgs/msg/emergency_stop.hpp"
+#include "rcl_interfaces/msg/set_parameters_result.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_components/register_node_macro.hpp"
 #include "rclcpp_lifecycle/lifecycle_node.hpp"
@@ -159,6 +161,18 @@ private:
   control_core::Config makeControlCoreConfig() const;
 
   /**
+   * @brief 走行チューニング用パラメータの実行時変更コールバック。
+   *
+   * 実機で `ros2 param set` しながら加減速の詰めができるようにするためのもの。
+   * 対象はスルーレート系・不感帯・停止ブレーキ・平滑化など「再初期化なしで
+   * 反映できる」パラメータに限る。シリアルポート・モータ ID・control_mode・
+   * control_rate などの構造的パラメータは対象外で、変更しても次の
+   * cleanup -> configure まで反映されない（その旨を警告ログに出す）。
+   */
+  rcl_interfaces::msg::SetParametersResult onParameterChange(
+      const std::vector<rclcpp::Parameter>& params);
+
+  /**
    * @brief スルーレート制限用のコマンド状態をリセット
    */
   void resetCommandState();
@@ -186,6 +200,8 @@ private:
   rclcpp::TimerBase::SharedPtr control_timer_;
   rclcpp::TimerBase::SharedPtr status_timer_;
   rclcpp::TimerBase::SharedPtr auto_start_timer_;
+  // 走行チューニング用パラメータの実行時変更ハンドラ（onParameterChange 参照）
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_handler_;
 
   // モータ制御ライブラリ
   std::shared_ptr<motor_control_lib::DdtMotorLib> motor_lib_;
@@ -227,8 +243,8 @@ private:
   // デマンド適応加速度の下限。スティックをゆっくり/わずかに倒したときの加速度上限。
   // 0 以下で適応無効＝max_*_accel の一定クランプ（従来挙動）。詳細は
   // drive_slew::demandScaledAccel。
-  double min_linear_accel_{0.5};    // [m/s^2]
-  double min_angular_accel_{0.15};  // [rad/s^2]
+  double min_linear_accel_{0.0};   // [m/s^2]
+  double min_angular_accel_{0.0};  // [rad/s^2]
   // 加速度が min から max へ達するデマンド基準（残差 = |目標 - 前回指令|）。
   // 0 以下で適応無効。詳細は drive_slew::demandScaledAccel。
   double accel_demand_ref_linear_{0.3};   // [m/s]
@@ -257,7 +273,7 @@ private:
   double cmd_timeout_sec_;
 
   // 停止時の電気ブレーキ（velocity モードのみ）
-  bool brake_on_stop_{false};
+  bool brake_on_stop_{true};
 
   // ファーム側加速時間 [0.1ms/rpm]（velocity モードのみ）
   int accel_time_0p1ms_per_rpm_{1};
@@ -269,7 +285,7 @@ private:
   int command_wait_ms_{0};
 
   // 停止継続中のブレーキ再送間隔 [ms]。0で無効（毎回送信、従来挙動）
-  int stop_resend_interval_ms_{0};
+  int stop_resend_interval_ms_{200};
 
   // 実測RPMローパスの時定数 [s]。<=0で無効（生値）。レポート/オドメトリ経路のみ平滑化する
   double measured_lpf_tau_sec_{0.15};
