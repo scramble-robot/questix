@@ -174,11 +174,12 @@ public:
   struct MotorFeedbackData {
     uint8_t motor_id{0};
     uint8_t mode{0};
-    int16_t current_raw{0};    // トルク電流生値（符号付き）
-    int16_t velocity_rpm{0};   // 実測 RPM
-    int16_t target_rpm{0};     // 最終指令値（クランプ後）
-    uint16_t position_raw{0};  // ロータ位置
-    uint8_t temperature{0};    // 常に 0（Protocol 2 (0x74) 未実装）
+    int16_t current_raw{0};       // トルク電流生値（符号付き）
+    int16_t velocity_rpm{0};      // 実測 RPM（measured_lpf_tau_sec>0 ならローパス済み）
+    int16_t velocity_rpm_raw{0};  // 実測 RPM のフィルタ前生値（同定・振動解析用）
+    int16_t target_rpm{0};        // 最終指令値（クランプ後）
+    uint16_t position_raw{0};     // ロータ位置
+    uint8_t temperature{0};       // 常に 0（Protocol 2 (0x74) 未実装）
     uint8_t fault_code{0};
     bool has_feedback{false};      // 一度でも有効フィードバックを受信したか
     double feedback_age_sec{0.0};  // has_feedback のときのみ有効な受信経過秒
@@ -189,6 +190,21 @@ public:
    * @return 登録済みモータなら true（out を更新）。未登録/未初期化なら false。
    */
   bool getMotorFeedbackData(int motor_id, MotorFeedbackData& out) const;
+
+  /**
+   * @brief シリアル指令→フィードバック応答の往復レイテンシ統計。
+   *  制御周期引き上げ（タイムアウト短縮・tick 高周期化）の判断材料。
+   *  往復 = 書込開始からフィードバック受信完了まで（送信 1.74ms + ファーム処理 +
+   *  応答 1.74ms @57600baud/10byte フレーム）。タイムアウト時はカウントのみ。
+   */
+  struct SerialLatencyStats {
+    uint64_t samples{0};   // 応答を受信できた往復の回数
+    uint64_t timeouts{0};  // フィードバック未受信（タイムアウト）の回数
+    double last_ms{0.0};   // 直近の往復時間 [ms]
+    double avg_ms{0.0};    // 指数移動平均 [ms]（alpha=0.05）
+    double max_ms{0.0};    // 起動以降の最大 [ms]
+  };
+  SerialLatencyStats getSerialLatencyStats() const;
 
   /**
    * @brief 鮮度ゲート付きフィードバックポーリング。
@@ -262,7 +278,8 @@ private:
   mutable std::recursive_mutex state_mutex_;
 
   // Motor state tracking
-  std::map<int, int> motor_velocities_;           // motor_id -> target velocity_rpm
+  SerialLatencyStats serial_latency_stats_;  // 往復レイテンシ統計（state_mutex_ 保護）
+  std::map<int, int> motor_velocities_;      // motor_id -> target velocity_rpm
   std::map<int, MotorFeedback> motor_feedbacks_;  // motor_id -> feedback
   std::map<int, ControlMode> motor_modes_;        // motor_id -> control mode
   std::map<int, PiState> pi_states_;              // motor_id -> PI state
@@ -284,6 +301,7 @@ private:
   bool sendFrameWithFeedback(int motor_id, const std::vector<uint8_t>& frame);
   int16_t runCurrentLoopStep(int motor_id, int rpm_ref);  // PI 1ステップ
   void resetCurrentPiStateForStop(int motor_id);
+  void recordSerialRoundtrip(double roundtrip_ms);  // 往復レイテンシ統計の更新
   bool readFeedbackFrame(int expected_motor_id, std::vector<uint8_t>& out_frame, int timeout_ms);
   bool parseFeedback(int expected_motor_id, const std::vector<uint8_t>& frame);
   // レポート／オドメトリ用途で返す実測 RPM。measured_lpf_tau_sec_ > 0 ならローパス済み
