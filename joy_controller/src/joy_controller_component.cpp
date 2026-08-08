@@ -48,13 +48,15 @@ JoyControllerComponent::JoyControllerComponent(const rclcpp::NodeOptions &option
 
 void JoyControllerComponent::loadParameters() {
   // Movement parameters
-  declare_parameter("longitudinal_input_ratio", 0.1);
+  // デフォルト値は config/joy_controller_params.yaml と同値に保つこと（単一ソース原則）。
+  // 乖離すると YAML を渡さない起動経路だけ挙動が変わり、原因究明が難しい。
+  declare_parameter("longitudinal_input_ratio", 2.0);
   get_parameter("longitudinal_input_ratio", longitudinal_input_ratio_);
 
   declare_parameter("lateral_input_ratio", 0.3);
   get_parameter("lateral_input_ratio", lateral_input_ratio_);
 
-  declare_parameter("angular_input_ratio", 0.1);
+  declare_parameter("angular_input_ratio", 6.0);
   get_parameter("angular_input_ratio", angular_input_ratio_);
 
   // Controller mapping

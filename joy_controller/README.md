@@ -1,192 +1,100 @@
 # Joy Controller
 
-ROS2の統合型ジョイスティックコントローラーパッケージです。joy_to_twistの機能を統合し、拡張された機能を提供します。
+ジョイスティック入力 (`sensor_msgs/Joy`) を速度指令 (`geometry_msgs/Twist`) に変換する QUESTiX のパッケージです。
 
-## 機能
+2 つのノード（コンポーネント）を提供します:
 
-### 基本機能
+| ノード | 実装 | 用途 |
+|---|---|---|
+| `joy_controller_node` | `src/joy_controller_component.cpp` | 通常モード: 左スティックで前後、右スティックで旋回 |
+| `joy_controller_dual_stick_node` | `src/joy_controller_dual_stick_component.cpp` | デュアルスティック（戦車）モード: 左右スティック縦軸 = 左右車輪 |
 
-- ジョイスティック入力をTwistメッセージに変換
-- **サーボモーターの位置制御**: 右スティックの値でサーボモーターを制御
-- 設定可能な入力スケーリング
-- デッドゾーン処理
-- パラメータの動的変更サポート
+## トピック
 
-### 拡張機能
+| 方向 | トピック | 型 | 備考 |
+|---|---|---|---|
+| Sub | `joy_topic` パラメータで指定（既定 `/joy`、referee 構成では `/joy_gated`） | `sensor_msgs/Joy` | |
+| Pub | `/target_twist` | `geometry_msgs/Twist` | depth 1。`drive_component` が購読 |
 
-- **ターボモード**: 高速移動モード (デフォルトで2倍速)
-- **精密モード**: 低速精密制御モード (デフォルトで0.3倍速)
-- **緊急停止**: ワンボタンで全ての動作を停止
-- **安全機能**: 最大速度制限、ジョイスティックタイムアウト検知
-- **ボタン状態管理**: プレス、ホールド、リリース状態の詳細な追跡
+軸→速度は**純粋な線形写像**です。デッドゾーン処理は入力ドライバ側
+（`uart_joy_driver` の `deadzone` / joy パッケージの `deadzone`）で行われ、
+本ノードには expo カーブ・ターボ/精密モード等はありません。
 
-### 出力トピック
+## 起動
 
-- `/cmd_vel` (geometry_msgs/Twist): 速度コマンド
-- `/servo_shot/position_command` (std_msgs/Int32): サーボモーターの位置コマンド
-- `/emergency_stop` (std_msgs/Bool): 緊急停止状態
-- `/turbo_mode` (std_msgs/Bool): ターボモード状態
-- `/precision_mode` (std_msgs/Bool): 精密モード状態
-- `/speed_multiplier` (std_msgs/Float64): 現在の速度倍率
-
-## 使用方法
-
-### ビルド
+統合起動は `launcher`（`questix_core.launch.xml`）経由が正規経路です。単体では:
 
 ```bash
-cd /home/asahi/questix_core
-colcon build --packages-select joy_controller
-source install/setup.bash
-```
+# DualShock (joy_node) + joy_controller
+ros2 launch joy_controller joy_controller.launch.xml controller_type:=dualshock
 
-### 起動
+# UART コントローラ + joy_controller
+ros2 launch joy_controller joy_controller.launch.xml controller_type:=uart
 
-```bash
-# 基本起動
-ros2 launch joy_controller joy_controller.launch.py
+# デュアルスティックモード
+ros2 launch joy_controller joy_controller.launch.xml dual_stick:=true
 
-# カスタム設定ファイルを使用
-ros2 launch joy_controller joy_controller.launch.py config_file:=/path/to/your/config.yaml
-
-# サーボ制御テスト起動
-ros2 launch joy_controller servo_test.launch.py debug_mode:=true
-
-# デバッグモードで起動
-ros2 run joy_controller joy_controller_node --ros-args -p debug_mode:=true
-```
-
-## コントローラーマッピング (デフォルト)
-
-### 軸 (Axes)
-
-- **軸1** (左スティック Y): 前後移動 (linear.x)
-- **軸0** (左スティック X): 左右移動 (linear.y) - ホロノミックロボット用
-- **軸3** (右スティック X): 回転 (angular.z)
-- **軸2** (右スティック X): サーボ位置制御
-
-### ボタン (Buttons)
-
-- **ボタン6**: 緊急停止トグル
-- **ボタン4** (L1/LB): ターボモードトグル
-- **ボタン5** (R1/RB): 精密モードトグル
-
-## サーボ制御
-
-右スティックのX軸でサーボモーターの位置を積分制御（増分制御）します：
-
-- **増分制御**: スティックの値に応じてサーボ位置が徐々に変化
-- **中央位置**: スティックが中央にあるとき、サーボ位置は現在位置を維持
-- **左方向**: スティックを左に倒すと位置が増加（最大位置: default 4096）
-- **右方向**: スティックを右に倒すと位置が減少（最小位置: default 0）
-- **デッドゾーン**: 小さな入力は無視されます (default: 0.1)
-- **増分レート**: スティック入力に応じた変化速度 (default: 10.0 units/message)
-
-### サーボ監視
-
-```bash
-# サーボ位置コマンドを監視
-ros2 topic echo /servo_shot/position_command
-
-# ジョイスティック入力を監視
-ros2 topic echo /joy
+# GPIO レフェリーゲート付き（/joy_gated 経由）
+ros2 launch joy_controller joy_controller_referee.launch.xml
 ```
 
 ## パラメータ
 
-### 移動制御パラメータ
+実効値の単一ソースは `config/joy_controller_params.yaml`（dual stick は
+`config/joy_controller_dual_stick_params.yaml`）です。コード側の
+`declare_parameter` デフォルトは YAML と同値に保つ運用です。
 
-- `longitudinal_input_ratio` (default: 1.0): 前後移動のスケーリング
-- `lateral_input_ratio` (default: 0.3): 左右移動のスケーリング
-- `angular_input_ratio` (default: 1.0): 回転のスケーリング
-- `turbo_multiplier` (default: 2.0): ターボモード倍率
-- `precision_multiplier` (default: 0.3): 精密モード倍率
-- `deadzone_threshold` (default: 0.1): デッドゾーン閾値
+### joy_controller_node
 
-### サーボ制御パラメータ
+| パラメータ | 既定値 | 意味 |
+|---|---|---|
+| `longitudinal_input_ratio` | 2.0 | フルスティック時の前後速度 [m/s] |
+| `lateral_input_ratio` | 0.3 | フルスティック時の左右速度 [m/s]（ホロノミック用。差動駆動では未使用） |
+| `angular_input_ratio` | 6.0 | フルスティック時の旋回速度 [rad/s]。符号で旋回方向 |
+| `linear_x_axis` | 1 | 前後の軸番号（通常 左スティック Y） |
+| `linear_y_axis` | 0 | 左右の軸番号（通常 左スティック X） |
+| `angular_z_axis` | 3 | 旋回の軸番号（通常 右スティック X） |
+| `joy_topic` | `/joy` | 入力トピック（launcher が `/joy_gated` へ切替える唯一のインライン override） |
+| `debug_mode` | false | デバッグログ |
 
-- `right_stick_x_axis` (default: 2): サーボ制御に使用する軸番号
-- `servo_min_position` (default: 0): サーボの最小位置
-- `servo_max_position` (default: 4096): サーボの最大位置
-- `servo_center_position` (default: 2048): サーボの初期位置
-- `servo_deadzone_threshold` (default: 0.1): サーボ制御のデッドゾーン
-- `servo_increment_rate` (default: 10.0): 増分レート（メッセージあたりの位置変化量）
+### joy_controller_dual_stick_node
 
-### 安全パラメータ
-
-- `enable_safety_checks` (default: true): 安全チェック有効化
-- `max_linear_velocity` (default: 2.0): 最大線形速度 [m/s]
-- `max_angular_velocity` (default: 2.0): 最大角速度 [rad/s]
-- `joy_timeout_duration` (default: 1.0): ジョイスティックタイムアウト [秒]
-
-### デバッグパラメータ
-
-- `debug_mode` (default: false): デバッグログ有効化
-
-## 設定例
-
-```yaml
-joy_controller:
-  ros__parameters:
-    # より遅い動作に設定
-    longitudinal_input_ratio: 0.5
-    angular_input_ratio: 0.5
-    
-    # より強力なターボモード
-    turbo_multiplier: 3.0
-    
-    # 安全性を重視した設定
-    max_linear_velocity: 1.0
-    max_angular_velocity: 1.0
-    
-    # デバッグモード有効
-    debug_mode: true
-```
+| パラメータ | 既定値 | 意味 |
+|---|---|---|
+| `longitudinal_input_ratio` | 0.05 | 車輪速度スケール |
+| `angular_input_ratio` | 0.05 | 旋回成分スケール |
+| `left_stick_vertical_axis` | 1 | 左車輪の軸番号 |
+| `right_stick_vertical_axis` | 4 | 右車輪の軸番号 |
+| `joy_topic` | `/joy` | 入力トピック |
+| `debug_mode` | false | デバッグログ |
 
 ## パラメータの動的変更
 
-実行時にパラメータを変更することができます：
+上記パラメータはすべて `ros2 param set` で即時反映されます:
 
 ```bash
-# 速度比率を変更
-ros2 param set /joy_controller longitudinal_input_ratio 0.5
-
-# ターボモード倍率を変更
-ros2 param set /joy_controller turbo_multiplier 3.0
-
-# デバッグモードを有効化
+ros2 param set /joy_controller longitudinal_input_ratio 1.0
 ros2 param set /joy_controller debug_mode true
 ```
 
+注意: 実行時変更は永続化されません（drive 系は respawn 起動のため、
+プロセス再起動で YAML の値に戻ります）。恒久化する場合は YAML に反映してください。
+
 ## トラブルシューティング
 
-### ジョイスティックが認識されない
-
 ```bash
-# ジョイスティックデバイスを確認
+# ジョイスティックデバイスを確認 (DualShock)
 ls /dev/input/js*
 
-# joyノードのテスト
-ros2 run joy joy_node --ros-args -p dev:=/dev/input/js0
-
-# joy_controllerのデバッグ
-ros2 run joy_controller joy_controller_node --ros-args -p debug_mode:=true
-```
-
-### ボタンマッピングの確認
-
-```bash
-# ジョイスティック入力の監視
+# 入力の監視
 ros2 topic echo /joy
+
+# 出力の監視
+ros2 topic echo /target_twist
 ```
 
 ## 依存関係
 
-- rclcpp
-- sensor_msgs
-- geometry_msgs
-- std_msgs
-- joy
-
-## ライセンス
-
-MIT License
+- rclcpp / rclcpp_components
+- sensor_msgs / geometry_msgs
+- joy（DualShock 経路の joy_node）

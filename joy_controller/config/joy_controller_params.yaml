@@ -21,22 +21,10 @@ joy_controller:
     linear_x_axis: 1 # Axis for forward/backward (typically left stick Y)
     linear_y_axis: 0 # Axis for left/right (typically left stick X)
     angular_z_axis: 3 # Axis for rotation (typically right stick X)
-    right_stick_x_axis: 4 # Axis for servo control (typically right stick X)
 
-    # Button mapping for servo shot
-    servo_shot_button_1: 1 # Button for servo shot position 1
-    servo_shot_button_2: 0 # Button for servo shot position 2
-
-    # Servo control parameters
-    servo_min_position: 0 # Minimum servo position
-    servo_max_position: 4095 # Maximum servo position
-    servo_center_position: 2048 # Center position of servo
-    servo_deadzone_threshold: 0.3 # Deadzone for servo control
-    servo_increment_rate: 100.0 # Increment rate per joy message (position units per message)
-
-    # Servo shot positions
-    servo_shot_position_1: 1500 # Position for servo shot button 1
-    servo_shot_position_2: 2500 # Position for servo shot button 2
+    # NOTE: サーボ/ショット系のパラメータはこのノードでは宣言されていません。
+    # ショット系の設定は launcher/config/shot_config.*.yaml を参照してください。
+    # （未宣言キーを書いても ROS 2 は黙って無視するため、ここには置かないこと）
 
     # Debug settings
     debug_mode: false # Enable debug logging
