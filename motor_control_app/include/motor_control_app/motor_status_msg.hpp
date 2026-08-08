@@ -35,6 +35,7 @@ inline questix_msgs::msg::MotorFeedback toMotorFeedbackMsg(
   msg.current_raw = fb.current_raw;
   msg.current_amp = motor_control_lib::ddt_protocol::currentRawToAmp(fb.current_raw);
   msg.velocity_rpm = fb.velocity_rpm;
+  msg.velocity_rpm_raw = fb.velocity_rpm_raw;
   msg.target_rpm = fb.target_rpm;
   msg.position_raw = fb.position_raw;
   msg.temperature = fb.temperature;
