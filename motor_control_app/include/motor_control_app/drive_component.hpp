@@ -8,9 +8,12 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "geometry_msgs/msg/transform_stamped.hpp"
 #include "geometry_msgs/msg/twist.hpp"
+#include "motor_control_app/control_core.hpp"
+#include "motor_control_app/drive_control_tick.hpp"
 #include "motor_control_app/drive_watchdog.hpp"
 #include "motor_control_app/odometry_integrator.hpp"
 #include "motor_control_lib/ddt_motor_lib.hpp"
@@ -18,6 +21,7 @@
 #include "nav_msgs/msg/odometry.hpp"
 #include "questix_msgs/msg/drive_status.hpp"
 #include "questix_msgs/msg/emergency_stop.hpp"
+#include "rcl_interfaces/msg/set_parameters_result.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_components/register_node_macro.hpp"
 #include "rclcpp_lifecycle/lifecycle_node.hpp"
@@ -30,6 +34,12 @@ namespace motor_control_app {
  * @brief DDTモータを使用したドライブコンポーネント（Lifecycle ノード）
  *
  * geometry_msgs/Twistメッセージを受信してDDTモータを制御します。
+ *
+ * 制御は固定周期の制御 tick（control_rate、既定 50 Hz）で実行する。
+ * twistCallback は最新目標の保存のみを行い、スルーレート制限・シリアル送信・
+ * コマンドタイムアウト判定はすべて controlTimerCallback に集約されている。
+ * これにより制御周期（= スルーレートの dt）が上流の publish レートから独立し、
+ * シリアルバスの利用者が制御 tick の1箇所になる。
  *
  * 非常停止中はモータが通電されず、シリアル接続（/dev/ttyACM0 の USB CDC）が
  * 得られない。そのため起動時は unconfigured で待機し、通電後に
@@ -67,21 +77,31 @@ public:
 private:
   /**
    * @brief Twistメッセージのコールバック関数
+   *
+   * 最新目標と受信時刻の保存のみを行う（I/O・スルーレート計算なし）。
+   * 制御実行は controlTimerCallback（固定周期）に集約されている。
    * @param msg 受信したTwistメッセージ
    */
   void twistCallback(const geometry_msgs::msg::Twist::SharedPtr msg);
 
   /**
-   * @brief モータステータスをパブリッシュするタイマーコールバック
+   * @brief 制御 tick（固定周期 control_rate）のタイマーコールバック
+   *
+   * コマンドタイムアウト判定（旧ウォッチドッグ）、フォールト停止、
+   * 固定 dt のスルーレート制限、シリアル送信（指令+フィードバック往復）を
+   * 1箇所で実行する。シリアルバスの利用者はこの tick のみ。
+   * 未武装（目標未受信）の間は駆動指令を送らず、フィードバックが古ければ
+   * 低頻度で再取得のみ行う。
    */
-  void statusTimerCallback();
+  void controlTimerCallback();
 
   /**
-   * @brief コマンド受信ウォッチドッグのタイマーコールバック
+   * @brief モータステータスをパブリッシュするタイマーコールバック
    *
-   * /target_twist が cmd_timeout_sec_ 秒以上途絶えたらモータを停止します。
+   * 制御 tick が取り込んだフィードバック快照を読んで publish するだけで、
+   * シリアルには触らない。
    */
-  void watchdogTimerCallback();
+  void statusTimerCallback();
 
   /**
    * @brief 実測 twist を積分して /odom を publish し、odom->base_link TF を broadcast する。
@@ -136,6 +156,23 @@ private:
   void shutdownMotorLib();
 
   /**
+   * @brief 現在のパラメータから制御コアの設定を組み立てる（readParameters の後に呼ぶ）
+   */
+  control_core::Config makeControlCoreConfig() const;
+
+  /**
+   * @brief 走行チューニング用パラメータの実行時変更コールバック。
+   *
+   * 実機で `ros2 param set` しながら加減速の詰めができるようにするためのもの。
+   * 対象はスルーレート系・不感帯・停止ブレーキ・平滑化など「再初期化なしで
+   * 反映できる」パラメータに限る。シリアルポート・モータ ID・control_mode・
+   * control_rate などの構造的パラメータは対象外で、変更しても次の
+   * cleanup -> configure まで反映されない（その旨を警告ログに出す）。
+   */
+  rcl_interfaces::msg::SetParametersResult onParameterChange(
+      const std::vector<rclcpp::Parameter>& params);
+
+  /**
    * @brief スルーレート制限用のコマンド状態をリセット
    */
   void resetCommandState();
@@ -147,7 +184,7 @@ private:
   void resetOdometry();
 
   // ROS 2 通信
-  // Twist/status/watchdog/auto-start callbacks intentionally share the node's default
+  // Twist/control/status/auto-start callbacks intentionally share the node's default
   // MutuallyExclusive callback group, so callbacks do not run concurrently. If entities are
   // split across callback groups, synchronize motor_initialized_, diff_drive_, command state,
   // timer pointers, and all motor serial operations before enabling concurrent execution.
@@ -160,15 +197,25 @@ private:
   // ホイールオドメトリ（nav_msgs/Odometry）と odom->base_link TF。
   rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::Odometry>::SharedPtr odom_publisher_;
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
+  rclcpp::TimerBase::SharedPtr control_timer_;
   rclcpp::TimerBase::SharedPtr status_timer_;
-  rclcpp::TimerBase::SharedPtr watchdog_timer_;
   rclcpp::TimerBase::SharedPtr auto_start_timer_;
+  // 走行チューニング用パラメータの実行時変更ハンドラ（onParameterChange 参照）
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_handler_;
 
   // モータ制御ライブラリ
   std::shared_ptr<motor_control_lib::DdtMotorLib> motor_lib_;
   std::unique_ptr<motor_control_lib::DifferentialDrive> diff_drive_;
 
+  // ホスト側の制御コア（スルーレート・運動学・停止判定）。ROS/シリアル非依存の純粋な
+  // 状態機械で、閉ループシミュレーションテスト（test_control_core）と同じコードを通る。
+  // diff_drive_ と同じライフサイクル（initializeMotorLib で構築、shutdown で破棄）。
+  std::unique_ptr<control_core::ControlCore> control_core_;
+
   // パラメータ
+  // クラス内初期化子は declareParameters の既定値（= launcher/config/drive_component.yaml）と
+  // 同値に保つこと。実行時は on_configure -> readParameters で必ず上書きされるが、乖離した
+  // 値は「3種類目のデフォルト」としてコードを読む人を誤導する。
   std::string serial_port_;
   int baud_rate_;
   double wheel_radius_;
@@ -200,39 +247,48 @@ private:
   double min_angular_accel_{0.0};  // [rad/s^2]
   // 加速度が min から max へ達するデマンド基準（残差 = |目標 - 前回指令|）。
   // 0 以下で適応無効。詳細は drive_slew::demandScaledAccel。
-  double accel_demand_ref_linear_{0.0};   // [m/s]
-  double accel_demand_ref_angular_{0.0};  // [rad/s]
+  double accel_demand_ref_linear_{0.3};   // [m/s]
+  double accel_demand_ref_angular_{0.5};  // [rad/s]
   // 目標接近時のレート絞り幅（実効的なジャーク制限）。残差がこの幅に入ると 1 ステップの
   // 上限を残差比例で縮め、飽和点で加速度がステップで 0 に落ちないようにする。0 で無効
   // （従来の一次レート制限）。詳細は drive_slew::clampRateTapered。
-  double slew_taper_band_linear_{0.15};  // [m/s]
-  double slew_taper_band_angular_{0.3};  // [rad/s]
-  double last_cmd_linear_;
-  double last_cmd_angular_;
-  rclcpp::Time last_cmd_time_;
-  bool has_last_cmd_;
+  double slew_taper_band_linear_{0.2};   // [m/s]
+  double slew_taper_band_angular_{0.2};  // [rad/s]
 
-  // コマンド受信ウォッチドッグ（velocity/current 両モードで有効）
+  // 制御 tick の周期 [Hz]。スルーレート制限の dt は 1/control_rate の定数になる
+  double control_rate_{50.0};
+
+  // 最新の目標 twist（twistCallback が保存、controlTimerCallback が消費）。
+  // has_target_ = false は未武装（起動直後・タイムアウト/非常停止/フォールト停止後）で、
+  // 制御 tick は駆動指令を送らない。次の /target_twist 受信で再武装される。
+  double target_linear_{0.0};
+  double target_angular_{0.0};
+  rclcpp::Time last_cmd_time_;
+  bool has_target_{false};
+
+  // スルーレート制限と停止判定の状態は control_core_ が保持する。
+
+  // コマンド受信タイムアウト（velocity/current 両モードで有効。制御 tick 内で判定）
   // /target_twist がこの秒数途絶えたら走行モータを停止する。0 以下で無効。
   double cmd_timeout_sec_;
 
   // 停止時の電気ブレーキ（velocity モードのみ）
-  bool brake_on_stop_{true};
+  bool brake_on_stop_{false};
 
   // ファーム側加速時間 [0.1ms/rpm]（velocity モードのみ）
-  int accel_time_0p1ms_per_rpm_{50};
+  int accel_time_0p1ms_per_rpm_{1};
 
   // 指令を許す最低車輪 RPM（低速不感帯）。0 で不感帯なし
-  int min_command_rpm_{8};
+  int min_command_rpm_{5};
 
   // 指令送信後の追加待機 [ms]。0で無効（DDT M0602C の間隔要件用の保険）
   int command_wait_ms_{0};
 
   // 停止継続中のブレーキ再送間隔 [ms]。0で無効（毎回送信、従来挙動）
-  int stop_resend_interval_ms_{200};
+  int stop_resend_interval_ms_{300};
 
   // 実測RPMローパスの時定数 [s]。<=0で無効（生値）。レポート/オドメトリ経路のみ平滑化する
-  double measured_lpf_tau_sec_{0.0};
+  double measured_lpf_tau_sec_{0.15};
 
   // Lifecycle 自動起動（モータ通電まで configure を再試行する）
   bool auto_start_{true};

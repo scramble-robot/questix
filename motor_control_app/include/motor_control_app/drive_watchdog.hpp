@@ -19,6 +19,9 @@ inline bool shouldTimeoutStop(double elapsed_sec, double timeout_sec, bool has_c
 }
 
 // twistCallback が取るべきアクション
+// 注: drive_component は固定周期の制御 tick へ移行し、判定は
+// drive_control_tick::decideTickAction が担う。この関数はイベント駆動で
+// 指令を送るノード向けの汎用判定として残している。
 enum class TwistAction { kIgnore, kFaultStop, kDrive };
 
 // Twist 受信時のアクションを決定する。

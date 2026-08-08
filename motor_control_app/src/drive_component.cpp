@@ -12,6 +12,7 @@
 #include <functional>
 #include <lifecycle_msgs/msg/state.hpp>
 
+#include "motor_control_app/drive_control_tick.hpp"
 #include "motor_control_app/drive_slew.hpp"
 #include "motor_control_app/lifecycle_auto_start.hpp"
 #include "motor_control_app/motor_status_msg.hpp"
@@ -20,17 +21,26 @@ using namespace std::chrono_literals;
 
 namespace motor_control_app {
 
+namespace {
+// 未武装（駆動指令を送っていない）間にフィードバック快照の鮮度を維持するポーリング周期の
+// 目安 [s]。この鮮度以内なら再取得しない（≈5Hz）。odometry::kMaxFeedbackAgeSec（stale 判定）
+// より十分小さくすること。
+constexpr double kIdleFeedbackMaxAgeSec = 0.2;
+}  // namespace
+
 DriveComponent::DriveComponent(const rclcpp::NodeOptions& options)
     : rclcpp_lifecycle::LifecycleNode("drive_component", options),
-      last_cmd_linear_(0.0),
-      last_cmd_angular_(0.0),
       last_cmd_time_(0, 0, RCL_ROS_TIME),
-      has_last_cmd_(false),
-      cmd_timeout_sec_(0.5),
+      cmd_timeout_sec_(1.0),
       motor_initialized_(false),
       emergency_stop_active_(false) {
   // パラメーター宣言（取得は on_configure で行い、cleanup→configure で再読込できるようにする）
   declareParameters();
+
+  // 走行チューニング用パラメータの実行時変更を受け付ける（実機で ros2 param set しながら
+  // 加減速を詰められるようにするため）。詳細は onParameterChange。
+  param_handler_ = this->add_on_set_parameters_callback(
+      std::bind(&DriveComponent::onParameterChange, this, std::placeholders::_1));
 
   auto_start_ = this->get_parameter("auto_start").as_bool();
   const double requested_retry_period = this->get_parameter("connect_retry_period_sec").as_double();
@@ -72,11 +82,11 @@ DriveComponent::~DriveComponent() {
   if (auto_start_timer_) {
     auto_start_timer_->cancel();
   }
+  if (control_timer_) {
+    control_timer_->cancel();
+  }
   if (status_timer_) {
     status_timer_->cancel();
-  }
-  if (watchdog_timer_) {
-    watchdog_timer_->cancel();
   }
   shutdownMotorLib();
 }
@@ -129,6 +139,14 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
     return CallbackReturn::FAILURE;
   }
 
+  if (!lifecycle_auto_start::isValidStatusPublishRate(control_rate_)) {
+    RCLCPP_ERROR(this->get_logger(),
+                 "Invalid control_rate=%g; value must produce a positive, representable "
+                 "nanosecond timer period",
+                 control_rate_);
+    return CallbackReturn::FAILURE;
+  }
+
   // 未通電（非常停止中）は USB CDC デバイス自体が存在しない。ライブラリを構築する前に
   // デバイスの有無を確認し、リトライ毎のライブラリ内 ERROR ログで journald を汚さない。
   if (!std::filesystem::exists(serial_port_)) {
@@ -165,6 +183,7 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
   RCLCPP_INFO(this->get_logger(), "  odom_frame_id: %s", odom_frame_id_.c_str());
   RCLCPP_INFO(this->get_logger(), "  base_frame_id: %s", base_frame_id_.c_str());
   RCLCPP_INFO(this->get_logger(), "  cmd_timeout_sec: %.2f", cmd_timeout_sec_);
+  RCLCPP_INFO(this->get_logger(), "  control_rate: %.1f", control_rate_);
   RCLCPP_INFO(this->get_logger(), "  control_mode: %s", control_mode_.c_str());
   if (control_mode_ == "current") {
     RCLCPP_INFO(
@@ -237,17 +256,21 @@ DriveComponent::CallbackReturn DriveComponent::on_activate(const rclcpp_lifecycl
   // ではない）。deactivate 中のギャップを次サンプルで積分しないため。
   has_last_odom_time_ = false;
 
-  // ステータスパブリッシュタイマー
+  // 制御 tick タイマー（固定周期）。スルーレート制限・タイムアウト判定・シリアル送信を
+  // ここに集約する（twistCallback は目標保存のみ）。
+  const auto control_period =
+      std::chrono::nanoseconds(lifecycle_auto_start::statusTimerPeriodNanoseconds(control_rate_));
+  control_timer_ = this->create_wall_timer(control_period,
+                                           std::bind(&DriveComponent::controlTimerCallback, this));
+
+  // ステータスパブリッシュタイマー（フィードバック快照の publish のみ。シリアル非使用）
   const auto timer_period = std::chrono::nanoseconds(
       lifecycle_auto_start::statusTimerPeriodNanoseconds(status_publish_rate_));
   status_timer_ =
       this->create_wall_timer(timer_period, std::bind(&DriveComponent::statusTimerCallback, this));
 
-  // コマンド受信ウォッチドッグ（100ms 周期）。cmd_timeout_sec_ <= 0 で無効。
-  if (drive_watchdog::isEnabled(cmd_timeout_sec_)) {
-    watchdog_timer_ =
-        this->create_wall_timer(100ms, std::bind(&DriveComponent::watchdogTimerCallback, this));
-  } else {
+  // コマンド受信タイムアウトは制御 tick 内で判定する。cmd_timeout_sec_ <= 0 で無効。
+  if (!drive_watchdog::isEnabled(cmd_timeout_sec_)) {
     RCLCPP_WARN(this->get_logger(),
                 "Command timeout watchdog disabled (cmd_timeout_sec <= 0); motors will keep the "
                 "last command if /target_twist stops");
@@ -262,8 +285,8 @@ DriveComponent::CallbackReturn DriveComponent::on_activate(const rclcpp_lifecycl
 }
 
 DriveComponent::CallbackReturn DriveComponent::on_deactivate(const rclcpp_lifecycle::State& state) {
+  control_timer_.reset();
   status_timer_.reset();
-  watchdog_timer_.reset();
   // best-effort で停止指令（電流PI積分状態もリセットされる）
   if (diff_drive_) {
     diff_drive_->stop();
@@ -280,8 +303,8 @@ DriveComponent::CallbackReturn DriveComponent::on_deactivate(const rclcpp_lifecy
 }
 
 DriveComponent::CallbackReturn DriveComponent::on_cleanup(const rclcpp_lifecycle::State&) {
+  control_timer_.reset();
   status_timer_.reset();
-  watchdog_timer_.reset();
   twist_subscription_.reset();
   typed_status_publisher_.reset();
   resetOdometry();
@@ -294,8 +317,8 @@ DriveComponent::CallbackReturn DriveComponent::on_shutdown(const rclcpp_lifecycl
   if (auto_start_timer_) {
     auto_start_timer_->cancel();
   }
+  control_timer_.reset();
   status_timer_.reset();
-  watchdog_timer_.reset();
   twist_subscription_.reset();
   typed_status_publisher_.reset();
   resetOdometry();
@@ -307,8 +330,8 @@ DriveComponent::CallbackReturn DriveComponent::on_shutdown(const rclcpp_lifecycl
 DriveComponent::CallbackReturn DriveComponent::on_error(const rclcpp_lifecycle::State&) {
   // 遷移中に ERROR / 例外が発生したときの後始末。リソースを解放して unconfigured
   // に戻し、auto_start 有効時はタイマーを再開して自動復帰に委ねる。
+  control_timer_.reset();
   status_timer_.reset();
-  watchdog_timer_.reset();
   twist_subscription_.reset();
   typed_status_publisher_.reset();
   resetOdometry();
@@ -321,6 +344,10 @@ DriveComponent::CallbackReturn DriveComponent::on_error(const rclcpp_lifecycle::
 }
 
 void DriveComponent::declareParameters() {
+  // 既定値は launcher/config/drive_component.yaml（統合起動の Single Source of Truth）と
+  // 同値に保つこと。乖離すると単体 launch と統合起動で走行挙動が変わる。
+  // 値を変更するときは必ず両方（+ drive_component.hpp のクラス内初期化子）を更新する。
+
   // DDTモータライブラリのパラメータを宣言
   this->declare_parameter("serial_port", "/dev/ttyACM0");
   this->declare_parameter("baud_rate", 57600);
@@ -342,20 +369,20 @@ void DriveComponent::declareParameters() {
   this->declare_parameter("current_zero_deadband_rpm", 5);
   this->declare_parameter("current_invert_measured", true);
   this->declare_parameter("max_linear_accel", 3.0);
-  this->declare_parameter("max_angular_accel", 2.0);
+  this->declare_parameter("max_angular_accel", 3.0);
 
   // デマンド適応加速度。スティックを速く/大きく倒すほど加速度上限を max へ、ゆっくり/わずか
   // なら min へ寄せる。min_*_accel<=0 または accel_demand_ref_*<=0 で適応無効＝max の一定
   // クランプ（従来挙動）。詳細は drive_slew::demandScaledAccel。
-  this->declare_parameter("min_linear_accel", 0.5);
-  this->declare_parameter("min_angular_accel", 0.35);
+  this->declare_parameter("min_linear_accel", 0.0);
+  this->declare_parameter("min_angular_accel", 0.0);
   this->declare_parameter("accel_demand_ref_linear", 0.3);
   this->declare_parameter("accel_demand_ref_angular", 0.5);
 
   // 目標接近時のレート絞り幅（実効ジャーク制限）。0 で無効＝従来の一次レート制限。
   // 詳細は drive_slew::clampRateTapered。
-  this->declare_parameter("slew_taper_band_linear", 0.4);
-  this->declare_parameter("slew_taper_band_angular", 0.9);
+  this->declare_parameter("slew_taper_band_linear", 0.2);
+  this->declare_parameter("slew_taper_band_angular", 0.2);
 
   // 停止時の電気ブレーキ（velocity モードのみ有効）
   this->declare_parameter("brake_on_stop", false);
@@ -367,8 +394,14 @@ void DriveComponent::declareParameters() {
   // 指令を許す最低車輪 RPM（低速不感帯）。詳細は DifferentialDrive::setMinCommandRpm。
   this->declare_parameter("min_command_rpm", 5);
 
-  // コマンド受信ウォッチドッグのタイムアウト [s]（velocity/current 両モードで有効）
+  // コマンド受信タイムアウト [s]（velocity/current 両モードで有効。制御 tick 内で判定）
   this->declare_parameter("cmd_timeout_sec", 1.0);
+
+  // 制御 tick の周期 [Hz]。スルーレート制限の dt = 1/control_rate（固定）になり、
+  // 加速度プロファイルが上流の publish レート（DualShock 20Hz / UART 50Hz）に依存しない。
+  // 指令+フィードバックのシリアル往復（2モータで正常 ≈ 7ms、最悪 ≈ 20ms）がこの周期予算に
+  // 収まる必要がある（超過は "Control tick overrun" 警告が出る）。
+  this->declare_parameter("control_rate", 50.0);
 
   // 指令送信後の追加待機 [ms]。0で無効。実機の最小コマンド間隔要件用の保険
   this->declare_parameter("command_wait_ms", 0);
@@ -376,11 +409,11 @@ void DriveComponent::declareParameters() {
   // 停止継続中のブレーキ再送間隔 [ms]。高頻度でブレーキを再送し続けると、残留回転が
   // ある間は毎回新規の制動として作用し、収束せず持続的な振動を起こすことがある。
   // 0で無効（毎回送信、従来挙動）。
-  this->declare_parameter("stop_resend_interval_ms", 0);
+  this->declare_parameter("stop_resend_interval_ms", 300);
 
   // 実測RPMローパスの時定数 [s]。フィードバック速度のノイズを平滑化する（レポート/オドメトリ
   // 経路のみ、PI制御は生値のまま）。0以下で無効。詳細は DdtMotorLib::setMeasuredLowpassTau。
-  this->declare_parameter("measured_lpf_tau_sec", 0.1);
+  this->declare_parameter("measured_lpf_tau_sec", 0.15);
 
   // Lifecycle 自動遷移。非常停止解除でモータが通電するまで configure を再試行する。
   this->declare_parameter("auto_start", true);
@@ -426,6 +459,7 @@ void DriveComponent::readParameters() {
       static_cast<int>(this->get_parameter("accel_time_0p1ms_per_rpm").as_int());
   min_command_rpm_ = static_cast<int>(this->get_parameter("min_command_rpm").as_int());
   cmd_timeout_sec_ = this->get_parameter("cmd_timeout_sec").as_double();
+  control_rate_ = this->get_parameter("control_rate").as_double();
   command_wait_ms_ = static_cast<int>(this->get_parameter("command_wait_ms").as_int());
   stop_resend_interval_ms_ =
       static_cast<int>(this->get_parameter("stop_resend_interval_ms").as_int());
@@ -491,8 +525,13 @@ bool DriveComponent::initializeMotorLib() {
     diff_drive_ = std::make_unique<motor_control_lib::DifferentialDrive>(
         motor_lib_, left_motor_id_, right_motor_id_, wheel_radius_, wheel_separation_);
 
-    // 低速不感帯（ファーム速度ループが低速域で振動するため、その領域を指令しない）
+    // 低速不感帯（ファーム速度ループが低速域で振動するため、その領域を指令しない）。
+    // 通常経路の判定は control_core_ が行うが、自己完結パス（setVelocity）でも同じ
+    // 不感帯が効くように両方へ設定する。
     diff_drive_->setMinCommandRpm(min_command_rpm_);
+
+    // ホスト側の制御コア（スルーレート・運動学・停止判定）を構築する。
+    control_core_ = std::make_unique<control_core::ControlCore>(makeControlCoreConfig());
 
     motor_initialized_ = true;
     RCLCPP_INFO(this->get_logger(), "Motor library initialized successfully");
@@ -513,15 +552,149 @@ void DriveComponent::shutdownMotorLib() {
     motor_lib_->emergencyStop();
     motor_lib_->shutdown();
   }
+  control_core_.reset();
   diff_drive_.reset();
   motor_lib_.reset();
   motor_initialized_ = false;
 }
 
+control_core::Config DriveComponent::makeControlCoreConfig() const {
+  control_core::Config config;
+  config.max_linear_accel = max_linear_accel_;
+  config.max_angular_accel = max_angular_accel_;
+  config.min_linear_accel = min_linear_accel_;
+  config.min_angular_accel = min_angular_accel_;
+  config.accel_demand_ref_linear = accel_demand_ref_linear_;
+  config.accel_demand_ref_angular = accel_demand_ref_angular_;
+  config.slew_taper_band_linear = slew_taper_band_linear_;
+  config.slew_taper_band_angular = slew_taper_band_angular_;
+  config.wheel_radius = wheel_radius_;
+  config.wheel_separation = wheel_separation_;
+  config.min_command_rpm = min_command_rpm_;
+  return config;
+}
+
+rcl_interfaces::msg::SetParametersResult DriveComponent::onParameterChange(
+    const std::vector<rclcpp::Parameter>& params) {
+  rcl_interfaces::msg::SetParametersResult result;
+  result.successful = true;
+
+  // 再初期化なしで反映できないパラメータ（変更しても次の cleanup -> configure まで効かない）
+  static const std::vector<std::string> kRequiresReconfigure = {
+      "serial_port",   "baud_rate",        "left_motor_id",      "right_motor_id",
+      "max_motor_rpm", "control_mode",     "control_rate",       "status_publish_rate",
+      "wheel_radius",  "wheel_separation", "typed_status_topic", "odom_topic",
+      "odom_frame_id", "base_frame_id",    "publish_tf"};
+
+  bool control_core_dirty = false;
+  try {
+    for (const auto& param : params) {
+      const std::string& name = param.get_name();
+
+      // --- スルーレート系（制御コアへ反映） ---
+      if (name == "max_linear_accel") {
+        max_linear_accel_ = param.get_value<double>();
+        control_core_dirty = true;
+      } else if (name == "max_angular_accel") {
+        max_angular_accel_ = param.get_value<double>();
+        control_core_dirty = true;
+      } else if (name == "min_linear_accel") {
+        min_linear_accel_ = param.get_value<double>();
+        control_core_dirty = true;
+      } else if (name == "min_angular_accel") {
+        min_angular_accel_ = param.get_value<double>();
+        control_core_dirty = true;
+      } else if (name == "accel_demand_ref_linear") {
+        accel_demand_ref_linear_ = param.get_value<double>();
+        control_core_dirty = true;
+      } else if (name == "accel_demand_ref_angular") {
+        accel_demand_ref_angular_ = param.get_value<double>();
+        control_core_dirty = true;
+      } else if (name == "slew_taper_band_linear") {
+        slew_taper_band_linear_ = param.get_value<double>();
+        control_core_dirty = true;
+      } else if (name == "slew_taper_band_angular") {
+        slew_taper_band_angular_ = param.get_value<double>();
+        control_core_dirty = true;
+      } else if (name == "min_command_rpm") {
+        min_command_rpm_ = static_cast<int>(param.get_value<int64_t>());
+        control_core_dirty = true;
+        // 自己完結パス（DifferentialDrive::setVelocity）側にも同じ不感帯を反映する
+        if (diff_drive_) {
+          diff_drive_->setMinCommandRpm(min_command_rpm_);
+        }
+
+        // --- 制御 tick が直接見る値 ---
+      } else if (name == "cmd_timeout_sec") {
+        cmd_timeout_sec_ = param.get_value<double>();
+
+        // --- DdtMotorLib 側の設定（セッターで即時反映できる） ---
+      } else if (name == "brake_on_stop") {
+        brake_on_stop_ = param.get_value<bool>();
+        if (motor_lib_) {
+          motor_lib_->setBrakeOnStop(brake_on_stop_);
+        }
+      } else if (name == "stop_resend_interval_ms") {
+        stop_resend_interval_ms_ = static_cast<int>(param.get_value<int64_t>());
+        if (motor_lib_) {
+          motor_lib_->setStopResendIntervalMs(stop_resend_interval_ms_);
+        }
+      } else if (name == "measured_lpf_tau_sec") {
+        measured_lpf_tau_sec_ = param.get_value<double>();
+        if (motor_lib_) {
+          motor_lib_->setMeasuredLowpassTau(measured_lpf_tau_sec_);
+        }
+      } else if (name == "accel_time_0p1ms_per_rpm") {
+        accel_time_0p1ms_per_rpm_ = static_cast<int>(param.get_value<int64_t>());
+        if (motor_lib_) {
+          motor_lib_->setAccelTime(accel_time_0p1ms_per_rpm_);
+        }
+      } else if (name == "command_wait_ms") {
+        command_wait_ms_ = static_cast<int>(param.get_value<int64_t>());
+        if (motor_lib_) {
+          motor_lib_->setCommandWaitMs(command_wait_ms_);
+        }
+
+        // --- 再初期化が必要なもの: 受け付けるが即時反映されないことを警告する ---
+      } else if (std::find(kRequiresReconfigure.begin(), kRequiresReconfigure.end(), name) !=
+                 kRequiresReconfigure.end()) {
+        RCLCPP_WARN(this->get_logger(),
+                    "パラメータ '%s' は実行時反映されません。"
+                    "lifecycle cleanup -> configure で再読込してください",
+                    name.c_str());
+      }
+    }
+
+    // 制御コアの設定を差し替える（スルーレート状態と停止モードは維持されるので、
+    // 走行中に変更しても指令が飛ばない）。
+    if (control_core_dirty && control_core_) {
+      control_core_->setConfig(makeControlCoreConfig());
+      RCLCPP_INFO(this->get_logger(),
+                  "制御コア設定を更新: max_accel[lin=%.3f ang=%.3f] min_accel[lin=%.3f ang=%.3f] "
+                  "ref[lin=%.3f ang=%.3f] taper[lin=%.3f ang=%.3f] min_command_rpm=%d",
+                  max_linear_accel_, max_angular_accel_, min_linear_accel_, min_angular_accel_,
+                  accel_demand_ref_linear_, accel_demand_ref_angular_, slew_taper_band_linear_,
+                  slew_taper_band_angular_, min_command_rpm_);
+    }
+    result.reason = "Parameters updated successfully";
+  } catch (const std::exception& e) {
+    result.successful = false;
+    result.reason = std::string("Failed to update parameters: ") + e.what();
+    RCLCPP_ERROR(this->get_logger(), "%s", result.reason.c_str());
+  }
+
+  return result;
+}
+
 void DriveComponent::resetCommandState() {
-  has_last_cmd_ = false;
-  last_cmd_linear_ = 0.0;
-  last_cmd_angular_ = 0.0;
+  // 武装解除（制御 tick は次の /target_twist まで駆動指令を送らない）+
+  // 制御コアのリセット（次の駆動は 0 からのランプ、停止モードから再開）。
+  has_target_ = false;
+  target_linear_ = 0.0;
+  target_angular_ = 0.0;
+  if (control_core_) {
+    control_core_->reset();
+  }
 }
 
 void DriveComponent::resetOdometry() {
@@ -537,56 +710,95 @@ void DriveComponent::twistCallback(const geometry_msgs::msg::Twist::SharedPtr ms
     return;
   }
 
-  bool motor_ready = motor_initialized_ && diff_drive_ != nullptr;
-  switch (drive_watchdog::decideTwistAction(motor_ready, emergency_stop_active_,
-                                            motor_ready && diff_drive_->isHealthy())) {
-    case drive_watchdog::TwistAction::kIgnore:
-      RCLCPP_WARN_THROTTLE(
-          this->get_logger(), *this->get_clock(), 1000,
-          "Motor not initialized or emergency stop active, ignoring twist command");
+  // 非常停止中は目標を保存しない（解除後はモータ停止のまま、次の指令で再開 = 従来挙動）。
+  if (emergency_stop_active_) {
+    RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                         "Emergency stop active, ignoring twist command");
+    return;
+  }
+
+  // 制御実行は controlTimerCallback（固定周期の制御 tick）に集約されている。ここでは
+  // 最新目標の保存のみを行い、シリアル I/O もスルーレート計算もしない。これにより
+  // 制御周期（= スルーレートの dt）が上流の publish レートやメッセージ取りこぼしから
+  // 独立する（従来は /target_twist の到着間隔が dt だった）。
+  target_linear_ = msg->linear.x;
+  target_angular_ = msg->angular.z;
+  last_cmd_time_ = this->now();
+  has_target_ = true;
+}
+
+void DriveComponent::controlTimerCallback() {
+  const auto tick_start = std::chrono::steady_clock::now();
+
+  // control_core_ は diff_drive_ と同じライフサイクル（initializeMotorLib で構築、
+  // shutdownMotorLib で破棄）だが、kDrive 経路で参照するため準備判定に含める。
+  const bool motor_ready = motor_initialized_ && diff_drive_ != nullptr && control_core_ != nullptr;
+  const double elapsed = has_target_ ? (this->now() - last_cmd_time_).seconds() : 0.0;
+  // isHealthy はキャッシュ済みフィードバックの fault コードを見るだけでシリアルには触らない
+  const bool healthy = motor_ready && diff_drive_->isHealthy();
+
+  switch (drive_control_tick::decideTickAction(has_target_, motor_ready, emergency_stop_active_,
+                                               healthy, elapsed, cmd_timeout_sec_)) {
+    case drive_control_tick::TickAction::kIdle:
+      // 未武装（起動直後・タイムアウト/非常停止/フォールト停止後）。駆動指令は送らないが、
+      // フィードバックが古ければ低頻度で再取得する（外力で車輪が回された場合の観測と
+      // /drive_status の鮮度のため）。シリアル利用者を tick の1箇所に保つための配置。
+      if (motor_ready && !emergency_stop_active_ && motor_lib_) {
+        motor_lib_->refreshMotorFeedback(left_motor_id_, kIdleFeedbackMaxAgeSec);
+        motor_lib_->refreshMotorFeedback(right_motor_id_, kIdleFeedbackMaxAgeSec);
+      }
       return;
-    case drive_watchdog::TwistAction::kFaultStop:
-      // モータ異常中は最後の指令を保持せず、明示的に停止指令を送る。
+    case drive_control_tick::TickAction::kTimeoutStop:
+      RCLCPP_WARN(this->get_logger(),
+                  "Command timeout: no /target_twist for %.2fs (limit %.2fs), stopping motors",
+                  elapsed, cmd_timeout_sec_);
+      // stop() は各ホイールの stopMotor を通り電流PI積分状態をリセットする。
+      // resetCommandState で武装解除（WARN はイベント毎に1回）。次の /target_twist で
+      // 自動的に再武装し、スルーレートクランプもゼロから再スタートする。
+      diff_drive_->stop();
+      resetCommandState();
+      return;
+    case drive_control_tick::TickAction::kFaultStop:
+      // モータ異常中は最後の指令を保持せず、明示的に停止指令を送って武装解除する。
       diff_drive_->stop();
       resetCommandState();
       RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
                            "Motor not healthy: sending stop command");
       return;
-    case drive_watchdog::TwistAction::kDrive:
+    case drive_control_tick::TickAction::kDrive:
       break;
   }
 
-  // 加速度クランプ（スルーレート制限）。max_*_accel<=0 のとき無効。
-  // リセット直後（has_last_cmd_ == false）は last_cmd_* が 0 のため、0 からのランプに
-  // なる（以前はクランプ自体をスキップしてステップ指令が素通りしていた）。
-  rclcpp::Time now = this->now();
-  double dt = drive_slew::normalizeDt(has_last_cmd_,
-                                      has_last_cmd_ ? (now - last_cmd_time_).seconds() : 0.0);
-  // 目標接近時はレートを絞る（slew_taper_band_* > 0 のとき）。飽和点で加速度がステップで
-  // 0 に落ちるのを避け、ファーム速度ループのランプ終端オーバーシュートを励起しない。
-  // 加速度上限はデマンド（残差 = |目標 - 前回指令|）に応じて min_*_accel..max_*_accel へ
-  // 適応させる。スティックを速く倒すほど残差が大きく加速度が強くなる。適応無効時（min<=0 /
-  // ref<=0）は max_*_accel 一定の従来挙動。
-  double target_linear = drive_slew::clampRateAdaptive(
-      msg->linear.x, last_cmd_linear_, min_linear_accel_, max_linear_accel_,
-      accel_demand_ref_linear_, dt, slew_taper_band_linear_);
-  double target_angular = drive_slew::clampRateAdaptive(
-      msg->angular.z, last_cmd_angular_, min_angular_accel_, max_angular_accel_,
-      accel_demand_ref_angular_, dt, slew_taper_band_angular_);
-  last_cmd_linear_ = target_linear;
-  last_cmd_angular_ = target_angular;
-  last_cmd_time_ = now;
-  has_last_cmd_ = true;
+  // ホスト側の制御コアで 1 ステップ進める（スルーレート制限 -> 運動学 -> 停止判定）。
+  // dt は固定周期の定数なので、実効加速度プロファイルが上流の publish レートに依存しない。
+  // 制御則の詳細は control_core.hpp / drive_slew.hpp を参照。
+  const double dt = drive_control_tick::tickDtSec(control_rate_);
+  const auto out = control_core_->step(target_linear_, target_angular_, dt);
 
-  // 速度指令をモータライブラリに送信
-  if (!diff_drive_->setVelocity(target_linear, target_angular)) {
+  // 指令送信（応答フレームでフィードバック快照も更新される）。停止判定は制御コアが
+  // 済ませているため、送信先は停止指令か生の車輪 RPM のどちらかになる。
+  const bool sent =
+      out.stop ? diff_drive_->commandStop() : diff_drive_->setWheelRpm(out.left_rpm, out.right_rpm);
+  if (!sent) {
     RCLCPP_ERROR_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
                           "Failed to set motor velocity");
     return;
   }
 
-  RCLCPP_DEBUG(this->get_logger(), "Velocity command sent: linear=%.3f, angular=%.3f",
-               target_linear, target_angular);
+  RCLCPP_DEBUG(this->get_logger(),
+               "Command sent: linear=%.3f, angular=%.3f -> left=%d RPM, right=%d RPM, stop=%s",
+               out.linear, out.angular, out.left_rpm, out.right_rpm, out.stop ? "true" : "false");
+
+  // tick 所要時間の監視。シリアル応答待ち（最悪 10ms × 2）が周期予算を超えると
+  // 制御周期が崩れるため、超過を可視化する（実機での control_rate 選定の材料）。
+  const double tick_ms =
+      std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tick_start)
+          .count();
+  if (tick_ms > dt * 1000.0) {
+    RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
+                         "Control tick overrun: %.1f ms > budget %.1f ms (control_rate=%.1f)",
+                         tick_ms, dt * 1000.0, control_rate_);
+  }
 }
 
 void DriveComponent::emergencyStopCallback(const questix_msgs::msg::EmergencyStop::SharedPtr msg) {
@@ -620,37 +832,15 @@ void DriveComponent::emergencyStopCallback(const questix_msgs::msg::EmergencySto
   }
 }
 
-void DriveComponent::watchdogTimerCallback() {
-  if (!motor_initialized_ || !diff_drive_) {
-    return;
-  }
-
-  // 単一スレッドエグゼキュータ（コンポーネントコンテナ／単体 spin）前提のため、
-  // last_cmd_time_ / has_last_cmd_ の共有状態にミューテックスは不要。
-  double elapsed = (this->now() - last_cmd_time_).seconds();
-  if (drive_watchdog::shouldTimeoutStop(elapsed, cmd_timeout_sec_, has_last_cmd_)) {
-    RCLCPP_WARN(this->get_logger(),
-                "Command timeout: no /target_twist for %.2fs (limit %.2fs), stopping motors",
-                elapsed, cmd_timeout_sec_);
-    // stop() は各ホイールの stopMotor を通り電流PI積分状態をリセットする。
-    diff_drive_->stop();
-    // 再発火防止（イベント毎に WARN 1回）。次の /target_twist で自動的に再武装し、
-    // スルーレートクランプもゼロから再スタートする。
-    resetCommandState();
-  }
-}
-
 void DriveComponent::statusTimerCallback() {
   if (!motor_initialized_ || !diff_drive_) {
     return;
   }
 
   try {
-    // 型付き publish 用に、左右モータのフィードバックを（古ければ）1回ポーリングして更新する。
-    // 走行中は新鮮なので実質 no-op。アイドル時のみ最後のフレームを再送して実測を取り直す。
-    motor_lib_->refreshMotorFeedback(left_motor_id_);
-    motor_lib_->refreshMotorFeedback(right_motor_id_);
-
+    // 制御 tick（controlTimerCallback）が取り込んだフィードバック快照を読んで publish する
+    // だけで、シリアルには触らない。走行中は tick の指令応答で control_rate 周期の実測が
+    // 得られる。未武装（アイドル）中の鮮度維持は tick 側の低頻度ポーリングが担う。
     auto status = diff_drive_->getDriveStatus();
 
     // 型付きステータス（questix_msgs/DriveStatus）を publish

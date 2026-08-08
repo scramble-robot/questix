@@ -24,9 +24,36 @@ public:
   virtual ~DifferentialDrive() = default;
 
   // IDriveMotor implementation
+  /**
+   * @brief 車体 twist を左右車輪 RPM に変換して送信する（自己完結パス）。
+   *
+   * 運動学変換 + 低速不感帯 + 停止ヒステリシスを内部で完結させる簡易 API。
+   * drive_component は代わりに motor_control_app の control_core で
+   * スルーレート・不感帯・停止判定を行い、setWheelRpm / commandStop を直接呼ぶ
+   * （ホスト側の制御状態を1箇所に集めるため）。判定ロジック自体は
+   * differential_kinematics / drive_stop_gate の純粋関数を共有している。
+   */
   bool setVelocity(double linear_x, double angular_z) override;
   void stop() override;
   bool getCurrentVelocity(double& linear_x, double& angular_z) const override;
+
+  /**
+   * @brief 左右車輪 RPM を直接送信する（停止/不感帯判定は呼び出し側の責務）。
+   *
+   * ホスト側の制御コア（motor_control_app の control_core）が運動学変換・不感帯・
+   * 停止判定まで済ませた結果を送るための経路。ここでは stop gate を通さないため、
+   * 停止させたいときは commandStop() を呼ぶこと。
+   * RPM は DdtMotorLib 側で max_motor_rpm にクランプされる。
+   */
+  bool setWheelRpm(int left_rpm, int right_rpm);
+
+  /**
+   * @brief 通常運転の停止指令（目標0 + 電気ブレーキ）を送る。
+   *
+   * 停止フレームの再送は DdtMotorLib の stop_resend_interval_ms スロットルに従う。
+   * 非常停止・ウォッチドッグ・シャットダウンの即時停止は stop() を使う。
+   */
+  bool commandStop();
 
   // Configuration
   bool setWheelParams(double wheel_radius, double wheel_separation);
@@ -75,11 +102,7 @@ private:
   // 指令を許す最低車輪 RPM（低速不感帯）。0 で不感帯なし。
   int min_command_rpm_{0};
 
-  // 停止モード中の停止指令送信。残留回転が大きい間は目標0（無ブレーキ）で
-  // ファームランプに減速させ、実測RPMが閾値未満になってからブレーキを投入する。
-  bool commandStop();
-
-  // Conversion methods
+  // Conversion methods（変換式は differential_kinematics.hpp の純粋関数に委譲する）
   std::pair<double, double> twistToMotorVelocities(double linear_x, double angular_z) const;
   std::pair<double, double> motorVelocitiesToTwist(int left_rpm, int right_rpm) const;
 };
