@@ -14,23 +14,10 @@ endif()
 find_package(ament_cmake_auto REQUIRED)
 ament_auto_find_build_dependencies()
 
-# Install launch files
-install(DIRECTORY
-  launch/
-  DESTINATION share/${PROJECT_NAME}/launch
-  FILES_MATCHING PATTERN "*.xml"
-)
-
 # Install documentation
 install(FILES
   README.md
   DESTINATION share/${PROJECT_NAME}
-)
-
-install(DIRECTORY
-  config/
-  DESTINATION share/${PROJECT_NAME}/config
-  FILES_MATCHING PATTERN "*.yaml"
 )
 
 
@@ -54,4 +41,7 @@ if(BUILD_TESTING)
   )
 endif()
 
-ament_auto_package()
+# INSTALL_TO_SHARE + colcon --symlink-install で config/launch が symlink になり、
+# ソース YAML の編集が再ビルド無しで実機に反映される（旧 install(DIRECTORY) は
+# コピーになるため、編集済みソースと実行時 config が乖離する事故があった）。
+ament_auto_package(INSTALL_TO_SHARE launch config)
