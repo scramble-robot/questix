@@ -182,7 +182,7 @@ def check_ephemeral_range(warn, path=EPHEMERAL_RANGE_PATH):
 
 
 def _read_answer_or_raise_on_eof(read_line, context):
-    """Read one line, distinguishing EOF ("") from a blank Enter ("\\n").
+    r"""Read one line, distinguishing EOF ("") from a blank Enter ("\n").
 
     read_line() returning the empty string means stdin was closed (EOF), not
     that the user pressed Enter. Conflating the two would let a closed/piped
