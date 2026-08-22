@@ -53,6 +53,9 @@
       ansible.builtin.debug:
         msg: "Detected device: {{ pi_model.stdout }}"
 
+    - name: Validate ROS_DOMAIN_ID before any state-changing role runs
+      ansible.builtin.include_tasks: tasks/validate_ros_domain_id.yaml
+
   roles:
     - { role: ros2_installation }
     - { role: raspberry_pi_setup }

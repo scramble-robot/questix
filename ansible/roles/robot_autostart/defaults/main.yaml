@@ -5,9 +5,24 @@ target_user: "{{ ansible_user | default(ansible_env.SUDO_USER) }}"
 workspace_path: "/home/{{ target_user }}/robot_ws"
 ros2_distro: jazzy
 ros_domain_id: 42
+questix_robot_config_dir: /etc/questix_robot
 
 # Robot mode: "practice" (default, safe) or "competition" (auto-launch on boot)
 robot_mode: practice
+
+# Shipping defaults for a freshly-kitted launch.env (single source of truth for
+# ansible/roles/robot_autostart/templates/launch.env.j2). A robot ships with every
+# launch component off so a first boot never drives motors/LiDAR/RViz unexpectedly;
+# operators opt components in explicitly. ENABLE_GPIO_REF stays true: it is the
+# manual/diagnostic GPIO safety path (competition mode always forces it true
+# regardless of this value - see robot_autostart/README.md), so shipping it
+# disabled would default manual `ros2 launch` invocations to no GPIO safety.
+enable_lidar: false
+enable_shot: false
+enable_drive: false
+enable_gpio_ref: true
+enable_rviz: false
+controller_type: dualshock
 
 # Robot manager Web UI
 # Set to true to install robot-manager GUI

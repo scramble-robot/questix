@@ -18,14 +18,8 @@
     mode: "0644"
     force: false
 
-- name: Deploy launch environment file
-  ansible.builtin.template:
-    src: launch.env.j2
-    dest: /etc/questix_robot/launch.env
-    owner: "{{ target_user }}"
-    group: "{{ target_user }}"
-    mode: "0644"
-    force: false
+- name: Deploy and synchronize launch environment file
+  ansible.builtin.include_tasks: launch_env.yaml
 
 - name: Create launcher script directory
   ansible.builtin.file:
