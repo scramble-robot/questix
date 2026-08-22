@@ -35,8 +35,8 @@ DdtMotorLib::DdtMotorLib(const std::string& serial_port, int baud_rate)
       brake_on_stop_(true),
       accel_time_0p1ms_per_rpm_(50),
       command_wait_ms_(0),
-      stop_resend_interval_ms_(200),
       measured_lpf_tau_sec_(0.0),
+      stop_resend_interval_ms_(200),
       serial_fd_(-1) {
   logger_ = rclcpp::get_logger("DdtMotorLib");
 }
@@ -531,6 +531,9 @@ bool DdtMotorLib::sendFrameWithFeedback(int motor_id, const std::vector<uint8_t>
   // 書込は最大3回まで再試行する。書込成功後はフィードバックを1回だけ待つ。
   // 固定スリープは行わない: 応答待ち（最大10ms）が自然なコマンド間隔になる。
   for (int attempt = 0; attempt < 3; ++attempt) {
+    // 往復レイテンシ計測: 書込開始→フィードバック受信完了。制御周期引き上げ
+    // （タイムアウト短縮・tick 高周期化）の判断材料として統計を蓄積する。
+    const auto roundtrip_start = std::chrono::steady_clock::now();
     ssize_t written = writeSerial(frame.data(), frame.size());
     if (written != static_cast<ssize_t>(frame.size())) {
       RCLCPP_WARN_THROTTLE(logger_, throttle_clock_, 1000, "指令書込失敗 motor=%d", motor_id);
@@ -544,8 +547,13 @@ bool DdtMotorLib::sendFrameWithFeedback(int motor_id, const std::vector<uint8_t>
     std::vector<uint8_t> feedback_frame;
     if (readFeedbackFrame(motor_id, feedback_frame, /*timeout_ms=*/10)) {
       parseFeedback(motor_id, feedback_frame);
+      recordSerialRoundtrip(std::chrono::duration<double, std::milli>(
+                                std::chrono::steady_clock::now() - roundtrip_start)
+                                .count());
     } else {
       RCLCPP_DEBUG(logger_, "モーター %d フィードバック未受信 (10ms timeout)", motor_id);
+      std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+      ++serial_latency_stats_.timeouts;
     }
     // 実機の最小コマンド間隔要件が判明した場合の保険（既定 0 = 待機なし）。
     if (command_wait_ms_ > 0) {
@@ -761,6 +769,27 @@ ssize_t DdtMotorLib::readSerial(void* data, size_t size) {
   return read(serial_fd_, data, size);
 }
 
+void DdtMotorLib::recordSerialRoundtrip(double roundtrip_ms) {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+  auto& stats = serial_latency_stats_;
+  ++stats.samples;
+  stats.last_ms = roundtrip_ms;
+  stats.max_ms = std::max(stats.max_ms, roundtrip_ms);
+  // EMA alpha=0.05: 直近 ~20 サンプル相当の平滑平均。初回はそのまま採用。
+  stats.avg_ms =
+      (stats.samples == 1) ? roundtrip_ms : stats.avg_ms + 0.05 * (roundtrip_ms - stats.avg_ms);
+  RCLCPP_DEBUG_THROTTLE(logger_, throttle_clock_, 5000,
+                        "シリアル往復: last=%.2fms avg=%.2fms max=%.2fms samples=%lu timeouts=%lu",
+                        stats.last_ms, stats.avg_ms, stats.max_ms,
+                        static_cast<unsigned long>(stats.samples),
+                        static_cast<unsigned long>(stats.timeouts));
+}
+
+DdtMotorLib::SerialLatencyStats DdtMotorLib::getSerialLatencyStats() const {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+  return serial_latency_stats_;
+}
+
 bool DdtMotorLib::getMotorFeedbackData(int motor_id, MotorFeedbackData& out) const {
   std::lock_guard<std::recursive_mutex> lock(state_mutex_);
   if (!initialized_) {
@@ -780,8 +809,11 @@ bool DdtMotorLib::getMotorFeedbackData(int motor_id, MotorFeedbackData& out) con
     const MotorFeedback& fb = fb_it->second;
     out.mode = fb.mode;
     out.current_raw = fb.current;
-    // レポート用途はローパス済み実測 RPM を返す（tau<=0 で生値）。
+    // レポート用途はローパス済み実測 RPM を返す（tau<=0 で生値）。生値も併せて返す:
+    // ローパスは既定 tau=0.15s (fc≒1.06Hz) でファーム速度ループの ~1.8Hz 振動を
+    // 約半分に見せるため、同定・振動解析は velocity_rpm_raw を使うこと。
     out.velocity_rpm = static_cast<int16_t>(measuredRpmForReport(fb));
+    out.velocity_rpm_raw = fb.speed;
     out.position_raw = fb.position;
     out.temperature = fb.temperature;  // 常に 0（Protocol 2 未実装）
     out.fault_code = fb.fault_code;

@@ -34,17 +34,14 @@ namespace {
 // launcher/config/drive_component.yaml（統合起動の Single Source of Truth）の値を写した
 // 設定。YAML との一致を強制する仕組みではないため、YAML を変えたらここも見直す。
 //
-// デマンド適応（min_*_accel）は実機評価で無効化した。残差ベースの適応は「入力の丁寧さ」と
-// 「追従の遅れ」を区別できず、微小入力の応答を鈍くしていたため（狙いと逆の効果）。
-// 機構ごとの寄与は DemandAdaptationDominatesTheSettlingTail が明示的に測っている。
+// デマンド適応（min_*_accel / accel_demand_ref_*）は実機評価の結果コードごと廃止した。
+// 残差ベースの適応は「入力の丁寧さ」と「追従の遅れ」を区別できず、微小入力の応答を
+// 鈍くしていたため（狙いと逆の効果）。廃止後の応答特性は
+// SmallInputsRespondQuickly / ForwardStepSettlesInAboutZeroPointEightSeconds が固定する。
 core::Config yamlConfig() {
   core::Config config;
   config.max_linear_accel = 3.0;
   config.max_angular_accel = 3.0;
-  config.min_linear_accel = 0.0;
-  config.min_angular_accel = 0.0;
-  config.accel_demand_ref_linear = 0.3;
-  config.accel_demand_ref_angular = 0.5;
   config.slew_taper_band_linear = 0.2;
   config.slew_taper_band_angular = 0.2;
   config.wheel_radius = 0.1;
@@ -189,63 +186,37 @@ TEST(ControlCoreSettling, RaisingMaxAngularAccelSpeedsUpTurning) {
   EXPECT_NEAR(settlingTime(control, 0.0, kFullStickAngular, kControlDt), 1.02, 0.10);
 }
 
-// 尾の主因はデマンド適応（min_angular_accel）で、テーパー単独の寄与は小さい。
-// この分解が崩れたら、どちらのレバーで整定を調整すべきかの前提が変わる。
-TEST(ControlCoreSettling, DemandAdaptationDominatesTheSettlingTail) {
-  // 出荷設定（適応 OFF・テーパー ON）
+// テーパーが整定に足す尾は小さい（純粋なレート上限 2.00s に対して +0.04s 程度）。
+// ジャーク抑制（目標到達時の加速度ステップ回避）のコストがほぼゼロであることの回帰。
+// 廃止済みのデマンド適応は同じ整定を 2.44s まで伸ばしていた（削除の根拠、design 文書参照）。
+TEST(ControlCoreSettling, TaperAddsOnlyASmallSettlingTail) {
+  // 出荷設定（テーパー ON）
   core::ControlCore shipped(yamlConfig());
   const double settling_shipped = settlingTime(shipped, 0.0, kFullStickAngular, kControlDt);
 
-  // 適応を再有効化（PR #141 当時の設定）
-  auto adaptation_on = yamlConfig();
-  adaptation_on.min_angular_accel = 0.15;
-  core::ControlCore with_adaptation(adaptation_on);
-  const double settling_with_adaptation =
-      settlingTime(with_adaptation, 0.0, kFullStickAngular, kControlDt);
-
   // テーパーも切った純粋なレート上限のみ = 6.0 / 3.0 = 2.00 秒
-  auto both_off = yamlConfig();
-  both_off.slew_taper_band_angular = 0.0;
-  core::ControlCore pure_rate_limit(both_off);
+  auto taper_off = yamlConfig();
+  taper_off.slew_taper_band_angular = 0.0;
+  core::ControlCore pure_rate_limit(taper_off);
   const double settling_pure = settlingTime(pure_rate_limit, 0.0, kFullStickAngular, kControlDt);
 
   EXPECT_NEAR(settling_pure, 2.00, 0.06);
   EXPECT_NEAR(settling_shipped, 2.04, 0.12);
-  // 適応を有効に戻すと 2.44 秒まで伸びる = 尾の主因はデマンド適応
-  EXPECT_NEAR(settling_with_adaptation, 2.44, 0.12);
-  EXPECT_GT(settling_with_adaptation, settling_shipped);
 }
 
-// デマンド適応は微小入力の応答を鈍くしていた（狙いと逆）。これが無効化の根拠。
-// 実機で「追従性が低い」と報告された症状のうち、微小操作の鈍さはこれで説明できる。
-TEST(ControlCoreSettling, DemandAdaptationMadeSmallInputsSluggish) {
+// 微小入力（スティックをわずかに倒す）が速く応答すること。
+// 廃止済みのデマンド適応は同じ入力を 0.52s まで鈍らせていた（削除の根拠）。
+// この応答性が悪化したら、加速整形に「残差依存」の要素が紛れ込んでいないか疑うこと。
+TEST(ControlCoreSettling, SmallInputsRespondQuickly) {
   constexpr double kSmallTurn = 0.3;  // [rad/s] スティックをわずかに倒した相当
-
   core::ControlCore shipped(yamlConfig());
-  const double settling_shipped = settlingTime(shipped, 0.0, kSmallTurn, kControlDt);
-
-  auto adaptation_on = yamlConfig();
-  adaptation_on.min_angular_accel = 0.15;
-  core::ControlCore with_adaptation(adaptation_on);
-  const double settling_with_adaptation =
-      settlingTime(with_adaptation, 0.0, kSmallTurn, kControlDt);
-
-  EXPECT_NEAR(settling_shipped, 0.14, 0.04);
-  EXPECT_NEAR(settling_with_adaptation, 0.52, 0.08);
-  // 微小入力では適応有効時のほうが 3 倍以上遅い
-  EXPECT_GT(settling_with_adaptation, settling_shipped * 2.0);
+  EXPECT_NEAR(settlingTime(shipped, 0.0, kSmallTurn, kControlDt), 0.14, 0.04);
 }
 
 // 前進フルスティック（0 -> 2.0 m/s）は 0.78 秒（レート上限だけなら 0.67 秒）。
-// デマンド適応を有効に戻すと 1.22 秒まで伸びる。
 TEST(ControlCoreSettling, ForwardStepSettlesInAboutZeroPointEightSeconds) {
   core::ControlCore control(yamlConfig());
   EXPECT_NEAR(settlingTime(control, kFullStickLinear, 0.0, kControlDt), 0.78, 0.10);
-
-  auto adaptation_on = yamlConfig();
-  adaptation_on.min_linear_accel = 0.5;
-  core::ControlCore with_adaptation(adaptation_on);
-  EXPECT_NEAR(settlingTime(with_adaptation, kFullStickLinear, 0.0, kControlDt), 1.22, 0.12);
 }
 
 // テーパーは目標へ漸近的に近づくだけでオーバーシュートしない（単調）。

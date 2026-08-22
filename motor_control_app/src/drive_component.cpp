@@ -194,32 +194,8 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
   }
   RCLCPP_INFO(this->get_logger(), "  max_linear_accel: %.3f  max_angular_accel: %.3f",
               max_linear_accel_, max_angular_accel_);
-  RCLCPP_INFO(
-      this->get_logger(),
-      "  demand-scaled accel: linear[min=%.3f ref=%.3f] angular[min=%.3f ref=%.3f] (0=無効)",
-      min_linear_accel_, accel_demand_ref_linear_, min_angular_accel_, accel_demand_ref_angular_);
   RCLCPP_INFO(this->get_logger(), "  slew_taper_band_linear: %.3f  slew_taper_band_angular: %.3f",
               slew_taper_band_linear_, slew_taper_band_angular_);
-
-  // ホスト側スルーレートとファーム側 accel_time は同じ加速プロファイルを二重に持っている。
-  // 傾きが緩い（ms/rpm が大きい）側が実効的に支配するため、両方を同じ単位で並べて出す。
-  const double firmware_ramp_ms_per_rpm = accel_time_0p1ms_per_rpm_ * 0.1;
-  const double host_ramp_ms_per_rpm =
-      drive_slew::hostRampMsPerRpm(max_linear_accel_, wheel_radius_);
-  RCLCPP_INFO(this->get_logger(), "  accel_time_0p1ms_per_rpm: %d (= %.1f ms/rpm, firmware ramp)",
-              accel_time_0p1ms_per_rpm_, firmware_ramp_ms_per_rpm);
-  if (host_ramp_ms_per_rpm > 0.0) {
-    RCLCPP_INFO(this->get_logger(),
-                "    host slew equivalent: %.1f ms/rpm "
-                "(max_linear_accel=%.3f, wheel_radius=%.3f) -> 加速プロファイル支配側: %s",
-                host_ramp_ms_per_rpm, max_linear_accel_, wheel_radius_,
-                firmware_ramp_ms_per_rpm >= host_ramp_ms_per_rpm ? "firmware (accel_time)"
-                                                                 : "host (max_linear_accel)");
-  } else {
-    RCLCPP_INFO(this->get_logger(),
-                "    host slew disabled (max_linear_accel<=0) -> "
-                "加速プロファイル支配側: firmware (accel_time)");
-  }
   RCLCPP_INFO(this->get_logger(), "  min_command_rpm: %d", min_command_rpm_);
 
   // twist 購読（コールバックは ACTIVE のときのみ処理する）
@@ -292,6 +268,16 @@ DriveComponent::CallbackReturn DriveComponent::on_deactivate(const rclcpp_lifecy
     diff_drive_->stop();
   }
   resetCommandState();
+  // 実走セッションの往復レイテンシ統計を記録に残す（制御周期引き上げの判断材料）。
+  if (motor_lib_) {
+    const auto stats = motor_lib_->getSerialLatencyStats();
+    if (stats.samples > 0) {
+      RCLCPP_INFO(this->get_logger(),
+                  "シリアル往復レイテンシ統計: avg=%.2fms max=%.2fms samples=%lu timeouts=%lu",
+                  stats.avg_ms, stats.max_ms, static_cast<unsigned long>(stats.samples),
+                  static_cast<unsigned long>(stats.timeouts));
+    }
+  }
   rclcpp_lifecycle::LifecycleNode::on_deactivate(state);
   // 手動 deactivate を含め、deactivate では自動再遷移を必ず止める
   // （shot_component bc037d1 と同じ扱い）。
@@ -371,14 +357,6 @@ void DriveComponent::declareParameters() {
   this->declare_parameter("max_linear_accel", 3.0);
   this->declare_parameter("max_angular_accel", 3.0);
 
-  // デマンド適応加速度。スティックを速く/大きく倒すほど加速度上限を max へ、ゆっくり/わずか
-  // なら min へ寄せる。min_*_accel<=0 または accel_demand_ref_*<=0 で適応無効＝max の一定
-  // クランプ（従来挙動）。詳細は drive_slew::demandScaledAccel。
-  this->declare_parameter("min_linear_accel", 0.0);
-  this->declare_parameter("min_angular_accel", 0.0);
-  this->declare_parameter("accel_demand_ref_linear", 0.3);
-  this->declare_parameter("accel_demand_ref_angular", 0.5);
-
   // 目標接近時のレート絞り幅（実効ジャーク制限）。0 で無効＝従来の一次レート制限。
   // 詳細は drive_slew::clampRateTapered。
   this->declare_parameter("slew_taper_band_linear", 0.2);
@@ -386,10 +364,6 @@ void DriveComponent::declareParameters() {
 
   // 停止時の電気ブレーキ（velocity モードのみ有効）
   this->declare_parameter("brake_on_stop", false);
-
-  // ファーム側加速時間 [0.1ms/rpm]（velocity モードのみ有効）。ホスト側スルーレート制限が
-  // 生む階段状の目標変化をファームが補間する平滑化機構。詳細は DdtMotorLib::setAccelTime。
-  this->declare_parameter("accel_time_0p1ms_per_rpm", 1);
 
   // 指令を許す最低車輪 RPM（低速不感帯）。詳細は DifferentialDrive::setMinCommandRpm。
   this->declare_parameter("min_command_rpm", 5);
@@ -448,15 +422,9 @@ void DriveComponent::readParameters() {
   current_invert_measured_ = this->get_parameter("current_invert_measured").as_bool();
   max_linear_accel_ = this->get_parameter("max_linear_accel").as_double();
   max_angular_accel_ = this->get_parameter("max_angular_accel").as_double();
-  min_linear_accel_ = this->get_parameter("min_linear_accel").as_double();
-  min_angular_accel_ = this->get_parameter("min_angular_accel").as_double();
-  accel_demand_ref_linear_ = this->get_parameter("accel_demand_ref_linear").as_double();
-  accel_demand_ref_angular_ = this->get_parameter("accel_demand_ref_angular").as_double();
   slew_taper_band_linear_ = this->get_parameter("slew_taper_band_linear").as_double();
   slew_taper_band_angular_ = this->get_parameter("slew_taper_band_angular").as_double();
   brake_on_stop_ = this->get_parameter("brake_on_stop").as_bool();
-  accel_time_0p1ms_per_rpm_ =
-      static_cast<int>(this->get_parameter("accel_time_0p1ms_per_rpm").as_int());
   min_command_rpm_ = static_cast<int>(this->get_parameter("min_command_rpm").as_int());
   cmd_timeout_sec_ = this->get_parameter("cmd_timeout_sec").as_double();
   control_rate_ = this->get_parameter("control_rate").as_double();
@@ -484,8 +452,13 @@ bool DriveComponent::initializeMotorLib() {
     // 停止時の電気ブレーキ設定（velocity モードのみ有効）
     motor_lib_->setBrakeOnStop(brake_on_stop_);
 
-    // ファーム側加速時間（velocity モードのみ有効）
-    motor_lib_->setAccelTime(accel_time_0p1ms_per_rpm_);
+    // ファーム側加速時間（velocity モードのみ有効）。実機評価で 1 に確定:
+    // 1 より大きくすると高RPM の直進が乱れる。加速プロファイルの整形はホスト側の
+    // スルーレート制限（max_*_accel + slew_taper_band_*）に一本化し、ファーム側の
+    // 平滑化は実質無効（1 = 0.1ms/rpm）で固定する。パラメータとしては公開しない
+    // （二重の加速プロファイルがチューニングを非直交にしていたため廃止）。
+    constexpr int kFirmwareAccelTime0p1msPerRpm = 1;
+    motor_lib_->setAccelTime(kFirmwareAccelTime0p1msPerRpm);
 
     // 指令送信後の追加待機（既定 0 = 無効）
     motor_lib_->setCommandWaitMs(command_wait_ms_);
@@ -562,10 +535,6 @@ control_core::Config DriveComponent::makeControlCoreConfig() const {
   control_core::Config config;
   config.max_linear_accel = max_linear_accel_;
   config.max_angular_accel = max_angular_accel_;
-  config.min_linear_accel = min_linear_accel_;
-  config.min_angular_accel = min_angular_accel_;
-  config.accel_demand_ref_linear = accel_demand_ref_linear_;
-  config.accel_demand_ref_angular = accel_demand_ref_angular_;
   config.slew_taper_band_linear = slew_taper_band_linear_;
   config.slew_taper_band_angular = slew_taper_band_angular_;
   config.wheel_radius = wheel_radius_;
@@ -579,14 +548,30 @@ rcl_interfaces::msg::SetParametersResult DriveComponent::onParameterChange(
   rcl_interfaces::msg::SetParametersResult result;
   result.successful = true;
 
-  // 再初期化なしで反映できないパラメータ（変更しても次の cleanup -> configure まで効かない）
-  static const std::vector<std::string> kRequiresReconfigure = {
-      "serial_port",   "baud_rate",        "left_motor_id",      "right_motor_id",
-      "max_motor_rpm", "control_mode",     "control_rate",       "status_publish_rate",
-      "wheel_radius",  "wheel_separation", "typed_status_topic", "odom_topic",
-      "odom_frame_id", "base_frame_id",    "publish_tf"};
+  // 再初期化なしで反映できないパラメータ。実行時変更は拒否する（受理して黙って無視すると
+  // `ros2 param set` が成功を報告してしまい、変わっていないことに気付けない）。
+  // 変更するには YAML（launcher/config/drive_component.yaml）を編集してノードを再起動する。
+  static const std::vector<std::string> kRequiresReconfigure = {"serial_port",
+                                                                "baud_rate",
+                                                                "left_motor_id",
+                                                                "right_motor_id",
+                                                                "max_motor_rpm",
+                                                                "control_mode",
+                                                                "control_rate",
+                                                                "status_publish_rate",
+                                                                "wheel_radius",
+                                                                "wheel_separation",
+                                                                "typed_status_topic",
+                                                                "odom_topic",
+                                                                "odom_frame_id",
+                                                                "base_frame_id",
+                                                                "publish_tf",
+                                                                "auto_start",
+                                                                "connect_retry_period_sec",
+                                                                "emergency_stop_topic"};
 
   bool control_core_dirty = false;
+  bool current_pi_dirty = false;
   try {
     for (const auto& param : params) {
       const std::string& name = param.get_name();
@@ -597,18 +582,6 @@ rcl_interfaces::msg::SetParametersResult DriveComponent::onParameterChange(
         control_core_dirty = true;
       } else if (name == "max_angular_accel") {
         max_angular_accel_ = param.get_value<double>();
-        control_core_dirty = true;
-      } else if (name == "min_linear_accel") {
-        min_linear_accel_ = param.get_value<double>();
-        control_core_dirty = true;
-      } else if (name == "min_angular_accel") {
-        min_angular_accel_ = param.get_value<double>();
-        control_core_dirty = true;
-      } else if (name == "accel_demand_ref_linear") {
-        accel_demand_ref_linear_ = param.get_value<double>();
-        control_core_dirty = true;
-      } else if (name == "accel_demand_ref_angular") {
-        accel_demand_ref_angular_ = param.get_value<double>();
         control_core_dirty = true;
       } else if (name == "slew_taper_band_linear") {
         slew_taper_band_linear_ = param.get_value<double>();
@@ -644,25 +617,56 @@ rcl_interfaces::msg::SetParametersResult DriveComponent::onParameterChange(
         if (motor_lib_) {
           motor_lib_->setMeasuredLowpassTau(measured_lpf_tau_sec_);
         }
-      } else if (name == "accel_time_0p1ms_per_rpm") {
-        accel_time_0p1ms_per_rpm_ = static_cast<int>(param.get_value<int64_t>());
-        if (motor_lib_) {
-          motor_lib_->setAccelTime(accel_time_0p1ms_per_rpm_);
-        }
       } else if (name == "command_wait_ms") {
         command_wait_ms_ = static_cast<int>(param.get_value<int64_t>());
         if (motor_lib_) {
           motor_lib_->setCommandWaitMs(command_wait_ms_);
         }
 
-        // --- 再初期化が必要なもの: 受け付けるが即時反映されないことを警告する ---
+        // --- current モード PI（ゲイン4種は setCurrentControlParams へまとめて反映） ---
+      } else if (name == "current_kp") {
+        current_kp_ = param.get_value<double>();
+        current_pi_dirty = true;
+      } else if (name == "current_ki") {
+        current_ki_ = param.get_value<double>();
+        current_pi_dirty = true;
+      } else if (name == "max_current_amp") {
+        max_current_amp_ = param.get_value<double>();
+        current_pi_dirty = true;
+      } else if (name == "integral_limit_amp") {
+        integral_limit_amp_ = param.get_value<double>();
+        current_pi_dirty = true;
+      } else if (name == "current_zero_deadband_rpm") {
+        current_zero_deadband_rpm_ = static_cast<int>(param.get_value<int64_t>());
+        if (motor_lib_) {
+          motor_lib_->setCurrentZeroDeadbandRpm(current_zero_deadband_rpm_);
+        }
+      } else if (name == "current_invert_measured") {
+        current_invert_measured_ = param.get_value<bool>();
+        if (motor_lib_) {
+          motor_lib_->setCurrentInvertMeasured(current_invert_measured_);
+        }
+
+        // --- 再初期化が必要なもの: 拒否する（受理して無視すると成功に見えてしまう） ---
       } else if (std::find(kRequiresReconfigure.begin(), kRequiresReconfigure.end(), name) !=
                  kRequiresReconfigure.end()) {
-        RCLCPP_WARN(this->get_logger(),
-                    "パラメータ '%s' は実行時反映されません。"
-                    "lifecycle cleanup -> configure で再読込してください",
-                    name.c_str());
+        result.successful = false;
+        result.reason = "parameter '" + name +
+                        "' cannot be applied at runtime. "
+                        "Edit launcher/config/drive_component.yaml and restart the node.";
+        RCLCPP_WARN(this->get_logger(), "%s", result.reason.c_str());
+        return result;
       }
+    }
+
+    // PI ゲインは4値まとめて反映（内部の PI 状態は保持され、積分項はアンチワインドアップ
+    // クランプで新しい上限に追従する）。current モード以外では次のモード切替まで実害なし。
+    if (current_pi_dirty && motor_lib_) {
+      motor_lib_->setCurrentControlParams(current_kp_, current_ki_, max_current_amp_,
+                                          integral_limit_amp_);
+      RCLCPP_INFO(this->get_logger(),
+                  "電流PI設定を更新: kp=%.5f ki=%.5f max=%.2fA integral_limit=%.2fA", current_kp_,
+                  current_ki_, max_current_amp_, integral_limit_amp_);
     }
 
     // 制御コアの設定を差し替える（スルーレート状態と停止モードは維持されるので、
@@ -670,10 +674,9 @@ rcl_interfaces::msg::SetParametersResult DriveComponent::onParameterChange(
     if (control_core_dirty && control_core_) {
       control_core_->setConfig(makeControlCoreConfig());
       RCLCPP_INFO(this->get_logger(),
-                  "制御コア設定を更新: max_accel[lin=%.3f ang=%.3f] min_accel[lin=%.3f ang=%.3f] "
-                  "ref[lin=%.3f ang=%.3f] taper[lin=%.3f ang=%.3f] min_command_rpm=%d",
-                  max_linear_accel_, max_angular_accel_, min_linear_accel_, min_angular_accel_,
-                  accel_demand_ref_linear_, accel_demand_ref_angular_, slew_taper_band_linear_,
+                  "制御コア設定を更新: max_accel[lin=%.3f ang=%.3f] "
+                  "taper[lin=%.3f ang=%.3f] min_command_rpm=%d",
+                  max_linear_accel_, max_angular_accel_, slew_taper_band_linear_,
                   slew_taper_band_angular_, min_command_rpm_);
     }
     result.reason = "Parameters updated successfully";
