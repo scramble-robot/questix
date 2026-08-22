@@ -9,10 +9,12 @@ motor_control_lib の FeetechServoController が話す Modbus-RTU プロトコ�
   - 現在位置(Present Position, addr 256)を読み取り、0-4095 / 0-360deg で可視化。
   - Error Reset(addr 134)に値 4 を書き込み、現在位置を中点(2047)に再設定するキャリブレーション。
   - 速度・電圧・温度・電流・トルク状態などのテレメトリ表示。
+  - ID レジスタ(addr 10)への書き込みによるサーボ ID 変更（工場出荷 ID 1 → 10/11 など）。
 
 プロトコルは motor_control_lib/src/servo_control.cpp を Python に移植したもの。
 """
 
+import os
 import sys
 import time
 import tkinter as tk
@@ -34,9 +36,12 @@ current_theme = "light"
 DARK_THEME = "darkly"
 LIGHT_THEME = "flatly"
 
-PORT = "/dev/servo"  # CH340 RS485 アダプタの udev シンボリックリンク（fallback: /dev/ttyUSB0）
+PORT = "/dev/servo"  # CH340 RS485 アダプタの udev シンボリックリンク
+FALLBACK_PORT = "/dev/ttyUSB0"  # udev ルールのない開発 PC などで /dev/servo が無い場合の既定
 BAUDRATE = 115200
-DEFAULT_SERVO_ID = 11  # tilt サーボ（trigger は 10）
+DEFAULT_SERVO_ID = 11  # tilt サーボ（trigger は 10、工場出荷時は 1）
+# ID 選択肢（工場出荷=1 / trigger=10 / tilt=11。自由入力も可能）
+COMMON_SERVO_IDS = [1, 10, 11]
 # ボーレート候補（サーボ既定値 115200 を先頭に、servo_control.cpp が対応するレートを列挙）
 COMMON_BAUDRATES = [115200, 57600, 38400, 19200, 9600, 230400, 460800, 921600]
 # ポート候補（自動検出できない・ビジー中でも選べるように既知の候補を常に列挙する）
@@ -47,8 +52,12 @@ FUNC_READ = 0x03   # Read Holding Registers
 FUNC_WRITE = 0x06  # Write Single Register
 
 # サーボのレジスタアドレス（servo_control.cpp initializeRegisterMap のキー = 実際に送るアドレス）
+REG_ID = 10                 # サーボ ID（read_write, EEPROM 保存）
 REG_GOAL_POSITION = 128
 REG_TORQUE_ENABLE = 129
+# ロックフラグ（SM2924BLMB MODBUS-RTU 内存表 addr 133/0x85）:
+# 0 を書くと EPROM 書き込みが電源断後も保存（アンロック）、1 で保存されない（起動時既定）
+REG_LOCK_FLAG = 133
 REG_ERROR_RESET = 134       # 値 4 で現在位置を中点(2047)に設定
 # Present Position はレジスタ 257（servo_control.cpp の有効エントリ。256 は別値を返す）
 REG_PRESENT_POSITION = 257
@@ -107,10 +116,17 @@ def _make_toplevel(title: str):
 # ポート / ボーレート選択状態（ddt_checker.py と同じホルダー方式）
 # ---------------------------------------------------------------------------
 def get_current_port():
-    """現在選択されているポートを取得。"""
+    """現在選択されているポートを取得。
+
+    未選択時は /dev/servo（udev シンボリックリンク）を既定とするが、
+    udev ルールのない別 PC ではリンクが存在しないため /dev/ttyUSB0 に
+    フォールバックする。
+    """
     if hasattr(get_current_port, "selected_port") and get_current_port.selected_port:
         return get_current_port.selected_port
-    return PORT
+    if os.path.exists(PORT):
+        return PORT
+    return FALLBACK_PORT
 
 
 def get_current_baudrate():
@@ -639,6 +655,84 @@ def set_midpoint():
         messagebox.showerror("キャリブレーションエラー", str(e))
 
 
+def change_servo_id():
+    """ID レジスタ(10)に新しい ID を書き込み、サーボの ID を変更する。
+
+    ID は EPROM 領域のため、先にロックフラグ(133)へ 0 を書いてアンロック
+    しないと変更が反映・保存されない（SM2924BLMB MODBUS-RTU 内存表）。
+    シーケンス: アンロック(133=0) → ID 書き込み(10) → 新 ID で検証読み取り
+    → 再ロック(133=1)。ID 変更直後は旧 ID 宛てのエコーが返らない個体が
+    あるため、エコー不一致だけでは失敗とみなさず検証読み取りで成否を判定する。
+    """
+    servo_id = _require_servo_id()
+    if servo_id is None:
+        return
+    try:
+        new_id = int(id_change_entry.get())
+    except ValueError:
+        new_id = -1
+    if not 1 <= new_id <= 247:
+        messagebox.showerror(
+            "入力エラー", "新しい ID は 1〜247 の整数で入力してください（0 はブロードキャスト用）"
+        )
+        return
+    if new_id == servo_id:
+        messagebox.showinfo("確認", f"現在の ID と同じため変更は不要です（id={servo_id}）")
+        return
+    if not messagebox.askyesno(
+        "確認",
+        f"サーボ ID を {servo_id} → {new_id} に変更します。\n"
+        f"（ロックフラグ {REG_LOCK_FLAG} を解除してから ID レジスタ {REG_ID} に書き込みます。\n"
+        "変更は EPROM に保存され、電源を切っても保持されます）\n\n"
+        "※ 同じバスに ID が重複するサーボを接続しないよう注意してください。\n"
+        "実行しますか？",
+    ):
+        return
+
+    echo_error = None
+    try:
+        with open_serial() as ser:
+            # アンロック: 0 で EPROM 書き込みが電源断後も保存される（起動時既定は 1=保存されない）
+            write_register(ser, servo_id, REG_LOCK_FLAG, 0)
+            time.sleep(0.05)
+            try:
+                write_register(ser, servo_id, REG_ID, new_id)
+            except IOError as e:
+                echo_error = e  # エコー不一致でも検証読み取りまで進める
+            time.sleep(0.1)
+            verified = read_register(ser, new_id, REG_ID)
+            # 再ロック（新 ID 宛て）。保存済みの値には影響しない
+            write_register(ser, new_id, REG_LOCK_FLAG, 1)
+    except Exception as e:  # noqa: BLE001 - GUI にまとめて表示する
+        # 旧 ID でまだ応答するか確認し、切り分け情報をダイアログに含める
+        diag = ""
+        try:
+            with open_serial() as ser:
+                still = read_register(ser, servo_id, REG_ID)
+            diag = (f"\n\n旧 ID {servo_id} は応答しています（ID レジスタ値: {still}）。"
+                    "書き込みが反映されていません。")
+        except Exception:  # noqa: BLE001 - 診断failは無視して元エラーを表示
+            diag = f"\n\n旧 ID {servo_id} からも応答がありません。配線・電源を確認してください。"
+        detail = f"\n\n書き込み時のエコー: {echo_error}" if echo_error else ""
+        messagebox.showerror(
+            "ID 変更エラー",
+            f"新 ID {new_id} での検証読み取りに失敗しました。\n{e}{detail}{diag}",
+        )
+        return
+
+    if verified != new_id:
+        messagebox.showerror(
+            "ID 変更エラー",
+            f"検証読み取りの値が一致しません（期待: {new_id}, 実際: {verified}）",
+        )
+        return
+
+    # 接続欄の ID も新 ID へ切り替え、以降の操作が新 ID に向くようにする
+    entry_servo_id.set(str(new_id))
+    labels["ID"].config(text=str(new_id))
+    messagebox.showinfo("完了", f"サーボ ID を {servo_id} → {new_id} に変更しました")
+
+
 def toggle_torque():
     """トルク有効(129)を ON/OFF トグルする。手でホーンを動かして中点合わせする際に使う。"""
     servo_id = _require_servo_id()
@@ -859,6 +953,7 @@ def build_gui():
     """GUI を構築して起動する（tkinter）。"""
     global root, labels, port_list, entry_servo_id, position_canvas, auto_refresh_var
     global goal_scale, goal_entry, goal_angle_label, torque_on_var, style, theme_button
+    global id_change_entry
 
     ensure_gui_toolkit()  # ttkbootstrap を有効化（無ければ stock ttk）
 
@@ -923,10 +1018,13 @@ def build_gui():
     labels["Port Status"].grid(row=0, column=1, sticky="w", columnspan=2)
 
     ttk.Label(frame_conn, text="サーボ ID:").grid(row=1, column=0, sticky="e", pady=3)
-    entry_servo_id = ttk.Entry(frame_conn, width=8)
-    entry_servo_id.insert(0, str(DEFAULT_SERVO_ID))
+    # 既知 ID をプルダウンで選択できるコンボボックス（0〜253 の自由入力も可能）
+    entry_servo_id = ttk.Combobox(
+        frame_conn, width=6, values=[str(i) for i in COMMON_SERVO_IDS]
+    )
+    entry_servo_id.set(str(DEFAULT_SERVO_ID))
     entry_servo_id.grid(row=1, column=1, sticky="w", pady=3)
-    ttk.Label(frame_conn, text="(tilt=11 / trigger=10)", foreground="gray").grid(
+    ttk.Label(frame_conn, text="(工場出荷=1 / trigger=10 / tilt=11)", foreground="gray").grid(
         row=1, column=2, sticky="w"
     )
 
@@ -1040,6 +1138,27 @@ def build_gui():
         frame_cal,
         text="※ トルクを OFF にして手でホーンを目標位置へ動かし、\n"
              "  「中点(2047)に設定」を押すとその位置が中点になります。",
+        foreground="gray",
+        justify="left",
+    ).pack(anchor="w", pady=(3, 0))
+
+    # --- ID 変更 ---
+    frame_id = ttk.Labelframe(scrollable_frame, text="ID 変更", padding=10)
+    frame_id.pack(padx=10, pady=5, fill="x")
+
+    id_row = ttk.Frame(frame_id)
+    id_row.pack(fill="x")
+    ttk.Label(id_row, text="新しい ID:").pack(side="left")
+    id_change_entry = ttk.Combobox(
+        id_row, width=6, values=[str(i) for i in COMMON_SERVO_IDS]
+    )
+    id_change_entry.pack(side="left", padx=5)
+    _mk(ttk.Button, id_row, text="ID を書き込む", command=change_servo_id,
+        bootstyle="warning").pack(side="left", padx=5)
+    ttk.Label(
+        frame_id,
+        text="※ 接続欄の「サーボ ID」のサーボに対して書き込みます。\n"
+             "  変更は EEPROM に保存され、成功すると接続欄の ID も切り替わります。",
         foreground="gray",
         justify="left",
     ).pack(anchor="w", pady=(3, 0))
