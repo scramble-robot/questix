@@ -1,0 +1,15 @@
+---
+# Source-only harness for ansible/roles/robot_autostart/tasks/launch_env.yaml.
+# Exercises the real role task file (via include_role) against a caller-supplied
+# temp directory, never against /etc/questix_robot. See run_contract_tests.sh.
+
+- hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    target_user: "{{ lookup('env', 'USER') }}"
+  tasks:
+    - name: Exercise robot_autostart launch_env tasks
+      ansible.builtin.include_role:
+        name: robot_autostart
+        tasks_from: launch_env.yaml
