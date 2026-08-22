@@ -135,6 +135,33 @@ jobs:
               run: |
                   git ls-files -z -- '*.sh' | xargs -0 -r -n1 bash -n
 
+    kitting-contract-tests:
+        name: Kitting Resolver + Ansible Contract Tests
+        runs-on: ubuntu-24.04
+        timeout-minutes: 15
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Set up Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.12"
+
+            - name: Install Ansible
+              run: |
+                  python -m pip install --upgrade pip
+                  # Pinned for reproducibility; bump deliberately (see AGENTS.md).
+                  pip install "ansible==14.2.0"
+
+            - name: Run ROS_DOMAIN_ID resolver unit tests
+              run: python3 -m unittest scripts.test_resolve_ros_domain_id -v
+
+            # Source-only: runs against temp dirs, no become/root, never touches
+            # /etc/questix_robot. See ansible/tests/run_contract_tests.sh.
+            - name: Run kitting Ansible contract tests
+              run: ansible/tests/run_contract_tests.sh
+
     ansible-validate-inventory:
         name: Validate Ansible Configuration
         runs-on: ubuntu-24.04
