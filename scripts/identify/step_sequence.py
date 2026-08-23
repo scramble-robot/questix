@@ -4,8 +4,7 @@
 # Use of this source code is governed by an MIT-style
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
-"""
-同定用ステップ列を /target_twist に publish する（design/model_based_drive_control.md Phase A）。
+"""同定用ステップ列を /target_twist に publish する（design/model_based_drive_control.md Phase A）。
 
 車輪を浮かせた状態で使うこと。drive_component の control_mode は velocity（ファーム速度ループの
 同定）または current（既存 PI 経由の参考データ）。ステップは「車輪 RPM」で指定し、
