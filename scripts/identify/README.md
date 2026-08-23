@@ -6,8 +6,20 @@
 
 | ファイル | 役割 |
 |---|---|
+| `record.sh` | **1 コマンド記録**：メタ情報（ロボット ID・床・電池・積載・ファーム）を聞いて `meta.yaml` に保存し、bag 記録 + ステップ列 publish を実行 |
 | `step_sequence.py` | `/target_twist` にステップ列を publish（車輪 RPM 指定、直進 or 旋回） |
-| `fit_models.py` | rosbag2 または CSV から一次遅れ + むだ時間を最小二乗で同定し、`identified_params.yaml` を出力 |
+| `fit_models.py` | rosbag2 または CSV 1 本から一次遅れ + むだ時間を最小二乗で同定し、`identified_params.yaml` を出力 |
+| `batch_fit.py` | `record.sh` の出力を**まとめて同定**し、一覧表（`summary.md/csv`）・1 枚図（`summary.png`）・十分性判定（`sufficiency.md`）を出力 |
+| `handout.md` | 講義用 1 ページ手順書（受講者がログを取って提出するまで） |
+| `test_fit_models.py` | 合成データでの検算 |
+
+## 最短の流れ（講義で「1 回ずつ取って順次回収」する運用）
+
+```bash
+bash scripts/identify/record.sh                      # 受講者: 対話でメタ情報 → 記録（約 3 分）
+python3 scripts/identify/batch_fit.py ~/ident_data/ident_* --out results   # 運営: 一括同定
+cat results/summary.md results/sufficiency.md       # τ / d / R² / RUN 境界と「十分か」
+```
 
 ## 手順（velocity モード）
 

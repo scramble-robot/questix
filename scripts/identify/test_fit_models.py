@@ -56,6 +56,29 @@ def main():
         txt = open(out).read()
         print(txt)
         assert "drive_fsm_run_enter_rpm: 50" in txt
+
+        # batch_fit: 2 つの CSV（同条件の繰り返し）+ 1 つ別条件 → summary / sufficiency
+        for i, (tau, floor) in enumerate(((0.12, "lifted"), (0.125, "lifted"), (0.16, "tile"))):
+            t2, u2, om2 = synth(tau=tau, seed=i)
+            c = os.path.join(d, f"ds{i}.csv")
+            with open(c, "w") as f:
+                f.write("t,left_target,left_meas,right_target,right_meas\n")
+                for k in range(len(t2)):
+                    f.write(f"{t2[k]:.3f},{u2[k]:.0f},{om2[k]:.0f},{-u2[k]:.0f},{-om2[k]:.0f}\n")
+            with open(os.path.join(d, f"ds{i}.meta.yaml"), "w") as f:
+                f.write(f'robot_id: "r1"\nfloor: "{floor}"\npayload_kg: 0\n')
+        outdir = os.path.join(d, "res")
+        r = subprocess.run([sys.executable, os.path.join(os.path.dirname(__file__), "batch_fit.py"),
+                            os.path.join(d, "ds0.csv"), os.path.join(d, "ds1.csv"), os.path.join(d, "ds2.csv"),
+                            "--out", outdir], capture_output=True, text=True)
+        print(r.stdout, r.stderr)
+        assert r.returncode == 0, r.stderr
+        suff = open(os.path.join(outdir, "sufficiency.md")).read()
+        print(suff)
+        assert "| r1 | lifted | 0 | 2 |" in suff and "| OK |" in suff
+        assert "| r1 | tile | 0 | 1 |" in suff and "繰り返し<2" in suff
+        for fn in ("summary.md", "summary.csv", "summary.png"):
+            assert os.path.exists(os.path.join(outdir, fn)), fn
     print("OK")
 
 

@@ -151,6 +151,77 @@ def summarize(data, side, mode, dt, max_delay, min_len):
     return overall, per_level
 
 
+# ----------------------------------------------------------------------------- 解析 API
+def analyze(data, mode="velocity", dt=None, max_delay=4, min_segment=25, r2_threshold=0.9):
+    """Run the identification on one dataset and return a plain dict (used by CLI and batch_fit).
+
+    戻り値:
+      dt, mode, sides{left,right}: {overall: fit, per_level: {level: {tau, delay, r2, n}}},
+      suggested: {velocity_run_model_tau_sec, velocity_run_model_delay_ticks, drive_fsm_run_enter_rpm}
+    """
+    t = data["t"]
+    dt = dt if dt else float(np.median(np.diff(t)))
+    sides = {}
+    for side in ("left", "right"):
+        overall, per_level = summarize(data, side, mode, dt, max_delay, min_segment)
+        levels = {}
+        for lv, fits in per_level.items():
+            levels[float(lv)] = dict(
+                tau=float(np.nanmean([f["tau"] for f in fits])),
+                delay=int(round(np.mean([f["delay"] for f in fits]))),
+                r2=float(np.mean([f["r2"] for f in fits])),
+                n=len(fits),
+            )
+        sides[side] = dict(overall=overall, per_level=levels)
+
+    def min_good_level(side):
+        ok = [lv for lv, v in sides[side]["per_level"].items() if v["r2"] >= r2_threshold]
+        return min(ok) if ok else None
+
+    goods = [x for x in (min_good_level("left"), min_good_level("right")) if x is not None]
+    run_enter = int(max(goods)) if len(goods) == 2 else None
+    tau_avg = float(np.nanmean([sides[s]["overall"]["tau"] for s in ("left", "right")]))
+    delay_avg = int(round(np.mean([sides[s]["overall"]["delay"] for s in ("left", "right")])))
+    return dict(dt=dt, mode=mode, sides=sides, n_samples=len(t),
+                suggested=dict(velocity_run_model_tau_sec=tau_avg,
+                               velocity_run_model_delay_ticks=delay_avg,
+                               drive_fsm_run_enter_rpm=run_enter))
+
+
+def print_report(res):
+    """Print the analysis result as a human-readable table."""
+    print(f"samples={res['n_samples']}  dt={res['dt']*1000:.1f} ms  mode={res['mode']}")
+    for side in ("left", "right"):
+        o = res["sides"][side]["overall"]
+        print(f"\n[{side}] overall: a={o['a']:.4f} b={o['b']:.4f} c={o['c']:+.3f} "
+              f"delay={o['delay']} tick tau={o['tau']*1000:.1f} ms R2={o['r2']:.3f}")
+        print(f"  {'level':>7} {'n':>3} {'tau[ms]':>8} {'delay':>5} {'R2':>6}")
+        for lv in sorted(res["sides"][side]["per_level"]):
+            v = res["sides"][side]["per_level"][lv]
+            print(f"  {lv:7.0f} {v['n']:3d} {v['tau']*1000:8.1f} {v['delay']:5d} {v['r2']:6.3f}")
+
+
+def to_yaml_lines(res):
+    """Render the analysis result as YAML lines (no PyYAML dependency)."""
+    lines = ["# 生成: scripts/identify/fit_models.py", f"mode: {res['mode']}", f"dt_sec: {res['dt']:.5f}"]
+    for side in ("left", "right"):
+        o = res["sides"][side]["overall"]
+        lines += [f"{side}:", f"  a: {o['a']:.6f}", f"  b: {o['b']:.6f}", f"  c: {o['c']:.4f}",
+                  f"  delay_ticks: {o['delay']}", f"  tau_sec: {o['tau']:.5f}", f"  r2: {o['r2']:.4f}",
+                  "  per_level:"]
+        for lv in sorted(res["sides"][side]["per_level"]):
+            v = res["sides"][side]["per_level"][lv]
+            lines.append(f"    {int(lv)}: {{tau_sec: {v['tau']:.5f}, delay_ticks: {v['delay']}, "
+                         f"r2: {v['r2']:.4f}}}")
+    sg = res["suggested"]
+    lines.append("suggested:")
+    lines.append(f"  velocity_run_model_tau_sec: {sg['velocity_run_model_tau_sec']:.4f}")
+    lines.append(f"  velocity_run_model_delay_ticks: {sg['velocity_run_model_delay_ticks']}")
+    re_ = sg["drive_fsm_run_enter_rpm"]
+    lines.append(f"  drive_fsm_run_enter_rpm: {re_ if re_ is not None else 'null  # R2 基準を満たすレベルなし'}")
+    return lines
+
+
 # ----------------------------------------------------------------------------- main
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -166,55 +237,12 @@ def main():
     args = ap.parse_args()
 
     data = load_bag(args.bag) if args.bag else load_csv(args.csv)
-    t = data["t"]
-    dt = args.dt if args.dt else float(np.median(np.diff(t)))
-    print(f"samples={len(t)}  dt={dt*1000:.1f} ms  mode={args.mode}")
-
-    report = {}
-    for side in ("left", "right"):
-        overall, per_level = summarize(data, side, args.mode, dt, args.max_delay, args.min_segment)
-        report[side] = dict(overall=overall, per_level=per_level)
-        print(f"\n[{side}] overall: a={overall['a']:.4f} b={overall['b']:.4f} c={overall['c']:+.3f} "
-              f"delay={overall['delay']} tick tau={overall['tau']*1000:.1f} ms R2={overall['r2']:.3f}")
-        print(f"  {'level':>7} {'n':>3} {'a':>7} {'tau[ms]':>8} {'delay':>5} {'R2':>6}")
-        for lv in sorted(per_level):
-            fits = per_level[lv]
-            a = np.mean([f["a"] for f in fits])
-            tau = np.nanmean([f["tau"] for f in fits])
-            d = int(round(np.mean([f["delay"] for f in fits])))
-            r2 = np.mean([f["r2"] for f in fits])
-            print(f"  {lv:7.0f} {len(fits):3d} {a:7.4f} {tau*1000:8.1f} {d:5d} {r2:6.3f}")
-
-    # RUN 閾値の提案: 両輪で R² >= threshold を満たす最小レベル
-    def min_good_level(side):
-        ok = [lv for lv, fits in report[side]["per_level"].items()
-              if np.mean([f["r2"] for f in fits]) >= args.r2_threshold]
-        return min(ok) if ok else None
-
-    suggest = [x for x in (min_good_level("left"), min_good_level("right")) if x is not None]
-    run_enter = int(max(suggest)) if len(suggest) == 2 else None
-
-    lines = ["# 生成: scripts/identify/fit_models.py", f"mode: {args.mode}", f"dt_sec: {dt:.5f}"]
-    for side in ("left", "right"):
-        o = report[side]["overall"]
-        lines += [f"{side}:", f"  a: {o['a']:.6f}", f"  b: {o['b']:.6f}", f"  c: {o['c']:.4f}",
-                  f"  delay_ticks: {o['delay']}", f"  tau_sec: {o['tau']:.5f}", f"  r2: {o['r2']:.4f}",
-                  "  per_level:"]
-        for lv in sorted(report[side]["per_level"]):
-            fits = report[side]["per_level"][lv]
-            lines.append(f"    {int(lv)}: {{tau_sec: {np.nanmean([f['tau'] for f in fits]):.5f}, "
-                         f"delay_ticks: {int(round(np.mean([f['delay'] for f in fits])))}, "
-                         f"r2: {np.mean([f['r2'] for f in fits]):.4f}}}")
-    lines.append("suggested:")
-    tau_avg = float(np.nanmean([report[s]["overall"]["tau"] for s in ("left", "right")]))
-    delay_avg = int(round(np.mean([report[s]["overall"]["delay"] for s in ("left", "right")])))
-    lines.append(f"  velocity_run_model_tau_sec: {tau_avg:.4f}")
-    lines.append(f"  velocity_run_model_delay_ticks: {delay_avg}")
-    lines.append(f"  drive_fsm_run_enter_rpm: {run_enter if run_enter is not None else 'null  # R2 基準を満たすレベルなし'}")
+    res = analyze(data, args.mode, args.dt, args.max_delay, args.min_segment, args.r2_threshold)
+    print_report(res)
     with open(args.out, "w") as f:
-        f.write("\n".join(lines) + "\n")
+        f.write("\n".join(to_yaml_lines(res)) + "\n")
     print(f"\nwrote {args.out}")
-    if run_enter is None:
+    if res["suggested"]["drive_fsm_run_enter_rpm"] is None:
         print("注意: R² 基準を満たすレベルが無い（一次遅れで当てはまらない）。Phase E は no-go。")
     return 0
 
