@@ -210,12 +210,19 @@ def test_competition_service_launchers_always_enable_gpio_safety():
 def test_launch_environment_defaults_enable_gpio_safety():
     systemd_env = (
         SOURCE_ROOT / 'systemd/questix_robot.env').read_text(encoding='utf-8')
+    role_defaults = load_yaml('ansible/roles/robot_autostart/defaults/main.yaml')
     ansible_env = (
         SOURCE_ROOT / 'ansible/roles/robot_autostart/templates/launch.env.j2'
     ).read_text(encoding='utf-8')
 
     assert 'ENABLE_GPIO_REF=true' in systemd_env.splitlines()
-    assert 'ENABLE_GPIO_REF=true' in ansible_env.splitlines()
+    # ENABLE_LIDAR/SHOT/DRIVE/RVIZ and CONTROLLER_TYPE ship disabled/dualshock
+    # (see robot_autostart/defaults/main.yaml), but GPIO safety is the
+    # exception: it must default to enabled even though the competition
+    # systemd launcher ignores this value and always forces it true, because
+    # this is also the default for manual/diagnostic `ros2 launch` runs.
+    assert role_defaults['enable_gpio_ref'] is True
+    assert 'ENABLE_GPIO_REF={{ enable_gpio_ref | lower }}' in ansible_env.splitlines()
 
 
 def test_installers_preserve_existing_environment_but_launcher_is_safe():
@@ -225,11 +232,15 @@ def test_installers_preserve_existing_environment_but_launcher_is_safe():
     ansible_tasks = (
         SOURCE_ROOT / 'ansible/roles/robot_autostart/tasks/main.yaml'
     ).read_text(encoding='utf-8')
+    launch_env_tasks = (
+        SOURCE_ROOT / 'ansible/roles/robot_autostart/tasks/launch_env.yaml'
+    ).read_text(encoding='utf-8')
 
     assert (
         '"${REPO_DIR}/systemd/questix_robot.env" > '
         '/etc/questix_robot/launch.env'
     ) in installer
     assert 'launch.env already exists, skipping' in installer
-    assert 'src: launch.env.j2' in ansible_tasks
-    assert 'force: false' in ansible_tasks
+    assert 'include_tasks: launch_env.yaml' in ansible_tasks
+    assert 'src: launch.env.j2' in launch_env_tasks
+    assert 'force: false' in launch_env_tasks
