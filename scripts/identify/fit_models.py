@@ -4,8 +4,7 @@
 # Use of this source code is governed by an MIT-style
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
-"""
-ステップ応答から一次遅れ + むだ時間モデルを同定する（design/model_based_drive_control.md Phase A）。
+"""ステップ応答から一次遅れ + むだ時間モデルを同定する（design/model_based_drive_control.md Phase A）。
 
 入力:
   --bag <rosbag2 dir>   /drive_status (questix_msgs/DriveStatus) を読む（ROS 2 環境が必要）
@@ -78,8 +77,8 @@ def load_bag(path, topic="/drive_status"):
 
 # ----------------------------------------------------------------------------- 同定
 def fit_first_order(omega, u, dt, max_delay=4, unity_gain=True):
-    """
-    ω_{k+1} = a ω_k + b u_{k-d} + c を最小二乗で当てはめる。
+    """Fit ω_{k+1} = a ω_k + b u_{k-d} + c by least squares.
+
     unity_gain=True なら b = 1 - a に拘束（velocity モード）。
     戻り値: dict(a, b, c, delay, tau, r2)
     """
@@ -113,7 +112,7 @@ def fit_first_order(omega, u, dt, max_delay=4, unity_gain=True):
 
 
 def segments_by_level(target, min_len):
-    """target が一定の区間 [(start, end, level), ...]（end は排他）"""
+    """Return segments [(start, end, level), ...] where target is constant（end は排他）."""
     segs = []
     start = 0
     for k in range(1, len(target) + 1):
