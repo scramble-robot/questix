@@ -143,6 +143,39 @@ drive_component:
     # 丸ごと使えなくなる。実機で 5〜15 を目安に調整する。
     min_command_rpm: 5
 
+    # ---- velocity モードの走行状態機械（design/model_based_drive_control.md Phase B）----
+    # 車輪 RPM（左右の大きい方）で 停止(STOP) / 低速(CREEP) / 走行(RUN) を判定する。
+    # STOP<->CREEP は従来の min_command_rpm + ヒステリシス（drive_stop_gate）そのまま。
+    # CREEP<->RUN は run_enter（入り）/ run_exit（抜け）の 2 閾値でヒステリシスを作る。
+    # 両方 0 なら RUN 判定は無効 = CREEP が存在しない従来の 2 状態（停止/走行）。
+    # RUN は「ファーム速度ループが一次遅れで近似できる領域」で、下の velocity_run_* の
+    # LQR+FF はこの状態でだけ動く。閾値は同定（Phase A）の「一次で当てはまる rpm 域」から決める。
+    drive_fsm_run_enter_rpm: 0   # [RPM] 0 で無効
+    drive_fsm_run_exit_rpm: 0    # [RPM] 0 で無効（enter だけ指定なら同値を使う）
+
+    # ---- velocity モード RUN 域の外側 LQR+FF（Phase E、velocity モードのみ有効）----
+    # ファーム速度ループを一次遅れ τ + むだ時間 d[tick] で近似し、実測 RPM（生値）からの
+    # 推定値で目標 RPM を補正する。current モードでは無視される（起動ログに WARN）。
+    #   指令 = 目標 + lead_gain*(目標の変化)/(1-a) - disturbance_gain*d̂/(1-a) - K*(x̂ - 目標)
+    #   a = exp(-dt/τ)、K は q/r から離散リカッチで計算、補正量は ±max_correction_rpm に制限。
+    # 既定は無効。有効化の前提: Phase A の同定で RUN 域が一次遅れで R² >= 0.9、かつ実測で
+    # 追従誤差が運用上問題になっていること。q=0, lead=0, disturbance=0 なら有効でも出力は
+    # 従来と同一（目標をそのまま送る）。
+    # 注意: 外側ループは内側（ファーム）より十分遅くすること（q を小さく、r を大きく）。
+    #   ゲイン K は起動ログ／ros2 param set 後のログに出る。K が 0.3 を超えるなら強すぎる目安。
+    velocity_run_lqr_enabled: false
+    velocity_run_model_tau_sec: 0.1        # [s] 同定値（一次遅れ時定数）
+    velocity_run_model_delay_ticks: 1      # [tick] 同定値（RS-485 1 問 1 答で最低 1）
+    velocity_run_q: 0.0                    # 追従誤差の重み（0 で FB なし）
+    velocity_run_r: 1.0                    # 入力の重み
+    velocity_run_lead_gain: 0.0            # 0..1 参照変化の先回り（大きいと指令がギザギザに）
+    velocity_run_disturbance_gain: 0.0     # 0..1 外乱推定 d̂ による定常偏差補償（observer_l_d>0 が必要）
+    velocity_run_observer_l_x: 0.3         # 0..1 状態推定のイノベーションゲイン（1 で実測そのまま）
+    velocity_run_observer_l_d: 0.0         # 外乱推定ゲイン（0 で外乱推定なし。0.01〜0.05 から）
+    velocity_run_max_correction_rpm: 20.0  # [RPM] 補正量の上限（安全装置。正帰還・干渉の被害を有界に）
+    velocity_run_invert_measured: false    # 実測 RPM の符号を反転（正帰還になる場合のみ true）
+    velocity_run_feedback_max_age_sec: 0.1 # [s] 両輪のフィードバックがこれより古ければ FF のみ
+
     # /target_twist 受信タイムアウト（制御 tick 内で判定）。
     # 指令がこの秒数途絶えたら走行モータを停止する（velocity/current 両モードで有効）。
     # 上流（uart_joy_driver/joy_gate/joy_controller）が停止しても暴走を防ぐ安全機能。

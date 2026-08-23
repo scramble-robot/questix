@@ -22,6 +22,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <vector>
 
@@ -425,4 +426,210 @@ TEST(ControlCoreOperatingPoint, TurnRangeMostlyOverlapsUnstableRegion) {
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
+}
+
+// --- Phase B/E: 走行状態機械と RUN 域 LQR+FF -----------------------------------------------
+//
+// design/model_based_drive_control.md の Phase B（状態機械）/ Phase E（velocity RUN の外側
+// LQR+FF）。既定設定では従来出力と完全一致すること、有効化したときに閉ループで期待どおり
+// 働くことを、ファーム速度ループの一次遅れモデルで確認する。
+
+namespace {
+
+// 一次遅れ + むだ時間 + 一定外乱（負荷で目標より低く回る）のプラント（1 車輪、モータフレーム）。
+// 実測は整数量子化。
+class LagPlant {
+public:
+  LagPlant(double tau_sec, double dt_sec, int delay_ticks, double steady_offset_rpm)
+      : a_(std::exp(-dt_sec / tau_sec)), delay_(delay_ticks) {
+    // 定常で「目標 + steady_offset_rpm」に落ち着くよう 1 tick あたりの外乱に換算
+    d_ = (1.0 - a_) * steady_offset_rpm;
+  }
+  int step(int cmd_rpm) {
+    const double u = hist_[delay_];
+    for (int i = 4; i > 0; --i) hist_[i] = hist_[i - 1];
+    hist_[0] = static_cast<double>(cmd_rpm);
+    x_ = a_ * x_ + (1.0 - a_) * u + d_;
+    return static_cast<int>(std::lround(x_));
+  }
+  double truth() const { return x_; }
+
+private:
+  double a_;
+  int delay_;
+  double d_;
+  double x_{0.0};
+  std::array<double, 5> hist_{};
+};
+
+core::Config lqrConfig(double q, double disturbance_gain, double l_d, double max_corr) {
+  core::Config config = yamlConfig();
+  config.run_enter_rpm = 40;
+  config.run_exit_rpm = 30;
+  config.velocity_run.enabled = true;
+  config.velocity_run.model_tau_sec = 0.1;
+  config.velocity_run.model_delay_ticks = 1;
+  config.velocity_run.q = q;
+  config.velocity_run.r = 1.0;
+  config.velocity_run.lead_gain = 0.0;
+  config.velocity_run.disturbance_gain = disturbance_gain;
+  config.velocity_run.observer_l_x = 0.3;
+  config.velocity_run.observer_l_d = l_d;
+  config.velocity_run.max_correction_rpm = max_corr;
+  return config;
+}
+
+// 左右同じプラントで直進させ、最終的な左輪の実測と指令を返す
+struct RunResult {
+  double left_truth{0.0};
+  int left_cmd{0};
+  int left_ref{0};
+  bool lqr_active{false};
+};
+RunResult driveStraight(core::ControlCore& control, double offset_rpm, double target_linear,
+                        int ticks) {
+  LagPlant left(0.1, kControlDt, 1, offset_rpm);
+  LagPlant right(0.1, kControlDt, 1, offset_rpm);
+  core::WheelFeedback fb;
+  RunResult res;
+  for (int k = 0; k < ticks; ++k) {
+    const auto out = control.step(target_linear, 0.0, kControlDt, fb);
+    const int lcmd = out.stop ? 0 : out.left_rpm;
+    const int rcmd = out.stop ? 0 : out.right_rpm;
+    fb.valid = true;
+    fb.left_rpm = left.step(lcmd);
+    fb.right_rpm = right.step(rcmd);
+    res.left_truth = left.truth();
+    res.left_cmd = out.left_rpm;
+    res.left_ref = out.left_ref_rpm;
+    res.lqr_active = out.lqr_active;
+  }
+  return res;
+}
+
+}  // namespace
+
+TEST(ControlCoreFsm, DefaultConfigIsIdenticalWithAndWithoutFeedback) {
+  // 既定（RUN 閾値 0、LQR 無効）では、フィードバックを渡しても出力が従来 API と完全一致し、
+  // CREEP には決して入らない。
+  core::ControlCore legacy(yamlConfig());
+  core::ControlCore with_fb(yamlConfig());
+  core::WheelFeedback fb;
+  fb.valid = true;
+  for (int k = 0; k < 300; ++k) {
+    const double lin = (k < 150) ? kFullStickLinear : 0.0;
+    const double ang = (k >= 100 && k < 250) ? 0.7 : 0.0;
+    const auto a = legacy.step(lin, ang, kControlDt);
+    fb.left_rpm = a.left_rpm + 3;  // 適当なずれ。無視されるはず
+    fb.right_rpm = a.right_rpm - 3;
+    const auto b = with_fb.step(lin, ang, kControlDt, fb);
+    EXPECT_EQ(a.stop, b.stop) << "k=" << k;
+    EXPECT_EQ(a.left_rpm, b.left_rpm) << "k=" << k;
+    EXPECT_EQ(a.right_rpm, b.right_rpm) << "k=" << k;
+    EXPECT_EQ(a.left_rpm, a.left_ref_rpm);
+    EXPECT_NE(b.mode, core::DriveMode::kCreep);
+    EXPECT_EQ(b.stop, b.mode == core::DriveMode::kStop);
+    EXPECT_FALSE(b.lqr_active);
+  }
+}
+
+TEST(ControlCoreFsm, RunThresholdProducesCreepThenRun) {
+  core::Config config = yamlConfig();
+  config.run_enter_rpm = 40;
+  config.run_exit_rpm = 30;
+  core::ControlCore control(config);
+  // 低速目標（約 19 RPM）: 不感帯は抜けるが RUN 未満 -> CREEP
+  core::Output out;
+  for (int k = 0; k < 200; ++k) out = control.step(0.2, 0.0, kControlDt);
+  EXPECT_FALSE(out.stop);
+  EXPECT_EQ(out.mode, core::DriveMode::kCreep);
+  // 高速目標（約 95 RPM）-> RUN
+  for (int k = 0; k < 200; ++k) out = control.step(1.0, 0.0, kControlDt);
+  EXPECT_EQ(out.mode, core::DriveMode::kRun);
+  // 戻すと CREEP、さらに 0 で STOP
+  for (int k = 0; k < 200; ++k) out = control.step(0.2, 0.0, kControlDt);
+  EXPECT_EQ(out.mode, core::DriveMode::kCreep);
+  for (int k = 0; k < 200; ++k) out = control.step(0.0, 0.0, kControlDt);
+  EXPECT_EQ(out.mode, core::DriveMode::kStop);
+  EXPECT_TRUE(out.stop);
+}
+
+TEST(ControlCoreLqr, ZeroWeightsReproduceReferenceEvenWhenEnabled) {
+  // enabled=true でも q=0, lead=0, disturbance=0 なら補正量 0 = 従来出力
+  core::ControlCore control(lqrConfig(0.0, 0.0, 0.0, 20.0));
+  const auto res = driveStraight(control, -10.0, 1.0, 200);
+  EXPECT_TRUE(res.lqr_active);
+  EXPECT_EQ(res.left_cmd, res.left_ref);
+}
+
+TEST(ControlCoreLqr, FeedbackOnlyLeavesSteadyOffset) {
+  // 負荷で 10 RPM 低く回るプラント。FF のみ（LQR 無効）では偏差がそのまま残る
+  core::Config config = yamlConfig();
+  core::ControlCore control(config);
+  const auto res = driveStraight(control, -10.0, 1.0, 300);
+  EXPECT_NEAR(res.left_truth - res.left_ref, -10.0, 1.0);
+}
+
+TEST(ControlCoreLqr, DisturbanceCompensationRemovesSteadyOffset) {
+  // 同じプラントで LQR+FF（外乱補償あり）: 指令が上乗せされ、実測が目標に収束する
+  core::ControlCore control(lqrConfig(0.5, 1.0, 0.05, 20.0));
+  const auto res = driveStraight(control, -10.0, 1.0, 400);
+  EXPECT_TRUE(res.lqr_active);
+  EXPECT_GT(res.left_cmd, res.left_ref);  // 補正が正方向（負荷を打ち消す）
+  EXPECT_NEAR(res.left_truth, static_cast<double>(res.left_ref), 1.0);
+  ASSERT_TRUE(control.lqrGains().has_value());
+  EXPECT_GT(control.lqrGains()->k, 0.0);
+  ASSERT_TRUE(control.leftOmegaHat().has_value());
+}
+
+TEST(ControlCoreLqr, CorrectionIsBoundedByMaxCorrection) {
+  // 補正上限 5 RPM。負荷 30 RPM ぶんは補正しきれず、指令は目標 +5 で止まる
+  core::ControlCore control(lqrConfig(0.5, 1.0, 0.05, 5.0));
+  const auto res = driveStraight(control, -30.0, 1.0, 400);
+  EXPECT_LE(res.left_cmd - res.left_ref, 5);
+  EXPECT_GE(res.left_cmd - res.left_ref, 4);  // 上限に張り付く
+}
+
+TEST(ControlCoreLqr, InvalidFeedbackFallsBackToFeedforward) {
+  core::ControlCore control(lqrConfig(0.5, 1.0, 0.05, 20.0));
+  // まず FB ありで補正が乗る状態を作る
+  driveStraight(control, -10.0, 1.0, 200);
+  // FB を無効にすると参照そのまま + オブザーバはリセット
+  core::WheelFeedback invalid;
+  const auto out = control.step(1.0, 0.0, kControlDt, invalid);
+  EXPECT_EQ(out.mode, core::DriveMode::kRun);
+  EXPECT_FALSE(out.lqr_active);
+  EXPECT_EQ(out.left_rpm, out.left_ref_rpm);
+  EXPECT_FALSE(control.leftOmegaHat().has_value());
+}
+
+TEST(ControlCoreLqr, ResetAndModeTransitionClearObserver) {
+  core::ControlCore control(lqrConfig(0.5, 1.0, 0.05, 20.0));
+  driveStraight(control, -10.0, 1.0, 200);
+  ASSERT_TRUE(control.leftOmegaHat().has_value());
+  // RUN -> STOP 遷移でクリア
+  core::WheelFeedback fb;
+  fb.valid = true;
+  core::Output out;
+  for (int k = 0; k < 300; ++k) out = control.step(0.0, 0.0, kControlDt, fb);
+  EXPECT_EQ(out.mode, core::DriveMode::kStop);
+  EXPECT_FALSE(control.leftOmegaHat().has_value());
+  // reset() でもクリア
+  driveStraight(control, -10.0, 1.0, 200);
+  ASSERT_TRUE(control.leftOmegaHat().has_value());
+  control.reset();
+  EXPECT_FALSE(control.leftOmegaHat().has_value());
+  EXPECT_EQ(control.mode(), core::DriveMode::kStop);
+}
+
+TEST(ControlCoreLqr, SetConfigRecomputesGains) {
+  core::ControlCore control(lqrConfig(0.5, 1.0, 0.05, 20.0));
+  driveStraight(control, -10.0, 1.0, 50);
+  ASSERT_TRUE(control.lqrGains().has_value());
+  const double k1 = control.lqrGains()->k;
+  control.setConfig(lqrConfig(2.0, 1.0, 0.05, 20.0));
+  EXPECT_FALSE(control.lqrGains().has_value());  // 次の tick で再計算
+  driveStraight(control, -10.0, 1.0, 5);
+  ASSERT_TRUE(control.lqrGains().has_value());
+  EXPECT_GT(control.lqrGains()->k, k1);  // q を上げればゲインは上がる
 }

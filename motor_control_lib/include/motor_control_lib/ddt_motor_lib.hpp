@@ -174,11 +174,12 @@ public:
   struct MotorFeedbackData {
     uint8_t motor_id{0};
     uint8_t mode{0};
-    int16_t current_raw{0};    // トルク電流生値（符号付き）
-    int16_t velocity_rpm{0};   // 実測 RPM
-    int16_t target_rpm{0};     // 最終指令値（クランプ後）
-    uint16_t position_raw{0};  // ロータ位置
-    uint8_t temperature{0};    // 常に 0（Protocol 2 (0x74) 未実装）
+    int16_t current_raw{0};  // トルク電流生値（符号付き）
+    int16_t velocity_rpm{0};  // 実測 RPM（レポート用。measured_lpf_tau_sec > 0 ならローパス済み）
+    int16_t velocity_rpm_raw{0};  // 実測 RPM の生値（制御用。フィルタなし）
+    int16_t target_rpm{0};        // 最終指令値（クランプ後）
+    uint16_t position_raw{0};     // ロータ位置
+    uint8_t temperature{0};       // 常に 0（Protocol 2 (0x74) 未実装）
     uint8_t fault_code{0};
     bool has_feedback{false};      // 一度でも有効フィードバックを受信したか
     double feedback_age_sec{0.0};  // has_feedback のときのみ有効な受信経過秒

@@ -221,6 +221,26 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
                 "加速プロファイル支配側: firmware (accel_time)");
   }
   RCLCPP_INFO(this->get_logger(), "  min_command_rpm: %d", min_command_rpm_);
+  RCLCPP_INFO(this->get_logger(), "  drive_fsm_run_enter_rpm: %d  drive_fsm_run_exit_rpm: %d%s",
+              drive_fsm_run_enter_rpm_, drive_fsm_run_exit_rpm_,
+              (drive_fsm_run_enter_rpm_ <= 0 && drive_fsm_run_exit_rpm_ <= 0)
+                  ? " (RUN 閾値無効 = 停止/走行の 2 状態)"
+                  : "");
+  if (velocity_run_lqr_enabled_ && control_mode_ != "velocity") {
+    RCLCPP_WARN(this->get_logger(),
+                "velocity_run_lqr_enabled=true は velocity モード専用のため control_mode='%s' "
+                "では無視します",
+                control_mode_.c_str());
+  }
+  RCLCPP_INFO(this->get_logger(),
+              "  velocity_run_lqr: %s  tau=%.3fs delay=%d ticks q=%.3f r=%.3f lead=%.2f dist=%.2f "
+              "obs[l_x=%.2f l_d=%.3f] max_corr=%.1f rpm invert=%s fb_max_age=%.2fs",
+              (velocity_run_lqr_enabled_ && control_mode_ == "velocity") ? "enabled" : "disabled",
+              velocity_run_model_tau_sec_, velocity_run_model_delay_ticks_, velocity_run_q_,
+              velocity_run_r_, velocity_run_lead_gain_, velocity_run_disturbance_gain_,
+              velocity_run_observer_l_x_, velocity_run_observer_l_d_,
+              velocity_run_max_correction_rpm_, velocity_run_invert_measured_ ? "true" : "false",
+              velocity_run_feedback_max_age_sec_);
 
   // twist 購読（コールバックは ACTIVE のときのみ処理する）
   twist_subscription_ = this->create_subscription<geometry_msgs::msg::Twist>(
@@ -394,6 +414,27 @@ void DriveComponent::declareParameters() {
   // 指令を許す最低車輪 RPM（低速不感帯）。詳細は DifferentialDrive::setMinCommandRpm。
   this->declare_parameter("min_command_rpm", 5);
 
+  // velocity モードの走行状態機械（停止/低速/走行）。RUN 閾値 0 で従来の 2 状態。
+  // 詳細は motor_control_lib/drive_mode_fsm.hpp。
+  this->declare_parameter("drive_fsm_run_enter_rpm", 0);
+  this->declare_parameter("drive_fsm_run_exit_rpm", 0);
+
+  // velocity モード RUN 域の外側 LQR+FF（velocity モードのみ有効。current モードでは無視）。
+  // 既定は無効。同定結果（design/model_based_drive_control.md Phase A）を得てから有効化する。
+  // 詳細は control_core.hpp VelocityRunLqrConfig / motor_control_lib/wheel_velocity_lqr.hpp。
+  this->declare_parameter("velocity_run_lqr_enabled", false);
+  this->declare_parameter("velocity_run_model_tau_sec", 0.1);
+  this->declare_parameter("velocity_run_model_delay_ticks", 1);
+  this->declare_parameter("velocity_run_q", 0.0);
+  this->declare_parameter("velocity_run_r", 1.0);
+  this->declare_parameter("velocity_run_lead_gain", 0.0);
+  this->declare_parameter("velocity_run_disturbance_gain", 0.0);
+  this->declare_parameter("velocity_run_observer_l_x", 0.3);
+  this->declare_parameter("velocity_run_observer_l_d", 0.0);
+  this->declare_parameter("velocity_run_max_correction_rpm", 20.0);
+  this->declare_parameter("velocity_run_invert_measured", false);
+  this->declare_parameter("velocity_run_feedback_max_age_sec", 0.1);
+
   // コマンド受信タイムアウト [s]（velocity/current 両モードで有効。制御 tick 内で判定）
   this->declare_parameter("cmd_timeout_sec", 1.0);
 
@@ -458,6 +499,25 @@ void DriveComponent::readParameters() {
   accel_time_0p1ms_per_rpm_ =
       static_cast<int>(this->get_parameter("accel_time_0p1ms_per_rpm").as_int());
   min_command_rpm_ = static_cast<int>(this->get_parameter("min_command_rpm").as_int());
+  drive_fsm_run_enter_rpm_ =
+      static_cast<int>(this->get_parameter("drive_fsm_run_enter_rpm").as_int());
+  drive_fsm_run_exit_rpm_ =
+      static_cast<int>(this->get_parameter("drive_fsm_run_exit_rpm").as_int());
+  velocity_run_lqr_enabled_ = this->get_parameter("velocity_run_lqr_enabled").as_bool();
+  velocity_run_model_tau_sec_ = this->get_parameter("velocity_run_model_tau_sec").as_double();
+  velocity_run_model_delay_ticks_ =
+      static_cast<int>(this->get_parameter("velocity_run_model_delay_ticks").as_int());
+  velocity_run_q_ = this->get_parameter("velocity_run_q").as_double();
+  velocity_run_r_ = this->get_parameter("velocity_run_r").as_double();
+  velocity_run_lead_gain_ = this->get_parameter("velocity_run_lead_gain").as_double();
+  velocity_run_disturbance_gain_ = this->get_parameter("velocity_run_disturbance_gain").as_double();
+  velocity_run_observer_l_x_ = this->get_parameter("velocity_run_observer_l_x").as_double();
+  velocity_run_observer_l_d_ = this->get_parameter("velocity_run_observer_l_d").as_double();
+  velocity_run_max_correction_rpm_ =
+      this->get_parameter("velocity_run_max_correction_rpm").as_double();
+  velocity_run_invert_measured_ = this->get_parameter("velocity_run_invert_measured").as_bool();
+  velocity_run_feedback_max_age_sec_ =
+      this->get_parameter("velocity_run_feedback_max_age_sec").as_double();
   cmd_timeout_sec_ = this->get_parameter("cmd_timeout_sec").as_double();
   control_rate_ = this->get_parameter("control_rate").as_double();
   command_wait_ms_ = static_cast<int>(this->get_parameter("command_wait_ms").as_int());
@@ -571,6 +631,21 @@ control_core::Config DriveComponent::makeControlCoreConfig() const {
   config.wheel_radius = wheel_radius_;
   config.wheel_separation = wheel_separation_;
   config.min_command_rpm = min_command_rpm_;
+  config.run_enter_rpm = drive_fsm_run_enter_rpm_;
+  config.run_exit_rpm = drive_fsm_run_exit_rpm_;
+  // RUN 域 LQR+FF は velocity モード専用。current モードではファーム速度ループが無く
+  // 前提モデルが成り立たないため、設定が true でも無効にする（起動ログで通知）。
+  config.velocity_run.enabled = velocity_run_lqr_enabled_ && control_mode_ == "velocity";
+  config.velocity_run.model_tau_sec = velocity_run_model_tau_sec_;
+  config.velocity_run.model_delay_ticks = velocity_run_model_delay_ticks_;
+  config.velocity_run.q = velocity_run_q_;
+  config.velocity_run.r = velocity_run_r_;
+  config.velocity_run.lead_gain = velocity_run_lead_gain_;
+  config.velocity_run.disturbance_gain = velocity_run_disturbance_gain_;
+  config.velocity_run.observer_l_x = velocity_run_observer_l_x_;
+  config.velocity_run.observer_l_d = velocity_run_observer_l_d_;
+  config.velocity_run.max_correction_rpm = velocity_run_max_correction_rpm_;
+  config.velocity_run.invert_measured = velocity_run_invert_measured_;
   return config;
 }
 
@@ -624,6 +699,54 @@ rcl_interfaces::msg::SetParametersResult DriveComponent::onParameterChange(
           diff_drive_->setMinCommandRpm(min_command_rpm_);
         }
 
+        // --- 走行状態機械 / RUN 域 LQR+FF（制御コアへ反映） ---
+      } else if (name == "drive_fsm_run_enter_rpm") {
+        drive_fsm_run_enter_rpm_ = static_cast<int>(param.get_value<int64_t>());
+        control_core_dirty = true;
+      } else if (name == "drive_fsm_run_exit_rpm") {
+        drive_fsm_run_exit_rpm_ = static_cast<int>(param.get_value<int64_t>());
+        control_core_dirty = true;
+      } else if (name == "velocity_run_lqr_enabled") {
+        velocity_run_lqr_enabled_ = param.get_value<bool>();
+        control_core_dirty = true;
+        if (velocity_run_lqr_enabled_ && control_mode_ != "velocity") {
+          RCLCPP_WARN(this->get_logger(),
+                      "velocity_run_lqr_enabled は velocity モード専用です（現在 '%s'、無視）",
+                      control_mode_.c_str());
+        }
+      } else if (name == "velocity_run_model_tau_sec") {
+        velocity_run_model_tau_sec_ = param.get_value<double>();
+        control_core_dirty = true;
+      } else if (name == "velocity_run_model_delay_ticks") {
+        velocity_run_model_delay_ticks_ = static_cast<int>(param.get_value<int64_t>());
+        control_core_dirty = true;
+      } else if (name == "velocity_run_q") {
+        velocity_run_q_ = param.get_value<double>();
+        control_core_dirty = true;
+      } else if (name == "velocity_run_r") {
+        velocity_run_r_ = param.get_value<double>();
+        control_core_dirty = true;
+      } else if (name == "velocity_run_lead_gain") {
+        velocity_run_lead_gain_ = param.get_value<double>();
+        control_core_dirty = true;
+      } else if (name == "velocity_run_disturbance_gain") {
+        velocity_run_disturbance_gain_ = param.get_value<double>();
+        control_core_dirty = true;
+      } else if (name == "velocity_run_observer_l_x") {
+        velocity_run_observer_l_x_ = param.get_value<double>();
+        control_core_dirty = true;
+      } else if (name == "velocity_run_observer_l_d") {
+        velocity_run_observer_l_d_ = param.get_value<double>();
+        control_core_dirty = true;
+      } else if (name == "velocity_run_max_correction_rpm") {
+        velocity_run_max_correction_rpm_ = param.get_value<double>();
+        control_core_dirty = true;
+      } else if (name == "velocity_run_invert_measured") {
+        velocity_run_invert_measured_ = param.get_value<bool>();
+        control_core_dirty = true;
+      } else if (name == "velocity_run_feedback_max_age_sec") {
+        velocity_run_feedback_max_age_sec_ = param.get_value<double>();
+
         // --- 制御 tick が直接見る値 ---
       } else if (name == "cmd_timeout_sec") {
         cmd_timeout_sec_ = param.get_value<double>();
@@ -671,10 +794,17 @@ rcl_interfaces::msg::SetParametersResult DriveComponent::onParameterChange(
       control_core_->setConfig(makeControlCoreConfig());
       RCLCPP_INFO(this->get_logger(),
                   "制御コア設定を更新: max_accel[lin=%.3f ang=%.3f] min_accel[lin=%.3f ang=%.3f] "
-                  "ref[lin=%.3f ang=%.3f] taper[lin=%.3f ang=%.3f] min_command_rpm=%d",
+                  "ref[lin=%.3f ang=%.3f] taper[lin=%.3f ang=%.3f] min_command_rpm=%d "
+                  "fsm_run[enter=%d exit=%d] velocity_run_lqr=%s[tau=%.3f q=%.3f r=%.3f lead=%.2f "
+                  "dist=%.2f max_corr=%.1f]",
                   max_linear_accel_, max_angular_accel_, min_linear_accel_, min_angular_accel_,
                   accel_demand_ref_linear_, accel_demand_ref_angular_, slew_taper_band_linear_,
-                  slew_taper_band_angular_, min_command_rpm_);
+                  slew_taper_band_angular_, min_command_rpm_, drive_fsm_run_enter_rpm_,
+                  drive_fsm_run_exit_rpm_,
+                  (velocity_run_lqr_enabled_ && control_mode_ == "velocity") ? "on" : "off",
+                  velocity_run_model_tau_sec_, velocity_run_q_, velocity_run_r_,
+                  velocity_run_lead_gain_, velocity_run_disturbance_gain_,
+                  velocity_run_max_correction_rpm_);
     }
     result.reason = "Parameters updated successfully";
   } catch (const std::exception& e) {
@@ -773,7 +903,23 @@ void DriveComponent::controlTimerCallback() {
   // dt は固定周期の定数なので、実効加速度プロファイルが上流の publish レートに依存しない。
   // 制御則の詳細は control_core.hpp / drive_slew.hpp を参照。
   const double dt = drive_control_tick::tickDtSec(control_rate_);
-  const auto out = control_core_->step(target_linear_, target_angular_, dt);
+
+  // 実測車輪 RPM（生値、モータフレーム）を制御コアへ渡す。RUN 域 LQR+FF（velocity モード、
+  // 有効時のみ）が使う。両輪のフィードバックが新鮮でなければ valid=false = FF のみ（従来挙動）。
+  control_core::WheelFeedback feedback;
+  if (motor_lib_) {
+    motor_control_lib::DdtMotorLib::MotorFeedbackData left_fb, right_fb;
+    const bool got = motor_lib_->getMotorFeedbackData(left_motor_id_, left_fb) &&
+                     motor_lib_->getMotorFeedbackData(right_motor_id_, right_fb);
+    if (got && left_fb.has_feedback && right_fb.has_feedback &&
+        left_fb.feedback_age_sec <= velocity_run_feedback_max_age_sec_ &&
+        right_fb.feedback_age_sec <= velocity_run_feedback_max_age_sec_) {
+      feedback.valid = true;
+      feedback.left_rpm = left_fb.velocity_rpm_raw;
+      feedback.right_rpm = right_fb.velocity_rpm_raw;
+    }
+  }
+  const auto out = control_core_->step(target_linear_, target_angular_, dt, feedback);
 
   // 指令送信（応答フレームでフィードバック快照も更新される）。停止判定は制御コアが
   // 済ませているため、送信先は停止指令か生の車輪 RPM のどちらかになる。
@@ -786,8 +932,11 @@ void DriveComponent::controlTimerCallback() {
   }
 
   RCLCPP_DEBUG(this->get_logger(),
-               "Command sent: linear=%.3f, angular=%.3f -> left=%d RPM, right=%d RPM, stop=%s",
-               out.linear, out.angular, out.left_rpm, out.right_rpm, out.stop ? "true" : "false");
+               "Command sent: linear=%.3f, angular=%.3f -> left=%d RPM (ref %d), right=%d RPM "
+               "(ref %d), mode=%s, lqr=%s",
+               out.linear, out.angular, out.left_rpm, out.left_ref_rpm, out.right_rpm,
+               out.right_ref_rpm, motor_control_lib::drive_mode_fsm::toString(out.mode),
+               out.lqr_active ? "on" : "off");
 
   // tick 所要時間の監視。シリアル応答待ち（最悪 10ms × 2）が周期予算を超えると
   // 制御周期が崩れるため、超過を可視化する（実機での control_rate 選定の材料）。
