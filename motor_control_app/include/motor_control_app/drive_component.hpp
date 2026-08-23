@@ -281,6 +281,26 @@ private:
   // 指令を許す最低車輪 RPM（低速不感帯）。0 で不感帯なし
   int min_command_rpm_{5};
 
+  // velocity モードの走行状態機械（design/model_based_drive_control.md Phase B）。
+  // RUN 閾値が 0 なら CREEP は空集合 = 従来の停止/走行 2 状態。
+  int drive_fsm_run_enter_rpm_{0};
+  int drive_fsm_run_exit_rpm_{0};
+
+  // velocity モード RUN 域の外側 LQR+FF（Phase E）。velocity モードのみ有効。
+  // 既定は無効（enabled=false）で従来挙動。同定（Phase A）後に YAML で有効化する。
+  bool velocity_run_lqr_enabled_{false};
+  double velocity_run_model_tau_sec_{0.1};
+  int velocity_run_model_delay_ticks_{1};
+  double velocity_run_q_{0.0};
+  double velocity_run_r_{1.0};
+  double velocity_run_lead_gain_{0.0};
+  double velocity_run_disturbance_gain_{0.0};
+  double velocity_run_observer_l_x_{0.3};
+  double velocity_run_observer_l_d_{0.0};
+  double velocity_run_max_correction_rpm_{20.0};
+  bool velocity_run_invert_measured_{false};
+  double velocity_run_feedback_max_age_sec_{0.1};
+
   // 指令送信後の追加待機 [ms]。0で無効（DDT M0602C の間隔要件用の保険）
   int command_wait_ms_{0};
 

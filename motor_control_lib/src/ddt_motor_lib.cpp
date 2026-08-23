@@ -782,6 +782,7 @@ bool DdtMotorLib::getMotorFeedbackData(int motor_id, MotorFeedbackData& out) con
     out.current_raw = fb.current;
     // レポート用途はローパス済み実測 RPM を返す（tau<=0 で生値）。
     out.velocity_rpm = static_cast<int16_t>(measuredRpmForReport(fb));
+    out.velocity_rpm_raw = fb.speed;  // 制御経路（control_core の観測器）は生値を使う
     out.position_raw = fb.position;
     out.temperature = fb.temperature;  // 常に 0（Protocol 2 未実装）
     out.fault_code = fb.fault_code;
