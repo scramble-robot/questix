@@ -20,7 +20,15 @@ uint8 mode              # firmware control mode (DATA[1]); see MODE_* constants
 int16 current_raw       # torque current raw (DATA[2..3], signed):
                         # -32767..32767 <-> -8..+8 A
 float32 current_amp     # current_raw * 8.0 / 32767.0 [A]
-int16 velocity_rpm      # measured wheel speed [RPM] (DATA[4..5], signed)
+int16 velocity_rpm      # measured wheel speed [RPM] (DATA[4..5], signed).
+                        # Low-pass filtered when measured_lpf_tau_sec > 0
+                        # (report path only; equals velocity_rpm_raw when the
+                        # filter is disabled).
+int16 velocity_rpm_raw  # measured wheel speed [RPM], UNFILTERED wire value.
+                        # Use this for system identification / oscillation
+                        # analysis: the filtered value understates ~1.8 Hz
+                        # firmware-loop oscillation by about half at the
+                        # default tau (0.15 s).
 int16 target_rpm        # last commanded target [RPM] (clamped to max_motor_rpm)
 uint16 position_raw     # rotor position (DATA[6..7]): 0..32767 <-> 0..360 deg
 uint8 temperature       # [deg C] CURRENTLY ALWAYS 0: requires DDT Protocol 2

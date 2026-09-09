@@ -17,7 +17,8 @@ TEST(ToMotorFeedbackMsg, FieldsPassThrough) {
   fb.motor_id = 4;
   fb.mode = 2;
   fb.current_raw = 16384;  // 半分 -> 約 4A
-  fb.velocity_rpm = -120;
+  fb.velocity_rpm = 80;
+  fb.velocity_rpm_raw = 120;
   fb.target_rpm = -150;
   fb.position_raw = 12345;
   fb.temperature = 0;
@@ -29,7 +30,8 @@ TEST(ToMotorFeedbackMsg, FieldsPassThrough) {
   EXPECT_EQ(msg.motor_id, 4);
   EXPECT_EQ(msg.mode, 2);
   EXPECT_EQ(msg.current_raw, 16384);
-  EXPECT_EQ(msg.velocity_rpm, -120);
+  EXPECT_EQ(msg.velocity_rpm, 80);
+  EXPECT_EQ(msg.velocity_rpm_raw, 120);
   EXPECT_EQ(msg.target_rpm, -150);
   EXPECT_EQ(msg.position_raw, 12345);
   EXPECT_EQ(msg.temperature, 0);
@@ -60,6 +62,7 @@ TEST(ToMotorFeedbackMsg, ZeroStampWhenNoFeedback) {
   EXPECT_EQ(msg.motor_id, 5);
   EXPECT_EQ(msg.target_rpm, 42);
   EXPECT_EQ(msg.velocity_rpm, 0);
+  EXPECT_EQ(msg.velocity_rpm_raw, 0);
 }
 
 }  // namespace
