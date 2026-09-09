@@ -70,7 +70,18 @@ ros2 launch joy_controller joy_controller_referee.launch.xml
 
 ## パラメータの動的変更
 
-上記パラメータはすべて `ros2 param set` で即時反映されます:
+`ros2 param set` で即時反映されるパラメータは、現行実装では次のとおりです。
+
+| モード | 実行時に即時反映されるパラメータ |
+|---|---|
+| single-stick | `longitudinal_input_ratio`, `lateral_input_ratio`, `angular_input_ratio`, `linear_x_axis`, `linear_y_axis`, `angular_z_axis`, `debug_mode` |
+| dual-stick | `longitudinal_input_ratio`, `angular_input_ratio`, `debug_mode` |
+
+dual-stickの `left_stick_vertical_axis` / `right_stick_vertical_axis` はstartup/config専用です。
+YAMLを変更してノードを再起動してください。両モードの `joy_topic` はlaunch/startup時の
+指定専用で、実行時に変更しても購読先は切り替わりません。
+
+即時反映されるパラメータの変更例:
 
 ```bash
 ros2 param set /joy_controller longitudinal_input_ratio 1.0
@@ -99,6 +110,9 @@ ros2 topic echo /target_twist
 - sensor_msgs / geometry_msgs
 - joy（DualShock 経路の joy_node）
 
-XML launchのnormalモードは `config_file` → `joy_controller_params.yaml`、
+standard / referee両XML launchのnormalモードは `config_file` → `joy_controller_params.yaml`、
 dualモードは `dual_stick_config_file` → `joy_controller_dual_stick_params.yaml` を使用します。
 独自設定は対応する引数で指定してください。
+
+dual-stick YAMLは `/**` selectorを使用し、standaloneの `joy_controller_dual_stick` と
+launch時の `joy_controller` の両node nameへ適用されます。
