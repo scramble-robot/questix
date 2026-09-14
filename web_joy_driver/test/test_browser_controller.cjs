@@ -180,8 +180,18 @@ test("takeover never automatically reconnects, even without a released message",
     const c = controller(); c.sockets[0].open();
     if (message) c.sockets[0].message({ type: "released" });
     c.sockets[0].end(4000); c.retry();
+    assert.equal(c.$("reconnect").hidden, false);
     c.document.dispatch("visibilitychange"); assert.equal(c.sockets.length, 1);
     c.$("reconnect").dispatch("click"); c.sockets[1].open(); neutral(c.last());
+    assert.equal(c.$("reconnect").hidden, true);
+  }
+});
+
+test("authentication failure exposes the manual reconnect button", () => {
+  for (const code of [1008, 4401]) {
+    const c = controller(); c.sockets[0].end(code); c.retry();
+    assert.equal(c.sockets.length, 1);
+    assert.equal(c.$("reconnect").hidden, false);
   }
 });
 

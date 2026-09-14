@@ -91,7 +91,7 @@
     white-space: nowrap; overflow: hidden;
   }
   footer span { overflow: hidden; text-overflow: ellipsis; }
-  #reconnect { display: none; }
+  #reconnect[hidden] { display: none; }
   #controls { padding: 6px 10px; background: var(--panel); border-bottom: 1px solid var(--line); }
   #controls label { display: inline-flex; align-items: center; gap: 8px; }
   #inputMode { background: var(--bg); color: var(--fg); padding: 5px; border: 1px solid var(--line); border-radius: 6px; }
@@ -127,7 +127,7 @@
     <div class="spacer"></div>
     <span class="pill" id="estop">E-stop: --</span>
     <span class="pill" id="conn">未接続</span>
-    <button class="icon" id="reconnect">再接続</button>
+    <button class="icon" id="reconnect" hidden>再接続</button>
     <button class="icon" id="fullscreen" title="全画面" aria-label="全画面">⛶</button>
   </header>
   <div id="banner"></div>
@@ -229,7 +229,7 @@
     resetAll();
     if (ws) ws.close();
     released = false;
-    $("reconnect").style.display = "none";
+    $("reconnect").hidden = true;
     setConn("warn", "接続中…");
     const socket = new WebSocket(wsUrl());
     ws = socket;
@@ -248,8 +248,8 @@
       ws = null;
       resetAll();
       if (ev.code === 4000) released = true;
-      if (released) { setConn("bad", "切断（引き継ぎ）"); $("reconnect").style.display = ""; return; }
-      if (ev.code === 1008 || ev.code === 4401) { released = true; setConn("bad", "認証エラー"); setBanner("bad", "トークンが違います"); $("reconnect").style.display = ""; return; }
+      if (released) { setConn("bad", "切断（引き継ぎ）"); $("reconnect").hidden = false; return; }
+      if (ev.code === 1008 || ev.code === 4401) { released = true; setConn("bad", "認証エラー"); setBanner("bad", "トークンが違います"); $("reconnect").hidden = false; return; }
       setConn("bad", "切断 / 再接続待ち");
       setBanner("warn", "ロボットとの接続が切れました", "ロボット側は自動でニュートラルに戻ります");
       if (!document.hidden) reconnectTimer = setTimeout(connect, reconnectDelay);
