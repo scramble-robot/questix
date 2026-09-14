@@ -1,0 +1,65 @@
+# Web Joy Driver Configuration
+# Smartphone/browser virtual controller served over HTTP + WebSocket.
+# スマホのブラウザから操作するための仮想コントローラ設定。
+
+web_joy_driver:
+  ros__parameters:
+    # Joy output topic. The launcher overrides this to /joy_gated-compatible
+    # pipelines through joy_gate, so leave it at /joy here.
+    joy_topic: "/joy"
+
+    # HTTP/WebSocket bind address and port.
+    # 0.0.0.0 exposes the page on every interface (Wi-Fi AP / LAN).
+    # Open http://<robot-ip>:8899/ on the phone.
+    host: "0.0.0.0"
+    port: 8899
+
+    # Optional shared secret. When non-empty the page must be opened as
+    # http://<robot-ip>:8899/?token=<value>; WebSocket connections without a
+    # matching token are rejected with HTTP 401.
+    # 空文字で認証なし。LAN に他の端末がいる環境では設定を推奨。
+    auth_token: ""
+
+    # Joy publish rate (Hz). The last valid frame is re-sent at this rate,
+    # independent of how often the browser sends frames.
+    publish_rate: 50.0
+
+    # Neutral fallback: if no frame arrives for this many seconds
+    # (Wi-Fi drop, browser backgrounded), an all-zero Joy is published.
+    # 0 以下で無効（非推奨）。
+    message_timeout_sec: 0.5
+
+    # Stick deadzone (0.0-1.0), applied server-side to every axis.
+    deadzone: 0.05
+
+    # Array sizes. Defaults match the Switch2-native layout of uart_joy_driver:
+    #   buttons: A=0, B=1, X=2, Y=3, L=4, R=5, ZL=6, ZR=7,
+    #            Minus=8, Plus=9, Home=10, Capture=11, LStick=12, RStick=13
+    #   axes:    LX=0, LY=1, RX=3, RY=4, D-pad H=6, D-pad V=7 (left/up = +1)
+    # The shipped page (static/index.html) fills exactly these indices, so the
+    # *.uart.yaml controller profiles of shot_component / esc_motor_control apply.
+    num_axes: 8
+    num_buttons: 14
+
+    # WebSocket keepalive: ping every ping_interval_sec, drop the client when a
+    # pong does not arrive within ping_timeout_sec.
+    ping_interval_sec: 1.0
+    ping_timeout_sec: 2.0
+
+    # How often the node pushes a status message (E-stop state, frame age) to
+    # connected pages.
+    status_period_sec: 0.2
+
+    # Upper bound for the WebSocket closing handshake. A page that stopped
+    # reading (backgrounded browser) is dropped after this instead of the
+    # library default of 10 s, so takeover by another phone stays responsive.
+    close_timeout_sec: 1.0
+
+    # Directory containing index.html. Empty = the installed package share
+    # directory. Point this at the source tree for live page editing.
+    static_dir: ""
+
+    # Unified emergency stop topic (questix_msgs/EmergencyStop, reliable +
+    # transient_local) relayed to the page for DISPLAY ONLY; gating stays in
+    # joy_gate and the per-component subscribers. "" disables the display.
+    emergency_stop_topic: "/emergency_stop"

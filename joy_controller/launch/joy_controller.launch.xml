@@ -17,11 +17,14 @@ YAML 読み込みより後に置くことで launcher からの指定が勝つ�
     <arg name="uart_config_file"
          default="$(find-pkg-share uart_joy_driver)/config/uart_joy_driver_params.yaml"
          description="Path to the UART joy driver configuration YAML" />
-    <arg name="controller_type" default="uart" description="Controller type: dualshock or uart" />
+    <arg name="web_config_file"
+         default="$(find-pkg-share web_joy_driver)/config/web_joy_driver_params.yaml"
+         description="Path to the web (smartphone/browser) joy driver configuration YAML" />
+    <arg name="controller_type" default="uart" description="Controller type: dualshock, uart, or web" />
     <arg name="joy_topic" default="/joy" description="Joy input topic (override only)" />
 
-    <!-- Joy node (from joy package) - DualShock mode -->
-    <group unless="$(equals '$(var controller_type)' 'uart')">
+    <!-- Joy node (from joy package) - DualShock mode (also the fallback for unknown types) -->
+    <group unless="$(or $(equals '$(var controller_type)' 'uart') $(equals '$(var controller_type)' 'web'))">
         <node pkg="joy" exec="joy_node" name="joy_node" output="screen">
             <param from="$(var joy_node_config_file)" />
         </node>
@@ -31,6 +34,13 @@ YAML 読み込みより後に置くことで launcher からの指定が勝つ�
     <group if="$(equals '$(var controller_type)' 'uart')">
         <node pkg="uart_joy_driver" exec="uart_joy_driver_node" name="uart_joy_driver" output="screen">
             <param from="$(var uart_config_file)" />
+        </node>
+    </group>
+
+    <!-- Web Joy Driver node - smartphone/browser mode (Switch2-native indices, same as UART) -->
+    <group if="$(equals '$(var controller_type)' 'web')">
+        <node pkg="web_joy_driver" exec="web_joy_driver_node" name="web_joy_driver" output="screen">
+            <param from="$(var web_config_file)" />
         </node>
     </group>
 

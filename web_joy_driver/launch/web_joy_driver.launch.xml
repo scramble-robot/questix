@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<!--
+Web Joy Driver launch file
+YAML が Single Source of Truth。値を変えたい場合は config_file:=... で別 YAML を指定すること。
+-->
+<launch>
+    <arg name="config_file"
+         default="$(find-pkg-share web_joy_driver)/config/web_joy_driver_params.yaml"
+         description="Path to the web_joy_driver configuration YAML" />
+
+    <node pkg="web_joy_driver" exec="web_joy_driver_node" name="web_joy_driver" output="screen">
+        <param from="$(var config_file)" />
+    </node>
+</launch>

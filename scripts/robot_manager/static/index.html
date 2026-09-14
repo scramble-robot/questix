@@ -4,13 +4,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Questix Robot Manager</title>
-  <link rel="stylesheet" href="/static/style.css?v=8">
+  <title>QUESTiX Robot Manager</title>
+  <link rel="stylesheet" href="/static/style.css?v=10">
 </head>
 
 <body>
   <header>
-    <h1>Questix Robot Manager</h1>
+    <h1>QUESTiX Robot Manager</h1>
     <div id="service-indicator" class="indicator inactive" title="Service status">
       <span class="dot"></span>
       <span id="service-status-text">unknown</span>
@@ -61,15 +61,12 @@
       <h2>Launch 設定</h2>
       <div class="config-grid">
         <div class="config-item wide controller-type-row">
-          <label>コントローラー</label>
-          <div class="toggle-row compact">
-            <span class="toggle-label">UART</span>
-            <label class="toggle-switch small">
-              <input type="checkbox" id="controller-type-toggle" data-config="CONTROLLER_TYPE">
-              <span class="slider"></span>
-            </label>
-            <span class="toggle-label">DualShock</span>
-          </div>
+          <label for="controller-type">コントローラー</label>
+          <select id="controller-type" data-config="CONTROLLER_TYPE">
+            <option value="uart">UART (Switch 型)</option>
+            <option value="dualshock">DualShock</option>
+            <option value="web">Web (PC・スマホブラウザ)</option>
+          </select>
         </div>
         <div class="config-item">
           <label>LiDAR</label>
@@ -116,6 +113,27 @@
         </div>
       </div>
       <button class="btn btn-save" id="save-config">設定を保存</button>
+    </section>
+
+    <section class="card" aria-labelledby="web-joy-heading">
+      <h2 id="web-joy-heading">ブラウザ・スマホで操作</h2>
+      <p>コントローラーを Web に設定して保存し、サービスを起動・再起動してください。</p>
+      <p>PC・iPhone・iPad はアプリ不要です。「ブラウザで操作」を開き、タッチ・マウスまたはキーボードを選べます。</p>
+      <form id="web-joy-qr-form" novalidate>
+        <label for="web-joy-url">操作ページの URL</label>
+        <input id="web-joy-url" type="url" inputmode="url" autocomplete="off" spellcheck="false"
+          placeholder="http://192.168.1.100:8899/" aria-describedby="web-joy-help" maxlength="2048">
+        <p id="web-joy-help">操作する端末とロボットを同じネットワークに接続してください。localhost ではなくロボットの IP アドレスを指定します。ポートや認証トークンを変更した場合は URL に反映してください。</p>
+        <a id="web-joy-browser" class="btn btn-save" target="_blank" rel="noopener noreferrer" hidden>ブラウザで操作 ↗</a>
+        <button type="submit" class="btn btn-save">接続用 QR を表示</button>
+      </form>
+      <p id="web-joy-qr-status" role="status" aria-live="polite"></p>
+      <div id="web-joy-qr-result" hidden>
+        <div id="web-joy-qr" role="img" aria-label="操作ページの接続用 QR コード"></div>
+        <p>スマホのカメラで読み取るとブラウザで開けます。Android アプリの「QR を読み取る」でも利用できます。</p>
+        <a id="web-joy-link" target="_blank" rel="noopener noreferrer">操作ページを開く</a>
+        <p class="web-joy-qr-note">QR はこの画面内で生成します。URL にトークンがある場合は QR にも含まれます。</p>
+      </div>
     </section>
     </div><!-- /control panel -->
 
@@ -292,6 +310,8 @@
   <div id="toast-container"></div>
 
   <script src="/static/app.js?v=8"></script>
+  <script src="/static/qrcode.js?v=1.4.4"></script>
+  <script src="/static/web-joy-connection.js?v=2"></script>
 </body>
 
 </html>

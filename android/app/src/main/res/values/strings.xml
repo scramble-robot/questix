@@ -1,0 +1,17 @@
+<resources>
+    <string name="app_name">QUESTiX Web Joy</string>
+    <string name="connection_help">ロボットと同じ Wi-Fi に接続し、操作ページの URL を入力するか、管理画面の QR を読み取ってください。</string>
+    <string name="url_label">接続先 URL</string>
+    <string name="url_example">例: http://192.168.1.100:8899/</string>
+    <string name="connect">接続する</string>
+    <string name="scan">QR を読み取る</string>
+    <string name="scan_prompt">QUESTiX 管理画面の接続用 QR を枠内に合わせてください</string>
+    <string name="scan_ready">URL を読み取りました。接続先を確認して「接続する」を押してください。</string>
+    <string name="scan_cancelled">読み取りを中止しました。カメラを許可するか、URL を入力してください。</string>
+    <string name="scan_unavailable">カメラを開けませんでした。URL を入力してください。</string>
+    <string name="url_invalid">http:// または https:// で始まるロボットの URL を入力してください（localhost・ユーザー名・パスワードは使用不可）。</string>
+    <string name="connection_failed">ページを開けませんでした。Wi-Fi・URL・ロボットの Web コントローラー起動状態を確認してください。</string>
+    <string name="navigation_blocked">別の接続先への移動を止めました。接続先 URL を設定し直してください。</string>
+    <string name="disconnected">接続を終了しました。再開するには「接続する」を押してください。</string>
+    <string name="operation_help">操作中は全画面になり、画面の自動消灯を防ぎます。Android の「戻る」で接続設定へ戻ります。別のアプリへの移動・画面ロック時は接続を終了します。</string>
+</resources>

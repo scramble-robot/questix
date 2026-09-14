@@ -1,16 +1,20 @@
 <launch>
   <!-- Launch Arguments -->
-  <arg name="controller_type" default="dualshock" description="Controller type: dualshock or uart" />
+  <arg name="controller_type" default="dualshock" description="Controller type: dualshock, uart, or web" />
   <arg name="enable_gpio_ref" default="false" description="Use the gated joy topic supplied by the parent GPIO safety path" />
   <arg name="use_sim_time" default="false" description="Use simulation time" />
 
   <!-- Per-controller YAML profiles (auto-selected from controller_type).
+       web_joy_driver publishes the same Switch2-native indices as uart_joy_driver,
+       so controller_type=web reuses the *.uart.yaml profiles (no duplicate YAML).
        Override shot_config_file / esc_config_file to bypass selection. -->
+  <let name="joy_profile" value="uart" if="$(equals '$(var controller_type)' 'web')" />
+  <let name="joy_profile" value="$(var controller_type)" unless="$(equals '$(var controller_type)' 'web')" />
   <arg name="shot_config_file"
-       default="$(find-pkg-share motor_control_app)/config/shot_config.$(var controller_type).yaml"
+       default="$(find-pkg-share motor_control_app)/config/shot_config.$(var joy_profile).yaml"
        description="Shot component YAML (defaults to controller-specific profile)" />
   <arg name="esc_config_file"
-       default="$(find-pkg-share esc_motor_control_cpp)/config/esc_motor_control_cpp.$(var controller_type).yaml"
+       default="$(find-pkg-share esc_motor_control_cpp)/config/esc_motor_control_cpp.$(var joy_profile).yaml"
        description="ESC motor control YAML (defaults to controller-specific profile)" />
 
   <!-- joy topic selection based on enable_gpio_ref -->
