@@ -337,3 +337,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [ROS2 Community](https://ros.org/) for the excellent robotics framework
 - [Ubuntu](https://ubuntu.com/) for the solid foundation
 - [Ansible](https://ansible.com/) for infrastructure automation
+
+## BlocklyによるQUESTiXシミュレーション
+
+任意で起動できる `questix_blockly` パッケージで、前進・回転などをブロックから操作し、
+ブラウザとRVizに同じ走行を表示できます。Blockly／ゲームコントローラーの切替に対応します。
+既存の実機起動設定は変更しません。
+ビルド・起動・対応範囲は [QUESTiX Blockly](questix_blockly/README.md) を参照してください。
