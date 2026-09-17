@@ -20,7 +20,9 @@ endif()
 if(BUILD_TESTING)
   find_package(ament_cmake_pytest REQUIRED)
   ament_add_pytest_test(control_mode test/test_control_mode.py
-    APPEND_ENV PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/scripts ROS_DOMAIN_ID=78
+    # ROS_DOMAIN_ID is a scalar; appending to an inherited value produces e.g. 0:78.
+    ENV ROS_DOMAIN_ID=78
+    APPEND_ENV PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/scripts
     TIMEOUT 30)
   ament_add_pytest_test(differential test/test_differential.py
     APPEND_ENV PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/scripts TIMEOUT 30)
