@@ -202,16 +202,30 @@ public:
   }
 
   /**
-   * @brief 設定を差し替える（制御状態は保持する）。
+   * @brief 設定を差し替える（走行状態は保持し、モデル由来の内部状態だけ捨てる）。
    *
    * 実機でのチューニングを再起動なしに行うため、ROS パラメータ変更から呼ばれる。
-   * スルーレートの前回指令と走行状態は維持するので、走行中に変更しても指令が
-   * 飛ばない（次のステップから新しい設定で継続する）。LQR ゲインは次の tick で再計算する。
+   * スルーレートの前回指令（last_linear_ / last_angular_）と走行状態（mode_）は維持するので、
+   * 走行中に変更しても指令が飛ばない（次のステップから新しい設定で継続する）。
+   *
+   * ただし velocity_run_* の制御パラメータが 1 つでも変わったときは、旧モデルで育った
+   * オブザーバ / LQR の内部状態（x̂・事前推定・外乱推定・入力履歴・前回参照）を新しい設定へ
+   * 持ち越さない（AGENTS.md 制御状態リセットの規律）。RUN 継続中に LQR を切り替えても、
+   * 次の有効なフィードバックで実測 RPM から初期化し直す。
+   * velocity_run 以外（スルーレート・不感帯など）の変更では車輪制御器の状態は消さない。
+   * RUN 閾値（run_enter_rpm / run_exit_rpm）は、変更でモードが移れば step() 側の遷移処理が
+   * resetWheelControllers() を呼ぶため、ここでは判定に含めない。
+   *
+   * LQR ゲインは変更の有無によらず捨て、次の tick で再計算する。
    */
   void setConfig(const Config& config) {
+    const bool velocity_run_changed = velocityRunChanged(config_.velocity_run, config.velocity_run);
     config_ = config;
     lqr_gains_.reset();
     lqr_gains_dt_ = 0.0;
+    if (velocity_run_changed) {
+      resetWheelControllers();
+    }
   }
 
   const Config& config() const { return config_; }
@@ -312,6 +326,20 @@ private:
   void resetWheelControllers() {
     left_ = WheelState{};
     right_ = WheelState{};
+  }
+
+  // velocity_run のうち、オブザーバ / LQR の意味を変えるメンバが変わったか。
+  // 値は drive_component の検証を通った後のものをそのまま保持しているため、変更検出には
+  // 厳密比較で足りる（許容誤差を持たせると「変えたのに state が残る」側に倒れる）。
+  static bool velocityRunChanged(const VelocityRunLqrConfig& before,
+                                 const VelocityRunLqrConfig& after) {
+    return before.enabled != after.enabled || before.model_tau_sec != after.model_tau_sec ||
+           before.model_delay_ticks != after.model_delay_ticks || before.q != after.q ||
+           before.r != after.r || before.lead_gain != after.lead_gain ||
+           before.disturbance_gain != after.disturbance_gain ||
+           before.observer_l_x != after.observer_l_x || before.observer_l_d != after.observer_l_d ||
+           before.max_correction_rpm != after.max_correction_rpm ||
+           before.invert_measured != after.invert_measured;
   }
 
   Config config_;
