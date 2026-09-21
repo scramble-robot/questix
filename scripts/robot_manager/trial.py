@@ -36,7 +36,7 @@ SCHEMA_VERSION = 1
 # dot entries) never shows it, then moved into the bag directory once rosbag2
 # has created it.
 STAGING_PREFIX = ".trial_"
-STAGING_SUFFIX = ".tmp"
+STAGING_SUFFIX = ".evidence.tmp"
 
 TRIAL_FILE = "questix_trial.yaml"
 SOURCE_FILE = "source_identity.txt"
@@ -224,21 +224,47 @@ class RuntimeEnv:
     warnings: list = field(default_factory=list)
 
 
+def workspace_setup(robot_ws: str) -> str:
+    """Return the path of the workspace overlay a classroom trial must source."""
+    return f"{robot_ws.rstrip('/')}/install/setup.bash"
+
+
 def build_prelude(robot_ws: str) -> str:
     """Return the bash prelude that sources ROS 2 and the robot workspace.
 
-    Sourcing failures exit with distinct non-zero codes *before* anything is
-    executed, so a classroom trial can never start a recorder in an environment
-    that is not the robot's.
+    Both overlays are mandatory and every failure exits with its own code
+    *before* anything else runs, so a classroom trial can never record from an
+    environment that is not the robot's. The preflight query runs through this
+    same prelude, which is why a broken environment is reported before any
+    recorder process (or even the evidence staging directory) exists.
     """
-    ws_setup = f"{robot_ws.rstrip('/')}/install/setup.bash"
+    ws_setup = workspace_setup(robot_ws)
     return (
         f"if [ ! -f {shlex.quote(ROS_SETUP)} ]; then "
         f'echo "ROS setup not found: {ROS_SETUP}" >&2; exit 90; fi; '
         f"source {shlex.quote(ROS_SETUP)} || exit 91; "
-        f"if [ -f {shlex.quote(ws_setup)} ]; then "
-        f"source {shlex.quote(ws_setup)} || exit 92; fi; "
+        f"if [ ! -f {shlex.quote(ws_setup)} ]; then "
+        f'echo "workspace setup not found: {ws_setup}" >&2; exit 92; fi; '
+        f"source {shlex.quote(ws_setup)} || exit 93; "
     )
+
+
+# Exit codes reserved by build_prelude(); anything else came from the command.
+PRELUDE_EXIT_REASONS = {
+    90: f"{ROS_SETUP} がありません",
+    91: f"{ROS_SETUP} を source できません",
+    92: "${ROBOT_WS}/install/setup.bash がありません (ワークスペースをビルドしてください)",
+    93: "${ROBOT_WS}/install/setup.bash を source できません",
+}
+
+
+def explain_prelude_exit(code: int, stderr: str = "") -> str:
+    """Describe why the ROS environment could not be prepared."""
+    known = PRELUDE_EXIT_REASONS.get(code)
+    if known:
+        return known
+    detail = (stderr or "").strip().splitlines()
+    return detail[-1] if detail else f"code {code}"
 
 
 def resolve_runtime_env(launch_env: dict, base_env: Optional[dict] = None) -> RuntimeEnv:
@@ -289,17 +315,25 @@ def resolve_runtime_env(launch_env: dict, base_env: Optional[dict] = None) -> Ru
     )
 
 
-def discovery_settings(env: dict) -> dict:
-    """Return the ROS discovery settings that are observable in ``env``."""
-    keys = (
-        "ROS_DISTRO",
-        "ROS_DOMAIN_ID",
-        "RMW_IMPLEMENTATION",
-        "ROS_LOCALHOST_ONLY",
-        "ROS_AUTOMATIC_DISCOVERY_RANGE",
-        "ROS_STATIC_PEERS",
-    )
-    return {k: env[k] for k in keys if env.get(k)}
+def run_shell(runtime: RuntimeEnv, body: str, timeout: int = QUERY_TIMEOUT_SEC):
+    """Run `body` after the runtime prelude. Returns ``(returncode, stdout, stderr)``.
+
+    ``body`` is always a constant defined in this module or a shell-quoted
+    read-only command built by :func:`run_ros`; it never carries user input.
+    """
+    try:
+        proc = subprocess.run(
+            ["bash", "-lc", runtime.prelude + body],
+            env=runtime.env,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return 124, "", f"timeout after {timeout}s"
+    except OSError as exc:
+        return 127, "", str(exc)
+    return proc.returncode, proc.stdout, proc.stderr
 
 
 def run_ros(runtime: RuntimeEnv, argv: list, timeout: int = QUERY_TIMEOUT_SEC):
@@ -309,20 +343,52 @@ def run_ros(runtime: RuntimeEnv, argv: list, timeout: int = QUERY_TIMEOUT_SEC):
     function is only ever given query commands (``topic list``, ``node list``,
     ``param dump``, ``bag info``).
     """
-    script = runtime.prelude + "exec " + " ".join(shlex.quote(a) for a in argv)
-    try:
-        proc = subprocess.run(
-            ["bash", "-lc", script],
-            env=runtime.env,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
+    return run_shell(runtime, "exec " + " ".join(shlex.quote(a) for a in argv), timeout)
+
+
+# The environment the recorder actually sees, read from inside the sourced
+# shell: setup.bash defines ROS_DISTRO and can change the discovery settings, so
+# the pre-source environment is not evidence of how the bag was recorded.
+EFFECTIVE_ENV_KEYS = (
+    "ROS_DISTRO",
+    "ROS_DOMAIN_ID",
+    "RMW_IMPLEMENTATION",
+    "ROS_LOCALHOST_ONLY",
+    "ROS_AUTOMATIC_DISCOVERY_RANGE",
+    "ROS_STATIC_PEERS",
+)
+
+_ENV_DUMP_SCRIPT = (
+    "for __questix_key in " + " ".join(EFFECTIVE_ENV_KEYS) + "; do "
+    "printf '%s=%s\\n' \"$__questix_key\" \"$(printenv \"$__questix_key\" || true)\"; "
+    "done"
+)
+
+
+def query_effective_env(runtime: RuntimeEnv) -> tuple:
+    """Read the ROS environment as it exists *after* sourcing, plus any warning.
+
+    Returns ``(env_dict, warnings)``; only non-empty values are reported so an
+    unset discovery setting is not recorded as if it had been configured.
+    """
+    code, out, err = run_shell(runtime, _ENV_DUMP_SCRIPT)
+    if code != 0:
+        return {}, [f"実行時ROS環境を取得できませんでした: {explain_prelude_exit(code, err)}"]
+
+    effective: dict = {}
+    for line in out.splitlines():
+        key, _, value = line.partition("=")
+        if key in EFFECTIVE_ENV_KEYS and value.strip():
+            effective[key] = value.strip()
+
+    warnings: list = []
+    expected = runtime.ros_domain_id or "0"
+    if effective.get("ROS_DOMAIN_ID", "0") != expected:
+        warnings.append(
+            "実行時 ROS_DOMAIN_ID が解決値と異なります: "
+            f"{effective.get('ROS_DOMAIN_ID', 'unset')} != {expected}"
         )
-    except subprocess.TimeoutExpired:
-        return 124, "", f"timeout after {timeout}s: {' '.join(argv)}"
-    except OSError as exc:
-        return 127, "", str(exc)
-    return proc.returncode, proc.stdout, proc.stderr
+    return effective, warnings
 
 
 # ---------------------------------------------------------------------------
@@ -369,6 +435,79 @@ def _git(repo_dir: Path, args: list, timeout: int = 10):
     return proc.stdout.strip()
 
 
+# launch.env key that pins the QUESTiX source checkout explicitly. Optional: it
+# only has to be set when the workspace layout cannot be discovered.
+SOURCE_DIR_ENV_KEY = "QUESTIX_SOURCE_DIR"
+
+# A directory is the QUESTiX source tree when it carries both of these; checked
+# at the git top level so a candidate anywhere inside the checkout resolves.
+SOURCE_MARKERS = ("launcher/package.xml", "systemd/questix_robot_launcher.sh")
+
+
+def is_questix_source(root: Path) -> bool:
+    """Return True when root is a QUESTiX source checkout."""
+    try:
+        return all((root / marker).is_file() for marker in SOURCE_MARKERS)
+    except OSError:
+        return False
+
+
+def git_toplevel(path: Path) -> Optional[Path]:
+    """Return the git work tree root containing path, or None."""
+    root = _git(path, ["rev-parse", "--show-toplevel"])
+    return Path(root) if root else None
+
+
+def source_candidates(robot_ws: str, launch_env: dict, manager_dir: Path) -> list:
+    """List the places to look for the QUESTiX checkout, most authoritative first.
+
+    The installed Robot Manager lives in ``/opt/questix_robot/robot_manager``
+    (and in site-packages), which is not a git checkout, so its own location is
+    the *last* candidate rather than the authority.
+    """
+    candidates: list = []
+
+    explicit = (launch_env.get(SOURCE_DIR_ENV_KEY) or "").strip()
+    if explicit:
+        if not _ABS_PATH_RE.match(explicit):
+            raise ValueError(f"launch.env の {SOURCE_DIR_ENV_KEY} が不正です")
+        candidates.append((Path(explicit), f"launch.env:{SOURCE_DIR_ENV_KEY}"))
+
+    # The workspace the robot actually runs from: with `colcon build
+    # --symlink-install`, ${ROBOT_WS}/src/<repo> is the live source tree.
+    workspace_src = Path(robot_ws.rstrip("/")) / "src"
+    try:
+        children = sorted(p for p in workspace_src.iterdir() if p.is_dir())
+    except OSError:
+        children = []
+    candidates += [(child, "robot_ws/src") for child in children]
+
+    candidates.append((manager_dir, "robot_manager_tree"))
+    return candidates
+
+
+def resolve_source_repo(robot_ws: str, launch_env: dict, manager_dir: Path) -> dict:
+    """Find the QUESTiX checkout the running robot was built from.
+
+    Returns ``{"root", "origin", "searched"}`` with ``root`` None when no
+    candidate is both a git checkout and a QUESTiX source tree. An unresolved
+    source is reported as such, never silently recorded as "unknown".
+    """
+    searched: list = []
+    for path, origin in source_candidates(robot_ws, launch_env, manager_dir):
+        searched.append(str(path))
+        root = git_toplevel(path)
+        if root is None or not is_questix_source(root):
+            continue
+        return {"root": root, "origin": origin, "searched": searched}
+    return {"root": None, "origin": "unresolved", "searched": searched}
+
+
+def has_exact_commit(identity: dict) -> bool:
+    """Return True when the identity carries a full 40-character commit SHA."""
+    return bool(re.fullmatch(r"[0-9a-f]{40}", identity.get("commit", "")))
+
+
 def git_source_identity(repo_dir: Path) -> dict:
     """Collect the exact source identity of the checkout robot_manager runs from.
 
@@ -410,7 +549,7 @@ def git_source_identity(repo_dir: Path) -> dict:
 def source_identity_text(identity: dict, runtime: dict) -> str:
     """Render the human-readable source_identity.txt sidecar."""
     lines = ["QUESTiX classroom trial — source identity", ""]
-    for key in ("repo_root", "commit", "branch", "dirty", "describe"):
+    for key in ("repo_root", "origin", "commit", "branch", "dirty", "describe"):
         lines.append(f"{key}: {identity.get(key, 'unknown')}")
     lines.append("")
     for key in sorted(runtime):
@@ -549,9 +688,27 @@ def atomic_write_text(path: Path, text: str) -> None:
     os.replace(tmp, path)
 
 
-def staging_dir(output_dir: Path, trial_id: str) -> Path:
-    """Return the hidden staging directory used before the bag directory exists."""
-    return output_dir / f"{STAGING_PREFIX}{trial_id}{STAGING_SUFFIX}"
+def staging_name(base: str, attempt: int = 1) -> str:
+    """Return the hidden staging directory name for a recording session."""
+    suffix = "" if attempt <= 1 else f".{attempt}"
+    return f"{STAGING_PREFIX}{base}{suffix}{STAGING_SUFFIX}"
+
+
+def create_staging_dir(output_dir: Path, base: str, limit: int = 100) -> Path:
+    """Create and return a staging directory that no other session is using.
+
+    The name is derived from the (already collision-safe) bag name and created
+    exclusively, so a stale staging directory left behind by a failed start can
+    never be reused and mix its evidence into the next trial.
+    """
+    for attempt in range(1, limit + 1):
+        candidate = output_dir / staging_name(base, attempt)
+        try:
+            candidate.mkdir(parents=True)
+            return candidate
+        except FileExistsError:
+            continue
+    raise OSError("evidence置き場の名前を確保できませんでした")
 
 
 def unique_bag_name(output_dir: Path, base: str, suffix: str = "", limit: int = 100) -> str:

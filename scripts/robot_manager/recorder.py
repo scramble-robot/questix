@@ -87,6 +87,11 @@ _last_trial: Optional[dict] = None
 # Set while a start is being prepared (preflight/evidence run outside the lock),
 # so two concurrent starts cannot both reach `Popen`.
 _starting: bool = False
+# Set between a classroom trial's stop and the end of its after-run parameter
+# snapshot. The recording slot stays busy until then so the next trial cannot
+# start — and its parameters cannot be changed — while the previous trial's
+# "after" evidence is still being read.
+_capturing: bool = False
 # The background thread collecting after-run evidence, joined on shutdown.
 _finalize_thread: Optional[threading.Thread] = None
 
@@ -349,18 +354,19 @@ def _record_args_summary(config: dict[str, str]) -> dict:
 # Start / stop core
 # ---------------------------------------------------------------------------
 
-def _stop_locked(reason: str) -> None:
+def _stop_locked(reason: str) -> Optional[dict]:
     """Send SIGINT to the recording process group and wait. Caller must hold _lock.
 
-    A classroom trial additionally hands its evidence context to a background
-    finalize thread: the after-run parameter dumps and ``ros2 bag info`` must not
-    block the HTTP request, and they need the recorder process to be gone first.
+    Returns the pending evidence work for a classroom trial (None for a generic
+    recording). The caller must pass it to :func:`_after_stop` *before* reporting
+    the stop, because the after-run parameter snapshot has to be taken while the
+    parameters that produced this bag are still in effect.
     """
     global _proc, _bag_name, _bag_path, _started_at, _last_stop_reason
-    global _last_finalize_reason, _mode, _trial, _last_trial
+    global _last_finalize_reason, _mode, _trial, _last_trial, _capturing
     proc = _proc
     if proc is None:
-        return
+        return None
     # SIGINT alone means rosbag2 wrote metadata.yaml and the MCAP summary; an
     # escalation does not, so it is never reported as a clean finalize.
     finalize = "clean"
@@ -396,7 +402,7 @@ def _stop_locked(reason: str) -> None:
     _last_finalize_reason = finalize
 
     if ctx is None:
-        return
+        return None
 
     log = ctx.get("log")
     if log is not None:
@@ -406,13 +412,79 @@ def _stop_locked(reason: str) -> None:
             pass
     _last_trial = _trial_summary(ctx, reason, finalize, {"status": "pending", "warnings": []},
                                  finalizing=True)
-    global _finalize_thread
-    _finalize_thread = threading.Thread(
-        target=_finalize_trial,
-        args=(ctx, reason, finalize, elapsed, returncode),
-        daemon=True,
+    _capturing = True
+    return {
+        "ctx": ctx,
+        "reason": reason,
+        "finalize": finalize,
+        "elapsed": elapsed,
+        "returncode": returncode,
+    }
+
+
+def _after_stop(pending: Optional[dict]) -> None:
+    """Take the after-run parameter snapshot, then finalize in the background.
+
+    Synchronous by design: when this returns, ``*_params_after.yaml`` and
+    ``parameter_diff.txt`` describe the trial that just ended. Only the heavy,
+    attribution-insensitive work (``ros2 bag info``, integrity, moving the
+    sidecars) continues in a thread. Must be called without ``_lock`` held.
+    """
+    global _finalize_thread, _capturing
+    if pending is None:
+        return
+    ctx = pending["ctx"]
+    try:
+        captured = _capture_after_evidence(ctx)
+    except Exception as exc:  # noqa: BLE001 — evidence must never block the finalize
+        captured = {"after": {}, "files": [],
+                    "warnings": [f"after parameter の取得に失敗しました: {exc}"]}
+    finally:
+        with _lock:
+            _capturing = False
+
+    thread = threading.Thread(
+        target=_finalize_trial, args=(ctx, pending, captured), daemon=True
     )
-    _finalize_thread.start()
+    with _lock:
+        _finalize_thread = thread
+    thread.start()
+
+
+def _capture_after_evidence(ctx: dict) -> dict:
+    """Dump the effective parameters after the run and write the before/after diff."""
+    runtime = ctx["runtime"]
+    staging: Path = ctx["staging"]
+    warnings: list = []
+    files: list = []
+    after: dict = {}
+
+    snapshots = [("drive", trial.DRIVE_NODE, trial.DRIVE_PARAMS_AFTER)]
+    if ctx["preflight"]["joy_node_present"]:
+        snapshots.append(("joy", trial.JOY_NODE, trial.JOY_PARAMS_AFTER))
+    for key, node, filename in snapshots:
+        text, warning = _dump_params(runtime, node, staging, filename)
+        after[key] = text
+        if warning:
+            warnings.append(warning)
+        else:
+            files.append(filename)
+
+    diff_sections: list = []
+    for key, label in (("drive", trial.DRIVE_NODE), ("joy", trial.JOY_NODE)):
+        before = ctx["params_before"].get(key)
+        if before is None or after.get(key) is None:
+            continue
+        diff = trial.unified_diff_text(before, after[key], f"{label} before", f"{label} after")
+        diff_sections.append(diff if diff else f"# {label}: no parameter change\n")
+    if diff_sections:
+        try:
+            trial.atomic_write_text(staging / trial.PARAM_DIFF_FILE, "".join(diff_sections))
+            files.append(trial.PARAM_DIFF_FILE)
+        except OSError as exc:
+            warnings.append(f"parameter_diff.txt を書き出せませんでした: {exc}")
+
+    return {"after": after, "files": files, "warnings": warnings}
 
 
 def _trial_summary(ctx: dict, reason: str, finalize: str, integrity: dict,
@@ -438,14 +510,19 @@ def _watch_disk(output_dir: Path, min_free: int) -> None:
     """Background watcher: auto-stop recording if free space drops below min_free."""
     while True:
         time.sleep(WATCH_INTERVAL_SEC)
+        pending = None
         with _lock:
             if _proc is None or _proc.poll() is not None:
                 # Recording ended (manually or the process died); nothing to watch.
                 return
             free, _total = _disk_usage(output_dir)
-            if min_free > 0 and free < min_free:
-                _stop_locked("auto_stopped_low_disk")
-                return
+            if min_free <= 0 or free >= min_free:
+                continue
+            pending = _stop_locked("auto_stopped_low_disk")
+        # Outside the lock: an auto-stop gets the same evidence semantics as a
+        # user stop, without holding the status lock through a ROS query.
+        _after_stop(pending)
+        return
 
 
 # ---------------------------------------------------------------------------
@@ -491,9 +568,12 @@ def _trial_document(ctx: dict, status: str, result: dict | None = None) -> str:
         "runtime": {
             "hostname": ctx["hostname"],
             "robot_ws": runtime.robot_ws,
+            "ros_setup": trial.ROS_SETUP,
+            "workspace_setup": trial.workspace_setup(runtime.robot_ws),
             "ros_domain_id": runtime.ros_domain_id or "unset",
             "ros_domain_id_source": runtime.domain_source,
-            "discovery": trial.discovery_settings(runtime.env),
+            # Read inside the sourced shell, i.e. what the recorder itself saw.
+            "effective_env": ctx.get("effective_env", {}),
         },
         "source": ctx["source"],
         "preflight": {
@@ -523,41 +603,20 @@ def _write_trial_document(ctx: dict, dest: Path, status: str, result: dict | Non
         pass
 
 
-def _finalize_trial(ctx: dict, reason: str, finalize: str, elapsed: float,
-                    returncode: int | None) -> None:
-    """Collect after-run evidence and move the sidecars into the bag directory.
+def _finalize_trial(ctx: dict, pending: dict, captured: dict) -> None:
+    """Judge bag integrity and move the evidence into the bag directory.
 
-    Runs in a background thread after the recorder process is gone, so a slow
-    ROS query cannot block the HTTP request that stopped the recording.
+    Runs in a background thread after :func:`_after_stop` has already secured
+    the after-run parameter snapshot, so nothing here can mis-attribute
+    evidence to the wrong trial.
     """
     global _last_trial
     runtime = ctx["runtime"]
     staging: Path = ctx["staging"]
     bag_dir: Path = ctx["bag_path"]
-    warnings: list = []
-
-    after: dict[str, str | None] = {}
-    snapshots = [("drive", trial.DRIVE_NODE, trial.DRIVE_PARAMS_AFTER)]
-    if ctx["preflight"]["joy_node_present"]:
-        snapshots.append(("joy", trial.JOY_NODE, trial.JOY_PARAMS_AFTER))
-    for key, node, filename in snapshots:
-        text, warning = _dump_params(runtime, node, staging, filename)
-        after[key] = text
-        if warning:
-            warnings.append(warning)
-
-    diff_sections: list[str] = []
-    for key, label in (("drive", trial.DRIVE_NODE), ("joy", trial.JOY_NODE)):
-        before = ctx["params_before"].get(key)
-        if before is None or after.get(key) is None:
-            continue
-        diff = trial.unified_diff_text(before, after[key], f"{label} before", f"{label} after")
-        diff_sections.append(diff if diff else f"# {label}: no parameter change\n")
-    if diff_sections:
-        try:
-            trial.atomic_write_text(staging / trial.PARAM_DIFF_FILE, "".join(diff_sections))
-        except OSError as exc:
-            warnings.append(f"parameter_diff.txt を書き出せませんでした: {exc}")
+    reason = pending["reason"]
+    finalize = pending["finalize"]
+    warnings: list = list(captured["warnings"])
 
     if bag_dir.is_dir():
         code, out, err = trial.run_ros(
@@ -585,12 +644,13 @@ def _finalize_trial(ctx: dict, reason: str, finalize: str, elapsed: float,
 
     result = {
         "ended_at": datetime.now().isoformat(timespec="seconds"),
-        "elapsed_sec": int(elapsed),
+        "elapsed_sec": int(pending["elapsed"]),
         "stop_reason": reason,
         "finalize": finalize,
-        "return_code": returncode,
+        "return_code": pending["returncode"],
         "integrity": integrity,
-        "files": sorted({*ctx.get("files", []), *moved["moved"], trial.TRIAL_FILE}),
+        "files": sorted({*ctx.get("files", []), *captured["files"], *moved["moved"],
+                         trial.TRIAL_FILE}),
         "staging_kept": moved["staging_kept"],
         "warnings": warnings,
     }
@@ -606,6 +666,10 @@ def _finalize_trial(ctx: dict, reason: str, finalize: str, elapsed: float,
 def _reserve_start() -> None:
     """Claim the single recording slot, or raise 409. Caller must hold _lock."""
     global _starting
+    if _capturing:
+        raise HTTPException(
+            status_code=409, detail="直前のtrialのparameter記録中です。数秒後にやり直してください"
+        )
     if _starting or (_proc is not None and _proc.poll() is None):
         raise HTTPException(status_code=409, detail="録画中です")
     _starting = True
@@ -642,23 +706,26 @@ def _prepare_output(config: dict[str, str]) -> tuple[str, Path]:
 
 
 def _classroom_preflight(runtime) -> dict:
-    """Query the ROS graph read-only and require the drive command/feedback path."""
+    """Query the ROS graph read-only and require the drive command/feedback path.
+
+    This runs through the strict classroom prelude, so a missing or unusable
+    /opt/ros/jazzy/setup.bash or ${ROBOT_WS}/install/setup.bash is reported here
+    — before any evidence directory is created and before any recorder process
+    is started.
+    """
     code, out, err = trial.run_ros(runtime, ["ros2", "topic", "list"])
     if code != 0:
-        detail = (err or "").strip().splitlines()
         raise HTTPException(
             status_code=503,
-            detail="ROS環境を解決できません (setup.bash / ROS_DOMAIN_ID を確認してください): "
-                   + (detail[-1] if detail else f"code {code}"),
+            detail="ROS環境を解決できません: " + trial.explain_prelude_exit(code, err),
         )
     topics = trial.parse_name_list(out)
 
     code, out_nodes, err = trial.run_ros(runtime, ["ros2", "node", "list"])
     if code != 0:
-        detail = (err or "").strip().splitlines()
         raise HTTPException(
             status_code=503,
-            detail="ノード一覧を取得できません: " + (detail[-1] if detail else f"code {code}"),
+            detail="ノード一覧を取得できません: " + trial.explain_prelude_exit(code, err),
         )
     preflight = trial.classify_preflight(trial.parse_name_list(out_nodes), topics)
     if preflight["missing_required"]:
@@ -668,6 +735,44 @@ def _classroom_preflight(runtime) -> dict:
             detail="必須のノード/トピックがありません: " + ", ".join(preflight["missing_required"]),
         )
     return preflight
+
+
+def _resolve_source_identity(runtime, launch_env: dict) -> dict:
+    """Resolve the exact source identity of the QUESTiX checkout in use.
+
+    The installed Robot Manager lives outside any git checkout
+    (``/opt/questix_robot/robot_manager`` and site-packages), so its own
+    location is not the authority: the workspace the robot runs from is
+    searched first, and ``QUESTIX_SOURCE_DIR`` in launch.env pins it explicitly
+    when a site needs to. An unresolved source fails the trial instead of
+    recording "unknown" as if it were a result — a classroom trial exists to
+    tie a bag to the source that produced it, and the generic recording path
+    stays available when only a bag is wanted.
+    """
+    try:
+        found = trial.resolve_source_repo(
+            runtime.robot_ws, launch_env, Path(__file__).resolve().parent
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    if found["root"] is None:
+        raise HTTPException(
+            status_code=503,
+            detail="QUESTiX source repository を特定できません "
+                   f"(探索: {', '.join(found['searched']) or 'なし'})。"
+                   f"launch.env に {trial.SOURCE_DIR_ENV_KEY}=<checkout path> を設定してください",
+        )
+
+    identity = trial.git_source_identity(found["root"])
+    identity["origin"] = found["origin"]
+    if not trial.has_exact_commit(identity):
+        raise HTTPException(
+            status_code=503,
+            detail=f"{found['root']} から commit SHA を取得できません "
+                   "(git がない / 浅いコピー の可能性があります)",
+        )
+    return identity
 
 
 def _start_trial(raw: dict) -> dict:
@@ -696,19 +801,27 @@ def _start_trial(raw: dict) -> dict:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
+        source = _resolve_source_identity(runtime, launch_env)
         preflight = _classroom_preflight(runtime)
+        effective_env, env_warnings = trial.query_effective_env(runtime)
 
-        staging = trial.staging_dir(output_dir, metadata["trial_id"])
         try:
-            staging.mkdir(parents=True, exist_ok=True)
+            bag_name = trial.unique_bag_name(
+                output_dir, f"{vehicle}_{datetime.now():%Y%m%d_%H%M%S}", metadata["trial_id"]
+            )
+        except OSError as e:
+            raise HTTPException(status_code=500, detail=str(e))
+        bag_path = output_dir / bag_name
+
+        # Named after the bag and created exclusively, so a staging directory
+        # left behind by an earlier (failed) trial is never reused.
+        try:
+            staging = trial.create_staging_dir(output_dir, bag_name)
         except OSError as e:
             raise HTTPException(status_code=500, detail=f"evidence置き場を作成できません: {e}")
 
-        warnings = list(runtime.warnings)
+        warnings = list(runtime.warnings) + env_warnings
         files: list[str] = []
-        source = trial.git_source_identity(Path(__file__).resolve().parent)
-        if source["commit"] == "unknown":
-            warnings.append("git情報を取得できませんでした (commit unknown)")
 
         try:
             trial.atomic_write_text(
@@ -723,7 +836,7 @@ def _start_trial(raw: dict) -> dict:
                     "robot_ws": runtime.robot_ws,
                     "ros_domain_id": runtime.ros_domain_id or "unset",
                     "ros_domain_id_source": runtime.domain_source,
-                    **trial.discovery_settings(runtime.env),
+                    **{f"effective_{k}": v for k, v in effective_env.items()},
                 }),
             )
             files += [trial.TOPIC_LIST_FILE, trial.SOURCE_FILE]
@@ -743,14 +856,6 @@ def _start_trial(raw: dict) -> dict:
                 files.append(filename)
 
         try:
-            bag_name = trial.unique_bag_name(
-                output_dir, f"{vehicle}_{datetime.now():%Y%m%d_%H%M%S}", metadata["trial_id"]
-            )
-        except OSError as e:
-            raise HTTPException(status_code=500, detail=str(e))
-        bag_path = output_dir / bag_name
-
-        try:
             script = _build_record_command(config, bag_path, prelude=runtime.prelude)
         except OSError as exc:
             raise HTTPException(status_code=500, detail="録画設定を読み込めません") from exc
@@ -763,6 +868,7 @@ def _start_trial(raw: dict) -> dict:
             "runtime": runtime,
             "preflight": preflight,
             "source": source,
+            "effective_env": effective_env,
             "hostname": trial.hostname(),
             "record_config": _record_args_summary(config),
             "params_before": params_before,
@@ -884,7 +990,7 @@ def _status_payload() -> dict:
         "last_stop_reason": _last_stop_reason,
         "last_finalize_reason": _last_finalize_reason,
         "mode": _mode if recording else None,
-        "starting": _starting,
+        "starting": _starting or _capturing,
         "trial": _active_trial_view() if recording else None,
         "last_trial": _last_trial,
     }
@@ -907,22 +1013,32 @@ def _active_trial_view() -> Optional[dict]:
 @router.get("/status")
 def get_status():
     """Return current recording state and disk usage."""
+    pending = None
     with _lock:
         # Reap a process that exited on its own (e.g. --max-bag-duration).
         global _proc
         if _proc is not None and _proc.poll() is not None:
-            # Reaping must not depend on the config being readable, so a bad
-            # rosbag.env degrades the reason instead of skipping the reap.
-            try:
-                max_duration = int(_read_config().get("MAX_DURATION_SEC", "0"))
-            except (OSError, ValueError):
-                max_duration = 0
-            elapsed = time.time() - _started_at if _started_at else 0.0
-            _stop_locked(
-                _last_stop_reason
-                or trial.classify_exit_reason(_proc.poll(), max_duration, elapsed)
-            )
+            pending = _stop_locked(_last_stop_reason or _exit_reason_locked())
+    # The stop only becomes observable once the after-run snapshot is taken, so
+    # the auto-exit path attributes its parameters exactly like a user stop.
+    _after_stop(pending)
+    with _lock:
         return _status_payload()
+
+
+def _exit_reason_locked() -> str:
+    """Classify a recorder that exited on its own. Caller must hold _lock."""
+    if _mode != "classroom":
+        # Generic recording keeps its original single reason for a self-exit.
+        return "process_exited"
+    # Reaping must not depend on the config being readable, so a bad
+    # rosbag.env degrades the reason instead of skipping the reap.
+    try:
+        max_duration = int(_read_config().get("MAX_DURATION_SEC", "0"))
+    except (OSError, ValueError):
+        max_duration = 0
+    elapsed = time.time() - _started_at if _started_at else 0.0
+    return trial.classify_exit_reason(_proc.poll(), max_duration, elapsed)
 
 
 @router.post("/start")
@@ -1004,8 +1120,12 @@ def stop_recording():
         if _proc is None or _proc.poll() is not None:
             raise HTTPException(status_code=409, detail="録画していません")
         name = _bag_name
-        _stop_locked("user_stopped")
-        return {"recording": False, "bag_name": name}
+        # Generic recording keeps its original reason string; the classroom
+        # vocabulary is reported on the trial evidence instead.
+        pending = _stop_locked("user_stopped" if _mode == "classroom" else "stopped")
+    # Returns only after the trial's after-run parameters have been captured.
+    _after_stop(pending)
+    return {"recording": False, "bag_name": name}
 
 
 def shutdown_recording() -> None:
@@ -1016,12 +1136,15 @@ def shutdown_recording() -> None:
     collected in a background thread, so the shutdown waits for it rather than
     letting the interpreter exit mid-write.
     """
+    pending = None
     with _lock:
         if _proc is not None and _proc.poll() is None:
-            _stop_locked("shutdown")
-        pending = _finalize_thread
-    if pending is not None and pending.is_alive():
-        pending.join(timeout=SHUTDOWN_FINALIZE_TIMEOUT_SEC)
+            pending = _stop_locked("shutdown")
+    _after_stop(pending)
+    with _lock:
+        thread = _finalize_thread
+    if thread is not None and thread.is_alive():
+        thread.join(timeout=SHUTDOWN_FINALIZE_TIMEOUT_SEC)
 
 
 @router.get("/config")

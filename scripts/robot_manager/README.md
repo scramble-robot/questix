@@ -90,12 +90,43 @@ classroom trial logger は**完全に受動的**です。ROS に対して行う�
 `launch.env` を読み、`ROBOT_WS` と `ROS_DOMAIN_ID` を解決します。
 
 - topic/node 探索、parameter dump、`ros2 bag record`、`ros2 bag info` はすべてこの解決済み環境で実行します。
-- `/opt/ros/jazzy/setup.bash`（および存在すれば `${ROBOT_WS}/install/setup.bash`）を source できない場合、
-  **recorder プロセスを起動する前に** 失敗します（HTTP 503）。
+- `/opt/ros/jazzy/setup.bash` と `${ROBOT_WS}/install/setup.bash` の**両方が必須**です。どちらかが
+  無い・source に失敗する場合は、**evidence ディレクトリを作る前・recorder プロセスを起動する前に**
+  失敗します（HTTP 503）。preflight 自体がこの prelude 経由で実行されるため、ここで必ず検出されます。
+
+  | exit code | 意味 |
+  | --- | --- |
+  | 90 | `/opt/ros/jazzy/setup.bash` が無い |
+  | 91 | `/opt/ros/jazzy/setup.bash` を source できない |
+  | 92 | `${ROBOT_WS}/install/setup.bash` が無い（ワークスペース未ビルド） |
+  | 93 | `${ROBOT_WS}/install/setup.bash` を source できない |
+
 - `launch.env` に `ROS_DOMAIN_ID` が無い場合はプロセス環境 → ROS 既定値の順にフォールバックし、
   どの出所を使ったかを evidence と warning に残します。
+- **実行時 ROS 環境**（`ROS_DISTRO` / `ROS_DOMAIN_ID` / `RMW_IMPLEMENTATION` /
+  `ROS_LOCALHOST_ONLY` / `ROS_AUTOMATIC_DISCOVERY_RANGE` / `ROS_STATIC_PEERS`）は
+  source **後**のシェル内で読み取り、`questix_trial.yaml` の `runtime.effective_env` と
+  `source_identity.txt` に保存します。`ROS_DISTRO` は `setup.bash` が定義するため、source 前の
+  環境は「どう録画されたか」の証拠になりません。解決値と実行時 `ROS_DOMAIN_ID` が食い違う場合は
+  warning を出します。
 
 generic 録画の環境解決は従来のまま変更していません（厳格化は classroom 経路だけです）。
+
+### QUESTiX source identity の権威
+
+Robot Manager は `/opt/questix_robot/robot_manager`（および site-packages）へコピーして
+インストールされるため、**自分自身の `__file__` は Git チェックアウトではありません**。そこで
+classroom trial は、実際に動いている QUESTiX ソースを次の順で解決します。
+
+1. `launch.env` の `QUESTIX_SOURCE_DIR`（任意。明示指定が必要な環境向け）
+2. `${ROBOT_WS}/src/*`（`colcon build --symlink-install` ではここが実ソースツリー）
+3. Robot Manager 自身のディレクトリ（チェックアウトから直接起動している開発機向け）
+
+候補は「git work tree であること」かつ「QUESTiX のマーカー（`launcher/package.xml` と
+`systemd/questix_robot_launcher.sh`）を持つこと」の両方を満たす必要があります。
+
+解決できない、または 40 桁の commit SHA が取得できない場合、classroom trial は **HTTP 503 で失敗**
+します。`unknown` を正常として記録しません。bag だけが必要な場合は generic 録画を使ってください。
 
 ### preflight
 
@@ -118,11 +149,13 @@ generic 録画の環境解決は従来のまま変更していません（厳格
 ### evidence ディレクトリ
 
 `ros2 bag record -o <bag>` は自分でディレクトリを作るため、開始前の evidence はいったん
-隠しディレクトリ（`OUTPUT_DIR/.trial_<id>.tmp/`）へ書き、bag ができてから移します。
+隠しディレクトリへ書き、bag ができてから移します。staging 名は（衝突回避済みの）bag 名から作り、
+`mkdir` で**排他的に**作成するので、同じ trial ID をやり直しても、失敗した trial の staging が
+残っていても、evidence が混ざることはありません。
 
 ```text
 OUTPUT_DIR/
-├── .trial_t20260921_193000.tmp/   # 作成中 / 失敗時のみ残る
+├── .trial_robot1_20260921_193000.evidence.tmp/   # 作成中 / 失敗時のみ残る
 └── robot1_20260921_193000/
     ├── metadata.yaml           # rosbag2 の所有物（sidecar は絶対に上書きしない）
     ├── robot1_0.mcap
@@ -139,7 +172,8 @@ OUTPUT_DIR/
 ```
 
 sidecar は一時ファイル → rename で書き出します。`questix_trial.yaml` には `schema_version`、
-実効 recorder 設定（`-a -s mcap` と `EXCLUDE_TOPICS`）、runtime、source、preflight、結果が入ります。
+実効 recorder 設定（`-a -s mcap` と `EXCLUDE_TOPICS`）、runtime（解決値と実行時 `effective_env`）、
+source（解決元 `origin` 付き）、preflight、結果が入ります。
 Git の diff 本文は保存しません（dirty/clean のみ）。
 
 bag 名は従来どおり `<vehicle>_<YYYYMMDD_HHMMSS>` ですが、同名ディレクトリが既にある場合は
@@ -153,15 +187,39 @@ trial ID、さらに連番を足して**既存 bag を絶対に上書きしま�
 - parameter dump 失敗: 録画は続行し、warning として evidence と UI に出します。
 - 停止は従来どおり SIGINT。SIGTERM/SIGKILL へ escalate した場合は正常 finalize とは扱わず、
   `finalize: finalize_timeout` として記録し、integrity は `ok` になりません。
-- 停止理由は `user_stopped` / `auto_stopped_low_disk` / `max_duration` / `process_exited` /
-  `start_failed` / `shutdown` を区別します（finalize の成否は `last_finalize_reason` で別に持ちます）。
+- classroom trial の停止理由は `user_stopped` / `auto_stopped_low_disk` / `max_duration` /
+  `process_exited` / `start_failed` / `shutdown` を区別します（finalize の成否は
+  `last_finalize_reason` で別に持ちます）。generic 録画の停止理由は従来どおり `stopped` /
+  `auto_stopped_low_disk` / `process_exited` / `start_failed` のままです。
 - 低容量の自動停止（SIGINT）と最小空き容量ガードは generic と共通で、従来どおり動作します。
+
+### 停止時の順序（evidence の帰属）
+
+授業では「Trial A 停止 → parameter 変更 → Trial B」と進むため、停止 API が返ったあとに
+parameter を変えられても Trial A の `*_params_after.yaml` が汚れない順序にしてあります。
+
+```text
+SIGINT → recorder 終了
+  ├─ 同期: drive/joy parameter-after dump → parameter_diff.txt 確定   ← ここまで終えてから
+  └─ HTTP stop 応答
+        └─ 非同期: ros2 bag info → integrity 判定 → sidecar を bag へ移動
+```
+
+- 停止 API が返った時点で、直前 trial の after parameter と diff は確定しています。
+- この同期区間の間は録画スロットを保持したままなので、次の trial start は HTTP 409 になります
+  （数秒）。低容量自動停止・プロセス自己終了（`/status` による回収）・サービス停止でも同じ順序です。
+- parameter dump に失敗しても停止自体は成功し、warning として evidence と UI に残ります。
 
 停止後、同じ ROS 環境で `ros2 bag info` を実行し、`/target_twist` と `/drive_status` の
 メッセージが 1 件以上あるかを見て `ok` / `warning` / `failed` を API と UI に返します。
 出力フォーマットに過度に依存しない緩いパーサで、読み取れなければ `warning` に落とします。
-after 側の parameter dump と `ros2 bag info` は停止後にバックグラウンドで実行するため、
-停止 API 自体はすぐ返り、UI は evidence の状態を `作成中...` → `OK` / `要確認` / `失敗` と表示します。
+UI は evidence の状態を `作成中...` → `OK` / `要確認` / `失敗` と表示します。
+
+### サービス停止時の挙動（generic を含む意図的な変更）
+
+Robot Manager の shutdown 時に、**自身が所有する録画プロセスを SIGINT で graceful finalize**
+するようになりました。これは generic 録画にも効きます（従来は録画プロセスが finalize されずに
+残る可能性がありました）。classroom trial の場合は evidence の確定まで待ってから終了します。
 
 ### 授業でのA/B手順
 
