@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Questix Robot Manager</title>
-  <link rel="stylesheet" href="/static/style.css?v=8">
+  <link rel="stylesheet" href="/static/style.css?v=9">
 </head>
 
 <body>
@@ -134,8 +134,16 @@
       <!-- Live recording status -->
       <div id="rec-status" class="rec-status">
         <div class="rec-status-row">
+          <span class="rec-status-label">記録モード</span>
+          <span id="rec-mode" class="rec-status-value">—</span>
+        </div>
+        <div class="rec-status-row">
           <span class="rec-status-label">バッグ名</span>
           <span id="rec-bag-name" class="rec-status-value">—</span>
+        </div>
+        <div class="rec-status-row" id="rec-trial-row">
+          <span class="rec-status-label">trial ID / 条件</span>
+          <span id="rec-trial-id" class="rec-status-value">—</span>
         </div>
         <div class="rec-status-row">
           <span class="rec-status-label">経過</span>
@@ -145,7 +153,12 @@
           <span class="rec-status-label">サイズ</span>
           <span id="rec-size" class="rec-status-value">—</span>
         </div>
+        <div class="rec-status-row">
+          <span class="rec-status-label">evidence</span>
+          <span id="rec-evidence" class="evidence-badge none">—</span>
+        </div>
       </div>
+      <ul id="rec-warnings" class="rec-warnings hidden"></ul>
 
       <!-- Disk gauge -->
       <div class="disk-gauge">
@@ -159,6 +172,58 @@
         <div class="disk-gauge-sub">
           <span>録画フォルダ使用量</span>
           <span id="disk-used-text">—</span>
+        </div>
+      </div>
+
+      <!-- Classroom trial (授業用A/B trial) metadata -->
+      <div class="trial-block">
+        <div class="config-item wide">
+          <label for="rec-trial-mode">授業trial記録（evidenceを一緒に保存）</label>
+          <label class="toggle-switch small">
+            <input type="checkbox" id="rec-trial-mode">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <p class="trial-note">
+          氏名・学籍番号・メールアドレス・学校名は入力しないでください。これらの項目は保存しません。
+          チームIDは匿名の記号（例: <code>teamA</code>）を使ってください。
+        </p>
+        <div class="config-grid rec-config hidden" id="trial-fields">
+          <div class="config-item">
+            <label for="trial-id">trial ID</label>
+            <input type="text" id="trial-id" data-trial="trial_id" placeholder="自動採番">
+          </div>
+          <div class="config-item">
+            <label for="trial-team">チームID (匿名)</label>
+            <input type="text" id="trial-team" data-trial="team_id" placeholder="teamA">
+          </div>
+          <div class="config-item">
+            <label for="trial-robot">号機ID</label>
+            <input type="text" id="trial-robot" data-trial="robot_id" placeholder="robot1">
+          </div>
+          <div class="config-item">
+            <label for="trial-floor">床面</label>
+            <input type="text" id="trial-floor" data-trial="floor" placeholder="体育館">
+          </div>
+          <div class="config-item wide">
+            <label for="trial-condition">条件ラベル</label>
+            <input type="text" id="trial-condition" data-trial="condition_label"
+              placeholder="baseline / max_speed 1.5">
+          </div>
+          <div class="config-item">
+            <label for="trial-payload">積載 (kg)</label>
+            <input type="number" id="trial-payload" data-trial="payload_kg" min="0" step="0.1">
+          </div>
+          <div class="config-item">
+            <label for="trial-battery">バッテリ (V)</label>
+            <input type="number" id="trial-battery" data-trial="battery_voltage" min="0"
+              step="0.1">
+          </div>
+          <div class="config-item wide">
+            <label for="trial-memo">メモ</label>
+            <input type="text" id="trial-memo" data-trial="memo"
+              placeholder="観察・気づき（個人情報は書かない）">
+          </div>
         </div>
       </div>
 
@@ -291,7 +356,7 @@
   <!-- Toast container -->
   <div id="toast-container"></div>
 
-  <script src="/static/app.js?v=8"></script>
+  <script src="/static/app.js?v=9"></script>
 </body>
 
 </html>

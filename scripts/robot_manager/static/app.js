@@ -207,7 +207,10 @@ async function refreshRecStatus() {
   // Mirror recording state onto the 録画 tab so it is visible from any tab
   document.getElementById("tab-rec-dot").classList.toggle("recording", recording);
   document.getElementById("rec-state-text").textContent = recording ? "録画中" : "停止中";
+  document.getElementById("rec-mode").textContent =
+    recording ? (data.mode === "classroom" ? "授業trial" : "通常") : "—";
   document.getElementById("rec-bag-name").textContent = recording ? data.bag_name : "—";
+  renderTrialStatus(data);
   document.getElementById("rec-elapsed").textContent = recording ? fmtDuration(data.elapsed_sec) : "—";
   document.getElementById("rec-size").textContent = recording ? fmtBytes(data.size_bytes) : "—";
 
@@ -224,7 +227,7 @@ async function refreshRecStatus() {
   fill.classList.toggle("low", low);
 
   // Buttons
-  document.getElementById("rec-start").disabled = recording || low;
+  document.getElementById("rec-start").disabled = recording || low || Boolean(data.starting);
   document.getElementById("rec-stop").disabled = !recording;
 
   // Notify once when an auto-stop happened
@@ -233,6 +236,48 @@ async function refreshRecStatus() {
     toast("ディスク空き容量不足のため録画を自動停止しました", "error");
   }
   lastStopReasonShown = data.last_stop_reason;
+}
+
+// Trial status: the running trial's identity, or the last trial's evidence
+// verdict once it has been finalized.
+function renderTrialStatus(data) {
+  const trial = data.trial;
+  const last = data.last_trial;
+  const idCell = document.getElementById("rec-trial-id");
+  if (trial) {
+    idCell.textContent = [trial.trial_id, trial.condition_label].filter(Boolean).join(" / ");
+  } else if (last) {
+    idCell.textContent = [last.trial_id, last.condition_label].filter(Boolean).join(" / ") || "—";
+  } else {
+    idCell.textContent = "—";
+  }
+
+  const badge = document.getElementById("rec-evidence");
+  let state = "none";
+  let text = "—";
+  if (trial) {
+    state = "recording";
+    text = "記録中";
+  } else if (last && last.finalizing) {
+    state = "pending";
+    text = "作成中...";
+  } else if (last) {
+    state = last.integrity_status || "unknown";
+    text = { ok: "OK", warning: "要確認", failed: "失敗", pending: "作成中..." }[state] || state;
+    if (last.finalize === "finalize_timeout") text += " (強制終了)";
+  }
+  badge.className = "evidence-badge " + state;
+  badge.textContent = text;
+
+  const warnings = (trial && trial.warnings) || (last && last.warnings) || [];
+  const list = document.getElementById("rec-warnings");
+  while (list.firstChild) list.removeChild(list.firstChild);
+  list.classList.toggle("hidden", warnings.length === 0);
+  for (const warning of warnings) {
+    const li = document.createElement("li");
+    li.textContent = warning;
+    list.appendChild(li);
+  }
 }
 
 async function refreshRecConfig() {
@@ -527,10 +572,30 @@ function setupFolderPickerEvents() {
 
 function setupRecorderEvents() {
   setupFolderPickerEvents();
+  document.getElementById("rec-trial-mode").addEventListener("change", (e) => {
+    document.getElementById("trial-fields").classList.toggle("hidden", !e.target.checked);
+  });
+
   document.getElementById("rec-start").addEventListener("click", async () => {
+    const classroom = document.getElementById("rec-trial-mode").checked;
     try {
-      const data = await api("/api/rosbag/start", { method: "POST" });
-      toast(`録画を開始しました: ${data.bag_name}`, "success");
+      let data;
+      if (classroom) {
+        const meta = {};
+        for (const input of document.querySelectorAll("[data-trial]")) {
+          const value = input.value.trim();
+          if (value) meta[input.dataset.trial] = value;
+        }
+        data = await api("/api/rosbag/start-trial", {
+          method: "POST",
+          body: JSON.stringify(meta),
+        });
+        toast(`授業trialを開始しました: ${data.trial_id} (${data.bag_name})`, "success");
+        for (const warning of data.warnings || []) toast(warning, "error");
+      } else {
+        data = await api("/api/rosbag/start", { method: "POST" });
+        toast(`録画を開始しました: ${data.bag_name}`, "success");
+      }
       await refreshRecStatus();
     } catch {
       // already toasted

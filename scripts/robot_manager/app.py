@@ -3,6 +3,7 @@
 import os
 import re
 import subprocess
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
@@ -23,7 +24,15 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 MANAGER_PORT = int(os.environ.get("MANAGER_PORT", "8888"))
 
-app = FastAPI(title="Questix Robot Manager")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Stop a running recording with SIGINT when the service shuts down."""
+    yield
+    recorder.shutdown_recording()
+
+
+app = FastAPI(title="Questix Robot Manager", lifespan=lifespan)
 
 # ---------------------------------------------------------------------------
 # Security middleware
