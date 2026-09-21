@@ -1,0 +1,34 @@
+# QUESTiX LAB live bridge: observation only (subscriptions -> WebSocket, nothing is published).
+questix_lab_bridge:
+  ros__parameters:
+    host: "0.0.0.0"
+    # Must match LAB_BRIDGE_PORT of robot_manager (scripts/robot_manager/app.py), which allows
+    # the /lab page to connect to this port, and DEFAULT_PORT in static/lab/js/live/robot-link.js.
+    port: 8897
+    max_clients: 8
+    # The same port also serves the QUESTiX LAB pages over plain HTTP, so learners can open
+    # http://<robot-ip>:8897/ directly. Empty = find scripts/robot_manager/static/lab
+    # automatically (source tree, $ROBOT_WS/src/*, /opt/questix_robot/robot_manager).
+    lab_dir: ""
+
+    # An empty topic name disables that stream.
+    scan_topic: "/scan"
+    odom_topic: "/odom"
+    drive_status_topic: "/drive_status"
+    target_twist_topic: "/target_twist"
+    # sensor_msgs/CompressedImage (JPEG/PNG), e.g. "/image_raw/compressed". No camera driver is
+    # part of this repository, so the stream is off by default.
+    camera_topic: ""
+
+    # Upper bounds for what is forwarded to browsers (latest message wins).
+    scan_max_hz: 5.0
+    scan_max_points: 360
+    odom_max_hz: 20.0
+    drive_max_hz: 20.0
+    twist_max_hz: 20.0
+    camera_max_fps: 10.0
+
+    # Reported to the page for wheel-odometry lessons. Keep identical to wheel_radius /
+    # wheel_separation in launcher/config/drive_component.yaml (the values the robot drives with).
+    wheel_radius: 0.1
+    wheel_separation: 0.5

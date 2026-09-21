@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+    <name>questix_lab_bridge</name>
+    <version>3.2.0</version>
+    <description>Read-only WebSocket bridge that mirrors robot telemetry (LiDAR, odometry, drive status, camera) to the QUESTiX LAB web teaching material.</description>
+    <maintainer email="aki.grade2580@outlook.jp">asa-naki</maintainer>
+    <license>MIT</license>
+
+    <exec_depend>rclpy</exec_depend>
+    <exec_depend>geometry_msgs</exec_depend>
+    <exec_depend>nav_msgs</exec_depend>
+    <exec_depend>sensor_msgs</exec_depend>
+    <exec_depend>questix_msgs</exec_depend>
+    <exec_depend>python3-websockets</exec_depend>
+
+    <test_depend>python3-pytest</test_depend>
+
+    <export>
+        <build_type>ament_python</build_type>
+    </export>
+</package>

@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 
-from robot_manager import logs, recorder
+from robot_manager import lab, logs, recorder
 
 CONFIG_DIR = Path(os.environ.get("QUESTIX_CONFIG_DIR", "/etc/questix_robot"))
 MODE_FILE = CONFIG_DIR / "mode"
@@ -20,8 +20,22 @@ ENV_FILE = CONFIG_DIR / "launch.env"
 SERVICE_NAME = "questix_robot"
 
 STATIC_DIR = Path(__file__).parent / "static"
+LAB_DIR = STATIC_DIR / "lab"
 
 MANAGER_PORT = int(os.environ.get("MANAGER_PORT", "8888"))
+# Port of the read-only questix_lab_bridge node (defined once, in lab.py).
+LAB_BRIDGE_PORT = lab.LAB_BRIDGE_PORT
+
+_DEFAULT_CSP = "default-src 'self'"
+# QUESTiX LAB (/lab) renders lesson figures with inline style attributes, canvas data/blob
+# images, and listens to the lab bridge WebSocket. Scripts stay limited to 'self'; the
+# manager UI itself keeps the strict default policy.
+_LAB_CSP = (
+    "default-src 'self'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data: blob:; "
+    f"connect-src 'self' ws://*:{LAB_BRIDGE_PORT}"
+)
 
 app = FastAPI(title="Questix Robot Manager")
 
@@ -41,6 +55,9 @@ app.add_middleware(
 
 app.include_router(recorder.router)
 app.include_router(logs.router)
+app.include_router(lab.router)
+# A bridge started from the 教材 tab must not outlive the manager.
+app.add_event_handler("shutdown", lab.shutdown)
 
 
 @app.middleware("http")
@@ -48,7 +65,8 @@ async def security_headers(request: Request, call_next):
     response: Response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Content-Security-Policy"] = "default-src 'self'"
+    is_lab = request.url.path == "/lab" or request.url.path.startswith("/lab/")
+    response.headers["Content-Security-Policy"] = _LAB_CSP if is_lab else _DEFAULT_CSP
     # Force revalidation so updated static assets (HTML/JS/CSS) are picked up
     # immediately after an edit instead of being served stale from browser cache.
     response.headers["Cache-Control"] = "no-cache"
@@ -226,4 +244,6 @@ def index():
     return FileResponse(STATIC_DIR / "index.html")
 
 
+# QUESTiX LAB web teaching material (simulator lessons + read-only live robot data).
+app.mount("/lab", StaticFiles(directory=str(LAB_DIR), html=True), name="lab")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

@@ -1,0 +1,5 @@
+# Third-party code keeps its upstream formatting so it can be diffed against the source.
+js/vendor/
+assets/
+# Downloadable files are delivered to learners byte-for-byte.
+content/

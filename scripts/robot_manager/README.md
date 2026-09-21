@@ -6,7 +6,9 @@ uvicorn on `127.0.0.1:8888`.
 - `app.py` — service control (mode, start/stop/restart, launch config).
 - `recorder.py` — rosbag recording console (`/api/rosbag/*`).
 - `logs.py` — log collection console (`/api/logs/*`).
+- `lab.py` — QUESTiX LAB console (`/api/lab/*`): starts/stops the read-only lab bridge.
 - `static/` — vanilla HTML/CSS/JS frontend (no build step).
+- `static/lab/` — QUESTiX LAB web teaching material, served at `/lab/` (see its README).
 
 ## Competition GPIO safety
 
@@ -17,6 +19,40 @@ ignores that field and always passes `enable_gpio_ref:=true` together with
 `ENABLE_GPIO_REF=false` cannot disable the GPIO5 physical E-stop and GPIO27
 AutoReferee safety path. `enable_autoreferee:=true` with `enable_gpio_ref:=false` is
 not a valid operational configuration.
+
+## QUESTiX LAB (`/lab/`)
+
+The teaching material is a static site mounted at `/lab/` and linked from the header. Its
+lessons use inline style attributes, canvas `data:`/`blob:` images, and a WebSocket to the
+read-only `questix_lab_bridge` node, so `/lab` responses get a relaxed
+Content-Security-Policy (`style-src 'unsafe-inline'`, `img-src data: blob:`,
+`connect-src ws://*:$LAB_BRIDGE_PORT`, default 8897). Scripts stay `'self'`-only, and every other
+route keeps `default-src 'self'`.
+
+robot_manager listens on `127.0.0.1` only, because its API controls the robot service without
+authentication. `/lab/` is therefore reachable from the robot's own browser only. Learners'
+devices open the material from the read-only `questix_lab_bridge` node instead; do not expose
+robot_manager itself to the network for this.
+
+### 教材 tab (`lab.py`)
+
+The **教材** tab starts and stops that bridge, so nobody has to run `ros2 launch` by hand:
+
+- **配信開始** runs `ros2 run questix_lab_bridge lab_bridge_node` in its own process group with
+  the ROS environment of `ROBOT_WS` and the `ROS_DOMAIN_ID` from `launch.env` (the same domain
+  the robot service uses), the package's `lab_bridge.yaml`, `port:=$LAB_BRIDGE_PORT`, and
+  `lab_dir:=` this manager's `static/lab/` — learners get exactly the pages served at `/lab/`.
+- The tab shows the URL(s) to open on learners' devices (`http://<robot-ip>:8897/`; container
+  and VPN interfaces are left out). A page opened there connects to the robot automatically.
+- **配信停止** interrupts the process group (SIGINT, then SIGTERM/SIGKILL). The bridge is also
+  stopped when robot_manager exits. A bridge that was started by hand is shown as
+  "配信中 (手動で起動)" and is not stopped from here.
+- `カメラのトピック` (`sensor_msgs/CompressedImage`, empty = no camera) is stored in
+  `$QUESTIX_CONFIG_DIR/lab.env` and applies from the next start.
+
+Prerequisite: `questix_lab_bridge` is built in `ROBOT_WS` (`colcon build`; rosdep key
+`python3-websockets`). If the node exits immediately, starting fails with an error toast.
+The bridge only subscribes; it never publishes or accepts commands.
 
 ## Running (dev)
 

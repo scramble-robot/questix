@@ -30,6 +30,8 @@
 - `description_launch/`: URDF, RViz, and xacro assets.
 - `ansible/`, `scripts/`, `systemd/`: OS setup, ISO build tooling, and resident services.
 - `scripts/robot_manager/`: FastAPI web management UI.
+- `scripts/robot_manager/static/lab/`: QUESTiX LAB web teaching material (static ES-module site served at `/lab/`; in-browser simulator lessons plus a read-only live view of the real robot). Ship only permissively licensed third-party files there (no GPL/AGPL); see its `assets/vendor/NOTICE.md`.
+- `questix_lab_bridge/`: Read-only WebSocket bridge (ament_python) that mirrors `/scan`, `/odom`, `/drive_status`, `/target_twist`, and an optional camera topic to QUESTiX LAB. It must never publish or accept commands.
 - `src/`: External packages imported via `dependency.repos` (`ydlidar_ros2`, `ydlidar_sdk_vendor`). Not part of the core QUESTiX codebase; do not edit unless explicitly requested.
 
 ## Pre-work checks

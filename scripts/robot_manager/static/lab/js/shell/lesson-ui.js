@@ -1,0 +1,189 @@
+import { SYSTEM_COURSES } from '../systems/data.js';
+
+// Shared vocabulary and controls for independent robot-technology lessons.
+const EXISTING_LESSONS = [
+  {
+    id: 'control',
+    pages: ['controlPage'],
+    title: '目標に合わせて動かす',
+    summary: 'フィードフォワード・PID',
+    purpose: '測定した値から、車輪への指示を調整する',
+    description:
+      '車輪を決めた速さで回したり、決めた距離で止めたりする方法を調べます。必要な出力の見積もりと、測定したずれの修正を組み合わせ、目標に近づくように調整します。',
+    tags: ['指示と測定', 'PIDの調整', '条件を変えて比較'],
+    button: 'seriesControl',
+    nav: 'navControl',
+    canvas: 'seriesControlRobot',
+  },
+  {
+    id: 'launch',
+    pages: ['launchPage'],
+    title: '出力を調整して飛ばす',
+    summary: 'ディスク射出・飛行の物理',
+    purpose: '出力と飛距離を測り、正面の的へ届ける',
+    description:
+      '柔らかいディスクを横向きに射出し、モーターの出力と飛距離を調べます。飛行中の力を考え、記録を使って的を狙います。実機の測定値からも出力を見積もれます。',
+    tags: ['出力と飛距離', '重力と空気の力', '実機での測定'],
+    button: 'seriesLaunch',
+    nav: 'navLaunch',
+    canvas: 'seriesLaunchRobot',
+  },
+  {
+    id: 'arm',
+    pages: ['armPage'],
+    title: 'アームの手先を動かす',
+    summary: '順運動学・逆運動学',
+    purpose: '関節の角度と手先の位置を結び付ける',
+    description:
+      'オプションのSO-ARM101を題材に、関節の角度と手先の位置の関係を調べます。行き先に届く姿勢を選び、腕全体で障害物を避ける実験へ進みます。実機の角度データでも計算を確かめられます。',
+    tags: ['角度と位置', '届く姿勢と道筋', 'SO-ARM101'],
+    button: 'seriesArm',
+    nav: 'navArm',
+    canvas: 'seriesArmRobot',
+  },
+  {
+    id: 'vision',
+    pages: ['visionPage'],
+    title: 'カメラで周囲を調べる',
+    summary: '画像処理・物体認識',
+    purpose: '色や奥行きから、物体を見つける',
+    description:
+      '色の画像と奥行きが撮れる1台のカメラから、物の位置や種類を調べます。色で選ぶ方法を試した後、見本を使って学習する方法や、専用の目印・学習済みモデルで物を見分ける方法へ進みます。',
+    tags: ['RGBと奥行き', '両眼視', '物体認識'],
+    button: 'seriesVision',
+    nav: 'navVision',
+    canvas: 'seriesVisionRobot',
+  },
+  {
+    id: 'slam',
+    pages: ['slamPage'],
+    title: '位置と地図を調べる',
+    summary: '自己位置推定・SLAM',
+    purpose: 'センサーから位置と地図を求める',
+    description:
+      '車輪が回った量や周囲までの距離から、ロボットがどこにいるかを調べます。センサーを組み合わせて位置のずれを減らし、周囲の地図を作ります。',
+    tags: ['位置の推定', '地図づくり', '実機の記録で比較'],
+    button: 'seriesSlam',
+    nav: 'navSlam',
+    canvas: 'seriesSlamRobot',
+  },
+  {
+    id: 'planning',
+    pages: ['planningPage'],
+    title: '道を選んで目的地へ進む',
+    summary: '経路計画・障害物回避',
+    purpose: '機体の幅と周囲の状況から、通れる道を決める',
+    description:
+      '地図に道を描いて走らせ、機体の幅も通れるかを確かめます。障害物から離す距離を変えて道を比べ、途中で通路がふさがれた場合は計画し直します。',
+    tags: ['機体の幅', '通行の余裕', '道の計画し直し'],
+    button: 'seriesPlanning',
+    nav: 'navPlanning',
+    canvas: 'seriesPlanningRobot',
+  },
+  {
+    id: 'rl',
+    pages: ['introPage'],
+    title: '経験から動きを学ぶ',
+    summary: '報酬・強化学習',
+    purpose: '荷物を届ける動き方を、経験から学ばせる',
+    description:
+      '荷物を届けるロボットに、近づいたら加点、接触したら減点というルールで動き方を学ばせます。点数の付け方や練習する条件を変え、目的に合う動きを学習させます。',
+    tags: ['報酬の設計', '学習とテスト', '走行の比較'],
+    button: 'seriesRL',
+    nav: 'navRL',
+    canvas: 'seriesRlRobot',
+  },
+];
+const allLessons = [...EXISTING_LESSONS, ...SYSTEM_COURSES];
+const LESSON_GROUPS = [
+  {
+    title: '動きのしくみを調べる',
+    description: '力・指示・関節の動きを実験し、ロボットの体がどう動くかを考えます。',
+    ids: ['mechanics', 'control', 'launch', 'arm'],
+  },
+  {
+    title: '周囲の情報を測って使う',
+    description: '何が見えるか、どこにいるか、情報はいつのものかを確かめます。',
+    ids: ['vision', 'slam', 'tracking', 'timing'],
+  },
+  {
+    title: '目的に合わせて判断する',
+    description: '道や仕事の手順を決め、観測と動作を組み合わせて目的を達成します。',
+    ids: ['planning', 'coordination', 'behavior', 'diagnostics', 'rl'],
+  },
+];
+const LESSONS = LESSON_GROUPS.flatMap((g) =>
+  g.ids.map((id) => allLessons.find((l) => l.id === id)),
+);
+// Course identity stays the same in the catalogue, navigation and experiment headings.
+function lessonLabel(id) {
+  const lesson = LESSONS.find((l) => l.id === id);
+  return (
+    '<span>' + lesson.title + '</span><span class="course-terms">' + lesson.summary + '</span>'
+  );
+}
+const EXPERIMENT_STEPS = [
+  { key: 'setup', label: '条件を決める' },
+  { key: 'learn', label: '実験する' },
+  { key: 'test', label: '結果を見る' },
+  { key: 'improve', label: '条件を変えて比べる' },
+];
+function experimentSteps(attribute) {
+  return (
+    '<nav class="step-nav" aria-label="実験の手順">' +
+    EXPERIMENT_STEPS.map(
+      (s, i) =>
+        '<button ' +
+        attribute +
+        '="' +
+        s.key +
+        '"><span>' +
+        (i + 1) +
+        '</span>' +
+        s.label +
+        '</button>',
+    ).join('') +
+    '</nav>'
+  );
+}
+function sensorTabs(attribute) {
+  return (
+    '<div class="sensor-tabs" role="group" aria-label="センサーを選ぶ">' +
+    [
+      ['lidar', '周囲の距離'],
+      ['camera', 'RGB-Dカメラ'],
+      ['imu', 'IMU'],
+      ['wheels', '車輪'],
+    ]
+      .map(
+        ([key, label]) =>
+          '<button ' +
+          attribute +
+          '="' +
+          key +
+          '" aria-pressed="' +
+          (key === 'lidar') +
+          '">' +
+          label +
+          '</button>',
+      )
+      .join('') +
+    '</div>'
+  );
+}
+const SENSOR_COPY = {
+  lidar: { name: '2D LiDAR', title: '周囲までの距離' },
+  camera: { name: 'RGB-Dカメラ（1台）', title: '色と奥行きの情報' },
+  imu: { name: '9軸 IMU', title: '向きを変える速さ' },
+  wheels: { name: '車輪の回転数センサー', title: '左右の車輪の回転数' },
+};
+
+export {
+  LESSON_GROUPS,
+  LESSONS,
+  lessonLabel,
+  EXPERIMENT_STEPS,
+  experimentSteps,
+  sensorTabs,
+  SENSOR_COPY,
+};

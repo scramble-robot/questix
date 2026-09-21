@@ -586,6 +586,87 @@ function setupRecorderEvents() {
 // Event handlers
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// QUESTiX LAB tab: start/stop the read-only lab bridge (teaching pages on the LAN)
+// ---------------------------------------------------------------------------
+
+let labConfigLoaded = false;
+
+async function refreshLabStatus() {
+  let data;
+  try {
+    data = await apiSilent("/api/lab/status");
+  } catch {
+    return; // lab console unavailable; leave UI as-is
+  }
+  const serving = data.running || data.external;
+  document.getElementById("lab-indicator").className =
+    "rec-indicator " + (serving ? "serving" : "idle");
+  document.getElementById("tab-lab-dot").classList.toggle("serving", serving);
+  document.getElementById("lab-state-text").textContent = data.running
+    ? "配信中"
+    : data.external
+      ? "配信中 (手動で起動)"
+      : "停止中";
+  document.getElementById("lab-elapsed").textContent = data.running
+    ? fmtDuration(data.elapsed_sec)
+    : "—";
+
+  const urls = document.getElementById("lab-urls");
+  urls.replaceChildren();
+  if (serving && data.urls.length) {
+    for (const url of data.urls) {
+      const link = document.createElement("a");
+      link.href = url;
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.textContent = url;
+      urls.append(link);
+    }
+  } else {
+    urls.textContent = serving ? "ネットワークに接続されていません" : "—";
+  }
+
+  document.getElementById("lab-start").disabled = serving;
+  document.getElementById("lab-stop").disabled = !data.running;
+  if (!labConfigLoaded) {
+    document.getElementById("lab-camera").value = data.config.CAMERA_TOPIC || "";
+    labConfigLoaded = true;
+  }
+}
+
+function setupLabEvents() {
+  document.getElementById("lab-start").addEventListener("click", async () => {
+    try {
+      await api("/api/lab/start", { method: "POST" });
+      toast("教材の配信を開始しました", "success");
+    } catch {
+      // already toasted
+    }
+    await refreshLabStatus();
+  });
+  document.getElementById("lab-stop").addEventListener("click", async () => {
+    try {
+      await api("/api/lab/stop", { method: "POST" });
+      toast("教材の配信を停止しました", "success");
+    } catch {
+      // already toasted
+    }
+    await refreshLabStatus();
+  });
+  document.getElementById("lab-save-config").addEventListener("click", async () => {
+    try {
+      await api("/api/lab/config", {
+        method: "PUT",
+        body: JSON.stringify({ CAMERA_TOPIC: document.getElementById("lab-camera").value }),
+      });
+      toast("教材の設定を保存しました (次の配信開始から有効)", "success");
+    } catch {
+      // already toasted
+    }
+  });
+}
+
 function setupTabs() {
   const tabs = document.querySelectorAll(".tab");
   const panels = document.querySelectorAll(".tab-panel");
@@ -694,4 +775,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }, 5000);
   // Poll recorder status more frequently for a live elapsed/size readout
   setInterval(refreshRecStatus, 2000);
+  setupLabEvents();
+  refreshLabStatus();
+  setInterval(refreshLabStatus, 3000);
 });

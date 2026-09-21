@@ -1,0 +1,180 @@
+/* Live link to a real robot: header status button and the monitor dialog. */
+.robot-link {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.robot-link-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #b3bfbb;
+  flex-shrink: 0;
+}
+.robot-link[data-phase='open'] .robot-link-dot {
+  background: #2f9d7e;
+}
+.robot-link[data-phase='connecting'] .robot-link-dot,
+.robot-link[data-phase='error'] .robot-link-dot {
+  background: #d9903d;
+}
+.robot-link[data-phase='open'] {
+  color: var(--green);
+}
+.robot-dialog {
+  width: min(860px, calc(100% - 32px));
+}
+.robot-dialog > p {
+  font-size: 14px;
+}
+.robot-form label {
+  display: block;
+  font-size: 13px;
+  font-weight: 650;
+  margin-bottom: 8px;
+}
+.robot-form > div {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.robot-form input {
+  flex: 1;
+  min-width: 220px;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-variant-numeric: tabular-nums;
+}
+.robot-form input:disabled {
+  background: #eef1ef;
+  color: #5d726d;
+}
+.robot-status {
+  margin: 14px 0 18px;
+  padding: 12px 15px;
+  border-radius: 9px;
+  background: #eef5f0;
+  color: #376e60;
+  font-size: 13px;
+}
+.robot-monitor {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.robot-panels {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.robot-monitor figure {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.robot-monitor figcaption {
+  flex-direction: row;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.robot-monitor figure > p {
+  min-height: 0;
+}
+#robotScan {
+  aspect-ratio: 1;
+  background: var(--dark);
+}
+#robotCamera {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4/3;
+  object-fit: contain;
+  background: var(--dark);
+}
+#robotWheels {
+  height: 190px;
+}
+.robot-key {
+  display: inline-block;
+  width: 14px;
+  height: 3px;
+  border-radius: 2px;
+  vertical-align: middle;
+  margin: 0 4px 0 10px;
+}
+.robot-key-left {
+  background: #1c756b;
+}
+.robot-key-right {
+  background: #a65a32;
+}
+.robot-readings {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.robot-readings > div {
+  background: #fff;
+  padding: 12px 15px;
+}
+.robot-readings dt {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.robot-readings dd {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.robot-streams {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.robot-streams caption {
+  text-align: left;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.robot-streams th,
+.robot-streams td {
+  text-align: left;
+  padding: 8px 10px;
+  border-top: 1px solid var(--line);
+  font-weight: 400;
+}
+.robot-streams th {
+  font-weight: 600;
+}
+.robot-streams td:last-child {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.robot-dialog code {
+  font-size: 12px;
+  background: #eef1ef;
+  border-radius: 5px;
+  padding: 2px 5px;
+  word-break: break-all;
+}
+@media (max-width: 700px) {
+  .robot-panels,
+  .robot-readings {
+    grid-template-columns: 1fr;
+  }
+  .robot-link {
+    font-size: 12px;
+  }
+}

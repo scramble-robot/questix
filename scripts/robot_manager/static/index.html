@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Questix Robot Manager</title>
-  <link rel="stylesheet" href="/static/style.css?v=8">
+  <link rel="stylesheet" href="/static/style.css?v=10">
 </head>
 
 <body>
@@ -25,6 +25,10 @@
       <span id="tab-rec-dot" class="tab-dot"></span>
     </button>
     <button class="tab" data-tab="log" role="tab">ログ回収</button>
+    <button class="tab" data-tab="lab" role="tab">
+      教材
+      <span id="tab-lab-dot" class="tab-dot"></span>
+    </button>
   </nav>
 
   <main>
@@ -261,6 +265,52 @@
       <div id="log-result" class="log-result hidden"></div>
     </section>
     </div><!-- /log panel -->
+    <!-- ===== QUESTiX LAB tab ===== -->
+    <div class="tab-panel" data-panel="lab">
+    <section class="card">
+      <h2>
+        QUESTiX LAB 教材の配信
+        <span id="lab-indicator" class="rec-indicator idle">
+          <span class="rec-dot"></span>
+          <span id="lab-state-text">停止中</span>
+        </span>
+      </h2>
+      <p class="lab-note">
+        配信を開始すると、同じネットワークの端末から教材を開けます。教材はロボットのセンサーの値を
+        <strong>受け取るだけ</strong>で、ロボットを動かす指令は送りません。
+      </p>
+
+      <div class="rec-status">
+        <div class="rec-status-row">
+          <span class="rec-status-label">生徒の端末で開くURL</span>
+          <span id="lab-urls" class="rec-status-value lab-urls">—</span>
+        </div>
+        <div class="rec-status-row">
+          <span class="rec-status-label">経過</span>
+          <span id="lab-elapsed" class="rec-status-value">—</span>
+        </div>
+      </div>
+
+      <div class="btn-group rec-controls">
+        <button class="btn btn-start" id="lab-start">配信開始</button>
+        <button class="btn btn-stop" id="lab-stop" disabled>配信停止</button>
+        <a class="btn btn-small lab-open" href="/lab/" target="_blank" rel="noopener">このPCで教材を開く</a>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>教材の設定</h2>
+      <div class="config-grid rec-config">
+        <div class="config-item wide">
+          <label for="lab-camera">カメラのトピック (CompressedImage / 空欄=使わない)</label>
+          <input type="text" id="lab-camera" placeholder="/image_raw/compressed">
+        </div>
+      </div>
+      <button class="btn btn-save" id="lab-save-config">教材の設定を保存</button>
+      <p class="lab-note">設定は、次に配信を開始したときから有効になります。</p>
+    </section>
+    </div><!-- /lab panel -->
+
   </main>
 
   <!-- Folder picker modal -->
@@ -291,7 +341,7 @@
   <!-- Toast container -->
   <div id="toast-container"></div>
 
-  <script src="/static/app.js?v=8"></script>
+  <script src="/static/app.js?v=9"></script>
 </body>
 
 </html>

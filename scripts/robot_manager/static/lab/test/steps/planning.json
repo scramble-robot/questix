@@ -1,0 +1,19 @@
+[
+  {"click": "#planningNear"},
+  {"click": "#planningRun", "frames": 400},
+  {"click": "#planningUndo"},
+  {"click": "#planningWide"},
+  {"click": "#planningRun", "frames": 400},
+  {"click": "[data-planning-topic=margin]"},
+  {"input": "#planningMargin", "value": "15"},
+  {"click": "#planningRun", "frames": 600},
+  {"input": "#planningMargin", "value": "0"},
+  {"click": "#planningRun", "frames": 600},
+  {"click": "[data-planning-topic=replan]"},
+  {"click": "#planningReplan"},
+  {"click": "#planningRun", "frames": 500},
+  {"click": "#planningRun", "frames": 500},
+  {"click": "#planningSearch"},
+  {"click": "[data-planning-topic=margin]"},
+  {"click": "#planningNext"}
+]

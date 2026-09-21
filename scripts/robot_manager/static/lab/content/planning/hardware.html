@@ -1,0 +1,13 @@
+<p>ROS 2はセンサーやモーターのプログラムを連携させる仕組み、Nav2はその上で地図からの移動を扱うソフトウェアです。実機では床にスタートと目的地を印し、棚の代わりに箱を置きます。同じ配置の地図を用意し、予定した道と走行記録を比べます。この画面からモーターへの指示は送りません。</p>
+<ol>
+  <li>実測した機体の大きさを設定し、既存の停止機能を使える状態で低速から確認します。</li>
+  <li>ROS 2のNav2で自己位置・地図・予定経路を表示します。機体の形状と、障害物の周りを避ける設定を確認します。</li>
+  <li>同じスタートで条件を一つだけ変え、予定経路とオドメトリなどの走行記録を保存します。</li>
+  <li>距離・到着時間・障害物との間隔を比べます。推定位置から算出した間隔には推定誤差も含まれます。</li>
+  </ol>
+<p>走行記録の例です。トピック名は実機の設定に合わせます。</p>
+<pre class="planning-command">ros2 bag record /plan /odom /scan /tf /tf_static</pre>
+<p>予定経路と走行記録を重ねるには、同じ時刻と、同じ位置の基準で比べます。位置の原点と軸の向きをまとめて座標系と呼びます。オドメトリは車輪の回転などから移動量を見積もる方法です。その位置にも誤差があるため、床の印や動画で実際の停止位置も確かめてください。</p>
+<p>搭載センサーは、RGB-Dカメラ1台・2D LiDAR・IMU・車輪の回転数センサーです。LiDARや深度画像からの障害物情報と、位置推定の結果を走行に使います。</p>
+<p>Nav2のInflation Layerは、障害物の近くを避けるための通行コストを設定します。この教材の「余裕」は中心が入れない範囲を広げる簡略化で、Nav2のinflation_radiusと同じ意味・同じ値ではありません。</p>
+<p><a href="https://docs.nav2.org/rolling/getting_started/navigation_concepts/environmental_representation/" target="_blank" rel="noopener">Nav2：地図と障害物の扱い</a> · <a href="https://docs.nav2.org/rolling/configuration_and_development/first_time_robot_setup_guide/footprint/setup_footprint/" target="_blank" rel="noopener">Nav2：機体の形状の設定</a></p>

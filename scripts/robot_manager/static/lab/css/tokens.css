@@ -1,0 +1,19 @@
+:root {
+  font-family:
+    Inter,
+    'Noto Sans JP',
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+  color: #253a3f;
+  background: #f3f5f4;
+  font-synthesis: none;
+  --green: #1c756b;
+  --green-soft: #e8f2ee;
+  --line: #dde5e1;
+  --muted: #667975;
+  --dark: #102832;
+  --orange: #a65a32;
+  --radius: 18px;
+}
