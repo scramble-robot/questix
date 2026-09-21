@@ -6,6 +6,17 @@ module-level globals guarded by a lock; uvicorn runs a single worker so this is
 sufficient. Bags are named ``<vehicle>_<timestamp>`` so the recording machine is
 identifiable from the bag (directory) name alone, which ``rosbag_manager`` uses as
 the display name.
+
+Two recording flavours share that single process, lock and state:
+
+* **generic** — ``POST /start``: unchanged behaviour, no metadata, no sidecars.
+* **classroom trial** — ``POST /start-trial``: the same recorder plus the
+  evidence described in :mod:`robot_manager.trial` (metadata, exact source
+  identity, effective parameters before/after, topic list, bag integrity).
+
+The classroom path adds *evidence*, never a second recording authority and never
+any control authority: it publishes nothing, sets no parameter and touches no
+device.
 """
 
 import os
@@ -22,6 +33,8 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, field_validator
 
+from robot_manager import trial
+
 CONFIG_DIR = Path(os.environ.get("QUESTIX_CONFIG_DIR", "/etc/questix_robot"))
 LAUNCH_ENV_FILE = CONFIG_DIR / "launch.env"
 ROSBAG_ENV_FILE = CONFIG_DIR / "rosbag.env"
@@ -29,6 +42,8 @@ ROSBAG_ENV_FILE = CONFIG_DIR / "rosbag.env"
 # ros2 bag record needs SIGINT to finalize metadata.yaml + the MCAP summary.
 STOP_TIMEOUT_SEC = 20
 WATCH_INTERVAL_SEC = 5
+# Bounded wait for the classroom evidence thread when the service shuts down.
+SHUTDOWN_FINALIZE_TIMEOUT_SEC = 90
 
 _DEFAULT_CONFIG = {
     "VEHICLE_NAME": "robot",
@@ -61,6 +76,19 @@ _bag_name: Optional[str] = None
 _bag_path: Optional[Path] = None
 _started_at: Optional[float] = None
 _last_stop_reason: Optional[str] = None
+# "clean" or "finalize_timeout": whether SIGINT alone finalized the last bag.
+_last_finalize_reason: Optional[str] = None
+# "generic" or "classroom" while recording; kept for the status payload.
+_mode: Optional[str] = None
+# Evidence context of the running classroom trial (None for generic recordings).
+_trial: Optional[dict] = None
+# Summary of the most recent classroom trial (evidence status, warnings, ...).
+_last_trial: Optional[dict] = None
+# Set while a start is being prepared (preflight/evidence run outside the lock),
+# so two concurrent starts cannot both reach `Popen`.
+_starting: bool = False
+# The background thread collecting after-run evidence, joined on shutdown.
+_finalize_thread: Optional[threading.Thread] = None
 
 
 # ---------------------------------------------------------------------------
@@ -211,6 +239,26 @@ class RecorderConfig(BaseModel):
         return v
 
 
+class TrialStartRequest(BaseModel):
+    """Optional classroom metadata for a trial recording.
+
+    There is deliberately no field for a student name, student number, e-mail
+    address or school: unknown keys are rejected (``extra="forbid"``) so such a
+    value cannot even reach the validation layer.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    trial_id: str | None = None
+    team_id: str | None = None
+    robot_id: str | None = None
+    condition_label: str | None = None
+    floor: str | None = None
+    payload_kg: float | str | None = None
+    battery_voltage: float | str | None = None
+    memo: str | None = None
+
+
 class BagRef(BaseModel):
     """Reference to a bag by its directory name inside OUTPUT_DIR."""
 
@@ -240,8 +288,15 @@ def _split_excludes(raw: str) -> list[str]:
     return [t for t in re.split(r"[\s,]+", raw.strip()) if t]
 
 
-def _build_record_command(config: dict[str, str], bag_path: Path) -> str:
-    """Build the `bash -lc` script that sources ROS and runs `ros2 bag record`."""
+def _build_record_command(
+    config: dict[str, str], bag_path: Path, prelude: str | None = None
+) -> str:
+    """Build the `bash -lc` script that sources ROS and runs `ros2 bag record`.
+
+    ``prelude`` overrides the lenient default sourcing with the strict classroom
+    prelude (see :func:`robot_manager.trial.build_prelude`), which fails with a
+    distinct exit code instead of recording in the wrong ROS environment.
+    """
     robot_ws = _robot_ws()
     if not _ABS_PATH_RE.match(robot_ws):
         raise HTTPException(status_code=400, detail="ROBOT_WS in launch.env is invalid")
@@ -267,6 +322,8 @@ def _build_record_command(config: dict[str, str], bag_path: Path) -> str:
         args += ["--max-bag-duration", str(max_duration)]
 
     record_cmd = " ".join(args)
+    if prelude is not None:
+        return f"{prelude}exec {record_cmd}"
     return (
         "source /opt/ros/jazzy/setup.bash && "
         f'source "{robot_ws}/install/setup.bash" 2>/dev/null; '
@@ -274,16 +331,39 @@ def _build_record_command(config: dict[str, str], bag_path: Path) -> str:
     )
 
 
+def _record_args_summary(config: dict[str, str]) -> dict:
+    """Describe the recorder configuration that is being applied, for evidence."""
+    return {
+        "storage": "mcap",
+        "all_topics": True,
+        "exclude_topics": _split_excludes(config.get("EXCLUDE_TOPICS", "")),
+        "vehicle_name": config.get("VEHICLE_NAME", ""),
+        "output_dir": config.get("OUTPUT_DIR", ""),
+        "min_free_gb": config.get("MIN_FREE_GB", ""),
+        "max_split_mb": config.get("MAX_SPLIT_MB", ""),
+        "max_duration_sec": config.get("MAX_DURATION_SEC", ""),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Start / stop core
 # ---------------------------------------------------------------------------
 
 def _stop_locked(reason: str) -> None:
-    """Send SIGINT to the recording process group and wait. Caller must hold _lock."""
+    """Send SIGINT to the recording process group and wait. Caller must hold _lock.
+
+    A classroom trial additionally hands its evidence context to a background
+    finalize thread: the after-run parameter dumps and ``ros2 bag info`` must not
+    block the HTTP request, and they need the recorder process to be gone first.
+    """
     global _proc, _bag_name, _bag_path, _started_at, _last_stop_reason
+    global _last_finalize_reason, _mode, _trial, _last_trial
     proc = _proc
     if proc is None:
         return
+    # SIGINT alone means rosbag2 wrote metadata.yaml and the MCAP summary; an
+    # escalation does not, so it is never reported as a clean finalize.
+    finalize = "clean"
     try:
         os.killpg(os.getpgid(proc.pid), signal.SIGINT)
     except ProcessLookupError:
@@ -292,6 +372,7 @@ def _stop_locked(reason: str) -> None:
         proc.wait(timeout=STOP_TIMEOUT_SEC)
     except subprocess.TimeoutExpired:
         # Escalate only as a last resort; the bag may be left unfinalized.
+        finalize = "finalize_timeout"
         try:
             os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
             proc.wait(timeout=5)
@@ -300,11 +381,57 @@ def _stop_locked(reason: str) -> None:
                 os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
             except ProcessLookupError:
                 pass
+
+    ctx = _trial
+    elapsed = time.time() - _started_at if _started_at else 0.0
+    returncode = proc.poll()
+
     _proc = None
     _bag_name = None
     _bag_path = None
     _started_at = None
+    _mode = None
+    _trial = None
     _last_stop_reason = reason
+    _last_finalize_reason = finalize
+
+    if ctx is None:
+        return
+
+    log = ctx.get("log")
+    if log is not None:
+        try:
+            log.close()
+        except OSError:
+            pass
+    _last_trial = _trial_summary(ctx, reason, finalize, {"status": "pending", "warnings": []},
+                                 finalizing=True)
+    global _finalize_thread
+    _finalize_thread = threading.Thread(
+        target=_finalize_trial,
+        args=(ctx, reason, finalize, elapsed, returncode),
+        daemon=True,
+    )
+    _finalize_thread.start()
+
+
+def _trial_summary(ctx: dict, reason: str, finalize: str, integrity: dict,
+                   finalizing: bool = False) -> dict:
+    """Build the compact trial view returned by the status API / shown in the UI."""
+    meta = ctx.get("metadata", {})
+    warnings = list(ctx.get("warnings", [])) + list(integrity.get("warnings", []))
+    return {
+        "trial_id": meta.get("trial_id"),
+        "team_id": meta.get("team_id"),
+        "condition_label": meta.get("condition_label"),
+        "bag_name": ctx.get("bag_name"),
+        "stop_reason": reason,
+        "finalize": finalize,
+        "integrity_status": integrity.get("status"),
+        "evidence_dir": str(ctx.get("evidence_dir") or ctx.get("staging")),
+        "warnings": warnings,
+        "finalizing": finalizing,
+    }
 
 
 def _watch_disk(output_dir: Path, min_free: int) -> None:
@@ -319,6 +446,419 @@ def _watch_disk(output_dir: Path, min_free: int) -> None:
             if min_free > 0 and free < min_free:
                 _stop_locked("auto_stopped_low_disk")
                 return
+
+
+# ---------------------------------------------------------------------------
+# Classroom trial evidence (passive: every ROS call below is a read)
+# ---------------------------------------------------------------------------
+
+def _dump_params(runtime, node: str, dest: Path, filename: str) -> tuple[str | None, str | None]:
+    """Dump a node's effective parameters into dest/filename.
+
+    Returns ``(dump_text, warning)``. A failed snapshot is a warning, never a
+    hard failure: evidence quality must not decide whether the robot keeps
+    running or whether a bag is kept.
+    """
+    code, out, err = trial.run_ros(runtime, ["ros2", "param", "dump", node])
+    if code != 0 or not out.strip():
+        detail = (err or "").strip().splitlines()
+        return None, f"{node} のparameter取得に失敗しました: {detail[-1] if detail else f'code {code}'}"
+    try:
+        trial.atomic_write_text(dest / filename, out)
+    except OSError as exc:
+        return out, f"{filename} を書き出せませんでした: {exc}"
+    return out, None
+
+
+def _trial_document(ctx: dict, status: str, result: dict | None = None) -> str:
+    """Render questix_trial.yaml for a trial in the given lifecycle state."""
+    runtime = ctx["runtime"]
+    meta = ctx["metadata"]
+    pre = ctx["preflight"]
+    doc = {
+        "schema_version": trial.SCHEMA_VERSION,
+        "mode": "classroom",
+        "status": status,
+        "privacy": "氏名・学籍番号・メール等の個人情報は保存しません",
+        "trial": {k: meta.get(k) for k in trial.METADATA_FIELDS if meta.get(k) is not None},
+        "timing": {
+            "started_at": ctx["started_iso"],
+            "ended_at": (result or {}).get("ended_at"),
+            "elapsed_sec": (result or {}).get("elapsed_sec"),
+        },
+        "recording": dict(ctx["record_config"], bag_name=ctx["bag_name"],
+                          bag_dir=str(ctx["bag_path"])),
+        "runtime": {
+            "hostname": ctx["hostname"],
+            "robot_ws": runtime.robot_ws,
+            "ros_domain_id": runtime.ros_domain_id or "unset",
+            "ros_domain_id_source": runtime.domain_source,
+            "discovery": trial.discovery_settings(runtime.env),
+        },
+        "source": ctx["source"],
+        "preflight": {
+            "required_present": pre["required_present"],
+            "missing_required": pre["missing_required"],
+            "optional_present": pre["optional_present"],
+            "optional_missing": pre["optional_missing"],
+            "node_count": len(pre["nodes"]),
+            "topic_count": len(pre["topics"]),
+        },
+        "result": result or {},
+        "evidence": {
+            "staging_dir": str(ctx["staging"]),
+            "files": sorted((result or {}).get("files", ctx.get("files", []))),
+            "staging_kept": (result or {}).get("staging_kept", True),
+        },
+        "warnings": list(ctx.get("warnings", [])) + list((result or {}).get("warnings", [])),
+    }
+    return trial.to_yaml(doc)
+
+
+def _write_trial_document(ctx: dict, dest: Path, status: str, result: dict | None = None) -> None:
+    """Write questix_trial.yaml into dest, ignoring filesystem failures."""
+    try:
+        trial.atomic_write_text(dest / trial.TRIAL_FILE, _trial_document(ctx, status, result))
+    except OSError:
+        pass
+
+
+def _finalize_trial(ctx: dict, reason: str, finalize: str, elapsed: float,
+                    returncode: int | None) -> None:
+    """Collect after-run evidence and move the sidecars into the bag directory.
+
+    Runs in a background thread after the recorder process is gone, so a slow
+    ROS query cannot block the HTTP request that stopped the recording.
+    """
+    global _last_trial
+    runtime = ctx["runtime"]
+    staging: Path = ctx["staging"]
+    bag_dir: Path = ctx["bag_path"]
+    warnings: list = []
+
+    after: dict[str, str | None] = {}
+    snapshots = [("drive", trial.DRIVE_NODE, trial.DRIVE_PARAMS_AFTER)]
+    if ctx["preflight"]["joy_node_present"]:
+        snapshots.append(("joy", trial.JOY_NODE, trial.JOY_PARAMS_AFTER))
+    for key, node, filename in snapshots:
+        text, warning = _dump_params(runtime, node, staging, filename)
+        after[key] = text
+        if warning:
+            warnings.append(warning)
+
+    diff_sections: list[str] = []
+    for key, label in (("drive", trial.DRIVE_NODE), ("joy", trial.JOY_NODE)):
+        before = ctx["params_before"].get(key)
+        if before is None or after.get(key) is None:
+            continue
+        diff = trial.unified_diff_text(before, after[key], f"{label} before", f"{label} after")
+        diff_sections.append(diff if diff else f"# {label}: no parameter change\n")
+    if diff_sections:
+        try:
+            trial.atomic_write_text(staging / trial.PARAM_DIFF_FILE, "".join(diff_sections))
+        except OSError as exc:
+            warnings.append(f"parameter_diff.txt を書き出せませんでした: {exc}")
+
+    if bag_dir.is_dir():
+        code, out, err = trial.run_ros(
+            runtime, ["ros2", "bag", "info", str(bag_dir)], trial.BAG_INFO_TIMEOUT_SEC
+        )
+        info_text = out if code == 0 else f"{out}\n# stderr\n{err}"
+        try:
+            trial.atomic_write_text(staging / trial.BAG_INFO_FILE, info_text)
+        except OSError as exc:
+            warnings.append(f"bag_info.txt を書き出せませんでした: {exc}")
+        integrity = trial.evaluate_integrity(
+            code == 0, trial.parse_bag_info_topics(out), finalize == "clean"
+        )
+    else:
+        warnings.append("バッグディレクトリが作成されませんでした")
+        integrity = {"status": "failed", "topic_counts": {},
+                     "warnings": ["バッグが作成されていません"]}
+
+    moved = trial.move_sidecars(staging, bag_dir)
+    evidence_dir = bag_dir if bag_dir.is_dir() else staging
+    if moved["skipped"]:
+        warnings.append("退避できなかったevidence: " + ", ".join(moved["skipped"]))
+    if moved["staging_kept"] and evidence_dir != staging:
+        warnings.append(f"一時evidenceを {staging} に残しました")
+
+    result = {
+        "ended_at": datetime.now().isoformat(timespec="seconds"),
+        "elapsed_sec": int(elapsed),
+        "stop_reason": reason,
+        "finalize": finalize,
+        "return_code": returncode,
+        "integrity": integrity,
+        "files": sorted({*ctx.get("files", []), *moved["moved"], trial.TRIAL_FILE}),
+        "staging_kept": moved["staging_kept"],
+        "warnings": warnings,
+    }
+    ctx["evidence_dir"] = evidence_dir
+    _write_trial_document(ctx, evidence_dir, "finalized", result)
+
+    summary = _trial_summary(ctx, reason, finalize, integrity)
+    summary["warnings"] = list(ctx.get("warnings", [])) + warnings + integrity.get("warnings", [])
+    with _lock:
+        _last_trial = summary
+
+
+def _reserve_start() -> None:
+    """Claim the single recording slot, or raise 409. Caller must hold _lock."""
+    global _starting
+    if _starting or (_proc is not None and _proc.poll() is None):
+        raise HTTPException(status_code=409, detail="録画中です")
+    _starting = True
+
+
+def _release_start() -> None:
+    """Release the start reservation."""
+    global _starting
+    with _lock:
+        _starting = False
+
+
+def _prepare_output(config: dict[str, str]) -> tuple[str, Path]:
+    """Validate vehicle/output settings, enforce the disk guard, ensure the folder."""
+    vehicle = config["VEHICLE_NAME"]
+    if not _VEHICLE_RE.match(vehicle):
+        raise HTTPException(status_code=400, detail="VEHICLE_NAME が不正です")
+    output_dir = Path(config["OUTPUT_DIR"])
+    if not _ABS_PATH_RE.match(str(output_dir)):
+        raise HTTPException(status_code=400, detail="OUTPUT_DIR が不正です")
+
+    min_free = _min_free_bytes(config)
+    free, _total = _disk_usage(output_dir)
+    if min_free > 0 and free < min_free:
+        raise HTTPException(
+            status_code=507,
+            detail=f"空き容量不足: {free // 1024**3}GB < {min_free // 1024**3}GB",
+        )
+    try:
+        output_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"出力フォルダを作成できません: {e}")
+    return vehicle, output_dir
+
+
+def _classroom_preflight(runtime) -> dict:
+    """Query the ROS graph read-only and require the drive command/feedback path."""
+    code, out, err = trial.run_ros(runtime, ["ros2", "topic", "list"])
+    if code != 0:
+        detail = (err or "").strip().splitlines()
+        raise HTTPException(
+            status_code=503,
+            detail="ROS環境を解決できません (setup.bash / ROS_DOMAIN_ID を確認してください): "
+                   + (detail[-1] if detail else f"code {code}"),
+        )
+    topics = trial.parse_name_list(out)
+
+    code, out_nodes, err = trial.run_ros(runtime, ["ros2", "node", "list"])
+    if code != 0:
+        detail = (err or "").strip().splitlines()
+        raise HTTPException(
+            status_code=503,
+            detail="ノード一覧を取得できません: " + (detail[-1] if detail else f"code {code}"),
+        )
+    preflight = trial.classify_preflight(trial.parse_name_list(out_nodes), topics)
+    if preflight["missing_required"]:
+        # No recorder process is started: an unusable trial is refused up front.
+        raise HTTPException(
+            status_code=409,
+            detail="必須のノード/トピックがありません: " + ", ".join(preflight["missing_required"]),
+        )
+    return preflight
+
+
+def _start_trial(raw: dict) -> dict:
+    """Start a classroom trial recording, writing evidence before the recorder runs."""
+    global _proc, _bag_name, _bag_path, _started_at, _last_stop_reason
+    global _last_finalize_reason, _mode, _trial
+
+    try:
+        metadata = trial.validate_metadata(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    metadata["trial_id"] = metadata.get("trial_id") or trial.new_trial_id()
+
+    with _lock:
+        _reserve_start()
+    try:
+        config = _read_config_for_api()
+        vehicle, output_dir = _prepare_output(config)
+
+        try:
+            launch_env = _read_env_file(LAUNCH_ENV_FILE)
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail="launch.env を読み込めません") from exc
+        try:
+            runtime = trial.resolve_runtime_env(launch_env)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+        preflight = _classroom_preflight(runtime)
+
+        staging = trial.staging_dir(output_dir, metadata["trial_id"])
+        try:
+            staging.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            raise HTTPException(status_code=500, detail=f"evidence置き場を作成できません: {e}")
+
+        warnings = list(runtime.warnings)
+        files: list[str] = []
+        source = trial.git_source_identity(Path(__file__).resolve().parent)
+        if source["commit"] == "unknown":
+            warnings.append("git情報を取得できませんでした (commit unknown)")
+
+        try:
+            trial.atomic_write_text(
+                staging / trial.TOPIC_LIST_FILE,
+                "\n".join(preflight["topics"]) + "\n" if preflight["topics"] else "",
+            )
+            trial.atomic_write_text(
+                staging / trial.SOURCE_FILE,
+                trial.source_identity_text(source, {
+                    "hostname": trial.hostname(),
+                    "started_at": datetime.now().isoformat(timespec="seconds"),
+                    "robot_ws": runtime.robot_ws,
+                    "ros_domain_id": runtime.ros_domain_id or "unset",
+                    "ros_domain_id_source": runtime.domain_source,
+                    **trial.discovery_settings(runtime.env),
+                }),
+            )
+            files += [trial.TOPIC_LIST_FILE, trial.SOURCE_FILE]
+        except OSError as e:
+            warnings.append(f"evidenceを書き出せませんでした: {e}")
+
+        params_before: dict[str, str | None] = {}
+        snapshots = [("drive", trial.DRIVE_NODE, trial.DRIVE_PARAMS_BEFORE)]
+        if preflight["joy_node_present"]:
+            snapshots.append(("joy", trial.JOY_NODE, trial.JOY_PARAMS_BEFORE))
+        for key, node, filename in snapshots:
+            text, warning = _dump_params(runtime, node, staging, filename)
+            params_before[key] = text
+            if warning:
+                warnings.append(warning)
+            else:
+                files.append(filename)
+
+        try:
+            bag_name = trial.unique_bag_name(
+                output_dir, f"{vehicle}_{datetime.now():%Y%m%d_%H%M%S}", metadata["trial_id"]
+            )
+        except OSError as e:
+            raise HTTPException(status_code=500, detail=str(e))
+        bag_path = output_dir / bag_name
+
+        try:
+            script = _build_record_command(config, bag_path, prelude=runtime.prelude)
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail="録画設定を読み込めません") from exc
+
+        ctx = {
+            "metadata": metadata,
+            "bag_name": bag_name,
+            "bag_path": bag_path,
+            "staging": staging,
+            "runtime": runtime,
+            "preflight": preflight,
+            "source": source,
+            "hostname": trial.hostname(),
+            "record_config": _record_args_summary(config),
+            "params_before": params_before,
+            "started_iso": datetime.now().isoformat(timespec="seconds"),
+            "warnings": warnings,
+            "files": files + [trial.RECORDER_LOG_FILE],
+            "log": None,
+        }
+
+        # Unlike the generic recorder (stdout/stderr -> /dev/null), a classroom
+        # trial keeps the recorder output so a start failure, a rosbag2 warning
+        # or an abnormal exit can be read afterwards from the bag itself.
+        try:
+            log = open(staging / trial.RECORDER_LOG_FILE, "ab", buffering=0)
+        except OSError as e:
+            raise HTTPException(status_code=500, detail=f"recorder.log を作成できません: {e}")
+        ctx["log"] = log
+
+        try:
+            proc = subprocess.Popen(
+                ["bash", "-lc", script],
+                start_new_session=True,
+                env=runtime.env,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+            )
+        except OSError as e:
+            log.close()
+            _write_trial_document(ctx, staging, "start_failed",
+                                  {"stop_reason": "start_failed", "warnings": [str(e)]})
+            raise HTTPException(status_code=500, detail=f"録画を開始できません: {e}")
+
+        # Fast-fail: if the process dies immediately, ROS/the mcap plugin is
+        # likely missing. Surface that as an error instead of a phantom recording.
+        time.sleep(0.6)
+        if proc.poll() is not None:
+            log.close()
+            tail = _recorder_log_tail(staging / trial.RECORDER_LOG_FILE)
+            result = {
+                "stop_reason": "start_failed",
+                "return_code": proc.returncode,
+                "warnings": [f"recorder が即終了しました (code {proc.returncode})"],
+                "staging_kept": True,
+            }
+            # The staging directory is intentionally kept: partial evidence of a
+            # failed start is the evidence of that failure.
+            _write_trial_document(ctx, staging, "start_failed", result)
+            with _lock:
+                _last_stop_reason = "start_failed"
+                _last_finalize_reason = None
+            raise HTTPException(
+                status_code=500,
+                detail="録画を開始できませんでした "
+                       "(ROS環境 / rosbag2 mcapプラグインを確認してください)"
+                       + (f": {tail}" if tail else ""),
+            )
+
+        _write_trial_document(ctx, staging, "recording")
+
+        with _lock:
+            _proc = proc
+            _bag_name = bag_name
+            _bag_path = bag_path
+            _started_at = time.time()
+            _last_stop_reason = None
+            _last_finalize_reason = None
+            _mode = "classroom"
+            _trial = ctx
+
+        threading.Thread(
+            target=_watch_disk, args=(output_dir, _min_free_bytes(config)), daemon=True
+        ).start()
+        return {
+            "recording": True,
+            "mode": "classroom",
+            "bag_name": bag_name,
+            "trial_id": metadata["trial_id"],
+            "evidence_dir": str(staging),
+            "preflight": {
+                "required_present": preflight["required_present"],
+                "optional_present": preflight["optional_present"],
+                "optional_missing": preflight["optional_missing"],
+            },
+            "warnings": warnings,
+        }
+    finally:
+        _release_start()
+
+
+def _recorder_log_tail(path: Path, limit: int = 300) -> str:
+    """Return the last characters of recorder.log for an API error message."""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return ""
+    return text[-limit:].replace("\n", " / ")
 
 
 # ---------------------------------------------------------------------------
@@ -342,6 +882,25 @@ def _status_payload() -> dict:
         "disk_total_bytes": total,
         "min_free_bytes": _min_free_bytes(config),
         "last_stop_reason": _last_stop_reason,
+        "last_finalize_reason": _last_finalize_reason,
+        "mode": _mode if recording else None,
+        "starting": _starting,
+        "trial": _active_trial_view() if recording else None,
+        "last_trial": _last_trial,
+    }
+
+
+def _active_trial_view() -> Optional[dict]:
+    """Return the running trial's metadata for the status payload."""
+    if _trial is None:
+        return None
+    meta = _trial["metadata"]
+    return {
+        "trial_id": meta.get("trial_id"),
+        "team_id": meta.get("team_id"),
+        "condition_label": meta.get("condition_label"),
+        "evidence_dir": str(_trial["staging"]),
+        "warnings": list(_trial.get("warnings", [])),
     }
 
 
@@ -352,40 +911,38 @@ def get_status():
         # Reap a process that exited on its own (e.g. --max-bag-duration).
         global _proc
         if _proc is not None and _proc.poll() is not None:
-            _stop_locked(_last_stop_reason or "process_exited")
+            # Reaping must not depend on the config being readable, so a bad
+            # rosbag.env degrades the reason instead of skipping the reap.
+            try:
+                max_duration = int(_read_config().get("MAX_DURATION_SEC", "0"))
+            except (OSError, ValueError):
+                max_duration = 0
+            elapsed = time.time() - _started_at if _started_at else 0.0
+            _stop_locked(
+                _last_stop_reason
+                or trial.classify_exit_reason(_proc.poll(), max_duration, elapsed)
+            )
         return _status_payload()
 
 
 @router.post("/start")
 def start_recording():
-    """Start a new MCAP recording of all topics."""
+    """Start a new MCAP recording of all topics (generic, no trial metadata)."""
     global _proc, _bag_name, _bag_path, _started_at, _last_stop_reason
+    global _last_finalize_reason, _mode, _trial
     with _lock:
-        if _proc is not None and _proc.poll() is None:
-            raise HTTPException(status_code=409, detail="録画中です")
-
+        _reserve_start()
+    try:
         config = _read_config_for_api()
-        vehicle = config["VEHICLE_NAME"]
-        if not _VEHICLE_RE.match(vehicle):
-            raise HTTPException(status_code=400, detail="VEHICLE_NAME が不正です")
-        output_dir = Path(config["OUTPUT_DIR"])
-        if not _ABS_PATH_RE.match(str(output_dir)):
-            raise HTTPException(status_code=400, detail="OUTPUT_DIR が不正です")
-
+        vehicle, output_dir = _prepare_output(config)
         min_free = _min_free_bytes(config)
-        free, _total = _disk_usage(output_dir)
-        if min_free > 0 and free < min_free:
-            raise HTTPException(
-                status_code=507,
-                detail=f"空き容量不足: {free // 1024**3}GB < {min_free // 1024**3}GB",
-            )
 
         try:
-            output_dir.mkdir(parents=True, exist_ok=True)
+            bag_name = trial.unique_bag_name(
+                output_dir, f"{vehicle}_{datetime.now():%Y%m%d_%H%M%S}"
+            )
         except OSError as e:
-            raise HTTPException(status_code=500, detail=f"出力フォルダを作成できません: {e}")
-
-        bag_name = f"{vehicle}_{datetime.now():%Y%m%d_%H%M%S}"
+            raise HTTPException(status_code=500, detail=str(e))
         bag_path = output_dir / bag_name
         try:
             script = _build_record_command(config, bag_path)
@@ -402,31 +959,42 @@ def start_recording():
         except OSError as e:
             raise HTTPException(status_code=500, detail=f"録画を開始できません: {e}")
 
-        _proc = proc
-        _bag_name = bag_name
-        _bag_path = bag_path
-        _started_at = time.time()
-        _last_stop_reason = None
-
         # Fast-fail: if the process dies immediately, ROS/the mcap plugin is
         # likely missing. Surface that as an error instead of a phantom recording.
         time.sleep(0.6)
         if proc.poll() is not None:
-            _proc = None
-            _bag_name = None
-            _bag_path = None
-            _started_at = None
-            _last_stop_reason = "start_failed"
+            with _lock:
+                _last_stop_reason = "start_failed"
+                _last_finalize_reason = None
             raise HTTPException(
                 status_code=500,
                 detail="録画を開始できませんでした (ROS環境 / rosbag2 mcapプラグインを確認してください)",
             )
 
+        with _lock:
+            _proc = proc
+            _bag_name = bag_name
+            _bag_path = bag_path
+            _started_at = time.time()
+            _last_stop_reason = None
+            _last_finalize_reason = None
+            _mode = "generic"
+            _trial = None
+
         watcher = threading.Thread(
             target=_watch_disk, args=(output_dir, min_free), daemon=True
         )
         watcher.start()
-        return {"recording": True, "bag_name": bag_name}
+        return {"recording": True, "mode": "generic", "bag_name": bag_name}
+    finally:
+        _release_start()
+
+
+@router.post("/start-trial")
+def start_trial_recording(req: TrialStartRequest):
+    """Start a classroom trial recording (same recorder, plus evidence sidecars)."""
+    raw = {k: v for k, v in req.model_dump().items() if v is not None}
+    return _start_trial(raw)
 
 
 @router.post("/stop")
@@ -436,8 +1004,24 @@ def stop_recording():
         if _proc is None or _proc.poll() is not None:
             raise HTTPException(status_code=409, detail="録画していません")
         name = _bag_name
-        _stop_locked("stopped")
+        _stop_locked("user_stopped")
         return {"recording": False, "bag_name": name}
+
+
+def shutdown_recording() -> None:
+    """Stop any running recording when the web service shuts down.
+
+    Without this the recorder process would be orphaned or killed without a
+    SIGINT, leaving an unfinalized bag behind. A classroom trial's evidence is
+    collected in a background thread, so the shutdown waits for it rather than
+    letting the interpreter exit mid-write.
+    """
+    with _lock:
+        if _proc is not None and _proc.poll() is None:
+            _stop_locked("shutdown")
+        pending = _finalize_thread
+    if pending is not None and pending.is_alive():
+        pending.join(timeout=SHUTDOWN_FINALIZE_TIMEOUT_SEC)
 
 
 @router.get("/config")

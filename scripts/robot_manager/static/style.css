@@ -554,6 +554,66 @@ main {
   background: var(--red);
 }
 
+/* Classroom trial (授業用A/B trial) metadata */
+.trial-block {
+  margin-bottom: 0.9rem;
+}
+
+.trial-note {
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  margin: 0.4rem 0 0.6rem;
+}
+
+.trial-note code {
+  font-family: "JetBrains Mono", "Consolas", monospace;
+  background: var(--bg-input);
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+}
+
+.evidence-badge {
+  font-size: 0.78rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+
+.evidence-badge.none {
+  color: var(--text-dim);
+}
+
+.evidence-badge.recording,
+.evidence-badge.pending {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.evidence-badge.ok {
+  color: var(--green);
+  border-color: var(--green);
+}
+
+.evidence-badge.warning,
+.evidence-badge.unknown {
+  color: var(--orange);
+  border-color: var(--orange);
+}
+
+.evidence-badge.failed {
+  color: var(--red);
+  border-color: var(--red);
+}
+
+.rec-warnings {
+  list-style: disc inside;
+  color: var(--orange);
+  font-size: 0.78rem;
+  line-height: 1.6;
+  margin-bottom: 0.9rem;
+}
+
 .rec-controls {
   margin-bottom: 1rem;
 }
