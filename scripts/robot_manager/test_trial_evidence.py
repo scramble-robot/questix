@@ -492,6 +492,62 @@ class SourceIdentityTests(unittest.TestCase):
 class SourceResolutionTests(unittest.TestCase):
     """The active QUESTiX checkout is the authority, not the installed copy."""
 
+    def test_workspace_root_itself_can_be_the_checkout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            # ROBOT_WS is the checkout; src/ exists (Ansible creates it) but is empty.
+            workspace = make_repo(Path(tmp) / "robot_ws")
+            (workspace / "src").mkdir()
+            installed = Path(tmp) / "opt" / "robot_manager"
+            installed.mkdir(parents=True)
+
+            found = trial.resolve_source_repo(str(workspace), {}, installed)
+
+            self.assertEqual(found["root"], workspace)
+            self.assertEqual(found["origin"], "robot_ws")
+            identity = trial.git_source_identity(found["root"])
+            self.assertRegex(identity["commit"], r"^[0-9a-f]{40}$")
+            self.assertTrue(trial.has_exact_commit(identity))
+            self.assertEqual(identity["dirty"], "clean")
+
+    def test_explicit_path_wins_over_the_workspace_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = make_repo(Path(tmp) / "robot_ws")
+            pinned = make_repo(Path(tmp) / "pinned")
+
+            found = trial.resolve_source_repo(
+                str(workspace), {trial.SOURCE_DIR_ENV_KEY: str(pinned)}, Path(tmp)
+            )
+
+        self.assertEqual(found["root"], pinned)
+        self.assertEqual(found["origin"], f"launch.env:{trial.SOURCE_DIR_ENV_KEY}")
+
+    def test_non_questix_workspace_root_falls_back_to_src(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            # ROBOT_WS is a git checkout, but of something else.
+            workspace = make_repo(Path(tmp) / "robot_ws", questix=False)
+            repo = make_repo(workspace / "src" / "questix")
+            installed = Path(tmp) / "installed"
+            installed.mkdir()
+
+            found = trial.resolve_source_repo(str(workspace), {}, installed)
+
+        self.assertEqual(found["root"], repo)
+        self.assertEqual(found["origin"], "robot_ws/src")
+
+    def test_duplicate_candidates_are_searched_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "robot_ws"
+            (workspace / "src").mkdir(parents=True)
+            installed = Path(tmp) / "installed"
+            installed.mkdir()
+
+            found = trial.resolve_source_repo(
+                str(workspace), {trial.SOURCE_DIR_ENV_KEY: str(workspace)}, installed
+            )
+
+        self.assertIsNone(found["root"])
+        self.assertEqual(len(found["searched"]), len(set(found["searched"])))
+
     def test_installed_manager_path_falls_back_to_the_workspace_checkout(self):
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp) / "robot_ws"
@@ -538,8 +594,9 @@ class SourceResolutionTests(unittest.TestCase):
 
     def test_unresolvable_source_is_reported_not_guessed(self):
         with tempfile.TemporaryDirectory() as tmp:
+            # Neither the workspace root nor anything under src/ is a checkout.
             workspace = Path(tmp) / "robot_ws"
-            (workspace / "src").mkdir(parents=True)
+            (workspace / "src" / "not_a_repo").mkdir(parents=True)
             installed = Path(tmp) / "installed"
             installed.mkdir()
 

@@ -119,11 +119,16 @@ Robot Manager は `/opt/questix_robot/robot_manager`（および site-packages�
 classroom trial は、実際に動いている QUESTiX ソースを次の順で解決します。
 
 1. `launch.env` の `QUESTIX_SOURCE_DIR`（任意。明示指定が必要な環境向け）
-2. `${ROBOT_WS}/src/*`（`colcon build --symlink-install` ではここが実ソースツリー）
-3. Robot Manager 自身のディレクトリ（チェックアウトから直接起動している開発機向け）
+2. `${ROBOT_WS}` 自身（ワークスペースそのものがチェックアウトである配置）
+3. `${ROBOT_WS}/src/*`（`colcon build --symlink-install` ではここが実ソースツリー）
+4. Robot Manager 自身のディレクトリ（チェックアウトから直接起動している開発機向け）
 
-候補は「git work tree であること」かつ「QUESTiX のマーカー（`launcher/package.xml` と
-`systemd/questix_robot_launcher.sh`）を持つこと」の両方を満たす必要があります。
+setup / Ansible が保証するのは「`ROBOT_WS` が設定されること」と「`${ROBOT_WS}/src` が作られること」
+までで、チェックアウトの置き場所までは保証されません。そのため `questix` というディレクトリ名には
+依存せず、候補は「git work tree であること」かつ「git top-level に QUESTiX のマーカー
+（`launcher/package.xml` と `systemd/questix_robot_launcher.sh`）を持つこと」の両方で判定します。
+同じパスが複数回候補になる場合（例: `QUESTIX_SOURCE_DIR` が `${ROBOT_WS}` と同じ）は、
+最も権威のある出所として 1 回だけ評価します。
 
 解決できない、または 40 桁の commit SHA が取得できない場合、classroom trial は **HTTP 503 で失敗**
 します。`unknown` を正常として記録しません。bag だけが必要な場合は generic 録画を使ってください。

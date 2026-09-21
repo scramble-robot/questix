@@ -461,28 +461,48 @@ def git_toplevel(path: Path) -> Optional[Path]:
 def source_candidates(robot_ws: str, launch_env: dict, manager_dir: Path) -> list:
     """List the places to look for the QUESTiX checkout, most authoritative first.
 
+    The repository's setup guarantees that ``ROBOT_WS`` is configured and that
+    ``${ROBOT_WS}/src`` exists — not that the checkout sits at any particular
+    path inside it, and not that the workspace root is separate from the
+    checkout. So the workspace root itself is a candidate before its ``src``
+    children, and no candidate is matched by name: each one has to be a git work
+    tree whose top level carries the QUESTiX markers.
+
     The installed Robot Manager lives in ``/opt/questix_robot/robot_manager``
     (and in site-packages), which is not a git checkout, so its own location is
     the *last* candidate rather than the authority.
     """
     candidates: list = []
+    seen: set = set()
+
+    def add(path: Path, origin: str) -> None:
+        # The same directory can be reached twice (e.g. QUESTIX_SOURCE_DIR set
+        # to ROBOT_WS); keep the first, most authoritative origin only.
+        key = str(path)
+        if key in seen:
+            return
+        seen.add(key)
+        candidates.append((path, origin))
 
     explicit = (launch_env.get(SOURCE_DIR_ENV_KEY) or "").strip()
     if explicit:
         if not _ABS_PATH_RE.match(explicit):
             raise ValueError(f"launch.env の {SOURCE_DIR_ENV_KEY} が不正です")
-        candidates.append((Path(explicit), f"launch.env:{SOURCE_DIR_ENV_KEY}"))
+        add(Path(explicit), f"launch.env:{SOURCE_DIR_ENV_KEY}")
 
-    # The workspace the robot actually runs from: with `colcon build
-    # --symlink-install`, ${ROBOT_WS}/src/<repo> is the live source tree.
-    workspace_src = Path(robot_ws.rstrip("/")) / "src"
+    # The workspace the robot actually runs from. It is the checkout itself in
+    # some deployments; in others it holds the checkout under src/ (with
+    # `colcon build --symlink-install`, src/<repo> is the live source tree).
+    workspace = Path(robot_ws.rstrip("/"))
+    add(workspace, "robot_ws")
     try:
-        children = sorted(p for p in workspace_src.iterdir() if p.is_dir())
+        children = sorted(p for p in (workspace / "src").iterdir() if p.is_dir())
     except OSError:
         children = []
-    candidates += [(child, "robot_ws/src") for child in children]
+    for child in children:
+        add(child, "robot_ws/src")
 
-    candidates.append((manager_dir, "robot_manager_tree"))
+    add(manager_dir, "robot_manager_tree")
     return candidates
 
 
