@@ -10,6 +10,7 @@ Pi 上で HTTP + WebSocket サーバを立て、ブラウザのバーチャル�
 - 下流（`joy_gate` → `joy_controller` / `shot_component` / `esc_motor_control`）は無変更。
   GPIO 非常停止によるゲートもそのまま効きます。
 - 無通信 `message_timeout_sec`（既定 0.5 s）でニュートラルを配信する watchdog 付き。
+- `camera_topic`（`sensor_msgs/CompressedImage`）の映像を同じ WebSocket で中継し、操作画面の中央に表示します。
 
 ## 使い方
 
@@ -71,6 +72,11 @@ Space の押し直しだけでは以前の操作は再開しません。操作�
   - 「ショット」: ゲームパッド風のクラスタ。親指が置きやすい位置に大きな FIRE、その上下に砲の向きと同じ方向の
     TILT ▲ / ▼、左に ROLLER です。
   - 横向きでは「移動」が左、「ショット」が右。縦向きでは「移動」が下段（親指の位置）、「ショット」がその上の右寄せです。
+- 「カメラ」: ノードが `camera_topic` を中継している間、2 つのカードの間（横向きは中央の列、縦向きは最上段）に
+  ロボットのカメラ映像を表示します。余った領域いっぱいにアスペクト比を保って表示し、映像が届く前は「カメラ待機中」、
+  途絶えると「映像が止まっています」を重ねます。ラベルの右に受信フレームレートを表示します。
+  `camera_topic` が空のときは従来どおり 2 カードだけのレイアウトです。
+  キーボード操作ではキーマップをカメラの下に置き、映像を隠しません。
 - スティックは各領域の定位置に土台を常時表示します。土台の中に触れるとその場を中心に固定スティックとして動き、
   土台の外に触れるとその位置にスティックが移動します（浮動）。指を離すと土台の位置に戻ります。
 - ヘッダー: 「非常停止」「接続」の状態チップ、再接続（引き継がれた／認証エラー時のみ）、操作ガイド、全画面。
@@ -92,8 +98,12 @@ Space の押し直しだけでは以前の操作は再開しません。操作�
   短い配列は 0 で補完、長すぎる配列・非数値・NaN は破棄（警告ログ）。
   ブラウザは入力変化時に即送信し、加えて 100 ms ごとに現在値を再送します。
 
-- ノード → ブラウザ: `{"type":"status", "hold": "active|timeout|released", "rx_age_ms", "estop", "estop_reason", "controller", "clients"}` を `status_period_sec` ごとに送信。
+- ノード → ブラウザ: `{"type":"status", "hold": "active|timeout|released", "rx_age_ms", "estop", "estop_reason", "camera", "camera_age_ms", "controller", "clients"}` を `status_period_sec` ごとに送信。
   `estop` は `/emergency_stop`（`questix_msgs/EmergencyStop`）の表示用リレーで、ゲートには使いません。
+  `camera` は `disabled | waiting | live | stale`。
+- ノード → ブラウザ（バイナリ）: カメラ画像 1 枚（JPEG または PNG のバイト列）を 1 メッセージとして、接続中の全端末に送信。
+  `camera_max_fps` で間引き、読み終えていない端末には次のフレームを送らず最新のフレームだけを送ります（キューを持ちません）。
+  ブラウザ側も、デコード中に届いたフレームは最新の 1 枚だけを保持します。
 
 ### 操作権
 
@@ -130,6 +140,28 @@ Wi-Fi 切断後の再接続をシンプルにするための仕様で、引き�
 | `close_timeout_sec` | `1.0` | 切断ハンドシェイクの上限。読まなくなった端末を引きずらないため |
 | `static_dir` | `""` | `index.html` の場所（空 = share ディレクトリ） |
 | `emergency_stop_topic` | `/emergency_stop` | 表示用 E-stop 購読。`""` で無効 |
+| `camera_topic` | `/camera/image_raw/compressed` | 画面中央に表示する `sensor_msgs/CompressedImage`（JPEG/PNG）。`""` で非表示 |
+| `camera_max_fps` | `15.0` | ブラウザへ送るフレームレートの上限。0 以下で間引きなし |
+| `camera_timeout_sec` | `2.0` | 映像が途絶えたと表示するまでの秒数。0 以下で無効 |
+
+### カメラ映像の入力
+
+ノードはカメラを直接扱わず、`camera_topic` の `sensor_msgs/CompressedImage` を購読して中継するだけです。
+JPEG または PNG のバイト列（`format` が `jpeg` / `png` のもの）だけを送り、`compressedDepth` などそれ以外は警告ログを出して捨てます。
+QoS は sensor data（best effort）なので、reliable / best effort どちらの配信元にもつながります。
+
+Raspberry Pi 5 でトピックを作る例（`camera_topic` の既定 `/camera/image_raw/compressed` に合わせる場合）:
+
+```bash
+# USB カメラ (ros-jazzy-usb-cam)。image_transport の compressed プラグインが <topic>/compressed を出します。
+ros2 run usb_cam usb_cam_node_exe --ros-args -r __ns:=/camera -p video_device:=/dev/video0 -p image_width:=640 -p image_height:=480
+# Raspberry Pi カメラモジュール (ros-jazzy-camera-ros, libcamera)
+ros2 run camera_ros camera_node --ros-args -r __ns:=/camera -p width:=640 -p height:=480
+```
+
+帯域の目安: 640x480 JPEG は 1 枚 30〜60 KB。`camera_max_fps: 15` で 0.5〜1 MB/s 程度です。
+スマホの Wi-Fi が不安定なときは `camera_max_fps` を下げるか、配信元の解像度を落としてください。
+カメラ映像はあくまで補助表示で、操作系（`/joy` の配信、タイムアウト、非常停止）には影響しません。
 
 ## 依存
 

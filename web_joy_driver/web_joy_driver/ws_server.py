@@ -9,6 +9,8 @@ Endpoints:
 
 * ``GET /`` and ``GET /index.html``: the controller page (single HTML file).
 * ``GET /ws`` (WebSocket upgrade): joy frame stream, JSON text messages.
+  Server → client additionally carries *binary* messages: one encoded camera
+  image (JPEG/PNG bytes, see ``push_camera_frame``) per message.
 
 Control policy: the most recently connected client becomes the *active*
 controller; the previous one receives ``{"type": "released"}`` and is closed.
@@ -43,7 +45,7 @@ except ImportError:  # pragma: no cover - very old websockets
 WS_PATH = "/ws"
 INDEX_PATHS = ("/", "/index.html")
 CLOSE_TAKEN_OVER = 4000  # application close code sent to the replaced controller
-MAX_FRAME_BYTES = 4096
+MAX_FRAME_BYTES = 4096  # client -> server only; camera frames go the other way
 
 FrameCallback = Callable[[Dict[str, Any]], None]
 ReleaseCallback = Callable[[], None]
@@ -66,9 +68,14 @@ class JoyWebSocketServer:
         ping_timeout_sec: float = 2.0,
         status_period_sec: float = 0.2,
         close_timeout_sec: float = 1.0,
+        camera_max_fps: float = 15.0,
         logger: Optional[logging.Logger] = None,
     ) -> None:
-        """Configure the server; call ``start`` to run it on a thread."""
+        """Configure the server; call ``start`` to run it on a thread.
+
+        ``camera_max_fps`` caps how often ``push_camera_frame`` data is
+        forwarded to browsers (``<= 0`` forwards every frame).
+        """
         self._host = host
         self._port = port
         self._index_html = index_html
@@ -80,6 +87,7 @@ class JoyWebSocketServer:
         self._ping_timeout = ping_timeout_sec
         self._status_period = status_period_sec
         self._close_timeout = close_timeout_sec
+        self._camera_min_interval = 1.0 / camera_max_fps if camera_max_fps > 0.0 else 0.0
         self._log = logger or logging.getLogger(__name__)
 
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -91,6 +99,13 @@ class JoyWebSocketServer:
         self._connections: Set[Any] = set()
         self._active: Optional[Any] = None
         self._rejected_frames = 0
+        # Latest camera frame, replaced (never queued) so a slow link shows the
+        # newest image instead of a growing backlog. Only touched on the loop.
+        self._camera_frame: Optional[bytes] = None
+        self._camera_event: Optional[asyncio.Event] = None
+        self._camera_busy: Set[Any] = set()  # connections with a camera send in flight
+        self._camera_sent = 0
+        self._camera_dropped = 0
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -128,9 +143,71 @@ class JoyWebSocketServer:
             self._start_error = exc
             self._started.set()
 
+    # ------------------------------------------------------------------
+    # Camera relay (called from any thread)
+    # ------------------------------------------------------------------
+    def push_camera_frame(self, data: bytes) -> None:
+        """Queue one encoded image (JPEG/PNG bytes) for delivery to every client.
+
+        Safe to call from the ROS executor thread. Frames arriving faster than
+        ``camera_max_fps`` or faster than a client can read are dropped, so
+        this never blocks and never grows a backlog.
+        """
+        loop = self._loop
+        if loop is None or self._stop_event is None or self._stop_event.is_set():
+            return
+        try:
+            loop.call_soon_threadsafe(self._set_camera_frame, bytes(data))
+        except RuntimeError:  # loop already closed during shutdown
+            pass
+
+    @property
+    def camera_stats(self) -> Dict[str, int]:
+        """Return counters of camera frames sent to / dropped for clients."""
+        return {"sent": self._camera_sent, "dropped": self._camera_dropped}
+
+    def _set_camera_frame(self, data: bytes) -> None:
+        if self._camera_frame is not None and self._camera_event is not None \
+                and self._camera_event.is_set():
+            self._camera_dropped += 1  # previous frame was never picked up
+        self._camera_frame = data
+        if self._camera_event is not None:
+            self._camera_event.set()
+
+    async def _camera_loop(self) -> None:
+        loop = asyncio.get_running_loop()
+        last_sent = -1e9
+        while True:
+            assert self._camera_event is not None
+            await self._camera_event.wait()
+            wait = self._camera_min_interval - (loop.time() - last_sent)
+            if wait > 0.0:
+                await asyncio.sleep(wait)  # the latest frame is taken after the wait
+            self._camera_event.clear()
+            frame = self._camera_frame
+            if frame is None:
+                continue
+            last_sent = loop.time()
+            for ws in list(self._connections):
+                if ws in self._camera_busy:
+                    self._camera_dropped += 1  # client still reading the previous image
+                    continue
+                self._camera_busy.add(ws)
+                asyncio.ensure_future(self._send_camera(ws, frame))
+
+    async def _send_camera(self, ws: Any, frame: bytes) -> None:
+        try:
+            await asyncio.wait_for(ws.send(frame), self._close_timeout)
+            self._camera_sent += 1
+        except Exception:  # noqa: BLE001 - peer gone or not reading; keepalive drops it
+            self._camera_dropped += 1
+        finally:
+            self._camera_busy.discard(ws)
+
     async def _main(self) -> None:
         self._loop = asyncio.get_running_loop()
         self._stop_event = asyncio.Event()
+        self._camera_event = asyncio.Event()
         kwargs: Dict[str, Any] = dict(
             process_request=self._process_request,
             ping_interval=self._ping_interval,
@@ -146,11 +223,13 @@ class JoyWebSocketServer:
                 self._bound_port = sock.getsockname()[1]
                 break
             status_task = asyncio.ensure_future(self._status_loop())
+            camera_task = asyncio.ensure_future(self._camera_loop())
             self._started.set()
             try:
                 await self._stop_event.wait()
             finally:
                 status_task.cancel()
+                camera_task.cancel()
                 for ws in list(self._connections):
                     try:
                         await ws.close()

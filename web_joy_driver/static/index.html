@@ -108,11 +108,37 @@
 
   /* ------------------------------------------------------------ main */
   /* Two compact groups instead of full-screen zones: "移動" holds both
-     sticks side by side, "ショット" holds the action cluster. */
+     sticks side by side, "ショット" holds the action cluster. When the node
+     relays a camera (#app.has-cam) the live view fills the middle column. */
   main {
     position: relative; display: grid; min-height: 0; align-items: center; align-content: center;
     justify-content: space-between; gap: 10px; padding: 10px; grid-template-columns: auto auto;
   }
+  .has-cam main {
+    grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: minmax(0, 1fr);
+    justify-content: stretch; align-content: stretch;
+  }
+  .cam {
+    display: none; position: relative; min-width: 0; min-height: 0; align-self: stretch; overflow: hidden;
+    border-radius: 16px; border: 1px solid var(--line); background: #000;
+  }
+  .has-cam .cam { display: block; }
+  .cam img {
+    display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; -webkit-user-drag: none;
+  }
+  .cam img:not([src]) { visibility: hidden; }
+  .cam .group-label { text-shadow: 0 1px 3px rgba(0, 0, 0, .8); }
+  .cam .group-label .hint { font: 10px var(--mono); }
+  /* Keyboard mode keeps the camera visible: the key map takes the cards' place. */
+  .cam-badge {
+    position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 4px; padding: 12px; text-align: center; pointer-events: none; background: rgba(10, 14, 20, .55);
+  }
+  .cam-badge[hidden] { display: none; }
+  .cam-badge b { font-size: 14px; }
+  .cam-badge span { font-size: 12px; color: var(--dim); }
+  .cam-badge.stale { background: rgba(10, 14, 20, .35); }
+  .cam-badge.stale b { color: var(--amber); }
   .group {
     position: relative; min-width: 0; border-radius: 16px; padding: 30px 8px 8px;
     border: 1px solid var(--line); background: rgba(18, 25, 37, .55);
@@ -217,6 +243,9 @@
   .keyboard #keymap { display: flex; }
   .keyboard .group { opacity: .35; }
   .keyboard .rest, .keyboard .zone-label { visibility: hidden; }
+  .keyboard.has-cam main { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+  .keyboard.has-cam .group { display: none; }
+  .keyboard.has-cam #keymap { position: static; grid-column: 1; background: none; padding: 4px 0 0; }
   .kgroup { display: grid; gap: 6px; justify-items: center; }
   .kgroup .krow { display: flex; gap: 6px; }
   .kgroup .kname { font-size: 11px; font-weight: 700; letter-spacing: .08em; color: var(--dim); }
@@ -315,10 +344,15 @@
     .key.space { min-width: 150px; }
     #keymap { gap: 12px; }
     footer { padding: 3px 10px; }
+    .cam { border-radius: 12px; }
   }
   @media (orientation: portrait) {
-    /* Cluster above, both sticks along the bottom edge under the thumbs. */
+    /* Cluster above, both sticks along the bottom edge under the thumbs.
+       With a camera: view on top filling the spare height, cluster, sticks. */
     main { grid-template-columns: 1fr; align-content: end; justify-items: stretch; }
+    .has-cam main { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) auto auto; align-content: stretch; }
+    .keyboard.has-cam main { grid-template-rows: minmax(0, 1fr) auto; }
+    .cam { order: -2; }
     .group.shot { justify-self: end; order: -1; }
     .group.move { justify-content: space-between; }
     .zone { width: calc(50% - 4px); height: clamp(170px, 26vh, 220px); }
@@ -384,6 +418,11 @@
         <div class="stick" id="rightStick"><span class="arr w big">↶</span><span class="arr e big">↷</span><div class="knob"></div></div>
       </div>
     </section>
+    <section class="cam" id="cam" aria-label="カメラ映像">
+      <img id="camImg" alt="" decoding="async" draggable="false">
+      <div class="group-label"><b>▣</b> カメラ <span class="hint" id="camInfo"></span></div>
+      <div class="cam-badge" id="camBadge"><b id="camBadgeTitle">カメラ待機中</b><span id="camBadgeSub">ロボットから映像が届くと表示します</span></div>
+    </section>
     <section class="group shot">
       <div class="group-label"><b>◎</b> ショット</div>
       <div class="buttons" id="buttons"></div>
@@ -437,6 +476,7 @@
         <ul>
           <li><b>接続</b>: ロボットとの WebSocket 状態。切れると自動で再接続します。</li>
           <li><b>非常停止</b>: ロボット側の非常停止状態。停止中は入力しても動きません。</li>
+          <li><b>カメラ</b>: 中央にロボットのカメラ映像を表示します (ノード側で <code>camera_topic</code> を設定)。映像が止まると表示でお知らせします。</li>
           <li>下部のメーターは送信中の値です (前後・左右・旋回)。</li>
         </ul>
       </section>
@@ -477,6 +517,7 @@
   const STICK_RADIUS = 60;         // px of travel for full deflection
   const HEARTBEAT_MS = 100;        // resend the current state at least this often
   const RECONNECT_MIN_MS = 500, RECONNECT_MAX_MS = 5000;
+  const CAM_STALE_MS = 3000;       // no camera frame received by this page for this long -> badge
 
   const axes = new Array(NUM_AXES).fill(0);
   const buttons = new Array(NUM_BUTTONS).fill(0);
@@ -539,6 +580,7 @@
     released = false;
     $("reconnect").hidden = true;
     const socket = new WebSocket(wsUrl());
+    socket.binaryType = "arraybuffer";
     ws = socket;
     setConn("warn", "接続中…", `${location.host} のロボットに接続しています`);
     socket.onopen = () => {
@@ -547,6 +589,7 @@
     };
     socket.onmessage = (ev) => {
       if (ws !== socket) return;
+      if (typeof ev.data !== "string") { onCameraFrame(ev.data); return; }
       let msg; try { msg = JSON.parse(ev.data); } catch (e) { return; }
       if (msg.type === "status") onStatus(msg);
       else if (msg.type === "released") { released = true; resetAll(); setBanner("warn", "他の端末が操作を引き継ぎました", "この端末で操作するには「再接続」を押してください"); }
@@ -555,6 +598,7 @@
       if (ws !== socket) return;
       ws = null;
       resetAll();
+      camera.disconnected();
       if (ev.code === 4000) released = true;
       if (released) {
         setConn("bad", "他の端末が操作中", "後から接続した端末が操作を引き継ぎました。この端末で操作するには再接続してください");
@@ -586,12 +630,74 @@
     } else {
       e.className = "chip"; e.textContent = "非常停止: 情報なし";
     }
+    camera.status(s);
     const hold = { active: "送信中", timeout: "タイムアウト→ニュートラル", released: "フレーム未受信" }[s.hold] || s.hold;
     const age = s.rx_age_ms == null ? "-" : Math.round(s.rx_age_ms);
     $("dbgStat").textContent = `${hold} · 遅延 ${age}ms · 接続 ${s.clients}${s.controller ? "" : " · 閲覧のみ"}`;
     if (s.hold === "timeout" && s.controller) setConn("warn", "接続 (フレーム遅延)");
     else if (s.controller && ws && ws.readyState === WebSocket.OPEN) setConn("ok", "接続");
   }
+
+  // ---------------------------------------------------------------- camera
+  // The node relays sensor_msgs/CompressedImage frames as binary WebSocket
+  // messages (one JPEG/PNG per message). The newest frame always wins: while
+  // the <img> is still decoding, later frames replace the pending one and
+  // are never queued, so a slow phone lags by at most one image.
+  const camera = (() => {
+    const img = $("camImg"), badge = $("camBadge");
+    const supported = typeof Blob !== "undefined" && typeof URL !== "undefined" && !!URL.createObjectURL;
+    let enabled = false, decoding = false, pending = null, shownUrl = null;
+    let lastFrameAt = 0, frames = 0;
+    const times = [];  // receive timestamps of the last 2 s for the fps hint
+    function mime(buf) {
+      const b = new Uint8Array(buf, 0, Math.min(8, buf.byteLength));
+      if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return "image/png";
+      return "image/jpeg";  // FF D8 FF; anything else is skipped by the node
+    }
+    function show(buf) {
+      decoding = true;
+      const url = URL.createObjectURL(new Blob([buf], { type: mime(buf) }));
+      const done = () => {
+        decoding = false;
+        if (shownUrl) URL.revokeObjectURL(shownUrl);
+        shownUrl = url;
+        if (pending) { const next = pending; pending = null; show(next); }
+      };
+      img.onload = done;
+      img.onerror = done;
+      img.src = url;
+    }
+    function setBadge(cls, title, sub) {
+      if (!cls) { badge.hidden = true; return; }
+      badge.hidden = false; badge.className = "cam-badge " + cls;
+      $("camBadgeTitle").textContent = title; $("camBadgeSub").textContent = sub || "";
+    }
+    function onFrame(buf) {
+      frames += 1;
+      lastFrameAt = Date.now();
+      times.push(lastFrameAt);
+      if (!supported || !enabled) return;
+      if (decoding) pending = buf; else show(buf);
+    }
+    function status(s) {
+      const state = s.camera;
+      enabled = !!state && state !== "disabled";
+      $("app").classList.toggle("has-cam", enabled);
+      if (!enabled) return;
+      const now = Date.now();
+      while (times.length && now - times[0] > 2000) times.shift();
+      $("camInfo").textContent = frames ? `${(times.length / 2).toFixed(0)} fps` : "";
+      if (!supported) setBadge("stale", "このブラウザでは表示できません", "画像の表示に対応していません");
+      else if (state === "waiting") setBadge("wait", "カメラ待機中", "ロボット側のノードが映像を受信していません");
+      else if (state === "stale") setBadge("stale", "映像が止まっています", `最後の映像から ${Math.round((s.camera_age_ms || 0) / 1000)} 秒`);
+      else if (!frames) setBadge("wait", "映像を受信中…", "");
+      else if (now - lastFrameAt > CAM_STALE_MS) setBadge("stale", "映像の受信が遅れています", "通信が不安定な可能性があります");
+      else setBadge("");
+    }
+    function disconnected() { lastFrameAt = 0; pending = null; }
+    return { onFrame, status, disconnected };
+  })();
+  function onCameraFrame(buf) { camera.onFrame(buf); }
 
   // ---------------------------------------------------------------- sticks
   function makeStick(zoneEl, stickEl, map) {

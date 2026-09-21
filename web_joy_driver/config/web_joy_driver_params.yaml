@@ -63,3 +63,20 @@ web_joy_driver:
     # transient_local) relayed to the page for DISPLAY ONLY; gating stays in
     # joy_gate and the per-component subscribers. "" disables the display.
     emergency_stop_topic: "/emergency_stop"
+
+    # Camera view shown between the sticks on the page. The topic must be a
+    # sensor_msgs/CompressedImage carrying JPEG or PNG bytes (what
+    # image_transport's "compressed" plugin, usb_cam, v4l2_camera and
+    # camera_ros publish under <image topic>/compressed). Other encodings
+    # (compressedDepth etc.) are logged and skipped. "" hides the camera panel.
+    # 画面中央のカメラ映像。JPEG/PNG の CompressedImage トピックを指定。空で非表示。
+    camera_topic: "/camera/image_raw/compressed"
+
+    # Upper bound of frames forwarded to browsers (Hz). Frames beyond this, or
+    # faster than a phone can read, are dropped (latest frame wins, no backlog).
+    # 0 以下で間引きなし。Wi-Fi の帯域に合わせて下げる。
+    camera_max_fps: 15.0
+
+    # The page shows a "no signal" badge over the last image when no frame has
+    # arrived for this many seconds. 0 以下で無効。
+    camera_timeout_sec: 2.0

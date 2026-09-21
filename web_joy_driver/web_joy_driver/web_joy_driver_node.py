@@ -7,17 +7,28 @@ at ``publish_rate`` like ``uart_joy_driver``; when frames stop for longer than
 published so downstream nodes stop. Emergency-stop state from
 ``emergency_stop_topic`` is relayed to the page for display only; gating is
 still done by ``joy_gate`` and the per-component E-stop subscribers.
+
+Camera view: ``camera_topic`` (``sensor_msgs/CompressedImage``, JPEG or PNG)
+is relayed to the page as binary WebSocket messages so the operator sees the
+robot's view between the sticks. Frames are throttled to ``camera_max_fps``
+and dropped for clients that cannot keep up; nothing is ever queued.
 """
 
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import rclpy
 from ament_index_python.packages import get_package_share_directory
 from rclpy.node import Node
-from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
-from sensor_msgs.msg import Joy
+from rclpy.qos import (
+    DurabilityPolicy,
+    HistoryPolicy,
+    QoSProfile,
+    ReliabilityPolicy,
+    qos_profile_sensor_data,
+)
+from sensor_msgs.msg import CompressedImage, Joy
 
 from .joy_frame import (
     DEFAULT_NUM_AXES,
@@ -33,6 +44,26 @@ try:
     from questix_msgs.msg import EmergencyStop
 except ImportError:  # questix_msgs not built; E-stop display is optional
     EmergencyStop = None  # type: ignore[assignment,misc]
+
+# Camera relay states reported to the page in the status message.
+CAMERA_DISABLED = "disabled"  # camera_topic is ""
+CAMERA_WAITING = "waiting"  # subscribed, no frame received yet
+CAMERA_LIVE = "live"  # frames arriving
+CAMERA_STALE = "stale"  # frames stopped for longer than camera_timeout_sec
+
+# Magic bytes of the encodings a browser <img> can show. Anything else is
+# logged and skipped instead of being pushed to the page.
+_JPEG_SOI = b"\xff\xd8\xff"
+_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
+
+def image_encoding(data: bytes) -> Optional[str]:
+    """Return ``"jpeg"``/``"png"`` from the leading bytes of ``data`` or ``None``."""
+    if data.startswith(_JPEG_SOI):
+        return "jpeg"
+    if data.startswith(_PNG_SIGNATURE):
+        return "png"
+    return None
 
 
 class WebJoyDriverNode(Node):
@@ -57,6 +88,9 @@ class WebJoyDriverNode(Node):
         self.declare_parameter("close_timeout_sec", 1.0)
         self.declare_parameter("static_dir", "")
         self.declare_parameter("emergency_stop_topic", "/emergency_stop")
+        self.declare_parameter("camera_topic", "/camera/image_raw/compressed")
+        self.declare_parameter("camera_max_fps", 15.0)
+        self.declare_parameter("camera_timeout_sec", 2.0)
 
         joy_topic = self.get_parameter("joy_topic").value
         host = self.get_parameter("host").value
@@ -69,6 +103,9 @@ class WebJoyDriverNode(Node):
         self._num_buttons = int(self.get_parameter("num_buttons").value)
         static_dir = self.get_parameter("static_dir").value
         estop_topic = self.get_parameter("emergency_stop_topic").value
+        camera_topic = self.get_parameter("camera_topic").value
+        camera_max_fps = float(self.get_parameter("camera_max_fps").value)
+        self._camera_timeout = float(self.get_parameter("camera_timeout_sec").value)
 
         if publish_rate <= 0.0:
             raise ValueError("publish_rate must be > 0")
@@ -84,6 +121,11 @@ class WebJoyDriverNode(Node):
         self._estop_active: Optional[bool] = None
         self._estop_reason = ""
         self._estop_rx_time: Optional[float] = None
+        self._camera_enabled = bool(camera_topic)
+        self._camera_rx_time: Optional[float] = None
+        self._camera_frames = 0
+        self._camera_rejected = 0
+        self._camera_encoding = ""
 
         self._publisher = self.create_publisher(Joy, joy_topic, 10)
 
@@ -100,6 +142,12 @@ class WebJoyDriverNode(Node):
             self.get_logger().warning(
                 "questix_msgs is unavailable; emergency stop state will not be shown")
 
+        if camera_topic:
+            # Best-effort matches both reliable and best-effort image publishers
+            # (image_transport / usb_cam / camera_ros); a dropped frame is fine.
+            self._camera_sub = self.create_subscription(
+                CompressedImage, camera_topic, self._on_camera_image, qos_profile_sensor_data)
+
         index_html = self._load_index_html(static_dir)
         self._server = JoyWebSocketServer(
             host=host,
@@ -113,6 +161,7 @@ class WebJoyDriverNode(Node):
             ping_timeout_sec=float(self.get_parameter("ping_timeout_sec").value),
             status_period_sec=float(self.get_parameter("status_period_sec").value),
             close_timeout_sec=float(self.get_parameter("close_timeout_sec").value),
+            camera_max_fps=camera_max_fps,
             logger=_RclpyLoggerAdapter(self.get_logger()),
         )
         self._server.start()
@@ -123,6 +172,12 @@ class WebJoyDriverNode(Node):
             "timeout %.2fs, token %s"
             % (host, self._server.bound_port, "legacy" if self._server.legacy_api else "asyncio",
                joy_topic, publish_rate, timeout_sec, "set" if token else "NOT set"))
+        if camera_topic:
+            self.get_logger().info(
+                "camera view relays %s (CompressedImage jpeg/png) at <= %.1f fps"
+                % (camera_topic, camera_max_fps))
+        else:
+            self.get_logger().info("camera view disabled (camera_topic is empty)")
 
     # ------------------------------------------------------------------
     def _load_index_html(self, static_dir: str) -> bytes:
@@ -145,11 +200,24 @@ class WebJoyDriverNode(Node):
     def _on_release(self) -> None:
         self._hold.release()
 
+    def _camera_state(self, now: float) -> Tuple[str, Optional[int]]:
+        if not self._camera_enabled:
+            return CAMERA_DISABLED, None
+        if self._camera_rx_time is None:
+            return CAMERA_WAITING, None
+        age = max(0.0, now - self._camera_rx_time)
+        stale = self._camera_timeout > 0.0 and age > self._camera_timeout
+        return (CAMERA_STALE if stale else CAMERA_LIVE), int(age * 1000.0)
+
     def _status(self) -> Dict[str, Any]:
         now = time.monotonic()
         age = self._hold.age_sec(now)
         _axes, _buttons, state = self._hold.snapshot(now)
+        camera, camera_age_ms = self._camera_state(now)
         return {
+            "camera": camera,
+            "camera_age_ms": camera_age_ms,
+            "camera_frames": self._camera_frames,
             "hold": state,
             "rx_age_ms": None if age is None else int(age * 1000.0),
             "timeout_ms": int(self._hold.timeout_sec * 1000.0),
@@ -165,6 +233,29 @@ class WebJoyDriverNode(Node):
         self._estop_active = bool(msg.active)
         self._estop_reason = str(msg.reason)
         self._estop_rx_time = time.monotonic()
+
+    def _on_camera_image(self, msg: Any) -> None:
+        data = bytes(msg.data)
+        encoding = image_encoding(data)
+        if encoding is None:
+            # e.g. a compressedDepth / unsupported codec: log and skip, never push.
+            self._camera_rejected += 1
+            if self._camera_rejected <= 5 or self._camera_rejected % 100 == 0:
+                self.get_logger().warning(
+                    "ignored camera frame: unsupported encoding (format=%r, %d bytes), total %d"
+                    % (msg.format, len(data), self._camera_rejected))
+            return
+        if self._camera_frames == 0:
+            self.get_logger().info(
+                "camera frames arriving: %s, %d bytes (format=%r)"
+                % (encoding, len(data), msg.format))
+        elif self._camera_encoding and encoding != self._camera_encoding:
+            self.get_logger().info(
+                "camera encoding changed: %s -> %s" % (self._camera_encoding, encoding))
+        self._camera_encoding = encoding
+        self._camera_frames += 1
+        self._camera_rx_time = time.monotonic()
+        self._server.push_camera_frame(data)
 
     def _publish(self) -> None:
         axes, buttons, state = self._hold.snapshot(time.monotonic())

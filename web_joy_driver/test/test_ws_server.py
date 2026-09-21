@@ -177,3 +177,44 @@ def test_takeover_is_not_stalled_by_a_client_that_stopped_reading(server):
             pass
 
     _run(go())
+
+
+JPEG_HEAD = b"\xff\xd8\xff\xe0"
+
+
+def test_camera_frames_are_relayed_as_binary_and_only_the_latest_survives(server):
+    """Camera images reach every client as binary frames; a burst collapses to the newest."""
+    srv, _ = server
+
+    async def go():
+        async with websockets.connect(f"ws://127.0.0.1:{srv.bound_port}/ws?token=secret") as ws:
+            assert json.loads(await ws.recv())["type"] == "welcome"
+            srv.push_camera_frame(JPEG_HEAD + b"first")
+            received = []
+            for _ in range(100):
+                msg = await asyncio.wait_for(ws.recv(), 2.0)
+                if isinstance(msg, bytes):
+                    received.append(msg)
+                    break
+            assert received == [JPEG_HEAD + b"first"]
+            # 50 frames within a few ms: throttled to camera_max_fps (default 15),
+            # so far fewer messages arrive and the last one is the newest frame.
+            for i in range(50):
+                srv.push_camera_frame(JPEG_HEAD + b"burst%02d" % i)
+            deadline = time.monotonic() + 3.0
+            burst = []
+            while time.monotonic() < deadline:
+                msg = await asyncio.wait_for(ws.recv(), 2.0)
+                if isinstance(msg, bytes):
+                    burst.append(msg)
+                    if msg == JPEG_HEAD + b"burst49":
+                        break
+            assert burst[-1] == JPEG_HEAD + b"burst49"
+            assert len(burst) < 50
+            # Text traffic keeps flowing alongside the images.
+            msg = json.loads(await asyncio.wait_for(ws.recv(), 2.0))
+            assert msg["type"] == "status"
+
+    _run(go())
+    assert srv.camera_stats["sent"] >= 2
+    assert srv.camera_stats["dropped"] > 0
