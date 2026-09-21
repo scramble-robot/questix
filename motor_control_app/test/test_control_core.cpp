@@ -22,10 +22,17 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <functional>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include "motor_control_app/control_core.hpp"
+#include "motor_control_app/drive_slew.hpp"
+#include "motor_control_lib/differential_kinematics.hpp"
+#include "motor_control_lib/drive_stop_gate.hpp"
 
 namespace core = motor_control_app::control_core;
 
@@ -396,4 +403,454 @@ TEST(ControlCoreOperatingPoint, TurnRangeMostlyOverlapsUnstableRegion) {
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
+}
+
+// --- Phase B/E: 走行状態機械と RUN 域 LQR+FF -----------------------------------------------
+//
+// design/model_based_drive_control.md の Phase B（状態機械）/ Phase E（velocity RUN の外側
+// LQR+FF）。既定設定では従来出力と完全一致すること、有効化したときに閉ループで期待どおり
+// 働くことを、ファーム速度ループの一次遅れモデルで確認する。
+
+namespace {
+
+// 一次遅れ + むだ時間 + 一定外乱（負荷で目標より低く回る）のプラント（1 車輪、モータフレーム）。
+// 実測は整数量子化。
+class LagPlant {
+public:
+  LagPlant(double tau_sec, double dt_sec, int delay_ticks, double steady_offset_rpm)
+      : a_(std::exp(-dt_sec / tau_sec)), delay_(delay_ticks) {
+    // 定常で「目標 + steady_offset_rpm」に落ち着くよう 1 tick あたりの外乱に換算
+    d_ = (1.0 - a_) * steady_offset_rpm;
+  }
+  int step(int cmd_rpm) {
+    const double u = hist_[delay_];
+    for (int i = 4; i > 0; --i) hist_[i] = hist_[i - 1];
+    hist_[0] = static_cast<double>(cmd_rpm);
+    x_ = a_ * x_ + (1.0 - a_) * u + d_;
+    return static_cast<int>(std::lround(x_));
+  }
+  double truth() const { return x_; }
+
+private:
+  double a_;
+  int delay_;
+  double d_;
+  double x_{0.0};
+  std::array<double, 5> hist_{};
+};
+
+core::Config lqrConfig(double q, double disturbance_gain, double l_d, double max_corr) {
+  core::Config config = yamlConfig();
+  config.run_enter_rpm = 40;
+  config.run_exit_rpm = 30;
+  config.velocity_run.enabled = true;
+  config.velocity_run.model_tau_sec = 0.1;
+  config.velocity_run.model_delay_ticks = 1;
+  config.velocity_run.q = q;
+  config.velocity_run.r = 1.0;
+  config.velocity_run.lead_gain = 0.0;
+  config.velocity_run.disturbance_gain = disturbance_gain;
+  config.velocity_run.observer_l_x = 0.3;
+  config.velocity_run.observer_l_d = l_d;
+  config.velocity_run.max_correction_rpm = max_corr;
+  return config;
+}
+
+// 左右同じプラントで直進させ、最終的な左輪の実測と指令を返す
+struct RunResult {
+  double left_truth{0.0};
+  int left_cmd{0};
+  int left_ref{0};
+  bool lqr_active{false};
+};
+RunResult driveStraight(core::ControlCore& control, double offset_rpm, double target_linear,
+                        int ticks) {
+  LagPlant left(0.1, kControlDt, 1, offset_rpm);
+  LagPlant right(0.1, kControlDt, 1, offset_rpm);
+  core::WheelFeedback fb;
+  RunResult res;
+  for (int k = 0; k < ticks; ++k) {
+    const auto out = control.step(target_linear, 0.0, kControlDt, fb);
+    const int lcmd = out.stop ? 0 : out.left_rpm;
+    const int rcmd = out.stop ? 0 : out.right_rpm;
+    fb.valid = true;
+    fb.left_rpm = left.step(lcmd);
+    fb.right_rpm = right.step(rcmd);
+    res.left_truth = left.truth();
+    res.left_cmd = out.left_rpm;
+    res.left_ref = out.left_ref_rpm;
+    res.lqr_active = out.lqr_active;
+  }
+  return res;
+}
+
+}  // namespace
+
+TEST(ControlCoreFsm, DefaultConfigIsIdenticalWithAndWithoutFeedback) {
+  // 既定（RUN 閾値 0、LQR 無効）では、フィードバックを渡しても出力が従来 API と完全一致し、
+  // CREEP には決して入らない。
+  core::ControlCore legacy(yamlConfig());
+  core::ControlCore with_fb(yamlConfig());
+  core::WheelFeedback fb;
+  fb.valid = true;
+  for (int k = 0; k < 300; ++k) {
+    const double lin = (k < 150) ? kFullStickLinear : 0.0;
+    const double ang = (k >= 100 && k < 250) ? 0.7 : 0.0;
+    const auto a = legacy.step(lin, ang, kControlDt);
+    fb.left_rpm = a.left_rpm + 3;  // 適当なずれ。無視されるはず
+    fb.right_rpm = a.right_rpm - 3;
+    const auto b = with_fb.step(lin, ang, kControlDt, fb);
+    EXPECT_EQ(a.stop, b.stop) << "k=" << k;
+    EXPECT_EQ(a.left_rpm, b.left_rpm) << "k=" << k;
+    EXPECT_EQ(a.right_rpm, b.right_rpm) << "k=" << k;
+    EXPECT_EQ(a.left_rpm, a.left_ref_rpm);
+    EXPECT_NE(b.mode, core::DriveMode::kCreep);
+    EXPECT_EQ(b.stop, b.mode == core::DriveMode::kStop);
+    EXPECT_FALSE(b.lqr_active);
+  }
+}
+
+TEST(ControlCoreFsm, DefaultConfigMatchesPreFsmPipeline) {
+  // 状態機械導入前の 1 ステップ（テーパー付きスルーレート -> 運動学 -> 丸め -> drive_stop_gate）
+  // をここで独立に再現し、既定設定（RUN 閾値 0、LQR 無効）の ControlCore が 3 引数 API でも
+  // フィードバック付き API でも同じ指令列を出すことを確認する。
+  const core::Config config = yamlConfig();
+  core::ControlCore three_arg(config);
+  core::ControlCore with_fb(config);
+  double ref_linear = 0.0;
+  double ref_angular = 0.0;
+  bool ref_stop = true;
+  core::WheelFeedback fb;
+  fb.valid = true;
+  for (int k = 0; k < 400; ++k) {
+    // 前進 -> 前進+旋回 -> 不感帯付近の微速 -> 逆転 -> 停止
+    double lin = 0.0;
+    double ang = 0.0;
+    if (k < 100) {
+      lin = kFullStickLinear;
+    } else if (k < 200) {
+      lin = kFullStickLinear;
+      ang = 0.7;
+    } else if (k < 260) {
+      lin = 0.05;
+    } else if (k < 340) {
+      lin = -kFullStickLinear;
+      ang = -0.4;
+    }
+    ref_linear = motor_control_app::drive_slew::clampRateTapered(
+        lin, ref_linear, config.max_linear_accel, kControlDt, config.slew_taper_band_linear);
+    ref_angular = motor_control_app::drive_slew::clampRateTapered(
+        ang, ref_angular, config.max_angular_accel, kControlDt, config.slew_taper_band_angular);
+    const auto [l, r] = motor_control_lib::differential_kinematics::twistToWheelRpm(
+        ref_linear, ref_angular, config.wheel_radius, config.wheel_separation);
+    const int ref_left = static_cast<int>(std::lround(l));
+    const int ref_right = static_cast<int>(std::lround(r));
+    ref_stop = motor_control_lib::drive_stop_gate::updateStopMode(
+        ref_stop, std::max(std::abs(ref_left), std::abs(ref_right)), config.min_command_rpm);
+
+    const auto a = three_arg.step(lin, ang, kControlDt);
+    fb.left_rpm = ref_left - 7;  // 大きくずれた実測でも無視されるはず
+    fb.right_rpm = ref_right + 7;
+    const auto b = with_fb.step(lin, ang, kControlDt, fb);
+    for (const auto& out : {a, b}) {
+      EXPECT_EQ(out.stop, ref_stop) << "k=" << k;
+      EXPECT_EQ(out.left_rpm, ref_left) << "k=" << k;
+      EXPECT_EQ(out.right_rpm, ref_right) << "k=" << k;
+      EXPECT_DOUBLE_EQ(out.linear, ref_linear) << "k=" << k;
+      EXPECT_DOUBLE_EQ(out.angular, ref_angular) << "k=" << k;
+      EXPECT_NE(out.mode, core::DriveMode::kCreep) << "k=" << k;
+      EXPECT_FALSE(out.lqr_active) << "k=" << k;
+    }
+  }
+}
+
+TEST(ControlCoreFsm, RunThresholdProducesCreepThenRun) {
+  core::Config config = yamlConfig();
+  config.run_enter_rpm = 40;
+  config.run_exit_rpm = 30;
+  core::ControlCore control(config);
+  // 低速目標（約 19 RPM）: 不感帯は抜けるが RUN 未満 -> CREEP
+  core::Output out;
+  for (int k = 0; k < 200; ++k) out = control.step(0.2, 0.0, kControlDt);
+  EXPECT_FALSE(out.stop);
+  EXPECT_EQ(out.mode, core::DriveMode::kCreep);
+  // 高速目標（約 95 RPM）-> RUN
+  for (int k = 0; k < 200; ++k) out = control.step(1.0, 0.0, kControlDt);
+  EXPECT_EQ(out.mode, core::DriveMode::kRun);
+  // 戻すと CREEP、さらに 0 で STOP
+  for (int k = 0; k < 200; ++k) out = control.step(0.2, 0.0, kControlDt);
+  EXPECT_EQ(out.mode, core::DriveMode::kCreep);
+  for (int k = 0; k < 200; ++k) out = control.step(0.0, 0.0, kControlDt);
+  EXPECT_EQ(out.mode, core::DriveMode::kStop);
+  EXPECT_TRUE(out.stop);
+}
+
+TEST(ControlCoreLqr, ZeroWeightsReproduceReferenceEvenWhenEnabled) {
+  // enabled=true でも q=0, lead=0, disturbance=0 なら補正量 0 = 従来出力
+  core::ControlCore control(lqrConfig(0.0, 0.0, 0.0, 20.0));
+  const auto res = driveStraight(control, -10.0, 1.0, 200);
+  EXPECT_TRUE(res.lqr_active);
+  EXPECT_EQ(res.left_cmd, res.left_ref);
+}
+
+TEST(ControlCoreLqr, FeedbackOnlyLeavesSteadyOffset) {
+  // 負荷で 10 RPM 低く回るプラント。FF のみ（LQR 無効）では偏差がそのまま残る
+  core::Config config = yamlConfig();
+  core::ControlCore control(config);
+  const auto res = driveStraight(control, -10.0, 1.0, 300);
+  EXPECT_NEAR(res.left_truth - res.left_ref, -10.0, 1.0);
+}
+
+TEST(ControlCoreLqr, DisturbanceCompensationRemovesSteadyOffset) {
+  // 同じプラントで LQR+FF（外乱補償あり）: 指令が上乗せされ、実測が目標に収束する
+  core::ControlCore control(lqrConfig(0.5, 1.0, 0.05, 20.0));
+  const auto res = driveStraight(control, -10.0, 1.0, 400);
+  EXPECT_TRUE(res.lqr_active);
+  EXPECT_GT(res.left_cmd, res.left_ref);  // 補正が正方向（負荷を打ち消す）
+  EXPECT_NEAR(res.left_truth, static_cast<double>(res.left_ref), 1.0);
+  ASSERT_TRUE(control.lqrGains().has_value());
+  EXPECT_GT(control.lqrGains()->k, 0.0);
+  ASSERT_TRUE(control.leftOmegaHat().has_value());
+}
+
+TEST(ControlCoreLqr, CorrectionIsBoundedByMaxCorrection) {
+  // 補正上限 5 RPM。負荷 30 RPM ぶんは補正しきれず、指令は目標 +5 で止まる
+  core::ControlCore control(lqrConfig(0.5, 1.0, 0.05, 5.0));
+  const auto res = driveStraight(control, -30.0, 1.0, 400);
+  EXPECT_LE(res.left_cmd - res.left_ref, 5);
+  EXPECT_GE(res.left_cmd - res.left_ref, 4);  // 上限に張り付く
+}
+
+TEST(ControlCoreLqr, InvalidFeedbackFallsBackToFeedforward) {
+  core::ControlCore control(lqrConfig(0.5, 1.0, 0.05, 20.0));
+  // まず FB ありで補正が乗る状態を作る
+  driveStraight(control, -10.0, 1.0, 200);
+  // FB を無効にすると参照そのまま + オブザーバはリセット
+  core::WheelFeedback invalid;
+  const auto out = control.step(1.0, 0.0, kControlDt, invalid);
+  EXPECT_EQ(out.mode, core::DriveMode::kRun);
+  EXPECT_FALSE(out.lqr_active);
+  EXPECT_EQ(out.left_rpm, out.left_ref_rpm);
+  EXPECT_FALSE(control.leftOmegaHat().has_value());
+}
+
+TEST(ControlCoreLqr, ResetAndModeTransitionClearObserver) {
+  core::ControlCore control(lqrConfig(0.5, 1.0, 0.05, 20.0));
+  driveStraight(control, -10.0, 1.0, 200);
+  ASSERT_TRUE(control.leftOmegaHat().has_value());
+  // RUN -> STOP 遷移でクリア
+  core::WheelFeedback fb;
+  fb.valid = true;
+  core::Output out;
+  for (int k = 0; k < 300; ++k) out = control.step(0.0, 0.0, kControlDt, fb);
+  EXPECT_EQ(out.mode, core::DriveMode::kStop);
+  EXPECT_FALSE(control.leftOmegaHat().has_value());
+  // reset() でもクリア
+  driveStraight(control, -10.0, 1.0, 200);
+  ASSERT_TRUE(control.leftOmegaHat().has_value());
+  control.reset();
+  EXPECT_FALSE(control.leftOmegaHat().has_value());
+  EXPECT_EQ(control.mode(), core::DriveMode::kStop);
+}
+
+TEST(ControlCoreLqr, SetConfigRecomputesGains) {
+  core::ControlCore control(lqrConfig(0.5, 1.0, 0.05, 20.0));
+  driveStraight(control, -10.0, 1.0, 50);
+  ASSERT_TRUE(control.lqrGains().has_value());
+  ASSERT_TRUE(control.leftOmegaHat().has_value());
+  const double k1 = control.lqrGains()->k;
+  control.setConfig(lqrConfig(2.0, 1.0, 0.05, 20.0));
+  EXPECT_FALSE(control.lqrGains().has_value());  // 次の tick で再計算
+  // q は velocity_run の制御パラメータなので、旧モデルで育ったオブザーバ状態も捨てる
+  EXPECT_FALSE(control.leftOmegaHat().has_value());
+  driveStraight(control, -10.0, 1.0, 5);
+  ASSERT_TRUE(control.lqrGains().has_value());
+  EXPECT_GT(control.lqrGains()->k, k1);  // q を上げればゲインは上がる
+}
+
+// --- runtime 再設定時の内部状態の扱い（velocity_run_* の runtime tunable 化に対する規律） --
+//
+// 走行中に velocity_run_* を変えると LQR ゲインは作り直されるが、オブザーバ / LQR の
+// 内部状態は旧モデルで育ったものなので、そのまま新しい設定へ持ち越してはいけない。
+// 一方で、スルーレートの前回指令と走行状態まで捨てると「パラメータを触った瞬間に指令が
+// 飛ぶ」ことになるため、そこは維持する。以下の 6 本でその境界を固定する。
+
+TEST(ControlCoreLqr, VelocityRunConfigChangeClearsObserverAndLqrState) {
+  core::ControlCore control(lqrConfig(0.5, 1.0, 0.05, 20.0));
+  driveStraight(control, -10.0, 1.0, 200);
+  ASSERT_TRUE(control.leftOmegaHat().has_value());
+  ASSERT_TRUE(control.rightOmegaHat().has_value());
+  ASSERT_NE(control.leftDisturbanceHat(), 0.0);  // 外乱推定が育っている
+  ASSERT_TRUE(control.lqrGains().has_value());
+  ASSERT_EQ(control.mode(), core::DriveMode::kRun);
+
+  // モデルそのもの（一次遅れ時定数）を差し替える
+  core::Config next = lqrConfig(0.5, 1.0, 0.05, 20.0);
+  next.velocity_run.model_tau_sec = 0.2;
+  control.setConfig(next);
+
+  EXPECT_FALSE(control.leftOmegaHat().has_value());
+  EXPECT_FALSE(control.rightOmegaHat().has_value());
+  EXPECT_EQ(control.leftDisturbanceHat(), 0.0);
+  EXPECT_EQ(control.rightDisturbanceHat(), 0.0);
+  EXPECT_FALSE(control.lqrGains().has_value());
+  // RUN のまま継続する（状態遷移は起こさない）
+  EXPECT_EQ(control.mode(), core::DriveMode::kRun);
+}
+
+TEST(ControlCoreLqr, EveryVelocityRunParameterChangeClearsControllerState) {
+  // velocity_run のどのメンバを変えても制御器の状態を捨てること。新しいメンバを
+  // 足したらこの表にも足す（足し忘れると stale state が新設定へ漏れる）。
+  using Mutator = std::function<void(core::VelocityRunLqrConfig&)>;
+  const std::vector<std::pair<std::string, Mutator>> mutators = {
+      {"enabled", [](core::VelocityRunLqrConfig& v) { v.enabled = false; }},
+      {"model_tau_sec", [](core::VelocityRunLqrConfig& v) { v.model_tau_sec = 0.2; }},
+      {"model_delay_ticks", [](core::VelocityRunLqrConfig& v) { v.model_delay_ticks = 2; }},
+      {"q", [](core::VelocityRunLqrConfig& v) { v.q = 2.0; }},
+      {"r", [](core::VelocityRunLqrConfig& v) { v.r = 2.0; }},
+      {"lead_gain", [](core::VelocityRunLqrConfig& v) { v.lead_gain = 0.5; }},
+      {"disturbance_gain", [](core::VelocityRunLqrConfig& v) { v.disturbance_gain = 0.5; }},
+      {"observer_l_x", [](core::VelocityRunLqrConfig& v) { v.observer_l_x = 0.5; }},
+      {"observer_l_d", [](core::VelocityRunLqrConfig& v) { v.observer_l_d = 0.1; }},
+      {"max_correction_rpm", [](core::VelocityRunLqrConfig& v) { v.max_correction_rpm = 10.0; }},
+      {"invert_measured", [](core::VelocityRunLqrConfig& v) { v.invert_measured = true; }},
+  };
+
+  for (const auto& entry : mutators) {
+    const std::string& name = entry.first;
+    core::ControlCore control(lqrConfig(0.5, 1.0, 0.05, 20.0));
+    driveStraight(control, -10.0, 1.0, 200);
+    ASSERT_TRUE(control.leftOmegaHat().has_value()) << name;
+    ASSERT_NE(control.leftDisturbanceHat(), 0.0) << name;
+
+    core::Config next = lqrConfig(0.5, 1.0, 0.05, 20.0);
+    entry.second(next.velocity_run);
+    control.setConfig(next);
+
+    EXPECT_FALSE(control.leftOmegaHat().has_value()) << name;
+    EXPECT_FALSE(control.rightOmegaHat().has_value()) << name;
+    EXPECT_EQ(control.leftDisturbanceHat(), 0.0) << name;
+    EXPECT_EQ(control.rightDisturbanceHat(), 0.0) << name;
+    EXPECT_FALSE(control.lqrGains().has_value()) << name;
+  }
+}
+
+TEST(ControlCoreLqr, EnableToggleDoesNotReuseStaleObserverState) {
+  const core::Config on = lqrConfig(0.5, 1.0, 0.05, 20.0);
+  core::Config off = on;
+  off.velocity_run.enabled = false;
+
+  core::ControlCore control(on);
+  driveStraight(control, -10.0, 1.0, 200);
+  ASSERT_TRUE(control.leftOmegaHat().has_value());
+  const double stale = *control.leftOmegaHat();
+
+  // true -> false でクリア
+  control.setConfig(off);
+  EXPECT_FALSE(control.leftOmegaHat().has_value());
+  // 無効のまま RUN を続けても状態は育たない
+  driveStraight(control, -10.0, 1.0, 50);
+  EXPECT_FALSE(control.leftOmegaHat().has_value());
+
+  // false -> true。再有効化だけでは初期化されず、次の有効 FB で「今の実測」から始まる
+  control.setConfig(on);
+  EXPECT_FALSE(control.leftOmegaHat().has_value());
+  ASSERT_EQ(control.mode(), core::DriveMode::kRun);
+  core::WheelFeedback fb;
+  fb.valid = true;
+  fb.left_rpm = 7;
+  fb.right_rpm = -7;  // 右輪はモータ個別フレームでは負
+  const auto out = control.step(1.0, 0.0, kControlDt, fb);
+  ASSERT_EQ(out.mode, core::DriveMode::kRun);
+  ASSERT_TRUE(control.leftOmegaHat().has_value());
+  EXPECT_NEAR(*control.leftOmegaHat(), 7.0, 1e-9);  // 実測 RPM で初期化
+  EXPECT_NE(*control.leftOmegaHat(), stale);
+}
+
+TEST(ControlCoreLqr, UnrelatedConfigChangePreservesControllerState) {
+  // velocity_run 以外を変えただけなら、オブザーバ / 外乱推定は消さない
+  // （setConfig のたびに無条件リセットする実装を禁止する）。
+  core::ControlCore control(lqrConfig(0.5, 1.0, 0.05, 20.0));
+  driveStraight(control, -10.0, 1.0, 200);
+  ASSERT_TRUE(control.leftOmegaHat().has_value());
+  const double x_hat = *control.leftOmegaHat();
+  const double d_hat = control.leftDisturbanceHat();
+  ASSERT_NE(d_hat, 0.0);
+
+  core::Config next = lqrConfig(0.5, 1.0, 0.05, 20.0);
+  next.max_linear_accel = 4.0;
+  next.max_angular_accel = 4.0;
+  next.slew_taper_band_linear = 0.3;
+  next.min_command_rpm = 6;
+  control.setConfig(next);
+
+  ASSERT_TRUE(control.leftOmegaHat().has_value());
+  ASSERT_TRUE(control.rightOmegaHat().has_value());
+  EXPECT_EQ(*control.leftOmegaHat(), x_hat);
+  EXPECT_EQ(control.leftDisturbanceHat(), d_hat);
+}
+
+TEST(ControlCoreLqr, VelocityRunConfigChangeClearsLeadTermState) {
+  // lead 項は「前回参照との差分」なので、LQR runtime state（prev_ref）が残っていると
+  // 設定変更直後の tick に変更前の参照からの差分が補正として乗ってしまう。
+  // q=0（FB ゲイン 0）、disturbance_gain=0、observer_l_d=0 にしてあるので、
+  // この設定での補正量は lead 項だけ = prev_ref の有無がそのまま出力に出る。
+  core::Config base = lqrConfig(0.0, 0.0, 0.0, 20.0);
+  base.velocity_run.lead_gain = 1.0;
+
+  // 直進でも右輪の指令はモータ個別フレームでは負（differential_kinematics の符号規約）。
+  // 加速時の参照変化 dref は左輪で正・右輪で負になるため、lead 項の符号も左右で逆になる。
+  core::WheelFeedback fb;
+  fb.valid = true;
+  fb.left_rpm = 95;
+  fb.right_rpm = -95;
+
+  {
+    // velocity_run を変更 -> prev_ref は捨てられ、参照が動いても lead 項は乗らない。
+    // q=0 なので r を変えても制御則自体は変わらない（状態リセットだけを見ている）。
+    core::ControlCore control(base);
+    driveStraight(control, 0.0, 1.0, 200);  // 目標一定 = prev_ref が固まる
+    core::Config next = base;
+    next.velocity_run.r = 2.0;
+    control.setConfig(next);
+    const auto out = control.step(2.0, 0.0, kControlDt, fb);
+    ASSERT_EQ(out.mode, core::DriveMode::kRun);
+    ASSERT_TRUE(out.lqr_active);
+    EXPECT_GT(out.left_ref_rpm, 0);
+    EXPECT_LT(out.right_ref_rpm, 0);
+    EXPECT_EQ(out.left_rpm, out.left_ref_rpm);
+    EXPECT_EQ(out.right_rpm, out.right_ref_rpm);
+  }
+  {
+    // velocity_run 以外の変更 -> prev_ref は維持され、参照の変化ぶん lead 項が乗る
+    core::ControlCore control(base);
+    driveStraight(control, 0.0, 1.0, 200);
+    core::Config next = base;
+    next.slew_taper_band_angular = 0.3;
+    control.setConfig(next);
+    const auto out = control.step(2.0, 0.0, kControlDt, fb);
+    ASSERT_EQ(out.mode, core::DriveMode::kRun);
+    ASSERT_TRUE(out.lqr_active);
+    EXPECT_GT(out.left_rpm, out.left_ref_rpm);
+    EXPECT_LT(out.right_rpm, out.right_ref_rpm);  // 右輪は参照が負方向へ動く
+  }
+}
+
+TEST(ControlCoreLqr, VelocityRunConfigChangePreservesSlewAndDriveMode) {
+  // PR #144 の「走行中にパラメータを変えても指令が飛ばない」性質を維持すること。
+  core::ControlCore control(lqrConfig(0.5, 1.0, 0.05, 20.0));
+  driveStraight(control, -10.0, 1.0, 200);
+  const double linear = control.lastLinear();
+  const double angular = control.lastAngular();
+  ASSERT_EQ(control.mode(), core::DriveMode::kRun);
+  ASSERT_GT(linear, 0.5);
+
+  core::Config next = lqrConfig(0.5, 1.0, 0.05, 20.0);
+  next.velocity_run.observer_l_x = 0.5;
+  control.setConfig(next);
+
+  EXPECT_EQ(control.lastLinear(), linear);    // スルーレート状態は維持
+  EXPECT_EQ(control.lastAngular(), angular);  // 0 のままだが 0 に「戻す」のではない
+  EXPECT_EQ(control.mode(), core::DriveMode::kRun);
+  EXPECT_FALSE(control.stopMode());
 }

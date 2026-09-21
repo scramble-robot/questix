@@ -72,6 +72,37 @@ control_rate Hz の固定 tick:
 | `current_zero_deadband_rpm` | 5 | ○ | 静止時の微振動防止 |
 | `current_invert_measured` | true | ○ | 実測符号反転（正帰還防止） |
 
+### モデルベース走行制御（実験的、**既定は無効**。velocity モードのみ）
+
+走行状態機械（STOP / CREEP / RUN）と RUN 域の外側 LQR+FF。既定値のままなら出力は従来と
+同一（`test_control_core` / `test_drive_param_policy` で回帰確認）。有効化は
+`scripts/identify/` の同定結果を得てから。設計は `design/model_based_drive_control.md`。
+実行時変更は他のパラメータと同じく全値検証 → 一括反映で、範囲外・非有限値は要求ごと拒否。
+
+| パラメータ | 既定値 | 実行時変更 | 効き |
+|---|---|---|---|
+| `drive_fsm_run_enter_rpm` / `drive_fsm_run_exit_rpm` | 0 / 0 | ○ | CREEP↔RUN の入り/抜け閾値 [RPM]。0 で RUN 判定無効 = 従来の停止/走行 2 状態。exit > enter は enter に丸めて使う |
+| `velocity_run_lqr_enabled` | false | ○ | RUN 域 LQR+FF の有効化。current モードでは無視（WARN） |
+| `velocity_run_model_tau_sec` / `velocity_run_model_delay_ticks` | 0.1 / 1 | ○ | 同定した一次遅れ時定数 [s]（> 0）/ むだ時間 [tick]（0..4） |
+| `velocity_run_q` / `velocity_run_r` | 0.0 / 1.0 | ○ | 追従誤差 / 入力の重み（q ≥ 0、r > 0）。q = 0 で FB なし |
+| `velocity_run_lead_gain` / `velocity_run_disturbance_gain` | 0.0 / 0.0 | ○ | 参照変化の先回り / 外乱推定による定常偏差補償（各 0..1） |
+| `velocity_run_observer_l_x` / `velocity_run_observer_l_d` | 0.3 / 0.0 | ○ | オブザーバの状態（0..1）/ 外乱（≥ 0）イノベーションゲイン |
+| `velocity_run_max_correction_rpm` | 20.0 | ○ | 補正量の上限 [RPM]（安全装置） |
+| `velocity_run_invert_measured` | false | ○ | 実測 RPM の符号反転（正帰還になる場合のみ） |
+| `velocity_run_feedback_max_age_sec` | 0.1 | ○ | 両輪の `velocity_rpm_raw` がこれより古ければ FF のみ（> 0） |
+
+`velocity_run_*`（上表のうち `velocity_run_feedback_max_age_sec` を除く）を実行時に変更すると、
+旧モデルで育ったオブザーバ / LQR の内部状態（推定 RPM・外乱推定・入力履歴・前回参照）は
+破棄され、次の有効なフィードバックで実測 RPM から初期化し直される。走行中に LQR を
+ON/OFF しても、変更前のモデル由来の推定値が新しい設定へ持ち越されることはない。
+一方でスルーレートの前回指令と走行状態（STOP / CREEP / RUN）は維持するので、パラメータを
+触った瞬間に指令が飛ぶことはない。`velocity_run_*` 以外（加速度上限・不感帯など）の変更では
+オブザーバ / LQR の状態は消さない。
+
+`velocity_run_feedback_max_age_sec` はフィードバックの鮮度判定であり制御器のモデルではない
+ため、この破棄の対象に含めない（古くなった時点で既存のフィードバック無効経路が同じ状態を
+リセットする）。
+
 ### 観測・レポート
 
 | パラメータ | 既定値 | 実行時変更 | 効き |
