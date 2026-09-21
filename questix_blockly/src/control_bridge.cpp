@@ -8,18 +8,15 @@ using motor_control_app::control_core::ControlCore;
 
 extern "C" {
 void* questix_create(const double* p) {
+  // p の並びは scripts/differential.py の FIELDS と一致させること。
   Config c;
   c.max_linear_accel = p[0];
   c.max_angular_accel = p[1];
-  c.min_linear_accel = p[2];
-  c.min_angular_accel = p[3];
-  c.accel_demand_ref_linear = p[4];
-  c.accel_demand_ref_angular = p[5];
-  c.slew_taper_band_linear = p[6];
-  c.slew_taper_band_angular = p[7];
-  c.wheel_radius = p[8];
-  c.wheel_separation = p[9];
-  c.min_command_rpm = p[10];
+  c.slew_taper_band_linear = p[2];
+  c.slew_taper_band_angular = p[3];
+  c.wheel_radius = p[4];
+  c.wheel_separation = p[5];
+  c.min_command_rpm = p[6];
   return new ControlCore(c);
 }
 

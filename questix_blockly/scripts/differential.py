@@ -4,8 +4,8 @@ from pathlib import Path
 import yaml
 from ament_index_python.packages import get_package_prefix, get_package_share_directory
 
-FIELDS = ('max_linear_accel', 'max_angular_accel', 'min_linear_accel',
-          'min_angular_accel', 'accel_demand_ref_linear', 'accel_demand_ref_angular',
+# Order must match the p[] indices in src/control_bridge.cpp (questix_create).
+FIELDS = ('max_linear_accel', 'max_angular_accel',
           'slew_taper_band_linear', 'slew_taper_band_angular', 'wheel_radius',
           'wheel_separation', 'min_command_rpm')
 
