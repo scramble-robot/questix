@@ -1,57 +1,22 @@
 """Regression tests for Robot Manager file helpers."""
 
-import tempfile
 import sys
-import types
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+# Runnable from any working directory: the package lives in scripts/, the shared
+# test shims next to this file.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-try:
-    from fastapi import HTTPException
-except ModuleNotFoundError:
-    fastapi = types.ModuleType("fastapi")
+from test_support import install_stubs  # noqa: E402
 
-    class HTTPException(Exception):
-        """Minimal FastAPI HTTPException substitute for helper tests."""
+install_stubs()
 
-        def __init__(self, status_code, detail):
-            super().__init__(detail)
-            self.status_code = status_code
-            self.detail = detail
-
-    class APIRouter:
-        """Minimal route decorator substitute for importing helper modules."""
-
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def _route(self, *args, **kwargs):
-            return lambda function: function
-
-        get = post = put = delete = _route
-
-    fastapi.APIRouter = APIRouter
-    fastapi.HTTPException = HTTPException
-    sys.modules["fastapi"] = fastapi
-
-try:
-    import pydantic  # noqa: F401
-except ModuleNotFoundError:
-    pydantic = types.ModuleType("pydantic")
-
-    class BaseModel:
-        """Minimal Pydantic model substitute for importing helper modules."""
-
-    def field_validator(*args, **kwargs):
-        return lambda function: function
-
-    pydantic.BaseModel = BaseModel
-    pydantic.field_validator = field_validator
-    sys.modules["pydantic"] = pydantic
-
-from robot_manager import logs, recorder
+from fastapi import HTTPException  # noqa: E402  (import after stub installation)
+from robot_manager import logs, recorder  # noqa: E402
 
 
 class ReadEnvFileTests(unittest.TestCase):
