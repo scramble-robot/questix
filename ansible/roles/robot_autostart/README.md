@@ -46,17 +46,27 @@ sudo nano /etc/questix_robot/launch.env
 sudo systemctl restart questix_robot
 ```
 
-設定項目:
+設定項目（出荷時のデフォルトは `ansible/roles/robot_autostart/defaults/main.yaml` が
+single source。`launch.env.j2` はそこから参照するのみで値を重複定義しません）:
 
-| 環境変数 | デフォルト | 説明 |
+| 環境変数 | 出荷時デフォルト | 説明 |
 |---------|-----------|------|
-| `ENABLE_LIDAR` | `true` | YDLiDAR の有効化 |
-| `ENABLE_SHOT` | `true` | 射出コンポーネントの有効化 |
-| `ENABLE_DRIVE` | `true` | 駆動コンポーネントの有効化 |
-| `ENABLE_GPIO_REF` | `true` | 手動開発・診断用の GPIO 安全系設定。competition systemd 起動では値を無視して常に有効 |
+| `ROS_DOMAIN_ID` | （kitting時に解決） | 詳細は `ansible/playbooks/vars/README.md` の「ROS_DOMAIN_ID の解決」を参照 |
+| `ENABLE_LIDAR` | `false` | YDLiDAR の有効化 |
+| `ENABLE_SHOT` | `false` | 射出コンポーネントの有効化 |
+| `ENABLE_DRIVE` | `false` | 駆動コンポーネントの有効化 |
+| `ENABLE_GPIO_REF` | `true` | 手動開発・診断用の GPIO 安全系設定。competition systemd 起動では値を無視して常に有効。他の項目と異なり出荷時も `true`（無効化すると手動 `ros2 launch` で GPIO 安全系がデフォルト無効になるため） |
 | `ENABLE_RVIZ` | `false` | RViz 可視化の有効化 |
+| `CONTROLLER_TYPE` | `dualshock` | コントローラ種別（`uart` または `dualshock`） |
 
-Ansible は `launch.env` を `force: false` で配置するため、既存ファイルを上書きしません。
+出荷時に全コンポーネントを無効（`ENABLE_GPIO_REF` を除く）にしているのは、初回起動時に
+モーターや LiDAR が意図せず動作しないようにするためです。運用者が必要なコンポーネントを
+明示的に有効化してください。
+
+Ansible は `launch.env` を `force: false` で配置するため、既存ファイルを上書きしません
+（新規作成時のみ上記の出荷時デフォルトが適用されます）。ただし `ROS_DOMAIN_ID` だけは
+再setup時にも resolver が解決した値へ同期されます（他の既存設定は保持されます）。
+
 既存環境に `ENABLE_GPIO_REF=false` が残っていても、competition ランチャーは
 `enable_gpio_ref:=true` を固定で渡すため安全系を無効化できません。
 `enable_autoreferee:=true` かつ `enable_gpio_ref:=false` は通常運用上の無効な

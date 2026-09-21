@@ -54,6 +54,7 @@ Recurring bug classes from this repository's fix history. Check each relevant it
 - **Launch dependencies in package.xml**: Every package referenced by a launch file via `pkg=` or `find-pkg-share` must be listed as `exec_depend` in that package's `package.xml`, and must actually exist in the workspace or ROS repos.
 - **CI must fail on failure**: Do not mask checks with `continue-on-error: true` or `|| true`. If a check cannot be enforced (e.g. Ansible check-mode limitations), leave a comment explaining why it is advisory.
 - **Installer/unit consistency**: Static `systemd/` unit files and their install-time substitutions (`scripts/install-robot-manager.sh`) and the Ansible templates in `ansible/roles/robot_autostart/templates/` describe the same services; when changing a user, path, or environment variable in one, update all three.
+- **Persisted-value precedence for kitting config (`ROS_DOMAIN_ID`)**: `/etc/questix_robot/launch.env` and the target user's `~/.bashrc` Ansible managed block are two independent persisted copies of the same value. Never let one silently win over the other, and never silently paper over a malformed persisted value — see `scripts/resolve_ros_domain_id.py` and its decision table in `ansible/playbooks/vars/README.md`. The resolver only reads and validates; only Ansible (`robot_autostart`/`robotics_workspace` roles) writes.
 
 ## Pull request titles
 

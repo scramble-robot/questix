@@ -1,0 +1,29 @@
+---
+# Reject an invalid ros_domain_id before any state-changing role runs.
+#
+# This must not rely on `ros_domain_id | int`, which silently coerces
+# non-numeric strings (e.g. "abc") to 0 - so first confirm the value is a
+# well-formed integer string, then range-check it.
+#
+# Range mirrors scripts/resolve_ros_domain_id.py (0-101 or 215-232); kept in
+# both places because this playbook can be invoked directly, bypassing the
+# resolver (e.g. scripts/apply-ansible-config.sh during ISO builds).
+
+- name: Assert ROS_DOMAIN_ID is a well-formed integer
+  ansible.builtin.assert:
+    that:
+      - (ros_domain_id | string) is regex('^-?[0-9]+$')
+    fail_msg: "ros_domain_id must be an integer, got: {{ ros_domain_id }}"
+    success_msg: "ros_domain_id is a well-formed integer: {{ ros_domain_id }}"
+
+- name: Assert ROS_DOMAIN_ID is within the allowed ranges (0-101 or 215-232)
+  ansible.builtin.assert:
+    that:
+      - (ros_domain_id | int) >= 0
+      - >-
+        (ros_domain_id | int) <= 101 or
+        ((ros_domain_id | int) >= 215 and (ros_domain_id | int) <= 232)
+    fail_msg: >-
+      ros_domain_id must be in the allowed ranges 0-101 or 215-232,
+      got: {{ ros_domain_id }}
+    success_msg: "ros_domain_id {{ ros_domain_id }} is within the allowed ranges"
