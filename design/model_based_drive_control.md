@@ -10,6 +10,7 @@
 - Phase D: 未着手
 - Phase E: 実装済み（`motor_control_lib/wheel_velocity_lqr.hpp`, `ControlCore` の RUN 域 LQR+FF, `velocity_run_*` パラメータ）。**既定は無効**。有効化は Phase A の同定結果（go/no-go 判定）後
 - Phase F: 未着手
+PR #144 との関係: PR #144（走行チューニング基盤の整理）が土台。#144 が提供するのは (a) 加速整形の直交化（デマンド適応 `min_*_accel` / `accel_demand_ref_*` の廃止、ファーム `accel_time_0p1ms_per_rpm` の公開パラメータ廃止 = 内部で 1 固定）、(b) 実行時パラメータのトランザクション反映（全検証 → 一括 commit）、(c) 生の実測 RPM の観測経路（`MotorFeedbackData::velocity_rpm_raw` / `questix_msgs/MotorFeedback.velocity_rpm_raw`）。本計画（状態機械・オブザーバ・RUN 域 LQR+FF・同定ツール）はその上に追加するもので、これらを再実装・復活させない
 関連資料: `~/workspace/mpc_study`（MPC / LQR+FF / MPPI の解説と Python プロトタイプ。`README.md` 5.4 節「LQR+FF」、4 章「線形 MPC」）、`~/workspace/ddt_motor.md`（M0602C 仕様）
 
 ---
@@ -30,7 +31,7 @@
 | 項目 | 事実 | 出典 |
 |---|---|---|
 | 制御周期 | 固定 50 Hz tick、dt は定数 | `drive_control_tick.hpp`, `control_rate: 50.0` |
-| velocity モード | ホストは目標 rpm を送るだけ。加減速は `drive_slew`（レート・デマンド適応・テーパー）+ ファーム `accel_time`（=1、実質なし）の二重プロファイル | `control_core.hpp`, YAML コメント |
+| velocity モード | ホストは目標 rpm を送るだけ。加減速は `drive_slew`（レート制限 + テーパー）に一本化。ファーム `accel_time` は内部で 1 固定（実質なし。PR #144 で公開パラメータから廃止） | `control_core.hpp`, YAML コメント |
 | current モード | ソフト PI: rpm 誤差 → 電流指令、`max_current_amp: 1.0` で固定クランプ、積分は純 P 起動 | `ddt_current_pi.hpp`, `DdtMotorLib::runCurrentLoopStep` |
 | 低 RPM の問題 | ファーム速度ループが低速で減衰不足（目標 95 rpm で 59〜118 rpm を ≈1.8 Hz 往復）。対策は `min_command_rpm` 不感帯と `drive_stop_gate` ヒステリシス | YAML コメント, `drive_stop_gate.hpp` |
 | 停止の問題 | ブレーキ再送の扱い（`stop_resend_interval_ms: 300`, `brake_on_stop: false`）で調整済み。2 段階停止はファーム目標再送が主因 | YAML コメント |
@@ -76,7 +77,7 @@ $$
 $$
 
 - Phase A で rpm 域ごと（例 50 / 100 / 200 / 400 rpm、正負）にステップ応答を取り、**一次で当てはまる領域（RUN）と当てはまらない領域（CREEP）の境界**を決める。2 次（減衰不足）が要る場合はその旨を記録し、Phase E の go/no-go 材料にする。
-- 同定は `accel_time_0p1ms_per_rpm = 1`、`brake_on_stop = false` 固定で行う（ファーム側ランプ・ブレーキは別の系）。
+- 同定は `brake_on_stop = false` 固定で行う（ブレーキは別の系）。ファーム側ランプ（`accel_time_0p1ms_per_rpm`）は PR #144 以降 `drive_component` 内部で 1 固定なので設定不要。
 
 ### 2.3 観測器（両モード共通）
 
@@ -147,7 +148,7 @@ current モード制御則 = i_ff（FF） + 状態 FB（LQR ゲイン） + 外�
 **変更**
 - `scripts/identify/` に以下を追加（Python、ROS 2 依存は rosbag 読みのみ）
   - `step_sequence.py`: `/target_twist` に所定のステップ列を publish する（車輪を浮かせた状態で使用）。velocity モード: 左右同 rpm で 0→50→100→200→400→200→100→50→0、各 4 s 保持、正負。current モード: 既存 PI を経由せず電流を直接与える経路が必要なため、`single_ddt_motor` ノード or 新規 `--current-raw` オプションで電流ステップ ±0.3 / 0.6 / 1.0 A（`max_current_amp` の範囲内）。
-  - `fit_models.py`: rosbag（`/drive_status`: `left/right.current_amp, velocity_rpm, target_rpm`、header.stamp）から、一次遅れ + むだ時間（velocity）/ $a, b_i, d$（current）を最小二乗で当てはめ、rpm 域ごとの当てはまり（R²、残差の周期性）を出力。結果を `identified_params.yaml` として書き出す。
+  - `fit_models.py`: rosbag（`/drive_status`: `left/right.current_amp, velocity_rpm_raw, target_rpm`、header.stamp）から、一次遅れ + むだ時間（velocity）/ $a, b_i, d$（current）を最小二乗で当てはめ、rpm 域ごとの当てはまり（R²、残差の周期性）を出力。結果を `identified_params.yaml` として書き出す。実測 RPM は LPF 前の `velocity_rpm_raw`（PR #144 で追加）を使う。`velocity_rpm` は `measured_lpf_tau_sec` のローパス後で、τ・むだ時間の同定を歪めるため使わない。
 - 収集手順書 `scripts/identify/README.md`（安全手順含む: ジャッキアップ、非常停止の確認、`max_current_amp` 維持、温度監視は Protocol 2 未実装のため手で触って確認、連続通電時間の上限）。
 
 **成果物**: rosbag 一式、`identified_params.yaml`、当てはまりレポート（rpm 域 × 一次/二次の可否）。
@@ -167,11 +168,11 @@ current モード制御則 = i_ff（FF） + 状態 FB（LQR ゲイン） + 外�
 - `motor_control_lib/include/motor_control_lib/drive_mode_fsm.hpp`（純粋関数）
   ```cpp
   enum class DriveMode { kStop, kCreep, kRun };
-  struct FsmConfig { int min_command_rpm; int run_enter_rpm; int run_exit_rpm; /* 既定は min_command_rpm + kExitMarginRpm 相当 */ };
+  struct FsmConfig { int min_command_rpm; int run_enter_rpm; int run_exit_rpm; /* 既定は 0 / 0 = RUN 判定無効 */ };
   DriveMode updateDriveMode(DriveMode prev, int max_abs_cmd_rpm, const FsmConfig&);
   ```
   - `kStop ↔ kCreep` は `drive_stop_gate::updateStopMode` と同じ閾値・ヒステリシス（包含して使う）。
-  - `kCreep ↔ kRun` は新しい閾値対（入り/抜けを分ける）。既定では `run_enter_rpm = run_exit_rpm = min_command_rpm + kExitMarginRpm` とし、`kCreep` が空集合になる = 現行挙動。
+  - `kCreep ↔ kRun` は新しい閾値対（入り/抜けを分ける）。既定は `run_enter_rpm = run_exit_rpm = 0`（RUN 判定無効）。このとき `kCreep` が空集合になり、`drive_stop_gate` の停止/走行 2 状態 = 現行挙動と一致する。
 - `ControlCore::Output` に `DriveMode mode` を追加（`stop` は `mode == kStop` の別名として残す）。
 - `ControlCore::step()` 内で遷移を検出したら、保持している制御状態（Phase C/D/E で増える）を `reset()` する。
 
@@ -306,7 +307,7 @@ current モード制御則 = i_ff（FF） + 状態 FB（LQR ゲイン） + 外�
 
 ## 付録 B: Phase A の収集プロトコル（要約）
 
-1. 車輪を浮かせ、非常停止を確認。`control_mode: velocity`、`accel_time_0p1ms_per_rpm: 1`、`brake_on_stop: false`、`max_linear_accel` は十分大きく（ステップが鈍らないように。例 20）。
+1. 車輪を浮かせ、非常停止を確認。`control_mode: velocity`、`brake_on_stop: false`、`max_linear_accel` は十分大きく（ステップが鈍らないように。例 20）。
 2. `step_sequence.py --mode velocity` で正負のステップ列、各レベル 4 s、2 往復。rosbag: `/drive_status`, `/target_twist`。
 3. `control_mode: current`（既存 PI）で同様に収集（PI 経由の応答。参考データ）。
 4. 電流直接ステップ（`--mode current-raw`、±0.3 / 0.6 / 1.0 A、各 3 s、計 6 回）。連続通電は 1 レベルあたり 10 s 以内、間に 20 s 休止。
