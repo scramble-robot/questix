@@ -1,0 +1,26 @@
+name: Blockly Web
+on:
+  push:
+    branches: [main]
+    paths: ['questix_blockly/web/**', '.github/workflows/blockly-web.yaml']
+  pull_request:
+    paths: ['questix_blockly/web/**', '.github/workflows/blockly-web.yaml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  web:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: questix_blockly/web/package-lock.json
+      - run: npm ci
+        working-directory: questix_blockly/web
+      - run: npm test
+        working-directory: questix_blockly/web
+      - run: npm run build
+        working-directory: questix_blockly/web

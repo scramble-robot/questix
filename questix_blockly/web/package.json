@@ -1,0 +1,17 @@
+{
+  "dependencies": {
+    "blockly": "13.3.0",
+    "vite": "8.3.0"
+  },
+  "name": "questix-blockly",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "vite --host 127.0.0.1 --port 5173 --strictPort",
+    "build": "vite build",
+    "test": "node questix.test.js"
+  },
+  "engines": {
+    "node": ">=22.12"
+  }
+}
