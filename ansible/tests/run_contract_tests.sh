@@ -13,6 +13,17 @@ cd "$REPO_ROOT"
 PASS=0
 FAIL=0
 
+# The contract suite must never modify the developer/CI user's real shell
+# configuration.  Role dependencies are exercised too, so guard this explicitly.
+real_bashrc_fingerprint() {
+    if [ -e "$HOME/.bashrc" ]; then
+        sha256sum "$HOME/.bashrc" | awk '{print $1}'
+    else
+        echo "MISSING"
+    fi
+}
+REAL_BASHRC_BEFORE="$(real_bashrc_fingerprint)"
+
 pass() { echo "PASS: $1"; PASS=$((PASS + 1)); }
 fail() { echo "FAIL: $1"; FAIL=$((FAIL + 1)); }
 
@@ -150,6 +161,13 @@ assert_range_case() {
 
 for v in 0 101 215 232; do assert_range_case "$v" pass; done
 for v in 102 214 233 -1 abc; do assert_range_case "$v" fail; done
+
+REAL_BASHRC_AFTER="$(real_bashrc_fingerprint)"
+if [ "$REAL_BASHRC_BEFORE" = "$REAL_BASHRC_AFTER" ]; then
+    pass "isolation: real user ~/.bashrc remained byte-identical"
+else
+    fail "isolation: real user ~/.bashrc was modified"
+fi
 
 echo ""
 echo "==================================================================="
