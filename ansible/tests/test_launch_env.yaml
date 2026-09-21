@@ -8,6 +8,11 @@
   gather_facts: false
   vars:
     target_user: "{{ lookup('env', 'USER') }}"
+    # robot_autostart has a robotics_workspace role dependency.  Keep that
+    # dependency inside the same temporary test root instead of allowing its
+    # role defaults to touch the developer's real ~/.bashrc or ~/robot_ws.
+    bashrc_path: "{{ questix_robot_config_dir }}/.bashrc"
+    workspace_path: "{{ questix_robot_config_dir }}/robot_ws"
   tasks:
     - name: Exercise robot_autostart launch_env tasks
       ansible.builtin.include_role:
