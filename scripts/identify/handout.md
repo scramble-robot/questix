@@ -13,9 +13,16 @@
 cd ~/questix   # リポジトリの場所
 bash scripts/identify/record.sh
 ```
+このスクリプトは**自分で車輪を回す**（手動操縦のログ取りではない）。必ず先生の指示のもとで、
+車輪を浮かせた状態で実行する。起動前に自動チェックが走り、`drive_component` が上がっていない、
+必要なトピックが見えない、記録できるデータが同定に使えない、のいずれかならその場で止まる。
+
 聞かれたら入力：ロボット ID（機体のラベル）、床（`lifted` など）、電池電圧、積載、メモ。
 Enter で開始 → 車輪が 20〜400 rpm を段階的に正転・逆転する（約 2.5 分）。**手を近づけない**。
-終わると `~/ident_data/ident_<ID>_<床>_<日時>/` ができる（`meta.yaml` と `bag/`）。
+終わると `~/ident_data/ident_<ID>_<床>_<日時>/` ができる。中身は測定データ（`bag/`）と、
+「どのソースコード・どの設定・どの条件で測ったか」の記録（`meta.yaml`、`source_identity.txt`、
+`drive_component_params_*.yaml`、`bag_info.txt` など）。**後から結果を説明できるように、
+フォルダはまるごと残す**。`warning:` が出たら内容をメモしておく（例：設定が途中で変わった）。
 
 ## 2. 自分のデータを見る（10 分）
 ```bash
@@ -36,7 +43,8 @@ python3 scripts/identify/batch_fit.py ~/ident_data/ident_* --out ~/ident_data/re
 - 「モデルが当てはまる領域だけにモデルベース制御（LQR）を使う」という設計判断をどう思うか。
 
 ## 4. 提出（2 分）
-`~/ident_data/ident_*` フォルダ（bag/ と meta.yaml）をそのまま共有フォルダ／USB へ。数 MB。
+`~/ident_data/ident_*` フォルダを**中身を消さずまるごと**共有フォルダ／USB へ。数 MB。
+（`bag/` だけ出すと、どの条件で測ったか分からなくなり同定に使えない。）
 運営は `batch_fit.py` で全員分をまとめ、`sufficiency.md` で「どの条件のデータが足りているか」を判定して、順次 `launcher/config/drive_component.yaml` の `velocity_run_*` / `drive_fsm_run_*` を更新する。
 
 ---
