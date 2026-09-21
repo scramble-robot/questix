@@ -25,8 +25,9 @@ cat results/summary.md results/sufficiency.md       # τ / d / R² / RUN 境界�
 
 1. 車輪を浮かせ（ジャッキアップ）、非常停止が効くことを確認する。
 2. `launcher/config/drive_component.yaml` を同定用に: `control_mode: velocity`,
-   `accel_time_0p1ms_per_rpm: 1`, `brake_on_stop: false`, `max_linear_accel: 20.0`
-   （ステップが鈍らないよう十分大きく。終わったら元に戻す）。`drive_fsm_run_*` と
+   `brake_on_stop: false`, `max_linear_accel: 20.0`
+   （ステップが鈍らないよう十分大きく。終わったら元に戻す）。ファーム側加速時間は
+   `drive_component` 内部で 1 固定なので設定不要。`drive_fsm_run_*` と
    `velocity_run_lqr_enabled` は既定（無効）のまま。
 3. 統合起動し、別端末で記録と刺激を開始:
    ```bash
@@ -39,6 +40,10 @@ cat results/summary.md results/sufficiency.md       # τ / d / R² / RUN 境界�
    ```bash
    python3 scripts/identify/fit_models.py --bag ident_velocity_XXXX --mode velocity --out design/identification/velocity_XXXX.yaml
    ```
+   実測 RPM は `/drive_status` の `left/right.velocity_rpm_raw`（LPF 前の生値）を使う。
+   `velocity_rpm` は `measured_lpf_tau_sec` のローパス後で τ・むだ時間を歪めるため使わない。
+   `velocity_rpm_raw` を持たない旧定義の `questix_msgs` ではエラーで止まる（黙って切り替えない）。
+
    レポートの見方:
    - `overall`: 全区間の一次遅れ当てはめ（τ, むだ時間, R²）
    - `per_level`: |目標 RPM| ごとの R²。**R² ≥ 0.9 の最小レベルが `drive_fsm_run_enter_rpm` の目安**。

@@ -7,7 +7,10 @@
 """ステップ応答から一次遅れ + むだ時間モデルを同定する（design/model_based_drive_control.md Phase A）。
 
 入力:
-  --bag <rosbag2 dir>   /drive_status (questix_msgs/DriveStatus) を読む（ROS 2 環境が必要）
+  --bag <rosbag2 dir>   /drive_status (questix_msgs/DriveStatus) を読む（ROS 2 環境が必要）。
+                        実測 RPM は LPF 前の velocity_rpm_raw を使う（ローパス後の velocity_rpm は
+                        τ・むだ時間の同定を歪める）。velocity_rpm_raw を持たない旧定義の
+                        questix_msgs では黙って velocity_rpm に切り替えず、エラーで止まる。
   --csv <file>          列: t, left_target, left_meas, right_target, right_meas
                         [, left_current, right_current]（current モード用、単位 A）
 
@@ -59,14 +62,21 @@ def load_bag(path, topic="/drive_status"):
     if topic not in types:
         raise SystemExit(f"bag に {topic} がありません: {list(types)}")
     msg_type = get_message(types[topic])
+    # 同定は LPF 前の生値で行う。旧定義（velocity_rpm_raw なし）の questix_msgs では測定の
+    # 意味が変わる（ローパス後の値になる）ため、黙って velocity_rpm に切り替えずに止める。
+    if not hasattr(msg_type().left, "velocity_rpm_raw"):
+        raise SystemExit(
+            "questix_msgs/MotorFeedback に velocity_rpm_raw がありません。velocity_rpm_raw を含む "
+            "questix_msgs をビルド・source し、その定義で記録した bag を使ってください"
+            "（旧 bag は LPF 後の velocity_rpm しか持たず、同定の測定基準が異なります）")
     rows = []
     while reader.has_next():
         name, raw, t_ns = reader.read_next()
         if name != topic:
             continue
         m = deserialize_message(raw, msg_type)
-        rows.append((t_ns * 1e-9, m.left.target_rpm, m.left.velocity_rpm, m.right.target_rpm,
-                     m.right.velocity_rpm, m.left.current_amp, m.right.current_amp))
+        rows.append((t_ns * 1e-9, m.left.target_rpm, m.left.velocity_rpm_raw, m.right.target_rpm,
+                     m.right.velocity_rpm_raw, m.left.current_amp, m.right.current_amp))
     if not rows:
         raise SystemExit("メッセージがありません")
     arr = np.array(rows, dtype=float)
