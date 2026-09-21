@@ -91,6 +91,18 @@ control_rate Hz の固定 tick:
 | `velocity_run_invert_measured` | false | ○ | 実測 RPM の符号反転（正帰還になる場合のみ） |
 | `velocity_run_feedback_max_age_sec` | 0.1 | ○ | 両輪の `velocity_rpm_raw` がこれより古ければ FF のみ（> 0） |
 
+`velocity_run_*`（上表のうち `velocity_run_feedback_max_age_sec` を除く）を実行時に変更すると、
+旧モデルで育ったオブザーバ / LQR の内部状態（推定 RPM・外乱推定・入力履歴・前回参照）は
+破棄され、次の有効なフィードバックで実測 RPM から初期化し直される。走行中に LQR を
+ON/OFF しても、変更前のモデル由来の推定値が新しい設定へ持ち越されることはない。
+一方でスルーレートの前回指令と走行状態（STOP / CREEP / RUN）は維持するので、パラメータを
+触った瞬間に指令が飛ぶことはない。`velocity_run_*` 以外（加速度上限・不感帯など）の変更では
+オブザーバ / LQR の状態は消さない。
+
+`velocity_run_feedback_max_age_sec` はフィードバックの鮮度判定であり制御器のモデルではない
+ため、この破棄の対象に含めない（古くなった時点で既存のフィードバック無効経路が同じ状態を
+リセットする）。
+
 ### 観測・レポート
 
 | パラメータ | 既定値 | 実行時変更 | 効き |
