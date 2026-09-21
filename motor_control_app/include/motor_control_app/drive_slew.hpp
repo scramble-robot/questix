@@ -77,38 +77,9 @@ inline double clampRate(double target, double last, double max_accel, double dt_
   return clampRateTapered(target, last, max_accel, dt_sec, /*taper_band=*/0.0);
 }
 
-// 入力デマンド（残差 = |目標 - 前回指令|）に応じて加速度上限を min_accel..max_accel の範囲で
-// 線形補間する。residual が 0 のとき min_accel、demand_ref 以上のとき max_accel。
-//
-// これにより「スティックを速く/大きく倒すほど加速度が強く、ゆっくり/わずかに倒すと穏やか」に
-// なる。スティックを速く倒すほど 1 メッセージあたりの目標変化（残差）が大きくなり、accel が
-// max 側へ寄る。逆にじわっと倒すと残差が小さいまま推移し、accel は min 付近にとどまる。
-//
-// 適応を無効化する条件では max_accel をそのまま返し、従来の一定加速度クランプと一致する:
-//   - demand_ref <= 0（基準未設定）
-//   - min_accel <= 0（下限未設定）
-//   - min_accel >= max_accel（範囲が縮退）
-inline double demandScaledAccel(double residual, double min_accel, double max_accel,
-                                double demand_ref) {
-  if (demand_ref <= 0.0 || min_accel <= 0.0 || min_accel >= max_accel) {
-    return max_accel;
-  }
-  const double t = std::clamp(std::abs(residual) / demand_ref, 0.0, 1.0);
-  return min_accel + (max_accel - min_accel) * t;
-}
-
-// デマンド適応 + テーパー付きスルーレート制限。max_accel <= 0 で制限無効（target をそのまま
-// 返す）。加速度上限を demandScaledAccel で残差に応じて決めたうえで clampRateTapered に渡す。
-// 適応無効条件（demand_ref/min_accel が上記のいずれか）では clampRateTapered(max_accel) と同一。
-inline double clampRateAdaptive(double target, double last, double min_accel, double max_accel,
-                                double demand_ref, double dt_sec, double taper_band) {
-  if (max_accel <= 0.0) {
-    return target;
-  }
-  const double residual = std::abs(target - last);
-  const double accel = demandScaledAccel(residual, min_accel, max_accel, demand_ref);
-  return clampRateTapered(target, last, accel, dt_sec, taper_band);
-}
+// 注: デマンド適応加速度（demandScaledAccel / clampRateAdaptive）は実機評価の結果、
+// 削除した。残差ベースの適応は「入力の丁寧さ」と「追従の遅れ」を区別できず、微小入力の
+// 応答を鈍くしていた（狙いと逆。design/drive_control_refactor.md 参照）。
 
 // ホスト側スルーレート制限 max_linear_accel [m/s^2] を、ファーム側 accel_time と同じ単位
 // （ms/rpm = 1 rpm の目標変化にかかる時間）へ換算する。

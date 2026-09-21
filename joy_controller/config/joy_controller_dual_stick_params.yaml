@@ -2,7 +2,7 @@
 # This file contains the default parameters for the dual stick differential drive controller
 
 # Movement control parameters
-joy_controller_dual_stick:
+/**:
   ros__parameters:
     # Input scaling ratios
     longitudinal_input_ratio: 0.05 # Wheel velocity scaling (same as joy_controller)

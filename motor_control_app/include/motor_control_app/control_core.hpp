@@ -26,11 +26,6 @@ struct Config {
   // スルーレート制限（加速度クランプ）
   double max_linear_accel{0.0};   // [m/s^2] 0 以下で制限無効
   double max_angular_accel{0.0};  // [rad/s^2] 0 以下で制限無効
-  // デマンド適応加速度の下限と基準残差。0 以下で適応無効（max 一定クランプ）
-  double min_linear_accel{0.0};          // [m/s^2]
-  double min_angular_accel{0.0};         // [rad/s^2]
-  double accel_demand_ref_linear{0.0};   // [m/s]
-  double accel_demand_ref_angular{0.0};  // [rad/s]
   // 目標接近時のレート絞り幅（実効ジャーク制限）。0 で無効
   double slew_taper_band_linear{0.0};   // [m/s]
   double slew_taper_band_angular{0.0};  // [rad/s]
@@ -61,7 +56,7 @@ struct Output {
  * @brief ホスト側走行制御のコア。ROS にもシリアルにも依存しない。
  *
  * 1 ステップの流れ:
- *   目標 twist -> スルーレート制限（デマンド適応 + テーパー）-> 運動学変換（左右車輪 RPM）
+ *   目標 twist -> スルーレート制限（テーパー付き）-> 運動学変換（左右車輪 RPM）
  *   -> 最近接整数へ丸め -> 停止/走行ヒステリシス判定（低速不感帯）
  *
  * 既存の純粋関数（drive_slew / differential_kinematics / drive_stop_gate）を合成した層で、
@@ -83,14 +78,13 @@ public:
    * @param dt_sec 制御周期 [s]（固定値を想定）
    */
   Output step(double target_linear, double target_angular, double dt_sec) {
-    // 加速度クランプ。上限はデマンド（残差 = |目標 - 前回指令|）に応じて
-    // min..max へ適応し、目標接近時はテーパーでさらに絞る。詳細は drive_slew.hpp。
-    last_linear_ = drive_slew::clampRateAdaptive(
-        target_linear, last_linear_, config_.min_linear_accel, config_.max_linear_accel,
-        config_.accel_demand_ref_linear, dt_sec, config_.slew_taper_band_linear);
-    last_angular_ = drive_slew::clampRateAdaptive(
-        target_angular, last_angular_, config_.min_angular_accel, config_.max_angular_accel,
-        config_.accel_demand_ref_angular, dt_sec, config_.slew_taper_band_angular);
+    // 加速度クランプ。目標接近時はテーパーで絞る（実効ジャーク制限）。詳細は drive_slew.hpp。
+    last_linear_ =
+        drive_slew::clampRateTapered(target_linear, last_linear_, config_.max_linear_accel, dt_sec,
+                                     config_.slew_taper_band_linear);
+    last_angular_ =
+        drive_slew::clampRateTapered(target_angular, last_angular_, config_.max_angular_accel,
+                                     dt_sec, config_.slew_taper_band_angular);
 
     const auto [left_rpm, right_rpm] = motor_control_lib::differential_kinematics::twistToWheelRpm(
         last_linear_, last_angular_, config_.wheel_radius, config_.wheel_separation);

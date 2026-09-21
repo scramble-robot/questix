@@ -75,6 +75,7 @@ public:
   CallbackReturn on_error(const rclcpp_lifecycle::State& state) override;
 
 private:
+  friend struct DriveParamPolicyAccess;
   /**
    * @brief Twistメッセージのコールバック関数
    *
@@ -166,8 +167,8 @@ private:
    * 実機で `ros2 param set` しながら加減速の詰めができるようにするためのもの。
    * 対象はスルーレート系・不感帯・停止ブレーキ・平滑化など「再初期化なしで
    * 反映できる」パラメータに限る。シリアルポート・モータ ID・control_mode・
-   * control_rate などの構造的パラメータは対象外で、変更しても次の
-   * cleanup -> configure まで反映されない（その旨を警告ログに出す）。
+   * control_rate などの構造的パラメータは実行時変更を拒否する。
+   * 全値の検証に成功した要求だけを反映する。
    */
   rcl_interfaces::msg::SetParametersResult onParameterChange(
       const std::vector<rclcpp::Parameter>& params);
@@ -240,15 +241,6 @@ private:
   // 加速度制限（スルーレート）
   double max_linear_accel_;   // [m/s^2] 負値または0で制限無効
   double max_angular_accel_;  // [rad/s^2] 負値または0で制限無効
-  // デマンド適応加速度の下限。スティックをゆっくり/わずかに倒したときの加速度上限。
-  // 0 以下で適応無効＝max_*_accel の一定クランプ（従来挙動）。詳細は
-  // drive_slew::demandScaledAccel。
-  double min_linear_accel_{0.0};   // [m/s^2]
-  double min_angular_accel_{0.0};  // [rad/s^2]
-  // 加速度が min から max へ達するデマンド基準（残差 = |目標 - 前回指令|）。
-  // 0 以下で適応無効。詳細は drive_slew::demandScaledAccel。
-  double accel_demand_ref_linear_{0.3};   // [m/s]
-  double accel_demand_ref_angular_{0.5};  // [rad/s]
   // 目標接近時のレート絞り幅（実効的なジャーク制限）。残差がこの幅に入ると 1 ステップの
   // 上限を残差比例で縮め、飽和点で加速度がステップで 0 に落ちないようにする。0 で無効
   // （従来の一次レート制限）。詳細は drive_slew::clampRateTapered。
@@ -274,9 +266,6 @@ private:
 
   // 停止時の電気ブレーキ（velocity モードのみ）
   bool brake_on_stop_{false};
-
-  // ファーム側加速時間 [0.1ms/rpm]（velocity モードのみ）
-  int accel_time_0p1ms_per_rpm_{1};
 
   // 指令を許す最低車輪 RPM（低速不感帯）。0 で不感帯なし
   int min_command_rpm_{5};

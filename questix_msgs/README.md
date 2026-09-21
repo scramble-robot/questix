@@ -27,7 +27,8 @@ DDT M0602C の Protocol 1 応答フレームをデコードした 1 モータ分
 | `mode` | `uint8` | ファーム報告の制御モード(DATA[1])。定数 `MODE_CURRENT_LOOP=1` / `MODE_VELOCITY_LOOP=2` |
 | `current_raw` | `int16` | トルク電流の生値(DATA[2..3], 符号付き)。-32767..32767 ↔ -8..+8 A |
 | `current_amp` | `float32` | `current_raw * 8.0 / 32767.0` [A] |
-| `velocity_rpm` | `int16` | 実測輪速 [RPM](DATA[4..5], 符号付き) |
+| `velocity_rpm` | `int16` | 実測輪速 [RPM](DATA[4..5], 符号付き)。`measured_lpf_tau_sec > 0` のときはローパス済み(既定 tau=0.15s) |
+| `velocity_rpm_raw` | `int16` | 実測輪速のフィルタ前生値 [RPM]。同定・振動解析用(ローパス済み値はファーム速度ループの ~1.8Hz 振動を約半分に見せる) |
 | `target_rpm` | `int16` | 最終指令値 [RPM](`max_motor_rpm` でクランプ後) |
 | `position_raw` | `uint16` | ロータ位置(DATA[6..7])。0..32767 ↔ 0..360 deg |
 | `temperature` | `uint8` | [deg C] **現状常に 0**。DDT Protocol 2 (0x74) 未実装。実装時にフィールドを変えずに済むよう定義だけ残している |

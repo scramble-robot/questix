@@ -11,6 +11,9 @@ YAML 読み込みより後に置くことで launcher からの指定が勝つ�
     <arg name="config_file"
          default="$(find-pkg-share joy_controller)/config/joy_controller_params.yaml"
          description="Path to the joy_controller configuration YAML" />
+    <arg name="dual_stick_config_file"
+         default="$(find-pkg-share joy_controller)/config/joy_controller_dual_stick_params.yaml"
+         description="Path to the dual stick configuration YAML" />
     <arg name="joy_node_config_file"
          default="$(find-pkg-share joy_controller)/config/joy_node_params.yaml"
          description="Path to the joy_node configuration YAML" />
@@ -42,7 +45,7 @@ YAML 読み込みより後に置くことで launcher からの指定が勝つ�
 
     <!-- Joy controller dual stick node (dual stick mode) -->
     <node pkg="joy_controller" exec="joy_controller_dual_stick_node" name="joy_controller" output="screen" if="$(var dual_stick)">
-        <param from="$(var config_file)" />
+        <param from="$(var dual_stick_config_file)" />
         <param name="joy_topic" value="$(var joy_topic)" />
     </node>
 </launch>
