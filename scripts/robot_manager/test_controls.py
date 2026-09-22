@@ -255,3 +255,19 @@ def test_independent_tilt_save_reload_and_duplicate_validation(client):
             'revision': current['revision'], 'values': bad})
         assert response.status_code == 422
         assert profile(client)['values'] == current['values']
+
+
+@pytest.mark.parametrize('controller', ['uart', 'dualshock'])
+@pytest.mark.parametrize('number', [2, 2.0])
+def test_integer_looking_speed_is_saved_as_ros_double(client, tmp_path, controller, number):
+    """JSON 2 and 2.0 both persist as YAML doubles, while button indices stay integers."""
+    current = profile(client, controller)
+    current['values']['joy_controller']['longitudinal_input_ratio'] = number
+    response = client.put(f'/api/control-config/{controller}', json={
+        'revision': current['revision'], 'values': current['values']})
+    assert response.status_code == 200, response.text
+    assert type(response.json()['values']['joy_controller']['longitudinal_input_ratio']) is float
+    saved = yaml.safe_load((tmp_path / f'controls.{controller}.yaml').read_text())
+    speed = saved['joy_controller']['ros__parameters']['longitudinal_input_ratio']
+    assert speed == 2.0 and type(speed) is float
+    assert type(saved['shot_component']['ros__parameters']['fire_button']) is int

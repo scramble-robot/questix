@@ -680,3 +680,26 @@ test('rounded upper bounds remain valid and reset retains direction after cleari
   document.getElementById('controls-reset').events.click();
   assert.equal(vm.runInContext('controlDraft.joy_controller.angular_input_ratio', context), -20);
 });
+
+for (const entered of ['2', '2.0']) {
+  test(`typing ${entered} produces numeric payloads for all four tuning fields`, async () => {
+    const { document, context, getPayload } = editorFixture({
+      joy_controller: { longitudinal_input_ratio: 1.5 },
+    });
+    await vm.runInContext('loadControls("uart")', context);
+    for (const [node, key] of [
+      ['joy_controller', 'longitudinal_input_ratio'], ['joy_controller', 'angular_input_ratio'],
+      ['esc_motor_control', 'full_speed_value'], ['uart_joy_driver', 'deadzone'],
+    ]) {
+      const input = document.getElementById(`control-${node}-${key}`);
+      input.value = entered;
+      input.events.input();
+    }
+    await vm.runInContext('saveControls({preventDefault() {}})', context);
+    const values = getPayload().values;
+    assert.equal(values.joy_controller.longitudinal_input_ratio, 2);
+    assert.equal(values.joy_controller.angular_input_ratio, 2 / (180 / Math.PI));
+    assert.equal(values.esc_motor_control.full_speed_value, 0.02);
+    assert.equal(values.uart_joy_driver.deadzone, 0.02);
+  });
+}
