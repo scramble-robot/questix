@@ -132,7 +132,7 @@ const ControllerMap = (() => {
 
   function draw(controller, compact, usedSpots) {
     const dual = controller === "dualshock";
-    const svg = element("svg", { viewBox: compact ? "80 10 560 350" : "-145 -15 1010 405", role: "group",
+    const svg = element("svg", { viewBox: compact ? "130 10 460 350" : "-95 -15 910 405", role: "group",
       "aria-label": `${dual ? "DualShock" : "Switch"} コントローラーの操作図` });
     svg.append(element("title", {}, "ボタンやスティックを選ぶと、機能の割り当てを編集できます。"));
     const defs = element("defs");
@@ -141,12 +141,13 @@ const ControllerMap = (() => {
       element("stop", { offset: "1", "stop-color": "#202c36" }));
     defs.append(gradient);
     svg.append(defs);
-    svg.append(element("ellipse", { cx: 360, cy: 329, rx: 242, ry: 19, fill: "#060d14", opacity: ".35" }));
-    svg.append(element("path", { d: "M192 112 Q157 108 143 150 L105 291 Q98 326 125 338 "
-      + "Q154 351 174 323 L239 263 Q260 256 280 264 L440 264 Q460 256 481 263 "
-      + "L546 323 Q566 351 595 338 Q622 326 615 291 L577 150 Q563 108 528 112 Z",
+    svg.append(element("ellipse", { cx: 360, cy: 329, rx: 192, ry: 19, fill: "#060d14", opacity: ".35" }));
+    svg.append(element("path", { d: "M242 112 Q207 108 193 150 L155 291 Q148 326 175 338 "
+      + "Q204 351 224 323 L289 263 Q310 256 330 264 L390 264 Q410 256 431 263 "
+      + "L496 323 Q516 351 545 338 Q572 326 565 291 L527 150 Q513 108 478 112 "
+      + "L430 118 Q360 154 290 118 Z",
     fill: "url(#controller-shell)", stroke: "#6b7e8c", "stroke-width": 1.5 }));
-    svg.append(element("path", { d: "M161 251 L131 311 Q128 321 140 320 L216 255 M559 251 L589 311 Q592 321 580 320 L504 255",
+    svg.append(element("path", { d: "M211 251 L181 311 Q178 321 190 320 L266 255 M509 251 L539 311 Q542 321 530 320 L454 255",
       fill: "none", stroke: "#8493a0", "stroke-width": 2, opacity: ".2" }));
     svg.append(element("text", { x: 360, y: 325, "text-anchor": "middle", fill: "#a9b8ca",
       "font-size": 10, "letter-spacing": 3 }, dual ? "DUALSHOCK" : "SWITCH / UART"));
@@ -176,23 +177,23 @@ const ControllerMap = (() => {
       svg.append(group);
       spots.set(id, { group, x, y, radius, name });
     }
-    spot("left-trigger", 208, 43, dual ? "L2" : "ZL", 43, "rect");
-    spot("right-trigger", 512, 43, dual ? "R2" : "ZR", 43, "rect");
-    spot("left-shoulder", 208, 93, dual ? "L1" : "L", 43, "rect");
-    spot("right-shoulder", 512, 93, dual ? "R1" : "R", 43, "rect");
+    spot("left-trigger", 258, 43, dual ? "L2" : "ZL", 43, "rect");
+    spot("right-trigger", 462, 43, dual ? "R2" : "ZR", 43, "rect");
+    spot("left-shoulder", 258, 93, dual ? "L1" : "L", 43, "rect");
+    spot("right-shoulder", 462, 93, dual ? "R1" : "R", 43, "rect");
     // Keep the central area quiet; auxiliary buttons appear when assigned.
-    if (usedSpots.has("menu-left")) spot("menu-left", dual ? 288 : 310, 136, dual ? "SHARE" : "−", 20);
-    if (usedSpots.has("menu-right")) spot("menu-right", dual ? 432 : 410, 136, dual ? "OPTIONS" : "+", 20);
-    if (usedSpots.has("home")) spot("home", dual ? 360 : 400, 231, dual ? "PS" : "HOME", 19);
-    if (!dual && usedSpots.has("capture")) spot("capture", 320, 231, "▣", 19);
-    spot("left-stick", dual ? 275 : 202, dual ? 267 : 181, "L", 34);
-    spot("right-stick", 445, 267, "R", 34);
-    const dx = dual ? 201 : 270;
+    if (usedSpots.has("menu-left")) spot("menu-left", 330, 171, dual ? "SHARE" : "−", 20);
+    if (usedSpots.has("menu-right")) spot("menu-right", 390, 171, dual ? "OPTIONS" : "+", 20);
+    if (usedSpots.has("home")) spot("home", 360, 215, dual ? "PS" : "HOME", 19);
+    if (!dual && usedSpots.has("capture")) spot("capture", 320, 215, "▣", 19);
+    spot("left-stick", dual ? 315 : 252, dual ? 267 : 181, "L", 34);
+    spot("right-stick", 405, 267, "R", 34);
+    const dx = dual ? 251 : 310;
     const dy = dual ? 187 : 270;
     spot("dpad", dx, dy, "✚", 30);
     for (const [direction, x, y, label] of [
-      ["top", 520, 151, dual ? "△" : "X"], ["right", 554, 185, dual ? "○" : "A"],
-      ["bottom", 520, 219, dual ? "×" : "B"], ["left", 486, 185, dual ? "□" : "Y"],
+      ["top", 470, 151, dual ? "△" : "X"], ["right", 504, 185, dual ? "○" : "A"],
+      ["bottom", 470, 219, dual ? "×" : "B"], ["left", 436, 185, dual ? "□" : "Y"],
     ]) spot(`face-${direction}`, x, y, label, 20);
     return { svg, spots };
   }
@@ -259,7 +260,8 @@ const ControllerMap = (() => {
       group.classList.add("map-assigned");
       if (mapped.some((card) => card.assignment.changed)) group.classList.add("map-changed");
       [...assignedNumbers].forEach((number, index) => {
-        const badgeX = x + radius - 4 + index * 24;
+        const badgeIndex = x < 360 ? assignedNumbers.size - index - 1 : index;
+        const badgeX = x + (x < 360 ? -1 : 1) * (radius - 4 + badgeIndex * 24);
         const assignment = mapped.find((card) => card.assignment.number === number).assignment;
         const actionId = `${assignment.node}.${assignment.key}`;
         // Siblings, not nested buttons: each number edits its own function.
@@ -274,9 +276,9 @@ const ControllerMap = (() => {
         if (!options.compact) {
           const left = x < 360;
           const rowY = calloutRows.get(actionId);
-          const labelX = left ? -124 : 666;
-          const edgeX = left ? 55 : 655;
-          const elbowX = left ? 80 : 632;
+          const labelX = left ? -74 : 616;
+          const edgeX = left ? 105 : 605;
+          const elbowX = left ? 130 : 582;
           badge.append(element("path", { d: `M${x + (left ? -radius : radius)} ${y} L${elbowX} ${rowY} H${edgeX}`,
             fill: "none", stroke: colors[number], "stroke-width": 1, opacity: ".45", "pointer-events": "none" }),
           element("rect", { x: labelX - 6, y: rowY - 27, width: 184, height: 48, rx: 9,

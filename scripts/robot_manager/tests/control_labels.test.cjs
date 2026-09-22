@@ -432,7 +432,7 @@ test('desktop drawing names each function while mobile keeps the compact diagram
   context.window.innerWidth = 390;
   vm.runInContext('renderControllerMap()', context);
   const host = document.getElementById('controller-map');
-  assert.equal(host.children[0].attributes.viewBox, '80 10 560 350');
+  assert.equal(host.children[0].attributes.viewBox, '130 10 460 350');
   badge = document.querySelector('[data-map-function="shot_component.fire_button"]');
   assert.equal(badge.children.some((item) => item.attributes.class === 'map-callout-hit'), false);
   const card = document.querySelector('[data-action="shot_component.fire_button"]');
