@@ -156,7 +156,7 @@
               <button type="button" id="map-close" class="btn btn-small" aria-label="割り当て編集を閉じる">閉じる</button>
             </div>
             <div class="map-editor-fields" id="map-standard-fields">
-              <label for="map-input">使う入力<select id="map-input"></select></label>
+              <label for="map-input"><span id="map-input-caption">使う入力</span><select id="map-input"></select></label>
               <label for="map-action">割り当てる機能<select id="map-action"></select></label>
             </div>
             <div class="map-editor-fields" id="map-tilt-fields" hidden>
@@ -171,9 +171,11 @@
               <label for="map-tilt-down" id="map-tilt-down-row">下げるボタン<select id="map-tilt-down"></select></label>
             </div>
             <p id="map-current" class="map-help"></p>
+            <p id="map-tilt-opposite" class="map-help" hidden></p>
             <p id="map-preview" class="map-help" role="status"></p>
             <button type="button" id="map-apply" class="btn btn-small">編集値に反映</button>
             <button type="button" id="map-edit-draft" class="btn btn-small" hidden>編集中に切り替える</button>
+            <button type="button" id="map-tilt-pair" class="btn btn-small" hidden>チルトの操作方法・上下をまとめて編集</button>
             <p id="map-feedback" class="map-help" role="status"></p>
           </dialog>
         </section>
@@ -378,8 +380,8 @@
 
   <script src="/static/app.js?v=9"></script>
   <script src="/static/control-labels.js?v=1"></script>
-  <script src="/static/controller-map.js?v=7"></script>
-  <script src="/static/controls.js?v=9"></script>
+  <script src="/static/controller-map.js?v=8"></script>
+  <script src="/static/controls.js?v=10"></script>
 </body>
 
 </html>

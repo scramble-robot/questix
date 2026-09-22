@@ -14,9 +14,23 @@ let mapReturnTarget = null;
 
 function isTiltEditor() {
   return mapSelection?.mode === "action"
-    && ["tilt_axis", "tilt_up_button_index", "tilt_down_button_index"].includes(mapSelection.key)
+    && mapSelection.key === "tilt_axis"
     && ["tilt_axis", "tilt_up_button_index", "tilt_down_button_index"]
       .every((key) => Object.hasOwn(controlDraft?.shot_component || {}, key));
+}
+
+function tiltDirectionKey() {
+  return ["tilt_up_button_index", "tilt_down_button_index"]
+    .find((key) => mapSelection?.actionId === `shot_component.${key}`);
+}
+
+function planMapAssignment(values) {
+  const key = tiltDirectionKey();
+  if (mapSelection.mode === "action" && key) {
+    return ControllerMap.planTiltButton(values, key, Number(mapSelection.inputId.split(":")[1]));
+  }
+  return ControllerMap.planAssignment(controlProfile.controller, values,
+    mapSelection.spot, mapSelection.inputId, mapSelection.actionId);
 }
 
 function tiltSettings(values) {
@@ -156,6 +170,8 @@ function renderMapEditor() {
   const tilt = isTiltEditor();
   document.getElementById("map-standard-fields").hidden = tilt;
   document.getElementById("map-tilt-fields").hidden = !tilt;
+  document.getElementById("map-tilt-pair").hidden = true;
+  document.getElementById("map-tilt-opposite").hidden = true;
   if (tilt) { renderTiltEditor(values, saved); return; }
   const input = document.getElementById("map-input");
   const action = document.getElementById("map-action");
@@ -164,6 +180,14 @@ function renderMapEditor() {
   const inputs = actionMode
     ? ControllerMap.destinations(controlProfile.controller, mapSelection.key)
     : ControllerMap.inputs(controlProfile.controller, mapSelection.spot);
+  // Preserve an existing custom button number when opening a direction editor.
+  if (actionMode && tiltDirectionKey()) {
+    const value = values.shot_component[mapSelection.key];
+    if (!inputs.some((item) => item.id === `button:${value}`)) {
+      inputs.push({ id: `button:${value}`, kind: "button", value, spot: null,
+        label: ControlLabels.valueLabel(controlProfile.controller, mapSelection.key, value) });
+    }
+  }
   mapSelectOptions(input, inputs, mapSelection.inputId);
   mapSelection.inputId = input.value;
   const channel = inputs.find((item) => item.id === input.value);
@@ -177,6 +201,19 @@ function renderMapEditor() {
     label: ControllerMap.actionLabel(item.key, item.action) })),
     mapSelection.actionId || currentAction);
   mapSelection.actionId = action.value;
+  const direction = tiltDirectionKey();
+  document.getElementById("map-input-caption").textContent = actionMode && direction
+    ? direction === "tilt_up_button_index" ? "上げるボタン" : "下げるボタン" : "使う入力";
+  if (direction) {
+    const other = direction === "tilt_up_button_index" ? "tilt_down_button_index" : "tilt_up_button_index";
+    const opposite = document.getElementById("map-tilt-opposite");
+    opposite.hidden = false;
+    opposite.textContent = `${direction === "tilt_up_button_index" ? "下げる" : "上げる"}（現在）: `
+      + ControlLabels.valueLabel(controlProfile.controller, other, values.shot_component[other]);
+    const pair = document.getElementById("map-tilt-pair");
+    pair.hidden = false;
+    pair.disabled = controlsBusy;
+  }
   document.getElementById("map-current").textContent = `${saved ? "保存済み" : "編集中"}の割り当て: `
     + (current.map((item) => item.action).join("、") || "なし");
   const apply = document.getElementById("map-apply");
@@ -192,8 +229,7 @@ function renderMapEditor() {
     return;
   }
   try {
-    const changes = ControllerMap.planAssignment(controlProfile.controller, values,
-      mapSelection.spot, input.value, action.value);
+    const changes = planMapAssignment(values);
     const selected = actions.find((item) => item.id === action.value);
     const previous = ControlLabels.valueLabel(controlProfile.controller, selected.key, values[selected.node][selected.key]);
     const shared = current.filter((item) => `${item.node}.${item.key}` !== action.value);
@@ -216,8 +252,7 @@ function applyMapAssignment() {
   try {
     const tilt = isTiltEditor();
     const changes = tilt ? ControllerMap.planTiltAssignment(mapSelection.tilt)
-      : ControllerMap.planAssignment(controlProfile.controller, controlDraft,
-        mapSelection.spot, mapSelection.inputId, mapSelection.actionId);
+      : planMapAssignment(controlDraft);
     for (const { node, key, value } of changes) {
       controlDraft[node][key] = value;
       document.getElementById(`control-${node}-${key}`).value = String(value);
@@ -524,6 +559,11 @@ async function saveControls(event) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("map-tilt-pair").addEventListener("click", () => {
+    if (controlsBusy || !tiltDirectionKey()) return;
+    openMapEditor({ mode: "action", key: "tilt_axis", title: "5 · チルト上下",
+      actionId: "shot_component.tilt_axis" }, mapReturnTarget);
+  });
   for (const [id, key] of [["map-tilt-mode", "mode"], ["map-tilt-axis", "axis"],
     ["map-tilt-up", "up"], ["map-tilt-down", "down"]]) {
     document.getElementById(id).addEventListener("change", () => {

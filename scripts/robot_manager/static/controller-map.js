@@ -95,16 +95,26 @@ const ControllerMap = (() => {
     const input = inputs(controller, spot).find((item) => item.id === inputId);
     const action = input && actions(values, input.kind).find((item) => item.id === actionId);
     if (!action) throw new Error("入力と機能の組み合わせを選んでください。");
-    const changes = [{ node: action.node, key: action.key, value: input.value }];
     if (action.key === "tilt_up_button_index" || action.key === "tilt_down_button_index") {
-      const other = action.key === "tilt_up_button_index" ? "tilt_down_button_index" : "tilt_up_button_index";
-      if (!Object.hasOwn(values.shot_component, "tilt_axis")) throw new Error("チルト設定を読み直してください。");
-      if (values.shot_component[other] === input.value) {
-        throw new Error("チルト上・下には異なるボタンを割り当ててください。");
-      }
-      changes.push({ node: "shot_component", key: "tilt_axis", value: -1 });
+      return planTiltButton(values, action.key, input.value);
     }
-    return changes;
+    return [{ node: action.node, key: action.key, value: input.value }];
+  }
+
+  function planTiltButton(values, key, value) {
+    if (!["tilt_up_button_index", "tilt_down_button_index"].includes(key)
+        || !Number.isInteger(value) || value < 0 || value > 63) {
+      throw new Error("チルトのボタンを選んでください。");
+    }
+    const other = key === "tilt_up_button_index" ? "tilt_down_button_index" : "tilt_up_button_index";
+    const shot = values.shot_component || {};
+    if (![key, other, "tilt_axis"].every((field) => Object.hasOwn(shot, field))) {
+      throw new Error("チルト設定を読み直してください。");
+    }
+    if (shot[other] === value) throw new Error("チルト上・下には異なるボタンを割り当ててください。");
+    // A direction edit never includes the opposite button in its patch.
+    return [{ node: "shot_component", key, value },
+      { node: "shot_component", key: "tilt_axis", value: -1 }];
   }
 
   function planTiltAssignment(settings) {
@@ -314,6 +324,6 @@ const ControllerMap = (() => {
     host.replaceChildren(svg, list);
   }
 
-  return { location, bindings, inputs, actions, destinations, actionLabel, planAssignment, planTiltAssignment, render };
+  return { location, bindings, inputs, actions, destinations, actionLabel, planAssignment, planTiltButton, planTiltAssignment, render };
 })();
 if (typeof module !== "undefined") module.exports = ControllerMap;

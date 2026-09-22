@@ -92,3 +92,20 @@ test('tilt plans update both buttons atomically and reject invalid or duplicate 
     { mode: 'axis', axis: -1 }, { mode: 'axis', axis: null }, { mode: 'invalid', axis: 7 },
   ]) assert.throws(() => map.planTiltAssignment(invalid));
 });
+
+test('single-direction patches preserve the opposite button and select button mode explicitly', () => {
+  const values = { shot_component: { tilt_axis: 7, tilt_up_button_index: 4, tilt_down_button_index: 6 } };
+  for (const key of ['tilt_up_button_index', 'tilt_down_button_index']) {
+    assert.deepEqual(map.planTiltButton(values, key, 0), [
+      { node: 'shot_component', key, value: 0 },
+      { node: 'shot_component', key: 'tilt_axis', value: -1 },
+    ]);
+  }
+  assert.throws(() => map.planTiltButton(values, 'tilt_up_button_index', 6));
+  assert.throws(() => map.planTiltButton(values, 'tilt_down_button_index', 4));
+  assert.throws(() => map.planTiltButton(values, 'fire_button', 0));
+  for (const value of [-1, 64, 0.5, null]) {
+    assert.throws(() => map.planTiltButton(values, 'tilt_up_button_index', value));
+  }
+  assert.deepEqual(values.shot_component, { tilt_axis: 7, tilt_up_button_index: 4, tilt_down_button_index: 6 });
+});
