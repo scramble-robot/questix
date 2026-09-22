@@ -3,26 +3,23 @@ import { QUIZZES } from './data.js';
 
 // New scenarios, independent of the learner's simulation records. Numerical
 // assumptions belong to each question; they are not real-hardware settings.
-// Each case names the quiz question (`review`) whose experiment the learner should revisit.
+// Each case names the quiz question (`review`) whose experiment the learner should revisit and
+// inherits that question's review card, so the two cannot drift apart.
 const cases = await loadJson('content/mastery-tests.json');
+// A mastery question may send the learner back to the same experiment for a different purpose;
+// those questions replace the inherited instruction with their own.
+const reviewActions = await loadJson('content/quiz/mastery-review-actions.json');
+
+function reviewFor(course, question) {
+  const inherited = QUIZZES[course].find((quiz) => quiz.id === question.review)?.review;
+  const action = reviewActions[course]?.[question.id];
+  return action ? { ...inherited, action } : inherited;
+}
 
 const MASTERY_TESTS = Object.fromEntries(
   Object.entries(cases).map(([course, questions]) => [
     course,
-    questions.map((q) => {
-      const review = QUIZZES[course].find((v) => v.id === q.review)?.review;
-      return {
-        ...q,
-        review:
-          course === 'rl' && q.id === 'improve-success'
-            ? {
-                ...review,
-                action:
-                  '「学習とテスト」で、到着回数と到着までの時間を比べてください。障害物との間隔や報酬の値は、その後の総合実験で条件を変えて確かめます。',
-              }
-            : review,
-      };
-    }),
+    questions.map((question) => ({ ...question, review: reviewFor(course, question) })),
   ]),
 );
 

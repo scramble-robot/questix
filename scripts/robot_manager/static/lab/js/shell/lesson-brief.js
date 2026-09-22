@@ -1,17 +1,29 @@
-// Every experiment uses the same three sections, in the same reading order.
-// Content is explicitly authored; do not infer sections from sentence position.
-const escape = (value) =>
-  String(value).replace(
-    /[&<>"']/g,
-    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
-  );
-const BRIEF_SECTIONS = [
-  { key: 'scene', title: 'この実験の状況', cue: 'reference' },
-  { key: 'purpose', title: '目的と比べること', cue: 'learn' },
-  { key: 'first', title: '最初に試すこと', cue: 'action' },
-];
+import { loadJson } from '../core/content.js';
+import { escapeHtml } from './html-escape.js';
+
+// Every experiment opens with the same three sections, in the same reading order: the situation,
+// the purpose (what to compare) and the first thing to try. Sections are authored explicitly in
+// content/lesson-guides.json (or by the course); nothing is inferred from sentence position.
+// The result is an HTML string because course modules embed it in their own markup.
+
+const copy = await loadJson('content/shell/lesson-brief.json');
+
+// [{ key, title, cue }]: `key` names the content field, `cue` the lesson icon of the heading.
+const BRIEF_SECTIONS = copy.sections;
+
+const paragraphs = (text) => (Array.isArray(text) ? text : [text]);
+
+function briefSection(section, content) {
+  const body = paragraphs(content[section.key])
+    .map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`)
+    .join('');
+  const heading = `<h2 data-lesson-cue="${section.cue}">${section.title}</h2>`;
+  return `<div class="lesson-brief-${section.key}">${heading}${body}</div>`;
+}
+
 function lessonBrief(key, content) {
-  return `<section class="lesson-brief" data-lesson-brief="${escape(key)}" aria-label="実験の状況・目的・手順">${BRIEF_SECTIONS.map((s) => `<div class="lesson-brief-${s.key}"><h2 data-lesson-cue="${s.cue}">${s.title}</h2>${(Array.isArray(content[s.key]) ? content[s.key] : [content[s.key]]).map((p) => `<p>${escape(p)}</p>`).join('')}</div>`).join('')}</section>`;
+  const sections = BRIEF_SECTIONS.map((section) => briefSection(section, content)).join('');
+  return `<section class="lesson-brief" data-lesson-brief="${escapeHtml(key)}" aria-label="${copy.ariaLabel}">${sections}</section>`;
 }
 
 export { BRIEF_SECTIONS, lessonBrief };

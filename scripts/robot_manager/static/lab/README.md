@@ -28,13 +28,13 @@ Opening `index.html` via `file://` does not work: ES modules need HTTP.
 | `index.html` | Page shell: header, one `<section>` per course, dialogs. |
 | `css/` | Stylesheets, linked in cascade order by `index.html` (later sheets override earlier ones, so keep the order). `live.css` is the robot monitor. |
 | `js/main.js` | Entry point; imports every module in evaluation order. |
-| `js/core/` | Shared simulation engine, canvas renderer, depth-camera maths. |
+| `js/core/` | Shared simulation engine (`engine.js` re-exports `engine/`), canvas renderer, depth-camera maths, and the content loader (`content.js`: `loadJson` / `loadText` / `fillSentence`). |
 | `js/shell/` | Course catalogue, navigation, lesson briefs/guides, school-subject tips, supplements. |
-| `js/rl/`, `slam/`, `vision/`, `control/`, `planning/`, `launch/`, `arm/`, `systems/` | One directory per course family: `core` (maths, no DOM), `render`, `ui`. |
+| `js/rl/`, `slam/`, `vision/`, `control/`, `planning/`, `launch/`, `arm/`, `systems/` | One directory per course family: `core` (maths, no DOM), `render` (canvas/SVG), `view` (lit-html templates), `ui` (state, actions, one `update()`). Larger courses split these further, e.g. `slam/basics-*`, `vision/depth-*`, `rl/lab-view.js`. |
 | `js/quiz/` | Checkpoint quizzes and mastery tests. |
 | `js/live/` | Live link to a real robot: `robot-link.js` (WebSocket client), `live-ui.js` (header button + monitor dialog), `slam-recorder.js` (records a SLAM log from live data). |
 | `js/vendor/`, `assets/vendor/` | Third-party code and data; see `assets/vendor/NOTICE.md`. |
-| `test/` | Node tests for DOM-free modules: `node --test scripts/robot_manager/static/lab/test/*.test.mjs` |
+| `test/` | Node tests for DOM-free modules (`node --test .../test/*.test.mjs`), the UI regression harness (`ui-regression.mjs`) and the per-course steps files it replays (`test/steps/`). |
 
 `core` modules have no DOM access and can be imported from Node for tests.
 

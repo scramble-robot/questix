@@ -1,0 +1,86 @@
+{
+  "status": {
+    "unanswered": "未回答",
+    "correct": "正解",
+    "recovered": "解き直して正解",
+    "review": "もう一度確かめる"
+  },
+  "storage": {
+    "available": "回答はこのブラウザに保存します。別の端末やファイルへの引き継ぎ、教員への送信は行いません。",
+    "unavailable": "この環境では回答を保存できません。ページを開いている間は、実験と問題を行き来できます。"
+  },
+  "busyAlert": "学習の処理が終わってから、もう一度「実験へ」を押してください。",
+  "entry": {
+    "eyebrow": "この教材のまとめ",
+    "title": "実験で分かったことを、確かめる",
+    "lead": "「{title}」の理解を確かめます。迷った内容は、対応する実験に戻って試せます。",
+    "quizTitle": "小テスト",
+    "quizFormat": "6問 · 基本を確認",
+    "quizDescription": "一問ずつ答えと解説を確かめ、基本の考え方を復習します。",
+    "quizProgress": "{checked} / {total} 問を回答済み",
+    "quizStart": "小テストを始める",
+    "quizContinue": "小テストを続ける",
+    "quizResults": "結果と復習を見る",
+    "masteryTitle": "実力テスト",
+    "masteryFormat": "3問 · 別の条件で考える",
+    "masteryDescription": "新しい場面のデータを読み、答えと根拠を示します。最後は改善案も説明し、提出後に振り返ります。"
+  },
+  "review": {
+    "eyebrow": "小テスト {number} / {total} · 実験で確かめる",
+    "return": "問題に戻って解き直す",
+    "close": "復習の案内を閉じる"
+  },
+  "page": {
+    "back": "← 教材に戻る",
+    "eyebrow": "{title} · 理解を確かめる",
+    "questionTitle": "実験の結果から考えてみよう",
+    "questionIntro": "場面を読んで、最も適切な答えを一つ選んでください。迷ったら「まだ分からない」から解説と実験を確認できます。制限時間はありません。",
+    "summaryTitle": "小テストの振り返り",
+    "summaryIntro": "もう一度確かめたい内容を選ぶと、その実験へ戻れます。結果を見てから解き直し、理由も説明できるか確かめてください。",
+    "navLabel": "小テストの問題",
+    "navQuestion": "問{number} {concept}：{status}",
+    "navSummary": "振り返り"
+  },
+  "question": {
+    "eyebrow": "問 {number} / {total} · {concept}",
+    "title": "こんな結果が出たら",
+    "evidenceCaption": "この問題で使う測定例",
+    "evidenceNote": "教材の仕組みを考えるための例です。あなたの実験結果とは別です。",
+    "check": "答えを確かめる",
+    "unsure": "まだ分からない",
+    "validation": "答えを一つ選ぶか、「まだ分からない」を押してください。",
+    "previous": "← 前の問題",
+    "pace": "解説を読んでから、自分のペースで進めます"
+  },
+  "feedback": {
+    "correctFirst": "✓ 正解です",
+    "correctRecovered": "✓ 解き直して確かめられました",
+    "unsure": "実験に戻って、手がかりを探そう",
+    "wrong": "もう一度、結果と理由をつなげてみよう",
+    "unsureBody": "まず次のポイントを観察してください。問題はそのまま残るので、実験後に戻って選び直せます。",
+    "observeTitle": "実験で見るポイント",
+    "revisit": "実験へ：{title} ↗",
+    "retry": "この問題を解き直す",
+    "next": "次の問題へ →",
+    "toSummary": "回答を振り返る"
+  },
+  "summary": {
+    "titleRemaining": "次に確かめることが見つかりました",
+    "titleComplete": "6問すべてで、考え方を確かめました",
+    "firstCorrect": "最初の回答で正解",
+    "recovered": "解き直して正解",
+    "remaining": "これから確かめる",
+    "adviceRemaining": "点数だけで終わらせず、気になった項目を一つ選びましょう。「実験で確かめる」で操作する画面と観察の案内が開きます。",
+    "adviceComplete": "正解の選択肢を覚えるだけでなく、実験のどの結果が理由になるかを、自分の言葉でも説明してみましょう。気になる実験は下から再確認できます。",
+    "resultStatus": "{number} · {status}",
+    "revisit": "実験で確かめる",
+    "showAnswer": "回答を見る",
+    "solve": "問題を解く",
+    "solveRemaining": "まだ確かめていない問題を解く →",
+    "finish": "教材に戻る",
+    "newAttempt": "全問を新しく解く",
+    "resetNotice": "この教材の小テストの回答を消して、1問目から始めます。実験の設定や記録は残ります。",
+    "resetConfirm": "回答を消して始める",
+    "resetCancel": "キャンセル"
+  }
+}

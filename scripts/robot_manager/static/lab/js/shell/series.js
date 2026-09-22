@@ -1,9 +1,10 @@
-import { seriesCover } from './series-covers.js';
+import { render, unsafeHTML } from '../vendor/lit-html.js';
+import { loadJson, loadText } from '../core/content.js';
 import { SYSTEM_COURSES } from '../systems/data.js';
 import { initSystems, activateSystem, reviewSystem } from '../systems/ui.js';
 import { showMeasurementLab } from '../systems/measurement-lab.js';
 import { LESSONS, LESSON_GROUPS, lessonLabel } from './lesson-ui.js';
-import { schoolOverview, initSchoolOverview } from './school-tips.js';
+import { SCHOOL_GRADES } from './school-tips.js';
 import { initSupplements } from './supplement-ui.js';
 import { initLessonIcons } from './lesson-icons.js';
 import { initSlam, pauseSlam, reviewSlam } from '../slam/ui.js';
@@ -16,82 +17,157 @@ import { initArm, activateArm, reviewArm } from '../arm/ui.js';
 import { reviewRL } from '../rl/foundations.js';
 import { initQuizzes } from '../quiz/ui.js';
 import { initMastery } from '../quiz/mastery-ui.js';
+import { courseNavigation, seriesPage } from './series-view.js';
+
+// Application shell: which page is shown (catalogue, a course, a quiz or a mastery test), the
+// header course switcher, the hash routes and the catalogue page itself. series-view.js turns the
+// model into markup; the courses own their pages and expose init/activate/review entry points.
+
+const copy = await loadJson('content/shell/series.json');
+const curriculumSourceHtml = (await loadText('content/shell/school-curriculum-source.html')).trim();
+
+const CATALOGUE = 'series'; // the route of the catalogue page
+const CATALOGUE_PAGE = 'seriesPage';
+const GROUP_ANCHOR_PREFIX = '#course-group-'; // in-page links on the catalogue, not routes
+const ASSESSMENTS = {
+  quiz: { hashPrefix: '#quiz-', page: 'quizPage', title: copy.header.quizTitle },
+  mastery: { hashPrefix: '#mastery-', page: 'masteryPage', title: copy.header.masteryTitle },
+};
+
+const $ = (id) => document.getElementById(id);
+const lessonById = (id) => LESSONS.find((lesson) => lesson.id === id);
+const pageIds = [
+  CATALOGUE_PAGE,
+  ...LESSONS.flatMap((lesson) => lesson.pages),
+  'quizPage',
+  'masteryPage',
+];
+
+// --- State ---------------------------------------------------------------------------------------
+
+let course = null; // CATALOGUE or a course id; null until the first route
+let assessment = null; // 'quiz' | 'mastery' while a test page is shown instead of the course
+let selectedGrade = SCHOOL_GRADES[0].id; // tab of the school-subject overview
+// Section a course was left on, so that returning to it continues where the learner was.
+const lastPages = new Map(LESSONS.map((lesson) => [lesson.id, lesson.pages[0]]));
 
 initSupplements();
 initLessonIcons();
-const $ = (id) => document.getElementById(id);
-const pages = ['seriesPage', ...LESSONS.flatMap((l) => l.pages), 'quizPage', 'masteryPage'];
-$('rlCourseLabel').innerHTML = lessonLabel('rl');
-$('lessonNav').innerHTML = LESSONS.map(
-  (l, i) =>
-    '<a id="' +
-    l.nav +
-    '" href="#' +
-    l.id +
-    '"><strong><b class="course-nav-number" aria-hidden="true">' +
-    (i + 1) +
-    '</b>' +
-    (l.id === 'planning' ? '道を選んで<br>目的地へ進む' : l.title) +
-    '</strong><span>' +
-    l.summary +
-    '</span></a>',
-).join('');
-$('seriesPage').innerHTML =
-  `<div class="series-heading"><p class="eyebrow">QUESTiX LAB · 移動ロボットの実験室</p><h1>ロボットの技術を、実験で学ぶ</h1><p>画面のロボットを動かし、測ったデータから仕組みを調べる教材です。専門用語や式は、使う場面で説明します。初めてなら1から順に、気になる内容があればその教材から始められます。<br>各実験の「最初に試すこと」に沿って一度動かし、予想と違った所を探してください。条件を一つだけ変えてもう一度試すと、何が動きに影響したかを比べられます。</p></div>
-<div class="series-group-index">${LESSON_GROUPS.map((g, i) => '<a href="#course-group-' + i + '">' + g.title + ' ↓</a>').join('')}</div>
-${LESSON_GROUPS.map(
-  (group, gi) =>
-    '<section class="series-group" id="course-group-' +
-    gi +
-    '"><h2>' +
-    group.title +
-    '</h2><p>' +
-    group.description +
-    '</p><div class="series-courses">' +
-    group.ids
-      .map((id) => {
-        const l = LESSONS.find((v) => v.id === id),
-          i = LESSONS.indexOf(l);
-        return (
-          '<article class="card series-course"><div class="series-cover ' +
-          l.id +
-          '-cover">' +
-          seriesCover(l.id, l.canvas) +
-          '<span>' +
-          l.summary +
-          '</span></div><div class="series-course-body"><p class="series-order">' +
-          String(i + 1).padStart(2, '0') +
-          ' <span>/ ' +
-          LESSONS.length +
-          '</span></p><h3>' +
-          l.title +
-          '</h3><p>' +
-          l.description +
-          '</p><div class="series-tags">' +
-          l.tags.map((t) => '<span>' + t + '</span>').join('') +
-          '</div><button class="primary full" id="' +
-          l.button +
-          '" aria-label="「' +
-          l.title +
-          '」の教材を開く">この教材を開く →</button></div></article>'
-        );
-      })
-      .join('') +
-    '</div></section>',
-).join('')}
-${schoolOverview(LESSONS)}
-<section class="series-robot card"><div><p class="eyebrow">実験で使うロボット · QUESTiX</p><h2>左右の車輪で走り、4種類のセンサーで測る</h2><p>モーターは電気で回転を生み、車輪を動かします。左右を同じ速さで回すと直進し、回る速さに差を付けると曲がります。センサーは、動いた結果や周囲の様子を数値や画像で受け取る装置です。</p></div><dl><div><dt>車輪の回転数センサー</dt><dd>車輪がどれだけ回ったか、どれくらいの速さで回っているかを測ります。1分間に60回転する速さが60 rpmです。</dd></div><div><dt>9軸IMU</dt><dd>速さの変化、回る速さ、磁場をそれぞれ3方向で測ります。衝撃に気づいたり、機体の向きや傾きを推定したりする情報になります。</dd></div><div><dt>2D LiDAR（ライダー）</dt><dd>レーザーの光を周囲へ向け、物までの距離を測ります。同じ高さで測った点を並べると、壁や棚の配置を調べられます。</dd></div><div><dt>RGB-Dカメラ 1台</dt><dd>普通の写真のような色の画像と、画像の各点に対応する奥行きを取得します。「何が見えるか」と「どれくらい手前にあるか」を調べられます。</dd></div></dl></section><p class="page-footnote">RGB-Dカメラは、色を記録するRGBと奥行きを表すD（Depth）の両方を扱うカメラです。この教材では、左右2か所から撮った画像の違いで奥行きを求める装置を1台搭載した構成を使います。</p><p class="page-footnote">SO-ARM101は、物をつかむために取り付けるオプションのアームです。肩やひじに相当する関節をモーターで回し、手先を動かします。</p><p class="page-footnote">画面の実験は、ロボットの動きを計算で再現するシミュレーションです。実物を動かす命令は送りません。実機で測った記録（ログ）を読み込んで比べられる教材もあります。実験記録は教材を切り替えても残りますが、ページを再読み込みすると消えます。</p>`;
-initSlam(HARDWARE);
-initVision();
-initControl();
-initPlanning();
-initLaunch();
-initArm();
-initSystems();
-let currentSeries = null,
-  quizCourse = null;
+render(unsafeHTML(lessonLabel('rl')), $('rlCourseLabel'));
+$('currentCourseTitle').replaceChildren(); // index.html holds the caption until lit renders it
+
+// --- Model -----------------------------------------------------------------------------------
+
+const catalogueGroups = LESSON_GROUPS.map((group) => ({
+  ...group,
+  lessons: group.ids.map((id) => ({
+    ...lessonById(id),
+    number: LESSONS.indexOf(lessonById(id)) + 1,
+  })),
+}));
+const courseTitles = Object.fromEntries(LESSONS.map((lesson) => [lesson.id, lesson.title]));
+
+function model() {
+  return {
+    copy,
+    course,
+    lessons: LESSONS,
+    groups: catalogueGroups,
+    overview: {
+      grades: SCHOOL_GRADES,
+      selectedGrade,
+      courseTitles,
+      sourceHtml: curriculumSourceHtml,
+    },
+  };
+}
+
+function headerCaption() {
+  return lessonById(course)?.title || copy.header.chooseCourse;
+}
+
+function documentTitle() {
+  const courseTitle = lessonById(course)?.title || copy.header.catalogueTitle;
+  const prefix = assessment ? `${ASSESSMENTS[assessment].title}｜` : '';
+  return `${prefix}${courseTitle}｜${copy.siteName}`;
+}
+
+function update() {
+  const current = model();
+  render(courseNavigation(current, actions), $('lessonNav'));
+  render(headerCaption(), $('currentCourseTitle'));
+  render(seriesPage(current, actions), $(CATALOGUE_PAGE));
+  $('seriesHome').hidden = course === CATALOGUE;
+  $('courseSwitcher').open = false;
+  document.title = documentTitle();
+}
+
+// --- Page switching ------------------------------------------------------------------------------
+
+const visiblePage = (lesson) => lesson.pages.find((id) => !$(id).hidden);
+
+// Remembers where the current course was left, tells the courses to pause and hides every page.
+function leaveCurrentPage() {
+  const previous = lessonById(course);
+  if (previous) lastPages.set(previous.id, visiblePage(previous) || lastPages.get(previous.id));
+  document.dispatchEvent(new CustomEvent('series-leave'));
+  pauseSlam();
+  for (const id of pageIds) $(id).hidden = true;
+}
+
+function replaceHash(hash) {
+  if (location.hash !== hash) history.replaceState(null, '', hash);
+}
+
+const activators = {
+  vision: activateVision,
+  control: activateControl,
+  planning: activatePlanning,
+  launch: activateLaunch,
+  arm: activateArm,
+};
+
+function show(name, updateHash = true) {
+  if (name === course && !assessment) return;
+  leaveCurrentPage();
+  assessment = null;
+  $(lastPages.get(name) || CATALOGUE_PAGE).hidden = false;
+  activators[name]?.();
+  activateSystem(name);
+  showMeasurementLab(name);
+  course = name;
+  update();
+  quizzes.showCourse(name);
+  mastery.showCourse(name);
+  if (updateHash) replaceHash('#' + name);
+  window.scrollTo({ top: 0 });
+}
+
+function showAssessment(kind, name, updateHash) {
+  if (!lessonById(name)) return;
+  leaveCurrentPage();
+  showMeasurementLab(null);
+  if (kind === 'quiz') mastery.hide();
+  else quizzes.hide();
+  assessment = kind;
+  course = name;
+  update();
+  $(ASSESSMENTS[kind].page).hidden = false;
+  if (kind === 'quiz') quizzes.show(name);
+  else mastery.show(name);
+  if (updateHash) replaceHash(ASSESSMENTS[kind].hashPrefix + name);
+  window.scrollTo({ top: 0 });
+}
+
+const showQuiz = (name, updateHash = true) => showAssessment('quiz', name, updateHash);
+const showMastery = (name, updateHash = true) => showAssessment('mastery', name, updateHash);
+
+// --- Opening an experiment from a review, a test or the school overview ----------------------
+
 const reviewLessons = {
-  ...Object.fromEntries(SYSTEM_COURSES.map((c) => [c.id, (topic) => reviewSystem(c.id, topic)])),
+  ...Object.fromEntries(
+    SYSTEM_COURSES.map((system) => [system.id, (topic) => reviewSystem(system.id, topic)]),
+  ),
   control: reviewControl,
   launch: reviewLaunch,
   arm: reviewArm,
@@ -100,149 +176,117 @@ const reviewLessons = {
   planning: reviewPlanning,
   rl: reviewRL,
 };
-const openReviewExperiment = (course, topic) => {
-  show(course);
-  const opened = reviewLessons[course](topic);
-  if (course === 'rl') lastPages.set('rl', 'introPage');
+
+function openExperiment(name, topic) {
+  show(name);
+  const opened = reviewLessons[name](topic);
+  // The RL review opens the foundations page; next time the course starts there again.
+  if (name === 'rl') lastPages.set('rl', 'introPage');
   return opened;
+}
+
+// --- Actions ---------------------------------------------------------------------------------------
+
+const modified = (event) => event.ctrlKey || event.metaKey || event.shiftKey || event.altKey;
+
+// Keyboard order of the grade tabs (WAI-ARIA tabs pattern); null for other keys.
+function nextGradeIndex(key, index, count) {
+  if (key === 'ArrowRight') return (index + 1) % count;
+  if (key === 'ArrowLeft') return (index + count - 1) % count;
+  if (key === 'Home') return 0;
+  if (key === 'End') return count - 1;
+  return null;
+}
+
+const actions = {
+  openCourse: (id) => show(id),
+  followCourseLink(event, id) {
+    if (modified(event)) return; // let the browser open a new tab/window
+    event.preventDefault();
+    show(id);
+  },
+  selectGrade(id) {
+    selectedGrade = id;
+    update();
+  },
+  moveBetweenGrades(event, id) {
+    const index = SCHOOL_GRADES.findIndex((grade) => grade.id === id);
+    const next = nextGradeIndex(event.key, index, SCHOOL_GRADES.length);
+    if (next === null) return;
+    event.preventDefault();
+    actions.selectGrade(SCHOOL_GRADES[next].id);
+    $(`school-tab-${SCHOOL_GRADES[next].id}`).focus();
+  },
+  followExperimentLink(event, experiment) {
+    if (modified(event) || event.button !== 0) return;
+    event.preventDefault();
+    openExperiment(experiment.course, experiment.topic);
+  },
 };
+
+// --- Start-up ------------------------------------------------------------------------------------
+
+initSlam(HARDWARE);
+initVision();
+initControl();
+initPlanning();
+initLaunch();
+initArm();
+initSystems();
 const mastery = initMastery({
   openTest: showMastery,
   backToCourse: show,
-  openExperiment: openReviewExperiment,
+  openExperiment,
 });
 const quizzes = initQuizzes({
   openQuiz: showQuiz,
   backToCourse: show,
-  openExperiment: openReviewExperiment,
+  openExperiment,
   openMastery: showMastery,
   masteryStatus: mastery.status,
 });
-const lastPages = new Map(LESSONS.map((l) => [l.id, l.pages[0]]));
-initSchoolOverview($('seriesPage'), (course, topic) => {
-  show(course);
-  reviewLessons[course](topic);
-  if (course === 'rl') lastPages.set('rl', 'introPage');
-});
-function updateNavigation(name) {
-  $('courseSwitcher').open = false;
-  $('currentCourseTitle').textContent =
-    LESSONS.find((l) => l.id === name)?.title || '13科目から選ぶ';
-  currentSeries = name;
-  document.title =
-    (LESSONS.find((l) => l.id === name)?.title || 'ロボットの技術を学ぶ実験室') + '｜QUESTiX LAB';
-  $('seriesHome').hidden = name === 'series';
-  for (const lesson of LESSONS)
-    $(lesson.nav).setAttribute('aria-current', name === lesson.id ? 'page' : 'false');
-}
-function show(name, hash = true) {
-  if (name === currentSeries && !quizCourse) return;
-  const previous = LESSONS.find((l) => l.id === currentSeries);
-  if (previous)
-    lastPages.set(
-      previous.id,
-      previous.pages.find((id) => !$(id).hidden) || lastPages.get(previous.id),
-    );
-  document.dispatchEvent(new CustomEvent('series-leave'));
-  pauseSlam();
-  quizCourse = null;
-  for (const id of pages) $(id).hidden = true;
-  $(lastPages.get(name) || 'seriesPage').hidden = false;
-  if (name === 'vision') activateVision();
-  if (name === 'control') activateControl();
-  if (name === 'planning') activatePlanning();
-  if (name === 'launch') activateLaunch();
-  if (name === 'arm') activateArm();
-  activateSystem(name);
-  showMeasurementLab(name);
-  updateNavigation(name);
-  quizzes.showCourse(name);
-  mastery.showCourse(name);
-  if (hash && location.hash !== '#' + name) history.replaceState(null, '', '#' + name);
-  window.scrollTo({ top: 0 });
-}
-function showQuiz(name, hash = true) {
-  if (!LESSONS.some((l) => l.id === name)) return;
-  const previous = LESSONS.find((l) => l.id === currentSeries);
-  if (previous)
-    lastPages.set(
-      previous.id,
-      previous.pages.find((id) => !$(id).hidden) || lastPages.get(previous.id),
-    );
-  document.dispatchEvent(new CustomEvent('series-leave'));
-  pauseSlam();
-  for (const id of pages) $(id).hidden = true;
-  showMeasurementLab(null);
-  mastery.hide();
-  quizCourse = name;
-  updateNavigation(name);
-  $('quizPage').hidden = false;
-  quizzes.show(name);
-  document.title = '小テスト｜' + LESSONS.find((l) => l.id === name).title + '｜QUESTiX LAB';
-  if (hash) history.replaceState(null, '', '#quiz-' + name);
-  window.scrollTo({ top: 0 });
-}
-function showMastery(name, hash = true) {
-  if (!LESSONS.some((l) => l.id === name)) return;
-  const previous = LESSONS.find((l) => l.id === currentSeries);
-  if (previous)
-    lastPages.set(
-      previous.id,
-      previous.pages.find((id) => !$(id).hidden) || lastPages.get(previous.id),
-    );
-  document.dispatchEvent(new CustomEvent('series-leave'));
-  pauseSlam();
-  for (const id of pages) $(id).hidden = true;
-  showMeasurementLab(null);
-  quizzes.hide();
-  quizCourse = name;
-  updateNavigation(name);
-  $('masteryPage').hidden = false;
-  mastery.show(name);
-  document.title = '実力テスト｜' + LESSONS.find((l) => l.id === name).title + '｜QUESTiX LAB';
-  if (hash) history.replaceState(null, '', '#mastery-' + name);
-  window.scrollTo({ top: 0 });
-}
-for (const lesson of LESSONS) {
-  $(lesson.nav).onclick = (e) => {
-    if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
-    e.preventDefault();
-    $('courseSwitcher').open = false;
-    show(lesson.id);
-  };
-  $(lesson.button).onclick = () => show(lesson.id);
-}
-$('seriesHome').onclick = () => show('series');
-document.querySelector('.brand').onclick = (e) => {
-  e.preventDefault();
-  show('series');
+
+$('seriesHome').onclick = () => show(CATALOGUE);
+document.querySelector('.brand').onclick = (event) => {
+  event.preventDefault();
+  show(CATALOGUE);
 };
-document.addEventListener('series-open', (e) => show(e.detail));
-document.addEventListener('quiz-open', (e) => showQuiz(e.detail));
+document.addEventListener('series-open', (event) => show(event.detail));
+document.addEventListener('quiz-open', (event) => showQuiz(event.detail));
+
+// The course switcher closes on any click or tap outside it and on Escape.
+function closeSwitcherOutside(event) {
+  const switcher = $('courseSwitcher');
+  if (switcher.open && !switcher.contains(event.target)) switcher.open = false;
+}
+document.addEventListener('pointerdown', closeSwitcherOutside);
+document.addEventListener('click', closeSwitcherOutside);
+document.addEventListener('keydown', (event) => {
+  const switcher = $('courseSwitcher');
+  if (event.key !== 'Escape' || !switcher.open) return;
+  switcher.open = false;
+  switcher.querySelector('summary').focus();
+});
+
+// --- Hash routes: #<course>, #quiz-<course>, #mastery-<course>; anything else is the catalogue.
+
+function assessmentRoute(hash) {
+  for (const [kind, { hashPrefix }] of Object.entries(ASSESSMENTS)) {
+    const lesson = LESSONS.find((candidate) => hashPrefix + candidate.id === hash);
+    if (lesson) return { kind, id: lesson.id };
+  }
+  return null;
+}
+
 function route() {
-  if (location.hash.startsWith('#course-group-')) return;
-  const test = LESSONS.find((l) => '#mastery-' + l.id === location.hash);
+  const hash = location.hash;
+  if (hash.startsWith(GROUP_ANCHOR_PREFIX)) return;
+  const test = assessmentRoute(hash);
   if (test) {
-    showMastery(test.id, false);
+    showAssessment(test.kind, test.id, false);
     return;
   }
-  const quiz = LESSONS.find((l) => '#quiz-' + l.id === location.hash);
-  if (quiz) showQuiz(quiz.id, false);
-  else show(LESSONS.find((l) => '#' + l.id === location.hash)?.id || 'series', false);
+  show(LESSONS.find((lesson) => '#' + lesson.id === hash)?.id || CATALOGUE, false);
 }
-document.addEventListener('pointerdown', (e) => {
-  const menu = $('courseSwitcher');
-  if (menu.open && !menu.contains(e.target)) menu.open = false;
-});
-document.addEventListener('click', (e) => {
-  const menu = $('courseSwitcher');
-  if (menu.open && !menu.contains(e.target)) menu.open = false;
-});
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && $('courseSwitcher').open) {
-    $('courseSwitcher').open = false;
-    $('courseSwitcher').querySelector('summary').focus();
-  }
-});
 window.addEventListener('hashchange', route);
 route();

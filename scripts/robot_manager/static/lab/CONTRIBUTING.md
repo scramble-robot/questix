@@ -32,8 +32,10 @@ a sentence, an explanation, or a status message belongs in the content file.
 - Strings from other modules that are already HTML (`lessonBrief`, `schoolTips`, `lessonLabel`)
   are inserted with `unsafeHTML`; never pass learner input or robot data through it.
 - Comments explain why (a constraint, a unit, a trap), not what the next line does.
-- Shared helpers live in `js/core/` (`content.js`, `dom.js`); do not re-declare `download` or
-  number formatting per module.
+- Shared helpers live in `js/core/` (`content.js`, `dom.js`); do not re-declare `download`, number
+  formatting, or the `{name}` placeholder filler per module. `fillSentence(sentence, values)` from
+  `js/core/content.js` fills the placeholders of a content sentence; a placeholder with no value is
+  left as it is, so a missing key shows up as `{rpm}` rather than as the word "undefined".
 - Format with Prettier (`.prettierrc.json`); third-party code in `js/vendor/` is left as upstream.
 
 ## lit-html notes
@@ -75,3 +77,29 @@ DOM-free modules get Node tests in `test/*.test.mjs` (`node --test test/*.test.m
 - Planning: the playback position slider never worked (the handler paused first, which wrote the
   current position back into the slider before its new value was read). It works now.
 - Planning: the saved hardware procedure (`.txt`) has line breaks between paragraphs.
+- SLAM: the hint that a previous result is still on screen (`画面には、前の実験結果を残しています。`)
+  was only refreshed when the method or the calibration checkbox changed, so it went stale after
+  selecting an earlier run from the results card — the page then claimed the displayed result
+  matched the selected conditions when it did not. It is now derived from the run on screen.
+- Vision: the 面積 slider's read-out was created with the suffix `画素以上` but its update handler
+  wrote `画素`, so the number changed meaning as soon as the learner dragged it. It now always
+  says `…画素以上`.
+- Vision: the stereo chapter's 実際の奥行き read-out printed the distance raw when the chapter
+  opened (`2 m`) and with one decimal after a drag (`2.0 m`). The slider steps in 0.1 m, so it
+  now always shows one decimal.
+- Reinforcement learning: the caption under the arena has a 「一時停止中。…」 branch that could not
+  be reached. Pausing playback updated the button glyph from `updatePlayback()`, but the caption is
+  written by `updateScene()`, which stops running once playback stops — so after pressing Ⅱ the page
+  still claimed it was playing. The caption is now derived from the playback state.
+- Reinforcement learning (structural, nothing a learner sees): the lab page is rendered once at
+  start-up and kept hidden until it is opened, where the original left `#labPage` empty until then.
+  Snapshots are unaffected — the serializer does not descend into a hidden element — but a steps
+  file must not pick controls by position across the whole page, because the hidden lab now
+  contributes elements. Open the lab with `[data-rl-group="3"]` and address its controls by id.
+
+## Snapshot files that are advisory, not gates
+
+- `test/steps/rl-lab-trials.json` drives seed-dependent training and evaluation. Nearly every one of
+  its snapshots is reported UNSTABLE (the baseline does not reproduce itself there), so it is useful
+  for spotting page errors, not for proving equality. The deterministic cover is
+  `test/steps/rl-lab.json` plus `test/rl-experiment.test.mjs`.

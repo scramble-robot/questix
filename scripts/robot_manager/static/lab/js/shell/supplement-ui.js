@@ -1,74 +1,165 @@
-// Explicitly marked reference material opens in one native, accessible dialog.
-// Experiment controls, legends, short hints and results remain inline details.
+import { loadJson } from '../core/content.js';
+
+// Explicitly marked reference material — `details[data-help-dialog]` — opens in the one shared,
+// native dialog of index.html instead of unfolding in place. The details itself is hidden and a
+// trigger button takes its place; while the dialog is open the details' own child nodes are MOVED
+// into it and moved back on close. They are moved, never copied, so listeners, canvases and the
+// current data survive and the courses can keep rendering into them.
+// Experiment controls, legends, short hints and results stay inline details.
+
+const copy = await loadJson('content/shell/supplement.json');
+
+const HELP_DIALOG_SELECTOR = 'details[data-help-dialog]';
+const SCHOOL_TIP_ATTRIBUTE = 'data-school-tip';
+
+// Decorative "this opens in a window" glyph of the trigger button.
+const OPEN_ICON_SVG =
+  '<svg viewBox="0 0 20 20" width="18" height="18" fill="none"><rect x="3" y="4" width="14" height="12" rx="2"/><path d="M3 8h14M13 6h1"/></svg>';
+
+const FOCUSABLE_SELECTOR =
+  'button:not(:disabled),a[href],input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex="0"]';
+
+// Leaving a course, opening the measurement lab or the RL foundations closes the dialog.
+const DISMISS_EVENTS = ['series-leave', 'open-lab', 'rl-foundations'];
+
+const ELEMENT_NODE = 1;
+const DOCUMENT_NODE = 9;
+
+const isSchoolTip = (source) => source.hasAttribute(SCHOOL_TIP_ATTRIBUTE);
+
+// The trigger repeats the summary, so whatever the summary shows (labels, lesson cue icons) is
+// what the learner sees on the button.
+function triggerCaption(summary) {
+  const caption = document.createElement('span');
+  caption.className = 'supplement-trigger-copy';
+  caption.append(...[...summary.childNodes].map((node) => node.cloneNode(true)));
+  return caption;
+}
+
+function triggerAction() {
+  const action = document.createElement('span');
+  action.className = 'supplement-trigger-action';
+  action.setAttribute('aria-hidden', 'true');
+  action.append(copy.openAction);
+  action.insertAdjacentHTML('beforeend', OPEN_ICON_SVG);
+  return action;
+}
+
+function createTrigger(source, summary) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = isSchoolTip(source)
+    ? 'supplement-trigger supplement-tip-trigger'
+    : 'supplement-trigger';
+  button.setAttribute('aria-haspopup', 'dialog');
+  button.setAttribute('aria-controls', 'supplementDialog');
+  button.append(triggerCaption(summary), triggerAction());
+  return button;
+}
+
+// The mutated node itself may be the details, so it is checked as well as its descendants.
+function helpDialogsIn(root) {
+  const self = root.matches?.(HELP_DIALOG_SELECTOR) ? [root] : [];
+  return [...self, ...root.querySelectorAll(HELP_DIALOG_SELECTOR)];
+}
+
+function dialogTitle(summary) {
+  const topic = summary.querySelector('.school-tip-topic')?.textContent;
+  return topic || summary.textContent.trim();
+}
+
+function dialogLabel(source, summary) {
+  if (!isSchoolTip(source)) return copy.label.supplement;
+  return summary.querySelector('.school-tip-label')?.textContent || copy.label.schoolTip;
+}
+
+function visibleFocusable(dialog) {
+  const candidates = [...dialog.querySelectorAll(FOCUSABLE_SELECTOR)];
+  return candidates.filter((node) => node.getClientRects().length);
+}
+
+// A modal <dialog> covers the viewport for hit-testing, so a click on the backdrop is reported on
+// the dialog element itself; only the pointer coordinates tell the two apart.
+function isOnBackdrop(dialog, event) {
+  if (event.target !== dialog) return false;
+  const box = dialog.getBoundingClientRect();
+  if (event.clientX < box.left || event.clientX > box.right) return true;
+  return event.clientY < box.top || event.clientY > box.bottom;
+}
+
 function initSupplements() {
   const dialog = document.getElementById('supplementDialog');
   if (!dialog || typeof MutationObserver === 'undefined') return;
-  const body = document.getElementById('supplementBody'),
-    title = document.getElementById('supplementTitle'),
-    label = document.getElementById('supplementLabel');
-  const close = document.getElementById('supplementClose'),
-    back = document.getElementById('supplementBack');
-  const enhanced = new WeakMap();
-  let active = null,
-    backdropStart = false;
+  const body = document.getElementById('supplementBody');
+  const title = document.getElementById('supplementTitle');
+  const label = document.getElementById('supplementLabel');
+  const closeButton = document.getElementById('supplementClose');
+  const backButton = document.getElementById('supplementBack');
+
+  const triggers = new WeakMap(); // details -> the button that replaced it
+  let shown = null; // { source, button } while the dialog holds a details' children
+  let pressStartedOnBackdrop = false;
+
   function dismiss(restoreFocus = true) {
-    if (!active) return;
-    const previous = active;
-    active = null;
+    if (!shown) return;
+    const previous = shown;
+    shown = null;
     if (dialog.open) dialog.close();
-    // Move the original nodes back, preserving listeners, canvases and current data.
     previous.source.append(...body.childNodes);
     document.body.classList.remove('supplement-is-open');
     document.dispatchEvent(new CustomEvent('supplement-close'));
     if (restoreFocus && previous.button.isConnected) previous.button.focus({ preventScroll: true });
   }
-  function open(source, button, summary) {
-    if (active) dismiss(false);
+
+  function show(source, button, summary) {
+    if (shown) dismiss(false);
+    // Courses pause their animations on this event, before the nodes are taken out of the page.
     document.dispatchEvent(new CustomEvent('supplement-open'));
-    if (!source.isConnected) return;
-    active = { source, button };
-    title.textContent =
-      summary.querySelector('.school-tip-topic')?.textContent || summary.textContent.trim();
-    label.textContent = source.hasAttribute('data-school-tip')
-      ? summary.querySelector('.school-tip-label')?.textContent || 'Tips · 学校の数学・物理'
-      : '補足の解説';
+    if (!source.isConnected) return; // a listener may have re-rendered the page away
+    shown = { source, button };
+    title.textContent = dialogTitle(summary);
+    label.textContent = dialogLabel(source, summary);
     body.replaceChildren(...[...source.childNodes].filter((node) => node !== summary));
-    dialog.classList.toggle('supplement-school', source.hasAttribute('data-school-tip'));
+    dialog.classList.toggle('supplement-school', isSchoolTip(source));
     document.body.classList.add('supplement-is-open');
     dialog.showModal();
     body.scrollTop = 0;
     title.focus({ preventScroll: true });
   }
+
   function enhance(root) {
-    if (root.nodeType !== 1 && root.nodeType !== 9) return;
-    const candidates = [
-      ...(root.matches?.('details[data-help-dialog]') ? [root] : []),
-      ...root.querySelectorAll('details[data-help-dialog]'),
-    ];
-    for (const source of candidates) {
-      if (enhanced.has(source) || !source.isConnected) continue;
+    if (root.nodeType !== ELEMENT_NODE && root.nodeType !== DOCUMENT_NODE) return;
+    for (const source of helpDialogsIn(root)) {
+      if (triggers.has(source) || !source.isConnected) continue;
       const summary = source.querySelector(':scope > summary');
       if (!summary) continue;
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className =
-        'supplement-trigger' +
-        (source.hasAttribute('data-school-tip') ? ' supplement-tip-trigger' : '');
-      button.setAttribute('aria-haspopup', 'dialog');
-      button.setAttribute('aria-controls', 'supplementDialog');
-      button.innerHTML =
-        '<span class="supplement-trigger-copy">' +
-        summary.innerHTML +
-        '</span><span class="supplement-trigger-action" aria-hidden="true">解説を開く<svg viewBox="0 0 20 20" width="18" height="18" fill="none"><rect x="3" y="4" width="14" height="12" rx="2"/><path d="M3 8h14M13 6h1"/></svg></span>';
-      button.onclick = () => open(source, button, summary);
+      const button = createTrigger(source, summary);
+      button.addEventListener('click', () => show(source, button, summary));
       source.before(button);
       source.hidden = true;
       source.open = false;
-      enhanced.set(source, button);
+      triggers.set(source, button);
     }
   }
-  close.onclick = () => dismiss();
-  back.onclick = () => dismiss();
+
+  // Focus stays inside the dialog: Tab past the last control wraps to the first and back.
+  function keepFocusInDialog(event) {
+    const targets = visibleFocusable(dialog);
+    const first = targets[0];
+    const last = targets.at(-1);
+    const current = document.activeElement;
+    const leavingStart = event.shiftKey && (current === first || !targets.includes(current));
+    const leavingEnd = !event.shiftKey && current === last;
+    if (!leavingStart && !leavingEnd) return;
+    event.preventDefault();
+    const wrapTo = leavingStart ? last : first;
+    wrapTo?.focus();
+  }
+
+  closeButton.addEventListener('click', () => dismiss());
+  backButton.addEventListener('click', () => dismiss());
+
+  // Escape and the platform's own close both go through dismiss, so the nodes always move back.
   dialog.addEventListener('cancel', (event) => {
     event.preventDefault();
     dismiss();
@@ -76,53 +167,36 @@ function initSupplements() {
   dialog.addEventListener('close', () => {
     if (!dialog.open) dismiss();
   });
+
   dialog.addEventListener('keydown', (event) => {
     // Reading/navigation keys must not reach the robot's document-level drive keys.
     event.stopPropagation();
-    if (event.key !== 'Tab') return;
-    const targets = [
-      ...dialog.querySelectorAll(
-        'button:not(:disabled),a[href],input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex="0"]',
-      ),
-    ].filter((node) => node.getClientRects().length);
-    const first = targets[0],
-      last = targets.at(-1),
-      current = document.activeElement;
-    if (event.shiftKey && (current === first || !targets.includes(current))) {
-      event.preventDefault();
-      last?.focus();
-    } else if (!event.shiftKey && current === last) {
-      event.preventDefault();
-      first?.focus();
-    }
+    if (event.key === 'Tab') keepFocusInDialog(event);
   });
   dialog.addEventListener('keyup', (event) => event.stopPropagation());
-  const outside = (event) => {
-    const r = dialog.getBoundingClientRect();
-    return (
-      event.clientX < r.left ||
-      event.clientX > r.right ||
-      event.clientY < r.top ||
-      event.clientY > r.bottom
-    );
-  };
+
+  // Closing on the backdrop needs press and release on it, so a drag out of the dialog is not one.
   dialog.addEventListener('pointerdown', (event) => {
-    backdropStart = event.target === dialog && outside(event);
+    pressStartedOnBackdrop = isOnBackdrop(dialog, event);
   });
   dialog.addEventListener('click', (event) => {
-    if (backdropStart && event.target === dialog && outside(event)) dismiss();
-    backdropStart = false;
+    if (pressStartedOnBackdrop && isOnBackdrop(dialog, event)) dismiss();
+    pressStartedOnBackdrop = false;
   });
+
+  // An in-page link inside the dialog navigates the page behind it, so focus stays on the target.
   body.addEventListener('click', (event) => {
     if (event.target.closest('a[href^="#"]')) dismiss(false);
   });
-  for (const event of ['series-leave', 'open-lab', 'rl-foundations'])
-    document.addEventListener(event, () => dismiss(false));
+  for (const name of DISMISS_EVENTS) document.addEventListener(name, () => dismiss(false));
+
   enhance(document);
-  new MutationObserver((records) => {
-    if (active && !active.source.isConnected) dismiss(false);
+  const observer = new MutationObserver((records) => {
+    // A course may re-render its page while the details' children are in the dialog.
+    if (shown && !shown.source.isConnected) dismiss(false);
     for (const record of records) for (const node of record.addedNodes) enhance(node);
-  }).observe(document.body, { childList: true, subtree: true });
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
 }
 
 export { initSupplements };

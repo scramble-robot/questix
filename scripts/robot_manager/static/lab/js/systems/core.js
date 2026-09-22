@@ -1,152 +1,198 @@
 import { SYSTEM_TOPICS, systemDefaults } from './data.js';
 import { armFK, armIK } from '../arm/core.js';
 
-const dt = 0.05,
-  clamp = (x, a, b) => Math.max(a, Math.min(b, x)),
-  rad = (x) => (x * Math.PI) / 180;
-const mean = (a) => (a.length ? a.reduce((s, x) => s + x, 0) / a.length : 0);
+// Simulations behind the six "systems" courses. No DOM and no state: every experiment is a pure
+// function of its settings, returning the samples, the events, the metrics and the closing
+// sentence that ui.js, render.js and narration.js show. Importable from Node and unit-tested in
+// test/systems-core.test.mjs.
+
+const dt = 0.05; // seconds per simulation step
+const GRAVITY = 9.81; // m/s²
+const EPSILON = 1e-8; // seconds; sample times are multiples of dt with rounding noise
+
+const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
+const rad = (degrees) => (degrees * Math.PI) / 180;
+const mean = (values) =>
+  values.length ? values.reduce((sum, v) => sum + v, 0) / values.length : 0;
 const metric = (label, value, unit = '', digits = 2) => ({ label, value, unit, digits });
+
+// One fixed pseudo-random stream per run, so the same settings always give the same measurements.
 function seedNoise() {
-  let n = 917;
+  let seed = 917;
   return () => {
-    n = (Math.imul(n, 1664525) + 1013904223) >>> 0;
-    return (n / 4294967296) * 2 - 1;
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return (seed / 4294967296) * 2 - 1;
   };
 }
+
+// Settings that reach a simulation are always the topic's own controls: anything unknown, of the
+// wrong type or out of range falls back to the control's default or its nearest allowed value.
 function validateSystemConfig(course, id, input = {}) {
-  const topic = SYSTEM_TOPICS[course]?.find((t) => t.id === id);
+  const topic = SYSTEM_TOPICS[course]?.find((entry) => entry.id === id);
   if (!topic) throw new Error('Unknown experiment');
   const config = systemDefaults(course, id);
-  for (const c of topic.controls) {
-    const v = input[c.key];
-    if (c.type === 'number' && Number.isFinite(Number(v)))
-      config[c.key] = clamp(Number(v), c.min, c.max);
-    else if (c.type === 'check' && typeof v === 'boolean') config[c.key] = v;
-    else if (c.type === 'select' && c.options.some((o) => o[0] === v)) config[c.key] = v;
+  for (const control of topic.controls) {
+    const value = input[control.key];
+    if (control.type === 'number' && Number.isFinite(Number(value)))
+      config[control.key] = clamp(Number(value), control.min, control.max);
+    else if (control.type === 'check' && typeof value === 'boolean') config[control.key] = value;
+    else if (control.type === 'select' && control.options.some(([option]) => option === value))
+      config[control.key] = value;
   }
   return config;
 }
+
+// --- camera and arm frames (coordination) ---------------------------------------------------
+
+const FITTED_CAMERA = { cameraX: 40, cameraZ: 30, cameraAngle: 10 }; // mm, mm, degrees
+const CALIBRATION_MARKERS = [
+  { x: 140, z: 80 },
+  { x: 210, z: 130 },
+  { x: 130, z: 180 },
+];
+
+// A point the camera reports, expressed from the arm's shoulder.
 function cameraToBody(point, camera) {
-  const a = rad(camera.cameraAngle);
+  const angle = rad(camera.cameraAngle);
   return {
-    x: camera.cameraX + point.x * Math.cos(a) - point.z * Math.sin(a),
-    z: camera.cameraZ + point.x * Math.sin(a) + point.z * Math.cos(a),
+    x: camera.cameraX + point.x * Math.cos(angle) - point.z * Math.sin(angle),
+    z: camera.cameraZ + point.x * Math.sin(angle) + point.z * Math.cos(angle),
   };
 }
-function bodyToCamera(point, camera = { cameraX: 40, cameraZ: 30, cameraAngle: 10 }) {
-  const a = rad(camera.cameraAngle),
-    x = point.x - camera.cameraX,
-    z = point.z - camera.cameraZ;
-  return { x: x * Math.cos(a) + z * Math.sin(a), z: -x * Math.sin(a) + z * Math.cos(a) };
+
+// The same point as the camera would measure it.
+function bodyToCamera(point, camera = FITTED_CAMERA) {
+  const angle = rad(camera.cameraAngle);
+  const x = point.x - camera.cameraX;
+  const z = point.z - camera.cameraZ;
+  return {
+    x: x * Math.cos(angle) + z * Math.sin(angle),
+    z: -x * Math.sin(angle) + z * Math.cos(angle),
+  };
 }
+
 function calibrationPairs() {
-  return [
-    { x: 140, z: 80 },
-    { x: 210, z: 130 },
-    { x: 130, z: 180 },
-  ].map((body) => ({ body, camera: bodyToCamera(body) }));
+  return CALIBRATION_MARKERS.map((body) => ({ body, camera: bodyToCamera(body) }));
 }
+
+const MIN_MARKER_SPREAD = 1e-9; // mm²; below this the markers are effectively one point
+
+// The camera's mounting position and angle that best explain the measured markers (a planar
+// Procrustes fit), plus the RMS distance left over.
 function fitCameraTransform(pairs) {
-  if (
-    pairs.length < 2 ||
-    pairs.some(
-      (p) => !['x', 'z'].every((k) => Number.isFinite(p.camera[k]) && Number.isFinite(p.body[k])),
-    )
-  )
+  const finite = (pair) =>
+    ['x', 'z'].every((key) => Number.isFinite(pair.camera[key]) && Number.isFinite(pair.body[key]));
+  if (pairs.length < 2 || pairs.some((pair) => !finite(pair)))
     throw new Error('離れた2点以上の対応が必要です。');
-  const p = { x: mean(pairs.map((v) => v.camera.x)), z: mean(pairs.map((v) => v.camera.z)) },
-    q = { x: mean(pairs.map((v) => v.body.x)), z: mean(pairs.map((v) => v.body.z)) };
-  let dot = 0,
-    cross = 0,
-    spread = 0;
-  for (const v of pairs) {
-    const x = v.camera.x - p.x,
-      z = v.camera.z - p.z,
-      X = v.body.x - q.x,
-      Z = v.body.z - q.z;
-    dot += x * X + z * Z;
-    cross += x * Z - z * X;
+  const cameraCentre = {
+    x: mean(pairs.map((pair) => pair.camera.x)),
+    z: mean(pairs.map((pair) => pair.camera.z)),
+  };
+  const bodyCentre = {
+    x: mean(pairs.map((pair) => pair.body.x)),
+    z: mean(pairs.map((pair) => pair.body.z)),
+  };
+  let dot = 0;
+  let cross = 0;
+  let spread = 0;
+  for (const pair of pairs) {
+    const x = pair.camera.x - cameraCentre.x;
+    const z = pair.camera.z - cameraCentre.z;
+    const bodyX = pair.body.x - bodyCentre.x;
+    const bodyZ = pair.body.z - bodyCentre.z;
+    dot += x * bodyX + z * bodyZ;
+    cross += x * bodyZ - z * bodyX;
     spread += x * x + z * z;
   }
-  if (spread < 1e-9 || Math.hypot(dot, cross) < 1e-9)
+  if (spread < MIN_MARKER_SPREAD || Math.hypot(dot, cross) < MIN_MARKER_SPREAD)
     throw new Error('目印を離して測ってください。');
-  const a = Math.atan2(cross, dot),
-    fit = {
-      cameraX: q.x - p.x * Math.cos(a) + p.z * Math.sin(a),
-      cameraZ: q.z - p.x * Math.sin(a) - p.z * Math.cos(a),
-      cameraAngle: (a * 180) / Math.PI,
-    };
+  const angle = Math.atan2(cross, dot);
+  const fit = {
+    cameraX: bodyCentre.x - cameraCentre.x * Math.cos(angle) + cameraCentre.z * Math.sin(angle),
+    cameraZ: bodyCentre.z - cameraCentre.x * Math.sin(angle) - cameraCentre.z * Math.cos(angle),
+    cameraAngle: (angle * 180) / Math.PI,
+  };
   fit.error = Math.sqrt(
     mean(
-      pairs.map((v) => {
-        const e = cameraToBody(v.camera, fit);
-        return (e.x - v.body.x) ** 2 + (e.z - v.body.z) ** 2;
+      pairs.map((pair) => {
+        const placed = cameraToBody(pair.camera, fit);
+        return (placed.x - pair.body.x) ** 2 + (placed.z - pair.body.z) ** 2;
       }),
     ),
   );
   return fit;
 }
-function mechanics(id, c) {
-  const samples = [],
-    events = [];
-  let x = 0.3,
-    v = id === 'braking' ? c.initialSpeed : 0,
-    odom = x,
-    brakeStart = null;
-  for (let i = 0; i <= 160; i++) {
-    const t = i * dt;
-    let force = 0,
-      accel = 0,
-      wheelSpeed = v,
-      braking = false;
-    const motorPower = id === 'braking' ? null : t < 3 ? c.power : 0;
-    if (id === 'braking') {
-      if (brakeStart === null && 3 - x <= c.brakeAt) {
+
+// --- mechanics: force, traction, braking ------------------------------------------------------
+
+const MECHANICS_STEPS = 160;
+const MECHANICS_START_X = 0.3; // m
+const POWER_OFF_STEP = 60; // step index; the motor is switched off at 3.0 s
+const POWER_OFF_TIME = 3; // seconds
+const STOP_LINE = 3; // m; the line the braking experiment must not overrun
+const MOTOR_FORCE = 16; // N at 100 % with the wheels still
+const BACK_EMF = 3; // N per m/s: the faster it rolls, the less the motor pushes
+const ROLLING_DRAG = 0.6; // N while moving
+const DEFAULT_GRIP = 0.7;
+const MAX_BRAKE_FORCE = 7; // N
+const SLIP_TO_WHEEL_SPEED = 7; // N of excess drive per m/s of wheel slip
+const BRAKE_SUCCESS_MARGIN = 0.2; // m short of the line still counts as a good stop
+const SLIP_TOLERANCE = 0.15; // m/s between wheel and body speed before traction is lost
+
+function mechanicsStatus(sample) {
+  if (sample.braking) return 'ブレーキで減速';
+  if (sample.motorPower !== 0) return '走行中';
+  return sample.v > 0 ? '出力0・惰性で移動' : '停止';
+}
+
+function mechanics(topic, config) {
+  const braking = topic === 'braking';
+  const samples = [];
+  const events = [];
+  let x = MECHANICS_START_X;
+  let v = braking ? config.initialSpeed : 0;
+  let odom = x;
+  let brakeStart = null;
+  for (let step = 0; step <= MECHANICS_STEPS; step++) {
+    const t = step * dt;
+    let force = 0;
+    let accel = 0;
+    let wheelSpeed = v;
+    let brakingNow = false;
+    const motorPower = braking ? null : t < POWER_OFF_TIME ? config.power : 0;
+    if (braking) {
+      if (brakeStart === null && STOP_LINE - x <= config.brakeAt) {
         brakeStart = x;
         events.push({ t, x, kind: 'brake', label: 'ブレーキ開始', text: 'ブレーキを開始' });
       }
-      braking = brakeStart !== null;
-      force = braking && v > 0 ? -Math.min(7, c.grip * c.mass * 9.81) : 0;
-      accel = force / c.mass;
+      brakingNow = brakeStart !== null;
+      force =
+        brakingNow && v > 0 ? -Math.min(MAX_BRAKE_FORCE, config.grip * config.mass * GRAVITY) : 0;
+      accel = force / config.mass;
     } else {
-      const requested = Math.max(0, (16 * motorPower) / 100 - 3 * v),
-        cap = (c.grip ?? 0.7) * c.mass * 9.81,
-        drive = Math.min(requested, cap);
-      force = drive - (v > 0 ? 0.6 : 0);
-      accel = force / c.mass;
-      wheelSpeed = v + Math.max(0, requested - cap) / 7;
-      if (i === 60)
+      const requested = Math.max(0, (MOTOR_FORCE * motorPower) / 100 - BACK_EMF * v);
+      const grip = (config.grip ?? DEFAULT_GRIP) * config.mass * GRAVITY;
+      const drive = Math.min(requested, grip);
+      force = drive - (v > 0 ? ROLLING_DRAG : 0);
+      accel = force / config.mass;
+      // Force the tyres cannot pass to the floor spins the wheels instead of moving the body.
+      wheelSpeed = v + Math.max(0, requested - grip) / SLIP_TO_WHEEL_SPEED;
+      if (step === POWER_OFF_STEP)
         events.push({
           t,
           x,
           kind: 'power-off',
           label: '出力0 %',
-          text: 'モーターへの出力を' + c.power + ' %から0 %に変更（ブレーキなし）',
+          text: 'モーターへの出力を' + config.power + ' %から0 %に変更（ブレーキなし）',
         });
     }
-    samples.push({
-      t,
-      x,
-      v,
-      wheelSpeed,
-      odom,
-      force,
-      accel,
-      motorPower,
-      braking,
-      status: braking
-        ? 'ブレーキで減速'
-        : motorPower === 0
-          ? v > 0
-            ? '出力0・惰性で移動'
-            : '停止'
-          : '走行中',
-    });
+    const sample = { t, x, v, wheelSpeed, odom, force, accel, motorPower, braking: brakingNow };
+    samples.push({ ...sample, status: mechanicsStatus(sample) });
     const nextV = Math.max(0, v + accel * dt);
     x += (v + nextV) * 0.5 * dt;
     odom += (v + nextV) * 0.5 * dt + Math.max(0, wheelSpeed - v) * dt;
     v = nextV;
-    if (id === 'braking' && brakeStart !== null && v === 0) {
+    if (braking && brakeStart !== null && v === 0) {
       samples.push({
         ...samples.at(-1),
         t: t + dt,
@@ -160,82 +206,112 @@ function mechanics(id, c) {
       break;
     }
   }
-  const end = samples.at(-1),
-    success =
-      id === 'braking'
-        ? 3 - end.x >= -1e-6 && 3 - end.x <= 0.2
-        : !samples.some((s) => s.wheelSpeed - s.v > 0.15);
+  const end = samples.at(-1);
+  const remaining = STOP_LINE - end.x;
+  const success = braking
+    ? remaining >= -1e-6 && remaining <= BRAKE_SUCCESS_MARGIN
+    : !samples.some((sample) => sample.wheelSpeed - sample.v > SLIP_TOLERANCE);
+  const brakingMetrics = () => [
+    metric('線までの残り（負なら通過）', remaining, 'm'),
+    metric('ブレーキ後の移動', end.x - (brakeStart ?? end.x), 'm'),
+    metric('停止まで', end.t, '秒'),
+  ];
+  const drivingMetrics = () => [
+    metric('3秒時点の速さ', samples[POWER_OFF_STEP].v, 'm/秒'),
+    metric('車輪から求めた移動距離の誤差', end.odom - end.x, 'm'),
+    metric('動き始めの加速度', samples[0].accel, 'm/秒²'),
+  ];
+  const outcome = () => {
+    if (braking)
+      return success
+        ? '線の手前20 cm以内に停止しました。'
+        : '停止位置を確認し、ブレーキを始める距離を調整しましょう。';
+    if (topic === 'force') return '質量か出力のどちらか一つを変え、前回の線と比べましょう。';
+    return '質量・出力・床のうち一つを変え、前回の線と比べましょう。';
+  };
   return {
     samples,
     events,
     success,
-    metrics:
-      id === 'braking'
-        ? [
-            metric('線までの残り（負なら通過）', 3 - end.x, 'm'),
-            metric('ブレーキ後の移動', end.x - (brakeStart ?? end.x), 'm'),
-            metric('停止まで', end.t, '秒'),
-          ]
-        : [
-            metric('3秒時点の速さ', samples[60].v, 'm/秒'),
-            metric('車輪から求めた移動距離の誤差', end.odom - end.x, 'm'),
-            metric('動き始めの加速度', samples[0].accel, 'm/秒²'),
-          ],
-    outcome:
-      id === 'braking'
-        ? success
-          ? '線の手前20 cm以内に停止しました。'
-          : '停止位置を確認し、ブレーキを始める距離を調整しましょう。'
-        : id === 'force'
-          ? '質量か出力のどちらか一つを変え、前回の線と比べましょう。'
-          : '質量・出力・床のうち一つを変え、前回の線と比べましょう。',
+    metrics: braking ? brakingMetrics() : drivingMetrics(),
+    outcome: outcome(),
   };
 }
-function behavior(id, c) {
-  const samples = [],
-    events = [],
-    route = [],
-    box = { x: 2.45, y: 1.4, w: 0.4, h: 1.2 };
-  let x = 0.5,
-    y = 2,
-    theta = 0,
-    v = 0,
-    state = '荷物へ進む',
-    hasParcel = false,
-    waitStart = null,
-    waitTotal = 0,
-    target = { x: 1.3, y: 2 },
-    waypoints = [],
-    done = false,
-    detoured = false;
-  const change = (t, text, why) => {
-    if (state !== text) {
-      state = text;
-      events.push({ t, text: text + '：' + why });
-    }
+
+// --- behavior: sequence, blocked, missing -----------------------------------------------------
+
+const BEHAVIOR_STEPS = 320;
+const PARCEL_PLACE = { x: 1.3, y: 2 };
+const PARCEL_ELSEWHERE = { x: 1.3, y: 0.7 };
+const DELIVERY_PLACE = { x: 4.3, y: 2 };
+const DETOUR = [
+  { x: 3.3, y: 0.85 },
+  { x: 4.3, y: 2 },
+];
+const DETOUR_ENTRY = { x: 1.65, y: 0.85 };
+const OBSTACLE_BOX = { x: 2.45, y: 1.4, w: 0.4, h: 1.2 };
+const TEMPORARY_OBSTACLE_UNTIL = 9; // seconds
+const ARRIVED_WITHIN = 0.09; // m
+const CRUISE_SPEED = 0.65; // m/s
+const MAX_TURN_RATE = 2.3; // rad/s
+const HEADING_GAIN = 3; // rad/s per rad of heading error
+const WHEEL_RADIUS = 0.065; // m
+const HALF_TRACK = 0.16; // m from the centre to a wheel
+const SECONDS_PER_MINUTE = 60;
+
+const TO_PARCEL = '荷物へ進む';
+const TO_ELSEWHERE = '別の場所を探す';
+const TO_DELIVERY = '届け先へ進む';
+const WAITING = '通路が空くまで待つ';
+const DELIVERED = '配達完了';
+const ARRIVED_EMPTY = '空のまま到着';
+
+function behavior(topic, config) {
+  const samples = [];
+  const events = [];
+  let x = 0.5;
+  let y = 2;
+  let theta = 0;
+  let v = 0;
+  let state = TO_PARCEL;
+  let hasParcel = false;
+  let waitStart = null;
+  let waitTotal = 0;
+  let target = { ...PARCEL_PLACE };
+  let waypoints = [];
+  let done = false;
+  let detoured = false;
+  // Every change of plan is recorded with the reason the robot had for it.
+  const change = (t, next, why) => {
+    if (state === next) return;
+    state = next;
+    events.push({ t, text: next + '：' + why });
   };
-  for (let i = 0; i <= 320; i++) {
-    const t = i * dt,
-      blocked = c.obstacle && c.obstacle !== 'none' && (c.obstacle !== 'temporary' || t < 9);
+  for (let step = 0; step <= BEHAVIOR_STEPS; step++) {
+    const t = step * dt;
+    const blocked =
+      config.obstacle &&
+      config.obstacle !== 'none' &&
+      (config.obstacle !== 'temporary' || t < TEMPORARY_OBSTACLE_UNTIL);
     let w = 0;
-    if (!done && Math.hypot(target.x - x, target.y - y) < 0.09) {
-      if (state === '荷物へ進む' && id === 'missing' && c.searchRule !== 'search') {
-        change(t, '届け先へ進む', '荷物はないが、そのまま進むルール');
-        target = { x: 4.3, y: 2 };
-      } else if (state === '荷物へ進む' && id === 'missing') {
-        change(t, '別の場所を探す', '最初の場所に荷物がない');
-        target = { x: 1.3, y: 0.7 };
-      } else if (state === '荷物へ進む' || state === '別の場所を探す') {
+    if (!done && Math.hypot(target.x - x, target.y - y) < ARRIVED_WITHIN) {
+      if (state === TO_PARCEL && topic === 'missing' && config.searchRule !== 'search') {
+        change(t, TO_DELIVERY, '荷物はないが、そのまま進むルール');
+        target = { ...DELIVERY_PLACE };
+      } else if (state === TO_PARCEL && topic === 'missing') {
+        change(t, TO_ELSEWHERE, '最初の場所に荷物がない');
+        target = { ...PARCEL_ELSEWHERE };
+      } else if (state === TO_PARCEL || state === TO_ELSEWHERE) {
         hasParcel = true;
-        change(t, '届け先へ進む', '荷物を受け取った');
-        target = { x: 4.3, y: 2 };
+        change(t, TO_DELIVERY, '荷物を受け取った');
+        target = { ...DELIVERY_PLACE };
       } else if (waypoints.length) {
         target = waypoints.shift();
       } else {
         done = true;
         change(
           t,
-          hasParcel ? '配達完了' : '空のまま到着',
+          hasParcel ? DELIVERED : ARRIVED_EMPTY,
           hasParcel ? '荷物を渡した' : '受け取りを確かめていなかった',
         );
       }
@@ -244,31 +320,32 @@ function behavior(id, c) {
     if (danger && !done) {
       if (waitStart === null) {
         waitStart = t;
-        change(t, '通路が空くまで待つ', '前の障害物を検知');
+        change(t, WAITING, '前の障害物を検知');
       }
       waitTotal += dt;
-      if (id === 'blocked' && c.blockedRule === 'detour' && t - waitStart >= c.timeout) {
+      if (
+        topic === 'blocked' &&
+        config.blockedRule === 'detour' &&
+        t - waitStart >= config.timeout
+      ) {
         detoured = true;
-        waypoints = [
-          { x: 3.3, y: 0.85 },
-          { x: 4.3, y: 2 },
-        ];
-        target = { x: 1.65, y: 0.85 };
+        waypoints = DETOUR.map((point) => ({ ...point }));
+        target = { ...DETOUR_ENTRY };
         change(t, '別の道へ進む', '設定した待ち時間を越えた');
       }
-    } else if (waitStart !== null && state === '通路が空くまで待つ') {
-      change(t, '届け先へ進む', '通路が空いた');
+    } else if (waitStart !== null && state === WAITING) {
+      change(t, TO_DELIVERY, '通路が空いた');
       waitStart = null;
     }
     if (!done && (!danger || detoured)) {
-      const angle = Math.atan2(target.y - y, target.x - x),
-        err = Math.atan2(Math.sin(angle - theta), Math.cos(angle - theta));
-      w = clamp(err * 3, -2.3, 2.3);
-      v = 0.65 * Math.max(0, Math.cos(err));
+      const bearing = Math.atan2(target.y - y, target.x - x);
+      const error = Math.atan2(Math.sin(bearing - theta), Math.cos(bearing - theta));
+      w = clamp(error * HEADING_GAIN, -MAX_TURN_RATE, MAX_TURN_RATE);
+      // Turn first, drive once the goal is ahead.
+      v = CRUISE_SPEED * Math.max(0, Math.cos(error));
     } else v = 0;
     // Screen y points down; positive theta is clockwise.
-    const left = ((v + w * 0.16) / (0.065 * 2 * Math.PI)) * 60,
-      right = ((v - w * 0.16) / (0.065 * 2 * Math.PI)) * 60;
+    const toRpm = (speed) => (speed / (WHEEL_RADIUS * 2 * Math.PI)) * SECONDS_PER_MINUTE;
     samples.push({
       t,
       x,
@@ -276,23 +353,29 @@ function behavior(id, c) {
       theta,
       v,
       w,
-      left,
-      right,
+      left: toRpm(v + w * HALF_TRACK),
+      right: toRpm(v - w * HALF_TRACK),
       status: state,
       hasParcel,
       blocked,
-      box,
+      box: OBSTACLE_BOX,
       waitTotal,
       target: { ...target },
     });
-    route.push({ x, y });
     if (done) break;
     theta += w * dt;
     x += v * Math.cos(theta) * dt;
     y += v * Math.sin(theta) * dt;
   }
-  const end = samples.at(-1),
-    success = end.status === '配達完了';
+  const end = samples.at(-1);
+  const success = end.status === DELIVERED;
+  const outcome = () => {
+    if (success)
+      return '荷物を受け取り、届け先へ渡せました。別の通路条件でも同じルールを確かめましょう。';
+    if (end.status === ARRIVED_EMPTY)
+      return '移動は終わりましたが、荷物は届けられていません。受け取りの結果を確認する条件が必要です。';
+    return '制限時間内に配達できませんでした。止まっている状態と、次へ移る条件を見直しましょう。';
+  };
   return {
     samples,
     events,
@@ -302,69 +385,148 @@ function behavior(id, c) {
       metric('待った時間', waitTotal, '秒'),
       metric('荷物を届けた', success ? 'はい' : 'いいえ'),
     ],
-    outcome: success
-      ? '荷物を受け取り、届け先へ渡せました。別の通路条件でも同じルールを確かめましょう。'
-      : end.status === '空のまま到着'
-        ? '移動は終わりましたが、荷物は届けられていません。受け取りの結果を確認する条件が必要です。'
-        : '制限時間内に配達できませんでした。止まっている状態と、次へ移る条件を見直しましょう。',
+    outcome: outcome(),
   };
 }
+
+// --- tracking: velocity, prediction, crossing -------------------------------------------------
+
+const TRACKING_STEPS = 140;
+const CROSSING_STEPS = 220;
+const TRACKING_LANE_Y = 1.6; // m; QUESTiX watches from here
+const CART_TURN_TIME = 4; // seconds; the other robot turns round here in the "turn" scenario
+const CART_TURN_STEP = 80; // step index at which the turn is recorded as an event
+const CART_SPEED = 0.4; // m/s
+const CROSSING_GOAL_X = 4.4; // m
+const ROBOT_RADIUS_SUM = 0.36; // m between the two centres when the shells touch
+const PREDICTED_CLEARANCE = 0.7; // m; predicted approach that makes QUESTiX wait
+const CURRENT_CLEARANCE = 0.47; // m; same rule using only the distance measured now
+const CROSSING_ACCEL = 1.2; // m/s²
+const CROSSING_MAX_SPEED = 0.6; // m/s
+const QUESTIX_REL_SPEED = -0.6; // m/s of QUESTiX along the lane, seen from the other robot
+
+// Where the other robot is at a given time; in the "turn" scenario it reverses at 4 s.
 const cartAt = (t, motion) => ({
   x: 2.65,
-  y: motion === 'turn' && t >= 4 ? 1.55 + 0.4 * (t - 4) : 3.15 - 0.4 * t,
+  y:
+    motion === 'turn' && t >= CART_TURN_TIME
+      ? 1.55 + CART_SPEED * (t - CART_TURN_TIME)
+      : 3.15 - CART_SPEED * t,
 });
-function tracking(id, c) {
-  const samples = [],
-    events = [],
-    noise = seedNoise(),
-    predictions = [],
-    errors = [];
-  let obs = null,
-    previous = null,
-    velocity = 0,
-    hasVelocity = false,
-    lastMeasure = -Infinity,
-    lastError = null,
-    evaluation = null,
-    x = 0.4,
-    v = 0,
-    minDistance = Infinity,
-    contact = false;
-  const interval = c.interval ?? 0.2,
-    horizon = c.horizon ?? 1,
-    smoothing = c.smoothing ?? 1;
-  for (let i = 0; i <= (id === 'crossing' ? 220 : 140); i++) {
-    const t = i * dt,
-      cart = cartAt(t, c.motion),
-      y = 1.6;
-    if (t - lastMeasure >= interval - 1e-8) {
+
+function trackingStatus(topic, { contact, atGoal, stopping, hasVelocity }) {
+  if (contact) return '接触して終了';
+  if (topic === 'crossing') {
+    if (atGoal) return '到着';
+    return stopping ? '相手を待つ' : '進む';
+  }
+  return hasVelocity ? '停止して観察中' : '次の測定を待つ';
+}
+
+function trackingMetrics(topic, samples, errors, minDistance, end, contact) {
+  if (topic === 'crossing')
+    return [
+      metric('最も近づいた間隔', Math.max(0, minDistance), 'm'),
+      metric('経過時間', end.t, '秒'),
+      metric('接触', contact ? 'あり' : 'なし'),
+    ];
+  if (topic === 'velocity')
+    return [
+      metric(
+        '測定位置の平均のずれ',
+        mean(
+          samples
+            .filter((sample) => sample.t === sample.obs.t)
+            .map((sample) => Math.abs(sample.observedPosition - sample.actualPosition)),
+        ),
+        'm',
+      ),
+      metric(
+        '求めた速度の平均のずれ',
+        mean(
+          samples
+            .filter((sample) => sample.velocity !== null)
+            .map((sample) => Math.abs(sample.velocity - sample.actualVelocity)),
+        ),
+        'm/秒',
+      ),
+    ];
+  return [
+    metric('予測と実際の平均のずれ', mean(errors), 'm'),
+    metric('予測と実際の最大のずれ', Math.max(0, ...errors), 'm'),
+  ];
+}
+
+function trackingOutcome(topic, config, success, contact) {
+  if (topic === 'crossing') {
+    if (success)
+      return '接触せずにゴールへ到着しました。今の距離だけで判断した走行と、待ち始めた位置・最も近づいた間隔を比べてください。';
+    if (contact)
+      return '相手のロボットに接触しました。近づいたことに気づいても、減速する間に進みます。この先どこまで近づくかを予測した場合と比べてください。';
+    return '接触はしませんでしたが、時間内に到着しませんでした。待ち続けている場面と、進む条件を確かめてください。';
+  }
+  if (topic === 'velocity')
+    return config.noise > 0
+      ? '相手のロボット自体は一定速度でも、測定位置のずれが、計算した速度の変動になりました。測定のずれを0にした記録と比べてください。'
+      : '2回の位置の差を時間で割ると、相手のロボットの速度を求められました。次は測定位置だけにずれを加え、実際の速度が同じでも計算値が変わるか調べましょう。';
+  return config.motion === 'turn'
+    ? '方向転換の前に立てた予測は、その後も同じ向きに進む想定なので外れます。答え合わせの時刻と4秒の方向転換を照らし合わせ、短い時間先の予測とも比べてください。'
+    : '同じ向き・速さで進み続ける場面で予測しました。次は4秒で向きを変え、同じ予測方法がどこで外れるか確かめてください。';
+}
+
+function tracking(topic, config) {
+  const samples = [];
+  const events = [];
+  const noise = seedNoise();
+  const predictions = [];
+  const errors = [];
+  let obs = null;
+  let previous = null;
+  let velocity = 0;
+  let hasVelocity = false;
+  let lastMeasure = -Infinity;
+  let lastError = null;
+  let evaluation = null;
+  let x = 0.4;
+  let v = 0;
+  let minDistance = Infinity;
+  let contact = false;
+  const interval = config.interval ?? 0.2;
+  const horizon = config.horizon ?? 1;
+  const smoothing = config.smoothing ?? 1;
+  const steps = topic === 'crossing' ? CROSSING_STEPS : TRACKING_STEPS;
+  for (let step = 0; step <= steps; step++) {
+    const t = step * dt;
+    const cart = cartAt(t, config.motion);
+    const y = TRACKING_LANE_Y;
+    if (t - lastMeasure >= interval - EPSILON) {
       previous = obs;
-      obs = { x: cart.x, y: cart.y + noise() * (c.noise ?? 0), t };
+      obs = { x: cart.x, y: cart.y + noise() * (config.noise ?? 0), t };
       if (previous) {
         const measured = (obs.y - previous.y) / (t - previous.t);
         velocity = hasVelocity ? velocity * (1 - smoothing) + measured * smoothing : measured;
         hasVelocity = true;
       }
       lastMeasure = t;
-      if (hasVelocity && id === 'prediction')
+      if (hasVelocity && topic === 'prediction')
         predictions.push({ madeAt: t, t: t + horizon, y: obs.y + velocity * horizon });
     }
-    for (const p of predictions) {
-      if (!p.checked && t + 1e-8 >= p.t) {
-        p.checked = true;
-        const actualY = cartAt(p.t, c.motion).y;
-        lastError = Math.abs(p.y - actualY);
-        evaluation = {
-          madeAt: p.madeAt,
-          targetTime: p.t,
-          predictedY: p.y,
-          actualY,
-          error: lastError,
-        };
-        errors.push(lastError);
-      }
+    // A prediction can only be marked right or wrong once its target time has arrived.
+    for (const prediction of predictions) {
+      if (prediction.checked || t + EPSILON < prediction.t) continue;
+      prediction.checked = true;
+      const actualY = cartAt(prediction.t, config.motion).y;
+      lastError = Math.abs(prediction.y - actualY);
+      evaluation = {
+        madeAt: prediction.madeAt,
+        targetTime: prediction.t,
+        predictedY: prediction.y,
+        actualY,
+        error: lastError,
+      };
+      errors.push(lastError);
     }
-    if (c.motion === 'turn' && i === 80)
+    if (config.motion === 'turn' && step === CART_TURN_STEP)
       events.push({
         t,
         kind: 'turn',
@@ -372,45 +534,47 @@ function tracking(id, c) {
         text: '相手のロボットが進む向きを反対に変えた。新しく測る位置から速度と予測を更新する。',
       });
     const predicted =
-        hasVelocity && id !== 'velocity'
-          ? { x: obs.x, y: obs.y + velocity * horizon, targetTime: obs.t + horizon }
-          : null,
-      rx = obs.x - x,
-      ry = obs.y + velocity * (t - obs.t) - y;
-    let stop = false;
-    if (id === 'crossing') {
-      if (c.rule === 'predict') {
-        const relVx = -0.6,
-          relVy = velocity,
-          tNear = clamp(
-            -(rx * relVx + ry * relVy) / (relVx * relVx + relVy * relVy || 1),
-            0,
-            horizon,
-          );
-        stop = Math.hypot(rx + relVx * tNear, ry + relVy * tNear) < 0.7;
-      } else stop = Math.hypot(rx, obs.y - y) < 0.47;
-      const distance = Math.hypot(cart.x - x, cart.y - y) - 0.36;
+      hasVelocity && topic !== 'velocity'
+        ? { x: obs.x, y: obs.y + velocity * horizon, targetTime: obs.t + horizon }
+        : null;
+    const relativeX = obs.x - x;
+    const relativeY = obs.y + velocity * (t - obs.t) - y;
+    let stopping = false;
+    if (topic === 'crossing') {
+      if (config.rule === 'predict') {
+        const closingY = velocity;
+        // Time within the horizon at which the two paths are closest.
+        const nearest = clamp(
+          -(relativeX * QUESTIX_REL_SPEED + relativeY * closingY) /
+            (QUESTIX_REL_SPEED * QUESTIX_REL_SPEED + closingY * closingY || 1),
+          0,
+          horizon,
+        );
+        stopping =
+          Math.hypot(relativeX + QUESTIX_REL_SPEED * nearest, relativeY + closingY * nearest) <
+          PREDICTED_CLEARANCE;
+      } else stopping = Math.hypot(relativeX, obs.y - y) < CURRENT_CLEARANCE;
+      const distance = Math.hypot(cart.x - x, cart.y - y) - ROBOT_RADIUS_SUM;
       minDistance = Math.min(minDistance, distance);
       if (distance <= 0) {
         contact = true;
-        stop = true;
+        stopping = true;
       }
-      if (x >= 4.4) stop = true;
-      const nextV = clamp(v + (stop ? -1.2 : 1.2) * dt, 0, 0.6);
+      if (x >= CROSSING_GOAL_X) stopping = true;
+      const nextV = clamp(
+        v + (stopping ? -CROSSING_ACCEL : CROSSING_ACCEL) * dt,
+        0,
+        CROSSING_MAX_SPEED,
+      );
       x += ((v + nextV) * dt) / 2;
       v = contact ? 0 : nextV;
     }
-    const status = contact
-      ? '接触して終了'
-      : id === 'crossing'
-        ? x >= 4.4
-          ? '到着'
-          : stop
-            ? '相手を待つ'
-            : '進む'
-        : hasVelocity
-          ? '停止して観察中'
-          : '次の測定を待つ';
+    const status = trackingStatus(topic, {
+      contact,
+      atGoal: x >= CROSSING_GOAL_X,
+      stopping,
+      hasVelocity,
+    });
     if (samples.at(-1)?.status !== status) events.push({ t, text: status });
     samples.push({
       t,
@@ -424,116 +588,93 @@ function tracking(id, c) {
       velocity: hasVelocity ? velocity : null,
       actualPosition: cart.y,
       observedPosition: obs.y,
-      actualVelocity: c.motion === 'turn' && t >= 4 ? 0.4 : -0.4,
+      actualVelocity: config.motion === 'turn' && t >= CART_TURN_TIME ? CART_SPEED : -CART_SPEED,
       predicted,
       evaluation: evaluation ? { ...evaluation } : null,
       predictionError: lastError,
-      separation: Math.max(0, Math.hypot(cart.x - x, cart.y - y) - 0.36),
+      separation: Math.max(0, Math.hypot(cart.x - x, cart.y - y) - ROBOT_RADIUS_SUM),
       status,
     });
-    if (contact || (id === 'crossing' && x >= 4.4 && v === 0)) break;
+    if (contact || (topic === 'crossing' && x >= CROSSING_GOAL_X && v === 0)) break;
   }
-  const end = samples.at(-1),
-    success = id === 'crossing' ? !contact && end.x >= 4.4 : true;
-  const metrics =
-    id === 'crossing'
-      ? [
-          metric('最も近づいた間隔', Math.max(0, minDistance), 'm'),
-          metric('経過時間', end.t, '秒'),
-          metric('接触', contact ? 'あり' : 'なし'),
-        ]
-      : id === 'velocity'
-        ? [
-            metric(
-              '測定位置の平均のずれ',
-              mean(
-                samples
-                  .filter((s) => s.t === s.obs.t)
-                  .map((s) => Math.abs(s.observedPosition - s.actualPosition)),
-              ),
-              'm',
-            ),
-            metric(
-              '求めた速度の平均のずれ',
-              mean(
-                samples
-                  .filter((s) => s.velocity !== null)
-                  .map((s) => Math.abs(s.velocity - s.actualVelocity)),
-              ),
-              'm/秒',
-            ),
-          ]
-        : [
-            metric('予測と実際の平均のずれ', mean(errors), 'm'),
-            metric('予測と実際の最大のずれ', Math.max(0, ...errors), 'm'),
-          ];
-  const outcome =
-    id === 'crossing'
-      ? success
-        ? '接触せずにゴールへ到着しました。今の距離だけで判断した走行と、待ち始めた位置・最も近づいた間隔を比べてください。'
-        : contact
-          ? '相手のロボットに接触しました。近づいたことに気づいても、減速する間に進みます。この先どこまで近づくかを予測した場合と比べてください。'
-          : '接触はしませんでしたが、時間内に到着しませんでした。待ち続けている場面と、進む条件を確かめてください。'
-      : id === 'velocity'
-        ? c.noise > 0
-          ? '相手のロボット自体は一定速度でも、測定位置のずれが、計算した速度の変動になりました。測定のずれを0にした記録と比べてください。'
-          : '2回の位置の差を時間で割ると、相手のロボットの速度を求められました。次は測定位置だけにずれを加え、実際の速度が同じでも計算値が変わるか調べましょう。'
-        : c.motion === 'turn'
-          ? '方向転換の前に立てた予測は、その後も同じ向きに進む想定なので外れます。答え合わせの時刻と4秒の方向転換を照らし合わせ、短い時間先の予測とも比べてください。'
-          : '同じ向き・速さで進み続ける場面で予測しました。次は4秒で向きを変え、同じ予測方法がどこで外れるか確かめてください。';
-  return { samples, events, success, metrics, outcome };
+  const end = samples.at(-1);
+  const success = topic === 'crossing' ? !contact && end.x >= CROSSING_GOAL_X : true;
+  return {
+    samples,
+    events,
+    success,
+    metrics: trackingMetrics(topic, samples, errors, minDistance, end, contact),
+    outcome: trackingOutcome(topic, config, success, contact),
+  };
 }
-function coordination(id, c) {
-  const samples = [],
-    events = [];
-  let q = [100, -100],
-    estimate = null,
-    lastLook = -Infinity;
-  for (let i = 0; i <= 120; i++) {
-    const t = i * dt,
-      target = id === 'feedback' && t >= 2 ? { x: 220, z: 105 } : { x: 185, z: 145 },
-      reading = bodyToCamera(target);
-    if (
-      !estimate ||
-      (id === 'feedback' && c.lookAgain === 'repeat' && t - lastLook >= c.interval - 1e-8)
-    ) {
+
+// --- coordination: frames, calibrate, feedback ------------------------------------------------
+
+const COORDINATION_STEPS = 120;
+const START_ANGLES = [100, -100]; // degrees
+const JOINT_RATE = 45; // degrees per second
+const REACHED_WITHIN = 8; // mm between the tip and the target
+const FIRST_TARGET = { x: 185, z: 145 }; // mm from the shoulder
+const MOVED_TARGET = { x: 220, z: 105 }; // mm; the object is moved at 2 s in the feedback topic
+const TARGET_MOVES_AT = 2; // seconds
+
+// The reachable solution closest to where the joints already are.
+function nearestSolution(estimate, angles) {
+  const distance = (solution) =>
+    solution.q.reduce((sum, value, joint) => sum + (value - angles[joint]) ** 2, 0);
+  return armIK(estimate, true)
+    .solutions.filter((solution) => solution.allowed)
+    .sort((a, b) => distance(a) - distance(b));
+}
+
+function coordination(topic, config) {
+  const samples = [];
+  const events = [];
+  let angles = [...START_ANGLES];
+  let estimate = null;
+  let lastLook = -Infinity;
+  for (let step = 0; step <= COORDINATION_STEPS; step++) {
+    const t = step * dt;
+    const target = topic === 'feedback' && t >= TARGET_MOVES_AT ? MOVED_TARGET : FIRST_TARGET;
+    const reading = bodyToCamera(target);
+    const looksAgain =
+      topic === 'feedback' &&
+      config.lookAgain === 'repeat' &&
+      t - lastLook >= config.interval - EPSILON;
+    if (!estimate || looksAgain) {
+      // Without the transform the camera reading is used as if it were a shoulder coordinate.
       estimate =
-        id === 'frames' && !c.transform
+        topic === 'frames' && !config.transform
           ? { ...reading }
-          : cameraToBody(
-              reading,
-              id === 'feedback' ? { cameraX: 40, cameraZ: 30, cameraAngle: 10 } : c,
-            );
+          : cameraToBody(reading, topic === 'feedback' ? FITTED_CAMERA : config);
       lastLook = t;
       events.push({ t, text: 'カメラから行き先を更新' });
     }
-    const solutions = armIK(estimate, true)
-      .solutions.filter((s) => s.allowed)
-      .sort(
-        (a, b) =>
-          a.q.reduce((s, v, j) => s + (v - q[j]) ** 2, 0) -
-          b.q.reduce((s, v, j) => s + (v - q[j]) ** 2, 0),
+    const solutions = nearestSolution(estimate, angles);
+    if (solutions.length)
+      angles = angles.map(
+        (value, joint) =>
+          clamp(solutions[0].q[joint] - value, -JOINT_RATE * dt, JOINT_RATE * dt) + value,
       );
-    if (solutions.length) q = q.map((v, j) => v + clamp(solutions[0].q[j] - v, -45 * dt, 45 * dt));
-    const fk = armFK(q),
-      error = Math.hypot(fk.tip.x - target.x, fk.tip.z - target.z);
+    const pose = armFK(angles);
     samples.push({
       t,
-      q: [...q],
-      ...fk,
+      q: [...angles],
+      ...pose,
       target,
       estimate: { ...estimate },
       reading,
-      error,
+      error: Math.hypot(pose.tip.x - target.x, pose.tip.z - target.z),
       lastLook,
       status: solutions.length ? '手先を目標へ近づける' : 'この行き先には届かない',
     });
   }
   const end = samples.at(-1);
+  const success = end.error < REACHED_WITHIN;
   return {
     samples,
     events,
-    success: end.error < 8,
+    success,
     metrics: [
       metric('最後の手先と目標の距離', end.error, 'mm', 1),
       metric(
@@ -543,37 +684,92 @@ function coordination(id, c) {
         1,
       ),
     ],
-    outcome:
-      end.error < 8
-        ? '手先が目標から8 mm以内に入りました。同じ設定を別の観測条件でも使えるか考えましょう。'
-        : '青い行き先と黄色い目標を比べ、座標の変換や観測の更新を見直しましょう。',
+    outcome: success
+      ? '手先が目標から8 mm以内に入りました。同じ設定を別の観測条件でも使えるか考えましょう。'
+      : '青い行き先と黄色い目標を比べ、座標の変換や観測の更新を見直しましょう。',
   };
 }
-function timing(id, c) {
-  const samples = [],
-    events = [],
-    transit = [],
-    queue = [];
-  let x = 0.35,
-    v = 0,
-    last = null,
-    nextProcess = 0,
-    stop = false,
-    contact = false;
-  const wall = 4,
-    latency = c.latency ?? 0,
-    processing = c.processing ?? 20;
-  for (let i = 0; i <= 220; i++) {
-    const t = i * dt;
+
+// --- timing: delay, alignment, queue ----------------------------------------------------------
+
+const TIMING_STEPS = 220;
+const WALL_X = 4; // m
+const ROBOT_HALF_LENGTH = 0.18; // m from the centre to the front bumper
+const STOP_RANGE = 0.6; // m; a range at or below this commands a stop
+const TIMING_ACCEL = 1.2; // m/s²
+const TIMING_DECEL = 3.2; // m/s²
+const TIMING_MAX_SPEED = 0.8; // m/s
+const TARGET_GAP = 0.5; // m short of the wall the robot aims to stop
+const GOOD_GAP = 0.16; // m; how far from the target gap still counts as a success
+const MAP_TOLERANCE = 0.05; // m of map error the alignment topic accepts
+
+function timingStatus({ contact, stop, v, last }) {
+  if (contact) return '接触して終了';
+  if (stop) return v ? '減速中' : '停止';
+  return last ? '走行中' : '最初のデータを待つ';
+}
+
+function timingMetrics(topic, samples, end, maxWallError) {
+  const shared = [
+    metric('中心から壁までの距離', end.range, 'm'),
+    metric('使った情報の最大の古さ', Math.max(...samples.map((sample) => sample.age)), '秒'),
+  ];
+  if (topic === 'alignment') return [...shared, metric('地図の壁の最大のずれ', maxWallError, 'm')];
+  if (topic === 'queue')
+    return [
+      ...shared,
+      metric('処理待ちの最大件数', Math.max(...samples.map((sample) => sample.queue)), '件', 0),
+    ];
+  return [...shared, metric('壁の0.5 m手前からのずれ', Math.abs(end.range - TARGET_GAP), 'm')];
+}
+
+function timingOutcome(topic, config, contact, maxWallError) {
+  if (topic === 'alignment')
+    return maxWallError < EPSILON
+      ? '距離と機体位置を同じ時刻で組み合わせると、地図の壁が実際の4 mの位置に重なりました。遅れて届いても、測ったときの位置に戻って計算できます。'
+      : '古い距離に現在の機体位置を足したため、実際より奥へ壁を描いてしまいました。走行ではなく、地図へ置く位置の誤りです。測った時刻の位置を使って比べましょう。';
+  if (contact) {
+    if (topic !== 'queue')
+      return '届いた距離はまだ大きくても、実際の機体は壁に近づいていて、停止が間に合わず接触しました。届く遅れを0秒にするか、測定後の移動量を使って補正して比べます。';
+    return config.queue === 'latest'
+      ? '最新の1件を選んでいても、次に処理するまでの間に機体が進み、停止が間に合いませんでした。処理回数を増やした場合と比べましょう。'
+      : 'データはすぐ届いていましたが、順番待ちで古い距離を使い続け、壁に接触しました。最新の1件を使う方法や、処理回数を増やす方法と比べましょう。';
+  }
+  if (topic === 'queue')
+    return '壁に接触する前に止まりました。処理待ちの件数と情報の古さを、前の設定と比べてください。今の判断に使うデータを選ぶことと、記録として全件を残すことは別に考えます。';
+  return config.compensate
+    ? '遅れ自体は残っていますが、測定後に進んだ距離を引いて停止を判断できました。この実験では車輪からの移動量に誤差がないとしています。'
+    : '接触前に停止しました。壁の0.5 m手前という目標からどれくらいずれたかを、遅れのある場合と比べてください。';
+}
+
+function timing(topic, config) {
+  const samples = [];
+  const events = [];
+  const transit = []; // measured, not yet received
+  const queue = []; // received, not yet processed
+  let x = 0.35;
+  let v = 0;
+  let last = null; // the measurement the robot is currently deciding on
+  let nextProcess = 0;
+  let stop = false;
+  let contact = false;
+  const latency = config.latency ?? 0;
+  const processing = config.processing ?? 20;
+  for (let step = 0; step <= TIMING_STEPS; step++) {
+    const t = step * dt;
     // Advance from the previous decision to this timestamp before measuring.
     // This keeps the measured position, range and displayed clock on the same instant.
-    if (i > 0) {
-      const nextV = clamp(v + (stop || !last ? -3.2 : 1.2) * dt, 0, 0.8),
-        nextX = x + ((v + nextV) * dt) / 2;
-      if (nextX >= wall - 0.18) {
+    if (step > 0) {
+      const nextV = clamp(
+        v + (stop || !last ? -TIMING_DECEL : TIMING_ACCEL) * dt,
+        0,
+        TIMING_MAX_SPEED,
+      );
+      const nextX = x + ((v + nextV) * dt) / 2;
+      if (nextX >= WALL_X - ROBOT_HALF_LENGTH) {
         contact = true;
         stop = true;
-        x = wall - 0.18;
+        x = WALL_X - ROBOT_HALF_LENGTH;
         v = 0;
         events.push({ t, kind: 'contact', text: '停止が間に合わず、機体が壁に接触した。' });
       } else {
@@ -581,22 +777,22 @@ function timing(id, c) {
         v = nextV;
       }
     }
-    transit.push({ stamp: t, receive: t + latency, x, range: wall - x });
-    while (transit.length && transit[0].receive <= t + 1e-8) queue.push(transit.shift());
-    if (t >= nextProcess - 1e-8) {
+    transit.push({ stamp: t, receive: t + latency, x, range: WALL_X - x });
+    while (transit.length && transit[0].receive <= t + EPSILON) queue.push(transit.shift());
+    if (t >= nextProcess - EPSILON) {
       if (queue.length) {
-        last = id === 'queue' && c.queue === 'latest' ? queue.at(-1) : queue[0];
-        if (id === 'queue' && c.queue === 'latest') queue.length = 0;
+        const takeLatest = topic === 'queue' && config.queue === 'latest';
+        last = takeLatest ? queue.at(-1) : queue[0];
+        if (takeLatest) queue.length = 0;
         else queue.shift();
       }
       nextProcess += 1 / processing;
     }
-    const usedRange = last
-        ? last.range - (c.compensate || id === 'alignment' ? x - last.x : 0)
-        : null,
-      mapBaseX = last ? (id === 'alignment' && c.align === 'stamp' ? last.x : x) : null,
-      wallEstimate = last ? mapBaseX + last.range : null;
-    if (last && usedRange <= 0.6 && !stop) {
+    const compensating = config.compensate || topic === 'alignment';
+    const usedRange = last ? last.range - (compensating ? x - last.x : 0) : null;
+    const mapBaseX = last ? (topic === 'alignment' && config.align === 'stamp' ? last.x : x) : null;
+    const wallEstimate = last ? mapBaseX + last.range : null;
+    if (last && usedRange <= STOP_RANGE && !stop) {
       stop = true;
       events.push({
         t,
@@ -609,129 +805,197 @@ function timing(id, c) {
       t,
       x,
       v,
-      range: wall - x,
+      range: WALL_X - x,
       usedRange,
       rawRange: last?.range ?? null,
       measuredX: last?.x ?? null,
       mapBaseX,
       wallEstimate,
-      wallError: wallEstimate === null ? null : wallEstimate - wall,
+      wallError: wallEstimate === null ? null : wallEstimate - WALL_X,
       age: last ? t - last.stamp : 0,
       stamp: last?.stamp ?? null,
       receive: last?.receive ?? null,
       queue: queue.length,
       stop,
       contact,
-      status: contact
-        ? '接触して終了'
-        : stop
-          ? v
-            ? '減速中'
-            : '停止'
-          : last
-            ? '走行中'
-            : '最初のデータを待つ',
+      status: timingStatus({ contact, stop, v, last }),
     });
     if (contact || (stop && v === 0 && t > 1)) break;
   }
-  const end = samples.at(-1),
-    maxWallError = Math.max(...samples.map((s) => Math.abs(s.wallError ?? 0))),
-    metrics = [
-      metric('中心から壁までの距離', end.range, 'm'),
-      metric('使った情報の最大の古さ', Math.max(...samples.map((s) => s.age)), '秒'),
-      id === 'alignment'
-        ? metric('地図の壁の最大のずれ', maxWallError, 'm')
-        : id === 'queue'
-          ? metric('処理待ちの最大件数', Math.max(...samples.map((s) => s.queue)), '件', 0)
-          : metric('壁の0.5 m手前からのずれ', Math.abs(end.range - 0.5), 'm'),
-    ];
-  const outcome =
-    id === 'alignment'
-      ? maxWallError < 1e-8
-        ? '距離と機体位置を同じ時刻で組み合わせると、地図の壁が実際の4 mの位置に重なりました。遅れて届いても、測ったときの位置に戻って計算できます。'
-        : '古い距離に現在の機体位置を足したため、実際より奥へ壁を描いてしまいました。走行ではなく、地図へ置く位置の誤りです。測った時刻の位置を使って比べましょう。'
-      : contact
-        ? id === 'queue'
-          ? c.queue === 'latest'
-            ? '最新の1件を選んでいても、次に処理するまでの間に機体が進み、停止が間に合いませんでした。処理回数を増やした場合と比べましょう。'
-            : 'データはすぐ届いていましたが、順番待ちで古い距離を使い続け、壁に接触しました。最新の1件を使う方法や、処理回数を増やす方法と比べましょう。'
-          : '届いた距離はまだ大きくても、実際の機体は壁に近づいていて、停止が間に合わず接触しました。届く遅れを0秒にするか、測定後の移動量を使って補正して比べます。'
-        : id === 'queue'
-          ? '壁に接触する前に止まりました。処理待ちの件数と情報の古さを、前の設定と比べてください。今の判断に使うデータを選ぶことと、記録として全件を残すことは別に考えます。'
-          : c.compensate
-            ? '遅れ自体は残っていますが、測定後に進んだ距離を引いて停止を判断できました。この実験では車輪からの移動量に誤差がないとしています。'
-            : '接触前に停止しました。壁の0.5 m手前という目標からどれくらいずれたかを、遅れのある場合と比べてください。';
+  const end = samples.at(-1);
+  const maxWallError = Math.max(...samples.map((sample) => Math.abs(sample.wallError ?? 0)));
+  const success =
+    topic === 'alignment'
+      ? maxWallError < MAP_TOLERANCE
+      : !contact && Math.abs(end.range - TARGET_GAP) < GOOD_GAP;
   return {
     samples,
     events,
-    success:
-      id === 'alignment' ? maxWallError < 0.05 : !contact && Math.abs(end.range - 0.5) < 0.16,
-    metrics,
-    outcome,
+    success,
+    metrics: timingMetrics(topic, samples, end, maxWallError),
+    outcome: timingOutcome(topic, config, contact, maxWallError),
   };
 }
-function canRestart(latched, causeCleared, operatorRequest) {
-  return Boolean(latched && causeCleared && operatorRequest);
+
+// --- diagnostics: distance, missing, impact ---------------------------------------------------
+
+const DIAGNOSTICS_STEPS = 200;
+const SHELF_X = 3.2; // m; the shelf the depth camera sees
+const IMPACT_OBSTACLE_X = 8; // m; far away, so the impact run is never about a collision
+const DIAGNOSTICS_WALL_X = 4; // m; what the LiDAR sees over the shelf
+const DATA_LOSS_STEP = 30; // step index at which the event is recorded
+const DATA_LOSS_TIME = 1.5; // seconds; no new range arrives from here on
+const SHOCK_STEP = 40; // step index; the event is played at 2.0 s
+const SHOCK_TIME = 2; // seconds
+const SHOCK_DURATION = 0.15; // seconds
+const BUMP_PEAK = 5.2; // m/s²
+const IMPACT_PEAK = 16; // m/s²
+const DIAGNOSTICS_ACCEL = 1.2; // m/s²
+const DIAGNOSTICS_MAX_SPEED = 0.6; // m/s
+const CRUISE_ACCEL_UNTIL = 0.6; // m/s; the robot accelerates up to this speed
+const RECORDED_STOP_RANGE = 0.6; // m; the stored range that commands a stop in the missing topic
+const IMPACT_RUN_TIME = 4; // seconds
+
+const eventName = (eventType) => (eventType === 'bump' ? '小さな段差' : '強い衝撃');
+
+function diagnosticsStatus({ contact, latched, v }) {
+  if (contact) return '接触して終了';
+  if (latched) return v ? '停止指示・減速中' : '停止を保持';
+  return '走行中';
 }
-function diagnostics(id, c) {
-  const samples = [],
-    events = [];
-  let x = 0.4,
-    v = 0,
-    lastRange = 2.8,
-    lastStamp = 0,
-    latched = false,
-    reason = '',
-    contact = false;
-  const obstacle = id === 'impact' ? 8 : 3.2;
-  for (let i = 0; i <= 200; i++) {
-    const t = i * dt,
-      lidar = (id === 'distance' ? 4 : obstacle) - x,
-      depth = obstacle - x;
-    if (id === 'missing' && i === 30)
+
+// The first condition that matched, or '' while the robot is still free to drive.
+function stopReason(topic, config, { lidar, depth, lastRange, age, accel }) {
+  let reason = '';
+  if (topic === 'distance') {
+    const used = Math.min(lidar, config.sensorRule === 'both' ? depth : Infinity);
+    if (used <= config.stopDistance) reason = '障害物までの距離が設定値以下';
+  }
+  if (topic === 'missing') {
+    if (config.watchdog && age > config.staleLimit) reason = '距離データの更新が途切れた';
+    if (lastRange <= RECORDED_STOP_RANGE) reason = '記録された距離が0.6 m以下';
+  }
+  if (topic === 'impact' && Math.abs(accel) >= config.impactLimit)
+    reason = 'IMUでしきい値以上の加速度';
+  return reason;
+}
+
+function diagnosticsMetrics(topic, config, samples, end, latched, contact) {
+  if (topic === 'impact')
+    return [
+      metric('想定した出来事', eventName(config.eventType)),
+      metric('停止判定', latched ? 'あり' : 'なし'),
+      metric(
+        '加速度の最大の大きさ',
+        Math.max(...samples.map((sample) => Math.abs(sample.accel))),
+        'm/秒²',
+      ),
+    ];
+  const third =
+    topic === 'distance'
+      ? metric(
+          '停止指示を出した時刻',
+          samples.find((sample) => sample.latched)?.t ?? '指示なし',
+          '秒',
+        )
+      : metric('最後のデータの古さ', end.age, '秒');
+  return [
+    metric('停止判定', latched ? 'あり' : 'なし'),
+    metric('接触', contact ? 'あり' : 'なし'),
+    third,
+  ];
+}
+
+function impactOutcome(config, latched) {
+  if (config.eventType === 'bump')
+    return latched
+      ? '通過してよい段差の模擬データでも停止しました。同じしきい値で強い衝撃も試してから、境目の値を見直しましょう。'
+      : 'この段差の模擬データでは走行を続けました。同じしきい値で、強い衝撃を見逃さず止められるかも確認しましょう。';
+  return latched
+    ? '強い衝撃を検知して停止を保持しました。衝撃が起きた後の判断で、接触を防いだという意味ではありません。'
+    : '強い衝撃の模擬データでも停止しませんでした。加速度の波形と停止の境目を比べ、値を見直してください。';
+}
+
+function contactOutcome(topic, config, latched) {
+  if (topic === 'missing')
+    return '距離データが途切れた後も、最後の値を使って走り続け、接触しました。新しい値が来ないことも停止条件にできるか確かめましょう。';
+  if (config.sensorRule !== 'lidar')
+    return '棚までの距離も使いましたが、停止を指示する距離が短すぎて接触しました。減速して止まるまでの距離も必要です。';
+  return latched
+    ? 'LiDARは奥の壁までの距離で停止を指示しましたが、手前の棚に接触しました。棚を測るカメラの距離も使って比べましょう。'
+    : 'LiDARは棚の下を通して奥の壁を測っていたため、棚に接触するまで停止条件に達しませんでした。棚を測るカメラの距離も使って比べましょう。';
+}
+
+function diagnosticsOutcome(topic, config, latched, contact) {
+  if (topic === 'impact') return impactOutcome(config, latched);
+  if (contact) return contactOutcome(topic, config, latched);
+  if (topic === 'missing')
+    return '距離が短くなるのを待たず、データが更新されない時間を使って停止できました。前回の動きと、停止指示を出した時刻を比べてください。';
+  return 'カメラが測った棚までの距離で停止を判断し、接触する前に止まりました。壁までの距離だけで走った結果と比べてください。';
+}
+
+function diagnostics(topic, config) {
+  const samples = [];
+  const events = [];
+  let x = 0.4;
+  let v = 0;
+  let lastRange = 2.8;
+  let lastStamp = 0;
+  let latched = false;
+  let reason = '';
+  let contact = false;
+  const obstacle = topic === 'impact' ? IMPACT_OBSTACLE_X : SHELF_X;
+  for (let step = 0; step <= DIAGNOSTICS_STEPS; step++) {
+    const t = step * dt;
+    // The LiDAR beam passes under the shelf and reaches the far wall; the camera sees the shelf.
+    const lidar = (topic === 'distance' ? DIAGNOSTICS_WALL_X : obstacle) - x;
+    const depth = obstacle - x;
+    if (topic === 'missing' && step === DATA_LOSS_STEP)
       events.push({
         t,
         kind: 'data-loss',
         label: '距離の更新が途切れる',
         text: '新しい距離が届かなくなった。最後の測定値は残っている。',
       });
-    if (id === 'impact' && i === 40)
+    if (topic === 'impact' && step === SHOCK_STEP)
       events.push({
         t,
         x,
         kind: 'shock',
-        label: c.eventType === 'bump' ? '小さな段差' : '強い衝撃',
-        text:
-          (c.eventType === 'bump' ? '小さな段差' : '強い衝撃') + 'を表す加速度の模擬データを入力。',
+        label: eventName(config.eventType),
+        text: eventName(config.eventType) + 'を表す加速度の模擬データを入力。',
       });
-    if (id !== 'missing' || t < 1.5) {
+    if (topic !== 'missing' || t < DATA_LOSS_TIME) {
       lastRange = lidar;
       lastStamp = t;
     }
-    const pulse = id === 'impact' && t >= 2 && t < 2.15 ? (c.eventType === 'impact' ? 16 : 5.2) : 0,
-      accel = pulse || (v < 0.6 && !latched ? 1.2 : latched && v > 0 ? -1.2 : 0),
-      age = t - lastStamp;
+    const shock =
+      topic === 'impact' && t >= SHOCK_TIME && t < SHOCK_TIME + SHOCK_DURATION
+        ? config.eventType === 'impact'
+          ? IMPACT_PEAK
+          : BUMP_PEAK
+        : 0;
+    const driving = v < CRUISE_ACCEL_UNTIL && !latched ? DIAGNOSTICS_ACCEL : 0;
+    const slowing = latched && v > 0 ? -DIAGNOSTICS_ACCEL : 0;
+    const accel = shock || driving || slowing;
+    const age = t - lastStamp;
     if (!latched) {
-      if (
-        id === 'distance' &&
-        Math.min(lidar, c.sensorRule === 'both' ? depth : Infinity) <= c.stopDistance
-      )
-        reason = '障害物までの距離が設定値以下';
-      if (id === 'missing' && c.watchdog && age > c.staleLimit)
-        reason = '距離データの更新が途切れた';
-      if (id === 'missing' && lastRange <= 0.6) reason = '記録された距離が0.6 m以下';
-      if (id === 'impact' && Math.abs(accel) >= c.impactLimit) reason = 'IMUでしきい値以上の加速度';
+      reason = stopReason(topic, config, { lidar, depth, lastRange, age, accel }) || reason;
       if (reason) {
         latched = true;
         events.push({ t, text: '停止を保持：' + reason });
       }
     }
-    const nextV = clamp(v + (latched ? -1.2 : 1.2) * dt, 0, 0.6);
+    const nextV = clamp(
+      v + (latched ? -DIAGNOSTICS_ACCEL : DIAGNOSTICS_ACCEL) * dt,
+      0,
+      DIAGNOSTICS_MAX_SPEED,
+    );
     x += ((v + nextV) * dt) / 2;
     v = nextV;
-    if (x + 0.18 >= obstacle) {
+    if (x + ROBOT_HALF_LENGTH >= obstacle) {
       contact = true;
-      x = obstacle - 0.18;
+      x = obstacle - ROBOT_HALF_LENGTH;
       v = 0;
       events.push({ t, kind: 'contact', text: '機体が障害物に接触したため、実験を終了。' });
     }
@@ -747,78 +1011,52 @@ function diagnostics(id, c) {
       latched,
       reason,
       contact,
-      status: contact
-        ? '接触して終了'
-        : latched
-          ? v
-            ? '停止指示・減速中'
-            : '停止を保持'
-          : '走行中',
+      status: diagnosticsStatus({ contact, latched, v }),
     });
-    if (contact || (id !== 'impact' && latched && v === 0) || (id === 'impact' && t >= 4)) break;
+    if (contact) break;
+    if (topic === 'impact' ? t >= IMPACT_RUN_TIME : latched && v === 0) break;
   }
-  const end = samples.at(-1),
-    success =
-      id === 'impact' ? (c.eventType === 'impact' ? latched : !latched) : latched && !contact;
-  const metrics =
-    id === 'impact'
-      ? [
-          metric('想定した出来事', c.eventType === 'bump' ? '小さな段差' : '強い衝撃'),
-          metric('停止判定', latched ? 'あり' : 'なし'),
-          metric(
-            '加速度の最大の大きさ',
-            Math.max(...samples.map((s) => Math.abs(s.accel))),
-            'm/秒²',
-          ),
-        ]
-      : [
-          metric('停止判定', latched ? 'あり' : 'なし'),
-          metric('接触', contact ? 'あり' : 'なし'),
-          id === 'distance'
-            ? metric('停止指示を出した時刻', samples.find((s) => s.latched)?.t ?? '指示なし', '秒')
-            : metric('最後のデータの古さ', end.age, '秒'),
-        ];
-  const outcome =
-    id === 'impact'
-      ? c.eventType === 'bump'
-        ? latched
-          ? '通過してよい段差の模擬データでも停止しました。同じしきい値で強い衝撃も試してから、境目の値を見直しましょう。'
-          : 'この段差の模擬データでは走行を続けました。同じしきい値で、強い衝撃を見逃さず止められるかも確認しましょう。'
-        : latched
-          ? '強い衝撃を検知して停止を保持しました。衝撃が起きた後の判断で、接触を防いだという意味ではありません。'
-          : '強い衝撃の模擬データでも停止しませんでした。加速度の波形と停止の境目を比べ、値を見直してください。'
-      : contact
-        ? id === 'missing'
-          ? '距離データが途切れた後も、最後の値を使って走り続け、接触しました。新しい値が来ないことも停止条件にできるか確かめましょう。'
-          : c.sensorRule === 'lidar'
-            ? latched
-              ? 'LiDARは奥の壁までの距離で停止を指示しましたが、手前の棚に接触しました。棚を測るカメラの距離も使って比べましょう。'
-              : 'LiDARは棚の下を通して奥の壁を測っていたため、棚に接触するまで停止条件に達しませんでした。棚を測るカメラの距離も使って比べましょう。'
-            : '棚までの距離も使いましたが、停止を指示する距離が短すぎて接触しました。減速して止まるまでの距離も必要です。'
-        : id === 'missing'
-          ? '距離が短くなるのを待たず、データが更新されない時間を使って停止できました。前回の動きと、停止指示を出した時刻を比べてください。'
-          : 'カメラが測った棚までの距離で停止を判断し、接触する前に止まりました。壁までの距離だけで走った結果と比べてください。';
-  return { samples, events, success, metrics, outcome };
+  const end = samples.at(-1);
+  const success =
+    topic === 'impact' ? (config.eventType === 'impact' ? latched : !latched) : latched && !contact;
+  return {
+    samples,
+    events,
+    success,
+    metrics: diagnosticsMetrics(topic, config, samples, end, latched, contact),
+    outcome: diagnosticsOutcome(topic, config, latched, contact),
+  };
 }
+
+// --- entry points ------------------------------------------------------------------------------
+
+const SIMULATIONS = { mechanics, behavior, tracking, coordination, timing, diagnostics };
+
+// A stop that has latched is released by the operator, not by the sensor reading coming back.
+function canRestart(latched, causeCleared, operatorRequest) {
+  return Boolean(latched && causeCleared && operatorRequest);
+}
+
 function simulateSystem(course, topic, input = {}) {
-  const config = validateSystemConfig(course, topic, input),
-    run = { mechanics, behavior, tracking, coordination, timing, diagnostics }[course](
-      topic,
-      config,
-    );
+  const config = validateSystemConfig(course, topic, input);
+  const run = SIMULATIONS[course](topic, config);
   return { course, topic, config, ...run, duration: run.samples.at(-1).t };
 }
+
+// The whole time series, with nested readings flattened to one column each.
 function systemCSV(run) {
   const flatten = (value, prefix = '', out = {}) => {
-    for (const [key, v] of Object.entries(value)) {
+    for (const [key, entry] of Object.entries(value)) {
       const name = prefix ? prefix + '.' + key : key;
-      if (v !== null && typeof v === 'object') flatten(v, name, out);
-      else out[name] = v;
+      if (entry !== null && typeof entry === 'object') flatten(entry, name, out);
+      else out[name] = entry;
     }
     return out;
   };
-  const rows = run.samples.map((s) => flatten(s)),
-    keys = [...new Set(rows.flatMap((s) => Object.keys(s)))];
+  const rows = run.samples.map((sample) => flatten(sample));
+  const keys = [...new Set(rows.flatMap((row) => Object.keys(row)))];
+  const cell = (value) =>
+    typeof value === 'string' ? '"' + value.replaceAll('"', '""') + '"' : (value ?? '');
   return [
     '# QUESTiX LAB simulation ' + run.course + '/' + run.topic,
     '# config ' + JSON.stringify(run.config),
@@ -826,13 +1064,7 @@ function systemCSV(run) {
       (run.course === 'coordination' ? 'mm' : 'm') +
       '; velocity=m/s; wheel_rate=rpm; force=N; acceleration=m/s^2; arm_angles=deg; heading=rad',
     keys.join(','),
-    ...rows.map((s) =>
-      keys
-        .map((k) =>
-          typeof s[k] === 'string' ? '"' + s[k].replaceAll('"', '""') + '"' : (s[k] ?? ''),
-        )
-        .join(','),
-    ),
+    ...rows.map((row) => keys.map((key) => cell(row[key])).join(',')),
   ].join('\n');
 }
 

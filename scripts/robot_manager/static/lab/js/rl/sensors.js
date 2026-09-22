@@ -1,212 +1,262 @@
-const colors = ['#087f75', '#6760bd', '#c07626'];
+import { loadJson } from '../core/content.js';
+
+// Sensor figures of the reinforcement-learning lab: the LiDAR sweep and the time plot behind the
+// "センサーの値を見る" panel. Both draw from plain data handed in by lab.js and hold no state.
+// What each figure means is written in content/rl/lab-sensors.json.
+
+const copy = await loadJson('content/rl/lab-sensors.json');
+
+const SERIES_COLORS = ['#087f75', '#6760bd', '#c07626'];
+
+const LIDAR = {
+  background: '#f5f9fa',
+  ring: '#d3e2e5',
+  ringLabel: '#607d89',
+  ray: '#4baba82b',
+  nearPoint: '#c57324', // measured closer than NEAR_RANGE
+  point: '#158a85',
+  body: '#153e4a',
+  lens: '#67cffa',
+  caption: '#4e6a77',
+  pixelsPerMetre: 55,
+  rings: 3, // labelled distance circles, one per metre
+  nearRange: 0.5, // metres; closer than this the point is drawn in warning colour
+  outOfRange: 3.18, // metres; beyond this the beam hit nothing and only an outline is drawn
+};
+
+const PLOT = {
+  background: '#f5f9fa',
+  grid: '#dce6e8',
+  axisText: '#5c7580',
+  thresholdLine: '#c34a38',
+  thresholdText: '#af4d3e',
+  markerLine: '#c05e37',
+  markerText: '#a04a2c',
+  left: 66,
+  rightInset: 22,
+  top: 32,
+  bottomInset: 66,
+  window: 10, // seconds of history shown
+  gridLines: 4,
+  timeLabels: 2,
+};
+
+// Which figure the sensor panel shows: the wheels and the impact trace have one each, the rest of
+// the IMU shares the attitude plot.
 function graphSpec(mode, view = 'tilt') {
-  if (mode === 'impact')
-    return {
-      title: '衝撃 · 水平加速度',
-      unit: 'm/秒²',
-      keys: ['impact'],
-      labels: ['加速度の大きさ'],
-      min: 0,
-      max: 16,
-      note: '加速度は速さの変わり方です。横軸は時間、縦軸は水平な方向の加速度の大きさで、急な加減速で山ができます。この教材では点線を超えると停止します。衝突以外でも大きくなる場合があります。',
-    };
-  if (mode === 'wheels')
-    return {
-      title: '左右の車輪の回転数',
-      unit: 'rpm',
-      keys: ['left', 'right'],
-      labels: ['左車輪', '右車輪'],
-      min: -80,
-      max: 80,
-      note: 'rpmは1分間の回転数です。横軸は時間、縦軸は回る速さで、正は前進方向、負は後退方向です。左右の線に差があると、機体は向きを変えます。',
-    };
-  if (view === 'heading')
-    return {
-      title: 'ロボットが向いている方向',
-      unit: '°',
-      keys: ['yaw'],
-      labels: ['向き'],
-      min: -180,
-      max: 180,
-      note: '地図の右向きを0°として、機体がどちらを向いているかを表します。上向きは90°、左向きは180°と−180°で同じ方向です。ここで数値が切り替わっても、機体が急に一回転したわけではありません。',
-    };
-  if (view === 'rotation')
-    return {
-      title: '向きを変える速さ',
-      unit: '°/秒',
-      keys: ['gyro'],
-      labels: ['回転速度'],
-      min: -180,
-      max: 180,
-      note: '1秒間に向きが何度変わるかを表します。90°/秒なら、同じ速さで1秒回ると直角ぶん向きが変わります。0は回転なし、正は左回り、負は右回りです。',
-    };
-  return {
-    title: '機体の傾き',
-    unit: '°',
-    keys: ['pitch', 'roll'],
-    labels: ['前後の傾き', '左右の傾き'],
-    min: -5,
-    max: 5,
-    note: '水平な状態が0°です。前後・左右にどれくらい傾いたかを別の線で示します。地図上で向く方向とは別の量です。ここでは、加減速や旋回による小さな揺れを計算で再現しています。',
-  };
+  if (mode === 'impact') return copy.graphs.impact;
+  if (mode === 'wheels') return copy.graphs.wheels;
+  if (view === 'heading') return copy.graphs.heading;
+  if (view === 'rotation') return copy.graphs.rotation;
+  return copy.graphs.tilt;
 }
-function drawLidar(canvas, scan) {
-  const c = canvas.getContext('2d'),
-    w = canvas.width,
-    h = canvas.height,
-    cx = w / 2,
-    cy = h / 2 + 7,
-    k = 55;
-  c.clearRect(0, 0, w, h);
-  c.fillStyle = '#f5f9fa';
-  c.fillRect(0, 0, w, h);
-  c.textAlign = 'left';
-  c.font = '24px system-ui';
-  for (let r = 1; r <= 3; r++) {
-    c.strokeStyle = '#d3e2e5';
-    c.lineWidth = 1.5;
-    c.beginPath();
-    c.arc(cx, cy, r * k, 0, 2 * Math.PI);
-    c.stroke();
-    c.fillStyle = '#607d89';
-    c.fillText(r + ' m', cx + r * k + 5, cy + 6);
-  }
-  c.setLineDash([3, 6]);
-  c.beginPath();
-  c.moveTo(cx, cy - 3.2 * k);
-  c.lineTo(cx, cy + 3.2 * k);
-  c.moveTo(cx - 3.2 * k, cy);
-  c.lineTo(cx + 3.2 * k, cy);
-  c.stroke();
-  c.setLineDash([]);
-  scan.forEach((d, i) => {
-    const a = (i * 2 * Math.PI) / scan.length - Math.PI / 2,
-      x = cx + Math.cos(a) * d * k,
-      y = cy + Math.sin(a) * d * k;
-    c.strokeStyle = '#4baba82b';
-    c.beginPath();
-    c.moveTo(cx, cy);
-    c.lineTo(x, y);
-    c.stroke();
-    c.fillStyle = d < 0.5 ? '#c57324' : '#158a85';
-    c.beginPath();
-    c.arc(x, y, d >= 3.18 ? 3 : 5, 0, 2 * Math.PI);
-    d >= 3.18 ? c.stroke() : c.fill();
-  });
-  c.fillStyle = '#153e4a';
-  c.beginPath();
-  c.moveTo(cx, cy - 15);
-  c.lineTo(cx + 10, cy - 4);
-  c.lineTo(cx + 10, cy + 12);
-  c.lineTo(cx - 10, cy + 12);
-  c.lineTo(cx - 10, cy - 4);
-  c.closePath();
-  c.fill();
-  c.fillStyle = '#67cffa';
-  c.fillRect(cx - 5, cy - 9, 10, 3);
-  c.textAlign = 'center';
-  c.fillStyle = '#4e6a77';
-  c.fillText('機体の正面', cx, 26);
-  c.font = '22px system-ui';
-  c.fillText('現在の測距点 · 地図は蓄積していません', cx, h - 10);
-}
-function drawGraph(canvas, history, spec, threshold, markers) {
-  const c = canvas.getContext('2d'),
-    w = canvas.width,
-    h = canvas.height,
-    L = 66,
-    R = w - 22,
-    T = 32,
-    B = h - 66;
-  c.clearRect(0, 0, w, h);
-  c.fillStyle = '#f5f9fa';
-  c.fillRect(0, 0, w, h);
-  const end = Math.max(10, history.at(-1)?.t || 0),
-    start = end - 10,
-    values = history.filter((p) => p.t >= start),
-    observed = values.flatMap((p) => spec.keys.map((k) => p[k] || 0));
-  let min = spec.min,
-    max = spec.max;
-  if (spec.keys[0] === 'impact')
-    max = Math.max(max, threshold * 1.15, ...observed.map((x) => x * 1.08));
-  if (spec.keys[0] === 'gyro') {
-    const top = Math.ceil(Math.max(180, ...observed.map(Math.abs)) / 90) * 90;
-    min = -top;
-    max = top;
-  }
-  if (spec.keys[0] === 'left') {
-    const top = Math.max(80, ...observed.map(Math.abs));
-    min = -top;
-    max = top;
-  }
-  const X = (t) => L + ((t - start) / 10) * (R - L),
-    Y = (v) => B - ((v - min) / (max - min)) * (B - T);
-  c.font = '24px system-ui';
-  c.textAlign = 'right';
-  c.fillStyle = '#5c7580';
-  for (let i = 0; i <= 4; i++) {
-    const v = min + ((max - min) * i) / 4,
-      y = Y(v);
-    c.strokeStyle = '#dce6e8';
-    c.lineWidth = 1;
-    c.beginPath();
-    c.moveTo(L, y);
-    c.lineTo(R, y);
-    c.stroke();
-    c.fillText(Math.abs(v) < 10 ? v.toFixed(1) : v.toFixed(0), L - 12, y + 6);
-  }
-  c.textAlign = 'center';
-  for (let i = 0; i <= 2; i++) {
-    const t = start + i * 5;
-    c.fillText(t.toFixed(0) + '秒', X(t), B + 34);
-  }
-  c.font = '22px system-ui';
-  c.fillText('シミュレーション時刻 · 直近10秒', w / 2, h - 8);
-  if (spec.keys[0] === 'impact') {
-    c.strokeStyle = '#c34a38';
-    c.setLineDash([8, 6]);
-    c.lineWidth = 2;
-    c.beginPath();
-    c.moveTo(L, Y(threshold));
-    c.lineTo(R, Y(threshold));
-    c.stroke();
-    c.setLineDash([]);
-    c.textAlign = 'right';
-    c.fillStyle = '#af4d3e';
-    c.fillText('停止 ' + threshold.toFixed(0), R, Y(threshold) - 7);
-  }
-  spec.keys.forEach((key, n) => {
-    c.strokeStyle = colors[n];
-    c.lineWidth = 2.5;
-    c.beginPath();
-    let prev = null;
-    values.forEach((p) => {
-      if (prev === null || (key === 'yaw' && Math.abs(p[key] - prev) > 180))
-        c.moveTo(X(p.t), Y(p[key]));
-      else c.lineTo(X(p.t), Y(p[key]));
-      prev = p[key];
-    });
-    c.stroke();
-  });
-  for (const m of markers.filter((m) => m.t >= start && m.t <= end)) {
-    c.strokeStyle = '#c05e37';
-    c.lineWidth = 2;
-    c.setLineDash([3, 5]);
-    c.beginPath();
-    c.moveTo(X(m.t), T);
-    c.lineTo(X(m.t), B);
-    c.stroke();
-    c.setLineDash([]);
-    c.textAlign = 'right';
-    c.font = '22px system-ui';
-    c.fillStyle = '#a04a2c';
-    c.fillText(m.label, Math.min(R, Math.max(L + 95, X(m.t) - 5)), 21);
-  }
-  return spec.keys.map((key, i) => ({
-    label: spec.labels[i],
-    color: colors[i],
+
+// The numbers printed beside the plot: the latest sample of every series it draws.
+function graphReadings(history, spec) {
+  return spec.keys.map((key, index) => ({
+    label: spec.labels[index],
+    color: SERIES_COLORS[index],
     value: (history.at(-1)?.[key] || 0).toFixed(1),
   }));
 }
 
-export { graphSpec, drawLidar, drawGraph };
+function drawLidarRings(ctx, centre, scale) {
+  for (let metres = 1; metres <= LIDAR.rings; metres++) {
+    ctx.strokeStyle = LIDAR.ring;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(centre.x, centre.y, metres * scale, 0, 2 * Math.PI);
+    ctx.stroke();
+    ctx.fillStyle = LIDAR.ringLabel;
+    ctx.fillText(metres + ' m', centre.x + metres * scale + 5, centre.y + 6);
+  }
+  const reach = 3.2 * scale;
+  ctx.setLineDash([3, 6]);
+  ctx.beginPath();
+  ctx.moveTo(centre.x, centre.y - reach);
+  ctx.lineTo(centre.x, centre.y + reach);
+  ctx.moveTo(centre.x - reach, centre.y);
+  ctx.lineTo(centre.x + reach, centre.y);
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+function drawLidarBody(ctx, centre) {
+  ctx.fillStyle = LIDAR.body;
+  ctx.beginPath();
+  ctx.moveTo(centre.x, centre.y - 15);
+  ctx.lineTo(centre.x + 10, centre.y - 4);
+  ctx.lineTo(centre.x + 10, centre.y + 12);
+  ctx.lineTo(centre.x - 10, centre.y + 12);
+  ctx.lineTo(centre.x - 10, centre.y - 4);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = LIDAR.lens;
+  ctx.fillRect(centre.x - 5, centre.y - 9, 10, 3);
+}
+
+// One sweep of the 2D LiDAR, robot centred, the front of the body pointing up.
+function drawLidar(canvas, scan) {
+  const ctx = canvas.getContext('2d');
+  const width = canvas.width;
+  const height = canvas.height;
+  const centre = { x: width / 2, y: height / 2 + 7 };
+  const scale = LIDAR.pixelsPerMetre;
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = LIDAR.background;
+  ctx.fillRect(0, 0, width, height);
+  ctx.textAlign = 'left';
+  ctx.font = '24px system-ui';
+  drawLidarRings(ctx, centre, scale);
+  scan.forEach((distance, index) => {
+    // Index 0 looks straight ahead, which is up on screen.
+    const angle = (index * 2 * Math.PI) / scan.length - Math.PI / 2;
+    const x = centre.x + Math.cos(angle) * distance * scale;
+    const y = centre.y + Math.sin(angle) * distance * scale;
+    ctx.strokeStyle = LIDAR.ray;
+    ctx.beginPath();
+    ctx.moveTo(centre.x, centre.y);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    ctx.fillStyle = distance < LIDAR.nearRange ? LIDAR.nearPoint : LIDAR.point;
+    const beyondRange = distance >= LIDAR.outOfRange;
+    ctx.beginPath();
+    ctx.arc(x, y, beyondRange ? 3 : 5, 0, 2 * Math.PI);
+    if (beyondRange) ctx.stroke();
+    else ctx.fill();
+  });
+  drawLidarBody(ctx, centre);
+  ctx.textAlign = 'center';
+  ctx.fillStyle = LIDAR.caption;
+  ctx.fillText(copy.lidar.front, centre.x, 26);
+  ctx.font = '22px system-ui';
+  ctx.fillText(copy.lidar.footer, centre.x, height - 10);
+}
+
+// Impact and gyro traces outgrow their nominal range, so the axis follows what was measured.
+function plotRange(spec, observed, threshold) {
+  if (spec.keys[0] === 'impact')
+    return {
+      min: spec.min,
+      max: Math.max(spec.max, threshold * 1.15, ...observed.map((value) => value * 1.08)),
+    };
+  if (spec.keys[0] === 'gyro') {
+    const top = Math.ceil(Math.max(180, ...observed.map(Math.abs)) / 90) * 90;
+    return { min: -top, max: top };
+  }
+  if (spec.keys[0] === 'left') {
+    const top = Math.max(80, ...observed.map(Math.abs));
+    return { min: -top, max: top };
+  }
+  return { min: spec.min, max: spec.max };
+}
+
+function drawPlotAxes(ctx, canvas, axis, start) {
+  const { left, right, top, bottom, x, y, min, max } = axis;
+  ctx.font = '24px system-ui';
+  ctx.textAlign = 'right';
+  ctx.fillStyle = PLOT.axisText;
+  for (let i = 0; i <= PLOT.gridLines; i++) {
+    const value = min + ((max - min) * i) / PLOT.gridLines;
+    const lineY = y(value);
+    ctx.strokeStyle = PLOT.grid;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(left, lineY);
+    ctx.lineTo(right, lineY);
+    ctx.stroke();
+    ctx.fillText(Math.abs(value) < 10 ? value.toFixed(1) : value.toFixed(0), left - 12, lineY + 6);
+  }
+  ctx.textAlign = 'center';
+  for (let i = 0; i <= PLOT.timeLabels; i++) {
+    const seconds = start + (i * PLOT.window) / PLOT.timeLabels;
+    ctx.fillText(seconds.toFixed(0) + copy.graph.secondsSuffix, x(seconds), bottom + 34);
+  }
+  ctx.font = '22px system-ui';
+  ctx.fillText(copy.graph.footer, canvas.width / 2, canvas.height - 8);
+}
+
+function drawThreshold(ctx, axis, threshold) {
+  ctx.strokeStyle = PLOT.thresholdLine;
+  ctx.setLineDash([8, 6]);
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(axis.left, axis.y(threshold));
+  ctx.lineTo(axis.right, axis.y(threshold));
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.textAlign = 'right';
+  ctx.fillStyle = PLOT.thresholdText;
+  ctx.fillText(copy.graph.stopPrefix + threshold.toFixed(0), axis.right, axis.y(threshold) - 7);
+}
+
+function drawSeries(ctx, axis, samples, key, color) {
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  let previous = null;
+  for (const sample of samples) {
+    // Heading wraps at ±180°; a jump that large is the wrap, not a movement, so lift the pen.
+    const wrapped = key === 'yaw' && Math.abs(sample[key] - previous) > 180;
+    if (previous === null || wrapped) ctx.moveTo(axis.x(sample.t), axis.y(sample[key]));
+    else ctx.lineTo(axis.x(sample.t), axis.y(sample[key]));
+    previous = sample[key];
+  }
+  ctx.stroke();
+}
+
+function drawMarkers(ctx, axis, markers, start, end) {
+  for (const marker of markers.filter((m) => m.t >= start && m.t <= end)) {
+    ctx.strokeStyle = PLOT.markerLine;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([3, 5]);
+    ctx.beginPath();
+    ctx.moveTo(axis.x(marker.t), axis.top);
+    ctx.lineTo(axis.x(marker.t), axis.bottom);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.textAlign = 'right';
+    ctx.font = '22px system-ui';
+    ctx.fillStyle = PLOT.markerText;
+    ctx.fillText(
+      marker.label,
+      Math.min(axis.right, Math.max(axis.left + 95, axis.x(marker.t) - 5)),
+      21,
+    );
+  }
+}
+
+// The last PLOT.window seconds of the chosen sensor values. Returns the latest reading per series
+// so the panel beside the figure can print the same numbers.
+function drawGraph(canvas, history, spec, threshold, markers) {
+  const ctx = canvas.getContext('2d');
+  const left = PLOT.left;
+  const right = canvas.width - PLOT.rightInset;
+  const top = PLOT.top;
+  const bottom = canvas.height - PLOT.bottomInset;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = PLOT.background;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const end = Math.max(PLOT.window, history.at(-1)?.t || 0);
+  const start = end - PLOT.window;
+  const samples = history.filter((sample) => sample.t >= start);
+  const observed = samples.flatMap((sample) => spec.keys.map((key) => sample[key] || 0));
+  const { min, max } = plotRange(spec, observed, threshold);
+  const axis = {
+    left,
+    right,
+    top,
+    bottom,
+    min,
+    max,
+    x: (t) => left + ((t - start) / PLOT.window) * (right - left),
+    y: (value) => bottom - ((value - min) / (max - min)) * (bottom - top),
+  };
+  drawPlotAxes(ctx, canvas, axis, start);
+  if (spec.keys[0] === 'impact') drawThreshold(ctx, axis, threshold);
+  spec.keys.forEach((key, index) => drawSeries(ctx, axis, samples, key, SERIES_COLORS[index]));
+  drawMarkers(ctx, axis, markers, start, end);
+  return graphReadings(history, spec);
+}
+
+export { graphSpec, graphReadings, drawLidar, drawGraph };

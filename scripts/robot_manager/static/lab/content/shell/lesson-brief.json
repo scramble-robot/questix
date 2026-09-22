@@ -1,0 +1,20 @@
+{
+  "ariaLabel": "実験の状況・目的・手順",
+  "sections": [
+    {
+      "key": "scene",
+      "title": "この実験の状況",
+      "cue": "reference"
+    },
+    {
+      "key": "purpose",
+      "title": "目的と比べること",
+      "cue": "learn"
+    },
+    {
+      "key": "first",
+      "title": "最初に試すこと",
+      "cue": "action"
+    }
+  ]
+}

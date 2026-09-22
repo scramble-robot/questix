@@ -22,4 +22,10 @@ const loadText = (path) => read(path, 'text');
 const loadJson = async (path) => JSON.parse(await read(path, 'text'));
 const contentUrl = (path) => new URL(path, ROOT).href;
 
-export { loadText, loadJson, contentUrl };
+// Fills the `{name}` placeholders of a sentence from a content file, e.g.
+// fillSentence('車輪を{rpm} rpmで回す', { rpm: 60 }). A placeholder with no value is left as it
+// is, so a missing key shows up as `{rpm}` in the lesson rather than as the word "undefined".
+const fillSentence = (sentence, values) =>
+  sentence.replace(/\{(\w+)\}/g, (match, key) => (key in values ? String(values[key]) : match));
+
+export { loadText, loadJson, contentUrl, fillSentence };
