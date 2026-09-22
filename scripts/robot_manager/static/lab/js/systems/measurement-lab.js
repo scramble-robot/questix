@@ -3,15 +3,9 @@ import { loadJson, fillSentence as fill } from '../core/content.js';
 import { downloadFile } from '../core/dom.js';
 import { measurementStats, fitMeasurement, parseMeasurementCSV } from './measurement-core.js';
 import { measurementPanel } from './measurement-view.js';
-import {
-  CAPTURE_DEFAULTS,
-  recordDrive,
-  liveLink,
-  missingStreams,
-  onLiveLink,
-  steadyMeasurements,
-  throttleProgress,
-} from '../live/capture.js';
+import { CAPTURE_DEFAULTS, onLiveLink, steadyMeasurements } from '../live/capture.js';
+import { driveRows, drivesOf } from '../live/recording-core.js';
+import { createLiveSession } from '../live/live-session.js';
 import { captureNotes } from '../live/live-view.js';
 import { openRobotDialog } from '../live/live-ui.js';
 
@@ -19,8 +13,12 @@ import { openRobotDialog } from '../live/live-ui.js';
 // learner looks at repeated measurements, compares them with an independent reference and fits a
 // straight line. State and behaviour live here, measurement-view.js turns the model into markup,
 // measurement-core.js does the arithmetic. A scenario with a `live` block can also fill the table
-// from the connected robot instead of the worked example or a CSV; the recording itself is done by
-// js/live/capture.js. Texts and the scenarios are in content/systems/measurement-lab.json.
+// from the connected robot (or a saved recording / rosbag) instead of the worked example or a CSV;
+// recording, files and storage are js/live/live-session.js. Two kinds of `live` block exist:
+// - `holds` (control): every held speed command becomes one input with repeated measurements;
+// - `drives` (SLAM): every drive between two stops gives the wheel-odometry distance, and the
+//   learner types in the distance measured on the floor for it — the robot cannot measure that.
+// Texts and the scenarios are in content/systems/measurement-lab.json.
 
 const copy = await loadJson('content/systems/measurement-lab.json');
 
@@ -33,6 +31,9 @@ const CHECK_INPUT = 50; // the one point held back to check a fitted line with
 const CHECK_SPREAD = 0.7;
 const MIN_HOLD_SECONDS = CAPTURE_DEFAULTS.minHoldSeconds;
 const VALUE_DIGITS = 3;
+const CM_PER_M = 100;
+const DRIVE_DIGITS = 1; // cm: a tape measure is read to the millimetre at best
+const DEGREES_PER_RADIAN = 180 / Math.PI;
 
 const states = new Map();
 let shown = null; // scenario currently in the panel, or null when no course offers one
@@ -56,6 +57,36 @@ function exampleRows(scenario) {
   ]);
 }
 
+// Whatever table the learner is working on (typed in, opened from CSV, recorded) survives a reload
+// of the page in this browser; the worked example is simply rebuilt. Storage can be blocked or
+// full, so this is a convenience only — saving the CSV is the reliable way to keep a table.
+const TABLE_PREFIX = 'questix-lab-measurement-table:';
+const KEPT_FIELDS = ['rows', 'pending', 'selectedX', 'source', 'reference', 'mode'];
+
+function keptTable(course) {
+  try {
+    const kept = JSON.parse(localStorage.getItem(TABLE_PREFIX + course) ?? 'null');
+    return Array.isArray(kept?.rows) && Array.isArray(kept.pending) ? kept : null;
+  } catch {
+    return null;
+  }
+}
+
+function keepTable(course) {
+  const state = states.get(course);
+  try {
+    if (!state || state.source === copy.sources.example)
+      localStorage.removeItem(TABLE_PREFIX + course);
+    else
+      localStorage.setItem(
+        TABLE_PREFIX + course,
+        JSON.stringify(Object.fromEntries(KEPT_FIELDS.map((key) => [key, state[key]]))),
+      );
+  } catch {
+    /* storage blocked or full: the table simply does not survive a reload */
+  }
+}
+
 function labState(course) {
   if (!states.has(course)) {
     const scenario = scenarioOf(course);
@@ -67,7 +98,9 @@ function labState(course) {
       source: copy.sources.example,
       correct: false,
       message: '',
-      capture: { recording: false, progress: 0, controller: null },
+      // Drives found in a recording that still wait for the learner's floor measurement.
+      pending: [],
+      ...keptTable(course),
     });
   }
   return states.get(course);
@@ -82,19 +115,113 @@ function shownScenario(course) {
   return { ...scenario, ...scenario.live };
 }
 
+// --- the real robot --------------------------------------------------------------------------
+
+const sessions = new Map();
+
+// A recording replaces the table: mixing a worked example with real measurements would leave the
+// learner unable to say which number came from where.
+function applyHolds(course, recording) {
+  const state = labState(course);
+  const { rows, summary } = driveRows(recording);
+  const measured = steadyMeasurements(rows);
+  if (!measured.rows.length)
+    return { ok: false, note: fill(copy.messages.liveNoHold, { seconds: MIN_HOLD_SECONDS }) };
+  state.rows = measured.rows;
+  state.source = copy.sources.live;
+  state.selectedX = measured.rows[0].x;
+  state.correct = false;
+  const note = fill(copy.messages.liveRecorded, {
+    notes: captureNotes(summary),
+    holds: measured.holds.length,
+    count: measured.rows.length,
+  });
+  return { ok: true, note };
+}
+
+// The wheel side of each drive is known; the floor side is typed in afterwards (addDrives).
+function applyDrives(course, recording) {
+  const state = labState(course);
+  const drives = drivesOf(recording);
+  if (!drives.length) return { ok: false, note: copy.messages.liveNoDrive };
+  state.pending = drives.map((drive, index) => ({
+    number: index + 1,
+    wheel: Number((drive.distance * CM_PER_M).toFixed(DRIVE_DIGITS)),
+    turn: Math.round(Math.abs(drive.turn) * DEGREES_PER_RADIAN),
+    floor: '',
+  }));
+  return { ok: true, note: fill(copy.messages.liveDrives, { count: drives.length }) };
+}
+
+const APPLY = { holds: applyHolds, drives: applyDrives };
+
+function sessionOf(course) {
+  const scenario = scenarioOf(course);
+  if (!scenario?.live) return null;
+  if (!sessions.has(course)) {
+    const live = scenario.live;
+    const session = createLiveSession({
+      slot: `measurement-${course}`,
+      lesson: `measurement-${course}`,
+      needs: live.streams,
+      seconds: live.seconds,
+      countStream: live.streams[0],
+      finishOnStop: live.kind === 'drives',
+      applyOnRestore: false, // the table itself comes back (keptTable)
+      recordLabel: live.recordLabel,
+      stopLabel: live.stopLabel,
+      failed: copy.messages.liveFailed,
+      apply: (recording) => APPLY[live.kind](course, recording),
+      update: () => {
+        if (shown === course) update();
+      },
+    });
+    sessions.set(course, session);
+    session.restore();
+  }
+  return sessions.get(course);
+}
+
 function liveModel(course) {
   const scenario = scenarioOf(course);
-  const state = labState(course);
-  if (!scenario.live) return null;
-  const link = liveLink();
+  const session = sessionOf(course);
+  if (!session) return null;
   return {
-    link: { ...link, missing: missingStreams(scenario.live.streams) },
-    recording: state.capture.recording,
-    progress: state.capture.progress,
-    seconds: scenario.live.seconds,
-    message: '',
+    ...session.model(),
+    message: session.note,
     text: scenario.live.text,
+    referenceNote: scenario.live.referenceNote,
+    pending: labState(course).pending,
   };
+}
+
+// The drives the learner has measured on the floor go into the table as (floor, wheel) rows. The
+// first batch replaces the worked example; later ones add to what is there, so repeated drives
+// collect into one table.
+function addDrives() {
+  const state = labState(shown);
+  const measured = state.pending.filter(
+    (drive) => drive.floor !== '' && Number.isFinite(Number(drive.floor)),
+  );
+  if (!measured.length) {
+    state.message = copy.messages.liveNeedFloor;
+    update();
+    return;
+  }
+  const rows = measured.map((drive) => ({ x: Number(drive.floor), y: drive.wheel, test: false }));
+  const kept = state.source === copy.sources.example ? [] : state.rows;
+  state.rows = kept.concat(rows).slice(0, MAX_ROWS);
+  state.source = copy.sources.live;
+  state.selectedX = rows[0].x;
+  state.correct = false;
+  state.pending = state.pending.filter((drive) => !measured.includes(drive));
+  state.message = fill(copy.messages.liveDrivesAdded, { count: rows.length });
+  update();
+}
+
+function setFloor(index, value) {
+  const drive = labState(shown).pending[index];
+  if (drive) drive.floor = value.trim();
 }
 
 function buildModel(course) {
@@ -126,6 +253,7 @@ const host = () => document.getElementById('measurementEntry');
 
 function update() {
   if (!shown) return;
+  keepTable(shown);
   render(measurementPanel(buildModel(shown), copy, actions), host());
 }
 
@@ -169,54 +297,6 @@ function saveCsv() {
   );
 }
 
-// --- recording from the real robot ---------------------------------------------------------
-
-// A recording replaces the table: mixing a worked example with real measurements would leave the
-// learner unable to say which number came from where.
-async function startCapture() {
-  const course = shown;
-  const scenario = course && scenarioOf(course);
-  if (!scenario?.live) return;
-  const state = labState(course);
-  if (state.capture.recording) return;
-  const controller = new AbortController();
-  state.capture = { recording: true, progress: 0, controller };
-  state.message = '';
-  update();
-  try {
-    const { rows, summary } = await recordDrive({
-      seconds: scenario.live.seconds,
-      signal: controller.signal,
-      onProgress: throttleProgress((count) => {
-        state.capture.progress = count;
-        if (shown === course) update();
-      }),
-    });
-    const measured = steadyMeasurements(rows);
-    if (!measured.rows.length) {
-      state.message = fill(copy.messages.liveNoHold, { seconds: MIN_HOLD_SECONDS });
-    } else {
-      state.rows = measured.rows;
-      state.source = copy.sources.live;
-      state.selectedX = measured.rows[0].x;
-      state.correct = false;
-      state.message = fill(copy.messages.liveRecorded, {
-        notes: captureNotes(summary),
-        holds: measured.holds.length,
-        count: measured.rows.length,
-      });
-    }
-  } catch (error) {
-    state.message = fill(copy.messages.liveFailed, { reason: error.message });
-  }
-  state.capture = { recording: false, progress: 0, controller: null };
-  if (shown === course) update();
-}
-
-function stopCapture() {
-  if (shown) labState(shown).capture.controller?.abort();
-}
-
 // A typed number is taken only when it is a finite number; anything else leaves the stored value
 // alone, and the field keeps showing what the learner typed.
 function setNumber(key, value) {
@@ -249,8 +329,12 @@ const actions = {
   editCell,
   openCsv,
   saveCsv,
-  startCapture,
-  stopCapture,
+  startCapture: () => sessionOf(shown)?.actions.startCapture(),
+  stopCapture: () => sessionOf(shown)?.actions.stopCapture(),
+  openRecording: (file) => sessionOf(shown)?.actions.openRecording(file),
+  saveRecording: (kind) => sessionOf(shown)?.actions.saveRecording(kind),
+  setFloor,
+  addDrives,
   openLink: openRobotDialog,
 };
 
@@ -265,6 +349,7 @@ function showMeasurementLab(course) {
   if (!scenarioOf(course)) return;
   shown = course;
   labState(course).message = '';
+  sessionOf(course); // brings back the recording this browser kept, before the first draw
   // Rebuild the panel so its details element, focus and the supplement trigger start fresh.
   render(null, entry);
   update();

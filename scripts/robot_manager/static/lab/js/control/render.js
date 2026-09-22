@@ -287,6 +287,9 @@ function drawControlStage(canvas, { distance, angle, frame, started, blocked, de
 
 const CHART = { height: 224, left: 58, right: 20, top: 28, bottom: 36 };
 const GRID_FRACTIONS = [0, 0.5, 1];
+// Other groups' recordings, one colour each, in the order they were opened.
+const COMPARE_COLOURS = ['#3f7fbf', '#c07a1c', '#5b8f3c', '#8a5cc2', '#2a9d9a'];
+
 const TIME_TICKS = [0, 4, 8, 12, 16]; // seconds
 const REVEAL_OVERHANG = 2; // px of clip added so the line's cap is not cut off
 const SMALL_RANGE = 4; // a span narrower than this gets one decimal on the axis
@@ -295,7 +298,18 @@ const SMALL_RANGE = 4; // a span narrower than this gets one decimal on the axis
 // silently change the scale by a fraction of a division.
 const axisStep = (key, distance) => (key === 'command' ? 25 : distance ? 0.5 : 20);
 
-function chartBounds({ run, previous, live, key, target, extra, breakdown, distance, fallback }) {
+function chartBounds({
+  run,
+  previous,
+  live,
+  compared = [],
+  key,
+  target,
+  extra,
+  breakdown,
+  distance,
+  fallback,
+}) {
   const simulated = run
     ? [
         ...run.samples.map((sample) => sample[key]),
@@ -307,9 +321,16 @@ function chartBounds({ run, previous, live, key, target, extra, breakdown, dista
       ]
     : [0, distance ? START_DISTANCE : fallback];
   // The real recording shares the axis, so a measurement outside the simulated range still fits.
+  // A distance recording has no target of its own (NaN), which must not reach Math.max.
   const values = live
-    ? [...simulated, ...live.samples.flatMap((sample) => [sample.measured, sample.target])]
+    ? [
+        ...simulated,
+        ...live.samples
+          .flatMap((sample) => [sample.measured, sample.target])
+          .filter(Number.isFinite),
+      ]
     : simulated;
+  for (const entry of compared) values.push(...entry.run.samples.map((sample) => sample.measured));
   let min = Math.min(0, ...values);
   let max = Math.max(...values);
   if (max - min < 1e-5) max = min + 1;
@@ -353,6 +374,7 @@ function controlChart({
   run,
   previous,
   live = null,
+  compared = [],
   key,
   title,
   unit,
@@ -374,6 +396,7 @@ function controlChart({
     run,
     previous,
     live,
+    compared,
     key,
     target,
     extra,
@@ -445,13 +468,17 @@ function controlChart({
       }
       ${
         live
-          ? svg`<path
-              d=${line(live.samples, 'target')}
-              fill="none"
-              stroke=${CHART_COLOURS.liveTarget}
-              stroke-width="1.5"
-              stroke-dasharray="7 5"
-            /><path
+          ? svg`${
+              live.samples.some((sample) => Number.isFinite(sample.target))
+                ? svg`<path
+                    d=${line(live.samples, 'target')}
+                    fill="none"
+                    stroke=${CHART_COLOURS.liveTarget}
+                    stroke-width="1.5"
+                    stroke-dasharray="7 5"
+                  />`
+                : nothing
+            }<path
               d=${line(live.samples, 'measured')}
               fill="none"
               stroke=${CHART_COLOURS.live}
@@ -460,6 +487,16 @@ function controlChart({
             />`
           : nothing
       }
+      ${compared.map(
+        (entry) =>
+          svg`<path
+            d=${line(entry.run.samples, 'measured')}
+            fill="none"
+            stroke=${entry.colour}
+            stroke-width="1.6"
+            stroke-linejoin="round"
+          />`,
+      )}
       ${
         run
           ? svg`${
@@ -526,4 +563,4 @@ function controlChart({
   </div>`;
 }
 
-export { controlWheelAngle, drawControlBench, drawControlStage, controlChart };
+export { COMPARE_COLOURS, controlWheelAngle, drawControlBench, drawControlStage, controlChart };

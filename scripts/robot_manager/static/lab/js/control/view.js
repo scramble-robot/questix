@@ -493,6 +493,7 @@ function charts(model, copy, actions) {
   const measured = controlChart({
     ...shared,
     live: model.live.run,
+    compared: model.live.compared,
     key: 'measured',
     title: distance ? '壁までの距離' : '車輪の回転数',
     unit: distance ? 'm' : 'rpm',
@@ -509,10 +510,16 @@ function charts(model, copy, actions) {
       ><span class="target">今回の目標</span
       >${comparison ? html`<span class="previous">前の測定値・目標</span>` : nothing}${
         model.live.run
-          ? html`<span class="live">${copy.charts.liveLegend}</span
-              ><span class="live-target">${copy.charts.liveTargetLegend}</span>`
+          ? html`<span class="live">${copy.charts.liveLegend}</span>${
+                distance
+                  ? nothing
+                  : html`<span class="live-target">${copy.charts.liveTargetLegend}</span>`
+              }`
           : nothing
-      }
+      }${model.live.compared.map(
+        (entry) =>
+          html`<span class="compared" style=${`--compared:${entry.colour}`}>${entry.name}</span>`,
+      )}
     </div>
     ${
       comparison
@@ -565,6 +572,11 @@ function commandSection(model, copy, actions, shared) {
   </details>`;
 }
 
+function liveChartNote(model, copy) {
+  if (!model.live.run) return nothing;
+  return model.distance ? copy.charts.liveNoteDistance : copy.charts.liveNote;
+}
+
 function graphsCard(model, copy, actions) {
   return html`<section class="card control-graphs">
     <div class="section-top">
@@ -582,7 +594,7 @@ function graphsCard(model, copy, actions) {
     <div id="controlCharts">${charts(model, copy, actions)}</div>
     <p class="control-chart-note">
       ${copy.charts.note}<span id="controlLoadNote">${model.loadNote}</span>
-      ${model.live.run ? copy.charts.liveNote : nothing}
+      ${liveChartNote(model, copy)}
     </p>
   </section>`;
 }
@@ -615,26 +627,93 @@ function calibrationCard(model, copy) {
 
 // Recording the real robot and drawing it on the same axes as the simulation. The link is
 // observation-only, so the learner drives the robot from the controller or the operation screen
-// while this card records what the wheels actually did.
+// while this card records what the wheels (speed topics) or the LiDAR (distance topics) measured.
 function liveCard(model, copy, actions) {
   const text = copy.live;
-  if (model.distance)
-    return html`<section class="card control-live">
-      <h2>${text.title}</h2>
-      <p>${text.distanceOnly}</p>
-    </section>`;
   return html`<section class="card control-live">
     <h2>${text.title}</h2>
-    <p>${text.intro}</p>
-    <p>${text.howto}</p>
+    <p>${model.distance ? text.distanceIntro : text.intro}</p>
+    <p>${model.distance ? text.distanceHowto : text.howto}</p>
     ${liveCaptureControls(model.live.capture, actions)}
     ${
-      model.live.run
-        ? html`<p class="control-live-recorded" role="status">${model.live.note}</p>
-            <button @click=${actions.clearLive}>${text.clear}</button>`
+      model.live.note
+        ? html`<p class="control-live-recorded" role="status">${model.live.note}</p>`
         : nothing
     }
+    ${model.live.run ? html`<button @click=${actions.clearLive}>${text.clear}</button>` : nothing}
+    ${compareControls(model, text, actions)} ${comparisonTable(model, text)}
   </section>`;
+}
+
+// Other groups' saved recordings (or rosbags), drawn on the same chart.
+function compareControls(model, text, actions) {
+  return html`<div class="control-compare-files">
+    <label
+      >${text.compareOpen}
+      <input
+        data-live-compare
+        type="file"
+        multiple
+        accept=".json,.mcap,application/json"
+        @change=${(event) => {
+          actions.addComparisons(event.target.files);
+          event.target.value = '';
+        }}
+    /></label>
+    ${
+      model.live.compared.length
+        ? html`<button data-live-compare-clear @click=${actions.clearComparisons}>
+            ${text.compareClear}
+          </button>`
+        : nothing
+    }
+    <p class="helper">${text.compareNote}</p>
+    ${model.live.compareNote ? html`<p role="status">${model.live.compareNote}</p>` : nothing}
+  </div>`;
+}
+
+const secondsText = (value) => (value === null ? '—' : formatNumber(value) + ' 秒');
+
+// The same numbers for the simulation and every recording, by the course's own definitions.
+function comparisonTable(model, text) {
+  const rows = model.live.table;
+  if (rows.length < 2) return nothing;
+  const distance = model.distance;
+  const unit = distance ? ' m' : ' rpm';
+  const digits = distance ? 2 : 1;
+  const value = (number) => formatNumber(number, digits) + unit;
+  const columns = distance ? text.compareColumnsDistance : text.compareColumnsSpeed;
+  return html`<div class="control-compare-table">
+    <h3>${text.compareTitle}</h3>
+    <table>
+      <thead>
+        <tr>
+          ${columns.map((column) => html`<th>${column}</th>`)}
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map(
+          ({ label, metrics }) =>
+            html`<tr>
+              <th>${label}</th>
+              <td>${value(metrics.target)}</td>
+              <td>${value(metrics.finalError)}</td>
+              <td>${value(metrics.overshoot)}</td>
+              <td>
+                ${metrics.settling === null ? text.compareNotSettled : secondsText(metrics.settling)}
+              </td>
+              ${
+                distance
+                  ? nothing
+                  : html`<td>${secondsText(metrics.delay)}</td>
+                      <td>${secondsText(metrics.tau)}</td>`
+              }
+            </tr>`,
+        )}
+      </tbody>
+    </table>
+    <p class="helper">${distance ? text.compareExplainDistance : text.compareExplainSpeed}</p>
+  </div>`;
 }
 
 // The same three methods, under the same conditions, as far as the learner has tried them.

@@ -105,6 +105,18 @@
 .planning-actual:before {
   border-top: 2px solid #8ee0c6;
 }
+/* The path the robot was driven along while the room was measured (js/planning/render.js). */
+.planning-driven:before {
+  content: '';
+  display: inline-block;
+  width: 22px;
+  vertical-align: middle;
+  margin-right: 7px;
+  border-top: 2px dotted #c99ad6;
+}
+.planning-room .live-capture {
+  margin-bottom: 4px;
+}
 .planning-playbar {
   display: flex;
   align-items: center;
@@ -690,4 +702,43 @@
   .launch-mechanism .launch-disc-dim span {
     font-size: 10px;
   }
+}
+.planning-room-source {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+  margin-top: 10px;
+}
+.planning-room-source h3 {
+  margin: 0 0 6px;
+}
+.planning-scan-settings {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  margin: 8px 0;
+}
+.planning-scan-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.planning-scan-field input[type='number'] {
+  width: 5em;
+}
+.planning-scan-open input {
+  display: block;
+  margin-top: 4px;
+  max-width: 100%;
+}
+.planning-room-place {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.planning-room-place button[aria-pressed='true'] {
+  outline: 2px solid var(--green, #236f61);
 }

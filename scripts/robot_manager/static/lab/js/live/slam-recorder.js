@@ -1,5 +1,6 @@
-import { recordStream } from './capture.js';
-import { wheelRpm } from './capture-core.js';
+import { recordStream, openRecordingFile, PAIR_FRESH_MS } from './capture.js';
+import { wheelRpm, scanMount } from './capture-core.js';
+import { pairByStamp, missingInRecording, RECORDING_FORMAT } from './recording-core.js';
 
 // Records live LiDAR scans and wheel feedback into the same "robo-lab-sensors-v1" JSON that the
 // SLAM lesson imports from a file, so a real run goes through the identical validation and maths.
@@ -14,11 +15,11 @@ function buildSlamLog(samples, config) {
     throw Error('ロボットから車輪の寸法を受け取れませんでした。');
   if (samples.length < 4)
     throw Error('記録が短すぎます。LiDAR（/scan）が届いているか確かめてください。');
-  const start = samples[0].scan.stamp,
-    rangeMax = Math.min(LOG_RANGE_LIMIT, samples[0].scan.range_max),
-    frames = [];
-  let previous = 0,
-    moved = false;
+  const start = samples[0].scan.stamp;
+  const rangeMax = Math.min(LOG_RANGE_LIMIT, samples[0].scan.range_max);
+  const frames = [];
+  let previous = 0;
+  let moved = false;
   for (const { scan, drive } of samples.slice(1)) {
     const t = scan.stamp - start;
     if (!(t > previous)) continue;
@@ -48,7 +49,8 @@ function buildSlamLog(samples, config) {
         radius: config.wheel_radius,
         track: config.wheel_separation,
         rangeMax,
-        lidar: { x: 0, y: 0, yaw: 0 },
+        // Where the LiDAR sits on the robot (TF via the bridge, or the QUESTiX default).
+        lidar: { ...scanMount(samples[0].scan) },
       },
       stationarySeconds: 0,
       frames,
@@ -73,4 +75,31 @@ async function recordSlamLog({ seconds = 12, onProgress = () => {}, signal } = {
   return buildSlamLog(samples, config);
 }
 
-export { wheelRpm, buildSlamLog, recordSlamLog };
+// A rosbag from the robot (.mcap) or a recording this material saved: each scan paired with the
+// wheel feedback of the same moment, exactly as a live recording pairs them.
+const MCAP_FIRST_BYTE = 0x89;
+
+async function isRobotRecording(file) {
+  const head = new Uint8Array(await file.slice(0, 64).arrayBuffer());
+  if (head[0] === MCAP_FIRST_BYTE || /\.mcap$/i.test(file.name)) return true;
+  return new TextDecoder().decode(head).includes(`"${RECORDING_FORMAT}"`);
+}
+
+/**
+ * Open `file` as a SLAM log. A rosbag or a questix-lab-recording is converted with buildSlamLog;
+ * resolves with `{log, moved, assumedConfig}`, or with null for any other file, which the lesson
+ * then reads as a robo-lab-sensors-v1 JSON itself.
+ */
+async function slamLogFromFile(file) {
+  if (!(await isRobotRecording(file))) return null;
+  const { recording, assumedConfig } = await openRecordingFile(file);
+  const missing = missingInRecording(recording, ['scan', 'drive']);
+  if (missing.length)
+    throw Error('LiDAR（/scan）と車輪の状態（/drive_status）の両方が入った記録を選んでください。');
+  const samples = pairByStamp(recording, 'scan', ['drive'], PAIR_FRESH_MS / 1000).filter(
+    (sample) => sample.drive,
+  );
+  return { ...buildSlamLog(samples, recording.config), assumedConfig };
+}
+
+export { wheelRpm, buildSlamLog, recordSlamLog, slamLogFromFile };

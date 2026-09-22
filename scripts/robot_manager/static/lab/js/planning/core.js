@@ -11,8 +11,13 @@ const PLAN_TOPICS = [
   { id: 'width', label: '機体の幅を考える', title: '線が通れる場所を、ロボットも通れる？' },
   { id: 'margin', label: '余裕と距離を比べる', title: '障害物から、どれくらい離れて通る？' },
   { id: 'replan', label: '道を計画し直す', title: '途中で道がふさがったら、どうする？' },
+  { id: 'room', label: '測った部屋で試す', title: '実際に測った部屋でも、道を計画できる？' },
 ];
 function planningMap(topic = 'draw') {
+  // The measured room is built from a recording (room-core.js); until one is opened the frame is
+  // empty, with the start and goal where the other topics have them.
+  if (topic === 'room')
+    return { width: 6, height: 4, start: { x: 0.6, y: 2 }, goal: { x: 5.4, y: 2 }, obstacles: [] };
   const narrow = ['margin', 'replan'].includes(topic);
   return {
     width: 6,
@@ -35,6 +40,9 @@ function planningDefaults(topic) {
     algorithm: 'astar',
     replan: false,
     points: [],
+    // Which measured room the run used (room topic only), so opening another recording marks
+    // the result on screen as belonging to other conditions.
+    room: '',
   };
 }
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -46,14 +54,17 @@ function rectDistance(p, r) {
   );
 }
 function pointSegment(p, a, b) {
-  const dx = b.x - a.x,
-    dy = b.y - a.y,
-    k = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / (dx * dx + dy * dy || 1)));
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const k = Math.max(
+    0,
+    Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / (dx * dx + dy * dy || 1)),
+  );
   return distance(p, { x: a.x + k * dx, y: a.y + k * dy });
 }
 function intersects(a, b, r) {
-  let lo = 0,
-    hi = 1;
+  let lo = 0;
+  let hi = 1;
   for (const [p, d, min, max] of [
     [a.x, b.x - a.x, r.x, r.x + r.w],
     [a.y, b.y - a.y, r.y, r.y + r.h],
@@ -61,8 +72,8 @@ function intersects(a, b, r) {
     if (Math.abs(d) < 1e-12) {
       if (p < min || p > max) return false;
     } else {
-      let x = (min - p) / d,
-        y = (max - p) / d;
+      let x = (min - p) / d;
+      let y = (max - p) / d;
       if (x > y) [x, y] = [y, x];
       lo = Math.max(lo, x);
       hi = Math.min(hi, y);
@@ -127,9 +138,9 @@ class MinHeap {
     a[i] = v;
   }
   pop() {
-    const a = this.items,
-      first = a[0],
-      last = a.pop();
+    const a = this.items;
+    const first = a[0];
+    const last = a.pop();
     if (a.length) {
       let i = 0;
       while (2 * i + 1 < a.length) {
@@ -155,13 +166,13 @@ function planRoute(
     cell = 0.1,
   } = {},
 ) {
-  const required = radius + margin,
-    cols = Math.round(map.width / cell) + 1,
-    rows = Math.round(map.height / cell) + 1,
-    n = cols * rows,
-    point = (id) => ({ x: (id % cols) * cell, y: Math.floor(id / cols) * cell });
-  const blocked = new Uint8Array(n),
-    expanded = [];
+  const required = radius + margin;
+  const cols = Math.round(map.width / cell) + 1;
+  const rows = Math.round(map.height / cell) + 1;
+  const n = cols * rows;
+  const point = (id) => ({ x: (id % cols) * cell, y: Math.floor(id / cols) * cell });
+  const blocked = new Uint8Array(n);
+  const expanded = [];
   for (let id = 0; id < n; id++) blocked[id] = planningClearance(point(id), map) <= required + 1e-7;
   const result = (path, reason = '') => ({
     path,
@@ -178,11 +189,11 @@ function planRoute(
   if (planningClearance(start, map) <= required + 1e-7) return result([], 'start');
   if (planningClearance(goal, map) <= required + 1e-7) return result([], 'goal');
   function connector(p) {
-    let best = -1,
-      d = Infinity;
+    let best = -1;
+    let d = Infinity;
     for (let id = 0; id < n; id++) {
-      const q = point(id),
-        next = distance(p, q);
+      const q = point(id);
+      const next = distance(p, q);
       if (!blocked[id] && next < d && segmentClearance(p, q, map) > required + 1e-7) {
         best = id;
         d = next;
@@ -190,17 +201,17 @@ function planRoute(
     }
     return best;
   }
-  const from = connector(start),
-    to = connector(goal);
+  const from = connector(start);
+  const to = connector(goal);
   if (from < 0 || to < 0) return result([], 'blocked');
-  const g = new Float64Array(n).fill(Infinity),
-    parents = new Int32Array(n).fill(-1),
-    closed = new Uint8Array(n),
-    heap = new MinHeap();
+  const g = new Float64Array(n).fill(Infinity);
+  const parents = new Int32Array(n).fill(-1);
+  const closed = new Uint8Array(n);
+  const heap = new MinHeap();
   g[from] = 0;
   const heuristic = (id) => {
-    const x = Math.abs((id % cols) - (to % cols)),
-      y = Math.abs(Math.floor(id / cols) - Math.floor(to / cols));
+    const x = Math.abs((id % cols) - (to % cols));
+    const y = Math.abs(Math.floor(id / cols) - Math.floor(to / cols));
     return algorithm === 'dijkstra'
       ? 0
       : cell * (Math.max(x, y) + (Math.SQRT2 - 1) * Math.min(x, y));
@@ -238,12 +249,12 @@ function planRoute(
       }
       return { ...result(path), gridLength: g[to] };
     }
-    const x = id % cols,
-      y = Math.floor(id / cols),
-      p = point(id);
+    const x = id % cols;
+    const y = Math.floor(id / cols);
+    const p = point(id);
     for (const [dx, dy] of dirs) {
-      const xx = x + dx,
-        yy = y + dy;
+      const xx = x + dx;
+      const yy = y + dy;
       if (xx < 0 || xx >= cols || yy < 0 || yy >= rows) continue;
       const j = yy * cols + xx;
       if (blocked[j] || closed[j] || segmentClearance(p, point(j), map) <= required + 1e-7)
@@ -258,14 +269,14 @@ function planRoute(
   }
   return result([], 'blocked');
 }
-function planningExperiment(config) {
+// `map` replaces the topic's built-in map (the measured room).
+function planningExperiment(config, map = planningMap(config.topic)) {
   const cfg = {
-      ...planningDefaults(config.topic),
-      ...config,
-      points: (config.points || []).map((p) => ({ ...p })),
-    },
-    map = planningMap(cfg.topic),
-    radius = cfg.body ? PLAN_ROBOT.radius : 0;
+    ...planningDefaults(config.topic),
+    ...config,
+    points: (config.points || []).map((p) => ({ ...p })),
+  };
+  const radius = cfg.body ? PLAN_ROBOT.radius : 0;
   const initial =
     cfg.topic === 'draw'
       ? { path: [map.start, ...cfg.points, map.goal], expanded: [], required: 0 }
@@ -294,15 +305,15 @@ function planningExperiment(config) {
     minimum: first.clearance,
   };
   if (!initial.path.length) return out;
-  let path = initial.path,
-    index = 1,
-    pose = { ...first },
-    obstacles = map.obstacles,
-    changed = false,
-    extra = null,
-    total = 0;
-  const dt = 0.04,
-    rpm = (v) => (v / (2 * Math.PI * PLAN_ROBOT.wheelRadius)) * 60;
+  let path = initial.path;
+  let index = 1;
+  let pose = { ...first };
+  let obstacles = map.obstacles;
+  let changed = false;
+  let extra = null;
+  let total = 0;
+  const dt = 0.04;
+  const rpm = (v) => (v / (2 * Math.PI * PLAN_ROBOT.wheelRadius)) * 60;
   const sample = (phase, left = 0, right = 0) => {
     pose = {
       ...pose,
@@ -349,12 +360,12 @@ function planningExperiment(config) {
       sample('arrived');
       break;
     }
-    const target = path[index],
-      d = distance(pose, target),
-      heading = Math.atan2(target.y - pose.y, target.x - pose.x),
-      error = wrap(heading - pose.theta);
-    let v = 0,
-      w = 0;
+    const target = path[index];
+    const d = distance(pose, target);
+    const heading = Math.atan2(target.y - pose.y, target.x - pose.x);
+    const error = wrap(heading - pose.theta);
+    let v = 0;
+    let w = 0;
     if (Math.abs(error) > 0.001) w = Math.sign(error) * Math.min(1.4, Math.abs(error) / dt);
     else v = Math.min(0.4, d / dt);
     const next = {

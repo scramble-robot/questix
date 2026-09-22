@@ -5,13 +5,13 @@ The reference implementation is the path-planning course: `js/planning/` with
 
 ## Layers (one directory per course)
 
-| File | Role | Rules |
-| --- | --- | --- |
-| `core.js` | Maths, simulation, parsing | No DOM, no `window`. Importable from Node, unit-testable. |
-| `render.js` | Canvas / SVG drawing | Draws from plain data handed in by `ui.js`. Holds no state. |
-| `view.js` | lit-html templates | Pure functions `model → TemplateResult`. No state, no `document.*`, no side effects. Events are bound in the template (`@click=${actions.x}`). |
-| `ui.js` | State and behaviour | Owns the state, builds the `model`, implements `actions`, calls `render(view(model), container)` from one `update()` function, exports the `init… / activate… / review…` entry points. |
-| `content/<course>.json` | Every learner-facing sentence | Loaded with `loadJson` (top-level await). Rich fragments (lists, links) go to `content/<course>/*.html`; downloadable scripts and procedures are real files. |
+| File                    | Role                          | Rules                                                                                                                                                                                  |
+| ----------------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `core.js`               | Maths, simulation, parsing    | No DOM, no `window`. Importable from Node, unit-testable.                                                                                                                              |
+| `render.js`             | Canvas / SVG drawing          | Draws from plain data handed in by `ui.js`. Holds no state.                                                                                                                            |
+| `view.js`               | lit-html templates            | Pure functions `model → TemplateResult`. No state, no `document.*`, no side effects. Events are bound in the template (`@click=${actions.x}`).                                         |
+| `ui.js`                 | State and behaviour           | Owns the state, builds the `model`, implements `actions`, calls `render(view(model), container)` from one `update()` function, exports the `init… / activate… / review…` entry points. |
+| `content/<course>.json` | Every learner-facing sentence | Loaded with `loadJson` (top-level await). Rich fragments (lists, links) go to `content/<course>/*.html`; downloadable scripts and procedures are real files.                           |
 
 Short labels (button captions, table headers, units) may stay in `view.js`. Anything that reads as
 a sentence, an explanation, or a status message belongs in the content file.
@@ -55,18 +55,36 @@ a sentence, an explanation, or a status message belongs in the content file.
 
 ## Taking measurements from the real robot
 
-A lesson never talks to `robot-link.js` directly. It records through `js/live/capture.js`
-(`recordDrive`, or `recordStream` for another pair of topics), turns the samples into lesson
-numbers with `js/live/capture-core.js`, and shows `liveCaptureControls` from `js/live/live-view.js`
-so every course offers the same block: link state, which stream is missing, record / stop.
+A lesson never talks to `robot-link.js` directly. It creates a session with `createLiveSession`
+(`js/live/live-session.js`), which records every lesson stream through `recordRobot` in
+`js/live/capture.js`, opens saved recordings and rosbags, saves JSON/CSV and keeps the last recording
+across a reload. The lesson only supplies `apply(recording)`, which turns the recording into its own
+numbers with the DOM-free helpers of `js/live/recording-core.js` (`driveRows`, `wallRows`,
+`drivesOf`) and `js/live/capture-core.js`, and shows `liveCaptureControls` from
+`js/live/live-view.js` with the session's `model()`, so every course offers the same block: link
+state, which stream is missing, record / stop, open / save.
 
-- `capture-core.js` has no DOM and no WebSocket, so every rule about what counts as a measurement
-  is a Node test (`test/live-capture-core.test.mjs`).
+- `capture-core.js`, `recording-core.js` and `rosbag-core.js` have no DOM and no WebSocket, so every
+  rule about what counts as a measurement is a Node test (`test/live-capture-core.test.mjs`,
+  `test/recording-core.test.mjs`, `test/rosbag-core.test.mjs`).
+- Derive numbers from the message stamps (`pairByStamp`), never from arrival order: a reopened file
+  or a rosbag must give the same result as the live recording.
 - Keep the link observation-only. Nothing under `js/live/` may send a frame to the robot.
 - A recording replaces the lesson's data instead of being mixed into it, and says what the
-  conditions were (`captureNotes`), so a learner can tell measured numbers from generated ones.
-- Only offer a recording where the robot actually measures both quantities. Where it does not, say
-  so (as the measurement lab does for the launch and SLAM scenarios) instead of hiding the option.
+  conditions were (`captureNotes`, and where it came from), so a learner can tell measured numbers
+  from generated ones.
+- Only offer a recording where the robot actually measures the quantity. Where it measures one side
+  only, take that side automatically and let the learner type the other (the SLAM scenario of the
+  measurement lab); where it measures neither, say so (the launch scenario) instead of hiding the
+  option.
+- Place LiDAR points with `scanMount(scan)` (capture-core): the bridge attaches the mount from TF,
+  `rosbag-core.js` reads it from `/tf_static`, and `LIDAR_DEFAULT_MOUNT` mirrors
+  `launcher/launch/lidar_driver.launch.xml` for older recordings. Never assume the LiDAR sits at the
+  centre of the robot.
+- `rosbag-core.js` ports `questix_lab_bridge/questix_lab_bridge/messages.py`; change the two
+  together. Its test runs against `test/fixtures/drive-approach.mcap`, written by rosbag2 itself —
+  regenerate it with `test/fixtures/make-rosbag-fixture.py` (needs ROS 2 and a built
+  `questix_msgs`, see the script) when the messages change.
 
 Adding such a block is a visible change, so the UI-regression run for that route reports the block
 itself as a difference; check that the differing lines are only the new block, then take a fresh
@@ -86,12 +104,17 @@ node test/ui-regression.mjs --baseline /tmp/lab-baseline --route planning
 node test/ui-regression.mjs --baseline /tmp/lab-baseline --route planning --steps test/steps/planning.json
 ```
 
-Without `--steps` it opens every chapter/topic button and presses each primary button once. Add a
+Without `--steps` it opens every chapter/topic button and presses each primary button once.
+`--dump <dir>` also writes every snapshot to files; review an intended change (a new block) with
+`diff -ru <dir>/baseline <dir>/candidate`, which realigns after an insertion. Add a
 `test/steps/<course>.json` that exercises the controls the crawl does not reach (sliders,
 checkboxes, examples, secondary buttons). A difference must be either fixed or a deliberate,
 documented bug fix (list it under "Known intentional differences" below) — never silenced.
 
-DOM-free modules get Node tests in `test/*.test.mjs` (`node --test test/*.test.mjs`).
+DOM-free modules get Node tests in `test/*.test.mjs` (`node --test test/*.test.mjs`). Tests that pin
+behaviour to the site before the refactor import the copies in `test/baseline/` (see its README), so
+they run in CI as well; `LAB_BASELINE=<dir>` additionally enables the few comparisons that need a
+whole copy of the site.
 
 ## Known intentional differences from the single-file original
 

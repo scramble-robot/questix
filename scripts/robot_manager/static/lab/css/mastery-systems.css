@@ -1147,3 +1147,27 @@ html {
   margin: 14px 0;
   line-height: 1.7;
 }
+
+/* Drives found in a live recording, waiting for the floor measurement (measurement-view.js). */
+.measurement-drives {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0;
+  overflow-x: auto;
+}
+.measurement-drives p {
+  margin: 0;
+}
+.measurement-drives table {
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.measurement-drives th,
+.measurement-drives td {
+  border-bottom: 1px solid var(--line);
+  padding: 4px 8px;
+  text-align: left;
+}
+.measurement-drives input {
+  width: 7em;
+}

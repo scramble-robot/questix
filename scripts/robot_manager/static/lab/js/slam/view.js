@@ -101,7 +101,7 @@ function hardwarePanel(model, copy, actions) {
             >計測ログを開く<input
               id="slamUpload"
               type="file"
-              accept=".json,application/json"
+              accept=".json,.mcap,application/json"
               @change=${actions.openLogFile}
           /></label>
           <button id="slamRecord" class="small" @click=${actions.toggleRecording}>
@@ -541,6 +541,11 @@ function settingsPanel(model, copy, actions) {
       <legend class="sr-only">${text.methodLegend}</legend>
       ${['wheel', 'imu', 'slam'].map((key) => methodChoice(key, model, copy, actions))}
     </fieldset>
+    ${
+      model.noGyro
+        ? html`<p class="slam-warning" id="slamNoGyro" role="note">${text.noGyroWarning}</p>`
+        : nothing
+    }
     <label class="calibrate-choice" id="slamCalibrateLabel" ?hidden=${method === 'wheel'}
       ><input
         type="checkbox"

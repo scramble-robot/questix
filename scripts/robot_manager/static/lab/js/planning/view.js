@@ -4,6 +4,7 @@ import { lessonLabel } from '../shell/lesson-ui.js';
 import { schoolTips } from '../shell/school-tips.js';
 import { lessonBrief } from '../shell/lesson-brief.js';
 import { PLAN_TOPICS } from './core.js';
+import { roomCard } from './room-view.js';
 
 // Templates of the path-planning course. Every function is pure: it turns the model built by
 // ui.js (current topic, experiment state, playback) into markup. Learner-facing sentences come
@@ -58,6 +59,14 @@ function readings(sample, copy) {
   return `左の車輪 ${formatNumber(sample.left, 0)} rpm　右の車輪 ${formatNumber(sample.right, 0)} rpm　移動 ${formatNumber(sample.travel, 2)} m`;
 }
 
+function mapIntro(model) {
+  if (model.topic !== 'room') return '棚のある部屋の地図。スタートは左、目的地は右。';
+  if (!model.room.ready) return 'まだ部屋を測っていない、空の地図。';
+  return model.room.source === 'robot'
+    ? '実機で測った部屋の地図。'
+    : 'スマホの3Dスキャンから作った部屋の地図。';
+}
+
 function mapCard(model, copy, topicCopy, actions) {
   const drawing = model.topic === 'draw';
   return html`<section class="card">
@@ -71,13 +80,17 @@ function mapCard(model, copy, topicCopy, actions) {
       height="500"
       tabindex="0"
       role="img"
-      aria-label=${'棚のある部屋の地図。スタートは左、目的地は右。' + topicCopy.mapLabel}
-      @click=${drawing ? actions.clickMap : nothing}
+      aria-label=${mapIntro(model) + topicCopy.mapLabel}
+      @click=${drawing || model.topic === 'room' ? actions.clickMap : nothing}
       @keydown=${drawing ? actions.keyOnMap : nothing}
     ></canvas>
     <div class="planning-legend">
-      <span class="planning-planned">予定した道</span><span class="planning-actual">走った軌跡</span
-      ><span>円：直径36 cmの機体が占める範囲</span>
+      <span class="planning-planned">予定した道</span
+      ><span class="planning-actual">走った軌跡</span>${
+        model.topic === 'room' && model.room.source === 'robot'
+          ? html`<span class="planning-driven">測ったときに走らせた道</span>`
+          : nothing
+      }<span>円：直径36 cmの機体が占める範囲</span>
     </div>
     <div class="planning-playbar">
       <button id="planningPlay" ?disabled=${!model.canPlay} @click=${actions.togglePlay}>
@@ -203,7 +216,7 @@ function conditionControl(model, copy, actions) {
       config.body,
       (on) => actions.setCondition('body', on),
     );
-  if (topic === 'margin') return marginControl(config, copy, actions);
+  if (topic === 'margin' || topic === 'room') return marginControl(config, copy, actions);
   if (topic === 'replan')
     return checkControl(
       'planningReplan',
@@ -220,7 +233,7 @@ function controlPanel(model, copy, topicCopy, actions) {
   const runButton = html`<button
     class=${drawing ? 'primary full planning-first-run' : 'primary full'}
     id="planningRun"
-    ?disabled=${model.playing}
+    ?disabled=${model.playing || (model.topic === 'room' && !model.room.ready)}
     @click=${actions.runOrResume}
   >
     ${runButtonLabel(model, topicCopy)}
@@ -274,7 +287,7 @@ function resultsCard(model, copy, topicCopy, actions) {
 function conditionSummary(topic, config) {
   if (topic === 'draw') return `${config.points.length}個の通過点`;
   if (topic === 'width') return `機体の幅 ${config.body ? 'あり' : 'なし'}`;
-  if (topic === 'margin') return `余裕 ${Math.round(config.margin * 100)} cm`;
+  if (topic === 'margin' || topic === 'room') return `余裕 ${Math.round(config.margin * 100)} cm`;
   return `計画し直し ${config.replan ? 'あり' : 'なし'}`;
 }
 
@@ -375,7 +388,7 @@ function planningPage(model, copy, hardwareHtml, actions) {
     ${unsafeHTML(lessonBrief(lessonKey, topicCopy.brief) + schoolTips(lessonKey))}
     <div class="planning-layout">
       <div class="planning-workspace">
-        ${mapCard(model, copy, topicCopy, actions)}${resultsCard(model, copy, topicCopy, actions)}
+        ${roomCard(model, copy, actions)}${mapCard(model, copy, topicCopy, actions)}${resultsCard(model, copy, topicCopy, actions)}
         ${historyCard(model, copy)}
       </div>
       ${controlPanel(model, copy, topicCopy, actions)}

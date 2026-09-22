@@ -754,3 +754,38 @@
     margin-top: 6px;
   }
 }
+
+/* Other groups' recordings on the control charts, and the comparison table (js/control/view.js). */
+.control-chart-legend .compared:before {
+  content: '';
+  display: inline-block;
+  width: 22px;
+  vertical-align: middle;
+  margin-right: 6px;
+  border-top: 2px solid var(--compared);
+}
+.control-compare-files {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+.control-compare-files input {
+  display: block;
+  margin-top: 4px;
+  max-width: 100%;
+}
+.control-compare-table {
+  margin-top: 12px;
+  overflow-x: auto;
+}
+.control-compare-table table {
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.control-compare-table th,
+.control-compare-table td {
+  border-bottom: 1px solid var(--line);
+  padding: 4px 8px;
+  text-align: left;
+  white-space: nowrap;
+}

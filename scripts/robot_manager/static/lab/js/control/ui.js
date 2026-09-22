@@ -9,6 +9,7 @@ import {
   BLOCK_WINDOW,
   DRAG_START,
   START_DISTANCE,
+  STOP_DISTANCE,
   controlDefaults,
   normalizeControlConfig,
   simulateControl,
@@ -16,17 +17,13 @@ import {
   controlLoad,
   controlCalibration,
 } from './core.js';
-import { controlWheelAngle, drawControlStage } from './render.js';
+import { controlWheelAngle, drawControlStage, COMPARE_COLOURS } from './render.js';
 import { controlPage, gainText, COMMAND_OPEN_TOPICS } from './view.js';
 import { conceptState, advanceConcept, resetConcept } from './concepts.js';
-import {
-  recordDrive,
-  liveControlRun,
-  liveLink,
-  missingStreams,
-  onLiveLink,
-  throttleProgress,
-} from '../live/capture.js';
+import { liveControlRun, onLiveLink, openRecordingFile } from '../live/capture.js';
+import { liveDistanceRun, stepMetrics, firstHold } from '../live/capture-core.js';
+import { driveRows, wallRows } from '../live/recording-core.js';
+import { createLiveSession } from '../live/live-session.js';
 import { captureNotes } from '../live/live-view.js';
 import { openRobotDialog } from '../live/live-ui.js';
 import { fillSentence as fill } from '../core/content.js';
@@ -73,12 +70,10 @@ let chartWidth = CHART_MAX_WIDTH;
 let concept = conceptState(FIRST_TOPIC);
 const playback = { playing: false, frame: 0, startTime: 0, startIndex: 0, speed: 1 };
 const calibration = controlCalibration();
-// One recording from the real robot, shared by the speed topics: it is the same machine whichever
-// experiment is on screen. The distance topics measure another quantity and do not show it.
-const LIVE_STREAMS = ['drive', 'twist'];
-let liveRun = null;
-let liveNote = '';
-const liveCapture = { recording: false, progress: 0, controller: null };
+// One recording from the real robot per kind of topic: the speed topics share the wheels' step
+// response, the distance topics the LiDAR's view of the wall. It is the same machine whichever
+// experiment is on screen, so switching between topics of one kind keeps the recording.
+const liveRuns = { speed: null, distance: null };
 
 const page = () => document.getElementById('controlPage');
 const experiment = () => experiments.get(topicId);
@@ -177,15 +172,15 @@ function buildModel() {
     calibration,
     concept,
     live: {
-      run: isDistance() ? null : liveRun,
-      note: liveNote,
-      capture: {
-        link: { ...liveLink(), missing: missingStreams(LIVE_STREAMS) },
-        recording: liveCapture.recording,
-        progress: liveCapture.progress,
-        seconds: copy.live.seconds,
-        message: '',
-      },
+      run: liveRuns[liveKind()],
+      note: liveSession().note,
+      capture: liveSession().model(),
+      compared: comparedRuns[liveKind()].map((entry, index) => ({
+        ...entry,
+        colour: COMPARE_COLOURS[index],
+      })),
+      compareNote,
+      table: comparisonRows(),
     },
   };
 }
@@ -355,40 +350,107 @@ function saveCsv(run) {
 
 // --- the real robot next to the simulation ---------------------------------------------------
 
-async function startCapture() {
-  if (liveCapture.recording) return;
-  const controller = new AbortController();
-  liveCapture.recording = true;
-  liveCapture.progress = 0;
-  liveCapture.controller = controller;
-  liveNote = '';
-  update();
-  try {
-    const { rows, summary } = await recordDrive({
-      seconds: copy.live.seconds,
-      signal: controller.signal,
-      onProgress: throttleProgress((count) => {
-        liveCapture.progress = count;
-        update();
-      }),
-    });
-    const run = liveControlRun(rows, DURATION);
-    if (!run.samples.length) {
-      liveNote = copy.live.noCommand;
-    } else {
-      liveRun = run;
-      liveNote = fill(copy.live.recorded, { notes: captureNotes(summary) });
+// The wheels: /target_twist against /drive_status, time counted from the first command.
+// A recording as the run a chart draws, for either kind of topic: `{run, note}`, or `{note}` alone
+// when the recording holds nothing that can be drawn.
+function speedRun(recording) {
+  const { rows, summary } = driveRows(recording);
+  const run = liveControlRun(rows, DURATION);
+  if (!run.samples.length) return { note: copy.live.noCommand };
+  return { run, note: fill(copy.live.recorded, { notes: captureNotes(summary) }) };
+}
+
+// The wall: the LiDAR's distance straight ahead, time counted from the start of the approach.
+function distanceRun(recording) {
+  const run = liveDistanceRun(wallRows(recording), DURATION);
+  if (!run.approached) return { note: copy.live.noApproach };
+  const note = fill(copy.live.distanceRecorded, {
+    closest: Math.min(...run.samples.map((sample) => sample.measured)).toFixed(2),
+    final: run.samples[run.samples.length - 1].measured.toFixed(2),
+  });
+  return { run, note };
+}
+
+const RUN_OF = { speed: speedRun, distance: distanceRun };
+
+function applyRecording(kind, recording) {
+  const { run, note } = RUN_OF[kind](recording);
+  if (!run) return { ok: false, note };
+  liveRuns[kind] = run;
+  return { ok: true, note };
+}
+
+// Other groups' recordings, drawn next to this one so a class can compare machines and drivers.
+const MAX_COMPARED = 5;
+const comparedRuns = { speed: [], distance: [] };
+let compareNote = '';
+
+async function addComparisons(files) {
+  const kind = liveKind();
+  const notes = [];
+  for (const file of files) {
+    if (comparedRuns[kind].length >= MAX_COMPARED) {
+      notes.push(fill(copy.live.compareTooMany, { count: MAX_COMPARED }));
+      break;
     }
-  } catch (error) {
-    // A recording that failed does not discard the one already on the chart: losing a good
-    // measurement because the link dropped during the next attempt would be the worse outcome.
-    liveNote = fill(copy.live.failed, { reason: error.message });
+    try {
+      const { recording } = await openRecordingFile(file);
+      const { run, note } = RUN_OF[kind](recording);
+      if (run) comparedRuns[kind].push({ name: file.name, run });
+      else notes.push(`${file.name}：${note}`);
+    } catch (error) {
+      notes.push(`${file.name}：${error.message}`);
+    }
   }
-  liveCapture.recording = false;
-  liveCapture.progress = 0;
-  liveCapture.controller = null;
+  compareNote = notes.join(' ');
   update();
 }
+
+// One row per run in the comparison table: the simulation on screen, this recording, the others.
+function comparisonRows() {
+  const kind = liveKind();
+  const distance = kind === 'distance';
+  const current = experiment();
+  const rows = [];
+  const add = (label, samples, key, target) =>
+    rows.push({ label, metrics: stepMetrics(samples, { key, target, distance }) });
+  // A speed recording is judged over its first command only (firstHold).
+  const judged = (run) => (distance ? run.samples : firstHold(run.samples));
+  if (current.result?.mode === kind)
+    add(copy.live.compareSimulation, current.result.samples, 'actual', current.result.target);
+  const liveTarget = (run) => (distance ? STOP_DISTANCE : run.samples[0].target);
+  if (liveRuns[kind])
+    add(copy.live.compareThis, liveRuns[kind], 'measured', liveTarget(liveRuns[kind]));
+  for (const entry of comparedRuns[kind])
+    add(entry.name, entry.run, 'measured', liveTarget(entry.run));
+  return rows;
+}
+
+const liveSessions = {
+  speed: createLiveSession({
+    slot: 'control-speed',
+    lesson: 'control-speed',
+    needs: ['drive', 'twist'],
+    seconds: copy.live.seconds,
+    countStream: 'drive',
+    failed: copy.live.failed,
+    apply: (recording) => applyRecording('speed', recording),
+    update: () => update(),
+  }),
+  distance: createLiveSession({
+    slot: 'control-distance',
+    lesson: 'control-distance',
+    needs: ['scan'],
+    seconds: copy.live.distanceSeconds,
+    countStream: 'scan',
+    failed: copy.live.failed,
+    apply: (recording) => applyRecording('distance', recording),
+    update: () => update(),
+  }),
+};
+
+const liveKind = () => (isDistance() ? 'distance' : 'speed');
+const liveSession = () => liveSessions[liveKind()];
 
 const actions = {
   openGroup(index) {
@@ -473,13 +535,19 @@ const actions = {
     concept = resetConcept(concept);
     update();
   },
-  startCapture,
-  stopCapture() {
-    liveCapture.controller?.abort();
-  },
+  startCapture: () => liveSession().actions.startCapture(),
+  stopCapture: () => liveSession().actions.stopCapture(),
+  openRecording: (file) => liveSession().actions.openRecording(file),
+  saveRecording: (kind) => liveSession().actions.saveRecording(kind),
   clearLive() {
-    liveRun = null;
-    liveNote = '';
+    liveRuns[liveKind()] = null;
+    liveSession().clear();
+    update();
+  },
+  addComparisons: (files) => addComparisons([...files]),
+  clearComparisons() {
+    comparedRuns[liveKind()] = [];
+    compareNote = '';
     update();
   },
   openLink: openRobotDialog,
@@ -497,6 +565,9 @@ function reviewControl(id) {
 }
 
 function initControl() {
+  // A recording taken before the page was reloaded comes back, as far as this browser kept it.
+  liveSessions.speed.restore();
+  liveSessions.distance.restore();
   rebuild();
   document.addEventListener('series-leave', stopAndShow);
   document.addEventListener('supplement-open', stopAndShow);

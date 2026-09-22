@@ -10,6 +10,16 @@ import {
   steadyMeasurements,
   liveControlRun,
   captureSummary,
+  commandStart,
+  FRONT_HALF_ANGLE,
+  LIDAR_DEFAULT_MOUNT,
+  scanMount,
+  frontDistance,
+  distanceSamples,
+  liveDistanceRun,
+  odomMoves,
+  firstHold,
+  stepMetrics,
 } from '../js/live/capture-core.js';
 
 const config = { wheel_radius: 0.1, wheel_separation: 0.5 };
@@ -164,4 +174,146 @@ test('captureSummary reports the conditions the learner needs to read the result
     drive: { ...sample.drive, emergency_stop: true },
   }));
   assert.equal(captureSummary(driveSamples(stopped, config)).emergencyStop, true);
+});
+
+// --- step alignment, the wall ahead and the drives between stops ----------------------------
+
+test('liveControlRun counts time from the first command, where the simulation steps', () => {
+  const rows = driveSamples(
+    recording([
+      [3, 0, 0],
+      [10, 40, 38],
+    ]),
+    config,
+  );
+  const run = liveControlRun(rows, 16);
+  assert.equal(run.samples[0].time, 0);
+  assert.ok(Math.abs(run.samples[0].target - 40) < 1e-6);
+  assert.ok(Math.abs(commandStart(rows) - 3) < 1e-6);
+});
+
+// A scan whose beams all see a flat wall `wall` metres straight ahead.
+function wallScan(stamp, wall, { beams = 360, blocked = [] } = {}) {
+  const increment = (2 * Math.PI) / beams;
+  const ranges = Array.from({ length: beams }, (_, index) => {
+    const angle = -Math.PI + index * increment;
+    if (blocked.includes(index)) return 0.2;
+    return Math.abs(angle) < 1.2 ? Number((wall / Math.cos(angle)).toFixed(3)) : null;
+  });
+  return { stamp, angle_min: -Math.PI, angle_increment: increment, range_max: 12, ranges };
+}
+
+test('frontDistance is the median of the beams straight ahead', () => {
+  assert.ok(Math.abs(frontDistance(wallScan(0, 1.5)) - 1.5) < 0.005);
+  // One stray beam (a cable in front of the LiDAR) does not move it.
+  assert.ok(Math.abs(frontDistance(wallScan(0, 1.5, { blocked: [180] })) - 1.5) < 0.005);
+  const nothingAhead = { ...wallScan(0, 1.5), ranges: new Array(360).fill(null) };
+  assert.equal(frontDistance(nothingAhead), null);
+  // Angles are wrapped: a LiDAR reporting 0…2π still finds straight ahead.
+  const wrapped = wallScan(0, 1.5);
+  const shifted = {
+    ...wrapped,
+    angle_min: 0,
+    ranges: [...wrapped.ranges.slice(180), ...wrapped.ranges.slice(0, 180)],
+  };
+  assert.ok(Math.abs(frontDistance(shifted) - 1.5) < 0.005);
+  assert.ok(FRONT_HALF_ANGLE > 0);
+});
+
+test('liveDistanceRun starts where the robot starts to approach the wall', () => {
+  const scans = [];
+  for (let i = 0; i < 60; i += 1) {
+    const time = i * 0.2; // 5 Hz
+    const wall = time < 2 ? 1.5 : Math.max(0.5, 1.5 - 0.25 * (time - 2));
+    scans.push(wallScan(50 + time, wall));
+  }
+  const rows = distanceSamples(scans);
+  assert.equal(rows.length, 60);
+  const run = liveDistanceRun(rows, 16);
+  assert.equal(run.approached, true);
+  assert.equal(run.samples[0].time, 0);
+  assert.ok(Math.abs(run.samples[0].measured - 1.5) < 0.01);
+  assert.ok(run.samples.every((sample) => Number.isNaN(sample.target)));
+  assert.ok(Math.abs(run.samples[run.samples.length - 1].measured - 0.5) < 0.01);
+  const still = liveDistanceRun(distanceSamples(scans.slice(0, 10)), 16);
+  assert.equal(still.approached, false);
+});
+
+test('odomMoves finds each drive between two stops', () => {
+  const odoms = [];
+  let x = 0;
+  const plan = [
+    [1, 0],
+    [2, 0.2], // 40 cm
+    [1, 0],
+    [1.5, 0.2], // 30 cm
+    [1, 0],
+    [0.05, 0.2], // 1 cm: a nudge
+    [1, 0],
+  ];
+  let stamp = 20;
+  for (const [seconds, speed] of plan)
+    for (let i = 0; i < Math.round(seconds * 20); i += 1) {
+      odoms.push({ stamp, x, y: 0, theta: 0, v: speed, w: 0 });
+      x += speed * 0.05;
+      stamp += 0.05;
+    }
+  const moves = odomMoves(odoms);
+  assert.equal(moves.length, 2);
+  assert.ok(Math.abs(moves[0].distance - 0.4) < 0.011);
+  assert.ok(Math.abs(moves[1].distance - 0.3) < 0.011);
+  assert.ok(moves[0].to < moves[1].from);
+  assert.equal(moves[0].turn, 0);
+});
+
+test('the LiDAR mount turns beams into the robot frame; without one the QUESTiX mount is used', () => {
+  assert.deepEqual(scanMount({}), LIDAR_DEFAULT_MOUNT);
+  assert.deepEqual(scanMount({ mount: null }), LIDAR_DEFAULT_MOUNT);
+  // A LiDAR mounted backwards sees the wall ahead of the robot at its own angle π.
+  const scan = wallScan(0, 1.5);
+  const backwards = {
+    ...scan,
+    ranges: [...scan.ranges.slice(180), ...scan.ranges.slice(0, 180)],
+    mount: { x: 0.2, y: 0, yaw: Math.PI },
+  };
+  assert.ok(Math.abs(frontDistance(backwards) - 1.5) < 0.005);
+});
+
+test('stepMetrics reads a recording by the definitions of the control course', () => {
+  // A first-order step to 40 rpm: 0.2 s delay, 0.5 s time constant, 1 rpm short at the end.
+  const samples = [];
+  for (let i = 0; i <= 320; i += 1) {
+    const time = i * 0.05;
+    const moving = Math.max(0, time - 0.2);
+    samples.push({ time, measured: 39 * (1 - Math.exp(-moving / 0.5)), target: 40 });
+  }
+  const metrics = stepMetrics(samples, { target: 40 });
+  assert.ok(Math.abs(metrics.finalError - 1) < 0.01);
+  assert.equal(metrics.overshoot, 0);
+  // Read off 20 Hz samples, so within about one sample period.
+  assert.ok(Math.abs(metrics.delay - 0.2) <= 0.06);
+  assert.ok(Math.abs(metrics.tau - 0.5) <= 0.06);
+  assert.ok(Math.abs(metrics.gain - 39 / 40) < 0.001);
+  assert.ok(metrics.settling > 1 && metrics.settling < 2.5);
+  // Approaching a wall: 0.1 m past the 0.5 m target, then back and still.
+  const wall = [];
+  for (let i = 0; i <= 200; i += 1) {
+    const time = i * 0.1;
+    const gap = time < 5 ? 1.5 - 0.22 * time : time < 7 ? 0.4 + 0.05 * (time - 5) : 0.5;
+    wall.push({ time, measured: gap });
+  }
+  const stop = stepMetrics(wall, { target: 0.5, distance: true });
+  assert.ok(Math.abs(stop.overshoot - 0.1) < 1e-9);
+  assert.equal(stop.finalError, 0);
+  assert.ok(stop.settling >= 6 && stop.settling <= 7.2);
+  assert.equal(stop.tau, undefined);
+});
+
+test('firstHold keeps a speed run up to its first change of command', () => {
+  const samples = [0, 1, 2, 3].map((time) => ({ time, target: time < 2 ? 40 : 0, measured: 0 }));
+  assert.deepEqual(
+    firstHold(samples).map((sample) => sample.time),
+    [0, 1],
+  );
+  assert.deepEqual(firstHold([]), []);
 });

@@ -2,16 +2,18 @@ import { drawRobot } from '../core/renderer.js';
 import { PLAN_ROBOT, planningMap } from './core.js';
 
 const PLAN_PLOT = { x: 60, y: 46, k: 100, width: 720, height: 500 };
+// `room` is the measured room (room-core.js `measuredRoom`) when the topic uses one: its map and
+// the path the robot was driven along.
 function drawPlanning(
   canvas,
-  { topic, config, run, index = 0, showSearch = false, cursor = null },
+  { topic, config, run, index = 0, showSearch = false, cursor = null, room = null },
 ) {
-  const p = PLAN_PLOT,
-    box = canvas.getBoundingClientRect(),
-    dpr = window.devicePixelRatio || 1,
-    w = box.width || 720;
-  const bw = Math.round(w * dpr),
-    bh = Math.round(((w * 500) / 720) * dpr);
+  const p = PLAN_PLOT;
+  const box = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const w = box.width || 720;
+  const bw = Math.round(w * dpr);
+  const bh = Math.round(((w * 500) / 720) * dpr);
   if (canvas.width !== bw || canvas.height !== bh) {
     canvas.width = bw;
     canvas.height = bh;
@@ -20,10 +22,10 @@ function drawPlanning(
   c.setTransform(canvas.width / 720, 0, 0, canvas.height / 500, 0, 0);
   c.fillStyle = '#152e39';
   c.fillRect(0, 0, 720, 500);
-  const map = run?.map || planningMap(topic),
-    sample = run?.samples[index] || { ...map.start, theta: 0, left: 0, right: 0 };
-  const obstacles = [...map.obstacles, ...(sample.changed && run?.obstacle ? [run.obstacle] : [])],
-    P = (q) => ({ x: p.x + q.x * p.k, y: p.y + q.y * p.k });
+  const map = run?.map || room?.map || planningMap(topic);
+  const sample = run?.samples[index] || { ...map.start, theta: 0, left: 0, right: 0 };
+  const obstacles = [...map.obstacles, ...(sample.changed && run?.obstacle ? [run.obstacle] : [])];
+  const P = (q) => ({ x: p.x + q.x * p.k, y: p.y + q.y * p.k });
   c.fillStyle = '#1b3540';
   c.fillRect(p.x, p.y, map.width * p.k, map.height * p.k);
   c.strokeStyle = '#45606b';
@@ -68,6 +70,12 @@ function drawPlanning(
   }
   for (const [i, r] of obstacles.entries()) {
     const extra = i >= map.obstacles.length;
+    if (r.measured) {
+      // A measured cell: where LiDAR beams ended, drawn without a label.
+      c.fillStyle = '#78919b';
+      c.fillRect(p.x + r.x * p.k, p.y + r.y * p.k, r.w * p.k, r.h * p.k);
+      continue;
+    }
     c.fillStyle = extra ? '#a55b3e' : '#3c5662';
     c.strokeStyle = extra ? '#e8ab7b' : '#78919b';
     c.lineWidth = 1.5;
@@ -96,6 +104,19 @@ function drawPlanning(
     : topic === 'draw'
       ? [map.start, ...config.points, map.goal]
       : [];
+  if (room?.trajectory) {
+    // The path the robot was driven along while the room was measured.
+    c.lineWidth = 1.6;
+    c.strokeStyle = '#c99ad6aa';
+    c.setLineDash([2, 5]);
+    c.beginPath();
+    room.trajectory.forEach((q, i) => {
+      const v = P(q);
+      i ? c.lineTo(v.x, v.y) : c.moveTo(v.x, v.y);
+    });
+    c.stroke();
+    c.setLineDash([]);
+  }
   if (sample.changed && run?.newPlan) route(run.plan.path, '#9bb0b066', [6, 7]);
   route(routePoints, '#edcc88', [7, 5]);
   if (run) route(run.samples.slice(0, index + 1), '#8ee0c6');

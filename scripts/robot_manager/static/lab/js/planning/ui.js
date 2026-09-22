@@ -11,6 +11,9 @@ import {
 } from './core.js';
 import { PLAN_PLOT, drawPlanning } from './render.js';
 import { planningPage } from './view.js';
+import { createRoom } from './room-ui.js';
+import { onLiveLink } from '../live/capture.js';
+import { openRobotDialog } from '../live/live-ui.js';
 
 // Path-planning course: state and behaviour. view.js turns the model into markup, render.js draws
 // the map, core.js plans and simulates. Texts live in content/planning.json.
@@ -64,6 +67,23 @@ let showSearch = false;
 let cursor = { x: 1.8, y: 0.8 };
 const playback = { playing: false, frame: 0, startTime: 0, startIndex: 0, speed: 1 };
 
+// --- the measured room -----------------------------------------------------------------------
+
+// A new or changed room map makes the run on screen belong to other conditions: it is cleared,
+// and the key goes into the room topic's conditions (see planningDefaults).
+const room = createRoom({
+  copy,
+  changed(key) {
+    const current = experiments.get('room');
+    current.config.room = key;
+    if (topicId === 'room') pause();
+    resetRun(current, null);
+  },
+  update: () => {
+    if (topicId === 'room') update();
+  },
+});
+
 const page = () => document.getElementById('planningPage');
 const experiment = () => experiments.get(topicId);
 const lastIndex = (run) => run.samples.length - 1;
@@ -100,6 +120,7 @@ function buildModel() {
     status: conditionsChanged(current) ? copy.status.stale : status,
     showSearch,
     countedRun,
+    room: room.model(),
   };
 }
 
@@ -114,6 +135,7 @@ function drawMap() {
     index: current.index,
     showSearch,
     cursor,
+    room: topicId === 'room' ? room.drawing : null,
   });
 }
 
@@ -203,7 +225,8 @@ function resetRun(current, run) {
 function startRun() {
   pause();
   const current = experiment();
-  resetRun(current, planningExperiment(current.config));
+  if (topicId === 'room' && !room.map) return;
+  resetRun(current, planningExperiment(current.config, topicId === 'room' ? room.map : undefined));
   status = copy.status.running;
   if (current.run.samples.length === 1) {
     finish();
@@ -308,7 +331,10 @@ const actions = {
     status = name === 'near' ? copy.status.exampleNear : copy.status.exampleWide;
     update();
   },
-  clickMap: (event) => addWaypoint(canvasToMap(event)),
+  clickMap(event) {
+    if (topicId === 'room') room.place(canvasToMap(event));
+    else addWaypoint(canvasToMap(event));
+  },
   keyOnMap(event) {
     if (ARROW_KEYS[event.key]) moveCursor(ARROW_KEYS[event.key]);
     else if (event.key === 'Enter') addWaypoint(cursor);
@@ -324,6 +350,8 @@ const actions = {
     const procedure = document.getElementById('planningHardware').innerText;
     downloadFile('QUESTiX-LAB-経路計画-実機手順.txt', procedure + copy.hardwareGuideReferences);
   },
+  openLink: openRobotDialog,
+  ...room.actions,
   next() {
     const position = PLAN_TOPICS.findIndex((topic) => topic.id === topicId);
     const next = PLAN_TOPICS[position + 1];
@@ -345,7 +373,11 @@ function pauseAndShow() {
 }
 
 function initPlanning() {
+  room.restore(); // the room measured before a reload, as far as this browser kept it
   openTopic(topicId);
+  onLiveLink(() => {
+    if (topicId === 'room' && !page().hidden) update();
+  });
   document.addEventListener('series-leave', pauseAndShow);
   document.addEventListener('supplement-open', pauseAndShow);
   document.addEventListener('visibilitychange', () => {

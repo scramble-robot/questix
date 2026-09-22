@@ -209,3 +209,28 @@
   font-size: 12px;
   color: var(--muted);
 }
+.live-capture-files {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+.live-capture-files .live-capture-note {
+  flex-basis: 100%;
+}
+.live-capture-open input {
+  display: block;
+  margin-top: 4px;
+  max-width: 100%;
+}
+
+/* A log from the real robot has no IMU values (js/slam/view.js). */
+.slam-warning {
+  border-left: 4px solid var(--orange);
+  background: #fbf1ea;
+  padding: 8px 12px;
+  margin: 8px 0;
+  font-size: 14px;
+}

@@ -285,6 +285,46 @@ function importExport(model, copy, actions) {
   </div>`;
 }
 
+// Drives found in a recording, waiting for the distance the learner measured on the floor.
+function pendingDrives(model, copy, actions) {
+  const pending = model.live.pending ?? [];
+  if (!pending.length) return nothing;
+  const text = copy.drives;
+  return html`<div class="measurement-drives">
+    <p>${text.intro}</p>
+    <table>
+      <thead>
+        <tr>
+          ${text.columns.map((column) => html`<th>${column}</th>`)}
+        </tr>
+      </thead>
+      <tbody>
+        ${pending.map(
+          (drive, index) =>
+            html`<tr>
+              <td>${drive.number}</td>
+              <td>${drive.wheel.toFixed(1)}</td>
+              <td>${drive.turn + '°'}</td>
+              <td>
+                <input
+                  data-drive-floor=${index}
+                  aria-label=${fill(text.floorLabel, { number: drive.number })}
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  .value=${live(drive.floor)}
+                  @change=${(event) => actions.setFloor(index, event.target.value)}
+                />
+              </td>
+            </tr>`,
+        )}
+      </tbody>
+    </table>
+    <button data-drive-add @click=${actions.addDrives}>${text.add}</button>
+    <p class="live-capture-note">${text.note}</p>
+  </div>`;
+}
+
 // Filling the table from the connected robot. A scenario without a `live` block says why its
 // reference quantity cannot come from the robot instead of offering a button that cannot work.
 function liveCapture(model, copy, actions) {
@@ -294,8 +334,8 @@ function liveCapture(model, copy, actions) {
     ${
       model.live
         ? html`<p>${model.live.text}</p>
-            ${liveCaptureControls(model.live, actions)}
-            <p>${panel.liveReferenceNote}</p>`
+            ${liveCaptureControls(model.live, actions)} ${pendingDrives(model, copy, actions)}
+            <p>${model.live.referenceNote ?? panel.liveReferenceNote}</p>`
         : html`<p>${panel.liveUnavailable}</p>`
     }
   </div>`;

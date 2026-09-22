@@ -8,6 +8,7 @@ import {
   disconnectRobot,
 } from './robot-link.js';
 import { wheelRpm } from './slam-recorder.js';
+import { scanMount } from './capture-core.js';
 
 // Header button and "実機モニター" dialog. Drawing only happens while the dialog is open.
 const $ = (id) => document.getElementById(id);
@@ -32,14 +33,14 @@ const COLORS = {
   dark: '#102832',
 };
 
-let history = [],
-  cameraUrl = '',
-  frameRequested = false;
+let history = [];
+let cameraUrl = '';
+let frameRequested = false;
 
 function prepare(canvas) {
-  const ratio = window.devicePixelRatio || 1,
-    width = canvas.clientWidth,
-    height = canvas.clientHeight;
+  const ratio = window.devicePixelRatio || 1;
+  const width = canvas.clientWidth;
+  const height = canvas.clientHeight;
   if (canvas.width !== Math.round(width * ratio) || canvas.height !== Math.round(height * ratio)) {
     canvas.width = Math.round(width * ratio);
     canvas.height = Math.round(height * ratio);
@@ -52,20 +53,20 @@ function prepare(canvas) {
 
 // Robot-centred top view: forward is up, left is left (REP-103 seen from above).
 function drawScan() {
-  const { c, width, height } = prepare($('robotScan')),
-    scan = latestRobot('scan'),
-    cx = width / 2,
-    cy = height / 2,
-    radius = Math.min(width, height) / 2 - 14;
+  const { c, width, height } = prepare($('robotScan'));
+  const scan = latestRobot('scan');
+  const cx = width / 2;
+  const cy = height / 2;
+  const radius = Math.min(width, height) / 2 - 14;
   c.fillStyle = COLORS.dark;
   c.fillRect(0, 0, width, height);
   const limit = scan
-      ? Math.min(
-          scan.range_max,
-          Math.max(2, Math.ceil(Math.max(0, ...scan.ranges.filter((r) => r !== null)))),
-        )
-      : 4,
-    scale = radius / limit;
+    ? Math.min(
+        scan.range_max,
+        Math.max(2, Math.ceil(Math.max(0, ...scan.ranges.filter((r) => r !== null)))),
+      )
+    : 4;
+  const scale = radius / limit;
   c.strokeStyle = '#365059';
   c.fillStyle = '#a9c0c5';
   c.font = '11px system-ui';
@@ -77,11 +78,15 @@ function drawScan() {
     c.fillText(ring + ' m', cx + 4, cy - ring * scale - 3);
   }
   if (scan) {
+    // Points are placed from where the LiDAR sits on the robot, so the centre is the robot's.
+    const mount = scanMount(scan);
     c.fillStyle = COLORS.point;
     scan.ranges.forEach((r, i) => {
       if (r === null) return;
-      const a = scan.angle_min + i * scan.angle_increment;
-      c.fillRect(cx - Math.sin(a) * r * scale - 1.5, cy - Math.cos(a) * r * scale - 1.5, 3, 3);
+      const a = mount.yaw + scan.angle_min + i * scan.angle_increment;
+      const x = mount.x + Math.cos(a) * r; // forward
+      const y = mount.y + Math.sin(a) * r; // left
+      c.fillRect(cx - y * scale - 1.5, cy - x * scale - 1.5, 3, 3);
     });
   }
   c.fillStyle = '#f0c86a';
@@ -97,20 +102,20 @@ function drawScan() {
 }
 
 function drawWheels() {
-  const { c, width, height } = prepare($('robotWheels')),
-    pad = { left: 38, right: 8, top: 10, bottom: 20 },
-    now = history.length ? history[history.length - 1].at : 0;
+  const { c, width, height } = prepare($('robotWheels'));
+  const pad = { left: 38, right: 8, top: 10, bottom: 20 };
+  const now = history.length ? history[history.length - 1].at : 0;
   const peak = Math.max(
-      10,
-      ...history
-        .flatMap((h) => [h.left, h.right, h.targetLeft, h.targetRight])
-        .filter(Number.isFinite)
-        .map(Math.abs),
-    ),
-    top = Math.ceil(peak / 10) * 10;
+    10,
+    ...history
+      .flatMap((h) => [h.left, h.right, h.targetLeft, h.targetRight])
+      .filter(Number.isFinite)
+      .map(Math.abs),
+  );
+  const top = Math.ceil(peak / 10) * 10;
   const x = (at) =>
-      pad.left + (1 - (now - at) / (HISTORY_SECONDS * 1000)) * (width - pad.left - pad.right),
-    y = (v) => pad.top + (1 - (v + top) / (2 * top)) * (height - pad.top - pad.bottom);
+    pad.left + (1 - (now - at) / (HISTORY_SECONDS * 1000)) * (width - pad.left - pad.right);
+  const y = (v) => pad.top + (1 - (v + top) / (2 * top)) * (height - pad.top - pad.bottom);
   c.font = '11px system-ui';
   c.fillStyle = COLORS.muted;
   c.strokeStyle = COLORS.grid;
@@ -153,10 +158,10 @@ function drawWheels() {
 }
 
 function readings() {
-  const odom = latestRobot('odom'),
-    drive = latestRobot('drive'),
-    twist = latestRobot('twist'),
-    f = (v, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : '—');
+  const odom = latestRobot('odom');
+  const drive = latestRobot('drive');
+  const twist = latestRobot('twist');
+  const f = (v, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : '—');
   $('robotPose').textContent = odom
     ? `x ${f(odom.x)} m · y ${f(odom.y)} m · 向き ${f((odom.theta * 180) / Math.PI, 0)}°`
     : '—';
@@ -249,16 +254,16 @@ function initLive() {
     if (!config || !Number.isFinite(drive.v) || !Number.isFinite(drive.w)) return;
     // Both curves go through the same kinematics, so command and measurement share one sign convention
     // (the raw per-wheel RPM cannot be compared directly: the right motor is mirrored on the wire).
-    const rpm = wheelRpm(drive, config),
-      twist = latestRobot('twist'),
-      target =
-        twist &&
-        drive.stamp - twist.stamp < TWIST_FRESH_SECONDS &&
-        Number.isFinite(twist.linear) &&
-        Number.isFinite(twist.angular)
-          ? wheelRpm({ v: twist.linear, w: twist.angular }, config)
-          : { left: NaN, right: NaN },
-      at = performance.now();
+    const rpm = wheelRpm(drive, config);
+    const twist = latestRobot('twist');
+    const target =
+      twist &&
+      drive.stamp - twist.stamp < TWIST_FRESH_SECONDS &&
+      Number.isFinite(twist.linear) &&
+      Number.isFinite(twist.angular)
+        ? wheelRpm({ v: twist.linear, w: twist.angular }, config)
+        : { left: NaN, right: NaN };
+    const at = performance.now();
     history.push({
       at,
       left: rpm.left,
@@ -271,8 +276,8 @@ function initLive() {
   });
   onRobot('camera', (blob) => {
     if (!$('robotDialog').open) return;
-    const next = URL.createObjectURL(blob),
-      image = $('robotCamera');
+    const next = URL.createObjectURL(blob);
+    const image = $('robotCamera');
     image.onload = () => {
       if (cameraUrl) URL.revokeObjectURL(cameraUrl);
       cameraUrl = next;

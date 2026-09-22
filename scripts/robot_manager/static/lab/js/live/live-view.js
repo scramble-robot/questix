@@ -18,21 +18,60 @@ function linkMessage(model) {
 function recordButton(model, actions) {
   if (model.recording)
     return html`<button class="live-capture-stop" @click=${actions.stopCapture}>
-      ${captureCopy.stop}
+      ${model.stopLabel ?? captureCopy.stop}
     </button>`;
   return html`<button
     class="live-capture-record"
     ?disabled=${!model.link.connected || model.link.missing.length > 0}
     @click=${actions.startCapture}
   >
-    ${fill(captureCopy.record, { seconds: model.seconds })}
+    ${fill(model.recordLabel ?? captureCopy.record, { seconds: model.seconds })}
   </button>`;
 }
 
+// Saving the recording on screen and opening one again — a file this material saved, or a rosbag
+// recorded on the robot. Offered without a connection too: a class can work from yesterday's
+// recordings with the robot switched off.
+function fileControls(model, actions) {
+  if (!model.file) return nothing;
+  const text = captureCopy.file;
+  return html`<div class="live-capture-files">
+    <label class="live-capture-open"
+      >${text.open}
+      <input
+        data-live-open
+        type="file"
+        accept=".json,.mcap,application/json"
+        ?disabled=${model.recording}
+        @change=${(event) => {
+          actions.openRecording(event.target.files[0]);
+          event.target.value = '';
+        }}
+    /></label>
+    <button
+      data-live-save
+      ?disabled=${!model.file.canSave}
+      @click=${() => actions.saveRecording('json')}
+    >
+      ${text.saveJson}
+    </button>
+    <button
+      data-live-save-csv
+      ?disabled=${!model.file.canSave}
+      @click=${() => actions.saveRecording('csv')}
+    >
+      ${text.saveCsv}
+    </button>
+    <p class="live-capture-note">${text.note}</p>
+  </div>`;
+}
+
 /**
- * `model` is `{ link: {connected, phase, missing}, recording, progress, seconds, message }`.
- * `actions` needs `startCapture` and `stopCapture`; `openLink` is optional and, when given, adds
- * the shortcut to the connection dialog for a learner who has not connected yet.
+ * `model` is `{ link: {connected, phase, missing}, recording, progress, seconds, message }`, plus
+ * optional `recordLabel` / `stopLabel` sentences and `file: {canSave}` to offer saving and opening
+ * recordings. `actions` needs `startCapture` and `stopCapture` (and, with `file`, `saveRecording`
+ * and `openRecording`); `openLink` is optional and, when given, adds the shortcut to the connection
+ * dialog for a learner who has not connected yet.
  */
 function liveCaptureControls(model, actions) {
   return html`<div class="live-capture" data-live-capture>
@@ -57,6 +96,7 @@ function liveCaptureControls(model, actions) {
         ? html`<p class="live-capture-message" role="status" data-live-message>${model.message}</p>`
         : nothing
     }
+    ${fileControls(model, actions)}
     <p class="live-capture-note">${captureCopy.readOnly}</p>
   </div>`;
 }

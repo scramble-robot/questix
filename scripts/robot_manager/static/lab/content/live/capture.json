@@ -23,5 +23,18 @@
     "notMoved": "記録の間、車輪はほとんど回っていません。ロボットを走らせながら、もう一度記録してください。",
     "notCommanded": "速度の指令（/target_twist）が届いていないため、目標値のない測定になりました。",
     "emergencyStop": "記録の間、緊急停止が入っていました。止まっているのはそのためです。"
+  },
+  "file": {
+    "open": "記録ファイル・rosbagを開く",
+    "saveJson": "記録を保存する（JSON）",
+    "saveCsv": "表計算用に保存する（CSV）",
+    "note": "JSONはこの教材でもう一度開けます。CSVは表計算ソフトやグラフ作成ツールで開けます（1行が1つのメッセージ、stream列で種類を選べます）。ロボットの管理画面（Robot Manager）の録画で記録したrosbag（.mcap）も開けます。",
+    "opened": "ファイル「{name}」を開きました（{seconds}秒ぶん）。",
+    "openedBag": "rosbag「{name}」を開きました（{seconds}秒ぶん、{topics}）。",
+    "assumedConfig": "rosbagには車輪の寸法が入っていないため、ロボットの標準値（半径{radius} m・間隔{separation} m）で計算しました。実機とつないでから開くと、その実機の値を使います。",
+    "restored": "前回の記録（{time}）を表示しています。",
+    "notKept": "記録が大きいため、ページを再読み込みすると消えます。残すときはファイルに保存してください。",
+    "missing": "このファイルには、この実験に必要な{streams}がありません。",
+    "failed": "ファイルを開けませんでした：{reason}"
   }
 }

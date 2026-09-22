@@ -3,7 +3,7 @@ import { loadJson, loadText } from '../core/content.js';
 import { downloadFile } from '../core/dom.js';
 import { lessonGuide, figureGuide } from '../shell/lesson-guide.js';
 import { generateSlamLog, estimateSlam, slamMetrics, validateSlamLog } from './engine.js';
-import { recordSlamLog } from '../live/slam-recorder.js';
+import { recordSlamLog, slamLogFromFile } from '../live/slam-recorder.js';
 import { basicsTemplate, initSlamBasics, reviewSlamBasics } from './basics.js';
 import { drawMaps, drawSensorChart, drawTilt, tiltAcceleration } from './render.js';
 import { slamPage } from './view.js';
@@ -125,6 +125,8 @@ function buildModel() {
     ready,
     finished,
     hardware: isHardwareLog(),
+    // QUESTiX has no IMU: a log recorded on it carries gyroZ = 0 throughout.
+    noGyro: isHardwareLog() && log.frames.every((frame) => frame.gyroZ === 0),
     hardwareVisible: view !== 'basics' && real,
     experimentVisible: view !== 'basics' && (!real || isHardwareLog()),
     hardwareGuideHtml: hardware.html,
@@ -333,8 +335,14 @@ async function openLogFile(event) {
   const file = input.files[0];
   if (!file) return;
   try {
-    if (file.size > MAX_LOG_BYTES) throw Error(copy.hardware.fileTooLarge);
-    acceptLog(JSON.parse(await file.text()), file.name);
+    const converted = await slamLogFromFile(file);
+    if (converted) {
+      const assumed = converted.assumedConfig ? copy.hardware.assumedConfig : '';
+      acceptLog(converted.log, file.name, copy.hardware.recordedNote + assumed);
+    } else {
+      if (file.size > MAX_LOG_BYTES) throw Error(copy.hardware.fileTooLarge);
+      acceptLog(JSON.parse(await file.text()), file.name);
+    }
   } catch (error) {
     importStatus = fill(copy.hardware.importFailed, { message: error.message });
     update();

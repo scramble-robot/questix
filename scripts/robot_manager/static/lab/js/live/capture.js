@@ -1,11 +1,13 @@
 import { onRobot, robotState } from './robot-link.js';
+import { CAPTURE_DEFAULTS, steadyMeasurements, liveControlRun } from './capture-core.js';
 import {
-  CAPTURE_DEFAULTS,
-  driveSamples,
-  steadyMeasurements,
-  liveControlRun,
-  captureSummary,
-} from './capture-core.js';
+  RECORDING_STREAMS,
+  makeRecording,
+  parseRecording,
+  serializeRecording,
+  recordingCSV,
+} from './recording-core.js';
+import { BAG_DEFAULT_CONFIG, readRosbag } from './rosbag-core.js';
 
 // Recording a stretch of live robot data for a lesson. Every course that compares its simulation
 // with the real machine goes through `recordStream` here, so the connection checks, the timeout,
@@ -93,22 +95,161 @@ function recordStream({ trigger, pair = [], seconds = DEFAULT_SECONDS, onProgres
 }
 
 /**
- * Record the wheels: what the robot was asked to do (`/target_twist`) against what it did
- * (`/drive_status`). Resolves with `{rows, summary, config}` where `rows` are the normalised
- * samples of capture-core, ready for `steadyMeasurements` or `liveControlRun`.
+ * Record every lesson stream the robot publishes (drive, twist, scan, odom) for `seconds`, as a
+ * recording of recording-core — the shape that is saved, reopened and read from a rosbag, so a
+ * lesson has one code path for all three. Progress counts the messages of `countStream`.
+ *
+ * `signal` aborts (rejects with MESSAGES.aborted); `finish` ends the recording early and keeps
+ * what was collected, for lessons where the learner says when the robot is done.
  */
-async function recordDrive(options = {}) {
-  const { samples, config } = await recordStream({
-    trigger: 'drive',
-    pair: ['twist'],
-    ...options,
-  });
-  if (!samples.length)
-    throw new Error(
-      '車輪の状態（/drive_status）と速度の指令（/target_twist）が届きませんでした。走行用のノードが動いているか確かめてください。',
+function recordRobot({
+  seconds = DEFAULT_SECONDS,
+  countStream = 'drive',
+  onProgress,
+  signal,
+  finish,
+} = {}) {
+  return new Promise((resolve, reject) => {
+    const state = robotState();
+    if (state.phase !== 'open') {
+      reject(new Error(MESSAGES.notConnected));
+      return;
+    }
+    const streams = Object.fromEntries(RECORDING_STREAMS.map((name) => [name, []]));
+    const unsubscribe = [];
+    let timer = 0;
+    const stop = () => {
+      for (const off of unsubscribe) off();
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
+      finish?.removeEventListener('abort', done);
+    };
+    const fail = (error) => {
+      stop();
+      reject(error);
+    };
+    const done = () => {
+      stop();
+      resolve(
+        makeRecording({
+          source: 'live',
+          name: '',
+          recordedAt: new Date().toISOString(),
+          config: state.hello.config,
+          topics: Object.fromEntries(
+            RECORDING_STREAMS.map((name) => [name, state.hello.streams?.[name] ?? null]),
+          ),
+          streams,
+        }),
+      );
+    };
+    const abort = () => fail(new Error(MESSAGES.aborted));
+    for (const name of RECORDING_STREAMS)
+      unsubscribe.push(
+        onRobot(name, (message) => {
+          streams[name].push(message);
+          if (name === countStream) onProgress?.(streams[name].length);
+        }),
+      );
+    unsubscribe.push(
+      onRobot('state', (next) => {
+        if (next.phase !== 'open') fail(new Error(MESSAGES.lost));
+      }),
     );
-  const rows = driveSamples(samples, config);
-  return { rows, summary: captureSummary(rows), config };
+    timer = setTimeout(done, seconds * 1000);
+    signal?.addEventListener('abort', abort);
+    finish?.addEventListener('abort', done);
+  });
+}
+
+// --- recordings as files ---------------------------------------------------------------------
+
+const MAX_JSON_BYTES = 50 * 1024 * 1024; // a saved recording; 45 minutes of every stream is ~30 MB
+const MAX_BAG_BYTES = 1024 * 1024 * 1024; // a rosbag recorded with -a also holds camera images
+const MCAP_MAGIC = 0x89; // first byte of an MCAP file; a JSON file starts with "{" or a BOM
+
+/**
+ * Open a file the learner picked: a recording this material saved (.json) or a rosbag the robot
+ * recorded (.mcap, robot_manager's recording card). A bag carries no wheel geometry, so the
+ * connected robot's is used, or the robot's defaults when none is connected (`assumedConfig`).
+ * Resolves with the recording; rejects with a message meant for the learner.
+ */
+async function openRecordingFile(file) {
+  const bytes = await file.slice(0, 1).arrayBuffer();
+  const isBag = new Uint8Array(bytes)[0] === MCAP_MAGIC || /\.mcap$/i.test(file.name);
+  if (file.size > (isBag ? MAX_BAG_BYTES : MAX_JSON_BYTES))
+    throw new Error(
+      isBag ? '1 GBより大きいrosbagは開けません。' : '50 MBより大きい記録ファイルは開けません。',
+    );
+  if (!isBag) {
+    // The note names the file the learner picked, whatever the recording was called when saved.
+    const recording = { ...parseRecording(await file.text()), name: file.name };
+    return { recording, assumedConfig: false };
+  }
+  const bag = readRosbag(await file.arrayBuffer());
+  const hello = robotState().phase === 'open' ? robotState().hello : null;
+  const recording = makeRecording({
+    source: 'rosbag',
+    name: file.name,
+    recordedAt: new Date(bag.start * 1000).toISOString(),
+    config: hello?.config ?? BAG_DEFAULT_CONFIG,
+    topics: bag.topics,
+    streams: bag.streams,
+  });
+  return { recording, assumedConfig: !hello };
+}
+
+const pad = (number) => String(number).padStart(2, '0');
+function fileStamp(iso) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return 'recording';
+  return (
+    `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-` +
+    `${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
+  );
+}
+
+/** File name and contents for saving `recording` as JSON (`kind: 'json'`) or CSV. */
+function recordingFile(recording, lesson, kind) {
+  const base = `QUESTiX-LAB-${lesson}-${fileStamp(recording.recordedAt)}`;
+  if (kind === 'csv')
+    return { name: `${base}.csv`, text: recordingCSV(recording), type: 'text/csv;charset=utf-8' };
+  return { name: `${base}.json`, text: serializeRecording(recording), type: 'application/json' };
+}
+
+// --- keeping the last recording across a reload ----------------------------------------------
+
+// Per-browser convenience only: storage can be blocked, full or cleared, so a lesson must work
+// without it, and saving the file stays the way to keep a recording. Large recordings (a long
+// rosbag) do not fit and are simply not kept.
+const STORE_PREFIX = 'questix-lab-recording:';
+const MAX_KEPT_CHARS = 3 * 1024 * 1024;
+
+function keepRecording(slot, recording) {
+  try {
+    if (!recording) {
+      localStorage.removeItem(STORE_PREFIX + slot);
+      return true;
+    }
+    const text = serializeRecording(recording);
+    if (text.length > MAX_KEPT_CHARS) {
+      localStorage.removeItem(STORE_PREFIX + slot);
+      return false;
+    }
+    localStorage.setItem(STORE_PREFIX + slot, text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function keptRecording(slot) {
+  try {
+    const text = localStorage.getItem(STORE_PREFIX + slot);
+    return text ? parseRecording(text) : null;
+  } catch {
+    return null;
+  }
 }
 
 // Redrawing a lesson page on every message would repaint it 20 times a second for no visible gain,
@@ -157,7 +298,11 @@ export {
   isConnected,
   throttleProgress,
   recordStream,
-  recordDrive,
+  recordRobot,
+  openRecordingFile,
+  recordingFile,
+  keepRecording,
+  keptRecording,
   liveLink,
   missingStreams,
   onLiveLink,

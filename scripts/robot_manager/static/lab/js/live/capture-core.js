@@ -145,20 +145,264 @@ function steadyMeasurements(rows, options = {}) {
   return { rows: measurements.slice(0, settings.maxRows), holds: kept, skipped };
 }
 
+// Where a step response starts: the first row that asks the wheels to turn. A recording usually
+// begins a few seconds before the learner moves the stick, and a bag long before; counting time
+// from this row puts the real step at t = 0, where the simulation makes its own. A recording that
+// is already moving at its first row keeps that row as the start.
+function commandStart(rows) {
+  const first = rows.find((row) => Math.abs(row.commandRpm) > MOVING_RPM);
+  return first ? first.time : (rows[0]?.time ?? 0);
+}
+
 /**
  * A recording shaped like a simulated control run, so the speed charts can draw it next to the
- * simulation: `time` from the start of the recording, `measured` and `target` in rpm. Samples
- * after `duration` are dropped rather than squeezed, so the time axis keeps its meaning.
+ * simulation: `time` from the first command (see commandStart), `measured` and `target` in rpm.
+ * Samples after `duration` are dropped rather than squeezed, so the time axis keeps its meaning.
  */
 function liveControlRun(rows, duration) {
+  const start = commandStart(rows.filter((row) => Number.isFinite(row.commandRpm)));
   const samples = rows
-    .filter((row) => row.time <= duration && Number.isFinite(row.commandRpm))
+    .filter((row) => Number.isFinite(row.commandRpm))
     .map((row) => ({
-      time: row.time,
+      time: row.time - start,
       measured: row.measuredRpm,
       target: row.commandRpm,
-    }));
+    }))
+    .filter((sample) => sample.time >= 0 && sample.time <= duration);
   return { samples, seconds: samples.length ? samples[samples.length - 1].time : 0 };
+}
+
+// --- the wall ahead, from the LiDAR ----------------------------------------------------------
+
+// The distance lessons stop the robot in front of a wall and measure the gap with the LiDAR. On
+// the robot the beams within this angle of the robot's forward direction stand in for that one
+// measurement; the median keeps a single spurious beam (a cable, a table leg) from moving it. The
+// distance is the LiDAR's own reading (from the sensor to the wall), as in the lessons.
+//
+// Where the LiDAR sits comes with every scan (`mount`, looked up in TF by questix_lab_bridge, or
+// read from /tf_static in a rosbag). Without it, the static transform QUESTiX publishes is assumed:
+// keep LIDAR_DEFAULT_MOUNT equal to launcher/launch/lidar_driver.launch.xml (base_link ->
+// laser_frame, 0.2 m ahead of the centre, facing forward).
+const LIDAR_DEFAULT_MOUNT = { x: 0.2, y: 0, yaw: 0 };
+
+/** Pose of the scan frame on the robot: `{x, y, yaw}` in metres and radians. */
+function scanMount(scan) {
+  const mount = scan?.mount;
+  if (mount && [mount.x, mount.y, mount.yaw].every(Number.isFinite)) return mount;
+  return LIDAR_DEFAULT_MOUNT;
+}
+
+const FRONT_HALF_ANGLE = (5 * Math.PI) / 180; // rad either side of straight ahead
+const FRONT_MIN_BEAMS = 3; // fewer valid beams than this ahead: no measurement
+// The robot counts as approaching once the gap has shrunk by this much from where it stood.
+const APPROACH_START = 0.03; // m, about three times the LiDAR's noise at 1–2 m
+
+const wrapAngle = (angle) => Math.atan2(Math.sin(angle), Math.cos(angle));
+
+function median(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+/** Distance [m] to whatever is straight ahead in one scan, or null when too few beams hit it. */
+function frontDistance(scan, halfAngle = FRONT_HALF_ANGLE) {
+  const ahead = [];
+  const yaw = scanMount(scan).yaw;
+  scan.ranges.forEach((range, index) => {
+    const angle = wrapAngle(yaw + scan.angle_min + index * scan.angle_increment);
+    if (range !== null && Number.isFinite(range) && Math.abs(angle) <= halfAngle) ahead.push(range);
+  });
+  return ahead.length >= FRONT_MIN_BEAMS ? median(ahead) : null;
+}
+
+/** One row per scan with a wall ahead: `{time, distance}`, time from the first scan. */
+function distanceSamples(scans) {
+  if (!scans.length) return [];
+  const start = scans[0].stamp;
+  const rows = [];
+  let previous = -Infinity;
+  for (const scan of scans) {
+    const time = scan.stamp - start;
+    if (!(time > previous)) continue;
+    const distance = frontDistance(scan);
+    if (distance === null) continue;
+    previous = time;
+    rows.push({ time, distance });
+  }
+  return rows;
+}
+
+// Where an approach starts: the last row before the gap first shrinks by APPROACH_START from the
+// distance the robot stood at. -1 when it never does.
+function approachStart(rows) {
+  if (!rows.length) return -1;
+  const standing = median(rows.slice(0, 3).map((row) => row.distance));
+  const moving = rows.findIndex((row) => standing - row.distance >= APPROACH_START);
+  return moving < 0 ? -1 : Math.max(0, moving - 1);
+}
+
+/**
+ * A wall-distance recording shaped like a simulated distance run: `measured` in metres, time from
+ * the start of the approach (see approachStart). The real robot has no distance target of its own
+ * — the learner drives it — so `target` is NaN and the chart draws no target line for it.
+ * `approached` is false when the robot never moved towards the wall.
+ */
+function liveDistanceRun(rows, duration) {
+  const first = approachStart(rows);
+  if (first < 0) return { samples: [], seconds: 0, approached: false };
+  const start = rows[first].time;
+  const samples = rows
+    .slice(first)
+    .map((row) => ({ time: row.time - start, measured: row.distance, target: NaN }))
+    .filter((sample) => sample.time <= duration);
+  return { samples, seconds: samples[samples.length - 1].time, approached: true };
+}
+
+// --- distance travelled, from the wheels -----------------------------------------------------
+
+// /odom integrates the wheel rotation, so the distance it reports for one drive is exactly the
+// "車輪から求めた距離" the measurement lab compares with a tape measure. A drive is a stretch where
+// the robot moves, between two stops.
+const MOVE_SPEED = 0.01; // m/s: slower than this counts as standing still
+const STOP_SECONDS = 0.5; // a pause at least this long ends a drive
+const MIN_MOVE = 0.02; // m: a shorter drive is a nudge, not a measurement
+
+function finishMove(poses) {
+  const first = poses[0];
+  const last = poses[poses.length - 1];
+  let path = 0;
+  for (let i = 1; i < poses.length; i += 1)
+    path += Math.hypot(poses[i].x - poses[i - 1].x, poses[i].y - poses[i - 1].y);
+  return {
+    from: first.time,
+    to: last.time,
+    // A tape measures the straight line between the two marks, so that is what is compared.
+    distance: Math.hypot(last.x - first.x, last.y - first.y),
+    path,
+    turn: wrapAngle(last.theta - first.theta),
+  };
+}
+
+/**
+ * The drives in a stretch of /odom messages: `[{from, to, distance, path, turn}]` in metres and
+ * radians, time from the first message. A drive starts at the last pose before the robot moves and
+ * ends at the pose where it has stood still for STOP_SECONDS (or at the end of the recording).
+ */
+function odomMoves(odoms) {
+  const poses = odoms
+    .filter((odom) => [odom.x, odom.y, odom.theta, odom.v].every(Number.isFinite))
+    .map((odom) => ({ ...odom, time: odom.stamp - odoms[0].stamp }));
+  const moves = [];
+  let current = null;
+  let stillSince = null;
+  poses.forEach((pose, index) => {
+    const moving = Math.abs(pose.v) >= MOVE_SPEED;
+    if (!current) {
+      if (moving) current = [poses[Math.max(0, index - 1)], pose];
+      return;
+    }
+    current.push(pose);
+    if (moving) {
+      stillSince = null;
+      return;
+    }
+    stillSince ??= pose.time;
+    if (pose.time - stillSince < STOP_SECONDS) return;
+    moves.push(finishMove(current));
+    current = null;
+    stillSince = null;
+  });
+  if (current) moves.push(finishMove(current));
+  return moves.filter((move) => move.distance >= MIN_MOVE);
+}
+
+// --- the same numbers the simulation reports ------------------------------------------------
+
+// The control course judges a run by its final error, overshoot and settling time
+// (js/control/core.js controlMetrics). A recording is judged by the same definitions, so the table
+// that puts the robot next to the simulation compares like with like.
+const RUN_TAIL_SECONDS = 2; // the last seconds averaged into the final error (core.js TAIL_SECONDS)
+const SETTLE_BAND = { speed: 3, distance: 0.05 }; // rpm / m around the target (core.js tolerance)
+const STILL_SPEED = 0.03; // m/s: a gap changing slower than this means the robot has stopped
+// A first-order model y(t) = K·target·(1 − e^−(t−L)/τ) read off the step: L when the response
+// first reaches 5 % of its final value, τ from there to 63.2 %.
+const DELAY_FRACTION = 0.05;
+const TAU_FRACTION = 1 - Math.exp(-1);
+
+/**
+ * The first command of a speed run and what the wheels did while it lasted: the samples up to
+ * the moment the target moves more than the hold tolerance away from its first value. A recording
+ * (or a bag) usually goes on after the step — stopping, another speed — and judging that part
+ * against the first target would count it as error.
+ */
+function firstHold(samples) {
+  if (!samples.length) return [];
+  const target = samples[0].target;
+  const end = samples.findIndex(
+    (sample) => Math.abs(sample.target - target) > CAPTURE_DEFAULTS.commandTolerance,
+  );
+  return end < 0 ? samples : samples.slice(0, end);
+}
+
+const meanOf = (values) => values.reduce((sum, value) => sum + value, 0) / values.length;
+
+// Settling, read backwards from the end like core.js: a value that only touches the band and
+// leaves again has not settled. For the wall, the robot must also have stopped.
+function settledFrom(samples, { key, target, band, distance }) {
+  let settling = null;
+  for (let i = samples.length - 1; i >= 0; i -= 1) {
+    const sample = samples[i];
+    const previous = samples[i - 1];
+    const speed = previous
+      ? Math.abs(sample[key] - previous[key]) / (sample.time - previous.time)
+      : 0;
+    if (Math.abs(sample[key] - target) > band || (distance && speed > STILL_SPEED)) break;
+    settling = sample.time;
+  }
+  return settling;
+}
+
+function firstOrderFit(samples, key, final) {
+  if (!(Math.abs(final) > MOVING_RPM)) return { delay: null, tau: null };
+  const reach = (fraction) =>
+    samples.find((sample) => sample[key] / final >= fraction)?.time ?? null;
+  const delay = reach(DELAY_FRACTION);
+  const rise = reach(TAU_FRACTION);
+  return { delay, tau: delay === null || rise === null ? null : rise - delay };
+}
+
+/**
+ * Final error, overshoot and settling time of a run (`samples` of `{time, [key]}` from t = 0), by
+ * the definitions of the control course. For a speed step also the first-order model: `delay` L
+ * and time constant `tau` in seconds, and `gain` K = final / target. `distance` runs count
+ * overshoot towards the wall (below the target). Values that do not exist are null.
+ */
+function stepMetrics(samples, { key = 'measured', target, distance = false }) {
+  if (!samples.length) return null;
+  const end = samples[samples.length - 1].time;
+  const tail = samples.filter((sample) => sample.time >= end - RUN_TAIL_SECONDS);
+  const final = meanOf(tail.map((sample) => sample[key]));
+  const overshoot = Math.max(
+    0,
+    ...samples.map((sample) => (distance ? target - sample[key] : sample[key] - target)),
+  );
+  const band = distance ? SETTLE_BAND.distance : SETTLE_BAND.speed;
+  const settling = settledFrom(samples, { key, target, band, distance });
+  const metrics = {
+    target,
+    final,
+    finalError: meanOf(tail.map((sample) => Math.abs(sample[key] - target))),
+    overshoot,
+    // Settled only if it stays so for at least a second before the end, as in core.js.
+    settling: settling !== null && end - settling >= 1 ? settling : null,
+  };
+  if (distance) return metrics;
+  return {
+    ...metrics,
+    gain: target ? final / target : null,
+    ...firstOrderFit(samples, key, final),
+  };
 }
 
 // What the learner is told about a recording: how long it ran, whether the robot moved at all,
@@ -181,6 +425,16 @@ export {
   driveSamples,
   commandHolds,
   steadyMeasurements,
+  commandStart,
   liveControlRun,
+  FRONT_HALF_ANGLE,
+  LIDAR_DEFAULT_MOUNT,
+  scanMount,
+  frontDistance,
+  distanceSamples,
+  liveDistanceRun,
+  odomMoves,
+  firstHold,
+  stepMetrics,
   captureSummary,
 };
