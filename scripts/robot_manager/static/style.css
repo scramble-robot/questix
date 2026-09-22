@@ -955,6 +955,10 @@ main {
 .control-field > label { grid-column: 1 / -1; font-weight: 600; }
 .control-field-help { grid-column: 1 / -1; color: var(--text-dim); font-size: 0.85rem;
   line-height: 1.65; margin: 0 0 0.6rem; }
+.control-field > .control-accel-toggle { display: flex; flex-wrap: wrap; align-items: center;
+  gap: 0.5rem; font-size: 0.85rem; font-weight: normal; margin-bottom: 0.5rem; }
+.control-accel-toggle small { flex-basis: 100%; color: var(--text-dim); line-height: 1.6; }
+.control-field input:disabled { opacity: 0.55; }
 .control-presets { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.6rem; }
 .control-field.runtime-visible { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .control-runtime[hidden] { display: none; }

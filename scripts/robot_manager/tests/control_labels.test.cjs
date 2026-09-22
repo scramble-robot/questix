@@ -52,6 +52,7 @@ class Element {
   close() { this.open = false; this.events.close?.(); }
   getBoundingClientRect() { return { left: 100, right: 500, top: 100, bottom: 500 }; }
   checkValidity() { return this.valid !== false; }
+  setCustomValidity(message) { this.validationMessage = message; this.valid = !message; }
   addEventListener(name, handler) { this.events[name] = handler; }
   all() { return this.children.flatMap((child) => [child, ...child.all()]); }
   querySelector(selector) {
@@ -97,6 +98,7 @@ function editorFixture(extraValues = {}, controller = 'uart') {
   };
   extraValues = { ...extraValues,
     joy_controller: { longitudinal_input_ratio: 2, angular_input_ratio: 6, ...extraValues.joy_controller },
+    drive_component: { max_linear_accel: 3, max_angular_accel: 3, ...extraValues.drive_component },
     esc_motor_control: { full_speed_value: 1, ...extraValues.esc_motor_control },
     uart_joy_driver: { deadzone: 0.05, ...extraValues.uart_joy_driver },
     joy_node: { deadzone: 0.1, ...extraValues.joy_node },
@@ -165,7 +167,7 @@ test('reset changes only the visible tuning values, retaining mappings and hidde
   assert.equal(vm.runInContext('controlDraft.joy_node.deadzone', context), 0.2);
   await vm.runInContext('saveControls({preventDefault() {}})', context);
   assert.deepEqual(getPayload().values.drive_component,
-    { max_motor_rpm: 321, max_linear_accel: 2.5, min_command_rpm: 8 });
+    { max_motor_rpm: 321, max_linear_accel: 2.5, max_angular_accel: 3, min_command_rpm: 8 });
   assert.equal(getPayload().values.joy_controller.lateral_input_ratio, -0.6);
   assert.equal(getPayload().values.joy_axis_drive.max_motor_rpm, 82);
 });
@@ -626,7 +628,7 @@ test('a stale tilt API explains the required manager update without showing inco
 });
 
 for (const controller of ['uart', 'dualshock']) {
-  test(`${controller}: only four understandable tuning fields are rendered`, async () => {
+  test(`${controller}: only six understandable tuning fields are rendered`, async () => {
     const { document, context } = editorFixture({
       drive_component: { max_motor_rpm: 475, max_linear_accel: 3, slew_taper_band_linear: 0.2 },
       joy_controller: { lateral_input_ratio: 0.3 },
@@ -634,9 +636,9 @@ for (const controller of ['uart', 'dualshock']) {
       joy_axis_drive: { max_motor_rpm: 100 },
     }, controller);
     await vm.runInContext(`loadControls("${controller}")`, context);
-    assert.deepEqual(document.querySelectorAll('.control-field').map((row) => `${row.dataset.node}.${row.dataset.key}`),
-      ['joy_controller.longitudinal_input_ratio', 'joy_controller.angular_input_ratio',
-        'esc_motor_control.full_speed_value', `${controller === 'uart' ? 'uart_joy_driver' : 'joy_node'}.deadzone`]);
+    assert.deepEqual(document.querySelectorAll('.control-field').map((row) => `${row.dataset.node}.${row.dataset.key}`).sort(),
+      ['drive_component.max_linear_accel', 'drive_component.max_angular_accel', 'joy_controller.longitudinal_input_ratio', 'joy_controller.angular_input_ratio',
+        'esc_motor_control.full_speed_value', `${controller === 'uart' ? 'uart_joy_driver' : 'joy_node'}.deadzone`].sort());
   });
 }
 
@@ -682,7 +684,7 @@ test('rounded upper bounds remain valid and reset retains direction after cleari
 });
 
 for (const entered of ['2', '2.0']) {
-  test(`typing ${entered} produces numeric payloads for all four tuning fields`, async () => {
+  test(`typing ${entered} produces numeric payloads for all six tuning fields`, async () => {
     const { document, context, getPayload } = editorFixture({
       joy_controller: { longitudinal_input_ratio: 1.5 },
     });
@@ -690,6 +692,7 @@ for (const entered of ['2', '2.0']) {
     for (const [node, key] of [
       ['joy_controller', 'longitudinal_input_ratio'], ['joy_controller', 'angular_input_ratio'],
       ['esc_motor_control', 'full_speed_value'], ['uart_joy_driver', 'deadzone'],
+      ['drive_component', 'max_linear_accel'], ['drive_component', 'max_angular_accel'],
     ]) {
       const input = document.getElementById(`control-${node}-${key}`);
       input.value = entered;
@@ -701,6 +704,8 @@ for (const entered of ['2', '2.0']) {
     assert.equal(values.joy_controller.angular_input_ratio, 2 / (100 / 6));
     assert.equal(values.esc_motor_control.full_speed_value, 0.02);
     assert.equal(values.uart_joy_driver.deadzone, 0.02);
+    assert.equal(values.drive_component.max_linear_accel, 2 / (100 / 3));
+    assert.equal(values.drive_component.max_angular_accel, 2 / (100 / 3));
   });
 }
 
@@ -744,4 +749,68 @@ test('a custom zero turn default stays editable without division by zero', async
   input.value = '0.5'; input.events.input();
   await vm.runInContext('saveControls({preventDefault() {}})', context);
   assert.equal(getPayload().values.joy_controller.angular_input_ratio, Math.PI);
+});
+
+test('acceleration presets persist independent limits and keep the standard fixed', async () => {
+  const { document, context, getPayload } = editorFixture({ drive_component: { min_command_rpm: 7 } });
+  await vm.runInContext('loadControls("uart")', context);
+  const row = (key) => document.querySelectorAll('.control-field').find((item) => item.dataset.key === key);
+  row('max_linear_accel').querySelector('.control-presets').children[0].events.click();
+  row('max_angular_accel').querySelector('.control-presets').children[2].events.click();
+  await vm.runInContext('saveControls({preventDefault() {}})', context);
+  assert.equal(getPayload().values.drive_component.max_linear_accel, 1.5);
+  assert.equal(getPayload().values.drive_component.max_angular_accel, 4.5);
+  assert.equal(getPayload().values.drive_component.min_command_rpm, 7);
+  assert.equal(getPayload().values.joy_controller.longitudinal_input_ratio, 2);
+  assert.equal(getPayload().values.joy_controller.angular_input_ratio, 6);
+  assert.equal(document.getElementById('control-drive_component-max_linear_accel').value, 50);
+  vm.runInContext(`controlRuntime = { nodes: { drive_component: {status: 'ok', values: {
+    max_linear_accel: 3, max_angular_accel: 0}} } }; renderRuntimeValues();`, context);
+  assert.equal(row('max_linear_accel').querySelector('.control-runtime-value').textContent, '100 %');
+  assert.equal(row('max_angular_accel').querySelector('.control-runtime-value').textContent, '調整OFF（制限なし）');
+  document.getElementById('controls-reset').events.click();
+  assert.equal(vm.runInContext('controlDraft.drive_component.max_linear_accel', context), 3);
+  assert.equal(vm.runInContext('controlDraft.drive_component.max_angular_accel', context), 3);
+});
+
+test('zero acceleration is an explicit off state, never a gentle percentage', async () => {
+  const { document, context, getPayload } = editorFixture();
+  await vm.runInContext('loadControls("uart")', context);
+  const id = 'control-drive_component-max_linear_accel';
+  const input = () => document.getElementById(id);
+  const enabled = () => document.getElementById(`${id}-enabled`);
+  input().value = '0'; input().events.input();
+  assert.equal(input().checkValidity(), false);
+  assert.match(input().validationMessage, /チェックを外して/);
+  input().value = '50'; input().events.input();
+  assert.equal(input().checkValidity(), true);
+  enabled().checked = false; enabled().events.change();
+  assert.equal(input().disabled, true);
+  assert.equal(vm.runInContext('controlDraft.drive_component.max_linear_accel', context), 0);
+  vm.runInContext('controlsSetBusy(true); controlsSetBusy(false)', context);
+  assert.equal(input().disabled, true);
+  enabled().checked = true; enabled().events.change();
+  assert.equal(vm.runInContext('controlDraft.drive_component.max_linear_accel', context), 1.5);
+  enabled().checked = false; enabled().events.change();
+  await vm.runInContext('saveControls({preventDefault() {}})', context);
+  assert.equal(getPayload().values.drive_component.max_linear_accel, 0);
+  assert.equal(input().disabled, true);
+  assert.equal(document.getElementById(`${id}-saved`).children[1].textContent, '調整OFF（制限なし）');
+  enabled().checked = true; enabled().events.change();
+  assert.equal(vm.runInContext('controlDraft.drive_component.max_linear_accel', context), 3);
+});
+
+test('a zero acceleration default requires a positive value when enabling the adjustment', async () => {
+  const { document, context } = editorFixture({ drive_component: { max_linear_accel: 0 } });
+  await vm.runInContext('loadControls("uart")', context);
+  const input = document.getElementById('control-drive_component-max_linear_accel');
+  const enabled = document.getElementById('control-drive_component-max_linear_accel-enabled');
+  assert.equal(input.disabled, true);
+  enabled.checked = true; enabled.events.change();
+  assert.equal(input.disabled, false);
+  assert.equal(input.required, true);
+  assert.equal(input.value, '');
+  assert.equal(vm.runInContext('controlDraft.drive_component.max_linear_accel', context), null);
+  input.value = '2'; input.events.input();
+  assert.equal(vm.runInContext('controlDraft.drive_component.max_linear_accel', context), 2);
 });

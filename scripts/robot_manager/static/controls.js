@@ -19,6 +19,12 @@ const tuningFields = {
       help: "スティックを最大まで倒したときの前進・後退の速さ。大きくすると速くなります。" },
     angular_input_ratio: { title: "旋回の速さ", signed: true },
   },
+  drive_component: {
+    max_linear_accel: { title: "走り出し・停止のきびきび感", acceleration: true,
+      help: "小さくするとおだやかに、大きくするとすばやく加速・減速します。おだやかにすると、スティックを戻して止まるまでの時間も長くなります。" },
+    max_angular_accel: { title: "旋回のきびきび感", acceleration: true,
+      help: "曲がり始め・曲がり終わりの反応を調整します。小さくするとおだやかに、大きくするとすばやく旋回速度が変わります。旋回の最高速度は変わりません。" },
+  },
   esc_motor_control: {
     full_speed_value: { title: "ローラー出力", unit: "%", scale: 100,
       help: "回転ボタンを押したときの出力。0% で停止、100% で最大出力です。" },
@@ -42,6 +48,16 @@ function tuningSpec(node, key) {
     return { ...spec, unit: "回転/秒", scale: 1 / (2 * Math.PI),
       help: "1 で1秒に1回転、0.5 で2秒に1回転の指令です。0 では旋回しません。" };
   }
+  if (spec?.acceleration) {
+    const reference = controlProfile.defaults[node][key];
+    if (reference > 0) return { ...spec, unit: "%", scale: 100 / reference,
+      help: `100% が標準です。${spec.help}`,
+      presets: [[50, "おだやか 50%"], [100, "標準 100%"], [150, "きびきび 150%"]] };
+    // Zero disables the underlying limiter and cannot define a percentage baseline.
+    return { ...spec, unit: key === "max_linear_accel" ? "m/s²" : "回転/秒²",
+      scale: key === "max_linear_accel" ? 1 : 1 / (2 * Math.PI),
+      help: `${spec.help} 初期設定は調整OFFのため、加速度の数値を直接入力します。` };
+  }
   return spec;
 }
 
@@ -57,6 +73,7 @@ function tuningDirection(current, saved) {
 }
 
 function tuningValue(spec, value) {
+  if (spec.acceleration && value === 0) return "調整OFF（制限なし）";
   return `${tuningNumber(spec, value)} ${spec.unit}${spec.signed && value < 0 ? "（方向反転）" : ""}`;
 }
 
@@ -356,7 +373,8 @@ function renderControls() {
     section.className = "control-section";
     const legend = document.createElement("legend");
     legend.textContent = group.node === "joy_controller" ? "走行"
-      : group.node === "esc_motor_control" ? "射出ローラー" : "スティック";
+      : group.node === "drive_component" ? "加速・減速の調整"
+        : group.node === "esc_motor_control" ? "射出ローラー" : "スティック";
     section.appendChild(legend);
     for (const field of fields) {
       const spec = tuningSpec(group.node, field.key);
@@ -383,7 +401,38 @@ function renderControls() {
       input.min = spec.signed ? 0 : field.min * spec.scale;
       input.max = tuningNumber(spec, field.max);
       input.step = "any";
-      input.value = tuningNumber(spec, value);
+      input.value = spec.acceleration && value === 0 ? "" : tuningNumber(spec, value);
+      let lastPositive = value > 0 ? value : controlProfile.defaults[group.node][field.key] > 0
+        ? controlProfile.defaults[group.node][field.key] : null;
+      let enabled = null;
+      let toggle = null;
+      if (spec.acceleration) {
+        toggle = document.createElement("label");
+        toggle.className = "control-accel-toggle";
+        enabled = document.createElement("input");
+        enabled.type = "checkbox";
+        enabled.id = `${input.id}-enabled`;
+        enabled.className = "control-accel-enabled";
+        enabled.checked = value !== 0;
+        const title = document.createElement("span");
+        title.textContent = "加速・減速の調整を使う";
+        toggle.append(enabled, title);
+        const note = document.createElement("small");
+        note.textContent = "OFFでは、この速度変化の制限を使いません。";
+        toggle.append(note);
+        input.placeholder = "調整OFF";
+        input.disabled = !enabled.checked;
+        enabled.addEventListener("change", () => {
+          if (controlsBusy) return;
+          const current = controlDraft[group.node][field.key];
+          if (current > 0) lastPositive = current;
+          controlDraft[group.node][field.key] = enabled.checked ? lastPositive : 0;
+          input.value = enabled.checked && lastPositive !== null ? tuningNumber(spec, lastPositive) : "";
+          input.disabled = !enabled.checked;
+          input.setCustomValidity("");
+          refreshControlChanges();
+        });
+      }
       const saved = document.createElement("div");
       saved.className = "control-saved";
       saved.id = `${input.id}-saved`;
@@ -395,13 +444,15 @@ function renderControls() {
       saved.append(savedCaption, savedValue);
       input.setAttribute("aria-describedby", `${help.id} ${saved.id}`);
       const updateValue = () => {
-        if (controlsBusy) return;
+        if (controlsBusy || enabled && !enabled.checked) return;
         const entered = Number(input.value);
         // Returning to a rounded display value restores its exact original ROS value.
         const raw = entered === tuningNumber(spec, value) ? value
           : entered === tuningNumber(spec, field.max) ? field.max * direction
             : entered / spec.scale * direction;
         controlDraft[group.node][field.key] = input.value === "" ? null : raw;
+        if (spec.acceleration) input.setCustomValidity(input.value !== "" && raw <= 0
+          ? "0より大きい値を入力してください。調整を使わない場合はチェックを外してください。" : "");
         refreshControlChanges();
       };
       input.addEventListener("input", updateValue);
@@ -415,6 +466,7 @@ function renderControls() {
         button.textContent = title;
         button.addEventListener("click", () => {
           if (controlsBusy) return;
+          if (enabled) { enabled.checked = true; input.disabled = false; }
           input.value = String(amount);
           updateValue();
         });
@@ -439,6 +491,7 @@ function renderControls() {
       runtimeState.className = "control-runtime-state";
       runtime.append(runtimeCaption, runtimeValue, runtimeState);
       row.append(label, help);
+      if (toggle) row.append(toggle);
       if (spec.presets) row.append(presets);
       row.append(editor, saved, runtime);
       section.appendChild(row);
@@ -461,6 +514,11 @@ function controlsSetBusy(busy) {
   document.getElementById("controls-reset").disabled = busy || !controlProfile;
   for (const input of document.querySelectorAll("#controls-fields input, #controls-fields select, #controls-fields button")) {
     input.disabled = busy;
+  }
+  for (const row of document.querySelectorAll(".control-field")) {
+    const enabled = row.querySelector(".control-accel-enabled");
+    if (enabled) document.getElementById(`control-${row.dataset.node}-${row.dataset.key}`).disabled
+      = busy || !enabled.checked;
   }
 }
 
@@ -595,7 +653,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (confirmControlDiscard()) loadControls(select.value);
   });
   document.getElementById("controls-reset").addEventListener("click", () => {
-    if (controlsBusy || !controlProfile || !confirm("速度・操作感の4項目を初期値に戻しますか？ 保存するまで適用されません。")) return;
+    if (controlsBusy || !controlProfile || !confirm("速度・操作感の表示項目を初期値に戻しますか？ 保存するまで適用されません。")) return;
     for (const group of controlProfile.groups) {
       for (const field of group.fields) {
         const spec = tuningSpec(group.node, field.key);
