@@ -56,7 +56,7 @@ function tuningSpec(node, key) {
     // Zero disables the underlying limiter and cannot define a percentage baseline.
     return { ...spec, unit: key === "max_linear_accel" ? "m/s²" : "回転/秒²",
       scale: key === "max_linear_accel" ? 1 : 1 / (2 * Math.PI),
-      help: `${spec.help} 初期設定は調整OFFのため、加速度の数値を直接入力します。` };
+      help: `${spec.help} 初期設定は制限なしのため、加速度の数値を直接入力します。` };
   }
   return spec;
 }
@@ -73,7 +73,7 @@ function tuningDirection(current, saved) {
 }
 
 function tuningValue(spec, value) {
-  if (spec.acceleration && value === 0) return "調整OFF（制限なし）";
+  if (spec.acceleration && value === 0) return "制限なし";
   return `${tuningNumber(spec, value)} ${spec.unit}${spec.signed && value < 0 ? "（方向反転）" : ""}`;
 }
 
@@ -402,36 +402,10 @@ function renderControls() {
       input.max = tuningNumber(spec, field.max);
       input.step = "any";
       input.value = spec.acceleration && value === 0 ? "" : tuningNumber(spec, value);
-      let lastPositive = value > 0 ? value : controlProfile.defaults[group.node][field.key] > 0
-        ? controlProfile.defaults[group.node][field.key] : null;
-      let enabled = null;
-      let toggle = null;
-      if (spec.acceleration) {
-        toggle = document.createElement("label");
-        toggle.className = "control-accel-toggle";
-        enabled = document.createElement("input");
-        enabled.type = "checkbox";
-        enabled.id = `${input.id}-enabled`;
-        enabled.className = "control-accel-enabled";
-        enabled.checked = value !== 0;
-        const title = document.createElement("span");
-        title.textContent = "加速・減速の調整を使う";
-        toggle.append(enabled, title);
-        const note = document.createElement("small");
-        note.textContent = "OFFでは、この速度変化の制限を使いません。";
-        toggle.append(note);
-        input.placeholder = "調整OFF";
-        input.disabled = !enabled.checked;
-        enabled.addEventListener("change", () => {
-          if (controlsBusy) return;
-          const current = controlDraft[group.node][field.key];
-          if (current > 0) lastPositive = current;
-          controlDraft[group.node][field.key] = enabled.checked ? lastPositive : 0;
-          input.value = enabled.checked && lastPositive !== null ? tuningNumber(spec, lastPositive) : "";
-          input.disabled = !enabled.checked;
-          input.setCustomValidity("");
-          refreshControlChanges();
-        });
+      if (spec.acceleration && value === 0) {
+        // Preserve a legacy disabled limit until the user explicitly edits this field.
+        input.required = false;
+        input.placeholder = "制限なし（未変更）";
       }
       const saved = document.createElement("div");
       saved.className = "control-saved";
@@ -444,7 +418,8 @@ function renderControls() {
       saved.append(savedCaption, savedValue);
       input.setAttribute("aria-describedby", `${help.id} ${saved.id}`);
       const updateValue = () => {
-        if (controlsBusy || enabled && !enabled.checked) return;
+        if (controlsBusy) return;
+        input.required = true;
         const entered = Number(input.value);
         // Returning to a rounded display value restores its exact original ROS value.
         const raw = entered === tuningNumber(spec, value) ? value
@@ -452,7 +427,7 @@ function renderControls() {
             : entered / spec.scale * direction;
         controlDraft[group.node][field.key] = input.value === "" ? null : raw;
         if (spec.acceleration) input.setCustomValidity(input.value !== "" && raw <= 0
-          ? "0より大きい値を入力してください。調整を使わない場合はチェックを外してください。" : "");
+          ? "0より大きい値を入力するか、プリセットを選んでください。" : "");
         refreshControlChanges();
       };
       input.addEventListener("input", updateValue);
@@ -466,7 +441,6 @@ function renderControls() {
         button.textContent = title;
         button.addEventListener("click", () => {
           if (controlsBusy) return;
-          if (enabled) { enabled.checked = true; input.disabled = false; }
           input.value = String(amount);
           updateValue();
         });
@@ -491,7 +465,6 @@ function renderControls() {
       runtimeState.className = "control-runtime-state";
       runtime.append(runtimeCaption, runtimeValue, runtimeState);
       row.append(label, help);
-      if (toggle) row.append(toggle);
       if (spec.presets) row.append(presets);
       row.append(editor, saved, runtime);
       section.appendChild(row);
@@ -515,11 +488,7 @@ function controlsSetBusy(busy) {
   for (const input of document.querySelectorAll("#controls-fields input, #controls-fields select, #controls-fields button")) {
     input.disabled = busy;
   }
-  for (const row of document.querySelectorAll(".control-field")) {
-    const enabled = row.querySelector(".control-accel-enabled");
-    if (enabled) document.getElementById(`control-${row.dataset.node}-${row.dataset.key}`).disabled
-      = busy || !enabled.checked;
-  }
+
 }
 
 async function loadControls(controller) {

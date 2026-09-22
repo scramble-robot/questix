@@ -767,50 +767,43 @@ test('acceleration presets persist independent limits and keep the standard fixe
   vm.runInContext(`controlRuntime = { nodes: { drive_component: {status: 'ok', values: {
     max_linear_accel: 3, max_angular_accel: 0}} } }; renderRuntimeValues();`, context);
   assert.equal(row('max_linear_accel').querySelector('.control-runtime-value').textContent, '100 %');
-  assert.equal(row('max_angular_accel').querySelector('.control-runtime-value').textContent, '調整OFF（制限なし）');
+  assert.equal(row('max_angular_accel').querySelector('.control-runtime-value').textContent, '制限なし');
   document.getElementById('controls-reset').events.click();
   assert.equal(vm.runInContext('controlDraft.drive_component.max_linear_accel', context), 3);
   assert.equal(vm.runInContext('controlDraft.drive_component.max_angular_accel', context), 3);
 });
 
-test('zero acceleration is an explicit off state, never a gentle percentage', async () => {
-  const { document, context, getPayload } = editorFixture();
+test('acceleration editing has no toggle and rejects zero as a gentle setting', async () => {
+  const { document, context } = editorFixture();
   await vm.runInContext('loadControls("uart")', context);
-  const id = 'control-drive_component-max_linear_accel';
-  const input = () => document.getElementById(id);
-  const enabled = () => document.getElementById(`${id}-enabled`);
-  input().value = '0'; input().events.input();
-  assert.equal(input().checkValidity(), false);
-  assert.match(input().validationMessage, /チェックを外して/);
-  input().value = '50'; input().events.input();
-  assert.equal(input().checkValidity(), true);
-  enabled().checked = false; enabled().events.change();
-  assert.equal(input().disabled, true);
-  assert.equal(vm.runInContext('controlDraft.drive_component.max_linear_accel', context), 0);
-  vm.runInContext('controlsSetBusy(true); controlsSetBusy(false)', context);
-  assert.equal(input().disabled, true);
-  enabled().checked = true; enabled().events.change();
+  assert.equal(document.getElementById('controls-fields').all().some((el) => el.type === 'checkbox'), false);
+  const input = document.getElementById('control-drive_component-max_linear_accel');
+  input.value = '0'; input.events.input();
+  assert.equal(input.checkValidity(), false);
+  assert.match(input.validationMessage, /プリセット/);
+  const row = document.querySelectorAll('.control-field').find((item) => item.dataset.key === 'max_linear_accel');
+  row.querySelector('.control-presets').children[0].events.click();
+  assert.equal(input.checkValidity(), true);
   assert.equal(vm.runInContext('controlDraft.drive_component.max_linear_accel', context), 1.5);
-  enabled().checked = false; enabled().events.change();
-  await vm.runInContext('saveControls({preventDefault() {}})', context);
-  assert.equal(getPayload().values.drive_component.max_linear_accel, 0);
-  assert.equal(input().disabled, true);
-  assert.equal(document.getElementById(`${id}-saved`).children[1].textContent, '調整OFF（制限なし）');
-  enabled().checked = true; enabled().events.change();
-  assert.equal(vm.runInContext('controlDraft.drive_component.max_linear_accel', context), 3);
 });
 
-test('a zero acceleration default requires a positive value when enabling the adjustment', async () => {
-  const { document, context } = editorFixture({ drive_component: { max_linear_accel: 0 } });
+test('legacy zero acceleration survives unrelated saves and accepts direct positive editing', async () => {
+  const { document, context, getPayload } = editorFixture({ drive_component: { max_linear_accel: 0 } });
   await vm.runInContext('loadControls("uart")', context);
-  const input = document.getElementById('control-drive_component-max_linear_accel');
-  const enabled = document.getElementById('control-drive_component-max_linear_accel-enabled');
-  assert.equal(input.disabled, true);
-  enabled.checked = true; enabled.events.change();
+  let input = document.getElementById('control-drive_component-max_linear_accel');
   assert.equal(input.disabled, false);
-  assert.equal(input.required, true);
+  assert.equal(input.required, false);
   assert.equal(input.value, '');
-  assert.equal(vm.runInContext('controlDraft.drive_component.max_linear_accel', context), null);
+  assert.match(input.placeholder, /制限なし/);
+  const speed = document.getElementById('control-joy_controller-longitudinal_input_ratio');
+  speed.value = '1'; speed.events.input();
+  await vm.runInContext('saveControls({preventDefault() {}})', context);
+  assert.equal(getPayload().values.drive_component.max_linear_accel, 0);
+  input = document.getElementById('control-drive_component-max_linear_accel');
   input.value = '2'; input.events.input();
+  assert.equal(input.required, true);
   assert.equal(vm.runInContext('controlDraft.drive_component.max_linear_accel', context), 2);
+  input.value = ''; input.events.input();
+  assert.equal(vm.runInContext('controlDraft.drive_component.max_linear_accel', context), null);
+  assert.equal(input.required, true);
 });
