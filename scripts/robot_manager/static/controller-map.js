@@ -14,6 +14,12 @@ const ControllerMap = (() => {
     ["shot_component", "tilt_up_button_index", "チルトを上げる"],
     ["shot_component", "tilt_down_button_index", "チルトを下げる"],
   ];
+  // Numbers identify functions and remain stable when their inputs move.
+  const numbers = { linear_x_axis: 1, angular_z_axis: 2, fire_button: 3,
+    full_speed_button: 4, tilt_axis: 5, tilt_up_button_index: 5,
+    tilt_down_button_index: 5, linear_y_axis: 6 };
+
+  function actionLabel(key, action) { return `${numbers[key]} · ${action}`; }
 
   function location(controller, key, value) {
     if (!Number.isInteger(value) || value < 0) return null;
@@ -47,10 +53,10 @@ const ControllerMap = (() => {
     }
     return active.filter(([node, key]) => Object.hasOwn(values[node] || {}, key)).map(([node, key, action]) => {
       const value = values[node][key];
-      return { node, key, action, value, spot: location(controller, key, value),
+      return { node, key, action, number: numbers[key], value, spot: location(controller, key, value),
         label: value === null ? "未入力" : labels.valueLabel(controller, key, value),
         changed: value !== saved[node]?.[key], target: `control-${node}-${key}` };
-    });
+    }).sort((a, b) => a.number - b.number);
   }
 
   function inputs(controller, spot) {
@@ -69,7 +75,16 @@ const ControllerMap = (() => {
   function actions(values, kind) {
     return [...fields, ...tiltFields]
       .filter(([node, key]) => labels.kind(key) === kind && Object.hasOwn(values[node] || {}, key))
-      .map(([node, key, action]) => ({ id: `${node}.${key}`, node, key, action }));
+      .map(([node, key, action]) => ({ id: `${node}.${key}`, node, key, action }))
+      .sort((a, b) => numbers[a.key] - numbers[b.key]);
+  }
+
+  function destinations(controller, key) {
+    const kind = labels.kind(key);
+    return Array.from({ length: kind === "axis" ? 8 : 14 }, (_, value) => ({
+      id: `${kind}:${value}`, kind, value, spot: location(controller, key, value),
+      label: labels.valueLabel(controller, key, value),
+    })).filter((item) => item.spot);
   }
 
   function planAssignment(controller, values, spot, inputId, actionId) {
@@ -142,16 +157,17 @@ const ControllerMap = (() => {
     return { svg, spots };
   }
 
-  function render(host, controller, values, saved, onJump, options = {}) {
+  function render(host, controller, values, saved, onAction, options = {}) {
     const assignments = bindings(controller, values, saved);
     const { svg, spots } = draw(controller);
     const list = document.createElement("div");
     list.className = "map-bindings";
-    list.setAttribute("aria-label", "操作の割り当て一覧。選択すると設定項目へ移動します。");
+    list.setAttribute("aria-label", "機能一覧。選択すると割り当て先のポップアップが開きます。");
     const markerBySpot = new Map();
     for (const assignment of assignments) {
-      if (assignment.spot && !markerBySpot.has(assignment.spot)) {
-        markerBySpot.set(assignment.spot, markerBySpot.size + 1);
+      if (assignment.spot) {
+        if (!markerBySpot.has(assignment.spot)) markerBySpot.set(assignment.spot, new Set());
+        markerBySpot.get(assignment.spot).add(assignment.number);
       }
     }
     const cards = [];
@@ -161,7 +177,7 @@ const ControllerMap = (() => {
       button.className = "map-binding" + (assignment.changed ? " map-binding-changed" : "");
       const number = document.createElement("span");
       number.className = "map-number";
-      number.textContent = markerBySpot.get(assignment.spot) || "—";
+      number.textContent = assignment.number;
       const description = document.createElement("span");
       const title = document.createElement("strong");
       title.textContent = assignment.action;
@@ -172,8 +188,10 @@ const ControllerMap = (() => {
       }
       description.append(title, value);
       button.append(number, description);
-      button.setAttribute("aria-label", `${assignment.action}: ${assignment.label}。設定へ移動`);
-      button.addEventListener("click", () => onJump(assignment.target));
+      button.setAttribute("data-action", `${assignment.node}.${assignment.key}`);
+      button.setAttribute("aria-haspopup", "dialog");
+      button.setAttribute("aria-label", `${actionLabel(assignment.key, assignment.action)}: ${assignment.label}。割り当てを編集`);
+      button.addEventListener("click", () => onAction(assignment));
       const highlight = (active) => spots.get(assignment.spot)?.group.classList.toggle("map-highlight", active);
       button.addEventListener("mouseenter", () => highlight(true));
       button.addEventListener("mouseleave", () => highlight(false));
@@ -182,15 +200,18 @@ const ControllerMap = (() => {
       list.append(button);
       cards.push({ button, assignment });
     }
-    for (const [id, number] of markerBySpot) {
+    for (const [id, assignedNumbers] of markerBySpot) {
       const { group, x, y, radius } = spots.get(id);
       const mapped = cards.filter((card) => card.assignment.spot === id);
       group.classList.add("map-assigned");
       if (mapped.some((card) => card.assignment.changed)) group.classList.add("map-changed");
-      group.append(element("circle", { cx: x + radius - 4, cy: y - 18, r: 12,
+      [...assignedNumbers].forEach((number, index) => {
+        const badgeX = x + radius - 4 + index * 24;
+        group.append(element("circle", { cx: badgeX, cy: y - 18, r: 12,
         fill: "#61dddf", stroke: "#122235", "stroke-width": 2 }),
-      element("text", { x: x + radius - 4, y: y - 14, fill: "#10202d",
+      element("text", { x: badgeX, y: y - 14, fill: "#10202d",
         "text-anchor": "middle", "font-size": 12, "font-weight": "bold" }, String(number)));
+      });
     }
     for (const [id, { group, name }] of spots) {
       const mapped = cards.filter((card) => card.assignment.spot === id);
@@ -198,6 +219,7 @@ const ControllerMap = (() => {
         : id === "dpad" ? "十字キー" : name;
       group.setAttribute("tabindex", "0");
       group.setAttribute("role", "button");
+      group.setAttribute("aria-haspopup", "dialog");
       group.setAttribute("aria-pressed", String(options.selectedSpot === id));
       group.classList.toggle("map-selected", options.selectedSpot === id);
       group.setAttribute("aria-label", `${title}: ${mapped.map(({ assignment }) => assignment.action).join("、") || "割り当てなし"}。機能を編集`);
@@ -210,6 +232,6 @@ const ControllerMap = (() => {
     host.replaceChildren(svg, list);
   }
 
-  return { location, bindings, inputs, actions, planAssignment, render };
+  return { location, bindings, inputs, actions, destinations, actionLabel, planAssignment, render };
 })();
 if (typeof module !== "undefined") module.exports = ControllerMap;

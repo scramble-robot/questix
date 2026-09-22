@@ -62,3 +62,18 @@ test('assignment plans reject incompatible inputs and preserve the source values
       { node: 'shot_component', key: 'tilt_axis', value: -1 }]);
   assert.deepEqual(values, original);
 });
+
+test('function numbers remain stable across remapping and tilt modes', () => {
+  const values = { joy_controller: { linear_x_axis: 1, angular_z_axis: 3, linear_y_axis: 0 },
+    shot_component: { fire_button: 5, tilt_axis: 7, tilt_up_button_index: 4, tilt_down_button_index: 6 },
+    esc_motor_control: { full_speed_button: 7 } };
+  const numbers = () => Object.fromEntries(map.bindings('uart', values, values).map((item) => [item.key, item.number]));
+  assert.deepEqual(numbers(), { linear_x_axis: 1, angular_z_axis: 2, linear_y_axis: 6,
+    fire_button: 3, full_speed_button: 4, tilt_axis: 5 });
+  values.shot_component.fire_button = 0;
+  values.shot_component.tilt_axis = -1;
+  assert.equal(numbers().fire_button, 3);
+  assert.equal(numbers().tilt_up_button_index, 5);
+  assert.equal(numbers().tilt_down_button_index, 5);
+  assert.deepEqual(map.destinations('uart', 'tilt_axis').map((item) => item.value), [0, 1, 3, 4, 6, 7]);
+});

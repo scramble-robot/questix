@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>QUESTiX Robot Manager</title>
-  <link rel="stylesheet" href="/static/style.css?v=13">
+  <link rel="stylesheet" href="/static/style.css?v=14">
 </head>
 
 <body>
@@ -145,9 +145,16 @@
             </select>
           </div>
           <p id="controller-map-caption" class="control-help"></p>
+          <div class="control-toolbar map-save-bar">
+            <span id="map-change-count" role="status">未保存: 0 項目</span>
+            <button type="submit" form="controls-form" id="map-save" class="btn btn-small" disabled>操作設定を保存</button>
+          </div>
           <div id="controller-map"></div>
-          <section id="controller-map-editor" class="map-editor" hidden aria-labelledby="map-editor-title">
-            <h4 id="map-editor-title">機能の割り当て</h4>
+          <dialog id="controller-map-editor" class="map-editor" aria-labelledby="map-editor-title">
+            <div class="map-editor-header">
+              <h4 id="map-editor-title">機能の割り当て</h4>
+              <button type="button" id="map-close" class="btn btn-small" aria-label="割り当て編集を閉じる">閉じる</button>
+            </div>
             <div class="map-editor-fields">
               <label for="map-input">使う入力<select id="map-input"></select></label>
               <label for="map-action">割り当てる機能<select id="map-action"></select></label>
@@ -157,9 +164,10 @@
             <button type="button" id="map-apply" class="btn btn-small">編集値に反映</button>
             <button type="button" id="map-edit-draft" class="btn btn-small" hidden>編集中に切り替える</button>
             <p id="map-feedback" class="map-help" role="status"></p>
-          </section>
-          <p class="map-help">図のボタンやスティックを選び、使う入力と機能を選んで「編集値に反映」を押してください。
-            未割り当ての部分も選択できます。一覧を選ぶと詳細な設定項目へ移動します。
+          </dialog>
+          <p class="map-help">図のキーを押して機能を選ぶか、番号付きの機能を押して割り当て先を選べます。
+            ポップアップ内で「編集値に反映」を押し、図の上の「操作設定を保存」で確定します。
+            番号は機能に固定され、割り当て先を変えても同じ番号で表示します。
             通常走行・射出の操作図です。左右独立スティック／Joy 直接駆動の単体起動用設定は下のフォームで変更できます。</p>
         </section>
         <p class="control-help">「保存済み」は読み込み時点の設定です。「変更後」を編集して保存すると、
@@ -352,8 +360,8 @@
 
   <script src="/static/app.js?v=9"></script>
   <script src="/static/control-labels.js?v=1"></script>
-  <script src="/static/controller-map.js?v=2"></script>
-  <script src="/static/controls.js?v=5"></script>
+  <script src="/static/controller-map.js?v=3"></script>
+  <script src="/static/controls.js?v=6"></script>
 </body>
 
 </html>

@@ -45,8 +45,11 @@ class Element {
   appendChild(child) { this.append(child); }
   replaceChildren(...children) { this.children = children; }
   setAttribute(name, value) { this.attributes[name] = value; }
-  focus() { this.focused = true; }
-  scrollIntoView() {}
+  focus(options) { this.focused = true; this.focusOptions = options; }
+  scrollIntoView() { throw new Error('Controller editing must not scroll the page'); }
+  showModal() { this.open = true; }
+  close() { this.open = false; this.events.close?.(); }
+  getBoundingClientRect() { return { left: 100, right: 500, top: 100, bottom: 500 }; }
   addEventListener(name, handler) { this.events[name] = handler; }
   all() { return this.children.flatMap((child) => [child, ...child.all()]); }
   querySelector(selector) { return this.all().find((child) => child.className === selector.slice(1)); }
@@ -65,7 +68,14 @@ function editorFixture(extraValues = {}) {
     createElement: (tag) => new Element(tag),
     createElementNS: (namespace, tag) => new Element(tag),
     addEventListener(name, handler) { this.events[name] = handler; },
-    querySelector: () => document.getElementById('tuning-tab'),
+    querySelector(selector) {
+      const match = selector?.match(/^\[([^=]+)="([^"]+)"\]$/);
+      if (match && match[1] !== 'data-tab') {
+        return document.getElementById('controller-map').all()
+          .find((element) => element.attributes[match[1]] === match[2]);
+      }
+      return document.getElementById('tuning-tab');
+    },
     querySelectorAll(selector) {
       const all = document.getElementById('controls-fields').all();
       return selector === '.control-field' ? all.filter((element) => element.className === 'control-field')
@@ -186,7 +196,9 @@ test('controller drawing follows edits and can show the saved mapping without lo
   let list = host.children[1];
   assert.equal(list.children[0].children[1].children[1].textContent, 'ZR（ボタン 7） · 変更あり');
   list.children[0].events.click();
-  assert.equal(input.focused, true);
+  assert.equal(document.getElementById('controller-map-editor').open, true);
+  assert.equal(document.getElementById('map-action').value, 'shot_component.fire_button');
+  assert.equal(document.getElementById('map-input').value, 'button:7');
   const source = document.getElementById('controller-map-source');
   source.value = 'saved';
   source.events.change();
@@ -283,4 +295,62 @@ test('diagram distinguishes stick axes from pressing and previews overlapping fu
   selectMap(document, 'map-action', 'shot_component.tilt_axis');
   document.getElementById('map-apply').events.click();
   assert.equal(document.getElementById('control-shot_component-tilt_axis').value, '7');
+});
+
+test('numbered function opens a popup and moves its binding without scrolling or renumbering', async () => {
+  const { document, context } = editorFixture();
+  await vm.runInContext('loadControls("uart")', context);
+  let card = document.querySelector('[data-action="shot_component.fire_button"]');
+  assert.equal(card.children[0].textContent, 3);
+  card.events.click();
+  const dialog = document.getElementById('controller-map-editor');
+  assert.equal(dialog.open, true);
+  assert.equal(document.getElementById('map-input').focusOptions.preventScroll, true);
+  assert.equal(document.getElementById('map-action').disabled, true);
+  selectMap(document, 'map-input', 'button:0');
+  assert.equal(vm.runInContext('controlDraft.shot_component.fire_button', context), 5);
+  document.getElementById('map-apply').events.click();
+  assert.equal(dialog.open, true);
+  card = document.querySelector('[data-action="shot_component.fire_button"]');
+  assert.equal(card.children[0].textContent, 3);
+  assert.match(card.children[1].children[1].textContent, /A（ボタン 0）/);
+  assert.equal(document.getElementById('map-save').disabled, false);
+  assert.equal(document.getElementById('map-change-count').textContent, '未保存: 1 項目');
+  document.getElementById('map-close').events.click();
+  assert.equal(dialog.open, false);
+  card = document.querySelector('[data-action="shot_component.fire_button"]');
+  assert.equal(card.focusOptions.preventScroll, true);
+});
+
+test('closing or dismissing the popup discards unconfirmed choices and restores focus without scrolling', async () => {
+  const { document, context } = editorFixture();
+  await vm.runInContext('loadControls("uart")', context);
+  chooseSpot(document, 'face-right');
+  const dialog = document.getElementById('controller-map-editor');
+  dialog.events.click({ target: dialog, clientX: 200, clientY: 200 });
+  assert.equal(dialog.open, true);
+  dialog.events.click({ target: dialog, clientX: 20, clientY: 20 });
+  assert.equal(dialog.open, false);
+  assert.equal(vm.runInContext('controlDraft.shot_component.fire_button', context), 5);
+  assert.equal(document.querySelector('[data-spot="face-right"]').focusOptions.preventScroll, true);
+  chooseSpot(document, 'face-right', true);
+  // Native dialog Escape invokes close; check the same cleanup path.
+  dialog.close();
+  assert.equal(vm.runInContext('mapSelection', context), null);
+  assert.equal(document.getElementById('map-save').disabled, true);
+});
+
+test('function popup moves a custom index to a standard input and closes on profile reload', async () => {
+  const { document, context } = editorFixture();
+  await vm.runInContext('loadControls("uart")', context);
+  const input = document.getElementById('control-shot_component-fire_button');
+  input.value = '63';
+  input.events.input();
+  document.querySelector('[data-action="shot_component.fire_button"]').events.click();
+  assert.match(document.getElementById('map-preview').textContent, /63/);
+  selectMap(document, 'map-input', 'button:7');
+  document.getElementById('map-apply').events.click();
+  assert.equal(vm.runInContext('controlDraft.shot_component.fire_button', context), 7);
+  await vm.runInContext('loadControls("uart")', context);
+  assert.equal(document.getElementById('controller-map-editor').open, false);
 });

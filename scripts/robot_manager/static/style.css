@@ -978,9 +978,17 @@ main {
 .map-control.map-highlight .map-control-shape, .map-control:focus .map-control-shape {
   fill: #305775; stroke: #fff; stroke-width: 4; }
 .map-control.map-selected .map-control-shape { fill: #305775; stroke: #fff; stroke-width: 4; }
-.map-editor { margin-top: 1rem; padding: 1rem; border: 1px solid #61dddf; border-radius: 8px; }
-.map-editor h4 { margin-bottom: 0.7rem; }
-.map-editor-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; }
+.map-save-bar { justify-content: flex-end; font-size: 0.85rem; margin-bottom: 0.5rem; }
+.map-save-bar .btn { flex: 0 0 auto; }
+.map-editor { position: fixed; inset: 0; margin: auto; width: min(440px, calc(100vw - 2rem));
+  max-height: calc(100dvh - 2rem); overflow-y: auto; overscroll-behavior: contain;
+  padding: 1.2rem; border: 1px solid #61dddf; border-radius: 12px;
+  background: #112033; color: var(--text); box-shadow: 0 16px 64px #0008; }
+.map-editor::backdrop { background: #07111e66; }
+.map-editor-header { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; }
+.map-editor-header h4 { flex: 1; }
+.map-editor-header .btn { flex: 0 0 auto; }
+.map-editor-fields { display: grid; gap: 0.75rem; }
 .map-editor-fields label { display: grid; gap: 0.4rem; font-size: 0.85rem; min-width: 0; }
 .map-editor-fields select { width: 100%; min-width: 0; padding: 0.6rem;
   background: var(--bg-input); color: var(--text); border: 1px solid #466077; border-radius: 6px; }
