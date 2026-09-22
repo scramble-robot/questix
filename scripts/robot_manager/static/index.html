@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>QUESTiX Robot Manager</title>
-  <link rel="stylesheet" href="/static/style.css?v=17">
+  <link rel="stylesheet" href="/static/style.css?v=18">
 </head>
 
 <body>
@@ -168,20 +168,22 @@
           </dialog>
         </section>
         <details class="tuning-details" id="controls-details">
-          <summary><span>速度・詳細設定</span><span class="tuning-detail-hint">速度、加速度、入力感度、実行中の値</span></summary>
-        <p class="control-help">「保存済み」は読み込み時点の設定です。「変更後」を編集して保存すると、
-          次回のロボット起動／再起動で反映されます。「実行中の値を取得」で現在の ROS パラメータと比較できます。</p>
-        <button type="button" class="btn btn-small" id="controls-runtime-load" disabled>実行中の値を取得</button>
-        <p id="controls-runtime-message" class="control-help" role="status" aria-live="polite">実行中の値は未取得です。</p>
+          <summary><span>速度・操作感</span><span class="tuning-detail-hint">走行・旋回の速さ、ローラー出力、スティックの遊び</span></summary>
+        <p class="control-help">保存すると、次回のロボット起動時に反映されます。
+          走行・旋回速度は指令値で、実際の速さは車体の上限や路面によって変わります。</p>
         <p id="controls-change-count" class="control-help" role="status" aria-live="polite"></p>
         <form id="controls-form">
           <div id="controls-fields"></div>
           <p id="controls-message" class="control-help" role="status" aria-live="polite"></p>
           <div class="btn-group">
             <button type="submit" class="btn btn-save" id="controls-save" disabled>操作設定を保存</button>
-            <button type="button" class="btn" id="controls-reset" disabled>初期値に戻す</button>
+            <button type="button" class="btn" id="controls-reset" disabled>速度・操作感を初期値に戻す</button>
           </div>
         </form>
+        <div class="tuning-runtime-tools">
+          <button type="button" class="btn btn-small" id="controls-runtime-load" disabled>実行中の設定と比較</button>
+          <p id="controls-runtime-message" class="control-help" role="status" aria-live="polite">実行中の値は未取得です。</p>
+        </div>
         </details>
         <details class="tuning-details tuning-meta">
           <summary><span>プロファイル情報・操作ガイド</span></summary>
@@ -189,7 +191,7 @@
           <p id="controls-layout-note" class="control-help"></p>
           <p class="control-help">機能名・番号を選ぶと割り当て先、キーを選ぶと割り当てる機能を編集できます。
             「編集値に反映」の後、「操作設定を保存」で確定します。
-            図は通常走行・射出用です。左右独立スティック／Joy 直接駆動は詳細設定から変更できます。</p>
+            キーの割り当ては図から、走行速度や入力の調整は「速度・操作感」から変更できます。</p>
         </details>
       </section>
     </div>
@@ -369,7 +371,7 @@
   <script src="/static/app.js?v=9"></script>
   <script src="/static/control-labels.js?v=2"></script>
   <script src="/static/controller-map.js?v=10"></script>
-  <script src="/static/controls.js?v=12"></script>
+  <script src="/static/controls.js?v=13"></script>
 </body>
 
 </html>

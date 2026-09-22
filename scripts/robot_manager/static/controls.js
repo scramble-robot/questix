@@ -12,6 +12,45 @@ let runtimeAvailable = false;
 let mapSelection = null;
 let mapReturnTarget = null;
 
+// UI choices and units only. Defaults and validation limits come from the profile API.
+const tuningFields = {
+  joy_controller: {
+    longitudinal_input_ratio: { title: "走行速度", unit: "m/s", scale: 1, signed: true,
+      help: "スティックを最大まで倒したときの前進・後退の速さ。大きくすると速くなります。" },
+    angular_input_ratio: { title: "旋回速度", unit: "度/秒", scale: 180 / Math.PI, signed: true,
+      help: "スティックを最大まで倒したときの曲がる速さ。360 度/秒で、1 秒に 1 回転の指令です。" },
+  },
+  esc_motor_control: {
+    full_speed_value: { title: "ローラー出力", unit: "%", scale: 100,
+      help: "回転ボタンを押したときの出力。0% で停止、100% で最大出力です。" },
+  },
+  joy_node: { deadzone: { title: "スティックの遊び", unit: "%", scale: 100,
+    help: "中心付近の小さな傾きを無視する幅。触っていないのに動くときは大きくします。" } },
+  uart_joy_driver: { deadzone: { title: "スティックの遊び", unit: "%", scale: 100,
+    help: "中心付近の小さな傾きを無視する幅。触っていないのに動くときは大きくします。" } },
+};
+
+function tuningSpec(node, key) {
+  if (node === "joy_node" && controlProfile.controller !== "dualshock"
+      || node === "uart_joy_driver" && controlProfile.controller !== "uart") return null;
+  return tuningFields[node]?.[key];
+}
+
+function tuningNumber(spec, value) {
+  if (value === null) return "";
+  const displayed = (spec.signed ? Math.abs(value) : value) * spec.scale;
+  const rounded = Number(displayed.toFixed(2));
+  return displayed !== 0 && rounded === 0 ? Number(displayed.toPrecision(3)) : rounded;
+}
+
+function tuningDirection(current, saved) {
+  return current < 0 || (current === 0 || current === null) && saved < 0 ? -1 : 1;
+}
+
+function tuningValue(spec, value) {
+  return `${tuningNumber(spec, value)} ${spec.unit}${spec.signed && value < 0 ? "（方向反転）" : ""}`;
+}
+
 function tiltDirectionKey() {
   return ["tilt_up_button_index", "tilt_down_button_index"]
     .find((key) => mapSelection?.actionId === `shot_component.${key}`);
@@ -172,7 +211,6 @@ function applyMapAssignment() {
     const changes = planMapAssignment(controlDraft);
     for (const { node, key, value } of changes) {
       controlDraft[node][key] = value;
-      document.getElementById(`control-${node}-${key}`).value = String(value);
     }
     refreshControlChanges();
     document.getElementById("map-feedback").textContent = "編集値に反映しました。操作設定を保存すると確定します。";
@@ -257,6 +295,8 @@ function renderRuntimeValues() {
     const value = row.querySelector(".control-runtime-value");
     const status = row.querySelector(".control-runtime-state");
     const report = controlRuntime?.nodes[node];
+    row.querySelector(".control-runtime").hidden = !controlRuntime;
+    row.classList.toggle("runtime-visible", Boolean(controlRuntime));
     if (!report) {
       value.textContent = "未取得";
       status.textContent = "";
@@ -268,9 +308,8 @@ function renderRuntimeValues() {
       value.textContent = "パラメータ未宣言";
       status.textContent = "";
     } else {
-      // Raw values avoid assuming that the running robot uses the edited controller profile.
       const actual = report.values[key];
-      value.textContent = typeof actual === "boolean" ? (actual ? "ON" : "OFF") : String(actual);
+      value.textContent = tuningValue(tuningSpec(node, key), actual);
       status.textContent = actual === controlProfile.values[node][key]
         ? "保存済みと一致" : "保存済みと異なる";
     }
@@ -287,8 +326,7 @@ async function loadRuntimeValues() {
   try {
     controlRuntime = await api("/api/control-runtime");
     const captured = new Date(controlRuntime.captured_at).toLocaleTimeString("ja-JP");
-    message.textContent = `ROS_DOMAIN_ID=${controlRuntime.domain_id} ｜ 取得時刻: ${captured}。`
-      + "ボタン・軸は実際の番号を表示します。コントローラー種別は自動判別していません。";
+    message.textContent = `取得時刻: ${captured}。実行中の設定と保存済みの設定を比較しています。`;
   } catch (error) {
     controlRuntime = null;
     message.textContent = error.message;
@@ -303,47 +341,40 @@ function renderControls() {
   const container = document.getElementById("controls-fields");
   container.replaceChildren();
   for (const group of controlProfile.groups) {
-    if (group.node === "joy_node" && controlProfile.controller !== "dualshock") continue;
-    if (group.node === "uart_joy_driver" && controlProfile.controller !== "uart") continue;
+    const fields = group.fields.filter((field) => tuningSpec(group.node, field.key));
+    if (!fields.length) continue;
     const section = document.createElement("fieldset");
     section.className = "control-section";
     const legend = document.createElement("legend");
-    legend.textContent = group.label;
+    legend.textContent = group.node === "joy_controller" ? "走行"
+      : group.node === "esc_motor_control" ? "射出ローラー" : "スティック";
     section.appendChild(legend);
-    for (const field of group.fields) {
+    for (const field of fields) {
+      const spec = tuningSpec(group.node, field.key);
       const row = document.createElement("div");
       row.className = "control-field";
       row.dataset.node = group.node;
       row.dataset.key = field.key;
       const label = document.createElement("label");
-      const namedInput = ControlLabels.kind(field.key);
-      const input = document.createElement(namedInput ? "select" : "input");
+      const input = document.createElement("input");
       input.id = `control-${group.node}-${field.key}`;
       input.dataset.node = group.node;
       input.dataset.key = field.key;
-      input.dataset.kind = field.type;
       label.htmlFor = input.id;
-      label.textContent = field.label.replaceAll("軸番号", "入力軸").replaceAll("ボタン番号", "ボタン");
+      label.textContent = `${spec.title}（${spec.unit}）`;
+      const help = document.createElement("p");
+      help.className = "control-field-help";
+      help.id = `${input.id}-help`;
+      help.textContent = spec.help;
       const value = controlDraft[group.node][field.key];
-      if (namedInput) {
-        for (const option of ControlLabels.options(controlProfile.controller, field)) {
-          const element = document.createElement("option");
-          element.value = option.value;
-          element.textContent = option.label;
-          input.appendChild(element);
-        }
-        input.value = value;
-      } else if (field.type === "bool") {
-        input.type = "checkbox";
-        input.checked = value;
-      } else {
-        input.type = "number";
-        input.required = true;
-        input.min = field.min;
-        input.max = field.max;
-        input.step = field.type === "int" ? "1" : "any";
-        input.value = value;
-      }
+      // Preserve any existing axis inversion when editing the speed magnitude.
+      const direction = spec.signed ? tuningDirection(value, controlProfile.values[group.node][field.key]) : 1;
+      input.type = "number";
+      input.required = true;
+      input.min = spec.signed ? 0 : field.min * spec.scale;
+      input.max = tuningNumber(spec, field.max);
+      input.step = "any";
+      input.value = tuningNumber(spec, value);
       const saved = document.createElement("div");
       saved.className = "control-saved";
       saved.id = `${input.id}-saved`;
@@ -351,13 +382,16 @@ function renderControls() {
       savedCaption.className = "control-value-caption";
       savedCaption.textContent = "保存済み";
       const savedValue = document.createElement("strong");
-      savedValue.textContent = ControlLabels.valueLabel(controlProfile.controller, field.key,
-        controlProfile.values[group.node][field.key]);
+      savedValue.textContent = tuningValue(spec, controlProfile.values[group.node][field.key]);
       saved.append(savedCaption, savedValue);
-      input.setAttribute("aria-describedby", saved.id);
+      input.setAttribute("aria-describedby", `${help.id} ${saved.id}`);
       input.addEventListener("input", () => {
-        controlDraft[group.node][field.key] = field.type === "bool"
-          ? input.checked : input.value === "" ? null : Number(input.value);
+        const entered = Number(input.value);
+        // Returning to a rounded display value restores its exact original ROS value.
+        const raw = entered === tuningNumber(spec, value) ? value
+          : entered === tuningNumber(spec, field.max) ? field.max * direction
+            : entered / spec.scale * direction;
+        controlDraft[group.node][field.key] = input.value === "" ? null : raw;
         refreshControlChanges();
       });
       const editor = document.createElement("div");
@@ -378,7 +412,7 @@ function renderControls() {
       const runtimeState = document.createElement("span");
       runtimeState.className = "control-runtime-state";
       runtime.append(runtimeCaption, runtimeValue, runtimeState);
-      row.append(label, saved, runtime, editor);
+      row.append(label, help, editor, saved, runtime);
       section.appendChild(row);
     }
     container.appendChild(section);
@@ -452,7 +486,8 @@ async function saveControls(event) {
     const invalid = document.getElementById("controls-fields").querySelector(":invalid");
     const group = controlProfile.groups.find((item) => item.node === invalid?.dataset.node);
     const field = group?.fields.find((item) => item.key === invalid.dataset.key);
-    controlMessage(`${field?.label || "入力値"}を確認してください。${invalid?.validationMessage || ""}`);
+    const spec = tuningSpec(group?.node, field?.key);
+    controlMessage(`${spec?.title || "入力値"}を確認してください。${invalid?.validationMessage || ""}`);
     return;
   }
   controlsSetBusy(true);
@@ -532,8 +567,17 @@ document.addEventListener("DOMContentLoaded", () => {
     if (confirmControlDiscard()) loadControls(select.value);
   });
   document.getElementById("controls-reset").addEventListener("click", () => {
-    if (!controlProfile || !confirm("表示中の設定を初期値に戻しますか？ 保存するまで適用されません。")) return;
-    controlDraft = structuredClone(controlProfile.defaults);
+    if (controlsBusy || !controlProfile || !confirm("速度・操作感の4項目を初期値に戻しますか？ 保存するまで適用されません。")) return;
+    for (const group of controlProfile.groups) {
+      for (const field of group.fields) {
+        const spec = tuningSpec(group.node, field.key);
+        if (!spec) continue;
+        const value = controlProfile.defaults[group.node][field.key];
+        const current = controlDraft[group.node][field.key];
+        const direction = tuningDirection(current, controlProfile.values[group.node][field.key]);
+        controlDraft[group.node][field.key] = spec.signed ? Math.abs(value) * direction : value;
+      }
+    }
     renderControls();
   });
   document.querySelector('[data-tab="tuning"]').addEventListener("click", async () => {

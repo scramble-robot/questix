@@ -95,7 +95,12 @@ function editorFixture(extraValues = {}, controller = 'uart') {
       { key: 'fire_button', label: '射出ボタン番号', type: 'int', min: 0, max: 63 },
     ] }],
   };
-  extraValues = { ...extraValues, shot_component: { tilt_up_axis: 7, tilt_down_axis: 7,
+  extraValues = { ...extraValues,
+    joy_controller: { longitudinal_input_ratio: 2, angular_input_ratio: 6, ...extraValues.joy_controller },
+    esc_motor_control: { full_speed_value: 1, ...extraValues.esc_motor_control },
+    uart_joy_driver: { deadzone: 0.05, ...extraValues.uart_joy_driver },
+    joy_node: { deadzone: 0.1, ...extraValues.joy_node },
+    shot_component: { tilt_up_axis: 7, tilt_down_axis: 7,
     tilt_up_axis_sign: 1, tilt_down_axis_sign: -1, tilt_up_button_index: 4,
     tilt_down_button_index: 6, ...extraValues.shot_component } };
   for (const [node, values] of Object.entries(extraValues)) {
@@ -105,7 +110,7 @@ function editorFixture(extraValues = {}, controller = 'uart') {
     if (!group) { group = { node, label: node, fields: [] }; profile.groups.push(group); }
     for (const key of Object.keys(values)) {
       if (!group.fields.some((field) => field.key === key)) {
-        group.fields.push({ key, label: key, type: 'int', min: -1, max: 63 });
+        group.fields.push({ key, label: key, type: 'float', min: key.includes('ratio') ? -20 : 0, max: key === 'deadzone' ? 0.99 : key === 'full_speed_value' ? 1 : 20 });
       }
     }
   }
@@ -125,55 +130,62 @@ function editorFixture(extraValues = {}, controller = 'uart') {
   return { document, context, getPayload: () => savedPayload };
 }
 
-test('editing keeps saved names stable, highlights changes and submits numeric indices', async () => {
+test('speed editing keeps saved values stable and persists numeric values', async () => {
   const { document, context, getPayload } = editorFixture();
   await vm.runInContext('loadControls("uart")', context);
-  const saved = document.getElementById('control-shot_component-fire_button-saved');
-  const input = document.getElementById('control-shot_component-fire_button');
-  assert.equal(saved.children[1].textContent, 'R（ボタン 5）');
-  assert.equal(input.tag, 'select');
-  input.value = '7';
-  input.events.input();
-  assert.equal(saved.children[1].textContent, 'R（ボタン 5）');
+  const id = 'control-joy_controller-longitudinal_input_ratio';
+  const saved = document.getElementById(`${id}-saved`);
+  const input = document.getElementById(id);
+  assert.equal(saved.children[1].textContent, '2 m/s');
+  assert.equal(input.type, 'number');
+  input.value = '1.5'; input.events.input();
+  assert.equal(saved.children[1].textContent, '2 m/s');
   assert.equal(document.getElementById('controls-change-count').textContent, '未保存の変更: 1 項目');
-  input.value = '5';
-  input.events.input();
+  input.value = '2'; input.events.input();
   assert.equal(document.getElementById('controls-change-count').textContent, '未保存の変更: 0 項目');
-  input.value = '7';
-  input.events.input();
+  input.value = '1.5'; input.events.input();
   await vm.runInContext('saveControls({preventDefault() {}})', context);
-  assert.equal(getPayload().values.shot_component.fire_button, 7);
-  assert.equal(document.getElementById('control-shot_component-fire_button-saved')
-    .children[1].textContent, 'ZR（ボタン 7）');
-  assert.equal(document.getElementById('controls-change-count').textContent, '未保存の変更: 0 項目');
+  assert.equal(getPayload().values.joy_controller.longitudinal_input_ratio, 1.5);
+  assert.equal(document.getElementById(`${id}-saved`).children[1].textContent, '1.5 m/s');
 });
 
-test('reset modifies only the draft, preserving the saved value for comparison', async () => {
-  const { document, context } = editorFixture();
+test('reset changes only the visible tuning values, retaining mappings and hidden settings', async () => {
+  const { document, context, getPayload } = editorFixture({
+    drive_component: { max_motor_rpm: 321, max_linear_accel: 2.5, min_command_rpm: 8 },
+    joy_controller: { lateral_input_ratio: -0.6 },
+    joy_axis_drive: { max_motor_rpm: 82 },
+  });
   await vm.runInContext('loadControls("uart")', context);
+  vm.runInContext('controlDraft.shot_component.fire_button = 0; controlDraft.joy_node.deadzone = 0.2', context);
+  const input = document.getElementById('control-joy_controller-longitudinal_input_ratio');
+  input.value = '1'; input.events.input();
   document.getElementById('controls-reset').events.click();
-  assert.equal(document.getElementById('control-shot_component-fire_button').value, 4);
-  assert.equal(document.getElementById('control-shot_component-fire_button-saved')
-    .children[1].textContent, 'R（ボタン 5）');
-  assert.equal(document.getElementById('controls-change-count').textContent, '未保存の変更: 1 項目');
+  assert.equal(vm.runInContext('controlDraft.joy_controller.longitudinal_input_ratio', context), 2);
+  assert.equal(vm.runInContext('controlDraft.shot_component.fire_button', context), 0);
+  assert.equal(vm.runInContext('controlDraft.joy_node.deadzone', context), 0.2);
+  await vm.runInContext('saveControls({preventDefault() {}})', context);
+  assert.deepEqual(getPayload().values.drive_component,
+    { max_motor_rpm: 321, max_linear_accel: 2.5, min_command_rpm: 8 });
+  assert.equal(getPayload().values.joy_controller.lateral_input_ratio, -0.6);
+  assert.equal(getPayload().values.joy_axis_drive.max_motor_rpm, 82);
 });
 
-test('runtime values are independent snapshots and unavailable nodes never use saved defaults', async () => {
+test('runtime comparisons show the same units and never substitute saved defaults', async () => {
   const { document, context } = editorFixture();
   await vm.runInContext('loadControls("uart")', context);
-  vm.runInContext(`controlRuntime = { nodes: {
-    shot_component: { status: "ok", values: { fire_button: 2 } }
-  } }; renderRuntimeValues();`, context);
   let rows = document.querySelectorAll('.control-field');
-  assert.equal(rows[0].querySelector('.control-runtime-value').textContent, '2');
+  assert.ok(rows.every((row) => row.querySelector('.control-runtime').hidden));
+  vm.runInContext(`controlRuntime = { nodes: {
+    joy_controller: { status: "ok", values: { longitudinal_input_ratio: -1.5 } }
+  } }; renderRuntimeValues();`, context);
+  assert.equal(rows[0].querySelector('.control-runtime-value').textContent, '1.5 m/s（方向反転）');
   assert.equal(rows[0].querySelector('.control-runtime-state').textContent, '保存済みと異なる');
   assert.equal(rows[1].querySelector('.control-runtime-value').textContent, 'パラメータ未宣言');
-  vm.runInContext(`controlRuntime.nodes.shot_component = { status: "unavailable", values: {} };
+  vm.runInContext(`controlRuntime.nodes.joy_controller = { status: "unavailable", values: {} };
     renderRuntimeValues();`, context);
-  rows = document.querySelectorAll('.control-field');
   assert.equal(rows[0].querySelector('.control-runtime-value').textContent, 'ノード未検出');
-  assert.equal(document.getElementById('control-shot_component-fire_button-saved')
-    .children[1].textContent, 'R（ボタン 5）');
+  assert.equal(document.getElementById('control-joy_controller-longitudinal_input_ratio-saved')
+    .children[1].textContent, '2 m/s');
 });
 
 test('an older backend disables runtime reads without breaking saved-profile editing', async () => {
@@ -197,9 +209,7 @@ test('controller drawing follows edits and can show the saved mapping without lo
   await vm.runInContext('loadControls("uart")', context);
   const host = document.getElementById('controller-map');
   assert.equal(host.children[0].tag, 'svg');
-  const input = document.getElementById('control-shot_component-fire_button');
-  input.value = '7';
-  input.events.input();
+  vm.runInContext('controlDraft.shot_component.fire_button = 7; refreshControlChanges()', context);
   let list = host.children[1];
   assert.equal(list.children[0].children[1].children[1].textContent, 'ZR（ボタン 7） · 変更あり');
   list.children[0].events.click();
@@ -211,7 +221,7 @@ test('controller drawing follows edits and can show the saved mapping without lo
   source.events.change();
   list = host.children[1];
   assert.equal(list.children[0].children[1].children[1].textContent, 'R（ボタン 5）');
-  assert.equal(input.value, '7');
+  assert.equal(vm.runInContext('controlDraft.shot_component.fire_button', context), 7);
   source.value = 'draft';
   source.events.change();
   assert.equal(host.children[1].children[0].children[1].children[1].textContent,
@@ -241,16 +251,15 @@ test('an unassigned diagram button edits the draft and saves through the existin
   assert.equal(document.getElementById('map-apply').disabled, false);
   document.getElementById('map-apply').events.click();
   assert.equal(getPayload(), undefined);
-  assert.equal(document.getElementById('control-shot_component-fire_button').value, '0');
-  assert.equal(document.getElementById('control-shot_component-fire_button-saved').children[1].textContent,
-    'R（ボタン 5）');
+  assert.equal(vm.runInContext('controlDraft.shot_component.fire_button', context), 0);
+  assert.equal(vm.runInContext('controlProfile.values.shot_component.fire_button', context), 5);
   assert.equal(document.getElementById('controls-change-count').textContent, '未保存の変更: 1 項目');
   await vm.runInContext('saveControls({preventDefault() {}})', context);
   assert.equal(getPayload().values.shot_component.fire_button, 0);
   assert.equal(document.getElementById('controls-change-count').textContent, '未保存の変更: 0 項目');
 });
 
-test('diagram edits are blocked in saved view and while saving, then reset with the form', async () => {
+test('diagram edits are blocked in saved view and while saving, and survive a speed-only reset', async () => {
   const { document, context } = editorFixture();
   await vm.runInContext('loadControls("uart")', context);
   chooseSpot(document, 'face-right');
@@ -267,8 +276,8 @@ test('diagram edits are blocked in saved view and while saving, then reset with 
   document.getElementById('map-apply').events.click();
   assert.equal(vm.runInContext('controlDraft.shot_component.fire_button', context), 0);
   document.getElementById('controls-reset').events.click();
-  assert.equal(vm.runInContext('controlDraft.shot_component.fire_button', context), 4);
-  assert.match(document.getElementById('map-preview').textContent, /L（ボタン 4）/);
+  assert.equal(vm.runInContext('controlDraft.shot_component.fire_button', context), 0);
+  assert.match(document.getElementById('map-preview').textContent, /A（ボタン 0）/);
 });
 
 test('diagram distinguishes stick axes from pressing and previews overlapping functions', async () => {
@@ -289,8 +298,8 @@ test('diagram distinguishes stick axes from pressing and previews overlapping fu
   assert.ok(document.getElementById('map-action').children.every((item) => !item.value.startsWith('joy_controller.')));
   selectMap(document, 'map-action', 'shot_component.tilt_up_button_index');
   document.getElementById('map-apply').events.click();
-  assert.equal(document.getElementById('control-shot_component-tilt_up_axis').value, '-1');
-  assert.equal(document.getElementById('control-shot_component-tilt_up_button_index').value, '12');
+  assert.equal(vm.runInContext('controlDraft.shot_component.tilt_up_axis', context), -1);
+  assert.equal(vm.runInContext('controlDraft.shot_component.tilt_up_button_index', context), 12);
   chooseSpot(document, 'left-trigger');
   selectMap(document, 'map-action', 'shot_component.tilt_up_button_index');
   assert.equal(document.getElementById('map-apply').disabled, true);
@@ -301,7 +310,7 @@ test('diagram distinguishes stick axes from pressing and previews overlapping fu
   selectMap(document, 'map-input', 'direction:7:1');
   selectMap(document, 'map-action', 'shot_component.tilt_up_button_index');
   document.getElementById('map-apply').events.click();
-  assert.equal(document.getElementById('control-shot_component-tilt_up_axis').value, '7');
+  assert.equal(vm.runInContext('controlDraft.shot_component.tilt_up_axis', context), 7);
 });
 
 test('numbered function opens a popup and moves its binding without scrolling or renumbering', async () => {
@@ -350,9 +359,7 @@ test('closing or dismissing the popup discards unconfirmed choices and restores 
 test('function popup moves a custom index to a standard input and closes on profile reload', async () => {
   const { document, context } = editorFixture();
   await vm.runInContext('loadControls("uart")', context);
-  const input = document.getElementById('control-shot_component-fire_button');
-  input.value = '63';
-  input.events.input();
+  vm.runInContext('controlDraft.shot_component.fire_button = 63; refreshControlChanges()', context);
   document.querySelector('[data-action="shot_component.fire_button"]').events.click();
   assert.match(document.getElementById('map-preview').textContent, /63/);
   selectMap(document, 'map-input', 'button:7');
@@ -391,13 +398,13 @@ test('diagram save reports success and validation failures locally without sendi
   document.getElementById('map-apply').events.click();
   document.getElementById('map-close').events.click();
   const form = document.getElementById('controls-form');
-  const input = document.getElementById('control-shot_component-fire_button');
+  const input = document.getElementById('control-joy_controller-longitudinal_input_ratio');
   form.valid = false;
   input.valid = false;
   input.validationMessage = '範囲外です。';
   await document.getElementById('map-save').events.click({ preventDefault() {} });
   assert.equal(getPayload(), undefined);
-  assert.match(document.getElementById('map-status').textContent, /射出ボタン番号.*範囲外/);
+  assert.match(document.getElementById('map-status').textContent, /走行速度.*範囲外/);
   assert.equal(document.getElementById('map-save').disabled, false);
   form.valid = true;
   input.valid = true;
@@ -524,9 +531,7 @@ test('DualShock tilt buttons use their own names and unused central controls sta
   document.getElementById('map-apply').events.click();
   assert.ok(document.querySelector('[data-spot="home"]'));
   document.getElementById('map-close').events.click();
-  const fire = document.getElementById('control-shot_component-fire_button');
-  fire.value = '13';
-  fire.events.input();
+  vm.runInContext('controlDraft.shot_component.fire_button = 13; refreshControlChanges()', context);
   assert.equal(document.querySelector('[data-spot="touchpad"]'), undefined);
   assert.match(document.querySelector('[data-action="shot_component.fire_button"]').children[1].children[1].textContent, /タッチパッド.*図の対象外/);
 });
@@ -618,4 +623,60 @@ test('a stale tilt API explains the required manager update without showing inco
   assert.equal(document.getElementById('controller-map-panel').hidden, true);
   assert.equal(document.getElementById('controls-save').disabled, true);
   assert.match(document.getElementById('controls-load-error').textContent, /robot_manager.*再起動/);
+});
+
+for (const controller of ['uart', 'dualshock']) {
+  test(`${controller}: only four understandable tuning fields are rendered`, async () => {
+    const { document, context } = editorFixture({
+      drive_component: { max_motor_rpm: 475, max_linear_accel: 3, slew_taper_band_linear: 0.2 },
+      joy_controller: { lateral_input_ratio: 0.3 },
+      joy_controller_dual_stick: { longitudinal_input_ratio: 0.05 },
+      joy_axis_drive: { max_motor_rpm: 100 },
+    }, controller);
+    await vm.runInContext(`loadControls("${controller}")`, context);
+    assert.deepEqual(document.querySelectorAll('.control-field').map((row) => `${row.dataset.node}.${row.dataset.key}`),
+      ['joy_controller.longitudinal_input_ratio', 'joy_controller.angular_input_ratio',
+        'esc_motor_control.full_speed_value', `${controller === 'uart' ? 'uart_joy_driver' : 'joy_node'}.deadzone`]);
+  });
+}
+
+test('friendly units preserve precision, inversion and every hidden value when saving', async () => {
+  const { document, context, getPayload } = editorFixture({
+    joy_controller: { longitudinal_input_ratio: -2, angular_input_ratio: -6, lateral_input_ratio: -0.31 },
+    drive_component: { min_command_rpm: 7, slew_taper_band_linear: 0.17 },
+  });
+  await vm.runInContext('loadControls("uart")', context);
+  const before = JSON.parse(vm.runInContext('JSON.stringify(controlDraft)', context));
+  const turn = document.getElementById('control-joy_controller-angular_input_ratio');
+  assert.equal(turn.value, 343.77);
+  turn.events.input();
+  assert.equal(vm.runInContext('controlDraft.joy_controller.angular_input_ratio', context), -6);
+  turn.value = '180'; turn.events.input();
+  assert.equal(vm.runInContext('controlDraft.joy_controller.angular_input_ratio', context), -Math.PI);
+  const speed = document.getElementById('control-joy_controller-longitudinal_input_ratio');
+  speed.value = '0'; speed.events.input();
+  speed.value = '1.5'; speed.events.input();
+  const roller = document.getElementById('control-esc_motor_control-full_speed_value');
+  roller.value = '65'; roller.events.input();
+  const deadzone = document.getElementById('control-uart_joy_driver-deadzone');
+  deadzone.value = '12'; deadzone.events.input();
+  await vm.runInContext('saveControls({preventDefault() {}})', context);
+  const expected = structuredClone(before);
+  expected.joy_controller.longitudinal_input_ratio = -1.5;
+  expected.joy_controller.angular_input_ratio = -Math.PI;
+  expected.esc_motor_control.full_speed_value = 0.65;
+  expected.uart_joy_driver.deadzone = 0.12;
+  assert.deepEqual(getPayload().values, expected);
+});
+
+test('rounded upper bounds remain valid and reset retains direction after clearing a value', async () => {
+  const { document, context } = editorFixture({ joy_controller: { angular_input_ratio: -20 } });
+  await vm.runInContext('loadControls("uart")', context);
+  const turn = document.getElementById('control-joy_controller-angular_input_ratio');
+  assert.equal(turn.value, turn.max);
+  turn.events.input();
+  assert.equal(vm.runInContext('controlDraft.joy_controller.angular_input_ratio', context), -20);
+  turn.value = ''; turn.events.input();
+  document.getElementById('controls-reset').events.click();
+  assert.equal(vm.runInContext('controlDraft.joy_controller.angular_input_ratio', context), -20);
 });
