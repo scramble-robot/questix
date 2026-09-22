@@ -49,6 +49,13 @@ The **教材** tab starts and stops that bridge, so nobody has to run `ros2 laun
   "配信中 (手動で起動)" and is not stopped from here.
 - `カメラのトピック` (`sensor_msgs/CompressedImage`, empty = no camera) is stored in
   `$QUESTIX_CONFIG_DIR/lab.env` and applies from the next start.
+- **起動時に配信を自動で開始する** (`AUTOSTART="true"` in `lab.env`, off by default) starts the
+  bridge whenever robot_manager starts — with the robot_manager service, that is at boot — so a
+  class can open the pages without anyone pressing 配信開始. It runs in the background of the
+  manager's start-up; if it fails (ROS workspace not built, a bridge already running by hand) the
+  tab says "自動開始に失敗しました". Nothing in systemd or Ansible changes: the bridge stays a
+  child of robot_manager and stops with it. Turn it on only on networks where every device may
+  see the pages and the read-only telemetry.
 
 Prerequisite: `questix_lab_bridge` is built in `ROBOT_WS` (`colcon build`; rosdep key
 `python3-websockets`). If the node exits immediately, starting fails with an error toast.

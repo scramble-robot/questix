@@ -57,6 +57,7 @@ app.include_router(recorder.router)
 app.include_router(logs.router)
 app.include_router(lab.router)
 # A bridge started from the 教材 tab must not outlive the manager.
+app.add_event_handler("startup", lab.autostart)
 app.add_event_handler("shutdown", lab.shutdown)
 
 

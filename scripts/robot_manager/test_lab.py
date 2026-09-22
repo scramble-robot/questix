@@ -39,8 +39,10 @@ def test_invalid_workspace_is_rejected(lab, tmp_path):
 
 def test_config_round_trip_and_validation(lab):
     assert lab.set_config(lab.LabConfig(CAMERA_TOPIC=" /cam/compressed ")) == {
-        "CAMERA_TOPIC": "/cam/compressed"}
-    assert lab._read_config() == {"CAMERA_TOPIC": "/cam/compressed"}
+        "CAMERA_TOPIC": "/cam/compressed", "AUTOSTART": "false"}
+    assert lab._read_config() == {"CAMERA_TOPIC": "/cam/compressed", "AUTOSTART": "false"}
+    lab.set_config(lab.LabConfig(AUTOSTART=True))
+    assert lab._read_config()["AUTOSTART"] == "true"
     with pytest.raises(ValueError):
         lab.LabConfig(CAMERA_TOPIC="relative/topic")
 
@@ -49,3 +51,34 @@ def test_status_when_idle(lab):
     status = lab.get_status()
     assert status["running"] is False and status["port"] == lab.LAB_BRIDGE_PORT
     assert all(url.endswith(f":{lab.LAB_BRIDGE_PORT}/") for url in status["urls"])
+
+
+def test_autostart_only_when_enabled(lab, monkeypatch):
+    started = []
+    monkeypatch.setattr(lab, "start_bridge", lambda: started.append(True))
+    monkeypatch.setattr(lab.threading, "Thread", _run_now)
+    lab.autostart()
+    assert started == []  # off by default
+    lab.set_config(lab.LabConfig(AUTOSTART=True))
+    lab.autostart()
+    assert started == [True]
+
+
+def test_autostart_failure_is_reported(lab, monkeypatch):
+    def fail():
+        raise HTTPException(status_code=500, detail="ROS missing")
+    monkeypatch.setattr(lab, "start_bridge", fail)
+    monkeypatch.setattr(lab.threading, "Thread", _run_now)
+    lab.set_config(lab.LabConfig(AUTOSTART=True))
+    lab.autostart()
+    assert lab.get_status()["last_stop_reason"] == "autostart_failed"
+
+
+class _run_now:
+    """Stand-in for threading.Thread that runs the target at start()."""
+
+    def __init__(self, target, **_kwargs):
+        self._target = target
+
+    def start(self):
+        self._target()

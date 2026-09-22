@@ -6,6 +6,7 @@ node can: it serves the same teaching pages on the LAN and mirrors robot telemet
 observation only. This module starts and stops that node so nobody has to type ``ros2 launch``.
 """
 
+import logging
 import os
 import re
 import signal
@@ -35,12 +36,17 @@ _DEFAULT_CONFIG = {
     # sensor_msgs/CompressedImage topic; empty = no camera stream (no camera driver ships
     # with the repository).
     "CAMERA_TOPIC": "",
+    # "true": start the bridge whenever robot_manager starts (i.e. at boot), so a class can open
+    # the pages without anyone pressing 配信開始 first. Off by default: the bridge serves the
+    # pages and read-only telemetry to the whole LAN.
+    "AUTOSTART": "false",
 }
 _ABS_PATH_RE = re.compile(r"^/[a-zA-Z0-9_/.~-]*$")
 _TOPIC_RE = re.compile(r"^/[A-Za-z0-9_/]*$")
 _DOMAIN_RE = re.compile(r"^\d{1,3}$")
 
 router = APIRouter(prefix="/api/lab")
+logger = logging.getLogger(__name__)
 
 # Bridge process state (guarded by _lock)
 _lock = threading.Lock()
@@ -51,6 +57,7 @@ _last_stop_reason: Optional[str] = None
 
 class LabConfig(BaseModel):
     CAMERA_TOPIC: str = ""
+    AUTOSTART: bool = False
 
     @field_validator("CAMERA_TOPIC")
     @classmethod
@@ -246,7 +253,10 @@ def stop_bridge():
 @router.put("/config")
 def set_config(config: LabConfig):
     """Persist bridge settings; they take effect the next time the bridge starts."""
-    values = config.model_dump()
+    values = {
+        key: (str(value).lower() if isinstance(value, bool) else value)
+        for key, value in config.model_dump().items()
+    }
     lines = [f'{key}="{value}"' for key, value in values.items()]
     try:
         LAB_ENV_FILE.write_text("\n".join(lines) + "\n")
@@ -255,6 +265,29 @@ def set_config(config: LabConfig):
     except OSError as e:
         raise HTTPException(status_code=500, detail=f"lab.env を書き込めません: {e}")
     return values
+
+
+def _autostart() -> None:
+    global _last_stop_reason
+    try:
+        start_bridge()
+        logger.info("QUESTiX LAB bridge started automatically (AUTOSTART=true in lab.env)")
+    except HTTPException as error:
+        # e.g. ROS not built yet, or someone already runs a bridge by hand: say so in the UI.
+        with _lock:
+            _last_stop_reason = "autostart_failed"
+        logger.warning("QUESTiX LAB bridge autostart failed: %s", error.detail)
+
+
+def autostart() -> None:
+    """Start the bridge when robot_manager starts, if lab.env asks for it (AUTOSTART=true).
+
+    Runs in a thread: starting waits up to START_GRACE_SEC for the node, which must not delay
+    the manager's own start-up.
+    """
+    if _read_config().get("AUTOSTART") != "true":
+        return
+    threading.Thread(target=_autostart, name="lab-autostart", daemon=True).start()
 
 
 def shutdown() -> None:

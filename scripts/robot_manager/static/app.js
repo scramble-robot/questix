@@ -607,7 +607,9 @@ async function refreshLabStatus() {
     ? "配信中"
     : data.external
       ? "配信中 (手動で起動)"
-      : "停止中";
+      : data.last_stop_reason === "autostart_failed"
+        ? "停止中 (自動開始に失敗しました。ROS環境とビルドを確認してください)"
+        : "停止中";
   document.getElementById("lab-elapsed").textContent = data.running
     ? fmtDuration(data.elapsed_sec)
     : "—";
@@ -631,6 +633,7 @@ async function refreshLabStatus() {
   document.getElementById("lab-stop").disabled = !data.running;
   if (!labConfigLoaded) {
     document.getElementById("lab-camera").value = data.config.CAMERA_TOPIC || "";
+    document.getElementById("lab-autostart").checked = data.config.AUTOSTART === "true";
     labConfigLoaded = true;
   }
 }
@@ -658,7 +661,10 @@ function setupLabEvents() {
     try {
       await api("/api/lab/config", {
         method: "PUT",
-        body: JSON.stringify({ CAMERA_TOPIC: document.getElementById("lab-camera").value }),
+        body: JSON.stringify({
+          CAMERA_TOPIC: document.getElementById("lab-camera").value,
+          AUTOSTART: document.getElementById("lab-autostart").checked,
+        }),
       });
       toast("教材の設定を保存しました (次の配信開始から有効)", "success");
     } catch {
