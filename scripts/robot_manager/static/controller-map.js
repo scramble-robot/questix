@@ -10,8 +10,8 @@ const ControllerMap = (() => {
     ["esc_motor_control", "full_speed_button", "ローラー回転"],
   ];
   const tiltFields = [
-    ["shot_component", "tilt_up_button_index", "チルトを上げる"],
-    ["shot_component", "tilt_down_button_index", "チルトを下げる"],
+    ["shot_component", "tilt_up_button_index", "射出角度を上げる"],
+    ["shot_component", "tilt_down_button_index", "射出角度を下げる"],
   ];
   // Numbers identify functions and remain stable when their inputs move.
   const numbers = { linear_x_axis: 1, angular_z_axis: 2, fire_button: 3,
@@ -19,8 +19,8 @@ const ControllerMap = (() => {
     tilt_down_button_index: 5, linear_y_axis: 6 };
   const colors = { 1: "#83dbc5", 2: "#94c7ff", 3: "#f1af88", 4: "#c5b2f5", 5: "#e7ce88", 6: "#83d5dd" };
   const shortNames = { linear_x_axis: "前進・後退", angular_z_axis: "旋回", fire_button: "射出",
-    full_speed_button: "ローラー", tilt_up_button_index: "チルトを上げる",
-    tilt_down_button_index: "チルトを下げる", linear_y_axis: "左右移動" };
+    full_speed_button: "ローラー", tilt_up_button_index: "射出角度を上げる",
+    tilt_down_button_index: "射出角度を下げる", linear_y_axis: "左右移動" };
 
   function actionLabel(key, action) { return `${numbers[key]} · ${action}`; }
 
@@ -122,18 +122,18 @@ const ControllerMap = (() => {
   }
 
   function planTiltDirection(controller, values, key, inputId) {
-    if (!isTilt(key)) throw new Error("チルトの方向を選んでください。");
+    if (!isTilt(key)) throw new Error("射出角度を上げるか下げるかを選んでください。");
     const parts = inputId.split(":");
     const [kind, rawValue, rawSign] = parts;
     const value = Number(rawValue), sign = Number(rawSign);
     if (!Number.isInteger(value) || value < 0 || value > 63 || rawValue === ""
         || !(kind === "button" && parts.length === 2
           || kind === "direction" && parts.length === 3 && [1, -1].includes(sign))) {
-      throw new Error("チルトの入力を選んでください。");
+      throw new Error("射出角度の調整に使う入力を選んでください。");
     }
     const other = key === "tilt_up_button_index" ? "tilt_down_button_index" : "tilt_up_button_index";
     if (directionInput(controller, values, other).id === inputId) {
-      throw new Error("チルト上・下には異なる入力を割り当ててください。");
+      throw new Error("射出角度の「上げる」「下げる」には異なる入力を割り当ててください。");
     }
     const prefix = key.replace("_button_index", "");
     return [{ key: `${prefix}_axis`, value: kind === "button" ? -1 : value },

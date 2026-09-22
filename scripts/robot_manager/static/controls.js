@@ -409,7 +409,7 @@ async function loadControls(controller) {
     const profile = await api(`/api/control-config/${controller}`);
     if (!['tilt_up_axis', 'tilt_down_axis', 'tilt_up_axis_sign', 'tilt_down_axis_sign']
       .every((key) => Object.hasOwn(profile.values.shot_component || {}, key))) {
-      throw new Error("上下別のチルト設定 API が未反映です。robot_manager を更新・再起動してから読み直してください。");
+      throw new Error("射出角度を上下別に設定する API が未反映です。robot_manager を更新・再起動してから読み直してください。");
     }
     controlProfile = profile;
     mapSelection = null;

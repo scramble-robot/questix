@@ -39,7 +39,7 @@ ROS ノードを `ros2 run` で直接起動する場合は、このファイル�
   左右速度は全方向移動用で、標準の差動駆動では使用しません。
 - `drive_component`: 車輪の最大 RPM、加速度、目標付近の緩和幅、低速不感帯。
   `max_motor_rpm` は M0602C の指令上限 475 以下、`min_command_rpm` はその値未満です。
-- `shot_component`: 射出ボタン、チルトを上げる入力・下げる入力。
+- `shot_component`: 射出ボタン、射出角度を上げる入力・下げる入力。
   図の「上げる」「下げる」から別々に選べます（例：上げる＝十字キー上、下げる＝B）。
   `tilt_up_axis` / `tilt_down_axis` は方向ごとの軸番号で、-1 の場合だけ対応する
   `tilt_up_button_index` / `tilt_down_button_index` を使います。

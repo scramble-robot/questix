@@ -30,14 +30,14 @@ GROUPS = {
         ('slew_taper_band_angular', '目標旋回速度付近の緩和幅 [rad/s]（0で無効）', 'float', 0, 20),
         ('min_command_rpm', '低速不感帯 [RPM]（0で無効）', 'int', 0, 474),
     ]),
-    'shot_component': ('射出・チルトのキー割り当て', [
+    'shot_component': ('射出・角度調整のキー割り当て', [
         ('fire_button', '射出ボタン番号', 'int', 0, 63),
         ('tilt_up_axis', '上げる入力軸（-1でボタン）', 'int', -1, 63),
         ('tilt_up_axis_sign', '上げる軸の方向（+1 / -1）', 'int', -1, 1),
         ('tilt_down_axis', '下げる入力軸（-1でボタン）', 'int', -1, 63),
         ('tilt_down_axis_sign', '下げる軸の方向（+1 / -1）', 'int', -1, 1),
-        ('tilt_up_button_index', 'チルト上ボタン番号（ボタン操作時のみ）', 'int', 0, 63),
-        ('tilt_down_button_index', 'チルト下ボタン番号（ボタン操作時のみ）', 'int', 0, 63),
+        ('tilt_up_button_index', '射出角度を上げるボタン番号（ボタン操作時のみ）', 'int', 0, 63),
+        ('tilt_down_button_index', '射出角度を下げるボタン番号（ボタン操作時のみ）', 'int', 0, 63),
     ]),
     'esc_motor_control': ('ローラー', [
         ('full_speed_button', '回転ボタン番号', 'int', 0, 63),
@@ -109,11 +109,11 @@ def validate(values):
         axis = shot[f'tilt_{direction}_axis']
         sign = shot[f'tilt_{direction}_axis_sign']
         if sign not in (-1, 1):
-            raise ValueError('チルト軸の方向は +1 または -1 を選んでください。')
+            raise ValueError('角度調整に使う軸の方向は +1 または -1 を選んでください。')
         inputs.append(('axis', axis, sign) if axis >= 0 else
                       ('button', shot[f'tilt_{direction}_button_index']))
     if inputs[0] == inputs[1]:
-        raise ValueError('チルト上・下には異なる入力を割り当ててください。')
+        raise ValueError('射出角度の「上げる」「下げる」には異なる入力を割り当ててください。')
     return clean
 
 
@@ -150,7 +150,7 @@ def _decode(raw):
             'fire_button', 'tilt_axis', 'tilt_up_button_index', 'tilt_down_button_index'}:
         axis = shot.pop('tilt_axis')
         if type(axis) is not int or not -1 <= axis <= 63:
-            raise ValueError('旧チルト軸番号が不正です。')
+            raise ValueError('旧形式の角度調整の軸番号が不正です。')
         for direction, sign in (('up', 1), ('down', -1)):
             shot[f'tilt_{direction}_axis'] = axis
             shot[f'tilt_{direction}_axis_sign'] = sign
