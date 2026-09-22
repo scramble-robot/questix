@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>QUESTiX Robot Manager</title>
-  <link rel="stylesheet" href="/static/style.css?v=11">
+  <link rel="stylesheet" href="/static/style.css?v=12">
 </head>
 
 <body>
@@ -135,6 +135,20 @@
         </div>
         <p id="controls-summary" class="control-summary" role="status">設定を読み込んでください。</p>
         <p id="controls-layout-note" class="control-help"></p>
+        <section id="controller-map-panel" class="controller-map-panel" hidden aria-labelledby="controller-map-heading">
+          <div class="control-toolbar">
+            <h3 id="controller-map-heading">コントローラーの操作図</h3>
+            <label for="controller-map-source">図の表示</label>
+            <select id="controller-map-source">
+              <option value="draft">編集中</option>
+              <option value="saved">保存済み</option>
+            </select>
+          </div>
+          <p id="controller-map-caption" class="control-help"></p>
+          <div id="controller-map"></div>
+          <p class="map-help">図の番号と一覧を見比べて操作を確認できます。一覧を選ぶと設定項目へ移動します。
+            通常走行・射出の操作図です。左右独立スティック／Joy 直接駆動の単体起動用設定は下のフォームで変更できます。</p>
+        </section>
         <p class="control-help">「保存済み」は読み込み時点の設定です。「変更後」を編集して保存すると、
           次回のロボット起動／再起動で反映されます。「実行中の値を取得」で現在の ROS パラメータと比較できます。</p>
         <button type="button" class="btn btn-small" id="controls-runtime-load" disabled>実行中の値を取得</button>
@@ -325,7 +339,8 @@
 
   <script src="/static/app.js?v=9"></script>
   <script src="/static/control-labels.js?v=1"></script>
-  <script src="/static/controls.js?v=3"></script>
+  <script src="/static/controller-map.js?v=1"></script>
+  <script src="/static/controls.js?v=4"></script>
 </body>
 
 </html>

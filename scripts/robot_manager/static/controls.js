@@ -32,9 +32,30 @@ function renderControlSummary() {
       + "実際の Joy の番号に合わせて選んでください（接続機器の自動判別ではありません）。";
 }
 
+function renderControllerMap() {
+  const wrapper = document.getElementById("controller-map-panel");
+  wrapper.hidden = !controlProfile;
+  const host = document.getElementById("controller-map");
+  if (!controlProfile) {
+    host.replaceChildren();
+    return;
+  }
+  const saved = document.getElementById("controller-map-source").value === "saved";
+  document.getElementById("controller-map-caption").textContent = saved
+    ? "保存済みの割り当てを表示しています。"
+    : "編集中の割り当てを表示しています。変更は保存するまで反映されません。";
+  ControllerMap.render(host, controlProfile.controller,
+    saved ? controlProfile.values : controlDraft, controlProfile.values, (id) => {
+      const input = document.getElementById(id);
+      input.scrollIntoView({ behavior: "smooth", block: "center" });
+      input.focus({ preventScroll: true });
+    });
+}
+
 function refreshControlChanges() {
   const count = ControlLabels.changedCount(controlProfile.values, controlDraft);
   controlsDirty = count > 0;
+  renderControllerMap();
   for (const row of document.querySelectorAll(".control-field")) {
     const { node, key } = row.dataset;
     const changed = controlDraft[node][key] !== controlProfile.values[node][key];
@@ -211,6 +232,7 @@ async function loadControls(controller) {
   } catch (error) {
     controlProfile = null;
     controlDraft = null;
+    renderControllerMap();
     controlRuntime = null;
     document.getElementById("controls-runtime-message").textContent = runtimeAvailable
       ? "実行中の値は未取得です。"
@@ -253,6 +275,7 @@ async function saveControls(event) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("controller-map-source").addEventListener("change", renderControllerMap);
   document.getElementById("controls-runtime-load").addEventListener("click", loadRuntimeValues);
   const select = document.getElementById("controls-profile");
   let lastController = select.value;

@@ -93,5 +93,5 @@ jobs:
           PYTHONPATH: scripts
         run: python -m pytest -q scripts/robot_manager
 
-      - name: Test controller names and saved versus edited values
-        run: node --test scripts/robot_manager/tests/control_labels.test.cjs
+      - name: Test controller names, diagrams, and saved versus edited values
+        run: node --test scripts/robot_manager/tests/*.test.cjs

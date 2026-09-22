@@ -37,12 +37,15 @@ class Element {
     this.dataset = {};
     this.events = {};
     this.className = '';
-    this.classList = { toggle: (name, on) => { this[name] = on; } };
+    this.classList = { toggle: (name, on) => { this[name] = on; },
+      add: (name) => { this[name] = true; } };
   }
   append(...children) { this.children.push(...children); }
   appendChild(child) { this.append(child); }
   replaceChildren(...children) { this.children = children; }
   setAttribute() {}
+  focus() { this.focused = true; }
+  scrollIntoView() {}
   addEventListener(name, handler) { this.events[name] = handler; }
   all() { return this.children.flatMap((child) => [child, ...child.all()]); }
   querySelector(selector) { return this.all().find((child) => child.className === selector.slice(1)); }
@@ -59,6 +62,7 @@ function editorFixture() {
       return elements.get(id);
     },
     createElement: (tag) => new Element(tag),
+    createElementNS: (namespace, tag) => new Element(tag),
     addEventListener(name, handler) { this.events[name] = handler; },
     querySelector: () => document.getElementById('tuning-tab'),
     querySelectorAll(selector) {
@@ -86,6 +90,7 @@ function editorFixture() {
     },
   });
   document.getElementById('controls-profile').value = 'uart';
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../static/controller-map.js'), 'utf8'), context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../static/controls.js'), 'utf8'), context);
   document.events.DOMContentLoaded();
   return { document, context, getPayload: () => savedPayload };
@@ -155,4 +160,29 @@ test('an older backend disables runtime reads without breaking saved-profile edi
   await document.getElementById('tuning-tab').events.click();
   assert.equal(document.getElementById('controls-runtime-load').disabled, false);
   assert.equal(document.getElementById('controls-runtime-message').textContent, '実行中の値は未取得です。');
+});
+
+
+test('controller drawing follows edits and can show the saved mapping without losing the draft', async () => {
+  const { document, context } = editorFixture();
+  await vm.runInContext('loadControls("uart")', context);
+  const host = document.getElementById('controller-map');
+  assert.equal(host.children[0].tag, 'svg');
+  const input = document.getElementById('control-shot_component-fire_button');
+  input.value = '7';
+  input.events.input();
+  let list = host.children[1];
+  assert.equal(list.children[0].children[1].children[1].textContent, 'ZR（ボタン 7） · 変更あり');
+  list.children[0].events.click();
+  assert.equal(input.focused, true);
+  const source = document.getElementById('controller-map-source');
+  source.value = 'saved';
+  source.events.change();
+  list = host.children[1];
+  assert.equal(list.children[0].children[1].children[1].textContent, 'R（ボタン 5）');
+  assert.equal(input.value, '7');
+  source.value = 'draft';
+  source.events.change();
+  assert.equal(host.children[1].children[0].children[1].children[1].textContent,
+    'ZR（ボタン 7） · 変更あり');
 });

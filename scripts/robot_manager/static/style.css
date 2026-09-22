@@ -965,3 +965,30 @@ main {
 @media (max-width: 480px) {
   .control-field { grid-template-columns: minmax(0, 1fr); padding: 0.5rem; }
 }
+
+/* Controller illustration and linked assignments */
+.controller-map-panel { margin: 1rem 0 1.5rem; padding: 1rem; border: 1px solid #466077;
+  border-radius: var(--radius); background: #112033; }
+.controller-map-panel h3 { font-size: 1rem; margin-right: auto; }
+#controller-map svg { display: block; width: 100%; height: auto; margin: 0 auto;
+  max-width: 720px; font-family: inherit; }
+.map-control[role="button"] { cursor: pointer; }
+.map-control.map-assigned .map-control-shape { stroke: #61dddf; stroke-width: 3; }
+.map-control.map-changed .map-control-shape { stroke: var(--orange); }
+.map-control.map-highlight .map-control-shape, .map-control:focus .map-control-shape {
+  fill: #305775; stroke: #fff; stroke-width: 4; }
+.map-bindings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.6rem; }
+.map-binding { display: flex; align-items: center; gap: 0.65rem; padding: 0.75rem;
+  border: 1px solid #466077; border-radius: 8px; background: #172c42; color: var(--text);
+  font: inherit; text-align: left; cursor: pointer; min-width: 0; }
+.map-binding:hover, .map-binding:focus-visible { background: #23445e; outline: 2px solid #61dddf; }
+.map-binding-changed { border-color: var(--orange); }
+.map-binding strong { display: block; font-size: 0.9rem; margin-bottom: 0.2rem; }
+.map-binding strong + span { display: block; font-size: 0.8rem; color: #b9cbdc; overflow-wrap: anywhere; }
+.map-number { display: grid; place-items: center; flex: 0 0 1.7rem; height: 1.7rem;
+  border-radius: 50%; color: #122235; background: #61dddf; font-weight: 700; }
+.map-help { font-size: 0.8rem; line-height: 1.6; color: #b9cbdc; margin-top: 0.9rem; }
+@media (max-width: 520px) {
+  .controller-map-panel { padding: 0.6rem; }
+  .map-bindings { grid-template-columns: minmax(0, 1fr); }
+}
