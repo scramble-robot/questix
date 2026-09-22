@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>QUESTiX Robot Manager</title>
-  <link rel="stylesheet" href="/static/style.css?v=14">
+  <link rel="stylesheet" href="/static/style.css?v=15">
 </head>
 
 <body>
@@ -147,8 +147,9 @@
           <p id="controller-map-caption" class="control-help"></p>
           <div class="control-toolbar map-save-bar">
             <span id="map-change-count" role="status">未保存: 0 項目</span>
-            <button type="submit" form="controls-form" id="map-save" class="btn btn-small" disabled>操作設定を保存</button>
+            <button type="button" id="map-save" class="btn btn-small" disabled>操作設定を保存</button>
           </div>
+          <p id="map-status" class="map-help" role="status" aria-live="polite"></p>
           <div id="controller-map"></div>
           <dialog id="controller-map-editor" class="map-editor" aria-labelledby="map-editor-title">
             <div class="map-editor-header">
@@ -165,7 +166,7 @@
             <button type="button" id="map-edit-draft" class="btn btn-small" hidden>編集中に切り替える</button>
             <p id="map-feedback" class="map-help" role="status"></p>
           </dialog>
-          <p class="map-help">図のキーを押して機能を選ぶか、番号付きの機能を押して割り当て先を選べます。
+          <p class="map-help">図のキーを押して機能を選ぶか、図の番号・番号付きの機能を押して割り当て先を選べます。
             ポップアップ内で「編集値に反映」を押し、図の上の「操作設定を保存」で確定します。
             番号は機能に固定され、割り当て先を変えても同じ番号で表示します。
             通常走行・射出の操作図です。左右独立スティック／Joy 直接駆動の単体起動用設定は下のフォームで変更できます。</p>
@@ -360,8 +361,8 @@
 
   <script src="/static/app.js?v=9"></script>
   <script src="/static/control-labels.js?v=1"></script>
-  <script src="/static/controller-map.js?v=3"></script>
-  <script src="/static/controls.js?v=6"></script>
+  <script src="/static/controller-map.js?v=4"></script>
+  <script src="/static/controls.js?v=7"></script>
 </body>
 
 </html>

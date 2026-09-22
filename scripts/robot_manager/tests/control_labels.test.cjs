@@ -50,9 +50,13 @@ class Element {
   showModal() { this.open = true; }
   close() { this.open = false; this.events.close?.(); }
   getBoundingClientRect() { return { left: 100, right: 500, top: 100, bottom: 500 }; }
+  checkValidity() { return this.valid !== false; }
   addEventListener(name, handler) { this.events[name] = handler; }
   all() { return this.children.flatMap((child) => [child, ...child.all()]); }
-  querySelector(selector) { return this.all().find((child) => child.className === selector.slice(1)); }
+  querySelector(selector) {
+    return this.all().find((child) => selector === ':invalid' ? child.valid === false
+      : child.className === selector.slice(1));
+  }
 }
 
 function editorFixture(extraValues = {}) {
@@ -353,4 +357,67 @@ test('function popup moves a custom index to a standard input and closes on prof
   assert.equal(vm.runInContext('controlDraft.shot_component.fire_button', context), 7);
   await vm.runInContext('loadControls("uart")', context);
   assert.equal(document.getElementById('controller-map-editor').open, false);
+});
+
+test('each number on a shared stick opens its own function and restores focus after moving', async () => {
+  const { document, context } = editorFixture({
+    joy_controller: { linear_x_axis: 1, linear_y_axis: 0, angular_z_axis: 3 },
+  });
+  await vm.runInContext('loadControls("uart")', context);
+  const selector = '[data-map-function="joy_controller.linear_x_axis"]';
+  const badge = document.querySelector(selector);
+  assert.equal(badge.attributes.role, 'button');
+  assert.equal(badge.children[1].textContent, '1');
+  badge.events.keydown({ key: ' ', preventDefault() {} });
+  assert.equal(document.getElementById('map-action').value, 'joy_controller.linear_x_axis');
+  assert.equal(document.getElementById('map-input').value, 'axis:1');
+  selectMap(document, 'map-input', 'axis:4');
+  document.getElementById('map-apply').events.click();
+  document.getElementById('map-close').events.click();
+  assert.equal(vm.runInContext('controlDraft.joy_controller.linear_x_axis', context), 4);
+  assert.equal(vm.runInContext('controlDraft.joy_controller.linear_y_axis', context), 0);
+  assert.equal(document.querySelector(selector).focusOptions.preventScroll, true);
+  document.querySelector('[data-map-function="joy_controller.linear_y_axis"]').events.click();
+  assert.equal(document.getElementById('map-action').value, 'joy_controller.linear_y_axis');
+});
+
+test('diagram save reports success and validation failures locally without sending invalid values', async () => {
+  const { document, context, getPayload } = editorFixture();
+  await vm.runInContext('loadControls("uart")', context);
+  chooseSpot(document, 'face-right');
+  document.getElementById('map-apply').events.click();
+  document.getElementById('map-close').events.click();
+  const form = document.getElementById('controls-form');
+  const input = document.getElementById('control-shot_component-fire_button');
+  form.valid = false;
+  input.valid = false;
+  input.validationMessage = '範囲外です。';
+  await document.getElementById('map-save').events.click({ preventDefault() {} });
+  assert.equal(getPayload(), undefined);
+  assert.match(document.getElementById('map-status').textContent, /射出ボタン番号.*範囲外/);
+  assert.equal(document.getElementById('map-save').disabled, false);
+  form.valid = true;
+  input.valid = true;
+  await document.getElementById('map-save').events.click({ preventDefault() {} });
+  assert.equal(getPayload().values.shot_component.fire_button, 0);
+  assert.match(document.getElementById('map-status').textContent, /保存しました/);
+  assert.equal(document.getElementById('map-save').disabled, true);
+});
+
+test('a failed diagram save keeps the draft and revision and leaves the error next to the diagram', async () => {
+  const { document, context } = editorFixture();
+  await vm.runInContext('loadControls("uart")', context);
+  chooseSpot(document, 'face-right');
+  document.getElementById('map-apply').events.click();
+  document.getElementById('map-close').events.click();
+  for (const message of ['他の画面で変更されました。再読み込みしてください。', '通信に失敗しました。']) {
+    context.api = async () => { throw new Error(message); };
+    await document.getElementById('map-save').events.click({ preventDefault() {} });
+    assert.equal(document.getElementById('map-status').textContent, message);
+    assert.equal(vm.runInContext('controlDraft.shot_component.fire_button', context), 0);
+    assert.equal(vm.runInContext('controlProfile.values.shot_component.fire_button', context), 5);
+    assert.equal(vm.runInContext('controlProfile.revision', context), 'initial');
+    assert.equal(document.getElementById('map-save').disabled, false);
+    assert.equal(document.getElementById('map-change-count').textContent, '未保存: 1 項目');
+  }
 });

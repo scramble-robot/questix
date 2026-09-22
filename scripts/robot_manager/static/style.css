@@ -973,6 +973,8 @@ main {
 #controller-map svg { display: block; width: 100%; height: auto; margin: 0 auto;
   max-width: 720px; font-family: inherit; }
 .map-control[role="button"] { cursor: pointer; }
+.map-function { cursor: pointer; }
+.map-function:hover circle, .map-function:focus circle { stroke: #fff; stroke-width: 3; fill: #b0ffff; }
 .map-control.map-assigned .map-control-shape { stroke: #61dddf; stroke-width: 3; }
 .map-control.map-changed .map-control-shape { stroke: var(--orange); }
 .map-control.map-highlight .map-control-shape, .map-control:focus .map-control-shape {

@@ -207,10 +207,22 @@ const ControllerMap = (() => {
       if (mapped.some((card) => card.assignment.changed)) group.classList.add("map-changed");
       [...assignedNumbers].forEach((number, index) => {
         const badgeX = x + radius - 4 + index * 24;
-        group.append(element("circle", { cx: badgeX, cy: y - 18, r: 12,
-        fill: "#61dddf", stroke: "#122235", "stroke-width": 2 }),
-      element("text", { x: badgeX, y: y - 14, fill: "#10202d",
-        "text-anchor": "middle", "font-size": 12, "font-weight": "bold" }, String(number)));
+        const assignment = mapped.find((card) => card.assignment.number === number).assignment;
+        const actionId = `${assignment.node}.${assignment.key}`;
+        // Siblings, not nested buttons: each number edits its own function.
+        const badge = element("g", { class: "map-function", role: "button", tabindex: "0",
+          "data-map-function": actionId, "aria-haspopup": "dialog",
+          "aria-label": `${actionLabel(assignment.key, assignment.action)}。割り当て先を編集` });
+        badge.append(element("circle", { cx: badgeX, cy: y - 18, r: 12,
+          fill: "#61dddf", stroke: "#122235", "stroke-width": 2 }),
+        element("text", { x: badgeX, y: y - 14, fill: "#10202d",
+          "text-anchor": "middle", "font-size": 12, "font-weight": "bold" }, String(number)));
+        const choose = () => onAction(assignment, `[data-map-function="${actionId}"]`);
+        badge.addEventListener("click", choose);
+        badge.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") { event.preventDefault(); choose(); }
+        });
+        svg.append(badge);
       });
     }
     for (const [id, { group, name }] of spots) {

@@ -123,6 +123,7 @@ function applyMapAssignment() {
 
 function controlMessage(message) {
   document.getElementById("controls-message").textContent = message;
+  document.getElementById("map-status").textContent = message;
 }
 
 function controllerName(controller) {
@@ -158,12 +159,12 @@ function renderControllerMap() {
     ? "保存済みの割り当てを表示しています。"
     : "編集中の割り当てを表示しています。変更は保存するまで反映されません。";
   ControllerMap.render(host, controlProfile.controller,
-    saved ? controlProfile.values : controlDraft, controlProfile.values, (assignment) => {
+    saved ? controlProfile.values : controlDraft, controlProfile.values, (assignment, returnTarget) => {
       const actionId = `${assignment.node}.${assignment.key}`;
       openMapEditor({ mode: "action", spot: assignment.spot, key: assignment.key,
         title: ControllerMap.actionLabel(assignment.key, assignment.action), actionId,
         inputId: `${ControlLabels.kind(assignment.key)}:${assignment.value}` },
-      `[data-action="${actionId}"]`);
+      returnTarget || `[data-action="${actionId}"]`);
     }, { selectedSpot: mapSelection?.spot, onSelect: (spot, title) => {
       openMapEditor({ mode: "key", spot, title }, `[data-spot="${spot}"]`);
     } });
@@ -378,7 +379,16 @@ function confirmControlDiscard() {
 async function saveControls(event) {
   event.preventDefault();
   if (controlsBusy || !controlProfile) return;
+  // Check constraints without the browser scrolling to a field below the diagram.
+  if (!document.getElementById("controls-form").checkValidity()) {
+    const invalid = document.getElementById("controls-fields").querySelector(":invalid");
+    const group = controlProfile.groups.find((item) => item.node === invalid?.dataset.node);
+    const field = group?.fields.find((item) => item.key === invalid.dataset.key);
+    controlMessage(`${field?.label || "入力値"}を確認してください。${invalid?.validationMessage || ""}`);
+    return;
+  }
   controlsSetBusy(true);
+  controlMessage("操作設定を保存しています…");
   try {
     controlProfile = await api(`/api/control-config/${controlProfile.controller}`, {
       method: "PUT",
@@ -398,6 +408,7 @@ async function saveControls(event) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("map-save").addEventListener("click", saveControls);
   const mapDialog = document.getElementById("controller-map-editor");
   document.getElementById("map-close").addEventListener("click", () => mapDialog.close());
   mapDialog.addEventListener("close", finishMapEditor);
