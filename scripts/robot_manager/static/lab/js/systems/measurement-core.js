@@ -10,18 +10,18 @@ function measurementStats(values) {
   };
 }
 function fitMeasurement(rows) {
-  const train = rows.filter((r) => !r.test),
-    check = rows.filter((r) => r.test);
+  const train = rows.filter((r) => !r.test);
+  const check = rows.filter((r) => r.test);
   if (train.length < 2 || rows.some((r) => !Number.isFinite(r.x) || !Number.isFinite(r.y)))
     return null;
-  const x = measurementStats(train.map((r) => r.x)).mean,
-    y = measurementStats(train.map((r) => r.y)).mean,
-    variance = train.reduce((s, r) => s + (r.x - x) ** 2, 0);
+  const x = measurementStats(train.map((r) => r.x)).mean;
+  const y = measurementStats(train.map((r) => r.y)).mean;
+  const variance = train.reduce((s, r) => s + (r.x - x) ** 2, 0);
   if (variance < 1e-9) return null;
-  const slope = train.reduce((s, r) => s + (r.x - x) * (r.y - y), 0) / variance,
-    intercept = y - slope * x,
-    min = Math.min(...train.map((r) => r.x)),
-    max = Math.max(...train.map((r) => r.x));
+  const slope = train.reduce((s, r) => s + (r.x - x) * (r.y - y), 0) / variance;
+  const intercept = y - slope * x;
+  const min = Math.min(...train.map((r) => r.x));
+  const max = Math.max(...train.map((r) => r.x));
   const predictions = check.map((r) => ({
     ...r,
     predicted: slope * r.x + intercept,

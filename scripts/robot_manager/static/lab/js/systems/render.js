@@ -1,8 +1,14 @@
 import { html, svg, nothing } from '../vendor/lit-html.js';
+import { loadJson, fillSentence as fill } from '../core/content.js';
 
 // Scenes and charts of the six "systems" courses, as lit templates. Every function here is pure:
 // it turns a finished run and the sample index being shown into markup, and holds no state.
-// The readings and explanations that go with a scene live in narration.js.
+// The readings and explanations that go with a scene live in narration.js. Every caption comes
+// from content/systems/render.json; the run's status names come from content/systems/core.json,
+// the file core.js takes them from, because a few scenes compare against them.
+
+const copy = await loadJson('content/systems/render.json');
+const { status: STATUS } = await loadJson('content/systems/core.json');
 
 const SERIES_COLORS = ['#3d8b77', '#5d83bf', '#c18837', '#a4abb2']; // one per chart line, in order
 const STROKE = '#77939e';
@@ -113,12 +119,16 @@ function scene(body, description) {
   </svg>`;
 }
 
-const sceneDescription = (sample) => `${sample.status}、開始から${num(sample.t, 1)}秒`;
+const sceneDescription = (sample) =>
+  fill(copy.scene.description, { status: sample.status, time: num(sample.t, 1) });
 
 // --- scenes -----------------------------------------------------------------------------------
 
-const VIEW_LABELS = { coordination: 'アームを横から見る', behavior: '部屋を上から見る' };
-const viewLabel = (course) => VIEW_LABELS[course] ?? 'ロボットを横から見る';
+const VIEW_LABELS = {
+  coordination: copy.scene.viewLabels.coordination,
+  behavior: copy.scene.viewLabels.behavior,
+};
+const viewLabel = (course) => VIEW_LABELS[course] ?? copy.scene.viewLabels.sideView;
 
 const GROUND_Y = 260; // baseline the side-view robots stand on
 
@@ -136,6 +146,7 @@ function floorAxis(toX, lastMark, step = 1) {
 }
 
 function armScene(run, index) {
+  const text = copy.arm;
   const sample = run.samples[index];
   const toX = (mm) => 120 + mm * 1.65;
   const toY = (mm) => 302 - mm * 1.05;
@@ -148,9 +159,9 @@ function armScene(run, index) {
     label(28, 32, viewLabel('coordination')),
     line(120, 302, 750, 302),
     line(120, 302, 120, 76),
-    label(558, 330, '根元からの横位置（mm）', undefined, 14),
-    label(22, 70, '高さ（mm）', undefined, 14),
-    label(72, 330, '根元（肩）', undefined, 14),
+    label(558, 330, text.horizontalAxis, undefined, 14),
+    label(22, 70, text.heightAxis, undefined, 14),
+    label(72, 330, text.shoulder, undefined, 14),
     line(toX(40), toY(30), toX(sample.target.x), toY(sample.target.z), '#708995', 1.5, '5 5'),
     run.topic === 'calibrate'
       ? markers.map((marker) => circle(toX(marker.x), toY(marker.z), 5, '#aebbd6'))
@@ -173,11 +184,11 @@ function armScene(run, index) {
       strokeWidth: 2,
     }),
     circle(toX(sample.estimate.x), toY(sample.estimate.z), 8, '#91bfff'),
-    label(458, 58, '黄：手先を近づけたい物体', '#e9ca85'),
-    label(458, 82, '青：計算した手先の行き先', '#91bfff'),
+    label(458, 58, text.targetKey, '#e9ca85'),
+    label(458, 82, text.estimateKey, '#91bfff'),
     box(toX(40) - 12, toY(30) - 7, 24, 14, '#91bfff', { rx: 4 }),
-    label(toX(40) + 24, toY(30), 'RGB-Dカメラ', '#91bfff', 14),
-    label(458, 110, '物体と手先の距離 ' + num(sample.error, 1) + ' mm', '#dfeaed'),
+    label(toX(40) + 24, toY(30), text.camera, '#91bfff', 14),
+    label(458, 110, fill(text.tipDistance, { distance: num(sample.error, 1) }), '#dfeaed'),
   ];
   return scene(body, sceneDescription(sample));
 }
@@ -198,13 +209,13 @@ function roomScene(run, index) {
     box(55, 50, 690, 270, '#233e4a', { rx: 8 }),
     svg`<path d=${trail} fill="none" stroke="#74b7a0" stroke-width="2" />`,
     box(toX(1.3) - 8, toY(parcelY) - 8, 16, 16, '#dab57e', { rx: 3 }),
-    label(toX(1.3) - 30, toY(parcelY) - 23, '荷物', undefined, 14),
+    label(toX(1.3) - 30, toY(parcelY) - 23, copy.room.parcel, undefined, 14),
     circle(toX(4.3), toY(2), 26, '#e7ca81'),
-    label(toX(4.3) - 30, toY(2) - 39, '届け先', undefined, 14),
+    label(toX(4.3) - 30, toY(2) - 39, copy.room.delivery, undefined, 14),
     sample.blocked
       ? [
           box(toX(2.45), toY(1.4), 58, 90, '#ab7459', { rx: 5 }),
-          label(toX(2.4), toY(1.25), '障害物', '#e7b692', 14),
+          label(toX(2.4), toY(1.25), copy.room.obstacle, '#e7b692', 14),
         ]
       : nothing,
     robot(toX(sample.x), toY(sample.y), (sample.theta * 180) / Math.PI + 90),
@@ -214,6 +225,7 @@ function roomScene(run, index) {
 }
 
 function mechanicsScene(run, index) {
+  const text = copy.mechanics;
   const sample = run.samples[index];
   // Keep the whole run on screen, with a little room past the furthest point reached.
   const extent =
@@ -223,14 +235,14 @@ function mechanicsScene(run, index) {
     (event) => event.kind === 'power-off' || event.kind === 'brake',
   );
   const transitionLabel =
-    transition?.kind === 'power-off' ? '出力を0 %にした位置' : 'ブレーキを始めた位置';
+    transition?.kind === 'power-off' ? text.powerOffPosition : text.brakePosition;
   const body = [
     label(28, 32, viewLabel('mechanics')),
     floorAxis(toX, Math.floor(extent), extent > 10 ? 2 : 1),
     run.topic === 'braking'
       ? [
           line(toX(3), 100, toX(3), GROUND_Y, '#e7ca81', 3),
-          label(toX(3) - 25, 80, '3 mの線', '#e7ca81', 15),
+          label(toX(3) - 25, 80, text.stopLine, '#e7ca81', 15),
         ]
       : nothing,
     transition && transition.t <= sample.t
@@ -252,7 +264,7 @@ function mechanicsScene(run, index) {
           label(
             Math.max(32, Math.min(565, toX(sample.odom) - 100)),
             180,
-            '車輪の回転で推定した位置',
+            text.odometryPosition,
             '#91bfff',
             14,
           ),
@@ -263,14 +275,14 @@ function mechanicsScene(run, index) {
     label(
       45,
       104,
-      '前後の力の差 ' + num(sample.force, 1) + ' N　加速度 ' + num(sample.accel, 2) + ' m/秒²',
+      fill(text.forces, { force: num(sample.force, 1), accel: num(sample.accel, 2) }),
       '#c6d6dd',
       16,
     ),
     label(
       45,
       70,
-      '機体 ' + num(sample.v) + ' m/秒　車輪から ' + num(sample.wheelSpeed) + ' m/秒',
+      fill(text.speeds, { speed: num(sample.v), wheelSpeed: num(sample.wheelSpeed) }),
       '#a8dcca',
       17,
     ),
@@ -281,51 +293,60 @@ function mechanicsScene(run, index) {
 const DIAGNOSTICS_EXTENT = 4.8; // metres shown across the scene
 
 function distanceParts(sample, toX) {
+  const text = copy.diagnostics;
   return [
     box(toX(3.2), 174, toX(4) - toX(3.2), 62, '#b57959'),
-    label(toX(3.05) - 10, 152, '棚の張り出し', '#e3b794', 15),
+    label(toX(3.05) - 10, 152, text.shelf, '#e3b794', 15),
     line(toX(sample.x), 245, toX(4), 245, '#7dd4cb', 2, '5 4'),
     line(toX(sample.x) + 25, 222, toX(3.2), 222, '#98bfff', 2, '5 4'),
-    label(48, 77, 'LiDAR → 奥の壁まで ' + num(sample.lidar) + ' m', '#7dd4cb', 17),
-    label(48, 109, 'RGB-Dカメラ → 棚まで ' + num(sample.depth) + ' m', '#98bfff', 17),
+    label(48, 77, fill(text.lidarRange, { distance: num(sample.lidar) }), '#7dd4cb', 17),
+    label(48, 109, fill(text.cameraRange, { distance: num(sample.depth) }), '#98bfff', 17),
   ];
 }
 
 const DATA_LOSS_TIME = 1.5; // seconds; after this the range stops being updated
 
 function missingParts(sample, toX) {
+  const text = copy.diagnostics;
   const stale = sample.t >= DATA_LOSS_TIME;
   return [
     box(toX(3.2), 145, 20, 115, '#a8846b'),
-    label(toX(3.2) - 22, 125, '障害物', '#e3b794', 15),
+    label(toX(3.2) - 22, 125, text.obstacle, '#e3b794', 15),
     line(toX(sample.x), 235, toX(3.2), 235, '#7dd4cb', 2, stale ? '2 8' : '5 4'),
-    label(48, 79, '最後に届いた距離 ' + num(sample.range) + ' m', '#98bfff', 18),
-    label(
-      48,
-      111,
-      stale ? '1.5秒以降、距離の数字は更新されない' : '新しい値を受信中',
-      stale ? '#e7bf80' : '#bdcfd6',
-      15,
-    ),
-    label(48, 325, '現在の距離（観察用） ' + num(sample.depth) + ' m', '#bdcfd6', 15),
+    label(48, 79, fill(text.lastRange, { distance: num(sample.range) }), '#98bfff', 18),
+    label(48, 111, stale ? text.staleRange : text.freshRange, stale ? '#e7bf80' : '#bdcfd6', 15),
+    label(48, 325, fill(text.currentRange, { distance: num(sample.depth) }), '#bdcfd6', 15),
   ];
 }
 
 function impactParts(run, sample, toX) {
+  const text = copy.diagnostics;
   const shock = run.events.find((event) => event.kind === 'shock');
   const happened = shock && sample.t >= shock.t;
   return [
-    label(48, 80, 'IMUの加速度 ' + num(sample.accel, 1) + ' m/秒²', '#dce5ea', 18),
-    label(48, 112, '停止の境目 ' + num(run.config.impactLimit, 1) + ' m/秒²以上', '#e7bf80', 15),
+    label(48, 80, fill(text.imuAcceleration, { accel: num(sample.accel, 1) }), '#dce5ea', 18),
+    label(
+      48,
+      112,
+      fill(text.impactLimit, { limit: num(run.config.impactLimit, 1) }),
+      '#e7bf80',
+      15,
+    ),
     happened
       ? [
           line(toX(shock.x), 165, toX(shock.x), GROUND_Y, '#e7bf80', 2, '4 5'),
-          label(Math.max(48, toX(shock.x) - 65), 146, '2秒：' + shock.label, '#e7bf80', 16),
+          label(
+            Math.max(48, toX(shock.x) - 65),
+            146,
+            fill(text.shockMarker, { event: shock.label }),
+            '#e7bf80',
+            16,
+          ),
           // A short flash around the robot marks the moment of the shock.
           sample.t < 2.2 ? circle(toX(sample.x), GROUND_Y - 24, 36, '#e7bf80') : nothing,
         ]
       : nothing,
-    label(48, 325, '出来事に相当するIMUの波形を入力する実験', '#bdcfd6', 15),
+    label(48, 325, text.impactNote, '#bdcfd6', 15),
   ];
 }
 
@@ -341,7 +362,10 @@ function diagnosticsScene(run, index) {
     label(28, 32, viewLabel('diagnostics')),
     floorAxis(toX, Math.floor(DIAGNOSTICS_EXTENT)),
     run.topic === 'distance'
-      ? [box(toX(4), 75, 17, 185, '#8e9da5'), label(toX(4) - 13, 60, '壁', undefined, 15)]
+      ? [
+          box(toX(4), 75, 17, 185, '#8e9da5'),
+          label(toX(4) - 13, 60, copy.diagnostics.wall, undefined, 15),
+        ]
       : nothing,
     topicParts(),
     robot(toX(sample.x), GROUND_Y, 0, true),
@@ -350,35 +374,34 @@ function diagnosticsScene(run, index) {
 }
 
 function timingScene(run, index) {
+  const text = copy.timing;
   const sample = run.samples[index];
   const mapping = run.topic === 'alignment';
   const toX = (metres) => 55 + (metres / 4.8) * 690;
   const stages = [
-    ['① 距離を測った時刻', sample.stamp],
-    ['② 情報が届いた時刻', sample.receive],
-    ['③ 今、判断に使う時刻', sample.stamp === null ? null : sample.t],
+    [text.stages.measured, sample.stamp],
+    [text.stages.received, sample.receive],
+    [text.stages.used, sample.stamp === null ? null : sample.t],
   ];
   const measuredTrail =
     sample.measuredX !== null && sample.x - sample.measuredX > 0.04
       ? svg`<g opacity=".35">${robot(toX(sample.measuredX), GROUND_Y, 0, true)}</g>`
       : nothing;
   const mapParts = () => [
-    label(48, 125, '青：計算して地図に置いた壁', '#98bfff', 16),
+    label(48, 125, text.mapKey, '#98bfff', 16),
     line(toX(sample.wallEstimate), 140, toX(sample.wallEstimate), GROUND_Y, '#91bfff', 4),
     line(toX(sample.mapBaseX), 184, toX(sample.wallEstimate), 184, '#91bfff', 2, '5 4'),
-    label(48, 157, '計算した壁の位置 ' + num(sample.wallEstimate) + ' m', '#91bfff', 17),
+    label(48, 157, fill(text.wallEstimate, { distance: num(sample.wallEstimate) }), '#91bfff', 17),
   ];
   const rangeParts = () => [
-    label(48, 125, '測ったときの距離 ' + num(sample.rawRange) + ' m', '#e6c189', 16),
-    label(48, 156, '現在の実際の距離 ' + num(sample.range) + ' m', '#8bd6be', 16),
+    label(48, 125, fill(text.rangeWhenMeasured, { distance: num(sample.rawRange) }), '#e6c189', 16),
+    label(48, 156, fill(text.currentRange, { distance: num(sample.range) }), '#8bd6be', 16),
     line(toX(sample.measuredX), 179, toX(4), 179, '#e6c189', 2, '4 5'),
     line(toX(sample.x), 200, toX(4), 200, '#8bd6be', 2),
   ];
-  const legend = mapping
-    ? '薄い機体：距離を測ったときの位置　実線の機体：現在の位置'
-    : '薄い機体：測定時の位置　点線：止まりたい位置（壁の0.5 m手前）';
+  const legend = mapping ? text.mapLegend : text.rangeLegend;
   const body = [
-    label(28, 28, '1件の距離データが判断に使われるまで'),
+    label(28, 28, text.title),
     stages.map(([title, time], position) => {
       const x = 48 + position * 245;
       return [
@@ -389,23 +412,21 @@ function timingScene(run, index) {
     }),
     floorAxis(toX, 4),
     box(toX(4), 132, 17, 128, '#8e9da5'),
-    label(toX(4) - 24, 119, '実際の壁', '#cedbe0', 14),
+    label(toX(4) - 24, 119, text.realWall, '#cedbe0', 14),
     mapping ? nothing : line(toX(3.5), 220, toX(3.5), GROUND_Y, '#e7ca81', 2, '5 4'),
     sample.measuredX !== null
       ? [measuredTrail, mapping ? mapParts() : rangeParts()]
-      : label(48, 134, '最初の距離データが届くのを待っています', '#c6d9e3', 16),
+      : label(48, 134, text.waitingFirstData, '#c6d9e3', 16),
     robot(toX(sample.x), GROUND_Y, 0, true),
     label(48, 324, legend, '#c3d5dc', 14),
   ];
   const description =
-    '測った時刻 ' +
-    num(sample.stamp, 2) +
-    '秒、届いた時刻 ' +
-    num(sample.receive, 2) +
-    '秒、判断に使う時刻 ' +
-    num(sample.t, 2) +
-    '秒。' +
-    (mapping ? '灰色は実際の壁、青は地図へ置いた壁。' : '薄い機体は測定時、実線の機体は現在。') +
+    fill(text.description, {
+      stamp: num(sample.stamp, 2),
+      receive: num(sample.receive, 2),
+      now: num(sample.t, 2),
+    }) +
+    (mapping ? text.mapDescription : text.rangeDescription) +
     sample.status;
   return scene(body, description);
 }
@@ -415,7 +436,6 @@ function timingScene(run, index) {
 const TRACKING_SCALE = 115; // pixels per metre
 const TRACKING_RADIUS = 0.18 * TRACKING_SCALE; // collision circle of either robot
 const TARGET_ACCENT = '#d2dce1'; // the other robot is drawn in grey, not in QUESTiX green
-const MEASURED_KEY = '青い点：カメラで測った相手の中心';
 
 function arrow(x1, y1, x2, y2, color) {
   const angle = Math.atan2(y2 - y1, x2 - x1);
@@ -440,6 +460,7 @@ function trackingRobot(x, y, angle, isTarget = false) {
 }
 
 function trackingScene(run, index) {
+  const text = copy.tracking;
   const sample = run.samples[index];
   const crossing = run.topic === 'crossing';
   const predicting = run.topic === 'prediction';
@@ -457,22 +478,22 @@ function trackingScene(run, index) {
   const drawnForecastX = forecastX === null ? null : Math.max(48, Math.min(752, forecastX));
   const offscreen = forecastX !== null && forecastX !== drawnForecastX;
   const questixLabelY = Math.max(110, Math.min(553, questixY + 6));
-  const contact = crossing && sample.status === '接触して終了';
+  const contact = crossing && sample.status === STATUS.contact;
 
   const goalParts = [
     box(questixX - 43, 60, 86, 510, '#78c8a915', { rx: 8 }),
     line(questixX, 545, questixX, 108, '#86bda8', 2, '8 9'),
     circle(questixX, toY(4.4), TRACKING_RADIUS, '#92d8bd'),
     centered(questixX, toY(4.4) + 6, '◎', '#a6e6cb', 22),
-    label(questixX + 39, toY(4.4) + 6, 'ゴール', '#b5e8d4', 18),
-    centered(questixX, targetY - 69, '二つの進路が交わる場所', '#e0dbb8', 16),
+    label(questixX + 39, toY(4.4) + 6, text.goal, '#b5e8d4', 18),
+    centered(questixX, targetY - 69, text.crossingPoint, '#e0dbb8', 16),
   ];
   const facingParts = [
     arrow(questixX, questixY - 40, questixX, questixY - 110, '#8bd6be'),
-    label(questixX + 24, questixY - 83, 'カメラの正面', '#a6e0cc', 17),
+    label(questixX + 24, questixY - 83, text.cameraFront, '#a6e0cc', 17),
   ];
   const positionAxis = [
-    label(54, 110, '相手の横方向の位置（m）', '#afc6d0', 15),
+    label(54, 110, text.positionAxis, '#afc6d0', 15),
     line(92, 145, 710, 145, '#718d99', 1),
     [-1, 0, 1, 2, 3].map((metre) => [
       line(toX(metre), 139, toX(metre), 151, '#a5bbc5', 1),
@@ -505,7 +526,9 @@ function trackingScene(run, index) {
           centered(
             Math.max(122, Math.min(674, drawnForecastX)),
             targetY - 68,
-            offscreen ? '予測は図の外' : num(sample.predicted.targetTime, 1) + '秒の予測位置',
+            offscreen
+              ? text.offscreenForecast
+              : fill(text.forecastPosition, { time: num(sample.predicted.targetTime, 1) }),
             '#efcf80',
             17,
           ),
@@ -518,9 +541,9 @@ function trackingScene(run, index) {
     box(40, targetY - 43, 720, 86, '#bacad00e', { rx: 8 }),
     line(40, targetY - 43, 760, targetY - 43, '#76919b', 1),
     line(40, targetY + 43, 760, targetY + 43, '#76919b', 1),
-    label(54, targetY + 72, '相手のロボットが通る道', '#c3d3db', 18),
+    label(54, targetY + 72, text.otherRoute, '#c3d3db', 18),
     crossing ? goalParts : facingParts,
-    label(54, 64, '部屋を上から見る', '#bfd1d8', 17),
+    label(54, 64, text.view, '#bfd1d8', 17),
     crossing ? nothing : positionAxis,
     previousObservation,
     forecastParts,
@@ -534,7 +557,7 @@ function trackingScene(run, index) {
     trackingRobot(targetX, targetY, direction < 0 ? -90 : 90, true),
     trackingRobot(questixX, questixY, 0),
     circle(measuredX, targetY, 6, '#c6dfff', '#568bd9'),
-    centered(Math.max(108, Math.min(690, targetX)), targetY + 105, '相手のロボット', '#e0e9ee', 18),
+    centered(Math.max(108, Math.min(690, targetX)), targetY + 105, text.otherRobot, '#e0e9ee', 18),
     label(questixX + 38, questixLabelY, 'QUESTiX', '#a6e0cc', 18),
     contact
       ? [
@@ -544,7 +567,7 @@ function trackingScene(run, index) {
             TRACKING_RADIUS + 12,
             '#ee9b83',
           ),
-          label(questixX + 38, questixLabelY + 25, '接触', '#ffb7a4', 18),
+          label(questixX + 38, questixLabelY + 25, text.contact, '#ffb7a4', 18),
         ]
       : label(
           questixX + 38,
@@ -554,16 +577,7 @@ function trackingScene(run, index) {
           16,
         ),
   ];
-  const description =
-    'QUESTiXは画面の上を向く。相手のロボットは、その正面を' +
-    (direction < 0 ? '右から左' : '左から右') +
-    'へ移動中。' +
-    (crossing ? 'QUESTiXも上のゴールへ進む。' : 'QUESTiXは下で止まり、相手の位置をカメラで測る。') +
-    '青い点は直近の測定位置。' +
-    (predicting ? '黄色の輪は測定から' + num(run.config.horizon, 1) + '秒先の予測位置。' : '') +
-    '開始から' +
-    num(sample.t, 1) +
-    '秒。';
+  const description = trackingDescription(run, sample, direction);
   return html`<div class="sys-tracking-scene">
     <div class="sys-tracking-context">
       <strong>${trackingIntro(crossing)}</strong>
@@ -574,32 +588,46 @@ function trackingScene(run, index) {
     </svg>
     <div class="sys-tracking-key">
       <span
-        ><i class="tracking-measured"></i>${MEASURED_KEY}<span class="sys-tracking-stamp"
-          >${num(sample.obs.t, 1) + '秒の測定'}</span
+        ><i class="tracking-measured"></i>${text.measuredKey}<span class="sys-tracking-stamp"
+          >${fill(text.measurementStamp, { time: num(sample.obs.t, 1) })}</span
         ></span
       >${predicting ? forecastKey(run, sample, offscreen) : nothing}
     </div>
   </div>`;
 }
 
+// The scene's accessible description: who faces where, what moves, and the time shown.
+function trackingDescription(run, sample, direction) {
+  const text = copy.tracking.description;
+  const crossing = run.topic === 'crossing';
+  const predicting = run.topic === 'prediction';
+  return (
+    fill(text.opening, { direction: direction < 0 ? text.rightToLeft : text.leftToRight }) +
+    (crossing ? text.crossing : text.watching) +
+    text.measured +
+    (predicting ? fill(text.forecast, { horizon: num(run.config.horizon, 1) }) : '') +
+    fill(text.elapsed, { time: num(sample.t, 1) })
+  );
+}
+
 function trackingStatusLabel(sample, crossing) {
-  if (!crossing) return '止まって観察';
-  if (sample.status === '相手を待つ') return '減速・待機';
+  if (!crossing) return copy.tracking.observing;
+  if (sample.status === STATUS.tracking.waitForOther) return copy.tracking.waiting;
   return sample.status;
 }
 
 function trackingIntro(crossing) {
-  if (crossing) return 'QUESTiXも進み、相手が横切るときは待ちます。';
-  return 'QUESTiXは止まり、正面を横切る相手をカメラで観察します。';
+  if (crossing) return copy.tracking.crossingIntro;
+  return copy.tracking.watchingIntro;
 }
 
 function forecastKey(run, sample, offscreen) {
+  const text = copy.tracking;
   const stamp = sample.predicted
-    ? num(sample.predicted.targetTime, 1) +
-      '秒にいると見積もった場所' +
-      (offscreen ? '（図の外）' : '')
-    : '2回以上測ると表示';
-  const caption = '黄色の輪：測定から' + num(run.config.horizon, 1) + '秒先の予測';
+    ? fill(text.forecastStamp, { time: num(sample.predicted.targetTime, 1) }) +
+      (offscreen ? text.forecastOffscreen : '')
+    : text.forecastPending;
+  const caption = fill(text.forecastCaption, { horizon: num(run.config.horizon, 1) });
   return html`<span
     ><i class="tracking-predicted"></i>${caption}<span class="sys-tracking-stamp"
       >${stamp}</span
@@ -618,98 +646,8 @@ function systemScene(run, index) {
 
 // --- charts -----------------------------------------------------------------------------------
 
-const SYSTEM_CHARTS = {
-  mechanics: [
-    {
-      title: '速さ',
-      unit: 'm/秒',
-      lines: [
-        ['v', '機体の速さ'],
-        ['wheelSpeed', '車輪の回転から求めた速さ'],
-      ],
-    },
-    { title: '前後の力の差', unit: 'N', lines: [['force', '前進させる力 − 抵抗する力']] },
-    { title: '加速度', unit: 'm/秒²', lines: [['accel', '速さの変わり方']] },
-    {
-      title: '移動した位置',
-      unit: 'm',
-      lines: [
-        ['x', '実際の位置'],
-        ['odom', '車輪の回転で推定した位置'],
-      ],
-    },
-  ],
-  behavior: [
-    {
-      title: '車輪の回転数',
-      unit: 'rpm',
-      lines: [
-        ['left', '左車輪'],
-        ['right', '右車輪'],
-      ],
-    },
-    { title: '走行の速さ', unit: 'm/秒', lines: [['v', '機体の速さ']] },
-  ],
-  tracking: [
-    {
-      title: '相手のロボットの速度',
-      unit: 'm/秒',
-      lines: [
-        ['actualVelocity', '相手のロボットの実際の速度'],
-        ['velocity', '測った位置から求めた速度'],
-      ],
-    },
-    {
-      title: '予測の答え合わせ',
-      unit: 'm',
-      lines: [['predictionError', '予測した位置と、その時刻の実際の位置のずれ']],
-    },
-    { title: '互いの間隔', unit: 'm', lines: [['separation', '相手とQUESTiXの表面の間隔']] },
-    {
-      title: '相手のロボットの位置',
-      unit: 'm',
-      lines: [
-        ['actualPosition', '相手のロボットの実際の位置'],
-        ['observedPosition', 'カメラで測った位置'],
-      ],
-    },
-  ],
-  coordination: [{ title: '手先と目標の距離', unit: 'mm', lines: [['error', '位置のずれ']] }],
-  timing: [
-    {
-      title: '壁までの距離',
-      unit: 'm',
-      lines: [
-        ['range', '現在の実際の距離（観察用）'],
-        ['usedRange', '停止判断に使った距離'],
-      ],
-    },
-    {
-      title: '使った情報の古さ',
-      unit: '秒',
-      lines: [['age', '測った時刻から判断に使うまでの時間']],
-    },
-    {
-      title: '地図へ置いた壁のずれ',
-      unit: 'm',
-      lines: [['wallError', '計算した壁の位置と、実際の4 mとの差']],
-    },
-    { title: '処理待ちの件数', unit: '件', lines: [['queue', '届いたが、まだ処理していない件数']] },
-  ],
-  diagnostics: [
-    {
-      title: 'センサーの距離',
-      unit: 'm',
-      lines: [
-        ['lidar', 'LiDAR'],
-        ['depth', '奥行き'],
-        ['range', '最後に届いた距離'],
-      ],
-    },
-    { title: '情報の古さ', unit: '秒', lines: [['age', '最後の測定からの時間']] },
-    { title: 'IMUの加速度', unit: 'm/秒²', lines: [['accel', '重力を除く前後の加速度']] },
-  ],
-};
+// Chart titles, units and the sample key and caption of each line, per course, in display order.
+const SYSTEM_CHARTS = copy.charts;
 
 const CHART_TOP = 40; // y where the "now" and transition rules start
 const CHART_BOTTOM = 195; // y of the lowest gridline; values grow upwards from here
@@ -725,21 +663,8 @@ const TRANSITION_KINDS = ['power-off', 'brake', 'data-loss', 'shock', 'turn', 's
 function chartFor(run, chartIndex) {
   const chart = SYSTEM_CHARTS[run.course][chartIndex] || SYSTEM_CHARTS[run.course][0];
   if (run.course !== 'diagnostics' || chartIndex !== 0) return chart;
-  if (run.topic === 'missing')
-    return {
-      ...chart,
-      lines: [
-        ['depth', '現在の距離（観察用）'],
-        ['range', '最後に届いた距離（判断に使用）'],
-      ],
-    };
-  return {
-    ...chart,
-    lines: [
-      ['lidar', 'LiDAR：奥の壁まで'],
-      ['depth', 'RGB-Dカメラ：棚まで'],
-    ],
-  };
+  if (run.topic === 'missing') return { ...chart, lines: copy.diagnosticsSensorLines.missing };
+  return { ...chart, lines: copy.diagnosticsSensorLines.shelf };
 }
 
 // The value at which the experiment decides to stop, drawn as a dashed line; null when the chart
@@ -770,7 +695,7 @@ function linePath(samples, key, toX, toY) {
     .join('');
 }
 
-const CHART_STYLE_KEY = '実線：今回 ／ 破線：前回（同じ色の値を比較）';
+const CHART_STYLE_KEY = copy.chart.styleKey;
 
 function chartLegend(chart, previous) {
   return html`<div class="sys-chart-legend">
@@ -811,7 +736,7 @@ function systemChart(run, index, chartIndex = 0, previous = null) {
           ${label(
             Math.min(595, Math.max(95, toX(transition.t) + 8)),
             24,
-            num(transition.t, 1) + '秒 ' + transition.label,
+            fill(copy.chart.transition, { time: num(transition.t, 1), label: transition.label }),
             '#885817',
             14,
           )}
@@ -824,7 +749,7 @@ function systemChart(run, index, chartIndex = 0, previous = null) {
           label(
             550,
             Math.max(50, toY(threshold) - 8),
-            '停止の境目 ' + num(threshold, 1),
+            fill(copy.chart.threshold, { value: num(threshold, 1) }),
             '#885817',
             13,
           ),
@@ -832,7 +757,11 @@ function systemChart(run, index, chartIndex = 0, previous = null) {
       : nothing;
 
   return html`${chartLegend(chart, previous)}
-    <svg viewBox="0 0 800 235" role="img" aria-label="横軸は開始からの秒数。縦軸は${chart.unit}">
+    <svg
+      viewBox="0 0 800 235"
+      role="img"
+      aria-label=${fill(copy.chart.description, { unit: chart.unit })}
+    >
       <rect width="800" height="235" fill="#f6f8f9" />
       ${[low, (low + high) / 2, high].map((value) => [
         line(CHART_LEFT, toY(value), CHART_RIGHT, toY(value), '#dfe6e8', 1),

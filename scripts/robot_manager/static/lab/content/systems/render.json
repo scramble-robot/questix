@@ -1,0 +1,206 @@
+{
+  "scene": {
+    "description": "{status}、開始から{time}秒",
+    "viewLabels": {
+      "coordination": "アームを横から見る",
+      "behavior": "部屋を上から見る",
+      "sideView": "ロボットを横から見る"
+    }
+  },
+  "arm": {
+    "horizontalAxis": "根元からの横位置（mm）",
+    "heightAxis": "高さ（mm）",
+    "shoulder": "根元（肩）",
+    "targetKey": "黄：手先を近づけたい物体",
+    "estimateKey": "青：計算した手先の行き先",
+    "camera": "RGB-Dカメラ",
+    "tipDistance": "物体と手先の距離 {distance} mm"
+  },
+  "room": {
+    "parcel": "荷物",
+    "delivery": "届け先",
+    "obstacle": "障害物"
+  },
+  "mechanics": {
+    "powerOffPosition": "出力を0 %にした位置",
+    "brakePosition": "ブレーキを始めた位置",
+    "stopLine": "3 mの線",
+    "odometryPosition": "車輪の回転で推定した位置",
+    "forces": "前後の力の差 {force} N　加速度 {accel} m/秒²",
+    "speeds": "機体 {speed} m/秒　車輪から {wheelSpeed} m/秒"
+  },
+  "diagnostics": {
+    "wall": "壁",
+    "shelf": "棚の張り出し",
+    "lidarRange": "LiDAR → 奥の壁まで {distance} m",
+    "cameraRange": "RGB-Dカメラ → 棚まで {distance} m",
+    "obstacle": "障害物",
+    "lastRange": "最後に届いた距離 {distance} m",
+    "staleRange": "1.5秒以降、距離の数字は更新されない",
+    "freshRange": "新しい値を受信中",
+    "currentRange": "現在の距離（観察用） {distance} m",
+    "imuAcceleration": "IMUの加速度 {accel} m/秒²",
+    "impactLimit": "停止の境目 {limit} m/秒²以上",
+    "shockMarker": "2秒：{event}",
+    "impactNote": "出来事に相当するIMUの波形を入力する実験"
+  },
+  "timing": {
+    "title": "1件の距離データが判断に使われるまで",
+    "stages": {
+      "measured": "① 距離を測った時刻",
+      "received": "② 情報が届いた時刻",
+      "used": "③ 今、判断に使う時刻"
+    },
+    "mapKey": "青：計算して地図に置いた壁",
+    "wallEstimate": "計算した壁の位置 {distance} m",
+    "rangeWhenMeasured": "測ったときの距離 {distance} m",
+    "currentRange": "現在の実際の距離 {distance} m",
+    "mapLegend": "薄い機体：距離を測ったときの位置　実線の機体：現在の位置",
+    "rangeLegend": "薄い機体：測定時の位置　点線：止まりたい位置（壁の0.5 m手前）",
+    "realWall": "実際の壁",
+    "waitingFirstData": "最初の距離データが届くのを待っています",
+    "description": "測った時刻 {stamp}秒、届いた時刻 {receive}秒、判断に使う時刻 {now}秒。",
+    "mapDescription": "灰色は実際の壁、青は地図へ置いた壁。",
+    "rangeDescription": "薄い機体は測定時、実線の機体は現在。"
+  },
+  "tracking": {
+    "measuredKey": "青い点：カメラで測った相手の中心",
+    "goal": "ゴール",
+    "crossingPoint": "二つの進路が交わる場所",
+    "cameraFront": "カメラの正面",
+    "positionAxis": "相手の横方向の位置（m）",
+    "offscreenForecast": "予測は図の外",
+    "forecastPosition": "{time}秒の予測位置",
+    "otherRoute": "相手のロボットが通る道",
+    "view": "部屋を上から見る",
+    "otherRobot": "相手のロボット",
+    "contact": "接触",
+    "observing": "止まって観察",
+    "waiting": "減速・待機",
+    "crossingIntro": "QUESTiXも進み、相手が横切るときは待ちます。",
+    "watchingIntro": "QUESTiXは止まり、正面を横切る相手をカメラで観察します。",
+    "measurementStamp": "{time}秒の測定",
+    "forecastStamp": "{time}秒にいると見積もった場所",
+    "forecastOffscreen": "（図の外）",
+    "forecastPending": "2回以上測ると表示",
+    "forecastCaption": "黄色の輪：測定から{horizon}秒先の予測",
+    "description": {
+      "opening": "QUESTiXは画面の上を向く。相手のロボットは、その正面を{direction}へ移動中。",
+      "rightToLeft": "右から左",
+      "leftToRight": "左から右",
+      "crossing": "QUESTiXも上のゴールへ進む。",
+      "watching": "QUESTiXは下で止まり、相手の位置をカメラで測る。",
+      "measured": "青い点は直近の測定位置。",
+      "forecast": "黄色の輪は測定から{horizon}秒先の予測位置。",
+      "elapsed": "開始から{time}秒。"
+    }
+  },
+  "chart": {
+    "styleKey": "実線：今回 ／ 破線：前回（同じ色の値を比較）",
+    "transition": "{time}秒 {label}",
+    "threshold": "停止の境目 {value}",
+    "description": "横軸は開始からの秒数。縦軸は{unit}"
+  },
+  "diagnosticsSensorLines": {
+    "missing": [
+      ["depth", "現在の距離（観察用）"],
+      ["range", "最後に届いた距離（判断に使用）"]
+    ],
+    "shelf": [
+      ["lidar", "LiDAR：奥の壁まで"],
+      ["depth", "RGB-Dカメラ：棚まで"]
+    ]
+  },
+  "charts": {
+    "mechanics": [
+      {
+        "title": "速さ",
+        "unit": "m/秒",
+        "lines": [
+          ["v", "機体の速さ"],
+          ["wheelSpeed", "車輪の回転から求めた速さ"]
+        ]
+      },
+      { "title": "前後の力の差", "unit": "N", "lines": [["force", "前進させる力 − 抵抗する力"]] },
+      { "title": "加速度", "unit": "m/秒²", "lines": [["accel", "速さの変わり方"]] },
+      {
+        "title": "移動した位置",
+        "unit": "m",
+        "lines": [
+          ["x", "実際の位置"],
+          ["odom", "車輪の回転で推定した位置"]
+        ]
+      }
+    ],
+    "behavior": [
+      {
+        "title": "車輪の回転数",
+        "unit": "rpm",
+        "lines": [
+          ["left", "左車輪"],
+          ["right", "右車輪"]
+        ]
+      },
+      { "title": "走行の速さ", "unit": "m/秒", "lines": [["v", "機体の速さ"]] }
+    ],
+    "tracking": [
+      {
+        "title": "相手のロボットの速度",
+        "unit": "m/秒",
+        "lines": [
+          ["actualVelocity", "相手のロボットの実際の速度"],
+          ["velocity", "測った位置から求めた速度"]
+        ]
+      },
+      {
+        "title": "予測の答え合わせ",
+        "unit": "m",
+        "lines": [["predictionError", "予測した位置と、その時刻の実際の位置のずれ"]]
+      },
+      { "title": "互いの間隔", "unit": "m", "lines": [["separation", "相手とQUESTiXの表面の間隔"]] },
+      {
+        "title": "相手のロボットの位置",
+        "unit": "m",
+        "lines": [
+          ["actualPosition", "相手のロボットの実際の位置"],
+          ["observedPosition", "カメラで測った位置"]
+        ]
+      }
+    ],
+    "coordination": [{ "title": "手先と目標の距離", "unit": "mm", "lines": [["error", "位置のずれ"]] }],
+    "timing": [
+      {
+        "title": "壁までの距離",
+        "unit": "m",
+        "lines": [
+          ["range", "現在の実際の距離（観察用）"],
+          ["usedRange", "停止判断に使った距離"]
+        ]
+      },
+      {
+        "title": "使った情報の古さ",
+        "unit": "秒",
+        "lines": [["age", "測った時刻から判断に使うまでの時間"]]
+      },
+      {
+        "title": "地図へ置いた壁のずれ",
+        "unit": "m",
+        "lines": [["wallError", "計算した壁の位置と、実際の4 mとの差"]]
+      },
+      { "title": "処理待ちの件数", "unit": "件", "lines": [["queue", "届いたが、まだ処理していない件数"]] }
+    ],
+    "diagnostics": [
+      {
+        "title": "センサーの距離",
+        "unit": "m",
+        "lines": [
+          ["lidar", "LiDAR"],
+          ["depth", "奥行き"],
+          ["range", "最後に届いた距離"]
+        ]
+      },
+      { "title": "情報の古さ", "unit": "秒", "lines": [["age", "最後の測定からの時間"]] },
+      { "title": "IMUの加速度", "unit": "m/秒²", "lines": [["accel", "重力を除く前後の加速度"]] }
+    ]
+  }
+}

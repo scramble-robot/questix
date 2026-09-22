@@ -1,10 +1,16 @@
 import { SYSTEM_TOPICS, systemDefaults } from './data.js';
 import { armFK, armIK } from '../arm/core.js';
+import { loadJson, fillSentence as fill } from '../core/content.js';
 
 // Simulations behind the six "systems" courses. No DOM and no state: every experiment is a pure
 // function of its settings, returning the samples, the events, the metrics and the closing
 // sentence that ui.js, render.js and narration.js show. Importable from Node and unit-tested in
-// test/systems-core.test.mjs.
+// test/systems-core.test.mjs. Every status, event, metric label and closing sentence comes from
+// content/systems/core.json; the status names double as state identifiers, so render.js reads the
+// same `status` section instead of repeating them.
+
+const copy = await loadJson('content/systems/core.json');
+const STATUS = copy.status;
 
 const dt = 0.05; // seconds per simulation step
 const GRAVITY = 9.81; // m/s²
@@ -83,7 +89,7 @@ function fitCameraTransform(pairs) {
   const finite = (pair) =>
     ['x', 'z'].every((key) => Number.isFinite(pair.camera[key]) && Number.isFinite(pair.body[key]));
   if (pairs.length < 2 || pairs.some((pair) => !finite(pair)))
-    throw new Error('離れた2点以上の対応が必要です。');
+    throw new Error(copy.calibration.needTwoPairs);
   const cameraCentre = {
     x: mean(pairs.map((pair) => pair.camera.x)),
     z: mean(pairs.map((pair) => pair.camera.z)),
@@ -105,7 +111,7 @@ function fitCameraTransform(pairs) {
     spread += x * x + z * z;
   }
   if (spread < MIN_MARKER_SPREAD || Math.hypot(dot, cross) < MIN_MARKER_SPREAD)
-    throw new Error('目印を離して測ってください。');
+    throw new Error(copy.calibration.spreadMarkers);
   const angle = Math.atan2(cross, dot);
   const fit = {
     cameraX: bodyCentre.x - cameraCentre.x * Math.cos(angle) + cameraCentre.z * Math.sin(angle),
@@ -140,12 +146,13 @@ const BRAKE_SUCCESS_MARGIN = 0.2; // m short of the line still counts as a good 
 const SLIP_TOLERANCE = 0.15; // m/s between wheel and body speed before traction is lost
 
 function mechanicsStatus(sample) {
-  if (sample.braking) return 'ブレーキで減速';
-  if (sample.motorPower !== 0) return '走行中';
-  return sample.v > 0 ? '出力0・惰性で移動' : '停止';
+  if (sample.braking) return STATUS.mechanics.braking;
+  if (sample.motorPower !== 0) return STATUS.driving;
+  return sample.v > 0 ? STATUS.mechanics.coasting : STATUS.stopped;
 }
 
 function mechanics(topic, config) {
+  const text = copy.mechanics;
   const braking = topic === 'braking';
   const samples = [];
   const events = [];
@@ -163,7 +170,13 @@ function mechanics(topic, config) {
     if (braking) {
       if (brakeStart === null && STOP_LINE - x <= config.brakeAt) {
         brakeStart = x;
-        events.push({ t, x, kind: 'brake', label: 'ブレーキ開始', text: 'ブレーキを開始' });
+        events.push({
+          t,
+          x,
+          kind: 'brake',
+          label: text.events.brakeLabel,
+          text: text.events.brakeText,
+        });
       }
       brakingNow = brakeStart !== null;
       force =
@@ -182,8 +195,8 @@ function mechanics(topic, config) {
           t,
           x,
           kind: 'power-off',
-          label: '出力0 %',
-          text: 'モーターへの出力を' + config.power + ' %から0 %に変更（ブレーキなし）',
+          label: text.events.powerOffLabel,
+          text: fill(text.events.powerOffText, { power: config.power }),
         });
     }
     const sample = { t, x, v, wheelSpeed, odom, force, accel, motorPower, braking: brakingNow };
@@ -201,7 +214,7 @@ function mechanics(topic, config) {
         wheelSpeed: 0,
         force: 0,
         accel: 0,
-        status: '停止',
+        status: STATUS.stopped,
       });
       break;
     }
@@ -212,22 +225,19 @@ function mechanics(topic, config) {
     ? remaining >= -1e-6 && remaining <= BRAKE_SUCCESS_MARGIN
     : !samples.some((sample) => sample.wheelSpeed - sample.v > SLIP_TOLERANCE);
   const brakingMetrics = () => [
-    metric('線までの残り（負なら通過）', remaining, 'm'),
-    metric('ブレーキ後の移動', end.x - (brakeStart ?? end.x), 'm'),
-    metric('停止まで', end.t, '秒'),
+    metric(text.metrics.remainingToLine, remaining, 'm'),
+    metric(text.metrics.distanceAfterBrake, end.x - (brakeStart ?? end.x), 'm'),
+    metric(text.metrics.timeToStop, end.t, '秒'),
   ];
   const drivingMetrics = () => [
-    metric('3秒時点の速さ', samples[POWER_OFF_STEP].v, 'm/秒'),
-    metric('車輪から求めた移動距離の誤差', end.odom - end.x, 'm'),
-    metric('動き始めの加速度', samples[0].accel, 'm/秒²'),
+    metric(text.metrics.speedAtPowerOff, samples[POWER_OFF_STEP].v, 'm/秒'),
+    metric(text.metrics.odometryError, end.odom - end.x, 'm'),
+    metric(text.metrics.startingAcceleration, samples[0].accel, 'm/秒²'),
   ];
   const outcome = () => {
-    if (braking)
-      return success
-        ? '線の手前20 cm以内に停止しました。'
-        : '停止位置を確認し、ブレーキを始める距離を調整しましょう。';
-    if (topic === 'force') return '質量か出力のどちらか一つを変え、前回の線と比べましょう。';
-    return '質量・出力・床のうち一つを変え、前回の線と比べましょう。';
+    if (braking) return success ? text.outcome.brakingSuccess : text.outcome.brakingRetry;
+    if (topic === 'force') return text.outcome.force;
+    return text.outcome.traction;
   };
   return {
     samples,
@@ -259,14 +269,17 @@ const WHEEL_RADIUS = 0.065; // m
 const HALF_TRACK = 0.16; // m from the centre to a wheel
 const SECONDS_PER_MINUTE = 60;
 
-const TO_PARCEL = '荷物へ進む';
-const TO_ELSEWHERE = '別の場所を探す';
-const TO_DELIVERY = '届け先へ進む';
-const WAITING = '通路が空くまで待つ';
-const DELIVERED = '配達完了';
-const ARRIVED_EMPTY = '空のまま到着';
+const TO_PARCEL = STATUS.behavior.toParcel;
+const TO_ELSEWHERE = STATUS.behavior.toElsewhere;
+const TO_DELIVERY = STATUS.behavior.toDelivery;
+const WAITING = STATUS.behavior.waiting;
+const DETOURING = STATUS.behavior.detour;
+const DELIVERED = STATUS.behavior.delivered;
+const ARRIVED_EMPTY = STATUS.behavior.arrivedEmpty;
 
 function behavior(topic, config) {
+  const text = copy.behavior;
+  const why = text.reasons;
   const samples = [];
   const events = [];
   let x = 0.5;
@@ -282,10 +295,10 @@ function behavior(topic, config) {
   let done = false;
   let detoured = false;
   // Every change of plan is recorded with the reason the robot had for it.
-  const change = (t, next, why) => {
+  const change = (t, next, reason) => {
     if (state === next) return;
     state = next;
-    events.push({ t, text: next + '：' + why });
+    events.push({ t, text: fill(text.stateChange, { state: next, reason }) });
   };
   for (let step = 0; step <= BEHAVIOR_STEPS; step++) {
     const t = step * dt;
@@ -296,14 +309,14 @@ function behavior(topic, config) {
     let w = 0;
     if (!done && Math.hypot(target.x - x, target.y - y) < ARRIVED_WITHIN) {
       if (state === TO_PARCEL && topic === 'missing' && config.searchRule !== 'search') {
-        change(t, TO_DELIVERY, '荷物はないが、そのまま進むルール');
+        change(t, TO_DELIVERY, why.ignoreMissingParcel);
         target = { ...DELIVERY_PLACE };
       } else if (state === TO_PARCEL && topic === 'missing') {
-        change(t, TO_ELSEWHERE, '最初の場所に荷物がない');
+        change(t, TO_ELSEWHERE, why.parcelNotThere);
         target = { ...PARCEL_ELSEWHERE };
       } else if (state === TO_PARCEL || state === TO_ELSEWHERE) {
         hasParcel = true;
-        change(t, TO_DELIVERY, '荷物を受け取った');
+        change(t, TO_DELIVERY, why.parcelPickedUp);
         target = { ...DELIVERY_PLACE };
       } else if (waypoints.length) {
         target = waypoints.shift();
@@ -312,7 +325,7 @@ function behavior(topic, config) {
         change(
           t,
           hasParcel ? DELIVERED : ARRIVED_EMPTY,
-          hasParcel ? '荷物を渡した' : '受け取りを確かめていなかった',
+          hasParcel ? why.parcelHandedOver : why.pickupNotChecked,
         );
       }
     }
@@ -320,7 +333,7 @@ function behavior(topic, config) {
     if (danger && !done) {
       if (waitStart === null) {
         waitStart = t;
-        change(t, WAITING, '前の障害物を検知');
+        change(t, WAITING, why.obstacleAhead);
       }
       waitTotal += dt;
       if (
@@ -331,10 +344,10 @@ function behavior(topic, config) {
         detoured = true;
         waypoints = DETOUR.map((point) => ({ ...point }));
         target = { ...DETOUR_ENTRY };
-        change(t, '別の道へ進む', '設定した待ち時間を越えた');
+        change(t, DETOURING, why.waitTimeExceeded);
       }
     } else if (waitStart !== null && state === WAITING) {
-      change(t, TO_DELIVERY, '通路が空いた');
+      change(t, TO_DELIVERY, why.passageClear);
       waitStart = null;
     }
     if (!done && (!danger || detoured)) {
@@ -370,20 +383,18 @@ function behavior(topic, config) {
   const end = samples.at(-1);
   const success = end.status === DELIVERED;
   const outcome = () => {
-    if (success)
-      return '荷物を受け取り、届け先へ渡せました。別の通路条件でも同じルールを確かめましょう。';
-    if (end.status === ARRIVED_EMPTY)
-      return '移動は終わりましたが、荷物は届けられていません。受け取りの結果を確認する条件が必要です。';
-    return '制限時間内に配達できませんでした。止まっている状態と、次へ移る条件を見直しましょう。';
+    if (success) return text.outcome.delivered;
+    if (end.status === ARRIVED_EMPTY) return text.outcome.arrivedEmpty;
+    return text.outcome.timedOut;
   };
   return {
     samples,
     events,
     success,
     metrics: [
-      metric('経過時間', end.t, '秒'),
-      metric('待った時間', waitTotal, '秒'),
-      metric('荷物を届けた', success ? 'はい' : 'いいえ'),
+      metric(text.metrics.elapsed, end.t, '秒'),
+      metric(text.metrics.waited, waitTotal, '秒'),
+      metric(text.metrics.delivered, success ? 'はい' : 'いいえ'),
     ],
     outcome: outcome(),
   };
@@ -415,25 +426,27 @@ const cartAt = (t, motion) => ({
 });
 
 function trackingStatus(topic, { contact, atGoal, stopping, hasVelocity }) {
-  if (contact) return '接触して終了';
+  const status = STATUS.tracking;
+  if (contact) return STATUS.contact;
   if (topic === 'crossing') {
-    if (atGoal) return '到着';
-    return stopping ? '相手を待つ' : '進む';
+    if (atGoal) return status.arrived;
+    return stopping ? status.waitForOther : status.go;
   }
-  return hasVelocity ? '停止して観察中' : '次の測定を待つ';
+  return hasVelocity ? status.observing : status.waitingMeasurement;
 }
 
 function trackingMetrics(topic, samples, errors, minDistance, end, contact) {
+  const text = copy.tracking.metrics;
   if (topic === 'crossing')
     return [
-      metric('最も近づいた間隔', Math.max(0, minDistance), 'm'),
-      metric('経過時間', end.t, '秒'),
-      metric('接触', contact ? 'あり' : 'なし'),
+      metric(text.closestGap, Math.max(0, minDistance), 'm'),
+      metric(text.elapsed, end.t, '秒'),
+      metric(text.contact, contact ? 'あり' : 'なし'),
     ];
   if (topic === 'velocity')
     return [
       metric(
-        '測定位置の平均のずれ',
+        text.positionError,
         mean(
           samples
             .filter((sample) => sample.t === sample.obs.t)
@@ -442,7 +455,7 @@ function trackingMetrics(topic, samples, errors, minDistance, end, contact) {
         'm',
       ),
       metric(
-        '求めた速度の平均のずれ',
+        text.velocityError,
         mean(
           samples
             .filter((sample) => sample.velocity !== null)
@@ -452,26 +465,20 @@ function trackingMetrics(topic, samples, errors, minDistance, end, contact) {
       ),
     ];
   return [
-    metric('予測と実際の平均のずれ', mean(errors), 'm'),
-    metric('予測と実際の最大のずれ', Math.max(0, ...errors), 'm'),
+    metric(text.meanPredictionError, mean(errors), 'm'),
+    metric(text.maxPredictionError, Math.max(0, ...errors), 'm'),
   ];
 }
 
 function trackingOutcome(topic, config, success, contact) {
+  const text = copy.tracking.outcome;
   if (topic === 'crossing') {
-    if (success)
-      return '接触せずにゴールへ到着しました。今の距離だけで判断した走行と、待ち始めた位置・最も近づいた間隔を比べてください。';
-    if (contact)
-      return '相手のロボットに接触しました。近づいたことに気づいても、減速する間に進みます。この先どこまで近づくかを予測した場合と比べてください。';
-    return '接触はしませんでしたが、時間内に到着しませんでした。待ち続けている場面と、進む条件を確かめてください。';
+    if (success) return text.crossingSuccess;
+    if (contact) return text.crossingContact;
+    return text.crossingTimedOut;
   }
-  if (topic === 'velocity')
-    return config.noise > 0
-      ? '相手のロボット自体は一定速度でも、測定位置のずれが、計算した速度の変動になりました。測定のずれを0にした記録と比べてください。'
-      : '2回の位置の差を時間で割ると、相手のロボットの速度を求められました。次は測定位置だけにずれを加え、実際の速度が同じでも計算値が変わるか調べましょう。';
-  return config.motion === 'turn'
-    ? '方向転換の前に立てた予測は、その後も同じ向きに進む想定なので外れます。答え合わせの時刻と4秒の方向転換を照らし合わせ、短い時間先の予測とも比べてください。'
-    : '同じ向き・速さで進み続ける場面で予測しました。次は4秒で向きを変え、同じ予測方法がどこで外れるか確かめてください。';
+  if (topic === 'velocity') return config.noise > 0 ? text.velocityNoisy : text.velocityClean;
+  return config.motion === 'turn' ? text.predictionTurn : text.predictionStraight;
 }
 
 function tracking(topic, config) {
@@ -530,8 +537,8 @@ function tracking(topic, config) {
       events.push({
         t,
         kind: 'turn',
-        label: '相手が方向転換',
-        text: '相手のロボットが進む向きを反対に変えた。新しく測る位置から速度と予測を更新する。',
+        label: copy.tracking.events.turnLabel,
+        text: copy.tracking.events.turnText,
       });
     const predicted =
       hasVelocity && topic !== 'velocity'
@@ -628,6 +635,7 @@ function nearestSolution(estimate, angles) {
 }
 
 function coordination(topic, config) {
+  const text = copy.coordination;
   const samples = [];
   const events = [];
   let angles = [...START_ANGLES];
@@ -648,7 +656,7 @@ function coordination(topic, config) {
           ? { ...reading }
           : cameraToBody(reading, topic === 'feedback' ? FITTED_CAMERA : config);
       lastLook = t;
-      events.push({ t, text: 'カメラから行き先を更新' });
+      events.push({ t, text: text.events.lookedAgain });
     }
     const solutions = nearestSolution(estimate, angles);
     if (solutions.length)
@@ -666,7 +674,7 @@ function coordination(topic, config) {
       reading,
       error: Math.hypot(pose.tip.x - target.x, pose.tip.z - target.z),
       lastLook,
-      status: solutions.length ? '手先を目標へ近づける' : 'この行き先には届かない',
+      status: solutions.length ? STATUS.coordination.approaching : STATUS.coordination.unreachable,
     });
   }
   const end = samples.at(-1);
@@ -676,17 +684,15 @@ function coordination(topic, config) {
     events,
     success,
     metrics: [
-      metric('最後の手先と目標の距離', end.error, 'mm', 1),
+      metric(text.metrics.tipToTarget, end.error, 'mm', 1),
       metric(
-        '計算した行き先のずれ',
+        text.metrics.estimateError,
         Math.hypot(end.estimate.x - end.target.x, end.estimate.z - end.target.z),
         'mm',
         1,
       ),
     ],
-    outcome: success
-      ? '手先が目標から8 mm以内に入りました。同じ設定を別の観測条件でも使えるか考えましょう。'
-      : '青い行き先と黄色い目標を比べ、座標の変換や観測の更新を見直しましょう。',
+    outcome: success ? text.outcome.reached : text.outcome.missed,
   };
 }
 
@@ -704,45 +710,39 @@ const GOOD_GAP = 0.16; // m; how far from the target gap still counts as a succe
 const MAP_TOLERANCE = 0.05; // m of map error the alignment topic accepts
 
 function timingStatus({ contact, stop, v, last }) {
-  if (contact) return '接触して終了';
-  if (stop) return v ? '減速中' : '停止';
-  return last ? '走行中' : '最初のデータを待つ';
+  if (contact) return STATUS.contact;
+  if (stop) return v ? STATUS.timing.slowing : STATUS.stopped;
+  return last ? STATUS.driving : STATUS.timing.waitingFirstData;
 }
 
 function timingMetrics(topic, samples, end, maxWallError) {
+  const text = copy.timing.metrics;
   const shared = [
-    metric('中心から壁までの距離', end.range, 'm'),
-    metric('使った情報の最大の古さ', Math.max(...samples.map((sample) => sample.age)), '秒'),
+    metric(text.wallDistance, end.range, 'm'),
+    metric(text.maxAge, Math.max(...samples.map((sample) => sample.age)), '秒'),
   ];
-  if (topic === 'alignment') return [...shared, metric('地図の壁の最大のずれ', maxWallError, 'm')];
+  if (topic === 'alignment') return [...shared, metric(text.maxWallError, maxWallError, 'm')];
   if (topic === 'queue')
     return [
       ...shared,
-      metric('処理待ちの最大件数', Math.max(...samples.map((sample) => sample.queue)), '件', 0),
+      metric(text.maxQueue, Math.max(...samples.map((sample) => sample.queue)), '件', 0),
     ];
-  return [...shared, metric('壁の0.5 m手前からのずれ', Math.abs(end.range - TARGET_GAP), 'm')];
+  return [...shared, metric(text.gapError, Math.abs(end.range - TARGET_GAP), 'm')];
 }
 
 function timingOutcome(topic, config, contact, maxWallError) {
-  if (topic === 'alignment')
-    return maxWallError < EPSILON
-      ? '距離と機体位置を同じ時刻で組み合わせると、地図の壁が実際の4 mの位置に重なりました。遅れて届いても、測ったときの位置に戻って計算できます。'
-      : '古い距離に現在の機体位置を足したため、実際より奥へ壁を描いてしまいました。走行ではなく、地図へ置く位置の誤りです。測った時刻の位置を使って比べましょう。';
+  const text = copy.timing.outcome;
+  if (topic === 'alignment') return maxWallError < EPSILON ? text.alignedWall : text.misalignedWall;
   if (contact) {
-    if (topic !== 'queue')
-      return '届いた距離はまだ大きくても、実際の機体は壁に近づいていて、停止が間に合わず接触しました。届く遅れを0秒にするか、測定後の移動量を使って補正して比べます。';
-    return config.queue === 'latest'
-      ? '最新の1件を選んでいても、次に処理するまでの間に機体が進み、停止が間に合いませんでした。処理回数を増やした場合と比べましょう。'
-      : 'データはすぐ届いていましたが、順番待ちで古い距離を使い続け、壁に接触しました。最新の1件を使う方法や、処理回数を増やす方法と比べましょう。';
+    if (topic !== 'queue') return text.delayContact;
+    return config.queue === 'latest' ? text.latestContact : text.queueContact;
   }
-  if (topic === 'queue')
-    return '壁に接触する前に止まりました。処理待ちの件数と情報の古さを、前の設定と比べてください。今の判断に使うデータを選ぶことと、記録として全件を残すことは別に考えます。';
-  return config.compensate
-    ? '遅れ自体は残っていますが、測定後に進んだ距離を引いて停止を判断できました。この実験では車輪からの移動量に誤差がないとしています。'
-    : '接触前に停止しました。壁の0.5 m手前という目標からどれくらいずれたかを、遅れのある場合と比べてください。';
+  if (topic === 'queue') return text.queueStopped;
+  return config.compensate ? text.compensated : text.stopped;
 }
 
 function timing(topic, config) {
+  const text = copy.timing.events;
   const samples = [];
   const events = [];
   const transit = []; // measured, not yet received
@@ -771,7 +771,7 @@ function timing(topic, config) {
         stop = true;
         x = WALL_X - ROBOT_HALF_LENGTH;
         v = 0;
-        events.push({ t, kind: 'contact', text: '停止が間に合わず、機体が壁に接触した。' });
+        events.push({ t, kind: 'contact', text: text.contactText });
       } else {
         x = nextX;
         v = nextV;
@@ -797,8 +797,8 @@ function timing(topic, config) {
       events.push({
         t,
         kind: 'stop-command',
-        label: '停止指示',
-        text: '判断に使った距離が0.6 m以下になったので、停止を指示。ここから減速する。',
+        label: text.stopLabel,
+        text: text.stopText,
       });
     }
     samples.push({
@@ -856,37 +856,39 @@ const CRUISE_ACCEL_UNTIL = 0.6; // m/s; the robot accelerates up to this speed
 const RECORDED_STOP_RANGE = 0.6; // m; the stored range that commands a stop in the missing topic
 const IMPACT_RUN_TIME = 4; // seconds
 
-const eventName = (eventType) => (eventType === 'bump' ? '小さな段差' : '強い衝撃');
+const eventName = (eventType) =>
+  eventType === 'bump' ? copy.diagnostics.eventNames.bump : copy.diagnostics.eventNames.impact;
 
 function diagnosticsStatus({ contact, latched, v }) {
-  if (contact) return '接触して終了';
-  if (latched) return v ? '停止指示・減速中' : '停止を保持';
-  return '走行中';
+  if (contact) return STATUS.contact;
+  if (latched) return v ? STATUS.diagnostics.stopSlowing : STATUS.diagnostics.holding;
+  return STATUS.driving;
 }
 
 // The first condition that matched, or '' while the robot is still free to drive.
 function stopReason(topic, config, { lidar, depth, lastRange, age, accel }) {
+  const text = copy.diagnostics.stopReasons;
   let reason = '';
   if (topic === 'distance') {
     const used = Math.min(lidar, config.sensorRule === 'both' ? depth : Infinity);
-    if (used <= config.stopDistance) reason = '障害物までの距離が設定値以下';
+    if (used <= config.stopDistance) reason = text.tooClose;
   }
   if (topic === 'missing') {
-    if (config.watchdog && age > config.staleLimit) reason = '距離データの更新が途切れた';
-    if (lastRange <= RECORDED_STOP_RANGE) reason = '記録された距離が0.6 m以下';
+    if (config.watchdog && age > config.staleLimit) reason = text.dataStale;
+    if (lastRange <= RECORDED_STOP_RANGE) reason = text.recordedTooClose;
   }
-  if (topic === 'impact' && Math.abs(accel) >= config.impactLimit)
-    reason = 'IMUでしきい値以上の加速度';
+  if (topic === 'impact' && Math.abs(accel) >= config.impactLimit) reason = text.imuThreshold;
   return reason;
 }
 
 function diagnosticsMetrics(topic, config, samples, end, latched, contact) {
+  const text = copy.diagnostics.metrics;
   if (topic === 'impact')
     return [
-      metric('想定した出来事', eventName(config.eventType)),
-      metric('停止判定', latched ? 'あり' : 'なし'),
+      metric(text.assumedEvent, eventName(config.eventType)),
+      metric(text.stopDecision, latched ? 'あり' : 'なし'),
       metric(
-        '加速度の最大の大きさ',
+        text.maxAcceleration,
         Math.max(...samples.map((sample) => Math.abs(sample.accel))),
         'm/秒²',
       ),
@@ -894,47 +896,41 @@ function diagnosticsMetrics(topic, config, samples, end, latched, contact) {
   const third =
     topic === 'distance'
       ? metric(
-          '停止指示を出した時刻',
-          samples.find((sample) => sample.latched)?.t ?? '指示なし',
+          text.stopCommandTime,
+          samples.find((sample) => sample.latched)?.t ?? text.noStopCommand,
           '秒',
         )
-      : metric('最後のデータの古さ', end.age, '秒');
+      : metric(text.lastDataAge, end.age, '秒');
   return [
-    metric('停止判定', latched ? 'あり' : 'なし'),
-    metric('接触', contact ? 'あり' : 'なし'),
+    metric(text.stopDecision, latched ? 'あり' : 'なし'),
+    metric(text.contact, contact ? 'あり' : 'なし'),
     third,
   ];
 }
 
 function impactOutcome(config, latched) {
-  if (config.eventType === 'bump')
-    return latched
-      ? '通過してよい段差の模擬データでも停止しました。同じしきい値で強い衝撃も試してから、境目の値を見直しましょう。'
-      : 'この段差の模擬データでは走行を続けました。同じしきい値で、強い衝撃を見逃さず止められるかも確認しましょう。';
-  return latched
-    ? '強い衝撃を検知して停止を保持しました。衝撃が起きた後の判断で、接触を防いだという意味ではありません。'
-    : '強い衝撃の模擬データでも停止しませんでした。加速度の波形と停止の境目を比べ、値を見直してください。';
+  const text = copy.diagnostics.outcome;
+  if (config.eventType === 'bump') return latched ? text.bumpStopped : text.bumpPassed;
+  return latched ? text.impactStopped : text.impactMissed;
 }
 
 function contactOutcome(topic, config, latched) {
-  if (topic === 'missing')
-    return '距離データが途切れた後も、最後の値を使って走り続け、接触しました。新しい値が来ないことも停止条件にできるか確かめましょう。';
-  if (config.sensorRule !== 'lidar')
-    return '棚までの距離も使いましたが、停止を指示する距離が短すぎて接触しました。減速して止まるまでの距離も必要です。';
-  return latched
-    ? 'LiDARは奥の壁までの距離で停止を指示しましたが、手前の棚に接触しました。棚を測るカメラの距離も使って比べましょう。'
-    : 'LiDARは棚の下を通して奥の壁を測っていたため、棚に接触するまで停止条件に達しませんでした。棚を測るカメラの距離も使って比べましょう。';
+  const text = copy.diagnostics.outcome;
+  if (topic === 'missing') return text.missingContact;
+  if (config.sensorRule !== 'lidar') return text.stopTooLate;
+  return latched ? text.lidarLatchedContact : text.lidarMissedShelf;
 }
 
 function diagnosticsOutcome(topic, config, latched, contact) {
+  const text = copy.diagnostics.outcome;
   if (topic === 'impact') return impactOutcome(config, latched);
   if (contact) return contactOutcome(topic, config, latched);
-  if (topic === 'missing')
-    return '距離が短くなるのを待たず、データが更新されない時間を使って停止できました。前回の動きと、停止指示を出した時刻を比べてください。';
-  return 'カメラが測った棚までの距離で停止を判断し、接触する前に止まりました。壁までの距離だけで走った結果と比べてください。';
+  if (topic === 'missing') return text.missingStopped;
+  return text.distanceStopped;
 }
 
 function diagnostics(topic, config) {
+  const text = copy.diagnostics.events;
   const samples = [];
   const events = [];
   let x = 0.4;
@@ -954,8 +950,8 @@ function diagnostics(topic, config) {
       events.push({
         t,
         kind: 'data-loss',
-        label: '距離の更新が途切れる',
-        text: '新しい距離が届かなくなった。最後の測定値は残っている。',
+        label: text.dataLossLabel,
+        text: text.dataLossText,
       });
     if (topic === 'impact' && step === SHOCK_STEP)
       events.push({
@@ -963,7 +959,7 @@ function diagnostics(topic, config) {
         x,
         kind: 'shock',
         label: eventName(config.eventType),
-        text: eventName(config.eventType) + 'を表す加速度の模擬データを入力。',
+        text: fill(text.shockText, { event: eventName(config.eventType) }),
       });
     if (topic !== 'missing' || t < DATA_LOSS_TIME) {
       lastRange = lidar;
@@ -983,7 +979,7 @@ function diagnostics(topic, config) {
       reason = stopReason(topic, config, { lidar, depth, lastRange, age, accel }) || reason;
       if (reason) {
         latched = true;
-        events.push({ t, text: '停止を保持：' + reason });
+        events.push({ t, text: fill(text.latched, { reason }) });
       }
     }
     const nextV = clamp(
@@ -997,7 +993,7 @@ function diagnostics(topic, config) {
       contact = true;
       x = obstacle - ROBOT_HALF_LENGTH;
       v = 0;
-      events.push({ t, kind: 'contact', text: '機体が障害物に接触したため、実験を終了。' });
+      events.push({ t, kind: 'contact', text: text.contactText });
     }
     samples.push({
       t,

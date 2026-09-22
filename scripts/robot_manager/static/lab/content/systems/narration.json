@@ -81,7 +81,6 @@
     "crossing": {
       "label": "QUESTiXの判断",
       "beforeValue": "開始前",
-      "waitingStatus": "相手を待つ",
       "predictRule": "前進し続けると、今から{horizon}秒の間に相手のロボットと近づきすぎるかを計算して待ちます。",
       "nearRule": "今見えている相手のロボットとの距離だけを使い、近くなってから待ちます。",
       "stoppingNote": "止める指示を出しても、減速する間は進みます。"

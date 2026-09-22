@@ -8,6 +8,8 @@ import { fillSentence as fill } from '../core/content.js';
 // shown; no DOM, no state. Every sentence comes from content/systems/narration.json.
 
 const copy = await loadJson('content/systems/narration.json');
+// The run's status names are defined once, in content/systems/core.json (as core.js emits them).
+const { status: STATUS } = await loadJson('content/systems/core.json');
 
 const DATA_LOSS_TIME = 1.5; // seconds; diagnostics/missing stops receiving new ranges here
 const SHOCK_TIME = 2; // seconds; diagnostics/impact plays its event here
@@ -198,7 +200,7 @@ function crossingReading(config, sample, started) {
   return {
     label: text.label,
     value: started ? sample.status : text.beforeValue,
-    mode: sample.status === text.waitingStatus ? 'brake' : 'ready',
+    mode: sample.status === STATUS.tracking.waitForOther ? 'brake' : 'ready',
     text: rule + text.stoppingNote,
   };
 }

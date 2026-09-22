@@ -12,9 +12,9 @@ const STREAMS = ['scan', 'odom', 'drive', 'twist', 'camera'];
 
 const listeners = new Map();
 const latest = new Map();
-let socket = null,
-  wanted = false,
-  retryTimer = 0;
+let socket = null;
+let wanted = false;
+let retryTimer = 0;
 let state = { phase: 'idle', url: '', hello: null, rates: {}, message: '' };
 
 function emit(type, value) {
