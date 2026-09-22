@@ -20,92 +20,66 @@ test('axis and button namespaces are kept separate and unmapped indices stay off
   assert.equal(map.location('uart', 'tilt_axis', -1), null);
 });
 
-test('tilt mode only shows effective assignments and preserves unknown mappings', () => {
-  const saved = { shot_component: { fire_button: 5, tilt_axis: 7,
-    tilt_up_button_index: 4, tilt_down_button_index: 6 } };
-  const draft = structuredClone(saved);
-  assert.deepEqual(map.bindings('uart', draft, saved).map((item) => item.key),
-    ['fire_button', 'tilt_axis']);
-  draft.shot_component.tilt_axis = -1;
-  draft.shot_component.fire_button = 63;
-  const assignments = map.bindings('uart', draft, saved);
-  assert.deepEqual(assignments.map((item) => item.key),
-    ['fire_button', 'tilt_up_button_index', 'tilt_down_button_index']);
-  assert.equal(assignments[0].spot, null);
-  assert.equal(assignments[0].changed, true);
-  assert.equal(assignments[0].target, 'control-shot_component-fire_button');
-  assert.equal(assignments[1].spot, 'left-shoulder');
-  assert.equal(assignments[2].spot, 'left-trigger');
+
+const defaults = () => ({ shot_component: { fire_button: 5,
+  tilt_up_axis: 7, tilt_down_axis: 7, tilt_up_axis_sign: 1, tilt_down_axis_sign: -1,
+  tilt_up_button_index: 4, tilt_down_button_index: 6 } });
+
+test('both tilt directions are always visible with their effective input and change state', () => {
+  const saved = defaults(), draft = structuredClone(saved);
+  let assignments = map.bindings('uart', draft, saved);
+  assert.deepEqual(assignments.map((a) => a.inputId), ['button:5', 'direction:7:1', 'direction:7:-1']);
+  assert.match(assignments[1].label, /十字キー 上（軸 7）/);
+  assert.match(assignments[2].label, /十字キー 下（軸 7）/);
+  draft.shot_component.tilt_up_axis = -1;
+  draft.shot_component.tilt_up_button_index = 63;
+  assignments = map.bindings('uart', draft, saved);
+  assert.equal(assignments[1].spot, null);
+  assert.equal(assignments[1].changed, true);
+  assert.equal(assignments[2].changed, false);
+  draft.shot_component.tilt_up_axis = 7;
+  draft.shot_component.tilt_up_axis_sign = -1;
+  assert.equal(map.bindings('uart', draft, saved)[1].changed, true);
 });
 
-test('editable inputs respect controller-specific button and axis layouts', () => {
+test('diagram inputs distinguish full axes, individual directions and pressing', () => {
   assert.deepEqual(map.inputs('uart', 'left-stick').map((item) => item.id),
-    ['axis:0', 'axis:1', 'button:12']);
-  assert.deepEqual(map.inputs('dualshock', 'left-stick').map((item) => item.id),
-    ['axis:0', 'axis:1', 'button:11']);
-  assert.deepEqual(map.inputs('dualshock', 'left-trigger').map((item) => item.id),
-    ['axis:2', 'button:6']);
-  assert.deepEqual(map.inputs('uart', 'left-trigger').map((item) => item.id), ['button:6']);
-  assert.deepEqual(map.inputs('dualshock', 'face-bottom').map((item) => item.id), ['button:0']);
+    ['axis:0', 'direction:0:1', 'direction:0:-1', 'axis:1', 'direction:1:1', 'direction:1:-1', 'button:12']);
+  assert.equal(map.inputs('dualshock', 'left-stick').at(-1).id, 'button:11');
+  assert.deepEqual(map.inputs('dualshock', 'left-trigger').map((item) => item.id), ['axis:2', 'button:6']);
+  assert.deepEqual(map.actions(defaults(), 'direction').map((a) => a.key),
+    ['tilt_up_button_index', 'tilt_down_button_index']);
+  assert.equal(map.actions(defaults(), 'axis').length, 0);
 });
 
-test('assignment plans reject incompatible inputs and preserve the source values', () => {
-  const values = { shot_component: { fire_button: 5, tilt_axis: 7,
-    tilt_up_button_index: 4, tilt_down_button_index: 6 } };
+test('direction edits preserve all opposite inputs and permit a mixed axis/button pair', () => {
+  const values = defaults();
   const original = structuredClone(values);
-  assert.throws(() => map.planAssignment('uart', values, 'left-stick', 'axis:0', 'shot_component.fire_button'));
+  const apply = (changes) => changes.forEach(({node, key, value}) => { values[node][key] = value; });
+  apply(map.planTiltDirection('uart', values, 'tilt_down_button_index', 'button:1'));
+  assert.equal(values.shot_component.tilt_up_axis, 7);
+  assert.equal(values.shot_component.tilt_up_axis_sign, 1);
+  assert.equal(values.shot_component.tilt_up_button_index, 4);
+  assert.equal(values.shot_component.tilt_down_axis, -1);
+  assert.equal(values.shot_component.tilt_down_button_index, 1);
+  apply(map.planAssignment('uart', values, 'dpad', 'direction:6:-1', 'shot_component.tilt_up_button_index'));
+  assert.equal(values.shot_component.tilt_up_axis, 6);
+  assert.equal(values.shot_component.tilt_up_axis_sign, -1);
+  assert.equal(values.shot_component.tilt_down_button_index, 1);
+  assert.throws(() => map.planTiltDirection('uart', values, 'tilt_up_button_index', 'button:1'));
+  assert.throws(() => map.planTiltDirection('uart', original, 'tilt_up_button_index', 'direction:7:-1'));
+  for (const invalid of ['button:-1', 'button:64', 'button:', 'direction:7:0', 'axis:7', 'direction:1.5:1']) {
+    assert.throws(() => map.planTiltDirection('uart', values, 'tilt_up_button_index', invalid));
+  }
+  assert.throws(() => map.planAssignment('uart', values, 'dpad', 'direction:7:1', 'shot_component.fire_button'));
   assert.throws(() => map.planAssignment('uart', values, 'face-right', 'button:7', 'shot_component.fire_button'));
-  assert.deepEqual(map.planAssignment('dualshock', values, 'face-bottom', 'button:0', 'shot_component.fire_button'),
-    [{ node: 'shot_component', key: 'fire_button', value: 0 }]);
-  assert.deepEqual(map.planAssignment('uart', values, 'face-right', 'button:0', 'shot_component.tilt_up_button_index'),
-    [{ node: 'shot_component', key: 'tilt_up_button_index', value: 0 },
-      { node: 'shot_component', key: 'tilt_axis', value: -1 }]);
-  assert.deepEqual(values, original);
+  assert.deepEqual(original, defaults());
 });
 
-test('function numbers remain stable across remapping and tilt modes', () => {
-  const values = { joy_controller: { linear_x_axis: 1, angular_z_axis: 3, linear_y_axis: 0 },
-    shot_component: { fire_button: 5, tilt_axis: 7, tilt_up_button_index: 4, tilt_down_button_index: 6 },
-    esc_motor_control: { full_speed_button: 7 } };
-  const numbers = () => Object.fromEntries(map.bindings('uart', values, values).map((item) => [item.key, item.number]));
-  assert.deepEqual(numbers(), { linear_x_axis: 1, angular_z_axis: 2, linear_y_axis: 6,
-    fire_button: 3, full_speed_button: 4, tilt_axis: 5 });
-  values.shot_component.fire_button = 0;
-  values.shot_component.tilt_axis = -1;
-  assert.equal(numbers().fire_button, 3);
-  assert.equal(numbers().tilt_up_button_index, 5);
-  assert.equal(numbers().tilt_down_button_index, 5);
-  assert.deepEqual(map.destinations('uart', 'tilt_axis').map((item) => item.value), [0, 1, 3, 4, 6, 7]);
-});
-
-test('tilt plans update both buttons atomically and reject invalid or duplicate indices', () => {
-  assert.deepEqual(map.planTiltAssignment({ mode: 'buttons', up: 2, down: 1 }), [
-    { node: 'shot_component', key: 'tilt_axis', value: -1 },
-    { node: 'shot_component', key: 'tilt_up_button_index', value: 2 },
-    { node: 'shot_component', key: 'tilt_down_button_index', value: 1 },
-  ]);
-  assert.deepEqual(map.planTiltAssignment({ mode: 'axis', axis: 7 }),
-    [{ node: 'shot_component', key: 'tilt_axis', value: 7 }]);
-  for (const invalid of [
-    { mode: 'buttons', up: 2, down: 2 }, { mode: 'buttons', up: -1, down: 0 },
-    { mode: 'buttons', up: 64, down: 1 }, { mode: 'buttons', up: 2.5, down: 1 },
-    { mode: 'axis', axis: -1 }, { mode: 'axis', axis: null }, { mode: 'invalid', axis: 7 },
-  ]) assert.throws(() => map.planTiltAssignment(invalid));
-});
-
-test('single-direction patches preserve the opposite button and select button mode explicitly', () => {
-  const values = { shot_component: { tilt_axis: 7, tilt_up_button_index: 4, tilt_down_button_index: 6 } };
-  for (const key of ['tilt_up_button_index', 'tilt_down_button_index']) {
-    assert.deepEqual(map.planTiltButton(values, key, 0), [
-      { node: 'shot_component', key, value: 0 },
-      { node: 'shot_component', key: 'tilt_axis', value: -1 },
-    ]);
-  }
-  assert.throws(() => map.planTiltButton(values, 'tilt_up_button_index', 6));
-  assert.throws(() => map.planTiltButton(values, 'tilt_down_button_index', 4));
-  assert.throws(() => map.planTiltButton(values, 'fire_button', 0));
-  for (const value of [-1, 64, 0.5, null]) {
-    assert.throws(() => map.planTiltButton(values, 'tilt_up_button_index', value));
-  }
-  assert.deepEqual(values.shot_component, { tilt_axis: 7, tilt_up_button_index: 4, tilt_down_button_index: 6 });
+test('function numbers stay stable when tilt changes inputs', () => {
+  const values = defaults();
+  const before = map.bindings('uart', values, values).map((a) => [a.key, a.number]);
+  values.shot_component.tilt_up_axis = -1;
+  assert.deepEqual(map.bindings('uart', values, values).map((a) => [a.key, a.number]), before);
+  assert.deepEqual(before.map((a) => a[1]), [3, 5, 5]);
 });

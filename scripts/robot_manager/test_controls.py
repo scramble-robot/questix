@@ -117,7 +117,9 @@ def test_save_reload_and_profile_isolation(client, tmp_path):
     ('drive_component', 'max_motor_rpm', 476),
     ('drive_component', 'max_motor_rpm', 5),  # deadband would swallow all motion
     ('joy_axis_drive', 'invert_left_axis', 1),
-    ('shot_component', 'tilt_axis', -2),
+    ('shot_component', 'tilt_up_axis', -2),
+    ('shot_component', 'tilt_down_axis', 64),
+    ('shot_component', 'tilt_up_axis_sign', 0),
     ('esc_motor_control', 'full_speed_value', 1.1),
     ('uart_joy_driver', 'deadzone', 1.0),
     ('shot_component', 'port', '/dev/other'),
@@ -209,3 +211,47 @@ def test_runtime_api_uses_launch_environment_without_configuration_writes(client
     assert response.status_code == 200
     assert response.json() == expected
     assert calls == [{}]
+
+
+@pytest.mark.parametrize('axis', [7, -1])
+def test_legacy_tilt_profile_migrates_without_writing_on_read(client, tmp_path, axis):
+    """Read legacy axis/button profiles and preserve both directions on the next save."""
+    before = profile(client)
+    legacy = deepcopy(before['values'])
+    legacy['shot_component'] = {'fire_button': 2, 'tilt_axis': axis,
+                                'tilt_up_button_index': 3, 'tilt_down_button_index': 1}
+    path = tmp_path / 'controls.uart.yaml'
+    raw = yaml.safe_dump({node: {'ros__parameters': params} for node, params in legacy.items()})
+    path.write_text(raw)
+    current = profile(client)
+    assert path.read_text() == raw
+    assert current['values']['shot_component'] == {
+        'fire_button': 2, 'tilt_up_axis': axis, 'tilt_down_axis': axis,
+        'tilt_up_axis_sign': 1, 'tilt_down_axis_sign': -1,
+        'tilt_up_button_index': 3, 'tilt_down_button_index': 1}
+    response = client.put('/api/control-config/uart', json={
+        'revision': current['revision'], 'values': current['values']})
+    assert response.status_code == 200, response.text
+    assert profile(client)['values'] == current['values']
+    assert 'tilt_axis' not in yaml.safe_load(path.read_text())['shot_component']['ros__parameters']
+
+
+def test_independent_tilt_save_reload_and_duplicate_validation(client):
+    """Mixed inputs survive persistence; identical directions are rejected."""
+    current = profile(client)
+    shot = current['values']['shot_component']
+    shot['tilt_down_axis'] = -1
+    shot['tilt_down_button_index'] = 1
+    response = client.put('/api/control-config/uart', json={
+        'revision': current['revision'], 'values': current['values']})
+    assert response.status_code == 200, response.text
+    current = profile(client)
+    assert current['values']['shot_component'] == shot
+    for changes in [{'tilt_down_axis': 7, 'tilt_down_axis_sign': 1},
+                    {'tilt_up_axis': -1, 'tilt_up_button_index': 1}]:
+        bad = deepcopy(current['values'])
+        bad['shot_component'].update(changes)
+        response = client.put('/api/control-config/uart', json={
+            'revision': current['revision'], 'values': bad})
+        assert response.status_code == 422
+        assert profile(client)['values'] == current['values']

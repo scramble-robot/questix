@@ -10,17 +10,16 @@ const ControllerMap = (() => {
     ["esc_motor_control", "full_speed_button", "ローラー回転"],
   ];
   const tiltFields = [
-    ["shot_component", "tilt_axis", "チルト上下"],
     ["shot_component", "tilt_up_button_index", "チルトを上げる"],
     ["shot_component", "tilt_down_button_index", "チルトを下げる"],
   ];
   // Numbers identify functions and remain stable when their inputs move.
   const numbers = { linear_x_axis: 1, angular_z_axis: 2, fire_button: 3,
-    full_speed_button: 4, tilt_axis: 5, tilt_up_button_index: 5,
+    full_speed_button: 4, tilt_up_button_index: 5,
     tilt_down_button_index: 5, linear_y_axis: 6 };
   const colors = { 1: "#83dbc5", 2: "#94c7ff", 3: "#f1af88", 4: "#c5b2f5", 5: "#e7ce88", 6: "#83d5dd" };
   const shortNames = { linear_x_axis: "前進・後退", angular_z_axis: "旋回", fire_button: "射出",
-    full_speed_button: "ローラー", tilt_axis: "チルト上下", tilt_up_button_index: "チルトを上げる",
+    full_speed_button: "ローラー", tilt_up_button_index: "チルトを上げる",
     tilt_down_button_index: "チルトを下げる", linear_y_axis: "左右移動" };
 
   function actionLabel(key, action) { return `${numbers[key]} · ${action}`; }
@@ -48,28 +47,54 @@ const ControllerMap = (() => {
     return extra[value] || null;
   }
 
-  function bindings(controller, values, saved) {
-    const active = fields.slice();
-    if (values.shot_component?.tilt_axis === -1) {
-      active.push(...tiltFields.slice(1));
-    } else {
-      active.push(tiltFields[0]);
+  function isTilt(key) {
+    return key === "tilt_up_button_index" || key === "tilt_down_button_index";
+  }
+
+  function directionInput(controller, values, key) {
+    const prefix = key.replace("_button_index", "");
+    const shot = values.shot_component || {};
+    const axis = shot[`${prefix}_axis`];
+    return axis >= 0 ? inputOption(controller, "direction", axis, shot[`${prefix}_axis_sign`])
+      : inputOption(controller, "button", shot[key]);
+  }
+
+  function inputOption(controller, kind, value, sign) {
+    const axis = kind !== "button";
+    const key = axis ? "tilt_axis" : "fire_button";
+    let label = labels.valueLabel(controller, key, value);
+    if (kind === "direction") {
+      const direction = [0, 3, 6].includes(value) ? (sign === 1 ? "左" : "右")
+        : [1, 4, 7].includes(value) ? (sign === 1 ? "上" : "下") : (sign === 1 ? "＋方向" : "−方向");
+      label = label.replace("左右", direction).replace("上下", direction);
+      if (![0, 1, 3, 4, 6, 7].includes(value)) label += ` ${direction}`;
     }
-    return active.filter(([node, key]) => Object.hasOwn(values[node] || {}, key)).map(([node, key, action]) => {
-      const value = values[node][key];
-      return { node, key, action, number: numbers[key], value, spot: location(controller, key, value),
-        label: value === null ? "未入力" : labels.valueLabel(controller, key, value),
-        changed: value !== saved[node]?.[key], target: `control-${node}-${key}` };
-    }).sort((a, b) => a.number - b.number);
+    return { id: `${kind}:${value}${kind === "direction" ? `:${sign}` : ""}`,
+      kind, value, sign, label, spot: location(controller, key, value) };
+  }
+
+  function bindings(controller, values, saved) {
+    return [...fields, ...tiltFields]
+      .filter(([node, key]) => Object.hasOwn(values[node] || {}, key)).map(([node, key, action]) => {
+        const input = isTilt(key) ? directionInput(controller, values, key)
+          : inputOption(controller, labels.kind(key), values[node][key]);
+        const before = isTilt(key) ? directionInput(controller, saved, key).id
+          : inputOption(controller, labels.kind(key), saved[node]?.[key]).id;
+        return { node, key, action, number: numbers[key], ...input, inputId: input.id,
+          changed: input.id !== before, target: `control-${node}-${key}` };
+      }).sort((a, b) => a.number - b.number);
   }
 
   function inputs(controller, spot) {
     const result = [];
-    for (const [kind, key, count] of [["axis", "tilt_axis", 8], ["button", "fire_button", 14]]) {
+    for (const [kind, count] of [["axis", 8], ["button", 14]]) {
       for (let value = 0; value < count; value++) {
-        if (location(controller, key, value) === spot) {
-          result.push({ id: `${kind}:${value}`, kind, value,
-            label: labels.valueLabel(controller, key, value) });
+        const input = inputOption(controller, kind, value);
+        if (input.spot !== spot) continue;
+        result.push(input);
+        if (kind === "axis" && ![2, 5].includes(value)) {
+          result.push(inputOption(controller, "direction", value, 1),
+            inputOption(controller, "direction", value, -1));
         }
       }
     }
@@ -78,59 +103,50 @@ const ControllerMap = (() => {
 
   function actions(values, kind) {
     return [...fields, ...tiltFields]
-      .filter(([node, key]) => labels.kind(key) === kind && Object.hasOwn(values[node] || {}, key))
+      .filter(([node, key]) => (isTilt(key) ? ["button", "direction"].includes(kind)
+        : labels.kind(key) === kind) && Object.hasOwn(values[node] || {}, key))
       .map(([node, key, action]) => ({ id: `${node}.${key}`, node, key, action }))
       .sort((a, b) => numbers[a.key] - numbers[b.key]);
   }
 
   function destinations(controller, key) {
+    if (isTilt(key)) {
+      return [0, 1, 3, 4, 6, 7].flatMap((value) => [1, -1].map((sign) =>
+        inputOption(controller, "direction", value, sign)))
+        .concat(Array.from({ length: 14 }, (_, value) => inputOption(controller, "button", value)))
+        .filter((item) => item.spot);
+    }
     const kind = labels.kind(key);
-    return Array.from({ length: kind === "axis" ? 8 : 14 }, (_, value) => ({
-      id: `${kind}:${value}`, kind, value, spot: location(controller, key, value),
-      label: labels.valueLabel(controller, key, value),
-    })).filter((item) => item.spot);
+    return Array.from({ length: kind === "axis" ? 8 : 14 }, (_, value) =>
+      inputOption(controller, kind, value)).filter((item) => item.spot);
+  }
+
+  function planTiltDirection(controller, values, key, inputId) {
+    if (!isTilt(key)) throw new Error("チルトの方向を選んでください。");
+    const parts = inputId.split(":");
+    const [kind, rawValue, rawSign] = parts;
+    const value = Number(rawValue), sign = Number(rawSign);
+    if (!Number.isInteger(value) || value < 0 || value > 63 || rawValue === ""
+        || !(kind === "button" && parts.length === 2
+          || kind === "direction" && parts.length === 3 && [1, -1].includes(sign))) {
+      throw new Error("チルトの入力を選んでください。");
+    }
+    const other = key === "tilt_up_button_index" ? "tilt_down_button_index" : "tilt_up_button_index";
+    if (directionInput(controller, values, other).id === inputId) {
+      throw new Error("チルト上・下には異なる入力を割り当ててください。");
+    }
+    const prefix = key.replace("_button_index", "");
+    return [{ key: `${prefix}_axis`, value: kind === "button" ? -1 : value },
+      kind === "button" ? { key, value } : { key: `${prefix}_axis_sign`, value: sign }]
+      .map((change) => ({ node: "shot_component", ...change }));
   }
 
   function planAssignment(controller, values, spot, inputId, actionId) {
     const input = inputs(controller, spot).find((item) => item.id === inputId);
     const action = input && actions(values, input.kind).find((item) => item.id === actionId);
     if (!action) throw new Error("入力と機能の組み合わせを選んでください。");
-    if (action.key === "tilt_up_button_index" || action.key === "tilt_down_button_index") {
-      return planTiltButton(values, action.key, input.value);
-    }
+    if (isTilt(action.key)) return planTiltDirection(controller, values, action.key, inputId);
     return [{ node: action.node, key: action.key, value: input.value }];
-  }
-
-  function planTiltButton(values, key, value) {
-    if (!["tilt_up_button_index", "tilt_down_button_index"].includes(key)
-        || !Number.isInteger(value) || value < 0 || value > 63) {
-      throw new Error("チルトのボタンを選んでください。");
-    }
-    const other = key === "tilt_up_button_index" ? "tilt_down_button_index" : "tilt_up_button_index";
-    const shot = values.shot_component || {};
-    if (![key, other, "tilt_axis"].every((field) => Object.hasOwn(shot, field))) {
-      throw new Error("チルト設定を読み直してください。");
-    }
-    if (shot[other] === value) throw new Error("チルト上・下には異なるボタンを割り当ててください。");
-    // A direction edit never includes the opposite button in its patch.
-    return [{ node: "shot_component", key, value },
-      { node: "shot_component", key: "tilt_axis", value: -1 }];
-  }
-
-  function planTiltAssignment(settings) {
-    const index = (value) => Number.isInteger(value) && value >= 0 && value <= 63;
-    if (settings.mode === "axis" && index(settings.axis)) {
-      return [{ node: "shot_component", key: "tilt_axis", value: settings.axis }];
-    }
-    if (settings.mode !== "buttons" || !index(settings.up) || !index(settings.down)) {
-      throw new Error("チルトの入力を選んでください。");
-    }
-    if (settings.up === settings.down) throw new Error("チルト上・下には異なるボタンを割り当ててください。");
-    return [
-      { node: "shot_component", key: "tilt_axis", value: -1 },
-      { node: "shot_component", key: "tilt_up_button_index", value: settings.up },
-      { node: "shot_component", key: "tilt_down_button_index", value: settings.down },
-    ];
   }
 
   function element(tag, attributes = {}, text = null) {
@@ -214,11 +230,11 @@ const ControllerMap = (() => {
     const list = document.createElement("div");
     list.className = "map-bindings";
     list.setAttribute("aria-label", "機能一覧。選択すると割り当て先のポップアップが開きます。");
-    const markerBySpot = new Map();
+    const keysBySpot = new Map();
     for (const assignment of assignments) {
       if (assignment.spot) {
-        if (!markerBySpot.has(assignment.spot)) markerBySpot.set(assignment.spot, new Set());
-        markerBySpot.get(assignment.spot).add(assignment.number);
+        if (!keysBySpot.has(assignment.spot)) keysBySpot.set(assignment.spot, new Set());
+        keysBySpot.get(assignment.spot).add(assignment.key);
       }
     }
     const cards = [];
@@ -264,15 +280,16 @@ const ControllerMap = (() => {
         previous = y;
       });
     }
-    for (const [id, assignedNumbers] of markerBySpot) {
+    for (const [id, assignedKeys] of keysBySpot) {
       const { group, x, y, radius } = spots.get(id);
       const mapped = cards.filter((card) => card.assignment.spot === id);
       group.classList.add("map-assigned");
       if (mapped.some((card) => card.assignment.changed)) group.classList.add("map-changed");
-      [...assignedNumbers].forEach((number, index) => {
-        const badgeIndex = x < 360 ? assignedNumbers.size - index - 1 : index;
+      [...assignedKeys].forEach((key, index) => {
+        const number = numbers[key];
+        const badgeIndex = x < 360 ? assignedKeys.size - index - 1 : index;
         const badgeX = x + (x < 360 ? -1 : 1) * (radius - 4 + badgeIndex * 24);
-        const assignment = mapped.find((card) => card.assignment.number === number).assignment;
+        const assignment = mapped.find((card) => card.assignment.key === key).assignment;
         const actionId = `${assignment.node}.${assignment.key}`;
         // Siblings, not nested buttons: each number edits its own function.
         const badge = element("g", { class: "map-function", role: "button", tabindex: "0",
@@ -282,7 +299,8 @@ const ControllerMap = (() => {
         badge.append(element("circle", { cx: badgeX, cy: y - 18, r: 12,
           fill: colors[number], stroke: "#122235", "stroke-width": 2 }),
         element("text", { x: badgeX, y: y - 14, fill: "#10202d",
-          "text-anchor": "middle", "font-size": 12, "font-weight": "bold" }, String(number)));
+          "text-anchor": "middle", "font-size": isTilt(key) ? 10 : 12, "font-weight": "bold" },
+          String(number) + (key === "tilt_up_button_index" ? "↑" : key === "tilt_down_button_index" ? "↓" : "")));
         if (!options.compact) {
           const left = x < 360;
           const rowY = calloutRows.get(actionId);
@@ -324,6 +342,6 @@ const ControllerMap = (() => {
     host.replaceChildren(svg, list);
   }
 
-  return { location, bindings, inputs, actions, destinations, actionLabel, planAssignment, planTiltButton, planTiltAssignment, render };
+  return { location, bindings, inputs, actions, destinations, actionLabel, planAssignment, isTilt, directionInput, planTiltDirection, render };
 })();
 if (typeof module !== "undefined") module.exports = ControllerMap;

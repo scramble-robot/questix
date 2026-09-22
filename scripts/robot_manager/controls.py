@@ -32,7 +32,10 @@ GROUPS = {
     ]),
     'shot_component': ('射出・チルトのキー割り当て', [
         ('fire_button', '射出ボタン番号', 'int', 0, 63),
-        ('tilt_axis', 'チルト軸番号（-1でボタン操作）', 'int', -1, 63),
+        ('tilt_up_axis', '上げる入力軸（-1でボタン）', 'int', -1, 63),
+        ('tilt_up_axis_sign', '上げる軸の方向（+1 / -1）', 'int', -1, 1),
+        ('tilt_down_axis', '下げる入力軸（-1でボタン）', 'int', -1, 63),
+        ('tilt_down_axis_sign', '下げる軸の方向（+1 / -1）', 'int', -1, 1),
         ('tilt_up_button_index', 'チルト上ボタン番号（ボタン操作時のみ）', 'int', 0, 63),
         ('tilt_down_button_index', 'チルト下ボタン番号（ボタン操作時のみ）', 'int', 0, 63),
     ]),
@@ -101,8 +104,16 @@ def validate(values):
     if drive['min_command_rpm'] >= drive['max_motor_rpm']:
         raise ValueError('低速不感帯は車輪の最大回転数より小さくしてください。')
     shot = clean['shot_component']
-    if shot['tilt_axis'] == -1 and shot['tilt_up_button_index'] == shot['tilt_down_button_index']:
-        raise ValueError('チルト上・下には異なるボタンを割り当ててください。')
+    inputs = []
+    for direction in ('up', 'down'):
+        axis = shot[f'tilt_{direction}_axis']
+        sign = shot[f'tilt_{direction}_axis_sign']
+        if sign not in (-1, 1):
+            raise ValueError('チルト軸の方向は +1 または -1 を選んでください。')
+        inputs.append(('axis', axis, sign) if axis >= 0 else
+                      ('button', shot[f'tilt_{direction}_button_index']))
+    if inputs[0] == inputs[1]:
+        raise ValueError('チルト上・下には異なる入力を割り当ててください。')
     return clean
 
 
@@ -133,6 +144,16 @@ def _decode(raw):
         if not isinstance(section, dict) or set(section) != {'ros__parameters'}:
             raise ValueError(f'{node}: ros__parameters セクションが不正です。')
         values[node] = section['ros__parameters']
+    # Upgrade only the complete legacy shape; partial/unknown fields remain errors.
+    shot = values.get('shot_component')
+    if isinstance(shot, dict) and set(shot) == {
+            'fire_button', 'tilt_axis', 'tilt_up_button_index', 'tilt_down_button_index'}:
+        axis = shot.pop('tilt_axis')
+        if type(axis) is not int or not -1 <= axis <= 63:
+            raise ValueError('旧チルト軸番号が不正です。')
+        for direction, sign in (('up', 1), ('down', -1)):
+            shot[f'tilt_{direction}_axis'] = axis
+            shot[f'tilt_{direction}_axis_sign'] = sign
     return validate(values)
 
 

@@ -21,7 +21,7 @@ const ControlLabels = (() => {
     "fire_button", "tilt_up_button_index", "tilt_down_button_index", "full_speed_button",
   ]);
   const axisKeys = new Set([
-    "linear_x_axis", "linear_y_axis", "angular_z_axis", "tilt_axis",
+    "linear_x_axis", "linear_y_axis", "angular_z_axis", "tilt_axis", "tilt_up_axis", "tilt_down_axis",
     "left_stick_vertical_axis", "right_stick_vertical_axis", "left_axis_index", "right_axis_index",
   ]);
 
@@ -36,7 +36,7 @@ const ControlLabels = (() => {
       return name ? `${name}（ボタン ${value}）` : `ボタン ${value}（名前未登録）`;
     }
     if (type === "axis") {
-      if (value === -1) return key === "tilt_axis" ? "ボタンで操作（-1）" : "使用しない（-1）";
+      if (value === -1) return key.startsWith("tilt_") ? "ボタンで操作（-1）" : "使用しない（-1）";
       const name = axes[controller]?.[value];
       return name ? `${name}（軸 ${value}）` : `軸 ${value}（名前未登録）`;
     }

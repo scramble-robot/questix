@@ -39,8 +39,15 @@ ROS ノードを `ros2 run` で直接起動する場合は、このファイル�
   左右速度は全方向移動用で、標準の差動駆動では使用しません。
 - `drive_component`: 車輪の最大 RPM、加速度、目標付近の緩和幅、低速不感帯。
   `max_motor_rpm` は M0602C の指令上限 475 以下、`min_command_rpm` はその値未満です。
-- `shot_component`: 射出ボタン、チルト軸、チルト上下ボタン。
-  `tilt_axis: -1` で上下ボタンを使い、0 以上なら軸で操作します。
+- `shot_component`: 射出ボタン、チルトを上げる入力・下げる入力。
+  図の「上げる」「下げる」から別々に選べます（例：上げる＝十字キー上、下げる＝B）。
+  `tilt_up_axis` / `tilt_down_axis` は方向ごとの軸番号で、-1 の場合だけ対応する
+  `tilt_up_button_index` / `tilt_down_button_index` を使います。
+  軸操作時の `tilt_up_axis_sign` / `tilt_down_axis_sign` は +1 が正方向、-1 が負方向です。
+  初期値は十字キー上／下。同一入力の重複割り当ては拒否し、上下同時押しでは動かしません。
+  従来の `tilt_axis` 形式は管理画面で読み込む際に上下それぞれへ変換し、保存時に新形式になります。
+  ノードも旧形式を受け付けます（新しい軸パラメータが未指定、内部値 -2 の場合のみ継承）。
+  この変更を使うには `motor_control_app` を再ビルドし、robot_manager を更新してください。
 - `esc_motor_control`: ローラー回転ボタンと出力（0〜1）。出力は実測 RPM ではありません。
 - `joy_node` / `uart_joy_driver`: 入力ドライバのスティック不感帯。
 - `joy_controller_dual_stick` / `joy_axis_drive`: それぞれの単体起動モード専用。

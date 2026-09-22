@@ -16,6 +16,7 @@
 #include <sensor_msgs/msg/joy.hpp>
 #include <string>
 
+#include "motor_control_app/tilt_input.hpp"
 #include "motor_control_lib/servo_control.hpp"
 
 namespace motor_control_app {
@@ -76,7 +77,12 @@ private:
   int tilt_servo_id_;
   int trigger_servo_id_;
   int fire_button_;
-  int tilt_axis_;
+  // Per-direction axis: -1 uses the button; -2 inherits legacy tilt_axis.
+  // axis_sign is +1/-1 and applies only when that direction uses an axis.
+  int tilt_up_axis_;
+  int tilt_down_axis_;
+  int tilt_up_axis_sign_;
+  int tilt_down_axis_sign_;
   int tilt_up_button_index_;
   int tilt_down_button_index_;
   double tilt_step_angle_;
@@ -107,9 +113,7 @@ private:
 
   bool is_shooting_;
   bool last_button_state_;
-  float last_tilt_value_;
-  bool last_tilt_up_state_;
-  bool last_tilt_down_state_;
+  TiltInputEdges tilt_edges_;
   int current_tilt_position_;
   double current_tilt_angle_;
   rclcpp::Time last_command_time_;

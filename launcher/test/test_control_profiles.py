@@ -111,7 +111,7 @@ def test_dual_stick_keeps_its_own_scaling(expand):
 
 
 @pytest.mark.parametrize('relative_path,node,key,value', [
-    ('motor_control_app/launch/shot_component.launch.xml', 'shot_component', 'tilt_axis', 7),
+    ('motor_control_app/launch/shot_component.launch.xml', 'shot_component', 'tilt_up_axis', 7),
     ('motor_control_app/launch/joy_axis_drive.launch.xml', 'joy_axis_drive', 'max_motor_rpm', 100),
     ('motor_control_app/launch/joy_axis_drive.launch.py', 'joy_axis_drive', 'max_motor_rpm', 100),
     ('motor_control_app/launch/drive_component.launch.xml',

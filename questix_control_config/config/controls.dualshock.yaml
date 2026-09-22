@@ -1,7 +1,8 @@
 # QUESTiX operator controls — one file per controller, shared by all launch paths.
 # ROS node sections prevent unrelated parameters from leaking between nodes.
 # Signed input ratios reverse direction. Units: linear m/s, angular rad/s.
-# tilt_axis: -1 selects tilt_up/down buttons; >= 0 selects an axis.
+# Each tilt direction selects its own axis (-1 uses its button index).
+# axis_sign: +1 = positive half-axis, -1 = negative half-axis; used only in axis mode.
 # Acceleration/taper: 0 disables shaping. max_motor_rpm must be <= 475.
 # Dual-stick and joy_axis_drive sections apply only to their standalone modes.
 # Hardware ports, GPIO safety and lifecycle settings remain in each package.
@@ -22,7 +23,10 @@ joy_controller_dual_stick:
 shot_component:
   ros__parameters:
     fire_button: 5
-    tilt_axis: 7
+    tilt_up_axis: 7
+    tilt_up_axis_sign: 1
+    tilt_down_axis: 7
+    tilt_down_axis_sign: -1
     tilt_up_button_index: 4
     tilt_down_button_index: 6
 esc_motor_control:

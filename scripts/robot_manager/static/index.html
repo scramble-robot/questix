@@ -159,23 +159,11 @@
               <label for="map-input"><span id="map-input-caption">使う入力</span><select id="map-input"></select></label>
               <label for="map-action">割り当てる機能<select id="map-action"></select></label>
             </div>
-            <div class="map-editor-fields" id="map-tilt-fields" hidden>
-              <label for="map-tilt-mode">チルトの操作方法
-                <select id="map-tilt-mode">
-                  <option value="axis">十字キー・スティックなどの軸で操作</option>
-                  <option value="buttons">上下を別々のボタンで操作</option>
-                </select>
-              </label>
-              <label for="map-tilt-axis" id="map-tilt-axis-row">使う入力軸<select id="map-tilt-axis"></select></label>
-              <label for="map-tilt-up" id="map-tilt-up-row">上げるボタン<select id="map-tilt-up"></select></label>
-              <label for="map-tilt-down" id="map-tilt-down-row">下げるボタン<select id="map-tilt-down"></select></label>
-            </div>
             <p id="map-current" class="map-help"></p>
             <p id="map-tilt-opposite" class="map-help" hidden></p>
             <p id="map-preview" class="map-help" role="status"></p>
             <button type="button" id="map-apply" class="btn btn-small">編集値に反映</button>
             <button type="button" id="map-edit-draft" class="btn btn-small" hidden>編集中に切り替える</button>
-            <button type="button" id="map-tilt-pair" class="btn btn-small" hidden>チルトの操作方法・上下をまとめて編集</button>
             <p id="map-feedback" class="map-help" role="status"></p>
           </dialog>
         </section>
@@ -379,9 +367,9 @@
   <div id="toast-container"></div>
 
   <script src="/static/app.js?v=9"></script>
-  <script src="/static/control-labels.js?v=1"></script>
-  <script src="/static/controller-map.js?v=8"></script>
-  <script src="/static/controls.js?v=10"></script>
+  <script src="/static/control-labels.js?v=2"></script>
+  <script src="/static/controller-map.js?v=9"></script>
+  <script src="/static/controls.js?v=11"></script>
 </body>
 
 </html>

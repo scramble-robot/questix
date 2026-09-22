@@ -89,13 +89,15 @@ function editorFixture(extraValues = {}, controller = 'uart') {
   };
   const profile = {
     controller, revision: 'initial',
-    values: { shot_component: { fire_button: 5, tilt_axis: 7 } },
-    defaults: { shot_component: { fire_button: 4, tilt_axis: 7 } },
+    values: { shot_component: { fire_button: 5 } },
+    defaults: { shot_component: { fire_button: 4 } },
     groups: [{ node: 'shot_component', label: '射出', fields: [
       { key: 'fire_button', label: '射出ボタン番号', type: 'int', min: 0, max: 63 },
-      { key: 'tilt_axis', label: 'チルト軸番号', type: 'int', min: -1, max: 63 },
     ] }],
   };
+  extraValues = { ...extraValues, shot_component: { tilt_up_axis: 7, tilt_down_axis: 7,
+    tilt_up_axis_sign: 1, tilt_down_axis_sign: -1, tilt_up_button_index: 4,
+    tilt_down_button_index: 6, ...extraValues.shot_component } };
   for (const [node, values] of Object.entries(extraValues)) {
     profile.values[node] = { ...profile.values[node], ...values };
     profile.defaults[node] = { ...profile.defaults[node], ...values };
@@ -103,7 +105,7 @@ function editorFixture(extraValues = {}, controller = 'uart') {
     if (!group) { group = { node, label: node, fields: [] }; profile.groups.push(group); }
     for (const key of Object.keys(values)) {
       if (!group.fields.some((field) => field.key === key)) {
-        group.fields.push({ key, label: key, type: 'int', min: 0, max: 63 });
+        group.fields.push({ key, label: key, type: 'int', min: -1, max: 63 });
       }
     }
   }
@@ -272,7 +274,7 @@ test('diagram edits are blocked in saved view and while saving, then reset with 
 test('diagram distinguishes stick axes from pressing and previews overlapping functions', async () => {
   const { document, context } = editorFixture({
     joy_controller: { linear_x_axis: 1, linear_y_axis: 0, angular_z_axis: 3 },
-    shot_component: { tilt_up_button_index: 4, tilt_down_button_index: 6 },
+    shot_component: { tilt_down_axis: -1, tilt_up_button_index: 4, tilt_down_button_index: 6 },
     esc_motor_control: { full_speed_button: 7 },
   });
   await vm.runInContext('loadControls("uart")', context);
@@ -287,19 +289,19 @@ test('diagram distinguishes stick axes from pressing and previews overlapping fu
   assert.ok(document.getElementById('map-action').children.every((item) => !item.value.startsWith('joy_controller.')));
   selectMap(document, 'map-action', 'shot_component.tilt_up_button_index');
   document.getElementById('map-apply').events.click();
-  assert.equal(document.getElementById('control-shot_component-tilt_axis').value, '-1');
+  assert.equal(document.getElementById('control-shot_component-tilt_up_axis').value, '-1');
   assert.equal(document.getElementById('control-shot_component-tilt_up_button_index').value, '12');
   chooseSpot(document, 'left-trigger');
   selectMap(document, 'map-action', 'shot_component.tilt_up_button_index');
   assert.equal(document.getElementById('map-apply').disabled, true);
-  assert.match(document.getElementById('map-preview').textContent, /異なるボタン/);
+  assert.match(document.getElementById('map-preview').textContent, /異なる入力/);
   document.getElementById('map-apply').events.click();
   assert.equal(vm.runInContext('controlDraft.shot_component.tilt_up_button_index', context), 12);
   chooseSpot(document, 'dpad');
-  selectMap(document, 'map-input', 'axis:7');
-  selectMap(document, 'map-action', 'shot_component.tilt_axis');
+  selectMap(document, 'map-input', 'direction:7:1');
+  selectMap(document, 'map-action', 'shot_component.tilt_up_button_index');
   document.getElementById('map-apply').events.click();
-  assert.equal(document.getElementById('control-shot_component-tilt_axis').value, '7');
+  assert.equal(document.getElementById('control-shot_component-tilt_up_axis').value, '7');
 });
 
 test('numbered function opens a popup and moves its binding without scrolling or renumbering', async () => {
@@ -467,63 +469,46 @@ test('profile load failures remain visible even when the diagram and detailed se
   assert.equal(document.getElementById('controls-load-error').textContent, '設定を読み込めません。');
 });
 
-test('tilt function popup assigns separate ordinary buttons together and saves button mode', async () => {
-  const { document, context, getPayload } = editorFixture({
-    shot_component: { tilt_up_button_index: 4, tilt_down_button_index: 6 },
+for (const controller of ['uart', 'dualshock']) {
+  test(`${controller}: separate tilt popups preserve the other direction through save and reopen`, async () => {
+    const { document, context, getPayload } = editorFixture({}, controller);
+    await vm.runInContext(`loadControls("${controller}")`, context);
+    const shot = () => JSON.parse(vm.runInContext('JSON.stringify(controlDraft.shot_component)', context));
+    const open = (dir) => document.querySelector(`[data-map-function="shot_component.tilt_${dir}_button_index"]`).events.click();
+    open('down');
+    assert.equal(document.getElementById('map-input').value, 'direction:7:-1');
+    assert.match(document.getElementById('map-tilt-opposite').textContent, /上げる.*十字キー 上/);
+    assert.equal(document.getElementById('map-apply').disabled, true);
+    selectMap(document, 'map-input', 'button:1');
+    assert.equal(shot().tilt_down_axis, 7);
+    document.getElementById('map-apply').events.click();
+    assert.equal(shot().tilt_down_axis, -1);
+    assert.equal(shot().tilt_down_button_index, 1);
+    assert.equal(shot().tilt_up_axis, 7);
+    assert.equal(shot().tilt_up_axis_sign, 1);
+    document.getElementById('map-close').events.click();
+    await document.getElementById('map-save').events.click({ preventDefault() {} });
+    assert.deepEqual(getPayload().values.shot_component, shot());
+    open('up');
+    assert.equal(document.getElementById('map-input').value, 'direction:7:1');
+    selectMap(document, 'map-input', 'direction:1:-1');
+    document.getElementById('map-apply').events.click();
+    assert.equal(shot().tilt_up_axis, 1);
+    assert.equal(shot().tilt_up_axis_sign, -1);
+    assert.equal(shot().tilt_down_axis, -1);
+    assert.equal(shot().tilt_down_button_index, 1);
+    document.getElementById('map-close').events.click();
+    open('down');
+    assert.equal(document.getElementById('map-input').value, 'button:1');
+    selectMap(document, 'map-input', 'direction:1:-1');
+    assert.equal(document.getElementById('map-apply').disabled, true);
+    selectMap(document, 'map-input', 'direction:1:1');
+    document.getElementById('map-apply').events.click();
+    assert.equal(shot().tilt_down_axis, 1);
+    assert.equal(shot().tilt_down_axis_sign, 1);
+    assert.equal(shot().tilt_up_axis_sign, -1);
   });
-  await vm.runInContext('loadControls("uart")', context);
-  document.querySelector('[data-map-function="shot_component.tilt_axis"]').events.click();
-  assert.equal(document.getElementById('map-tilt-fields').hidden, false);
-  assert.equal(document.getElementById('map-standard-fields').hidden, true);
-  assert.equal(document.getElementById('map-tilt-mode').value, 'axis');
-  selectMap(document, 'map-tilt-mode', 'buttons');
-  assert.equal(document.getElementById('map-tilt-axis-row').hidden, true);
-  selectMap(document, 'map-tilt-up', '2');
-  selectMap(document, 'map-tilt-down', '1');
-  assert.match(document.getElementById('map-preview').textContent, /上: X.*下: B/);
-  assert.equal(vm.runInContext('controlDraft.shot_component.tilt_axis', context), 7);
-  document.getElementById('map-apply').events.click();
-  assert.equal(document.getElementById('control-shot_component-tilt_axis').value, '-1');
-  assert.equal(document.getElementById('control-shot_component-tilt_up_button_index').value, '2');
-  assert.equal(document.getElementById('control-shot_component-tilt_down_button_index').value, '1');
-  assert.ok(document.querySelector('[data-map-function="shot_component.tilt_up_button_index"]'));
-  assert.ok(document.querySelector('[data-map-function="shot_component.tilt_down_button_index"]'));
-  document.getElementById('map-close').events.click();
-  await document.getElementById('map-save').events.click({ preventDefault() {} });
-  assert.deepEqual(getPayload().values.shot_component,
-    { fire_button: 5, tilt_axis: -1, tilt_up_button_index: 2, tilt_down_button_index: 1 });
-  document.querySelector('[data-map-function="shot_component.tilt_down_button_index"]').events.click();
-  document.getElementById('map-tilt-pair').events.click();
-  selectMap(document, 'map-tilt-mode', 'axis');
-  selectMap(document, 'map-tilt-axis', '7');
-  document.getElementById('map-apply').events.click();
-  assert.equal(vm.runInContext('controlDraft.shot_component.tilt_axis', context), 7);
-  assert.equal(vm.runInContext('controlDraft.shot_component.tilt_up_button_index', context), 2);
-});
-
-test('tilt popup rejects duplicate buttons, cancels pending edits, and protects saved view', async () => {
-  const { document, context } = editorFixture({
-    shot_component: { tilt_up_button_index: 4, tilt_down_button_index: 6 },
-  });
-  await vm.runInContext('loadControls("uart")', context);
-  document.querySelector('[data-map-function="shot_component.tilt_axis"]').events.click();
-  selectMap(document, 'map-tilt-mode', 'buttons');
-  selectMap(document, 'map-tilt-up', '6');
-  assert.equal(document.getElementById('map-apply').disabled, true);
-  assert.match(document.getElementById('map-preview').textContent, /異なるボタン/);
-  document.getElementById('map-apply').events.click();
-  assert.equal(vm.runInContext('controlDraft.shot_component.tilt_axis', context), 7);
-  document.getElementById('map-close').events.click();
-  document.querySelector('[data-map-function="shot_component.tilt_axis"]').events.click();
-  assert.equal(document.getElementById('map-tilt-mode').value, 'axis');
-  selectMap(document, 'controller-map-source', 'saved');
-  assert.equal(document.getElementById('map-tilt-mode').disabled, true);
-  selectMap(document, 'map-tilt-mode', 'buttons');
-  document.getElementById('map-apply').events.click();
-  assert.equal(vm.runInContext('controlDraft.shot_component.tilt_axis', context), 7);
-  document.getElementById('map-edit-draft').events.click();
-  assert.equal(document.getElementById('map-tilt-mode').disabled, false);
-});
+}
 
 test('DualShock tilt buttons use their own names and unused central controls stay off the diagram', async () => {
   const { document, context } = editorFixture({
@@ -532,12 +517,10 @@ test('DualShock tilt buttons use their own names and unused central controls sta
   await vm.runInContext('loadControls("dualshock")', context);
   assert.equal(document.querySelector('[data-spot="touchpad"]'), undefined);
   assert.equal(document.querySelector('[data-spot="home"]'), undefined);
-  document.querySelector('[data-map-function="shot_component.tilt_axis"]').events.click();
-  selectMap(document, 'map-tilt-mode', 'buttons');
-  assert.match(document.getElementById('map-tilt-up').children.find((item) => item.value === '4').textContent, /L1/);
-  assert.match(document.getElementById('map-tilt-down').children.find((item) => item.value === '6').textContent, /L2/);
-  selectMap(document, 'map-tilt-up', '10');
-  selectMap(document, 'map-tilt-down', '0');
+  document.querySelector('[data-map-function="shot_component.tilt_up_button_index"]').events.click();
+  assert.match(document.getElementById('map-input').children.find((item) => item.value === 'button:4').textContent, /L1/);
+  assert.match(document.getElementById('map-input').children.find((item) => item.value === 'button:6').textContent, /L2/);
+  selectMap(document, 'map-input', 'button:10');
   document.getElementById('map-apply').events.click();
   assert.ok(document.querySelector('[data-spot="home"]'));
   document.getElementById('map-close').events.click();
@@ -551,7 +534,7 @@ test('DualShock tilt buttons use their own names and unused central controls sta
 for (const controller of ['uart', 'dualshock']) {
   test(`${controller}: editing tilt up or down changes only the selected direction`, async () => {
     const { document, context, getPayload } = editorFixture({
-      shot_component: { tilt_axis: -1, tilt_up_button_index: 2, tilt_down_button_index: 1 },
+      shot_component: { tilt_up_axis: -1, tilt_down_axis: -1, tilt_up_button_index: 2, tilt_down_button_index: 1 },
     }, controller);
     await vm.runInContext(`loadControls("${controller}")`, context);
     for (const [key, other, value] of [
@@ -560,8 +543,6 @@ for (const controller of ['uart', 'dualshock']) {
     ]) {
       const before = vm.runInContext(`controlDraft.shot_component.${other}`, context);
       document.querySelector(`[data-map-function="shot_component.${key}"]`).events.click();
-      assert.equal(document.getElementById('map-standard-fields').hidden, false);
-      assert.equal(document.getElementById('map-tilt-fields').hidden, true);
       assert.equal(document.getElementById('map-action').value, `shot_component.${key}`);
       assert.match(document.getElementById('map-editor-title').textContent, key.includes('_up_') ? /上げる/ : /下げる/);
       assert.equal(document.getElementById('map-tilt-opposite').hidden, false);
@@ -569,26 +550,26 @@ for (const controller of ['uart', 'dualshock']) {
       document.getElementById('map-apply').events.click();
       assert.equal(vm.runInContext(`controlDraft.shot_component.${key}`, context), value);
       assert.equal(vm.runInContext(`controlDraft.shot_component.${other}`, context), before);
-      assert.equal(vm.runInContext('controlDraft.shot_component.tilt_axis', context), -1);
+      assert.equal(vm.runInContext('controlDraft.shot_component.tilt_up_axis', context), -1);
       document.getElementById('map-close').events.click();
     }
     await document.getElementById('map-save').events.click({ preventDefault() {} });
     assert.deepEqual(getPayload().values.shot_component,
-      { fire_button: 5, tilt_axis: -1, tilt_up_button_index: 4, tilt_down_button_index: 6 });
+      { fire_button: 5, tilt_up_axis: -1, tilt_down_axis: -1, tilt_up_axis_sign: 1, tilt_down_axis_sign: -1, tilt_up_button_index: 4, tilt_down_button_index: 6 });
   });
 }
 
 test('single tilt editing rejects the opposite button, cancels local choices, and protects saved values', async () => {
   const { document, context } = editorFixture({
-    shot_component: { tilt_axis: -1, tilt_up_button_index: 2, tilt_down_button_index: 1 },
+    shot_component: { tilt_up_axis: -1, tilt_down_axis: -1, tilt_up_button_index: 2, tilt_down_button_index: 1 },
   });
   await vm.runInContext('loadControls("uart")', context);
   const open = () => document.querySelector('[data-map-function="shot_component.tilt_up_button_index"]').events.click();
   open();
-  assert.equal(document.getElementById('map-input-caption').textContent, '上げるボタン');
+  assert.equal(document.getElementById('map-input-caption').textContent, '上げる操作');
   selectMap(document, 'map-input', 'button:1');
   assert.equal(document.getElementById('map-apply').disabled, true);
-  assert.match(document.getElementById('map-preview').textContent, /異なるボタン/);
+  assert.match(document.getElementById('map-preview').textContent, /異なる入力/);
   document.getElementById('map-apply').events.click();
   assert.equal(vm.runInContext('controlDraft.shot_component.tilt_up_button_index', context), 2);
   selectMap(document, 'map-input', 'button:4');
@@ -612,7 +593,7 @@ test('single tilt editing rejects the opposite button, cancels local choices, an
 
 test('single tilt editing preserves a custom index until a replacement is explicitly applied', async () => {
   const { document, context } = editorFixture({
-    shot_component: { tilt_axis: -1, tilt_up_button_index: 63, tilt_down_button_index: 1 },
+    shot_component: { tilt_up_axis: -1, tilt_down_axis: -1, tilt_up_button_index: 63, tilt_down_button_index: 1 },
   });
   await vm.runInContext('loadControls("uart")', context);
   document.querySelector('[data-action="shot_component.tilt_up_button_index"]').events.click();
@@ -622,4 +603,19 @@ test('single tilt editing preserves a custom index until a replacement is explic
   document.getElementById('map-apply').events.click();
   assert.equal(vm.runInContext('controlDraft.shot_component.tilt_up_button_index', context), 4);
   assert.equal(vm.runInContext('controlDraft.shot_component.tilt_down_button_index', context), 1);
+});
+
+test('a stale tilt API explains the required manager update without showing incorrect bindings', async () => {
+  const { document, context } = editorFixture();
+  const api = context.api;
+  context.api = async (...args) => {
+    const profile = await api(...args);
+    profile.values.shot_component = { fire_button: 5, tilt_axis: 7,
+      tilt_up_button_index: 4, tilt_down_button_index: 6 };
+    return profile;
+  };
+  await vm.runInContext('loadControls("uart")', context);
+  assert.equal(document.getElementById('controller-map-panel').hidden, true);
+  assert.equal(document.getElementById('controls-save').disabled, true);
+  assert.match(document.getElementById('controls-load-error').textContent, /robot_manager.*再起動/);
 });
