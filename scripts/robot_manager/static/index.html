@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>QUESTiX Robot Manager</title>
-  <link rel="stylesheet" href="/static/style.css?v=15">
+  <link rel="stylesheet" href="/static/style.css?v=16">
 </head>
 
 <body>
@@ -121,36 +121,35 @@
     </div><!-- /control panel -->
 
     <div class="tab-panel" data-panel="tuning">
-      <section class="card">
-        <h2>操作・速度のチューニング</h2>
-        <p class="control-help">キー割り当て・速度をコントローラー別に保存します。
-          保存後、制御タブの「再起動」で反映されます。</p>
-        <div class="control-toolbar">
-          <label for="controls-profile">編集するコントローラー</label>
+      <section class="card tuning-card">
+        <div class="tuning-header">
+          <div><p class="tuning-eyebrow">CONTROLLER</p><h2>コントローラー設定</h2>
+            <p class="tuning-subtitle">機能名やキーを選んで、割り当てを変更。</p></div>
+        <div class="control-toolbar tuning-profile">
+          <label for="controls-profile" class="tuning-sr-only">編集するコントローラー</label>
           <select id="controls-profile">
             <option value="uart">UART / Switch</option>
             <option value="dualshock">DualShock</option>
           </select>
           <button type="button" class="btn btn-small" id="controls-reload">再読み込み</button>
         </div>
-        <p id="controls-summary" class="control-summary" role="status">設定を読み込んでください。</p>
-        <p id="controls-layout-note" class="control-help"></p>
+        </div>
+        <p id="controls-load-error" class="control-help tuning-load-error" role="alert" hidden></p>
         <section id="controller-map-panel" class="controller-map-panel" hidden aria-labelledby="controller-map-heading">
-          <div class="control-toolbar">
-            <h3 id="controller-map-heading">コントローラーの操作図</h3>
-            <label for="controller-map-source">図の表示</label>
+          <div class="map-topbar">
+            <h3 id="controller-map-heading">キーの割り当て</h3>
+            <label for="controller-map-source" class="tuning-sr-only">図の表示</label>
             <select id="controller-map-source">
-              <option value="draft">編集中</option>
+              <option value="draft">編集中の配置</option>
               <option value="saved">保存済み</option>
             </select>
-          </div>
-          <p id="controller-map-caption" class="control-help"></p>
-          <div class="control-toolbar map-save-bar">
             <span id="map-change-count" role="status">未保存: 0 項目</span>
             <button type="button" id="map-save" class="btn btn-small" disabled>操作設定を保存</button>
           </div>
-          <p id="map-status" class="map-help" role="status" aria-live="polite"></p>
+          <p id="controller-map-caption" class="tuning-sr-only"></p>
           <div id="controller-map"></div>
+          <div class="map-footer"><p id="map-status" role="status" aria-live="polite"></p>
+            <span>保存した設定は、次回のロボット起動時に反映</span></div>
           <dialog id="controller-map-editor" class="map-editor" aria-labelledby="map-editor-title">
             <div class="map-editor-header">
               <h4 id="map-editor-title">機能の割り当て</h4>
@@ -166,11 +165,9 @@
             <button type="button" id="map-edit-draft" class="btn btn-small" hidden>編集中に切り替える</button>
             <p id="map-feedback" class="map-help" role="status"></p>
           </dialog>
-          <p class="map-help">図のキーを押して機能を選ぶか、図の番号・番号付きの機能を押して割り当て先を選べます。
-            ポップアップ内で「編集値に反映」を押し、図の上の「操作設定を保存」で確定します。
-            番号は機能に固定され、割り当て先を変えても同じ番号で表示します。
-            通常走行・射出の操作図です。左右独立スティック／Joy 直接駆動の単体起動用設定は下のフォームで変更できます。</p>
         </section>
+        <details class="tuning-details" id="controls-details">
+          <summary><span>速度・詳細設定</span><span class="tuning-detail-hint">速度、加速度、入力感度、実行中の値</span></summary>
         <p class="control-help">「保存済み」は読み込み時点の設定です。「変更後」を編集して保存すると、
           次回のロボット起動／再起動で反映されます。「実行中の値を取得」で現在の ROS パラメータと比較できます。</p>
         <button type="button" class="btn btn-small" id="controls-runtime-load" disabled>実行中の値を取得</button>
@@ -184,6 +181,15 @@
             <button type="button" class="btn" id="controls-reset" disabled>初期値に戻す</button>
           </div>
         </form>
+        </details>
+        <details class="tuning-details tuning-meta">
+          <summary><span>プロファイル情報・操作ガイド</span></summary>
+          <p id="controls-summary" class="control-summary" role="status">設定を読み込んでください。</p>
+          <p id="controls-layout-note" class="control-help"></p>
+          <p class="control-help">機能名・番号を選ぶと割り当て先、キーを選ぶと割り当てる機能を編集できます。
+            「編集値に反映」の後、「操作設定を保存」で確定します。
+            図は通常走行・射出用です。左右独立スティック／Joy 直接駆動は詳細設定から変更できます。</p>
+        </details>
       </section>
     </div>
 
@@ -361,8 +367,8 @@
 
   <script src="/static/app.js?v=9"></script>
   <script src="/static/control-labels.js?v=1"></script>
-  <script src="/static/controller-map.js?v=4"></script>
-  <script src="/static/controls.js?v=7"></script>
+  <script src="/static/controller-map.js?v=5"></script>
+  <script src="/static/controls.js?v=8"></script>
 </body>
 
 </html>

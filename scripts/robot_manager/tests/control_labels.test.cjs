@@ -37,6 +37,7 @@ class Element {
     this.dataset = {};
     this.events = {};
     this.attributes = {};
+    this.style = {};
     this.className = '';
     this.classList = { toggle: (name, on) => { this[name] = on; },
       add: (name) => { this[name] = true; } };
@@ -55,7 +56,7 @@ class Element {
   all() { return this.children.flatMap((child) => [child, ...child.all()]); }
   querySelector(selector) {
     return this.all().find((child) => selector === ':invalid' ? child.valid === false
-      : child.className === selector.slice(1));
+      : (child.className || child.attributes.class || '').split(' ').includes(selector.slice(1)));
   }
 }
 
@@ -108,7 +109,7 @@ function editorFixture(extraValues = {}) {
   }
   let savedPayload;
   const context = vm.createContext({ document, ControlLabels: labels, structuredClone,
-    window: { addEventListener() {} }, confirm: () => true, toast() {},
+    window: { innerWidth: 1280, innerHeight: 800, addEventListener() {} }, confirm: () => true, toast() {},
     api: async (url, options) => {
       if (!options) return structuredClone(profile);
       savedPayload = JSON.parse(options.body);
@@ -322,8 +323,8 @@ test('numbered function opens a popup and moves its binding without scrolling or
   assert.equal(document.getElementById('map-change-count').textContent, '未保存: 1 項目');
   document.getElementById('map-close').events.click();
   assert.equal(dialog.open, false);
-  card = document.querySelector('[data-action="shot_component.fire_button"]');
-  assert.equal(card.focusOptions.preventScroll, true);
+  const callout = document.querySelector('[data-map-function="shot_component.fire_button"]');
+  assert.equal(callout.focusOptions.preventScroll, true);
 });
 
 test('closing or dismissing the popup discards unconfirmed choices and restores focus without scrolling', async () => {
@@ -420,4 +421,48 @@ test('a failed diagram save keeps the draft and revision and leaves the error ne
     assert.equal(document.getElementById('map-save').disabled, false);
     assert.equal(document.getElementById('map-change-count').textContent, '未保存: 1 項目');
   }
+});
+
+test('desktop drawing names each function while mobile keeps the compact diagram and named list', async () => {
+  const { document, context } = editorFixture();
+  await vm.runInContext('loadControls("uart")', context);
+  let badge = document.querySelector('[data-map-function="shot_component.fire_button"]');
+  assert.ok(badge.children.some((item) => item.tag === 'text' && item.textContent === '射出'));
+  assert.ok(badge.querySelector('.map-callout-hit'));
+  context.window.innerWidth = 390;
+  vm.runInContext('renderControllerMap()', context);
+  const host = document.getElementById('controller-map');
+  assert.equal(host.children[0].attributes.viewBox, '80 10 560 350');
+  badge = document.querySelector('[data-map-function="shot_component.fire_button"]');
+  assert.equal(badge.children.some((item) => item.attributes.class === 'map-callout-hit'), false);
+  const card = document.querySelector('[data-action="shot_component.fire_button"]');
+  assert.equal(card.children[1].children[0].textContent, 'ディスク射出');
+  card.events.click();
+  document.getElementById('map-close').events.click();
+  assert.equal(document.querySelector('[data-action="shot_component.fire_button"]').focusOptions.preventScroll, true);
+});
+
+test('popup placement chooses space beside its anchor and fits small viewports', () => {
+  const { context } = editorFixture();
+  const position = (anchor, width, height, viewportWidth, viewportHeight) => {
+    context.placementArgs = [anchor, width, height, viewportWidth, viewportHeight];
+    return JSON.parse(JSON.stringify(vm.runInContext('mapPopupPosition(...placementArgs)', context)));
+  };
+  assert.deepEqual(position({ left: 50, right: 150, top: 100 }, 360, 300, 1280, 800),
+    { left: 162, top: 84 });
+  assert.deepEqual(position({ left: 1100, right: 1200, top: 700 }, 360, 300, 1280, 800),
+    { left: 728, top: 488 });
+  assert.deepEqual(position({ left: 40, right: 100, top: 20 }, 366, 400, 390, 700),
+    { left: 12, top: 288 });
+  assert.deepEqual(position({ left: 40, right: 100, top: 20 }, 366, 900, 390, 700),
+    { left: 12, top: 12 });
+});
+
+test('profile load failures remain visible even when the diagram and detailed settings are closed', async () => {
+  const { document, context } = editorFixture();
+  context.api = async () => { throw new Error('設定を読み込めません。'); };
+  await vm.runInContext('loadControls("uart")', context);
+  assert.equal(document.getElementById('controller-map-panel').hidden, true);
+  assert.equal(document.getElementById('controls-load-error').hidden, false);
+  assert.equal(document.getElementById('controls-load-error').textContent, '設定を読み込めません。');
 });

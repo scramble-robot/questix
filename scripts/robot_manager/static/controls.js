@@ -12,6 +12,34 @@ let runtimeAvailable = false;
 let mapSelection = null;
 let mapReturnTarget = null;
 
+function mapPopupPosition(anchor, width, height, viewportWidth, viewportHeight) {
+  const gap = 12;
+  const maxLeft = Math.max(gap, viewportWidth - width - gap);
+  const maxTop = Math.max(gap, viewportHeight - height - gap);
+  if (viewportWidth < 640) return { left: gap, top: maxTop };
+  const rightSpace = viewportWidth - anchor.right;
+  const leftSpace = anchor.left;
+  const left = rightSpace >= width + gap || rightSpace >= leftSpace
+    ? anchor.right + gap : anchor.left - width - gap;
+  return { left: Math.max(gap, Math.min(left, maxLeft)),
+    top: Math.max(gap, Math.min(anchor.top - 16, maxTop)) };
+}
+
+function positionMapEditor() {
+  const panel = document.getElementById("controller-map-editor");
+  if (!panel.open || !mapReturnTarget) return;
+  const callout = window.innerWidth >= 640 && mapReturnTarget.startsWith('[data-action=')
+    ? document.querySelector(mapReturnTarget.replace("data-action", "data-map-function")) : null;
+  const source = callout || document.querySelector(mapReturnTarget);
+  if (!source) return;
+  const anchor = (source.querySelector(".map-callout-hit") || source).getBoundingClientRect();
+  const bounds = panel.getBoundingClientRect();
+  const position = mapPopupPosition(anchor, bounds.width || bounds.right - bounds.left,
+    bounds.height || bounds.bottom - bounds.top, window.innerWidth, window.innerHeight);
+  panel.style.left = `${position.left}px`;
+  panel.style.top = `${position.top}px`;
+}
+
 function openMapEditor(selection, returnTarget) {
   if (controlsBusy) return;
   mapSelection = selection;
@@ -19,6 +47,7 @@ function openMapEditor(selection, returnTarget) {
   renderControllerMap();
   const panel = document.getElementById("controller-map-editor");
   if (!panel.open) panel.showModal();
+  positionMapEditor();
   const saved = document.getElementById("controller-map-source").value === "saved";
   document.getElementById(selection.mode === "action" || saved ? "map-input" : "map-action")
     .focus({ preventScroll: true });
@@ -28,7 +57,9 @@ function finishMapEditor() {
   if (!mapSelection) return;
   mapSelection = null;
   renderControllerMap();
-  document.querySelector(mapReturnTarget)?.focus({ preventScroll: true });
+  const callout = window.innerWidth >= 640 && mapReturnTarget?.startsWith('[data-action=')
+    ? document.querySelector(mapReturnTarget.replace("data-action", "data-map-function")) : null;
+  (callout || document.querySelector(mapReturnTarget))?.focus({ preventScroll: true });
   mapReturnTarget = null;
 }
 
@@ -124,6 +155,9 @@ function applyMapAssignment() {
 function controlMessage(message) {
   document.getElementById("controls-message").textContent = message;
   document.getElementById("map-status").textContent = message;
+  const loadError = document.getElementById("controls-load-error");
+  loadError.hidden = Boolean(controlProfile);
+  loadError.textContent = controlProfile ? "" : message;
 }
 
 function controllerName(controller) {
@@ -165,10 +199,11 @@ function renderControllerMap() {
         title: ControllerMap.actionLabel(assignment.key, assignment.action), actionId,
         inputId: `${ControlLabels.kind(assignment.key)}:${assignment.value}` },
       returnTarget || `[data-action="${actionId}"]`);
-    }, { selectedSpot: mapSelection?.spot, onSelect: (spot, title) => {
+    }, { compact: window.innerWidth < 640, selectedSpot: mapSelection?.spot, onSelect: (spot, title) => {
       openMapEditor({ mode: "key", spot, title }, `[data-spot="${spot}"]`);
     } });
   renderMapEditor();
+  positionMapEditor();
 }
 
 function refreshControlChanges() {
@@ -184,8 +219,7 @@ function refreshControlChanges() {
   document.getElementById("controls-change-count").textContent = `未保存の変更: ${count} 項目`;
   document.getElementById("map-change-count").textContent = `未保存: ${count} 項目`;
   document.getElementById("map-save").disabled = controlsBusy || !count;
-  controlMessage(count ? `${count} 項目を変更しています。「操作設定を保存」で確定します。`
-    : "保存済みの設定を表示しています。実行中の設定は「実行中の値を取得」で確認できます。");
+  controlMessage(count ? `${count} 項目の変更を保存できます。` : "変更はありません。");
 }
 
 function renderRuntimeValues() {
@@ -341,6 +375,7 @@ function controlsSetBusy(busy) {
 
 async function loadControls(controller) {
   controlsSetBusy(true);
+  document.getElementById("controls-load-error").hidden = true;
   try {
     const profile = await api(`/api/control-config/${controller}`);
     controlProfile = profile;
@@ -408,6 +443,13 @@ async function saveControls(event) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  let compactMap = window.innerWidth < 640;
+  window.addEventListener("resize", () => {
+    const compact = window.innerWidth < 640;
+    if (compact !== compactMap) { compactMap = compact; renderControllerMap(); }
+    positionMapEditor();
+  });
+  window.addEventListener("scroll", positionMapEditor, true);
   document.getElementById("map-save").addEventListener("click", saveControls);
   const mapDialog = document.getElementById("controller-map-editor");
   document.getElementById("map-close").addEventListener("click", () => mapDialog.close());
@@ -424,12 +466,14 @@ document.addEventListener("DOMContentLoaded", () => {
     if (mapSelection.mode !== "action") mapSelection.actionId = null;
     document.getElementById("map-feedback").textContent = "";
     renderMapEditor();
+    positionMapEditor();
   });
   document.getElementById("map-action").addEventListener("change", () => {
     if (!mapSelection) return;
     mapSelection.actionId = document.getElementById("map-action").value;
     document.getElementById("map-feedback").textContent = "";
     renderMapEditor();
+    positionMapEditor();
   });
   document.getElementById("map-apply").addEventListener("click", applyMapAssignment);
   document.getElementById("map-edit-draft").addEventListener("click", () => {

@@ -18,6 +18,10 @@ const ControllerMap = (() => {
   const numbers = { linear_x_axis: 1, angular_z_axis: 2, fire_button: 3,
     full_speed_button: 4, tilt_axis: 5, tilt_up_button_index: 5,
     tilt_down_button_index: 5, linear_y_axis: 6 };
+  const colors = { 1: "#83dbc5", 2: "#94c7ff", 3: "#f1af88", 4: "#c5b2f5", 5: "#e7ce88", 6: "#83d5dd" };
+  const shortNames = { linear_x_axis: "前進・後退", angular_z_axis: "旋回", fire_button: "射出",
+    full_speed_button: "ローラー", tilt_axis: "チルト上下", tilt_up_button_index: "チルトを上げる",
+    tilt_down_button_index: "チルトを下げる", linear_y_axis: "左右移動" };
 
   function actionLabel(key, action) { return `${numbers[key]} · ${action}`; }
 
@@ -110,17 +114,26 @@ const ControllerMap = (() => {
     return node;
   }
 
-  function draw(controller) {
+  function draw(controller, compact) {
     const dual = controller === "dualshock";
-    const svg = element("svg", { viewBox: "0 0 720 370", role: "group",
+    const svg = element("svg", { viewBox: compact ? "80 10 560 350" : "-145 -15 1010 405", role: "group",
       "aria-label": `${dual ? "DualShock" : "Switch"} コントローラーの操作図` });
     svg.append(element("title", {}, "ボタンやスティックを選ぶと、機能の割り当てを編集できます。"));
+    const defs = element("defs");
+    const gradient = element("linearGradient", { id: "controller-shell", x2: "0", y2: "1" });
+    gradient.append(element("stop", { offset: "0", "stop-color": "#465665" }),
+      element("stop", { offset: "1", "stop-color": "#202c36" }));
+    defs.append(gradient);
+    svg.append(defs);
+    svg.append(element("ellipse", { cx: 360, cy: 329, rx: 242, ry: 19, fill: "#060d14", opacity: ".35" }));
     svg.append(element("path", { d: "M192 112 Q157 108 143 150 L105 291 Q98 326 125 338 "
       + "Q154 351 174 323 L239 263 Q260 256 280 264 L440 264 Q460 256 481 263 "
       + "L546 323 Q566 351 595 338 Q622 326 615 291 L577 150 Q563 108 528 112 Z",
-    fill: dual ? "#293243" : "#263b47", stroke: "#78869a", "stroke-width": 2 }));
+    fill: "url(#controller-shell)", stroke: "#6b7e8c", "stroke-width": 1.5 }));
+    svg.append(element("path", { d: "M161 251 L131 311 Q128 321 140 320 L216 255 M559 251 L589 311 Q592 321 580 320 L504 255",
+      fill: "none", stroke: "#8493a0", "stroke-width": 2, opacity: ".2" }));
     svg.append(element("text", { x: 360, y: 325, "text-anchor": "middle", fill: "#a9b8ca",
-      "font-size": 14 }, dual ? "DUALSHOCK" : "UART / SWITCH"));
+      "font-size": 10, "letter-spacing": 3 }, dual ? "DUALSHOCK" : "SWITCH / UART"));
     const spots = new Map();
     function spot(id, x, y, name, radius = 24, shape = "circle") {
       const group = element("g", { class: "map-control", "data-spot": id });
@@ -128,11 +141,22 @@ const ControllerMap = (() => {
         ? element("rect", { x: x - radius, y: y - 17, width: radius * 2, height: 34, rx: 10 })
         : element("circle", { cx: x, cy: y, r: radius });
       outline.setAttribute("class", "map-control-shape");
-      outline.setAttribute("fill", "#101c2d");
-      outline.setAttribute("stroke", "#8998ac");
-      outline.setAttribute("stroke-width", 2);
-      group.append(outline, element("text", { x, y: y + 5, "text-anchor": "middle",
-        fill: "#f2f6fc", "font-size": shape === "rect" ? 11 : name.length >= 7 ? 9 : name.length >= 4 ? 11 : 16 }, name));
+      outline.setAttribute("fill", "#17232e");
+      outline.setAttribute("stroke", "#677986");
+      outline.setAttribute("stroke-width", 1.5);
+      group.append(outline);
+      if (id.endsWith("-stick")) {
+        group.append(element("circle", { cx: x, cy: y, r: radius - 7, fill: "#293945", stroke: "#425461", "stroke-width": 2 }),
+          element("circle", { cx: x, cy: y, r: radius - 12, fill: "none", stroke: "#6c7e8a", "stroke-width": 1, opacity: ".45" }));
+      }
+      if (id === "dpad") {
+        group.append(element("path", { d: `M${x-8} ${y-23} h16 v15 h15 v16 h-15 v15 h-16 v-15 h-15 v-16 h15 Z`,
+          fill: "#354752", stroke: "#8b9ba6", "stroke-width": 1 }));
+      } else {
+        const faceColors = dual ? { "face-top": "#83dbc5", "face-right": "#ee9b9e", "face-bottom": "#94c7ff", "face-left": "#d0b1ee" } : {};
+        group.append(element("text", { x, y: y + 5, "text-anchor": "middle",
+          fill: faceColors[id] || "#e6edf2", "font-size": shape === "rect" ? 11 : name.length >= 7 ? 9 : name.length >= 4 ? 11 : 16 }, name));
+      }
       svg.append(group);
       spots.set(id, { group, x, y, radius, name });
     }
@@ -159,7 +183,7 @@ const ControllerMap = (() => {
 
   function render(host, controller, values, saved, onAction, options = {}) {
     const assignments = bindings(controller, values, saved);
-    const { svg, spots } = draw(controller);
+    const { svg, spots } = draw(controller, options.compact);
     const list = document.createElement("div");
     list.className = "map-bindings";
     list.setAttribute("aria-label", "機能一覧。選択すると割り当て先のポップアップが開きます。");
@@ -189,6 +213,8 @@ const ControllerMap = (() => {
       description.append(title, value);
       button.append(number, description);
       button.setAttribute("data-action", `${assignment.node}.${assignment.key}`);
+      button.setAttribute("data-on-map", String(Boolean(assignment.spot)));
+      number.setAttribute("style", `--function-color: ${colors[assignment.number]}`);
       button.setAttribute("aria-haspopup", "dialog");
       button.setAttribute("aria-label", `${actionLabel(assignment.key, assignment.action)}: ${assignment.label}。割り当てを編集`);
       button.addEventListener("click", () => onAction(assignment));
@@ -199,6 +225,17 @@ const ControllerMap = (() => {
       button.addEventListener("blur", () => highlight(false));
       list.append(button);
       cards.push({ button, assignment });
+    }
+    const calloutRows = new Map();
+    for (const left of [true, false]) {
+      const side = assignments.filter((item) => item.spot && (spots.get(item.spot).x < 360) === left)
+        .sort((a, b) => spots.get(a.spot).y - spots.get(b.spot).y);
+      let previous = -20;
+      side.forEach((item, index) => {
+        const y = Math.min(Math.max(spots.get(item.spot).y, previous + 52), 350 - (side.length - index - 1) * 52);
+        calloutRows.set(`${item.node}.${item.key}`, y);
+        previous = y;
+      });
     }
     for (const [id, assignedNumbers] of markerBySpot) {
       const { group, x, y, radius } = spots.get(id);
@@ -213,10 +250,25 @@ const ControllerMap = (() => {
         const badge = element("g", { class: "map-function", role: "button", tabindex: "0",
           "data-map-function": actionId, "aria-haspopup": "dialog",
           "aria-label": `${actionLabel(assignment.key, assignment.action)}。割り当て先を編集` });
+        badge.classList.toggle("map-function-changed", assignment.changed);
         badge.append(element("circle", { cx: badgeX, cy: y - 18, r: 12,
-          fill: "#61dddf", stroke: "#122235", "stroke-width": 2 }),
+          fill: colors[number], stroke: "#122235", "stroke-width": 2 }),
         element("text", { x: badgeX, y: y - 14, fill: "#10202d",
           "text-anchor": "middle", "font-size": 12, "font-weight": "bold" }, String(number)));
+        if (!options.compact) {
+          const left = x < 360;
+          const rowY = calloutRows.get(actionId);
+          const labelX = left ? -124 : 666;
+          const edgeX = left ? 55 : 655;
+          const elbowX = left ? 80 : 632;
+          badge.append(element("path", { d: `M${x + (left ? -radius : radius)} ${y} L${elbowX} ${rowY} H${edgeX}`,
+            fill: "none", stroke: colors[number], "stroke-width": 1, opacity: ".45", "pointer-events": "none" }),
+          element("rect", { x: labelX - 6, y: rowY - 27, width: 184, height: 48, rx: 9,
+            fill: "transparent", class: "map-callout-hit" }),
+          element("text", { x: labelX, y: rowY - 5, fill: colors[number], "font-size": 18, "font-weight": 600 }, shortNames[assignment.key]),
+          element("text", { x: labelX, y: rowY + 14, fill: "#9cabb7", "font-size": 12 },
+            assignment.label.replace(/（(?:軸|ボタン) \d+）/, "") + (assignment.changed ? " · 変更" : "")));
+        }
         const choose = () => onAction(assignment, `[data-map-function="${actionId}"]`);
         badge.addEventListener("click", choose);
         badge.addEventListener("keydown", (event) => {
