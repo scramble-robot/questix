@@ -8,9 +8,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import * as candidate from '../js/core/engine.js';
 
-const BASELINE_PATH = '/home/asahi/.cache/questix-lab-cleanup/base/js/core/engine.js';
+// The pre-refactor modules are kept in test/baseline/ (see its README), so this runs in CI too.
+const BASELINE_PATH = fileURLToPath(new URL('./baseline/js/core/engine.js', import.meta.url));
 const baseline = fs.existsSync(BASELINE_PATH) ? await import(BASELINE_PATH) : null;
 const TASKS = ['delivery', 'dock'];
 const COURSE_NAMES = ['standard', 'open', 'turns'];

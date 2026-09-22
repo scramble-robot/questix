@@ -18,7 +18,8 @@ import {
   TEST_PLACES,
 } from '../js/rl/experiment.js';
 
-const BASELINE = '/home/asahi/.cache/questix-lab-cleanup/base/js/rl/experiment.js';
+// The pre-refactor modules are kept in test/baseline/ (see its README), so this runs in CI too.
+const BASELINE = new URL('./baseline/js/rl/experiment.js', import.meta.url).href;
 const baseline = await import(BASELINE).catch(() => null);
 
 const outcome = (over) => ({

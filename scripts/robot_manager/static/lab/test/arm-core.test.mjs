@@ -2,7 +2,7 @@
 //
 // The expected numbers pin what the arm course computed before its rewrite, so a later change to
 // the kinematics cannot quietly move what learners read on the screen. Set
-// QUESTIX_LAB_BASELINE=<a copy of the site> to diff every case against that copy's module too.
+// LAB_BASELINE=<a copy of the site> to diff every case against that copy's module too.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
@@ -271,10 +271,10 @@ test('the module exports everything the other courses import', () => {
 });
 
 // Optional: the same cases through another copy of the site, for instance the edition before a
-// refactor. Skipped unless QUESTIX_LAB_BASELINE points at one.
+// refactor. Skipped unless LAB_BASELINE points at one.
 test('every case gives the same answer as the baseline copy', async (t) => {
-  const root = process.env.QUESTIX_LAB_BASELINE;
-  if (!root) return t.skip('set QUESTIX_LAB_BASELINE to compare with another copy');
+  const root = process.env.LAB_BASELINE;
+  if (!root) return t.skip('set LAB_BASELINE to compare with another copy');
   const baseline = await import(pathToFileURL(`${root}/js/arm/core.js`).href);
   const answers = (module) => [
     module.ARM_TOPICS,

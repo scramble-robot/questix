@@ -10,12 +10,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import * as core from '../js/vision/core.js';
 import * as images from '../js/vision/images.js';
 
-const BASELINE = '/home/asahi/.cache/questix-lab-cleanup/base';
+// The pre-refactor modules are kept in test/baseline/ (see its README), so this runs in CI too.
+const BASELINE = fileURLToPath(new URL('./baseline', import.meta.url));
 
 // FNV-1a over the bytes of an image, so a whole picture fits in one assertion.
 function hashImage(image) {

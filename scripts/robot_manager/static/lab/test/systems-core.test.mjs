@@ -5,7 +5,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-const BASELINE = '/home/asahi/.cache/questix-lab-cleanup/base/js/systems/';
+// The pre-refactor modules are kept in test/baseline/ (see its README), so this runs in CI too.
+const BASELINE = new URL('./baseline/js/systems/', import.meta.url).href;
 
 const current = await import('../js/systems/core.js');
 const baseline = await import(BASELINE + 'core.js');

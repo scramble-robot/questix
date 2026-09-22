@@ -6,9 +6,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import * as candidate from '../js/core/depth-core.js';
 
-const BASELINE_PATH = '/home/asahi/.cache/questix-lab-cleanup/base/js/core/depth-core.js';
+// The pre-refactor modules are kept in test/baseline/ (see its README), so this runs in CI too.
+const BASELINE_PATH = fileURLToPath(new URL('./baseline/js/core/depth-core.js', import.meta.url));
 const baseline = fs.existsSync(BASELINE_PATH) ? await import(BASELINE_PATH) : null;
 const CONDITIONS = ['normal', 'holes', 'plain', 'glass'];
 

@@ -2,7 +2,7 @@
 //
 // The shell's string-returning helpers are embedded by every course module, so their output is
 // pinned against the pre-cleanup modules when a baseline copy of the site is available
-// (LAB_BASELINE=<dir>, default: the coordinator's copy). Without a baseline the tests still
+// (LAB_BASELINE=<dir>). Without a baseline the tests still
 // check the structure of the strings.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -24,7 +24,7 @@ import {
 import { schoolTips, SCHOOL_TIPS, SCHOOL_GRADES } from '../js/shell/school-tips.js';
 import { seriesCover } from '../js/shell/series-covers.js';
 
-const BASELINE = process.env.LAB_BASELINE || '/home/asahi/.cache/questix-lab-cleanup/base';
+const BASELINE = process.env.LAB_BASELINE;
 const baselineModule = async (name) => {
   const file = path.join(BASELINE, 'js/shell', name);
   return fs.existsSync(file) ? import(file) : null;
@@ -102,44 +102,48 @@ test('seriesCover draws every course and rejects unknown ids', () => {
   assert.throws(() => seriesCover('nope'));
 });
 
-test('string helpers match the baseline modules', { skip: !fs.existsSync(BASELINE) }, async () => {
-  const [brief, guide, icons, ui, tips, covers] = await Promise.all(
-    [
-      'lesson-brief.js',
-      'lesson-guide.js',
-      'lesson-icons.js',
-      'lesson-ui.js',
-      'school-tips.js',
-      'series-covers.js',
-    ].map(baselineModule),
-  );
-  assert.equal(
-    lessonBrief('test-key', BRIEF_CONTENT),
-    brief.lessonBrief('test-key', BRIEF_CONTENT),
-  );
-  for (const key of GUIDE_KEYS) {
-    assert.equal(lessonGuide(key), guide.lessonGuide(key), key);
-    assert.equal(lessonGuide(key, 'NOTE'), guide.lessonGuide(key, 'NOTE'), key);
-    assert.equal(figureGuide(key), guide.figureGuide(key), key);
-  }
-  for (const kind of ['learn', 'action', 'observe', 'result', 'reflect', 'reference', 'x'])
-    assert.equal(lessonIcon(kind), icons.lessonIcon(kind), kind);
-  assert.deepEqual(LESSONS, ui.LESSONS);
-  assert.deepEqual(LESSON_GROUPS, ui.LESSON_GROUPS);
-  assert.deepEqual(EXPERIMENT_STEPS, ui.EXPERIMENT_STEPS);
-  assert.deepEqual(SENSOR_COPY, ui.SENSOR_COPY);
-  for (const lesson of LESSONS) {
-    assert.equal(lessonLabel(lesson.id), ui.lessonLabel(lesson.id), lesson.id);
-    assert.equal(seriesCover(lesson.id), covers.seriesCover(lesson.id), lesson.id);
-    assert.equal(
-      seriesCover(lesson.id, lesson.canvas),
-      covers.seriesCover(lesson.id, lesson.canvas),
+test(
+  'string helpers match the baseline modules',
+  { skip: !BASELINE || !fs.existsSync(BASELINE) },
+  async () => {
+    const [brief, guide, icons, ui, tips, covers] = await Promise.all(
+      [
+        'lesson-brief.js',
+        'lesson-guide.js',
+        'lesson-icons.js',
+        'lesson-ui.js',
+        'school-tips.js',
+        'series-covers.js',
+      ].map(baselineModule),
     );
-  }
-  assert.equal(experimentSteps('data-lab-step'), ui.experimentSteps('data-lab-step'));
-  assert.equal(sensorTabs('data-sensor'), ui.sensorTabs('data-sensor'));
-  assert.deepEqual(Object.keys(SCHOOL_TIPS), Object.keys(tips.SCHOOL_TIPS));
-  for (const key of Object.keys(SCHOOL_TIPS))
-    assert.equal(schoolTips(key), tips.schoolTips(key), key);
-  assert.deepEqual(SCHOOL_GRADES, tips.SCHOOL_GRADES);
-});
+    assert.equal(
+      lessonBrief('test-key', BRIEF_CONTENT),
+      brief.lessonBrief('test-key', BRIEF_CONTENT),
+    );
+    for (const key of GUIDE_KEYS) {
+      assert.equal(lessonGuide(key), guide.lessonGuide(key), key);
+      assert.equal(lessonGuide(key, 'NOTE'), guide.lessonGuide(key, 'NOTE'), key);
+      assert.equal(figureGuide(key), guide.figureGuide(key), key);
+    }
+    for (const kind of ['learn', 'action', 'observe', 'result', 'reflect', 'reference', 'x'])
+      assert.equal(lessonIcon(kind), icons.lessonIcon(kind), kind);
+    assert.deepEqual(LESSONS, ui.LESSONS);
+    assert.deepEqual(LESSON_GROUPS, ui.LESSON_GROUPS);
+    assert.deepEqual(EXPERIMENT_STEPS, ui.EXPERIMENT_STEPS);
+    assert.deepEqual(SENSOR_COPY, ui.SENSOR_COPY);
+    for (const lesson of LESSONS) {
+      assert.equal(lessonLabel(lesson.id), ui.lessonLabel(lesson.id), lesson.id);
+      assert.equal(seriesCover(lesson.id), covers.seriesCover(lesson.id), lesson.id);
+      assert.equal(
+        seriesCover(lesson.id, lesson.canvas),
+        covers.seriesCover(lesson.id, lesson.canvas),
+      );
+    }
+    assert.equal(experimentSteps('data-lab-step'), ui.experimentSteps('data-lab-step'));
+    assert.equal(sensorTabs('data-sensor'), ui.sensorTabs('data-sensor'));
+    assert.deepEqual(Object.keys(SCHOOL_TIPS), Object.keys(tips.SCHOOL_TIPS));
+    for (const key of Object.keys(SCHOOL_TIPS))
+      assert.equal(schoolTips(key), tips.schoolTips(key), key);
+    assert.deepEqual(SCHOOL_GRADES, tips.SCHOOL_GRADES);
+  },
+);

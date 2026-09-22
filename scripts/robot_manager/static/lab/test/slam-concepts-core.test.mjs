@@ -6,7 +6,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-const BASELINE = '/home/asahi/.cache/questix-lab-cleanup/base/js/slam/concepts-core.js';
+// The pre-refactor modules are kept in test/baseline/ (see its README), so this runs in CI too.
+const BASELINE = new URL('./baseline/js/slam/concepts-core.js', import.meta.url).href;
 
 const current = await import('../js/slam/concepts-core.js');
 const baseline = await import(BASELINE);

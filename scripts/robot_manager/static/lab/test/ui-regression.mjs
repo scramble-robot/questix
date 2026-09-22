@@ -11,6 +11,7 @@
 // Without --steps the page is crawled: every chapter/topic button is opened in order and each
 // enabled primary button is pressed once. Steps file: [{"click":"#id"},{"input":"#id","value":"3"},
 // {"wait":500},{"snapshot":"after run"}] (click/input take an optional "nth").
+// `--dump <dir>` also writes every snapshot to files for `diff -ru` (see dumpSnapshots).
 // Needs google-chrome and Node >= 22. Exit code 1 when any snapshot differs.
 
 import { spawn } from 'node:child_process';
@@ -307,6 +308,22 @@ function diffLines(name, before, after, maxLines) {
 
 const args = parseArgs(process.argv.slice(2));
 const steps = args.steps ? JSON.parse(fs.readFileSync(args.steps, 'utf8')) : null;
+// `--dump <dir>` writes every snapshot to <dir>/{baseline,candidate}/NN.txt, so an intended change
+// (a new block) can be reviewed with `diff -ru`, which realigns after an insertion where the
+// summary above compares line by line.
+function dumpSnapshots(dir, sites) {
+  for (const [side, site] of Object.entries(sites)) {
+    const target = path.join(dir, side);
+    fs.mkdirSync(target, { recursive: true });
+    site.snapshots.forEach((snapshot, index) =>
+      fs.writeFileSync(
+        path.join(target, `${String(index).padStart(2, '0')}.txt`),
+        `# ${snapshot.name}\n${snapshot.dom}\n`,
+      ),
+    );
+  }
+}
+
 const [baselineServer, candidateServer] = await Promise.all([
   serve(path.resolve(args.baseline)),
   serve(path.resolve(args.candidate)),
@@ -317,6 +334,7 @@ try {
     runSite(origin(baselineServer), args.route, steps),
     runSite(origin(candidateServer), args.route, steps),
   ]);
+  if (args.dump) dumpSnapshots(args.dump, { baseline, candidate });
   const pairs = Math.min(baseline.snapshots.length, candidate.snapshots.length);
   const differing = [];
   for (let i = 0; i < pairs; i++)
