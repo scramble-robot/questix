@@ -4,6 +4,7 @@ import { downloadFile } from '../core/dom.js';
 import {
   CONTROL_TOPICS,
   CONTROL_PERIOD,
+  DURATION,
   LAST_SAMPLE,
   BLOCK_WINDOW,
   DRAG_START,
@@ -18,6 +19,16 @@ import {
 import { controlWheelAngle, drawControlStage } from './render.js';
 import { controlPage, gainText, COMMAND_OPEN_TOPICS } from './view.js';
 import { conceptState, advanceConcept, resetConcept } from './concepts.js';
+import {
+  recordDrive,
+  liveControlRun,
+  liveLink,
+  missingStreams,
+  onLiveLink,
+  throttleProgress,
+} from '../live/capture.js';
+import { captureNotes } from '../live/live-view.js';
+import { openRobotDialog } from '../live/live-ui.js';
 import { fillSentence as fill } from '../core/content.js';
 
 // Feedback-control course: state and behaviour. view.js turns the model into markup, render.js
@@ -62,6 +73,12 @@ let chartWidth = CHART_MAX_WIDTH;
 let concept = conceptState(FIRST_TOPIC);
 const playback = { playing: false, frame: 0, startTime: 0, startIndex: 0, speed: 1 };
 const calibration = controlCalibration();
+// One recording from the real robot, shared by the speed topics: it is the same machine whichever
+// experiment is on screen. The distance topics measure another quantity and do not show it.
+const LIVE_STREAMS = ['drive', 'twist'];
+let liveRun = null;
+let liveNote = '';
+const liveCapture = { recording: false, progress: 0, controller: null };
 
 const page = () => document.getElementById('controlPage');
 const experiment = () => experiments.get(topicId);
@@ -159,6 +176,17 @@ function buildModel() {
     chartWidth,
     calibration,
     concept,
+    live: {
+      run: isDistance() ? null : liveRun,
+      note: liveNote,
+      capture: {
+        link: { ...liveLink(), missing: missingStreams(LIVE_STREAMS) },
+        recording: liveCapture.recording,
+        progress: liveCapture.progress,
+        seconds: copy.live.seconds,
+        message: '',
+      },
+    },
   };
 }
 
@@ -325,6 +353,43 @@ function saveCsv(run) {
   update();
 }
 
+// --- the real robot next to the simulation ---------------------------------------------------
+
+async function startCapture() {
+  if (liveCapture.recording) return;
+  const controller = new AbortController();
+  liveCapture.recording = true;
+  liveCapture.progress = 0;
+  liveCapture.controller = controller;
+  liveNote = '';
+  update();
+  try {
+    const { rows, summary } = await recordDrive({
+      seconds: copy.live.seconds,
+      signal: controller.signal,
+      onProgress: throttleProgress((count) => {
+        liveCapture.progress = count;
+        update();
+      }),
+    });
+    const run = liveControlRun(rows, DURATION);
+    if (!run.samples.length) {
+      liveNote = copy.live.noCommand;
+    } else {
+      liveRun = run;
+      liveNote = fill(copy.live.recorded, { notes: captureNotes(summary) });
+    }
+  } catch (error) {
+    // A recording that failed does not discard the one already on the chart: losing a good
+    // measurement because the link dropped during the next attempt would be the worse outcome.
+    liveNote = fill(copy.live.failed, { reason: error.message });
+  }
+  liveCapture.recording = false;
+  liveCapture.progress = 0;
+  liveCapture.controller = null;
+  update();
+}
+
 const actions = {
   openGroup(index) {
     selectTopic(CONTROL_TOPICS.find((entry) => entry.group === index).id);
@@ -408,6 +473,16 @@ const actions = {
     concept = resetConcept(concept);
     update();
   },
+  startCapture,
+  stopCapture() {
+    liveCapture.controller?.abort();
+  },
+  clearLive() {
+    liveRun = null;
+    liveNote = '';
+    update();
+  },
+  openLink: openRobotDialog,
 };
 
 function activateControl() {
@@ -432,6 +507,10 @@ function initControl() {
     if (page().hidden) return;
     refreshCharts();
     update();
+  });
+  // Connecting or losing the robot changes what the recording card offers.
+  onLiveLink(() => {
+    if (!page().hidden) update();
   });
 }
 

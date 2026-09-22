@@ -1,5 +1,6 @@
 import { html, svg, nothing, live } from '../vendor/lit-html.js';
 import { fillSentence as fill } from '../core/content.js';
+import { liveCaptureControls } from '../live/live-view.js';
 
 // Templates of the measurement lab, the panel that opens under the control, launch and SLAM
 // courses. Pure functions of the model built by measurement-lab.js; sentences come from
@@ -284,6 +285,22 @@ function importExport(model, copy, actions) {
   </div>`;
 }
 
+// Filling the table from the connected robot. A scenario without a `live` block says why its
+// reference quantity cannot come from the robot instead of offering a button that cannot work.
+function liveCapture(model, copy, actions) {
+  const panel = copy.panel;
+  return html`<div class="measurement-live">
+    <h3>${panel.liveTitle}</h3>
+    ${
+      model.live
+        ? html`<p>${model.live.text}</p>
+            ${liveCaptureControls(model.live, actions)}
+            <p>${panel.liveReferenceNote}</p>`
+        : html`<p>${panel.liveUnavailable}</p>`
+    }
+  </div>`;
+}
+
 function measurementPanel(model, copy, actions) {
   const panel = copy.panel;
   const scenario = model.scenario;
@@ -307,7 +324,7 @@ function measurementPanel(model, copy, actions) {
       <p data-measure-source>${fill(panel.inUse, { source: model.source })}</p>
       ${measurementTable(model, copy, actions)}
       <button data-measure-add @click=${actions.addRow}>${copy.labels.addRow}</button>
-      ${importExport(model, copy, actions)}
+      ${importExport(model, copy, actions)}${liveCapture(model, copy, actions)}
     </div>
   </details>`;
 }

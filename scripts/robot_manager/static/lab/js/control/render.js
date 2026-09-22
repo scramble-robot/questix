@@ -28,6 +28,8 @@ const CHART_COLOURS = {
   cursor: '#173d4d',
   blocked: '#e4c18b',
   loadEvent: '#b77c34',
+  live: '#b2506f', // a recording from the real robot, drawn on the same axes as the simulation
+  liveTarget: '#d39ab0',
 };
 
 // Integrate actual wheel speed. Multiplying the current speed by elapsed time
@@ -293,8 +295,8 @@ const SMALL_RANGE = 4; // a span narrower than this gets one decimal on the axis
 // silently change the scale by a fraction of a division.
 const axisStep = (key, distance) => (key === 'command' ? 25 : distance ? 0.5 : 20);
 
-function chartBounds({ run, previous, key, target, extra, breakdown, distance, fallback }) {
-  const values = run
+function chartBounds({ run, previous, live, key, target, extra, breakdown, distance, fallback }) {
+  const simulated = run
     ? [
         ...run.samples.map((sample) => sample[key]),
         ...(previous ? previous.samples.map((sample) => sample[key]) : []),
@@ -304,6 +306,10 @@ function chartBounds({ run, previous, key, target, extra, breakdown, distance, f
         ...(breakdown ? run.samples.flatMap((sample) => [sample.ff, sample.correction]) : []),
       ]
     : [0, distance ? START_DISTANCE : fallback];
+  // The real recording shares the axis, so a measurement outside the simulated range still fits.
+  const values = live
+    ? [...simulated, ...live.samples.flatMap((sample) => [sample.measured, sample.target])]
+    : simulated;
   let min = Math.min(0, ...values);
   let max = Math.max(...values);
   if (max - min < 1e-5) max = min + 1;
@@ -346,6 +352,7 @@ function eventMarker(marker, { x, top, height }) {
 function controlChart({
   run,
   previous,
+  live = null,
   key,
   title,
   unit,
@@ -366,6 +373,7 @@ function controlChart({
   const { min, max } = chartBounds({
     run,
     previous,
+    live,
     key,
     target,
     extra,
@@ -433,6 +441,23 @@ function controlChart({
           /><text x=${width - right} y=${y(run ? run.target : fallback) - 7} text-anchor="end">
             ${targetCaption}
           </text>`
+          : nothing
+      }
+      ${
+        live
+          ? svg`<path
+              d=${line(live.samples, 'target')}
+              fill="none"
+              stroke=${CHART_COLOURS.liveTarget}
+              stroke-width="1.5"
+              stroke-dasharray="7 5"
+            /><path
+              d=${line(live.samples, 'measured')}
+              fill="none"
+              stroke=${CHART_COLOURS.live}
+              stroke-width="2.5"
+              stroke-linejoin="round"
+            />`
           : nothing
       }
       ${

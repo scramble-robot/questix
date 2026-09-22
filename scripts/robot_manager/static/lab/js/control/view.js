@@ -2,6 +2,7 @@ import { html, live, nothing, unsafeHTML } from '../vendor/lit-html.js';
 import { formatNumber } from '../core/dom.js';
 import { lessonLabel } from '../shell/lesson-ui.js';
 import { schoolTips } from '../shell/school-tips.js';
+import { liveCaptureControls } from '../live/live-view.js';
 import { lessonBrief } from '../shell/lesson-brief.js';
 import { CONTROL_GROUPS, CONTROL_TOPICS, LAST_SAMPLE, STOP_DISTANCE, controlLoad } from './core.js';
 import { controlChart } from './render.js';
@@ -491,6 +492,7 @@ function charts(model, copy, actions) {
   const targetValue = distance ? '0.50 m' : (result ? result.target : fallback) + ' rpm';
   const measured = controlChart({
     ...shared,
+    live: model.live.run,
     key: 'measured',
     title: distance ? '壁までの距離' : '車輪の回転数',
     unit: distance ? 'm' : 'rpm',
@@ -505,7 +507,12 @@ function charts(model, copy, actions) {
   return html`<div class="control-chart-legend">
       <span class="measured">今回の測定値</span
       ><span class="target">今回の目標</span
-      >${comparison ? html`<span class="previous">前の測定値・目標</span>` : nothing}
+      >${comparison ? html`<span class="previous">前の測定値・目標</span>` : nothing}${
+        model.live.run
+          ? html`<span class="live">${copy.charts.liveLegend}</span
+              ><span class="live-target">${copy.charts.liveTargetLegend}</span>`
+          : nothing
+      }
     </div>
     ${
       comparison
@@ -575,6 +582,7 @@ function graphsCard(model, copy, actions) {
     <div id="controlCharts">${charts(model, copy, actions)}</div>
     <p class="control-chart-note">
       ${copy.charts.note}<span id="controlLoadNote">${model.loadNote}</span>
+      ${model.live.run ? copy.charts.liveNote : nothing}
     </p>
   </section>`;
 }
@@ -602,6 +610,30 @@ function calibrationCard(model, copy) {
       </tbody>
     </table>
     <p>${text.note}</p>
+  </section>`;
+}
+
+// Recording the real robot and drawing it on the same axes as the simulation. The link is
+// observation-only, so the learner drives the robot from the controller or the operation screen
+// while this card records what the wheels actually did.
+function liveCard(model, copy, actions) {
+  const text = copy.live;
+  if (model.distance)
+    return html`<section class="card control-live">
+      <h2>${text.title}</h2>
+      <p>${text.distanceOnly}</p>
+    </section>`;
+  return html`<section class="card control-live">
+    <h2>${text.title}</h2>
+    <p>${text.intro}</p>
+    <p>${text.howto}</p>
+    ${liveCaptureControls(model.live.capture, actions)}
+    ${
+      model.live.run
+        ? html`<p class="control-live-recorded" role="status">${model.live.note}</p>
+            <button @click=${actions.clearLive}>${text.clear}</button>`
+        : nothing
+    }
   </section>`;
 }
 
@@ -912,8 +944,8 @@ function controlPage(model, copy, hardwareHtml, actions) {
       ${controlPanel(model, copy, actions)}
     </div>
     ${resultsCard(model, copy, actions)}${explanationCard(model, copy, actions)}
-    ${questionCard(model, copy, actions)}${historyCard(model, copy)}${hardwareCard(hardwareHtml)}
-    ${footer(model, copy, actions)}`;
+    ${questionCard(model, copy, actions)}${historyCard(model, copy)}
+    ${liveCard(model, copy, actions)}${hardwareCard(hardwareHtml)} ${footer(model, copy, actions)}`;
 }
 
 export { controlPage, gainText, COMMAND_OPEN_TOPICS };

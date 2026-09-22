@@ -396,6 +396,20 @@
 .control-chart-legend .previous:before {
   border-top: 2px dashed #a3adb8;
 }
+/* The recording from the real robot, drawn on the same axes as the simulation
+   (CHART_COLOURS.live / .liveTarget in js/control/render.js). */
+.control-chart-legend .live:before {
+  border-top: 3px solid #b2506f;
+}
+.control-chart-legend .live-target:before {
+  border-top: 2px dashed #d39ab0;
+}
+.control-live .live-capture {
+  margin-top: 14px;
+}
+.control-live-recorded {
+  font-size: 14px;
+}
 .control-chart {
   padding: 14px 16px 0;
 }

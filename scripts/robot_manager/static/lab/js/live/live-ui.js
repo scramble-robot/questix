@@ -220,12 +220,16 @@ function showState(state) {
   requestRedraw();
 }
 
+// Lessons that offer a live measurement link here, so a learner who has not connected yet can
+// reach the connection dialog without hunting for the header button.
+function openRobotDialog() {
+  $('robotDialog').showModal();
+  showState(robotState());
+}
+
 function initLive() {
   $('robotUrl').value = defaultRobotUrl();
-  $('robotLinkOpen').onclick = () => {
-    $('robotDialog').showModal();
-    showState(robotState());
-  };
+  $('robotLinkOpen').onclick = openRobotDialog;
   $('robotClose').onclick = () => $('robotDialog').close();
   $('robotForm').onsubmit = (event) => {
     event.preventDefault();
@@ -291,4 +295,4 @@ function initLive() {
 
 initLive();
 
-export { initLive };
+export { initLive, openRobotDialog };

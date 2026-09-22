@@ -178,3 +178,34 @@
     font-size: 12px;
   }
 }
+
+/* The block a lesson shows when it can take measurements from the connected robot
+   (js/live/live-view.js). Used by the measurement lab and the feedback-control course. */
+.live-capture {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--green-soft);
+  padding: 14px 16px;
+  margin: 12px 0;
+  display: grid;
+  gap: 8px;
+}
+.live-capture p {
+  margin: 0;
+}
+.live-capture-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.live-capture-record,
+.live-capture-stop {
+  font-weight: 600;
+}
+.live-capture-progress {
+  font-variant-numeric: tabular-nums;
+}
+.live-capture-note {
+  font-size: 12px;
+  color: var(--muted);
+}

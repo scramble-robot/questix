@@ -32,7 +32,7 @@ Opening `index.html` via `file://` does not work: ES modules need HTTP.
 | `js/shell/` | Course catalogue, navigation, lesson briefs/guides, school-subject tips, supplements. |
 | `js/rl/`, `slam/`, `vision/`, `control/`, `planning/`, `launch/`, `arm/`, `systems/` | One directory per course family: `core` (maths, no DOM), `render` (canvas/SVG), `view` (lit-html templates), `ui` (state, actions, one `update()`). Larger courses split these further, e.g. `slam/basics-*`, `vision/depth-*`, `rl/lab-view.js`. |
 | `js/quiz/` | Checkpoint quizzes and mastery tests. |
-| `js/live/` | Live link to a real robot: `robot-link.js` (WebSocket client), `live-ui.js` (header button + monitor dialog), `slam-recorder.js` (records a SLAM log from live data). |
+| `js/live/` | Live link to a real robot: `robot-link.js` (WebSocket client), `live-ui.js` (header button + monitor dialog), `capture-core.js` (DOM-free maths on a recording), `capture.js` (records a stretch of live data for any lesson), `live-view.js` (the shared record/連携 controls), `slam-recorder.js` (shapes a SLAM log from a recording). |
 | `js/vendor/`, `assets/vendor/` | Third-party code and data; see `assets/vendor/NOTICE.md`. |
 | `test/` | Node tests for DOM-free modules (`node --test .../test/*.test.mjs`), the UI regression harness (`ui-regression.mjs`) and the per-course steps files it replays (`test/steps/`). |
 
@@ -45,9 +45,13 @@ Opening `index.html` via `file://` does not work: ES modules need HTTP.
 | Any page | — | Header **実機** button: LiDAR view, camera, commanded vs measured wheel RPM, pose, E-stop state. |
 | Vision | Generated scenes, opened image files, webcam | **実機カメラの画像を使う** feeds the newest robot camera frame into the same processing as an opened file (colour extraction, markers, face detection, …). |
 | SLAM | Generated sensor logs | **実機から15秒記録する** records LiDAR + wheel feedback into the same `robo-lab-sensors-v1` log the lesson imports from a file, through the same validation. No IMU stream exists, so `gyroZ` is 0 and the LiDAR mount offset is assumed to be zero. |
+| Feedback control (speed topics) | Simulated PID runs | **実機で同じ実験をして重ねる** records `/drive_status` against `/target_twist` and draws the measured wheel speed on the same axes as the simulated run, so the two can be compared directly. The distance topics say why they cannot show it. |
+| Measurement lab (under control) | Worked example, CSV | **実機で記録する** turns a recording into the table: each command held for at least 2 s becomes one input, with repeats taken after it has settled. Rows are never marked as check data — that stays the learner's decision. |
 | All others | In-browser models | Existing offline workflow: download the ROS 2 script or procedure, import CSV/JSON. |
 
-The page never sends anything to the robot. Browsers only allow `getUserMedia` (webcam) on
+Every recording goes through `js/live/capture.js`, so the connection checks, the timeout, the abort
+and the learner-facing messages exist once; `capture-core.js` holds the arithmetic and is covered by
+`test/live-capture-core.test.mjs`. The page never sends anything to the robot. Browsers only allow `getUserMedia` (webcam) on
 `localhost` or HTTPS; the robot camera button has no such restriction.
 
 ## Licensing rule

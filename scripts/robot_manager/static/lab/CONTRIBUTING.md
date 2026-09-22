@@ -53,6 +53,27 @@ a sentence, an explanation, or a status message belongs in the content file.
 - Module entry points and other exports keep their names, signatures and return types; other
   modules depend on them.
 
+## Taking measurements from the real robot
+
+A lesson never talks to `robot-link.js` directly. It records through `js/live/capture.js`
+(`recordDrive`, or `recordStream` for another pair of topics), turns the samples into lesson
+numbers with `js/live/capture-core.js`, and shows `liveCaptureControls` from `js/live/live-view.js`
+so every course offers the same block: link state, which stream is missing, record / stop.
+
+- `capture-core.js` has no DOM and no WebSocket, so every rule about what counts as a measurement
+  is a Node test (`test/live-capture-core.test.mjs`).
+- Keep the link observation-only. Nothing under `js/live/` may send a frame to the robot.
+- A recording replaces the lesson's data instead of being mixed into it, and says what the
+  conditions were (`captureNotes`), so a learner can tell measured numbers from generated ones.
+- Only offer a recording where the robot actually measures both quantities. Where it does not, say
+  so (as the measurement lab does for the launch and SLAM scenarios) instead of hiding the option.
+
+Adding such a block is a visible change, so the UI-regression run for that route reports the block
+itself as a difference; check that the differing lines are only the new block, then take a fresh
+baseline. Without a robot, the flow can be exercised end to end by feeding
+`questix_lab_bridge.ws_server.LabWebSocketServer` synthetic payloads (no ROS needed) and driving the
+page over the Chrome DevTools protocol.
+
 ## Proving that learners see the same thing
 
 `test/ui-regression.mjs` drives a baseline copy of the site and the working copy through the same

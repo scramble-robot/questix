@@ -1,21 +1,12 @@
-import { onRobot, robotState } from './robot-link.js';
+import { recordStream } from './capture.js';
+import { wheelRpm } from './capture-core.js';
 
 // Records live LiDAR scans and wheel feedback into the same "robo-lab-sensors-v1" JSON that the
 // SLAM lesson imports from a file, so a real run goes through the identical validation and maths.
+// Collecting the samples is the shared job of capture.js; this module only shapes the log.
 
-const DRIVE_FRESH_MS = 500;
 const LOG_RANGE_LIMIT = 50; // validateSlamLog accepts rangeMax up to 50 m
 const LOG_RPM_LIMIT = 1000;
-
-// Forward-positive wheel speed [RPM] for both wheels. The raw DDT feedback cannot be used directly:
-// the right motor is mirrored, so its wire RPM is negative when driving forward. The chassis
-// velocity in /drive_status already has the robot's own sign convention applied, so invert the
-// differential-drive kinematics instead: v_left = v - w*L/2, v_right = v + w*L/2.
-function wheelRpm(drive, config) {
-  const toRpm = (speed) => (speed / (2 * Math.PI * config.wheel_radius)) * 60,
-    half = (drive.w * config.wheel_separation) / 2;
-  return { left: toRpm(drive.v - half), right: toRpm(drive.v + half) };
-}
 
 // samples: [{scan, drive}] in arrival order. The first scan only fixes t = 0.
 function buildSlamLog(samples, config) {
@@ -67,56 +58,19 @@ function buildSlamLog(samples, config) {
 }
 
 // Resolves with {log, moved}; rejects with a learner-facing message. `signal` aborts early.
-function recordSlamLog({ seconds = 12, onProgress = () => {}, signal } = {}) {
-  return new Promise((resolve, reject) => {
-    const state = robotState();
-    if (state.phase !== 'open') {
-      reject(Error('先に画面右上の「実機」からロボットに接続してください。'));
-      return;
-    }
-    const samples = [];
-    let drive = null,
-      driveAt = 0,
-      missedDrive = 0;
-    const finish = (error) => {
-      offScan();
-      offDrive();
-      offState();
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', abort);
-      if (error) {
-        reject(error);
-        return;
-      }
-      try {
-        if (!samples.length && missedDrive)
-          throw Error(
-            '車輪の回転数（/drive_status）が届いていません。走行用のノードが動いているか確かめてください。',
-          );
-        resolve(buildSlamLog(samples, state.hello.config));
-      } catch (e) {
-        reject(e);
-      }
-    };
-    const abort = () => finish(Error('記録を中止しました。'));
-    const offDrive = onRobot('drive', (message) => {
-      drive = message;
-      driveAt = performance.now();
-    });
-    const offScan = onRobot('scan', (scan) => {
-      if (!drive || performance.now() - driveAt > DRIVE_FRESH_MS) {
-        missedDrive++;
-        return;
-      }
-      samples.push({ scan, drive });
-      onProgress(samples.length);
-    });
-    const offState = onRobot('state', (next) => {
-      if (next.phase !== 'open') finish(Error('記録の途中でロボットとの接続が切れました。'));
-    });
-    const timer = setTimeout(() => finish(), seconds * 1000);
-    signal?.addEventListener('abort', abort);
+async function recordSlamLog({ seconds = 12, onProgress = () => {}, signal } = {}) {
+  const { samples, missed, config } = await recordStream({
+    trigger: 'scan',
+    pair: ['drive'],
+    seconds,
+    onProgress,
+    signal,
   });
+  if (!samples.length && missed)
+    throw Error(
+      '車輪の回転数（/drive_status）が届いていません。走行用のノードが動いているか確かめてください。',
+    );
+  return buildSlamLog(samples, config);
 }
 
 export { wheelRpm, buildSlamLog, recordSlamLog };
