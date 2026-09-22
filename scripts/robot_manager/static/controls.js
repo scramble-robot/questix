@@ -9,6 +9,88 @@ let controlsLoadedAt = null;
 let controlRuntime = null;
 let runtimeBusy = false;
 let runtimeAvailable = false;
+let mapSelection = null;
+
+function mapSelectOptions(select, options, selected) {
+  select.replaceChildren();
+  for (const item of options) {
+    const option = document.createElement("option");
+    option.value = item.id;
+    option.textContent = item.label;
+    select.appendChild(option);
+  }
+  select.value = options.some((item) => item.id === selected) ? selected : options[0]?.id || "";
+}
+
+function renderMapEditor() {
+  const panel = document.getElementById("controller-map-editor");
+  panel.hidden = !controlProfile || !mapSelection;
+  if (panel.hidden) return;
+  const saved = document.getElementById("controller-map-source").value === "saved";
+  const values = saved ? controlProfile.values : controlDraft;
+  const input = document.getElementById("map-input");
+  const action = document.getElementById("map-action");
+  document.getElementById("map-editor-title").textContent = `${mapSelection.title} の機能`;
+  const inputs = ControllerMap.inputs(controlProfile.controller, mapSelection.spot);
+  mapSelectOptions(input, inputs, mapSelection.inputId);
+  mapSelection.inputId = input.value;
+  const channel = inputs.find((item) => item.id === input.value);
+  const actions = channel ? ControllerMap.actions(values, channel.kind) : [];
+  const current = ControllerMap.bindings(controlProfile.controller, values, values)
+    .filter((item) => channel && ControlLabels.kind(item.key) === channel.kind && item.value === channel.value);
+  const currentAction = current[0] && `${current[0].node}.${current[0].key}`;
+  mapSelectOptions(action, actions.map((item) => ({ id: item.id, label: item.action })),
+    mapSelection.actionId || currentAction);
+  mapSelection.actionId = action.value;
+  document.getElementById("map-current").textContent = `${saved ? "保存済み" : "編集中"}の割り当て: `
+    + (current.map((item) => item.action).join("、") || "なし");
+  const apply = document.getElementById("map-apply");
+  const edit = document.getElementById("map-edit-draft");
+  input.disabled = controlsBusy;
+  action.disabled = controlsBusy || saved || !actions.length;
+  apply.disabled = controlsBusy || saved;
+  edit.hidden = !saved;
+  edit.disabled = controlsBusy;
+  const preview = document.getElementById("map-preview");
+  if (saved) {
+    preview.textContent = "保存済みの設定を表示しています。「編集中に切り替える」で変更できます。";
+    return;
+  }
+  try {
+    const changes = ControllerMap.planAssignment(controlProfile.controller, values,
+      mapSelection.spot, input.value, action.value);
+    const selected = actions.find((item) => item.id === action.value);
+    const previous = ControlLabels.valueLabel(controlProfile.controller, selected.key, values[selected.node][selected.key]);
+    const shared = current.filter((item) => `${item.node}.${item.key}` !== action.value);
+    preview.textContent = `${selected.action}: ${previous} → ${channel.label}。`
+      + (shared.length ? `同じ入力の ${shared.map((item) => item.action).join("、")} も残り、同時に動作します。` : "")
+      + (changes.some((item) => item.key === "tilt_axis" && item.value === -1)
+        ? "チルトは上下のボタン操作に切り替わります。"
+        : selected.key === "tilt_axis" ? "チルトは軸操作に切り替わります。" : "")
+      + "「編集値に反映」の後、「操作設定を保存」で確定します。";
+    apply.disabled = controlsBusy || changes.every((item) => values[item.node][item.key] === item.value);
+  } catch (error) {
+    preview.textContent = error.message;
+    apply.disabled = true;
+  }
+}
+
+function applyMapAssignment() {
+  if (controlsBusy || !controlProfile || !mapSelection
+      || document.getElementById("controller-map-source").value === "saved") return;
+  try {
+    const changes = ControllerMap.planAssignment(controlProfile.controller, controlDraft,
+      mapSelection.spot, mapSelection.inputId, mapSelection.actionId);
+    for (const { node, key, value } of changes) {
+      controlDraft[node][key] = value;
+      document.getElementById(`control-${node}-${key}`).value = String(value);
+    }
+    refreshControlChanges();
+    document.getElementById("map-feedback").textContent = "編集値に反映しました。操作設定を保存すると確定します。";
+  } catch (error) {
+    document.getElementById("map-feedback").textContent = error.message;
+  }
+}
 
 function controlMessage(message) {
   document.getElementById("controls-message").textContent = message;
@@ -33,11 +115,13 @@ function renderControlSummary() {
 }
 
 function renderControllerMap() {
+  document.getElementById("map-feedback").textContent = "";
   const wrapper = document.getElementById("controller-map-panel");
   wrapper.hidden = !controlProfile;
   const host = document.getElementById("controller-map");
   if (!controlProfile) {
     host.replaceChildren();
+    renderMapEditor();
     return;
   }
   const saved = document.getElementById("controller-map-source").value === "saved";
@@ -49,7 +133,16 @@ function renderControllerMap() {
       const input = document.getElementById(id);
       input.scrollIntoView({ behavior: "smooth", block: "center" });
       input.focus({ preventScroll: true });
-    });
+    }, { selectedSpot: mapSelection?.spot, onSelect: (spot, title) => {
+      if (controlsBusy) return;
+      mapSelection = { spot, title };
+      document.getElementById("map-feedback").textContent = "";
+      renderControllerMap();
+      const editor = document.getElementById("controller-map-editor");
+      editor.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      document.getElementById("map-input").focus({ preventScroll: true });
+    } });
+  renderMapEditor();
 }
 
 function refreshControlChanges() {
@@ -206,6 +299,7 @@ function renderControls() {
 
 function controlsSetBusy(busy) {
   controlsBusy = busy;
+  renderMapEditor();
   document.getElementById("controls-runtime-load").disabled = busy || runtimeBusy || !controlProfile || !runtimeAvailable;
   document.getElementById("controls-profile").disabled = busy;
   document.getElementById("controls-reload").disabled = busy;
@@ -221,6 +315,7 @@ async function loadControls(controller) {
   try {
     const profile = await api(`/api/control-config/${controller}`);
     controlProfile = profile;
+    mapSelection = null;
     controlDraft = structuredClone(profile.values);
     controlsLoadedAt = new Date().toLocaleTimeString("ja-JP");
     controlRuntime = null;
@@ -275,6 +370,25 @@ async function saveControls(event) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("map-input").addEventListener("change", () => {
+    if (!mapSelection) return;
+    mapSelection.inputId = document.getElementById("map-input").value;
+    mapSelection.actionId = null;
+    document.getElementById("map-feedback").textContent = "";
+    renderMapEditor();
+  });
+  document.getElementById("map-action").addEventListener("change", () => {
+    if (!mapSelection) return;
+    mapSelection.actionId = document.getElementById("map-action").value;
+    document.getElementById("map-feedback").textContent = "";
+    renderMapEditor();
+  });
+  document.getElementById("map-apply").addEventListener("click", applyMapAssignment);
+  document.getElementById("map-edit-draft").addEventListener("click", () => {
+    document.getElementById("controller-map-source").value = "draft";
+    renderControllerMap();
+    document.getElementById("map-action").focus();
+  });
   document.getElementById("controller-map-source").addEventListener("change", renderControllerMap);
   document.getElementById("controls-runtime-load").addEventListener("click", loadRuntimeValues);
   const select = document.getElementById("controls-profile");

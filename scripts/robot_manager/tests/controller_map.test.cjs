@@ -37,3 +37,28 @@ test('tilt mode only shows effective assignments and preserves unknown mappings'
   assert.equal(assignments[1].spot, 'left-shoulder');
   assert.equal(assignments[2].spot, 'left-trigger');
 });
+
+test('editable inputs respect controller-specific button and axis layouts', () => {
+  assert.deepEqual(map.inputs('uart', 'left-stick').map((item) => item.id),
+    ['axis:0', 'axis:1', 'button:12']);
+  assert.deepEqual(map.inputs('dualshock', 'left-stick').map((item) => item.id),
+    ['axis:0', 'axis:1', 'button:11']);
+  assert.deepEqual(map.inputs('dualshock', 'left-trigger').map((item) => item.id),
+    ['axis:2', 'button:6']);
+  assert.deepEqual(map.inputs('uart', 'left-trigger').map((item) => item.id), ['button:6']);
+  assert.deepEqual(map.inputs('dualshock', 'face-bottom').map((item) => item.id), ['button:0']);
+});
+
+test('assignment plans reject incompatible inputs and preserve the source values', () => {
+  const values = { shot_component: { fire_button: 5, tilt_axis: 7,
+    tilt_up_button_index: 4, tilt_down_button_index: 6 } };
+  const original = structuredClone(values);
+  assert.throws(() => map.planAssignment('uart', values, 'left-stick', 'axis:0', 'shot_component.fire_button'));
+  assert.throws(() => map.planAssignment('uart', values, 'face-right', 'button:7', 'shot_component.fire_button'));
+  assert.deepEqual(map.planAssignment('dualshock', values, 'face-bottom', 'button:0', 'shot_component.fire_button'),
+    [{ node: 'shot_component', key: 'fire_button', value: 0 }]);
+  assert.deepEqual(map.planAssignment('uart', values, 'face-right', 'button:0', 'shot_component.tilt_up_button_index'),
+    [{ node: 'shot_component', key: 'tilt_up_button_index', value: 0 },
+      { node: 'shot_component', key: 'tilt_axis', value: -1 }]);
+  assert.deepEqual(values, original);
+});

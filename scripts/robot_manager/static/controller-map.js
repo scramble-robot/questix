@@ -9,6 +9,11 @@ const ControllerMap = (() => {
     ["shot_component", "fire_button", "ディスク射出"],
     ["esc_motor_control", "full_speed_button", "ローラー回転"],
   ];
+  const tiltFields = [
+    ["shot_component", "tilt_axis", "チルト上下"],
+    ["shot_component", "tilt_up_button_index", "チルトを上げる"],
+    ["shot_component", "tilt_down_button_index", "チルトを下げる"],
+  ];
 
   function location(controller, key, value) {
     if (!Number.isInteger(value) || value < 0) return null;
@@ -36,10 +41,9 @@ const ControllerMap = (() => {
   function bindings(controller, values, saved) {
     const active = fields.slice();
     if (values.shot_component?.tilt_axis === -1) {
-      active.push(["shot_component", "tilt_up_button_index", "チルトを上げる"],
-        ["shot_component", "tilt_down_button_index", "チルトを下げる"]);
+      active.push(...tiltFields.slice(1));
     } else {
-      active.push(["shot_component", "tilt_axis", "チルト上下"]);
+      active.push(tiltFields[0]);
     }
     return active.filter(([node, key]) => Object.hasOwn(values[node] || {}, key)).map(([node, key, action]) => {
       const value = values[node][key];
@@ -47,6 +51,41 @@ const ControllerMap = (() => {
         label: value === null ? "未入力" : labels.valueLabel(controller, key, value),
         changed: value !== saved[node]?.[key], target: `control-${node}-${key}` };
     });
+  }
+
+  function inputs(controller, spot) {
+    const result = [];
+    for (const [kind, key, count] of [["axis", "tilt_axis", 8], ["button", "fire_button", 14]]) {
+      for (let value = 0; value < count; value++) {
+        if (location(controller, key, value) === spot) {
+          result.push({ id: `${kind}:${value}`, kind, value,
+            label: labels.valueLabel(controller, key, value) });
+        }
+      }
+    }
+    return result;
+  }
+
+  function actions(values, kind) {
+    return [...fields, ...tiltFields]
+      .filter(([node, key]) => labels.kind(key) === kind && Object.hasOwn(values[node] || {}, key))
+      .map(([node, key, action]) => ({ id: `${node}.${key}`, node, key, action }));
+  }
+
+  function planAssignment(controller, values, spot, inputId, actionId) {
+    const input = inputs(controller, spot).find((item) => item.id === inputId);
+    const action = input && actions(values, input.kind).find((item) => item.id === actionId);
+    if (!action) throw new Error("入力と機能の組み合わせを選んでください。");
+    const changes = [{ node: action.node, key: action.key, value: input.value }];
+    if (action.key === "tilt_up_button_index" || action.key === "tilt_down_button_index") {
+      const other = action.key === "tilt_up_button_index" ? "tilt_down_button_index" : "tilt_up_button_index";
+      if (!Object.hasOwn(values.shot_component, "tilt_axis")) throw new Error("チルト設定を読み直してください。");
+      if (values.shot_component[other] === input.value) {
+        throw new Error("チルト上・下には異なるボタンを割り当ててください。");
+      }
+      changes.push({ node: "shot_component", key: "tilt_axis", value: -1 });
+    }
+    return changes;
   }
 
   function element(tag, attributes = {}, text = null) {
@@ -60,7 +99,7 @@ const ControllerMap = (() => {
     const dual = controller === "dualshock";
     const svg = element("svg", { viewBox: "0 0 720 370", role: "group",
       "aria-label": `${dual ? "DualShock" : "Switch"} コントローラーの操作図` });
-    svg.append(element("title", {}, "番号付きの部分を選ぶと、割り当て一覧へ移動できます。"));
+    svg.append(element("title", {}, "ボタンやスティックを選ぶと、機能の割り当てを編集できます。"));
     svg.append(element("path", { d: "M192 112 Q157 108 143 150 L105 291 Q98 326 125 338 "
       + "Q154 351 174 323 L239 263 Q260 256 280 264 L440 264 Q460 256 481 263 "
       + "L546 323 Q566 351 595 338 Q622 326 615 291 L577 150 Q563 108 528 112 Z",
@@ -80,7 +119,7 @@ const ControllerMap = (() => {
       group.append(outline, element("text", { x, y: y + 5, "text-anchor": "middle",
         fill: "#f2f6fc", "font-size": shape === "rect" ? 11 : name.length >= 7 ? 9 : name.length >= 4 ? 11 : 16 }, name));
       svg.append(group);
-      spots.set(id, { group, x, y, radius });
+      spots.set(id, { group, x, y, radius, name });
     }
     spot("left-trigger", 208, 43, dual ? "L2" : "ZL", 43, "rect");
     spot("right-trigger", 512, 43, dual ? "R2" : "ZR", 43, "rect");
@@ -103,7 +142,7 @@ const ControllerMap = (() => {
     return { svg, spots };
   }
 
-  function render(host, controller, values, saved, onJump) {
+  function render(host, controller, values, saved, onJump, options = {}) {
     const assignments = bindings(controller, values, saved);
     const { svg, spots } = draw(controller);
     const list = document.createElement("div");
@@ -148,14 +187,21 @@ const ControllerMap = (() => {
       const mapped = cards.filter((card) => card.assignment.spot === id);
       group.classList.add("map-assigned");
       if (mapped.some((card) => card.assignment.changed)) group.classList.add("map-changed");
-      group.setAttribute("tabindex", "0");
-      group.setAttribute("role", "button");
-      group.setAttribute("aria-label", `${number}: ${mapped.map(({ assignment }) => `${assignment.action} (${assignment.label})`).join("、")}。一覧へ移動`);
       group.append(element("circle", { cx: x + radius - 4, cy: y - 18, r: 12,
         fill: "#61dddf", stroke: "#122235", "stroke-width": 2 }),
       element("text", { x: x + radius - 4, y: y - 14, fill: "#10202d",
         "text-anchor": "middle", "font-size": 12, "font-weight": "bold" }, String(number)));
-      const choose = () => mapped[0].button.focus();
+    }
+    for (const [id, { group, name }] of spots) {
+      const mapped = cards.filter((card) => card.assignment.spot === id);
+      const title = id === "left-stick" ? "左スティック" : id === "right-stick" ? "右スティック"
+        : id === "dpad" ? "十字キー" : name;
+      group.setAttribute("tabindex", "0");
+      group.setAttribute("role", "button");
+      group.setAttribute("aria-pressed", String(options.selectedSpot === id));
+      group.classList.toggle("map-selected", options.selectedSpot === id);
+      group.setAttribute("aria-label", `${title}: ${mapped.map(({ assignment }) => assignment.action).join("、") || "割り当てなし"}。機能を編集`);
+      const choose = () => options.onSelect ? options.onSelect(id, title) : mapped[0]?.button.focus();
       group.addEventListener("click", choose);
       group.addEventListener("keydown", (event) => {
         if (event.key === "Enter" || event.key === " ") { event.preventDefault(); choose(); }
@@ -164,6 +210,6 @@ const ControllerMap = (() => {
     host.replaceChildren(svg, list);
   }
 
-  return { location, bindings, render };
+  return { location, bindings, inputs, actions, planAssignment, render };
 })();
 if (typeof module !== "undefined") module.exports = ControllerMap;

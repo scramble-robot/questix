@@ -977,6 +977,13 @@ main {
 .map-control.map-changed .map-control-shape { stroke: var(--orange); }
 .map-control.map-highlight .map-control-shape, .map-control:focus .map-control-shape {
   fill: #305775; stroke: #fff; stroke-width: 4; }
+.map-control.map-selected .map-control-shape { fill: #305775; stroke: #fff; stroke-width: 4; }
+.map-editor { margin-top: 1rem; padding: 1rem; border: 1px solid #61dddf; border-radius: 8px; }
+.map-editor h4 { margin-bottom: 0.7rem; }
+.map-editor-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; }
+.map-editor-fields label { display: grid; gap: 0.4rem; font-size: 0.85rem; min-width: 0; }
+.map-editor-fields select { width: 100%; min-width: 0; padding: 0.6rem;
+  background: var(--bg-input); color: var(--text); border: 1px solid #466077; border-radius: 6px; }
 .map-bindings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.6rem; }
 .map-binding { display: flex; align-items: center; gap: 0.65rem; padding: 0.75rem;
   border: 1px solid #466077; border-radius: 8px; background: #172c42; color: var(--text);
@@ -991,4 +998,5 @@ main {
 @media (max-width: 520px) {
   .controller-map-panel { padding: 0.6rem; }
   .map-bindings { grid-template-columns: minmax(0, 1fr); }
+  .map-editor-fields { grid-template-columns: minmax(0, 1fr); }
 }

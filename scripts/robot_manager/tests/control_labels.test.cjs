@@ -36,6 +36,7 @@ class Element {
     this.children = [];
     this.dataset = {};
     this.events = {};
+    this.attributes = {};
     this.className = '';
     this.classList = { toggle: (name, on) => { this[name] = on; },
       add: (name) => { this[name] = true; } };
@@ -43,7 +44,7 @@ class Element {
   append(...children) { this.children.push(...children); }
   appendChild(child) { this.append(child); }
   replaceChildren(...children) { this.children = children; }
-  setAttribute() {}
+  setAttribute(name, value) { this.attributes[name] = value; }
   focus() { this.focused = true; }
   scrollIntoView() {}
   addEventListener(name, handler) { this.events[name] = handler; }
@@ -51,7 +52,7 @@ class Element {
   querySelector(selector) { return this.all().find((child) => child.className === selector.slice(1)); }
 }
 
-function editorFixture() {
+function editorFixture(extraValues = {}) {
   const elements = new Map();
   const document = {
     events: {},
@@ -80,6 +81,17 @@ function editorFixture() {
       { key: 'tilt_axis', label: 'チルト軸番号', type: 'int', min: -1, max: 63 },
     ] }],
   };
+  for (const [node, values] of Object.entries(extraValues)) {
+    profile.values[node] = { ...profile.values[node], ...values };
+    profile.defaults[node] = { ...profile.defaults[node], ...values };
+    let group = profile.groups.find((item) => item.node === node);
+    if (!group) { group = { node, label: node, fields: [] }; profile.groups.push(group); }
+    for (const key of Object.keys(values)) {
+      if (!group.fields.some((field) => field.key === key)) {
+        group.fields.push({ key, label: key, type: 'int', min: 0, max: 63 });
+      }
+    }
+  }
   let savedPayload;
   const context = vm.createContext({ document, ControlLabels: labels, structuredClone,
     window: { addEventListener() {} }, confirm: () => true, toast() {},
@@ -185,4 +197,90 @@ test('controller drawing follows edits and can show the saved mapping without lo
   source.events.change();
   assert.equal(host.children[1].children[0].children[1].children[1].textContent,
     'ZR（ボタン 7） · 変更あり');
+});
+
+function chooseSpot(document, spot, keyboard = false) {
+  const group = document.getElementById('controller-map').children[0].all()
+    .find((item) => item.attributes['data-spot'] === spot);
+  assert.equal(group.attributes.role, 'button');
+  if (keyboard) group.events.keydown({ key: 'Enter', preventDefault() {} });
+  else group.events.click();
+}
+
+function selectMap(document, id, value) {
+  const input = document.getElementById(id);
+  input.value = value;
+  input.events.change();
+}
+
+test('an unassigned diagram button edits the draft and saves through the existing API', async () => {
+  const { document, context, getPayload } = editorFixture();
+  await vm.runInContext('loadControls("uart")', context);
+  chooseSpot(document, 'face-right', true);
+  assert.equal(document.getElementById('map-input').value, 'button:0');
+  assert.match(document.getElementById('map-current').textContent, /なし/);
+  assert.equal(document.getElementById('map-apply').disabled, false);
+  document.getElementById('map-apply').events.click();
+  assert.equal(getPayload(), undefined);
+  assert.equal(document.getElementById('control-shot_component-fire_button').value, '0');
+  assert.equal(document.getElementById('control-shot_component-fire_button-saved').children[1].textContent,
+    'R（ボタン 5）');
+  assert.equal(document.getElementById('controls-change-count').textContent, '未保存の変更: 1 項目');
+  await vm.runInContext('saveControls({preventDefault() {}})', context);
+  assert.equal(getPayload().values.shot_component.fire_button, 0);
+  assert.equal(document.getElementById('controls-change-count').textContent, '未保存の変更: 0 項目');
+});
+
+test('diagram edits are blocked in saved view and while saving, then reset with the form', async () => {
+  const { document, context } = editorFixture();
+  await vm.runInContext('loadControls("uart")', context);
+  chooseSpot(document, 'face-right');
+  selectMap(document, 'controller-map-source', 'saved');
+  assert.equal(document.getElementById('map-apply').disabled, true);
+  document.getElementById('map-apply').events.click();
+  assert.equal(vm.runInContext('controlDraft.shot_component.fire_button', context), 5);
+  document.getElementById('map-edit-draft').events.click();
+  await vm.runInContext('controlsSetBusy(true)', context);
+  assert.equal(document.getElementById('map-apply').disabled, true);
+  document.getElementById('map-apply').events.click();
+  assert.equal(vm.runInContext('controlDraft.shot_component.fire_button', context), 5);
+  await vm.runInContext('controlsSetBusy(false)', context);
+  document.getElementById('map-apply').events.click();
+  assert.equal(vm.runInContext('controlDraft.shot_component.fire_button', context), 0);
+  document.getElementById('controls-reset').events.click();
+  assert.equal(vm.runInContext('controlDraft.shot_component.fire_button', context), 4);
+  assert.match(document.getElementById('map-preview').textContent, /L（ボタン 4）/);
+});
+
+test('diagram distinguishes stick axes from pressing and previews overlapping functions', async () => {
+  const { document, context } = editorFixture({
+    joy_controller: { linear_x_axis: 1, linear_y_axis: 0, angular_z_axis: 3 },
+    shot_component: { tilt_up_button_index: 4, tilt_down_button_index: 6 },
+    esc_motor_control: { full_speed_button: 7 },
+  });
+  await vm.runInContext('loadControls("uart")', context);
+  chooseSpot(document, 'left-stick');
+  selectMap(document, 'map-input', 'axis:1');
+  selectMap(document, 'map-action', 'joy_controller.angular_z_axis');
+  assert.match(document.getElementById('map-preview').textContent, /前進・後退.*同時に動作/);
+  document.getElementById('map-apply').events.click();
+  assert.equal(vm.runInContext('controlDraft.joy_controller.angular_z_axis', context), 1);
+  assert.equal(vm.runInContext('controlDraft.joy_controller.linear_x_axis', context), 1);
+  selectMap(document, 'map-input', 'button:12');
+  assert.ok(document.getElementById('map-action').children.every((item) => !item.value.startsWith('joy_controller.')));
+  selectMap(document, 'map-action', 'shot_component.tilt_up_button_index');
+  document.getElementById('map-apply').events.click();
+  assert.equal(document.getElementById('control-shot_component-tilt_axis').value, '-1');
+  assert.equal(document.getElementById('control-shot_component-tilt_up_button_index').value, '12');
+  chooseSpot(document, 'left-trigger');
+  selectMap(document, 'map-action', 'shot_component.tilt_up_button_index');
+  assert.equal(document.getElementById('map-apply').disabled, true);
+  assert.match(document.getElementById('map-preview').textContent, /異なるボタン/);
+  document.getElementById('map-apply').events.click();
+  assert.equal(vm.runInContext('controlDraft.shot_component.tilt_up_button_index', context), 12);
+  chooseSpot(document, 'dpad');
+  selectMap(document, 'map-input', 'axis:7');
+  selectMap(document, 'map-action', 'shot_component.tilt_axis');
+  document.getElementById('map-apply').events.click();
+  assert.equal(document.getElementById('control-shot_component-tilt_axis').value, '7');
 });

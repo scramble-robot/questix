@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>QUESTiX Robot Manager</title>
-  <link rel="stylesheet" href="/static/style.css?v=12">
+  <link rel="stylesheet" href="/static/style.css?v=13">
 </head>
 
 <body>
@@ -146,7 +146,20 @@
           </div>
           <p id="controller-map-caption" class="control-help"></p>
           <div id="controller-map"></div>
-          <p class="map-help">図の番号と一覧を見比べて操作を確認できます。一覧を選ぶと設定項目へ移動します。
+          <section id="controller-map-editor" class="map-editor" hidden aria-labelledby="map-editor-title">
+            <h4 id="map-editor-title">機能の割り当て</h4>
+            <div class="map-editor-fields">
+              <label for="map-input">使う入力<select id="map-input"></select></label>
+              <label for="map-action">割り当てる機能<select id="map-action"></select></label>
+            </div>
+            <p id="map-current" class="map-help"></p>
+            <p id="map-preview" class="map-help" role="status"></p>
+            <button type="button" id="map-apply" class="btn btn-small">編集値に反映</button>
+            <button type="button" id="map-edit-draft" class="btn btn-small" hidden>編集中に切り替える</button>
+            <p id="map-feedback" class="map-help" role="status"></p>
+          </section>
+          <p class="map-help">図のボタンやスティックを選び、使う入力と機能を選んで「編集値に反映」を押してください。
+            未割り当ての部分も選択できます。一覧を選ぶと詳細な設定項目へ移動します。
             通常走行・射出の操作図です。左右独立スティック／Joy 直接駆動の単体起動用設定は下のフォームで変更できます。</p>
         </section>
         <p class="control-help">「保存済み」は読み込み時点の設定です。「変更後」を編集して保存すると、
@@ -339,8 +352,8 @@
 
   <script src="/static/app.js?v=9"></script>
   <script src="/static/control-labels.js?v=1"></script>
-  <script src="/static/controller-map.js?v=1"></script>
-  <script src="/static/controls.js?v=4"></script>
+  <script src="/static/controller-map.js?v=2"></script>
+  <script src="/static/controls.js?v=5"></script>
 </body>
 
 </html>
