@@ -10,6 +10,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from questix_control_config import control_actions
 
 
 def generate_launch_description():
@@ -40,12 +41,14 @@ def generate_launch_description():
         name='shot_component',
         parameters=[
             LaunchConfiguration('config_file'),
+            LaunchConfiguration('control_config_file'),
             {'joy_topic': LaunchConfiguration('joy_topic')},
         ],
         output='screen'
     )
 
     return LaunchDescription([
+        *control_actions(),
         config_file_arg,
         joy_topic_arg,
         shot_component_node

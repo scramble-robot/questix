@@ -10,6 +10,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from questix_control_config import control_actions
 
 
 def generate_launch_description():
@@ -30,7 +31,8 @@ def generate_launch_description():
         package='motor_control_app',
         executable='joy_axis_drive_node',
         name='joy_axis_drive',
-        parameters=[LaunchConfiguration('config_file')],
+        parameters=[LaunchConfiguration('config_file'),
+                    LaunchConfiguration('control_config_file')],
         output='screen',
         emulate_tty=True,
         respawn=True,
@@ -38,6 +40,7 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        *control_actions(),
         config_file_arg,
         joy_axis_drive_node,
     ])

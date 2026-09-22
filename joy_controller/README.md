@@ -40,9 +40,10 @@ ros2 launch joy_controller joy_controller_referee.launch.xml
 
 ## パラメータ
 
-実効値の単一ソースは `config/joy_controller_params.yaml`（dual stick は
-`config/joy_controller_dual_stick_params.yaml`）です。コード側の
-`declare_parameter` デフォルトは YAML と同値に保つ運用です。
+操作割り当て・速度の単一ソースは
+[`questix_control_config`](../questix_control_config/README.md) のコントローラー別プロファイルです。
+robot_manager の「操作・速度」タブで編集できます。
+このパッケージの YAML にはデバッグ等のノード設定を残しています。
 
 ### joy_controller_node
 
@@ -110,9 +111,6 @@ ros2 topic echo /target_twist
 - sensor_msgs / geometry_msgs
 - joy（DualShock 経路の joy_node）
 
-standard / referee両XML launchのnormalモードは `config_file` → `joy_controller_params.yaml`、
-dualモードは `dual_stick_config_file` → `joy_controller_dual_stick_params.yaml` を使用します。
-独自設定は対応する引数で指定してください。
-
-dual-stick YAMLは `/**` selectorを使用し、standaloneの `joy_controller_dual_stick` と
-launch時の `joy_controller` の両node nameへ適用されます。
+standard / referee 両 XML launch は、ノード設定の後に共通操作プロファイルを読みます。
+独自のキー割り当て・速度設定は `control_config_file:=...` で指定してください。
+dual-stick の起動時ノード名は `/joy_controller_dual_stick` です。

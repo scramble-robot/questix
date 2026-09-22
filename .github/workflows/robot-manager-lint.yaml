@@ -1,5 +1,5 @@
 ---
-name: Robot Manager Lint
+name: Robot Manager Checks
 
 # The ROS 2 build/test workflow ignores "scripts/**", and its static-analysis
 # job excludes "./scripts/*" from flake8/pydocstyle, so the FastAPI-based
@@ -11,11 +11,15 @@ on:
     branches: [main]
     paths:
       - "scripts/**"
+      - "questix_control_config/**"
+      - "uart_joy_driver/src/joy_line_parser.cpp"
       - ".github/workflows/robot-manager-lint.yaml"
   pull_request:
     branches: [main]
     paths:
       - "scripts/**"
+      - "questix_control_config/**"
+      - "uart_joy_driver/src/joy_line_parser.cpp"
       - ".github/workflows/robot-manager-lint.yaml"
 
 permissions:
@@ -62,3 +66,32 @@ jobs:
             -not -path "*/install/*" \
             -not -path "*/log/*" \
             | xargs -r python -m pydocstyle --ignore=D100,D101,D102,D103,D104,D105,D107,D203,D213,D400,D415
+
+  control-tests:
+    name: API and controller UI regression tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install test dependencies
+        run: python -m pip install ./scripts pytest
+
+      - name: Test configuration API without hardware or systemd
+        env:
+          PYTHONPATH: scripts
+        run: python -m pytest -q scripts/robot_manager
+
+      - name: Test controller names and saved versus edited values
+        run: node --test scripts/robot_manager/tests/control_labels.test.cjs

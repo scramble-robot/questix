@@ -8,12 +8,15 @@ UARTシリアル接続のSwitch系コントローラーをJoyメッセージと�
 値を変えたい場合は YAML を編集するか、`config_file:=...` で別 YAML を指定すること。
 -->
 <launch>
+    <arg name="controller_type" default="uart" />
     <arg name="config_file"
          default="$(find-pkg-share uart_joy_driver)/config/uart_joy_driver_params.yaml"
          description="Path to the UART joy driver configuration YAML" />
+  <include file="$(find-pkg-share questix_control_config)/launch/control_profile.launch.py" />
 
     <!-- UART Joy Driver node -->
     <node pkg="uart_joy_driver" exec="uart_joy_driver_node" name="uart_joy_driver" output="screen">
         <param from="$(var config_file)" />
+        <param from="$(var control_config_file)" />
     </node>
 </launch>

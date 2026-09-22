@@ -4,13 +4,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Questix Robot Manager</title>
-  <link rel="stylesheet" href="/static/style.css?v=8">
+  <title>QUESTiX Robot Manager</title>
+  <link rel="stylesheet" href="/static/style.css?v=11">
 </head>
 
 <body>
   <header>
-    <h1>Questix Robot Manager</h1>
+    <h1>QUESTiX Robot Manager</h1>
     <div id="service-indicator" class="indicator inactive" title="Service status">
       <span class="dot"></span>
       <span id="service-status-text">unknown</span>
@@ -20,6 +20,7 @@
   <!-- Tab bar -->
   <nav class="tabbar" role="tablist">
     <button class="tab active" data-tab="control" role="tab">制御</button>
+    <button class="tab" data-tab="tuning" role="tab">操作・速度</button>
     <button class="tab" data-tab="rec" role="tab">
       録画
       <span id="tab-rec-dot" class="tab-dot"></span>
@@ -118,6 +119,37 @@
       <button class="btn btn-save" id="save-config">設定を保存</button>
     </section>
     </div><!-- /control panel -->
+
+    <div class="tab-panel" data-panel="tuning">
+      <section class="card">
+        <h2>操作・速度のチューニング</h2>
+        <p class="control-help">キー割り当て・速度をコントローラー別に保存します。
+          保存後、制御タブの「再起動」で反映されます。</p>
+        <div class="control-toolbar">
+          <label for="controls-profile">編集するコントローラー</label>
+          <select id="controls-profile">
+            <option value="uart">UART / Switch</option>
+            <option value="dualshock">DualShock</option>
+          </select>
+          <button type="button" class="btn btn-small" id="controls-reload">再読み込み</button>
+        </div>
+        <p id="controls-summary" class="control-summary" role="status">設定を読み込んでください。</p>
+        <p id="controls-layout-note" class="control-help"></p>
+        <p class="control-help">「保存済み」は読み込み時点の設定です。「変更後」を編集して保存すると、
+          次回のロボット起動／再起動で反映されます。「実行中の値を取得」で現在の ROS パラメータと比較できます。</p>
+        <button type="button" class="btn btn-small" id="controls-runtime-load" disabled>実行中の値を取得</button>
+        <p id="controls-runtime-message" class="control-help" role="status" aria-live="polite">実行中の値は未取得です。</p>
+        <p id="controls-change-count" class="control-help" role="status" aria-live="polite"></p>
+        <form id="controls-form">
+          <div id="controls-fields"></div>
+          <p id="controls-message" class="control-help" role="status" aria-live="polite"></p>
+          <div class="btn-group">
+            <button type="submit" class="btn btn-save" id="controls-save" disabled>操作設定を保存</button>
+            <button type="button" class="btn" id="controls-reset" disabled>初期値に戻す</button>
+          </div>
+        </form>
+      </section>
+    </div>
 
     <!-- ===== Recording tab ===== -->
     <div class="tab-panel" data-panel="rec">
@@ -291,7 +323,9 @@
   <!-- Toast container -->
   <div id="toast-container"></div>
 
-  <script src="/static/app.js?v=8"></script>
+  <script src="/static/app.js?v=9"></script>
+  <script src="/static/control-labels.js?v=1"></script>
+  <script src="/static/controls.js?v=3"></script>
 </body>
 
 </html>

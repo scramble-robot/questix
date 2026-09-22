@@ -27,7 +27,7 @@
       [project]
       name = "robot_manager"
       version = "0.1.0"
-      dependencies = ["fastapi", "uvicorn[standard]"]
+      dependencies = ["fastapi", "uvicorn[standard]", "PyYAML>=6.0"]
 
       [tool.setuptools.packages.find]
       where = ["."]

@@ -939,3 +939,29 @@ main {
     width: 160px;
   }
 }
+/* Operator tuning form */
+.control-help { color: var(--text-dim); line-height: 1.6; margin: 0.8rem 0; }
+.control-toolbar { display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap; }
+.control-toolbar select { background: var(--bg-input); color: var(--text); padding: 0.6rem;
+  border: 1px solid var(--text-dim); border-radius: 6px; font: inherit; }
+.control-section { border: 1px solid var(--text-dim); border-radius: 8px;
+  padding: 1rem; margin: 1.2rem 0; }
+.control-section legend { padding: 0 0.4rem; font-weight: 600; }
+.control-summary { padding: 0.8rem; margin-top: 1rem; background: var(--bg-input);
+  border-radius: 6px; line-height: 1.6; }
+.control-field { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: start; gap: 0.5rem 1rem; padding: 0.8rem; margin: 0.75rem 0;
+  border: 1px solid transparent; border-bottom-color: var(--text-dim); border-radius: 6px; }
+.control-field > label { grid-column: 1 / -1; font-weight: 600; }
+.control-field.changed { border-color: var(--orange); background: rgba(255, 145, 0, 0.06); }
+.control-saved, .control-editor, .control-runtime { min-width: 0; display: flex; flex-direction: column; gap: 0.4rem; }
+.control-saved strong { font-size: 0.95rem; font-weight: 500; overflow-wrap: anywhere; }
+.control-value-caption, .control-change-state, .control-runtime-state { font-size: 0.8rem; color: var(--text-dim); }
+.control-field.changed .control-change-state { color: var(--orange); font-weight: 600; }
+.control-field input[type="number"], .control-field select { width: 100%; min-width: 0;
+  background: var(--bg-input); color: var(--text); border: 1px solid var(--text-dim);
+  padding: 0.6rem; border-radius: 6px; font: inherit; }
+.control-field input[type="checkbox"] { width: 1.3rem; height: 1.3rem; }
+@media (max-width: 480px) {
+  .control-field { grid-template-columns: minmax(0, 1fr); padding: 0.5rem; }
+}

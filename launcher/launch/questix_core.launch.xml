@@ -24,6 +24,7 @@
   <let name="operation_manager_config_file" value="$(find-pkg-share operation_manager)/config/operation_manager.competition.yaml" if="$(var enable_autoreferee)"/>
   <!-- All child processes stay disabled while the invalid branch reports and exits. -->
   <group unless="$(and $(var enable_autoreferee) $(not $(var enable_gpio_ref)))">
+    <include file="$(find-pkg-share questix_control_config)/launch/control_profile.launch.py" />
     <group if="$(var enable_shot)">
       <include file="$(find-pkg-share questix_launcher)/launch/shot_component.launch.xml">
         <arg name="enable_gpio_ref" value="$(var enable_gpio_ref)"/>

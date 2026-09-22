@@ -8,6 +8,7 @@ setup(
     package_data={"robot_manager": ["static/*"]},
     install_requires=[
         "fastapi",
+        "PyYAML>=6.0",
         "uvicorn[standard]",
     ],
 )

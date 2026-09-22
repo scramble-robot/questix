@@ -1,13 +1,9 @@
-# NOTE: このファイルが drive_component の設定の単一ソース（Single Source of Truth）です。
-# 統合起動（questix_launcher）ではこの launcher/config が params-file として渡されます。
-# 以前 motor_control_app/config にあった重複コピーは廃止しました。
-# motor_control_app 単体launch は config_file 引数を省略すると drive_component ノードの宣言
-# デフォルト（drive_component.cpp の declare_parameter）で起動します。宣言デフォルトはこの yaml の
-# 値と同値に保っているため、単体launch も同じ挙動になります。単体launch でこの yaml を使いたい
-# 場合は config_file:=<path> を渡してください。
-# 設定を変更する場合はこの1箇所を編集してください（統合起動に反映）。単体launch のデフォルトも
-# 変えたい場合は drive_component.cpp の declare_parameter を同じ値に合わせてください。
-# 変更が実際にノードへ届いているかは `ros2 param dump /drive_component` で確認できます。
+# QUESTiX drive hardware/control-loop configuration (single source).
+# Operator tuning (RPM limits, acceleration, taper, deadband) is in
+# questix_control_config/config/controls.*.yaml, shared with robot_manager.
+# Integrated launch loads this file, then the operator profile.
+# Standalone launch accepts this file via config_file; without it hardware
+# parameters retain node defaults. Shared operator controls still apply.
 drive_component:
   ros__parameters:
     # シリアル通信設定
@@ -28,12 +24,6 @@ drive_component:
     # モータ設定
     left_motor_id: 4 # 左モータID
     right_motor_id: 5 # 右モータID
-    # 走行モータの上限回転数
-    # 値を下げるとロボット全体の最高速度が下がります。組立直後の安全確認では低めを推奨します。
-    # M0602C の速度ループ指令範囲は ±475 rpm（仕様）。475 を超える値はライブラリ側で
-    # 475 にクランプされます（範囲外指令はファーム挙動が未定義のため）。
-    max_motor_rpm: 475 # 最大RPM
-
     # 制御モード設定
     # "velocity": M0602Cファーム内蔵の速度ループを使用（従来挙動）
     # "current" : ソフトウェアPI制御で目標RPM→電流指令に変換（精密操縦向け）
@@ -44,39 +34,6 @@ drive_component:
     integral_limit_amp: 0.3     # [A] 積分項寄与の絶対値上限（アンチワインドアップ）
     current_zero_deadband_rpm: 5  # [RPM] 目標0かつ実測がこの範囲内ならPIを停止して積分リセット（静止時の微振動防止）
     current_invert_measured: true # PI内でmeasured RPMを符号反転（指令と測定の物理符号が逆=正帰還になっている場合のみtrue）
-
-    # 加速度クランプ（スルーレート制限）。0 以下で無効。
-    # スティック満倒からの起動トルクを抑え、急加速感をやわらげる。
-    # 追従性（どれだけ速く目標へ到達するか）を決める主レバーはこの 2 つ。
-    # 実測（test_control_core）: 目標の 90% に達するまでの時間は
-    #   前進 2.0 m/s: max_linear_accel 3.0 -> 0.62s / 5.0 -> 0.36s / 8.0 -> 0.24s
-    #   旋回 6.0 rad/s: max_angular_accel 3.0 -> 1.82s / 6.0 -> 0.90s / 10.0 -> 0.54s
-    # 旋回が遅いと感じる場合はここを上げる。ただし max_angular_accel は低RPM域の
-    # ファーム速度ループの励起を抑える目的で低めに設定された経緯があるため
-    # （PR #141）、上げると旋回の振動が戻る可能性がある。実機で 3.0 -> 4.5 -> 6.0 と
-    # 段階的に上げ、振動が出ない上限を探すこと。実行時変更に対応している:
-    #   ros2 param set /drive_component max_angular_accel 4.5
-    max_linear_accel: 3.0    # [m/s^2] 線形加速度の上限
-    max_angular_accel: 3.0   # [rad/s^2] 角加速度の上限（上げると旋回の追従が速くなるが低RPMファームループを励起し得る）
-
-    # 注: デマンド適応加速度（min_*_accel / accel_demand_ref_*）は実機評価の結果、
-    # コードごと廃止した。残差ベースの適応は「入力の丁寧さ」と「追従の遅れ」を区別できず、
-    # 微小入力の応答を鈍くしていた（0.3 rad/s 到達 0.52s → 0.14s、前進フルスティック整定
-    # 1.22s → 0.78s、いずれも無効化で改善）。ジャーク抑制は slew_taper_band_* が担当する。
-    # 経緯は design/drive_control_refactor.md を参照。
-
-    # 目標接近時のレート絞り幅（実効的なジャーク制限）。0 以下で無効＝従来の一次レート制限。
-    # 残差 |目標 - 前回指令| がこの幅に入ると 1 ステップの上限を残差に比例して縮め、目標へ
-    # 漸近的に到達させる。一次のレート制限だけだと、スティック満倒で目標が飽和した瞬間に
-    # 加速度が max_*_accel から 0 へステップで落ち、追従遅れが溜まった M0602C ファーム
-    # 速度ループがオーバーシュート→引き戻し（一旦減速して再加速）を起こす。
-    # 残差の時定数は band / max_*_accel [s]。旋回は低RPMでファーム速度ループが不安定なため、
-    # band を広くとって目標到達を緩やかにするほど、到達直後のオーバーシュート振動が減る。
-    # 幅を 1 ステップ分（max_*_accel × 制御周期 1/control_rate）より十分大きく取らないと効かない。
-    # 加速側・減速側の両方に対称に効く。減速側では min_command_rpm の不感帯が
-    # 残った微小指令を停止に丸めるため、停止までの遅れにはならない。
-    slew_taper_band_linear: 0.2    # [m/s] 0 で無効
-    slew_taper_band_angular: 0.2    # [rad/s] 0 で無効。旋回の目標到達を緩やかにし低RPMファームループの振動を抑える主レバー
 
     # 停止時の電気ブレーキ（velocity モードのみ有効）。
     # true: スティック中立/停止時に目標0＋ブレーキ指令を送り、しっかり停止・保持する。
@@ -98,16 +55,6 @@ drive_component:
     # 高RPMの直進が乱れることが確定しており、左右共通・前後/旋回分離不可の単一ファーム値は
     # チューニングレバーとして機能しない。加速プロファイルの整形はホスト側
     # （max_*_accel + slew_taper_band_*）に一本化する。
-
-    # 指令を許す最低車輪RPM（低速不感帯）。左右輪の指令RPMがいずれもこの値未満なら停止扱い。
-    # M0602Cのファーム速度ループは低速域ほど減衰が悪く、わずかな速度を保持させようとすると
-    # 収束せず振動し続ける（実機ログ: 目標95RPM一定で実測59〜118RPMを約1.8Hzで往復、
-    # 低速側はさらに悪化）。その領域を指令しないための不感帯。0で無効。
-    # 換算: 1 RPM ≒ 0.0105 m/s（wheel_radius 0.1）。8 RPM ≒ 0.084 m/s。
-    # 注意: 旋回のみの指令では車輪RPMは最大でも angular_z × wheel_separation/2 相当
-    # （angular_input_ratio 1.0 なら約24RPM）しか出ないため、上げすぎると旋回の低速側が
-    # 丸ごと使えなくなる。実機で 5〜15 を目安に調整する。
-    min_command_rpm: 5
 
     # /target_twist 受信タイムアウト（制御 tick 内で判定）。
     # 指令がこの秒数途絶えたら走行モータを停止する（velocity/current 両モードで有効）。

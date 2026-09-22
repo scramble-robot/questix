@@ -7,6 +7,7 @@
   <arg name="serial_port" 
        default="/dev/ttyACM0" 
        description="Serial port for motor communication" />
+  <include file="$(find-pkg-share questix_control_config)/launch/control_profile.launch.py" />
 
   <!-- JoyAxisDrive Node -->
   <node pkg="motor_control_app" 
@@ -16,6 +17,7 @@
         respawn="true" 
         respawn_delay="2.0">
     <param from="$(var config_file)" />
+        <param from="$(var control_config_file)" />
     <param name="serial_port" value="$(var serial_port)" />
   </node>
 </launch>

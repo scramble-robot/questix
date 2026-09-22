@@ -1,4 +1,4 @@
-"""Questix Robot Manager — FastAPI backend for systemd service control."""
+"""QUESTiX Robot Manager — FastAPI backend for systemd service control."""
 
 import os
 import re
@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 
-from robot_manager import logs, recorder
+from robot_manager import control_runtime, controls, logs, recorder
 
 CONFIG_DIR = Path(os.environ.get("QUESTIX_CONFIG_DIR", "/etc/questix_robot"))
 MODE_FILE = CONFIG_DIR / "mode"
@@ -23,7 +23,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 MANAGER_PORT = int(os.environ.get("MANAGER_PORT", "8888"))
 
-app = FastAPI(title="Questix Robot Manager")
+app = FastAPI(title="QUESTiX Robot Manager")
 
 # ---------------------------------------------------------------------------
 # Security middleware
@@ -215,6 +215,24 @@ def set_launch_config(config: LaunchConfig):
     except PermissionError:
         raise HTTPException(status_code=403, detail="Permission denied writing launch.env")
     return current
+
+
+@app.get("/api/control-runtime")
+def get_control_runtime():
+    """Read running ROS parameters without applying any saved settings."""
+    return control_runtime.read_snapshot(_read_env())
+
+
+@app.get("/api/control-config/{controller}")
+def get_control_config(controller: Literal["uart", "dualshock"]):
+    """Return the saved controls for the selected controller profile."""
+    return controls.read_profile(CONFIG_DIR, controller, _read_env())
+
+
+@app.put("/api/control-config/{controller}")
+def set_control_config(controller: Literal["uart", "dualshock"], config: controls.ControlUpdate):
+    """Persist controls for the next robot start without restarting the service."""
+    return controls.write_profile(CONFIG_DIR, controller, _read_env(), config)
 
 
 # ---------------------------------------------------------------------------

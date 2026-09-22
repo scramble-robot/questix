@@ -24,7 +24,14 @@ async function api(path, opts = {}) {
       ...opts,
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    if (!res.ok) {
+      if (res.status === 404 && (path.startsWith("/api/control-config/") || path === "/api/control-runtime")) {
+        throw new Error("操作設定APIが未反映です。管理画面サービスを更新・再起動し、再読み込みしてください。");
+      }
+      const detail = Array.isArray(data.detail)
+        ? data.detail.map((item) => item.msg).join("; ") : data.detail;
+      throw new Error(detail || `HTTP ${res.status}`);
+    }
     return data;
   } catch (e) {
     toast(e.message, "error");

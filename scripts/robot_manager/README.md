@@ -86,3 +86,47 @@ sudo usermod -aG adm,systemd-journal "$USER"   # then re-login / restart the ser
 
 A source the user cannot read does not fail the whole collection — it is recorded as
 a per-source error in `MANIFEST.txt` and the archive is still produced.
+
+## 操作・速度の設定
+
+Joy のキー割り当て、射出・ローラー操作、走行速度・加速度は
+[QUESTiX 共通操作設定](../../questix_control_config/README.md) に集約しています。
+robot_manager の「操作・速度」タブでコントローラー別に編集・保存し、
+ロボットの次回起動／再起動で反映します。保存による自動再起動は行いません。
+管理画面には未保存表示・初期値への復元・入力検証・同時編集の競合検出があります。
+
+操作割り当てはコントローラー別のボタン名・軸名から選べます。名前の隣に
+ROS の配列番号も表示し、標準配置以外の番号も選択できます。
+UART の名前は `uart_joy_driver` のプロトコルに合わせています。DualShock は
+Linux の標準配置を表示するもので、接続機器の自動判別ではありません。
+[joy_node の配列順は機器依存](https://github.com/ros-drivers/joystick_drivers/blob/ros2/joy/README.md)
+のため、独自の接続環境では実際の番号に合わせてください。
+
+各項目の「保存済み」は読み込み時点の設定、「変更後」は未保存の編集値です。
+変更行と変更件数を表示し、初期値への復元時にも元の保存値を比較できます。
+「実行中の値を取得」を押すと、同じ行の「実行中（取得時点）」と比較できます。
+初回表示時には Launch 設定の
+コントローラーを選択し、編集対象・Launch 設定・読み込み時刻を表示します。
+
+フロントエンドの回帰テスト（追加依存なし）:
+
+```bash
+node --test scripts/robot_manager/tests/control_labels.test.cjs
+```
+
+### 実行中の設定の取得
+
+`GET /api/control-runtime` は `launch.env` の `ROBOT_WS`・`ROS_DISTRO`・
+`ROS_DOMAIN_ID` を使い、短時間の ROS `GetParameters` クライアントで
+編集対象パラメータだけを読み取ります。自動ポーリング、パラメータ書き込み、
+ロボットの再起動は行いません。複数ノードの応答待ちは共通の期限内で行い、
+同時リクエストは制限しています。
+
+実行中の列は取得時刻付きのスナップショットです。ノード未検出・応答なし・
+未宣言パラメータを区別し、取得できなかった値を保存済み設定で補完しません。
+コントローラー種別は実機から判別していないため、実行中の軸・ボタンは番号で表示します。
+別のプロファイルを編集中の場合も、問い合わせ先は表示された ROS_DOMAIN_ID のノードです。
+取得には ROS 2 とビルド済みのワークスペースが必要です。
+
+API を追加したバージョンへ更新した場合は、管理画面サービスの再起動が必要です。
+保存済みのキー設定を実際のロボットに適用する再起動とは別の操作です。

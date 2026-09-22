@@ -45,6 +45,8 @@
     <test_depend>ros2pkg</test_depend>
     <test_depend>ros2run</test_depend>
 
+    <exec_depend>questix_control_config</exec_depend>
+
     <export>
         <build_type>ament_cmake</build_type>
     </export>
