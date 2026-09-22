@@ -8,7 +8,7 @@ test('Switch and DualShock face buttons map to the correct physical positions', 
   assert.equal(map.location('dualshock', 'fire_button', 0), 'face-bottom');
   assert.equal(map.location('dualshock', 'fire_button', 1), 'face-right');
   assert.equal(map.location('uart', 'fire_button', 13), 'right-stick');
-  assert.equal(map.location('dualshock', 'fire_button', 13), 'touchpad');
+  assert.equal(map.location('dualshock', 'fire_button', 13), null);
 });
 
 test('axis and button namespaces are kept separate and unmapped indices stay off the drawing', () => {
@@ -76,4 +76,19 @@ test('function numbers remain stable across remapping and tilt modes', () => {
   assert.equal(numbers().tilt_up_button_index, 5);
   assert.equal(numbers().tilt_down_button_index, 5);
   assert.deepEqual(map.destinations('uart', 'tilt_axis').map((item) => item.value), [0, 1, 3, 4, 6, 7]);
+});
+
+test('tilt plans update both buttons atomically and reject invalid or duplicate indices', () => {
+  assert.deepEqual(map.planTiltAssignment({ mode: 'buttons', up: 2, down: 1 }), [
+    { node: 'shot_component', key: 'tilt_axis', value: -1 },
+    { node: 'shot_component', key: 'tilt_up_button_index', value: 2 },
+    { node: 'shot_component', key: 'tilt_down_button_index', value: 1 },
+  ]);
+  assert.deepEqual(map.planTiltAssignment({ mode: 'axis', axis: 7 }),
+    [{ node: 'shot_component', key: 'tilt_axis', value: 7 }]);
+  for (const invalid of [
+    { mode: 'buttons', up: 2, down: 2 }, { mode: 'buttons', up: -1, down: 0 },
+    { mode: 'buttons', up: 64, down: 1 }, { mode: 'buttons', up: 2.5, down: 1 },
+    { mode: 'axis', axis: -1 }, { mode: 'axis', axis: null }, { mode: 'invalid', axis: 7 },
+  ]) assert.throws(() => map.planTiltAssignment(invalid));
 });

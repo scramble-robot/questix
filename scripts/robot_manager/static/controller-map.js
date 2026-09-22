@@ -44,7 +44,7 @@ const ControllerMap = (() => {
     if (common[value]) return common[value];
     const extra = controller === "uart"
       ? { 11: "capture", 12: "left-stick", 13: "right-stick" }
-      : { 11: "left-stick", 12: "right-stick", 13: "touchpad" };
+      : { 11: "left-stick", 12: "right-stick" };
     return extra[value] || null;
   }
 
@@ -107,6 +107,22 @@ const ControllerMap = (() => {
     return changes;
   }
 
+  function planTiltAssignment(settings) {
+    const index = (value) => Number.isInteger(value) && value >= 0 && value <= 63;
+    if (settings.mode === "axis" && index(settings.axis)) {
+      return [{ node: "shot_component", key: "tilt_axis", value: settings.axis }];
+    }
+    if (settings.mode !== "buttons" || !index(settings.up) || !index(settings.down)) {
+      throw new Error("チルトの入力を選んでください。");
+    }
+    if (settings.up === settings.down) throw new Error("チルト上・下には異なるボタンを割り当ててください。");
+    return [
+      { node: "shot_component", key: "tilt_axis", value: -1 },
+      { node: "shot_component", key: "tilt_up_button_index", value: settings.up },
+      { node: "shot_component", key: "tilt_down_button_index", value: settings.down },
+    ];
+  }
+
   function element(tag, attributes = {}, text = null) {
     const node = document.createElementNS(namespace, tag);
     for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value);
@@ -114,7 +130,7 @@ const ControllerMap = (() => {
     return node;
   }
 
-  function draw(controller, compact) {
+  function draw(controller, compact, usedSpots) {
     const dual = controller === "dualshock";
     const svg = element("svg", { viewBox: compact ? "80 10 560 350" : "-145 -15 1010 405", role: "group",
       "aria-label": `${dual ? "DualShock" : "Switch"} コントローラーの操作図` });
@@ -164,11 +180,11 @@ const ControllerMap = (() => {
     spot("right-trigger", 512, 43, dual ? "R2" : "ZR", 43, "rect");
     spot("left-shoulder", 208, 93, dual ? "L1" : "L", 43, "rect");
     spot("right-shoulder", 512, 93, dual ? "R1" : "R", 43, "rect");
-    if (dual) spot("touchpad", 360, 164, "TOUCH PAD", 46, "rect");
-    spot("menu-left", dual ? 288 : 310, 136, dual ? "SHARE" : "−", 20);
-    spot("menu-right", dual ? 432 : 410, 136, dual ? "OPTIONS" : "+", 20);
-    spot("home", dual ? 360 : 400, 231, dual ? "PS" : "HOME", 19);
-    if (!dual) spot("capture", 320, 231, "▣", 19);
+    // Keep the central area quiet; auxiliary buttons appear when assigned.
+    if (usedSpots.has("menu-left")) spot("menu-left", dual ? 288 : 310, 136, dual ? "SHARE" : "−", 20);
+    if (usedSpots.has("menu-right")) spot("menu-right", dual ? 432 : 410, 136, dual ? "OPTIONS" : "+", 20);
+    if (usedSpots.has("home")) spot("home", dual ? 360 : 400, 231, dual ? "PS" : "HOME", 19);
+    if (!dual && usedSpots.has("capture")) spot("capture", 320, 231, "▣", 19);
     spot("left-stick", dual ? 275 : 202, dual ? 267 : 181, "L", 34);
     spot("right-stick", 445, 267, "R", 34);
     const dx = dual ? 201 : 270;
@@ -183,7 +199,7 @@ const ControllerMap = (() => {
 
   function render(host, controller, values, saved, onAction, options = {}) {
     const assignments = bindings(controller, values, saved);
-    const { svg, spots } = draw(controller, options.compact);
+    const { svg, spots } = draw(controller, options.compact, new Set(assignments.map((item) => item.spot)));
     const list = document.createElement("div");
     list.className = "map-bindings";
     list.setAttribute("aria-label", "機能一覧。選択すると割り当て先のポップアップが開きます。");
@@ -296,6 +312,6 @@ const ControllerMap = (() => {
     host.replaceChildren(svg, list);
   }
 
-  return { location, bindings, inputs, actions, destinations, actionLabel, planAssignment, render };
+  return { location, bindings, inputs, actions, destinations, actionLabel, planAssignment, planTiltAssignment, render };
 })();
 if (typeof module !== "undefined") module.exports = ControllerMap;
