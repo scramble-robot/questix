@@ -84,7 +84,7 @@ function editorFixture(extraValues = {}, controller = 'uart') {
     querySelectorAll(selector) {
       const all = document.getElementById('controls-fields').all();
       return selector === '.control-field' ? all.filter((element) => element.className === 'control-field')
-        : all.filter((element) => element.tag === 'input' || element.tag === 'select');
+        : all.filter((element) => element.tag === 'input' || element.tag === 'select' || element.tag === 'button');
     },
   };
   const profile = {
@@ -648,11 +648,11 @@ test('friendly units preserve precision, inversion and every hidden value when s
   await vm.runInContext('loadControls("uart")', context);
   const before = JSON.parse(vm.runInContext('JSON.stringify(controlDraft)', context));
   const turn = document.getElementById('control-joy_controller-angular_input_ratio');
-  assert.equal(turn.value, 343.77);
+  assert.equal(turn.value, 100);
   turn.events.input();
   assert.equal(vm.runInContext('controlDraft.joy_controller.angular_input_ratio', context), -6);
-  turn.value = '180'; turn.events.input();
-  assert.equal(vm.runInContext('controlDraft.joy_controller.angular_input_ratio', context), -Math.PI);
+  turn.value = '50'; turn.events.input();
+  assert.equal(vm.runInContext('controlDraft.joy_controller.angular_input_ratio', context), -3);
   const speed = document.getElementById('control-joy_controller-longitudinal_input_ratio');
   speed.value = '0'; speed.events.input();
   speed.value = '1.5'; speed.events.input();
@@ -663,7 +663,7 @@ test('friendly units preserve precision, inversion and every hidden value when s
   await vm.runInContext('saveControls({preventDefault() {}})', context);
   const expected = structuredClone(before);
   expected.joy_controller.longitudinal_input_ratio = -1.5;
-  expected.joy_controller.angular_input_ratio = -Math.PI;
+  expected.joy_controller.angular_input_ratio = -3;
   expected.esc_motor_control.full_speed_value = 0.65;
   expected.uart_joy_driver.deadzone = 0.12;
   assert.deepEqual(getPayload().values, expected);
@@ -698,8 +698,50 @@ for (const entered of ['2', '2.0']) {
     await vm.runInContext('saveControls({preventDefault() {}})', context);
     const values = getPayload().values;
     assert.equal(values.joy_controller.longitudinal_input_ratio, 2);
-    assert.equal(values.joy_controller.angular_input_ratio, 2 / (180 / Math.PI));
+    assert.equal(values.joy_controller.angular_input_ratio, 2 / (100 / 6));
     assert.equal(values.esc_motor_control.full_speed_value, 0.02);
     assert.equal(values.uart_joy_driver.deadzone, 0.02);
   });
 }
+
+test('turn presets keep a fixed standard across save, runtime comparison and reset', async () => {
+  const { document, context, getPayload } = editorFixture();
+  await vm.runInContext('loadControls("uart")', context);
+  const turnRow = () => document.querySelectorAll('.control-field').find((row) => row.dataset.key === 'angular_input_ratio');
+  const presets = () => turnRow().querySelector('.control-presets').children;
+  const turnInput = () => document.getElementById('control-joy_controller-angular_input_ratio');
+  assert.equal(turnInput().value, 100);
+  assert.deepEqual(presets().map((button) => button.textContent), ['ゆっくり 50%', '標準 100%', '速め 150%']);
+  presets()[0].events.click();
+  assert.equal(turnInput().value, '50');
+  await vm.runInContext('saveControls({preventDefault() {}})', context);
+  assert.equal(getPayload().values.joy_controller.angular_input_ratio, 3);
+  assert.equal(turnInput().value, 50);
+  vm.runInContext(`controlRuntime = { nodes: { joy_controller: {status: 'ok', values: {angular_input_ratio: 6}} } };
+    renderRuntimeValues();`, context);
+  assert.equal(turnRow().querySelector('.control-runtime-value').textContent, '100 %');
+  assert.equal(turnRow().querySelector('.control-runtime-state').textContent, '保存済みと異なる');
+  presets()[2].events.click();
+  assert.equal(vm.runInContext('controlDraft.joy_controller.angular_input_ratio', context), 9);
+  vm.runInContext('controlsSetBusy(true)', context);
+  assert.equal(presets()[0].disabled, true);
+  presets()[0].events.click();
+  assert.equal(vm.runInContext('controlDraft.joy_controller.angular_input_ratio', context), 9);
+  vm.runInContext('controlsSetBusy(false)', context);
+  document.getElementById('controls-reset').events.click();
+  assert.equal(turnInput().value, 100);
+  assert.equal(vm.runInContext('controlDraft.joy_controller.angular_input_ratio', context), 6);
+});
+
+test('a custom zero turn default stays editable without division by zero', async () => {
+  const { document, context, getPayload } = editorFixture({ joy_controller: { angular_input_ratio: 0 } });
+  await vm.runInContext('loadControls("uart")', context);
+  const input = document.getElementById('control-joy_controller-angular_input_ratio');
+  assert.equal(input.value, 0);
+  assert.ok(Number.isFinite(input.max));
+  const row = document.querySelectorAll('.control-field').find((item) => item.dataset.key === 'angular_input_ratio');
+  assert.match(row.children[0].textContent, /回転\/秒/);
+  input.value = '0.5'; input.events.input();
+  await vm.runInContext('saveControls({preventDefault() {}})', context);
+  assert.equal(getPayload().values.joy_controller.angular_input_ratio, Math.PI);
+});

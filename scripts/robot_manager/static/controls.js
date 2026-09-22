@@ -17,8 +17,7 @@ const tuningFields = {
   joy_controller: {
     longitudinal_input_ratio: { title: "走行速度", unit: "m/s", scale: 1, signed: true,
       help: "スティックを最大まで倒したときの前進・後退の速さ。大きくすると速くなります。" },
-    angular_input_ratio: { title: "旋回速度", unit: "度/秒", scale: 180 / Math.PI, signed: true,
-      help: "スティックを最大まで倒したときの曲がる速さ。360 度/秒で、1 秒に 1 回転の指令です。" },
+    angular_input_ratio: { title: "旋回の速さ", signed: true },
   },
   esc_motor_control: {
     full_speed_value: { title: "ローラー出力", unit: "%", scale: 100,
@@ -33,7 +32,17 @@ const tuningFields = {
 function tuningSpec(node, key) {
   if (node === "joy_node" && controlProfile.controller !== "dualshock"
       || node === "uart_joy_driver" && controlProfile.controller !== "uart") return null;
-  return tuningFields[node]?.[key];
+  const spec = tuningFields[node]?.[key];
+  if (node === "joy_controller" && key === "angular_input_ratio") {
+    const reference = Math.abs(controlProfile.defaults[node][key]);
+    if (reference > 0) return { ...spec, unit: "%", scale: 100 / reference,
+      help: "100% が標準の速さです。50% で半分、150% で1.5倍。0% では旋回しません。",
+      presets: [[50, "ゆっくり 50%"], [100, "標準 100%"], [150, "速め 150%"]] };
+    // A custom profile can define a zero default; a relative percentage is then undefined.
+    return { ...spec, unit: "回転/秒", scale: 1 / (2 * Math.PI),
+      help: "1 で1秒に1回転、0.5 で2秒に1回転の指令です。0 では旋回しません。" };
+  }
+  return spec;
 }
 
 function tuningNumber(spec, value) {
@@ -385,7 +394,8 @@ function renderControls() {
       savedValue.textContent = tuningValue(spec, controlProfile.values[group.node][field.key]);
       saved.append(savedCaption, savedValue);
       input.setAttribute("aria-describedby", `${help.id} ${saved.id}`);
-      input.addEventListener("input", () => {
+      const updateValue = () => {
+        if (controlsBusy) return;
         const entered = Number(input.value);
         // Returning to a rounded display value restores its exact original ROS value.
         const raw = entered === tuningNumber(spec, value) ? value
@@ -393,7 +403,23 @@ function renderControls() {
             : entered / spec.scale * direction;
         controlDraft[group.node][field.key] = input.value === "" ? null : raw;
         refreshControlChanges();
-      });
+      };
+      input.addEventListener("input", updateValue);
+      const presets = document.createElement("div");
+      presets.className = "control-presets";
+      for (const [amount, title] of spec.presets || []) {
+        if (amount > input.max) continue;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "btn btn-small";
+        button.textContent = title;
+        button.addEventListener("click", () => {
+          if (controlsBusy) return;
+          input.value = String(amount);
+          updateValue();
+        });
+        presets.appendChild(button);
+      }
       const editor = document.createElement("div");
       editor.className = "control-editor";
       const caption = document.createElement("span");
@@ -412,7 +438,9 @@ function renderControls() {
       const runtimeState = document.createElement("span");
       runtimeState.className = "control-runtime-state";
       runtime.append(runtimeCaption, runtimeValue, runtimeState);
-      row.append(label, help, editor, saved, runtime);
+      row.append(label, help);
+      if (spec.presets) row.append(presets);
+      row.append(editor, saved, runtime);
       section.appendChild(row);
     }
     container.appendChild(section);
@@ -431,7 +459,7 @@ function controlsSetBusy(busy) {
   document.getElementById("controls-save").disabled = busy || !controlProfile;
   document.getElementById("map-save").disabled = busy || !controlProfile || !controlsDirty;
   document.getElementById("controls-reset").disabled = busy || !controlProfile;
-  for (const input of document.querySelectorAll("#controls-fields input, #controls-fields select")) {
+  for (const input of document.querySelectorAll("#controls-fields input, #controls-fields select, #controls-fields button")) {
     input.disabled = busy;
   }
 }

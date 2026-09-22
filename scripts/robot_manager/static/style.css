@@ -955,6 +955,7 @@ main {
 .control-field > label { grid-column: 1 / -1; font-weight: 600; }
 .control-field-help { grid-column: 1 / -1; color: var(--text-dim); font-size: 0.85rem;
   line-height: 1.65; margin: 0 0 0.6rem; }
+.control-presets { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.6rem; }
 .control-field.runtime-visible { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .control-runtime[hidden] { display: none; }
 #controls-reset { background: #243744; color: #e6edf2; }
