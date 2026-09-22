@@ -949,22 +949,29 @@ main {
 .control-section legend { padding: 0 0.4rem; font-weight: 600; }
 .control-summary { padding: 0.8rem; margin-top: 1rem; background: var(--bg-input);
   border-radius: 6px; line-height: 1.6; }
-.control-field { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+.control-field { display: grid; grid-template-columns: minmax(0, 1fr);
   align-items: start; gap: 0.4rem 1rem; padding: 0.6rem; margin: 0.3rem 0 0.6rem;
   border: 1px solid transparent; border-bottom-color: var(--text-dim); border-radius: 6px; }
-.control-field > label { grid-column: 1 / -1; font-weight: 600; }
+.control-field-heading { grid-column: 1 / -1; display: flex; align-items: center; gap: 0.4rem; }
+.control-field-heading label { font-weight: 600; }
+.control-info { flex: 0 0 auto; width: 2rem; height: 2rem; border: 0; border-radius: 50%;
+  background: transparent; color: #9cabb7; font: inherit; font-size: 1.1rem; cursor: pointer; }
+.control-info:hover, .control-info[aria-expanded="true"] { background: #2a414f; color: #e6edf2; }
+.control-info:focus-visible { outline: 2px solid #83dbc5; outline-offset: 2px; }
 .control-field-help { grid-column: 1 / -1; color: var(--text-dim); font-size: 0.85rem;
   line-height: 1.65; margin: 0 0 0.6rem; }
 .control-field input:disabled { opacity: 0.55; }
 .control-presets { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.6rem; }
-.control-field.runtime-visible { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.control-runtime[hidden] { display: none; }
+.control-field.runtime-visible { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.control-runtime[hidden], .control-saved[hidden], .control-field-help[hidden],
+.control-change-state[hidden], .tuning-savebar[hidden], #controls-message[hidden] { display: none; }
 #controls-reset { background: #243744; color: #e6edf2; }
 #controls-reset:hover:not(:disabled) { background: #304957; }
 .tuning-runtime-tools { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid #354754; }
 .control-field.changed { border-color: var(--orange); background: rgba(255, 145, 0, 0.06); }
 .control-saved, .control-editor, .control-runtime { min-width: 0; display: flex; flex-direction: column; gap: 0.4rem; }
-.control-saved strong { font-size: 0.95rem; font-weight: 500; overflow-wrap: anywhere; }
+.control-saved { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; align-items: baseline; color: var(--text-dim); }
+.control-saved strong { font-size: 0.8rem; font-weight: 400; overflow-wrap: anywhere; }
 .control-value-caption, .control-change-state, .control-runtime-state { font-size: 0.8rem; color: var(--text-dim); }
 .control-field.changed .control-change-state { color: var(--orange); font-weight: 600; }
 .control-field input[type="number"], .control-field select { width: 100%; min-width: 0;
@@ -972,7 +979,7 @@ main {
   padding: 0.6rem; border-radius: 6px; font: inherit; }
 .control-field input[type="checkbox"] { width: 1.3rem; height: 1.3rem; }
 @media (max-width: 480px) {
-  .control-field, .control-field.runtime-visible { grid-template-columns: repeat(2, minmax(0, 1fr));
+  .control-field, .control-field.runtime-visible { grid-template-columns: minmax(0, 1fr);
     gap: 0.4rem 0.75rem; padding: 0.4rem; }
   .control-field .control-runtime { grid-column: 1 / -1; }
 }
@@ -997,9 +1004,16 @@ main {
 .map-topbar { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; padding: 1rem 1.2rem;
   border-bottom: 1px solid #ffffff0b; background: #14212b; }
 .map-topbar h3 { font-size: 0.85rem; font-weight: 500; }
-#map-change-count { color: #a4b4c0; font-size: 0.75rem; }
-#map-save { flex: 0 0 auto; background: #83dbc5; color: #122d2b; }
-#map-save:disabled { background: #263e43; color: #91adaa; opacity: 1; }
+/* Shared save action stays visible for both the diagram and collapsed tuning form. */
+.tuning-savebar { position: sticky; bottom: 0.75rem; z-index: 10; padding: 0.85rem 1rem;
+  border: 1px solid #405563; border-radius: 12px; background: #172530; color: #e6edf2;
+  box-shadow: 0 8px 28px #0005; }
+.tuning-savebar-actions { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; }
+#controls-change-count { font-size: 0.85rem; font-weight: 600; }
+.tuning-savebar-note { color: #9cabb7; font-size: 0.7rem; margin-top: 0.25rem; }
+#controls-save { flex: 0 0 auto; width: auto; margin: 0; background: #83dbc5; color: #122d2b; }
+#controls-save:disabled { background: #263e43; color: #91adaa; opacity: 1; }
+#controls-message { margin-top: 0.65rem; font-size: 0.8rem; line-height: 1.6; overflow-wrap: anywhere; }
 #controller-map { padding: 1.5rem 0.25rem 0.5rem; }
 #controller-map svg { display: block; width: 100%; height: auto; margin: 0 auto;
   max-width: 1010px; font-family: inherit; }
@@ -1039,9 +1053,6 @@ main {
 .map-number { display: grid; place-items: center; flex: 0 0 1.4rem; height: 1.4rem; font-size: 0.75rem;
   border-radius: 50%; color: #122235; background: var(--function-color, #83dbc5); font-weight: 700; }
 .map-help { font-size: 0.8rem; line-height: 1.6; color: #b9cbdc; margin-top: 0.9rem; }
-.map-footer { display: flex; justify-content: space-between; gap: 0.8rem; flex-wrap: wrap;
-  padding: 0.9rem 1.2rem; color: #849aa8; font-size: 0.7rem; border-top: 1px solid #ffffff08; }
-#map-status { color: #c2d5dd; }
 .tuning-details { border-top: 1px solid #2b3d4a; padding: 1rem 0; }
 .tuning-details > summary { cursor: pointer; color: #d5e1e7; font-size: 0.9rem; }
 .tuning-detail-hint { margin-left: 1rem; color: #869ca9; font-size: 0.75rem; }
@@ -1053,7 +1064,6 @@ main {
   .tuning-header h2 { font-size: 1.2rem; }
   .map-topbar { padding: 0.8rem; gap: 0.5rem; }
   .map-topbar h3 { width: calc(100% - 170px); }
-  #map-save { margin-left: auto; }
   .map-editor { width: calc(100vw - 24px); }
   .map-binding[data-on-map="true"] { display: flex; }
   .map-binding strong { font-size: 0.8rem; }

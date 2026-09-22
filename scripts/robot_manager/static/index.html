@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>QUESTiX Robot Manager</title>
-  <link rel="stylesheet" href="/static/style.css?v=21">
+  <link rel="stylesheet" href="/static/style.css?v=22">
 </head>
 
 <body>
@@ -143,13 +143,9 @@
               <option value="draft">編集中の配置</option>
               <option value="saved">保存済み</option>
             </select>
-            <span id="map-change-count" role="status">未保存: 0 項目</span>
-            <button type="button" id="map-save" class="btn btn-small" disabled>操作設定を保存</button>
           </div>
           <p id="controller-map-caption" class="tuning-sr-only"></p>
           <div id="controller-map"></div>
-          <div class="map-footer"><p id="map-status" role="status" aria-live="polite"></p>
-            <span>保存した設定は、次回のロボット起動時に反映</span></div>
           <dialog id="controller-map-editor" class="map-editor" aria-labelledby="map-editor-title">
             <div class="map-editor-header">
               <h4 id="map-editor-title">機能の割り当て</h4>
@@ -169,14 +165,9 @@
         </section>
         <details class="tuning-details" id="controls-details">
           <summary><span>速度・操作感</span><span class="tuning-detail-hint">速さ、加速・減速、ローラー出力、スティックの遊び</span></summary>
-        <p class="control-help">保存すると、次回のロボット起動時に反映されます。
-          走行・旋回速度は指令値で、実際の速さは車体の上限や路面によって変わります。</p>
-        <p id="controls-change-count" class="control-help" role="status" aria-live="polite"></p>
-        <form id="controls-form">
+        <form id="controls-form" novalidate>
           <div id="controls-fields"></div>
-          <p id="controls-message" class="control-help" role="status" aria-live="polite"></p>
           <div class="btn-group">
-            <button type="submit" class="btn btn-save" id="controls-save" disabled>操作設定を保存</button>
             <button type="button" class="btn" id="controls-reset" disabled>速度・操作感を初期値に戻す</button>
           </div>
         </form>
@@ -194,6 +185,16 @@
             キーの割り当ては図から、走行速度や入力の調整は「速度・操作感」から変更できます。</p>
         </details>
       </section>
+      <div id="controls-savebar" class="tuning-savebar" hidden>
+        <div class="tuning-savebar-actions">
+          <div>
+            <p id="controls-change-count" role="status" aria-live="polite">未保存の変更: 0 項目</p>
+            <p class="tuning-savebar-note">保存後、次回のロボット起動時に反映</p>
+          </div>
+          <button type="button" class="btn btn-save" id="controls-save" disabled>操作設定を保存</button>
+        </div>
+        <p id="controls-message" role="status" aria-live="polite" hidden></p>
+      </div>
     </div>
 
     <!-- ===== Recording tab ===== -->
@@ -371,7 +372,7 @@
   <script src="/static/app.js?v=9"></script>
   <script src="/static/control-labels.js?v=2"></script>
   <script src="/static/controller-map.js?v=10"></script>
-  <script src="/static/controls.js?v=16"></script>
+  <script src="/static/controls.js?v=17"></script>
 </body>
 
 </html>

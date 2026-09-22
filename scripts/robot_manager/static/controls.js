@@ -247,7 +247,7 @@ function applyMapAssignment() {
 
 function controlMessage(message) {
   document.getElementById("controls-message").textContent = message;
-  document.getElementById("map-status").textContent = message;
+  document.getElementById("controls-message").hidden = !message;
   const loadError = document.getElementById("controls-load-error");
   loadError.hidden = Boolean(controlProfile);
   loadError.textContent = controlProfile ? "" : message;
@@ -275,6 +275,7 @@ function renderControllerMap() {
   document.getElementById("map-feedback").textContent = "";
   const wrapper = document.getElementById("controller-map-panel");
   wrapper.hidden = !controlProfile;
+  document.getElementById("controls-savebar").hidden = !controlProfile;
   const host = document.getElementById("controller-map");
   if (!controlProfile) {
     host.replaceChildren();
@@ -307,12 +308,16 @@ function refreshControlChanges() {
     const { node, key } = row.dataset;
     const changed = controlDraft[node][key] !== controlProfile.values[node][key];
     row.classList.toggle("changed", changed);
-    row.querySelector(".control-change-state").textContent = changed ? "変更あり" : "保存済みと同じ";
+    row.querySelector(".control-change-state").textContent = changed ? "変更あり" : "";
+    row.querySelector(".control-change-state").hidden = !changed;
+    const saved = row.querySelector(".control-saved");
+    saved.hidden = !changed;
+    const input = document.getElementById(`control-${node}-${key}`);
+    input.setAttribute("aria-describedby", `${input.id}-help${changed ? ` ${saved.id}` : ""}`);
   }
   document.getElementById("controls-change-count").textContent = `未保存の変更: ${count} 項目`;
-  document.getElementById("map-change-count").textContent = `未保存: ${count} 項目`;
-  document.getElementById("map-save").disabled = controlsBusy || !count;
-  controlMessage(count ? `${count} 項目の変更を保存できます。` : "変更はありません。");
+  document.getElementById("controls-save").disabled = controlsBusy || !count;
+  controlMessage("");
 }
 
 function renderRuntimeValues() {
@@ -393,6 +398,22 @@ function renderControls() {
       help.className = "control-field-help";
       help.id = `${input.id}-help`;
       help.textContent = spec.help;
+      if (spec.signed) help.textContent += " 実際の速さは車体の上限や路面によって変わります。";
+      help.hidden = true;
+      const info = document.createElement("button");
+      info.type = "button";
+      info.className = "control-info";
+      info.textContent = "ⓘ";
+      info.setAttribute("aria-label", `${spec.title}の説明`);
+      info.setAttribute("aria-controls", help.id);
+      info.setAttribute("aria-expanded", "false");
+      info.addEventListener("click", () => {
+        help.hidden = !help.hidden;
+        info.setAttribute("aria-expanded", String(!help.hidden));
+      });
+      const heading = document.createElement("div");
+      heading.className = "control-field-heading";
+      heading.append(label, info);
       const value = controlDraft[group.node][field.key];
       // Preserve any existing axis inversion when editing the speed magnitude.
       const direction = spec.signed ? tuningDirection(value, controlProfile.values[group.node][field.key]) : 1;
@@ -450,7 +471,7 @@ function renderControls() {
       editor.className = "control-editor";
       const caption = document.createElement("span");
       caption.className = "control-value-caption";
-      caption.textContent = "変更後";
+      caption.textContent = "設定値";
       const state = document.createElement("span");
       state.className = "control-change-state";
       editor.append(caption, input, state);
@@ -464,9 +485,9 @@ function renderControls() {
       const runtimeState = document.createElement("span");
       runtimeState.className = "control-runtime-state";
       runtime.append(runtimeCaption, runtimeValue, runtimeState);
-      row.append(label, help);
+      row.append(heading, help);
       if (spec.presets) row.append(presets);
-      row.append(editor, saved, runtime);
+      row.append(editor, runtime, saved);
       section.appendChild(row);
     }
     container.appendChild(section);
@@ -482,8 +503,7 @@ function controlsSetBusy(busy) {
   document.getElementById("controls-runtime-load").disabled = busy || runtimeBusy || !controlProfile || !runtimeAvailable;
   document.getElementById("controls-profile").disabled = busy;
   document.getElementById("controls-reload").disabled = busy;
-  document.getElementById("controls-save").disabled = busy || !controlProfile;
-  document.getElementById("map-save").disabled = busy || !controlProfile || !controlsDirty;
+  document.getElementById("controls-save").disabled = busy || !controlProfile || !controlsDirty;
   document.getElementById("controls-reset").disabled = busy || !controlProfile;
   for (const input of document.querySelectorAll("#controls-fields input, #controls-fields select, #controls-fields button")) {
     input.disabled = busy;
@@ -538,7 +558,7 @@ async function saveControls(event) {
   if (controlsBusy || !controlProfile) return;
   // Check constraints without the browser scrolling to a field below the diagram.
   if (!document.getElementById("controls-form").checkValidity()) {
-    const invalid = document.getElementById("controls-fields").querySelector(":invalid");
+    const invalid = document.getElementById("controls-fields").querySelector("input:invalid");
     const group = controlProfile.groups.find((item) => item.node === invalid?.dataset.node);
     const field = group?.fields.find((item) => item.key === invalid.dataset.key);
     const spec = tuningSpec(group?.node, field?.key);
@@ -573,7 +593,7 @@ document.addEventListener("DOMContentLoaded", () => {
     positionMapEditor();
   });
   window.addEventListener("scroll", positionMapEditor, true);
-  document.getElementById("map-save").addEventListener("click", saveControls);
+  document.getElementById("controls-save").addEventListener("click", saveControls);
   const mapDialog = document.getElementById("controller-map-editor");
   document.getElementById("map-close").addEventListener("click", () => mapDialog.close());
   mapDialog.addEventListener("close", finishMapEditor);

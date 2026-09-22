@@ -56,7 +56,7 @@ class Element {
   addEventListener(name, handler) { this.events[name] = handler; }
   all() { return this.children.flatMap((child) => [child, ...child.all()]); }
   querySelector(selector) {
-    return this.all().find((child) => selector === ':invalid' ? child.valid === false
+    return this.all().find((child) => selector === 'input:invalid' ? child.tag === 'input' && child.valid === false
       : (child.className || child.attributes.class || '').split(' ').includes(selector.slice(1)));
   }
 }
@@ -140,15 +140,20 @@ test('speed editing keeps saved values stable and persists numeric values', asyn
   const input = document.getElementById(id);
   assert.equal(saved.children[1].textContent, '2 m/s');
   assert.equal(input.type, 'number');
+  assert.equal(saved.hidden, true);
   input.value = '1.5'; input.events.input();
+  assert.equal(saved.hidden, false);
+  assert.equal(document.getElementById('control-joy_controller-angular_input_ratio-saved').hidden, true);
   assert.equal(saved.children[1].textContent, '2 m/s');
   assert.equal(document.getElementById('controls-change-count').textContent, '未保存の変更: 1 項目');
   input.value = '2'; input.events.input();
+  assert.equal(saved.hidden, true);
   assert.equal(document.getElementById('controls-change-count').textContent, '未保存の変更: 0 項目');
   input.value = '1.5'; input.events.input();
   await vm.runInContext('saveControls({preventDefault() {}})', context);
   assert.equal(getPayload().values.joy_controller.longitudinal_input_ratio, 1.5);
   assert.equal(document.getElementById(`${id}-saved`).children[1].textContent, '1.5 m/s');
+  assert.equal(document.getElementById(`${id}-saved`).hidden, true);
 });
 
 test('reset changes only the visible tuning values, retaining mappings and hidden settings', async () => {
@@ -196,7 +201,7 @@ test('an older backend disables runtime reads without breaking saved-profile edi
     ? { CONTROLLER_TYPE: 'uart' } : { paths: {} };
   await document.getElementById('tuning-tab').events.click();
   assert.equal(document.getElementById('controls-runtime-load').disabled, true);
-  assert.equal(document.getElementById('controls-save').disabled, false);
+  assert.equal(document.getElementById('controls-save').disabled, true);
   assert.match(document.getElementById('controls-runtime-message').textContent, /再起動/);
   context.apiSilent = async (url) => url === '/api/launch-config'
     ? { CONTROLLER_TYPE: 'uart' } : { paths: { '/api/control-runtime': { get: {} } } };
@@ -332,8 +337,8 @@ test('numbered function opens a popup and moves its binding without scrolling or
   card = document.querySelector('[data-action="shot_component.fire_button"]');
   assert.equal(card.children[0].textContent, 3);
   assert.match(card.children[1].children[1].textContent, /A（ボタン 0）/);
-  assert.equal(document.getElementById('map-save').disabled, false);
-  assert.equal(document.getElementById('map-change-count').textContent, '未保存: 1 項目');
+  assert.equal(document.getElementById('controls-save').disabled, false);
+  assert.equal(document.getElementById('controls-change-count').textContent, '未保存の変更: 1 項目');
   document.getElementById('map-close').events.click();
   assert.equal(dialog.open, false);
   const callout = document.querySelector('[data-map-function="shot_component.fire_button"]');
@@ -355,7 +360,7 @@ test('closing or dismissing the popup discards unconfirmed choices and restores 
   // Native dialog Escape invokes close; check the same cleanup path.
   dialog.close();
   assert.equal(vm.runInContext('mapSelection', context), null);
-  assert.equal(document.getElementById('map-save').disabled, true);
+  assert.equal(document.getElementById('controls-save').disabled, true);
 });
 
 test('function popup moves a custom index to a standard input and closes on profile reload', async () => {
@@ -393,7 +398,7 @@ test('each number on a shared stick opens its own function and restores focus af
   assert.equal(document.getElementById('map-action').value, 'joy_controller.linear_y_axis');
 });
 
-test('diagram save reports success and validation failures locally without sending invalid values', async () => {
+test('shared save reports success and validation failures without sending invalid values', async () => {
   const { document, context, getPayload } = editorFixture();
   await vm.runInContext('loadControls("uart")', context);
   chooseSpot(document, 'face-right');
@@ -404,19 +409,19 @@ test('diagram save reports success and validation failures locally without sendi
   form.valid = false;
   input.valid = false;
   input.validationMessage = '範囲外です。';
-  await document.getElementById('map-save').events.click({ preventDefault() {} });
+  await document.getElementById('controls-save').events.click({ preventDefault() {} });
   assert.equal(getPayload(), undefined);
-  assert.match(document.getElementById('map-status').textContent, /走行速度.*範囲外/);
-  assert.equal(document.getElementById('map-save').disabled, false);
+  assert.match(document.getElementById('controls-message').textContent, /走行速度.*範囲外/);
+  assert.equal(document.getElementById('controls-save').disabled, false);
   form.valid = true;
   input.valid = true;
-  await document.getElementById('map-save').events.click({ preventDefault() {} });
+  await document.getElementById('controls-save').events.click({ preventDefault() {} });
   assert.equal(getPayload().values.shot_component.fire_button, 0);
-  assert.match(document.getElementById('map-status').textContent, /保存しました/);
-  assert.equal(document.getElementById('map-save').disabled, true);
+  assert.match(document.getElementById('controls-message').textContent, /保存しました/);
+  assert.equal(document.getElementById('controls-save').disabled, true);
 });
 
-test('a failed diagram save keeps the draft and revision and leaves the error next to the diagram', async () => {
+test('a failed save keeps the draft and revision and reports the error in the shared bar', async () => {
   const { document, context } = editorFixture();
   await vm.runInContext('loadControls("uart")', context);
   chooseSpot(document, 'face-right');
@@ -424,13 +429,13 @@ test('a failed diagram save keeps the draft and revision and leaves the error ne
   document.getElementById('map-close').events.click();
   for (const message of ['他の画面で変更されました。再読み込みしてください。', '通信に失敗しました。']) {
     context.api = async () => { throw new Error(message); };
-    await document.getElementById('map-save').events.click({ preventDefault() {} });
-    assert.equal(document.getElementById('map-status').textContent, message);
+    await document.getElementById('controls-save').events.click({ preventDefault() {} });
+    assert.equal(document.getElementById('controls-message').textContent, message);
     assert.equal(vm.runInContext('controlDraft.shot_component.fire_button', context), 0);
     assert.equal(vm.runInContext('controlProfile.values.shot_component.fire_button', context), 5);
     assert.equal(vm.runInContext('controlProfile.revision', context), 'initial');
-    assert.equal(document.getElementById('map-save').disabled, false);
-    assert.equal(document.getElementById('map-change-count').textContent, '未保存: 1 項目');
+    assert.equal(document.getElementById('controls-save').disabled, false);
+    assert.equal(document.getElementById('controls-change-count').textContent, '未保存の変更: 1 項目');
   }
 });
 
@@ -496,7 +501,7 @@ for (const controller of ['uart', 'dualshock']) {
     assert.equal(shot().tilt_up_axis, 7);
     assert.equal(shot().tilt_up_axis_sign, 1);
     document.getElementById('map-close').events.click();
-    await document.getElementById('map-save').events.click({ preventDefault() {} });
+    await document.getElementById('controls-save').events.click({ preventDefault() {} });
     assert.deepEqual(getPayload().values.shot_component, shot());
     open('up');
     assert.equal(document.getElementById('map-input').value, 'direction:7:1');
@@ -560,7 +565,7 @@ for (const controller of ['uart', 'dualshock']) {
       assert.equal(vm.runInContext('controlDraft.shot_component.tilt_up_axis', context), -1);
       document.getElementById('map-close').events.click();
     }
-    await document.getElementById('map-save').events.click({ preventDefault() {} });
+    await document.getElementById('controls-save').events.click({ preventDefault() {} });
     assert.deepEqual(getPayload().values.shot_component,
       { fire_button: 5, tilt_up_axis: -1, tilt_down_axis: -1, tilt_up_axis_sign: 1, tilt_down_axis_sign: -1, tilt_up_button_index: 4, tilt_down_button_index: 6 });
   });
@@ -745,7 +750,7 @@ test('a custom zero turn default stays editable without division by zero', async
   assert.equal(input.value, 0);
   assert.ok(Number.isFinite(input.max));
   const row = document.querySelectorAll('.control-field').find((item) => item.dataset.key === 'angular_input_ratio');
-  assert.match(row.children[0].textContent, /回転\/秒/);
+  assert.match(row.children[0].children[0].textContent, /回転\/秒/);
   input.value = '0.5'; input.events.input();
   await vm.runInContext('saveControls({preventDefault() {}})', context);
   assert.equal(getPayload().values.joy_controller.angular_input_ratio, Math.PI);
@@ -806,4 +811,42 @@ test('legacy zero acceleration survives unrelated saves and accepts direct posit
   input.value = ''; input.events.input();
   assert.equal(vm.runInContext('controlDraft.drive_component.max_linear_accel', context), null);
   assert.equal(input.required, true);
+});
+
+
+test('field help opens on demand without changing or saving values', async () => {
+  const { document, context, getPayload } = editorFixture();
+  await vm.runInContext('loadControls("uart")', context);
+  for (const row of document.querySelectorAll('.control-field')) {
+    const help = row.querySelector('.control-field-help');
+    const info = row.querySelector('.control-info');
+    assert.equal(help.hidden, true);
+    assert.equal(info.type, 'button');
+    assert.equal(info.attributes['aria-controls'], help.id);
+    assert.equal(info.attributes['aria-expanded'], 'false');
+    info.events.click();
+    assert.equal(help.hidden, false);
+    assert.equal(info.attributes['aria-expanded'], 'true');
+    info.events.click();
+    assert.equal(help.hidden, true);
+    assert.equal(info.attributes['aria-expanded'], 'false');
+  }
+  assert.equal(document.getElementById('controls-save').disabled, true);
+  assert.equal(getPayload(), undefined);
+});
+
+test('shared save includes both diagram and tuning changes while details are closed', async () => {
+  const { document, context, getPayload } = editorFixture();
+  await vm.runInContext('loadControls("uart")', context);
+  document.getElementById('controls-details').open = false;
+  vm.runInContext('controlDraft.shot_component.fire_button = 0', context);
+  const input = document.getElementById('control-joy_controller-longitudinal_input_ratio');
+  input.value = '1'; input.events.input();
+  assert.equal(document.getElementById('controls-change-count').textContent, '未保存の変更: 2 項目');
+  assert.equal(document.getElementById('controls-savebar').hidden, false);
+  await document.getElementById('controls-save').events.click({ preventDefault() {} });
+  assert.equal(getPayload().values.shot_component.fire_button, 0);
+  assert.equal(getPayload().values.joy_controller.longitudinal_input_ratio, 1);
+  assert.equal(document.getElementById('controls-details').open, false);
+  assert.equal(document.getElementById('controls-save').disabled, true);
 });
