@@ -28,7 +28,13 @@ questix_lab_bridge:
     twist_max_hz: 20.0
     camera_max_fps: 10.0
 
+    # Each scan carries where its frame sits on the robot, looked up in TF (the static
+    # base_link -> laser_frame transform of launcher/launch/lidar_driver.launch.xml).
+    base_frame: "base_link"
+
     # Reported to the page for wheel-odometry lessons. Keep identical to wheel_radius /
     # wheel_separation in launcher/config/drive_component.yaml (the values the robot drives with).
+    # BAG_DEFAULT_CONFIG in scripts/robot_manager/static/lab/js/live/rosbag-core.js repeats them for
+    # rosbags opened without a robot connected.
     wheel_radius: 0.1
     wheel_separation: 0.5

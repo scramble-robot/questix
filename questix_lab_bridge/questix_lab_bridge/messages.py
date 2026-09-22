@@ -8,13 +8,17 @@ Text frames are JSON objects tagged by ``type``:
 
 * ``hello``  - protocol version, robot geometry, and the topic behind each stream.
 * ``scan``   - ``angle_min``, ``angle_increment``, ``range_max``, ``ranges``
-  (unmeasured beams are ``null``).
+  (unmeasured beams are ``null``), and ``mount`` - the scan frame's pose ``x``, ``y``
+  [m], ``yaw`` [rad] in the robot's base frame, from TF (``null`` until TF knows it).
 * ``odom``   - ``x``, ``y``, ``theta``, ``v``, ``w``.
 * ``drive``  - measured/target wheel RPM, current, chassis velocity, emergency stop.
 * ``twist``  - commanded ``linear`` / ``angular`` velocity.
 * ``status`` - message rate per stream over the last reporting interval.
 
 Binary frames carry one compressed camera image (JPEG or PNG bytes, unmodified).
+
+scripts/robot_manager/static/lab/js/live/rosbag-core.js ports the scan/odom/drive/twist
+conversions below so the lab can read a rosbag into the same payloads; change both together.
 """
 
 import json
@@ -48,12 +52,23 @@ def hello_payload(streams, wheel_radius, wheel_separation):
     }
 
 
-def scan_payload(msg, max_points=360):
+def mount_from_transform(transform):
+    """Planar pose of a geometry_msgs/Transform: ``{x, y, yaw}`` in metres and radians."""
+    return {
+        'x': round(transform.translation.x, 4),
+        'y': round(transform.translation.y, 4),
+        'yaw': round(yaw_from_quaternion(transform.rotation), 4),
+    }
+
+
+def scan_payload(msg, max_points=360, mount=None):
     """Convert sensor_msgs/LaserScan, keeping at most ``max_points`` beams.
 
     Beams are decimated by an integer stride so ``angle_increment`` stays uniform.
     Non-finite or out-of-range readings become ``None`` (JSON ``null``): an
     unmeasured beam must not be mistaken for free space or for an obstacle.
+    ``mount`` is where the scan frame sits on the robot (``mount_from_transform``);
+    the lab places the points with it instead of assuming the LiDAR at the centre.
     """
     count = len(msg.ranges)
     stride = max(1, math.ceil(count / max(1, max_points)))
@@ -71,6 +86,7 @@ def scan_payload(msg, max_points=360):
         'range_min': msg.range_min,
         'range_max': msg.range_max,
         'ranges': ranges,
+        'mount': mount,
     }
 
 

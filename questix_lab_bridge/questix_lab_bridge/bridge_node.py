@@ -9,7 +9,9 @@ from questix_msgs.msg import DriveStatus
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
+from rclpy.time import Time
 from sensor_msgs.msg import CompressedImage, LaserScan
+from tf2_ros import Buffer, TransformException, TransformListener
 
 from . import messages
 from .static_site import find_lab_dir
@@ -44,6 +46,12 @@ class LabBridgeNode(Node):
             'camera': self.declare_parameter('camera_max_fps', 10.0).value,
         }
         self._scan_max_points = self.declare_parameter('scan_max_points', 360).value
+        # Frame the LiDAR mount is reported in (the robot's own frame, as in the static TF
+        # published by launcher/launch/lidar_driver.launch.xml).
+        self._base_frame = self.declare_parameter('base_frame', 'base_link').value
+        self._tf_buffer = Buffer()
+        self._tf_listener = TransformListener(self._tf_buffer, self)
+        self._mounts = {}  # scan frame -> mount; static on this robot, so looked up once
         # Geometry is only reported to the page (it must match drive_component's values).
         wheel_radius = self.declare_parameter('wheel_radius', 0.1).value
         wheel_separation = self.declare_parameter('wheel_separation', 0.5).value
@@ -103,9 +111,25 @@ class LabBridgeNode(Node):
             return
         self._server.publish(name, payload)
 
+    def _mount(self, frame):
+        """Pose of ``frame`` in the base frame, or None while TF does not know it yet."""
+        if frame in self._mounts:
+            return self._mounts[frame]
+        try:
+            stamped = self._tf_buffer.lookup_transform(self._base_frame, frame, Time())
+        except TransformException as error:
+            self.get_logger().warning(
+                'no TF from %s to %s yet, the lab will assume its default LiDAR mount: %s'
+                % (self._base_frame, frame, error), throttle_duration_sec=30.0)
+            return None
+        self._mounts[frame] = messages.mount_from_transform(stamped.transform)
+        self.get_logger().info('LiDAR mount %s in %s: %s'
+                               % (frame, self._base_frame, self._mounts[frame]))
+        return self._mounts[frame]
+
     def _on_scan(self, msg):
-        self._relay('scan', lambda: messages.encode(
-            messages.scan_payload(msg, self._scan_max_points)))
+        self._relay('scan', lambda: messages.encode(messages.scan_payload(
+            msg, self._scan_max_points, self._mount(msg.header.frame_id))))
 
     def _on_odom(self, msg):
         self._relay('odom', lambda: messages.encode(messages.odom_payload(msg)))

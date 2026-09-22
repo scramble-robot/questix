@@ -77,3 +77,18 @@ def test_rate_limiter_latest_wins():
 def test_hello_declares_read_only():
     payload = messages.hello_payload({'scan': '/scan', 'camera': None}, 0.1, 0.5)
     assert payload['protocol'] == messages.PROTOCOL_VERSION and payload['read_only'] is True
+
+
+def test_mount_from_transform_is_planar():
+    transform = NS(
+        translation=NS(x=0.2, y=-0.01, z=0.02),
+        rotation=NS(x=0.0, y=0.0, z=math.sin(0.25), w=math.cos(0.25)),
+    )
+    assert messages.mount_from_transform(transform) == {'x': 0.2, 'y': -0.01, 'yaw': 0.5}
+
+
+def test_scan_carries_the_mount():
+    msg = _scan([1.0, 2.0])
+    assert messages.scan_payload(msg)['mount'] is None
+    mount = {'x': 0.2, 'y': 0.0, 'yaw': 0.0}
+    assert messages.scan_payload(msg, mount=mount)['mount'] == mount
