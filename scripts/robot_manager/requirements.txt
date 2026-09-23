@@ -1,0 +1,21 @@
+# Exact versions Robot Manager is tested and shipped with (CI, scripts/update-robot-manager.sh,
+# scripts/install-robot-manager.sh, ansible robot_autostart). Installed into the system Python
+# (no venv, so ROS 2 keeps its apt environment); keep this list minimal for the same reason:
+# plain uvicorn, not uvicorn[standard], which also installed pyyaml, websockets, uvloop, httptools,
+# watchfiles and python-dotenv over the apt copies ROS 2 uses (python3-yaml, python3-websockets).
+#
+# Tested together on Python 3.12 (Ubuntu 24.04, amd64): pytest and a live start of the manager.
+# To move to newer versions, change them here together and run the robot_manager tests.
+fastapi==0.135.3
+starlette==1.0.0
+pydantic==2.12.5
+pydantic-core==2.41.5
+uvicorn==0.44.0
+annotated-doc==0.0.4
+annotated-types==0.7.0
+anyio==4.13.0
+click==8.3.2
+h11==0.16.0
+idna==3.11
+typing-extensions==4.15.0
+typing-inspection==0.4.2

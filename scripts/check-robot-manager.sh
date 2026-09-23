@@ -167,13 +167,46 @@ else
     ok "食い違いはありません"
 fi
 
-section "インストール済みの Robot Manager とリポジトリ"
+section "インストール済みの Robot Manager とリポジトリ（ファイルと固定バージョン）"
 "$REPO_ROOT/scripts/update-robot-manager.sh" --check
 case $? in
-    0) ok "リポジトリと同じです" ;;
-    1) ng "リポジトリと違います（sudo scripts/update-robot-manager.sh で更新）" ;;
+    0) ok "リポジトリと同じで、依存ライブラリも固定版（scripts/robot_manager/requirements.txt）です" ;;
+    1) ng "リポジトリまたは固定版と違います（sudo scripts/update-robot-manager.sh で更新）" ;;
     2) ng "インストールされていません" ;;
 esac
+
+section "apt より優先されている pip のライブラリ（ROS 2 への影響）"
+# ROS 2 uses the apt copies in /usr/lib/python3/dist-packages; a pip copy of the same library in
+# /usr/local wins for every Python program, ROS 2 nodes included. Informational: not counted.
+"$PYTHON" -I - "$REPO_ROOT/scripts/robot_manager/requirements.txt" << 'PYTHON'
+import sys
+from importlib import metadata
+needed = set()
+for line in open(sys.argv[1]):
+    line = line.split('#', 1)[0].strip()
+    if line:
+        needed.add(line.partition('==')[0].lower().replace('_', '-'))
+copies = {}
+for dist in metadata.distributions():
+    name = (dist.metadata['Name'] or '').lower().replace('_', '-')
+    copies.setdefault(name, []).append((dist.version, str(dist.locate_file(''))))
+keep, revertible = [], []
+for name, found in sorted(copies.items()):
+    pip = [version for version, path in found if '/usr/local/lib/' in path]
+    apt = [version for version, path in found if path.startswith('/usr/lib/python3/dist-packages')]
+    if pip and apt:
+        (keep if name in needed else revertible).append((name, pip[0], apt[0]))
+if keep:
+    print('  ・Robot Manager に必要なため pip の版を使用: '
+          + ', '.join(f'{n} {p}（apt {a}）' for n, p, a in keep))
+if revertible:
+    print('  ⚠️  Robot Manager には不要な pip の版: '
+          + ', '.join(f'{n} {p}（apt {a}）' for n, p, a in revertible))
+    print('      以前の uvicorn[standard] などが入れたものです。ROS 2 で問題が出たら、次で apt の版に戻せます:')
+    print('      sudo pip3 uninstall --break-system-packages ' + ' '.join(n for n, _, _ in revertible))
+if not keep and not revertible:
+    print('  ✅ ありません')
+PYTHON
 
 section "API の応答（http://127.0.0.1:$PORT）"
 for path in /api/status /api/lab/status /api/wifi-ap; do

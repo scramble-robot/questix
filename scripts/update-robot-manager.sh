@@ -3,14 +3,17 @@
 # Bring the installed Robot Manager (python package robot_manager, systemd questix_robot_manager)
 # up to date with this repository. The service runs the installed copy, so a `git pull` alone
 # does not change what it serves; this script copies, reinstalls and restarts only Robot Manager.
-# Works offline when fastapi/uvicorn are already installed (no downloads, no build isolation).
+# Dependencies are pinned in scripts/robot_manager/requirements.txt and installed into the system
+# Python (no venv). Only when an installed version differs from the pins are they downloaded
+# (needs the internet); otherwise the update works offline.
 #
 # Usage:
 #   sudo scripts/update-robot-manager.sh                  install or update if outdated
 #   sudo scripts/update-robot-manager.sh --if-installed   update only an existing install
 #                                                         (used by scripts/wifi-ap.sh up)
-#   scripts/update-robot-manager.sh --check               exit 0 = up to date, 1 = outdated,
-#                                                         2 = not installed
+#   scripts/update-robot-manager.sh --check               exit 0 = up to date, 1 = outdated
+#                                                         (files or pinned versions), 2 = not
+#                                                         installed
 #
 # Exit status of an update: 0 when Robot Manager is up to date (updated or already current).
 
@@ -18,6 +21,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SOURCE_DIR="$REPO_ROOT/scripts/robot_manager"
+REQUIREMENTS="$SOURCE_DIR/requirements.txt"
 # Kept as a plain copy too: questix_lab_bridge falls back to its static/lab (static_site.py).
 INSTALL_DIR=/opt/questix_robot
 SERVICE=questix_robot_manager
@@ -58,6 +62,38 @@ for path in source.rglob('*'):
 PYTHON
 }
 
+# Every pinned dependency must be installed in exactly that version; prints the ones that are not.
+deps_current() {
+    python3 -I - "$REQUIREMENTS" << 'PYTHON'
+import sys
+from importlib import metadata
+wrong = []
+for line in open(sys.argv[1]):
+    line = line.split('#', 1)[0].strip()
+    if not line:
+        continue
+    name, _, pinned = line.partition('==')
+    try:
+        installed = metadata.version(name)
+    except metadata.PackageNotFoundError:
+        installed = 'なし'
+    if installed != pinned:
+        wrong.append(f'{name} {installed} → {pinned}')
+if wrong:
+    print('  固定版と違うライブラリ: ' + ', '.join(wrong), file=sys.stderr)
+    sys.exit(1)
+PYTHON
+}
+
+# Downloads the pinned versions. Offline (e.g. on the robot's own Wi-Fi) this fails; the manager
+# then keeps running with what is installed, and the next online run fixes it.
+install_requirements() {
+    echo "📦 固定したバージョンの依存ライブラリを入れます（インターネットが必要）..."
+    if ! pip3 install --break-system-packages -q -r "$REQUIREMENTS"; then
+        echo "⚠️  依存ライブラリを固定版にできませんでした。インターネットにつないで sudo $0 を再実行してください。" >&2
+    fi
+}
+
 service_installed() {
     systemctl cat "$SERVICE.service" > /dev/null 2>&1
 }
@@ -81,12 +117,8 @@ install_package() {
     mv "$INSTALL_DIR/robot_manager.new" "$INSTALL_DIR/robot_manager"
     cp "$REPO_ROOT/scripts/setup.py" "$INSTALL_DIR/setup.py"
 
-    local pip_args=(install --break-system-packages -q)
-    if python3 -I -c 'import fastapi, uvicorn' 2> /dev/null; then
-        # An update must not need the internet (e.g. on the robot's own Wi-Fi): keep the installed
-        # dependencies and reinstall only this package.
-        pip_args+=(--no-deps --force-reinstall)
-    fi
+    # Dependencies come from install_requirements; this reinstalls only the package, offline.
+    local pip_args=(install --break-system-packages -q --no-deps --force-reinstall)
     if python3 -I -c 'import setuptools' 2> /dev/null; then
         pip_args+=(--no-build-isolation)  # build with the system setuptools instead of downloading it
     fi
@@ -138,6 +170,8 @@ main() {
 
     local installed
     installed="$(installed_dir)"
+    local files_ok=0
+    local deps_ok=0
     if [ -z "$installed" ]; then
         case "$mode" in
             --check) exit 2 ;;
@@ -146,7 +180,11 @@ main() {
                 exit 0
                 ;;
         esac
-    elif is_current "$installed"; then
+    else
+        is_current "$installed" && files_ok=1
+    fi
+    deps_current && deps_ok=1
+    if [ "$files_ok" = 1 ] && [ "$deps_ok" = 1 ]; then
         [ "$mode" = --check ] && exit 0
         echo "✅ Robot Manager は最新です。"
         exit 0
@@ -154,8 +192,11 @@ main() {
     [ "$mode" = --check ] && exit 1
 
     [ "$(id -u)" -eq 0 ] || die "root で実行してください（sudo）。"
-    echo "🔄 Robot Manager をこのリポジトリの版に更新します ..."
-    install_package
+    [ "$deps_ok" = 1 ] || install_requirements
+    if [ "$files_ok" = 0 ]; then
+        echo "🔄 Robot Manager をこのリポジトリの版に更新します ..."
+        install_package
+    fi
     restart_service
     echo "✅ Robot Manager を更新しました。"
 }
