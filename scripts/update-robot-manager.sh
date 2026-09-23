@@ -35,7 +35,8 @@ installed_dir() {
         2> /dev/null || true
 }
 
-# The files pip installs (setup.py: *.py and static/**) must match the repository byte for byte.
+# The files pip installs (setup.py: *.py and static/**, hidden files excluded) must match the
+# repository byte for byte.
 is_current() {
     local installed="$1"
     python3 -I - "$SOURCE_DIR" "$installed" << 'PYTHON'
@@ -44,6 +45,10 @@ source, installed = map(pathlib.Path, sys.argv[1:3])
 for path in source.rglob('*'):
     relative = path.relative_to(source)
     if not path.is_file() or '__pycache__' in relative.parts:
+        continue
+    # setuptools' package_data globs skip hidden files (static/lab/.prettierrc.json and the like
+    # are development settings), so they are never installed.
+    if any(part.startswith('.') for part in relative.parts):
         continue
     if relative.suffix != '.py' and relative.parts[0] != 'static':
         continue
