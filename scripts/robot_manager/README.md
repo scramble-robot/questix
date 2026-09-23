@@ -22,6 +22,13 @@ restarts the service. `--check` only reports (exit 0 current / 1 outdated / 2 no
 `sudo scripts/wifi-ap.sh up` runs it with `--if-installed` before starting the teaching material,
 and `scripts/install-robot-manager.sh --with-gui` uses it for its Robot Manager step.
 
+When something fails (HTTP 500, the service does not come up), run
+`sudo scripts/check-robot-manager.sh`. It changes nothing and reports in one go: the Python the
+service uses, the version and origin (apt / pip) of fastapi, starlette, pydantic(-core), uvicorn and
+anyio including duplicate copies, unmet requirements between them, `pip check`, whether
+`robot_manager.app` imports, whether the install matches the repository, the answers of
+`/api/status`, `/api/lab/status` and `/api/wifi-ap`, and the last traceback in the service log.
+
 ## Competition GPIO safety
 
 The `ENABLE_GPIO_REF` field in `launch.env` is retained for manual development and
