@@ -1,0 +1,135 @@
+---
+# Wi-Fi access point tasks
+# The profile is written as a NetworkManager keyfile, so the role also works where NetworkManager
+# is not running (ISO chroot); it is only activated when NetworkManager is running.
+
+- name: Check access point settings
+  ansible.builtin.assert:
+    that:
+      - wifi_ap_state in ['up', 'down', 'absent']
+      - wifi_ap_state == 'absent' or wifi_ap_ssid is match('^[A-Za-z0-9_.-][A-Za-z0-9 _.-]{0,30}[A-Za-z0-9_.-]$')
+      # Printable ASCII without spaces or backslashes: the keyfile would reinterpret those.
+      - wifi_ap_state == 'absent' or wifi_ap_password is match('^[!-\[\]-~]{8,63}$')
+      - wifi_ap_band in ['bg', 'a']
+      - wifi_ap_channel | int > 0
+      - wifi_ap_country is match('^[A-Z]{2}$')
+      - wifi_ap_address is match('^[0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2}$')
+    fail_msg: >-
+      Invalid access point settings. SSID: 2-32 letters, digits, space, '_', '.', '-'.
+      Password: 8-63 printable ASCII characters without spaces or backslashes.
+      Band: bg or a. Country: two capital letters. Address: x.x.x.x/nn.
+    quiet: true
+
+- name: Install NetworkManager and the access point helpers
+  ansible.builtin.apt:
+    name:
+      - network-manager
+      - dnsmasq-base  # DHCP/DNS for NetworkManager's shared IPv4 method
+      - iw
+    state: present
+  when: wifi_ap_state != 'absent'
+
+- name: Set the Wi-Fi regulatory domain at boot
+  ansible.builtin.copy:
+    dest: "{{ wifi_ap_regdom_path }}"
+    content: |
+      # Managed by the wifi_access_point role.
+      options cfg80211 ieee80211_regdom={{ wifi_ap_country }}
+    owner: root
+    group: root
+    mode: "0644"
+  when: wifi_ap_state != 'absent'
+
+- name: Create the QUESTiX settings directory
+  ansible.builtin.file:
+    path: "{{ wifi_ap_env_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: wifi_ap_state != 'absent'
+
+- name: Write the access point profile
+  ansible.builtin.template:
+    src: questix-ap.nmconnection.j2
+    dest: "{{ wifi_ap_keyfile_path }}"
+    owner: root
+    group: root
+    mode: "0600"  # NetworkManager ignores keyfiles readable by others
+  register: wifi_ap_keyfile
+  when: wifi_ap_state != 'absent'
+
+- name: Save the access point settings for scripts/wifi-ap.sh
+  ansible.builtin.template:
+    src: wifi_ap.env.j2
+    dest: "{{ wifi_ap_env_path }}"
+    owner: root
+    group: root
+    mode: "0600"  # contains the passphrase
+  when: wifi_ap_state != 'absent'
+
+- name: Remove the access point files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ wifi_ap_keyfile_path }}"
+    - "{{ wifi_ap_env_path }}"
+    - "{{ wifi_ap_regdom_path }}"
+  register: wifi_ap_removed
+  when: wifi_ap_state == 'absent'
+
+# Read-only discovery; runs in check mode too so the tasks below can be evaluated.
+- name: Check whether NetworkManager is running
+  ansible.builtin.command: nmcli -t -f RUNNING general
+  register: wifi_ap_nm
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Check whether the access point is active
+  ansible.builtin.command: nmcli -t -f NAME connection show --active
+  register: wifi_ap_active
+  changed_when: false
+  check_mode: false
+  when: wifi_ap_nm.rc == 0 and wifi_ap_nm.stdout == 'running'
+
+- name: Apply the changes now
+  when: wifi_ap_nm.rc == 0 and wifi_ap_nm.stdout == 'running'
+  block:
+    - name: Apply the regulatory domain now
+      ansible.builtin.command: iw reg set {{ wifi_ap_country }}
+      changed_when: false  # no readable state to compare before; harmless to repeat
+      when: wifi_ap_state == 'up'
+
+    # Before the reload: once the profile is removed, NetworkManager no longer knows its name.
+    - name: Switch the access point off
+      ansible.builtin.command: nmcli connection down {{ wifi_ap_connection_name }}
+      changed_when: true
+      when:
+        - wifi_ap_state != 'up'
+        - wifi_ap_connection_name in wifi_ap_active.stdout_lines
+
+    - name: Reload NetworkManager profiles
+      ansible.builtin.command: nmcli connection reload
+      changed_when: true
+      when: wifi_ap_keyfile is changed or wifi_ap_removed is changed
+
+    # Last task on purpose: over an SSH session on the same Wi-Fi the connection drops here.
+    - name: Switch the access point on
+      ansible.builtin.command: nmcli connection up {{ wifi_ap_connection_name }}
+      changed_when: true
+      when:
+        - wifi_ap_state == 'up'
+        - wifi_ap_keyfile is changed or wifi_ap_connection_name not in wifi_ap_active.stdout_lines
+
+- name: Report the access point
+  ansible.builtin.debug:
+    msg:
+      - "Access point: {{ wifi_ap_state }}"
+      - "SSID: {{ wifi_ap_ssid }} ({{ wifi_ap_interface }}, band {{ wifi_ap_band }}, channel {{ wifi_ap_channel }})"
+      - "Robot address on the access point: {{ wifi_ap_address | split('/') | first }}"
+      - >-
+        {{ 'Applied now.' if wifi_ap_nm.rc == 0 and wifi_ap_nm.stdout == 'running'
+        else 'NetworkManager is not running: the profile becomes active at the next boot.' }}
+  when: wifi_ap_state != 'absent'

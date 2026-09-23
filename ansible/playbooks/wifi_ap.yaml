@@ -1,0 +1,15 @@
+---
+# Wi-Fi Access Point Playbook (Raspberry Pi 5)
+# Applies only the wifi_access_point role, so the change takes effect immediately without running
+# the whole kit setup. Usually run through scripts/wifi-ap.sh, which keeps the settings per kit.
+#
+#   ansible-playbook ansible/playbooks/wifi_ap.yaml -i localhost, --connection=local \
+#     --ask-become-pass -e wifi_ap_password=<8-63 characters>
+
+- name: Configure the Raspberry Pi Wi-Fi access point
+  hosts: all
+  become: true
+  gather_facts: true
+
+  roles:
+    - { role: wifi_access_point }

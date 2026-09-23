@@ -43,3 +43,10 @@ configure_udev_rules: true
 # Display settings
 enable_autologin: true
 disable_screen_blank: true
+
+# Wi-Fi access point (wifi_access_point role)
+# false: the kit setup leaves the Wi-Fi alone. Switch it on the robot with
+#   sudo scripts/wifi-ap.sh up
+# true: the setup also creates the access point; then wifi_ap_password (8-63 characters) is
+# required, e.g. -e wifi_ap_password=... on the ansible-playbook command line.
+wifi_ap_enabled: false

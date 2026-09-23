@@ -1,0 +1,30 @@
+---
+# Default variables for wifi_access_point role
+# The Raspberry Pi's Wi-Fi becomes an access point (WPA2-PSK) managed by NetworkManager.
+# NetworkManager's "shared" IPv4 method runs the DHCP server (dnsmasq-base) and forwards
+# client traffic to a wired uplink when one is connected.
+
+# up: create the profile, bring it up now and at every boot.
+# down: keep the profile but switch it off now and at boot (the Wi-Fi client profiles take over).
+# absent: remove the profile and the saved settings.
+wifi_ap_state: up
+
+wifi_ap_interface: wlan0
+# At most 32 bytes.
+wifi_ap_ssid: "QUESTiX-{{ ansible_hostname }}"
+# WPA2 passphrase, 8-63 characters. There is no default on purpose: every kit gets its own.
+# scripts/wifi-ap.sh generates one on the first run and keeps it in wifi_ap_env_path.
+wifi_ap_password: ""
+# bg = 2.4 GHz (every phone and tablet), a = 5 GHz (less crowded; needs a matching country).
+wifi_ap_band: bg
+wifi_ap_channel: 6
+# Regulatory domain (ISO 3166-1 alpha-2); decides the allowed channels and transmit power.
+wifi_ap_country: JP
+# Address of the Pi on the access point network; clients get 10.42.0.x from DHCP.
+wifi_ap_address: 10.42.0.1/24
+
+wifi_ap_connection_name: questix-ap
+wifi_ap_keyfile_path: /etc/NetworkManager/system-connections/questix-ap.nmconnection
+# Current settings for scripts/wifi-ap.sh (root-only: contains the passphrase).
+wifi_ap_env_path: /etc/questix_robot/wifi_ap.env
+wifi_ap_regdom_path: /etc/modprobe.d/questix-wifi-regdom.conf

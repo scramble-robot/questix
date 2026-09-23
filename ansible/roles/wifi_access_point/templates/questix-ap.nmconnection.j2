@@ -1,0 +1,35 @@
+# {{ ansible_managed }}
+# NetworkManager keyfile of the QUESTiX access point (wifi_access_point role).
+# Change it with scripts/wifi-ap.sh or the role variables, not by hand.
+[connection]
+id={{ wifi_ap_connection_name }}
+uuid={{ wifi_ap_connection_name | to_uuid }}
+type=wifi
+interface-name={{ wifi_ap_interface }}
+autoconnect={{ 'true' if wifi_ap_state == 'up' else 'false' }}
+# Wins over saved Wi-Fi client profiles at boot while the access point is on.
+autoconnect-priority=100
+
+[wifi]
+mode=ap
+ssid={{ wifi_ap_ssid }}
+band={{ wifi_ap_band }}
+channel={{ wifi_ap_channel }}
+# 2 = disable power saving: keeps controller and camera latency low.
+powersave=2
+
+[wifi-security]
+key-mgmt=wpa-psk
+# WPA2/CCMP only. The Pi's brcmfmac firmware does not handle TKIP or PMF reliably in AP mode.
+proto=rsn
+pairwise=ccmp
+group=ccmp
+pmf=1
+psk={{ wifi_ap_password }}
+
+[ipv4]
+method=shared
+address1={{ wifi_ap_address }}
+
+[ipv6]
+method=disabled
