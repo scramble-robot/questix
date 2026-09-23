@@ -760,14 +760,13 @@ function setupEvents() {
       toast(
         newMode === "competition"
           ? `モードを ${label} に変更しました（教材の配信と自動開始はオフにしました）`
-          : `モードを ${label} に変更しました`,
+          : `モードを ${label} に変更しました（教材の配信を開始します）`,
         "success",
       );
       await refreshStatus();
-      if (newMode === "competition") {
-        labConfigLoaded = false; // the server turned AUTOSTART off; show it in the checkbox
-        await refreshLabStatus();
-      }
+      // The server turned AUTOSTART off (competition) or on (practice); show it in the checkbox.
+      labConfigLoaded = false;
+      await refreshLabStatus();
     } catch {
       e.target.checked = !e.target.checked;
     }

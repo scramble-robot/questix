@@ -198,13 +198,17 @@ def get_status():
 
 @app.post("/api/mode")
 def set_mode(req: ModeRequest):
+    previous = _read_mode()
     try:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         MODE_FILE.write_text(req.mode + "\n")
     except PermissionError:
         raise HTTPException(status_code=403, detail="Permission denied writing mode file")
+    # QUESTiX LAB streams telemetry to the LAN: off for competitions, back on for practice.
     if req.mode == "competition":
         lab.disable_for_competition()
+    elif previous == "competition":
+        lab.enable_for_practice()
     return {"mode": req.mode}
 
 

@@ -120,13 +120,37 @@ class _FakeProcess:
         return 0
 
 
-def test_switching_to_competition_mode_calls_the_lab_console(lab, monkeypatch, tmp_path):
+def test_practice_mode_turns_autostart_back_on_and_starts_the_bridge(lab, monkeypatch):
+    started = []
+    monkeypatch.setattr(lab, "start_bridge", lambda: started.append(True))
+    monkeypatch.setattr(lab.threading, "Thread", _run_now)
+    monkeypatch.setattr(lab, "_port_in_use", lambda: False)
+    lab.set_config(lab.LabConfig(CAMERA_TOPIC="/cam/compressed", AUTOSTART=False))
+    lab.enable_for_practice()
+    assert lab._read_config() == {"CAMERA_TOPIC": "/cam/compressed", "AUTOSTART": "true"}
+    assert started == [True]
+
+
+def test_practice_mode_leaves_a_running_bridge_alone(lab, monkeypatch):
+    started = []
+    monkeypatch.setattr(lab, "start_bridge", lambda: started.append(True))
+    monkeypatch.setattr(lab.threading, "Thread", _run_now)
+    monkeypatch.setattr(lab, "_port_in_use", lambda: True)  # e.g. started by hand
+    lab.enable_for_practice()
+    assert started == []
+    assert lab.get_status()["last_stop_reason"] is None
+
+
+def test_mode_switches_call_the_lab_console(lab, monkeypatch, tmp_path):
     from robot_manager import app as app_module
     app_module = importlib.reload(app_module)
     calls = []
-    monkeypatch.setattr(app_module.lab, "disable_for_competition", lambda: calls.append(True))
+    monkeypatch.setattr(app_module.lab, "disable_for_competition", lambda: calls.append("off"))
+    monkeypatch.setattr(app_module.lab, "enable_for_practice", lambda: calls.append("on"))
     app_module.set_mode(app_module.ModeRequest(mode="practice"))
-    assert calls == []
+    assert calls == []  # practice -> practice: the learner's own checkbox choice stays
     app_module.set_mode(app_module.ModeRequest(mode="competition"))
-    assert calls == [True]
+    assert calls == ["off"]
     assert (tmp_path / "mode").read_text() == "competition\n"
+    app_module.set_mode(app_module.ModeRequest(mode="practice"))
+    assert calls == ["off", "on"]

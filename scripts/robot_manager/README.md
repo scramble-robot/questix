@@ -57,9 +57,9 @@ The **教材** tab starts and stops that bridge, so nobody has to run `ros2 laun
   child of robot_manager and stops with it. While it is on, every device on the network may
   see the pages and the read-only telemetry.
 - **大会モード** (`competition` in `$QUESTIX_CONFIG_DIR/mode`): switching to it from this UI stops
-  a bridge started here and writes `AUTOSTART="false"`; switching back to 練習モード leaves it
-  off (tick the checkbox again, or run `sudo scripts/wifi-ap.sh up`). Automatic start is also
-  skipped while the mode file says `competition`, even if it was changed by hand.
+  a bridge started here and writes `AUTOSTART="false"`; switching back to 練習モード writes
+  `AUTOSTART="true"` and starts the bridge again (unless one already runs). Automatic start is
+  also skipped while the mode file says `competition`, even if it was changed by hand.
 - `sudo scripts/wifi-ap.sh up` (Wi-Fi access point) turns `AUTOSTART` on and asks a running
   robot_manager to start the bridge, so `http://10.42.0.1:8897/` works right away — except in
   大会モード, where it leaves the bridge alone.

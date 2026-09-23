@@ -286,7 +286,7 @@ def disable_for_competition() -> None:
 
     Competition runs must not stream telemetry to the LAN: automatic start is turned off in
     lab.env (the checkbox shows it) and a bridge this manager started is stopped. Switching back
-    to practice mode leaves it off; the checkbox or `scripts/wifi-ap.sh up` turns it on again.
+    to practice mode turns both on again (enable_for_practice).
     """
     config = _read_config()
     if config.get("AUTOSTART") != "false":
@@ -294,6 +294,22 @@ def disable_for_competition() -> None:
     with _lock:
         if _proc is not None and _proc.poll() is None:
             _stop_locked("competition_mode")
+
+
+def enable_for_practice() -> None:
+    """Undo disable_for_competition when the robot goes from competition back to practice mode.
+
+    Automatic start is turned on again and the bridge is started now, in the background like at
+    boot, so the class can open the pages right away. A bridge that already runs (started here or
+    by hand) is left alone.
+    """
+    config = _read_config()
+    if config.get("AUTOSTART") != "true":
+        _write_config({**config, "AUTOSTART": "true"})
+    with _lock:
+        running = (_proc is not None and _proc.poll() is None) or _port_in_use()
+    if not running:
+        threading.Thread(target=_autostart, name="lab-practice-start", daemon=True).start()
 
 
 def _autostart() -> None:
