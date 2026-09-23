@@ -12,11 +12,13 @@
 #   sudo scripts/wifi-ap.sh remove         delete the access point profile and its settings
 #
 # Options for "up" (saved for the next runs):
-#   --ssid NAME         default: QUESTiX-<hostname>
+#   --ssid NAME|auto    default: QUESTiX-<last 4 hex digits of the Wi-Fi MAC address>, which differs
+#                       on every kit even when they were all installed from the same image
 #   --password PASS     8-63 characters; generated on the first run when omitted
 #   --new-password      generate a new password
 #   --band bg|a         bg = 2.4 GHz (default), a = 5 GHz
-#   --channel N         default: 6 (2.4 GHz) / 36 (5 GHz)
+#   --channel N|auto    default on the first run: auto = the least crowded of 1/6/11 (2.4 GHz) or
+#                       36/40/44/48 (5 GHz) around this robot, so several robots spread out
 #   --country CC        regulatory domain, default: JP
 #   --interface IF      default: wlan0
 #   --yes               do not ask before dropping an SSH session that uses this Wi-Fi
@@ -69,7 +71,7 @@ find_ansible() {
 load_settings() {
     WIFI_AP_STATE=""
     WIFI_AP_INTERFACE=wlan0
-    WIFI_AP_SSID="QUESTiX-$(hostname -s)"
+    WIFI_AP_SSID=""
     WIFI_AP_PASSWORD=""
     WIFI_AP_BAND=bg
     WIFI_AP_CHANNEL=""
@@ -87,8 +89,59 @@ generate_password() {
     echo "$password"
 }
 
-default_channel() {
-    if [ "$1" = a ]; then echo 36; else echo 6; fi
+# Last 4 hex digits of the Wi-Fi MAC address, e.g. 3F2A: unique per kit, printed on no label.
+mac_suffix() {
+    local mac
+    mac="$(cat "/sys/class/net/$1/address" 2> /dev/null || true)"
+    mac="${mac//:/}"
+    echo "${mac: -4}" | tr '[:lower:]' '[:upper:]'
+}
+
+default_ssid() {
+    local suffix
+    suffix="$(mac_suffix "$WIFI_AP_INTERFACE")"
+    echo "QUESTiX-${suffix:-$(hostname -s)}"
+}
+
+# Channels that do not overlap each other. 5 GHz: W52 only, the band Japan allows indoors
+# without radar detection (DFS), which a Pi access point does not do.
+candidate_channels() {
+    if [ "$1" = a ]; then echo 36 40 44 48; else echo 1 6 11; fi
+}
+
+# Picks the channel with the least signal around this robot (other robots' access points
+# included). 2.4 GHz channels closer than 5 apart overlap, so their signals count too.
+# Without a scan (the interface is already an access point), the candidates are rotated by the
+# MAC address so that robots still spread over the channels.
+pick_channel() {
+    local band="$1"
+    local candidates
+    read -r -a candidates <<< "$(candidate_channels "$band")"
+    local mac
+    mac="$(mac_suffix "$WIFI_AP_INTERFACE")"
+    local offset=$(( 16#${mac:-0} % ${#candidates[@]} ))
+    local scan
+    scan="$(nmcli -t -f CHAN,SIGNAL device wifi list ifname "$WIFI_AP_INTERFACE" --rescan yes 2> /dev/null || true)"
+    local overlap=1
+    [ "$band" = bg ] && overlap=5
+    local best=""
+    local best_load=""
+    local index channel load
+    for index in "${!candidates[@]}"; do
+        channel="${candidates[$(( (index + offset) % ${#candidates[@]} ))]}"
+        load="$(awk -F: -v c="$channel" -v o="$overlap" \
+            '{d = $1 - c; if (d < 0) d = -d; if (d < o) sum += $2} END {print sum + 0}' <<< "$scan")"
+        if [ -z "$best" ] || [ "$load" -lt "$best_load" ]; then
+            best="$channel"
+            best_load="$load"
+        fi
+    done
+    if [ -n "$scan" ]; then
+        echo "📡 周囲の電波を調べて、チャンネル $best を選びました。" >&2
+    else
+        echo "📡 周囲を調べられなかったため、この機体用のチャンネル $best を使います。" >&2
+    fi
+    echo "$best"
 }
 
 # Local addresses of established SSH sessions that arrive over the given interface.
@@ -160,7 +213,7 @@ command_up() {
             --ssid) WIFI_AP_SSID="${2:?--ssid に値が必要です}"; shift 2 ;;
             --password) WIFI_AP_PASSWORD="${2:?--password に値が必要です}"; shift 2 ;;
             --new-password) new_password=1; shift ;;
-            --band) WIFI_AP_BAND="${2:?--band に値が必要です}"; WIFI_AP_CHANNEL=""; shift 2 ;;
+            --band) WIFI_AP_BAND="${2:?--band に値が必要です}"; WIFI_AP_CHANNEL=auto; shift 2 ;;
             --channel) WIFI_AP_CHANNEL="${2:?--channel に値が必要です}"; shift 2 ;;
             --country) WIFI_AP_COUNTRY="${2:?--country に値が必要です}"; shift 2 ;;
             --interface) WIFI_AP_INTERFACE="${2:?--interface に値が必要です}"; shift 2 ;;
@@ -171,9 +224,14 @@ command_up() {
     if [ -z "$WIFI_AP_PASSWORD" ] || [ "$new_password" = 1 ]; then
         WIFI_AP_PASSWORD="$(generate_password)"
     fi
-    WIFI_AP_CHANNEL="${WIFI_AP_CHANNEL:-$(default_channel "$WIFI_AP_BAND")}"
-    WIFI_AP_STATE=up
     [ -d "/sys/class/net/$WIFI_AP_INTERFACE" ] || die "Wi-Fi インターフェース $WIFI_AP_INTERFACE がありません。"
+    if [ -z "$WIFI_AP_SSID" ] || [ "$WIFI_AP_SSID" = auto ]; then
+        WIFI_AP_SSID="$(default_ssid)"
+    fi
+    if [ -z "$WIFI_AP_CHANNEL" ] || [ "$WIFI_AP_CHANNEL" = auto ]; then
+        WIFI_AP_CHANNEL="$(pick_channel "$WIFI_AP_BAND")"
+    fi
+    WIFI_AP_STATE=up
     confirm_ssh_drop "$assume_yes"
     export_settings
     run_playbook
