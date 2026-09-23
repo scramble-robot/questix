@@ -5,7 +5,8 @@
 # keeps the settings in /etc/questix_robot/wifi_ap.env, so every kit keeps its own SSID/password.
 #
 # Usage:
-#   sudo scripts/wifi-ap.sh up [options]   access point on, now and at every boot; also turns on
+#   sudo scripts/wifi-ap.sh up [options]   access point on, now and at every boot; updates an outdated
+#                                          Robot Manager (scripts/update-robot-manager.sh) and turns on
 #                                          the QUESTiX LAB bridge (except in competition mode)
 #   sudo scripts/wifi-ap.sh down           access point off; saved Wi-Fi client profiles take over
 #   sudo scripts/wifi-ap.sh status         SSID, password, address and connected devices
@@ -297,6 +298,10 @@ command_up() {
     export_settings
     run_playbook
     [ "${DETACH:-0}" = 1 ] || command_status
+    # The service runs an installed copy; after a `git pull` it may lack what enable_lab_bridge
+    # asks for. Updates only when it differs from this repository.
+    "$REPO_ROOT/scripts/update-robot-manager.sh" --if-installed \
+        || echo "⚠️  Robot Manager を更新できませんでした。sudo scripts/update-robot-manager.sh で再実行してください。"
     enable_lab_bridge
     print_join_hint
 }
@@ -328,6 +333,7 @@ enable_lab_bridge() {
         200) echo "📚 教材の配信を開始しました: http://${WIFI_AP_ADDRESS%/*}:$LAB_BRIDGE_PORT/" ;;
         409) echo "📚 教材の配信は動作中です: http://${WIFI_AP_ADDRESS%/*}:$LAB_BRIDGE_PORT/" ;;
         000) echo "ℹ️  Robot Manager が動いていないため、教材の配信は次の起動時に自動で始まります。" ;;
+        404) echo "⚠️  Robot Manager が教材の配信に対応していません。sudo scripts/update-robot-manager.sh で更新してください。" ;;
         *) echo "⚠️  教材の配信を開始できませんでした (HTTP $code)。Robot Manager の「教材」タブを確認してください。" ;;
     esac
 }

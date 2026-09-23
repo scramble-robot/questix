@@ -7,8 +7,20 @@ uvicorn on `127.0.0.1:8888`.
 - `recorder.py` — rosbag recording console (`/api/rosbag/*`).
 - `logs.py` — log collection console (`/api/logs/*`).
 - `lab.py` — QUESTiX LAB console (`/api/lab/*`): starts/stops the read-only lab bridge.
+- `wifi_ap.py` — read-only access point settings for the QR codes (`/api/wifi-ap`).
 - `static/` — vanilla HTML/CSS/JS frontend (no build step).
 - `static/lab/` — QUESTiX LAB web teaching material, served at `/lab/` (see its README).
+
+## Updating an installed Robot Manager
+
+The `questix_robot_manager` service runs the pip-installed copy, not this directory, so a
+`git pull` does not change what it serves (a missing route then answers HTTP 404). Run
+`sudo scripts/update-robot-manager.sh`: it compares the installed files with this directory and,
+only when they differ, replaces `/opt/questix_robot/robot_manager`, reinstalls the package without
+downloading anything (`--no-deps --no-build-isolation` when fastapi/uvicorn are present) and
+restarts the service. `--check` only reports (exit 0 current / 1 outdated / 2 not installed).
+`sudo scripts/wifi-ap.sh up` runs it with `--if-installed` before starting the teaching material,
+and `scripts/install-robot-manager.sh --with-gui` uses it for its Robot Manager step.
 
 ## Competition GPIO safety
 

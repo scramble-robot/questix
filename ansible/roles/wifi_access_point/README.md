@@ -21,6 +21,8 @@ sudo scripts/wifi-ap.sh remove    # プロファイルと設定を削除
   `--channel`、`--country`、`--interface` で変更できます（`--help` 参照）。
 - ロボットのアドレスは `10.42.0.1`、接続した端末には DHCP で `10.42.0.x` が割り当てられます。
   有線 LAN がインターネットにつながっていれば、端末の通信はそちらへ転送されます。
+- `up` は、インストール済みの Robot Manager がリポジトリと違えば先に更新します（`scripts/update-robot-manager.sh`。
+  オフラインで動き、Robot Manager だけを入れ直して再起動します）。`git pull` のあとは `up` だけで最新になります。
 - `up` は QUESTiX LAB の教材配信も有効にします（`lab.env` の `AUTOSTART="true"` と、動作中の Robot Manager への
   配信開始の依頼）。つないだ端末で `http://10.42.0.1:8897/` を開けます。大会モードのときは配信を開始しません。
 - **URL を打たずに開く**: Robot Manager の「教材」タブの「スマートフォンで開く」に、① Wi-Fi に接続する QR と
