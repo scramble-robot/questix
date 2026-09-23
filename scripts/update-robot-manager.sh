@@ -21,7 +21,7 @@ SOURCE_DIR="$REPO_ROOT/scripts/robot_manager"
 # Kept as a plain copy too: questix_lab_bridge falls back to its static/lab (static_site.py).
 INSTALL_DIR=/opt/questix_robot
 SERVICE=questix_robot_manager
-READY_TIMEOUT_SEC=15
+READY_TIMEOUT_SEC=30
 
 die() {
     echo "❌ $*" >&2
@@ -88,16 +88,39 @@ install_package() {
     pip3 "${pip_args[@]}" "$INSTALL_DIR"
 }
 
+# HTTP status of the manager's /api/status, 000 while nothing answers.
+status_code() {
+    curl -s -o /dev/null -w '%{http_code}' -m 3 "http://127.0.0.1:$(service_port)/api/status" || true
+}
+
+# The service log without the 304 lines of the UI's polling, so an error is visible at once.
+show_service_log() {
+    echo "---- systemctl status $SERVICE ----" >&2
+    systemctl status "$SERVICE.service" --no-pager 2> /dev/null | head -n 8 >&2 || true
+    echo "---- journalctl -u $SERVICE (304 を除く直近) ----" >&2
+    journalctl -u "$SERVICE.service" -n 200 --no-pager 2> /dev/null | grep -v '" 304' | tail -n 40 >&2 || true
+}
+
 restart_service() {
     service_installed || return 0
     systemctl restart "$SERVICE.service"
-    local url="http://127.0.0.1:$(service_port)/api/status"
     local waited=0
-    until curl -fs -o /dev/null -m 2 "$url"; do
+    local code
+    code="$(status_code)"
+    until [ "$code" != 000 ]; do
         waited=$((waited + 1))
-        [ "$waited" -lt "$READY_TIMEOUT_SEC" ] || die "Robot Manager が起動しません（journalctl -u $SERVICE を確認）。"
+        if [ "$waited" -ge "$READY_TIMEOUT_SEC" ]; then
+            show_service_log
+            die "Robot Manager が ${READY_TIMEOUT_SEC} 秒以内に応答しませんでした（上のログを確認）。"
+        fi
         sleep 1
+        code="$(status_code)"
     done
+    # It runs, but a request fails: show why instead of reporting success.
+    if [ "$code" != 200 ]; then
+        show_service_log
+        die "Robot Manager は起動しましたが、/api/status が HTTP $code を返しました（上のログを確認）。"
+    fi
 }
 
 main() {

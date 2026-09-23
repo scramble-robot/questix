@@ -40,13 +40,12 @@
     mode: "0644"
   when: wifi_ap_state != 'absent'
 
+# Only created when missing: robot_autostart gives the directory to the robot user, and
+# robot_manager (running as that user) writes lab.env and the mode there. Never change its owner.
 - name: Create the QUESTiX settings directory
   ansible.builtin.file:
     path: "{{ wifi_ap_env_path | dirname }}"
     state: directory
-    owner: root
-    group: root
-    mode: "0755"
   when: wifi_ap_state != 'absent'
 
 # robot_autostart makes the directory the robot user's; that user runs robot_manager, which
