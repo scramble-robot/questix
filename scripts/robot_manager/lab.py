@@ -23,6 +23,9 @@ from pydantic import BaseModel, field_validator
 CONFIG_DIR = Path(os.environ.get("QUESTIX_CONFIG_DIR", "/etc/questix_robot"))
 LAUNCH_ENV_FILE = CONFIG_DIR / "launch.env"
 LAB_ENV_FILE = CONFIG_DIR / "lab.env"
+# Written by app.py (/api/mode) and read by the robot launcher; "competition" or "practice".
+MODE_FILE = CONFIG_DIR / "mode"
+COMPETITION_MODE = "competition"
 LAB_DIR = Path(__file__).parent / "static" / "lab"
 
 # Keep in sync with `port` in questix_lab_bridge/config/lab_bridge.yaml, LAB_BRIDGE_PORT in
@@ -37,9 +40,9 @@ _DEFAULT_CONFIG = {
     # with the repository).
     "CAMERA_TOPIC": "",
     # "true": start the bridge whenever robot_manager starts (i.e. at boot), so a class can open
-    # the pages without anyone pressing 配信開始 first. Off by default: the bridge serves the
-    # pages and read-only telemetry to the whole LAN.
-    "AUTOSTART": "false",
+    # the pages without anyone pressing 配信開始 first. On by default for classes; switching to
+    # competition mode turns it off (disable_for_competition), and it never starts in that mode.
+    "AUTOSTART": "true",
 }
 _ABS_PATH_RE = re.compile(r"^/[a-zA-Z0-9_/.~-]*$")
 _TOPIC_RE = re.compile(r"^/[A-Za-z0-9_/]*$")
@@ -57,7 +60,7 @@ _last_stop_reason: Optional[str] = None
 
 class LabConfig(BaseModel):
     CAMERA_TOPIC: str = ""
-    AUTOSTART: bool = False
+    AUTOSTART: bool = True
 
     @field_validator("CAMERA_TOPIC")
     @classmethod
@@ -85,6 +88,23 @@ def _read_config() -> dict[str, str]:
     config = dict(_DEFAULT_CONFIG)
     config.update({k: v for k, v in _read_env_file(LAB_ENV_FILE).items() if k in config})
     return config
+
+
+def _write_config(values: dict[str, str]) -> None:
+    lines = [f'{key}="{value}"' for key, value in values.items()]
+    try:
+        LAB_ENV_FILE.write_text("\n".join(lines) + "\n")
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Permission denied writing lab.env")
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"lab.env を書き込めません: {e}")
+
+
+def _competition_mode() -> bool:
+    try:
+        return MODE_FILE.read_text().strip() == COMPETITION_MODE
+    except OSError:
+        return False
 
 
 def _build_command(config: dict[str, str]) -> str:
@@ -257,14 +277,23 @@ def set_config(config: LabConfig):
         key: (str(value).lower() if isinstance(value, bool) else value)
         for key, value in config.model_dump().items()
     }
-    lines = [f'{key}="{value}"' for key, value in values.items()]
-    try:
-        LAB_ENV_FILE.write_text("\n".join(lines) + "\n")
-    except PermissionError:
-        raise HTTPException(status_code=403, detail="Permission denied writing lab.env")
-    except OSError as e:
-        raise HTTPException(status_code=500, detail=f"lab.env を書き込めません: {e}")
+    _write_config(values)
     return values
+
+
+def disable_for_competition() -> None:
+    """Keep the bridge off once the robot is switched to competition mode (app.py /api/mode).
+
+    Competition runs must not stream telemetry to the LAN: automatic start is turned off in
+    lab.env (the checkbox shows it) and a bridge this manager started is stopped. Switching back
+    to practice mode leaves it off; the checkbox or `scripts/wifi-ap.sh up` turns it on again.
+    """
+    config = _read_config()
+    if config.get("AUTOSTART") != "false":
+        _write_config({**config, "AUTOSTART": "false"})
+    with _lock:
+        if _proc is not None and _proc.poll() is None:
+            _stop_locked("competition_mode")
 
 
 def _autostart() -> None:
@@ -286,6 +315,10 @@ def autostart() -> None:
     the manager's own start-up.
     """
     if _read_config().get("AUTOSTART") != "true":
+        return
+    if _competition_mode():
+        # lab.env may still say true when the mode file was changed by hand.
+        logger.info("QUESTiX LAB bridge not started automatically: competition mode")
         return
     threading.Thread(target=_autostart, name="lab-autostart", daemon=True).start()
 

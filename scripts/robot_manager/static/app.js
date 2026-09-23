@@ -609,7 +609,9 @@ async function refreshLabStatus() {
       ? "配信中 (手動で起動)"
       : data.last_stop_reason === "autostart_failed"
         ? "停止中 (自動開始に失敗しました。ROS環境とビルドを確認してください)"
-        : "停止中";
+        : data.last_stop_reason === "competition_mode"
+          ? "停止中 (大会モードに切り替えたため停止しました)"
+          : "停止中";
   document.getElementById("lab-elapsed").textContent = data.running
     ? fmtDuration(data.elapsed_sec)
     : "—";
@@ -701,8 +703,17 @@ function setupEvents() {
         method: "POST",
         body: JSON.stringify({ mode: newMode }),
       });
-      toast(`モードを ${label} に変更しました`, "success");
+      toast(
+        newMode === "competition"
+          ? `モードを ${label} に変更しました（教材の配信と自動開始はオフにしました）`
+          : `モードを ${label} に変更しました`,
+        "success",
+      );
       await refreshStatus();
+      if (newMode === "competition") {
+        labConfigLoaded = false; // the server turned AUTOSTART off; show it in the checkbox
+        await refreshLabStatus();
+      }
     } catch {
       e.target.checked = !e.target.checked;
     }

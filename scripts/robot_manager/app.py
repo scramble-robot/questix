@@ -202,6 +202,8 @@ def set_mode(req: ModeRequest):
         MODE_FILE.write_text(req.mode + "\n")
     except PermissionError:
         raise HTTPException(status_code=403, detail="Permission denied writing mode file")
+    if req.mode == "competition":
+        lab.disable_for_competition()
     return {"mode": req.mode}
 
 

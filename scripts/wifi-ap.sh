@@ -5,7 +5,8 @@
 # keeps the settings in /etc/questix_robot/wifi_ap.env, so every kit keeps its own SSID/password.
 #
 # Usage:
-#   sudo scripts/wifi-ap.sh up [options]   access point on, now and at every boot
+#   sudo scripts/wifi-ap.sh up [options]   access point on, now and at every boot; also turns on
+#                                          the QUESTiX LAB bridge (except in competition mode)
 #   sudo scripts/wifi-ap.sh down           access point off; saved Wi-Fi client profiles take over
 #   sudo scripts/wifi-ap.sh status         SSID, password, address and connected devices
 #   sudo scripts/wifi-ap.sh remove         delete the access point profile and its settings
@@ -27,6 +28,10 @@ PLAYBOOK="$REPO_ROOT/ansible/playbooks/wifi_ap.yaml"
 ENV_FILE=/etc/questix_robot/wifi_ap.env
 LOG_FILE=/var/log/questix-wifi-ap.log
 CONNECTION_NAME=questix-ap
+# robot_manager (scripts/robot_manager/__main__.py) and its QUESTiX LAB settings.
+CONFIG_DIR="${QUESTIX_CONFIG_DIR:-/etc/questix_robot}"
+ROBOT_MANAGER_URL=http://127.0.0.1:8888
+LAB_BRIDGE_PORT=8897  # questix_lab_bridge/config/lab_bridge.yaml
 PASSWORD_LENGTH=12
 # No 0/O, 1/l/I: the password is read off a screen and typed on a phone.
 PASSWORD_CHARACTERS='A-HJ-NP-Za-km-z2-9'
@@ -173,7 +178,39 @@ command_up() {
     export_settings
     run_playbook
     [ "${DETACH:-0}" = 1 ] || command_status
+    enable_lab_bridge
     print_join_hint
+}
+
+# Learners join the access point to open the teaching pages, so the bridge that serves them
+# (started by robot_manager) is switched on with it: AUTOSTART for the next boots, and a start
+# request now. Competition mode keeps the bridge off (robot_manager turned AUTOSTART off).
+enable_lab_bridge() {
+    if [ "$(cat "$CONFIG_DIR/mode" 2> /dev/null)" = competition ]; then
+        echo "ℹ️  大会モードのため、教材の配信（QUESTiX LAB）は開始しません。"
+        return
+    fi
+    local lab_env="$CONFIG_DIR/lab.env"
+    if [ -f "$lab_env" ] && ! grep -qx 'AUTOSTART="true"' "$lab_env"; then
+        # robot_manager (the login user) owns lab.env; keep it that way.
+        local owner
+        owner="$(stat -c %U:%G "$lab_env")"
+        if grep -q '^AUTOSTART=' "$lab_env"; then
+            sed -i 's/^AUTOSTART=.*/AUTOSTART="true"/' "$lab_env"
+        else
+            echo 'AUTOSTART="true"' >> "$lab_env"
+        fi
+        chown "$owner" "$lab_env"
+    fi
+    # No lab.env: robot_manager's default is AUTOSTART on.
+    local code
+    code="$(curl -s -o /dev/null -w '%{http_code}' -m 10 -X POST "$ROBOT_MANAGER_URL/api/lab/start" || true)"
+    case "$code" in
+        200) echo "📚 教材の配信を開始しました: http://${WIFI_AP_ADDRESS%/*}:$LAB_BRIDGE_PORT/" ;;
+        409) echo "📚 教材の配信は動作中です: http://${WIFI_AP_ADDRESS%/*}:$LAB_BRIDGE_PORT/" ;;
+        000) echo "ℹ️  Robot Manager が動いていないため、教材の配信は次の起動時に自動で始まります。" ;;
+        *) echo "⚠️  教材の配信を開始できませんでした (HTTP $code)。Robot Manager の「教材」タブを確認してください。" ;;
+    esac
 }
 
 # 1 when the only argument is --yes/-y.

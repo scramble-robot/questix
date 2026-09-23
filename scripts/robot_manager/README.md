@@ -49,13 +49,20 @@ The **教材** tab starts and stops that bridge, so nobody has to run `ros2 laun
   "配信中 (手動で起動)" and is not stopped from here.
 - `カメラのトピック` (`sensor_msgs/CompressedImage`, empty = no camera) is stored in
   `$QUESTIX_CONFIG_DIR/lab.env` and applies from the next start.
-- **起動時に配信を自動で開始する** (`AUTOSTART="true"` in `lab.env`, off by default) starts the
+- **起動時に配信を自動で開始する** (`AUTOSTART="true"` in `lab.env`, **on by default**) starts the
   bridge whenever robot_manager starts — with the robot_manager service, that is at boot — so a
   class can open the pages without anyone pressing 配信開始. It runs in the background of the
   manager's start-up; if it fails (ROS workspace not built, a bridge already running by hand) the
   tab says "自動開始に失敗しました". Nothing in systemd or Ansible changes: the bridge stays a
-  child of robot_manager and stops with it. Turn it on only on networks where every device may
+  child of robot_manager and stops with it. While it is on, every device on the network may
   see the pages and the read-only telemetry.
+- **大会モード** (`competition` in `$QUESTIX_CONFIG_DIR/mode`): switching to it from this UI stops
+  a bridge started here and writes `AUTOSTART="false"`; switching back to 練習モード leaves it
+  off (tick the checkbox again, or run `sudo scripts/wifi-ap.sh up`). Automatic start is also
+  skipped while the mode file says `competition`, even if it was changed by hand.
+- `sudo scripts/wifi-ap.sh up` (Wi-Fi access point) turns `AUTOSTART` on and asks a running
+  robot_manager to start the bridge, so `http://10.42.0.1:8897/` works right away — except in
+  大会モード, where it leaves the bridge alone.
 
 Prerequisite: `questix_lab_bridge` is built in `ROBOT_WS` (`colcon build`; rosdep key
 `python3-websockets`). If the node exits immediately, starting fails with an error toast.

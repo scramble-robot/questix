@@ -39,10 +39,10 @@ def test_invalid_workspace_is_rejected(lab, tmp_path):
 
 def test_config_round_trip_and_validation(lab):
     assert lab.set_config(lab.LabConfig(CAMERA_TOPIC=" /cam/compressed ")) == {
-        "CAMERA_TOPIC": "/cam/compressed", "AUTOSTART": "false"}
-    assert lab._read_config() == {"CAMERA_TOPIC": "/cam/compressed", "AUTOSTART": "false"}
-    lab.set_config(lab.LabConfig(AUTOSTART=True))
-    assert lab._read_config()["AUTOSTART"] == "true"
+        "CAMERA_TOPIC": "/cam/compressed", "AUTOSTART": "true"}
+    assert lab._read_config() == {"CAMERA_TOPIC": "/cam/compressed", "AUTOSTART": "true"}
+    lab.set_config(lab.LabConfig(AUTOSTART=False))
+    assert lab._read_config()["AUTOSTART"] == "false"
     with pytest.raises(ValueError):
         lab.LabConfig(CAMERA_TOPIC="relative/topic")
 
@@ -58,10 +58,34 @@ def test_autostart_only_when_enabled(lab, monkeypatch):
     monkeypatch.setattr(lab, "start_bridge", lambda: started.append(True))
     monkeypatch.setattr(lab.threading, "Thread", _run_now)
     lab.autostart()
-    assert started == []  # off by default
-    lab.set_config(lab.LabConfig(AUTOSTART=True))
+    assert started == [True]  # on by default, without any lab.env
+    lab.set_config(lab.LabConfig(AUTOSTART=False))
     lab.autostart()
     assert started == [True]
+
+
+def test_autostart_is_skipped_in_competition_mode(lab, monkeypatch, tmp_path):
+    started = []
+    monkeypatch.setattr(lab, "start_bridge", lambda: started.append(True))
+    monkeypatch.setattr(lab.threading, "Thread", _run_now)
+    (tmp_path / "mode").write_text("competition\n")  # changed by hand: lab.env still says true
+    lab.autostart()
+    assert started == []
+
+
+def test_competition_mode_turns_autostart_off_and_stops_the_bridge(lab, monkeypatch):
+    signals = []
+    # Never signal a real process group from a test.
+    monkeypatch.setattr(lab.os, "getpgid", lambda pid: pid)
+    monkeypatch.setattr(lab.os, "killpg", lambda pgid, sig: signals.append((pgid, sig)))
+    lab.set_config(lab.LabConfig(CAMERA_TOPIC="/cam/compressed", AUTOSTART=True))
+    lab._proc = _FakeProcess()
+    lab.disable_for_competition()
+    assert signals == [(_FakeProcess.pid, lab.signal.SIGINT)]
+    assert lab._read_config() == {"CAMERA_TOPIC": "/cam/compressed", "AUTOSTART": "false"}
+    status = lab.get_status()
+    assert status["running"] is False and status["last_stop_reason"] == "competition_mode"
+    lab.disable_for_competition()  # nothing running, already off: no error
 
 
 def test_autostart_failure_is_reported(lab, monkeypatch):
@@ -82,3 +106,27 @@ class _run_now:
 
     def start(self):
         self._target()
+
+
+class _FakeProcess:
+    """A running bridge process as far as _stop_locked is concerned."""
+
+    pid = 12345
+
+    def poll(self):
+        return None
+
+    def wait(self, timeout=None):
+        return 0
+
+
+def test_switching_to_competition_mode_calls_the_lab_console(lab, monkeypatch, tmp_path):
+    from robot_manager import app as app_module
+    app_module = importlib.reload(app_module)
+    calls = []
+    monkeypatch.setattr(app_module.lab, "disable_for_competition", lambda: calls.append(True))
+    app_module.set_mode(app_module.ModeRequest(mode="practice"))
+    assert calls == []
+    app_module.set_mode(app_module.ModeRequest(mode="competition"))
+    assert calls == [True]
+    assert (tmp_path / "mode").read_text() == "competition\n"
