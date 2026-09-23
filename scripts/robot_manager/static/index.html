@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Questix Robot Manager</title>
-  <link rel="stylesheet" href="/static/style.css?v=10">
+  <link rel="stylesheet" href="/static/style.css?v=11">
 </head>
 
 <body>
@@ -299,6 +299,27 @@
     </section>
 
     <section class="card">
+      <h2>スマートフォンで開く</h2>
+      <p class="lab-note">
+        カメラで ① を読み取るとロボットの Wi-Fi に接続し、② を読み取ると教材が開きます。
+        URL を調べて入力する必要はありません。
+      </p>
+      <div class="lab-qr-grid">
+        <figure class="lab-qr">
+          <div id="lab-wifi-qr" class="lab-qr-image"></div>
+          <figcaption id="lab-wifi-caption">① Wi-Fi</figcaption>
+        </figure>
+        <figure class="lab-qr">
+          <div id="lab-url-qr" class="lab-qr-image"></div>
+          <figcaption id="lab-url-caption">② 教材</figcaption>
+        </figure>
+      </div>
+      <div class="btn-group rec-controls">
+        <a class="btn btn-small lab-open" href="/static/ap-card.html" target="_blank" rel="noopener">印刷用の接続カードを開く</a>
+      </div>
+    </section>
+
+    <section class="card">
       <h2>教材の設定</h2>
       <div class="config-grid rec-config">
         <div class="config-item wide">
@@ -347,7 +368,9 @@
   <!-- Toast container -->
   <div id="toast-container"></div>
 
-  <script src="/static/app.js?v=9"></script>
+  <script src="/static/vendor/qrcode.js"></script>
+  <script src="/static/qr-svg.js?v=1"></script>
+  <script src="/static/app.js?v=10"></script>
 </body>
 
 </html>

@@ -16,13 +16,17 @@ sudo scripts/wifi-ap.sh down      # 停止して、保存済みの Wi-Fi へ戻�
 sudo scripts/wifi-ap.sh remove    # プロファイルと設定を削除
 ```
 
-- 初回の `up` でパスワードを自動生成し、`/etc/questix_robot/wifi_ap.env`（root のみ読み取り可）に保存します。
+- 初回の `up` でパスワードを自動生成し、`/etc/questix_robot/wifi_ap.env` に保存します（読めるのは root とロボットのユーザーだけ。Robot Manager が QR コードを出すために読みます）。
   次回からは同じ SSID・パスワード・チャンネルを使います。`--ssid`、`--password`、`--new-password`、`--band`、
   `--channel`、`--country`、`--interface` で変更できます（`--help` 参照）。
 - ロボットのアドレスは `10.42.0.1`、接続した端末には DHCP で `10.42.0.x` が割り当てられます。
   有線 LAN がインターネットにつながっていれば、端末の通信はそちらへ転送されます。
 - `up` は QUESTiX LAB の教材配信も有効にします（`lab.env` の `AUTOSTART="true"` と、動作中の Robot Manager への
   配信開始の依頼）。つないだ端末で `http://10.42.0.1:8897/` を開けます。大会モードのときは配信を開始しません。
+- **URL を打たずに開く**: Robot Manager の「教材」タブの「スマートフォンで開く」に、① Wi-Fi に接続する QR と
+  ② 教材を開く QR が出ます。`sudo scripts/wifi-ap.sh card` で、同じ内容の印刷用カード（1 ファイルの HTML、
+  オフラインで開ける）をホームディレクトリに書き出します。ロボットに貼っておくと、カメラで2回読むだけです。
+  教材の URL はどの機体でも `http://10.42.0.1:8897/` です。
 - `qrencode` が入っていれば、スマートフォンのカメラで読み取れる接続用 QR コードを表示します。
 
 > [!WARNING]

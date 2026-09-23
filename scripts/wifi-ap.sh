@@ -9,6 +9,8 @@
 #                                          the QUESTiX LAB bridge (except in competition mode)
 #   sudo scripts/wifi-ap.sh down           access point off; saved Wi-Fi client profiles take over
 #   sudo scripts/wifi-ap.sh status         SSID, password, address and connected devices
+#   sudo scripts/wifi-ap.sh card [FILE]    printable card with the Wi-Fi and QUESTiX LAB QR codes
+#                                          (also in robot_manager: 教材 tab → 印刷用の接続カード)
 #   sudo scripts/wifi-ap.sh remove         delete the access point profile and its settings
 #
 # Options for "up" (saved for the next runs):
@@ -33,6 +35,7 @@ CONNECTION_NAME=questix-ap
 # robot_manager (scripts/robot_manager/__main__.py) and its QUESTiX LAB settings.
 CONFIG_DIR="${QUESTIX_CONFIG_DIR:-/etc/questix_robot}"
 ROBOT_MANAGER_URL=http://127.0.0.1:8888
+CARD_SOURCE_DIR="$REPO_ROOT/scripts/robot_manager/static"
 LAB_BRIDGE_PORT=8897  # questix_lab_bridge/config/lab_bridge.yaml
 PASSWORD_LENGTH=12
 # No 0/O, 1/l/I: the password is read off a screen and typed on a phone.
@@ -334,11 +337,57 @@ print_join_hint() {
     qrencode -t ansiutf8 "WIFI:T:WPA;S:${escaped_ssid};P:${escaped_password};;"
 }
 
+# Writes the robot_manager card page (static/ap-card.html) as one self-contained file: styles and
+# scripts inlined, the settings embedded as JSON, so it opens and prints without the manager.
+command_card() {
+    [ -f "$ENV_FILE" ] || die "アクセスポイントはまだ設定されていません。 sudo $0 up で作成します。"
+    local owner="${SUDO_USER:-root}"
+    local home
+    home="$(getent passwd "$owner" | cut -d: -f6)"
+    local output="${1:-$home/QUESTiX-card-$WIFI_AP_SSID.html}"
+    umask 077  # the card contains the password
+    CARD_SOURCE_DIR="$CARD_SOURCE_DIR" CARD_OUTPUT="$output" \
+        CARD_LAB_URL="http://${WIFI_AP_ADDRESS%/*}:$LAB_BRIDGE_PORT/" \
+        CARD_SSID="$WIFI_AP_SSID" CARD_PASSWORD="$WIFI_AP_PASSWORD" \
+        CARD_ADDRESS="${WIFI_AP_ADDRESS%/*}" python3 - << 'PYTHON'
+import json, os, pathlib
+source = pathlib.Path(os.environ['CARD_SOURCE_DIR'])
+page = (source / 'ap-card.html').read_text()
+data = {
+    'configured': True,
+    'ssid': os.environ['CARD_SSID'],
+    'password': os.environ['CARD_PASSWORD'],
+    'address': os.environ['CARD_ADDRESS'],
+    'lab_url': os.environ['CARD_LAB_URL'],
+}
+def inline_script(name):
+    # "</script" inside a script would end it early.
+    return '<script>\n' + (source / name).read_text().replace('</script', '<\\/script') + '\n</script>'
+page = page.replace(
+    '<link rel="stylesheet" href="/static/ap-card.css">',
+    '<style>\n' + (source / 'ap-card.css').read_text() + '\n</style>')
+embedded = json.dumps(data, ensure_ascii=False).replace('<', '\\u003c')
+page = page.replace(
+    '<script src="/static/vendor/qrcode.js"></script>',
+    '<script id="card-data" type="application/json">' + embedded + '</script>\n  '
+    + inline_script('vendor/qrcode.js'))
+page = page.replace('<script src="/static/qr-svg.js"></script>', inline_script('qr-svg.js'))
+page = page.replace('<script src="/static/ap-card.js"></script>', inline_script('ap-card.js'))
+if 'src="/static/' in page or 'href="/static/' in page:
+    raise SystemExit('ap-card.html references a file that was not inlined')
+pathlib.Path(os.environ['CARD_OUTPUT']).write_text(page)
+PYTHON
+    chmod 600 "$output"
+    [ "$owner" = root ] || chown "$owner:" "$output"
+    echo "🪪 接続カードを書き出しました: $output"
+    echo "   ブラウザで開いて印刷し、ロボットに貼ってください（パスワードが載っています）。"
+}
+
 main() {
     local subcommand="${1:-}"
     case "$subcommand" in
         -h | --help | help | "") usage; exit 0 ;;
-        up | down | status | remove) ;;
+        up | down | status | remove | card) ;;
         *) die "不明なコマンド: $subcommand（--help を参照）" ;;
     esac
     require_root "$@"
@@ -349,6 +398,7 @@ main() {
         down) command_down "$@" ;;
         status) command_status ;;
         remove) command_remove "$@" ;;
+        card) command_card "$@" ;;
     esac
 }
 

@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 
-from robot_manager import lab, logs, recorder
+from robot_manager import lab, logs, recorder, wifi_ap
 
 CONFIG_DIR = Path(os.environ.get("QUESTIX_CONFIG_DIR", "/etc/questix_robot"))
 MODE_FILE = CONFIG_DIR / "mode"
@@ -56,6 +56,7 @@ app.add_middleware(
 app.include_router(recorder.router)
 app.include_router(logs.router)
 app.include_router(lab.router)
+app.include_router(wifi_ap.router)
 # A bridge started from the 教材 tab must not outlive the manager.
 app.add_event_handler("startup", lab.autostart)
 app.add_event_handler("shutdown", lab.shutdown)

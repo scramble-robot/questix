@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QUESTiX 接続カード</title>
+  <link rel="stylesheet" href="/static/ap-card.css">
+</head>
+<body>
+  <main class="sheet">
+    <header>
+      <p class="brand">QUESTiX</p>
+      <h1 id="card-title">ロボットにつなぐ</h1>
+    </header>
+    <p id="card-message" class="message" hidden></p>
+    <div id="card-steps" class="steps" hidden>
+      <section class="step">
+        <h2><span class="number">1</span>Wi-Fi に接続</h2>
+        <div id="wifi-qr" class="qr-box"></div>
+        <p class="hint">カメラで読み取り、表示された「接続」を押します。</p>
+        <dl>
+          <div><dt>SSID</dt><dd id="card-ssid"></dd></div>
+          <div><dt>パスワード</dt><dd id="card-password" class="mono"></dd></div>
+        </dl>
+      </section>
+      <section class="step">
+        <h2><span class="number">2</span>教材を開く</h2>
+        <div id="lab-qr" class="qr-box"></div>
+        <p class="hint">接続できたら、カメラで読み取ってブラウザで開きます。</p>
+        <dl>
+          <div><dt>URL</dt><dd id="card-url" class="mono"></dd></div>
+        </dl>
+      </section>
+    </div>
+    <footer>
+      <p>教材はロボットの値を受け取るだけで、ロボットを動かす指令は送りません。</p>
+      <button id="card-print" type="button">印刷する</button>
+    </footer>
+  </main>
+  <script src="/static/vendor/qrcode.js"></script>
+  <script src="/static/qr-svg.js"></script>
+  <script src="/static/ap-card.js"></script>
+</body>
+</html>

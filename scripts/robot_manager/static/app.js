@@ -591,6 +591,8 @@ function setupRecorderEvents() {
 // ---------------------------------------------------------------------------
 
 let labConfigLoaded = false;
+// Inputs of the "スマートフォンで開く" QR codes; they are redrawn only when these change.
+const joinQr = { accessPoint: null, labUrls: [], serving: false, drawn: "" };
 
 async function refreshLabStatus() {
   let data;
@@ -631,12 +633,64 @@ async function refreshLabStatus() {
     urls.textContent = serving ? "ネットワークに接続されていません" : "—";
   }
 
+  joinQr.labUrls = data.urls;
+  joinQr.serving = serving;
+  renderJoinQr();
+
   document.getElementById("lab-start").disabled = serving;
   document.getElementById("lab-stop").disabled = !data.running;
   if (!labConfigLoaded) {
     document.getElementById("lab-camera").value = data.config.CAMERA_TOPIC || "";
     document.getElementById("lab-autostart").checked = data.config.AUTOSTART === "true";
     labConfigLoaded = true;
+  }
+}
+
+async function refreshAccessPoint() {
+  try {
+    joinQr.accessPoint = await apiSilent("/api/wifi-ap");
+  } catch {
+    return;
+  }
+  renderJoinQr();
+}
+
+function labUrlForPhones() {
+  const ap = joinQr.accessPoint;
+  // On the robot's own access point the address is fixed (10.42.0.1), whatever else is listed.
+  if (ap && ap.configured && ap.active && ap.lab_url) return ap.lab_url;
+  return joinQr.labUrls[0] || "";
+}
+
+function renderJoinQr() {
+  const ap = joinQr.accessPoint;
+  const url = labUrlForPhones();
+  const key = JSON.stringify([ap, url, joinQr.serving]);
+  if (key === joinQr.drawn) return;
+  joinQr.drawn = key;
+
+  const wifiBox = document.getElementById("lab-wifi-qr");
+  const wifiCaption = document.getElementById("lab-wifi-caption");
+  wifiBox.replaceChildren();
+  if (ap && ap.configured) {
+    wifiBox.append(qrSvg(wifiQrText(ap.ssid, ap.password), `Wi-Fi ${ap.ssid} に接続するQRコード`));
+    wifiCaption.textContent =
+      `① Wi-Fi: ${ap.ssid} / パスワード: ${ap.password}` +
+      (ap.active ? "" : "（アクセスポイントは現在オフ）");
+  } else {
+    wifiCaption.textContent =
+      "① ロボットの Wi-Fi は未設定です（sudo scripts/wifi-ap.sh up）。同じネットワークの端末なら ② だけで開けます。";
+  }
+
+  const urlBox = document.getElementById("lab-url-qr");
+  const urlCaption = document.getElementById("lab-url-caption");
+  urlBox.replaceChildren();
+  if (url) {
+    urlBox.append(qrSvg(url, `${url} を開くQRコード`));
+    urlCaption.textContent =
+      `② 教材: ${url}` + (joinQr.serving ? "" : "（配信停止中です。「配信開始」を押してください）");
+  } else {
+    urlCaption.textContent = "② ネットワークに接続されていません";
   }
 }
 
@@ -795,4 +849,6 @@ document.addEventListener("DOMContentLoaded", () => {
   setupLabEvents();
   refreshLabStatus();
   setInterval(refreshLabStatus, 3000);
+  refreshAccessPoint();
+  setInterval(refreshAccessPoint, 5000);
 });

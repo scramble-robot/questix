@@ -64,6 +64,14 @@ The **教材** tab starts and stops that bridge, so nobody has to run `ros2 laun
   robot_manager to start the bridge, so `http://10.42.0.1:8897/` works right away — except in
   大会モード, where it leaves the bridge alone.
 
+- **スマートフォンで開く** shows two QR codes: ① joins the robot's Wi-Fi access point (from
+  `$QUESTIX_CONFIG_DIR/wifi_ap.env`, written by `scripts/wifi-ap.sh`; read-only `GET /api/wifi-ap`,
+  `wifi_ap.py`) and ② opens the teaching pages (`http://10.42.0.1:8897/` while the access point
+  is on, otherwise the first LAN URL). **印刷用の接続カード** (`static/ap-card.html`) is the same
+  pair on a printable page; `sudo scripts/wifi-ap.sh card` writes it as a standalone file. QR
+  codes are drawn as SVG from `static/vendor/qrcode.js` (qrcode-generator, MIT, see
+  `static/vendor/NOTICE.md`) by `static/qr-svg.js`, which fits the strict CSP of the manager UI.
+
 Prerequisite: `questix_lab_bridge` is built in `ROBOT_WS` (`colcon build`; rosdep key
 `python3-websockets`). If the node exits immediately, starting fails with an error toast.
 The bridge only subscribes; it never publishes or accepts commands.

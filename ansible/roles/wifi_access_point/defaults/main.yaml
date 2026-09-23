@@ -32,6 +32,7 @@ wifi_ap_address: 10.42.0.1/24
 
 wifi_ap_connection_name: questix-ap
 wifi_ap_keyfile_path: /etc/NetworkManager/system-connections/questix-ap.nmconnection
-# Current settings for scripts/wifi-ap.sh (root-only: contains the passphrase).
+# Current settings for scripts/wifi-ap.sh and the robot_manager QR codes. Contains the passphrase:
+# root and the group of its directory (the robot user) only.
 wifi_ap_env_path: /etc/questix_robot/wifi_ap.env
 wifi_ap_regdom_path: /etc/modprobe.d/questix-wifi-regdom.conf

@@ -49,6 +49,14 @@
     mode: "0755"
   when: wifi_ap_state != 'absent'
 
+# robot_autostart makes the directory the robot user's; that user runs robot_manager, which
+# shows the Wi-Fi QR code from the settings file.
+- name: Look up the owner of the QUESTiX settings directory
+  ansible.builtin.stat:
+    path: "{{ wifi_ap_env_path | dirname }}"
+  register: wifi_ap_settings_dir
+  when: wifi_ap_state != 'absent'
+
 - name: Write the access point profile
   ansible.builtin.template:
     src: questix-ap.nmconnection.j2
@@ -64,8 +72,9 @@
     src: wifi_ap.env.j2
     dest: "{{ wifi_ap_env_path }}"
     owner: root
-    group: root
-    mode: "0600"  # contains the passphrase
+    # Readable by the robot user for the QR code in robot_manager (listens on 127.0.0.1 only).
+    group: "{{ wifi_ap_settings_dir.stat.gr_name | default('root') }}"
+    mode: "0640"  # contains the passphrase
   when: wifi_ap_state != 'absent'
 
 - name: Remove the access point files
