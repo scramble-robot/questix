@@ -3,6 +3,7 @@
 import os
 import re
 import subprocess
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
@@ -37,7 +38,23 @@ _LAB_CSP = (
     f"connect-src 'self' ws://*:{LAB_BRIDGE_PORT}"
 )
 
-app = FastAPI(title="Questix Robot Manager")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Start the lab bridge if lab.env asks for it; a bridge started here must not outlive us.
+
+    A lifespan instead of add_event_handler/on_event: Starlette 1.0 removed the event handlers
+    from the application (FastAPI 0.135 no longer offers app.add_event_handler), while lifespan
+    works on every FastAPI since 0.93.
+    """
+    lab.autostart()
+    try:
+        yield
+    finally:
+        lab.shutdown()
+
+
+app = FastAPI(title="Questix Robot Manager", lifespan=lifespan)
 
 # ---------------------------------------------------------------------------
 # Security middleware
@@ -57,9 +74,6 @@ app.include_router(recorder.router)
 app.include_router(logs.router)
 app.include_router(lab.router)
 app.include_router(wifi_ap.router)
-# A bridge started from the 教材 tab must not outlive the manager.
-app.add_event_handler("startup", lab.autostart)
-app.add_event_handler("shutdown", lab.shutdown)
 
 
 @app.middleware("http")

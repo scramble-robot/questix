@@ -154,3 +154,20 @@ def test_mode_switches_call_the_lab_console(lab, monkeypatch, tmp_path):
     assert (tmp_path / "mode").read_text() == "competition\n"
     app_module.set_mode(app_module.ModeRequest(mode="practice"))
     assert calls == ["off", "on"]
+
+
+def test_manager_lifespan_starts_and_stops_the_lab_console(lab, monkeypatch):
+    # Starlette 1.0 removed app.add_event_handler; the manager must use a lifespan.
+    import asyncio
+    from robot_manager import app as app_module
+    app_module = importlib.reload(app_module)
+    calls = []
+    monkeypatch.setattr(app_module.lab, "autostart", lambda: calls.append("startup"))
+    monkeypatch.setattr(app_module.lab, "shutdown", lambda: calls.append("shutdown"))
+
+    async def run():
+        async with app_module.app.router.lifespan_context(app_module.app):
+            assert calls == ["startup"]
+
+    asyncio.run(run())
+    assert calls == ["startup", "shutdown"]
