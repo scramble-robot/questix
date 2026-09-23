@@ -22,6 +22,10 @@
 #   --channel N|auto    default on the first run: auto = the least crowded of 1/6/11 (2.4 GHz) or
 #                       36/40/44/48 (5 GHz) around this robot, so several robots spread out
 #   --country CC        regulatory domain, default: JP
+#   --address A.B.C.D/NN|auto
+#                       robot address on the access point, default 10.42.0.1/24 (the same on every
+#                       robot: each one is on its own Wi-Fi). auto: another 10.4x.0.1/24 is taken
+#                       only when a wired or other network of this robot already uses the range
 #   --interface IF      default: wlan0
 #   --yes               do not ask before dropping an SSH session that uses this Wi-Fi
 
@@ -37,6 +41,7 @@ CONFIG_DIR="${QUESTIX_CONFIG_DIR:-/etc/questix_robot}"
 ROBOT_MANAGER_URL=http://127.0.0.1:8888
 CARD_SOURCE_DIR="$REPO_ROOT/scripts/robot_manager/static"
 LAB_BRIDGE_PORT=8897  # questix_lab_bridge/config/lab_bridge.yaml
+DEFAULT_ADDRESS=10.42.0.1/24
 PASSWORD_LENGTH=12
 # No 0/O, 1/l/I: the password is read off a screen and typed on a phone.
 PASSWORD_CHARACTERS='A-HJ-NP-Za-km-z2-9'
@@ -79,7 +84,7 @@ load_settings() {
     WIFI_AP_BAND=bg
     WIFI_AP_CHANNEL=""
     WIFI_AP_COUNTRY=JP
-    WIFI_AP_ADDRESS=10.42.0.1/24
+    WIFI_AP_ADDRESS="$DEFAULT_ADDRESS"
     if [ -f "$ENV_FILE" ]; then
         # shellcheck source=/dev/null
         . "$ENV_FILE"
@@ -116,6 +121,52 @@ candidate_channels() {
 # included). 2.4 GHz channels closer than 5 apart overlap, so their signals count too.
 # Without a scan (the interface is already an access point), the candidates are rotated by the
 # MAC address so that robots still spread over the channels.
+# IPv4 routes of every interface except the access point itself (wired LAN, VPN, containers).
+other_ipv4_routes() {
+    ip -4 -o route show 2> /dev/null | awk -v ap="$WIFI_AP_INTERFACE" '
+        { dev = ""; for (i = 1; i < NF; i++) if ($i == "dev") dev = $(i + 1) }
+        $1 != "default" && dev != ap { print $1, dev }'
+}
+
+# Prints the access point address to use. Keeps the current (or default) one unless another
+# network of this robot overlaps it; then takes the first free 10.42-10.61.0.1/24. An address
+# given with --address is used as is, or rejected when it overlaps.
+choose_address() {
+    local current="$1"
+    local explicit="$2"
+    other_ipv4_routes | python3 -c '
+import ipaddress, sys
+current, explicit = sys.argv[1], sys.argv[2] == "1"
+routes = [line.split() for line in sys.stdin if line.strip()]
+def conflict(address):
+    network = ipaddress.ip_interface(address).network
+    for prefix, dev in routes:
+        try:
+            if network.overlaps(ipaddress.ip_network(prefix, strict=False)):
+                return f"{prefix} ({dev})"
+        except ValueError:
+            pass
+    return None
+try:
+    used = conflict(current)
+except ValueError:
+    sys.exit(f"❌ アドレス {current} の形式が正しくありません（例: 10.42.0.1/24）。")
+if not used:
+    print(current)
+elif explicit:
+    sys.exit(f"❌ {current} は、このロボットの {used} と重なっています。別の --address を指定してください。")
+else:
+    for second in range(42, 62):
+        candidate = f"10.{second}.0.1/24"
+        if not conflict(candidate):
+            print(f"🌐 {current} は {used} と重なるため、{candidate} を使います。", file=sys.stderr)
+            print(candidate)
+            break
+    else:
+        sys.exit("❌ 空いているアドレスが見つかりません。--address で指定してください。")
+' "$current" "$explicit"
+}
+
 pick_channel() {
     local band="$1"
     local candidates
@@ -211,6 +262,7 @@ export_settings() {
 command_up() {
     local assume_yes=0
     local new_password=0
+    local explicit_address=0
     while [ "$#" -gt 0 ]; do
         case "$1" in
             --ssid) WIFI_AP_SSID="${2:?--ssid に値が必要です}"; shift 2 ;;
@@ -220,10 +272,15 @@ command_up() {
             --channel) WIFI_AP_CHANNEL="${2:?--channel に値が必要です}"; shift 2 ;;
             --country) WIFI_AP_COUNTRY="${2:?--country に値が必要です}"; shift 2 ;;
             --interface) WIFI_AP_INTERFACE="${2:?--interface に値が必要です}"; shift 2 ;;
+            --address) WIFI_AP_ADDRESS="${2:?--address に値が必要です}"; explicit_address=1; shift 2 ;;
             --yes | -y) assume_yes=1; shift ;;
             *) die "不明なオプション: $1（--help を参照）" ;;
         esac
     done
+    if [ "$WIFI_AP_ADDRESS" = auto ]; then
+        WIFI_AP_ADDRESS="$DEFAULT_ADDRESS"
+        explicit_address=0
+    fi
     if [ -z "$WIFI_AP_PASSWORD" ] || [ "$new_password" = 1 ]; then
         WIFI_AP_PASSWORD="$(generate_password)"
     fi
@@ -234,6 +291,7 @@ command_up() {
     if [ -z "$WIFI_AP_CHANNEL" ] || [ "$WIFI_AP_CHANNEL" = auto ]; then
         WIFI_AP_CHANNEL="$(pick_channel "$WIFI_AP_BAND")"
     fi
+    WIFI_AP_ADDRESS="$(choose_address "$WIFI_AP_ADDRESS" "$explicit_address")" || exit 1
     WIFI_AP_STATE=up
     confirm_ssh_drop "$assume_yes"
     export_settings
