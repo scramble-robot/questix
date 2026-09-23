@@ -35,6 +35,8 @@ const ASSESSMENTS = {
 };
 
 const $ = (id) => document.getElementById(id);
+const siteHeader = document.querySelector('.site-header');
+const CARD_GAP_BELOW_HEADER = 16; // px
 const lessonById = (id) => LESSONS.find((lesson) => lesson.id === id);
 const pageIds = [
   CATALOGUE_PAGE,
@@ -50,6 +52,8 @@ let assessment = null; // 'quiz' | 'mastery' while a test page is shown instead 
 let selectedGrade = SCHOOL_GRADES[0].id; // tab of the school-subject overview
 // Section a course was left on, so that returning to it continues where the learner was.
 const lastPages = new Map(LESSONS.map((lesson) => [lesson.id, lesson.pages[0]]));
+// Where the catalogue was scrolled when a course was opened from it: { course, scrollY }.
+let catalogueReturn = null;
 
 initSupplements();
 initLessonIcons();
@@ -115,8 +119,34 @@ function leaveCurrentPage() {
   for (const id of pageIds) $(id).hidden = true;
 }
 
-function replaceHash(hash) {
-  if (location.hash !== hash) history.replaceState(null, '', hash);
+// Every page change is a history entry, so the browser's back button (or the phone's back gesture)
+// returns to the catalogue instead of leaving the site.
+// The pages scroll themselves (scrollAfterShowing); the browser's own restoration would fight it.
+history.scrollRestoration = 'manual';
+function pushHash(hash) {
+  if (location.hash !== hash) history.pushState(null, '', hash);
+}
+
+// Back on the catalogue, the learner sees the cards they were choosing from: the position they
+// left it at, or the card of the course they come from when that course was opened elsewhere.
+function scrollCatalogue(previous) {
+  if (catalogueReturn && catalogueReturn.course === previous) {
+    window.scrollTo({ top: catalogueReturn.scrollY });
+    return;
+  }
+  const button = $(lessonById(previous)?.button);
+  if (!button) {
+    window.scrollTo({ top: 0 });
+    return;
+  }
+  // The header stays on screen (sticky), so the card goes just below it.
+  const cardTop = button.closest('.series-course').getBoundingClientRect().top + window.scrollY;
+  window.scrollTo({ top: cardTop - siteHeader.offsetHeight - CARD_GAP_BELOW_HEADER });
+}
+
+function scrollAfterShowing(name, previous) {
+  if (name === CATALOGUE) scrollCatalogue(previous);
+  else window.scrollTo({ top: 0 });
 }
 
 const activators = {
@@ -129,6 +159,8 @@ const activators = {
 
 function show(name, updateHash = true) {
   if (name === course && !assessment) return;
+  const previous = course;
+  if (previous === CATALOGUE) catalogueReturn = { course: name, scrollY: window.scrollY };
   leaveCurrentPage();
   assessment = null;
   $(lastPages.get(name) || CATALOGUE_PAGE).hidden = false;
@@ -139,12 +171,13 @@ function show(name, updateHash = true) {
   update();
   quizzes.showCourse(name);
   mastery.showCourse(name);
-  if (updateHash) replaceHash('#' + name);
-  window.scrollTo({ top: 0 });
+  if (updateHash) pushHash('#' + name);
+  scrollAfterShowing(name, previous);
 }
 
 function showAssessment(kind, name, updateHash) {
   if (!lessonById(name)) return;
+  if (course === CATALOGUE) catalogueReturn = { course: name, scrollY: window.scrollY };
   leaveCurrentPage();
   showMeasurementLab(null);
   if (kind === 'quiz') mastery.hide();
@@ -155,7 +188,7 @@ function showAssessment(kind, name, updateHash) {
   $(ASSESSMENTS[kind].page).hidden = false;
   if (kind === 'quiz') quizzes.show(name);
   else mastery.show(name);
-  if (updateHash) replaceHash(ASSESSMENTS[kind].hashPrefix + name);
+  if (updateHash) pushHash(ASSESSMENTS[kind].hashPrefix + name);
   window.scrollTo({ top: 0 });
 }
 
@@ -268,6 +301,27 @@ document.addEventListener('keydown', (event) => {
   switcher.querySelector('summary').focus();
 });
 
+// On a phone the header scrolls away with the page and slides back in as soon as the learner
+// scrolls up, so the catalogue button and the switcher are one small swipe away from anywhere.
+const HEADER_TUCK_QUERY = window.matchMedia('(max-width: 600px)');
+const HEADER_SCROLL_THRESHOLD = 6; // px of scrolling in one direction before the header reacts
+let lastScrollY = window.scrollY;
+
+function tuckHeaderOnScroll() {
+  const scrollY = window.scrollY;
+  const delta = scrollY - lastScrollY;
+  if (Math.abs(delta) < HEADER_SCROLL_THRESHOLD) return;
+  const tucked =
+    HEADER_TUCK_QUERY.matches &&
+    delta > 0 &&
+    scrollY > siteHeader.offsetHeight &&
+    !$('courseSwitcher').open;
+  siteHeader.classList.toggle('is-tucked', tucked);
+  lastScrollY = scrollY;
+}
+window.addEventListener('scroll', tuckHeaderOnScroll, { passive: true });
+siteHeader.addEventListener('focusin', () => siteHeader.classList.remove('is-tucked'));
+
 // --- Hash routes: #<course>, #quiz-<course>, #mastery-<course>; anything else is the catalogue.
 
 function assessmentRoute(hash) {
@@ -280,7 +334,12 @@ function assessmentRoute(hash) {
 
 function route() {
   const hash = location.hash;
-  if (hash.startsWith(GROUP_ANCHOR_PREFIX)) return;
+  if (hash.startsWith(GROUP_ANCHOR_PREFIX)) {
+    // A group heading of the catalogue; going back to it from a course shows the catalogue again.
+    if (course !== CATALOGUE) show(CATALOGUE, false);
+    document.querySelector(hash)?.scrollIntoView();
+    return;
+  }
   const test = assessmentRoute(hash);
   if (test) {
     showAssessment(test.kind, test.id, false);

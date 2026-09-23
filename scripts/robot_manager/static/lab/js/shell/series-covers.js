@@ -314,12 +314,19 @@ const DRAWINGS = {
     arrow(285, 170, 315, 170, COLOR.muted, 2),
 };
 
-function seriesCover(id, elementId = 'series-cover-' + id) {
+// `decorative` drops the title, description and ids for small copies next to a visible course
+// title (the header switcher): assistive technology already reads the title there, and a second
+// copy of the catalogue's ids would make its aria-labelledby ambiguous.
+function seriesCover(id, elementId = 'series-cover-' + id, { decorative = false } = {}) {
   const draw = DRAWINGS[id];
   if (!draw) throw new Error('Missing course illustration: ' + id);
+  const drawing = `<rect width="${COVER_WIDTH}" height="${COVER_HEIGHT}" fill="${COLOR.bg}"/><g font-family="system-ui, sans-serif" font-weight="500">${draw()}</g>`;
+  if (decorative) {
+    return `<svg data-series-illustration="${id}" viewBox="0 0 ${COVER_WIDTH} ${COVER_HEIGHT}" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">${drawing}</svg>`;
+  }
   const { title, description } = copy[id];
   const prefix = 'cover-' + id;
-  return `<svg id="${escapeHtml(elementId)}" data-series-illustration="${id}" viewBox="0 0 ${COVER_WIDTH} ${COVER_HEIGHT}" role="img" aria-labelledby="${prefix}-title" aria-describedby="${prefix}-description" xmlns="http://www.w3.org/2000/svg"><title id="${prefix}-title">${escapeHtml(title)}</title><desc id="${prefix}-description">${escapeHtml(description)}</desc><rect width="${COVER_WIDTH}" height="${COVER_HEIGHT}" fill="${COLOR.bg}"/><g font-family="system-ui, sans-serif" font-weight="500">${draw()}</g></svg>`;
+  return `<svg id="${escapeHtml(elementId)}" data-series-illustration="${id}" viewBox="0 0 ${COVER_WIDTH} ${COVER_HEIGHT}" role="img" aria-labelledby="${prefix}-title" aria-describedby="${prefix}-description" xmlns="http://www.w3.org/2000/svg"><title id="${prefix}-title">${escapeHtml(title)}</title><desc id="${prefix}-description">${escapeHtml(description)}</desc>${drawing}</svg>`;
 }
 
 export { seriesCover };

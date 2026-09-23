@@ -16,15 +16,19 @@ function navigationTitle(lesson, copy) {
   return lines.map((line, index) => (index === 0 ? line : html`<br />${line}`));
 }
 
-function courseLink(lesson, number, model, actions) {
+// Each entry repeats a small copy of the catalogue cover, so a course can be recognised from inside
+// another one by the same picture the learner chose it by.
+function courseLink(lesson, model, actions) {
   const current = model.course === lesson.id ? 'page' : 'false';
   return html`<a
     id=${lesson.nav}
     href="#${lesson.id}"
     aria-current=${current}
     @click=${(event) => actions.followCourseLink(event, lesson.id)}
+    ><span class="course-nav-cover"
+      >${unsafeHTML(seriesCover(lesson.id, undefined, { decorative: true }))}</span
     ><strong
-      ><b class="course-nav-number" aria-hidden="true">${number}</b>${navigationTitle(
+      ><b class="course-nav-number" aria-hidden="true">${lesson.number}</b>${navigationTitle(
         lesson,
         model.copy,
       )}</strong
@@ -32,8 +36,17 @@ function courseLink(lesson, number, model, actions) {
   >`;
 }
 
+// Grouped like the catalogue page, so both lists read in the same order under the same headings.
 function courseNavigation(model, actions) {
-  return model.lessons.map((lesson, index) => courseLink(lesson, index + 1, model, actions));
+  return model.groups.map(
+    (group) =>
+      html`<section class="course-nav-group">
+        <h2>${group.title}</h2>
+        <div class="course-nav-links">
+          ${group.lessons.map((lesson) => courseLink(lesson, model, actions))}
+        </div>
+      </section>`,
+  );
 }
 
 // --- Catalogue page ----------------------------------------------------------------------------
