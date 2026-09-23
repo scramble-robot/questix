@@ -1,6 +1,7 @@
-import { html, nothing } from '../vendor/lit-html.js';
+import { html, nothing, unsafeHTML } from '../vendor/lit-html.js';
 import { fillSentence as fill } from '../core/content.js';
 import { liveCaptureControls } from '../live/live-view.js';
+import { runModeBadgeHtml } from '../shell/run-mode.js';
 
 // Templates of the measured room (planning topic `room`): measuring it with the robot, opening a
 // phone's 3D scan and choosing where to cut it, and placing the start and goal. Pure functions of
@@ -13,7 +14,7 @@ const rotateValue = (value) => (value === 'auto' ? 'auto' : value === 'true');
 
 function robotSection(room, text, actions) {
   return html`<section class="planning-room-source">
-    <h3>${text.robotTitle}</h3>
+    <h3>${unsafeHTML(runModeBadgeHtml('live'))} ${text.robotTitle}</h3>
     ${text.steps.map((step) => html`<p>${step}</p>`)} ${liveCaptureControls(room.live, actions)}
     ${
       room.live.note
@@ -150,7 +151,7 @@ function scanSettings(scan, text, actions) {
 
 function scanSection(room, text, actions) {
   return html`<section class="planning-room-source">
-    <h3>${text.title}</h3>
+    <h3>${unsafeHTML(runModeBadgeHtml('data'))} ${text.title}</h3>
     ${text.steps.map((step) => html`<p>${step}</p>`)}
     <label class="planning-scan-open"
       >${text.open}<input

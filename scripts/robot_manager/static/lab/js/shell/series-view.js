@@ -1,5 +1,6 @@
 import { html, nothing, unsafeHTML } from '../vendor/lit-html.js';
 import { seriesCover } from './series-covers.js';
+import { RUN_MODE_ORDER, runModeBadgeHtml } from './run-mode.js';
 
 // Templates of the application shell: the course switcher in the header and the catalogue page
 // (course groups, the school-subject overview and the robot description). Every function is pure:
@@ -14,6 +15,15 @@ const COURSE_NUMBER_DIGITS = 2; // "01 / 13"
 function navigationTitle(lesson, copy) {
   const lines = copy.navigationTitleLines[lesson.id] || [lesson.title];
   return lines.map((line, index) => (index === 0 ? line : html`<br />${line}`));
+}
+
+// Only courses that can use the robot are marked, so the switcher stays short.
+function navigationRunModes(lesson) {
+  const modes = lesson.runModes.modes.filter((mode) => mode !== 'sim');
+  if (!modes.length) return nothing;
+  return html`<span class="run-mode-badges"
+    >${modes.map((mode) => unsafeHTML(runModeBadgeHtml(mode)))}</span
+  >`;
 }
 
 // Each entry repeats a small copy of the catalogue cover, so a course can be recognised from inside
@@ -32,7 +42,7 @@ function courseLink(lesson, model, actions) {
         lesson,
         model.copy,
       )}</strong
-    ><span>${lesson.summary}</span></a
+    ><span>${lesson.summary}</span>${navigationRunModes(lesson)}</a
   >`;
 }
 
@@ -66,6 +76,32 @@ function groupIndex(groups) {
   </div>`;
 }
 
+// What the course runs on, above its description, and what the robot adds when it can be used.
+function cardRunModes(lesson) {
+  const { modes, real } = lesson.runModes;
+  return html`<div class="series-run-modes" data-run-mode=${modes.join(' ')}>
+    <span class="run-mode-badges">${modes.map((mode) => unsafeHTML(runModeBadgeHtml(mode)))}</span>
+    ${real ? html`<p>${real}</p>` : nothing}
+  </div>`;
+}
+
+// The three labels explained once, before the first group.
+function runModeLegend(copy) {
+  return html`<section class="series-run-legend" aria-labelledby="runModeLegendTitle">
+    <h2 id="runModeLegendTitle">${copy.legend.title}</h2>
+    <p>${copy.legend.lead}</p>
+    <dl>
+      ${RUN_MODE_ORDER.map(
+        (mode) =>
+          html`<div>
+            <dt>${unsafeHTML(runModeBadgeHtml(mode))}</dt>
+            <dd>${copy.modes[mode].description}</dd>
+          </div>`,
+      )}
+    </dl>
+  </section>`;
+}
+
 function courseCard(lesson, model, actions) {
   const number = String(lesson.number).padStart(COURSE_NUMBER_DIGITS, '0');
   return html`<article class="card series-course">
@@ -75,6 +111,7 @@ function courseCard(lesson, model, actions) {
     <div class="series-course-body">
       <p class="series-order">${number} <span>/ ${model.lessons.length}</span></p>
       <h3>${lesson.title}</h3>
+      ${cardRunModes(lesson)}
       <p>${lesson.description}</p>
       <div class="series-tags">${lesson.tags.map((tag) => html`<span>${tag}</span>`)}</div>
       <button
@@ -217,8 +254,10 @@ function robotSection(copy) {
 
 function seriesPage(model, actions) {
   const copy = model.copy;
-  return html`${catalogueHeading(copy)}${groupIndex(model.groups)}${model.groups.map(
-    (group, index) => courseGroup(group, index, model, actions),
+  return html`${catalogueHeading(copy)}${groupIndex(model.groups)}${runModeLegend(
+    model.runModeCopy,
+  )}${model.groups.map((group, index) =>
+    courseGroup(group, index, model, actions),
   )}${schoolOverview(model, actions)}${robotSection(copy)}${copy.footnotes.map(
     (note) => html`<p class="page-footnote">${note}</p>`,
   )}`;

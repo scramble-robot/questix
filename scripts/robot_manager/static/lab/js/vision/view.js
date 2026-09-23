@@ -69,7 +69,12 @@ function sourceBar(model, actions) {
       /></label>
       <button id="visionCamera" class="small" ?hidden=${depth} @click=${actions.startCamera}>
         RGB画像を撮る</button
-      ><button id="visionRobot" class="small" ?hidden=${depth} @click=${actions.useRobotCamera}>
+      ><button
+        id="visionRobot"
+        class="small run-mode-live-button"
+        ?hidden=${depth}
+        @click=${actions.useRobotCamera}
+      >
         実機カメラの画像を使う</button
       ><label class="vision-file small" ?hidden=${!model.rgbdAllowed}
         >RGB-Dログを開く<input

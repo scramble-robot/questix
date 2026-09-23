@@ -1,6 +1,7 @@
 import { html, svg, nothing, unsafeHTML } from '../vendor/lit-html.js';
 import { formatNumber } from '../core/dom.js';
 import { lessonLabel, EXPERIMENT_STEPS, SENSOR_COPY } from '../shell/lesson-ui.js';
+import { runModeBadgeHtml } from '../shell/run-mode.js';
 import { SLAM_METHODS } from './engine.js';
 
 // Templates of the SLAM experiment page. Every function is pure: it turns the model built by
@@ -53,6 +54,7 @@ function pageHeading(model, copy, actions) {
         センサーを比べる</button
       ><button
         id="slamRealTab"
+        class="run-mode-live-button"
         aria-pressed=${String(!basics && model.real)}
         @click=${() => actions.setReal(true)}
       >
@@ -82,7 +84,7 @@ function hardwarePanel(model, copy, actions) {
     ?hidden=${!model.hardwareVisible}
   >
     <div class="section-top">
-      <h2>${text.title}</h2>
+      <h2>${unsafeHTML(runModeBadgeHtml('live'))} ${text.title}</h2>
       <span class="tag">${text.tag}</span>
     </div>
     <div class="hardware-steps">

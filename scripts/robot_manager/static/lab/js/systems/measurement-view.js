@@ -1,6 +1,7 @@
-import { html, svg, nothing, live } from '../vendor/lit-html.js';
+import { html, svg, nothing, live, unsafeHTML } from '../vendor/lit-html.js';
 import { fillSentence as fill } from '../core/content.js';
 import { liveCaptureControls } from '../live/live-view.js';
+import { runModeBadgeHtml } from '../shell/run-mode.js';
 
 // Templates of the measurement lab, the panel that opens under the control, launch and SLAM
 // courses. Pure functions of the model built by measurement-lab.js; sentences come from
@@ -330,7 +331,7 @@ function pendingDrives(model, copy, actions) {
 function liveCapture(model, copy, actions) {
   const panel = copy.panel;
   return html`<div class="measurement-live">
-    <h3>${panel.liveTitle}</h3>
+    <h3>${model.live ? unsafeHTML(runModeBadgeHtml('live')) : nothing} ${panel.liveTitle}</h3>
     ${
       model.live
         ? html`<p>${model.live.text}</p>

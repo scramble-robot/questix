@@ -73,6 +73,10 @@ state, which stream is missing, record / stop, open / save.
 - A recording replaces the lesson's data instead of being mixed into it, and says what the
   conditions were (`captureNotes`, and where it came from), so a learner can tell measured numbers
   from generated ones.
+- When a topic gains (or loses) a way to use the robot, update its entry in
+  `content/shell/run-modes.json` in the same change (course `modes` and `real`, topic `keys`,
+  `note` and the `target` selector of the robot block), so the labels never promise something the
+  page does not offer. Put `runModeBadgeHtml('live' | 'data')` in the heading of the robot block.
 - Only offer a recording where the robot actually measures the quantity. Where it measures one side
   only, take that side automatically and let the learner type the other (the SLAM scenario of the
   measurement lab); where it measures neither, say so (the launch scenario) instead of hiding the

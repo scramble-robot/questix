@@ -4,6 +4,7 @@ import { lessonLabel } from '../shell/lesson-ui.js';
 import { schoolTips } from '../shell/school-tips.js';
 import { liveCaptureControls } from '../live/live-view.js';
 import { lessonBrief } from '../shell/lesson-brief.js';
+import { runModeBadgeHtml } from '../shell/run-mode.js';
 import { CONTROL_GROUPS, CONTROL_TOPICS, LAST_SAMPLE, STOP_DISTANCE, controlLoad } from './core.js';
 import { controlChart } from './render.js';
 import { conceptLesson } from './concepts.js';
@@ -631,7 +632,7 @@ function calibrationCard(model, copy) {
 function liveCard(model, copy, actions) {
   const text = copy.live;
   return html`<section class="card control-live">
-    <h2>${text.title}</h2>
+    <h2>${unsafeHTML(runModeBadgeHtml('live'))} ${text.title}</h2>
     <p>${model.distance ? text.distanceIntro : text.intro}</p>
     <p>${model.distance ? text.distanceHowto : text.howto}</p>
     ${liveCaptureControls(model.live.capture, actions)}

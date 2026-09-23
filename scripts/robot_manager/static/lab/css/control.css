@@ -404,6 +404,17 @@
 .control-chart-legend .live-target:before {
   border-top: 2px dashed #d39ab0;
 }
+.control-live {
+  padding: 22px;
+  margin-top: 16px;
+}
+.control-live h2 {
+  font-size: 17px;
+}
+.control-live > p {
+  font-size: 14px;
+  color: #4d6469;
+}
 .control-live .live-capture {
   margin-top: 14px;
 }

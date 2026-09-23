@@ -2,6 +2,7 @@ import { html, nothing, classMap, unsafeHTML } from '../vendor/lit-html.js';
 import { lessonLabel } from '../shell/lesson-ui.js';
 import { schoolTips } from '../shell/school-tips.js';
 import { lessonBrief } from '../shell/lesson-brief.js';
+import { runModeBadgeHtml } from '../shell/run-mode.js';
 import { ARM_GOALS, ARM_TOPICS, SO101_JOINTS } from './core.js';
 
 // Templates of the arm course. Every function is pure: it turns the model built by ui.js into
@@ -544,7 +545,7 @@ function realLab(model, copy, fragments, actions) {
   return html`<section class="card arm-real-lab">
     <div>
       <p class="eyebrow">実機で確かめる</p>
-      <h2>${copy.hardware.labTitle}</h2>
+      <h2>${unsafeHTML(runModeBadgeHtml('data'))} ${copy.hardware.labTitle}</h2>
       <p>${copy.hardware.labIntro}</p>
     </div>
     <div class="arm-real-columns">

@@ -18,6 +18,7 @@ import { reviewRL } from '../rl/foundations.js';
 import { initQuizzes } from '../quiz/ui.js';
 import { initMastery } from '../quiz/mastery-ui.js';
 import { courseNavigation, seriesPage } from './series-view.js';
+import { courseRunModes, RUN_MODE_COPY } from './run-mode.js';
 
 // Application shell: which page is shown (catalogue, a course, a quiz or a mastery test), the
 // header course switcher, the hash routes and the catalogue page itself. series-view.js turns the
@@ -67,6 +68,7 @@ const catalogueGroups = LESSON_GROUPS.map((group) => ({
   lessons: group.ids.map((id) => ({
     ...lessonById(id),
     number: LESSONS.indexOf(lessonById(id)) + 1,
+    runModes: courseRunModes(id),
   })),
 }));
 const courseTitles = Object.fromEntries(LESSONS.map((lesson) => [lesson.id, lesson.title]));
@@ -77,6 +79,7 @@ function model() {
     course,
     lessons: LESSONS,
     groups: catalogueGroups,
+    runModeCopy: RUN_MODE_COPY,
     overview: {
       grades: SCHOOL_GRADES,
       selectedGrade,

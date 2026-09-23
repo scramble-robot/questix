@@ -728,11 +728,6 @@
 .planning-scan-field input[type='number'] {
   width: 5em;
 }
-.planning-scan-open input {
-  display: block;
-  margin-top: 4px;
-  max-width: 100%;
-}
 .planning-room-place {
   display: flex;
   flex-wrap: wrap;

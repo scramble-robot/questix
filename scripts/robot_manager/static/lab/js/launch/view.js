@@ -3,6 +3,7 @@ import { formatNumber } from '../core/dom.js';
 import { lessonLabel } from '../shell/lesson-ui.js';
 import { schoolTips } from '../shell/school-tips.js';
 import { lessonBrief } from '../shell/lesson-brief.js';
+import { runModeBadgeHtml } from '../shell/run-mode.js';
 import { LAUNCH_TOPICS } from './core.js';
 import { launchMechanism, launchChart } from './render.js';
 import { fillSentence } from '../core/content.js';
@@ -324,7 +325,9 @@ function measurementCard(measurement, copy, actions) {
       ? copy.measurement.sourceMeasured
       : copy.measurement.sourceExample;
   return html`<section class="card launch-data">
-    <div class="section-top"><h2>測定した出力と飛距離</h2></div>
+    <div class="section-top">
+      <h2>${unsafeHTML(runModeBadgeHtml('data'))} 測定した出力と飛距離</h2>
+    </div>
     <p id="launchSourceNote">${sourceNote}</p>
     <div id="launchMeasuredGraph">
       ${unsafeHTML(launchChart(measurement.rows, measurement.chartTarget, measurement.estimate))}
