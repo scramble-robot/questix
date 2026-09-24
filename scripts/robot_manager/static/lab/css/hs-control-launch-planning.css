@@ -300,3 +300,92 @@
   max-width: none;
   font-size: 16px;
 }
+
+/* --- planning ----------------------------------------------------------------------------- */
+
+/* The map's key: each entry draws the same line, hatch or shading as the canvas
+   (js/planning/render.js, roles of js/core/palette.js). */
+.planning-legend {
+  gap: 8px 16px;
+  font-size: 14px;
+  color: #d3e2e6;
+}
+.planning-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+[class^='planning-key-']:before {
+  content: '';
+  display: inline-block;
+  width: 26px;
+  height: 0;
+}
+.planning-key-planned:before {
+  height: 3px;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--scene-role-plan) 0 10px,
+    transparent 10px 14px,
+    var(--scene-role-plan) 14px 16px,
+    transparent 16px 20px
+  );
+}
+.planning-key-actual:before {
+  border-top: 3px solid var(--scene-role-actual);
+}
+.planning-key-previous:before,
+.planning-key-driven:before {
+  border-top: 2px dotted var(--scene-role-previous);
+}
+.planning-key-nogo:before {
+  width: 20px;
+  height: 14px;
+  background: repeating-linear-gradient(-45deg, #d9c9a399 0 1.5px, transparent 1.5px 6px);
+  border: 1px solid #d9c9a366;
+}
+.planning-key-search:before {
+  width: 26px;
+  height: 12px;
+  background: linear-gradient(
+    90deg,
+    rgb(79 134 224 / 85%) 0 30%,
+    rgb(79 134 224 / 50%) 30% 65%,
+    rgb(79 134 224 / 20%) 65%
+  );
+}
+
+/* Playback: a visible 再生位置 label and the time, as in the systems courses. */
+.planning-seek {
+  flex: 1 1 260px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+.planning-seek input {
+  flex: 1;
+  min-width: 90px;
+  min-height: 30px;
+  accent-color: var(--green);
+}
+.planning-seek-time {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  min-width: 88px;
+  text-align: right;
+}
+@media (max-width: 620px) {
+  .planning-seek {
+    flex-basis: 100%;
+    order: 3;
+  }
+}
+
+/* 探索方法: short option labels, full width, readable size. */
+.planning-guide select {
+  box-sizing: border-box;
+  min-height: 44px;
+  padding: 8px 10px;
+  font-size: 15px;
+}

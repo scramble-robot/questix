@@ -67,6 +67,30 @@ function mapIntro(model) {
     : 'スマホの3Dスキャンから作った部屋の地図。';
 }
 
+// 「3.2 / 5.3 秒」: where the playback is, out of the whole run (as the systems courses show it).
+function seekTime({ sample, run }, copy) {
+  if (!sample) return copy.playback.seekTimeBefore;
+  return `${formatNumber(sample.t)} / ${formatNumber(run.samples.at(-1).t)} 秒`;
+}
+
+// The key of the map, in HTML so it stays readable on a phone. Each entry draws the same line or
+// shading as the canvas (css/hs-control-launch-planning.css).
+function mapLegend(model, copy) {
+  const text = copy.legend;
+  const key = (kind, label) => html`<span class=${'planning-key-' + kind}>${label}</span>`;
+  const replanned =
+    model.topic === 'replan' && Boolean(model.sample?.changed && model.run?.newPlan);
+  return html`<div class="planning-legend">
+    ${key('planned', text.planned)}${key('actual', text.actual)}${
+      replanned ? key('previous', text.previousPlan) : nothing
+    }${
+      model.topic === 'room' && model.room.source === 'robot' ? key('driven', text.driven) : nothing
+    }${model.noGoShown ? key('nogo', text.noGo) : nothing}${
+      model.showSearch && model.topic !== 'draw' ? key('search', text.search) : nothing
+    }<span>${text.body}</span>
+  </div>`;
+}
+
 function mapCard(model, copy, topicCopy, actions) {
   const drawing = model.topic === 'draw';
   return html`<section class="card">
@@ -84,29 +108,24 @@ function mapCard(model, copy, topicCopy, actions) {
       @click=${drawing || model.topic === 'room' ? actions.clickMap : nothing}
       @keydown=${drawing ? actions.keyOnMap : nothing}
     ></canvas>
-    <div class="planning-legend">
-      <span class="planning-planned">予定した道</span
-      ><span class="planning-actual">走った軌跡</span>${
-        model.topic === 'room' && model.room.source === 'robot'
-          ? html`<span class="planning-driven">測ったときに走らせた道</span>`
-          : nothing
-      }<span>円：直径36 cmの機体が占める範囲</span>
-    </div>
+    ${mapLegend(model, copy)}
     <div class="planning-playbar">
       <button id="planningPlay" ?disabled=${!model.canPlay} @click=${actions.togglePlay}>
         ${playButtonLabel(model)}
       </button>
-      <label for="planningSeek" class="sr-only">確認する時刻（観察済みの範囲）</label>
-      <input
-        id="planningSeek"
-        type="range"
-        min="0"
-        max=${model.observed}
-        value="0"
-        .value=${String(model.index)}
-        ?disabled=${!model.run}
-        @input=${(event) => actions.seek(Number(event.target.value))}
-      />
+      <label class="planning-seek" for="planningSeek"
+        >${copy.playback.seek}<input
+          id="planningSeek"
+          type="range"
+          min="0"
+          max=${model.observed}
+          value="0"
+          .value=${String(model.index)}
+          aria-valuetext=${seekTime(model, copy)}
+          ?disabled=${!model.run}
+          @input=${(event) => actions.seek(Number(event.target.value))}
+        /><span class="planning-seek-time">${seekTime(model, copy)}</span></label
+      >
       <label
         >再生速度<select
           id="planningSpeed"
@@ -183,8 +202,8 @@ function searchDetails(model, copy, actions) {
       .value=${model.config.algorithm}
       @change=${(event) => actions.setCondition('algorithm', event.target.value)}
     >
-      <option value="astar">A*：残りの距離も見積もる</option>
-      <option value="dijkstra">ダイクストラ：進んだ距離で比べる</option>
+      <option value="astar">A*（エースター）</option>
+      <option value="dijkstra">ダイクストラ</option>
     </select>
     <p>${copy.controls.searchMethod}</p>
     <p>${copy.controls.searchCompare}</p>

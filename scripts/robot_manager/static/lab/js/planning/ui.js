@@ -9,7 +9,7 @@ import {
   planningExperiment,
   planningCSV,
 } from './core.js';
-import { PLAN_PLOT, drawPlanning } from './render.js';
+import { PLAN_PLOT, drawPlanning, noGoReach } from './render.js';
 import { planningPage } from './view.js';
 import { createRoom } from './room-ui.js';
 import { onLiveLink } from '../live/capture.js';
@@ -119,6 +119,7 @@ function buildModel() {
     speed: playback.speed,
     status: conditionsChanged(current) ? copy.status.stale : status,
     showSearch,
+    noGoShown: noGoReach(topicId, current.config, run?.plan, run) > 0,
     countedRun,
     room: room.model(),
   };
@@ -313,7 +314,7 @@ const actions = {
   },
   showSearch(visible) {
     showSearch = visible;
-    drawMap();
+    update(); // the map's key names the searched cells while they are shown
   },
   redraw() {
     redraw();
