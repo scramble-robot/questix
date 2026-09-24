@@ -1,8 +1,12 @@
-import { html, svg, nothing, unsafeHTML } from '../vendor/lit-html.js';
+import { html, nothing, unsafeHTML } from '../vendor/lit-html.js';
 import { formatNumber } from '../core/dom.js';
 import { lessonLabel, EXPERIMENT_STEPS, SENSOR_COPY } from '../shell/lesson-ui.js';
 import { runModeBadgeHtml } from '../shell/run-mode.js';
 import { SLAM_METHODS } from './engine.js';
+import { htmlChart } from './chart-view.js';
+import { depthColorKey } from '../vision/depth-key.js';
+import { niceScale } from '../core/chart-scale.js';
+import { roleStyle } from '../core/palette.js';
 
 // Templates of the SLAM experiment page. Every function is pure: it turns the model built by
 // ui.js (mode, log, runs, playback, sensor view, settings) into markup. Learner-facing sentences
@@ -19,9 +23,15 @@ const SENSOR_TABS = [
   ['imu', 'IMU'],
   ['wheels', '車輪'],
 ];
-const GRAPH = { width: 720, height: 190, left: 52, right: 700, top: 22, bottom: 150 };
-const GRAPH_MIN_SCALE = 0.2; // metres; the error axis never shrinks below this
-const GRAPH_COLORS = { wheel: '#a65a32', imu: '#366da0', slam: '#236f61' };
+// One colour, dash and label per method, the same in the map and in the chart (S2): the second
+// cue next to colour is the dash pattern.
+const METHOD_LINES = {
+  wheel: { color: '#a65a32', dash: '' },
+  imu: { color: '#366da0', dash: '9 4' },
+  slam: { color: '#236f61', dash: '2 4', width: 3 },
+};
+const GOAL_CENTIMETRES = 15; // the lesson's target for the error after one loop (ui.js GOAL_ERROR)
+const CENTIMETRES_PER_METRE = 100;
 
 const centimetres = (metres, copy) =>
   metres === null ? copy.scene.noReference : formatNumber(metres * 100, 1) + ' cm';
@@ -45,20 +55,20 @@ function pageHeading(model, copy, actions) {
     </div>
     <nav class="slam-mode" aria-label="実験の進め方">
       <button id="slamBasicsTab" aria-pressed=${String(basics)} @click=${actions.showBasics}>
-        仕組みを知る</button
+        ① 仕組み（7実験）</button
       ><button
         id="slamSimTab"
         aria-pressed=${String(!basics && !model.real)}
         @click=${() => actions.setReal(false)}
       >
-        センサーを比べる</button
+        ② 総合実験：センサーを比べる</button
       ><button
         id="slamRealTab"
         class="run-mode-live-button"
         aria-pressed=${String(!basics && model.real)}
         @click=${() => actions.setReal(true)}
       >
-        ROS 2の実機で確かめる
+        ③ 実機で確かめる（ROS 2）
       </button>
     </nav>
   </div>`;
@@ -289,49 +299,42 @@ function runCard(run, index, model, copy, actions) {
   </button>`;
 }
 
-function errorSeries(run, reference) {
-  return run.states.map((pose, i) => Math.hypot(pose.x - reference[i].x, pose.y - reference[i].y));
+// [time (s), error (cm)] of one run against the simulated reference.
+function errorSeries(run, reference, times) {
+  return run.states.map((pose, i) => [
+    times[i],
+    Math.hypot(pose.x - reference[i].x, pose.y - reference[i].y) * CENTIMETRES_PER_METRE,
+  ]);
 }
 
-function errorLine(run, values, max) {
-  const { left, right, top, bottom } = GRAPH;
-  const points = values
-    .map(
-      (value, i) =>
-        (left + ((right - left) * i) / (values.length - 1)).toFixed(1) +
-        ',' +
-        (bottom - (value / max) * (bottom - top)).toFixed(1),
-    )
-    .join(' ');
-  return svg`<polyline
-    fill="none"
-    stroke=${GRAPH_COLORS[run.method]}
-    stroke-width="2.5"
-    stroke-dasharray=${run.calibrate ? '7 3' : nothing}
-    points=${points}
-  />`;
-}
-
-// Position error over time for every run of this log; only simulated logs have a reference.
+// Position error over time for every run of this log, in cm like the result cards, against the
+// 15 cm target; only simulated logs have a reference. The range is fixed per log and its runs.
 function errorGraph(model, copy) {
   if (!model.reference) return nothing;
-  const series = model.runs.map((run) => ({ run, values: errorSeries(run, model.reference) }));
-  const max = Math.max(GRAPH_MIN_SCALE, ...series.flatMap((entry) => entry.values));
-  const { width, height, left, right, top, bottom } = GRAPH;
-  return html`<svg
-    viewBox="0 0 ${width} ${height}"
-    role="img"
-    aria-label=${copy.comparison.graphLabel}
-  >
-    <path d="M${left},${top}V${bottom}H${right}" fill="none" stroke="#9aafb2" />
-    ${series.map(({ run, values }) => errorLine(run, values, max))}
-    <g fill="#587079" font-size="13">
-      <text x="8" y="30">${max.toFixed(1)} m</text>
-      <text x="26" y="152">0</text>
-      <text x="52" y="174">0秒</text>
-      <text x="650" y="174">${model.endTime.toFixed(0)}秒</text>
-    </g>
-  </svg>`;
+  const text = copy.comparison;
+  const series = model.runs.map((run) => ({
+    ...METHOD_LINES[run.method],
+    opacity: run.calibrate ? 0.75 : 1,
+    points: errorSeries(run, model.reference, model.frameTimes),
+    label: runLabel(run, copy),
+  }));
+  const target = roleStyle('target');
+  const event = roleStyle('event');
+  return htmlChart({
+    label: text.graphLabel,
+    yTitle: text.graphYTitle,
+    xTitle: text.graphXTitle,
+    x: niceScale([0, model.endTime], { padding: 0 }),
+    y: niceScale(
+      series.flatMap((line) => line.points.map((point) => point[1])),
+      { max: GOAL_CENTIMETRES, ticks: 4 },
+    ),
+    series,
+    hlines: [
+      { y: GOAL_CENTIMETRES, label: text.graphGoal, color: target.color, dash: target.dash },
+    ],
+    vlines: [{ x: model.frame.t, label: text.graphNow, color: event.color, dash: event.dash }],
+  });
 }
 
 function comparisonCard(model, copy, actions) {
@@ -472,6 +475,7 @@ function sensorSection(model, copy, actions) {
             role="img"
             aria-label=${text.chartLabel}
           ></canvas>
+          ${sensor === 'camera' && cameraMode === 'depth' ? depthColorKey(text.depthKey) : nothing}
         </div>
         <div class="sensor-explanation">
           <p class="eyebrow" id="slamSensorName">${SENSOR_COPY[sensor].name}</p>

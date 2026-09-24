@@ -3,6 +3,9 @@ import { formatNumber } from '../core/dom.js';
 import { snapToZero, fillText } from './basics-core.js';
 import { figureArt, metric, helpDialog } from './basics-view.js';
 import { pointInWorld, MAPPING_ROOM, MAPPING_POSES } from './concepts-core.js';
+import { htmlChart } from './chart-view.js';
+import { niceScale } from '../core/chart-scale.js';
+import { roleStyle } from '../core/palette.js';
 
 // Templates of the four concept chapters of the SLAM course (pose, occupancy map, localization,
 // loop closure). Every function is pure: it turns the model built by concepts.js into markup, and
@@ -19,9 +22,13 @@ const plainDetails = (summary, paragraphs, extra = nothing) =>
     ${paragraphs.map((paragraph) => html`<p>${paragraph}</p>`)}${extra}
   </details>`;
 
+// The answer stays folded until the learner has predicted it (C1, S4).
 function conceptQuestion({ title, text, hint }, hintSummary) {
   return html`<h2>${title}</h2>
-    <p>${text}</p>
+    <details class="reflection-answer">
+      <summary>予想してから答えを見る</summary>
+      <p>${text}</p>
+    </details>
     ${plainDetails(hintSummary, [hint])}`;
 }
 
@@ -296,13 +303,16 @@ function mapParts(model, copy, actions) {
 
 const CORRIDOR_PLOT = { originX: 62, originY: 220, scale: 69 };
 const CANDIDATE_Y = 1.2; // metres: the corridor's centre line, where every candidate sits
-const CHART = { left: 62, right: 620, top: 40, bottom: 140, width: 558, height: 92 };
 const CHART_FROM = 0.7; // metres: first candidate on the chart's x axis
 const CHART_SPAN = 6.6; // metres covered by the chart's x axis
-const CHART_FLOOR = 0.15; // metres: the smallest full-scale the error axis ever uses
+const CHART_FLOOR = 0.15; // metres: the error axis always reaches at least this
 const OVERLAY_CENTRE = { x: 138, y: 104 };
 const OVERLAY_SCALE = 43; // pixels per metre in the robot's-eye comparison
 const AMBIGUOUS_CANDIDATES = 3; // more plausible places than this reads as "not decided"
+const CORRIDOR_TICKS = 8; // one tick per metre along the corridor
+// Candidates are yellow in the corridor; on the white chart the same candidate is dark amber.
+const CANDIDATE_COLOUR = '#f2c14e';
+const CANDIDATE_LINE_COLOUR = '#9a6b00';
 
 function corridorFigure(model, copy) {
   const { originX, originY, scale } = CORRIDOR_PLOT;
@@ -316,7 +326,7 @@ function corridorFigure(model, copy) {
   const plausible = model.checked
     ? model.fit.plausible.map(
         (candidate) =>
-          svg`<circle cx=${originX + candidate.x * scale} cy=${originY - CANDIDATE_Y * scale} r="5" fill="#f2bf77"/>`,
+          svg`<circle cx=${originX + candidate.x * scale} cy=${originY - CANDIDATE_Y * scale} r="6" fill=${CANDIDATE_COLOUR}/>`,
       )
     : nothing;
   const legend = model.checked ? copy.figureLegend.checked : copy.figureLegend.unchecked;
@@ -344,49 +354,83 @@ function rangeOutline(scan) {
     .join(' ');
 }
 
+// Measured (blue, solid) against predicted (magenta, dash-dot) as palette.js names the roles;
+// the key is HTML beside the drawing so it stays readable on a phone (S3).
 function overlayFigure(model, copy) {
-  return html`<svg viewBox="0 0 640 215" role="img" aria-label=${copy.overlayLabel}>
-    <rect x="28" y="4" width="220" height="202" rx="12" fill="#f2f6f5" />
-    <circle cx=${OVERLAY_CENTRE.x} cy=${OVERLAY_CENTRE.y} r="86" fill="none" stroke="#d1dfdc" />
-    <path d=${rangeOutline(model.observed)} fill="none" stroke="#397f74" stroke-width="3" />
-    <path
-      d=${rangeOutline(model.predicted)}
-      fill="none"
-      stroke="#c77d37"
-      stroke-width="3"
-      stroke-dasharray="5 4"
-    />
-    <path d="M138 94l-6 14h12z" fill="#263a45" />
-    <g font-size="15">
-      <text x="125" y="22" fill="#597078">${copy.front}</text>
-      <text x="276" y="63" fill="#397f74">${copy.measured}</text>
-      <text x="276" y="99" fill="#a46324">${copy.predicted}</text>
-      <text x="276" y="145" fill="#597078">${copy.overlap}</text>
-      <text x="276" y="176" fill="#597078">${copy.limit}</text>
-    </g>
-  </svg>`;
+  const measured = roleStyle('measured');
+  const plan = roleStyle('plan');
+  return html`<div class="slam-overlay">
+    <svg viewBox="20 0 236 215" role="img" aria-label=${copy.overlayLabel}>
+      <rect x="28" y="4" width="220" height="202" rx="12" fill="#f2f6f5" />
+      <circle cx=${OVERLAY_CENTRE.x} cy=${OVERLAY_CENTRE.y} r="86" fill="none" stroke="#d1dfdc" />
+      <path
+        d=${rangeOutline(model.observed)}
+        fill="none"
+        stroke=${measured.color}
+        stroke-width="3"
+      />
+      <path
+        d=${rangeOutline(model.predicted)}
+        fill="none"
+        stroke=${plan.color}
+        stroke-width="3"
+        stroke-dasharray=${plan.dash}
+      />
+      <path d="M138 94l-6 14h12z" fill="#263a45" />
+      <text x="138" y="24" text-anchor="middle" font-size="15" fill="#597078">${copy.front}</text>
+    </svg>
+    <ul class="slam-overlay-key">
+      <li><i class="key-measured" aria-hidden="true"></i>${copy.measured}</li>
+      <li><i class="key-predicted" aria-hidden="true"></i>${copy.predicted}</li>
+      <li>${copy.overlap}</li>
+      <li>${copy.limit}</li>
+    </ul>
+  </div>`;
 }
 
-const chartX = (metres) => CHART.left + ((metres - CHART_FROM) / CHART_SPAN) * CHART.width;
-
+// Mismatch of every candidate along the corridor, in cm, with 1 m ticks, the band of candidates
+// that fit and the learner's own candidate marked (S3). Shown as soon as the search has run.
 function errorChart(model, copy) {
-  const fullScale = Math.max(CHART_FLOOR, ...model.fit.candidates.map((c) => c.error));
-  const points = model.fit.candidates
-    .map((c) => `${chartX(c.x)},${CHART.bottom - (c.error / fullScale) * CHART.height}`)
-    .join(' ');
-  const guessAt = chartX(model.guess);
-  return html`<svg viewBox="0 0 640 180" role="img" aria-label=${copy.chartLabel}>
-    <path d="M62 40V140H620" fill="none" stroke="#a2b8be" />
-    <polyline points=${points} fill="none" stroke="#397f74" stroke-width="3" />
-    ${line(guessAt, CHART.top, guessAt, CHART.bottom, '#c77d37', { dash: '4 4' })}
-    <g fill="#597078" font-size="13">
-      <text x="62" y="169">0.7 m</text>
-      <text x="578" y="169">7.3 m</text>
-      <text x="62" y="22">${copy.chartAxisTitle}</text>
-      <text x="52" y="52" text-anchor="end">${(fullScale * 100).toFixed(0)}</text>
-      <text x="52" y="144" text-anchor="end">0</text>
-    </g>
-  </svg>`;
+  const candidates = model.fit.candidates;
+  const plausible = model.fit.plausible;
+  const band = plausible.length
+    ? [
+        {
+          from: plausible[0].x,
+          to: plausible.at(-1).x,
+          label: fillText(copy.chartBand, {
+            from: quantity(plausible[0].x, 1),
+            to: quantity(plausible.at(-1).x, 1),
+          }),
+        },
+      ]
+    : [];
+  return htmlChart({
+    label: copy.chartLabel,
+    yTitle: copy.chartAxisTitle,
+    xTitle: copy.chartXTitle,
+    x: niceScale([CHART_FROM, CHART_FROM + CHART_SPAN], { ticks: CORRIDOR_TICKS, padding: 0 }),
+    y: niceScale(
+      candidates.map((candidate) => candidate.error * 100),
+      { min: CHART_FLOOR * 100, ticks: 4 },
+    ),
+    series: [
+      {
+        points: candidates.map((candidate) => [candidate.x, candidate.error * 100]),
+        ...roleStyle('measured'),
+        label: copy.chartLine,
+      },
+    ],
+    bands: band,
+    vlines: [
+      {
+        x: model.guess,
+        label: fillText(copy.chartGuess, { position: quantity(model.guess, 1) }),
+        color: CANDIDATE_LINE_COLOUR,
+        dash: '4 4',
+      },
+    ],
+  });
 }
 
 function localizationEvidence(model, copy) {
@@ -394,11 +438,9 @@ function localizationEvidence(model, copy) {
     ${overlayFigure(model, copy)}
     ${
       model.checked
-        ? html`<details>
-            <summary>${copy.chartSummary}</summary>
+        ? html`<h3 class="slam-chart-title">${copy.chartSummary}</h3>
             ${errorChart(model, copy)}
-            <p>${copy.chartNote}</p>
-          </details>`
+            <p>${copy.chartNote}</p>`
         : nothing
     }`;
 }

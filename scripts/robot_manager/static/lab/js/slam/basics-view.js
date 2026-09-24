@@ -28,6 +28,29 @@ const SECONDS_PER_MINUTE = 60;
 const ALIGNED_ERROR = 0.035; // metres: below this the scans read as overlapping
 
 const quantity = (value, digits = 2) => formatNumber(snapToZero(value), digits);
+const SCALE_BAR_METRES = 0.2; // the wheel figure's scale bar: 20 cm
+
+// A labelled scale bar at the lower right of a plot, so distances can be read off the figure (S5).
+function scaleBar(plot, metres, text) {
+  const right = 630;
+  const left = right - metres * plot.scale;
+  return svg`${line(left, 318, right, 318, LABEL_COLOUR, { width: 3 })}${line(left, 312, left, 324, LABEL_COLOUR, { width: 2 })}${line(right, 312, right, 324, LABEL_COLOUR, { width: 2 })}${label(left, 306, text)}`;
+}
+
+// An arc of `angle` radians around a plot point, with its value, for the angles the text names.
+function angleMark(centre, radius, from, to, text, colour) {
+  const steps = 24;
+  const points = Array.from({ length: steps + 1 }, (_, i) => {
+    const angle = from + ((to - from) * i) / steps;
+    return `${centre.x + radius * Math.cos(angle)},${centre.y - radius * Math.sin(angle)}`;
+  });
+  const middle = (from + to) / 2;
+  const at = {
+    x: centre.x + (radius + 26) * Math.cos(middle),
+    y: centre.y - (radius + 26) * Math.sin(middle),
+  };
+  return svg`<polyline points=${points.join(' ')} fill="none" stroke=${colour} stroke-width="2"/>${label(at.x - 18, at.y + 5, text, `fill:${colour}`)}`;
+}
 const degrees = (radians) => (radians * 180) / Math.PI;
 
 // --- figure toolkit -------------------------------------------------------------------------
@@ -108,7 +131,7 @@ function wheelsFigure({ estimate, actual, slipping }, copy) {
       slipping
         ? svg`${path(actual.path, WHEEL_PLOT, ACTUAL_COLOUR, true)}${robot(actualEnd.x, actualEnd.y, actual.angle, true)}${label(36, 333, copy.slipLegend)}`
         : nothing
-    }${robot(end.x, end.y, estimate.angle)}${label(originX - 70, originY + 70, '出発点（0, 0）')}`,
+    }${robot(end.x, end.y, estimate.angle)}${label(originX - 70, originY + 70, '出発点（0, 0）')}${scaleBar(WHEEL_PLOT, SCALE_BAR_METRES, '20 cm')}`,
     copy.figureLabel,
   );
 }
@@ -197,7 +220,7 @@ function imuFigure({ result }, copy) {
     y: TURN_ARC_RADIUS * Math.sin((result.angle * i) / TURN_ARC_SEGMENTS),
   }));
   return figure(
-    svg`${line(65, originY, 620, originY)}${line(originX, 322, originX, 35)}${label(555, originY + 24, '初めの向き')}${label(45, 40, copy.figureLegend.steps)}${path(arc, IMU_PLOT, TURN_ARC_COLOUR)}${robot(originX, originY, 0, true)}${path([{ x: 0, y: 0 }, result], IMU_PLOT, ESTIMATE_COLOUR)}${robot(end.x, end.y, result.angle)}${label(35, 333, copy.figureLegend.line)}`,
+    svg`${line(65, originY, 620, originY)}${line(originX, 322, originX, 35)}${label(555, originY + 24, '初めの向き')}${label(45, 40, copy.figureLegend.steps)}${path(arc, IMU_PLOT, TURN_ARC_COLOUR)}${Math.abs(result.angle) > 0.05 ? label(originX + 58, originY - 58 * Math.sign(result.angle), `${quantity(degrees(result.angle), 0)}°`, `fill:${TURN_ARC_COLOUR}`) : nothing}${robot(originX, originY, 0, true)}${path([{ x: 0, y: 0 }, result], IMU_PLOT, ESTIMATE_COLOUR)}${robot(end.x, end.y, result.angle)}${label(35, 333, copy.figureLegend.line)}`,
     copy.figureLabel,
   );
 }
@@ -273,11 +296,11 @@ function scanPoint(point, shift = 0, colour = OLD_POINT_COLOUR, radius = 2.6) {
   return svg`<circle cx=${pixel.x} cy=${pixel.y} r=${radius} fill=${colour}/>`;
 }
 
-function beamFigure({ hit }, copy) {
+function beamFigure({ beam, hit }, copy) {
   const { originX, originY } = LIDAR_PLOT;
   const end = toPixel(LIDAR_PLOT, hit);
   return figure(
-    svg`<rect x=${originX - 50} y=${originY - 150} width="250" height="250" fill="none" stroke=${ROOM_WALL_COLOUR} stroke-width="5"/>${line(originX, originY, end.x, end.y, ESTIMATE_COLOUR, { width: 2 })}${scanPoint(hit, 0, BEAM_END_COLOUR, 6)}${robot(originX, originY)}${label(465, 85, copy.figureLegend.room)}${label(465, 117, copy.figureLegend.point)}${label(originX - 37, originY + 62, 'ロボット')}`,
+    svg`<rect x=${originX - 50} y=${originY - 150} width="250" height="250" fill="none" stroke=${ROOM_WALL_COLOUR} stroke-width="5"/>${line(originX, originY, originX + 80, originY, LABEL_COLOUR, { dash: '4 4' })}${line(originX, originY, end.x, end.y, ESTIMATE_COLOUR, { width: 2 })}${Math.abs(beam) >= 5 ? angleMark({ x: originX, y: originY }, 44, 0, (beam * Math.PI) / 180, `${beam}°`, TURN_ARC_COLOUR) : nothing}${label((originX + end.x) / 2 + 8, (originY + end.y) / 2 + 20, `${quantity(hit.r)} m`, `fill:${BEAM_END_COLOUR}`)}${scanPoint(hit, 0, BEAM_END_COLOUR, 6)}${robot(originX, originY)}${label(465, 85, copy.figureLegend.room)}${label(465, 117, copy.figureLegend.point)}${label(originX - 37, originY + 62, 'ロボット')}`,
     copy.figureLabel,
   );
 }
@@ -453,7 +476,10 @@ function sensorSlots(parts) {
     </aside>`,
     question: html`<section class="card basics-question" id="basicsQuestion">
       <h2>${parts.question.title}</h2>
-      <p>${parts.question.text}</p>
+      <details class="reflection-answer">
+        <summary>予想してから答えを見る</summary>
+        <p>${parts.question.text}</p>
+      </details>
     </section>`,
     summary: html`<p id="basicsSummary">${parts.summary}</p>`,
   };
@@ -469,8 +495,11 @@ function basicsPage(model, copy, helpHtml, actions) {
       <div class="basics-workspace">
         <section class="card basics-visual">
           <div class="basics-visual-heading">${slots.figureStep}${slots.figureTitle}</div>
+          ${slots.figure}
+        </section>
+        <section class="card basics-result">
           <div id="slamFigureGuide">${unsafeHTML(model.figureGuide)}</div>
-          ${slots.figure}${slots.calculation}${slots.observation}
+          ${slots.calculation}${slots.observation}
         </section>
         <section
           class="card basics-evidence"

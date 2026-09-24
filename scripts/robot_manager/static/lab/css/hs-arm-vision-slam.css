@@ -438,3 +438,184 @@
     padding: 14px;
   }
 }
+
+/* ---- SLAM ------------------------------------------------------------------------------ */
+
+#slamPage .basics-result {
+  overflow: hidden;
+}
+#slamPage .basics-result #slamFigureGuide:empty {
+  display: none;
+}
+/* On a phone: figure → controls → what was calculated → evidence (S1, C3). The RL course uses
+   the same class names, so every rule here is scoped to the SLAM page. */
+@media (max-width: 900px) {
+  #slamPage .basics-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  #slamPage .basics-workspace {
+    display: contents;
+  }
+  #slamPage .basics-visual {
+    order: 1;
+  }
+  #slamPage .basics-guide {
+    order: 2;
+  }
+  #slamPage .basics-result {
+    order: 3;
+  }
+  #slamPage .basics-evidence {
+    order: 4;
+  }
+  #slamPage .pose-comparison {
+    grid-template-columns: 1fr;
+  }
+}
+/* The mechanism figures are drawn in a 680-unit viewBox. Shrunk into a phone, their 14-unit
+   labels would be 7 px, so the labels grow as the figure narrows (≥ 12 px on screen; S1). */
+#basicsFigure {
+  container-type: inline-size;
+}
+@container (max-width: 460px) {
+  #basicsFigure > svg text {
+    font-size: 25px !important;
+  }
+}
+@container (min-width: 461px) and (max-width: 700px) {
+  #basicsFigure > svg text {
+    font-size: 18px !important;
+  }
+}
+
+/* HTML-labelled line chart of the SLAM course (js/slam/chart-view.js): the SVG stretches, the
+   text stays at its size (S2, S3). */
+.html-chart {
+  margin: 12px 0 4px;
+  padding: 0 4px 0 0;
+}
+.html-chart-y-title,
+.html-chart-x-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #3d5660;
+}
+.html-chart-x-title {
+  text-align: center;
+  margin-top: 26px;
+}
+.html-chart-area {
+  position: relative;
+  height: 200px;
+  margin: 10px 0 0 42px;
+  border-left: 1px solid #8fa3a8;
+  border-bottom: 1px solid #8fa3a8;
+}
+.html-chart-area > svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.html-chart-area > span {
+  position: absolute;
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.html-chart-tick-y {
+  right: calc(100% + 6px);
+  transform: translateY(-50%);
+  color: #587079;
+}
+.html-chart-tick-x {
+  top: calc(100% + 5px);
+  transform: translateX(-50%);
+  color: #587079;
+}
+.html-chart-line-label {
+  transform: translate(-100%, -115%);
+  font-weight: 700;
+  background: #ffffffd9;
+  padding: 0 3px;
+  border-radius: 3px;
+}
+.html-chart-hline-label {
+  left: 4px;
+  transform: translateY(-115%);
+  font-weight: 700;
+}
+.html-chart-vline-label {
+  top: 2px;
+  transform: translateX(4px);
+  font-weight: 600;
+}
+.html-chart-vline-label.flip {
+  transform: translateX(calc(-100% - 4px));
+}
+.html-chart-band-label {
+  bottom: 4px;
+  transform: translateX(-50%);
+  color: #7a5a06;
+  font-weight: 700;
+  background: #fff6dccc;
+  padding: 0 4px;
+  border-radius: 3px;
+}
+@media (max-width: 600px) {
+  .html-chart-area {
+    height: 180px;
+    margin-left: 36px;
+  }
+}
+
+/* Robot's-eye comparison of the localization chapter: drawing and HTML key (S3). */
+.slam-overlay {
+  display: grid;
+  grid-template-columns: minmax(0, 260px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+}
+.slam-overlay svg {
+  width: 100%;
+  height: auto;
+}
+.slam-overlay-key {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+  font-size: 14px;
+  color: #3d5660;
+}
+.slam-overlay-key i {
+  display: inline-block;
+  width: 26px;
+  height: 0;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+.slam-overlay-key .key-measured {
+  border-top: 3px solid var(--role-measured);
+}
+.slam-overlay-key .key-predicted {
+  border-top: 3px dashed var(--role-plan);
+}
+.slam-chart-title {
+  font-size: 15px;
+  margin: 20px 0 0;
+}
+@media (max-width: 600px) {
+  .slam-overlay {
+    grid-template-columns: 1fr;
+  }
+  .slam-overlay svg {
+    max-width: 280px;
+    margin: 0 auto;
+  }
+}

@@ -1,4 +1,4 @@
-import { depthColor } from '../core/depth-core.js';
+import { depthColor, invalidDepthColor } from '../core/depth-core.js';
 import { loadJson } from '../core/content.js';
 
 // Display-only RGB-D model. The SLAM estimator never receives this geometry.
@@ -184,7 +184,10 @@ function drawDepthImage(context, scene, pose, width, height) {
   for (let y = 0; y < height; y += DEPTH_CELL)
     for (let x = 0; x < width; x += DEPTH_CELL) {
       const depth = slamDepthAt(scene, pose, x + DEPTH_CELL / 2, y + DEPTH_CELL / 2, width, height);
-      context.fillStyle = 'rgb(' + depthColor(depth).join(',') + ')';
+      // No depth: the same diagonal hatch as the vision course, one cell per hatch step.
+      const color =
+        depth === null ? invalidDepthColor(x / DEPTH_CELL, y / DEPTH_CELL) : depthColor(depth);
+      context.fillStyle = 'rgb(' + color.join(',') + ')';
       context.fillRect(x, y, DEPTH_CELL + 1, DEPTH_CELL + 1);
     }
   drawBadge(context, copy.depthBadge, {

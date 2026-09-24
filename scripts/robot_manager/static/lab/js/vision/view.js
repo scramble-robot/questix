@@ -2,9 +2,7 @@ import { html, nothing, unsafeHTML } from '../vendor/lit-html.js';
 import { lessonLabel } from '../shell/lesson-ui.js';
 import { lessonGuide, figureGuide } from '../shell/lesson-guide.js';
 import { FACE_SCORE } from './face.js';
-import { depthColorBar } from '../core/depth-core.js';
-
-const DEPTH_BAR = depthColorBar();
+import { depthColorKey } from './depth-key.js';
 
 // Templates of the vision course page. Every function is pure: it turns the model built by ui.js
 // (chapter, image source, chapter state, messages) into markup. Sentences come from
@@ -115,24 +113,6 @@ function figureGuideNote(model, copy) {
   return unsafeHTML(figureGuide('vision-' + model.chapter));
 }
 
-// The colour bar of the depth image, in metres, with the hatch of "not measured" (V3).
-function depthColorKey(copy) {
-  const text = copy.frame.depthKey;
-  return html`<div class="depth-color-key" role="img" aria-label=${text.label}>
-    <strong>${text.title}</strong>
-    <div class="depth-color-scale">
-      <div class="depth-color-bar" style=${`background: ${DEPTH_BAR.gradient}`}></div>
-      <div class="depth-color-ticks">
-        ${DEPTH_BAR.ticks.map(
-          (tick) => html`<span style=${`left: ${tick.at}%`}>${String(tick.metres)}</span>`,
-        )}
-      </div>
-      <div class="depth-color-ends"><span>${text.near}</span><span>${text.far}</span></div>
-    </div>
-    <span class="depth-color-missing"><i aria-hidden="true"></i>${text.missing}</span>
-  </div>`;
-}
-
 function pixelCell(cell) {
   return html`<i
     style=${`background:rgb(${cell.rgb[0]},${cell.rgb[1]},${cell.rgb[2]})`}
@@ -186,7 +166,7 @@ function sceneCard(model, copy, actions) {
         </div>
       </figure>
     </div>
-    ${model.chapter === 'depth' ? depthColorKey(copy) : nothing}
+    ${model.chapter === 'depth' ? depthColorKey(copy.frame.depthKey) : nothing}
   </section>`;
 }
 

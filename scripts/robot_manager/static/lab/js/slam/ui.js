@@ -142,6 +142,7 @@ function buildModel() {
     seekMax,
     frame: log.frames[cursor],
     endTime: log.frames.at(-1).t,
+    frameTimes: log.frames.map((entry) => entry.t),
     playing: playback.playing,
     speed: playback.speed,
     runError,
@@ -165,6 +166,7 @@ function paintMaps() {
       start: copy.scene.startMarker,
       unknownTruth: copy.scene.unknownTruth,
       unknownTruthNote: copy.scene.unknownTruthNote,
+      gap: copy.scene.gapLabel,
     },
   });
 }

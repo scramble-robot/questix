@@ -1,6 +1,6 @@
 {
   "unavailableTitle": "画像は記録されていません",
   "unavailableNote": "このログには、カメラの画像データが含まれていません。",
-  "depthBadge": "デプス（模擬）· 橙：近い / 青：遠い / 灰：範囲外・不明",
+  "depthBadge": "デプス（模擬）· 黄：近い → 紺：遠い / 斜線：範囲外・不明",
   "rgbBadge": "RGB-DカメラのRGB映像（模擬）"
 }

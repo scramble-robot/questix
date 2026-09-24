@@ -17,7 +17,12 @@ const TILT_HEIGHT = 190;
 const GRAVITY = 9.81; // m/s²
 const START_RING_RADIUS = 0.15; // metres, drawn around the start position
 const ROBOT_SCALE = 0.48; // the shared robot drawing is made for a larger canvas
+// Method colours on the dark map, with the dash patterns of the error chart (view.js METHOD_LINES).
 const METHOD_COLORS = { wheel: '#eab075', imu: '#93baff', slam: '#7bdec3' };
+const METHOD_DASHES = { wheel: [], imu: [9, 4], slam: [2, 4] };
+const TRUTH_COLOR = '#eef5f8';
+const GAP_COLOR = '#ff6b6b'; // the gap between where the robot is and where it thinks it is
+const MIN_TEXT_PX = 12; // smallest text on screen (CONTRIBUTING.md, "Figures and charts")
 
 // Keep drawing coordinates independent of the canvas bitmap. CSS size and screen density
 // determine the backing resolution, including browser zoom changes.
@@ -108,6 +113,25 @@ function drawRoom(context, scene, { toX, toY, k }) {
     context.fillRect(toX(wall.x - start.x), toY(wall.y + wall.h - start.y), wall.w * k, wall.h * k);
 }
 
+// Canvas units of text that shows at `px` CSS pixels however far the map is shrunk.
+function textSize(canvas, px) {
+  const width = canvas.getBoundingClientRect().width || MAP_WIDTH;
+  return Math.ceil(Math.max(px, (MIN_TEXT_PX * MAP_WIDTH) / width, (px * MAP_WIDTH) / 600));
+}
+
+// A label on a dark tag, kept inside the map.
+function tag(context, text, x, y, color, size) {
+  context.font = `600 ${size}px system-ui`;
+  const width = context.measureText(text).width + 10;
+  const left = Math.min(Math.max(4, x - width / 2), MAP_WIDTH - width - 4);
+  const top = Math.min(Math.max(4, y - size / 2 - 4), MAP_HEIGHT - size - 12);
+  context.fillStyle = 'rgba(12,28,34,.88)';
+  context.fillRect(left, top, width, size + 8);
+  context.fillStyle = color;
+  context.textAlign = 'left';
+  context.fillText(text, left + 5, top + size + 1);
+}
+
 function drawUnknownTruth(context, labels) {
   context.fillStyle = '#b8d1dc';
   context.font = '22px system-ui';
@@ -128,15 +152,47 @@ function drawScanPoints(context, run, cursor, { toX, toY }) {
     context.fillRect(toX(point.x) - 1.5, toY(point.y) - 1.5, 3, 3);
 }
 
-function drawPath(context, path, color, { toX, toY }) {
+function drawPath(context, path, color, { toX, toY }, { width = 3, dash = [] } = {}) {
   context.strokeStyle = color;
-  context.lineWidth = 3;
+  context.lineWidth = width;
+  context.setLineDash(dash);
   context.beginPath();
   path.forEach((pose, i) => {
     if (i) context.lineTo(toX(pose.x), toY(pose.y));
     else context.moveTo(toX(pose.x), toY(pose.y));
   });
   context.stroke();
+  context.setLineDash([]);
+}
+
+// On the estimate: the real path as a thin white dashed line and a red line from where the robot
+// really is to where it thinks it is, labelled in cm (S2).
+function drawTruthOverlay(context, reference, estimate, projection, labels, size) {
+  const { toX, toY } = projection;
+  drawPath(context, reference, TRUTH_COLOR + 'cc', projection, { width: 1.5, dash: [6, 5] });
+  const truth = reference.at(-1);
+  const guess = estimate.at(-1);
+  if (!truth || !guess) return;
+  context.strokeStyle = GAP_COLOR;
+  context.lineWidth = 3;
+  context.beginPath();
+  context.moveTo(toX(truth.x), toY(truth.y));
+  context.lineTo(toX(guess.x), toY(guess.y));
+  context.stroke();
+  context.fillStyle = TRUTH_COLOR;
+  context.beginPath();
+  context.arc(toX(truth.x), toY(truth.y), 4, 0, Math.PI * 2);
+  context.fill();
+  const gap = Math.hypot(truth.x - guess.x, truth.y - guess.y) * 100; // cm
+  const middle = { x: (toX(truth.x) + toX(guess.x)) / 2, y: (toY(truth.y) + toY(guess.y)) / 2 };
+  tag(
+    context,
+    labels.gap.replace('{cm}', gap.toFixed(0)),
+    middle.x,
+    middle.y - 22,
+    '#ffc2c2',
+    size,
+  );
 }
 
 function drawStartRing(context, { toX, toY, k }) {
@@ -157,23 +213,25 @@ function drawRobotAt(context, pose, { toX, toY }) {
   context.restore();
 }
 
-function drawMapLabels(context, labels, { toX, toY, k }) {
+function drawMapLabels(context, labels, { toX, toY, k }, size) {
   context.fillStyle = '#c7dae0';
-  context.font = '16px system-ui';
+  context.font = `${size}px system-ui`;
   context.textAlign = 'left';
-  context.fillText(labels.start, toX(0) + 12, toY(0) + 24);
+  context.fillText(labels.start, toX(0) + 12, toY(0) + size + 8);
   context.strokeStyle = '#c7dae0';
+  context.lineWidth = 2;
   context.beginPath();
   context.moveTo(30, MAP_HEIGHT - 20);
   context.lineTo(30 + k, MAP_HEIGHT - 20);
   context.stroke();
-  context.fillText('1 m', 35, MAP_HEIGHT - 29);
+  context.fillText('1 m', 35, MAP_HEIGHT - 26);
 }
 
 // `truth` draws the reference trajectory (simulation only); otherwise the estimate of `run`.
 function drawMap(canvas, { log, run, cursor, labels }, bounds, truth) {
   const context = sharpContext(canvas, MAP_WIDTH, MAP_HEIGHT);
   const projection = mapProjection(bounds);
+  const size = textSize(canvas, 16);
   drawGrid(context, bounds, projection);
   if (truth && log.scene) drawRoom(context, log.scene, projection);
   if (truth && !log.reference) {
@@ -183,11 +241,15 @@ function drawMap(canvas, { log, run, cursor, labels }, bounds, truth) {
   if (!truth && run) drawScanPoints(context, run, cursor, projection);
   const path = truth ? log.reference : run?.states || [];
   const limit = run ? cursor : 0;
-  const color = truth ? '#d6e4ed' : METHOD_COLORS[run?.method || 'wheel'];
-  drawPath(context, path?.slice(0, limit + 1) || [], color, projection);
+  const method = run?.method || 'wheel';
+  const color = truth ? '#d6e4ed' : METHOD_COLORS[method];
+  const shown = path?.slice(0, limit + 1) || [];
+  drawPath(context, shown, color, projection, { dash: truth ? [] : METHOD_DASHES[method] });
   drawStartRing(context, projection);
   drawRobotAt(context, path?.[limit] || { x: 0, y: 0, theta: 0 }, projection);
-  drawMapLabels(context, labels, projection);
+  if (!truth && run && log.reference)
+    drawTruthOverlay(context, log.reference.slice(0, limit + 1), shown, projection, labels, size);
+  drawMapLabels(context, labels, projection, size);
 }
 
 function drawMaps(truthCanvas, estimateCanvas, scene) {
