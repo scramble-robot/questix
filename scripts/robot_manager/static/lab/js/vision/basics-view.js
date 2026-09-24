@@ -19,6 +19,7 @@ const GEOMETRY_DIAGRAM = {
   targetHalfHeightPerMetre: 80, // svg px of half target height per metre of target width
 };
 const WHEEL_DIAMETER = 0.13; // metres
+const STRAIGHT_AHEAD_DEGREES = 0.05; // below this the direction reads 「正面」
 const SECONDS_PER_MINUTE = 60;
 
 const wheelRpm = (metresPerSecond) =>
@@ -409,6 +410,14 @@ function geometryDiagram(model, copy) {
         stroke="#648c84"
         stroke-dasharray="5 4"
       />
+      <path
+        d=${`M106 ${axisY}L${targetX} ${axisY - targetHalfHeight}M106 ${axisY}L${targetX} ${axisY + targetHalfHeight}`}
+        fill="none"
+        stroke="#be4937"
+        stroke-width="1.5"
+        stroke-dasharray="6 4"
+        opacity=".7"
+      />
       <rect
         x=${targetX}
         y=${axisY - targetHalfHeight}
@@ -419,21 +428,27 @@ function geometryDiagram(model, copy) {
       <text x=${targetX - 20} y="150" fill="#45626d" font-size="15">
         目印 ${Math.round(geometry.width * 100)} cm
       </text>
-      <text x="310" y="22" fill="#45626d" font-size="15">
+      <text x=${(112 + targetX) / 2} y="56" text-anchor="middle" fill="#45626d" font-size="15">
         奥行き ${formatNumber(geometry.distance)} m
       </text>
     </svg>
   </div>`;
 }
 
+// 「正面」 for a target straight ahead, otherwise the side and the angle (V7).
+function directionText(angle) {
+  if (Math.abs(angle) < STRAIGHT_AHEAD_DEGREES) return '正面';
+  return `${angle < 0 ? '左' : '右'} ${formatNumber(Math.abs(angle))}°`;
+}
+
 function geometryEvidence(model, copy) {
   const text = copy.geometry.evidence;
   const { geometry, measurement } = model;
   const { target, angle, depth, clipped } = measurement;
-  const side = angle < 0 ? '左' : '右';
+  const direction = directionText(angle);
   return html`<h2>${text.title}</h2>
     <div class="vision-metrics">
-      <span>左右の方向 <b>${side} ${formatNumber(Math.abs(angle))}°</b></span
+      <span>左右の方向 <b>${direction}</b></span
       ><span>推定した奥行き <b>${clipped ? '範囲外' : formatNumber(depth, 2) + ' m'}</b></span>
     </div>
     <p>

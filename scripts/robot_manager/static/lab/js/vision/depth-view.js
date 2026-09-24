@@ -40,7 +40,7 @@ function stereoDiagram(model, copy) {
       <path d=${sightLines} fill="none" stroke="#a6d7ce" stroke-width="2" />
       <rect x="302" y=${targetY} width="36" height="27" rx="3" fill="#c66d4e" />
       <text x="349" y=${targetY + 20}>${text.targetLabel}</text>
-      <text x="458" y="182">${text.rgbLabel}</text>
+      <text x="636" y="150" text-anchor="end">${text.rgbLabel}</text>
       <text x="320" y="221" text-anchor="middle">${text.deviceLabel}</text>
       <text x="208" y="150">左</text>
       <text x="402" y="150">右</text>

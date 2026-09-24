@@ -107,6 +107,19 @@ function drawGeometryOverlay(canvas, target) {
   context.strokeStyle = '#185e50';
   context.lineWidth = 2;
   context.strokeRect(target.x, target.y, target.w, target.h);
+  // The width the calculation uses, as a dimension line under the box (V7).
+  const y = Math.min(IMAGE_SIZE.height - 20, target.y + target.h + 10);
+  context.strokeStyle = '#10313a';
+  context.lineWidth = 1.5;
+  context.beginPath();
+  context.moveTo(target.x, y);
+  context.lineTo(target.x + target.w, y);
+  context.moveTo(target.x, y - 5);
+  context.lineTo(target.x, y + 5);
+  context.moveTo(target.x + target.w, y - 5);
+  context.lineTo(target.x + target.w, y + 5);
+  context.stroke();
+  tag(context, `← ${target.w} px →`, target.x + target.w / 2 - 30, y + 20, '#ffffff');
 }
 
 // The band of rows the line detector looks at, the image centre, and the detected line centre.

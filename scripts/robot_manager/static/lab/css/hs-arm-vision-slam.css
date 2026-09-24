@@ -437,6 +437,11 @@
   .vision-pending {
     padding: 14px;
   }
+  /* Stacked, the images of the moving chapters need not be squeezed to 115 px: at full width
+     their overlays (widths in px, the lost-line band) stay readable. */
+  .vision-scene:has(.vision-motion:not([hidden])) .vision-image-pair canvas {
+    height: auto;
+  }
 }
 
 /* ---- SLAM ------------------------------------------------------------------------------ */
@@ -630,4 +635,21 @@
   border-color: var(--green);
   background: var(--green);
   color: #fff;
+}
+
+/* The side view of the distance chapter and the top view of the stereo chapter are 640 units
+   wide; their labels grow as they narrow so they stay at 12 px or more. */
+.vision-world-diagram,
+.depth-diagram {
+  container-type: inline-size;
+}
+@container (max-width: 460px) {
+  :is(.vision-world-diagram, .depth-diagram) svg text {
+    font-size: 26px !important;
+  }
+}
+@container (min-width: 461px) and (max-width: 700px) {
+  :is(.vision-world-diagram, .depth-diagram) svg text {
+    font-size: 18px !important;
+  }
 }
