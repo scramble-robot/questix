@@ -7,13 +7,16 @@ import { QUIZZES } from './data.js';
 // inherits that question's review card, so the two cannot drift apart.
 const cases = await loadJson('content/mastery-tests.json');
 // A mastery question may send the learner back to the same experiment for a different purpose;
-// those questions replace the inherited instruction with their own.
+// those questions replace the inherited instruction with their own (a sentence), or send the
+// learner to another experiment of the course ({topic, title, action}).
 const reviewActions = await loadJson('content/quiz/mastery-review-actions.json');
 
 function reviewFor(course, question) {
   const inherited = QUIZZES[course].find((quiz) => quiz.id === question.review)?.review;
-  const action = reviewActions[course]?.[question.id];
-  return action ? { ...inherited, action } : inherited;
+  const override = reviewActions[course]?.[question.id];
+  if (!override) return inherited;
+  if (typeof override === 'string') return { ...inherited, action: override };
+  return { ...inherited, ...override };
 }
 
 const MASTERY_TESTS = Object.fromEntries(
