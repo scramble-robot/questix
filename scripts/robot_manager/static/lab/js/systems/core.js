@@ -221,31 +221,81 @@ function mechanics(topic, config) {
   }
   const end = samples.at(-1);
   const remaining = STOP_LINE - end.x;
-  const success = braking
-    ? remaining >= -1e-6 && remaining <= BRAKE_SUCCESS_MARGIN
-    : !samples.some((sample) => sample.wheelSpeed - sample.v > SLIP_TOLERANCE);
-  const brakingMetrics = () => [
-    metric(text.metrics.remainingToLine, remaining, 'm'),
-    metric(text.metrics.distanceAfterBrake, end.x - (brakeStart ?? end.x), 'm'),
-    metric(text.metrics.timeToStop, end.t, '秒'),
-  ];
-  const drivingMetrics = () => [
-    metric(text.metrics.speedAtPowerOff, samples[POWER_OFF_STEP].v, 'm/秒'),
-    metric(text.metrics.odometryError, end.odom - end.x, 'm'),
-    metric(text.metrics.startingAcceleration, samples[0].accel, 'm/秒²'),
-  ];
-  const outcome = () => {
-    if (braking) return success ? text.outcome.brakingSuccess : text.outcome.brakingRetry;
-    if (topic === 'force') return text.outcome.force;
-    return text.outcome.traction;
+  const slipped = samples.some((sample) => sample.wheelSpeed - sample.v > SLIP_TOLERANCE);
+  const success = braking ? remaining >= -1e-6 && remaining <= BRAKE_SUCCESS_MARGIN : !slipped;
+  const brake = events.find((event) => event.kind === 'brake');
+  const afterBrake = end.x - (brakeStart ?? end.x);
+  const figures = {
+    remaining,
+    afterBrake,
+    brakeToStop: brake ? end.t - brake.t : null,
+    speedAtPowerOff: samples[POWER_OFF_STEP]?.v ?? null, // braking runs can end sooner
+    odometryError: end.odom - end.x,
+    startingAcceleration: samples[0].accel,
   };
   return {
     samples,
     events,
     success,
-    metrics: braking ? brakingMetrics() : drivingMetrics(),
-    outcome: outcome(),
+    metrics: mechanicsMetrics(topic, figures),
+    outcome: mechanicsOutcome(topic, config, success, slipped, figures),
   };
+}
+
+// Only the numbers the topic is about: acceleration for the force topic, wheel slip for the
+// traction topic, stopping distances for the braking topic.
+function mechanicsMetrics(topic, figures) {
+  const text = copy.mechanics.metrics;
+  if (topic === 'braking')
+    return [
+      metric(text.remainingToLine, figures.remaining, 'm'),
+      metric(text.distanceAfterBrake, figures.afterBrake, 'm'),
+      figures.brakeToStop === null
+        ? metric(text.brakeToStop, copy.noValue)
+        : metric(text.brakeToStop, figures.brakeToStop, '秒'),
+    ];
+  if (topic === 'force')
+    return [
+      metric(text.startingAcceleration, figures.startingAcceleration, 'm/秒²'),
+      metric(text.speedAtPowerOff, figures.speedAtPowerOff, 'm/秒'),
+    ];
+  return [
+    metric(text.speedAtPowerOff, figures.speedAtPowerOff, 'm/秒'),
+    metric(text.odometryError, figures.odometryError, 'm'),
+    metric(text.startingAcceleration, figures.startingAcceleration, 'm/秒²'),
+  ];
+}
+
+const CENTIMETRES = 100;
+const BRAKE_ADVICE_MARGIN = 0.1; // m short of the line the advice aims for
+const BRAKE_ADVICE_STEP = 0.05; // m; the brakeAt setting moves in these steps
+
+// The closing sentence, with the run's own numbers in it.
+function mechanicsOutcome(topic, config, success, slipped, figures) {
+  const text = copy.mechanics.outcome;
+  if (topic === 'force')
+    return fill(text.force, {
+      accel: figures.startingAcceleration.toFixed(2),
+      speed: figures.speedAtPowerOff.toFixed(2),
+      mass: config.mass,
+      power: config.power,
+    });
+  if (topic === 'traction')
+    return fill(slipped ? text.tractionSlip : text.tractionGrip, {
+      error: figures.odometryError.toFixed(2),
+    });
+  const advice =
+    Math.ceil((figures.afterBrake + BRAKE_ADVICE_MARGIN) / BRAKE_ADVICE_STEP - 1e-9) *
+    BRAKE_ADVICE_STEP;
+  const values = {
+    over: Math.round(-figures.remaining * CENTIMETRES),
+    short: Math.round(figures.remaining * CENTIMETRES),
+    after: figures.afterBrake.toFixed(2),
+    advice: advice.toFixed(2),
+  };
+  if (success) return fill(text.brakingSuccess, values);
+  if (figures.remaining < 0) return fill(text.brakingOver, values);
+  return fill(text.brakingShort, values);
 }
 
 // --- behavior: sequence, blocked, missing -----------------------------------------------------
@@ -382,11 +432,6 @@ function behavior(topic, config) {
   }
   const end = samples.at(-1);
   const success = end.status === DELIVERED;
-  const outcome = () => {
-    if (success) return text.outcome.delivered;
-    if (end.status === ARRIVED_EMPTY) return text.outcome.arrivedEmpty;
-    return text.outcome.timedOut;
-  };
   return {
     samples,
     events,
@@ -396,9 +441,43 @@ function behavior(topic, config) {
       metric(text.metrics.waited, waitTotal, '秒'),
       metric(text.metrics.delivered, success ? 'はい' : 'いいえ'),
     ],
-    outcome: outcome(),
+    outcome: behaviorOutcome(topic, config, samples, waitTotal),
   };
 }
+
+// Per topic, so the closing sentence talks about the rule the topic changed.
+function behaviorOutcome(topic, config, samples, waited) {
+  const text = copy.behavior.outcome;
+  const end = samples.at(-1);
+  const values = { time: end.t.toFixed(1), waited: waited.toFixed(1), limit: BEHAVIOR_TIME_LIMIT };
+  const detoured = samples.some((sample) => sample.status === DETOURING);
+  if (end.status === ARRIVED_EMPTY) return fill(text.arrivedEmpty, values);
+  if (end.status !== DELIVERED) {
+    if (end.status === WAITING) return fill(text.waitedForever, values);
+    return fill(text.timedOut, values);
+  }
+  if (topic === 'missing') return fill(text.deliveredAfterSearch, values);
+  if (detoured) return fill(text.deliveredByDetour, values);
+  if (waited > 0) return fill(text.deliveredAfterWait, values);
+  if (topic === 'blocked') return fill(text.deliveredAfterWait, values);
+  return fill(text.delivered, values);
+}
+
+const BEHAVIOR_TIME_LIMIT = BEHAVIOR_STEPS * dt; // seconds
+
+// Where things are in the room (metres), for the drawing; the simulation uses the same constants.
+const BEHAVIOR_PLACES = {
+  parcel: PARCEL_PLACE,
+  elsewhere: PARCEL_ELSEWHERE,
+  delivery: DELIVERY_PLACE,
+  detour: [DETOUR_ENTRY, ...DETOUR],
+  obstacle: OBSTACLE_BOX,
+  timeLimit: BEHAVIOR_TIME_LIMIT,
+};
+
+/** Straight-line distance [m] from the robot to the delivery place. */
+const deliveryDistance = (sample) =>
+  Math.hypot(DELIVERY_PLACE.x - sample.x, DELIVERY_PLACE.y - sample.y);
 
 // --- tracking: velocity, prediction, crossing -------------------------------------------------
 
@@ -415,6 +494,39 @@ const CURRENT_CLEARANCE = 0.47; // m; same rule using only the distance measured
 const CROSSING_ACCEL = 1.2; // m/s²
 const CROSSING_MAX_SPEED = 0.6; // m/s
 const QUESTIX_REL_SPEED = -0.6; // m/s of QUESTiX along the lane, seen from the other robot
+
+/**
+ * What the two waiting rules of the crossing topic look at, for the sample shown (for drawing:
+ * the simulation decides with the same formulas one step earlier). Distances are between the
+ * two centres, in metres.
+ * - `current`: the measured point now, and the radius it must stay out of.
+ * - `forecast`: when within `horizon` seconds the two come closest if QUESTiX keeps going, where
+ *   both are then, and the clearance that makes QUESTiX wait.
+ */
+function crossingForecast(sample, config) {
+  const velocity = sample.velocity ?? 0;
+  const relativeX = sample.obs.x - sample.x;
+  const relativeY = sample.obs.y + velocity * (sample.t - sample.obs.t) - sample.y;
+  const nearest = clamp(
+    -(relativeX * QUESTIX_REL_SPEED + relativeY * velocity) /
+      (QUESTIX_REL_SPEED * QUESTIX_REL_SPEED + velocity * velocity || 1),
+    0,
+    config.horizon ?? 1,
+  );
+  return {
+    current: {
+      gap: Math.hypot(relativeX, sample.obs.y - sample.y),
+      clearance: CURRENT_CLEARANCE,
+    },
+    forecast: {
+      after: nearest,
+      gap: Math.hypot(relativeX + QUESTIX_REL_SPEED * nearest, relativeY + velocity * nearest),
+      clearance: PREDICTED_CLEARANCE,
+      self: { x: sample.x - QUESTIX_REL_SPEED * nearest, y: sample.y },
+      other: { x: sample.obs.x, y: sample.y + relativeY + velocity * nearest },
+    },
+  };
+}
 
 // Where the other robot is at a given time; in the "turn" scenario it reverses at 4 s.
 const cartAt = (t, motion) => ({
@@ -437,12 +549,17 @@ function trackingStatus(topic, { contact, atGoal, stopping, hasVelocity }) {
 
 function trackingMetrics(topic, samples, errors, minDistance, end, contact) {
   const text = copy.tracking.metrics;
-  if (topic === 'crossing')
+  if (topic === 'crossing') {
+    const waitStart = samples.find((sample) => sample.status === STATUS.tracking.waitForOther);
     return [
       metric(text.closestGap, Math.max(0, minDistance), 'm'),
+      waitStart
+        ? metric(text.waitStartGap, waitStart.separation, 'm')
+        : metric(text.waitStartGap, text.neverWaited),
       metric(text.elapsed, end.t, '秒'),
       metric(text.contact, contact ? 'あり' : 'なし'),
     ];
+  }
   if (topic === 'velocity')
     return [
       metric(
@@ -470,11 +587,12 @@ function trackingMetrics(topic, samples, errors, minDistance, end, contact) {
   ];
 }
 
-function trackingOutcome(topic, config, success, contact) {
+function trackingOutcome(topic, config, samples, success, contact) {
   const text = copy.tracking.outcome;
   if (topic === 'crossing') {
+    const waited = samples.some((sample) => sample.status === STATUS.tracking.waitForOther);
     if (success) return text.crossingSuccess;
-    if (contact) return text.crossingContact;
+    if (contact) return waited ? text.crossingContact : text.crossingContactNoWait;
     return text.crossingTimedOut;
   }
   if (topic === 'velocity') return config.noise > 0 ? text.velocityNoisy : text.velocityClean;
@@ -611,7 +729,7 @@ function tracking(topic, config) {
     events,
     success,
     metrics: trackingMetrics(topic, samples, errors, minDistance, end, contact),
-    outcome: trackingOutcome(topic, config, success, contact),
+    outcome: trackingOutcome(topic, config, samples, success, contact),
   };
 }
 
@@ -644,6 +762,13 @@ function coordination(topic, config) {
   for (let step = 0; step <= COORDINATION_STEPS; step++) {
     const t = step * dt;
     const target = topic === 'feedback' && t >= TARGET_MOVES_AT ? MOVED_TARGET : FIRST_TARGET;
+    if (topic === 'feedback' && Math.abs(t - TARGET_MOVES_AT) < EPSILON)
+      events.push({
+        t,
+        kind: 'target-move',
+        label: text.events.targetMoveLabel,
+        text: text.events.targetMoveText,
+      });
     const reading = bodyToCamera(target);
     const looksAgain =
       topic === 'feedback' &&
@@ -679,21 +804,29 @@ function coordination(topic, config) {
   }
   const end = samples.at(-1);
   const success = end.error < REACHED_WITHIN;
+  const looks = events.filter((event) => !event.kind).length;
+  const metrics = [metric(text.metrics.tipToTarget, end.error, 'mm', 1)];
+  if (topic === 'feedback') metrics.push(metric(text.metrics.looks, looks, '回', 0));
   return {
     samples,
     events,
     success,
-    metrics: [
-      metric(text.metrics.tipToTarget, end.error, 'mm', 1),
-      metric(
-        text.metrics.estimateError,
-        Math.hypot(end.estimate.x - end.target.x, end.estimate.z - end.target.z),
-        'mm',
-        1,
-      ),
-    ],
-    outcome: success ? text.outcome.reached : text.outcome.missed,
+    metrics,
+    outcome: coordinationOutcome(topic, config, success, end, looks),
   };
+}
+
+function coordinationOutcome(topic, config, success, end, looks) {
+  const text = copy.coordination.outcome[topic];
+  const values = {
+    error: end.error.toFixed(0),
+    offset: Math.hypot(end.estimate.x - end.target.x, end.estimate.z - end.target.z).toFixed(0),
+    looks,
+  };
+  if (success) return fill(text.reached, values);
+  if (topic === 'frames' && !config.transform) return fill(text.missedRaw, values);
+  if (topic === 'feedback' && config.lookAgain === 'repeat') return fill(text.missedSlow, values);
+  return fill(text.missed, values);
 }
 
 // --- timing: delay, alignment, queue ----------------------------------------------------------
@@ -721,13 +854,15 @@ function timingMetrics(topic, samples, end, maxWallError) {
     metric(text.wallDistance, end.range, 'm'),
     metric(text.maxAge, Math.max(...samples.map((sample) => sample.age)), '秒'),
   ];
+  const contact = metric(text.contact, end.contact ? 'あり' : 'なし');
   if (topic === 'alignment') return [...shared, metric(text.maxWallError, maxWallError, 'm')];
   if (topic === 'queue')
     return [
       ...shared,
       metric(text.maxQueue, Math.max(...samples.map((sample) => sample.queue)), '件', 0),
+      contact,
     ];
-  return [...shared, metric(text.gapError, Math.abs(end.range - TARGET_GAP), 'm')];
+  return [...shared, metric(text.gapError, Math.abs(end.range - TARGET_GAP), 'm'), contact];
 }
 
 function timingOutcome(topic, config, contact, maxWallError) {
@@ -1033,6 +1168,106 @@ function canRestart(latched, causeCleared, operatorRequest) {
   return Boolean(latched && causeCleared && operatorRequest);
 }
 
+/**
+ * Why a latched stop happened, for the stop-release card: `{id, time, sentence}` where `id` is
+ * the kind of cause the learner has to recognise ('near' | 'stale' for the distance and missing
+ * topics, the event type 'bump' | 'impact' for the impact topic), or null when nothing latched.
+ */
+function stopCause(run) {
+  if (run.course !== 'diagnostics') return null;
+  const latch = run.samples.find((sample) => sample.latched);
+  if (!latch) return null;
+  const text = copy.diagnostics.causes;
+  const config = run.config;
+  const time = latch.t.toFixed(1);
+  if (run.topic === 'impact') {
+    const peak = Math.max(...run.samples.map((sample) => Math.abs(sample.accel)));
+    return {
+      id: config.eventType,
+      time: latch.t,
+      sentence: fill(text.imu, {
+        time,
+        value: peak.toFixed(1),
+        limit: config.impactLimit.toFixed(1),
+      }),
+    };
+  }
+  const reasons = copy.diagnostics.stopReasons;
+  if (latch.reason === reasons.dataStale)
+    return {
+      id: 'stale',
+      time: latch.t,
+      sentence: fill(text.stale, { time, value: latch.age.toFixed(2), limit: config.staleLimit }),
+    };
+  const used =
+    run.topic === 'missing'
+      ? latch.range
+      : Math.min(latch.lidar, config.sensorRule === 'both' ? latch.depth : Infinity);
+  const limit = run.topic === 'missing' ? RECORDED_STOP_RANGE : config.stopDistance;
+  return {
+    id: 'near',
+    time: latch.t,
+    sentence: fill(text.near, { time, value: used.toFixed(2), limit: limit.toFixed(2) }),
+  };
+}
+
+/**
+ * Consecutive events with the same text become one entry `{t, text, count, every}`: the time of
+ * the first, how many there were, and the spacing in seconds (null for a single event), so a
+ * repeated action ("行き先を更新" every 0.3 s) does not push the rare ones off the list.
+ */
+function groupEvents(events) {
+  const groups = [];
+  for (const event of events) {
+    const last = groups.at(-1);
+    if (last && last.text === event.text && !event.kind) {
+      last.count += 1;
+      last.every = (event.t - last.t) / (last.count - 1);
+      continue;
+    }
+    groups.push({ t: event.t, text: event.text, kind: event.kind, count: 1, every: null });
+  }
+  return groups;
+}
+
+const RATIO_DIGITS = 2;
+
+// One sentence comparing this run with the previous one, where a topic has a textbook
+// relation to show (F = ma, stopping distance ∝ v²); '' otherwise or when more than the
+// relevant setting changed.
+function compareRuns(run, previous) {
+  if (!previous || run.course !== 'mechanics') return '';
+  const text = copy.mechanics.compare;
+  const changed = Object.keys(run.config).filter((key) => run.config[key] !== previous.config[key]);
+  if (changed.length !== 1) return '';
+  const metricValue = (target, index) => target.metrics[index].value;
+  const ratio = (now, before) => (before ? (now / before).toFixed(RATIO_DIGITS) : '—');
+  if (run.topic === 'force' && (changed[0] === 'mass' || changed[0] === 'power')) {
+    const now = metricValue(run, 0);
+    const before = metricValue(previous, 0);
+    return fill(changed[0] === 'mass' ? text.mass : text.power, {
+      from: previous.config[changed[0]],
+      to: run.config[changed[0]],
+      before: before.toFixed(2),
+      now: now.toFixed(2),
+      ratio: ratio(now, before),
+    });
+  }
+  if (run.topic === 'braking' && changed[0] === 'initialSpeed') {
+    const now = metricValue(run, 1);
+    const before = metricValue(previous, 1);
+    return fill(text.speed, {
+      from: previous.config.initialSpeed.toFixed(1),
+      to: run.config.initialSpeed.toFixed(1),
+      speedRatio: ratio(run.config.initialSpeed, previous.config.initialSpeed),
+      before: before.toFixed(2),
+      now: now.toFixed(2),
+      ratio: ratio(now, before),
+    });
+  }
+  return '';
+}
+
 function simulateSystem(course, topic, input = {}) {
   const config = validateSystemConfig(course, topic, input);
   const run = SIMULATIONS[course](topic, config);
@@ -1065,6 +1300,12 @@ function systemCSV(run) {
 }
 
 export {
+  BEHAVIOR_PLACES,
+  deliveryDistance,
+  crossingForecast,
+  stopCause,
+  groupEvents,
+  compareRuns,
   validateSystemConfig,
   cameraToBody,
   bodyToCamera,

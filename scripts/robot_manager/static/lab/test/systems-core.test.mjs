@@ -95,23 +95,58 @@ const topics = Object.entries(SYSTEM_TOPICS).flatMap(([course, list]) =>
   list.map((topic) => [course, topic.id]),
 );
 
+// What the simulation computes is pinned to the baseline: the samples (and so the CSV), the
+// events' times and kinds, success and duration. The learner-facing wording of the results is
+// not: the readability pass (2026-09) deliberately rewrote the metrics and closing sentences so
+// they use the run's numbers and only show what a topic is about, and added the coordination
+// 'target-move' event; those are covered by test/systems-results.test.mjs instead.
+const NEW_EVENT_KINDS = ['target-move'];
+const pinned = (run) => ({
+  course: run.course,
+  topic: run.topic,
+  config: run.config,
+  samples: run.samples,
+  success: run.success,
+  duration: run.duration,
+  events: run.events
+    .filter((event) => !NEW_EVENT_KINDS.includes(event.kind))
+    .map((event) => [event.t, event.kind ?? null, event.x ?? null]),
+});
+
+// Settings whose allowed range was changed on purpose: the coordination camera angle is 0–30°
+// (the trigonometry tip is introduced with an upward tilt only). Outside these keys,
+// validateSystemConfig must still match the baseline.
+const RANGE_CHANGES = {
+  'coordination/frames': { cameraAngle: [0, 30] },
+  'coordination/calibrate': { cameraAngle: [0, 30] },
+};
+
 for (const [course, topic] of topics) {
   const inputs = [{}, ...(VARIATIONS[`${course}/${topic}`] || [])];
   test(`simulateSystem ${course}/${topic} matches the baseline`, () => {
     for (const input of inputs) {
-      const expected = baseline.simulateSystem(course, topic, input);
+      // Both are given the settings the current page allows, so a range change is not a
+      // simulation difference.
+      const effective = current.validateSystemConfig(course, topic, input);
+      const expected = baseline.simulateSystem(course, topic, effective);
       const actual = current.simulateSystem(course, topic, input);
-      assert.deepEqual(actual, expected, JSON.stringify(input));
+      assert.deepEqual(pinned(actual), pinned(expected), JSON.stringify(input));
       assert.equal(current.systemCSV(actual), baseline.systemCSV(expected));
     }
   });
   test(`validateSystemConfig ${course}/${topic} matches the baseline`, () => {
+    const changes = RANGE_CHANGES[`${course}/${topic}`] ?? {};
     const odd = [{}, { unknown: 1 }, ...inputs.map((input) => ({ ...input, noise: 'x' }))];
-    for (const input of odd)
-      assert.deepEqual(
-        current.validateSystemConfig(course, topic, input),
-        baseline.validateSystemConfig(course, topic, input),
-      );
+    for (const input of odd) {
+      const actual = current.validateSystemConfig(course, topic, input);
+      const expected = baseline.validateSystemConfig(course, topic, input);
+      for (const [key, [low, high]] of Object.entries(changes)) {
+        assert.ok(actual[key] >= low && actual[key] <= high, `${key} in ${low}..${high}`);
+        delete actual[key];
+        delete expected[key];
+      }
+      assert.deepEqual(actual, expected);
+    }
   });
 }
 

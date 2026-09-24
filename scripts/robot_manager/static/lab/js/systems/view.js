@@ -1,18 +1,21 @@
 import { html, nothing, unsafeHTML, live } from '../vendor/lit-html.js';
+import { decimalsOf } from '../core/chart-scale.js';
 import { lessonBrief } from '../shell/lesson-brief.js';
 import { schoolTips } from '../shell/school-tips.js';
-import { systemScene, systemChart, SYSTEM_CHARTS } from './render.js';
+import { systemScene, systemChart, stateDiagram, SYSTEM_CHARTS } from './render.js';
 import { systemEvidence } from './narration.js';
 
 // Templates of the six "systems" courses. Every function is pure: it turns the model built by
-// ui.js (selected topic, experiment state, playback, draft settings) into markup. Learner-facing
-// sentences come from content/systems/ui.json (`copy`); only short labels live here.
+// ui.js (selected topic, experiment state, playback, draft settings, measured figure widths) into
+// markup. Learner-facing sentences come from content/systems/ui.json (`copy`); only short labels
+// live here.
 
 const PLAYBACK_SPEEDS = [1, 2, 4];
 const LAST_TOPIC_POSITION = 2; // three topics per course; the last one leads to the quiz
 
 // Which charts a topic offers (in index order) and which one it opens with.
 const TOPIC_CHARTS = {
+  'mechanics/force': { shown: [0, 1, 2], initial: 0 },
   'tracking/velocity': { shown: [0, 3], initial: 0 },
   'tracking/prediction': { shown: [0, 1, 3], initial: 1 },
   'tracking/crossing': { shown: [2], initial: 2 },
@@ -61,6 +64,27 @@ function chapterNav(model, actions) {
   </nav>`;
 }
 
+// On a phone the lesson brief is long: the first thing to try and a start button come first.
+function quickStart(model, copy, actions) {
+  return html`<section class="sys-quickstart" aria-label=${copy.quickStart.title}>
+    <h2>${copy.quickStart.title}</h2>
+    <p>${model.topic.first}</p>
+    <div class="sys-quickstart-actions">
+      <button
+        class="primary"
+        data-sys-quickrun
+        ?disabled=${model.playing || model.releaseNeeded}
+        @click=${actions.quickRun}
+      >
+        ${runButtonLabel(model, copy)}
+      </button>
+      <a href="#${model.course}-settings" @click=${actions.showSettings}
+        >${copy.quickStart.settings}</a
+      >
+    </div>
+  </section>`;
+}
+
 function statusText(model, copy) {
   if (!model.started) return copy.observation.statusBefore;
   if (model.playing) return model.sample.status;
@@ -70,6 +94,7 @@ function statusText(model, copy) {
 
 function driveReading(model) {
   const drive = model.drive;
+  const fields = drive?.fields ?? [];
   return html`<div
     class="sys-drive"
     data-sys-drive
@@ -80,7 +105,22 @@ function driveReading(model) {
       <span data-sys-drive-label>${drive?.label ?? ''}</span
       ><strong data-sys-drive-value>${drive?.value ?? ''}</strong>
     </div>
-    <p data-sys-drive-text>${drive?.text ?? ''}</p>
+    <div class="sys-drive-body">
+      <p data-sys-drive-text>${drive?.text ?? ''}</p>
+      ${
+        fields.length
+          ? html`<dl class="sys-drive-fields">
+              ${fields.map(
+                (field) =>
+                  html`<div>
+                    <dt>${field.label}</dt>
+                    <dd>${field.value}</dd>
+                  </div>`,
+              )}
+            </dl>`
+          : nothing
+      }
+    </div>
   </div>`;
 }
 
@@ -112,7 +152,7 @@ function playbar(model, copy, actions) {
     >
     <button
       data-sys-transition
-      ?hidden=${!model.drive?.event}
+      ?hidden=${!model.drive?.event || !model.drive?.replay}
       ?disabled=${!model.started}
       @click=${actions.replayTransition}
     >
@@ -139,28 +179,36 @@ function playbar(model, copy, actions) {
         @pointercancel=${actions.refresh}
       /><span class="sys-seek-time" data-sys-seektime>${seekTime}</span></label
     >
+    ${model.fastForward ? html`<p class="sys-fast" role="status">${copy.playbar.fastForward}</p>` : nothing}
     <p class="sys-seek-hint" id=${hintId} data-sys-seekhint>${seekHint}</p>
   </div>`;
 }
 
+// One chart: a heading when the topic has only one, a choice when it has several.
+function chartPicker(model, copy, actions) {
+  if (model.chartChoices.length === 1)
+    return html`<h3 class="sys-chart-title">
+      ${fillTemplate(copy.observation.chartSingle, { title: model.chartChoices[0].title })}
+    </h3>`;
+  return html`<label class="sys-chart-pick"
+    >${copy.observation.chartPick}
+    <select data-sys-chart @change=${(event) => actions.selectChart(Number(event.target.value))}>
+      ${model.chartChoices.map(
+        (choice) =>
+          html`<option value=${choice.index} ?selected=${choice.index === model.chartIndex}>
+            ${choice.title}
+          </option>`,
+      )}
+    </select></label
+  >`;
+}
+
 function chartSection(model, copy, actions) {
   return html`<div class="sys-data">
-    <label
-      >確認するグラフ
-      <select data-sys-chart @change=${(event) => actions.selectChart(Number(event.target.value))}>
-        ${model.chartChoices.map(
-          (choice) =>
-            html`<option value=${choice.index} ?selected=${choice.index === model.chartIndex}>
-              ${choice.title}
-            </option>`,
-        )}
-      </select></label
-    >
+    ${chartPicker(model, copy, actions)}
     <div data-sys-chartview>
-      ${systemChart(model.run, model.index, model.chartIndex, model.previous)}
+      ${systemChart(model.run, model.index, model.chartIndex, model.previous, model.figure)}
     </div>
-    <div data-sys-evidence>${systemEvidence(model.run, model.index, model.started)}</div>
-    <p class="muted">${copy.observation.chartNote}</p>
   </div>`;
 }
 
@@ -170,8 +218,39 @@ function eventList(model, copy) {
     return html`<li>${text}</li>`;
   }
   return model.events.map(
-    (event) => html`<li><time>${event.t.toFixed(1)}秒</time>${event.text}</li>`,
+    (event) =>
+      html`<li ?data-kind=${Boolean(event.kind)}>
+        <time>${event.t.toFixed(1)}秒</time
+        ><span
+          >${event.text}${
+            event.count > 1
+              ? html`<small
+                  >${fillTemplate(copy.observation.repeated, {
+                    count: event.count,
+                    every: event.every.toFixed(1),
+                  })}</small
+                >`
+              : nothing
+          }</span
+        >
+      </li>`,
   );
+}
+
+// The event list and (behaviour) the state diagram appear twice: under the scene on narrow
+// screens, in the free column under the settings on wide ones. CSS shows one of the two.
+function sideParts(model, copy, place) {
+  return html`<div class="sys-side" data-place=${place}>
+    ${model.course === 'behavior' ? stateDiagram(model.run, model.index) : nothing}
+    <div class="sys-events">
+      <h3 data-lesson-cue=${place === 'inline' ? 'observe' : nothing}>
+        ${copy.observation.eventsTitle}
+      </h3>
+      <ol data-sys-events=${place}>
+        ${eventList(model, copy)}
+      </ol>
+    </div>
+  </div>`;
 }
 
 function observationCard(model, copy, actions) {
@@ -181,16 +260,18 @@ function observationCard(model, copy, actions) {
       ><span data-sys-clock>${seconds(model.sample.t)}</span>
     </div>
     ${driveReading(model)}
-    <div data-sys-scene>${systemScene(model.run, model.index)}</div>
-    ${playbar(model, copy, actions)}
-    <p class="sys-reading">${model.topic.observe}</p>
-    ${chartSection(model, copy, actions)}
-    <div class="sys-events">
-      <h3 data-lesson-cue="observe">${copy.observation.eventsTitle}</h3>
-      <ol data-sys-events>
-        ${eventList(model, copy)}
-      </ol>
+    <div class="sys-figures">
+      <div class="sys-figure-scene" data-sys-scene>
+        ${systemScene(model.run, model.index, model.figure)}
+      </div>
+      ${chartSection(model, copy, actions)}
     </div>
+    ${playbar(model, copy, actions)}
+    <div class="sys-evidence" data-sys-evidence>
+      ${systemEvidence(model.run, model.index, model.started)}
+    </div>
+    <p class="sys-reading">${model.topic.observe}</p>
+    ${sideParts(model, copy, 'inline')}
   </section>`;
 }
 
@@ -208,10 +289,11 @@ function checkField(control, id, value, actions) {
   >`;
 }
 
-function selectField(control, id, value, actions) {
+function selectField(control, id, value, actions, disabled) {
   return html`<select
     id=${id}
     data-setting=${control.key}
+    ?disabled=${disabled}
     @change=${(event) => actions.editSetting(control.key, event.target.value)}
   >
     ${control.options.map(
@@ -221,31 +303,49 @@ function selectField(control, id, value, actions) {
   </select>`;
 }
 
-function numberField(control, id, value, actions) {
-  return html`<input
-    id=${id}
-    data-setting=${control.key}
-    type="number"
-    min=${control.min}
-    max=${control.max}
-    step=${control.step}
-    .value=${live(String(value))}
-    @change=${(event) => actions.editSetting(control.key, event.target.value)}
-  />`;
+// A bounded number is a slider with its value and range next to it: no keyboard needed on a
+// phone, and the learner sees how far the setting can go.
+function sliderField(control, id, value, actions, disabled) {
+  const digits = decimalsOf(control.step);
+  const shown = Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : String(value);
+  const unit = control.unit ? ' ' + control.unit : '';
+  return html`<span class="sys-slider"
+      ><input
+        id=${id}
+        data-setting=${control.key}
+        type="range"
+        min=${control.min}
+        max=${control.max}
+        step=${control.step}
+        .value=${live(String(value))}
+        ?disabled=${disabled}
+        @input=${(event) => actions.editSetting(control.key, event.target.value)}
+      /><output for=${id}>${shown}${unit}</output></span
+    ><span class="sys-range"
+      >${Number(control.min).toFixed(digits)}〜${Number(control.max).toFixed(digits)}${unit}</span
+    >`;
+}
+
+// A setting that does nothing with the current choice of another one is disabled, with the reason.
+function disabledReason(model, control) {
+  const rule = control.disabledUnless;
+  if (!rule) return null;
+  return model.draft[rule.key] === rule.value ? null : control.disabledNote;
 }
 
 function settingField(model, control, actions) {
   const id = `sys-${model.course}-${control.key}`;
   const value = model.draft[control.key];
   if (control.type === 'check') return checkField(control, id, value, actions);
+  const reason = disabledReason(model, control);
   const input =
     control.type === 'select'
-      ? selectField(control, id, value, actions)
-      : numberField(control, id, value, actions);
-  return html`<label class="sys-field" for=${id}
-    ><span>${control.label}${control.unit ? `（${control.unit}）` : ''}</span>${input}${
-      control.note ? html`<small>${control.note}</small>` : nothing
-    }</label
+      ? selectField(control, id, value, actions, Boolean(reason))
+      : sliderField(control, id, value, actions, Boolean(reason));
+  return html`<label class="sys-field" for=${id} ?data-off=${Boolean(reason)}
+    ><span>${control.label}</span>${input}${
+      reason ? html`<small class="sys-off-reason">${reason}</small>` : nothing
+    }${control.note ? html`<small>${control.note}</small>` : nothing}</label
   >`;
 }
 
@@ -293,15 +393,15 @@ function pairTable(pairs, copy) {
     <thead>
       <tr>
         <th>目印</th>
-        <th>カメラの向きが基準<br />前, 上</th>
-        <th>根元から<br />横, 高さ</th>
+        <th>カメラから<br />d 前, h 上</th>
+        <th>根元から<br />x 横, z 高さ</th>
       </tr>
     </thead>
     <tbody>
       ${pairs.map(
         (pair, index) =>
           html`<tr>
-            <th>${index + 1}</th>
+            <th>${'①②③'[index] ?? index + 1}</th>
             <td>${pair.camera.x.toFixed(1)}, ${pair.camera.z.toFixed(1)}</td>
             <td>${pair.body.x}, ${pair.body.z}</td>
           </tr>`,
@@ -311,7 +411,7 @@ function pairTable(pairs, copy) {
 }
 
 function settingsPanel(model, copy, actions) {
-  return html`<aside class="card sys-settings">
+  return html`<aside class="card sys-settings" id="${model.course}-settings">
     <h2 data-lesson-cue="action">${copy.settings.title}</h2>
     <form data-sys-form @submit=${actions.submitSettings}>
       <fieldset ?disabled=${model.playing}>
@@ -363,6 +463,12 @@ function manyChangedNote(result, model, copy) {
   return html`<p class="muted">${text}</p>`;
 }
 
+function previousMetric(result, index, copy) {
+  const before = result.previous?.metrics[index];
+  if (!before) return nothing;
+  return html`<small>${copy.results.previous}${metricText(before)}</small>`;
+}
+
 function resultCard(model, copy) {
   const result = model.result;
   if (!result)
@@ -374,18 +480,14 @@ function resultCard(model, copy) {
     ></section>`;
   return html`<section class="card sys-result" data-sys-result aria-live="polite">
     <h2 data-lesson-cue="result">${copy.results.title}</h2>
-    <p>${result.outcome}</p>
+    <p class="sys-result-outcome">${result.outcome}</p>
+    ${result.comparison ? html`<p class="sys-result-compare">${result.comparison}</p>` : nothing}
     <div class="sys-metrics">
       ${result.metrics.map(
         (metric, index) =>
           html`<div>
-            <span>${metric.label}</span><strong>${metricText(metric)}</strong>${
-              result.previous
-                ? html`<small
-                    >${copy.results.previous}${metricText(result.previous.metrics[index])}</small
-                  >`
-                : nothing
-            }
+            <span>${metric.label}</span
+            ><strong>${metricText(metric)}</strong>${previousMetric(result, index, copy)}
           </div>`,
       )}
     </div>
@@ -394,19 +496,35 @@ function resultCard(model, copy) {
   </section>`;
 }
 
+// Before releasing a latched stop, the learner reads what the robot recorded and picks the cause.
 function restartCard(model, copy, actions) {
   const restart = model.restart;
+  const cause = restart.cause;
+  const options = copy.restart.causes[model.topic.id] ?? copy.restart.causes.default;
+  const feedback = () => {
+    if (!restart.picked) return '';
+    return restart.cleared ? copy.restart.right : copy.restart.wrong;
+  };
   return html`<section class="card sys-restart" data-sys-restart ?hidden=${!restart.visible}>
     <h2>${restart.released ? copy.restart.released : copy.restart.held}</h2>
+    ${cause ? html`<p class="sys-restart-cause">${cause.sentence}</p>` : nothing}
     <p>${copy.restart.text}</p>
-    <label class="sys-check"
-      ><input
-        type="checkbox"
-        data-sys-cleared
-        .checked=${live(restart.cleared)}
-        @change=${(event) => actions.confirmCleared(event.target.checked)}
-      />${copy.restart.cleared}</label
-    >
+    <fieldset class="sys-cause" ?disabled=${restart.released}>
+      <legend>${copy.restart.question}</legend>
+      ${options.map(
+        ([id, text]) =>
+          html`<label class="sys-check"
+            ><input
+              type="radio"
+              name="${model.course}-cause"
+              data-sys-cause=${id}
+              .checked=${live(restart.picked === id)}
+              @change=${() => actions.pickCause(id)}
+            /><span>${text}</span></label
+          >`,
+      )}
+    </fieldset>
+    <p class="sys-cause-feedback" role="status" ?data-right=${restart.cleared}>${feedback()}</p>
     <button data-sys-release ?disabled=${!restart.releaseEnabled} @click=${actions.release}>
       ${copy.restart.release}
     </button>
@@ -505,10 +623,11 @@ function systemPage(model, copy, actions) {
       </p>
       <h1>${model.topic.title}</h1>
     </div>
-    ${chapterNav(model, actions)}
+    ${chapterNav(model, actions)} ${quickStart(model, copy, actions)}
     ${unsafeHTML(lessonBrief(lessonKey, model.topic) + schoolTips(lessonKey))}
     <div class="sys-workspace">
       ${observationCard(model, copy, actions)} ${settingsPanel(model, copy, actions)}
+      ${sideParts(model, copy, 'aside')}
     </div>
     ${resultCard(model, copy)} ${restartCard(model, copy, actions)}
     <div class="sys-bottom">${historyCard(model, copy, actions)} ${realRobotCard(model, copy)}</div>

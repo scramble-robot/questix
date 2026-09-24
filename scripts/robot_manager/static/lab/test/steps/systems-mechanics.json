@@ -2,7 +2,7 @@
   { "click": "#mechanicsPage [data-sys-run]", "frames": 240 },
   { "click": "#mechanicsPage [data-sys-pause]" },
   { "input": "#mechanicsPage [data-sys-speed]", "value": "4" },
-  { "input": "#mechanicsPage [data-sys-chart]", "value": "3" },
+  { "input": "#mechanicsPage [data-sys-chart]", "value": "2" },
   { "click": "#mechanicsPage [data-sys-pause]", "frames": 400 },
   { "click": "#mechanicsPage [data-sys-transition]", "frames": 60 },
   { "input": "#mechanicsPage [data-sys-seek]", "value": "20" },

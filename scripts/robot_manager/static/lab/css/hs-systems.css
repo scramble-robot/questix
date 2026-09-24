@@ -1,1 +1,563 @@
 /* High-school readability pass: systems (see CONTRIBUTING.md, "Figures and charts"). */
+
+/* --- workspace: the observation card beside the settings, events under the settings ------- */
+.sys-workspace {
+  grid-template-rows: auto 1fr;
+}
+.sys-workspace > .sys-observation {
+  grid-row: 1 / span 2;
+}
+.sys-workspace > .sys-side {
+  grid-column: 2;
+  grid-row: 2;
+  align-self: start;
+}
+.sys-side[data-place='aside'] {
+  background: var(--panel, #fff);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 18px 0 4px;
+}
+.sys-observation .sys-side[data-place='inline'] {
+  display: none;
+}
+@media (max-width: 800px) {
+  .sys-workspace > .sys-observation {
+    grid-row: auto;
+  }
+  .sys-workspace > .sys-side[data-place='aside'] {
+    display: none;
+  }
+  .sys-observation .sys-side[data-place='inline'] {
+    display: block;
+  }
+}
+
+/* --- phone: the first thing to try and the start button before the long brief ------------- */
+.sys-quickstart {
+  display: none;
+}
+@media (max-width: 800px) {
+  .sys-quickstart {
+    display: block;
+    margin: 0 0 18px;
+    padding: 16px;
+    border: 1px solid #b9d3cb;
+    border-radius: 12px;
+    background: #f1f8f5;
+  }
+  .sys-quickstart h2 {
+    font-size: 16px;
+    margin: 0 0 6px;
+  }
+  .sys-quickstart p {
+    font-size: 14px;
+    line-height: 1.8;
+    margin: 0 0 12px;
+  }
+  .sys-quickstart-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 16px;
+  }
+  .sys-quickstart-actions a {
+    font-size: 14px;
+  }
+}
+
+/* --- figures ----------------------------------------------------------------------------- */
+.sys-observation svg.sys-swatch,
+.sys-swatch {
+  display: inline-block;
+  flex: none;
+  width: 24px;
+  height: 12px;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+.sys-scene-svg {
+  background: #1b303b;
+}
+[data-sys-scene] {
+  background: #1b303b;
+}
+.sys-readouts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 22px;
+  margin: 0;
+  padding: 12px 20px 4px;
+  background: #1b303b;
+  color: #dce8ec;
+}
+.sys-readouts > div {
+  display: grid;
+  gap: 2px;
+}
+.sys-readouts dt {
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+  color: #b9ccd3;
+}
+.sys-readouts dd {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.sys-scene-key {
+  list-style: none;
+  margin: 0;
+  padding: 8px 20px 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  background: #1b303b;
+  color: #c9d8de;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.sys-scene-key li {
+  display: flex;
+  align-items: center;
+}
+.sys-tracking-key {
+  font-size: 13px;
+}
+.sys-tracking-key > span {
+  grid-template-columns: 30px 1fr;
+}
+.sys-tracking-stamp {
+  font-size: 12px;
+}
+@media (max-width: 600px) {
+  .sys-readouts {
+    padding: 10px 14px 2px;
+    gap: 6px 16px;
+  }
+  .sys-readouts dd {
+    font-size: 16px;
+  }
+  .sys-scene-key {
+    padding: 6px 14px 12px;
+    font-size: 12px;
+  }
+}
+
+/* timing: ① measured → ② received → ③ used, on a short time axis ending now */
+.sys-timeband,
+.sys-queue {
+  background: #1b303b;
+  color: #dce8ec;
+  padding: 12px 20px 4px;
+}
+.sys-timeband p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.sys-timeband-title {
+  color: #b9ccd3;
+  font-size: 12px !important;
+}
+.sys-timeline {
+  position: relative;
+  height: 14px;
+  margin: 8px 6px 4px;
+  border-bottom: 2px solid #5f7b86;
+}
+.sys-timeline-age {
+  position: absolute;
+  top: 3px;
+  height: 8px;
+  background: #4f86e0;
+  opacity: 0.55;
+  border-radius: 4px;
+}
+.sys-timeline-mark {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 14px;
+  margin-left: -1px;
+  background: #f4f8f9;
+}
+.sys-timeband-stages {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 4px 0 6px;
+  padding: 0;
+}
+.sys-timeband-stages li {
+  display: grid;
+  gap: 2px;
+}
+.sys-timeband-stages span {
+  font-size: 12px;
+  color: #b9ccd3;
+}
+.sys-timeband-stages strong {
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+.sys-timeband-age {
+  font-weight: 600;
+  color: #9fc2ff;
+}
+.sys-queue-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 6px 0;
+}
+.sys-queue-box {
+  display: inline-block;
+  width: 12px;
+  height: 16px;
+  border-radius: 3px;
+  background: #c9d3d8;
+  opacity: 0.85;
+}
+.sys-queue-using {
+  font-size: 12px;
+  padding: 2px 8px;
+  margin-right: 6px;
+  border-radius: 4px;
+  background: #4f86e0;
+  color: #fff;
+}
+.sys-queue-more,
+.sys-queue-note {
+  font-size: 12px;
+  color: #b9ccd3;
+  margin: 0;
+}
+@media (max-width: 600px) {
+  .sys-timeband,
+  .sys-queue {
+    padding: 10px 14px 2px;
+  }
+}
+
+/* the decision panel above the scene: stacked on a phone, key numbers as fields */
+.sys-drive-body {
+  display: grid;
+  gap: 8px;
+}
+.sys-drive-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  margin: 0;
+}
+.sys-drive-fields > div {
+  display: grid;
+  gap: 1px;
+}
+.sys-drive-fields dt {
+  font-size: 12px;
+  color: #b9ccd3;
+}
+.sys-drive-fields dd {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 600px) {
+  .sys-drive {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .sys-drive-reading {
+    grid-template-columns: auto 1fr;
+    align-items: baseline;
+    gap: 10px;
+  }
+  .sys-drive-reading strong {
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+  }
+}
+
+/* charts: axis titles and legend in HTML, the plot drawn at the width it is shown */
+.sys-data {
+  padding: 16px 22px 10px;
+}
+.sys-chart-title {
+  font-size: 15px;
+  margin: 0 0 8px;
+}
+.sys-chart-pick {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+  flex-wrap: wrap;
+  margin: 0 0 8px;
+}
+.sys-chart-pick select {
+  max-width: 100%;
+}
+.sys-chart {
+  margin: 0;
+}
+.sys-chart-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.sys-chart-yaxis,
+.sys-chart-xaxis {
+  margin: 0;
+  font-size: 13px;
+  color: #3f565f;
+  font-weight: 600;
+}
+.sys-chart-xaxis {
+  text-align: center;
+}
+ul.sys-chart-legend {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  padding: 0;
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+ul.sys-chart-legend li {
+  display: flex;
+  align-items: center;
+}
+.sys-chart-note {
+  font-size: 13px;
+  line-height: 1.8;
+  color: #4f6670;
+  margin: 6px 0 0;
+}
+.sys-reading {
+  font-size: 14px;
+}
+.sys-fast {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 13px;
+  color: #8a5a12;
+}
+@media (max-width: 600px) {
+  .sys-data {
+    padding: 12px 12px 8px;
+  }
+}
+
+/* events: repeated ones grouped, rare ones stand out */
+.sys-events small {
+  display: block;
+  color: #6a7f87;
+  font-size: 12px;
+}
+.sys-events li[data-kind] span {
+  font-weight: 650;
+  color: #2f4850;
+}
+.sys-events ol {
+  font-size: 14px;
+}
+
+/* behaviour: the states and the conditions that change them */
+.sys-states {
+  margin: 0;
+  padding: 14px 20px 6px;
+}
+.sys-observation .sys-states {
+  border-bottom: 1px solid var(--line);
+}
+.sys-states figcaption {
+  font-size: 15px;
+  font-weight: 650;
+  margin-bottom: 8px;
+}
+.sys-states-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 4px 6px;
+  align-items: center;
+}
+.sys-state {
+  border: 2px solid #9fb3b9;
+  border-radius: 10px;
+  padding: 8px 6px;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.4;
+  background: #fff;
+}
+.sys-state small {
+  display: block;
+  font-size: 12px;
+  color: #1a7a57;
+}
+.sys-state[aria-current='step'] {
+  border: 3px solid #1a9e6e;
+  background: #e6f5ee;
+  font-weight: 700;
+}
+.sys-state[data-unused] {
+  border-style: dashed;
+  color: #7a8b91;
+}
+.sys-edges {
+  display: grid;
+  gap: 2px;
+}
+.sys-edge {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #3f565f;
+  text-align: center;
+}
+.sys-edge > span {
+  display: block;
+  font-size: 16px;
+  line-height: 1.1;
+}
+.sys-edge[data-active] {
+  color: #1a7a57;
+  font-weight: 700;
+}
+.sys-edge[data-unused] {
+  color: #8a9aa0;
+}
+.sys-edge small {
+  display: block;
+  font-size: 12px;
+}
+
+/* settings: sliders with value and range; a setting with no effect says why */
+.sys-slider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.sys-field .sys-slider input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  min-height: 30px;
+  accent-color: #437f72;
+  background: transparent;
+}
+.sys-slider output {
+  min-width: 76px;
+  text-align: right;
+  font-size: 17px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.sys-range {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted);
+}
+.sys-field[data-off] > span:first-child,
+.sys-field[data-off] output {
+  color: #8a9aa0;
+}
+.sys-off-reason {
+  color: #8a5a12 !important;
+}
+
+/* results and the stop-release card */
+.sys-result-outcome {
+  font-size: 15px !important;
+  font-weight: 600;
+}
+.sys-result-compare {
+  padding: 10px 14px;
+  border-left: 4px solid #1a9e6e;
+  background: #f1f8f5;
+}
+.sys-restart-cause {
+  font-weight: 650;
+  padding: 10px 14px;
+  border-left: 4px solid #c62828;
+  background: #fff;
+}
+.sys-cause {
+  border: 0;
+  padding: 0;
+  margin: 12px 0;
+}
+.sys-cause legend {
+  font-size: 14px;
+  font-weight: 650;
+  margin-bottom: 4px;
+}
+.sys-cause .sys-check {
+  margin: 8px 0;
+}
+.sys-cause-feedback {
+  color: #95583f;
+  font-weight: 600;
+}
+.sys-cause-feedback[data-right] {
+  color: #1a7a57;
+}
+.sys-field small,
+.sys-check small {
+  font-size: 12px;
+}
+
+/* scene and chart together: side by side where the card is wide, one under the other on a phone */
+.sys-observation {
+  container-type: inline-size;
+}
+.sys-figures {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+.sys-figure-scene {
+  min-width: 0;
+  background: #1b303b;
+}
+@container (min-width: 700px) {
+  .sys-figures {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+  .sys-figures > .sys-data {
+    padding: 12px 16px 8px;
+  }
+}
+.sys-evidence:not(:has(*)) {
+  display: none;
+}
+.sys-evidence {
+  padding: 0 22px;
+}
+@media (max-width: 600px) {
+  .sys-readouts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(76px, 1fr));
+  }
+  .sys-readouts dd {
+    font-size: 15px;
+  }
+  .sys-scene-key {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2px 10px;
+  }
+  .sys-evidence {
+    padding: 0 12px;
+  }
+}

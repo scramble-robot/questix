@@ -10,16 +10,19 @@ import { fillSentence as fill } from '../core/content.js';
 const copy = await loadJson('content/systems/narration.json');
 // The run's status names are defined once, in content/systems/core.json (as core.js emits them).
 const { status: STATUS } = await loadJson('content/systems/core.json');
+// Behaviour status names back to the state they stand for (toParcel, waiting, ...).
+const STATE_IDS = Object.fromEntries(
+  Object.entries(STATUS.behavior).map(([id, name]) => [name, id]),
+);
 
 const DATA_LOSS_TIME = 1.5; // seconds; diagnostics/missing stops receiving new ranges here
 const SHOCK_TIME = 2; // seconds; diagnostics/impact plays its event here
 const QUEUE_BACKLOG = 10; // items waiting before the timing/queue reading counts as falling behind
 const WALL_TOLERANCE = 1e-8; // metres; below this the map and the real wall are the same place
-const EQUATION_DIGITS = 4; // an equation shows its terms as measured, without padding
 
 const num = (value, digits = 2) => (Number.isFinite(value) ? value.toFixed(digits) : '—');
-// Equation terms keep their exact value: 4.2 stays "4.2", not "4.2000".
-const amount = (value) => String(Number(value.toFixed(EQUATION_DIGITS)));
+// Every term of an equation has the same two decimals, so the columns of a sum line up.
+const amount = (value) => value.toFixed(2);
 
 // Before the first run every reading is in its neutral "ready" state.
 const modeOf = (started, running) => (started ? running : 'ready');
@@ -92,11 +95,17 @@ function stopDistanceReading(config, sample, started) {
     rule: bothSensors ? text.bothSensors : text.lidarOnly,
     limit: num(config.stopDistance),
   });
+  const shown = (range) => (started ? num(range) + ' m' : copy.unknown);
   return {
     label: text.label,
     value: value(),
     mode: sample.contact || sample.latched ? 'brake' : 'ready',
     text: rule + detail(),
+    fields: [
+      { label: text.lidarField, value: shown(sample.lidar) },
+      { label: text.cameraField, value: shown(sample.depth) },
+      { label: text.limitField, value: num(config.stopDistance) + ' m' },
+    ],
   };
 }
 
@@ -122,6 +131,11 @@ function staleDataReading(config, sample, started) {
     value: value(),
     mode: fresh ? 'ready' : 'coast',
     text: explanation(),
+    fields: [
+      { label: text.lastRangeField, value: started ? num(sample.range) + ' m' : copy.unknown },
+      { label: text.ageField, value: started ? num(sample.age) + ' 秒' : copy.unknown },
+      { label: text.currentField, value: started ? num(sample.depth) + ' m' : copy.unknown },
+    ],
   };
 }
 
@@ -146,6 +160,10 @@ function impactReading(config, sample, started) {
     value: value(),
     mode: sample.latched ? 'brake' : 'ready',
     text: explanation(),
+    fields: [
+      { label: text.accelField, value: started ? num(sample.accel, 1) + ' m/秒²' : copy.unknown },
+      { label: text.limitField, value: '±' + num(config.impactLimit, 1) + ' m/秒²' },
+    ],
   };
 }
 
@@ -183,11 +201,18 @@ function predictionReading(config, sample, started) {
       target: num(sample.predicted.targetTime, 1),
     });
   };
+  const known = started && sample.predicted;
   return {
-    label: text.label,
-    value: fill(text.value, { horizon: num(config.horizon, 1) }),
+    label: fill(text.label, { horizon: num(config.horizon, 1) }),
+    value: known ? num(sample.predicted.y) + text.unit : copy.unknown,
     mode: 'ready',
     text: explanation(),
+    fields: known
+      ? [
+          { label: text.measuredField, value: num(sample.obs.y) + text.unit },
+          { label: text.targetField, value: num(sample.predicted.targetTime, 1) + ' 秒' },
+        ]
+      : [],
   };
 }
 
@@ -266,14 +291,66 @@ function timingReading(run, index, started) {
   return delayReading(run.config, sample, started);
 }
 
+// The state now, and what makes it change: the condition sentence is per state and topic.
+function behaviorReading(run, index, started) {
+  const text = copy.behavior;
+  const sample = run.samples[index];
+  const state = STATE_IDS[sample.status];
+  const conditions = text.next[run.topic] ?? text.next.sequence;
+  const changes = run.events.filter((event) => event.t > 0);
+  // Replay the change shown last, or, before any has happened, the first one to come.
+  const event = changes.findLast((entry) => entry.t <= sample.t + 1e-8) ?? changes[0];
+  return {
+    event,
+    label: text.label,
+    value: started ? sample.status : copy.unknown,
+    mode: sample.status === STATUS.behavior.waiting ? 'coast' : 'ready',
+    text: started
+      ? fill(conditions[state] ?? text.next.done, { timeout: num(run.config.timeout, 1) })
+      : text.before,
+    replay: text.replay,
+  };
+}
+
+function coordinationReading(run, index, started) {
+  const text = copy.coordination;
+  const sample = run.samples[index];
+  const explanation = () => {
+    if (!started) return text.before[run.topic];
+    return fill(text.looked, { time: num(sample.lastLook, 1) });
+  };
+  const event = run.events.find((entry) => entry.kind === 'target-move');
+  return {
+    event,
+    label: text.label,
+    value: started
+      ? fill(text.value, { x: num(sample.estimate.x, 0), z: num(sample.estimate.z, 0) })
+      : copy.unknown,
+    mode: 'ready',
+    text: explanation(),
+    fields: [
+      {
+        label: text.errorField,
+        value: started ? num(sample.error, 0) + ' mm' : copy.unknown,
+      },
+      {
+        label: text.objectField,
+        value: fill(text.value, { x: num(sample.target.x, 0), z: num(sample.target.z, 0) }),
+      },
+    ],
+    replay: event ? text.replay : undefined,
+  };
+}
+
 const READINGS = {
   mechanics: mechanicsReading,
   diagnostics: diagnosticsReading,
   tracking: trackingReading,
   timing: timingReading,
+  behavior: behaviorReading,
+  coordination: coordinationReading,
 };
 
-// The behaviour and coordination courses have no live reading; their panel stays hidden.
 function systemState(run, index, started = true) {
   const reading = READINGS[run.course];
   return reading ? reading(run, index, started) : null;

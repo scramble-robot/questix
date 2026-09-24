@@ -8,6 +8,9 @@ import {
   calibrationPairs,
   fitCameraTransform,
   canRestart,
+  stopCause,
+  groupEvents,
+  compareRuns,
 } from './core.js';
 import { systemState } from './narration.js';
 import { systemPage, initialChart, chartChoices } from './view.js';
@@ -25,6 +28,9 @@ const MAX_EVENTS_SHOWN = 6;
 const TIME_EPSILON = 1e-8; // seconds; sample times are multiples of 0.05 with rounding noise
 const LAST_TOPIC_POSITION = 2; // three topics per course; the last one leads to the quiz
 const CAMERA_KEYS = ['cameraX', 'cameraZ', 'cameraAngle'];
+const NARROW_FIGURE = 560; // px; below this width figures use their narrow layout
+const WAITING_BOOST = 4; // playback runs this many times faster while the robot only waits
+const MAX_BOOSTED_SPEED = 4;
 const SEEK_KEYS = [
   'ArrowLeft',
   'ArrowRight',
@@ -84,12 +90,14 @@ function freshPage(state) {
   return {
     draft: { ...state.config }, // settings as edited in the form, applied when a run starts
     note: 'before', // 'before' | 'changed' | 'running'
-    cleared: false, // "cause checked" box of the stop-release checklist
+    cleared: false, // the learner picked the recorded cause of the latched stop
+    picked: null, // the cause the learner picked, right or wrong
     releaseMessageShown: false,
     // The checklist card stays on screen after the stop is released, so the learner can read the
     // confirmation; it is taken down only when the next run starts or ends.
     restartVisible: releaseNeeded(state),
     fitted: null, // camera settings found from the calibration pairs
+    figure: null, // { sceneWidth, chartWidth } the figures were last drawn at
   };
 }
 
@@ -101,7 +109,36 @@ const releaseNeeded = (state) => state.completed && latchedAtEnd(state.run) && !
 function syncRunPanels(state) {
   const page = pages.get(state.course);
   page.cleared = false;
+  page.picked = null;
   page.restartVisible = releaseNeeded(state);
+}
+
+// Figures are drawn at the width they are shown. Until the page has been laid out (or while it
+// is hidden) the widths are estimated from the window.
+function figureWidths(course) {
+  const page = pages.get(course);
+  const measured = measureFigures(course);
+  if (measured) return measured;
+  if (page.figure) return page.figure;
+  const estimate = Math.max(300, Math.min(790, window.innerWidth - 32));
+  return { sceneWidth: estimate, chartWidth: estimate - 36 };
+}
+
+function measureFigures(course) {
+  const root = pageElement(course);
+  const scene = root?.querySelector('[data-sys-scene]')?.clientWidth ?? 0;
+  const chart = root?.querySelector('[data-sys-chartview]')?.clientWidth ?? 0;
+  if (!scene || !chart) return null;
+  return { sceneWidth: scene, chartWidth: chart };
+}
+
+// While the delivery robot only stands and waits, playback runs faster so the learner does not
+// watch nothing happen for ten seconds.
+function waitingBoost(state) {
+  if (state.course !== 'behavior' || !state.run) return false;
+  const sample = state.run.samples[state.index];
+  const before = state.run.samples[state.index - 1];
+  return Boolean(before) && sample.waitTotal > before.waitTotal && state.speed < MAX_BOOSTED_SPEED;
 }
 
 function buildModel(course) {
@@ -112,6 +149,7 @@ function buildModel(course) {
   const started = Boolean(state.run);
   const run = state.run || simulateSystem(course, state.id, state.config); // preview before a run
   const sample = run.samples[state.index];
+  const figure = page.figure ?? figureWidths(course);
   return {
     course,
     meta: SYSTEM_COURSES.find((entry) => entry.id === course),
@@ -129,11 +167,21 @@ function buildModel(course) {
     atEnd: state.index === lastIndex(run),
     speed: state.speed,
     drive: systemState(run, state.index, started),
+    fastForward: state.playing && waitingBoost(state),
+    figure: {
+      ...figure,
+      narrow: figure.sceneWidth < NARROW_FIGURE,
+      started,
+      // The calibration scene shows where the settings being edited would put the markers.
+      settings: page.draft,
+    },
     chartIndex: state.chart,
     chartChoices: chartChoices(course, state.id),
     previous: state.previous,
     events: started
-      ? run.events.filter((event) => event.t <= sample.t + TIME_EPSILON).slice(-MAX_EVENTS_SHOWN)
+      ? groupEvents(run.events.filter((event) => event.t <= sample.t + TIME_EPSILON)).slice(
+          -MAX_EVENTS_SHOWN,
+        )
       : [],
     draft: page.draft,
     note: page.note,
@@ -146,6 +194,8 @@ function buildModel(course) {
     restart: {
       visible: page.restartVisible,
       released: state.released,
+      cause: state.completed ? stopCause(run) : null,
+      picked: page.picked,
       cleared: page.cleared,
       releaseEnabled: page.cleared && !state.released,
       messageShown: page.releaseMessageShown,
@@ -161,13 +211,32 @@ function resultModel(state, topic) {
         .filter((key) => state.run.config[key] !== previous.config[key])
         .map((key) => topic.controls.find((control) => control.key === key).label)
     : [];
-  return { outcome: state.run.outcome, metrics: state.run.metrics, previous, changed };
+  return {
+    outcome: state.run.outcome,
+    comparison: compareRuns(state.run, previous),
+    metrics: state.run.metrics,
+    previous,
+    changed,
+  };
 }
+
+const sameWidths = (a, b) =>
+  Boolean(a && b) &&
+  Math.abs(a.sceneWidth - b.sceneWidth) < 1 &&
+  Math.abs(a.chartWidth - b.chartWidth) < 1;
 
 function update(course) {
   const root = pageElement(course);
   if (!root) return;
+  const page = pages.get(course);
+  page.figure = figureWidths(course);
   render(systemPage(buildModel(course), copy, actionsOf(course)), root);
+  // The first drawing (or one after a resize) may have been made at an estimated width.
+  const measured = measureFigures(course);
+  if (measured && !sameWidths(measured, page.figure)) {
+    page.figure = measured;
+    render(systemPage(buildModel(course), copy, actionsOf(course)), root);
+  }
 }
 
 // A topic page is rebuilt from scratch so details, focus and the edited settings start fresh.
@@ -205,8 +274,9 @@ function tick(stamp) {
   if (!active?.playing) return;
   const state = active;
   const run = state.run;
+  const boost = waitingBoost(state) ? WAITING_BOOST : 1;
   if (stamp !== undefined && lastFrameTime)
-    state.elapsed += Math.min((stamp - lastFrameTime) / 1000, MAX_FRAME_STEP) * state.speed;
+    state.elapsed += Math.min((stamp - lastFrameTime) / 1000, MAX_FRAME_STEP) * state.speed * boost;
   lastFrameTime = stamp ?? 0;
   while (state.index + 1 < run.samples.length && run.samples[state.index + 1].t <= state.elapsed)
     state.index++;
@@ -320,7 +390,14 @@ function release(state) {
 function showRestart(course) {
   const root = pageElement(course);
   root.querySelector('[data-sys-restart]').scrollIntoView({ behavior: 'smooth', block: 'center' });
-  root.querySelector('[data-sys-cleared]').focus({ preventScroll: true });
+  root.querySelector('[data-sys-cause]').focus({ preventScroll: true });
+}
+
+function pickCause(state, id) {
+  const page = pages.get(state.course);
+  const cause = stopCause(state.run);
+  page.picked = id;
+  page.cleared = Boolean(cause) && cause.id === id;
 }
 
 function next(course) {
@@ -377,9 +454,19 @@ function createActions(course) {
       submitSettings(state(), event.target);
     },
     showRestart: () => showRestart(course),
-    confirmCleared(checked) {
-      page().cleared = checked;
+    pickCause(id) {
+      pickCause(state(), id);
       refresh();
+    },
+    quickRun() {
+      if (state().playing || releaseNeeded(state())) return;
+      submitSettings(state(), pageElement(course).querySelector('[data-sys-form]'));
+    },
+    showSettings(event) {
+      event.preventDefault();
+      pageElement(course)
+        .querySelector('.sys-settings')
+        .scrollIntoView({ behavior: 'smooth', block: 'start' });
     },
     release() {
       release(state());
@@ -398,12 +485,24 @@ function createActions(course) {
   };
 }
 
+let resizeRequest = 0;
+
+// Figures follow the width of the page (a rotated phone, a resized window).
+function redrawAfterResize() {
+  cancelAnimationFrame(resizeRequest);
+  resizeRequest = requestAnimationFrame(() => {
+    for (const course of SYSTEM_COURSES)
+      if (pageElement(course.id) && !pageElement(course.id).hidden) update(course.id);
+  });
+}
+
 function initSystems() {
   for (const course of SYSTEM_COURSES) rebuild(course.id);
   for (const name of ['series-leave', 'supplement-open']) document.addEventListener(name, pause);
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) pause();
   });
+  window.addEventListener('resize', redrawAfterResize);
 }
 
 function activateSystem(course) {

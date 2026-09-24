@@ -5,85 +5,175 @@
       "coordination": "アームを横から見る",
       "behavior": "部屋を上から見る",
       "sideView": "ロボットを横から見る"
-    }
+    },
+    "floorUnit": "m",
+    "readoutBefore": "—"
   },
   "arm": {
-    "horizontalAxis": "根元からの横位置（mm）",
-    "heightAxis": "高さ（mm）",
+    "xAxis": "x 横（mm）",
+    "zAxis": "z 高さ（mm）",
     "shoulder": "根元（肩）",
-    "targetKey": "黄：手先を近づけたい物体",
-    "estimateKey": "青：計算した手先の行き先",
-    "camera": "RGB-Dカメラ",
-    "tipDistance": "物体と手先の距離 {distance} mm"
+    "object": "物体",
+    "objectBefore": "移動前の位置",
+    "estimate": "計算した行き先",
+    "estimateRaw": "カメラの数値をそのまま使った行き先",
+    "camera": "カメラ",
+    "cameraForward": "d 前",
+    "cameraUp": "h 上",
+    "cameraSetting": "設定上のカメラ",
+    "keys": {
+      "object": "物体（手先を近づけたい物）",
+      "estimate": "計算した手先の行き先",
+      "shoulderFrame": "根元の座標（x 横・z 高さ、目盛り50 mmごと）",
+      "cameraFrame": "カメラの座標（d 前・h 上）。実際は根元から横40 mm・上30 mm、10°上向き",
+      "markers": "①②③ 目印の実際の位置",
+      "markersSeen": "いまの設定で計算した目印の位置（ずれている分だけ設定が違う）",
+      "cameraSetting": "設定上のカメラの位置と向き",
+      "objectBefore": "物体が2秒で動く前の位置"
+    }
   },
   "room": {
     "parcel": "荷物",
+    "noParcel": "荷物なし",
+    "candidate": "？",
+    "candidateLabel": "別の候補",
     "delivery": "届け先",
-    "obstacle": "障害物"
+    "obstacle": "障害物",
+    "detour": "迂回路",
+    "keys": {
+      "trail": "通った道",
+      "detour": "迂回路（上側の道、前から分かっている）",
+      "noParcel": "点線の四角：いつもの場所（荷物がない）",
+      "candidate": "？：まだ確かめていない別の受け取り場所"
+    }
+  },
+  "states": {
+    "title": "状態と切り替えの条件",
+    "now": "今の状態",
+    "unused": "（このルールでは使わない）",
+    "names": {
+      "toParcel": "荷物へ進む",
+      "toElsewhere": "別の場所を探す",
+      "toDelivery": "届け先へ進む",
+      "waiting": "通路が空くまで待つ",
+      "detour": "別の道へ進む",
+      "delivered": "配達完了",
+      "arrivedEmpty": "空のまま到着"
+    },
+    "conditions": {
+      "pickedUp": "到着 かつ 荷物あり",
+      "blocked": "前に障害物",
+      "clear": "通路が空いた",
+      "arrived": "届け先に到着",
+      "timeout": "待ち時間 ≥ {timeout}秒",
+      "detourArrived": "迂回路で到着",
+      "notThere": "到着 かつ 荷物なし",
+      "keepGoing": "到着（荷物がなくても進む）",
+      "foundElsewhere": "見つけて受け取った",
+      "arrivedWith": "到着 かつ 荷物あり",
+      "arrivedWithout": "到着 かつ 荷物なし"
+    }
   },
   "mechanics": {
-    "powerOffPosition": "出力を0 %にした位置",
-    "brakePosition": "ブレーキを始めた位置",
-    "stopLine": "3 mの線",
-    "odometryPosition": "車輪の回転で推定した位置",
-    "forces": "前後の力の差 {force} N　加速度 {accel} m/秒²",
-    "speeds": "機体 {speed} m/秒　車輪から {wheelSpeed} m/秒"
+    "powerOffPosition": "▼出力0 %",
+    "brakePosition": "▼ブレーキ開始",
+    "brakePlan": "ブレーキ予定",
+    "stopLine": "止まりたい線（3 m）",
+    "odometryPosition": "車輪から推定した位置",
+    "readouts": {
+      "speed": "機体の速さ",
+      "wheelSpeed": "車輪の速さ",
+      "force": "前後の力の差",
+      "accel": "加速度"
+    },
+    "keys": {
+      "stopLine": "白い実線：止まりたい線（3 m）",
+      "brake": "▼：ブレーキを始めた位置",
+      "brakePlan": "一点鎖線：ブレーキを始める予定の位置",
+      "centre": "▲：距離は機体の中心で測ります",
+      "powerOff": "▼：出力を0 %にした位置",
+      "odometry": "薄い機体：車輪の回転から推定した位置",
+      "actual": "濃い機体：実際の位置"
+    }
   },
   "diagnostics": {
     "wall": "壁",
     "shelf": "棚の張り出し",
-    "lidarRange": "LiDAR → 奥の壁まで {distance} m",
-    "cameraRange": "RGB-Dカメラ → 棚まで {distance} m",
     "obstacle": "障害物",
-    "lastRange": "最後に届いた距離 {distance} m",
-    "staleRange": "1.5秒以降、距離の数字は更新されない",
-    "freshRange": "新しい値を受信中",
-    "currentRange": "現在の距離（観察用） {distance} m",
-    "imuAcceleration": "IMUの加速度 {accel} m/秒²",
-    "impactLimit": "停止の境目 {limit} m/秒²以上",
-    "shockMarker": "2秒：{event}",
-    "impactNote": "出来事に相当するIMUの波形を入力する実験"
+    "lidar": "LiDAR",
+    "camera": "カメラ",
+    "lastRange": "最後に届いた距離",
+    "stale": "更新なし",
+    "shockMarker": "▼2秒：{event}",
+    "keys": {
+      "lidar": "実線：LiDARが測る方向（低い位置、棚の下を通る）",
+      "camera": "破線：RGB-Dカメラが測る方向",
+      "lastRange": "青い線：最後に届いた距離（判断に使う）",
+      "lastRangeGhost": "薄い機体：最後に距離が届いたときの位置",
+      "shock": "▼：揺れが起きた位置"
+    }
   },
   "timing": {
-    "title": "1件の距離データが判断に使われるまで",
     "stages": {
-      "measured": "① 距離を測った時刻",
-      "received": "② 情報が届いた時刻",
-      "used": "③ 今、判断に使う時刻"
+      "title": "1件の距離データが判断に使われるまで",
+      "measured": "① 測った",
+      "received": "② 届いた",
+      "used": "③ 判断に使う",
+      "age": "今使っている距離は {age}秒前に測った値です。",
+      "waiting": "最初の距離データが届くのを待っています。"
     },
-    "mapKey": "青：計算して地図に置いた壁",
-    "wallEstimate": "計算した壁の位置 {distance} m",
-    "rangeWhenMeasured": "測ったときの距離 {distance} m",
-    "currentRange": "現在の実際の距離 {distance} m",
-    "mapLegend": "薄い機体：距離を測ったときの位置　実線の機体：現在の位置",
-    "rangeLegend": "薄い機体：測定時の位置　点線：止まりたい位置（壁の0.5 m手前）",
+    "queue": {
+      "title": "処理待ちの列（左が古い）",
+      "empty": "待っているデータはありません。",
+      "more": "ほか{count}件",
+      "using": "判断に使用中：{stamp}秒に測定",
+      "latest": "「最新を使う」：処理のたびに一番新しい1件だけを使い、古い分は捨てます。"
+    },
     "realWall": "実際の壁",
-    "waitingFirstData": "最初の距離データが届くのを待っています",
+    "target": "止まりたい位置",
+    "threshold": "停止指示の境目",
+    "usedRange": "判断に使った距離",
+    "actualRange": "実際の距離",
+    "mapWall": "地図に置いた壁",
+    "mapSum": "機体の位置＋測った距離",
+    "keys": {
+      "ghost": "薄い機体：距離を測ったときの位置",
+      "target": "白い実線：止まりたい位置（壁の0.5 m手前）",
+      "threshold": "破線：停止指示を出す距離（壁まで0.6 m）",
+      "usedRange": "青：判断に使った距離",
+      "actualRange": "緑：現在の実際の距離（観察用）",
+      "mapWall": "青い太線：計算して地図に置いた壁",
+      "realWall": "灰色：実際の壁（4 m、動かない）"
+    },
     "description": "測った時刻 {stamp}秒、届いた時刻 {receive}秒、判断に使う時刻 {now}秒。",
     "mapDescription": "灰色は実際の壁、青は地図へ置いた壁。",
     "rangeDescription": "薄い機体は測定時、実線の機体は現在。"
   },
   "tracking": {
-    "measuredKey": "青い点：カメラで測った相手の中心",
+    "measuredKey": "青い点：カメラで測った相手の中心（薄い点は{interval}秒ごとの足あと）",
     "goal": "ゴール",
-    "crossingPoint": "二つの進路が交わる場所",
+    "crossingPoint": "進路が交わる場所",
     "cameraFront": "カメラの正面",
     "positionAxis": "相手の横方向の位置（m）",
     "offscreenForecast": "予測は図の外",
-    "forecastPosition": "{time}秒の予測位置",
+    "forecastPosition": "{time}秒の予測",
     "otherRoute": "相手のロボットが通る道",
-    "view": "部屋を上から見る",
     "otherRobot": "相手のロボット",
     "contact": "接触",
     "observing": "止まって観察",
     "waiting": "減速・待機",
+    "stopCircle": "待つ円（中心から{radius} m）",
+    "closest": "{after}秒後に{gap} m",
+    "closestNote": "{clearance} m未満なら待つ",
     "crossingIntro": "QUESTiXも進み、相手が横切るときは待ちます。",
     "watchingIntro": "QUESTiXは止まり、正面を横切る相手をカメラで観察します。",
     "measurementStamp": "{time}秒の測定",
     "forecastStamp": "{time}秒にいると見積もった場所",
     "forecastOffscreen": "（図の外）",
     "forecastPending": "2回以上測ると表示",
-    "forecastCaption": "黄色の輪：測定から{horizon}秒先の予測",
+    "forecastCaption": "一点鎖線の輪：測定から{horizon}秒先の予測",
+    "currentRuleKey": "破線の円：「今の距離だけ」で待つ範囲。測った点がこの円に入ると待ちます。",
+    "predictRuleKey": "一点鎖線：前進を続けたとき最も近づく時刻の、両方の予測位置。中心どうしが0.7 m未満なら待ちます。",
     "description": {
       "opening": "QUESTiXは画面の上を向く。相手のロボットは、その正面を{direction}へ移動中。",
       "rightToLeft": "右から左",
@@ -91,25 +181,59 @@
       "crossing": "QUESTiXも上のゴールへ進む。",
       "watching": "QUESTiXは下で止まり、相手の位置をカメラで測る。",
       "measured": "青い点は直近の測定位置。",
-      "forecast": "黄色の輪は測定から{horizon}秒先の予測位置。",
+      "forecast": "一点鎖線の輪は測定から{horizon}秒先の予測位置。",
       "elapsed": "開始から{time}秒。"
     }
   },
   "chart": {
-    "styleKey": "実線：今回 ／ 破線：前回（同じ色の値を比較）",
+    "xAxis": "開始からの時間（秒）",
+    "yAxis": "{quantity}（{unit}）",
+    "previous": "前回",
+    "previousKey": "灰色の点線：前回",
     "transition": "{time}秒 {label}",
-    "threshold": "停止の境目 {value}",
-    "description": "横軸は開始からの秒数。縦軸は{unit}"
+    "description": "{title}のグラフ。横軸は開始からの時間（秒）、縦軸は{quantity}（{unit}）",
+    "single": "グラフ：{title}"
+  },
+  "chartEvents": {
+    "contact": "接触",
+    "stop": "停止指示"
   },
   "diagnosticsSensorLines": {
     "missing": [
-      ["depth", "現在の距離（観察用）"],
-      ["range", "最後に届いた距離（判断に使用）"]
+      {
+        "key": "depth",
+        "label": "現在の距離（観察用）",
+        "short": "現在",
+        "role": "actual"
+      },
+      {
+        "key": "range",
+        "label": "最後に届いた距離（判断に使用）",
+        "short": "判断に使用",
+        "role": "measured"
+      }
     ],
     "shelf": [
-      ["lidar", "LiDAR：奥の壁まで"],
-      ["depth", "RGB-Dカメラ：棚まで"]
+      {
+        "key": "lidar",
+        "label": "LiDAR：奥の壁まで",
+        "short": "LiDAR",
+        "role": "measured"
+      },
+      {
+        "key": "depth",
+        "label": "RGB-Dカメラ：棚まで",
+        "short": "カメラ",
+        "role": "measured",
+        "dash": "7 4"
+      }
     ]
+  },
+  "thresholds": {
+    "timingStop": "停止指示を出す距離 {value} m",
+    "stopDistance": "停止の境目 {value} m",
+    "staleLimit": "待てる時間 {value}秒",
+    "impactBand": "±{value} m/秒²の帯の外に出たら停止"
   },
   "charts": {
     "mechanics": [
@@ -117,90 +241,329 @@
         "title": "速さ",
         "unit": "m/秒",
         "lines": [
-          ["v", "機体の速さ"],
-          ["wheelSpeed", "車輪の回転から求めた速さ"]
+          {
+            "key": "v",
+            "label": "機体の速さ",
+            "short": "機体",
+            "role": "actual"
+          },
+          {
+            "key": "wheelSpeed",
+            "label": "車輪の回転から求めた速さ",
+            "short": "車輪",
+            "role": "measured",
+            "topics": [
+              "traction"
+            ]
+          }
+        ],
+        "note": {
+          "force": "この実験の床は滑らないので、車輪の回転から求めた速さも機体の速さと同じです。線は1本だけ描きます。",
+          "braking": "ブレーキの実験では車輪が滑らないので、車輪の回転から求めた速さも機体の速さと同じです。線は1本だけ描きます。"
+        }
+      },
+      {
+        "title": "前後の力の差",
+        "unit": "N",
+        "lines": [
+          {
+            "key": "force",
+            "label": "前進させる力 − 抵抗する力",
+            "short": "力の差",
+            "role": "actual"
+          }
         ]
       },
-      { "title": "前後の力の差", "unit": "N", "lines": [["force", "前進させる力 − 抵抗する力"]] },
-      { "title": "加速度", "unit": "m/秒²", "lines": [["accel", "速さの変わり方"]] },
+      {
+        "title": "加速度",
+        "unit": "m/秒²",
+        "lines": [
+          {
+            "key": "accel",
+            "label": "速さの変わり方",
+            "short": "加速度",
+            "role": "actual"
+          }
+        ]
+      },
       {
         "title": "移動した位置",
+        "axis": "位置",
         "unit": "m",
         "lines": [
-          ["x", "実際の位置"],
-          ["odom", "車輪の回転で推定した位置"]
-        ]
+          {
+            "key": "x",
+            "label": "実際の位置",
+            "short": "実際",
+            "role": "actual"
+          },
+          {
+            "key": "odom",
+            "label": "車輪の回転で推定した位置",
+            "short": "車輪から",
+            "role": "measured",
+            "topics": [
+              "traction"
+            ]
+          }
+        ],
+        "note": {
+          "force": "この実験では車輪が滑らないので、車輪の回転から推定した位置も実際の位置と同じです。線は1本だけ描きます。",
+          "braking": "この実験では車輪が滑らないので、車輪の回転から推定した位置も実際の位置と同じです。線は1本だけ描きます。"
+        }
       }
     ],
     "behavior": [
       {
+        "title": "状態と届け先までの距離",
+        "axis": "届け先までの直線距離",
+        "unit": "m",
+        "band": "status",
+        "lines": [
+          {
+            "key": "deliveryDistance",
+            "label": "届け先までの直線距離",
+            "short": "届け先まで",
+            "role": "actual"
+          }
+        ],
+        "note": {
+          "all": "上の帯は、その時刻の状態です。距離が減らない時間は、止まっているか遠回りしています。"
+        }
+      },
+      {
         "title": "車輪の回転数",
+        "axis": "回転数",
         "unit": "rpm",
         "lines": [
-          ["left", "左車輪"],
-          ["right", "右車輪"]
-        ]
+          {
+            "key": "left",
+            "label": "左車輪",
+            "short": "左",
+            "role": "actual"
+          },
+          {
+            "key": "right",
+            "label": "右車輪",
+            "short": "右",
+            "role": "measured"
+          }
+        ],
+        "note": {
+          "all": "まっすぐ進むとき左右は同じ値で、線が重なります。向きを変えるときは左右が違い、負の値は車輪が後ろ向きに回っていることを表します。"
+        }
       },
-      { "title": "走行の速さ", "unit": "m/秒", "lines": [["v", "機体の速さ"]] }
+      {
+        "title": "走行の速さ",
+        "axis": "速さ",
+        "unit": "m/秒",
+        "lines": [
+          {
+            "key": "v",
+            "label": "機体の速さ",
+            "short": "速さ",
+            "role": "actual"
+          }
+        ]
+      }
     ],
     "tracking": [
       {
         "title": "相手のロボットの速度",
+        "axis": "速度",
         "unit": "m/秒",
         "lines": [
-          ["actualVelocity", "相手のロボットの実際の速度"],
-          ["velocity", "測った位置から求めた速度"]
-        ]
+          {
+            "key": "actualVelocity",
+            "label": "実際の速度",
+            "short": "実際",
+            "role": "actual"
+          },
+          {
+            "key": "velocity",
+            "label": "測った位置から求めた速度",
+            "short": "求めた値",
+            "role": "measured"
+          }
+        ],
+        "note": {
+          "all": "負の値は、図の左向きに動いていることを表します（0の線を太く描いています）。"
+        }
       },
       {
         "title": "予測の答え合わせ",
-        "unit": "m",
-        "lines": [["predictionError", "予測した位置と、その時刻の実際の位置のずれ"]]
-      },
-      { "title": "互いの間隔", "unit": "m", "lines": [["separation", "相手とQUESTiXの表面の間隔"]] },
-      {
-        "title": "相手のロボットの位置",
+        "axis": "予測のずれ",
         "unit": "m",
         "lines": [
-          ["actualPosition", "相手のロボットの実際の位置"],
-          ["observedPosition", "カメラで測った位置"]
+          {
+            "key": "predictionError",
+            "label": "予測した位置と、その時刻の実際の位置のずれ",
+            "short": "ずれ",
+            "role": "plan"
+          }
+        ]
+      },
+      {
+        "title": "互いの間隔",
+        "axis": "間隔",
+        "unit": "m",
+        "lines": [
+          {
+            "key": "separation",
+            "label": "相手とQUESTiXの表面の間隔",
+            "short": "間隔",
+            "role": "actual"
+          }
+        ]
+      },
+      {
+        "title": "相手のロボットの位置",
+        "axis": "横方向の位置",
+        "unit": "m",
+        "lines": [
+          {
+            "key": "actualPosition",
+            "label": "実際の位置",
+            "short": "実際",
+            "role": "actual"
+          },
+          {
+            "key": "observedPosition",
+            "label": "カメラで測った位置",
+            "short": "測定",
+            "role": "measured"
+          }
         ]
       }
     ],
-    "coordination": [{ "title": "手先と目標の距離", "unit": "mm", "lines": [["error", "位置のずれ"]] }],
+    "coordination": [
+      {
+        "title": "手先と物体の距離",
+        "axis": "手先と物体の距離",
+        "unit": "mm",
+        "lines": [
+          {
+            "key": "error",
+            "label": "手先と物体の距離",
+            "short": "距離",
+            "role": "actual"
+          }
+        ],
+        "note": {
+          "frames": "行き先がずれていると、手先は途中で物体の近くを通り過ぎるため、距離が一度小さくなってから大きくなることがあります。",
+          "calibrate": "行き先がずれていると、手先は途中で物体の近くを通り過ぎるため、距離が一度小さくなってから大きくなることがあります。",
+          "feedback": "縦の線は物体が動いた時刻です。見直すと、そこから距離が再び小さくなります。"
+        }
+      }
+    ],
     "timing": [
       {
         "title": "壁までの距離",
+        "axis": "壁までの距離",
         "unit": "m",
         "lines": [
-          ["range", "現在の実際の距離（観察用）"],
-          ["usedRange", "停止判断に使った距離"]
+          {
+            "key": "range",
+            "label": "現在の実際の距離（観察用）",
+            "short": "実際",
+            "role": "actual"
+          },
+          {
+            "key": "usedRange",
+            "label": "判断に使った距離",
+            "short": "判断に使用",
+            "role": "measured"
+          }
         ]
       },
       {
         "title": "使った情報の古さ",
+        "axis": "古さ",
         "unit": "秒",
-        "lines": [["age", "測った時刻から判断に使うまでの時間"]]
+        "lines": [
+          {
+            "key": "age",
+            "label": "測った時刻から判断に使うまでの時間",
+            "short": "古さ",
+            "role": "measured"
+          }
+        ]
       },
       {
         "title": "地図へ置いた壁のずれ",
+        "axis": "ずれ",
         "unit": "m",
-        "lines": [["wallError", "計算した壁の位置と、実際の4 mとの差"]]
+        "lines": [
+          {
+            "key": "wallError",
+            "label": "地図に置いた壁 − 実際の壁（4 m）",
+            "short": "ずれ",
+            "role": "measured"
+          }
+        ]
       },
-      { "title": "処理待ちの件数", "unit": "件", "lines": [["queue", "届いたが、まだ処理していない件数"]] }
+      {
+        "title": "処理待ちの件数",
+        "axis": "件数",
+        "unit": "件",
+        "integer": true,
+        "lines": [
+          {
+            "key": "queue",
+            "label": "届いたが、まだ処理していない件数",
+            "short": "待ち",
+            "role": "measured"
+          }
+        ]
+      }
     ],
     "diagnostics": [
       {
         "title": "センサーの距離",
+        "axis": "距離",
         "unit": "m",
         "lines": [
-          ["lidar", "LiDAR"],
-          ["depth", "奥行き"],
-          ["range", "最後に届いた距離"]
+          {
+            "key": "lidar",
+            "label": "LiDAR",
+            "short": "LiDAR",
+            "role": "measured"
+          },
+          {
+            "key": "depth",
+            "label": "奥行き",
+            "short": "カメラ",
+            "role": "measured",
+            "dash": "7 4"
+          }
         ]
       },
-      { "title": "情報の古さ", "unit": "秒", "lines": [["age", "最後の測定からの時間"]] },
-      { "title": "IMUの加速度", "unit": "m/秒²", "lines": [["accel", "重力を除く前後の加速度"]] }
+      {
+        "title": "情報の古さ",
+        "axis": "最後の測定からの時間",
+        "unit": "秒",
+        "lines": [
+          {
+            "key": "age",
+            "label": "最後の測定からの時間",
+            "short": "古さ",
+            "role": "measured"
+          }
+        ]
+      },
+      {
+        "title": "IMUの加速度",
+        "axis": "加速度",
+        "unit": "m/秒²",
+        "lines": [
+          {
+            "key": "accel",
+            "label": "重力を除く前後の加速度",
+            "short": "加速度",
+            "role": "measured"
+          }
+        ]
+      }
     ]
   }
 }
