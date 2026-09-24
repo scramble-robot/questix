@@ -11,7 +11,7 @@ import {
   clearDriveRuns,
   onDriveRuns,
 } from './drive-history.js';
-import { driveReportView, driveRunLabel } from './drive-report-view.js';
+import { driveReportView, driveRunLabel, reportCopy } from './drive-report-view.js';
 
 // The pieces of the driving experiments that belong to no lesson:
 // - the stop bar, fixed at the bottom of every page while the robot drives on a lesson's command —
@@ -171,7 +171,7 @@ function placeStopBar() {
 // --- history -----------------------------------------------------------------------------------
 
 function historyPanel() {
-  const copy = driveCopy.report;
+  const copy = reportCopy;
   const runs = driveRuns();
   if (!runs.length)
     return html`<h3>${copy.historyTitle}</h3>

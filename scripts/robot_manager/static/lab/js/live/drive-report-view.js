@@ -9,8 +9,8 @@ const CHART = { width: 640, height: 190, left: 48, right: 12, top: 24, bottom: 2
 const PATH_BOX = 300; // px: the square the path is drawn in
 const PATH_MIN_SPAN = 1; // m: the path view never shows less than this, so a nudge stays small
 const PATH_GRID = 0.5; // m between grid lines
-const driveCopy = await loadJson('content/live/drive.json');
-const text = () => driveCopy.report;
+const reportCopy = await loadJson('content/live/drive-report.json');
+const text = () => reportCopy;
 
 const fixed = (value, digits) => (Number.isFinite(value) ? value.toFixed(digits) : '—');
 const degrees = (radians) => (radians * 180) / Math.PI;
@@ -262,4 +262,4 @@ function driveRunLabel(run) {
   });
 }
 
-export { driveReportView, driveRunLabel };
+export { driveReportView, driveRunLabel, reportCopy };
