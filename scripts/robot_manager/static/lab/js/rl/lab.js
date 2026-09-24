@@ -6,6 +6,8 @@ import { SENSOR_COPY } from '../shell/lesson-ui.js';
 import { World, COURSES, DEFAULT_REWARD, FEATURE_NAMES } from '../core/engine.js';
 import { drawArena, drawCamera, drawTrajectory, drawStartMap } from '../core/renderer.js';
 import { drawLidar, drawGraph, graphSpec, graphReadings } from './sensors.js';
+import { drawStartMarks } from './lab-render.js';
+import { revealElement } from './reveal.js';
 import {
   Experiment,
   clone,
@@ -79,7 +81,9 @@ let speed = 1;
 let runRewardsOpen = false;
 
 let trainProgress = null;
-let chartMetric = 'score';
+let chartMetric = 'rate'; // the guide asks learners to read the arrival rate first
+const briefVisits = new Map(); // how often each stage's guide text has been reached
+let briefKey = null;
 
 let sensorsOpen = false;
 let sensor = 'lidar';
@@ -382,6 +386,15 @@ function runRewardsModel() {
   };
 }
 
+// Counts a stage's guide text as reached again only when the learner arrives from another stage.
+function countBriefVisit(key) {
+  if (key !== briefKey) {
+    briefKey = key;
+    briefVisits.set(key, (briefVisits.get(key) || 0) + 1);
+  }
+  return briefVisits.get(key);
+}
+
 function buildModel() {
   const run = experiment?.run ?? null;
   const results = testResults();
@@ -397,6 +410,7 @@ function buildModel() {
   const before = experiment?.previous ? statistics(experiment.previous.results) : null;
   const guideKey = 'lab-' + (manual ? 'manual' : stage);
   return {
+    briefFolded: countBriefVisit(guideKey) > 1,
     ready: Boolean(experiment),
     generation: guideGeneration,
     stage,
@@ -485,7 +499,11 @@ function paintCheckpoints(model) {
 function paintTestMap() {
   const config = experiment.run.config;
   const env = new World(config.task, config.rewards, config.physics);
-  drawStartMap(freshCanvas('testMap'), env, { results: experiment.run.results });
+  const canvas = freshCanvas('testMap');
+  // The shared map draws floor, shelves and goal; the course adds its own outcome marks
+  // (● × △), the same symbols as the list of runs beside the map.
+  drawStartMap(canvas, env, { results: [] });
+  drawStartMarks(canvas, env, experiment.run.results);
 }
 
 function paintSensor(model) {
@@ -529,14 +547,22 @@ function lockCourseNavigation() {
 }
 
 function focusWorkspace() {
-  document.querySelector('#labPage .step-nav').scrollIntoView({ block: 'start' });
+  revealElement(document.querySelector('#labPage .step-nav'));
   const heading = byId('guidePanel').querySelector('h2');
   heading?.setAttribute('tabindex', '-1');
   heading?.focus({ preventScroll: true });
 }
 
+// While the robot trains (about 18 s) the progress bar and the curve are what to watch.
+function revealTraining() {
+  revealElement(byId('trainingBoard'));
+  const heading = byId('learningTitle');
+  heading?.setAttribute('tabindex', '-1');
+  heading?.focus({ preventScroll: true });
+}
+
 function revealArena() {
-  if (matchMedia(NARROW_LAYOUT).matches) byId('arenaCard').scrollIntoView({ block: 'start' });
+  if (matchMedia(NARROW_LAYOUT).matches) revealElement(byId('arenaCard'));
   else focusWorkspace();
 }
 
@@ -611,7 +637,7 @@ async function startTraining() {
   playing = false;
   trainProgress = { episodes: 0, history: [], checkpoints: [] };
   update({ fresh: true });
-  focusWorkspace();
+  revealTraining();
   const currentToken = ++token;
   try {
     await experiment.train(

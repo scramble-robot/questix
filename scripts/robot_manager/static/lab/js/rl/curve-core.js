@@ -56,12 +56,18 @@ function lastPoint(points) {
  * - `xMax`: the run count at the right edge — the whole run, fixed before it starts.
  * - `yRange`: values the y axis must always show (e.g. the best score a run can reach), so the
  *   axis stays put while a run is still being drawn.
- * - `yInteger`, `yMin`/`yMax`: forwarded to niceScale.
+ * - `yInteger`, `yMin`/`yMax`, `yPadding`: forwarded to niceScale (`yPadding: 0` for a quantity
+ *   with a hard limit such as 100 %).
  * Returns percentages from the plot's top-left corner, ready for curve-view.js.
  */
-function curveLayout({ series, xMax, yRange = [], yInteger = false, yMin, yMax }) {
+function curveLayout({ series, xMax, yRange = [], yInteger = false, yMin, yMax, yPadding }) {
   const values = series.flatMap((line) => line.points.map((point) => point.y)).filter(finite);
-  const yScale = niceScale([...values, ...yRange], { integer: yInteger, min: yMin, max: yMax });
+  const yScale = niceScale([...values, ...yRange], {
+    integer: yInteger,
+    min: yMin,
+    max: yMax,
+    padding: yPadding,
+  });
   const xScale = niceScale([0, xMax], { integer: true, padding: 0, ticks: X_TICKS });
   const xAt = scaleTo(xScale, 0, PLOT_UNITS);
   const yAt = scaleTo(yScale, PLOT_UNITS, 0);

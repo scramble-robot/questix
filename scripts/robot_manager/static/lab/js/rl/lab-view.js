@@ -1,18 +1,18 @@
-import { html, svg, nothing, live, classMap, repeat, unsafeHTML } from '../vendor/lit-html.js';
+import { html, nothing, live, classMap, repeat, unsafeHTML } from '../vendor/lit-html.js';
 import { formatNumber } from '../core/dom.js';
 import { EXPERIMENT_STEPS } from '../shell/lesson-ui.js';
 import { COURSES } from '../core/engine.js';
-import { REWARDS, CHECKPOINT_LABELS, TOTAL_EPISODES } from './experiment.js';
+import { REWARDS, CHECKPOINT_LABELS, TOTAL_EPISODES, activeRewards } from './experiment.js';
+import { curveLayout } from './curve-core.js';
+import { curveChart } from './curve-view.js';
+import { OUTCOME_SYMBOLS } from './outcome-marks.js';
 
 // Templates of the reinforcement-learning lab. Every function is pure: it turns the model built by
 // lab.js into markup and binds the actions it is given. Learner-facing sentences come from
 // content/rl/lab.json (`copy`); only captions, units and column headers live here.
 
 const TEST_PLACES = 20;
-const SUMMARY_REWARDS = 3; // rewards shown in the short summary above the editor
-const CHART = { width: 760, height: 210, left: 55, right: 735, top: 22, bottom: 166 };
-const GRID_COLOR = '#e0e8e3';
-const LINE_COLOR = '#1c756b';
+const PERCENT = 100; // the arrival rate is drawn on a fixed 0–100 % axis
 
 // Short button captions of the sensor panel; the explanations are in SENSOR_COPY and the content
 // file. Kept in the same order as shell/lesson-ui.js builds them for the SLAM course.
@@ -90,12 +90,8 @@ function stageNav(model, actions) {
 function playbackBar(model, copy, actions) {
   const playback = model.playback;
   return html`<div class="playback-bar" id="playbackBar" ?hidden=${!model.playbackVisible}>
-    <button
-      id="playPause"
-      aria-label=${model.playing ? '一時停止' : '再生'}
-      @click=${actions.togglePlay}
-    >
-      ${model.playing ? 'Ⅱ' : '▶'}</button
+    <button id="playPause" @click=${actions.togglePlay}>
+      ${model.playing ? '❚❚ 一時停止' : '▶ 再生'}</button
     ><button id="replayStart" class="small" @click=${actions.replayFromStart}>最初から</button
     ><input
       id="seek"
@@ -243,70 +239,34 @@ function checkpointCard(model, copy, index, actions) {
   </div>`;
 }
 
-// Where the learning curve runs. A metric with no arrival in a stretch of the run leaves a hole in
-// the line rather than a straight segment across it.
-function chartGeometry(history, metricKey) {
-  const values = history
-    .map((point) => point[metricKey])
-    .filter((value) => value !== null && Number.isFinite(value));
-  if (!values.length) return null;
-  const min = metricKey === 'score' ? Math.min(0, ...values) : 0;
-  const max = metricKey === 'rate' ? 100 : Math.max(1, ...values) * 1.08;
-  const x = (episodes) => CHART.left + (episodes / TOTAL_EPISODES) * (CHART.right - CHART.left);
-  const y = (value) => CHART.bottom - ((value - min) / (max - min)) * (CHART.bottom - CHART.top);
-  let path = '';
-  let gap = true;
-  for (const point of history) {
-    const value = point[metricKey];
-    if (value === null || !Number.isFinite(value)) {
-      gap = true;
-      continue;
-    }
-    path += (gap ? 'M' : 'L') + x(point.episodes).toFixed(1) + ' ' + y(value).toFixed(1) + ' ';
-    gap = false;
-  }
-  const ticks = [min, (min + max) / 2, max].map((value) => ({
-    y: y(value),
-    label: value.toFixed(0),
-  }));
-  return { path, ticks };
-}
-
+// The learning curve of the metric on screen. The arrival rate always spans 0–100 %; the other
+// metrics take their axis from the values so far (their range is not known before training).
 function learningChart(model, copy) {
-  const chart = chartGeometry(model.training.history, model.training.metricKey);
-  if (!chart)
-    return html`<div class="chart-empty">
-      ${model.training.history.length ? copy.training.emptyNoArrival : copy.training.emptyComputing}
-    </div>`;
-  const { width, height, left, right, top, bottom } = CHART;
-  return html`<svg
-    viewBox=${'0 0 ' + width + ' ' + height}
-    role="img"
-    aria-label=${model.training.metric.name + 'の学習中の変化'}
-  >
-    ${chart.ticks.map(
-      // `svg` (not `html`) so the fragment is parsed inside an <svg>, where <line/> closes itself.
-      (tick) =>
-        svg`<line x1=${left} x2=${right} y1=${tick.y} y2=${tick.y} stroke=${GRID_COLOR} /><text
-            x=${left - 10}
-            y=${tick.y + 5}
-            text-anchor="end"
-            >${tick.label}</text
-          >`,
-    )}
-    <path
-      d=${chart.path}
-      fill="none"
-      stroke=${LINE_COLOR}
-      stroke-width="3"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-    />
-    <text x=${left} y="194">0</text>
-    <text x="385" y="194" text-anchor="middle">2,000</text>
-    <text x=${right} y="194" text-anchor="end">${TOTAL_EPISODES.toLocaleString()} 走行</text>
-    <text x=${left} y="14">${model.training.metric.unit}</text>
-  </svg>`;
+  const training = model.training;
+  const metric = training.metric;
+  const points = training.history.map((point) => ({
+    x: point.episodes,
+    y: point[training.metricKey],
+  }));
+  const rate = training.metricKey === 'rate';
+  const layout = curveLayout({
+    series: [{ role: 'actual', label: metric.name, points }],
+    xMax: TOTAL_EPISODES,
+    yRange: rate ? [0, PERCENT] : [],
+    yMax: rate ? PERCENT : undefined,
+    yPadding: rate ? 0 : undefined,
+  });
+  const empty = training.history.length
+    ? copy.training.emptyNoArrival
+    : copy.training.emptyComputing;
+  return curveChart(layout, {
+    title: '',
+    yTitle: metric.axis,
+    xTitle: copy.training.xAxis,
+    unit: metric.unit === '%' ? '%' : ' ' + metric.unit,
+    empty,
+    ariaLabel: metric.name + 'の学習中の変化',
+  });
 }
 
 function trainingBoard(model, copy, actions) {
@@ -322,7 +282,7 @@ function trainingBoard(model, copy, actions) {
     </div>
     <div class="training-progress">
       <progress id="trainingProgress" max=${TOTAL_EPISODES} value=${training.episodes}></progress>
-      <p>${copy.training.progressNote}</p>
+      <p>${model.busy ? copy.training.progressNote : copy.training.progressDone}</p>
     </div>
     <div class="checkpoint-grid" id="checkpointGrid">
       ${[0, 1, 2].map((index) => checkpointCard(model, copy, index, actions))}
@@ -356,8 +316,8 @@ function resultMetric(label, value, unit, previousText) {
 
 function trialButton(model, copy, result, index, actions) {
   const mark = () => {
-    if (result.success) return '○';
-    return result.collision ? '×' : '△';
+    if (result.success) return OUTCOME_SYMBOLS.arrived;
+    return result.collision ? OUTCOME_SYMBOLS.contact : OUTCOME_SYMBOLS.timeout;
   };
   return html`<button
     data-trial=${index}
@@ -587,23 +547,20 @@ function sensorSection(model, copy, actions) {
   </section>`;
 }
 
+// Every reward the next training will use, so the summary never hides a point that is given.
 function rewardSummary(model, copy) {
   const settings = model.draft.rewards;
-  return html`<div class="reward-summary">
-    ${REWARDS.slice(0, SUMMARY_REWARDS).map(
-      (reward) =>
-        html`<div>
-          <span>${reward.name}</span
-          ><strong
-            >${
-              settings.enabled[reward.key]
-                ? reward.sign + settings[reward.key]
-                : copy.setup.disabledValue
-            }<small>${reward.unit}</small></strong
-          >
-        </div>`,
-    )}
-  </div>`;
+  const rewards = activeRewards(settings, model.draft.task);
+  return html`<p class="reward-summary-title">${copy.setup.summaryTitle}</p>
+    <div class="reward-summary">
+      ${rewards.map(
+        (reward) =>
+          html`<div>
+            <span>${reward.name}</span
+            ><strong>${reward.sign}${settings[reward.key]}<small>${reward.unit}</small></strong>
+          </div>`,
+      )}
+    </div>`;
 }
 
 function rewardRow(model, copy, reward, actions) {
@@ -636,12 +593,23 @@ function rewardRow(model, copy, reward, actions) {
   </div>`;
 }
 
+// From the foundation chapters to this page: the table of three actions gives way to a formula
+// that turns sensor values into the two wheel speeds.
+function bridgeNote(copy) {
+  const bridge = copy.bridge;
+  return html`<div class="lab-bridge">
+    <strong>${bridge.title}</strong>
+    <p>${bridge.before}</p>
+    <p>${bridge.now}</p>
+  </div>`;
+}
+
 function setupGuide(model, copy, actions) {
   const revised = model.hasPrevious;
   return html`<p class="eyebrow">${copy.setup.eyebrow}</p>
     <h2 data-lesson-cue="action">${revised ? copy.setup.titleRevision : copy.setup.titleFirst}</h2>
     <p>${revised ? copy.setup.introRevision : copy.setup.introFirst}</p>
-    ${rewardSummary(model, copy)}
+    ${model.hasRun ? nothing : bridgeNote(copy)} ${rewardSummary(model, copy)}
     <button id="trainNow" class="primary full" @click=${actions.startTraining}>
       ${copy.setup.trainButton}
     </button>
@@ -894,9 +862,24 @@ function methodNote(model, copy, actions) {
   </details>`;
 }
 
+// The situation / purpose / first-step texts of a stage are open the first time it is reached
+// and folded afterwards, so a learner coming back sees the experiment first.
+function lessonBrief(model, copy) {
+  if (!model.lessonBrief) return nothing;
+  if (!model.briefFolded) return unsafeHTML(model.lessonBrief);
+  return fresh(
+    model,
+    () =>
+      html`<details class="lab-brief-fold">
+        <summary>${copy.briefFolded}</summary>
+        ${unsafeHTML(model.lessonBrief)}
+      </details>`,
+  );
+}
+
 function labPage(model, copy, actions) {
   return html`${missionHeading(model, copy, actions)}${stageNav(model, actions)}
-    <div id="labLessonBrief">${model.lessonBrief ? unsafeHTML(model.lessonBrief) : nothing}</div>
+    <div id="labLessonBrief">${lessonBrief(model, copy)}</div>
     <div
       class=${classMap({ 'lab-layout': true, 'experiment-layout': true, 'manual-mode': model.manual })}
     >

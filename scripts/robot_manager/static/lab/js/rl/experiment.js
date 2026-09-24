@@ -53,6 +53,13 @@ function evaluate(config, weights, seed, { random = true } = {}) {
   });
 }
 
+/** The rewards a training run with these settings uses, in the editor's order. */
+function activeRewards(rewards, task) {
+  return REWARDS.filter(
+    (reward) => rewards.enabled[reward.key] && (!reward.dock || task === 'dock'),
+  );
+}
+
 function resultName(result) {
   const names = copy.resultNames;
   if (result.success) return names.success;
@@ -203,6 +210,7 @@ export {
   newSeeds,
   evaluate,
   resultName,
+  activeRewards,
   statistics,
   describeChange,
   Experiment,

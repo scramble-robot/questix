@@ -4,6 +4,7 @@ import { initRLCurriculum } from './foundations.js';
 import { IntroLearner, introRandom, introRollout, introDistance } from './intro.js';
 import { drawPrimerRun } from './primer-render.js';
 import { primerLabels, primerPanels } from './primer-view.js';
+import { revealElement } from './reveal.js';
 
 // Reward primer: the first reinforcement-learning experiment a learner meets. The same robot is
 // trained twice — once for getting closer to the goal, once for spinning on the spot — so that the
@@ -189,8 +190,7 @@ async function learnPrimer() {
   primer.result = null;
   primer.curves.set(primer.rule, primer.model.episodeRewards);
   update();
-  if (window.matchMedia(NARROW_SCREEN).matches)
-    el('primerCurve')?.scrollIntoView({ block: 'start' });
+  if (window.matchMedia(NARROW_SCREEN).matches) revealElement(el('primerCurve'));
   for (let round = 0; round < TRAINING_ROUNDS; round++) {
     primer.model.train(EPISODES_PER_ROUND);
     update();
@@ -203,7 +203,7 @@ async function learnPrimer() {
   primer.busy = false;
   update();
   if (window.matchMedia(NARROW_SCREEN).matches)
-    document.querySelector('.intro-visual').scrollIntoView({ block: 'start' });
+    revealElement(document.querySelector('.intro-visual'));
 }
 
 // ------------------------------------------------------------------ start-up

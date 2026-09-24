@@ -13,6 +13,7 @@ import {
   newTrainingModel,
 } from './foundations-core.js';
 import { drawFoundationMap } from './foundations-render.js';
+import { revealElement } from './reveal.js';
 import { fillSentence } from '../core/content.js';
 import { groupsNav, topicsNav, lessonGuides, chapterPanels } from './foundations-view.js';
 
@@ -476,7 +477,7 @@ async function trainModel(startMode, varyWheels, keepModel) {
 // when a button starts something to watch there.
 function revealFigure() {
   if (!window.matchMedia(NARROW_SCREEN).matches) return;
-  document.querySelector('#rlFoundationLesson .basics-visual').scrollIntoView({ block: 'start' });
+  revealElement(document.querySelector('#rlFoundationLesson .basics-visual'));
 }
 
 // ----------------------------------------------------------------- actions

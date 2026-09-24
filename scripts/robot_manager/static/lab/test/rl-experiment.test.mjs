@@ -10,6 +10,7 @@ import {
   initialConfig,
   newSeeds,
   resultName,
+  activeRewards,
   statistics,
   describeChange,
   Experiment,
@@ -203,4 +204,17 @@ test('testing before training is refused', () => {
 
 test('the three trajectories are labelled before, midway and after', () => {
   assert.deepEqual(CHECKPOINT_LABELS, ['学習前', '途中', '学習後']);
+});
+
+test('the reward summary lists every reward the next training uses, and only those', () => {
+  const config = initialConfig('delivery');
+  const names = activeRewards(config.rewards, 'delivery').map((reward) => reward.key);
+  assert.deepEqual(names, ['success', 'progress', 'collision', 'time', 'careful', 'settling']);
+  // The docking heading reward is on by default but only exists in the docking mission.
+  assert.ok(activeRewards(config.rewards, 'dock').some((reward) => reward.key === 'heading'));
+  config.rewards.enabled.time = false;
+  config.rewards.enabled.clearance = true;
+  const changed = activeRewards(config.rewards, 'delivery').map((reward) => reward.key);
+  assert.ok(!changed.includes('time'));
+  assert.ok(changed.includes('clearance'));
 });

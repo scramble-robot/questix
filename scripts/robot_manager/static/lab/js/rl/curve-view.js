@@ -8,6 +8,7 @@ import { PLOT_UNITS } from './curve-core.js';
 // charts"). Pure: takes the layout from curve-core.js and short captions.
 
 const END_LABEL_FLIP = 40; // percent: from here on the line label sits left of the line's end
+const END_LABEL_LOW = 22; // percent from the top: a line this high gets its label below it
 
 function gridLines(layout) {
   return layout.yTicks.map(
@@ -42,9 +43,12 @@ function linePaths(layout) {
 function endLabel(line, unit) {
   if (!line.end) return nothing;
   const flipped = line.end.x > END_LABEL_FLIP;
+  const classes = ['rl-curve-end'];
+  if (flipped) classes.push('is-flipped');
+  if (line.end.y < END_LABEL_LOW) classes.push('is-below');
   const style = roleStyle(line.role, 'chart');
   return html`<span
-    class=${flipped ? 'rl-curve-end is-flipped' : 'rl-curve-end'}
+    class=${classes.join(' ')}
     data-role=${line.role}
     style="left:${line.end.x}%;top:${line.end.y}%;--line-color:${style.color}"
     ><i aria-hidden="true"></i>${line.label} ${formatNumber(line.end.value, 1)}${unit}</span

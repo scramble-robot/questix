@@ -55,7 +55,7 @@ select {
   border-radius: 50%;
   display: grid;
   place-items: center;
-  font-size: 11px;
+  font-size: 12px;
 }
 .step-nav button[aria-current='step'] {
   background: white;
@@ -117,7 +117,7 @@ select {
 }
 .scan-option {
   color: #b3c8cd;
-  font-size: 11px;
+  font-size: 12px;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -149,8 +149,9 @@ select {
   padding: 14px 18px;
 }
 .playback-bar > button:first-child {
-  width: 44px;
-  padding: 8px;
+  min-width: 44px;
+  padding: 8px 12px;
+  white-space: nowrap;
 }
 .playback-bar input {
   flex: 1;
@@ -189,7 +190,7 @@ select {
   white-space: nowrap;
 }
 .reward-summary small {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
   font-weight: 400;
   margin-left: 5px;
@@ -244,11 +245,11 @@ select {
   color: #91a09b;
 }
 .reward-row small {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
 }
 .reward-row > p {
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.8;
   margin: 8px 0 0 27px;
 }
@@ -341,7 +342,7 @@ progress::-webkit-progress-value {
   font-size: 12px;
 }
 .checkpoint span {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
 }
 .checkpoint button {
@@ -350,7 +351,7 @@ progress::-webkit-progress-value {
   border-radius: 0;
   width: 100%;
   background: transparent;
-  font-size: 11px;
+  font-size: 12px;
   min-height: 38px;
 }
 .training-chart {
@@ -369,7 +370,7 @@ progress::-webkit-progress-value {
   border-radius: 7px;
   min-height: 35px;
   padding: 7px 10px;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 500;
   background: #f4f7f5;
   color: var(--muted);
@@ -379,25 +380,8 @@ progress::-webkit-progress-value {
   color: var(--green);
   font-weight: 700;
 }
-#learningChart svg {
-  width: 100%;
-  display: block;
-}
-#learningChart text {
-  font: 14px system-ui;
-  fill: #738179;
-}
-.chart-empty {
-  height: 180px;
-  background: #f7f9f7;
-  display: grid;
-  place-items: center;
-  color: #819188;
-  font-size: 13px;
-  border-radius: 10px;
-}
 .training-chart .helper {
-  font-size: 11px !important;
+  font-size: 12px !important;
 }
 .result-highlight {
   font-size: 44px;
@@ -420,7 +404,7 @@ progress::-webkit-progress-value {
   margin: 24px 0;
 }
 .result-badge {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   padding: 6px 10px;
   border-radius: 20px;
@@ -466,7 +450,7 @@ progress::-webkit-progress-value {
 }
 .result-metrics em {
   display: block;
-  font-size: 11px;
+  font-size: 12px;
   font-style: normal;
   margin-top: 10px;
   color: #7b8d81;
@@ -485,7 +469,7 @@ progress::-webkit-progress-value {
   font-size: 13px;
 }
 .result-detail .helper {
-  font-size: 11px !important;
+  font-size: 12px !important;
 }
 .trial-grid {
   display: grid;
@@ -508,7 +492,7 @@ progress::-webkit-progress-value {
   font-variant-numeric: tabular-nums;
 }
 .trial-grid span {
-  font-size: 10px;
+  font-size: 12px;
 }
 .trial-grid .success {
   color: #367863;
@@ -562,7 +546,7 @@ progress::-webkit-progress-value {
   font-size: 13px;
 }
 .improvement-choices .choice small {
-  font-size: 11px;
+  font-size: 12px;
 }
 .note-label {
   font-size: 12px;
@@ -570,7 +554,7 @@ progress::-webkit-progress-value {
   margin: 15px 0 8px;
 }
 .note-label span {
-  font-size: 10px;
+  font-size: 12px;
   color: #7e8c85;
   margin-left: 6px;
 }
@@ -616,7 +600,7 @@ textarea {
 .sensor-disclosure small {
   display: block;
   font-weight: 400;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
   margin-top: 5px;
 }
@@ -663,7 +647,7 @@ textarea {
   line-height: 1.85;
 }
 .sensor-explanation .eyebrow {
-  font-size: 10px;
+  font-size: 12px;
   margin-bottom: 9px;
 }
 .sensor-explanation select {
@@ -672,7 +656,7 @@ textarea {
   width: 100%;
 }
 .sensor-explanation .helper {
-  font-size: 10px !important;
+  font-size: 12px !important;
 }
 #sensorReading > strong {
   display: block;
@@ -686,7 +670,7 @@ textarea {
   font-weight: 400;
 }
 #sensorReading > span {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
 }
 #sensorReading > .text-reading {
@@ -696,7 +680,7 @@ textarea {
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 11px;
+  font-size: 12px;
   margin: 9px 0;
 }
 .sensor-value i {
@@ -711,7 +695,7 @@ textarea {
   font-weight: 600;
 }
 .sensor-value small {
-  font-size: 10px;
+  font-size: 12px;
 }
 .method-note {
   margin-top: 30px;
@@ -733,7 +717,7 @@ textarea {
   font-size: 12px;
 }
 .method-grid button {
-  font-size: 11px;
+  font-size: 12px;
 }
 #manualControls {
   background: #fff;
@@ -789,7 +773,7 @@ textarea {
   color: white;
 }
 .safety-controls p {
-  font-size: 11px;
+  font-size: 12px;
   color: #826456;
   margin: 8px 0 0;
   line-height: 1.7;
@@ -853,7 +837,7 @@ textarea {
     font-size: 29px;
   }
   .result-metrics span {
-    font-size: 11px;
+    font-size: 12px;
   }
   .sensor-content {
     grid-template-columns: 1fr;
@@ -885,7 +869,7 @@ textarea {
     padding: 16px;
   }
   .scan-option {
-    font-size: 10px;
+    font-size: 12px;
   }
   #manualControls {
     gap: 18px;
@@ -920,7 +904,7 @@ textarea {
   .step-nav button {
     flex-direction: column;
     gap: 6px;
-    font-size: 10px;
+    font-size: 12px;
     padding: 8px 2px;
     min-height: 62px;
     line-height: 1.4;
@@ -928,7 +912,7 @@ textarea {
   .step-nav button span {
     width: 18px;
     height: 18px;
-    font-size: 10px;
+    font-size: 12px;
   }
   .lab-layout {
     grid-template-columns: 1fr;
@@ -954,7 +938,7 @@ textarea {
     padding: 10px 14px;
   }
   .lab-guide .helper {
-    font-size: 11px !important;
+    font-size: 12px !important;
   }
   .workspace {
     gap: 16px;
@@ -963,7 +947,7 @@ textarea {
     padding: 15px;
   }
   .scan-option {
-    font-size: 10px;
+    font-size: 12px;
   }
   .scene-caption {
     padding: 14px 16px;
@@ -973,7 +957,7 @@ textarea {
     gap: 7px;
   }
   .playback-bar .small {
-    font-size: 11px;
+    font-size: 12px;
     padding: 7px;
   }
   .checkpoint-grid {
@@ -981,13 +965,13 @@ textarea {
     padding: 0 14px 18px;
   }
   .checkpoint strong {
-    font-size: 11px;
+    font-size: 12px;
   }
   .checkpoint span {
     font-size: 9px;
   }
   .checkpoint button {
-    font-size: 10px;
+    font-size: 12px;
   }
   .checkpoint > div {
     padding: 9px;
@@ -996,7 +980,7 @@ textarea {
     padding: 0 18px 18px;
   }
   .training-progress p {
-    font-size: 11px;
+    font-size: 12px;
   }
   .training-chart {
     padding: 18px 14px;
@@ -1006,10 +990,10 @@ textarea {
   }
   .chart-tabs button {
     padding: 6px 7px;
-    font-size: 10px;
+    font-size: 12px;
   }
   .training-chart .helper {
-    font-size: 10px !important;
+    font-size: 12px !important;
   }
   .result-metrics {
     padding: 0 18px 20px;
@@ -1019,17 +1003,21 @@ textarea {
     font-size: 29px;
   }
   .result-metrics span {
-    font-size: 10px;
+    font-size: 12px;
   }
   .result-metrics small {
-    font-size: 11px;
+    font-size: 12px;
   }
   .result-metrics em {
-    font-size: 10px;
+    font-size: 12px;
   }
   .result-detail {
     padding: 18px;
     gap: 22px;
+  }
+  /* Full width on a phone, so the start marks are large enough to tell apart. */
+  .result-detail > div:first-child {
+    grid-template-columns: 1fr;
   }
   .trial-grid {
     gap: 7px;
@@ -1053,7 +1041,7 @@ textarea {
     gap: 3px;
   }
   .sensor-tabs button {
-    font-size: 11px;
+    font-size: 12px;
   }
   .sensor-content {
     padding: 18px;
@@ -1065,7 +1053,7 @@ textarea {
     max-width: 240px;
   }
   .sensor-explanation .helper {
-    font-size: 11px !important;
+    font-size: 12px !important;
   }
   .sensor-explanation p {
     font-size: 13px;
@@ -1171,14 +1159,14 @@ textarea {
     grid-template-columns: 1fr 1fr;
   }
   .intro-visual .experience-strip {
-    font-size: 10px;
+    font-size: 12px;
   }
   .intro-layout .section-top {
     padding: 14px;
   }
   .intro-layout figure > p {
     min-height: 0;
-    font-size: 10px;
+    font-size: 12px;
     padding: 9px;
   }
   .intro-layout figcaption {
@@ -1186,10 +1174,10 @@ textarea {
     font-size: 12px;
   }
   .intro-layout figcaption > span {
-    font-size: 10px;
+    font-size: 12px;
   }
   .intro-layout .page-footnote {
-    font-size: 11px;
+    font-size: 12px;
   }
   .intro-layout .comparison canvas {
     height: auto;
@@ -1232,7 +1220,7 @@ textarea {
   color: var(--green);
 }
 .run-rewards .helper {
-  font-size: 11px !important;
+  font-size: 12px !important;
 }
 .run-reward-total {
   font-size: 13px;

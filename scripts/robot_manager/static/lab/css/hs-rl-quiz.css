@@ -208,7 +208,8 @@
   color: #5f6f76;
   font-weight: 400;
 }
-.rl-curve-end[data-role='previous'].is-flipped {
+.rl-curve-end[data-role='previous'].is-flipped,
+.rl-curve-end.is-flipped.is-below {
   transform: translate(calc(-100% - 8px), 30%);
 }
 .rl-curve-empty {
@@ -274,5 +275,54 @@
   }
   .rl-map-key {
     padding: 8px 12px;
+  }
+}
+
+/* ------------------------------------------------------------ reinforcement-learning lab */
+
+/* From the Q-table of the foundation chapters to a formula for the wheel speeds. */
+.lab-bridge {
+  margin: 14px 0 4px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #eef4fb;
+  border-left: 4px solid var(--role-measured);
+  font-size: 14px;
+  line-height: 1.7;
+}
+.lab-bridge p {
+  margin: 6px 0 0;
+  color: #34484d;
+}
+.reward-summary-title {
+  margin: 20px 0 -12px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #34484d;
+}
+
+/* A stage's guide text is folded once the learner has read it. */
+.lab-brief-fold {
+  margin: 0 0 16px;
+  padding: 10px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: white;
+}
+.lab-brief-fold > summary {
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--green);
+  font-weight: 700;
+}
+.lab-brief-fold[open] > summary {
+  margin-bottom: 10px;
+}
+#learningChart .rl-curve-frame {
+  grid-template-rows: 180px 20px;
+}
+@media (max-width: 600px) {
+  #learningChart .rl-curve-frame {
+    grid-template-rows: 150px 20px;
   }
 }
