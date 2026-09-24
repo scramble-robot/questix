@@ -4,7 +4,7 @@
        default="$(find-pkg-share questix_lab_bridge)/config/lab_bridge.yaml"
        description="Parameter file of the QUESTiX LAB live bridge" />
 
-  <!-- Read-only telemetry mirror for the QUESTiX LAB pages served by robot_manager (/lab). -->
+  <!-- Telemetry mirror for the QUESTiX LAB pages (read-only unless allow_drive is set in the config). -->
   <node pkg="questix_lab_bridge" exec="lab_bridge_node" name="questix_lab_bridge" output="screen">
     <param from="$(var config_file)" />
   </node>

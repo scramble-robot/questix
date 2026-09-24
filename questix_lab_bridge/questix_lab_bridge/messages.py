@@ -1,12 +1,16 @@
 """Convert ROS messages into the JSON payloads of the QUESTiX LAB live protocol.
 
-Protocol version 1, server to browser only. Units follow REP-103: metres, radians,
-seconds; x forward, y left, theta counter-clockwise. Every function here is pure and
-duck-typed so it can be tested without a ROS installation.
+Protocol version 1. Units follow REP-103: metres, radians, seconds; x forward, y left,
+theta counter-clockwise. Every function here is pure and duck-typed so it can be tested
+without a ROS installation.
 
-Text frames are JSON objects tagged by ``type``:
+Server to browser, text frames are JSON objects tagged by ``type``:
 
 * ``hello``  - protocol version, robot geometry, and the topic behind each stream.
+* ``session`` - the id this connection has on the bridge (``drive_state.owner`` uses it).
+* ``drive_state`` - whether a page may drive the robot now and why not, who drives it,
+  the limits, and why the last run ended (drive.DriveArbiter.state). A page whose request
+  was refused gets one more, to itself only, with ``refused`` set to the reason.
 * ``scan``   - ``angle_min``, ``angle_increment``, ``range_max``, ``ranges``
   (unmeasured beams are ``null``), and ``mount`` - the scan frame's pose ``x``, ``y``
   [m], ``yaw`` [rad] in the robot's base frame, from TF (``null`` until TF knows it).
@@ -16,6 +20,12 @@ Text frames are JSON objects tagged by ``type``:
 * ``status`` - message rate per stream over the last reporting interval.
 
 Binary frames carry one compressed camera image (JPEG or PNG bytes, unmodified).
+
+Browser to server (only when the bridge runs with ``allow_drive``; otherwise ignored):
+
+* ``{"type": "drive", "linear": v, "angular": w}`` - drive at v [m/s], w [rad/s]. Also the
+  heartbeat: the owner repeats it, and silence stops the robot (drive.py).
+* ``{"type": "stop"}`` - stop the robot, whichever page drives it.
 
 scripts/robot_manager/static/lab/js/live/rosbag-core.js ports the scan/odom/drive/twist
 conversions below so the lab can read a rosbag into the same payloads; change both together.
@@ -41,12 +51,12 @@ def _finite(value, digits):
     return round(value, digits) if math.isfinite(value) else None
 
 
-def hello_payload(streams, wheel_radius, wheel_separation):
+def hello_payload(streams, wheel_radius, wheel_separation, drive_allowed=False):
     """Describe the bridge to a newly connected browser."""
     return {
         'type': 'hello',
         'protocol': PROTOCOL_VERSION,
-        'read_only': True,
+        'read_only': not drive_allowed,
         'config': {'wheel_radius': wheel_radius, 'wheel_separation': wheel_separation},
         'streams': streams,
     }
@@ -136,6 +146,37 @@ def twist_payload(msg, stamp):
         'linear': _finite(msg.linear.x, 4),
         'angular': _finite(msg.angular.z, 4),
     }
+
+
+def session_payload(client_id):
+    """Tell one browser its id on this bridge."""
+    return {'type': 'session', 'id': client_id}
+
+
+def drive_state_payload(state):
+    """Wrap drive.DriveArbiter.state() for the browsers."""
+    return {'type': 'drive_state', **state}
+
+
+def parse_request(text):
+    """Decode a browser frame into ``('drive', linear, angular)``, ``('stop',)`` or None.
+
+    Anything else (binary frames, other types, broken JSON) is None and ignored. Values are
+    passed on unchecked; DriveArbiter.request refuses what is not a finite number.
+    """
+    if not isinstance(text, str):
+        return None
+    try:
+        message = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(message, dict):
+        return None
+    if message.get('type') == 'stop':
+        return ('stop',)
+    if message.get('type') == 'drive':
+        return ('drive', message.get('linear'), message.get('angular'))
+    return None
 
 
 def status_payload(rates):

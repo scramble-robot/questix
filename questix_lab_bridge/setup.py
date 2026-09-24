@@ -18,7 +18,7 @@ setup(
     zip_safe=True,
     maintainer='asa-naki',
     maintainer_email='aki.grade2580@outlook.jp',
-    description='Read-only WebSocket bridge for the QUESTiX LAB web teaching material.',
+    description='WebSocket bridge for the QUESTiX LAB web teaching material.',
     license='MIT',
     tests_require=['pytest'],
     entry_points={

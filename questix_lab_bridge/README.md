@@ -1,15 +1,16 @@
 # questix_lab_bridge
 
-Read-only WebSocket bridge between a real QUESTiX robot and the **QUESTiX LAB** web teaching
-material (`scripts/robot_manager/static/lab/`, served by `robot_manager` at `/lab/`).
+WebSocket bridge between a real QUESTiX robot and the **QUESTiX LAB** web teaching material
+(`scripts/robot_manager/static/lab/`, served by `robot_manager` at `/lab/`).
 
 The lessons run their experiments in an in-browser simulator. This node lets the same pages
 *observe* the real robot as well: LiDAR scans, odometry, wheel feedback, the commanded velocity,
 and (optionally) camera images.
 
-**Observation only.** The node creates subscriptions and nothing else (no publishers, services,
-or actions of its own), and everything a browser sends over the socket is discarded. A lesson
-can never move the robot; driving stays with the controller and the `joy_gate` / E-stop path.
+**Observation only by default.** Unless `allow_drive` is true the node creates subscriptions and
+nothing else (no publishers, services, or actions of its own), and everything a browser sends over
+the socket is discarded. With `allow_drive` (see [Driving experiments](#driving-experiments)) it
+also publishes `/target_twist` for the lessons' low-speed driving experiments, and nothing else.
 
 ## Run
 
@@ -47,14 +48,65 @@ it is a classroom tool that is switched on from the manager when a lesson needs 
 | `scan_max_points` | `360` | Scans are decimated by an integer stride to at most this many beams. |
 | `base_frame` | `base_link` | Each scan carries `mount` (`x`, `y`, `yaw` of the scan frame in this frame), looked up once per frame in TF — on QUESTiX the static transform of `launcher/launch/lidar_driver.launch.xml`. `null` (and a throttled warning) while TF does not know it; the lab then uses its default mount. |
 | `wheel_radius`, `wheel_separation` | `0.1`, `0.5` | Only reported to the page for wheel-odometry lessons. Keep identical to `launcher/config/drive_component.yaml`. |
+| `allow_drive` | `false` | Let pages drive the robot (next section). robot_manager passes `true` while 教材からの走行 is allowed. |
+| `drive_topic` | `/target_twist` | `geometry_msgs/Twist` published for the pages, the same topic `drive_component` listens to. |
+| `emergency_stop_topic` | `/emergency_stop` | `questix_msgs/EmergencyStop` (reliable, transient local). `/drive_status`'s `emergency_stop` counts too. |
+| `drive_max_linear`, `drive_max_angular` | `0.3`, `1.0` | Upper bounds [m/s], [rad/s]; faster requests are clamped. |
+| `drive_deadman_sec` | `0.5` | The driving page repeats its command every 0.1 s; silence this long stops the robot. |
+| `drive_max_run_sec` | `30.0` | Longest single run, from its first command to its stop. |
+| `drive_rate_hz` | `20.0` | Rate the held command is published at. |
+
+## Driving experiments
+
+Some lessons can drive the robot slowly and record what happens: a speed step in the
+feedback-control course, the learner's own PID stopping the robot 0.5 m before a wall, a
+forward/backward speed staircase and a measured-distance drive for the measurement lab, and a
+hold-to-move bench test in the 実機 dialog. All of it goes through `/target_twist`, exactly like
+the controller, so `drive_component`'s own limits, `cmd_timeout_sec` and emergency stop apply
+unchanged.
+
+To use it:
+
+1. Start the robot **without its controller**, so the bridge is the only `/target_twist` source
+   (two sources would take turns every tick):
+   `ros2 launch questix_launcher questix_core.launch.xml enable_controller:=false`
+2. In Questix Robot Manager's 教材 tab, press **走行を許可する** (restarts the bridge with
+   `allow_drive:=true`). Competition mode turns it off again.
+3. Learners tick the safety check on the page and press the lesson's drive button.
+
+The bridge enforces every rule itself (`questix_lab_bridge/drive.py`, unit-tested), whatever a
+page sends:
+
+| Rule | Effect |
+| --- | --- |
+| `allow_drive` false | Every request refused (`not_allowed`); nothing is ever published. |
+| Another node publishes `drive_topic` | Refused / running run stopped (`other_publisher`, with the node names). Checked every 0.5 s in the ROS graph. |
+| No node subscribes to `drive_topic` | Refused (`no_drive_node`). |
+| Emergency stop active | Refused / stopped (`emergency_stop`). |
+| Another page drives | Refused (`busy`). Any page may **stop** any run. |
+| No command for `drive_deadman_sec` | Stopped (`timeout`): closed tab, sleeping laptop, lost Wi-Fi. |
+| Owner disconnects | Stopped at once (`disconnected`). |
+| Run longer than `drive_max_run_sec` | Stopped (`time_limit`). |
+| Speed above the limits / non-finite | Clamped / stopped (`invalid`). |
+
+After a stop the bridge publishes zero for 0.3 s so `drive_component` sees an explicit stop, then
+nothing: an idle bridge never competes with a controller started later. If the bridge itself dies
+mid-run, `drive_component`'s `cmd_timeout_sec` (1 s) stops the motors.
+
+The page side (`static/lab/js/live/drive-link.js`) adds its own stops: the learner's 止める
+button, Esc, the page being hidden or closed, and a fixed stop bar shown on every connected page
+while any page drives.
 
 ## Protocol (version 1)
 
 Units follow REP-103: metres, radians, seconds; x forward, y left, theta counter-clockwise.
 
 Text frames are JSON objects tagged by `type`: `hello` (sent first: protocol version, geometry,
-topic per stream), `scan`, `odom`, `drive`, `twist`, and `status` (received rate per stream,
-once a second). Unmeasured LiDAR beams are `null`, never `0` or a large number. Binary frames
+topic per stream, `read_only`), `session` (this connection's id), `drive_state` (may a page drive
+now, blockers, owner id, limits, why the last run ended; on every change and once a second),
+`scan`, `odom`, `drive`, `twist`, and `status` (received rate per stream, once a second).
+Browsers send `{"type": "drive", "linear": v, "angular": w}` (also the heartbeat) and
+`{"type": "stop"}`; both are ignored unless `allow_drive` is set. Unmeasured LiDAR beams are `null`, never `0` or a large number. Binary frames
 are one camera image each, exactly as published. See `questix_lab_bridge/messages.py` for the
 fields.
 
@@ -67,9 +119,12 @@ robot's own sign convention. With `joy_axis_drive`, `v` and `w` are always 0 (se
 ## Security notes
 
 The port is unauthenticated and, by default, reachable from the LAN. It exposes telemetry,
-camera images, and the static teaching pages (GET only, confined to `lab_dir`), but accepts no
-commands. Set `host` to `127.0.0.1` if only the robot's own browser
-should connect, and leave `camera_topic` empty when images must not leave the robot.
+camera images, and the static teaching pages (GET only, confined to `lab_dir`). With
+`allow_drive` it also accepts low-speed drive commands from **anyone who can reach the port** —
+keep driving off unless a class is using it at the robot, on the robot's own access point or a
+trusted classroom network, and switch it off afterwards (robot_manager shows it in orange). Set
+`host` to `127.0.0.1` if only the robot's own browser should connect, and leave `camera_topic`
+empty when images must not leave the robot.
 
 ## Tests
 
@@ -78,5 +133,8 @@ should connect, and leave `camera_topic` empty when images must not leave the ro
 colcon test --packages-select questix_lab_bridge
 ```
 
-Validated so far on an AMD64 development machine with published test topics only. Raspberry Pi 5
-validation with the real LiDAR, drive, and a camera is still pending and is authoritative.
+Validated so far on an AMD64 development machine with published test topics only (driving: a
+fake drive node obeying `/target_twist`, with the pages driven in headless Chrome). Raspberry Pi 5
+validation with the real LiDAR, drive, and a camera is still pending and is authoritative —
+in particular the driving experiments with the real motors, `joy_gate`-less startup and the
+physical E-stop.

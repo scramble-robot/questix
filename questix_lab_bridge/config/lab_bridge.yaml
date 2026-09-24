@@ -1,4 +1,5 @@
-# QUESTiX LAB live bridge: observation only (subscriptions -> WebSocket, nothing is published).
+# QUESTiX LAB live bridge: subscriptions -> WebSocket. Nothing is published unless allow_drive
+# is true (see the drive section at the end and questix_lab_bridge/drive.py).
 questix_lab_bridge:
   ros__parameters:
     host: "0.0.0.0"
@@ -38,3 +39,26 @@ questix_lab_bridge:
     # rosbags opened without a robot connected.
     wheel_radius: 0.1
     wheel_separation: 0.5
+
+    # Driving experiments from the pages (the only thing this node can publish).
+    # false = observation only; robot_manager passes true when 教材からの走行を許可 is on.
+    # Even when allowed, a page can drive only while
+    #   - no other node publishes drive_topic (start the robot without its controller:
+    #     `ros2 launch questix_launcher questix_core.launch.xml enable_controller:=false`),
+    #   - a drive node (drive_component) subscribes to it, and
+    #   - the emergency stop is released (emergency_stop_topic or /drive_status).
+    allow_drive: false
+    drive_topic: "/target_twist"
+    emergency_stop_topic: "/emergency_stop"
+    # Upper bounds for what a page may command; faster requests are clamped. Keep them low:
+    # learners run these experiments next to the robot.
+    drive_max_linear: 0.3   # [m/s]
+    drive_max_angular: 1.0  # [rad/s]
+    # The driving page repeats its command about 10 times a second. Silence for this long
+    # (closed tab, sleeping laptop, lost Wi-Fi) stops the robot.
+    drive_deadman_sec: 0.5
+    # One run (from the first command to stop) may not last longer than this.
+    drive_max_run_sec: 30.0
+    # Rate the held command is published at. drive_component's cmd_timeout_sec (1.0 s) is the
+    # last line of defence if this node dies while driving.
+    drive_rate_hz: 20.0

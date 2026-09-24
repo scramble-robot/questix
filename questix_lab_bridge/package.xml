@@ -3,7 +3,7 @@
 <package format="3">
     <name>questix_lab_bridge</name>
     <version>3.2.0</version>
-    <description>Read-only WebSocket bridge that mirrors robot telemetry (LiDAR, odometry, drive status, camera) to the QUESTiX LAB web teaching material.</description>
+    <description>WebSocket bridge that mirrors robot telemetry (LiDAR, odometry, drive status, camera) to the QUESTiX LAB web teaching material and, when explicitly allowed, lets its pages run guarded low-speed driving experiments.</description>
     <maintainer email="aki.grade2580@outlook.jp">asa-naki</maintainer>
     <license>MIT</license>
 

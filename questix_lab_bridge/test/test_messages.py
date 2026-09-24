@@ -92,3 +92,24 @@ def test_scan_carries_the_mount():
     assert messages.scan_payload(msg)['mount'] is None
     mount = {'x': 0.2, 'y': 0.0, 'yaw': 0.0}
     assert messages.scan_payload(msg, mount=mount)['mount'] == mount
+
+
+def test_hello_is_not_read_only_when_driving_is_allowed():
+    hello = messages.hello_payload({}, 0.1, 0.5, drive_allowed=True)
+    assert hello['read_only'] is False
+
+
+def test_parse_request():
+    assert messages.parse_request('{"type":"stop"}') == ('stop',)
+    assert messages.parse_request('{"type":"drive","linear":0.1,"angular":-0.2}') == (
+        'drive', 0.1, -0.2)
+    # Missing values are passed on as None; the arbiter refuses them.
+    assert messages.parse_request('{"type":"drive"}') == ('drive', None, None)
+    for ignored in ('not json', '[1]', '{"type":"cmd_vel"}', b'{"type":"stop"}', '"stop"'):
+        assert messages.parse_request(ignored) is None
+
+
+def test_session_and_drive_state_payloads():
+    assert messages.session_payload(3) == {'type': 'session', 'id': 3}
+    state = messages.drive_state_payload({'allowed': True, 'owner': None})
+    assert state == {'type': 'drive_state', 'allowed': True, 'owner': None}

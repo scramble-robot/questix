@@ -1,10 +1,14 @@
-"""Read-only WebSocket fan-out used by the QUESTiX LAB bridge node.
+"""WebSocket fan-out used by the QUESTiX LAB bridge node.
 
 The server runs an asyncio loop on its own thread. ROS callbacks hand payloads over
-with :meth:`LabWebSocketServer.publish`; each client keeps only the newest payload
-per stream, so a slow browser drops frames instead of building a backlog.
+with :meth:`LabWebSocketServer.publish` (every browser) or :meth:`publish_to` (one);
+each client keeps only the newest payload per stream, so a slow browser drops frames
+instead of building a backlog.
 
-Anything a browser sends is discarded: this socket never drives the robot.
+Each connection gets an integer id. Text a browser sends is handed to ``on_message(id,
+text)`` on the server thread, and ``on_disconnect(id)`` runs when it goes away; without
+those callbacks everything a browser sends is discarded. The bridge node decides what,
+if anything, a message may do (drive.py): this module never drives the robot itself.
 
 Plain HTTP requests on the same port (a browser opening ``http://<robot>:8897/``) are
 answered with the QUESTiX LAB static site instead of failing the WebSocket handshake.
@@ -31,7 +35,7 @@ except ImportError:
     _serve = websockets.serve
     _LEGACY_API = True
 
-# Browsers have nothing to tell this server, so keep their frames tiny.
+# Browsers only send short drive/stop requests, so keep their frames tiny.
 _MAX_INCOMING_BYTES = 1024
 
 
@@ -40,14 +44,21 @@ def _is_websocket_upgrade(headers):
 
 
 class _Client:
-    def __init__(self):
+    def __init__(self, client_id):
+        self.id = client_id
         self.slots = {}
         self.event = asyncio.Event()
 
 
 class LabWebSocketServer:
 
-    def __init__(self, host, port, hello_text, max_clients=8, logger=None, site_dir=None):
+    def __init__(self, host, port, hello_text, max_clients=8, logger=None, site_dir=None,
+                 greeting=None, on_message=None, on_disconnect=None):
+        """``greeting(id)`` returns text frames sent right after ``hello`` to that client."""
+        self._greeting = greeting
+        self._on_message = on_message
+        self._on_disconnect = on_disconnect
+        self._next_id = 1
         self._site_dir = None if site_dir is None else Path(site_dir).resolve()
         self._host = host
         self._port = port
@@ -87,8 +98,16 @@ class LabWebSocketServer:
             return
         self._loop.call_soon_threadsafe(self._offer, stream, payload)
 
-    def _offer(self, stream, payload):
+    def publish_to(self, client_id, stream, payload):
+        """Offer a payload to one client only (e.g. the answer to its own request)."""
+        if self._loop is None:
+            return
+        self._loop.call_soon_threadsafe(self._offer, stream, payload, client_id)
+
+    def _offer(self, stream, payload, client_id=None):
         for client in self._clients:
+            if client_id is not None and client.id != client_id:
+                continue
             client.slots[stream] = payload
             client.event.set()
 
@@ -128,24 +147,38 @@ class LabWebSocketServer:
         if len(self._clients) >= self._max_clients:
             await websocket.close(1013, 'too many clients')
             return
-        client = _Client()
+        client = _Client(self._next_id)
+        self._next_id += 1
         self._clients.add(client)
-        self._log('client connected (%d)' % len(self._clients))
+        self._log('client %d connected (%d)' % (client.id, len(self._clients)))
         sender = None
         try:
             # hello always precedes stream data, so the page knows the geometry first.
             await websocket.send(self._hello_text)
+            for text in self._greeting(client.id) if self._greeting else ():
+                await websocket.send(text)
             client.slots.clear()
             sender = asyncio.ensure_future(self._sender(websocket, client))
-            async for _ in websocket:
-                pass  # read-only: incoming frames are ignored on purpose
+            async for message in websocket:
+                if self._on_message is not None and isinstance(message, str):
+                    self._call(self._on_message, client.id, message)
         except websockets.ConnectionClosed:
             pass
         finally:
             if sender is not None:
                 sender.cancel()
             self._clients.discard(client)
-            self._log('client disconnected (%d)' % len(self._clients))
+            if self._on_disconnect is not None:
+                self._call(self._on_disconnect, client.id)
+            self._log('client %d disconnected (%d)' % (client.id, len(self._clients)))
+
+    def _call(self, callback, *args):
+        # A failing callback must not take the connection (or the robot's stop path) down.
+        try:
+            callback(*args)
+        except Exception as error:  # noqa: B902 - logged, the connection stays up
+            if self._logger is not None:
+                self._logger.error('WebSocket callback failed: %r' % (error,))
 
     async def _sender(self, websocket, client):
         try:

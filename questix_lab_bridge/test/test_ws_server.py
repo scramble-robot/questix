@@ -98,3 +98,62 @@ def test_plain_http_without_a_site_explains_itself(server):
     status, content_type, body = _http_get(server.port, '/')
     assert status == 404 and content_type.startswith('text/plain')
     assert b'lab_dir' in body
+
+
+def test_client_ids_messages_and_disconnect_reach_the_callbacks():
+    received = []
+    left = []
+    instance = LabWebSocketServer(
+        '127.0.0.1', 0, json.dumps({'type': 'hello'}),
+        greeting=lambda client: [json.dumps({'type': 'session', 'id': client})],
+        on_message=lambda client, text: received.append((client, text)),
+        on_disconnect=left.append)
+    instance.start()
+
+    async def scenario():
+        url = 'ws://127.0.0.1:%d' % instance.port
+        async with websockets.connect(url) as first, websockets.connect(url) as second:
+            await first.recv()
+            first_id = json.loads(await first.recv())['id']
+            await second.recv()
+            second_id = json.loads(await second.recv())['id']
+            assert first_id != second_id
+            await _wait_for_clients(instance, 2)
+            await first.send('{"type":"stop"}')
+            await first.send(b'binary frames are not handed on')
+            # A reply meant for one page reaches only that page.
+            instance.publish_to(second_id, 'drive_state', 'only-second')
+            assert await asyncio.wait_for(second.recv(), 2) == 'only-second'
+            for _ in range(100):
+                if received:
+                    break
+                await asyncio.sleep(0.01)
+            assert received == [(first_id, '{"type":"stop"}')]
+        for _ in range(100):
+            if len(left) == 2:
+                break
+            await asyncio.sleep(0.01)
+        assert sorted(left) == sorted([first_id, second_id])
+    try:
+        asyncio.run(scenario())
+    finally:
+        instance.stop()
+
+
+def test_a_failing_callback_keeps_the_connection():
+    def explode(client, text):
+        raise RuntimeError('boom')
+    instance = LabWebSocketServer('127.0.0.1', 0, '{}', on_message=explode)
+    instance.start()
+
+    async def scenario():
+        async with websockets.connect('ws://127.0.0.1:%d' % instance.port) as client:
+            await client.recv()
+            await _wait_for_clients(instance, 1)
+            await client.send('{"type":"stop"}')
+            instance.publish('status', 'still-here')
+            assert await asyncio.wait_for(client.recv(), 2) == 'still-here'
+    try:
+        asyncio.run(scenario())
+    finally:
+        instance.stop()
