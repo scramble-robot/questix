@@ -46,10 +46,10 @@ const hardwareHtml = await loadText('content/control/hardware.html');
 
 const FIRST_TOPIC = 'output';
 const CHART_MIN_WIDTH = 320; // px
-const CHART_MAX_WIDTH = 740; // px
+const CHART_MAX_WIDTH = 900; // px: as wide as the card, so chart text is not scaled up
 const CHART_GUTTER = 32; // px of the container the chart leaves to its own padding
-// The result card is only scrolled to when it has left this comfortable band on screen.
-const VISIBLE_BAND = { top: 80, bottom: 200 }; // px
+const SCROLL_MARGIN = 12; // px left between the part scrolled to and the edge of the screen
+const PHONE_QUERY = '(max-width: 600px)'; // matches the tucking header in css/navigation.css
 
 // One experiment per topic, kept while the learner moves between topics and courses.
 const experiments = new Map(
@@ -165,6 +165,9 @@ function buildModel() {
     previous: current.previous,
     comparison: compare ? current.previous : null,
     runs: current.runs,
+    doneTopics: CONTROL_TOPICS.filter((entry) => experiments.get(entry.id).runs.length).map(
+      (entry) => entry.id,
+    ),
     index: current.index,
     complete: current.complete,
     finishedRun: current.complete ? current.result : null,
@@ -333,15 +336,32 @@ function startRun() {
   current.complete = false;
   refreshCharts();
   update();
-  keepFigureInView();
+  showRunOnScreen();
   startPlayback();
 }
 
-function keepFigureInView() {
+// Press → see: after 実験, the rpm chart the brief talks about is on screen, with the figure above
+// it when both fit, otherwise with the chart's bottom at the bottom of the screen (the readings
+// and the playback bar stay just above it). The settings stay beside it (sticky, css/control.css).
+function showRunOnScreen() {
   const figure = document.getElementById('controlVisual');
-  const bounds = figure.getBoundingClientRect();
-  if (bounds.top < VISIBLE_BAND.top || bounds.top > window.innerHeight - VISIBLE_BAND.bottom)
-    figure.scrollIntoView({ block: 'start', behavior: 'instant' });
+  const chart = document.querySelector('#controlCharts .control-chart');
+  if (!figure || !chart) return;
+  const header = stickyHeaderHeight();
+  const figureTop = figure.getBoundingClientRect().top + window.scrollY;
+  const chartBottom = chart.getBoundingClientRect().bottom + window.scrollY;
+  const top = Math.max(
+    figureTop - header - SCROLL_MARGIN,
+    chartBottom - window.innerHeight + SCROLL_MARGIN,
+  );
+  window.scrollTo({ top, behavior: 'instant' });
+}
+
+// The site header stays on top of the page on wide screens; phones tuck it away while scrolling
+// down (shell/series.js), so it does not cover the page there.
+function stickyHeaderHeight() {
+  if (window.matchMedia(PHONE_QUERY).matches) return 0;
+  return document.querySelector('.site-header')?.getBoundingClientRect().height ?? 0;
 }
 
 // A setting was changed: the graphs still show the previous run until it is repeated.

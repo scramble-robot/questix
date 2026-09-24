@@ -1,1 +1,156 @@
 /* High-school readability pass: control-launch-planning (see CONTRIBUTING.md, "Figures and charts"). */
+
+/* --- control ------------------------------------------------------------------------------ */
+
+/* Chromebook: the settings and the run button stay beside the figure and the charts while the
+   learner scrolls down to the charts (the header is about 108 px high at 1366 px). */
+@media (min-width: 821px) {
+  .control-guide {
+    position: sticky;
+    top: 120px;
+    max-height: calc(100vh - 132px);
+    overflow-y: auto;
+  }
+}
+
+/* 図の見方 comes before the figure, so after 実験 the figure, the playback bar and the rpm chart
+   below them are as close together as possible. */
+.control-visual .figure-guide {
+  border-top: 0;
+  border-bottom: 1px solid var(--line);
+}
+
+/* Both time charts have the same horizontal edges, so one moment of the run is at the same x in
+   the rpm chart and in the output chart: the output chart's <details> adds no side padding. */
+.control-graphs details {
+  margin: 0;
+  padding: 16px 0 0;
+}
+.control-graphs details > summary,
+.control-graphs details > p,
+.control-graphs details > .control-chart-legend {
+  margin-left: 24px;
+  margin-right: 24px;
+}
+.control-graphs details > p {
+  padding: 0;
+}
+@media (max-width: 620px) {
+  .control-graphs details {
+    margin: 0;
+    padding: 16px 0 0;
+  }
+  .control-graphs details > summary,
+  .control-graphs details > p,
+  .control-graphs details > .control-chart-legend {
+    margin-left: 16px;
+    margin-right: 16px;
+  }
+}
+
+.control-chart h3 {
+  font-size: 15px;
+}
+.control-chart text {
+  font-size: max(var(--figure-text-min), 13px);
+}
+
+/* Legend swatches follow the roles of js/core/palette.js: 今回 = actual, 目標 = target,
+   前回 = previous, 出来事 = event (a grey vertical line), FF = plan (dash-dot). */
+.control-chart-legend .event:before {
+  width: 0;
+  height: 16px;
+  border-top: 0;
+  border-left: 2px dashed var(--role-event);
+  margin: 0 8px 0 4px;
+}
+.control-chart-legend .ff-line:before {
+  border-top: 0;
+  height: 2px;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--role-plan) 0 10px,
+    transparent 10px 14px,
+    var(--role-plan) 14px 16px,
+    transparent 16px 20px
+  );
+}
+.control-chart-legend {
+  font-size: 14px;
+  color: #3f575d;
+}
+
+.control-compare small {
+  font-size: 13px;
+  color: #6a7c81;
+}
+
+/* One sentence under the result numbers that says what the run shows, with its numbers. */
+.control-summary {
+  margin: 18px 0 0;
+  padding: 14px 16px;
+  border-left: 4px solid var(--role-actual);
+  background: #f1f6f3;
+  font-size: 16px;
+  line-height: 1.8;
+}
+.control-metrics-simple {
+  grid-template-columns: minmax(0, 1fr);
+}
+.control-metrics-simple small {
+  font-size: 14px;
+}
+
+/* Numbered topic boxes (1-1, 1-2 …) that look like buttons, ✓ once the experiment was run. */
+.control-topic-nav {
+  margin-bottom: 8px;
+}
+.control-topic-nav button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 8px 14px 8px 8px;
+  border: 1px solid #bdd2ce;
+  border-radius: 10px;
+  background: white;
+  color: #28464d;
+  font-size: 14px;
+}
+.control-topic-nav button[aria-pressed='true'] {
+  border: 2px solid #285f55;
+  background: #eaf4ef;
+  color: #1f4e45;
+  font-weight: 650;
+}
+.control-topic-number {
+  display: inline-block;
+  min-width: 34px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: #e2ecea;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  text-align: center;
+}
+.control-topic-nav button[aria-pressed='true'] .control-topic-number {
+  background: #285f55;
+  color: white;
+}
+.control-topic-done {
+  color: var(--role-actual);
+  font-weight: 700;
+}
+.control-topic-place {
+  margin: 0 0 20px;
+  font-size: 13px;
+  color: #56696f;
+}
+@media (max-width: 620px) {
+  .control-topic-nav button {
+    flex: 1 1 calc(50% - 4px);
+    justify-content: flex-start;
+    text-align: left;
+    font-size: 13px;
+  }
+}

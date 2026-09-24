@@ -1,5 +1,12 @@
 import { html, live, nothing, unsafeHTML } from '../vendor/lit-html.js';
-import { formatNumber } from '../core/dom.js';
+import {
+  formatValue,
+  runSummary,
+  isSimpleTopic,
+  settledSpeed,
+  speedGap,
+  topicPlace,
+} from './summary.js';
 import { lessonLabel } from '../shell/lesson-ui.js';
 import { schoolTips } from '../shell/school-tips.js';
 import { liveCaptureControls } from '../live/live-view.js';
@@ -18,6 +25,7 @@ const SETTLED_RPM = 3; // rpm: "close enough" for the speed experiments
 const OVERSHOOT_RPM = 8; // rpm of overshoot above which the I hint changes
 const OVERSHOOT_METRES = 0.1; // metres past the stopping line that counts as a real overshoot
 const SLOW_SETTLING = 10; // seconds
+const CENTIMETRES = 100; // per metre: distances are shown in cm on the chart, readings and results
 
 // Range, step and displayed precision of every slider, in the unit of its setting.
 const SLIDER_RANGES = {
@@ -49,10 +57,10 @@ const configKey = (config) => JSON.stringify({ ...config, scenario: 'standard' }
 function gainText(config, topicId, copy) {
   if (topicId === 'output') return '一定出力 ' + config.power + '%';
   if (topicId === 'feedforward')
-    return 'FF ' + formatNumber(config.ffGain, 2) + ' %/rpm・目標 ' + config.targetRPM + ' rpm';
+    return 'FF ' + formatValue(config.ffGain, 2) + ' %/rpm・目標 ' + config.targetRPM + ' rpm';
   if (topicId === 'combined') {
     const estimate =
-      config.strategy === 'feedback' ? '' : '・FF ' + formatNumber(config.ffGain, 2) + ' %/rpm';
+      config.strategy === 'feedback' ? '' : '・FF ' + formatValue(config.ffGain, 2) + ' %/rpm';
     return copy.labels.method[config.strategy] + estimate + '・目標 ' + config.targetRPM + ' rpm';
   }
   if (topicId === 'reference')
@@ -60,9 +68,9 @@ function gainText(config, topicId, copy) {
   if (topicId === 'feedback')
     return config.feedback ? '測って調整' : '一定出力 ' + config.power + '%';
   if (topicId === 'limits') return 'Iの抑制 ' + (config.antiWindup ? 'あり' : 'なし');
-  if (topicId === 'noise') return 'フィルター ' + formatNumber(config.filter, 2) + '秒';
+  if (topicId === 'noise') return 'フィルター ' + formatValue(config.filter, 2) + '秒';
   const { kp, ki, kd } = config;
-  return `P ${formatNumber(kp)} / I ${formatNumber(ki)} / D ${formatNumber(kd)}`;
+  return `P ${formatValue(kp)} / I ${formatValue(ki)} / D ${formatValue(kd)}`;
 }
 
 // The load a run met, named only where the learner can choose it.
@@ -77,16 +85,23 @@ function conditionText(run, topicId, copy, separator) {
   return loadSuffix(run, topicId, copy, separator);
 }
 
+// The first stage's history columns: the speed the wheel settled at and how far that is from the
+// target.
+function simpleMetricText(run, copy) {
+  return [formatValue(settledSpeed(run), 0) + ' rpm', speedGap(run, copy.summary)];
+}
+
 // The three headline numbers of a run: remaining error, overshoot, time to settle.
 function metricText(run, copy) {
   const metrics = run.metrics;
   const distance = run.mode === 'distance';
-  const scale = distance ? 100 : 1; // metres to centimetres
+  const scale = distance ? CENTIMETRES : 1;
   const unit = distance ? ' cm' : ' rpm';
+  const digits = distance ? 0 : 1; // whole centimetres, as on the chart and in the summary
   return [
-    formatNumber(metrics.finalError * scale) + unit,
-    formatNumber(metrics.overshoot * scale) + unit,
-    metrics.settling === null ? copy.results.notSettled : formatNumber(metrics.settling) + ' 秒',
+    formatValue(metrics.finalError * scale, digits) + unit,
+    formatValue(metrics.overshoot * scale, digits) + unit,
+    metrics.settling === null ? copy.results.notSettled : formatValue(metrics.settling) + ' 秒',
   ];
 }
 
@@ -127,7 +142,7 @@ function hintText(run, topicId, copy) {
 function timeLabel(model, copy) {
   if (!model.result) return copy.time.idle;
   const phase = playbackPhase(model, copy);
-  return phase + ' · ' + formatNumber(model.frame.time) + ' / 16.0 秒';
+  return phase + ' · ' + formatValue(model.frame.time) + ' / 16.0 秒';
 }
 
 function playbackPhase(model, copy) {
@@ -149,7 +164,7 @@ function settingSlider(key, text, model, actions) {
   return html`<label class="control-setting" for=${'control-' + key}
     ><span
       >${text.label}<output id=${'control-' + key + '-value'}
-        >${formatNumber(value, range.digits)}</output
+        >${formatValue(value, range.digits)}</output
       ></span
     ><input
       id=${'control-' + key}
@@ -378,16 +393,19 @@ function controlPanel(model, copy, actions) {
 function readings(model, copy) {
   const { distance, frame, result } = model;
   const targetValue = distance
-    ? '0.50 m'
-    : formatNumber(result ? frame.target : model.config.targetRPM, 0) + ' rpm';
-  const measured = result ? formatNumber(frame.measured, distance ? 2 : 1) : '—';
-  const output = result ? formatNumber(distance ? frame.rpm : frame.command) : '—';
+    ? formatValue(STOP_DISTANCE * CENTIMETRES, 0) + ' cm'
+    : formatValue(result ? frame.target : model.config.targetRPM, 0) + ' rpm';
+  const measured = () => {
+    if (!result) return '—';
+    return distance ? formatValue(frame.measured * CENTIMETRES, 0) : formatValue(frame.measured, 1);
+  };
+  const output = result ? formatValue(distance ? frame.rpm : frame.command) : '—';
   return html`<div>
       <span>${model.topicId === 'reference' ? 'いまの目標' : '目標'}</span
       ><strong>${targetValue}</strong>
     </div>
     <div>
-      <span>${model.topic.sensor}</span><strong>${measured + (distance ? ' m' : ' rpm')}</strong>
+      <span>${model.topic.sensor}</span><strong>${measured() + (distance ? ' cm' : ' rpm')}</strong>
     </div>
     <div>
       <span>${distance ? '左右の車輪の回転数' : 'モーターへの出力'}</span
@@ -400,14 +418,14 @@ function contributions(model, copy) {
   const { frame, result } = model;
   if (!result) return copy.visual.contributionsIdle;
   if (model.topicId === 'feedforward')
-    return html`<span>目標 <strong>${formatNumber(frame.target, 0) + ' rpm'}</strong></span
+    return html`<span>目標 <strong>${formatValue(frame.target, 0) + ' rpm'}</strong></span
       ><b>×</b
-      ><span>1 rpmあたり <strong>${formatNumber(result.config.ffGain, 2) + '%'}</strong></span
-      ><b>→</b><span>出力 <strong>${formatNumber(frame.command) + '%'}</strong></span
+      ><span>1 rpmあたり <strong>${formatValue(result.config.ffGain, 2) + '%'}</strong></span
+      ><b>→</b><span>出力 <strong>${formatValue(frame.command) + '%'}</strong></span
       >${frame.ff > 100 ? html`<small>${copy.visual.feedforwardCapped}</small>` : nothing}`;
-  return html`<span>見積もり FF <strong>${formatNumber(frame.ff) + '%'}</strong></span
-    ><b>＋</b><span>ずれの修正 FB <strong>${formatNumber(frame.correction) + '%'}</strong></span
-    ><b>→</b><span>出力 <strong>${formatNumber(frame.command) + '%'}</strong></span
+  return html`<span>見積もり FF <strong>${formatValue(frame.ff) + '%'}</strong></span
+    ><b>＋</b><span>ずれの修正 FB <strong>${formatValue(frame.correction) + '%'}</strong></span
+    ><b>→</b><span>出力 <strong>${formatValue(frame.command) + '%'}</strong></span
     >${
       Math.abs(frame.ff + frame.correction) > 100
         ? html`<small>${copy.visual.sumCapped}</small>`
@@ -421,6 +439,10 @@ function visualCard(model, copy, actions) {
       <h2>${model.distance ? copy.visual.titleDistance : copy.visual.titleSpeed}</h2>
       <span id="controlTime" class="control-time">${timeLabel(model, copy)}</span>
     </div>
+    <p class="figure-guide">
+      <strong>図の見方</strong
+      >${model.distance ? copy.visual.figureDistance : copy.visual.figureSpeed}
+    </p>
     <canvas
       id="controlRobot"
       width="960"
@@ -461,10 +483,6 @@ function visualCard(model, copy, actions) {
         </select></label
       >
     </div>
-    <p class="figure-guide">
-      <strong>図の見方</strong
-      >${model.distance ? copy.visual.figureDistance : copy.visual.figureSpeed}
-    </p>
   </section>`;
 }
 
@@ -490,14 +508,17 @@ function charts(model, copy, actions) {
     marker: chartMarker(model),
     copy,
   };
-  const targetValue = distance ? '0.50 m' : (result ? result.target : fallback) + ' rpm';
+  const targetValue = distance
+    ? formatValue(STOP_DISTANCE * CENTIMETRES, 0) + ' cm'
+    : (result ? result.target : fallback) + ' rpm';
   const measured = controlChart({
     ...shared,
     live: model.live.run,
     compared: model.live.compared,
     key: 'measured',
     title: distance ? '壁までの距離' : '車輪の回転数',
-    unit: distance ? 'm' : 'rpm',
+    unit: distance ? 'cm' : 'rpm',
+    factor: distance ? CENTIMETRES : 1,
     target: true,
     targetCaption: (model.topicId === 'reference' ? '最終目標' : '目標') + ' ' + targetValue,
   });
@@ -507,9 +528,9 @@ function charts(model, copy, actions) {
       loadSuffix(comparison, model.topicId, copy, '・')
     : '';
   return html`<div class="control-chart-legend">
-      <span class="measured">今回の測定値</span
-      ><span class="target">今回の目標</span
-      >${comparison ? html`<span class="previous">前の測定値・目標</span>` : nothing}${
+      <span class="measured">今回</span><span class="target">目標</span>${
+        comparison ? html`<span class="previous">前回</span>` : nothing
+      }${shared.marker ? html`<span class="event">出来事</span>` : nothing}${
         model.live.run
           ? html`<span class="live">${copy.charts.liveLegend}</span>${
                 distance
@@ -554,7 +575,7 @@ function commandSection(model, copy, actions, shared) {
                 type="checkbox"
                 .checked=${model.showIntegral}
                 @change=${(event) => actions.setShowIntegral(event.target.checked)}
-              />Iの補正も表示する（紫）</label
+              />Iの補正も表示する（青い線「I」）</label
             >`
           : nothing
       }
@@ -562,7 +583,7 @@ function commandSection(model, copy, actions, shared) {
     ${
       breakdown
         ? html`<div class="control-chart-legend">
-            <span class="measured">実際の指示</span><span class="ff-line">見積もり FF</span
+            <span class="measured">実際の指示（今回）</span><span class="ff-line">見積もり FF</span
             ><span class="fb-line">ずれの修正 FB</span>
           </div>`
         : nothing
@@ -586,15 +607,19 @@ function graphsCard(model, copy, actions) {
         ><input
           id="controlCompare"
           type="checkbox"
-          .checked=${model.compare}
+          .checked=${model.compare && Boolean(model.previous)}
           ?disabled=${!model.previous}
           @change=${(event) => actions.setCompare(event.target.checked)}
-        />前の実験と重ねる</label
+        />前の実験と重ねる${
+          model.previous ? nothing : html`<small>（${copy.charts.compareLater}）</small>`
+        }</label
       >
     </div>
     <div id="controlCharts">${charts(model, copy, actions)}</div>
     <p class="control-chart-note">
-      ${copy.charts.note}<span id="controlLoadNote">${model.loadNote}</span>
+      ${model.distance ? copy.charts.noteDistance : copy.charts.noteSpeed}<span id="controlLoadNote"
+        >${model.loadNote}</span
+      >
       ${liveChartNote(model, copy)}
     </p>
   </section>`;
@@ -618,7 +643,7 @@ function calibrationCard(model, copy) {
       <tbody>
         <tr>
           <th>車輪の回転数</th>
-          ${model.calibration.map((point) => html`<td>${formatNumber(point.rpm, 0) + ' rpm'}</td>`)}
+          ${model.calibration.map((point) => html`<td>${formatValue(point.rpm, 0) + ' rpm'}</td>`)}
         </tr>
       </tbody>
     </table>
@@ -698,16 +723,15 @@ function compareControls(model, text, actions) {
   </div>`;
 }
 
-const secondsText = (value) => (value === null ? '—' : formatNumber(value) + ' 秒');
+const secondsText = (value) => (value === null ? '—' : formatValue(value) + ' 秒');
 
 // The same numbers for the simulation and every recording, by the course's own definitions.
 function comparisonTable(model, text) {
   const rows = model.live.table;
   if (rows.length < 2) return nothing;
   const distance = model.distance;
-  const unit = distance ? ' m' : ' rpm';
-  const digits = distance ? 2 : 1;
-  const value = (number) => formatNumber(number, digits) + unit;
+  const value = (number) =>
+    distance ? formatValue(number * CENTIMETRES, 0) + ' cm' : formatValue(number, 1) + ' rpm';
   const columns = distance ? text.compareColumnsDistance : text.compareColumnsSpeed;
   return html`<div class="control-compare-table">
     <h3>${text.compareTitle}</h3>
@@ -753,9 +777,9 @@ function methodComparison(model, run, copy) {
   const cells = (method) => {
     const match = [...model.runs].reverse().find((x) => x.method === method && sameConditions(x));
     if (!match) return html`<td colspan="3">${copy.results.notTried}</td>`;
-    return html`<td>${formatNumber(match.samples[20].actual) + ' rpm'}</td>
-      <td>${formatNumber(match.metrics.finalError) + ' rpm'}</td>
-      <td>${formatNumber(match.metrics.overshoot) + ' rpm'}</td>`;
+    return html`<td>${formatValue(match.samples[20].actual) + ' rpm'}</td>
+      <td>${formatValue(match.metrics.finalError) + ' rpm'}</td>
+      <td>${formatValue(match.metrics.overshoot) + ' rpm'}</td>`;
   };
   return html`<div class="control-method-comparison">
     <h3>${copy.results.methodComparisonTitle}</h3>
@@ -789,7 +813,19 @@ function methodComparison(model, run, copy) {
   </div>`;
 }
 
+// The first stage shows one number: the speed the wheel settled at, and how far from the target.
+function simpleResultMetrics(run, copy) {
+  const [speed, gap] = simpleMetricText(run, copy);
+  return html`<div class="control-metrics control-metrics-simple">
+    <div>
+      <span>${copy.results.settledSpeed}</span><strong>${speed}</strong
+      ><small>（${gap}）${copy.results.settledSpeedNote}</small>
+    </div>
+  </div>`;
+}
+
 function resultMetrics(model, run, copy) {
+  if (isSimpleTopic(model.topicId)) return simpleResultMetrics(run, copy);
   const [finalError, overshoot, settling] = metricText(run, copy);
   const metrics = run.metrics;
   const distance = model.distance;
@@ -834,10 +870,11 @@ function resultsBody(model, run, copy, actions) {
       <button id="controlExport" @click=${actions.save}>実験データを保存</button>
     </div>
     ${resultMetrics(model, run, copy)}
+    <p id="controlSummary" class="control-summary">${runSummary(run, topicId, copy.summary)}</p>
     ${
       topicId === 'reference'
         ? html`<p class="control-result-note">
-            ${copy.results.peakAccelerationLabel}<strong>${formatNumber(metrics.peakAcceleration) + ' rpm/秒'}</strong>${copy.results.peakAccelerationNote}
+            ${copy.results.peakAccelerationLabel}<strong>${formatValue(metrics.peakAcceleration) + ' rpm/秒'}</strong>${copy.results.peakAccelerationNote}
           </p>`
         : nothing
     }
@@ -845,13 +882,13 @@ function resultsBody(model, run, copy, actions) {
     ${
       topicId === 'noise'
         ? html`<p class="control-result-note">
-            ${copy.results.chatterLabel}<strong>${formatNumber(metrics.chatter) + 'ポイント'}</strong>${copy.results.chatterNote}
+            ${copy.results.chatterLabel}<strong>${formatValue(metrics.chatter) + 'ポイント'}</strong>${copy.results.chatterNote}
           </p>`
         : nothing
     }
     ${run.collision ? html`<p class="control-alert">${copy.results.collision}</p>` : nothing}
     <p class="control-result-note">${hintText(run, topicId, copy)}</p>
-    <p class="helper">${copy.results.metricsNote}</p>
+    ${isSimpleTopic(topicId) ? nothing : html`<p class="helper">${copy.results.metricsNote}</p>`}
     ${
       topicId === 'challenge'
         ? html`<p class="helper">${copy.results.challengeCriteria}</p>`
@@ -868,12 +905,16 @@ function resultsCard(model, copy, actions) {
 
 function historyCard(model, copy) {
   const { runs, topicId } = model;
+  const simple = isSimpleTopic(topicId);
+  const columns = simple ? copy.history.simpleColumns : ['最後のずれ', '行き過ぎ', '落ち着くまで'];
   const rows = runs.map(
     (run, index) =>
       html`<tr>
         <td>${index + 1}</td>
         <td>${gainText(run.config, topicId, copy) + conditionText(run, topicId, copy, '・')}</td>
-        ${metricText(run, copy).map((value) => html`<td>${value}</td>`)}
+        ${(simple ? simpleMetricText(run, copy) : metricText(run, copy)).map(
+          (value) => html`<td>${value}</td>`,
+        )}
       </tr>`,
   );
   return html`<details class="card control-history">
@@ -890,9 +931,7 @@ function historyCard(model, copy) {
                     <tr>
                       <th>回</th>
                       <th>設定</th>
-                      <th>最後のずれ</th>
-                      <th>行き過ぎ</th>
-                      <th>落ち着くまで</th>
+                      ${columns.map((column) => html`<th>${column}</th>`)}
                     </tr>
                   </thead>
                   <tbody>
@@ -1012,20 +1051,29 @@ function groupNav(model, actions) {
   </nav>`;
 }
 
-function topicNav(model, actions) {
+// The experiments of the current stage as numbered boxes (1-1, 1-2 …), ✓ once one has been run,
+// with one line saying where the learner is.
+function topicNav(model, copy, actions) {
   const siblings = CONTROL_TOPICS.filter((topic) => topic.group === model.topic.group);
-  return html`<nav class="learning-subtopics" aria-label="この段階の制御実験">
-    ${siblings.map(
-      (topic) =>
-        html`<button
+  const place = topicPlace(CONTROL_TOPICS, model.topicId);
+  return html`<nav class="learning-subtopics control-topic-nav" aria-label="この段階の制御実験">
+      ${siblings.map((topic) => {
+        const done = model.doneTopics.includes(topic.id);
+        return html`<button
           data-control-topic=${topic.id}
           aria-pressed=${String(model.topicId === topic.id)}
           @click=${() => actions.openTopic(topic.id)}
         >
-          ${topic.name}
-        </button>`,
-    )}
-  </nav>`;
+          <span class="control-topic-number">${topicPlace(CONTROL_TOPICS, topic.id).label}</span
+          >${topic.name}${
+            done
+              ? html`<span class="control-topic-done" aria-label=${copy.nav.done}>✓</span>`
+              : nothing
+          }
+        </button>`;
+      })}
+    </nav>
+    <p class="control-topic-place">${fill(copy.nav.place, place)}</p>`;
 }
 
 function controlPage(model, copy, hardwareHtml, actions) {
@@ -1036,7 +1084,7 @@ function controlPage(model, copy, hardwareHtml, actions) {
         <h1>${model.topic.title}</h1>
       </div>
     </div>
-    ${groupNav(model, actions)}${topicNav(model, actions)}
+    ${groupNav(model, actions)}${topicNav(model, copy, actions)}
     ${unsafeHTML(lessonBrief(lessonKey, model.topic) + schoolTips(lessonKey))}
     <div class="control-layout">
       <div class="control-workspace">

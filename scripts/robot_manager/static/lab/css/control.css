@@ -87,11 +87,11 @@
   color: #68827b;
 }
 .control-chart-legend .ff-line:before {
-  border-color: #9367a3;
+  border-color: var(--role-plan);
 }
 .control-chart-legend .fb-line:before {
-  border-color: #5d81b7;
-  border-top-style: dotted;
+  border-color: var(--role-measured);
+  border-top-style: solid;
 }
 .control-previous-note {
   font-size: 13px;
@@ -386,23 +386,23 @@
   content: '';
   display: inline-block;
   width: 20px;
-  border-top: 3px solid #38786e;
+  border-top: 3px solid var(--role-actual);
   vertical-align: middle;
   margin-right: 6px;
 }
 .control-chart-legend .target:before {
-  border-top: 2px dashed #af8136;
+  border-top: 2px dashed var(--role-target);
 }
 .control-chart-legend .previous:before {
-  border-top: 2px dashed #a3adb8;
+  border-top: 2px dotted var(--role-previous);
 }
 /* The recording from the real robot, drawn on the same axes as the simulation
-   (CHART_COLOURS.live / .liveTarget in js/control/render.js). */
+   (the "measured" role: what the robot measured, see js/core/palette.js). */
 .control-chart-legend .live:before {
-  border-top: 3px solid #b2506f;
+  border-top: 3px solid var(--role-measured);
 }
 .control-chart-legend .live-target:before {
-  border-top: 2px dashed #d39ab0;
+  border-top: 2px dotted var(--role-target);
 }
 .control-live {
   padding: 22px;
