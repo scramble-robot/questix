@@ -6,7 +6,8 @@ uvicorn on `127.0.0.1:8888`.
 - `app.py` — service control (mode, start/stop/restart, launch config).
 - `recorder.py` — rosbag recording console (`/api/rosbag/*`).
 - `logs.py` — log collection console (`/api/logs/*`).
-- `lab.py` — QUESTiX LAB console (`/api/lab/*`): starts/stops the read-only lab bridge.
+- `lab.py` — QUESTiX LAB console (`/api/lab/*`): starts/stops the lab bridge and allows or
+  forbids driving from the lessons.
 - `wifi_ap.py` — read-only access point settings for the QR codes (`/api/wifi-ap`).
 - `static/` — vanilla HTML/CSS/JS frontend (no build step).
 - `static/lab/` — QUESTiX LAB web teaching material, served at `/lab/` (see its README).
@@ -38,7 +39,8 @@ When something fails (HTTP 500, the service does not come up), run
 service uses, the version and origin (apt / pip) of fastapi, starlette, pydantic(-core), uvicorn and
 anyio including duplicate copies, unmet requirements between them, `pip check`, whether
 `robot_manager.app` imports, whether the install matches the repository, the answers of
-`/api/status`, `/api/lab/status` and `/api/wifi-ap`, and the last traceback in the service log.
+`/api/status`, `/api/lab/status` and `/api/wifi-ap`, whether the service user can write
+`/etc/questix_robot` (and read `wifi_ap.env`), and the last traceback in the service log.
 
 ## Competition GPIO safety
 
@@ -90,6 +92,26 @@ The **教材** tab starts and stops that bridge, so nobody has to run `ros2 laun
   a bridge started here and writes `AUTOSTART="false"`; switching back to 練習モード writes
   `AUTOSTART="true"` and starts the bridge again (unless one already runs). Automatic start is
   also skipped while the mode file says `competition`, even if it was changed by hand.
+- The bridge's stdout/stderr go to `~/.cache/questix/lab-bridge.log` of the service user
+  (truncated on every start; discarded if that file cannot be written). While no bridge of ours
+  runs, or after a failed start, `/api/lab/status` carries its last 15 lines as `log_tail` and
+  the tab shows them under **ブリッジのログ**.
+- `/api/lab/status` also carries `bridge`: the running bridge's own `GET /api/state` (ours or one
+  started by hand; `null` when none answers within 0.5 s). The tab takes the driving state from
+  it (`bridge.read_only`), not from `lab.env`.
+- **教材からの走行** (`ALLOW_DRIVE` in `lab.env`, `POST /api/lab/drive`) lets the lessons' driving
+  experiments move the robot (`questix_lab_bridge/README.md`, "Driving experiments"). Switching
+  it restarts a bridge started here (every connected page drops for a few seconds); a bridge
+  started by hand keeps its own `allow_drive`. The card lists, for the teacher, what still
+  blocks driving (`bridge.drive_state.blockers`: controller publishing `/target_twist`, no
+  `drive_component` or a different `ROS_DOMAIN_ID`, emergency stop), the robot name, connected
+  pages and which page drives. After 走行を禁止する it reminds the teacher to restart the robot
+  with its controller until dismissed. `ALLOW_DRIVE` is reset to `false` whenever robot_manager
+  starts (and by 大会モード); if `lab.env` cannot be written, driving still counts as off and
+  the reason is shown as `config_error`.
+- A permission error on `mode`, `launch.env` or `lab.env` names the service user, the owner and
+  the fix (`sudo chown <user>:<user> /etc/questix_robot …`). `scripts/check-robot-manager.sh`
+  checks the same, plus that `wifi_ap.env` is readable.
 - `sudo scripts/wifi-ap.sh up` (Wi-Fi access point) turns `AUTOSTART` on and asks a running
   robot_manager to start the bridge, so `http://10.42.0.1:8897/` works right away — except in
   大会モード, where it leaves the bridge alone.
@@ -103,8 +125,9 @@ The **教材** tab starts and stops that bridge, so nobody has to run `ros2 laun
   `static/vendor/NOTICE.md`) by `static/qr-svg.js`, which fits the strict CSP of the manager UI.
 
 Prerequisite: `questix_lab_bridge` is built in `ROBOT_WS` (`colcon build`; rosdep key
-`python3-websockets`). If the node exits immediately, starting fails with an error toast.
-The bridge only subscribes; it never publishes or accepts commands.
+`python3-websockets`). If the node exits immediately, starting fails with an error (and the log
+above). The bridge only subscribes unless 教材からの走行 is allowed; then it may publish
+`/target_twist` and nothing else.
 
 ## Running (dev)
 

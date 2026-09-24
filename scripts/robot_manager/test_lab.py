@@ -1,6 +1,8 @@
 """Tests for the QUESTiX LAB console (no ROS needed: the bridge command is only built)."""
 
+import getpass
 import importlib
+import os
 
 import pytest
 from fastapi import HTTPException
@@ -10,7 +12,11 @@ from fastapi import HTTPException
 def lab(tmp_path, monkeypatch):
     monkeypatch.setenv("QUESTIX_CONFIG_DIR", str(tmp_path))
     from robot_manager import lab as module
-    return importlib.reload(module)
+    module = importlib.reload(module)
+    # Never ask a bridge that happens to run on this machine, never write to the real ~/.cache.
+    monkeypatch.setattr(module, "_bridge_state", lambda: None)
+    monkeypatch.setattr(module, "LOG_FILE", tmp_path / "cache" / "lab-bridge.log")
+    return module
 
 
 def test_command_sources_ros_and_serves_the_managers_lab_dir(lab, tmp_path):
@@ -216,3 +222,230 @@ def test_drive_cannot_be_allowed_in_competition_mode(lab, tmp_path):
     assert error.value.status_code == 409
     assert lab._read_config()["ALLOW_DRIVE"] == "false"
     lab.set_drive(lab.DriveRequest(allow=False))  # forbidding is always possible
+
+
+def test_invalid_workspace_is_explained_in_japanese(lab, tmp_path):
+    (tmp_path / "launch.env").write_text('ROBOT_WS="relative/ws"\n')
+    with pytest.raises(HTTPException) as error:
+        lab._build_command({"CAMERA_TOPIC": ""})
+    assert "ROBOT_WS が不正です" in error.value.detail
+
+
+class _ExitingPopen:
+    """Popen stand-in: prints to the log it was given, then has exited (start fails)."""
+
+    calls = []
+
+    def __init__(self, args, **kwargs):
+        _ExitingPopen.calls.append(kwargs)
+        stdout = kwargs["stdout"]
+        if hasattr(stdout, "write"):
+            stdout.write(b"".join(b"line %d\n" % n for n in range(30)))
+            stdout.write(b"Package 'questix_lab_bridge' not found\n")
+            stdout.flush()
+        self.pid = 4242
+
+    def poll(self):
+        return 1
+
+
+def test_bridge_output_goes_to_a_log_whose_tail_the_status_shows(lab, monkeypatch):
+    monkeypatch.setattr(lab, "_port_in_use", lambda: False)
+    monkeypatch.setattr(lab.subprocess, "Popen", _ExitingPopen)
+    monkeypatch.setattr(lab, "_lan_addresses", lambda: [])  # subprocess.run uses Popen too
+    lab.LOG_FILE.parent.mkdir(parents=True)
+    lab.LOG_FILE.write_text("output of an older run\n")
+    with pytest.raises(HTTPException) as error:
+        lab.start_bridge()
+    assert str(lab.LOG_FILE) in error.value.detail
+    assert _ExitingPopen.calls[-1]["stderr"] == lab.subprocess.STDOUT
+    status = lab.get_status()
+    assert status["last_stop_reason"] == "start_failed"
+    tail = status["log_tail"].splitlines()
+    # Truncated on start; only the last lines are shown.
+    assert "output of an older run" not in lab.LOG_FILE.read_text()
+    assert len(tail) == lab.LOG_TAIL_LINES
+    assert tail[-1] == "Package 'questix_lab_bridge' not found"
+
+
+def test_bridge_output_is_discarded_when_the_log_cannot_be_written(lab, monkeypatch, tmp_path):
+    monkeypatch.setattr(lab, "_port_in_use", lambda: False)
+    monkeypatch.setattr(lab.subprocess, "Popen", _ExitingPopen)
+    monkeypatch.setattr(lab, "_lan_addresses", lambda: [])  # subprocess.run uses Popen too
+    (tmp_path / "not-a-dir").write_text("")
+    monkeypatch.setattr(lab, "LOG_FILE", tmp_path / "not-a-dir" / "lab-bridge.log")
+    with pytest.raises(HTTPException):
+        lab.start_bridge()
+    assert _ExitingPopen.calls[-1]["stdout"] == lab.subprocess.DEVNULL
+    assert _ExitingPopen.calls[-1]["stderr"] == lab.subprocess.DEVNULL
+    assert lab.get_status()["log_tail"] is None
+
+
+def test_log_tail_is_left_out_while_our_bridge_runs_fine(lab):
+    lab.LOG_FILE.parent.mkdir(parents=True)
+    lab.LOG_FILE.write_text("[INFO] serving\n")
+    assert lab.get_status()["log_tail"] == "[INFO] serving"
+    lab._proc = _FakeProcess()
+    assert lab.get_status()["log_tail"] is None
+
+
+def test_status_carries_the_bridges_own_state(lab, monkeypatch):
+    state = {"read_only": False, "clients": 2, "max_clients": 24,
+             "drive_state": {"blockers": []}}
+    monkeypatch.setattr(lab, "_bridge_state", lambda: state)
+    monkeypatch.setattr(lab, "_port_in_use", lambda: True)  # started by hand
+    status = lab.get_status()
+    assert status["external"] is True and status["bridge"] == state
+    assert status["drive_running"] is None
+    monkeypatch.setattr(lab, "_port_in_use", lambda: False)
+    assert lab.get_status()["bridge"] is None  # nothing to ask
+    lab._proc = _FakeProcess()
+    assert lab.get_status()["bridge"] == state  # ours
+
+
+def test_bridge_state_reads_the_bridge_endpoint(lab, monkeypatch):
+    import http.server
+    import json
+    import threading
+    from robot_manager import lab as module
+    fetch = importlib.reload(module)._bridge_state  # the real function, not the fixture's stub
+    replies = {"/api/state": (200, json.dumps({"read_only": True, "clients": 0})),
+               "/list": (200, "[1, 2]"), "/broken": (200, "{no json")}
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            status, body = replies.get(self.path, (404, "Not found"))
+            self.send_response(status)
+            self.end_headers()
+            self.wfile.write(body.encode())
+
+        def log_message(self, *args):
+            pass
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = "http://127.0.0.1:%d" % server.server_address[1]
+    try:
+        for path, expected in (("/api/state", {"read_only": True, "clients": 0}),
+                               ("/list", None), ("/broken", None), ("/old-bridge", None)):
+            monkeypatch.setattr(module, "BRIDGE_STATE_URL", base + path)
+            assert fetch() == expected
+    finally:
+        server.shutdown()
+        server.server_close()
+    monkeypatch.setattr(module, "BRIDGE_STATE_URL", base + "/api/state")
+    assert fetch() is None  # nothing listens any more
+
+
+def _writable_by_root():
+    return os.geteuid() == 0
+
+
+@pytest.fixture
+def read_only_config_dir(tmp_path):
+    if _writable_by_root():
+        pytest.skip("root may write anywhere")
+    tmp_path.chmod(0o500)
+    yield tmp_path
+    tmp_path.chmod(0o700)
+
+
+@pytest.fixture
+def read_only_lab_env(tmp_path):
+    """lab.env (content written by the test first) that the manager cannot write."""
+    if _writable_by_root():
+        pytest.skip("root may write anywhere")
+    path = tmp_path / "lab.env"
+
+    def lock(text):
+        path.write_text(text)
+        path.chmod(0o400)
+    yield lock
+    if path.exists():
+        path.chmod(0o600)
+
+
+def test_permission_error_names_the_user_the_owner_and_the_fix(lab, read_only_config_dir):
+    user = getpass.getuser()
+    with pytest.raises(HTTPException) as error:
+        lab.set_config(lab.LabConfig())
+    detail = error.value.detail
+    assert error.value.status_code == 403
+    assert f"ユーザー {user}" in detail
+    assert detail.endswith(f"sudo chown {user}:{user} {read_only_config_dir}")
+
+
+def test_permission_error_includes_an_existing_lab_env(lab, tmp_path, read_only_lab_env):
+    read_only_lab_env('AUTOSTART="true"\n')
+    with pytest.raises(HTTPException) as error:
+        lab.set_config(lab.LabConfig())
+    assert error.value.detail.endswith(f"{tmp_path} {tmp_path / 'lab.env'}")
+    assert "lab.env の所有者は" in error.value.detail
+
+
+def test_competition_stops_the_bridge_even_if_lab_env_cannot_be_written(
+        lab, monkeypatch, read_only_lab_env):
+    signals = []
+    monkeypatch.setattr(lab.os, "getpgid", lambda pid: pid)
+    monkeypatch.setattr(lab.os, "killpg", lambda pgid, sig: signals.append((pgid, sig)))
+    read_only_lab_env('AUTOSTART="true"\nALLOW_DRIVE="true"\n')
+    lab._proc = _FakeProcess()
+    lab.disable_for_competition()  # logged, not raised
+    assert signals == [(_FakeProcess.pid, lab.signal.SIGINT)]
+    status = lab.get_status()
+    assert status["running"] is False and status["last_stop_reason"] == "competition_mode"
+    # lab.env still says true, but driving counts as off until it can be written.
+    assert status["drive_allowed"] is False and "sudo chown" in status["config_error"]
+    assert "allow_drive" not in lab._build_command(lab._read_config())
+
+
+def test_driving_permission_is_reset_when_the_manager_starts(lab, monkeypatch, tmp_path):
+    seen = []
+    monkeypatch.setattr(lab, "start_bridge", lambda: seen.append(lab._read_config()))
+    monkeypatch.setattr(lab.threading, "Thread", _run_now)
+    (tmp_path / "lab.env").write_text(
+        'CAMERA_TOPIC="/cam"\nAUTOSTART="true"\nALLOW_DRIVE="true"\n')
+    lab.autostart()
+    assert seen == [{"CAMERA_TOPIC": "/cam", "AUTOSTART": "true", "ALLOW_DRIVE": "false"}]
+    assert 'ALLOW_DRIVE="false"' in (tmp_path / "lab.env").read_text()
+    # AUTOSTART=false: the bridge stays off, but driving is reset all the same.
+    (tmp_path / "lab.env").write_text('AUTOSTART="false"\nALLOW_DRIVE="true"\n')
+    lab.autostart()
+    assert len(seen) == 1
+    assert 'ALLOW_DRIVE="false"' in (tmp_path / "lab.env").read_text()
+
+
+def test_driving_reset_holds_even_if_lab_env_cannot_be_written(
+        lab, monkeypatch, tmp_path, read_only_lab_env):
+    commands = []
+    monkeypatch.setattr(lab, "start_bridge",
+                        lambda: commands.append(lab._build_command(lab._read_config())))
+    monkeypatch.setattr(lab.threading, "Thread", _run_now)
+    read_only_lab_env('ALLOW_DRIVE="true"\n')
+    lab.autostart()
+    assert len(commands) == 1 and "allow_drive" not in commands[0]
+    assert lab.get_status()["config_error"]
+    # Allowing again needs a writable lab.env, and the error says how to get one.
+    with pytest.raises(HTTPException) as error:
+        lab.set_drive(lab.DriveRequest(allow=True))
+    assert "sudo chown" in error.value.detail
+    (tmp_path / "lab.env").chmod(0o600)
+    lab.set_drive(lab.DriveRequest(allow=True))
+    status = lab.get_status()
+    assert status["drive_allowed"] is True and status["config_error"] is None
+
+
+def test_forbidding_restarts_the_bridge_even_if_lab_env_cannot_be_written(
+        lab, monkeypatch, tmp_path, read_only_lab_env):
+    monkeypatch.setattr(lab.os, "getpgid", lambda pid: pid)
+    monkeypatch.setattr(lab.os, "killpg", lambda pgid, sig: None)
+    started = []
+
+    def fake_start():
+        started.append(lab._build_command(lab._read_config()))
+        lab._proc = _FakeProcess()
+    monkeypatch.setattr(lab, "start_bridge", fake_start)
+    read_only_lab_env('ALLOW_DRIVE="true"\n')
+    lab._proc = _FakeProcess()
+    status = lab.set_drive(lab.DriveRequest(allow=False))
+    assert len(started) == 1 and "allow_drive" not in started[0]
+    assert status["drive_allowed"] is False and status["config_error"]

@@ -43,6 +43,9 @@ _LAB_CSP = (
 async def lifespan(_app: FastAPI):
     """Start the lab bridge if lab.env asks for it; a bridge started here must not outlive us.
 
+    lab.autostart() also forbids driving from the lessons again first: that permission never
+    carries over a restart of the manager.
+
     A lifespan instead of add_event_handler/on_event: Starlette 1.0 removed the event handlers
     from the application (FastAPI 0.135 no longer offers app.add_event_handler), while lifespan
     works on every FastAPI since 0.93.
@@ -217,7 +220,7 @@ def set_mode(req: ModeRequest):
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         MODE_FILE.write_text(req.mode + "\n")
     except PermissionError:
-        raise HTTPException(status_code=403, detail="Permission denied writing mode file")
+        raise HTTPException(status_code=403, detail=lab.permission_detail(MODE_FILE))
     # QUESTiX LAB streams telemetry to the LAN: off for competitions, back on for practice.
     if req.mode == "competition":
         lab.disable_for_competition()
@@ -253,7 +256,7 @@ def set_launch_config(config: LaunchConfig):
     try:
         _write_env(current)
     except PermissionError:
-        raise HTTPException(status_code=403, detail="Permission denied writing launch.env")
+        raise HTTPException(status_code=403, detail=lab.permission_detail(ENV_FILE))
     return current
 
 
