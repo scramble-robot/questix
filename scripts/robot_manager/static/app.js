@@ -14,7 +14,9 @@ function toast(message, type = "info") {
   el.className = `toast ${type}`;
   el.textContent = message;
   container.appendChild(el);
-  setTimeout(() => el.remove(), 3000);
+  // Errors often say what to type on the robot (e.g. a chown command): give time to read them.
+  // Keep in sync with the toast-out delays in style.css.
+  setTimeout(() => el.remove(), type === "error" ? 10000 : 3000);
 }
 
 async function api(path, opts = {}) {
@@ -613,7 +615,9 @@ async function refreshLabStatus() {
         ? "停止中 (自動開始に失敗しました。ROS環境とビルドを確認してください)"
         : data.last_stop_reason === "competition_mode"
           ? "停止中 (大会モードに切り替えたため停止しました)"
-          : "停止中";
+          : data.last_stop_reason === "start_failed" || data.last_stop_reason === "exited"
+            ? "停止中 (ブリッジが終了しました。「ブリッジのログ」を確認してください)"
+            : "停止中";
   document.getElementById("lab-elapsed").textContent = data.running
     ? fmtDuration(data.elapsed_sec)
     : "—";
@@ -639,6 +643,7 @@ async function refreshLabStatus() {
 
   document.getElementById("lab-start").disabled = serving;
   document.getElementById("lab-stop").disabled = !data.running;
+  showLabLog(data, serving);
   showLabDrive(data);
   if (!labConfigLoaded) {
     document.getElementById("lab-camera").value = data.config.CAMERA_TOPIC || "";
@@ -695,25 +700,144 @@ function renderJoinQr() {
   }
 }
 
-// "教材からの走行": what lab.env allows, and what the running bridge does. Allowed is shown in
-// orange on the card and the tab, so nobody forgets to switch it back after a class.
+// The last lab error stays in its card until the next success (a toast is easy to miss).
+function setLabError(id, message) {
+  const el = document.getElementById(id);
+  el.textContent = message || "";
+  el.hidden = !message;
+}
+
+// "ブリッジのログ": the end of the bridge's output, while it is stopped or has failed.
+function showLabLog(data, serving) {
+  const details = document.getElementById("lab-log");
+  const show = !serving && Boolean(data.log_tail);
+  details.hidden = !show;
+  if (!show) return;
+  const text = document.getElementById("lab-log-text");
+  if (text.textContent !== data.log_tail) text.textContent = data.log_tail;
+  document.getElementById("lab-log-file").textContent = `全体: ${data.log_file}`;
+  if (data.last_stop_reason === "start_failed" || data.last_stop_reason === "exited") {
+    details.open = true;
+  }
+}
+
+// Why pages cannot drive right now, from the bridge's drive_state.blockers, for the teacher.
+function labBlockerText(blocker, bridge) {
+  switch (blocker.code) {
+    case "other_publisher":
+      return (
+        `コントローラーなど（${(blocker.nodes || []).join(", ") || "不明なノード"}）が /target_twist を出しています。` +
+        "コントローラーなしで起動し直してください：ros2 launch questix_launcher questix_core.launch.xml enable_controller:=false"
+      );
+    case "no_drive_node": {
+      const domain = bridge.robot && bridge.robot.domain != null ? bridge.robot.domain : "未設定(0)";
+      return `drive_component が見つかりません（ロボットのROSが起動していないか、ROS_DOMAIN_ID ${domain} が違います）`;
+    }
+    case "emergency_stop":
+      return "非常停止が押されています";
+    default:
+      return null; // not_allowed is the state line itself
+  }
+}
+
+const LAB_REMINDER_KEY = "questix.labDriveReminder";
+
+function labReminderPending() {
+  try {
+    return localStorage.getItem(LAB_REMINDER_KEY) === "pending";
+  } catch {
+    return false;
+  }
+}
+
+function setLabReminderPending(pending) {
+  try {
+    if (pending) localStorage.setItem(LAB_REMINDER_KEY, "pending");
+    else localStorage.removeItem(LAB_REMINDER_KEY);
+  } catch {
+    // storage unavailable: the reminder is only shown while the status calls for it
+  }
+}
+
+// "教材からの走行": what the running bridge itself does (bridge = its GET /api/state), not only
+// what lab.env asks for. Driving possible is shown in orange on the card and the tab, so nobody
+// forgets to switch it back after a class.
 function showLabDrive(data) {
-  const allowed = data.drive_allowed;
-  const applied = data.drive_running;
-  const indicator = document.getElementById("lab-drive-indicator");
-  indicator.className = "rec-indicator " + (allowed ? "driving" : "idle");
-  document.getElementById("lab-drive-state").textContent = allowed
-    ? applied === false
-      ? "許可 (配信を開始し直すと反映されます)"
-      : "許可中"
-    : applied
-      ? "禁止 (配信を開始し直すと反映されます)"
-      : "禁止";
-  document.getElementById("lab-drive-card").classList.toggle("allowed", allowed);
-  document.getElementById("lab-drive-warning").hidden = !allowed;
-  document.getElementById("tab-lab-dot").classList.toggle("driving", allowed);
-  document.getElementById("lab-drive-allow").disabled = allowed;
-  document.getElementById("lab-drive-forbid").disabled = !allowed;
+  const bridge = data.bridge;
+  const serving = data.running || data.external;
+  const bridgeAllows = Boolean(bridge && bridge.read_only === false);
+  const setting = data.drive_allowed;
+  // Forbidden here, but the bridge still accepts driving (restart failed, or started by hand).
+  const stale = !setting && bridgeAllows && !data.external;
+
+  let state;
+  let tone;
+  if (!serving) {
+    state = "配信が止まっています";
+    tone = "idle";
+  } else if (!bridge) {
+    state = "ブリッジの状態が分かりません（起動中か、状態を返さない古いブリッジです）";
+    tone = "idle";
+  } else if (stale) {
+    state =
+      "禁止にしました（配信中のブリッジはまだ走らせられます。『配信停止』→『配信開始』を押してください）";
+    tone = "driving";
+  } else if (bridgeAllows) {
+    state = "許可中（生徒の教材から走らせられます）";
+    tone = "driving";
+  } else {
+    state = "禁止";
+    tone = "idle";
+  }
+  document.getElementById("lab-drive-indicator").className =
+    `rec-indicator ${tone} lab-drive-status`;
+  document.getElementById("lab-drive-state").textContent = state;
+  document.getElementById("lab-drive-external").hidden = !(data.external && bridge);
+
+  const robot = bridge && bridge.robot;
+  document.getElementById("lab-drive-robot").textContent = robot
+    ? `${robot.name}（ROS_DOMAIN_ID ${robot.domain != null ? robot.domain : "未設定(0)"}）`
+    : "—";
+  document.getElementById("lab-drive-clients").textContent =
+    bridge && bridge.clients != null ? `${bridge.clients} / ${bridge.max_clients}` : "—";
+  const drive = (bridge && bridge.drive_state) || {};
+  document.getElementById("lab-drive-owner-row").hidden = !drive.active;
+  document.getElementById("lab-drive-owner").textContent = drive.active
+    ? `生徒の端末 #${drive.owner}`
+    : "—";
+
+  // Readiness for the teacher: only meaningful while the bridge accepts driving at all.
+  const ready = document.getElementById("lab-drive-ready");
+  ready.replaceChildren();
+  ready.hidden = !bridgeAllows;
+  if (bridgeAllows) {
+    const texts = (drive.blockers || []).map((b) => labBlockerText(b, bridge)).filter(Boolean);
+    for (const text of texts) {
+      const item = document.createElement("li");
+      item.className = "blocked";
+      item.textContent = text;
+      ready.append(item);
+    }
+    if (!texts.length) {
+      const item = document.createElement("li");
+      item.className = "ready";
+      item.textContent = "生徒の教材から走らせられます";
+      ready.append(item);
+    }
+  }
+
+  const drivable = bridgeAllows || setting;
+  document.getElementById("lab-drive-card").classList.toggle("allowed", drivable);
+  document.getElementById("lab-drive-warning").hidden = !bridgeAllows || stale;
+  document.getElementById("tab-lab-dot").classList.toggle("driving", drivable);
+  document.getElementById("lab-drive-reminder").hidden = !(labReminderPending() || stale);
+  // A lab.env write that failed without failing the request (e.g. owned by another user).
+  if (data.config_error) setLabError("lab-drive-error", data.config_error);
+
+  document.getElementById("lab-drive-allow").disabled = setting;
+  // Forbidding again also restarts a bridge of ours that still accepts driving.
+  document.getElementById("lab-drive-forbid").disabled =
+    !setting && !(bridgeAllows && data.running);
 }
 
 async function setLabDrive(allow) {
@@ -722,7 +846,8 @@ async function setLabDrive(allow) {
     !confirm(
       "教材からロボットを動かせるようにします。\n" +
         "ロボットはコントローラーなし（enable_controller:=false）で起動しましたか？\n" +
-        "周りに人や物がないことを確かめましたか？",
+        "周りに人や物がないことを確かめましたか？\n" +
+        "配信中のブリッジを起動し直すため、生徒全員の接続が数秒切れます。",
     )
   ) {
     return;
@@ -730,8 +855,22 @@ async function setLabDrive(allow) {
   try {
     await api("/api/lab/drive", { method: "POST", body: JSON.stringify({ allow }) });
     toast(allow ? "教材からの走行を許可しました" : "教材からの走行を禁止しました", "success");
-  } catch {
-    // already toasted
+    setLabError("lab-drive-error", null);
+    if (!allow) setLabReminderPending(true);
+  } catch (e) {
+    setLabError("lab-drive-error", e.message); // also toasted
+  }
+  await refreshLabStatus();
+}
+
+// Start/stop of the bridge: success toasts, failure stays in the card too.
+async function labServeAction(path, done) {
+  try {
+    await api(path, { method: "POST" });
+    toast(done, "success");
+    setLabError("lab-serve-error", null);
+  } catch (e) {
+    setLabError("lab-serve-error", e.message); // also toasted
   }
   await refreshLabStatus();
 }
@@ -739,24 +878,16 @@ async function setLabDrive(allow) {
 function setupLabEvents() {
   document.getElementById("lab-drive-allow").addEventListener("click", () => setLabDrive(true));
   document.getElementById("lab-drive-forbid").addEventListener("click", () => setLabDrive(false));
-  document.getElementById("lab-start").addEventListener("click", async () => {
-    try {
-      await api("/api/lab/start", { method: "POST" });
-      toast("教材の配信を開始しました", "success");
-    } catch {
-      // already toasted
-    }
-    await refreshLabStatus();
+  document.getElementById("lab-drive-reminder-done").addEventListener("click", () => {
+    setLabReminderPending(false);
+    document.getElementById("lab-drive-reminder").hidden = true;
   });
-  document.getElementById("lab-stop").addEventListener("click", async () => {
-    try {
-      await api("/api/lab/stop", { method: "POST" });
-      toast("教材の配信を停止しました", "success");
-    } catch {
-      // already toasted
-    }
-    await refreshLabStatus();
-  });
+  document
+    .getElementById("lab-start")
+    .addEventListener("click", () => labServeAction("/api/lab/start", "教材の配信を開始しました"));
+  document
+    .getElementById("lab-stop")
+    .addEventListener("click", () => labServeAction("/api/lab/stop", "教材の配信を停止しました"));
   document.getElementById("lab-save-config").addEventListener("click", async () => {
     try {
       await api("/api/lab/config", {
