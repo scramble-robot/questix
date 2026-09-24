@@ -51,6 +51,65 @@ else
     info "ExecStart: $exec_start"
 fi
 
+section "設定ファイルの権限（サービスのユーザー ${SERVICE_USER:-root}）"
+# Robot Manager saves the mode, launch.env and lab.env into CONFIG_DIR and reads wifi_ap.env for
+# the QR codes. On a robot whose login user is not the one the installer ran for (e.g. scramble
+# instead of ubuntu) every save fails with a permission error. Only tests access; changes nothing.
+CONFIG_DIR="${QUESTIX_CONFIG_DIR:-/etc/questix_robot}"
+check_user="${SERVICE_USER:-root}"
+
+# as_user <test-flag> <path>: 0/1 = the service user can / cannot, 2 = cannot tell without sudo.
+as_user() {
+    if [ "$(id -un)" = "$check_user" ]; then
+        test "$1" "$2"
+    elif [ "$(id -u)" -eq 0 ]; then
+        if command -v runuser > /dev/null 2>&1; then
+            runuser -u "$check_user" -- test "$1" "$2"
+        else
+            sudo -u "$check_user" test "$1" "$2"
+        fi
+    else
+        return 2
+    fi
+}
+
+owner_of() {
+    stat -c '%U:%G %a' "$1" 2> /dev/null || echo "?"
+}
+
+if [ ! -d "$CONFIG_DIR" ]; then
+    ng "$CONFIG_DIR がありません（sudo scripts/install-robot-manager.sh）"
+else
+    unwritable=()
+    for path in "$CONFIG_DIR" "$CONFIG_DIR/lab.env" "$CONFIG_DIR/launch.env" "$CONFIG_DIR/mode"; do
+        [ -e "$path" ] || continue
+        as_user -w "$path"
+        case $? in
+            0) ok "書き込めます: $path ($(owner_of "$path"))" ;;
+            2) info "確認には sudo が必要です: $path ($(owner_of "$path"))" ;;
+            *)
+                ng "$check_user は書き込めません: $path ($(owner_of "$path"))"
+                unwritable+=("$path")
+                ;;
+        esac
+    done
+    if [ "${#unwritable[@]}" -gt 0 ]; then
+        echo "      → 直すには: sudo chown $check_user:$check_user ${unwritable[*]}"
+    fi
+    if [ -e "$CONFIG_DIR/wifi_ap.env" ]; then
+        as_user -r "$CONFIG_DIR/wifi_ap.env"
+        case $? in
+            0) ok "読めます: $CONFIG_DIR/wifi_ap.env ($(owner_of "$CONFIG_DIR/wifi_ap.env"))" ;;
+            2) info "確認には sudo が必要です: $CONFIG_DIR/wifi_ap.env ($(owner_of "$CONFIG_DIR/wifi_ap.env"))" ;;
+            *)
+                ng "$check_user は読めません: $CONFIG_DIR/wifi_ap.env ($(owner_of "$CONFIG_DIR/wifi_ap.env"))"
+                # root:<group> 0640 keeps the passphrase private; only the group has to change.
+                echo "      → 直すには: sudo chgrp $check_user $CONFIG_DIR/wifi_ap.env"
+                ;;
+        esac
+    fi
+fi
+
 section "Python とライブラリ（サービスと同じ $PYTHON）"
 # -I: the repository (current directory) must not shadow the installed packages.
 "$PYTHON" -I - << 'PYTHON'
