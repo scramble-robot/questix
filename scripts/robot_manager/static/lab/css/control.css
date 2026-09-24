@@ -442,8 +442,12 @@
   overflow: visible;
 }
 .control-chart text {
+  font-family: system-ui;
+  font-size: 14px;
+}
+/* Direct labels (今回・前回・目標・出来事) carry their role colour as an attribute. */
+.control-chart text:not([fill]) {
   fill: #60767e;
-  font: 14px system-ui;
 }
 .control-graphs details {
   padding: 16px 12px 0;

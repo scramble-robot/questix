@@ -429,10 +429,10 @@ function eventMarker(marker, { x, top, height, right, copy }) {
         fill=${event.color}
         opacity=".12"
       />${eventLine(from, top, height, event)}${eventLine(to, top, height, event)}${haloText(
-        (from + to) / 2,
+        from + EVENT_LABEL_OFFSET,
         top + 16,
         copy.charts.eventBlocked,
-        { ...labelStyle, anchor: 'middle' },
+        labelStyle,
       )}`;
   }
   if (marker === 'load') {
