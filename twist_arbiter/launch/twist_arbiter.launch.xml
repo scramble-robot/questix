@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<!--
+twist_arbiter standalone launch file.
+パラメータは twist_arbiter.yaml が Single Source of Truth。
+統合起動では launcher/launch/drive_component.launch.xml が起動する。
+-->
+<launch>
+  <arg name="config_file"
+       default="$(find-pkg-share twist_arbiter)/config/twist_arbiter.yaml"
+       description="Path to the twist_arbiter configuration YAML" />
+
+  <node pkg="twist_arbiter" exec="twist_arbiter_node" name="twist_arbiter" output="screen">
+    <param from="$(var config_file)" />
+  </node>
+</launch>
