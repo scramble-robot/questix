@@ -1,5 +1,7 @@
-// Live, observation-only link to a real QUESTiX robot (questix_lab_bridge, protocol 1).
-// The page only listens: nothing is ever sent to the robot, so lessons cannot move it.
+// Live link to a real QUESTiX robot (questix_lab_bridge, protocol 1).
+// The page listens to the robot's streams. The only frames it ever sends are the drive/stop
+// requests of js/live/drive-link.js (sendRobot below is for that module alone), and the bridge
+// accepts them only when it was started with allow_drive and its own checks pass.
 // Units follow REP-103: metres, radians, seconds; x forward, y left, theta counter-clockwise.
 
 // Keep in sync with `port` in questix_lab_bridge/config/lab_bridge.yaml and
@@ -15,7 +17,8 @@ const latest = new Map();
 let socket = null;
 let wanted = false;
 let retryTimer = 0;
-let state = { phase: 'idle', url: '', hello: null, rates: {}, message: '' };
+// `session` is this connection's id on the bridge (drive_state.owner refers to it).
+let state = { phase: 'idle', url: '', hello: null, session: null, rates: {}, message: '' };
 
 function emit(type, value) {
   for (const fn of listeners.get(type) || []) fn(value);
@@ -25,7 +28,7 @@ function setState(patch) {
   emit('state', state);
 }
 
-// Subscribe to 'state', 'status', or a stream name; returns the unsubscribe function.
+// Subscribe to 'state', 'status', 'drive_state', or a stream name; returns the unsubscribe function.
 function onRobot(type, fn) {
   if (!listeners.has(type)) listeners.set(type, new Set());
   listeners.get(type).add(fn);
@@ -82,6 +85,15 @@ function handleText(text) {
     emit('status', message);
     return;
   }
+  if (message.type === 'session') {
+    setState({ session: message.id });
+    return;
+  }
+  if (message.type === 'drive_state') {
+    latest.set('drive_state', message);
+    emit('drive_state', message);
+    return;
+  }
   if (STREAMS.includes(message.type)) {
     latest.set(message.type, message);
     emit(message.type, message);
@@ -91,7 +103,7 @@ function handleText(text) {
 function open(url) {
   clearTimeout(retryTimer);
   latest.clear();
-  setState({ phase: 'connecting', url, hello: null, rates: {} });
+  setState({ phase: 'connecting', url, hello: null, session: null, rates: {} });
   let ws;
   try {
     ws = new WebSocket(url);
@@ -142,6 +154,14 @@ function connectRobot(text) {
   state = { ...state, message: '' };
   open(url);
 }
+// For js/live/drive-link.js only: lessons go through its checks, never through this function.
+// Returns false when the frame could not be sent (no open connection).
+function sendRobot(message) {
+  if (!socket || socket.readyState !== WebSocket.OPEN || state.phase !== 'open') return false;
+  socket.send(JSON.stringify(message));
+  return true;
+}
+
 function disconnectRobot() {
   wanted = false;
   clearTimeout(retryTimer);
@@ -158,4 +178,5 @@ export {
   normalizeRobotUrl,
   connectRobot,
   disconnectRobot,
+  sendRobot,
 };

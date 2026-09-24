@@ -9,6 +9,8 @@
   --run-live-soft: #faedf1;
   --run-data: #8a4b24;
   --run-data-soft: #f8efe6;
+  --run-drive: #b3261e;
+  --run-drive-soft: #fdeceb;
 }
 
 .run-mode {
@@ -68,6 +70,18 @@
   border: 2px solid currentColor;
   border-top: 0;
   background: linear-gradient(currentColor, currentColor) 50% 0 / 2px 3px no-repeat;
+}
+/* A play triangle: the page itself moves the robot (only where the robot allows it). */
+.run-mode-drive {
+  color: var(--run-drive);
+  background: var(--run-drive-soft);
+}
+.run-mode-drive::before {
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 5px 0 5px 9px;
+  border-color: transparent transparent transparent currentColor;
 }
 .run-mode-badges {
   display: inline-flex;

@@ -1,5 +1,6 @@
 import { html, nothing } from '../vendor/lit-html.js';
 import { loadJson, fillSentence as fill } from '../core/content.js';
+import { driveControls } from './drive-view.js';
 
 // The one block of controls a lesson shows when it can take measurements from the real robot:
 // the state of the link, which stream is missing, and the record / stop button. Pure templates —
@@ -16,6 +17,8 @@ function linkMessage(model) {
 }
 
 function recordButton(model, actions) {
+  // A driving run has its own stop button in the drive block.
+  if (model.running) return nothing;
   if (model.recording)
     return html`<button class="live-capture-stop" @click=${actions.stopCapture}>
       ${model.stopLabel ?? captureCopy.stop}
@@ -71,7 +74,9 @@ function fileControls(model, actions) {
  * optional `recordLabel` / `stopLabel` sentences and `file: {canSave}` to offer saving and opening
  * recordings. `actions` needs `startCapture` and `stopCapture` (and, with `file`, `saveRecording`
  * and `openRecording`); `openLink` is optional and, when given, adds the shortcut to the connection
- * dialog for a learner who has not connected yet.
+ * dialog for a learner who has not connected yet. With `drive` (live-session's drive part), the
+ * block also offers driving the robot (drive-view.js), which needs `startDriveCapture` and
+ * `confirmDrive` in `actions`.
  */
 function liveCaptureControls(model, actions) {
   return html`<div class="live-capture" data-live-capture>
@@ -85,7 +90,7 @@ function liveCaptureControls(model, actions) {
       }
     </div>
     ${
-      model.recording
+      model.recording && !model.running
         ? html`<p class="live-capture-progress" role="status">
             ${fill(captureCopy.progress, { count: model.progress })}
           </p>`
@@ -96,8 +101,9 @@ function liveCaptureControls(model, actions) {
         ? html`<p class="live-capture-message" role="status" data-live-message>${model.message}</p>`
         : nothing
     }
+    ${model.drive && model.link.connected ? driveControls(model, model.drive, actions) : nothing}
     ${fileControls(model, actions)}
-    <p class="live-capture-note">${captureCopy.readOnly}</p>
+    <p class="live-capture-note">${model.drive ? captureCopy.recordOnly : captureCopy.readOnly}</p>
   </div>`;
 }
 

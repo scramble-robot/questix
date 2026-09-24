@@ -266,3 +266,187 @@
   margin: 8px 0;
   font-size: 14px;
 }
+
+/* Driving the robot from a lesson (js/live/drive-view.js, drive-ui.js). Orange marks everything
+   that moves the robot; the stop controls are red and large enough to hit without aiming. */
+.drive-block {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+.drive-block h4 {
+  margin: 0;
+  color: var(--orange);
+}
+.drive-blockers {
+  margin: 0;
+  padding-left: 1.3em;
+  display: grid;
+  gap: 4px;
+  color: var(--orange);
+}
+.drive-relaunch {
+  display: block;
+  margin-top: 4px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: white;
+  color: var(--dark);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+.drive-ready {
+  color: var(--green);
+  font-weight: 600;
+}
+.drive-confirm {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-weight: 600;
+}
+.drive-confirm input {
+  margin-top: 3px;
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+.drive-note {
+  font-size: 12px;
+  color: var(--muted);
+}
+.drive-start {
+  font-weight: 700;
+  border-color: var(--orange);
+  color: var(--orange);
+}
+.drive-stop,
+.drive-bar-stop {
+  font-weight: 700;
+  background: #c62828;
+  border-color: #c62828;
+  color: white;
+  min-height: 52px;
+  min-width: 140px;
+}
+.drive-progress {
+  font-variant-numeric: tabular-nums;
+  color: var(--orange);
+  font-weight: 600;
+}
+
+/* The stop bar: above everything, including open dialogs' backdrops. */
+.drive-bar-host {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2147483000;
+  pointer-events: none;
+}
+.drive-bar {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+  background: #fff4e5;
+  border-top: 3px solid #c62828;
+  box-shadow: 0 -6px 18px rgba(16, 40, 50, 0.18);
+}
+.drive-bar-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #c62828;
+  animation: drive-bar-blink 1s steps(2, start) infinite;
+}
+@keyframes drive-bar-blink {
+  to {
+    visibility: hidden;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .drive-bar-dot {
+    animation: none;
+  }
+}
+
+/* Bench test in the 実機 dialog. */
+.robot-drive {
+  border-top: 1px solid var(--line);
+  margin-top: 12px;
+  padding-top: 8px;
+  display: grid;
+  gap: 8px;
+}
+.robot-drive h3,
+.robot-drive p {
+  margin: 0;
+}
+.drive-bench-speeds {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 8px 16px;
+}
+.drive-bench-speed {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+}
+.drive-bench-speed output {
+  font-variant-numeric: tabular-nums;
+  min-width: 6em;
+  text-align: right;
+}
+.drive-bench-pad {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-areas:
+    '. forward .'
+    'left . right'
+    '. backward .';
+  gap: 8px;
+  max-width: 360px;
+  margin: 0 auto;
+  width: 100%;
+}
+.drive-bench-move {
+  min-height: 56px;
+  font-weight: 700;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.drive-bench-move[data-drive-bench='forward'] {
+  grid-area: forward;
+}
+.drive-bench-move[data-drive-bench='left'] {
+  grid-area: left;
+}
+.drive-bench-move[data-drive-bench='right'] {
+  grid-area: right;
+}
+.drive-bench-move[data-drive-bench='backward'] {
+  grid-area: backward;
+}
+.drive-bench-move.held {
+  background: var(--orange);
+  border-color: var(--orange);
+  color: white;
+}
+
+/* The setting next to a drive block (real step speed, drive distance). */
+.control-live-speed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  font-weight: 600;
+}

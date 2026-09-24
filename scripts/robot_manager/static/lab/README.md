@@ -3,7 +3,8 @@
 Browser-based teaching material for the QUESTiX robot: 13 courses (mechanics, control, SLAM,
 vision, path planning, reinforcement learning, …) in which learners set a condition, run an
 experiment in an **in-browser simulator**, observe the result, and improve it. With the
-`questix_lab_bridge` node running, the same pages also **observe the real robot** (read-only).
+`questix_lab_bridge` node running, the same pages also **observe the real robot**, and — on a robot
+where driving has been allowed — run **low-speed driving experiments** on it.
 
 Ways to open it:
 
@@ -40,8 +41,9 @@ Opening `index.html` via `file://` does not work: ES modules need HTTP.
 
 ## Simulator and real robot
 
-Learners see what each experiment runs on from three labels: **シミュレーション** (the in-browser
-model; no robot needed), **実機と連携** (values taken from the connected robot, read-only) and
+Learners see what each experiment runs on from four labels: **シミュレーション** (the in-browser
+model; no robot needed), **実機と連携** (values taken from the connected robot, read-only),
+**実機を動かす** (the page drives the robot itself, only where driving is allowed) and
 **実機で測って入力** (numbers measured on the robot, typed in or opened as a file). They appear on the
 catalogue cards (with a legend), in the course switcher, in the first row of every experiment's
 brief (with a button that scrolls to the robot block) and on the robot blocks themselves. Which
@@ -60,6 +62,29 @@ and name real topics.
 | Measurement lab (under SLAM)       | Worked example, CSV                          | Semi-automatic: every drive between two stops in `/odom` gives the wheel-odometry distance (straight line start → stop); the learner types in the tape-measured floor distance for each, and **表に加える** puts the pairs in the table.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | Path planning (測った部屋で試す)   | Built-in rooms                               | Two sources, one map in the course's 6 m × 4 m frame. **部屋を測る** records `/scan` + `/odom` (or opens a recording / rosbag); each scan is placed with the odometry of the same moment and the LiDAR mount, cells hit at least twice become obstacles, and the driven path is drawn next to the planned one (odometry-only placement drifts on long drives). **3Dスキャンを開く** takes a phone scan (PLY / OBJ / GLB, uncompressed; Scaniverse etc.), finds the floor, and by default keeps everything between just above the floor (default 3 cm; lower things are rolled over) and the top of the robot — what blocks a wheeled robot; a table the robot fits under stays free. A second band cuts only around the 2D LiDAR's plane (± a thickness), the map the robot itself sees, to compare; its height is typed in (it is not in the TF). Start and goal can be placed by clicking the map. |
 | All others                         | In-browser models                            | Existing offline workflow: download the ROS 2 script or procedure, import CSV/JSON.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+
+### Driving the real robot
+
+Where a lesson can drive the robot, its record block gets a **実機を走らせる** part: the program in
+one sentence, a checklist of what still prevents driving (each with what to do), the learner's
+safety tick, the limits, a start button and, while running, a large **止める**. While any page
+drives, every connected page shows a stop bar at the bottom (also inside open dialogs), and Esc
+stops the robot. The 実機 dialog adds a hold-to-move bench test (前進 / 後退 / 左 / 右 while pressed).
+
+| Lesson                            | What the page drives                                                                                                                                             |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Feedback control, speed topics    | A step input: 1 s still, 0.1 / 0.2 / 0.3 m/s for 5 s, stop; recorded and overlaid like a manual run.                                                             |
+| Feedback control, distance topics | The simulation's own P/I/D gains close the loop on the LiDAR's distance to the wall (target 0.50 m, output 100 % = 0.25 m/s, one step per scan); ends at 0.25 m. |
+| Measurement lab (under control)   | A forward/backward staircase (±0.1, ±0.2 m/s, 3 s each) that fills the table.                                                                                    |
+| Measurement lab (under SLAM)      | 50 or 100 cm measured by `/odom`, easing into the goal; the learner measures the floor.                                                                          |
+
+Driving needs three things on the robot side: the robot started **without its controller**
+(`ros2 launch questix_launcher questix_core.launch.xml enable_controller:=false`), **走行を許可する**
+in Robot Manager's 教材 tab, and the E-stop released. The bridge checks all of them and every other
+safety rule itself (`questix_lab_bridge/README.md`, "Driving experiments"); the page only shows them.
+`js/live/drive-core.js` (readiness, programs, odometry goals) and `js/control/live-drive.js` (step,
+wall PID) are DOM-free and tested (`test/drive-core.test.mjs`, `test/control-live-drive.test.mjs`);
+`js/live/drive-link.js` is the only module that sends anything to the robot.
 
 Every recording goes through `js/live/capture.js`, so the connection checks, the timeout, the abort
 and the learner-facing messages exist once; `capture-core.js` holds the arithmetic and is covered by

@@ -1,8 +1,9 @@
 import { loadJson } from '../core/content.js';
 import { escapeHtml } from './html-escape.js';
 
-// What an experiment runs on: the in-browser simulation ('sim'), the connected robot ('live'), or
-// values measured on the robot and typed in or opened as a file ('data'). One vocabulary, shown on
+// What an experiment runs on: the in-browser simulation ('sim'), the connected robot ('live'), the
+// robot driven by the page itself where a robot allows it ('drive'), or values measured on the robot
+// and typed in or opened as a file ('data'). One vocabulary, shown on
 // the catalogue cards, in the course switcher, at the top of every experiment and on the blocks
 // that take robot data, so a learner can tell before starting whether the robot is needed.
 // Which course and topic uses which mode is declared in content/shell/run-modes.json.

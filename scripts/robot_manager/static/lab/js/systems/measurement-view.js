@@ -326,16 +326,41 @@ function pendingDrives(model, copy, actions) {
   </div>`;
 }
 
+// How far "N cm走らせて記録する" drives; only offered while the panel can drive the robot.
+function driveDistanceSelect(model, copy, actions) {
+  const live = model.live;
+  if (!live.driveDistances.length || !live.drive || !live.link.connected) return nothing;
+  return html`<label class="control-live-speed"
+    >${copy.messages.driveDistanceLabel}
+    <select
+      data-drive-distance
+      ?disabled=${live.recording}
+      @change=${(event) => actions.setDriveDistance(Number(event.target.value))}
+    >
+      ${live.driveDistances.map(
+        (distance) =>
+          html`<option value=${distance} ?selected=${distance === live.driveDistance}>
+            ${fill(copy.messages.driveDistanceOption, { cm: Math.round(distance * 100) })}
+          </option>`,
+      )}
+    </select></label
+  >`;
+}
+
 // Filling the table from the connected robot. A scenario without a `live` block says why its
 // reference quantity cannot come from the robot instead of offering a button that cannot work.
 function liveCapture(model, copy, actions) {
   const panel = copy.panel;
   return html`<div class="measurement-live">
-    <h3>${model.live ? unsafeHTML(runModeBadgeHtml('live')) : nothing} ${panel.liveTitle}</h3>
+    <h3>
+      ${model.live ? unsafeHTML(runModeBadgeHtml('live')) : nothing}
+      ${model.live?.drive ? unsafeHTML(runModeBadgeHtml('drive')) : nothing} ${panel.liveTitle}
+    </h3>
     ${
       model.live
         ? html`<p>${model.live.text}</p>
-            ${liveCaptureControls(model.live, actions)} ${pendingDrives(model, copy, actions)}
+            ${driveDistanceSelect(model, copy, actions)} ${liveCaptureControls(model.live, actions)}
+            ${pendingDrives(model, copy, actions)}
             <p>${model.live.referenceNote ?? panel.liveReferenceNote}</p>`
         : html`<p>${panel.liveUnavailable}</p>`
     }

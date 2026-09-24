@@ -66,7 +66,7 @@
 </dialog>
 <dialog id="robotDialog" class="robot-dialog" aria-labelledby="robotDialogTitle">
  <header class="dialog-heading"><h2 id="robotDialogTitle">実機のQUESTiXとつなぐ</h2><button id="robotClose" aria-label="閉じる">×</button></header>
- <p>シミュレーターで確かめた考え方を、実際のロボットの値でも観察します。教材は<strong>値を受け取るだけ</strong>で、ロボットを動かす指令は送りません。走らせるときは、これまでどおりコントローラーを使い、非常停止に手が届く状態で行ってください。</p>
+ <p>シミュレーターで確かめた考え方を、実際のロボットの値でも観察します。ふだんの教材は<strong>値を受け取るだけ</strong>です。ロボットの管理画面で「教材からの走行」が許可され、ロボットがコントローラーなしで起動しているときだけ、走行実験のボタンが低速でロボットを動かします。どちらの場合も、非常停止に手が届く状態で行ってください。</p>
  <form id="robotForm" class="robot-form"><label for="robotUrl">ロボットのアドレス</label><div><input id="robotUrl" type="text" inputmode="url" autocomplete="off" spellcheck="false" placeholder="ws://192.168.1.20:8897"><button id="robotConnect" class="primary" type="submit">接続する</button><button id="robotDisconnect" type="button" hidden>切断する</button></div></form>
  <p id="robotStatus" class="robot-status" role="status"></p>
  <section id="robotMonitor" class="robot-monitor" hidden>
@@ -78,8 +78,10 @@
   <dl class="robot-readings"><div><dt>位置の見積もり</dt><dd id="robotPose">—</dd></div><div><dt>実測の速度</dt><dd id="robotSpeed">—</dd></div><div><dt>速度の指令</dt><dd id="robotCommand">—</dd></div><div><dt>非常停止</dt><dd id="robotEstop">—</dd></div></dl>
   <table class="robot-streams"><caption>受信している値</caption><tbody id="robotStreams"></tbody></table>
  </section>
+ <section id="robotDrive" class="robot-drive" hidden></section>
  <details><summary>つながらないときは</summary><p>ロボット側で <code>ros2 launch questix_lab_bridge lab_bridge.launch.xml</code> が動いているか、端末がロボットと同じネットワークにあるかを確かめます。アドレスは <code>ws://ロボットのIPアドレス:8897</code> です。カメラは、ロボットにカメラのノードがあり <code>camera_topic</code> を設定した場合だけ届きます。</p></details>
 </dialog>
 <div id="simulation" hidden><canvas id="arena" width="1000" height="660" role="img" aria-label="ロボットの走行コース"></canvas><input id="trailToggle" type="checkbox" checked><input id="sensorToggle" type="checkbox"><canvas id="cameraView" width="640" height="280"></canvas></div>
+<div id="driveBar" class="drive-bar-host"></div>
 <script type="module" src="js/main.js"></script>
 </body></html>

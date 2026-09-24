@@ -12,12 +12,22 @@ import {
 } from './capture.js';
 import { missingInRecording, recordingSummary } from './recording-core.js';
 import { captureCopy } from './live-view.js';
+import { driveModel, onDrive, confirmDriveSafety, runDrive } from './drive-link.js';
+import { driveEndedText } from './drive-view.js';
 
 // The state behind one `liveCaptureControls` block: recording from the robot, opening a saved
 // recording or a rosbag, saving the one on screen, and bringing it back after a reload. A lesson
 // creates one session per block and supplies `apply`, which turns a recording into the lesson's
 // own numbers; everything around that (progress, abort, files, storage, the sentence saying where
 // the numbers came from) is the same in every course and lives here.
+//
+// A lesson that can also drive the robot passes `drive`; then the block offers "走らせて記録する",
+// which records while drive-link.js runs the lesson's controller, keeps recording for a moment after
+// the robot stops (so the stop is in the data), and says how the run ended.
+
+const DRIVE_PROGRESS_MS = 250;
+const DEFAULT_TAIL_SECONDS = 1.5;
+const sleep = (seconds) => new Promise((resolve) => setTimeout(resolve, seconds * 1000));
 
 const streamList = (streams) =>
   streams.map((name) => captureCopy.streamNames[name] ?? name).join('と');
@@ -60,6 +70,9 @@ function originNote(recording, origin, assumedConfig) {
  * - `applyOnRestore`: false when the lesson keeps its own results across a reload (the recording
  *   then only comes back so it can still be saved)
  * - `update()`: redraws the lesson
+ * - `drive` (optional): `{ plan(), program(), startLabel }`. `plan()` returns `{controller, seconds,
+ *   tail}` for drive-link's runDrive (tail = seconds recorded after the robot stops) or throws an
+ *   Error whose message is shown; `program()` is the sentence saying what the robot will do.
  */
 function createLiveSession(options) {
   const session = {
@@ -68,7 +81,12 @@ function createLiveSession(options) {
     busy: false,
     progress: 0,
     controllers: null,
+    driving: false,
+    driveElapsed: 0,
+    driveTotal: 0,
+    driveAbort: null,
   };
+  if (options.drive) onDrive(() => options.update());
 
   function show(recording, origin, assumedConfig = false) {
     const result = options.apply(recording);
@@ -107,10 +125,78 @@ function createLiveSession(options) {
   }
 
   function stopCapture() {
+    // While driving, "止める" stops the robot; the recording then keeps the stop and ends itself.
+    if (session.driving) {
+      session.driveAbort?.abort();
+      return;
+    }
     const controllers = session.controllers;
     if (!controllers) return;
     if (options.finishOnStop) controllers.finish.abort();
     else controllers.abort.abort();
+  }
+
+  async function startDriveCapture() {
+    if (session.busy || !options.drive) return;
+    let plan;
+    try {
+      plan = options.drive.plan();
+    } catch (error) {
+      session.note = error.message;
+      options.update();
+      return;
+    }
+    const tail = plan.tail ?? DEFAULT_TAIL_SECONDS;
+    const controllers = { abort: new AbortController(), finish: new AbortController() };
+    const driveAbort = new AbortController();
+    Object.assign(session, {
+      busy: true,
+      driving: true,
+      progress: 0,
+      controllers,
+      driveAbort,
+      driveElapsed: 0,
+      driveTotal: plan.seconds,
+      note: '',
+    });
+    options.update();
+    const recorded = recordRobot({
+      // An upper bound only: the recording is finished below, right after the tail.
+      seconds: plan.seconds + tail + 5,
+      countStream: options.countStream,
+      signal: controllers.abort.signal,
+      finish: controllers.finish.signal,
+    }).catch((error) => error);
+    const startedAt = performance.now();
+    const progress = setInterval(() => {
+      session.driveElapsed = (performance.now() - startedAt) / 1000;
+      options.update();
+    }, DRIVE_PROGRESS_MS);
+    const result = await runDrive({
+      controller: plan.controller,
+      seconds: plan.seconds,
+      signal: driveAbort.signal,
+    });
+    clearInterval(progress);
+    session.driving = false;
+    session.driveAbort = null;
+    options.update();
+    if (result.reason === 'refused') controllers.abort.abort();
+    else {
+      await sleep(tail);
+      controllers.finish.abort();
+    }
+    const recording = await recorded;
+    const ended = driveEndedText(result);
+    if (recording instanceof Error) {
+      session.note =
+        result.reason === 'refused' ? ended : fill(options.failed, { reason: recording.message });
+    } else {
+      show(recording, 'live');
+      session.note = [ended, session.note].filter(Boolean).join(' ');
+    }
+    Object.assign(session, { busy: false, progress: 0, controllers: null });
+    options.update();
   }
 
   async function openRecording(file) {
@@ -155,12 +241,29 @@ function createLiveSession(options) {
     return {
       link: { ...liveLink(), missing: missingStreams(options.needs) },
       recording: session.busy,
+      running: session.driving,
+      elapsed: session.driveElapsed,
+      total: session.driveTotal,
       progress: session.progress,
       seconds: options.seconds,
       recordLabel: options.recordLabel,
       stopLabel: options.stopLabel,
       message: '',
       file: { canSave: Boolean(session.recording) && !session.busy },
+      drive: options.drive ? driveBlockModel() : null,
+    };
+  }
+
+  function driveBlockModel() {
+    // /target_twist is what the run itself publishes, so it cannot be required before it starts.
+    const missing = missingStreams(options.needs.filter((name) => name !== 'twist'));
+    const drive = driveModel();
+    return {
+      ...drive,
+      // A stream the lesson needs but does not receive would make the run worthless.
+      ready: drive.ready && missing.length === 0,
+      program: options.drive.program(),
+      startLabel: options.drive.startLabel,
     };
   }
 
@@ -177,7 +280,14 @@ function createLiveSession(options) {
     model,
     restore,
     clear,
-    actions: { startCapture, stopCapture, openRecording, saveRecording },
+    actions: {
+      startCapture,
+      stopCapture,
+      openRecording,
+      saveRecording,
+      startDriveCapture,
+      confirmDrive: confirmDriveSafety,
+    },
   };
 }
 

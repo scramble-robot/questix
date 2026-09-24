@@ -30,8 +30,8 @@
 - `description_launch/`: URDF, RViz, and xacro assets.
 - `ansible/`, `scripts/`, `systemd/`: OS setup, ISO build tooling, and resident services.
 - `scripts/robot_manager/`: FastAPI web management UI.
-- `scripts/robot_manager/static/lab/`: QUESTiX LAB web teaching material (static ES-module site served at `/lab/`; in-browser simulator lessons plus a read-only live view of the real robot). Ship only permissively licensed third-party files there (no GPL/AGPL); see its `assets/vendor/NOTICE.md`.
-- `questix_lab_bridge/`: Read-only WebSocket bridge (ament_python) that mirrors `/scan`, `/odom`, `/drive_status`, `/target_twist`, and an optional camera topic to QUESTiX LAB. It must never publish or accept commands.
+- `scripts/robot_manager/static/lab/`: QUESTiX LAB web teaching material (static ES-module site served at `/lab/`; in-browser simulator lessons plus a live view of the real robot and guarded low-speed driving experiments). Ship only permissively licensed third-party files there (no GPL/AGPL); see its `assets/vendor/NOTICE.md`. Only `js/live/drive-link.js` may send frames to the robot.
+- `questix_lab_bridge/`: WebSocket bridge (ament_python) that mirrors `/scan`, `/odom`, `/drive_status`, `/target_twist`, and an optional camera topic to QUESTiX LAB. Observation only unless `allow_drive` is set (robot_manager 教材 tab, off by default and in competition mode); then it may publish `/target_twist` and nothing else, under the checks in `questix_lab_bridge/drive.py` (no other publisher, drive node present, E-stop released, one page, speed limits, dead-man timeout). Do not add other publishers, services or actions, and do not weaken those checks.
 - `src/`: External packages imported via `dependency.repos` (`ydlidar_ros2`, `ydlidar_sdk_vendor`). Not part of the core QUESTiX codebase; do not edit unless explicitly requested.
 
 ## Pre-work checks

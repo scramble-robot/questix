@@ -20,13 +20,23 @@ import {
 import { controlWheelAngle, drawControlStage, COMPARE_COLOURS } from './render.js';
 import { controlPage, gainText, COMMAND_OPEN_TOPICS } from './view.js';
 import { conceptState, advanceConcept, resetConcept } from './concepts.js';
-import { liveControlRun, onLiveLink, openRecordingFile } from '../live/capture.js';
-import { liveDistanceRun, stepMetrics, firstHold } from '../live/capture-core.js';
+import { liveControlRun, liveLink, onLiveLink, openRecordingFile } from '../live/capture.js';
+import { liveDistanceRun, stepMetrics, firstHold, forwardRpm } from '../live/capture-core.js';
 import { driveRows, wallRows } from '../live/recording-core.js';
 import { createLiveSession } from '../live/live-session.js';
 import { captureNotes } from '../live/live-view.js';
 import { openRobotDialog } from '../live/live-ui.js';
 import { fillSentence as fill } from '../core/content.js';
+import {
+  STEP_SPEEDS,
+  STEP_HOLD,
+  WALL_SECONDS,
+  WALL_MAX_SPEED,
+  WALL_START_MIN,
+  WALL_MIN_GAP,
+  speedStep,
+  wallApproach,
+} from './live-drive.js';
 
 // Feedback-control course: state and behaviour. view.js turns the model into markup, render.js
 // draws the robot and the charts, core.js simulates. Texts live in content/control/ui.json.
@@ -175,6 +185,8 @@ function buildModel() {
       run: liveRuns[liveKind()],
       note: liveSession().note,
       capture: liveSession().model(),
+      stepSpeed: liveStepSpeed,
+      stepSpeeds: stepSpeedOptions(),
       compared: comparedRuns[liveKind()].map((entry, index) => ({
         ...entry,
         colour: COMPARE_COLOURS[index],
@@ -426,6 +438,66 @@ function comparisonRows() {
   return rows;
 }
 
+// Driving the real robot from this card (live-drive.js): the speed of the real step input, and
+// the robot's wheel radius for the rpm shown next to it (as the bridge reported it).
+let liveStepSpeed = STEP_SPEEDS[1];
+const REAL_WHEEL_RADIUS = 0.1; // m, until the robot has told us (launcher/config/drive_component.yaml)
+
+function stepSpeedOptions() {
+  const config = { wheel_radius: liveLink().config?.wheel_radius ?? REAL_WHEEL_RADIUS };
+  return STEP_SPEEDS.map((speed) => ({
+    speed,
+    label: fill(copy.live.driveSpeedOption, {
+      speed: speed.toFixed(1),
+      rpm: forwardRpm(speed, config).toFixed(0),
+    }),
+  }));
+}
+
+const speedDrive = {
+  startLabel: undefined,
+  program: () => {
+    const step = speedStep(liveStepSpeed);
+    return fill(copy.live.driveSpeedProgram, {
+      speed: liveStepSpeed.toFixed(1),
+      hold: STEP_HOLD,
+      distance: (step.distance + 0.5).toFixed(1),
+      target: experiment().config.targetRPM,
+    });
+  },
+  plan: () => {
+    const step = speedStep(liveStepSpeed);
+    return { controller: step.controller, seconds: step.seconds, tail: 1 };
+  },
+};
+
+const wallMessages = () => ({
+  tooClose: fill(copy.live.driveWallTooClose, { start: WALL_START_MIN.toFixed(1) }),
+  noWall: copy.live.driveWallNoWall,
+  lost: copy.live.driveWallLost,
+  hit: fill(copy.live.driveWallHit, { gap: WALL_MIN_GAP.toFixed(2) }),
+});
+
+const wallDrive = {
+  startLabel: copy.live.driveWallStart,
+  program: () => {
+    const config = experiment().config;
+    return fill(copy.live.driveWallProgram, {
+      kp: config.kp,
+      ki: config.ki,
+      kd: config.kd,
+      top: WALL_MAX_SPEED.toFixed(2),
+      start: WALL_START_MIN.toFixed(1),
+      gap: WALL_MIN_GAP.toFixed(2),
+    });
+  },
+  plan: () => ({
+    controller: wallApproach({ ...experiment().config }, wallMessages()),
+    seconds: WALL_SECONDS,
+    tail: 1,
+  }),
+};
+
 const liveSessions = {
   speed: createLiveSession({
     slot: 'control-speed',
@@ -436,6 +508,7 @@ const liveSessions = {
     failed: copy.live.failed,
     apply: (recording) => applyRecording('speed', recording),
     update: () => update(),
+    drive: speedDrive,
   }),
   distance: createLiveSession({
     slot: 'control-distance',
@@ -446,6 +519,7 @@ const liveSessions = {
     failed: copy.live.failed,
     apply: (recording) => applyRecording('distance', recording),
     update: () => update(),
+    drive: wallDrive,
   }),
 };
 
@@ -536,6 +610,12 @@ const actions = {
     update();
   },
   startCapture: () => liveSession().actions.startCapture(),
+  startDriveCapture: () => liveSession().actions.startDriveCapture(),
+  confirmDrive: (value) => liveSession().actions.confirmDrive(value),
+  setLiveStepSpeed(value) {
+    if (STEP_SPEEDS.includes(value)) liveStepSpeed = value;
+    update();
+  },
   stopCapture: () => liveSession().actions.stopCapture(),
   openRecording: (file) => liveSession().actions.openRecording(file),
   saveRecording: (kind) => liveSession().actions.saveRecording(kind),

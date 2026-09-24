@@ -276,6 +276,7 @@ function liveLink() {
     url: state.url,
     streams: state.hello?.streams ?? {},
     rates: state.rates ?? {},
+    config: state.hello?.config ?? null, // wheel_radius, wheel_separation of this robot
   };
 }
 

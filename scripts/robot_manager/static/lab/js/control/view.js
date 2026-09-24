@@ -626,15 +626,19 @@ function calibrationCard(model, copy) {
   </section>`;
 }
 
-// Recording the real robot and drawing it on the same axes as the simulation. The link is
-// observation-only, so the learner drives the robot from the controller or the operation screen
-// while this card records what the wheels (speed topics) or the LiDAR (distance topics) measured.
+// Recording the real robot and drawing it on the same axes as the simulation. Either the learner
+// drives the robot from the controller while this card records what the wheels (speed topics) or
+// the LiDAR (distance topics) measured, or — on a robot that allows it — the card drives the robot
+// itself: a step input (speed), or the simulation's own PID stopping in front of the wall.
 function liveCard(model, copy, actions) {
   const text = copy.live;
   return html`<section class="card control-live">
-    <h2>${unsafeHTML(runModeBadgeHtml('live'))} ${text.title}</h2>
+    <h2>
+      ${unsafeHTML(runModeBadgeHtml('live'))}${unsafeHTML(runModeBadgeHtml('drive'))} ${text.title}
+    </h2>
     <p>${model.distance ? text.distanceIntro : text.intro}</p>
     <p>${model.distance ? text.distanceHowto : text.howto}</p>
+    ${model.distance ? nothing : stepSpeedSelect(model, text, actions)}
     ${liveCaptureControls(model.live.capture, actions)}
     ${
       model.live.note
@@ -644,6 +648,27 @@ function liveCard(model, copy, actions) {
     ${model.live.run ? html`<button @click=${actions.clearLive}>${text.clear}</button>` : nothing}
     ${compareControls(model, text, actions)} ${comparisonTable(model, text)}
   </section>`;
+}
+
+// The speed of the real step input; only offered while the card can drive the robot.
+function stepSpeedSelect(model, text, actions) {
+  const capture = model.live.capture;
+  if (!capture.drive || !capture.link.connected) return nothing;
+  return html`<label class="control-live-speed"
+    >${text.driveSpeedLabel}
+    <select
+      data-live-step-speed
+      ?disabled=${capture.recording}
+      @change=${(event) => actions.setLiveStepSpeed(Number(event.target.value))}
+    >
+      ${model.live.stepSpeeds.map(
+        (option) =>
+          html`<option value=${option.speed} ?selected=${option.speed === model.live.stepSpeed}>
+            ${option.label}
+          </option>`,
+      )}
+    </select></label
+  >`;
 }
 
 // Other groups' saved recordings (or rosbags), drawn on the same chart.

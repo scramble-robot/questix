@@ -141,7 +141,12 @@
     "liveDrives": "{count}回の走行を見つけました。床で測った距離を入れてください。",
     "liveNoDrive": "止まるまでの走行が見つかりませんでした。記録を始めてから、ロボットを2 cm以上走らせて止めてください（/odom が届いているかも確かめてください）。",
     "liveNeedFloor": "床で測った距離を、少なくとも1回ぶん入れてください。",
-    "liveDrivesAdded": "{count}回ぶんを表に加えました。"
+    "liveDrivesAdded": "{count}回ぶんを表に加えました。",
+    "driveHoldsProgram": "前進と後退を交互に、{speeds} m/sを{hold}秒ずつ保ちます（間に{pause}秒止まります）。保った区間ごとに1つの入力になります。ロボットの前後に{space} m以上の空きを作ってください。",
+    "driveDistanceLabel": "走らせる距離",
+    "driveDistanceOption": "{cm} cm",
+    "driveDistanceProgram": "床の印の上から、車輪の記録（/odom）で{cm} cm進んだところで止まるまで、まっすぐ{speed} m/sで走ります（ゴールの手前で減速します）。ロボットの前に{space} m以上の空きを作ってください。止まったら床の印からの距離をメジャーで測り、下の表に入れてください。何回か繰り返すと、車輪から求めた距離のくせが見えてきます。",
+    "driveDistanceStart": "{cm} cm走らせて記録する"
   },
   "drives": {
     "intro": "記録から、止まるまでの走行を見つけました。床の印の間をメジャーで測り、1回ごとに入れてから「表に加える」を押してください。",

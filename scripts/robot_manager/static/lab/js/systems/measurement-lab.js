@@ -8,6 +8,12 @@ import { driveRows, drivesOf } from '../live/recording-core.js';
 import { createLiveSession } from '../live/live-session.js';
 import { captureNotes } from '../live/live-view.js';
 import { openRobotDialog } from '../live/live-ui.js';
+import {
+  staircaseProgram,
+  programSeconds,
+  programCommand,
+  createOdomGoal,
+} from '../live/drive-core.js';
 
 // The measurement lab: a panel offered under the control, launch and SLAM courses where the
 // learner looks at repeated measurements, compares them with an independent reference and fits a
@@ -119,6 +125,60 @@ function shownScenario(course) {
 
 const sessions = new Map();
 
+// Driving the robot for a table (drive-core.js). Holds alternate forward and backward, so the
+// robot ends near where it started and needs little room; every hold is one input of the table.
+const HOLD_SPEEDS = [0.1, -0.1, 0.2, -0.2]; // m/s
+const HOLD_SECONDS = 3; // settleSeconds + minHoldSeconds of CAPTURE_DEFAULTS
+const HOLD_PAUSE = 1.5; // s standing still between holds, so each hold starts from rest
+// Drives measured by /odom for the SLAM table; the learner measures the same drive on the floor.
+const DRIVE_DISTANCES = [0.5, 1]; // m
+const DRIVE_SPEED = 0.2; // m/s
+const DRIVE_SPARE = 4; // s on top of distance / speed for speeding up, slowing down and settling
+const DRIVE_ROOM = 0.5; // m of free floor asked for beyond the drive itself
+let driveDistance = DRIVE_DISTANCES[0];
+
+const holdsDrive = {
+  program() {
+    const largest = Math.max(...HOLD_SPEEDS.map(Math.abs));
+    return fill(copy.messages.driveHoldsProgram, {
+      speeds: [...new Set(HOLD_SPEEDS.map(Math.abs))].join('・'),
+      hold: HOLD_SECONDS,
+      pause: HOLD_PAUSE,
+      space: (largest * HOLD_SECONDS + 0.3).toFixed(1),
+    });
+  },
+  plan() {
+    const steps = staircaseProgram(HOLD_SPEEDS, { hold: HOLD_SECONDS, pause: HOLD_PAUSE });
+    return {
+      controller: (elapsed) => programCommand(steps, elapsed),
+      seconds: programSeconds(steps),
+    };
+  },
+};
+
+const cm = (metres) => Math.round(metres * CM_PER_M);
+
+const drivesDrive = {
+  get startLabel() {
+    return fill(copy.messages.driveDistanceStart, { cm: cm(driveDistance) });
+  },
+  program: () =>
+    fill(copy.messages.driveDistanceProgram, {
+      cm: cm(driveDistance),
+      speed: DRIVE_SPEED,
+      space: (driveDistance + DRIVE_ROOM).toFixed(1),
+    }),
+  plan() {
+    const goal = createOdomGoal({ kind: 'distance', target: driveDistance, speed: DRIVE_SPEED });
+    return {
+      controller: (elapsed, robot) => goal.update(robot.odom, elapsed),
+      seconds: driveDistance / DRIVE_SPEED + DRIVE_SPARE,
+    };
+  },
+};
+
+const DRIVES = { holds: holdsDrive, drives: drivesDrive };
+
 // A recording replaces the table: mixing a worked example with real measurements would leave the
 // learner unable to say which number came from where.
 function applyHolds(course, recording) {
@@ -175,6 +235,7 @@ function sessionOf(course) {
       update: () => {
         if (shown === course) update();
       },
+      drive: DRIVES[live.kind],
     });
     sessions.set(course, session);
     session.restore();
@@ -192,6 +253,8 @@ function liveModel(course) {
     text: scenario.live.text,
     referenceNote: scenario.live.referenceNote,
     pending: labState(course).pending,
+    driveDistance: scenario.live.kind === 'drives' ? driveDistance : null,
+    driveDistances: scenario.live.kind === 'drives' ? DRIVE_DISTANCES : [],
   };
 }
 
@@ -330,6 +393,12 @@ const actions = {
   openCsv,
   saveCsv,
   startCapture: () => sessionOf(shown)?.actions.startCapture(),
+  startDriveCapture: () => sessionOf(shown)?.actions.startDriveCapture(),
+  confirmDrive: (value) => sessionOf(shown)?.actions.confirmDrive(value),
+  setDriveDistance(value) {
+    if (DRIVE_DISTANCES.includes(value)) driveDistance = value;
+    update();
+  },
   stopCapture: () => sessionOf(shown)?.actions.stopCapture(),
   openRecording: (file) => sessionOf(shown)?.actions.openRecording(file),
   saveRecording: (kind) => sessionOf(shown)?.actions.saveRecording(kind),

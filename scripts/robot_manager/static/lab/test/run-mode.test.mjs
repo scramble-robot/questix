@@ -17,7 +17,7 @@ import { LESSONS } from '../js/shell/lesson-ui.js';
 import { lessonBrief } from '../js/shell/lesson-brief.js';
 
 const readJson = (path) => JSON.parse(fs.readFileSync(new URL(path, import.meta.url), 'utf8'));
-const ROBOT_MODES = ['live', 'data'];
+const ROBOT_MODES = ['live', 'drive', 'data'];
 
 // Lesson keys the courses build: "<course>-<topic id>".
 const topicIds = (path) => Object.keys(readJson(path).topics);
@@ -79,7 +79,7 @@ test('a course that uses the robot has at least one topic that does', () => {
 });
 
 test('topicRunModes matches exact keys, whole courses and falls back to the simulation', () => {
-  assert.deepEqual(topicRunModes('control-p').modes, ['sim', 'live']);
+  assert.deepEqual(topicRunModes('control-p').modes, ['sim', 'live', 'drive']);
   assert.deepEqual(topicRunModes('launch-measure').modes, ['data']);
   assert.deepEqual(topicRunModes('launch-power').modes, ['sim']);
   assert.deepEqual(topicRunModes('lab-setup').modes, ['sim']);
@@ -90,7 +90,7 @@ test('topicRunModes matches exact keys, whole courses and falls back to the simu
 test('the brief of an experiment starts with its labels', () => {
   const content = { scene: 's', purpose: 'p', first: 'f' };
   const html = lessonBrief('control-p', content);
-  assert.ok(html.includes('class="run-mode-strip" data-run-mode="sim live"'));
+  assert.ok(html.includes('class="run-mode-strip" data-run-mode="sim live drive"'));
   assert.ok(html.indexOf('run-mode-strip') < html.indexOf('lesson-brief-scene'));
   assert.ok(html.includes('data-run-mode-target=".control-live"'));
   assert.ok(!lessonBrief('launch-power', content).includes('data-run-mode-target'));
