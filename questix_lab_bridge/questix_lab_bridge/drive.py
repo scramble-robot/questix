@@ -10,7 +10,8 @@ Rules, all enforced here and not in the page:
 * Refused while something else publishes the drive topic (the controller: two sources
   on ``/target_twist`` would alternate every tick), while no drive node subscribes to
   it, and while the emergency stop is active. A blocker that appears mid-run stops it.
-* One page drives at a time (the owner). Any page may stop it.
+* One page drives at a time (the owner). Any page may stop it (the stop bar); a page
+  ending its own run asks with ``only_own`` so it never ends another pupil's run.
 * The owner repeats its command at least every ``deadman_sec``; silence stops the robot,
   so a closed laptop or a lost Wi-Fi link cannot leave it running. So does the owner
   disconnecting, and a run longer than ``max_run_sec``.
@@ -118,8 +119,15 @@ class DriveArbiter:
         self._heard_at = now
         return None
 
-    def stop(self, client, now):
-        """Any page may stop the robot, whoever drives it."""
+    def stop(self, client, now, only_own=False):
+        """Stop the run; return whether one ended.
+
+        Any page may stop the robot, whoever drives it. With ``only_own`` the run ends only if
+        ``client`` owns it: a page whose request was refused, or whose run already ended,
+        must not stop the run another page has started since.
+        """
+        if only_own and self.owner != client:
+            return False
         if self.active:
             self._end(STOPPED, client, now)
             return True

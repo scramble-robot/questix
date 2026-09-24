@@ -6,7 +6,14 @@ questix_lab_bridge:
     # Must match LAB_BRIDGE_PORT of robot_manager (scripts/robot_manager/app.py), which allows
     # the /lab page to connect to this port, and DEFAULT_PORT in static/lab/js/live/robot-link.js.
     port: 8897
-    max_clients: 8
+    # Pages connected at once; further browsers are refused. Sized for a class: every pupil's
+    # phone or tablet (about 20) plus the teachers' laptops. Each page gets the same telemetry
+    # (latest-wins, some tens of kB/s per page with the camera off), so the Wi-Fi limits it long
+    # before the Raspberry Pi does.
+    max_clients: 24
+    # Name shown to pages and to robot_manager (hello.robot.name, GET /api/state), so a class
+    # with several robots can tell them apart. Empty = this machine's host name.
+    robot_name: ""
     # The same port also serves the QUESTiX LAB pages over plain HTTP, so learners can open
     # http://<robot-ip>:8897/ directly. Empty = find scripts/robot_manager/static/lab
     # automatically (source tree, $ROBOT_WS/src/*, /opt/questix_robot/robot_manager).

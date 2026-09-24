@@ -40,7 +40,9 @@ class LabBridgeNode(Node):
         super().__init__('questix_lab_bridge')
         host = self.declare_parameter('host', '0.0.0.0').value
         port = self.declare_parameter('port', 8897).value
-        max_clients = self.declare_parameter('max_clients', 8).value
+        max_clients = self.declare_parameter('max_clients', 24).value
+        # Shown to pages and teachers so they can tell robots apart; empty = the host name.
+        self._robot = messages.robot_identity(self.declare_parameter('robot_name', '').value)
         # Directory of the QUESTiX LAB site served over HTTP on the same port; empty = locate
         # it automatically (source tree, $ROBOT_WS, /opt/questix_robot).
         site_dir = find_lab_dir(self.declare_parameter('lab_dir', '').value)
@@ -90,14 +92,16 @@ class LabBridgeNode(Node):
 
         self._limiters = {name: messages.RateLimiter(hz) for name, hz in max_hz.items()}
         self._counts = {name: 0 for name, topic in topics.items() if topic}
+        self._rates = {}  # last status report; replaced whole, read by /api/state
         self._warned_camera_format = False
 
         streams = {name: (topic or None) for name, topic in topics.items()}
         hello = messages.encode(messages.hello_payload(
-            streams, wheel_radius, wheel_separation, self._drive.allowed))
+            streams, wheel_radius, wheel_separation, self._drive.allowed, self._robot))
         self._server = LabWebSocketServer(
             host, port, hello, max_clients, self.get_logger(), site_dir,
-            greeting=self._greeting, on_message=self._on_browser, on_disconnect=self._on_leave)
+            greeting=self._greeting, on_message=self._on_browser, on_disconnect=self._on_leave,
+            state_provider=self._state)
 
         self._drive_publisher = None
         if self._drive.allowed:
@@ -215,7 +219,7 @@ class LabBridgeNode(Node):
         now = time.monotonic()
         with self._drive_lock:
             if request[0] == 'stop':
-                if self._drive.stop(client_id, now):
+                if self._drive.stop(client_id, now, only_own=request[1] == 'mine'):
                     self._publish_twist(0.0, 0.0)
                     self.get_logger().info('drive stopped by page %d' % client_id)
             else:
@@ -231,6 +235,13 @@ class LabBridgeNode(Node):
                 if self._drive.owner == client_id and was_owner is None:
                     self.get_logger().info('page %d drives %s' % (client_id, self._drive_topic))
             self._send_drive_state(now)
+
+    def _state(self, clients, max_clients):
+        """Snapshot for GET /api/state; runs on the WebSocket thread."""
+        with self._drive_lock:
+            drive_state = self._drive.state()
+        return messages.state_payload(drive_state, self._robot, self._rates,
+                                      self._drive.allowed, clients, max_clients)
 
     def _on_leave(self, client_id):
         with self._drive_lock:
@@ -300,6 +311,7 @@ class LabBridgeNode(Node):
         rates = {name: count / _STATUS_PERIOD_SEC for name, count in self._counts.items()}
         for name in self._counts:
             self._counts[name] = 0
+        self._rates = rates
         self._server.publish('status', messages.encode(messages.status_payload(rates)))
 
     def destroy_node(self):

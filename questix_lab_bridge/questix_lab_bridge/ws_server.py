@@ -11,13 +11,19 @@ those callbacks everything a browser sends is discarded. The bridge node decides
 if anything, a message may do (drive.py): this module never drives the robot itself.
 
 Plain HTTP requests on the same port (a browser opening ``http://<robot>:8897/``) are
-answered with the QUESTiX LAB static site instead of failing the WebSocket handshake.
+answered with the QUESTiX LAB static site instead of failing the WebSocket handshake,
+except ``GET /api/state``: a JSON snapshot of the bridge (who is connected, may pages
+drive, what blocks it) for robot_manager. ``state_provider(clients, max_clients)`` builds
+it on the server thread (messages.state_payload); without one only the client counts are
+reported.
 """
 
 import asyncio
 import http
+import json
 from pathlib import Path
 import threading
+from urllib.parse import urlsplit
 
 import websockets
 
@@ -38,6 +44,8 @@ except ImportError:
 # Browsers only send short drive/stop requests, so keep their frames tiny.
 _MAX_INCOMING_BYTES = 1024
 
+STATE_PATH = '/api/state'
+
 
 def _is_websocket_upgrade(headers):
     return headers.get('Upgrade', '').lower() == 'websocket'
@@ -52,10 +60,11 @@ class _Client:
 
 class LabWebSocketServer:
 
-    def __init__(self, host, port, hello_text, max_clients=8, logger=None, site_dir=None,
-                 greeting=None, on_message=None, on_disconnect=None):
+    def __init__(self, host, port, hello_text, max_clients=24, logger=None, site_dir=None,
+                 greeting=None, on_message=None, on_disconnect=None, state_provider=None):
         """``greeting(id)`` returns text frames sent right after ``hello`` to that client."""
         self._greeting = greeting
+        self._state_provider = state_provider
         self._on_message = on_message
         self._on_disconnect = on_disconnect
         self._next_id = 1
@@ -134,14 +143,41 @@ class LabWebSocketServer:
     async def _http(self, connection, request):
         if _is_websocket_upgrade(request.headers):
             return None
-        status, headers, body = static_response(self._site_dir, request.path)
+        status, headers, body = self._http_response(request.path)
         return Response(status, http.HTTPStatus(status).phrase, Headers(headers), body)
 
     async def _http_legacy(self, path, request_headers):
         if _is_websocket_upgrade(request_headers):
             return None
-        status, headers, body = static_response(self._site_dir, path)
+        status, headers, body = self._http_response(path)
         return http.HTTPStatus(status), headers, body
+
+    def _http_response(self, target):
+        if urlsplit(target).path == STATE_PATH:
+            return self._state_response()
+        return static_response(self._site_dir, target)
+
+    def _state_response(self):
+        status = 200
+        try:
+            if self._state_provider is None:
+                state = {'clients': self.client_count, 'max_clients': self._max_clients}
+            else:
+                state = self._state_provider(self.client_count, self._max_clients)
+            body = json.dumps(state, separators=(',', ':'), allow_nan=False)
+        except Exception as error:  # noqa: B902 - reported to the caller, the server stays up
+            status = 500
+            body = json.dumps({'error': repr(error)})
+            if self._logger is not None:
+                self._logger.error('%s failed: %r' % (STATE_PATH, error))
+        headers = [
+            ('Content-Type', 'application/json'),
+            ('X-Content-Type-Options', 'nosniff'),
+            ('Cache-Control', 'no-store'),
+            # Read-only and no more than every page already receives over the WebSocket.
+            ('Access-Control-Allow-Origin', '*'),
+        ]
+        return status, headers, body.encode('utf-8')
 
     async def _handler(self, websocket):
         if len(self._clients) >= self._max_clients:

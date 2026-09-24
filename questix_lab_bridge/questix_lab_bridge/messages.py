@@ -6,7 +6,9 @@ without a ROS installation.
 
 Server to browser, text frames are JSON objects tagged by ``type``:
 
-* ``hello``  - protocol version, robot geometry, and the topic behind each stream.
+* ``hello``  - protocol version, ``read_only``, ``robot`` (``name``: the robot_name parameter
+  or the host name; ``domain``: ROS_DOMAIN_ID as an int, ``null`` when unset), robot
+  geometry, and the topic behind each stream.
 * ``session`` - the id this connection has on the bridge (``drive_state.owner`` uses it).
 * ``drive_state`` - whether a page may drive the robot now and why not, who drives it,
   the limits, and why the last run ended (drive.DriveArbiter.state). A page whose request
@@ -25,7 +27,13 @@ Browser to server (only when the bridge runs with ``allow_drive``; otherwise ign
 
 * ``{"type": "drive", "linear": v, "angular": w}`` - drive at v [m/s], w [rad/s]. Also the
   heartbeat: the owner repeats it, and silence stops the robot (drive.py).
-* ``{"type": "stop"}`` - stop the robot, whichever page drives it.
+* ``{"type": "stop"}`` - stop the robot, whichever page drives it (the stop bar).
+* ``{"type": "stop", "scope": "mine"}`` - stop the run only if this page owns it; a page
+  ending its own experiment sends this so it cannot end another pupil's run. Any other
+  ``scope`` value is treated as a plain stop.
+
+Plain HTTP ``GET /api/state`` on the same port returns ``state_payload`` as JSON (see
+ws_server.py), for robot_manager and for anyone checking the bridge without a WebSocket.
 
 scripts/robot_manager/static/lab/js/live/rosbag-core.js ports the scan/odom/drive/twist
 conversions below so the lab can read a rosbag into the same payloads; change both together.
@@ -33,6 +41,8 @@ conversions below so the lab can read a rosbag into the same payloads; change bo
 
 import json
 import math
+import os
+import socket
 
 PROTOCOL_VERSION = 1
 
@@ -51,12 +61,27 @@ def _finite(value, digits):
     return round(value, digits) if math.isfinite(value) else None
 
 
-def hello_payload(streams, wheel_radius, wheel_separation, drive_allowed=False):
-    """Describe the bridge to a newly connected browser."""
+def robot_identity(name='', environ=None):
+    """Return ``{name, domain}``: which robot this bridge runs on, for pages and teachers.
+
+    ``name`` falls back to the host name. ``domain`` is ROS_DOMAIN_ID as an int, or None when
+    it is unset or not a number (ROS then uses domain 0).
+    """
+    environ = os.environ if environ is None else environ
+    try:
+        domain = int(environ.get('ROS_DOMAIN_ID', '').strip())
+    except ValueError:
+        domain = None
+    return {'name': name or socket.gethostname(), 'domain': domain}
+
+
+def hello_payload(streams, wheel_radius, wheel_separation, drive_allowed=False, robot=None):
+    """Describe the bridge to a newly connected browser; ``robot`` is robot_identity()."""
     return {
         'type': 'hello',
         'protocol': PROTOCOL_VERSION,
         'read_only': not drive_allowed,
+        'robot': robot if robot is not None else robot_identity(),
         'config': {'wheel_radius': wheel_radius, 'wheel_separation': wheel_separation},
         'streams': streams,
     }
@@ -158,8 +183,27 @@ def drive_state_payload(state):
     return {'type': 'drive_state', **state}
 
 
+def state_payload(drive_state, robot, rates, drive_allowed, clients, max_clients):
+    """Body of ``GET /api/state``: the bridge as robot_manager and teachers need to see it.
+
+    ``drive_state`` is DriveArbiter.state(), ``rates`` the last status report [Hz].
+    """
+    return {
+        'protocol': PROTOCOL_VERSION,
+        'read_only': not drive_allowed,
+        'robot': robot,
+        'clients': clients,
+        'max_clients': max_clients,
+        'drive_state': drive_state,
+        'rates': {name: round(hz, 1) for name, hz in rates.items()},
+    }
+
+
 def parse_request(text):
-    """Decode a browser frame into ``('drive', linear, angular)``, ``('stop',)`` or None.
+    """Decode a browser frame into ``('drive', linear, angular)``, ``('stop', scope)`` or None.
+
+    ``scope`` is ``'mine'`` (stop only a run this page owns) or ``'any'`` (stop any run; also
+    for a missing or unknown scope, so a malformed stop still stops).
 
     Anything else (binary frames, other types, broken JSON) is None and ignored. Values are
     passed on unchecked; DriveArbiter.request refuses what is not a finite number.
@@ -173,7 +217,7 @@ def parse_request(text):
     if not isinstance(message, dict):
         return None
     if message.get('type') == 'stop':
-        return ('stop',)
+        return ('stop', 'mine' if message.get('scope') == 'mine' else 'any')
     if message.get('type') == 'drive':
         return ('drive', message.get('linear'), message.get('angular'))
     return None

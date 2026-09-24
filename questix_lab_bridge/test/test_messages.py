@@ -100,13 +100,47 @@ def test_hello_is_not_read_only_when_driving_is_allowed():
 
 
 def test_parse_request():
-    assert messages.parse_request('{"type":"stop"}') == ('stop',)
+    assert messages.parse_request('{"type":"stop"}') == ('stop', 'any')
+    assert messages.parse_request('{"type":"stop","scope":"mine"}') == ('stop', 'mine')
+    # A stop with a scope the bridge does not know still stops.
+    assert messages.parse_request('{"type":"stop","scope":"everything"}') == ('stop', 'any')
+    assert messages.parse_request('{"type":"stop","scope":null}') == ('stop', 'any')
     assert messages.parse_request('{"type":"drive","linear":0.1,"angular":-0.2}') == (
         'drive', 0.1, -0.2)
     # Missing values are passed on as None; the arbiter refuses them.
     assert messages.parse_request('{"type":"drive"}') == ('drive', None, None)
     for ignored in ('not json', '[1]', '{"type":"cmd_vel"}', b'{"type":"stop"}', '"stop"'):
         assert messages.parse_request(ignored) is None
+
+
+def test_robot_identity_names_the_robot_and_its_domain():
+    assert messages.robot_identity('questix-3', {'ROS_DOMAIN_ID': '7'}) == {
+        'name': 'questix-3', 'domain': 7}
+    identity = messages.robot_identity('', {})
+    assert identity['name'] and identity['domain'] is None
+    assert messages.robot_identity('a', {'ROS_DOMAIN_ID': ' '})['domain'] is None
+    assert messages.robot_identity('a', {'ROS_DOMAIN_ID': 'x'})['domain'] is None
+
+
+def test_hello_carries_the_robot_identity():
+    robot = {'name': 'questix-3', 'domain': 7}
+    hello = messages.hello_payload({}, 0.1, 0.5, robot=robot)
+    assert hello['robot'] == robot
+    default = messages.hello_payload({}, 0.1, 0.5)['robot']
+    assert set(default) == {'name', 'domain'} and default['name']
+    messages.encode(hello)
+
+
+def test_state_payload():
+    state = messages.state_payload(
+        {'allowed': True, 'blockers': []}, {'name': 'r', 'domain': None},
+        {'scan': 4.96, 'odom': 20.0}, True, 3, 24)
+    assert state == {
+        'protocol': messages.PROTOCOL_VERSION, 'read_only': False,
+        'robot': {'name': 'r', 'domain': None}, 'clients': 3, 'max_clients': 24,
+        'drive_state': {'allowed': True, 'blockers': []},
+        'rates': {'scan': 5.0, 'odom': 20.0}}
+    assert messages.state_payload({}, {}, {}, False, 0, 24)['read_only'] is True
 
 
 def test_session_and_drive_state_payloads():

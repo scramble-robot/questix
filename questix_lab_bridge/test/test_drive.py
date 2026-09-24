@@ -58,6 +58,22 @@ def test_one_owner_at_a_time_but_anyone_can_stop():
     assert arbiter.request(2, 0.2, 0.0, 0.3) is None
 
 
+def test_stop_only_own_ends_only_the_senders_run():
+    arbiter = ready_arbiter()
+    arbiter.request(1, 0.1, 0.0, 0.0)
+    # Page 2 was refused (busy) and ends "its" experiment: page 1 keeps driving.
+    assert arbiter.request(2, 0.1, 0.0, 0.1) == drive.BUSY
+    assert not arbiter.stop(2, 0.2, only_own=True)
+    assert arbiter.active and arbiter.owner == 1
+    assert arbiter.tick(0.25) == (0.1, 0.0)
+    # The owner itself may end it that way.
+    assert arbiter.stop(1, 0.3, only_own=True)
+    assert arbiter.last_stop == {'reason': drive.STOPPED, 'by': 1}
+    # Nothing runs: nothing to stop, whatever the scope.
+    assert not arbiter.stop(1, 0.4, only_own=True)
+    assert not arbiter.stop(2, 0.4)
+
+
 def test_silence_stops_the_robot_then_zero_is_held_briefly():
     arbiter = ready_arbiter()
     arbiter.request(1, 0.2, 0.0, 0.0)

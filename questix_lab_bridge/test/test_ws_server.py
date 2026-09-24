@@ -1,5 +1,6 @@
 import asyncio
 import json
+import threading
 
 import pytest
 
@@ -136,6 +137,54 @@ def test_client_ids_messages_and_disconnect_reach_the_callbacks():
         assert sorted(left) == sorted([first_id, second_id])
     try:
         asyncio.run(scenario())
+    finally:
+        instance.stop()
+
+
+def test_state_endpoint_reports_the_bridge_and_counts_clients():
+    threads = []
+
+    def provider(clients, max_clients):
+        threads.append(threading.current_thread().name)
+        return {'read_only': False, 'clients': clients, 'max_clients': max_clients,
+                'drive_state': {'blockers': [{'code': 'emergency_stop', 'nodes': None}]}}
+    instance = LabWebSocketServer('127.0.0.1', 0, '{"type":"hello"}', max_clients=5,
+                                  state_provider=provider)
+    instance.start()
+    try:
+        status, content_type, body = _http_get(instance.port, '/api/state')
+        assert (status, content_type) == (200, 'application/json')
+        assert json.loads(body) == {
+            'read_only': False, 'clients': 0, 'max_clients': 5,
+            'drive_state': {'blockers': [{'code': 'emergency_stop', 'nodes': None}]}}
+
+        async def scenario():
+            async with websockets.connect('ws://127.0.0.1:%d' % instance.port) as client:
+                assert json.loads(await client.recv()) == {'type': 'hello'}
+                await _wait_for_clients(instance, 1)
+                reply = await asyncio.get_running_loop().run_in_executor(
+                    None, _http_get, instance.port, '/api/state?t=1')
+                return json.loads(reply[2])
+        assert asyncio.run(scenario())['clients'] == 1
+        # Built on the server thread; the node takes its own lock inside the provider.
+        assert threads and set(threads) == {'lab_bridge_ws'}
+    finally:
+        instance.stop()
+
+
+def test_state_endpoint_without_a_provider_or_with_a_failing_one(server):
+    status, content_type, body = _http_get(server.port, '/api/state')
+    assert status == 200 and json.loads(body) == {'clients': 0, 'max_clients': 1}
+
+    def explode(clients, max_clients):
+        raise RuntimeError('boom')
+    instance = LabWebSocketServer('127.0.0.1', 0, '{}', state_provider=explode)
+    instance.start()
+    try:
+        status, content_type, body = _http_get(instance.port, '/api/state')
+        assert status == 500 and 'boom' in json.loads(body)['error']
+        # Everything else keeps working.
+        assert _http_get(instance.port, '/')[0] == 404
     finally:
         instance.stop()
 
