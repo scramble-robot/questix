@@ -19,6 +19,7 @@ import {
   TEST_PLACES,
 } from './experiment.js';
 import { labPage } from './lab-view.js';
+import { stickyRange } from './curve-core.js';
 
 // Reinforcement-learning lab: state and behaviour. lab-view.js turns the model into markup,
 // core/renderer.js and sensors.js draw the figures, experiment.js runs the training and the test
@@ -81,6 +82,7 @@ let speed = 1;
 let runRewardsOpen = false;
 
 let trainProgress = null;
+let chartRanges = {}; // per metric: the y range of the training chart so far (stickyRange)
 let chartMetric = 'rate'; // the guide asks learners to read the arrival rate first
 const briefVisits = new Map(); // how often each stage's guide text has been reached
 let briefKey = null;
@@ -159,9 +161,15 @@ function sceneNextLabel() {
 function trainingModel() {
   const progress = trainProgress || {};
   const checkpoints = progress.checkpoints || [];
+  const history = progress.history || [];
+  chartRanges[chartMetric] = stickyRange(
+    chartRanges[chartMetric],
+    history.map((point) => point[chartMetric]),
+  );
   return {
     episodes: progress.episodes || 0,
-    history: progress.history || [],
+    history,
+    yRange: chartRanges[chartMetric] || [],
     checkpoints,
     checkpointResults: checkpoints.map((checkpoint) => resultName(checkpoint.result)),
     metricKey: chartMetric,
@@ -588,6 +596,7 @@ function openLab(task = 'delivery', course = 'standard') {
   stage = openingStage();
   resetWorld();
   trainProgress = experiment.run;
+  chartRanges = {};
   update({ fresh: true });
 }
 
@@ -636,6 +645,7 @@ async function startTraining() {
   playback = null;
   playing = false;
   trainProgress = { episodes: 0, history: [], checkpoints: [] };
+  chartRanges = {};
   update({ fresh: true });
   revealTraining();
   const currentToken = ++token;

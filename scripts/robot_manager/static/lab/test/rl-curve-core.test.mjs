@@ -5,7 +5,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { blockMeans, blockPoints, curveLayout, rewardCurveLayout } from '../js/rl/curve-core.js';
+import {
+  blockMeans,
+  blockPoints,
+  curveLayout,
+  rewardCurveLayout,
+  stickyRange,
+} from '../js/rl/curve-core.js';
 import {
   IntroLearner,
   introRandom,
@@ -119,4 +125,15 @@ test('a run that only spins is counted in whole turns and shows every turn on th
   ];
   assert.equal(introTurns(straight), 0.25);
   assert.deepEqual(turnsInPlace(straight), [straight[2]]);
+});
+
+test('a sticky range never shrinks and grows past a new extreme with headroom', () => {
+  assert.equal(stickyRange(undefined, []), undefined);
+  assert.deepEqual(stickyRange(undefined, [2, 5, null]), [2, 5]);
+  const range = [0, 10];
+  assert.equal(stickyRange(range, [3, 7]), range);
+  assert.deepEqual(stickyRange(range, [12]), [0, 18]);
+  assert.deepEqual(stickyRange(range, [-2, 4]), [-8, 10]);
+  // Values shrinking back (arrival time falling while it learns) keep the axis where it was.
+  assert.deepEqual(stickyRange([4, 20], [6, 5]), [4, 20]);
 });

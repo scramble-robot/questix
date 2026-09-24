@@ -99,6 +99,27 @@ function curveLayout({ series, xMax, yRange = [], yInteger = false, yMin, yMax, 
   };
 }
 
+const RANGE_HEADROOM = 0.5; // share of the span added past a value that left the range
+
+/**
+ * The y range `[low, high]` a chart keeps while a run is still adding values it cannot know in
+ * advance (a score, a time): it never shrinks, and when a value falls outside it grows past that
+ * value by half its span, so the axis moves a few times per run instead of with every point.
+ */
+function stickyRange(range, values) {
+  const known = values.filter(finite);
+  if (!known.length) return range;
+  const lowest = Math.min(...known);
+  const highest = Math.max(...known);
+  if (!range) return [lowest, highest];
+  let [low, high] = range;
+  if (lowest >= low && highest <= high) return range;
+  const span = Math.max(highest, high) - Math.min(lowest, low) || Math.abs(highest) || 1;
+  if (lowest < low) low = lowest - span * RANGE_HEADROOM;
+  if (highest > high) high = highest + span * RANGE_HEADROOM;
+  return [low, high];
+}
+
 const REWARD_BLOCK = 50; // training runs averaged into one point of a reward curve
 
 /**
@@ -117,4 +138,12 @@ function rewardCurveLayout(lines, total, yRange) {
   });
 }
 
-export { PLOT_UNITS, REWARD_BLOCK, blockMeans, blockPoints, curveLayout, rewardCurveLayout };
+export {
+  PLOT_UNITS,
+  REWARD_BLOCK,
+  blockMeans,
+  blockPoints,
+  curveLayout,
+  rewardCurveLayout,
+  stickyRange,
+};

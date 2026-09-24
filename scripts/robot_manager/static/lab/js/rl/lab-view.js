@@ -240,7 +240,8 @@ function checkpointCard(model, copy, index, actions) {
 }
 
 // The learning curve of the metric on screen. The arrival rate always spans 0–100 %; the other
-// metrics take their axis from the values so far (their range is not known before training).
+// metrics cannot be known before training, so lab.js keeps a range that only grows, with headroom
+// (stickyRange): the axis stays put for most of the run instead of rescaling with every point.
 function learningChart(model, copy) {
   const training = model.training;
   const metric = training.metric;
@@ -252,7 +253,7 @@ function learningChart(model, copy) {
   const layout = curveLayout({
     series: [{ role: 'actual', label: metric.name, points }],
     xMax: TOTAL_EPISODES,
-    yRange: rate ? [0, PERCENT] : [],
+    yRange: rate ? [0, PERCENT] : training.yRange,
     yMax: rate ? PERCENT : undefined,
     yPadding: rate ? 0 : undefined,
   });
