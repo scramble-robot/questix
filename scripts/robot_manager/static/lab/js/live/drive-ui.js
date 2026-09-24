@@ -111,7 +111,8 @@ async function hold(move) {
       ? `${bench.linear.toFixed(2)} m/s`
       : `${bench.angular.toFixed(2)} rad/s`,
     ended: bench.note,
-    reason: result.reason,
+    // Letting go of the button is how a bench move is meant to end.
+    reason: result.reason === 'stopped' ? 'done' : result.reason,
     robot: liveLink().robot?.name ?? '',
     cut: Boolean(recording.cut),
     recording,

@@ -70,10 +70,13 @@ state, which stream is missing, record / stop, open / save.
 - Derive numbers from the message stamps (`pairByStamp`), never from arrival order: a reopened file
   or a rosbag must give the same result as the live recording.
 - Only `js/live/drive-link.js` sends frames to the robot. A lesson that drives passes
-  `drive: { plan, program, startLabel }` to `createLiveSession` (see its doc comment): `plan()`
-  returns a `controller(elapsed, robot)` built from `js/live/drive-core.js` (programs, odometry
-  goals) or a DOM-free module of the course (`js/control/live-drive.js`), and the shared block
-  shows the checklist, the safety tick and the stop button. Never bypass the bridge's checks from the
+  `drive: { plan, program, placement, conditions, startLabel }` to `createLiveSession` (see its doc
+  comment): `plan()` returns a `controller(elapsed, robot)` built from `js/live/drive-core.js`
+  (programs, odometry goals) or a DOM-free module of the course (`js/control/live-drive.js`), plus
+  optional `outcome()` and chart `references`; `placement()` is its own line (how much room, where
+  to put the robot), `conditions()` a few words for the run history. The shared block shows one
+  learner reason at a time, folds the teacher's details, and puts the result under the button.
+  A run's own stop is scoped to the page (`scope: 'mine'`); only the stop bar stops any run. Never bypass the bridge's checks from the
   page, and give a closed-loop controller its own guards (stale sensor → stand still, minimum
   distance → throw an Error with the learner's sentence). Declare the topic's `drive` run mode in
   `content/shell/run-modes.json` and put `runModeBadgeHtml('drive')` in the block's heading.
