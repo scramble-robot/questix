@@ -1,9 +1,13 @@
-"""QUESTiX LAB console: run the read-only lab bridge from robot_manager.
+"""QUESTiX LAB console: run the lab bridge from robot_manager.
 
 robot_manager itself only listens on 127.0.0.1 (its API controls the robot service without
 authentication), so learners' devices cannot open ``/lab/`` here. The ``questix_lab_bridge``
-node can: it serves the same teaching pages on the LAN and mirrors robot telemetry to them,
-observation only. This module starts and stops that node so nobody has to type ``ros2 launch``.
+node can: it serves the same teaching pages on the LAN and mirrors robot telemetry to them.
+This module starts and stops that node so nobody has to type ``ros2 launch``.
+
+The bridge is observation only unless ``ALLOW_DRIVE`` is on (``/api/lab/drive``, off by
+default and turned off by competition mode): then pages may run low-speed driving experiments,
+under the bridge's own checks (questix_lab_bridge/questix_lab_bridge/drive.py).
 """
 
 import logging
@@ -43,6 +47,10 @@ _DEFAULT_CONFIG = {
     # the pages without anyone pressing 配信開始 first. On by default for classes; switching to
     # competition mode turns it off (disable_for_competition), and it never starts in that mode.
     "AUTOSTART": "true",
+    # "true": the bridge may publish /target_twist for the lessons' driving experiments. Off by
+    # default; a person at the robot turns it on for a class (/api/lab/drive), and competition
+    # mode turns it off again. Changed only through set_drive, never by the settings form.
+    "ALLOW_DRIVE": "false",
 }
 _ABS_PATH_RE = re.compile(r"^/[a-zA-Z0-9_/.~-]*$")
 _TOPIC_RE = re.compile(r"^/[A-Za-z0-9_/]*$")
@@ -56,6 +64,12 @@ _lock = threading.Lock()
 _proc: Optional[subprocess.Popen] = None
 _started_at: Optional[float] = None
 _last_stop_reason: Optional[str] = None
+# Whether the running bridge was started with allow_drive (lab.env may have changed since).
+_started_allow_drive = False
+
+
+class DriveRequest(BaseModel):
+    allow: bool
 
 
 class LabConfig(BaseModel):
@@ -131,6 +145,8 @@ def _build_command(config: dict[str, str]) -> str:
     ]
     if camera_topic:  # an empty value would be an rcl parse error, and empty is the default
         args += ["-p", f"camera_topic:={camera_topic}"]
+    if config.get("ALLOW_DRIVE") == "true":
+        args += ["-p", "allow_drive:=true"]
     return (
         "source /opt/ros/jazzy/setup.bash && "
         f'source "{robot_ws}/install/setup.bash" 2>/dev/null; '
@@ -203,6 +219,7 @@ def _status_payload() -> dict:
         _last_stop_reason = "exited"
     # A bridge started by hand (ros2 launch) is reported, but not ours to stop.
     external = not managed and _port_in_use()
+    config = _read_config()
     return {
         "running": managed,
         "external": external,
@@ -210,7 +227,10 @@ def _status_payload() -> dict:
         "urls": [f"http://{a}:{LAB_BRIDGE_PORT}/" for a in _lan_addresses()],
         "elapsed_sec": int(time.time() - _started_at) if managed and _started_at else 0,
         "last_stop_reason": _last_stop_reason,
-        "config": _read_config(),
+        "config": config,
+        # What lab.env asks for, and what the running bridge actually does (null: not ours).
+        "drive_allowed": config.get("ALLOW_DRIVE") == "true",
+        "drive_running": _started_allow_drive if managed else None,
     }
 
 
@@ -223,7 +243,7 @@ def get_status():
 @router.post("/start")
 def start_bridge():
     """Start the read-only bridge (teaching pages + telemetry on the LAN)."""
-    global _proc, _started_at, _last_stop_reason
+    global _proc, _started_at, _last_stop_reason, _started_allow_drive
     with _lock:
         if _proc is not None and _proc.poll() is None:
             raise HTTPException(status_code=409, detail="教材の配信は既に動いています")
@@ -234,7 +254,12 @@ def start_bridge():
             )
         if not (LAB_DIR / "index.html").is_file():
             raise HTTPException(status_code=500, detail="教材のファイルが見つかりません")
-        script = _build_command(_read_config())
+        config = _read_config()
+        if _competition_mode() and config.get("ALLOW_DRIVE") == "true":
+            # lab.env may have been edited by hand; a competition robot never takes lab commands.
+            config["ALLOW_DRIVE"] = "false"
+            _write_config(config)
+        script = _build_command(config)
         try:
             proc = subprocess.Popen(
                 ["bash", "-lc", script],
@@ -258,6 +283,7 @@ def start_bridge():
         _proc = proc
         _started_at = time.time()
         _last_stop_reason = None
+        _started_allow_drive = config.get("ALLOW_DRIVE") == "true"
         return _status_payload()
 
 
@@ -277,8 +303,31 @@ def set_config(config: LabConfig):
         key: (str(value).lower() if isinstance(value, bool) else value)
         for key, value in config.model_dump().items()
     }
-    _write_config(values)
+    _write_config({**_read_config(), **values})  # keeps ALLOW_DRIVE as it is
     return values
+
+
+@router.post("/drive")
+def set_drive(request: DriveRequest):
+    """Allow or forbid the lessons' driving experiments, and restart our bridge to apply it.
+
+    A bridge this manager runs is restarted at once, so the switch never says one thing while
+    the bridge does another. A bridge started by hand keeps its own parameters (the status
+    reports drive_running = null for it).
+    """
+    if request.allow and _competition_mode():
+        raise HTTPException(status_code=409, detail="大会モードでは教材から走行させられません")
+    config = _read_config()
+    config["ALLOW_DRIVE"] = "true" if request.allow else "false"
+    _write_config(config)
+    with _lock:
+        running = _proc is not None and _proc.poll() is None
+        if running:
+            _stop_locked("drive_setting")
+    if running:
+        start_bridge()
+    with _lock:
+        return _status_payload()
 
 
 def disable_for_competition() -> None:
@@ -286,11 +335,14 @@ def disable_for_competition() -> None:
 
     Competition runs must not stream telemetry to the LAN: automatic start is turned off in
     lab.env (the checkbox shows it) and a bridge this manager started is stopped. Switching back
-    to practice mode turns both on again (enable_for_practice).
+    to practice mode turns both on again (enable_for_practice). Driving from the lessons
+    (ALLOW_DRIVE) is turned off too, and is not turned back on by practice mode.
     """
     config = _read_config()
-    if config.get("AUTOSTART") != "false":
-        _write_config({**config, "AUTOSTART": "false"})
+    if config.get("AUTOSTART") != "false" or config.get("ALLOW_DRIVE") != "false":
+        # Driving from the lessons stays off after returning to practice: someone at the robot
+        # turns it on again deliberately.
+        _write_config({**config, "AUTOSTART": "false", "ALLOW_DRIVE": "false"})
     with _lock:
         if _proc is not None and _proc.poll() is None:
             _stop_locked("competition_mode")

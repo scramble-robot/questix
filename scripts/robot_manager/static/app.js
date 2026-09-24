@@ -639,6 +639,7 @@ async function refreshLabStatus() {
 
   document.getElementById("lab-start").disabled = serving;
   document.getElementById("lab-stop").disabled = !data.running;
+  showLabDrive(data);
   if (!labConfigLoaded) {
     document.getElementById("lab-camera").value = data.config.CAMERA_TOPIC || "";
     document.getElementById("lab-autostart").checked = data.config.AUTOSTART === "true";
@@ -694,7 +695,50 @@ function renderJoinQr() {
   }
 }
 
+// "教材からの走行": what lab.env allows, and what the running bridge does. Allowed is shown in
+// orange on the card and the tab, so nobody forgets to switch it back after a class.
+function showLabDrive(data) {
+  const allowed = data.drive_allowed;
+  const applied = data.drive_running;
+  const indicator = document.getElementById("lab-drive-indicator");
+  indicator.className = "rec-indicator " + (allowed ? "driving" : "idle");
+  document.getElementById("lab-drive-state").textContent = allowed
+    ? applied === false
+      ? "許可 (配信を開始し直すと反映されます)"
+      : "許可中"
+    : applied
+      ? "禁止 (配信を開始し直すと反映されます)"
+      : "禁止";
+  document.getElementById("lab-drive-card").classList.toggle("allowed", allowed);
+  document.getElementById("lab-drive-warning").hidden = !allowed;
+  document.getElementById("tab-lab-dot").classList.toggle("driving", allowed);
+  document.getElementById("lab-drive-allow").disabled = allowed;
+  document.getElementById("lab-drive-forbid").disabled = !allowed;
+}
+
+async function setLabDrive(allow) {
+  if (
+    allow &&
+    !confirm(
+      "教材からロボットを動かせるようにします。\n" +
+        "ロボットはコントローラーなし（enable_controller:=false）で起動しましたか？\n" +
+        "周りに人や物がないことを確かめましたか？",
+    )
+  ) {
+    return;
+  }
+  try {
+    await api("/api/lab/drive", { method: "POST", body: JSON.stringify({ allow }) });
+    toast(allow ? "教材からの走行を許可しました" : "教材からの走行を禁止しました", "success");
+  } catch {
+    // already toasted
+  }
+  await refreshLabStatus();
+}
+
 function setupLabEvents() {
+  document.getElementById("lab-drive-allow").addEventListener("click", () => setLabDrive(true));
+  document.getElementById("lab-drive-forbid").addEventListener("click", () => setLabDrive(false));
   document.getElementById("lab-start").addEventListener("click", async () => {
     try {
       await api("/api/lab/start", { method: "POST" });
@@ -759,7 +803,7 @@ function setupEvents() {
       });
       toast(
         newMode === "competition"
-          ? `モードを ${label} に変更しました（教材の配信と自動開始はオフにしました）`
+          ? `モードを ${label} に変更しました（教材の配信・自動開始・走行の許可はオフにしました）`
           : `モードを ${label} に変更しました（教材の配信を開始します）`,
         "success",
       );

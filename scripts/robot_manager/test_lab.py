@@ -40,7 +40,8 @@ def test_invalid_workspace_is_rejected(lab, tmp_path):
 def test_config_round_trip_and_validation(lab):
     assert lab.set_config(lab.LabConfig(CAMERA_TOPIC=" /cam/compressed ")) == {
         "CAMERA_TOPIC": "/cam/compressed", "AUTOSTART": "true"}
-    assert lab._read_config() == {"CAMERA_TOPIC": "/cam/compressed", "AUTOSTART": "true"}
+    assert lab._read_config() == {
+        "CAMERA_TOPIC": "/cam/compressed", "AUTOSTART": "true", "ALLOW_DRIVE": "false"}
     lab.set_config(lab.LabConfig(AUTOSTART=False))
     assert lab._read_config()["AUTOSTART"] == "false"
     with pytest.raises(ValueError):
@@ -79,10 +80,13 @@ def test_competition_mode_turns_autostart_off_and_stops_the_bridge(lab, monkeypa
     monkeypatch.setattr(lab.os, "getpgid", lambda pid: pid)
     monkeypatch.setattr(lab.os, "killpg", lambda pgid, sig: signals.append((pgid, sig)))
     lab.set_config(lab.LabConfig(CAMERA_TOPIC="/cam/compressed", AUTOSTART=True))
+    lab.set_drive(lab.DriveRequest(allow=True))
     lab._proc = _FakeProcess()
     lab.disable_for_competition()
     assert signals == [(_FakeProcess.pid, lab.signal.SIGINT)]
-    assert lab._read_config() == {"CAMERA_TOPIC": "/cam/compressed", "AUTOSTART": "false"}
+    # Driving from the lessons is switched off with the stream.
+    assert lab._read_config() == {
+        "CAMERA_TOPIC": "/cam/compressed", "AUTOSTART": "false", "ALLOW_DRIVE": "false"}
     status = lab.get_status()
     assert status["running"] is False and status["last_stop_reason"] == "competition_mode"
     lab.disable_for_competition()  # nothing running, already off: no error
@@ -127,7 +131,9 @@ def test_practice_mode_turns_autostart_back_on_and_starts_the_bridge(lab, monkey
     monkeypatch.setattr(lab, "_port_in_use", lambda: False)
     lab.set_config(lab.LabConfig(CAMERA_TOPIC="/cam/compressed", AUTOSTART=False))
     lab.enable_for_practice()
-    assert lab._read_config() == {"CAMERA_TOPIC": "/cam/compressed", "AUTOSTART": "true"}
+    # Driving stays off: it is turned on deliberately, never by a mode switch.
+    assert lab._read_config() == {
+        "CAMERA_TOPIC": "/cam/compressed", "AUTOSTART": "true", "ALLOW_DRIVE": "false"}
     assert started == [True]
 
 
@@ -171,3 +177,42 @@ def test_manager_lifespan_starts_and_stops_the_lab_console(lab, monkeypatch):
 
     asyncio.run(run())
     assert calls == ["startup", "shutdown"]
+
+
+def test_drive_is_off_by_default_and_passed_only_when_allowed(lab):
+    assert lab.get_status()["drive_allowed"] is False
+    assert "allow_drive" not in lab._build_command(lab._read_config())
+    lab.set_drive(lab.DriveRequest(allow=True))
+    assert "-p allow_drive:=true" in lab._build_command(lab._read_config())
+    # The settings form does not touch it.
+    lab.set_config(lab.LabConfig(CAMERA_TOPIC="/cam/compressed"))
+    assert lab._read_config()["ALLOW_DRIVE"] == "true"
+
+
+def test_drive_switch_restarts_our_bridge_so_it_applies_at_once(lab, monkeypatch):
+    signals = []
+    monkeypatch.setattr(lab.os, "getpgid", lambda pid: pid)
+    monkeypatch.setattr(lab.os, "killpg", lambda pgid, sig: signals.append((pgid, sig)))
+    started = []
+
+    def fake_start():
+        started.append(lab._read_config()["ALLOW_DRIVE"])
+        lab._proc = _FakeProcess()
+        lab._started_allow_drive = lab._read_config()["ALLOW_DRIVE"] == "true"
+    monkeypatch.setattr(lab, "start_bridge", fake_start)
+    lab.set_drive(lab.DriveRequest(allow=True))
+    assert started == []  # not running: only the setting changes
+    lab._proc = _FakeProcess()
+    status = lab.set_drive(lab.DriveRequest(allow=False))
+    assert signals == [(_FakeProcess.pid, lab.signal.SIGINT)]
+    assert started == ["false"]
+    assert status["drive_allowed"] is False and status["drive_running"] is False
+
+
+def test_drive_cannot_be_allowed_in_competition_mode(lab, tmp_path):
+    (tmp_path / "mode").write_text("competition\n")
+    with pytest.raises(HTTPException) as error:
+        lab.set_drive(lab.DriveRequest(allow=True))
+    assert error.value.status_code == 409
+    assert lab._read_config()["ALLOW_DRIVE"] == "false"
+    lab.set_drive(lab.DriveRequest(allow=False))  # forbidding is always possible

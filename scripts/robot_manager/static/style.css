@@ -105,6 +105,45 @@ header h1 {
   user-select: all;
 }
 
+/* 教材からの走行: allowed is a state to notice and switch back, so it is orange, not green */
+.rec-indicator.driving {
+  color: var(--orange);
+}
+
+.rec-indicator.driving .rec-dot,
+.tab-dot.driving {
+  background: var(--orange);
+  box-shadow: 0 0 8px var(--orange);
+}
+
+.lab-drive.allowed {
+  border: 2px solid var(--orange);
+}
+
+.lab-drive-steps {
+  font-size: 0.85rem;
+  line-height: 1.7;
+  margin: 0 0 0.9rem 1.2rem;
+}
+
+.lab-drive-command {
+  display: block;
+  margin: 0.3rem 0;
+  padding: 0.4rem 0.6rem;
+  background: var(--bg-input);
+  border-radius: 6px;
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.lab-drive-warning {
+  font-size: 0.85rem;
+  line-height: 1.7;
+  color: var(--orange);
+  margin: 0 0 0.9rem;
+}
+
 .lab-open {
   text-decoration: none;
   display: inline-flex;
