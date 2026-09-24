@@ -14,7 +14,7 @@ import { missingInRecording, recordingSummary } from './recording-core.js';
 import { captureCopy } from './live-view.js';
 import { driveModel, onDrive, confirmDriveSafety, runDrive } from './drive-link.js';
 import { driveEndedText, driveCopy } from './drive-view.js';
-import { addDriveRun, driveRun, saveDriveRun } from './drive-history.js';
+import { addDriveRun, driveRun, saveDriveRun, isEmptyRun } from './drive-history.js';
 
 // The state behind one `liveCaptureControls` block: recording from the robot, opening a saved
 // recording or a rosbag, saving the one on screen, and bringing it back after a reload. A lesson
@@ -29,15 +29,6 @@ import { addDriveRun, driveRun, saveDriveRun } from './drive-history.js';
 const DRIVE_PROGRESS_MS = 250;
 const DEFAULT_TAIL_SECONDS = 1.5;
 const sleep = (seconds) => new Promise((resolve) => setTimeout(resolve, seconds * 1000));
-const MOVING_COMMAND = 1e-3; // m/s or rad/s: a smaller command is a stop
-
-// Whether the page actually told the robot to move during the recording (its own commands are on
-// /target_twist, which the bridge mirrors back).
-function commanded(recording) {
-  return (recording.streams.twist ?? []).some(
-    (twist) => Math.abs(twist.linear) > MOVING_COMMAND || Math.abs(twist.angular) > MOVING_COMMAND,
-  );
-}
 
 const streamList = (streams) =>
   streams.map((name) => captureCopy.streamNames[name] ?? name).join('と');
@@ -223,7 +214,7 @@ function createLiveSession(options) {
 
   function finishRun(result, recording, plan) {
     const ended = driveEndedText(result);
-    if (!result.started || recording instanceof Error || !commanded(recording)) {
+    if (!result.started || recording instanceof Error || isEmptyRun(recording)) {
       session.driveNote = ended;
       return;
     }

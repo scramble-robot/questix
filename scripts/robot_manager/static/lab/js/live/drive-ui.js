@@ -18,8 +18,14 @@ import {
   saveDriveRun,
   clearDriveRuns,
   onDriveRuns,
+  isEmptyRun,
 } from './drive-history.js';
-import { driveReportView, driveRunLabel, reportCopy } from './drive-report-view.js';
+import {
+  driveReportView,
+  driveHistoryList,
+  reportCopy,
+  compareLimit,
+} from './drive-report-view.js';
 
 // The pieces of the driving experiments that belong to no lesson:
 // - the stop bar, fixed at the bottom of every page while the robot drives on a lesson's command —
@@ -46,6 +52,7 @@ const BENCH_MOVES = [
 const bench = { ...BENCH_DEFAULTS, held: null, abort: null, note: '' };
 let selectedRun = null; // id of the run whose report the dialog shows; null = the newest
 let newestRun = null; // id of the newest run seen, so a new run (from any block) is shown at once
+let comparedRuns = []; // ids ticked to be drawn over the shown report (at most compareLimit)
 
 // --- stop bar --------------------------------------------------------------------------------
 
@@ -96,6 +103,7 @@ async function hold(move) {
   finish.abort();
   const recording = await recorded;
   if (!result.started || recording instanceof Error || result.elapsed < BENCH_MIN_PRESS) return;
+  if (isEmptyRun(recording)) return;
   addDriveRun({
     slot: 'bench',
     lesson: fill(driveCopy.lessons.bench, { move: driveCopy.bench[move.id] }),
@@ -202,6 +210,12 @@ function placeStopBar() {
 
 // --- history -----------------------------------------------------------------------------------
 
+function toggleCompare(id) {
+  if (comparedRuns.includes(id)) comparedRuns = comparedRuns.filter((other) => other !== id);
+  else if (comparedRuns.length < compareLimit) comparedRuns = [...comparedRuns, id];
+  update();
+}
+
 function historyPanel() {
   const copy = reportCopy;
   const runs = driveRuns();
@@ -211,29 +225,25 @@ function historyPanel() {
   const shown = (selectedRun !== null && driveRun(selectedRun)) || runs[0];
   return html`<h3>${copy.historyTitle}</h3>
     <p>${copy.historyLead}</p>
-    <ol class="drive-history">
-      ${runs.map(
-        (run) =>
-          html`<li>
-            <button
-              data-drive-run=${run.id}
-              aria-pressed=${run === shown ? 'true' : 'false'}
-              @click=${() => {
-                selectedRun = run.id;
-                update();
-              }}
-            >
-              ${driveRunLabel(run)}
-            </button>
-          </li>`,
-      )}
-    </ol>
-    ${driveReportView(shown, { saveRun: saveDriveRun })}
+    ${driveHistoryList({
+      runs,
+      selected: shown.id,
+      compared: comparedRuns,
+      select: (id) => {
+        selectedRun = id;
+        update();
+      },
+      toggleCompare,
+    })}
+    ${driveReportView(shown, {
+      saveRun: saveDriveRun,
+      compare: comparedRuns.map(driveRun).filter(Boolean),
+    })}
     <button
       class="quiet"
       data-drive-history-clear
       @click=${() => {
-        if (window.confirm(copy.clear + '？')) clearDriveRuns();
+        if (window.confirm(copy.clearConfirm)) clearDriveRuns();
       }}
     >
       ${copy.clear}
@@ -251,6 +261,8 @@ function update() {
     newestRun = newest;
     selectedRun = null;
   }
+  // Runs that fell off the history (or were cleared) cannot be compared any more.
+  comparedRuns = comparedRuns.filter((id) => driveRun(id));
   render(historyPanel(), document.getElementById('robotDriveLog'));
   const panel = document.getElementById('robotDrive');
   // Driving needs a connection; before that the dialog is about connecting.
