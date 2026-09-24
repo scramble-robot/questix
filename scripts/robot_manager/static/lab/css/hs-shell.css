@@ -111,9 +111,6 @@
     font-weight: 700;
     color: #1e5350;
   }
-  html {
-    scroll-padding-top: 72px;
-  }
 }
 @media (max-width: 600px) {
   /* The labels say it; the sentence behind them is on wider screens and in each label's title. */
@@ -266,4 +263,16 @@ body .measurement-entry {
 }
 body .measurement-entry > .supplement-trigger {
   margin: 0;
+}
+
+/* One scroll offset for the sticky header, instead of the per-course values spread over
+   curriculum.css, mastery-systems.css and arm.css (they disagreed, so things scrolled into view
+   ended up under the header). :root outranks their html selectors. */
+:root {
+  scroll-padding-top: 116px;
+}
+@media (max-width: 600px) {
+  :root {
+    scroll-padding-top: 76px;
+  }
 }

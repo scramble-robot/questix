@@ -26,10 +26,12 @@ const TEXT_BASELINE_NUDGE = 5; // pixels, to centre 15 px text on the point it l
 const ARENA_BACKGROUND = '#102832';
 const ARENA_FLOOR = '#142f39';
 const ARENA_BORDER = '#45616a';
-const LABEL_FONT = '15px system-ui';
+const LABEL_SIZE = 15; // canvas pixels on a full-size arena
+const MIN_TEXT = 12; // CSS pixels: the smallest text a figure may show (--figure-text-min)
 const RULER_TEXT = '#92afb9';
 const RULER_BELOW_ARENA = 30; // pixels below the arena for the horizontal ruler
 const RULER_LEFT_OF_ARENA = 12; // pixels left of the arena for the vertical ruler
+const ARENA_SIZE_ABOVE = 10; // pixels between the room's top edge and its size label
 
 const WALL_SHADOW = '#0a2029';
 const WALL_SHADOW_OFFSET = 5; // pixels
@@ -42,7 +44,7 @@ const WALL_LABEL = { delivery: '棚', dock: '設備' };
 const GOAL_COLOR = { delivery: '#f0cc81', dock: '#c4b8ff' };
 const GOAL_FILL = { delivery: '#ac975426', dock: '#48446744' };
 const GOAL_LABEL = { delivery: '届け先', dock: '充電ポート →' };
-const GOAL_LABEL_FONT = 'bold 16px system-ui';
+const GOAL_LABEL_SIZE = 16; // canvas pixels, bold
 const GOAL_DASH = [6, 5]; // pixels
 const GOAL_LABEL_GAP = 18; // pixels above the goal circle
 // Arrow through the goal showing the heading a docking run has to arrive with.
@@ -177,6 +179,19 @@ function arenaBox(env) {
   };
 }
 
+// The arena canvas is drawn at a fixed resolution and shrunk by CSS on a phone (720 → ~350 px), so
+// labels are enlarged by the same factor there: never smaller than MIN_TEXT on screen.
+let unitsPerPixel = 1;
+// The canvas may be letterboxed (object-fit: contain), so the tighter of the two ratios counts.
+function measureScale(canvas) {
+  const shown = canvas.getBoundingClientRect?.();
+  const ratio = shown ? Math.min(shown.width / canvas.width, shown.height / canvas.height) : 0;
+  unitsPerPixel = ratio > 0 ? 1 / ratio : 1;
+}
+const fontOf = (size, weight = '') =>
+  `${weight}${Math.round(Math.max(size, MIN_TEXT * unitsPerPixel))}px system-ui`;
+const labelFont = () => fontOf(LABEL_SIZE);
+
 /** Pixel rectangle of the arena fitted into a thumbnail canvas with equal margins. */
 function thumbnailBox(canvas, env, padding) {
   const scale = Math.min(
@@ -205,7 +220,7 @@ function paintArenaFloor(box) {
 
 /** Metre marks along the bottom and left edges of the arena. */
 function paintRuler(box) {
-  ctx.font = LABEL_FONT;
+  ctx.font = labelFont();
   ctx.textAlign = 'center';
   ctx.fillStyle = RULER_TEXT;
   for (let metre = 0; metre <= 4; metre++)
@@ -243,7 +258,7 @@ function paintWalls(env, box) {
     );
     paintRoundedRect(ctx, x, y, width, height, WALL_CORNER_RADIUS, WALL_FILL, WALL_EDGE);
     ctx.fillStyle = WALL_TEXT;
-    ctx.font = LABEL_FONT;
+    ctx.font = labelFont();
     ctx.textAlign = 'center';
     ctx.fillText(
       env.task === 'delivery' ? WALL_LABEL.delivery : WALL_LABEL.dock,
@@ -271,7 +286,7 @@ function paintGoal(env, box) {
   ctx.stroke();
   ctx.setLineDash([]);
   ctx.fillStyle = color;
-  ctx.font = GOAL_LABEL_FONT;
+  ctx.font = fontOf(GOAL_LABEL_SIZE, 'bold ');
   ctx.textAlign = 'center';
   ctx.fillText(docking ? GOAL_LABEL.dock : GOAL_LABEL.delivery, x, y - radius - GOAL_LABEL_GAP);
   if (!docking) return;
@@ -382,15 +397,17 @@ function paintMotionArrow(robot, pose) {
   ctx.lineCap = 'butt';
 }
 
+// Above the room's right corner: below it, the enlarged phone labels would run into the 4 m mark.
 function paintArenaSize(box) {
   ctx.textAlign = 'right';
-  ctx.font = LABEL_FONT;
+  ctx.font = labelFont();
   ctx.fillStyle = RULER_TEXT;
-  ctx.fillText('4.8 × 3.2 m', box.x + box.width, box.y + box.height + RULER_BELOW_ARENA);
+  ctx.fillText('4.8 × 3.2 m', box.x + box.width, box.y - ARENA_SIZE_ABOVE);
 }
 
 /** The main lesson view: the room, the robot, and whichever sensor overlays are switched on. */
 function drawArena(env, pose, trail, observation) {
+  measureScale(ctx.canvas);
   const box = arenaBox(env);
   paintArenaFloor(box);
   paintRuler(box);
@@ -797,4 +814,12 @@ function drawRobot(target, p, pose) {
   target.restore();
 }
 
-export { drawArena, drawCamera, drawStartMap, drawTrajectory, drawRobot };
+export {
+  drawArena,
+  drawCamera,
+  drawStartMap,
+  drawTrajectory,
+  drawRobot,
+  thumbnailBox,
+  START_MAP_PADDING,
+};
