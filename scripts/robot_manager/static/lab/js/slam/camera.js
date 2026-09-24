@@ -193,7 +193,7 @@ function drawDepthImage(context, scene, pose, width, height) {
   drawBadge(context, copy.depthBadge, {
     x: 12,
     y: 12,
-    width: 560,
+    width: 180,
     height: 32,
     background: '#102b35e8',
     color: '#e6eff3',

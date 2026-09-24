@@ -523,6 +523,9 @@ const LOOP_PANELS = [
   { x: 358, clip: 'loopAfter', colour: '#8cd7c0' },
 ];
 const LOOP_LINK_COLOUR = '#f4cb86';
+const LOOP_GAP_COLOUR = '#ff6b6b'; // danger red of palette.js (scene): the gap to close
+// The gap's value sits at the panel's lower right, clear of the 出発点/最後 labels.
+const LOOP_GAP_LABEL = { x: 170, y: 322 };
 const EVERY_OTHER_RAY = 2; // half the beams are drawn, to keep the two panels readable
 
 const loopPoint = (panelX, point) => ({
@@ -571,10 +574,21 @@ function loopPanel(model, panel, poses, title, closure, copy) {
   return svg`${label(panel.x + 10, 30, title)}<defs><clipPath id=${panel.clip}><rect x=${panel.x} y="45" width="310" height="268"/></clipPath></defs><g clip-path=${`url(#${panel.clip})`}>${loopScanDots(model, panel, poses)}</g>${loopTrack(panel, poses, copy)}${closure}`;
 }
 
-function loopClosureLine(panel, from, to) {
+// The gap between two poses as a red double arrow with its size in cm (S7).
+function loopGapArrow(panel, from, to, text) {
   const a = loopPoint(panel.x, from);
   const b = loopPoint(panel.x, to);
-  return line(a.x, a.y, b.x, b.y, LOOP_LINK_COLOUR, { dash: '4 4' });
+  const length = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+  const ux = (b.x - a.x) / length;
+  const uy = (b.y - a.y) / length;
+  const head = (at, sign) =>
+    `M${at.x},${at.y}L${at.x - sign * (9 * ux - 5 * uy)},${at.y - sign * (9 * uy + 5 * ux)}M${at.x},${at.y}L${at.x - sign * (9 * ux + 5 * uy)},${at.y - sign * (9 * uy - 5 * ux)}`;
+  return svg`${line(a.x, a.y, b.x, b.y, LOOP_GAP_COLOUR, { width: 3 })}<path d=${head(b, 1) + head(a, -1)} stroke=${LOOP_GAP_COLOUR} stroke-width="3" fill="none"/>${label(panel.x + LOOP_GAP_LABEL.x, LOOP_GAP_LABEL.y, text, `fill:${LOOP_GAP_COLOUR};font-weight:700`)}`;
+}
+
+function gapText(copy, from, to) {
+  const centimetres = Math.hypot(to.x - from.x, to.y - from.y) * 100;
+  return fillText(copy.panels.gap, { gap: quantity(centimetres, 0) });
 }
 
 function adjustedTitle(model, copy) {
@@ -585,7 +599,12 @@ function adjustedTitle(model, copy) {
 function loopFigure(model, copy) {
   const [beforePanel, afterPanel] = LOOP_PANELS;
   const before = model.fixture.before;
-  const beforeClosure = loopClosureLine(beforePanel, before[0], before.at(-1));
+  const beforeClosure = loopGapArrow(
+    beforePanel,
+    before.at(-1),
+    before[0],
+    gapText(copy, before.at(-1), before[0]),
+  );
   let after = loopPlaceholder(copy);
   if (model.result) {
     const poses = model.result.after;

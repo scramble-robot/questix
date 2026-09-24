@@ -265,21 +265,33 @@ const POLAR_CENTER_Y = 168;
 const POLAR_SCALE = 40; // canvas units per metre
 const POLAR_RINGS = 3; // one ring per metre
 const NEAR_RANGE = 0.5; // metres; closer readings are highlighted
+const POLAR_ROBOT_SCALE = 0.3; // the shared robot drawing, shrunk to the 1 m rings
 
-function drawLidarPolar(context, frame) {
+// Rings every metre, labelled, and the robot seen from above with its front marked (S8).
+function drawLidarPolar(context, frame, labelSize) {
   context.strokeStyle = '#d2e0e5';
+  context.fillStyle = '#587079';
+  context.font = `${labelSize}px system-ui`;
+  context.textAlign = 'left';
   for (let ring = 1; ring <= POLAR_RINGS; ring++) {
     context.beginPath();
     context.arc(POLAR_CENTER_X, POLAR_CENTER_Y, ring * POLAR_SCALE, 0, 2 * Math.PI);
     context.stroke();
+    context.fillText(
+      `${ring} m`,
+      POLAR_CENTER_X + ring * POLAR_SCALE * 0.72 + 3,
+      POLAR_CENTER_Y + ring * POLAR_SCALE * 0.72 + labelSize * 0.4,
+    );
   }
-  // A small arrow for the robot, pointing to the top of the chart.
+  context.save();
+  context.translate(POLAR_CENTER_X, POLAR_CENTER_Y);
+  context.scale(POLAR_ROBOT_SCALE, POLAR_ROBOT_SCALE);
+  drawRobot(context, { x: 0, y: 0 }, { theta: -Math.PI / 2, left: 0, right: 0 });
+  context.restore();
   context.fillStyle = '#284c60';
-  context.beginPath();
-  context.moveTo(POLAR_CENTER_X, POLAR_CENTER_Y - 9);
-  context.lineTo(POLAR_CENTER_X - 7, POLAR_CENTER_Y + 6);
-  context.lineTo(POLAR_CENTER_X + 7, POLAR_CENTER_Y + 6);
-  context.fill();
+  context.textAlign = 'center';
+  context.fillText('▲ 前', POLAR_CENTER_X, POLAR_CENTER_Y - 3 * POLAR_SCALE - 8);
+  context.textAlign = 'left';
   frame.ranges.forEach((range, i) => {
     if (range === null) return;
     const angle = frame.angleMin + i * frame.angleIncrement;
@@ -389,7 +401,7 @@ function drawSensorChart(canvas, { log, cursor, sensor, cameraMode }) {
   context.fillStyle = '#2e505c';
   context.font = '18px system-ui';
   context.textAlign = 'left';
-  if (sensor === 'lidar') drawLidarPolar(context, log.frames[cursor]);
+  if (sensor === 'lidar') drawLidarPolar(context, log.frames[cursor], chartLabelSize(canvas));
   else if (sensor === 'camera')
     drawSlamCamera(context, log, cursor, SENSOR_WIDTH, SENSOR_HEIGHT, cameraMode);
   else drawTimeSeries(context, canvas, log, cursor, sensor);
