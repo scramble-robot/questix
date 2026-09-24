@@ -3,22 +3,65 @@
 // requests of js/live/drive-link.js (sendRobot below is for that module alone), and the bridge
 // accepts them only when it was started with allow_drive and its own checks pass.
 // Units follow REP-103: metres, radians, seconds; x forward, y left, theta counter-clockwise.
+//
+// No DOM here (only WebSocket, localStorage and location, each read when used), so the connection
+// rules run as Node tests (test/robot-link.test.mjs) against a fake WebSocket and mocked timers.
+import { loadJson, fillSentence } from '../core/content.js';
+
+const copy = await loadJson('content/live/link.json');
 
 // Keep in sync with `port` in questix_lab_bridge/config/lab_bridge.yaml and
 // LAB_BRIDGE_PORT in scripts/robot_manager/app.py (its CSP only allows this port).
 const DEFAULT_PORT = 8897;
+// Robot Manager's own port: the address learners most often paste by mistake.
+const MANAGER_PORT = 8888;
+const EXAMPLE_ADDRESS = 'http://10.42.0.1:8897/'; // what Robot Manager shows on the robot's own Wi-Fi
 const PROTOCOL = 1;
 const STORAGE_KEY = 'questix-lab-robot-url';
-const RETRY_MS = 3000;
+const RETRY_MS = 3000; // milliseconds between attempts
+// Without a hello by then the host is out of reach (another network) or the port is blocked;
+// the browser itself would wait for the operating system's TCP timeout, which takes minutes.
+const CONNECT_TIMEOUT_MS = 6000;
+// The bridge closes a connection over its max_clients with 1013 (RFC 6455 "Try Again Later").
+const CLOSE_TOO_MANY_CLIENTS = 1013;
+// Keep in sync with max_clients in questix_lab_bridge/config/lab_bridge.yaml (the close frame
+// does not carry the number).
+const BRIDGE_CLIENT_LIMIT = 24;
+// A full bridge frees a place only when someone leaves, so knocking every 3 s only adds load.
+const FULL_RETRY_MS = 15000;
+// Failed attempts in a row after which a page served by the bridge concludes the bridge is gone.
+const STOPPED_AFTER_FAILURES = 3;
+// Connected, but no stream has delivered anything for this long (milliseconds).
+const SILENT_MS = 4000;
 const STREAMS = ['scan', 'odom', 'drive', 'twist', 'camera'];
+// Address schemes a learner may paste, and the WebSocket scheme each one means.
+const SCHEMES = { 'http:': 'ws:', 'https:': 'wss:', 'ws:': 'ws:', 'wss:': 'wss:' };
 
 const listeners = new Map();
 const latest = new Map();
 let socket = null;
 let wanted = false;
 let retryTimer = 0;
+let connectTimer = 0;
+let silenceTimer = 0;
 // `session` is this connection's id on the bridge (drive_state.owner refers to it).
-let state = { phase: 'idle', url: '', hello: null, session: null, rates: {}, message: '' };
+// `everOpened`: a hello arrived since connectRobot, so a failure now means the link was lost.
+// `failures`: attempts in a row that ended without a hello. `problem`: why the last one failed
+// ('timeout', 'refused', 'full', 'lost', 'stopped', 'blocked', 'version' or '').
+// `silent`: open, but every stream has been quiet for SILENT_MS.
+let state = {
+  phase: 'idle',
+  url: '',
+  hello: null,
+  session: null,
+  rates: {},
+  message: '',
+  problem: '',
+  everOpened: false,
+  failures: 0,
+  closeCode: null,
+  silent: false,
+};
 
 function emit(type, value) {
   for (const fn of listeners.get(type) || []) fn(value);
@@ -41,26 +84,151 @@ function latestRobot(type) {
   return latest.get(type) ?? null;
 }
 
-function defaultRobotUrl() {
+// What the learner is told about the link: 'idle', 'connecting' (first attempt), 'open',
+// 'failed' (never got through, or refused for good) or 'reconnecting' (a working link was lost).
+function linkStage(link) {
+  if (link.phase === 'open') return 'open';
+  if (link.phase === 'idle') return link.problem ? 'failed' : 'idle';
+  if (link.everOpened) return 'reconnecting';
+  return link.failures > 0 ? 'failed' : 'connecting';
+}
+
+function addressError(key) {
+  const values = { example: EXAMPLE_ADDRESS, port: DEFAULT_PORT, managerPort: MANAGER_PORT };
+  return Error(fillSentence(copy.address[key], values));
+}
+function parseAddress(value) {
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(value) ? value : 'ws://' + value;
+  try {
+    return new URL(withScheme);
+  } catch {
+    throw addressError('invalid');
+  }
+}
+// Accepts what Robot Manager shows (http://10.42.0.1:8897/), a ws:// address, a bare host or
+// host:port, and returns the bridge's WebSocket URL without path or query. Errors are sentences.
+function normalizeRobotUrl(text) {
+  // Full-width digits, dots and colons typed with a Japanese IME become ASCII.
+  const value = String(text ?? '')
+    .normalize('NFKC')
+    .replace(/。/g, '.')
+    .trim();
+  if (!value) throw addressError('empty');
+  const url = parseAddress(value);
+  const protocol = SCHEMES[url.protocol];
+  if (!protocol) throw addressError('scheme');
+  // `ws://http://…` parses with the host "http": what a pasted address used to turn into.
+  if (!url.hostname || SCHEMES[url.hostname + ':']) throw addressError('invalid');
+  if (url.port === String(MANAGER_PORT)) throw addressError('managerPort');
+  return `${protocol}//${url.hostname}:${url.port || DEFAULT_PORT}`;
+}
+
+function savedRobotUrl() {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) return saved;
+    return saved ? normalizeRobotUrl(saved) : '';
   } catch {
-    /* storage may be blocked */
+    return ''; // storage blocked, or a broken address saved by an older version
   }
-  // Served by robot_manager on the robot: the bridge runs on the same host.
-  return location.protocol === 'http:' && location.hostname
-    ? `ws://${location.hostname}:${DEFAULT_PORT}`
-    : '';
 }
-function normalizeRobotUrl(text) {
-  const value = text.trim();
-  if (!value)
-    throw Error('ロボットのアドレスを入力してください。例：ws://192.168.1.20:' + DEFAULT_PORT);
-  const url = new URL(/^wss?:\/\//.test(value) ? value : 'ws://' + value);
-  if (!/^wss?:$/.test(url.protocol)) throw Error('ws:// から始まるアドレスを入力してください。');
-  if (!url.port) url.port = String(DEFAULT_PORT);
-  return url.href;
+function defaultRobotUrl() {
+  const saved = savedRobotUrl();
+  if (saved) return saved;
+  // Served by robot_manager on the robot: the bridge runs on the same host.
+  const page = globalThis.location;
+  return page?.protocol === 'http:' && page.hostname ? `ws://${page.hostname}:${DEFAULT_PORT}` : '';
+}
+
+function hostName(url) {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
+}
+// A page opened from the bridge (http://<robot>:8897/) that talks to that same bridge.
+function servedByThisBridge(url) {
+  const page = globalThis.location;
+  if (page?.port !== String(DEFAULT_PORT)) return false;
+  try {
+    return new URL(url).host === page.host;
+  } catch {
+    return false;
+  }
+}
+function problemMessage(problem, url, delayMs) {
+  const host = hostName(url);
+  const values = {
+    host,
+    address: `http://${host}:${DEFAULT_PORT}/`,
+    limit: BRIDGE_CLIENT_LIMIT,
+    seconds: Math.round(delayMs / 1000),
+  };
+  const sentence = fillSentence(copy.problems[problem], values);
+  return delayMs && problem !== 'lost' ? sentence + fillSentence(copy.retry, values) : sentence;
+}
+
+function stopTimers() {
+  clearTimeout(retryTimer);
+  clearTimeout(connectTimer);
+  clearTimeout(silenceTimer);
+  retryTimer = 0;
+  connectTimer = 0;
+  silenceTimer = 0;
+}
+// Closes the socket without letting its close event count as a failure.
+function dropSocket() {
+  const old = socket;
+  socket = null;
+  if (!old) return;
+  old.onmessage = null;
+  old.onclose = null;
+  old.close();
+}
+
+function armSilence() {
+  if (silenceTimer || state.silent) return;
+  silenceTimer = setTimeout(() => {
+    silenceTimer = 0;
+    if (state.phase === 'open') setState({ silent: true });
+  }, SILENT_MS);
+}
+function receiveStatus(message) {
+  const rates = message.rates || {};
+  if (Object.values(rates).some((hz) => hz > 0)) {
+    clearTimeout(silenceTimer);
+    silenceTimer = 0;
+    setState({ rates, silent: false });
+  } else {
+    armSilence();
+    setState({ rates });
+  }
+  emit('status', message);
+}
+function refuseVersion() {
+  wanted = false;
+  stopTimers();
+  dropSocket();
+  setState({ phase: 'idle', rates: {}, problem: 'version', message: copy.problems.version });
+}
+function welcome(message) {
+  if (message.protocol !== PROTOCOL) {
+    refuseVersion();
+    return;
+  }
+  clearTimeout(connectTimer);
+  connectTimer = 0;
+  setState({
+    phase: 'open',
+    hello: message,
+    message: '',
+    problem: '',
+    everOpened: true,
+    failures: 0,
+    closeCode: null,
+    silent: false,
+  });
+  armSilence(); // until the first status says otherwise, nothing has arrived
 }
 
 function handleText(text) {
@@ -71,72 +239,84 @@ function handleText(text) {
     return;
   }
   if (!message || typeof message.type !== 'string') return;
-  if (message.type === 'hello') {
-    if (message.protocol !== PROTOCOL) {
-      setState({ message: 'ロボット側のソフトウェアと教材の版が合いません。' });
-      disconnectRobot();
-      return;
-    }
-    setState({ phase: 'open', hello: message, message: '' });
-    return;
-  }
-  if (message.type === 'status') {
-    setState({ rates: message.rates || {} });
-    emit('status', message);
-    return;
-  }
-  if (message.type === 'session') {
-    setState({ session: message.id });
-    return;
-  }
-  if (message.type === 'drive_state') {
-    latest.set('drive_state', message);
-    emit('drive_state', message);
-    return;
-  }
-  if (STREAMS.includes(message.type)) {
+  if (message.type === 'hello') welcome(message);
+  else if (message.type === 'status') receiveStatus(message);
+  else if (message.type === 'session') setState({ session: message.id });
+  else if (message.type === 'drive_state' || STREAMS.includes(message.type)) {
     latest.set(message.type, message);
     emit(message.type, message);
   }
 }
+function receive(event) {
+  if (typeof event.data === 'string') {
+    handleText(event.data);
+    return;
+  }
+  latest.set('camera', event.data);
+  emit('camera', event.data);
+}
+
+// An attempt ended without a working link (or a working link ended): say why and try again.
+function failed(url, problem, closeCode) {
+  stopTimers();
+  const failures = state.failures + 1;
+  const gone = failures >= STOPPED_AFTER_FAILURES && problem !== 'full' && servedByThisBridge(url);
+  const shown = gone ? 'stopped' : problem;
+  const delay = problem === 'full' ? FULL_RETRY_MS : RETRY_MS;
+  setState({
+    phase: 'error',
+    rates: {},
+    silent: false,
+    failures,
+    closeCode,
+    problem: shown,
+    message: problemMessage(shown, url, delay),
+  });
+  retryTimer = setTimeout(() => {
+    if (wanted) open(url);
+  }, delay);
+}
+function closeProblem(code) {
+  if (code === CLOSE_TOO_MANY_CLIENTS) return 'full';
+  return state.everOpened ? 'lost' : 'refused';
+}
+// The browser refused to even start (mixed content, a blocked address): retrying cannot help.
+function blocked(url) {
+  wanted = false;
+  setState({
+    phase: 'idle',
+    failures: state.failures + 1,
+    problem: 'blocked',
+    message: problemMessage('blocked', url, 0),
+  });
+}
 
 function open(url) {
-  clearTimeout(retryTimer);
+  stopTimers();
   latest.clear();
-  setState({ phase: 'connecting', url, hello: null, session: null, rates: {} });
+  setState({ phase: 'connecting', url, hello: null, session: null, rates: {}, silent: false });
   let ws;
   try {
     ws = new WebSocket(url);
   } catch {
-    setState({ phase: 'error', message: 'このアドレスには接続できません。' });
+    blocked(url);
     return;
   }
   socket = ws;
   ws.binaryType = 'blob';
   ws.onmessage = (event) => {
-    if (ws !== socket) return;
-    if (typeof event.data === 'string') handleText(event.data);
-    else {
-      latest.set('camera', event.data);
-      emit('camera', event.data);
-    }
+    if (ws === socket) receive(event);
   };
-  ws.onclose = () => {
+  ws.onclose = (event) => {
     if (ws !== socket) return;
     socket = null;
-    if (!wanted) {
-      setState({ phase: 'idle', rates: {} });
-      return;
-    }
-    setState({
-      phase: 'error',
-      rates: {},
-      message: state.message || 'ロボットとつながっていません。数秒ごとに再接続を試みます。',
-    });
-    retryTimer = setTimeout(() => {
-      if (wanted) open(url);
-    }, RETRY_MS);
+    failed(url, closeProblem(event.code), event.code);
   };
+  connectTimer = setTimeout(() => {
+    if (ws !== socket) return;
+    dropSocket();
+    failed(url, state.everOpened ? 'lost' : 'timeout', null);
+  }, CONNECT_TIMEOUT_MS);
 }
 function connectRobot(text) {
   const url = normalizeRobotUrl(text);
@@ -146,12 +326,8 @@ function connectRobot(text) {
     /* optional */
   }
   wanted = true;
-  if (socket) {
-    const old = socket;
-    socket = null;
-    old.close();
-  }
-  state = { ...state, message: '' };
+  dropSocket();
+  state = { ...state, message: '', problem: '', everOpened: false, failures: 0, closeCode: null };
   open(url);
 }
 // For js/live/drive-link.js only: lessons go through its checks, never through this function.
@@ -164,16 +340,34 @@ function sendRobot(message) {
 
 function disconnectRobot() {
   wanted = false;
-  clearTimeout(retryTimer);
-  if (socket) socket.close();
-  else setState({ phase: 'idle', rates: {} });
+  stopTimers();
+  dropSocket();
+  setState({
+    phase: 'idle',
+    session: null,
+    rates: {},
+    message: '',
+    problem: '',
+    everOpened: false,
+    failures: 0,
+    closeCode: null,
+    silent: false,
+  });
 }
 
 export {
   DEFAULT_PORT,
+  MANAGER_PORT,
+  CONNECT_TIMEOUT_MS,
+  RETRY_MS,
+  FULL_RETRY_MS,
+  SILENT_MS,
+  STOPPED_AFTER_FAILURES,
+  BRIDGE_CLIENT_LIMIT,
   onRobot,
   robotState,
   latestRobot,
+  linkStage,
   defaultRobotUrl,
   normalizeRobotUrl,
   connectRobot,

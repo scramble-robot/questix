@@ -8,10 +8,10 @@ where driving has been allowed — run **low-speed driving experiments** on it.
 
 Ways to open it:
 
-- **With a robot:** press **配信開始** on the **教材** tab of Questix Robot Manager (or run
-  `ros2 launch questix_lab_bridge lab_bridge.launch.xml`) and open `http://<robot-ip>:8897/`
-  on any device in the same network. The bridge serves these files and the page connects to
-  the robot automatically.
+- **With a robot:** the bridge starts with Robot Manager (or with **配信開始** on its **教材**
+  tab; by hand: `ros2 launch questix_lab_bridge lab_bridge.launch.xml`). Open
+  `http://<robot-ip>:8897/` on any device in the same Wi-Fi — the 教材 tab shows it as a QR code.
+  The bridge serves these files and the page connects to the robot automatically.
 - **On the robot itself:** `robot_manager` serves it at `http://localhost:8888/lab/`.
 - **Simulator only (no robot):** it is a static site with no build step, so any static file
   server works:
@@ -21,6 +21,17 @@ python3 -m http.server 8000 -d scripts/robot_manager/static/lab   # http://local
 ```
 
 Opening `index.html` via `file://` does not work: ES modules need HTTP.
+
+Elsewhere the header's **実機** button opens the connection dialog. It takes the address as Robot
+Manager shows it (`http://10.42.0.1:8897/`), a `ws://` address, or a bare host / `host:port`, and
+connects to the bridge's WebSocket on port 8897; `:8888` (Robot Manager itself) is refused with an
+explanation. `js/live/robot-link.js` gives up an attempt after 6 s and says why in the learner's
+words: unreachable host, no bridge answering, the bridge's client limit (close code 1013, retried
+every 15 s), or — on a page served by the bridge — the stream stopped. Until a connection has worked
+the address stays editable; only a link that was open and dropped is shown as つながり直しています….
+Once open, the dialog shows the robot's name, its `ROS_DOMAIN_ID` and whether lessons may drive it
+(from the bridge's `hello`), and warns when no stream has delivered anything for 4 s. These rules are
+Node tests (`test/robot-link.test.mjs`, fake WebSocket and mocked timers).
 
 ## Layout
 

@@ -27,7 +27,7 @@
 <link rel="stylesheet" href="css/navigation.css">
 </head>
 <body>
-<header class="site-header"><a class="brand" href="#series" aria-label="QUESTiX LAB 教材一覧へ"><img class="brand-logo" src="assets/questix-logo.svg" alt="QUESTiX" width="584" height="124"><span class="brand-lab">LAB</span></a><div class="header-actions"><button class="quiet robot-link" id="robotLinkOpen" data-phase="idle" aria-haspopup="dialog"><span class="robot-link-dot" aria-hidden="true"></span>実機 <span id="robotLinkState">未接続</span></button><button class="series-home" id="seriesHome" hidden><span aria-hidden="true">←</span> 教材一覧</button><details id="courseSwitcher" class="course-switcher"><summary><span>教材を切り替える</span><strong id="currentCourseTitle">13科目から選ぶ</strong></summary><nav id="lessonNav" class="series-nav" aria-label="教材の切り替え"></nav></details></div></header>
+<header class="site-header"><a class="brand" href="#series" aria-label="QUESTiX LAB 教材一覧へ"><img class="brand-logo" src="assets/questix-logo.svg" alt="QUESTiX" width="584" height="124"><span class="brand-lab">LAB</span></a><div class="header-actions"><button class="quiet robot-link" id="robotLinkOpen" data-phase="idle" data-stage="idle" aria-haspopup="dialog"><span class="robot-link-dot" aria-hidden="true"></span>実機 <span id="robotLinkName" class="robot-link-name" hidden></span> <span id="robotLinkState">未接続</span></button><button class="series-home" id="seriesHome" hidden><span aria-hidden="true">←</span> 教材一覧</button><details id="courseSwitcher" class="course-switcher"><summary><span>教材を切り替える</span><strong id="currentCourseTitle">13科目から選ぶ</strong></summary><nav id="lessonNav" class="series-nav" aria-label="教材の切り替え"></nav></details></div></header>
 <main id="main"><aside id="masteryReview" class="quiz-review" aria-label="実力テストの復習" hidden></aside><aside id="quizReview" class="quiz-review" aria-label="小テストの復習" hidden></aside><section id="mechanicsPage" class="page" hidden></section><section id="trackingPage" class="page" hidden></section><section id="timingPage" class="page" hidden></section><section id="coordinationPage" class="page" hidden></section><section id="behaviorPage" class="page" hidden></section><section id="diagnosticsPage" class="page" hidden></section><section id="seriesPage" class="page"></section><section id="slamPage" class="page" hidden></section><section id="visionPage" class="page" hidden></section><section id="controlPage" class="page" hidden></section><section id="planningPage" class="page" hidden></section><section id="launchPage" class="page" hidden></section><section id="armPage" class="page" hidden></section>
 <section id="introPage" class="page" hidden>
 <div class="page-heading"><div><p class="eyebrow course-label" id="rlCourseLabel"></p><h1>荷物を届ける動き方を、試した経験から学ぶ</h1></div></div>
@@ -68,10 +68,11 @@
 </dialog>
 <dialog id="robotDialog" class="robot-dialog" aria-labelledby="robotDialogTitle">
  <header class="dialog-heading"><h2 id="robotDialogTitle">実機のQUESTiXとつなぐ</h2><button id="robotClose" aria-label="閉じる">×</button></header>
- <p>シミュレーターで確かめた考え方を、実際のロボットの値でも観察します。ふだんの教材は<strong>値を受け取るだけ</strong>です。ロボットの管理画面で「教材からの走行」が許可され、ロボットがコントローラーなしで起動しているときだけ、走行実験のボタンが低速でロボットを動かします。どちらの場合も、非常停止に手が届く状態で行ってください。</p>
- <form id="robotForm" class="robot-form"><label for="robotUrl">ロボットのアドレス</label><div><input id="robotUrl" type="text" inputmode="url" autocomplete="off" spellcheck="false" placeholder="ws://192.168.1.20:8897"><button id="robotConnect" class="primary" type="submit">接続する</button><button id="robotDisconnect" type="button" hidden>切断する</button></div></form>
- <p id="robotStatus" class="robot-status" role="status"></p>
- <section id="robotMonitor" class="robot-monitor" hidden>
+ <nav id="robotDialogNav" class="robot-dialog-nav" hidden></nav>
+ <p>ロボットから届く値を、シミュレーターと同じ画面で見られます。ロボットと同じWi-Fiにつないで <code>http://ロボットのアドレス:8897/</code> を開くと、自動でつながります（Robot Managerに出るQRコードからも開けます）。走らせる実験は、先生が許可したときだけ低速で動きます。非常停止に手が届くところで行ってください。</p>
+ <form id="robotForm" class="robot-form"><label for="robotUrl">ロボットのアドレス</label><div><input id="robotUrl" type="text" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="http://10.42.0.1:8897/" aria-describedby="robotStatus"><button id="robotConnect" class="primary" type="submit">接続する</button><button id="robotDisconnect" type="button" hidden>切断する</button></div></form>
+ <div id="robotStatus" class="robot-status" role="status"></div>
+ <section id="robotMonitor" class="robot-monitor" tabindex="-1" hidden>
   <div class="robot-panels">
    <figure><figcaption><strong>LiDAR</strong><span>上が前、中央がロボット</span></figcaption><canvas id="robotScan" role="img" aria-label="LiDARが測った周囲の点"></canvas><p id="robotScanNote"></p></figure>
    <figure><figcaption><strong>カメラ</strong><span>視覚の教材で「実機カメラの画像を使う」から取り込めます</span></figcaption><img id="robotCamera" alt="ロボットのカメラ画像" hidden><p id="robotCameraNote"></p></figure>
@@ -80,9 +81,9 @@
   <dl class="robot-readings"><div><dt>位置の見積もり</dt><dd id="robotPose">—</dd></div><div><dt>実測の速度</dt><dd id="robotSpeed">—</dd></div><div><dt>速度の指令</dt><dd id="robotCommand">—</dd></div><div><dt>非常停止</dt><dd id="robotEstop">—</dd></div></dl>
   <table class="robot-streams"><caption>受信している値</caption><tbody id="robotStreams"></tbody></table>
  </section>
- <section id="robotDrive" class="robot-drive" hidden></section>
- <section id="robotDriveLog" class="robot-drive robot-drive-log"></section>
- <details><summary>つながらないときは</summary><p>ロボット側で <code>ros2 launch questix_lab_bridge lab_bridge.launch.xml</code> が動いているか、端末がロボットと同じネットワークにあるかを確かめます。アドレスは <code>ws://ロボットのIPアドレス:8897</code> です。カメラは、ロボットにカメラのノードがあり <code>camera_topic</code> を設定した場合だけ届きます。</p></details>
+ <section id="robotDrive" class="robot-drive" tabindex="-1" hidden></section>
+ <section id="robotDriveLog" class="robot-drive robot-drive-log" tabindex="-1"></section>
+ <details class="robot-help"><summary>つながらないときは</summary><ol><li>この端末が、ロボットと同じWi-Fiにつながっているか確かめます。</li><li>アドレスは、Robot Managerの「教材」タブに出ているもの（例：<code>http://10.42.0.1:8897/</code>）をそのまま入力します。<code>:8888</code> は管理画面の番号なので、教材には使いません。</li><li>それでもつながらないときは、先生にRobot Managerの「教材」タブで「配信開始」を押してもらいます。</li></ol><p class="robot-help-teacher"><strong>先生へ</strong>教材への配信は <code>questix_lab_bridge</code>（ポート8897）が行います。Robot Managerの「教材」タブの「配信開始」で起動し、大会モードに切り替えると止まります。つながっても値が届かないときは、ロボットのROSが起動しているか、配信とロボットの <code>ROS_DOMAIN_ID</code> が同じかを確かめてください。教材からの走行は、同じタブの「教材からの走行」で許可したときだけ有効です。カメラは <code>camera_topic</code> を設定した場合だけ届きます。同時につなげる端末は24台までです。</p></details>
 </dialog>
 <div id="simulation" hidden><canvas id="arena" width="1000" height="660" role="img" aria-label="ロボットの走行コース"></canvas><input id="trailToggle" type="checkbox" checked><input id="sensorToggle" type="checkbox"><canvas id="cameraView" width="640" height="280"></canvas></div>
 <div id="driveBar" class="drive-bar-host"></div>

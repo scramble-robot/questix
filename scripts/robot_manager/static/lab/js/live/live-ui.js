@@ -3,16 +3,20 @@ import {
   onRobot,
   robotState,
   latestRobot,
+  linkStage,
   defaultRobotUrl,
   connectRobot,
   disconnectRobot,
 } from './robot-link.js';
 import { wheelRpm } from './slam-recorder.js';
 import { scanMount } from './capture-core.js';
+import { loadJson, fillSentence } from '../core/content.js';
+import { html, render, nothing } from '../vendor/lit-html.js';
 
-// Header button and "実機モニター" dialog. Drawing only happens while the dialog is open.
+const copy = await loadJson('content/live/link.json');
+
+// Header button and "実機" dialog. Drawing only happens while the dialog is open.
 const $ = (id) => document.getElementById(id);
-const PHASE_LABEL = { idle: '未接続', connecting: '接続中…', open: '接続中', error: '再接続中…' };
 const STREAM_LABEL = {
   scan: 'LiDAR',
   odom: '位置の見積もり',
@@ -20,10 +24,14 @@ const STREAM_LABEL = {
   twist: '速度の指令',
   camera: 'カメラ',
 };
+// The dialog's own table of contents: nav key → section id (drive-ui.js renders the last two).
+const DIALOG_SECTIONS = [
+  ['monitor', 'robotMonitor'],
+  ['drive', 'robotDrive'],
+  ['log', 'robotDriveLog'],
+];
 const HISTORY_SECONDS = 10;
 const TWIST_FRESH_SECONDS = 1; // an older command no longer describes what the robot was asked to do
-const escapeHtml = (text) =>
-  String(text).replace(/[&<>"']/g, (ch) => '&#' + ch.charCodeAt(0) + ';');
 const COLORS = {
   left: '#1c756b',
   right: '#a65a32',
@@ -36,6 +44,7 @@ const COLORS = {
 let history = [];
 let cameraUrl = '';
 let frameRequested = false;
+let addressProblem = ''; // the sentence normalizeRobotUrl threw for the typed address
 
 function prepare(canvas) {
   const ratio = window.devicePixelRatio || 1;
@@ -49,6 +58,12 @@ function prepare(canvas) {
   c.setTransform(ratio, 0, 0, ratio, 0, 0);
   c.clearRect(0, 0, width, height);
   return { c, width, height };
+}
+
+function scanNote(scan) {
+  if (!scan) return copy.monitor.scanNone;
+  const measured = scan.ranges.filter((r) => r !== null).length;
+  return fillSentence(copy.monitor.scanCount, { measured, total: scan.ranges.length });
 }
 
 // Robot-centred top view: forward is up, left is left (REP-103 seen from above).
@@ -96,9 +111,7 @@ function drawScan() {
   c.lineTo(cx - 6, cy + 6);
   c.closePath();
   c.fill();
-  $('robotScanNote').textContent = scan
-    ? `${scan.ranges.filter((r) => r !== null).length} / ${scan.ranges.length} 本の測定 · 測れなかった方向は描きません`
-    : 'LiDARの値はまだ届いていません';
+  $('robotScanNote').textContent = scanNote(scan);
 }
 
 function drawWheels() {
@@ -127,11 +140,7 @@ function drawWheels() {
     c.stroke();
     c.fillText(String(v), 4, y(v) + 4);
   }
-  c.fillText(
-    '直近' + HISTORY_SECONDS + '秒 · 車輪の回転数 [RPM]（前進が正）· 実線＝実測　破線＝指令',
-    pad.left,
-    height - 5,
-  );
+  c.fillText(fillSentence(copy.monitor.wheels, { seconds: HISTORY_SECONDS }), pad.left, height - 5);
   for (const [key, side, dashed] of [
     ['targetLeft', 'left', true],
     ['targetRight', 'right', true],
@@ -157,6 +166,10 @@ function drawWheels() {
   c.setLineDash([]);
 }
 
+function estopText(drive) {
+  if (!drive) return '—';
+  return drive.emergency_stop ? copy.monitor.estopPressed : copy.monitor.estopReleased;
+}
 function readings() {
   const odom = latestRobot('odom');
   const drive = latestRobot('drive');
@@ -169,11 +182,7 @@ function readings() {
   $('robotCommand').textContent = twist
     ? `前後 ${f(twist.linear)} m/s · 回転 ${f(twist.angular)} rad/s`
     : '—';
-  $('robotEstop').textContent = drive
-    ? drive.emergency_stop
-      ? '作動中（走行しません）'
-      : '解除'
-    : '—';
+  $('robotEstop').textContent = estopText(drive);
 }
 
 // The canvases have no size while the monitor section is hidden, so there is nothing to draw on yet.
@@ -190,39 +199,133 @@ function requestRedraw() {
   requestAnimationFrame(redraw);
 }
 
-function showState(state) {
-  const open = state.phase === 'open';
-  $('robotLinkOpen').dataset.phase = state.phase;
-  $('robotLinkState').textContent = PHASE_LABEL[state.phase];
-  $('robotConnect').hidden = state.phase !== 'idle';
-  $('robotDisconnect').hidden = state.phase === 'idle';
-  $('robotUrl').disabled = state.phase !== 'idle';
-  $('robotStatus').textContent =
-    state.message ||
-    (open
-      ? 'つながりました。ロボットのセンサーの値を表示しています。'
-      : state.phase === 'connecting'
-        ? 'ロボットを探しています…'
-        : 'ロボットと同じネットワークにつなぎ、アドレスを確かめて「接続する」を押してください。');
-  $('robotMonitor').hidden = !open;
-  $('robotStreams').innerHTML = open
-    ? Object.entries(state.hello.streams)
-        .map(([name, topic]) => {
-          const hz = state.rates[name];
-          return `<tr><th>${STREAM_LABEL[name] || name}</th><td>${topic ? `<code>${escapeHtml(topic)}</code>` : '使いません'}</td><td>${topic ? (hz > 0 ? hz.toFixed(1) + ' 回/秒' : '届いていません') : '—'}</td></tr>`;
-        })
-        .join('')
-    : '';
-  if (!open) {
-    history = [];
-    if (cameraUrl) {
-      URL.revokeObjectURL(cameraUrl);
-      cameraUrl = '';
-    }
-    $('robotCamera').hidden = true;
-    $('robotCameraNote').textContent = 'カメラの画像はまだ届いていません';
+// The robot's name as the bridge announces it; bridges older than the `robot` field send none.
+const robotName = (hello) =>
+  typeof hello?.robot?.name === 'string' ? hello.robot.name.trim() : '';
+const domainText = (domain) =>
+  Number.isInteger(domain) ? String(domain) : copy.identity.domainUnset;
+
+function identityView(hello) {
+  const rows = [];
+  if (robotName(hello)) rows.push([copy.identity.robot, robotName(hello)]);
+  if (hello.robot) rows.push([copy.identity.domain, domainText(hello.robot.domain)]);
+  const driving =
+    hello.read_only === false ? copy.identity.driveAllowed : copy.identity.driveReadOnly;
+  rows.push([copy.identity.drive, driving]);
+  return html`<dl class="robot-identity">
+    ${rows.map(
+      ([term, value]) =>
+        html`<div>
+          <dt>${term}</dt>
+          <dd>${value}</dd>
+        </div>`,
+    )}
+  </dl>`;
+}
+function silentView(hello) {
+  const sentence = hello.robot
+    ? fillSentence(copy.silent, { domain: domainText(hello.robot.domain) })
+    : copy.silentNoDomain;
+  return html`<p class="robot-status-warn">${sentence}</p>`;
+}
+function statusSentence(state, stage) {
+  if (state.message) return state.message;
+  let host = state.url;
+  try {
+    host = new URL(state.url).hostname;
+  } catch {
+    /* no address yet */
   }
+  return fillSentence(copy.status[stage] ?? '', { host });
+}
+function statusView(state, stage) {
+  const open = state.phase === 'open';
+  return html`${addressProblem ? html`<p class="robot-status-warn">${addressProblem}</p>` : nothing}
+    <p class="robot-status-line" data-stage=${stage}>
+      <strong>${copy.stage[stage]}</strong><span>${statusSentence(state, stage)}</span>
+    </p>
+    ${open ? identityView(state.hello) : nothing}
+    ${open && state.silent ? silentView(state.hello) : nothing}`;
+}
+
+function rateText(topic, hz) {
+  if (!topic) return '—';
+  if (!(hz > 0)) return copy.monitor.streamMissing;
+  return fillSentence(copy.monitor.streamRate, { hz: hz.toFixed(1) });
+}
+function streamRows(state) {
+  return Object.entries(state.hello.streams).map(
+    ([name, topic]) =>
+      html`<tr>
+        <th>${STREAM_LABEL[name] || name}</th>
+        <td>${topic ? html`<code>${topic}</code>` : copy.monitor.streamUnused}</td>
+        <td>${rateText(topic, state.rates[name])}</td>
+      </tr>`,
+  );
+}
+
+function showHeader(state, stage) {
+  const button = $('robotLinkOpen');
+  button.dataset.phase = state.phase;
+  button.dataset.stage = stage;
+  const name = state.phase === 'open' ? robotName(state.hello) : '';
+  $('robotLinkName').textContent = name;
+  $('robotLinkName').hidden = !name;
+  $('robotLinkState').textContent = copy.stage[stage];
+}
+// Until a link has worked, the address stays editable so a typo can be fixed while it retries.
+function showForm(state, stage) {
+  const linked = stage === 'open' || stage === 'reconnecting';
+  $('robotUrl').disabled = linked;
+  $('robotUrl').setAttribute('aria-invalid', addressProblem ? 'true' : 'false');
+  $('robotConnect').hidden = linked;
+  const stop = $('robotDisconnect');
+  stop.hidden = state.phase === 'idle';
+  stop.textContent = linked ? copy.buttons.disconnect : copy.buttons.cancel;
+}
+function resetMonitor() {
+  history = [];
+  if (cameraUrl) {
+    URL.revokeObjectURL(cameraUrl);
+    cameraUrl = '';
+  }
+  $('robotCamera').hidden = true;
+  $('robotCameraNote').textContent = copy.monitor.cameraNone;
+}
+
+function showState(state) {
+  const stage = linkStage(state);
+  const open = state.phase === 'open';
+  showHeader(state, stage);
+  showForm(state, stage);
+  $('robotStatus').dataset.stage = stage;
+  render(statusView(state, stage), $('robotStatus'));
+  $('robotMonitor').hidden = !open;
+  render(open ? streamRows(state) : nothing, $('robotStreams'));
+  if (!open) resetMonitor();
   requestRedraw();
+}
+
+// Buttons, not links: the location hash belongs to the lesson router.
+function jumpTo(id) {
+  const section = $(id);
+  const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  section.scrollIntoView({ block: 'start', behavior: smooth ? 'smooth' : 'auto' });
+  section.focus({ preventScroll: true });
+}
+function showDialogNav() {
+  const visible = DIALOG_SECTIONS.filter(([, id]) => !$(id).hidden);
+  const nav = $('robotDialogNav');
+  nav.hidden = !visible.length;
+  render(
+    visible.map(
+      ([key, id]) =>
+        html`<button type="button" class="quiet" @click=${() => jumpTo(id)}>
+          ${copy.nav[key]}
+        </button>`,
+    ),
+    nav,
+  );
 }
 
 // Lessons that offer a live measurement link here, so a learner who has not connected yet can
@@ -230,65 +333,88 @@ function showState(state) {
 function openRobotDialog() {
   $('robotDialog').showModal();
   showState(robotState());
+  showDialogNav();
+}
+
+function submitAddress(event) {
+  event.preventDefault();
+  try {
+    connectRobot($('robotUrl').value);
+    addressProblem = '';
+  } catch (error) {
+    addressProblem = error.message;
+  }
+  showState(robotState());
+}
+function clearAddressProblem() {
+  if (!addressProblem) return;
+  addressProblem = '';
+  showState(robotState());
+}
+
+function recordWheels(drive) {
+  const config = robotState().hello?.config;
+  if (!config || !Number.isFinite(drive.v) || !Number.isFinite(drive.w)) return;
+  // Both curves go through the same kinematics, so command and measurement share one sign convention
+  // (the raw per-wheel RPM cannot be compared directly: the right motor is mirrored on the wire).
+  const rpm = wheelRpm(drive, config);
+  const twist = latestRobot('twist');
+  const target =
+    twist &&
+    drive.stamp - twist.stamp < TWIST_FRESH_SECONDS &&
+    Number.isFinite(twist.linear) &&
+    Number.isFinite(twist.angular)
+      ? wheelRpm({ v: twist.linear, w: twist.angular }, config)
+      : { left: NaN, right: NaN };
+  const at = performance.now();
+  history.push({
+    at,
+    left: rpm.left,
+    right: rpm.right,
+    targetLeft: target.left,
+    targetRight: target.right,
+  });
+  while (history.length && at - history[0].at > HISTORY_SECONDS * 1000) history.shift();
+  requestRedraw();
+}
+function showCamera(blob) {
+  if (!$('robotDialog').open) return;
+  const next = URL.createObjectURL(blob);
+  const image = $('robotCamera');
+  image.onload = () => {
+    if (cameraUrl) URL.revokeObjectURL(cameraUrl);
+    cameraUrl = next;
+  };
+  image.src = next;
+  image.hidden = false;
+  $('robotCameraNote').textContent = copy.monitor.cameraLive;
+}
+
+function wireDialog() {
+  $('robotUrl').value = defaultRobotUrl();
+  $('robotUrl').oninput = clearAddressProblem;
+  $('robotLinkOpen').onclick = openRobotDialog;
+  $('robotClose').onclick = () => $('robotDialog').close();
+  $('robotForm').onsubmit = submitAddress;
+  $('robotDisconnect').onclick = disconnectRobot;
+  $('robotDialogNav').setAttribute('aria-label', copy.nav.label);
+  // drive-ui.js shows and hides its sections on its own schedule; follow them.
+  const observer = new MutationObserver(showDialogNav);
+  for (const [, id] of DIALOG_SECTIONS) observer.observe($(id), { attributeFilter: ['hidden'] });
 }
 
 function initLive() {
-  $('robotUrl').value = defaultRobotUrl();
-  $('robotLinkOpen').onclick = openRobotDialog;
-  $('robotClose').onclick = () => $('robotDialog').close();
-  $('robotForm').onsubmit = (event) => {
-    event.preventDefault();
-    try {
-      connectRobot($('robotUrl').value);
-    } catch (e) {
-      $('robotStatus').textContent = e.message;
-    }
-  };
-  $('robotDisconnect').onclick = disconnectRobot;
+  wireDialog();
   onRobot('state', showState);
   onRobot('scan', requestRedraw);
   onRobot('odom', requestRedraw);
   onRobot('twist', requestRedraw);
-  onRobot('drive', (drive) => {
-    const config = robotState().hello?.config;
-    if (!config || !Number.isFinite(drive.v) || !Number.isFinite(drive.w)) return;
-    // Both curves go through the same kinematics, so command and measurement share one sign convention
-    // (the raw per-wheel RPM cannot be compared directly: the right motor is mirrored on the wire).
-    const rpm = wheelRpm(drive, config);
-    const twist = latestRobot('twist');
-    const target =
-      twist &&
-      drive.stamp - twist.stamp < TWIST_FRESH_SECONDS &&
-      Number.isFinite(twist.linear) &&
-      Number.isFinite(twist.angular)
-        ? wheelRpm({ v: twist.linear, w: twist.angular }, config)
-        : { left: NaN, right: NaN };
-    const at = performance.now();
-    history.push({
-      at,
-      left: rpm.left,
-      right: rpm.right,
-      targetLeft: target.left,
-      targetRight: target.right,
-    });
-    while (history.length && at - history[0].at > HISTORY_SECONDS * 1000) history.shift();
-    requestRedraw();
-  });
-  onRobot('camera', (blob) => {
-    if (!$('robotDialog').open) return;
-    const next = URL.createObjectURL(blob);
-    const image = $('robotCamera');
-    image.onload = () => {
-      if (cameraUrl) URL.revokeObjectURL(cameraUrl);
-      cameraUrl = next;
-    };
-    image.src = next;
-    image.hidden = false;
-    $('robotCameraNote').textContent = 'ロボットのカメラの、いまの画像です';
-  });
+  onRobot('drive', recordWheels);
+  onRobot('camera', showCamera);
   showState(robotState());
+  showDialogNav();
   // Served by the bridge itself (http://<robot>:8897/): the robot is this very host, so connect right away.
-  // Listening is harmless; the link never sends anything to the robot.
+  // Listening is harmless; only drive-link.js ever sends, and only after its own checks.
   if (location.protocol === 'http:' && location.port === String(DEFAULT_PORT)) {
     try {
       connectRobot(`ws://${location.host}`);
