@@ -16,5 +16,10 @@
   { "click": "#behaviorPage [data-chapter=missing]" },
   { "input": "#behaviorPage [data-setting=searchRule]", "value": "search" },
   { "click": "#behaviorPage [data-sys-run]", "frames": 1100 },
-  { "input": "#behaviorPage [data-sys-seek]", "value": "40" }
+  { "input": "#behaviorPage [data-sys-seek]", "value": "40" },
+  { "click": "#behaviorPage [data-chapter=blocked]" },
+  { "input": "#behaviorPage [data-setting=blockedRule]", "value": "detour" },
+  { "input": "#behaviorPage [data-setting=timeout]", "value": "1.5" },
+  { "click": "#behaviorPage [data-sys-run]", "frames": 400 },
+  { "click": "#behaviorPage [data-sys-transition]", "frames": 200 }
 ]

@@ -23,5 +23,6 @@
   { "input": "#mechanicsPage [data-sys-seek]", "value": "5" },
   { "input": "#mechanicsPage [data-sys-chart]", "value": "2" },
   { "click": "#mechanicsPage [data-sys-transition]", "frames": 700 },
-  { "click": "#mechanicsPage [data-chapter=force]" }
+  { "click": "#mechanicsPage [data-chapter=force]" },
+  { "click": "#mechanicsPage [data-sys-quickrun]", "frames": 200 }
 ]
