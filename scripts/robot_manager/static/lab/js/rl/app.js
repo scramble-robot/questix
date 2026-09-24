@@ -20,6 +20,7 @@ const copy = await loadJson('content/rl/primer.json');
 const PRIMER_SEED = 71;
 const TRAINING_ROUNDS = 10;
 const EPISODES_PER_ROUND = 80; // 10 × 80 = the 800 runs the page footnote promises
+const TRAINING_PACE = 220; // ms per round, so the 800 runs take about 2 s and the curve can be watched
 const REPLAY_SPEED = 2; // times real time
 const NARROW_SCREEN = '(max-width: 900px)';
 const UNTRAINED_TRAIL = '#91a9b3';
@@ -33,6 +34,7 @@ const primer = {
   model: null,
   result: null,
   history: new Map(), // the last run per reward rule, kept for the comparison card
+  curves: new Map(), // total reward of every training run per reward rule, for the learning curve
   busy: false,
   playing: false,
   playToken: 0, // invalidates the frames of a replay that has been superseded
@@ -57,6 +59,19 @@ function buildModel() {
       toDistance: introDistance(example.state),
     },
     history: [...primer.history].map(([rule, run]) => ({ rule, run })),
+    curve: curveModel(),
+  };
+}
+
+// The rule being trained (or shown) as the learning curve, the other rule's last curve beside it.
+function curveModel() {
+  const current = primer.curves.get(primer.rule);
+  const other = [...primer.curves].find(([rule]) => rule !== primer.rule);
+  if (!current && !primer.busy) return null;
+  return {
+    total: TRAINING_ROUNDS * EPISODES_PER_ROUND,
+    current: current && { rule: primer.rule, rewards: [...current] },
+    previous: other && { rule: other[0], rewards: [...other[1]] },
   };
 }
 
@@ -171,10 +186,17 @@ async function learnPrimer() {
   primer.started = true;
   updateLabels();
   primer.model = new IntroLearner(primer.rule, introRandom(PRIMER_SEED));
+  primer.result = null;
+  primer.curves.set(primer.rule, primer.model.episodeRewards);
+  update();
+  if (window.matchMedia(NARROW_SCREEN).matches)
+    el('primerCurve')?.scrollIntoView({ block: 'start' });
   for (let round = 0; round < TRAINING_ROUNDS; round++) {
     primer.model.train(EPISODES_PER_ROUND);
-    // Yields to the browser so the page stays responsive while the robot practises.
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    update();
+    // Waits a moment between rounds so the learner can watch the reward curve grow; the training
+    // itself would finish in a fraction of a second.
+    await new Promise((resolve) => setTimeout(resolve, TRAINING_PACE));
   }
   primer.result = introRollout(primer.model);
   primer.history.set(primer.rule, primer.result);

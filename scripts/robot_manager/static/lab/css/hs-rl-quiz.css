@@ -1,1 +1,278 @@
 /* High-school readability pass: rl-quiz (see CONTRIBUTING.md, "Figures and charts"). */
+
+/* ------------------------------------------------ reinforcement learning: shared parts */
+
+/* The result of the last press, right under the buttons (press → see on a phone). */
+.rl-press-result {
+  margin: 10px 0 14px;
+  padding: 10px 12px;
+  border-left: 4px solid var(--role-actual);
+  border-radius: 8px;
+  background: var(--green-soft);
+  color: #1f4c45;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+}
+.rl-press-result[hidden] {
+  display: none;
+}
+
+/* Words defined where they are first used: tap to open the meaning in place. */
+.rl-terms {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 6px 8px;
+  margin: 10px 0 4px;
+  font-size: 13px;
+}
+.rl-terms > span {
+  color: var(--muted);
+  padding-top: 5px;
+}
+.rl-term,
+.basics-guide .rl-term {
+  display: inline-block;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.rl-term[open] {
+  display: block;
+  flex-basis: 100%;
+}
+.rl-term summary {
+  display: inline-block;
+  list-style: none;
+  cursor: pointer;
+  padding: 4px 10px;
+  border: 1px solid #b9cfca;
+  border-radius: 999px;
+  background: white;
+  color: var(--green);
+  font-weight: 700;
+}
+.rl-term summary::-webkit-details-marker {
+  display: none;
+}
+.rl-term summary::after {
+  content: ' ？';
+  color: var(--muted);
+  font-weight: 400;
+}
+.rl-term[open] summary {
+  background: var(--green-soft);
+}
+.rl-term[open] summary::after {
+  content: ' ×';
+}
+.rl-term > span {
+  display: block;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #f4f7f6;
+  color: #253a3f;
+  line-height: 1.6;
+}
+.rl-turn-note {
+  margin: -4px 0 0;
+}
+
+/* Estimates: the value before this step is a faint dotted bar behind the new one. */
+.rl-value-track {
+  height: 14px;
+}
+.rl-value-track i {
+  background: var(--role-actual);
+}
+.rl-value-track i.is-negative {
+  background: var(--orange);
+}
+.rl-value-track i.is-previous {
+  background: transparent;
+  border: 2px dotted var(--role-previous);
+  box-sizing: border-box;
+  border-radius: 3px;
+}
+.rl-value-scale {
+  margin-top: 0;
+}
+
+/* Learning curve: SVG lines stretched to the plot, HTML labels on top (curve-view.js). */
+.rl-curve-wrap {
+  padding: 14px 18px 4px;
+  background: white;
+  color: #253a3f;
+}
+.rl-curve {
+  margin: 0;
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+.rl-curve figcaption {
+  font-weight: 700;
+  font-size: 15px;
+}
+.rl-curve-ytitle,
+.rl-curve-xtitle {
+  color: var(--muted);
+  font-size: 12px;
+}
+.rl-curve-xtitle {
+  text-align: right;
+}
+.rl-curve-frame {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  grid-template-rows: 170px 20px;
+}
+.rl-curve-yticks,
+.rl-curve-xticks,
+.rl-curve-plot {
+  position: relative;
+}
+.rl-curve-yticks span {
+  position: absolute;
+  right: 6px;
+  transform: translateY(-50%);
+  font-size: 12px;
+  color: #4d6469;
+  font-variant-numeric: tabular-nums;
+}
+.rl-curve-xticks {
+  grid-column: 2;
+}
+.rl-curve-xticks span {
+  position: absolute;
+  top: 3px;
+  transform: translateX(-50%);
+  font-size: 12px;
+  color: #4d6469;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.rl-curve-xticks span:first-child {
+  transform: none;
+}
+.rl-curve-xticks span:last-child {
+  transform: translateX(-100%);
+}
+.rl-curve-plot {
+  border-left: 1px solid #4d6469;
+  border-bottom: 1px solid #4d6469;
+}
+.rl-curve-plot svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.rl-curve-grid {
+  stroke: #dbe4e6;
+  stroke-width: 1;
+}
+.rl-curve-zero {
+  stroke: #4d6469;
+  stroke-width: 2;
+}
+.rl-curve-end {
+  position: absolute;
+  transform: translate(8px, -50%);
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgb(255 255 255 / 88%);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  color: #253a3f;
+  pointer-events: none;
+}
+.rl-curve-end.is-flipped {
+  transform: translate(calc(-100% - 8px), -130%);
+}
+.rl-curve-end i {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 4px;
+  border-radius: 50%;
+  background: var(--line-color);
+}
+.rl-curve-end[data-role='previous'] {
+  color: #5f6f76;
+  font-weight: 400;
+}
+.rl-curve-end[data-role='previous'].is-flipped {
+  transform: translate(calc(-100% - 8px), 30%);
+}
+.rl-curve-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 12px;
+  text-align: center;
+  color: var(--muted);
+}
+
+/* The three start marks, in the same symbols and role colours as the canvas. */
+.rl-map-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+  padding: 8px 18px;
+  background: var(--dark);
+  color: #dfe8ea;
+  font-size: 13px;
+}
+.rl-map-key [data-outcome='arrived'] {
+  color: var(--scene-role-actual);
+}
+.rl-map-key [data-outcome='contact'] {
+  color: var(--scene-role-danger);
+}
+.rl-map-key [data-outcome='timeout'] {
+  color: var(--scene-role-target);
+}
+
+/* Scrolling to a figure keeps its heading clear of the sticky site header. */
+#rlFoundationLesson .basics-visual,
+#rlCurve,
+.intro-visual,
+#primerCurve,
+#labPage .step-nav,
+#trainingBoard,
+#arenaCard,
+#resultsBoard {
+  scroll-margin-top: 16px;
+}
+
+/* The chapter's topics are buttons: give the unselected one an outline and an arrow. */
+#rlTopics button:not([aria-pressed='true']) {
+  border: 1px solid #bdd2ce;
+  background: white;
+  color: var(--green);
+}
+#rlTopics button:not([aria-pressed='true'])::after {
+  content: ' →';
+}
+
+@media (max-width: 600px) {
+  .rl-curve-frame {
+    grid-template-rows: 150px 20px;
+  }
+  .rl-curve-wrap {
+    padding: 12px 12px 4px;
+  }
+  .rl-map-key {
+    padding: 8px 12px;
+  }
+}

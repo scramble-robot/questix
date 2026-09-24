@@ -3,6 +3,9 @@ import { formatNumber } from '../core/dom.js';
 import { lessonGuide, figureGuide } from '../shell/lesson-guide.js';
 import { ACTION_LABELS } from './foundations-core.js';
 import { fillSentence } from '../core/content.js';
+import { rewardCurveLayout } from './curve-core.js';
+import { curveChart } from './curve-view.js';
+import { OUTCOME_SYMBOLS } from './outcome-marks.js';
 
 // Templates of the reinforcement-learning foundation chapters. Every function is pure: it turns
 // the model built by foundations.js into markup. The learner-facing sentences come from
@@ -13,7 +16,9 @@ import { fillSentence } from '../core/content.js';
 
 const DESTINATION_BAR_FULL_SCALE = 4; // points of mean reward that fill a destination bar
 const SIGNED_CHART_CENTRE = 50; // percent: where zero sits on a chart that shows negative values
-const NEGATIVE_BAR_STYLE = 'background:#b27b42';
+// Points a training run can reach, kept on the curve's axis from the first point on, so the axis
+// does not move while the curve grows: arriving from the fixed start earns about 8 × 3.1 + 8.
+const CURVE_RANGE = [0, 35];
 const FRONT_BEARING = 0.02; // radians within which the goal counts as straight ahead
 const DEGREES_PER_RADIAN = 180 / Math.PI;
 
@@ -28,6 +33,23 @@ const helpDetails = (title, body) =>
     <summary>${title}</summary>
     <p>${body}</p>
   </details>`;
+// A word defined where it is first used: tapping it opens its meaning in place.
+const termChip = (term) =>
+  html`<details class="rl-term">
+    <summary>${term.term}</summary>
+    <span>${term.definition}</span>
+  </details>`;
+
+function termList(keys, copy) {
+  return html`<div class="rl-terms">
+    <span>${copy.termsLabel}</span>${keys.map((key) => termChip(copy.terms[key]))}
+  </div>`;
+}
+
+// The result of the last press, right under the buttons, so a phone shows it without scrolling.
+const pressResult = (text, id) =>
+  html`<p id=${id} class="rl-press-result" role="status" ?hidden=${!text}>${text}</p>`;
+
 const dialogDetails = (title, paragraphs) =>
   html`<details data-help-dialog>
     <summary>${title}</summary>
@@ -121,8 +143,9 @@ function topicsNav(model, actions) {
 // How a single evaluation run ended: the short form names the run in the list of twenty, the long
 // form reads as a sentence opener under the map.
 const runOutcome = (run, copy) => {
-  if (run.success) return copy.results.arrived;
-  return run.hit ? copy.results.contact : copy.results.timeout;
+  if (run.success) return OUTCOME_SYMBOLS.arrived + ' ' + copy.results.arrived;
+  if (run.hit) return OUTCOME_SYMBOLS.contact + ' ' + copy.results.contact;
+  return OUTCOME_SYMBOLS.timeout + ' ' + copy.results.timeout;
 };
 
 const runEnding = (run, copy) => {
@@ -175,20 +198,33 @@ function recordTable(earlier, later, copy) {
 
 // ------------------------------------------------------------- action values
 
-function barLeft(value, width, signedScale) {
-  if (!signedScale) return 0;
-  return value < 0 ? SIGNED_CHART_CENTRE - width : SIGNED_CHART_CENTRE;
+// Position of one bar on the track, in percent.
+function barGeometry(value, limit, signedScale) {
+  const width = (Math.abs(value) / limit) * (signedScale ? SIGNED_CHART_CENTRE : 100);
+  if (!signedScale) return { left: 0, width };
+  return { left: value < 0 ? SIGNED_CHART_CENTRE - width : SIGNED_CHART_CENTRE, width };
 }
 
-function chartRow([label, value, caption], limit, signedScale) {
-  const width = (Math.abs(value) / limit) * (signedScale ? SIGNED_CHART_CENTRE : 100);
-  const left = barLeft(value, width, signedScale);
-  const negative = value < 0 ? NEGATIVE_BAR_STYLE : '';
+function valueBar(value, limit, signedScale, previous) {
+  const { left, width } = barGeometry(value, limit, signedScale);
+  const classes = [previous ? 'is-previous' : '', value < 0 ? 'is-negative' : '']
+    .filter(Boolean)
+    .join(' ');
+  return html`<i class=${classes} style="left:${left}%;width:${width}%"></i>`;
+}
+
+function chartRow({ label, value, caption, previous }, limit, signedScale) {
+  const changed = previous !== undefined && previous !== value;
   return html`<div>
     <span>${label}</span>
     <div>
       <div class=${signedScale ? 'rl-value-track signed' : 'rl-value-track'}>
-        <i style="left:${left}%;width:${width}%;${negative}"></i>
+        ${changed ? valueBar(previous, limit, signedScale, true) : nothing}${valueBar(
+          value,
+          limit,
+          signedScale,
+          false,
+        )}
       </div>
       <small>${caption}</small>
     </div>
@@ -196,15 +232,27 @@ function chartRow([label, value, caption], limit, signedScale) {
   </div>`;
 }
 
-// Bars for the estimated value of every action. Negative estimates grow to the left of a centre
-// line, so the scale is only split in two when some value is actually negative.
-function valueChart(rows, max, copy) {
-  const signedScale = rows.some(([, value]) => value < 0);
-  const limit = Math.max(max, 1, ...rows.map(([, value]) => Math.abs(value)));
+// The longest bar is the largest estimate on screen (before or after this step), so even small
+// estimates such as 0.29 or −0.01 are visible; the scale is written under the bars.
+function valueLimit(rows) {
+  const sizes = rows.flatMap((row) => [row.value, row.previous ?? 0]).map(Math.abs);
+  const largest = Math.max(...sizes);
+  return largest > 0 ? largest : 1;
+}
+
+// Bars for the estimated value of every action, with the value before this step as a faint
+// dotted bar. Negative estimates grow to the left of a centre line, so the scale is only split
+// in two when some value is actually negative.
+function valueChart(rows, copy) {
+  const signedScale = rows.some((row) => row.value < 0 || row.previous < 0);
+  const limit = valueLimit(rows);
   return html`<div class="rl-value-chart">
       ${rows.map((row) => chartRow(row, limit, signedScale))}
     </div>
-    ${signedScale ? html`<p class="helper">${copy.chart.signedScaleNote}</p>` : nothing}`;
+    <p class="helper rl-value-scale">
+      ${fillSentence(copy.chart.valueScale, { limit: format(limit, 2) })}
+      ${signedScale ? copy.chart.signedScaleNote : ''}
+    </p>`;
 }
 
 // ------------------------------------------------- chapter "experience" (行動と報酬)
@@ -215,11 +263,23 @@ function bearingLabel(bearing) {
   return side + format(Math.abs(bearing) * DEGREES_PER_RADIAN, 0) + '°';
 }
 
+function experiencePress(chapter, text) {
+  const event = chapter.event;
+  if (!event) return '';
+  return fillSentence(text.pressResult, {
+    action: event.actionLabel,
+    from: format(event.fromDistance, 3),
+    to: format(event.toDistance, 3),
+    reward: signed(event.reward, 2),
+  });
+}
+
 function experienceControls(chapter, copy, actions) {
   const text = copy.experience;
   return html`<p class="eyebrow">${text.eyebrow}</p>
     <h2>${text.controlsTitle}</h2>
     <p>${text.controlsIntro}</p>
+    ${termList(['estimate', 'policy'], copy)}
     <div class="rl-action-buttons">
       ${ACTION_LABELS.map(
         (label, action) =>
@@ -233,6 +293,8 @@ function experienceControls(chapter, copy, actions) {
           </button>`,
       )}
     </div>
+    <p class="helper rl-turn-note">${text.turnNote}</p>
+    ${pressResult(experiencePress(chapter, text), 'rlActionResult')}
     <button
       id="rlAuto"
       class="primary full"
@@ -269,26 +331,28 @@ function experienceExtra(chapter, copy) {
   const text = copy.experience;
   const event = chapter.event;
   if (!event) return nothing;
-  const rows = ACTION_LABELS.map((label, action) => [
+  const rows = ACTION_LABELS.map((label, action) => ({
     label,
-    event.values[action],
-    action === event.action ? text.updatedAction : text.unchangedAction,
-  ]);
+    value: event.values[action],
+    previous: event.previousValues[action],
+    caption: action === event.action ? text.updatedAction : text.unchangedAction,
+  }));
   const wheels = fillSentence(text.wheels, {
     left: format(event.rpm[0], 0),
     right: format(event.rpm[1], 0),
   });
-  return html`<details>
+  // Open from the start: the estimates are what the robot learned from this step.
+  return html`<details open>
     <summary>${text.wheelsTitle}</summary>
-    <p>${wheels}</p>
-    ${valueChart(rows, Math.max(1, ...event.values), copy)}
+    ${valueChart(rows, copy)}
     <p class="helper">${text.valuesNote}</p>
+    <p>${wheels}</p>
   </details>`;
 }
 
 function experienceMetrics(chapter) {
   return [
-    ['目印までの距離', format(chapter.distance, 2) + ' m'],
+    ['届け先までの距離', format(chapter.distance, 2) + ' m'],
     ['機体から見た方向', bearingLabel(chapter.bearing)],
   ];
 }
@@ -346,6 +410,20 @@ function choiceMix(exploration) {
     <p>平均点で選ぶ ${Math.round(byMean)}% <span>ランダム ${Math.round(atRandom)}%</span></p>`;
 }
 
+function explorePress(chapter, text) {
+  if (!chapter.batch.length) return '';
+  const counts = text.destinations.map(
+    (letter, index) =>
+      letter + ' ' + chapter.batch.filter((delivery) => delivery.action === index).length + '回',
+  );
+  const total = chapter.batch.reduce((sum, delivery) => sum + delivery.reward, 0);
+  return fillSentence(text.pressResult, {
+    count: chapter.batch.length,
+    mix: counts.join('・'),
+    total,
+  });
+}
+
 function exploreControls(chapter, copy, actions) {
   const text = copy.explore;
   return html`<h2>${text.controlsTitle}</h2>
@@ -364,6 +442,7 @@ function exploreControls(chapter, copy, actions) {
     <button id="rlTryTen" class="primary full" @click=${actions.deliverBatch}>
       10回配達させる
     </button>
+    ${pressResult(explorePress(chapter, text), 'rlExploreResult')}
     <p id="rlExploreNext" class="rl-next-instruction">${chapter.nextHint}</p>
     <div class="rl-secondary-actions">
       <button id="rlTryOne" class="full" @click=${actions.deliverOnce}>1回だけ試す</button
@@ -505,11 +584,58 @@ function futureExtra(chapter, copy) {
 
 // ---------------------------------------------------------- chapter "test" (学習とテスト)
 
+const placeName = (startMode, copy) =>
+  startMode === 'fixed' ? copy.test.placeFixed : copy.test.placeVaried;
+
+// Mean reward per 50 training runs of the model being trained (or the last one), with the model
+// trained before it as a grey dotted line.
+function learningCurve(curve, copy) {
+  const text = copy.chart;
+  const lines = [];
+  if (curve.previous)
+    lines.push({
+      role: 'previous',
+      label: fillSentence(text.previousLine, { place: placeName(curve.previous.startMode, copy) }),
+      rewards: curve.previous.rewards,
+    });
+  if (curve.current)
+    lines.push({
+      role: 'actual',
+      label: fillSentence(text.currentLine, { place: placeName(curve.current.startMode, copy) }),
+      rewards: curve.current.rewards,
+    });
+  const layout = rewardCurveLayout(lines, curve.total, CURVE_RANGE);
+  return html`<div id="rlCurve" class="rl-curve-wrap">
+    ${curveChart(layout, {
+      title: text.curveTitle,
+      yTitle: text.curveY,
+      xTitle: text.curveX,
+      unit: '点',
+      empty: text.curveEmpty,
+      ariaLabel: text.curveTitle,
+    })}
+    <p class="helper">${text.curveNote}</p>
+  </div>`;
+}
+
+function testPress(chapter, copy) {
+  const text = copy.test;
+  if (chapter.training) return fillSentence(text.pressTraining, chapter.training);
+  if (chapter.result)
+    return fillSentence(text.pressResult, {
+      successes: chapter.result.successes,
+      contacts: chapter.result.contacts,
+      runs: chapter.result.runs.length,
+    });
+  return chapter.hasModel ? text.pressTrained : '';
+}
+
 function testControls(chapter, model, copy, actions) {
   const text = copy.test;
   return html`<p class="eyebrow">${text.eyebrow}</p>
     <h2>${text.controlsTitle}</h2>
     <p>${text.controlsIntro}</p>
+    ${termList(['model'], copy)}
     <label class="vision-select"
       >学習の開始位置<select
         id="rlTrainMode"
@@ -537,9 +663,22 @@ function testControls(chapter, model, copy, actions) {
     >
       学習済みの動きを20か所でテスト
     </button>
+    ${pressResult(testPress(chapter, copy), 'rlTestResult')}
     <p class="helper">${text.controlsNote}</p>
     ${helpDetails(text.differenceTitle, text.difference)}
     ${helpDetails(text.generalisationTitle, text.generalisation)}`;
+}
+
+// The three start marks of the test map, in the same symbols as the list of runs.
+function testMapKey(chapter, copy) {
+  if (!chapter.result) return nothing;
+  const text = copy.results;
+  return html`<p class="rl-map-key">
+    <span data-outcome="arrived">${OUTCOME_SYMBOLS.arrived} ${text.arrived}</span
+    ><span data-outcome="contact">${OUTCOME_SYMBOLS.contact} ${text.contact}</span
+    ><span data-outcome="timeout">${OUTCOME_SYMBOLS.timeout} ${text.timeout}</span
+    ><span data-outcome="selected">◯ ${text.selected}</span>
+  </p>`;
 }
 
 function testExplanation(chapter, copy) {
@@ -580,11 +719,27 @@ function testMetrics(chapter, copy) {
 
 // ------------------------------------------------------ chapter "transfer" (実機との違い)
 
+const timeText = (seconds) => (seconds === null ? '—' : format(seconds));
+
+function transferPress(chapter, copy) {
+  const text = copy.transfer;
+  if (chapter.training) return fillSentence(copy.test.pressTraining, chapter.training);
+  if (!chapter.result) return chapter.hasModel ? text.pressTrained : '';
+  const { normal, changed } = chapter.result;
+  return fillSentence(text.pressResult, {
+    normal: normal.successes,
+    changed: changed.successes,
+    normalTime: timeText(normal.meanTime),
+    changedTime: timeText(changed.meanTime),
+  });
+}
+
 function transferControls(chapter, model, copy, actions) {
   const text = copy.transfer;
   return html`<p class="eyebrow">${text.eyebrow}</p>
     <h2>${text.controlsTitle}</h2>
     <p>${text.controlsIntro}</p>
+    ${termList(['model', 'policy'], copy)}
     <button
       id="rlTransferTrain"
       class=${chapter.hasModel ? 'full' : 'primary full'}
@@ -613,6 +768,7 @@ function transferControls(chapter, model, copy, actions) {
     >
       同じモデルで通常・変更後をテスト
     </button>
+    ${pressResult(transferPress(chapter, copy), 'rlTransferResult')}
     <button
       id="rlTransferRetrain"
       class="full"
@@ -629,13 +785,23 @@ function transferFigure(chapter, copy) {
   const text = copy.transfer;
   if (!chapter.result)
     return html`<canvas id="rlRobotMap" role="img" aria-label=${text.mapLabel}></canvas>`;
+  const firstRun = (result) => {
+    const run = result.runs[0];
+    return runEnding(run, copy) + ' ' + format(run.time) + '秒';
+  };
   return html`<div class="rl-transfer-plots">
     <figure>
-      <figcaption>通常の車輪 · 左右100%</figcaption>
+      <figcaption>
+        通常の車輪 · 左右100%<br /><strong>${firstRun(chapter.result.normal)}</strong>
+      </figcaption>
       <canvas id="rlNormalMap" role="img" aria-label=${text.normalMapLabel}></canvas>
     </figure>
     <figure>
-      <figcaption>変更後 · 左${Math.round(chapter.result.gain * 100)}%</figcaption>
+      <figcaption>
+        変更後 · 左${Math.round(chapter.result.gain * 100)}%<br /><strong
+          >${firstRun(chapter.result.changed)}</strong
+        >
+      </figcaption>
       <canvas id="rlChangedMap" role="img" aria-label=${text.changedMapLabel}></canvas>
     </figure>
   </div>`;
@@ -721,7 +887,8 @@ function chapterFigure(model, copy) {
   if (chapter.kind === 'explore') return exploreFigure(chapter, copy);
   if (chapter.kind === 'future') return futureFigure(chapter, copy);
   if (chapter.kind === 'test')
-    return html`<canvas id="rlRobotMap" role="img" aria-label=${copy.test.mapLabel}></canvas>`;
+    return html`<canvas id="rlRobotMap" role="img" aria-label=${copy.test.mapLabel}></canvas>
+      ${testMapKey(chapter, copy)}${learningCurve(chapter.curve, copy)}`;
   return transferFigure(chapter, copy);
 }
 

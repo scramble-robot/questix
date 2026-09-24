@@ -38,8 +38,11 @@ const FUTURE_DISCOUNT = 0.9; // weight of the next state's estimate for the look
 const FUTURE_BATCH_EPISODES = 30;
 const TRAINING_ROUNDS = 10; // 10 × 80 = the 800 episodes the chapter text promises
 const EPISODES_PER_ROUND = 80;
+const TRAINING_PACE = 220; // ms per round, so 800 runs take about 2 s and the curve can be watched
+const NARROW_SCREEN = '(max-width: 900px)'; // controls sit above the figure below this width
 const NO_MOVEMENT = 0.0001; // metres below which a step counts as not having moved
 const MEAN_TIME_TOLERANCE = 0.1; // seconds a mean run time must grow by to count as slower
+const SAME_ARRIVALS_MARGIN = 1; // arrivals out of 20 that still count as "about the same"
 // Value table cells shown in the "future" chapter, as [state, action] of FutureLearner.q.
 const FUTURE_VALUE_CELLS = [
   [0, 0], // start → carry it nearby
@@ -70,11 +73,21 @@ const experience = {
 resetExperiencePose();
 const explore = { learner: new RouteLearner(), exploration: 0, batch: [] };
 const future = { immediate: new FutureLearner(0), lookAhead: new FutureLearner(FUTURE_DISCOUNT) };
-const test = { mode: 'fixed', model: null, result: null, previous: null, index: 0, notice: null };
+const test = {
+  mode: 'fixed',
+  model: null,
+  result: null,
+  previous: null,
+  index: 0,
+  notice: null,
+  previousCurve: null, // { rewards, startMode } of the model trained before the current one
+};
 const transfer = {
   model: null,
   variedWheels: false,
-  gain: 0.7, // fraction of the commanded movement the left wheel actually makes
+  // Fraction of the commanded movement the left wheel actually makes. At 50 % the arrivals hardly
+  // change but the runs take about twice as long, which is the point of the chapter.
+  gain: 0.5,
   result: null,
   previous: null,
   notice: null,
@@ -85,6 +98,7 @@ let topicId = FIRST_TOPIC;
 let openCoursePage = null; // handed in by initRLCurriculum
 let busy = false; // a model is training; every control is locked until it finishes
 let trainingStatus = '';
+let trainingModel = null; // the model being trained, so its learning curve can grow on screen
 
 const el = (id) => document.getElementById(id);
 const topicById = (id) => TOPICS.find((topic) => topic.id === id);
@@ -106,6 +120,7 @@ function experienceEvent() {
     movement: movementSentence(before.distance, after.distance),
     rpm: after.rpm,
     values: event.after,
+    previousValues: event.before,
     change: event.change,
   };
 }
@@ -208,16 +223,39 @@ function futureStatus() {
   return future.lookAhead.policy() === 'delivery' ? text.delivery : text.near;
 }
 
+// How far the model being trained has got, or null when nothing is training.
+function trainingProgress() {
+  if (!busy || !trainingModel) return null;
+  return { episodes: trainingModel.episodes, total: TRAINING_ROUNDS * EPISODES_PER_ROUND };
+}
+
+// The learning curve of the test chapter: the run being trained (or the last one) and the one
+// trained before it, as the total reward of every run.
+function testCurve() {
+  const current = busy && topicId === 'test' ? trainingModel : test.model;
+  return {
+    total: TRAINING_ROUNDS * EPISODES_PER_ROUND,
+    current: current && {
+      rewards: [...current.episodeRewards],
+      startMode: current.options.startMode,
+    },
+    previous: test.previousCurve,
+  };
+}
+
 function testChapter() {
   const model = test.model;
   return {
     kind: 'test',
+    busy,
     mode: test.mode,
     hasModel: Boolean(model),
     trainedModel: model ? { episodes: model.episodes, startMode: model.options.startMode } : null,
+    training: trainingProgress(),
     result: test.result,
     previous: test.previous,
     index: test.index,
+    curve: testCurve(),
   };
 }
 
@@ -242,6 +280,8 @@ function testStatus() {
 function transferChapter() {
   return {
     kind: 'transfer',
+    busy,
+    training: trainingProgress(),
     gainPercent: Math.round(transfer.gain * 100),
     hasModel: Boolean(transfer.model),
     variedWheels: transfer.variedWheels,
@@ -258,12 +298,27 @@ function retrainDidNotHelp(result) {
   return result.changed.meanTime > previous.changed.meanTime + MEAN_TIME_TOLERANCE;
 }
 
+// True when the changed wheel kept (almost) every arrival but made the runs clearly longer.
+function onlySlower(result) {
+  const { normal, changed } = result;
+  if (normal.meanTime === null || changed.meanTime === null) return false;
+  if (Math.abs(normal.successes - changed.successes) > SAME_ARRIVALS_MARGIN) return false;
+  return changed.meanTime > normal.meanTime + MEAN_TIME_TOLERANCE;
+}
+
 function transferStatus() {
   const text = copy.transfer.status;
   if (transfer.notice) return transfer.notice;
   const result = transfer.result;
   if (!result) return transfer.model ? text.trained : text.initial;
   if (retrainDidNotHelp(result)) return text.noImprovement;
+  if (onlySlower(result))
+    return fillSentence(text.slower, {
+      normal: result.normal.successes,
+      changed: result.changed.successes,
+      normalTime: result.normal.meanTime.toFixed(1),
+      changedTime: result.changed.meanTime.toFixed(1),
+    });
   return fillSentence(text.compared, {
     normal: result.normal.successes,
     changed: result.changed.successes,
@@ -396,21 +451,32 @@ async function trainModel(startMode, varyWheels, keepModel) {
   if (busy) return;
   trainingStatus = CHAPTERS[topicId].status(); // keep what the learner is reading for now
   busy = true;
-  update();
   const model = newTrainingModel(startMode, varyWheels);
+  trainingModel = model;
+  update();
+  revealFigure();
   try {
     for (let round = 0; round < TRAINING_ROUNDS; round++) {
       model.train(EPISODES_PER_ROUND);
       trainingStatus = model.episodes + copy.training.progress;
       update();
-      // Yields to the browser so the progress message is painted between rounds.
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      // Waits a moment between rounds so the learner can watch the curve grow; the training
+      // itself would finish in a fraction of a second.
+      await new Promise((resolve) => setTimeout(resolve, TRAINING_PACE));
     }
     keepModel(model);
   } finally {
     busy = false;
+    trainingModel = null;
     update();
   }
+}
+
+// Press → see: on a phone the controls sit above the figure, so the figure is brought on screen
+// when a button starts something to watch there.
+function revealFigure() {
+  if (!window.matchMedia(NARROW_SCREEN).matches) return;
+  document.querySelector('#rlFoundationLesson .basics-visual').scrollIntoView({ block: 'start' });
 }
 
 // ----------------------------------------------------------------- actions
@@ -509,6 +575,11 @@ const actions = {
     // Training always starts from an empty table, so an earlier result becomes the comparison.
     trainModel(test.mode, false, (model) => {
       if (test.result) test.previous = test.result;
+      if (test.model)
+        test.previousCurve = {
+          rewards: [...test.model.episodeRewards],
+          startMode: test.model.options.startMode,
+        };
       test.model = model;
       test.result = null;
     });
@@ -522,6 +593,7 @@ const actions = {
     };
     test.index = 0;
     update();
+    revealFigure();
   },
   showTrial(index) {
     test.notice = null;
@@ -566,6 +638,7 @@ const actions = {
       label: transfer.variedWheels ? copy.transfer.trainedVaried : copy.transfer.trainedNormal,
     };
     update();
+    revealFigure();
   },
 };
 

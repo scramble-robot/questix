@@ -102,6 +102,7 @@ class IntroLearner {
     this.episodes = 0;
     this.steps = 0;
     this.example = null; // the first clearly rewarded step, shown by the primer
+    this.episodeRewards = []; // total reward of every training run, for the learning curve
   }
 
   // Observation index: distance bin × bearing bin.
@@ -157,15 +158,18 @@ class IntroLearner {
       EXPLORATION_MIN,
       EXPLORATION_START - this.episodes / EXPLORATION_DECAY_EPISODES,
     );
+    let total = 0;
     for (let step = 0; step < EPISODE_STEPS; step++) {
       const action = this.choose(pose, epsilon);
       const outcome = introStep(pose, action, this.rule, physics);
       const change = this.update(pose, action, outcome);
+      total += outcome.reward;
       if (!this.example && outcome.reward > EXAMPLE_MIN_REWARD && !outcome.done)
         this.example = { from: { ...pose }, action, ...outcome, ...change };
       pose = outcome.state;
       if (outcome.done) break;
     }
+    this.episodeRewards.push(total);
     this.episodes++;
   }
 
@@ -198,4 +202,32 @@ function introRollout(model, random = introRandom(41), options = {}) {
   return { trace, success, hit, score, time: trace.at(-1).time, distance: introDistance(pose) };
 }
 
-export { introRandom, introDistance, introStep, IntroLearner, introRollout };
+const IN_PLACE = 0.001; // metres a step may move and still count as turning on the spot
+
+/** Whole turns a traced run made in total, counting left and right turns alike. */
+function introTurns(trace) {
+  let angle = 0;
+  for (let index = 1; index < trace.length; index++)
+    angle += Math.abs(wrapAngle(trace[index].theta - trace[index - 1].theta));
+  return angle / (2 * Math.PI);
+}
+
+/** The poses of a trace reached by turning on the spot (heading changed, position did not). */
+function turnsInPlace(trace) {
+  return trace.filter((pose, index) => {
+    if (index === 0) return false;
+    const before = trace[index - 1];
+    const moved = Math.hypot(pose.x - before.x, pose.y - before.y);
+    return moved < IN_PLACE && pose.theta !== before.theta;
+  });
+}
+
+export {
+  introRandom,
+  introDistance,
+  introStep,
+  IntroLearner,
+  introRollout,
+  introTurns,
+  turnsInPlace,
+};

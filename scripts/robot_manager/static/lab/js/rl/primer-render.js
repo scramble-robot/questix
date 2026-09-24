@@ -1,4 +1,7 @@
 import { drawRobot } from '../core/renderer.js';
+import { SCENE_ROLE_COLORS } from '../core/palette.js';
+import { turnsInPlace } from './intro.js';
+import { sceneFontSize } from './outcome-marks.js';
 
 // Canvas drawing for the reward primer: one run of the robot across the room, optionally stopped
 // part-way through so the two runs can be replayed side by side. Holds no state.
@@ -11,7 +14,11 @@ const GOAL = { x: 3.9, y: 1.5 }; // metres
 const GOAL_RADIUS = 24; // pixels
 const GOAL_LABEL = '届け先';
 const GOAL_LABEL_RISE = 40; // pixels above the goal centre
+const GOAL_LABEL_SIZE = 22; // pixels on the full-size canvas, raised when it is shown smaller
 const TIME_LABEL_AT = { x: 40, y: 385 }; // pixels
+const TIME_LABEL_SIZE = 19; // pixels on the full-size canvas
+const HEADING_ARROW = 80; // pixels: reaches past the robot drawing so a spin shows as a fan
+const HEADING_ARROW_ALPHA = 0.45;
 const TRACE_WIDTH = 3; // pixels
 // Shown before a run exists, so both canvases start from the same pose.
 const START_POSE = { x: 0.8, y: 1.5, theta: -Math.PI / 2, left: 0, right: 0, time: 0 };
@@ -36,7 +43,13 @@ function drawArena(context) {
   );
 }
 
-function drawGoal(context) {
+// How many canvas pixels one CSS pixel spans; the canvas is 600 wide but may be shown at 170 px.
+function unitsPerPixel(canvas) {
+  const width = canvas.getBoundingClientRect().width;
+  return width > 0 ? PLOT.width / width : 1;
+}
+
+function drawGoal(context, scale) {
   const goal = toPixels(GOAL);
   context.setLineDash([6, 5]);
   context.strokeStyle = COLOURS.goal;
@@ -48,16 +61,38 @@ function drawGoal(context) {
   context.stroke();
   context.setLineDash([]);
   context.fillStyle = COLOURS.goal;
-  context.font = '22px system-ui';
+  context.font = sceneFontSize(GOAL_LABEL_SIZE, scale) + 'px system-ui';
   context.textAlign = 'center';
   context.fillText(GOAL_LABEL, goal.x, goal.y - GOAL_LABEL_RISE);
+}
+
+// A line in the heading of every turn made on the spot: one spin is a single line, a run that
+// only spins becomes a fan around the robot.
+function drawTurnArrows(context, poses) {
+  context.save();
+  context.strokeStyle = SCENE_ROLE_COLORS.actual;
+  context.globalAlpha = HEADING_ARROW_ALPHA;
+  context.lineWidth = 3;
+  context.lineCap = 'round';
+  for (const pose of turnsInPlace(poses)) {
+    const point = toPixels(pose);
+    context.beginPath();
+    context.moveTo(point.x, point.y);
+    context.lineTo(
+      point.x + Math.cos(pose.theta) * HEADING_ARROW,
+      point.y + Math.sin(pose.theta) * HEADING_ARROW,
+    );
+    context.stroke();
+  }
+  context.restore();
 }
 
 // Draws the run up to `time` seconds, or all of it when no limit is given.
 function drawPrimerRun(canvas, { run, time = Infinity, trail, startLabel }) {
   const context = canvas.getContext('2d');
+  const scale = unitsPerPixel(canvas);
   drawArena(context);
-  drawGoal(context);
+  drawGoal(context, scale);
   const trace = run?.trace || [START_POSE];
   const index = Math.max(
     0,
@@ -72,10 +107,11 @@ function drawPrimerRun(canvas, { run, time = Infinity, trail, startLabel }) {
     else context.lineTo(point.x, point.y);
   });
   context.stroke();
+  drawTurnArrows(context, trace.slice(0, index + 1));
   const pose = trace[index];
   drawRobot(context, toPixels(pose), pose);
   context.fillStyle = '#8fa8b0';
-  context.font = '19px system-ui';
+  context.font = sceneFontSize(TIME_LABEL_SIZE, scale) + 'px system-ui';
   context.textAlign = 'left';
   const label = run ? Math.min(time, run.time).toFixed(1) + ' 秒' : startLabel;
   context.fillText(label, TIME_LABEL_AT.x, TIME_LABEL_AT.y);
