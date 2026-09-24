@@ -5,8 +5,10 @@ import { driveReadiness, limitCommand } from './drive-core.js';
 // `controller(elapsed, robot)` function and hand it to `runDrive`; this module repeats the command
 // ten times a second (the bridge's dead-man timeout is 0.5 s), watches whether the bridge still
 // lets this page drive, and sends "stop" whenever the run ends for any reason: finished, the
-// learner's stop, the page hidden or closed, Esc, the link lost. Any page can stop any run
-// (`stopDrive`), which is why every connected page shows the stop bar while the robot drives.
+// learner's stop, the page hidden or closed, Esc, the link lost. A run that ends on this page sends
+// a stop scoped to this page (`scope: 'mine'`), so a refused request can never end another pupil's
+// run; the stop bar (`stopDrive`) is the one deliberate way to stop any run, which is why every
+// connected page shows it while the robot drives.
 
 const HEARTBEAT_MS = 100;
 // The bridge answers the first command with a drive_state naming this page as the owner.
@@ -26,7 +28,12 @@ function notify() {
 /** Everything a view needs: driveReadiness plus whether this page runs something itself. */
 function driveModel() {
   const link = robotState();
-  const readiness = driveReadiness({ link, driveState: latestRobot('drive_state'), confirmed });
+  const readiness = driveReadiness({
+    link,
+    driveState: latestRobot('drive_state'),
+    confirmed,
+    runningHere: Boolean(current),
+  });
   return { ...readiness, confirmed, running: Boolean(current) };
 }
 
@@ -42,11 +49,14 @@ function confirmDriveSafety(value) {
   notify();
 }
 
-// Stop the robot, whichever page drives it. Always allowed, even without a run of our own.
+// Stop the robot, whichever page drives it (the stop bar). Always allowed.
 function stopDrive() {
   sendRobot({ type: 'stop' });
   current?.finish('stopped');
 }
+
+// Stop this page's own run only; the bridge ignores it when another page drives.
+const stopMine = () => sendRobot({ type: 'stop', scope: 'mine' });
 
 /**
  * Run `controller(elapsed, robot)` on the robot for at most `seconds`. `robot` has the latest
@@ -55,16 +65,17 @@ function stopDrive() {
  * an Error to end it with that message (result reason `failed`, e.g. "the wall is too close").
  *
  * Resolves with `{reason, by, elapsed}` whatever happened — `done` when the controller or the time
- * ran out, `stopped`, `hidden`, `lost`, `refused` (with `blockers`), or the bridge's own reason
- * (`timeout`, `time_limit`, `emergency_stop`, `other_publisher`, …). Never rejects: stopping is a
- * normal outcome, and the lesson says what happened.
+ * ran out, `stopped`, `hidden`, `lost`, `refused` (with `blockers`), `no_answer` (the bridge did
+ * not confirm the start in time), or the bridge's own reason (`timeout`, `time_limit`,
+ * `emergency_stop`, `other_publisher`, …). Never rejects: stopping is a normal outcome, and the
+ * lesson says what happened. `started` tells whether the bridge ever let this page drive.
  */
 function runDrive({ controller, seconds, signal }) {
   const readiness = driveModel();
+  if (current)
+    return Promise.resolve({ reason: 'refused', blockers: [{ code: 'running_here' }], elapsed: 0 });
   if (!readiness.ready)
     return Promise.resolve({ reason: 'refused', blockers: readiness.blockers, elapsed: 0 });
-  if (current)
-    return Promise.resolve({ reason: 'refused', blockers: [{ code: 'busy' }], elapsed: 0 });
   return new Promise((resolve) => {
     const startedAt = performance.now();
     const elapsed = () => (performance.now() - startedAt) / 1000;
@@ -77,10 +88,12 @@ function runDrive({ controller, seconds, signal }) {
       clearInterval(timer);
       for (const off of unsubscribe) off();
       signal?.removeEventListener('abort', abort);
-      // A run that ends on this page tells the bridge at once instead of waiting for the dead-man.
-      if (!['stopped_by_bridge', 'lost'].includes(extra.kind)) sendRobot({ type: 'stop' });
+      // A run that ends on this page tells the bridge at once instead of waiting for the dead-man;
+      // scoped to this page, so a refused request cannot stop someone else's run.
+      if (!['stopped_by_bridge', 'lost'].includes(extra.kind)) stopMine();
       notify();
       resolve({
+        started: run.started,
         reason,
         by: extra.by ?? null,
         blockers: extra.blockers,
@@ -120,8 +133,8 @@ function runDrive({ controller, seconds, signal }) {
       const limited = limitCommand(command, driveModel().limits);
       if (!sendRobot({ type: 'drive', linear: limited.linear, angular: limited.angular }))
         return finish('lost', { kind: 'lost' });
-      if (!run.started && now * 1000 > START_TIMEOUT_MS)
-        finish('refused', { blockers: driveModel().blockers });
+      // No confirmation yet: the robot may be moving (a busy Wi-Fi), so this is not a refusal.
+      if (!run.started && now * 1000 > START_TIMEOUT_MS) finish('no_answer');
     };
     unsubscribe.push(
       onRobot('drive_state', (state) => {
@@ -161,9 +174,10 @@ function initDriveLink() {
   window.addEventListener('pagehide', () => {
     if (current) current.finish('hidden');
   });
-  // Esc stops the robot from anywhere on the page, whoever drives it.
+  // Esc stops this page's own run from anywhere on the page. It never stops another pupil's run:
+  // Esc also closes dialogs, and closing one must not end someone else's experiment.
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && driveModel().active) stopDrive();
+    if (event.key === 'Escape' && current) current.finish('stopped');
   });
 }
 

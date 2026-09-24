@@ -269,32 +269,70 @@
 
 /* Driving the robot from a lesson (js/live/drive-view.js, drive-ui.js). Orange marks everything
    that moves the robot; the stop controls are red and large enough to hit without aiming. */
-.drive-block {
-  border-top: 1px solid var(--line);
-  padding-top: 10px;
+.live-block {
   display: grid;
-  gap: 8px;
+  gap: 12px;
+  margin: 12px 0;
+}
+.live-block > .live-capture {
+  margin: 0;
+}
+.drive-block {
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--orange);
+  border-radius: var(--radius);
+  background: white;
+  padding: 14px 16px;
+  display: grid;
+  gap: 10px;
+}
+.drive-block p {
+  margin: 0;
 }
 .drive-block h4 {
   margin: 0;
   color: var(--orange);
 }
+.drive-block-off {
+  border-left-color: var(--line);
+  background: #f7f9f8;
+}
+.drive-placement {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fff4e5;
+}
 .drive-blockers {
   margin: 0;
-  padding-left: 1.3em;
+  padding: 10px 12px 10px 30px;
+  border-left: 4px solid #c62828;
+  border-radius: 8px;
+  background: #fff4e5;
+  color: var(--dark);
+  font-size: 14px;
   display: grid;
   gap: 4px;
-  color: var(--orange);
+}
+.drive-teacher {
+  font-size: 13px;
+  color: #4d6469;
+}
+.drive-teacher summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.drive-teacher p {
+  margin: 6px 0 0;
 }
 .drive-relaunch {
   display: block;
   margin-top: 4px;
   padding: 6px 8px;
   border-radius: 8px;
-  background: white;
+  background: #f3f5f4;
   color: var(--dark);
   font-size: 12px;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   user-select: all;
 }
 .drive-ready {
@@ -312,15 +350,33 @@
   width: 18px;
   height: 18px;
   flex: none;
+  accent-color: var(--orange);
 }
 .drive-note {
-  font-size: 12px;
+  font-size: 13px;
+  color: #4d6469;
+}
+.drive-actions {
+  align-items: center;
+}
+/* The main action of the block: filled, so it reads before the file buttons around it. */
+.drive-start:not(:disabled) {
+  font-weight: 700;
+  background: var(--orange);
+  border-color: var(--orange);
+  color: white;
+}
+.drive-start:disabled {
   color: var(--muted);
 }
-.drive-start {
-  font-weight: 700;
-  border-color: var(--orange);
-  color: var(--orange);
+.drive-why {
+  flex-basis: 100%;
+  font-size: 14px;
+  color: #4d6469;
+}
+.drive-result {
+  font-weight: 600;
+  color: var(--dark);
 }
 .drive-stop,
 .drive-bar-stop {
@@ -337,7 +393,7 @@
   font-weight: 600;
 }
 
-/* The stop bar: above everything, including open dialogs' backdrops. */
+/* The stop bar: above everything, moved into an open modal dialog while one is open. */
 .drive-bar-host {
   position: fixed;
   left: 0;
@@ -351,7 +407,6 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  flex-wrap: wrap;
   gap: 12px;
   padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
   background: #fff4e5;
@@ -359,6 +414,7 @@
   box-shadow: 0 -6px 18px rgba(16, 40, 50, 0.18);
 }
 .drive-bar-dot {
+  flex: none;
   width: 12px;
   height: 12px;
   border-radius: 50%;
@@ -373,6 +429,30 @@
 @media (prefers-reduced-motion: reduce) {
   .drive-bar-dot {
     animation: none;
+  }
+}
+/* No Esc key on a touch screen. */
+@media (hover: none) {
+  .drive-bar-esc {
+    display: none;
+  }
+}
+/* While the bar is up, the page and open dialogs keep room below their last buttons. */
+body.driving,
+body.driving dialog[open] {
+  padding-bottom: 96px;
+}
+@media (max-width: 560px) {
+  .drive-bar {
+    justify-content: space-between;
+    padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+  }
+  .drive-bar strong {
+    font-size: 14px;
+    line-height: 1.4;
+  }
+  .drive-bar-stop {
+    min-width: 96px;
   }
 }
 
@@ -390,18 +470,19 @@
 }
 .drive-bench-speeds {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 8px 16px;
-}
-.drive-bench-speed {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: max-content minmax(0, 1fr) 7em;
   align-items: center;
-  gap: 8px;
+  gap: 8px 12px;
+}
+/* The label's parts join the parent grid, so both sliders start at the same x. */
+.drive-bench-speed {
+  display: contents;
+}
+.drive-bench-speed input {
+  accent-color: var(--orange);
 }
 .drive-bench-speed output {
   font-variant-numeric: tabular-nums;
-  min-width: 6em;
   text-align: right;
 }
 .drive-bench-pad {
@@ -418,7 +499,9 @@
 }
 .drive-bench-move {
   min-height: 56px;
+  padding: 8px 4px;
   font-weight: 700;
+  white-space: nowrap;
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;

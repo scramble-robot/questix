@@ -87,3 +87,25 @@ test("the output is scaled to the bridge's limit when that is lower", () => {
   const command = controller(0, robotAt(wallScan(2, 0), 0, { linear: 0.1, angular: 1 }));
   assert.ok(Math.abs(command.linear - 0.1) < 1e-9);
 });
+
+test('the wall run ends by itself once the robot holds the stop distance', () => {
+  const controller = wallApproach(
+    { kp: 1.2, ki: 0, kd: 0.3, filter: 0, antiWindup: true },
+    MESSAGES,
+  );
+  let distance = 1.5;
+  let v = 0;
+  let time = 0;
+  let command = { linear: 0 };
+  while (command && time < 30) {
+    command = controller(time, { ...robotAt(wallScan(distance, time)), drive: { v } });
+    if (!command) break;
+    v = command.linear;
+    distance -= v * 0.2;
+    time += 0.2;
+  }
+  assert.equal(command, null, 'the controller ended the run');
+  assert.equal(controller.result.settled, true);
+  assert.ok(Math.abs(controller.result.distance - STOP_DISTANCE) < 0.05);
+  assert.ok(time < 16, `settled after ${time.toFixed(1)} s`);
+});

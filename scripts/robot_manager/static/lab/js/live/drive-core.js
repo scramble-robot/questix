@@ -17,6 +17,8 @@ const DRIVE_BLOCKERS = [
   'other_publisher', // the controller (or anything else) publishes /target_twist
   'emergency_stop',
   'busy', // another page drives the robot
+  'running_here', // this page already runs something (another block, the bench test)
+  'missing_streams', // the lesson needs a stream the robot does not send (added by live-session)
   'unconfirmed', // the learner has not confirmed the surroundings are clear
 ];
 
@@ -26,7 +28,7 @@ const DRIVE_BLOCKERS = [
  * Returns `{ready, blockers: [{code, nodes}], owner: 'me' | 'other' | null, active, limits,
  * lastStop}`; `owner` is who drives the robot at the moment, whatever this page wants.
  */
-function driveReadiness({ link, driveState, confirmed }) {
+function driveReadiness({ link, driveState, confirmed, runningHere = false }) {
   const blockers = [];
   const connected = link?.phase === 'open';
   if (!connected) blockers.push({ code: 'no_link', nodes: null });
@@ -39,6 +41,7 @@ function driveReadiness({ link, driveState, confirmed }) {
   const active = Boolean(state?.active);
   const owner = ownerOf(state, link?.session);
   if (owner === 'other') blockers.push({ code: 'busy', nodes: null });
+  if (runningHere) blockers.push({ code: 'running_here', nodes: null });
   if (!confirmed) blockers.push({ code: 'unconfirmed', nodes: null });
   blockers.sort((a, b) => DRIVE_BLOCKERS.indexOf(a.code) - DRIVE_BLOCKERS.indexOf(b.code));
   return {

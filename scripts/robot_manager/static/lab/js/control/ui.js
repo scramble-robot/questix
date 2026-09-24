@@ -388,8 +388,33 @@ const RUN_OF = { speed: speedRun, distance: distanceRun };
 function applyRecording(kind, recording) {
   const { run, note } = RUN_OF[kind](recording);
   if (!run) return { ok: false, note };
+  keepPrevious(kind);
   liveRuns[kind] = run;
+  liveLabels[kind] = liveRunLabel(kind, recording);
   return { ok: true, note };
+}
+
+// A new real run pushes the one on screen into the comparison lines (with the settings it was run
+// with), so tuning a gain on the robot compares like with like instead of overwriting the last try.
+const liveLabels = { speed: '', distance: '' };
+
+function liveRunLabel(kind, recording) {
+  const config = experiment().config;
+  const settings = kind === 'distance' ? gainsText(config) : '';
+  const recorded = new Date(recording.recordedAt);
+  const time = Number.isNaN(recorded.getTime())
+    ? ''
+    : recorded.toLocaleTimeString('ja-JP', { timeStyle: 'short' });
+  return fill(copy.live.previousRun, { time, settings }).trim();
+}
+
+function keepPrevious(kind) {
+  if (!liveRuns[kind]) return;
+  comparedRuns[kind].unshift({
+    name: liveLabels[kind] || copy.live.compareThis,
+    run: liveRuns[kind],
+  });
+  comparedRuns[kind].length = Math.min(comparedRuns[kind].length, MAX_COMPARED);
 }
 
 // Other groups' recordings, drawn next to this one so a class can compare machines and drivers.
@@ -432,10 +457,11 @@ function comparisonRows() {
     add(copy.live.compareSimulation, current.result.samples, 'actual', current.result.target);
   const liveTarget = (run) => (distance ? STOP_DISTANCE : run.samples[0].target);
   if (liveRuns[kind])
-    add(copy.live.compareThis, liveRuns[kind], 'measured', liveTarget(liveRuns[kind]));
+    add(copy.live.compareThis, judged(liveRuns[kind]), 'measured', liveTarget(liveRuns[kind]));
   for (const entry of comparedRuns[kind])
-    add(entry.name, entry.run, 'measured', liveTarget(entry.run));
-  return rows;
+    add(entry.name, judged(entry.run), 'measured', liveTarget(entry.run));
+  // A run too short to judge has no metrics; it is left out of the table rather than shown empty.
+  return rows.filter((row) => row.metrics);
 }
 
 // Driving the real robot from this card (live-drive.js): the speed of the real step input, and
@@ -454,17 +480,22 @@ function stepSpeedOptions() {
   }));
 }
 
+const gainsText = (config) =>
+  fill(copy.live.driveGains, { kp: config.kp, ki: config.ki, kd: config.kd });
+
 const speedDrive = {
   startLabel: undefined,
-  program: () => {
-    const step = speedStep(liveStepSpeed);
-    return fill(copy.live.driveSpeedProgram, {
+  program: () =>
+    fill(copy.live.driveSpeedProgram, {
       speed: liveStepSpeed.toFixed(1),
       hold: STEP_HOLD,
-      distance: (step.distance + 0.5).toFixed(1),
       target: experiment().config.targetRPM,
-    });
-  },
+    }),
+  placement: () =>
+    fill(copy.live.driveSpeedPlacement, {
+      distance: (speedStep(liveStepSpeed).distance + 0.5).toFixed(1),
+    }),
+  conditions: () => `${liveStepSpeed.toFixed(1)} m/s`,
   plan: () => {
     const step = speedStep(liveStepSpeed);
     return { controller: step.controller, seconds: step.seconds, tail: 1 };
@@ -478,24 +509,40 @@ const wallMessages = () => ({
   hit: fill(copy.live.driveWallHit, { gap: WALL_MIN_GAP.toFixed(2) }),
 });
 
+function wallOutcome(result) {
+  if (result.settled) return copy.live.driveWallSettled;
+  if (result.distance === null) return '';
+  return fill(copy.live.driveWallNotSettled, { distance: result.distance.toFixed(2) });
+}
+
 const wallDrive = {
   startLabel: copy.live.driveWallStart,
-  program: () => {
-    const config = experiment().config;
-    return fill(copy.live.driveWallProgram, {
-      kp: config.kp,
-      ki: config.ki,
-      kd: config.kd,
+  program: () =>
+    fill(copy.live.driveWallProgram, {
+      gains: gainsText(experiment().config),
       top: WALL_MAX_SPEED.toFixed(2),
-      start: WALL_START_MIN.toFixed(1),
       gap: WALL_MIN_GAP.toFixed(2),
-    });
+    }),
+  placement: () => fill(copy.live.driveWallPlacement, { start: WALL_START_MIN.toFixed(1) }),
+  conditions: () => gainsText(experiment().config),
+  plan: () => {
+    const controller = wallApproach({ ...experiment().config }, wallMessages());
+    return {
+      controller,
+      seconds: WALL_SECONDS,
+      tail: 1,
+      outcome: () => wallOutcome(controller.result),
+      references: {
+        front: [
+          { value: STOP_DISTANCE, label: fill(copy.live.driveTargetLine, { value: '0.50' }) },
+          {
+            value: WALL_MIN_GAP,
+            label: fill(copy.live.driveLimitLine, { value: WALL_MIN_GAP.toFixed(2) }),
+          },
+        ],
+      },
+    };
   },
-  plan: () => ({
-    controller: wallApproach({ ...experiment().config }, wallMessages()),
-    seconds: WALL_SECONDS,
-    tail: 1,
-  }),
 };
 
 const liveSessions = {

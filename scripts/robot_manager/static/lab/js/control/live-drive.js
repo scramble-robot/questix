@@ -21,6 +21,11 @@ const WALL_START_MIN = 0.9; // m: closer than this, the approach is too short to
 const WALL_MIN_GAP = 0.25; // m: the run ends at once when the LiDAR sees the wall this close
 const SCAN_STALE = 0.6; // seconds without a scan: stand still (the controller would be blind)
 const SCAN_LOST = 1.5; // seconds without a scan: end the run
+// The run ends by itself once the robot has held the stop distance: within this band of it and
+// slower than SETTLE_SPEED for SETTLE_SECONDS (the simulation's settling band is 5 cm).
+const SETTLE_BAND = 0.05; // m
+const SETTLE_SPEED = 0.02; // m/s, measured (/drive_status)
+const SETTLE_SECONDS = 1.5;
 
 /** The step program for `speed` [m/s] and the space it needs ahead, in metres. */
 function speedStep(speed) {
@@ -38,13 +43,17 @@ function speedStep(speed) {
  * given gains (`kp`, `ki`, `kd`, `filter`, `antiWindup` as in the simulation's config). It runs
  * once per new scan (the LiDAR's rate is the control rate on the robot) and holds its output in
  * between. `messages.tooClose` / `.noWall` / `.lost` / `.hit` are the sentences it ends a run with.
- * `trace` receives `{time, distance, command}` per control step, for the lesson's note.
+ * It returns null (run over) once the robot has settled at the stop distance. `trace` receives
+ * `{time, distance, command}` per control step. The returned function carries `result`:
+ * `{settled, distance}` — whether it settled, and the last distance it measured.
  */
 function wallApproach(gains, messages, trace = () => {}) {
   const pid = {};
   let lastStamp = null;
   let output = 0;
-  return (elapsed, robot) => {
+  let steadySince = null;
+  const result = { settled: false, distance: null };
+  const controller = (elapsed, robot) => {
     const scan = robot.scan;
     const age = robot.age('scan');
     if (!scan || age > SCAN_LOST) {
@@ -56,6 +65,14 @@ function wallApproach(gains, messages, trace = () => {}) {
     if (distance === null) throw new Error(messages.noWall);
     if (distance < WALL_MIN_GAP) throw new Error(messages.hit);
     if (lastStamp === null && distance < WALL_START_MIN) throw new Error(messages.tooClose);
+    result.distance = distance;
+    const speed = Math.abs(robot.drive?.v ?? Infinity);
+    const steady = Math.abs(distance - STOP_DISTANCE) < SETTLE_BAND && speed < SETTLE_SPEED;
+    steadySince = steady ? (steadySince ?? elapsed) : null;
+    if (steadySince !== null && elapsed - steadySince >= SETTLE_SECONDS) {
+      result.settled = true;
+      return null;
+    }
     if (scan.stamp !== lastStamp) {
       const dt = lastStamp === null ? 0.2 : Math.max(0.01, scan.stamp - lastStamp);
       lastStamp = scan.stamp;
@@ -74,6 +91,7 @@ function wallApproach(gains, messages, trace = () => {}) {
     const top = Math.min(WALL_MAX_SPEED, robot.limits?.linear ?? WALL_MAX_SPEED);
     return { linear: output * top, angular: 0 };
   };
+  return Object.assign(controller, { result });
 }
 
 export {

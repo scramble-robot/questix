@@ -138,15 +138,17 @@ const DRIVE_ROOM = 0.5; // m of free floor asked for beyond the drive itself
 let driveDistance = DRIVE_DISTANCES[0];
 
 const holdsDrive = {
-  program() {
-    const largest = Math.max(...HOLD_SPEEDS.map(Math.abs));
-    return fill(copy.messages.driveHoldsProgram, {
+  conditions: () => HOLD_SPEEDS.map((speed) => speed.toFixed(1)).join('／') + ' m/s',
+  placement: () =>
+    fill(copy.messages.driveHoldsPlacement, {
+      space: (Math.max(...HOLD_SPEEDS.map(Math.abs)) * HOLD_SECONDS + 0.3).toFixed(1),
+    }),
+  program: () =>
+    fill(copy.messages.driveHoldsProgram, {
       speeds: [...new Set(HOLD_SPEEDS.map(Math.abs))].join('・'),
       hold: HOLD_SECONDS,
       pause: HOLD_PAUSE,
-      space: (largest * HOLD_SECONDS + 0.3).toFixed(1),
-    });
-  },
+    }),
   plan() {
     const steps = staircaseProgram(HOLD_SPEEDS, { hold: HOLD_SECONDS, pause: HOLD_PAUSE });
     return {
@@ -163,40 +165,48 @@ const drivesDrive = {
     return fill(copy.messages.driveDistanceStart, { cm: cm(driveDistance) });
   },
   program: () =>
-    fill(copy.messages.driveDistanceProgram, {
-      cm: cm(driveDistance),
-      speed: DRIVE_SPEED,
+    fill(copy.messages.driveDistanceProgram, { cm: cm(driveDistance), speed: DRIVE_SPEED }),
+  placement: () =>
+    fill(copy.messages.driveDistancePlacement, {
       space: (driveDistance + DRIVE_ROOM).toFixed(1),
     }),
+  conditions: () => `${cm(driveDistance)} cm`,
   plan() {
     const goal = createOdomGoal({ kind: 'distance', target: driveDistance, speed: DRIVE_SPEED });
     return {
       controller: (elapsed, robot) => goal.update(robot.odom, elapsed),
       seconds: driveDistance / DRIVE_SPEED + DRIVE_SPARE,
+      outcome: () =>
+        goal.reached
+          ? ''
+          : fill(copy.messages.driveDistanceShort, { cm: (goal.progress * CM_PER_M).toFixed(1) }),
     };
   },
 };
 
 const DRIVES = { holds: holdsDrive, drives: drivesDrive };
 
-// A recording replaces the table: mixing a worked example with real measurements would leave the
-// learner unable to say which number came from where.
+// The first recording replaces the worked example (mixing it with real measurements would leave the
+// learner unable to say which number came from where); later recordings add to the real rows, so
+// repeated runs collect into one table.
 function applyHolds(course, recording) {
   const state = labState(course);
   const { rows, summary } = driveRows(recording);
   const measured = steadyMeasurements(rows);
   if (!measured.rows.length)
     return { ok: false, note: fill(copy.messages.liveNoHold, { seconds: MIN_HOLD_SECONDS }) };
-  state.rows = measured.rows;
+  const first = state.source !== copy.sources.live;
+  state.rows = (first ? [] : state.rows).concat(measured.rows).slice(0, MAX_ROWS);
   state.source = copy.sources.live;
   state.selectedX = measured.rows[0].x;
   state.correct = false;
-  const note = fill(copy.messages.liveRecorded, {
+  const note = fill(first ? copy.messages.liveRecorded : copy.messages.liveRecordedMore, {
     notes: captureNotes(summary),
     holds: measured.holds.length,
     count: measured.rows.length,
   });
-  return { ok: true, note };
+  // The worked example's reference means nothing for the robot's numbers.
+  return { ok: true, note: first ? `${note} ${copy.messages.liveReference}` : note };
 }
 
 // The wheel side of each drive is known; the floor side is typed in afterwards (addDrives).
@@ -204,12 +214,17 @@ function applyDrives(course, recording) {
   const state = labState(course);
   const drives = drivesOf(recording);
   if (!drives.length) return { ok: false, note: copy.messages.liveNoDrive };
-  state.pending = drives.map((drive, index) => ({
-    number: index + 1,
-    wheel: Number((drive.distance * CM_PER_M).toFixed(DRIVE_DIGITS)),
-    turn: Math.round(Math.abs(drive.turn) * DEGREES_PER_RADIAN),
-    floor: '',
-  }));
+  // Drives still waiting for their floor distance stay; the new ones are numbered after them.
+  const last = Math.max(0, ...state.pending.map((drive) => drive.number));
+  state.pending = state.pending.concat(
+    drives.map((drive, index) => ({
+      number: last + index + 1,
+      wheel: Number((drive.distance * CM_PER_M).toFixed(DRIVE_DIGITS)),
+      turn: Math.round(Math.abs(drive.turn) * DEGREES_PER_RADIAN),
+      floor: '',
+    })),
+  );
+  state.added = '';
   return { ok: true, note: fill(copy.messages.liveDrives, { count: drives.length }) };
 }
 
@@ -253,6 +268,7 @@ function liveModel(course) {
     text: scenario.live.text,
     referenceNote: scenario.live.referenceNote,
     pending: labState(course).pending,
+    added: labState(course).added ?? '',
     driveDistance: scenario.live.kind === 'drives' ? driveDistance : null,
     driveDistances: scenario.live.kind === 'drives' ? DRIVE_DISTANCES : [],
   };
@@ -278,7 +294,8 @@ function addDrives() {
   state.selectedX = rows[0].x;
   state.correct = false;
   state.pending = state.pending.filter((drive) => !measured.includes(drive));
-  state.message = fill(copy.messages.liveDrivesAdded, { count: rows.length });
+  // Said next to the button that did it, not at the top of the panel.
+  state.added = fill(copy.messages.liveDrivesAdded, { count: rows.length });
   update();
 }
 

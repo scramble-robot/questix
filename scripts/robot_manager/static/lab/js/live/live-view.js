@@ -10,25 +10,43 @@ const captureCopy = await loadJson('content/live/capture.json');
 
 const streamLabel = (name) => captureCopy.streamNames[name] ?? name;
 
+// While the page may drive the robot, the controller is off, so /target_twist only flows while
+// someone drives: not receiving it then is normal, not a fault worth a warning.
+function missingNow(model) {
+  if (!drivingAllowed(model)) return model.link.missing;
+  return model.link.missing.filter((name) => name !== 'twist');
+}
+
 function linkMessage(model) {
-  if (model.link.connected && model.link.missing.length)
-    return fill(captureCopy.missing, { streams: model.link.missing.map(streamLabel).join('と') });
+  const missing = missingNow(model);
+  if (model.link.connected && missing.length)
+    return fill(captureCopy.missing, { streams: missing.map(streamLabel).join('と') });
+  if (drivingAllowed(model)) return captureCopy.state.openDrive;
   return captureCopy.state[model.link.phase] ?? captureCopy.state.idle;
 }
 
+const drivingAllowed = (model) => Boolean(model.drive?.allowed && model.link.connected);
+// A driving run (or its tail) owns the block's buttons until it is over.
+const driveBusy = (model) => model.running || model.tail;
+
+function recordLabel(model) {
+  if (drivingAllowed(model)) return fill(captureCopy.recordOther, { seconds: model.seconds });
+  return fill(model.recordLabel ?? captureCopy.record, { seconds: model.seconds });
+}
+
 function recordButton(model, actions) {
-  // A driving run has its own stop button in the drive block.
-  if (model.running) return nothing;
+  if (driveBusy(model)) return nothing;
   if (model.recording)
     return html`<button class="live-capture-stop" @click=${actions.stopCapture}>
       ${model.stopLabel ?? captureCopy.stop}
     </button>`;
+  // With driving allowed this is the secondary way: recording a run someone else drives.
   return html`<button
-    class="live-capture-record"
+    class=${drivingAllowed(model) ? 'live-capture-record quiet' : 'live-capture-record'}
     ?disabled=${!model.link.connected || model.link.missing.length > 0}
     @click=${actions.startCapture}
   >
-    ${fill(model.recordLabel ?? captureCopy.record, { seconds: model.seconds })}
+    ${recordLabel(model)}
   </button>`;
 }
 
@@ -78,7 +96,14 @@ function fileControls(model, actions) {
  * block also offers driving the robot (drive-view.js), which needs `startDriveCapture` and
  * `confirmDrive` in `actions`.
  */
-function liveCaptureControls(model, actions) {
+function captureNote(model) {
+  if (!model.drive) return captureCopy.readOnly;
+  return drivingAllowed(model) ? captureCopy.recordOtherNote : captureCopy.recordOnly;
+}
+
+// The recording part: link state, the record button (the main one unless the page may drive),
+// progress, the lesson's message and the files.
+function capturePart(model, actions) {
   return html`<div class="live-capture" data-live-capture>
     <p class="live-capture-state" data-live-state>${linkMessage(model)}</p>
     <div class="live-capture-actions">
@@ -90,7 +115,7 @@ function liveCaptureControls(model, actions) {
       }
     </div>
     ${
-      model.recording && !model.running
+      model.recording && !driveBusy(model)
         ? html`<p class="live-capture-progress" role="status">
             ${fill(captureCopy.progress, { count: model.progress })}
           </p>`
@@ -101,10 +126,18 @@ function liveCaptureControls(model, actions) {
         ? html`<p class="live-capture-message" role="status" data-live-message>${model.message}</p>`
         : nothing
     }
-    ${model.drive && model.link.connected ? driveControls(model, model.drive, actions) : nothing}
     ${fileControls(model, actions)}
-    <p class="live-capture-note">${model.drive ? captureCopy.recordOnly : captureCopy.readOnly}</p>
+    <p class="live-capture-note">${captureNote(model)}</p>
   </div>`;
+}
+
+function liveCaptureControls(model, actions) {
+  const drive =
+    model.drive && model.link.connected ? driveControls(model, model.drive, actions) : nothing;
+  // When the page may drive, driving comes first; otherwise the one-line note follows recording.
+  if (drivingAllowed(model) || driveBusy(model))
+    return html`<div class="live-block">${drive} ${capturePart(model, actions)}</div>`;
+  return html`<div class="live-block">${capturePart(model, actions)} ${drive}</div>`;
 }
 
 // The sentences a lesson adds after a recording, so every course reports the same conditions.

@@ -152,3 +152,17 @@ test('a goal without odometry stands still instead of guessing', () => {
   assert.deepEqual(goal.update(null, 0), { linear: 0, angular: 0 });
   assert.deepEqual(goal.update({ x: NaN, y: 0, theta: 0 }, 0.1), { linear: 0, angular: 0 });
 });
+
+test('a run of this page blocks the other start buttons of the page', () => {
+  const readiness = driveReadiness({
+    link: OPEN,
+    driveState: readyState,
+    confirmed: true,
+    runningHere: true,
+  });
+  assert.equal(readiness.ready, false);
+  assert.deepEqual(
+    readiness.blockers.map((blocker) => blocker.code),
+    ['running_here'],
+  );
+});

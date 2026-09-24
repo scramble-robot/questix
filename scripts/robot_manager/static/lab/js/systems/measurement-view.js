@@ -289,7 +289,10 @@ function importExport(model, copy, actions) {
 // Drives found in a recording, waiting for the distance the learner measured on the floor.
 function pendingDrives(model, copy, actions) {
   const pending = model.live.pending ?? [];
-  if (!pending.length) return nothing;
+  if (!pending.length)
+    return model.live.added
+      ? html`<p role="status" data-drive-added>${model.live.added}</p>`
+      : nothing;
   const text = copy.drives;
   return html`<div class="measurement-drives">
     <p>${text.intro}</p>
@@ -322,6 +325,7 @@ function pendingDrives(model, copy, actions) {
       </tbody>
     </table>
     <button data-drive-add @click=${actions.addDrives}>${text.add}</button>
+    ${model.live.added ? html`<p role="status" data-drive-added>${model.live.added}</p>` : nothing}
     <p class="live-capture-note">${text.note}</p>
   </div>`;
 }
@@ -329,7 +333,7 @@ function pendingDrives(model, copy, actions) {
 // How far "N cm走らせて記録する" drives; only offered while the panel can drive the robot.
 function driveDistanceSelect(model, copy, actions) {
   const live = model.live;
-  if (!live.driveDistances.length || !live.drive || !live.link.connected) return nothing;
+  if (!live.driveDistances.length || !live.drive?.allowed || !live.link.connected) return nothing;
   return html`<label class="control-live-speed"
     >${copy.messages.driveDistanceLabel}
     <select
@@ -359,8 +363,8 @@ function liveCapture(model, copy, actions) {
     ${
       model.live
         ? html`<p>${model.live.text}</p>
-            ${driveDistanceSelect(model, copy, actions)} ${liveCaptureControls(model.live, actions)}
-            ${pendingDrives(model, copy, actions)}
+            ${driveDistanceSelect(model, copy, actions)} ${pendingDrives(model, copy, actions)}
+            ${liveCaptureControls(model.live, actions)}
             <p>${model.live.referenceNote ?? panel.liveReferenceNote}</p>`
         : html`<p>${panel.liveUnavailable}</p>`
     }

@@ -653,7 +653,7 @@ function liveCard(model, copy, actions) {
 // The speed of the real step input; only offered while the card can drive the robot.
 function stepSpeedSelect(model, text, actions) {
   const capture = model.live.capture;
-  if (!capture.drive || !capture.link.connected) return nothing;
+  if (!capture.drive?.allowed || !capture.link.connected) return nothing;
   return html`<label class="control-live-speed"
     >${text.driveSpeedLabel}
     <select

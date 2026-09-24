@@ -100,7 +100,9 @@ function recordStream({ trigger, pair = [], seconds = DEFAULT_SECONDS, onProgres
  * lesson has one code path for all three. Progress counts the messages of `countStream`.
  *
  * `signal` aborts (rejects with MESSAGES.aborted); `finish` ends the recording early and keeps
- * what was collected, for lessons where the learner says when the robot is done.
+ * what was collected, for lessons where the learner says when the robot is done. With `keepOnLost`,
+ * a lost link resolves with what was collected so far, marked `cut: true`, instead of rejecting —
+ * for driving runs, whose first seconds are worth keeping even when the phone drops off the Wi-Fi.
  */
 function recordRobot({
   seconds = DEFAULT_SECONDS,
@@ -108,6 +110,7 @@ function recordRobot({
   onProgress,
   signal,
   finish,
+  keepOnLost = false,
 } = {}) {
   return new Promise((resolve, reject) => {
     const state = robotState();
@@ -122,28 +125,28 @@ function recordRobot({
       for (const off of unsubscribe) off();
       clearTimeout(timer);
       signal?.removeEventListener('abort', abort);
-      finish?.removeEventListener('abort', done);
+      finish?.removeEventListener('abort', finished);
     };
     const fail = (error) => {
       stop();
       reject(error);
     };
-    const done = () => {
+    const done = (cut = false) => {
       stop();
-      resolve(
-        makeRecording({
-          source: 'live',
-          name: '',
-          recordedAt: new Date().toISOString(),
-          config: state.hello.config,
-          topics: Object.fromEntries(
-            RECORDING_STREAMS.map((name) => [name, state.hello.streams?.[name] ?? null]),
-          ),
-          streams,
-        }),
-      );
+      const recording = makeRecording({
+        source: 'live',
+        name: '',
+        recordedAt: new Date().toISOString(),
+        config: state.hello.config,
+        topics: Object.fromEntries(
+          RECORDING_STREAMS.map((name) => [name, state.hello.streams?.[name] ?? null]),
+        ),
+        streams,
+      });
+      resolve(cut === true ? { ...recording, cut: true } : recording);
     };
     const abort = () => fail(new Error(MESSAGES.aborted));
+    const finished = () => done();
     for (const name of RECORDING_STREAMS)
       unsubscribe.push(
         onRobot(name, (message) => {
@@ -153,12 +156,14 @@ function recordRobot({
       );
     unsubscribe.push(
       onRobot('state', (next) => {
-        if (next.phase !== 'open') fail(new Error(MESSAGES.lost));
+        if (next.phase === 'open') return;
+        if (keepOnLost) done(true);
+        else fail(new Error(MESSAGES.lost));
       }),
     );
     timer = setTimeout(done, seconds * 1000);
     signal?.addEventListener('abort', abort);
-    finish?.addEventListener('abort', done);
+    finish?.addEventListener('abort', finished);
   });
 }
 
@@ -277,6 +282,7 @@ function liveLink() {
     streams: state.hello?.streams ?? {},
     rates: state.rates ?? {},
     config: state.hello?.config ?? null, // wheel_radius, wheel_separation of this robot
+    robot: state.hello?.robot ?? null, // {name, domain}; null on bridges older than that
   };
 }
 

@@ -1,8 +1,16 @@
-import { html, nothing, render } from '../vendor/lit-html.js';
+import { html, nothing, render, unsafeHTML } from '../vendor/lit-html.js';
 import { fillSentence as fill } from '../core/content.js';
 import { driveModel, onDrive, confirmDriveSafety, stopDrive, runDrive } from './drive-link.js';
-import { driveCopy, driveChecklist, confirmBox, driveEndedText } from './drive-view.js';
-import { recordRobot } from './capture.js';
+import {
+  driveCopy,
+  driveChecklist,
+  driveTeacherDetails,
+  driveFirstReason,
+  confirmBox,
+  driveEndedText,
+} from './drive-view.js';
+import { recordRobot, liveLink } from './capture.js';
+import { runModeBadgeHtml } from '../shell/run-mode.js';
 import {
   addDriveRun,
   driveRuns,
@@ -26,6 +34,7 @@ const BENCH_MIN = { linear: 0.06, angular: 0.3 }; // below drive_component's dea
 const BENCH_STEP = { linear: 0.02, angular: 0.1 };
 const BENCH_MAX_SECONDS = 20; // one press; the bridge's own limit is longer
 const BENCH_TAIL_SECONDS = 1; // recorded after release, so the report shows the robot stopping
+const BENCH_MIN_PRESS = 0.5; // s: a shorter tap is not worth an entry in the run history
 const RECORD_SPARE_SECONDS = 5; // the recording's own time limit, only a backstop
 const BENCH_MOVES = [
   { id: 'forward', linear: 1, angular: 0 },
@@ -36,17 +45,22 @@ const BENCH_MOVES = [
 
 const bench = { ...BENCH_DEFAULTS, held: null, abort: null, note: '' };
 let selectedRun = null; // id of the run whose report the dialog shows; null = the newest
+let newestRun = null; // id of the newest run seen, so a new run (from any block) is shown at once
 
 // --- stop bar --------------------------------------------------------------------------------
 
 function stopBar(model) {
   if (!model.active && !model.running) return nothing;
   const mine = model.running || model.owner === 'me';
+  // Esc only stops this page's own run (drive-link.js), so the key is only named for that one;
+  // CSS hides the hint on touch screens, which have no Esc key.
   return html`<div class="drive-bar" role="alert" data-drive-bar>
     <span class="drive-bar-dot" aria-hidden="true"></span>
     <strong>${mine ? driveCopy.bar.mine : driveCopy.bar.other}</strong>
     <button class="drive-bar-stop" data-drive-bar-stop @click=${stopDrive}>
-      ${driveCopy.bar.stop}
+      ${driveCopy.bar.stop}${
+        mine ? html`<span class="drive-bar-esc">${driveCopy.bar.esc}</span>` : nothing
+      }
     </button>
   </div>`;
 }
@@ -75,24 +89,33 @@ async function hold(move) {
     seconds: BENCH_MAX_SECONDS,
     signal: abort.signal,
   });
-  Object.assign(bench, { held: null, abort: null });
-  // Releasing the button is the normal end of a bench move; anything else is worth a sentence.
-  bench.note =
-    result.reason === 'stopped' || result.reason === 'done' ? '' : driveEndedText(result);
+  Object.assign(bench, { held: null, abort: null, note: benchNote(result) });
   update();
-  if (result.reason !== 'refused')
+  if (result.started)
     await new Promise((resolve) => setTimeout(resolve, BENCH_TAIL_SECONDS * 1000));
   finish.abort();
   const recording = await recorded;
-  if (result.reason === 'refused' || recording instanceof Error) return;
+  if (!result.started || recording instanceof Error || result.elapsed < BENCH_MIN_PRESS) return;
   addDriveRun({
     slot: 'bench',
     lesson: fill(driveCopy.lessons.bench, { move: driveCopy.bench[move.id] }),
+    conditions: move.linear
+      ? `${bench.linear.toFixed(2)} m/s`
+      : `${bench.angular.toFixed(2)} rad/s`,
     ended: bench.note,
     reason: result.reason,
+    robot: liveLink().robot?.name ?? '',
+    cut: Boolean(recording.cut),
     recording,
   });
-  selectedRun = null;
+}
+
+// Releasing the button is the normal end of a bench move; anything else is worth a sentence.
+function benchNote(result) {
+  if (result.reason === 'stopped') return '';
+  if (result.reason === 'done')
+    return fill(driveCopy.bench.timeLimit, { seconds: BENCH_MAX_SECONDS });
+  return driveEndedText(result);
 }
 
 function release() {
@@ -100,9 +123,11 @@ function release() {
 }
 
 function benchButton(model, move) {
-  const disabled = !model.ready || (bench.held !== null && bench.held !== move.id);
+  // The held button stays enabled while it drives (this page's own run makes `ready` false).
+  const held = bench.held === move.id;
+  const disabled = bench.held !== null ? !held : !model.ready;
   return html`<button
-    class="drive-bench-move ${bench.held === move.id ? 'held' : ''}"
+    class="drive-bench-move ${held ? 'held' : ''}"
     data-drive-bench=${move.id}
     ?disabled=${disabled}
     @pointerdown=${(event) => {
@@ -147,16 +172,23 @@ function speedSlider(model, key, label) {
 }
 
 function benchPanel(model) {
-  return html`<h3>${driveCopy.bench.title}</h3>
-    <p>${driveCopy.bench.lead}</p>
-    ${driveChecklist(model)} ${confirmBox(model, { confirmDrive: confirmDriveSafety })}
+  const heading = html`<h3>${unsafeHTML(runModeBadgeHtml('drive'))} ${driveCopy.bench.title}</h3>`;
+  if (!model.allowed)
+    return html`${heading}
+      <p>${driveCopy.notAllowed}</p>
+      ${driveTeacherDetails(model)}`;
+  const reason = bench.held === null ? driveFirstReason(model) : '';
+  return html`${heading}
+    <p>${fill(driveCopy.bench.lead, { seconds: BENCH_MAX_SECONDS })}</p>
+    ${driveChecklist(model)} ${driveTeacherDetails(model)}
+    ${confirmBox(model, { confirmDrive: confirmDriveSafety }, bench.held !== null)}
     <div class="drive-bench-speeds">
       ${speedSlider(model, 'linear', driveCopy.bench.speed)}
       ${speedSlider(model, 'angular', driveCopy.bench.turnSpeed)}
     </div>
     <div class="drive-bench-pad">${BENCH_MOVES.map((move) => benchButton(model, move))}</div>
-    ${bench.note ? html`<p class="drive-note" role="status">${bench.note}</p>` : nothing}
-    <p class="drive-note">${driveCopy.afterNote}</p>`;
+    ${reason ? html`<p class="drive-why">${reason}</p>` : nothing}
+    ${bench.note ? html`<p class="drive-result" role="status">${bench.note}</p>` : nothing}`;
 }
 
 // A modal dialog sits in the browser's top layer, above any z-index, so the bar moves into the open
@@ -212,6 +244,13 @@ function update() {
   const model = driveModel();
   placeStopBar();
   render(stopBar(model), document.getElementById('driveBar'));
+  // Room at the bottom of the page, so the bar never hides its last buttons.
+  document.body.classList.toggle('driving', model.active || model.running);
+  const newest = driveRuns()[0]?.id ?? null;
+  if (newest !== newestRun) {
+    newestRun = newest;
+    selectedRun = null;
+  }
   render(historyPanel(), document.getElementById('robotDriveLog'));
   const panel = document.getElementById('robotDrive');
   // Driving needs a connection; before that the dialog is about connecting.

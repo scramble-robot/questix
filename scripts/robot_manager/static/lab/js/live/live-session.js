@@ -29,6 +29,15 @@ import { addDriveRun, driveRun, saveDriveRun } from './drive-history.js';
 const DRIVE_PROGRESS_MS = 250;
 const DEFAULT_TAIL_SECONDS = 1.5;
 const sleep = (seconds) => new Promise((resolve) => setTimeout(resolve, seconds * 1000));
+const MOVING_COMMAND = 1e-3; // m/s or rad/s: a smaller command is a stop
+
+// Whether the page actually told the robot to move during the recording (its own commands are on
+// /target_twist, which the bridge mirrors back).
+function commanded(recording) {
+  return (recording.streams.twist ?? []).some(
+    (twist) => Math.abs(twist.linear) > MOVING_COMMAND || Math.abs(twist.angular) > MOVING_COMMAND,
+  );
+}
 
 const streamList = (streams) =>
   streams.map((name) => captureCopy.streamNames[name] ?? name).join('と');
@@ -71,9 +80,12 @@ function originNote(recording, origin, assumedConfig) {
  * - `applyOnRestore`: false when the lesson keeps its own results across a reload (the recording
  *   then only comes back so it can still be saved)
  * - `update()`: redraws the lesson
- * - `drive` (optional): `{ plan(), program(), startLabel }`. `plan()` returns `{controller, seconds,
- *   tail}` for drive-link's runDrive (tail = seconds recorded after the robot stops) or throws an
- *   Error whose message is shown; `program()` is the sentence saying what the robot will do.
+ * - `drive` (optional): `{ plan(), program(), placement(), conditions(), startLabel }`. `plan()`
+ *   returns `{controller, seconds, tail, references, outcome}` for drive-link's runDrive (tail =
+ *   seconds recorded after the robot stops; references = drive-history's chart reference lines;
+ *   outcome() = an optional sentence on how the run went, e.g. whether the goal was reached) or
+ *   throws an Error whose message is shown. `program()` says what the robot will do, `placement()`
+ *   how to place it, `conditions()` the settings in a few words for the run history.
  */
 function createLiveSession(options) {
   const session = {
@@ -86,6 +98,8 @@ function createLiveSession(options) {
     driveElapsed: 0,
     driveTotal: 0,
     driveAbort: null,
+    tail: false, // recording the stop after the robot was told to stop
+    driveNote: '', // how the last run ended, shown under the start button
     driveRunId: null, // the history entry (drive-history.js) of this block's last run
   };
   if (options.drive) onDrive(() => options.update());
@@ -144,23 +158,39 @@ function createLiveSession(options) {
     try {
       plan = options.drive.plan();
     } catch (error) {
-      session.note = error.message;
+      session.driveNote = error.message;
       options.update();
       return;
     }
+    Object.assign(session, { busy: true, driveNote: '' });
+    try {
+      await driveAndRecord(plan);
+    } finally {
+      Object.assign(session, {
+        busy: false,
+        driving: false,
+        tail: false,
+        progress: 0,
+        controllers: null,
+        driveAbort: null,
+      });
+      options.update();
+    }
+  }
+
+  // Records while drive-link runs the plan, then keeps recording for `tail` seconds so the stop is
+  // in the data. A run that never moved the robot (refused, or failed before it started) changes
+  // nothing on the page but the sentence under the button.
+  async function driveAndRecord(plan) {
     const tail = plan.tail ?? DEFAULT_TAIL_SECONDS;
-    const program = options.drive.program();
     const controllers = { abort: new AbortController(), finish: new AbortController() };
     const driveAbort = new AbortController();
     Object.assign(session, {
-      busy: true,
       driving: true,
-      progress: 0,
       controllers,
       driveAbort,
       driveElapsed: 0,
       driveTotal: plan.seconds,
-      note: '',
     });
     options.update();
     const recorded = recordRobot({
@@ -169,6 +199,7 @@ function createLiveSession(options) {
       countStream: options.countStream,
       signal: controllers.abort.signal,
       finish: controllers.finish.signal,
+      keepOnLost: true,
     }).catch((error) => error);
     const startedAt = performance.now();
     const progress = setInterval(() => {
@@ -181,33 +212,39 @@ function createLiveSession(options) {
       signal: driveAbort.signal,
     });
     clearInterval(progress);
-    session.driving = false;
-    session.driveAbort = null;
+    Object.assign(session, { driving: false, driveAbort: null, tail: result.started });
     options.update();
-    if (result.reason === 'refused') controllers.abort.abort();
-    else {
+    if (result.started) {
       await sleep(tail);
       controllers.finish.abort();
-    }
-    const recording = await recorded;
+    } else controllers.abort.abort();
+    finishRun(result, await recorded, plan);
+  }
+
+  function finishRun(result, recording, plan) {
     const ended = driveEndedText(result);
-    if (recording instanceof Error) {
-      session.note =
-        result.reason === 'refused' ? ended : fill(options.failed, { reason: recording.message });
-    } else {
-      show(recording, 'live');
-      session.note = [ended, session.note].filter(Boolean).join(' ');
-      session.driveRunId = addDriveRun({
-        slot: options.slot,
-        lesson: driveCopy.lessons[options.slot] ?? options.lesson,
-        program,
-        ended,
-        reason: result.reason,
-        recording,
-      }).id;
+    if (!result.started || recording instanceof Error || !commanded(recording)) {
+      session.driveNote = ended;
+      return;
     }
-    Object.assign(session, { busy: false, progress: 0, controllers: null });
-    options.update();
+    // The next run is a new situation (the robot has moved): the learner confirms again.
+    confirmDriveSafety(false);
+    show(recording, 'live');
+    const outcome = plan.outcome?.() ?? '';
+    const cut = recording.cut ? driveCopy.ended.cut : '';
+    session.driveNote = [ended, outcome, cut].filter(Boolean).join(' ');
+    session.driveRunId = addDriveRun({
+      slot: options.slot,
+      lesson: driveCopy.lessons[options.slot] ?? options.lesson,
+      conditions: options.drive.conditions?.() ?? '',
+      program: options.drive.program(),
+      ended: session.driveNote,
+      reason: result.reason,
+      robot: liveLink().robot?.name ?? '',
+      references: plan.references ?? {},
+      cut: Boolean(recording.cut),
+      recording,
+    }).id;
   }
 
   async function openRecording(file) {
@@ -253,6 +290,8 @@ function createLiveSession(options) {
       link: { ...liveLink(), missing: missingStreams(options.needs) },
       recording: session.busy,
       running: session.driving,
+      tail: session.tail,
+      driveNote: session.driveNote,
       elapsed: session.driveElapsed,
       total: session.driveTotal,
       progress: session.progress,
@@ -269,11 +308,16 @@ function createLiveSession(options) {
     // /target_twist is what the run itself publishes, so it cannot be required before it starts.
     const missing = missingStreams(options.needs.filter((name) => name !== 'twist'));
     const drive = driveModel();
+    // A stream the lesson needs but does not receive would make the run worthless.
+    const blockers = missing.length
+      ? [...drive.blockers, { code: 'missing_streams', nodes: null, streams: streamList(missing) }]
+      : drive.blockers;
     return {
       ...drive,
-      // A stream the lesson needs but does not receive would make the run worthless.
+      blockers,
       ready: drive.ready && missing.length === 0,
       program: options.drive.program(),
+      placement: options.drive.placement?.() ?? '',
       startLabel: options.drive.startLabel,
       // Shown under the block until the next run (null after a reload: see the 実機 dialog).
       report: session.driveRunId === null ? null : driveRun(session.driveRunId),
