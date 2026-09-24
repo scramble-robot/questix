@@ -61,12 +61,22 @@ function courseNavigation(model, actions) {
 
 // --- Catalogue page ----------------------------------------------------------------------------
 
-function catalogueHeading(copy) {
+// The first course is where a newcomer starts, so it gets a button right under the heading
+// instead of a sentence asking the learner to scroll to card 01.
+function catalogueHeading(model, actions) {
+  const copy = model.copy;
   const [firstLine, secondLine] = copy.heading.lead;
+  const first = model.lessons[0];
   return html`<div class="series-heading">
     <p class="eyebrow">${copy.heading.eyebrow}</p>
     <h1>${copy.heading.title}</h1>
     <p>${firstLine}<br />${secondLine}</p>
+    <div class="series-start">
+      <button class="primary" data-series-start @click=${() => actions.openCourse(first.id)}>
+        ${copy.heading.start} ${first.title} →
+      </button>
+      <a class="series-start-list" href="#course-group-0">${copy.heading.list}</a>
+    </div>
   </div>`;
 }
 
@@ -85,10 +95,11 @@ function cardRunModes(lesson) {
   </div>`;
 }
 
-// The three labels explained once, before the first group.
+// The labels explained once, after the courses: folded, because a newcomer without a robot does
+// not need them to start.
 function runModeLegend(copy) {
-  return html`<section class="series-run-legend" aria-labelledby="runModeLegendTitle">
-    <h2 id="runModeLegendTitle">${copy.legend.title}</h2>
+  return html`<details class="series-run-legend">
+    <summary><h2>${copy.legend.title}</h2></summary>
     <p>${copy.legend.lead}</p>
     <dl>
       ${RUN_MODE_ORDER.map(
@@ -99,7 +110,7 @@ function runModeLegend(copy) {
           </div>`,
       )}
     </dl>
-  </section>`;
+  </details>`;
 }
 
 function courseCard(lesson, model, actions) {
@@ -111,9 +122,9 @@ function courseCard(lesson, model, actions) {
     <div class="series-course-body">
       <p class="series-order">${number} <span>/ ${model.lessons.length}</span></p>
       <h3>${lesson.title}</h3>
-      ${cardRunModes(lesson)}
       <p>${lesson.description}</p>
       <div class="series-tags">${lesson.tags.map((tag) => html`<span>${tag}</span>`)}</div>
+      ${cardRunModes(lesson)}
       <button
         class="primary full"
         id=${lesson.button}
@@ -252,13 +263,15 @@ function robotSection(copy) {
   </section>`;
 }
 
+// Reading order for a newcomer: what this is and where to start, the robot the experiments are
+// about, the courses; the label legend and the school-subject overview for those who look further.
 function seriesPage(model, actions) {
   const copy = model.copy;
-  return html`${catalogueHeading(copy)}${groupIndex(model.groups)}${runModeLegend(
-    model.runModeCopy,
+  return html`${catalogueHeading(model, actions)}${robotSection(copy)}${groupIndex(
+    model.groups,
   )}${model.groups.map((group, index) =>
     courseGroup(group, index, model, actions),
-  )}${schoolOverview(model, actions)}${robotSection(copy)}${copy.footnotes.map(
+  )}${runModeLegend(model.runModeCopy)}${schoolOverview(model, actions)}${copy.footnotes.map(
     (note) => html`<p class="page-footnote">${note}</p>`,
   )}`;
 }

@@ -131,7 +131,19 @@ function capturePart(model, actions) {
   </div>`;
 }
 
+// Without a robot the block is folded into one line: a learner who has no robot must not have to
+// read past disabled buttons to reach the next experiment, and can still open it to load a saved
+// recording or to connect.
+function offlineBlock(model, actions) {
+  return html`<details class="live-offline" data-live-offline>
+    <summary>${captureCopy.offline}</summary>
+    ${capturePart(model, actions)}
+  </details>`;
+}
+
 function liveCaptureControls(model, actions) {
+  const busy = model.recording || driveBusy(model);
+  if (!model.link.connected && !busy) return offlineBlock(model, actions);
   const drive =
     model.drive && model.link.connected ? driveControls(model, model.drive, actions) : nothing;
   // When the page may drive, driving comes first; otherwise the one-line note follows recording.

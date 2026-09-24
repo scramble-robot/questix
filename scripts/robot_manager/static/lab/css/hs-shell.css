@@ -1,1 +1,257 @@
 /* High-school readability pass: shell (see CONTRIBUTING.md, "Figures and charts"). */
+
+/* Lesson brief (js/shell/lesson-brief.js): 最初に試すこと stands out as the thing to do, and on a
+   phone the situation and purpose are cut to two lines until the learner opens them. */
+.lesson-brief .lesson-brief-first {
+  background: #eef6f3;
+  border-radius: 12px;
+  padding: 16px 20px;
+  border-left: 4px solid var(--green);
+}
+.lesson-brief .lesson-brief-first h2 {
+  color: #1c5f57;
+}
+.lesson-brief-more {
+  display: none;
+}
+@media (max-width: 760px) {
+  .lesson-brief .lesson-brief-first {
+    border-top: 0;
+    padding: 14px 16px;
+  }
+}
+@media (max-width: 600px) {
+  .lesson-brief {
+    gap: 12px;
+    padding: 16px;
+  }
+  .lesson-brief:not(.is-open) .lesson-brief-scene p,
+  .lesson-brief:not(.is-open) .lesson-brief-purpose p {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .lesson-brief:not(.is-open) .lesson-brief-scene p + p,
+  .lesson-brief:not(.is-open) .lesson-brief-purpose p + p {
+    display: none;
+  }
+  .lesson-brief .lesson-brief-scene {
+    padding-bottom: 0;
+    border-bottom: 0;
+  }
+  .lesson-brief-more {
+    display: block;
+    justify-self: start;
+    min-height: 40px;
+    padding: 6px 14px;
+    font-size: 14px;
+    color: #1e5350;
+  }
+}
+
+/* The run-mode row of the brief: neutral and compact — red/pink stays on the drive badge only. */
+.lesson-brief .run-mode-strip,
+.lesson-brief .run-mode-strip[data-run-mode~='live'],
+.lesson-brief .run-mode-strip[data-run-mode~='data'] {
+  background: #f5f8f7;
+  padding: 8px 12px;
+}
+.lesson-brief .run-mode-strip p {
+  font-size: 13px;
+  line-height: 1.6;
+}
+.lesson-brief .run-mode-jump {
+  color: #1e5350;
+  padding: 4px 10px;
+}
+
+/* Phone header: one row (logo · 実機 · 一覧 · 教材 ▾) instead of ~150 px. The robot's state stays
+   visible as the dot's colour; its name and state text are in the 実機 dialog. navigation.css is
+   loaded after this file, hence the body prefix. */
+.switcher-short {
+  display: none;
+}
+@media (max-width: 600px) {
+  body .site-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 12px;
+    min-height: 0;
+  }
+  body .site-header .brand-logo {
+    width: 96px;
+  }
+  body .site-header .brand-lab {
+    font-size: 13px;
+  }
+  body .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: nowrap;
+  }
+  body .header-actions > button,
+  body .course-switcher > summary {
+    min-height: 40px;
+    padding: 6px 10px;
+    font-size: 14px;
+  }
+  body .robot-link .robot-link-name,
+  body .robot-link #robotLinkState,
+  body .header-actions .header-long,
+  body .course-switcher .switcher-label,
+  body .course-switcher #currentCourseTitle {
+    display: none;
+  }
+  body .course-switcher .switcher-short {
+    display: inline;
+    font-weight: 700;
+    color: #1e5350;
+  }
+  html {
+    scroll-padding-top: 72px;
+  }
+}
+@media (max-width: 600px) {
+  /* The labels say it; the sentence behind them is on wider screens and in each label's title. */
+  .lesson-brief .run-mode-strip-label,
+  .lesson-brief .run-mode-strip p {
+    display: none;
+  }
+  .lesson-brief .run-mode-strip {
+    gap: 6px 8px;
+  }
+  .lesson-brief .run-mode-strip .run-mode {
+    font-size: 12px;
+  }
+}
+
+/* Supplement buttons keep their word on phones, so they read as something to press. */
+@media (max-width: 600px) {
+  .supplement-trigger .supplement-trigger-action {
+    font-size: 13px;
+    gap: 4px;
+    font-weight: 600;
+    color: #1e5350;
+  }
+}
+
+/* Catalogue (js/shell/series-view.js): the start button for newcomers, the folded label legend. */
+.series-start {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  margin-top: 18px;
+}
+.series-start .primary {
+  min-height: 52px;
+  padding: 12px 22px;
+  font-size: 16px;
+}
+.series-start-list {
+  color: #1e5350;
+  font-weight: 600;
+}
+details.series-run-legend > summary {
+  cursor: pointer;
+  list-style: revert;
+}
+details.series-run-legend > summary > h2 {
+  display: inline;
+  font-size: 18px;
+}
+.series-course .series-run-modes {
+  margin: 10px 0 0;
+}
+.series-course .series-run-modes p {
+  font-size: 13px;
+}
+
+/* The real-robot block folded while no robot is connected (js/live/live-view.js). */
+.live-offline {
+  margin: 12px 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f7f9f8;
+}
+.live-offline > summary {
+  cursor: pointer;
+  padding: 12px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #4d6469;
+}
+.live-offline[open] > .live-capture {
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 12px 12px;
+}
+
+/* Course switcher on phones: one line per course, no cover pictures, labels as marks only. */
+@media (max-width: 600px) {
+  body .course-switcher .series-nav .course-nav-cover {
+    display: none;
+  }
+  body .course-nav-links {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+  body .course-switcher .series-nav a {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    min-height: 44px;
+  }
+  body .course-switcher .series-nav span:not(.course-nav-cover) {
+    margin-left: 0;
+  }
+  body .course-switcher .series-nav .run-mode {
+    font-size: 0;
+    gap: 0;
+    padding: 3px;
+  }
+}
+@media (max-width: 600px) {
+  body .course-switcher .series-nav a > span:not(.course-nav-cover):not(.run-mode-badges) {
+    display: none;
+  }
+  body .course-switcher .series-nav a > strong br {
+    display: none;
+  }
+}
+@media (max-width: 600px) {
+  body .course-switcher .series-nav a {
+    justify-content: flex-start;
+    text-align: left;
+    flex-wrap: nowrap;
+  }
+  body .course-switcher .series-nav a > strong {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  body .course-switcher .series-nav .run-mode-badges {
+    flex: none;
+    flex-wrap: nowrap;
+    gap: 4px;
+  }
+  body .course-switcher .series-nav .run-mode-badges .run-mode {
+    font-size: 0;
+    gap: 0;
+    padding: 4px;
+  }
+}
+@media (max-width: 600px) {
+  body .course-switcher .series-nav a {
+    flex-direction: row;
+    align-items: center;
+  }
+  body .course-switcher .series-nav .run-mode-badges {
+    margin: 0 0 0 auto;
+  }
+}
