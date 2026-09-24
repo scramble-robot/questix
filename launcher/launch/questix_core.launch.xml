@@ -8,9 +8,10 @@
   <arg name="enable_gpio_ref" default="$(env ENABLE_GPIO_REF true)" description="Enable GPIO safety path (gpio_reader, operation_manager, and joy gating)"/>
   <arg name="enable_autoreferee" default="false" description="Use competition GPIO profile with AutoReferee GPIO27"/>
   <arg name="controller_type" default="$(env CONTROLLER_TYPE dualshock)" description="Controller type: dualshock or uart"/>
-  <!-- Deliberately not read from the environment: launch.env must never switch the controller off
-       for a competition run. false is for QUESTiX LAB driving experiments (practice only). -->
-  <arg name="enable_controller" default="true" description="Start the controller path; false = /target_twist comes from another source (QUESTiX LAB)"/>
+  <!-- Practice runs route the controller through twist_arbiter so QUESTiX LAB driving experiments
+       can share the drive without relaunching; the stick always takes over. Not read from the
+       environment, and never on with AutoReferee (competition): see the drive include below. -->
+  <arg name="enable_twist_arbiter" default="true" description="Share /target_twist between the controller and QUESTiX LAB (practice only; ignored with enable_autoreferee)"/>
   <arg name="enable_rviz" default="$(env ENABLE_RVIZ false)" description="Enable RViz visualization"/>
   <!-- AutoReferee operation without the GPIO safety path is an invalid configuration. -->
   <group if="$(and $(var enable_autoreferee) $(not $(var enable_gpio_ref)))">
@@ -39,7 +40,7 @@
         <!-- questix_core owns the single integrated operation_manager process. -->
         <arg name="enable_operation_manager" value="false"/>
         <arg name="controller_type" value="$(var controller_type)"/>
-        <arg name="enable_controller" value="$(var enable_controller)"/>
+        <arg name="enable_twist_arbiter" value="$(and $(var enable_twist_arbiter) $(not $(var enable_autoreferee)))"/>
       </include>
     </group>
     <group if="$(var enable_lidar)">

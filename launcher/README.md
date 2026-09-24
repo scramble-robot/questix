@@ -55,22 +55,23 @@ ros2 launch questix_launcher questix_core.launch.xml \
   enable_gpio_ref:=true enable_autoreferee:=false enable_rviz:=false
 ```
 
-## コントローラーなしで起動する（QUESTiX LAB の走行実験）
+## コントローラーと QUESTiX LAB の走行実験（twist_arbiter）
 
-`enable_controller:=false` を付けると、コントローラー系（joy ドライバ・joy_gate・
-joy_controller）を起動せず、`/target_twist` を出すノードがなくなります。QUESTiX LAB の
-走行実験は教材ブリッジ（`questix_lab_bridge`）が `/target_twist` を出すため、この起動が
-前提です（2か所から出すと指令が交互に効くので、ブリッジは他の publisher がいる間は走らせません）。
+`questix_core.launch.xml` は練習用の起動では切り替えノード `twist_arbiter` を入れます
+（`enable_twist_arbiter` 既定 `true`）。joy_controller の出力は `/target_twist/joy` に付け替えられ、
+QUESTiX LAB の教材ブリッジは `/target_twist/lab` に出し、`twist_arbiter` がどちらかを
+`/target_twist`（drive_component）へ渡します。起動し直す必要はありません。
 
-```bash
-ros2 launch questix_launcher questix_core.launch.xml enable_controller:=false
-```
+- ふだんはコントローラーの指令が通ります。
+- 教材が走り始めると、スティックが中立なら教材の指令に切り替わります。
+- 教材の走行中にスティックを倒すと、すぐにコントローラーへ戻り、教材の走行は止まります
+  （その走行が終わるまで教材は割り込めません）。
+- 教材の指令が途切れると、コントローラーに戻ります。
 
-- 既定は `true`。環境変数（`launch.env`）からは読まず、大会用の `questix_robot_launcher.sh` も
-  渡さないため、大会起動では常にコントローラーが起動します。
-- コントローラーがないので `/joy` も出ず、射出（shot）も操作できません。
-- GPIO 安全系（`gpio_reader` / `operation_manager` / `/emergency_stop`）はそのまま動きます。
-- 実験が終わったら、Robot Manager で「教材からの走行」を禁止に戻し、この引数なしで起動し直します。
+`enable_autoreferee:=true`（大会用の起動、`questix_robot_launcher.sh`）では
+`enable_twist_arbiter` の値にかかわらず入れず、joy_controller が `/target_twist` を直接出す
+今までの経路のままです。規則は `twist_arbiter/include/twist_arbiter/arbiter_logic.hpp`、
+パラメータは `twist_arbiter/config/twist_arbiter.yaml` にあります。
 
 ## ファイル構成
 

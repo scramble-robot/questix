@@ -10,10 +10,16 @@ YAML を Single Source of Truth とし、個別パラメータの launch 引数�
   <arg name="enable_gpio_ref" default="false" description="Use the GPIO-gated controller path (joy_gate and optional operation_manager)" />
   <arg name="enable_operation_manager" default="true" description="Start operation_manager in standalone referee launch" />
   <arg name="controller_type" default="uart" description="Controller type: dualshock or uart" />
-  <arg name="enable_controller" default="true" description="Start the controller path (joy driver, joy_gate, joy_controller). false leaves /target_twist to another source, e.g. QUESTiX LAB driving experiments" />
+  <arg name="enable_twist_arbiter" default="false" description="Route the controller through twist_arbiter so QUESTiX LAB driving experiments and the controller share /target_twist (practice only; the stick always takes over)" />
+
+  <!-- With twist_arbiter the controller publishes to its own input and the arbiter owns
+       /target_twist; without it (competition) joy_controller drives /target_twist directly. -->
+  <let name="controller_twist_topic" value="/target_twist/joy" if="$(var enable_twist_arbiter)" />
+  <let name="controller_twist_topic" value="/target_twist" unless="$(var enable_twist_arbiter)" />
 
   <!-- Joy Controller component launch (without GPIO gating) -->
-  <group if="$(and $(var enable_controller) $(not $(var enable_gpio_ref)))">
+  <group unless="$(var enable_gpio_ref)">
+    <set_remap from="/target_twist" to="$(var controller_twist_topic)" />
     <include file="$(find-pkg-share joy_controller)/launch/joy_controller.launch.xml">
       <arg name="config_file" value="$(var joy_config_file)" />
       <arg name="controller_type" value="$(var controller_type)" />
@@ -21,7 +27,8 @@ YAML を Single Source of Truth とし、個別パラメータの launch 引数�
   </group>
 
   <!-- GPIO-gated Joy Controller path; gpio_reader is owned by the integrated parent. -->
-  <group if="$(and $(var enable_controller) $(var enable_gpio_ref))">
+  <group if="$(var enable_gpio_ref)">
+    <set_remap from="/target_twist" to="$(var controller_twist_topic)" />
     <include file="$(find-pkg-share joy_controller)/launch/joy_controller_referee.launch.xml">
       <arg name="config_file" value="$(var joy_config_file)" />
       <arg name="controller_type" value="$(var controller_type)" />
@@ -29,11 +36,9 @@ YAML を Single Source of Truth とし、個別パラメータの launch 引数�
     </include>
   </group>
 
-  <!-- Without the controller the referee launch above does not run, so the standalone
-       operation_manager it would have started comes from here (integrated launches pass
-       enable_operation_manager:=false and own theirs). -->
-  <group if="$(and $(not $(var enable_controller)) $(and $(var enable_gpio_ref) $(var enable_operation_manager)))">
-    <include file="$(find-pkg-share operation_manager)/launch/operation_manager.launch.xml" />
+  <!-- Controller or QUESTiX LAB -> /target_twist (twist_arbiter/include/twist_arbiter/arbiter_logic.hpp). -->
+  <group if="$(var enable_twist_arbiter)">
+    <include file="$(find-pkg-share twist_arbiter)/launch/twist_arbiter.launch.xml" />
   </group>
 
   <!-- Include drive Component Launch -->
