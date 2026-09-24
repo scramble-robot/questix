@@ -7,7 +7,7 @@ import { World, COURSES, DEFAULT_REWARD, FEATURE_NAMES } from '../core/engine.js
 import { drawArena, drawCamera, drawTrajectory, drawStartMap } from '../core/renderer.js';
 import { drawLidar, drawGraph, graphSpec, graphReadings } from './sensors.js';
 import { drawStartMarks } from './lab-render.js';
-import { revealElement } from './reveal.js';
+import { revealElement } from '../core/reveal.js';
 import {
   Experiment,
   clone,

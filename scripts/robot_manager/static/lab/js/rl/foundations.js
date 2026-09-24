@@ -13,7 +13,7 @@ import {
   newTrainingModel,
 } from './foundations-core.js';
 import { drawFoundationMap } from './foundations-render.js';
-import { revealElement } from './reveal.js';
+import { revealElement } from '../core/reveal.js';
 import { fillSentence } from '../core/content.js';
 import { groupsNav, topicsNav, lessonGuides, chapterPanels } from './foundations-view.js';
 

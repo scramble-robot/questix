@@ -1,4 +1,4 @@
-import { revealFigure } from './reveal-figure.js';
+import { revealElement } from '../core/reveal.js';
 import { render } from '../vendor/lit-html.js';
 import { loadJson, loadText } from '../core/content.js';
 import { downloadFile } from '../core/dom.js';
@@ -117,7 +117,7 @@ function revealScene() {
   if (!globalThis.matchMedia?.(STACKED_LAYOUT).matches) return;
   // The course map of the line-following chapter is what its run changes most.
   const motion = document.querySelector('#visionMotion:not([hidden])');
-  revealFigure(motion || document.querySelector('.vision-image-pair'));
+  revealElement(motion || document.querySelector('.vision-image-pair'));
 }
 const isFoundation = (chapter) => Boolean(FOUNDATION_CONTENT[chapter]);
 const chapterAt = (index) => VISION_CHAPTERS[index];

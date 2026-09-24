@@ -1,4 +1,6 @@
-// Press → see: brings the part of the page a learner should watch to the top of the screen.
+// Press → see (CONTRIBUTING.md, "Figures and charts"): brings the part of the page a learner should
+// watch — the figure a run changed, a training board — to the top of the screen. Shared by the
+// courses that scroll on their own (rl, arm, vision).
 //
 // The site header is sticky. On a phone it tucks itself away while the page scrolls down and comes
 // back on the first scroll up (shell/series.js, css/navigation.css), so the page-wide

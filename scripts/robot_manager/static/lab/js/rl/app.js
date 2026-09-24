@@ -4,7 +4,7 @@ import { initRLCurriculum } from './foundations.js';
 import { IntroLearner, introRandom, introRollout, introDistance } from './intro.js';
 import { drawPrimerRun } from './primer-render.js';
 import { primerLabels, primerPanels } from './primer-view.js';
-import { revealElement } from './reveal.js';
+import { revealElement } from '../core/reveal.js';
 
 // Reward primer: the first reinforcement-learning experiment a learner meets. The same robot is
 // trained twice — once for getting closer to the goal, once for spinning on the spot — so that the
