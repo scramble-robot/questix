@@ -46,6 +46,7 @@ const SLIDER_DIGITS = 0; // a slider shows whole degrees…
 const READING_DIGITS = 1; // …a pose read from JSON or from the zero button, one decimal
 const INVERSE_TOPICS = ['inverse', 'reach', 'challenge'];
 const AXES = ['x', 'y', 'z'];
+const POSE_LABELS = ['A', 'B'];
 
 const pointText = (point) => ({ x: String(point.x), z: String(point.z) });
 
@@ -67,6 +68,7 @@ function newExperiment(id) {
     hits: [], // goals already reached without touching the post
     waypoint: false, // the current target is a waypoint, not the goal
     notice: '',
+    tried: false, // a motion of this topic has finished: its reflection answer opens
   };
 }
 
@@ -145,6 +147,7 @@ function buildModel() {
     goal: current.goal,
     hits: current.hits,
     records: current.records,
+    tried: current.tried,
     hardware: {
       angles: hardware.angles,
       digits: jointDigits,
@@ -158,6 +161,18 @@ function buildModel() {
   };
 }
 
+// Thin outlines of where the arm may stop: the sliders' pose, or every pose the inverse
+// kinematics found, named A/B so both can be compared at once (A6).
+function ghostPoses(current) {
+  if (!isInverse()) return [{ q: current.desired }];
+  const solutions = current.solution?.solutions ?? [];
+  return solutions.map((candidate, index) => ({
+    q: candidate.q,
+    label: solutions.length > 1 ? POSE_LABELS[index] : '',
+    selected: index === current.selected,
+  }));
+}
+
 function drawScene() {
   const canvas = document.getElementById('armScene');
   if (!canvas) return;
@@ -166,16 +181,17 @@ function drawScene() {
     return;
   }
   const current = experiment();
-  // The thin outline shows where the arm is about to stop: the chosen pose, or the sliders.
-  const ghost = isInverse() ? current.solution?.solutions[current.selected]?.q : current.desired;
+  const challenge = topicId === 'challenge';
   drawArm(canvas, {
     q: current.angles,
     target: ['joints', 'forward'].includes(topicId) ? null : current.target,
-    ghost,
+    ghosts: ghostPoses(current),
     trace: current.trace,
     reach: topicId === 'reach',
-    obstacle: topicId === 'challenge',
+    obstacle: challenge,
+    contact: challenge && armClearance(current.angles) <= 0,
     projections: topicId === 'forward',
+    angles: !isInverse(),
   });
 }
 
@@ -265,6 +281,7 @@ function tick() {
 
 function finish() {
   const current = experiment();
+  current.tried = true;
   const pose = armFK(current.angles);
   const error = Math.hypot(pose.tip.x - current.target.x, pose.tip.z - current.target.z); // mm
   if (topicId === 'challenge') {

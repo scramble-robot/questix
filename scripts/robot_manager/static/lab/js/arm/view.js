@@ -3,7 +3,8 @@ import { lessonLabel } from '../shell/lesson-ui.js';
 import { schoolTips } from '../shell/school-tips.js';
 import { lessonBrief } from '../shell/lesson-brief.js';
 import { runModeBadgeHtml } from '../shell/run-mode.js';
-import { ARM_GOALS, ARM_TOPICS, SO101_JOINTS } from './core.js';
+import { ARM_GOALS, ARM_MODEL, ARM_TOPICS, SO101_JOINTS } from './core.js';
+import { PART_COLORS } from './render.js';
 
 // Templates of the arm course. Every function is pure: it turns the model built by ui.js into
 // markup. Learner-facing sentences come from content/arm.json (`copy`) and the HTML fragments
@@ -24,6 +25,7 @@ const TARGET_PRESETS = [
 ];
 const POSE_NAMES = ['A', 'B'];
 const ANGLE_RANGE = { min: -150, max: 150 }; // degrees the sliders offer
+const ANGLE_TICKS = [-90, 0, 90]; // degrees marked under the sliders
 
 // toFixed keeps the sign of tiny negative results of the trigonometry ("-0.0"); learners should
 // read those as 0.
@@ -68,78 +70,112 @@ function workspaceTitle(model) {
   return '角度と手先の位置を見比べる';
 }
 
-function calculationBox(pose, copy) {
-  const { elbow, tip } = pose;
+// "+ 11.3" or "− 11.3": a signed term of a sum, with a proper minus sign.
+function signedTerm(text) {
+  return text.startsWith('-') ? `− ${text.slice(1)}` : `+ ${text}`;
+}
+
+// One line of forward kinematics with the angles and lengths put in:
+// 「x = 160×cos20° + 130×cos(20°+65°) = 150.4 + 11.3 = 161.7 mm」 (A5).
+function calculationLine(axis, angles, pose) {
+  const [shoulder, elbow] = angles.map((angle) => formatValue(angle, 0));
+  const trig = axis === 'x' ? 'cos' : 'sin';
+  const sum = `${shoulder}°${signedTerm(elbow + '°').replace(' ', '')}`;
+  const first = formatValue(pose.elbow[axis]);
+  const second = formatValue(pose.tip[axis] - pose.elbow[axis]);
+  return (
+    `${axis} = ${ARM_MODEL.l1}×${trig}${shoulder}° + ${ARM_MODEL.l2}×${trig}(${sum})` +
+    ` = ${first} ${signedTerm(second)} = ${formatValue(pose.tip[axis])} mm`
+  );
+}
+
+function calculationBox(model, copy) {
   return html`<div id="armCalculation" class="arm-calculation">
     <div>
-      <span>横の位置 x</span
-      ><strong
-        >${formatValue(elbow.x)} + ${formatValue(tip.x - elbow.x)} = ${formatValue(tip.x)}
-        mm</strong
-      >
+      <span>横の位置</span><strong>${calculationLine('x', model.angles, model.pose)}</strong>
     </div>
-    <div>
-      <span>高さ z</span
-      ><strong
-        >${formatValue(elbow.z)} + ${formatValue(tip.z - elbow.z)} = ${formatValue(tip.z)}
-        mm</strong
-      >
-    </div>
+    <div><span>高さ</span><strong>${calculationLine('z', model.angles, model.pose)}</strong></div>
     <p>${copy.workspace.calculationNote}</p>
   </div>`;
 }
 
-function workspaceCard(model, copy, actions) {
+// The key of the side view, in HTML so it stays readable on a phone (A1, A3). Each entry names a
+// mark by its shape and label as the lesson text does.
+function sceneLegend(model, copy) {
+  const legend = copy.legend;
+  const items = [
+    ['arm-key-link1', legend.link1],
+    ['arm-key-link2', legend.link2],
+    ['arm-key-tip', legend.tip],
+    ['arm-key-ghost', model.inverse ? legend.ghostPoses : legend.ghost],
+    ['arm-key-trail', legend.trail],
+  ];
+  if (model.topic === 'joints' || model.topic === 'forward')
+    items.push(['arm-key-angle', legend.angles]);
+  if (model.topic === 'forward') items.push(['arm-key-projection', legend.projections]);
+  if (model.topic === 'reach') items.push(['arm-key-reach', legend.reach]);
+  if (model.inverse) items.push(['arm-key-target', legend.target]);
+  if (model.topic === 'challenge')
+    items.push(['arm-key-post', legend.post], ['arm-key-contact', legend.contact]);
+  return html`<ul class="arm-legend" aria-label="図の見方">
+    ${items.map(([key, label]) => html`<li><i class=${key} aria-hidden="true"></i>${label}</li>`)}
+  </ul>`;
+}
+
+function readings(model) {
   const { angles, pose } = model;
+  return html`<dl class="arm-readings">
+    <div>
+      <dt>手先の横位置 x</dt>
+      <dd id="armX">${millimetres(pose.tip.x)}</dd>
+    </div>
+    <div>
+      <dt>肩からの高さ z</dt>
+      <dd id="armZ">${millimetres(pose.tip.z)}</dd>
+    </div>
+    <div>
+      <dt>現在の肩 θ₁ / 肘 θ₂</dt>
+      <dd id="armAngles">${formatValue(angles[0], 0)}° / ${formatValue(angles[1], 0)}°</dd>
+    </div>
+  </dl>`;
+}
+
+// The figure, its key, the play controls and the numbers read from it: first on a phone.
+function figureCard(model, copy, actions) {
   const pickable = model.inverse && model.topic !== 'challenge';
-  return html`<section class="card arm-workspace">
+  return html`<section class="card arm-workspace arm-figure-card">
     <div class="arm-view-head">
       <h2>${workspaceTitle(model)}</h2>
-      <span>肩の中心が0：右方向をx、上方向をzで表す</span>
+      <span>${copy.workspace.axesNote}</span>
     </div>
-    <div
-      class="diagram-scroll"
-      role="region"
-      aria-label=${copy.workspace.diagramRegionLabel}
-      tabindex="0"
-    >
-      <canvas
-        id="armScene"
-        width="760"
-        height="490"
-        aria-label=${copy.workspace.sceneLabel}
-        @click=${pickable ? actions.pickTarget : nothing}
-      ></canvas>
-    </div>
-    <p class="diagram-scroll-hint">${copy.workspace.scrollHint}</p>
+    <canvas
+      id="armScene"
+      width="760"
+      height="490"
+      aria-label=${copy.workspace.sceneLabel}
+      @click=${pickable ? actions.pickTarget : nothing}
+    ></canvas>
+    ${sceneLegend(model, copy)}
     <div class="arm-playbar">
       <button id="armPause" ?disabled=${!model.motion} @click=${actions.togglePlay}>
         ${playButtonLabel(model)}
       </button>
       <span id="armClock">${clockLabel(model)}</span>
-      <span>実線：現在 ／ 細線：到着姿勢</span>
     </div>
-    <dl class="arm-readings">
-      <div>
-        <dt>手先の横位置 x</dt>
-        <dd id="armX">${millimetres(pose.tip.x)}</dd>
-      </div>
-      <div>
-        <dt>肩からの高さ z</dt>
-        <dd id="armZ">${millimetres(pose.tip.z)}</dd>
-      </div>
-      <div>
-        <dt>現在の肩 / 肘</dt>
-        <dd id="armAngles">${formatValue(angles[0], 0)}° / ${formatValue(angles[1], 0)}°</dd>
-      </div>
-    </dl>
+    ${readings(model)}
+  </section>`;
+}
+
+// What happened and, in the forward topic, the calculation: after the main controls on a phone.
+function resultCard(model, copy) {
+  return html`<section class="card arm-result-card">
     <p id="armStatus" class="arm-status" role="status">${model.status}</p>
-    ${model.topic === 'forward' ? calculationBox(pose, copy) : nothing}
+    ${model.topic === 'forward' ? calculationBox(model, copy) : nothing}
   </section>`;
 }
 
 function angleSlider(index, model, actions) {
-  const label = index === 0 ? '肩：右向きからの角度' : '肘：手前の棒からの曲げ角度';
+  const label = index === 0 ? '肩 θ₁：右向きからの角度' : '肘 θ₂：手前の棒からの曲げ角度';
   return html`<label class="arm-angle-label" for="armAngle${index}"
       >${label}<output id="armAngleValue${index}">${model.desired[index]}°</output></label
     ><input
@@ -148,38 +184,40 @@ function angleSlider(index, model, actions) {
       min=${ANGLE_RANGE.min}
       max=${ANGLE_RANGE.max}
       step="1"
+      list="armAngleTicks"
       .value=${String(model.desired[index])}
       ?disabled=${model.playing}
       @input=${(event) => actions.setDesiredAngle(index, Number(event.target.value))}
     />`;
 }
 
-function anglePresets(model, fragments, actions) {
+// Tick marks at −90°, 0° and 90° under both angle sliders (A10).
+const angleTicks = html`<datalist id="armAngleTicks">
+  ${ANGLE_TICKS.map((value) => html`<option value=${value} label=${`${value}°`}></option>`)}
+</datalist>`;
+
+function anglePresets(model, actions) {
   return html`<div class="arm-presets">
-      ${ANGLE_PRESETS.map(
-        (preset) =>
-          html`<button
-            data-arm-preset=${preset.angles.join(',')}
-            ?disabled=${model.playing}
-            @click=${() => actions.usePreset(preset.angles)}
-          >
-            ${preset.label}
-          </button>`,
-      )}
-    </div>
-    <details data-help-dialog>
-      <summary>位置を計算する式を見る</summary>
-      ${unsafeHTML(fragments.formula)}
-    </details>`;
+    ${ANGLE_PRESETS.map(
+      (preset) =>
+        html`<button
+          data-arm-preset=${preset.angles.join(',')}
+          ?disabled=${model.playing}
+          @click=${() => actions.usePreset(preset.angles)}
+        >
+          ${preset.label}
+        </button>`,
+    )}
+  </div>`;
 }
 
-function angleControls(model, copy, fragments, actions) {
-  return html`${angleSlider(0, model, actions)}${angleSlider(1, model, actions)}
-    <p class="helper">${copy.controls.angleHelp}</p>
+function angleControls(model, copy, actions) {
+  return html`${angleSlider(0, model, actions)}${angleSlider(1, model, actions)}${angleTicks}
     <button class="primary full" id="armRun" ?disabled=${model.playing} @click=${actions.run}>
       この角度まで動かす
     </button>
-    ${model.topic === 'forward' ? anglePresets(model, fragments, actions) : nothing}`;
+    ${model.topic === 'forward' ? anglePresets(model, actions) : nothing}
+    <p class="helper">${copy.controls.angleHelp}</p>`;
 }
 
 function targetField(axis, model, actions) {
@@ -224,11 +262,16 @@ function targetPresets(model, copy, actions) {
     <p class="helper">${copy.controls.limitHelp}</p>`;
 }
 
-function solutionNote(candidate, copy) {
+function solutionNote(candidate, selected, copy) {
   if (!candidate.allowed) return copy.solutions.outsideLimits;
   if (candidate.endsOnObstacle) return copy.solutions.endsOnObstacle;
+  if (selected) return copy.solutions.selected;
   return copy.solutions.choose;
 }
+
+// A positive elbow bend turns the second bar counter-clockwise, which leaves the elbow below the
+// line from the shoulder to the tip (A6).
+const elbowSide = (candidate) => (candidate.q[1] >= 0 ? '肘が下' : '肘が上');
 
 function solutionButton(candidate, index, model, copy, actions) {
   return html`<button
@@ -240,9 +283,9 @@ function solutionButton(candidate, index, model, copy, actions) {
     ?disabled=${model.playing || !candidate.allowed}
     @click=${() => actions.selectPose(index)}
   >
-    <strong>姿勢${POSE_NAMES[index]}</strong
-    ><span>肩 ${formatValue(candidate.q[0])}° ／ 肘 ${formatValue(candidate.q[1])}°</span
-    ><small>${solutionNote(candidate, copy)}</small>
+    <strong>姿勢${POSE_NAMES[index]}（${elbowSide(candidate)}）</strong
+    ><span>肩 θ₁ ${formatValue(candidate.q[0])}° ／ 肘 θ₂ ${formatValue(candidate.q[1])}°</span
+    ><small>${solutionNote(candidate, index === model.selected && candidate.allowed, copy)}</small>
   </button>`;
 }
 
@@ -284,7 +327,7 @@ function targetControls(model, copy, actions) {
     </button>`;
 }
 
-function challengeExtras(model, copy, actions) {
+function challengeProgress(model, actions) {
   const reached = model.hits.includes(model.goal);
   return html`<p id="armProgress" class="arm-progress">
       ${model.hits.length} / ${GOAL_COUNT} 個に到着
@@ -297,14 +340,17 @@ function challengeExtras(model, copy, actions) {
       @click=${actions.nextGoal}
     >
       次の目標へ →
-    </button>
-    <details class="arm-extra">
-      <summary>通過点とやり直し</summary>
-      <p>${copy.controls.waypointHelp}</p>
-      <button id="armWaypoint" @click=${actions.useWaypoint}>高い通過点を使う</button>
-      <button id="armGoal" @click=${actions.backToGoal}>目標へ戻す</button>
-      <button id="armReset" @click=${actions.resetPose}>開始姿勢に戻す</button>
-    </details>`;
+    </button>`;
+}
+
+function challengeExtras(copy, actions) {
+  return html`<details class="arm-extra">
+    <summary>通過点とやり直し</summary>
+    <p>${copy.controls.waypointHelp}</p>
+    <button id="armWaypoint" @click=${actions.useWaypoint}>高い通過点を使う</button>
+    <button id="armGoal" @click=${actions.backToGoal}>目標へ戻す</button>
+    <button id="armReset" @click=${actions.resetPose}>開始姿勢に戻す</button>
+  </details>`;
 }
 
 function modelNotes(copy) {
@@ -314,21 +360,41 @@ function modelNotes(copy) {
   </details>`;
 }
 
-function guidePanel(model, copy, fragments, actions) {
+// The main controls: right under the figure on a phone.
+function guidePanel(model, copy, actions) {
   const inverse = model.inverse;
   return html`<aside class="card arm-guide">
     <p class="eyebrow">
       ${inverse ? '① 行き先 → ② 角度を計算 → ③ 動かす' : '角度を決めて、動きを確かめる'}
     </p>
     <h2>${inverse ? '手先をどこへ運ぶ？' : '関節を何度にする？'}</h2>
-    ${
-      inverse
-        ? targetControls(model, copy, actions)
-        : angleControls(model, copy, fragments, actions)
-    }
-    ${model.topic === 'challenge' ? challengeExtras(model, copy, actions) : nothing}
-    ${modelNotes(copy)}
+    ${inverse ? targetControls(model, copy, actions) : angleControls(model, copy, actions)}
+    ${model.topic === 'challenge' ? challengeProgress(model, actions) : nothing}
   </aside>`;
+}
+
+function formulaDetails(fragments) {
+  return html`<details data-help-dialog>
+    <summary>位置を計算する式を見る</summary>
+    ${unsafeHTML(fragments.formula)}
+  </details>`;
+}
+
+// Retries, formulas and model notes: after the result on a phone.
+function morePanel(model, copy, fragments, actions) {
+  return html`<aside class="card arm-guide arm-guide-more">
+    ${model.topic === 'challenge' ? challengeExtras(copy, actions) : nothing}
+    ${model.topic === 'forward' ? formulaDetails(fragments) : nothing} ${modelNotes(copy)}
+  </aside>`;
+}
+
+// Figure → main controls → result → details on a phone; figure and result on the left, the
+// controls on the right on a wide screen (arm.css, hs-arm-vision-slam.css).
+function armLayout(figure, guide, result, more) {
+  return html`<div class="arm-layout">
+    <div class="arm-main-col">${figure}${result}</div>
+    <div class="arm-side-col">${guide}${more}</div>
+  </div>`;
 }
 
 function historyRow(record) {
@@ -362,11 +428,16 @@ function historyCard(model, copy) {
   </section>`;
 }
 
-function reflectionCard(topicCopy) {
+// The answer stays folded until the learner has predicted it: it opens by itself after the
+// first finished motion of the topic, or on click (C1).
+function reflectionCard(topicCopy, model) {
   const { question, answer, hint } = topicCopy.reflection;
   return html`<section class="card arm-reflection">
     <h2>${question}</h2>
-    <p>${answer}</p>
+    <details class="reflection-answer" ?open=${model.tried}>
+      <summary>予想してから答えを見る</summary>
+      <p>${answer}</p>
+    </details>
     <details>
       <summary>次に試すためのヒント</summary>
       <p>${hint}</p>
@@ -375,16 +446,24 @@ function reflectionCard(topicCopy) {
 }
 
 function experimentPage(model, copy, topicCopy, fragments, actions) {
-  return html`<div class="arm-layout">
-      ${workspaceCard(model, copy, actions)}${guidePanel(model, copy, fragments, actions)}
-    </div>
-    ${model.topic === 'challenge' ? historyCard(model, copy) : nothing} ${reflectionCard(topicCopy)}`;
+  return html`${armLayout(
+    figureCard(model, copy, actions),
+    guidePanel(model, copy, actions),
+    resultCard(model, copy),
+    morePanel(model, copy, fragments, actions),
+  )}
+  ${model.topic === 'challenge' ? historyCard(model, copy) : nothing}
+  ${reflectionCard(topicCopy, model)}`;
 }
 
 function jointSlider(joint, index, model, actions) {
   const angle = model.hardware.angles[index];
   return html`<label class="arm-angle-label" for="armReal${index}"
-      >${index + 1}. ${joint.label}<output id="armRealValue${index}"
+      ><span
+        ><i class="arm-joint-dot" style=${`--joint-color: ${PART_COLORS[index]}`} aria-hidden="true"
+          >${index + 1}</i
+        >${joint.label}</span
+      ><output id="armRealValue${index}"
         >${formatValue(angle, model.hardware.digits[index])}°</output
       ></label
     ><input
@@ -398,19 +477,28 @@ function jointSlider(joint, index, model, actions) {
     />`;
 }
 
-function hardwareWorkspace(model, copy) {
-  const { tip, source } = model.hardware;
-  const hardwareCopy = copy.hardware;
-  return html`<section class="card arm-workspace">
-    <div
-      class="diagram-scroll"
-      role="region"
-      aria-label=${copy.workspace.diagramRegionLabel}
-      tabindex="0"
-    >
-      <canvas id="armScene" width="760" height="490" aria-label=${hardwareCopy.sceneLabel}></canvas>
+function hardwareLegend(copy) {
+  return html`<ul class="arm-legend" aria-label="図の見方">
+    ${['x', 'y', 'z'].map(
+      (axis) =>
+        html`<li>
+          <i class="arm-key-axis-${axis}" aria-hidden="true"></i>${copy.legend.axes[axis]}
+        </li>`,
+    )}
+    <li><i class="arm-key-number" aria-hidden="true">1</i>${copy.legend.jointNumbers}</li>
+    <li><i class="arm-key-drop" aria-hidden="true"></i>${copy.legend.drop}</li>
+  </ul>`;
+}
+
+function hardwareFigure(model, copy) {
+  const { tip } = model.hardware;
+  return html`<section class="card arm-workspace arm-figure-card">
+    <div class="arm-view-head">
+      <h2>${copy.hardware.figureTitle}</h2>
+      <span>${copy.hardware.figureNote}</span>
     </div>
-    <p class="diagram-scroll-hint">${copy.workspace.scrollHint}</p>
+    <canvas id="armScene" width="760" height="490" aria-label=${copy.hardware.sceneLabel}></canvas>
+    ${hardwareLegend(copy)}
     <dl class="arm-readings">
       <div>
         <dt>手先 x</dt>
@@ -425,7 +513,15 @@ function hardwareWorkspace(model, copy) {
         <dd id="armRealZ">${millimetres(tip.z)}</dd>
       </div>
     </dl>
-    <p id="armRealSource" class="arm-status">${source}${hardwareCopy.sourceSuffix}</p>
+  </section>`;
+}
+
+function hardwareResult(model, copy) {
+  const hardwareCopy = copy.hardware;
+  return html`<section class="card arm-result-card">
+    <p id="armRealSource" class="arm-status">
+      ${model.hardware.source}${hardwareCopy.sourceSuffix}
+    </p>
     <div class="arm-hardware-note">
       <h2>${hardwareCopy.noteTitle}</h2>
       <p>${hardwareCopy.note}</p>
@@ -433,19 +529,25 @@ function hardwareWorkspace(model, copy) {
   </section>`;
 }
 
-function hardwareGuide(model, copy, fragments, actions) {
+function hardwareGuide(model, copy, actions) {
   return html`<aside class="card arm-guide">
     <p class="eyebrow">実機の寸法で、角度から位置を計算</p>
     <h2>5つの関節角度を変える</h2>
-    ${SO101_JOINTS.map((joint, index) => jointSlider(joint, index, model, actions))}
-    <p class="helper">${copy.hardware.slidersHelp}</p>
     <button id="armRealZero" class="full" @click=${actions.showZeroPose}>
       全関節0°の計算を見る
     </button>
+    ${SO101_JOINTS.map((joint, index) => jointSlider(joint, index, model, actions))}
+    <p class="helper">${copy.hardware.slidersHelp}</p>
+  </aside>`;
+}
+
+function hardwareMore(copy, fragments) {
+  return html`<aside class="card arm-guide arm-guide-more">
     <details data-help-dialog>
       <summary>${copy.hardware.urdfSummary}</summary>
       ${unsafeHTML(fragments.urdfNotes)}
     </details>
+    ${modelNotes(copy)}
   </aside>`;
 }
 
@@ -566,10 +668,13 @@ function realLab(model, copy, fragments, actions) {
 }
 
 function hardwarePage(model, copy, fragments, actions) {
-  return html`<div class="arm-layout">
-      ${hardwareWorkspace(model, copy)}${hardwareGuide(model, copy, fragments, actions)}
-    </div>
-    ${realLab(model, copy, fragments, actions)}`;
+  return html`${armLayout(
+    hardwareFigure(model, copy),
+    hardwareGuide(model, copy, actions),
+    hardwareResult(model, copy),
+    hardwareMore(copy, fragments),
+  )}
+  ${realLab(model, copy, fragments, actions)}`;
 }
 
 function footer(model, actions) {

@@ -1,1 +1,215 @@
 /* High-school readability pass: arm-vision-slam (see CONTRIBUTING.md, "Figures and charts"). */
+
+/* ---- Shared by the three courses ------------------------------------------------------- */
+
+/* A reflection answer stays folded until the learner has predicted it (C1). */
+:is(#armPage, #visionPage, #slamPage) .reflection-answer {
+  margin: 14px 0 0;
+}
+:is(#armPage, #visionPage, #slamPage) .reflection-answer > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 8px 16px;
+  border: 1px solid #9cc3b6;
+  border-radius: 999px;
+  background: #f0f7f4;
+  color: #1c5f55;
+  font-weight: 650;
+  cursor: pointer;
+}
+:is(#armPage, #visionPage, #slamPage) .reflection-answer[open] > summary {
+  background: transparent;
+  border-color: transparent;
+  padding-left: 0;
+}
+
+/* ---- Arm ------------------------------------------------------------------------------- */
+
+/* Figure and result on the left, controls on the right; on a phone the four cards are read as
+   figure → main controls → result → details (C3). */
+.arm-main-col,
+.arm-side-col {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-width: 0;
+}
+.arm-result-card .arm-status {
+  border-radius: var(--radius) var(--radius) 0 0;
+  min-height: 0;
+}
+.arm-result-card .arm-status:only-child {
+  border-radius: var(--radius);
+}
+.arm-guide-more:empty {
+  display: none;
+}
+.arm-guide-more > details:first-child,
+.arm-guide-more > .supplement-trigger:first-child {
+  margin-top: 0;
+}
+@media (max-width: 800px) {
+  .arm-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .arm-main-col,
+  .arm-side-col {
+    display: contents;
+  }
+  .arm-figure-card {
+    order: 1;
+  }
+  .arm-guide {
+    order: 2;
+  }
+  .arm-result-card {
+    order: 3;
+  }
+  .arm-guide.arm-guide-more {
+    order: 4;
+  }
+}
+
+/* The key of the side view, in HTML so it stays readable when the canvas is narrow (A1, A3). */
+.arm-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0;
+  padding: 10px 16px 12px;
+  list-style: none;
+  background: #192f3b;
+  color: #d9e6eb;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.arm-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.arm-legend i {
+  display: inline-block;
+  flex: none;
+  width: 24px;
+  height: 0;
+  font-style: normal;
+}
+.arm-key-link1 {
+  border-top: 7px solid #83d7c2;
+  border-radius: 4px;
+}
+.arm-key-link2 {
+  border-top: 7px solid #96b8ed;
+  border-radius: 4px;
+}
+.arm-legend .arm-key-tip {
+  width: 12px;
+  height: 12px;
+  border: 3px solid #f4ede0;
+  border-radius: 50%;
+}
+.arm-key-ghost {
+  border-top: 3px solid #e3eef2aa;
+}
+.arm-key-trail {
+  border-top: 3px dotted #f4ede0;
+}
+.arm-key-projection {
+  border-top: 2px dashed #83d7c2;
+}
+.arm-legend .arm-key-angle {
+  width: 18px;
+  height: 9px;
+  border: 2px solid #96b8ed;
+  border-bottom: 0;
+  border-radius: 9px 9px 0 0;
+}
+.arm-legend .arm-key-reach {
+  height: 12px;
+  border: 1px solid #83d7c2;
+  border-radius: 6px;
+  background: #497f7088;
+}
+.arm-legend :is(.arm-key-target, .arm-key-contact) {
+  width: auto;
+  height: auto;
+  font-weight: 700;
+}
+.arm-key-target::before {
+  content: '⊕';
+  color: #f3d68b;
+}
+.arm-key-contact::before {
+  content: '✕';
+  color: var(--scene-role-danger);
+}
+.arm-legend .arm-key-post {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #8a6f64;
+}
+.arm-key-axis-x {
+  border-top: 3px solid #e5484d;
+}
+.arm-key-axis-y {
+  border-top: 3px solid #2fa84f;
+}
+.arm-key-axis-z {
+  border-top: 3px solid #3b82f6;
+}
+.arm-key-drop {
+  border-top: 2px dashed #f1dca7;
+}
+.arm-legend .arm-key-number,
+.arm-joint-dot {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 3px solid var(--joint-color, #9bb4bb);
+  border-radius: 50%;
+  background: #f4f8f9;
+  color: #10252f;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 1;
+}
+.arm-legend .arm-key-number {
+  width: 22px;
+}
+.arm-joint-dot {
+  margin-right: 8px;
+  vertical-align: middle;
+}
+.arm-angle-label > span {
+  display: inline-flex;
+  align-items: center;
+}
+.arm-calculation strong {
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+.arm-calculation > div > span {
+  flex: none;
+}
+.arm-playbar {
+  border-top: 1px solid var(--line);
+}
+@media (max-width: 600px) {
+  .arm-legend {
+    padding: 8px 12px 10px;
+  }
+  .arm-readings dt {
+    font-size: 12px;
+  }
+  .arm-view-head > span {
+    white-space: normal;
+  }
+}

@@ -59,7 +59,7 @@
 #armScene {
   display: block;
   width: 100%;
-  aspect-ratio: 760/490;
+  height: auto;
   touch-action: manipulation;
 }
 .arm-playbar {
@@ -396,9 +396,6 @@
 @media (max-width: 800px) {
   .arm-layout {
     grid-template-columns: 1fr;
-  }
-  .arm-guide {
-    grid-row: 1;
   }
   .arm-real-columns {
     grid-template-columns: 1fr;
