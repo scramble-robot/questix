@@ -1,9 +1,16 @@
 """Serve the QUESTiX LAB static site from the bridge port (plain HTTP GET only).
 
 Opening ``http://<robot>:8897/`` in a browser then shows the teaching material, and the
-page connects back to the same port over WebSocket. Pure functions, no ROS or asyncio.
+page connects back to the same port over WebSocket. No ROS or asyncio.
+
+A class opens the site on many phones at once over the robot's own Wi-Fi, and the site is
+about 200 small files. Every response carries an ETag (file size and modification time), so
+a reload revalidates each file with a 304 instead of downloading it again, and text files are
+sent gzip-compressed to browsers that accept it (compressed bodies are cached in memory per
+file version).
 """
 
+import gzip
 import mimetypes
 import os
 from pathlib import Path
@@ -24,6 +31,12 @@ _CONTENT_TYPES = {
     '.txt': 'text/plain; charset=utf-8',
     '.bin': 'application/octet-stream',
 }
+
+# Worth compressing: the site's text. Images (PNG, JPEG) and binaries are already compact.
+_COMPRESSIBLE = {'.html', '.js', '.mjs', '.css', '.svg', '.json', '.md', '.txt'}
+_GZIP_LEVEL = 6
+_MAX_CACHED_BODIES = 512  # compressed files kept in memory; the site has ~250 text files
+_gzip_cache = {}  # (path, etag) -> compressed bytes
 
 _NO_SITE_TEXT = (
     'QUESTiX LAB bridge: this port is the read-only WebSocket for the teaching material.\n'
@@ -59,11 +72,12 @@ def find_lab_dir(configured=''):
     return None
 
 
-def static_response(root, target):
+def static_response(root, target, request_headers=None):
     """Map a request target to ``(status, headers, body)``.
 
     ``root`` is None when the site was not found. Paths are resolved and must stay
-    inside ``root``; anything else is a 404 rather than an error.
+    inside ``root``; anything else is a 404 rather than an error. ``request_headers`` (a
+    mapping with ``get``) enables the 304 and gzip answers described in the module doc.
     """
     if root is None:
         return _text(404, _NO_SITE_TEXT)
@@ -75,14 +89,43 @@ def static_response(root, target):
         return _text(404, 'Not found.\n')
     content_type = (_CONTENT_TYPES.get(path.suffix.lower())
                     or mimetypes.guess_type(path.name)[0] or 'application/octet-stream')
-    return 200, _headers(content_type), path.read_bytes()
+    stat = path.stat()
+    etag = '"%x-%x"' % (stat.st_size, stat.st_mtime_ns)
+    headers = _headers(content_type) + [('ETag', etag)]
+    request_headers = request_headers or {}
+    if _etag_matches(request_headers.get('If-None-Match', ''), etag):
+        return 304, headers, b''
+    body = path.read_bytes()
+    if path.suffix.lower() in _COMPRESSIBLE and _accepts_gzip(request_headers):
+        body = _compressed(path, etag, body)
+        headers += [('Content-Encoding', 'gzip'), ('Vary', 'Accept-Encoding')]
+    return 200, headers, body
+
+
+def _etag_matches(header, etag):
+    return any(tag.strip() in (etag, '*') for tag in header.split(',') if tag.strip())
+
+
+def _accepts_gzip(request_headers):
+    return 'gzip' in request_headers.get('Accept-Encoding', '').lower()
+
+
+def _compressed(path, etag, body):
+    key = (str(path), etag)
+    if key not in _gzip_cache:
+        if len(_gzip_cache) >= _MAX_CACHED_BODIES:
+            _gzip_cache.clear()
+        # mtime=0: the same file always compresses to the same bytes.
+        _gzip_cache[key] = gzip.compress(body, _GZIP_LEVEL, mtime=0)
+    return _gzip_cache[key]
 
 
 def _headers(content_type):
     return [
         ('Content-Type', content_type),
         ('X-Content-Type-Options', 'nosniff'),
-        # Lessons are edited in place; always revalidate instead of serving stale modules.
+        # Lessons are edited in place; always revalidate (cheap with the ETag) instead of
+        # serving stale modules.
         ('Cache-Control', 'no-cache'),
     ]
 

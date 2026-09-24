@@ -143,19 +143,19 @@ class LabWebSocketServer:
     async def _http(self, connection, request):
         if _is_websocket_upgrade(request.headers):
             return None
-        status, headers, body = self._http_response(request.path)
+        status, headers, body = self._http_response(request.path, request.headers)
         return Response(status, http.HTTPStatus(status).phrase, Headers(headers), body)
 
     async def _http_legacy(self, path, request_headers):
         if _is_websocket_upgrade(request_headers):
             return None
-        status, headers, body = self._http_response(path)
+        status, headers, body = self._http_response(path, request_headers)
         return http.HTTPStatus(status), headers, body
 
-    def _http_response(self, target):
+    def _http_response(self, target, request_headers=None):
         if urlsplit(target).path == STATE_PATH:
             return self._state_response()
-        return static_response(self._site_dir, target)
+        return static_response(self._site_dir, target, request_headers)
 
     def _state_response(self):
         status = 200
