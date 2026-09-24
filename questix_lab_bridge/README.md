@@ -62,18 +62,22 @@ it is a classroom tool that is switched on from the manager when a lesson needs 
 Some lessons can drive the robot slowly and record what happens: a speed step in the
 feedback-control course, the learner's own PID stopping the robot 0.5 m before a wall, a
 forward/backward speed staircase and a measured-distance drive for the measurement lab, and a
-hold-to-move bench test in the 実機 dialog. All of it goes through `/target_twist`, exactly like
-the controller, so `drive_component`'s own limits, `cmd_timeout_sec` and emergency stop apply
-unchanged.
+hold-to-move bench test in the 実機 dialog. The bridge publishes to `/target_twist/lab`;
+`twist_arbiter` (started by practice launches of `questix_core.launch.xml`) passes either that or
+the controller's command on to `/target_twist`, so `drive_component`'s own limits,
+`cmd_timeout_sec` and emergency stop apply unchanged, and the controller keeps working:
+
+- a lab run takes over only while the stick is neutral;
+- moving the stick during a lab run hands the robot back to the controller at once; the bridge
+  reads `/twist_arbiter/status` and ends the run (`controller`);
+- nothing has to be relaunched between driving by hand and a lesson.
 
 To use it:
 
-1. Start the robot **without its controller**, so the bridge is the only `/target_twist` source
-   (two sources would take turns every tick):
-   `ros2 launch questix_launcher questix_core.launch.xml enable_controller:=false`
-2. In Questix Robot Manager's 教材 tab, press **走行を許可する** (restarts the bridge with
-   `allow_drive:=true`; every connected page drops for a few seconds and reconnects).
-   Competition mode turns it off again, and so does every restart of Robot Manager.
+1. Start the robot as usual for practice: `ros2 launch questix_launcher questix_core.launch.xml`
+   (competition launches, `enable_autoreferee:=true`, do not start `twist_arbiter`).
+2. Robot Manager runs the bridge with `allow_drive:=true` in practice mode (its 教材 tab switch
+   「教材からの走行を止める」 turns it off; competition mode turns it off, practice mode on).
 3. Learners tick the safety check on the page and press the lesson's drive button.
 
 The bridge enforces every rule itself (`questix_lab_bridge/drive.py`, unit-tested), whatever a
@@ -83,7 +87,8 @@ page sends:
 | --- | --- |
 | `allow_drive` false | Every request refused (`not_allowed`); nothing is ever published. |
 | Another node publishes `drive_topic` | Refused / running run stopped (`other_publisher`, with the node names). Checked every 0.5 s in the ROS graph. |
-| No node subscribes to `drive_topic` | Refused (`no_drive_node`). |
+| No node subscribes to `drive_topic` | Refused (`no_drive_node`): no `twist_arbiter` (not a practice launch, or another `ROS_DOMAIN_ID`). |
+| `twist_arbiter` gives the robot to the controller | Stopped (`controller`): the stick moved, or it was held when the run started. |
 | Emergency stop active | Refused / stopped (`emergency_stop`). |
 | Another page drives | Refused (`busy`). Any page may **stop** any run (`{"type":"stop"}`, the stop bar); a page ending its own experiment sends `"scope":"mine"` and cannot end someone else's. |
 | No command for `drive_deadman_sec` | Stopped (`timeout`): closed tab, sleeping laptop, lost Wi-Fi. |
@@ -92,7 +97,7 @@ page sends:
 | Speed above the limits / non-finite | Clamped / stopped (`invalid`). |
 
 After a stop the bridge publishes zero for 0.3 s so `drive_component` sees an explicit stop, then
-nothing: an idle bridge never competes with a controller started later. If the bridge itself dies
+nothing, so `twist_arbiter` soon hands the robot back to the controller. If the bridge itself dies
 mid-run, `drive_component`'s `cmd_timeout_sec` (1 s) stops the motors.
 
 The page side (`static/lab/js/live/drive-link.js`) adds its own stops: the learner's 止める

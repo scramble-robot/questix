@@ -1,11 +1,13 @@
 """ROS 2 node that mirrors robot telemetry to QUESTiX LAB pages over a WebSocket.
 
-By default observation only: the node creates subscriptions and nothing else, and the
-WebSocket ignores everything a browser sends. With ``allow_drive`` it also publishes the
-drive topic (``/target_twist``) for pages that run a driving experiment, under the rules
-of drive.DriveArbiter: nothing else may publish that topic, a drive node must listen, the
-emergency stop must be released, one page at a time, speed limits, and a dead-man timeout.
+Without ``allow_drive`` observation only: the node creates subscriptions and nothing else,
+and the WebSocket ignores everything a browser sends. With it, the node also publishes the
+drive topic (``/target_twist/lab``, twist_arbiter's lab input) for pages that run a driving
+experiment, under the rules of drive.DriveArbiter: nothing else may publish that topic, a node
+must listen, the emergency stop must be released, one page at a time, speed limits, and a
+dead-man timeout. twist_arbiter's status ends a run the controller takes over.
 """
+import json
 import threading
 import time
 
@@ -17,6 +19,7 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, qos_profile_sensor_data, ReliabilityPolicy
 from rclpy.time import Time
 from sensor_msgs.msg import CompressedImage, LaserScan
+from std_msgs.msg import String
 from tf2_ros import Buffer, TransformException, TransformListener
 
 from . import messages
@@ -30,6 +33,9 @@ _GRAPH_PERIOD_SEC = 0.5
 # drive_state is repeated this often even without a change, so a page notices a dead bridge.
 _DRIVE_STATE_PERIOD_SEC = 1.0
 # questix_msgs/README.md: /emergency_stop is reliable + transient_local, keep-last 1.
+# How long a run may wait for twist_arbiter to hand it the robot before the controller is
+# considered to hold it (a stick not at rest when the run started).
+_ARBITER_GRACE_SEC = 0.5
 _ESTOP_QOS = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
                         durability=DurabilityPolicy.TRANSIENT_LOCAL)
 
@@ -74,7 +80,11 @@ class LabBridgeNode(Node):
 
         # Driving from the pages (off unless allow_drive; see drive.py for every rule).
         allow_drive = bool(self.declare_parameter('allow_drive', False).value)
-        self._drive_topic = self.declare_parameter('drive_topic', '/target_twist').value
+        # twist_arbiter's lab input: the controller keeps its own, and the arbiter decides.
+        self._drive_topic = self.declare_parameter('drive_topic', '/target_twist/lab').value
+        arbiter_topic = self.declare_parameter(
+            'arbiter_status_topic', '/twist_arbiter/status').value
+        self._arbiter_status = None
         estop_topic = self.declare_parameter('emergency_stop_topic', '/emergency_stop').value
         drive_rate = self.declare_parameter('drive_rate_hz', 20.0).value
         self._drive_lock = threading.Lock()
@@ -109,6 +119,9 @@ class LabBridgeNode(Node):
             if estop_topic:
                 self._estop_subscription = self.create_subscription(
                     EmergencyStop, estop_topic, self._on_estop, _ESTOP_QOS)
+            if arbiter_topic:
+                self._arbiter_subscription = self.create_subscription(
+                    String, arbiter_topic, self._on_arbiter, _ESTOP_QOS)
             self._graph_timer = self.create_timer(_GRAPH_PERIOD_SEC, self._check_graph)
             self._drive_timer = self.create_timer(1.0 / max(1.0, drive_rate), self._on_drive_tick)
             self._check_graph()
@@ -251,9 +264,34 @@ class LabBridgeNode(Node):
                 self.get_logger().warning('page %d disconnected while driving: stopped' % client_id)
                 self._send_drive_state(time.monotonic())
 
+    def _on_arbiter(self, msg):
+        try:
+            status = json.loads(msg.data)
+        except ValueError:
+            return
+        with self._drive_lock:
+            self._arbiter_status = status if isinstance(status, dict) else None
+
+    def _controller_has_robot(self, now):
+        """Tell whether twist_arbiter has given the robot to the controller during our run.
+
+        The arbiter switches to the lab on our first command; a run it has not switched to
+        within _ARBITER_GRACE_SEC (the stick was held) or has switched away from (the stick
+        moved) is over. Without an arbiter status (no arbiter running) nothing is decided here.
+        """
+        status = self._arbiter_status
+        if status is None or not self._drive.active:
+            return False
+        if status.get('reason') == 'controller' and status.get('lab_locked'):
+            return True
+        return (status.get('active') != 'lab'
+                and self._drive.run_seconds(now) > _ARBITER_GRACE_SEC)
+
     def _on_drive_tick(self):
         now = time.monotonic()
         with self._drive_lock:
+            if self._controller_has_robot(now):
+                self._drive.controller_took_over(now)
             was_active = self._drive.active
             command = self._drive.tick(now)
             if was_active and not self._drive.active:

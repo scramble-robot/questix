@@ -47,7 +47,7 @@ def test_config_round_trip_and_validation(lab):
     assert lab.set_config(lab.LabConfig(CAMERA_TOPIC=" /cam/compressed ")) == {
         "CAMERA_TOPIC": "/cam/compressed", "AUTOSTART": "true"}
     assert lab._read_config() == {
-        "CAMERA_TOPIC": "/cam/compressed", "AUTOSTART": "true", "ALLOW_DRIVE": "false"}
+        "CAMERA_TOPIC": "/cam/compressed", "AUTOSTART": "true", "ALLOW_DRIVE": "true"}
     lab.set_config(lab.LabConfig(AUTOSTART=False))
     assert lab._read_config()["AUTOSTART"] == "false"
     with pytest.raises(ValueError):
@@ -139,7 +139,7 @@ def test_practice_mode_turns_autostart_back_on_and_starts_the_bridge(lab, monkey
     lab.enable_for_practice()
     # Driving stays off: it is turned on deliberately, never by a mode switch.
     assert lab._read_config() == {
-        "CAMERA_TOPIC": "/cam/compressed", "AUTOSTART": "true", "ALLOW_DRIVE": "false"}
+        "CAMERA_TOPIC": "/cam/compressed", "AUTOSTART": "true", "ALLOW_DRIVE": "true"}
     assert started == [True]
 
 
@@ -185,11 +185,13 @@ def test_manager_lifespan_starts_and_stops_the_lab_console(lab, monkeypatch):
     assert calls == ["startup", "shutdown"]
 
 
-def test_drive_is_off_by_default_and_passed_only_when_allowed(lab):
-    assert lab.get_status()["drive_allowed"] is False
+def test_drive_is_on_by_default_and_the_teacher_can_switch_it_off(lab):
+    # Each run is confirmed by the learner on the page; the switch is the teacher's off switch.
+    assert lab.get_status()["drive_allowed"] is True
+    assert "-p allow_drive:=true" in lab._build_command(lab._read_config())
+    lab.set_drive(lab.DriveRequest(allow=False))
     assert "allow_drive" not in lab._build_command(lab._read_config())
     lab.set_drive(lab.DriveRequest(allow=True))
-    assert "-p allow_drive:=true" in lab._build_command(lab._read_config())
     # The settings form does not touch it.
     lab.set_config(lab.LabConfig(CAMERA_TOPIC="/cam/compressed"))
     assert lab._read_config()["ALLOW_DRIVE"] == "true"
@@ -398,33 +400,17 @@ def test_competition_stops_the_bridge_even_if_lab_env_cannot_be_written(
     assert "allow_drive" not in lab._build_command(lab._read_config())
 
 
-def test_driving_permission_is_reset_when_the_manager_starts(lab, monkeypatch, tmp_path):
+def test_manager_start_keeps_the_teachers_choice(lab, monkeypatch, tmp_path):
     seen = []
     monkeypatch.setattr(lab, "start_bridge", lambda: seen.append(lab._read_config()))
     monkeypatch.setattr(lab.threading, "Thread", _run_now)
-    (tmp_path / "lab.env").write_text(
-        'CAMERA_TOPIC="/cam"\nAUTOSTART="true"\nALLOW_DRIVE="true"\n')
+    (tmp_path / "lab.env").write_text('AUTOSTART="true"\nALLOW_DRIVE="false"\n')
     lab.autostart()
-    assert seen == [{"CAMERA_TOPIC": "/cam", "AUTOSTART": "true", "ALLOW_DRIVE": "false"}]
-    assert 'ALLOW_DRIVE="false"' in (tmp_path / "lab.env").read_text()
-    # AUTOSTART=false: the bridge stays off, but driving is reset all the same.
-    (tmp_path / "lab.env").write_text('AUTOSTART="false"\nALLOW_DRIVE="true"\n')
-    lab.autostart()
-    assert len(seen) == 1
-    assert 'ALLOW_DRIVE="false"' in (tmp_path / "lab.env").read_text()
+    assert seen[0]["ALLOW_DRIVE"] == "false"
 
 
-def test_driving_reset_holds_even_if_lab_env_cannot_be_written(
-        lab, monkeypatch, tmp_path, read_only_lab_env):
-    commands = []
-    monkeypatch.setattr(lab, "start_bridge",
-                        lambda: commands.append(lab._build_command(lab._read_config())))
-    monkeypatch.setattr(lab.threading, "Thread", _run_now)
-    read_only_lab_env('ALLOW_DRIVE="true"\n')
-    lab.autostart()
-    assert len(commands) == 1 and "allow_drive" not in commands[0]
-    assert lab.get_status()["config_error"]
-    # Allowing again needs a writable lab.env, and the error says how to get one.
+def test_allowing_again_needs_a_writable_lab_env(lab, tmp_path, read_only_lab_env):
+    read_only_lab_env('ALLOW_DRIVE="false"\n')
     with pytest.raises(HTTPException) as error:
         lab.set_drive(lab.DriveRequest(allow=True))
     assert "sudo chown" in error.value.detail

@@ -38,6 +38,7 @@ STOPPED = 'stopped'
 TIMEOUT = 'timeout'
 TIME_LIMIT = 'time_limit'
 DISCONNECTED = 'disconnected'
+CONTROLLER = 'controller'  # twist_arbiter gave the robot to the controller (a hand on the stick)
 
 
 class DriveArbiter:
@@ -132,6 +133,17 @@ class DriveArbiter:
             self._end(STOPPED, client, now)
             return True
         return False
+
+    def controller_took_over(self, now):
+        """End the run because twist_arbiter handed the robot to the controller."""
+        if self.active:
+            self._end(CONTROLLER, None, now)
+            return True
+        return False
+
+    def run_seconds(self, now):
+        """Return how long the current run has lasted (0 when none runs)."""
+        return now - self._started_at if self.active else 0.0
 
     def disconnect(self, client, now):
         if self.owner == client:

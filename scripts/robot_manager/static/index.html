@@ -315,7 +315,7 @@
         <span id="lab-drive-state">配信が止まっています</span>
       </p>
       <p id="lab-drive-external" class="lab-drive-warning" hidden>
-        手動で起動したブリッジです。ここでの許可・禁止は反映されません（端末で Ctrl+C して『配信開始』を押してください）
+        手動で起動したブリッジです。ここでの切り替えは反映されません（端末で Ctrl+C して『配信開始』を押してください）
       </p>
       <div class="rec-status lab-drive-facts">
         <div class="rec-status-row">
@@ -333,49 +333,24 @@
       </div>
       <ul id="lab-drive-ready" class="lab-drive-ready" hidden></ul>
 
-      <div id="lab-drive-reminder" class="lab-drive-reminder" hidden>
-        <p>
-          コントローラーありで起動し直しましたか？
-          <code class="lab-drive-command">ros2 launch questix_launcher questix_core.launch.xml</code>
-        </p>
-        <button type="button" class="btn btn-small" id="lab-drive-reminder-done">起動し直した</button>
-      </div>
-      <p id="lab-drive-warning" class="lab-drive-warning" hidden>
-        教材からロボットを動かせる状態です。授業が終わったら<strong>走行を禁止する</strong>を押し、
-        ロボットをコントローラーありで起動し直してください（<code>enable_controller:=false</code> を付けずに起動）。
-      </p>
       <p id="lab-drive-error" class="lab-inline-error" role="alert" hidden></p>
 
       <div class="btn-group rec-controls">
-        <button class="btn btn-caution" id="lab-drive-allow">走行を許可する</button>
-        <button class="btn btn-safe" id="lab-drive-forbid" disabled>走行を禁止する</button>
+        <button class="btn btn-safe" id="lab-drive-forbid">教材からの走行を止める</button>
+        <button class="btn btn-caution" id="lab-drive-allow" disabled>教材からの走行を再開する</button>
       </div>
 
       <p class="lab-note">
-        許可すると、生徒の教材の走行実験（ステップ応答・壁の前で止めるPID・速さの往復・決めた距離の走行・実機テスト）が
-        低速でロボットを動かします。許可・禁止を切り替えると、配信中のブリッジを自動で起動し直します。
-        そのあいだ生徒全員の接続が数秒切れ、自動でつながり直します。
-        Robot Manager を起動し直すと（電源を入れ直したときも）、走行は必ず「禁止」に戻ります。
+        練習モードでは、生徒が教材で安全確認のチェックを入れると、走行実験（ステップ応答・壁の前で止めるPID・速さの往復・
+        決めた距離の走行・動作確認）が低速でロボットを動かします。コントローラーはそのまま使えます：
+        教材の走行中でもスティックを倒せば、すぐにコントローラーの操作に切り替わり、教材の走行は止まります
+        （切り替えノード twist_arbiter）。起動し直す必要はありません。
       </p>
-      <h3 class="lab-drive-subhead">条件（そろうまで教材の走行ボタンは押せません）</h3>
-      <ul class="lab-drive-steps">
-        <li>ロボットが<strong>コントローラーなし</strong>で起動している（指令が2か所から出てぶつかるのを防ぐため）</li>
-        <li>drive_component が動いていて、ブリッジと同じ ROS_DOMAIN_ID である</li>
-        <li>非常停止が解除されている</li>
-      </ul>
-      <h3 class="lab-drive-subhead">手順</h3>
-      <ol class="lab-drive-steps">
-        <li>ロボットをコントローラーなしで起動し直す：
-          <code class="lab-drive-command">ros2 launch questix_launcher questix_core.launch.xml enable_controller:=false</code>
-        </li>
-        <li>非常停止ボタンの位置を確かめ、ロボットの周り 1 m に人や物がないようにする</li>
-        <li>「走行を許可する」を押す（配信中のブリッジは自動で起動し直します）</li>
-        <li>上の表示が「生徒の教材から走らせられます」になったら、生徒が教材で安全確認をして走らせる</li>
-        <li>終わったら「走行を禁止する」を押し、ロボットをコントローラーありで起動し直す</li>
-      </ol>
       <p class="lab-note">
-        上限は前後 0.3 m/s・回転 1.0 rad/s（questix_lab_bridge の設定）。教材の画面が閉じたり通信が
-        0.5 秒途切れたりすると止まり、どの端末の停止バーでも止められます。大会モードに切り替えると走行は禁止に戻ります。
+        授業の外で走らせたくないときは「教材からの走行を止める」を押します（配信中のブリッジを自動で起動し直すので、
+        生徒の接続が数秒切れます）。大会モードでは走行できず、練習モードに戻すと再開します。
+        上限は前後 0.3 m/s・回転 1.0 rad/s（questix_lab_bridge の設定）で、教材の画面が閉じたり通信が 0.5 秒途切れたりすると止まり、
+        どの端末の停止バーでも止められます。
       </p>
     </section>
 
@@ -451,7 +426,7 @@
 
   <script src="/static/vendor/qrcode.js"></script>
   <script src="/static/qr-svg.js?v=1"></script>
-  <script src="/static/app.js?v=11"></script>
+  <script src="/static/app.js?v=12"></script>
 </body>
 
 </html>

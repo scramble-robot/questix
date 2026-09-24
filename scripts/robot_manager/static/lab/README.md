@@ -98,9 +98,10 @@ lesson block shows the report of its last run; the 実機 dialog lists every run
 Reports stay in `localStorage` across a reload; the full recording (JSON / CSV) can be saved only
 until the page is closed.
 
-Driving needs three things on the robot side: the robot started **without its controller**
-(`ros2 launch questix_launcher questix_core.launch.xml enable_controller:=false`), **走行を許可する**
-in Robot Manager's 教材 tab, and the E-stop released. The bridge checks all of them and every other
+Driving needs the robot started for practice (`ros2 launch questix_launcher questix_core.launch.xml`,
+which includes `twist_arbiter`: the controller keeps working and moving its stick takes over from a
+lesson), 教材からの走行 not switched off in Robot Manager's 教材 tab (on by default in practice
+mode), the E-stop released, and the learner's safety tick on the page. The bridge checks all of them and every other
 safety rule itself (`questix_lab_bridge/README.md`, "Driving experiments"); the page only shows them.
 `js/live/drive-core.js` (readiness, programs, odometry goals) and `js/control/live-drive.js` (step,
 wall PID) are DOM-free and tested (`test/drive-core.test.mjs`, `test/control-live-drive.test.mjs`);

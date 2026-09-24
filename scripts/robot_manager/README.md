@@ -100,15 +100,16 @@ The **教材** tab starts and stops that bridge, so nobody has to run `ros2 laun
   started by hand; `null` when none answers within 0.5 s). The tab takes the driving state from
   it (`bridge.read_only`), not from `lab.env`.
 - **教材からの走行** (`ALLOW_DRIVE` in `lab.env`, `POST /api/lab/drive`) lets the lessons' driving
-  experiments move the robot (`questix_lab_bridge/README.md`, "Driving experiments"). Switching
-  it restarts a bridge started here (every connected page drops for a few seconds); a bridge
-  started by hand keeps its own `allow_drive`. The card lists, for the teacher, what still
-  blocks driving (`bridge.drive_state.blockers`: controller publishing `/target_twist`, no
-  `drive_component` or a different `ROS_DOMAIN_ID`, emergency stop), the robot name, connected
-  pages and which page drives. After 走行を禁止する it reminds the teacher to restart the robot
-  with its controller until dismissed. `ALLOW_DRIVE` is reset to `false` whenever robot_manager
-  starts (and by 大会モード); if `lab.env` cannot be written, driving still counts as off and
-  the reason is shown as `config_error`.
+  experiments move the robot (`questix_lab_bridge/README.md`, "Driving experiments"); each run is
+  confirmed by the learner's safety tick, and `twist_arbiter` lets the controller take over at any
+  time. On by default in practice mode; the card's 「教材からの走行を止める」 is the teacher's off
+  switch. 大会モード turns it off (and it always reads as off in that mode), going back to practice
+  turns it on. Switching restarts a bridge started here (every connected page drops for a few
+  seconds); a bridge started by hand keeps its own `allow_drive`. The card lists, for the teacher,
+  what still blocks driving (`bridge.drive_state.blockers`: no `twist_arbiter` or a different
+  `ROS_DOMAIN_ID`, another publisher on `/target_twist/lab`, emergency stop), the robot name,
+  connected pages and which page drives. If `lab.env` cannot be written when switching off,
+  driving still counts as off and the reason is shown as `config_error`.
 - A permission error on `mode`, `launch.env` or `lab.env` names the service user, the owner and
   the fix (`sudo chown <user>:<user> /etc/questix_robot …`). `scripts/check-robot-manager.sh`
   checks the same, plus that `wifi_ap.env` is readable.
@@ -126,8 +127,8 @@ The **教材** tab starts and stops that bridge, so nobody has to run `ros2 laun
 
 Prerequisite: `questix_lab_bridge` is built in `ROBOT_WS` (`colcon build`; rosdep key
 `python3-websockets`). If the node exits immediately, starting fails with an error (and the log
-above). The bridge only subscribes unless 教材からの走行 is allowed; then it may publish
-`/target_twist` and nothing else.
+above). The bridge only subscribes unless 教材からの走行 is on; then it may publish
+`/target_twist/lab` (twist_arbiter's lab input) and nothing else.
 
 ## Running (dev)
 

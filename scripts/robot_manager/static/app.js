@@ -725,13 +725,13 @@ function showLabLog(data, serving) {
 function labBlockerText(blocker, bridge) {
   switch (blocker.code) {
     case "other_publisher":
-      return (
-        `コントローラーなど（${(blocker.nodes || []).join(", ") || "不明なノード"}）が /target_twist を出しています。` +
-        "コントローラーなしで起動し直してください：ros2 launch questix_launcher questix_core.launch.xml enable_controller:=false"
-      );
+      return `ほかのノード（${(blocker.nodes || []).join(", ") || "不明なノード"}）が教材用の指令（/target_twist/lab）を出しています。`;
     case "no_drive_node": {
       const domain = bridge.robot && bridge.robot.domain != null ? bridge.robot.domain : "未設定(0)";
-      return `drive_component が見つかりません（ロボットのROSが起動していないか、ROS_DOMAIN_ID ${domain} が違います）`;
+      return (
+        `切り替えノード twist_arbiter が見つかりません（ロボットのROSが questix_core で起動していないか、ROS_DOMAIN_ID ${domain} が違います）。` +
+        "大会用の起動（enable_autoreferee:=true）では教材から走らせられません。"
+      );
     }
     case "emergency_stop":
       return "非常停止が押されています";
@@ -740,28 +740,8 @@ function labBlockerText(blocker, bridge) {
   }
 }
 
-const LAB_REMINDER_KEY = "questix.labDriveReminder";
-
-function labReminderPending() {
-  try {
-    return localStorage.getItem(LAB_REMINDER_KEY) === "pending";
-  } catch {
-    return false;
-  }
-}
-
-function setLabReminderPending(pending) {
-  try {
-    if (pending) localStorage.setItem(LAB_REMINDER_KEY, "pending");
-    else localStorage.removeItem(LAB_REMINDER_KEY);
-  } catch {
-    // storage unavailable: the reminder is only shown while the status calls for it
-  }
-}
-
 // "教材からの走行": what the running bridge itself does (bridge = its GET /api/state), not only
-// what lab.env asks for. Driving possible is shown in orange on the card and the tab, so nobody
-// forgets to switch it back after a class.
+// what lab.env asks for. Driving possible is shown in orange on the card and the tab.
 function showLabDrive(data) {
   const bridge = data.bridge;
   const serving = data.running || data.external;
@@ -780,13 +760,13 @@ function showLabDrive(data) {
     tone = "idle";
   } else if (stale) {
     state =
-      "禁止にしました（配信中のブリッジはまだ走らせられます。『配信停止』→『配信開始』を押してください）";
+      "止めました（配信中のブリッジはまだ走らせられます。『配信停止』→『配信開始』を押してください）";
     tone = "driving";
   } else if (bridgeAllows) {
-    state = "許可中（生徒の教材から走らせられます）";
+    state = "走行できます（生徒が教材で安全確認をして走らせます）";
     tone = "driving";
   } else {
-    state = "禁止";
+    state = "止めています（教材からは走らせられません）";
     tone = "idle";
   }
   document.getElementById("lab-drive-indicator").className =
@@ -828,9 +808,7 @@ function showLabDrive(data) {
 
   const drivable = bridgeAllows || setting;
   document.getElementById("lab-drive-card").classList.toggle("allowed", drivable);
-  document.getElementById("lab-drive-warning").hidden = !bridgeAllows || stale;
   document.getElementById("tab-lab-dot").classList.toggle("driving", drivable);
-  document.getElementById("lab-drive-reminder").hidden = !(labReminderPending() || stale);
   // A lab.env write that failed without failing the request (e.g. owned by another user).
   if (data.config_error) setLabError("lab-drive-error", data.config_error);
 
@@ -841,22 +819,13 @@ function showLabDrive(data) {
 }
 
 async function setLabDrive(allow) {
-  if (
-    allow &&
-    !confirm(
-      "教材からロボットを動かせるようにします。\n" +
-        "ロボットはコントローラーなし（enable_controller:=false）で起動しましたか？\n" +
-        "周りに人や物がないことを確かめましたか？\n" +
-        "配信中のブリッジを起動し直すため、生徒全員の接続が数秒切れます。",
-    )
-  ) {
+  if (!confirm("配信中のブリッジを起動し直すため、生徒全員の接続が数秒切れます。よろしいですか？")) {
     return;
   }
   try {
     await api("/api/lab/drive", { method: "POST", body: JSON.stringify({ allow }) });
-    toast(allow ? "教材からの走行を許可しました" : "教材からの走行を禁止しました", "success");
+    toast(allow ? "教材からの走行を再開しました" : "教材からの走行を止めました", "success");
     setLabError("lab-drive-error", null);
-    if (!allow) setLabReminderPending(true);
   } catch (e) {
     setLabError("lab-drive-error", e.message); // also toasted
   }
@@ -878,10 +847,6 @@ async function labServeAction(path, done) {
 function setupLabEvents() {
   document.getElementById("lab-drive-allow").addEventListener("click", () => setLabDrive(true));
   document.getElementById("lab-drive-forbid").addEventListener("click", () => setLabDrive(false));
-  document.getElementById("lab-drive-reminder-done").addEventListener("click", () => {
-    setLabReminderPending(false);
-    document.getElementById("lab-drive-reminder").hidden = true;
-  });
   document
     .getElementById("lab-start")
     .addEventListener("click", () => labServeAction("/api/lab/start", "教材の配信を開始しました"));

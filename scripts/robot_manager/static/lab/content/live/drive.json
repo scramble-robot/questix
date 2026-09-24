@@ -1,6 +1,6 @@
 {
   "title": "教材が実機を走らせる",
-  "notAllowed": "先生が「教材からの走行」を許可すると、この教材がロボットを低速で走らせて測れます。それまでは、コントローラーで走らせながら「記録する」を使います。",
+  "notAllowed": "いまは先生が教材からの走行を止めています。コントローラーで走らせながら「記録する」を使います。",
   "blockers": {
     "no_link": {
       "student": "ロボットにつながっていません。画面右上の「実機」から接続してください。"
@@ -10,17 +10,16 @@
       "teacher": "ロボットの questix_lab_bridge が古い版です。ロボットで colcon build --packages-select questix_lab_bridge を実行し、Robot Manager の教材タブで配信を開始し直してください。"
     },
     "not_allowed": {
-      "student": "先生が「教材からの走行」を許可すると走らせられます。",
-      "teacher": "Robot Manager（ロボットの画面で http://localhost:8888）の教材タブで「走行を許可する」を押します。"
+      "student": "いまは先生が教材からの走行を止めています。",
+      "teacher": "Robot Manager（ロボットの画面で http://localhost:8888）の教材タブで「教材からの走行を再開する」を押します。"
     },
     "no_drive_node": {
       "student": "ロボットの走る準備ができていません。先生に伝えてください。",
-      "teacher": "/target_twist を受け取る drive_component が見つかりません。ロボットのROSが起動しているか、ROS_DOMAIN_ID が教材の配信と同じかを確かめてください。"
+      "teacher": "教材の指令を受け取る切り替えノード twist_arbiter が見つかりません。ロボットのROSを ros2 launch questix_launcher questix_core.launch.xml（練習用）で起動しているか、ROS_DOMAIN_ID が教材の配信と同じかを確かめてください。大会用の起動（enable_autoreferee:=true）では教材から走らせられません。"
     },
     "other_publisher": {
-      "student": "コントローラーが動いているため、教材からは走らせられません。先生に伝えてください。",
-      "teacher": "{nodes} も /target_twist を出しています。指令が2か所から出ると交互に効くので、コントローラーなしで起動し直してください：",
-      "command": "ros2 launch questix_launcher questix_core.launch.xml enable_controller:=false"
+      "student": "ロボットの走る準備ができていません。先生に伝えてください。",
+      "teacher": "{nodes} も教材用の指令（/target_twist/lab）を出しています。教材ブリッジが2つ動いていないか確かめてください。"
     },
     "emergency_stop": {
       "student": "非常停止ボタンが押されています。先生と一緒に周りを確かめてから解除してください。"
@@ -46,7 +45,7 @@
   "ready": "走らせる準備ができています。",
   "placement": "置き方",
   "confirm": "「置き方」の広さが空いていて、周りに人や物がなく、非常停止ボタンに手が届くことを確かめました",
-  "limits": "この教材が出せる速さは前後 {linear} m/s・回転 {angular} rad/s（約{degrees}°/秒）までです。画面を閉じる・別のタブにする・通信が途切れると止まります（パソコンはEscキーでも止まります）。",
+  "limits": "この教材が出せる速さは前後 {linear} m/s・回転 {angular} rad/s（約{degrees}°/秒）までです。画面を閉じる・別のタブにする・通信が途切れると止まります（パソコンはEscキーでも止まります）。コントローラーのスティックを倒しても、すぐに止まってコントローラーの操作に切り替わります。",
   "start": "教材が走らせて記録する",
   "stop": "止める",
   "running": "走行中… {seconds}秒（最長{total}秒）",
@@ -67,7 +66,8 @@
     "lost": "ロボットとの接続が切れたため止めました。",
     "no_answer": "ロボットから返事がありませんでした（Wi-Fiが混んでいる可能性があります）。念のため止める指令を送りました。もう一度押し、続くときは先生に伝えてください。",
     "refused": "走らせられませんでした。{reason}",
-    "cut": "接続が切れたため、記録は途中までです。"
+    "cut": "接続が切れたため、記録は途中までです。",
+    "controller": "コントローラーが操作されたため、教材の走行を止めました（コントローラーが優先です）。スティックから手を離してから、もう一度押してください。"
   },
   "bar": {
     "mine": "この画面の実験でロボットが走っています",

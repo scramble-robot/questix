@@ -128,3 +128,14 @@ def test_version_changes_only_on_news():
     assert started > version
     arbiter.request(1, 0.1, 0.0, 0.3)  # heartbeat with the same command
     assert arbiter.version == started
+
+
+def test_controller_takeover_ends_the_run():
+    arbiter = ready_arbiter()
+    assert not arbiter.controller_took_over(0.0)
+    arbiter.request(1, 0.1, 0.0, 0.0)
+    assert arbiter.run_seconds(0.4) == 0.4
+    assert arbiter.controller_took_over(0.5)
+    assert arbiter.last_stop == {'reason': drive.CONTROLLER, 'by': None}
+    assert arbiter.run_seconds(0.6) == 0.0
+    assert arbiter.tick(0.6) == (0.0, 0.0)

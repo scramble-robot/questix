@@ -125,23 +125,6 @@ header h1 {
   border: 2px solid var(--orange);
 }
 
-.lab-drive-steps {
-  font-size: 0.85rem;
-  line-height: 1.7;
-  margin: 0 0 0.9rem 1.2rem;
-}
-
-.lab-drive-command {
-  display: block;
-  margin: 0.3rem 0;
-  padding: 0.4rem 0.6rem;
-  background: var(--bg-input);
-  border-radius: 6px;
-  font-size: 0.78rem;
-  overflow-wrap: anywhere;
-  user-select: all;
-}
-
 .lab-drive-warning {
   font-size: 0.85rem;
   line-height: 1.7;
@@ -203,30 +186,6 @@ header h1 {
   border-color: var(--orange);
   color: var(--orange);
   font-weight: 600;
-}
-
-.lab-drive-reminder {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem 0.8rem;
-  padding: 0.6rem 0.8rem;
-  margin: 0 0 0.9rem;
-  border-radius: 8px;
-  border: 1px dashed var(--yellow);
-  font-size: 0.85rem;
-  line-height: 1.6;
-}
-
-.lab-drive-reminder p {
-  flex: 1 1 16rem;
-  min-width: 0;
-}
-
-.lab-drive-subhead {
-  font-size: 0.85rem;
-  font-weight: 600;
-  margin: 0.6rem 0 0.4rem;
 }
 
 .lab-inline-error {

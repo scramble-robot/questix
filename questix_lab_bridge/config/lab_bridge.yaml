@@ -48,14 +48,18 @@ questix_lab_bridge:
     wheel_separation: 0.5
 
     # Driving experiments from the pages (the only thing this node can publish).
-    # false = observation only; robot_manager passes true when 教材からの走行を許可 is on.
+    # true = pages may drive, each run confirmed by the learner's safety tick on the page.
+    # robot_manager passes its 教材からの走行 switch (on in practice mode, off in competition).
+    # The page's commands go to twist_arbiter's lab input; the arbiter (practice launches of
+    # questix_core) chooses between them and the controller, and a moved stick takes over.
     # Even when allowed, a page can drive only while
-    #   - no other node publishes drive_topic (start the robot without its controller:
-    #     `ros2 launch questix_launcher questix_core.launch.xml enable_controller:=false`),
-    #   - a drive node (drive_component) subscribes to it, and
+    #   - no other node publishes drive_topic,
+    #   - twist_arbiter subscribes to it (the robot's ROS runs, same ROS_DOMAIN_ID), and
     #   - the emergency stop is released (emergency_stop_topic or /drive_status).
-    allow_drive: false
-    drive_topic: "/target_twist"
+    allow_drive: true
+    drive_topic: "/target_twist/lab"
+    # twist_arbiter's status: a run the controller takes over ends at once. Empty = not used.
+    arbiter_status_topic: "/twist_arbiter/status"
     emergency_stop_topic: "/emergency_stop"
     # Upper bounds for what a page may command; faster requests are clamped. Keep them low:
     # learners run these experiments next to the robot.

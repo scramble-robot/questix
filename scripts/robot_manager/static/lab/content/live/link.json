@@ -38,7 +38,7 @@
     "domainUnset": "未設定（0と同じ）",
     "drive": "教材からの走行",
     "driveAllowed": "教材から走らせられます",
-    "driveReadOnly": "値の受信だけ（走行は先生の許可が必要）"
+    "driveReadOnly": "値の受信だけ（先生が教材からの走行を止めています）"
   },
   "silent": "ロボットの値が届いていません。ロボットのROSが起動しているか、ROS_DOMAIN_ID（{domain}）がロボットと同じかを先生に確かめてもらってください。",
   "silentNoDomain": "ロボットの値が届いていません。ロボットのROSが起動しているか、ROS_DOMAIN_IDがロボットと同じかを先生に確かめてもらってください。",

@@ -5,11 +5,11 @@ authentication), so learners' devices cannot open ``/lab/`` here. The ``questix_
 node can: it serves the same teaching pages on the LAN and mirrors robot telemetry to them.
 This module starts and stops that node so nobody has to type ``ros2 launch``.
 
-The bridge is observation only unless ``ALLOW_DRIVE`` is on (``/api/lab/drive``): then pages
-may run low-speed driving experiments, under the bridge's own checks
-(questix_lab_bridge/questix_lab_bridge/drive.py). It is off by default, turned off by
-competition mode, and turned off again whenever robot_manager starts: permission to drive never
-carries over a restart.
+With ``ALLOW_DRIVE`` on (the default in practice mode) pages may run low-speed driving
+experiments, each confirmed by the learner's safety tick on the page and bounded by the bridge's
+own checks (questix_lab_bridge/questix_lab_bridge/drive.py); twist_arbiter lets the controller
+take over at any time. ``/api/lab/drive`` is the teacher's off switch. Competition mode turns
+driving off; going back to practice mode turns it on again.
 
 The status reports what the running bridge itself says (``GET /api/state`` on its port), so the
 tab shows whether pages can really drive now, also for a bridge started by hand. The output of
@@ -68,11 +68,12 @@ _DEFAULT_CONFIG = {
     # the pages without anyone pressing 配信開始 first. On by default for classes; switching to
     # competition mode turns it off (disable_for_competition), and it never starts in that mode.
     "AUTOSTART": "true",
-    # "true": the bridge may publish /target_twist for the lessons' driving experiments. Off by
-    # default; a person at the robot turns it on for a class (/api/lab/drive). Competition mode
-    # and every start of robot_manager (reset_drive_at_startup) turn it off again. Changed only
-    # through set_drive, never by the settings form.
-    "ALLOW_DRIVE": "false",
+    # "true": the bridge may publish twist_arbiter's lab input for the lessons' driving
+    # experiments; each run is confirmed by the learner on the page, and moving the controller's
+    # stick takes over. On by default in practice mode; the teacher can switch it off
+    # (/api/lab/drive), competition mode switches it off and practice mode on again. Changed
+    # only through set_drive and the mode switches, never by the settings form.
+    "ALLOW_DRIVE": "true",
 }
 _ABS_PATH_RE = re.compile(r"^/[a-zA-Z0-9_/.~-]*$")
 _TOPIC_RE = re.compile(r"^/[A-Za-z0-9_/]*$")
@@ -159,7 +160,9 @@ def _read_env_file(path: Path) -> dict[str, str]:
 def _read_config() -> dict[str, str]:
     config = dict(_DEFAULT_CONFIG)
     config.update({k: v for k, v in _read_env_file(LAB_ENV_FILE).items() if k in config})
-    if _drive_forced_off:
+    # A competition robot never takes lab commands, whatever lab.env says (it may have been edited
+    # by hand, or never written: driving is on by default).
+    if _drive_forced_off or _competition_mode():
         config["ALLOW_DRIVE"] = "false"
     return config
 
@@ -180,8 +183,8 @@ def _write_config(values: dict[str, str]) -> None:
 def _force_drive_off(config: dict[str, str], why: str) -> dict[str, str]:
     """Write ``config`` with ALLOW_DRIVE=false; if that fails, log it and keep driving off anyway.
 
-    For the places where switching driving off must not fail: robot_manager's start,
-    competition mode and 走行を禁止する. Returns the config with ALLOW_DRIVE=false.
+    For the places where switching driving off must not fail: competition mode and
+    走行を禁止する. Returns the config with ALLOW_DRIVE=false.
     """
     global _drive_forced_off, _config_error
     config = {**config, "ALLOW_DRIVE": "false"}
@@ -481,8 +484,8 @@ def disable_for_competition() -> None:
     Competition runs must not stream telemetry to the LAN: a bridge this manager started is
     stopped first (whatever happens to lab.env), then automatic start is turned off in lab.env
     (the checkbox shows it). Switching back to practice mode turns both on again
-    (enable_for_practice). Driving from the lessons (ALLOW_DRIVE) is turned off too, and is not
-    turned back on by practice mode. A failed write of lab.env is logged, not raised: the mode
+    (enable_for_practice). Driving from the lessons (ALLOW_DRIVE) is turned off too, and back on
+    with practice mode. A failed write of lab.env is logged, not raised: the mode
     switch itself has already happened, and autostart never runs in competition mode anyway.
     """
     with _lock:
@@ -490,21 +493,19 @@ def disable_for_competition() -> None:
             _stop_locked("competition_mode")
     config = _read_config()
     if config.get("AUTOSTART") != "false" or config.get("ALLOW_DRIVE") != "false":
-        # Driving from the lessons stays off after returning to practice: someone at the robot
-        # turns it on again deliberately.
         _force_drive_off({**config, "AUTOSTART": "false"}, "competition mode")
 
 
 def enable_for_practice() -> None:
     """Undo disable_for_competition when the robot goes from competition back to practice mode.
 
-    Automatic start is turned on again and the bridge is started now, in the background like at
-    boot, so the class can open the pages right away. A bridge that already runs (started here or
-    by hand) is left alone.
+    Automatic start and driving from the lessons are turned on again, and the bridge is started
+    now, in the background like at boot, so the class can open the pages right away. A bridge
+    that already runs (started here or by hand) is left alone.
     """
     config = _read_config()
-    if config.get("AUTOSTART") != "true":
-        _write_config({**config, "AUTOSTART": "true"})
+    if config.get("AUTOSTART") != "true" or config.get("ALLOW_DRIVE") != "true":
+        _write_config({**config, "AUTOSTART": "true", "ALLOW_DRIVE": "true"})
     with _lock:
         running = (_proc is not None and _proc.poll() is None) or _port_in_use()
     if not running:
@@ -523,26 +524,12 @@ def _autostart() -> None:
         logger.warning("QUESTiX LAB bridge autostart failed: %s", error.detail)
 
 
-def reset_drive_at_startup() -> None:
-    """Forbid driving from the lessons again whenever robot_manager starts.
-
-    Permission to drive is given by a person at the robot for one class. A reboot, a crash or an
-    update of the manager must not bring a robot back up that pages can drive.
-    """
-    if _read_config().get("ALLOW_DRIVE") == "true":
-        logger.warning("QUESTiX LAB: driving from the lessons was still allowed in lab.env; "
-                       "forbidden again at robot_manager start (ALLOW_DRIVE=false)")
-        _force_drive_off(_read_config(), "robot_manager start")
-
-
 def autostart() -> None:
-    """Start-up of the lab console: forbid driving, then start the bridge if lab.env asks for it.
+    """Start the bridge when robot_manager starts, if lab.env asks for it (AUTOSTART=true).
 
-    Driving is reset synchronously (reset_drive_at_startup), before any bridge can start. The
-    bridge itself is started in a thread: starting waits up to START_GRACE_SEC for the node,
-    which must not delay the manager's own start-up.
+    Runs in a thread: starting waits up to START_GRACE_SEC for the node, which must not delay
+    the manager's own start-up.
     """
-    reset_drive_at_startup()
     if _read_config().get("AUTOSTART") != "true":
         return
     if _competition_mode():
