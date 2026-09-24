@@ -450,3 +450,136 @@
   margin: 8px 0;
   font-weight: 600;
 }
+
+/* Report of a driving run (js/live/drive-report-view.js) and the run history in the 実機 dialog. */
+.drive-report {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: white;
+  padding: 12px 14px;
+}
+.drive-report h4,
+.drive-report p {
+  margin: 0;
+}
+.drive-report-legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.drive-report-legend .key {
+  display: inline-block;
+  width: 22px;
+  height: 0;
+  border-top: 3px solid var(--green);
+  margin-left: 8px;
+}
+.drive-report-legend .key.command {
+  border-top: 3px dashed var(--orange);
+}
+.drive-report-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 6px 14px;
+  margin: 0;
+}
+.drive-report-summary div {
+  display: grid;
+  gap: 2px;
+}
+.drive-report-summary dt {
+  font-size: 12px;
+  color: var(--muted);
+}
+.drive-report-summary dd {
+  margin: 0;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.drive-report-charts {
+  display: grid;
+  gap: 10px;
+}
+.drive-report-chart,
+.drive-report-path {
+  margin: 0;
+}
+.drive-report-chart figcaption,
+.drive-report-path figcaption {
+  font-size: 13px;
+  font-weight: 600;
+}
+.drive-report-chart svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.drive-report-path svg {
+  display: block;
+  width: min(100%, 300px);
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.drive-report svg .grid {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+.drive-report svg .tick {
+  font-size: 11px;
+  fill: var(--muted);
+}
+.drive-report svg .line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+.drive-report svg .line.measured {
+  stroke: var(--green);
+}
+.drive-report svg .line.command {
+  stroke: var(--orange);
+  stroke-dasharray: 6 4;
+}
+.drive-report svg .line.front {
+  stroke: #2f5f93;
+}
+.drive-report svg .marker {
+  stroke: #c62828;
+  stroke-dasharray: 3 3;
+}
+.drive-report svg .marker-label {
+  fill: #c62828;
+}
+.drive-report svg .start {
+  fill: var(--orange);
+}
+.drive-report svg .end {
+  fill: var(--dark);
+}
+.drive-history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.drive-history button {
+  width: 100%;
+  text-align: left;
+  min-height: 0;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.drive-history button[aria-pressed='true'] {
+  border-color: var(--green);
+  background: var(--green-soft);
+  font-weight: 700;
+}

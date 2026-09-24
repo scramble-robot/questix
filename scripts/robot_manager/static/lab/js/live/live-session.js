@@ -13,7 +13,8 @@ import {
 import { missingInRecording, recordingSummary } from './recording-core.js';
 import { captureCopy } from './live-view.js';
 import { driveModel, onDrive, confirmDriveSafety, runDrive } from './drive-link.js';
-import { driveEndedText } from './drive-view.js';
+import { driveEndedText, driveCopy } from './drive-view.js';
+import { addDriveRun, driveRun, saveDriveRun } from './drive-history.js';
 
 // The state behind one `liveCaptureControls` block: recording from the robot, opening a saved
 // recording or a rosbag, saving the one on screen, and bringing it back after a reload. A lesson
@@ -85,6 +86,7 @@ function createLiveSession(options) {
     driveElapsed: 0,
     driveTotal: 0,
     driveAbort: null,
+    driveRunId: null, // the history entry (drive-history.js) of this block's last run
   };
   if (options.drive) onDrive(() => options.update());
 
@@ -147,6 +149,7 @@ function createLiveSession(options) {
       return;
     }
     const tail = plan.tail ?? DEFAULT_TAIL_SECONDS;
+    const program = options.drive.program();
     const controllers = { abort: new AbortController(), finish: new AbortController() };
     const driveAbort = new AbortController();
     Object.assign(session, {
@@ -194,6 +197,14 @@ function createLiveSession(options) {
     } else {
       show(recording, 'live');
       session.note = [ended, session.note].filter(Boolean).join(' ');
+      session.driveRunId = addDriveRun({
+        slot: options.slot,
+        lesson: driveCopy.lessons[options.slot] ?? options.lesson,
+        program,
+        ended,
+        reason: result.reason,
+        recording,
+      }).id;
     }
     Object.assign(session, { busy: false, progress: 0, controllers: null });
     options.update();
@@ -264,6 +275,8 @@ function createLiveSession(options) {
       ready: drive.ready && missing.length === 0,
       program: options.drive.program(),
       startLabel: options.drive.startLabel,
+      // Shown under the block until the next run (null after a reload: see the 実機 dialog).
+      report: session.driveRunId === null ? null : driveRun(session.driveRunId),
     };
   }
 
@@ -287,6 +300,7 @@ function createLiveSession(options) {
       saveRecording,
       startDriveCapture,
       confirmDrive: confirmDriveSafety,
+      saveRun: saveDriveRun,
     },
   };
 }

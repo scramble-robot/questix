@@ -611,6 +611,7 @@ const actions = {
   },
   startCapture: () => liveSession().actions.startCapture(),
   startDriveCapture: () => liveSession().actions.startDriveCapture(),
+  saveRun: (id, kind) => liveSession().actions.saveRun(id, kind),
   confirmDrive: (value) => liveSession().actions.confirmDrive(value),
   setLiveStepSpeed(value) {
     if (STEP_SPEEDS.includes(value)) liveStepSpeed = value;

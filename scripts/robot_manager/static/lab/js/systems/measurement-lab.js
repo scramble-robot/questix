@@ -394,6 +394,7 @@ const actions = {
   saveCsv,
   startCapture: () => sessionOf(shown)?.actions.startCapture(),
   startDriveCapture: () => sessionOf(shown)?.actions.startDriveCapture(),
+  saveRun: (id, kind) => sessionOf(shown)?.actions.saveRun(id, kind),
   confirmDrive: (value) => sessionOf(shown)?.actions.confirmDrive(value),
   setDriveDistance(value) {
     if (DRIVE_DISTANCES.includes(value)) driveDistance = value;

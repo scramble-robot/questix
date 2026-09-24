@@ -79,6 +79,7 @@
   <table class="robot-streams"><caption>受信している値</caption><tbody id="robotStreams"></tbody></table>
  </section>
  <section id="robotDrive" class="robot-drive" hidden></section>
+ <section id="robotDriveLog" class="robot-drive robot-drive-log"></section>
  <details><summary>つながらないときは</summary><p>ロボット側で <code>ros2 launch questix_lab_bridge lab_bridge.launch.xml</code> が動いているか、端末がロボットと同じネットワークにあるかを確かめます。アドレスは <code>ws://ロボットのIPアドレス:8897</code> です。カメラは、ロボットにカメラのノードがあり <code>camera_topic</code> を設定した場合だけ届きます。</p></details>
 </dialog>
 <div id="simulation" hidden><canvas id="arena" width="1000" height="660" role="img" aria-label="ロボットの走行コース"></canvas><input id="trailToggle" type="checkbox" checked><input id="sensorToggle" type="checkbox"><canvas id="cameraView" width="640" height="280"></canvas></div>

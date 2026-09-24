@@ -78,6 +78,15 @@ stops the robot. The 実機 dialog adds a hold-to-move bench test (前進 / 後�
 | Measurement lab (under control)   | A forward/backward staircase (±0.1, ±0.2 m/s, 3 s each) that fills the table.                                                                                    |
 | Measurement lab (under SLAM)      | 50 or 100 cm measured by `/odom`, easing into the goal; the learner measures the floor.                                                                          |
 
+Every run is recorded and gets a **report** (`js/live/drive-report-core.js` → `drive-report-view.js`):
+duration, distance by `/odom`, where it ended, turn, peak speed against the command, how long and
+how far the robot took to stop after the stop command, the nearest wall; charts of commanded vs
+measured speed (and turn rate), the LiDAR's distance ahead, and the path seen from above. The
+lesson block shows the report of its last run; the 実機 dialog lists every run of this browser
+(`js/live/drive-history.js`, bench presses included, newest 20) with the selected one's report.
+Reports stay in `localStorage` across a reload; the full recording (JSON / CSV) can be saved only
+until the page is closed.
+
 Driving needs three things on the robot side: the robot started **without its controller**
 (`ros2 launch questix_launcher questix_core.launch.xml enable_controller:=false`), **走行を許可する**
 in Robot Manager's 教材 tab, and the E-stop released. The bridge checks all of them and every other

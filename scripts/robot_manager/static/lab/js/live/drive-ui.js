@@ -1,17 +1,32 @@
 import { html, nothing, render } from '../vendor/lit-html.js';
+import { fillSentence as fill } from '../core/content.js';
 import { driveModel, onDrive, confirmDriveSafety, stopDrive, runDrive } from './drive-link.js';
 import { driveCopy, driveChecklist, confirmBox, driveEndedText } from './drive-view.js';
+import { recordRobot } from './capture.js';
+import {
+  addDriveRun,
+  driveRuns,
+  driveRun,
+  saveDriveRun,
+  clearDriveRuns,
+  onDriveRuns,
+} from './drive-history.js';
+import { driveReportView, driveRunLabel } from './drive-report-view.js';
 
-// Two pieces of the driving experiments that belong to no lesson:
+// The pieces of the driving experiments that belong to no lesson:
 // - the stop bar, fixed at the bottom of every page while the robot drives on a lesson's command —
 //   this page's or another one's — so a stop is always one tap (or Esc) away;
 // - the bench test in the 実機 dialog: hold a button and the robot moves slowly, release and it stops,
-//   for checking wheel directions and left/right after assembly.
+//   for checking wheel directions and left/right after assembly. Each press is recorded;
+// - the history of every run of this browser (drive-history.js) in the same dialog, with the
+//   report of the one selected.
 
 const BENCH_DEFAULTS = { linear: 0.1, angular: 0.5 }; // m/s, rad/s
 const BENCH_MIN = { linear: 0.06, angular: 0.3 }; // below drive_component's dead band (drive-core)
 const BENCH_STEP = { linear: 0.02, angular: 0.1 };
 const BENCH_MAX_SECONDS = 20; // one press; the bridge's own limit is longer
+const BENCH_TAIL_SECONDS = 1; // recorded after release, so the report shows the robot stopping
+const RECORD_SPARE_SECONDS = 5; // the recording's own time limit, only a backstop
 const BENCH_MOVES = [
   { id: 'forward', linear: 1, angular: 0 },
   { id: 'left', linear: 0, angular: 1 },
@@ -20,6 +35,7 @@ const BENCH_MOVES = [
 ];
 
 const bench = { ...BENCH_DEFAULTS, held: null, abort: null, note: '' };
+let selectedRun = null; // id of the run whose report the dialog shows; null = the newest
 
 // --- stop bar --------------------------------------------------------------------------------
 
@@ -46,6 +62,11 @@ async function hold(move) {
   const abort = new AbortController();
   Object.assign(bench, { held: move.id, abort, note: '' });
   update();
+  const finish = new AbortController();
+  const recorded = recordRobot({
+    seconds: BENCH_MAX_SECONDS + RECORD_SPARE_SECONDS,
+    finish: finish.signal,
+  }).catch((error) => error);
   const result = await runDrive({
     controller: () => ({
       linear: move.linear * bench.linear,
@@ -59,6 +80,19 @@ async function hold(move) {
   bench.note =
     result.reason === 'stopped' || result.reason === 'done' ? '' : driveEndedText(result);
   update();
+  if (result.reason !== 'refused')
+    await new Promise((resolve) => setTimeout(resolve, BENCH_TAIL_SECONDS * 1000));
+  finish.abort();
+  const recording = await recorded;
+  if (result.reason === 'refused' || recording instanceof Error) return;
+  addDriveRun({
+    slot: 'bench',
+    lesson: fill(driveCopy.lessons.bench, { move: driveCopy.bench[move.id] }),
+    ended: bench.note,
+    reason: result.reason,
+    recording,
+  });
+  selectedRun = null;
 }
 
 function release() {
@@ -134,10 +168,51 @@ function placeStopBar() {
   if (host.parentElement !== parent) parent.append(host);
 }
 
+// --- history -----------------------------------------------------------------------------------
+
+function historyPanel() {
+  const copy = driveCopy.report;
+  const runs = driveRuns();
+  if (!runs.length)
+    return html`<h3>${copy.historyTitle}</h3>
+      <p>${copy.historyEmpty}</p>`;
+  const shown = (selectedRun !== null && driveRun(selectedRun)) || runs[0];
+  return html`<h3>${copy.historyTitle}</h3>
+    <p>${copy.historyLead}</p>
+    <ol class="drive-history">
+      ${runs.map(
+        (run) =>
+          html`<li>
+            <button
+              data-drive-run=${run.id}
+              aria-pressed=${run === shown ? 'true' : 'false'}
+              @click=${() => {
+                selectedRun = run.id;
+                update();
+              }}
+            >
+              ${driveRunLabel(run)}
+            </button>
+          </li>`,
+      )}
+    </ol>
+    ${driveReportView(shown, { saveRun: saveDriveRun })}
+    <button
+      class="quiet"
+      data-drive-history-clear
+      @click=${() => {
+        if (window.confirm(copy.clear + '？')) clearDriveRuns();
+      }}
+    >
+      ${copy.clear}
+    </button>`;
+}
+
 function update() {
   const model = driveModel();
   placeStopBar();
   render(stopBar(model), document.getElementById('driveBar'));
+  render(historyPanel(), document.getElementById('robotDriveLog'));
   const panel = document.getElementById('robotDrive');
   // Driving needs a connection; before that the dialog is about connecting.
   panel.hidden = model.blockers.some((blocker) => blocker.code === 'no_link');
@@ -146,6 +221,7 @@ function update() {
 
 function initDriveUi() {
   onDrive(update);
+  onDriveRuns(update);
   new MutationObserver(placeStopBar).observe(document.body, {
     subtree: true,
     attributeFilter: ['open'],

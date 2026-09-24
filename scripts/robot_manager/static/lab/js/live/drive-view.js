@@ -1,5 +1,6 @@
 import { html, nothing } from '../vendor/lit-html.js';
 import { loadJson, fillSentence as fill } from '../core/content.js';
+import { driveReportView } from './drive-report-view.js';
 
 // The block a lesson shows when it can drive the real robot: why it cannot yet (each blocker with
 // what to do about it), the learner's safety tick, the limits, start / stop, and how the last run
@@ -105,6 +106,7 @@ function driveControls(model, drive, actions) {
           </p>`
         : nothing
     }
+    ${drive.report && !model.running ? driveReportView(drive.report, actions) : nothing}
     <p class="drive-note">${driveCopy.afterNote}</p>
   </div>`;
 }
