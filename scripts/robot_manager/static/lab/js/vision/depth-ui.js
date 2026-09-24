@@ -298,6 +298,7 @@ const rgbdActions = {
     outputShows = 'selection';
     updateRgbd();
     page.setStatus(runStatus(selection));
+    page.revealScene();
   },
   showDepthImage() {
     forgetRun();

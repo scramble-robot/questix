@@ -281,18 +281,25 @@ function intersectionOverUnion(a, b) {
   return overlap / (a.w * a.h + b.w * b.h - overlap);
 }
 
-// Scores found regions against the human-authored answer boxes. Each target is matched once.
-function evaluateRegions(regions, targets) {
+// Which found region matched which answer box: `verdicts[i]` is 'correct' or 'extra' for
+// regions[i], `missed` the answer boxes no region matched. Each target is matched once.
+function matchRegions(regions, targets) {
   const matched = new Set();
-  let found = 0;
-  for (const region of regions) {
+  const verdicts = regions.map((region) => {
     const index = targets.findIndex(
       (target, at) => !matched.has(at) && intersectionOverUnion(region, target) > OVERLAP_THRESHOLD,
     );
-    if (index < 0) continue;
+    if (index < 0) return 'extra';
     matched.add(index);
-    found++;
-  }
+    return 'correct';
+  });
+  return { verdicts, missed: targets.filter((_, index) => !matched.has(index)) };
+}
+
+// Scores found regions against the human-authored answer boxes. Each target is matched once.
+function evaluateRegions(regions, targets) {
+  const { verdicts } = matchRegions(regions, targets);
+  const found = verdicts.filter((verdict) => verdict === 'correct').length;
   return { found, missed: targets.length - found, falsePositive: regions.length - found };
 }
 
@@ -509,6 +516,7 @@ export {
   maskImage,
   connectedRegions,
   evaluateRegions,
+  matchRegions,
   projectedTarget,
   cameraGeometry,
   linePath,

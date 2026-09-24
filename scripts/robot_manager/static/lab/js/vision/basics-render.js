@@ -1,4 +1,5 @@
 import { drawRobot } from '../core/renderer.js';
+import { roleStyle } from '../core/palette.js';
 import { IMAGE_SIZE, linePath } from './basics-math.js';
 
 // Canvas overlays of the vision foundation chapters. Every function draws from plain data handed
@@ -18,9 +19,34 @@ const MAP_SCALE = 2;
 const MAP_ORIGIN = { x: 35, y: 115 }; // map pixels of the course origin
 const MAP_PIXELS_PER_METRE = { x: 94, y: 115 };
 const ROBOT_SCALE = 0.48;
+const MIN_TEXT_PX = 12; // smallest text on screen (CONTRIBUTING.md, "Figures and charts")
+const LABEL_FONT = '600 12px system-ui, sans-serif'; // image px; the image is shown at ≥ 1×
+const NUMBERED_REGIONS = 6; // the regions listed under the result carry their number on the box
+// How a found box is drawn, by what the scoring says it is: colour, dash and a symbol, so the
+// three kinds are told apart without colour (V6). Unscored boxes (the learner's own image) are
+// "measured" boxes: something the detector decided.
+const REGION_STYLES = {
+  correct: { color: '#35d49a', dash: [], symbol: '✓' },
+  extra: { color: '#f06bc8', dash: [6, 4], symbol: '✕' },
+  missed: { color: '#f2c14e', dash: [2, 3], symbol: '？' },
+  unscored: { color: roleStyle('measured', 'scene').color, dash: [], symbol: '' },
+};
 
-// Shades the ignored upper part of the input image and marks the boundary with a dashed line.
-function drawRoiShade(canvas, image) {
+// A small label on a dark tag, at the top-left corner of a box (inside the image).
+function tag(context, text, x, y, color) {
+  context.font = LABEL_FONT;
+  const width = context.measureText(text).width + 6;
+  const left = Math.max(0, Math.min(x, context.canvas.width - width));
+  const top = Math.max(0, y - 16);
+  context.fillStyle = 'rgba(12,28,34,.85)';
+  context.fillRect(left, top, width, 16);
+  context.fillStyle = color;
+  context.fillText(text, left + 3, top + 12);
+}
+
+// Shades the ignored upper part of the input image, marks the boundary with a dashed line and
+// says what it means.
+function drawRoiShade(canvas, image, label) {
   const context = canvas.getContext('2d');
   const boundary = image.height * ROI_TOP_FRACTION;
   context.fillStyle = 'rgba(16,35,42,.40)';
@@ -33,21 +59,37 @@ function drawRoiShade(canvas, image) {
   context.lineTo(image.width, boundary);
   context.stroke();
   context.setLineDash([]);
+  tag(context, label, 4, boundary + 18, '#ffffff');
 }
 
-// Orange bounding boxes with a cross at each region's centre.
-function drawRegionBoxes(canvas, regions, imageWidth) {
+function box(context, rect, style, width) {
+  context.strokeStyle = style.color;
+  context.lineWidth = width;
+  context.setLineDash(style.dash);
+  context.strokeRect(rect.x, rect.y, rect.w, rect.h);
+  context.setLineDash([]);
+}
+
+// Found regions with a cross at each centre, styled by the scoring: ✓ correct, ✕ extra, and the
+// missed answer boxes dotted. The first regions carry their number from the result list.
+function drawRegionBoxes(canvas, regions, imageWidth, match = null) {
   const context = canvas.getContext('2d');
-  context.lineWidth = Math.max(1, imageWidth / 160);
-  context.strokeStyle = '#faaf50';
-  for (const region of regions.slice(0, REGION_BOX_LIMIT)) {
-    context.strokeRect(region.x, region.y, region.w, region.h);
+  const width = Math.max(1.5, imageWidth / 130);
+  regions.slice(0, REGION_BOX_LIMIT).forEach((region, index) => {
+    const style = REGION_STYLES[match ? match.verdicts[index] : 'unscored'];
+    box(context, region, style, width);
     context.beginPath();
     context.moveTo(region.cx - 5, region.cy);
     context.lineTo(region.cx + 5, region.cy);
     context.moveTo(region.cx, region.cy - 5);
     context.lineTo(region.cx, region.cy + 5);
     context.stroke();
+    if (index < NUMBERED_REGIONS)
+      tag(context, `${index + 1} ${style.symbol}`.trim(), region.x, region.y, style.color);
+  });
+  for (const target of match?.missed ?? []) {
+    box(context, target, REGION_STYLES.missed, width);
+    tag(context, '？ 見逃し', target.x, target.y + target.h + 16, REGION_STYLES.missed.color);
   }
 }
 
@@ -125,23 +167,60 @@ function drawRobotMarker(context, pose) {
   context.restore();
 }
 
-// Course map: the line, the trajectory of the trial so far, the robot at the shown frame.
-function drawCourseMap(canvas, { gap, frames, pose }, labels) {
+// Where the robot lost the line: a red ✕ with the time, so the learner can find the curve (V10).
+function drawLostMark(context, pose, label, fontSize) {
+  const point = mapPoint(pose.x, pose.y);
+  context.strokeStyle = roleStyle('danger', 'scene').color;
+  context.lineWidth = 3;
+  context.beginPath();
+  context.moveTo(point.x - 8, point.y - 8);
+  context.lineTo(point.x + 8, point.y + 8);
+  context.moveTo(point.x - 8, point.y + 8);
+  context.lineTo(point.x + 8, point.y - 8);
+  context.stroke();
+  context.font = `600 ${fontSize}px system-ui, sans-serif`;
+  const width = context.measureText(label).width + 10;
+  const height = fontSize + 9;
+  const left = Math.min(Math.max(4, point.x - width / 2), MAP_SIZE.width - width - 4);
+  const top = point.y > MAP_SIZE.height / 2 ? point.y - height - 16 : point.y + 14;
+  context.fillStyle = 'rgba(12,28,34,.9)';
+  context.fillRect(left, top, width, height);
+  context.fillStyle = '#ffb3b3';
+  context.fillText(label, left + 5, top + fontSize + 2);
+}
+
+// Course map: the line, the trajectory of the trial so far, the robot at the shown frame, and
+// where the line was lost (`lost`: {pose, label}) once the whole trial is shown.
+function drawCourseMap(canvas, { gap, frames, pose, lost = null }, labels) {
   canvas.width = MAP_SIZE.width * MAP_SCALE;
   canvas.height = MAP_SIZE.height * MAP_SCALE;
   const context = canvas.getContext('2d');
   context.scale(MAP_SCALE, MAP_SCALE);
+  // The map is drawn in 500 units and shrunk to its box: its text grows so it never shows under
+  // 12 px (on a 390 px phone the box is about 330 px wide).
+  const shrink = MAP_SIZE.width / (canvas.clientWidth || MAP_SIZE.width);
+  const fontSize = Math.ceil(Math.max(13, MIN_TEXT_PX * shrink));
   context.fillStyle = '#172f3b';
   context.fillRect(0, 0, MAP_SIZE.width, MAP_SIZE.height);
   drawCourseLine(context, gap);
   if (frames) drawTrajectory(context, frames);
   drawRobotMarker(context, pose);
   context.fillStyle = '#dce8eb';
-  context.font = '13px system-ui';
-  context.fillText(labels.start, 18, 203);
-  context.fillText(labels.goal, 430, 203);
+  context.font = `${fontSize}px system-ui`;
+  context.fillText(labels.start, 12, MAP_SIZE.height - 12);
+  context.textAlign = 'right';
+  context.fillText(labels.goal, MAP_SIZE.width - 12, MAP_SIZE.height - 12);
+  context.textAlign = 'left';
   context.fillStyle = '#e3bc6b';
   context.fillRect(458, mapPoint(GOAL_X, linePath(GOAL_X)).y - 14, 3, 28);
+  if (lost) drawLostMark(context, lost.pose, lost.label, fontSize);
 }
 
-export { drawRoiShade, drawRegionBoxes, drawGeometryOverlay, drawLineOverlay, drawCourseMap };
+export {
+  REGION_STYLES,
+  drawRoiShade,
+  drawRegionBoxes,
+  drawGeometryOverlay,
+  drawLineOverlay,
+  drawCourseMap,
+};

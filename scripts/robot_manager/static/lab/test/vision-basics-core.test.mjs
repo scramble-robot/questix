@@ -17,6 +17,7 @@ import {
   maskImage,
   connectedRegions,
   evaluateRegions,
+  matchRegions,
   projectedTarget,
   cameraGeometry,
   linePath,
@@ -173,6 +174,21 @@ test('scoring counts a marker once and calls everything else a false positive', 
     missed: 2,
     falsePositive: 1,
   });
+});
+
+test('each found box is called correct or extra, and unmatched answers are missed (V6)', () => {
+  const targets = [
+    { x: 0, y: 0, w: 10, h: 10 },
+    { x: 50, y: 50, w: 10, h: 10 },
+  ];
+  const hit = { x: 0, y: 0, w: 10, h: 10 };
+  const wall = { x: 100, y: 0, w: 20, h: 10 };
+  const match = matchRegions([wall, hit, hit], targets);
+  assert.deepEqual(match.verdicts, ['extra', 'correct', 'extra']);
+  assert.deepEqual(match.missed, [targets[1]]);
+  const score = evaluateRegions([wall, hit, hit], targets);
+  assert.equal(score.found, match.verdicts.filter((verdict) => verdict === 'correct').length);
+  assert.equal(score.missed, match.missed.length);
 });
 
 test('a marker twice as wide at twice the distance projects to the same square', () => {

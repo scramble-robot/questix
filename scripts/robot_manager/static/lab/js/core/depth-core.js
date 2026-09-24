@@ -19,9 +19,22 @@ const DEPTH_CAMERA = {
   max: 5, // metres, farthest depth of the colour scale
 };
 
+// Depth colours: near = yellow, far = navy, through green, teal and blue (a viridis-like ramp
+// whose lightness falls steadily with distance, so "lighter = nearer" holds for every colour
+// vision; V3). No stop is grey, so no measured depth looks like the hatched "not measured".
+const DEPTH_COLOR_STOPS = [
+  [253, 231, 37], // near
+  [94, 201, 98],
+  [33, 145, 140],
+  [59, 82, 139],
+  [29, 31, 94], // far
+];
+// Pixels without a depth are hatched with these two colours, never drawn as a depth colour.
 const INVALID_DEPTH_COLOR = [45, 51, 62];
-const NEAR_DEPTH_COLOR = [242, 173, 75];
-const FAR_DEPTH_COLOR = [62, 99, 189];
+const INVALID_HATCH_COLOR = [150, 160, 168];
+const HATCH_PERIOD = 6; // pixels between the diagonal hatch lines
+const HATCH_WIDTH = 2; // pixels of each hatch line
+const DEPTH_TICKS = [0.25, 1, 2, 3, 4, 5]; // metres labelled on the colour bar
 const UNSELECTED_COLOR = [30, 44, 53];
 const RGB_CHANNELS = 3;
 const RGBA_CHANNELS = 4;
@@ -71,22 +84,57 @@ function depthFromDisparity(disparity, focal = 240, baseline = 0.075) {
   return null;
 }
 
-/** Warm (near) to cool (far) colour scale; invalid depths get a neutral grey. */
-function depthColor(z, min = 0.25, max = 5) {
-  if (!Number.isFinite(z) || z <= 0) return INVALID_DEPTH_COLOR;
-  const t = Math.max(0, Math.min(1, (z - min) / (max - min)));
-  return NEAR_DEPTH_COLOR.map((near, channel) =>
-    Math.round(near * (1 - t) + FAR_DEPTH_COLOR[channel] * t),
+/** Colour at `t` (0 = near … 1 = far) along DEPTH_COLOR_STOPS. */
+function rampColor(t) {
+  const position = Math.max(0, Math.min(1, t)) * (DEPTH_COLOR_STOPS.length - 1);
+  const index = Math.min(DEPTH_COLOR_STOPS.length - 2, Math.floor(position));
+  const share = position - index;
+  return DEPTH_COLOR_STOPS[index].map((from, channel) =>
+    Math.round(from * (1 - share) + DEPTH_COLOR_STOPS[index + 1][channel] * share),
   );
 }
+
+/** Yellow (near) to navy (far) colour scale; invalid depths get the dark hatch colour. */
+function depthColor(z, min = DEPTH_CAMERA.min, max = DEPTH_CAMERA.max) {
+  if (!Number.isFinite(z) || z <= 0) return INVALID_DEPTH_COLOR;
+  return rampColor((z - min) / (max - min));
+}
+
+/** Colour of an image position without a depth: diagonal light lines on the dark colour. */
+function invalidDepthColor(u, v) {
+  return (u + v) % HATCH_PERIOD < HATCH_WIDTH ? INVALID_HATCH_COLOR : INVALID_DEPTH_COLOR;
+}
+
+const hasDepth = (z) => Number.isFinite(z) && z > 0;
 
 function depthImage(frame) {
   const data = new Uint8ClampedArray(frame.width * frame.height * RGBA_CHANNELS);
   for (let i = 0; i < frame.depth.length; i++) {
-    data.set(depthColor(frame.depth[i]), i * RGBA_CHANNELS);
+    const z = frame.depth[i];
+    const color = hasDepth(z)
+      ? depthColor(z)
+      : invalidDepthColor(i % frame.width, Math.floor(i / frame.width));
+    data.set(color, i * RGBA_CHANNELS);
     data[i * RGBA_CHANNELS + 3] = OPAQUE;
   }
   return { width: frame.width, height: frame.height, data };
+}
+
+/**
+ * The colour bar next to a depth image: a CSS gradient from near (left) to far (right) and the
+ * labelled metres with their position in percent, `{gradient, ticks: [{metres, at}]}`.
+ */
+function depthColorBar(min = DEPTH_CAMERA.min, max = DEPTH_CAMERA.max, ticks = DEPTH_TICKS) {
+  const last = DEPTH_COLOR_STOPS.length - 1;
+  const stops = DEPTH_COLOR_STOPS.map(
+    (color, index) => `rgb(${color.join(',')}) ${Math.round((index / last) * 100)}%`,
+  );
+  return {
+    gradient: `linear-gradient(to right, ${stops.join(', ')})`,
+    ticks: ticks
+      .filter((metres) => metres >= min && metres <= max)
+      .map((metres) => ({ metres, at: ((metres - min) / (max - min)) * 100 })),
+  };
 }
 
 /** Back-projects pixel (u, v) to camera coordinates in metres, or null without depth. */
@@ -377,6 +425,8 @@ export {
   stereoProjection,
   depthFromDisparity,
   depthColor,
+  invalidDepthColor,
+  depthColorBar,
   depthImage,
   depthPoint,
   rgbdScene,

@@ -2,6 +2,9 @@ import { html, nothing, unsafeHTML } from '../vendor/lit-html.js';
 import { lessonLabel } from '../shell/lesson-ui.js';
 import { lessonGuide, figureGuide } from '../shell/lesson-guide.js';
 import { FACE_SCORE } from './face.js';
+import { depthColorBar } from '../core/depth-core.js';
+
+const DEPTH_BAR = depthColorBar();
 
 // Templates of the vision course page. Every function is pure: it turns the model built by ui.js
 // (chapter, image source, chapter state, messages) into markup. Sentences come from
@@ -112,6 +115,24 @@ function figureGuideNote(model, copy) {
   return unsafeHTML(figureGuide('vision-' + model.chapter));
 }
 
+// The colour bar of the depth image, in metres, with the hatch of "not measured" (V3).
+function depthColorKey(copy) {
+  const text = copy.frame.depthKey;
+  return html`<div class="depth-color-key" role="img" aria-label=${text.label}>
+    <strong>${text.title}</strong>
+    <div class="depth-color-scale">
+      <div class="depth-color-bar" style=${`background: ${DEPTH_BAR.gradient}`}></div>
+      <div class="depth-color-ticks">
+        ${DEPTH_BAR.ticks.map(
+          (tick) => html`<span style=${`left: ${tick.at}%`}>${String(tick.metres)}</span>`,
+        )}
+      </div>
+      <div class="depth-color-ends"><span>${text.near}</span><span>${text.far}</span></div>
+    </div>
+    <span class="depth-color-missing"><i aria-hidden="true"></i>${text.missing}</span>
+  </div>`;
+}
+
 function pixelCell(cell) {
   return html`<i
     style=${`background:rgb(${cell.rgb[0]},${cell.rgb[1]},${cell.rgb[2]})`}
@@ -131,6 +152,7 @@ function sceneCard(model, copy, actions) {
   const pending = model.messages.pending;
   return html`<section class="card vision-scene">
     <div id="visionMotion" class="vision-motion" hidden></div>
+    ${figureGuideNote(model, copy)}
     <div class="vision-image-pair">
       <figure>
         <figcaption>
@@ -164,7 +186,13 @@ function sceneCard(model, copy, actions) {
         </div>
       </figure>
     </div>
-    ${figureGuideNote(model, copy)}
+    ${model.chapter === 'depth' ? depthColorKey(copy) : nothing}
+  </section>`;
+}
+
+// What the last action found: after the main controls on a phone (C3).
+function resultCard(model, copy) {
+  return html`<section class="card vision-result">
     <div id="visionReading" class="vision-reading" role="status">${model.messages.status}</div>
     ${pixelProbe(model, copy)}
   </section>`;
@@ -503,10 +531,14 @@ function evidenceContent(model, copy, actions) {
   return null;
 }
 
+// The answer stays folded until the learner has predicted it (C1).
 function reflectContent(reflect) {
   if (!reflect) return nothing;
   return html`<h2>${reflect.title}</h2>
-    <p>${reflect.text}</p>
+    <details class="reflection-answer">
+      <summary>予想してから答えを見る</summary>
+      <p>${reflect.text}</p>
+    </details>
     <details ?data-help-dialog=${reflect.dialog}>
       <summary>${reflect.hintTitle}</summary>
       ${reflect.hints.map((hint) => html`<p>${hint}</p>`)}
@@ -559,7 +591,7 @@ function visionPage(model, copy, referencesHtml, actions) {
     ${captureCard(model, copy, actions)}
     <div class="experiment-layout vision-layout">
       <div class="vision-workspace">
-        ${sceneCard(model, copy, actions)}
+        ${sceneCard(model, copy, actions)}${resultCard(model, copy)}
         <section id="visionEvidence" class="card vision-evidence" ?hidden=${!evidence}>
           ${evidence ?? nothing}
         </section>

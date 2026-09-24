@@ -15,6 +15,7 @@ import {
 } from './core.js';
 import { armScenePoint, drawArm, drawSO101 } from './render.js';
 import { armPage, formatValue } from './view.js';
+import { revealFigure } from '../vision/reveal-figure.js';
 import { fillSentence as fill } from '../core/content.js';
 
 // Arm course: state and behaviour. view.js turns the model into markup, render.js draws the scene,
@@ -239,7 +240,7 @@ function clearMotion() {
 
 function startMotion(to) {
   pause();
-  document.getElementById('armScene').scrollIntoView({ block: 'start', behavior: 'instant' });
+  revealFigure(document.getElementById('armScene'));
   const current = experiment();
   playback.run = armTrajectory(current.angles, to, topicId === 'challenge' ? ARM_OBSTACLE : null);
   playback.index = 0;

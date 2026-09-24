@@ -10,7 +10,8 @@ import { slider, select, helpDetails, checkbox } from './controls-view.js';
 
 const HISTORY_ROWS = 4; // most recent runs listed under "これまでの結果"
 const REGION_ROWS = 6; // largest regions listed with centre and area
-const HISTOGRAM = { left: 20, right: 380, baseline: 76, barHeight: 60, barWidth: 9, pitch: 11.25 };
+// Histogram drawing units: one bin every `pitch`, bars `barWidth` wide, `height` tall at the peak.
+const HISTOGRAM = { pitch: 10, barWidth: 8, height: 100 };
 const GEOMETRY_DIAGRAM = {
   cameraFront: 145, // svg x where the depth axis starts
   pixelsPerMetre: 95, // svg x per metre of depth
@@ -30,9 +31,13 @@ function recentRuns(history, rows = HISTORY_ROWS) {
   return shown.map((entry, index) => ({ number: firstNumber + index, entry }));
 }
 
+// The answer stays folded until the learner has predicted it (C1).
 function reflection({ title, text, hint }, copy) {
   return html`<h2>${title}</h2>
-    <p>${text}</p>
+    <details class="reflection-answer">
+      <summary>予想してから答えを見る</summary>
+      <p>${text}</p>
+    </details>
     <details>
       <summary>${copy.hintSummary}</summary>
       <p>${hint}</p>
@@ -82,35 +87,91 @@ function captureControls(model, copy, actions) {
         [40, '40画素'],
       ],
     })}
-    <button class="primary full" id="vcReset" @click=${actions.reset}>基準の写り方に戻す</button>
+    <button class="full" id="vcReset" @click=${actions.reset}>基準の写り方に戻す</button>
     <p class="helper">${text.helper}</p>`;
 }
 
-function histogram(bins, copy) {
-  const peak = Math.max(...bins);
-  const { left, right, baseline, barHeight, barWidth, pitch } = HISTOGRAM;
-  return html`<svg
-    class="vision-histogram"
-    viewBox="0 0 400 104"
-    role="img"
-    aria-label=${copy.capture.histogramLabel}
-  >
-    <line x1=${left} x2=${right} y1=${baseline} y2=${baseline} stroke="#b7c9cc" />
-    ${bins.map(
-      (count, index) =>
-        svg`<rect x=${left + index * pitch} y=${baseline - (barHeight * count) / peak} width=${barWidth} height=${(barHeight * count) / peak} fill="#548980"/>`,
-    )}
-    <text x=${left} y="98">暗い 0</text>
-    <text x=${right} y="98" text-anchor="end">255 明るい</text>
-  </svg>`;
+const shares = (bins) => {
+  const total = bins.reduce((sum, count) => sum + count, 0) || 1;
+  return bins.map((count) => count / total);
+};
+
+// The outline of the reference histogram, as one step line over the bars.
+function stepOutline(values, peak) {
+  const { pitch, height } = HISTOGRAM;
+  const y = (value) => height - (height * value) / peak;
+  return values
+    .map(
+      (value, index) => `${index ? 'L' : 'M'}${index * pitch} ${y(value)}H${(index + 1) * pitch}`,
+    )
+    .join('');
+}
+
+// Now (filled bars) against the reference (grey dotted outline), on one scale of "share of the
+// pixels", so the two can be compared although the images have different pixel counts (V5). The
+// last bin is the clipped band. Every label is HTML, so it stays readable on a phone.
+function histogram(model, copy) {
+  const text = copy.capture.histogram;
+  const now = shares(model.histogram);
+  const before = shares(model.baseline);
+  const peak = Math.max(...now, ...before) || 1;
+  const { pitch, barWidth, height } = HISTOGRAM;
+  const width = now.length * pitch;
+  return html`<figure class="vision-histogram-figure">
+    <figcaption>${text.title}</figcaption>
+    <div class="vision-histogram-plot">
+      <span class="vision-histogram-y">${text.yAxis}</span>
+      <svg
+        class="vision-histogram"
+        viewBox=${`0 0 ${width} ${height}`}
+        preserveAspectRatio="none"
+        role="img"
+        aria-label=${copy.capture.histogramLabel}
+      >
+        <rect x=${width - pitch} y="0" width=${pitch} height=${height} fill="#f6d5d2" />
+        ${now.map(
+          (value, index) =>
+            svg`<rect x=${index * pitch + (pitch - barWidth) / 2} y=${height - (height * value) / peak} width=${barWidth} height=${(height * value) / peak} fill="var(--role-measured)"/>`,
+        )}
+        <path
+          d=${stepOutline(before, peak)}
+          fill="none"
+          stroke="#6d7c83"
+          stroke-width="2"
+          stroke-dasharray="2 3"
+          vector-effect="non-scaling-stroke"
+        />
+        <line
+          x1="0"
+          x2=${width}
+          y1=${height}
+          y2=${height}
+          stroke="#8fa3a8"
+          vector-effect="non-scaling-stroke"
+        />
+      </svg>
+    </div>
+    <div class="vision-histogram-x">
+      <span>0 暗い</span><span>${text.xAxis}</span><span>明るい 255</span>
+    </div>
+    <ul class="vision-histogram-key">
+      <li><i class="key-now" aria-hidden="true"></i>${text.now}</li>
+      <li><i class="key-before" aria-hidden="true"></i>${text.before}</li>
+      <li><i class="key-clipped" aria-hidden="true"></i>${text.clipped}</li>
+    </ul>
+  </figure>`;
 }
 
 function captureEvidence(model, copy) {
   const text = copy.capture;
   return html`<h2>${text.evidenceTitle}</h2>
-    <p>${text.evidenceText}</p>
-    ${histogram(model.histogram, copy)}
-    <p>ほぼ白い画素：${model.whiteRatio}%　画素数：${model.pixelCount.toLocaleString()}</p>`;
+    ${histogram(model, copy)}
+    <p class="vision-histogram-readout">
+      白つぶれに近い画素：<b>${model.whiteRatio}%</b>　画素数：<b
+        >${model.pixelCount.toLocaleString()}</b
+      >
+    </p>
+    <p>${text.evidenceText}</p>`;
 }
 
 // ---- まとまりを見つける -----------------------------------------------------------------------
@@ -205,25 +266,33 @@ function regionEvidenceTitle(result, text) {
   return result.success ? text.success : text.scored;
 }
 
+// The three kinds of box, with the same colour, line and symbol as in the image (V6).
 function regionScore(score, text) {
   if (!score) return html`<p>${text.unscoredNote}</p>`;
-  return html`<div class="vision-metrics">
-      <span>目印 <b>${score.found}/2</b></span
-      ><span>見逃し <b>${score.missed}</b></span
-      ><span>余計な検出 <b>${score.falsePositive}</b></span>
+  return html`<div class="vision-metrics vision-region-key">
+      <span data-kind="correct"
+        ><i aria-hidden="true"></i>✓ 正しく囲んだ目印 <b>${score.found}/2</b></span
+      ><span data-kind="extra"
+        ><i aria-hidden="true"></i>✕ 余計な枠 <b>${score.falsePositive}</b></span
+      ><span data-kind="missed"
+        ><i aria-hidden="true"></i>？ 見逃した目印 <b>${score.missed}</b></span
+      >
     </div>
     <p>${text.scoringNote}</p>`;
 }
 
-function regionList(regions, text) {
+const VERDICT_SYMBOLS = { correct: '✓', extra: '✕' };
+
+function regionList(result, text) {
+  const { regions, match } = result;
   if (!regions.length) return text.noRegions;
   return regions
     .slice(0, REGION_ROWS)
     .map(
       (region, index) =>
-        html`<span
-          >${index + 1}：中心 (${Math.round(region.cx)}, ${Math.round(region.cy)}) ·
-          ${region.area}画素</span
+        html`<span data-kind=${match ? match.verdicts[index] : 'unscored'}
+          ><b>${index + 1}${match ? ' ' + VERDICT_SYMBOLS[match.verdicts[index]] : ''}</b> 中心
+          (${Math.round(region.cx)}, ${Math.round(region.cy)}) · ${region.area}画素</span
         >`,
     );
 }
@@ -250,7 +319,7 @@ function regionEvidence(model, copy) {
   const { result } = model;
   return html`<h2>${regionEvidenceTitle(result, text)}</h2>
     ${regionScore(result.score, text)}
-    <div class="vision-region-list">${regionList(result.regions, text)}</div>
+    <div class="vision-region-list">${regionList(result, text)}</div>
     ${regionHistory(model.history, copy)}`;
 }
 
@@ -484,7 +553,7 @@ function followHistory(history, copy) {
 function followEvidence(model, copy) {
   const text = copy.follow;
   const { trial } = model;
-  return html`<h2>${trial ? text.outcomes[trial.outcome] : text.motionTitle}</h2>
+  return html`<h2>${trial ? text.outcomes[trial.outcome] : text.evidence.beforeRun}</h2>
     ${
       trial
         ? html`<div class="vision-metrics">

@@ -1,3 +1,4 @@
+import { revealFigure } from './reveal-figure.js';
 import { render } from '../vendor/lit-html.js';
 import { loadJson, loadText } from '../core/content.js';
 import { downloadFile } from '../core/dom.js';
@@ -108,6 +109,16 @@ const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const page = () => document.getElementById('visionPage');
 const inputCanvas = () => document.getElementById('visionInput');
 const outputCanvas = () => document.getElementById('visionOutput');
+const STACKED_LAYOUT = '(max-width: 900px)'; // images, controls and results one above the other
+
+// Press → see: on a phone the controls sit under the images, so after a run the page goes back
+// up to the images the run changed.
+function revealScene() {
+  if (!globalThis.matchMedia?.(STACKED_LAYOUT).matches) return;
+  // The course map of the line-following chapter is what its run changes most.
+  const motion = document.querySelector('#visionMotion:not([hidden])');
+  revealFigure(motion || document.querySelector('.vision-image-pair'));
+}
 const isFoundation = (chapter) => Boolean(FOUNDATION_CONTENT[chapter]);
 const chapterAt = (index) => VISION_CHAPTERS[index];
 const chapterIndex = (id) => VISION_CHAPTERS.findIndex(([key]) => key === id);
@@ -324,6 +335,7 @@ function foundationApi() {
     external: state.external,
     showImage,
     setStatus,
+    revealScene,
     replaceSample() {
       useTeachingImage();
       rebuild();
@@ -736,6 +748,7 @@ const actions = {
     state.messages.outputNote = appliedNote(mode, threshold);
     state.messages.status = appliedStatus(mode, result);
     update();
+    revealScene();
   },
   setCondition(condition) {
     state.condition = condition;
@@ -888,6 +901,7 @@ const actions = {
         ? copy.marker.status.decoded
         : copy.marker.status.unreadable;
     update();
+    revealScene();
   },
   saveMarkerSvg() {
     downloadFile(
@@ -936,6 +950,7 @@ const actions = {
       state.messages.status = copy.face.status.detectFailed + error.message;
     }
     refreshFace();
+    revealScene();
   },
   setScore(threshold) {
     state.face.threshold = threshold;

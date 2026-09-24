@@ -213,3 +213,228 @@
     white-space: normal;
   }
 }
+
+/* ---- Vision ---------------------------------------------------------------------------- */
+
+.vision-result {
+  overflow: hidden;
+}
+.vision-result .vision-reading:empty {
+  display: none;
+}
+.vision-result:has(.vision-reading:empty):has(.vision-pixel[hidden]) {
+  display: none;
+}
+/* The images get a frame, so an over-exposed white picture still reads as a picture (V4). */
+.vision-image-pair canvas {
+  outline: 1px solid #b9c9c6;
+  outline-offset: -1px;
+}
+.vision-pending {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 14px;
+}
+.vision-pending strong {
+  font-size: 15px;
+}
+/* Figure guide above the images: read before looking, and the controls follow the images. */
+.vision-scene > .figure-guide {
+  border-top: 0;
+  border-bottom: 1px solid #e0e8e6;
+}
+
+/* Colour bar of a depth image in metres, and the hatch of "not measured" (V3); also used by the
+   SLAM camera view. */
+.depth-color-key {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  padding: 0 24px 18px;
+  font-size: 13px;
+  color: #3d5660;
+}
+.depth-color-key strong {
+  font-size: 13px;
+}
+.depth-color-scale {
+  position: relative;
+}
+.depth-color-bar {
+  height: 14px;
+  border-radius: 3px;
+}
+.depth-color-ticks {
+  position: relative;
+  height: 18px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.depth-color-ticks span {
+  position: absolute;
+  top: 2px;
+  transform: translateX(-50%);
+}
+.depth-color-ticks span::before {
+  content: '';
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  height: 5px;
+  border-left: 1px solid #3d5660;
+}
+.depth-color-ends {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+}
+.depth-color-missing {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.depth-color-missing i {
+  display: inline-block;
+  width: 26px;
+  height: 14px;
+  border-radius: 3px;
+  background: repeating-linear-gradient(-45deg, #969fa8 0 2px, #2d333e 2px 6px);
+}
+
+/* Brightness histogram: now (filled) against the reference (dotted), labels in HTML (V5). */
+.vision-histogram-figure {
+  margin: 16px 0 8px;
+}
+.vision-histogram-figure figcaption {
+  font-size: 14px;
+  font-weight: 650;
+  margin-bottom: 8px;
+}
+.vision-histogram-plot {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: stretch;
+}
+.vision-histogram-y {
+  writing-mode: vertical-rl;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+}
+.vision-histogram-figure .vision-histogram {
+  width: 100%;
+  height: 140px;
+  max-height: none;
+  margin: 0;
+}
+.vision-histogram-x {
+  display: flex;
+  justify-content: space-between;
+  margin-left: 26px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.vision-histogram-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+.vision-histogram-key li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.vision-histogram-key i {
+  display: inline-block;
+  width: 18px;
+  height: 12px;
+}
+.vision-histogram-key .key-now {
+  background: var(--role-measured);
+}
+.vision-histogram-key .key-before {
+  height: 0;
+  border-top: 2px dotted #6d7c83;
+}
+.vision-histogram-key .key-clipped {
+  background: #f6d5d2;
+}
+.vision-histogram-readout {
+  font-size: 14px !important;
+}
+/* The three kinds of box of the region search, as drawn in the image (V6). */
+.vision-region-key span,
+.vision-region-list span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.vision-region-key i {
+  display: inline-block;
+  width: 18px;
+  height: 12px;
+  border: 2px solid currentColor;
+}
+.vision-region-key [data-kind='correct'] i {
+  color: #13875f;
+}
+.vision-region-key [data-kind='extra'] i {
+  color: #c2379a;
+  border-style: dashed;
+}
+.vision-region-key [data-kind='missed'] i {
+  color: #b8860b;
+  border-style: dotted;
+}
+.vision-region-list [data-kind='correct'] {
+  box-shadow: inset 3px 0 #13875f;
+}
+.vision-region-list [data-kind='extra'] {
+  box-shadow: inset 3px 0 #c2379a;
+}
+/* On a phone: images → main controls → result → evidence (C3, V2, V18). */
+@media (max-width: 900px) {
+  .vision-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .vision-layout > .vision-workspace {
+    display: contents;
+  }
+  .vision-layout .vision-scene {
+    order: 1;
+  }
+  .vision-layout > .guide {
+    order: 2;
+  }
+  .vision-layout .vision-result {
+    order: 3;
+  }
+  .vision-layout .vision-evidence {
+    order: 4;
+  }
+}
+/* Images one above the other, full width, on a phone (V2). */
+@media (max-width: 600px) {
+  .vision-image-pair {
+    grid-template-columns: 1fr;
+    gap: 14px;
+    padding: 14px 16px;
+  }
+  .vision-image-pair figcaption {
+    font-size: 14px;
+    margin-bottom: 8px;
+  }
+  .vision-image-pair figcaption span {
+    font-size: 12px;
+  }
+  .vision-pending {
+    padding: 14px;
+  }
+}

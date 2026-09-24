@@ -1,5 +1,5 @@
 import { render } from '../vendor/lit-html.js';
-import { loadJson } from '../core/content.js';
+import { loadJson, fillSentence as fill } from '../core/content.js';
 import { formatNumber } from '../core/dom.js';
 import { DEPTH_CONTENT, depthSource, renderDepth } from './depth-ui.js';
 import {
@@ -13,6 +13,7 @@ import {
   connectedRegions,
   regionScene,
   evaluateRegions,
+  matchRegions,
   projectedTarget,
   cameraGeometry,
   lineCamera,
@@ -89,7 +90,7 @@ const IDLE_FRAME = { pose: { x: 0, y: 0, theta: 0 }, command: { left: 0, right: 
 const LINE_CENTER_X = 59.5; // pixel column of the image centre in the 120 px line camera
 
 // Experiment settings, kept while the learner moves between chapters.
-const capture = { exposure: 2.8, blur: 0, width: 320 };
+const capture = { ...CAPTURE_BASELINE }; // starts at the reference, as the lesson's first step says
 const region = {
   scene: 'clean',
   method: 'rgb',
@@ -159,6 +160,7 @@ function captureModel() {
     capture,
     output,
     histogram: brightnessHistogram(output),
+    baseline: brightnessHistogram(cameraEffects(page.source, CAPTURE_BASELINE)),
     whiteRatio: Math.round(nearWhiteFraction(output) * 100),
     pixelCount: output.width * output.height,
   };
@@ -219,7 +221,7 @@ function regionModel() {
 function drawRegionInput() {
   const input = byId('visionInput');
   page.showImage(input, page.source);
-  if (region.roi) drawRoiShade(input, page.source);
+  if (region.roi) drawRoiShade(input, page.source, copy.regions.roiTag);
 }
 
 function drawRegionOutput() {
@@ -230,7 +232,7 @@ function drawRegionOutput() {
   const output = byId('visionOutput');
   const { width, height } = page.source;
   page.showImage(output, maskImage(regionResult.mask, width, height));
-  drawRegionBoxes(output, regionResult.regions, width);
+  drawRegionBoxes(output, regionResult.regions, width, regionResult.match);
 }
 
 function updateRegions() {
@@ -268,9 +270,11 @@ function findRegions() {
   const mask = morphology(raw, width, height, region.operation, region.radius);
   const regions = connectedRegions(mask, width, height, region.minArea);
   // The learner's own images have no answer key, so they are not scored.
-  const score = external ? null : evaluateRegions(regions, regionScene(region.scene).targets);
+  const targets = regionScene(region.scene).targets;
+  const score = external ? null : evaluateRegions(regions, targets);
+  const match = external ? null : matchRegions(regions, targets);
   const success = Boolean(score) && score.found === 2 && score.falsePositive === 0;
-  return { mask, regions, score, success };
+  return { mask, regions, score, match, success };
 }
 
 // A changed condition keeps the previous result on screen but marks it as stale.
@@ -295,6 +299,7 @@ const regionActions = {
     regionNote = `${regionResult.regions.length}個の領域 · 十字は中心`;
     updateRegions();
     page.setStatus(regionRunStatus(regionResult));
+    page.revealScene();
   },
   setScene(value) {
     region.scene = value;
@@ -442,9 +447,17 @@ function drawFollowFrame() {
   setText('visionOutputNote', lineNote(observation));
   drawCourseMap(
     byId('vfMap'),
-    { gap: options.gap, frames: follow.trial?.frames, pose: frame.pose },
+    { gap: options.gap, frames: follow.trial?.frames, pose: frame.pose, lost: lostMark() },
     { start: 'スタート', goal: 'ゴール' },
   );
+}
+
+// The ✕ where the trial lost the line, shown with the last recorded frame.
+function lostMark() {
+  const trial = follow.trial;
+  if (trial?.outcome !== 'lost' || follow.index !== lastFrameIndex()) return null;
+  const last = trial.frames[lastFrameIndex()];
+  return { pose: last.pose, label: fill(copy.follow.lostMark, { time: formatNumber(last.time) }) };
 }
 
 function showFrame() {
@@ -506,7 +519,12 @@ const followActions = {
       scene: follow.scene,
     });
     showFrame();
-    page.setStatus(copy.follow.outcomes[follow.trial.outcome] + copy.follow.status.ranSuffix);
+    page.setStatus(
+      copy.follow.outcomes[follow.trial.outcome] +
+        copy.follow.status.ranSuffix +
+        (follow.trial.outcome === 'lost' ? copy.follow.status.lostHint : ''),
+    );
+    page.revealScene();
   },
   setSetting(key, value) {
     follow[key] = value;

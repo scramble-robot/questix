@@ -59,8 +59,10 @@ function goodLog(depthModule) {
   return structuredClone(log);
 }
 
-test('exports the same names as the baseline', { skip: !baseline }, () => {
-  assert.deepEqual(Object.keys(candidate).sort(), Object.keys(baseline).sort());
+// The colour bar helpers (invalidDepthColor, depthColorBar) were added with the new depth colours.
+test('exports every name of the baseline', { skip: !baseline }, () => {
+  const names = Object.keys(candidate);
+  for (const name of Object.keys(baseline)) assert.ok(names.includes(name), name);
   assert.deepEqual(candidate.DEPTH_CAMERA, baseline.DEPTH_CAMERA);
 });
 
@@ -82,18 +84,60 @@ compareWithBaseline('stereoProjection and depthFromDisparity', (e) => [
   ],
 ]);
 
-compareWithBaseline('depthColor over the range and for invalid values', (e) => {
-  const zs = [-1, 0, NaN, Infinity, 0.1, 0.25, 0.5, 1, 1.7, 2.5, 4, 5, 7];
-  return [zs.map((z) => e.depthColor(z)), zs.map((z) => e.depthColor(z, 0.5, 2))];
+// Intended change (audit V3): the depth colours used to fade linearly from orange to blue, which
+// turned 2–3 m into greys that looked like "not measured". They now run from yellow (near) to
+// navy (far) with a lightness that falls at every step, and missing depths are hatched.
+const luminance = ([red, green, blue]) => 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+
+test('depth colours get darker with every step of distance, near yellow and far navy', () => {
+  const zs = Array.from({ length: 96 }, (_, index) => 0.25 + index * 0.05);
+  const colors = zs.map((z) => candidate.depthColor(z));
+  for (let i = 1; i < colors.length; i++)
+    assert.ok(luminance(colors[i]) < luminance(colors[i - 1]), `${zs[i]} m`);
+  const [red, green, blue] = candidate.depthColor(0.25);
+  assert.ok(red > 200 && green > 200 && blue < 80, 'near is yellow');
+  const far = candidate.depthColor(5);
+  assert.ok(far[2] > far[0] && far[2] > far[1] && luminance(far) < 50, 'far is navy');
+  assert.deepEqual(candidate.depthColor(0.1), candidate.depthColor(0.25), 'clamped below');
+  assert.deepEqual(candidate.depthColor(7), candidate.depthColor(5), 'clamped above');
 });
 
-compareWithBaseline('depthImage and depthPoint on a small frame', (e) => {
+test('no measured depth is grey, so none can be mistaken for the missing-depth hatch', () => {
+  for (let z = 0.25; z <= 5; z += 0.05) {
+    const color = candidate.depthColor(z);
+    const spread = Math.max(...color) - Math.min(...color);
+    assert.ok(spread > 50, `${z.toFixed(2)} m is ${color}`);
+  }
+});
+
+test('missing depths are hatched in two colours, never a depth colour', () => {
+  const frame = smallFrame(candidate, { targetZ: 1.0, condition: 'holes' });
+  const missing = { ...frame, depth: new Float32Array(frame.depth.length).fill(NaN) };
+  const image = candidate.depthImage(missing);
+  const colors = new Set();
+  for (let i = 0; i < image.data.length; i += 4) colors.add(image.data.slice(i, i + 3).join(','));
+  assert.equal(colors.size, 2);
+  for (const z of [-1, 0, NaN, Infinity])
+    assert.deepEqual(candidate.depthColor(z), candidate.invalidDepthColor(1, 1));
+});
+
+test('the colour bar spans near to far with labelled metres', () => {
+  const bar = candidate.depthColorBar();
+  assert.match(bar.gradient, /^linear-gradient\(to right, rgb\(253,231,37\) 0%/);
+  assert.deepEqual(
+    bar.ticks.map((tick) => tick.metres),
+    [0.25, 1, 2, 3, 4, 5],
+  );
+  assert.equal(bar.ticks[0].at, 0);
+  assert.equal(bar.ticks.at(-1).at, 100);
+});
+
+compareWithBaseline('depthPoint on a small frame', (e) => {
   const frame = smallFrame(e, { targetZ: 1.0, condition: 'holes' });
   const points = [];
   for (let v = 0; v < frame.height; v++)
     for (let u = 0; u < frame.width; u++) points.push(e.depthPoint(frame, u, v));
-  const image = e.depthImage(frame);
-  return [frame, image, points, e.depthPoint({ ...frame, depth: [NaN, 0, -1, 2] }, 1, 0)];
+  return [frame, points, e.depthPoint({ ...frame, depth: [NaN, 0, -1, 2] }, 1, 0)];
 });
 
 for (const condition of CONDITIONS)

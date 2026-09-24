@@ -124,10 +124,18 @@ function stereoEvidence(model, copy) {
     ${helpDetails(text.help)} ${stereoHistory(model, copy)}`;
 }
 
+// The answer stays folded until the learner has predicted it (C1).
+function foldedAnswer(paragraphs) {
+  return html`<details class="reflection-answer">
+    <summary>予想してから答えを見る</summary>
+    ${paragraphs.map(paragraph)}
+  </details>`;
+}
+
 function stereoReflect(copy) {
   const text = copy.stereo.reflect;
   return html`<h2>${text.title}</h2>
-    ${text.paragraphs.map(paragraph)}`;
+    ${foldedAnswer(text.paragraphs)}`;
 }
 
 // ---- RGBと奥行きを使う ------------------------------------------------------------------------
@@ -212,7 +220,7 @@ function rgbdEvidence(model, copy, actions) {
 function rgbdReflect(copy) {
   const text = copy.rgbd.reflect;
   return html`<h2>${text.title}</h2>
-    ${text.paragraphs.map(paragraph)}`;
+    ${foldedAnswer(text.paragraphs)}`;
 }
 
 export {
