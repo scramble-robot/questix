@@ -1,9 +1,14 @@
-import { LAUNCH_SPEC, launchGroups } from './core.js';
+import { LAUNCH_SPEC, LAUNCH_TOLERANCE, launchGroups, launchHit, launchRangeAxis } from './core.js';
 import { drawRobot } from '../core/renderer.js';
 import { formatNumber } from '../core/dom.js';
+import { CHART_ROLE_COLORS, SCENE_ROLE_COLORS, roleStyle } from '../core/palette.js';
+import { formatTick } from '../core/chart-scale.js';
+import { fillSentence as fill } from '../core/content.js';
 
 // Disc-launcher course: canvas and SVG drawing. Everything is drawn from the data ui.js hands in;
-// this module keeps no state of its own.
+// this module keeps no state of its own. Colours come from the roles of js/core/palette.js: the
+// flight is "actual" (green solid), the target is "target" (amber band with a dashed centre), the
+// previous flight "previous" (grey dotted); the calculation without air is a white dotted line.
 
 // --- Shared canvas helpers ---------------------------------------------------------------------
 
@@ -19,154 +24,181 @@ function scaledContext(canvas, width, height) {
   return context;
 }
 
-const ARROW_HEAD = 8; // px
-const ARROW_HEAD_SPREAD = 0.45; // radians between the shaft and each barb
-const MIN_ARROW_LENGTH = 3; // px: below this the head would be longer than the shaft
+// Where a text of `width` starts when it is aligned at x.
+function textLeft(x, width, align) {
+  if (align === 'center') return x - width / 2;
+  if (align === 'right') return x - width;
+  return x;
+}
 
-function drawArrow(context, x, y, dx, dy, color, label) {
-  const length = Math.hypot(dx, dy);
-  if (length < MIN_ARROW_LENGTH) return;
-  const angle = Math.atan2(dy, dx);
-  context.strokeStyle = color;
-  context.fillStyle = color;
-  context.lineWidth = 2.4;
-  context.beginPath();
-  context.moveTo(x, y);
-  context.lineTo(x + dx, y + dy);
-  context.stroke();
-  context.beginPath();
-  context.moveTo(x + dx, y + dy);
-  context.lineTo(
-    x + dx - ARROW_HEAD * Math.cos(angle - ARROW_HEAD_SPREAD),
-    y + dy - ARROW_HEAD * Math.sin(angle - ARROW_HEAD_SPREAD),
-  );
-  context.lineTo(
-    x + dx - ARROW_HEAD * Math.cos(angle + ARROW_HEAD_SPREAD),
-    y + dy - ARROW_HEAD * Math.sin(angle + ARROW_HEAD_SPREAD),
-  );
-  context.fill();
-  if (label) {
-    context.font = TITLE_FONT;
-    context.textAlign = dx < 0 ? 'right' : 'left';
-    context.fillText(label, x + dx + (dx < 0 ? -7 : 7), y + dy - 6);
-  }
+// Text on a plate of the sky colour, so a label stays readable where it crosses a line.
+function plateText(context, text, x, y, colour, align = 'left') {
+  context.textAlign = align;
+  const width = context.measureText(text).width;
+  const left = textLeft(x, width, align);
+  context.fillStyle = FLIGHT_COLORS.sky;
+  context.fillRect(left - 3, y - 14, width + 6, 19);
+  context.fillStyle = colour;
+  context.fillText(text, x, y);
+  context.textAlign = 'left';
 }
 
 // --- Side view of the flight -------------------------------------------------------------------
 
-const FLIGHT_WIDTH = 760; // px
-const FLIGHT_HEIGHT = 350; // px
-const PIXELS_PER_METRE = 145; // the same scale along and above the floor, as the note says
-const MUZZLE_X = 130; // px: where the disc leaves the launcher, i.e. 0 m
-const FLOOR_Y = 278; // px
-const FLOOR_RIGHT_X = 733; // px: right end of the floor line
-const AXIS_TOP_Y = 80; // px
-const GRID_TOP_Y = 86; // px
-const LAST_METRE_MARK = 4; // metres: the furthest labelled mark on the floor
-const TICK_LABEL_Y = 302; // px
-const TICK_LABEL_Y_WITH_ARROWS = 338; // px: the force arrows need the room above
-
-const TITLE_FONT = '14px system-ui';
-const TICK_FONT = '13px system-ui';
-const NOTE_FONT = '12px system-ui';
+// Two layouts of the same side view. The narrow one is for phones: it shows 0–3.3 m (the longest
+// flight is about 3.1 m) at the canvas's own width, so the landing point and its distance are
+// always on screen, and its fonts stay ≥ 12 px once the canvas is shrunk to a 352 px card.
+// Coordinates are canvas units; `scale` is canvas units per metre, the same along and above the
+// floor. With the force box (forces topic) the sky is taller, so the arrows can be drawn at a
+// scale where the smallest force of a flight, about 0.07 N of drag, is still ≥ 40 px on screen.
+const WIDE = {
+  width: 760,
+  height: 350,
+  scale: 145,
+  muzzleX: 130,
+  floorY: 278,
+  lastMetre: 4,
+  font: 14,
+  note: 13,
+};
+const NARROW = {
+  width: 440,
+  height: 350,
+  scale: 105,
+  muzzleX: 66,
+  floorY: 280,
+  lastMetre: 3,
+  font: 17,
+  note: 16,
+};
+const FORCE_BOX_ROOM = 60; // canvas units of extra sky for the force box
+const FLIGHT_LAYOUTS = {
+  wide: WIDE,
+  narrow: NARROW,
+  wideForces: {
+    ...WIDE,
+    height: WIDE.height + FORCE_BOX_ROOM,
+    floorY: WIDE.floorY + FORCE_BOX_ROOM,
+    inset: { x: 400, y: 40, width: 348, height: 250 },
+    forceScale: 600, // canvas units per newton
+  },
+  narrowForces: {
+    ...NARROW,
+    height: NARROW.height + FORCE_BOX_ROOM,
+    floorY: NARROW.floorY + FORCE_BOX_ROOM,
+    inset: { x: 150, y: 36, width: 284, height: 250 },
+    forceScale: 800,
+  },
+};
+const NARROW_BELOW = 600; // CSS pixels of canvas width
+const FLOOR_MARGIN = 25; // canvas units between the last metre mark and the canvas edge
+const SIDE_VIEW_SCALE = 145; // canvas units per metre the robot schematic was drawn at
+const SIDE_VIEW_MUZZLE = { x: 130, floorY: 278 }; // where the schematic's muzzle and floor are
 
 const FLIGHT_COLORS = {
   sky: '#17313c',
   title: '#cee0e4',
-  note: '#99b2bc',
+  note: '#a9c0c8',
   axis: '#54717a',
-  grid: '#91adbb1f',
-  tick: '#adc2ca',
-  floorLabel: '#a6bec5',
-  gravity: '#eea49a',
-  drag: '#b6b6ec',
-  lift: '#9adcca',
-  targetBand: '#e8bf7938',
-  targetLine: '#edca81',
-  targetLabel: '#f1d49b',
-  flight: '#91decc',
-  previousFlight: '#b6c6ce66',
-  vacuumFlight: '#e6c58a',
-  disc: '#f4cf90',
-  discEdge: '#ffebc7',
-  landingMark: '#f2d49b',
-  landingLabel: '#ecdcba',
-  scaleNote: '#aac2ca',
+  grid: '#91adbb2e',
+  tick: '#c3d4da',
+  floorLabel: '#b7cbd1',
+  vacuumFlight: '#f4f7f8',
+  disc: '#e8eef0',
+  discEdge: '#ffffff',
+  landingLabel: '#e9f5ef',
   robotBody: '#a0b9be',
   robotLauncher: '#597b83',
   robotWheel: '#223f48',
   robotWheelEdge: '#a5b6b9',
   robotSensor: '#93ccd8',
-  muzzle: '#efc887',
+  muzzle: '#c9d6da',
+  insetFill: '#10262f',
+  insetEdge: '#4b6873',
+  velocity: '#8fa6ae',
 };
 
-// Same order and colours as the arrows drawn on the disc.
-const FORCE_LEGEND = [
-  { color: FLIGHT_COLORS.gravity, title: '重力' },
-  { color: FLIGHT_COLORS.drag, title: '空気抵抗' },
-  { color: FLIGHT_COLORS.lift, title: '揚力' },
-];
+// The three forces differ in lightness and line, not in hue alone, and each carries its name at
+// its tip: 重力 red thin solid, 空気抵抗 white double line, 揚力 purple thick solid.
+const FORCE_STYLES = {
+  gravity: { colour: '#ff8f8f', width: 3, double: false, label: '重力' },
+  drag: { colour: '#ffffff', width: 1.6, double: true, label: '空気抵抗' },
+  lift: { colour: '#b48cff', width: 5, double: false, label: '揚力' },
+};
 
-const TARGET_TOLERANCE = 0.15; // metres either side of the centre; ui.js decides hits with it
-const FORCE_ARROW_SCALE = 220; // pixels per newton
-const LANDING_MARK_RADIUS = 6; // px
-const LANDING_LABEL_MAX_X = 677; // px: keeps the distance label inside the canvas
+const LANDING_MARK_RADIUS = 7; // canvas units
+const GRID_ABOVE_MUZZLE = 24; // canvas units the metre lines reach above the release height
+// The magnified disc in the force box: canvas units per metre, and where it sits in the box.
+const INSET_DISC = { scale: 220, at: { x: 0.5, y: 0.36 } };
 
-const metresToX = (metres) => MUZZLE_X + metres * PIXELS_PER_METRE;
-const metresToY = (metres) => FLOOR_Y - metres * PIXELS_PER_METRE;
-
-function drawBackdrop(context, showForces) {
-  context.fillStyle = FLIGHT_COLORS.sky;
-  context.fillRect(0, 0, FLIGHT_WIDTH, FLIGHT_HEIGHT);
-  context.font = TITLE_FONT;
-  context.fillStyle = FLIGHT_COLORS.title;
-  context.fillText('横から見た飛行', 22, 28);
-  context.fillStyle = FLIGHT_COLORS.note;
-  context.font = NOTE_FONT;
-  context.fillText('射出口を0 mとして、最初に床に触れた位置を測る', 22, 49);
-  if (!showForces) return;
-  context.font = TITLE_FONT;
-  context.textAlign = 'left';
-  FORCE_LEGEND.forEach(({ color, title }, index) => {
-    const x = 265 + index * 145;
-    context.fillStyle = color;
-    context.fillRect(x, 65, 20, 3);
-    context.fillText(title, x + 29, 72);
-  });
+function flightLayout(canvas, forces) {
+  const cssWidth = canvas.getBoundingClientRect().width || WIDE.width;
+  if (cssWidth < NARROW_BELOW) return forces ? FLIGHT_LAYOUTS.narrowForces : NARROW;
+  return forces ? FLIGHT_LAYOUTS.wideForces : WIDE;
 }
 
-function drawFloorAndScale(context, showForces) {
+const toX = (layout, metres) => layout.muzzleX + metres * layout.scale;
+const toY = (layout, metres) => layout.floorY - metres * layout.scale;
+
+function drawBackdrop(context, layout, copy) {
+  context.fillStyle = FLIGHT_COLORS.sky;
+  context.fillRect(0, 0, layout.width, layout.height);
+  context.textAlign = 'left';
+  context.font = `${layout.font}px system-ui`;
+  context.fillStyle = FLIGHT_COLORS.title;
+  context.fillText(copy.title, 14, 26);
+  context.fillStyle = FLIGHT_COLORS.note;
+  context.font = `${layout.note}px system-ui`;
+  if (layout.width === WIDE.width) {
+    context.fillText(copy.note, 14, 47);
+    context.textAlign = 'right';
+    context.fillText(copy.sameScale, layout.width - 14, 26);
+    context.textAlign = 'left';
+  }
+}
+
+function drawFloorAndScale(context, layout, copy) {
+  const floorRight = toX(layout, layout.lastMetre) + FLOOR_MARGIN;
+  const gridTop = toY(layout, LAUNCH_SPEC.height) - GRID_ABOVE_MUZZLE;
   context.strokeStyle = FLIGHT_COLORS.axis;
   context.lineWidth = 1;
   context.beginPath();
-  context.moveTo(metresToX(0), AXIS_TOP_Y);
-  context.lineTo(metresToX(0), FLOOR_Y);
-  context.lineTo(FLOOR_RIGHT_X, FLOOR_Y);
+  context.moveTo(toX(layout, 0), gridTop);
+  context.lineTo(toX(layout, 0), layout.floorY);
+  context.lineTo(floorRight, layout.floorY);
   context.stroke();
-  const labelY = showForces ? TICK_LABEL_Y_WITH_ARROWS : TICK_LABEL_Y;
-  for (let metre = 0; metre <= LAST_METRE_MARK; metre++) {
+  context.font = `${layout.note}px system-ui`;
+  context.textAlign = 'center';
+  for (let metre = 0; metre <= layout.lastMetre; metre++) {
     context.fillStyle = FLIGHT_COLORS.tick;
-    context.font = TICK_FONT;
-    context.textAlign = 'center';
-    context.fillText(metre + ' m', metresToX(metre), labelY);
+    context.fillText(metre + ' m', toX(layout, metre), layout.floorY + 22);
     if (!metre) continue; // the 0 m mark already has the vertical axis
     context.strokeStyle = FLIGHT_COLORS.grid;
     context.beginPath();
-    context.moveTo(metresToX(metre), GRID_TOP_Y);
-    context.lineTo(metresToX(metre), FLOOR_Y);
+    context.moveTo(toX(layout, metre), gridTop);
+    context.lineTo(toX(layout, metre), layout.floorY);
     context.stroke();
   }
   context.textAlign = 'left';
   context.fillStyle = FLIGHT_COLORS.floorLabel;
-  context.font = TICK_FONT;
-  context.fillText('床', 27, 291);
-  context.font = NOTE_FONT;
-  context.fillText('高さ45 cm（仮定）', 14, 185);
+  context.fillText(copy.floor, 6, layout.floorY + 22);
+  plateText(
+    context,
+    copy.height,
+    6,
+    toY(layout, LAUNCH_SPEC.height) - 34,
+    FLIGHT_COLORS.floorLabel,
+  );
 }
 
 // Side-view schematic, paired with the existing QUESTiX top view in the mechanism panel. The
-// coordinates are a drawing, not a measurement of the machine.
-function drawRobotSideView(context) {
+// coordinates are a drawing, not a measurement of the machine; the narrow layout shrinks it with
+// the rest of the scene.
+function drawRobotSideView(context, layout) {
+  context.save();
+  context.translate(layout.muzzleX, layout.floorY);
+  context.scale(layout.scale / SIDE_VIEW_SCALE, layout.scale / SIDE_VIEW_SCALE);
+  context.translate(-SIDE_VIEW_MUZZLE.x, -SIDE_VIEW_MUZZLE.floorY);
   context.fillStyle = FLIGHT_COLORS.robotBody;
   context.fillRect(45, 223, 66, 32);
   context.fillStyle = FLIGHT_COLORS.robotLauncher;
@@ -181,114 +213,237 @@ function drawRobotSideView(context) {
   context.fillStyle = FLIGHT_COLORS.robotSensor;
   context.fillRect(103, 230, 8, 8);
   context.fillStyle = FLIGHT_COLORS.muzzle;
-  context.fillRect(108, metresToY(LAUNCH_SPEC.height) - 2, 22, 4);
+  context.fillRect(108, SIDE_VIEW_MUZZLE.floorY - LAUNCH_SPEC.height * SIDE_VIEW_SCALE - 2, 22, 4);
+  context.restore();
 }
 
-function drawTarget(context, target) {
-  context.fillStyle = FLIGHT_COLORS.targetBand;
-  context.fillRect(
-    metresToX(target - TARGET_TOLERANCE),
-    260,
-    2 * TARGET_TOLERANCE * PIXELS_PER_METRE,
-    18,
-  );
-  context.strokeStyle = FLIGHT_COLORS.targetLine;
-  context.lineWidth = 2;
+// The target: a band on the floor ±15 cm around its centre with a dashed centre line, labelled
+// 「的 1.2 m ±15 cm」 under the metre marks — the same band and words as on the record chart.
+function drawTarget(context, layout, target, label) {
+  const style = roleStyle('target', 'scene');
+  const left = toX(layout, target - LAUNCH_TOLERANCE);
+  const width = 2 * LAUNCH_TOLERANCE * layout.scale;
+  const bandTop = layout.floorY - 16;
+  context.fillStyle = style.color + '66';
+  context.fillRect(left, bandTop, width, 16);
+  context.strokeStyle = style.color;
+  context.lineWidth = 1.5;
+  context.strokeRect(left, bandTop, width, 16);
+  context.setLineDash([8, 5]);
+  context.lineWidth = style.width;
   context.beginPath();
-  context.moveTo(metresToX(target), 245);
-  context.lineTo(metresToX(target), FLOOR_Y);
+  context.moveTo(toX(layout, target), bandTop - 26);
+  context.lineTo(toX(layout, target), layout.floorY);
   context.stroke();
-  context.fillStyle = FLIGHT_COLORS.targetLabel;
-  context.textAlign = 'center';
-  context.font = NOTE_FONT;
-  context.fillText('的 ' + formatNumber(target) + ' m', metresToX(target), 326);
+  context.setLineDash([]);
+  context.font = `${layout.note}px system-ui`;
+  plateText(context, label, toX(layout, target), layout.floorY + 46, style.color, 'center');
 }
 
-function drawTrace(context, samples, color, dash = []) {
+function drawTrace(context, layout, samples, { colour, width = 2, dash = [], round = false }) {
   if (!samples?.length) return;
-  context.strokeStyle = color;
+  context.strokeStyle = colour;
   context.setLineDash(dash);
-  context.lineWidth = 2;
+  context.lineWidth = width;
+  context.lineCap = round ? 'round' : 'butt';
   context.beginPath();
   samples.forEach((sample, index) => {
-    const x = metresToX(sample.x);
-    const y = metresToY(sample.z);
+    const x = toX(layout, sample.x);
+    const y = toY(layout, sample.z);
     if (index) context.lineTo(x, y);
     else context.moveTo(x, y);
   });
   context.stroke();
   context.setLineDash([]);
+  context.lineCap = 'butt';
 }
 
 // The disc is held flat, so from the side it is its own thin edge, at its true 180:20 proportions.
-function drawDisc(context, x, y) {
-  const halfWidth = (LAUNCH_SPEC.diameter / 2) * PIXELS_PER_METRE;
-  const halfHeight = (LAUNCH_SPEC.thickness / 2) * PIXELS_PER_METRE;
-  const width = LAUNCH_SPEC.diameter * PIXELS_PER_METRE;
-  const height = LAUNCH_SPEC.thickness * PIXELS_PER_METRE;
-  context.fillStyle = FLIGHT_COLORS.disc;
-  context.fillRect(x - halfWidth, y - halfHeight, width, height);
+function drawDisc(context, layout, x, y, fill = FLIGHT_COLORS.disc) {
+  const width = LAUNCH_SPEC.diameter * layout.scale;
+  const height = Math.max(3, LAUNCH_SPEC.thickness * layout.scale);
+  context.fillStyle = fill;
+  context.fillRect(x - width / 2, y - height / 2, width, height);
   context.strokeStyle = FLIGHT_COLORS.discEdge;
   context.lineWidth = 1;
-  context.strokeRect(x - halfWidth, y - halfHeight, width, height);
+  context.strokeRect(x - width / 2, y - height / 2, width, height);
 }
 
-// Canvas y grows downwards, so weight (which pulls down) gets a positive dy and the z components
-// of drag and lift are negated.
-function drawForceArrows(context, x, y, sample, air) {
-  drawArrow(context, x, y, 0, sample.weight * FORCE_ARROW_SCALE, FLIGHT_COLORS.gravity);
-  if (!air) return;
-  const scale = FORCE_ARROW_SCALE;
-  drawArrow(context, x, y, sample.dragX * scale, -sample.dragZ * scale, FLIGHT_COLORS.drag);
-  drawArrow(context, x, y, sample.liftX * scale, -sample.liftZ * scale, FLIGHT_COLORS.lift);
+const ARROW_HEAD = 11; // canvas units
+const ARROW_HEAD_SPREAD = 0.45; // radians between the shaft and each barb
+const MIN_ARROW_LENGTH = 3; // canvas units: below this the head would be longer than the shaft
+const DOUBLE_LINE_GAP = 2.6; // canvas units between the two strokes of the drag arrow
+const ARROW_LABEL_GAP = 10; // canvas units between an arrow's tip and its name
+
+function arrowShaft(context, x, y, dx, dy, style) {
+  const length = Math.hypot(dx, dy);
+  const offsets = style.double ? [-DOUBLE_LINE_GAP, DOUBLE_LINE_GAP] : [0];
+  // Perpendicular unit vector, for the two strokes of a double line.
+  const px = -dy / length;
+  const py = dx / length;
+  const shorten = ARROW_HEAD * 0.7; // the shaft ends inside the head
+  const ex = x + dx - (dx / length) * shorten;
+  const ey = y + dy - (dy / length) * shorten;
+  context.lineWidth = style.width;
+  for (const offset of offsets) {
+    context.beginPath();
+    context.moveTo(x + px * offset, y + py * offset);
+    context.lineTo(ex + px * offset, ey + py * offset);
+    context.stroke();
+  }
 }
 
-function drawLandingMark(context, range, x) {
-  context.strokeStyle = FLIGHT_COLORS.landingMark;
-  context.lineWidth = 1;
+function drawForceArrow(context, x, y, dx, dy, style, font) {
+  const length = Math.hypot(dx, dy);
+  if (length < MIN_ARROW_LENGTH) return;
+  const angle = Math.atan2(dy, dx);
+  context.strokeStyle = style.colour;
+  context.fillStyle = style.colour;
+  arrowShaft(context, x, y, dx, dy, style);
   context.beginPath();
-  context.arc(x, FLOOR_Y, LANDING_MARK_RADIUS, 0, Math.PI * 2);
-  context.stroke();
-  context.fillStyle = FLIGHT_COLORS.landingLabel;
+  context.moveTo(x + dx, y + dy);
+  context.lineTo(
+    x + dx - ARROW_HEAD * Math.cos(angle - ARROW_HEAD_SPREAD),
+    y + dy - ARROW_HEAD * Math.sin(angle - ARROW_HEAD_SPREAD),
+  );
+  context.lineTo(
+    x + dx - ARROW_HEAD * Math.cos(angle + ARROW_HEAD_SPREAD),
+    y + dy - ARROW_HEAD * Math.sin(angle + ARROW_HEAD_SPREAD),
+  );
+  context.closePath();
+  context.fill();
+  // The name sits just beyond the tip, on the side the arrow points to.
+  context.font = `bold ${font}px system-ui`;
+  context.textBaseline = 'middle';
+  // An arrow pointing up or down gets its name beside the tip, so the box need not be taller.
+  const vertical = Math.abs(dx) < length * VERTICAL_SHARE;
+  const [labelX, labelY] = vertical
+    ? [x + dx + ARROW_LABEL_GAP, y + dy - Math.sign(dy) * font * 0.6]
+    : [x + dx + Math.cos(angle) * ARROW_LABEL_GAP, y + dy + Math.sin(angle) * ARROW_LABEL_GAP];
+  context.textAlign = !vertical && dx < 0 ? 'right' : 'left';
+  context.fillText(style.label, labelX, labelY);
   context.textAlign = 'left';
-  context.font = TITLE_FONT;
-  context.fillText(formatNumber(range, 2) + ' m', Math.min(LANDING_LABEL_MAX_X, x + 10), 263);
+  context.textBaseline = 'alphabetic';
 }
 
-function drawScaleNote(context) {
-  context.textAlign = 'right';
-  context.fillStyle = FLIGHT_COLORS.scaleNote;
-  context.font = NOTE_FONT;
-  context.fillText('横の位置と高さは同じ縮尺', 736, 28);
+const VERTICAL_SHARE = 0.3; // an arrow whose sideways part is below this share points up or down
+
+// The forces at the moment on screen, drawn large in a box in the empty sky above the flight: a
+// copy of the disc with the three arrows (canvas y grows downwards, so the weight gets a positive
+// dy and the z components of drag and lift are negated) and a dotted line for the direction the
+// disc is moving, which drag opposes and lift is square to.
+function drawForceInset(context, layout, sample, air, copy) {
+  const box = layout.inset;
+  context.fillStyle = FLIGHT_COLORS.insetFill;
+  context.strokeStyle = FLIGHT_COLORS.insetEdge;
+  context.lineWidth = 1;
+  context.fillRect(box.x, box.y, box.width, box.height);
+  context.strokeRect(box.x, box.y, box.width, box.height);
+  context.font = `${layout.note}px system-ui`;
+  context.fillStyle = FLIGHT_COLORS.note;
+  context.fillText(copy.inset, box.x + 8, box.y + box.height - 8);
+  const x = box.x + box.width * INSET_DISC.at.x;
+  const y = box.y + box.height * INSET_DISC.at.y;
+  const speed = Math.hypot(sample.vx ?? 0, sample.vz ?? 0);
+  if (speed > 0) {
+    const reach = box.width * 0.32;
+    context.strokeStyle = FLIGHT_COLORS.velocity;
+    context.setLineDash([2, 4]);
+    context.lineWidth = 1.5;
+    context.beginPath();
+    context.moveTo(x - (sample.vx / speed) * reach, y + (sample.vz / speed) * reach);
+    context.lineTo(x + (sample.vx / speed) * reach, y - (sample.vz / speed) * reach);
+    context.stroke();
+    context.setLineDash([]);
+    context.fillStyle = FLIGHT_COLORS.velocity;
+    context.font = `${layout.note}px system-ui`;
+    context.textAlign = 'right';
+    context.fillText(copy.moving, box.x + box.width - 8, box.y + box.height - 8);
+    context.textAlign = 'left';
+  }
+  // Only the outline, so the arrows that start at its centre are not hidden under it.
+  drawDisc(context, INSET_DISC, x, y, FLIGHT_COLORS.insetFill);
+  const scale = layout.forceScale;
+  const font = layout.note;
+  drawForceArrow(context, x, y, 0, sample.weight * scale, FORCE_STYLES.gravity, font);
+  if (!air) return;
+  drawForceArrow(
+    context,
+    x,
+    y,
+    sample.dragX * scale,
+    -sample.dragZ * scale,
+    FORCE_STYLES.drag,
+    font,
+  );
+  drawForceArrow(
+    context,
+    x,
+    y,
+    sample.liftX * scale,
+    -sample.liftZ * scale,
+    FORCE_STYLES.lift,
+    font,
+  );
 }
 
+function drawLandingMark(context, layout, range, x) {
+  const style = roleStyle('actual', 'scene');
+  context.strokeStyle = style.color;
+  context.lineWidth = 2.5;
+  context.beginPath();
+  context.arc(x, layout.floorY, LANDING_MARK_RADIUS, 0, Math.PI * 2);
+  context.stroke();
+  context.font = `bold ${layout.font}px system-ui`;
+  const text = formatNumber(range, 2) + ' m';
+  const right = layout.width - 8;
+  const width = context.measureText(text).width;
+  const labelX = Math.min(right - width, x + 10);
+  plateText(context, text, labelX, layout.floorY - 26, FLIGHT_COLORS.landingLabel);
+}
+
+/**
+ * The side view of one launch. `index` is the sample on screen; `previous` the last launch (grey
+ * dotted), `reference` the same launch without air (white dotted, drawn only as far as the disc
+ * on screen has got), `target` the centre of the target (m) and `forces` whether the force box is
+ * shown. `copy` holds the words drawn on the canvas (content/launch.json, `scene`).
+ */
 function drawLaunch(
   canvas,
-  { run, index = 0, reference = null, target = null, forces = false, previous = null },
+  { run, index = 0, reference = null, target = null, forces = false, previous = null, copy },
 ) {
-  const context = scaledContext(canvas, FLIGHT_WIDTH, FLIGHT_HEIGHT);
-  drawBackdrop(context, forces);
-  drawFloorAndScale(context, forces);
-  drawRobotSideView(context);
-  if (target !== null) drawTarget(context, target);
-  if (previous) drawTrace(context, previous.samples, FLIGHT_COLORS.previousFlight, [3, 5]);
-  const sample = run?.samples[index] || { x: 0, z: LAUNCH_SPEC.height, t: 0 };
-  // The comparison run is only drawn as far as the flight being watched has got.
+  const layout = flightLayout(canvas, forces);
+  canvas.style.aspectRatio = `${layout.width} / ${layout.height}`;
+  const context = scaledContext(canvas, layout.width, layout.height);
+  drawBackdrop(context, layout, copy);
+  drawFloorAndScale(context, layout, copy);
+  drawRobotSideView(context, layout);
+  if (target !== null)
+    drawTarget(context, layout, target, fill(copy.target, { target: formatNumber(target, 1) }));
+  if (previous)
+    drawTrace(context, layout, previous.samples, {
+      colour: SCENE_ROLE_COLORS.previous,
+      dash: [2, 5],
+    });
+  const sample = run?.samples[index] || { x: 0, z: LAUNCH_SPEC.height, t: 0, vx: 0, vz: 0 };
   if (reference && run)
     drawTrace(
       context,
+      layout,
       reference.samples.filter((point) => point.t <= sample.t),
-      FLIGHT_COLORS.vacuumFlight,
-      [5, 5],
+      { colour: FLIGHT_COLORS.vacuumFlight, width: 2.5, dash: [0.5, 6], round: true },
     );
-  if (run) drawTrace(context, run.samples.slice(0, index + 1), FLIGHT_COLORS.flight);
-  const discX = metresToX(sample.x);
-  const discY = metresToY(sample.z);
-  drawDisc(context, discX, discY);
+  if (run)
+    drawTrace(context, layout, run.samples.slice(0, index + 1), {
+      colour: SCENE_ROLE_COLORS.actual,
+      width: 3,
+    });
+  const discX = toX(layout, sample.x);
+  const discY = toY(layout, sample.z);
+  drawDisc(context, layout, discX, discY);
   const landed = Boolean(run) && index === run.samples.length - 1;
-  if (forces && run && !landed) drawForceArrows(context, discX, discY, sample, run.config.air);
-  if (landed && run.status === 'landed') drawLandingMark(context, run.range, discX);
-  drawScaleNote(context);
+  if (forces && run && !landed) drawForceInset(context, layout, sample, run.config.air, copy);
+  if (landed && run.status === 'landed') drawLandingMark(context, layout, run.range, discX);
 }
 
 // --- Top view of the launcher ------------------------------------------------------------------
@@ -329,126 +484,135 @@ function drawLaunchRobot(canvas) {
 
 // --- Output against distance chart -------------------------------------------------------------
 
-const CHART_LEFT = 62; // px: the vertical axis
-const CHART_RIGHT = 642; // px
-const CHART_TOP = 50; // px
-const CHART_BASE = 234; // px: 0 m
-const CHART_PLOT_HEIGHT = 184; // px between 0 m and the top of the scale
-const CHART_GRID_STEPS = 3; // gridlines above 0 m
-const PIXELS_PER_PERCENT = 5.8;
-const CHART_MIN_RANGE = 3.5; // metres: keeps the first few records from filling the whole chart
-const CHART_HEADROOM = 1.1; // leaves room above the furthest record
-const CHART_COLORS = {
-  axis: '#81969c',
-  axisTitle: '#536c75',
-  grid: '#e2e9e8',
-  tick: '#657b81',
-  data: '#44877c',
-  target: '#bc8b3f',
-  targetLabel: '#8c6d3d',
-  empty: '#667e85',
-};
-const CHART_LABEL =
-  '横軸はモーターへの出力指示0から100%、縦軸は飛距離。点が1枚ごとの結果、線は同じ出力の平均を結んだものです。';
+// The chart is laid out at the width it is shown at (ui.js measures it), so its text is 13 px on
+// a phone as on a Chromebook. Coordinates are CSS pixels.
+const CHART = { height: 290, left: 50, right: 18, top: 30, bottom: 58 };
+const CHART_FONT = 13; // px
+const POWER_TICKS = [0, 20, 40, 60, 80, 100]; // percent
+const POINT_RADIUS = 6; // px: hollow, so repeats at one output stay countable
+const HIT_RADIUS = 2.5; // px: the inner ring that turns ○ into ◎
+// The mean line is the points' colour, darker, so points and line are told apart without a legend.
+const MEAN_COLOURS = { actual: '#0f6b4a', measured: '#1c5aa6' };
+const CHART_TEXT = { tick: '#4d6469', title: '#3c5359', empty: '#5f757b' };
 
-const percentToX = (percent) => CHART_LEFT + percent * PIXELS_PER_PERCENT;
-const chartRangeToY = (range, max) => CHART_BASE - (range / max) * CHART_PLOT_HEIGHT;
+const svgText = (x, y, text, { anchor = 'start', colour = CHART_TEXT.tick, weight = 400 } = {}) =>
+  `<text x="${x}" y="${y}" text-anchor="${anchor}" fill="${colour}" font-size="${CHART_FONT}" font-weight="${weight}" paint-order="stroke" stroke="#fff" stroke-width="4" stroke-linejoin="round">${text}</text>`;
 
-function chartGrid(max) {
-  let markup = '';
-  for (let step = 0; step <= CHART_GRID_STEPS; step++) {
-    const y = CHART_BASE - (step * CHART_PLOT_HEIGHT) / CHART_GRID_STEPS;
-    const metres = (step * max) / CHART_GRID_STEPS;
+function chartFrame(width) {
+  const plotBottom = CHART.height - CHART.bottom;
+  const right = width - CHART.right;
+  const x = (percent) => CHART.left + (percent / 100) * (right - CHART.left);
+  return { plotBottom, right, x };
+}
+
+function chartGrid(frame, axis, y, copy) {
+  let markup = svgText(8, 18, copy.yTitle, { colour: CHART_TEXT.title, weight: 600 });
+  for (const value of axis.ticks) {
+    const zero = value === 0;
     markup +=
-      `<path d="M${CHART_LEFT} ${y}H${CHART_RIGHT}" stroke="${CHART_COLORS.grid}"/>` +
-      `<text x="51" y="${y + 4}" text-anchor="end" fill="${CHART_COLORS.tick}" font-size="12">${formatNumber(metres)}</text>`;
+      `<path d="M${CHART.left} ${y(value)}H${frame.right}" stroke="${zero ? CHART_ROLE_COLORS.axis : CHART_ROLE_COLORS.grid}" stroke-width="${zero ? 1.5 : 1}"/>` +
+      svgText(CHART.left - 7, y(value) + 4, formatTick(value, axis.step), { anchor: 'end' });
   }
+  for (const percent of POWER_TICKS)
+    markup += svgText(frame.x(percent), frame.plotBottom + 18, percent, { anchor: 'middle' });
+  markup += svgText((CHART.left + frame.right) / 2, CHART.height - 12, copy.xTitle, {
+    anchor: 'middle',
+    colour: CHART_TEXT.title,
+    weight: 600,
+  });
   return markup;
 }
 
-function chartAxes() {
-  const ticks = [0, 20, 40, 60, 80, 100]
-    .map(
-      (percent) =>
-        `<text x="${percentToX(percent)}" y="254" text-anchor="middle" fill="${CHART_COLORS.tick}" font-size="12">${percent}</text>`,
-    )
-    .join('');
-  return (
-    `<path d="M${CHART_LEFT} ${CHART_TOP}V${CHART_BASE}H${CHART_RIGHT}" fill="none" stroke="${CHART_COLORS.axis}"/>` +
-    ticks +
-    `<text x="352" y="279" text-anchor="middle" fill="${CHART_COLORS.axisTitle}" font-size="14">モーターへの出力指示（%）</text>`
-  );
-}
-
-function chartTargetLine(target, max) {
+// The target band ±15 cm with its dashed centre and the same words as in the scene.
+function chartTarget(frame, target, y, label) {
   if (target === null) return '';
-  const y = chartRangeToY(target, max);
+  const style = roleStyle('target');
+  const top = y(target + LAUNCH_TOLERANCE);
+  const bottom = y(target - LAUNCH_TOLERANCE);
   return (
-    `<path d="M${CHART_LEFT} ${y}H${CHART_RIGHT}" stroke="${CHART_COLORS.target}" stroke-dasharray="5 5"/>` +
-    `<text x="651" y="${y + 4}" fill="${CHART_COLORS.targetLabel}" font-size="12">的</text>`
+    `<rect x="${CHART.left}" y="${top}" width="${frame.right - CHART.left}" height="${bottom - top}" fill="${style.color}" opacity=".16"/>` +
+    `<path d="M${CHART.left} ${y(target)}H${frame.right}" stroke="${style.color}" stroke-width="${style.width}" stroke-dasharray="${style.dash}"/>` +
+    // On the left, where the low outputs' points sit well below any target band.
+    svgText(CHART.left + 6, top - 5, label, { colour: style.color, weight: 600 })
   );
 }
 
-// One point per launch, and per output setting a line through the means with a whisker over the
-// spread, so that repeats at the same output read as a range rather than as one number.
-function chartMeanLine(groups, max) {
-  if (groups.length <= 1) return '';
-  const points = groups
-    .map((group) => percentToX(group.power) + ',' + chartRangeToY(group.mean, max))
-    .join(' ');
-  return `<polyline points="${points}" fill="none" stroke="${CHART_COLORS.data}" stroke-width="2"/>`;
-}
-
-function chartPoints(rows, max) {
-  return rows
-    .map(
-      (row) =>
-        `<circle cx="${percentToX(row.power)}" cy="${chartRangeToY(row.range, max)}" r="4" fill="${CHART_COLORS.data}" opacity=".65"/>`,
-    )
-    .join('');
-}
-
-function chartSpread(groups, max) {
-  return groups
+// Per output setting a darker line through the means and a whisker over the spread, so that
+// repeats at the same output read as a range rather than as one number.
+function chartMeans(frame, groups, y, role) {
+  const colour = MEAN_COLOURS[role];
+  const whiskers = groups
     .map(
       (group) =>
-        `<path d="M${percentToX(group.power)} ${chartRangeToY(group.min, max)}V${chartRangeToY(group.max, max)}" stroke="${CHART_COLORS.data}" stroke-width="2"/>`,
+        `<path d="M${frame.x(group.power)} ${y(group.min)}V${y(group.max)}" stroke="${colour}" stroke-width="2"/>`,
     )
+    .join('');
+  if (groups.length <= 1) return whiskers;
+  const points = groups.map((group) => frame.x(group.power) + ',' + y(group.mean)).join(' ');
+  return (
+    `<polyline points="${points}" fill="none" stroke="${colour}" stroke-width="3" stroke-linejoin="round"/>` +
+    whiskers
+  );
+}
+
+// One hollow point per launch; a launch that landed in its target's band gets an inner ring (◎).
+function chartPoints(frame, rows, y, role) {
+  const colour = roleStyle(role).color;
+  return rows
+    .map((row) => {
+      const cx = frame.x(row.power);
+      const cy = y(row.range);
+      const ring = `<circle cx="${cx}" cy="${cy}" r="${POINT_RADIUS}" fill="#fff" fill-opacity=".85" stroke="${colour}" stroke-width="2"/>`;
+      if (!launchHit(row.range, row.target)) return ring;
+      return (
+        ring +
+        `<circle cx="${cx}" cy="${cy}" r="${HIT_RADIUS}" fill="none" stroke="${colour}" stroke-width="2"/>`
+      );
+    })
     .join('');
 }
 
 // Drops from the estimated output up to the target line: the reading the learner is asked to make.
-function chartEstimate(estimate, target, max) {
+function chartEstimate(frame, estimate, target, y) {
   if (!estimate?.ok) return '';
-  const x = percentToX(estimate.power);
-  const y = chartRangeToY(target, max);
+  const style = roleStyle('target');
+  const x = frame.x(estimate.power);
   return (
-    `<path d="M${x} ${CHART_BASE}V${y}" stroke="${CHART_COLORS.target}" stroke-dasharray="3 4"/>` +
-    `<circle cx="${x}" cy="${y}" r="6" fill="#fff" stroke="${CHART_COLORS.target}" stroke-width="2"/>`
+    `<path d="M${x} ${frame.plotBottom}V${y(target)}" stroke="${style.color}" stroke-width="2" stroke-dasharray="3 4"/>` +
+    `<circle cx="${x}" cy="${y(target)}" r="7" fill="#fff" stroke="${style.color}" stroke-width="2.5"/>` +
+    svgText(x + 6, frame.plotBottom - 6, '約' + formatNumber(estimate.power, 0) + '%', {
+      colour: style.color,
+      weight: 700,
+    })
   );
 }
 
-function chartEmptyNote(rows) {
-  if (rows.length) return '';
-  return `<text x="350" y="142" text-anchor="middle" fill="${CHART_COLORS.empty}" font-size="15">実験すると、ここに測定点が増えます</text>`;
-}
-
-// Returns SVG markup (view.js inserts it with unsafeHTML).
-function launchChart(rows, target = null, estimate = null) {
+/**
+ * The output → distance chart as SVG markup (view.js inserts it with unsafeHTML). `rows` are
+ * `{power, range, target?}`; `target` the centre of the target band (m) or null; `width` the
+ * width in CSS pixels it will be shown at; `role` 'actual' for simulated launches, 'measured'
+ * for the real robot's; `copy` the chart's words (content/launch.json, `chart`).
+ */
+function launchChart(rows, { target = null, estimate = null, width = 680, role = 'actual', copy }) {
   const groups = launchGroups(rows);
-  const max =
-    Math.max(CHART_MIN_RANGE, target || 0, ...rows.map((row) => row.range)) * CHART_HEADROOM;
+  const axis = launchRangeAxis(rows, target);
+  const frame = chartFrame(width);
+  const y = (metres) => frame.plotBottom - (metres / axis.max) * (frame.plotBottom - CHART.top);
+  const targetLabel = target === null ? '' : fill(copy.target, { target: formatNumber(target, 1) });
+  const empty = rows.length
+    ? ''
+    : svgText(width / 2, (CHART.top + frame.plotBottom) / 2, copy.empty, {
+        anchor: 'middle',
+        colour: CHART_TEXT.empty,
+      });
   return (
-    `<svg class="launch-chart" viewBox="0 0 720 288" role="img" aria-label="${CHART_LABEL}">` +
-    `<text x="20" y="25" fill="${CHART_COLORS.axisTitle}" font-size="14">飛距離（m）</text>` +
-    chartGrid(max) +
-    chartAxes() +
-    chartTargetLine(target, max) +
-    chartMeanLine(groups, max) +
-    chartPoints(rows, max) +
-    chartSpread(groups, max) +
-    chartEstimate(estimate, target, max) +
-    chartEmptyNote(rows) +
+    `<svg class="launch-chart" viewBox="0 0 ${width} ${CHART.height}" width="${width}" height="${CHART.height}" role="img" aria-label="${copy.label}">` +
+    chartGrid(frame, axis, y, copy) +
+    chartTarget(frame, target, y, targetLabel) +
+    chartMeans(frame, groups, y, role) +
+    chartPoints(frame, rows, y, role) +
+    chartEstimate(frame, estimate, target, y) +
+    empty +
     '</svg>'
   );
 }

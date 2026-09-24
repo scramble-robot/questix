@@ -154,3 +154,149 @@
     font-size: 13px;
   }
 }
+
+/* --- launch ------------------------------------------------------------------------------- */
+
+/* The side view is drawn for the width it is shown at (js/launch/render.js picks a narrow layout
+   that fits 0–3 m on a phone), so it never needs to scroll sideways. The canvas sets its own
+   aspect-ratio. */
+.launch-flight-frame {
+  background: #17313c;
+}
+#launchFlight {
+  aspect-ratio: auto;
+  height: auto;
+}
+
+/* The key under the side view: each entry draws the same line or arrow as the canvas. */
+.launch-legend {
+  gap: 8px 18px;
+  font-size: 14px;
+  color: #dbe8ea;
+  padding: 10px 18px 14px;
+}
+.launch-legend > span:last-child {
+  margin-left: 0;
+  flex-basis: 100%;
+  color: #b8cbd1;
+  font-size: 13px;
+}
+.launch-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.launch-key:before {
+  content: '';
+  display: inline-block;
+  width: 24px;
+  height: 0;
+  border-top: 3px solid var(--scene-role-actual);
+}
+.launch-key-previous:before {
+  border-top: 2px dotted var(--scene-role-previous);
+}
+.launch-key-vacuum:before {
+  border-top: 3px dotted #f4f7f8;
+}
+.launch-key-target:before {
+  height: 10px;
+  border: 1.5px solid var(--scene-role-target);
+  background: rgb(184 128 12 / 40%);
+  width: 20px;
+}
+.launch-key-gravity:before {
+  border-top: 3px solid #ff8f8f;
+}
+.launch-key-drag:before {
+  border-top: 1.5px solid #fff;
+  border-bottom: 1.5px solid #fff;
+  height: 3px;
+}
+.launch-key-lift:before {
+  border-top: 5px solid #b48cff;
+}
+
+/* The key of the record chart (white card): hollow point, darker mean line, ◎ hit. */
+.launch-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin: 4px 22px 12px;
+  font-size: 14px;
+  color: #3f575d;
+}
+.launch-chart-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.launch-key-point:before,
+.launch-key-hit:before {
+  content: '';
+  box-sizing: border-box;
+  width: 13px;
+  height: 13px;
+  border: 2px solid var(--role-actual);
+  border-radius: 50%;
+}
+.launch-key-hit:before {
+  content: '◎';
+  border: 0;
+  width: auto;
+  height: auto;
+  color: var(--role-actual);
+  font-weight: 700;
+}
+.launch-key-mean:before {
+  content: '';
+  width: 24px;
+  border-top: 3px solid #0f6b4a;
+}
+.launch-chart-measured .launch-key-point:before {
+  border-color: var(--role-measured);
+}
+.launch-chart-measured .launch-key-mean:before {
+  border-top-color: #1c5aa6;
+}
+.launch-chart-legend .launch-key-target:before {
+  border-color: var(--role-target);
+  background: rgb(168 118 10 / 16%);
+}
+.launch-chart {
+  max-width: 100%;
+}
+
+.launch-arrows-button {
+  margin: 14px 0 6px;
+}
+.launch-power-detail {
+  margin: 4px 0 18px;
+}
+.launch-power-detail summary {
+  font-size: 13px;
+  color: #4d6469;
+}
+
+/* Measurement inputs look like the rest of the form controls. */
+.launch-guide input[type='number'],
+.launch-guide select {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid #b9cbcc;
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 16px;
+}
+.launch-guide input[type='number']:disabled {
+  background: #eef2f2;
+  color: #7a8b8f;
+}
+.launch-guide #launchSource {
+  max-width: none;
+  font-size: 16px;
+}

@@ -1,9 +1,10 @@
 import { render } from '../vendor/lit-html.js';
 import { loadJson, loadText } from '../core/content.js';
-import { downloadFile } from '../core/dom.js';
+import { downloadFile, formatNumber } from '../core/dom.js';
 import {
   LAUNCH_TOPICS,
   LAUNCH_TARGETS,
+  launchHit,
   launchExperiment,
   launchEstimate,
   launchGroups,
@@ -28,7 +29,10 @@ const fragments = {
 };
 
 const PLAYBACK_RATE = 0.2; // simulated seconds per real second: the flight is shown 5x slower
-const TARGET_TOLERANCE = 0.15; // metres either side of the target centre that count as a hit
+const ARROW_MOMENT = 0.5; // share of the flight time where 「矢印を見る」 stops the disc
+const CHART_GUTTER = 44; // px of the card the record chart leaves to its padding
+const CHART_MIN_WIDTH = 300; // px
+const CHART_MAX_WIDTH = 820; // px
 const MAX_RECORDS = 60; // launches kept per topic
 const MAX_MEASUREMENTS = 300; // rows of real-robot measurements
 const MAX_CSV_BYTES = 100000;
@@ -69,9 +73,12 @@ let targetIndex = 0;
 const hitTargets = new Set(); // indices into LAUNCH_TARGETS
 let showForces = true;
 let showReference = true;
-const playback = { playing: false, frame: 0, startTime: 0, startOffset: 0 };
+// `stopAt`: a flight time (s) at which playback pauses by itself (「矢印を見る」), or null.
+const playback = { playing: false, frame: 0, startTime: 0, startOffset: 0, stopAt: null };
+let chartWidth = CHART_MAX_WIDTH;
 const measurements = {
-  source: 'measured', // 'measured' (the learner's rows) or 'example'
+  // 'measured' (the learner's rows) or 'example'; the example is shown until there are real rows.
+  source: 'example',
   measured: [],
   target: DEFAULT_MEASUREMENT_TARGET,
   importStatus: '',
@@ -81,14 +88,15 @@ const page = () => document.getElementById('launchPage');
 const experiment = () => experiments.get(topicId);
 const lastIndex = (run) => run.samples.length - 1;
 const currentTarget = () => (topicId === 'target' ? LAUNCH_TARGETS[targetIndex] : null);
+// `target` is the target of that launch (null outside the target topic): the chart rings a hit.
 const recordRows = (records) =>
-  records.map((run) => ({ power: run.config.power, range: run.range }));
+  records.map((run) => ({ power: run.config.power, range: run.range, target: run.target }));
 
 // Where the disc came down relative to the target of that launch (null when there was none).
 function landingOutcome(run) {
   if (run.status !== 'landed') return { released: false, run, error: null, hit: false };
   const error = run.target === null ? null : run.range - run.target;
-  const hit = error !== null && Math.abs(error) <= TARGET_TOLERANCE;
+  const hit = error !== null && launchHit(run.range, run.target);
   return { released: true, run, error, hit };
 }
 
@@ -108,6 +116,22 @@ function landingAdvice(outcome) {
 function finishedStatus(outcome) {
   if (!outcome.released) return copy.status.notReleased;
   return `${outcomeLabel(outcome)}。${landingAdvice(outcome)}`;
+}
+
+// The line under the flight follows what is on screen: while the disc is shown mid-flight (paused
+// or dragged back with the slider) it says where the disc is, not how the launch ended.
+function statusText() {
+  const current = experiment();
+  const run = current.run;
+  if (!run || run.status !== 'landed') return status;
+  if (playback.playing) return copy.status.running;
+  if (current.index >= lastIndex(run)) return status;
+  const sample = run.samples[current.index];
+  return fillSentence(copy.status.pausedAt, {
+    time: formatNumber(sample.t, 2),
+    distance: formatNumber(sample.x, 2),
+    height: formatNumber(sample.z * 100, 0),
+  });
 }
 
 function measurementModel() {
@@ -143,7 +167,8 @@ function buildModel() {
     pending,
     canPlay: Boolean(run) && run.samples.length >= 2,
     atEnd: Boolean(run) && current.index === lastIndex(run),
-    status,
+    status: statusText(),
+    chartWidth,
     result: current.complete ? landingOutcome(run) : null,
     rows,
     target,
@@ -170,7 +195,20 @@ function drawFlight() {
     forces: inForcesTopic && showForces,
     target: run?.target ?? currentTarget(),
     previous: topicId === 'power' ? previousLanding(current) : null,
+    copy: copy.scene,
   });
+}
+
+// The record chart is laid out at the width of its card, so its text is not shrunk on a phone.
+// Returns whether the width changed (the chart then has to be drawn again).
+function measureChartWidth() {
+  const container = document.querySelector('#launchPage .launch-data');
+  if (!container?.clientWidth) return false; // hidden page: keep the last width
+  const available = container.clientWidth - CHART_GUTTER;
+  const width = Math.round(Math.max(CHART_MIN_WIDTH, Math.min(CHART_MAX_WIDTH, available)));
+  if (width === chartWidth) return false;
+  chartWidth = width;
+  return true;
 }
 
 // The dashed trace of the launch before the one being shown.
@@ -201,6 +239,7 @@ function rebuildPage() {
   measurements.importStatus = '';
   render(null, page());
   update();
+  if (measureChartWidth()) update();
   drawRobot();
 }
 
@@ -213,7 +252,14 @@ function openTopic(id) {
 
 function pause() {
   playback.playing = false;
+  playback.stopAt = null;
   cancelAnimationFrame(playback.frame);
+}
+
+// The last sample at or before flight time `time` (s).
+function sampleIndexAt(run, time) {
+  const next = run.samples.findIndex((sample) => sample.t > time);
+  return next < 0 ? lastIndex(run) : Math.max(0, next - 1);
 }
 
 function pauseAndShow() {
@@ -252,10 +298,13 @@ function tick() {
   const run = current.run;
   const elapsed = (performance.now() - playback.startTime) / 1000;
   const shownTime = playback.startOffset + elapsed * PLAYBACK_RATE;
-  while (current.index < lastIndex(run) && run.samples[current.index + 1].t <= shownTime)
+  const stopAt = playback.stopAt;
+  const until = stopAt === null ? shownTime : Math.min(shownTime, stopAt);
+  while (current.index < lastIndex(run) && run.samples[current.index + 1].t <= until)
     current.index += 1;
   current.observed = Math.max(current.observed, current.index);
-  if (current.index === lastIndex(run)) {
+  if (stopAt !== null && shownTime >= stopAt && current.index < lastIndex(run)) pause();
+  else if (current.index === lastIndex(run)) {
     pause();
     finish();
   } else playback.frame = requestAnimationFrame(tick);
@@ -287,6 +336,28 @@ function launch() {
     finish();
     update();
   } else play();
+}
+
+// 「矢印を見る」: the force box needs the disc held still in mid-air. A launch already on screen is
+// moved to the middle of its flight; otherwise a new one is launched and stops there by itself.
+function showArrows() {
+  showForces = true;
+  const current = experiment();
+  const run = current.run;
+  if (run?.status === 'landed') {
+    pause();
+    current.index = sampleIndexAt(run, run.time * ARROW_MOMENT);
+    current.observed = Math.max(current.observed, current.index);
+    update();
+    document
+      .getElementById('launchFlight')
+      .scrollIntoView({ block: 'center', behavior: 'instant' });
+    return;
+  }
+  launch();
+  const started = experiment().run;
+  if (started?.status === 'landed' && playback.playing)
+    playback.stopAt = started.time * ARROW_MOMENT;
 }
 
 function nextTarget() {
@@ -376,6 +447,7 @@ const actions = {
     update();
   },
   nextTarget,
+  showArrows,
   saveCsv() {
     const rows = recordRows(experiment().records);
     downloadFile('QUESTiX-LAB-射出-模擬.csv', launchCSV(rows, 'simulation'), CSV_TYPE);
@@ -417,11 +489,14 @@ function initLaunch() {
     if (document.hidden) pauseAndShow();
   });
   window.addEventListener('resize', () => {
-    if (!page().hidden) drawCanvases();
+    if (page().hidden) return;
+    if (measureChartWidth()) update();
+    drawCanvases();
   });
 }
 
 function activateLaunch() {
+  if (measureChartWidth()) update();
   drawCanvases();
 }
 

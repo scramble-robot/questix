@@ -5,6 +5,9 @@ import {
   LAUNCH_SPEC,
   LAUNCH_TARGETS,
   LAUNCH_TOPICS,
+  LAUNCH_TOLERANCE,
+  launchHit,
+  launchRangeAxis,
   launchCSV,
   launchEstimate,
   launchExperiment,
@@ -251,6 +254,27 @@ test('launchCSV writes a labelled file that launchParseCSV reads back', () => {
   assert.match(measured, /\nmeasured,40,1\.2346$/, 'measurements are the default source');
   assert.deepEqual(launchParseCSV(measured), [{ power: 40, range: 1.2346 }]);
   assert.throws(() => launchParseCSV(launchCSV(rows, 'simulation')), /模擬データ/);
+});
+
+test('a hit is within ±15 cm of the target, and only when there is a target', () => {
+  assert.equal(LAUNCH_TOLERANCE, 0.15);
+  assert.equal(launchHit(1.35, 1.2), true, 'the edge of the band counts');
+  assert.equal(launchHit(1.05, 1.2), true);
+  assert.equal(launchHit(1.36, 1.2), false);
+  assert.equal(launchHit(1.2, null), false);
+  assert.equal(launchHit(1.2, undefined), false);
+});
+
+test('the record chart reads in half metres and holds every record and the whole band', () => {
+  const empty = launchRangeAxis([]);
+  assert.equal(empty.step, 0.5);
+  assert.equal(empty.max, 3);
+  assert.deepEqual(empty.ticks, [0, 0.5, 1, 1.5, 2, 2.5, 3]);
+  const far = launchRangeAxis([{ power: 100, range: 3.11 }], 2.5);
+  assert.equal(far.max, 3.5);
+  assert.ok(far.ticks.every((tick) => Number.isInteger(tick * 2)));
+  // The band of a far target is never cut by the top of the chart.
+  assert.ok(launchRangeAxis([], 2.9).max >= 2.9 + LAUNCH_TOLERANCE);
 });
 
 // Cross-check against the pre-cleanup copy of this module when one is available next to the working

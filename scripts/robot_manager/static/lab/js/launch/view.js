@@ -61,12 +61,39 @@ function runButtonLabel({ playing, pending }) {
   return 'この出力で1枚飛ばす';
 }
 
-function legend(topic) {
+// The key of the side view in HTML, so it stays readable on a phone. Each entry repeats the line or
+// arrow drawn on the canvas (css/hs-control-launch-planning.css draws the swatches).
+function legend(model, copy) {
+  const text = copy.legend;
+  const forces = model.topic === 'forces';
+  const key = (kind, label) => html`<span class=${'launch-key launch-key-' + kind}>${label}</span>`;
   return html`<div class="launch-legend">
-    <span>━ 今回</span
-    >${topic === 'power' ? html`<span class="launch-previous">┄ 前回</span>` : nothing}${
-      topic === 'forces' ? html`<span class="launch-vacuum">┄ 空気がない計算</span>` : nothing
-    }<span>5倍スロー</span>
+    ${key('flight', text.flight)}${model.topic === 'power' ? key('previous', text.previous) : nothing}${
+      forces && model.showReference ? key('vacuum', text.vacuum) : nothing
+    }${
+      model.target === null
+        ? nothing
+        : key('target', fillSentence(text.target, { target: formatNumber(model.target, 1) }))
+    }${
+      forces && model.showForces
+        ? html`${key('gravity', text.gravity)}${key('drag', text.drag)}${key('lift', text.lift)}`
+        : nothing
+    }<span class="launch-key-slow">${text.slow}</span>
+  </div>`;
+}
+
+// The key of the record chart: hollow points, the darker mean line, and ◎ for a hit.
+function chartLegend(copy, { role, target = null, hits = false }) {
+  const text = copy.chart;
+  return html`<div class=${'launch-chart-legend launch-chart-' + role}>
+    <span class="launch-key-point">${text.point}</span
+    ><span class="launch-key-mean">${text.mean}</span>${
+      target === null
+        ? nothing
+        : html`<span class="launch-key launch-key-target"
+            >${fillSentence(text.target, { target: formatNumber(target, 1) })}</span
+          >`
+    }${hits ? html`<span class="launch-key-hit">${text.hit}</span>` : nothing}
   </div>`;
 }
 
@@ -77,7 +104,7 @@ function flightCard(model, copy, actions) {
       <span id="launchTime">${timeLabel(model)}</span>
     </div>
     <p class="launch-model-note">${copy.flight.modelNote}</p>
-    <div class="diagram-scroll" role="region" aria-label=${copy.flight.regionLabel} tabindex="0">
+    <div class="launch-flight-frame" role="region" aria-label=${copy.flight.regionLabel}>
       <canvas
         id="launchFlight"
         width="760"
@@ -86,8 +113,7 @@ function flightCard(model, copy, actions) {
         aria-label=${copy.flight.canvasLabel}
       ></canvas>
     </div>
-    <p class="diagram-scroll-hint">${copy.flight.scrollHint}</p>
-    ${legend(model.topic)}
+    ${legend(model, copy)}
     <div class="launch-playbar">
       <button
         id="launchPlay"
@@ -190,7 +216,21 @@ function recordsCard(model, copy, actions) {
         CSV保存
       </button>
     </div>
-    <div id="launchGraph">${unsafeHTML(launchChart(model.rows, model.target))}</div>
+    <div id="launchGraph">
+      ${unsafeHTML(
+        launchChart(model.rows, {
+          target: model.target,
+          width: model.chartWidth,
+          role: 'actual',
+          copy: copy.chart,
+        }),
+      )}
+    </div>
+    ${chartLegend(copy, {
+      role: 'actual',
+      target: model.target,
+      hits: model.topic === 'target',
+    })}
     <p>${copy.records.chartNote}</p>
     <details>
       <summary>数値の記録を見る（直近6枚）</summary>
@@ -208,7 +248,14 @@ function conditionIntro(model, copy) {
 }
 
 function forcesControls(model, copy, actions) {
-  return html`<label class="launch-check"
+  return html`<button
+      id="launchShowArrows"
+      class="full launch-arrows-button"
+      ?disabled=${model.playing}
+      @click=${actions.showArrows}
+    >
+      ${copy.controls.arrowButton}</button
+    ><label class="launch-check"
       ><input
         type="checkbox"
         id="launchForceToggle"
@@ -269,6 +316,10 @@ function conditionPanel(model, copy, actions) {
       @input=${(event) => actions.setPower(Number(event.target.value))}
     />
     <p class="helper">${copy.controls.powerHelper}</p>
+    <details class="launch-power-detail">
+      <summary>${copy.controls.powerDetailSummary}</summary>
+      <p class="helper">${copy.controls.powerDetail}</p>
+    </details>
     <button class="primary full" id="launchRun" ?disabled=${model.playing} @click=${actions.launch}>
       ${runButtonLabel(model)}
     </button>
@@ -319,7 +370,7 @@ function measurementTable(measurement, copy) {
   </table>`;
 }
 
-function measurementCard(measurement, copy, actions) {
+function measurementCard(measurement, chartWidth, copy, actions) {
   const sourceNote =
     measurement.source === 'measured'
       ? copy.measurement.sourceMeasured
@@ -330,8 +381,17 @@ function measurementCard(measurement, copy, actions) {
     </div>
     <p id="launchSourceNote">${sourceNote}</p>
     <div id="launchMeasuredGraph">
-      ${unsafeHTML(launchChart(measurement.rows, measurement.chartTarget, measurement.estimate))}
+      ${unsafeHTML(
+        launchChart(measurement.rows, {
+          target: measurement.chartTarget,
+          estimate: measurement.estimate,
+          width: chartWidth,
+          role: 'measured',
+          copy: copy.chart,
+        }),
+      )}
     </div>
+    ${chartLegend(copy, { role: 'measured', target: measurement.chartTarget })}
     <p>${copy.measurement.chartNote}</p>
     <div id="launchMeasuredRows" class="launch-table">${measurementTable(measurement, copy)}</div>
     <div class="launch-file-row">
@@ -434,7 +494,7 @@ function measurementPanel(measurement, copy, actions) {
 
 function measurementBody(model, copy, fragments, actions) {
   return html`<div class="launch-layout">
-      ${measurementCard(model.measurement, copy, actions)}${measurementPanel(
+      ${measurementCard(model.measurement, model.chartWidth, copy, actions)}${measurementPanel(
         model.measurement,
         copy,
         actions,

@@ -299,10 +299,40 @@ function launchCSV(rows, source = 'measured') {
   return CSV_HEADER + body;
 }
 
+// --- What the scene and the record chart share ---------------------------------------------------
+
+const LAUNCH_TOLERANCE = 0.15; // metres either side of a target's centre that count as a hit
+const RANGE_TICK = 0.5; // metres between the labelled lines of the record chart
+const MIN_CHART_RANGE = 2.5; // metres: the first few records do not fill the whole chart
+const CHART_HEADROOM = 1.05; // share of the furthest value kept free above it
+
+/** Whether a disc that came down at `range` hit a target centred at `target` (null: no target). */
+function launchHit(range, target) {
+  return Number.isFinite(target) && Math.abs(range - target) <= LAUNCH_TOLERANCE + 1e-9;
+}
+
+/**
+ * The record chart's distance axis: 0 to a whole number of 0.5 m steps above every record and the
+ * whole target band, so the axis is read in round half metres. `{ max, step, ticks }`.
+ */
+function launchRangeAxis(rows, target = null) {
+  const band = Number.isFinite(target) ? target + LAUNCH_TOLERANCE : 0;
+  const furthest =
+    Math.max(MIN_CHART_RANGE, band, ...rows.map((row) => row.range)) * CHART_HEADROOM;
+  const max = Math.ceil(furthest / RANGE_TICK - 1e-9) * RANGE_TICK;
+  const ticks = [];
+  for (let value = 0; value <= max + 1e-9; value += RANGE_TICK)
+    ticks.push(Number(value.toFixed(1)));
+  return { max, step: RANGE_TICK, ticks };
+}
+
 export {
   LAUNCH_SPEC,
   LAUNCH_TOPICS,
   LAUNCH_TARGETS,
+  LAUNCH_TOLERANCE,
+  launchHit,
+  launchRangeAxis,
   launchSpeed,
   launchForces,
   launchExperiment,
