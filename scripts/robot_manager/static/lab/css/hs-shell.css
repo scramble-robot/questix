@@ -255,3 +255,15 @@ details.series-run-legend > summary > h2 {
     margin: 0 0 0 auto;
   }
 }
+
+/* The measurement-lab entry is only a supplement button (its details open in the shared dialog), so
+   it should not sit inside an otherwise empty white card. */
+body .measurement-entry {
+  padding: 0;
+  background: none;
+  border: 0;
+  box-shadow: none;
+}
+body .measurement-entry > .supplement-trigger {
+  margin: 0;
+}
