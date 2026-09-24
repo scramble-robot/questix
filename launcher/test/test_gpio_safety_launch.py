@@ -233,3 +233,34 @@ def test_installers_preserve_existing_environment_but_launcher_is_safe():
     assert 'launch.env already exists, skipping' in installer
     assert 'src: launch.env.j2' in ansible_tasks
     assert 'force: false' in ansible_tasks
+
+
+def test_controller_is_only_left_out_on_explicit_request():
+    # QUESTiX LAB driving experiments start the robot with enable_controller:=false so the lab
+    # bridge is the only /target_twist publisher. Competition runs must always get the controller:
+    # the argument is not read from launch.env, and the service launchers never pass it.
+    core = load_xml('launcher/launch/questix_core.launch.xml')
+    assert find_arg(core, 'enable_controller').get('default') == 'true'
+    drive_include = next(
+        include for include in core.findall('.//include')
+        if 'drive_component.launch.xml' in include.get('file', '')
+    )
+    forwarded = next(
+        arg for arg in drive_include.findall('./arg') if arg.get('name') == 'enable_controller')
+    assert forwarded.get('value') == '$(var enable_controller)'
+
+    drive = load_xml('launcher/launch/drive_component.launch.xml')
+    assert find_arg(drive, 'enable_controller').get('default') == 'true'
+    controller_groups = [
+        group for group in drive.findall('./group')
+        if any('find-pkg-share joy_controller' in include.get('file', '')
+               for include in group.findall('./include'))
+    ]
+    assert len(controller_groups) == 2
+    assert all('$(var enable_controller)' in group.get('if', '') for group in controller_groups)
+
+    for relative_path in (
+        'systemd/questix_robot_launcher.sh',
+        'ansible/roles/robot_autostart/files/questix_robot_launcher.sh',
+    ):
+        assert 'enable_controller' not in (SOURCE_ROOT / relative_path).read_text(encoding='utf-8')

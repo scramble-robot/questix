@@ -8,6 +8,9 @@
   <arg name="enable_gpio_ref" default="$(env ENABLE_GPIO_REF true)" description="Enable GPIO safety path (gpio_reader, operation_manager, and joy gating)"/>
   <arg name="enable_autoreferee" default="false" description="Use competition GPIO profile with AutoReferee GPIO27"/>
   <arg name="controller_type" default="$(env CONTROLLER_TYPE dualshock)" description="Controller type: dualshock or uart"/>
+  <!-- Deliberately not read from the environment: launch.env must never switch the controller off
+       for a competition run. false is for QUESTiX LAB driving experiments (practice only). -->
+  <arg name="enable_controller" default="true" description="Start the controller path; false = /target_twist comes from another source (QUESTiX LAB)"/>
   <arg name="enable_rviz" default="$(env ENABLE_RVIZ false)" description="Enable RViz visualization"/>
   <!-- AutoReferee operation without the GPIO safety path is an invalid configuration. -->
   <group if="$(and $(var enable_autoreferee) $(not $(var enable_gpio_ref)))">
@@ -36,6 +39,7 @@
         <!-- questix_core owns the single integrated operation_manager process. -->
         <arg name="enable_operation_manager" value="false"/>
         <arg name="controller_type" value="$(var controller_type)"/>
+        <arg name="enable_controller" value="$(var enable_controller)"/>
       </include>
     </group>
     <group if="$(var enable_lidar)">

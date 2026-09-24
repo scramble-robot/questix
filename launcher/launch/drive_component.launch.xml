@@ -10,9 +10,10 @@ YAML を Single Source of Truth とし、個別パラメータの launch 引数�
   <arg name="enable_gpio_ref" default="false" description="Use the GPIO-gated controller path (joy_gate and optional operation_manager)" />
   <arg name="enable_operation_manager" default="true" description="Start operation_manager in standalone referee launch" />
   <arg name="controller_type" default="uart" description="Controller type: dualshock or uart" />
+  <arg name="enable_controller" default="true" description="Start the controller path (joy driver, joy_gate, joy_controller). false leaves /target_twist to another source, e.g. QUESTiX LAB driving experiments" />
 
   <!-- Joy Controller component launch (without GPIO gating) -->
-  <group unless="$(var enable_gpio_ref)">
+  <group if="$(and $(var enable_controller) $(not $(var enable_gpio_ref)))">
     <include file="$(find-pkg-share joy_controller)/launch/joy_controller.launch.xml">
       <arg name="config_file" value="$(var joy_config_file)" />
       <arg name="controller_type" value="$(var controller_type)" />
@@ -20,12 +21,19 @@ YAML を Single Source of Truth とし、個別パラメータの launch 引数�
   </group>
 
   <!-- GPIO-gated Joy Controller path; gpio_reader is owned by the integrated parent. -->
-  <group if="$(var enable_gpio_ref)">
+  <group if="$(and $(var enable_controller) $(var enable_gpio_ref))">
     <include file="$(find-pkg-share joy_controller)/launch/joy_controller_referee.launch.xml">
       <arg name="config_file" value="$(var joy_config_file)" />
       <arg name="controller_type" value="$(var controller_type)" />
       <arg name="enable_operation_manager" value="$(var enable_operation_manager)" />
     </include>
+  </group>
+
+  <!-- Without the controller the referee launch above does not run, so the standalone
+       operation_manager it would have started comes from here (integrated launches pass
+       enable_operation_manager:=false and own theirs). -->
+  <group if="$(and $(not $(var enable_controller)) $(and $(var enable_gpio_ref) $(var enable_operation_manager)))">
+    <include file="$(find-pkg-share operation_manager)/launch/operation_manager.launch.xml" />
   </group>
 
   <!-- Include drive Component Launch -->

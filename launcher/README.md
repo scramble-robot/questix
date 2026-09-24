@@ -55,6 +55,23 @@ ros2 launch questix_launcher questix_core.launch.xml \
   enable_gpio_ref:=true enable_autoreferee:=false enable_rviz:=false
 ```
 
+## コントローラーなしで起動する（QUESTiX LAB の走行実験）
+
+`enable_controller:=false` を付けると、コントローラー系（joy ドライバ・joy_gate・
+joy_controller）を起動せず、`/target_twist` を出すノードがなくなります。QUESTiX LAB の
+走行実験は教材ブリッジ（`questix_lab_bridge`）が `/target_twist` を出すため、この起動が
+前提です（2か所から出すと指令が交互に効くので、ブリッジは他の publisher がいる間は走らせません）。
+
+```bash
+ros2 launch questix_launcher questix_core.launch.xml enable_controller:=false
+```
+
+- 既定は `true`。環境変数（`launch.env`）からは読まず、大会用の `questix_robot_launcher.sh` も
+  渡さないため、大会起動では常にコントローラーが起動します。
+- コントローラーがないので `/joy` も出ず、射出（shot）も操作できません。
+- GPIO 安全系（`gpio_reader` / `operation_manager` / `/emergency_stop`）はそのまま動きます。
+- 実験が終わったら、Robot Manager で「教材からの走行」を禁止に戻し、この引数なしで起動し直します。
+
 ## ファイル構成
 
 ### メインlaunchファイル
