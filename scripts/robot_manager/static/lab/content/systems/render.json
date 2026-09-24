@@ -50,7 +50,7 @@
   "states": {
     "title": "状態と切り替えの条件",
     "now": "今の状態",
-    "unused": "（このルールでは使わない）",
+    "unused": "（今のルールでは使わない）",
     "names": {
       "toParcel": "荷物へ進む",
       "toElsewhere": "別の場所を探す",
@@ -72,6 +72,15 @@
       "foundElsewhere": "見つけて受け取った",
       "arrivedWith": "到着 かつ 荷物あり",
       "arrivedWithout": "到着 かつ 荷物なし"
+    },
+    "short": {
+      "toParcel": "荷物へ",
+      "toElsewhere": "探す",
+      "toDelivery": "届け先へ",
+      "waiting": "待つ",
+      "detour": "迂回",
+      "delivered": "完了",
+      "arrivedEmpty": "空で到着"
     }
   },
   "mechanics": {
@@ -131,7 +140,7 @@
     },
     "realWall": "実際の壁",
     "target": "止まりたい位置",
-    "threshold": "停止指示の境目",
+    "threshold": "停止指示を出す距離",
     "usedRange": "判断に使った距離",
     "actualRange": "実際の距離",
     "mapWall": "地図に置いた壁",

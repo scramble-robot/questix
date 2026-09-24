@@ -241,7 +241,6 @@ function eventList(model, copy) {
 // screens, in the free column under the settings on wide ones. CSS shows one of the two.
 function sideParts(model, copy, place) {
   return html`<div class="sys-side" data-place=${place}>
-    ${model.course === 'behavior' ? stateDiagram(model.run, model.index) : nothing}
     <div class="sys-events">
       <h3 data-lesson-cue=${place === 'inline' ? 'observe' : nothing}>
         ${copy.observation.eventsTitle}
@@ -263,6 +262,7 @@ function observationCard(model, copy, actions) {
     <div class="sys-figures">
       <div class="sys-figure-scene" data-sys-scene>
         ${systemScene(model.run, model.index, model.figure)}
+        ${model.course === 'behavior' ? stateDiagram(model.run, model.index) : nothing}
       </div>
       ${chartSection(model, copy, actions)}
     </div>

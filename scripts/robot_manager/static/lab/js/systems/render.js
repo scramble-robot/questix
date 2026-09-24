@@ -252,13 +252,22 @@ function sceneKey(entries) {
   const shown = entries.filter(Boolean);
   if (!shown.length) return nothing;
   return html`<ul class="sys-scene-key">
-    ${shown.map(
-      (entry) =>
-        html`<li>
-          ${entry.role ? swatch(entry.role, entry.dash) : nothing}<span>${entry.text}</span>
-        </li>`,
-    )}
+    ${shown.map((entry) => html`<li>${keyMark(entry)}<span>${entry.text}</span></li>`)}
   </ul>`;
+}
+
+// The mark in front of a key entry: a line in the role's style, or the shape drawn in the scene.
+function keyMark(entry) {
+  if (!entry.role) return nothing;
+  if (!entry.mark) return swatch(entry.role, entry.dash);
+  const color = sceneRole(entry.role).color;
+  const shape =
+    entry.mark === 'square'
+      ? svg`<rect x="6" y="0.5" width="11" height="11" rx="2" fill=${color + '40'} stroke=${color} stroke-width="2" />`
+      : svg`<circle cx="12" cy="6" r="5" fill=${color} stroke="#ffffff" stroke-width="1.5" />`;
+  return html`<svg class="sys-swatch" viewBox="0 0 24 12" width="24" height="12" aria-hidden="true">
+    ${shape}
+  </svg>`;
 }
 
 const sceneDescription = (sample) =>
@@ -400,9 +409,10 @@ function mechanicsReadouts(run, sample, started) {
   return readoutBand(
     [
       { label: text.speed, value: shown(sample.v, 2, 'm/秒'), role: 'actual' },
-      run.topic === 'force'
-        ? null
-        : { label: text.wheelSpeed, value: shown(sample.wheelSpeed, 2, 'm/秒'), role: 'measured' },
+      // Only the traction topic lets the wheels slip; elsewhere both speeds are the same number.
+      run.topic === 'traction'
+        ? { label: text.wheelSpeed, value: shown(sample.wheelSpeed, 2, 'm/秒'), role: 'measured' }
+        : null,
       { label: text.force, value: shown(sample.force, 1, 'N') },
       { label: text.accel, value: shown(sample.accel, 2, 'm/秒²') },
     ].filter(Boolean),
@@ -482,9 +492,10 @@ function missingParts(run, sample, stage) {
   const measured = sceneRole('measured');
   const stale = sample.t >= DATA_LOSS_TIME;
   const obstacleX = stage.toX(3.2);
-  const lidarY = stage.ground - LIDAR_HEIGHT * scale;
   const lastUpdate = run.samples.findLast((point) => point.t < DATA_LOSS_TIME);
-  const fromX = stage.toX(stale ? lastUpdate.x : sample.x) + 26 * scale;
+  // Drawn above the robots, from the centre of the one the range was measured from.
+  const rangeY = stage.ground - 52 * scale;
+  const fromX = stage.toX(stale ? lastUpdate.x : sample.x);
   return [
     box(obstacleX, stage.ground - 115 * scale, 20 * scale, 115 * scale, '#a8846b'),
     label(obstacleX, stage.ground - 115 * scale - 8, text.obstacle, {
@@ -494,14 +505,15 @@ function missingParts(run, sample, stage) {
       bounds: stage.bounds,
     }),
     stale ? sideView(stage.toX(lastUpdate.x), stage.ground, scale, 0.4) : nothing,
-    line(fromX, lidarY - 16 * scale, obstacleX, lidarY - 16 * scale, measured.color, 2.5),
-    label(fromX, lidarY - 16 * scale - 6, text.lastRange, {
+    line(fromX, rangeY, obstacleX, rangeY, measured.color, 2.5),
+    line(fromX, rangeY - 5, fromX, rangeY + 5, measured.color, 2),
+    label(fromX, rangeY - 6, text.lastRange, {
       color: measured.color,
       size: TEXT_SMALL,
       bounds: stage.bounds,
     }),
     stale
-      ? label(stage.toX(sample.x), stage.ground - 50 * scale - 4, text.stale, {
+      ? label(stage.toX(sample.x), rangeY - 22, text.stale, {
           color: '#efc584',
           size: TEXT_SMALL,
           anchor: 'middle',
@@ -795,7 +807,7 @@ const TRACKING_MAX_HEIGHT = { wide: 360, narrow: 300 }; // px
 
 function trackingStage(options, crossing) {
   const width = options.sceneWidth;
-  const [low, high] = crossing ? [0.1, 4.75] : [0.1, 3.55];
+  const [low, high] = crossing ? [0.1, 4.75] : [0.1, 3.95];
   const maxHeight = options.narrow ? TRACKING_MAX_HEIGHT.narrow : TRACKING_MAX_HEIGHT.wide;
   const k = Math.min(
     (width - 2 * TRACKING_MARGIN) / TRACKING_Y_SPAN,
@@ -945,8 +957,8 @@ function crossingRuleParts(run, sample, stage) {
     return [
       circle(questixX, questixY, radius, target.color, 'none', 2, target.dash),
       label(
-        questixX - radius - 4,
-        questixY + 4,
+        questixX - radius * 0.7 - 4,
+        questixY + radius * 0.7 + 14,
         fill(text.stopCircle, { radius: view.current.clearance }),
         {
           color: target.color,
@@ -1283,13 +1295,9 @@ function cameraFrame(stage, camera, ghost = false) {
     ${arrow(origin.x, origin.y, stage.toX(forward.x), stage.toY(forward.z), color)}
     ${arrow(origin.x, origin.y, stage.toX(up.x), stage.toY(up.z), color)}
     ${
+      // The camera as configured is named in the key only: it sits next to the shoulder label.
       ghost
-        ? label(origin.x, origin.y + 22, text.cameraSetting, {
-            color,
-            size: TEXT_SMALL,
-            anchor: 'middle',
-            bounds: stage.bounds,
-          })
+        ? nothing
         : [
             label(stage.toX(forward.x) + 4, stage.toY(forward.z) + 4, text.cameraForward, {
               color,
@@ -1418,7 +1426,7 @@ function armScene(run, index, options) {
       bounds: stage.bounds,
     }),
     circle(estimate.x, estimate.y, 9, '#ffffff', measured.color, 2),
-    label(estimate.x + 14, estimate.y + 18, raw ? text.estimateRaw : text.estimate, {
+    label(estimate.x + 13, estimate.y + 5, raw ? text.estimateRaw : text.estimate, {
       color: measured.color,
       size: TEXT_SMALL,
       bounds: stage.bounds,
@@ -1431,8 +1439,8 @@ function armKey(run, settings) {
   const keys = copy.arm.keys;
   const calibrating = run.topic === 'calibrate';
   return sceneKey([
-    { text: keys.object, role: 'target' },
-    { text: keys.estimate, role: 'measured' },
+    { text: keys.object, role: 'target', mark: 'square' },
+    { text: keys.estimate, role: 'measured', mark: 'dot' },
     { text: keys.shoulderFrame },
     { text: keys.cameraFrame },
     calibrating ? { text: keys.markers } : null,
@@ -1739,6 +1747,7 @@ const CHART_LEFT = 46; // px for the value tick labels
 const CHART_RIGHT = 12;
 const EVENT_LANES = [13, 27]; // baselines of the event labels
 const LABEL_GAP = 14; // px between two direct labels at line ends
+const NOISE = 1e-9; // values this close to zero are zero on an axis
 const ACTUAL_UNDER_WIDTH = 7; // px; the true value drawn under a measured line
 const TRANSITION_KINDS = [
   'power-off',
@@ -1843,11 +1852,18 @@ function chartScales(run, chart, previous, threshold, plot) {
       for (const entry of chart.lines) values.push(valueOf(sample, entry.key));
   if (threshold) values.push(threshold.value, ...(threshold.band ? [-threshold.value] : []));
   const y = niceScale(
-    values.filter((value) => value !== null),
+    // Rounding noise (1e-17 instead of 0) must not become an axis of its own.
+    values.filter((value) => value !== null).map((value) => (Math.abs(value) < NOISE ? 0 : value)),
     { integer: Boolean(chart.integer), ticks: plot.height < 140 ? 4 : 5 },
   );
   const duration = Math.max(run.duration, previous?.duration ?? 0);
-  const x = niceScale([0, duration], { ticks: Math.max(3, Math.floor(plot.width / 80)) });
+  // Time runs from the start to the end of the run exactly; the ticks are round seconds inside it.
+  const rounded = niceScale([0, duration], { ticks: Math.max(3, Math.floor(plot.width / 70)) });
+  const x = {
+    ...rounded,
+    max: duration,
+    ticks: rounded.ticks.filter((time) => time <= duration + EPSILON),
+  };
   return {
     x,
     y,
@@ -2016,14 +2032,13 @@ function stateBand(run, seen, scales, plot) {
     const to = scales.toX(next ? next.start : segment.end);
     const id = STATE_IDS[segment.status];
     const tone = chartRole(STATE_TONES[id] ?? 'previous').color;
-    const name = copy.states.names[id] ?? segment.status;
+    const full = copy.states.names[id] ?? segment.status;
+    const name = textWidth(full, TEXT_SMALL) + 6 < to - from ? full : copy.states.short[id];
     const fits = textWidth(name, TEXT_SMALL) + 6 < to - from;
     return [
-      box(from, 6, Math.max(1, to - from), 22, tone, {
-        opacity: 0.22,
-        stroke: tone,
-        strokeWidth: 1,
-      }),
+      box(from, 6, Math.max(1, to - from), 22, tone, { opacity: 0.22 }),
+      // A white gap between two states, so two moving states in a row stay two segments.
+      line(from, 4, from, 30, '#ffffff', 2),
       fits ? label(from + 3, 21, name, { color: '#23363d', size: TEXT_SMALL, halo: '' }) : nothing,
     ];
   });

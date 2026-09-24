@@ -173,8 +173,8 @@
     }
   },
   "coordination": {
-    "label": "計算した行き先（根元から）",
-    "value": "x {x} ・ z {z} mm",
+    "label": "計算した行き先（根元から x, z）",
+    "value": "({x}, {z}) mm",
     "looked": "最後にカメラで物体を見て行き先を決めたのは {time}秒です。",
     "errorField": "手先と物体の距離",
     "objectField": "物体の実際の位置",

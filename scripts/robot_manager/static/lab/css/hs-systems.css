@@ -561,3 +561,16 @@ ul.sys-chart-legend li {
     padding: 0 12px;
   }
 }
+.tracking-measured {
+  width: 14px;
+  height: 14px;
+  border: 2px solid #ffffff;
+  background: var(--scene-role-measured);
+}
+.tracking-predicted {
+  border: 3px dashed var(--scene-role-plan);
+}
+.sys-figure-scene .sys-states {
+  background: #ffffff;
+  color: #23363d;
+}
