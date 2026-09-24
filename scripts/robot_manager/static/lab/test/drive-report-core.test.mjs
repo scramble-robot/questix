@@ -4,7 +4,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { driveReport } from '../js/live/drive-report-core.js';
+import {
+  driveReport,
+  isEmptyRun,
+  runStatusKind,
+  describeTurn,
+  describeOffset,
+  describeTurnRate,
+} from '../js/live/drive-report-core.js';
+import { loadJson } from '../js/core/content.js';
+
+const copy = await loadJson('content/live/drive-report.json');
 
 // A robot that follows its command with a first-order lag, starting at (x0, y0) facing theta0.
 // Commands: 0.2 m/s from t = 1 s to t = 4 s, then 0 until 6 s.
@@ -110,4 +120,55 @@ test('the kept series are thinned for storage', () => {
   const report = driveReport(straightRun());
   assert.ok(report.series.measured.length <= 62, `${report.series.measured.length} samples`);
   assert.ok(report.series.path.length < 100);
+});
+
+test('the drive time runs from the first moving command to the zero command after the last', () => {
+  const { summary } = driveReport(straightRun());
+  // Commands 0.2 m/s from 1 s to 4 s, sent every 0.04 s; the recording goes on until 6 s.
+  assert.ok(Math.abs(summary.driveSeconds - 3) < 0.05, `drive ${summary.driveSeconds}`);
+  assert.ok(Math.abs(summary.seconds - 6) < 1e-9, `recording ${summary.seconds}`);
+});
+
+test('a run that never moved is empty; a pure turn on the spot is not', () => {
+  const still = straightRun();
+  still.streams.twist = still.streams.twist.map((message) => ({ ...message, linear: 0 }));
+  still.streams.drive = still.streams.drive.map((message) => ({ ...message, v: 0 }));
+  still.streams.odom = still.streams.odom.map((message) => ({ ...message, x: 5, y: -2 }));
+  assert.equal(driveReport(still).summary.moved, false);
+  assert.equal(isEmptyRun(still), true);
+  assert.equal(isEmptyRun(straightRun()), false);
+
+  const spin = { config: {}, streams: { twist: [], drive: [], odom: [] } };
+  for (let step = 0; step <= 20; step++)
+    spin.streams.odom.push({ stamp: step * 0.1, x: 1, y: 1, theta: step * 0.05 });
+  const { summary } = driveReport(spin);
+  assert.ok(summary.distance < 0.01);
+  assert.equal(summary.moved, true);
+});
+
+test('a commanded run counts as moved even when the wheels did not turn', () => {
+  const blocked = straightRun();
+  blocked.streams.odom = blocked.streams.odom.map((message) => ({ ...message, x: 5, y: -2 }));
+  assert.equal(isEmptyRun(blocked), false);
+});
+
+test('turns and end positions are worded by their sign', () => {
+  assert.equal(describeTurn((43 * Math.PI) / 180, copy), '左へ43°');
+  assert.equal(describeTurn((-12.4 * Math.PI) / 180, copy), '右へ12°');
+  assert.equal(describeTurn(0.001, copy), '0°');
+  assert.equal(describeTurn(null, copy), '—');
+  assert.equal(describeOffset(0.6, -0.012, copy), '前へ 60.0 cm・右へ 1.2 cm');
+  assert.equal(describeOffset(-0.283, 0.087, copy), '後ろへ 28.3 cm・左へ 8.7 cm');
+  assert.equal(describeOffset(0, 0.0001, copy), '前後 0 cm・左右 0 cm');
+  assert.equal(describeOffset(null, null, copy), '—');
+  assert.equal(describeTurnRate(0.5, copy), '0.50 rad/s（約29°/秒）');
+});
+
+test('run endings sort into ok, stopped and problem', () => {
+  assert.equal(runStatusKind('done'), 'ok');
+  for (const reason of ['stopped', 'stopped_other', 'hidden'])
+    assert.equal(runStatusKind(reason), 'stopped', reason);
+  for (const reason of ['timeout', 'lost', 'emergency_stop', 'other_publisher', 'failed'])
+    assert.equal(runStatusKind(reason), 'problem', reason);
+  assert.equal(runStatusKind(''), 'stopped');
 });

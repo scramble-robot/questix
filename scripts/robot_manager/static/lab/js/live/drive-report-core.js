@@ -1,17 +1,22 @@
-// What one driving run did, from its recording: the numbers and the curves the run report draws.
-// No DOM: test/drive-report-core.test.mjs checks it with made-up recordings.
+// What one driving run did, from its recording: the numbers and the curves the run report draws,
+// plus the small wording helpers of the report. No DOM: test/drive-report-core.test.mjs checks it
+// with made-up recordings.
 //
 // Time is counted from the first command the run sent (the moment the page took over), in the
 // robot's own clock (message stamps), so a reopened file gives the same report. The path is turned
 // so the robot starts at the origin facing up the page: x forward, y left at the start (REP-103).
 
 import { frontDistance } from './capture-core.js';
+import { fillSentence as fill } from '../core/content.js';
 
 const STILL_LINEAR = 0.02; // m/s: slower than this counts as standing
 const STILL_ANGULAR = 0.05; // rad/s
 const COMMANDED = 1e-3; // |command| above this is "moving"
 const REPORT_PERIOD = 0.1; // s: the kept report is thinned to 10 samples a second
 const PATH_STEP = 0.01; // m: path points closer than this to the previous one are dropped
+// A run below all three of these did practically nothing and is not worth a report.
+const MOVED_DISTANCE = 0.01; // m of path
+const MOVED_TURN = (2 * Math.PI) / 180; // rad of heading change
 
 const wrapAngle = (angle) => Math.atan2(Math.sin(angle), Math.cos(angle));
 const finite = (...values) => values.every(Number.isFinite);
@@ -75,24 +80,50 @@ function pathLength(path, from = -Infinity, to = Infinity) {
   return length;
 }
 
+// Indices of the first and the last command that asked for motion, or null when none did.
+function movingSpan(command) {
+  const moving = (sample) => Math.abs(sample.v) > COMMANDED || Math.abs(sample.w) > COMMANDED;
+  const first = command.findIndex(moving);
+  if (first < 0) return null;
+  return { first, last: command.findLastIndex(moving) };
+}
+
+/**
+ * How long the page asked the robot to move: from the first moving command to the zero command
+ * that followed the last one (or to the last moving command when no zero came). Null when the run
+ * never commanded motion. Unlike `seconds`, this leaves out the recording after the stop.
+ */
+function driveTime(command) {
+  const span = movingSpan(command);
+  if (!span) return null;
+  const end = command[span.last + 1] ?? command[span.last];
+  return end.t - command[span.first].t;
+}
+
 /**
  * How the robot stopped at the end: from the first zero command after the last moving one, how
  * long until the measured speed fell below STILL_* and how far it rolled meanwhile. Null when the
  * run never commanded motion, or the robot had not come to rest by the end of the recording.
+ * drive_component low-pass filters the measured speed, so `delay` includes that filter's lag.
  */
 function stopping(command, measured, path) {
-  let last = -1;
-  command.forEach((sample, index) => {
-    if (Math.abs(sample.v) > COMMANDED || Math.abs(sample.w) > COMMANDED) last = index;
-  });
-  const zero = command[last + 1];
-  if (last < 0 || !zero) return null;
+  const span = movingSpan(command);
+  const zero = span && command[span.last + 1];
+  if (!zero) return null;
   const still = measured.find(
     (sample) =>
       sample.t >= zero.t && Math.abs(sample.v) < STILL_LINEAR && Math.abs(sample.w) < STILL_ANGULAR,
   );
   if (!still) return null;
   return { at: zero.t, delay: still.t - zero.t, distance: pathLength(path, zero.t, still.t) };
+}
+
+// False when the robot practically stood still: under MOVED_DISTANCE of path, under MOVED_TURN
+// of heading change, and no command ever asked it to move.
+function hasMoved(distance, turn, command) {
+  if (distance >= MOVED_DISTANCE) return true;
+  if (Number.isFinite(turn) && Math.abs(turn) >= MOVED_TURN) return true;
+  return movingSpan(command) !== null;
 }
 
 const peak = (samples, key) => Math.max(0, ...samples.map((sample) => Math.abs(sample[key])));
@@ -123,9 +154,11 @@ function thinPath(path) {
 
 /**
  * The report of one run: `{series: {command, measured, path, front}, summary}`. Series are thinned
- * for display and storage. `summary` has `seconds`, `distance` (path length, m), `forward` / `left`
- * (where it ended, m), `turn` (rad), `maxSpeed`, `maxTurnRate`, `maxCommand`, `stop` (stopping(),
- * or null), `emergencyStop` and `closest` (nearest wall ahead, m, or null).
+ * for display and storage. `summary` has `seconds` (length of the recording, including the tail
+ * recorded after the stop), `driveSeconds` (driveTime(), or null), `distance` (path length, m),
+ * `forward` / `left` (where it ended, m), `turn` (rad, + = left), `maxSpeed`, `maxTurnRate`,
+ * `maxCommand`, `stop` (stopping(), or null), `emergencyStop`, `closest` (nearest wall ahead, m,
+ * or null) and `moved` (hasMoved()).
  */
 function driveReport(recording) {
   const t0 = startTime(recording);
@@ -137,6 +170,7 @@ function driveReport(recording) {
     list.length ? [list[list.length - 1].t] : [],
   );
   const end = path[path.length - 1];
+  const distance = pathLength(path);
   return {
     series: {
       command: thin(command, REPORT_PERIOD / 2),
@@ -146,7 +180,8 @@ function driveReport(recording) {
     },
     summary: {
       seconds: times.length ? Math.max(0, ...times) : 0,
-      distance: pathLength(path),
+      driveSeconds: driveTime(command),
+      distance,
       forward: end?.x ?? null,
       left: end?.y ?? null,
       turn: end?.turn ?? null,
@@ -156,8 +191,82 @@ function driveReport(recording) {
       stop: stopping(command, measured, path),
       emergencyStop: measured.some((sample) => sample.estop),
       closest: front.length ? Math.min(...front.map((sample) => sample.d)) : null,
+      moved: hasMoved(distance, end?.turn, command),
     },
   };
 }
 
-export { driveReport, STILL_LINEAR, STILL_ANGULAR };
+// True when the recording shows the robot practically not moving (see hasMoved); such a run is
+// not worth keeping in the history.
+const isEmptyRun = (recording) => !driveReport(recording).summary.moved;
+
+// --- wording helpers (the sentences come from content/live/drive-report.json) ------------------
+
+// How a run ended, from drive-link's reason: 'ok' ran as planned, 'stopped' the learner (or the
+// page being hidden) stopped it, 'problem' the robot or the link stopped it. Unknown: 'stopped'.
+const RUN_STATUS = {
+  done: 'ok',
+  stopped: 'stopped',
+  stopped_other: 'stopped',
+  hidden: 'stopped',
+  timeout: 'problem',
+  time_limit: 'problem',
+  disconnected: 'problem',
+  lost: 'problem',
+  emergency_stop: 'problem',
+  other_publisher: 'problem',
+  no_drive_node: 'problem',
+  not_allowed: 'problem',
+  invalid: 'problem',
+  failed: 'problem',
+  no_answer: 'problem',
+};
+const runStatusKind = (reason) => RUN_STATUS[reason] ?? 'stopped';
+
+const degreesOf = (radians) => (radians * 180) / Math.PI;
+
+/** 「左へ43°」 / 「右へ12°」 / 「0°」 from a heading change in rad (+ = left, REP-103). */
+function describeTurn(radians, copy) {
+  if (!Number.isFinite(radians)) return copy.none;
+  const degrees = Math.round(Math.abs(degreesOf(radians)));
+  if (degrees === 0) return copy.turnNone;
+  return fill(radians > 0 ? copy.turnLeft : copy.turnRight, { degrees });
+}
+
+// One axis of the end position: the word follows the sign, the number is always positive.
+function describeAxis(metres, [positive, negative, zero]) {
+  const centimetres = Math.abs(metres * 100).toFixed(1);
+  if (Number(centimetres) === 0) return zero;
+  return fill(metres > 0 ? positive : negative, { cm: centimetres });
+}
+
+/** 「前へ 60.0 cm・右へ 1.2 cm」 from where the run ended (m, x forward, y left at the start). */
+function describeOffset(forward, left, copy) {
+  if (!Number.isFinite(forward) || !Number.isFinite(left)) return copy.none;
+  return [
+    describeAxis(forward, [copy.offsetForward, copy.offsetBackward, copy.offsetNoForward]),
+    describeAxis(left, [copy.offsetLeft, copy.offsetRight, copy.offsetNoLeft]),
+  ].join('・');
+}
+
+/** 「0.50 rad/s（約29°/秒）」 */
+function describeTurnRate(radiansPerSecond, copy) {
+  if (!Number.isFinite(radiansPerSecond)) return copy.none;
+  return fill(copy.turnRateValue, {
+    rate: radiansPerSecond.toFixed(2),
+    degrees: Math.round(degreesOf(radiansPerSecond)),
+  });
+}
+
+export {
+  driveReport,
+  isEmptyRun,
+  runStatusKind,
+  describeTurn,
+  describeOffset,
+  describeTurnRate,
+  STILL_LINEAR,
+  STILL_ANGULAR,
+  MOVED_DISTANCE,
+  MOVED_TURN,
+};

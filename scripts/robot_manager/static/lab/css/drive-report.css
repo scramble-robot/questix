@@ -1,44 +1,89 @@
-/* Reports and history of driving runs (js/live/drive-report-view.js, drive-history.js). */
+/* Report of a driving run (js/live/drive-report-view.js) and the run history (drive-history.js)
+   in the 実機 dialog and in the lessons' driving blocks. */
 
-/* Report of a driving run (js/live/drive-report-view.js) and the run history in the 実機 dialog. */
 .drive-report {
+  /* measured / command are CHART_COLOURS.live / liveTarget in js/control/render.js: a recording of
+     the real robot and its command look the same here as on the simulator's charts. The LiDAR and
+     compare colours were checked together with them for colour-blind separation. */
+  --report-measured: #b2506f;
+  --report-command: #d39ab0;
+  --report-lidar: #1673c9;
+  --report-compare-1: #b97a00;
+  --report-compare-2: #8250c4;
+  --report-compare-3: #12876b;
+  --report-ink: var(--dark);
+  --report-plot-height: 170px;
+  container-type: inline-size;
   display: grid;
-  gap: 8px;
+  gap: 10px;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: white;
   padding: 12px 14px;
+  min-width: 0;
 }
-.drive-report h4,
 .drive-report p {
   margin: 0;
 }
-.drive-report-legend {
+/* Explicit, or it inherits the orange of .drive-block h4 (css/live.css) inside a lesson. */
+.drive-block .drive-report h4,
+.drive-report h4 {
+  margin: 0;
+  color: var(--report-ink);
+  font-size: 15px;
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 6px;
-  font-size: 12px;
+}
+.drive-report-head {
+  display: grid;
+  gap: 4px;
+}
+.drive-report-meta {
+  font-size: 13px;
   color: var(--muted);
 }
-.drive-report-legend .key {
-  display: inline-block;
-  width: 22px;
-  height: 0;
-  border-top: 3px solid var(--green);
-  margin-left: 8px;
+.drive-report-cut {
+  color: var(--orange);
+  font-weight: 600;
 }
-.drive-report-legend .key.command {
-  border-top: 3px dashed var(--orange);
+
+/* How the run ended: an icon, with its words for screen readers next to it (.sr-only). */
+.drive-status {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  font-size: 12px;
+  line-height: 1;
+  color: white;
+  background: var(--green);
+}
+.drive-status.stopped {
+  background: var(--muted);
+  font-size: 9px;
+}
+.drive-status.problem {
+  background: var(--orange);
+}
+
+/* --- summary and path --- */
+.drive-report-overview {
+  display: grid;
+  gap: 12px;
 }
 .drive-report-summary {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  gap: 6px 14px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px 14px;
   margin: 0;
 }
 .drive-report-summary div {
   display: grid;
   gap: 2px;
+  align-content: start;
 }
 .drive-report-summary dt {
   font-size: 12px;
@@ -49,38 +94,171 @@
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
+.drive-value-part {
+  display: inline-block;
+  white-space: nowrap;
+}
+@container (min-width: 620px) {
+  .drive-report {
+    --report-plot-height: 200px;
+  }
+  .drive-report-overview {
+    grid-template-columns: minmax(0, 1fr) minmax(220px, 300px);
+    align-items: start;
+  }
+}
+
+/* --- charts --- */
 .drive-report-charts {
   display: grid;
-  gap: 10px;
+  gap: 14px;
 }
+/* The lesson pages' figure / figcaption / figure > p (css/base.css) are cards of their own; here
+   they sit inside the report's card. */
 .drive-report-chart,
 .drive-report-path {
   margin: 0;
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  background: transparent;
+}
+.drive-report figure + figure {
+  border-top: 0;
 }
 .drive-report-chart figcaption,
 .drive-report-path figcaption {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+  padding: 0;
+}
+.drive-report figure > p {
+  padding: 0;
+  min-height: 0;
+}
+.drive-report-caption {
+  color: var(--report-ink);
   font-size: 13px;
+  font-weight: 700;
+}
+.drive-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.drive-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.drive-key {
+  display: inline-block;
+  width: 20px;
+  height: 0;
+  border-top: 3px solid var(--report-measured);
+}
+.drive-key.command {
+  border-top: 3px dashed var(--report-command);
+}
+.drive-key.front {
+  border-top-color: var(--report-lidar);
+}
+.drive-key.compare-1,
+.drive-key.compare-2,
+.drive-key.compare-3 {
+  border-top-width: 2px;
+}
+.drive-key.compare-1 {
+  border-top-color: var(--report-compare-1);
+}
+.drive-key.compare-2 {
+  border-top-color: var(--report-compare-2);
+}
+.drive-key.compare-3 {
+  border-top-color: var(--report-compare-3);
+}
+
+/* A time chart: the SVG only draws lines and is stretched to the area; every text is HTML at a
+   fixed size, placed in % of the area. Padding makes room for the ticks around it. */
+.drive-plot {
+  position: relative;
+  height: var(--report-plot-height);
+  padding: 20px 18px 22px 42px;
+}
+.drive-plot-area {
+  position: relative;
+  height: 100%;
+}
+.drive-plot-lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.drive-plot-unit,
+.drive-plot-y,
+.drive-plot-t,
+.drive-plot-marker,
+.drive-plot-reference {
+  position: absolute;
+  font-size: 12px;
+  line-height: 1.2;
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.drive-plot-unit {
+  left: 0;
+  top: 0;
+}
+.drive-plot-y {
+  right: calc(100% + 6px);
+  transform: translateY(-50%);
+}
+.drive-plot-t {
+  top: calc(100% + 4px);
+  transform: translateX(-50%);
+}
+.drive-plot-marker {
+  bottom: calc(100% + 3px);
+  padding-left: 4px;
+  color: var(--report-ink);
   font-weight: 600;
 }
-.drive-report-chart svg {
-  display: block;
-  width: 100%;
-  height: auto;
+.drive-plot-marker.flip {
+  transform: translateX(-100%);
+  padding: 0 4px 0 0;
 }
-.drive-report-path svg {
-  display: block;
-  width: min(100%, 300px);
-  height: auto;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+.drive-plot-reference {
+  right: 2px;
+  transform: translateY(-100%);
+  padding: 0 3px;
+  border-radius: 3px;
+  background: rgb(255 255 255 / 0.85);
+  color: var(--report-ink);
 }
 .drive-report svg .grid {
   stroke: var(--line);
   stroke-width: 1;
 }
-.drive-report svg .tick {
-  font-size: 11px;
-  fill: var(--muted);
+.drive-report svg .grid.zero {
+  stroke: #b9c6c1;
+}
+.drive-report svg .reference {
+  stroke: var(--muted);
+  stroke-width: 1;
+  stroke-dasharray: 2 4;
+}
+.drive-report svg .marker {
+  stroke: var(--report-ink);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
 }
 .drive-report svg .line {
   fill: none;
@@ -88,41 +266,112 @@
   stroke-linejoin: round;
 }
 .drive-report svg .line.measured {
-  stroke: var(--green);
+  stroke: var(--report-measured);
 }
 .drive-report svg .line.command {
-  stroke: var(--orange);
+  stroke: var(--report-command);
   stroke-dasharray: 6 4;
 }
 .drive-report svg .line.front {
-  stroke: #2f5f93;
+  stroke: var(--report-lidar);
 }
-.drive-report svg .marker {
-  stroke: #c62828;
-  stroke-dasharray: 3 3;
+.drive-report svg .line.compare-1,
+.drive-report svg .line.compare-2,
+.drive-report svg .line.compare-3 {
+  stroke-width: 1.5;
 }
-.drive-report svg .marker-label {
-  fill: #c62828;
+.drive-report svg .line.compare-1 {
+  stroke: var(--report-compare-1);
 }
-.drive-report svg .start {
-  fill: var(--orange);
+.drive-report svg .line.compare-2 {
+  stroke: var(--report-compare-2);
 }
-.drive-report svg .end {
-  fill: var(--dark);
+.drive-report svg .line.compare-3 {
+  stroke: var(--report-compare-3);
 }
+
+/* The path from above: a square that never grows past 300 px. */
+.drive-report-path svg {
+  display: block;
+  width: min(100%, 300px);
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.drive-report-path svg .start {
+  fill: white;
+  fill-opacity: 0.6;
+  stroke: var(--report-ink);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+.drive-report-path svg .end,
+.drive-report-path svg .heading-head {
+  fill: var(--report-ink);
+}
+.drive-report-path svg .heading {
+  stroke: var(--report-ink);
+  stroke-width: 2;
+}
+.drive-report .drive-report-spin {
+  display: grid;
+  place-items: center;
+  min-height: 96px;
+  width: min(100%, 300px);
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-weight: 700;
+  text-align: center;
+}
+.drive-report-more {
+  padding-top: 4px;
+}
+.drive-report-more > summary {
+  min-height: 44px;
+  padding: 10px 0;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--report-ink);
+}
+.drive-report-more[open] > summary {
+  margin-bottom: 6px;
+}
+
+/* On a phone the card's frame costs width the charts need. */
+@media (max-width: 559px) {
+  .drive-report {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    padding: 0;
+  }
+}
+
+/* --- history list --- */
 .drive-history {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
   gap: 4px;
-  max-height: 220px;
+  max-height: 300px;
   overflow-y: auto;
 }
+.drive-history li {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
 .drive-history button {
-  width: 100%;
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   text-align: left;
-  min-height: 0;
+  min-height: 44px;
   padding: 6px 10px;
   font-size: 13px;
   font-variant-numeric: tabular-nums;
@@ -130,5 +379,32 @@
 .drive-history button[aria-pressed='true'] {
   border-color: var(--green);
   background: var(--green-soft);
+}
+.drive-history-text {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 12px;
+  min-width: 0;
+}
+.drive-history button[aria-pressed='true'] .drive-history-text > :first-child {
   font-weight: 700;
+}
+.drive-history-numbers {
+  color: var(--muted);
+  font-weight: 500;
+}
+.drive-history-compare {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  padding: 0 6px;
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.drive-history-compare input {
+  width: 20px;
+  height: 20px;
+  margin: 0;
 }
