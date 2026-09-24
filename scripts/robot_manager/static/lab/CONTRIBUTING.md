@@ -53,6 +53,44 @@ a sentence, an explanation, or a status message belongs in the content file.
 - Module entry points and other exports keep their names, signatures and return types; other
   modules depend on them.
 
+## Figures and charts (for high-school learners on phones and Chromebooks)
+
+The learners are 高校1〜2年, often on a 390 px phone or a 1366×768 Chromebook. A figure that is
+exact but unreadable teaches nothing. Every new or reworked figure follows these rules:
+
+- **Readable text at any width.** No text smaller than 12 px on screen (`--figure-text-min`). A
+  figure authored in an 800-unit viewBox and shrunk to 352 px turns 14-unit labels into 6 px, so:
+  put legends, axis titles, key readouts and tick labels in HTML next to or over the figure, or
+  give narrow screens their own viewBox. Lines keep their width with
+  `vector-effect="non-scaling-stroke"` (≥ 2 px).
+- **Colour means a role, never a position.** Take colours from `js/core/palette.js`
+  (`roleStyle(role, 'chart' | 'scene')`, CSS `--role-*` / `--scene-role-*`): actual = green solid,
+  measured / estimated / used for a decision = blue, target / threshold = amber dashed, plan /
+  prediction = magenta dash-dot, previous run = grey dotted, event = grey labelled vertical line,
+  danger = red with an icon. The same quantity has the same colour in the scene and in its chart.
+  Never colour lines by their order in a list.
+- **Never by colour alone.** Each line or mark also has a dash pattern or shape and a direct label
+  (at the line's end, or on the mark). Learner text names things by shape and label
+  (「白い実線の止まりたい線」「▼ブレーキ開始」), not by colour alone.
+- **Axes that can be read.** Use `niceScale` / `formatTick` from `js/core/chart-scale.js`: round
+  ticks, zero on the axis for signed quantities (draw the zero line thicker), whole ticks for
+  counts. Fix the range once per run (plus the previous run shown with it) — never recompute it
+  from the samples played so far. The y axis says the quantity and unit (「速さ（m/秒）」), the x
+  axis 「開始からの時間（秒）」. Two charts that share a time axis share its left/right edges.
+- **Events are marked where they happen.** Anything the text asks the learner to look for (a
+  load change, contact, a state change, a stop) is a labelled vertical line on the chart and an
+  entry in 起きたこと; repeated events are grouped (「見直し 12回（0.3秒ごと）」).
+- **Press → see, on one screen.** After a button starts or changes something, the part to watch
+  is on screen: scroll to it (as the systems courses do with `scrollToScene`) or show the result
+  right under the button. On a phone the chart the text refers to is next to the scene, not two
+  screens below.
+- **Say what it means.** A result card ends with one sentence that uses the measured numbers
+  (「線を52 cm越えました。ブレーキを約0.9 m手前で始めれば止まれます。」), and only shows metrics
+  the topic is about; a setting that has no effect in the current mode is disabled with the
+  reason next to it.
+- **Words.** Define a term where it first appears (or link the 補足); units are written the same
+  way everywhere (m/秒, rad/秒, rpm, cm); a sentence refers to controls by their visible label.
+
 ## Taking measurements from the real robot
 
 A lesson never talks to `robot-link.js` directly. It creates a session with `createLiveSession`
