@@ -2,6 +2,7 @@ import { html, svg, nothing } from '../vendor/lit-html.js';
 import { loadJson, fillSentence as fill } from '../core/content.js';
 import { roleStyle } from '../core/palette.js';
 import { niceScale, formatTick, scaleTo } from '../core/chart-scale.js';
+import { questixSideLayout, questixSideSvg, questixTopSvg } from '../core/questix-art.js';
 import {
   BEHAVIOR_PLACES,
   crossingForecast,
@@ -32,8 +33,6 @@ const STROKE = '#77939e';
 const FLOOR = '#8c9fa5';
 const GOAL_LINE = '#f4f8f9'; // a line on the floor the robot should stop at: white, solid
 const NEUTRAL = '#c9d3d8'; // events and neutral marks in a scene
-const ROBOT_ACCENT = '#8bd6be'; // sensor ring of the top-view QUESTiX
-const OTHER_ACCENT = '#aab7bd'; // the other robot: grey, so nothing on it looks "measured"
 const TEXT_SMALL = 12; // px on screen; the minimum (--figure-text-min)
 const TEXT_BODY = 13;
 const TEXT_STRONG = 14;
@@ -310,66 +309,63 @@ function floorEvent(stage, x, labelText, labelY) {
   ];
 }
 
-function topRobot(accent, eye) {
-  return svg`<rect x="-21" y="-29" width="42" height="58" rx="10" fill="#d1e0e2" /><rect
-      x="-29"
-      y="-20"
-      width="10"
-      height="40"
-      rx="3"
-      fill="#182a33"
-      stroke="#86a3b0"
-    /><rect
-      x="19"
-      y="-20"
-      width="10"
-      height="40"
-      rx="3"
-      fill="#182a33"
-      stroke="#86a3b0"
-    /><rect x="-13" y="-27" width="26" height="10" rx="5" fill="#21485d" /><circle
-      cx="-6"
-      cy="-22"
-      r="3"
-      fill=${eye}
-    /><circle cx="6" cy="-22" r="3" fill=${eye} /><rect
-      x="-14"
-      y="-11"
-      width="28"
-      height="31"
-      rx="8"
-      fill="#29414a"
-    /><circle r="9" cy="3" fill="#1a3038" stroke=${accent} stroke-width="3" />`;
-}
+// The QUESTiX in the side scenes is the CAD side view (front to the right, wheels on the floor),
+// SIDE_LENGTH px from rear to front at robotScale 1: the footprint the beams, brackets and labels
+// of those scenes are placed around (its front is SIDE_LENGTH / 2 ahead of the centre). The view
+// is about as tall as it is long, so what sits above it asks sideTop() for its height.
+const SIDE_LENGTH = 52; // px at robotScale 1
+// A pale plate behind the dark CAD renders keeps them visible on the dark scene floor; a ghost
+// (an earlier position) is the same picture, faint, with a dashed outline.
+const ROBOT_PLATE = '#d9eaee';
+const PLATE_OPACITY = 0.16;
+const GHOST_OUTLINE = '#c3d4da';
 
-// Side view, about 48 px long and 42 px tall at scale 1, wheels touching y = 0.
-const sideRobot = () =>
-  svg`<rect x="-23" y="-31" width="48" height="23" rx="6" fill="#cedbdc" /><rect
-      x="15"
-      y="-39"
-      width="13"
-      height="11"
-      rx="4"
-      fill="#9fb3bd"
-    /><circle
-      cx="-8"
-      cy="-11"
-      r="14"
-      fill="#1d2930"
-      stroke="#92adb5"
-      stroke-width="3"
-    /><circle cx="21" cy="-4" r="6" fill="#1d2930" stroke="#92adb5" stroke-width="2" />`;
+const sideLength = (scale) => SIDE_LENGTH * scale;
 
-function sideView(x, y, scale, opacity = 1) {
-  return svg`<g transform="translate(${x} ${y}) scale(${scale})" opacity=${opacity}>
-    ${sideRobot()}
+/** y of the top of the side view (its mast) standing on `ground`. */
+const sideTop = (ground, scale) => questixSideLayout(0, ground, sideLength(scale)).top;
+
+function sideView(x, ground, scale, opacity = 1) {
+  const length = sideLength(scale);
+  const top = sideTop(ground, scale);
+  const ghost = opacity < 1;
+  const plate = {
+    x: x - length / 2 - 2,
+    y: top - 2,
+    width: length + 4,
+    height: ground - top + 2,
+  };
+  return svg`<g data-questix-robot=${ghost ? 'ghost' : 'current'}>
+    ${box(plate.x, plate.y, plate.width, plate.height, ROBOT_PLATE, {
+      rx: 5,
+      opacity: ghost ? PLATE_OPACITY / 2 : PLATE_OPACITY,
+    })}
+    ${questixSideSvg(x, ground, length, 'side', opacity)}
+    ${
+      ghost
+        ? box(plate.x, plate.y, plate.width, plate.height, 'none', {
+            rx: 5,
+            stroke: GHOST_OUTLINE,
+            strokeWidth: 1.5,
+            dash: '4 3',
+          })
+        : nothing
+    }
   </g>`;
 }
 
-function topView(x, y, angle, scale, accent = ROBOT_ACCENT, eye = '#92d1fd') {
-  return svg`<g transform="translate(${x} ${y}) rotate(${angle}) scale(${scale})">
-    ${topRobot(accent, eye)}
-  </g>`;
+/**
+ * CAD top view centred on (x, y), `heading` degrees (0 = facing right, like the simulation's
+ * theta), `size` px across, on a pale round plate.
+ */
+function topView(x, y, heading, size, opacity = 1) {
+  return svg`<circle
+      cx=${x}
+      cy=${y}
+      r=${size * 0.62}
+      fill=${ROBOT_PLATE}
+      opacity=${PLATE_OPACITY * opacity}
+    />${questixTopSvg(x, y, heading, size, opacity)}`;
 }
 
 function stageSvg(stage, body, description) {
@@ -517,11 +513,14 @@ function brakingParts(run, sample, stage, reached) {
   return parts;
 }
 
+// The mass is written just above the robot's mast.
+const massLabelY = (stage) => sideTop(stage.ground, stage.robotScale) - 6;
+
 // The mass written above the robot, where label() puts it.
 function massLabelBox(run, sample, stage) {
   const area = labelBox(
     stage.toX(sample.x),
-    stage.ground - 46 * stage.robotScale - 4,
+    massLabelY(stage),
     run.config.mass + ' kg',
     TEXT_SMALL,
     'middle',
@@ -537,7 +536,7 @@ function tractionParts(run, sample, stage) {
   const content = copy.mechanics.odometryPosition;
   const width = textWidth(content, TEXT_SMALL);
   const left = clamp(x - width / 2, stage.bounds[0], stage.bounds[1] - width);
-  let y = stage.ground - 56 * stage.robotScale;
+  let y = sideTop(stage.ground, stage.robotScale) - 12;
   if (boxesMeet(grow(labelBox(left, y, content, TEXT_SMALL), 2), massLabelBox(run, sample, stage)))
     y -= 18;
   return [
@@ -563,7 +562,7 @@ function mechanicsScene(run, index, options) {
     reached ? floorEvent(stage, stage.toX(transition.x), markerText, 44) : nothing,
     run.topic === 'traction' ? tractionParts(run, sample, stage) : nothing,
     sideView(stage.toX(sample.x), stage.ground, stage.robotScale),
-    label(stage.toX(sample.x), stage.ground - 46 * stage.robotScale - 4, run.config.mass + ' kg', {
+    label(stage.toX(sample.x), massLabelY(stage), run.config.mass + ' kg', {
       color: SOFT_INK,
       size: TEXT_SMALL,
       anchor: 'middle',
@@ -611,42 +610,48 @@ const DIAGNOSTICS_EXTENT = 4.8; // metres shown across the scene
 const DATA_LOSS_TIME = 1.5; // seconds; after this the range stops being updated
 const SHOCK_FLASH = 0.25; // seconds the ring around the robot is shown after the shock
 
-// Heights above the floor at scale 1 (px): the LiDAR sits low, the camera near the top.
-const LIDAR_HEIGHT = 11;
-const CAMERA_HEIGHT = 33;
-const SHELF_TOP = 86;
-const SHELF_BOTTOM = 22;
+// Heights above the floor as fractions of the robot's length (SIDE_LENGTH), read off the CAD
+// side view: the RGB-D camera sits at the disc outlet on the front, the LiDAR below it on the
+// front of the chassis. The shelf's overhang starts between the two, so the LiDAR beam passes
+// under it and the camera's does not.
+const LIDAR_HEIGHT = 0.14;
+const CAMERA_HEIGHT = 0.34;
+const SHELF_BOTTOM = 0.24;
+const SHELF_TOP = 1.65;
+const SENSOR_LABEL_GAP = 4; // px between a sensor's beam and its name
 
 function distanceParts(sample, stage) {
   const text = copy.diagnostics;
-  const scale = stage.robotScale;
+  const length = sideLength(stage.robotScale);
   const measured = sceneRole('measured');
-  const front = stage.toX(sample.x) + 26 * scale;
-  const lidarY = stage.ground - LIDAR_HEIGHT * scale;
-  const cameraY = stage.ground - CAMERA_HEIGHT * scale;
+  const front = stage.toX(sample.x) + length / 2;
+  const lidarY = stage.ground - LIDAR_HEIGHT * length;
+  const cameraY = stage.ground - CAMERA_HEIGHT * length;
   const shelfX = stage.toX(3.2);
   const wallX = stage.toX(4);
-  // The sensor names ride with the robot, each at the height of its beam: behind the robot where
-  // there is room, so they sit on neither the robot nor a beam. Near the start there is no room
-  // behind it; each name then sits on its own beam, which starts after the name ("LiDAR ——•").
+  // The sensor names ride with the robot, next to the height of their beams: behind the robot
+  // where there is room, so they sit on neither the robot nor a beam. Near the start there is no
+  // room behind it; each name then sits before its own beam, which starts after the name
+  // ("LiDAR ——•"). The beams are close together, so the LiDAR's name sits low, just clear of the
+  // floor line, and the camera's stands on top of its own beam.
   const sensors = [
-    [text.lidar, lidarY],
-    [text.camera, cameraY],
+    [text.lidar, Math.min(lidarY + SENSOR_LABEL_GAP, stage.ground - 3)],
+    [text.camera, cameraY - SENSOR_LABEL_GAP],
   ];
   const widest = Math.max(...sensors.map(([name]) => textWidth(name, TEXT_SMALL)));
-  const back = stage.toX(sample.x) - 26 * scale - 6;
+  const back = stage.toX(sample.x) - length / 2 - 6;
   const behind = back - widest >= stage.bounds[0];
   const beamFrom = behind ? front : front + widest + 12;
   return [
     box(
       shelfX,
-      stage.ground - SHELF_TOP * scale,
+      stage.ground - SHELF_TOP * length,
       wallX - shelfX,
-      (SHELF_TOP - SHELF_BOTTOM) * scale,
+      (SHELF_TOP - SHELF_BOTTOM) * length,
       '#b57959',
     ),
     // Ends short of the wall, so the name never touches it.
-    label(wallX - 6, stage.ground - SHELF_TOP * scale - 8, text.shelf, {
+    label(wallX - 6, stage.ground - SHELF_TOP * length - 8, text.shelf, {
       color: '#e3b794',
       size: TEXT_SMALL,
       anchor: 'end',
@@ -656,7 +661,7 @@ function distanceParts(sample, stage) {
     circle(wallX, lidarY, 3, measured.color, measured.color),
     line(beamFrom, cameraY, shelfX, cameraY, measured.color, 2, '7 4'),
     sensors.map(([name, y]) =>
-      label(behind ? back : front + 6, y + 4, name, {
+      label(behind ? back : front + 6, y, name, {
         color: measured.color,
         size: TEXT_SMALL,
         anchor: behind ? 'end' : 'start',
@@ -674,7 +679,7 @@ function missingParts(run, sample, stage) {
   const obstacleX = stage.toX(3.2);
   const lastUpdate = run.samples.findLast((point) => point.t < DATA_LOSS_TIME);
   // Drawn above the robots, from the centre of the one the range was measured from.
-  const rangeY = stage.ground - 52 * scale;
+  const rangeY = sideTop(stage.ground, scale) - 8;
   const fromX = stage.toX(stale ? lastUpdate.x : sample.x);
   return [
     box(obstacleX, stage.ground - 115 * scale, 20 * scale, 115 * scale, '#a8846b'),
@@ -716,7 +721,14 @@ function impactParts(run, sample, stage) {
       40,
     ),
     sample.t < shock.t + SHOCK_FLASH
-      ? circle(stage.toX(sample.x), stage.ground - 20 * scale, 34 * scale, '#efc584', 'none', 3)
+      ? circle(
+          stage.toX(sample.x),
+          stage.ground - sideLength(scale) / 2,
+          sideLength(scale) * 0.78,
+          '#efc584',
+          'none',
+          3,
+        )
       : nothing,
   ];
 }
@@ -800,9 +812,9 @@ function bracketLabel(stage, fromX, y, content, role, guideX) {
 
 function rangeParts(sample, stage) {
   const text = copy.timing;
-  const scale = stage.robotScale;
-  const usedY = stage.ground - 50 * scale - 30;
-  const actualY = stage.ground - 50 * scale - 10;
+  const top = sideTop(stage.ground, stage.robotScale);
+  const usedY = top - 34;
+  const actualY = top - 14;
   const wallX = stage.toX(TIMING_WALL);
   const guideX = stage.toX(TIMING_WALL - TIMING_STOP_RANGE);
   const usedFrom = stage.toX(TIMING_WALL - sample.usedRange);
@@ -819,7 +831,7 @@ function mapParts(sample, stage) {
   const text = copy.timing;
   const measured = sceneRole('measured');
   const wallX = stage.toX(sample.wallEstimate);
-  const y = stage.ground - 50 * stage.robotScale - 16;
+  const y = sideTop(stage.ground, stage.robotScale) - 20;
   return [
     line(wallX, 44, wallX, stage.ground, measured.color, 4),
     label(wallX + 6, 56, text.mapWall, {
@@ -998,6 +1010,8 @@ const TRACKING_ROBOT_RADIUS = 0.18; // m; collision circle of either robot
 const TRACKING_LANE_HALF = 0.32; // m; half width of the pale strip drawn as the route
 const TRACKING_MARGIN = 12; // px
 const TRACKING_MAX_HEIGHT = { wide: 360, narrow: 300 }; // px
+// Width of the drawn robot in collision radii: its chamfered corners just meet the circle.
+const TRACKING_ROBOT_SIZE = 1.5;
 
 function trackingStage(options, crossing) {
   const width = options.sceneWidth;
@@ -1047,18 +1061,13 @@ function arrow(x1, y1, x2, y2, color) {
   ];
 }
 
-function trackingRobot(stage, x, y, angle, isTarget = false) {
+// Both robots are the same CAD top view inside their collision circle; the other robot is told
+// apart by its grey dashed circle and a slightly faded picture (and by its name in the scene).
+function trackingRobot(stage, x, y, heading, isTarget = false) {
   const ring = isTarget ? '#aebec5' : '#82cfb5';
   return svg`<g data-tracking-robot=${isTarget ? 'target' : 'questix'}>
-    ${circle(x, y, stage.radius, ring, isTarget ? '#6e859042' : '#67b59920')}
-    ${topView(
-      x,
-      y,
-      angle,
-      stage.radius / 37,
-      isTarget ? OTHER_ACCENT : ROBOT_ACCENT,
-      isTarget ? '#8a979d' : '#92d1fd',
-    )}
+    ${circle(x, y, stage.radius, ring, isTarget ? '#6e859042' : '#67b59920', 2, isTarget ? '4 3' : '')}
+    ${questixTopSvg(x, y, heading, stage.radius * TRACKING_ROBOT_SIZE, isTarget ? 0.8 : 1)}
   </g>`;
 }
 
@@ -1378,8 +1387,9 @@ function trackingScene(run, index, options) {
       laneY,
       '#d9e2e7',
     ),
-    trackingRobot(stage, targetX, laneY, direction < 0 ? -90 : 90, true),
-    trackingRobot(stage, questixX, questixY, 0),
+    trackingRobot(stage, targetX, laneY, direction < 0 ? 180 : 0, true),
+    // QUESTiX faces up the screen (the rotated room's +x).
+    trackingRobot(stage, questixX, questixY, -90),
     line(questixX, questixY - stage.radius, measuredX, laneY, '#83b7ec66', 1.5, '4 7'),
     // The measurement is drawn last and larger than before, with a white edge, so it never
     // hides behind (or looks like part of) the other robot.
@@ -1814,6 +1824,7 @@ function armKey(run, settings) {
 const ROOM_X = [0, 4.8]; // metres across
 const ROOM_Y = [0.3, 2.8]; // metres down the screen
 const ROOM_HEIGHT = { wide: 250, narrow: 220 }; // px
+const ROOM_ROBOT_SIZE = 58; // px across the robot at robotScale 1
 
 function roomStage(options) {
   const width = options.sceneWidth;
@@ -1977,7 +1988,12 @@ function roomScene(run, index, options) {
           }),
         ]
       : nothing,
-    topView(at(sample).x, at(sample).y, (sample.theta * 180) / Math.PI + 90, stage.robotScale),
+    topView(
+      at(sample).x,
+      at(sample).y,
+      (sample.theta * 180) / Math.PI,
+      ROOM_ROBOT_SIZE * stage.robotScale,
+    ),
     sample.hasParcel ? box(at(sample).x - 6, at(sample).y - 6, 12, 12, '#e2bd80') : nothing,
   ];
   return html`${stageSvg(stage, body, sceneDescription(sample))} ${roomKey(run)}`;

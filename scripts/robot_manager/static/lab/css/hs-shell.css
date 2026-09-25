@@ -316,3 +316,49 @@ body .measurement-entry > .supplement-trigger {
     scroll-padding-top: 76px;
   }
 }
+
+/* Catalogue robot section (js/shell/series-view.js): the isometric CAD view with its sensor
+   callouts beside the description. The figure's text is sized in its viewBox so it stays at
+   12 px or more when the figure is about 300 px wide on a phone. */
+.series-robot {
+  grid-template-columns: minmax(260px, 420px) minmax(0, 1fr);
+  align-items: start;
+}
+.questix-hardware-figure {
+  grid-row: span 2;
+  margin: 0;
+  padding: 12px;
+  border-radius: 14px;
+  background: #f3f5f3;
+}
+.questix-hardware-figure svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.questix-hardware-figure figcaption {
+  padding: 4px 8px 4px;
+  color: #56696e;
+  font-size: 13px;
+  line-height: 1.7;
+}
+@media (max-width: 800px) {
+  .series-robot {
+    grid-template-columns: 1fr;
+  }
+  .questix-hardware-figure {
+    grid-row: auto;
+    width: 100%;
+    max-width: 480px;
+    margin: 0 auto;
+  }
+}
+@media (max-width: 600px) {
+  .series-robot {
+    padding: 16px;
+    gap: 18px;
+  }
+  .questix-hardware-figure {
+    padding: 6px;
+  }
+}

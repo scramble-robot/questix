@@ -22,7 +22,16 @@ import {
   SENSOR_COPY,
 } from '../js/shell/lesson-ui.js';
 import { schoolTips, SCHOOL_TIPS, SCHOOL_GRADES } from '../js/shell/school-tips.js';
-import { seriesCover } from '../js/shell/series-covers.js';
+
+// The covers draw the robot from its CAD views (js/core/questix-art.js), which loads lit-html;
+// lit-html looks up `document` when it is loaded, and these tests only use string helpers.
+globalThis.document ??= {
+  createComment: () => ({}),
+  createTreeWalker: () => ({}),
+  createElement: () => ({}),
+  importNode: () => ({}),
+};
+const { seriesCover } = await import('../js/shell/series-covers.js');
 
 const BASELINE = process.env.LAB_BASELINE;
 const baselineModule = async (name) => {

@@ -1,4 +1,5 @@
-import { html, nothing, unsafeHTML } from '../vendor/lit-html.js';
+import { html, svg, nothing, unsafeHTML } from '../vendor/lit-html.js';
+import { questixImageUrl } from '../core/questix-art.js';
 import { seriesCover } from './series-covers.js';
 import { RUN_MODE_ORDER, runModeBadgeHtml } from './run-mode.js';
 
@@ -244,13 +245,93 @@ function schoolOverview(model, actions) {
 
 // --- The robot used in every experiment ---------------------------------------------------------
 
+// The isometric CAD view with numbered callouts where the sensors sit, like the figure of the
+// single-file edition. The viewBox is shrunk to about 300 px on a 390 px phone, so text is set at
+// 26–28 units to stay at 12 px or more there (CONTRIBUTING.md, "Figures and charts").
+const HARDWARE_VIEW = { width: 620, height: 566 };
+const ISOMETRIC = { x: 10, y: 10, width: 500, height: 496 }; // where the image sits
+const LABEL_SIZE = 28; // user units
+const BADGE_RADIUS = 19;
+const BADGE_TEXT = 26;
+// Each sensor: where it is on the image (fractions of the image), the leader's path to its name,
+// where its name starts and the baselines of its lines, and its colours (stroke, text, badge).
+const HARDWARE_CALLOUTS = [
+  {
+    key: 'camera',
+    number: 1,
+    at: [0.646, 0.556],
+    leader: 'H488V276H612',
+    labelX: 496,
+    lines: [236, 268],
+    colors: ['#487f9b', '#2b5a70', '#e4f3fa'],
+  },
+  {
+    key: 'lidar',
+    number: 2,
+    at: [0.744, 0.766],
+    leader: 'H500V448H612',
+    labelX: 508,
+    lines: [440],
+    colors: ['#a77d38', '#7a5821', '#fff0d4'],
+  },
+];
+const FRONT_ARROW = 'M414 486L484 524M462 522L484 524L474 504';
+
+function hardwareCallout(callout, copy) {
+  const [stroke, ink, fill] = callout.colors;
+  const x = ISOMETRIC.x + callout.at[0] * ISOMETRIC.width;
+  const y = ISOMETRIC.y + callout.at[1] * ISOMETRIC.height;
+  return svg`<path d="M${x} ${y}${callout.leader}" fill="none" stroke=${stroke} stroke-width="2" />
+    <circle cx=${x} cy=${y} r=${BADGE_RADIUS} fill=${fill} stroke=${stroke} stroke-width="2" />
+    <text x=${x} y=${y + BADGE_TEXT * 0.36} text-anchor="middle" font-size=${BADGE_TEXT} fill=${ink}>
+      ${callout.number}
+    </text>
+    ${copy[callout.key].map(
+      (line, index) =>
+        svg`<text x=${callout.labelX} y=${callout.lines[index]} font-size=${LABEL_SIZE} fill=${ink}>${line}</text>`,
+    )}`;
+}
+
+function hardwareFigure(copy) {
+  const figure = copy.robot.figure;
+  return html`<figure class="questix-hardware-figure">
+    <svg
+      viewBox="0 0 ${HARDWARE_VIEW.width} ${HARDWARE_VIEW.height}"
+      role="img"
+      aria-label=${figure.label}
+    >
+      <image
+        href=${questixImageUrl('isometric')}
+        x=${ISOMETRIC.x}
+        y=${ISOMETRIC.y}
+        width=${ISOMETRIC.width}
+        height=${ISOMETRIC.height}
+      />
+      <g font-family="system-ui, sans-serif" font-weight="650">
+        ${HARDWARE_CALLOUTS.map((callout) => hardwareCallout(callout, figure))}
+        <path
+          d=${FRONT_ARROW}
+          fill="none"
+          stroke="#427c88"
+          stroke-width="3"
+          stroke-linecap="round"
+        />
+        <text x="496" y="556" font-size=${LABEL_SIZE} fill="#2f5d69">${figure.front}</text>
+      </g>
+    </svg>
+    <figcaption>${figure.caption}</figcaption>
+  </figure>`;
+}
+
 // Ends with the way to 記録の一覧: what was measured on the robot, by this or any other device.
 function robotSection(copy, actions) {
   return html`<section class="series-robot card">
-    <div>
+    ${hardwareFigure(copy)}
+    <div class="questix-hardware-copy">
       <p class="eyebrow">${copy.robot.eyebrow}</p>
       <h2>${copy.robot.title}</h2>
       <p>${copy.robot.lead}</p>
+      <p>${copy.robot.placement}</p>
       <p class="series-records">
         ${copy.robot.recordsLead}
         <button class="quiet" data-series-records @click=${actions.openRecords}>

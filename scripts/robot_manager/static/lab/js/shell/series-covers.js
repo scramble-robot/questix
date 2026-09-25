@@ -1,9 +1,11 @@
 import { loadJson } from '../core/content.js';
+import { QUESTIX_VIEWS, questixImageUrl, questixSideLayout } from '../core/questix-art.js';
 import { escapeHtml } from './html-escape.js';
 
 // Cover illustration of every course on the catalogue page. The same robot identifies the
 // hardware in each picture; the composition shows what that course's experiment is about.
-// Inline SVG keeps the catalogue sharp and available without extra files. Each cover's title and
+// The robot is drawn from its CAD views (js/core/questix-art.js, assets/questix/); the rest is
+// inline SVG. Each cover's title and
 // description (read by assistive technology) live in content/shell/covers.json.
 
 const COVER_WIDTH = 600; // SVG user units
@@ -57,18 +59,39 @@ function arrow(fromX, fromY, toX, toY, color = COLOR.mint, width = 3, dash = '')
 function crate(x, y, scale = 1, color = COLOR.box) {
   return `<g transform="translate(${x} ${y}) scale(${scale})"><path d="M-23-15L0-27 25-15 2-2Z" fill="#e3a474"/><path d="M-23-15L2-2V27L-23 13Z" fill="${color}"/><path d="M2-2L25-15V13L2 27Z" fill="#9e6349"/>${path('M-10-21L15-8V7', '#f1cf9a', 5)}</g>`;
 }
-function topRobot(x, y, heading = 0, scale = 1, opacity = 1) {
-  const wheelTreads = [-14, 0, 14]
-    .map((offset) => path(`M${offset}-31v8M${offset} 23v8`, '#4c6875', 2))
-    .join('');
-  return `<g transform="translate(${x} ${y}) rotate(${heading}) scale(${scale})" opacity="${opacity}">${ellipse(0, 6, 39, 30, '#10232b99')}${rect(-21, -33, 42, 12, '#10232b', 4, '#809ba6')}${rect(-21, 21, 42, 12, '#10232b', 4, '#809ba6')}${wheelTreads}${rect(-33, -23, 66, 46, '#cbdcde', 13, '#e3edf0')}${rect(-24, -16, 42, 32, '#304f5d', 10)}${circle(-3, 0, 11, '#1c3540', COLOR.mint, 3)}${circle(-3, 0, 3, COLOR.mint, 'none')}${rect(23, -14, 10, 28, '#254a61', 5)}${circle(28, -7, 3, '#aee0ff', 'none')}${circle(28, 7, 3, '#aee0ff', 'none')}${rect(-27, -16, 4, 13, '#eb934b', 2)}</g>`;
+// The CAD views as SVG markup strings (the covers are strings, not lit templates), placed like
+// questixTopSvg / questixSideSvg in js/core/questix-art.js, with the same light-blue front cue.
+const TOP_SIZE = 76; // user units across the top view at scale 1
+const SIDE_LENGTH = 108; // user units from rear to front of the side view at scale 1
+const FRONT_CUE_OUTER = '#112d38';
+const FRONT_CUE_INNER = '#a0dfff';
+// A pale plate behind the dark renders keeps them visible on the dark cover.
+const ROBOT_PLATE = '<circle r="{r}" fill="#d9eaee" opacity=".17"/>';
+const round = (value) => Math.round(value * 100) / 100;
+
+function cadImage(view, x, y, width, height, opacity = 1) {
+  return `<image href="${escapeHtml(questixImageUrl(view))}" x="${round(x)}" y="${round(y)}" width="${round(width)}" height="${round(height)}" opacity="${opacity}" preserveAspectRatio="none"/>`;
 }
-function sideRobot(x, y, scale = 1, opacity = 1, carriesLoad = false) {
-  const load = carriesLoad ? crate(3, -88, 0.66) : '';
-  return `<g transform="translate(${x} ${y}) scale(${scale})" opacity="${opacity}">${ellipse(0, 2, 52, 7, '#112731aa')}${rect(-43, -55, 85, 34, '#cbdcde', 11)}${rect(-32, -46, 49, 10, '#3b5966', 4)}${rect(-24, -66, 27, 12, '#62818d', 5)}${ellipse(-10, -66, 13, 4, '#9ac4c9')}${rect(33, -53, 18, 14, '#2a5064', 5)}${circle(46, -46, 3, '#aee0ff', 'none')}${circle(-20, -20, 20, '#142c38', '#94adb6', 4)}${circle(-20, -20, 8, '#526f7c', 'none')}${path('M-20-34v7', COLOR.mint, 3)}${circle(30, -8, 8, '#142c38', '#94adb6', 3)}${load}</g>`;
+function topRobot(x, y, heading = 0, scale = 1, opacity = 1) {
+  const size = TOP_SIZE * scale;
+  const {
+    size: [width, height],
+    bounds: [left, top, right, bottom],
+  } = QUESTIX_VIEWS.top;
+  const crop = [left * width, top * height, (right - left) * width, (bottom - top) * height]
+    .map(round)
+    .join(' ');
+  const cue = `M${round(size * 0.48)} ${round(-size * 0.12)}V${round(size * 0.12)}`;
+  const plate = ROBOT_PLATE.replace('{r}', round(size * 0.62));
+  return `<g data-questix-view="top" transform="translate(${x} ${y}) rotate(${heading})" opacity="${opacity}">${plate}<svg x="${round(-size / 2)}" y="${round(-size / 2)}" width="${round(size)}" height="${round(size)}" viewBox="${crop}" preserveAspectRatio="none">${cadImage('top', 0, 0, width, height)}</svg>${path(cue, FRONT_CUE_OUTER, Math.max(3, round(size * 0.08)))}${path(cue, FRONT_CUE_INNER, Math.max(2, round(size * 0.05)))}</g>`;
+}
+// `x` is the middle of the robot, `bottom` the floor its wheels stand on.
+function sideRobot(x, bottom, scale = 1, opacity = 1, view = 'side') {
+  const place = questixSideLayout(x, bottom, SIDE_LENGTH * scale, view);
+  return `<g data-questix-view="${view}">${cadImage(view, place.x, place.y, place.width, place.height, opacity)}</g>`;
 }
 function wheelBench(x, y) {
-  return `<g transform="translate(${x} ${y})">${path('M-66 61H63', COLOR.line, 3)}${rect(-49, 15, 13, 44, '#516f7b', 2)}${rect(39, 15, 13, 44, '#516f7b', 2)}${rect(-60, 9, 121, 9, '#8ba5af', 3)}${rect(-56, -50, 115, 39, '#cbdcde', 10)}${rect(42, -44, 25, 16, '#31556a', 5)}${circle(57, -37, 4, COLOR.blue, 'none')}${circle(-3, 8, 31, '#132b35', '#93aab2', 4)}${circle(-3, 8, 20, '#395963', 'none')}${path('M-3 8L14-6', COLOR.mint, 5)}${circle(-3, 8, 6, '#cbdcde', 'none')}</g>`;
+  return `<g transform="translate(${x} ${y})">${path('M-80 61H80', COLOR.line, 3)}${rect(-55, 2, 12, 58, '#516f7b', 2)}${rect(52, 2, 12, 58, '#516f7b', 2)}${sideRobot(0, 15, 178 / SIDE_LENGTH, 1, 'bench')}${circle(21, 1, 14, 'none', COLOR.mint, 2)}${path('M21 1L29-8', COLOR.mint, 3)}</g>`;
 }
 // The other elbow position that reaches the same tip: the elbow mirrored across the base–tip line.
 function mirrorElbow(base, elbow, tip) {
@@ -105,9 +128,9 @@ const DRAWINGS = {
     text(151, 99, '出力 50 %', COLOR.mint, 22, 'middle') +
     text(450, 99, '出力 0 %', COLOR.gold, 22, 'middle') +
     path('M49 216H254M346 216H552', COLOR.line, 2) +
-    sideRobot(138, 212, 1.02) +
-    sideRobot(411, 212, 1.02) +
-    arrow(178, 180, 238, 180, COLOR.mint) +
+    sideRobot(138, 216, 0.96) +
+    sideRobot(411, 216, 0.96) +
+    arrow(196, 176, 252, 176, COLOR.mint) +
     path('M475 168l16 12-16 12m24-24l16 12-16 12', COLOR.gold, 3) +
     arrow(280, 156, 320, 156, COLOR.muted, 2) +
     text(300, 132, '3秒後', COLOR.muted, 18, 'middle'),
@@ -122,23 +145,26 @@ const DRAWINGS = {
     path('M435 226Q435 252 278 252H134V239', COLOR.blue, 2) +
     path('M126 246l8-8 8 8', COLOR.blue, 2) +
     text(298, 241, '測って調整', COLOR.blue, 18, 'middle'),
-  launch: () =>
-    path('M37 231H565', COLOR.line, 2) +
-    sideRobot(111, 225, 1.04) +
-    rect(143, 134, 12, 36, '#829aa5', 2) +
-    rect(99, 125, 88, 10, '#a9bcc5', 3) +
-    circle(151, 120, 15, '#466575', COLOR.blue, 3) +
-    path('M115 138H188', COLOR.line, 3) +
-    path('M185 130Q310 130 365 230', COLOR.line, 2, '5 7') +
-    path('M185 130Q355 98 501 230', COLOR.mint, 3) +
-    path('M185 130Q392 71 551 230', COLOR.line, 2, '5 7') +
-    ellipse(338, 139, 30, 5, COLOR.gold, '#f4d9a3') +
-    rect(308, 139, 60, 5, COLOR.gold, 2) +
-    ellipse(501, 230, 33, 9, '#e8c27a12', COLOR.gold) +
-    ellipse(501, 230, 15, 4, 'none', COLOR.gold) +
-    text(342, 95, '横向きのディスク', COLOR.ink, 20, 'middle') +
-    path('M188 253H501M188 248v10M501 248v10', COLOR.line, 2) +
-    text(345, 251, '飛距離', COLOR.muted, 18, 'middle'),
+  launch: () => {
+    // The disc leaves from the launcher's outlet on the front of the side view.
+    const { outlet } = questixSideLayout(110, 231, 145);
+    const from = `M${round(outlet.x)} ${round(outlet.y)}`;
+    return (
+      path('M37 231H565', COLOR.line, 2) +
+      sideRobot(110, 231, 145 / SIDE_LENGTH) +
+      path(`${from}Q260 ${round(outlet.y)} 365 231`, COLOR.line, 2, '5 7') +
+      path(`${from}Q330 ${round(outlet.y)} 501 231`, COLOR.mint, 3) +
+      path(`${from}Q354 ${round(outlet.y)} 551 231`, COLOR.line, 2, '5 7') +
+      ellipse(338, 194, 30, 5, COLOR.gold, '#f4d9a3') +
+      rect(308, 194, 60, 5, COLOR.gold, 2) +
+      ellipse(501, 231, 33, 9, '#e8c27a12', COLOR.gold) +
+      ellipse(501, 231, 15, 4, 'none', COLOR.gold) +
+      text(342, 117, '横向きのディスク', COLOR.ink, 20, 'middle') +
+      path('M338 129V174', COLOR.line, 2) +
+      path(`M${round(outlet.x)} 253H501M${round(outlet.x)} 248v10M501 248v10`, COLOR.line, 2) +
+      text(342, 251, '飛距離', COLOR.muted, 18, 'middle')
+    );
+  },
   arm: () =>
     path('M63 248H543', COLOR.line, 2) +
     rect(128, 194, 94, 54, '#617f8b', 5) +
@@ -211,7 +237,9 @@ const DRAWINGS = {
     path('M40 83H560M40 177H560', COLOR.line, 1) +
     path('M299 225L428 129', COLOR.blue, 2, '4 6') +
     topRobot(299, 234, -90, 0.85) +
-    topRobot(430, 130, 180, 0.92) +
+    // The other robot looks the same: a grey dashed ring and its name tell it apart.
+    '<circle cx="430" cy="130" r="44" fill="#aebec520" stroke="#aebec5" stroke-width="2" stroke-dasharray="5 4"/>' +
+    topRobot(430, 130, 180, 0.92, 0.85) +
     circle(430, 130, 5, COLOR.blue, '#c6dfff', 2) +
     arrow(383, 130, 324, 130, COLOR.muted, 3) +
     circle(273, 130, 33, 'none', COLOR.gold, 2) +
@@ -254,7 +282,9 @@ const DRAWINGS = {
     rect(504, 191, 9, 47, '#546f7c', 2) +
     crate(465, 151, 1.1) +
     rect(433, 114, 64, 68, 'none', 4, COLOR.gold) +
-    sideRobot(128, 234, 1.22) +
+    // The chassis alone carries the arm on a short post.
+    sideRobot(128, 239, 160 / SIDE_LENGTH, 1, 'base') +
+    rect(116, 168, 22, 48, '#607d86', 3) +
     arm([125, 168], [219, 79], [387, 126]) +
     path('M177 179L433 114M177 179L433 182', '#98bee96b', 2, '4 5') +
     arrow(177, 179, 230, 179, COLOR.blue, 2) +
