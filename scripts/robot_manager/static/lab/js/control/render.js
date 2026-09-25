@@ -341,6 +341,19 @@ const COMPARED_DASHES = ['10 4', '4 3', '12 3 2 3', '2 3 8 3', '16 4'];
 const LIVE_COMMAND = { dash: '6 4', width: 1.5 };
 
 const TIME_TICKS = [0, 4, 8, 12, 16]; // seconds
+
+// The time axis: the simulated run's fixed 16 s, or — with only real recordings on the chart — the
+// recordings' own length in round steps, so a 6 s step response is not squeezed into the left third.
+function timeAxis(run, live, compared) {
+  if (run) return { span: DURATION, ticks: TIME_TICKS };
+  const ends = [live, ...compared.map((entry) => entry.run)]
+    .filter(Boolean)
+    .map((recorded) => recorded.samples.at(-1)?.time)
+    .filter(Number.isFinite);
+  if (!ends.length) return { span: DURATION, ticks: TIME_TICKS };
+  const scale = niceScale([0, Math.max(...ends)], { integer: true, padding: 0, ticks: 4 });
+  return { span: scale.max, ticks: scale.ticks };
+}
 const REVEAL_OVERHANG = 2; // px of clip added so the line's cap is not cut off
 const LABEL_GAP = 15; // px kept between two labels at the right edge
 const EVENT_LABEL_OFFSET = 6; // px between an event line and its label
@@ -636,7 +649,8 @@ function controlChart({
     fallback, // in the run's units: chartScale applies `factor` to every value itself
     factor,
   });
-  const x = (seconds) => left + (seconds / DURATION) * plotWidth;
+  const time = timeAxis(run, live, compared);
+  const x = (seconds) => left + (seconds / time.span) * plotWidth;
   const y = scaleTo(scale, top + plotHeight, top);
   const line = (samples, field) =>
     samples
@@ -696,7 +710,7 @@ function controlChart({
         </text>`;
       })}
       ${eventMarker(marker, { x, top, height: plotHeight, right, copy })}
-      ${TIME_TICKS.map(
+      ${time.ticks.map(
         (seconds) =>
           svg`<text x=${x(seconds)} y=${H - 10} text-anchor="middle">${seconds + '秒'}</text>`,
       )}

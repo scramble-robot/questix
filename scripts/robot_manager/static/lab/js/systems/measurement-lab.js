@@ -195,6 +195,11 @@ const drivesDrive = {
 };
 
 const DRIVES = { holds: holdsDrive, drives: drivesDrive };
+// The run report's numbers that matter for each kind of measurement (live-session reportMetrics).
+const REPORT_METRICS_OF = {
+  holds: ['driveTime', 'distance', 'maxSpeed'],
+  drives: ['distance', 'ended', 'turn'],
+};
 
 // The first recording replaces the worked example (mixing it with real measurements would leave the
 // learner unable to say which number came from where); later recordings add to the real rows, so
@@ -358,6 +363,7 @@ function sessionOf(course) {
         if (shown === course) update();
       },
       drive: DRIVES[live.kind],
+      reportMetrics: REPORT_METRICS_OF[live.kind],
     });
     sessions.set(course, session);
     session.restore();

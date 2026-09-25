@@ -3,15 +3,9 @@ import { loadJson, loadText } from '../core/content.js';
 import { downloadFile } from '../core/dom.js';
 import { lessonGuide, figureGuide } from '../shell/lesson-guide.js';
 import { generateSlamLog, estimateSlam, slamMetrics, validateSlamLog } from './engine.js';
-import { buildSlamLog, slamLogFromFile } from '../live/slam-recorder.js';
-import {
-  recordRobot,
-  recordingFile,
-  liveLink,
-  onLiveLink,
-  PAIR_FRESH_MS,
-} from '../live/capture.js';
-import { pairByStamp, missingInRecording } from '../live/recording-core.js';
+import { slamLogFromFile, slamLogFromRecording } from '../live/slam-recorder.js';
+import { recordRobot, recordingFile, liveLink, onLiveLink } from '../live/capture.js';
+import { missingInRecording } from '../live/recording-core.js';
 import { openRobotDialog } from '../live/live-ui.js';
 import { basicsTemplate, initSlamBasics, reviewSlamBasics } from './basics.js';
 import { drawMaps, drawSensorChart, drawTilt, tiltAcceleration } from './render.js';
@@ -380,13 +374,10 @@ function parseLogJson(text) {
 // The live recording is a questix-lab-recording like every other course's, turned into the SLAM
 // log exactly as a saved one is when it is opened again (slamLogFromFile): scans paired with the
 // wheel feedback of the same moment by their stamps.
-function slamLogFromRecording(recorded) {
+function slamLogOfRecording(recorded) {
   if (missingInRecording(recorded, ['scan', 'drive']).length)
     throw Error(copy.hardware.recordMissing);
-  const samples = pairByStamp(recorded, 'scan', ['drive'], PAIR_FRESH_MS / 1000).filter(
-    (sample) => sample.drive,
-  );
-  return buildSlamLog(samples, recorded.config);
+  return slamLogFromRecording(recorded);
 }
 
 // Without a robot on the other end this reports why nothing was recorded.
@@ -407,7 +398,7 @@ async function toggleRecording() {
         update();
       },
     });
-    const converted = slamLogFromRecording(recorded);
+    const converted = slamLogOfRecording(recorded);
     const motion = converted.moved ? '' : copy.hardware.recordedWithoutMotion;
     acceptLog(
       converted.log,

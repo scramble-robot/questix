@@ -634,6 +634,7 @@ const liveSessions = {
     apply: (recording) => applyRecording('speed', recording),
     update: () => update(),
     drive: speedDrive,
+    reportMetrics: ['driveTime', 'distance', 'maxSpeed', 'stop'], // what the step run is about
   }),
   distance: createLiveSession({
     slot: 'control-distance',
@@ -645,6 +646,7 @@ const liveSessions = {
     apply: (recording) => applyRecording('distance', recording),
     update: () => update(),
     drive: wallDrive,
+    reportMetrics: ['distance', 'closest', 'stop'], // how it came to rest at the wall
   }),
 };
 
