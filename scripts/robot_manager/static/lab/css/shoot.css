@@ -1,0 +1,183 @@
+/* Firing discs from a lesson (js/live/shoot-view.js): the launcher block, and the stop bar that
+   every page shows while a roller turns. The block reuses the driving block's parts (css/live.css:
+   .drive-block, .drive-confirm, .drive-stop, .drive-bar …); only what differs is here. */
+
+.launch-shoot {
+  margin-top: 24px;
+  padding: 24px;
+}
+.launch-shoot h2 {
+  margin-top: 0;
+}
+@media (max-width: 600px) {
+  .launch-shoot {
+    padding: 18px;
+  }
+}
+
+.shoot-sliders {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px 20px;
+}
+.shoot-slider {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 4px 12px;
+  font-weight: 600;
+}
+.shoot-slider input {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  width: 100%;
+  min-height: 32px;
+  accent-color: var(--orange);
+}
+.shoot-slider output {
+  font-variant-numeric: tabular-nums;
+  font-size: 18px;
+  color: var(--dark);
+}
+.shoot-sliders .drive-note {
+  grid-column: 1 / -1;
+}
+
+.shoot-run {
+  display: grid;
+  gap: 10px;
+}
+.shoot-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: stretch;
+}
+.shoot-actions button {
+  min-height: 52px;
+  min-width: 160px;
+  font-size: 16px;
+}
+.shoot-fire:not(:disabled) {
+  font-weight: 700;
+  background: var(--green);
+  border-color: var(--green);
+  color: white;
+}
+.shoot-fire:disabled {
+  color: var(--muted);
+}
+/* Side by side on a phone too: the stop and the fire button are one glance apart. */
+@media (max-width: 420px) {
+  .shoot-actions button {
+    flex: 1 1 0;
+    min-width: 0;
+    padding-left: 8px;
+    padding-right: 8px;
+    font-size: 15px;
+  }
+}
+
+/* The spin-up bar: fills while the roller comes up to speed. */
+.shoot-spin {
+  display: grid;
+  gap: 4px;
+}
+.shoot-spin meter {
+  width: 100%;
+  height: 14px;
+}
+
+/* The launcher's own values, big enough to read from a step away. */
+.shoot-state {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+  display: grid;
+  gap: 6px;
+}
+.shoot-state dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px 16px;
+}
+.shoot-state dt {
+  font-size: 13px;
+  color: #4d6469;
+}
+.shoot-state dd {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--dark);
+  font-variant-numeric: tabular-nums;
+}
+.shoot-state-flag {
+  font-weight: 700;
+  color: var(--orange);
+}
+
+/* Rows fired from the lesson, in the launch course's measurement card. */
+.launch-shots {
+  padding: 0 22px;
+  display: grid;
+  gap: 6px;
+}
+.launch-shots h3 {
+  margin: 12px 0 0;
+  font-size: 16px;
+}
+.launch-shots .launch-table {
+  padding: 0;
+  max-height: 360px;
+}
+.launch-shots-waiting {
+  margin: 0;
+  font-weight: 600;
+  color: var(--orange);
+}
+.launch-shots tr.waiting td {
+  background: #fff4e5;
+}
+.launch-shots tr.waiting:not(.launch-shot-entry) td {
+  border-bottom: 0;
+}
+.launch-shot-entry td {
+  white-space: normal;
+  padding-top: 0;
+}
+.launch-shot-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  align-items: center;
+}
+.launch-shot-form label {
+  font-weight: 600;
+}
+.launch-shot-form input {
+  width: 7em;
+  min-height: 40px;
+  font-size: 16px; /* 16 px or more: phones do not zoom into the field */
+}
+.launch-shot-form button {
+  min-height: 40px;
+}
+@media (max-width: 600px) {
+  .launch-shots {
+    padding: 0 16px;
+  }
+}
+
+/* The launcher's stop bar sits above the driving one when both are up. */
+body.driving .shoot-bar-host {
+  bottom: 76px;
+}
+body.shooting,
+body.shooting dialog[open] {
+  padding-bottom: 96px;
+}
+body.driving.shooting,
+body.driving.shooting dialog[open] {
+  padding-bottom: 176px;
+}

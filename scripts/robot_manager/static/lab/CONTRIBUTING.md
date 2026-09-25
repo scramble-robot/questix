@@ -122,6 +122,13 @@ state, which stream is missing, record / stop, open / save.
   `test/recording-core.test.mjs`, `test/rosbag-core.test.mjs`).
 - Derive numbers from the message stamps (`pairByStamp`), never from arrival order: a reopened file
   or a rosbag must give the same result as the live recording.
+- Only `js/live/shoot-link.js` sends launcher frames (`roller`, `roller_stop`, `tilt`, `fire`). A
+  lesson that fires discs puts `${launcherPanel('<place>', { onShot, lesson })}` from
+  `js/live/shoot-ui.js` in its view (it draws itself, like the 「実機の状態」 panel): `onShot({percent,
+tilt, at})` gets each of this page's discs and returns whether the lesson kept a row for it, and
+  `lesson` names the record each session is kept under on the robot. Its rules (buttons, reasons,
+  which fired_count increase was this page's disc) are `js/live/shoot-core.js`
+  (`test/shoot-core.test.mjs`); declare the topic's `drive` run mode as for driving.
 - Only `js/live/drive-link.js` sends drive frames to the robot. The one other frame is `record_save`
   (`saveRecordOnRobot` in `js/live/robot-link.js`): every finished recording is also kept on the
   robot when its bridge offers it (`hello.records`), and `js/live/records-*.js` list and open those

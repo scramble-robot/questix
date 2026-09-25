@@ -313,3 +313,24 @@ test('the cleanup changed no results', async (t) => {
     baseline.launchParseCSV('output_pct,range_m\n40,1.2'),
   );
 });
+
+test('rows fired from the lesson keep their tilt and time through a CSV file', () => {
+  const rows = [
+    { power: 50, range: 1.25, tilt: 30.5, time: '10:51:02' },
+    { power: 60, range: 1.5 },
+  ];
+  const text = launchCSV(rows);
+  assert.equal(
+    text,
+    '﻿source,output_pct,range_m,tilt_deg,time\nmeasured,50,1.2500,30.5,10:51:02\nmeasured,60,1.5000,,',
+  );
+  assert.deepEqual(launchParseCSV(text), [
+    { power: 50, range: 1.25, tilt: 30.5, time: '10:51:02' },
+    { power: 60, range: 1.5 },
+  ]);
+  assert.throws(
+    () => launchParseCSV('output_pct,range_m,tilt_deg\n50,1.2,200'),
+    /2行目の角度は0〜180/,
+  );
+  assert.throws(() => launchParseCSV('output_pct,range_m,time\n50,1.2,noon'), /2行目の時刻/);
+});

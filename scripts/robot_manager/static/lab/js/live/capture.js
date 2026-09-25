@@ -95,7 +95,8 @@ function recordStream({ trigger, pair = [], seconds = DEFAULT_SECONDS, onProgres
 }
 
 /**
- * Record every lesson stream the robot publishes (drive, twist, scan, odom) for `seconds`, as a
+ * Record every lesson stream the robot publishes (drive, twist, scan, odom, and the launcher's
+ * roller and shot) — or only `streams` — for `seconds`, as a
  * recording of recording-core — the shape that is saved, reopened and read from a rosbag, so a
  * lesson has one code path for all three. Progress counts the messages of `countStream`.
  *
@@ -111,6 +112,7 @@ function recordRobot({
   signal,
   finish,
   keepOnLost = false,
+  streams: names = RECORDING_STREAMS,
 } = {}) {
   return new Promise((resolve, reject) => {
     const state = robotState();
@@ -118,7 +120,7 @@ function recordRobot({
       reject(new Error(MESSAGES.notConnected));
       return;
     }
-    const streams = Object.fromEntries(RECORDING_STREAMS.map((name) => [name, []]));
+    const streams = Object.fromEntries(names.map((name) => [name, []]));
     const unsubscribe = [];
     let timer = 0;
     const stop = () => {
@@ -139,7 +141,7 @@ function recordRobot({
         recordedAt: new Date().toISOString(),
         config: state.hello.config,
         topics: Object.fromEntries(
-          RECORDING_STREAMS.map((name) => [name, state.hello.streams?.[name] ?? null]),
+          names.map((name) => [name, state.hello.streams?.[name] ?? null]),
         ),
         streams,
       });
@@ -147,7 +149,7 @@ function recordRobot({
     };
     const abort = () => fail(new Error(MESSAGES.aborted));
     const finished = () => done();
-    for (const name of RECORDING_STREAMS)
+    for (const name of names)
       unsubscribe.push(
         onRobot(name, (message) => {
           streams[name].push(message);

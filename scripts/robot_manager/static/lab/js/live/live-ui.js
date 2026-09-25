@@ -475,7 +475,8 @@ function initLive() {
   showState(robotState());
   showDialogNav();
   // Served by the bridge itself (http://<robot>:8897/): the robot is this very host, so connect right away.
-  // Listening is harmless; only drive-link.js ever sends, and only after its own checks.
+  // Listening is harmless; only drive-link.js and shoot-link.js ever send, and only after their
+  // own checks.
   if (location.protocol === 'http:' && location.port === String(DEFAULT_PORT)) {
     try {
       connectRobot(`ws://${location.host}`);

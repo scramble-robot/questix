@@ -45,6 +45,7 @@
     "motor-bench": "モーター（駆動輪を台の上で回す）",
     "slam": "自己位置推定（実機のログ）",
     "planning-room": "経路計画（測った部屋）",
+    "launch-measure": "射出（実機から1枚発射）",
     "bench": "動作確認",
     "free-drive": "コントローラーで走行",
     "rosbag": "Robot Managerの録画",

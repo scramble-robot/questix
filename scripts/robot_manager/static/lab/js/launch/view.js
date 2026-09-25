@@ -1,4 +1,4 @@
-import { html, nothing, unsafeHTML } from '../vendor/lit-html.js';
+import { html, nothing, unsafeHTML, repeat } from '../vendor/lit-html.js';
 import { formatNumber } from '../core/dom.js';
 import { lessonLabel } from '../shell/lesson-ui.js';
 import { schoolTips } from '../shell/school-tips.js';
@@ -7,6 +7,7 @@ import { runModeBadgeHtml } from '../shell/run-mode.js';
 import { LAUNCH_TOPICS } from './core.js';
 import { launchMechanism, launchChart } from './render.js';
 import { robotStatePanel } from '../live/robot-state.js';
+import { launcherPanel } from '../live/shoot-ui.js';
 import { fillSentence } from '../core/content.js';
 
 // Templates of the disc-launcher course. Every function is pure: it turns the model built by
@@ -356,7 +357,9 @@ function experimentBody(model, copy, fragments, actions) {
 }
 
 function measurementTable(measurement, copy) {
-  if (!measurement.rows.length) return html`<p>${copy.measurement.empty}</p>`;
+  // Discs fired but not measured yet are listed under 教材から発射した1枚ごとの記録.
+  if (!measurement.rows.length)
+    return measurement.waiting ? nothing : html`<p>${copy.measurement.empty}</p>`;
   return html`<table>
     <thead>
       <tr>
@@ -378,6 +381,79 @@ function measurementTable(measurement, copy) {
       )}
     </tbody>
   </table>`;
+}
+
+// The distance of a fired disc still to be typed: a row of its own under the shot (full width, so
+// the field and its button fit on a phone), with its own small form, so Enter or 「記録」 records
+// that row. The field keeps what the learner types across redraws (no value binding), and
+// `repeat` keeps each row's field.
+function shotRangeRow(row, number, copy, actions) {
+  const label = fillSentence(copy.measurement.shotRangeLabel, { count: String(number) });
+  return html`<tr class="waiting launch-shot-entry">
+    <td colspan="5">
+      <form class="launch-shot-form" @submit=${(event) => actions.setShotRange(row.id, event)}>
+        <label for=${'launchShotRange' + row.id}>${label}</label>
+        <input
+          id=${'launchShotRange' + row.id}
+          name="range"
+          type="number"
+          min="0"
+          max="30"
+          step="0.01"
+          inputmode="decimal"
+          placeholder="例：1.25"
+          required
+          data-launch-shot-range=${row.id}
+        /><button type="submit" class="small">記録</button>
+      </form>
+    </td>
+  </tr>`;
+}
+
+function shotRows(row, number, copy, actions) {
+  const measured = Number.isFinite(row.range);
+  return html`<tr data-launch-shot=${row.id} class=${measured ? '' : 'waiting'}>
+      <td>${number}</td>
+      <td>${row.time}</td>
+      <td>${row.power}%</td>
+      <td>${Number.isFinite(row.tilt) ? `${formatNumber(row.tilt, 1)}°` : '—'}</td>
+      <td>${measured ? `${formatNumber(row.range, 2)} m` : copy.measurement.shotWaiting}</td>
+    </tr>
+    ${measured ? nothing : shotRangeRow(row, number, copy, actions)}`;
+}
+
+function shotsTable(measurement, copy, actions) {
+  if (!measurement.shots.length) return nothing;
+  const waiting = measurement.waiting
+    ? html`<p class="launch-shots-waiting">
+        ${fillSentence(copy.measurement.shotsWaiting, { count: String(measurement.waiting) })}
+      </p>`
+    : nothing;
+  return html`<div class="launch-shots" data-launch-shots>
+    <h3>${copy.measurement.shotsTitle}</h3>
+    <p class="helper">${copy.measurement.shotsNote}</p>
+    ${waiting}
+    <div class="launch-table launch-shots-table">
+      <table>
+        <thead>
+          <tr>
+            <th>枚</th>
+            <th>時刻</th>
+            <th>出力</th>
+            <th>角度</th>
+            <th>距離</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${repeat(
+            measurement.shots,
+            (row) => row.id,
+            (row, index) => shotRows(row, index + 1, copy, actions),
+          )}
+        </tbody>
+      </table>
+    </div>
+  </div>`;
 }
 
 function measurementCard(measurement, chartWidth, copy, actions) {
@@ -404,6 +480,7 @@ function measurementCard(measurement, chartWidth, copy, actions) {
     ${chartLegend(copy, { role: 'measured', target: measurement.chartTarget })}
     <p>${copy.measurement.chartNote}</p>
     <div id="launchMeasuredRows" class="launch-table">${measurementTable(measurement, copy)}</div>
+    ${shotsTable(measurement, copy, actions)}
     <div class="launch-file-row">
       <button
         id="launchMeasuredExport"
@@ -517,6 +594,14 @@ function robotStateCard(copy) {
   </section>`;
 }
 
+// Firing from the lesson (js/live/shoot-ui.js draws the block itself): each disc fired here adds
+// a row to the table above, waiting for the distance measured with a tape.
+function shootCard(actions) {
+  return html`<section class="card launch-shoot">
+    ${launcherPanel('launch-measure', { onShot: actions.addShot, lesson: 'launch-measure' })}
+  </section>`;
+}
+
 function measurementBody(model, copy, fragments, actions) {
   return html`<div class="launch-layout">
       ${measurementCard(model.measurement, model.chartWidth, copy, actions)}${measurementPanel(
@@ -525,7 +610,7 @@ function measurementBody(model, copy, fragments, actions) {
         actions,
       )}
     </div>
-    ${robotStateCard(copy)}
+    ${shootCard(actions)} ${robotStateCard(copy)}
     <section class="card launch-reflection">${unsafeHTML(fragments.measureReflection)}</section>`;
 }
 

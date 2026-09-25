@@ -238,3 +238,61 @@ test('saved files are named after lesson, group, robot, conditions and time', ()
     'QUESTiX-LAB-bench-20260925-090000.json',
   );
 });
+
+// --- the launcher's statuses (roller, shot), optional streams since 2026-09 --------------------
+
+const roller = (stamp, command, source = 'lab') => ({
+  type: 'roller',
+  stamp,
+  command,
+  source,
+  lab_accepted: true,
+  lab_locked: false,
+  estop: false,
+});
+const shot = (stamp, count, tilt = 30) => ({
+  type: 'shot',
+  stamp,
+  tilt_deg: tilt,
+  shooting: false,
+  fired_count: count,
+  last_fire_source: 'lab',
+});
+
+test("a recording keeps the launcher's roller and shot statuses, and older files stay valid", () => {
+  const launcher = makeRecording({
+    ...sample(),
+    streams: {
+      drive: [drive(10.0, 0)],
+      roller: [roller(10.4, 0.5), roller(10.2, 0.5)],
+      shot: [shot(10.3, 1)],
+    },
+  });
+  assert.deepEqual(
+    launcher.streams.roller.map((message) => message.stamp),
+    [10.2, 10.4],
+  );
+  assert.deepEqual(parseRecording(serializeRecording(launcher)), launcher);
+  assert.deepEqual(recordingSummary(launcher).counts, { drive: 1, roller: 2, shot: 1 });
+  // A file written before the launcher streams existed reads back unchanged.
+  const old = sample();
+  assert.equal(parseRecording(serializeRecording(old)).streams.roller, undefined);
+  const broken = { ...sample(), streams: { roller: 'many' } };
+  assert.throws(() => parseRecording(JSON.stringify(broken)), /roller が一覧/);
+});
+
+test('the per-message CSV has columns for the roller command and the tilt', () => {
+  const launcher = makeRecording({
+    ...sample(),
+    streams: { roller: [roller(1.0, 0.5, 'joy,"x')], shot: [shot(1.1, 3, 42.5)] },
+  });
+  const lines = recordingCSV(launcher).replace(/^﻿/, '').trim().split('\n');
+  const header = lines[0].split(',');
+  const rows = lines.slice(1).map((line) => line.split(','));
+  assert.equal(rows[0][header.indexOf('roller_command')], '0.5');
+  assert.equal(rows[0][header.indexOf('roller_source')], '', 'an odd word is left out');
+  assert.equal(rows[1][header.indexOf('tilt_deg')], '42.5');
+  assert.equal(rows[1][header.indexOf('fired_count')], '3');
+  assert.equal(rows[1][header.indexOf('shooting')], '0');
+  assert.ok(rows.every((row) => row.length === header.length));
+});

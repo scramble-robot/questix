@@ -44,6 +44,7 @@ const MAX_RANGE = 30; // metres: longest flight distance a learner may record
 const MAX_CSV_CHARS = 100000; // 100 KB of measurement CSV
 const MAX_CSV_ROWS = 300;
 const UNSIGNED_DECIMAL = /^(?:\d+(?:\.\d*)?|\.\d+)$/;
+const MAX_TILT = 180; // degrees: the widest tilt a row read from a file may name
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
@@ -251,6 +252,27 @@ function launchEstimate(rows, target) {
   };
 }
 
+// Optional columns of a file saved from the real-robot table: the tilt of the shot [deg] and the
+// time it was fired (「10:51:02」). Empty cells are allowed (rows typed in by hand have neither).
+const CLOCK = /^\d{1,2}:\d{2}(?::\d{2})?$/;
+
+function parseShotDetails(cells, columns, lineNumber) {
+  const details = {};
+  const tilt = columns.tilt >= 0 ? cells[columns.tilt] : '';
+  const time = columns.time >= 0 ? cells[columns.time] : '';
+  if (tilt) {
+    if (!UNSIGNED_DECIMAL.test(tilt) || Number(tilt) > MAX_TILT)
+      throw new Error(lineNumber + '行目の角度は0〜180の数値で入力してください。');
+    details.tilt = Number(tilt);
+  }
+  if (time) {
+    if (!CLOCK.test(time))
+      throw new Error(lineNumber + '行目の時刻は 10:51:02 の形で入力してください。');
+    details.time = time;
+  }
+  return details;
+}
+
 function parseMeasurementRow(cells, columnCount, columns, lineNumber) {
   if (cells.length !== columnCount || !cells[columns.power] || !cells[columns.range])
     throw new Error(lineNumber + '行目に出力と飛距離がありません。');
@@ -259,7 +281,11 @@ function parseMeasurementRow(cells, columnCount, columns, lineNumber) {
     throw new Error('模擬データは実機の測定として読み込めません。');
   if (!UNSIGNED_DECIMAL.test(cells[columns.power]) || !UNSIGNED_DECIMAL.test(cells[columns.range]))
     throw new Error(lineNumber + '行目は数値だけで入力してください。');
-  return { power: Number(cells[columns.power]), range: Number(cells[columns.range]) };
+  return {
+    power: Number(cells[columns.power]),
+    range: Number(cells[columns.range]),
+    ...parseShotDetails(cells, columns, lineNumber),
+  };
 }
 
 function launchParseCSV(text) {
@@ -275,6 +301,8 @@ function launchParseCSV(text) {
     power: header.indexOf('output_pct'),
     range: header.indexOf('range_m'),
     source: header.indexOf('source'),
+    tilt: header.indexOf('tilt_deg'),
+    time: header.indexOf('time'),
   };
   if (columns.power < 0 || columns.range < 0)
     throw new Error('1行目に output_pct,range_m の列名が必要です。');
@@ -289,14 +317,26 @@ function launchParseCSV(text) {
   return rows;
 }
 
-const CSV_HEADER = '﻿source,output_pct,range_m\n'; // BOM so spreadsheets read UTF-8
+const CSV_HEADER = '﻿source,output_pct,range_m'; // BOM so spreadsheets read UTF-8
+const SHOT_COLUMNS = ',tilt_deg,time'; // only when a row came from a shot of the real launcher
 const RANGE_DECIMALS = 4; // sub-millimetre: past anything a learner can measure, but lossless here
 
+const hasShotDetails = (row) => Number.isFinite(row.tilt) || Boolean(row.time);
+
+/**
+ * The rows as CSV (`source` names where they came from). Rows fired from the lesson also carry
+ * their tilt and time; a table without such rows keeps the three columns it always had.
+ */
 function launchCSV(rows, source = 'measured') {
+  const details = rows.some(hasShotDetails);
   const body = rows
-    .map((row) => [source, row.power, row.range.toFixed(RANGE_DECIMALS)].join(','))
+    .map((row) => {
+      const cells = [source, row.power, row.range.toFixed(RANGE_DECIMALS)];
+      if (details) cells.push(Number.isFinite(row.tilt) ? row.tilt : '', row.time ?? '');
+      return cells.join(',');
+    })
     .join('\n');
-  return CSV_HEADER + body;
+  return CSV_HEADER + (details ? SHOT_COLUMNS : '') + '\n' + body;
 }
 
 // --- What the scene and the record chart share ---------------------------------------------------

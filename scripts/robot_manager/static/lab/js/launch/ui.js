@@ -80,7 +80,10 @@ let chartWidth = CHART_MAX_WIDTH;
 const measurements = {
   // 'measured' (the learner's rows) or 'example'; the example is shown until there are real rows.
   source: 'example',
+  // `{power, range}` typed or read from a CSV; a disc fired from the lesson (js/live/shoot-ui.js)
+  // adds `{id, power, range: null, tilt, time, shot: true}` and the learner types its range.
   measured: [],
+  focusShot: null, // id of the row whose distance field takes the focus after the next render
   target: DEFAULT_MEASUREMENT_TARGET,
   importStatus: '',
 };
@@ -135,13 +138,20 @@ function statusText() {
   });
 }
 
+// A row fired from the lesson waits for its distance (`range: null`) and stays out of the chart
+// and the estimate until the learner has typed it.
+const hasRange = (row) => Number.isFinite(row.range);
+
 function measurementModel() {
   const measuredShown = measurements.source === 'measured';
-  const rows = measuredShown ? measurements.measured : EXAMPLE_MEASUREMENTS;
+  const rows = (measuredShown ? measurements.measured : EXAMPLE_MEASUREMENTS).filter(hasRange);
   const target = measurements.target;
   return {
     source: measurements.source,
     rows,
+    // The discs fired from the lesson, with their time and tilt (the table the learner completes).
+    shots: measuredShown ? measurements.measured.filter((row) => row.shot) : [],
+    waiting: measuredShown ? measurements.measured.filter((row) => !hasRange(row)).length : 0,
     estimate: launchEstimate(rows, target),
     target,
     chartTarget: Number.isFinite(target) && target > 0 ? target : null,
@@ -424,6 +434,73 @@ async function importCsv(event) {
   if (topicId === 'measure') update();
 }
 
+// --- discs fired from the lesson (js/live/shoot-ui.js) ----------------------------------------
+
+let nextShotId = 1;
+const TILT_DECIMALS = 1;
+
+function clockText(date) {
+  const pad = (value) => String(value).padStart(2, '0');
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+// The distance field of the row waiting first, focused after the page has been drawn, so the
+// learner types the measured range straight into it.
+function focusWaitingShot() {
+  const id = measurements.focusShot;
+  measurements.focusShot = null;
+  if (id === null || topicId !== 'measure' || page().hidden) return;
+  document.querySelector(`[data-launch-shot-range="${id}"]`)?.focus();
+}
+
+/**
+ * One of this page's discs left the launcher (`percent` roller power, `tilt` degrees, `at` a
+ * Date): a row waiting for its distance. Returns false when the table is full.
+ */
+function addShot({ percent, tilt, at }) {
+  if (measurements.measured.length >= MAX_MEASUREMENTS) return false;
+  const row = {
+    id: nextShotId++,
+    power: percent,
+    range: null,
+    tilt: Number.isFinite(tilt) ? Number(tilt.toFixed(TILT_DECIMALS)) : null,
+    time: clockText(at),
+    shot: true,
+  };
+  measurements.measured.push(row);
+  const switched = measurements.source !== 'measured';
+  measurements.source = 'measured';
+  measurements.focusShot = row.id;
+  if (topicId === 'measure') {
+    const count = measurements.measured.filter((entry) => entry.shot).length;
+    const added = fillSentence(copy.measurement.shotAdded, { count: String(count) });
+    measurements.importStatus = switched ? `${added}${copy.measurement.shotSwitched}` : added;
+    update();
+    focusWaitingShot();
+  }
+  return true;
+}
+
+/** The learner typed the distance of fired row `id` (its small form was submitted). */
+function setShotRange(id, event) {
+  event.preventDefault();
+  const row = measurements.measured.find((entry) => entry.id === id);
+  const field = event.currentTarget.elements.range;
+  if (!row || !field) return;
+  try {
+    if (!field.value.trim()) throw new Error(copy.measurement.rangeRequired);
+    const range = Number(field.value);
+    launchGroups([{ power: row.power, range }]); // the learner's message for 0-30 m
+    row.range = range;
+    measurements.importStatus = copy.measurement.added;
+    measurements.focusShot = measurements.measured.find((entry) => !hasRange(entry))?.id ?? null;
+  } catch (error) {
+    measurements.importStatus = error.message;
+  }
+  update();
+  focusWaitingShot();
+}
+
 const actions = {
   openTopic,
   launch,
@@ -473,10 +550,13 @@ const actions = {
     measurements.target = metres;
     update();
   },
+  addShot,
+  setShotRange,
   saveMeasurementsCsv() {
     const measured = measurements.source === 'measured';
     const name = `QUESTiX-LAB-射出-${measured ? '実測' : '入力例'}.csv`;
-    const rows = measured ? measurements.measured : EXAMPLE_MEASUREMENTS;
+    // A disc whose distance has not been typed yet is not a measurement yet.
+    const rows = (measured ? measurements.measured : EXAMPLE_MEASUREMENTS).filter(hasRange);
     downloadFile(name, launchCSV(rows, measured ? 'measured' : 'example'), CSV_TYPE);
   },
   saveCsvTemplate() {

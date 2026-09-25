@@ -106,7 +106,22 @@ mode), the E-stop released, and the learner's safety tick on the page. The bridg
 safety rule itself (`questix_lab_bridge/README.md`, "Driving experiments"); the page only shows them.
 `js/live/drive-core.js` (readiness, programs, odometry goals) and `js/control/live-drive.js` (step,
 wall PID) are DOM-free and tested (`test/drive-core.test.mjs`, `test/control-live-drive.test.mjs`);
-`js/live/drive-link.js` is the only module that sends anything to the robot.
+`js/live/drive-link.js` is the only module that sends drive frames to the robot.
+
+The launch course's 実機の測定で確かめる can also **fire discs** from the page (「教材からローラーを回して
+1枚ずつ発射する」, `js/live/shoot-*.js`): the learner ticks 「発射する方向と的の周りに人がいない・ディスクを
+1枚だけ入れた」 (cleared after every shot), sets the roller power and the tilt, presses 「ローラーを回す」
+(a toggle kept alive by a 10 Hz heartbeat, so a hand stays free for 「1枚発射」) and, once the
+spin-up bar is full, 「1枚発射」. Each disc adds a row with power, tilt and time to the topic's table,
+with its distance field focused for the measured range, and the session (the `roller` / `shot`
+statuses) is kept on the robot as a record. The roller stops by itself after each shot, and on the
+learner's stop, Esc, a hidden page, a stalled page, a lost link, the stop bar (any page), and
+whatever the bridge ends it for (controller, E-stop, dead-man, 30 s). It needs the bridge's
+`allow_shoot` (Robot Manager's 教材からの発射) and the launcher nodes started with
+`accept_lab_input`; otherwise the topic works with typed data as before and says why in one line.
+The bridge enforces every rule itself (`questix_lab_bridge/README.md`, "Launcher experiments");
+`js/live/shoot-core.js` mirrors them for the page and is tested (`test/shoot-core.test.mjs`), and
+`js/live/shoot-link.js` is the only module that sends launcher frames.
 
 Where learners measure on the robot (motor 実物で確かめる, launch 実機の測定で確かめる, the measurement
 lab's robot part, planning 測った部屋, control's live card) the **「実機の状態」 panel**

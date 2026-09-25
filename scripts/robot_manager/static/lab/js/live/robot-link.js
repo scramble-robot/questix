@@ -1,9 +1,10 @@
 // Live link to a real QUESTiX robot (questix_lab_bridge, protocol 1).
 // The page listens to the robot's streams. The only frames it ever sends are the drive/stop
-// requests of js/live/drive-link.js (sendRobot below is for that module alone), which the bridge
-// accepts only when it was started with allow_drive and its own checks pass, and `record_save`
-// (saveRecordOnRobot below): a finished recording handed to the bridge to keep on the robot,
-// which moves nothing.
+// requests of js/live/drive-link.js and the launcher requests (roller / roller_stop / tilt / fire)
+// of js/live/shoot-link.js (sendRobot below is for those two modules alone), which the bridge
+// accepts only when it was started with allow_drive / allow_shoot and its own checks pass, and
+// `record_save` (saveRecordOnRobot below): a finished recording handed to the bridge to keep on the
+// robot, which moves nothing.
 // Units follow REP-103: metres, radians, seconds; x forward, y left, theta counter-clockwise.
 //
 // No DOM here (only WebSocket, localStorage and location, each read when used), so the connection
@@ -35,7 +36,10 @@ const FULL_RETRY_MS = 15000;
 const STOPPED_AFTER_FAILURES = 3;
 // Connected, but no stream has delivered anything for this long (milliseconds).
 const SILENT_MS = 4000;
-const STREAMS = ['scan', 'odom', 'drive', 'twist', 'camera'];
+const STREAMS = ['scan', 'odom', 'drive', 'twist', 'roller', 'shot', 'camera'];
+// The bridge's own state frames: kept as the latest of their type like a stream. `shoot_refused`
+// is an answer to this page only; it is passed on but not kept.
+const STATES = ['drive_state', 'shoot_state'];
 // Keep in sync with the bridge's incoming size limit for record_save (8 MiB).
 const MAX_SAVE_BYTES = 8 * 1024 * 1024;
 // A save the bridge has not answered by then is reported as failed (the bridge writes the file
@@ -82,7 +86,8 @@ function setState(patch) {
   emit('state', state);
 }
 
-// Subscribe to 'state', 'status', 'drive_state', or a stream name; returns the unsubscribe function.
+// Subscribe to 'state', 'status', 'drive_state', 'shoot_state', 'shoot_refused' or a stream name;
+// returns the unsubscribe function.
 function onRobot(type, fn) {
   if (!listeners.has(type)) listeners.set(type, new Set());
   listeners.get(type).add(fn);
@@ -309,7 +314,8 @@ function handleText(text) {
   else if (message.type === 'record_saved') answerSave(null, String(message.id ?? ''));
   else if (message.type === 'record_error')
     answerSave(new Error(String(message.message || copy.save.off)));
-  else if (message.type === 'drive_state' || STREAMS.includes(message.type)) {
+  else if (message.type === 'shoot_refused') emit(message.type, message);
+  else if (STATES.includes(message.type) || STREAMS.includes(message.type)) {
     latest.set(message.type, message);
     emit(message.type, message);
   }
@@ -398,7 +404,8 @@ function connectRobot(text) {
   state = { ...state, message: '', problem: '', everOpened: false, failures: 0, closeCode: null };
   open(url);
 }
-// For js/live/drive-link.js only: lessons go through its checks, never through this function.
+// For js/live/drive-link.js and js/live/shoot-link.js only: lessons go through their checks,
+// never through this function.
 // Returns false when the frame could not be sent (no open connection).
 function sendRobot(message) {
   if (!socket || socket.readyState !== WebSocket.OPEN || state.phase !== 'open') return false;

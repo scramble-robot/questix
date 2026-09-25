@@ -65,3 +65,4 @@ import './shell/series-covers.js';
 import './shell/series.js';
 import './live/live-ui.js';
 import './live/drive-ui.js';
+import './live/shoot-ui.js';

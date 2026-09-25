@@ -9,6 +9,8 @@
 //   config: { wheel_radius, wheel_separation },       // metres, as the bridge's hello reports it
 //   topics: { drive: '/drive_status', ... },            // the ROS topic behind each stream
 //   streams: { drive: [...], twist: [...], scan: [...], odom: [...] }
+//   // roller / shot (the launcher's /roller/status and /shot/status, since 2026-09) are optional
+//   // like every stream: older files lack them, and readers that do not need them ignore them.
 //   // optional, written since 2026-09 (older files simply lack them; readers fall back):
 //   lesson: 'control-speed',                            // the lesson / slot it was made for
 //   conditions: { speed: 0.2, label: '0.20 m/s' },      // the lesson's drive.conditions() + label
@@ -33,7 +35,7 @@ import {
 
 const RECORDING_FORMAT = 'questix-lab-recording';
 const RECORDING_VERSION = 1;
-const RECORDING_STREAMS = ['drive', 'twist', 'scan', 'odom'];
+const RECORDING_STREAMS = ['drive', 'twist', 'scan', 'odom', 'roller', 'shot'];
 const MAX_RECORDING_MESSAGES = 200000; // about 45 minutes of every stream at the bridge's rates
 
 const recordingError = (text) => new Error(text);
@@ -314,7 +316,16 @@ const CSV_COLUMNS = [
   ['y_m', (message, stream) => (isOdom(stream) ? message.y : '')],
   ['theta_rad', (message, stream) => (isOdom(stream) ? message.theta : '')],
   ['front_m', (message, stream) => (stream === 'scan' ? frontDistance(message) : '')],
+  // The launcher: roller command 0..1 and who gave it, the measured tilt, the shot counter.
+  ['roller_command', (message, stream) => (stream === 'roller' ? message.command : '')],
+  ['roller_source', (message, stream) => (stream === 'roller' ? csvWord(message.source) : '')],
+  ['tilt_deg', (message, stream) => (stream === 'shot' ? message.tilt_deg : '')],
+  ['shooting', (message, stream) => (stream === 'shot' ? Number(message.shooting === true) : '')],
+  ['fired_count', (message, stream) => (stream === 'shot' ? message.fired_count : '')],
 ];
+
+// A word from a status message, kept only when it cannot break the CSV (joy / lab / idle).
+const csvWord = (value) => (typeof value === 'string' && /^[a-z_]+$/.test(value) ? value : '');
 
 const csvCell = (value) =>
   value === null || value === undefined || Number.isNaN(value) ? '' : String(value);

@@ -2,6 +2,8 @@ import { html, nothing } from '../vendor/lit-html.js';
 import { fillSentence as fill } from '../core/content.js';
 import { recordsCopy as copy, lessonName, megabytes, BAG_MAX_SECONDS } from './records-core.js';
 import { driveReportView } from './drive-report-view.js';
+import { launcherRecordSummary } from './shoot-core.js';
+import { launcherRecordView } from './shoot-view.js';
 
 // Templates of 記録の一覧 (records-ui.js) and of the 「ロボットの記録から選ぶ」 picker
 // (record-picker.js): pure functions of the model those modules build. The pieces both show — one
@@ -136,6 +138,12 @@ function itemStatus(item) {
 // history of the 実機 dialog.
 function itemReport(item, actions) {
   if (!item.open || !item.run) return nothing;
+  // A launcher session (js/live/shoot-ui.js) did not drive: its roller and tilt instead.
+  const launcher = item.run.slot === 'launch-measure' && launcherRecordSummary(item.run.recording);
+  if (launcher)
+    return html`<div class="records-report" data-records-report=${item.key}>
+      ${launcherRecordView(launcher)}
+    </div>`;
   return html`<div class="records-report" data-records-report=${item.key}>
     ${driveReportView(item.run, { saveRun: (id, kind) => actions.save(item.key, kind) })}
   </div>`;

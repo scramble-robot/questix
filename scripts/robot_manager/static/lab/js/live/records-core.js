@@ -185,8 +185,11 @@ function normalizeEntry(raw) {
 /** The streams a bag holds, from its topic names. */
 function bagStreams(topics) {
   const names = Array.isArray(topics) ? topics.filter((topic) => typeof topic === 'string') : [];
-  return RECORDING_STREAMS.filter((stream) =>
-    names.some((topic) => topic === BAG_TOPICS[stream] || topic.endsWith(BAG_TOPICS[stream])),
+  // Only the streams a bag is converted into (the launcher's statuses are not).
+  return RECORDING_STREAMS.filter(
+    (stream) =>
+      BAG_TOPICS[stream] &&
+      names.some((topic) => topic === BAG_TOPICS[stream] || topic.endsWith(BAG_TOPICS[stream])),
   );
 }
 
