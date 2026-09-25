@@ -75,7 +75,10 @@ def expand(monkeypatch, tmp_path):
     return run
 
 
-@pytest.mark.parametrize('controller', ['uart', 'dualshock'])
+DRIVERS = {'uart': 'uart_joy_driver', 'dualshock': 'joy_node', 'web': 'web_joy_driver'}
+
+
+@pytest.mark.parametrize('controller', ['uart', 'dualshock', 'web'])
 @pytest.mark.parametrize('gated', ['true', 'false'])
 def test_integrated_profile_and_topic_overrides(expand, tmp_path, controller, gated):
     """A saved profile reaches all consumers and cannot undo the GPIO topic gate."""
@@ -96,8 +99,38 @@ def test_integrated_profile_and_topic_overrides(expand, tmp_path, controller, ga
         assert nodes['/' + node]['joy_topic'] == ('/joy_gated' if gated == 'true' else '/joy')
     assert nodes['/shot_component']['tilt_servo_id'] == 11  # hardware settings preserved
     assert nodes['/drive_component']['cmd_timeout_sec'] == 1.0  # watchdog preserved
-    driver = 'uart_joy_driver' if controller == 'uart' else 'joy_node'
+    driver = DRIVERS[controller]
     assert nodes['/' + driver]['deadzone'] == profile[driver]['ros__parameters']['deadzone']
+    assert not (set(DRIVERS.values()) - {driver}) & set(nodes)  # only the selected driver
+
+
+def test_web_profile_is_packaged_and_reaches_the_browser_driver(expand, tmp_path):
+    """controller_type=web resolves controls.web.yaml (tilt on buttons) for every consumer."""
+    nodes = expand('launcher/launch/questix_core.launch.xml', controller_type='web',
+                   enable_gpio_ref='true', enable_lidar='false', enable_rviz='false')
+    shot = nodes['/shot_component']
+    assert (shot['tilt_up_axis'], shot['tilt_down_axis']) == (-1, -1)
+    assert (shot['tilt_up_button_index'], shot['tilt_down_button_index']) == (4, 6)
+    assert nodes['/esc_motor_control']['full_speed_button'] == 7
+    web = nodes['/web_joy_driver']
+    assert web['deadzone'] == 0.05
+    assert web['port'] == 8899 and web['message_timeout_sec'] == 0.5  # hardware YAML kept
+    hardware = yaml.safe_load((ROOT / 'web_joy_driver/config/web_joy_driver_params.yaml')
+                              .read_text())['web_joy_driver']['ros__parameters']
+    assert 'deadzone' not in hardware  # single source: the operator profile
+    profile = yaml.safe_load(
+        (ROOT / 'questix_control_config/config/controls.web.yaml').read_text())
+    profile['web_joy_driver']['ros__parameters']['deadzone'] = 0.2
+    (tmp_path / 'controls.web.yaml').write_text(yaml.safe_dump(profile))
+    nodes = expand('web_joy_driver/launch/web_joy_driver.launch.xml')
+    assert nodes['/web_joy_driver']['deadzone'] == 0.2
+
+
+def test_unknown_controller_type_fails_before_nodes(expand):
+    """A typo in CONTROLLER_TYPE must not silently start another controller's profile."""
+    with pytest.raises(ValueError, match='uart, dualshock, web'):
+        expand('launcher/launch/questix_core.launch.xml', controller_type='switch',
+               enable_lidar='false', enable_rviz='false')
 
 
 def test_dual_stick_keeps_its_own_scaling(expand):
@@ -121,6 +154,7 @@ def test_dual_stick_keeps_its_own_scaling(expand):
     ('esc_motor_control_cpp/launch/esc_motor_control_cpp.launch.xml',
      'esc_motor_control', 'full_speed_button', 7),
     ('uart_joy_driver/launch/uart_joy_driver.launch.xml', 'uart_joy_driver', 'deadzone', 0.05),
+    ('web_joy_driver/launch/web_joy_driver.launch.xml', 'web_joy_driver', 'deadzone', 0.05),
     ('joy_controller/launch/joy_controller.launch.py',
      'joy_controller', 'angular_input_ratio', 6.0),
 ])

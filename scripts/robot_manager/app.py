@@ -108,7 +108,7 @@ class ModeRequest(BaseModel):
     mode: Literal["practice", "competition"]
 
 
-_CONTROLLER_TYPES = {"uart", "dualshock", "web"}
+_CONTROLLER_TYPES = set(controls.CONTROLLERS)
 
 
 class LaunchConfig(BaseModel):
@@ -305,13 +305,13 @@ def get_control_runtime():
 
 
 @app.get("/api/control-config/{controller}")
-def get_control_config(controller: Literal["uart", "dualshock"]):
+def get_control_config(controller: controls.Controller):
     """Return the saved controls for the selected controller profile."""
     return controls.read_profile(CONFIG_DIR, controller, _read_env())
 
 
 @app.put("/api/control-config/{controller}")
-def set_control_config(controller: Literal["uart", "dualshock"], config: controls.ControlUpdate):
+def set_control_config(controller: controls.Controller, config: controls.ControlUpdate):
     """Persist controls for the next robot start without restarting the service."""
     return controls.write_profile(CONFIG_DIR, controller, _read_env(), config)
 

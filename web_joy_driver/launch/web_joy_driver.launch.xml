@@ -2,13 +2,18 @@
 <!--
 Web Joy Driver launch file
 YAML が Single Source of Truth。値を変えたい場合は config_file:=... で別 YAML を指定すること。
+スティックの不感帯（deadzone）は操作設定 questix_control_config/config/controls.web.yaml
+（保存済みなら ${QUESTIX_CONFIG_DIR}/controls.web.yaml）の web_joy_driver セクションから読む。
 -->
 <launch>
+    <arg name="controller_type" default="web" />
     <arg name="config_file"
          default="$(find-pkg-share web_joy_driver)/config/web_joy_driver_params.yaml"
          description="Path to the web_joy_driver configuration YAML" />
+    <include file="$(find-pkg-share questix_control_config)/launch/control_profile.launch.py" />
 
     <node pkg="web_joy_driver" exec="web_joy_driver_node" name="web_joy_driver" output="screen">
         <param from="$(var config_file)" />
+        <param from="$(var control_config_file)" />
     </node>
 </launch>

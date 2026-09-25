@@ -17,7 +17,7 @@
 | Pub | `/target_twist` | `geometry_msgs/Twist` | depth 1。`drive_component` が購読 |
 
 軸→速度は**純粋な線形写像**です。デッドゾーン処理は入力ドライバ側
-（`uart_joy_driver` の `deadzone` / joy パッケージの `deadzone`）で行われ、
+（`uart_joy_driver` / `web_joy_driver` / joy パッケージの `deadzone`）で行われ、
 本ノードには expo カーブ・ターボ/精密モード等はありません。
 
 ## 起動
@@ -30,6 +30,9 @@ ros2 launch joy_controller joy_controller.launch.xml controller_type:=dualshock
 
 # UART コントローラ + joy_controller
 ros2 launch joy_controller joy_controller.launch.xml controller_type:=uart
+
+# ブラウザ・スマホ (web_joy_driver) + joy_controller（操作設定 controls.web.yaml）
+ros2 launch joy_controller joy_controller.launch.xml controller_type:=web
 
 # デュアルスティックモード
 ros2 launch joy_controller joy_controller.launch.xml dual_stick:=true

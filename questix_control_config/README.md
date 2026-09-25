@@ -1,13 +1,14 @@
 # QUESTiX 操作設定
 
-Joy のキー割り当てと速度調整は `config/controls.uart.yaml` または
-`config/controls.dualshock.yaml` にまとめています。走行、射出、ローラーが同じファイルを
+Joy のキー割り当てと速度調整は、コントローラーごとに `config/controls.uart.yaml`（UART / Switch）、
+`config/controls.dualshock.yaml`（DualShock）、`config/controls.web.yaml`（Web：ブラウザ・スマホ、
+`web_joy_driver`）にまとめています。走行、射出、ローラーが同じファイルを
 読み、ROS のノード名ごとのセクションを使用します。シリアルポート、GPIO、非常停止、
 ライフサイクル、モータ制御ループの設定は各パッケージの YAML に残ります。
 
 ## 編集・反映
 
-robot_manager の「操作・速度」タブでコントローラーを選び、値を編集して保存します。
+robot_manager の「調整」タブでコントローラーを選び、値を編集して保存します。
 保存先は `${QUESTIX_CONFIG_DIR:-/etc/questix_robot}/controls.<controller>.yaml` です。
 保存は実行中のロボットには反映されません。安全に停止できる状態でロボットを再起動してください。
 管理画面の「初期値に戻す」はフォームだけを戻し、「操作設定を保存」で確定します。
@@ -16,7 +17,9 @@ robot_manager の「操作・速度」タブでコントローラーを選び、
 ノード停止中や ROS 未導入の場合は取得不可を表示します。
 
 編集対象の選択と、Launch 設定の `CONTROLLER_TYPE`（実際に使用するコントローラー）は
-別です。UART 用と DualShock 用の調整は互いに上書きされません。
+別です。UART 用・DualShock 用・Web 用の調整は互いに上書きされません。
+
+`controller_type` は `uart` / `dualshock` / `web` のいずれかです（それ以外は起動前にエラー）。
 
 起動時の選択優先順位:
 
@@ -29,7 +32,7 @@ robot_manager の「操作・速度」タブでコントローラーを選び、
 指定を適用します。GPIO ゲートの選択は操作設定で上書きされません。
 `config_file` はハードウェア側、`control_config_file` は操作側の変更に使用してください。
 
-通常の統合起動に加え、Joy / 射出 / ESC / 走行 / UART の単体 launch も同じ設定を選びます。
+通常の統合起動に加え、Joy / 射出 / ESC / 走行 / UART / Web の単体 launch も同じ設定を選びます。
 ROS ノードを `ros2 run` で直接起動する場合は、このファイルを `--params-file` で明示してください。
 独自ノード名を使う場合は、YAML のセクション名も一致させる必要があります。
 
@@ -49,7 +52,9 @@ ROS ノードを `ros2 run` で直接起動する場合は、このファイル�
   ノードも旧形式を受け付けます（新しい軸パラメータが未指定、内部値 -2 の場合のみ継承）。
   この変更を使うには `motor_control_app` を再ビルドし、robot_manager を更新してください。
 - `esc_motor_control`: ローラー回転ボタンと出力（0〜1）。出力は実測 RPM ではありません。
-- `joy_node` / `uart_joy_driver`: 入力ドライバのスティック不感帯。
+- `joy_node` / `uart_joy_driver`: 入力ドライバのスティック不感帯（UART・DualShock 用ファイルのみ）。
+- `web_joy_driver`: ブラウザのスティックの不感帯（Web 用ファイルのみ）。ポート・認証・タイムアウト・カメラなどは
+  `web_joy_driver/config/web_joy_driver_params.yaml` に残ります。
 - `joy_controller_dual_stick` / `joy_axis_drive`: それぞれの単体起動モード専用。
   通常の統合起動には影響しません。dual-stick の速度スケールは従来どおり 0.05 です。
 
@@ -65,6 +70,15 @@ M0602C の低 RPM 域では、旋回加速度を上げると振動が再発す�
 緩和する幅で、0 は無効です。幅を大きくすると目標への収束は緩やかになります。
 `min_command_rpm` を大きくしすぎると、低速旋回ができなくなります。
 詳細な実機評価の経緯は `design/drive_control_refactor.md` を参照してください。
+
+### Web（ブラウザ・スマホ）用の設定
+
+`web_joy_driver` の操作画面は「移動」カード（左スティック＝軸 0/1、右スティック＝軸 3/4）と
+「ショット」カード（TILT ▲＝ボタン 4、FIRE＝ボタン 5、TILT ▼＝ボタン 6、ROLLER＝ボタン 7）だけを送ります。
+十字キーがないため、`controls.web.yaml` の初期値は射出角度を TILT ▲ / ▼ ボタンで操作します
+（`tilt_up_axis` / `tilt_down_axis` = -1）。UART 用の設定（十字キー上下）をそのまま使うと角度調整が効きません。
+管理画面の Web 用の操作図は、この画面の操作名（TILT ▲・FIRE など）で表示します。
+キーボード操作（I / F / K / R、W A S D、Q / E）も同じ番号を送るため、同じ設定が適用されます。
 
 ## 既存設定からの移行
 

@@ -496,8 +496,9 @@
 (() => {
   "use strict";
   // ----------------------------------------------------------------------
-  // Layout: Switch2-native indices (same as uart_joy_driver), so the
-  // *.uart.yaml profiles of shot_component / esc_motor_control apply.
+  // Layout: Switch2-native indices (same as uart_joy_driver). The operator
+  // profile is questix_control_config/config/controls.web.yaml; keep it (and
+  // robot_manager's web diagram) in sync when changing these indices.
   //   buttons: A=0 B=1 X=2 Y=3 L=4 R=5 ZL=6 ZR=7 Minus=8 Plus=9 Home=10 Capture=11 LStick=12 RStick=13
   //   axes:    LX=0 LY=1 RX=3 RY=4 DpadH=6 DpadV=7   (left / up = +1)
   // ----------------------------------------------------------------------

@@ -34,11 +34,16 @@ const tuningFields = {
     help: "中心付近の小さな傾きを無視する幅。触っていないのに動くときは大きくします。" } },
   uart_joy_driver: { deadzone: { title: "スティックの遊び", unit: "%", scale: 100,
     help: "中心付近の小さな傾きを無視する幅。触っていないのに動くときは大きくします。" } },
+  web_joy_driver: { deadzone: { title: "スティックの遊び", unit: "%", scale: 100,
+    help: "画面のスティックを中心付近で少しだけ動かしたときに無視する幅。指を置いただけで動くときは大きくします。" } },
 };
 
+// Stick dead zone of the input driver each controller type actually starts.
+const controllerDrivers = { dualshock: "joy_node", uart: "uart_joy_driver", web: "web_joy_driver" };
+
 function tuningSpec(node, key) {
-  if (node === "joy_node" && controlProfile.controller !== "dualshock"
-      || node === "uart_joy_driver" && controlProfile.controller !== "uart") return null;
+  if (Object.values(controllerDrivers).includes(node)
+      && controllerDrivers[controlProfile.controller] !== node) return null;
   const spec = tuningFields[node]?.[key];
   if (node === "joy_controller" && key === "angular_input_ratio") {
     const reference = Math.abs(controlProfile.defaults[node][key]);
@@ -255,7 +260,7 @@ function controlMessage(message) {
 }
 
 function controllerName(controller) {
-  return controller === "uart" ? "UART / Switch" : controller === "dualshock" ? "DualShock" : "未確認";
+  return ControlLabels.controllers.includes(controller) ? ControlLabels.controllerName(controller) : "未確認";
 }
 
 function renderControlSummary() {
@@ -266,10 +271,14 @@ function renderControlSummary() {
   }
   summary.textContent = `編集中: ${controllerName(controlProfile.controller)} ｜ `
     + `次回起動で使うコントローラー: ${controllerName(launchController)} ｜ 読み込み: ${controlsLoadedAt}`;
-  document.getElementById("controls-layout-note").textContent = controlProfile.controller === "uart"
-    ? "Switch のボタン名・スティック名で選択できます。番号は UART ドライバの配列に対応しています。"
-    : "DualShock の標準配置の名前を表示しています。接続方式やドライバで番号が異なる場合は、"
-      + "実際の Joy の番号に合わせて選んでください（接続機器の自動判別ではありません）。";
+  const notes = {
+    uart: "Switch のボタン名・スティック名で選択できます。番号は UART ドライバの配列に対応しています。",
+    dualshock: "DualShock の標準配置の名前を表示しています。接続方式やドライバで番号が異なる場合は、"
+      + "実際の Joy の番号に合わせて選んでください（接続機器の自動判別ではありません）。",
+    web: "ブラウザ・スマホの操作画面（「移動」「ショット」）の名前で選択できます。キーボード操作"
+      + "（W A S D・Q / E・I / F / K / R）も同じ入力として扱われます。画面に十字キーはありません。",
+  };
+  document.getElementById("controls-layout-note").textContent = notes[controlProfile.controller] || notes.dualshock;
 }
 
 function renderControllerMap() {
@@ -704,7 +713,7 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       const config = await apiSilent("/api/launch-config");
       launchController = config.CONTROLLER_TYPE || null;
-      if (!controlsOpened && ["uart", "dualshock"].includes(launchController)) {
+      if (!controlsOpened && ControlLabels.controllers.includes(launchController)) {
         select.value = launchController;
         lastController = select.value;
       }

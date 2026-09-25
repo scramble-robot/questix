@@ -5,8 +5,11 @@ Android アプリのインストールは不要です。
 Pi 上で HTTP + WebSocket サーバを立て、ブラウザのバーチャルスティック／ボタン入力を
 `sensor_msgs/Joy` として `/joy` に配信します。
 
-- 配列は `uart_joy_driver` と同じ **Switch2 ネイティブ配列** なので、
-  `shot_config.uart.yaml` / `esc_motor_control_cpp.uart.yaml` がそのまま適用されます。
+- 配列は `uart_joy_driver` と同じ **Switch2 ネイティブ配列** です。キー割り当て・速度・スティックの不感帯は
+  Web 専用の操作設定 `questix_control_config/config/controls.web.yaml` を使います
+  （保存済みなら `${QUESTIX_CONFIG_DIR:-/etc/questix_robot}/controls.web.yaml`）。
+  画面には十字キーがないため、射出角度は TILT ▲ / ▼ ボタン（buttons[4] / buttons[6]）で操作する設定が初期値です。
+  管理画面の「調整」で「Web（ブラウザ・スマホ）」を選ぶと、この画面の操作名で割り当てを確認・変更できます。
 - 下流（`joy_gate` → `joy_controller` / `shot_component` / `esc_motor_control`）は無変更。
   GPIO 非常停止によるゲートもそのまま効きます。
 - 無通信 `message_timeout_sec`（既定 0.5 s）でニュートラルを配信する watchdog 付き。
@@ -44,7 +47,7 @@ ros2 launch questix_launcher questix_core.launch.xml controller_type:=web
 | R | ROLLER（保持） |
 | Space を離す / Esc /「入力を解除」 | この端末の全入力をニュートラルに戻す |
 
-キーボード入力の大きさは最大 1、速度の倍率は既存の ROS 設定に従います。
+キーボード入力の大きさは最大 1、速度の倍率は操作設定 `controls.web.yaml` に従います。
 タッチ・マウス操作との同時入力はできません。操作方法の切り替え時にも全入力を解除します。
 Space の押し直しだけでは以前の操作は再開しません。操作キーも離して押し直してください。
 「入力を解除」はこのページの入力解除であり、GPIO 非常停止の代わりではありません。
@@ -84,7 +87,9 @@ Space の押し直しだけでは以前の操作は再開しません。操作�
 - フッター: 送信中の「前後・左右・旋回」メーターと、ノードからの状態（送信中／タイムアウト、遅延 ms、接続数）。
   幅に余裕がある場合は生の `axes` / `buttons` も表示します。
 
-割り当ては `static/index.html` 冒頭の `LAYOUT` で変更できます。
+機能の割り当て（どの入力で射出・角度調整・ローラーを動かすか）は、管理画面の「調整」→「Web（ブラウザ・スマホ）」
+（`controls.web.yaml`）で変更します。画面の入力と番号の対応そのものは `static/index.html` 冒頭の `LAYOUT` にあり、
+変更した場合は `controls.web.yaml` と管理画面の Web 操作図（`scripts/robot_manager/static/controller-map.js`）も合わせてください。
 
 ## プロトコル
 
@@ -125,7 +130,8 @@ Wi-Fi 切断後の再接続をシンプルにするための仕様で、引き�
 
 ## パラメータ
 
-`config/web_joy_driver_params.yaml` が Single Source of Truth です。主なもの:
+`config/web_joy_driver_params.yaml` が Single Source of Truth です（`deadzone` だけは操作設定
+`controls.web.yaml` の `web_joy_driver` セクション）。主なもの:
 
 | 名前 | 既定 | 説明 |
 | --- | --- | --- |
@@ -134,7 +140,7 @@ Wi-Fi 切断後の再接続をシンプルにするための仕様で、引き�
 | `auth_token` | `""` | 空で認証なし。LAN 共有時は設定推奨 |
 | `publish_rate` | `50.0` | Joy 再送周期 (Hz) |
 | `message_timeout_sec` | `0.5` | 無通信でニュートラルに戻すまでの秒数 |
-| `deadzone` | `0.05` | 軸のデッドゾーン |
+| `deadzone` | `0.05` | 軸のデッドゾーン。`questix_control_config/config/controls.web.yaml` で設定 |
 | `num_axes` / `num_buttons` | `8` / `14` | 配列長（Switch2 配列） |
 | `ping_interval_sec` / `ping_timeout_sec` | `1.0` / `2.0` | WebSocket keepalive |
 | `close_timeout_sec` | `1.0` | 切断ハンドシェイクの上限。読まなくなった端末を引きずらないため |

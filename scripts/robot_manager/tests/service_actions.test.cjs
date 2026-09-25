@@ -4,6 +4,7 @@ const vm = require('node:vm');
 const fs = require('node:fs');
 const path = require('node:path');
 const OperatorGuide = require('../static/operator-guide.js');
+const ControlLabels = require('../static/control-labels.js');
 
 function fixture(fetch) {
   const elements = new Map();
@@ -23,7 +24,7 @@ function fixture(fetch) {
     querySelectorAll: (selector) => selector === '[data-service-action]' ? buttons : [],
     addEventListener() {},
   };
-  const context = vm.createContext({ document, OperatorGuide, fetch, confirm: () => true,
+  const context = vm.createContext({ document, OperatorGuide, ControlLabels, fetch, confirm: () => true,
     setTimeout() {}, setInterval() {} });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../static/app.js'), 'utf8'), context);
   return { context, document, buttons };
@@ -72,4 +73,44 @@ test('older services without readiness still show saved settings without a globa
   assert.match(f.document.getElementById('ready-profile').textContent, /読み込みました/);
   assert.match(f.document.getElementById('ready-workspace').textContent, /更新・再起動が必要/);
   assert.equal(f.document.getElementById('readiness-refresh').disabled, false);
+});
+
+test('the browser controller is named in readiness and selected in the admin controller choice', async () => {
+  const f = fixture(async (url) => {
+    if (url === '/api/readiness') {
+      return response(200, { controller: 'web', profile: { ok: true, message: '読み込み・入力値の確認済み' },
+        workspace: { ok: true, message: 'ok' } });
+    }
+    if (url === '/api/status') {
+      return response(200, { service: 'inactive', mode: 'practice', launch_config: { CONTROLLER_TYPE: 'web' } });
+    }
+    throw Error(`unexpected URL: ${url}`);
+  });
+  await vm.runInContext('refreshReadiness()', f.context);
+  assert.equal(f.document.getElementById('ready-controller').textContent, 'Web（ブラウザ・スマホ）');
+  await vm.runInContext('refreshStatus()', f.context);
+  assert.equal(f.document.getElementById('ready-controller').textContent, 'Web（ブラウザ・スマホ）');
+  // The admin choice is a three-way select whose value is saved as CONTROLLER_TYPE.
+  assert.equal(f.document.getElementById('controller-type').value, 'web');
+  const html = fs.readFileSync(path.join(__dirname, '../static/index.html'), 'utf8');
+  for (const id of ['controller-type', 'controls-profile']) {
+    const select = html.slice(html.indexOf(`<select id="${id}"`));
+    const options = select.slice(0, select.indexOf('</select>'));
+    assert.deepEqual([...options.matchAll(/value="([^"]+)"/g)].map((m) => m[1]), ['uart', 'dualshock', 'web']);
+  }
+  assert.doesNotMatch(html, /controller-type-toggle/);
+});
+
+test('older services validate a web launch profile through the web profile API', async () => {
+  const calls = [];
+  const f = fixture(async (url) => {
+    calls.push(url);
+    if (url === '/api/readiness') return response(404, { detail: 'Not Found' });
+    if (url === '/api/launch-config') return response(200, { CONTROLLER_TYPE: 'web' });
+    if (url === '/api/control-config/web') return response(200, { values: {} });
+    throw Error(`unexpected URL: ${url}`);
+  });
+  await vm.runInContext('refreshReadiness()', f.context);
+  assert.ok(calls.includes('/api/control-config/web'));
+  assert.match(f.document.getElementById('ready-profile').textContent, /読み込みました/);
 });

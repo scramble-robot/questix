@@ -12,6 +12,7 @@
     <depend>questix_msgs</depend>
     <depend>ament_index_python</depend>
     <exec_depend>python3-websockets</exec_depend>
+    <exec_depend>questix_control_config</exec_depend>
 
     <test_depend>python3-pytest</test_depend>
 

@@ -7,6 +7,7 @@ import math
 import os
 import tempfile
 from pathlib import Path
+from typing import Literal, get_args
 
 import yaml
 from fastapi import HTTPException
@@ -46,6 +47,8 @@ GROUPS = {
     ]),
     'joy_node': ('DualShock 入力', [('deadzone', 'スティック不感帯', 'float', 0, 0.99)]),
     'uart_joy_driver': ('UART 入力', [('deadzone', 'スティック不感帯', 'float', 0, 0.99)]),
+    'web_joy_driver': ('Web（ブラウザ・スマホ）入力', [
+        ('deadzone', 'スティック不感帯', 'float', 0, 0.99)]),
     'joy_controller_dual_stick': ('左右独立スティック（単体起動時のみ）', [
         ('left_stick_vertical_axis', '左車輪の軸番号', 'int', 0, 63),
         ('right_stick_vertical_axis', '右車輪の軸番号', 'int', 0, 63),
@@ -62,6 +65,26 @@ GROUPS = {
 }
 
 
+# Controller profiles: questix_control_config/config/controls.<controller>.yaml.
+Controller = Literal['uart', 'dualshock', 'web']
+CONTROLLERS = get_args(Controller)
+# Input-driver sections each profile carries. The UART and DualShock files have always
+# held both joy_node and uart_joy_driver; the browser profile holds only web_joy_driver.
+_DRIVER_NODES = ('joy_node', 'uart_joy_driver', 'web_joy_driver')
+_PROFILE_DRIVERS = {
+    'uart': ('joy_node', 'uart_joy_driver'),
+    'dualshock': ('joy_node', 'uart_joy_driver'),
+    'web': ('web_joy_driver',),
+}
+
+
+def profile_groups(controller):
+    """Return the editable node sections stored in one controller's profile."""
+    drivers = _PROFILE_DRIVERS[controller]
+    return {node: group for node, group in GROUPS.items()
+            if node not in _DRIVER_NODES or node in drivers}
+
+
 class ControlUpdate(BaseModel):
     """Require the revision read by the editor to prevent lost updates."""
 
@@ -70,21 +93,22 @@ class ControlUpdate(BaseModel):
     values: dict[str, dict[str, object]]
 
 
-def schema():
+def schema(controller):
     """Describe the form without duplicating profile defaults in JavaScript."""
     return [
         {'node': node, 'label': label, 'fields': [
             dict(zip(('key', 'label', 'type', 'min', 'max'), field)) for field in fields
-        ]} for node, (label, fields) in GROUPS.items()
+        ]} for node, (label, fields) in profile_groups(controller).items()
     ]
 
 
-def validate(values):
+def validate(values, controller):
     """Reject unknown fields, wrong types, nonfinite numbers and unusable bounds."""
-    if not isinstance(values, dict) or set(values) != set(GROUPS):
+    groups = profile_groups(controller)
+    if not isinstance(values, dict) or set(values) != set(groups):
         raise ValueError('設定のノード一覧が一致しません。再読み込みしてください。')
     clean = {}
-    for node, (_, fields) in GROUPS.items():
+    for node, (_, fields) in groups.items():
         params = values[node]
         if not isinstance(params, dict) or set(params) != {f[0] for f in fields}:
             raise ValueError(f'{node}: 設定項目が一致しません。再読み込みしてください。')
@@ -136,7 +160,7 @@ def _default_file(controller, env):
                         'questix_control_config のビルド・インストールを確認してください。')
 
 
-def _decode(raw):
+def _decode(raw, controller):
     document = yaml.safe_load(raw)
     if not isinstance(document, dict):
         raise ValueError('設定ファイルは ROS パラメータ YAML である必要があります。')
@@ -155,7 +179,7 @@ def _decode(raw):
         for direction, sign in (('up', 1), ('down', -1)):
             shot[f'tilt_{direction}_axis'] = axis
             shot[f'tilt_{direction}_axis_sign'] = sign
-    return validate(values)
+    return validate(values, controller)
 
 
 def read_profile(config_dir, controller, env):
@@ -165,8 +189,8 @@ def read_profile(config_dir, controller, env):
     try:
         default_raw = default_file.read_bytes()
         saved_raw = saved_file.read_bytes() if saved_file.exists() else None
-        defaults = _decode(default_raw)
-        values = _decode(saved_raw) if saved_raw is not None else defaults
+        defaults = _decode(default_raw, controller)
+        values = _decode(saved_raw, controller) if saved_raw is not None else defaults
     except (OSError, ValueError, yaml.YAMLError) as exc:
         raise HTTPException(503, f'操作設定を読み込めません: {exc}') from exc
     revision = hashlib.sha256(
@@ -177,21 +201,21 @@ def read_profile(config_dir, controller, env):
     try:
         history = json.loads((config_dir / f'controls.{controller}.history.json').read_text())
         if revision in history:
-            previous = validate(history[revision])
+            previous = validate(history[revision], controller)
     except FileNotFoundError:
         pass
     except (OSError, ValueError, TypeError):
         history_warning = '前の設定を読み込めません。現在の設定は使用できます。'
     return {'controller': controller, 'revision': revision, 'values': values,
             'previous_values': previous, 'history_warning': history_warning,
-            'defaults': defaults, 'groups': schema(), 'apply_on_restart': True,
+            'defaults': defaults, 'groups': schema(controller), 'apply_on_restart': True,
             'source': str(saved_file if saved_raw is not None else default_file)}
 
 
 def write_profile(config_dir, controller, env, update):
     """Validate and atomically replace a profile without modifying a running robot."""
     try:
-        values = validate(update.values)
+        values = validate(update.values, controller)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     try:

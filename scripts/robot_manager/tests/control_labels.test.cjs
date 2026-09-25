@@ -882,3 +882,54 @@ test('a runtime response arriving after a service change cannot revive a stale c
   assert.match(document.getElementById('controls-runtime-message').textContent, /状態が変わりました/);
   assert.equal(document.getElementById('controls-verify').disabled, false);
 });
+
+test('web labels follow the browser page layout and flag inputs the page never sends', () => {
+  const page = fs.readFileSync(path.join(__dirname, '../../../web_joy_driver/static/index.html'), 'utf8');
+  const layout = [...page.matchAll(/\{ index: (\d+), name: "([^"]+)"/g)].map((m) => [Number(m[1]), m[2]]);
+  assert.deepEqual(layout, [[4, 'TILT ▲'], [5, 'FIRE'], [6, 'TILT ▼'], [7, 'ROLLER']]);
+  for (const [index, name] of layout) {
+    assert.equal(labels.valueLabel('web', 'fire_button', index), `${name}（ボタン ${index}）`);
+  }
+  assert.match(page, /leftStick: \{ x: 0, y: 1 \}/);
+  assert.match(page, /rightStick: \{ x: 3, y: 4 \}/);
+  assert.equal(labels.valueLabel('web', 'linear_x_axis', 1), '左スティック 上下（軸 1）');
+  assert.equal(labels.valueLabel('web', 'fire_button', 0), 'ボタン 0（Web 画面にない入力）');
+  assert.equal(labels.valueLabel('web', 'tilt_up_axis', 7), '軸 7（Web 画面にない入力）');
+  assert.deepEqual(labels.controllers, ['uart', 'dualshock', 'web']);
+  assert.equal(labels.controllerName('web'), 'Web（ブラウザ・スマホ）');
+  assert.equal(labels.controllerName('unknown'), '未設定');
+});
+
+test('web: the tuning tab edits its own profile with the page diagram and driver deadzone', async () => {
+  const { document, context, getPayload } = editorFixture({
+    web_joy_driver: { deadzone: 0.05 },
+    esc_motor_control: { full_speed_button: 7 },
+    shot_component: { tilt_up_axis: -1, tilt_down_axis: -1, tilt_up_button_index: 4, tilt_down_button_index: 6 },
+  }, 'web');
+  await vm.runInContext('loadControls("web")', context);
+  const rows = document.querySelectorAll('.control-field').map((row) => `${row.dataset.node}.${row.dataset.key}`);
+  assert.ok(rows.includes('web_joy_driver.deadzone'));
+  assert.equal(rows.some((row) => row.startsWith('uart_joy_driver') || row.startsWith('joy_node')), false);
+  assert.match(document.getElementById('controls-summary').textContent, /編集中: Web（ブラウザ・スマホ）/);
+  assert.match(document.getElementById('controls-layout-note').textContent, /「移動」「ショット」/);
+  const svg = document.getElementById('controller-map').children[0];
+  assert.match(svg.attributes['aria-label'], /Web/);
+  for (const spot of ['left-stick', 'right-stick', 'tilt-up', 'fire', 'tilt-down', 'roller']) {
+    assert.ok(document.querySelector(`[data-spot="${spot}"]`), spot);
+  }
+  for (const spot of ['dpad', 'face-right', 'left-trigger', 'right-shoulder']) {
+    assert.equal(document.querySelector(`[data-spot="${spot}"]`), undefined, spot);
+  }
+  document.querySelector('[data-map-function="shot_component.tilt_down_button_index"]').events.click();
+  assert.equal(document.getElementById('map-input').value, 'button:6');
+  assert.match(document.getElementById('map-tilt-opposite').textContent, /TILT ▲/);
+  selectMap(document, 'map-input', 'button:7');
+  document.getElementById('map-apply').events.click();
+  document.getElementById('map-close').events.click();
+  const input = document.getElementById('control-web_joy_driver-deadzone');
+  input.value = '10';
+  input.events.input();
+  await document.getElementById('controls-save').events.click({ preventDefault() {} });
+  assert.equal(getPayload().values.shot_component.tilt_down_button_index, 7);
+  assert.equal(getPayload().values.web_joy_driver.deadzone, 0.1);
+});

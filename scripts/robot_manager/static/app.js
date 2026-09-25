@@ -46,7 +46,7 @@ async function refreshReadiness() {
       const config = await apiSilent('/api/launch-config');
       const controller = config.CONTROLLER_TYPE;
       let profile = { ok: false, message: 'コントローラー設定を担当者に確認してください。' };
-      if (['uart', 'dualshock'].includes(controller)) {
+      if (ControlLabels.controllers.includes(controller)) {
         try {
           await apiSilent(`/api/control-config/${controller}`);
           profile = { ok: true, message: '保存済みの操作設定を読み込みました' };
@@ -57,8 +57,7 @@ async function refreshReadiness() {
       data = { controller, profile, workspace: {
         ok: false, message: '自動確認には管理画面のプログラムの更新・再起動が必要です。担当者に確認してください。' } };
     }
-    document.getElementById('ready-controller').textContent =
-      { uart: 'UART / Switch', dualshock: 'DualShock' }[data.controller] || '未設定';
+    document.getElementById('ready-controller').textContent = ControlLabels.controllerName(data.controller);
     for (const key of ['profile', 'workspace']) {
       const el = document.getElementById(`ready-${key}`);
       el.textContent = data[key].message;
@@ -137,7 +136,7 @@ async function refreshStatus() {
     updateServiceIndicator(data.service);
     updateLaunchConfig(data.launch_config);
     document.getElementById('ready-controller').textContent =
-      { uart: 'UART / Switch', dualshock: 'DualShock' }[data.launch_config.CONTROLLER_TYPE] || '未設定';
+      ControlLabels.controllerName(data.launch_config.CONTROLLER_TYPE);
   } catch {
     latestStatus = null;
     updateServiceIndicator('unknown');

@@ -50,10 +50,11 @@ GPIO ref モードでは joy_topic = /joy_gated をデフォルトとする (唯
         </node>
     </group>
 
-    <!-- Web Joy Driver node - smartphone/browser mode (Switch2-native indices, same as UART) -->
+    <!-- Web Joy Driver node - smartphone/browser mode (Switch2-native indices; profile controls.web.yaml) -->
     <group if="$(equals '$(var controller_type)' 'web')">
         <node pkg="web_joy_driver" exec="web_joy_driver_node" name="web_joy_driver" output="screen">
             <param from="$(var web_config_file)" />
+            <param from="$(var control_config_file)" />
         </node>
     </group>
 

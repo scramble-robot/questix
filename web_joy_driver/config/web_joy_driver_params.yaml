@@ -1,6 +1,8 @@
 # Web Joy Driver Configuration
 # Smartphone/browser virtual controller served over HTTP + WebSocket.
 # スマホのブラウザから操作するための仮想コントローラ設定。
+# Operator mappings/tuning (key assignments, speeds, stick deadzone) live in
+# questix_control_config/config/controls.web.yaml (robot_manager「調整」→ Web).
 
 web_joy_driver:
   ros__parameters:
@@ -29,15 +31,13 @@ web_joy_driver:
     # 0 以下で無効（非推奨）。
     message_timeout_sec: 0.5
 
-    # Stick deadzone (0.0-1.0), applied server-side to every axis.
-    deadzone: 0.05
-
     # Array sizes. Defaults match the Switch2-native layout of uart_joy_driver:
     #   buttons: A=0, B=1, X=2, Y=3, L=4, R=5, ZL=6, ZR=7,
     #            Minus=8, Plus=9, Home=10, Capture=11, LStick=12, RStick=13
     #   axes:    LX=0, LY=1, RX=3, RY=4, D-pad H=6, D-pad V=7 (left/up = +1)
-    # The shipped page (static/index.html) fills exactly these indices, so the
-    # *.uart.yaml controller profiles of shot_component / esc_motor_control apply.
+    # The shipped page (static/index.html) sends only LX/LY/RX/RY and buttons
+    # L/R/ZL/ZR (TILT ▲ / FIRE / TILT ▼ / ROLLER); the matching operator profile is
+    # questix_control_config/config/controls.web.yaml (tilt on buttons, no D-pad).
     num_axes: 8
     num_buttons: 14
 

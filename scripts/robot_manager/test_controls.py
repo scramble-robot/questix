@@ -138,10 +138,11 @@ def test_invalid_values_do_not_write(client, tmp_path, node, key, value):
 def test_nonfinite_numbers(number):
     """Nonfinite values must never reach ROS even through non-JSON callers."""
     defaults = controls._decode((Path(__file__).resolve().parents[2]
-                                / 'questix_control_config/config/controls.uart.yaml').read_bytes())
+                                / 'questix_control_config/config/controls.uart.yaml').read_bytes(),
+                                'uart')
     defaults['joy_controller']['angular_input_ratio'] = number
     with pytest.raises(ValueError):
-        controls.validate(defaults)
+        controls.validate(defaults, 'uart')
 
 
 def test_conflict_preserves_first_writer(client):
@@ -257,7 +258,7 @@ def test_independent_tilt_save_reload_and_duplicate_validation(client):
         assert profile(client)['values'] == current['values']
 
 
-@pytest.mark.parametrize('controller', ['uart', 'dualshock'])
+@pytest.mark.parametrize('controller', ['uart', 'dualshock', 'web'])
 @pytest.mark.parametrize('number', [2, 2.0])
 def test_integer_looking_speed_is_saved_as_ros_double(client, tmp_path, controller, number):
     """JSON 2 and 2.0 both persist as YAML doubles, while button indices stay integers."""
@@ -347,6 +348,67 @@ def test_readiness_checks_configuration_without_subprocesses(client, monkeypatch
     data = client.get('/api/readiness').json()
     assert not data['profile']['ok']
     assert data['workspace']['ok']
+
+
+def test_web_profile_is_its_own_file_with_browser_inputs(client, tmp_path):
+    """The browser controller has its own saved profile, tilt buttons and driver deadzone."""
+    web = profile(client, 'web')
+    uart = profile(client, 'uart')
+    assert web['controller'] == 'web'
+    assert web['source'].endswith('controls.web.yaml')
+    # The web page has no D-pad: TILT ▲ / ▼ are buttons 4 / 6, FIRE 5, ROLLER 7.
+    assert web['values']['shot_component'] == {
+        'fire_button': 5, 'tilt_up_axis': -1, 'tilt_up_axis_sign': 1,
+        'tilt_down_axis': -1, 'tilt_down_axis_sign': -1,
+        'tilt_up_button_index': 4, 'tilt_down_button_index': 6}
+    assert web['values']['esc_motor_control']['full_speed_button'] == 7
+    assert web['values']['web_joy_driver'] == {'deadzone': 0.05}
+    assert 'uart_joy_driver' not in web['values'] and 'joy_node' not in web['values']
+    assert 'web_joy_driver' not in uart['values']
+    assert [group['node'] for group in web['groups']] == list(web['values'])
+    # Speeds and acceleration start from the UART values.
+    for node in ('joy_controller', 'drive_component', 'joy_controller_dual_stick',
+                 'joy_axis_drive'):
+        assert web['values'][node] == uart['values'][node]
+    changed = deepcopy(web['values'])
+    changed['web_joy_driver']['deadzone'] = 0.12
+    changed['joy_controller']['longitudinal_input_ratio'] = 1.0
+    response = client.put('/api/control-config/web', json={
+        'revision': web['revision'], 'values': changed})
+    assert response.status_code == 200, response.text
+    saved = yaml.safe_load((tmp_path / 'controls.web.yaml').read_text())
+    assert saved['web_joy_driver']['ros__parameters']['deadzone'] == 0.12
+    assert profile(client, 'web')['previous_values'] == web['values']
+    assert profile(client, 'uart')['values'] == uart['values']
+    assert not (tmp_path / 'controls.uart.yaml').exists()
+
+
+@pytest.mark.parametrize('values', [
+    lambda web, uart: {**web, 'uart_joy_driver': uart['uart_joy_driver']},
+    lambda web, uart: {k: v for k, v in web.items() if k != 'web_joy_driver'},
+    lambda web, uart: uart,
+    lambda web, uart: {**web, 'web_joy_driver': {'deadzone': 1.0}},
+])
+def test_web_profile_rejects_other_driver_sections(client, tmp_path, values):
+    """A UART-shaped or out-of-range payload cannot be saved as the web profile."""
+    web = profile(client, 'web')
+    uart = profile(client, 'uart')['values']
+    response = client.put('/api/control-config/web', json={
+        'revision': web['revision'], 'values': values(deepcopy(web['values']), uart)})
+    assert response.status_code == 422
+    assert not (tmp_path / 'controls.web.yaml').exists()
+
+
+def test_readiness_accepts_web_controller(client, monkeypatch, tmp_path):
+    """CONTROLLER_TYPE=web validates controls.web.yaml, not the UART file."""
+    monkeypatch.setattr(backend, '_read_env', lambda: {'CONTROLLER_TYPE': 'web'})
+    monkeypatch.setattr(backend.control_runtime, '_ros_paths', lambda config: ('ros', 'workspace'))
+    (tmp_path / 'controls.uart.yaml').write_text('bad: [')
+    data = client.get('/api/readiness').json()
+    assert data['controller'] == 'web'
+    assert data['profile']['ok']
+    (tmp_path / 'controls.web.yaml').write_text('bad: [')
+    assert not client.get('/api/readiness').json()['profile']['ok']
 
 
 def test_service_command_missing_returns_actionable_error(client):

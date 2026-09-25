@@ -9,12 +9,15 @@ from ament_index_python.packages import get_package_share_directory
 from launch.actions import DeclareLaunchArgument, OpaqueFunction, SetLaunchConfiguration
 from launch.substitutions import EnvironmentVariable, LaunchConfiguration
 
+# One packaged profile per controller: config/controls.<controller>.yaml.
+CONTROLLER_TYPES = ('uart', 'dualshock', 'web')
+
 
 def _select_profile(context):
     """Use an explicit file, a saved robot profile, or the packaged defaults."""
     controller = LaunchConfiguration('controller_type').perform(context)
-    if controller not in ('uart', 'dualshock'):
-        raise ValueError('controller_type must be uart or dualshock')
+    if controller not in CONTROLLER_TYPES:
+        raise ValueError('controller_type must be one of: ' + ', '.join(CONTROLLER_TYPES))
     explicit = LaunchConfiguration('control_config_file').perform(context)
     if explicit:
         path = Path(explicit).expanduser()

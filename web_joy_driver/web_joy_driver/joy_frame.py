@@ -4,8 +4,10 @@ A *frame* is one JSON object sent by the browser::
 
     {"type": "joy", "axes": [lx, ly, 0, rx, ry, 0, dh, dv], "buttons": [0, 1, ...]}
 
-Axis/button indices follow the Switch2-native layout used by ``uart_joy_driver``
-so that the existing ``*.uart.yaml`` controller profiles apply unchanged:
+Axis/button indices follow the Switch2-native layout used by ``uart_joy_driver``.
+The operator profile for this controller is
+``questix_control_config/config/controls.web.yaml`` (``controller_type:=web``); the
+shipped page sends only the sticks and L/R/ZL/ZR, so that profile tilts on buttons:
 
 * buttons: A=0, B=1, X=2, Y=3, L=4, R=5, ZL=6, ZR=7, Minus=8, Plus=9, Home=10,
   Capture=11, LStick=12, RStick=13

@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>QUESTiX Robot Manager</title>
-  <link rel="stylesheet" href="/static/style.css?v=31">
+  <link rel="stylesheet" href="/static/style.css?v=32">
 </head>
 
 <body>
@@ -123,6 +123,7 @@
           <select id="controls-profile">
             <option value="uart">UART / Switch</option>
             <option value="dualshock">DualShock</option>
+            <option value="web">Web（ブラウザ・スマホ）</option>
           </select>
           <button type="button" class="btn btn-small" id="controls-reload">保存した設定を読み直す</button>
         </div>
@@ -484,15 +485,12 @@
       <p class="section-help">開発・キッティング担当者向け。保存した内容は次のロボット制御の起動・再起動で反映します。</p>
       <div class="config-grid">
         <div class="config-item wide controller-type-row">
-          <label>コントローラー</label>
-          <div class="toggle-row compact">
-            <span class="toggle-label">UART</span>
-            <label class="toggle-switch small">
-              <input type="checkbox" id="controller-type-toggle" data-config="CONTROLLER_TYPE">
-              <span class="slider"></span>
-            </label>
-            <span class="toggle-label">DualShock</span>
-          </div>
+          <label for="controller-type">コントローラー</label>
+          <select id="controller-type" data-config="CONTROLLER_TYPE">
+            <option value="uart">UART / Switch</option>
+            <option value="dualshock">DualShock</option>
+            <option value="web">Web（ブラウザ・スマホ）</option>
+          </select>
         </div>
         <div class="config-item">
           <label>LiDAR</label>
@@ -616,10 +614,10 @@
   <script src="/static/qr-svg.js?v=1"></script>
   <script src="/static/web-joy-connection.js?v=2"></script>
   <script src="/static/operator-guide.js?v=3"></script>
-  <script src="/static/app.js?v=14"></script>
-  <script src="/static/control-labels.js?v=2"></script>
-  <script src="/static/controller-map.js?v=10"></script>
-  <script src="/static/controls.js?v=19"></script>
+  <script src="/static/control-labels.js?v=3"></script>
+  <script src="/static/app.js?v=15"></script>
+  <script src="/static/controller-map.js?v=11"></script>
+  <script src="/static/controls.js?v=20"></script>
 </body>
 
 </html>
