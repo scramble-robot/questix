@@ -23,6 +23,8 @@ import { driveModel, onDrive, confirmDriveSafety, runDrive } from './drive-link.
 import { driveEndedText, driveCopy } from './drive-view.js';
 import { runStatusText } from './drive-report-view.js';
 import { addDriveRun, driveRun, saveDriveRun, isEmptyRun } from './drive-history.js';
+import { addCaptureRun, keepRunOnRobot } from './run-keeper.js';
+import { pickRobotRecord } from './record-picker.js';
 
 // The state behind one `liveCaptureControls` block: recording from the robot, opening a saved
 // recording or a rosbag, saving the one on screen, and bringing it back after a reload. A lesson
@@ -33,6 +35,12 @@ import { addDriveRun, driveRun, saveDriveRun, isEmptyRun } from './drive-history
 // A lesson that can also drive the robot passes `drive`; then the block offers "走らせて記録する",
 // which records while drive-link.js runs the lesson's controller, keeps recording for a moment after
 // the robot stops (so the stop is in the data), and says how the run ended.
+//
+// Every finished run and every 「記録だけする」 recording goes into this browser's run history
+// (drive-history.js, when the robot moved) and to the robot itself (robot-records.js, when the
+// robot keeps records), so any device connected to the robot can find it in 記録の一覧 later. The
+// block says whether the robot kept it. A recording on the robot can be opened here as well
+// (「ロボットの記録から選ぶ」, record-picker.js), through the same path as a file.
 
 const DRIVE_PROGRESS_MS = 250;
 const DEFAULT_TAIL_SECONDS = 1.5;
@@ -67,7 +75,13 @@ function originNote(recording, origin, assumedConfig) {
   const text = captureCopy.file;
   const seconds = recordingSummary(recording).seconds.toFixed(1);
   if (origin === 'restored') return fill(text.restored, { time: formatTime(recording.recordedAt) });
-  if (origin !== 'file') return '';
+  if (origin !== 'file' && origin !== 'robot') return '';
+  if (origin === 'robot' && recording.source !== 'rosbag')
+    return fill(text.openedRobot, {
+      name: recording.name,
+      seconds,
+      facts: recordingFacts(recording),
+    });
   if (recording.source !== 'rosbag')
     return fill(text.opened, { name: recording.name, seconds, facts: recordingFacts(recording) });
   const topics = Object.values(recording.topics).filter(Boolean).join('・');
@@ -126,7 +140,8 @@ function createLiveSession(options) {
     tail: false, // recording the stop after the robot was told to stop
     driveNote: '', // how the last run ended, shown under the start button
     driveRunId: null, // the history entry (drive-history.js) of this block's last run
-    origin: '', // where session.recording came from: 'live', 'file' or 'restored'
+    origin: '', // where session.recording came from: 'live', 'file', 'robot' or 'restored'
+    robotSave: null, // how keeping the last run on the robot went: {state, message}, or null
   };
   if (options.drive) onDrive(() => options.update());
 
@@ -141,6 +156,12 @@ function createLiveSession(options) {
     if (!keepRecording(options.slot, recording)) session.note += ' ' + captureCopy.file.notKept;
   }
 
+  // The robot's copy of a finished recording; `runId` is its entry in the run history, if any.
+  async function keepCopyOnRobot(recording, runId) {
+    session.robotSave = await keepRunOnRobot(recording, runId);
+    options.update();
+  }
+
   // The run fields every recording made here carries (recording-core runInfo).
   const stamp = (recording, info = {}) =>
     withRunInfo(recording, {
@@ -153,10 +174,10 @@ function createLiveSession(options) {
   async function startCapture() {
     if (session.busy) return;
     const controllers = { abort: new AbortController(), finish: new AbortController() };
-    Object.assign(session, { busy: true, progress: 0, controllers, note: '' });
+    Object.assign(session, { busy: true, progress: 0, controllers, note: '', robotSave: null });
     options.update();
     try {
-      const recording = await recordRobot({
+      const raw = await recordRobot({
         seconds: options.seconds,
         countStream: options.countStream,
         signal: controllers.abort.signal,
@@ -166,7 +187,9 @@ function createLiveSession(options) {
           options.update();
         }),
       });
-      show(stamp(recording), 'live');
+      const recording = stamp(raw);
+      show(recording, 'live');
+      keepCopyOnRobot(recording, addCaptureRun(recording, options.slot));
     } catch (error) {
       // A recording that failed does not discard the one already on screen: losing a good
       // measurement because the link dropped during the next attempt would be the worse outcome.
@@ -200,7 +223,7 @@ function createLiveSession(options) {
       options.update();
       return;
     }
-    Object.assign(session, { busy: true, driveNote: '' });
+    Object.assign(session, { busy: true, driveNote: '', robotSave: null });
     try {
       await driveAndRecord(plan);
     } finally {
@@ -291,27 +314,52 @@ function createLiveSession(options) {
       cut: Boolean(recording.cut),
       recording,
     }).id;
+    keepCopyOnRobot(recording, session.driveRunId);
+  }
+
+  // A file and a recording from the robot take the same way into the lesson.
+  function openParsed(recording, origin, assumedConfig = false) {
+    const missing = missingInRecording(recording, options.needs);
+    if (missing.length)
+      session.note = fill(captureCopy.file.missing, { streams: streamList(missing) });
+    else show(recording, origin, assumedConfig);
   }
 
   async function openRecording(file) {
     if (!file || session.busy) return;
     try {
       const { recording, assumedConfig } = await openRecordingFile(file);
-      const missing = missingInRecording(recording, options.needs);
-      if (missing.length)
-        session.note = fill(captureCopy.file.missing, { streams: streamList(missing) });
-      else show(recording, 'file', assumedConfig);
+      openParsed(recording, 'file', assumedConfig);
     } catch (error) {
       session.note = fill(captureCopy.file.failed, { reason: error.message });
     }
     options.update();
   }
 
+  /**
+   * Show a recording that did not come from a file: one kept on the robot (the picker, or a link
+   * from 記録の一覧). `recording.name` is what the note calls it. Returns whether the lesson took
+   * it (false: it lacks a stream the lesson needs, or the lesson refused it; the note says why).
+   */
+  function useRecording(recording, origin = 'robot') {
+    if (session.busy) return false;
+    openParsed(recording, origin);
+    options.update();
+    return session.recording === recording;
+  }
+
+  // 「ロボットの記録から選ぶ」: the shared picker, filtered to this block's lesson.
+  async function pickFromRobot() {
+    if (session.busy) return;
+    const recording = await pickRobotRecord({ lesson: options.slot, needs: options.needs });
+    if (recording) useRecording(recording, 'robot');
+  }
+
   // A recording made on this device takes the group typed after it was made; a file opened from
   // another group keeps its own.
   function saveRecording(kind) {
     if (!session.recording) return;
-    const own = session.origin !== 'file' && !session.recording.group;
+    const own = !['file', 'robot'].includes(session.origin) && !session.recording.group;
     const recording = own
       ? withRunInfo(session.recording, { group: groupName() })
       : session.recording;
@@ -357,6 +405,7 @@ function createLiveSession(options) {
       recordLabel: options.recordLabel,
       stopLabel: options.stopLabel,
       message: '',
+      robotSave: session.robotSave,
       file: { canSave: Boolean(session.recording) && !session.busy, group: groupName() },
       drive: options.drive ? driveBlockModel() : null,
     };
@@ -396,10 +445,12 @@ function createLiveSession(options) {
     model,
     restore,
     clear,
+    useRecording,
     actions: {
       startCapture,
       stopCapture,
       openRecording,
+      pickRobotRecord: pickFromRobot,
       saveRecording,
       setGroup,
       startDriveCapture,

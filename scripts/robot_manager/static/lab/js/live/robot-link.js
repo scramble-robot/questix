@@ -1,7 +1,9 @@
 // Live link to a real QUESTiX robot (questix_lab_bridge, protocol 1).
 // The page listens to the robot's streams. The only frames it ever sends are the drive/stop
-// requests of js/live/drive-link.js (sendRobot below is for that module alone), and the bridge
-// accepts them only when it was started with allow_drive and its own checks pass.
+// requests of js/live/drive-link.js (sendRobot below is for that module alone), which the bridge
+// accepts only when it was started with allow_drive and its own checks pass, and `record_save`
+// (saveRecordOnRobot below): a finished recording handed to the bridge to keep on the robot,
+// which moves nothing.
 // Units follow REP-103: metres, radians, seconds; x forward, y left, theta counter-clockwise.
 //
 // No DOM here (only WebSocket, localStorage and location, each read when used), so the connection
@@ -34,11 +36,20 @@ const STOPPED_AFTER_FAILURES = 3;
 // Connected, but no stream has delivered anything for this long (milliseconds).
 const SILENT_MS = 4000;
 const STREAMS = ['scan', 'odom', 'drive', 'twist', 'camera'];
+// Keep in sync with the bridge's incoming size limit for record_save (8 MiB).
+const MAX_SAVE_BYTES = 8 * 1024 * 1024;
+// A save the bridge has not answered by then is reported as failed (the bridge writes the file
+// itself, which takes well under a second; a slow Wi-Fi may take a few for 8 MiB).
+const SAVE_TIMEOUT_MS = 30000;
 // Address schemes a learner may paste, and the WebSocket scheme each one means.
 const SCHEMES = { 'http:': 'ws:', 'https:': 'wss:', 'ws:': 'ws:', 'wss:': 'wss:' };
 
 const listeners = new Map();
 const latest = new Map();
+// record_save requests waiting for their record_saved / record_error, oldest first: the bridge
+// answers one connection's messages in the order they came, so the first answer is the oldest's.
+// An entry that timed out stays until its late answer arrives, so it cannot take the next one's.
+let saves = [];
 let socket = null;
 let wanted = false;
 let retryTimer = 0;
@@ -180,6 +191,7 @@ function stopTimers() {
 function dropSocket() {
   const old = socket;
   socket = null;
+  dropSaves();
   if (!old) return;
   old.onmessage = null;
   old.onclose = null;
@@ -231,6 +243,58 @@ function welcome(message) {
   armSilence(); // until the first status says otherwise, nothing has arrived
 }
 
+// --- keeping recordings on the robot -----------------------------------------------------------
+
+const saveError = (key, values = {}) => new Error(fillSentence(copy.save[key], values));
+
+function answerSave(error, id) {
+  const pending = saves.shift();
+  if (!pending || pending.timedOut) return;
+  clearTimeout(pending.timer);
+  if (error) pending.reject(error);
+  else pending.resolve(id);
+}
+// The connection the saves were sent on is gone, and their answers with it.
+function dropSaves() {
+  const pending = saves;
+  saves = [];
+  for (const save of pending) {
+    clearTimeout(save.timer);
+    if (!save.timedOut) save.reject(saveError('lost'));
+  }
+}
+
+/** What the bridge offers for records (hello.records), or null (not connected, older bridge). */
+function robotRecordsSupport() {
+  if (state.phase !== 'open') return null;
+  const records = state.hello?.records;
+  return records && typeof records === 'object' ? records : null;
+}
+
+/**
+ * Hand a finished recording (its JSON text, recording-core serializeRecording) to the bridge,
+ * which keeps it on the robot. Resolves with the id the bridge gave it; rejects with an Error whose
+ * message is the reason in the learner's words (not connected, not accepted, too big, no answer,
+ * or the bridge's own record_error sentence).
+ */
+function saveRecordOnRobot(text) {
+  if (!socket || socket.readyState !== WebSocket.OPEN || state.phase !== 'open')
+    return Promise.reject(saveError('notConnected'));
+  if (!robotRecordsSupport()?.save) return Promise.reject(saveError('off'));
+  const frame = `{"type":"record_save","recording":${text}}`;
+  if (new TextEncoder().encode(frame).length > MAX_SAVE_BYTES)
+    return Promise.reject(saveError('tooBig', { limit: MAX_SAVE_BYTES / 1024 / 1024 }));
+  return new Promise((resolve, reject) => {
+    const pending = { resolve, reject, timedOut: false, timer: 0 };
+    pending.timer = setTimeout(() => {
+      pending.timedOut = true;
+      reject(saveError('timeout'));
+    }, SAVE_TIMEOUT_MS);
+    saves.push(pending);
+    socket.send(frame);
+  });
+}
+
 function handleText(text) {
   let message;
   try {
@@ -242,6 +306,9 @@ function handleText(text) {
   if (message.type === 'hello') welcome(message);
   else if (message.type === 'status') receiveStatus(message);
   else if (message.type === 'session') setState({ session: message.id });
+  else if (message.type === 'record_saved') answerSave(null, String(message.id ?? ''));
+  else if (message.type === 'record_error')
+    answerSave(new Error(String(message.message || copy.save.off)));
   else if (message.type === 'drive_state' || STREAMS.includes(message.type)) {
     latest.set(message.type, message);
     emit(message.type, message);
@@ -310,6 +377,7 @@ function open(url) {
   ws.onclose = (event) => {
     if (ws !== socket) return;
     socket = null;
+    dropSaves();
     failed(url, closeProblem(event.code), event.code);
   };
   connectTimer = setTimeout(() => {
@@ -362,6 +430,8 @@ export {
   RETRY_MS,
   FULL_RETRY_MS,
   SILENT_MS,
+  SAVE_TIMEOUT_MS,
+  MAX_SAVE_BYTES,
   STOPPED_AFTER_FAILURES,
   BRIDGE_CLIENT_LIMIT,
   onRobot,
@@ -373,4 +443,6 @@ export {
   connectRobot,
   disconnectRobot,
   sendRobot,
+  robotRecordsSupport,
+  saveRecordOnRobot,
 };

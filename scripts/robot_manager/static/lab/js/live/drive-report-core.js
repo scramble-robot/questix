@@ -198,7 +198,8 @@ const isEmptyRun = (recording) => !driveReport(recording).summary.moved;
 // --- wording helpers (the sentences come from content/live/drive-report.json) ------------------
 
 // How a run ended, from drive-link's reason: 'ok' ran as planned, 'stopped' the learner (or the
-// page being hidden) stopped it, 'problem' the robot or the link stopped it. Unknown: 'stopped'.
+// page being hidden) stopped it, 'problem' the robot or the link stopped it, 'recorded' the page
+// only recorded (live-session's 「記録だけする」). Unknown: 'stopped'.
 const RUN_STATUS = {
   done: 'ok',
   stopped: 'stopped',
@@ -217,6 +218,8 @@ const RUN_STATUS = {
   no_answer: 'problem',
   // A hand on the controller's stick took the robot over: meant to happen, not a fault.
   controller: 'stopped',
+  // 「記録だけする」: the page recorded while someone else drove; it ran nothing itself.
+  recorded: 'recorded',
 };
 const runStatusKind = (reason) => RUN_STATUS[reason] ?? 'stopped';
 

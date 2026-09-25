@@ -4,9 +4,12 @@ import { downloadFile } from '../core/dom.js';
 import { lessonGuide, figureGuide } from '../shell/lesson-guide.js';
 import { generateSlamLog, estimateSlam, slamMetrics, validateSlamLog } from './engine.js';
 import { slamLogFromFile, slamLogFromRecording } from '../live/slam-recorder.js';
-import { recordRobot, recordingFile, liveLink, onLiveLink } from '../live/capture.js';
-import { missingInRecording } from '../live/recording-core.js';
+import { recordRobot, recordingFile, liveLink, onLiveLink, groupName } from '../live/capture.js';
+import { missingInRecording, withRunInfo } from '../live/recording-core.js';
 import { openRobotDialog } from '../live/live-ui.js';
+import { keepCapture } from '../live/run-keeper.js';
+import { pickRobotRecord } from '../live/record-picker.js';
+import { registerRecordTarget, revealAfterRender } from '../live/record-targets.js';
 import { basicsTemplate, initSlamBasics, reviewSlamBasics } from './basics.js';
 import { drawMaps, drawSensorChart, drawTilt, tiltAcceleration } from './render.js';
 import { slamPage } from './view.js';
@@ -405,15 +408,43 @@ async function toggleRecording() {
       copy.hardware.recordedName,
       copy.hardware.recordedNote + motion + copy.hardware.saveHint,
     );
-    // The shared recording fields (lesson, robot) say where the file came from once it is saved.
-    const robot = liveLink().robot;
-    robotRecording = { ...recorded, lesson: RECORDING_LESSON, ...(robot ? { robot } : {}) };
+    // The shared recording fields (lesson, robot, group) say where the file came from once it is
+    // saved; like every lesson's recording, it is also kept on the robot and in the run history.
+    robotRecording = withRunInfo(recorded, {
+      lesson: RECORDING_LESSON,
+      robot: liveLink().robot,
+      group: groupName(),
+    });
+    keepCapture(robotRecording, RECORDING_LESSON).then((saved) => {
+      if (!saved) return;
+      importStatus = `${importStatus} ${saved.message}`;
+      update();
+    });
   } catch (error) {
     importStatus = fill(copy.hardware.recordFailed, { message: error.message });
   } finally {
     recording = null;
     update();
   }
+}
+
+// A recording kept on the robot (the picker, or 記録の一覧) enters as a saved one opened from a file.
+function openRobotRecording(recording) {
+  try {
+    const converted = slamLogFromRecording(recording);
+    acceptLog(converted.log, recording.name, copy.hardware.recordedNote);
+    robotRecording = recording;
+    return true;
+  } catch (error) {
+    importStatus = fill(copy.hardware.importFailed, { message: error.message });
+    update();
+    return false;
+  }
+}
+
+async function pickRecording() {
+  const recording = await pickRobotRecord({ lesson: RECORDING_LESSON, needs: ['scan', 'drive'] });
+  if (recording) openRobotRecording(recording);
 }
 
 function estimatesCsv() {
@@ -551,6 +582,7 @@ const actions = {
     update();
   },
   openLogFile,
+  pickRecording,
   toggleRecording,
   openLink: openRobotDialog,
   saveRecording() {
@@ -594,6 +626,13 @@ function initSlam(hardwareContent) {
   // Connecting or losing the robot changes what the real-robot panel offers.
   onLiveLink(() => {
     if (real) update();
+  });
+  // 「自己位置推定で開く」 from 記録の一覧: the real-robot tab, with the recording as its log.
+  registerRecordTarget('slam', (recording) => {
+    actions.setReal(true);
+    const taken = openRobotRecording(recording);
+    revealAfterRender(() => document.getElementById('slamHardware'));
+    return taken;
   });
   watchCanvasSize();
   requestAnimationFrame(tick);

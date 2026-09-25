@@ -57,7 +57,8 @@
     "label": "この画面の中を移動",
     "monitor": "受信している値",
     "drive": "実機テスト",
-    "log": "走行の記録"
+    "log": "走行の記録",
+    "records": "記録の一覧"
   },
   "monitor": {
     "scanCount": "{measured} / {total} 本の測定 · 測れなかった方向は描きません",
@@ -72,5 +73,12 @@
     "streamRate": "{hz} 回/秒",
     "wheelLeft": "左",
     "wheelRight": "右"
+  },
+  "save": {
+    "notConnected": "ロボットとの接続が切れていました",
+    "off": "このロボットは記録の保存を受け付けていません",
+    "tooBig": "記録が大きすぎます（{limit} MBまで）",
+    "timeout": "ロボットから返事がありませんでした",
+    "lost": "保存の途中でロボットとの接続が切れました"
   }
 }

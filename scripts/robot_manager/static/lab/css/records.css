@@ -1,0 +1,288 @@
+/* 記録の一覧 (js/live/records-view.js), the 「ロボットの記録から選ぶ」 picker and the line under a
+   lesson's robot block saying whether a run was kept on the robot. Laid out for a 390 px phone
+   first; from 700 px the facts and buttons of a record sit side by side. */
+
+.records-page-inner {
+  max-width: 980px;
+}
+.records-privacy {
+  margin: 12px 0 16px;
+  padding: 10px 14px;
+  border-left: 4px solid var(--role-target);
+  border-radius: 8px;
+  background: #fbf5e6;
+  font-size: 14px;
+}
+.records-section {
+  margin-top: 16px;
+  padding: 18px 20px;
+}
+@media (max-width: 600px) {
+  .records-section {
+    padding: 14px 12px;
+  }
+}
+.records-section h2 {
+  margin-top: 0;
+}
+.records-section-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.records-note,
+.records-status,
+.records-count {
+  margin: 6px 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+.records-error {
+  margin: 6px 0;
+  color: var(--orange);
+  font-weight: 600;
+}
+.records-offline {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+.records-offline p {
+  margin: 0;
+}
+
+/* --- filters --- */
+.records-filters {
+  margin: 12px 0;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.records-filters summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  min-height: 44px;
+  padding: 10px 0;
+  font-weight: 700;
+  cursor: pointer;
+}
+.records-filters summary .records-count {
+  margin: 0;
+  font-weight: 400;
+}
+.records-filter-fields {
+  display: grid;
+  gap: 10px;
+  padding-bottom: 12px;
+}
+.records-filter {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  font-size: 14px;
+}
+.records-filter select {
+  width: 100%;
+  min-height: 40px;
+}
+.records-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  font-size: 14px;
+}
+.records-check input {
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
+@media (min-width: 700px) {
+  .records-filter-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* --- one record --- */
+.records-list {
+  display: grid;
+  gap: 10px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.records-item {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+}
+.records-label {
+  margin: 0;
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+.records-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.records-facts > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.records-outcome {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--dark);
+  font-weight: 600;
+}
+.records-outcome-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 11px;
+  line-height: 1;
+  background: var(--role-measured);
+}
+.records-outcome.ok .records-outcome-icon {
+  background: var(--green);
+}
+.records-outcome.stopped .records-outcome-icon {
+  background: var(--muted);
+  font-size: 9px;
+}
+.records-outcome.problem {
+  color: var(--orange);
+}
+.records-outcome.problem .records-outcome-icon {
+  background: var(--orange);
+}
+.records-badge {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--green-soft);
+  color: var(--green);
+  font-weight: 600;
+}
+.records-actions,
+.records-targets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.records-actions button,
+.records-targets button {
+  min-height: 40px;
+}
+.records-targets button {
+  font-size: 14px;
+}
+.records-more summary {
+  min-height: 40px;
+  padding: 8px 0;
+  color: var(--green);
+  font-weight: 600;
+  cursor: pointer;
+}
+.records-report {
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  min-width: 0;
+}
+
+/* --- rosbags: the time window to convert --- */
+.records-window {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px 12px;
+}
+.records-window-field {
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+}
+.records-window-field input {
+  width: 7em;
+  min-height: 40px;
+}
+.records-window-text {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.records-window .records-status {
+  flex-basis: 100%;
+}
+
+/* --- the picker --- */
+.record-picker {
+  width: min(760px, calc(100% - 16px));
+  padding: 20px;
+}
+.record-picker .dialog-heading {
+  margin-bottom: 12px;
+}
+.record-picker-body {
+  display: grid;
+  gap: 4px;
+}
+.record-picker-body p {
+  margin: 4px 0;
+}
+.record-picker-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+@media (max-width: 600px) {
+  .record-picker {
+    padding: 16px 14px;
+    max-height: 92dvh;
+  }
+}
+
+/* --- in the lessons: next to the file input, and under the block --- */
+.live-capture-pick {
+  min-height: 40px;
+}
+.live-robot-save {
+  margin: 8px 0;
+  font-size: 14px;
+  color: var(--green);
+}
+.live-robot-save.failed {
+  color: var(--orange);
+  font-weight: 600;
+}
+.live-robot-save .text-button {
+  margin-left: 6px;
+}
+
+/* --- the catalogue's robot section --- */
+.series-records {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}

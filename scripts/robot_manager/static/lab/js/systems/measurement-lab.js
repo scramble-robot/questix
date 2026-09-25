@@ -15,6 +15,8 @@ import { driveRows, drivesOf } from '../live/recording-core.js';
 import { createLiveSession } from '../live/live-session.js';
 import { captureNotes } from '../live/live-view.js';
 import { openRobotDialog } from '../live/live-ui.js';
+import { pickRobotRecord as pickFromRobot } from '../live/record-picker.js';
+import { registerRecordTarget } from '../live/record-targets.js';
 import {
   staircaseProgram,
   programSeconds,
@@ -598,6 +600,46 @@ async function openRecording(file) {
   }
 }
 
+// A recording kept on the robot takes the way of a file (a table that holds measurements asks
+// whether to replace or add).
+function openFromRobot(recording) {
+  const session = sessionOf(shown);
+  if (!recording || !session) return false;
+  clearNotes(labState(shown));
+  openingFile = true;
+  try {
+    return session.useRecording(recording, 'robot');
+  } finally {
+    openingFile = false;
+  }
+}
+
+async function pickRobotRecord() {
+  const scenario = scenarioOf(shown);
+  if (!scenario?.live) return;
+  const course = shown;
+  const recording = await pickFromRobot({
+    lesson: `measurement-${course}`,
+    needs: scenario.live.streams,
+  });
+  if (recording && shown === course) openFromRobot(recording);
+}
+
+const SUPPLEMENT_TRIGGER = 'button[aria-controls="supplementDialog"]';
+
+// 「測定ラボで開く」 from 記録の一覧: the course is on screen with this panel (series.js
+// showMeasurementLab); the recording goes in, then the panel's dialog opens on what it did.
+function openFromRecords(course, recording) {
+  if (shown !== course) return false;
+  const taken = openFromRobot(recording);
+  // The panel's trigger button is added by supplement-ui once the new panel is in the page.
+  requestAnimationFrame(() => {
+    host().querySelector(SUPPLEMENT_TRIGGER)?.click();
+    requestAnimationFrame(() => scrollToPart('[data-measure-live-note]'));
+  });
+  return taken;
+}
+
 function saveCsv() {
   const state = labState(shown);
   const lines = state.rows.map((row) => [row.x, row.y, row.test ? 1 : 0].join(','));
@@ -656,6 +698,7 @@ const actions = {
   },
   stopCapture: () => sessionOf(shown)?.actions.stopCapture(),
   openRecording,
+  pickRobotRecord,
   chooseIncoming,
   showTable,
   jumpToLive: () => scrollToPart('[data-measure-live]'),
@@ -669,6 +712,9 @@ const actions = {
 // Connecting or losing the robot changes what the panel offers, so it is redrawn from here rather
 // than leaving a stale "実機とつながっていません" on screen.
 onLiveLink(() => update());
+
+for (const course of Object.keys(copy.scenarios).filter((key) => copy.scenarios[key].live))
+  registerRecordTarget(`measurement-${course}`, (recording) => openFromRecords(course, recording));
 
 function showMeasurementLab(course) {
   const entry = host();

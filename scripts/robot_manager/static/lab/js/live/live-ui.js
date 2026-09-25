@@ -360,17 +360,25 @@ function jumpTo(id) {
   section.scrollIntoView({ block: 'start', behavior: smooth ? 'smooth' : 'auto' });
   section.focus({ preventScroll: true });
 }
+// 記録の一覧 is a page of its own (route #records): the dialog closes on the way there.
+function openRecordsPage() {
+  $('robotDialog').close();
+  location.hash = '#records';
+}
+
 function showDialogNav() {
   const visible = DIALOG_SECTIONS.filter(([, id]) => !$(id).hidden);
   const nav = $('robotDialogNav');
-  nav.hidden = !visible.length;
+  nav.hidden = false;
   render(
-    visible.map(
-      ([key, id]) =>
-        html`<button type="button" class="quiet" @click=${() => jumpTo(id)}>
-          ${copy.nav[key]}
-        </button>`,
-    ),
+    html`${visible.map(
+        ([key, id]) =>
+          html`<button type="button" class="quiet" @click=${() => jumpTo(id)}>
+            ${copy.nav[key]}
+          </button>`,
+      )}<button type="button" class="quiet" data-robot-records @click=${openRecordsPage}>
+        ${copy.nav.records}
+      </button>`,
     nav,
   );
 }

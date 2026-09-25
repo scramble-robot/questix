@@ -1,6 +1,7 @@
 import { fillSentence as fill } from '../core/content.js';
 import { pairByStamp } from '../live/recording-core.js';
 import { createLiveSession } from '../live/live-session.js';
+import { registerRecordTarget, revealAfterRender } from '../live/record-targets.js';
 import { PLAN_ROBOT, planningClearance } from './core.js';
 import { ROOM_SIZE, measuredRoom } from './room-core.js';
 import { readScan, floorHeight, sliceScan, scanRoom } from './scan3d-core.js';
@@ -122,6 +123,13 @@ function createRoom({ copy, changed, update }) {
     failed: text.failed,
     apply: applyRecording,
     update,
+  });
+  // 「経路計画で開く」 from 記録の一覧: the room topic is open (series.js), the recording builds the
+  // room as a file would, and the map comes on screen.
+  registerRecordTarget('planning-room', (recording) => {
+    const taken = session.useRecording(recording, 'robot');
+    revealAfterRender(() => document.getElementById('planningCanvas'));
+    return taken;
   });
 
   // --- from a phone's 3D scan ---

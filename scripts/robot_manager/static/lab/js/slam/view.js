@@ -7,6 +7,7 @@ import { htmlChart } from './chart-view.js';
 import { depthColorKey } from '../vision/depth-key.js';
 import { niceScale } from '../core/chart-scale.js';
 import { roleStyle } from '../core/palette.js';
+import { captureCopy } from '../live/live-view.js';
 
 // Templates of the SLAM experiment page. Every function is pure: it turns the model built by
 // ui.js (mode, log, runs, playback, sensor view, settings) into markup. Learner-facing sentences
@@ -146,6 +147,9 @@ function hardwarePanel(model, copy, actions) {
               accept=".json,.mcap,application/json"
               @change=${actions.openLogFile}
           /></label>
+          <button class="small" data-live-pick @click=${actions.pickRecording}>
+            ${captureCopy.file.pick}
+          </button>
           ${recordControls(model, text, actions, recordLabel)}`,
       )}
     </div>

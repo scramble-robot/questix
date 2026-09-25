@@ -35,6 +35,8 @@ import { driveRows, wallRows } from '../live/recording-core.js';
 import { createLiveSession } from '../live/live-session.js';
 import { captureNotes } from '../live/live-view.js';
 import { openRobotDialog } from '../live/live-ui.js';
+import { pickRobotRecord } from '../live/record-picker.js';
+import { registerRecordTarget } from '../live/record-targets.js';
 import { fillSentence as fill } from '../core/content.js';
 import {
   STEP_SPEEDS,
@@ -483,31 +485,70 @@ function addCompared(kind, entry) {
   comparedRuns[kind].splice(Math.max(0, oldestPast), 1);
 }
 
-async function addComparisons(files) {
+// `sources` are `{name, load()}`: files picked here, or a recording kept on the robot (the picker
+// or 記録の一覧), which take the same way onto the chart.
+async function addComparisons(sources) {
   const kind = liveKind();
   const notes = [];
   let added = 0;
-  for (const file of files) {
+  for (const source of sources) {
     if (comparedRuns[kind].length >= MAX_COMPARED) {
       notes.push(fill(copy.live.compareTooMany, { count: MAX_COMPARED }));
       break;
     }
     try {
-      const { recording } = await openRecordingFile(file);
+      const recording = await source.load();
       const { run, note } = RUN_OF[kind](recording);
       if (!run) {
-        notes.push(`${file.name}：${note}`);
+        notes.push(`${source.name}：${note}`);
         continue;
       }
-      addCompared(kind, { ...realEntry(kind, run, recording), source: 'file', file: file.name });
+      addCompared(kind, { ...realEntry(kind, run, recording), source: 'file', file: source.name });
       added += 1;
     } catch (error) {
-      notes.push(`${file.name}：${error.message}`);
+      notes.push(`${source.name}：${error.message}`);
     }
   }
   compareNote = notes.join(' ');
   if (added) revealPending = true;
   update();
+  return added > 0;
+}
+
+const fileSource = (file) => ({
+  name: file.name,
+  load: async () => (await openRecordingFile(file)).recording,
+});
+const recordingSource = (recording) => ({ name: recording.name, load: async () => recording });
+
+const SESSION_NEEDS = { speed: ['drive', 'twist'], distance: ['scan'] };
+
+// 「ロボットの記録から選ぶ」 next to 比べる: the picker, then the same way as a file.
+async function pickComparison() {
+  const kind = liveKind();
+  const slot = `control-${kind}`;
+  const recording = await pickRobotRecord({
+    lesson: slot,
+    needs: SESSION_NEEDS[kind],
+    compare: true,
+  });
+  if (recording) await addComparisons([recordingSource(recording)]);
+}
+
+// 「フィードバック制御で開く／比べる」 from 記録の一覧: the course is on screen (series.js); a topic of
+// the recording's kind is opened if the one on screen is of the other kind, then the recording goes
+// the way a file would, and the chart comes on screen (revealPending).
+function openFromRecords(kind, recording, compare) {
+  if (liveKind() !== kind) {
+    const first = CONTROL_TOPICS.find(
+      (entry) => (entry.mode === 'distance') === (kind === 'distance'),
+    );
+    selectTopic(first.id);
+  }
+  if (compare) return addComparisons([recordingSource(recording)]);
+  const taken = liveSessions[kind].useRecording(recording, 'robot');
+  if (!taken) revealElement(document.getElementById('controlLive'));
+  return taken;
 }
 
 // One row per run in the comparison table: the simulation on screen (marked when the settings
@@ -746,13 +787,15 @@ const actions = {
   },
   stopCapture: () => liveSession().actions.stopCapture(),
   openRecording: (file) => liveSession().actions.openRecording(file),
+  pickRobotRecord: () => liveSession().actions.pickRobotRecord(),
+  pickComparison,
   saveRecording: (kind) => liveSession().actions.saveRecording(kind),
   clearLive() {
     liveRuns[liveKind()] = null;
     liveSession().clear();
     update();
   },
-  addComparisons: (files) => addComparisons([...files]),
+  addComparisons: (files) => addComparisons([...files].map(fileSource)),
   clearComparisons() {
     comparedRuns[liveKind()] = [];
     nextLetter[liveKind()] = 0;
@@ -796,6 +839,12 @@ function initControl() {
   onLiveLink(() => {
     if (!page().hidden) update();
   });
+  registerRecordTarget('control-speed', (recording, { compare }) =>
+    openFromRecords('speed', recording, compare),
+  );
+  registerRecordTarget('control-distance', (recording, { compare }) =>
+    openFromRecords('distance', recording, compare),
+  );
 }
 
 export { activateControl, reviewControl, initControl };

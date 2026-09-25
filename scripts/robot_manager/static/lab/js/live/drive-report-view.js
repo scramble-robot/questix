@@ -37,7 +37,7 @@ const MOTION_SHOWN = 1e-3; // m/s or rad/s: a series that never exceeds this has
 const MEASURED_SMOOTHING = 0.15;
 const COMPARE_LIMIT = 3; // runs that can be overlaid on the report of another
 const COMPARE_NAMES = ['A', 'B', 'C'];
-const STATUS_ICONS = { ok: '✓', stopped: '■', problem: '⚠︎', unknown: '?' };
+const STATUS_ICONS = { ok: '✓', stopped: '■', problem: '⚠︎', recorded: '●', unknown: '?' };
 // Labels closer than this (percent of the plot's height, about one line of 12 px text on the
 // phone's 128 px plot) are moved apart.
 const LABEL_GAP = 12;
@@ -725,7 +725,7 @@ function driveHistoryList({ runs, selected, compared = [], select, toggleCompare
 // A run stopped within its first moments says little; it is kept, but folded away so the runs
 // worth comparing stay together.
 function isShortStop(run) {
-  if (run.reason === 'done' || !run.reason) return false;
+  if (['done', 'recorded', ''].includes(run.reason ?? '')) return false;
   const summary = run.report.summary;
   const seconds = Number.isFinite(summary.driveSeconds) ? summary.driveSeconds : summary.seconds;
   return seconds < SHORT_RUN;

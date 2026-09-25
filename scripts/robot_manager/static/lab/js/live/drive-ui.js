@@ -22,6 +22,8 @@ import {
   onDriveRuns,
   isEmptyRun,
 } from './drive-history.js';
+import { keepRunOnRobot } from './run-keeper.js';
+import { recordsCopy } from './records-core.js';
 import {
   driveReportView,
   driveHistoryList,
@@ -122,7 +124,7 @@ async function hold(move) {
   });
   bench.note = [bench.note, benchResult(recording, move)].filter(Boolean).join(' ');
   update();
-  addDriveRun({
+  const run = addDriveRun({
     slot: 'bench',
     lesson: fill(driveCopy.lessons.bench, { move: driveCopy.bench[move.id] }),
     conditions: conditions.label,
@@ -133,6 +135,12 @@ async function hold(move) {
     cut: Boolean(recording.cut),
     recording,
   });
+  // Kept on the robot like every lesson run, so the class can find the wiring checks later too.
+  const saved = await keepRunOnRobot(recording, run.id);
+  if (saved && !bench.held) {
+    bench.note = [bench.note, saved.message].join(' ');
+    update();
+  }
 }
 
 const signedRpm = (rpm) => `${rpm >= 0 ? '+' : '−'}${Math.abs(rpm).toFixed(0)}`;
@@ -314,16 +322,35 @@ function historyOpen() {
   </div>`;
 }
 
+// 記録の一覧 holds this list too, and the records every other device kept on the robot.
+function recordsLink() {
+  return html`<p class="drive-note">
+    ${recordsCopy.entry.catalogueLead}
+    <button
+      class="text-button"
+      data-drive-history-records
+      @click=${() => {
+        document.getElementById('robotDialog').close();
+        location.hash = '#records';
+      }}
+    >
+      ${recordsCopy.entry.catalogue}
+    </button>
+  </p>`;
+}
+
 function historyPanel() {
   const copy = reportCopy;
   const runs = driveRuns();
   if (!runs.length)
     return html`<h3>${copy.historyTitle}</h3>
+      ${recordsLink()}
       <p>${copy.historyEmpty}</p>
       ${historyOpen()}`;
   const shown = (selectedRun !== null && driveRun(selectedRun)) || runs[0];
   return html`<h3>${copy.historyTitle}</h3>
     <p>${copy.historyLead}</p>
+    ${recordsLink()}
     ${driveHistoryList({
       runs,
       selected: shown.id,

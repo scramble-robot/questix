@@ -28,6 +28,7 @@ const RUN_DEFAULTS = {
   references: {},
   cut: false,
   kept: false, // the full recording is in IndexedDB
+  robotId: '', // the id the robot gave its copy (robot-records.js keepOnRobot), '' when none
 };
 
 // An `undefined` from the caller (e.g. `program: plan.program` with no program) keeps the default.
@@ -232,6 +233,15 @@ async function saveDriveRun(id, kind) {
   return true;
 }
 
+/** Note that the run's recording is also kept on the robot, under `robotId`. */
+function markRunOnRobot(id, robotId) {
+  const run = driveRun(id);
+  if (!run || !robotId) return;
+  run.robotId = robotId;
+  store();
+  notify();
+}
+
 function clearDriveRuns() {
   forget(runs.map((run) => run.key));
   runs = [];
@@ -254,6 +264,7 @@ export {
   driveRunRecording,
   hasRecording,
   saveDriveRun,
+  markRunOnRobot,
   clearDriveRuns,
   onDriveRuns,
   isEmptyRun,

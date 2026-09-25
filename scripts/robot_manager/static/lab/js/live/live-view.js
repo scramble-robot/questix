@@ -2,6 +2,7 @@ import { html, nothing } from '../vendor/lit-html.js';
 import { loadJson, fillSentence as fill } from '../core/content.js';
 import { driveControls } from './drive-view.js';
 import { setGroupName } from './capture.js';
+import { recordsCopy } from './records-core.js';
 
 // The one block of controls a lesson shows when it can take measurements from the real robot:
 // the state of the link, which stream is missing, and the record / stop button. Pure templates —
@@ -52,9 +53,11 @@ function recordButton(model, actions) {
 }
 
 // Opening a recording: a file this material saved, or a rosbag recorded on the robot. Offered
-// without a connection too: a class can work from yesterday's recordings with the robot off.
+// without a connection too: a class can work from yesterday's recordings with the robot off. Next
+// to it, the records kept on the robot (record-picker.js), when the lesson passes the session's
+// `pickRobotRecord` on.
 function openControl(model, actions) {
-  return html`<label class="live-capture-open"
+  const file = html`<label class="live-capture-open"
     >${captureCopy.file.open}
     <input
       data-live-open
@@ -66,6 +69,41 @@ function openControl(model, actions) {
         event.target.value = '';
       }}
   /></label>`;
+  if (!actions.pickRobotRecord) return file;
+  return html`${file}<button
+      class="live-capture-pick"
+      data-live-pick
+      ?disabled=${model.recording}
+      @click=${actions.pickRobotRecord}
+    >
+      ${captureCopy.file.pick}
+    </button>`;
+}
+
+// Whether the finished run (or recording) was also kept on the robot (live-session robotSave).
+function robotSaveLine(model) {
+  const save = model.robotSave;
+  if (!save?.message) return nothing;
+  return html`<p
+    class="live-robot-save ${save.state}"
+    role=${save.state === 'failed' ? 'alert' : 'status'}
+    data-live-robot-save=${save.state}
+  >
+    ${save.message}
+    ${
+      save.state === 'saved'
+        ? html`<button
+            class="text-button"
+            data-live-records
+            @click=${() => {
+              location.hash = '#records';
+            }}
+          >
+            ${recordsCopy.save.openList}
+          </button>`
+        : nothing
+    }
+  </p>`;
 }
 
 // 班の名前, written into every recording made on this device and into the saved file's name. A
@@ -184,13 +222,18 @@ function offlineBlock(model, actions) {
 
 function liveCaptureControls(model, actions) {
   const busy = model.recording || driveBusy(model);
-  if (!model.link.connected && !busy) return offlineBlock(model, actions);
+  if (!model.link.connected && !busy)
+    return html`${offlineBlock(model, actions)}${robotSaveLine(model)}`;
   const drive =
     model.drive && model.link.connected ? driveControls(model, model.drive, actions) : nothing;
   // When the page may drive, driving comes first; otherwise the one-line note follows recording.
   if (drivingAllowed(model) || driveBusy(model))
-    return html`<div class="live-block">${drive} ${capturePart(model, actions)}</div>`;
-  return html`<div class="live-block">${capturePart(model, actions)} ${drive}</div>`;
+    return html`<div class="live-block">
+      ${drive} ${robotSaveLine(model)} ${capturePart(model, actions)}
+    </div>`;
+  return html`<div class="live-block">
+    ${capturePart(model, actions)} ${robotSaveLine(model)} ${drive}
+  </div>`;
 }
 
 // The sentences a lesson adds after a recording, so every course reports the same conditions.

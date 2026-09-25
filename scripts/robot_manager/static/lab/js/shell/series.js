@@ -19,16 +19,20 @@ import { initQuizzes } from '../quiz/ui.js';
 import { initMastery } from '../quiz/mastery-ui.js';
 import { courseNavigation, seriesPage } from './series-view.js';
 import { courseRunModes, RUN_MODE_COPY } from './run-mode.js';
+import { activateRecords } from '../live/records-ui.js';
 
-// Application shell: which page is shown (catalogue, a course, a quiz or a mastery test), the
-// header course switcher, the hash routes and the catalogue page itself. series-view.js turns the
-// model into markup; the courses own their pages and expose init/activate/review entry points.
+// Application shell: which page is shown (catalogue, a course, a quiz or a mastery test, or 記録の
+// 一覧 of the real robot's recordings), the header course switcher, the hash routes and the
+// catalogue page itself. series-view.js turns the model into markup; the courses own their pages
+// and expose init/activate/review entry points.
 
 const copy = await loadJson('content/shell/series.json');
 const curriculumSourceHtml = (await loadText('content/shell/school-curriculum-source.html')).trim();
 
 const CATALOGUE = 'series'; // the route of the catalogue page
 const CATALOGUE_PAGE = 'seriesPage';
+const RECORDS = 'records'; // the route of 記録の一覧 (js/live/records-ui.js)
+const RECORDS_PAGE = 'recordsPage';
 const GROUP_ANCHOR_PREFIX = '#course-group-'; // in-page links on the catalogue, not routes
 const ASSESSMENTS = {
   quiz: { hashPrefix: '#quiz-', page: 'quizPage', title: copy.header.quizTitle },
@@ -41,6 +45,7 @@ const CARD_GAP_BELOW_HEADER = 16; // px
 const lessonById = (id) => LESSONS.find((lesson) => lesson.id === id);
 const pageIds = [
   CATALOGUE_PAGE,
+  RECORDS_PAGE,
   ...LESSONS.flatMap((lesson) => lesson.pages),
   'quizPage',
   'masteryPage',
@@ -90,10 +95,12 @@ function model() {
 }
 
 function headerCaption() {
+  if (course === RECORDS) return copy.header.recordsTitle;
   return lessonById(course)?.title || copy.header.chooseCourse;
 }
 
 function documentTitle() {
+  if (course === RECORDS) return `${copy.header.recordsTitle}｜${copy.siteName}`;
   const courseTitle = lessonById(course)?.title || copy.header.catalogueTitle;
   const prefix = assessment ? `${ASSESSMENTS[assessment].title}｜` : '';
   return `${prefix}${courseTitle}｜${copy.siteName}`;
@@ -195,6 +202,24 @@ function showAssessment(kind, name, updateHash) {
   window.scrollTo({ top: 0 });
 }
 
+// 記録の一覧: reached from the catalogue's robot section, the 実機 dialog and a lesson's note that a
+// run was kept on the robot; it opens recordings in the courses (`series-experiment` below).
+function showRecords(updateHash = true) {
+  if (course === RECORDS) return;
+  if (course === CATALOGUE) catalogueReturn = null;
+  leaveCurrentPage();
+  showMeasurementLab(null);
+  quizzes.hide();
+  mastery.hide();
+  assessment = null;
+  course = RECORDS;
+  update();
+  $(RECORDS_PAGE).hidden = false;
+  activateRecords();
+  if (updateHash) pushHash('#' + RECORDS);
+  window.scrollTo({ top: 0 });
+}
+
 const showQuiz = (name, updateHash = true) => showAssessment('quiz', name, updateHash);
 const showMastery = (name, updateHash = true) => showAssessment('mastery', name, updateHash);
 
@@ -253,6 +278,7 @@ const actions = {
     actions.selectGrade(SCHOOL_GRADES[next].id);
     $(`school-tab-${SCHOOL_GRADES[next].id}`).focus();
   },
+  openRecords: () => showRecords(),
   followExperimentLink(event, experiment) {
     if (modified(event) || event.button !== 0) return;
     event.preventDefault();
@@ -289,6 +315,13 @@ document.querySelector('.brand').onclick = (event) => {
 };
 document.addEventListener('series-open', (event) => show(event.detail));
 document.addEventListener('quiz-open', (event) => showQuiz(event.detail));
+// A recording opened from 記録の一覧 (js/live/record-targets.js): the course, and its topic if named.
+document.addEventListener('series-experiment', (event) => {
+  const { course: name, topic } = event.detail;
+  if (!lessonById(name)) return;
+  if (topic) openExperiment(name, topic);
+  else show(name);
+});
 
 // The course switcher closes on any click or tap outside it and on Escape.
 function closeSwitcherOutside(event) {
@@ -325,7 +358,8 @@ function tuckHeaderOnScroll() {
 window.addEventListener('scroll', tuckHeaderOnScroll, { passive: true });
 siteHeader.addEventListener('focusin', () => siteHeader.classList.remove('is-tucked'));
 
-// --- Hash routes: #<course>, #quiz-<course>, #mastery-<course>; anything else is the catalogue.
+// --- Hash routes: #<course>, #quiz-<course>, #mastery-<course>, #records; anything else is the
+// catalogue.
 
 function assessmentRoute(hash) {
   for (const [kind, { hashPrefix }] of Object.entries(ASSESSMENTS)) {
@@ -341,6 +375,10 @@ function route() {
     // A group heading of the catalogue; going back to it from a course shows the catalogue again.
     if (course !== CATALOGUE) show(CATALOGUE, false);
     document.querySelector(hash)?.scrollIntoView();
+    return;
+  }
+  if (hash === '#' + RECORDS) {
+    showRecords(false);
     return;
   }
   const test = assessmentRoute(hash);

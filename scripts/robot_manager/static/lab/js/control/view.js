@@ -9,7 +9,7 @@ import {
 } from './summary.js';
 import { lessonLabel } from '../shell/lesson-ui.js';
 import { schoolTips } from '../shell/school-tips.js';
-import { liveCaptureControls } from '../live/live-view.js';
+import { liveCaptureControls, captureCopy } from '../live/live-view.js';
 import { lessonBrief } from '../shell/lesson-brief.js';
 import { runModeBadgeHtml } from '../shell/run-mode.js';
 import { CONTROL_GROUPS, CONTROL_TOPICS, LAST_SAMPLE, STOP_DISTANCE, controlLoad } from './core.js';
@@ -809,6 +809,9 @@ function compareControls(model, text, actions) {
           event.target.value = '';
         }}
     /></label>
+    <button class="live-capture-pick" data-live-compare-pick @click=${actions.pickComparison}>
+      ${captureCopy.file.pick}
+    </button>
     ${
       model.live.compared.length
         ? html`<button data-live-compare-clear @click=${actions.clearComparisons}>

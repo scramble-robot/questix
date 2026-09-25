@@ -244,12 +244,19 @@ function schoolOverview(model, actions) {
 
 // --- The robot used in every experiment ---------------------------------------------------------
 
-function robotSection(copy) {
+// Ends with the way to 記録の一覧: what was measured on the robot, by this or any other device.
+function robotSection(copy, actions) {
   return html`<section class="series-robot card">
     <div>
       <p class="eyebrow">${copy.robot.eyebrow}</p>
       <h2>${copy.robot.title}</h2>
       <p>${copy.robot.lead}</p>
+      <p class="series-records">
+        ${copy.robot.recordsLead}
+        <button class="quiet" data-series-records @click=${actions.openRecords}>
+          ${copy.robot.records}
+        </button>
+      </p>
     </div>
     <dl>
       ${copy.robot.sensors.map(
@@ -267,7 +274,7 @@ function robotSection(copy) {
 // about, the courses; the label legend and the school-subject overview for those who look further.
 function seriesPage(model, actions) {
   const copy = model.copy;
-  return html`${catalogueHeading(model, actions)}${robotSection(copy)}${groupIndex(
+  return html`${catalogueHeading(model, actions)}${robotSection(copy, actions)}${groupIndex(
     model.groups,
   )}${model.groups.map((group, index) =>
     courseGroup(group, index, model, actions),

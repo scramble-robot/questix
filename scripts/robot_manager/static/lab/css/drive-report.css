@@ -83,6 +83,10 @@
 .drive-status.unknown {
   background: var(--muted);
 }
+.drive-status.recorded {
+  background: var(--role-measured);
+  font-size: 10px;
+}
 /* Scrolled to when 比べる is ticked: clear of the dialog's sticky table of contents. */
 [data-drive-report-charts] {
   scroll-margin-top: 72px;
