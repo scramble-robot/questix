@@ -1,4 +1,4 @@
-/* Questix Robot Manager — Dark Theme */
+/* QUESTiX Robot Manager — Dark Theme */
 
 :root {
   --bg: #1a1a2e;
@@ -584,15 +584,9 @@ main {
   grid-column: 1 / -1;
 }
 
-/* Controller type row — inline toggle with labels */
+/* Controller type row — label + select */
 .controller-type-row {
   justify-content: space-between;
-}
-
-.toggle-row.compact {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
 }
 
 .config-item label {
@@ -600,7 +594,8 @@ main {
 }
 
 .config-item input[type="number"],
-.config-item input[type="text"] {
+.config-item input[type="text"],
+.config-item select {
   width: 140px;
   padding: 0.35rem 0.6rem;
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -615,7 +610,13 @@ main {
   width: 280px;
 }
 
-.config-item input:focus {
+.config-item select {
+  width: auto;
+  text-align: left;
+}
+
+.config-item input:focus,
+.config-item select:focus {
   outline: none;
   border-color: var(--accent);
 }
@@ -1165,3 +1166,20 @@ main {
     width: 160px;
   }
 }
+
+/* Web Joy connection QR */
+#web-joy-qr-form label { display: block; margin: 1rem 0 0.5rem; }
+#web-joy-url {
+  box-sizing: border-box; width: 100%; padding: 0.7rem;
+  border: 1px solid var(--accent); border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05); color: inherit; font: inherit;
+}
+#web-joy-help, .web-joy-qr-note { font-size: 0.85rem; line-height: 1.6; opacity: 0.8; }
+#web-joy-qr-result { margin-top: 1rem; }
+#web-joy-qr { max-width: 320px; }
+#web-joy-qr svg { display: block; width: 100%; height: auto; }
+#web-joy-link { color: #85b5ff; overflow-wrap: anywhere; }
+#web-joy-browser { text-decoration: none; margin-right: 0.5rem; }
+#web-joy-browser[hidden] { display: none; }
+
+[aria-labelledby="web-joy-heading"] p { margin: 0.75rem 0; line-height: 1.6; }

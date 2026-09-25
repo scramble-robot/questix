@@ -211,3 +211,24 @@ sudo usermod -aG adm,systemd-journal "$USER"   # then re-login / restart the ser
 
 A source the user cannot read does not fail the whole collection — it is recorded as
 a per-source error in `MANIFEST.txt` and the archive is still produced.
+
+
+## ブラウザ操作とスマホ接続用 QR
+
+「制御」タブの「ブラウザ・スマホで操作」で、`web_joy_driver` を開けます。
+有効な URL を入力すると「ブラウザで操作」リンクが表示され、QR 生成なしで直接開けます。
+PC ではキーボード（Space を保持して WASD / 矢印など）、スマホ・タブレットではタッチ操作が使えます。
+Android アプリは不要です。詳細は [Web Joy の操作方法](../../web_joy_driver/README.md) を参照してください。
+接続用 QR はスマホのカメラからブラウザで開く場合にも利用できます。
+URL は編集可能です。管理画面を LAN アドレスで開くと同じホストの HTTP ポート 8899 を
+初期候補にします。`localhost` で開いた場合は、スマホから到達できるロボットの IP を
+入力してください。ドライバーのポートや認証トークンは自動取得しません。
+
+QR は同梱の `static/vendor/qrcode.js`（qrcode-generator 2.0.4、Wi-Fi・教材の QR と共用）によりブラウザ内で生成します。
+外部の QR 生成サービスや CDN への通信はありません。URL 編集時には古い QR を消します。
+
+フロントエンドの URL・QR テスト:
+
+```bash
+node --test scripts/robot_manager/test/test_web_joy_connection.cjs
+```

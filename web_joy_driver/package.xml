@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+    <name>web_joy_driver</name>
+    <version>3.2.0</version>
+    <description>Browser (smartphone) virtual controller served over HTTP/WebSocket that publishes sensor_msgs/Joy using the Switch2-native index layout of uart_joy_driver.</description>
+    <maintainer email="aki.grade2580@outlook.jp">asa-naki</maintainer>
+    <license>MIT</license>
+
+    <depend>rclpy</depend>
+    <depend>sensor_msgs</depend>
+    <depend>questix_msgs</depend>
+    <depend>ament_index_python</depend>
+    <exec_depend>python3-websockets</exec_depend>
+
+    <test_depend>python3-pytest</test_depend>
+
+    <export>
+        <build_type>ament_python</build_type>
+    </export>
+</package>

@@ -73,10 +73,10 @@ function updateLaunchConfig(config) {
       input.checked = config[key] === "true";
     }
   }
-  // Controller type toggle: checked = dualshock, unchecked = uart
-  const ctrlToggle = document.getElementById("controller-type-toggle");
-  if (ctrlToggle && config.CONTROLLER_TYPE !== undefined) {
-    ctrlToggle.checked = config.CONTROLLER_TYPE === "dualshock";
+  // Controller type select: uart / dualshock / web
+  const ctrlSelect = document.getElementById("controller-type");
+  if (ctrlSelect && config.CONTROLLER_TYPE !== undefined) {
+    ctrlSelect.value = config.CONTROLLER_TYPE;
   }
   if (config.ROS_DOMAIN_ID !== undefined) {
     document.getElementById("ros-domain-id").value = config.ROS_DOMAIN_ID;
@@ -1080,7 +1080,7 @@ function setupEvents() {
     const config = {};
     for (const input of document.querySelectorAll("[data-config]")) {
       if (input.dataset.config === "CONTROLLER_TYPE") {
-        config.CONTROLLER_TYPE = input.checked ? "dualshock" : "uart";
+        config.CONTROLLER_TYPE = input.value;
       } else {
         config[input.dataset.config] = input.checked ? "true" : "false";
       }

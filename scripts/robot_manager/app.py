@@ -105,7 +105,7 @@ class ModeRequest(BaseModel):
     mode: Literal["practice", "competition"]
 
 
-_CONTROLLER_TYPES = {"uart", "dualshock"}
+_CONTROLLER_TYPES = {"uart", "dualshock", "web"}
 
 
 class LaunchConfig(BaseModel):
@@ -144,7 +144,7 @@ class LaunchConfig(BaseModel):
     @classmethod
     def validate_controller_type(cls, v: str | None) -> str | None:
         if v is not None and v not in _CONTROLLER_TYPES:
-            raise ValueError("CONTROLLER_TYPE must be 'uart' or 'dualshock'")
+            raise ValueError("CONTROLLER_TYPE must be one of: uart, dualshock, web")
         return v
 
 

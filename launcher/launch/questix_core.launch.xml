@@ -7,7 +7,7 @@
   <arg name="enable_drive" default="$(env ENABLE_DRIVE true)" description="Enable drive component"/>
   <arg name="enable_gpio_ref" default="$(env ENABLE_GPIO_REF true)" description="Enable GPIO safety path (gpio_reader, operation_manager, and joy gating)"/>
   <arg name="enable_autoreferee" default="false" description="Use competition GPIO profile with AutoReferee GPIO27"/>
-  <arg name="controller_type" default="$(env CONTROLLER_TYPE dualshock)" description="Controller type: dualshock or uart"/>
+  <arg name="controller_type" default="$(env CONTROLLER_TYPE dualshock)" description="Controller type: dualshock, uart, or web (smartphone browser)"/>
   <!-- Practice runs route the controller through twist_arbiter so QUESTiX LAB driving experiments
        can share the drive without relaunching; the stick always takes over. Not read from the
        environment, and never on with AutoReferee (competition): see the drive include below. -->

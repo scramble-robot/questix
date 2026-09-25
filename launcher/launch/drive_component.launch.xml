@@ -9,7 +9,7 @@ YAML を Single Source of Truth とし、個別パラメータの launch 引数�
   <arg name="drive_config_file" default="$(find-pkg-share questix_launcher)/config/drive_component.yaml" description="drive_component configuration YAML" />
   <arg name="enable_gpio_ref" default="false" description="Use the GPIO-gated controller path (joy_gate and optional operation_manager)" />
   <arg name="enable_operation_manager" default="true" description="Start operation_manager in standalone referee launch" />
-  <arg name="controller_type" default="uart" description="Controller type: dualshock or uart" />
+  <arg name="controller_type" default="uart" description="Controller type: dualshock, uart, or web" />
   <arg name="enable_twist_arbiter" default="false" description="Route the controller through twist_arbiter so QUESTiX LAB driving experiments and the controller share /target_twist (practice only; the stick always takes over)" />
 
   <!-- With twist_arbiter the controller publishes to its own input and the arbiter owns
