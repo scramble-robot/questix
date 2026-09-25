@@ -4,6 +4,7 @@ import { SYSTEM_COURSES } from '../systems/data.js';
 import { initSystems, activateSystem, reviewSystem } from '../systems/ui.js';
 import { showMeasurementLab } from '../systems/measurement-lab.js';
 import { showLearningResources } from './learning-resources.js';
+import { showLessonFooter } from './lesson-progress.js';
 import { LESSONS, LESSON_GROUPS, lessonLabel } from './lesson-ui.js';
 import { SCHOOL_GRADES } from './school-tips.js';
 import { initSupplements } from './supplement-ui.js';
@@ -180,6 +181,7 @@ function show(name, updateHash = true) {
   activateSystem(name);
   showMeasurementLab(name);
   showLearningResources(name);
+  showLessonFooter(lessonById(name) ? name : null);
   course = name;
   update();
   quizzes.showCourse(name);
@@ -194,6 +196,7 @@ function showAssessment(kind, name, updateHash) {
   leaveCurrentPage();
   showMeasurementLab(null);
   showLearningResources(null);
+  showLessonFooter(null);
   if (kind === 'quiz') mastery.hide();
   else quizzes.hide();
   assessment = kind;
@@ -214,6 +217,7 @@ function showRecords(updateHash = true) {
   leaveCurrentPage();
   showMeasurementLab(null);
   showLearningResources(null);
+  showLessonFooter(null);
   quizzes.hide();
   mastery.hide();
   assessment = null;

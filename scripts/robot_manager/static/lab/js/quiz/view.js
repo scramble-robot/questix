@@ -21,7 +21,17 @@ function startLabel(summary, copy) {
   return summary.checked ? copy.entry.quizContinue : copy.entry.quizStart;
 }
 
+function summaryNotice(model, notice, actions) {
+  return html`<div class="quiz-entry-notice">
+    <p class="eyebrow">${notice.eyebrow}</p>
+    <h2>${unsafeHTML(lessonIcon('reflect'))}${notice.title}</h2>
+    <p>${fill(notice.text, model.where)}</p>
+    <button class="text-button" id="quizPeek" @click=${actions.peekSummary}>${notice.peek}</button>
+  </div>`;
+}
+
 function quizEntryCard(model, copy, actions) {
+  if (!model.ready) return summaryNotice(model, copy.entry.notice, actions);
   const summary = model.summary;
   return html`<div>
       <p class="eyebrow">${copy.entry.eyebrow}</p>

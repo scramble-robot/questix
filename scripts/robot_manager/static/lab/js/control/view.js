@@ -1176,17 +1176,6 @@ function hardwareCard(hardwareHtml) {
   </details>`;
 }
 
-function footer(model, copy, actions) {
-  const position = CONTROL_TOPICS.indexOf(model.topic);
-  const next = CONTROL_TOPICS[position + 1];
-  return html`<div class="basics-footer">
-    <p>${position + 1} / ${CONTROL_TOPICS.length} ${copy.footer.note}</p>
-    <button id="controlNext" class="primary" @click=${actions.next}>
-      ${next ? '次へ：' + next.name : '小テストで確かめる →'}
-    </button>
-  </div>`;
-}
-
 function groupNav(model, actions) {
   return html`<nav class="basics-topics basics-groups" aria-label="学ぶ順序">
     ${CONTROL_GROUPS.map(
@@ -1249,7 +1238,7 @@ function controlPage(model, copy, hardwareHtml, actions) {
     </div>
     ${resultsCard(model, copy, actions)}${explanationCard(model, copy, actions)}
     ${questionCard(model, copy, actions)}${historyCard(model, copy)}
-    ${liveCard(model, copy, actions)}${hardwareCard(hardwareHtml)} ${footer(model, copy, actions)}`;
+    ${liveCard(model, copy, actions)}${hardwareCard(hardwareHtml)}`;
 }
 
 export { controlPage, gainText, COMMAND_OPEN_TOPICS };

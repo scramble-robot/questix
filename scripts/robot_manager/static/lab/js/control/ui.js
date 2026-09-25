@@ -30,6 +30,7 @@ import {
 } from './compare.js';
 import { liveControlRun, liveLink, onLiveLink, openRecordingFile } from '../live/capture.js';
 import { liveDistanceRun, forwardRpm } from '../live/capture-core.js';
+import { reportLessonProgress } from '../shell/lesson-progress.js';
 import { revealElement } from '../core/reveal.js';
 import { driveRows, wallRows } from '../live/recording-core.js';
 import { createLiveSession } from '../live/live-session.js';
@@ -240,6 +241,11 @@ function drawStage() {
 
 function update() {
   render(controlPage(buildModel(), copy, hardwareHtml, actions), page());
+  reportLessonProgress('control', {
+    topics: CONTROL_TOPICS.map((topic) => ({ id: topic.id, title: topic.name })),
+    current: topicId,
+    open: selectTopic,
+  });
   drawStage();
   if (revealPending && !page().hidden) {
     revealPending = false;

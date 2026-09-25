@@ -82,5 +82,5 @@
   { "input": "#controlScenario", "value": "noisy" },
   { "click": "#controlRun", "frames": 560 },
   { "click": "[data-control-live-jump]" },
-  { "click": "#controlNext" }
+  { "click": ".lesson-footer-next" }
 ]

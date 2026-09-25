@@ -1,6 +1,7 @@
 import { render, nothing } from '../vendor/lit-html.js';
 import { loadJson } from '../core/content.js';
 import { LESSONS } from '../shell/lesson-ui.js';
+import { lessonProgress } from '../shell/lesson-progress.js';
 import { QUIZZES } from './data.js';
 import {
   QUIZ_STORAGE_KEY,
@@ -82,11 +83,19 @@ function pageModel() {
   };
 }
 
+// The summary opens fully once the learner reaches the course's last experiment (or has opened
+// them all, or asks to see it early); before that it is a short note, so the big quiz buttons are
+// not the first thing a learner scrolling down an early experiment presses.
+const peeked = new Set(); // courses whose summary was opened early during this visit
+
 function entryModel() {
+  const where = lessonProgress(activeCourse);
   return {
     lessonTitle: lessonTitle(activeCourse),
     summary: quizSummary(progress, activeCourse),
     masteryLabel: shell.masteryStatus(activeCourse),
+    ready: !where || where.ready || peeked.has(activeCourse),
+    where,
   };
 }
 
@@ -161,6 +170,10 @@ function revisit(index) {
 }
 
 const actions = {
+  peekSummary() {
+    peeked.add(activeCourse);
+    updateCourseCards();
+  },
   back: () => shell.backToCourse(course),
   goTo: navigate,
   previous: () => navigate(currentIndex() - 1),
@@ -256,5 +269,10 @@ function initQuizzes(callbacks) {
     },
   };
 }
+
+// A course that moves to another experiment may reach (or leave) its last one.
+document.addEventListener('lesson-progress', (event) => {
+  if (event.detail.course === activeCourse) updateCourseCards();
+});
 
 export { initQuizzes };
