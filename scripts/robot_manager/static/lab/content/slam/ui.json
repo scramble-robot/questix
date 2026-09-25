@@ -1,4 +1,8 @@
 {
+  "lessonTopics": {
+    "compare": "総合実験：センサーを比べる",
+    "real": "実機で確かめる（ROS 2）"
+  },
   "headings": {
     "basics": "目的の場所へ進むために、現在地と周囲の地図を知る",
     "simulation": "使うセンサーを変え、位置のずれを比べる",
@@ -264,8 +268,7 @@
     },
     "nextCaseButtons": {
       "slip": "IMUのずれに挑戦 →",
-      "bias": "長い通路に挑戦 →",
-      "corridor": "実機で確かめる →"
+      "bias": "長い通路に挑戦 →"
     },
     "chooseConditions": "自分で条件を選ぶ"
   },

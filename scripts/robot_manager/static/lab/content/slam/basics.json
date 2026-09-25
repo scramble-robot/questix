@@ -1,8 +1,4 @@
 {
-  "footer": {
-    "next": "次へ：{title} →",
-    "experiment": "総合実験：センサーを組み合わせて比べる →"
-  },
   "wheels": {
     "figureStep": "車輪の回転 → 進んだ距離 → 位置と向き",
     "figureTitle": "左右の車輪を、2秒間回したら？",

@@ -20,5 +20,5 @@
   { "click": "#planningRun", "frames": 500 },
   { "click": "#planningSearch" },
   { "click": "[data-planning-topic=margin]" },
-  { "click": "#planningNext" }
+  { "click": ".lesson-footer-next" }
 ]

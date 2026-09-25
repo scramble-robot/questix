@@ -55,5 +55,5 @@
   { "input": "#visionScore", "value": "2" },
   { "click": "#visionSample" },
   { "click": "#visionFaceRun", "wait": 1500 },
-  { "click": "#visionNext" }
+  { "click": ".lesson-footer-next" }
 ]

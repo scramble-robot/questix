@@ -11,7 +11,7 @@
   { "click": "[data-wheel-preset=spin]" },
   { "click": "[data-wheel-preset=straight]" },
   { "click": "#basicsSlip" },
-  { "click": "#basicsNext" },
+  { "click": ".lesson-footer-next" },
   { "input": "#basicsRate", "value": "-45" },
   { "input": "#basicsSeconds", "value": "4" },
   { "input": "#basicsDistance", "value": "1" },
@@ -42,8 +42,8 @@
   { "click": "#scWrong" },
   { "click": "[data-slam-basics-group=\"0\"]" },
   { "click": "[data-basics-topic=lidar]" },
-  { "click": "#basicsNext" },
-  { "click": "#basicsNext" },
-  { "click": "#basicsNext" },
-  { "click": "#basicsNext" }
+  { "click": ".lesson-footer-next" },
+  { "click": ".lesson-footer-next" },
+  { "click": ".lesson-footer-next" },
+  { "click": ".lesson-footer-next" }
 ]

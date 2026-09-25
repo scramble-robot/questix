@@ -516,10 +516,7 @@ function basicsPage(model, copy, helpHtml, actions) {
       ${slots.controls}
     </div>
     ${slots.question}
-    <div class="basics-footer">
-      ${slots.summary}
-      <button class="primary" id="basicsNext" @click=${actions.next}>${model.nextLabel}</button>
-    </div>`;
+    <div class="basics-footer">${slots.summary}</div>`;
 }
 
 export { basicsPage, figureArt, metric, helpDialog };

@@ -2,7 +2,6 @@ import { render } from '../vendor/lit-html.js';
 import { loadJson, loadText } from '../core/content.js';
 import { lessonGuide, figureGuide } from '../shell/lesson-guide.js';
 import {
-  fillText,
   wheelExample,
   imuExample,
   beamHit,
@@ -36,7 +35,7 @@ const WHEEL_PRESETS = {
 const toRadians = (degrees) => (degrees * Math.PI) / 180;
 
 let chapterId = 'pose';
-let openExperiment = () => {};
+let chapterOpened = () => {};
 
 const wheels = { leftRpm: 30, rightRpm: 30, slipping: false };
 const imu = { rate: 30, seconds: 3, distance: 0.6 }; // °/second, seconds, metres
@@ -48,7 +47,6 @@ const secondScan = basicsScan(SECOND_SCAN_FROM);
 
 const page = () => document.getElementById('slamBasics');
 const chapter = () => SLAM_CHAPTERS.find((entry) => entry.id === chapterId);
-const chapterPosition = () => SLAM_CHAPTERS.findIndex((entry) => entry.id === chapterId);
 
 // The LiDAR chapter has two halves, each with its own lesson brief.
 function lessonKey() {
@@ -80,7 +78,6 @@ function lidarModel() {
 
 function buildModel() {
   const current = chapter();
-  const following = SLAM_CHAPTERS[chapterPosition() + 1];
   const key = lessonKey();
   const model = {
     topic: chapterId,
@@ -90,9 +87,6 @@ function buildModel() {
     groupTopics: SLAM_CHAPTERS.filter((entry) => entry.group === current.group),
     brief: lessonGuide(key),
     figureGuide: figureGuide(key),
-    nextLabel: following
-      ? fillText(copy.footer.next, { title: following.title })
-      : copy.footer.experiment,
     // Only "地図から位置を探す" shows the evidence card, and it reveals the card itself.
     evidenceShown: false,
   };
@@ -114,6 +108,7 @@ function openChapter(id) {
   chapterId = id;
   render(null, page());
   update();
+  chapterOpened(id);
 }
 
 const actions = {
@@ -121,15 +116,6 @@ const actions = {
     openChapter(SLAM_CHAPTERS.find((entry) => entry.group === index).id);
   },
   openTopic: openChapter,
-  next() {
-    const following = SLAM_CHAPTERS[chapterPosition() + 1];
-    if (!following) {
-      openExperiment();
-      return;
-    }
-    openChapter(following.id);
-    page().scrollIntoView({ block: 'start' });
-  },
   useWheelPreset(name) {
     Object.assign(wheels, WHEEL_PRESETS[name]);
     update();
@@ -189,8 +175,10 @@ const actions = {
 // and fills it with lit-html once initSlamBasics() runs.
 const basicsTemplate = () => '<section id="slamBasics"></section>';
 
-function initSlamBasics(onExperiment) {
-  openExperiment = onExperiment;
+// `onChapter(id)` hears every chapter that opens, so ui.js can report where the learner is to the
+// shared experiment footer (which also moves on to the 総合実験 after the last chapter).
+function initSlamBasics(onChapter) {
+  chapterOpened = onChapter;
   openChapter(chapterId);
 }
 

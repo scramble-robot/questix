@@ -16,6 +16,7 @@ import { drawFoundationMap } from './foundations-render.js';
 import { revealElement, revealIfHidden } from '../core/reveal.js';
 import { fillSentence } from '../core/content.js';
 import { groupsNav, topicsNav, lessonGuides, chapterPanels } from './foundations-view.js';
+import { reportLessonProgress } from '../shell/lesson-progress.js';
 
 // Reinforcement-learning course, foundation chapters: state and behaviour. foundations-view.js
 // turns the model into markup, foundations-render.js draws the arena, foundations-core.js and
@@ -391,8 +392,33 @@ function drawTransferFigure() {
 
 // -------------------------------------------------------------- rendering
 
+// The shared experiment footer: every foundation chapter is one experiment, and the course page
+// (「コースで試す」, both of its tasks and its own stage flow) is the last one.
+const COURSE_EXPERIMENT = 'course';
+const FOOTER_TOPICS = [
+  ...TOPICS.filter((topic) => topic.group !== COURSE_GROUP).map((topic) => ({
+    id: topic.id,
+    title: topic.label,
+  })),
+  { id: COURSE_EXPERIMENT, title: copy.groups[COURSE_GROUP] },
+];
+
+function footerTopic() {
+  return groupOf(topicId) === COURSE_GROUP ? COURSE_EXPERIMENT : topicId;
+}
+
+function openFooterTopic(id) {
+  if (id !== COURSE_EXPERIMENT) openTopic(id);
+  else if (groupOf(topicId) !== COURSE_GROUP) actions.openGroup(COURSE_GROUP);
+}
+
 function update() {
   const model = buildModel();
+  reportLessonProgress('rl', {
+    topics: FOOTER_TOPICS,
+    current: footerTopic(),
+    open: openFooterTopic,
+  });
   render(groupsNav(model, copy, actions), el('rlGroups'));
   render(topicsNav(model, actions), el('rlTopics'));
   el('rlBasicsPanel').hidden = model.onCourse;
@@ -406,8 +432,6 @@ function renderLesson(model) {
   for (const [id, template] of Object.entries(guides)) render(template, el(id));
   el('rlRewardLesson').hidden = model.topic !== REWARD_TOPIC;
   el('rlFoundationLesson').hidden = model.topic === REWARD_TOPIC;
-  el('rlNext').disabled = model.busy;
-  render(nextLabel(), el('rlNext'));
   render(topicById(model.topic).summary, el('rlSummary'));
   if (!model.chapter) return;
   renderChapter(model);
@@ -420,11 +444,6 @@ function renderChapter(model) {
     if (template !== null) render(template, el(id));
   }
   drawFigure();
-}
-
-function nextLabel() {
-  const next = TOPICS[TOPICS.findIndex((topic) => topic.id === topicId) + 1];
-  return next ? '次へ：' + next.label + ' →' : '';
 }
 
 function clearNotices() {
@@ -526,10 +545,6 @@ const actions = {
   },
   openTopic(id) {
     openTopic(id);
-  },
-  next() {
-    const next = TOPICS[TOPICS.findIndex((topic) => topic.id === topicId) + 1];
-    if (next) openTopic(next.id, true);
   },
 
   act,
@@ -657,9 +672,8 @@ const actions = {
 
 function initRLCurriculum(openLab) {
   openCoursePage = openLab;
-  // #rlNext and #rlFigure belong to index.html, outside this course's templates, so the button is
-  // wired and the figure observed once here instead of from a template.
-  el('rlNext').addEventListener('click', actions.next);
+  // #rlFigure belongs to index.html, outside this course's templates, so it is observed once here
+  // instead of from a template.
   new ResizeObserver(() => drawFigure()).observe(el('rlFigure'));
   document.addEventListener('rl-foundations', () => openTopic(FIRST_TOPIC, true));
   openTopic(FIRST_TOPIC);

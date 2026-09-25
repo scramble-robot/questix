@@ -15,6 +15,7 @@ import { createRoom } from './room-ui.js';
 import { onLiveLink } from '../live/capture.js';
 import { openRobotDialog } from '../live/live-ui.js';
 import { revealIfHidden } from '../core/reveal.js';
+import { reportLessonProgress } from '../shell/lesson-progress.js';
 
 // Path-planning course: state and behaviour. view.js turns the model into markup, render.js draws
 // the map, core.js plans and simulates. Texts live in content/planning.json.
@@ -150,6 +151,11 @@ function drawMap() {
 
 function update() {
   render(planningPage(buildModel(), copy, hardwareHtml, actions), page());
+  reportLessonProgress('planning', {
+    topics: PLAN_TOPICS.map((topic) => ({ id: topic.id, title: topic.label })),
+    current: topicId,
+    open: openTopic,
+  });
   drawMap();
 }
 
@@ -363,18 +369,6 @@ const actions = {
   },
   openLink: openRobotDialog,
   ...room.actions,
-  next() {
-    const position = PLAN_TOPICS.findIndex((topic) => topic.id === topicId);
-    const next = PLAN_TOPICS[position + 1];
-    if (next) {
-      openTopic(next.id);
-      page().scrollIntoView({ block: 'start' });
-      return;
-    }
-    const hardware = document.getElementById('planningHardware');
-    hardware.open = true;
-    hardware.scrollIntoView({ block: 'start' });
-  },
 };
 
 function pauseAndShow() {

@@ -42,6 +42,7 @@ import {
 } from './render.js';
 import { visionPage } from './view.js';
 import { fillSentence as fill } from '../core/content.js';
+import { reportLessonProgress } from '../shell/lesson-progress.js';
 
 // Vision course: state and behaviour. view.js turns the model into markup, render.js paints the
 // canvases, core.js / images.js / face.js do the image maths. Sentences live in
@@ -120,7 +121,6 @@ function revealScene() {
   revealElement(motion || document.querySelector('.vision-image-pair'));
 }
 const isFoundation = (chapter) => Boolean(FOUNDATION_CONTENT[chapter]);
-const chapterAt = (index) => VISION_CHAPTERS[index];
 const chapterIndex = (id) => VISION_CHAPTERS.findIndex(([key]) => key === id);
 const groupOf = (id) => VISION_CHAPTERS[chapterIndex(id)][2];
 const cloneImage = (image) => ({
@@ -147,12 +147,6 @@ function reflectCard(section, { title = section.title, dialog = false } = {}) {
 function chapterTitle(id) {
   const foundation = FOUNDATION_CONTENT[id];
   return foundation ? foundation[0] : copy[id].title;
-}
-
-function nextLabel() {
-  if (state.chapter === 'face') return copy.frame.quizButton;
-  const next = chapterAt(chapterIndex(state.chapter) + 1);
-  return copy.frame.nextPrefix + next[1] + copy.frame.nextSuffix;
 }
 
 // Candidates above the learner's score limit, with the numbered tags and depth readings that the
@@ -206,7 +200,6 @@ function buildModel() {
     outputTitle: state.outputTitle,
     takeaway: state.takeaway,
     reflect: state.reflect,
-    nextLabel: nextLabel(),
     messages: state.messages,
     probe: state.probe,
     pixels: { mode: state.pixels.mode, condition: state.condition },
@@ -228,8 +221,16 @@ function buildModel() {
   };
 }
 
+// Every chapter of every group, in teaching order, is one experiment of the shared footer.
+const FOOTER_TOPICS = VISION_CHAPTERS.map(([id, label]) => ({ id, title: label }));
+
 function update() {
   render(visionPage(buildModel(), copy, referencesHtml, actions), page());
+  reportLessonProgress('vision', {
+    topics: FOOTER_TOPICS,
+    current: state.chapter,
+    open: openChapter,
+  });
 }
 
 function setStatus(text) {
@@ -680,14 +681,6 @@ const actions = {
   openChapter,
   openGroup(index) {
     openChapter(VISION_CHAPTERS.find((entry) => entry[2] === index)[0]);
-  },
-  next() {
-    if (state.chapter === 'face') {
-      document.dispatchEvent(new CustomEvent('quiz-open', { detail: 'vision' }));
-      return;
-    }
-    openChapter(chapterAt(chapterIndex(state.chapter) + 1)[0]);
-    document.getElementById('visionRoot').scrollIntoView({ block: 'start' });
   },
 
   restoreSample() {

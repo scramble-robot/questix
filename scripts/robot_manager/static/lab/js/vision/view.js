@@ -525,10 +525,10 @@ function reflectContent(reflect) {
     </details>`;
 }
 
-function footer(model, copy, actions) {
+// The chapter's one-line takeaway; moving on is the shared experiment footer under the course.
+function takeawayLine(model) {
   return html`<div class="basics-footer">
     <p id="visionTakeaway">${model.takeaway}</p>
-    <button class="primary" id="visionNext" @click=${actions.next}>${model.nextLabel}</button>
   </div>`;
 }
 
@@ -581,7 +581,7 @@ function visionPage(model, copy, referencesHtml, actions) {
     <section id="visionReflect" class="card vision-reflect">
       ${reflectContent(model.reflect)}
     </section>
-    ${footer(model, copy, actions)}${realRobotNote(copy, actions)}${referencesNote(referencesHtml)}
+    ${takeawayLine(model)}${realRobotNote(copy, actions)}${referencesNote(referencesHtml)}
   </div>`;
 }
 

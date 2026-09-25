@@ -73,5 +73,5 @@
   { "click": "#vfRun" },
   { "click": "[data-vision-chapter=stereo]" },
   { "click": "[data-vision-chapter=follow]" },
-  { "click": "#visionNext" }
+  { "click": ".lesson-footer-next" }
 ]

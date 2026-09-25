@@ -39,7 +39,7 @@
   { "click": "#slamRun", "frames": 300 },
   { "click": "#slamEnd" },
   { "click": "[data-slam-stage=improve]" },
-  { "click": "#slamNextCase" },
+  { "click": ".lesson-footer-next" },
   { "click": "#slamSample" },
   { "click": "#slamRecord", "wait": 1500 },
   { "click": "#slamSimTab" },

@@ -143,11 +143,6 @@
     "地図は10 cm間隔の点で調べ、上下左右と斜めの8方向へ探索します。障害物の角を斜めに横切る移動も除外します。その後、障害物に触れずに直線でつなげる通過点をまとめます。地図を区切るのは計算のためで、ロボットの位置と向きは連続値です。",
     "機体の幅36 cm・車輪間隔32 cm・車輪半径6.5 cm。直進は最大0.4 m/秒で、左右の回転数から動きを計算します。滑り、加速・減速の遅れ、位置推定の誤差は省略しています。計画し直す場面の1秒の停止は説明用で、探索計算にかかった実時間ではありません。"
   ],
-  "footer": {
-    "next": "結果を確認したら、次の実験へ進めます。",
-    "last": "同じロボットで、実機の走行記録と比べられます。",
-    "lastButton": "実機で確かめる手順を見る"
-  },
   "hardwareGuideReferences": "\n\n参考: https://docs.nav2.org/rolling/getting_started/navigation_concepts/environmental_representation/\nhttps://docs.nav2.org/rolling/configuration_and_development/first_time_robot_setup_guide/footprint/setup_footprint/",
   "room": {
     "title": "部屋の地図を用意する",

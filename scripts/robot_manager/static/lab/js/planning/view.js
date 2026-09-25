@@ -372,17 +372,6 @@ function explanationCard(copy, topicCopy) {
   </section>`;
 }
 
-function footer(model, copy, actions) {
-  const position = PLAN_TOPICS.findIndex((topic) => topic.id === model.topic);
-  const next = PLAN_TOPICS[position + 1];
-  return html`<div class="basics-footer">
-    <p>${position + 1} / ${PLAN_TOPICS.length} · ${next ? copy.footer.next : copy.footer.last}</p>
-    <button id="planningNext" class="primary" @click=${actions.next}>
-      ${next ? `次へ：${next.label} →` : copy.footer.lastButton}
-    </button>
-  </div>`;
-}
-
 function hardwareSection(hardwareHtml, actions) {
   return html`<details data-help-dialog id="planningHardware" class="card planning-hardware">
     <summary>ROS 2の実機で確かめる</summary>
@@ -412,8 +401,7 @@ function planningPage(model, copy, hardwareHtml, actions) {
       </div>
       ${controlPanel(model, copy, topicCopy, actions)}
     </div>
-    ${explanationCard(copy, topicCopy)}${footer(model, copy, actions)}
-    ${hardwareSection(hardwareHtml, actions)}`;
+    ${explanationCard(copy, topicCopy)} ${hardwareSection(hardwareHtml, actions)}`;
 }
 
 export { planningPage };

@@ -657,13 +657,17 @@ function reflectionTitle(reflection, copy) {
   return reflection.reachedGoal ? text.titleReached : text.titleMissed;
 }
 
+// Steps inside the 総合実験 (another method, the next case). After the last case the next move is
+// the next experiment (③ 実機), which only the shared footer under the course offers.
 function reflectionNextButton(reflection, copy, actions) {
   if (reflection.next)
     return html`<button class="primary full" id="slamNext" @click=${actions.takeNextStep}>
       ${copy.reflection.nextButtons[reflection.next]}
     </button>`;
+  const caseButton = copy.reflection.nextCaseButtons[reflection.caseId];
+  if (reflection.kind === 'hardware' || !caseButton) return nothing;
   return html`<button class="small" id="slamNextCase" @click=${actions.nextCase}>
-    ${copy.reflection.nextCaseButtons[reflection.caseId]}
+    ${caseButton}
   </button>`;
 }
 

@@ -11,6 +11,8 @@ import { keepCapture } from '../live/run-keeper.js';
 import { pickRobotRecord } from '../live/record-picker.js';
 import { registerRecordTarget, revealAfterRender } from '../live/record-targets.js';
 import { basicsTemplate, initSlamBasics, reviewSlamBasics } from './basics.js';
+import { SLAM_CHAPTERS } from './concepts.js';
+import { reportLessonProgress } from '../shell/lesson-progress.js';
 import { drawMaps, drawSensorChart, drawTilt, tiltAcceleration } from './render.js';
 import { slamPage } from './view.js';
 import { fillSentence as fill } from '../core/content.js';
@@ -56,6 +58,7 @@ let real = false; // the experiment runs on a recorded robot log rather than the
 let stage = 'setup'; // setup | learn | test | improve
 let busy = false;
 let runError = null; // message of a failed estimate, shown until the next update
+let basicsChapter = SLAM_CHAPTERS[0].id; // the ① 仕組み chapter basics.js has open
 let importStatus = copy.hardware.importIdle;
 let recording = null; // AbortController while recording from the robot
 // The robot recording (questix-lab-recording, capture.js) the last live log was built from, so the
@@ -206,8 +209,41 @@ function showBasicsSection() {
   if (section) section.hidden = view !== 'basics';
 }
 
+// The shared experiment footer counts each ① 仕組み chapter, the ② 総合実験 and the ③ 実機 page as
+// one experiment each, in the order of the mode tabs. The four steps inside the 総合実験 and its
+// conditions (next method, next case) stay the page's own controls.
+const FOOTER_TOPICS = [
+  ...SLAM_CHAPTERS.map((chapter) => ({ id: chapter.id, title: chapter.title })),
+  { id: 'compare', title: copy.lessonTopics.compare },
+  { id: 'real', title: copy.lessonTopics.real },
+];
+
+function footerTopic() {
+  if (view === 'basics') return basicsChapter;
+  return real ? 'real' : 'compare';
+}
+
+function openFooterTopic(id) {
+  if (id === 'compare') actions.setReal(false);
+  else if (id === 'real') actions.setReal(true);
+  else {
+    // Set first, so switching to ① does not report the previously open chapter on the way.
+    basicsChapter = id;
+    reviewSlam(id);
+  }
+}
+
+function reportProgress() {
+  reportLessonProgress('slam', {
+    topics: FOOTER_TOPICS,
+    current: footerTopic(),
+    open: openFooterTopic,
+  });
+}
+
 function update() {
   render(slamPage(buildModel(), copy, { basicsHtml, methodNoteHtml }, actions), page());
+  reportProgress();
   showBasicsSection();
   paintMaps();
   paintSensor();
@@ -572,11 +608,9 @@ const actions = {
     update();
     document.getElementById('slamRun').focus();
   },
+  // The last case hands over to the footer's 次の実験 (③ 実機), so it has no case button.
   nextCase() {
-    if (isHardwareLog() || caseId === 'corridor') {
-      actions.setReal(true);
-      return;
-    }
+    if (isHardwareLog() || caseId === 'corridor') return;
     caseId = caseId === 'slip' ? 'bias' : 'corridor';
     resetLog(generateSlamLog(caseId));
     update();
@@ -617,9 +651,9 @@ function initSlam(hardwareContent) {
   resetLog(generateSlamLog());
   update();
   // basics.js wires its own markup, which update() has just inserted.
-  initSlamBasics(() => {
-    actions.setReal(false);
-    document.getElementById('slamSteps').scrollIntoView({ block: 'start' });
+  initSlamBasics((id) => {
+    basicsChapter = id;
+    reportProgress();
   });
   document.addEventListener('series-leave', pauseSlam);
   document.addEventListener('supplement-open', pauseSlam);
