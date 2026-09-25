@@ -89,18 +89,6 @@ function runSummary(run, topicId, text) {
   return speedSentence(run, text);
 }
 
-/**
- * Where a topic sits in the course: its stage (1-based), its number inside the stage and how many
- * topics the stage has, e.g. { stage: 1, position: 1, count: 4, label: '1-1' }.
- */
-function topicPlace(topics, topicId) {
-  const topic = topics.find((entry) => entry.id === topicId);
-  const siblings = topics.filter((entry) => entry.group === topic.group);
-  const position = siblings.indexOf(topic) + 1;
-  const stage = topic.group + 1;
-  return { stage, position, count: siblings.length, label: `${stage}-${position}` };
-}
-
 export {
   SIMPLE_TOPICS,
   isSimpleTopic,
@@ -109,5 +97,4 @@ export {
   speedGap,
   closestDistance,
   runSummary,
-  topicPlace,
 };

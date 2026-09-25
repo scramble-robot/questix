@@ -63,7 +63,8 @@ function chapterNav(model, actions) {
   </nav>`;
 }
 
-// On a phone the lesson brief is long: the first thing to try and a start button come first.
+// The first thing to try and a start button come before the brief, on every screen (the brief
+// then leaves its own 最初に試すこと out: lesson-brief.js).
 function quickStart(model, copy, actions) {
   return html`<section class="sys-quickstart" aria-label=${copy.quickStart.title}>
     <h2>${copy.quickStart.title}</h2>
@@ -626,7 +627,7 @@ function systemPage(model, copy, actions) {
       <h1>${model.topic.title}</h1>
     </div>
     ${chapterNav(model, actions)} ${quickStart(model, copy, actions)}
-    ${unsafeHTML(lessonBrief(lessonKey, model.topic) + schoolTips(lessonKey))}
+    ${unsafeHTML(lessonBrief(lessonKey, model.topic, { first: false }) + schoolTips(lessonKey))}
     <div class="sys-workspace">
       ${observationCard(model, copy, actions)} ${settingsPanel(model, copy, actions)}
       ${sideParts(model, copy, 'aside')}

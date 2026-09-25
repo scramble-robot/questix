@@ -409,7 +409,6 @@
     "distanceNotSettled": "時間内には止まりきりませんでした。"
   },
   "nav": {
-    "place": "段階{stage} · {count}実験のうち{position}つ目",
     "done": "実験済み"
   }
 }

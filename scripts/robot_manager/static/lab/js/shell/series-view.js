@@ -96,11 +96,13 @@ function cardRunModes(lesson) {
   </div>`;
 }
 
-// The labels explained once, after the courses: folded, because a newcomer without a robot does
-// not need them to start.
+// The labels explained once, near the top where the cards first show them: small and folded,
+// because a newcomer without a robot does not need them to start.
 function runModeLegend(copy) {
   return html`<details class="series-run-legend">
-    <summary><h2>${copy.legend.title}</h2></summary>
+    <summary>
+      ${copy.legend.title}<span class="series-run-legend-hint">${copy.legend.hint}</span>
+    </summary>
     <p>${copy.legend.lead}</p>
     <dl>
       ${RUN_MODE_ORDER.map(
@@ -334,7 +336,7 @@ function robotSection(copy, actions) {
       <p>${copy.robot.placement}</p>
       <p class="series-records">
         ${copy.robot.recordsLead}
-        <button class="quiet" data-series-records @click=${actions.openRecords}>
+        <button class="small" data-series-records @click=${actions.openRecords}>
           ${copy.robot.records}
         </button>
       </p>
@@ -351,15 +353,17 @@ function robotSection(copy, actions) {
   </section>`;
 }
 
-// Reading order for a newcomer: what this is and where to start, the robot the experiments are
-// about, the courses; the label legend and the school-subject overview for those who look further.
+// Reading order for a newcomer: what this is and where to start (with the labels' legend, folded),
+// the robot the experiments are about, the courses; the school-subject overview for those who look
+// further.
 function seriesPage(model, actions) {
   const copy = model.copy;
-  return html`${catalogueHeading(model, actions)}${robotSection(copy, actions)}${groupIndex(
-    model.groups,
-  )}${model.groups.map((group, index) =>
+  return html`${catalogueHeading(model, actions)}${runModeLegend(model.runModeCopy)}${robotSection(
+    copy,
+    actions,
+  )}${groupIndex(model.groups)}${model.groups.map((group, index) =>
     courseGroup(group, index, model, actions),
-  )}${runModeLegend(model.runModeCopy)}${schoolOverview(model, actions)}${copy.footnotes.map(
+  )}${schoolOverview(model, actions)}${copy.footnotes.map(
     (note) => html`<p class="page-footnote">${note}</p>`,
   )}`;
 }

@@ -1,26 +1,50 @@
 /* High-school readability pass: shell (see CONTRIBUTING.md, "Figures and charts"). */
 
-/* Lesson brief (js/shell/lesson-brief.js): 最初に試すこと stands out as the thing to do, and on a
-   phone the situation and purpose are cut to two lines until the learner opens them. */
-.lesson-brief .lesson-brief-first {
-  background: #eef6f3;
-  border-radius: 12px;
+/* Lesson brief (js/shell/lesson-brief.js): 最初に試すこと is its own card with the start button,
+   right under the course's navigation on every screen; the brief under it keeps the situation and
+   the purpose, which a phone cuts to two lines until the learner opens them. */
+.lesson-quickstart {
+  margin: 12px 0 14px;
   padding: 16px 20px;
+  border: 1px solid #b9d3cb;
   border-left: 4px solid var(--green);
+  border-radius: 12px;
+  background: #eef6f3;
 }
-.lesson-brief .lesson-brief-first h2 {
+.lesson-quickstart h2 {
+  font-size: 16px;
   color: #1c5f57;
+  margin: 0 0 6px;
+}
+.lesson-quickstart p {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.8;
+  color: #304651;
+  max-width: 72ch;
+}
+.lesson-quickstart p + p {
+  margin-top: 8px;
+}
+.lesson-quickstart-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin-top: 12px;
+}
+.lesson-brief .lesson-brief-purpose {
+  grid-column: 1/-1;
 }
 .lesson-brief-more {
   display: none;
 }
-@media (max-width: 760px) {
-  .lesson-brief .lesson-brief-first {
-    border-top: 0;
+@media (max-width: 600px) {
+  .lesson-quickstart {
     padding: 14px 16px;
   }
-}
-@media (max-width: 600px) {
+  .lesson-quickstart p {
+    font-size: 14px;
+  }
   .lesson-brief {
     gap: 12px;
     padding: 16px;
@@ -99,7 +123,7 @@
     padding: 6px 10px;
     font-size: 14px;
   }
-  /* The connection keeps one short word next to the dot (live-ui.js data-short: 接続中 / 未接続 /
+  /* The connection keeps one short word next to the dot (live-ui.js data-short: 接続済み / 未接続 /
      非常停止); the full sentence stays in the text for screen readers. */
   body .header-actions > .robot-link {
     gap: 4px;
@@ -193,13 +217,26 @@
 #seriesPage .series-group-index {
   margin-top: 16px;
 }
+/* The labels' legend, folded right under the catalogue heading: one small line until opened. */
+details.series-run-legend {
+  margin: 0 0 18px;
+  padding: 10px 16px;
+}
 details.series-run-legend > summary {
   cursor: pointer;
   list-style: revert;
+  font-size: 15px;
+  font-weight: 700;
+  color: #28483f;
 }
-details.series-run-legend > summary > h2 {
-  display: inline;
-  font-size: 18px;
+.series-run-legend-hint {
+  margin-left: 8px;
+  font-size: 13px;
+  font-weight: 400;
+  color: #526b73;
+}
+details.series-run-legend[open] > summary {
+  margin-bottom: 8px;
 }
 .series-course .series-run-modes {
   margin: 10px 0 0;
@@ -400,12 +437,6 @@ body .measurement-entry > .supplement-trigger {
   padding: 0 28px 22px 62px;
   font-size: 14px;
   color: #566f69;
-}
-.supplement-body .reference-course {
-  font-size: 19px;
-  font-weight: 650;
-  color: #28483f;
-  margin: 0 0 9px;
 }
 .supplement-body .reference-intro {
   font-size: 14px;

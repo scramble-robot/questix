@@ -46,15 +46,29 @@ const BRIEF_CONTENT = {
   first: 'try it',
 };
 
-test('lessonBrief renders the three sections in reading order', () => {
+test('lessonBrief puts 最初に試すこと with its start button first, then the brief', () => {
   const html = lessonBrief('test-key', BRIEF_CONTENT);
-  assert.ok(html.startsWith('<section class="lesson-brief" data-lesson-brief="test-key"'));
+  assert.ok(html.startsWith('<section class="lesson-quickstart" data-quick-start-card="test-key"'));
+  assert.ok(html.indexOf('lesson-quickstart') < html.indexOf('class="lesson-brief"'));
   assert.deepEqual(
     BRIEF_SECTIONS.map((section) => section.key),
     ['scene', 'purpose', 'first'],
   );
   assert.ok(html.includes('<p>A &amp; B &lt;scene&gt;</p>'), 'text is escaped');
   assert.equal((html.match(/<p>/g) || []).length, 4, 'array fields become one <p> each');
+  assert.equal((html.match(/try it/g) || []).length, 1, 'the first step is said once');
+  // Without a named start, the button brings the page's first main button on screen.
+  assert.ok(html.includes('data-quick-start="auto"'));
+  assert.ok(!html.includes('data-quick-press'));
+});
+
+test('lessonBrief takes the start button of the course, or leaves the card to the course', () => {
+  const start = { label: 'Go <now>', target: '#run', press: true };
+  const html = lessonBrief('test-key', BRIEF_CONTENT, { start });
+  assert.ok(html.includes('data-quick-start="#run" data-quick-press>Go &lt;now&gt;</button>'));
+  const own = lessonBrief('test-key', BRIEF_CONTENT, { first: false });
+  assert.ok(own.startsWith('<section class="lesson-brief"'));
+  assert.ok(!own.includes('try it'), 'a course with its own card: the brief leaves it out');
 });
 
 test('lessonGuide and figureGuide are empty for unknown keys', () => {

@@ -141,11 +141,6 @@
   color: var(--role-actual);
   font-weight: 700;
 }
-.control-topic-place {
-  margin: 0 0 20px;
-  font-size: 13px;
-  color: #56696f;
-}
 @media (max-width: 620px) {
   .control-topic-nav button {
     flex: 1 1 calc(50% - 4px);

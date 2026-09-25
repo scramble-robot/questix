@@ -66,12 +66,16 @@ function helpDialogsIn(root) {
   return [...self, ...root.querySelectorAll(HELP_DIALOG_SELECTOR)];
 }
 
-function dialogTitle(summary) {
+// A details may name the dialog itself (data-help-title / data-help-label), e.g. the measurement
+// lab 「測定データを分析する」 or the reading list 「もっと詳しく学ぶ」, which are not 補足の解説.
+function dialogTitle(source, summary) {
+  if (source.dataset.helpTitle) return source.dataset.helpTitle;
   const topic = summary.querySelector('.school-tip-topic')?.textContent;
   return topic || summary.textContent.trim();
 }
 
 function dialogLabel(source, summary) {
+  if (source.dataset.helpLabel) return source.dataset.helpLabel;
   if (!isSchoolTip(source)) return copy.label.supplement;
   return summary.querySelector('.school-tip-label')?.textContent || copy.label.schoolTip;
 }
@@ -120,7 +124,7 @@ function initSupplements() {
     document.dispatchEvent(new CustomEvent('supplement-open'));
     if (!source.isConnected) return; // a listener may have re-rendered the page away
     shown = { source, button };
-    title.textContent = dialogTitle(summary);
+    title.textContent = dialogTitle(source, summary);
     label.textContent = dialogLabel(source, summary);
     body.replaceChildren(...[...source.childNodes].filter((node) => node !== summary));
     dialog.classList.toggle('supplement-school', isSchoolTip(source));

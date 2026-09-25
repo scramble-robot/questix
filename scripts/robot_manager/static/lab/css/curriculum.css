@@ -496,8 +496,18 @@
   .series-courses {
     grid-template-columns: 1fr;
   }
+  /* On a phone the cover is drawn at about 0.6 of its size while the summary keeps 14 px, so the
+     summary goes above the drawing instead of over it (it covered the drawings' own labels). */
   .series-cover {
     height: auto;
+    aspect-ratio: auto;
+    display: flex;
+    flex-direction: column;
+  }
+  .series-cover > span {
+    order: -1;
+    position: static;
+    padding: 12px 16px 0;
   }
   .slam-maps {
     grid-template-columns: 1fr;

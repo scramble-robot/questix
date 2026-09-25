@@ -1,12 +1,5 @@
 import { html, live, nothing, unsafeHTML } from '../vendor/lit-html.js';
-import {
-  formatValue,
-  runSummary,
-  isSimpleTopic,
-  settledSpeed,
-  speedGap,
-  topicPlace,
-} from './summary.js';
+import { formatValue, runSummary, isSimpleTopic, settledSpeed, speedGap } from './summary.js';
 import { lessonLabel } from '../shell/lesson-ui.js';
 import { schoolTips } from '../shell/school-tips.js';
 import { liveCaptureControls } from '../live/live-view.js';
@@ -377,9 +370,7 @@ function controlPanel(model, copy, actions) {
     <p class="eyebrow">条件を決める</p>
     <h2 id="controlGoal">${goal}</h2>
     ${settingFields(model, copy, actions)}
-    <button id="controlRun" class="primary full" @click=${actions.run}>
-      ${model.result ? 'この設定でもう一度試す' : 'この設定で実験する'}
-    </button>
+    <button id="controlRun" class="primary full" @click=${actions.run}>${runLabel(model)}</button>
     <p id="controlRunStatus" class="helper" role="status">${model.status}</p>
     <button id="controlReset" class="text-button" @click=${actions.reset}>
       設定を初期値に戻す
@@ -1174,36 +1165,39 @@ function groupNav(model, actions) {
           aria-pressed=${String(model.topic.group === index)}
           @click=${() => actions.openGroup(index)}
         >
-          <span>${index + 1}</span>${group}
+          ${group}
         </button>`,
     )}
   </nav>`;
 }
 
-// The experiments of the current stage as numbered boxes (1-1, 1-2 …), ✓ once one has been run,
-// with one line saying where the learner is.
+// The experiments of the current stage, numbered as in the footer (1…N of the whole course, one
+// numbering everywhere), ✓ once one has been run.
 function topicNav(model, copy, actions) {
   const siblings = CONTROL_TOPICS.filter((topic) => topic.group === model.topic.group);
-  const place = topicPlace(CONTROL_TOPICS, model.topicId);
   return html`<nav class="learning-subtopics control-topic-nav" aria-label="この段階の制御実験">
-      ${siblings.map((topic) => {
-        const done = model.doneTopics.includes(topic.id);
-        return html`<button
-          data-control-topic=${topic.id}
-          aria-pressed=${String(model.topicId === topic.id)}
-          @click=${() => actions.openTopic(topic.id)}
-        >
-          <span class="control-topic-number">${topicPlace(CONTROL_TOPICS, topic.id).label}</span
-          >${topic.name}${
-            done
-              ? html`<span class="control-topic-done" aria-label=${copy.nav.done}>✓</span>`
-              : nothing
-          }
-        </button>`;
-      })}
-    </nav>
-    <p class="control-topic-place">${fill(copy.nav.place, place)}</p>`;
+    ${siblings.map((topic) => {
+      const done = model.doneTopics.includes(topic.id);
+      return html`<button
+        data-control-topic=${topic.id}
+        aria-pressed=${String(model.topicId === topic.id)}
+        @click=${() => actions.openTopic(topic.id)}
+      >
+        <span class="control-topic-number">${CONTROL_TOPICS.indexOf(topic) + 1}</span
+        >${topic.name}${
+          done
+            ? html`<span class="control-topic-done" aria-label=${copy.nav.done}>✓</span>`
+            : nothing
+        }
+      </button>`;
+    })}
+  </nav>`;
 }
+
+const runLabel = (model) => (model.result ? 'この設定でもう一度試す' : 'この設定で実験する');
+
+// The button of the 「最初に試すこと」 card (shell/lesson-brief.js): the simulated run starts.
+const quickStart = (model) => ({ label: runLabel(model), target: '#controlRun', press: true });
 
 function controlPage(model, copy, hardwareHtml, actions) {
   const lessonKey = 'control-' + model.topicId;
@@ -1214,7 +1208,7 @@ function controlPage(model, copy, hardwareHtml, actions) {
       </div>
     </div>
     ${groupNav(model, actions)}${topicNav(model, copy, actions)}
-    ${unsafeHTML(lessonBrief(lessonKey, model.topic) + schoolTips(lessonKey))}
+    ${unsafeHTML(lessonBrief(lessonKey, model.topic, { start: quickStart(model) }) + schoolTips(lessonKey))}
     ${liveOnTop(model) ? liveCard(model, copy, actions) : nothing}
     <div class="control-layout">
       <div class="control-workspace">

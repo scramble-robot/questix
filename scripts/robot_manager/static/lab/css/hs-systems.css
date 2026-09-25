@@ -33,37 +33,32 @@
   }
 }
 
-/* --- phone: the first thing to try and the start button before the long brief ------------- */
+/* --- the first thing to try and the start button before the brief, on every screen ------- */
 .sys-quickstart {
-  display: none;
+  margin: 0 0 18px;
+  padding: 16px;
+  border: 1px solid #b9d3cb;
+  border-left: 4px solid var(--green);
+  border-radius: 12px;
+  background: #eef6f3;
 }
-@media (max-width: 800px) {
-  .sys-quickstart {
-    display: block;
-    margin: 0 0 18px;
-    padding: 16px;
-    border: 1px solid #b9d3cb;
-    border-radius: 12px;
-    background: #f1f8f5;
-  }
-  .sys-quickstart h2 {
-    font-size: 16px;
-    margin: 0 0 6px;
-  }
-  .sys-quickstart p {
-    font-size: 14px;
-    line-height: 1.8;
-    margin: 0 0 12px;
-  }
-  .sys-quickstart-actions {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 10px 16px;
-  }
-  .sys-quickstart-actions a {
-    font-size: 14px;
-  }
+.sys-quickstart h2 {
+  font-size: 16px;
+  margin: 0 0 6px;
+}
+.sys-quickstart p {
+  font-size: 14px;
+  line-height: 1.8;
+  margin: 0 0 12px;
+}
+.sys-quickstart-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+}
+.sys-quickstart-actions a {
+  font-size: 14px;
 }
 
 /* --- figures ----------------------------------------------------------------------------- */

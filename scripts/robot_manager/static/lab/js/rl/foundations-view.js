@@ -96,7 +96,7 @@ function groupsNav(model, copy, actions) {
         .disabled=${model.busy}
         @click=${() => actions.openGroup(index)}
       >
-        <span>${index + 1}</span>${name}
+        ${name}
       </button>`,
   )}`;
 }

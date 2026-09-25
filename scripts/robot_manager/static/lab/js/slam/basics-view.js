@@ -428,7 +428,7 @@ function groupNav(model, actions) {
           aria-pressed=${String(index === model.group)}
           @click=${() => actions.openGroup(index)}
         >
-          <span>${index + 1}</span>${title}
+          ${title}
         </button>`,
     )}
   </nav>`;

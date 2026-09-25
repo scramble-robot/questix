@@ -2,17 +2,16 @@
 //
 // The words and numbers the feedback-control course shows under a finished run
 // (js/control/summary.js): the settled speed of the first stage, the sentence with the run's own
-// numbers, the numbered topic places, and no "-0" anywhere.
+// numbers, and no "-0" anywhere.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { CONTROL_TOPICS, controlDefaults, simulateControl } from '../js/control/core.js';
+import { controlDefaults, simulateControl } from '../js/control/core.js';
 import {
   formatValue,
   settledSpeed,
   speedGap,
   runSummary,
-  topicPlace,
   isSimpleTopic,
 } from '../js/control/summary.js';
 
@@ -66,19 +65,4 @@ test('a distance run is described in centimetres from the wall', () => {
   assert.doesNotMatch(sentence, /\{|undefined| m[^/]/);
   const gentle = run('d', { kd: 1.5 });
   assert.match(runSummary(gentle, 'd', text), /越えませんでした|越えました/);
-});
-
-test('topics are numbered by stage and position', () => {
-  assert.deepEqual(topicPlace(CONTROL_TOPICS, 'output'), {
-    stage: 1,
-    position: 1,
-    count: 4,
-    label: '1-1',
-  });
-  assert.equal(topicPlace(CONTROL_TOPICS, 'd').label, '2-3');
-  assert.equal(topicPlace(CONTROL_TOPICS, 'challenge').label, '4-1');
-  // Every placeholder of the navigation line is filled.
-  const place = topicPlace(CONTROL_TOPICS, 'i');
-  const line = copy.nav.place.replace(/\{(\w+)\}/g, (match, key) => place[key]);
-  assert.equal(line, '段階2 · 3実験のうち2つ目');
 });

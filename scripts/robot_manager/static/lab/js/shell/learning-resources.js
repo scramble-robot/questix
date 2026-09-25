@@ -48,7 +48,13 @@ function policy(list) {
 // The details opens in the shared supplement dialog (shell/supplement-ui.js), which puts a
 // button with the summary in its place; data-help-action names that button's action.
 function resourcesCard(list, title) {
-  return html`<details data-help-dialog data-help-action=${copy.action}>
+  // The dialog is 「もっと詳しく学ぶ」 about this course, not a 補足の解説 (supplement-ui.js).
+  return html`<details
+      data-help-dialog
+      data-help-action=${copy.action}
+      data-help-label=${copy.summary}
+      data-help-title=${title}
+    >
       <summary>
         ${copy.summary}
         <span class="reference-count"
@@ -56,7 +62,6 @@ function resourcesCard(list, title) {
         >
       </summary>
       <div class="reference-reading">
-        <p class="reference-course">${title}</p>
         <p class="reference-intro">${copy.intro}</p>
         <div class="reference-list">${list.resources.map(resourceItem)}</div>
         ${policy(list)}

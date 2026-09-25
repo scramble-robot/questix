@@ -485,10 +485,6 @@
 .lesson-brief p + p {
   margin-top: 10px;
 }
-.lesson-brief .lesson-brief-first {
-  border-left: 1px solid #dce5e3;
-  padding-left: 28px;
-}
 .figure-guide {
   font-size: 14px;
   line-height: 1.8;
@@ -608,11 +604,6 @@
     grid-template-columns: 1fr;
     gap: 18px;
     padding: 20px;
-  }
-  .lesson-brief .lesson-brief-first {
-    border-left: 0;
-    border-top: 1px solid #dce5e3;
-    padding: 16px 0 0;
   }
   .figure-guide {
     padding: 16px 20px;
