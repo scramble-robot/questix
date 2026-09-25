@@ -131,51 +131,57 @@ TEST(ShotLabFire, NextFireInSec) {
 
 // ---- controller activity ----
 
-// fire_button 5, tilt_axis 7 (D-pad vertical), tilt buttons 4/6 as in the YAML profiles.
+// fire_button 5; tilt up/down on axis 7 (D-pad vertical, + up / - down) as in controls.uart.yaml,
+// or on buttons 4 / 6 when the axes are -1.
+const shot_lab::TiltControl kUpAxis{7, 1, 4};
+const shot_lab::TiltControl kDownAxis{7, -1, 6};
+const shot_lab::TiltControl kUpButton{-1, 1, 4};
+const shot_lab::TiltControl kDownButton{-1, -1, 6};
+
 TEST(ShotLabJoy, FireButtonCounts) {
   std::vector<int32_t> buttons(12, 0);
   std::vector<float> axes(8, 0.0F);
-  EXPECT_FALSE(shot_lab::joyUsesLauncher(buttons, axes, 5, 7, 4, 6));
+  EXPECT_FALSE(shot_lab::joyUsesLauncher(buttons, axes, 5, kUpAxis, kDownAxis));
   buttons[5] = 1;
-  EXPECT_TRUE(shot_lab::joyUsesLauncher(buttons, axes, 5, 7, 4, 6));
+  EXPECT_TRUE(shot_lab::joyUsesLauncher(buttons, axes, 5, kUpAxis, kDownAxis));
 }
 
-TEST(ShotLabJoy, AxisModeUsesTheAxisOnly) {
+TEST(ShotLabJoy, AxisModeUsesEachDirectionsSign) {
   std::vector<int32_t> buttons(12, 0);
   std::vector<float> axes(8, 0.0F);
   axes[7] = 1.0F;
-  EXPECT_TRUE(shot_lab::joyUsesLauncher(buttons, axes, 5, 7, 4, 6));
+  EXPECT_TRUE(shot_lab::joyUsesLauncher(buttons, axes, 5, kUpAxis, kDownAxis));
   axes[7] = -1.0F;
-  EXPECT_TRUE(shot_lab::joyUsesLauncher(buttons, axes, 5, 7, 4, 6));
+  EXPECT_TRUE(shot_lab::joyUsesLauncher(buttons, axes, 5, kUpAxis, kDownAxis));
   axes[7] = 0.3F;
-  EXPECT_FALSE(shot_lab::joyUsesLauncher(buttons, axes, 5, 7, 4, 6));
+  EXPECT_FALSE(shot_lab::joyUsesLauncher(buttons, axes, 5, kUpAxis, kDownAxis));
   axes[7] = 0.0F;
-  buttons[4] = 1;  // tilt buttons are not the tilt input in axis mode
-  EXPECT_FALSE(shot_lab::joyUsesLauncher(buttons, axes, 5, 7, 4, 6));
+  buttons[4] = 1;  // the tilt buttons are not the tilt input in axis mode
+  EXPECT_FALSE(shot_lab::joyUsesLauncher(buttons, axes, 5, kUpAxis, kDownAxis));
 }
 
 TEST(ShotLabJoy, ButtonModeUsesTheTiltButtons) {
   std::vector<int32_t> buttons(12, 0);
   std::vector<float> axes(8, 0.0F);
   buttons[6] = 1;
-  EXPECT_TRUE(shot_lab::joyUsesLauncher(buttons, axes, 5, -1, 4, 6));
+  EXPECT_TRUE(shot_lab::joyUsesLauncher(buttons, axes, 5, kUpButton, kDownButton));
   buttons[6] = 0;
   buttons[4] = 1;
-  EXPECT_TRUE(shot_lab::joyUsesLauncher(buttons, axes, 5, -1, 4, 6));
+  EXPECT_TRUE(shot_lab::joyUsesLauncher(buttons, axes, 5, kUpButton, kDownButton));
 }
 
-TEST(ShotLabJoy, MissingAxisFallsBackToButtonsLikeJoyCallback) {
+TEST(ShotLabJoy, MixedDirectionsAreCheckedSeparately) {
   std::vector<int32_t> buttons(12, 0);
-  std::vector<float> axes(4, 0.0F);  // axis 7 is missing
-  buttons[4] = 1;
-  EXPECT_TRUE(shot_lab::joyUsesLauncher(buttons, axes, 5, 7, 4, 6));
+  std::vector<float> axes(8, 0.0F);
+  buttons[6] = 1;  // down on a button, up on the axis
+  EXPECT_TRUE(shot_lab::joyUsesLauncher(buttons, axes, 5, kUpAxis, kDownButton));
 }
 
 TEST(ShotLabJoy, OutOfRangeIndicesAreIgnored) {
   std::vector<int32_t> buttons(3, 1);
   std::vector<float> axes;
-  EXPECT_FALSE(shot_lab::joyUsesLauncher(buttons, axes, 5, 7, 4, 6));
-  EXPECT_FALSE(shot_lab::joyUsesLauncher(buttons, axes, -1, -1, -1, -1));
+  EXPECT_FALSE(shot_lab::joyUsesLauncher(buttons, axes, 5, kUpAxis, kDownAxis));
+  EXPECT_FALSE(shot_lab::joyUsesLauncher(buttons, axes, -1, {-1, 1, -1}, {-1, -1, -1}));
 }
 
 // ---- status ----

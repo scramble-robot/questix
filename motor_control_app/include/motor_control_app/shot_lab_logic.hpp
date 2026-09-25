@@ -11,6 +11,9 @@
 #include <cstdio>
 #include <limits>
 #include <string>
+#include <vector>
+
+#include "motor_control_app/tilt_input.hpp"
 
 namespace motor_control_app::shot_lab {
 
@@ -128,27 +131,24 @@ inline Refusal decideFire(const Conditions& c, double last_fire_sec, double min_
   return Refusal::kNone;
 }
 
-// Whether a /joy message shows the controller using the launcher: the fire button, and the tilt
-// input of the configured mode (axis past +-0.5 when tilt_axis >= 0, else the tilt buttons).
+// Whether a /joy message shows the controller using the launcher: the fire button, or either tilt
+// direction as that direction is configured (tilt_input.hpp: its axis past +-0.5 in its sign, or
+// its button when the axis is -1) -- the same test joyCallback uses to move the tilt servo.
 // Every index is bounds-checked against the message; a negative index is "not configured".
-template <typename Buttons, typename Axes>
-bool joyUsesLauncher(const Buttons& buttons, const Axes& axes, int fire_button, int tilt_axis,
-                     int tilt_up_button, int tilt_down_button) {
-  const auto pressed = [&buttons](int index) {
-    return index >= 0 && static_cast<std::size_t>(index) < buttons.size() &&
-           buttons[static_cast<std::size_t>(index)] == 1;
-  };
-  if (pressed(fire_button)) {
+struct TiltControl {
+  int axis;
+  int sign;
+  int button;
+};
+
+inline bool joyUsesLauncher(const std::vector<int32_t>& buttons, const std::vector<float>& axes,
+                            int fire_button, const TiltControl& up, const TiltControl& down) {
+  if (fire_button >= 0 && static_cast<std::size_t>(fire_button) < buttons.size() &&
+      buttons[static_cast<std::size_t>(fire_button)] == 1) {
     return true;
   }
-  if (tilt_axis >= 0) {
-    if (static_cast<std::size_t>(tilt_axis) < axes.size()) {
-      const double value = axes[static_cast<std::size_t>(tilt_axis)];
-      return std::isfinite(value) && std::abs(value) > 0.5;
-    }
-    // The configured axis is missing: joyCallback then falls back to the tilt buttons.
-  }
-  return pressed(tilt_up_button) || pressed(tilt_down_button);
+  return tiltInputPressed(axes, buttons, up.axis, up.sign, up.button) ||
+         tiltInputPressed(axes, buttons, down.axis, down.sign, down.button);
 }
 
 enum class FireSource { kNone, kJoy, kLab };

@@ -656,8 +656,10 @@ void ShotComponent::disconnectServo() {
 void ShotComponent::joyCallback(const sensor_msgs::msg::Joy::SharedPtr msg) {
   // Record controller use of the launcher (fire button, tilt input) for the QUESTiX LAB quiet
   // rule before any early return: a held button blocks lab requests in every state.
-  if (msg && shot_lab::joyUsesLauncher(msg->buttons, msg->axes, fire_button_, tilt_axis_,
-                                       tilt_up_button_index_, tilt_down_button_index_)) {
+  if (msg &&
+      shot_lab::joyUsesLauncher(msg->buttons, msg->axes, fire_button_,
+                                {tilt_up_axis_, tilt_up_axis_sign_, tilt_up_button_index_},
+                                {tilt_down_axis_, tilt_down_axis_sign_, tilt_down_button_index_})) {
     joy_launcher_active_at_sec_ = steadyNowSec();
   }
   if (this->get_current_state().id() != lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE) {
