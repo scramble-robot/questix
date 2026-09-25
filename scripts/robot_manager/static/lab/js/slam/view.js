@@ -686,11 +686,15 @@ function experimentLayout(model, copy, actions) {
   </div>`;
 }
 
+// shell/supplement-ui.js hides the <details> and puts its own button before it, so the view's
+// visibility goes on a wrapper: bound on the details, it would show them again beside the button.
 function methodNote(model, copy, methodNoteHtml) {
-  return html`<details data-help-dialog class="method-note" ?hidden=${model.view === 'basics'}>
-    <summary>${copy.methodNoteSummary}</summary>
-    ${unsafeHTML(methodNoteHtml)}
-  </details>`;
+  return html`<div class="method-note-wrap" ?hidden=${model.view === 'basics'}>
+    <details data-help-dialog class="method-note">
+      <summary>${copy.methodNoteSummary}</summary>
+      ${unsafeHTML(methodNoteHtml)}
+    </details>
+  </div>`;
 }
 
 // `basicsHtml` is the markup of the "仕組みを知る" part, owned and wired by basics.js; it is
