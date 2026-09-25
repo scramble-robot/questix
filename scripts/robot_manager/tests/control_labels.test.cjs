@@ -416,10 +416,14 @@ test('shared save reports success and validation failures without sending invali
   assert.equal(document.getElementById('controls-save').disabled, false);
   form.valid = true;
   input.valid = true;
+  const toasts = [];
+  context.toast = (message) => toasts.push(message);
   await document.getElementById('controls-save').events.click({ preventDefault() {} });
   assert.equal(getPayload().values.shot_component.fire_button, 0);
-  assert.match(document.getElementById('controls-message').textContent, /保存しました/);
+  assert.match(toasts.join(), /操作設定を保存しました/);
   assert.equal(document.getElementById('controls-save').disabled, true);
+  // Nothing left to save: the floating bar goes away instead of covering the diagram.
+  assert.equal(document.getElementById('controls-savebar').hidden, true);
 });
 
 test('a failed save keeps the draft and revision and reports the error in the shared bar', async () => {

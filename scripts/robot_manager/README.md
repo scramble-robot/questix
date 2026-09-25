@@ -3,12 +3,14 @@
 FastAPI-based web control panel for the `questix_robot` systemd service, served by
 uvicorn on `127.0.0.1:8888`.
 
-- `app.py` — service control (mode, start/stop/restart, launch config).
+- `app.py` — service control (mode, start/stop/restart with the practice start request,
+  「すべて止める」 `/api/stop-all`, launch config).
 - `recorder.py` — rosbag recording console (`/api/rosbag/*`).
 - `logs.py` — log collection console (`/api/logs/*`).
 - `lab.py` — QUESTiX LAB console (`/api/lab/*`): starts/stops the lab bridge and allows or
   forbids driving from the lessons.
-- `wifi_ap.py` — read-only access point settings for the QR codes (`/api/wifi-ap`).
+- `wifi_ap.py` — read-only access point settings for the QR codes (`/api/wifi-ap`), plus the
+  browser controller's address on the access point and the saved `CONTROLLER_TYPE`.
 - `static/` — vanilla HTML/CSS/JS frontend (no build step).
 - `static/lab/` — QUESTiX LAB web teaching material, served at `/lab/` (see its README).
 
@@ -61,15 +63,33 @@ QUESTiX Robot Manager の全タブとダイアログは、`static/style.css` の
 
 ## 生徒向けの操作と管理設定
 
-通常のタブは「操作」「調整」「記録」「診断ログ」です。生徒が行う練習／大会モードの
+通常のタブは「操作」「調整」「記録」「診断ログ」「教材」です。生徒が行う練習／大会モードの
 切り替えは「操作」に残し、機体構成・通信設定・録画の詳細設定は右上の「管理設定」に
 まとめています。これは画面の整理であり、利用者認証やアクセス権限の分離ではありません。
-全画面の「ロボット停止」は既存のサービス停止操作です。
 状態は「ロボット制御：実行中／起動処理中／停止処理中／停止中／起動失敗」と表示します。
 実行中は制御プログラムの実行状態で、コントローラーの接続や操作可能を保証する表示ではありません。
 
-- モードは**次回起動用の保存値**を表示します。変更しても実行中のモードは変わりません。
-  既存のランチャー仕様により、練習モードではサービスからのROS起動をスキップします。
+- ヘッダーには、ロボット名・モード（動作中のモードと次回のモード）・ロボット制御の状態・
+  非常停止ボタンが押されているときはその表示と、常に **「すべて止める」** があります。
+  「すべて止める」は確認なしの1タップで、`POST /api/stop-all` がまず教材の走行・発射を止め
+  （教材のブリッジに WebSocket で `{"type":"stop"}` と `{"type":"roller_stop"}` を送る。どのページも
+  送れる停止で、ブリッジは再起動せず生徒の接続も切れません）、次にロボット制御（`questix_robot`）を
+  停止します。結果は画面上部に項目ごとに表示します。教材からの走行・発射の**許可**は変えません
+  （許可・禁止は「教材」タブのスイッチで、先生が意図して切り替えます）。
+- 「操作」の最初のカード「いまのロボット」に、ロボット名、モード（動作中／次回）、ロボット制御、
+  非常停止ボタン、教材の配信、教材からの走行・発射の許可、いま動かしているのは誰かをまとめて表示します。
+  ロボット名は**ホスト名**です（教材のブリッジの `robot_name` の既定値で、生徒の教材画面に出る名前と同じ。
+  ブリッジが動いていればブリッジが名乗る名前を表示します）。Wi-Fi の SSID は接続用 QR に、
+  `VEHICLE_NAME` は記録名にだけ使い、ここでは使いません。非常停止ボタンの状態は、教材のブリッジが
+  走行か発射を許可されて配信しているときだけ分かります（それ以外は「分かりません」）。
+- モードの保存値は**次回起動用**です。変更しても実行中のモードは変わりません。ロボット制御が
+  動いているときにモードや操作設定を保存すると、画面上部に「今すぐ再起動して反映」を出します
+  （押すと通常の再起動確認のあとで再起動します）。
+- **練習モードの起動**: 電源投入時、練習モードではロボット制御を起動しません（今までどおり）。
+  「起動」「再起動」を押すと練習用の構成で起動します（下の「練習モードの起動要求」）。大会モードの
+  起動は今までどおりで、電源投入時にも起動します。起動の結果は、実際に起動したかどうかで表示します
+  （「練習用の構成で起動しました」「起動できませんでした：…」）。ロボット制御が動いている間は「起動」を
+  押せません。
 - 起動前の確認では保存プロファイルとROS・ワークスペースの起動ファイルを確認します。
   コントローラーの物理接続や安全状態の自動判定は行いません。
   旧サービスで `/api/readiness` がない場合は既存APIで保存設定を確認し、起動環境は未確認と表示します。
@@ -84,10 +104,48 @@ QUESTiX Robot Manager の全タブとダイアログは、`static/style.css` の
 
 授業用の標準設定の登録と録画メモは、この段階では追加していません。
 
+## 練習モードの起動要求 (`start-request`)
+
+`systemd/questix_robot_launcher.sh` (the `questix_robot` service's `ExecStart`, also shipped as
+`ansible/roles/robot_autostart/files/questix_robot_launcher.sh`) launches in practice mode only
+when Robot Manager asked for it a moment ago:
+
+1. 起動 / 再起動 in practice mode: the manager writes `$QUESTIX_CONFIG_DIR/start-request`
+   (atomically, with its own permissions: `mode=practice`, `requested_at=<epoch s>`,
+   `boot_id=<kernel boot id>`), then runs `systemctl start|restart questix_robot`.
+2. The launcher accepts the request only for the same boot, for `mode=practice` while the mode
+   file says `practice`, and when it is at most 120 s old; it deletes the request in any case, then
+   runs `ros2 launch questix_launcher questix_core.launch.xml enable_autoreferee:=false
+   enable_gpio_ref:=<ENABLE_GPIO_REF from launch.env, default true> controller_type:=…
+   enable_lidar/shot/drive/rviz:=…` (the same as competition except the safety profile). With
+   AutoReferee off, questix_core's practice defaults add `twist_arbiter` and let the ESC and shot
+   nodes accept QUESTiX LAB's launcher input, so the lessons can drive and fire.
+3. Without a usable request (power-on, `systemctl start` by hand, a stale request) it logs why and
+   exits 0, as before.
+4. Every launch writes `$QUESTIX_CONFIG_DIR/last-launch` (`mode`, `started_at`, `boot_id`);
+   `/api/status` reports it as `running_mode` while the service runs (`unknown` for a launch by an
+   older launcher or from another boot).
+
+The manager then waits up to 4 s for the launcher to take the request and 1.5 s more, and answers
+with what happened (`ok`, `message`, `state`, `running_mode`). If the request is still there (an
+older launcher that skips practice mode: rerun `scripts/install-robot-manager.sh` or the
+`robot_autostart` role) it removes it and says so; a request is also removed when `systemctl`
+fails, on 「すべて止める」 / 停止, and whenever the manager starts, so a leftover can never start the
+robot later.
+
+**Restart=on-failure**: the request is consumed before launching, so a practice launch that crashes
+is *not* restarted (the restart finds no request and exits 0; the unit ends up inactive). The
+操作 tab says so when a practice launch ends without a stop through the manager; press 起動 again
+after checking the 診断ログ. Competition launches are restarted as before.
+
+For tests, `QUESTIX_CONFIG_DIR`, `QUESTIX_BOOT_ID_FILE` and `QUESTIX_ROS_SETUP` override the
+launcher's paths (the service sets none of them); `test_launcher_script.py` runs the real script
+with a fake `ros2` and `logger`.
+
 ## Competition GPIO safety
 
-The `ENABLE_GPIO_REF` field in `launch.env` is retained for manual development and
-diagnostics. When `/etc/questix_robot/mode` is `competition`, the production launcher
+The `ENABLE_GPIO_REF` field in `launch.env` applies to practice launches started from Robot
+Manager (default and recommended: `true`) and to manual development and diagnostics. When `/etc/questix_robot/mode` is `competition`, the production launcher
 ignores that field and always passes `enable_gpio_ref:=true` together with
 `enable_autoreferee:=true`. Therefore an existing `launch.env` containing
 `ENABLE_GPIO_REF=false` cannot disable the GPIO5 physical E-stop and GPIO27
@@ -131,9 +189,14 @@ The **教材** tab starts and stops that bridge, so nobody has to run `ros2 laun
   child of robot_manager and stops with it. While it is on, every device on the network may
   see the pages and the read-only telemetry.
 - **大会モード** (`competition` in `$QUESTIX_CONFIG_DIR/mode`): switching to it from this UI stops
-  a bridge started here and writes `AUTOSTART="false"`; switching back to 練習モード writes
-  `AUTOSTART="true"` and starts the bridge again (unless one already runs). Automatic start is
-  also skipped while the mode file says `competition`, even if it was changed by hand.
+  a bridge started here and writes `AUTOSTART`, `ALLOW_DRIVE` and `ALLOW_SHOOT` false, after saving
+  the teacher's practice values as `PRACTICE_AUTOSTART` / `PRACTICE_ALLOW_DRIVE` /
+  `PRACTICE_ALLOW_SHOOT` in `lab.env` (only when none are saved yet). 配信開始 is refused (409) in
+  that mode and the tab disables streaming and both switches with the reason. Switching back to
+  練習モード restores exactly the saved values (all on when none were saved, e.g. the mode file was
+  edited by hand), clears them, and starts the bridge if automatic start is on; the toast says
+  what is on now, so a teacher's explicit forbid is never silently lifted. Automatic start is also
+  skipped while the mode file says `competition`, even if it was changed by hand.
 - The bridge's stdout/stderr go to `~/.cache/questix/lab-bridge.log` of the service user
   (truncated on every start; discarded if that file cannot be written). While no bridge of ours
   runs, or after a failed start, `/api/lab/status` carries its last 15 lines as `log_tail` and
@@ -144,21 +207,25 @@ The **教材** tab starts and stops that bridge, so nobody has to run `ros2 laun
 - **教材からの走行** (`ALLOW_DRIVE` in `lab.env`, `POST /api/lab/drive`) lets the lessons' driving
   experiments move the robot (`questix_lab_bridge/README.md`, "Driving experiments"); each run is
   confirmed by the learner's safety tick, and `twist_arbiter` lets the controller take over at any
-  time. On by default in practice mode; the card's 「教材からの走行を止める」 is the teacher's off
-  switch. 大会モード turns it off (and it always reads as off in that mode), going back to practice
-  turns it on. Switching restarts a bridge started here (every connected page drops for a few
-  seconds); a bridge started by hand keeps its own `allow_drive`. The card lists, for the teacher,
-  what still blocks driving (`bridge.drive_state.blockers`: no `twist_arbiter` or a different
-  `ROS_DOMAIN_ID`, another publisher on `/target_twist/lab`, emergency stop), the robot name,
-  connected pages and which page drives. If `lab.env` cannot be written when switching off,
-  driving still counts as off and the reason is shown as `config_error`.
+  time. On by default in practice mode; the card's switch 「教材からの走行を許可する」 (one switch,
+  its state next to it) is the teacher's off switch. 大会モード turns it off (and it always reads
+  as off in that mode), going back to practice restores the teacher's choice. Switching restarts
+  a bridge started here (every connected page drops for a few seconds); a bridge started by hand
+  keeps its own `allow_drive`. The card's headline combines the permission with what blocks it
+  now (「許可済み・いまは走行できません（非常停止ボタンが押されています）」); a missing
+  `twist_arbiter` / launcher node is shown only after it lasted 6 s, because a restarted bridge
+  reports it for a few seconds while it discovers the ROS graph. The plain reason is on the card;
+  the technical cause (`twist_arbiter`, `ROS_DOMAIN_ID`, topics, limits) is under
+  「先生・技術者向けの詳しい情報」. If `lab.env` cannot be written when switching off, driving
+  still counts as off and the reason is shown as `config_error`.
 - **教材からの発射** (`ALLOW_SHOOT` in `lab.env`, `POST /api/lab/shoot`) does the same for the disc
   launcher: the lessons may spin the roller, tilt and fire one disc at a time
   (`questix_lab_bridge/README.md`, "Launcher experiments"); the learner ticks
   「発射する方向に人がいない・的の周りに人がいない」 on the page, and the controller's launcher
   buttons take over at any time. Same policy as driving: on by default in practice mode, the
-  card's 「教材からの発射を止める」 is the teacher's off switch, 大会モード turns it off, practice turns it
-  on, the teacher's choice survives a manager restart, a failed write still counts as off. The
+  card's switch 「教材からの発射を許可する」 is the teacher's off switch, 大会モード turns it off,
+  practice restores the teacher's choice, the choice survives a manager restart, a failed write
+  still counts as off. The
   card shows `bridge.shoot_state` (who operates it, what blocks it: launcher nodes not accepting
   lab input, another publisher, emergency stop, controller in use). `/api/lab/status` carries
   `shoot_allowed` / `shoot_running` like `drive_allowed` / `drive_running`.
@@ -175,8 +242,10 @@ The **教材** tab starts and stops that bridge, so nobody has to run `ros2 laun
 - **スマートフォンで開く** shows two QR codes: ① joins the robot's Wi-Fi access point (from
   `$QUESTIX_CONFIG_DIR/wifi_ap.env`, written by `scripts/wifi-ap.sh`; read-only `GET /api/wifi-ap`,
   `wifi_ap.py`) and ② opens the teaching pages (`http://10.42.0.1:8897/` while the access point
-  is on, otherwise the first LAN URL). **印刷用の接続カード** (`static/ap-card.html`) is the same
-  pair on a printable page; `sudo scripts/wifi-ap.sh card` writes it as a standalone file. QR
+  is on, otherwise the first LAN URL). When `CONTROLLER_TYPE=web`, ③ opens the browser controller
+  (`web_joy_driver`, `http://10.42.0.1:8899/`, otherwise port 8899 of the first LAN URL).
+  **印刷用の接続カード** (`static/ap-card.html`) is the same set on a printable page (③ only with
+  `CONTROLLER_TYPE=web`); `sudo scripts/wifi-ap.sh card` writes the ①② card as a standalone file. QR
   codes are drawn as SVG from `static/vendor/qrcode.js` (qrcode-generator, MIT, see
   `static/vendor/NOTICE.md`) by `static/qr-svg.js`, which fits the strict CSP of the manager UI.
 
@@ -257,14 +326,19 @@ a per-source error in `MANIFEST.txt` and the archive is still produced.
 
 ## ブラウザ操作とスマホ接続用 QR
 
-「制御」タブの「ブラウザ・スマホで操作」で、`web_joy_driver` を開けます。
-有効な URL を入力すると「ブラウザで操作」リンクが表示され、QR 生成なしで直接開けます。
+「操作」タブの「ブラウザ・スマホのコントローラー」で、`web_joy_driver` を開けます。
+カードの最初の行に、次回の起動で使うコントローラー（`CONTROLLER_TYPE`）が Web かどうかを表示し、
+Web でないときは「管理設定を開く」で切り替え先へ移動できます。
+URL は自動で入ります: ロボットの Wi-Fi（アクセスポイント）がオンなら `http://10.42.0.1:8899/`
+（`/api/wifi-ap` の `controller_url`）、それ以外は「教材」タブが知っているロボットの LAN アドレスの
+ポート 8899 です（Robot Manager は `127.0.0.1` でだけ動くため、画面のアドレスからは作れません）。
+URL は編集でき、編集した後は自動で書き換えません。ドライバーのポートや認証トークンは自動取得しないので、
+変えた場合は URL に反映してください。
+「ブラウザで操作」リンクで QR 生成なしで直接開けます。
 PC ではキーボード（Space を保持して WASD / 矢印など）、スマホ・タブレットではタッチ操作が使えます。
 Android アプリは不要です。詳細は [Web Joy の操作方法](../../web_joy_driver/README.md) を参照してください。
-接続用 QR はスマホのカメラからブラウザで開く場合にも利用できます。
-URL は編集可能です。管理画面を LAN アドレスで開くと同じホストの HTTP ポート 8899 を
-初期候補にします。`localhost` で開いた場合は、スマホから到達できるロボットの IP を
-入力してください。ドライバーのポートや認証トークンは自動取得しません。
+接続用 QR はスマホのカメラからブラウザで開く場合にも利用できます。`CONTROLLER_TYPE=web` のときは
+「教材」タブの「スマートフォンで開く」と印刷用の接続カードにも ③ コントローラーの QR が出ます。
 
 QR は同梱の `static/vendor/qrcode.js`（qrcode-generator 2.0.4、Wi-Fi・教材の QR と共用）によりブラウザ内で生成します。
 外部の QR 生成サービスや CDN への通信はありません。URL 編集時には古い QR を消します。
@@ -289,7 +363,9 @@ ROS の配列番号も表示し、標準配置以外の番号も選択できま�
 管理設定の「機体・接続の設定」（`CONTROLLER_TYPE`）で選べます。「調整」で編集できるのは UART / Switch と
 DualShock で、設定ファイルはそれぞれ別（`controls.uart.yaml` / `controls.dualshock.yaml`）です。
 Web はブラウザの操作画面でボタンの役割が決まっているため、同梱の `controls.web.yaml` を固定で使い、
-「調整」では編集しません（次回起動が Web のときは「調整」にその旨を表示します。保存 API も 409 で断ります）。
+「調整」では編集しません（次回起動が Web のときは「調整」にその旨を表示し、「別のコントローラー用の設定です」
+という警告は出しません。保存 API も 409 で断ります）。「操作設定を保存」のバーは未保存の変更があるときだけ
+表示し、保存後にロボット制御が動いていれば画面上部に「今すぐ再起動して反映」を出します。
 UART の名前は `uart_joy_driver` のプロトコルに合わせています。DualShock は
 Linux の標準配置を表示するもので、接続機器の自動判別ではありません。
 [joy_node の配列順は機器依存](https://github.com/ros-drivers/joystick_drivers/blob/ros2/joy/README.md)

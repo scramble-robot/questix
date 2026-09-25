@@ -4,6 +4,8 @@
 ``$QUESTIX_CONFIG_DIR/wifi_ap.env``, readable by the robot's login user, which runs this manager.
 The manager only reads them to show "join this Wi-Fi" and "open the teaching pages" QR codes; it
 never changes the network. It listens on 127.0.0.1 only, so the password stays on the robot.
+The answer also carries the browser controller's address on the access point and the controller
+type saved for the next start, so the printable card can add a controller QR code when it is Web.
 """
 
 import os
@@ -17,6 +19,8 @@ from robot_manager import lab
 
 CONFIG_DIR = Path(os.environ.get("QUESTIX_CONFIG_DIR", "/etc/questix_robot"))
 WIFI_AP_ENV_FILE = CONFIG_DIR / "wifi_ap.env"
+# Port of the browser controller (web_joy_driver, used when CONTROLLER_TYPE=web in launch.env).
+WEB_JOY_PORT = int(os.environ.get("WEB_JOY_PORT", "8899"))
 # NetworkManager profile written by the wifi_access_point role.
 CONNECTION_NAME = "questix-ap"
 
@@ -56,6 +60,7 @@ def _active() -> bool:
 
 @router.get("")
 def get_access_point():
+    """Return the access point settings for the QR codes, or configured: false."""
     settings = _read_settings()
     if settings is None:
         return {"configured": False}
@@ -69,4 +74,6 @@ def get_access_point():
         "channel": settings.get("channel", ""),
         "address": address,
         "lab_url": f"http://{address}:{lab.LAB_BRIDGE_PORT}/" if address else "",
+        "controller_url": f"http://{address}:{WEB_JOY_PORT}/" if address else "",
+        "controller_type": lab._read_env_file(lab.LAUNCH_ENV_FILE).get("CONTROLLER_TYPE", ""),
     }

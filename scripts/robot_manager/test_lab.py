@@ -570,3 +570,154 @@ def test_forbidding_shoot_works_even_if_lab_env_cannot_be_written(
     assert len(started) == 1 and "-p allow_drive:=true -p allow_shoot:=false" in started[0]
     assert status["shoot_allowed"] is False and status["drive_allowed"] is True
     assert "sudo chown" in status["config_error"]
+
+
+# --- the teacher's choices across competition mode ------------------------------------------------
+
+def test_a_forbid_survives_a_competition_round_trip(lab, monkeypatch, tmp_path):
+    started = []
+    monkeypatch.setattr(lab, "start_bridge", lambda: started.append(True))
+    monkeypatch.setattr(lab.threading, "Thread", _run_now)
+    monkeypatch.setattr(lab, "_port_in_use", lambda: False)
+    lab.set_drive(lab.DriveRequest(allow=False))  # the teacher forbids driving, keeps firing
+    (tmp_path / "mode").write_text("competition\n")
+    lab.disable_for_competition()
+    lab.disable_for_competition()  # competition -> competition keeps the practice values
+    assert lab._read_config()["ALLOW_SHOOT"] == "false"
+    (tmp_path / "mode").write_text("practice\n")
+    now = lab.enable_for_practice()
+    assert now == {"restored": True, "autostart": True, "drive": False, "shoot": True}
+    config = lab._read_config()
+    assert config["ALLOW_DRIVE"] == "false" and config["ALLOW_SHOOT"] == "true"
+    assert started == [True]
+    assert "PRACTICE_" not in (tmp_path / "lab.env").read_text()  # cleared after restoring
+
+
+def test_autostart_off_survives_a_competition_round_trip(lab, monkeypatch, tmp_path):
+    started = []
+    monkeypatch.setattr(lab, "start_bridge", lambda: started.append(True))
+    monkeypatch.setattr(lab.threading, "Thread", _run_now)
+    monkeypatch.setattr(lab, "_port_in_use", lambda: False)
+    lab.set_config(lab.LabConfig(AUTOSTART=False))
+    (tmp_path / "mode").write_text("competition\n")
+    lab.disable_for_competition()
+    lab.set_config(lab.LabConfig(CAMERA_TOPIC="/cam/compressed"))  # keeps the saved values
+    (tmp_path / "mode").write_text("practice\n")
+    assert lab.enable_for_practice()["autostart"] is False
+    assert lab._read_config()["AUTOSTART"] == "false" and started == []
+
+
+def test_bridge_does_not_start_in_competition_mode(lab, tmp_path):
+    (tmp_path / "mode").write_text("competition\n")
+    with pytest.raises(HTTPException) as error:
+        lab.start_bridge()
+    assert error.value.status_code == 409 and "大会モード" in error.value.detail
+    assert lab.get_status()["competition"] is True
+
+
+# --- 「すべて止める」 -------------------------------------------------------------------------------
+
+class _FakeBridgeSocket:
+    """A WebSocket server on 127.0.0.1 that records the text frames a client sends."""
+
+    def __init__(self, refuse=False):
+        import socket
+        import threading
+        self.texts = []
+        self.refuse = refuse
+        self.server = socket.socket()
+        self.server.bind(("127.0.0.1", 0))
+        self.server.listen(1)
+        self.port = self.server.getsockname()[1]
+        self.thread = threading.Thread(target=self._serve, daemon=True)
+        self.thread.start()
+
+    def _serve(self):
+        import base64
+        import hashlib
+        conn, _ = self.server.accept()
+        with conn:
+            data = b""
+            while b"\r\n\r\n" not in data:
+                data += conn.recv(4096)
+            head, data = data.split(b"\r\n\r\n", 1)
+            if self.refuse:
+                conn.sendall(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n")
+                return
+            key = [line.split(b":", 1)[1].strip() for line in head.split(b"\r\n")
+                   if line.lower().startswith(b"sec-websocket-key")][0]
+            accept = base64.b64encode(hashlib.sha1(
+                key + b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest())
+            conn.sendall(b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"
+                         b"Connection: Upgrade\r\nSec-WebSocket-Accept: " + accept + b"\r\n\r\n"
+                         b"\x81\x05hello")  # a server frame the client must just skip
+            while True:
+                while len(data) < 2:
+                    data += conn.recv(4096)
+                opcode, length = data[0] & 0x0F, data[1] & 0x7F
+                assert data[1] & 0x80  # clients mask every frame
+                offset = 2
+                if length == 126:
+                    while len(data) < 4:
+                        data += conn.recv(4096)
+                    length, offset = int.from_bytes(data[2:4], "big"), 4
+                while len(data) < offset + 4 + length:
+                    data += conn.recv(4096)
+                mask = data[offset:offset + 4]
+                payload = bytes(b ^ mask[i % 4] for i, b in
+                                enumerate(data[offset + 4:offset + 4 + length]))
+                data = data[offset + 4 + length:]
+                if opcode == 0x8:
+                    conn.sendall(b"\x88\x02\x03\xe8")
+                    return
+                self.texts.append(payload.decode("utf-8"))
+
+
+def test_ws_client_sends_text_frames_and_closes(lab):
+    server = _FakeBridgeSocket()
+    long_text = '{"type":"stop","pad":"' + "x" * 200 + '"}'  # 16-bit length
+    lab._ws_send_texts(server.port, ['{"type":"stop"}', long_text])
+    server.thread.join(2)
+    assert server.texts == ['{"type":"stop"}', long_text]
+
+
+def test_ws_client_reports_a_refused_upgrade(lab):
+    server = _FakeBridgeSocket(refuse=True)
+    with pytest.raises(OSError, match="refused"):
+        lab._ws_send_texts(server.port, ['{"type":"stop"}'])
+
+
+def test_stop_lesson_motion_sends_stop_and_roller_stop(lab, monkeypatch):
+    sent = []
+    states = [
+        {"drive_state": {"active": True}, "shoot_state": {"active": False}},  # before
+        {"drive_state": {"active": False}, "shoot_state": {"active": False}},  # after
+    ]
+    monkeypatch.setattr(lab, "_port_in_use", lambda: True)
+    monkeypatch.setattr(lab, "_bridge_state", lambda: states.pop(0) if states else None)
+    monkeypatch.setattr(lab, "_ws_send_texts", lambda port, texts: sent.append((port, texts)))
+    answer = lab.stop_lesson_motion()
+    assert sent == [(lab.LAB_BRIDGE_PORT, ['{"type":"stop"}', '{"type":"roller_stop"}'])]
+    assert answer["ok"] is True and answer["message"] == "教材の走行・発射を止めました"
+
+
+def test_stop_lesson_motion_without_a_bridge_or_with_a_broken_one(lab, monkeypatch):
+    monkeypatch.setattr(lab, "_port_in_use", lambda: False)
+    assert lab.stop_lesson_motion()["ok"] is True
+    monkeypatch.setattr(lab, "_port_in_use", lambda: True)
+
+    def fail(port, texts):
+        raise OSError("the bridge refused the WebSocket: HTTP/1.1 503")
+    monkeypatch.setattr(lab, "_ws_send_texts", fail)
+    answer = lab.stop_lesson_motion()
+    assert answer["ok"] is False and "503" in answer["message"]
+
+
+def test_stop_lesson_motion_reports_a_run_that_did_not_end(lab, monkeypatch):
+    monkeypatch.setattr(lab, "STOP_CONFIRM_SEC", 0.2)
+    monkeypatch.setattr(lab, "_port_in_use", lambda: True)
+    monkeypatch.setattr(lab, "_bridge_state", lambda: {
+        "drive_state": {"active": False}, "shoot_state": {"active": True}})
+    monkeypatch.setattr(lab, "_ws_send_texts", lambda port, texts: None)
+    answer = lab.stop_lesson_motion()
+    assert answer["ok"] is False and answer["shoot_active"] is True

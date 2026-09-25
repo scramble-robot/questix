@@ -6,6 +6,36 @@ let configDirty = false;
 let latestStatus = null;
 let serviceRequestCount = 0;
 let issuePanel = 'control';
+// The last /api/lab/status, for the status strip on 操作 and the header.
+let latestLab = null;
+// When each transient lab blocker was first seen (StatusView.stableBlockers).
+const blockerMemory = StatusView.createBlockerMemory();
+let stopAllPending = false;
+
+// A persistent notice with our own words (no HTTP error behind it).
+function showIssueText(title, next, panel = 'control', detail = '') {
+  document.getElementById('issue-title').textContent = title;
+  document.getElementById('issue-next').textContent = next;
+  document.getElementById('issue-detail').textContent = detail || next;
+  document.getElementById('operation-issue').hidden = false;
+  issuePanel = panel;
+  const names = { control: '操作', tuning: '調整', rec: '記録', log: '診断ログ', admin: '管理設定', lab: '教材' };
+  document.getElementById('issue-open-panel').textContent = `${names[panel]}を開く`;
+}
+
+// 「今すぐ再起動して反映」 after a mode switch or a saved tuning: only while the robot runs.
+function offerApply(what) {
+  const status = latestStatus;
+  const box = document.getElementById('apply-offer');
+  if (!status || status.service !== 'active') {
+    box.hidden = true;
+    return false;
+  }
+  document.getElementById('apply-offer-text').textContent =
+    `${what}を保存しました。動いているロボット制御は、再起動するまで前の設定のままです。`;
+  box.hidden = false;
+  return true;
+}
 
 function showIssue(path, status, detail) {
   const issue = OperatorGuide.failure(path, status, detail);
@@ -132,29 +162,50 @@ async function refreshStatus() {
     if (data.service === 'failed' && old?.service !== 'failed') {
       showIssue('/api/service/start', 500, 'ロボット制御の起動に失敗しました。診断ログで原因を担当者と確認してください。');
     }
-    updateMode(data.mode);
+    // A practice launch that ends without a stop is not restarted (the launcher needs a fresh
+    // start request): say so instead of silently showing 停止中.
+    const stoppedOnPurpose = data.stop_requested_at != null && data.server_time != null &&
+      data.server_time - data.stop_requested_at < 30;
+    if (old?.service === 'active' && old.running_mode === 'practice' && data.service !== 'active' &&
+        data.service !== 'deactivating' && !stoppedOnPurpose && !serviceRequestCount) {
+      showIssueText('練習用のロボット制御が止まりました',
+        '停止の操作なしで終了しました（異常終了の可能性があります）。練習モードでは自動で起動し直しません。' +
+        '診断ログで原因を確認してから、もう一度「起動」を押してください。', 'log');
+    }
+    if (data.service !== 'active') document.getElementById('apply-offer').hidden = true;
+    updateMode(data);
     updateServiceIndicator(data.service);
     updateLaunchConfig(data.launch_config);
     document.getElementById('ready-controller').textContent =
       ControlLabels.controllerName(data.launch_config.CONTROLLER_TYPE);
+    renderWebJoyType();
+    renderOverview();
   } catch {
     latestStatus = null;
     updateServiceIndicator('unknown');
+    renderOverview();
     document.getElementById('connection-warning').hidden = false;
     if (typeof invalidateControlRuntime === 'function') invalidateControlRuntime();
   }
 }
 
-function updateMode(mode) {
+function updateMode(status) {
+  const mode = status.mode;
   const label = document.getElementById("mode-label");
-  const names = { practice: '練習', competition: '大会' };
+  const names = StatusView.MODE;
   label.textContent = names[mode] || '未確認';
-  document.getElementById('header-mode').textContent = `次回起動: ${names[mode] || '未確認'}`;
+  document.getElementById('header-mode').textContent = StatusView.modeSummary(status);
   label.className = `mode-badge ${mode}`;
   document.getElementById("mode-toggle").checked = mode === "competition";
-  document.getElementById('mode-apply-note').textContent = mode === 'practice'
-    ? '練習モードでは、この画面の起動ボタンからロボットを動かせません。動かす手順は担当者に確認してください。モードを変えるだけでは、実行中の動作は変わりません。'
-    : '大会モードでは「起動」でロボット制御を開始します。保存したモードは、次にロボット制御を起動・再起動するときに使われます。';
+  const running = status.service === 'active' ? names[status.running_mode] : null;
+  const differs = running && running !== names[mode]
+    ? `いまは${running}の構成で動いています。再起動すると${names[mode]}の構成になります。` : '';
+  document.getElementById('mode-apply-note').textContent = (mode === 'practice'
+    ? '練習モード：電源を入れても自動では起動しません。「起動」を押すと練習用の構成（教材からの走行・発射に対応）で起動します。'
+    : '大会モード：電源を入れると大会用の構成で自動で起動します（教材からは動かせません）。') + differs;
+  document.getElementById('practice-start-help').hidden = mode !== 'practice';
+  const start = document.getElementById('service-start');
+  start.textContent = mode === 'practice' ? '起動（練習用）' : mode === 'competition' ? '起動（大会用）' : '起動';
 }
 
 function updateServiceIndicator(status) {
@@ -173,6 +224,31 @@ function updateServiceIndicator(status) {
   indicator.className = `indicator ${appearance}`;
   indicator.title = help;
   document.getElementById('robot-state-help').textContent = help;
+  updateServiceButtons();
+}
+
+// 起動 is useless while the robot runs; 停止 always stays available.
+function updateServiceButtons() {
+  const running = latestStatus && ['active', 'activating'].includes(latestStatus.service);
+  document.querySelectorAll('[data-service-action]').forEach((button) => {
+    const action = button.dataset.serviceAction;
+    button.disabled = action !== 'stop' && (serviceRequestCount > 0 || (action === 'start' && Boolean(running)));
+  });
+}
+
+// The 操作 tab's status strip and the header's compact status.
+function renderOverview() {
+  const controller = latestStatus?.launch_config?.CONTROLLER_TYPE;
+  const rows = StatusView.overview(latestStatus, latestLab,
+    controller ? ControlLabels.controllerName(controller) : null);
+  for (const [key, row] of Object.entries(rows)) {
+    const el = document.getElementById(`st-${key}`);
+    if (!el) continue;
+    el.textContent = row.text;
+    el.dataset.tone = row.tone;
+  }
+  document.getElementById('header-robot').textContent = rows.robot.text;
+  document.getElementById('header-estop').hidden = rows.estop.text !== '押されています';
 }
 
 function updateLaunchConfig(config) {
@@ -729,6 +805,7 @@ async function refreshLabStatus() {
   } catch {
     return; // lab console unavailable; leave UI as-is
   }
+  latestLab = data;
   const serving = data.running || data.external;
   document.getElementById("lab-indicator").className =
     "rec-indicator " + (serving ? "serving" : "idle");
@@ -739,8 +816,8 @@ async function refreshLabStatus() {
       ? "配信中 (手動で起動)"
       : data.last_stop_reason === "autostart_failed"
         ? "停止中 (自動開始に失敗しました。ROS環境とビルドを確認してください)"
-        : data.last_stop_reason === "competition_mode"
-          ? "停止中 (大会モードに切り替えたため停止しました)"
+        : data.competition || data.last_stop_reason === "competition_mode"
+          ? "停止中 (大会モードでは配信しません)"
           : data.last_stop_reason === "start_failed" || data.last_stop_reason === "exited"
             ? "停止中 (ブリッジが終了しました。「ブリッジのログ」を確認してください)"
             : "停止中";
@@ -767,17 +844,25 @@ async function refreshLabStatus() {
   joinQr.serving = serving;
   renderJoinQr();
 
-  document.getElementById("lab-start").disabled = serving;
+  document.getElementById("lab-start").disabled = serving || Boolean(data.competition);
   document.getElementById("lab-stop").disabled = !data.running;
+  document.getElementById("lab-competition-note").hidden = !data.competition;
+  document.getElementById("lab-autostart").disabled = Boolean(data.competition);
   showLabLog(data, serving);
-  showLabDrive(data);
-  showLabShoot(data);
+  showLabCapability("drive", data);
+  showLabCapability("shoot", data);
+  // Either permission (asked for or in force) lights the tab's dot in orange.
+  document.getElementById("tab-lab-dot").classList.toggle("driving",
+    !data.competition && (data.drive_allowed || data.shoot_allowed ||
+      Boolean(data.bridge && (data.bridge.read_only === false || data.bridge.shoot_state?.allowed))));
   showLabRecords(data.bridge);
+  renderOverview();
   if (!labConfigLoaded) {
     document.getElementById("lab-camera").value = data.config.CAMERA_TOPIC || "";
     document.getElementById("lab-autostart").checked = data.config.AUTOSTART === "true";
     labConfigLoaded = true;
   }
+  suggestWebJoyUrl();
 }
 
 async function refreshAccessPoint() {
@@ -787,6 +872,7 @@ async function refreshAccessPoint() {
     return;
   }
   renderJoinQr();
+  suggestWebJoyUrl();
 }
 
 function labUrlForPhones() {
@@ -796,10 +882,35 @@ function labUrlForPhones() {
   return joinQr.labUrls[0] || "";
 }
 
+// The browser controller's address for phones (web_joy_driver, CONTROLLER_TYPE=web).
+function controllerUrlForPhones() {
+  return StatusView.controllerUrl(joinQr.accessPoint, joinQr.labUrls,
+    WebJoyConnection.defaultUrl(location.href));
+}
+
+function suggestWebJoyUrl() {
+  WebJoyConnection.suggest(controllerUrlForPhones());
+}
+
+// 操作 tab: whether the browser controller is the one the robot uses.
+function renderWebJoyType() {
+  const type = latestStatus?.launch_config?.CONTROLLER_TYPE;
+  const web = type === 'web';
+  document.getElementById('web-joy-type').textContent = web
+    ? '次回の起動で使うコントローラーは Web（ブラウザ・スマホ）です。ロボット制御の起動中は、下の URL か「教材」タブの ③ の QR で開けます。'
+    : `次回の起動で使うコントローラーは ${type ? ControlLabels.controllerName(type) : '未確認'} です。ブラウザ・スマホで操作するには、管理設定の「コントローラー」を Web にして保存し、ロボット制御を起動・再起動してください。`;
+  document.getElementById('web-joy-type').classList.toggle('check-warning', !web);
+  document.getElementById('web-joy-admin').hidden = web;
+  renderJoinQr();
+}
+
 function renderJoinQr() {
   const ap = joinQr.accessPoint;
   const url = labUrlForPhones();
-  const key = JSON.stringify([ap, url, joinQr.serving]);
+  const web = latestStatus?.launch_config?.CONTROLLER_TYPE === 'web';
+  const controllerUrl = web ? controllerUrlForPhones() : '';
+  const competition = Boolean(latestLab && latestLab.competition);
+  const key = JSON.stringify([ap, url, joinQr.serving, controllerUrl, competition]);
   if (key === joinQr.drawn) return;
   joinQr.drawn = key;
 
@@ -822,9 +933,20 @@ function renderJoinQr() {
   if (url) {
     urlBox.append(qrSvg(url, `${url} を開くQRコード`));
     urlCaption.textContent =
-      `② 教材: ${url}` + (joinQr.serving ? "" : "（配信停止中です。「配信開始」を押してください）");
+      `② 教材: ${url}` + (joinQr.serving ? "" : competition ? "（大会モードでは配信しません）"
+        : "（配信停止中です。「配信開始」を押してください）");
   } else {
     urlCaption.textContent = "② ネットワークに接続されていません";
+  }
+
+  const controllerFigure = document.getElementById("lab-controller-figure");
+  const controllerBox = document.getElementById("lab-controller-qr");
+  controllerBox.replaceChildren();
+  controllerFigure.hidden = !controllerUrl;
+  if (controllerUrl) {
+    controllerBox.append(qrSvg(controllerUrl, `${controllerUrl} を開くQRコード（ブラウザのコントローラー）`));
+    document.getElementById("lab-controller-caption").textContent =
+      `③ コントローラー: ${controllerUrl}（ロボット制御の起動中に使えます）`;
   }
 }
 
@@ -873,222 +995,78 @@ function showLabRecords(bridge) {
   dir.hidden = false;
 }
 
-// Why pages cannot drive right now, from the bridge's drive_state.blockers, for the teacher.
-function labBlockerText(blocker, bridge) {
-  switch (blocker.code) {
-    case "other_publisher":
-      return `ほかのノード（${(blocker.nodes || []).join(", ") || "不明なノード"}）が教材用の指令（/target_twist/lab）を出しています。`;
-    case "no_drive_node": {
-      const domain = bridge.robot && bridge.robot.domain != null ? bridge.robot.domain : "未設定(0)";
-      return (
-        `切り替えノード twist_arbiter が見つかりません（ロボットのROSが questix_core で起動していないか、ROS_DOMAIN_ID ${domain} が違います）。` +
-        "大会用の起動（enable_autoreferee:=true）では教材から走らせられません。"
-      );
-    }
-    case "emergency_stop":
-      return "非常停止が押されています";
-    default:
-      return null; // not_allowed is the state line itself
-  }
-}
+// "教材からの走行" / "教材からの発射": the headline comes from the permission and what blocks it
+// right now (StatusView.capability), from what the running bridge itself does (bridge = its GET
+// /api/state), not only from what lab.env asks for. One switch per capability.
+function showLabCapability(kind, data) {
+  const view = StatusView.capability(kind, data, latestStatus?.service, blockerMemory, Date.now());
+  document.getElementById(`lab-${kind}-indicator`).className =
+    `rec-indicator ${view.tone} lab-drive-status`;
+  document.getElementById(`lab-${kind}-state`).textContent = view.headline;
 
-// "教材からの走行": what the running bridge itself does (bridge = its GET /api/state), not only
-// what lab.env asks for. Driving possible is shown in orange on the card and the tab.
-function showLabDrive(data) {
-  const bridge = data.bridge;
-  const serving = data.running || data.external;
-  const bridgeAllows = Boolean(bridge && bridge.read_only === false);
-  const setting = data.drive_allowed;
-  // Forbidden here, but the bridge still accepts driving (restart failed, or started by hand).
-  const stale = !setting && bridgeAllows && !data.external;
+  const toggle = document.getElementById(`lab-${kind}-toggle`);
+  if (!toggle.dataset.busy) toggle.checked = view.allowed && !data.competition;
+  toggle.disabled = view.toggleDisabled || Boolean(toggle.dataset.busy);
+  document.getElementById(`lab-${kind}-toggle-state`).textContent = data.competition
+    ? '（大会モードのため禁止）' : view.allowed ? '（許可しています）' : '（禁止しています）';
+  const note = document.getElementById(`lab-${kind}-toggle-note`);
+  note.textContent = view.toggleNote;
+  note.hidden = !view.toggleNote;
 
-  let state;
-  let tone;
-  if (!serving) {
-    state = "配信が止まっています";
-    tone = "idle";
-  } else if (!bridge) {
-    state = "ブリッジの状態が分かりません（起動中か、状態を返さない古いブリッジです）";
-    tone = "idle";
-  } else if (stale) {
-    state =
-      "止めました（配信中のブリッジはまだ走らせられます。『配信停止』→『配信開始』を押してください）";
-    tone = "driving";
-  } else if (bridgeAllows) {
-    state = "走行できます（生徒が教材で安全確認をして走らせます）";
-    tone = "driving";
-  } else {
-    state = "止めています（教材からは走らせられません）";
-    tone = "idle";
-  }
-  document.getElementById("lab-drive-indicator").className =
-    `rec-indicator ${tone} lab-drive-status`;
-  document.getElementById("lab-drive-state").textContent = state;
-  document.getElementById("lab-drive-external").hidden = !(data.external && bridge);
+  const owner = document.getElementById(`lab-${kind}-owner-row`);
+  owner.hidden = !view.active;
+  const state = (data.bridge && (kind === "drive" ? data.bridge.drive_state : data.bridge.shoot_state)) || {};
+  document.getElementById(`lab-${kind}-owner`).textContent = !view.active ? "—"
+    : kind === "drive" ? `生徒の端末 #${view.owner}`
+      : `生徒の端末 #${view.owner}（ローラー ${Math.round((state.roller ? state.roller.power : 0) * 100)}%）`;
+  const facts = document.getElementById(`lab-${kind}-facts`);
+  if (facts) facts.hidden = !view.active;
 
-  const robot = bridge && bridge.robot;
-  document.getElementById("lab-drive-robot").textContent = robot
-    ? `${robot.name}（ROS_DOMAIN_ID ${robot.domain != null ? robot.domain : "未設定(0)"}）`
-    : "—";
-  document.getElementById("lab-drive-clients").textContent =
-    bridge && bridge.clients != null ? `${bridge.clients} / ${bridge.max_clients}` : "—";
-  const drive = (bridge && bridge.drive_state) || {};
-  document.getElementById("lab-drive-owner-row").hidden = !drive.active;
-  document.getElementById("lab-drive-owner").textContent = drive.active
-    ? `生徒の端末 #${drive.owner}`
-    : "—";
-
-  // Readiness for the teacher: only meaningful while the bridge accepts driving at all.
-  const ready = document.getElementById("lab-drive-ready");
+  const ready = document.getElementById(`lab-${kind}-ready`);
   ready.replaceChildren();
-  ready.hidden = !bridgeAllows;
-  if (bridgeAllows) {
-    const texts = (drive.blockers || []).map((b) => labBlockerText(b, bridge)).filter(Boolean);
-    for (const text of texts) {
-      const item = document.createElement("li");
-      item.className = "blocked";
-      item.textContent = text;
-      ready.append(item);
-    }
-    if (!texts.length) {
-      const item = document.createElement("li");
-      item.className = "ready";
-      item.textContent = "生徒の教材から走らせられます";
-      ready.append(item);
+  // One reason is already in the headline; list them only when there are more.
+  ready.hidden = view.reasons.length < 2;
+  const tech = document.getElementById(`lab-${kind}-tech`);
+  tech.replaceChildren();
+  for (const reason of view.reasons) {
+    const item = document.createElement("li");
+    item.className = "blocked";
+    item.textContent = reason.text;
+    ready.append(item);
+    if (reason.detail) {
+      const line = document.createElement("li");
+      line.textContent = reason.detail;
+      tech.append(line);
     }
   }
-
-  const drivable = bridgeAllows || setting;
-  document.getElementById("lab-drive-card").classList.toggle("allowed", drivable);
-  document.getElementById("tab-lab-dot").classList.toggle("driving", drivable);
+  if (kind === "drive") {
+    const robot = data.bridge && data.bridge.robot;
+    document.getElementById("lab-drive-robot").textContent = robot
+      ? `${robot.name}（ROS_DOMAIN_ID ${robot.domain != null ? robot.domain : "未設定(0)"}）` : "—";
+  }
+  document.getElementById(`lab-${kind}-card`).classList.toggle("allowed", view.tone === "driving");
   // A lab.env write that failed without failing the request (e.g. owned by another user).
-  if (data.config_error) setLabError("lab-drive-error", data.config_error);
-
-  document.getElementById("lab-drive-allow").disabled = setting;
-  // Forbidding again also restarts a bridge of ours that still accepts driving.
-  document.getElementById("lab-drive-forbid").disabled =
-    !setting && !(bridgeAllows && data.running);
+  if (data.config_error) setLabError(`lab-${kind}-error`, data.config_error);
 }
 
-// Why pages cannot use the launcher right now, from the bridge's shoot_state.blockers.
-function labShootBlockerText(blocker, bridge) {
-  const parts = blocker.parts || [];
-  const names = parts
-    .map((p) => (p === "roller" ? "ローラー(esc_motor_control)" : p === "shot" ? "発射台(shot_component)" : null))
-    .filter(Boolean)
-    .join("・");
-  switch (blocker.code) {
-    case "no_launcher": {
-      const domain = bridge.robot && bridge.robot.domain != null ? bridge.robot.domain : "未設定(0)";
-      return (
-        `${names || "発射装置"}が教材の指令を受け付けていません（ノードが動いていないか、練習用の起動ではないか、` +
-        `ROS_DOMAIN_ID ${domain} が違います）。大会用の起動では教材から発射できません。`
-      );
-    }
-    case "other_publisher":
-      return `ほかのノード（${(blocker.nodes || []).join(", ") || "不明なノード"}）が教材用の発射指令（/roller/lab・/shot/lab/*）を出しています。`;
-    case "emergency_stop":
-      return "非常停止が押されています";
-    case "controller":
-      return "コントローラーで発射装置を操作中です（ボタンを離すと教材から使えます）";
-    default:
-      return null; // not_allowed is the state line itself
-  }
-}
-
-// "教材からの発射": the same as driving, from the running bridge's shoot_state (an older bridge
-// without it counts as "cannot").
-function showLabShoot(data) {
-  const bridge = data.bridge;
-  const serving = data.running || data.external;
-  const shoot = (bridge && bridge.shoot_state) || {};
-  const bridgeAllows = shoot.allowed === true;
-  const setting = data.shoot_allowed;
-  const stale = !setting && bridgeAllows && !data.external;
-
-  let state;
-  let tone;
-  if (!serving) {
-    state = "配信が止まっています";
-    tone = "idle";
-  } else if (!bridge) {
-    state = "ブリッジの状態が分かりません（起動中か、状態を返さない古いブリッジです）";
-    tone = "idle";
-  } else if (stale) {
-    state =
-      "止めました（配信中のブリッジはまだ発射できます。『配信停止』→『配信開始』を押してください）";
-    tone = "driving";
-  } else if (bridgeAllows) {
-    state = "発射できます（生徒が教材で安全確認をして操作します）";
-    tone = "driving";
-  } else {
-    state = "止めています（教材からは発射できません）";
-    tone = "idle";
-  }
-  document.getElementById("lab-shoot-indicator").className =
-    `rec-indicator ${tone} lab-drive-status`;
-  document.getElementById("lab-shoot-state").textContent = state;
-
-  document.getElementById("lab-shoot-owner-row").hidden = !shoot.active;
-  document.getElementById("lab-shoot-owner").textContent = shoot.active
-    ? `生徒の端末 #${shoot.owner}（ローラー ${Math.round((shoot.roller ? shoot.roller.power : 0) * 100)}%）`
-    : "—";
-
-  const ready = document.getElementById("lab-shoot-ready");
-  ready.replaceChildren();
-  ready.hidden = !bridgeAllows;
-  if (bridgeAllows) {
-    const texts = (shoot.blockers || []).map((b) => labShootBlockerText(b, bridge)).filter(Boolean);
-    for (const text of texts) {
-      const item = document.createElement("li");
-      item.className = "blocked";
-      item.textContent = text;
-      ready.append(item);
-    }
-    if (!texts.length) {
-      const item = document.createElement("li");
-      item.className = "ready";
-      item.textContent = "生徒の教材から発射装置を使えます";
-      ready.append(item);
-    }
-  }
-
-  const shootable = bridgeAllows || setting;
-  document.getElementById("lab-shoot-card").classList.toggle("allowed", shootable);
-  // showLabDrive ran first and set the dot for driving; either permission lights it.
-  const dot = document.getElementById("tab-lab-dot");
-  dot.classList.toggle("driving", dot.classList.contains("driving") || shootable);
-  if (data.config_error) setLabError("lab-shoot-error", data.config_error);
-
-  document.getElementById("lab-shoot-allow").disabled = setting;
-  document.getElementById("lab-shoot-forbid").disabled =
-    !setting && !(bridgeAllows && data.running);
-}
-
-async function setLabShoot(allow) {
-  if (!confirm("配信中のブリッジを起動し直すため、生徒全員の接続が数秒切れます。よろしいですか？")) {
+// The teacher's switch: restarts a bridge of ours (every page drops for a few seconds).
+async function setLabPermission(kind, allow) {
+  const toggle = document.getElementById(`lab-${kind}-toggle`);
+  const name = kind === "drive" ? "走行" : "発射";
+  if (!confirm(`教材からの${name}を${allow ? "許可" : "禁止"}しますか？ 配信中のブリッジを起動し直すため、生徒全員の接続が数秒切れます。`)) {
+    toggle.checked = !allow;
     return;
   }
+  toggle.dataset.busy = "1";
+  toggle.disabled = true;
   try {
-    await api("/api/lab/shoot", { method: "POST", body: JSON.stringify({ allow }) });
-    toast(allow ? "教材からの発射を再開しました" : "教材からの発射を止めました", "success");
-    setLabError("lab-shoot-error", null);
+    await api(`/api/lab/${kind}`, { method: "POST", body: JSON.stringify({ allow }) });
+    toast(`教材からの${name}を${allow ? "許可しました" : "禁止しました"}`, "success");
+    setLabError(`lab-${kind}-error`, null);
   } catch (e) {
-    setLabError("lab-shoot-error", e.message); // also toasted
-  }
-  await refreshLabStatus();
-}
-
-async function setLabDrive(allow) {
-  if (!confirm("配信中のブリッジを起動し直すため、生徒全員の接続が数秒切れます。よろしいですか？")) {
-    return;
-  }
-  try {
-    await api("/api/lab/drive", { method: "POST", body: JSON.stringify({ allow }) });
-    toast(allow ? "教材からの走行を再開しました" : "教材からの走行を止めました", "success");
-    setLabError("lab-drive-error", null);
-  } catch (e) {
-    setLabError("lab-drive-error", e.message); // also toasted
+    setLabError(`lab-${kind}-error`, e.message); // also toasted
+  } finally {
+    delete toggle.dataset.busy;
   }
   await refreshLabStatus();
 }
@@ -1106,10 +1084,10 @@ async function labServeAction(path, done) {
 }
 
 function setupLabEvents() {
-  document.getElementById("lab-drive-allow").addEventListener("click", () => setLabDrive(true));
-  document.getElementById("lab-drive-forbid").addEventListener("click", () => setLabDrive(false));
-  document.getElementById("lab-shoot-allow").addEventListener("click", () => setLabShoot(true));
-  document.getElementById("lab-shoot-forbid").addEventListener("click", () => setLabShoot(false));
+  for (const kind of ["drive", "shoot"]) {
+    const toggle = document.getElementById(`lab-${kind}-toggle`);
+    toggle.addEventListener("change", () => setLabPermission(kind, toggle.checked));
+  }
   document
     .getElementById("lab-start")
     .addEventListener("click", () => labServeAction("/api/lab/start", "教材の配信を開始しました"));
@@ -1163,21 +1141,59 @@ async function serviceAction(action) {
   if (action !== 'stop' && serviceRequestCount) return;
   if (action === 'restart' && !confirm('ロボット制御を再起動しますか？ 動作をいったん止め、保存した設定で起動し直します。ロボットを安全な状態にしてから実行してください。')) return;
   serviceRequestCount++;
-  const updateButtons = () => document.querySelectorAll('[data-service-action]').forEach((button) => {
-    button.disabled = button.dataset.serviceAction !== 'stop' && serviceRequestCount > 0;
-  });
-  updateButtons();
+  updateServiceButtons();
   if (typeof invalidateControlRuntime === 'function') invalidateControlRuntime();
   try {
-    await api(`/api/service/${action}`, { method: 'POST' });
-    const labels = { start: 'ロボット制御の起動', stop: 'ロボット制御の停止', restart: 'ロボット制御の再起動' };
-    toast(`${labels[action]}の処理が完了しました。状態表示を確認してください。`, 'success');
+    const answer = await api(`/api/service/${action}`, { method: 'POST' });
+    // The server says what really happened (never "done" while the robot stays stopped).
+    const message = answer.message || (action === 'stop' ? 'ロボット制御を止めました' : '起動の要求を送りました');
+    toast(message, answer.ok === false ? 'error' : 'success');
+    if (answer.ok === false && action !== 'stop') {
+      showIssueText('ロボット制御を起動できませんでした', message, 'log');
+    } else if (action !== 'stop') {
+      document.getElementById('operation-issue').hidden = true;
+      document.getElementById('apply-offer').hidden = true;
+    }
   } catch {
     // Persistent guidance is rendered by api(); avoid an unhandled rejection.
   } finally {
     serviceRequestCount--;
-    updateButtons();
+    updateServiceButtons();
     await refreshStatus();
+  }
+}
+
+// 「すべて止める」: one tap, no confirmation (the robot service and the lessons' motion).
+async function stopAll() {
+  if (stopAllPending) return;
+  stopAllPending = true;
+  const button = document.getElementById('stop-all');
+  button.textContent = '止めています…';
+  if (typeof invalidateControlRuntime === 'function') invalidateControlRuntime();
+  try {
+    const answer = await api('/api/stop-all', { method: 'POST' });
+    const parts = document.getElementById('stop-all-parts');
+    parts.replaceChildren();
+    for (const part of [answer.service, answer.lab]) {
+      const item = document.createElement('li');
+      item.textContent = part.message;
+      item.className = part.ok ? 'ok' : 'failed';
+      parts.append(item);
+    }
+    document.getElementById('stop-all-title').textContent = answer.ok
+      ? 'すべて止めました' : '止められなかったものがあります';
+    const box = document.getElementById('stop-all-result');
+    box.classList.toggle('warning', !answer.ok);
+    box.hidden = false;
+    toast(answer.ok ? 'すべて止めました' : '止められなかったものがあります。画面上部を確認してください。',
+      answer.ok ? 'success' : 'error');
+  } catch {
+    // api() shows the failure at the top of the page.
+  } finally {
+    stopAllPending = false;
+    button.textContent = 'すべて止める';
+    await refreshStatus();
+    await refreshLabStatus();
   }
 }
 
@@ -1193,25 +1209,40 @@ function setupEvents() {
       return;
     }
     try {
-      await api("/api/mode", {
+      const answer = await api("/api/mode", {
         method: "POST",
         body: JSON.stringify({ mode: newMode }),
       });
       // The robot keeps its running mode until its next start; QUESTiX LAB follows the saved
-      // mode at once (lab.py: competition stops the lessons and forbids driving and launching).
+      // mode at once (lab.py: competition stops the lessons and forbids driving and launching;
+      // practice restores what the teacher had chosen before).
       toast(
         newMode === "competition"
-          ? `${label}を保存しました（ロボット制御は次の起動・再起動で反映。教材の配信・自動開始・走行と発射の許可はすぐにオフにしました）`
-          : `${label}を保存しました（ロボット制御は次の起動・再起動で反映。教材の配信はすぐに開始します）`,
-        "success",
+          ? `${label}を保存しました（教材の配信・自動開始・走行と発射の許可はすぐにオフにしました）`
+          : `${label}を保存しました。${StatusView.labRestoredText(answer.lab)}`,
+        answer.lab && answer.lab.error ? "error" : "success",
       );
       await refreshStatus();
+      if (answer.restart_needed) offerApply(`${label}`);
       // The server turned AUTOSTART off (competition) or on (practice); show it in the checkbox.
       labConfigLoaded = false;
       await refreshLabStatus();
     } catch {
       e.target.checked = !e.target.checked;
     }
+  });
+
+  document.getElementById('stop-all').addEventListener('click', stopAll);
+  document.getElementById('stop-all-dismiss').addEventListener('click', () => {
+    document.getElementById('stop-all-result').hidden = true;
+  });
+  document.getElementById('apply-offer-restart').addEventListener('click', () => serviceAction('restart'));
+  document.getElementById('apply-offer-dismiss').addEventListener('click', () => {
+    document.getElementById('apply-offer').hidden = true;
+  });
+  document.getElementById('web-joy-admin').addEventListener('click', () => {
+    activatePanel('admin');
+    document.getElementById('controller-type').focus();
   });
 
   // Separate service actions from controller-map assignment buttons.

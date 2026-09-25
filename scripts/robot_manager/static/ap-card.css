@@ -51,6 +51,15 @@ h1 {
   gap: 8mm;
 }
 
+.steps.three {
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 5mm;
+}
+
+[hidden] {
+  display: none !important;
+}
+
 .step h2 {
   display: flex;
   align-items: center;
@@ -127,7 +136,8 @@ footer button {
 }
 
 @media (max-width: 560px) {
-  .steps {
+  .steps,
+  .steps.three {
     grid-template-columns: 1fr;
   }
 }

@@ -519,9 +519,13 @@ main {
   background: var(--bg-hover);
 }
 
-/* Disabled must read as disabled even for coloured buttons (e.g. 走行を許可する while allowed). */
-.btn:disabled {
-  opacity: 0.65;
+/* Disabled must read as disabled even for coloured buttons: plain grey, not a paler colour. */
+.btn:disabled,
+.btn:disabled:hover {
+  background: #2b3445;
+  border-color: #3b475c;
+  color: #8e9aab;
+  opacity: 1;
   cursor: not-allowed;
 }
 
@@ -1330,4 +1334,65 @@ input[type="checkbox"] { accent-color: var(--accent); }
 
 .btn-safe:hover:not(:disabled) {
   background: #00a846;
+}
+
+/* Header: robot name, mode, service state and the one-tap 「すべて止める」. */
+.header-status { display: flex; align-items: center; gap: 0.35rem 0.75rem; flex-wrap: wrap; min-width: 0; }
+.header-robot { font-size: var(--font-small); font-weight: 700; overflow-wrap: anywhere; }
+.header-chip { font-size: var(--font-small); font-weight: 700; padding: 0.1rem 0.55rem; border-radius: 999px; }
+.header-chip.danger { background: var(--red); color: var(--on-danger); }
+.btn-stop-all { flex: none; min-height: 48px; padding: 0.5rem 1.1rem; font-size: 1rem; font-weight: 800;
+  letter-spacing: 0.04em; box-shadow: 0 0 0 2px #ff174455; }
+.stop-all-parts { list-style: none; margin-top: 0.5rem; display: grid; gap: 0.3rem; }
+.stop-all-parts li { padding-left: 1.4rem; position: relative; }
+.stop-all-parts li::before { position: absolute; left: 0; font-weight: 700; }
+.stop-all-parts li.ok::before { content: "✓"; color: var(--green); }
+.stop-all-parts li.failed::before { content: "!"; color: var(--orange); }
+.apply-offer-actions { margin-top: 0.6rem; flex-wrap: wrap; }
+
+/* 操作: the status strip */
+.status-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 0.5rem 1.25rem; margin-top: 0.75rem; }
+.status-strip > div { display: grid; gap: 0.1rem; align-content: start; padding: 0.45rem 0.7rem; border-left: 4px solid var(--border-input);
+  background: var(--bg-input); border-radius: 6px; min-width: 0; }
+.status-strip dt { font-size: var(--font-small); color: var(--text-dim); }
+.status-strip dd { font-weight: 600; overflow-wrap: anywhere; }
+.status-strip > div:has(dd[data-tone="ok"]) { border-left-color: var(--green); }
+.status-strip > div:has(dd[data-tone="warn"]) { border-left-color: var(--orange); }
+.status-strip > div:has(dd[data-tone="danger"]) { border-left-color: var(--red); }
+.status-strip dd[data-tone="danger"] { color: #ff8aa0; }
+.status-strip dd[data-tone="warn"] { color: var(--orange-hover); }
+
+/* 教材 cards: one switch per capability, its state next to it; details for teachers/engineers. */
+.rec-indicator.warn { color: var(--orange-hover); }
+.rec-indicator.warn .rec-dot { background: var(--yellow); }
+.lab-permission-row { display: flex; align-items: center; gap: 0.8rem; margin: 0 0 0.9rem; }
+.lab-permission-label { font-weight: 600; cursor: pointer; }
+.lab-permission-state { display: block; font-size: var(--font-small); font-weight: 400; color: var(--text-dim); }
+.toggle-switch input:disabled + .slider { background: #2b3445; cursor: not-allowed; }
+.toggle-switch input:disabled + .slider::before { background: #5d6878; }
+.lab-tech { margin-top: 0.4rem; font-size: 0.85rem; }
+.lab-tech summary { cursor: pointer; color: var(--text-dim); min-height: 44px; display: flex; align-items: center; }
+.lab-tech-list { margin: 0.4rem 0 0.4rem 1.2rem; font-size: 0.8rem; line-height: 1.6; color: var(--text-dim); overflow-wrap: anywhere; }
+.web-joy-type.check-warning { color: var(--orange-hover); }
+
+.indicator-label-short { display: none; }
+
+/* Phones: two compact header rows (title + 管理設定, status + すべて止める), one-line status rows. */
+@media (max-width: 639px) {
+  .app-chrome header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center;
+    gap: 0.3rem 0.6rem; padding: 0.45rem 1rem; }
+  .app-chrome .header-actions { display: contents; }
+  header h1 { grid-column: 1; grid-row: 1; font-size: 0.95rem; }
+  #open-admin { grid-column: 2; grid-row: 1; min-height: 36px; padding-block: 0.2rem; }
+  .header-status { grid-column: 1; grid-row: 2; gap: 0 0.5rem; font-size: 0.8rem; line-height: 1.45; }
+  .header-status .indicator { margin-right: 0; font-size: 0.8rem; gap: 0.3rem; }
+  .indicator-label { display: none; }
+  .indicator-label-short { display: inline; }
+  .header-mode { font-size: 0.8rem; }
+  .header-robot { font-size: 0.8rem; }
+  .btn-stop-all { grid-column: 2; grid-row: 2; padding-inline: 0.8rem; font-size: 0.95rem; }
+  .status-strip { grid-template-columns: minmax(0, 1fr); gap: 0.35rem; }
+  .status-strip > div { grid-template-columns: 7.2em minmax(0, 1fr); column-gap: 0.6rem; align-items: baseline;
+    padding: 0.3rem 0.6rem; }
+  .status-strip dd { font-size: 0.9rem; }
 }

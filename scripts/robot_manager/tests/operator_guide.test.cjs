@@ -45,3 +45,10 @@ test('404 details identify the endpoint and do not blame missing files on a vers
   assert.doesNotMatch(file.next, /バージョン|更新・再起動/);
   assert.equal(file.panel, 'rec');
 });
+
+test('the fixed web profile does not raise the "other controller" warning', () => {
+  const profile = { controller: 'uart', values: { joy_controller: { a: 1 } } };
+  const draft = { joy_controller: { a: 1 } };
+  assert.notEqual(guide.application(profile, draft, null, 'web').title, '別のコントローラー用の設定です');
+  assert.equal(guide.application(profile, draft, null, 'dualshock').title, '別のコントローラー用の設定です');
+});

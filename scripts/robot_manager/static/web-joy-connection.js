@@ -45,6 +45,13 @@ const WebJoyConnection = (() => {
     return code.createSvgTag({ cellSize: 4, margin: 16, scalable: true });
   }
 
+  // Set by init(): fill in an address the manager worked out (access point / LAN), unless the
+  // user has typed their own (e.g. with a token).
+  let suggestImpl = () => {};
+  function suggest(url) {
+    suggestImpl(url);
+  }
+
   function init() {
     const input = document.getElementById("web-joy-url");
     const status = document.getElementById("web-joy-qr-status");
@@ -69,7 +76,17 @@ const WebJoyConnection = (() => {
       updateBrowserLink();
     }
     updateBrowserLink();
-    input.addEventListener("input", clear);
+    let edited = false;
+    suggestImpl = (url) => {
+      if (edited || !url || input.value === url) return;
+      try { parseUrl(url); } catch (_) { return; }
+      input.value = url;
+      clear();
+    };
+    input.addEventListener("input", () => {
+      edited = true;
+      clear();
+    });
     document.getElementById("web-joy-qr-form").addEventListener("submit", (event) => {
       event.preventDefault();
       clear();
@@ -93,7 +110,7 @@ const WebJoyConnection = (() => {
       status.textContent = "接続用 QR を表示しました。";
     });
   }
-  return { parseUrl, defaultUrl, qrSvg, init };
+  return { parseUrl, defaultUrl, qrSvg, init, suggest };
 })();
 
 if (typeof module !== "undefined") module.exports = WebJoyConnection;

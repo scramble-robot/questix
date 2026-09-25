@@ -252,6 +252,7 @@ function applyMapAssignment() {
 function controlMessage(message) {
   document.getElementById("controls-message").textContent = message;
   document.getElementById("controls-message").hidden = !message;
+  if (typeof renderSavebar === "function") renderSavebar();
   const loadError = document.getElementById("controls-load-error");
   loadError.hidden = Boolean(controlProfile);
   loadError.textContent = controlProfile ? "" : message;
@@ -281,7 +282,7 @@ function renderControllerMap() {
   document.getElementById("map-feedback").textContent = "";
   const wrapper = document.getElementById("controller-map-panel");
   wrapper.hidden = !controlProfile;
-  document.getElementById("controls-savebar").hidden = !controlProfile;
+  renderSavebar();
   const host = document.getElementById("controller-map");
   if (!controlProfile) {
     host.replaceChildren();
@@ -304,6 +305,14 @@ function renderControllerMap() {
     } });
   renderMapEditor();
   positionMapEditor();
+}
+
+// The save bar floats over the page only while there is something to save (or a save is being
+// reported), so it never covers the diagram for nothing.
+function renderSavebar() {
+  const message = document.getElementById("controls-message");
+  document.getElementById("controls-savebar").hidden =
+    !controlProfile || !(controlsDirty || controlsBusy || !message.hidden);
 }
 
 function refreshControlChanges() {
@@ -542,6 +551,7 @@ function renderControls() {
 
 function controlsSetBusy(busy) {
   controlsBusy = busy;
+  renderSavebar();
   renderControlApplication();
   renderMapEditor();
   document.getElementById("controls-runtime-load").disabled = busy || runtimeBusy || !controlProfile || !runtimeAvailable;
@@ -622,8 +632,14 @@ async function saveControls(event) {
     controlsLoadedAt = new Date().toLocaleTimeString("ja-JP");
     controlsDirty = false;
     renderControls();
-    controlMessage("保存しました。ロボットを安全な状態にして、「操作」の「制御を再起動」で、保存した設定を読み込み直せます。");
-    toast("操作設定を保存しました（次の制御起動・再起動で使用）", "success");
+    controlMessage("");
+    // Offer the restart at the top of the page (with the usual safety confirmation) when the
+    // robot runs; otherwise the next start uses the saved settings anyway.
+    // Only when the robot uses this profile (a saved UART profile does nothing for a Web start).
+    const offered = typeof offerApply === "function" && launchController === controlProfile.controller
+      && offerApply("操作設定");
+    toast(offered ? "操作設定を保存しました。画面上部の「今すぐ再起動して反映」で使い始めます"
+      : "操作設定を保存しました（次にロボット制御を起動したときに使います）", "success");
   } catch (error) {
     controlMessage(error.message);
   } finally {

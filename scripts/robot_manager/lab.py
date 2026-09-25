@@ -9,12 +9,15 @@ With ``ALLOW_DRIVE`` on (the default in practice mode) pages may run low-speed d
 experiments, each confirmed by the learner's safety tick on the page and bounded by the bridge's
 own checks (questix_lab_bridge/questix_lab_bridge/drive.py); twist_arbiter lets the controller
 take over at any time. ``/api/lab/drive`` is the teacher's off switch. Competition mode turns
-driving off; going back to practice mode turns it on again.
+driving off (and does not stream at all); going back to practice mode restores what the teacher had
+chosen before competition mode (``PRACTICE_*`` in lab.env), so an explicit forbid survives the
+round trip.
 
 ``ALLOW_SHOOT`` works the same way for the disc launcher (roller, tilt, firing one disc; the
 bridge's questix_lab_bridge/questix_lab_bridge/shoot.py): on by default in practice mode, each
 firing session confirmed by the learner's safety tick, the controller taking over at any time,
-``/api/lab/shoot`` the teacher's off switch, off in competition mode. Both permissions are always
+``/api/lab/shoot`` the teacher's off switch, off in competition mode and restored with practice
+mode like driving. Both permissions are always
 passed to the bridge explicitly (``-p allow_drive:=…`` / ``-p allow_shoot:=…``), so the defaults
 in its lab_bridge.yaml never decide.
 
@@ -22,13 +25,20 @@ The status reports what the running bridge itself says (``GET /api/state`` on it
 tab shows whether pages can really drive now, also for a bridge started by hand, and how many
 records the bridge keeps on the robot (its ``records``: count, size, quota, folder).
 
+``stop_lesson_motion`` (Robot Manager's 「すべて止める」) ends whatever a page runs right now: it
+opens a WebSocket to the bridge like a page and sends ``{"type": "stop"}`` and
+``{"type": "roller_stop"}``, which any page may send; the bridge keeps running and no page
+disconnects.
+
 The bridge keeps the pages' records in ``records_dir`` (its own default in
 questix_lab_bridge/config/lab_bridge.yaml unless ``RECORDS_DIR`` is set in lab.env) and lists
 and converts the rosbags this manager records: it is given the recorder's ``OUTPUT_DIR``. The output of
 a bridge started here goes to ``LOG_FILE``; its last lines are shown when it stopped or failed.
 """
 
+import base64
 import getpass
+import hashlib
 import http.client
 import json
 import logging
@@ -37,6 +47,7 @@ import pwd
 import re
 import signal
 import socket
+import struct
 import subprocess
 import threading
 import time
@@ -100,6 +111,13 @@ _DEFAULT_CONFIG = {
     # questix_lab_bridge/config/lab_bridge.yaml, ~/.local/share/questix/lab-records of the user
     # running it). Set by hand in lab.env; an absolute path.
     "RECORDS_DIR": "",
+}
+# What the teacher had chosen in practice mode, saved by disable_for_competition and restored (then
+# cleared) by enable_for_practice. Kept in lab.env next to the live values, never in _read_config.
+_PRACTICE_KEYS = {
+    "AUTOSTART": "PRACTICE_AUTOSTART",
+    "ALLOW_DRIVE": "PRACTICE_ALLOW_DRIVE",
+    "ALLOW_SHOOT": "PRACTICE_ALLOW_SHOOT",
 }
 _ABS_PATH_RE = re.compile(r"^/[a-zA-Z0-9_/.~-]*$")
 _TOPIC_RE = re.compile(r"^/[A-Za-z0-9_/]*$")
@@ -199,9 +217,20 @@ def _read_config() -> dict[str, str]:
     return config
 
 
-def _write_config(values: dict[str, str]) -> None:
+def _read_practice_snapshot() -> dict[str, str]:
+    """Return the saved practice-mode values (AUTOSTART, ALLOW_*) or {} when none is saved."""
+    raw = _read_env_file(LAB_ENV_FILE)
+    return {key: raw[saved] for key, saved in _PRACTICE_KEYS.items()
+            if raw.get(saved) in ("true", "false")}
+
+
+def _write_config(values: dict[str, str], practice: Optional[dict[str, str]] = None) -> None:
+    """Write lab.env: ``values`` plus the practice snapshot (None keeps it, {} clears it)."""
     global _config_error
+    if practice is None:
+        practice = _read_practice_snapshot()
     lines = [f'{key}="{value}"' for key, value in values.items()]
+    lines += [f'{_PRACTICE_KEYS[key]}="{value}"' for key, value in practice.items()]
     try:
         LAB_ENV_FILE.write_text("\n".join(lines) + "\n")
     except PermissionError:
@@ -213,7 +242,8 @@ def _write_config(values: dict[str, str]) -> None:
     _config_error = None
 
 
-def _force_off(config: dict[str, str], keys, why: str) -> dict[str, str]:
+def _force_off(config: dict[str, str], keys, why: str,
+               practice: Optional[dict[str, str]] = None) -> dict[str, str]:
     """Write ``config`` with ``keys`` (ALLOW_*) false; if that fails, log it and keep them off.
 
     For the places where switching a permission off must not fail: competition mode, 走行を禁止する
@@ -222,7 +252,7 @@ def _force_off(config: dict[str, str], keys, why: str) -> dict[str, str]:
     global _config_error
     config = {**config, **{key: "false" for key in keys}}
     try:
-        _write_config(config)
+        _write_config(config, practice)
     except HTTPException as error:
         _forced_off.update(keys)
         _config_error = error.detail
@@ -348,6 +378,120 @@ def _bridge_state() -> Optional[dict]:
     return state if isinstance(state, dict) else None
 
 
+# --- 「すべて止める」: end the pages' driving run and launcher session ---------------------------
+# The bridge accepts {"type": "stop"} and {"type": "roller_stop"} from any page
+# (questix_lab_bridge/README.md, "Protocol"); the manager sends them over a WebSocket of its own
+# like a page would. A minimal RFC 6455 client, so the manager needs no websockets package (it
+# stays out of requirements.txt, which keeps ROS 2's apt python3-websockets untouched).
+STOP_TIMEOUT_SEC_WS = 1.5
+# How long to wait for /api/state to report both sessions ended.
+STOP_CONFIRM_SEC = 1.5
+_WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+
+def _ws_frame(opcode: int, payload: bytes) -> bytes:
+    """One final client frame (clients must mask); lengths in network byte order."""
+    head = bytes([0x80 | opcode])
+    length = len(payload)
+    if length < 126:
+        head += bytes([0x80 | length])
+    elif length < 1 << 16:
+        head += bytes([0x80 | 126]) + struct.pack("!H", length)
+    else:
+        head += bytes([0x80 | 127]) + struct.pack("!Q", length)
+    mask = os.urandom(4)
+    return head + mask + bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+
+
+def _ws_send_texts(port: int, texts: list[str], timeout: float = STOP_TIMEOUT_SEC_WS) -> None:
+    """Open a WebSocket to 127.0.0.1:port, send ``texts`` as text frames, then close cleanly.
+
+    Raises OSError (also for a refused upgrade, e.g. the bridge's client limit). The server's
+    frames (hello, states) are not needed and are read only to wait for its close.
+    """
+    key = base64.b64encode(os.urandom(16)).decode("ascii")
+    with socket.create_connection(("127.0.0.1", port), timeout=timeout) as conn:
+        conn.settimeout(timeout)
+        conn.sendall((
+            "GET / HTTP/1.1\r\n"
+            f"Host: 127.0.0.1:{port}\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            f"Sec-WebSocket-Key: {key}\r\n"
+            "Sec-WebSocket-Version: 13\r\n"
+            "User-Agent: questix-robot-manager\r\n\r\n").encode("ascii"))
+        reply = b""
+        while b"\r\n\r\n" not in reply:
+            chunk = conn.recv(4096)
+            if not chunk:
+                raise OSError("the bridge closed the connection during the upgrade")
+            reply += chunk
+            if len(reply) > 65536:
+                raise OSError("the bridge sent an unexpected answer")
+        head = reply.split(b"\r\n\r\n", 1)[0].decode("latin-1")
+        status = head.split("\r\n", 1)[0]
+        if " 101 " not in status + " ":
+            raise OSError(f"the bridge refused the WebSocket: {status}")
+        accept = base64.b64encode(
+            hashlib.sha1((key + _WS_GUID).encode("ascii")).digest()).decode("ascii")
+        if accept.lower() not in head.lower():
+            raise OSError("the bridge answered with a wrong Sec-WebSocket-Accept")
+        for text in texts:
+            conn.sendall(_ws_frame(0x1, text.encode("utf-8")))
+        conn.sendall(_ws_frame(0x8, struct.pack("!H", 1000)))
+        # The bridge handles the frames in order before our close; wait for its side to close.
+        deadline = time.monotonic() + timeout
+        try:
+            while time.monotonic() < deadline and conn.recv(65536):
+                pass
+        except OSError:
+            pass  # a timeout here only means the close handshake was slow; the frames went out
+
+
+def stop_lesson_motion() -> dict:
+    """End the pages' driving run and launcher session now (Robot Manager's 「すべて止める」).
+
+    Never raises. The bridge (ours or one started by hand) keeps running and the pages stay
+    connected: a pupil can start again, which the manager's stop of the robot service prevents
+    physically. Returns ``{"ok", "message", "bridge": bool, "drive_active", "shoot_active"}``
+    (the two actives as /api/state reports them after the stop; None when unknown).
+    """
+    if not _port_in_use():
+        return {"ok": True, "bridge": False, "drive_active": None, "shoot_active": None,
+                "message": "教材の配信は止まっています（教材からは何も動いていません）"}
+    before = _bridge_state() or {}
+    was_active = bool((before.get("drive_state") or {}).get("active")
+                      or (before.get("shoot_state") or {}).get("active"))
+    try:
+        _ws_send_texts(LAB_BRIDGE_PORT, ['{"type":"stop"}', '{"type":"roller_stop"}'])
+    except OSError as error:
+        logger.warning("QUESTiX LAB: could not send stop to the bridge: %s", error)
+        return {"ok": False, "bridge": True, "drive_active": None, "shoot_active": None,
+                "message": f"教材のブリッジに停止を送れませんでした（{error}）"}
+    deadline = time.monotonic() + STOP_CONFIRM_SEC
+    while True:
+        state = _bridge_state()
+        drive = (state or {}).get("drive_state") or {}
+        shoot = (state or {}).get("shoot_state") or {}
+        drive_active = drive.get("active") if state else None
+        shoot_active = shoot.get("active") if state else None
+        if state and not drive_active and not shoot_active:
+            break
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(0.1)
+    if state is None:
+        return {"ok": True, "bridge": True, "drive_active": None, "shoot_active": None,
+                "message": "教材の走行・発射に停止を送りました（結果はブリッジから確認できません）"}
+    if drive_active or shoot_active:
+        return {"ok": False, "bridge": True, "drive_active": bool(drive_active),
+                "shoot_active": bool(shoot_active),
+                "message": "教材に停止を送りましたが、まだ動作中と報告されています"}
+    return {"ok": True, "bridge": True, "drive_active": False, "shoot_active": False,
+            "message": ("教材の走行・発射を止めました" if was_active
+                        else "教材では何も動いていませんでした（念のため停止を送りました）")}
+
+
 def _open_log():
     """Open LOG_FILE for a new bridge (truncated), or return None if that is impossible."""
     try:
@@ -408,6 +552,8 @@ def _status_payload() -> dict:
         "running": managed,
         "external": external,
         "port": LAB_BRIDGE_PORT,
+        # Competition mode: no streaming, no lab driving or launching (the tab disables them).
+        "competition": _competition_mode(),
         "urls": [f"http://{a}:{LAB_BRIDGE_PORT}/" for a in _lan_addresses()],
         "elapsed_sec": int(time.time() - _started_at) if managed and _started_at else 0,
         "last_stop_reason": _last_stop_reason,
@@ -448,14 +594,15 @@ def start_bridge():
                 status_code=409,
                 detail=f"ポート {LAB_BRIDGE_PORT} は使用中です (手動で起動したブリッジを止めてください)",
             )
+        if _competition_mode():
+            # Competition runs must not stream telemetry to the LAN (disable_for_competition).
+            raise HTTPException(
+                status_code=409,
+                detail="大会モードでは教材を配信しません（練習モードに切り替えると配信できます）",
+            )
         if not (LAB_DIR / "index.html").is_file():
             raise HTTPException(status_code=500, detail="教材のファイルが見つかりません")
         config = _read_config()
-        if _competition_mode() and any(
-                _read_env_file(LAB_ENV_FILE).get(key) != "false" for key in _PERMISSIONS):
-            # _read_config already says false; this makes lab.env say it too (it may have been
-            # edited by hand). A competition robot never takes lab commands.
-            config = _force_off(config, tuple(_PERMISSIONS), "competition mode")
         script = _build_command(config)
         log = _open_log()
         try:
@@ -555,7 +702,7 @@ def _set_permission(key: str, allow: bool, competition_detail: str, why: str,
         running = _proc is not None and _proc.poll() is None
         if running:
             _stop_locked(stop_reason)
-    if running:
+    if running and not _competition_mode():  # a competition robot does not stream at all
         start_bridge()
     with _lock:
         return _status_payload()
@@ -565,38 +712,57 @@ def disable_for_competition() -> None:
     """Keep the bridge off once the robot is switched to competition mode (app.py /api/mode).
 
     Competition runs must not stream telemetry to the LAN: a bridge this manager started is
-    stopped first (whatever happens to lab.env), then automatic start is turned off in lab.env
-    (the checkbox shows it). Switching back to practice mode turns both on again
-    (enable_for_practice). Driving and the launcher from the lessons (ALLOW_DRIVE, ALLOW_SHOOT)
-    are turned off too, and back on with practice mode. A failed write of lab.env is logged, not
-    raised: the mode
-    switch itself has already happened, and autostart never runs in competition mode anyway.
+    stopped first (whatever happens to lab.env), then automatic start, driving and the launcher
+    from the lessons (AUTOSTART, ALLOW_DRIVE, ALLOW_SHOOT) are turned off in lab.env. What the
+    teacher had chosen for practice is saved first (PRACTICE_* in lab.env, only if nothing is
+    saved yet, so competition -> competition keeps the practice values), and enable_for_practice
+    restores exactly that. A failed write of lab.env is logged, not raised: the mode switch itself
+    has already happened, and autostart never runs in competition mode anyway.
     """
     with _lock:
         if _proc is not None and _proc.poll() is None:
             _stop_locked("competition_mode")
+    snapshot = None
+    if not _read_practice_snapshot():
+        raw = _read_env_file(LAB_ENV_FILE)
+        snapshot = {}
+        for key in _PRACTICE_KEYS:
+            value = raw.get(key, _DEFAULT_CONFIG[key])
+            # A forbid that could not be written still counts as a forbid.
+            snapshot[key] = "false" if key in _forced_off or value != "true" else "true"
     config = _read_config()
-    if config.get("AUTOSTART") != "false" or any(
+    if snapshot is not None or config.get("AUTOSTART") != "false" or any(
             _read_env_file(LAB_ENV_FILE).get(key) != "false" for key in _PERMISSIONS):
-        _force_off({**config, "AUTOSTART": "false"}, tuple(_PERMISSIONS), "competition mode")
+        _force_off({**config, "AUTOSTART": "false"}, tuple(_PERMISSIONS), "competition mode",
+                   practice=snapshot)
 
 
-def enable_for_practice() -> None:
+def enable_for_practice() -> dict:
     """Undo disable_for_competition when the robot goes from competition back to practice mode.
 
-    Automatic start, driving and the launcher from the lessons are turned on again, and the
-    bridge is started
-    now, in the background like at boot, so the class can open the pages right away. A bridge
-    that already runs (started here or by hand) is left alone.
+    Automatic start and the two permissions get the values the teacher had before competition
+    mode (all on when nothing was saved, e.g. the mode file was changed by hand), and the saved
+    values are cleared. When automatic start is on, the bridge is started now, in the background
+    like at boot, so the class can open the pages right away; a bridge that already runs (started
+    here or by hand) is left alone. Returns what is on now, for the manager's message:
+    ``{"restored": bool, "autostart": bool, "drive": bool, "shoot": bool}``.
     """
+    snapshot = _read_practice_snapshot()
     config = _read_config()
-    wanted = {"AUTOSTART": "true", **{key: "true" for key in _PERMISSIONS}}
-    if any(config.get(key) != value for key, value in wanted.items()):
-        _write_config({**config, **wanted})
-    with _lock:
-        running = (_proc is not None and _proc.poll() is None) or _port_in_use()
-    if not running:
-        threading.Thread(target=_autostart, name="lab-practice-start", daemon=True).start()
+    wanted = {key: snapshot.get(key, "true") for key in _PRACTICE_KEYS}
+    if any(config.get(key) != value for key, value in wanted.items()) or snapshot:
+        _write_config({**config, **wanted}, practice={})
+    if wanted["AUTOSTART"] == "true":
+        with _lock:
+            running = (_proc is not None and _proc.poll() is None) or _port_in_use()
+        if not running:
+            threading.Thread(target=_autostart, name="lab-practice-start", daemon=True).start()
+    return {
+        "restored": bool(snapshot),
+        "autostart": wanted["AUTOSTART"] == "true",
+        "drive": wanted["ALLOW_DRIVE"] == "true",
+        "shoot": wanted["ALLOW_SHOOT"] == "true",
+    }
 
 
 def _autostart() -> None:

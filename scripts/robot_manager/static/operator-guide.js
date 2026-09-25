@@ -52,7 +52,8 @@ const OperatorGuide = (() => {
       }
     }
     if (changed) return { kind: 'pending', title: `未保存の変更: ${changed} 項目`, note: 'まだロボットには反映されません。「操作設定を保存」で確定します。' };
-    if (launchController && launchController !== profile.controller) {
+    // Web has a fixed profile and its own note in the tuning tab; do not alarm about it here.
+    if (launchController && launchController !== 'web' && launchController !== profile.controller) {
       return { kind: 'unknown', title: '別のコントローラー用の設定です', note: '次回起動用に選択されているコントローラーと異なります。管理設定で確認してください。' };
     }
     const age = now - Date.parse(snapshot?.captured_at);

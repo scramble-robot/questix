@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>QUESTiX Robot Manager</title>
-  <link rel="stylesheet" href="/static/style.css?v=32">
+  <link rel="stylesheet" href="/static/style.css?v=33">
 </head>
 
 <body>
@@ -13,13 +13,20 @@
   <header>
     <h1>QUESTiX Robot Manager</h1>
     <div class="header-actions">
-    <span id="header-mode" class="header-mode">モード未取得</span>
-    <div id="service-indicator" class="indicator unknown" role="status" aria-live="polite">
-      <span class="dot"></span>
-      <span>ロボット制御：</span>
-      <span id="service-status-text">確認中</span>
+    <div class="header-status">
+      <span id="header-robot" class="header-robot" title="ロボット名（ホスト名。教材の画面にも同じ名前が出ます）">—</span>
+      <span id="header-mode" class="header-mode">モード未取得</span>
+      <div id="service-indicator" class="indicator unknown" role="status" aria-live="polite">
+        <span class="dot"></span>
+        <span class="indicator-label">ロボット制御：</span><span class="indicator-label-short" aria-hidden="true">制御：</span>
+        <span id="service-status-text">確認中</span>
+      </div>
+      <span id="header-estop" class="header-chip danger" hidden>非常停止ボタンが押されています</span>
     </div>
-    <button type="button" class="btn btn-stop btn-small" data-service-action="stop">ロボット停止</button>
+    <!-- One tap, no confirmation: stops the robot service and whatever a lesson runs. -->
+    <button type="button" class="btn btn-stop btn-stop-all" id="stop-all"
+      aria-describedby="stop-all-help">すべて止める</button>
+    <span id="stop-all-help" class="tuning-sr-only">ロボット制御を停止し、教材の走行と発射も止めます。確認なしですぐに実行します。</span>
     <button type="button" class="btn btn-small" id="open-admin" aria-pressed="false">管理設定</button>
     </div>
   </header>
@@ -41,6 +48,18 @@
   </div>
 
   <main>
+    <section id="stop-all-result" class="notice" role="status" aria-live="polite" hidden>
+      <div class="notice-heading"><h2 id="stop-all-title">すべて止めました</h2><button type="button" class="btn btn-small" id="stop-all-dismiss">閉じる</button></div>
+      <ul id="stop-all-parts" class="stop-all-parts"></ul>
+      <p class="section-help">教材の走行・発射の許可はそのままです（生徒の接続も切れていません）。ロボット制御は「操作」の「起動」で再開します。</p>
+    </section>
+    <section id="apply-offer" class="notice warning" role="status" hidden>
+      <p id="apply-offer-text"></p>
+      <div class="btn-group apply-offer-actions">
+        <button type="button" class="btn btn-restart btn-small" id="apply-offer-restart">今すぐ再起動して反映</button>
+        <button type="button" class="btn btn-small" id="apply-offer-dismiss">あとで</button>
+      </div>
+    </section>
     <p id="connection-warning" class="notice warning" role="status" hidden>通信できません。表示は最後に取得した状態です。ネットワークを確認してください。</p>
     <section id="operation-issue" class="notice warning" role="alert" hidden>
       <div class="notice-heading"><h2 id="issue-title"></h2><button type="button" class="btn btn-small" id="issue-dismiss">閉じる</button></div>
@@ -50,6 +69,21 @@
     </section>
     <!-- ===== Control tab ===== -->
     <div class="tab-panel active" data-panel="control" id="panel-control" role="tabpanel" aria-labelledby="tab-control">
+    <!-- Status strip: one place that says what the robot does now. -->
+    <section class="card status-card" aria-labelledby="status-heading">
+      <h2 id="status-heading">いまのロボット</h2>
+      <dl class="status-strip">
+        <div><dt>ロボット名</dt><dd id="st-robot" data-tone="plain">—</dd></div>
+        <div><dt>モード</dt><dd id="st-mode">—</dd></div>
+        <div><dt>ロボット制御</dt><dd id="st-service">—</dd></div>
+        <div><dt>非常停止ボタン</dt><dd id="st-estop">—</dd></div>
+        <div><dt>教材の配信</dt><dd id="st-lab">—</dd></div>
+        <div><dt>教材からの走行・発射</dt><dd id="st-permissions">—</dd></div>
+        <div><dt>いま動かしているのは</dt><dd id="st-driver">—</dd></div>
+      </dl>
+      <p class="section-help">ロボット名はロボットのホスト名で、教材の画面に出る名前と同じです。非常停止ボタンの状態は、教材のブリッジが確認できるときだけ表示します。</p>
+    </section>
+
     <!-- Mode Card -->
     <section class="card mode-card">
       <h2>次回起動のモード</h2>
@@ -72,11 +106,12 @@
       <h2>ロボット制御の起動・停止</h2>
       <p id="robot-state-help" class="section-help" role="status">ロボット制御の状態を確認しています。</p>
       <div class="btn-group service-controls">
-        <button class="btn btn-start" data-service-action="start">起動</button>
+        <button class="btn btn-start" data-service-action="start" id="service-start">起動</button>
         <button class="btn btn-restart" data-service-action="restart" aria-describedby="restart-help">制御を再起動</button>
         <button class="btn btn-stop" data-service-action="stop">停止</button>
       </div>
-      <p id="restart-help" class="section-help">再起動すると、動作をいったん止め、保存した設定でロボット制御を起動し直します。</p>
+      <p id="restart-help" class="section-help">再起動すると、動作をいったん止め、保存したモードと設定でロボット制御を起動し直します。</p>
+      <p id="practice-start-help" class="section-help">練習モードでは、電源を入れても自動では起動しません。「起動」を押すと練習用の構成（教材からの走行・発射に対応）で起動します。練習用の起動が異常終了しても自動では起動し直さないので、もう一度「起動」を押してください。</p>
     </section>
 
     <section class="card">
@@ -92,14 +127,15 @@
     </section>
 
     <section class="card" aria-labelledby="web-joy-heading">
-      <h2 id="web-joy-heading">ブラウザ・スマホで操作</h2>
-      <p>コントローラーを Web に設定して保存し、サービスを起動・再起動してください。</p>
+      <h2 id="web-joy-heading">ブラウザ・スマホのコントローラー</h2>
+      <p id="web-joy-type" class="web-joy-type" role="status">コントローラーの設定を確認しています。</p>
+      <button type="button" class="btn btn-small" id="web-joy-admin" hidden>管理設定を開く</button>
       <p>PC・iPhone・iPad はアプリ不要です。「ブラウザで操作」を開き、タッチ・マウスまたはキーボードを選べます。</p>
       <form id="web-joy-qr-form" novalidate>
         <label for="web-joy-url">操作ページの URL</label>
         <input id="web-joy-url" type="url" inputmode="url" autocomplete="off" spellcheck="false"
           placeholder="http://192.168.1.100:8899/" aria-describedby="web-joy-help" maxlength="2048">
-        <p id="web-joy-help">操作する端末とロボットを同じネットワークに接続してください。localhost ではなくロボットの IP アドレスを指定します。ポートや認証トークンを変更した場合は URL に反映してください。</p>
+        <p id="web-joy-help">ロボットの Wi-Fi（アクセスポイント）がオンならそのアドレス、それ以外はロボットの LAN アドレスを自動で入れます。操作する端末をロボットと同じネットワークに接続してください。ポートや認証トークンを変更した場合は URL に反映してください。</p>
         <a id="web-joy-browser" class="btn btn-save" target="_blank" rel="noopener noreferrer" hidden>ブラウザで操作 ↗</a>
         <button type="submit" class="btn btn-save">接続用 QR を表示</button>
       </form>
@@ -338,6 +374,7 @@
       </div>
       <p id="lab-records-dir" class="lab-note lab-records-dir" hidden></p>
 
+      <p id="lab-competition-note" class="lab-drive-warning" hidden>大会モードでは教材を配信しません（練習モードに切り替えると配信できます）。</p>
       <p id="lab-serve-error" class="lab-inline-error" role="alert" hidden></p>
       <details id="lab-log" class="lab-log" hidden>
         <summary>ブリッジのログ</summary>
@@ -357,22 +394,20 @@
         <span class="card-title">教材からの走行</span>
       </h2>
       <!-- What the running bridge itself says (GET /api/state), not only what lab.env asks for. -->
-      <p id="lab-drive-indicator" class="rec-indicator idle lab-drive-status">
+      <p id="lab-drive-indicator" class="rec-indicator idle lab-drive-status" role="status">
         <span class="rec-dot"></span>
         <span id="lab-drive-state">配信が止まっています</span>
       </p>
-      <p id="lab-drive-external" class="lab-drive-warning" hidden>
-        手動で起動したブリッジです。ここでの切り替えは反映されません（端末で Ctrl+C して『配信開始』を押してください）
-      </p>
-      <div class="rec-status lab-drive-facts">
-        <div class="rec-status-row">
-          <span class="rec-status-label">ロボット</span>
-          <span id="lab-drive-robot" class="rec-status-value">—</span>
-        </div>
-        <div class="rec-status-row">
-          <span class="rec-status-label">接続中の端末</span>
-          <span id="lab-drive-clients" class="rec-status-value">—</span>
-        </div>
+      <div class="lab-permission-row">
+        <label class="toggle-switch" for="lab-drive-toggle">
+          <input type="checkbox" id="lab-drive-toggle" aria-describedby="lab-drive-toggle-state">
+          <span class="slider"></span>
+        </label>
+        <label for="lab-drive-toggle" class="lab-permission-label">教材からの走行を許可する
+          <span id="lab-drive-toggle-state" class="lab-permission-state">—</span></label>
+      </div>
+      <p id="lab-drive-toggle-note" class="lab-drive-warning" hidden></p>
+      <div class="rec-status lab-drive-facts" id="lab-drive-facts" hidden>
         <div class="rec-status-row" id="lab-drive-owner-row" hidden>
           <span class="rec-status-label">いま走っているのは</span>
           <span id="lab-drive-owner" class="rec-status-value">—</span>
@@ -382,23 +417,29 @@
 
       <p id="lab-drive-error" class="lab-inline-error" role="alert" hidden></p>
 
-      <div class="btn-group rec-controls">
-        <button class="btn btn-safe" id="lab-drive-forbid">教材からの走行を止める</button>
-        <button class="btn btn-caution" id="lab-drive-allow" disabled>教材からの走行を再開する</button>
-      </div>
-
       <p class="lab-note">
-        練習モードでは、生徒が教材で安全確認のチェックを入れると、走行実験（ステップ応答・壁の前で止めるPID・速さの往復・
-        決めた距離の走行・動作確認）が低速でロボットを動かします。コントローラーはそのまま使えます：
-        教材の走行中でもスティックを倒せば、すぐにコントローラーの操作に切り替わり、教材の走行は止まります
-        （切り替えノード twist_arbiter）。起動し直す必要はありません。
+        生徒が教材で安全確認のチェックを入れると、走行実験（ステップ応答・壁の前で止める・速さの往復・
+        決めた距離の走行・動作確認）が低速でロボットを動かします。コントローラーはいつでも優先です：
+        スティックを倒せば、すぐにコントローラーの操作に切り替わり、教材の走行は止まります。
+        切り替えると配信中のブリッジを起動し直すので、生徒の接続が数秒切れます。
       </p>
-      <p class="lab-note">
-        授業の外で走らせたくないときは「教材からの走行を止める」を押します（配信中のブリッジを自動で起動し直すので、
-        生徒の接続が数秒切れます）。大会モードでは走行できず、練習モードに戻すと再開します。
-        上限は前後 0.3 m/s・回転 1.0 rad/s（questix_lab_bridge の設定）で、教材の画面が閉じたり通信が 0.5 秒途切れたりすると止まり、
-        どの端末の停止バーでも止められます。
-      </p>
+      <details class="lab-tech">
+        <summary>先生・技術者向けの詳しい情報</summary>
+        <div class="rec-status lab-drive-facts">
+          <div class="rec-status-row">
+            <span class="rec-status-label">ロボット（ROS_DOMAIN_ID）</span>
+            <span id="lab-drive-robot" class="rec-status-value">—</span>
+          </div>
+        </div>
+        <ul id="lab-drive-tech" class="lab-tech-list"></ul>
+        <p class="lab-note">
+          練習用の起動（questix_core、enable_autoreferee:=false）では切り替えノード twist_arbiter が入り、
+          コントローラーと教材の指令（/target_twist/lab）のどちらかを /target_twist に渡します。
+          大会用の起動（enable_autoreferee:=true）には入らないため、教材からは走らせられません。
+          上限は前後 0.3 m/s・回転 1.0 rad/s（questix_lab_bridge の設定）で、教材の画面が閉じたり通信が
+          0.5 秒途切れたりすると止まり、どの端末の停止バーでも止められます。
+        </p>
+      </details>
     </section>
 
     <section class="card lab-drive" id="lab-shoot-card">
@@ -406,11 +447,20 @@
         <span class="card-title">教材からの発射</span>
       </h2>
       <!-- What the running bridge itself says (GET /api/state shoot_state), not only lab.env. -->
-      <p id="lab-shoot-indicator" class="rec-indicator idle lab-drive-status">
+      <p id="lab-shoot-indicator" class="rec-indicator idle lab-drive-status" role="status">
         <span class="rec-dot"></span>
         <span id="lab-shoot-state">配信が止まっています</span>
       </p>
-      <div class="rec-status lab-drive-facts">
+      <div class="lab-permission-row">
+        <label class="toggle-switch" for="lab-shoot-toggle">
+          <input type="checkbox" id="lab-shoot-toggle" aria-describedby="lab-shoot-toggle-state">
+          <span class="slider"></span>
+        </label>
+        <label for="lab-shoot-toggle" class="lab-permission-label">教材からの発射を許可する
+          <span id="lab-shoot-toggle-state" class="lab-permission-state">—</span></label>
+      </div>
+      <p id="lab-shoot-toggle-note" class="lab-drive-warning" hidden></p>
+      <div class="rec-status lab-drive-facts" id="lab-shoot-facts" hidden>
         <div class="rec-status-row" id="lab-shoot-owner-row" hidden>
           <span class="rec-status-label">いま操作しているのは</span>
           <span id="lab-shoot-owner" class="rec-status-value">—</span>
@@ -420,28 +470,29 @@
 
       <p id="lab-shoot-error" class="lab-inline-error" role="alert" hidden></p>
 
-      <div class="btn-group rec-controls">
-        <button class="btn btn-safe" id="lab-shoot-forbid">教材からの発射を止める</button>
-        <button class="btn btn-caution" id="lab-shoot-allow" disabled>教材からの発射を再開する</button>
-      </div>
-
       <p class="lab-note">
-        練習モードでは、生徒が教材で「発射する方向に人がいない・的の周りに人がいない」のチェックを入れると、
+        生徒が教材で「発射する方向に人がいない・的の周りに人がいない」のチェックを入れると、
         ローラーの回転・発射台の角度・ディスク1枚の発射を教材から操作できます。コントローラーが優先です：
         ローラーや発射のボタンを押すと、すぐにコントローラーの操作に切り替わり、教材の操作は止まります。
+        切り替えると配信中のブリッジを起動し直すので、生徒の接続が数秒切れます。
       </p>
-      <p class="lab-note">
-        授業の外で使わせたくないときは「教材からの発射を止める」を押します（配信中のブリッジを自動で起動し直すので、
-        生徒の接続が数秒切れます）。大会モードでは使えず、練習モードに戻すと再開します。
-        ローラーは最大 80%、発射はローラーが1秒回ってから・前の発射から2秒あけて1枚ずつ（questix_lab_bridge の設定）。
-        教材の画面が閉じたり通信が 0.5 秒途切れたり 30 秒たったりするとローラーは止まり、どの端末からでも止められます。
-      </p>
+      <details class="lab-tech">
+        <summary>先生・技術者向けの詳しい情報</summary>
+        <ul id="lab-shoot-tech" class="lab-tech-list"></ul>
+        <p class="lab-note">
+          練習用の起動では、ローラー（esc_motor_control）と発射台（shot_component）が教材の入力
+          （/roller/lab・/shot/lab/*）を受け付けます。大会用の起動（enable_autoreferee:=true）では受け付けません。
+          ローラーは最大 80%、発射はローラーが1秒回ってから・前の発射から2秒あけて1枚ずつ（questix_lab_bridge の設定）。
+          教材の画面が閉じたり通信が 0.5 秒途切れたり 30 秒たったりするとローラーは止まり、どの端末からでも止められます。
+        </p>
+      </details>
     </section>
 
     <section class="card">
       <h2>スマートフォンで開く</h2>
       <p class="lab-note">
         カメラで ① を読み取るとロボットの Wi-Fi に接続し、② を読み取ると教材が開きます。
+        コントローラーが Web（ブラウザ・スマホ）のときは、③ でブラウザのコントローラーが開きます。
         URL を調べて入力する必要はありません。
       </p>
       <div class="lab-qr-grid">
@@ -453,6 +504,10 @@
           <div id="lab-url-qr" class="lab-qr-image"></div>
           <figcaption id="lab-url-caption">② 教材</figcaption>
         </figure>
+        <figure class="lab-qr" id="lab-controller-figure" hidden>
+          <div id="lab-controller-qr" class="lab-qr-image"></div>
+          <figcaption id="lab-controller-caption">③ コントローラー</figcaption>
+        </figure>
       </div>
       <div class="btn-group rec-controls">
         <a class="btn btn-small lab-open" href="/static/ap-card.html" target="_blank" rel="noopener">印刷用の接続カードを開く</a>
@@ -463,7 +518,7 @@
       <h2>教材の設定</h2>
       <div class="config-grid rec-config">
         <div class="config-item wide">
-          <label for="lab-camera">カメラのトピック (CompressedImage / 空欄=使わない)</label>
+          <label for="lab-camera">カメラのトピック（CompressedImage / 空欄=使わない）</label>
           <input type="text" id="lab-camera" placeholder="/image_raw/compressed">
         </div>
         <div class="config-item wide">
@@ -474,7 +529,7 @@
         </div>
       </div>
       <button class="btn btn-save" id="lab-save-config">教材の設定を保存</button>
-      <p class="lab-note">設定は、次に配信を開始したときから有効になります。自動開始は最初からオンです。オンの間は、教材のページとロボットの値を、同じネットワークの全員が開けます（走行と発射は「教材からの走行」「教材からの発射」で許可したときだけ）。大会モードに切り替えると、配信を止めて自動開始もオフにします（大会モードの間は自動で開始しません）。練習モードに戻すと、自動開始をオンに戻して配信を開始します。</p>
+      <p class="lab-note">設定は、次に配信を開始したときから有効になります。自動開始は最初からオンです。オンの間は、教材のページとロボットの値を、同じネットワークの全員が開けます（走行と発射は「教材からの走行」「教材からの発射」で許可したときだけ）。大会モードに切り替えると、配信を止めて自動開始・走行・発射をオフにします（大会モードの間は配信しません）。練習モードに戻すと、大会モードの前に選んでいた設定（自動開始・走行・発射）に戻します。</p>
     </section>
     </div><!-- /lab panel -->
     <div class="tab-panel" data-panel="admin" role="region" aria-label="管理設定">
@@ -500,21 +555,21 @@
           </label>
         </div>
         <div class="config-item">
-          <label>射出 (Shot)</label>
+          <label>発射装置（Shot）</label>
           <label class="toggle-switch small">
             <input type="checkbox" data-config="ENABLE_SHOT">
             <span class="slider"></span>
           </label>
         </div>
         <div class="config-item">
-          <label>駆動 (Drive)</label>
+          <label>走行（Drive）</label>
           <label class="toggle-switch small">
             <input type="checkbox" data-config="ENABLE_DRIVE">
             <span class="slider"></span>
           </label>
         </div>
         <div class="config-item">
-          <label title="Competition always enables GPIO safety">GPIO safety (manual only)</label>
+          <label title="大会モードでは常に有効です">安全入力（GPIO、非常停止ボタン）：練習用の起動で使用</label>
           <label class="toggle-switch small">
             <input type="checkbox" data-config="ENABLE_GPIO_REF">
             <span class="slider"></span>
@@ -528,7 +583,7 @@
           </label>
         </div>
         <div class="config-item wide">
-          <label for="ros-domain-id">ROS_DOMAIN_ID</label>
+          <label for="ros-domain-id">ROS_DOMAIN_ID（ロボットごとに別の番号。同じ番号のロボット同士は通信が混ざります）</label>
           <input type="number" id="ros-domain-id" min="0" max="232" value="42">
         </div>
         <div class="config-item wide">
@@ -612,12 +667,13 @@
 
   <script src="/static/vendor/qrcode.js"></script>
   <script src="/static/qr-svg.js?v=1"></script>
-  <script src="/static/web-joy-connection.js?v=2"></script>
-  <script src="/static/operator-guide.js?v=3"></script>
+  <script src="/static/web-joy-connection.js?v=3"></script>
+  <script src="/static/operator-guide.js?v=4"></script>
   <script src="/static/control-labels.js?v=4"></script>
-  <script src="/static/app.js?v=15"></script>
+  <script src="/static/status-view.js?v=1"></script>
+  <script src="/static/app.js?v=16"></script>
   <script src="/static/controller-map.js?v=12"></script>
-  <script src="/static/controls.js?v=21"></script>
+  <script src="/static/controls.js?v=22"></script>
 </body>
 
 </html>

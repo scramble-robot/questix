@@ -105,7 +105,7 @@ def _read_config_for_api() -> dict[str, str]:
 def _write_config(config: dict[str, str]) -> None:
     """Write rosbag.env preserving a header comment."""
     lines = [
-        "# Questix rosbag recorder configuration",
+        "# QUESTiX rosbag recorder configuration",
         "# Managed by robot_manager — edit via Web UI or manually",
         "",
     ]
