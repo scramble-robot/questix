@@ -13,3 +13,8 @@ NASA material is not protected by copyright; its use here does not imply NASA en
 
 `../vision/floor-scene.png` is the AI-generated teaching room that the original single-file
 edition embedded as base64 palette data; it was converted to PNG losslessly (pixel-identical).
+
+`../questix/*.webp` (top, side, baseSide, wheelBench, isometric) are views rendered from the
+QUESTiX (Questy V1) assembly CAD supplied by the project; they are the project's own material, not
+third-party files. The light-blue bar drawn on the front edge of top views is a diagram cue added by
+`js/core/questix-art.js`, not a part of the robot.

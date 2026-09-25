@@ -9,6 +9,7 @@
 // The arena and camera canvases are fixed elements of index.html (inside the hidden
 // #simulation block) that every lesson moves into its own layout, so they are looked up once
 // here; the two sensor overlay checkboxes sit beside them for the same reason.
+import { drawQuestixTop } from './questix-art.js';
 import { loadJson } from './content.js';
 
 const copy = await loadJson('content/core/renderer.json');
@@ -691,127 +692,13 @@ function drawTrajectory(canvas, env, result) {
   plot.stroke();
 }
 
-// Robot body, drawn around the origin and turned into the pose by drawRobot's own transform.
-// Courses other than the RL lab draw it on their own canvases, so the context is a parameter.
-const CHASSIS_FILL = '#c4d9db';
-const CHASSIS_EDGE = '#effbfa';
-const CHASSIS_SHADOW = '#0008';
-const TRACK_FILL = '#071b24';
-const TRACK_EDGE = '#617c85';
-const TREAD_COLOR = '#547580';
-const DECK_FILL = '#1a414c';
-const DECK_EDGE = '#4b7079';
-const LIDAR_WELL = '#092733';
-const LIDAR_SWEEP = '#64d2bb';
-const LIDAR_HUB = '#86e8cb';
-const LENS_HOUSING = '#081e2b';
-const LENS_GLOW = '#70c9ff';
-const LENS_COLOR = '#8edaff';
-const BUMPER_IDLE = '#447783';
-const BUMPER_REVERSE = '#ffb467';
-const VENT_COLOR = '#7693a1';
-
-/** Chassis outline: a rectangle with the front-right corner cut away for the camera head. */
-function paintChassis(target) {
-  target.shadowColor = CHASSIS_SHADOW;
-  target.shadowBlur = 14;
-  target.shadowOffsetY = 3;
-  target.beginPath();
-  target.moveTo(-23, -23);
-  target.lineTo(13, -23);
-  target.quadraticCurveTo(17, -23, 20, -19);
-  target.lineTo(28, -10);
-  target.quadraticCurveTo(31, -7, 31, -3);
-  target.lineTo(31, 3);
-  target.quadraticCurveTo(31, 7, 28, 10);
-  target.lineTo(20, 19);
-  target.quadraticCurveTo(17, 23, 13, 23);
-  target.lineTo(-23, 23);
-  target.quadraticCurveTo(-27, 23, -27, 19);
-  target.lineTo(-27, -19);
-  target.quadraticCurveTo(-27, -23, -23, -23);
-  target.closePath();
-  target.fillStyle = CHASSIS_FILL;
-  target.fill();
-  // The shadow belongs to the body only; everything drawn on top of it stays flat.
-  target.shadowBlur = 0;
-  target.shadowOffsetY = 0;
-  target.strokeStyle = CHASSIS_EDGE;
-  target.lineWidth = 1.4;
-  target.stroke();
-}
-
-/** The two driven wheels, with tread marks; they sit left and right of the heading. */
-function paintTracks(target) {
-  paintRoundedRect(target, -18, -32, 36, 12, 4, TRACK_FILL, TRACK_EDGE);
-  paintRoundedRect(target, -18, 20, 36, 12, 4, TRACK_FILL, TRACK_EDGE);
-  target.strokeStyle = TREAD_COLOR;
-  target.lineWidth = 1.4;
-  for (let x = -12; x <= 12; x += 6) {
-    target.beginPath();
-    target.moveTo(x, -30);
-    target.lineTo(x, -23);
-    target.moveTo(x, 23);
-    target.lineTo(x, 30);
-    target.stroke();
-  }
-}
-
-/** Sensor deck with the spinning lidar; the open arc is the direction it is sweeping. */
-function paintSensorDeck(target) {
-  paintRoundedRect(target, -21, -17, 37, 34, 6, DECK_FILL, DECK_EDGE);
-  target.fillStyle = LIDAR_WELL;
-  target.beginPath();
-  target.arc(-1, 0, 12, 0, Math.PI * 2);
-  target.fill();
-  target.strokeStyle = LIDAR_SWEEP;
-  target.lineWidth = 2;
-  target.beginPath();
-  target.arc(-1, 0, 9, -2.3, 2.3);
-  target.stroke();
-  target.fillStyle = LIDAR_HUB;
-  target.beginPath();
-  target.arc(-1, 0, 3, 0, Math.PI * 2);
-  target.fill();
-}
-
-/** The glowing blue lenses mark the front; learners read the heading from them. */
-function paintCameraLenses(target) {
-  paintRoundedRect(target, 20, -10, 7, 20, 3, LENS_HOUSING);
-  target.shadowColor = LENS_GLOW;
-  target.shadowBlur = 8;
-  target.fillStyle = LENS_COLOR;
-  target.beginPath();
-  target.arc(24, -5, 2.5, 0, Math.PI * 2);
-  target.arc(24, 5, 2.5, 0, Math.PI * 2);
-  target.fill();
-  target.shadowBlur = 0;
-}
-
-/** Rear bumper, lit while the wheels are driving backwards, plus the two side vents. */
-function paintRear(target, pose) {
-  target.strokeStyle = pose.left + pose.right < -MOTION_THRESHOLD ? BUMPER_REVERSE : BUMPER_IDLE;
-  target.lineWidth = 3;
-  target.beginPath();
-  target.moveTo(-24, -10);
-  target.lineTo(-24, 10);
-  target.stroke();
-  target.fillStyle = VENT_COLOR;
-  target.fillRect(-16, -11, 7, 3);
-  target.fillRect(-16, 8, 7, 3);
-}
+// The robot as every scene shows it: the CAD top view from core/questix-art.js, about 0.36 m
+// across at the arena's scale (the simulated body's collision diameter).
+const ROBOT_DRAW_SIZE = 60; // pixels; callers scale their context for other sizes
 
 /** Draws the robot on `target` at pixel point `p`, turned to `pose.theta`. */
 function drawRobot(target, p, pose) {
-  target.save();
-  target.translate(p.x, p.y);
-  target.rotate(pose.theta);
-  paintChassis(target);
-  paintTracks(target);
-  paintSensorDeck(target);
-  paintCameraLenses(target);
-  paintRear(target, pose);
-  target.restore();
+  drawQuestixTop(target, p.x, p.y, pose.theta, ROBOT_DRAW_SIZE);
 }
 
 export {

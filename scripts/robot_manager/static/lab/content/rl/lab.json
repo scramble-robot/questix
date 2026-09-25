@@ -26,7 +26,7 @@
       "manual": "手動で操作中",
       "stopped": "停止中"
     },
-    "initialCaption": "青いレンズ側が機体の正面です。左右の車輪の回転数を変えて曲がります。",
+    "initialCaption": "水色の線がある側が機体の正面です。左右の車輪の回転数を変えて曲がります。",
     "startCaption": {
       "prefix": "学習の開始位置：",
       "dockCondition": "向きのずれ8°以内で、",
