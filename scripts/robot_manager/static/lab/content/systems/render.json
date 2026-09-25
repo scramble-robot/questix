@@ -16,7 +16,7 @@
     "object": "物体",
     "objectBefore": "移動前の位置",
     "estimate": "計算した行き先",
-    "estimateRaw": "カメラの数値をそのまま使った行き先",
+    "estimateRaw": "そのままの行き先",
     "camera": "カメラ",
     "cameraForward": "d 前",
     "cameraUp": "h 上",
@@ -24,6 +24,7 @@
     "keys": {
       "object": "物体（手先を近づけたい物）",
       "estimate": "計算した手先の行き先",
+      "estimateRaw": "そのままの行き先：カメラの数値をそのまま使った手先の行き先",
       "shoulderFrame": "根元の座標（x 横・z 高さ、目盛り50 mmごと）",
       "cameraFrame": "カメラの座標（d 前・h 上）。実際は根元から横40 mm・上30 mm、10°上向き",
       "markers": "①②③ 目印の実際の位置",
@@ -40,36 +41,38 @@
     "delivery": "届け先",
     "obstacle": "障害物",
     "detour": "迂回路",
+    "pickedUp": "受け取った場所",
     "keys": {
       "trail": "通った道",
       "detour": "迂回路（上側の道、前から分かっている）",
       "noParcel": "点線の四角：いつもの場所（荷物がない）",
-      "candidate": "？：まだ確かめていない別の受け取り場所"
+      "candidate": "？：まだ確かめていない別の受け取り場所",
+      "pickedUp": "薄い四角：荷物を受け取った場所"
     }
   },
   "states": {
     "title": "状態と切り替えの条件",
     "now": "今の状態",
-    "unused": "（今のルールでは使わない）",
+    "unused": "（今のルールでは\u200b使わない）",
     "names": {
-      "toParcel": "荷物へ進む",
-      "toElsewhere": "別の場所を探す",
-      "toDelivery": "届け先へ進む",
-      "waiting": "通路が空くまで待つ",
-      "detour": "別の道へ進む",
+      "toParcel": "荷物へ\u200b進む",
+      "toElsewhere": "別の場所を\u200b探す",
+      "toDelivery": "届け先へ\u200b進む",
+      "waiting": "通路が\u200b空くまで\u200b待つ",
+      "detour": "別の道へ\u200b進む",
       "delivered": "配達完了",
-      "arrivedEmpty": "空のまま到着"
+      "arrivedEmpty": "空のまま\u200b到着"
     },
     "conditions": {
       "pickedUp": "到着 かつ 荷物あり",
-      "blocked": "前に障害物",
-      "clear": "通路が空いた",
-      "arrived": "届け先に到着",
+      "blocked": "前に\u200b障害物",
+      "clear": "通路が\u200b空いた",
+      "arrived": "届け先に\u200b到着",
       "timeout": "待ち時間 ≥ {timeout}秒",
-      "detourArrived": "迂回路で到着",
+      "detourArrived": "迂回路で\u200b到着",
       "notThere": "到着 かつ 荷物なし",
-      "keepGoing": "到着（荷物がなくても進む）",
-      "foundElsewhere": "見つけて受け取った",
+      "keepGoing": "到着（荷物が\u200bなくても\u200b進む）",
+      "foundElsewhere": "見つけて\u200b受け取った",
       "arrivedWith": "到着 かつ 荷物あり",
       "arrivedWithout": "到着 かつ 荷物なし"
     },

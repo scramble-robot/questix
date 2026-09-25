@@ -92,18 +92,32 @@ function statusText(model, copy) {
   return phase + model.sample.status;
 }
 
+// A reading whose value is the contact itself (a status word such as 「接触」, not a number read
+// at that moment) is shown in the danger role: red, with a warning sign in front of it.
+function showsContact(model) {
+  const value = model.drive?.value;
+  return Boolean(
+    model.started && model.sample?.contact && value && !Number.isFinite(parseFloat(value)),
+  );
+}
+
 function driveReading(model) {
   const drive = model.drive;
   const fields = drive?.fields ?? [];
+  const danger = showsContact(model);
   return html`<div
     class="sys-drive"
     data-sys-drive
-    data-mode=${drive ? drive.mode : nothing}
+    data-mode=${drive ? (danger ? 'danger' : drive.mode) : nothing}
     ?hidden=${!drive}
   >
     <div class="sys-drive-reading">
       <span data-sys-drive-label>${drive?.label ?? ''}</span
-      ><strong data-sys-drive-value>${drive?.value ?? ''}</strong>
+      ><strong data-sys-drive-value
+        >${danger ? html`<span class="sys-danger-icon" aria-hidden="true">⚠</span>` : nothing}${
+          drive?.value ?? ''
+        }</strong
+      >
     </div>
     <div class="sys-drive-body">
       <p data-sys-drive-text>${drive?.text ?? ''}</p>

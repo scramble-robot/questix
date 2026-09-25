@@ -133,6 +133,170 @@ function label(x, y, content, options = {}) {
   >${content}</text>`;
 }
 
+// --- keeping labels off lines and marks -------------------------------------------------------
+
+/** The box a label covers, for a baseline at `y` and the same anchoring as label(). */
+function labelBox(x, y, content, size, anchor = 'start') {
+  const width = textWidth(content, size);
+  let left = x;
+  if (anchor === 'middle') left = x - width / 2;
+  if (anchor === 'end') left = x - width;
+  return { left, right: left + width, top: y - size * 0.9, bottom: y + size * 0.15 };
+}
+
+const grow = (area, pad) => ({
+  left: area.left - pad,
+  right: area.right + pad,
+  top: area.top - pad,
+  bottom: area.bottom + pad,
+});
+
+const boxesMeet = (a, b) =>
+  a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+
+// Liang–Barsky: does the segment from (x1, y1) to (x2, y2) pass through the box?
+function segmentMeets(x1, y1, x2, y2, area) {
+  let from = 0;
+  let to = 1;
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const sides = [
+    [-dx, x1 - area.left],
+    [dx, area.right - x1],
+    [-dy, y1 - area.top],
+    [dy, area.bottom - y1],
+  ];
+  for (const [p, q] of sides) {
+    if (Math.abs(p) < EPSILON) {
+      if (q < 0) return false;
+      continue;
+    }
+    const t = q / p;
+    if (p < 0) from = Math.max(from, t);
+    else to = Math.min(to, t);
+    if (from > to) return false;
+  }
+  return true;
+}
+
+/**
+ * How many obstacles a label box touches. An obstacle is a box `{left, right, top, bottom}` or a
+ * segment `{x1, y1, x2, y2, pad}` (pad = half its drawn width plus a little air).
+ */
+function hits(area, obstacles) {
+  let count = 0;
+  for (const item of obstacles) {
+    if ('x1' in item) {
+      if (segmentMeets(item.x1, item.y1, item.x2, item.y2, grow(area, item.pad ?? 2))) count++;
+    } else if (boxesMeet(area, item)) count++;
+  }
+  return count;
+}
+
+/**
+ * The first candidate spot (`{x, y, anchor}`) whose label box stays inside `bounds` and clear of
+ * the obstacles; if every spot touches something, the one touching least (earlier wins a tie).
+ */
+function clearSpot(content, size, candidates, obstacles, bounds) {
+  let best = null;
+  for (const spot of candidates) {
+    const area = labelBox(spot.x, spot.y, content, size, spot.anchor);
+    if (area.left < bounds[0] || area.right > bounds[1] || area.top < 2) continue;
+    const count = hits(area, obstacles);
+    if (count === 0) return { ...spot, area };
+    if (!best || count < best.count) best = { ...spot, area, count };
+  }
+  return (
+    best ?? {
+      ...candidates[0],
+      area: labelBox(candidates[0].x, candidates[0].y, content, size, candidates[0].anchor),
+    }
+  );
+}
+
+// Spots right next to a mark, nearest first: right, left, above, below, then the four corners.
+function spotsNear(point, gap, size) {
+  const side = gap * 0.9;
+  return [
+    { x: point.x + gap, y: point.y + size * 0.35, anchor: 'start' },
+    { x: point.x - gap, y: point.y + size * 0.35, anchor: 'end' },
+    { x: point.x, y: point.y - gap - 2, anchor: 'middle' },
+    { x: point.x, y: point.y + gap + size, anchor: 'middle' },
+    { x: point.x + side, y: point.y + side + size * 0.7, anchor: 'start' },
+    { x: point.x - side, y: point.y + side + size * 0.7, anchor: 'end' },
+    { x: point.x + side, y: point.y - side, anchor: 'start' },
+    { x: point.x - side, y: point.y - side, anchor: 'end' },
+  ];
+}
+
+// Spots one and two steps further out in eight directions, drawn with a leader line to the mark.
+function spotsFar(point, gap, size) {
+  const directions = [
+    [1, 1],
+    [-1, 1],
+    [1, -1],
+    [-1, -1],
+    [1, 0],
+    [-1, 0],
+    [0, -1],
+    [0, 1],
+  ];
+  return [16, 36].flatMap((step) =>
+    directions.map(([sideways, down]) => ({
+      x: point.x + sideways * (gap + step),
+      y: point.y + down * (gap + step) + (down > 0 ? size : down === 0 ? size * 0.35 : 0),
+      anchor: sideways > 0 ? 'start' : sideways < 0 ? 'end' : 'middle',
+      leader: true,
+    })),
+  );
+}
+
+/**
+ * Names for marks in a scene whose marks move, each at the first spot around its mark (`at`)
+ * that is clear of the `obstacles` and of the names placed before it. `first(placed)` gives
+ * spots to try before those, from the spots of the names placed so far (e.g. a status line right
+ * under a name); `beside` is a second point to try (the middle of an axis arrow, next to its
+ * shaft) before a leader line is drawn.
+ */
+function placeLabels(stage, obstacles, entries) {
+  const taken = [...obstacles];
+  const placed = [];
+  return entries.filter(Boolean).map((entry) => {
+    const { at, beside, first, content, size, color, weight, gap, halo } = entry;
+    const spots = [
+      ...(first ? first(placed) : []),
+      ...spotsNear(at, gap, size),
+      ...(beside ? spotsNear(beside, gap, size) : []),
+      ...spotsFar(at, gap, size),
+    ];
+    const spot = clearSpot(content, size, spots, taken, stage.bounds);
+    taken.push(grow(spot.area, 2));
+    placed.push(spot);
+    const nearest = {
+      x: clamp(at.x, spot.area.left, spot.area.right),
+      y: clamp(at.y, spot.area.top, spot.area.bottom),
+    };
+    // The leader starts at the edge of the mark, not under it.
+    const reach = Math.hypot(nearest.x - at.x, nearest.y - at.y) || 1;
+    const edge = Math.min(gap - 4, reach);
+    const start = {
+      x: at.x + ((nearest.x - at.x) / reach) * edge,
+      y: at.y + ((nearest.y - at.y) / reach) * edge,
+    };
+    return [
+      spot.leader ? line(start.x, start.y, nearest.x, nearest.y, color, 1.5, '2 2') : nothing,
+      label(spot.x, spot.y, content, {
+        color,
+        size,
+        weight,
+        anchor: spot.anchor,
+        bounds: stage.bounds,
+        halo,
+      }),
+    ];
+  });
+}
+
 // A downward triangle marking where something happened on the floor, with its dashed line.
 function floorEvent(stage, x, labelText, labelY) {
   return [
@@ -353,25 +517,33 @@ function brakingParts(run, sample, stage, reached) {
   return parts;
 }
 
-function tractionParts(sample, stage) {
+// The mass written above the robot, where label() puts it.
+function massLabelBox(run, sample, stage) {
+  const area = labelBox(
+    stage.toX(sample.x),
+    stage.ground - 46 * stage.robotScale - 4,
+    run.config.mass + ' kg',
+    TEXT_SMALL,
+    'middle',
+  );
+  const shift = clamp(area.left, stage.bounds[0], stage.bounds[1] - (area.right - area.left));
+  return { ...area, left: shift, right: shift + (area.right - area.left) };
+}
+
+// The position the wheels report, as a faint robot. Its name goes one lane higher when the real
+// robot's mass label is in the way (the two robots are close together).
+function tractionParts(run, sample, stage) {
   const x = stage.toX(sample.odom);
+  const content = copy.mechanics.odometryPosition;
+  const width = textWidth(content, TEXT_SMALL);
+  const left = clamp(x - width / 2, stage.bounds[0], stage.bounds[1] - width);
+  let y = stage.ground - 56 * stage.robotScale;
+  if (boxesMeet(grow(labelBox(left, y, content, TEXT_SMALL), 2), massLabelBox(run, sample, stage)))
+    y -= 18;
   return [
     sideView(x, stage.ground, stage.robotScale, 0.5),
-    line(
-      x,
-      stage.ground - 50 * stage.robotScale,
-      x,
-      stage.ground,
-      sceneRole('measured').color,
-      1.5,
-      '4 4',
-    ),
-    label(x, stage.ground - 56 * stage.robotScale, copy.mechanics.odometryPosition, {
-      color: sceneRole('measured').color,
-      size: TEXT_SMALL,
-      anchor: 'middle',
-      bounds: stage.bounds,
-    }),
+    line(x, y + 6, x, stage.ground, sceneRole('measured').color, 1.5, '4 4'),
+    label(left, y, content, { color: sceneRole('measured').color, size: TEXT_SMALL }),
   ];
 }
 
@@ -389,7 +561,7 @@ function mechanicsScene(run, index, options) {
     floorAxis(stage, extent),
     run.topic === 'braking' ? brakingParts(run, sample, stage, reached) : nothing,
     reached ? floorEvent(stage, stage.toX(transition.x), markerText, 44) : nothing,
-    run.topic === 'traction' ? tractionParts(sample, stage) : nothing,
+    run.topic === 'traction' ? tractionParts(run, sample, stage) : nothing,
     sideView(stage.toX(sample.x), stage.ground, stage.robotScale),
     label(stage.toX(sample.x), stage.ground - 46 * stage.robotScale - 4, run.config.mass + ' kg', {
       color: SOFT_INK,
@@ -454,6 +626,17 @@ function distanceParts(sample, stage) {
   const cameraY = stage.ground - CAMERA_HEIGHT * scale;
   const shelfX = stage.toX(3.2);
   const wallX = stage.toX(4);
+  // The sensor names ride with the robot, each at the height of its beam: behind the robot where
+  // there is room, so they sit on neither the robot nor a beam. Near the start there is no room
+  // behind it; each name then sits on its own beam, which starts after the name ("LiDAR ——•").
+  const sensors = [
+    [text.lidar, lidarY],
+    [text.camera, cameraY],
+  ];
+  const widest = Math.max(...sensors.map(([name]) => textWidth(name, TEXT_SMALL)));
+  const back = stage.toX(sample.x) - 26 * scale - 6;
+  const behind = back - widest >= stage.bounds[0];
+  const beamFrom = behind ? front : front + widest + 12;
   return [
     box(
       shelfX,
@@ -462,26 +645,23 @@ function distanceParts(sample, stage) {
       (SHELF_TOP - SHELF_BOTTOM) * scale,
       '#b57959',
     ),
-    label(shelfX, stage.ground - SHELF_TOP * scale - 8, text.shelf, {
+    // Ends short of the wall, so the name never touches it.
+    label(wallX - 6, stage.ground - SHELF_TOP * scale - 8, text.shelf, {
       color: '#e3b794',
       size: TEXT_SMALL,
+      anchor: 'end',
       bounds: stage.bounds,
     }),
-    line(front, lidarY, wallX, lidarY, measured.color, 2),
+    line(beamFrom, lidarY, wallX, lidarY, measured.color, 2),
     circle(wallX, lidarY, 3, measured.color, measured.color),
-    label(wallX - 4, lidarY - 4, text.lidar, {
-      color: measured.color,
-      size: TEXT_SMALL,
-      anchor: 'end',
-      bounds: stage.bounds,
-    }),
-    line(front, cameraY, shelfX, cameraY, measured.color, 2, '7 4'),
-    label(shelfX - 4, cameraY - 6, text.camera, {
-      color: measured.color,
-      size: TEXT_SMALL,
-      anchor: 'end',
-      bounds: stage.bounds,
-    }),
+    line(beamFrom, cameraY, shelfX, cameraY, measured.color, 2, '7 4'),
+    sensors.map(([name, y]) =>
+      label(behind ? back : front + 6, y + 4, name, {
+        color: measured.color,
+        size: TEXT_SMALL,
+        anchor: behind ? 'end' : 'start',
+      }),
+    ),
   ];
 }
 
@@ -599,27 +779,39 @@ function bracket(fromX, toX, y, role) {
   ];
 }
 
+/**
+ * The name of a range bracket, on the bracket's own lane just left of where it starts, so it
+ * never crosses the white or dashed stop guide (`guideX` is the left one of them): when the
+ * bracket starts right of the guides the name stays left of them and a dotted leader reaches the
+ * bracket. With no room on the left (the bracket starts near the left edge) the name sits above
+ * the bracket, far from the guides.
+ */
+function bracketLabel(stage, fromX, y, content, role, guideX) {
+  const color = sceneRole(role).color;
+  const width = textWidth(content, TEXT_SMALL);
+  const end = Math.min(fromX, guideX) - 8;
+  if (end - width < stage.bounds[0])
+    return label(fromX, y - 8, content, { color, size: TEXT_SMALL, bounds: stage.bounds });
+  return [
+    end < fromX - 12 ? line(end + 4, y, fromX - 4, y, color, 1.5, '2 3') : nothing,
+    label(end, y + 4, content, { color, size: TEXT_SMALL, anchor: 'end' }),
+  ];
+}
+
 function rangeParts(sample, stage) {
   const text = copy.timing;
   const scale = stage.robotScale;
   const usedY = stage.ground - 50 * scale - 30;
   const actualY = stage.ground - 50 * scale - 10;
   const wallX = stage.toX(TIMING_WALL);
+  const guideX = stage.toX(TIMING_WALL - TIMING_STOP_RANGE);
   const usedFrom = stage.toX(TIMING_WALL - sample.usedRange);
   const actualFrom = stage.toX(sample.x);
   return [
     bracket(usedFrom, wallX, usedY, 'measured'),
-    label(usedFrom, usedY - 8, text.usedRange, {
-      color: sceneRole('measured').color,
-      size: TEXT_SMALL,
-      bounds: stage.bounds,
-    }),
+    bracketLabel(stage, usedFrom, usedY, text.usedRange, 'measured', guideX),
     bracket(actualFrom, wallX, actualY, 'actual'),
-    label(actualFrom, actualY - 7, text.actualRange, {
-      color: sceneRole('actual').color,
-      size: TEXT_SMALL,
-      bounds: stage.bounds,
-    }),
+    bracketLabel(stage, actualFrom, actualY, text.actualRange, 'actual', guideX),
   ];
 }
 
@@ -660,6 +852,8 @@ function timingGuides(stage, mapping) {
   const targetX = stage.toX(TIMING_TARGET);
   const thresholdX = stage.toX(TIMING_WALL - TIMING_STOP_RANGE);
   const threshold = sceneRole('target');
+  // Two lanes, 24 px apart, each name ending just left of its own guide line; the range
+  // brackets and their names are further down, above the robots.
   parts.push(
     line(targetX, 24, targetX, stage.ground, GOAL_LINE, 3),
     label(targetX - 4, 18, text.target, {
@@ -668,8 +862,8 @@ function timingGuides(stage, mapping) {
       anchor: 'end',
       bounds: stage.bounds,
     }),
-    line(thresholdX, 42, thresholdX, stage.ground, threshold.color, 2, threshold.dash),
-    label(thresholdX - 4, 36, text.threshold, {
+    line(thresholdX, 48, thresholdX, stage.ground, threshold.color, 2, threshold.dash),
+    label(thresholdX - 4, 42, text.threshold, {
       color: threshold.color,
       size: TEXT_SMALL,
       anchor: 'end',
@@ -882,7 +1076,7 @@ function positionAxis(stage, laneY) {
   const axisY = laneY - TRACKING_LANE_HALF * stage.k - 30;
   const ticks = [-1, 0, 1, 2, 3];
   return [
-    label(stage.left + 8, axisY - 16, copy.tracking.positionAxis, {
+    label(stage.left + 8, axisY - 19, copy.tracking.positionAxis, {
       color: SOFT_INK,
       size: TEXT_SMALL,
     }),
@@ -947,54 +1141,150 @@ function forecastParts(run, sample, stage, laneY) {
 // What the crossing rule looks at: the circle the measured point must stay out of ("今の距離
 // だけ"), or where both robots will be when they come closest ("この先の接近も予測する").
 function crossingRuleParts(run, sample, stage) {
-  const text = copy.tracking;
   const view = crossingForecast(sample, run.config);
   const questixX = stage.toX(sample.y);
   const questixY = stage.toY(sample.x);
   if (run.config.rule !== 'predict') {
+    // Named by crossingNames(), which keeps the name off the robots and their labels.
     const target = sceneRole('target');
     const radius = view.current.clearance * stage.k;
-    return [
-      circle(questixX, questixY, radius, target.color, 'none', 2, target.dash),
-      label(
-        questixX - radius * 0.7 - 4,
-        questixY + radius * 0.7 + 14,
-        fill(text.stopCircle, { radius: view.current.clearance }),
-        {
-          color: target.color,
-          size: TEXT_SMALL,
-          anchor: 'end',
-          bounds: stage.bounds,
-          halo: ROOM_FLOOR,
-        },
-      ),
-    ];
+    return circle(questixX, questixY, radius, target.color, 'none', 2, target.dash);
   }
-  if (sample.velocity === null) return nothing;
+  const closest = closestApproach(run, sample, stage);
+  if (!closest) return nothing;
+  const { self, other, close, spot } = closest;
   const plan = sceneRole('plan');
+  return [
+    circle(self.x, self.y, stage.radius, plan.color, 'none', 2, plan.dash),
+    circle(other.x, other.y, stage.radius, plan.color, 'none', 2, plan.dash),
+    line(self.x, self.y, other.x, other.y, plan.color, close ? 3 : 1.5, plan.dash),
+    label(spot.x, spot.y, spot.content, {
+      color: plan.color,
+      size: TEXT_SMALL,
+      weight: close ? 600 : nothing,
+      bounds: stage.bounds,
+      halo: ROOM_FLOOR,
+    }),
+  ];
+}
+
+// Where both robots will be when they come closest (the "predict" rule), and where that is said.
+function closestApproach(run, sample, stage) {
+  if (run.config.rule !== 'predict' || sample.velocity === null) return null;
+  const view = crossingForecast(sample, run.config);
   const self = { x: stage.toX(view.forecast.self.y), y: stage.toY(view.forecast.self.x) };
   const other = {
     x: clamp(stage.toX(view.forecast.other.y), stage.left, stage.right),
     y: stage.toY(view.forecast.other.x),
   };
-  const close = view.forecast.gap < view.forecast.clearance;
-  return [
-    circle(self.x, self.y, stage.radius, plan.color, 'none', 2, plan.dash),
-    circle(other.x, other.y, stage.radius, plan.color, 'none', 2, plan.dash),
-    line(self.x, self.y, other.x, other.y, plan.color, close ? 3 : 1.5, plan.dash),
-    label(
-      Math.max(self.x, other.x) + stage.radius + 6,
-      (self.y + other.y) / 2 + 4,
-      fill(text.closest, { after: num(view.forecast.after, 1), gap: num(view.forecast.gap, 2) }),
-      {
-        color: plan.color,
-        size: TEXT_SMALL,
-        weight: close ? 600 : nothing,
-        bounds: stage.bounds,
-        halo: ROOM_FLOOR,
-      },
-    ),
+  const content = fill(copy.tracking.closest, {
+    after: num(view.forecast.after, 1),
+    gap: num(view.forecast.gap, 2),
+  });
+  const x = Math.max(self.x, other.x) + stage.radius + 6;
+  const y = (self.y + other.y) / 2 + 4;
+  const width = textWidth(content, TEXT_SMALL);
+  const left = clamp(x, stage.bounds[0], Math.max(stage.bounds[0], stage.bounds[1] - width));
+  return {
+    self,
+    other,
+    close: view.forecast.gap < view.forecast.clearance,
+    spot: { x: left, y, content, area: labelBox(left, y, content, TEXT_SMALL) },
+  };
+}
+
+/**
+ * The names in the crossing scene: QUESTiX with its status (or ⚠ 接触) right under it, the other
+ * robot, and the "wait" circle of the current-distance rule. The robots meet in the middle of the
+ * room, so each name takes the first spot around its robot that is clear of both robots, the
+ * measured point, the contact ring, the fixed names of the room and the names placed before it.
+ */
+function crossingNames(run, sample, stage, laneY, contact) {
+  const text = copy.tracking;
+  const questix = { x: stage.toX(sample.y), y: stage.toY(sample.x) };
+  const target = { x: stage.toX(sample.cart.y), y: laneY };
+  const laneHalf = TRACKING_LANE_HALF * stage.k;
+  const direction = sample.actualVelocity < 0 ? -1 : 1;
+  const radius = stage.radius;
+  const obstacles = [
+    around(questix, radius + 3),
+    around(target, radius + 3),
+    around({ x: stage.toX(sample.obs.y), y: laneY }, 10),
+    labelBox(stage.left + 8, laneY + laneHalf + 16, text.otherRoute, TEXT_SMALL),
+    labelBox(questix.x + radius + 6, stage.toY(4.4) + 5, text.goal, TEXT_BODY),
+    labelBox(questix.x + radius + 6, laneY - laneHalf - 6, text.crossingPoint, TEXT_SMALL),
+    {
+      x1: target.x + direction * (radius + 4),
+      y1: laneY,
+      x2: target.x + direction * (radius + 26),
+      y2: laneY,
+      pad: 4,
+    },
   ];
+  if (contact)
+    obstacles.push(
+      around({ x: (target.x + questix.x) / 2, y: (laneY + questix.y) / 2 }, radius + 12),
+    );
+  const closest = closestApproach(run, sample, stage);
+  if (closest)
+    obstacles.push(
+      around(closest.self, radius + 2),
+      around(closest.other, radius + 2),
+      closest.spot.area,
+    );
+  const clearance = crossingForecast(sample, run.config).current.clearance;
+  const stopAt = {
+    x: questix.x - clearance * stage.k * 0.7,
+    y: questix.y + clearance * stage.k * 0.7,
+  };
+  const status = contact
+    ? { content: '⚠ ' + text.contact, size: TEXT_BODY, color: '#ffb7a4', weight: 600 }
+    : { content: trackingStatusLabel(sample, true), size: TEXT_SMALL, color: SOFT_INK };
+  return placeLabels(stage, obstacles, [
+    {
+      at: questix,
+      content: 'QUESTiX',
+      size: TEXT_BODY,
+      color: '#a6e0cc',
+      gap: radius + 6,
+      halo: ROOM_FLOOR,
+    },
+    {
+      ...status,
+      at: questix,
+      // Right under the QUESTiX name, lined up with it.
+      first: ([name]) => [{ x: name.x, y: name.y + 18, anchor: name.anchor }],
+      gap: radius + 6,
+      halo: ROOM_FLOOR,
+    },
+    {
+      at: target,
+      content: text.otherRobot,
+      size: TEXT_BODY,
+      color: INK,
+      first: () => [
+        {
+          x: clamp(target.x, stage.left + 40, stage.right - 40),
+          y: laneY + laneHalf + 32,
+          anchor: 'middle',
+        },
+      ],
+      gap: radius + 8,
+      halo: ROOM_FLOOR,
+    },
+    run.config.rule === 'predict'
+      ? null
+      : {
+          // Just outside the circle's lower left edge, where that is free.
+          at: stopAt,
+          first: () => [{ x: stopAt.x - 4, y: stopAt.y + 14, anchor: 'end' }],
+          content: fill(text.stopCircle, { radius: clearance }),
+          size: TEXT_SMALL,
+          color: sceneRole('target').color,
+          gap: 4,
+          halo: ROOM_FLOOR,
+        },
+  ]);
 }
 
 function crossingGoal(sample, stage, laneY) {
@@ -1094,47 +1384,43 @@ function trackingScene(run, index, options) {
     // The measurement is drawn last and larger than before, with a white edge, so it never
     // hides behind (or looks like part of) the other robot.
     circle(measuredX, laneY, options.narrow ? 7 : 8, '#ffffff', measured.color, 2),
-    label(
-      clamp(targetX, stage.left + 40, stage.right - 40),
-      laneY + laneHalf + 32,
-      text.otherRobot,
-      {
-        color: INK,
-        size: TEXT_BODY,
-        anchor: 'middle',
-        halo: ROOM_FLOOR,
-      },
-    ),
-    label(questixX + stage.radius + 6, questixY + 4, 'QUESTiX', {
-      color: '#a6e0cc',
-      size: TEXT_BODY,
-      halo: ROOM_FLOOR,
-      bounds: stage.bounds,
-    }),
     contact
-      ? [
-          circle(
-            (targetX + questixX) / 2,
-            (laneY + questixY) / 2,
-            stage.radius + 10,
-            sceneRole('danger').color,
-            'none',
-            3,
+      ? circle(
+          (targetX + questixX) / 2,
+          (laneY + questixY) / 2,
+          stage.radius + 10,
+          sceneRole('danger').color,
+          'none',
+          3,
+        )
+      : nothing,
+    crossing
+      ? crossingNames(run, sample, stage, laneY, contact)
+      : [
+          label(
+            clamp(targetX, stage.left + 40, stage.right - 40),
+            laneY + laneHalf + 32,
+            text.otherRobot,
+            {
+              color: INK,
+              size: TEXT_BODY,
+              anchor: 'middle',
+              halo: ROOM_FLOOR,
+            },
           ),
-          label(questixX + stage.radius + 6, questixY + 22, '⚠ ' + text.contact, {
-            color: '#ffb7a4',
+          label(questixX + stage.radius + 6, questixY + 4, 'QUESTiX', {
+            color: '#a6e0cc',
             size: TEXT_BODY,
-            weight: 600,
             halo: ROOM_FLOOR,
             bounds: stage.bounds,
           }),
-        ]
-      : label(questixX + stage.radius + 6, questixY + 22, trackingStatusLabel(sample, crossing), {
-          color: SOFT_INK,
-          size: TEXT_SMALL,
-          halo: ROOM_FLOOR,
-          bounds: stage.bounds,
-        }),
+          label(questixX + stage.radius + 6, questixY + 22, trackingStatusLabel(sample, false), {
+            color: SOFT_INK,
+            size: TEXT_SMALL,
+            halo: ROOM_FLOOR,
+            bounds: stage.bounds,
+          }),
+        ],
   ];
   const description = trackingDescription(run, sample, direction);
   return html`<div class="sys-tracking-scene">
@@ -1280,43 +1566,94 @@ function shoulderFrame(stage) {
   ];
 }
 
-// The camera body with its own axes (d forward, h up), turned by its mounting angle.
-function cameraFrame(stage, camera, ghost = false) {
-  const text = copy.arm;
-  const origin = { x: stage.toX(camera.cameraX), y: stage.toY(camera.cameraZ) };
+// Where a camera and the tips of its two axes are on screen (px).
+function cameraPoints(stage, camera) {
   const forward = cameraToBody({ x: CAMERA_AXIS, z: 0 }, camera);
   const up = cameraToBody({ x: 0, z: CAMERA_AXIS }, camera);
+  return {
+    origin: { x: stage.toX(camera.cameraX), y: stage.toY(camera.cameraZ) },
+    forward: { x: stage.toX(forward.x), y: stage.toY(forward.z) },
+    up: { x: stage.toX(up.x), y: stage.toY(up.z) },
+  };
+}
+
+// The camera body with its own axes (d forward, h up), turned by its mounting angle. Its names
+// are placed by placeLabels(), clear of the arm; the camera as configured is named in the key only.
+function cameraFrame(stage, camera, ghost = false) {
+  const { origin, forward, up } = cameraPoints(stage, camera);
   const color = ghost ? sceneRole('measured').color : CAMERA_INK;
   const angle = -camera.cameraAngle;
   return svg`<g opacity=${ghost ? 0.85 : 1}>
     <g transform="translate(${origin.x} ${origin.y}) rotate(${angle})">
       ${box(-12, -7, 24, 14, ghost ? 'none' : '#6f7f86', { rx: 4, stroke: color, strokeWidth: 2, dash: ghost ? '4 3' : undefined })}
     </g>
-    ${arrow(origin.x, origin.y, stage.toX(forward.x), stage.toY(forward.z), color)}
-    ${arrow(origin.x, origin.y, stage.toX(up.x), stage.toY(up.z), color)}
-    ${
-      // The camera as configured is named in the key only: it sits next to the shoulder label.
-      ghost
-        ? nothing
-        : [
-            label(stage.toX(forward.x) + 4, stage.toY(forward.z) + 4, text.cameraForward, {
-              color,
-              size: TEXT_SMALL,
-              bounds: stage.bounds,
-            }),
-            label(stage.toX(up.x) + 6, stage.toY(up.z), text.cameraUp, {
-              color,
-              size: TEXT_SMALL,
-              bounds: stage.bounds,
-            }),
-            label(origin.x + 14, origin.y + 20, text.camera, {
-              color,
-              size: TEXT_SMALL,
-              bounds: stage.bounds,
-            }),
-          ]
-    }
+    ${arrow(origin.x, origin.y, forward.x, forward.y, color)}
+    ${arrow(origin.x, origin.y, up.x, up.y, color)}
   </g>`;
+}
+
+const around = (point, half, halfHeight = half) => ({
+  left: point.x - half,
+  right: point.x + half,
+  top: point.y - halfHeight,
+  bottom: point.y + halfHeight,
+});
+// The box around the 24 × 14 px camera body turned by its mounting angle, plus 1 px of air.
+function cameraBody(origin, degrees) {
+  const angle = (Math.abs(degrees) * Math.PI) / 180;
+  const [cos, sin] = [Math.cos(angle), Math.sin(angle)];
+  return around(origin, 12 * cos + 7 * sin + 1, 12 * sin + 7 * cos + 1);
+}
+
+// Everything in the arm scene a name must not sit on: the frame's axes and numbers, both arm
+// links and their joints, the object, the computed destination, the camera and its axes, and the
+// calibration markers. The thin dashed sight line may run under a name (its halo keeps it
+// readable); a leader line to a name further away would be harder to follow.
+function armObstacles(stage, points, run, settings) {
+  const { base, elbow, tip, goal, estimate, camera } = points;
+  const segment = (from, to, pad) => ({ x1: from.x, y1: from.y, x2: to.x, y2: to.y, pad });
+  const originX = stage.toX(0);
+  const originY = stage.toY(0);
+  const obstacles = [
+    segment({ x: originX, y: originY }, { x: stage.toX(ARM_RANGE.xMax - 8), y: originY }, 2),
+    segment({ x: originX, y: originY }, { x: originX, y: stage.toY(ARM_RANGE.zMax - 8) }, 2),
+    segment(base, elbow, 8),
+    segment(elbow, tip, 7),
+    ...[base, elbow, tip].map((joint) => around(joint, 9)),
+    around(goal, 14),
+    around(estimate, 11),
+    cameraBody(camera.origin, ACTUAL_CAMERA.cameraAngle),
+    segment(camera.origin, camera.forward, 4),
+    segment(camera.origin, camera.up, 4),
+  ];
+  for (let mm = ARM_TICK; mm <= ARM_RANGE.xMax - 20; mm += ARM_TICK)
+    obstacles.push(labelBox(stage.toX(mm), originY + 18, String(mm), TEXT_SMALL, 'middle'));
+  for (let mm = ARM_TICK; mm <= ARM_RANGE.zMax - 20; mm += ARM_TICK)
+    obstacles.push(labelBox(originX - 8, stage.toY(mm) + 4, String(mm), TEXT_SMALL, 'end'));
+  obstacles.push(
+    labelBox(stage.toX(ARM_RANGE.xMax - 8), originY - 8, copy.arm.xAxis, TEXT_SMALL, 'end'),
+    labelBox(originX + 8, stage.toY(ARM_RANGE.zMax - 8) + 4, copy.arm.zAxis, TEXT_SMALL),
+    labelBox(originX - 8, originY + 18, copy.arm.shoulder, TEXT_SMALL, 'end'),
+  );
+  if (run.topic === 'calibrate')
+    for (const marker of CALIBRATION_MARKERS) {
+      const at = { x: stage.toX(marker.x), y: stage.toY(marker.z) };
+      obstacles.push(around(at, 13));
+      if (settings && !sameCamera(settings, ACTUAL_CAMERA)) {
+        const placed = cameraToBody(bodyToCamera(marker), settingsCamera(settings));
+        const seen = { x: stage.toX(placed.x), y: stage.toY(placed.z) };
+        obstacles.push(around(seen, 11), segment(at, seen, 2));
+      }
+    }
+  if (settings && !sameCamera(settings, ACTUAL_CAMERA)) {
+    const ghost = cameraPoints(stage, settingsCamera(settings));
+    obstacles.push(
+      cameraBody(ghost.origin, Number(settings.cameraAngle)),
+      segment(ghost.origin, ghost.forward, 4),
+      segment(ghost.origin, ghost.up, 4),
+    );
+  }
+  return obstacles;
 }
 
 const sameCamera = (a, b) =>
@@ -1383,10 +1720,44 @@ function armScene(run, index, options) {
     sample.target,
     sample.estimate,
   ].map(toPoint);
-  const camera = toPoint({ x: ACTUAL_CAMERA.cameraX, z: ACTUAL_CAMERA.cameraZ });
+  const cameraAt = cameraPoints(stage, ACTUAL_CAMERA);
+  const camera = cameraAt.origin;
   const raw = run.topic === 'frames' && !run.config.transform;
   const moved = run.topic === 'feedback' && sample.target.x !== FIRST_TARGET.x;
   const settings = run.topic === 'calibrate' ? options.settings : null;
+  const before = { x: stage.toX(FIRST_TARGET.x), y: stage.toY(FIRST_TARGET.z) };
+  const obstacles = armObstacles(
+    stage,
+    { base, elbow, tip, goal, estimate, camera: cameraAt },
+    run,
+    settings,
+  );
+  if (moved) obstacles.push(around(before, 13));
+  const names = placeLabels(stage, obstacles, [
+    { at: goal, content: text.object, size: TEXT_BODY, color: target.color, weight: 600, gap: 16 },
+    {
+      at: estimate,
+      content: raw ? text.estimateRaw : text.estimate,
+      size: TEXT_SMALL,
+      color: measured.color,
+      gap: 13,
+    },
+    moved
+      ? { at: before, content: text.objectBefore, size: TEXT_SMALL, color: SOFT_INK, gap: 14 }
+      : null,
+    { at: camera, content: text.camera, size: TEXT_SMALL, color: CAMERA_INK, gap: 16 },
+    ...[
+      [cameraAt.forward, text.cameraForward],
+      [cameraAt.up, text.cameraUp],
+    ].map(([tip, content]) => ({
+      at: tip,
+      beside: { x: (tip.x + camera.x) / 2, y: (tip.y + camera.y) / 2 },
+      content,
+      size: TEXT_SMALL,
+      color: CAMERA_INK,
+      gap: 8,
+    })),
+  ]);
   const body = [
     shoulderFrame(stage),
     run.topic === 'calibrate' ? calibrationMarkers(stage, settings) : nothing,
@@ -1396,20 +1767,12 @@ function armScene(run, index, options) {
     cameraFrame(stage, ACTUAL_CAMERA),
     line(camera.x, camera.y, goal.x, goal.y, '#708995', 1.5, '5 5'),
     moved
-      ? [
-          box(stage.toX(FIRST_TARGET.x) - 11, stage.toY(FIRST_TARGET.z) - 11, 22, 22, 'none', {
-            rx: 3,
-            stroke: target.color,
-            strokeWidth: 1.5,
-            dash: '3 4',
-          }),
-          label(stage.toX(FIRST_TARGET.x), stage.toY(FIRST_TARGET.z) - 16, text.objectBefore, {
-            color: SOFT_INK,
-            size: TEXT_SMALL,
-            anchor: 'middle',
-            bounds: stage.bounds,
-          }),
-        ]
+      ? box(before.x - 11, before.y - 11, 22, 22, 'none', {
+          rx: 3,
+          stroke: target.color,
+          strokeWidth: 1.5,
+          dash: '3 4',
+        })
       : nothing,
     line(base.x, base.y, elbow.x, elbow.y, ARM_LINK, 12),
     line(elbow.x, elbow.y, tip.x, tip.y, ARM_FOREARM, 10),
@@ -1419,18 +1782,8 @@ function armScene(run, index, options) {
       stroke: target.color,
       strokeWidth: 2.5,
     }),
-    label(goal.x + 16, goal.y - 10, text.object, {
-      color: target.color,
-      size: TEXT_BODY,
-      weight: 600,
-      bounds: stage.bounds,
-    }),
     circle(estimate.x, estimate.y, 9, '#ffffff', measured.color, 2),
-    label(estimate.x + 13, estimate.y + 5, raw ? text.estimateRaw : text.estimate, {
-      color: measured.color,
-      size: TEXT_SMALL,
-      bounds: stage.bounds,
-    }),
+    names,
   ];
   return html`${stageSvg(stage, body, sceneDescription(sample))} ${armKey(run, settings)}`;
 }
@@ -1440,7 +1793,11 @@ function armKey(run, settings) {
   const calibrating = run.topic === 'calibrate';
   return sceneKey([
     { text: keys.object, role: 'target', mark: 'square' },
-    { text: keys.estimate, role: 'measured', mark: 'dot' },
+    {
+      text: run.topic === 'frames' && !run.config.transform ? keys.estimateRaw : keys.estimate,
+      role: 'measured',
+      mark: 'dot',
+    },
     { text: keys.shoulderFrame },
     { text: keys.cameraFrame },
     calibrating ? { text: keys.markers } : null,
@@ -1490,10 +1847,26 @@ function parcelParts(run, sample, stage) {
       halo: ROOM_FLOOR,
     }),
   ];
-  if (run.topic !== 'missing') return sample.hasParcel ? nothing : parcel(place.parcel);
+  // Once the robot carries the parcel, a faint square keeps where it was picked up.
+  const pickedUp = (point) => [
+    box(at(point).x - size / 2, at(point).y - size / 2, size, size, '#dab57e', {
+      rx: 3,
+      opacity: 0.35,
+    }),
+    label(at(point).x, at(point).y + 24, text.pickedUp, {
+      color: SOFT_INK,
+      size: TEXT_SMALL,
+      anchor: 'middle',
+      bounds: stage.bounds,
+      halo: ROOM_FLOOR,
+    }),
+  ];
+  if (run.topic !== 'missing')
+    return sample.hasParcel ? pickedUp(place.parcel) : parcel(place.parcel);
   const empty = at(place.parcel);
   const candidate = at(place.elsewhere);
   return [
+    sample.hasParcel ? pickedUp(place.elsewhere) : nothing,
     box(empty.x - size / 2, empty.y - size / 2, size, size, 'none', {
       rx: 3,
       stroke: SOFT_INK,
@@ -1617,6 +1990,7 @@ function roomKey(run) {
     run.topic === 'blocked' ? { text: keys.detour, role: 'plan' } : null,
     run.topic === 'missing' ? { text: keys.noParcel } : null,
     run.topic === 'missing' ? { text: keys.candidate } : null,
+    run.samples.some((sample) => sample.hasParcel) ? { text: keys.pickedUp } : null,
   ]);
 }
 
@@ -1683,6 +2057,9 @@ const STATE_LAYOUT = {
   ],
 };
 
+// State names and conditions in content/systems/render.json carry zero-width spaces (\u200b)
+// between phrases; with `word-break: keep-all` (hs-systems.css) a narrow box wraps only there or
+// at a space, never inside a word.
 function stateDiagram(run, index) {
   const text = copy.states;
   const edges = stateEdges(run);
@@ -1749,6 +2126,9 @@ const EVENT_LANES = [13, 27]; // baselines of the event labels
 const LABEL_GAP = 14; // px between two direct labels at line ends
 const NOISE = 1e-9; // values this close to zero are zero on an axis
 const ACTUAL_UNDER_WIDTH = 7; // px; the true value drawn under a measured line
+const TIME_TICK_SPACING = 70; // px wanted between two labelled seconds
+const MIN_TIME_TICKS = 3; // labelled ticks a time axis shows at least
+const MAX_TIME_TICKS = 12;
 const TRANSITION_KINDS = [
   'power-off',
   'brake',
@@ -1856,20 +2236,25 @@ function chartScales(run, chart, previous, threshold, plot) {
     values.filter((value) => value !== null).map((value) => (Math.abs(value) < NOISE ? 0 : value)),
     { integer: Boolean(chart.integer), ticks: plot.height < 140 ? 4 : 5 },
   );
-  const duration = Math.max(run.duration, previous?.duration ?? 0);
-  // Time runs from the start to the end of the run exactly; the ticks are round seconds inside it.
-  const rounded = niceScale([0, duration], { ticks: Math.max(3, Math.floor(plot.width / 70)) });
-  const x = {
-    ...rounded,
-    max: duration,
-    ticks: rounded.ticks.filter((time) => time <= duration + EPSILON),
-  };
+  const x = timeScale(Math.max(run.duration, previous?.duration ?? 0), plot.width);
   return {
     x,
     y,
     toX: scaleTo(x, plot.left, plot.left + plot.width),
     toY: scaleTo(y, plot.top + plot.height, plot.top),
   };
+}
+
+// Time runs from the start to the end of the run exactly; the ticks are round seconds inside it,
+// about one per 70 px and never fewer than three labelled ones (a narrow phone chart of an 8 s
+// run would otherwise get only 0 and 5).
+function timeScale(duration, width) {
+  for (let ticks = Math.max(3, Math.floor(width / TIME_TICK_SPACING)); ; ticks++) {
+    const rounded = niceScale([0, duration], { ticks, padding: 0 });
+    const inside = rounded.ticks.filter((time) => time <= duration + EPSILON);
+    if (inside.length >= MIN_TIME_TICKS || ticks >= MAX_TIME_TICKS)
+      return { ...rounded, max: duration, ticks: inside };
+  }
 }
 
 function chartGrid(scales, plot) {
@@ -1910,6 +2295,8 @@ function chartGrid(scales, plot) {
   ];
 }
 
+// The threshold line (or band). Its name is drawn by thresholdLabel() or, when no free spot is
+// found along the line, among the line-end labels of directLabels().
 function thresholdParts(threshold, scales, plot) {
   if (!threshold) return nothing;
   const style = chartRole('target');
@@ -1921,25 +2308,66 @@ function thresholdParts(threshold, scales, plot) {
       box_(plot.left, y, plot.width, low - y, style.color, 0.08),
       line(plot.left, y, right, y, style.color, 2, style.dash),
       line(plot.left, low, right, low, style.color, 2, style.dash),
-      label(right - 4, y - 5, threshold.label, {
-        color: style.color,
-        size: TEXT_SMALL,
-        anchor: 'end',
-        halo: '#ffffff',
-        weight: 600,
-      }),
     ];
   }
-  return [
-    line(plot.left, y, right, y, style.color, 2, style.dash),
-    label(right - 4, y - 5, threshold.label, {
-      color: style.color,
-      size: TEXT_SMALL,
-      anchor: 'end',
-      halo: '#ffffff',
-      weight: 600,
-    }),
-  ];
+  return line(plot.left, y, right, y, style.color, 2, style.dash);
+}
+
+// Everything drawn inside the plot that a label must not sit on, for the whole run (not only the
+// part played so far, so a label does not jump while the run plays): every data line of this run
+// and of the previous one, the event lines and the zero line.
+function plotObstacles(chart, sources, marks, scales, plot) {
+  const obstacles = [];
+  for (const source of sources)
+    for (const entry of chart.lines) {
+      const pad =
+        entry.role === 'actual' && chart.lines.length > 1 ? ACTUAL_UNDER_WIDTH / 2 + 2 : 3;
+      let last = null;
+      for (const sample of source.samples) {
+        const value = valueOf(sample, entry.key);
+        const point = value === null ? null : { x: scales.toX(sample.t), y: scales.toY(value) };
+        if (point && last)
+          obstacles.push({ x1: last.x, y1: last.y, x2: point.x, y2: point.y, pad });
+        last = point;
+      }
+    }
+  for (const mark of marks) {
+    const x = scales.toX(mark.t);
+    obstacles.push({ x1: x, y1: plot.top, x2: x, y2: plot.top + plot.height, pad: 3 });
+  }
+  if (scales.y.min < 0 && scales.y.max > 0) {
+    const zero = scales.toY(0);
+    obstacles.push({ x1: plot.left, y1: zero, x2: plot.left + plot.width, y2: zero, pad: 2 });
+  }
+  return obstacles;
+}
+
+/**
+ * Where a threshold's name goes: at the left end of its line, just above it or just below it,
+ * wherever no data line, event line or the zero line passes. `null` when both are taken; the
+ * name then joins the line-end labels on the right, which are pushed apart from each other.
+ */
+function thresholdSpot(threshold, obstacles, scales, plot) {
+  if (!threshold) return null;
+  const y = scales.toY(threshold.value);
+  const x = plot.left + 6;
+  for (const baseline of [y - 5, y + TEXT_SMALL + 3]) {
+    const area = labelBox(x, baseline, threshold.label, TEXT_SMALL);
+    const inside = area.top >= plot.top && area.bottom <= plot.top + plot.height;
+    if (inside && area.right <= plot.left + plot.width && !hits(grow(area, 1), obstacles))
+      return { x, y: baseline };
+  }
+  return null;
+}
+
+function thresholdLabel(threshold, spot) {
+  if (!threshold || !spot) return nothing;
+  return label(spot.x, spot.y, threshold.label, {
+    color: chartRole('target').color,
+    size: TEXT_SMALL,
+    halo: '#ffffff',
+    weight: 600,
+  });
 }
 
 const box_ = (x, y, width, height, fill, opacity) => box(x, y, width, height, fill, { opacity });
@@ -1977,13 +2405,21 @@ function eventParts(marks, now, scales, plot) {
 }
 
 // Short labels at the end of each drawn line, pushed apart so they never sit on each other.
-function directLabels(chart, seen, scales, plot) {
+// `extras` ({text, color, x, y}) join the same push-apart set: the previous run's "前回", and a
+// threshold's name when no free spot was found along its line.
+function directLabels(chart, seen, scales, plot, extras = []) {
   const labels = [];
   for (const entry of chart.lines) {
     const last = seen.findLast((sample) => valueOf(sample, entry.key) !== null);
     if (!last) continue;
-    labels.push({ entry, x: scales.toX(last.t), y: scales.toY(valueOf(last, entry.key)) - 6 });
+    labels.push({
+      text: entry.short,
+      color: chartRole(entry.role).color,
+      x: scales.toX(last.t),
+      y: scales.toY(valueOf(last, entry.key)) - 6,
+    });
   }
+  labels.push(...extras);
   const top = plot.top + 10;
   const bottom = plot.top + plot.height - 4;
   labels.sort((a, b) => a.y - b.y);
@@ -1995,10 +2431,10 @@ function directLabels(chart, seen, scales, plot) {
     const limit = position === labels.length - 1 ? bottom : labels[position + 1].y - LABEL_GAP;
     labels[position].y = Math.min(labels[position].y, limit);
   }
-  return labels.map(({ entry, x, y }) => {
+  return labels.map(({ text, color, x, y }) => {
     const nearLeft = x < plot.left + 90;
-    return label(nearLeft ? x + 6 : x - 4, y, entry.short, {
-      color: chartRole(entry.role).color,
+    return label(nearLeft ? x + 6 : x - 4, y, text, {
+      color,
       size: TEXT_SMALL,
       anchor: nearLeft ? 'start' : 'end',
       weight: 600,
@@ -2073,7 +2509,22 @@ function systemChart(run, index, chartIndex = 0, previous = null, options = DEFA
   const scales = chartScales(run, chart, previous, threshold, plot);
   const quantity = chart.axis ?? chart.title;
   const now = seen.at(-1).t;
-  const previousLabelY = previous ? directPreviousLabel(chart, previous, scales) : null;
+  const marks = chart.band === 'status' ? [] : chartEvents(run);
+  const sources = [run, previous].filter(Boolean);
+  const spot = threshold
+    ? thresholdSpot(threshold, plotObstacles(chart, sources, marks, scales, plot), scales, plot)
+    : null;
+  const extras = [
+    previous ? previousLabel(chart, previous, scales) : null,
+    threshold && !spot
+      ? {
+          text: threshold.label,
+          color: chartRole('target').color,
+          x: plot.left + plot.width,
+          y: scales.toY(threshold.value) - 5,
+        }
+      : null,
+  ].filter(Boolean);
   return html`<div class="sys-chart">
     <p class="sys-chart-yaxis">${fill(copy.chart.yAxis, { quantity, unit: chart.unit })}</p>
     <svg
@@ -2085,7 +2536,7 @@ function systemChart(run, index, chartIndex = 0, previous = null, options = DEFA
       <rect width=${width} height=${height} fill="#ffffff" />
       ${chart.band === 'status' ? stateBand(run, seen, scales, plot) : nothing}
       ${chartGrid(scales, plot)} ${thresholdParts(threshold, scales, plot)}
-      ${chart.band === 'status' ? nothing : eventParts(chartEvents(run), now, scales, plot)}
+      ${chart.band === 'status' ? nothing : eventParts(marks, now, scales, plot)}
       ${
         previous
           ? chart.lines.map((entry) => {
@@ -2101,7 +2552,6 @@ function systemChart(run, index, chartIndex = 0, previous = null, options = DEFA
             })
           : nothing
       }
-      ${previousLabelY}
       ${chart.lines.map((entry) => {
         const style = chartRole(entry.role);
         // With a measured line on top, the true value is a wide translucent band under it, so
@@ -2119,7 +2569,7 @@ function systemChart(run, index, chartIndex = 0, previous = null, options = DEFA
           vector-effect="non-scaling-stroke"
         />`;
       })}
-      ${directLabels(chart, seen, scales, plot)}
+      ${thresholdLabel(threshold, spot)} ${directLabels(chart, seen, scales, plot, extras)}
       ${line(scales.toX(now), plot.top, scales.toX(now), plot.top + plot.height, '#627581', 1, '3 4')}
     </svg>
     <p class="sys-chart-xaxis">${copy.chart.xAxis}</p>
@@ -2127,17 +2577,17 @@ function systemChart(run, index, chartIndex = 0, previous = null, options = DEFA
   </div>`;
 }
 
-// "前回" once, at the end of the previous run's first line.
-function directPreviousLabel(chart, previous, scales) {
+// "前回" once, just below the end of the previous run's first line, as a line-end label.
+function previousLabel(chart, previous, scales) {
   const key = chart.lines[0]?.key;
   const last = previous.samples.findLast((sample) => valueOf(sample, key) !== null);
-  if (!last) return nothing;
-  return label(scales.toX(last.t) - 4, scales.toY(valueOf(last, key)) + 16, copy.chart.previous, {
+  if (!last) return null;
+  return {
+    text: copy.chart.previous,
     color: chartRole('previous').color,
-    size: TEXT_SMALL,
-    anchor: 'end',
-    halo: '#ffffff',
-  });
+    x: scales.toX(last.t),
+    y: scales.toY(valueOf(last, key)) + 16,
+  };
 }
 
-export { SYSTEM_CHARTS, systemChart, systemScene, stateDiagram, chartFor };
+export { SYSTEM_CHARTS, systemChart, systemScene, stateDiagram, chartFor, timeScale };

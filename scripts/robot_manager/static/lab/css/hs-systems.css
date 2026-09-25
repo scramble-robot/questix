@@ -269,6 +269,13 @@
   font-weight: 650;
   font-variant-numeric: tabular-nums;
 }
+/* contact is danger, never a caution: red with a warning sign (palette role "danger") */
+.sys-drive[data-mode='danger'] strong {
+  color: var(--scene-role-danger);
+}
+.sys-danger-icon {
+  margin-right: 0.3em;
+}
 @media (max-width: 600px) {
   .sys-drive {
     grid-template-columns: 1fr;
@@ -389,6 +396,13 @@ ul.sys-chart-legend li {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
   gap: 4px 6px;
   align-items: center;
+}
+/* Names and conditions wrap only between words: at spaces and at the zero-width spaces the
+   content puts between phrases (U+200B in 「通路が空くまで|待つ」), never inside 「あり」. */
+.sys-state,
+.sys-edge {
+  word-break: keep-all;
+  overflow-wrap: anywhere;
 }
 .sys-state {
   border: 2px solid #9fb3b9;
