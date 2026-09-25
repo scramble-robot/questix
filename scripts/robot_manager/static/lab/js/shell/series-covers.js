@@ -1,5 +1,5 @@
 import { loadJson } from '../core/content.js';
-import { QUESTIX_VIEWS, questixImageUrl, questixSideLayout } from '../core/questix-art.js';
+import { QUESTIX_VIEWS, questixImageUrl, questixSideLayout } from '../core/questix-views.js';
 import { escapeHtml } from './html-escape.js';
 
 // Cover illustration of every course on the catalogue page. The same robot identifies the

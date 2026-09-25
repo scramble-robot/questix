@@ -1,6 +1,6 @@
 import { html, svg, nothing } from '../vendor/lit-html.js';
 import { drawRobot } from '../core/renderer.js';
-import { drawQuestixSide, questixSideLayout } from '../core/questix-art.js';
+import { drawQuestixSide, questixSideLayout } from '../core/questix-views.js';
 import { DURATION, STOP_DISTANCE, DRAG_START, BLOCK_WINDOW } from './core.js';
 import { fillSentence as fill } from '../core/content.js';
 import { CHART_ROLE_COLORS, roleStyle } from '../core/palette.js';

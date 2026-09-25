@@ -9,7 +9,7 @@
 // The arena and camera canvases are fixed elements of index.html (inside the hidden
 // #simulation block) that every lesson moves into its own layout, so they are looked up once
 // here; the two sensor overlay checkboxes sit beside them for the same reason.
-import { drawQuestixTop } from './questix-art.js';
+import { drawQuestixTop } from './questix-views.js';
 import { loadJson } from './content.js';
 
 const copy = await loadJson('content/core/renderer.json');

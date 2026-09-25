@@ -1,5 +1,5 @@
 import { loadJson } from '../core/content.js';
-import { drawQuestixTop } from '../core/questix-art.js';
+import { drawQuestixTop } from '../core/questix-views.js';
 
 // Sensor figures of the reinforcement-learning lab: the LiDAR sweep and the time plot behind the
 // "センサーの値を見る" panel. Both draw from plain data handed in by lab.js and hold no state.

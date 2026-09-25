@@ -1,9 +1,7 @@
 import { ARM_OBSTACLE, armFK, armSegmentDistance, so101FK } from './core.js';
 import { roleStyle } from '../core/palette.js';
 
-// questix-art.js imports lit-html, which needs a document. test/arm-scene-frame.test.mjs imports
-// this module in Node for armSceneFrame, so the robot drawing is only loaded in a browser.
-const questixArt = typeof document === 'undefined' ? null : await import('../core/questix-art.js');
+import { drawQuestixSide, questixSideLayout } from '../core/questix-views.js';
 
 // Canvas drawings of the arm course: the side view of the teaching model and the 3-D sketch of
 // SO-ARM101. Both draw from data handed in by ui.js and keep no state of their own.
@@ -154,11 +152,11 @@ function link(ctx, from, to, color, size, ghost = false) {
 function robot(ctx, x, y, size = 1, { plateBelow, length } = SIDE_VIEW_BASE) {
   const width = length * size;
   const plate = y + plateBelow * size;
-  const chassisHeight = -questixArt.questixSideLayout(x, 0, width, 'base').top; // top above 0
+  const chassisHeight = -questixSideLayout(x, 0, width, 'base').top; // top above 0
   ctx.save();
   ctx.shadowColor = BASE_HALO;
   ctx.shadowBlur = Math.max(4, 6 * size);
-  questixArt.drawQuestixSide(ctx, x, plate + chassisHeight, width, 'base');
+  drawQuestixSide(ctx, x, plate + chassisHeight, width, 'base');
   ctx.restore();
   line(ctx, { x, y: plate }, { x, y: y - 4 * size }, '#9bb4bb', 13 * size);
 }

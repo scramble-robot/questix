@@ -1,5 +1,5 @@
 import { drawRobot } from '../core/renderer.js';
-import { drawQuestixSide } from '../core/questix-art.js';
+import { drawQuestixSide } from '../core/questix-views.js';
 import { drawSlamCamera } from './camera.js';
 
 // Canvas drawing of the SLAM experiment: the two maps (reference and estimate), the sensor chart

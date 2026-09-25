@@ -1,5 +1,5 @@
 import { html, svg, nothing, unsafeHTML } from '../vendor/lit-html.js';
-import { questixImageUrl } from '../core/questix-art.js';
+import { questixImageUrl } from '../core/questix-views.js';
 import { seriesCover } from './series-covers.js';
 import { RUN_MODE_ORDER, runModeBadgeHtml } from './run-mode.js';
 

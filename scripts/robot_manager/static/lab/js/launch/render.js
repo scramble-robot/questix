@@ -1,5 +1,5 @@
 import { LAUNCH_SPEC, LAUNCH_TOLERANCE, launchGroups, launchHit, launchRangeAxis } from './core.js';
-import { QUESTIX_VIEWS, drawQuestixSide, questixSideLayout } from '../core/questix-art.js';
+import { QUESTIX_VIEWS, drawQuestixSide, questixSideLayout } from '../core/questix-views.js';
 import { formatNumber } from '../core/dom.js';
 import { CHART_ROLE_COLORS, SCENE_ROLE_COLORS, roleStyle } from '../core/palette.js';
 import { formatTick } from '../core/chart-scale.js';
