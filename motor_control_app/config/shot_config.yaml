@@ -22,6 +22,25 @@ shot_component:
     emergency_stop_topic: "/emergency_stop"
     emergency_stop_timeout_sec: 1.0  # 受信途絶でfail-safe teardownするまでの秒数（0以下で無効）
 
+    # QUESTiX LAB launcher input / QUESTiX LAB からのチルト・射出
+    # accept_lab_input: true のときだけ /shot/lab/tilt (std_msgs/Float32, 目標チルト角 [deg],
+    #   tilt_min_angle..tilt_max_angle に制限) と /shot/lab/fire (std_msgs/Empty, 1発射出) を
+    #   購読する。練習用の起動 (questix_core.launch.xml, enable_autoreferee=false) だけが launch
+    #   引数で true にする。競技 (AutoReferee) では常に false。既定値はこの YAML の false。
+    #   Subscribed only when true; only practice launches set it (never competition).
+    #   lab の要求は ACTIVE・非常停止解除・射撃中でないときだけ適用し、断った要求は溜めない。
+    #   Lab requests apply only while ACTIVE, E-stop released and not shooting; never queued.
+    # lab_joy_quiet_sec: コントローラの射出ボタン・チルト入力が最後に使われてからこの秒数は
+    #   lab の要求を受け付けない (コントローラ優先)。
+    #   The controller's fire button and tilt input must be idle this long.
+    # lab_min_fire_interval_sec: lab の射出は直前の射出 (コントローラ含む) からこの秒数以上あける。
+    #   Minimum time between the last shot (any source) and a lab shot.
+    # 状態は /shot/status (std_msgs/String, JSON, 5 Hz と変化時) に常に出る。
+    # Status: /shot/status (JSON, 5 Hz and on change), published regardless of this setting.
+    accept_lab_input: false
+    lab_joy_quiet_sec: 1.0
+    lab_min_fire_interval_sec: 2.0
+
     port: "/dev/servo"
     baudrate: 115200
     tilt_servo_id: 11
