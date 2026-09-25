@@ -111,6 +111,25 @@
     font-weight: 700;
     color: #1e5350;
   }
+  /* 「教材 ⌄」 on one line, the same height as the buttons beside it (base.css pads every details). */
+  body .course-switcher {
+    padding: 0;
+  }
+  body .course-switcher > summary {
+    flex-direction: row;
+    align-items: center;
+    padding-right: 30px;
+  }
+  body .course-switcher > summary::after {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    line-height: 1;
+    transform: translateY(-70%); /* ⌄ sits low in its line box */
+  }
+  body .course-switcher[open] > summary::after {
+    transform: translateY(-30%) rotate(180deg);
+  }
 }
 @media (max-width: 600px) {
   /* The labels say it; the sentence behind them is on wider screens and in each label's title. */
