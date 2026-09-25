@@ -81,6 +81,15 @@ header h1 {
   color: inherit;
 }
 
+.lab-records-full {
+  color: var(--orange);
+}
+
+.lab-records-dir {
+  margin-top: 0.3rem;
+  overflow-wrap: anywhere;
+}
+
 .lab-qr-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

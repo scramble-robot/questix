@@ -12,7 +12,12 @@ take over at any time. ``/api/lab/drive`` is the teacher's off switch. Competiti
 driving off; going back to practice mode turns it on again.
 
 The status reports what the running bridge itself says (``GET /api/state`` on its port), so the
-tab shows whether pages can really drive now, also for a bridge started by hand. The output of
+tab shows whether pages can really drive now, also for a bridge started by hand, and how many
+records the bridge keeps on the robot (its ``records``: count, size, quota, folder).
+
+The bridge keeps the pages' records in ``records_dir`` (its own default in
+questix_lab_bridge/config/lab_bridge.yaml unless ``RECORDS_DIR`` is set in lab.env) and lists
+and converts the rosbags this manager records: it is given the recorder's ``OUTPUT_DIR``. The output of
 a bridge started here goes to ``LOG_FILE``; its last lines are shown when it stopped or failed.
 """
 
@@ -34,6 +39,8 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, field_validator
+
+from robot_manager import recorder
 
 CONFIG_DIR = Path(os.environ.get("QUESTIX_CONFIG_DIR", "/etc/questix_robot"))
 LAUNCH_ENV_FILE = CONFIG_DIR / "launch.env"
@@ -74,6 +81,11 @@ _DEFAULT_CONFIG = {
     # (/api/lab/drive), competition mode switches it off and practice mode on again. Changed
     # only through set_drive and the mode switches, never by the settings form.
     "ALLOW_DRIVE": "true",
+    # Folder where the bridge keeps QUESTiX LAB records (pages' saves, controller driving, rosbag
+    # conversions). Empty = the bridge's own default (records_dir in
+    # questix_lab_bridge/config/lab_bridge.yaml, ~/.local/share/questix/lab-records of the user
+    # running it). Set by hand in lab.env; an absolute path.
+    "RECORDS_DIR": "",
 }
 _ABS_PATH_RE = re.compile(r"^/[a-zA-Z0-9_/.~-]*$")
 _TOPIC_RE = re.compile(r"^/[A-Za-z0-9_/]*$")
@@ -205,6 +217,16 @@ def _competition_mode() -> bool:
         return False
 
 
+def _rosbag_dir() -> Optional[str]:
+    """Return the recorder's OUTPUT_DIR (rosbag.env), for the bridge to list; None if unusable."""
+    try:
+        output_dir = recorder._read_config().get("OUTPUT_DIR", "")
+    except OSError as error:
+        logger.warning("QUESTiX LAB: rosbag.env unreadable, the bridge uses its default: %s", error)
+        return None
+    return output_dir if _ABS_PATH_RE.match(output_dir) else None
+
+
 def _build_command(config: dict[str, str]) -> str:
     """Build the `bash -lc` script that sources ROS and runs the bridge node."""
     launch_env = _read_env_file(LAUNCH_ENV_FILE)
@@ -234,6 +256,18 @@ def _build_command(config: dict[str, str]) -> str:
         args += ["-p", f"camera_topic:={camera_topic}"]
     if config.get("ALLOW_DRIVE") == "true":
         args += ["-p", "allow_drive:=true"]
+    records_dir = config.get("RECORDS_DIR", "")
+    if records_dir:
+        if not _ABS_PATH_RE.match(records_dir):
+            raise HTTPException(
+                status_code=400,
+                detail=f"{LAB_ENV_FILE} の RECORDS_DIR が不正です（/ で始まるパスにしてください）",
+            )
+        args += ["-p", f'records_dir:="{records_dir}"']
+    rosbag_dir = _rosbag_dir()
+    if rosbag_dir:
+        # The bags this manager records (録画 tab), listed and converted for the lessons.
+        args += ["-p", f'rosbag_dir:="{rosbag_dir}"']
     return (
         "source /opt/ros/jazzy/setup.bash && "
         f'source "{robot_ws}/install/setup.bash" 2>/dev/null; '

@@ -645,6 +645,7 @@ async function refreshLabStatus() {
   document.getElementById("lab-stop").disabled = !data.running;
   showLabLog(data, serving);
   showLabDrive(data);
+  showLabRecords(data.bridge);
   if (!labConfigLoaded) {
     document.getElementById("lab-camera").value = data.config.CAMERA_TOPIC || "";
     document.getElementById("lab-autostart").checked = data.config.AUTOSTART === "true";
@@ -719,6 +720,30 @@ function showLabLog(data, serving) {
   if (data.last_stop_reason === "start_failed" || data.last_stop_reason === "exited") {
     details.open = true;
   }
+}
+
+// "ロボットに保存された記録": what the running bridge keeps (its /api/state records), so the
+// teacher sees how full the folder is and where to collect the pupils' records.
+function showLabRecords(bridge) {
+  const records = bridge && bridge.records;
+  const value = document.getElementById("lab-records");
+  const dir = document.getElementById("lab-records-dir");
+  if (!records || !records.dir) {
+    // records.dir null: the bridge runs with records_dir "" (keeps nothing).
+    value.textContent = records ? "保存しない設定です" : "—";
+    dir.hidden = true;
+    return;
+  }
+  const limit = `${Math.round(records.limit_bytes / (1024 * 1024))} MB`;
+  value.textContent =
+    `${records.count}件・${fmtBytes(records.used_bytes)}（上限 ${limit}）` +
+    (records.save ? "" : "・いっぱいか書き込めないため、教材から保存できません");
+  value.classList.toggle("lab-records-full", !records.save);
+  dir.textContent =
+    `保存先フォルダ: ${records.dir}` +
+    (records.auto_record ? "（コントローラーでの走行も自動で記録します）" : "") +
+    (records.rosbag_dir ? `／録画（rosbag）: ${records.rosbag_dir}` : "");
+  dir.hidden = false;
 }
 
 // Why pages cannot drive right now, from the bridge's drive_state.blockers, for the teacher.

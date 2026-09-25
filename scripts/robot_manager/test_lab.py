@@ -16,6 +16,8 @@ def lab(tmp_path, monkeypatch):
     # Never ask a bridge that happens to run on this machine, never write to the real ~/.cache.
     monkeypatch.setattr(module, "_bridge_state", lambda: None)
     monkeypatch.setattr(module, "LOG_FILE", tmp_path / "cache" / "lab-bridge.log")
+    # The recorder's rosbag.env (OUTPUT_DIR is passed to the bridge): never the machine's own.
+    monkeypatch.setattr(module.recorder, "ROSBAG_ENV_FILE", tmp_path / "rosbag.env")
     return module
 
 
@@ -47,7 +49,8 @@ def test_config_round_trip_and_validation(lab):
     assert lab.set_config(lab.LabConfig(CAMERA_TOPIC=" /cam/compressed ")) == {
         "CAMERA_TOPIC": "/cam/compressed", "AUTOSTART": "true"}
     assert lab._read_config() == {
-        "CAMERA_TOPIC": "/cam/compressed", "AUTOSTART": "true", "ALLOW_DRIVE": "true"}
+        "CAMERA_TOPIC": "/cam/compressed", "AUTOSTART": "true", "ALLOW_DRIVE": "true",
+        "RECORDS_DIR": ""}
     lab.set_config(lab.LabConfig(AUTOSTART=False))
     assert lab._read_config()["AUTOSTART"] == "false"
     with pytest.raises(ValueError):
@@ -92,7 +95,8 @@ def test_competition_mode_turns_autostart_off_and_stops_the_bridge(lab, monkeypa
     assert signals == [(_FakeProcess.pid, lab.signal.SIGINT)]
     # Driving from the lessons is switched off with the stream.
     assert lab._read_config() == {
-        "CAMERA_TOPIC": "/cam/compressed", "AUTOSTART": "false", "ALLOW_DRIVE": "false"}
+        "CAMERA_TOPIC": "/cam/compressed", "AUTOSTART": "false", "ALLOW_DRIVE": "false",
+        "RECORDS_DIR": ""}
     status = lab.get_status()
     assert status["running"] is False and status["last_stop_reason"] == "competition_mode"
     lab.disable_for_competition()  # nothing running, already off: no error
@@ -139,7 +143,8 @@ def test_practice_mode_turns_autostart_back_on_and_starts_the_bridge(lab, monkey
     lab.enable_for_practice()
     # Driving stays off: it is turned on deliberately, never by a mode switch.
     assert lab._read_config() == {
-        "CAMERA_TOPIC": "/cam/compressed", "AUTOSTART": "true", "ALLOW_DRIVE": "true"}
+        "CAMERA_TOPIC": "/cam/compressed", "AUTOSTART": "true", "ALLOW_DRIVE": "true",
+        "RECORDS_DIR": ""}
     assert started == [True]
 
 
@@ -435,3 +440,38 @@ def test_forbidding_restarts_the_bridge_even_if_lab_env_cannot_be_written(
     status = lab.set_drive(lab.DriveRequest(allow=False))
     assert len(started) == 1 and "allow_drive" not in started[0]
     assert status["drive_allowed"] is False and status["config_error"]
+
+
+def test_bridge_lists_the_recorders_rosbags(lab, tmp_path):
+    # Without rosbag.env: the recorder's default folder.
+    script = lab._build_command({"CAMERA_TOPIC": ""})
+    assert '-p rosbag_dir:="/var/lib/questix/rosbags"' in script
+    (tmp_path / "rosbag.env").write_text("OUTPUT_DIR=/data/bags\n")
+    assert '-p rosbag_dir:="/data/bags"' in lab._build_command({"CAMERA_TOPIC": ""})
+    # A path the shell could misread is not passed on (the bridge keeps its default).
+    (tmp_path / "rosbag.env").write_text("OUTPUT_DIR=/data/$(reboot)\n")
+    assert "rosbag_dir" not in lab._build_command({"CAMERA_TOPIC": ""})
+
+
+def test_records_dir_is_the_bridges_default_unless_set(lab, tmp_path):
+    assert "records_dir" not in lab._build_command(lab._read_config())
+    (tmp_path / "lab.env").write_text('RECORDS_DIR="/srv/questix/lab-records"\n')
+    config = lab._read_config()
+    assert config["RECORDS_DIR"] == "/srv/questix/lab-records"
+    assert '-p records_dir:="/srv/questix/lab-records"' in lab._build_command(config)
+    # The settings form keeps it.
+    lab.set_config(lab.LabConfig(CAMERA_TOPIC="", AUTOSTART=True))
+    assert lab._read_config()["RECORDS_DIR"] == "/srv/questix/lab-records"
+    with pytest.raises(HTTPException) as error:
+        lab._build_command({"RECORDS_DIR": "relative; reboot"})
+    assert "RECORDS_DIR" in error.value.detail
+
+
+def test_status_passes_the_bridges_records_summary_on(lab, monkeypatch):
+    records = {"dir": "/home/ubuntu/.local/share/questix/lab-records", "count": 3,
+               "used_bytes": 1234567, "limit_bytes": 524288000, "save": True,
+               "auto_record": True, "rosbag_dir": "/var/lib/questix/rosbags"}
+    state = {"read_only": True, "clients": 0, "max_clients": 24, "records": records}
+    monkeypatch.setattr(lab, "_bridge_state", lambda: state)
+    lab._proc = _FakeProcess()
+    assert lab.get_status()["bridge"]["records"] == records
