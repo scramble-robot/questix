@@ -62,6 +62,7 @@ const RECORD_TARGETS = [
   { id: 'measurement-slam', course: 'slam', topic: null, needs: ['odom'] },
   { id: 'slam', course: 'slam', topic: null, needs: ['scan', 'drive'] },
   { id: 'planning-room', course: 'planning', topic: 'room', needs: ['scan', 'odom'] },
+  { id: 'motor-bench', course: 'motor', topic: 'real', needs: ['drive', 'twist'] },
 ];
 
 class RecordsError extends Error {}

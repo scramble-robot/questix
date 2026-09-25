@@ -226,12 +226,14 @@ test('a lesson record opens in its lesson; free drives, bags and unknown ones wh
     'measurement-slam',
     'slam',
     'planning-room',
+    'motor-bench',
   ]);
   // A bag with only the wheels and the command: the lessons that need the LiDAR are left out.
   const bag = entry({ source: 'rosbag-cache', lesson: null });
   assert.deepEqual(ids(targetsFor(bag, ['drive', 'twist'])), [
     'control-speed',
     'measurement-control',
+    'motor-bench',
   ]);
   assert.equal(lessonKey(entry({ lesson: 'something-new' })), 'unknown');
   assert.ok(targetsFor(entry({ lesson: 'something-new' })).length > 0);

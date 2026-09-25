@@ -42,6 +42,7 @@
     "control-distance": "フィードバック制御（壁の前で止める）",
     "measurement-control": "測定ラボ（速さの往復）",
     "measurement-slam": "測定ラボ（決めた距離を走る）",
+    "motor-bench": "モーター（駆動輪を台の上で回す）",
     "slam": "自己位置推定（実機のログ）",
     "planning-room": "経路計画（測った部屋）",
     "bench": "動作確認",

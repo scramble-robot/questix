@@ -1,7 +1,25 @@
 import { render } from '../vendor/lit-html.js';
-import { loadJson, loadText } from '../core/content.js';
+import { loadJson, loadText, fillSentence as fill } from '../core/content.js';
 import { downloadFile } from '../core/dom.js';
 import { revealElement, revealIfHidden } from '../core/reveal.js';
+import { createLiveSession } from '../live/live-session.js';
+import { forwardRpm } from '../live/capture-core.js';
+import { liveLink } from '../live/capture.js';
+import { driveModel } from '../live/drive-link.js';
+import { programSeconds } from '../live/drive-core.js';
+import { openRobotDialog } from '../live/live-ui.js';
+import { registerRecordTarget, revealAfterRender } from '../live/record-targets.js';
+import { stateMemo } from '../live/robot-state.js';
+import {
+  BENCH_PERCENTS,
+  BENCH_HOLD,
+  SETTLE_SECONDS,
+  benchSteps,
+  benchPlan,
+  benchStepAt,
+  benchTable,
+  benchSummary,
+} from './bench-core.js';
 import {
   MOTOR_TOPICS,
   PLAYED_TOPICS,
@@ -19,8 +37,11 @@ import { reportLessonProgress } from '../shell/lesson-progress.js';
 
 // Motor course (電気で回転を生み出す): state and behaviour. view.js turns the model into markup,
 // render.js draws the figures, core.js simulates. Texts live in content/motor.json and
-// content/motor/*.html. The course never talks to the robot: its last topic plans a measurement
-// and points to the shared measurement lab (js/systems/measurement-lab.js) for the typed data.
+// content/motor/*.html. Its last topic plans a measurement, points to the shared measurement lab
+// (js/systems/measurement-lab.js) for typed data and, on the real robot, measures the drive
+// wheels lifted on a stand: the page commands a staircase of speeds through js/live (live-session,
+// whose drive-link.js is the only sender; bench-core.js turns the recording into the table) with
+// the 「実機の状態」 panel (js/live/robot-state.js) on screen.
 
 const copy = await loadJson('content/motor.json');
 const fragments = {
@@ -54,6 +75,12 @@ const states = new Map(
     },
   ]),
 );
+
+// The bench measurement of the drive wheels (topic `real`): the table from the last recording.
+const bench = { rows: [], summary: null };
+const BENCH_RECORD_SECONDS = 40; // 「記録だけする」: the learner drives with the controller
+const BENCH_MIN_HOLD_SECONDS = 2; // said in the sentence when no step was found
+const MEMO_PLACE = 'motor-real';
 
 let topicId = MOTOR_TOPICS[0].id;
 const structure = { step: 0, coil: 0 };
@@ -92,6 +119,144 @@ function runModel(current) {
   };
 }
 
+// --- Bench measurement of the drive wheels (topic `real`) ---------------------------------------
+
+// The fastest forward speed the bridge lets a page ask for, and the robot's wheel geometry. Read
+// from drive-link / the link itself: the session's model() asks benchDrive.program() for its text.
+const benchLimits = () => driveModel().limits;
+const benchConfig = () => liveLink().config;
+const stepsText = () => BENCH_PERCENTS.join('→');
+const rpmOf = (linear) => {
+  const config = benchConfig();
+  return config ? forwardRpm(linear, config).toFixed(1) : '—';
+};
+
+const benchDrive = {
+  startLabel: copy.bench.start,
+  confirmLabel: copy.bench.confirm,
+  program() {
+    const limits = benchLimits();
+    if (!(limits?.linear > 0))
+      return fill(copy.bench.programUnknown, { steps: stepsText(), hold: BENCH_HOLD });
+    return fill(copy.bench.program, {
+      steps: stepsText(),
+      hold: BENCH_HOLD,
+      total: Math.round(programSeconds(benchSteps(limits.linear))),
+      linear: limits.linear.toFixed(2),
+      rpm: rpmOf(limits.linear),
+    });
+  },
+  placement: () => copy.bench.placement,
+  conditions() {
+    const linear = benchLimits()?.linear ?? 0;
+    return {
+      maxLinear: linear,
+      label: fill(copy.bench.conditions, { linear: linear.toFixed(2), steps: stepsText() }),
+    };
+  },
+  plan() {
+    const limits = benchLimits();
+    if (!(limits?.linear > 0)) throw new Error(copy.bench.noLimits);
+    return benchPlan(limits.linear);
+  },
+};
+
+// A recording (this page's run, the controller's, a file or a record on the robot) becomes the
+// table; one without a steady step leaves the table on screen as it was.
+function applyBench(recording) {
+  let table;
+  try {
+    table = benchTable(recording);
+  } catch (error) {
+    return { ok: false, note: error.message };
+  }
+  if (!table.rows.length)
+    return { ok: false, note: fill(copy.bench.noSteps, { seconds: BENCH_MIN_HOLD_SECONDS }) };
+  bench.rows = table.rows;
+  bench.summary = benchSummary(table.rows);
+  const notes = [fill(copy.bench.filled, { count: table.rows.length })];
+  if (table.skipped) notes.push(fill(copy.bench.skipped, { count: table.skipped }));
+  return { ok: true, note: notes.join(' ') };
+}
+
+const benchSession = createLiveSession({
+  slot: 'motor-bench',
+  lesson: 'motor-bench',
+  needs: ['drive', 'twist'],
+  seconds: BENCH_RECORD_SECONDS,
+  countStream: 'drive',
+  finishOnStop: true,
+  recordLabel: copy.bench.recordLabel,
+  stopLabel: copy.bench.stopLabel,
+  failed: copy.bench.failed,
+  apply: applyBench,
+  update: () => {
+    if (topicId === 'real') update();
+  },
+  drive: benchDrive,
+  reportMetrics: ['driveTime', 'maxSpeed', 'stop'], // the wheels turn in the air: no distance
+});
+
+// While the staircase runs: which step, what it asks for, how long it still holds.
+function benchProgress(capture) {
+  const limits = benchLimits();
+  if (!capture.running || !(limits?.linear > 0)) return null;
+  const steps = benchSteps(limits.linear);
+  const index = benchStepAt(steps, capture.elapsed);
+  const end = steps.slice(0, index + 1).reduce((sum, step) => sum + step.seconds, 0);
+  return {
+    steps,
+    index,
+    left: Math.max(0, end - capture.elapsed),
+    rpm: steps.map((step) => rpmOf(step.linear)),
+  };
+}
+
+// The line at the top of the 「実機の状態」 panel during a run (redrawn by the panel itself).
+function benchStatus() {
+  const capture = benchSession.model();
+  if (capture.tail) return copy.bench.nowTail;
+  const progress = benchProgress(capture);
+  if (!progress) return '';
+  // Numbered as the table: the first step only stands still before the run.
+  if (progress.index === 0) return copy.bench.nowLead;
+  const step = progress.steps[progress.index];
+  const values = {
+    number: progress.index,
+    total: progress.steps.length - 1,
+    percent: step.percent,
+    rpm: progress.rpm[progress.index],
+    seconds: progress.left.toFixed(0),
+  };
+  return fill(step.percent ? copy.bench.nowStep : copy.bench.nowStop, values);
+}
+
+function benchModel() {
+  const capture = benchSession.model();
+  return {
+    capture: { ...capture, message: benchSession.note },
+    rows: bench.rows,
+    summary: bench.summary,
+    progress: benchProgress(capture),
+    settle: SETTLE_SECONDS,
+    status: benchStatus,
+    source: benchSession.recording?.name ?? '',
+  };
+}
+
+const benchActions = {
+  ...benchSession.actions,
+  openLink: openRobotDialog,
+  // Press → see: the run is watched in the 「実機の状態」 panel (wheel speeds, the current step).
+  async startDriveCapture() {
+    const running = benchSession.actions.startDriveCapture();
+    requestAnimationFrame(() => revealElement(document.getElementById('motorBenchPanel')));
+    await running;
+    // …and its result is the table.
+    if (bench.rows.length) revealIfHidden(document.getElementById('motorBenchTable'));
+  },
+};
+
 function buildModel() {
   const current = state();
   const group = topicOf(topicId).group;
@@ -116,6 +281,7 @@ function buildModel() {
       reflection: current.reflection,
     },
     kv: { voltage, rpm: kvSpeed(ESC_KV, voltage), cells: lipoCells(voltage) },
+    bench: topicId === 'real' ? benchModel() : null,
   };
 }
 
@@ -236,11 +402,19 @@ function structureNext() {
 
 // --- Real topic ----------------------------------------------------------------------------------
 
+// The bench table as lines of the saved text: "1. 20%（5.7 rpm） → 左 5.6 rpm・右 5.7 rpm".
+function benchLines() {
+  return bench.rows.map((row) => {
+    const percent = row.percent === null ? '' : `${row.percent}%`;
+    return `${row.number}. ${percent}（${row.command} rpm） → 左 ${row.left} rpm・右 ${row.right} rpm`;
+  });
+}
+
 function planText() {
   const current = state();
   const text = copy.real;
   const plan = text.plans[current.config.part];
-  return [
+  const lines = [
     text.fileHeading,
     plan.name,
     text.planLabels.change + plan.change,
@@ -248,7 +422,11 @@ function planText() {
     text.planLabels.compare + plan.compare,
     text.filePrediction + current.prediction,
     text.fileReflection + current.reflection,
-  ].join('\n');
+  ];
+  if (bench.rows.length) lines.push(text.fileTable, ...benchLines());
+  const memo = stateMemo(MEMO_PLACE).trim();
+  if (memo) lines.push(text.fileMemo, memo);
+  return lines.join('\n');
 }
 
 const actions = {
@@ -300,9 +478,19 @@ const actions = {
   jumpToMeasurements() {
     revealElement(document.getElementById('measurementEntry'));
   },
+  bench: benchActions,
 };
 
+// 「モーターの教材で開く」 from 記録の一覧: the recording takes the way of a file into the table.
+registerRecordTarget('motor-bench', (recording) => {
+  openTopic('real');
+  const taken = benchSession.useRecording(recording, 'robot');
+  revealAfterRender(() => document.getElementById('motorBenchTable'));
+  return taken;
+});
+
 function initMotor() {
+  benchSession.restore(); // the table of the last recording this browser kept
   rebuildPage();
   document.addEventListener('series-leave', pauseAndShow);
   document.addEventListener('supplement-open', pauseAndShow);

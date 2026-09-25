@@ -594,3 +594,74 @@
   outline: 3px solid #bf872e;
   outline-offset: 3px;
 }
+
+/* Bench measurement of the drive wheels (topic 実物で確かめる): the drive block next to the table
+   「指示 → 測った回転数」, the 「実機の状態」 panel (css/robot-state.css) under both. */
+.motor-bench {
+  margin-top: 18px;
+}
+.motor-bench-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.motor-bench-table h3 {
+  margin: 0 0 8px;
+  font-size: 17px;
+}
+.motor-bench-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+.motor-bench-table th,
+.motor-bench-table td {
+  padding: 7px 6px;
+  border-bottom: 1px solid var(--line);
+  text-align: right;
+}
+.motor-bench-table td {
+  white-space: nowrap;
+}
+.motor-bench-stop {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+.motor-bench-table th:first-child,
+.motor-bench-table td:first-child {
+  text-align: center;
+}
+.motor-bench-table th {
+  color: #3d5660;
+  font-size: 13px;
+}
+.motor-bench-table tr.is-current {
+  background: #fff6dc;
+  font-weight: 700;
+}
+.motor-bench-value {
+  font-weight: 700;
+}
+.motor-bench-table td.motor-bench-state {
+  color: var(--muted);
+  text-align: center;
+}
+.motor-bench-result {
+  margin: 8px 0 0;
+  font-weight: 600;
+}
+@media (min-width: 900px) {
+  .motor-bench-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+@media (max-width: 420px) {
+  .motor-bench-table th,
+  .motor-bench-table td {
+    padding: 6px 3px;
+    font-size: 14px;
+  }
+}

@@ -150,7 +150,7 @@ function notAllowedLine(drive) {
 
 /**
  * `model` is the session model (`recording`, `running`, `tail`, `elapsed`, `total`, `driveNote`),
- * `drive` the lesson's drive part: driveModel() plus `program`, `placement`, `startLabel`,
+ * `drive` the lesson's drive part: driveModel() plus `program`, `placement`, `confirmLabel`, `startLabel`,
  * `report` and `metrics` (the numbers of the report, null for all). `actions` needs `startDriveCapture`, `stopCapture` and `confirmDrive`.
  */
 function driveControls(model, drive, actions) {
@@ -158,7 +158,8 @@ function driveControls(model, drive, actions) {
   return html`<div class="drive-block" data-drive-block>
     <h4>${driveCopy.title}</h4>
     ${drive.program ? html`<p>${drive.program}</p>` : nothing} ${placementLine(drive)}
-    ${checklist(drive)} ${teacherDetails(drive)} ${confirmBox(drive, actions, model.running)}
+    ${checklist(drive)} ${teacherDetails(drive)}
+    ${confirmBox(drive, actions, model.running, drive.confirmLabel ?? driveCopy.confirm)}
     <div class="live-capture-actions drive-actions">${runControls(model, drive, actions)}</div>
     ${progressLine(model)}
     ${

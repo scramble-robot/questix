@@ -112,7 +112,9 @@ function originNote(recording, origin, assumedConfig) {
  * - `reportMetrics` (optional): the numbers the run report under the block shows, as keys of
  *   drive-report-view's REPORT_METRICS (e.g. `['driveTime', 'distance', 'maxSpeed', 'stop']`);
  *   all of them when left out.
- * - `drive` (optional): `{ plan(), program(), placement(), conditions(), startLabel }`. `plan()`
+ * - `drive` (optional): `{ plan(), program(), placement(), conditions(), startLabel, confirmLabel }`
+ *   (`confirmLabel`: the safety tick's sentence when the default one about the placement does not fit,
+ *   e.g. wheels lifted on a stand). `plan()`
  *   returns `{controller, seconds, tail, references, outcome}` for drive-link's runDrive (tail =
  *   seconds recorded after the robot stops; references = drive-history's chart reference lines;
  *   outcome() = an optional sentence on how the run went, e.g. whether the goal was reached) or
@@ -425,6 +427,7 @@ function createLiveSession(options) {
       ready: drive.ready && missing.length === 0,
       program: options.drive.program(),
       placement: options.drive.placement?.() ?? '',
+      confirmLabel: options.drive.confirmLabel ?? null,
       startLabel: options.drive.startLabel,
       metrics: options.reportMetrics ?? null,
       // Shown under the block until the next run (null after a reload: see the 実機 dialog).

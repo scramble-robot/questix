@@ -8,6 +8,8 @@ import { lessonLabel } from '../shell/lesson-ui.js';
 import { schoolTips } from '../shell/school-tips.js';
 import { lessonBrief } from '../shell/lesson-brief.js';
 import { runModeBadgeHtml } from '../shell/run-mode.js';
+import { liveCaptureControls } from '../live/live-view.js';
+import { robotStatePanel } from '../live/robot-state.js';
 import { LOAD_TIME, LOAD_TARGET, RUN_SECONDS, SERVO_MIN, SERVO_MAX, REAL_PARTS } from './core.js';
 import {
   exteriorFigure,
@@ -826,6 +828,121 @@ function realCard(model, copy, fragments, actions) {
   </section>`;
 }
 
+// --- Bench measurement of the drive wheels -------------------------------------------------------
+
+// 「0%」 and, under it, what that step is for.
+const stopLabel = (text) => html`0%<small class="motor-bench-stop">${text.stopRow}</small>`;
+
+function percentText(row, text) {
+  if (row.percent === null) return '—';
+  return row.percent === 0 ? stopLabel(text) : `${row.percent}%`;
+}
+
+// While the staircase runs, the table shows the plan and which step is being measured; the numbers
+// come from the recording once the run is over (bench-core.js benchTable).
+function plannedRows(progress, text) {
+  // The first step only stands still before the run: it is not a row of the table.
+  return progress.steps.slice(1).map((step, offset) => {
+    const index = offset + 1;
+    let state = text.waiting;
+    if (index < progress.index) state = text.recorded;
+    else if (index === progress.index) state = text.measuring;
+    return html`<tr class=${index === progress.index ? 'is-current' : ''}>
+      <td>${index}</td>
+      <td>${step.percent === 0 ? stopLabel(text) : `${step.percent}%`}</td>
+      <td>${progress.rpm[index]}</td>
+      <td colspan="2" class="motor-bench-state">${state}</td>
+    </tr>`;
+  });
+}
+
+function measuredRows(rows, text) {
+  return rows.map(
+    (row) =>
+      html`<tr>
+        <td>${row.number}</td>
+        <td>${percentText(row, text)}</td>
+        <td>${formatNumber(row.command, 1)}</td>
+        <td class="motor-bench-value">${formatNumber(row.left, 1)}</td>
+        <td class="motor-bench-value">${formatNumber(row.right, 1)}</td>
+      </tr>`,
+  );
+}
+
+function benchSentence(bench, text) {
+  if (!bench.summary) return text.summaryStill;
+  const { fastest, meanGap, wheelGap } = bench.summary;
+  return fillSentence(text.summary, {
+    command: formatNumber(fastest.command, 1),
+    left: formatNumber(fastest.left, 1),
+    right: formatNumber(fastest.right, 1),
+    gap: formatNumber(meanGap, 1),
+    wheelGap: formatNumber(wheelGap, 1),
+  });
+}
+
+function benchTableView(bench, copy) {
+  const text = copy.bench;
+  const columns = text.columns;
+  const running = Boolean(bench.progress);
+  if (!running && !bench.rows.length)
+    return html`<div class="motor-bench-table" id="motorBenchTable">
+      <h3>${text.tableTitle}</h3>
+      <p class="helper">${text.empty}</p>
+    </div>`;
+  return html`<div class="motor-bench-table" id="motorBenchTable">
+    <h3>${text.tableTitle}</h3>
+    <table data-motor-bench-table>
+      <thead>
+        <tr>
+          <th>${columns.step}</th>
+          <th>${columns.percent}</th>
+          <th>${columns.command}</th>
+          <th>${columns.left}</th>
+          <th>${columns.right}</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${running ? plannedRows(bench.progress, text) : measuredRows(bench.rows, text)}
+      </tbody>
+    </table>
+    <p class="helper">${fillSentence(text.tableCaption, { settle: bench.settle })}</p>
+    ${
+      running
+        ? nothing
+        : html`<p class="motor-bench-result" data-motor-bench-result>
+            ${benchSentence(bench, text)}
+          </p>`
+    }
+  </div>`;
+}
+
+function benchCard(model, copy, actions) {
+  const text = copy.bench;
+  const capture = model.bench.capture;
+  const driving = Boolean(capture.drive?.allowed && capture.link.connected);
+  return html`<section class="card motor-bench" id="motorBench">
+    <h2>
+      ${unsafeHTML(runModeBadgeHtml('live'))}${unsafeHTML(runModeBadgeHtml('drive'))} ${text.title}
+    </h2>
+    <p>${text.intro}</p>
+    <div class="motor-bench-layout">
+      <div class="motor-bench-controls">
+        ${liveCaptureControls(capture, actions.bench)}
+        ${driving ? nothing : html`<p class="helper">${text.recordNote}</p>`}
+      </div>
+      ${benchTableView(model.bench, copy)}
+    </div>
+    <div id="motorBenchPanel" class="motor-bench-panel">
+      ${robotStatePanel('motor-real', {
+        name: text.memoName,
+        placeholder: text.memoPlaceholder,
+        status: model.bench.status,
+      })}
+    </div>
+  </section>`;
+}
+
 // --- Page ----------------------------------------------------------------------------------------
 
 function mainCard(model, copy, fragments, actions) {
@@ -851,6 +968,7 @@ function motorPage(model, copy, fragments, actions) {
     <div class="motor-layout">
       ${mainCard(model, copy, fragments, actions)} ${guide(model, copy, fragments, actions)}
     </div>
+    ${model.bench ? benchCard(model, copy, actions) : nothing}
     <p class="page-footnote">${topic.footnote}</p>`;
 }
 

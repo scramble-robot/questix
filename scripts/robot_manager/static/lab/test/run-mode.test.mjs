@@ -82,6 +82,7 @@ test('a course that uses the robot has at least one topic that does', () => {
 test('topicRunModes matches exact keys, whole courses and falls back to the simulation', () => {
   assert.deepEqual(topicRunModes('control-p').modes, ['sim', 'live', 'drive']);
   assert.deepEqual(topicRunModes('launch-measure').modes, ['live', 'data']);
+  assert.deepEqual(topicRunModes('motor-real').modes, ['live', 'drive', 'data']);
   assert.deepEqual(topicRunModes('launch-power').modes, ['sim']);
   assert.deepEqual(topicRunModes('lab-setup').modes, ['sim']);
   assert.equal(topicRunModes('controlling-x'), null);

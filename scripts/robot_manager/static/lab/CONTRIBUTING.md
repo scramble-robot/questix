@@ -130,12 +130,20 @@ state, which stream is missing, record / stop, open / save.
   comment): `plan()` returns a `controller(elapsed, robot)` built from `js/live/drive-core.js`
   (programs, odometry goals) or a DOM-free module of the course (`js/control/live-drive.js`), plus
   optional `outcome()` and chart `references`; `placement()` is its own line (how much room, where
-  to put the robot), `conditions()` a few words for the run history. The shared block shows one
+  to put the robot), `conditions()` a few words for the run history, and `confirmLabel` replaces
+  the safety tick's sentence when the robot is not on the floor (the motor bench: wheels lifted). The shared block shows one
   learner reason at a time, folds the teacher's details, and puts the result under the button.
   A run's own stop is scoped to the page (`scope: 'mine'`); only the stop bar stops any run. Never bypass the bridge's checks from the
   page, and give a closed-loop controller its own guards (stale sensor → stand still, minimum
   distance → throw an Error with the learner's sentence). Declare the topic's `drive` run mode in
   `content/shell/run-modes.json` and put `runModeBadgeHtml('drive')` in the block's heading.
+- Where learners measure on the robot, put the 「実機の状態」 panel next to the measurement:
+  `${robotStatePanel('<place>', { name, placeholder, status, hideOffline })}` from
+  `js/live/robot-state.js` in the lesson's view (see its doc comment). It draws itself (at most
+  10 Hz, only while visible), so the lesson's `update()` is not called for it; `status()` is the
+  lesson's own line about a run in progress (the motor bench's current step). Its arithmetic is
+  `robot-state-core.js` (`test/robot-state-core.test.mjs`); its 測定メモ is per place and per
+  browser, and `stateMemo(place)` reads it for a lesson's own saved file. It only listens.
 - A recording replaces the lesson's data instead of being mixed into it, and says what the
   conditions were (`captureNotes`, and where it came from), so a learner can tell measured numbers
   from generated ones.
