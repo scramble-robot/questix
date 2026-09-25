@@ -45,33 +45,34 @@ function plateText(context, text, x, y, colour, align = 'left') {
 
 // --- Side view of the flight -------------------------------------------------------------------
 
-// Two layouts of the same side view. The narrow one is for phones: it shows 0–3.2 m (the longest
-// flight is about 3.1 m) at the canvas's own width, so the landing point and its distance are
-// always on screen, and its fonts stay ≥ 12 px once the canvas is shrunk to a 352 px card.
+// Two layouts of the same side view. The narrow one is for phones: it shows 0–2 m (the longest
+// flight from the 22 cm outlet is about 2.0 m) at the canvas's own width, so the landing point and
+// its distance are always on screen, and its fonts stay ≥ 12 px once the canvas is shrunk to a
+// 352 px card. The whole robot (0.65 m, drawn to the same scale) stands left of the 0 m mark.
 // Coordinates are canvas units; `scale` is canvas units per metre, the same along and above the
 // floor. With the force box (forces topic) the sky is taller, so the arrows can be drawn at a
 // scale where the smallest force of a flight, about 0.07 N of drag, is still ≥ 40 px on screen.
 const WIDE = {
   width: 760,
-  height: 350,
-  scale: 145,
-  muzzleX: 150, // leaves most of the robot, drawn to this scale, on the canvas
-  floorY: 278,
-  lastMetre: 4,
+  height: 330,
+  scale: 215,
+  muzzleX: 170, // the robot, 0.65 m at this scale, fits left of the outlet
+  floorY: 258,
+  lastMetre: 2.5,
   font: 14,
   note: 13,
 };
 const NARROW = {
   width: 440,
-  height: 350,
-  scale: 105,
-  muzzleX: 100,
-  floorY: 280,
-  lastMetre: 3,
+  height: 330,
+  scale: 140,
+  muzzleX: 108,
+  floorY: 262,
+  lastMetre: 2,
   font: 17,
   note: 16,
 };
-const FORCE_BOX_ROOM = 60; // canvas units of extra sky for the force box
+const FORCE_BOX_ROOM = 90; // canvas units of extra sky for the force box, clear of the flight
 const FLIGHT_LAYOUTS = {
   wide: WIDE,
   narrow: NARROW,

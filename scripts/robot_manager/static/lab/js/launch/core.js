@@ -9,7 +9,7 @@ const LAUNCH_SPEC = Object.freeze({
   diameter: 0.18, // metres
   thickness: 0.02, // metres
   mass: 0.018, // kilograms
-  height: 0.45, // metres: centre of the disc at the moment of release
+  height: 0.22, // metres: centre of the disc at the moment of release (the outlet on the CAD side view)
   gravity: 9.81, // metres per second squared
   density: 1.2, // kilograms per cubic metre (air)
   dt: 0.004, // seconds per integration step
@@ -20,7 +20,7 @@ const LAUNCH_TOPICS = [
   { id: 'target', title: 'データから的を狙う' },
   { id: 'measure', title: '実機の測定で確かめる' },
 ];
-const LAUNCH_TARGETS = [1.2, 1.8, 2.5]; // metres from the muzzle
+const LAUNCH_TARGETS = [1.2, 1.5, 1.8]; // metres from the muzzle; about 62 %, 76 % and 90 % output
 
 // Assumed output → release-speed curve. Not a measured motor curve: below the dead zone the roller
 // never pushes the disc out, and the exponent only bends the curve towards the slower end.
@@ -303,7 +303,7 @@ function launchCSV(rows, source = 'measured') {
 
 const LAUNCH_TOLERANCE = 0.15; // metres either side of a target's centre that count as a hit
 const RANGE_TICK = 0.5; // metres between the labelled lines of the record chart
-const MIN_CHART_RANGE = 2.5; // metres: the first few records do not fill the whole chart
+const MIN_CHART_RANGE = 2; // metres: the first few records do not fill the whole chart
 const CHART_HEADROOM = 1.05; // share of the furthest value kept free above it
 
 /** Whether a disc that came down at `range` hit a target centred at `target` (null: no target). */

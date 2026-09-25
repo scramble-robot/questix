@@ -24,7 +24,7 @@ test('the course constants stay in the order the lessons follow', () => {
     LAUNCH_TOPICS.map((topic) => topic.id),
     ['power', 'forces', 'target', 'measure'],
   );
-  assert.deepEqual(LAUNCH_TARGETS, [1.2, 1.8, 2.5]);
+  assert.deepEqual(LAUNCH_TARGETS, [1.2, 1.5, 1.8]);
   assert.equal(Object.isFrozen(LAUNCH_SPEC), true);
 });
 
@@ -92,9 +92,9 @@ test('launchExperiment flies until the disc touches the floor', () => {
   assert.equal(run.samples.at(-1).x, run.range);
   assert.equal(run.samples.at(-1).t, run.time);
   assert.equal(run.speed, launchSpeed(60));
-  assert.ok(Math.abs(run.range - 1.7941240083335384) < 1e-12);
-  assert.ok(Math.abs(run.time - 0.42448099253974436) < 1e-12);
-  assert.equal(run.samples.length, 108);
+  assert.ok(Math.abs(run.range - 1.1629813633816837) < 1e-12);
+  assert.ok(Math.abs(run.time - 0.26207959539665776) < 1e-12);
+  assert.equal(run.samples.length, 67);
   for (let i = 1; i < run.samples.length; i++)
     assert.ok(run.samples[i].t > run.samples[i - 1].t, 'samples advance in time');
 });
@@ -268,8 +268,8 @@ test('a hit is within ±15 cm of the target, and only when there is a target', (
 test('the record chart reads in half metres and holds every record and the whole band', () => {
   const empty = launchRangeAxis([]);
   assert.equal(empty.step, 0.5);
-  assert.equal(empty.max, 3);
-  assert.deepEqual(empty.ticks, [0, 0.5, 1, 1.5, 2, 2.5, 3]);
+  assert.equal(empty.max, 2.5);
+  assert.deepEqual(empty.ticks, [0, 0.5, 1, 1.5, 2, 2.5]);
   const far = launchRangeAxis([{ power: 100, range: 3.11 }], 2.5);
   assert.equal(far.max, 3.5);
   assert.ok(far.ticks.every((tick) => Number.isInteger(tick * 2)));
