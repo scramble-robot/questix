@@ -112,9 +112,19 @@ function comparisonRows({ simulation, current, compared, distance, stopDistance,
       realRow('live', currentName(current.parts, text), current, distance, stopDistance, text),
     );
   for (const entry of compared)
-    rows.push(realRow(entry.letter, entry.letter, entry, distance, stopDistance, text));
+    rows.push(
+      realRow(entry.letter, comparedName(entry, text), entry, distance, stopDistance, text),
+    );
   return rows.filter((row) => row.metrics);
 }
+
+/**
+ * The name of a compared run, as the help text and the legend call it: an earlier run of this page
+ * (source 'past', the grey dotted line) 「A（前の走行）」, an opened file (dark grey dashes) 「A」.
+ * The letter alone is what the chart writes at the end of the line.
+ */
+const comparedName = (entry, text) =>
+  entry.source === 'past' ? fill(text.compareNamePast, { letter: entry.letter }) : entry.letter;
 
 const currentName = (parts, text) =>
   parts.time ? fill(text.compareNameLive, { time: parts.time }) : text.compareNameLiveNoTime;
@@ -270,6 +280,7 @@ function comparisonConclusion(rows, options) {
 }
 
 export {
+  comparedName,
   clockTime,
   runLabelParts,
   runLabel,

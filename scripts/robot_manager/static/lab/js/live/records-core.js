@@ -383,6 +383,35 @@ function localEntry(run) {
 }
 
 /**
+ * The runs of this browser (drive-history.js) that 記録の一覧 lists next to the robot's records,
+ * so that a run is listed once: all of them while the robot's list is not known (`robotIds` null:
+ * offline, or not loaded), otherwise those the robot does not hold — never kept there (saving was
+ * off or failed, a file opened here) or kept under an id the robot no longer lists.
+ */
+function runsNotOnRobot(runs, robotIds) {
+  if (!robotIds) return runs;
+  return runs.filter((run) => !run.robotId || !robotIds.has(run.robotId));
+}
+
+/**
+ * Whether a run of this browser exists only here, as far as `robotIds` (the ids the robot lists,
+ * or null when unknown) tells: then its entry carries the 「この端末だけ」 tag.
+ */
+function onlyOnThisDevice(run, robotIds) {
+  if (!run.robotId) return true;
+  return robotIds ? !robotIds.has(run.robotId) : false;
+}
+
+/** Items with `entry.recordedAt`, newest first; an item without a usable date goes last. */
+function newestFirst(items) {
+  const time = (item) => {
+    const value = Date.parse(item.entry?.recordedAt ?? '');
+    return Number.isNaN(value) ? -Infinity : value;
+  };
+  return [...items].sort((a, b) => time(b) - time(a));
+}
+
+/**
  * What a list shows for an entry: its name (the label, or the lesson when it has none — the
  * bridge's 「設定：不明」 for a lab recording without conditions counts as none), the lesson it
  * belongs to, how it ended and where it can be opened (`streams` as in targetsFor).
@@ -436,6 +465,9 @@ export {
   outcomeWord,
   outcomeKind,
   localEntry,
+  runsNotOnRobot,
+  onlyOnThisDevice,
+  newestFirst,
   describeEntry,
   megabytes,
 };

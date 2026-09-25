@@ -203,6 +203,20 @@ function stateValue(value, fresh, heard) {
   return heard ? shootCopy.state.stale : shootCopy.state.never;
 }
 
+// The emergency stop as the drive strip says it (「非常停止：押されています／解除されています」),
+// from the bridge's own check: the launcher cannot run while it is pressed.
+function estopLine(model) {
+  const pressed = model.blockers.some((blocker) => blocker.code === 'emergency_stop');
+  return html`<p
+    class=${pressed ? 'rs-strip-estop is-pressed' : 'rs-strip-estop is-released'}
+    data-shoot-estop=${pressed ? 'pressed' : 'released'}
+  >
+    ${pressed ? html`<span aria-hidden="true">⛔</span>` : nothing}${
+      pressed ? shootCopy.estop.pressed : shootCopy.estop.released
+    }
+  </p>`;
+}
+
 /** The launcher's own values: the roller command and who gives it, the tilt, the shots. */
 function launcherState(model) {
   const words = shootCopy.state;
@@ -288,9 +302,11 @@ function shootBlock(model, view, actions) {
         ${powerSlider(model, actions)}${tiltSlider(model, view, actions)}
       </div>
       <div class="shoot-run" data-shoot-run>
-        ${buttons(model, actions)} ${spinLine(model)} ${whyLine(model)} ${noteLines(model, view)}
+        ${buttons(model, actions)} ${spinLine(model)} ${whyLine(model)}
+        <div class="shoot-strip" data-live-strip>${estopLine(model)} ${launcherState(model)}</div>
+        ${noteLines(model, view)}
       </div>
-      ${launcherState(model)} ${limitsNote(model)}
+      ${limitsNote(model)}
     </div>`;
 }
 

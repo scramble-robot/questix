@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {
   clockTime,
+  comparedName,
   runLabel,
   runLabelParts,
   compareLetter,
@@ -128,6 +129,28 @@ test('the table names the recording on screen by its time and the others by thei
   );
   assert.equal(rows[2].file, 'QUESTiX-LAB-control-distance-20260925-103000.json');
   assert.ok(rows[2].metrics.overshoot > 0.05, 'the dip past 50 cm counts as overshoot');
+});
+
+test('an earlier run of this page is named as the help text calls it, a file by its letter', () => {
+  const rows = comparisonRows({
+    simulation: null,
+    current: entry(wallRun(), { recordedAt: at(10, 52, 40) }),
+    compared: [
+      { ...entry(wallRun(), { recordedAt: at(10, 40, 0) }), source: 'past', letter: 'A' },
+      { ...entry(wallRun(), { recordedAt: at(10, 30, 0) }), source: 'file', letter: 'B' },
+    ],
+    distance: true,
+    stopDistance: 0.5,
+    text,
+  });
+  assert.deepEqual(
+    rows.map((row) => row.name),
+    ['実機 10:52:40', 'A（前の走行）', 'B'],
+  );
+  // The help text under the chart and next to 重ねる uses the same words.
+  assert.ok(text.compareNote.includes('A（前の走行）'));
+  assert.ok(copy.charts.liveNote.includes('A（前の走行）'));
+  assert.equal(comparedName({ source: 'past', letter: 'C' }, text), 'C（前の走行）');
 });
 
 const row = (name, conditions, metrics, extra = {}) => ({

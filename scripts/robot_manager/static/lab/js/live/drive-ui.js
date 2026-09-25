@@ -9,36 +9,24 @@ import {
   confirmBox,
   driveEndedText,
 } from './drive-view.js';
-import { recordRobot, liveLink, openRecordingFile, groupName } from './capture.js';
+import { recordRobot, liveLink, groupName } from './capture.js';
 import { withRunInfo } from './recording-core.js';
 import { benchCheck } from './drive-report-core.js';
 import { runModeBadgeHtml } from '../shell/run-mode.js';
-import {
-  addDriveRun,
-  driveRuns,
-  driveRun,
-  saveDriveRun,
-  clearDriveRuns,
-  onDriveRuns,
-  isEmptyRun,
-} from './drive-history.js';
+import { addDriveRun, driveRuns, onDriveRuns, isEmptyRun } from './drive-history.js';
 import { keepRunOnRobot } from './run-keeper.js';
 import { recordsCopy } from './records-core.js';
-import {
-  driveReportView,
-  driveHistoryList,
-  reportCopy,
-  compareLimit,
-  runStatusText,
-} from './drive-report-view.js';
+import { reportCopy, runStatusText } from './drive-report-view.js';
+import { liveStateStrip } from './robot-state.js';
 
 // The pieces of the driving experiments that belong to no lesson:
 // - the stop bar, fixed at the bottom of every page while the robot drives on a lesson's command —
 //   this page's or another one's — so a stop is always one tap (or Esc) away;
 // - the bench test in the 実機 dialog: hold a button and the robot moves slowly, release and it stops,
-//   for checking wheel directions and left/right after assembly. Each press is recorded;
-// - the history of every run of this browser (drive-history.js) in the same dialog, with the
-//   report of the one selected.
+//   for checking wheel directions and left/right after assembly. Each press is recorded, and the
+//   live strip under the buttons shows the wheels while it is held;
+// - a short way from the same dialog to 記録の一覧 (#records), which lists every run of this browser
+//   together with the records kept on the robot.
 
 const BENCH_DEFAULTS = { linear: 0.1, angular: 0.5 }; // m/s, rad/s
 const BENCH_MIN = { linear: 0.06, angular: 0.3 }; // below drive_component's dead band (drive-core)
@@ -55,10 +43,6 @@ const BENCH_MOVES = [
 ];
 
 const bench = { ...BENCH_DEFAULTS, held: null, abort: null, note: '' };
-let selectedRun = null; // id of the run whose report the dialog shows; null = the newest
-let newestRun = null; // id of the newest run seen, so a new run (from any block) is shown at once
-let comparedRuns = []; // ids ticked to be drawn over the shown report (at most compareLimit)
-let historyNote = ''; // what happened to the last file opened into the history
 
 // --- stop bar --------------------------------------------------------------------------------
 
@@ -122,7 +106,7 @@ async function hold(move) {
     group: groupName(),
     outcome: { reason, label: runStatusText(reason) },
   });
-  bench.note = [bench.note, benchResult(recording, move)].filter(Boolean).join(' ');
+  bench.note = [bench.note, benchResult(recording, move, reason)].filter(Boolean).join(' ');
   update();
   const run = addDriveRun({
     slot: 'bench',
@@ -146,11 +130,13 @@ async function hold(move) {
 const signedRpm = (rpm) => `${rpm >= 0 ? '+' : '−'}${Math.abs(rpm).toFixed(0)}`;
 
 // After release, one line on which way the wheels turned: 「左 +10 rpm・右 +10 rpm：まっすぐ前進」,
-// and whether that is what the pressed button asked for.
-function benchResult(recording, move) {
+// and whether that is what the pressed button asked for. After a controller takeover the wheels
+// followed the stick, so nothing is judged (and no verdict goes into the run history).
+function benchResult(recording, move, reason) {
   const copy = driveCopy.bench;
-  const check = benchCheck(recording);
+  const check = benchCheck(recording, { reason });
   if (!check) return copy.noCheck;
+  if (check.skipped) return copy.noVerdictController;
   const line = fill(copy.result, {
     left: signedRpm(check.left),
     right: signedRpm(check.right),
@@ -243,8 +229,10 @@ function benchPanel(model) {
       ${speedSlider(model, 'linear', driveCopy.bench.speed)}
       ${speedSlider(model, 'angular', driveCopy.bench.turnSpeed)}
     </div>
-    <div class="drive-bench-pad">${BENCH_MOVES.map((move) => benchButton(model, move))}</div>
-    ${reason ? html`<p class="drive-why">${reason}</p>` : nothing}
+    <div class="live-run" data-live-run>
+      <div class="drive-bench-pad">${BENCH_MOVES.map((move) => benchButton(model, move))}</div>
+      ${reason ? html`<p class="drive-why">${reason}</p>` : nothing} ${liveStateStrip('bench')}
+    </div>
     ${bench.note ? html`<p class="drive-result" role="status">${bench.note}</p>` : nothing}`;
 }
 
@@ -257,124 +245,27 @@ function placeStopBar() {
   if (host.parentElement !== parent) parent.append(host);
 }
 
-// --- history -----------------------------------------------------------------------------------
+// --- the way to 記録の一覧 -------------------------------------------------------------------
 
-// Ticking 比べる draws the run over the shown report: its charts come first and are scrolled to.
-function toggleCompare(id) {
-  const adding = !comparedRuns.includes(id);
-  if (!adding) comparedRuns = comparedRuns.filter((other) => other !== id);
-  else if (comparedRuns.length < compareLimit) comparedRuns = [...comparedRuns, id];
-  update();
-  if (!adding) return;
-  const charts = document.querySelector('#robotDriveLog [data-drive-report-charts]');
-  const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  // The dialog scrolls on its own, so window-based revealElement would not move it.
-  charts?.scrollIntoView({ block: 'start', behavior: smooth ? 'smooth' : 'auto' });
-}
-
-// A recording saved here or by another group, added to the history so it can be compared.
-async function openIntoHistory(file) {
-  if (!file) return;
-  const copy = reportCopy;
-  try {
-    const { recording } = await openRecordingFile(file);
-    if (isEmptyRun(recording)) {
-      historyNote = fill(copy.openedEmpty, { name: file.name });
-    } else {
-      // Files saved before recordings named their lesson still carry it in the file name.
-      const named = Object.keys(driveCopy.lessons).find((key) => file.name.includes(key));
-      const slot = recording.lesson || named || 'file';
-      selectedRun = addDriveRun({
-        slot,
-        lesson: driveCopy.lessons[slot] ?? copy.fileLesson,
-        conditions: recording.conditions?.label ?? '',
-        ended: recording.outcome?.label ?? '',
-        reason: recording.outcome?.reason ?? '',
-        robot: recording.robot?.name ?? '',
-        group: recording.group ?? '',
-        source: 'file',
-        recording,
-      }).id;
-      newestRun = selectedRun;
-      historyNote = fill(copy.opened, { name: file.name });
-    }
-  } catch (error) {
-    historyNote = fill(copy.openFailed, { name: file.name, reason: error.message });
-  }
-  update();
-}
-
-function historyOpen() {
-  const copy = reportCopy;
-  return html`<div class="drive-history-open">
-    <label class="live-capture-open"
-      >${copy.openFile}
-      <input
-        data-drive-history-open
-        type="file"
-        accept=".json,.mcap,application/json"
-        @change=${(event) => {
-          openIntoHistory(event.target.files[0]);
-          event.target.value = '';
-        }}
-    /></label>
-    <p class="drive-note" role="status">${historyNote || copy.openNote}</p>
-  </div>`;
-}
-
-// 記録の一覧 holds this list too, and the records every other device kept on the robot.
-function recordsLink() {
-  return html`<p class="drive-note">
-    ${recordsCopy.entry.catalogueLead}
-    <button
-      class="text-button"
-      data-drive-history-records
-      @click=${() => {
-        document.getElementById('robotDialog').close();
-        location.hash = '#records';
-      }}
-    >
-      ${recordsCopy.entry.catalogue}
-    </button>
-  </p>`;
-}
-
+// Every run of this browser is listed in 記録の一覧 (#records) with the records kept on the robot,
+// with its report, comparing, saving and adding files: the dialog only points there.
 function historyPanel() {
   const copy = reportCopy;
-  const runs = driveRuns();
-  if (!runs.length)
-    return html`<h3>${copy.historyTitle}</h3>
-      ${recordsLink()}
-      <p>${copy.historyEmpty}</p>
-      ${historyOpen()}`;
-  const shown = (selectedRun !== null && driveRun(selectedRun)) || runs[0];
+  const count = driveRuns().length;
   return html`<h3>${copy.historyTitle}</h3>
-    <p>${copy.historyLead}</p>
-    ${recordsLink()}
-    ${driveHistoryList({
-      runs,
-      selected: shown.id,
-      compared: comparedRuns,
-      select: (id) => {
-        selectedRun = id;
-        update();
-      },
-      toggleCompare,
-    })}
-    ${historyOpen()}
-    ${driveReportView(shown, {
-      saveRun: saveDriveRun,
-      compare: comparedRuns.map(driveRun).filter(Boolean),
-    })}
-    <button
-      class="quiet"
-      data-drive-history-clear
-      @click=${() => {
-        if (window.confirm(copy.clearConfirm)) clearDriveRuns();
-      }}
-    >
-      ${copy.clear}
-    </button>`;
+    <p class="drive-note">
+      ${count ? fill(copy.historyLink, { count }) : copy.historyLinkEmpty}
+      <button
+        class="text-button"
+        data-drive-history-records
+        @click=${() => {
+          document.getElementById('robotDialog').close();
+          location.hash = '#records';
+        }}
+      >
+        ${recordsCopy.entry.catalogue}
+      </button>
+    </p>`;
 }
 
 function update() {
@@ -383,13 +274,6 @@ function update() {
   render(stopBar(model), document.getElementById('driveBar'));
   // Room at the bottom of the page, so the bar never hides its last buttons.
   document.body.classList.toggle('driving', model.active || model.running);
-  const newest = driveRuns()[0]?.id ?? null;
-  if (newest !== newestRun) {
-    newestRun = newest;
-    selectedRun = null;
-  }
-  // Runs that fell off the history (or were cleared) cannot be compared any more.
-  comparedRuns = comparedRuns.filter((id) => driveRun(id));
   render(historyPanel(), document.getElementById('robotDriveLog'));
   const panel = document.getElementById('robotDrive');
   // Driving needs a connection; before that the dialog is about connecting.

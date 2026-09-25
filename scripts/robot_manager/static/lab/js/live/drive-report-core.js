@@ -236,20 +236,38 @@ const BENCH_TURNING = 2; // rpm: a wheel slower than this counts as standing
 const BENCH_EVEN = 0.25; // wheels within this share of each other count as equally fast
 
 /**
- * What the wheels did during a bench press, from its recording: the mean measured rpm of each
- * wheel (forward positive) while the press lasted, and the movement that follows from them —
- * 'forward', 'backward', 'left', 'right' (on the spot), 'forwardLeft', 'forwardRight',
- * 'backwardLeft', 'backwardRight' (driving while turning), or 'still'. Null when the recording has no wheel measurement then.
+ * The stamp of the lab's last moving command: the end of the first unbroken run of commands that
+ * ask for motion (releasing the button sends a stop at once). Commands after it may be the
+ * controller's: twist_arbiter forwards the stick onto /target_twist once the page has let go.
  */
-function benchCheck(recording) {
+function labCommandEnd(commands) {
+  const isMoving = (message) =>
+    Math.abs(message.linear) > COMMANDED || Math.abs(message.angular) > COMMANDED;
+  const first = commands.findIndex(isMoving);
+  if (first < 0) return Infinity;
+  const stopped = commands.slice(first).findIndex((message) => !isMoving(message));
+  return commands[stopped < 0 ? commands.length - 1 : first + stopped - 1].stamp;
+}
+
+/**
+ * What the wheels did during a bench press, from its recording: the mean measured rpm of each
+ * wheel (forward positive) while the lab held /target_twist, and the movement that follows from
+ * them — 'forward', 'backward', 'left', 'right' (on the spot), 'forwardLeft', 'forwardRight',
+ * 'backwardLeft', 'backwardRight' (driving while turning), or 'still'. Null when the recording has
+ * no wheel measurement then.
+ *
+ * `reason` is how the press ended (drive-link's result). After a controller takeover
+ * ('controller') the wheels answered the stick, not the pressed button, so nothing is judged:
+ * `{skipped: 'controller'}`. Otherwise only the samples up to the end of the lab's own command
+ * count (labCommandEnd), never a command the controller gave during the recorded tail.
+ */
+function benchCheck(recording, { reason = null } = {}) {
+  if (reason === 'controller') return { skipped: 'controller' };
   const zero = commandZero(recording);
   const commands = (recording.streams.twist ?? []).filter((message) =>
     finite(message.linear, message.angular),
   );
-  const moving = commands.filter(
-    (message) => Math.abs(message.linear) > COMMANDED || Math.abs(message.angular) > COMMANDED,
-  );
-  const end = moving.length ? moving[moving.length - 1].stamp : Infinity;
+  const end = labCommandEnd(commands);
   const held = (recording.streams.drive ?? []).filter(
     (message) =>
       finite(message.v, message.w) && message.stamp >= zero + BENCH_SETTLE && message.stamp <= end,

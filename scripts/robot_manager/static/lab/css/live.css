@@ -223,7 +223,6 @@
 /* File pickers look like the buttons next to them; the native "no file chosen" text is hidden
    because every lesson reports the opened file in its own status line. */
 .live-capture-open,
-.control-compare-files > label,
 .planning-scan-open {
   position: relative;
   display: inline-flex;
@@ -238,7 +237,6 @@
   cursor: pointer;
 }
 .live-capture-open input,
-.control-compare-files > label input,
 .planning-scan-open input {
   position: absolute;
   inset: 0;
@@ -248,7 +246,6 @@
   cursor: pointer;
 }
 .live-capture-open:focus-within,
-.control-compare-files > label:focus-within,
 .planning-scan-open:focus-within {
   outline: 3px solid #518df0;
   outline-offset: 3px;
@@ -568,4 +565,81 @@ body.driving dialog[open] {
 .live-capture-group small {
   font-weight: 400;
   color: var(--muted);
+}
+
+/* The button and the live strip under it (js/live/live-view.js): what live-view revealLiveRun
+   brings on screen when a run starts. */
+.live-run {
+  display: grid;
+  gap: 8px;
+}
+.live-capture-state.warn {
+  border-left: 4px solid var(--orange);
+  background: #fbf1ea;
+  padding: 8px 12px;
+  border-radius: 8px;
+}
+/* How the last run went, what the lesson made of it and whether the robot kept it: one box. */
+.live-result {
+  display: grid;
+  gap: 4px;
+  border-radius: 10px;
+  background: var(--green-soft);
+  padding: 10px 12px;
+}
+.live-result p {
+  margin: 0;
+}
+.live-result .drive-result {
+  font-weight: 650;
+}
+/* Offline: one line with the way to connect. */
+.live-block-off {
+  gap: 8px;
+}
+.live-offline-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 0;
+  color: #4d6469;
+  font-size: 14px;
+}
+/* 記録ファイルと保存: every file and record action of the block, folded. */
+.live-files {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fbfcfc;
+}
+.live-files > summary {
+  cursor: pointer;
+  min-height: 44px;
+  padding: 12px 14px;
+  font-weight: 650;
+}
+.live-files-hint {
+  margin-left: 6px;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--muted);
+}
+.live-files-body {
+  display: grid;
+  gap: 12px;
+  border-top: 1px solid var(--line);
+  padding: 12px 14px 14px;
+}
+.live-files-body p {
+  margin: 0;
+}
+.live-record-only,
+.live-compare {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+}
+.live-compare {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
 }

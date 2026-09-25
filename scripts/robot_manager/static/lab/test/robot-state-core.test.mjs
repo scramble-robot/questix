@@ -16,6 +16,9 @@ import {
   snapshotLine,
   freshnessText,
   signed,
+  speedTop,
+  sparkLines,
+  stripModel,
 } from '../js/live/robot-state-core.js';
 
 const text = JSON.parse(
@@ -174,13 +177,88 @@ test('a memo line carries the state of that moment, and dashes for stale values'
   const rpm = (0.2 * RPM_PER_MPS).toFixed(1);
   assert.equal(
     snapshotLine(model, date, text.memo),
-    `14:03:07 左 ${rpm} rpm・右 ${rpm} rpm／前後 +0.20 m/秒・回転 0.00 rad/秒／向き +3°／前 1.20 m／非常停止 解除`,
+    `14:03:07 左 ${rpm} rpm・右 ${rpm} rpm／前後 +0.20 m/秒・回転 0.00 rad/秒／向き +3°／前 1.20 m／非常停止：解除されています`,
   );
   const later = robotStateModel(tracker, { link, now: 5000 });
   assert.equal(
     snapshotLine(later, date, text.memo),
-    '14:03:07 左 — rpm・右 — rpm／前後 — m/秒・回転 — rad/秒／向き —°／前 — m／非常停止 —',
+    '14:03:07 左 — rpm・右 — rpm／前後 — m/秒・回転 — rad/秒／向き —°／前 — m／非常停止：—',
   );
+});
+
+test('the strip: emergency stop, who drives, both wheels and the speed of the last seconds', () => {
+  const tracker = createStateTracker();
+  const driveState = { active: true, owner: 's1', limits: { linear: 0.3, angular: 1 } };
+  for (let step = 0; step <= 20; step++) {
+    const now = step * 100;
+    ingest(tracker, 'twist', twist(step >= 10 ? 0.2 : 0), now, config);
+    ingest(tracker, 'drive', drive(step >= 12 ? 0.2 : 0), now + 50, config);
+  }
+  const model = robotStateModel(tracker, { link, driveState, session: 's1', now: 2100 });
+  const strip = stripModel(model);
+  assert.equal(strip.estop, 'released');
+  assert.equal(strip.driver, 'me');
+  assert.ok(Math.abs(strip.left - 0.2 * RPM_PER_MPS) < 1e-6);
+  assert.equal(strip.speed, 0.2);
+  // The axis is the bridge's limit: ±0.3 m/s, the zero line in the middle of the 32-unit height.
+  assert.equal(strip.top, 0.3);
+  assert.equal(strip.measured.length, 1);
+  const points = strip.measured[0].split(' ').map((pair) => pair.split(',').map(Number));
+  // Now is at the right edge; 0.2 m/s of ±0.3 sits a third of the way up from the middle.
+  const [lastX, lastY] = points.at(-1);
+  assert.ok(Math.abs(lastX - 120) < 1);
+  assert.ok(Math.abs(lastY - (16 - (0.2 / 0.3) * 16)) < 0.1);
+  assert.equal(strip.commanded.length, 1);
+  // Pressed: the strip says so, whatever else it shows.
+  ingest(tracker, 'drive', drive(0, 0, true), 2150, config);
+  const pressed = stripModel(robotStateModel(tracker, { link, now: 2200 }));
+  assert.equal(pressed.estop, 'pressed');
+  assert.deepEqual(stripModel(robotStateModel(tracker, { link: { connected: false }, now: 0 })), {
+    connected: false,
+    phase: 'idle',
+  });
+});
+
+test('the strip leaves stale values out and never bridges a gap in the sparkline', () => {
+  const tracker = createStateTracker();
+  ingest(tracker, 'drive', drive(0.1), 0, config);
+  const stale = stripModel(robotStateModel(tracker, { link, now: 5000 }));
+  assert.equal(stale.left, null);
+  assert.equal(stale.speed, null);
+  assert.equal(stale.estop, 'unknown');
+  // A missing value splits the line; a single point draws nothing.
+  const lines = sparkLines(
+    [
+      [-3, 0.1],
+      [-2, 0.1],
+      [-1.5, NaN],
+      [-1, 0.2],
+      [-0.5, 0.2],
+      [-0.2, NaN],
+      [0, 0.1],
+    ],
+    0.3,
+  );
+  assert.equal(lines.length, 2);
+  // Values beyond the axis are drawn at its edge.
+  assert.equal(
+    sparkLines(
+      [
+        [-1, 5],
+        [0, -5],
+      ],
+      0.3,
+    )[0],
+    '108,0 120,32',
+  );
+});
+
+test('the strip axis grows from the bridge limit to what the robot did, in round steps', () => {
+  const tracker = createStateTracker();
+  assert.equal(speedTop(tracker, null), 0.3);
+  assert.equal(speedTop(tracker, { linear: 0.15 }), 0.2);
+  ingest(tracker, 'drive', drive(0.45), 0, config);
+  assert.equal(speedTop(tracker, { linear: 0.15 }), 0.5);
 });
 
 test('signed numbers never show -0 or +0', () => {

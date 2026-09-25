@@ -36,7 +36,6 @@ import { driveRows, wallRows } from '../live/recording-core.js';
 import { createLiveSession } from '../live/live-session.js';
 import { captureNotes } from '../live/live-view.js';
 import { openRobotDialog } from '../live/live-ui.js';
-import { pickRobotRecord } from '../live/record-picker.js';
 import { registerRecordTarget } from '../live/record-targets.js';
 import { fillSentence as fill } from '../core/content.js';
 import {
@@ -213,12 +212,11 @@ function liveModel() {
     run: current?.run ?? null,
     current,
     chart: current ? { ...current.run, point: current.point, command: current.command } : null,
-    note: liveSession().note,
-    capture: liveSession().model(),
+    // The lesson's note on the recording goes into the block's one result box.
+    capture: { ...liveSession().model(), message: liveSession().note },
     stepSpeed: liveStepSpeed,
     stepSpeeds: stepSpeedOptions(),
     compared: comparedRuns[kind],
-    compareNote,
     table,
     conclusion: comparisonConclusion(table, { distance: kind === 'distance', text: copy.live }),
   };
@@ -527,19 +525,25 @@ const fileSource = (file) => ({
 });
 const recordingSource = (recording) => ({ name: recording.name, load: async () => recording });
 
-const SESSION_NEEDS = { speed: ['drive', 'twist'], distance: ['scan'] };
-
-// 「ロボットの記録から選ぶ」 next to 比べる: the picker, then the same way as a file.
-async function pickComparison() {
-  const kind = liveKind();
-  const slot = `control-${kind}`;
-  const recording = await pickRobotRecord({
-    lesson: slot,
-    needs: SESSION_NEEDS[kind],
-    compare: true,
-  });
-  if (recording) await addComparisons([recordingSource(recording)]);
+function clearComparisons() {
+  comparedRuns[liveKind()] = [];
+  nextLetter[liveKind()] = 0;
+  compareNote = '';
+  update();
 }
+
+// Drawing other recordings over this one, offered in the shared block's 記録ファイルと保存 (files)
+// and in its one picker (a record's 「これを重ねる」).
+const liveCompare = {
+  add: (recording) => addComparisons([recordingSource(recording)]),
+  addFiles: (files) => addComparisons([...files].map(fileSource)),
+  clear: clearComparisons,
+  model: () => ({
+    count: comparedRuns[liveKind()].length,
+    note: compareNote,
+    help: copy.live.compareNote,
+  }),
+};
 
 // 「フィードバック制御で開く／比べる」 from 記録の一覧: the course is on screen (series.js); a topic of
 // the recording's kind is opened if the one on screen is of the other kind, then the recording goes
@@ -611,7 +615,6 @@ const speedDrive = {
     fill(copy.live.driveSpeedProgram, {
       speed: liveStepSpeed.toFixed(1),
       hold: STEP_HOLD,
-      target: experiment().config.targetRPM,
     }),
   placement: () =>
     fill(copy.live.driveSpeedPlacement, {
@@ -681,7 +684,11 @@ const liveSessions = {
     apply: (recording) => applyRecording('speed', recording),
     update: () => update(),
     drive: speedDrive,
-    reportMetrics: ['driveTime', 'distance', 'maxSpeed', 'stop'], // what the step run is about
+    // The chart and the comparison table above are this block's result; the run's own report
+    // stays in 記録の一覧.
+    report: false,
+    state: { place: 'control-live', name: copy.live.memoName },
+    compare: liveCompare,
   }),
   distance: createLiveSession({
     slot: 'control-distance',
@@ -693,7 +700,9 @@ const liveSessions = {
     apply: (recording) => applyRecording('distance', recording),
     update: () => update(),
     drive: wallDrive,
-    reportMetrics: ['distance', 'closest', 'stop'], // how it came to rest at the wall
+    report: false,
+    state: { place: 'control-live', name: copy.live.memoName },
+    compare: liveCompare,
   }),
 };
 
@@ -794,20 +803,14 @@ const actions = {
   stopCapture: () => liveSession().actions.stopCapture(),
   openRecording: (file) => liveSession().actions.openRecording(file),
   pickRobotRecord: () => liveSession().actions.pickRobotRecord(),
-  pickComparison,
   saveRecording: (kind) => liveSession().actions.saveRecording(kind),
   clearLive() {
     liveRuns[liveKind()] = null;
     liveSession().clear();
     update();
   },
-  addComparisons: (files) => addComparisons([...files].map(fileSource)),
-  clearComparisons() {
-    comparedRuns[liveKind()] = [];
-    nextLetter[liveKind()] = 0;
-    compareNote = '';
-    update();
-  },
+  addComparisons: (files) => liveCompare.addFiles(files),
+  clearComparisons,
   openLink: openRobotDialog,
   showCharts,
   showLive: () => revealElement(document.getElementById('controlLive')),

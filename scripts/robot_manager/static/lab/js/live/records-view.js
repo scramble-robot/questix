@@ -51,6 +51,13 @@ function recordFacts(item) {
       >${item.outcome}</span
     >
     ${item.onRobot ? html`<span class="records-badge">${copy.item.saved}</span>` : nothing}
+    ${
+      item.localOnly
+        ? html`<span class="records-badge is-local" data-records-local-only
+            >${copy.item.localOnly}</span
+          >`
+        : nothing
+    }
     ${item.fromFile ? html`<span class="records-badge">${copy.item.fromFile}</span>` : nothing}
   </p>`;
 }
@@ -97,7 +104,21 @@ function targetList(item, actions) {
   </div>`;
 }
 
-function recordActions(item, actions) {
+// 比べる: this record's measurements drawn over the report that is open (up to compareLimit).
+function compareBox(item, actions, model) {
+  if (!model || !actions.toggleCompare || item.open) return nothing;
+  return html`<label class="records-check records-compare">
+    <input
+      type="checkbox"
+      data-records-compare-run=${item.key}
+      .checked=${item.compared}
+      ?disabled=${item.busy || (!item.compared && model.compareFull)}
+      @change=${() => actions.toggleCompare(item.key)}
+    />${copy.actions.compareRun}
+  </label>`;
+}
+
+function recordActions(item, actions, model) {
   return html`<div class="records-actions">
       <button
         data-records-view=${item.key}
@@ -123,6 +144,7 @@ function recordActions(item, actions) {
       >
         ${copy.actions.saveCsv}
       </button>
+      ${compareBox(item, actions, model)}
     </div>
     ${targetButtons(item, actions)}`;
 }
@@ -134,9 +156,9 @@ function itemStatus(item) {
   return nothing;
 }
 
-// The run report of the record, right under it (press → see), with the same charts as the run
-// history of the 実機 dialog.
-function itemReport(item, actions) {
+// The run report of the record, right under it (press → see), with the runs ticked 比べる drawn
+// over its charts.
+function itemReport(item, actions, model) {
   if (!item.open || !item.run) return nothing;
   // A launcher session (js/live/shoot-ui.js) did not drive: its roller and tilt instead.
   const launcher = item.run.slot === 'launch-measure' && launcherRecordSummary(item.run.recording);
@@ -145,33 +167,45 @@ function itemReport(item, actions) {
       ${launcherRecordView(launcher)}
     </div>`;
   return html`<div class="records-report" data-records-report=${item.key}>
-    ${driveReportView(item.run, { saveRun: (id, kind) => actions.save(item.key, kind) })}
+    ${driveReportView(item.run, {
+      saveRun: (id, kind) => actions.save(item.key, kind),
+      compare: model?.comparedRuns ?? [],
+    })}
   </div>`;
 }
 
-/** One record of 記録の一覧: facts, 見る / 保存 / 教材で開く, and its report when opened. */
-function recordItem(item, actions) {
+/**
+ * One record of 記録の一覧: facts, 見る / 保存 / 比べる / 教材で開く, and its report when opened.
+ * `model` (the page's) offers 比べる; the converted bags are listed without it.
+ */
+function recordItem(item, actions, model = null) {
   return html`<li class="records-item" data-records-item=${item.key}>
     <h4 class="records-label">${item.label}</h4>
-    ${recordFacts(item)} ${recordActions(item, actions)} ${itemStatus(item)}
-    ${itemReport(item, actions)}
+    ${recordFacts(item)} ${recordActions(item, actions, model)} ${itemStatus(item)}
+    ${itemReport(item, actions, model)}
   </li>`;
 }
 
-/** One record of the picker: facts and 「これを開く」 (「これを重ねる」 when comparing). */
-function pickItem(item, actions, compare) {
+/**
+ * One record of the picker: facts and 「これを開く」 (「これを重ねる」 when comparing; both, the
+ * second one quieter, when the lesson offers both).
+ */
+function pickItem(item, actions, { compare, both }) {
+  const button = (overlay, primary) =>
+    html`<button
+      class=${primary ? 'primary' : 'quiet'}
+      data-picker-use=${item.key}
+      data-picker-compare=${overlay ? 'true' : 'false'}
+      ?disabled=${item.busy}
+      @click=${() => actions.use(item.key, overlay)}
+    >
+      ${overlay ? copy.actions.useCompare : copy.actions.use}
+    </button>`;
   return html`<li class="records-item" data-records-item=${item.key}>
     <h4 class="records-label">${item.label}</h4>
     ${recordFacts(item)}
     <div class="records-actions">
-      <button
-        class="primary"
-        data-picker-use=${item.key}
-        ?disabled=${item.busy}
-        @click=${() => actions.use(item.key)}
-      >
-        ${compare ? copy.actions.useCompare : copy.actions.use}
-      </button>
+      ${both ? html`${button(false, true)}${button(true, false)}` : button(compare, true)}
     </div>
     ${itemStatus(item)}
   </li>`;
@@ -326,35 +360,78 @@ function quotaLine(model) {
   </p>`;
 }
 
-function robotSection(model, actions) {
+function robotLines(model, actions) {
   const text = copy.sections;
-  if (!model.connected)
-    return html`<section class="records-section card" data-records-robot>
-      <h2>${text.robot}</h2>
-      ${offlineNote(model, actions)}
-    </section>`;
-  return html`<section class="records-section card" data-records-robot>
-    <div class="records-section-top">
-      <h2>${text.robot}</h2>
-      <button class="quiet" data-records-reload ?disabled=${model.loading} @click=${actions.reload}>
-        ${copy.reload}
-      </button>
-    </div>
-    <p>${text.robotLead}</p>
+  if (!model.connected) return offlineNote(model, actions);
+  return html`<p>${text.robotLead}</p>
     ${model.robot ? html`<p class="records-note">${fill(copy.robotName, { robot: model.robot })}</p>` : nothing}
     ${quotaLine(model)}
     ${model.list && !model.save ? html`<p class="records-note">${copy.saveOff}</p>` : nothing}
     ${model.loading ? html`<p class="records-status" role="status">${copy.loading}</p>` : nothing}
-    ${model.error ? html`<p class="records-error" role="alert">${model.error}</p>` : nothing}
-    ${model.list ? filters(model, actions) : nothing}
+    ${model.error ? html`<p class="records-error" role="alert">${model.error}</p>` : nothing}`;
+}
+
+// Adding a saved file to this browser's runs, and clearing them: the tools of the runs kept here.
+function localTools(model, actions) {
+  const text = copy.local;
+  return html`<div class="records-local-tools" data-records-local-tools>
+    <label class="live-capture-open"
+      >${text.addFile}
+      <input
+        data-records-add-file
+        type="file"
+        accept=".json,.mcap,application/json"
+        @change=${(event) => {
+          actions.addFile(event.target.files[0]);
+          event.target.value = '';
+        }}
+    /></label>
     ${
-      model.list && !model.records.length && !model.loading
-        ? html`<p>${text.robotEmpty}</p>`
+      model.local.count
+        ? html`<button class="quiet" data-records-clear-local @click=${actions.clearLocal}>
+            ${fill(text.clear, { count: model.local.count })}
+          </button>`
+        : nothing
+    }
+    <p class="records-note" role="status">${model.local.note || text.note}</p>
+  </div>`;
+}
+
+// One list: the robot's records and this browser's runs it does not hold (「この端末だけ」).
+function listSection(model, actions) {
+  const text = copy.sections;
+  const empty = !model.records.length && !model.loading;
+  return html`<section class="records-section card" data-records-robot>
+    <div class="records-section-top">
+      <h2>${text.list}</h2>
+      ${
+        model.connected
+          ? html`<button
+              class="quiet"
+              data-records-reload
+              ?disabled=${model.loading}
+              @click=${actions.reload}
+            >
+              ${copy.reload}
+            </button>`
+          : nothing
+      }
+    </div>
+    ${robotLines(model, actions)}
+    <p class="records-note">${text.localLead}</p>
+    ${model.total ? filters(model, actions) : nothing}
+    ${empty ? html`<p>${model.total ? text.robotEmpty : text.listEmpty}</p>` : nothing}
+    ${
+      model.comparedRuns.length
+        ? html`<p class="records-note">
+            ${fill(text.comparing, { count: model.comparedRuns.length })}
+          </p>`
         : nothing
     }
     <ul class="records-list">
-      ${model.records.map((item) => recordItem(item, actions))}
+      ${model.records.map((item) => recordItem(item, actions, model))}
     </ul>
+    ${localTools(model, actions)}
   </section>`;
 }
 
@@ -384,19 +461,7 @@ function bagSection(model, actions) {
   </section>`;
 }
 
-function localSection(model, actions) {
-  const text = copy.sections;
-  return html`<section class="records-section card" data-records-local>
-    <h2>${text.local}</h2>
-    <p>${text.localLead}</p>
-    ${model.local.length ? nothing : html`<p>${text.localEmpty}</p>`}
-    <ul class="records-list">
-      ${model.local.map((item) => recordItem(item, actions))}
-    </ul>
-  </section>`;
-}
-
-/** 記録の一覧: the robot's records, Robot Manager's rosbags and this device's runs. */
+/** 記録の一覧: the robot's records with this device's runs in one list, then Robot Manager's rosbags. */
 function recordsPage(model, actions) {
   return html`<div class="records-page-inner">
     <div class="page-heading">
@@ -407,7 +472,7 @@ function recordsPage(model, actions) {
     </div>
     <p>${copy.lead}</p>
     <p class="records-privacy" data-records-privacy>${copy.privacy}</p>
-    ${robotSection(model, actions)} ${bagSection(model, actions)} ${localSection(model, actions)}
+    ${listSection(model, actions)} ${bagSection(model, actions)}
   </div>`;
 }
 
@@ -421,7 +486,7 @@ function pickerBody(model, actions) {
     ${model.error ? html`<p class="records-error" role="alert">${model.error}</p>` : nothing}
     ${empty ? html`<p>${model.showAll ? text.emptyAll : text.empty}</p>` : nothing}
     <ul class="records-list">
-      ${model.records.map((item) => pickItem(item, actions, model.compare))}
+      ${model.records.map((item) => pickItem(item, actions, model))}
     </ul>
     ${
       model.bags.length
@@ -438,7 +503,7 @@ function recordPicker(model, actions) {
   const text = copy.picker;
   const lead = model.showAll
     ? fill(text.leadAll, { streams: model.streams })
-    : fill(text.lead, { lesson: lessonName(model.lesson) });
+    : fill(model.both ? text.leadBoth : text.lead, { lesson: lessonName(model.lesson) });
   return html`<header class="dialog-heading">
       <h2 id="recordPickerTitle">${text.title}</h2>
       <button data-picker-close aria-label=${text.close} @click=${actions.close}>×</button>

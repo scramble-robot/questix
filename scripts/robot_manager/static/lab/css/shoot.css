@@ -181,3 +181,21 @@ body.driving.shooting,
 body.driving.shooting dialog[open] {
   padding-bottom: 176px;
 }
+
+/* The launcher's live values right under its buttons, like the drive strip (css/robot-state.css). */
+.shoot-strip {
+  display: grid;
+  gap: 8px;
+  border: 2px solid #cfe0da;
+  border-radius: 12px;
+  background: #fbfdfc;
+  padding: 8px 10px;
+}
+.shoot-strip .rs-strip-estop {
+  justify-self: start;
+  margin: 0;
+}
+.shoot-strip .shoot-state {
+  border-top: 0;
+  padding-top: 0;
+}

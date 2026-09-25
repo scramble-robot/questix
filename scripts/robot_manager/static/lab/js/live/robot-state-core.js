@@ -35,6 +35,11 @@ const DEFAULT_WHEEL_RPM = 60;
 // labelled, five labels on a chart of about 130 px). niceScale would give 7 ticks or a range twice
 // as wide for the same span, which leaves the lines flat on a phone.
 const WHEEL_AXIS_TOPS = [10, 20, 30, 40, 60, 80, 100, 120, 160, 200, 300, 400, 600, 800, 1000];
+// The strip's sparkline: chassis speed, ±top m/s. Before the bridge says its limit, ±0.3 m/s.
+const DEFAULT_SPEED_TOP = 0.3; // m/s
+const SPEED_AXIS_TOPS = [0.1, 0.2, 0.3, 0.5, 1, 2, 3]; // m/s
+const SPARK_WIDTH = 120; // SVG user units across the sparkline (= HISTORY_SECONDS)
+const SPARK_HEIGHT = 32; // SVG user units down
 const TIME_AXIS = { min: -HISTORY_SECONDS, max: 0, step: 5, ticks: [-10, -5, 0] };
 const DEGREES_PER_RADIAN = 180 / Math.PI;
 
@@ -44,7 +49,7 @@ const finite = (...values) => values.every(Number.isFinite);
 /** A fresh state: nothing received, no trail. */
 function createStateTracker() {
   return {
-    history: [], // {at, left, right, targetLeft, targetRight} of the last HISTORY_SECONDS
+    history: [], // {at, left, right, targetLeft, targetRight, speed, command} of HISTORY_SECONDS
     received: {}, // stream -> arrival time [ms] of its latest message
     latest: {}, // stream -> its latest message
     origin: null, // odom pose the trail is measured from
@@ -52,6 +57,7 @@ function createStateTracker() {
     trail: [], // [{forward, left}]
     poseHalf: POSE_MIN_HALF,
     peakRpm: 0, // largest wheel speed seen, so the axis only grows
+    peakSpeed: 0, // largest chassis speed (measured or commanded) seen, m/s: the strip's axis
   };
 }
 
@@ -81,9 +87,13 @@ function addWheels(tracker, drive, now, config) {
     right: measured.right,
     targetLeft: target.left,
     targetRight: target.right,
+    speed: drive.v,
+    command: command ? command.linear : NaN,
   });
   const values = [measured.left, measured.right, target.left, target.right].filter(Number.isFinite);
   tracker.peakRpm = Math.max(tracker.peakRpm, ...values.map(Math.abs));
+  const speeds = [drive.v, command?.linear].filter(Number.isFinite);
+  tracker.peakSpeed = Math.max(tracker.peakSpeed, ...speeds.map(Math.abs));
   while (tracker.history.length && now - tracker.history[0].at > HISTORY_SECONDS * 1000)
     tracker.history.shift();
 }
@@ -132,6 +142,13 @@ function wheelAxis(tracker, limits, config) {
   const high = Math.max(base, tracker.peakRpm);
   const top = WHEEL_AXIS_TOPS.find((value) => value >= high) ?? Math.ceil(high / 1000) * 1000;
   return { min: -top, max: top, step: top / 2, ticks: [-top, -top / 2, 0, top / 2, top] };
+}
+
+/** The strip's speed axis top (m/s): the bridge's limit or what was seen, rounded up, never shrunk. */
+function speedTop(tracker, limits) {
+  const limit = Number.isFinite(limits?.linear) ? limits.linear : DEFAULT_SPEED_TOP;
+  const high = Math.max(limit, tracker.peakSpeed);
+  return SPEED_AXIS_TOPS.find((value) => value >= high - 1e-9) ?? Math.ceil(high);
 }
 
 // Seconds since a stream last arrived, or null when it never has.
@@ -187,6 +204,8 @@ function wheelsModel(tracker, now) {
       right: toPoints('right'),
       targetLeft: toPoints('targetLeft'),
       targetRight: toPoints('targetRight'),
+      speed: toPoints('speed'),
+      command: toPoints('command'),
     },
   };
 }
@@ -252,11 +271,70 @@ function robotStateModel(
     motion,
     wheels,
     wheelAxis: wheelAxis(tracker, driveState?.limits ?? null, link.config),
+    speedTop: speedTop(tracker, driveState?.limits ?? null),
     timeAxis: TIME_AXIS,
     historySeconds: HISTORY_SECONDS,
     pose: poseModel(tracker, now),
     front: frontModel(tracker, now),
     streams: streamStates(tracker, link.streams, now),
+  };
+}
+
+// --- the compact strip under a lesson's start button ------------------------------------------
+
+/**
+ * `points` ([[seconds before now (<= 0), value], …]) as an SVG polyline's `points` in a
+ * SPARK_WIDTH × SPARK_HEIGHT box: now at the right edge, HISTORY_SECONDS ago at the left, `top` at
+ * the top and `-top` at the bottom (values beyond are drawn at the edge). A gap in the data (a
+ * value missing between two samples) is not bridged: each run of samples is its own polyline.
+ */
+function sparkLines(points, top) {
+  const x = (seconds) => ((seconds + HISTORY_SECONDS) / HISTORY_SECONDS) * SPARK_WIDTH;
+  const y = (value) => {
+    const clamped = Math.max(-top, Math.min(top, value));
+    return ((top - clamped) / (2 * top)) * SPARK_HEIGHT;
+  };
+  const lines = [];
+  let current = [];
+  for (const [seconds, value] of points) {
+    if (!Number.isFinite(value) || seconds < -HISTORY_SECONDS) {
+      if (current.length) lines.push(current);
+      current = [];
+      continue;
+    }
+    current.push(`${+x(seconds).toFixed(1)},${+y(value).toFixed(1)}`);
+  }
+  if (current.length) lines.push(current);
+  return lines.filter((line) => line.length > 1).map((line) => line.join(' '));
+}
+
+/**
+ * The strip's model from robotStateModel(): the emergency stop ('pressed' | 'released' |
+ * 'unknown'), who drives, both wheels (rpm, forward positive) and the chassis speed (m/s) — null
+ * where nothing fresh arrived — and the last HISTORY_SECONDS of the measured speed and of the
+ * command as sparkline polylines (`measured`, `command`: lists of `points` strings) on ±`top`.
+ */
+function stripModel(model) {
+  if (!model.connected) return { connected: false, phase: model.phase };
+  const wheels = model.wheels && !model.wheels.stale ? model.wheels : null;
+  const motion = model.motion && !model.motion.stale ? model.motion : null;
+  const top = model.speedTop ?? DEFAULT_SPEED_TOP;
+  const series = model.wheels?.series;
+  let estop = 'unknown';
+  if (model.estop !== null) estop = model.estop ? 'pressed' : 'released';
+  return {
+    connected: true,
+    estop,
+    driver: model.driver,
+    left: wheels ? wheels.left : null,
+    right: wheels ? wheels.right : null,
+    speed: motion ? motion.speed : null,
+    command: model.command ? model.command.linear : null,
+    top,
+    width: SPARK_WIDTH,
+    height: SPARK_HEIGHT,
+    measured: sparkLines(series?.speed ?? [], top),
+    commanded: sparkLines(series?.command ?? [], top),
   };
 }
 
@@ -318,6 +396,9 @@ export {
   wheelAxis,
   driverOf,
   robotStateModel,
+  speedTop,
+  sparkLines,
+  stripModel,
   snapshotLine,
   freshnessText,
   signed,

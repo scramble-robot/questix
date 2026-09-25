@@ -415,8 +415,20 @@
 .control-live .live-capture {
   margin-top: 14px;
 }
-.control-live-recorded {
+.control-live-howto > summary {
+  cursor: pointer;
+  min-height: 44px;
+  padding: 10px 0;
   font-size: 14px;
+  font-weight: 600;
+  color: #4d6469;
+}
+.control-live-howto > p {
+  font-size: 14px;
+  color: #4d6469;
+}
+.control-live-after {
+  margin-top: 12px;
 }
 .control-chart {
   padding: 14px 16px 0;
@@ -797,22 +809,9 @@
   font-size: 15px;
   font-weight: 600;
 }
-.control-show-charts {
-  margin: 8px 8px 0 0;
-}
 .control-guide > .control-live-jump {
   margin-top: 10px;
   font-size: 14px;
-}
-.control-compare-files {
-  display: grid;
-  gap: 6px;
-  margin-top: 12px;
-}
-.control-compare-files input {
-  display: block;
-  margin-top: 4px;
-  max-width: 100%;
 }
 .control-compare-table {
   margin: 16px 0 0;

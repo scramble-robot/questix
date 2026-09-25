@@ -362,3 +362,135 @@
 .robot-state-host .rs-memo button {
   font-size: 15px;
 }
+
+/* The full panel folded under a live block's strip (robotStatePanel with `folded`). */
+.rs-more {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fbfdfc;
+}
+.rs-more > summary {
+  cursor: pointer;
+  min-height: 44px;
+  padding: 12px 14px;
+  font-weight: 650;
+}
+.rs-more > .robot-state-host {
+  margin: 0;
+  padding: 0 8px 8px;
+}
+
+/* The compact strip right under a live block's button (js/live/robot-state-view.js stripView):
+   the emergency stop, who drives, the wheels and the speed, and the speed's last ten seconds. */
+.rs-strip-host {
+  container-type: inline-size;
+}
+.rs-strip {
+  display: grid;
+  gap: 8px;
+  border: 2px solid #cfe0da;
+  border-radius: 12px;
+  background: #fbfdfc;
+  padding: 8px 10px;
+}
+.rs-strip p {
+  margin: 0;
+}
+.rs-strip-status {
+  font-weight: 650;
+  color: var(--orange);
+}
+.rs-strip-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+.rs-strip-estop {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 650;
+  background: #e8f2ee;
+  color: #2f6f5d;
+}
+.rs-strip-estop.is-unknown {
+  background: #eef1ef;
+  color: var(--muted);
+}
+.rs-strip-estop.is-pressed {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--role-danger);
+  color: #fff;
+  font-size: 16px;
+}
+.rs-strip-driver {
+  font-size: 14px;
+}
+.rs-strip-driver span {
+  color: var(--muted);
+}
+.rs-strip-values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+}
+.rs-strip-values div {
+  display: grid;
+}
+.rs-strip-values dt {
+  font-size: 12px;
+  color: var(--muted);
+}
+.rs-strip-values dd {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+.rs-strip-values small {
+  margin-left: 2px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.rs-spark {
+  flex: 1 1 200px;
+  min-width: 140px;
+  max-width: 380px;
+  background: none;
+  margin: 0;
+}
+.rs-spark svg {
+  display: block;
+  width: 100%;
+  height: 36px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.rs-spark-zero {
+  stroke: #9aa5ae;
+  stroke-width: 1;
+}
+.rs-spark figcaption {
+  display: flex;
+  flex-direction: row;
+  padding: 2px 0 0;
+  background: none;
+  flex-wrap: wrap;
+  gap: 0 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.rs-spark-key.is-measured {
+  color: var(--role-measured);
+  font-weight: 650;
+}
+.rs-spark-key.is-target {
+  color: var(--role-target);
+  font-weight: 650;
+}

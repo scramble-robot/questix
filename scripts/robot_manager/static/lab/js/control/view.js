@@ -9,8 +9,7 @@ import {
 } from './summary.js';
 import { lessonLabel } from '../shell/lesson-ui.js';
 import { schoolTips } from '../shell/school-tips.js';
-import { liveCaptureControls, captureCopy } from '../live/live-view.js';
-import { robotStatePanel } from '../live/robot-state.js';
+import { liveCaptureControls } from '../live/live-view.js';
 import { lessonBrief } from '../shell/lesson-brief.js';
 import { runModeBadgeHtml } from '../shell/run-mode.js';
 import { CONTROL_GROUPS, CONTROL_TOPICS, LAST_SAMPLE, STOP_DISTANCE, controlLoad } from './core.js';
@@ -202,7 +201,7 @@ function strategyField(model, copy, actions) {
   const methods = Object.fromEntries(
     ['feedforward', 'feedback', 'both'].map((key) => [key, copy.labels.method[key]]),
   );
-  return html`<label class="control-select" for="controlStrategy">指示の決め方</label
+  return html`<label class="control-select" for="controlStrategy">指令の決め方</label
     ><select
       class="control-select-input"
       id="controlStrategy"
@@ -387,7 +386,7 @@ function controlPanel(model, copy, actions) {
     </button>
     ${model.topicId === 'challenge' ? badges(model, copy) : nothing}
     <button class="text-button control-live-jump" data-control-live-jump @click=${actions.showLive}>
-      ${copy.live.jumpToLive}
+      ${liveOnTop(model) ? copy.live.jumpToLiveUp : copy.live.jumpToLive}
     </button>
   </aside>`;
 }
@@ -551,10 +550,10 @@ function chartLegend(model, copy, layers) {
     }${live.compared.map(
       (entry) =>
         html`<span class="swatch"
-          >${swatch(comparedStyle(entry))}${fill(copy.charts.comparedLegend, {
-            letter: entry.letter,
-            label: labelOf(entry.parts),
-          })}</span
+          >${swatch(comparedStyle(entry))}${fill(
+            entry.source === 'past' ? copy.charts.comparedLegendPast : copy.charts.comparedLegend,
+            { letter: entry.letter, label: labelOf(entry.parts) },
+          )}</span
         >`,
     )}
   </div>`;
@@ -581,7 +580,7 @@ function backToLive(model, copy, actions) {
     data-control-back-to-live
     @click=${actions.showLive}
   >
-    ${copy.live.backToLive}
+    ${liveOnTop(model) ? copy.live.backToLiveUp : copy.live.backToLive}
   </button>`;
 }
 
@@ -643,7 +642,7 @@ function commandSection(model, copy, actions, shared) {
   const breakdown = topicId === 'combined';
   const options = model.integralTitled
     ? { title: '出力とIの補正', extra: model.showIntegral }
-    : { title: distance ? '車輪への指示' : 'モーターへの出力', breakdown };
+    : { title: distance ? '車輪への指令' : 'モーターへの出力', breakdown };
   const note = () => {
     if (topicId === 'limits') return copy.charts.commandLimits;
     return distance ? copy.charts.commandDistance : copy.charts.commandSpeed;
@@ -652,7 +651,7 @@ function commandSection(model, copy, actions, shared) {
     ?open=${model.commandOpen}
     @toggle=${(event) => actions.setCommandOpen(event.target.open)}
   >
-    <summary>${(distance ? '車輪へ指示した回転数の割合' : 'モーターへの出力') + 'を見る'}</summary>
+    <summary>${(distance ? '車輪へ指令した回転数の割合' : 'モーターへの出力') + 'を見る'}</summary>
     <p>
       ${note()}${
         topicId === 'limits'
@@ -670,7 +669,7 @@ function commandSection(model, copy, actions, shared) {
     ${
       breakdown
         ? html`<div class="control-chart-legend">
-            <span class="measured">実際の指示（今回）</span><span class="ff-line">見積もり FF</span
+            <span class="measured">実際の指令（今回）</span><span class="ff-line">見積もり FF</span
             ><span class="fb-line">ずれの修正 FB</span>
           </div>`
         : nothing
@@ -738,10 +737,31 @@ function calibrationCard(model, copy) {
   </section>`;
 }
 
+// With a robot connected, the real-robot card comes right after the brief, above the simulation:
+// the start button is then within two screens of the topic's top on a phone. Without one it stays
+// at the end, one line, for a class working from files.
+const liveOnTop = (model) => Boolean(model.live.capture.link.connected);
+
+// What the card does and how: folded while the page can drive the robot (the drive block right
+// under it says what the run does), open when learners drive with the controller themselves (the
+// safety sentence is there).
+function liveHowto(model, text) {
+  const intro = html`<p>${model.distance ? text.distanceIntro : text.intro}</p>`;
+  const howto = html`<p>${model.distance ? text.distanceHowto : text.howto}</p>`;
+  if (!model.live.capture.drive?.allowed || !model.live.capture.link.connected)
+    return html`${intro}${howto}`;
+  return html`<details class="control-live-howto">
+    <summary>${text.howtoSummary}</summary>
+    ${intro}${howto}
+  </details>`;
+}
+
 // Recording the real robot and drawing it on the same axes as the simulation. Either the learner
 // drives the robot from the controller while this card records what the wheels (speed topics) or
 // the LiDAR (distance topics) measured, or — on a robot that allows it — the card drives the robot
-// itself: a step input (speed), or the simulation's own PID stopping in front of the wall.
+// itself: a step input (speed), or the simulation's own PID stopping in front of the wall. The
+// shared block (js/live/live-view.js) holds the live strip, the folded 実機の状態, and every file,
+// record and comparison action in its 記録ファイルと保存.
 function liveCard(model, copy, actions) {
   const text = copy.live;
   const shown = Boolean(model.live.run) || model.live.compared.length > 0;
@@ -749,39 +769,27 @@ function liveCard(model, copy, actions) {
     <h2>
       ${unsafeHTML(runModeBadgeHtml('live'))}${unsafeHTML(runModeBadgeHtml('drive'))} ${text.title}
     </h2>
-    <p>${model.distance ? text.distanceIntro : text.intro}</p>
-    <p>${model.distance ? text.distanceHowto : text.howto}</p>
-    ${model.distance ? nothing : stepSpeedSelect(model, text, actions)}
+    ${liveHowto(model, text)} ${model.distance ? nothing : stepSpeedSelect(model, text, actions)}
     ${liveCaptureControls(model.live.capture, actions)}
     ${
-      model.live.note
-        ? html`<p class="control-live-recorded" role="status">${model.live.note}</p>`
-        : nothing
-    }
-    ${liveStatePanel(model, text)}
-    ${
       shown
-        ? html`<button
-            class="control-show-charts"
-            data-control-show-charts
-            @click=${actions.showCharts}
-          >
-            ${text.showCharts}
-          </button>`
+        ? html`<div class="live-capture-actions control-live-after">
+            <button
+              class="control-show-charts"
+              data-control-show-charts
+              @click=${actions.showCharts}
+            >
+              ${liveOnTop(model) ? text.showChartsBelow : text.showCharts}
+            </button>
+            ${
+              model.live.run
+                ? html`<button class="quiet" @click=${actions.clearLive}>${text.clear}</button>`
+                : nothing
+            }
+          </div>`
         : nothing
     }
-    ${model.live.run ? html`<button @click=${actions.clearLive}>${text.clear}</button>` : nothing}
-    ${compareControls(model, text, actions)}
   </section>`;
-}
-
-// The robot's state while it is driven or recorded, live (js/live/robot-state.js); the charts
-// above show the recording only once it is over. Offline the capture block already offers the
-// connection, so the panel then shows nothing.
-function liveStatePanel(model, text) {
-  if (!model.live.capture.link.connected) return nothing;
-  return html`<p class="helper">${text.stateNote}</p>
-    ${robotStatePanel('control-live', { name: text.memoName, hideOffline: true })}`;
 }
 
 // The speed of the real step input; only offered while the card can drive the robot.
@@ -803,36 +811,6 @@ function stepSpeedSelect(model, text, actions) {
       )}
     </select></label
   >`;
-}
-
-// Other groups' saved recordings (or rosbags), drawn on the same chart.
-function compareControls(model, text, actions) {
-  return html`<div class="control-compare-files">
-    <label
-      >${text.compareOpen}
-      <input
-        data-live-compare
-        type="file"
-        multiple
-        accept=".json,.mcap,application/json"
-        @change=${(event) => {
-          actions.addComparisons(event.target.files);
-          event.target.value = '';
-        }}
-    /></label>
-    <button class="live-capture-pick" data-live-compare-pick @click=${actions.pickComparison}>
-      ${captureCopy.file.pick}
-    </button>
-    ${
-      model.live.compared.length
-        ? html`<button data-live-compare-clear @click=${actions.clearComparisons}>
-            ${text.compareClear}
-          </button>`
-        : nothing
-    }
-    <p class="helper">${text.compareNote}</p>
-    ${model.live.compareNote ? html`<p role="status">${model.live.compareNote}</p>` : nothing}
-  </div>`;
 }
 
 const secondsText = (value) => (value === null ? '—' : formatValue(value) + ' 秒');
@@ -955,7 +933,7 @@ function methodComparison(model, run, copy) {
       <table>
         <thead>
           <tr>
-            <th>指示の決め方</th>
+            <th>指令の決め方</th>
             <th>1秒後の回転数</th>
             <th>最後のずれ</th>
             <th>最大の行き過ぎ</th>
@@ -1237,6 +1215,7 @@ function controlPage(model, copy, hardwareHtml, actions) {
     </div>
     ${groupNav(model, actions)}${topicNav(model, copy, actions)}
     ${unsafeHTML(lessonBrief(lessonKey, model.topic) + schoolTips(lessonKey))}
+    ${liveOnTop(model) ? liveCard(model, copy, actions) : nothing}
     <div class="control-layout">
       <div class="control-workspace">
         ${calibrationCard(model, copy)}${visualCard(model, copy, actions)}${graphsCard(
@@ -1249,7 +1228,7 @@ function controlPage(model, copy, hardwareHtml, actions) {
     </div>
     ${resultsCard(model, copy, actions)}${explanationCard(model, copy, actions)}
     ${questionCard(model, copy, actions)}${historyCard(model, copy)}
-    ${liveCard(model, copy, actions)}${hardwareCard(hardwareHtml)}`;
+    ${liveOnTop(model) ? nothing : liveCard(model, copy, actions)}${hardwareCard(hardwareHtml)}`;
 }
 
 export { controlPage, gainText, COMMAND_OPEN_TOPICS };

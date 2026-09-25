@@ -149,35 +149,36 @@ function notAllowedLine(drive) {
 }
 
 /**
- * `model` is the session model (`recording`, `running`, `tail`, `elapsed`, `total`, `driveNote`),
- * `drive` the lesson's drive part: driveModel() plus `program`, `placement`, `confirmLabel`, `startLabel`,
- * `report` and `metrics` (the numbers of the report, null for all). `actions` needs `startDriveCapture`, `stopCapture` and `confirmDrive`.
+ * `model` is the session model (`recording`, `running`, `tail`, `elapsed`, `total`), `drive` the
+ * lesson's drive part: driveModel() plus `program`, `placement`, `confirmLabel`, `startLabel`,
+ * `report` (null for none) and `metrics` (the numbers of the report, null for all). `actions`
+ * needs `startDriveCapture`, `stopCapture` and `confirmDrive`. `parts.strip` goes right under the
+ * start button (the live strip), `parts.result` under that (how the last run went).
  */
-function driveControls(model, drive, actions) {
+function driveControls(model, drive, actions, parts = {}) {
   if (!drive.allowed && !model.running) return notAllowedLine(drive);
   return html`<div class="drive-block" data-drive-block>
     <h4>${driveCopy.title}</h4>
     ${drive.program ? html`<p>${drive.program}</p>` : nothing} ${placementLine(drive)}
     ${checklist(drive)} ${teacherDetails(drive)}
     ${confirmBox(drive, actions, model.running, drive.confirmLabel ?? driveCopy.confirm)}
-    <div class="live-capture-actions drive-actions">${runControls(model, drive, actions)}</div>
-    ${progressLine(model)}
-    ${
-      model.driveNote && !model.running && !model.tail
-        ? html`<p class="drive-result" role="status" data-drive-result>${model.driveNote}</p>`
-        : nothing
-    }
-    ${limitsNote(drive)}
+    <div class="live-run" data-live-run>
+      <div class="live-capture-actions drive-actions">${runControls(model, drive, actions)}</div>
+      ${progressLine(model)} ${parts.strip ?? nothing}
+    </div>
+    ${parts.result ?? nothing}
     ${
       drive.report && !model.running && !model.tail
         ? driveReportView(drive.report, { compact: true, metrics: drive.metrics })
         : nothing
     }
+    ${limitsNote(drive)}
   </div>`;
 }
 
 export {
   driveControls,
+  notAllowedLine,
   driveEndedText,
   driveCopy,
   checklist as driveChecklist,

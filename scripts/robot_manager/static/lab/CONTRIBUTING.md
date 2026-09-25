@@ -144,13 +144,33 @@ tilt, at})` gets each of this page's discs and returns whether the lesson kept a
   page, and give a closed-loop controller its own guards (stale sensor → stand still, minimum
   distance → throw an Error with the learner's sentence). Declare the topic's `drive` run mode in
   `content/shell/run-modes.json` and put `runModeBadgeHtml('drive')` in the block's heading.
-- Where learners measure on the robot, put the 「実機の状態」 panel next to the measurement:
-  `${robotStatePanel('<place>', { name, placeholder, status, hideOffline })}` from
-  `js/live/robot-state.js` in the lesson's view (see its doc comment). It draws itself (at most
+- The shared block is laid out the same in every course (`js/live/live-view.js`): the start (or
+  record) button, right under it the compact live strip (`liveStateStrip` from
+  `js/live/robot-state.js`: 非常停止, who drives, both wheels, the speed and its last ten seconds),
+  the result of the last run in one box (how it ended, the lesson's `message`, whether the robot
+  kept it), then two folded parts — 「実機の状態をくわしく見る」 (only for a session created with
+  `state: { place, name, placeholder, status }`) and 「記録ファイルと保存」 (記録だけする while the
+  page may drive, open a file, one robot-record picker, 重ねる for a session created with
+  `compare: { add, addFiles, clear, model }`, 班の名前, the saves). Offline it is one line with
+  「実機につなぐ」 plus the files part; robot-only buttons are not shown. Starting a run or a
+  recording brings the button and the strip on screen (`revealLiveRun(slot)`), so a lesson does
+  not scroll on start itself. Pass `message: session.note` in the model to put the lesson's note in
+  the result box, and `report: false` when the lesson's own chart and table are the result. The
+  robot records' picker is `chooseRobotRecord({ lesson, needs, both })` (`{recording, compare}`) or
+  `pickRobotRecord` (the recording only), from `js/live/record-picker.js`.
+- Where learners measure on the robot without the shared block, put the 「実機の状態」 panel next to
+  the measurement: `${robotStatePanel('<place>', { name, placeholder, status, hideOffline, folded })}`
+  from `js/live/robot-state.js` in the lesson's view (see its doc comment); `folded` puts it in a
+  closed 「実機の状態をくわしく見る」, the right choice next to a strip. It draws itself (at most
   10 Hz, only while visible), so the lesson's `update()` is not called for it; `status()` is the
   lesson's own line about a run in progress (the motor bench's current step). Its arithmetic is
   `robot-state-core.js` (`test/robot-state-core.test.mjs`); its 測定メモ is per place and per
   browser, and `stateMemo(place)` reads it for a lesson's own saved file. It only listens.
+- Words (content/live, content/control and every course that drives): a command sent to the robot
+  is a 指令 (never 指示); the robot 走る and a lesson 走らせる it (the button test is 動作確認, not
+  実機テスト); the emergency stop reads 「非常停止：押されています」／「非常停止：解除されています」; a
+  working link is 「つながっています」 (short 「接続済み」). Records name the lesson by the course
+  title the learner sees, the experiment in brackets (「目標に合わせて動かす（実機を壁の前で止める）」).
 - A recording replaces the lesson's data instead of being mixed into it, and says what the
   conditions were (`captureNotes`, and where it came from), so a learner can tell measured numbers
   from generated ones.

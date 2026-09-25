@@ -17,18 +17,21 @@ const copy = await loadJson('content/live/link.json');
 
 // Header button and "実機" dialog. Drawing only happens while the dialog is open.
 const $ = (id) => document.getElementById(id);
+// What each stream is, in the learner's words (the topic itself is shown next to it).
 const STREAM_LABEL = {
   scan: 'LiDAR',
   odom: '位置の見積もり',
   drive: '車輪',
   twist: '速度の指令',
   camera: 'カメラ',
+  roller: 'ローラーの状態',
+  shot: '発射機構の状態',
 };
-// The dialog's own table of contents: nav key → section id (drive-ui.js renders the last two).
+// The dialog's own table of contents: nav key → section id (drive-ui.js renders the bench). The
+// run history lives in 記録の一覧, reached by the last button.
 const DIALOG_SECTIONS = [
   ['monitor', 'robotMonitor'],
   ['drive', 'robotDrive'],
-  ['log', 'robotDriveLog'],
 ];
 const HISTORY_SECONDS = 10;
 const TWIST_FRESH_SECONDS = 1; // an older command no longer describes what the robot was asked to do
@@ -244,22 +247,32 @@ const robotName = (hello) =>
 const domainText = (domain) =>
   Number.isInteger(domain) ? String(domain) : copy.identity.domainUnset;
 
+// The robot's name and whether lessons may drive it; the ROS_DOMAIN_ID is for the teacher, folded.
 function identityView(hello) {
   const rows = [];
   if (robotName(hello)) rows.push([copy.identity.robot, robotName(hello)]);
-  if (hello.robot) rows.push([copy.identity.domain, domainText(hello.robot.domain)]);
   const driving =
     hello.read_only === false ? copy.identity.driveAllowed : copy.identity.driveReadOnly;
   rows.push([copy.identity.drive, driving]);
   return html`<dl class="robot-identity">
-    ${rows.map(
-      ([term, value]) =>
-        html`<div>
-          <dt>${term}</dt>
-          <dd>${value}</dd>
-        </div>`,
-    )}
-  </dl>`;
+      ${rows.map(
+        ([term, value]) =>
+          html`<div>
+            <dt>${term}</dt>
+            <dd>${value}</dd>
+          </div>`,
+      )}
+    </dl>
+    ${
+      hello.robot
+        ? html`<details class="drive-teacher robot-identity-teacher">
+            <summary>${copy.identity.teacher}</summary>
+            <p data-robot-domain>
+              ${fillSentence(copy.identity.domainLine, { domain: domainText(hello.robot.domain) })}
+            </p>
+          </details>`
+        : nothing
+    }`;
 }
 function silentView(hello) {
   const sentence = hello.robot

@@ -20,6 +20,9 @@ import {
   outcomeWord,
   outcomeKind,
   localEntry,
+  runsNotOnRobot,
+  onlyOnThisDevice,
+  newestFirst,
   describeEntry,
   lessonKey,
   megabytes,
@@ -271,6 +274,44 @@ test('a run of this browser reads like a robot entry', () => {
   assert.equal(described.label, recordsCopy.lessons.bench);
   assert.equal(described.outcome, recordsCopy.outcomes.recorded);
   assert.equal(described.outcomeKind, 'none');
+});
+
+test('記録の一覧 lists each run once: this device only adds what the robot does not hold', () => {
+  const runs = [
+    { id: 1, robotId: 'r-1' }, // kept on the robot
+    { id: 2, robotId: '' }, // saving failed or was off
+    { id: 3, robotId: 'r-gone' }, // kept, then removed from the robot
+    { id: 4, source: 'file' }, // a file opened here
+  ];
+  const robot = new Set(['r-1', 'r-2']);
+  assert.deepEqual(
+    runsNotOnRobot(runs, robot).map((run) => run.id),
+    [2, 3, 4],
+  );
+  assert.deepEqual(
+    runs.filter((run) => onlyOnThisDevice(run, robot)).map((run) => run.id),
+    [2, 3, 4],
+  );
+  // Offline (the robot's list unknown): every run of this device, and only the ones never kept
+  // on a robot carry 「この端末だけ」.
+  assert.equal(runsNotOnRobot(runs, null).length, 4);
+  assert.deepEqual(
+    runs.filter((run) => onlyOnThisDevice(run, null)).map((run) => run.id),
+    [2, 4],
+  );
+});
+
+test('the merged list is newest first, undated entries last', () => {
+  const item = (id, recordedAt) => ({ id, entry: { recordedAt } });
+  const sorted = newestFirst([
+    item('old', '2026-09-25T01:00:00Z'),
+    item('none', ''),
+    item('new', '2026-09-26T01:00:00Z'),
+  ]);
+  assert.deepEqual(
+    sorted.map((entry) => entry.id),
+    ['new', 'old', 'none'],
+  );
 });
 
 test('sizes are written in megabytes, never as 0.0 for a small file', () => {

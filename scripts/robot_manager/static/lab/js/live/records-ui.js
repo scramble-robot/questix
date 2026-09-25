@@ -11,29 +11,37 @@ import {
   filterChoices,
   bagWindow,
   defaultBagWindow,
+  runsNotOnRobot,
+  onlyOnThisDevice,
+  newestFirst,
 } from './records-core.js';
 import { recordingFile } from './recording-core.js';
-import { driveReport } from './drive-report-core.js';
-import { reportCopy } from './drive-report-view.js';
+import { driveReport, isEmptyRun } from './drive-report-core.js';
+import { reportCopy, compareLimit } from './drive-report-view.js';
 import {
   RUN_DEFAULTS,
+  addDriveRun,
+  clearDriveRuns,
+  driveRun,
   driveRuns,
   driveRunRecording,
   hasRecording,
   onDriveRuns,
 } from './drive-history.js';
-import { groupName } from './capture.js';
+import { groupName, openRecordingFile } from './capture.js';
 import { robotRecordsClient, robotRecordsInfo, onRobotRecords } from './robot-records.js';
 import { openRecordInLesson } from './record-targets.js';
 import { recordsPage } from './records-view.js';
 import { openRobotDialog } from './live-ui.js';
 
-// 記録の一覧 (route #records): every recording a learner can reach from here — those kept on the
-// connected robot (lab runs and 「記録だけする」 of every device, and the robot's own recordings of
-// controller driving), Robot Manager's rosbags (converted on the robot, a time window at a time),
-// and this browser's run history. Each can be looked at (the run report of the 実機 dialog, with
-// its charts), saved as JSON or a spreadsheet CSV, and opened in the lessons that take it.
-// State and behaviour here; records-view.js draws, records-core.js holds the rules.
+// 記録の一覧 (route #records): every recording a learner can reach from here, in one list — those
+// kept on the connected robot (lab runs and 「記録だけする」 of every device, and the robot's own
+// recordings of controller driving) together with the runs of this browser the robot does not
+// hold (tagged 「この端末だけ」; every run while offline) — then Robot Manager's rosbags (converted
+// on the robot, a time window at a time). Each can be looked at (the run report with its charts,
+// and up to three others drawn over it with 比べる), saved as JSON or a spreadsheet CSV, and
+// opened in the lessons that take it. A saved file can be added to this browser's runs, and they
+// can be cleared. State and behaviour here; records-view.js draws, records-core.js holds the rules.
 
 const TICK_MS = 1000; // how often the "converting… N秒" line counts
 const KEPT_RECORDINGS = 6; // recordings fetched from the robot kept in memory (a few MB each)
@@ -53,6 +61,8 @@ const state = {
   windows: new Map(), // bag name → {start, seconds} typed
   converting: null, // {key, startedAt, abort, timer}
   converted: new Map(), // bag name → {entry, recording}: the last window converted
+  compared: [], // keys whose runs are drawn over the open report (at most compareLimit)
+  fileNote: '', // what happened to the last file added to this browser's runs
 };
 
 const page = () => document.getElementById('recordsPage');
@@ -70,6 +80,8 @@ function itemOf(key, entry, extra = {}) {
     message: '',
     onRobot: false,
     fromFile: false,
+    localOnly: false,
+    compared: state.compared.includes(key),
     ...extra,
   };
 }
@@ -78,9 +90,48 @@ function itemOf(key, entry, extra = {}) {
 const robotRecords = () =>
   (state.list?.records ?? []).filter((entry) => entry.source !== 'rosbag-cache');
 
-function robotItems() {
-  const shown = filterEntries(robotRecords(), state.filters, groupName());
-  return shown.map((entry) => itemOf(`robot:${entry.id}`, entry));
+// The ids the robot lists, or null while its list is not known (offline, not loaded yet).
+const robotIds = () =>
+  robotRecordsInfo().connected && state.list
+    ? new Set(state.list.records.map((entry) => entry.id))
+    : null;
+
+// Offline the last list is not shown: the robot may have changed, and its records cannot be opened.
+const robotItems = () =>
+  robotRecordsInfo().connected
+    ? robotRecords().map((entry) => itemOf(`robot:${entry.id}`, entry))
+    : [];
+
+function localItem(run, ids) {
+  const key = `local:${run.id}`;
+  const item = itemOf(key, localEntry(run), {
+    onRobot: Boolean(run.robotId) && !onlyOnThisDevice(run, ids),
+    localOnly: onlyOnThisDevice(run, ids),
+    fromFile: run.source === 'file',
+    // The history's own entry is its report; its recording may be gone after a reload.
+    run: state.openKey === key ? run : null,
+  });
+  return {
+    ...item,
+    label: run.conditions || lessonName(item.lesson),
+    targets: hasRecording(run) ? item.targets : [],
+  };
+}
+
+// One list: the robot's records and the runs of this browser it does not hold, newest first, as
+// far as the filters keep them.
+function listItems() {
+  const ids = robotIds();
+  const local = runsNotOnRobot(driveRuns(), ids).map((run) => localItem(run, ids));
+  const all = [...robotItems(), ...local];
+  const kept = new Set(
+    filterEntries(
+      all.map((item) => item.entry),
+      state.filters,
+      groupName(),
+    ),
+  );
+  return { all, shown: newestFirst(all.filter((item) => kept.has(item.entry))) };
 }
 
 // Converted on this page first (named after their window), then those the robot kept.
@@ -110,27 +161,9 @@ function bagItems() {
   });
 }
 
-function localItems() {
-  return driveRuns().map((run) => {
-    const entry = localEntry(run);
-    const item = itemOf(`local:${run.id}`, entry, {
-      onRobot: Boolean(run.robotId),
-      fromFile: run.source === 'file',
-      // The history's own entry is its report; its recording may be gone after a reload.
-      run: state.openKey === `local:${run.id}` ? run : null,
-    });
-    return {
-      ...item,
-      label: run.conditions || lessonName(item.lesson),
-      targets: hasRecording(run) ? item.targets : [],
-    };
-  });
-}
-
 function model() {
   const info = robotRecordsInfo();
-  const records = robotRecords();
-  const shown = robotItems();
+  const items = listItems();
   return {
     connected: info.connected,
     robot: robotState().hello?.robot?.name ?? '',
@@ -140,10 +173,13 @@ function model() {
     loading: state.loading,
     error: state.error,
     filters: state.filters,
-    choices: filterChoices(records),
+    choices: filterChoices(items.all.map((item) => item.entry)),
     myGroup: groupName(),
-    records: shown,
-    total: records.length,
+    records: items.shown,
+    total: items.all.length,
+    compareFull: state.compared.length >= compareLimit,
+    comparedRuns: state.compared.map(runOfKey).filter(Boolean),
+    local: { count: driveRuns().length, note: state.fileNote },
     bags: {
       supported: info.rosbags,
       loading: state.bags.loading,
@@ -151,7 +187,6 @@ function model() {
       list: bagItems(),
       converted: convertedItems(),
     },
-    local: localItems(),
   };
 }
 
@@ -280,22 +315,83 @@ function reportRun(key, recording) {
   };
 }
 
+// The run report of an item: a run of this browser is its own report; a record of the robot is
+// fetched once and turned into one.
+function runOfKey(key) {
+  const { kind, id } = splitKey(key);
+  if (kind === 'local') return driveRun(Number(id));
+  return state.runs.get(key) ?? null;
+}
+
+async function loadRun(key) {
+  if (key.startsWith('local:')) return runOfKey(key);
+  const recording = await recordingOf(key);
+  if (!recording) return null;
+  if (!state.runs.has(key)) state.runs.set(key, reportRun(key, recording));
+  return state.runs.get(key);
+}
+
 async function toggleView(key) {
   if (state.openKey === key) {
     state.openKey = null;
     update();
     return;
   }
-  if (key.startsWith('local:')) {
-    state.openKey = key;
+  if (!(await loadRun(key))) return;
+  state.openKey = key;
+  // The run shown is not drawn over itself.
+  state.compared = state.compared.filter((other) => other !== key);
+  update();
+}
+
+// 比べる: the run is drawn over the open report, whose charts then come first and are scrolled to.
+async function toggleCompare(key) {
+  if (state.compared.includes(key)) {
+    state.compared = state.compared.filter((other) => other !== key);
     update();
     return;
   }
-  const recording = await recordingOf(key);
-  if (!recording) return;
-  if (!state.runs.has(key)) state.runs.set(key, reportRun(key, recording));
-  state.openKey = key;
+  if (state.compared.length >= compareLimit || !(await loadRun(key))) return;
+  state.compared = [...state.compared, key];
   update();
+  const charts = page().querySelector('[data-drive-report-charts]');
+  charts?.scrollIntoView({ block: 'start', behavior: 'instant' });
+}
+
+// A recording saved here or by another group, added to this browser's runs to look at and compare.
+async function addFile(file) {
+  if (!file) return;
+  try {
+    const { recording } = await openRecordingFile(file);
+    if (isEmptyRun(recording)) {
+      state.fileNote = fill(reportCopy.openedEmpty, { name: file.name });
+    } else {
+      const slot = recording.lesson || 'file';
+      const run = addDriveRun({
+        slot,
+        lesson: copy.lessons[slot] ? lessonName(slot) : reportCopy.fileLesson,
+        conditions: recording.conditions?.label ?? '',
+        ended: recording.outcome?.label ?? '',
+        reason: recording.outcome?.reason ?? '',
+        robot: recording.robot?.name ?? '',
+        group: recording.group ?? '',
+        source: 'file',
+        recording,
+      });
+      state.openKey = `local:${run.id}`;
+      state.fileNote = fill(reportCopy.opened, { name: file.name });
+    }
+  } catch (error) {
+    state.fileNote = fill(reportCopy.openFailed, { name: file.name, reason: error.message });
+  }
+  update();
+}
+
+function clearLocal() {
+  if (!window.confirm(reportCopy.clearConfirm)) return;
+  state.compared = state.compared.filter((key) => !key.startsWith('local:'));
+  if (state.openKey?.startsWith('local:')) state.openKey = null;
+  clearDriveRuns();
 }
 
 async function save(key, kind) {
@@ -373,6 +469,9 @@ const actions = {
     update();
   },
   toggleView,
+  toggleCompare,
+  addFile,
+  clearLocal,
   save,
   openIn,
   convertBag,

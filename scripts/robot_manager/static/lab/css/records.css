@@ -278,6 +278,32 @@
 .live-robot-save .text-button {
   margin-left: 6px;
 }
+.live-result .live-robot-save {
+  margin: 0;
+}
+
+/* --- this device's runs in the one list: the tag, 比べる, and adding / clearing --- */
+.records-badge.is-local {
+  background: #fdf3e7;
+  color: #8a5a12;
+}
+.records-compare {
+  min-height: 40px;
+  padding: 0 4px;
+}
+.records-local-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 16px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.records-local-tools .records-note {
+  flex-basis: 100%;
+  margin: 0;
+}
 
 /* --- the catalogue's robot section --- */
 .series-records {

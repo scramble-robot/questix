@@ -327,6 +327,97 @@ function robotStateView(model, text, actions, status = '') {
   </section>`;
 }
 
+// --- the strip under a lesson's start button ------------------------------------------------------
+
+function stripEstop(strip, text) {
+  const words = text.strip.estop;
+  if (strip.estop === 'pressed')
+    return html`<p class="rs-strip-estop is-pressed" role="alert" data-rs-strip-estop="pressed">
+      <span aria-hidden="true">⛔</span>${words.pressed}
+    </p>`;
+  return html`<p class="rs-strip-estop is-${strip.estop}" data-rs-strip-estop=${strip.estop}>
+    ${words[strip.estop]}
+  </p>`;
+}
+
+const rpmText = (value) => (value === null ? '—' : value.toFixed(1));
+
+// The speed of the last ten seconds: measured solid, command dashed (roles of js/core/palette.js),
+// named in HTML next to it so nothing is colour alone or smaller than 12 px.
+function sparkline(strip, text) {
+  const words = text.strip;
+  const zero = strip.height / 2;
+  return html`<figure class="rs-spark" data-rs-spark>
+    <svg
+      viewBox=${`0 0 ${strip.width} ${strip.height}`}
+      preserveAspectRatio="none"
+      role="img"
+      aria-label=${fill(words.sparkLabel, { top: strip.top })}
+    >
+      <line
+        x1="0"
+        x2=${strip.width}
+        y1=${zero}
+        y2=${zero}
+        class="rs-spark-zero"
+        vector-effect="non-scaling-stroke"
+      />
+      ${strip.measured.map(
+        (points) =>
+          svg`<polyline points=${points} fill="none" stroke=${measured.color} stroke-width="2.5" vector-effect="non-scaling-stroke"/>`,
+      )}
+      ${strip.commanded.map(
+        // Over the measurement: where the wheels follow exactly, the dashes still show.
+        (points) =>
+          svg`<polyline points=${points} fill="none" stroke=${target.color} stroke-width="2" stroke-dasharray="5 4" vector-effect="non-scaling-stroke"/>`,
+      )}
+    </svg>
+    <figcaption>
+      <span class="rs-spark-key is-measured">${words.measured}</span>
+      <span class="rs-spark-key is-target">${words.command}</span>
+      <span>${fill(words.span, { seconds: 10, top: strip.top })}</span>
+    </figcaption>
+  </figure>`;
+}
+
+/**
+ * The compact strip a live block shows right under its start / record button (robot-state.js
+ * liveStateStrip draws it): the emergency stop, who drives, both wheels and the speed in numbers,
+ * a sparkline of the speed, and `status`, the lesson's line about the run in progress (or '').
+ * Nothing offline: the block already offers the connection.
+ */
+function stripView(strip, text, status = '') {
+  if (!strip.connected) return nothing;
+  const words = text.strip;
+  const speed = strip.speed === null ? '—' : signed(strip.speed, 2);
+  return html`<div class="rs-strip" data-live-strip aria-label=${words.label}>
+    ${status ? html`<p class="rs-strip-status" role="status" data-rs-status>${status}</p>` : nothing}
+    <div class="rs-strip-row">
+      ${stripEstop(strip, text)}
+      <p class="rs-strip-driver" data-rs-strip-driver=${strip.driver}>
+        <span>${text.driver.title}</span> <strong>${text.driver[strip.driver]}</strong>
+      </p>
+    </div>
+    <div class="rs-strip-row">
+      <dl class="rs-strip-values">
+        <div>
+          <dt>${words.left}</dt>
+          <dd data-rs-strip-wheel="left">${rpmText(strip.left)}<small>rpm</small></dd>
+        </div>
+        <div>
+          <dt>${words.right}</dt>
+          <dd data-rs-strip-wheel="right">${rpmText(strip.right)}<small>rpm</small></dd>
+        </div>
+        <div>
+          <dt>${words.speed}</dt>
+          <dd data-rs-strip-speed>${speed}<small>m/秒</small></dd>
+        </div>
+      </dl>
+      ${sparkline(strip, text)}
+    </div>
+  </div>`;
+}
+
 /**
  * The memo under the panel: `memo` is `{text, connected, placeholder}` (placeholder: the place's
  * own example, or null for the general one); `actions` needs `write`, `snapshot`
@@ -361,4 +452,4 @@ function memoView(memo, text, actions) {
   </div>`;
 }
 
-export { robotStateView, memoView };
+export { robotStateView, memoView, stripView };

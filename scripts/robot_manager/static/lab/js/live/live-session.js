@@ -18,13 +18,13 @@ import {
   withRunInfo,
   cleanConditions,
 } from './recording-core.js';
-import { captureCopy } from './live-view.js';
+import { captureCopy, revealLiveRun } from './live-view.js';
 import { driveModel, onDrive, confirmDriveSafety, runDrive } from './drive-link.js';
 import { driveEndedText, driveCopy } from './drive-view.js';
 import { runStatusText } from './drive-report-view.js';
 import { addDriveRun, driveRun, saveDriveRun, isEmptyRun } from './drive-history.js';
 import { addCaptureRun, keepRunOnRobot } from './run-keeper.js';
-import { pickRobotRecord } from './record-picker.js';
+import { chooseRobotRecord } from './record-picker.js';
 
 // The state behind one `liveCaptureControls` block: recording from the robot, opening a saved
 // recording or a rosbag, saving the one on screen, and bringing it back after a reload. A lesson
@@ -40,7 +40,11 @@ import { pickRobotRecord } from './record-picker.js';
 // (drive-history.js, when the robot moved) and to the robot itself (robot-records.js, when the
 // robot keeps records), so any device connected to the robot can find it in 記録の一覧 later. The
 // block says whether the robot kept it. A recording on the robot can be opened here as well
-// (「ロボットの記録から選ぶ」, record-picker.js), through the same path as a file.
+// (「ロボットの記録から選ぶ」, record-picker.js), through the same path as a file — or, for a
+// lesson that passes `compare`, drawn over the one on screen (the picker offers both).
+//
+// Press → see: starting a run or a recording brings the block's button and the live strip under
+// it on screen (live-view revealLiveRun), the same in every course.
 
 const DRIVE_PROGRESS_MS = 250;
 const DEFAULT_TAIL_SECONDS = 1.5;
@@ -111,7 +115,17 @@ function originNote(recording, origin, assumedConfig) {
  * - `update()`: redraws the lesson
  * - `reportMetrics` (optional): the numbers the run report under the block shows, as keys of
  *   drive-report-view's REPORT_METRICS (e.g. `['driveTime', 'distance', 'maxSpeed', 'stop']`);
- *   all of them when left out.
+ *   all of them when left out. `report: false` shows no run report under the block (a lesson
+ *   whose own chart and table are the result); the run stays in 記録の一覧.
+ * - `state` (optional): `{ place, name, placeholder, status }` — the block then offers the full
+ *   「実機の状態」 panel of `place` folded under the live strip (robot-state.js robotStatePanel
+ *   with `folded`; `name` / `placeholder` as there). `status()` is the lesson's line about the run
+ *   in progress, shown at the top of the strip and of the panel. Without `state`, only the strip.
+ * - `compare` (optional): `{ add(recording), addFiles(files), clear(), model() }` for a lesson that
+ *   draws other recordings over the one on screen: `add` takes one recording (a record picked on
+ *   the robot with 重ねる), `addFiles` a FileList, both resolving with whether one was drawn;
+ *   `model()` returns `{count, note, help}` (how many are drawn, what happened to the last ones,
+ *   the lesson's sentence on how they are drawn). The files section then offers 重ねる too.
  * - `drive` (optional): `{ plan(), program(), placement(), conditions(), startLabel, confirmLabel }`
  *   (`confirmLabel`: the safety tick's sentence when the default one about the placement does not fit,
  *   e.g. wheels lifted on a stand). `plan()`
@@ -178,6 +192,7 @@ function createLiveSession(options) {
     const controllers = { abort: new AbortController(), finish: new AbortController() };
     Object.assign(session, { busy: true, progress: 0, controllers, note: '', robotSave: null });
     options.update();
+    revealLiveRun(options.slot);
     try {
       const raw = await recordRobot({
         seconds: options.seconds,
@@ -256,6 +271,7 @@ function createLiveSession(options) {
       driveTotal: plan.seconds,
     });
     options.update();
+    revealLiveRun(options.slot);
     const recorded = recordRobot({
       // An upper bound only: the recording is finished below, right after the tail.
       seconds: plan.seconds + tail + 5,
@@ -350,11 +366,18 @@ function createLiveSession(options) {
     return session.recording === recording;
   }
 
-  // 「ロボットの記録から選ぶ」: the shared picker, filtered to this block's lesson.
+  // 「ロボットの記録から選ぶ」: the shared picker, filtered to this block's lesson; with `compare`,
+  // each record offers 開く and 重ねる.
   async function pickFromRobot() {
     if (session.busy) return;
-    const recording = await pickRobotRecord({ lesson: options.slot, needs: options.needs });
-    if (recording) useRecording(recording, 'robot');
+    const chosen = await chooseRobotRecord({
+      lesson: options.slot,
+      needs: options.needs,
+      both: Boolean(options.compare),
+    });
+    if (!chosen) return;
+    if (chosen.compare) await options.compare.add(chosen.recording);
+    else useRecording(chosen.recording, 'robot');
   }
 
   // A recording made on this device takes the group typed after it was made; a file opened from
@@ -410,6 +433,11 @@ function createLiveSession(options) {
       robotSave: session.robotSave,
       file: { canSave: Boolean(session.recording) && !session.busy, group: groupName() },
       drive: options.drive ? driveBlockModel() : null,
+      slot: options.slot,
+      state: options.state
+        ? { ...options.state, place: options.state.place ?? options.slot }
+        : null,
+      compare: options.compare ? options.compare.model() : null,
     };
   }
 
@@ -430,8 +458,11 @@ function createLiveSession(options) {
       confirmLabel: options.drive.confirmLabel ?? null,
       startLabel: options.drive.startLabel,
       metrics: options.reportMetrics ?? null,
-      // Shown under the block until the next run (null after a reload: see the 実機 dialog).
-      report: session.driveRunId === null ? null : driveRun(session.driveRunId),
+      // Shown under the block until the next run (null after a reload: see 記録の一覧).
+      report:
+        session.driveRunId === null || options.report === false
+          ? null
+          : driveRun(session.driveRunId),
     };
   }
 
@@ -459,6 +490,12 @@ function createLiveSession(options) {
       startDriveCapture,
       confirmDrive: confirmDriveSafety,
       saveRun: saveDriveRun,
+      ...(options.compare
+        ? {
+            addComparisons: (files) => options.compare.addFiles(files),
+            clearComparisons: () => options.compare.clear(),
+          }
+        : {}),
     },
   };
 }

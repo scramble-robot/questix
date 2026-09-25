@@ -21,10 +21,11 @@ import { openRobotDialog } from './live-ui.js';
 const TICK_MS = 1000; // how often the "converting… N秒" line counts
 
 const picker = {
-  resolve: null, // the pending pickRobotRecord promise
+  resolve: null, // the pending chooseRobotRecord promise
   lesson: '',
   needs: [],
-  compare: false,
+  compare: false, // the only way to use a record is 重ねる
+  both: false, // each record offers 開く and 重ねる
   showAll: false,
   loading: false,
   error: '',
@@ -40,14 +41,15 @@ const picker = {
 const dialog = () => document.getElementById('recordPicker');
 const streamList = (names) => names.map((name) => captureCopy.streamNames[name] ?? name).join('と');
 
-function finish(recording) {
+// `recording` null: closed without one; `compare`: the learner chose 重ねる.
+function finish(recording, compare = picker.compare) {
   const resolve = picker.resolve;
   picker.resolve = null;
   picker.converting?.abort.abort();
   clearInterval(picker.converting?.timer);
   picker.converting = null;
   if (dialog().open) dialog().close();
-  resolve?.(recording);
+  resolve?.(recording ? { recording, compare } : null);
 }
 
 // --- the model ------------------------------------------------------------------------------------
@@ -88,6 +90,7 @@ function model() {
     lesson: picker.lesson,
     streams: streamList(picker.needs),
     compare: picker.compare,
+    both: picker.both,
     showAll: picker.showAll,
     loading: picker.loading,
     error: picker.error,
@@ -131,16 +134,16 @@ async function load() {
 }
 
 // A recording that lacks what the lesson needs is refused here, where another can still be chosen.
-function accept(recording, key) {
+function accept(recording, key, compare) {
   const missing = missingInRecording(recording, picker.needs);
   if (missing.length) {
     picker.itemErrors.set(key, fill(copy.picker.missing, { streams: streamList(missing) }));
     return;
   }
-  finish(recording);
+  finish(recording, compare);
 }
 
-async function use(key) {
+async function use(key, compare = picker.compare) {
   const client = robotRecordsClient();
   const entry = picker.records.find((candidate) => `robot:${candidate.id}` === key);
   if (!client || !entry || picker.busy) return;
@@ -151,7 +154,7 @@ async function use(key) {
     const recording = await client.recording(entry.id);
     picker.busy = null;
     // The lesson's note names it as the list did.
-    accept({ ...recording, name: describeEntry(entry).label }, key);
+    accept({ ...recording, name: describeEntry(entry).label }, key, compare);
   } catch (error) {
     picker.busy = null;
     picker.itemErrors.set(key, error.message);
@@ -217,16 +220,18 @@ const actions = {
 
 /**
  * Open the picker for lesson `lesson` (a slot such as 'control-speed'), which needs the streams
- * `needs`. Resolves with the chosen recording (recording-core shape, `name` = what the list called
- * it), or null when the learner closed the picker. `compare`: the chosen record is drawn next to
- * the one on screen (the button says so).
+ * `needs`. Resolves with `{recording, compare}` — the chosen recording (recording-core shape,
+ * `name` = what the list called it) and whether the learner chose 重ねる — or null when the
+ * learner closed the picker. `compare`: 重ねる is the only way to use a record (the button says
+ * so); `both`: every record offers 開く and 重ねる, one picker for both.
  */
-function pickRobotRecord({ lesson, needs = [], compare = false }) {
+function chooseRobotRecord({ lesson, needs = [], compare = false, both = false }) {
   finish(null);
   Object.assign(picker, {
     lesson,
     needs,
     compare,
+    both,
     showAll: false,
     error: '',
     message: '',
@@ -244,6 +249,12 @@ function pickRobotRecord({ lesson, needs = [], compare = false }) {
   return promise;
 }
 
+/** chooseRobotRecord for one way of using the record: resolves with the recording, or null. */
+async function pickRobotRecord({ lesson, needs = [], compare = false }) {
+  const chosen = await chooseRobotRecord({ lesson, needs, compare });
+  return chosen?.recording ?? null;
+}
+
 // Esc and the dialog's own closing end the pick without a recording.
 dialog()?.addEventListener('close', () => {
   if (picker.resolve) finish(null);
@@ -254,4 +265,4 @@ document.addEventListener('series-leave', () => {
   if (dialog()?.open) finish(null);
 });
 
-export { pickRobotRecord };
+export { pickRobotRecord, chooseRobotRecord };
