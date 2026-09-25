@@ -11,13 +11,15 @@ const copy = await loadJson('content/shell/supplement.json');
 
 const HELP_DIALOG_SELECTOR = 'details[data-help-dialog]';
 const SCHOOL_TIP_ATTRIBUTE = 'data-school-tip';
+const HELP_ACTION_ATTRIBUTE = 'data-help-action';
 
 // Decorative "this opens in a window" glyph of the trigger button.
 const OPEN_ICON_SVG =
   '<svg viewBox="0 0 20 20" width="18" height="18" fill="none"><rect x="3" y="4" width="14" height="12" rx="2"/><path d="M3 8h14M13 6h1"/></svg>';
 
+// A nested <details> (e.g. the reading list's 資料を選んだ基準) is reached through its summary.
 const FOCUSABLE_SELECTOR =
-  'button:not(:disabled),a[href],input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex="0"]';
+  'button:not(:disabled),a[href],summary,input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex="0"]';
 
 // Leaving a course, opening the measurement lab or the RL foundations closes the dialog.
 const DISMISS_EVENTS = ['series-leave', 'open-lab', 'rl-foundations'];
@@ -36,11 +38,12 @@ function triggerCaption(summary) {
   return caption;
 }
 
-function triggerAction() {
+// The action word of the button: 開く, or what the details names in data-help-action (資料を見る).
+function triggerAction(source) {
   const action = document.createElement('span');
   action.className = 'supplement-trigger-action';
   action.setAttribute('aria-hidden', 'true');
-  action.append(copy.openAction);
+  action.append(source.getAttribute(HELP_ACTION_ATTRIBUTE) || copy.openAction);
   action.insertAdjacentHTML('beforeend', OPEN_ICON_SVG);
   return action;
 }
@@ -53,7 +56,7 @@ function createTrigger(source, summary) {
     : 'supplement-trigger';
   button.setAttribute('aria-haspopup', 'dialog');
   button.setAttribute('aria-controls', 'supplementDialog');
-  button.append(triggerCaption(summary), triggerAction());
+  button.append(triggerCaption(summary), triggerAction(source));
   return button;
 }
 

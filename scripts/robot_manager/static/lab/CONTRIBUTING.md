@@ -16,6 +16,21 @@ The reference implementation is the path-planning course: `js/planning/` with
 Short labels (button captions, table headers, units) may stay in `view.js`. Anything that reads as
 a sentence, an explanation, or a status message belongs in the content file.
 
+**Reading lists.** もっと詳しく学ぶ under every course (`js/shell/learning-resources.js`) reads
+`content/shell/learning-resources.json`, keyed by course id (a list for a course the site does not
+have yet stays unused until it exists). Add a source only after reading it: say where to start
+(`start`) and keep to research institutes, the companies that make the technology, publishers with
+named authors and education services with named teachers, never domain reputation alone. Before
+adding a link, and whenever the list is revised, check every url with
+`curl -sI -L --max-time 10 <url>`; a server that refuses HEAD (400/405) or answers a browser-like
+request with 403 gets a plain `curl -s -L --max-time 15 -o /dev/null -w '%{http_code}' <url>`, and
+the page title must still match the entry. Record the date and the final status in the entry
+(`checkedOn`, `checkResult`, e.g. `GET 200 (HEAD refused with 405)`) and the newest date in the
+top-level `checkedOn`; `reviewedOn` is when a person last read the course's sources. Drop a source
+whose page is gone (404/410, or a redirect to a different page or the site's top), not one that is
+only unreachable once — check it again later — and replace it rather than leave a course without a
+list; `test/learning-resources.test.mjs` requires https, the fields and a known course id.
+
 ## Style
 
 - Names say what the value is: `experiment`, `sample`, `clearance` — not `s`, `q`, `c`. Single

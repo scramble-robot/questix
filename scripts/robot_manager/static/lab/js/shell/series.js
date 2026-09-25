@@ -3,6 +3,7 @@ import { loadJson, loadText } from '../core/content.js';
 import { SYSTEM_COURSES } from '../systems/data.js';
 import { initSystems, activateSystem, reviewSystem } from '../systems/ui.js';
 import { showMeasurementLab } from '../systems/measurement-lab.js';
+import { showLearningResources } from './learning-resources.js';
 import { LESSONS, LESSON_GROUPS, lessonLabel } from './lesson-ui.js';
 import { SCHOOL_GRADES } from './school-tips.js';
 import { initSupplements } from './supplement-ui.js';
@@ -177,6 +178,7 @@ function show(name, updateHash = true) {
   activators[name]?.();
   activateSystem(name);
   showMeasurementLab(name);
+  showLearningResources(name);
   course = name;
   update();
   quizzes.showCourse(name);
@@ -190,6 +192,7 @@ function showAssessment(kind, name, updateHash) {
   if (course === CATALOGUE) catalogueReturn = { course: name, scrollY: window.scrollY };
   leaveCurrentPage();
   showMeasurementLab(null);
+  showLearningResources(null);
   if (kind === 'quiz') mastery.hide();
   else quizzes.hide();
   assessment = kind;
@@ -209,6 +212,7 @@ function showRecords(updateHash = true) {
   if (course === CATALOGUE) catalogueReturn = null;
   leaveCurrentPage();
   showMeasurementLab(null);
+  showLearningResources(null);
   quizzes.hide();
   mastery.hide();
   assessment = null;

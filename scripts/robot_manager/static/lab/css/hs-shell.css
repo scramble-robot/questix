@@ -362,3 +362,191 @@ body .measurement-entry > .supplement-trigger {
     padding: 6px;
   }
 }
+
+/* もっと詳しく学ぶ (js/shell/learning-resources.js): the reading list under every course. The card
+   is a supplement button with a caption; the list itself opens in the shared dialog. Nothing
+   here is smaller than 12 px, so it stays readable on a phone. */
+.learning-resources {
+  max-width: 1240px;
+  width: calc(100% - 80px);
+  margin: 24px auto 52px;
+  padding: 0;
+  background: #f8fbfa;
+}
+.learning-resources > .supplement-trigger {
+  margin: 0;
+  padding: 23px 28px 12px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.learning-resources .supplement-trigger-copy {
+  font-size: 19px;
+  font-weight: 650;
+}
+.learning-resources .reference-count {
+  font-size: 13px;
+  font-weight: 400;
+  color: #526b65;
+  margin-left: 10px;
+}
+.learning-resources .supplement-trigger-action {
+  font-size: 14px;
+  white-space: nowrap;
+}
+/* Starts under the heading's words, past the 24 px cue icon of the button (28 + 24 + gap). */
+.learning-resources .reference-caption {
+  margin: 0;
+  padding: 0 28px 22px 62px;
+  font-size: 14px;
+  color: #566f69;
+}
+.supplement-body .reference-course {
+  font-size: 19px;
+  font-weight: 650;
+  color: #28483f;
+  margin: 0 0 9px;
+}
+.supplement-body .reference-intro {
+  font-size: 14px;
+  color: #5c716a;
+  margin-bottom: 24px;
+}
+.reference-list {
+  display: grid;
+  gap: 18px;
+}
+.reference-item {
+  padding: 23px;
+  border: 1px solid #d8e4de;
+  border-radius: 12px;
+  background: #fbfdfc;
+  min-width: 0;
+}
+.reference-meta {
+  display: flex;
+  gap: 8px 18px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  margin-bottom: 13px;
+  font-size: 12px;
+  color: #5d726a;
+}
+.reference-meta > span:first-child {
+  font-weight: 650;
+  color: #256b5c;
+}
+.supplement-body .reference-item h3 {
+  font-size: 19px;
+  line-height: 1.7;
+  margin: 0 0 5px;
+}
+.reference-item h3 a {
+  color: #1a6b5c;
+  text-decoration: underline;
+  text-decoration-color: #93b8ac;
+  text-underline-offset: 4px;
+  overflow-wrap: anywhere;
+}
+.reference-item h3 a:hover {
+  color: #104a40;
+  text-decoration-color: currentColor;
+}
+.reference-item h3 a:focus-visible {
+  outline: 3px solid #397fcc;
+  outline-offset: 4px;
+  border-radius: 3px;
+}
+.reference-external {
+  font-size: 16px;
+  margin-left: 7px;
+  white-space: nowrap;
+}
+.supplement-body .reference-item p {
+  font-size: 14px;
+  line-height: 1.85;
+  margin: 12px 0 0;
+}
+.supplement-body .reference-item .reference-publisher {
+  font-size: 12px;
+  color: #60766e;
+  margin: 4px 0 0;
+}
+.supplement-body .reference-item .reference-site {
+  font-size: 12px;
+  color: #60766e;
+  margin: 2px 0 12px;
+  overflow-wrap: anywhere;
+}
+.supplement-body .reference-start {
+  padding: 13px 15px;
+  background: #edf4f0;
+  border-radius: 8px;
+}
+.reference-start strong {
+  display: block;
+  font-size: 12px;
+  color: #2f6757;
+  margin-bottom: 4px;
+}
+.supplement-body .reference-item .reference-book-note {
+  font-size: 12px;
+  color: #786445;
+}
+.reference-policy {
+  margin-top: 24px;
+  border-top: 1px solid #dde5e1;
+  padding-top: 18px;
+}
+.reference-policy summary {
+  font-size: 13px;
+  color: #526b65;
+  padding: 5px 0;
+}
+.supplement-body .reference-policy p {
+  font-size: 13px;
+  line-height: 1.85;
+  margin: 12px 0 0;
+}
+.supplement-body .reference-network {
+  font-size: 12px;
+  color: #65796f;
+  margin: 18px 0 0;
+}
+@media (max-width: 600px) {
+  .learning-resources {
+    width: calc(100% - 36px);
+  }
+  .learning-resources > .supplement-trigger {
+    padding: 18px 18px 12px;
+  }
+  .learning-resources .supplement-trigger-copy {
+    font-size: 17px;
+  }
+  .learning-resources .reference-count {
+    display: block;
+    margin: 4px 0 0;
+    font-size: 12px;
+  }
+  .learning-resources .reference-caption {
+    padding: 0 18px 18px;
+    font-size: 13px;
+  }
+  .learning-resources .supplement-trigger .supplement-trigger-action {
+    font-size: 13px;
+    gap: 5px;
+  }
+  .reference-item {
+    padding: 18px 16px;
+  }
+  .supplement-body .reference-item h3 {
+    font-size: 17px;
+  }
+  .reference-meta {
+    gap: 6px 14px;
+  }
+  .supplement-body .reference-start {
+    padding: 12px;
+  }
+}
