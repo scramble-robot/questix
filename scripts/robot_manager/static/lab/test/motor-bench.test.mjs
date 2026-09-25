@@ -57,11 +57,11 @@ function staircaseRecording({ skew = 0, start = 100, conditions = { maxLinear: M
   return conditions ? withRunInfo(recording, { conditions }) : recording;
 }
 
-test('the staircase goes up to 60 % of the limit and back, then stops', () => {
+test('the staircase goes up to 70 % of the limit and back, then stops', () => {
   const steps = benchSteps(MAX_LINEAR);
   assert.deepEqual(
     steps.map((step) => step.percent),
-    [0, 20, 40, 60, 40, 20, 0],
+    [0, 30, 50, 70, 50, 30, 0],
   );
   assert.ok(steps.every((step) => step.angular === 0));
   // Never faster than the bridge's clamp, and short enough for one run (drive_max_run_sec 30 s).
@@ -74,8 +74,8 @@ test('the staircase goes up to 60 % of the limit and back, then stops', () => {
 test('the plan holds each step and ends the run after the last one', () => {
   const plan = benchPlan(MAX_LINEAR);
   assert.deepEqual(plan.controller(0.5), { linear: 0, angular: 0 });
-  assert.equal(plan.controller(1.1).linear.toFixed(3), (0.2 * MAX_LINEAR).toFixed(3));
-  assert.equal(plan.controller(6.2).linear.toFixed(3), (0.6 * MAX_LINEAR).toFixed(3));
+  assert.equal(plan.controller(1.1).linear.toFixed(3), (0.3 * MAX_LINEAR).toFixed(3));
+  assert.equal(plan.controller(6.2).linear.toFixed(3), (0.7 * MAX_LINEAR).toFixed(3));
   assert.equal(plan.controller(plan.seconds + 0.01), null);
   assert.ok(plan.tail > 0);
 });
@@ -96,7 +96,7 @@ test('the table has one row per step with the steady mean of each wheel', () => 
   assert.equal(skipped, 0);
   assert.deepEqual(
     rows.map((row) => row.percent),
-    [20, 40, 60, 40, 20, 0],
+    [30, 50, 70, 50, 30, 0],
   );
   assert.deepEqual(
     rows.map((row) => row.number),
@@ -118,7 +118,7 @@ test('the two wheels are measured separately', () => {
   const gap = skew * RPM_PER_MPS; // right minus left, rpm
   for (const row of rows) assert.ok(Math.abs(row.right - row.left - gap) < 0.1);
   const summary = benchSummary(rows);
-  assert.equal(summary.fastest.percent, 60);
+  assert.equal(summary.fastest.percent, 70);
   assert.ok(Math.abs(summary.wheelGap - gap) < 0.1);
   assert.ok(Math.abs(summary.meanGap) < 0.2);
 });
@@ -137,7 +137,7 @@ test('a controller run (no staircase conditions) has no percent', () => {
 
 test('a moving step too short to measure is counted as skipped', () => {
   const recording = staircaseRecording({});
-  // Cut the recording 1.1 s into the third step (60 %): its steady part is too short.
+  // Cut the recording 1.1 s into the third step (70 %): its steady part is too short.
   const end = 100 + 1 + 2 * 2.5 + 1.1;
   const cut = {
     ...recording,
@@ -149,7 +149,7 @@ test('a moving step too short to measure is counted as skipped', () => {
   const { rows, skipped } = benchTable(cut);
   assert.deepEqual(
     rows.map((row) => row.percent),
-    [20, 40],
+    [30, 50],
   );
   assert.equal(skipped, 1);
 });

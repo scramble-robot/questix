@@ -10,7 +10,7 @@ import { driveRows } from '../live/recording-core.js';
 // Speeds are fractions of the fastest forward speed the bridge lets a page ask for
 // (drive_state.limits.linear), so the staircase stays inside the bridge's clamp on every robot.
 
-const BENCH_PERCENTS = [20, 40, 60, 40, 20]; // % of the allowed forward speed, up and back down
+const BENCH_PERCENTS = [30, 50, 70, 50, 30]; // % of the allowed forward speed, up and back down; 30 % (about 9 rpm) stays clear of the drive's ~5 rpm dead band
 const BENCH_LEAD = 1; // s standing still before the first step, so the recording starts at rest
 const BENCH_HOLD = 2.5; // s per step: about 1 s to settle, the rest is measured
 const BENCH_STOP = 2; // s at 0 after the last step: the stop is a step of the table too
