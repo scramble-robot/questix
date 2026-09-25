@@ -653,3 +653,33 @@
     font-size: 18px !important;
   }
 }
+
+/* Capture chapter on a phone: a small copy of the changed image stays at the top of the controls
+   card while the sliders below it move (js/vision/basics-view.js captureControls). */
+.vision-preview {
+  display: none;
+}
+@media (max-width: 600px) {
+  .vision-preview {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    position: sticky;
+    top: 8px;
+    z-index: 2;
+    margin: 8px 0 12px;
+    padding: 8px;
+    border-radius: 10px;
+    background: #10252c;
+    color: #e8f0f2;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .vision-preview canvas {
+    width: 150px;
+    height: auto;
+    flex: none;
+    border-radius: 4px;
+    image-rendering: pixelated;
+  }
+}

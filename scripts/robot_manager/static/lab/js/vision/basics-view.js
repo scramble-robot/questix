@@ -1,5 +1,6 @@
 import { html, svg, nothing } from '../vendor/lit-html.js';
 import { formatNumber } from '../core/dom.js';
+import { fillSentence } from '../core/content.js';
 import { slider, select, helpDetails, checkbox } from './controls-view.js';
 
 // Templates of the vision foundation chapters (capture, regions, geometry, line following).
@@ -54,9 +55,15 @@ function pendingNote(message, copy) {
 function captureControls(model, copy, actions) {
   const text = copy.capture;
   const { capture } = model;
+  // On a phone the images are far above these sliders, so a small copy of the changed image
+  // (drawn by basics.js) stays pinned at the top of this card while the sliders move.
   return html`<p class="eyebrow">${text.eyebrow}</p>
     <h2>${text.heading}</h2>
     <p>${text.intro}</p>
+    <figure class="vision-preview" aria-hidden="true">
+      <canvas id="vcPreview" width="320" height="220"></canvas>
+      <figcaption>${fillSentence(text.previewCaption, { white: model.whiteRatio })}</figcaption>
+    </figure>
     ${slider({
       id: 'vcExposure',
       label: '明るさの倍率',

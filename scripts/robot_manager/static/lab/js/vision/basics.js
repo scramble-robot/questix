@@ -174,10 +174,21 @@ function captureStatus(model) {
   return status.explore;
 }
 
+// The small copy of the changed image beside the sliders (phones only, see css): pixels stay
+// square blocks when the width is reduced, as in the image itself.
+function drawPreview(preview, source) {
+  if (!preview || !source?.width) return;
+  const context = preview.getContext('2d');
+  context.imageSmoothingEnabled = false;
+  context.clearRect(0, 0, preview.width, preview.height);
+  context.drawImage(source, 0, 0, preview.width, preview.height);
+}
+
 function updateCapture() {
   const model = captureModel();
   renderInto('visionControls', captureControls(model, copy, captureActions));
   page.showImage(byId('visionOutput'), model.output);
+  drawPreview(byId('vcPreview'), byId('visionOutput'));
   setText(
     'visionOutputNote',
     `${model.output.width} × ${model.output.height}画素 · 明るさ${formatNumber(capture.exposure, 2)}倍`,
