@@ -21,5 +21,8 @@
   { "input": "#behaviorPage [data-setting=blockedRule]", "value": "detour" },
   { "input": "#behaviorPage [data-setting=timeout]", "value": "1.5" },
   { "click": "#behaviorPage [data-sys-run]", "frames": 400 },
-  { "click": "#behaviorPage [data-sys-transition]", "frames": 200 }
+  { "click": "#behaviorPage [data-sys-transition]", "frames": 200 },
+  { "click": ".lesson-footer-step", "nth": 0 },
+  { "click": ".lesson-footer-next" },
+  { "click": ".lesson-footer-previous" }
 ]

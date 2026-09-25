@@ -18,5 +18,8 @@
   { "click": "#coordinationPage [data-sys-pause]" },
   { "input": "#coordinationPage [data-sys-speed]", "value": "4" },
   { "click": "#coordinationPage [data-sys-pause]", "frames": 400 },
-  { "click": "#coordinationPage [data-sys-csv]" }
+  { "click": "#coordinationPage [data-sys-csv]" },
+  { "click": ".lesson-footer-step", "nth": 0 },
+  { "click": ".lesson-footer-next" },
+  { "click": ".lesson-footer-previous" }
 ]

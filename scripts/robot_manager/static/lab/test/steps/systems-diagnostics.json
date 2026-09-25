@@ -24,5 +24,8 @@
   { "click": "#diagnosticsPage [data-sys-cause=impact]" },
   { "click": "#diagnosticsPage [data-sys-release]" },
   { "input": "#diagnosticsPage [data-setting=impactLimit]", "value": "20" },
-  { "click": "#diagnosticsPage [data-sys-run]", "frames": 400 }
+  { "click": "#diagnosticsPage [data-sys-run]", "frames": 400 },
+  { "click": ".lesson-footer-step", "nth": 0 },
+  { "click": ".lesson-footer-next" },
+  { "click": ".lesson-footer-previous" }
 ]

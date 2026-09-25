@@ -90,9 +90,6 @@
     "groupNavLabel": "モーター教材の段階",
     "topicNavLabel": "この段階の実験",
     "modelBadge": "原理を学ぶモデル",
-    "position": "{number} / {total} · {label}",
-    "next": "次へ：{label}",
-    "quiz": "小テストで確かめる",
     "guideEyebrowRun": "条件を決める",
     "guideEyebrowRead": "確かめるポイント"
   },

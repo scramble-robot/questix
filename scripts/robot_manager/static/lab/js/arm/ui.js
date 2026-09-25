@@ -15,6 +15,7 @@ import {
 } from './core.js';
 import { armScenePoint, drawArm, drawSO101 } from './render.js';
 import { armPage, formatValue } from './view.js';
+import { reportLessonProgress } from '../shell/lesson-progress.js';
 import { revealElement } from '../core/reveal.js';
 import { fillSentence as fill } from '../core/content.js';
 
@@ -95,7 +96,6 @@ let measureStatus = '';
 const page = () => document.getElementById('armPage');
 const experiment = () => experiments.get(topicId);
 const isInverse = () => INVERSE_TOPICS.includes(topicId);
-const topicPosition = () => ARM_TOPICS.findIndex((topic) => topic.id === topicId);
 const lastIndex = (run) => run.samples.length - 1;
 const sourceText = () => copy.hardware.sources[hardware.sourceKey];
 
@@ -127,7 +127,6 @@ function buildModel() {
   const candidates = buildCandidates(current);
   return {
     topic: topicId,
-    position: topicPosition(),
     inverse: isInverse(),
     playing: playback.playing,
     motion: run
@@ -198,6 +197,11 @@ function drawScene() {
 
 function update() {
   render(armPage(buildModel(), copy, fragments, actions), page());
+  reportLessonProgress('arm', {
+    topics: ARM_TOPICS.map((topic) => ({ id: topic.id, title: topic.label })),
+    current: topicId,
+    open: openTopic,
+  });
   drawScene();
 }
 
@@ -416,17 +420,6 @@ function comparisonCsv() {
 const actions = {
   openTopic,
   solve,
-  previous() {
-    openTopic(ARM_TOPICS[topicPosition() - 1].id);
-  },
-  next() {
-    const position = topicPosition();
-    if (position < ARM_TOPICS.length - 1) {
-      openTopic(ARM_TOPICS[position + 1].id);
-      return;
-    }
-    document.dispatchEvent(new CustomEvent('quiz-open', { detail: 'arm' }));
-  },
   togglePlay() {
     if (playback.playing) {
       pause();

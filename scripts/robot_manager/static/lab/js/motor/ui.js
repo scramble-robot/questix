@@ -15,6 +15,7 @@ import {
   evaluateMotorChoices,
 } from './core.js';
 import { motorPage } from './view.js';
+import { reportLessonProgress } from '../shell/lesson-progress.js';
 
 // Motor course (電気で回転を生み出す): state and behaviour. view.js turns the model into markup,
 // render.js draws the figures, core.js simulates. Texts live in content/motor.json and
@@ -93,16 +94,12 @@ function runModel(current) {
 
 function buildModel() {
   const current = state();
-  const position = MOTOR_TOPICS.findIndex((topic) => topic.id === topicId);
   const group = topicOf(topicId).group;
   const voltage = current.config.voltage;
   return {
     topic: topicId,
     group,
     groupTopics: MOTOR_TOPICS.filter((topic) => topic.group === group).map((topic) => topic.id),
-    position,
-    total: MOTOR_TOPICS.length,
-    next: MOTOR_TOPICS[position + 1]?.id ?? null,
     played: PLAYED_TOPICS.includes(topicId),
     config: current.config,
     run: runModel(current),
@@ -124,6 +121,11 @@ function buildModel() {
 
 function update() {
   render(motorPage(buildModel(), copy, fragments, actions), page());
+  reportLessonProgress('motor', {
+    topics: MOTOR_TOPICS.map((topic) => ({ id: topic.id, title: copy.topics[topic.id].label })),
+    current: topicId,
+    open: openTopic,
+  });
 }
 
 // Opening another topic rebuilds the page, so details, focus and scroll start fresh.
@@ -253,12 +255,6 @@ const actions = {
   openTopic,
   openGroup(group) {
     openTopic(MOTOR_TOPICS.find((topic) => topic.group === group).id);
-  },
-  next() {
-    const position = MOTOR_TOPICS.findIndex((topic) => topic.id === topicId);
-    const next = MOTOR_TOPICS[position + 1];
-    if (next) openTopic(next.id);
-    else document.dispatchEvent(new CustomEvent('quiz-open', { detail: 'motor' }));
   },
   run,
   togglePlay() {

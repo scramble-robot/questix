@@ -24,5 +24,8 @@
   { "input": "#mechanicsPage [data-sys-chart]", "value": "2" },
   { "click": "#mechanicsPage [data-sys-transition]", "frames": 700 },
   { "click": "#mechanicsPage [data-chapter=force]" },
-  { "click": "#mechanicsPage [data-sys-quickrun]", "frames": 200 }
+  { "click": "#mechanicsPage [data-sys-quickrun]", "frames": 200 },
+  { "click": ".lesson-footer-step", "nth": 0 },
+  { "click": ".lesson-footer-next" },
+  { "click": ".lesson-footer-previous" }
 ]

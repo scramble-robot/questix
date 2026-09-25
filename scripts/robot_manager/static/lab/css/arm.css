@@ -279,17 +279,6 @@
   margin: 12px 0 0;
   color: var(--muted);
 }
-.arm-bottom {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 26px;
-}
-.arm-bottom > span {
-  font-size: 13px;
-  color: var(--muted);
-}
 .arm-table {
   overflow: auto;
   margin: 18px 0;
@@ -452,13 +441,6 @@
   .arm-playbar span:last-child {
     width: 100%;
     margin-left: 0;
-  }
-  .arm-bottom button {
-    font-size: 13px;
-    padding: 10px;
-  }
-  .arm-bottom > span {
-    white-space: nowrap;
   }
   .arm-real-lab code {
     overflow-wrap: anywhere;

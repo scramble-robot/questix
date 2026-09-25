@@ -14,6 +14,7 @@ import {
 } from './core.js';
 import { systemState } from './narration.js';
 import { systemPage, initialChart, chartChoices } from './view.js';
+import { reportLessonProgress } from '../shell/lesson-progress.js';
 
 // The six "systems" courses (mechanics, tracking, timing, coordination, behavior, diagnostics)
 // share one page: state and behaviour live here, view.js turns the model into markup, render.js
@@ -26,7 +27,6 @@ const REPLAY_LEAD = 0.8; // seconds before a transition at which its replay star
 const MAX_HISTORY = 12; // finished runs kept per topic
 const MAX_EVENTS_SHOWN = 6;
 const TIME_EPSILON = 1e-8; // seconds; sample times are multiples of 0.05 with rounding noise
-const LAST_TOPIC_POSITION = 2; // three topics per course; the last one leads to the quiz
 const CAMERA_KEYS = ['cameraX', 'cameraZ', 'cameraAngle'];
 const NARROW_FIGURE = 560; // px; below this width figures use their narrow layout
 const WAITING_BOOST = 4; // playback runs this many times faster while the robot only waits
@@ -155,7 +155,6 @@ function buildModel(course) {
     meta: SYSTEM_COURSES.find((entry) => entry.id === course),
     topics,
     topic,
-    position: topics.indexOf(topic),
     real: SYSTEM_REAL[course],
     run,
     sample,
@@ -231,6 +230,11 @@ function update(course) {
   const page = pages.get(course);
   page.figure = figureWidths(course);
   render(systemPage(buildModel(course), copy, actionsOf(course)), root);
+  reportLessonProgress(course, {
+    topics: topicsOf(course).map((topic) => ({ id: topic.id, title: topic.label })),
+    current: selectedTopic.get(course),
+    open: (id) => reviewSystem(course, id),
+  });
   // The first drawing (or one after a resize) may have been made at an estimated width.
   const measured = measureFigures(course);
   if (measured && !sameWidths(measured, page.figure)) {
@@ -400,13 +404,6 @@ function pickCause(state, id) {
   page.cleared = Boolean(cause) && cause.id === id;
 }
 
-function next(course) {
-  const topics = topicsOf(course);
-  const position = topics.findIndex((topic) => topic.id === selectedTopic.get(course));
-  if (position < LAST_TOPIC_POSITION) reviewSystem(course, topics[position + 1].id);
-  else document.dispatchEvent(new CustomEvent('quiz-open', { detail: course }));
-}
-
 function saveCsv(state) {
   if (!state.run || !state.completed) return;
   const name = `QUESTiX-${state.course}-${state.id}.csv`;
@@ -481,7 +478,6 @@ function createActions(course) {
       refresh();
     },
     saveCsv: () => saveCsv(state()),
-    next: () => next(course),
   };
 }
 

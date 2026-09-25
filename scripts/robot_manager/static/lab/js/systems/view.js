@@ -11,7 +11,6 @@ import { systemEvidence } from './narration.js';
 // live here.
 
 const PLAYBACK_SPEEDS = [1, 2, 4];
-const LAST_TOPIC_POSITION = 2; // three topics per course; the last one leads to the quiz
 
 // Which charts a topic offers (in index order) and which one it opens with.
 const TOPIC_CHARTS = {
@@ -618,17 +617,6 @@ function realRobotCard(model, copy) {
   </details>`;
 }
 
-function nextStep(model, copy, actions) {
-  const next = model.topics[model.position + 1];
-  const last = model.position >= LAST_TOPIC_POSITION;
-  return html`<div class="sys-next">
-    <p>${last ? copy.next.last : copy.next.more}</p>
-    <button class="primary" data-sys-next @click=${actions.next}>
-      ${last ? copy.next.quiz : copy.next.nextPrefix + next.label}
-    </button>
-  </div>`;
-}
-
 function systemPage(model, copy, actions) {
   const lessonKey = `${model.course}-${model.topic.id}`;
   return html`<div class="lesson-heading">
@@ -644,8 +632,9 @@ function systemPage(model, copy, actions) {
       ${sideParts(model, copy, 'aside')}
     </div>
     ${resultCard(model, copy)} ${restartCard(model, copy, actions)}
-    <div class="sys-bottom">${historyCard(model, copy, actions)} ${realRobotCard(model, copy)}</div>
-    ${nextStep(model, copy, actions)}`;
+    <div class="sys-bottom">
+      ${historyCard(model, copy, actions)} ${realRobotCard(model, copy)}
+    </div>`;
 }
 
 export { systemPage, initialChart, chartChoices };

@@ -512,24 +512,6 @@ function measurementBody(model, copy, fragments, actions) {
     <section class="card launch-reflection">${unsafeHTML(fragments.measureReflection)}</section>`;
 }
 
-function footer(model, copy, actions) {
-  if (model.topic === 'measure')
-    return html`<div class="basics-footer">
-      <p>${copy.footer.measure}</p>
-      <button id="launchNext" class="primary" @click=${actions.openQuiz}>
-        小テストで確かめる →
-      </button>
-    </div>`;
-  const position = LAUNCH_TOPICS.findIndex((topic) => topic.id === model.topic);
-  const next = LAUNCH_TOPICS[position + 1];
-  return html`<div class="basics-footer">
-    <p>${copy.footer.experiment}</p>
-    <button id="launchNext" class="primary" @click=${() => actions.openTopic(next.id)}>
-      次へ：${next.title} →
-    </button>
-  </div>`;
-}
-
 function launchPage(model, copy, fragments, actions) {
   const topicCopy = copy.topics[model.topic];
   const lessonKey = 'launch-' + model.topic;
@@ -542,7 +524,7 @@ function launchPage(model, copy, fragments, actions) {
     </div>
     ${topicNav(model, actions)}
     ${unsafeHTML(lessonBrief(lessonKey, topicCopy.brief) + schoolTips(lessonKey))}
-    ${body(model, copy, fragments, actions)}${footer(model, copy, actions)}`;
+    ${body(model, copy, fragments, actions)}`;
 }
 
 export { launchPage };

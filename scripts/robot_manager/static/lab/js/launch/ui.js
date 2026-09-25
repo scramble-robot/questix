@@ -13,6 +13,7 @@ import {
 } from './core.js';
 import { drawLaunch, drawLaunchRobot } from './render.js';
 import { launchPage } from './view.js';
+import { reportLessonProgress } from '../shell/lesson-progress.js';
 import { fillSentence } from '../core/content.js';
 
 // Disc-launcher course: state and behaviour. view.js turns the model into markup, render.js draws
@@ -228,6 +229,11 @@ function drawCanvases() {
 
 function update() {
   render(launchPage(buildModel(), copy, fragments, actions), page());
+  reportLessonProgress('launch', {
+    topics: LAUNCH_TOPICS.map((topic) => ({ id: topic.id, title: topic.title })),
+    current: topicId,
+    open: openTopic,
+  });
   drawFlight();
 }
 
@@ -477,9 +483,6 @@ const actions = {
     downloadFile('QUESTiX-LAB-射出-測定用.csv', MEASUREMENT_CSV_TEMPLATE, CSV_TYPE);
   },
   importCsv,
-  openQuiz() {
-    document.dispatchEvent(new CustomEvent('quiz-open', { detail: 'launch' }));
-  },
 };
 
 function initLaunch() {

@@ -21,5 +21,8 @@
   { "click": "#trackingPage [data-sys-run]", "frames": 900 },
   { "input": "#trackingPage [data-setting=rule]", "value": "current" },
   { "click": "#trackingPage [data-sys-run]", "frames": 900 },
-  { "input": "#trackingPage [data-sys-seek]", "value": "100" }
+  { "input": "#trackingPage [data-sys-seek]", "value": "100" },
+  { "click": ".lesson-footer-step", "nth": 0 },
+  { "click": ".lesson-footer-next" },
+  { "click": ".lesson-footer-previous" }
 ]

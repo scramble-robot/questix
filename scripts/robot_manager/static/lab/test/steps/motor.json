@@ -35,5 +35,8 @@
   { "click": "#motorCheck" },
   { "click": "[data-motor-group='2']" },
   { "input": "[data-motor-setting=part]", "value": "roller" },
-  { "input": "#motorPrediction", "value": "回転数は目安より低くなると思う。" }
+  { "input": "#motorPrediction", "value": "回転数は目安より低くなると思う。" },
+  { "click": ".lesson-footer-step", "nth": 0 },
+  { "click": ".lesson-footer-next" },
+  { "click": ".lesson-footer-previous" }
 ]

@@ -863,21 +863,6 @@
 .table-scroll {
   overflow: auto;
 }
-.sys-next {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  padding: 22px 0;
-}
-.sys-next p {
-  color: var(--muted);
-  font-size: 14px;
-  line-height: 1.8;
-}
-.sys-next button {
-  flex: none;
-}
 .measurement-entry {
   max-width: 1240px;
   width: calc(100% - 80px);
@@ -997,13 +982,6 @@ html {
   .sys-chapters button {
     padding: 12px;
     font-size: 13px;
-  }
-  .sys-next {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  .sys-next button {
-    white-space: normal;
   }
   .sys-metrics {
     grid-template-columns: 1fr 1fr;

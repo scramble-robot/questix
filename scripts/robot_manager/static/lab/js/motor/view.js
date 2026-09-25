@@ -59,21 +59,6 @@ function topicNav(model, copy, actions) {
   </nav>`;
 }
 
-function footer(model, copy, actions) {
-  const position = fillSentence(copy.page.position, {
-    number: String(model.position + 1),
-    total: String(model.total),
-    label: copy.topics[model.topic].label,
-  });
-  const caption = model.next
-    ? fillSentence(copy.page.next, { label: copy.topics[model.next].label })
-    : copy.page.quiz;
-  return html`<footer class="basics-footer">
-    <p>${position}</p>
-    <button id="motorNext" class="primary" @click=${actions.next}>${caption} →</button>
-  </footer>`;
-}
-
 // --- Settings ----------------------------------------------------------------------------------
 
 function selectSetting(model, key, text, actions, { disabled = false, note = '' } = {}) {
@@ -866,8 +851,7 @@ function motorPage(model, copy, fragments, actions) {
     <div class="motor-layout">
       ${mainCard(model, copy, fragments, actions)} ${guide(model, copy, fragments, actions)}
     </div>
-    <p class="page-footnote">${topic.footnote}</p>
-    ${footer(model, copy, actions)}`;
+    <p class="page-footnote">${topic.footnote}</p>`;
 }
 
 export { motorPage };

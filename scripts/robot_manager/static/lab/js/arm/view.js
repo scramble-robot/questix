@@ -685,19 +685,6 @@ function hardwarePage(model, copy, fragments, actions) {
   ${realLab(model, copy, fragments, actions)}`;
 }
 
-function footer(model, actions) {
-  const last = model.position === ARM_TOPICS.length - 1;
-  return html`<div class="arm-bottom">
-    <button id="armPrevious" ?disabled=${model.position === 0} @click=${actions.previous}>
-      ← 前の実験
-    </button>
-    <span>${model.position + 1} / ${ARM_TOPICS.length}</span>
-    <button id="armNext" @click=${actions.next}>
-      ${last ? '小テストで確かめる →' : '次の実験 →'}
-    </button>
-  </div>`;
-}
-
 function armPage(model, copy, fragments, actions) {
   const topicCopy = copy.topics[model.topic];
   const lessonKey = 'arm-' + model.topic;
@@ -713,8 +700,7 @@ function armPage(model, copy, fragments, actions) {
       model.topic === 'hardware'
         ? hardwarePage(model, copy, fragments, actions)
         : experimentPage(model, copy, topicCopy, fragments, actions)
-    }
-    ${footer(model, actions)}`;
+    }`;
 }
 
 export { armPage, formatValue };
