@@ -270,7 +270,7 @@ function limitsNote(model) {
 
 // Nothing to operate (no robot, the teacher has not allowed it, an older bridge): one line, the
 // launcher's values when the robot sends them, and the lesson's typed data carries on.
-function offLine(model) {
+function offLine(model, after) {
   const code = model.blockers[0]?.code;
   let text = shootCopy.notAllowed;
   if (code === 'no_link') text = shootCopy.offline;
@@ -283,17 +283,18 @@ function offLine(model) {
   >
     <p>${text}</p>
     ${teacherDetails(model)} ${code !== 'no_link' && heard ? launcherState(model) : nothing}
+    ${after}
   </div>`;
 }
 
 /**
  * The launcher block: `model` from shootModel(), `view` the panel's state (`tiltPreview`,
  * `recordNote`, `rowAdded`), `actions`: confirm, setPercent, previewTilt, setTilt, startRoller,
- * stopOwn, fire.
+ * stopOwn, fire. `after`: the lesson's part right under the buttons (launcherPanel's `after`).
  */
-function shootBlock(model, view, actions) {
+function shootBlock(model, view, actions, after = nothing) {
   const heading = html`<h2>${unsafeHTML(runModeBadgeHtml('drive'))} ${shootCopy.title}</h2>`;
-  if (!shootOffered(model)) return html`${heading}${offLine(model)}`;
+  if (!shootOffered(model)) return html`${heading}${offLine(model, after)}`;
   return html`${heading}
     <div class="drive-block shoot-block" data-shoot-block>
       <p>${shootCopy.lead}</p>
@@ -302,7 +303,7 @@ function shootBlock(model, view, actions) {
         ${powerSlider(model, actions)}${tiltSlider(model, view, actions)}
       </div>
       <div class="shoot-run" data-shoot-run>
-        ${buttons(model, actions)} ${spinLine(model)} ${whyLine(model)}
+        ${buttons(model, actions)} ${spinLine(model)} ${whyLine(model)} ${after}
         <div class="shoot-strip" data-live-strip>${estopLine(model)} ${launcherState(model)}</div>
         ${noteLines(model, view)}
       </div>

@@ -6,7 +6,6 @@ import { lessonBrief } from '../shell/lesson-brief.js';
 import { runModeBadgeHtml } from '../shell/run-mode.js';
 import { LAUNCH_TOPICS } from './core.js';
 import { launchMechanism, launchChart } from './render.js';
-import { robotStatePanel } from '../live/robot-state.js';
 import { launcherPanel } from '../live/shoot-ui.js';
 import { fillSentence } from '../core/content.js';
 
@@ -178,7 +177,7 @@ function resultBox(model, copy) {
   const missed = result.error !== null;
   return html`<div id="launchResult" class="launch-result">
     <div class="launch-metrics">
-      ${metric('出力指示', run.config.power + '%')}
+      ${metric('出力指令', run.config.power + '%')}
       ${metric('最初の接地点まで', formatNumber(run.range, 2) + ' m')}
       ${
         missed
@@ -197,7 +196,7 @@ function historyTable(rows, copy) {
     <thead>
       <tr>
         <th>記録</th>
-        <th>出力指示</th>
+        <th>出力指令</th>
         <th>飛距離</th>
       </tr>
     </thead>
@@ -315,7 +314,7 @@ function conditionPanel(model, copy, actions) {
     <h2>${title}</h2>
     ${conditionIntro(model, copy)}
     <label class="launch-power-label" for="launchPower"
-      >モーターへの出力指示<output id="launchPowerValue">${model.power}%</output></label
+      >モーターへの出力指令<output id="launchPowerValue">${model.power}%</output></label
     ><input
       id="launchPower"
       type="range"
@@ -356,43 +355,44 @@ function experimentBody(model, copy, fragments, actions) {
     </section>`;
 }
 
-function measurementTable(measurement, copy) {
-  // Discs fired but not measured yet are listed under 教材から発射した1枚ごとの記録.
-  if (!measurement.rows.length)
-    return measurement.waiting ? nothing : html`<p>${copy.measurement.empty}</p>`;
-  return html`<table>
-    <thead>
-      <tr>
-        <th>出力</th>
-        <th>枚数</th>
-        <th>平均</th>
-        <th>最小〜最大</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${measurement.estimate.groups.map(
-        (group) =>
-          html`<tr>
-            <td>${group.power}%</td>
-            <td>${group.count}</td>
-            <td>${formatNumber(group.mean, 2)} m</td>
-            <td>${formatNumber(group.min, 2)}〜${formatNumber(group.max, 2)} m</td>
-          </tr>`,
-      )}
-    </tbody>
-  </table>`;
+// --- The real-robot measurement: one table of discs --------------------------------------------
+
+const KIND_LABELS = { typed: '手入力', file: 'CSV' };
+
+function whenText(row) {
+  if (row.time) return row.time;
+  return KIND_LABELS[row.kind] ?? '—';
 }
 
-// The distance of a fired disc still to be typed: a row of its own under the shot (full width, so
-// the field and its button fit on a phone), with its own small form, so Enter or 「記録」 records
-// that row. The field keeps what the learner types across redraws (no value binding), and
-// `repeat` keeps each row's field.
-function shotRangeRow(row, number, copy, actions) {
-  const label = fillSentence(copy.measurement.shotRangeLabel, { count: String(number) });
+// The fields of a disc still waiting: a row of its own under it (full width, so the fields and
+// the button fit on a phone), with its own small form, so Enter or 「表に入れる」 takes that row.
+// The fields keep what the learner types across redraws (no value binding), and `repeat` keeps
+// each row's fields.
+function entryRow(row, copy, actions) {
+  const text = copy.measurement;
+  const rangeLabel = fillSentence(text.shotRangeLabel, { count: String(row.number) });
+  const powerLabel = fillSentence(text.shotPowerLabel, { count: String(row.number) });
   return html`<tr class="waiting launch-shot-entry">
     <td colspan="5">
       <form class="launch-shot-form" @submit=${(event) => actions.setShotRange(row.id, event)}>
-        <label for=${'launchShotRange' + row.id}>${label}</label>
+        ${
+          row.entry === 'both'
+            ? html`<label for=${'launchShotPower' + row.id}>${powerLabel}</label>
+                <input
+                  id=${'launchShotPower' + row.id}
+                  name="power"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="1"
+                  inputmode="numeric"
+                  value=${row.power ?? ''}
+                  required
+                  data-launch-shot-power=${row.id}
+                />`
+            : nothing
+        }
+        <label for=${'launchShotRange' + row.id}>${rangeLabel}</label>
         <input
           id=${'launchShotRange' + row.id}
           name="range"
@@ -404,35 +404,71 @@ function shotRangeRow(row, number, copy, actions) {
           placeholder="例：1.25"
           required
           data-launch-shot-range=${row.id}
-        /><button type="submit" class="small">記録</button>
+        /><button type="submit" class="small primary">${text.enter}</button>
       </form>
     </td>
   </tr>`;
 }
 
-function shotRows(row, number, copy, actions) {
-  const measured = Number.isFinite(row.range);
-  return html`<tr data-launch-shot=${row.id} class=${measured ? '' : 'waiting'}>
-      <td>${number}</td>
-      <td>${row.time}</td>
-      <td>${row.power}%</td>
-      <td>${Number.isFinite(row.tilt) ? `${formatNumber(row.tilt, 1)}°` : '—'}</td>
-      <td>${measured ? `${formatNumber(row.range, 2)} m` : copy.measurement.shotWaiting}</td>
-    </tr>
-    ${measured ? nothing : shotRangeRow(row, number, copy, actions)}`;
+function distanceText(row, quickId, text) {
+  if (!row.waiting) return `${formatNumber(row.range, 2)} m`;
+  return row.id === quickId ? text.quickHere : text.shotWaiting;
 }
 
+// The disc fired last waits for its distance in the launcher block (quickEntry), not here.
+function tableRow(row, quickId, copy, actions) {
+  const text = copy.measurement;
+  const power = row.power === null ? '—' : `${row.power}%`;
+  const entry = row.waiting && row.id !== null && row.id !== quickId;
+  return html`<tr data-launch-shot=${row.id ?? ''} class=${row.waiting ? 'waiting' : ''}>
+      <td>${row.number}</td>
+      <td>${whenText(row)}</td>
+      <td>${row.entry === 'both' ? text.shotWaiting : power}</td>
+      <td>${row.tilt === null ? '—' : `${formatNumber(row.tilt, 1)}°`}</td>
+      <td>${distanceText(row, quickId, text)}</td>
+    </tr>
+    ${entry ? entryRow(row, copy, actions) : nothing}`;
+}
+
+function tableFiles(measurement, actions) {
+  return html`<div class="launch-file-row">
+    <button
+      id="launchMeasuredExport"
+      class="small"
+      ?disabled=${!measurement.rows.length}
+      @click=${actions.saveMeasurementsCsv}
+    >
+      この表をCSV保存</button
+    ><label class="vision-file"
+      >測定CSVを開く<input
+        id="launchImport"
+        type="file"
+        accept=".csv,text/csv"
+        @change=${actions.importCsv} /></label
+    ><button id="launchTemplate" class="small" @click=${actions.saveCsvTemplate}>
+      空の測定CSVを保存
+    </button>
+  </div>`;
+}
+
+/**
+ * The one table of the topic: every disc, 1…N — fired from the launcher block above (time and
+ * tilt filled in), added by hand (「行を手で追加」) or read from a CSV — with the distance fields of
+ * the discs still waiting, and the CSV actions of the same rows under it.
+ */
 function shotsTable(measurement, copy, actions) {
-  if (!measurement.shots.length) return nothing;
-  const waiting = measurement.waiting
-    ? html`<p class="launch-shots-waiting">
-        ${fillSentence(copy.measurement.shotsWaiting, { count: String(measurement.waiting) })}
-      </p>`
-    : nothing;
-  return html`<div class="launch-shots" data-launch-shots>
-    <h3>${copy.measurement.shotsTitle}</h3>
-    <p class="helper">${copy.measurement.shotsNote}</p>
-    ${waiting}
+  const text = copy.measurement;
+  const example = measurement.source !== 'measured';
+  return html`<section class="card launch-shots" id="launchShots" data-launch-shots>
+    <h2>${unsafeHTML(runModeBadgeHtml('data'))} ${text.shotsTitle}</h2>
+    <p class="helper">${example ? text.sourceExample : text.shotsNote}</p>
+    ${
+      measurement.waiting
+        ? html`<p class="launch-shots-waiting">
+            ${fillSentence(text.shotsWaiting, { count: String(measurement.waiting) })}
+          </p>`
+        : nothing
+    }
     <div class="launch-table launch-shots-table">
       <table>
         <thead>
@@ -446,17 +482,33 @@ function shotsTable(measurement, copy, actions) {
         </thead>
         <tbody>
           ${repeat(
-            measurement.shots,
-            (row) => row.id,
-            (row, index) => shotRows(row, index + 1, copy, actions),
+            measurement.table,
+            (row) => row.id ?? `row-${row.number}`,
+            (row) => tableRow(row, measurement.quick?.id ?? null, copy, actions),
           )}
         </tbody>
       </table>
     </div>
-  </div>`;
+    ${measurement.table.length ? nothing : html`<p>${text.empty}</p>`}
+    <div class="launch-table-actions">
+      <button class="small" data-launch-add-row @click=${actions.addTypedRow}>行を手で追加</button
+      ><button
+        id="launchRemoveMeasurement"
+        class="small"
+        ?disabled=${!measurement.canRemove}
+        @click=${actions.removeLastMeasurement}
+      >
+        最後の1枚を削除
+      </button>
+    </div>
+    <p class="helper">${text.typedHelper}</p>
+    <p id="launchImportStatus" role="status">${measurement.importStatus}</p>
+    ${tableFiles(measurement, actions)}
+    <p class="helper">${text.csvHelper}</p>
+  </section>`;
 }
 
-function measurementCard(measurement, chartWidth, copy, actions) {
+function measurementCard(measurement, chartWidth, copy) {
   const sourceNote =
     measurement.source === 'measured'
       ? copy.measurement.sourceMeasured
@@ -479,32 +531,6 @@ function measurementCard(measurement, chartWidth, copy, actions) {
     </div>
     ${chartLegend(copy, { role: 'measured', target: measurement.chartTarget })}
     <p>${copy.measurement.chartNote}</p>
-    <div id="launchMeasuredRows" class="launch-table">${measurementTable(measurement, copy)}</div>
-    ${shotsTable(measurement, copy, actions)}
-    <div class="launch-file-row">
-      <button
-        id="launchMeasuredExport"
-        class="small"
-        ?disabled=${!measurement.rows.length}
-        @click=${actions.saveMeasurementsCsv}
-      >
-        この記録をCSV保存</button
-      ><button
-        id="launchRemoveMeasurement"
-        class="small"
-        ?disabled=${!measurement.canRemove}
-        @click=${actions.removeLastMeasurement}
-      >
-        最後の1枚を削除</button
-      ><label class="vision-file"
-        >測定CSVを開く<input
-          id="launchImport"
-          type="file"
-          accept=".csv,text/csv"
-          @change=${actions.importCsv}
-      /></label>
-    </div>
-    <p id="launchImportStatus" role="status">${measurement.importStatus}</p>
   </section>`;
 }
 
@@ -516,11 +542,8 @@ function calibrationText(estimate, copy) {
   return candidate + estimate.message;
 }
 
-// The number fields keep what the learner typed: their `value` is bound as an attribute (the
-// default), which the browser ignores once the field has been edited, exactly as the original
-// page never wrote back into them. The form reads them when it is submitted.
+// Which data the chart reads and the distance to aim at next; the rows themselves are the table.
 function measurementPanel(measurement, copy, actions) {
-  const editable = measurement.editable;
   return html`<aside class="guide card launch-guide">
     <label class="launch-source-label" for="launchSource">使用するデータ</label
     ><select
@@ -532,33 +555,6 @@ function measurementPanel(measurement, copy, actions) {
       <option value="measured">実機の測定</option>
       <option value="example">入力例（模擬）</option>
     </select>
-    <h2>1枚の測定を記録する</h2>
-    <form id="launchMeasurementForm" @submit=${actions.addMeasurement}>
-      <label for="launchMeasuredPower">モーターへの出力指示（%）</label
-      ><input
-        id="launchMeasuredPower"
-        type="number"
-        min="0"
-        max="100"
-        step="1"
-        value="40"
-        required
-        ?disabled=${!editable}
-      /><label for="launchMeasuredRange">最初の接地点までの距離（m）</label
-      ><input
-        id="launchMeasuredRange"
-        type="number"
-        min="0"
-        max="30"
-        step="0.01"
-        placeholder="例：1.25"
-        required
-        ?disabled=${!editable}
-      /><button id="launchAddMeasurement" type="submit" class="primary full" ?disabled=${!editable}>
-        測定値を追加
-      </button>
-    </form>
-    <p class="helper">${copy.measurement.formHelper}</p>
     <label for="launchMeasuredTarget">次に狙う距離（m）</label
     ><input
       id="launchMeasuredTarget"
@@ -572,46 +568,72 @@ function measurementPanel(measurement, copy, actions) {
     <div class="launch-calibration" id="launchCalibration" role="status">
       ${calibrationText(measurement.estimate, copy)}
     </div>
-    <button id="launchTemplate" class="small full" @click=${actions.saveCsvTemplate}>
-      空の測定CSVを保存
-    </button>
-    <p class="helper">${copy.measurement.csvHelper}</p>
   </aside>`;
 }
 
-// The robot while the discs are launched and measured: the 「実機の状態」 panel and its memo
-// (js/live/robot-state.js). The range itself is measured with a tape and typed in above.
-function robotStateCard(copy) {
+// The distance of the disc just fired, typed right under 「1枚発射」 (the launcher block draws it
+// with its own redraws, launcherPanel `after`). Its row in the table says so.
+function quickEntry(quick, copy, actions) {
+  if (!quick) return nothing;
   const text = copy.measurement;
-  return html`<section class="card launch-robot-state">
-    <h2>${unsafeHTML(runModeBadgeHtml('live'))} ${text.robotTitle}</h2>
-    <p>${text.robotIntro}</p>
-    <p class="helper">${text.robotNote}</p>
-    ${robotStatePanel('launch-measure', {
-      name: text.memoName,
-      placeholder: text.memoPlaceholder,
+  const label = fillSentence(text.quickLabel, {
+    count: String(quick.number),
+    percent: String(quick.power),
+    tilt: quick.tilt === null ? '—' : formatNumber(quick.tilt, 0),
+  });
+  return html`<form
+    class="launch-shot-form launch-quick-entry"
+    data-launch-quick-entry=${quick.id}
+    @submit=${(event) => actions.setShotRange(quick.id, event)}
+  >
+    <label for=${'launchShotRange' + quick.id}>${label}</label>
+    <input
+      id=${'launchShotRange' + quick.id}
+      name="range"
+      type="number"
+      min="0"
+      max="30"
+      step="0.01"
+      inputmode="decimal"
+      placeholder="例：1.25"
+      required
+      data-launch-shot-range=${quick.id}
+    /><button type="submit" class="small primary">${text.enter}</button>
+  </form>`;
+}
+
+// Firing from the lesson (js/live/shoot-ui.js draws the block itself, with the emergency stop and
+// the launcher's state): each disc fired here adds a row to the table right under the block, and
+// its distance field comes right under the fire button.
+function shootCard(measurement, copy, actions) {
+  return html`<section class="card launch-shoot">
+    ${launcherPanel('launch-measure', {
+      onShot: actions.addShot,
+      lesson: 'launch-measure',
+      after: () => quickEntry(measurement.quick, copy, actions),
     })}
   </section>`;
 }
 
-// Firing from the lesson (js/live/shoot-ui.js draws the block itself): each disc fired here adds
-// a row to the table above, waiting for the distance measured with a tape.
-function shootCard(actions) {
-  return html`<section class="card launch-shoot">
-    ${launcherPanel('launch-measure', { onShot: actions.addShot, lesson: 'launch-measure' })}
-  </section>`;
-}
-
 function measurementBody(model, copy, fragments, actions) {
-  return html`<div class="launch-layout">
-      ${measurementCard(model.measurement, model.chartWidth, copy, actions)}${measurementPanel(
+  return html`${shootCard(model.measurement, copy, actions)}
+    ${shotsTable(model.measurement, copy, actions)}
+    <div class="launch-layout">
+      ${measurementCard(model.measurement, model.chartWidth, copy)}${measurementPanel(
         model.measurement,
         copy,
         actions,
       )}
     </div>
-    ${shootCard(actions)} ${robotStateCard(copy)}
     <section class="card launch-reflection">${unsafeHTML(fragments.measureReflection)}</section>`;
+}
+
+// The button of the 「最初に試すこと」 card (shell/lesson-brief.js): a simulated launch starts; on
+// the real robot the launcher block comes on screen (its safety tick comes first).
+function quickStart(model, copy) {
+  if (model.topic === 'measure')
+    return { label: copy.measurement.quickStart, target: '.launch-shoot' };
+  return { label: runButtonLabel(model), target: '#launchRun', press: true };
 }
 
 function launchPage(model, copy, fragments, actions) {
@@ -625,7 +647,7 @@ function launchPage(model, copy, fragments, actions) {
       </div>
     </div>
     ${topicNav(model, actions)}
-    ${unsafeHTML(lessonBrief(lessonKey, topicCopy.brief) + schoolTips(lessonKey))}
+    ${unsafeHTML(lessonBrief(lessonKey, topicCopy.brief, { start: quickStart(model, copy) }) + schoolTips(lessonKey))}
     ${body(model, copy, fragments, actions)}`;
 }
 

@@ -331,20 +331,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Places that put the panel in a card of their own. */
-.launch-robot-state {
-  margin-top: 24px;
-  padding: 24px;
-}
-.launch-robot-state h2 {
-  margin-top: 0;
-}
-@media (max-width: 600px) {
-  .launch-robot-state {
-    padding: 18px;
-  }
-}
-
 /* The panel keeps its own sizes inside hosts that style every svg / p / button of theirs (the
    measurement lab's dialog: .measurement-lab svg { height: auto; margin-top: 16px }). */
 .robot-state-host .robot-state p {

@@ -1,4 +1,4 @@
-import { html, render, ref } from '../vendor/lit-html.js';
+import { html, render, ref, nothing } from '../vendor/lit-html.js';
 import { fillSentence as fill } from '../core/content.js';
 import { revealElement } from '../core/reveal.js';
 import {
@@ -76,7 +76,10 @@ function actionsOf(entry) {
 
 function draw(entry, model) {
   if (!entry.element?.isConnected) return;
-  render(shootBlock(model, entry.view, entry.actions), entry.element);
+  render(
+    shootBlock(model, entry.view, entry.actions, entry.options.after?.() ?? nothing),
+    entry.element,
+  );
 }
 
 // --- the stop bar --------------------------------------------------------------------------------
@@ -226,7 +229,10 @@ function entryOf(place) {
  * The launcher block for `place` as a lit template for the lesson's own view. `options`:
  * - `onShot({percent, tilt, at})`: one of this page's discs was fired; returns whether the lesson
  *   kept a row for it (false: its table is full);
- * - `lesson`: the lesson key the session recordings are kept under on the robot.
+ * - `lesson`: the lesson key the session recordings are kept under on the robot;
+ * - `after()`: a lit template the block shows right under its buttons (and in its offline line),
+ *   redrawn with the block: the launch course's distance field of the disc just fired, so the
+ *   measured range is typed where the disc was fired.
  */
 function launcherPanel(place, options = {}) {
   const entry = entryOf(place);

@@ -339,6 +339,72 @@ function launchCSV(rows, source = 'measured') {
   return CSV_HEADER + (details ? SHOT_COLUMNS : '') + '\n' + body;
 }
 
+// --- The one table of the real-robot measurement (topic 実機で測る) -------------------------------
+
+/**
+ * The rows of the measurement table, one per disc, in the order they were added: a disc fired from
+ * the lesson (`shot: true`, with its time and tilt), one typed in by hand (`typed: true`) or one
+ * read from a CSV. Each row says whether its distance is still to be typed (`waiting`) and which
+ * fields the learner fills in (`entry`: null, 'range' for a fired disc, 'both' for a typed row,
+ * whose output is typed as well). `number` counts the discs, 1…N.
+ */
+function launchTableRows(rows) {
+  return rows.map((row, index) => {
+    const waiting = !Number.isFinite(row.range);
+    let entry = null;
+    if (waiting) entry = row.typed ? 'both' : 'range';
+    let kind = 'file';
+    if (row.shot) kind = 'shot';
+    else if (row.typed) kind = 'typed';
+    return {
+      id: row.id ?? null,
+      number: index + 1,
+      kind,
+      time: row.time ?? null,
+      power: Number.isFinite(row.power) ? row.power : null,
+      tilt: Number.isFinite(row.tilt) ? row.tilt : null,
+      range: waiting ? null : row.range,
+      waiting,
+      entry,
+    };
+  });
+}
+
+const PERCENT = 100;
+const TILT_DECIMALS = 1;
+
+/**
+ * The discs a recorded launcher session fired (a record 「出力を調整して飛ばす（実機から1枚発射）」
+ * kept on the robot): every rise of /shot/status fired_count is a disc, at that message's stamp
+ * [s], with the tilt it reported and the roller command [%] last reported at or before it.
+ * Returns [{percent, tilt, at: Date, source}] (`source`: last_fire_source, 'lab' or 'joy').
+ */
+function launcherShots(recording) {
+  const rollers = recording?.streams?.roller ?? [];
+  const shots = recording?.streams?.shot ?? [];
+  const fired = [];
+  let count = null;
+  for (const message of shots) {
+    if (!Number.isInteger(message.fired_count)) continue;
+    const rise = count === null ? 0 : message.fired_count - count;
+    count = message.fired_count;
+    if (rise <= 0) continue;
+    const roller = rollers.filter((entry) => entry.stamp <= message.stamp).at(-1);
+    const percent = Number.isFinite(roller?.command) ? Math.round(roller.command * PERCENT) : null;
+    const tilt = Number.isFinite(message.tilt_deg)
+      ? Number(message.tilt_deg.toFixed(TILT_DECIMALS))
+      : null;
+    for (let disc = 0; disc < rise; disc += 1)
+      fired.push({
+        percent,
+        tilt,
+        at: new Date(message.stamp * 1000),
+        source: message.last_fire_source ?? null,
+      });
+  }
+  return fired;
+}
+
 // --- What the scene and the record chart share ---------------------------------------------------
 
 const LAUNCH_TOLERANCE = 0.15; // metres either side of a target's centre that count as a hit
@@ -380,4 +446,6 @@ export {
   launchEstimate,
   launchParseCSV,
   launchCSV,
+  launchTableRows,
+  launcherShots,
 };

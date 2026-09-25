@@ -10,14 +10,21 @@ import {
   launchGroups,
   launchParseCSV,
   launchCSV,
+  launchTableRows,
+  launcherShots,
 } from './core.js';
 import { drawLaunch, drawLaunchRobot } from './render.js';
 import { launchPage } from './view.js';
 import { reportLessonProgress } from '../shell/lesson-progress.js';
 import { fillSentence } from '../core/content.js';
+import { revealIfHidden } from '../core/reveal.js';
+import { registerRecordTarget, revealAfterRender } from '../live/record-targets.js';
 
 // Disc-launcher course: state and behaviour. view.js turns the model into markup, render.js draws
 // the flight and the charts, core.js simulates and estimates. Texts live in content/launch.json.
+// The real-robot topic keeps one table of discs (fired from the lesson's launcher block, typed in
+// by hand or read from a CSV); a fired disc's row waits right under the launcher block for the
+// distance measured with a tape, and a launcher record on the robot opens back into it.
 
 const copy = await loadJson('content/launch.json');
 const fragments = {
@@ -142,16 +149,28 @@ function statusText() {
 // and the estimate until the learner has typed it.
 const hasRange = (row) => Number.isFinite(row.range);
 
+// The disc fired last on this page, while its distance is still to be typed: its field sits in
+// the launcher block right under 「1枚発射」 (launcherPanel `after`) instead of in the table.
+function quickShot() {
+  const index = measurements.measured.findLastIndex((row) => row.here);
+  const row = measurements.measured[index];
+  if (!row || hasRange(row)) return null;
+  return { id: row.id, number: index + 1, power: row.power, tilt: row.tilt };
+}
+
 function measurementModel() {
   const measuredShown = measurements.source === 'measured';
-  const rows = (measuredShown ? measurements.measured : EXAMPLE_MEASUREMENTS).filter(hasRange);
+  const shownRows = measuredShown ? measurements.measured : EXAMPLE_MEASUREMENTS;
+  const rows = shownRows.filter(hasRange);
   const target = measurements.target;
   return {
     source: measurements.source,
     rows,
-    // The discs fired from the lesson, with their time and tilt (the table the learner completes).
-    shots: measuredShown ? measurements.measured.filter((row) => row.shot) : [],
+    // The one table: every disc (fired here, typed in, read from a file), 1…N, with the fields
+    // of the discs whose distance is still to be typed.
+    table: launchTableRows(shownRows),
     waiting: measuredShown ? measurements.measured.filter((row) => !hasRange(row)).length : 0,
+    quick: measuredShown ? quickShot() : null,
     estimate: launchEstimate(rows, target),
     target,
     chartTarget: Number.isFinite(target) && target > 0 ? target : null,
@@ -385,30 +404,35 @@ function nextTarget() {
   rebuildPage();
 }
 
-function readMeasurement(fields) {
-  if (!fields.launchMeasuredRange.value.trim()) throw new Error(copy.measurement.rangeRequired);
-  const row = {
-    power: Number(fields.launchMeasuredPower.value),
-    range: Number(fields.launchMeasuredRange.value),
-  };
-  launchGroups([row]); // rejects values outside 0-100 % and 0-30 m with the learner's message
-  if (measurements.measured.length >= MAX_MEASUREMENTS)
-    throw new Error(copy.measurement.tooManyRows);
-  return row;
+// The example is shown until there are real rows; a disc fired or a row added by hand is real, so
+// the table switches to 実機の測定 and says so.
+function switchToMeasured() {
+  const switched = measurements.source !== 'measured';
+  measurements.source = 'measured';
+  return switched ? copy.measurement.shotSwitched : '';
 }
 
-function addMeasurement(event) {
-  event.preventDefault();
-  if (measurements.source !== 'measured') return;
-  const fields = event.currentTarget.elements;
-  try {
-    measurements.measured.push(readMeasurement(fields));
-    fields.launchMeasuredRange.value = '';
-    measurements.importStatus = copy.measurement.added;
-  } catch (error) {
-    measurements.importStatus = error.message;
+// 「行を手で追加」 (in the table): a disc measured without the lesson's launcher — its output and
+// its distance are typed into the new row.
+function addTypedRow() {
+  if (measurements.measured.length >= MAX_MEASUREMENTS) {
+    measurements.importStatus = copy.measurement.tooManyRows;
+    update();
+    return;
   }
+  const switched = switchToMeasured();
+  const last = measurements.measured.filter((row) => Number.isFinite(row.power)).at(-1);
+  const row = {
+    id: nextShotId++,
+    power: last?.power ?? DEFAULT_POWER,
+    range: null,
+    typed: true,
+  };
+  measurements.measured.push(row);
+  measurements.focusShot = row.id;
+  measurements.importStatus = copy.measurement.typedAdded + switched;
   update();
+  focusWaitingShot();
 }
 
 // The file is read asynchronously; the learner may have opened another topic meanwhile, in which
@@ -444,13 +468,24 @@ function clockText(date) {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
-// The distance field of the row waiting first, focused after the page has been drawn, so the
-// learner types the measured range straight into it.
+// The first field of the row waiting (a typed row's output, a fired disc's distance), focused after
+// the page has been drawn, so the learner types the measured range straight into it: the disc just
+// fired has its field right under 「1枚発射」, the other rows in the table under the block.
 function focusWaitingShot() {
   const id = measurements.focusShot;
   measurements.focusShot = null;
   if (id === null || topicId !== 'measure' || page().hidden) return;
-  document.querySelector(`[data-launch-shot-range="${id}"]`)?.focus();
+  // The launcher block draws itself (shoot-ui.js) right after the lesson took the shot.
+  requestAnimationFrame(() => focusRow(id));
+}
+
+function focusRow(id) {
+  const field =
+    document.querySelector(`[data-launch-shot-power="${id}"]`) ??
+    document.querySelector(`[data-launch-shot-range="${id}"]`);
+  if (!field) return;
+  field.focus({ preventScroll: true });
+  revealIfHidden(field.closest('tr, form') ?? field);
 }
 
 /**
@@ -466,32 +501,36 @@ function addShot({ percent, tilt, at }) {
     tilt: Number.isFinite(tilt) ? Number(tilt.toFixed(TILT_DECIMALS)) : null,
     time: clockText(at),
     shot: true,
+    here: true, // fired on this page: its distance is typed in the launcher block (quickShot)
   };
   measurements.measured.push(row);
-  const switched = measurements.source !== 'measured';
-  measurements.source = 'measured';
+  const switched = switchToMeasured();
   measurements.focusShot = row.id;
   if (topicId === 'measure') {
-    const count = measurements.measured.filter((entry) => entry.shot).length;
-    const added = fillSentence(copy.measurement.shotAdded, { count: String(count) });
-    measurements.importStatus = switched ? `${added}${copy.measurement.shotSwitched}` : added;
+    const number = measurements.measured.length;
+    measurements.importStatus =
+      fillSentence(copy.measurement.shotAdded, { count: String(number) }) + switched;
     update();
     focusWaitingShot();
   }
   return true;
 }
 
-/** The learner typed the distance of fired row `id` (its small form was submitted). */
+/**
+ * 「表に入れる」 of waiting row `id` (its small form was submitted): the distance measured with a
+ * tape and, for a row added by hand, its output.
+ */
 function setShotRange(id, event) {
   event.preventDefault();
   const row = measurements.measured.find((entry) => entry.id === id);
-  const field = event.currentTarget.elements.range;
-  if (!row || !field) return;
+  const fields = event.currentTarget.elements;
+  if (!row || !fields.range) return;
   try {
-    if (!field.value.trim()) throw new Error(copy.measurement.rangeRequired);
-    const range = Number(field.value);
-    launchGroups([{ power: row.power, range }]); // the learner's message for 0-30 m
-    row.range = range;
+    if (!fields.range.value.trim()) throw new Error(copy.measurement.rangeRequired);
+    const range = Number(fields.range.value);
+    const power = row.typed && fields.power ? Number(fields.power.value) : row.power;
+    launchGroups([{ power, range }]); // the learner's message for 0-100 % and 0-30 m
+    Object.assign(row, { power, range });
     measurements.importStatus = copy.measurement.added;
     measurements.focusShot = measurements.measured.find((entry) => !hasRange(entry))?.id ?? null;
   } catch (error) {
@@ -500,6 +539,38 @@ function setShotRange(id, event) {
   update();
   focusWaitingShot();
 }
+
+// 「出力を調整して飛ばすで開く」 from 記録の一覧: the discs a recorded launcher session fired come
+// back as rows waiting for their distance (the tape measurement is not in the record).
+function openLauncherRecord(recording) {
+  const discs = launcherShots(recording);
+  openTopic('measure');
+  if (!discs.length) {
+    measurements.importStatus = copy.measurement.recordNoShots;
+    update();
+    return false;
+  }
+  const room = MAX_MEASUREMENTS - measurements.measured.length;
+  const taken = discs.slice(0, Math.max(0, room));
+  const switched = switchToMeasured();
+  for (const disc of taken)
+    measurements.measured.push({
+      id: nextShotId++,
+      power: disc.percent,
+      range: null,
+      tilt: disc.tilt,
+      time: clockText(disc.at),
+      shot: true,
+    });
+  measurements.focusShot = measurements.measured.find((entry) => !hasRange(entry))?.id ?? null;
+  measurements.importStatus =
+    fillSentence(copy.measurement.recordOpened, { count: String(taken.length) }) + switched;
+  update();
+  revealAfterRender(() => document.getElementById('launchShots'));
+  return taken.length > 0;
+}
+
+registerRecordTarget('launch-measure', openLauncherRecord);
 
 const actions = {
   openTopic,
@@ -540,7 +611,7 @@ const actions = {
     measurements.source = source;
     update();
   },
-  addMeasurement,
+  addTypedRow,
   removeLastMeasurement() {
     if (measurements.source !== 'measured') return;
     measurements.measured.pop();

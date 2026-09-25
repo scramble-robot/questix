@@ -117,15 +117,28 @@
   color: var(--orange);
 }
 
-/* Rows fired from the lesson, in the launch course's measurement card. */
+/* The launch course's one measurement table, right under the launcher block: every disc (fired
+   from the lesson, typed in by hand, read from a CSV) and the fields of the ones still waiting. */
 .launch-shots {
-  padding: 0 22px;
+  margin-top: 18px;
+  padding: 20px 22px;
   display: grid;
-  gap: 6px;
+  gap: 8px;
 }
-.launch-shots h3 {
-  margin: 12px 0 0;
-  font-size: 16px;
+.launch-shots h2 {
+  margin: 0;
+  font-size: 18px;
+}
+.launch-shots p {
+  margin: 0;
+}
+.launch-shots .launch-file-row {
+  padding: 4px 0 0;
+}
+.launch-table-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
 }
 .launch-shots .launch-table {
   padding: 0;
@@ -163,9 +176,20 @@
 .launch-shot-form button {
   min-height: 40px;
 }
+/* The distance of the disc just fired, right under 「1枚発射」 in the launcher block. */
+.launch-quick-entry {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #fff4e5;
+  border: 1px solid #f0c98a;
+}
+.launch-quick-entry label {
+  flex: 1 1 100%;
+}
 @media (max-width: 600px) {
   .launch-shots {
-    padding: 0 16px;
+    padding: 16px;
   }
 }
 

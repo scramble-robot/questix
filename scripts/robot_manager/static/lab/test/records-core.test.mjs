@@ -256,6 +256,19 @@ test('the outcome word says who drove and how it ended', () => {
   assert.equal(outcomeKind(entry({ outcome: { reason: 'controller' } })), 'stopped');
 });
 
+test('a launcher session opens back in the launch table and is not called 記録だけ', () => {
+  const launcher = entry({ lesson: 'launch-measure', outcome: null });
+  assert.deepEqual(
+    targetsFor(launcher).map((target) => [target.id, target.course, target.topic]),
+    [['launch-measure', 'launch', 'measure']],
+  );
+  assert.equal(outcomeWord(launcher), recordsCopy.outcomes.launcher);
+  assert.notEqual(outcomeWord(launcher), recordsCopy.outcomes.recorded);
+  // A drive holds the launcher's streams too, but no discs: it is not offered there.
+  const free = entry({ source: 'auto', lesson: 'free-drive' });
+  assert.ok(!targetsFor(free).some((target) => target.id === 'launch-measure'));
+});
+
 test('a run of this browser reads like a robot entry', () => {
   const run = {
     id: 4,

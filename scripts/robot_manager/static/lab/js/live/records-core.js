@@ -63,6 +63,15 @@ const RECORD_TARGETS = [
   { id: 'slam', course: 'slam', topic: null, needs: ['scan', 'drive'] },
   { id: 'planning-room', course: 'planning', topic: 'room', needs: ['scan', 'odom'] },
   { id: 'motor-bench', course: 'motor', topic: 'real', needs: ['drive', 'twist'] },
+  // A launcher session: its discs come back as rows waiting for their distance. `ownOnly`: only
+  // its own records (a drive has no discs, even though every recording holds the streams).
+  {
+    id: 'launch-measure',
+    course: 'launch',
+    topic: 'measure',
+    needs: ['shot'],
+    ownOnly: true,
+  },
 ];
 
 class RecordsError extends Error {}
@@ -336,7 +345,9 @@ function targetsFor(entry, streams = RECORDING_STREAMS) {
   const own = RECORD_TARGETS.filter((target) => target.id === key);
   if (own.length) return own;
   if (!OPEN_ANYWHERE.includes(key)) return [];
-  return RECORD_TARGETS.filter((target) => target.needs.every((name) => streams.includes(name)));
+  return RECORD_TARGETS.filter(
+    (target) => !target.ownOnly && target.needs.every((name) => streams.includes(name)),
+  );
 }
 
 /** The streams a lesson needs that `recording` lacks, as stream names (recording-core). */
@@ -350,6 +361,8 @@ const recordedOnly = (entry) => !entry.outcome || entry.outcome.reason === 'reco
 function outcomeWord(entry) {
   if (entry.source === 'auto') return copy.outcomes.controller;
   if (entry.source === 'rosbag-cache') return copy.outcomes.rosbag;
+  // A launcher session that ended as meant fired discs; it did not only record.
+  if (lessonKey(entry) === 'launch-measure' && recordedOnly(entry)) return copy.outcomes.launcher;
   if (recordedOnly(entry)) return copy.outcomes.recorded;
   return statusCopy[runStatusKey(entry.outcome.reason)];
 }

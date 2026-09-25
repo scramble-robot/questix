@@ -53,6 +53,7 @@
   },
   "outcomes": {
     "recorded": "記録だけ",
+    "launcher": "教材から発射",
     "controller": "コントローラーで走行",
     "rosbag": "録画から変換"
   },

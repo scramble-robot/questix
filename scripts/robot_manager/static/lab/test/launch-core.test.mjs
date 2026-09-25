@@ -15,7 +15,61 @@ import {
   launchGroups,
   launchParseCSV,
   launchSpeed,
+  launchTableRows,
+  launcherShots,
 } from '../js/launch/core.js';
+
+test('the real-robot measurement is one table: fired, typed and read rows, 1…N', () => {
+  const table = launchTableRows([
+    { power: 30, range: 0.8 }, // from a CSV
+    { id: 1, power: 40, range: null, tilt: 30, time: '10:51:02', shot: true },
+    { id: 2, power: 45, range: 1.3, tilt: 30.5, time: '10:51:20', shot: true },
+    { id: 3, power: 50, range: null, typed: true },
+  ]);
+  assert.deepEqual(
+    table.map((row) => [row.number, row.kind, row.waiting, row.entry]),
+    [
+      [1, 'file', false, null],
+      [2, 'shot', true, 'range'],
+      [3, 'shot', false, null],
+      [4, 'typed', true, 'both'],
+    ],
+  );
+  assert.equal(table[1].time, '10:51:02');
+  assert.equal(table[1].range, null);
+  assert.equal(table[2].tilt, 30.5);
+  assert.equal(table[0].tilt, null);
+  assert.deepEqual(launchTableRows([]), []);
+});
+
+test('a recorded launcher session gives back its discs with power, tilt and time', () => {
+  const recording = {
+    streams: {
+      roller: [
+        { stamp: 100, command: 0 },
+        { stamp: 101, command: 0.5 },
+        { stamp: 104, command: 0.6 },
+      ],
+      shot: [
+        { stamp: 100.5, fired_count: 7, tilt_deg: 30 }, // before the session: not a disc
+        { stamp: 102, fired_count: 8, tilt_deg: 30.04, last_fire_source: 'lab' },
+        { stamp: 103, fired_count: 8, tilt_deg: 30 },
+        { stamp: 105, fired_count: 9, tilt_deg: 35, last_fire_source: 'joy' },
+      ],
+    },
+  };
+  const discs = launcherShots(recording);
+  assert.deepEqual(
+    discs.map((disc) => [disc.percent, disc.tilt, disc.source]),
+    [
+      [50, 30, 'lab'],
+      [60, 35, 'joy'],
+    ],
+  );
+  assert.equal(discs[0].at.getTime(), 102000);
+  assert.deepEqual(launcherShots({ streams: {} }), []);
+  assert.deepEqual(launcherShots(null), []);
+});
 
 const FLOOR = LAUNCH_SPEC.thickness / 2; // the disc's lower face touches down, not its centre
 
