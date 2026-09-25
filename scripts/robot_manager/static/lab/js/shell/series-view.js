@@ -73,7 +73,7 @@ function catalogueHeading(model, actions) {
     <p>${firstLine}<br />${secondLine}</p>
     <div class="series-start">
       <button class="primary" data-series-start @click=${() => actions.openCourse(first.id)}>
-        ${copy.heading.start} ${first.title} →
+        ${copy.heading.start} <span class="series-start-title">${first.title} →</span>
       </button>
       <a class="series-start-list" href="#course-group-0">${copy.heading.list}</a>
     </div>

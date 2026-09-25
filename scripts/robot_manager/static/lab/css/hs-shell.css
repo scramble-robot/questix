@@ -172,6 +172,14 @@
   color: #1e5350;
   font-weight: 600;
 }
+/* The course name and its arrow wrap as one piece, never the arrow alone on a phone. */
+.series-start-title {
+  white-space: nowrap;
+}
+/* Space between the robot card and the group links under it. */
+#seriesPage .series-group-index {
+  margin-top: 16px;
+}
 details.series-run-legend > summary {
   cursor: pointer;
   list-style: revert;
