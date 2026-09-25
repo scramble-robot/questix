@@ -11,6 +11,9 @@ from launch.substitutions import EnvironmentVariable, LaunchConfiguration
 
 # One packaged profile per controller: config/controls.<controller>.yaml.
 CONTROLLER_TYPES = ('uart', 'dualshock', 'web')
+# The browser controller's buttons are fixed by its page, so it always uses the packaged profile
+# (a saved file of the same name in QUESTIX_CONFIG_DIR is ignored; Robot Manager never writes one).
+FIXED_CONTROLLERS = ('web',)
 
 
 def _select_profile(context):
@@ -24,7 +27,8 @@ def _select_profile(context):
     else:
         filename = f'controls.{controller}.yaml'
         saved = Path(os.environ.get('QUESTIX_CONFIG_DIR', '/etc/questix_robot')) / filename
-        path = saved if saved.exists() else (
+        use_saved = saved.exists() and controller not in FIXED_CONTROLLERS
+        path = saved if use_saved else (
             Path(get_package_share_directory('questix_control_config')) / 'config' / filename)
     if not path.is_file():
         raise ValueError(f'Control profile not found: {path}')

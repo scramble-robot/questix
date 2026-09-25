@@ -24,14 +24,8 @@ const ControllerMap = (() => {
 
   function actionLabel(key, action) { return `${numbers[key]} · ${action}`; }
 
-  // Browser controller (web_joy_driver/static/index.html LAYOUT): the page sends only
-  // the 「移動」 sticks and the four 「ショット」 buttons, so nothing else is drawn.
-  const webSpots = { axis: { 0: "left-stick", 1: "left-stick", 3: "right-stick", 4: "right-stick" },
-    button: { 4: "tilt-up", 5: "fire", 6: "tilt-down", 7: "roller" } };
-
   function location(controller, key, value) {
     if (!Number.isInteger(value) || value < 0) return null;
-    if (controller === "web") return webSpots[labels.kind(key) === "axis" ? "axis" : "button"][value] || null;
     if (labels.kind(key) === "axis") {
       if (value === 0 || value === 1) return "left-stick";
       if (value === 3 || value === 4) return "right-stick";
@@ -162,71 +156,11 @@ const ControllerMap = (() => {
     return node;
   }
 
-  // One selectable control of a diagram; stick bases get the same ring decoration everywhere.
-  function addSpot(svg, spots, id, x, y, name, { radius = 24, shape = "circle", color = "#e6edf2", size } = {}) {
-    const group = element("g", { class: "map-control", "data-spot": id });
-    const outline = shape === "rect"
-      ? element("rect", { x: x - radius, y: y - 17, width: radius * 2, height: 34, rx: 10 })
-      : element("circle", { cx: x, cy: y, r: radius });
-    outline.setAttribute("class", "map-control-shape");
-    outline.setAttribute("fill", "#17232e");
-    outline.setAttribute("stroke", "#677986");
-    outline.setAttribute("stroke-width", 1.5);
-    group.append(outline);
-    if (id.endsWith("-stick")) {
-      group.append(element("circle", { cx: x, cy: y, r: radius - 7, fill: "#293945", stroke: "#425461", "stroke-width": 2 }),
-        element("circle", { cx: x, cy: y, r: radius - 12, fill: "none", stroke: "#6c7e8a", "stroke-width": 1, opacity: ".45" }));
-    }
-    if (id === "dpad") {
-      group.append(element("path", { d: `M${x-8} ${y-23} h16 v15 h15 v16 h-15 v15 h-16 v-15 h-15 v-16 h15 Z`,
-        fill: "#354752", stroke: "#8b9ba6", "stroke-width": 1 }));
-    } else if (name) {
-      group.append(element("text", { x, y: y + 5, "text-anchor": "middle", fill: color,
-        "font-size": size || (shape === "rect" ? 11 : name.length >= 7 ? 9 : name.length >= 4 ? 11 : 16) }, name));
-    }
-    svg.append(group);
-    spots.set(id, { group, x, y, radius, name });
-    return group;
-  }
-
-  // The web joy page in landscape: 「移動」 card left, 「ショット」 card right (FIRE with
-  // TILT ▲ above, TILT ▼ below and ROLLER to its left), named as on the page.
-  function drawWeb(svg) {
-    const spots = new Map();
-    const card = (x, title) => svg.append(
-      element("rect", { x, y: 58, width: 204, height: 266, rx: 18, fill: "#1b2733", stroke: "#40505e", "stroke-width": 1.5 }),
-      element("text", { x: x + 16, y: 84, fill: "#a9b8ca", "font-size": 13, "font-weight": 600 }, title));
-    card(150, "移動");
-    card(380, "ショット");
-    const guide = (group, x, y, text, size = 10) => group.append(element("text", { x, y, "text-anchor": "middle",
-      fill: "#9cabb7", "font-size": size, "pointer-events": "none" }, text));
-    for (const [id, x, caption] of [["left-stick", 206, "前後・左右"], ["right-stick", 300, "旋回"]]) {
-      svg.append(element("text", { x, y: 138, "text-anchor": "middle", fill: "#c9d4de", "font-size": 12 }, caption));
-      const group = addSpot(svg, spots, id, x, 205, "", { radius: 38 });
-      if (id === "left-stick") {
-        guide(group, x, 181, "前"); guide(group, x, 237, "後");
-        guide(group, x - 23, 209, "左"); guide(group, x + 23, 209, "右");
-      } else {
-        guide(group, x - 21, 211, "↶", 16); guide(group, x + 21, 211, "↷", 16);
-      }
-    }
-    addSpot(svg, spots, "tilt-up", 490, 122, "TILT ▲", { radius: 25 });
-    addSpot(svg, spots, "fire", 490, 195, "FIRE", { radius: 38, color: "#f1af88", size: 15 });
-    addSpot(svg, spots, "tilt-down", 490, 268, "TILT ▼", { radius: 25 });
-    addSpot(svg, spots, "roller", 415, 195, "ROLLER", { radius: 26, size: 10 });
-    svg.append(element("text", { x: 360, y: 346, "text-anchor": "middle", fill: "#a9b8ca",
-      "font-size": 10, "letter-spacing": 2 }, "WEB（ブラウザ・スマホ）"));
-    return { svg, spots };
-  }
-
   function draw(controller, compact, usedSpots) {
     const dual = controller === "dualshock";
-    const web = controller === "web";
     const svg = element("svg", { viewBox: compact ? "130 10 460 350" : "-95 -15 910 405", role: "group",
-      "aria-label": web ? "Web（ブラウザ・スマホ）操作画面の操作図"
-        : `${dual ? "DualShock" : "Switch"} コントローラーの操作図` });
+      "aria-label": `${dual ? "DualShock" : "Switch"} コントローラーの操作図` });
     svg.append(element("title", {}, "ボタンやスティックを選ぶと、機能の割り当てを編集できます。"));
-    if (web) return drawWeb(svg);
     const defs = element("defs");
     const gradient = element("linearGradient", { id: "controller-shell", x2: "0", y2: "1" });
     gradient.append(element("stop", { offset: "0", "stop-color": "#465665" }),
@@ -244,9 +178,31 @@ const ControllerMap = (() => {
     svg.append(element("text", { x: 360, y: 325, "text-anchor": "middle", fill: "#a9b8ca",
       "font-size": 10, "letter-spacing": 3 }, dual ? "DUALSHOCK" : "SWITCH / UART"));
     const spots = new Map();
-    const faceColors = dual ? { "face-top": "#83dbc5", "face-right": "#ee9b9e", "face-bottom": "#94c7ff", "face-left": "#d0b1ee" } : {};
-    const spot = (id, x, y, name, radius = 24, shape = "circle") =>
-      addSpot(svg, spots, id, x, y, name, { radius, shape, color: faceColors[id] || "#e6edf2" });
+    function spot(id, x, y, name, radius = 24, shape = "circle") {
+      const group = element("g", { class: "map-control", "data-spot": id });
+      const outline = shape === "rect"
+        ? element("rect", { x: x - radius, y: y - 17, width: radius * 2, height: 34, rx: 10 })
+        : element("circle", { cx: x, cy: y, r: radius });
+      outline.setAttribute("class", "map-control-shape");
+      outline.setAttribute("fill", "#17232e");
+      outline.setAttribute("stroke", "#677986");
+      outline.setAttribute("stroke-width", 1.5);
+      group.append(outline);
+      if (id.endsWith("-stick")) {
+        group.append(element("circle", { cx: x, cy: y, r: radius - 7, fill: "#293945", stroke: "#425461", "stroke-width": 2 }),
+          element("circle", { cx: x, cy: y, r: radius - 12, fill: "none", stroke: "#6c7e8a", "stroke-width": 1, opacity: ".45" }));
+      }
+      if (id === "dpad") {
+        group.append(element("path", { d: `M${x-8} ${y-23} h16 v15 h15 v16 h-15 v15 h-16 v-15 h-15 v-16 h15 Z`,
+          fill: "#354752", stroke: "#8b9ba6", "stroke-width": 1 }));
+      } else {
+        const faceColors = dual ? { "face-top": "#83dbc5", "face-right": "#ee9b9e", "face-bottom": "#94c7ff", "face-left": "#d0b1ee" } : {};
+        group.append(element("text", { x, y: y + 5, "text-anchor": "middle",
+          fill: faceColors[id] || "#e6edf2", "font-size": shape === "rect" ? 11 : name.length >= 7 ? 9 : name.length >= 4 ? 11 : 16 }, name));
+      }
+      svg.append(group);
+      spots.set(id, { group, x, y, radius, name });
+    }
     spot("left-trigger", 258, 43, dual ? "L2" : "ZL", 43, "rect");
     spot("right-trigger", 462, 43, dual ? "R2" : "ZR", 43, "rect");
     spot("left-shoulder", 258, 93, dual ? "L1" : "L", 43, "rect");
@@ -269,7 +225,6 @@ const ControllerMap = (() => {
   }
 
   function render(host, controller, values, saved, onAction, options = {}) {
-    const web = controller === "web";
     const assignments = bindings(controller, values, saved);
     const { svg, spots } = draw(controller, options.compact, new Set(assignments.map((item) => item.spot)));
     const list = document.createElement("div");
@@ -370,9 +325,8 @@ const ControllerMap = (() => {
     }
     for (const [id, { group, name }] of spots) {
       const mapped = cards.filter((card) => card.assignment.spot === id);
-      const title = id === "left-stick" ? (web ? "左スティック（前後・左右）" : "左スティック")
-        : id === "right-stick" ? (web ? "右スティック（旋回）" : "右スティック")
-          : id === "dpad" ? "十字キー" : name;
+      const title = id === "left-stick" ? "左スティック" : id === "right-stick" ? "右スティック"
+        : id === "dpad" ? "十字キー" : name;
       group.setAttribute("tabindex", "0");
       group.setAttribute("role", "button");
       group.setAttribute("aria-haspopup", "dialog");

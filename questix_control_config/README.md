@@ -17,7 +17,7 @@ robot_manager の「調整」タブでコントローラーを選び、値を編
 ノード停止中や ROS 未導入の場合は取得不可を表示します。
 
 編集対象の選択と、Launch 設定の `CONTROLLER_TYPE`（実際に使用するコントローラー）は
-別です。UART 用・DualShock 用・Web 用の調整は互いに上書きされません。
+別です。UART 用・DualShock 用の調整は互いに上書きされません。Web 用は固定です（下の「Web（ブラウザ・スマホ）用の設定」）。
 
 `controller_type` は `uart` / `dualshock` / `web` のいずれかです（それ以外は起動前にエラー）。
 
@@ -77,7 +77,8 @@ M0602C の低 RPM 域では、旋回加速度を上げると振動が再発す�
 「ショット」カード（TILT ▲＝ボタン 4、FIRE＝ボタン 5、TILT ▼＝ボタン 6、ROLLER＝ボタン 7）だけを送ります。
 十字キーがないため、`controls.web.yaml` の初期値は射出角度を TILT ▲ / ▼ ボタンで操作します
 （`tilt_up_axis` / `tilt_down_axis` = -1）。UART 用の設定（十字キー上下）をそのまま使うと角度調整が効きません。
-管理画面の Web 用の操作図は、この画面の操作名（TILT ▲・FIRE など）で表示します。
+Web はブラウザの操作画面でボタンの役割が決まっているため、`controls.web.yaml` は固定です。管理画面の「調整」では編集できず、
+`QUESTIX_CONFIG_DIR` に同名のファイルがあっても使われません（常にこのパッケージの `config/controls.web.yaml`）。
 キーボード操作（I / F / K / R、W A S D、Q / E）も同じ番号を送るため、同じ設定が適用されます。
 
 ## 既存設定からの移行

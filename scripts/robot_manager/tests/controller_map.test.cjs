@@ -83,39 +83,3 @@ test('function numbers stay stable when tilt changes inputs', () => {
   assert.deepEqual(map.bindings('uart', values, values).map((a) => [a.key, a.number]), before);
   assert.deepEqual(before.map((a) => a[1]), [3, 5, 5]);
 });
-
-test('web controller draws only the move and shot cards of the browser page', () => {
-  for (const [value, spot] of [[4, 'tilt-up'], [5, 'fire'], [6, 'tilt-down'], [7, 'roller']]) {
-    assert.equal(map.location('web', 'fire_button', value), spot);
-  }
-  for (const value of [0, 1, 2, 3, 8, 12, 13]) assert.equal(map.location('web', 'fire_button', value), null);
-  assert.equal(map.location('web', 'tilt_axis', 1), 'left-stick');
-  assert.equal(map.location('web', 'tilt_axis', 3), 'right-stick');
-  for (const value of [2, 5, 6, 7]) assert.equal(map.location('web', 'tilt_axis', value), null);
-  // Sticks cannot be pressed on the page: no L3/R3 entry, unlike the Switch diagram.
-  assert.deepEqual(map.inputs('web', 'left-stick').map((item) => item.id),
-    ['axis:0', 'direction:0:1', 'direction:0:-1', 'axis:1', 'direction:1:1', 'direction:1:-1']);
-  assert.deepEqual(map.inputs('web', 'fire').map((item) => item.id), ['button:5']);
-  const tilt = map.destinations('web', 'tilt_up_button_index').map((item) => item.id);
-  assert.ok(tilt.includes('button:4') && tilt.includes('button:6') && tilt.includes('direction:4:1'));
-  assert.equal(tilt.some((id) => id.startsWith('direction:7') || id.startsWith('direction:6')), false);
-  assert.deepEqual(map.destinations('web', 'fire_button').map((item) => item.id),
-    ['button:4', 'button:5', 'button:6', 'button:7']);
-});
-
-test('web default tilt uses the TILT buttons and names them as the page does', () => {
-  const values = { shot_component: { fire_button: 5, tilt_up_axis: -1, tilt_down_axis: -1,
-    tilt_up_axis_sign: 1, tilt_down_axis_sign: -1, tilt_up_button_index: 4, tilt_down_button_index: 6 },
-  esc_motor_control: { full_speed_button: 7 } };
-  const assignments = map.bindings('web', values, values);
-  assert.deepEqual(assignments.map((a) => [a.key, a.label, a.spot]), [
-    ['fire_button', 'FIRE（ボタン 5）', 'fire'],
-    ['full_speed_button', 'ROLLER（ボタン 7）', 'roller'],
-    ['tilt_up_button_index', 'TILT ▲（ボタン 4）', 'tilt-up'],
-    ['tilt_down_button_index', 'TILT ▼（ボタン 6）', 'tilt-down'],
-  ]);
-  // A UART-style D-pad tilt has no control on the web page and stays off the drawing.
-  values.shot_component.tilt_up_axis = 7;
-  assert.equal(map.bindings('web', values, values)[2].spot, null);
-  assert.equal(map.planTiltDirection('web', values, 'tilt_up_button_index', 'button:4')[0].value, -1);
-});

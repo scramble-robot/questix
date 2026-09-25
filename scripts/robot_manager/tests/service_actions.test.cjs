@@ -93,11 +93,13 @@ test('the browser controller is named in readiness and selected in the admin con
   // The admin choice is a three-way select whose value is saved as CONTROLLER_TYPE.
   assert.equal(f.document.getElementById('controller-type').value, 'web');
   const html = fs.readFileSync(path.join(__dirname, '../static/index.html'), 'utf8');
-  for (const id of ['controller-type', 'controls-profile']) {
+  const options = (id) => {
     const select = html.slice(html.indexOf(`<select id="${id}"`));
-    const options = select.slice(0, select.indexOf('</select>'));
-    assert.deepEqual([...options.matchAll(/value="([^"]+)"/g)].map((m) => m[1]), ['uart', 'dualshock', 'web']);
-  }
+    return [...select.slice(0, select.indexOf('</select>')).matchAll(/value="([^"]+)"/g)].map((m) => m[1]);
+  };
+  assert.deepEqual(options('controller-type'), ['uart', 'dualshock', 'web']);
+  // The browser controller's buttons are fixed by its page: the tuning tab does not edit it.
+  assert.deepEqual(options('controls-profile'), ['uart', 'dualshock']);
   assert.doesNotMatch(html, /controller-type-toggle/);
 });
 

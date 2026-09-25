@@ -9,9 +9,6 @@ const ControlLabels = (() => {
     dualshock: ["×（クロス）", "○（サークル）", "△（トライアングル）", "□（スクエア）",
       "L1", "R1", "L2", "R2", "SHARE", "OPTIONS", "PS", "L3（左スティック押し込み）",
       "R3（右スティック押し込み）", "タッチパッド押し込み"],
-    // Browser controller: only the 「ショット」 buttons of web_joy_driver/static/index.html
-    // (LAYOUT.buttons) exist; other indices are never sent by the shipped page.
-    web: [null, null, null, null, "TILT ▲", "FIRE", "TILT ▼", "ROLLER"],
   };
   const axes = {
     uart: { 0: "左スティック 左右", 1: "左スティック 上下", 3: "右スティック 左右",
@@ -19,11 +16,8 @@ const ControlLabels = (() => {
     dualshock: { 0: "左スティック 左右", 1: "左スティック 上下", 2: "L2 トリガー",
       3: "右スティック 左右", 4: "右スティック 上下", 5: "R2 トリガー",
       6: "十字キー 左右", 7: "十字キー 上下" },
-    // 「移動」 card: left stick = 前後・左右, right stick = 旋回 (axis 4 is sent but unused by default).
-    web: { 0: "左スティック 左右", 1: "左スティック 上下", 3: "右スティック 左右", 4: "右スティック 上下" },
   };
   const controllerNames = { uart: "UART / Switch", dualshock: "DualShock", web: "Web（ブラウザ・スマホ）" };
-  const missing = { web: "Web 画面にない入力" };
   const buttonKeys = new Set([
     "fire_button", "tilt_up_button_index", "tilt_down_button_index", "full_speed_button",
   ]);
@@ -40,12 +34,12 @@ const ControlLabels = (() => {
     const type = kind(key);
     if (type === "button") {
       const name = buttons[controller]?.[value];
-      return name ? `${name}（ボタン ${value}）` : `ボタン ${value}（${missing[controller] || "名前未登録"}）`;
+      return name ? `${name}（ボタン ${value}）` : `ボタン ${value}（名前未登録）`;
     }
     if (type === "axis") {
       if (value === -1) return key.startsWith("tilt_") ? "ボタンで操作（-1）" : "使用しない（-1）";
       const name = axes[controller]?.[value];
-      return name ? `${name}（軸 ${value}）` : `軸 ${value}（${missing[controller] || "名前未登録"}）`;
+      return name ? `${name}（軸 ${value}）` : `軸 ${value}（名前未登録）`;
     }
     if (typeof value === "boolean") return value ? "ON" : "OFF";
     return String(value);
@@ -67,7 +61,12 @@ const ControlLabels = (() => {
       + Object.keys(values).filter((key) => values[key] !== draft[node][key]).length, 0);
   }
 
-  return { kind, valueLabel, options, changedCount, controllerName, controllers: Object.keys(controllerNames) };
+  // Controllers whose operator controls are edited here; the browser controller (web) has its
+  // buttons fixed by its own page, so its profile (controls.web.yaml) is not editable.
+  return {
+    kind, valueLabel, options, changedCount, controllerName,
+    controllers: Object.keys(controllerNames), editable: ["uart", "dualshock"],
+  };
 })();
 
 // Allow hardware-free tests with Node's built-in test runner.

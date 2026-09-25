@@ -34,12 +34,10 @@ const tuningFields = {
     help: "中心付近の小さな傾きを無視する幅。触っていないのに動くときは大きくします。" } },
   uart_joy_driver: { deadzone: { title: "スティックの遊び", unit: "%", scale: 100,
     help: "中心付近の小さな傾きを無視する幅。触っていないのに動くときは大きくします。" } },
-  web_joy_driver: { deadzone: { title: "スティックの遊び", unit: "%", scale: 100,
-    help: "画面のスティックを中心付近で少しだけ動かしたときに無視する幅。指を置いただけで動くときは大きくします。" } },
 };
 
 // Stick dead zone of the input driver each controller type actually starts.
-const controllerDrivers = { dualshock: "joy_node", uart: "uart_joy_driver", web: "web_joy_driver" };
+const controllerDrivers = { dualshock: "joy_node", uart: "uart_joy_driver" };
 
 function tuningSpec(node, key) {
   if (Object.values(controllerDrivers).includes(node)
@@ -275,8 +273,6 @@ function renderControlSummary() {
     uart: "Switch のボタン名・スティック名で選択できます。番号は UART ドライバの配列に対応しています。",
     dualshock: "DualShock の標準配置の名前を表示しています。接続方式やドライバで番号が異なる場合は、"
       + "実際の Joy の番号に合わせて選んでください（接続機器の自動判別ではありません）。",
-    web: "ブラウザ・スマホの操作画面（「移動」「ショット」）の名前で選択できます。キーボード操作"
-      + "（W A S D・Q / E・I / F / K / R）も同じ入力として扱われます。画面に十字キーはありません。",
   };
   document.getElementById("controls-layout-note").textContent = notes[controlProfile.controller] || notes.dualshock;
 }
@@ -713,7 +709,8 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       const config = await apiSilent("/api/launch-config");
       launchController = config.CONTROLLER_TYPE || null;
-      if (!controlsOpened && ControlLabels.controllers.includes(launchController)) {
+      document.getElementById("controls-web-note").hidden = launchController !== "web";
+      if (!controlsOpened && ControlLabels.editable.includes(launchController)) {
         select.value = launchController;
         lastController = select.value;
       }

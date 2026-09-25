@@ -68,6 +68,10 @@ GROUPS = {
 # Controller profiles: questix_control_config/config/controls.<controller>.yaml.
 Controller = Literal['uart', 'dualshock', 'web']
 CONTROLLERS = get_args(Controller)
+# The browser controller's buttons are fixed by its own page (web_joy_driver/static/index.html), so
+# its profile is the packaged controls.web.yaml only: never edited here, never overridden by a file
+# in the config directory.
+FIXED_CONTROLLERS = ('web',)
 # Input-driver sections each profile carries. The UART and DualShock files have always
 # held both joy_node and uart_joy_driver; the browser profile holds only web_joy_driver.
 _DRIVER_NODES = ('joy_node', 'uart_joy_driver', 'web_joy_driver')
@@ -186,9 +190,10 @@ def read_profile(config_dir, controller, env):
     """Read persisted values, exposing defaults and an optimistic concurrency token."""
     default_file = _default_file(controller, env)
     saved_file = config_dir / f'controls.{controller}.yaml'
+    fixed = controller in FIXED_CONTROLLERS
     try:
         default_raw = default_file.read_bytes()
-        saved_raw = saved_file.read_bytes() if saved_file.exists() else None
+        saved_raw = saved_file.read_bytes() if saved_file.exists() and not fixed else None
         defaults = _decode(default_raw, controller)
         values = _decode(saved_raw, controller) if saved_raw is not None else defaults
     except (OSError, ValueError, yaml.YAMLError) as exc:
@@ -209,11 +214,15 @@ def read_profile(config_dir, controller, env):
     return {'controller': controller, 'revision': revision, 'values': values,
             'previous_values': previous, 'history_warning': history_warning,
             'defaults': defaults, 'groups': schema(controller), 'apply_on_restart': True,
+            'editable': not fixed,
             'source': str(saved_file if saved_raw is not None else default_file)}
 
 
 def write_profile(config_dir, controller, env, update):
     """Validate and atomically replace a profile without modifying a running robot."""
+    if controller in FIXED_CONTROLLERS:
+        raise HTTPException(409, 'Web（ブラウザ・スマホ）は操作画面でボタンの役割が決まっているため、'
+                                 '操作設定は変更できません。')
     try:
         values = validate(update.values, controller)
     except ValueError as exc:

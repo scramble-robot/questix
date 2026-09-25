@@ -7,7 +7,7 @@ Pi 上で HTTP + WebSocket サーバを立て、ブラウザのバーチャル�
 
 - 配列は `uart_joy_driver` と同じ **Switch2 ネイティブ配列** です。キー割り当て・速度・スティックの不感帯は
   Web 専用の操作設定 `questix_control_config/config/controls.web.yaml` を使います
-  （保存済みなら `${QUESTIX_CONFIG_DIR:-/etc/questix_robot}/controls.web.yaml`）。
+  （固定。管理画面では編集せず、`QUESTIX_CONFIG_DIR` の同名ファイルも使いません）。
   画面には十字キーがないため、射出角度は TILT ▲ / ▼ ボタン（buttons[4] / buttons[6]）で操作する設定が初期値です。
   管理画面の「調整」で「Web（ブラウザ・スマホ）」を選ぶと、この画面の操作名で割り当てを確認・変更できます。
 - 下流（`joy_gate` → `joy_controller` / `shot_component` / `esc_motor_control`）は無変更。
@@ -87,9 +87,8 @@ Space の押し直しだけでは以前の操作は再開しません。操作�
 - フッター: 送信中の「前後・左右・旋回」メーターと、ノードからの状態（送信中／タイムアウト、遅延 ms、接続数）。
   幅に余裕がある場合は生の `axes` / `buttons` も表示します。
 
-機能の割り当て（どの入力で射出・角度調整・ローラーを動かすか）は、管理画面の「調整」→「Web（ブラウザ・スマホ）」
-（`controls.web.yaml`）で変更します。画面の入力と番号の対応そのものは `static/index.html` 冒頭の `LAYOUT` にあり、
-変更した場合は `controls.web.yaml` と管理画面の Web 操作図（`scripts/robot_manager/static/controller-map.js`）も合わせてください。
+機能の割り当て（どの入力で射出・角度調整・ローラーを動かすか）は `controls.web.yaml` で固定です（管理画面では変更しません）。
+画面の入力と番号の対応そのものは `static/index.html` 冒頭の `LAYOUT` にあり、変更した場合は `controls.web.yaml` も合わせてください。
 
 ## プロトコル
 

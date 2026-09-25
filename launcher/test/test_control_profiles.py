@@ -78,7 +78,7 @@ def expand(monkeypatch, tmp_path):
 DRIVERS = {'uart': 'uart_joy_driver', 'dualshock': 'joy_node', 'web': 'web_joy_driver'}
 
 
-@pytest.mark.parametrize('controller', ['uart', 'dualshock', 'web'])
+@pytest.mark.parametrize('controller', ['uart', 'dualshock'])
 @pytest.mark.parametrize('gated', ['true', 'false'])
 def test_integrated_profile_and_topic_overrides(expand, tmp_path, controller, gated):
     """A saved profile reaches all consumers and cannot undo the GPIO topic gate."""
@@ -104,6 +104,21 @@ def test_integrated_profile_and_topic_overrides(expand, tmp_path, controller, ga
     assert not (set(DRIVERS.values()) - {driver}) & set(nodes)  # only the selected driver
 
 
+@pytest.mark.parametrize('gated', ['true', 'false'])
+def test_saved_web_profile_is_ignored(expand, tmp_path, gated):
+    """The browser controller's buttons are fixed by its page: only the packaged profile applies."""
+    profile = yaml.safe_load((ROOT / 'questix_control_config/config/controls.web.yaml').read_text())
+    saved = yaml.safe_load(yaml.safe_dump(profile))
+    saved['shot_component']['ros__parameters']['fire_button'] = 2
+    (tmp_path / 'controls.web.yaml').write_text(yaml.safe_dump(saved))
+    nodes = expand('launcher/launch/questix_core.launch.xml', controller_type='web',
+                   enable_gpio_ref=gated, enable_lidar='false', enable_rviz='false')
+    assert nodes['/shot_component']['fire_button'] == 5
+    for node in ('joy_controller', 'shot_component', 'esc_motor_control'):
+        assert nodes['/' + node]['joy_topic'] == ('/joy_gated' if gated == 'true' else '/joy')
+    assert not {'uart_joy_driver', 'joy_node'} & set(nodes)  # only the browser driver
+
+
 def test_web_profile_is_packaged_and_reaches_the_browser_driver(expand, tmp_path):
     """controller_type=web resolves controls.web.yaml (tilt on buttons) for every consumer."""
     nodes = expand('launcher/launch/questix_core.launch.xml', controller_type='web',
@@ -118,12 +133,9 @@ def test_web_profile_is_packaged_and_reaches_the_browser_driver(expand, tmp_path
     hardware = yaml.safe_load((ROOT / 'web_joy_driver/config/web_joy_driver_params.yaml')
                               .read_text())['web_joy_driver']['ros__parameters']
     assert 'deadzone' not in hardware  # single source: the operator profile
-    profile = yaml.safe_load(
-        (ROOT / 'questix_control_config/config/controls.web.yaml').read_text())
-    profile['web_joy_driver']['ros__parameters']['deadzone'] = 0.2
-    (tmp_path / 'controls.web.yaml').write_text(yaml.safe_dump(profile))
+    # The standalone browser-driver launch resolves the same packaged profile.
     nodes = expand('web_joy_driver/launch/web_joy_driver.launch.xml')
-    assert nodes['/web_joy_driver']['deadzone'] == 0.2
+    assert nodes['/web_joy_driver']['deadzone'] == 0.05
 
 
 def test_unknown_controller_type_fails_before_nodes(expand):
