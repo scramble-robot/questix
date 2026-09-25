@@ -22,6 +22,7 @@ const ROBOT_MODES = ['live', 'drive', 'data'];
 // Lesson keys the courses build: "<course>-<topic id>".
 const topicIds = (path) => Object.keys(readJson(path).topics);
 const KNOWN_KEYS = new Set([
+  ...topicIds('../content/motor.json').map((id) => 'motor-' + id),
   ...topicIds('../content/launch.json').map((id) => 'launch-' + id),
   ...topicIds('../content/arm.json').map((id) => 'arm-' + id),
   ...topicIds('../content/planning.json').map((id) => 'planning-' + id),

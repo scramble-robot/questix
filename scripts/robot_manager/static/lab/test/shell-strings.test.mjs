@@ -75,8 +75,9 @@ test('lessonIcon knows the six cue kinds', () => {
   assert.equal(lessonIcon('unknown'), '');
 });
 
-test('the catalogue lists 13 courses in group order', () => {
-  assert.equal(LESSONS.length, 13);
+test('the catalogue lists 14 courses in group order', () => {
+  assert.equal(LESSONS.length, 14);
+  assert.equal(LESSONS[0].id, 'motor', 'the catalogue starts with the motor course');
   assert.deepEqual(
     LESSONS.map((lesson) => lesson.id),
     LESSON_GROUPS.flatMap((group) => group.ids),

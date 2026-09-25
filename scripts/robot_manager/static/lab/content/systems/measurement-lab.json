@@ -1,5 +1,14 @@
 {
   "scenarios": {
+    "motor": {
+      "inputLabel": "モーターへの指示（%）",
+      "valueLabel": "実測回転数（rpm）",
+      "text": "同じ電源と負荷で、指示だけを変えて測った回転数を調べます。最初の数値は模擬測定例です。C4250や駆動輪の実測ではありません。どの部品・電源・負荷で測った値かを記録し、実機の表に置き換えて比べます。",
+      "slope": 15,
+      "offset": 0,
+      "spread": 12,
+      "reference": 600
+    },
     "control": {
       "inputLabel": "モーター出力（%）",
       "valueLabel": "回転数（rpm）",

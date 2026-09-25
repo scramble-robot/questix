@@ -1,6 +1,24 @@
 {
   "lessons": [
     {
+      "id": "motor",
+      "pages": [
+        "motorPage"
+      ],
+      "title": "電気で回転を生み出す",
+      "summary": "モーターの原理・使い分け",
+      "purpose": "電気と磁石から回転を生み、仕事に合う仕組みを選ぶ",
+      "description": "モーターの中で電気と磁石がどう働くかを動かして確かめます。回転の速さと回す力を比べ、QUESTiXの駆動輪・射出ローラー・ディスク送りの違いを調べます。",
+      "tags": [
+        "電磁石と回転",
+        "トルクと回転数",
+        "DD・ESC・サーボ"
+      ],
+      "button": "seriesMotor",
+      "nav": "navMotor",
+      "canvas": "seriesMotorRobot"
+    },
+    {
       "id": "control",
       "pages": [
         "controlPage"
@@ -130,8 +148,9 @@
   "groups": [
     {
       "title": "動きのしくみを調べる",
-      "description": "力・指示・関節の動きを実験し、ロボットの体がどう動くかを考えます。",
+      "description": "モーターの中で回転を生む仕組みから、力・指示・関節の動きへ進みます。",
       "ids": [
+        "motor",
         "mechanics",
         "control",
         "launch",

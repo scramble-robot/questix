@@ -3,7 +3,7 @@ import { formatNumber } from '../core/dom.js';
 import { snapToZero, fillText } from './basics-core.js';
 import { figureArt, metric, helpDialog } from './basics-view.js';
 import { pointInWorld, MAPPING_ROOM, MAPPING_POSES } from './concepts-core.js';
-import { htmlChart } from './chart-view.js';
+import { htmlChart } from '../core/html-chart.js';
 import { niceScale } from '../core/chart-scale.js';
 import { roleStyle } from '../core/palette.js';
 

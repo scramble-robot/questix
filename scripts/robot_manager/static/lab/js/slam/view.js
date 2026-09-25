@@ -3,7 +3,7 @@ import { formatNumber } from '../core/dom.js';
 import { lessonLabel, EXPERIMENT_STEPS, SENSOR_COPY } from '../shell/lesson-ui.js';
 import { runModeBadgeHtml } from '../shell/run-mode.js';
 import { SLAM_METHODS } from './engine.js';
-import { htmlChart } from './chart-view.js';
+import { htmlChart } from '../core/html-chart.js';
 import { depthColorKey } from '../vision/depth-key.js';
 import { niceScale } from '../core/chart-scale.js';
 import { roleStyle } from '../core/palette.js';

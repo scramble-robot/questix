@@ -1,5 +1,5 @@
 import { html, svg, nothing } from '../vendor/lit-html.js';
-import { formatTick } from '../core/chart-scale.js';
+import { formatTick } from './chart-scale.js';
 
 // A line chart for learners on any screen (CONTRIBUTING.md, "Figures and charts"): the plot is an
 // SVG stretched to its box with strokes that keep their width, and every word and number — axis
@@ -9,6 +9,7 @@ import { formatTick } from '../core/chart-scale.js';
 const PLOT = 1000; // SVG units along each axis of the stretched plot
 const LABEL_GAP = 9; // percent of the plot height kept between two direct labels
 const LABEL_FLIP_AT = 75; // percent: a marker label further right than this goes on its left
+const HLINE_LABEL_SPAN = 40; // percent of the plot width a threshold's label may cover from the left
 
 const percentX = (scale, value) => ((value - scale.min) / (scale.max - scale.min || 1)) * 100;
 const percentY = (scale, value) => 100 - ((value - scale.min) / (scale.max - scale.min || 1)) * 100;
@@ -30,8 +31,17 @@ function grid(x, y) {
   })}`;
 }
 
-// Direct labels at the right end of each line, pushed apart so they never overlap.
-function lineLabels(series, x, y) {
+// A line label that would sit on a threshold's label (both are drawn just above their line, the
+// threshold's at the left edge) moves just below the threshold instead.
+function clearOfThresholds(label, thresholds) {
+  if (label.left > HLINE_LABEL_SPAN) return;
+  const hit = thresholds.find((top) => Math.abs(label.top - top) < LABEL_GAP);
+  if (hit !== undefined) label.top = hit + LABEL_GAP;
+}
+
+// Direct labels at the right end of each line, pushed apart so they never overlap; with
+// `thresholds` (percent tops of threshold lines) they also keep clear of the thresholds' labels.
+function lineLabels(series, x, y, thresholds = []) {
   const labels = series
     .filter((line) => line.label && line.points.length)
     .map((line) => {
@@ -41,6 +51,7 @@ function lineLabels(series, x, y) {
     .sort((a, b) => a.top - b.top);
   for (let i = 1; i < labels.length; i++)
     labels[i].top = Math.max(labels[i].top, labels[i - 1].top + LABEL_GAP);
+  for (const label of labels) clearOfThresholds(label, thresholds);
   return labels.map(
     ({ line, left, top }) =>
       html`<span
@@ -58,6 +69,8 @@ function lineLabels(series, x, y) {
  *   bands: [{from, to, label}]    — a shaded x range,
  *   hlines: [{y, label, color, dash}] — a threshold across the plot,
  *   vlines: [{x, label, color, dash}] — a marked position or moment,
+ *   clearOfHlineLabels — move line labels off the thresholds' labels (a run played back grows
+ *     through them),
  * }
  */
 function htmlChart(spec) {
@@ -117,7 +130,12 @@ function htmlChart(spec) {
             >${line.label}</span
           >`,
       )}
-      ${lineLabels(series, x, y)}
+      ${lineLabels(
+        series,
+        x,
+        y,
+        spec.clearOfHlineLabels ? hlines.map((line) => percentY(y, line.y)) : [],
+      )}
     </div>
     <div class="html-chart-x-title">${spec.xTitle}</div>
   </figure>`;

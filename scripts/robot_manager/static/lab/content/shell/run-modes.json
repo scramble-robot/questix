@@ -28,6 +28,13 @@
     }
   },
   "courses": {
+    "motor": {
+      "modes": [
+        "sim",
+        "data"
+      ],
+      "real": "実機のモーターで測った指示と回転数を入力し、平均やばらつき、指示との関係を調べられます。"
+    },
     "mechanics": {
       "modes": [
         "sim"
@@ -109,6 +116,16 @@
     }
   },
   "topics": [
+    {
+      "keys": [
+        "motor-real"
+      ],
+      "modes": [
+        "data"
+      ],
+      "note": "実機で測った指示と回転数を、ページ下の「測定データを分析する」に入力して比べます。このページから実機へ指令は送りません。",
+      "target": ".motor-real"
+    },
     {
       "keys": [
         "control"

@@ -1,7 +1,7 @@
 {
   "siteName": "QUESTiX LAB",
   "header": {
-    "chooseCourse": "13科目から選ぶ",
+    "chooseCourse": "14科目から選ぶ",
     "catalogueTitle": "ロボットの技術を学ぶ実験室",
     "quizTitle": "小テスト",
     "masteryTitle": "実力テスト",
@@ -15,7 +15,7 @@
       "各実験の「最初に試すこと」に沿って一度動かし、予想と違った所を探してください。条件を一つだけ変えてもう一度試すと、何が動きに影響したかを比べられます。"
     ],
     "start": "はじめての人は：",
-    "list": "13の教材から選ぶ ↓"
+    "list": "14の教材から選ぶ ↓"
   },
   "openCourse": "この教材を開く →",
   "overview": {

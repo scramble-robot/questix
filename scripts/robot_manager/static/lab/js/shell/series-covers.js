@@ -122,6 +122,21 @@ function cart(x, y, opacity = 1, outline = false) {
 
 // One drawing per course id, in the shared coordinate space (COVER_WIDTH × COVER_HEIGHT).
 const DRAWINGS = {
+  // A motor seen from the end of its shaft: four fixed coils around the turning magnet.
+  motor: () =>
+    circle(174, 137, 78, 'none', COLOR.line, 3) +
+    [0, 90, 180, 270]
+      .map(
+        (angle) =>
+          `<g transform="translate(174 137) rotate(${angle})">${rect(91, -17, 40, 34, '#c7956a', 5, '#9c714e')}${path('M97-12v24m8-24v24m8-24v24m8-24v24', '#795134', 2)}</g>`,
+      )
+      .join('') +
+    `<g transform="rotate(-35 174 137)">${rect(119, 120, 55, 34, '#5b89ad', 5)}${rect(174, 120, 55, 34, '#b76655', 5)}${text(146, 145, 'S', '#fff', 22, 'middle')}${text(201, 145, 'N', '#fff', 22, 'middle')}</g>` +
+    circle(174, 137, 7, COLOR.ink) +
+    text(349, 103, '電気 → 磁場 → 回転', COLOR.ink, 22) +
+    text(349, 153, '速さを変える', COLOR.mint, 22) +
+    text(349, 193, '回す力を調べる', COLOR.blue, 22) +
+    text(174, 258, 'モーターの中を調べる', COLOR.ink, 20, 'middle'),
   mechanics: () =>
     rect(30, 67, 242, 180, '#23403f', 14) +
     rect(328, 67, 242, 180, '#35403f', 14) +

@@ -495,7 +495,7 @@
   }
 }
 
-/* HTML-labelled line chart of the SLAM course (js/slam/chart-view.js): the SVG stretches, the
+/* HTML-labelled line chart (js/core/html-chart.js; SLAM and motor courses): the SVG stretches, the
    text stays at its size (S2, S3). */
 .html-chart {
   margin: 12px 0 4px;

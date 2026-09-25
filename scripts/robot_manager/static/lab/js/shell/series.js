@@ -11,6 +11,7 @@ import { initLessonIcons } from './lesson-icons.js';
 import { initSlam, pauseSlam, reviewSlam } from '../slam/ui.js';
 import { HARDWARE } from '../slam/hardware.js';
 import { initVision, activateVision, reviewVision } from '../vision/ui.js';
+import { initMotor, reviewMotor } from '../motor/ui.js';
 import { initControl, activateControl, reviewControl } from '../control/ui.js';
 import { initPlanning, activatePlanning, reviewPlanning } from '../planning/ui.js';
 import { initLaunch, activateLaunch, reviewLaunch } from '../launch/ui.js';
@@ -233,6 +234,7 @@ const reviewLessons = {
   ...Object.fromEntries(
     SYSTEM_COURSES.map((system) => [system.id, (topic) => reviewSystem(system.id, topic)]),
   ),
+  motor: reviewMotor,
   control: reviewControl,
   launch: reviewLaunch,
   arm: reviewArm,
@@ -294,6 +296,7 @@ const actions = {
 
 initSlam(HARDWARE);
 initVision();
+initMotor();
 initControl();
 initPlanning();
 initLaunch();
