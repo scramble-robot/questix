@@ -1,0 +1,364 @@
+/* 「実機の状態」 panel and its 測定メモ (js/live/robot-state*.js): large numbers first, a chart per
+   wheel, the top view since the panel opened and the fan in front of the LiDAR. The layout follows
+   the panel's own width (container queries), since lessons put it in cards of different widths:
+   one column on a phone, two on a tablet, three on a Chromebook. */
+.robot-state-host {
+  container-type: inline-size;
+  margin: 16px 0;
+}
+.robot-state {
+  border: 2px solid #cfe0da;
+  border-radius: 14px;
+  padding: 14px 16px 12px;
+  background: #fbfdfc;
+}
+.rs-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 16px;
+}
+.rs-title {
+  margin: 0;
+  font-size: 20px;
+}
+.rs-link {
+  margin: 0;
+  color: var(--green);
+  font-size: 15px;
+  font-weight: 650;
+}
+.rs-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: #2f9d7e;
+}
+.rs-silent {
+  display: block;
+  color: #8a5a12;
+  font-weight: 600;
+}
+
+/* The emergency stop: a wide red block while pressed (icon + words, never colour alone). */
+.rs-estop {
+  margin: 10px 0 0;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 650;
+}
+.rs-estop.is-pressed {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  background: var(--role-danger);
+  color: #fff;
+}
+.rs-estop.is-pressed strong {
+  font-size: 24px;
+  line-height: 1.3;
+}
+.rs-estop.is-pressed p {
+  margin: 4px 0 0;
+  font-weight: 500;
+}
+.rs-estop-icon {
+  font-size: 34px;
+  line-height: 1;
+}
+.rs-estop.is-released,
+.rs-estop.is-unknown {
+  padding: 6px 12px;
+  background: #e8f2ee;
+  color: #2f6f5d;
+}
+.rs-estop.is-unknown {
+  background: #eef1ef;
+  color: #5d726d;
+}
+
+.rs-driver {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 12px;
+  margin: 10px 0;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: #f1f5f6;
+  font-size: 15px;
+}
+.rs-driver strong {
+  font-size: 20px;
+}
+.rs-driver[data-rs-driver='me'],
+.rs-driver[data-rs-driver='page'] {
+  background: #fff4dc;
+}
+.rs-driver[data-rs-driver='controller'] {
+  background: #e9f0fb;
+}
+.rs-driver-detail {
+  color: #3d5660;
+  font-variant-numeric: tabular-nums;
+}
+
+.rs-grid-cards {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+.rs-card {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+.rs-label {
+  margin: 0;
+  color: #3d5660;
+  font-size: 14px;
+  font-weight: 700;
+}
+.rs-big {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+  margin: 2px 0;
+}
+.rs-number {
+  color: var(--dark);
+  font-size: 34px;
+  font-weight: 750;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.rs-unit {
+  color: var(--muted);
+  font-size: 16px;
+  font-weight: 600;
+}
+.rs-clear {
+  color: #2f6f5d;
+  font-size: 20px;
+  font-weight: 700;
+}
+.rs-sub {
+  margin: 2px 0;
+  color: #4d6469;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+/* A value that stopped arriving stays readable but grey, with the freshness list saying why. */
+.rs-card.is-stale .rs-number,
+.rs-card.is-stale .rs-unit,
+.rs-card.is-stale .rs-clear {
+  color: #9aa5ae;
+}
+.rs-card.is-stale svg,
+.rs-card.is-stale .html-chart-area {
+  opacity: 0.45;
+}
+
+.rs-wheel .html-chart {
+  margin-top: 6px;
+}
+.rs-wheel .html-chart-area {
+  height: 130px;
+  margin-left: 36px;
+}
+.rs-wheel .html-chart-x-title {
+  margin-top: 22px;
+}
+
+.rs-motion {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+}
+
+.rs-pose-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+}
+.rs-pose-svg {
+  width: min(100%, 260px);
+  aspect-ratio: 1;
+  border-radius: 8px;
+  background: #f6f9f9;
+}
+.rs-pose-readout button {
+  margin-top: 6px;
+}
+.robot-state .rs-grid {
+  stroke: #dbe4e6;
+  stroke-width: 1;
+}
+.robot-state .rs-axis {
+  stroke: #b7c6ca;
+  stroke-width: 1.5;
+}
+.rs-front-svg {
+  display: block;
+  width: min(100%, 300px);
+  margin: 4px auto 0;
+}
+.rs-fan {
+  fill: #eef4f7;
+  stroke: #b7c6ca;
+  stroke-width: 1;
+}
+
+.rs-fresh {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin-top: 10px;
+  font-size: 14px;
+}
+.rs-fresh ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.rs-fresh li {
+  display: flex;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: #e8f2ee;
+  color: #2f6f5d;
+}
+.rs-fresh li.is-stale {
+  background: #eef1ef;
+  color: #7b8a8f;
+}
+.rs-fresh strong {
+  font-variant-numeric: tabular-nums;
+}
+.rs-fresh small {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.rs-offline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin: 0;
+  padding: 10px 14px;
+  border: 1px dashed #b7c6ca;
+  border-radius: 10px;
+  color: #3d5660;
+  font-size: 15px;
+}
+
+.rs-memo {
+  margin-top: 12px;
+}
+.rs-memo label {
+  display: block;
+}
+.rs-memo-label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 15px;
+  font-weight: 700;
+}
+.rs-memo textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+.rs-memo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+.rs-memo .helper {
+  font-size: 13px;
+}
+
+@container (min-width: 560px) {
+  .rs-grid-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .rs-motion {
+    grid-column: 1 / -1;
+  }
+}
+@container (min-width: 900px) {
+  .rs-grid-cards {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+  .rs-wheel {
+    grid-column: span 2;
+  }
+  .rs-motion {
+    grid-column: span 2;
+    flex-direction: column;
+  }
+  .rs-pose,
+  .rs-front {
+    grid-column: span 3;
+  }
+}
+.rs-status {
+  margin: 10px 0 0;
+  padding: 8px 12px;
+  border-left: 5px solid var(--role-target);
+  border-radius: 6px;
+  background: #fff6dc;
+  color: #5a4204;
+  font-size: 17px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Places that put the panel in a card of their own. */
+.launch-robot-state {
+  margin-top: 24px;
+  padding: 24px;
+}
+.launch-robot-state h2 {
+  margin-top: 0;
+}
+@media (max-width: 600px) {
+  .launch-robot-state {
+    padding: 18px;
+  }
+}
+
+/* The panel keeps its own sizes inside hosts that style every svg / p / button of theirs (the
+   measurement lab's dialog: .measurement-lab svg { height: auto; margin-top: 16px }). */
+.robot-state-host .robot-state p {
+  line-height: 1.45;
+}
+.robot-state-host .html-chart-area > svg {
+  height: 100%;
+  margin: 0;
+}
+.robot-state-host .rs-pose-svg,
+.robot-state-host .rs-front-svg {
+  height: auto;
+  margin-top: 4px;
+}
+.robot-state-host .rs-memo button {
+  font-size: 15px;
+}
