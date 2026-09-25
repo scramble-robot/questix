@@ -17,11 +17,20 @@ import {
   controlLoad,
   controlCalibration,
 } from './core.js';
-import { controlWheelAngle, drawControlStage, COMPARE_COLOURS } from './render.js';
+import { controlWheelAngle, drawControlStage } from './render.js';
 import { controlPage, gainText, COMMAND_OPEN_TOPICS } from './view.js';
 import { conceptState, advanceConcept, resetConcept } from './concepts.js';
+import {
+  runLabelParts,
+  compareLetter,
+  labelPoint,
+  commandRpm,
+  comparisonRows as buildComparisonRows,
+  comparisonConclusion,
+} from './compare.js';
 import { liveControlRun, liveLink, onLiveLink, openRecordingFile } from '../live/capture.js';
-import { liveDistanceRun, stepMetrics, firstHold, forwardRpm } from '../live/capture-core.js';
+import { liveDistanceRun, forwardRpm } from '../live/capture-core.js';
+import { revealElement } from '../core/reveal.js';
 import { driveRows, wallRows } from '../live/recording-core.js';
 import { createLiveSession } from '../live/live-session.js';
 import { captureNotes } from '../live/live-view.js';
@@ -83,7 +92,12 @@ const calibration = controlCalibration();
 // One recording from the real robot per kind of topic: the speed topics share the wheels' step
 // response, the distance topics the LiDAR's view of the wall. It is the same machine whichever
 // experiment is on screen, so switching between topics of one kind keeps the recording.
+// Each entry: `{run, parts, conditions, recordedAt, point, command}` (see realEntry).
 const liveRuns = { speed: null, distance: null };
+// Press → see: a real run that finished, or a file that was opened, brings the chart on screen
+// once it is drawn — but not the recording that comes back after a reload.
+let restoring = false;
+let revealPending = false;
 
 const page = () => document.getElementById('controlPage');
 const experiment = () => experiments.get(topicId);
@@ -184,19 +198,26 @@ function buildModel() {
     chartWidth,
     calibration,
     concept,
-    live: {
-      run: liveRuns[liveKind()],
-      note: liveSession().note,
-      capture: liveSession().model(),
-      stepSpeed: liveStepSpeed,
-      stepSpeeds: stepSpeedOptions(),
-      compared: comparedRuns[liveKind()].map((entry, index) => ({
-        ...entry,
-        colour: COMPARE_COLOURS[index],
-      })),
-      compareNote,
-      table: comparisonRows(),
-    },
+    live: liveModel(),
+  };
+}
+
+function liveModel() {
+  const kind = liveKind();
+  const current = liveRuns[kind];
+  const table = comparisonRows();
+  return {
+    run: current?.run ?? null,
+    current,
+    chart: current ? { ...current.run, point: current.point, command: current.command } : null,
+    note: liveSession().note,
+    capture: liveSession().model(),
+    stepSpeed: liveStepSpeed,
+    stepSpeeds: stepSpeedOptions(),
+    compared: comparedRuns[kind],
+    compareNote,
+    table,
+    conclusion: comparisonConclusion(table, { distance: kind === 'distance', text: copy.live }),
   };
 }
 
@@ -218,6 +239,15 @@ function drawStage() {
 function update() {
   render(controlPage(buildModel(), copy, hardwareHtml, actions), page());
   drawStage();
+  if (revealPending && !page().hidden) {
+    revealPending = false;
+    showCharts();
+  }
+}
+
+// The chart with the real runs and the comparison table under it.
+function showCharts() {
+  revealElement(document.getElementById('controlGraphs'));
 }
 
 // The charts are laid out for the width they are given, so the width is measured whenever they
@@ -405,46 +435,58 @@ function distanceRun(recording) {
 
 const RUN_OF = { speed: speedRun, distance: distanceRun };
 
+// A drawable run with what the recording says about itself (settings, time, group, robot: the
+// optional fields the live layer writes, 「設定：不明」 for older files).
+function realEntry(kind, run, recording) {
+  const distance = kind === 'distance';
+  return {
+    run,
+    parts: runLabelParts(recording, copy.live),
+    conditions: typeof recording.conditions === 'object' ? recording.conditions : null,
+    recordedAt: recording.recordedAt ?? null,
+    point: labelPoint(run, distance),
+    command: commandRpm(run, distance),
+  };
+}
+
 function applyRecording(kind, recording) {
   const { run, note } = RUN_OF[kind](recording);
   if (!run) return { ok: false, note };
   keepPrevious(kind);
-  liveRuns[kind] = run;
-  liveLabels[kind] = liveRunLabel(kind, recording);
+  liveRuns[kind] = realEntry(kind, run, recording);
+  if (!restoring && kind === liveKind()) revealPending = true;
   return { ok: true, note };
 }
 
-// A new real run pushes the one on screen into the comparison lines (with the settings it was run
-// with), so tuning a gain on the robot compares like with like instead of overwriting the last try.
-const liveLabels = { speed: '', distance: '' };
-
-function liveRunLabel(kind, recording) {
-  const config = experiment().config;
-  const settings = kind === 'distance' ? gainsText(config) : '';
-  const recorded = new Date(recording.recordedAt);
-  const time = Number.isNaN(recorded.getTime())
-    ? ''
-    : recorded.toLocaleTimeString('ja-JP', { timeStyle: 'short' });
-  return fill(copy.live.previousRun, { time, settings }).trim();
-}
-
+// A new real run pushes the one on screen into the comparison lines (grey, dotted, with the
+// settings it was run with), so tuning a gain on the robot compares like with like instead of
+// overwriting the last try.
 function keepPrevious(kind) {
   if (!liveRuns[kind]) return;
-  comparedRuns[kind].unshift({
-    name: liveLabels[kind] || copy.live.compareThis,
-    run: liveRuns[kind],
-  });
-  comparedRuns[kind].length = Math.min(comparedRuns[kind].length, MAX_COMPARED);
+  addCompared(kind, { ...liveRuns[kind], source: 'past' });
 }
 
 // Other groups' recordings, drawn next to this one so a class can compare machines and drivers.
+// Every compared run keeps its letter (A, B …) until the comparisons are cleared, so a letter
+// written in a note still means the same run.
 const MAX_COMPARED = 5;
 const comparedRuns = { speed: [], distance: [] };
+const nextLetter = { speed: 0, distance: 0 };
 let compareNote = '';
+
+function addCompared(kind, entry) {
+  const index = nextLetter[kind]++;
+  comparedRuns[kind].push({ ...entry, index, letter: compareLetter(index) });
+  if (comparedRuns[kind].length <= MAX_COMPARED) return;
+  // Full: the oldest earlier run of this page goes first; a file was opened on purpose.
+  const oldestPast = comparedRuns[kind].findIndex((other) => other.source === 'past');
+  comparedRuns[kind].splice(Math.max(0, oldestPast), 1);
+}
 
 async function addComparisons(files) {
   const kind = liveKind();
   const notes = [];
+  let added = 0;
   for (const file of files) {
     if (comparedRuns[kind].length >= MAX_COMPARED) {
       notes.push(fill(copy.live.compareTooMany, { count: MAX_COMPARED }));
@@ -453,35 +495,40 @@ async function addComparisons(files) {
     try {
       const { recording } = await openRecordingFile(file);
       const { run, note } = RUN_OF[kind](recording);
-      if (run) comparedRuns[kind].push({ name: file.name, run });
-      else notes.push(`${file.name}：${note}`);
+      if (!run) {
+        notes.push(`${file.name}：${note}`);
+        continue;
+      }
+      addCompared(kind, { ...realEntry(kind, run, recording), source: 'file', file: file.name });
+      added += 1;
     } catch (error) {
       notes.push(`${file.name}：${error.message}`);
     }
   }
   compareNote = notes.join(' ');
+  if (added) revealPending = true;
   update();
 }
 
-// One row per run in the comparison table: the simulation on screen, this recording, the others.
+// One row per run in the comparison table: the simulation on screen (marked when the settings
+// have changed since), this recording, the others.
 function comparisonRows() {
   const kind = liveKind();
-  const distance = kind === 'distance';
   const current = experiment();
-  const rows = [];
-  const add = (label, samples, key, target) =>
-    rows.push({ label, metrics: stepMetrics(samples, { key, target, distance }) });
-  // A speed recording is judged over its first command only (firstHold).
-  const judged = (run) => (distance ? run.samples : firstHold(run.samples));
-  if (current.result?.mode === kind)
-    add(copy.live.compareSimulation, current.result.samples, 'actual', current.result.target);
-  const liveTarget = (run) => (distance ? STOP_DISTANCE : run.samples[0].target);
-  if (liveRuns[kind])
-    add(copy.live.compareThis, judged(liveRuns[kind]), 'measured', liveTarget(liveRuns[kind]));
-  for (const entry of comparedRuns[kind])
-    add(entry.name, judged(entry.run), 'measured', liveTarget(entry.run));
-  // A run too short to judge has no metrics; it is left out of the table rather than shown empty.
-  return rows.filter((row) => row.metrics);
+  const result = current.result?.mode === kind ? current.result : null;
+  return buildComparisonRows({
+    simulation: result && {
+      samples: result.samples,
+      target: result.target,
+      settings: gainText(result.config, topicId, copy),
+      stale: isStale(),
+    },
+    current: liveRuns[kind],
+    compared: comparedRuns[kind],
+    distance: kind === 'distance',
+    stopDistance: STOP_DISTANCE,
+    text: copy.live,
+  });
 }
 
 // Driving the real robot from this card (live-drive.js): the speed of the real step input, and
@@ -503,6 +550,14 @@ function stepSpeedOptions() {
 const gainsText = (config) =>
   fill(copy.live.driveGains, { kp: config.kp, ki: config.ki, kd: config.kd });
 
+// What a run was made with, for the recording's `conditions` (read back by compare.js) and the
+// run history: the values plus a short label. Code that still expects the text gets the label.
+function runConditions(values, label) {
+  const conditions = { ...values, label };
+  Object.defineProperty(conditions, 'toString', { value: () => label });
+  return conditions;
+}
+
 const speedDrive = {
   startLabel: undefined,
   program: () =>
@@ -515,7 +570,7 @@ const speedDrive = {
     fill(copy.live.driveSpeedPlacement, {
       distance: (speedStep(liveStepSpeed).distance + 0.5).toFixed(1),
     }),
-  conditions: () => `${liveStepSpeed.toFixed(1)} m/s`,
+  conditions: () => runConditions({ speed: liveStepSpeed }, `${liveStepSpeed.toFixed(1)} m/s`),
   plan: () => {
     const step = speedStep(liveStepSpeed);
     return { controller: step.controller, seconds: step.seconds, tail: 1 };
@@ -544,7 +599,10 @@ const wallDrive = {
       gap: WALL_MIN_GAP.toFixed(2),
     }),
   placement: () => fill(copy.live.driveWallPlacement, { start: WALL_START_MIN.toFixed(1) }),
-  conditions: () => gainsText(experiment().config),
+  conditions: () => {
+    const { kp, ki, kd } = experiment().config;
+    return runConditions({ kp, ki, kd, stop: STOP_DISTANCE }, gainsText({ kp, ki, kd }));
+  },
   plan: () => {
     const controller = wallApproach({ ...experiment().config }, wallMessages());
     return {
@@ -695,10 +753,13 @@ const actions = {
   addComparisons: (files) => addComparisons([...files]),
   clearComparisons() {
     comparedRuns[liveKind()] = [];
+    nextLetter[liveKind()] = 0;
     compareNote = '';
     update();
   },
   openLink: openRobotDialog,
+  showCharts,
+  showLive: () => revealElement(document.getElementById('controlLive')),
 };
 
 function activateControl() {
@@ -714,8 +775,10 @@ function reviewControl(id) {
 
 function initControl() {
   // A recording taken before the page was reloaded comes back, as far as this browser kept it.
+  restoring = true;
   liveSessions.speed.restore();
   liveSessions.distance.restore();
+  restoring = false;
   rebuild();
   document.addEventListener('series-leave', stopAndShow);
   document.addEventListener('supplement-open', stopAndShow);

@@ -401,9 +401,6 @@
 .control-chart-legend .live:before {
   border-top: 3px solid var(--role-measured);
 }
-.control-chart-legend .live-target:before {
-  border-top: 2px dotted var(--role-target);
-}
 .control-live {
   padding: 22px;
   margin-top: 16px;
@@ -772,14 +769,40 @@
   }
 }
 
-/* Other groups' recordings on the control charts, and the comparison table (js/control/view.js). */
-.control-chart-legend .compared:before {
-  content: '';
-  display: inline-block;
-  width: 22px;
-  vertical-align: middle;
+/* Real runs on the control charts, and the comparison table under the chart (js/control/view.js).
+   The legend draws a compared run's or the real command's line with its own dash pattern. */
+.control-chart-legend .swatch:before {
+  display: none;
+}
+.control-legend-swatch {
+  width: 24px;
+  height: 8px;
   margin-right: 6px;
-  border-top: 2px solid var(--compared);
+  vertical-align: middle;
+  overflow: visible;
+}
+.control-chart-legend .live {
+  overflow-wrap: anywhere;
+}
+.control-live-scale,
+.control-compare-conclusion {
+  margin: 12px 24px 0;
+  padding: 10px 14px;
+  border-left: 4px solid var(--role-measured);
+  background: #f1f5fb;
+  font-size: 14px;
+  line-height: 1.7;
+}
+.control-compare-conclusion {
+  font-size: 15px;
+  font-weight: 600;
+}
+.control-show-charts {
+  margin: 8px 8px 0 0;
+}
+.control-guide > .control-live-jump {
+  margin-top: 10px;
+  font-size: 14px;
 }
 .control-compare-files {
   display: grid;
@@ -792,17 +815,118 @@
   max-width: 100%;
 }
 .control-compare-table {
-  margin-top: 12px;
-  overflow-x: auto;
+  margin: 16px 0 0;
+  padding: 0 24px;
 }
-.control-compare-table table {
+.control-compare-table h3 {
+  font-size: 15px;
+  margin: 0 0 8px;
+}
+.control-compare-table > .helper {
+  margin: 10px 0 0;
+}
+.control-compare-table .control-compare-conclusion {
+  margin: 12px 0 0;
+}
+.control-compare-wide {
+  display: block;
+  overflow-x: auto;
   border-collapse: collapse;
   font-variant-numeric: tabular-nums;
+  font-size: 14px;
 }
-.control-compare-table th,
-.control-compare-table td {
+.control-compare-wide th,
+.control-compare-wide td {
   border-bottom: 1px solid var(--line);
-  padding: 4px 8px;
+  padding: 5px 8px;
   text-align: left;
   white-space: nowrap;
+  vertical-align: top;
+}
+.control-compare-wide .control-compare-settings {
+  white-space: normal;
+  min-width: 9em;
+  max-width: 16em;
+  overflow-wrap: anywhere;
+}
+.control-compare-table small {
+  display: block;
+  color: #6a7c81;
+  font-size: 12px;
+}
+.control-compare-table .stale {
+  color: #6a7c81;
+}
+.control-compare-table small.control-compare-stale {
+  color: #8a5a00;
+}
+.control-compare-cards {
+  display: none;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  gap: 10px;
+}
+.control-compare-cards li {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.control-compare-cards h4 {
+  margin: 0;
+  font-size: 15px;
+}
+.control-compare-cards p {
+  margin: 2px 0 8px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.control-compare-cards dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.control-compare-cards dt {
+  font-size: 12px;
+  color: #5d7176;
+}
+.control-compare-cards dd {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.control-compare-cards details {
+  margin-top: 6px;
+  font-size: 13px;
+}
+.control-compare-cards details dl {
+  margin-top: 6px;
+}
+@media (max-width: 620px) {
+  .control-compare-wide {
+    display: none;
+  }
+  .control-compare-cards {
+    display: grid;
+  }
+  .control-compare-table {
+    padding: 0 16px;
+  }
+  .control-live-scale,
+  .control-compare-conclusion {
+    margin-left: 16px;
+    margin-right: 16px;
+  }
+}
+.control-back-to-live {
+  display: block;
+  margin: 8px 24px 0;
+  font-size: 14px;
+}
+@media (max-width: 620px) {
+  .control-back-to-live {
+    margin: 8px 16px 0;
+  }
 }

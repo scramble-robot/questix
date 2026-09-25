@@ -329,10 +329,16 @@ function drawControlStage(canvas, { distance, angle, frame, started, blocked, de
 
 // Both charts use these edges, so one moment of the run sits at the same x in each (the SVG's
 // viewBox is as wide as the container, see measureChartWidth in ui.js). The right margin holds
-// the direct labels at the ends of the lines (今回・前回・実機).
+// the direct labels at the ends of the lines (今回・前回・実機・A・B …).
 const CHART = { height: 232, left: 52, right: 50, top: 30, bottom: 34 };
-// Other groups' recordings, one colour each, in the order they were opened.
-const COMPARE_COLOURS = ['#3f7fbf', '#c07a1c', '#5b8f3c', '#8a5cc2', '#2a9d9a'];
+// Compared real runs never take a role colour of the lines they are compared with (actual,
+// measured, target): an earlier run on this page is a "previous" run (grey, dotted); an opened file
+// is dark grey with a dash pattern of its own. Each also carries its letter at the line.
+const COMPARED_FILE = { color: '#56646b', width: 1.6 };
+const COMPARED_DASHES = ['10 4', '4 3', '12 3 2 3', '2 3 8 3', '16 4'];
+// The real robot's command: the recording's own colour (measured), thin and long-dashed, so it
+// does not read as the simulation's 目標 (amber, dashed).
+const LIVE_COMMAND = { dash: '6 4', width: 1.5 };
 
 const TIME_TICKS = [0, 4, 8, 12, 16]; // seconds
 const REVEAL_OVERHANG = 2; // px of clip added so the line's cap is not cut off
@@ -353,7 +359,20 @@ function commandScale(values) {
   return niceScale(values, { ticks: 4 });
 }
 
+/** How a compared real run is drawn: `{color, dash, width}`. `entry.index` fixes its dash. */
+function comparedStyle(entry) {
+  if (entry.source === 'past') return roleStyle('previous');
+  return {
+    color: COMPARED_FILE.color,
+    dash: COMPARED_DASHES[entry.index % COMPARED_DASHES.length],
+    width: COMPARED_FILE.width,
+  };
+}
+
+const liveCommandStyle = () => ({ ...roleStyle('measured'), ...LIVE_COMMAND });
+
 // One axis for the whole run (and the previous run drawn with it), never grown while it plays.
+// Without a simulated run the axis is the real data's own (plus the target when it is drawn).
 function chartScale({
   run,
   previous,
@@ -366,7 +385,7 @@ function chartScale({
   fallback,
   factor,
 }) {
-  const simulated = run
+  const values = run
     ? [
         ...run.samples.map((sample) => sample[key]),
         ...(previous ? previous.samples.map((sample) => sample[key]) : []),
@@ -375,12 +394,12 @@ function chartScale({
         ...(extra ? run.samples.map((sample) => sample.i) : []),
         ...(breakdown ? run.samples.flatMap((sample) => [sample.ff, sample.correction]) : []),
       ]
-    : [0, fallback];
+    : [];
+  if (!run && target) values.push(fallback);
+  if (!run && !live && !compared.length) values.push(0, fallback);
   // The real recording shares the axis, so a measurement outside the simulated range still fits.
   // A distance recording has no target of its own (NaN), which is filtered out below.
-  const values = live
-    ? [...simulated, ...live.samples.flatMap((sample) => [sample.measured, sample.target])]
-    : simulated;
+  if (live) values.push(...live.samples.flatMap((sample) => [sample.measured, sample.target]));
   for (const entry of compared) values.push(...entry.run.samples.map((sample) => sample.measured));
   const scaled = values.filter(Number.isFinite).map((value) => value * factor);
   if (key === 'command') return commandScale(scaled);
@@ -473,19 +492,30 @@ function sampleAt(samples, time) {
   return found;
 }
 
-// The names written at the ends of the lines: 今回 follows the tip of the line as it is drawn,
-// the others sit where their line ends.
+// A real run's name at its line: at `point` (see labelPoint in compare.js), else where it ends.
+function realLabel(labels, { samples, point, text, colour, x, y, factor }) {
+  const last = samples.at(-1);
+  const at = point ?? (last ? { time: last.time, value: last.measured } : null);
+  if (!at || !Number.isFinite(at.value)) return;
+  labels.push({ x: x(at.time), y: y(at.value * factor) - 6, text, colour });
+}
+
+// The names written at the lines: 今回 follows the tip of the line as it is drawn, 前回 sits where
+// its line ends, a real run where its line tells it apart best (labelPoint in compare.js).
 function lineLabels({
   run,
   previous,
   live,
+  compared,
   key,
   extra,
   breakdown,
   cursorX,
   cursorTime,
+  x,
   y,
   factor,
+  commandCaption,
   copy,
 }) {
   const labels = [];
@@ -494,9 +524,39 @@ function lineLabels({
     if (last && Number.isFinite(last[field]))
       labels.push({ y: y(last[field] * factor) + 4, text, colour: roleStyle(role).color });
   };
+  if (key === 'measured') {
+    for (const entry of compared)
+      realLabel(labels, {
+        samples: entry.run.samples,
+        point: entry.point,
+        text: entry.letter,
+        colour: comparedStyle(entry).color,
+        x,
+        y,
+        factor,
+      });
+    if (live)
+      realLabel(labels, {
+        samples: live.samples,
+        point: live.point,
+        text: copy.charts.endLive,
+        colour: roleStyle('measured').color,
+        x,
+        y,
+        factor,
+      });
+    // 「実機の指令 19 rpm」 above the start of the command; spreadLabels keeps it off 「実機」.
+    const start = live?.samples[0];
+    if (start && commandCaption && Number.isFinite(live.command))
+      labels.push({
+        x: x(Math.max(0, start.time)) - 2,
+        y: y(live.command * factor) - 8,
+        text: commandCaption,
+        colour: liveCommandStyle().color,
+      });
+  }
   if (!run) return labels;
   if (previous) endOf(previous.samples, key, copy.charts.endPrevious, 'previous');
-  if (live && key === 'measured') endOf(live.samples, 'measured', copy.charts.endLive, 'measured');
   const tip = sampleAt(run.samples, cursorTime);
   labels.push({
     y: y(tip[key] * factor) + 4,
@@ -510,6 +570,28 @@ function lineLabels({
     endOf(run.samples, 'correction', 'FB', 'measured');
   }
   return labels;
+}
+
+// Real runs shown without a simulated one need no "run an experiment" text over their lines.
+function placeholder(real, width, height, copy) {
+  if (real) return nothing;
+  return svg`<text x=${width / 2} y=${height / 2} text-anchor="middle">${copy.charts.placeholder}</text>`;
+}
+
+function chartState(run, real, copy) {
+  if (run) return copy.charts.withRun;
+  return real ? copy.charts.withRecording : copy.charts.withoutRun;
+}
+
+// The recording on screen: what the robot measured (blue, solid) and, for the wheels, the command
+// it was given (blue, thin long dashes; its value is written above it, see lineLabels).
+function liveLines(live, { path, line }) {
+  const commanded = live.samples.some((sample) => Number.isFinite(sample.target));
+  const command = liveCommandStyle();
+  const commandLine = commanded
+    ? path(line(live.samples, 'target'), 'measured', { dash: command.dash, width: command.width })
+    : nothing;
+  return svg`${commandLine}${path(line(live.samples, 'measured'), 'measured', { width: 2.5 })}`;
 }
 
 /**
@@ -535,6 +617,7 @@ function controlChart({
   cursorTime,
   marker,
   targetCaption,
+  commandCaption = '',
   copy,
 }) {
   const { left, top, bottom, height: H } = CHART;
@@ -576,23 +659,23 @@ function controlChart({
     />`;
   };
   const targetValue = (run ? run.target : fallback) * factor;
-  const label =
-    title +
-    '。' +
-    fill(copy.charts.axes, { unit }) +
-    (run ? copy.charts.withRun : copy.charts.withoutRun);
+  const real = Boolean(live) || compared.length > 0;
+  const label = title + '。' + fill(copy.charts.axes, { unit }) + chartState(run, real, copy);
   const cursorX = x(cursorTime);
   const labels = lineLabels({
     run,
     previous,
     live,
+    compared,
     key,
     extra,
     breakdown,
     cursorX,
     cursorTime,
+    x,
     y,
     factor,
+    commandCaption,
     copy,
   });
 
@@ -624,25 +707,23 @@ function controlChart({
                 ? line(run.samples, 'target')
                 : `M${left},${y(targetValue)}L${right},${y(targetValue)}`,
               'target',
-            )}${haloText(right, y(targetValue) - 8, targetCaption, {
-              anchor: 'end',
+            )}${haloText(real ? left + 6 : right, y(targetValue) - 8, targetCaption, {
+              // Real runs are named at their right ends, so the caption moves to the left then.
+              anchor: real ? 'start' : 'end',
               colour: CHART_ROLE_COLORS.target,
               weight: 600,
             })}`
           : nothing
       }
-      ${
-        live
-          ? svg`${
-              live.samples.some((sample) => Number.isFinite(sample.target))
-                ? path(line(live.samples, 'target'), 'target', { dash: '3 3', width: 1.5 })
-                : nothing
-            }${path(line(live.samples, 'measured'), 'measured', { width: 2.5 })}`
-          : nothing
-      }
-      ${compared.map((entry) =>
-        path(line(entry.run.samples, 'measured'), 'measured', { colour: entry.colour, width: 1.6 }),
-      )}
+      ${compared.map((entry) => {
+        const style = comparedStyle(entry);
+        return path(line(entry.run.samples, 'measured'), 'previous', {
+          colour: style.color,
+          dash: style.dash,
+          width: style.width,
+        });
+      })}
+      ${live ? liveLines(live, { path, line }) : nothing}
       ${
         run
           ? svg`${previous ? path(line(previous.samples, key), 'previous') : nothing}<defs>
@@ -677,7 +758,7 @@ function controlChart({
             stroke-width="1"
             opacity=".5"
           />`
-          : svg`<text x=${width / 2} y=${H / 2} text-anchor="middle">${copy.charts.placeholder}</text>`
+          : placeholder(real, width, H, copy)
       }
       ${spreadLabels(labels, { top: top + 6, bottom: top + plotHeight + 4 }).map((entry) =>
         haloText(Math.min(entry.x ?? right, right) + 6, entry.y, entry.text, {
@@ -689,4 +770,11 @@ function controlChart({
   </div>`;
 }
 
-export { COMPARE_COLOURS, controlWheelAngle, drawControlBench, drawControlStage, controlChart };
+export {
+  comparedStyle,
+  liveCommandStyle,
+  controlWheelAngle,
+  drawControlBench,
+  drawControlStage,
+  controlChart,
+};

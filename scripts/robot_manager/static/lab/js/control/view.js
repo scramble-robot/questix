@@ -13,7 +13,7 @@ import { liveCaptureControls } from '../live/live-view.js';
 import { lessonBrief } from '../shell/lesson-brief.js';
 import { runModeBadgeHtml } from '../shell/run-mode.js';
 import { CONTROL_GROUPS, CONTROL_TOPICS, LAST_SAMPLE, STOP_DISTANCE, controlLoad } from './core.js';
-import { controlChart } from './render.js';
+import { controlChart, comparedStyle, liveCommandStyle } from './render.js';
 import { conceptLesson } from './concepts.js';
 import { fillSentence as fill } from '../core/content.js';
 
@@ -385,6 +385,9 @@ function controlPanel(model, copy, actions) {
       設定を初期値に戻す
     </button>
     ${model.topicId === 'challenge' ? badges(model, copy) : nothing}
+    <button class="text-button control-live-jump" data-control-live-jump @click=${actions.showLive}>
+      ${copy.live.jumpToLive}
+    </button>
   </aside>`;
 }
 
@@ -495,9 +498,96 @@ function chartMarker(model) {
   return null;
 }
 
+// What the rpm / distance chart draws. Without a simulated run, real runs are drawn on their own:
+// no "run an experiment" text, no simulated target for the wheels (the wall's 50 cm is the real
+// run's target too) and no simulated load event.
+function chartLayers(model) {
+  const hasRun = Boolean(model.result);
+  const real = Boolean(model.live.chart) || model.live.compared.length > 0;
+  return {
+    target: hasRun || !real || model.distance,
+    marker: hasRun || !real ? chartMarker(model) : null,
+  };
+}
+
+// A short line in the legend drawn like the line it names.
+const swatch = (style) =>
+  html`<svg class="control-legend-swatch" viewBox="0 0 24 8" aria-hidden="true">
+    <line
+      x1="1"
+      y1="4"
+      x2="23"
+      y2="4"
+      stroke=${style.color}
+      stroke-width=${style.width}
+      stroke-dasharray=${style.dash || nothing}
+    />
+  </svg>`;
+
+const labelOf = (parts) => [parts.settings, parts.time].filter(Boolean).join(' ');
+
+// Lists only the lines the chart draws; a real run is named with its settings and time.
+function chartLegend(model, copy, layers) {
+  const { result, comparison, live, distance } = model;
+  const current = live.current;
+  return html`<div class="control-chart-legend">
+    ${result ? html`<span class="measured">今回</span>` : nothing}${
+      layers.target ? html`<span class="target">目標</span>` : nothing
+    }${comparison ? html`<span class="previous">前回</span>` : nothing}${
+      layers.marker ? html`<span class="event">出来事</span>` : nothing
+    }${
+      current
+        ? html`<span class="live"
+            >${fill(copy.charts.liveLegendLabel, { label: labelOf(current.parts) })}</span
+          >`
+        : nothing
+    }${
+      current && !distance && Number.isFinite(current.command)
+        ? html`<span class="swatch"
+            >${swatch(liveCommandStyle())}${copy.charts.liveTargetLegend}</span
+          >`
+        : nothing
+    }${live.compared.map(
+      (entry) =>
+        html`<span class="swatch"
+          >${swatch(comparedStyle(entry))}${fill(copy.charts.comparedLegend, {
+            letter: entry.letter,
+            label: labelOf(entry.parts),
+          })}</span
+        >`,
+    )}
+  </div>`;
+}
+
+// The simulated 60 rpm and the real 0.2 m/s step are of different size: say so next to the chart.
+function scaleNote(model, copy) {
+  const current = model.live.current;
+  if (model.distance || !current || !Number.isFinite(current.command)) return nothing;
+  const rpm = formatValue(current.command, 0);
+  const speed = current.conditions?.speed;
+  const step = Number.isFinite(speed)
+    ? fill(copy.live.scaleStep, { speed: speed.toFixed(1) + ' m/s', rpm })
+    : fill(copy.live.scaleStepUnknown, { rpm });
+  const target = model.result ? model.result.target : model.config.targetRPM;
+  return html`<p class="control-live-scale">${fill(copy.live.scaleNote, { target, step })}</p>`;
+}
+
+// After looking at a real run, the way back to the robot block (far below on a phone).
+function backToLive(model, copy, actions) {
+  if (!model.live.current && !model.live.compared.length) return nothing;
+  return html`<button
+    class="text-button control-back-to-live"
+    data-control-back-to-live
+    @click=${actions.showLive}
+  >
+    ${copy.live.backToLive}
+  </button>`;
+}
+
 function charts(model, copy, actions) {
   const { distance, result, comparison } = model;
   const fallback = distance ? STOP_DISTANCE : model.config.targetRPM;
+  const layers = chartLayers(model);
   const shared = {
     run: result,
     previous: comparison,
@@ -505,50 +595,46 @@ function charts(model, copy, actions) {
     fallback,
     width: model.chartWidth,
     cursorTime: model.frame.time,
-    marker: chartMarker(model),
+    marker: layers.marker,
     copy,
   };
   const targetValue = distance
     ? formatValue(STOP_DISTANCE * CENTIMETRES, 0) + ' cm'
     : (result ? result.target : fallback) + ' rpm';
+  const command = model.live.current?.command;
   const measured = controlChart({
     ...shared,
-    live: model.live.run,
+    live: model.live.chart,
     compared: model.live.compared,
     key: 'measured',
     title: distance ? '壁までの距離' : '車輪の回転数',
     unit: distance ? 'cm' : 'rpm',
     factor: distance ? CENTIMETRES : 1,
-    target: true,
+    target: layers.target,
     targetCaption: (model.topicId === 'reference' ? '最終目標' : '目標') + ' ' + targetValue,
+    commandCaption: Number.isFinite(command)
+      ? fill(copy.charts.liveCommandCaption, { rpm: formatValue(command, 0) })
+      : '',
   });
   // Only the load is named here, even in the challenge topic, so the caption stays short.
   const previousNote = comparison
     ? gainText(comparison.config, model.topicId, copy) +
       loadSuffix(comparison, model.topicId, copy, '・')
     : '';
-  return html`<div class="control-chart-legend">
-      <span class="measured">今回</span><span class="target">目標</span>${
-        comparison ? html`<span class="previous">前回</span>` : nothing
-      }${shared.marker ? html`<span class="event">出来事</span>` : nothing}${
-        model.live.run
-          ? html`<span class="live">${copy.charts.liveLegend}</span>${
-                distance
-                  ? nothing
-                  : html`<span class="live-target">${copy.charts.liveTargetLegend}</span>`
-              }`
-          : nothing
-      }${model.live.compared.map(
-        (entry) =>
-          html`<span class="compared" style=${`--compared:${entry.colour}`}>${entry.name}</span>`,
-      )}
-    </div>
-    ${
-      comparison
-        ? html`<p class="control-previous-note">${'前の実験：' + previousNote}</p>`
-        : nothing
-    }
-    ${measured}${commandSection(model, copy, actions, shared)}`;
+  return html`${chartLegend(model, copy, layers)}
+  ${
+    comparison
+      ? html`<p class="control-previous-note">
+          ${fill(copy.charts.previousSimulation, { settings: previousNote })}
+        </p>`
+      : nothing
+  }
+  ${measured}${scaleNote(model, copy)}${comparisonTable(model, copy.live)}${backToLive(
+    model,
+    copy,
+    actions,
+  )}
+  ${commandSection(model, copy, actions, shared)}`;
 }
 
 function commandSection(model, copy, actions, shared) {
@@ -600,7 +686,7 @@ function liveChartNote(model, copy) {
 }
 
 function graphsCard(model, copy, actions) {
-  return html`<section class="card control-graphs">
+  return html`<section id="controlGraphs" class="card control-graphs">
     <div class="section-top">
       <h2>時間とともに、値はどう変わった？</h2>
       <label class="control-compare"
@@ -610,7 +696,7 @@ function graphsCard(model, copy, actions) {
           .checked=${model.compare && Boolean(model.previous)}
           ?disabled=${!model.previous}
           @change=${(event) => actions.setCompare(event.target.checked)}
-        />前の実験と重ねる${
+        />${copy.charts.compareToggle}${
           model.previous ? nothing : html`<small>（${copy.charts.compareLater}）</small>`
         }</label
       >
@@ -657,7 +743,8 @@ function calibrationCard(model, copy) {
 // itself: a step input (speed), or the simulation's own PID stopping in front of the wall.
 function liveCard(model, copy, actions) {
   const text = copy.live;
-  return html`<section class="card control-live">
+  const shown = Boolean(model.live.run) || model.live.compared.length > 0;
+  return html`<section id="controlLive" class="card control-live">
     <h2>
       ${unsafeHTML(runModeBadgeHtml('live'))}${unsafeHTML(runModeBadgeHtml('drive'))} ${text.title}
     </h2>
@@ -670,8 +757,19 @@ function liveCard(model, copy, actions) {
         ? html`<p class="control-live-recorded" role="status">${model.live.note}</p>`
         : nothing
     }
+    ${
+      shown
+        ? html`<button
+            class="control-show-charts"
+            data-control-show-charts
+            @click=${actions.showCharts}
+          >
+            ${text.showCharts}
+          </button>`
+        : nothing
+    }
     ${model.live.run ? html`<button @click=${actions.clearLive}>${text.clear}</button>` : nothing}
-    ${compareControls(model, text, actions)} ${comparisonTable(model, text)}
+    ${compareControls(model, text, actions)}
   </section>`;
 }
 
@@ -725,43 +823,93 @@ function compareControls(model, text, actions) {
 
 const secondsText = (value) => (value === null ? '—' : formatValue(value) + ' 秒');
 
-// The same numbers for the simulation and every recording, by the course's own definitions.
+// The numbers of one row, in the order of the columns after the name and 設定.
+function metricCells(metrics, distance, text) {
+  const value = (number) =>
+    distance ? formatValue(number * CENTIMETRES, 0) + ' cm' : formatValue(number, 1) + ' rpm';
+  const settling =
+    metrics.settling === null ? text.compareNotSettled : secondsText(metrics.settling);
+  const cells = [
+    value(metrics.target),
+    value(metrics.finalError),
+    value(metrics.overshoot),
+    settling,
+  ];
+  return distance ? cells : [...cells, secondsText(metrics.delay), secondsText(metrics.tau)];
+}
+
+// A phone card shows these numbers (最後のずれ・行き過ぎ・落ち着くまで) and folds the rest.
+const KEY_METRICS = [1, 2, 3]; // indices into metricCells
+
+function settingsCell(row, text) {
+  return html`${row.settings}${
+    row.stale ? html`<small class="control-compare-stale">${text.compareStale}</small>` : nothing
+  }${row.file ? html`<small>${fill(text.compareFile, { name: row.file })}</small>` : nothing}`;
+}
+
+// Chromebook: one table, every run a row.
+function compareTableWide(rows, columns, distance, text) {
+  return html`<table class="control-compare-wide">
+    <thead>
+      <tr>
+        ${columns.map((column) => html`<th>${column}</th>`)}
+      </tr>
+    </thead>
+    <tbody>
+      ${rows.map(
+        (row) =>
+          html`<tr class=${row.stale ? 'stale' : ''}>
+            <th>${row.name}</th>
+            <td class="control-compare-settings">${settingsCell(row, text)}</td>
+            ${metricCells(row.metrics, distance, text).map((cell) => html`<td>${cell}</td>`)}
+          </tr>`,
+      )}
+    </tbody>
+  </table>`;
+}
+
+// Phone: one card per run, so no number is off screen.
+function compareCards(rows, columns, distance, text) {
+  const names = columns.slice(2);
+  return html`<ol class="control-compare-cards">
+    ${rows.map((row) => {
+      const cells = metricCells(row.metrics, distance, text);
+      const pair = (index) =>
+        html`<div>
+          <dt>${names[index]}</dt>
+          <dd>${cells[index]}</dd>
+        </div>`;
+      const rest = cells
+        .map((cell, index) => index)
+        .filter((index) => !KEY_METRICS.includes(index));
+      return html`<li class=${row.stale ? 'stale' : ''}>
+        <h4>${row.name}</h4>
+        <p>${settingsCell(row, text)}</p>
+        <dl>${KEY_METRICS.map(pair)}</dl>
+        <details>
+          <summary>${text.compareMore}</summary>
+          <dl>${rest.map(pair)}</dl>
+        </details>
+      </li>`;
+    })}
+  </ol>`;
+}
+
+// The same numbers for the simulation and every real run, by the course's own definitions, right
+// under the chart that draws them, with one sentence on what changed between the last two runs.
 function comparisonTable(model, text) {
   const rows = model.live.table;
   if (rows.length < 2) return nothing;
   const distance = model.distance;
-  const value = (number) =>
-    distance ? formatValue(number * CENTIMETRES, 0) + ' cm' : formatValue(number, 1) + ' rpm';
   const columns = distance ? text.compareColumnsDistance : text.compareColumnsSpeed;
   return html`<div class="control-compare-table">
     <h3>${text.compareTitle}</h3>
-    <table>
-      <thead>
-        <tr>
-          ${columns.map((column) => html`<th>${column}</th>`)}
-        </tr>
-      </thead>
-      <tbody>
-        ${rows.map(
-          ({ label, metrics }) =>
-            html`<tr>
-              <th>${label}</th>
-              <td>${value(metrics.target)}</td>
-              <td>${value(metrics.finalError)}</td>
-              <td>${value(metrics.overshoot)}</td>
-              <td>
-                ${metrics.settling === null ? text.compareNotSettled : secondsText(metrics.settling)}
-              </td>
-              ${
-                distance
-                  ? nothing
-                  : html`<td>${secondsText(metrics.delay)}</td>
-                      <td>${secondsText(metrics.tau)}</td>`
-              }
-            </tr>`,
-        )}
-      </tbody>
-    </table>
+    ${compareTableWide(rows, columns, distance, text)}${compareCards(rows, columns, distance, text)}
+    ${
+      model.live.conclusion
+        ? html`<p class="control-compare-conclusion">${model.live.conclusion}</p>`
+        : nothing
+    }
     <p class="helper">${distance ? text.compareExplainDistance : text.compareExplainSpeed}</p>
   </div>`;
 }
@@ -919,7 +1067,7 @@ function historyCard(model, copy) {
   );
   return html`<details class="card control-history">
     <summary>
-      この実験の記録を比べる <span id="controlHistoryCount">${`（${runs.length}回）`}</span>
+      シミュレーションの記録を比べる <span id="controlHistoryCount">${`（${runs.length}回）`}</span>
     </summary>
     <div id="controlHistory">
       ${
