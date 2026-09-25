@@ -105,6 +105,17 @@ exact but unreadable teaches nothing. Every new or reworked figure follows these
   reason next to it.
 - **Words.** Define a term where it first appears (or link the 補足); units are written the same
   way everywhere (m/秒, rad/秒, rpm, cm); a sentence refers to controls by their visible label.
+- **The first action on the first screen, in every course.** `lessonBrief(key, content, { start })`
+  (`js/shell/lesson-brief.js`) opens every experiment with the card 「最初に試すこと」 and its button,
+  right under the course's navigation, on a phone and on a Chromebook: `start` is
+  `{ label, target, press }` — `target` a selector in the course page, `press: true` for a
+  simulation's start button (pressed), otherwise the part is brought on screen and focused (a
+  block on the real robot, whose safety tick comes first). Without `start` the button brings the
+  page's first main button on screen. A course with its own card passes `{ first: false }` (the
+  systems courses).
+- **One numbering.** Experiments are numbered 1…N of the whole course, as the footer
+  (`js/shell/lesson-progress.js`) numbers them; group tabs carry no numbers of their own and a
+  topic chip that shows a number shows that one (no 「1-1」, no 「段階1・…つ目」).
 
 ## Taking measurements from the real robot
 
@@ -126,7 +137,9 @@ state, which stream is missing, record / stop, open / save.
   lesson that fires discs puts `${launcherPanel('<place>', { onShot, lesson })}` from
   `js/live/shoot-ui.js` in its view (it draws itself, like the 「実機の状態」 panel): `onShot({percent,
 tilt, at})` gets each of this page's discs and returns whether the lesson kept a row for it, and
-  `lesson` names the record each session is kept under on the robot. Its rules (buttons, reasons,
+  `lesson` names the record each session is kept under on the robot; `after()` (optional) is the
+  lesson's part right under the buttons (the launch course's distance field of the disc just
+  fired, so the range is typed where the disc was fired). Its rules (buttons, reasons,
   which fired_count increase was this page's disc) are `js/live/shoot-core.js`
   (`test/shoot-core.test.mjs`); declare the topic's `drive` run mode as for driving.
 - Only `js/live/drive-link.js` sends drive frames to the robot. The one other frame is `record_save`
@@ -178,6 +191,11 @@ tilt, at})` gets each of this page's discs and returns whether the lesson kept a
   `content/shell/run-modes.json` in the same change (course `modes` and `real`, topic `keys`,
   `note` and the `target` selector of the robot block), so the labels never promise something the
   page does not offer. Put `runModeBadgeHtml('live' | 'data')` in the heading of the robot block.
+- A table the page already holds goes into 測定データを分析する without retyping:
+  `useMeasurements(course, { rows, source, labels, note })` from `js/systems/measurement-lab.js`
+  (the motor bench's 「分析に使う」, rows from `benchMeasurementRows`); a table that already holds
+  measurements asks 置き換える / 追加する as a file does, and the dialog opens on the result. The
+  lab's own sessions pass `state`, so the dialog has no second 「実機の状態」 panel.
 - Only offer a recording where the robot actually measures the quantity. Where it measures one side
   only, take that side automatically and let the learner type the other (the SLAM scenario of the
   measurement lab); where it measures neither, say so (the launch scenario) instead of hiding the
