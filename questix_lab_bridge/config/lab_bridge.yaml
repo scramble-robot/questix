@@ -1,5 +1,5 @@
 # QUESTiX LAB live bridge: subscriptions -> WebSocket. Nothing is published unless allow_drive
-# is true (see the drive section at the end and questix_lab_bridge/drive.py).
+# or allow_shoot is true (see the drive and launcher sections below, drive.py and shoot.py).
 questix_lab_bridge:
   ros__parameters:
     host: "0.0.0.0"
@@ -73,6 +73,49 @@ questix_lab_bridge:
     # Rate the held command is published at. drive_component's cmd_timeout_sec (1.0 s) is the
     # last line of defence if this node dies while driving.
     drive_rate_hz: 20.0
+
+    # The disc launcher's status (std_msgs/String JSON), mirrored to every page as the streams
+    # "roller" and "shot" whether or not allow_shoot is set. Empty = not mirrored (and no
+    # launcher experiments: the bridge needs both to decide).
+    roller_status_topic: "/roller/status"   # esc_motor_control
+    shot_status_topic: "/shot/status"       # shot_component
+
+    # Launcher experiments from the pages: roller power, tilt and firing one disc
+    # (questix_lab_bridge/shoot.py). Default false in the node; robot_manager passes its
+    # 教材からの発射 switch (on in practice mode, off in competition), each firing session
+    # confirmed by the learner's safety tick on the page. Even when allowed, a page can operate
+    # the launcher only while
+    #   - esc_motor_control and shot_component subscribe to the lab topics and report
+    #     lab_accepted (their accept_lab_input; practice launches only) in their status,
+    #   - no other node publishes the lab topics,
+    #   - the emergency stop is released (emergency_stop_topic, /drive_status or either status),
+    #   - the controller is not using the launcher (a pressed button takes over at once).
+    allow_shoot: false
+    roller_lab_topic: "/roller/lab"         # std_msgs/Float32, 0..1
+    tilt_lab_topic: "/shot/lab/tilt"        # std_msgs/Float32, degrees
+    fire_lab_topic: "/shot/lab/fire"        # std_msgs/Empty, one disc
+    # Caps for what a page may command. The effective limits are these narrowed by what the
+    # nodes report in their status (never wider): the roller power by esc_motor_control's
+    # lab_max_speed, the tilt range by shot_component's tilt_min_angle / tilt_max_angle
+    # (motor_control_app/config/shot_config*.yaml: 0 / 120). Pages get the effective ones in
+    # shoot_state.limits.
+    shoot_max_power: 0.8    # fraction 0..1
+    shoot_tilt_min: 0.0     # [deg]
+    shoot_tilt_max: 120.0   # [deg]
+    # Shortest time between two shots of any source [s]; shot_component enforces its own
+    # lab_min_fire_interval_sec as well (and its status next_fire_in_sec counts here: the later
+    # wins). A page fires only after the roller has been commanded at 0.2 or more for 1.0 s
+    # without a break (fixed in shoot.py).
+    shoot_fire_interval_sec: 2.0
+    # The page repeats the roller command about 10 times a second; silence for this long (closed
+    # tab, lost Wi-Fi) stops the roller.
+    shoot_deadman_sec: 0.5
+    # One session (from the first command to the stop) may not last longer than this [s].
+    shoot_max_spin_sec: 30.0
+    # Rate the roller command is published at during a session (esc_motor_control drops lab
+    # commands older than 1.0 s, and stops the roller if this node dies). Tilts are sent on
+    # request, at most every 60 ms (shot_component refuses closer than 50 ms).
+    shoot_rate_hz: 20.0
 
     # Records kept on the robot (questix_lab_bridge/records.py), so every device connected to
     # this robot can list, open and download them over this port (GET /api/records), and nothing

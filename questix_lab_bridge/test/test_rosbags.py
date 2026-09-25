@@ -4,18 +4,26 @@ import math
 
 import pytest
 
-rosbag2_py = pytest.importorskip('rosbag2_py')
-pytest.importorskip('questix_msgs.msg')
+from questix_lab_bridge import records, rosbags
 
-from builtin_interfaces.msg import Time  # noqa: E402
-from geometry_msgs.msg import TransformStamped, Twist  # noqa: E402
-from nav_msgs.msg import Odometry  # noqa: E402
-from questix_msgs.msg import DriveStatus  # noqa: E402
-from rclpy.serialization import serialize_message  # noqa: E402
-from sensor_msgs.msg import LaserScan  # noqa: E402
-from tf2_msgs.msg import TFMessage  # noqa: E402
+# A skip marker, not a module-level pytest.importorskip: with ROS sourced, launch_testing's pytest
+# plugin imports every test module inside its collection hook, and a Skipped raised there skips
+# the whole test directory instead of this file (seen with ROS 2 but no built questix_msgs).
+try:
+    from builtin_interfaces.msg import Time
+    from geometry_msgs.msg import TransformStamped, Twist
+    from nav_msgs.msg import Odometry
+    from questix_msgs.msg import DriveStatus
+    from rclpy.serialization import serialize_message
+    import rosbag2_py
+    from sensor_msgs.msg import LaserScan
+    from tf2_msgs.msg import TFMessage
+    _MISSING = None
+except ImportError as error:
+    _MISSING = str(error)
 
-from questix_lab_bridge import records, rosbags  # noqa: E402
+pytestmark = pytest.mark.skipif(
+    _MISSING is not None, reason='needs ROS 2 (rosbag2_py) and a built questix_msgs: %s' % _MISSING)
 
 START_NS = 1_758_000_000 * 10**9
 TOPICS = {'scan': '/scan', 'odom': '/odom', 'drive': '/drive_status', 'twist': '/target_twist',

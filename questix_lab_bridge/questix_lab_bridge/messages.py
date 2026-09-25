@@ -10,7 +10,9 @@ Server to browser, text frames are JSON objects tagged by ``type``:
   or the host name; ``domain``: ROS_DOMAIN_ID as an int, ``null`` when unset), robot
   geometry, the topic behind each stream, and ``records`` (``save``: pages may save
   recordings on the robot; ``list``: ``GET /api/records`` answers; ``rosbags``: ``GET
-  /api/rosbags`` can convert Robot Manager's rosbags).
+  /api/rosbags`` can convert Robot Manager's rosbags), and ``shoot`` (``allowed``: the bridge
+  runs with ``allow_shoot``; ``max_power``, ``tilt_min`` / ``tilt_max`` [deg],
+  ``fire_interval_sec``, ``min_fire_power``, ``spin_up_sec``, ``deadman_sec``, ``max_spin_sec``).
 * ``session`` - the id this connection has on the bridge (``drive_state.owner`` uses it).
 * ``drive_state`` - whether a page may drive the robot now and why not, who drives it,
   the limits, and why the last run ended (drive.DriveArbiter.state). A page whose request
@@ -21,6 +23,17 @@ Server to browser, text frames are JSON objects tagged by ``type``:
 * ``odom``   - ``x``, ``y``, ``theta``, ``v``, ``w``.
 * ``drive``  - measured/target wheel RPM, current, chassis velocity, emergency stop.
 * ``twist``  - commanded ``linear`` / ``angular`` velocity.
+* ``roller`` - ``/roller/status`` as the roller ESC node sends it (``command`` 0..1, ``source``
+  ``joy``/``lab``/``idle``, ``lab_accepted``, ``lab_locked``, ``estop``) plus ``stamp`` (receipt
+  time [s]).
+* ``shot``   - ``/shot/status`` (``tilt_deg``, ``shooting``, ``fired_count``,
+  ``last_fire_source`` ``joy``/``lab``/null, ``lab_accepted``, ``estop``, ``active``) plus
+  ``stamp``.
+* ``shoot_state`` - whether a page may operate the launcher now and why not, who does, the
+  roller power, fire readiness and limits (shoot.ShootArbiter.state); on every change and once
+  a second.
+* ``shoot_refused`` - to the asking page only: ``reason`` (a key, see shoot.py), ``request``
+  (``roller``/``tilt``/``fire``), and ``next_fire_in_sec`` / ``spin_ready_in_sec``.
 * ``status`` - message rate per stream over the last reporting interval.
 * ``record_saved`` (``id``) / ``record_error`` (``message``, Japanese) - the answer to this
   page's own ``record_save``, to that page only.
@@ -41,6 +54,15 @@ Browser to server (only when the bridge runs with ``allow_drive``; otherwise ign
 * ``{"type": "stop", "scope": "mine"}`` - stop the run only if this page owns it; a page
   ending its own experiment sends this so it cannot end another pupil's run. Any other
   ``scope`` value is treated as a plain stop.
+
+Browser to server (only when the bridge runs with ``allow_shoot``; otherwise ignored):
+
+* ``{"type": "roller", "power": p}`` - spin the roller at p (0..1, clamped to max_power). Also
+  the session heartbeat: the owner repeats it at least every 0.1 s, ``power`` 0 included;
+  silence for deadman_sec stops the roller (shoot.py).
+* ``{"type": "roller_stop"}`` - stop the roller and end the session, whichever page owns it.
+* ``{"type": "tilt", "deg": d}`` - tilt the launcher to d degrees (clamped).
+* ``{"type": "fire", "confirm": true}`` - fire one disc; ``confirm`` is the pupil's safety tick.
 
 Plain HTTP ``GET /api/state`` on the same port returns ``state_payload`` as JSON (see
 ws_server.py), for robot_manager and for anyone checking the bridge without a WebSocket.
@@ -86,11 +108,27 @@ def robot_identity(name='', environ=None):
     return {'name': name or socket.gethostname(), 'domain': domain}
 
 
+def shoot_hello(allowed, limits):
+    """``hello.shoot``: ``limits`` is shoot.ShootArbiter.limits()."""
+    return {
+        'allowed': bool(allowed),
+        'max_power': limits['max_power'],
+        'tilt_min': limits['tilt_min'],
+        'tilt_max': limits['tilt_max'],
+        'fire_interval_sec': limits['fire_interval_sec'],
+        'min_fire_power': limits['min_fire_power'],
+        'spin_up_sec': limits['spin_up_sec'],
+        'deadman_sec': limits['deadman'],
+        'max_spin_sec': limits['seconds'],
+    }
+
+
 def hello_payload(streams, wheel_radius, wheel_separation, drive_allowed=False, robot=None,
-                  records=None):
+                  records=None, shoot=None):
     """Describe the bridge to a newly connected browser; ``robot`` is robot_identity().
 
     ``records`` is records_api.RecordsApi.hello(); without it pages may neither save nor list.
+    ``shoot`` is shoot_hello(); without it the launcher is not offered (``allowed`` false).
     """
     return {
         'type': 'hello',
@@ -101,6 +139,7 @@ def hello_payload(streams, wheel_radius, wheel_separation, drive_allowed=False, 
         'streams': streams,
         'records': records if records is not None else {
             'save': False, 'list': False, 'rosbags': False},
+        'shoot': shoot if shoot is not None else {'allowed': False},
     }
 
 
@@ -190,6 +229,18 @@ def twist_payload(msg, stamp):
     }
 
 
+def launcher_status_payload(kind, text, stamp):
+    """Relay ``/roller/status`` or ``/shot/status`` (std_msgs/String JSON) as stream ``kind``.
+
+    The JSON object is passed on as the node wrote it, with ``type`` and ``stamp`` (receipt time
+    [s]; the status has none) set here. Raise ValueError for anything but a JSON object.
+    """
+    status = json.loads(text)
+    if not isinstance(status, dict):
+        raise ValueError('%s status is not a JSON object' % kind)
+    return {**status, 'type': kind, 'stamp': stamp}
+
+
 def session_payload(client_id):
     """Tell one browser its id on this bridge."""
     return {'type': 'session', 'id': client_id}
@@ -200,13 +251,30 @@ def drive_state_payload(state):
     return {'type': 'drive_state', **state}
 
 
+def shoot_state_payload(state):
+    """Wrap shoot.ShootArbiter.state() for the browsers."""
+    return {'type': 'shoot_state', **state}
+
+
+def shoot_refused_payload(reason, request, state):
+    """Tell one page why its launcher request was refused (``state``: its shoot_state body)."""
+    return {
+        'type': 'shoot_refused',
+        'reason': reason,
+        'request': request,
+        'next_fire_in_sec': state.get('next_fire_in_sec'),
+        'spin_ready_in_sec': state.get('spin_ready_in_sec'),
+    }
+
+
 def state_payload(drive_state, robot, rates, drive_allowed, clients, max_clients,
-                  records=None):
+                  records=None, shoot_state=None):
     """Body of ``GET /api/state``: the bridge as robot_manager and teachers need to see it.
 
     ``drive_state`` is DriveArbiter.state(), ``rates`` the last status report [Hz],
     ``records`` records_api.RecordsApi.summary() (``dir``, ``count``, ``used_bytes``,
-    ``limit_bytes``, ``save``, ``auto_record``, ``rosbag_dir``) or None.
+    ``limit_bytes``, ``save``, ``auto_record``, ``rosbag_dir``) or None, ``shoot_state``
+    ShootArbiter.state() (``allowed`` false when the bridge runs without ``allow_shoot``).
     """
     return {
         'protocol': PROTOCOL_VERSION,
@@ -217,14 +285,18 @@ def state_payload(drive_state, robot, rates, drive_allowed, clients, max_clients
         'drive_state': drive_state,
         'rates': {name: round(hz, 1) for name, hz in rates.items()},
         'records': records,
+        'shoot_state': shoot_state if shoot_state is not None else {'allowed': False},
     }
 
 
 def parse_request(text):
-    """Decode a browser frame into ``('drive', linear, angular)``, ``('stop', scope)`` or None.
+    """Decode a browser frame into a request tuple, or None.
 
-    ``scope`` is ``'mine'`` (stop only a run this page owns) or ``'any'`` (stop any run; also
-    for a missing or unknown scope, so a malformed stop still stops).
+    Driving: ``('drive', linear, angular)`` or ``('stop', scope)``; ``scope`` is ``'mine'``
+    (stop only a run this page owns) or ``'any'`` (stop any run; also for a missing or unknown
+    scope, so a malformed stop still stops). Launcher: ``('roller', power)``,
+    ``('roller_stop',)``, ``('tilt', deg)``, ``('fire', confirm)``; ``confirm`` is True only for
+    a JSON ``true`` (not ``1`` or ``"true"``).
 
     Anything else (binary frames, other types, broken JSON) is None and ignored. Values are
     passed on unchecked; DriveArbiter.request refuses what is not a finite number.
@@ -241,6 +313,14 @@ def parse_request(text):
         return ('stop', 'mine' if message.get('scope') == 'mine' else 'any')
     if message.get('type') == 'drive':
         return ('drive', message.get('linear'), message.get('angular'))
+    if message.get('type') == 'roller':
+        return ('roller', message.get('power'))
+    if message.get('type') == 'roller_stop':
+        return ('roller_stop',)
+    if message.get('type') == 'tilt':
+        return ('tilt', message.get('deg'))
+    if message.get('type') == 'fire':
+        return ('fire', message.get('confirm') is True)
     return None
 
 
