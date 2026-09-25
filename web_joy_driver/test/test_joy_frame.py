@@ -11,8 +11,21 @@ from web_joy_driver.joy_frame import (
     FrameError,
     JoyHold,
     apply_deadzone,
+    is_neutral_frame,
     parse_frame,
 )
+
+
+def test_is_neutral_frame():
+    assert is_neutral_frame({"type": "joy", "axes": [0, 0.0, -0.0], "buttons": [0, False]})
+    assert is_neutral_frame({"type": "joy"})  # missing arrays count as zeros
+    assert not is_neutral_frame({"type": "joy", "axes": [0.01], "buttons": []})
+    assert not is_neutral_frame({"type": "joy", "axes": [], "buttons": [1]})
+    assert not is_neutral_frame({"type": "joy", "axes": [], "buttons": [True]})
+    assert not is_neutral_frame({"type": "joy", "axes": [float("nan")]})
+    assert not is_neutral_frame({"type": "joy", "axes": ["0"]})
+    assert not is_neutral_frame({"type": "stop"})
+    assert not is_neutral_frame([0, 0])
 
 
 def test_apply_deadzone_clamps_and_zeroes():

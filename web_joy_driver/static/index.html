@@ -7,7 +7,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#0a0e14">
-<title>QUESTiX Web Joy</title>
+<title>ブラウザ・スマホで操作 · QUESTiX</title>
 <style>
   :root {
     --bg: #0a0e14; --bg2: #0d131c; --panel: #121925; --panel2: #172131;
@@ -61,7 +61,17 @@
     color: var(--cyan); border: 1px solid rgba(34, 211, 238, .45); background: var(--cyan-dim);
   }
   header .host { color: var(--mute); font: 12px var(--mono); }
+  /* Which robot this page drives: a phone on the wrong Wi-Fi should notice. */
+  .robot {
+    display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 42vw; padding: 3px 9px;
+    border-radius: 8px; border: 1px solid var(--line2); background: var(--bg); color: var(--fg);
+    font: 700 12px/1.2 var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .robot[hidden] { display: none; }
+  .robot svg { width: 14px; height: 14px; flex: none; }
+  .robot span { overflow: hidden; text-overflow: ellipsis; }
   .spacer { flex: 1; }
+  .chips { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
   .chip {
     display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
     border: 1px solid var(--line); background: var(--panel); font-size: 12px; white-space: nowrap; color: var(--dim);
@@ -75,19 +85,29 @@
   .chip.bad { color: var(--fg); border-color: rgba(244, 63, 94, .55); }
   .chip.bad::before { background: var(--bad); box-shadow: 0 0 8px var(--bad); }
   @keyframes blink { 50% { opacity: .35; } }
+  /* Every tappable control is at least 44 x 44 px. */
   button.icon {
-    background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 9px;
-    padding: 5px 10px; font-size: 13px; touch-action: manipulation; min-height: 30px;
+    background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 10px;
+    padding: 6px 12px; font-size: 14px; touch-action: manipulation; min-height: 44px; min-width: 44px;
   }
   button.icon:active { background: var(--panel2); }
   button.icon.primary { border-color: rgba(34, 211, 238, .6); background: var(--cyan-dim); color: var(--cyan); font-weight: 600; }
+  button.icon.square { padding: 0; width: 44px; font-size: 17px; }
+  button[hidden] { display: none; }
 
   /* ------------------------------------------------------------ banner */
   #banner { display: none; padding: 8px 12px; text-align: center; font-weight: 700; letter-spacing: .04em; }
   #banner.bad { display: block; background: var(--bad); color: #fff; animation: pulse-bg 1.2s infinite; }
   #banner.warn { display: block; background: var(--warn); color: #201700; }
   #banner.info { display: block; background: var(--accent); color: #041014; }
+  #banner.ok { display: block; background: var(--ok); color: #03140d; }
   #banner .sub { display: block; font-weight: 400; font-size: 12px; opacity: .92; }
+  #banner .acts { display: flex; justify-content: center; gap: 8px; margin-top: 6px; }
+  #banner .acts button {
+    min-height: 44px; padding: 6px 16px; border-radius: 10px; font-weight: 700; touch-action: manipulation;
+    border: 1px solid rgba(0, 0, 0, .35); background: rgba(255, 255, 255, .85); color: #111;
+  }
+  #banner .acts button.quiet { background: transparent; color: inherit; }
   @keyframes pulse-bg { 50% { filter: brightness(.8); } }
 
   /* ------------------------------------------------------------ controls */
@@ -97,14 +117,24 @@
   }
   .seg { display: inline-flex; padding: 3px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line); }
   .seg button {
-    background: transparent; color: var(--dim); border: 0; border-radius: 8px; padding: 5px 12px; font-size: 13px; font-weight: 600;
-    touch-action: manipulation;
+    background: transparent; color: var(--dim); border: 0; border-radius: 8px; padding: 6px 14px; font-size: 13px; font-weight: 600;
+    touch-action: manipulation; min-height: 44px;
   }
   .seg button.on { background: var(--panel2); color: var(--cyan); box-shadow: inset 0 0 0 1px rgba(34, 211, 238, .4); }
+  /* Keyboard mode needs a real keyboard: hidden on touch-only devices. */
+  .touch-only .seg { display: none; }
   #inputMode { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
   #inputHelp { margin: 0; color: var(--dim); font-size: 12px; flex: 1 1 260px; min-width: 0; }
   #inputHelp kbd { margin: 0 1px; }
-  #stop { border-color: rgba(244, 63, 94, .55); color: #ffb4c0; }
+  .acts-row { display: inline-flex; gap: 8px; }
+  #stop {
+    border-color: rgba(244, 63, 94, .7); background: rgba(244, 63, 94, .16); color: #ffd0d8; font-weight: 800;
+    padding: 6px 16px; letter-spacing: .06em;
+  }
+  #stop::before {
+    content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 7px; border-radius: 2px;
+    background: var(--bad); vertical-align: 0;
+  }
 
   /* ------------------------------------------------------------ main */
   /* Two compact groups instead of full-screen zones: "移動" holds both
@@ -286,8 +316,16 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   .ov h2 { margin: 0 0 4px; font-size: 17px; }
   .ov p { margin: 0; color: var(--dim); font-size: 13px; }
+  .ov p + p { margin-top: 8px; }
+  .ov .who { color: var(--mute); font: 12px var(--mono); }
   .ov button { margin-top: 14px; padding: 9px 18px; font-size: 14px; }
   .ov button[hidden] { display: none; }
+  /* Someone else operates: this page is a read-only view, the camera stays visible. */
+  #overlay.viewer { align-items: flex-start; background: rgba(10, 14, 20, .5); backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .ov.viewer .spin { border-color: var(--amber); animation: none; }
+  .ov.viewer .spin::after { content: "1"; display: block; text-align: center; font-weight: 800; color: var(--amber); line-height: 36px; }
+  .ov.free .spin { border-color: var(--ok); animation: none; }
+  .ov.free .spin::after { content: "▶"; display: block; text-align: center; color: var(--ok); line-height: 36px; }
 
   /* ------------------------------------------------------------ footer */
   footer {
@@ -334,8 +372,8 @@
     main { gap: 6px; padding: 6px; }
     .group { border-radius: 12px; padding: 26px 6px 6px; }
     .group.move { gap: 6px; }
-    .zone { width: clamp(170px, 24vw, 220px); height: min(58vh, 220px); border-radius: 10px; }
-    .buttons { --bs: 56px; --bf: 84px; gap: 8px; padding: 4px 6px 2px; }
+    .zone { width: clamp(170px, 24vw, 220px); height: min(52vh, 210px); border-radius: 10px; }
+    .buttons { --bs: 54px; --bf: 80px; gap: 7px; padding: 4px 6px 2px; }
     .stick { --s: 120px; }
     .stick .arr { font-size: 9px; }
     .stick .arr.n { top: 4px; } .stick .arr.s { bottom: 4px; } .stick .arr.w { left: 7px; } .stick .arr.e { right: 7px; }
@@ -361,15 +399,46 @@
   }
   @media (max-width: 520px) {
     header { gap: 6px; padding: 6px 8px; }
-    header .host, .brand .tag { display: none; }
-    .chip { padding: 3px 7px; font-size: 11px; }
-    button.icon { padding: 4px 8px; }
-    /* mode switch + release button on one row, hint text below */
+    header .host, .brand .tag, .brand h1 { display: none; }
+    /* Row 1: logo, robot name, ? and full screen. Row 2: the status chips, then
+       操作をやめる / 止める (on a row of their own when they do not fit). */
+    .chips { order: 5; flex: 1 1 auto; }
+    .acts-row { order: 6; margin-left: auto; }
+    .chip { padding: 3px 8px; font-size: 11px; }
+    .robot { max-width: none; flex: 0 1 auto; }
+    /* No hint line: the zones carry their own hints and the help sheet the rest,
+       so a notice banner never pushes the cards under the header. */
     #controls { gap: 6px 10px; }
-    #inputHelp { flex: 1 1 100%; order: 3; }
-    #stop { margin-left: auto; }
-    footer .raw { display: none; }
-    .meter .bar { width: 60px; }
+    #inputHelp { display: none; }
+    footer { padding: 5px 8px; }
+    .meter { flex: 1 1 0; min-width: 0; gap: 4px; }
+    .meter .ml { width: auto; flex: none; }
+    .meter .bar { flex: 1 1 auto; width: auto; min-width: 20px; }
+    .meter .mv { width: 36px; flex: none; }
+  }
+  @media (max-width: 900px) {
+    header .host, .brand .tag { display: none; }
+  }
+  /* Phones: the meters only; debug numbers would clip them. A touch-only phone has
+     nothing left in the controls row (no keyboard switch, no hint line). */
+  @media (max-width: 520px), (max-height: 480px) {
+    footer .stat, footer .raw, footer .spacer { display: none; }
+    footer { justify-content: space-between; gap: 8px; }
+    .touch-only #controls { display: none; }
+  }
+  @media (max-height: 480px) and (orientation: landscape) {
+    .brand h1 { display: none; }
+    #banner { padding: 4px 10px; }
+    #banner .sub { display: inline; margin-left: 10px; }
+    #banner .acts { display: inline-flex; margin: 0 0 0 12px; vertical-align: middle; }
+    #overlay { padding: 8px; }
+    .ov { max-width: 560px; padding: 10px 14px; }
+    .ov .spin { width: 28px; height: 28px; margin-bottom: 6px; border-width: 2px; }
+    .ov.bad .spin::after, .ov.viewer .spin::after, .ov.free .spin::after { line-height: 24px; font-size: 13px; }
+    .ov h2 { font-size: 15px; }
+    .ov p { font-size: 12px; }
+    .ov p + p { margin-top: 4px; }
+    .ov button { margin-top: 8px; }
   }
   @media (prefers-reduced-motion: reduce) {
     .chip.warn::before, #banner.bad, .ov .spin { animation: none; }
@@ -379,19 +448,26 @@
 <body>
 <div id="app">
   <header>
-    <div class="brand" aria-label="QUESTiX Web Joy">
+    <div class="brand" aria-label="QUESTiX ブラウザ・スマホで操作">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5 20.2 7.2v9.6L12 21.5 3.8 16.8V7.2Z" fill="none" stroke="#22d3ee" stroke-width="1.6" stroke-linejoin="round"/><circle cx="12" cy="10" r="2.4" fill="#22d3ee"/><path d="M12 12.4v4.2M8.8 16.6h6.4" stroke="#22d3ee" stroke-width="1.6" stroke-linecap="round"/></svg>
-      <h1>QUESTiX</h1><span class="tag">WEB JOY</span>
+      <h1>QUESTiX</h1><span class="tag">ブラウザ・スマホで操作</span>
     </div>
+    <span class="robot" id="robot" title="操作するロボット" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="4.5" width="11" height="8" rx="2" fill="none" stroke="#22d3ee" stroke-width="1.4"/><circle cx="6" cy="8.5" r="1.1" fill="#22d3ee"/><circle cx="10" cy="8.5" r="1.1" fill="#22d3ee"/><path d="M8 4.5V2" stroke="#22d3ee" stroke-width="1.4" stroke-linecap="round"/></svg><span id="robotName"></span></span>
     <span class="host" id="host"></span>
     <div class="spacer"></div>
-    <span class="chip" id="estop">非常停止: --</span>
-    <span class="chip" id="conn">未接続</span>
+    <div class="chips">
+      <span class="chip" id="estop">非常停止: --</span>
+      <span class="chip" id="conn">未接続</span>
+    </div>
+    <div class="acts-row">
+      <button class="icon" id="releaseBtn" title="操作をほかの端末に譲る" hidden>操作をやめる</button>
+      <button class="icon" id="stop" title="この画面の操作と、教材の走行・ローラーを止めます（どの端末からでも押せます）">止める</button>
+    </div>
     <button class="icon primary" id="reconnect" hidden>再接続</button>
-    <button class="icon" id="helpBtn" title="操作ガイド" aria-label="操作ガイド">?</button>
-    <button class="icon" id="fullscreen" title="全画面" aria-label="全画面">⛶</button>
+    <button class="icon square" id="helpBtn" title="操作ガイド" aria-label="操作ガイド">?</button>
+    <button class="icon square" id="fullscreen" title="全画面" aria-label="全画面">⛶</button>
   </header>
-  <div id="banner"></div>
+  <div id="banner" role="status"></div>
   <div id="controls">
     <select id="inputMode" aria-hidden="true" tabindex="-1">
       <option value="pointer">タッチ・マウス</option>
@@ -402,7 +478,6 @@
       <button type="button" id="modeKeyboard">キーボード</button>
     </div>
     <p id="inputHelp">スティック領域をドラッグ、ボタンは押している間だけ動きます。指を離すと止まります。</p>
-    <button class="icon" id="stop" title="この端末の入力をすべて解除">入力を解除 <kbd>Esc</kbd></button>
   </div>
   <main>
     <section class="group move">
@@ -433,7 +508,10 @@
         <div class="spin"></div>
         <h2 id="ovTitle">接続中…</h2>
         <p id="ovSub">ロボットに接続しています</p>
+        <p class="who" id="ovWho"></p>
         <button class="icon primary" id="overlayReconnect" hidden>再接続</button>
+        <button class="icon primary" id="claimBtn" hidden>操作する</button>
+        <button class="icon primary" id="requestBtn" hidden>操作したいと伝える</button>
       </div>
     </div>
   </main>
@@ -468,24 +546,35 @@
           <li><b><kbd>Space</kbd> を押したまま</b>操作キーを押します。Space を離すと全入力が解除されます。</li>
           <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / 矢印: 移動、<kbd>Q</kbd><kbd>E</kbd>: 旋回</li>
           <li><kbd>I</kbd><kbd>K</kbd>: TILT ▲▼、<kbd>F</kbd>: FIRE、<kbd>R</kbd>: ROLLER</li>
-          <li>キーはキーボード上の位置で判定します。</li>
+          <li><kbd>Esc</kbd>: この端末の入力をすべて解除。</li>
+          <li>キーはキーボード上の位置で判定します。タッチだけの端末では表示しません。</li>
         </ul>
       </section>
       <section>
         <h3>表示の見方</h3>
         <ul>
-          <li><b>接続</b>: ロボットとの WebSocket 状態。切れると自動で再接続します。</li>
+          <li><b>ロボット名</b>: 左上。操作したいロボットの名前か確かめてください (違うときは Wi-Fi を確認)。</li>
+          <li><b>接続</b>: 「操作中」はこの端末で操作できる状態、「閲覧のみ」はほかの端末が操作している状態です。切れると自動で再接続します。</li>
           <li><b>非常停止</b>: ロボット側の非常停止状態。停止中は入力しても動きません。</li>
-          <li><b>カメラ</b>: 中央にロボットのカメラ映像を表示します (ノード側で <code>camera_topic</code> を設定)。映像が止まると表示でお知らせします。</li>
-          <li>下部のメーターは送信中の値です (前後・左右・旋回)。</li>
+          <li><b>教材が走らせています</b>: QUESTiX LAB の教材がロボットを動かしている間に出ます。スティックを動かすとこの画面の操作に切り替わります。</li>
+          <li><b>カメラ</b>: ロボットのカメラ映像が届くと中央に表示します (ノード側で <code>camera_topic</code> を設定したときだけ)。</li>
+          <li>下部のメーターはロボットに送っている値です (前後・左右・旋回)。</li>
+        </ul>
+      </section>
+      <section>
+        <h3>1 台ずつ操作</h3>
+        <ul>
+          <li>教材と同じく、<b>操作できるのは 1 台だけ</b>です。ほかの端末には「ほかの端末（…）が操作中です」と、その端末の種類と IP アドレスが出ます。</li>
+          <li>代わるときは「操作したいと伝える」を押すと、操作中の端末に「譲る」ボタンが出ます。操作中の端末で「操作をやめる」を押しても代われます。</li>
+          <li>操作中の端末の接続が切れたときや画面を閉じたときも、ほかの端末が「操作する」を押せるようになります。</li>
         </ul>
       </section>
       <section class="warnbox">
         <h3>安全</h3>
         <ul>
+          <li><b>「止める」はどの端末からでも押せます</b>。この画面からの操作をニュートラルにし、教材の走行とローラーにも止めるを送ります。操作中の端末は、指を離してから触れ直すまで動かせません。</li>
           <li>接続が切れる・画面を閉じる・他のアプリに切り替えると、ロボットは<b>自動でニュートラル</b>に戻ります。</li>
-          <li>後から接続した端末が操作を引き継ぎます。引き継がれた側は「再接続」で戻れます。</li>
-          <li>「入力を解除」はこのページの入力解除であり、GPIO 非常停止の代わりではありません。</li>
+          <li>「止める」はこのページと教材からの指令を止めるもので、GPIO 非常停止の代わりではありません。</li>
         </ul>
       </section>
     </div>
@@ -519,6 +608,10 @@
   const HEARTBEAT_MS = 100;        // resend the current state at least this often
   const RECONNECT_MIN_MS = 500, RECONNECT_MAX_MS = 5000;
   const CAM_STALE_MS = 3000;       // no camera frame received by this page for this long -> badge
+  const DEFAULT_LAB_PORT = 8897;   // questix_lab_bridge; the node's welcome carries the real one
+  const LAB_STOP_TIMEOUT_MS = 2500;
+  const NOTICE_MS = 6000, REQUEST_NOTICE_MS = 20000;
+  const CLOSE_AUTH_FAILED = 4401;
 
   const axes = new Array(NUM_AXES).fill(0);
   const buttons = new Array(NUM_BUTTONS).fill(0);
@@ -530,41 +623,64 @@
   $("host").textContent = location.host;
   const attr = (el, name, value) => { if (el.setAttribute) el.setAttribute(name, value); };
   const haptic = (ms) => { if (navigator.vibrate) { try { navigator.vibrate(ms); } catch (e) { /* ignore */ } } };
+  const media = (query) => { try { return !!(window.matchMedia && window.matchMedia(query).matches); } catch (e) { return false; } };
+  // Keyboard mode needs a keyboard: hidden on touch-only devices (a touch screen
+  // and no mouse / trackpad: phones and plain tablets). Unknown devices keep it.
+  const keyboardCapable = !(media("(any-pointer: coarse)") && !media("(any-pointer: fine)"));
+  const touchScreen = (navigator.maxTouchPoints || 0) > 0;
+  // Identifies this browser tab across reconnects, so a Wi-Fi drop does not lock
+  // the operator out behind its own stale connection. Not a secret.
+  const pageId = (() => {
+    const make = () => Array.from({ length: 16 }, () => Math.floor(Math.random() * 36).toString(36)).join("");
+    try {
+      let v = sessionStorage.getItem("questix-web-joy-page");
+      if (!v) { v = make(); sessionStorage.setItem("questix-web-joy-page", v); }
+      return v;
+    } catch (e) { return make(); }
+  })();
+
+  // ---------------------------------------------------------------- state
+  const state = {
+    phase: "connecting",   // connecting | open | closed | auth
+    controller: false,     // this page is the operator
+    owner: null,           // {id, label, address, since_sec} of the operator, or null
+    you: null,             // this connection {id, label, address}
+    robot: "",
+    labPort: DEFAULT_LAB_PORT,
+    estop: null, estopReason: "",
+    arbiter: null,         // twist_arbiter status {active, reason, lab_locked} or null
+    lagging: false,
+    wantControl: true,     // (re)connect asking for the operator role
+    reclaim: false,        // the role was given up only because the page was hidden
+    notice: null,          // {cls, text, sub, until, actions}
+    clients: 0,
+  };
+  const who = (c) => c ? `${c.label || "端末"}・${c.address || "?"}` : "";
 
   // ---------------------------------------------------------------- transport
-  let ws = null, released = false, reconnectDelay = RECONNECT_MIN_MS, reconnectTimer = null;
+  let ws = null, reconnectDelay = RECONNECT_MIN_MS, reconnectTimer = null;
   let dirty = false, rafPending = false;
+  const isOpen = () => !!ws && ws.readyState === WebSocket.OPEN;
   function canInput() {
-    return focused && !document.hidden && !released && ws && ws.readyState === WebSocket.OPEN;
+    return focused && !document.hidden && isOpen() && state.controller;
+  }
+  function send(payload) {
+    if (!isOpen()) return false;
+    ws.send(JSON.stringify(payload));
+    return true;
   }
 
   function wsUrl() {
     const proto = location.protocol === "https:" ? "wss" : "ws";
-    const q = token ? "?token=" + encodeURIComponent(token) : "";
-    return `${proto}://${location.host}/ws${q}`;
-  }
-  // Header chip + full-screen overlay. The overlay only covers the sticks
-  // while the socket is not open, so it never hides live controls.
-  function setConn(cls, text, sub) {
-    const el = $("conn"); el.className = "chip " + cls; el.textContent = text;
-    const open = ws && ws.readyState === WebSocket.OPEN;
-    $("overlay").hidden = !!open;
-    if (open) return;
-    $("ovBox").className = "ov " + (cls === "bad" ? "bad" : "");
-    $("ovTitle").textContent = text;
-    $("ovSub").textContent = sub || "";
-    $("overlayReconnect").hidden = !released;
-  }
-  function setBanner(cls, text, sub) {
-    const el = $("banner");
-    if (!cls) { el.className = ""; el.textContent = ""; return; }
-    el.className = cls; el.textContent = text;
-    if (sub) { const s = document.createElement("span"); s.className = "sub"; s.textContent = sub; el.appendChild(s); }
+    const q = [];
+    if (token) q.push("token=" + encodeURIComponent(token));
+    q.push("cid=" + pageId, "claim=" + (state.wantControl || state.reclaim ? "1" : "0"));
+    if (touchScreen) q.push("touch=1");
+    return `${proto}://${location.host}/ws?${q.join("&")}`;
   }
   function sendNow() {
     dirty = false;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify({ type: "joy", axes, buttons }));
+    send({ type: "joy", axes, buttons });
   }
   function markDirty() {
     dirty = true;
@@ -578,72 +694,253 @@
     if (document.hidden) return;
     resetAll();
     if (ws) ws.close();
-    released = false;
-    $("reconnect").hidden = true;
+    state.phase = "connecting"; state.controller = false;
     const socket = new WebSocket(wsUrl());
     socket.binaryType = "arraybuffer";
     ws = socket;
-    setConn("warn", "接続中…", `${location.host} のロボットに接続しています`);
+    render();
     socket.onopen = () => {
       if (ws !== socket) return;
-      resetAll(); reconnectDelay = RECONNECT_MIN_MS; setConn("ok", "接続"); setBanner("");
+      resetAll(); reconnectDelay = RECONNECT_MIN_MS; state.phase = "open"; render();
     };
     socket.onmessage = (ev) => {
       if (ws !== socket) return;
       if (typeof ev.data !== "string") { onCameraFrame(ev.data); return; }
       let msg; try { msg = JSON.parse(ev.data); } catch (e) { return; }
-      if (msg.type === "status") onStatus(msg);
-      else if (msg.type === "released") { released = true; resetAll(); setBanner("warn", "他の端末が操作を引き継ぎました", "この端末で操作するには「再接続」を押してください"); }
+      onMessage(msg);
     };
     socket.onclose = (ev) => {
       if (ws !== socket) return;
       ws = null;
       resetAll();
       camera.disconnected();
-      if (ev.code === 4000) released = true;
-      if (released) {
-        setConn("bad", "他の端末が操作中", "後から接続した端末が操作を引き継ぎました。この端末で操作するには再接続してください");
-        $("reconnect").hidden = false; return;
+      state.controller = false; state.lagging = false;
+      if (ev.code === CLOSE_AUTH_FAILED || ev.code === 1008) {
+        state.phase = "auth"; render(); return;
       }
-      if (ev.code === 1008 || ev.code === 4401) {
-        released = true; setConn("bad", "認証エラー", "URL の token が違います。管理画面の QR または URL を確認してください");
-        setBanner("bad", "トークンが違います"); $("reconnect").hidden = false; return;
-      }
-      setConn("bad", "切断 / 再接続待ち", "ロボット側は自動でニュートラルに戻ります。接続が回復すると自動で再開します");
-      setBanner("warn", "ロボットとの接続が切れました", "ロボット側は自動でニュートラルに戻ります");
+      state.phase = "closed"; render();
       if (!document.hidden) reconnectTimer = setTimeout(connect, reconnectDelay);
       reconnectDelay = Math.min(RECONNECT_MAX_MS, reconnectDelay * 2);
     };
     socket.onerror = () => { /* onclose follows */ };
   }
-  $("reconnect").addEventListener("click", () => { clearTimeout(reconnectTimer); connect(); });
-  $("overlayReconnect").addEventListener("click", () => { clearTimeout(reconnectTimer); connect(); });
-  setInterval(() => { if (ws && ws.readyState === WebSocket.OPEN) sendNow(); }, HEARTBEAT_MS);
+  const manualReconnect = () => { clearTimeout(reconnectTimer); connect(); };
+  $("reconnect").addEventListener("click", manualReconnect);
+  $("overlayReconnect").addEventListener("click", manualReconnect);
+  setInterval(() => { if (isOpen() && state.controller) sendNow(); }, HEARTBEAT_MS);
+
+  function setRole(controller) {
+    const was = state.controller;
+    state.controller = !!controller;
+    if (was && !state.controller) resetAll();  // lost the role: never keep a held input
+    if (!state.reclaim && !document.hidden) state.wantControl = state.controller;
+  }
+  function onMessage(msg) {
+    switch (msg.type) {
+      case "welcome":
+        state.you = msg.you || null;
+        if (msg.robot && msg.robot.name) state.robot = String(msg.robot.name);
+        if (Number.isInteger(msg.lab_bridge_port)) state.labPort = msg.lab_bridge_port;
+        state.owner = msg.owner || null;
+        state.reclaim = false;
+        setRole(msg.controller);
+        break;
+      case "status": onStatus(msg); return;
+      case "stopped": {
+        const mine = !!(state.you && msg.by && msg.by.id === state.you.id);
+        if (mine) return;  // our own button already said so
+        if (state.controller) {
+          resetAll();
+          notice("warn", `${who(msg.by)} で「止める」が押されました`, "もう一度動かすには、指を離してから触れ直してください");
+        } else {
+          notice("info", `${who(msg.by)} で「止める」が押されました`, "");
+        }
+        return;
+      }
+      case "refused":
+        state.owner = msg.owner || state.owner;
+        notice("warn", `ほかの端末（${who(msg.owner)}）が操作中です`, "操作できるのは 1 台だけです");
+        return;
+      case "request_sent":
+        notice("info", msg.repeat ? "もう伝えてあります" : "操作中の端末に伝えました",
+          `${who(msg.owner)} で「譲る」が押されると、この端末で操作できます`);
+        return;
+      case "handover_request":
+        if (!state.controller || !msg.from) return;
+        notice("info", `${who(msg.from)} が操作したいと言っています`, "譲ると、この端末では操作できなくなります", REQUEST_NOTICE_MS, [
+          { label: "譲る", run: () => { resetAll(); state.wantControl = false; send({ type: "release", to: msg.from.id }); clearNotice(); } },
+          { label: "あとで", quiet: true, run: () => clearNotice() },
+        ]);
+        return;
+      default: return;
+    }
+    render();
+  }
 
   function onStatus(s) {
-    const e = $("estop");
-    if (s.estop === true) {
-      e.className = "chip bad"; e.textContent = "非常停止: 停止中";
-      setBanner("bad", "非常停止中", s.estop_reason || "");
-    } else if (s.estop === false) {
-      e.className = "chip ok"; e.textContent = "非常停止: 解除";
-      if ($("banner").className === "bad") setBanner("");
-    } else {
-      e.className = "chip"; e.textContent = "非常停止: 情報なし";
-    }
+    state.estop = s.estop === true ? true : s.estop === false ? false : null;
+    state.estopReason = s.estop_reason || "";
+    state.arbiter = s.arbiter && typeof s.arbiter === "object" ? s.arbiter : null;
+    state.owner = s.owner || null;
+    state.clients = s.clients || 0;
+    setRole(s.controller);
+    state.lagging = s.hold === "timeout" && !!s.controller;
     camera.status(s);
     const hold = { active: "送信中", timeout: "タイムアウト→ニュートラル", released: "フレーム未受信" }[s.hold] || s.hold;
     const age = s.rx_age_ms == null ? "-" : Math.round(s.rx_age_ms);
     $("dbgStat").textContent = `${hold} · 遅延 ${age}ms · 接続 ${s.clients}${s.controller ? "" : " · 閲覧のみ"}`;
-    if (s.hold === "timeout" && s.controller) setConn("warn", "接続 (フレーム遅延)");
-    else if (s.controller && ws && ws.readyState === WebSocket.OPEN) setConn("ok", "接続");
+    // A viewer's meters show what the operator is sending.
+    if (!state.controller && Array.isArray(s.axes)) renderMeters(s.axes.map(Number));
+    render();
   }
+
+  // ---------------------------------------------------------------- notices + rendering
+  let noticeTimer = null;
+  function notice(cls, text, sub, ms = NOTICE_MS, actions = null) {
+    state.notice = { cls, text, sub, until: Date.now() + ms, actions };
+    clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(render, ms + 50);
+    render();
+  }
+  function clearNotice() { state.notice = null; clearTimeout(noticeTimer); render(); }
+
+  function setChip(cls, text) { const el = $("conn"); el.className = "chip " + cls; el.textContent = text; }
+  function setBanner(b) {
+    const el = $("banner");
+    el.textContent = "";
+    if (!b) { el.className = ""; return; }
+    el.className = b.cls; el.textContent = b.text;
+    if (b.sub) { const s = document.createElement("span"); s.className = "sub"; s.textContent = b.sub; el.appendChild(s); }
+    if (b.actions) {
+      const row = document.createElement("div"); row.className = "acts";
+      for (const a of b.actions) {
+        const btn = document.createElement("button");
+        btn.type = "button"; btn.textContent = a.label; if (a.quiet) btn.className = "quiet";
+        btn.addEventListener("click", a.run);
+        row.appendChild(btn);
+      }
+      el.appendChild(row);
+    }
+  }
+  function banner() {
+    if (state.estop === true) return { cls: "bad", text: "非常停止中", sub: state.estopReason };
+    const n = state.notice;
+    if (n && Date.now() < n.until) return n;
+    if (state.phase === "open" && state.arbiter && state.arbiter.active === "lab") {
+      return { cls: "info", text: "教材が走らせています",
+        sub: state.controller ? "スティックを動かすとこの画面の操作に切り替わります。止めるときは「止める」"
+          : "QUESTiX LAB の実験でロボットが動いています。止めるときは「止める」" };
+    }
+    if (state.phase === "closed") return { cls: "warn", text: "ロボットとの接続が切れました", sub: "ロボット側は自動でニュートラルに戻ります" };
+    if (state.phase === "auth") return { cls: "bad", text: "トークンが違います", sub: "" };
+    return null;
+  }
+  function overlay() {
+    switch (state.phase) {
+      case "connecting": return { cls: "", title: "接続中…", sub: `${location.host} のロボットに接続しています` };
+      case "closed": return { cls: "bad", title: "切断 / 再接続待ち", sub: "ロボット側は自動でニュートラルに戻ります。接続が回復すると自動で再開します" };
+      case "auth": return { cls: "bad", title: "認証エラー", sub: "URL の token が違うか、ありません。管理画面の QR または URL から開き直してください", reconnect: true };
+      default: break;
+    }
+    if (state.controller) return null;
+    const me = state.you ? `この端末: ${who(state.you)}` : "";
+    if (state.owner) {
+      const min = Math.floor((state.owner.since_sec || 0) / 60);
+      const since = min >= 1 ? `${min} 分前から操作しています` : "操作を始めたところです";
+      return { cls: "viewer", viewer: true, title: `ほかの端末（${who(state.owner)}）が操作中です`,
+        sub: `操作できるのは 1 台だけです（${since}）。代わるときは「操作したいと伝える」を押すか、その端末で「操作をやめる」を押してもらってください。「止める」はこの端末からも押せます。`,
+        who: me, request: true };
+    }
+    return { cls: "free", viewer: true, title: "いまは誰も操作していません",
+      sub: "「操作する」を押すと、この端末で操作できます。", who: me, claim: true };
+  }
+  function render() {
+    // header
+    const robotEl = $("robot");
+    robotEl.hidden = !state.robot;
+    $("robotName").textContent = state.robot;
+    document.title = state.robot ? `${state.robot} · ブラウザ・スマホで操作` : "ブラウザ・スマホで操作 · QUESTiX";
+    const e = $("estop");
+    if (state.estop === true) { e.className = "chip bad"; e.textContent = "非常停止: 停止中"; }
+    else if (state.estop === false) { e.className = "chip ok"; e.textContent = "非常停止: 解除"; }
+    else { e.className = "chip"; e.textContent = state.phase === "open" ? "非常停止: 情報なし" : "非常停止: --"; }
+    if (state.phase === "connecting") setChip("warn", "接続中…");
+    else if (state.phase === "auth") setChip("bad", "認証エラー");
+    else if (state.phase === "closed") setChip("bad", "切断");
+    else if (state.controller) setChip(state.lagging ? "warn" : "ok", state.lagging ? "操作中 (遅延)" : "操作中");
+    else setChip("", "閲覧のみ");
+    $("reconnect").hidden = state.phase !== "auth";
+    $("releaseBtn").hidden = !(state.phase === "open" && state.controller);
+    // overlay over the controls whenever this page cannot operate
+    const ov = overlay();
+    $("overlay").hidden = !ov;
+    if (ov) {
+      $("overlay").className = ov.viewer ? "viewer" : "";
+      $("ovBox").className = "ov " + ov.cls;
+      $("ovTitle").textContent = ov.title;
+      $("ovSub").textContent = ov.sub || "";
+      $("ovWho").textContent = ov.who || "";
+      $("overlayReconnect").hidden = !ov.reconnect;
+      $("claimBtn").hidden = !ov.claim;
+      $("requestBtn").hidden = !ov.request;
+    }
+    setBanner(banner());
+  }
+
+  // ---------------------------------------------------------------- stop
+  // 止める works on every page, operator or not: the node drops the browser
+  // input to neutral (and ignores the operator until it lets go), and the lab
+  // bridge ends a lesson's driving run and roller session. Both are plain
+  // "stop" requests any page may send; nothing else is sent to the bridge.
+  function stopLab(done) {
+    const port = state.labPort;
+    if (!port) { done(null); return; }
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    let sock, finished = false, timer = null;
+    const finish = (ok) => {
+      if (finished) return;
+      finished = true; clearTimeout(timer);
+      try { sock.close(); } catch (e) { /* ignore */ }
+      done(ok);
+    };
+    try { sock = new WebSocket(`${proto}://${location.hostname}:${port}/`); } catch (e) { done(false); return; }
+    timer = setTimeout(() => finish(false), LAB_STOP_TIMEOUT_MS);
+    sock.onopen = () => {
+      try {
+        sock.send(JSON.stringify({ type: "stop" }));
+        sock.send(JSON.stringify({ type: "roller_stop" }));
+      } catch (e) { finish(false); return; }
+      finish(true);  // queued frames are sent before the close frame
+    };
+    sock.onerror = () => finish(false);
+    sock.onclose = () => finish(false);
+    sock.onmessage = () => {};
+  }
+  function stopAll() {
+    resetAll();
+    const sent = send({ type: "stop" });
+    const labWasDriving = !!(state.arbiter && state.arbiter.active === "lab");
+    notice("ok", "止めました", sent ? "教材にも止めるを送っています…" : "ロボットとの接続が切れています。教材に止めるを送っています…");
+    stopLab((ok) => {
+      if (ok) notice("ok", "止めました", sent ? "この画面の操作と、教材の走行・ローラーを止めました" : "教材の走行・ローラーを止めました（この画面はロボットに接続していません）");
+      else if (ok === false && labWasDriving) notice("warn", "教材の走行を止められませんでした", `教材の中継（ポート ${state.labPort}）に接続できません。教材の画面の「止める」か、非常停止ボタンを使ってください`, 10000);
+      else notice("ok", "止めました", sent ? "この画面の操作を止めました（教材の中継は動いていません）" : "ロボットとの接続が切れています。ロボット側は自動でニュートラルに戻ります");
+    });
+  }
+  $("stop").addEventListener("click", () => { stopAll(); $("stop").blur(); });
+  $("releaseBtn").addEventListener("click", () => {
+    resetAll(); state.wantControl = false; state.reclaim = false; send({ type: "release" }); $("releaseBtn").blur();
+  });
+  $("claimBtn").addEventListener("click", () => { state.wantControl = true; send({ type: "claim" }); });
+  $("requestBtn").addEventListener("click", () => { send({ type: "request" }); });
 
   // ---------------------------------------------------------------- camera
   // The node relays sensor_msgs/CompressedImage frames as binary WebSocket
   // messages (one JPEG/PNG per message). The newest frame always wins: while
   // the <img> is still decoding, later frames replace the pending one and
-  // are never queued, so a slow phone lags by at most one image.
+  // are never queued, so a slow phone lags by at most one image. The panel
+  // appears only once a frame has arrived, so a robot without a camera driver
+  // keeps the plain two-card layout.
   const camera = (() => {
     const img = $("camImg"), badge = $("camBadge");
     const supported = typeof Blob !== "undefined" && typeof URL !== "undefined" && !!URL.createObjectURL;
@@ -673,25 +970,26 @@
       badge.hidden = false; badge.className = "cam-badge " + cls;
       $("camBadgeTitle").textContent = title; $("camBadgeSub").textContent = sub || "";
     }
+    const layout = () => $("app").classList.toggle("has-cam", enabled && frames > 0);
     function onFrame(buf) {
+      if (!enabled) return;
       frames += 1;
       lastFrameAt = Date.now();
       times.push(lastFrameAt);
-      if (!supported || !enabled) return;
+      if (frames === 1) { layout(); setBadge(supported ? "" : "stale", "このブラウザでは表示できません", "画像の表示に対応していません"); }
+      if (!supported) return;
       if (decoding) pending = buf; else show(buf);
     }
     function status(s) {
       const state = s.camera;
       enabled = !!state && state !== "disabled";
-      $("app").classList.toggle("has-cam", enabled);
-      if (!enabled) return;
+      layout();
+      if (!enabled || !frames) return;
       const now = Date.now();
       while (times.length && now - times[0] > 2000) times.shift();
-      $("camInfo").textContent = frames ? `${(times.length / 2).toFixed(0)} fps` : "";
+      $("camInfo").textContent = `${(times.length / 2).toFixed(0)} fps`;
       if (!supported) setBadge("stale", "このブラウザでは表示できません", "画像の表示に対応していません");
-      else if (state === "waiting") setBadge("wait", "カメラ待機中", "ロボット側のノードが映像を受信していません");
       else if (state === "stale") setBadge("stale", "映像が止まっています", `最後の映像から ${Math.round((s.camera_age_ms || 0) / 1000)} 秒`);
-      else if (!frames) setBadge("wait", "映像を受信中…", "");
       else if (now - lastFrameAt > CAM_STALE_MS) setBadge("stale", "映像の受信が遅れています", "通信が不安定な可能性があります");
       else setBadge("");
     }
@@ -862,6 +1160,7 @@
   const HELP_POINTER = "スティック領域をドラッグ、ボタンは押している間だけ動きます。指を離すと止まります。";
   function applyMode() {
     resetAll();
+    if (!keyboardCapable) $("inputMode").value = "pointer";
     const keyboard = $("inputMode").value === "keyboard";
     $("app").classList.toggle("keyboard", keyboard);
     $("modePointer").className = keyboard ? "" : "on";
@@ -873,17 +1172,19 @@
     if (keyboard) {
       const parts = [["Space", " を押したまま "], ["WASD", " 移動 "], ["Q/E", " 旋回 "], ["I/K", " TILT "], ["F", " FIRE "], ["R", " ROLLER"]];
       for (const [key, text] of parts) { child(help, "kbd", "", key); child(help, "span", "", text); }
-      child(help, "span", "", "。Space を離すと入力解除。");
+      child(help, "span", "", "。Space を離すか ");
+      child(help, "kbd", "", "Esc");
+      child(help, "span", "", " で入力解除。");
     } else {
       help.textContent = HELP_POINTER;
     }
     $("inputMode").blur();
   }
+  $("app").classList.toggle("touch-only", !keyboardCapable);
   $("inputMode").addEventListener("change", applyMode);
   $("modePointer").addEventListener("click", () => { $("inputMode").value = "pointer"; applyMode(); $("modePointer").blur(); });
   $("modeKeyboard").addEventListener("click", () => { $("inputMode").value = "keyboard"; applyMode(); $("modeKeyboard").blur(); });
-  if (params.get("mode") === "keyboard") { $("inputMode").value = "keyboard"; applyMode(); }
-  $("stop").addEventListener("click", () => { resetAll(); $("stop").blur(); });
+  if (params.get("mode") === "keyboard" && keyboardCapable) { $("inputMode").value = "keyboard"; applyMode(); }
 
   // ---------------------------------------------------------------- help sheet
   function closeHelp() { $("help").hidden = true; }
@@ -901,14 +1202,22 @@
     renderKeys();
     sendNow();
   }
+  // Hidden page: let go of everything and of the operator role, so another
+  // device may take over; coming back takes the role again if it is still free.
+  function onHidden() {
+    resetAll();
+    if (isOpen() && state.controller) { state.reclaim = true; send({ type: "release" }); }
+  }
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden) resetAll();
-    else {
-      resetAll(); requestWakeLock();
-      if (!ws && !released) connect();
+    if (document.hidden) { onHidden(); return; }
+    resetAll(); requestWakeLock();
+    if (!ws && state.phase !== "auth") connect();
+    else if (isOpen() && state.reclaim) {
+      state.reclaim = false;
+      if (!state.controller && !state.owner) { state.wantControl = true; send({ type: "claim" }); }
     }
   });
-  window.addEventListener("pagehide", resetAll);
+  window.addEventListener("pagehide", onHidden);
   window.addEventListener("blur", () => { focused = false; resetAll(); });
   window.addEventListener("focus", () => { focused = true; resetAll(); });
   document.addEventListener("contextmenu", (ev) => ev.preventDefault());
@@ -939,10 +1248,14 @@
     fill.style.width = pct + "%";
     $(valueId).textContent = (v >= 0 ? "+" : "") + v.toFixed(2);
   }
+  function renderMeters(a) {
+    const at = (i) => (Number.isFinite(a[i]) ? a[i] : 0);
+    setMeter("mFwd", "vFwd", at(LAYOUT.leftStick.y));
+    setMeter("mLat", "vLat", -at(LAYOUT.leftStick.x));   // right = +
+    setMeter("mTurn", "vTurn", -at(LAYOUT.rightStick.x)); // right turn = +
+  }
   function renderDebug() {
-    setMeter("mFwd", "vFwd", axes[LAYOUT.leftStick.y]);
-    setMeter("mLat", "vLat", -axes[LAYOUT.leftStick.x]);   // right = +
-    setMeter("mTurn", "vTurn", -axes[LAYOUT.rightStick.x]); // right turn = +
+    renderMeters(axes);
     $("dbgAxes").textContent = "axes " + axes.map((v) => v.toFixed(2)).join(" ");
     $("dbgButtons").textContent = "btn " + buttons.join("");
   }

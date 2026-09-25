@@ -93,6 +93,28 @@ def parse_frame(
     return axes, buttons
 
 
+def is_neutral_frame(payload: Any) -> bool:
+    """Return ``True`` when ``payload`` is a joy frame with every axis and button at zero.
+
+    Used after a stop: the operator's page must let go of everything (it sends
+    an all-zero frame) before its frames move the robot again. Anything that
+    is not a well-formed all-zero joy frame counts as *not* neutral.
+    """
+    if not isinstance(payload, dict) or payload.get("type") != "joy":
+        return False
+    raw_axes = payload.get("axes", [])
+    raw_buttons = payload.get("buttons", [])
+    if not isinstance(raw_axes, list) or not isinstance(raw_buttons, list):
+        return False
+    for value in raw_axes + raw_buttons:
+        if isinstance(value, bool):
+            if value:
+                return False
+        elif not isinstance(value, (int, float)) or value != 0:
+            return False
+    return True
+
+
 class JoyHold:
     """Thread-safe holder for the latest joy command with a staleness watchdog.
 

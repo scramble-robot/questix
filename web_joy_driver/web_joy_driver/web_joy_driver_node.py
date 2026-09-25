@@ -8,12 +8,20 @@ published so downstream nodes stop. Emergency-stop state from
 ``emergency_stop_topic`` is relayed to the page for display only; gating is
 still done by ``joy_gate`` and the per-component E-stop subscribers.
 
-Camera view: ``camera_topic`` (``sensor_msgs/CompressedImage``, JPEG or PNG)
+Lessons: ``arbiter_status_topic`` (twist_arbiter's latched JSON status) is
+relayed so the page can say when a QUESTiX LAB driving experiment has the
+robot; this node only *reads* it. The page stops a lesson run itself, over
+the lab bridge's own WebSocket (``lab_bridge_port``), because the only ROS way
+would be another publisher on the lab's topics, which the bridge refuses.
+
+Camera view (off by default): ``camera_topic`` (``sensor_msgs/CompressedImage``, JPEG or PNG)
 is relayed to the page as binary WebSocket messages so the operator sees the
 robot's view between the sticks. Frames are throttled to ``camera_max_fps``
 and dropped for clients that cannot keep up; nothing is ever queued.
 """
 
+import json
+import socket
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
@@ -29,6 +37,7 @@ from rclpy.qos import (
     qos_profile_sensor_data,
 )
 from sensor_msgs.msg import CompressedImage, Joy
+from std_msgs.msg import String
 
 from .joy_frame import (
     DEFAULT_NUM_AXES,
@@ -88,9 +97,12 @@ class WebJoyDriverNode(Node):
         self.declare_parameter("close_timeout_sec", 1.0)
         self.declare_parameter("static_dir", "")
         self.declare_parameter("emergency_stop_topic", "/emergency_stop")
-        self.declare_parameter("camera_topic", "/camera/image_raw/compressed")
+        self.declare_parameter("camera_topic", "")
         self.declare_parameter("camera_max_fps", 15.0)
         self.declare_parameter("camera_timeout_sec", 2.0)
+        self.declare_parameter("robot_name", "")
+        self.declare_parameter("arbiter_status_topic", "/twist_arbiter/status")
+        self.declare_parameter("lab_bridge_port", 8897)
 
         joy_topic = self.get_parameter("joy_topic").value
         host = self.get_parameter("host").value
@@ -106,6 +118,11 @@ class WebJoyDriverNode(Node):
         camera_topic = self.get_parameter("camera_topic").value
         camera_max_fps = float(self.get_parameter("camera_max_fps").value)
         self._camera_timeout = float(self.get_parameter("camera_timeout_sec").value)
+        robot_name = str(self.get_parameter("robot_name").value).strip() or socket.gethostname()
+        arbiter_topic = self.get_parameter("arbiter_status_topic").value
+        lab_bridge_port = int(self.get_parameter("lab_bridge_port").value)
+        if not 0 <= lab_bridge_port <= 65535:
+            raise ValueError("lab_bridge_port must be 0..65535 (0 = the page does not stop lessons)")
 
         if publish_rate <= 0.0:
             raise ValueError("publish_rate must be > 0")
@@ -126,6 +143,10 @@ class WebJoyDriverNode(Node):
         self._camera_frames = 0
         self._camera_rejected = 0
         self._camera_encoding = ""
+        self._arbiter_topic = arbiter_topic
+        self._arbiter: Optional[Dict[str, Any]] = None
+        self._arbiter_publishers = 0
+        self._arbiter_bad = 0
 
         self._publisher = self.create_publisher(Joy, joy_topic, 10)
 
@@ -148,6 +169,19 @@ class WebJoyDriverNode(Node):
             self._camera_sub = self.create_subscription(
                 CompressedImage, camera_topic, self._on_camera_image, qos_profile_sensor_data)
 
+        if arbiter_topic:
+            # twist_arbiter publishes its status reliable + transient_local (latched).
+            latched = QoSProfile(
+                history=HistoryPolicy.KEEP_LAST,
+                depth=1,
+                reliability=ReliabilityPolicy.RELIABLE,
+                durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            )
+            self._arbiter_sub = self.create_subscription(
+                String, arbiter_topic, self._on_arbiter_status, latched)
+            # A latched sample outlives its publisher: forget it when twist_arbiter is gone.
+            self._arbiter_timer = self.create_timer(1.0, self._check_arbiter)
+
         index_html = self._load_index_html(static_dir)
         self._server = JoyWebSocketServer(
             host=host,
@@ -162,6 +196,7 @@ class WebJoyDriverNode(Node):
             status_period_sec=float(self.get_parameter("status_period_sec").value),
             close_timeout_sec=float(self.get_parameter("close_timeout_sec").value),
             camera_max_fps=camera_max_fps,
+            welcome_info={"robot": {"name": robot_name}, "lab_bridge_port": lab_bridge_port},
             logger=_RclpyLoggerAdapter(self.get_logger()),
         )
         self._server.start()
@@ -169,9 +204,9 @@ class WebJoyDriverNode(Node):
         self._timer = self.create_timer(1.0 / publish_rate, self._publish)
         self.get_logger().info(
             "web_joy_driver listening on http://%s:%d/ (ws %s), publishing %s at %.1f Hz, "
-            "timeout %.2fs, token %s"
+            "timeout %.2fs, token %s, robot name %r"
             % (host, self._server.bound_port, "legacy" if self._server.legacy_api else "asyncio",
-               joy_topic, publish_rate, timeout_sec, "set" if token else "NOT set"))
+               joy_topic, publish_rate, timeout_sec, "set" if token else "NOT set", robot_name))
         if camera_topic:
             self.get_logger().info(
                 "camera view relays %s (CompressedImage jpeg/png) at <= %.1f fps"
@@ -212,7 +247,7 @@ class WebJoyDriverNode(Node):
     def _status(self) -> Dict[str, Any]:
         now = time.monotonic()
         age = self._hold.age_sec(now)
-        _axes, _buttons, state = self._hold.snapshot(now)
+        axes, _buttons, state = self._hold.snapshot(now)
         camera, camera_age_ms = self._camera_state(now)
         return {
             "camera": camera,
@@ -226,13 +261,47 @@ class WebJoyDriverNode(Node):
             "estop_reason": self._estop_reason,
             "estop_age_ms": (None if self._estop_rx_time is None
                              else int((now - self._estop_rx_time) * 1000.0)),
+            "arbiter": self._arbiter_state(),
+            # What the robot is being sent now (viewers show the operator's input).
+            "axes": [round(float(v), 2) for v in axes],
         }
+
+    def _arbiter_state(self) -> Optional[Dict[str, Any]]:
+        """Return twist_arbiter's last status, or ``None`` when it is not running."""
+        arbiter = self._arbiter
+        if arbiter is None or self._arbiter_publishers <= 0:
+            return None
+        return dict(arbiter)
 
     # Called from the rclpy executor -----------------------------------
     def _on_emergency_stop(self, msg: Any) -> None:
         self._estop_active = bool(msg.active)
         self._estop_reason = str(msg.reason)
         self._estop_rx_time = time.monotonic()
+
+    def _on_arbiter_status(self, msg: Any) -> None:
+        try:
+            data = json.loads(msg.data)
+            active = data["active"]
+            if active not in ("joy", "lab"):
+                raise ValueError("unknown source %r" % (active,))
+        except (ValueError, KeyError, TypeError) as exc:
+            self._arbiter_bad += 1
+            if self._arbiter_bad <= 5 or self._arbiter_bad % 100 == 0:
+                self.get_logger().warning(
+                    "ignored twist_arbiter status %r (%s), total %d"
+                    % (msg.data[:120], exc, self._arbiter_bad))
+            return
+        self._arbiter = {
+            "active": active,
+            "reason": str(data.get("reason", "")),
+            "lab_locked": bool(data.get("lab_locked", False)),
+        }
+        # Seeing a sample proves a publisher exists, even before the next graph check.
+        self._arbiter_publishers = max(1, self._arbiter_publishers)
+
+    def _check_arbiter(self) -> None:
+        self._arbiter_publishers = self.count_publishers(self._arbiter_topic)
 
     def _on_camera_image(self, msg: Any) -> None:
         data = bytes(msg.data)

@@ -1,8 +1,10 @@
-# Web Joy Driver Configuration
+# Web Joy Driver Configuration (Robot Manager: 「ブラウザ・スマホで操作」)
 # Smartphone/browser virtual controller served over HTTP + WebSocket.
-# スマホのブラウザから操作するための仮想コントローラ設定。
-# Operator mappings/tuning (key assignments, speeds, stick deadzone) live in
-# questix_control_config/config/controls.web.yaml (robot_manager「調整」→ Web).
+# ブラウザ・スマホで操作するための仮想コントローラー設定。
+# Operator mappings (key assignments, speeds, stick deadzone) are fixed in
+# questix_control_config/config/controls.web.yaml (not editable in robot_manager).
+# One device operates at a time; the others see the page read-only and may press
+# 止める (see README「操作権」).
 
 web_joy_driver:
   ros__parameters:
@@ -18,7 +20,8 @@ web_joy_driver:
 
     # Optional shared secret. When non-empty the page must be opened as
     # http://<robot-ip>:8899/?token=<value>; WebSocket connections without a
-    # matching token are rejected with HTTP 401.
+    # matching token are accepted and closed at once with code 4401, so the
+    # page shows its 認証エラー screen.
     # 空文字で認証なし。LAN に他の端末がいる環境では設定を推奨。
     auth_token: ""
 
@@ -42,7 +45,10 @@ web_joy_driver:
     num_buttons: 14
 
     # WebSocket keepalive: ping every ping_interval_sec, drop the client when a
-    # pong does not arrive within ping_timeout_sec.
+    # pong does not arrive within ping_timeout_sec. This is also when a silent
+    # operator (Wi-Fi lost) loses the operator role so another device can take
+    # it (about 3 s with these values); the robot is neutral after
+    # message_timeout_sec.
     ping_interval_sec: 1.0
     ping_timeout_sec: 2.0
 
@@ -52,7 +58,7 @@ web_joy_driver:
 
     # Upper bound for the WebSocket closing handshake. A page that stopped
     # reading (backgrounded browser) is dropped after this instead of the
-    # library default of 10 s, so takeover by another phone stays responsive.
+    # library default of 10 s, so hand-over and shutdown stay responsive.
     close_timeout_sec: 1.0
 
     # Directory containing index.html. Empty = the installed package share
@@ -64,13 +70,15 @@ web_joy_driver:
     # joy_gate and the per-component subscribers. "" disables the display.
     emergency_stop_topic: "/emergency_stop"
 
-    # Camera view shown between the sticks on the page. The topic must be a
-    # sensor_msgs/CompressedImage carrying JPEG or PNG bytes (what
+    # Camera view shown between the sticks on the page. Off by default like
+    # questix_lab_bridge (no camera driver ships with this repository). Set it
+    # to a sensor_msgs/CompressedImage topic carrying JPEG or PNG bytes (what
     # image_transport's "compressed" plugin, usb_cam, v4l2_camera and
-    # camera_ros publish under <image topic>/compressed). Other encodings
-    # (compressedDepth etc.) are logged and skipped. "" hides the camera panel.
-    # 画面中央のカメラ映像。JPEG/PNG の CompressedImage トピックを指定。空で非表示。
-    camera_topic: "/camera/image_raw/compressed"
+    # camera_ros publish under <image topic>/compressed), e.g.
+    # "/camera/image_raw/compressed". Other encodings (compressedDepth etc.)
+    # are logged and skipped. The page shows the panel only once a frame arrived.
+    # 画面中央のカメラ映像。JPEG/PNG の CompressedImage トピックを指定。空（既定）で非表示。
+    camera_topic: ""
 
     # Upper bound of frames forwarded to browsers (Hz). Frames beyond this, or
     # faster than a phone can read, are dropped (latest frame wins, no backlog).
@@ -80,3 +88,19 @@ web_joy_driver:
     # The page shows a "no signal" badge over the last image when no frame has
     # arrived for this many seconds. 0 以下で無効。
     camera_timeout_sec: 2.0
+
+    # Name shown in the page header (and the tab title) so a phone on the
+    # wrong Wi-Fi notices which robot it controls. "" = the host name, like
+    # questix_lab_bridge's robot_name.
+    robot_name: ""
+
+    # twist_arbiter's latched status (std_msgs/String JSON). Read only: the page
+    # shows 「教材が走らせています」 while a QUESTiX LAB driving experiment has
+    # the robot. "" disables it. Competition launches do not run twist_arbiter.
+    arbiter_status_topic: "/twist_arbiter/status"
+
+    # Port of questix_lab_bridge on the same host. The page's 止める also sends
+    # {"type":"stop"} and {"type":"roller_stop"} there (browser -> bridge), so a
+    # lesson's driving run or roller session stops too. Keep equal to
+    # questix_lab_bridge's port. 0 = the page does not try.
+    lab_bridge_port: 8897
