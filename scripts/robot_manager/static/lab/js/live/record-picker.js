@@ -248,5 +248,10 @@ function pickRobotRecord({ lesson, needs = [], compare = false }) {
 dialog()?.addEventListener('close', () => {
   if (picker.resolve) finish(null);
 });
+// Leaving the page (another course, the records view, the browser's back button) ends it too, so
+// the dialog is never left open over a page it does not belong to.
+document.addEventListener('series-leave', () => {
+  if (dialog()?.open) finish(null);
+});
 
 export { pickRobotRecord };
