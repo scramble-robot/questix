@@ -13,7 +13,7 @@ import {
   newTrainingModel,
 } from './foundations-core.js';
 import { drawFoundationMap } from './foundations-render.js';
-import { revealElement } from '../core/reveal.js';
+import { revealElement, revealIfHidden } from '../core/reveal.js';
 import { fillSentence } from '../core/content.js';
 import { groupsNav, topicsNav, lessonGuides, chapterPanels } from './foundations-view.js';
 
@@ -480,6 +480,13 @@ function revealFigure() {
   revealElement(document.querySelector('#rlFoundationLesson .basics-visual'));
 }
 
+// After a single step (a button under the figure), the map is brought back only when it is off
+// screen, so the buttons stay under the learner's thumb.
+function keepFigureInView() {
+  if (!window.matchMedia(NARROW_SCREEN).matches) return;
+  revealIfHidden(document.getElementById('rlFigure'));
+}
+
 // ----------------------------------------------------------------- actions
 
 function resetExperiencePose() {
@@ -495,6 +502,7 @@ function act(action) {
   experience.trace.push(experience.pose);
   if (experience.trace.length > MAX_TRACE_POSES) experience.trace.shift();
   update();
+  keepFigureInView();
 }
 
 function deliver(count) {
@@ -502,12 +510,14 @@ function deliver(count) {
   for (let delivery = 0; delivery < count; delivery++)
     explore.batch.push(explore.learner.step(explore.exploration));
   update();
+  keepFigureInView();
 }
 
 function learnFuture(episodes) {
   future.immediate.train(episodes);
   future.lookAhead.train(episodes);
   update();
+  keepFigureInView();
 }
 
 const actions = {

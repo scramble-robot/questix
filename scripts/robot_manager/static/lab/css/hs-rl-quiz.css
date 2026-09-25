@@ -326,3 +326,30 @@
     grid-template-rows: 150px 20px;
   }
 }
+
+/* On a phone: figure → controls, like the SLAM mechanism pages, so a button press and the map it
+   moves are on one screen. */
+@media (max-width: 900px) {
+  #rlFoundationLesson .basics-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  #rlFoundationLesson .basics-workspace {
+    display: contents;
+  }
+  #rlFoundationLesson .basics-visual {
+    order: 1;
+    display: flex;
+    flex-direction: column;
+  }
+  #rlFoundationLesson .basics-guide {
+    order: 2;
+  }
+  #rlFoundationLesson .rl-explanation {
+    order: 3;
+  }
+  #rlFoundationLesson .rl-extra {
+    order: 4;
+  }
+}

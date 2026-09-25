@@ -268,18 +268,17 @@ function experiencePress(chapter, text) {
   if (!event) return '';
   return fillSentence(text.pressResult, {
     action: event.actionLabel,
-    from: format(event.fromDistance, 3),
-    to: format(event.toDistance, 3),
+    from: format(event.fromDistance, 2),
+    to: format(event.toDistance, 2),
     reward: signed(event.reward, 2),
   });
 }
 
 function experienceControls(chapter, copy, actions) {
   const text = copy.experience;
+  // The buttons come right after the title, so on a phone they sit just under the map they move.
   return html`<p class="eyebrow">${text.eyebrow}</p>
     <h2>${text.controlsTitle}</h2>
-    <p>${text.controlsIntro}</p>
-    ${termList(['estimate', 'policy'], copy)}
     <div class="rl-action-buttons">
       ${ACTION_LABELS.map(
         (label, action) =>
@@ -293,7 +292,6 @@ function experienceControls(chapter, copy, actions) {
           </button>`,
       )}
     </div>
-    <p class="helper rl-turn-note">${text.turnNote}</p>
     ${pressResult(experiencePress(chapter, text), 'rlActionResult')}
     <button
       id="rlAuto"
@@ -304,6 +302,9 @@ function experienceControls(chapter, copy, actions) {
       ロボットに1回選ばせる
     </button>
     <button id="rlRestart" class="full" @click=${actions.restart}>出発点に戻す</button>
+    <p class="helper rl-turn-note">${text.turnNote}</p>
+    <p>${text.controlsIntro}</p>
+    ${termList(['estimate', 'policy'], copy)}
     <p class="helper">${text.controlsNote}</p>
     ${helpDetails(text.whyTitle, text.why)}${helpDetails(text.observationTitle, text.observation)}
     <button id="rlForget" class="full" @click=${actions.forget}>
@@ -315,14 +316,16 @@ function experienceExplanation(chapter, copy) {
   const text = copy.experience;
   const event = chapter.event;
   if (!event) return nothing;
-  const valueChanged = fillSentence(text.valueChanged, {
-    before: format(event.change.before, 2),
-    after: format(event.change.after, 2),
+  const before = format(event.change.before, 2);
+  const after = format(event.change.after, 2);
+  const valueChanged = fillSentence(before === after ? text.valueUnchanged : text.valueChanged, {
+    before,
+    after,
   });
   return html`<h3>${text.eventTitle}</h3>
     <p>
-      距離 ${format(event.fromDistance, 3)} m → <strong>${event.actionLabel}</strong> → 距離
-      ${format(event.toDistance, 3)} m →
+      距離 ${format(event.fromDistance, 2)} m → <strong>${event.actionLabel}</strong> → 距離
+      ${format(event.toDistance, 2)} m →
       <strong>${signed(event.reward, 2)}点</strong>。${event.movement}${valueChanged}
     </p>`;
 }

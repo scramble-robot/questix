@@ -19,4 +19,17 @@ function revealElement(element) {
   window.scrollBy({ top: top - headerHeight - GAP, behavior: 'instant' });
 }
 
-export { revealElement };
+/** Like revealElement, but only when part of `element` is off screen or under the header. */
+function revealIfHidden(element) {
+  if (!element) return;
+  const box = element.getBoundingClientRect();
+  const header = document.querySelector('.site-header');
+  const headerBottom = header ? Math.max(0, header.getBoundingClientRect().bottom) : 0;
+  const fits = box.height <= window.innerHeight - headerBottom;
+  const shown = box.top >= headerBottom && box.bottom <= window.innerHeight;
+  if (fits && shown) return;
+  if (!fits && box.top >= headerBottom && box.top < window.innerHeight / 2) return;
+  revealElement(element);
+}
+
+export { revealElement, revealIfHidden };
