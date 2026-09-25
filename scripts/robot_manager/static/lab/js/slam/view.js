@@ -85,6 +85,36 @@ function hardwareStep(number, step, extra) {
   </div>`;
 }
 
+// Recording from the robot, and saving what was recorded (the shared questix-lab-recording JSON,
+// which this panel and the other courses open again). Without a robot the record button is folded
+// into one line, as in the other courses, with the way to connect; saving stays outside the fold.
+function recordControls(model, text, actions, recordLabel) {
+  const save = model.canSaveRecording
+    ? html`<button id="slamSaveRecording" class="small" @click=${actions.saveRecording}>
+        ${text.saveRecording}
+      </button>`
+    : nothing;
+  const record = html`<button
+    id="slamRecord"
+    class="small"
+    ?disabled=${!model.connected && !model.recording}
+    @click=${actions.toggleRecording}
+  >
+    ${recordLabel}
+  </button>`;
+  if (model.connected || model.recording) return html`${record} ${save}`;
+  return html`<details class="live-offline" data-slam-offline>
+      <summary>${text.offlineSummary}</summary>
+      <div class="live-capture">
+        <p>${text.offlineText}</p>
+        <div class="live-capture-actions">
+          <button class="quiet" @click=${actions.openLink}>${text.connect}</button>${record}
+        </div>
+      </div>
+    </details>
+    ${save}`;
+}
+
 function hardwarePanel(model, copy, actions) {
   const text = copy.hardware;
   const recordLabel = model.recording ? text.recordAbortButton : model.recordButton;
@@ -116,9 +146,7 @@ function hardwarePanel(model, copy, actions) {
               accept=".json,.mcap,application/json"
               @change=${actions.openLogFile}
           /></label>
-          <button id="slamRecord" class="small" @click=${actions.toggleRecording}>
-            ${recordLabel}
-          </button>`,
+          ${recordControls(model, text, actions, recordLabel)}`,
       )}
     </div>
     <p id="slamImportStatus" class="import-status" role="status">${model.importStatus}</p>

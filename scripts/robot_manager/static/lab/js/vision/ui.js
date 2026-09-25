@@ -653,11 +653,21 @@ async function loadImageFile(file) {
   await readImage(URL.createObjectURL(file), file.name, true);
 }
 
+// A file that is not JSON at all (a picture, a CSV…) gets a sentence, not the parser's English
+// "Unexpected token".
+function parseRgbdJson(text) {
+  try {
+    return JSON.parse(text.replace(/^\uFEFF/, ''));
+  } catch {
+    throw Error(copy.errors.rgbdNotJson);
+  }
+}
+
 async function loadRgbdFile(file) {
   const requestChapter = state.chapter;
   const version = state.sourceVersion;
   if (file.size > MAX_RGBD_BYTES) throw Error(copy.errors.rgbdTooLarge);
-  const frame = validateRGBD(JSON.parse(await file.text()));
+  const frame = validateRGBD(parseRgbdJson(await file.text()));
   if (state.chapter !== requestChapter || state.sourceVersion !== version) return;
   setDepthFrame(frame);
   useImage({ width: frame.width, height: frame.height, data: frame.rgb }, copy.sourceNames.rgbdLog);

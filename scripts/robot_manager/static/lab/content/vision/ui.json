@@ -15,6 +15,7 @@
   },
   "errors": {
     "rgbdTooLarge": "RGB-Dログは16 MB以下にしてください。",
+    "rgbdNotJson": "このファイルはJSONとして読めません。ROS 2で保存したRGB-Dログ（.json）を選んでください。画像ファイルは「画像を開く」から開けます。",
     "imageTooLarge": "画像は12 MB以下にしてください。",
     "imageTimeout": "画像を読み込めませんでした。",
     "imageTooManyPixels": "画像が大きすぎます。2400万画素以下で保存してください。",
