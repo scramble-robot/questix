@@ -7,8 +7,8 @@
 /**
  * The footer's model for one course. `topics` = [{ id, title }] in teaching order, `current` the id
  * on screen, `visited` the ids opened so far (a Set or an array).
- * `ready` is true on the last experiment or once every experiment has been opened: the summary
- * then opens fully instead of as a short note.
+ * `ready` is true once the last experiment has been reached (going back to an earlier one keeps it)
+ * or every experiment has been opened: the summary then opens fully instead of as a short note.
  */
 function progressModel({ topics, current, visited = [] }) {
   const seen = new Set(visited);
@@ -35,7 +35,7 @@ function progressModel({ topics, current, visited = [] }) {
     next: last ? null : items[index + 1],
     visitedCount,
     last,
-    ready: last || visitedCount === topics.length,
+    ready: items.at(-1).visited || visitedCount === topics.length,
   };
 }
 

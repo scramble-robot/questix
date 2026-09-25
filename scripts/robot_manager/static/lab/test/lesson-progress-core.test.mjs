@@ -27,13 +27,15 @@ test('the footer knows the experiment on screen and its neighbours', () => {
   );
 });
 
-test('the summary opens fully only at the end or once every experiment was opened', () => {
+test('the summary opens fully once the end was reached or every experiment was opened', () => {
   assert.equal(progressModel({ topics, current: 'a' }).ready, false);
   assert.equal(progressModel({ topics, current: 'c', visited: ['a', 'b'] }).ready, false);
   const last = progressModel({ topics, current: 'd' });
   assert.equal(last.ready, true);
   assert.equal(last.next, null);
   assert.equal(progressModel({ topics, current: 'a', visited: ['b', 'c', 'd'] }).ready, true);
+  // Having reached the end, going back to an earlier experiment keeps the summary open.
+  assert.equal(progressModel({ topics, current: 'b', visited: ['d'] }).ready, true);
 });
 
 test('an unknown current experiment falls back to the first', () => {
