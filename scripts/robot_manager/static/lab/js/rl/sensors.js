@@ -1,4 +1,5 @@
 import { loadJson } from '../core/content.js';
+import { drawQuestixTop } from '../core/questix-art.js';
 
 // Sensor figures of the reinforcement-learning lab: the LiDAR sweep and the time plot behind the
 // "センサーの値を見る" panel. Both draw from plain data handed in by lab.js and hold no state.
@@ -15,10 +16,9 @@ const LIDAR = {
   ray: '#4baba82b',
   nearPoint: '#c57324', // measured closer than NEAR_RANGE
   point: '#158a85',
-  body: '#153e4a',
-  lens: '#67cffa',
   caption: '#4e6a77',
   pixelsPerMetre: 55,
+  robotSize: 34, // pixels: larger than to scale, so the robot is recognisable; inside the 0.5 m band
   rings: 3, // labelled distance circles, one per metre
   nearRange: 0.5, // metres; closer than this the point is drawn in warning colour
   outOfRange: 3.18, // metres; beyond this the beam hit nothing and only an outline is drawn
@@ -81,18 +81,10 @@ function drawLidarRings(ctx, centre, scale) {
   ctx.setLineDash([]);
 }
 
+// The robot at the centre of the sweep: the CAD top view turned so its front (the light-blue line)
+// points up, like index 0 of the scan.
 function drawLidarBody(ctx, centre) {
-  ctx.fillStyle = LIDAR.body;
-  ctx.beginPath();
-  ctx.moveTo(centre.x, centre.y - 15);
-  ctx.lineTo(centre.x + 10, centre.y - 4);
-  ctx.lineTo(centre.x + 10, centre.y + 12);
-  ctx.lineTo(centre.x - 10, centre.y + 12);
-  ctx.lineTo(centre.x - 10, centre.y - 4);
-  ctx.closePath();
-  ctx.fill();
-  ctx.fillStyle = LIDAR.lens;
-  ctx.fillRect(centre.x - 5, centre.y - 9, 10, 3);
+  drawQuestixTop(ctx, centre.x, centre.y, -Math.PI / 2, LIDAR.robotSize);
 }
 
 // One sweep of the 2D LiDAR, robot centred, the front of the body pointing up.

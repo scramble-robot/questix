@@ -1,6 +1,10 @@
 import { ARM_OBSTACLE, armFK, armSegmentDistance, so101FK } from './core.js';
 import { roleStyle } from '../core/palette.js';
 
+// questix-art.js imports lit-html, which needs a document. test/arm-scene-frame.test.mjs imports
+// this module in Node for armSceneFrame, so the robot drawing is only loaded in a browser.
+const questixArt = typeof document === 'undefined' ? null : await import('../core/questix-art.js');
+
 // Canvas drawings of the arm course: the side view of the teaching model and the 3-D sketch of
 // SO-ARM101. Both draw from data handed in by ui.js and keep no state of their own.
 //
@@ -20,6 +24,12 @@ const SIDE_MARGIN = { left: 42, right: 12, top: 30, bottom: 30 }; // px around t
 // the extra width then shows more of the x range (a third on the left, the rest on the right).
 const MAX_GRID_HEIGHT = 420;
 const BASE_SCALE = 0.62; // px per mm the robot body and bar widths were drawn for
+// The chassis under the arm, in px at BASE_SCALE: its length (a sketch, not to scale) and how far
+// its top plate sits below `robot`'s y. The side view leaves room under the shoulder for the θ₁
+// label; the 3-D sketch keeps a shorter chassis right under the base, clear of the y axis label.
+const SIDE_VIEW_BASE = { length: 200, plateBelow: 24 };
+const SO101_BASE = { length: 132, plateBelow: 5 };
+const BASE_HALO = 'rgba(214, 238, 244, 0.45)';
 const SO101_ASPECT = 490 / 760; // height / width of the 3-D sketch
 const TEXT = 13; // px: labels in the figure
 const SMALL_TEXT = 12; // px: tick labels, the smallest text a figure may show
@@ -137,21 +147,20 @@ function link(ctx, from, to, color, size, ghost = false) {
   line(ctx, from, to, ghost ? color + '88' : color, ghost ? 3 : size);
 }
 
-// The robot the arm is mounted on, drawn from the pixel position of its top plate; `size` scales
-// the body with the grid.
-function robot(ctx, x, y, size = 1) {
-  const box = (left, top, width, height) =>
-    ctx.fillRect(x + left * size, y + top * size, width * size, height * size);
-  ctx.fillStyle = '#4d6772';
-  box(-66, 13, 132, 37);
-  ctx.fillStyle = '#a5b8bf';
-  box(-55, 5, 110, 12);
-  ctx.fillStyle = '#101f29';
-  box(-61, 38, 37, 22);
-  box(25, 38, 37, 22);
-  ctx.fillStyle = '#85cde7';
-  box(47, 18, 10, 9);
-  line(ctx, { x, y: y + 5 * size }, { x, y: y - 4 * size }, '#9bb4bb', 13 * size);
+// The robot the arm is mounted on: the CAD chassis (the 'base' view of js/core/questix-art.js,
+// front to the right) with its top plate `plateBelow` below `y`, and the post from the plate up
+// to the shoulder. `size` scales both with the grid; a faint light halo keeps the dark chassis
+// visible on the dark grid.
+function robot(ctx, x, y, size = 1, { plateBelow, length } = SIDE_VIEW_BASE) {
+  const width = length * size;
+  const plate = y + plateBelow * size;
+  const chassisHeight = -questixArt.questixSideLayout(x, 0, width, 'base').top; // top above 0
+  ctx.save();
+  ctx.shadowColor = BASE_HALO;
+  ctx.shadowBlur = Math.max(4, 6 * size);
+  questixArt.drawQuestixSide(ctx, x, plate + chassisHeight, width, 'base');
+  ctx.restore();
+  line(ctx, { x, y: plate }, { x, y: y - 4 * size }, '#9bb4bb', 13 * size);
 }
 
 // Green ring: everywhere the two bars can reach on length alone.
@@ -487,7 +496,7 @@ function drawSO101(canvas, q) {
   const { place, scale } = so101Placement(chain.points, width, height);
   const origin = place({ x: 0, y: 0, z: 0 });
   groundGrid(ctx, place);
-  robot(ctx, origin.x, origin.y + 20 * scale, scale);
+  robot(ctx, origin.x, origin.y + 20 * scale, scale, SO101_BASE);
   baseAxes(ctx, place, origin);
   const tip3d = chain.tip;
   // Vertical drop from the tip to the floor, so its height can be read against the grid.

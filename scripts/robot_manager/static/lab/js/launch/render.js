@@ -1,5 +1,5 @@
 import { LAUNCH_SPEC, LAUNCH_TOLERANCE, launchGroups, launchHit, launchRangeAxis } from './core.js';
-import { drawRobot } from '../core/renderer.js';
+import { QUESTIX_VIEWS, drawQuestixSide, questixSideLayout } from '../core/questix-art.js';
 import { formatNumber } from '../core/dom.js';
 import { CHART_ROLE_COLORS, SCENE_ROLE_COLORS, roleStyle } from '../core/palette.js';
 import { formatTick } from '../core/chart-scale.js';
@@ -37,7 +37,7 @@ function plateText(context, text, x, y, colour, align = 'left') {
   const width = context.measureText(text).width;
   const left = textLeft(x, width, align);
   context.fillStyle = FLIGHT_COLORS.sky;
-  context.fillRect(left - 3, y - 14, width + 6, 19);
+  context.fillRect(left - PLATE_MARGIN, y - 14, width + 2 * PLATE_MARGIN, 19);
   context.fillStyle = colour;
   context.fillText(text, x, y);
   context.textAlign = 'left';
@@ -45,7 +45,7 @@ function plateText(context, text, x, y, colour, align = 'left') {
 
 // --- Side view of the flight -------------------------------------------------------------------
 
-// Two layouts of the same side view. The narrow one is for phones: it shows 0–3.3 m (the longest
+// Two layouts of the same side view. The narrow one is for phones: it shows 0–3.2 m (the longest
 // flight is about 3.1 m) at the canvas's own width, so the landing point and its distance are
 // always on screen, and its fonts stay ≥ 12 px once the canvas is shrunk to a 352 px card.
 // Coordinates are canvas units; `scale` is canvas units per metre, the same along and above the
@@ -55,7 +55,7 @@ const WIDE = {
   width: 760,
   height: 350,
   scale: 145,
-  muzzleX: 130,
+  muzzleX: 150, // leaves most of the robot, drawn to this scale, on the canvas
   floorY: 278,
   lastMetre: 4,
   font: 14,
@@ -65,7 +65,7 @@ const NARROW = {
   width: 440,
   height: 350,
   scale: 105,
-  muzzleX: 66,
+  muzzleX: 100,
   floorY: 280,
   lastMetre: 3,
   font: 17,
@@ -92,8 +92,11 @@ const FLIGHT_LAYOUTS = {
 };
 const NARROW_BELOW = 600; // CSS pixels of canvas width
 const FLOOR_MARGIN = 25; // canvas units between the last metre mark and the canvas edge
-const SIDE_VIEW_SCALE = 145; // canvas units per metre the robot schematic was drawn at
-const SIDE_VIEW_MUZZLE = { x: 130, floorY: 278 }; // where the schematic's muzzle and floor are
+const HEIGHT_LABEL_GAP = 10; // canvas units between the height label and what it sits above
+const OUTLET_LEADER_OFFSET = 8; // canvas units the height label's leader stays off the outlet
+const PLATE_MARGIN = 3; // canvas units of sky plate around a label (see plateText)
+const ROBOT_HALO = 'rgba(214, 238, 244, 0.45)';
+const ROBOT_HALO_BLUR = 6; // canvas units
 
 const FLIGHT_COLORS = {
   sky: '#17313c',
@@ -107,12 +110,7 @@ const FLIGHT_COLORS = {
   disc: '#e8eef0',
   discEdge: '#ffffff',
   landingLabel: '#e9f5ef',
-  robotBody: '#a0b9be',
-  robotLauncher: '#597b83',
-  robotWheel: '#223f48',
-  robotWheelEdge: '#a5b6b9',
-  robotSensor: '#93ccd8',
-  muzzle: '#c9d6da',
+  outletMark: '#c9d6da',
   insetFill: '#10262f',
   insetEdge: '#4b6873',
   velocity: '#8fa6ae',
@@ -182,39 +180,63 @@ function drawFloorAndScale(context, layout, copy) {
   context.textAlign = 'left';
   context.fillStyle = FLIGHT_COLORS.floorLabel;
   context.fillText(copy.floor, 6, layout.floorY + 22);
-  plateText(
-    context,
-    copy.height,
-    6,
-    toY(layout, LAUNCH_SPEC.height) - 34,
-    FLIGHT_COLORS.floorLabel,
-  );
 }
 
-// Side-view schematic, paired with the existing QUESTiX top view in the mechanism panel. The
-// coordinates are a drawing, not a measurement of the machine; the narrow layout shrinks it with
-// the rest of the scene.
-function drawRobotSideView(context, layout) {
-  context.save();
-  context.translate(layout.muzzleX, layout.floorY);
-  context.scale(layout.scale / SIDE_VIEW_SCALE, layout.scale / SIDE_VIEW_SCALE);
-  context.translate(-SIDE_VIEW_MUZZLE.x, -SIDE_VIEW_MUZZLE.floorY);
-  context.fillStyle = FLIGHT_COLORS.robotBody;
-  context.fillRect(45, 223, 66, 32);
-  context.fillStyle = FLIGHT_COLORS.robotLauncher;
-  context.fillRect(67, 207, 57, 16);
-  context.fillStyle = FLIGHT_COLORS.robotWheel;
-  context.strokeStyle = FLIGHT_COLORS.robotWheelEdge;
-  context.lineWidth = 2;
+// The robot as the CAD side view (js/core/questix-art.js), drawn to the scene's own scale with its
+// disc outlet on the release point: 0 m along the floor, the assumed release height above it. The
+// renders put the outlet at about a third of the robot's length above the floor, so the robot's
+// drawn size follows from that height; its rear may run off the left edge of the canvas.
+function robotSideLayout(layout) {
+  const { bounds, size, outlet } = QUESTIX_VIEWS.side;
+  const imageHeight = (LAUNCH_SPEC.height * layout.scale) / (bounds[3] - outlet.y);
+  const imageWidth = (imageHeight * size[0]) / size[1];
+  const centre = layout.muzzleX - (outlet.x - (bounds[0] + bounds[2]) / 2) * imageWidth;
+  const width = (bounds[2] - bounds[0]) * imageWidth;
+  return { centre, width, top: questixSideLayout(centre, layout.floorY, width).top };
+}
+
+// 「射出口の高さ / 45 cm（仮定）」 with a dotted leader to the outlet. It sits in the sky just above
+// the release point; where the force box takes that sky (narrow screens), it moves above the
+// robot's upper left corner and its leader runs over and down in front of the robot.
+function drawHeightLabel(context, layout, copy, robotTop) {
+  const lines = [copy.heightTitle, copy.height];
+  const lineHeight = layout.note + 5;
+  const outletY = toY(layout, LAUNCH_SPEC.height);
+  const leaderX = layout.muzzleX + OUTLET_LEADER_OFFSET;
+  context.font = `${layout.note}px system-ui`;
+  const width = Math.max(...lines.map((text) => context.measureText(text).width));
+  const besideOutlet = !layout.inset || leaderX + width + 3 * PLATE_MARGIN < layout.inset.x;
+  const left = besideOutlet ? leaderX + 2 * PLATE_MARGIN : 2 * PLATE_MARGIN;
+  const lastLine = besideOutlet ? outletY - 2 * HEIGHT_LABEL_GAP : robotTop - HEIGHT_LABEL_GAP;
+  const firstLine = lastLine - (lines.length - 1) * lineHeight;
+  lines.forEach((text, index) =>
+    plateText(context, text, left, firstLine + index * lineHeight, FLIGHT_COLORS.floorLabel),
+  );
+  context.strokeStyle = FLIGHT_COLORS.outletMark;
+  context.lineWidth = 1.5;
+  context.setLineDash([2, 4]);
   context.beginPath();
-  context.arc(67, 261, 15, 0, Math.PI * 2);
-  context.fill();
+  if (besideOutlet) {
+    context.moveTo(leaderX, firstLine - layout.note);
+  } else {
+    const leaderY = lastLine - layout.note / 2 + 2;
+    context.moveTo(left + width + 2 * PLATE_MARGIN, leaderY);
+    context.lineTo(leaderX, leaderY);
+  }
+  context.lineTo(leaderX, outletY - OUTLET_LEADER_OFFSET);
   context.stroke();
-  context.fillStyle = FLIGHT_COLORS.robotSensor;
-  context.fillRect(103, 230, 8, 8);
-  context.fillStyle = FLIGHT_COLORS.muzzle;
-  context.fillRect(108, SIDE_VIEW_MUZZLE.floorY - LAUNCH_SPEC.height * SIDE_VIEW_SCALE - 2, 22, 4);
+  context.setLineDash([]);
+}
+
+function drawRobotSideView(context, layout, copy) {
+  const robot = robotSideLayout(layout);
+  // A faint light halo keeps the dark robot visible against the dark sky, as drawQuestixTop does.
+  context.save();
+  context.shadowColor = ROBOT_HALO;
+  context.shadowBlur = ROBOT_HALO_BLUR;
+  drawQuestixSide(context, robot.centre, layout.floorY, robot.width, 'side');
   context.restore();
+  drawHeightLabel(context, layout, copy, robot.top);
 }
 
 // The target: a band on the floor ±15 cm around its centre with a dashed centre line, labelled
@@ -417,7 +439,7 @@ function drawLaunch(
   const context = scaledContext(canvas, layout.width, layout.height);
   drawBackdrop(context, layout, copy);
   drawFloorAndScale(context, layout, copy);
-  drawRobotSideView(context, layout);
+  drawRobotSideView(context, layout, copy);
   if (target !== null)
     drawTarget(context, layout, target, fill(copy.target, { target: formatNumber(target, 1) }));
   if (previous)
@@ -446,15 +468,21 @@ function drawLaunch(
   if (landed && run.status === 'landed') drawLandingMark(context, layout, run.range, discX);
 }
 
-// --- Top view of the launcher ------------------------------------------------------------------
+// --- The launcher on its own -------------------------------------------------------------------
 
 const ROBOT_VIEW_WIDTH = 180; // px
 const ROBOT_VIEW_HEIGHT = 130; // px
+// The small side view beside the launcher schematic: the flight scene's robot and disc at a scale
+// that fits the canvas, with the disc just out of the outlet and an arrow for the push.
+const ROBOT_VIEW = { scale: 80, muzzleX: 116, floorY: 124 }; // px per metre, px, px
+const ROBOT_VIEW_COLORS = { floor: '#9aaeb2', disc: '#f5ce8e', push: '#427d77' };
+const ROBOT_VIEW_DISC_AHEAD = 12; // px from the outlet to the disc's centre
+const ROBOT_VIEW_ARROW_END = 174; // px
 
 // The parts below are joined without any whitespace between them: they are inserted as markup, and
 // stray text nodes would change the layout of the schematic.
-const ROBOT_TOP_VIEW =
-  '<div><canvas id="launchRobot" width="180" height="130" role="img" aria-label="QUESTiXを上から見た図"></canvas><span>機体は止めて射出</span></div>';
+const ROBOT_SIDE_VIEW =
+  '<div><canvas id="launchRobot" width="180" height="130" role="img" aria-label="QUESTiXを横から見た図。前面の射出口からディスクを水平に押し出す"></canvas><span>機体は止めて射出</span></div>';
 const LAUNCHER_TOP_VIEW =
   '<svg viewBox="0 0 420 160" role="img" aria-label="水平なディスクを、1つの駆動ローラが押し出す仮の機構。上から見た模式図。"><defs><marker id="launchArrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0 0L7 3L0 6" fill="none" stroke="#427d77"/></marker></defs><text x="18" y="22" fill="#49616b" font-size="14">上から見た射出部（機構は仮定）</text><path d="M40 126H260" stroke="#9aaeb2" stroke-width="6"/><circle cx="144" cy="85" r="39" fill="#f5ce8e" stroke="#aa7d3d"/><circle cx="142" cy="36" r="12" fill="#52797c"/><path d="M193 84H278" stroke="#427d77" stroke-width="3" marker-end="url(#launchArrow)"/><path d="M103 31H75" stroke="#52797c"/><text x="18" y="51" fill="#49616b" font-size="12">駆動ローラ1つ</text><text x="279" y="89" fill="#427d77" font-size="14">押し出す</text><text x="112" y="149" fill="#49616b" font-size="12">案内部</text><path d="M176 43Q205 85 177 122" fill="none" stroke="#9f753c" stroke-dasharray="3 3"/><text x="279" y="120" fill="#7d622f" font-size="12">回転も生じ得る</text></svg>';
 const DISC_DIMENSIONS =
@@ -465,7 +493,7 @@ const DISC_DIMENSIONS =
 function launchMechanism() {
   return (
     '<div class="launch-mechanism">' +
-    ROBOT_TOP_VIEW +
+    ROBOT_SIDE_VIEW +
     LAUNCHER_TOP_VIEW +
     DISC_DIMENSIONS +
     '</div>'
@@ -475,11 +503,31 @@ function launchMechanism() {
 function drawLaunchRobot(canvas) {
   const context = scaledContext(canvas, ROBOT_VIEW_WIDTH, ROBOT_VIEW_HEIGHT);
   context.clearRect(0, 0, ROBOT_VIEW_WIDTH, ROBOT_VIEW_HEIGHT);
-  context.save();
-  context.translate(88, 65);
-  context.scale(0.85, 0.85);
-  drawRobot(context, { x: 0, y: 0 }, { theta: 0, left: 0, right: 0 });
-  context.restore();
+  const robot = robotSideLayout(ROBOT_VIEW);
+  context.strokeStyle = ROBOT_VIEW_COLORS.floor;
+  context.lineWidth = 2;
+  context.beginPath();
+  context.moveTo(0, ROBOT_VIEW.floorY);
+  context.lineTo(ROBOT_VIEW_WIDTH, ROBOT_VIEW.floorY);
+  context.stroke();
+  drawQuestixSide(context, robot.centre, ROBOT_VIEW.floorY, robot.width, 'side');
+  const discX = ROBOT_VIEW.muzzleX + ROBOT_VIEW_DISC_AHEAD;
+  const discY = toY(ROBOT_VIEW, LAUNCH_SPEC.height);
+  drawDisc(context, ROBOT_VIEW, discX, discY, ROBOT_VIEW_COLORS.disc);
+  const tail = discX + (LAUNCH_SPEC.diameter * ROBOT_VIEW.scale) / 2 + 4;
+  context.strokeStyle = ROBOT_VIEW_COLORS.push;
+  context.fillStyle = ROBOT_VIEW_COLORS.push;
+  context.lineWidth = 2;
+  context.beginPath();
+  context.moveTo(tail, discY);
+  context.lineTo(ROBOT_VIEW_ARROW_END - 6, discY);
+  context.stroke();
+  context.beginPath();
+  context.moveTo(ROBOT_VIEW_ARROW_END, discY);
+  context.lineTo(ROBOT_VIEW_ARROW_END - 8, discY - 5);
+  context.lineTo(ROBOT_VIEW_ARROW_END - 8, discY + 5);
+  context.closePath();
+  context.fill();
 }
 
 // --- Output against distance chart -------------------------------------------------------------

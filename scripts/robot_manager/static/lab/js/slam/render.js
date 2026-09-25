@@ -1,4 +1,5 @@
 import { drawRobot } from '../core/renderer.js';
+import { drawQuestixSide } from '../core/questix-art.js';
 import { drawSlamCamera } from './camera.js';
 
 // Canvas drawing of the SLAM experiment: the two maps (reference and estimate), the sensor chart
@@ -414,6 +415,9 @@ const TILT_BAR_SPACING = 51; // canvas units between the x, y and z bars
 const TILT_BAR_SCALE = 12; // canvas units per m/s²
 const TILT_AXIS_LABELS = ['前後 x', '左右 y', '上下 z'];
 const TILT_AXIS_COLORS = ['#be884c', '#5686c3', '#358879'];
+// The chassis around its pivot, in canvas units: its length, and its wheels 10 below the pivot,
+// which puts them on the floor line when the robot is level.
+const TILT_CHASSIS = { width: 150, bottom: 10 };
 
 // Gravity as a stationary IMU measures it, in the body frame (x forward, y left, z up).
 function tiltAcceleration(pitchDegrees, rollDegrees) {
@@ -438,15 +442,12 @@ function drawTilt(canvas, { pitchDegrees, rollDegrees }) {
   context.moveTo(25, 110);
   context.lineTo(220, 110);
   context.stroke();
-  // Side view of the robot body: pitch lifts it, roll rotates it.
+  // Side view of the robot body (the CAD chassis, front to the right): pitch lifts it, roll
+  // rotates it.
   context.save();
   context.translate(120, 100 + pitch * 45);
   context.rotate(roll);
-  context.fillStyle = '#83b5c7';
-  context.fillRect(-64, -12, 128, 24);
-  context.fillStyle = '#1b4256';
-  context.fillRect(-55, 12, 27, 13);
-  context.fillRect(30, 12, 27, 13);
+  drawQuestixSide(context, 0, TILT_CHASSIS.bottom, TILT_CHASSIS.width, 'base');
   context.restore();
   context.fillStyle = '#315462';
   context.font = '16px system-ui';

@@ -6,6 +6,7 @@ import { fillSentence } from '../core/content.js';
 import { rewardCurveLayout } from './curve-core.js';
 import { curveChart } from './curve-view.js';
 import { OUTCOME_SYMBOLS } from './outcome-marks.js';
+import { questixTopSvg } from '../core/questix-art.js';
 
 // Templates of the reinforcement-learning foundation chapters. Every function is pure: it turns
 // the model built by foundations.js into markup. The learner-facing sentences come from
@@ -56,7 +57,9 @@ const dialogDetails = (title, paragraphs) =>
     ${paragraphs.map((paragraph) => html`<p>${paragraph}</p>`)}
   </details>`;
 
-// Small pictograms that stand in for the parcel, the corridor, the goal and the robot itself.
+// Small pictograms that stand in for the parcel, the corridor, the goal and the robot itself. The
+// robot is the CAD top view (js/core/questix-art.js), front up.
+const ICON_HEADING_UP = -90; // degrees
 const ICONS = {
   parcel: html`<svg viewBox="0 0 72 66" aria-hidden="true" focusable="false">
     <path d="M22 24L36 17L50 24V44L36 51L22 44Z" fill="#f4d8a3" stroke="#ac7a30" stroke-width="2" />
@@ -70,18 +73,7 @@ const ICONS = {
   road: html`<svg viewBox="0 0 72 66" aria-hidden="true" focusable="false">
     <path d="M18 8V58M54 8V58" stroke="#9eb4bd" stroke-width="3" />
     <path d="M36 8V15M36 51V58" stroke="#9eb4bd" stroke-width="2" />
-    <rect
-      x="25"
-      y="22"
-      width="22"
-      height="23"
-      rx="7"
-      fill="#b6d7d4"
-      stroke="#39776e"
-      stroke-width="2"
-    />
-    <circle cx="36" cy="29" r="4" fill="#477dac" />
-    <path d="M31 17L36 12L41 17" fill="none" stroke="#39776e" stroke-width="2" />
+    ${questixTopSvg(36, 33, ICON_HEADING_UP, 28)}
   </svg>`,
   goal: html`<svg viewBox="0 0 72 66" aria-hidden="true" focusable="false">
     <path d="M23 55V10L53 10L46 22L53 34H23" fill="#e6f1ed" stroke="#39776e" stroke-width="2" />
@@ -89,22 +81,7 @@ const ICONS = {
     <path d="M15 56H37" stroke="#39776e" stroke-width="2" />
   </svg>`,
   robot: html`<svg viewBox="0 0 72 66" aria-hidden="true" focusable="false">
-    <rect x="12" y="22" width="7" height="30" rx="3" fill="#294a57" />
-    <rect x="53" y="22" width="7" height="30" rx="3" fill="#294a57" />
-    <rect
-      x="20"
-      y="17"
-      width="32"
-      height="38"
-      rx="10"
-      fill="#c9dcde"
-      stroke="#7299a4"
-      stroke-width="2"
-    />
-    <rect x="26" y="14" width="20" height="9" rx="4" fill="#244c65" />
-    <circle cx="31" cy="18" r="2.5" fill="#b7e6ff" />
-    <circle cx="41" cy="18" r="2.5" fill="#b7e6ff" />
-    <circle cx="36" cy="36" r="8" fill="#274b50" stroke="#80d5c2" stroke-width="3" />
+    ${questixTopSvg(36, 34, ICON_HEADING_UP, 50)}
   </svg>`,
 };
 

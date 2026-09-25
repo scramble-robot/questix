@@ -107,7 +107,8 @@
     "note": "射出口を0 mとして、最初に床に触れた位置を測る",
     "sameScale": "横の位置と高さは同じ縮尺",
     "floor": "床",
-    "height": "高さ45 cm（仮定）",
+    "heightTitle": "射出口の高さ",
+    "height": "45 cm（仮定）",
     "target": "的 {target} m ±15 cm",
     "inset": "その瞬間の力",
     "moving": "┈ 進む向き"

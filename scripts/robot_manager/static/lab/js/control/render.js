@@ -1,5 +1,6 @@
 import { html, svg, nothing } from '../vendor/lit-html.js';
 import { drawRobot } from '../core/renderer.js';
+import { drawQuestixSide, questixSideLayout } from '../core/questix-art.js';
 import { DURATION, STOP_DISTANCE, DRAG_START, BLOCK_WINDOW } from './core.js';
 import { fillSentence as fill } from '../core/content.js';
 import { CHART_ROLE_COLORS, roleStyle } from '../core/palette.js';
@@ -37,72 +38,116 @@ function controlWheelAngle(samples, index) {
 const BENCH_WIDE = { scale: 0.78, x: 40, y: -40, text: 500 }; // canvas units
 const BENCH_FONT = { compact: 17, wide: 16 }; // canvas units: ≥ 12 px on a 352 px phone canvas and at 1366 px
 
-function drawBenchFrame(ctx, font) {
-  const box = (x, y, w, h, r, fill, stroke) => {
-    ctx.beginPath();
-    ctx.roundRect(x, y, w, h, r);
-    ctx.fillStyle = fill;
-    ctx.fill();
-    if (stroke) {
-      ctx.strokeStyle = stroke;
-      ctx.lineWidth = 2;
-      ctx.stroke();
-    }
+// The robot is the CAD 'bench' view (chassis, drive wheel uncovered) of js/core/questix-art.js,
+// placed in the compact canvas units below; the wide canvas scales the same drawing.
+const BENCH_ROBOT = { x: 236, bottom: 200, width: 400 }; // canvas units: centre, wheel bottom, length
+// The drive wheel inside the 'bench' image, as fractions of the image's width and height
+// (assets/questix/wheelBench.webp is 1100 × 190 px: wheel centre at 676, 98, radius 84.5 px).
+const BENCH_WHEEL = { x: 0.615, y: 0.518, radius: 0.0768 };
+const BENCH_FLOOR_Y = 266; // canvas units
+// The stand: a board under the chassis plate on two legs, between the caster and the drive wheel,
+// so the drive wheel hangs free beside it.
+const BENCH_BOARD = { left: 95, right: 245, top: 153, height: 10 }; // canvas units
+const BENCH_LEGS = [112, 222]; // canvas units: left edge of each leg
+const BENCH_LEG = { width: 10, foot: 38, footHeight: 8 }; // canvas units
+const BENCH_COLOURS = {
+  floor: '#617983',
+  floorLabel: '#a8bec6',
+  board: '#708894',
+  leg: '#526f7d',
+  foot: '#8ca1ab',
+  gap: '#e5c482',
+  standLabel: '#c9dce3',
+  standLeader: '#a4bac4',
+  spoke: '#b7f0de',
+  spokeEdge: '#10232c',
+  halo: 'rgba(214, 238, 244, 0.45)',
+};
+const BENCH_HALO_BLUR = 6; // canvas units
+
+function benchWheel() {
+  const place = questixSideLayout(BENCH_ROBOT.x, BENCH_ROBOT.bottom, BENCH_ROBOT.width, 'bench');
+  return {
+    x: place.x + BENCH_WHEEL.x * place.width,
+    y: place.y + BENCH_WHEEL.y * place.height,
+    radius: BENCH_WHEEL.radius * place.width,
   };
-  // Floor and support touch; the tire does not. In a side view the other
-  // driven wheel is behind the visible one, not a second front/rear wheel.
-  ctx.strokeStyle = '#617983';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(24, 266);
-  ctx.lineTo(456, 266);
-  ctx.stroke();
-  ctx.fillStyle = '#a8bec6';
-  ctx.font = font + 'px system-ui';
-  ctx.fillText('床', 431, 292);
-  box(138, 158, 186, 12, 3, '#708894');
-  for (const x of [145, 308]) {
-    box(x, 170, 10, 87, 2, '#526f7d');
-    box(x - 14, 257, 38, 8, 2, '#8ca1ab');
-  }
-  box(131, 87, 208, 71, 15, '#bdcfd6', '#ecf4f6');
-  box(143, 101, 174, 30, 7, '#304d59');
-  ctx.fillStyle = '#8ad2c2';
-  ctx.fillRect(151, 109, 37, 4);
-  box(317, 101, 32, 23, 6, '#213d50', '#7b9cac');
-  ctx.beginPath();
-  ctx.arc(338, 112, 6, 0, Math.PI * 2);
-  ctx.fillStyle = '#9ecfff';
-  ctx.fill();
-  box(248, 72, 42, 15, 5, '#89a5af');
-  box(254, 65, 30, 9, 3, '#284650', '#84bfb7');
 }
 
-// Label the actual gap, rather than relying on a caption to explain it.
+// Floor and stand touch; the tire does not. In a side view the other driven wheel is behind the
+// visible one, not a second front/rear wheel. The stand is drawn first, so the chassis and the
+// wheel sit in front of it.
+function drawBenchFrame(ctx, font) {
+  const box = (x, y, w, h, fill) => {
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, 2);
+    ctx.fillStyle = fill;
+    ctx.fill();
+  };
+  ctx.strokeStyle = BENCH_COLOURS.floor;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(24, BENCH_FLOOR_Y);
+  ctx.lineTo(456, BENCH_FLOOR_Y);
+  ctx.stroke();
+  ctx.fillStyle = BENCH_COLOURS.floorLabel;
+  ctx.font = font + 'px system-ui';
+  ctx.fillText('床', 431, 292);
+  const boardBottom = BENCH_BOARD.top + BENCH_BOARD.height;
+  const footTop = BENCH_FLOOR_Y - BENCH_LEG.footHeight - 1;
+  box(
+    BENCH_BOARD.left,
+    BENCH_BOARD.top,
+    BENCH_BOARD.right - BENCH_BOARD.left,
+    BENCH_BOARD.height,
+    BENCH_COLOURS.board,
+  );
+  for (const x of BENCH_LEGS) {
+    box(x, boardBottom, BENCH_LEG.width, footTop - boardBottom, BENCH_COLOURS.leg);
+    const footLeft = x + (BENCH_LEG.width - BENCH_LEG.foot) / 2;
+    box(footLeft, footTop, BENCH_LEG.foot, BENCH_LEG.footHeight, BENCH_COLOURS.foot);
+  }
+  // A faint light halo keeps the dark chassis visible on the dark background.
+  ctx.save();
+  ctx.shadowColor = BENCH_COLOURS.halo;
+  ctx.shadowBlur = BENCH_HALO_BLUR;
+  drawQuestixSide(ctx, BENCH_ROBOT.x, BENCH_ROBOT.bottom, BENCH_ROBOT.width, 'bench');
+  ctx.restore();
+}
+
+// Label the actual gap, rather than relying on a caption to explain it. The gap's words sit right
+// of its bracket and 支持台 left of the stand, both below the chassis.
 function drawBenchLabels(ctx, font) {
-  ctx.strokeStyle = '#e5c482';
+  const wheel = benchWheel();
+  const top = wheel.y + wheel.radius + 4;
+  const bottom = BENCH_FLOOR_Y - 4;
+  const middle = (top + bottom) / 2;
+  const baseline = middle + font * 0.35;
+  ctx.strokeStyle = BENCH_COLOURS.gap;
   ctx.lineWidth = 1.5;
   ctx.beginPath();
-  ctx.moveTo(231, 216);
-  ctx.lineTo(231, 259);
-  ctx.moveTo(226, 216);
-  ctx.lineTo(236, 216);
-  ctx.moveTo(226, 259);
-  ctx.lineTo(236, 259);
-  ctx.moveTo(239, 238);
-  ctx.lineTo(262, 238);
+  ctx.moveTo(wheel.x, top);
+  ctx.lineTo(wheel.x, bottom);
+  ctx.moveTo(wheel.x - 5, top);
+  ctx.lineTo(wheel.x + 5, top);
+  ctx.moveTo(wheel.x - 5, bottom);
+  ctx.lineTo(wheel.x + 5, bottom);
+  ctx.moveTo(wheel.x + 8, middle);
+  ctx.lineTo(wheel.x + 16, middle);
   ctx.stroke();
-  ctx.fillStyle = '#e5c482';
+  ctx.fillStyle = BENCH_COLOURS.gap;
   ctx.font = font + 'px system-ui';
-  ctx.fillText('タイヤは床に触れない', 268, 244);
-  ctx.strokeStyle = '#a4bac4';
+  ctx.fillText('タイヤは床に触れない', wheel.x + 20, baseline);
+  const leg = BENCH_LEGS[0];
+  ctx.strokeStyle = BENCH_COLOURS.standLeader;
   ctx.beginPath();
-  ctx.moveTo(100, 193);
-  ctx.lineTo(121, 193);
-  ctx.lineTo(145, 216);
+  ctx.moveTo(leg - 2, middle);
+  ctx.lineTo(leg - 10, middle);
   ctx.stroke();
-  ctx.fillStyle = '#c9dce3';
-  ctx.fillText('支持台', 30, 200);
+  ctx.fillStyle = BENCH_COLOURS.standLabel;
+  ctx.textAlign = 'right';
+  ctx.fillText('支持台', leg - 13, baseline);
+  ctx.textAlign = 'left';
 }
 
 function drawControlBench(ctx, { compact, angle, measured, started, blocked, description }) {
@@ -144,46 +189,36 @@ function drawControlBench(ctx, { compact, angle, measured, started, blocked, des
   ctx.fillText(description, x, 182);
 }
 
-// Tire, hub and one contrasting spoke make rotation directly visible.
+// The CAD wheel is a still picture, so a spoke drawn over it turns with the wheel: a light bar
+// with a dark edge from the hub into the tyre, and a dot on the hub.
 function drawBenchWheel(ctx, angle) {
+  const wheel = benchWheel();
   ctx.save();
-  ctx.translate(231, 164);
+  ctx.translate(wheel.x, wheel.y);
   ctx.rotate(angle);
+  ctx.lineCap = 'round';
+  for (const [colour, width] of [
+    [BENCH_COLOURS.spokeEdge, 8],
+    [BENCH_COLOURS.spoke, 4],
+  ]) {
+    ctx.strokeStyle = colour;
+    ctx.lineWidth = width;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(wheel.radius * SPOKE_REACH, 0);
+    ctx.stroke();
+  }
   ctx.beginPath();
-  ctx.arc(0, 0, 44, 0, Math.PI * 2);
-  ctx.fillStyle = '#10232c';
+  ctx.arc(0, 0, HUB_DOT_RADIUS, 0, Math.PI * 2);
+  ctx.fillStyle = BENCH_COLOURS.spoke;
   ctx.fill();
-  ctx.strokeStyle = '#7e969f';
-  ctx.lineWidth = 3;
+  ctx.strokeStyle = BENCH_COLOURS.spokeEdge;
+  ctx.lineWidth = 2;
   ctx.stroke();
-  for (let i = 0; i < 16; i++) {
-    const a = (i * Math.PI) / 8;
-    ctx.strokeStyle = '#3a535f';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(38 * Math.cos(a), 38 * Math.sin(a));
-    ctx.lineTo(42 * Math.cos(a), 42 * Math.sin(a));
-    ctx.stroke();
-  }
-  ctx.beginPath();
-  ctx.arc(0, 0, 31, 0, Math.PI * 2);
-  ctx.fillStyle = '#385864';
-  ctx.fill();
-  for (let i = 0; i < 4; i++) {
-    ctx.rotate(Math.PI / 2);
-    ctx.beginPath();
-    ctx.moveTo(11, 0);
-    ctx.lineTo(29, 0);
-    ctx.strokeStyle = i === 0 ? '#b7f0de' : '#738e99';
-    ctx.lineWidth = i === 0 ? 6 : 4;
-    ctx.stroke();
-  }
-  ctx.beginPath();
-  ctx.arc(0, 0, 10, 0, Math.PI * 2);
-  ctx.fillStyle = '#a9c8ce';
-  ctx.fill();
   ctx.restore();
 }
+const SPOKE_REACH = 0.88; // share of the wheel's radius
+const HUB_DOT_RADIUS = 5; // canvas units
 
 const centimetres = (metres) => formatValue(metres * 100, 0) + ' cm';
 

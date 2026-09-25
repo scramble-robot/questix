@@ -1,13 +1,17 @@
 import { html, svg, nothing, unsafeHTML, ifDefined } from '../vendor/lit-html.js';
 import { formatNumber } from '../core/dom.js';
 import { snapToZero, fillText } from './basics-core.js';
+import { questixTopSvg } from '../core/questix-art.js';
 
 // Templates of the introductory SLAM chapters. Every function is pure: it turns the model built
 // by basics.js into markup. Learner-facing sentences come from content/slam/basics.json (`copy`);
 // only short labels live here. The figure toolkit (`figureArt`) is shared with the concept
 // chapters through renderSlamConcept(topic, art).
 
-const GHOST_OPACITY = 0.28; // robot drawn at its start or at its real position
+const GHOST_OPACITY = 0.4; // robot drawn at its start or at its real position
+const ROBOT_SIZE = 50; // viewBox units across the robot's top view
+// A faint light halo keeps the dark robot visible on the dark figures (as drawQuestixTop does).
+const ROBOT_HALO = 'filter: drop-shadow(0 0 3px rgba(214, 238, 244, 0.5))';
 const LINE_COLOUR = '#54717e';
 const LABEL_COLOUR = '#bdd2da';
 const ESTIMATE_COLOUR = '#8ad7c0'; // path or beam computed from the sensor values
@@ -68,9 +72,11 @@ function figure(body, title) {
   </svg>`;
 }
 
-// The robot seen from above, heading `angle` radians (counter-clockwise on the page).
+// The robot seen from above (the CAD top view, its front marked by the light-blue line), heading
+// `angle` radians (counter-clockwise on the page). The size is a drawing size, not to the plot's
+// scale, so the robot stays recognisable on every plot.
 function robot(x, y, angle = 0, ghost = false) {
-  return svg`<g transform="translate(${x} ${y}) rotate(${-degrees(angle)})" opacity=${ghost ? GHOST_OPACITY : 1}><rect x="-14" y="-23" width="29" height="46" rx="9" fill="#c9dcde" stroke="#7299a4"/><rect x="-12" y="-28" width="24" height="8" rx="3" fill="#152d39" stroke="#89a5b0"/><rect x="-12" y="20" width="24" height="8" rx="3" fill="#152d39" stroke="#89a5b0"/><rect x="7" y="-13" width="9" height="26" rx="4" fill="#244c65"/><circle cx="12" cy="-6" r="3" fill="#b7e6ff"/><circle cx="12" cy="6" r="3" fill="#b7e6ff"/><circle r="8" fill="#274b50" stroke="#80d5c2" stroke-width="2"/><path d="M24 -6L32 0L24 6" fill="none" stroke="#a8e2d3" stroke-width="2"/></g>`;
+  return svg`<g style=${ROBOT_HALO}>${questixTopSvg(x, y, -degrees(angle), ROBOT_SIZE, ghost ? GHOST_OPACITY : 1)}</g>`;
 }
 
 function line(x1, y1, x2, y2, colour = LINE_COLOUR, { width, dash, opacity } = {}) {

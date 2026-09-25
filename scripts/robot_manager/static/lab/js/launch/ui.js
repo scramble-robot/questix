@@ -216,14 +216,14 @@ function previousLanding(current) {
   return current.records.filter((run) => run !== current.run).at(-1) ?? null;
 }
 
-function drawRobot() {
+function drawMechanismRobot() {
   const canvas = document.getElementById('launchRobot');
   if (canvas) drawLaunchRobot(canvas);
 }
 
 function drawCanvases() {
   drawFlight();
-  drawRobot();
+  drawMechanismRobot();
 }
 
 function update() {
@@ -240,7 +240,7 @@ function rebuildPage() {
   render(null, page());
   update();
   if (measureChartWidth()) update();
-  drawRobot();
+  drawMechanismRobot();
 }
 
 function openTopic(id) {
