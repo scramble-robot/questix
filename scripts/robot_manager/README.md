@@ -8,6 +8,48 @@ uvicorn on `127.0.0.1:8888`.
 - `logs.py` — log collection console (`/api/logs/*`).
 - `static/` — vanilla HTML/CSS/JS frontend (no build step).
 
+## UI スタイル
+
+QUESTiX Robot Manager の全タブとダイアログは、`static/style.css` の共通テーマを使います。
+
+- 色は `:root` の CSS 変数で管理します。濃紺の背景と鮮やかなシアンのアクセントを基本とし、
+  タブ単位で背景色・文字色を上書きしません。コントローラー図の機能識別色は別扱いです。
+- セクションは `.card`、操作は `.btn`、補助操作は `.btn-small` を使います。
+  保存はシアン、起動は緑、再起動はオレンジ、停止・削除は赤に揃えます。
+  再読み込みなどの補助操作は中立色、色付きボタンの文字は濃色にしてコントラストを確保します。
+- 日本語ゴシック体を優先し、本文・入力欄は 16px、補助文字は 14px 以上を基本にします。
+- 生徒向けの表示では rosbag を「動作データの記録」、bag を「記録データ」と呼びます。
+  割り当ての変更、設定の保存、次回起動での使用は、それぞれ別の段階として説明します。
+- 入力欄とボタンの基本高さは 44px、角丸は `--radius-control` に統一します。
+  キーボードのフォーカス表示と無効状態の表示も共通です。
+- 画面幅 639px 以下では設定を1列にし、パス入力をラベルの下に配置します。
+  スタイル変更時は全4タブと管理設定、操作設定の編集ダイアログ、フォルダ選択をPC・モバイル幅で確認します。
+
+## 生徒向けの操作と管理設定
+
+通常のタブは「操作」「調整」「記録」「診断ログ」です。生徒が行う練習／大会モードの
+切り替えは「操作」に残し、機体構成・通信設定・録画の詳細設定は右上の「管理設定」に
+まとめています。これは画面の整理であり、利用者認証やアクセス権限の分離ではありません。
+全画面の「ロボット停止」は既存のサービス停止操作です。
+状態は「ロボット制御：実行中／起動処理中／停止処理中／停止中／起動失敗」と表示します。
+実行中は制御プログラムの実行状態で、コントローラーの接続や操作可能を保証する表示ではありません。
+
+- モードは**次回起動用の保存値**を表示します。変更しても実行中のモードは変わりません。
+  既存のランチャー仕様により、練習モードではサービスからのROS起動をスキップします。
+- 起動前の確認では保存プロファイルとROS・ワークスペースの起動ファイルを確認します。
+  コントローラーの物理接続や安全状態の自動判定は行いません。
+  旧サービスで `/api/readiness` がない場合は既存APIで保存設定を確認し、起動環境は未確認と表示します。
+  新しい環境チェックと設定履歴の保存には、更新済みの管理サービスを起動する必要があります。
+- 調整画面は未保存と保存済みを区別し、「ロボットの設定と比較」で実際のROSパラメータと比較します。
+  取得できなかった項目は未確認として残します。比較は取得時点の情報で、30秒経過または
+  起動・停止操作、取得できたサービス状態・起動設定の変化、通信切断で確認結果を失効させます。
+- 操作失敗時は画面上部に案内と詳細を残します。通信断やタイムアウトでは処理完了を断定しません。
+- 操作設定の保存前の値は `controls.<controller>.history.json` に直前の1世代を保持します。
+  「ひとつ前の設定を読み込む」は編集値を戻すだけで、「操作設定を保存」により確定します。
+  既存の競合検出を使用し、外部編集でリビジョンが変わった場合は古い履歴を提示しません。
+
+授業用の標準設定の登録と録画メモは、この段階では追加していません。
+
 ## Competition GPIO safety
 
 The `ENABLE_GPIO_REF` field in `launch.env` is retained for manual development and
@@ -38,10 +80,10 @@ bag list shows each bag's full path to make that copy easy. Only MCAP-storage ba
 are accepted by `rosbag_manager` (db3/sqlite is rejected), which is why recording is
 fixed to `-s mcap`.
 
-Disk protection: recording refuses to start when free space is below `最小空き(GB)`
+Disk protection: recording refuses to start when free space is below `確保する空き容量 (GB)`
 (`MIN_FREE_GB`, HTTP 507) and auto-stops (via SIGINT, so the bag is finalized) if
-free space drops below that threshold mid-recording. Optional `分割(MB)`
-(`MAX_SPLIT_MB`) and `録画上限(秒)` (`MAX_DURATION_SEC`) cap per-file size and total
+free space drops below that threshold mid-recording. Optional `ファイルの分割サイズ (MB)`
+(`MAX_SPLIT_MB`) and `記録する時間 (秒 / 0=無制限)` (`MAX_DURATION_SEC`) cap per-file size and total
 recording time.
 
 ### Prerequisites
@@ -58,9 +100,9 @@ recording time.
 
 Recorder settings are persisted to `${QUESTIX_CONFIG_DIR:-/etc/questix_robot}/rosbag.env`.
 
-## ログ回収コンソール (log collection)
+## 診断ログの保存 (log collection)
 
-The **ログ回収** tab bundles diagnostic logs into a single `.tar.gz` written to a
+The **診断ログ** tab bundles diagnostic logs into a single `.tar.gz` written to a
 folder chosen with the shared folder picker (typically a USB stick) — this replaces
 the old live journal viewer, since on a headless robot the useful action is to
 *retrieve* logs onto removable media. Selectable sources:
@@ -91,7 +133,7 @@ a per-source error in `MANIFEST.txt` and the archive is still produced.
 
 Joy のキー割り当て、射出・ローラー操作、走行速度・加速度は
 [QUESTiX 共通操作設定](../../questix_control_config/README.md) に集約しています。
-robot_manager の「操作・速度」タブでコントローラー別に編集・保存し、
+QUESTiX Robot Manager の「調整」タブでコントローラー別に編集・保存し、
 ロボットの次回起動／再起動で反映します。保存による自動再起動は行いません。
 管理画面には未保存表示・初期値への復元・入力検証・同時編集の競合検出があります。
 
@@ -114,13 +156,13 @@ Linux の標準配置を表示するもので、接続機器の自動判別で�
 直接選べます。同じスティックに複数の番号がある場合も、番号ごとに編集できます。
 編集ポップアップは選んだキーや機能名の脇に表示し、画面端では位置を調整します。
 スマートフォンでは画面下部に表示します。走行速度・旋回速度・ローラー出力・スティックの遊びは
-「速度・操作感」、読み込んだプロファイルや配置の説明は「プロファイル情報・操作ガイド」
+「速度・操作感」、読み込んだプロファイルや配置の説明は「設定を戻す・設定情報・操作ガイド」
 を開いて確認できます。
 ページの自動スクロールは行いません。閉じるボタン・Escape・外側のクリックで
-閉じられ、「編集値に反映」を押す前の選択は変更として残りません。
+閉じられ、「この割り当てに変更」を押す前の選択は変更として残りません。
 スティックは上下・左右・押し込みを区別し、未割り当てのボタンも選択できます。
-「編集値に反映」でフォームと図を更新し、図のすぐ上の「操作設定を保存」で
-確定します。保存済み表示中は「編集中に切り替える」を押してから編集してください。
+「この割り当てに変更」で編集画面のフォームと図を更新し、「操作設定を保存」で
+確定します。保存済み表示中は「割り当てを編集する」を押してから編集してください。
 保存中・保存完了・入力エラー・保存失敗は図の近くにも表示します。図から保存する際は
 入力エラーがあってもページを自動スクロールせず、問題の項目名を表示します。
 保存が失敗した場合も編集値を保持します。
@@ -129,7 +171,7 @@ Linux の標準配置を表示するもので、接続機器の自動判別で�
 各ラベルからポップアップを開き、十字キー・スティックの方向やボタンを選べます。
 例えば「上げる＝十字キー上、下げる＝B」のように異なる種類の入力も組み合わせられます。
 選んだ方向だけを編集し、反対方向の現在値も表示します。
-上下に同じ入力は指定できません。「編集値に反映」までは割り当てを変更しません。
+上下に同じ入力は指定できません。「この割り当てに変更」までは割り当てを変更しません。
 標準配置にない番号は一覧に「図の対象外」と表示します。
 左右独立スティック・直接駆動専用の設定は、この画面では扱いません。
 

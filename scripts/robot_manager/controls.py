@@ -2,6 +2,7 @@
 
 import fcntl
 import hashlib
+import json
 import math
 import os
 import tempfile
@@ -171,7 +172,18 @@ def read_profile(config_dir, controller, env):
     revision = hashlib.sha256(
         str(default_file.resolve()).encode() + b'\0' + default_raw + b'\0'
         + (saved_raw if saved_raw is not None else b'<defaults>')).hexdigest()
+    previous = None
+    history_warning = None
+    try:
+        history = json.loads((config_dir / f'controls.{controller}.history.json').read_text())
+        if revision in history:
+            previous = validate(history[revision])
+    except FileNotFoundError:
+        pass
+    except (OSError, ValueError, TypeError):
+        history_warning = '前の設定を読み込めません。現在の設定は使用できます。'
     return {'controller': controller, 'revision': revision, 'values': values,
+            'previous_values': previous, 'history_warning': history_warning,
             'defaults': defaults, 'groups': schema(), 'apply_on_restart': True,
             'source': str(saved_file if saved_raw is not None else default_file)}
 
@@ -182,7 +194,6 @@ def write_profile(config_dir, controller, env, update):
         values = validate(update.values)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    temp_path = None
     try:
         config_dir.mkdir(parents=True, exist_ok=True)
         with (config_dir / '.controls.lock').open('a') as lock:
@@ -192,19 +203,43 @@ def write_profile(config_dir, controller, env, update):
                 raise HTTPException(409, '他の画面またはファイルで設定が変更されました。'
                                     '再読み込みして変更を確認してください。')
             document = {node: {'ros__parameters': params} for node, params in values.items()}
-            with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=config_dir,
-                                             prefix='.controls-', delete=False) as stream:
-                temp_path = Path(stream.name)
-                stream.write('# QUESTiX controls — applied on next robot start/restart.\n')
-                yaml.safe_dump(document, stream, allow_unicode=True, sort_keys=False)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(temp_path, config_dir / f'controls.{controller}.yaml')
+            raw = ('# QUESTiX controls — applied on next robot start/restart.\n'
+                   + yaml.safe_dump(document, allow_unicode=True, sort_keys=False))
+            default_file = _default_file(controller, env)
+            revision = hashlib.sha256(
+                str(default_file.resolve()).encode() + b'\0' + default_file.read_bytes()
+                + b'\0' + raw.encode()).hexdigest()
+            # Bind history to the exact new revision. Write it first, retaining the
+            # current entry: failed YAML replacement cannot attach the wrong undo
+            # values to the old profile. External edits invalidate stale history.
+            history = {}
+            if current['previous_values'] is not None:
+                history[current['revision']] = current['previous_values']
+            previous = (current['values'] if values != current['values']
+                        else current['previous_values'])
+            if previous is not None:
+                history[revision] = previous
+            _atomic_text(config_dir / f'controls.{controller}.history.json',
+                         json.dumps(history, ensure_ascii=False))
+            _atomic_text(config_dir / f'controls.{controller}.yaml', raw)
             return read_profile(config_dir, controller, env)
     except PermissionError as exc:
         raise HTTPException(403, '操作設定ディレクトリに書き込み権限がありません。') from exc
     except OSError as exc:
         raise HTTPException(500, f'操作設定を保存できません: {exc}') from exc
+
+
+def _atomic_text(path, content):
+    """Replace one configuration file without leaving partially written content."""
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent,
+                                         prefix='.controls-', delete=False) as stream:
+            temp_path = Path(stream.name)
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temp_path, path)
     finally:
         if temp_path is not None:
             temp_path.unlink(missing_ok=True)

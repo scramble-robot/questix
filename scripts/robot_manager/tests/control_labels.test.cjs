@@ -127,6 +127,7 @@ function editorFixture(extraValues = {}, controller = 'uart') {
   });
   document.getElementById('controls-profile').value = controller;
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../static/controller-map.js'), 'utf8'), context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../static/operator-guide.js'), 'utf8'), context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../static/controls.js'), 'utf8'), context);
   document.events.DOMContentLoaded();
   return { document, context, getPayload: () => savedPayload };
@@ -187,10 +188,10 @@ test('runtime comparisons show the same units and never substitute saved default
   } }; renderRuntimeValues();`, context);
   assert.equal(rows[0].querySelector('.control-runtime-value').textContent, '1.5 m/s（方向反転）');
   assert.equal(rows[0].querySelector('.control-runtime-state').textContent, '保存済みと異なる');
-  assert.equal(rows[1].querySelector('.control-runtime-value').textContent, 'パラメータ未宣言');
+  assert.equal(rows[1].querySelector('.control-runtime-value').textContent, 'この項目は確認できません');
   vm.runInContext(`controlRuntime.nodes.joy_controller = { status: "unavailable", values: {} };
     renderRuntimeValues();`, context);
-  assert.equal(rows[0].querySelector('.control-runtime-value').textContent, 'ノード未検出');
+  assert.equal(rows[0].querySelector('.control-runtime-value').textContent, '対象のプログラムが見つかりません');
   assert.equal(document.getElementById('control-joy_controller-longitudinal_input_ratio-saved')
     .children[1].textContent, '2 m/s');
 });
@@ -207,7 +208,7 @@ test('an older backend disables runtime reads without breaking saved-profile edi
     ? { CONTROLLER_TYPE: 'uart' } : { paths: { '/api/control-runtime': { get: {} } } };
   await document.getElementById('tuning-tab').events.click();
   assert.equal(document.getElementById('controls-runtime-load').disabled, false);
-  assert.equal(document.getElementById('controls-runtime-message').textContent, '実行中の値は未取得です。');
+  assert.equal(document.getElementById('controls-runtime-message').textContent, 'ロボットが使っている設定は、まだ確認していません。');
 });
 
 
@@ -629,7 +630,7 @@ test('a stale tilt API explains the required manager update without showing inco
   await vm.runInContext('loadControls("uart")', context);
   assert.equal(document.getElementById('controller-map-panel').hidden, true);
   assert.equal(document.getElementById('controls-save').disabled, true);
-  assert.match(document.getElementById('controls-load-error').textContent, /robot_manager.*再起動/);
+  assert.match(document.getElementById('controls-load-error').textContent, /担当者.*管理画面.*再起動/);
 });
 
 for (const controller of ['uart', 'dualshock']) {
@@ -849,4 +850,35 @@ test('shared save includes both diagram and tuning changes while details are clo
   assert.equal(getPayload().values.joy_controller.longitudinal_input_ratio, 1);
   assert.equal(document.getElementById('controls-details').open, false);
   assert.equal(document.getElementById('controls-save').disabled, true);
+});
+
+test('restoring previous saved settings changes only the draft until explicit save', async () => {
+  const { document, context, getPayload } = editorFixture();
+  await vm.runInContext('loadControls("uart")', context);
+  vm.runInContext(`controlProfile.previous_values = structuredClone(controlProfile.values);
+    controlProfile.previous_values.joy_controller.longitudinal_input_ratio = 1.25;
+    controlsSetBusy(false);`, context);
+  assert.equal(document.getElementById('controls-undo').disabled, false);
+  document.getElementById('controls-undo').events.click();
+  assert.equal(getPayload(), undefined);
+  assert.equal(vm.runInContext('controlProfile.values.joy_controller.longitudinal_input_ratio', context), 2);
+  assert.equal(vm.runInContext('controlDraft.joy_controller.longitudinal_input_ratio', context), 1.25);
+  assert.match(document.getElementById('controls-application-title').textContent, /未保存/);
+  await document.getElementById('controls-save').events.click({ preventDefault() {} });
+  assert.equal(getPayload().values.joy_controller.longitudinal_input_ratio, 1.25);
+});
+
+test('a runtime response arriving after a service change cannot revive a stale comparison', async () => {
+  const { document, context } = editorFixture();
+  await vm.runInContext('loadControls("uart")', context);
+  vm.runInContext('runtimeAvailable = true', context);
+  let finish;
+  context.api = () => new Promise((resolve) => { finish = resolve; });
+  const pending = vm.runInContext('loadRuntimeValues()', context);
+  vm.runInContext('invalidateControlRuntime()', context);
+  finish({ captured_at: new Date().toISOString(), nodes: {} });
+  await pending;
+  assert.equal(vm.runInContext('controlRuntime', context), null);
+  assert.match(document.getElementById('controls-runtime-message').textContent, /状態が変わりました/);
+  assert.equal(document.getElementById('controls-verify').disabled, false);
 });

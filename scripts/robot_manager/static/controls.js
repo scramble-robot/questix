@@ -9,6 +9,7 @@ let controlsLoadedAt = null;
 let controlRuntime = null;
 let runtimeBusy = false;
 let runtimeAvailable = false;
+let runtimeGeneration = 0;
 let mapSelection = null;
 let mapReturnTarget = null;
 
@@ -210,7 +211,7 @@ function renderMapEditor() {
   edit.disabled = controlsBusy;
   const preview = document.getElementById("map-preview");
   if (saved) {
-    preview.textContent = "保存済みの設定を表示しています。「編集中に切り替える」で変更できます。";
+    preview.textContent = "保存済みの設定を表示しています。「割り当てを編集する」で変更できます。";
     return;
   }
   try {
@@ -222,7 +223,7 @@ function renderMapEditor() {
     const shared = current.filter((item) => `${item.node}.${item.key}` !== action.value);
     preview.textContent = `${selected.action}: ${previous} → ${channel.label}。`
       + (shared.length ? `同じ入力の ${shared.map((item) => item.action).join("、")} も残り、同時に動作します。` : "")
-      + "「編集値に反映」の後、「操作設定を保存」で確定します。";
+      + "「この割り当てに変更」の後、「操作設定を保存」で確定します。";
     apply.disabled = controlsBusy || changes.every((item) => values[item.node][item.key] === item.value);
   } catch (error) {
     preview.textContent = error.message;
@@ -239,7 +240,7 @@ function applyMapAssignment() {
       controlDraft[node][key] = value;
     }
     refreshControlChanges();
-    document.getElementById("map-feedback").textContent = "編集値に反映しました。操作設定を保存すると確定します。";
+    document.getElementById("map-feedback").textContent = "割り当てを変更しました。まだ保存はされていません。「操作設定を保存」で確定します。";
   } catch (error) {
     document.getElementById("map-feedback").textContent = error.message;
   }
@@ -264,7 +265,7 @@ function renderControlSummary() {
     return;
   }
   summary.textContent = `編集中: ${controllerName(controlProfile.controller)} ｜ `
-    + `Launch 設定: ${controllerName(launchController)} ｜ 読み込み: ${controlsLoadedAt}`;
+    + `次回起動で使うコントローラー: ${controllerName(launchController)} ｜ 読み込み: ${controlsLoadedAt}`;
   document.getElementById("controls-layout-note").textContent = controlProfile.controller === "uart"
     ? "Switch のボタン名・スティック名で選択できます。番号は UART ドライバの配列に対応しています。"
     : "DualShock の標準配置の名前を表示しています。接続方式やドライバで番号が異なる場合は、"
@@ -285,7 +286,7 @@ function renderControllerMap() {
   const saved = document.getElementById("controller-map-source").value === "saved";
   document.getElementById("controller-map-caption").textContent = saved
     ? "保存済みの割り当てを表示しています。"
-    : "編集中の割り当てを表示しています。変更は保存するまで反映されません。";
+    : "編集中の割り当てを表示しています。保存後、次にロボット制御を起動するときに使われます。";
   ControllerMap.render(host, controlProfile.controller,
     saved ? controlProfile.values : controlDraft, controlProfile.values, (assignment, returnTarget) => {
       const actionId = `${assignment.node}.${assignment.key}`;
@@ -318,6 +319,33 @@ function refreshControlChanges() {
   document.getElementById("controls-change-count").textContent = `未保存の変更: ${count} 項目`;
   document.getElementById("controls-save").disabled = controlsBusy || !count;
   controlMessage("");
+  renderControlApplication();
+}
+
+function renderControlApplication() {
+  const state = OperatorGuide.application(controlProfile, controlDraft, controlRuntime, launchController);
+  const box = document.getElementById('controls-application');
+  box.dataset.state = state.kind;
+  document.getElementById('controls-application-title').textContent = state.title;
+  document.getElementById('controls-application-note').textContent = state.note;
+  document.getElementById('controls-verify').disabled = controlsBusy || runtimeBusy || !controlProfile || !runtimeAvailable;
+  document.getElementById('controls-undo').disabled = controlsBusy || !controlProfile?.previous_values;
+}
+
+function invalidateControlRuntime() {
+  runtimeGeneration++;
+  controlRuntime = null;
+  if (typeof latestStatus !== 'undefined') launchController = latestStatus?.launch_config?.CONTROLLER_TYPE || null;
+  renderRuntimeValues();
+  renderControlApplication();
+}
+
+function restorePreviousControls() {
+  if (controlsBusy || !controlProfile?.previous_values) return;
+  if (!confirm('現在の編集内容を置き換えて、直前の保存より前の設定を読み込みますか？ この操作だけでは保存されません。')) return;
+  controlDraft = structuredClone(controlProfile.previous_values);
+  renderControls();
+  controlMessage('ひとつ前の設定を編集画面に読み込みました。まだ保存はされていません。内容を確認して「操作設定を保存」で確定してください。');
 }
 
 function renderRuntimeValues() {
@@ -332,11 +360,11 @@ function renderRuntimeValues() {
       value.textContent = "未取得";
       status.textContent = "";
     } else if (report.status !== "ok") {
-      const labels = { unavailable: "ノード未検出", timeout: "応答なし", error: "取得失敗" };
+      const labels = { unavailable: "対象のプログラムが見つかりません", timeout: "応答なし", error: "取得失敗" };
       value.textContent = labels[report.status] || "取得失敗";
       status.textContent = "";
     } else if (!Object.hasOwn(report.values, key)) {
-      value.textContent = "パラメータ未宣言";
+      value.textContent = "この項目は確認できません";
       status.textContent = "";
     } else {
       const actual = report.values[key];
@@ -350,12 +378,21 @@ function renderRuntimeValues() {
 async function loadRuntimeValues() {
   if (runtimeBusy || controlsBusy || !controlProfile || !runtimeAvailable) return;
   runtimeBusy = true;
+  const generation = runtimeGeneration;
+  const controller = controlProfile.controller;
+  const revision = controlProfile.revision;
+  renderControlApplication();
   const button = document.getElementById("controls-runtime-load");
   const message = document.getElementById("controls-runtime-message");
   button.disabled = true;
-  message.textContent = "実行中の ROS パラメータを取得しています…";
+  message.textContent = "ロボットが使っている設定を確認しています…";
   try {
-    controlRuntime = await api("/api/control-runtime");
+    const snapshot = await api("/api/control-runtime");
+    if (generation !== runtimeGeneration || controller !== controlProfile?.controller || revision !== controlProfile?.revision) {
+      message.textContent = '取得中に状態が変わりました。もう一度確認してください。';
+      return;
+    }
+    controlRuntime = snapshot;
     const captured = new Date(controlRuntime.captured_at).toLocaleTimeString("ja-JP");
     message.textContent = `取得時刻: ${captured}。実行中の設定と保存済みの設定を比較しています。`;
   } catch (error) {
@@ -365,6 +402,7 @@ async function loadRuntimeValues() {
     runtimeBusy = false;
     button.disabled = controlsBusy || !controlProfile || !runtimeAvailable;
     renderRuntimeValues();
+    renderControlApplication();
   }
 }
 
@@ -499,6 +537,7 @@ function renderControls() {
 
 function controlsSetBusy(busy) {
   controlsBusy = busy;
+  renderControlApplication();
   renderMapEditor();
   document.getElementById("controls-runtime-load").disabled = busy || runtimeBusy || !controlProfile || !runtimeAvailable;
   document.getElementById("controls-profile").disabled = busy;
@@ -512,13 +551,14 @@ function controlsSetBusy(busy) {
 }
 
 async function loadControls(controller) {
+  invalidateControlRuntime();
   controlsSetBusy(true);
   document.getElementById("controls-load-error").hidden = true;
   try {
     const profile = await api(`/api/control-config/${controller}`);
     if (!['tilt_up_axis', 'tilt_down_axis', 'tilt_up_axis_sign', 'tilt_down_axis_sign']
       .every((key) => Object.hasOwn(profile.values.shot_component || {}, key))) {
-      throw new Error("射出角度を上下別に設定する API が未反映です。robot_manager を更新・再起動してから読み直してください。");
+      throw new Error("射出角度を上下別に設定する機能がまだ使えません。担当者に管理画面のプログラムを更新・再起動してもらってください。");
     }
     controlProfile = profile;
     mapSelection = null;
@@ -526,18 +566,19 @@ async function loadControls(controller) {
     controlsLoadedAt = new Date().toLocaleTimeString("ja-JP");
     controlRuntime = null;
     document.getElementById("controls-runtime-message").textContent = runtimeAvailable
-      ? "実行中の値は未取得です。"
-      : "実行中の値の取得 API が未反映です。管理画面サービスを再起動してから、このタブを開き直してください。";
+      ? "ロボットが使っている設定は、まだ確認していません。"
+      : "ロボットの設定を比較する機能がまだ使えません。担当者に管理画面のプログラムの更新・再起動を確認してもらってください。";
     controlsDirty = false;
     renderControls();
+    if (profile.history_warning) controlMessage(profile.history_warning);
   } catch (error) {
     controlProfile = null;
     controlDraft = null;
     renderControllerMap();
     controlRuntime = null;
     document.getElementById("controls-runtime-message").textContent = runtimeAvailable
-      ? "実行中の値は未取得です。"
-      : "実行中の値の取得 API が未反映です。管理画面サービスを再起動してから、このタブを開き直してください。";
+      ? "ロボットが使っている設定は、まだ確認していません。"
+      : "ロボットの設定を比較する機能がまだ使えません。担当者に管理画面のプログラムの更新・再起動を確認してもらってください。";
     controlsDirty = false;
     document.getElementById("controls-fields").replaceChildren();
     document.getElementById("controls-change-count").textContent = "";
@@ -550,7 +591,7 @@ async function loadControls(controller) {
 }
 
 function confirmControlDiscard() {
-  return !controlsDirty || confirm("未保存の変更を破棄しますか？");
+  return !controlsDirty || confirm("保存していない変更を取り消しますか？");
 }
 
 async function saveControls(event) {
@@ -576,8 +617,8 @@ async function saveControls(event) {
     controlsLoadedAt = new Date().toLocaleTimeString("ja-JP");
     controlsDirty = false;
     renderControls();
-    controlMessage("保存しました。ロボットを安全な状態にして、制御タブから再起動すると反映されます。");
-    toast("操作設定を保存しました（再起動後に反映）", "success");
+    controlMessage("保存しました。ロボットを安全な状態にして、「操作」の「制御を再起動」で、保存した設定を読み込み直せます。");
+    toast("操作設定を保存しました（次の制御起動・再起動で使用）", "success");
   } catch (error) {
     controlMessage(error.message);
   } finally {
@@ -594,6 +635,8 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   window.addEventListener("scroll", positionMapEditor, true);
   document.getElementById("controls-save").addEventListener("click", saveControls);
+  document.getElementById('controls-verify').addEventListener('click', loadRuntimeValues);
+  document.getElementById('controls-undo').addEventListener('click', restorePreviousControls);
   const mapDialog = document.getElementById("controller-map-editor");
   document.getElementById("map-close").addEventListener("click", () => mapDialog.close());
   mapDialog.addEventListener("close", finishMapEditor);
@@ -676,15 +719,15 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       if (!runtimeAvailable) {
         document.getElementById("controls-runtime-message").textContent =
-          "実行中の値の取得 API が未反映です。管理画面サービスを再起動してから、このタブを開き直してください。";
+          "ロボットの設定を比較する機能がまだ使えません。担当者に管理画面のプログラムの更新・再起動を確認してもらってください。";
       } else if (!controlRuntime) {
-        document.getElementById("controls-runtime-message").textContent = "実行中の値は未取得です。";
+        document.getElementById("controls-runtime-message").textContent = "ロボットが使っている設定は、まだ確認していません。";
       }
       controlsOpened = true;
       controlsSetBusy(false);
     }
     if (!controlProfile) await loadControls(select.value);
-    else renderControlSummary();
+    else { renderControlSummary(); renderControlApplication(); }
   });
   window.addEventListener("beforeunload", (event) => {
     if (controlsDirty) {

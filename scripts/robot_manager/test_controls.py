@@ -271,3 +271,87 @@ def test_integer_looking_speed_is_saved_as_ros_double(client, tmp_path, controll
     speed = saved['joy_controller']['ros__parameters']['longitudinal_input_ratio']
     assert speed == 2.0 and type(speed) is float
     assert type(saved['shot_component']['ros__parameters']['fire_button']) is int
+
+
+def test_previous_settings_survive_reload_and_restore_uses_normal_save(client):
+    """Undo is a revision-checked edit, isolated to the selected controller."""
+    before = profile(client)
+    assert before['previous_values'] is None
+    changed = deepcopy(before['values'])
+    changed['joy_controller']['longitudinal_input_ratio'] = 1.5
+    response = client.put('/api/control-config/uart', json={
+        'revision': before['revision'], 'values': changed})
+    assert response.status_code == 200
+    saved = profile(client)
+    assert saved['previous_values'] == before['values']
+    assert profile(client, 'dualshock')['previous_values'] is None
+    restored = client.put('/api/control-config/uart', json={
+        'revision': saved['revision'], 'values': saved['previous_values']})
+    assert restored.status_code == 200
+    assert restored.json()['values'] == before['values']
+    assert restored.json()['previous_values'] == changed
+    assert client.put('/api/control-config/uart', json={
+        'revision': saved['revision'], 'values': changed}).status_code == 409
+
+
+def test_failed_yaml_write_keeps_current_undo_entry(client, tmp_path):
+    """History written before a failed profile replacement cannot corrupt undo."""
+    before = profile(client)
+    before['values']['joy_controller']['longitudinal_input_ratio'] = 1.5
+    assert client.put('/api/control-config/uart', json={
+        'revision': before['revision'], 'values': before['values']}).status_code == 200
+    saved = profile(client)
+    changed = deepcopy(saved['values'])
+    changed['joy_controller']['longitudinal_input_ratio'] = 1.2
+    replace = controls.os.replace
+
+    def fail_profile(source, target):
+        if str(target).endswith('.yaml'):
+            raise OSError('profile replace failed')
+        return replace(source, target)
+
+    with patch.object(controls.os, 'replace', side_effect=fail_profile):
+        response = client.put('/api/control-config/uart', json={
+            'revision': saved['revision'], 'values': changed})
+    assert response.status_code == 500
+    assert profile(client)['previous_values'] == saved['previous_values']
+    assert profile(client)['values'] == saved['values']
+    assert not list(tmp_path.glob('.controls-*'))
+
+
+def test_external_edit_does_not_offer_stale_undo(client, tmp_path):
+    """A backup is offered only for the exact revision created by the manager."""
+    before = profile(client)
+    before['values']['joy_controller']['longitudinal_input_ratio'] = 1.5
+    assert client.put('/api/control-config/uart', json={
+        'revision': before['revision'], 'values': before['values']}).status_code == 200
+    path = tmp_path / 'controls.uart.yaml'
+    path.write_text(path.read_text() + '\n# external edit\n')
+    assert profile(client)['previous_values'] is None
+    (tmp_path / 'controls.uart.history.json').write_text('{broken')
+    current = profile(client)
+    assert current['previous_values'] is None
+    assert current['history_warning']
+    assert current['values'] == before['values']
+
+
+def test_readiness_checks_configuration_without_subprocesses(client, monkeypatch, tmp_path):
+    """A valid file is a setup check, never proof of connected hardware."""
+    monkeypatch.setattr(backend, '_read_env', lambda: {'CONTROLLER_TYPE': 'uart'})
+    monkeypatch.setattr(backend.control_runtime, '_ros_paths', lambda config: ('ros', 'workspace'))
+    data = client.get('/api/readiness').json()
+    assert data['controller'] == 'uart'
+    assert data['profile']['ok'] and data['workspace']['ok']
+    assert 'connected' not in data
+    (tmp_path / 'controls.uart.yaml').write_text('bad: [')
+    data = client.get('/api/readiness').json()
+    assert not data['profile']['ok']
+    assert data['workspace']['ok']
+
+
+def test_service_command_missing_returns_actionable_error(client):
+    """Missing systemctl is an API error rather than an uncaught backend failure."""
+    with patch.object(backend.subprocess, 'run', side_effect=FileNotFoundError):
+        response = client.request('POST', '/api/service/start')
+    assert response.status_code == 503
+    assert '担当者' in response.json()['detail']
