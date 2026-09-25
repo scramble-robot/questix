@@ -152,6 +152,7 @@ class LabBridgeNode(Node):
         # Either source reports an emergency stop: operation_manager's topic, or drive_component
         # itself in /drive_status (robots started without the GPIO safety path).
         self._estop = {'topic': False, 'drive': False}
+        self._estop_heard = False  # any E-stop report yet (topic or drive_status)
 
         # Records kept on the robot: pages' saves, controller driving recorded here, and
         # Robot Manager's rosbags converted for the lessons.
@@ -200,7 +201,9 @@ class LabBridgeNode(Node):
             state_provider=self._state, records=self._records)
 
         self._drive_publisher = None
-        if (self._drive.allowed or self._shoot.allowed) and estop_topic:
+        # Observed even when pages may not move the robot: /api/state tells the teacher whether the
+        # E-stop is pressed (robot_manager's status strip) whatever the permissions are.
+        if estop_topic:
             self._estop_subscription = self.create_subscription(
                 EmergencyStop, estop_topic, self._on_estop, _ESTOP_QOS)
         self._shoot_publishers = {}
@@ -335,8 +338,7 @@ class LabBridgeNode(Node):
         self._relay('odom', lambda: messages.odom_payload(msg))
 
     def _on_drive(self, msg):
-        if ((self._drive.allowed or self._shoot.allowed)
-                and self._estop['drive'] != bool(msg.emergency_stop)):
+        if not self._estop_heard or self._estop['drive'] != bool(msg.emergency_stop):
             self._set_estop('drive', bool(msg.emergency_stop))
         self._relay('drive', lambda: messages.drive_payload(msg))
 
@@ -400,10 +402,11 @@ class LabBridgeNode(Node):
         with self._drive_lock:
             drive_state = self._drive.state()
             shoot_state = self._shoot.state(time.monotonic())
+            estop = any(self._estop.values()) if self._estop_heard else None
         summary = dict(self._records.summary(), auto_record=self._recorder is not None)
         return messages.state_payload(drive_state, self._robot, self._rates,
                                       self._drive.allowed, clients, max_clients, summary,
-                                      shoot_state)
+                                      shoot_state, emergency_stop=estop)
 
     def _on_leave(self, client_id):
         with self._drive_lock:
@@ -490,6 +493,7 @@ class LabBridgeNode(Node):
         now = time.monotonic()
         with self._drive_lock:
             self._estop[source] = active
+            self._estop_heard = True
             was_active = self._drive.active
             self._drive.set_emergency_stop(any(self._estop.values()), now)
             if was_active and not self._drive.active:

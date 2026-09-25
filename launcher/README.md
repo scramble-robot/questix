@@ -16,9 +16,11 @@ drive が使う `joy_controller_referee.launch.xml` 内の operation_manager は
 - `true` (competition): GPIO5とGPIO27を読み、GPIO27 AutoRefereeを
   safe-highとして追加判定
 
-`/etc/questix_robot/mode` が `competition` のときだけ実行される
-`questix_robot_launcher.sh` は、必ず `enable_gpio_ref:=true` と
-`enable_autoreferee:=true` を固定値で渡します。既存の `launch.env` に
+`questix_robot_launcher.sh` は、`/etc/questix_robot/mode` が `competition` のとき
+（電源投入時の自動起動を含む）、必ず `enable_gpio_ref:=true` と
+`enable_autoreferee:=true` を固定値で渡します。`practice` のときは電源投入時には起動せず、
+Robot Manager の「起動」が置いた起動要求があるときだけ、`enable_autoreferee:=false`
+（twist_arbiter と教材からの発射あり）と `launch.env` の `ENABLE_GPIO_REF`（既定 true）で起動します。既存の `launch.env` に
 `ENABLE_GPIO_REF=false` が残っていても competition 起動では無視され、GPIO5と
 GPIO27の安全系は常時有効です。`enable_gpio_ref:=false` は手動の開発・診断用途に
 限定されます。`enable_autoreferee:=true` と `enable_gpio_ref:=false` の組合せは

@@ -170,11 +170,16 @@ const StatusView = (() => {
   function estop(lab, service) {
     const bridge = lab && lab.bridge;
     if (service !== 'active') return { text: 'ロボット制御が停止中のため分かりません', tone: 'idle' };
+    // Bridges since 2026-09-26 report it directly (always observed); older ones only as blockers.
+    if (bridge && typeof bridge.emergency_stop === 'boolean') {
+      return bridge.emergency_stop
+        ? { text: '押されています', tone: 'danger' } : { text: '解除されています', tone: 'ok' };
+    }
     const sources = [];
     if (bridge && bridge.read_only === false) sources.push(bridge.drive_state);
     if (bridge && bridge.shoot_state && bridge.shoot_state.allowed === true) sources.push(bridge.shoot_state);
     if (!sources.length) {
-      return { text: '分かりません（教材の走行か発射を許可して配信しているときに確認できます）', tone: 'idle' };
+      return { text: '分かりません（教材の配信を始めると確認できます）', tone: 'idle' };
     }
     const pressed = sources.some((s) => (s && s.blockers || []).some((b) => b.code === 'emergency_stop'));
     return pressed ? { text: '押されています', tone: 'danger' } : { text: '解除されています', tone: 'ok' };

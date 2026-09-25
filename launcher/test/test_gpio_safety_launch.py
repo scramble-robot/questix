@@ -192,10 +192,19 @@ def test_competition_service_launchers_always_enable_gpio_safety():
     for relative_path in launcher_paths:
         text = (SOURCE_ROOT / relative_path).read_text(encoding='utf-8')
         launcher_texts.append(text)
-        assert 'LAUNCH_ARGS="${LAUNCH_ARGS} enable_gpio_ref:=true"' in text
-        assert 'LAUNCH_ARGS="${LAUNCH_ARGS} enable_autoreferee:=true"' in text
-        assert 'enable_gpio_ref:=${ENABLE_GPIO_REF' not in text
-        assert 'if [ "${MODE}" != "competition" ]' in text
+        # Competition branch: both GPIO safety inputs fixed on, launch.env ignored.
+        start = text.index('if [ "${MODE}" = "competition" ]; then')
+        middle = text.index('\nelse\n', start)
+        end = text.index('\nfi\n', middle)
+        competition, practice = text[start:middle], text[middle:end]
+        assert 'LAUNCH_ARGS="${LAUNCH_ARGS} enable_gpio_ref:=true"' in competition
+        assert 'LAUNCH_ARGS="${LAUNCH_ARGS} enable_autoreferee:=true"' in competition
+        code = [line for line in competition.splitlines() if not line.strip().startswith('#')]
+        assert not any('ENABLE_GPIO_REF' in line for line in code)
+        # Practice branch (Robot Manager's 起動 only): no AutoReferee; GPIO safety on unless
+        # launch.env says exactly "false".
+        assert 'LAUNCH_ARGS="${LAUNCH_ARGS} enable_autoreferee:=false"' in practice
+        assert '"${ENABLE_GPIO_REF:-true}" = "false"' in practice
 
     safety_lines = [
         [

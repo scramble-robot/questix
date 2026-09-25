@@ -140,8 +140,9 @@ def test_state_payload():
         'robot': {'name': 'r', 'domain': None}, 'clients': 3, 'max_clients': 24,
         'drive_state': {'allowed': True, 'blockers': []},
         'rates': {'scan': 5.0, 'odom': 20.0}, 'records': None,
-        'shoot_state': {'allowed': False}}
+        'shoot_state': {'allowed': False}, 'emergency_stop': None}
     assert messages.state_payload({}, {}, {}, False, 0, 24)['read_only'] is True
+    assert messages.state_payload({}, {}, {}, False, 0, 24, emergency_stop=True)['emergency_stop'] is True
     summary = {'count': 2, 'used_bytes': 10, 'limit_bytes': 100}
     assert messages.state_payload({}, {}, {}, False, 0, 24, records=summary)['records'] == summary
 

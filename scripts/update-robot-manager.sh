@@ -12,7 +12,8 @@
 #   sudo scripts/update-robot-manager.sh --if-installed   update only an existing install
 #                                                         (used by scripts/wifi-ap.sh up)
 #   scripts/update-robot-manager.sh --check               exit 0 = up to date, 1 = outdated
-#                                                         (files or pinned versions), 2 = not
+#                                                         (files, pinned versions or the robot
+#                                                         launcher), 2 = not
 #                                                         installed
 #
 # Exit status of an update: 0 when Robot Manager is up to date (updated or already current).
@@ -60,6 +61,23 @@ for path in source.rglob('*'):
     if not target.is_file() or target.read_bytes() != path.read_bytes():
         sys.exit(1)
 PYTHON
+}
+
+# The robot control service (questix_robot) runs the launcher from INSTALL_DIR. Robot Manager's
+# 起動 in practice mode needs the version that honours its start request, so an update refreshes
+# it too; questix_robot itself is not restarted (the new launcher is used on its next start).
+LAUNCHER_SOURCE="$REPO_ROOT/systemd/questix_robot_launcher.sh"
+LAUNCHER_TARGET="$INSTALL_DIR/questix_robot_launcher.sh"
+
+# 0 when the installed launcher matches the repository or no robot service is installed.
+launcher_current() {
+    [ -f "$LAUNCHER_TARGET" ] || return 0
+    cmp -s "$LAUNCHER_SOURCE" "$LAUNCHER_TARGET"
+}
+
+install_launcher() {
+    echo "🔄 ロボット制御の起動スクリプトを更新します（次のロボット制御の起動から使われます）..."
+    install -m 0755 "$LAUNCHER_SOURCE" "$LAUNCHER_TARGET"
 }
 
 # Every pinned dependency must be installed in exactly that version; prints the ones that are not.
@@ -184,7 +202,9 @@ main() {
         is_current "$installed" && files_ok=1
     fi
     deps_current && deps_ok=1
-    if [ "$files_ok" = 1 ] && [ "$deps_ok" = 1 ]; then
+    local launcher_ok=0
+    launcher_current && launcher_ok=1
+    if [ "$files_ok" = 1 ] && [ "$deps_ok" = 1 ] && [ "$launcher_ok" = 1 ]; then
         [ "$mode" = --check ] && exit 0
         echo "✅ Robot Manager は最新です。"
         exit 0
@@ -193,6 +213,7 @@ main() {
 
     [ "$(id -u)" -eq 0 ] || die "root で実行してください（sudo）。"
     [ "$deps_ok" = 1 ] || install_requirements
+    [ "$launcher_ok" = 1 ] || install_launcher
     if [ "$files_ok" = 0 ]; then
         echo "🔄 Robot Manager をこのリポジトリの版に更新します ..."
         install_package

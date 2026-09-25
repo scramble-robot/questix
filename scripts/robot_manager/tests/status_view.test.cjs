@@ -115,3 +115,12 @@ test('going back to practice says what the lessons are set to', () => {
     /^教材の設定をオンにしました/);
   assert.equal(StatusView.labRestoredText(null), '');
 });
+
+test('the E-stop row uses the bridge report even when pages may not move the robot', () => {
+  const lab = (emergencyStop) => ({ bridge: { read_only: true, shoot_state: { allowed: false },
+    drive_state: { allowed: false, blockers: [] }, emergency_stop: emergencyStop } });
+  assert.equal(StatusView.estop(lab(true), 'active').text, '押されています');
+  assert.equal(StatusView.estop(lab(false), 'active').text, '解除されています');
+  // No report yet (or an older bridge): unknown rather than a guess.
+  assert.match(StatusView.estop(lab(null), 'active').text, /^分かりません/);
+});

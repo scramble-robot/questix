@@ -268,13 +268,14 @@ def shoot_refused_payload(reason, request, state):
 
 
 def state_payload(drive_state, robot, rates, drive_allowed, clients, max_clients,
-                  records=None, shoot_state=None):
+                  records=None, shoot_state=None, emergency_stop=None):
     """Body of ``GET /api/state``: the bridge as robot_manager and teachers need to see it.
 
     ``drive_state`` is DriveArbiter.state(), ``rates`` the last status report [Hz],
     ``records`` records_api.RecordsApi.summary() (``dir``, ``count``, ``used_bytes``,
     ``limit_bytes``, ``save``, ``auto_record``, ``rosbag_dir``) or None, ``shoot_state``
-    ShootArbiter.state() (``allowed`` false when the bridge runs without ``allow_shoot``).
+    ShootArbiter.state() (``allowed`` false when the bridge runs without ``allow_shoot``),
+    ``emergency_stop`` True/False from /emergency_stop and /drive_status, None before any report.
     """
     return {
         'protocol': PROTOCOL_VERSION,
@@ -286,6 +287,7 @@ def state_payload(drive_state, robot, rates, drive_allowed, clients, max_clients
         'rates': {name: round(hz, 1) for name, hz in rates.items()},
         'records': records,
         'shoot_state': shoot_state if shoot_state is not None else {'allowed': False},
+        'emergency_stop': emergency_stop,
     }
 
 
