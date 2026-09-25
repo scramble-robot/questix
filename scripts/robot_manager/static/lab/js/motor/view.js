@@ -9,7 +9,6 @@ import { schoolTips } from '../shell/school-tips.js';
 import { lessonBrief } from '../shell/lesson-brief.js';
 import { runModeBadgeHtml } from '../shell/run-mode.js';
 import { liveCaptureControls } from '../live/live-view.js';
-import { robotStatePanel } from '../live/robot-state.js';
 import { LOAD_TIME, LOAD_TARGET, RUN_SECONDS, SERVO_MIN, SERVO_MAX, REAL_PARTS } from './core.js';
 import {
   exteriorFigure,
@@ -40,7 +39,7 @@ function groupNav(model, copy, actions) {
           aria-current=${model.group === index ? 'step' : 'false'}
           @click=${() => actions.openGroup(index)}
         >
-          <span>${index + 1}</span>${group}
+          ${group}
         </button>`,
     )}
   </nav>`;
@@ -881,17 +880,49 @@ function benchSentence(bench, text) {
   });
 }
 
-function benchTableView(bench, copy) {
+// Under an empty table: what fills it. Without a robot the start button is not on the page, so the
+// sentence does not point to it; an example table can be analysed instead.
+function emptyBench(bench, copy, actions) {
+  const text = copy.bench;
+  const connected = bench.capture.link.connected;
+  return html`<p class="helper">${connected ? text.empty : text.emptyOffline}</p>
+    ${
+      connected
+        ? nothing
+        : html`<button class="small" data-motor-bench-sample @click=${actions.useSample}>
+            ${text.sample}
+          </button>`
+    }`;
+}
+
+// 「分析に使う」: the table goes into 測定データを分析する without retyping.
+function analyseRow(bench, copy, actions) {
+  const text = copy.bench;
+  return html`<div class="motor-bench-analyse">
+    <button class="primary" data-motor-bench-analyse @click=${actions.analyse}>
+      ${text.analyse}
+    </button>
+    <p class="helper">${text.analyseHelp}</p>
+    ${bench.handed ? html`<p role="status">${bench.handed}</p>` : nothing}
+  </div>`;
+}
+
+function benchTableView(bench, copy, actions) {
   const text = copy.bench;
   const columns = text.columns;
   const running = Boolean(bench.progress);
   if (!running && !bench.rows.length)
     return html`<div class="motor-bench-table" id="motorBenchTable">
       <h3>${text.tableTitle}</h3>
-      <p class="helper">${text.empty}</p>
+      ${emptyBench(bench, copy, actions)}
     </div>`;
   return html`<div class="motor-bench-table" id="motorBenchTable">
     <h3>${text.tableTitle}</h3>
+    ${
+      bench.sample && !running
+        ? html`<p class="motor-bench-sample" data-motor-bench-is-sample>${text.sampleNote}</p>`
+        : nothing
+    }
     <table data-motor-bench-table>
       <thead>
         <tr>
@@ -911,34 +942,33 @@ function benchTableView(bench, copy) {
       running
         ? nothing
         : html`<p class="motor-bench-result" data-motor-bench-result>
-            ${benchSentence(bench, text)}
-          </p>`
+              ${benchSentence(bench, text)}
+            </p>
+            ${analyseRow(bench, copy, actions)}`
     }
   </div>`;
+}
+
+// While the robot is connected but the teacher keeps the page from driving: the controller way.
+function benchNote(capture, text) {
+  if (!capture.link.connected) return nothing;
+  if (capture.drive?.allowed) return nothing;
+  return html`<p class="helper">${text.recordNote}</p>`;
 }
 
 function benchCard(model, copy, actions) {
   const text = copy.bench;
   const capture = model.bench.capture;
-  const driving = Boolean(capture.drive?.allowed && capture.link.connected);
   return html`<section class="card motor-bench" id="motorBench">
     <h2>
       ${unsafeHTML(runModeBadgeHtml('live'))}${unsafeHTML(runModeBadgeHtml('drive'))} ${text.title}
     </h2>
-    <p>${text.intro}</p>
+    <p>${capture.link.connected ? text.intro : text.introOffline}</p>
     <div class="motor-bench-layout">
       <div class="motor-bench-controls">
-        ${liveCaptureControls(capture, actions.bench)}
-        ${driving ? nothing : html`<p class="helper">${text.recordNote}</p>`}
+        ${liveCaptureControls(capture, actions.bench)} ${benchNote(capture, text)}
       </div>
-      ${benchTableView(model.bench, copy)}
-    </div>
-    <div id="motorBenchPanel" class="motor-bench-panel">
-      ${robotStatePanel('motor-real', {
-        name: text.memoName,
-        placeholder: text.memoPlaceholder,
-        status: model.bench.status,
-      })}
+      ${benchTableView(model.bench, copy, actions.bench)}
     </div>
   </section>`;
 }
@@ -952,6 +982,22 @@ function mainCard(model, copy, fragments, actions) {
   return realCard(model, copy, fragments, actions);
 }
 
+// The button of the 「最初に試すこと」 card (shell/lesson-brief.js): the part to use first comes on
+// screen (the structure before its run, the gears, the choices, the bench); a played experiment
+// starts.
+const QUICK_TARGETS = {
+  field: '.motor-structure',
+  transmission: '#motorGearTurn',
+  choose: '.motor-choice-options',
+  real: '#motorBench',
+};
+
+function quickStart(model, copy) {
+  const target = QUICK_TARGETS[model.topic];
+  if (target) return { label: copy.page.quickStart[model.topic], target };
+  return { label: copy.run.button, target: '#motorRun', press: true };
+}
+
 function motorPage(model, copy, fragments, actions) {
   const topic = copy.topics[model.topic];
   const lessonKey = 'motor-' + model.topic;
@@ -962,13 +1008,12 @@ function motorPage(model, copy, fragments, actions) {
       </div>
     </div>
     ${groupNav(model, copy, actions)} ${topicNav(model, copy, actions)}
-    ${unsafeHTML(lessonBrief(lessonKey, topic.brief))}
+    ${unsafeHTML(lessonBrief(lessonKey, topic.brief, { start: quickStart(model, copy) }))}
     ${model.topic === 'field' ? structureCard(model, copy, actions) : nothing}
-    ${unsafeHTML(schoolTips(lessonKey))}
+    ${model.bench ? benchCard(model, copy, actions) : nothing} ${unsafeHTML(schoolTips(lessonKey))}
     <div class="motor-layout">
       ${mainCard(model, copy, fragments, actions)} ${guide(model, copy, fragments, actions)}
     </div>
-    ${model.bench ? benchCard(model, copy, actions) : nothing}
     <p class="page-footnote">${topic.footnote}</p>`;
 }
 

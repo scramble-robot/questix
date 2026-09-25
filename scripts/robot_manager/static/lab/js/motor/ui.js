@@ -10,15 +10,19 @@ import { programSeconds } from '../live/drive-core.js';
 import { openRobotDialog } from '../live/live-ui.js';
 import { registerRecordTarget, revealAfterRender } from '../live/record-targets.js';
 import { stateMemo } from '../live/robot-state.js';
+import { useMeasurements } from '../systems/measurement-lab.js';
+import { recordingSourceLabel } from '../systems/measurement-core.js';
 import {
   BENCH_PERCENTS,
   BENCH_HOLD,
+  BENCH_SAMPLE_ROWS,
   SETTLE_SECONDS,
   benchSteps,
   benchPlan,
   benchStepAt,
   benchTable,
   benchSummary,
+  benchMeasurementRows,
 } from './bench-core.js';
 import {
   MOTOR_TOPICS,
@@ -37,11 +41,12 @@ import { reportLessonProgress } from '../shell/lesson-progress.js';
 
 // Motor course (電気で回転を生み出す): state and behaviour. view.js turns the model into markup,
 // render.js draws the figures, core.js simulates. Texts live in content/motor.json and
-// content/motor/*.html. Its last topic plans a measurement, points to the shared measurement lab
-// (js/systems/measurement-lab.js) for typed data and, on the real robot, measures the drive
-// wheels lifted on a stand: the page commands a staircase of speeds through js/live (live-session,
-// whose drive-link.js is the only sender; bench-core.js turns the recording into the table) with
-// the 「実機の状態」 panel (js/live/robot-state.js) on screen.
+// content/motor/*.html. Its last topic plans a measurement and, on the real robot, measures the
+// drive wheels lifted on a stand: the page commands a staircase of speeds through js/live
+// (live-session, whose drive-link.js is the only sender, with its live strip and the folded
+// 「実機の状態」 panel; bench-core.js turns the recording into the table). 「分析に使う」 hands the
+// table to the shared measurement lab (js/systems/measurement-lab.js) without retyping; without a
+// robot, an example table can be analysed the same way.
 
 const copy = await loadJson('content/motor.json');
 const fragments = {
@@ -76,8 +81,9 @@ const states = new Map(
   ]),
 );
 
-// The bench measurement of the drive wheels (topic `real`): the table from the last recording.
-const bench = { rows: [], summary: null };
+// The bench measurement of the drive wheels (topic `real`): the table from the last recording, or
+// the example table (`sample`) a class without a robot analyses; `handed` what 分析に使う said.
+const bench = { rows: [], summary: null, sample: false, handed: '' };
 const BENCH_RECORD_SECONDS = 40; // 「記録だけする」: the learner drives with the controller
 const BENCH_MIN_HOLD_SECONDS = 2; // said in the sentence when no step was found
 const MEMO_PLACE = 'motor-real';
@@ -172,8 +178,12 @@ function applyBench(recording) {
   }
   if (!table.rows.length)
     return { ok: false, note: fill(copy.bench.noSteps, { seconds: BENCH_MIN_HOLD_SECONDS }) };
-  bench.rows = table.rows;
-  bench.summary = benchSummary(table.rows);
+  Object.assign(bench, {
+    rows: table.rows,
+    summary: benchSummary(table.rows),
+    sample: false,
+    handed: '',
+  });
   const notes = [fill(copy.bench.filled, { count: table.rows.length })];
   if (table.skipped) notes.push(fill(copy.bench.skipped, { count: table.skipped }));
   return { ok: true, note: notes.join(' ') };
@@ -195,6 +205,13 @@ const benchSession = createLiveSession({
   },
   drive: benchDrive,
   reportMetrics: ['driveTime', 'maxSpeed', 'stop'], // the wheels turn in the air: no distance
+  // The strip under the button shows the wheels; the full panel (and its memo) is folded under it.
+  state: {
+    place: MEMO_PLACE,
+    name: copy.bench.memoName,
+    placeholder: copy.bench.memoPlaceholder,
+    status: () => benchStatus(),
+  },
 });
 
 // While the staircase runs: which step, what it asks for, how long it still holds.
@@ -237,24 +254,65 @@ function benchModel() {
     capture: { ...capture, message: benchSession.note },
     rows: bench.rows,
     summary: bench.summary,
+    sample: bench.sample,
+    handed: bench.handed,
     progress: benchProgress(capture),
     settle: SETTLE_SECONDS,
-    status: benchStatus,
     source: benchSession.recording?.name ?? '',
   };
+}
+
+// Where the rows handed to the measurement lab came from (its 「どこから：…」 line).
+function benchSource() {
+  if (bench.sample) return copy.bench.sampleSource;
+  const recording = benchSession.recording;
+  const texts = { group: copy.bench.fromGroup, live: copy.bench.fromLive };
+  return recording ? recordingSourceLabel(recording, texts, fill) : copy.bench.fromLive;
+}
+
+// 「分析に使う」: the table goes into 測定データを分析する as it is — both wheels as repeats of
+// each step, the way back down kept for checking the line (bench-core benchMeasurementRows).
+function analyseBench() {
+  const { rows, input } = benchMeasurementRows(bench.rows, benchSource());
+  if (!rows.length) {
+    bench.handed = copy.bench.analyseEmpty;
+    update();
+    return;
+  }
+  const note = bench.sample ? copy.bench.analyseSampleNote : copy.bench.analyseNote;
+  const taken = useMeasurements('motor', {
+    rows,
+    source: bench.sample ? copy.bench.sampleSource : copy.bench.analyseSource,
+    labels: copy.bench.analyseLabels[input],
+    note,
+  });
+  bench.handed = taken ? '' : copy.bench.analyseEmpty;
+  update();
+}
+
+// Without a robot: the example table, clearly named as one, to try the analysis at home.
+function useSampleBench() {
+  Object.assign(bench, {
+    rows: BENCH_SAMPLE_ROWS.map((row) => ({ ...row })),
+    summary: benchSummary(BENCH_SAMPLE_ROWS),
+    sample: true,
+    handed: '',
+  });
+  update();
+  revealIfHidden(document.getElementById('motorBenchTable'));
 }
 
 const benchActions = {
   ...benchSession.actions,
   openLink: openRobotDialog,
-  // Press → see: the run is watched in the 「実機の状態」 panel (wheel speeds, the current step).
+  // The shared block brings the button and its live strip on screen when the run starts
+  // (live-session revealLiveRun); once the run is over, its result is the table.
   async startDriveCapture() {
-    const running = benchSession.actions.startDriveCapture();
-    requestAnimationFrame(() => revealElement(document.getElementById('motorBenchPanel')));
-    await running;
-    // …and its result is the table.
+    await benchSession.actions.startDriveCapture();
     if (bench.rows.length) revealIfHidden(document.getElementById('motorBenchTable'));
   },
+  analyse: analyseBench,
+  useSample: useSampleBench,
 };
 
 function buildModel() {

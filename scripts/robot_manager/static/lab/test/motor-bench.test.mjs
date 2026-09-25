@@ -1,7 +1,7 @@
 // Run with: node --test scripts/robot_manager/static/lab/test/*.test.mjs
 //
 // The motor course's bench measurement (js/motor/bench-core.js): the staircase the page commands
-// and the table 「指示 → 測った回転数（左・右）」 it fills from the recording.
+// and the table 「指令 → 測った回転数（左・右）」 it fills from the recording.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -11,6 +11,8 @@ import {
   benchStepAt,
   benchTable,
   benchSummary,
+  benchMeasurementRows,
+  BENCH_SAMPLE_ROWS,
 } from '../js/motor/bench-core.js';
 import {
   makeRecording,
@@ -173,4 +175,59 @@ test('a recording without a held command gives an empty table, and no summary', 
     ]),
     null,
   );
+});
+
+test('「分析に使う」: each moving step gives the left and right wheel for the same input', () => {
+  const { rows } = benchTable(staircaseRecording({ skew: 0.01 }));
+  const handed = benchMeasurementRows(rows, '実機 10:00');
+  assert.equal(handed.input, 'percent');
+  // 30→50→70→50→30 %: the stop step is left out, two wheels per step.
+  assert.deepEqual(
+    handed.rows.map((row) => row.x),
+    [30, 30, 50, 50, 70, 70, 50, 50, 30, 30],
+  );
+  const firstStep = rows.find((row) => row.percent === 30);
+  assert.deepEqual(
+    handed.rows.slice(0, 2).map((row) => row.y),
+    [firstStep.left, firstStep.right],
+  );
+  // The way up makes the line, the way back down checks it.
+  assert.deepEqual(
+    handed.rows.map((row) => row.test),
+    [false, false, false, false, false, false, true, true, true, true],
+  );
+  assert.ok(handed.rows.every((row) => row.from === '実機 10:00'));
+});
+
+test('a controller table goes over by commanded rpm, with nothing held back', () => {
+  const rows = [
+    { number: 1, percent: null, command: 6, left: 5.5, right: 5.7, samples: 20, seconds: 3 },
+    { number: 2, percent: null, command: 12, left: 11.4, right: 11.8, samples: 20, seconds: 3 },
+    { number: 3, percent: null, command: 0, left: 0, right: 0, samples: 20, seconds: 3 },
+  ];
+  const handed = benchMeasurementRows(rows);
+  assert.equal(handed.input, 'rpm');
+  assert.deepEqual(
+    handed.rows.map((row) => [row.x, row.y, row.test]),
+    [
+      [6, 5.5, false],
+      [6, 5.7, false],
+      [12, 11.4, false],
+      [12, 11.8, false],
+    ],
+  );
+  assert.deepEqual(benchMeasurementRows([]), { rows: [], input: 'rpm' });
+});
+
+test('the sample table for a class without a robot reads like the staircase at 5–30 rpm', () => {
+  assert.deepEqual(
+    BENCH_SAMPLE_ROWS.map((row) => row.percent),
+    [...BENCH_PERCENTS, 0],
+  );
+  for (const row of BENCH_SAMPLE_ROWS) {
+    assert.ok(row.left <= 30 && row.right <= 30, 'about the bench range');
+    if (row.percent) assert.ok(row.left >= 5, 'clear of the dead band');
+  }
+  assert.ok(benchSummary(BENCH_SAMPLE_ROWS).meanGap < 0, 'a little slower than asked');
+  assert.equal(benchMeasurementRows(BENCH_SAMPLE_ROWS).rows.length, 10);
 });

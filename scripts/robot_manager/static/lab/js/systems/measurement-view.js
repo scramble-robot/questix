@@ -3,7 +3,6 @@ import { fillSentence as fill } from '../core/content.js';
 import { formatTick } from '../core/chart-scale.js';
 import { measurementPlotAxes } from './measurement-core.js';
 import { liveCaptureControls } from '../live/live-view.js';
-import { robotStatePanel } from '../live/robot-state.js';
 import { runModeBadgeHtml } from '../shell/run-mode.js';
 
 // Templates of the measurement lab, the panel that opens under the control, launch and SLAM
@@ -418,6 +417,8 @@ function liveNote(model, copy, actions) {
   </div>`;
 }
 
+// The robot's state while recording is the shared block's (live-view.js: the strip under the
+// button, the full panel folded), so the dialog does not show a second panel of its own.
 function liveCapture(model, copy, actions) {
   const panel = copy.panel;
   return html`<div class="measurement-live" data-measure-live>
@@ -432,18 +433,11 @@ function liveCapture(model, copy, actions) {
             ${liveCaptureControls({ ...model.live, message: '' }, actions)}
             ${liveNote(model, copy, actions)}
             <p>${model.live.referenceNote ?? panel.liveReferenceNote}</p>`
-        : html`<p>${panel.liveUnavailable}</p>`
+        : html`<p data-measure-live-elsewhere>
+            ${model.scenario.liveNote ?? panel.liveUnavailable}
+          </p>`
     }
-    ${robotStatePart(model, copy)}
   </div>`;
-}
-
-// The robot while the learner measures (js/live/robot-state.js): its state in large numbers, and
-// the 測定メモ that takes a line of it before a typed value. Right under the record / drive
-// buttons, so a run is watched where it was started.
-function robotStatePart(model, copy) {
-  return html`<p class="helper">${copy.panel.robotState}</p>
-    ${robotStatePanel(`measurement-${model.course}`, { name: copy.panel.memoName })}`;
 }
 
 function measurementPanel(model, copy, actions) {
@@ -451,10 +445,14 @@ function measurementPanel(model, copy, actions) {
   const scenario = model.scenario;
   const axes = fill(panel.axes, { input: scenario.inputLabel, value: scenario.valueLabel });
   const correction = model.mode === 'calibrate' ? model.correction : 0;
-  return html`<details data-help-dialog>
+  // The dialog is named 「測定データを分析する」, not 補足の解説 (shell/supplement-ui.js).
+  return html`<details
+    data-help-dialog
+    data-help-label=${panel.dialogLabel}
+    data-help-title=${panel.title}
+  >
     <summary>${panel.summary}</summary>
     <div class="measurement-lab">
-      <h2>${panel.title}</h2>
       ${
         model.live
           ? html`<button
@@ -468,7 +466,9 @@ function measurementPanel(model, copy, actions) {
       }
       <p>${scenario.text}</p>
       <p>${panel.guide}</p>
-      <p>${panel.sampleBefore}<strong>${panel.sampleName}</strong>${panel.sampleAfter}</p>
+      <p>
+        ${panel.sampleBefore}<strong>${panel.sampleName}</strong>${scenario.sampleAfter ?? panel.sampleAfter}
+      </p>
       ${modeSelect(model, copy, actions)}
       <p>${axes}</p>
       <div data-measure-plot ${ref(actions.watchPlot)}>

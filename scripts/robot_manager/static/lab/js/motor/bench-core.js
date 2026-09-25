@@ -3,7 +3,7 @@ import { commandHolds } from '../live/capture-core.js';
 import { driveRows } from '../live/recording-core.js';
 
 // The motor course's bench measurement of the drive wheels (topic `real`): with the wheels lifted
-// on a stand, the page asks for a staircase of speeds and the table 「指示 → 測った回転数（左・右）」
+// on a stand, the page asks for a staircase of speeds and the table 「指令 → 測った回転数（左・右）」
 // is filled from what the wheels reported. No DOM (test/motor-bench.test.mjs); ui.js hands the
 // program to live-session.js (whose drive-link.js is the only sender) and the recording back here.
 //
@@ -115,7 +115,60 @@ function benchSummary(rows) {
   };
 }
 
+/**
+ * The bench table as rows of the measurement lab (js/systems/measurement-lab.js, 「分析に使う」):
+ * every step that turned the wheels gives two measurements of the same input, the left and the
+ * right wheel. The input is the step's percent (a staircase of this page) or, for a table from a
+ * controller run, the commanded rpm. On a staircase, the steps after the fastest one (the way back
+ * down) are kept for checking the line (`test`), so the fitted line is tried on steps it was not
+ * made from. The stop step is left out: standing still says nothing about the slope.
+ *
+ * Returns `{rows: [{x, y, test, from}], input: 'percent' | 'rpm'}`.
+ */
+function benchMeasurementRows(rows, from = '') {
+  const moving = rows.filter((row) => Math.abs(row.command) > STILL_RPM);
+  const byPercent = moving.length > 0 && moving.every((row) => row.percent !== null);
+  let peak = 0;
+  for (const [index, row] of moving.entries())
+    if (Math.abs(row.command) > Math.abs(moving[peak].command)) peak = index;
+  const measured = moving.flatMap((row, index) => {
+    const x = byPercent ? row.percent : row.command;
+    const test = byPercent && index > peak;
+    return [
+      { x, y: row.left, test, from },
+      { x, y: row.right, test, from },
+    ];
+  });
+  return { rows: measured, input: byPercent ? 'percent' : 'rpm' };
+}
+
+// For a class without a robot: a table as the staircase gives it on a robot whose fastest allowed
+// forward speed turns the wheels at about 30 rpm (a little slower than asked, the left wheel a
+// little slower than the right). An example, never shown as a measurement.
+const BENCH_SAMPLE_ROWS = Object.freeze(
+  [
+    [30, 9.1, 8.4, 8.8],
+    [50, 15.2, 14.5, 15.0],
+    [70, 21.3, 20.6, 21.0],
+    [50, 15.2, 14.7, 15.1],
+    [30, 9.1, 8.6, 8.9],
+    [0, 0, 0, 0],
+  ].map(([percent, command, left, right], index) =>
+    Object.freeze({
+      number: index + 1,
+      percent,
+      command,
+      left,
+      right,
+      samples: 30,
+      seconds: BENCH_HOLD,
+    }),
+  ),
+);
+
 export {
+  BENCH_SAMPLE_ROWS,
+  benchMeasurementRows,
   BENCH_PERCENTS,
   BENCH_HOLD,
   SETTLE_SECONDS,

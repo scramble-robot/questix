@@ -595,8 +595,9 @@
   outline-offset: 3px;
 }
 
-/* Bench measurement of the drive wheels (topic 実物で確かめる): the drive block next to the table
-   「指示 → 測った回転数」, the 「実機の状態」 panel (css/robot-state.css) under both. */
+/* Bench measurement of the drive wheels (topic 実物で確かめる): the shared live block (its strip
+   and folded 「実機の状態」 panel, css/live.css) next to the table 「指令 → 測った回転数」, whose
+   「分析に使う」 hands it to the measurement lab. */
 .motor-bench {
   margin-top: 18px;
 }
@@ -652,6 +653,19 @@
 .motor-bench-result {
   margin: 8px 0 0;
   font-weight: 600;
+}
+.motor-bench-sample {
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border-left: 3px solid var(--role-target, #c18837);
+  background: #fff8e8;
+  font-size: 14px;
+}
+.motor-bench-analyse {
+  margin-top: 12px;
+}
+.motor-bench-analyse .helper {
+  margin: 6px 0 0;
 }
 @media (min-width: 900px) {
   .motor-bench-layout {

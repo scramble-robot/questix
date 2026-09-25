@@ -79,7 +79,7 @@ function exampleRows(scenario) {
 // of the page in this browser; the worked example is simply rebuilt. Storage can be blocked or
 // full, so this is a convenience only — saving the CSV is the reliable way to keep a table.
 const TABLE_PREFIX = 'questix-lab-measurement-table:';
-const KEPT_FIELDS = ['rows', 'pending', 'selectedX', 'source', 'reference', 'mode'];
+const KEPT_FIELDS = ['rows', 'pending', 'selectedX', 'source', 'reference', 'mode', 'labels'];
 
 function keptTable(course) {
   try {
@@ -125,10 +125,12 @@ function labState(course) {
 }
 
 // While the table holds a recording, the axes are named after what the robot actually measured,
-// not after the worked example's quantities.
+// not after the worked example's quantities; a table handed over by the page (the motor bench,
+// useMeasurements) names its own axes.
 function shownScenario(course) {
   const scenario = scenarioOf(course);
   const state = labState(course);
+  if (state.labels) return { ...scenario, ...state.labels };
   if (state.source !== copy.sources.live || !scenario.live) return scenario;
   return { ...scenario, ...scenario.live };
 }
@@ -224,6 +226,7 @@ function applyHolds(course, recording) {
     });
   const first = state.source !== copy.sources.live;
   state.rows = (first ? [] : state.rows).concat(incoming).slice(0, MAX_ROWS);
+  if (first) state.labels = null;
   state.source = copy.sources.live;
   state.selectedX = incoming[0].x;
   state.correct = false;
@@ -294,6 +297,8 @@ function askChoice(state, incoming) {
 function acceptRows(state, incoming, replace) {
   const fresh = replace || state.source === copy.sources.example;
   state.rows = (fresh ? [] : state.rows).concat(incoming.rows).slice(0, MAX_ROWS);
+  // Rows added to a table keep its axes; a table replaced takes the axes of what replaced it.
+  if (fresh) state.labels = incoming.labels ?? null;
   const live = state.source === copy.sources.live || incoming.source === copy.sources.live;
   state.source = !fresh && live ? copy.sources.live : incoming.source;
   state.selectedX = incoming.rows[0].x;
@@ -312,6 +317,7 @@ function acceptDrives(state, incoming, replace) {
     state.rows = exampleRows(scenarioOf(shown));
     state.source = copy.sources.example;
     state.reference = scenarioOf(shown).reference;
+    state.labels = null;
     state.correct = false;
   }
   addPending(state, incoming.drives);
@@ -366,6 +372,8 @@ function sessionOf(course) {
       },
       drive: DRIVES[live.kind],
       reportMetrics: REPORT_METRICS_OF[live.kind],
+      // The robot's state while recording: the strip under the button and, folded, the panel.
+      state: { place: `measurement-${course}`, name: copy.panel.memoName },
     });
     sessions.set(course, session);
     session.restore();
@@ -415,6 +423,7 @@ function addDrives() {
     from: drive.from,
   }));
   const kept = state.source === copy.sources.example ? [] : state.rows;
+  if (!kept.length) state.labels = null;
   state.rows = kept.concat(rows).slice(0, MAX_ROWS);
   state.source = copy.sources.live;
   state.selectedX = rows[0].x;
@@ -577,6 +586,7 @@ async function openCsv(file) {
       state.message = ask;
     } else {
       state.rows = rows;
+      state.labels = null;
       state.source = file.name;
       state.selectedX = rows[0].x;
       state.correct = false;
@@ -633,12 +643,53 @@ const SUPPLEMENT_TRIGGER = 'button[aria-controls="supplementDialog"]';
 function openFromRecords(course, recording) {
   if (shown !== course) return false;
   const taken = openFromRobot(recording);
-  // The panel's trigger button is added by supplement-ui once the new panel is in the page.
+  openDialogAt('[data-measure-live-note]');
+  return taken;
+}
+
+// Opens the panel's dialog and scrolls it to `selector`. The trigger button is added by
+// supplement-ui once the panel is in the page, hence the frame.
+function openDialogAt(selector) {
   requestAnimationFrame(() => {
     host().querySelector(SUPPLEMENT_TRIGGER)?.click();
-    requestAnimationFrame(() => scrollToPart('[data-measure-live-note]'));
+    requestAnimationFrame(() => scrollToPart(selector));
   });
-  return taken;
+}
+
+/**
+ * Measurements the course page already holds (the motor bench's table, 「分析に使う」) go into the
+ * table of `course` without retyping: `rows` [{x, y, test, from}], `source` the words for 使用中,
+ * `labels` {inputLabel, valueLabel} naming the axes, `note` what the page says about them. A table
+ * that already holds measurements asks 置き換える / 追加する, as a file does. The dialog then opens
+ * on the table (or on the question). Returns false when this course has no panel on screen.
+ */
+function useMeasurements(course, { rows, source, labels = null, note = '' }) {
+  if (shown !== course || !rows.length) return false;
+  const state = labState(course);
+  clearNotes(state);
+  const incoming = { kind: 'rows', where: 'csv', rows: rows.slice(0, MAX_ROWS), source, labels };
+  if (state.source !== copy.sources.example) {
+    const unit = copy.messages.choiceRows;
+    const ask = fill(copy.messages.choiceAsk, { count: incoming.rows.length, unit });
+    state.incoming = { ...incoming, notes: note, ask };
+    state.message = ask;
+    update();
+    openDialogAt('[data-measure-message]');
+    return true;
+  }
+  Object.assign(state, {
+    rows: incoming.rows,
+    labels,
+    source,
+    selectedX: incoming.rows[0].x,
+    correct: false,
+    message: [note, fill(copy.messages.handedOver, { count: incoming.rows.length })]
+      .filter(Boolean)
+      .join(' '),
+  });
+  update();
+  openDialogAt('[data-measure-table]');
+  return true;
 }
 
 function saveCsv() {
@@ -731,4 +782,4 @@ function showMeasurementLab(course) {
   update();
 }
 
-export { showMeasurementLab };
+export { showMeasurementLab, useMeasurements };
