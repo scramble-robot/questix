@@ -2,15 +2,16 @@
    in the 実機 dialog and in the lessons' driving blocks. */
 
 .drive-report {
-  /* measured / command are CHART_COLOURS.live / liveTarget in js/control/render.js: a recording of
-     the real robot and its command look the same here as on the simulator's charts. The LiDAR and
-     compare colours were checked together with them for colour-blind separation. */
-  --report-measured: #b2506f;
-  --report-command: #d39ab0;
-  --report-lidar: #1673c9;
-  --report-compare-1: #b97a00;
-  --report-compare-2: #8250c4;
-  --report-compare-3: #12876b;
+  /* Palette roles (js/core/palette.js): what the robot measured (wheels, LiDAR) is `measured`,
+     its command is the `target` it was asked to reach, other runs are `previous` — grey, told
+     apart by their dash pattern and the A / B / C written at their end, never by colour. */
+  --report-measured: var(--role-measured);
+  --report-command: var(--role-target);
+  --report-lidar: var(--role-measured);
+  --report-previous: var(--role-previous);
+  --report-dash-1: 2 4;
+  --report-dash-2: 7 4;
+  --report-dash-3: 7 3 2 3;
   --report-ink: var(--dark);
   --report-plot-height: 170px;
   container-type: inline-size;
@@ -48,7 +49,18 @@
   font-weight: 600;
 }
 
-/* How the run ended: an icon, with its words for screen readers next to it (.sr-only). */
+/* How the run ended: an icon with its words next to it. */
+.drive-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--report-ink);
+}
+.drive-status-badge.problem {
+  color: var(--orange);
+}
 .drive-status {
   display: inline-grid;
   place-items: center;
@@ -67,6 +79,13 @@
 }
 .drive-status.problem {
   background: var(--orange);
+}
+.drive-status.unknown {
+  background: var(--muted);
+}
+/* Scrolled to when 比べる is ticked: clear of the dialog's sticky table of contents. */
+[data-drive-report-charts] {
+  scroll-margin-top: 72px;
 }
 
 /* --- summary and path --- */
@@ -168,19 +187,29 @@
 .drive-key.front {
   border-top-color: var(--report-lidar);
 }
+/* The key of a compared run: its dash pattern drawn with a gradient (a CSS border has only
+   dotted and dashed). */
 .drive-key.compare-1,
 .drive-key.compare-2,
 .drive-key.compare-3 {
-  border-top-width: 2px;
+  width: 24px;
+  height: 3px;
+  border: 0;
 }
 .drive-key.compare-1 {
-  border-top-color: var(--report-compare-1);
+  background: repeating-linear-gradient(90deg, var(--report-previous) 0 3px, transparent 3px 7px);
 }
 .drive-key.compare-2 {
-  border-top-color: var(--report-compare-2);
+  background: repeating-linear-gradient(90deg, var(--report-previous) 0 8px, transparent 8px 12px);
 }
 .drive-key.compare-3 {
-  border-top-color: var(--report-compare-3);
+  background: repeating-linear-gradient(
+    90deg,
+    var(--report-previous) 0 8px,
+    transparent 8px 11px,
+    var(--report-previous) 11px 13px,
+    transparent 13px 16px
+  );
 }
 
 /* A time chart: the SVG only draws lines and is stretched to the area; every text is HTML at a
@@ -188,7 +217,15 @@
 .drive-plot {
   position: relative;
   height: var(--report-plot-height);
-  padding: 20px 18px 22px 42px;
+  /* Right: room for the names written at the lines' ends. */
+  padding: 20px 44px 22px 42px;
+}
+.drive-plot-axis {
+  margin: 0;
+  padding-left: 42px;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
 }
 .drive-plot-area {
   position: relative;
@@ -205,7 +242,8 @@
 .drive-plot-y,
 .drive-plot-t,
 .drive-plot-marker,
-.drive-plot-reference {
+.drive-plot-reference,
+.drive-plot-end {
   position: absolute;
   font-size: 12px;
   line-height: 1.2;
@@ -243,6 +281,25 @@
   background: rgb(255 255 255 / 0.85);
   color: var(--report-ink);
 }
+/* A reference line close above another is labelled below its line instead. */
+.drive-plot-reference.below {
+  transform: none;
+}
+/* The name of a line at its end: right of the last point (in the padding when it ends at the
+   right edge). */
+.drive-plot-end {
+  transform: translate(4px, -50%);
+  font-weight: 700;
+  color: var(--report-measured);
+}
+.drive-plot-end.command {
+  color: var(--report-command);
+}
+.drive-plot-end.compare-1,
+.drive-plot-end.compare-2,
+.drive-plot-end.compare-3 {
+  color: var(--report-ink);
+}
 .drive-report svg .grid {
   stroke: var(--line);
   stroke-width: 1;
@@ -278,16 +335,17 @@
 .drive-report svg .line.compare-1,
 .drive-report svg .line.compare-2,
 .drive-report svg .line.compare-3 {
-  stroke-width: 1.5;
+  stroke: var(--report-previous);
+  stroke-width: 2;
 }
 .drive-report svg .line.compare-1 {
-  stroke: var(--report-compare-1);
+  stroke-dasharray: var(--report-dash-1);
 }
 .drive-report svg .line.compare-2 {
-  stroke: var(--report-compare-2);
+  stroke-dasharray: var(--report-dash-2);
 }
 .drive-report svg .line.compare-3 {
-  stroke: var(--report-compare-3);
+  stroke-dasharray: var(--report-dash-3);
 }
 
 /* The path from above: a square that never grows past 300 px. */
@@ -407,4 +465,26 @@
   width: 20px;
   height: 20px;
   margin: 0;
+}
+
+/* Short runs stopped part-way, folded under the list. */
+.drive-history-short {
+  margin-top: 6px;
+}
+.drive-history-short > summary {
+  min-height: 44px;
+  padding: 10px 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.drive-history-open {
+  display: grid;
+  gap: 4px;
+  margin: 10px 0;
+}
+.drive-report-status {
+  line-height: 1.3;
+}
+.drive-report-topics {
+  font-size: 13px;
 }

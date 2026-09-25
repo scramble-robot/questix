@@ -99,8 +99,21 @@
     padding: 6px 10px;
     font-size: 14px;
   }
+  /* The connection keeps one short word next to the dot (live-ui.js data-short: 接続中 / 未接続 /
+     非常停止); the full sentence stays in the text for screen readers. */
+  body .header-actions > .robot-link {
+    gap: 4px;
+    padding: 6px 8px;
+  }
+  body .robot-link #robotLinkState {
+    font-size: 0;
+  }
+  body .robot-link #robotLinkState::after {
+    content: attr(data-short);
+    font-size: 12px;
+    font-weight: 600;
+  }
   body .robot-link .robot-link-name,
-  body .robot-link #robotLinkState,
   body .header-actions .header-long,
   body .course-switcher .switcher-label,
   body .course-switcher #currentCourseTitle {

@@ -23,7 +23,15 @@ globalThis.localStorage = {
   setItem: (key, value) => stored.set(key, value),
 };
 
-const { driveRuns, addDriveRun, RUN_DEFAULTS } = await import('../js/live/drive-history.js');
+const {
+  driveRuns,
+  driveRun,
+  addDriveRun,
+  driveRunsFor,
+  driveRunRecording,
+  hasRecording,
+  RUN_DEFAULTS,
+} = await import('../js/live/drive-history.js');
 
 test('entries stored before the new fields get their defaults', () => {
   const [run] = driveRuns();
@@ -59,4 +67,32 @@ test('a new entry keeps what it was given, defaults the rest and is stored witho
   assert.equal(kept.length, 2);
   assert.equal(kept[0].recording, undefined);
   assert.equal(kept[0].references.front[0].value, 0.5);
+});
+
+test('a lesson lists its runs with short names; without IndexedDB a recording stays in memory', async () => {
+  const recordedAt = new Date(2026, 8, 25, 10, 51, 2).toISOString();
+  const recording = {
+    recordedAt,
+    streams: { twist: [{ stamp: 0, linear: 0.2, angular: 0 }], drive: [], odom: [] },
+  };
+  const run = addDriveRun({
+    slot: 'control-distance',
+    lesson: '壁の前で止める',
+    conditions: 'P 2.2・I 0・D 0.6',
+    group: '3班',
+    reason: 'controller',
+    recording,
+  });
+  const [listed] = driveRunsFor('control-distance');
+  assert.equal(listed.id, run.id);
+  assert.equal(listed.label, '3班 P 2.2・I 0・D 0.6 10:51:02');
+  assert.equal(listed.ok, false);
+  assert.equal(listed.status, 'stopped');
+  assert.equal(listed.kept, true);
+  assert.equal(hasRecording(run), true);
+  assert.equal(await driveRunRecording(run.id), recording);
+  assert.deepEqual(driveRunsFor('nothing-here'), []);
+  // The first release's entry has no recording anywhere.
+  assert.equal(hasRecording(driveRun(4)), false);
+  assert.equal(await driveRunRecording(4), null);
 });

@@ -1,7 +1,8 @@
 // Run with: node --test scripts/robot_manager/static/lab/test/*.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { wheelRpm, buildSlamLog } from '../js/live/slam-recorder.js';
+import { wheelRpm, buildSlamLog, slamLogFromRecording } from '../js/live/slam-recorder.js';
+import { makeRecording } from '../js/live/recording-core.js';
 import { validateSlamLog } from '../js/slam/engine.js';
 
 const config = { wheel_radius: 0.1, wheel_separation: 0.5 };
@@ -46,4 +47,22 @@ test('out-of-order scans are skipped and short recordings rejected', () => {
   assert.equal(buildSlamLog(samples, config).log.frames.length, 3);
   assert.throws(() => buildSlamLog(samples.slice(0, 2), config));
   assert.throws(() => buildSlamLog(samples, { wheel_radius: 0, wheel_separation: 0.5 }));
+});
+
+test('a saved recording becomes a SLAM log, scans paired with the wheels by stamp', () => {
+  const recording = makeRecording({
+    source: 'live',
+    name: '',
+    recordedAt: '2026-09-25T01:00:00.000Z',
+    config,
+    streams: {
+      scan: Array.from({ length: 8 }, (_, i) => scan(100 + i * 0.2)),
+      drive: Array.from({ length: 16 }, (_, i) => ({ stamp: 100 + i * 0.1, v: 0.15, w: 0 })),
+    },
+  });
+  const { log, moved } = slamLogFromRecording(recording);
+  assert.equal(moved, true);
+  assert.equal(log.frames.length, 7);
+  const noWheels = makeRecording({ ...recording, streams: { scan: recording.streams.scan } });
+  assert.throws(() => slamLogFromRecording(noWheels), /drive_status/);
 });

@@ -93,13 +93,23 @@ async function isRobotRecording(file) {
 async function slamLogFromFile(file) {
   if (!(await isRobotRecording(file))) return null;
   const { recording, assumedConfig } = await openRecordingFile(file);
+  return { ...slamLogFromRecording(recording), assumedConfig };
+}
+
+/**
+ * A recording (recording-core shape: recorded here, opened from a file or read from a rosbag) as a
+ * SLAM log: each scan paired with the wheel feedback of the same moment, as a live recording pairs
+ * them. Returns `{log, moved}`; throws an Error with the learner's sentence when the recording
+ * lacks the LiDAR or the wheels, or is too short (buildSlamLog).
+ */
+function slamLogFromRecording(recording) {
   const missing = missingInRecording(recording, ['scan', 'drive']);
   if (missing.length)
     throw Error('LiDAR（/scan）と車輪の状態（/drive_status）の両方が入った記録を選んでください。');
   const samples = pairByStamp(recording, 'scan', ['drive'], PAIR_FRESH_MS / 1000).filter(
     (sample) => sample.drive,
   );
-  return { ...buildSlamLog(samples, recording.config), assumedConfig };
+  return buildSlamLog(samples, recording.config);
 }
 
-export { wheelRpm, buildSlamLog, recordSlamLog, slamLogFromFile };
+export { wheelRpm, buildSlamLog, recordSlamLog, slamLogFromFile, slamLogFromRecording };

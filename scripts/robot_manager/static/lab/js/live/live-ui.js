@@ -42,6 +42,7 @@ const COLORS = {
 };
 
 let history = [];
+let estopPressed = false; // from the latest /drive_status, shown next to the header's dot
 let cameraUrl = '';
 let frameRequested = false;
 let addressProblem = ''; // the sentence normalizeRobotUrl threw for the typed address
@@ -114,9 +115,35 @@ function drawScan() {
   $('robotScanNote').textContent = scanNote(scan);
 }
 
+// 「左」「右」 at the right end of the measured lines, moved apart when the two wheels agree.
+const WHEEL_LABEL_GAP = 14; // px
+function wheelEndLabels(c, y, width, pad) {
+  const last = history[history.length - 1];
+  if (!last) return;
+  const ends = [
+    ['left', last.left, copy.monitor.wheelLeft],
+    ['right', last.right, copy.monitor.wheelRight],
+  ].filter(([, value]) => Number.isFinite(value));
+  const tops = ends.map(([, value]) => y(value));
+  if (tops.length === 2 && Math.abs(tops[0] - tops[1]) < WHEEL_LABEL_GAP) {
+    const middle = (tops[0] + tops[1]) / 2;
+    const upper = ends[0][1] >= ends[1][1] ? 0 : 1;
+    tops[upper] = middle - WHEEL_LABEL_GAP / 2;
+    tops[1 - upper] = middle + WHEEL_LABEL_GAP / 2;
+  }
+  c.font = '600 12px system-ui';
+  c.textBaseline = 'middle';
+  ends.forEach(([side, , label], index) => {
+    c.fillStyle = COLORS[side];
+    c.fillText(label, width - pad.right + 4, tops[index]);
+  });
+  c.textBaseline = 'alphabetic';
+}
+
 function drawWheels() {
   const { c, width, height } = prepare($('robotWheels'));
-  const pad = { left: 38, right: 8, top: 10, bottom: 20 };
+  // The caption is HTML under the canvas (wheelCaption); the right margin holds 「左」「右」.
+  const pad = { left: 38, right: 22, top: 10, bottom: 8 };
   const now = history.length ? history[history.length - 1].at : 0;
   const peak = Math.max(
     10,
@@ -129,7 +156,7 @@ function drawWheels() {
   const x = (at) =>
     pad.left + (1 - (now - at) / (HISTORY_SECONDS * 1000)) * (width - pad.left - pad.right);
   const y = (v) => pad.top + (1 - (v + top) / (2 * top)) * (height - pad.top - pad.bottom);
-  c.font = '11px system-ui';
+  c.font = '12px system-ui';
   c.fillStyle = COLORS.muted;
   c.strokeStyle = COLORS.grid;
   c.lineWidth = 1;
@@ -138,9 +165,8 @@ function drawWheels() {
     c.moveTo(pad.left, y(v));
     c.lineTo(width - pad.right, y(v));
     c.stroke();
-    c.fillText(String(v), 4, y(v) + 4);
+    c.fillText(String(v), 4, Math.min(height - 2, y(v) + 4));
   }
-  c.fillText(fillSentence(copy.monitor.wheels, { seconds: HISTORY_SECONDS }), pad.left, height - 5);
   for (const [key, side, dashed] of [
     ['targetLeft', 'left', true],
     ['targetRight', 'right', true],
@@ -164,6 +190,19 @@ function drawWheels() {
     c.stroke();
   }
   c.setLineDash([]);
+  wheelEndLabels(c, y, width, pad);
+}
+
+// The wheel chart's caption as HTML under the canvas: canvas text would shrink with it on a phone.
+function wheelCaption() {
+  const figure = $('robotWheels').closest('figure');
+  let caption = figure.querySelector('.robot-wheels-note');
+  if (!caption) {
+    caption = document.createElement('p');
+    caption.className = 'robot-wheels-note';
+    figure.append(caption);
+  }
+  caption.textContent = fillSentence(copy.monitor.wheels, { seconds: HISTORY_SECONDS });
 }
 
 function estopText(drive) {
@@ -268,10 +307,15 @@ function showHeader(state, stage) {
   const button = $('robotLinkOpen');
   button.dataset.phase = state.phase;
   button.dataset.stage = stage;
-  const name = state.phase === 'open' ? robotName(state.hello) : '';
+  const open = state.phase === 'open';
+  const name = open ? robotName(state.hello) : '';
   $('robotLinkName').textContent = name;
   $('robotLinkName').hidden = !name;
-  $('robotLinkState').textContent = copy.stage[stage];
+  const estop = open && estopPressed;
+  button.dataset.estop = String(estop);
+  $('robotLinkState').textContent = copy.stage[stage] + (estop ? copy.estop.long : '');
+  // A phone shows only this short word next to the dot (css/hs-shell.css).
+  $('robotLinkState').dataset.short = estop ? copy.estop.short : copy.stageShort[stage];
 }
 // Until a link has worked, the address stays editable so a typo can be fixed while it retries.
 function showForm(state, stage) {
@@ -302,7 +346,10 @@ function showState(state) {
   render(statusView(state, stage), $('robotStatus'));
   $('robotMonitor').hidden = !open;
   render(open ? streamRows(state) : nothing, $('robotStreams'));
-  if (!open) resetMonitor();
+  if (!open) {
+    resetMonitor();
+    estopPressed = false;
+  }
   requestRedraw();
 }
 
@@ -353,6 +400,11 @@ function clearAddressProblem() {
 }
 
 function recordWheels(drive) {
+  if (Boolean(drive.emergency_stop) !== estopPressed) {
+    estopPressed = Boolean(drive.emergency_stop);
+    const state = robotState();
+    showHeader(state, linkStage(state));
+  }
   const config = robotState().hello?.config;
   if (!config || !Number.isFinite(drive.v) || !Number.isFinite(drive.w)) return;
   // Both curves go through the same kinematics, so command and measurement share one sign convention
@@ -405,6 +457,7 @@ function wireDialog() {
 
 function initLive() {
   wireDialog();
+  wheelCaption();
   onRobot('state', showState);
   onRobot('scan', requestRedraw);
   onRobot('odom', requestRedraw);

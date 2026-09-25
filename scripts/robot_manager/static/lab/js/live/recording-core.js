@@ -9,6 +9,12 @@
 //   config: { wheel_radius, wheel_separation },       // metres, as the bridge's hello reports it
 //   topics: { drive: '/drive_status', ... },            // the ROS topic behind each stream
 //   streams: { drive: [...], twist: [...], scan: [...], odom: [...] }
+//   // optional, written since 2026-09 (older files simply lack them; readers fall back):
+//   lesson: 'control-speed',                            // the lesson / slot it was made for
+//   conditions: { speed: 0.2, label: '0.20 m/s' },      // the lesson's drive.conditions() + label
+//   robot: { name: 'questix-03', domain: 3 },           // from the bridge's hello
+//   group: '3班',                                        // 班の名前 typed on this device
+//   outcome: { reason: 'done', label: '予定どおり走り終えた' }, // how a driving run ended
 // }
 //
 // Every stream holds messages exactly as questix_lab_bridge sends them (see
@@ -38,8 +44,100 @@ function sortedByStamp(list) {
     .sort((a, b) => a.stamp - b.stamp);
 }
 
+// --- what a run was: lesson, conditions, robot, group, outcome --------------------------------
+
+const UNKNOWN_CONDITIONS = '設定：不明';
+const MAX_TEXT = 60; // characters kept of a label read from a file
+const MAX_GROUP = 30;
+
+const cleanText = (value, max = MAX_TEXT) =>
+  typeof value === 'string' ? value.trim().slice(0, max) : '';
+
+// The words a lesson would have written, for conditions that came without a label.
+function conditionsText(values) {
+  if (Number.isFinite(values.speed)) return `${values.speed.toFixed(2)} m/s`;
+  const gains = [
+    ['P', values.kp],
+    ['I', values.ki],
+    ['D', values.kd],
+  ].filter(([, value]) => Number.isFinite(value));
+  return gains.map(([name, value]) => `${name} ${value}`).join('・');
+}
+
+/**
+ * The lesson's conditions as stored in a recording: `{...numbers and short texts, label}`, or null.
+ * A string (what drive.conditions() returned before it returned an object) becomes the label.
+ */
+function cleanConditions(value) {
+  if (typeof value === 'string') return cleanText(value) ? { label: cleanText(value) } : null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const kept = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (key === 'label') continue;
+    if (typeof item === 'number' && Number.isFinite(item)) kept[key] = item;
+    else if (typeof item === 'string' || typeof item === 'boolean')
+      kept[key] = typeof item === 'string' ? cleanText(item) : item;
+  }
+  const label = cleanText(value.label) || conditionsText(kept);
+  if (!label && !Object.keys(kept).length) return null;
+  return { ...kept, label };
+}
+
+function cleanRobot(value) {
+  if (!value || typeof value !== 'object') return null;
+  const name = cleanText(value.name);
+  const domain = Number.isInteger(value.domain) ? value.domain : null;
+  return name || domain !== null ? { name, domain } : null;
+}
+
+function cleanOutcome(value) {
+  const reason = cleanText(value?.reason, 40);
+  return reason ? { reason, label: cleanText(value.label) } : null;
+}
+
+/** The optional run fields of a recording, cleaned; empty ones are left out. */
+function runInfo({ lesson, conditions, robot, group, outcome } = {}) {
+  const info = {
+    lesson: cleanText(lesson),
+    conditions: cleanConditions(conditions),
+    robot: cleanRobot(robot),
+    group: cleanText(group, MAX_GROUP),
+    outcome: cleanOutcome(outcome),
+  };
+  return Object.fromEntries(Object.entries(info).filter(([, value]) => value));
+}
+
+/**
+ * `recording` with the given run fields (`lesson`, `conditions`, `robot`, `group`, `outcome`)
+ * added or replaced; fields given as empty are left as they were.
+ */
+const withRunInfo = (recording, info) => ({ ...recording, ...runInfo(info) });
+
+const pad = (number) => String(number).padStart(2, '0');
+
+/** 「10:51:02」 in local time, or '' for a missing or broken date. */
+function clockText(iso) {
+  const date = new Date(iso);
+  if (!iso || Number.isNaN(date.getTime())) return '';
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+/**
+ * A short name for a recording that a reader (chart legend, table row, history) can show next to
+ * others: 「0.20 m/s 10:51:02」, 「P 2.2・D 0.6 10:52:10」, with the group first when one was typed
+ * (「3班 0.20 m/s 10:51:02」), and 「設定：不明 10:51:02」 for files saved before recordings carried
+ * their conditions. The time is when the recording was made (local time, seconds included, so two
+ * runs a minute apart never share a name).
+ */
+function recordingLabel(recording) {
+  const conditions = cleanText(recording?.conditions?.label) || UNKNOWN_CONDITIONS;
+  return [cleanText(recording?.group, MAX_GROUP), conditions, clockText(recording?.recordedAt)]
+    .filter(Boolean)
+    .join(' ');
+}
+
 /** A recording from its parts; streams not given are left out, the rest are sorted by stamp. */
-function makeRecording({ source, name, recordedAt, config, topics = {}, streams }) {
+function makeRecording({ source, name, recordedAt, config, topics = {}, streams, ...info }) {
   const kept = {};
   for (const stream of RECORDING_STREAMS)
     if (Array.isArray(streams[stream])) kept[stream] = sortedByStamp(streams[stream]);
@@ -52,6 +150,7 @@ function makeRecording({ source, name, recordedAt, config, topics = {}, streams 
     config: { wheel_radius: config.wheel_radius, wheel_separation: config.wheel_separation },
     topics,
     streams: kept,
+    ...runInfo(info),
   };
 }
 
@@ -152,6 +251,32 @@ const wallRows = (recording) => distanceSamples(recording.streams.scan ?? []);
 /** The drives between stops, from /odom (capture-core `odomMoves`). */
 const drivesOf = (recording) => odomMoves(recording.streams.odom ?? []);
 
+// --- one time zero for every reader of a run ------------------------------------------------
+
+const COMMAND_MOVING = 1e-3; // |command| above this asks the robot to move (m/s or rad/s)
+
+/**
+ * The robot-clock stamp every chart and table of a run counts time from: the first command that
+ * asked the robot to move (the moment the page — or the controller — started it). The command
+ * stream also carries zeros before that (twist_arbiter republishes), which must not count. Without
+ * a moving command: the first command, else the first message of any stream, else 0.
+ */
+function commandZero(recording) {
+  const commands = (recording.streams.twist ?? []).filter(
+    (message) => Number.isFinite(message.linear) && Number.isFinite(message.angular),
+  );
+  const moving = commands.find(
+    (message) =>
+      Math.abs(message.linear) > COMMAND_MOVING || Math.abs(message.angular) > COMMAND_MOVING,
+  );
+  if (moving) return moving.stamp;
+  if (commands.length) return commands[0].stamp;
+  const stamps = Object.values(recording.streams).flatMap((list) =>
+    list.length ? [list[0].stamp] : [],
+  );
+  return stamps.length ? Math.min(...stamps) : 0;
+}
+
 // --- CSV for a spreadsheet or a plotting tool ------------------------------------------------
 
 // One row per message, all streams in one table ordered by time, so a spreadsheet can filter by
@@ -211,7 +336,176 @@ function recordingCSV(recording) {
   return '\uFEFF' + [header, ...lines].join('\n') + '\n';
 }
 
+// --- the run as a table, for a spreadsheet (what a learner hands in) ---------------------------
+
+// One row per wheel measurement (or per scan, for a LiDAR-only recording), time counted from the
+// first moving command (commandZero, as in the run report), Japanese headers with units, and the
+// conditions of the run above the table. The full per-message CSV (recordingCSV) stays available.
+const TABLE_FRESH = 0.5; // s: a command, pose or scan older than this is not attached to a row
+const TABLE_COLUMNS = [
+  '時間（指令からの秒）',
+  '指令の速さ（m/秒）',
+  '実測の速さ（m/秒）',
+  '指令の回転の速さ（rad/秒）',
+  '実測の回転の速さ（rad/秒）',
+  '左車輪の実測（rpm）',
+  '右車輪の実測（rpm）',
+  '走った距離（m）',
+  '正面の壁までの距離（m）',
+  '非常停止',
+];
+
+// A cell in quotes when needed (a group name or a label may hold a comma).
+function csvText(value) {
+  const text = csvCell(value);
+  return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+const digits = (value, count) => (Number.isFinite(value) ? value.toFixed(count) : '');
+
+// Distance along /odom up to each message, keyed by the message itself.
+function odomDistances(odoms) {
+  const distances = new Map();
+  let total = 0;
+  odoms.forEach((message, index) => {
+    const before = odoms[index - 1];
+    if (before && [message.x, message.y, before.x, before.y].every(Number.isFinite))
+      total += Math.hypot(message.x - before.x, message.y - before.y);
+    distances.set(message, total);
+  });
+  return distances;
+}
+
+const tableTrigger = (recording) =>
+  ['drive', 'scan', 'odom'].find((name) => recording.streams[name]?.length) ?? null;
+
+function tableRow(sample, trigger, zero, config, distances) {
+  const drive = sample.drive ?? null;
+  const measured = drive && Number.isFinite(drive.v) && Number.isFinite(drive.w);
+  const wheels = measured ? wheelRpm(drive, config) : null;
+  const front = sample.scan ? frontDistance(sample.scan) : null;
+  return [
+    digits(sample[trigger].stamp - zero, 3),
+    digits(sample.twist?.linear, 3),
+    measured ? digits(drive.v, 3) : '',
+    digits(sample.twist?.angular, 3),
+    measured ? digits(drive.w, 3) : '',
+    wheels ? digits(wheels.left, 1) : '',
+    wheels ? digits(wheels.right, 1) : '',
+    sample.odom ? digits(distances.get(sample.odom), 3) : '',
+    digits(front, 3),
+    drive?.emergency_stop ? '押されていた' : '',
+  ].join(',');
+}
+
+/** 「key,value」 lines above the table: what a reader needs to tell this run from another. */
+function tableHeading(recording) {
+  const lines = [
+    ['教材', recording.lesson],
+    ['条件', recording.conditions?.label || UNKNOWN_CONDITIONS],
+    ['ロボット', recording.robot?.name],
+    ['班', recording.group],
+    ['記録した時刻', recording.recordedAt],
+    ['終わり方', recording.outcome?.label],
+    ['時間の0', '最初に走る指令が出た時刻'],
+  ];
+  return lines.filter(([, value]) => value).map(([key, value]) => `${key},${csvText(value)}`);
+}
+
+/** The run as a tidy table (UTF-8 BOM): conditions lines, a blank line, then one row per sample. */
+function recordingTableCSV(recording) {
+  const trigger = tableTrigger(recording);
+  const zero = commandZero(recording);
+  const pair = ['twist', 'odom', 'scan'].filter((name) => name !== trigger);
+  const samples = trigger ? pairByStamp(recording, trigger, pair, TABLE_FRESH) : [];
+  const distances = odomDistances(recording.streams.odom ?? []);
+  const rows = samples.map((sample) =>
+    tableRow(sample, trigger, zero, recording.config, distances),
+  );
+  const lines = [...tableHeading(recording), '', TABLE_COLUMNS.join(','), ...rows];
+  return '﻿' + lines.join('\n') + '\n';
+}
+
+// --- file names ---------------------------------------------------------------------------------
+
+function fileStamp(iso) {
+  const date = new Date(iso);
+  if (!iso || Number.isNaN(date.getTime())) return 'recording';
+  return (
+    `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-` +
+    `${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
+  );
+}
+
+// Characters no file system minds, so a group name in Japanese stays readable.
+const filePart = (text, max = 24) =>
+  String(text ?? '')
+    .replace(/[\\/:*?"<>|\s]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, max);
+
+/** A few characters for the conditions in a file name: 0.20mps, P2.2-I0-D0.6, 50cm. */
+function conditionsToken(conditions) {
+  if (!conditions) return '';
+  if (Number.isFinite(conditions.speed)) return `${conditions.speed.toFixed(2)}mps`;
+  const gains = [
+    ['P', conditions.kp],
+    ['I', conditions.ki],
+    ['D', conditions.kd],
+  ].filter(([, value]) => Number.isFinite(value));
+  if (gains.length) return gains.map(([name, value]) => `${name}${value}`).join('-');
+  const label = conditions.label.replace(/\s+/g, '').replaceAll('・', '-').replaceAll('/', 'p');
+  return filePart(label, 20);
+}
+
+const FILE_KINDS = {
+  json: {
+    suffix: '.json',
+    type: 'application/json',
+    text: (recording) => serializeRecording(recording),
+  },
+  csv: {
+    suffix: '.csv',
+    type: 'text/csv;charset=utf-8',
+    text: (recording) => recordingTableCSV(recording),
+  },
+  'raw-csv': {
+    suffix: '-messages.csv',
+    type: 'text/csv;charset=utf-8',
+    text: (recording) => recordingCSV(recording),
+  },
+};
+
+/**
+ * File name and contents for saving `recording`: `kind` 'json' (opens again in this material),
+ * 'csv' (the tidy table, recordingTableCSV) or 'raw-csv' (every message, recordingCSV). One name
+ * scheme for every place that saves a run:
+ * QUESTiX-LAB-<lesson>-<group>-<robot>-<conditions>-<yyyymmdd-hhmmss>, parts left out when unknown.
+ * `lesson` is used when the recording does not say which lesson it was made for.
+ */
+function recordingFile(recording, lesson, kind = 'json') {
+  const parts = [
+    'QUESTiX-LAB',
+    filePart(recording.lesson || lesson, 40),
+    filePart(recording.group),
+    filePart(recording.robot?.name),
+    conditionsToken(recording.conditions),
+    fileStamp(recording.recordedAt),
+  ].filter(Boolean);
+  const format = FILE_KINDS[kind] ?? FILE_KINDS.json;
+  return { name: parts.join('-') + format.suffix, text: format.text(recording), type: format.type };
+}
+
 export {
+  UNKNOWN_CONDITIONS,
+  cleanConditions,
+  runInfo,
+  withRunInfo,
+  clockText,
+  recordingLabel,
+  commandZero,
+  recordingTableCSV,
+  recordingFile,
   RECORDING_FORMAT,
   RECORDING_VERSION,
   RECORDING_STREAMS,

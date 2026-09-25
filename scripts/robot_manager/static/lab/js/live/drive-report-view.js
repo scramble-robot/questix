@@ -5,8 +5,12 @@ import {
   describeTurn,
   describeTurnRate,
   runStatusKind,
+  runStatusKey,
   MOVED_DISTANCE,
+  MOVED_TURN,
 } from './drive-report-core.js';
+import { driveRunName, hasRecording } from './drive-history.js';
+import { UNKNOWN_CONDITIONS } from './recording-core.js';
 
 // The report of one driving run (drive-history.js entry): what happened in numbers, the commanded
 // and measured speed over time, the path seen from above, and the wall distance when the LiDAR saw
@@ -14,7 +18,9 @@ import {
 //
 // Time charts are an SVG stretched to a box of fixed CSS height (preserveAspectRatio="none", lines
 // with vector-effect="non-scaling-stroke") under HTML labels placed in %, so the text keeps its
-// size on a phone and on a projector alike. Colours are CSS variables in css/drive-report.css.
+// size on a phone and on a projector alike. Colours are the palette's roles (css/drive-report.css):
+// measured blue solid, command = the target amber dashed, other runs grey with their own dash
+// pattern, each line with a direct label at its end (A, B, C for the compared runs).
 
 const PLOT_SPAN = 100; // SVG user units across and down a time chart (= percent of the box)
 const PATH_BOX = 300; // user units: the square the path is drawn in
@@ -30,7 +36,25 @@ const MOTION_SHOWN = 1e-3; // m/s or rad/s: a series that never exceeds this has
 // constant (measured_lpf_tau_sec in launcher/config/drive_component.yaml), in seconds.
 const MEASURED_SMOOTHING = 0.15;
 const COMPARE_LIMIT = 3; // runs that can be overlaid on the report of another
-const STATUS_ICONS = { ok: '✓', stopped: '■', problem: '⚠︎' };
+const COMPARE_NAMES = ['A', 'B', 'C'];
+const STATUS_ICONS = { ok: '✓', stopped: '■', problem: '⚠︎', unknown: '?' };
+// Labels closer than this (percent of the plot's height, about one line of 12 px text on the
+// phone's 128 px plot) are moved apart.
+const LABEL_GAP = 12;
+const STILL_TURN_RATE = 0.05; // rad/s: a run whose turn rate never exceeds this did not turn
+const SHORT_RUN = 1.5; // s: a run stopped part-way within this is folded in the history list
+// The numbers of the summary, in order; a lesson picks its own (live-session `reportMetrics`).
+const REPORT_METRICS = [
+  'driveTime',
+  'duration',
+  'distance',
+  'ended',
+  'turn',
+  'maxSpeed',
+  'maxTurnRate',
+  'stop',
+  'closest',
+];
 
 const reportCopy = await loadJson('content/live/drive-report.json');
 const text = () => reportCopy;
@@ -51,12 +75,6 @@ function formatTime(iso) {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return '';
   return date.toLocaleString('ja-JP', { dateStyle: 'short', timeStyle: 'medium' });
-}
-
-function formatClock(iso) {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleTimeString('ja-JP');
 }
 
 // --- time charts --------------------------------------------------------------------------------
@@ -104,9 +122,62 @@ function plotLines(chart, axis, x, y) {
     }
     ${chart.lines.map(
       (line) =>
-        svg`<polyline class="line ${line.kind}" points=${polyline(line.points, x, y)} vector-effect="non-scaling-stroke"></polyline>`,
+        svg`<polyline class="line ${line.kind}" points=${polyline(shownPoints(line.points), x, y)} vector-effect="non-scaling-stroke"></polyline>`,
     )}
   </svg>`;
+}
+
+// Before the first command (t < 0) the robot stood waiting: the chart starts at the command. The
+// last point before it is kept (drawn at t = 0), so a line starts at the axis, not in mid-air.
+function shownPoints(points) {
+  const first = points.findIndex(([t]) => t >= 0);
+  if (first < 0) return [];
+  return points.slice(Math.max(0, first - 1));
+}
+
+// Moves labels (sorted by `top`, in %) apart to at least LABEL_GAP, staying inside 0–100 %.
+function spreadLabels(labels) {
+  const sorted = [...labels].sort((a, b) => a.top - b.top);
+  for (let index = 1; index < sorted.length; index++)
+    sorted[index].top = Math.max(sorted[index].top, sorted[index - 1].top + LABEL_GAP);
+  const overflow = (sorted.at(-1)?.top ?? 0) - PLOT_SPAN;
+  if (overflow > 0) for (const label of sorted) label.top -= overflow;
+  return sorted;
+}
+
+// The name of each line, written where the line ends (outside the plot on its right when it runs
+// to the end of the time axis).
+function endLabels(chart, x, y) {
+  const labels = chart.lines
+    .filter((line) => line.end && shownPoints(line.points).length)
+    .map((line) => {
+      const [t, value] = shownPoints(line.points).at(-1);
+      return { kind: line.kind, text: line.end, left: x(t), top: y(value) };
+    });
+  return spreadLabels(labels).map(
+    (label) =>
+      html`<span
+        class="drive-plot-end ${label.kind}"
+        style=${styleMap({ left: percent(label.left), top: percent(label.top) })}
+        >${label.text}</span
+      >`,
+  );
+}
+
+// Reference lines are labelled above the line; when two lie close, the lower one's label goes
+// below its line instead, so 「目標 0.50 m」 and 「ここで止める 0.30 m」 never overlap.
+function referenceLabels(references, y) {
+  const placed = references
+    .map((reference) => ({ ...reference, top: y(reference.value) }))
+    .sort((a, b) => a.top - b.top);
+  return placed.map((reference, index) => {
+    const crowded = index > 0 && reference.top - placed[index - 1].top < LABEL_GAP * 2;
+    return html`<span
+      class="drive-plot-reference ${crowded ? 'below' : ''}"
+      style=${styleMap({ top: percent(reference.top) })}
+      >${reference.label}</span
+    >`;
+  });
 }
 
 function markerLabel(marker, x) {
@@ -119,31 +190,21 @@ function markerLabel(marker, x) {
   >`;
 }
 
-// `ticks.values` on the y axis, `ticks.times` (s) on the time axis; the last time gets the unit.
+// `ticks.values` on the y axis, `ticks.times` (s) on the time axis (its title is under the chart).
 function plotLabels(chart, ticks, x, y) {
-  const times = ticks.times;
-  const last = times.length - 1;
   return html`${ticks.values.map(
     (value) =>
       html`<span class="drive-plot-y" style=${styleMap({ top: percent(y(value)) })}
         >${tickText(value)}</span
       >`,
   )}
-  ${times.map(
-    (t, index) =>
+  ${ticks.times.map(
+    (t) =>
       html`<span class="drive-plot-t" style=${styleMap({ left: percent(x(t)) })}
-        >${tickText(t)}${index === last ? text().seconds : ''}</span
+        >${tickText(t)}</span
       >`,
   )}
-  ${chart.references.map(
-    (reference) =>
-      html`<span
-        class="drive-plot-reference"
-        style=${styleMap({ top: percent(y(reference.value)) })}
-        >${reference.label}</span
-      >`,
-  )}
-  ${markerLabel(chart.marker, x)}`;
+  ${referenceLabels(chart.references, y)} ${endLabels(chart, x, y)} ${markerLabel(chart.marker, x)}`;
 }
 
 function legendView(entries) {
@@ -158,13 +219,14 @@ function legendView(entries) {
 }
 
 /**
- * A time chart. `lines` are `{kind, points: [[t, value]]}` (kind = CSS modifier: measured,
- * command, front, compare-1…), `legend` `{kind, label}`, `references` horizontal lines
+ * A time chart. `lines` are `{kind, points: [[t, value]], end}` (kind = CSS modifier: measured,
+ * command, front, compare-1…; `end` the label written where the line ends; points before t = 0
+ * are not drawn), `legend` `{kind, label}`, `references` horizontal lines
  * `{value, label}`, `marker` an optional vertical line `{t, label}`; `duration` in seconds.
  */
 function timeChart(chart) {
   const values = [
-    ...chart.lines.flatMap((line) => line.points.map((point) => point[1])),
+    ...chart.lines.flatMap((line) => shownPoints(line.points).map((point) => point[1])),
     ...chart.references.map((reference) => reference.value),
   ];
   const axis = valueAxis(values);
@@ -182,27 +244,25 @@ function timeChart(chart) {
         ${plotLines(chart, axis, x, y)} ${plotLabels(chart, { values: axis.ticks, times }, x, y)}
       </div>
     </div>
+    <p class="drive-plot-axis">${text().timeAxis}</p>
   </figure>`;
 }
 
 // --- which charts a run gets --------------------------------------------------------------------
 
-function compareName(run) {
-  return fill(text().compareLabel, {
-    time: formatClock(run.at),
-    conditions: run.conditions ?? '',
-  }).trim();
-}
+// 「A 3班 0.20 m/s 10:51:02」: the letter drawn at the line's end, then the run's short name.
+const compareName = (run, index) => `${COMPARE_NAMES[index]} ${driveRunName(run)}`;
 
 const compareLegend = (compare) =>
-  compare.map((run, index) => ({ kind: `compare-${index + 1}`, label: compareName(run) }));
+  compare.map((run, index) => ({ kind: `compare-${index + 1}`, label: compareName(run, index) }));
 
 // Command below, the compared runs' measurements, this run's measurement on top.
 function motionChart(run, compare, { key, label, unit, duration, marker }) {
   const copy = text();
   const { command, measured } = run.report.series;
-  const series = (samples, kind) => ({
+  const series = (samples, kind, end) => ({
     kind,
+    end,
     points: samples.map((sample) => [sample.t, sample[key]]),
   });
   return timeChart({
@@ -212,11 +272,11 @@ function motionChart(run, compare, { key, label, unit, duration, marker }) {
     marker,
     references: [],
     lines: [
-      series(command, 'command'),
+      series(command, 'command', copy.command),
       ...compare.map((other, index) =>
-        series(other.report.series.measured, `compare-${index + 1}`),
+        series(other.report.series.measured, `compare-${index + 1}`, COMPARE_NAMES[index]),
       ),
-      series(measured, 'measured'),
+      series(measured, 'measured', copy.measured),
     ],
     legend: [
       { kind: 'measured', label: copy.measured + (compare.length ? copy.thisRun : '') },
@@ -228,8 +288,9 @@ function motionChart(run, compare, { key, label, unit, duration, marker }) {
 
 function frontChart(run, compare, duration) {
   const copy = text();
-  const series = (samples, kind) => ({
+  const series = (samples, kind, end) => ({
     kind,
+    end,
     points: samples.map((sample) => [sample.t, sample.d]),
   });
   const withFront = compare.filter((other) => other.report.series.front?.length);
@@ -240,9 +301,9 @@ function frontChart(run, compare, duration) {
     references: run.references?.front ?? [],
     lines: [
       ...compare.map((other, index) =>
-        series(other.report.series.front ?? [], `compare-${index + 1}`),
+        series(other.report.series.front ?? [], `compare-${index + 1}`, COMPARE_NAMES[index]),
       ),
-      series(run.report.series.front, 'front'),
+      series(run.report.series.front, 'front', copy.lidar),
     ],
     legend: [
       { kind: 'front', label: copy.lidar + (withFront.length ? copy.thisRun : '') },
@@ -397,28 +458,49 @@ function stopText(stop) {
 
 // Reports stored before `driveSeconds` existed show the recording length only. A cut recording
 // has no tail after the stop, so its length is not said to include one.
-function summaryItems(summary, cut) {
+function allSummaryItems(summary, cut) {
   const copy = text();
   const items = [];
   if (Number.isFinite(summary.driveSeconds))
-    items.push([copy.driveTime, secondsText(summary.driveSeconds)]);
-  items.push([cut ? copy.durationCut : copy.duration, secondsText(summary.seconds)]);
-  items.push([copy.distance, `${fixed(summary.distance * 100, 1)} cm`]);
-  items.push([copy.ended, describeOffset(summary.forward, summary.left, copy)]);
-  items.push([copy.turn, describeTurn(summary.turn, copy)]);
+    items.push(['driveTime', copy.driveTime, secondsText(summary.driveSeconds)]);
+  items.push(['duration', cut ? copy.durationCut : copy.duration, secondsText(summary.seconds)]);
+  items.push(['distance', copy.distance, `${fixed(summary.distance * 100, 1)} cm`]);
+  items.push(['ended', copy.ended, describeOffset(summary.forward, summary.left, copy)]);
+  items.push(['turn', copy.turn, describeTurn(summary.turn, copy)]);
   items.push([
+    'maxSpeed',
     copy.maxSpeed,
     fill(copy.maxSpeedValue, {
       speed: fixed(summary.maxSpeed, 2),
       command: fixed(summary.maxCommand, 2),
     }),
   ]);
-  items.push([copy.maxTurnRate, describeTurnRate(summary.maxTurnRate, copy)]);
-  items.push([copy.stop, stopText(summary.stop)]);
+  items.push(['maxTurnRate', copy.maxTurnRate, describeTurnRate(summary.maxTurnRate, copy)]);
+  items.push(['stop', copy.stop, stopText(summary.stop)]);
   if (Number.isFinite(summary.closest))
-    items.push([copy.closest, `${fixed(summary.closest, 2)} m`]);
-  if (summary.emergencyStop) items.push([copy.emergencyStop, copy.emergencyStopYes]);
+    items.push(['closest', copy.closest, `${fixed(summary.closest, 2)} m`]);
   return items;
+}
+
+// A run that neither turned nor was turned has nothing to say about turning.
+const turned = (summary) =>
+  Math.abs(summary.turn ?? 0) >= MOVED_TURN || summary.maxTurnRate > STILL_TURN_RATE;
+
+/**
+ * The summary's `[term, value]` pairs: `metrics` (keys of REPORT_METRICS) picks and orders them;
+ * without it, all of them — in the compact report less the turning ones when the run did not
+ * turn. An emergency stop is always said.
+ */
+function summaryItems(summary, cut, { metrics = null, compact = false } = {}) {
+  const items = allSummaryItems(summary, cut);
+  const wanted = metrics ?? REPORT_METRICS;
+  const skipTurn = !metrics && compact && !turned(summary);
+  const shown = wanted
+    .map((key) => items.find(([item]) => item === key))
+    .filter((item) => item && !(skipTurn && ['turn', 'maxTurnRate'].includes(item[0])))
+    .map(([, term, value]) => [term, value]);
+  if (summary.emergencyStop) shown.push([text().emergencyStop, text().emergencyStopYes]);
+  return shown;
 }
 
 // A value such as 「前へ 60.0 cm・左右 0 cm」 may wrap only after 「・」 or before 「（」, never
@@ -428,9 +510,9 @@ const valueParts = (value) =>
     .split(/(?<=・)|(?=（)/)
     .map((part) => (/\d/.test(part) ? html`<span class="drive-value-part">${part}</span>` : part));
 
-function summaryList(run) {
+function summaryList(run, options) {
   return html`<dl class="drive-report-summary">
-    ${summaryItems(run.report.summary, run.cut).map(
+    ${summaryItems(run.report.summary, run.cut, options).map(
       ([term, value]) =>
         html`<div>
           <dt>${term}</dt>
@@ -440,30 +522,37 @@ function summaryList(run) {
   </dl>`;
 }
 
-/** How a run ended, for an icon: `{kind: 'ok' | 'stopped' | 'problem', text}`. */
+/** How a run ended in words, from drive-link's reason (「予定どおり走り終えた」, …). */
+const runStatusText = (reason) => text().status[runStatusKey(reason)];
+
+/** How a run ended, for an icon and its words: `{kind: 'ok' | 'stopped' | 'problem', text}`. */
 function driveRunStatus(run) {
-  const kind = runStatusKind(run.reason);
-  return { kind, text: text().status[kind] };
+  // A file saved before recordings said how the run ended.
+  if (!run.reason && run.source === 'file') return { kind: 'unknown', text: text().status.unknown };
+  return { kind: runStatusKind(run.reason), text: runStatusText(run.reason) };
 }
 
-function statusIcon(run) {
+// The icon with its words next to it (the icon alone would leave ■ and ⚠︎ to be guessed).
+function statusBadge(run) {
   const status = driveRunStatus(run);
-  return html`<span class="drive-status ${status.kind}" aria-hidden="true"
-      >${STATUS_ICONS[status.kind]}</span
-    ><span class="sr-only">${status.text}</span>`;
+  return html`<span class="drive-status-badge ${status.kind}"
+    ><span class="drive-status ${status.kind}" aria-hidden="true">${STATUS_ICONS[status.kind]}</span
+    >${status.text}</span
+  >`;
 }
 
 function reportHeader(run) {
   const copy = text();
   const meta = [
+    run.group ? fill(copy.group, { group: run.group }) : '',
     run.robot ? fill(copy.robot, { robot: run.robot }) : '',
-    run.conditions ? fill(copy.conditions, { conditions: run.conditions }) : '',
+    fill(copy.conditions, { conditions: run.conditions || copy.conditionsUnknown }),
+    run.source === 'file' ? copy.fromFile : '',
   ].filter(Boolean);
   return html`<header class="drive-report-head">
-    <h4>
-      ${statusIcon(run)} ${fill(copy.title, { time: formatTime(run.at), lesson: run.lesson })}
-    </h4>
-    ${meta.length ? html`<p class="drive-report-meta">${meta.join('　')}</p>` : nothing}
+    <h4>${fill(copy.title, { time: formatTime(run.at), lesson: run.lesson })}</h4>
+    <p class="drive-report-status">${statusBadge(run)}</p>
+    <p class="drive-report-meta">${meta.join('　')}</p>
     ${run.ended ? html`<p>${run.ended}</p>` : nothing}
     ${run.cut ? html`<p class="drive-report-cut">${copy.cut}</p>` : nothing}
   </header>`;
@@ -472,26 +561,41 @@ function reportHeader(run) {
 function reportNotes(summary) {
   const copy = text();
   const smoothing = summary.stop ? fill(copy.smoothing, { tau: MEASURED_SMOOTHING }) : '';
-  return html`<p class="drive-note">${copy.chartSources}${smoothing}</p>`;
+  return smoothing ? html`<p class="drive-note">${smoothing}</p>` : nothing;
 }
 
+// Which ROS topic each number and line came from: for the teacher, folded.
+const topicDetails = () =>
+  html`<details class="drive-teacher drive-report-topics">
+    <summary>${text().teacherDetails}</summary>
+    <p>${text().chartSources}</p>
+  </details>`;
+
 function saveButtons(run, saveRun) {
-  if (!run.recording) return html`<p class="drive-note">${text().notKept}</p>`;
+  const copy = text();
+  if (!hasRecording(run)) return html`<p class="drive-note">${copy.notKept}</p>`;
   if (!saveRun) return nothing;
   return html`<div class="live-capture-actions">
-    <button @click=${() => saveRun(run.id, 'json')}>${text().saveJson}</button>
-    <button @click=${() => saveRun(run.id, 'csv')}>${text().saveCsv}</button>
-  </div>`;
+      <button data-drive-save="json" @click=${() => saveRun(run.id, 'json')}>
+        ${copy.saveJson}
+      </button>
+      <button data-drive-save="csv" @click=${() => saveRun(run.id, 'csv')}>${copy.saveCsv}</button>
+      <button class="quiet" data-drive-save="raw-csv" @click=${() => saveRun(run.id, 'raw-csv')}>
+        ${copy.saveRawCsv}
+      </button>
+    </div>
+    <p class="drive-note">${copy.share}</p>`;
 }
 
 // --- the report ---------------------------------------------------------------------------------
 
 // Inside a lesson block: the numbers and the first chart; the rest behind a closed <details>.
-function compactBody(run, parts) {
+function compactBody(run, parts, metrics) {
   const copy = text();
   const [first, ...rest] = parts;
   const names = rest.map((part) => copy.chartNames[part.name]).join('・');
-  return html`${summaryList(run)} ${reportNotes(run.report.summary)} ${first?.view ?? nothing}
+  return html`${summaryList(run, { metrics, compact: true })} ${first?.view ?? nothing}
+  ${reportNotes(run.report.summary)}
   ${
     rest.length
       ? html`<details class="drive-report-more">
@@ -499,23 +603,29 @@ function compactBody(run, parts) {
           <div class="drive-report-charts">${rest.map((part) => part.view)}</div>
         </details>`
       : nothing
-  }`;
+  }
+  ${topicDetails()}`;
 }
 
-function fullBody(run, charts, path, saveRun) {
-  return html`<div class="drive-report-overview">${summaryList(run)} ${path}</div>
-    ${reportNotes(run.report.summary)}
-    <div class="drive-report-charts">${charts.map((chart) => chart.view)}</div>
-    ${saveButtons(run, saveRun)}`;
+// With other runs overlaid, the charts are what the learner asked to see: they come first.
+function fullBody(run, charts, path, { saveRun, comparing }) {
+  const overview = html`<div class="drive-report-overview">${summaryList(run)} ${path}</div>`;
+  const chartList = html`<div class="drive-report-charts" data-drive-report-charts>
+    ${charts.map((chart) => chart.view)}
+  </div>`;
+  return html`${comparing ? chartList : overview} ${reportNotes(run.report.summary)}
+  ${comparing ? overview : chartList} ${topicDetails()} ${saveButtons(run, saveRun)}`;
 }
 
 /**
  * The report of one run (drive-history.js entry).
  * - `compact`: for a lesson block — summary and the first chart, the others folded, no saving.
- * - `saveRun(id, kind)`: shows the save buttons (full view, only while the recording is in memory).
- * - `compare`: other entries whose measurements are overlaid as thin lines (at most compareLimit).
+ * - `metrics`: the summary's numbers (keys of REPORT_METRICS, in order); all when null.
+ * - `saveRun(id, kind)`: shows the save buttons (full view, while the recording can be had).
+ * - `compare`: other entries whose measurements are overlaid (at most compareLimit), grey with
+ *   their own dash pattern and labelled A, B, C.
  */
-function driveReportView(run, { compact = false, saveRun, compare = [] } = {}) {
+function driveReportView(run, { compact = false, metrics = null, saveRun, compare = [] } = {}) {
   const others = compare
     .filter((other) => other?.report && other.id !== run.id)
     .slice(0, COMPARE_LIMIT);
@@ -525,8 +635,8 @@ function driveReportView(run, { compact = false, saveRun, compare = [] } = {}) {
     ${reportHeader(run)}
     ${
       compact
-        ? compactBody(run, [...charts, { name: 'path', view: path }])
-        : fullBody(run, charts, path, saveRun)
+        ? compactBody(run, [...charts, { name: 'path', view: path }], metrics)
+        : fullBody(run, charts, path, { saveRun, comparing: others.length > 0 })
     }
   </section>`;
 }
@@ -542,27 +652,29 @@ function runNumbers(run) {
   });
 }
 
-/** One line per run, as plain text (time, lesson, conditions, distance, seconds). */
+/** One line per run, as plain text (time, lesson, group, conditions, distance, seconds). */
 function driveRunLabel(run) {
   const head = fill(text().listItem, { time: formatTime(run.at), lesson: run.lesson });
-  return [head, run.conditions, runNumbers(run)].filter(Boolean).join('　');
+  return [head, run.group, run.conditions, runNumbers(run)].filter(Boolean).join('　');
 }
 
 function historyItem(run, list) {
   const shown = run.id === list.selected;
   const compared = list.compared.includes(run.id);
   const full = !compared && list.compared.length >= COMPARE_LIMIT;
-  const details = [run.conditions, runNumbers(run)].filter(Boolean).join('　');
+  const details = [run.group, run.conditions || UNKNOWN_CONDITIONS, runNumbers(run)]
+    .filter(Boolean)
+    .join('　');
   return html`<li>
     <button
       data-drive-run=${run.id}
       aria-pressed=${shown ? 'true' : 'false'}
       @click=${() => list.select(run.id)}
     >
-      ${statusIcon(run)}
       <span class="drive-history-text">
         <span>${fill(text().listItem, { time: formatTime(run.at), lesson: run.lesson })}</span>
         <span class="drive-history-numbers">${details}</span>
+        ${statusBadge(run)}
       </span>
     </button>
     ${
@@ -588,20 +700,45 @@ function historyItem(run, list) {
  */
 function driveHistoryList({ runs, selected, compared = [], select, toggleCompare }) {
   const list = { selected, compared, select, toggleCompare };
+  const folded = runs.filter((run) => isShortStop(run) && !isInUse(run, list));
+  const listed = runs.filter((run) => !folded.includes(run));
   return html`${
       toggleCompare
         ? html`<p class="drive-note">${fill(text().compareLead, { limit: COMPARE_LIMIT })}</p>`
         : nothing
     }
     <ol class="drive-history">
-      ${runs.map((run) => historyItem(run, list))}
-    </ol>`;
+      ${listed.map((run) => historyItem(run, list))}
+    </ol>
+    ${
+      folded.length
+        ? html`<details class="drive-history-short">
+            <summary>${fill(text().shortRuns, { count: folded.length })}</summary>
+            <ol class="drive-history">
+              ${folded.map((run) => historyItem(run, list))}
+            </ol>
+          </details>`
+        : nothing
+    }`;
 }
+
+// A run stopped within its first moments says little; it is kept, but folded away so the runs
+// worth comparing stay together.
+function isShortStop(run) {
+  if (run.reason === 'done' || !run.reason) return false;
+  const summary = run.report.summary;
+  const seconds = Number.isFinite(summary.driveSeconds) ? summary.driveSeconds : summary.seconds;
+  return seconds < SHORT_RUN;
+}
+
+const isInUse = (run, list) => run.id === list.selected || list.compared.includes(run.id);
 
 export {
   driveReportView,
   driveRunLabel,
   driveRunStatus,
+  runStatusText,
+  REPORT_METRICS,
   driveHistoryList,
   reportCopy,
   COMPARE_LIMIT as compareLimit,

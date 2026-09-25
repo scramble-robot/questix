@@ -9,11 +9,19 @@ import {
   liveLink,
   missingStreams,
   throttleProgress,
+  groupName,
+  setGroupName,
 } from './capture.js';
-import { missingInRecording, recordingSummary } from './recording-core.js';
+import {
+  missingInRecording,
+  recordingSummary,
+  withRunInfo,
+  cleanConditions,
+} from './recording-core.js';
 import { captureCopy } from './live-view.js';
 import { driveModel, onDrive, confirmDriveSafety, runDrive } from './drive-link.js';
 import { driveEndedText, driveCopy } from './drive-view.js';
+import { runStatusText } from './drive-report-view.js';
 import { addDriveRun, driveRun, saveDriveRun, isEmptyRun } from './drive-history.js';
 
 // The state behind one `liveCaptureControls` block: recording from the robot, opening a saved
@@ -39,13 +47,29 @@ function formatTime(iso) {
   return date.toLocaleString('ja-JP', { dateStyle: 'short', timeStyle: 'short' });
 }
 
+// What a saved recording says about itself: when, which robot and group, which settings.
+function recordingFacts(recording) {
+  const text = captureCopy.file;
+  return [
+    formatTime(recording.recordedAt),
+    recording.group ?? '',
+    recording.robot?.name ? fill(text.robot, { robot: recording.robot.name }) : '',
+    recording.conditions?.label
+      ? fill(text.conditions, { conditions: recording.conditions.label })
+      : text.conditionsUnknown,
+  ]
+    .filter(Boolean)
+    .join('・');
+}
+
 // Where a recording came from, as the first sentence of the lesson's note.
 function originNote(recording, origin, assumedConfig) {
   const text = captureCopy.file;
   const seconds = recordingSummary(recording).seconds.toFixed(1);
   if (origin === 'restored') return fill(text.restored, { time: formatTime(recording.recordedAt) });
   if (origin !== 'file') return '';
-  if (recording.source !== 'rosbag') return fill(text.opened, { name: recording.name, seconds });
+  if (recording.source !== 'rosbag')
+    return fill(text.opened, { name: recording.name, seconds, facts: recordingFacts(recording) });
   const topics = Object.values(recording.topics).filter(Boolean).join('・');
   const opened = fill(text.openedBag, { name: recording.name, seconds, topics });
   if (!assumedConfig) return opened;
@@ -71,12 +95,22 @@ function originNote(recording, origin, assumedConfig) {
  * - `applyOnRestore`: false when the lesson keeps its own results across a reload (the recording
  *   then only comes back so it can still be saved)
  * - `update()`: redraws the lesson
+ * - `reportMetrics` (optional): the numbers the run report under the block shows, as keys of
+ *   drive-report-view's REPORT_METRICS (e.g. `['driveTime', 'distance', 'maxSpeed', 'stop']`);
+ *   all of them when left out.
  * - `drive` (optional): `{ plan(), program(), placement(), conditions(), startLabel }`. `plan()`
  *   returns `{controller, seconds, tail, references, outcome}` for drive-link's runDrive (tail =
  *   seconds recorded after the robot stops; references = drive-history's chart reference lines;
  *   outcome() = an optional sentence on how the run went, e.g. whether the goal was reached) or
  *   throws an Error whose message is shown. `program()` says what the robot will do, `placement()`
- *   how to place it, `conditions()` the settings in a few words for the run history.
+ *   how to place it, `conditions()` the settings the run is made with — an object of numbers
+ *   plus `label`, the few words readers show (`{ speed: 0.2, label: '0.20 m/s' }`), or just the
+ *   words as a string. It is written into the recording (`conditions`) and the run history.
+ *
+ * Every recording made here carries `lesson` (the slot), `robot` (from the bridge's hello) and
+ * `group` (班の名前); a driving run also `conditions` and `outcome` (recording-core runInfo). Only a
+ * run that went as planned (reason 'done') reaches `apply`: a run stopped part-way would be judged
+ * like a whole one, so it goes to the run history only, with a sentence saying so.
  */
 function createLiveSession(options) {
   const session = {
@@ -92,6 +126,7 @@ function createLiveSession(options) {
     tail: false, // recording the stop after the robot was told to stop
     driveNote: '', // how the last run ended, shown under the start button
     driveRunId: null, // the history entry (drive-history.js) of this block's last run
+    origin: '', // where session.recording came from: 'live', 'file' or 'restored'
   };
   if (options.drive) onDrive(() => options.update());
 
@@ -101,9 +136,19 @@ function createLiveSession(options) {
     session.note = [origins, result.note].filter(Boolean).join(' ');
     if (!result.ok) return;
     session.recording = recording;
+    session.origin = origin;
     if (origin === 'restored') return;
     if (!keepRecording(options.slot, recording)) session.note += ' ' + captureCopy.file.notKept;
   }
+
+  // The run fields every recording made here carries (recording-core runInfo).
+  const stamp = (recording, info = {}) =>
+    withRunInfo(recording, {
+      lesson: options.slot,
+      robot: liveLink().robot,
+      group: groupName(),
+      ...info,
+    });
 
   async function startCapture() {
     if (session.busy) return;
@@ -121,7 +166,7 @@ function createLiveSession(options) {
           options.update();
         }),
       });
-      show(recording, 'live');
+      show(stamp(recording), 'live');
     } catch (error) {
       // A recording that failed does not discard the one already on screen: losing a good
       // measurement because the link dropped during the next attempt would be the worse outcome.
@@ -148,6 +193,8 @@ function createLiveSession(options) {
     let plan;
     try {
       plan = options.drive.plan();
+      // Taken now: the settings the robot is driven with, whatever the page shows afterwards.
+      plan = { ...plan, conditions: cleanConditions(options.drive.conditions?.()) };
     } catch (error) {
       session.driveNote = error.message;
       options.update();
@@ -212,26 +259,34 @@ function createLiveSession(options) {
     finishRun(result, await recorded, plan);
   }
 
-  function finishRun(result, recording, plan) {
+  function finishRun(result, raw, plan) {
     const ended = driveEndedText(result);
-    if (!result.started || recording instanceof Error || isEmptyRun(recording)) {
+    if (!result.started || raw instanceof Error || isEmptyRun(raw)) {
       session.driveNote = ended;
       return;
     }
     // The next run is a new situation (the robot has moved): the learner confirms again.
     confirmDriveSafety(false);
-    show(recording, 'live');
+    const status = runStatusText(result.reason);
+    const recording = stamp(raw, {
+      conditions: plan.conditions,
+      outcome: { reason: result.reason, label: status },
+    });
+    const done = result.reason === 'done';
+    if (done) show(recording, 'live');
     const outcome = plan.outcome?.() ?? '';
     const cut = recording.cut ? driveCopy.ended.cut : '';
-    session.driveNote = [ended, outcome, cut].filter(Boolean).join(' ');
+    const notShown = done ? '' : fill(driveCopy.notShown, { status });
+    session.driveNote = [ended, outcome, cut, notShown].filter(Boolean).join(' ');
     session.driveRunId = addDriveRun({
       slot: options.slot,
       lesson: driveCopy.lessons[options.slot] ?? options.lesson,
-      conditions: options.drive.conditions?.() ?? '',
+      conditions: plan.conditions?.label ?? '',
       program: options.drive.program(),
-      ended: session.driveNote,
+      ended: [ended, outcome, cut].filter(Boolean).join(' '),
       reason: result.reason,
-      robot: liveLink().robot?.name ?? '',
+      robot: recording.robot?.name ?? '',
+      group: recording.group ?? '',
       references: plan.references ?? {},
       cut: Boolean(recording.cut),
       recording,
@@ -252,10 +307,21 @@ function createLiveSession(options) {
     options.update();
   }
 
+  // A recording made on this device takes the group typed after it was made; a file opened from
+  // another group keeps its own.
   function saveRecording(kind) {
     if (!session.recording) return;
-    const file = recordingFile(session.recording, options.lesson, kind);
+    const own = session.origin !== 'file' && !session.recording.group;
+    const recording = own
+      ? withRunInfo(session.recording, { group: groupName() })
+      : session.recording;
+    const file = recordingFile(recording, options.lesson, kind);
     downloadFile(file.name, file.text, file.type);
+  }
+
+  function setGroup(text) {
+    setGroupName(text);
+    options.update();
   }
 
   // The last recording of this block, if the browser kept one and it still has what is needed.
@@ -267,6 +333,7 @@ function createLiveSession(options) {
       return;
     }
     session.recording = recording;
+    session.origin = 'restored';
   }
 
   function clear() {
@@ -290,7 +357,7 @@ function createLiveSession(options) {
       recordLabel: options.recordLabel,
       stopLabel: options.stopLabel,
       message: '',
-      file: { canSave: Boolean(session.recording) && !session.busy },
+      file: { canSave: Boolean(session.recording) && !session.busy, group: groupName() },
       drive: options.drive ? driveBlockModel() : null,
     };
   }
@@ -310,6 +377,7 @@ function createLiveSession(options) {
       program: options.drive.program(),
       placement: options.drive.placement?.() ?? '',
       startLabel: options.drive.startLabel,
+      metrics: options.reportMetrics ?? null,
       // Shown under the block until the next run (null after a reload: see the 実機 dialog).
       report: session.driveRunId === null ? null : driveRun(session.driveRunId),
     };
@@ -333,6 +401,7 @@ function createLiveSession(options) {
       stopCapture,
       openRecording,
       saveRecording,
+      setGroup,
       startDriveCapture,
       confirmDrive: confirmDriveSafety,
       saveRun: saveDriveRun,

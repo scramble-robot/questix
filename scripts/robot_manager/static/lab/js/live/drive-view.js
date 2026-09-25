@@ -61,7 +61,8 @@ function checklist(drive) {
   </ul>`;
 }
 
-function confirmBox(drive, actions, running = false) {
+// `sentence`: what the learner confirms; the lesson blocks' default is about the placement line.
+function confirmBox(drive, actions, running = false, sentence = driveCopy.confirm) {
   return html`<label class="drive-confirm">
     <input
       type="checkbox"
@@ -70,7 +71,7 @@ function confirmBox(drive, actions, running = false) {
       ?disabled=${running}
       @change=${(event) => actions.confirmDrive(event.target.checked)}
     />
-    ${driveCopy.confirm}
+    ${sentence}
   </label>`;
 }
 
@@ -149,8 +150,8 @@ function notAllowedLine(drive) {
 
 /**
  * `model` is the session model (`recording`, `running`, `tail`, `elapsed`, `total`, `driveNote`),
- * `drive` the lesson's drive part: driveModel() plus `program`, `placement`, `startLabel` and
- * `report`. `actions` needs `startDriveCapture`, `stopCapture` and `confirmDrive`.
+ * `drive` the lesson's drive part: driveModel() plus `program`, `placement`, `startLabel`,
+ * `report` and `metrics` (the numbers of the report, null for all). `actions` needs `startDriveCapture`, `stopCapture` and `confirmDrive`.
  */
 function driveControls(model, drive, actions) {
   if (!drive.allowed && !model.running) return notAllowedLine(drive);
@@ -168,7 +169,7 @@ function driveControls(model, drive, actions) {
     ${limitsNote(drive)}
     ${
       drive.report && !model.running && !model.tail
-        ? driveReportView(drive.report, { compact: true })
+        ? driveReportView(drive.report, { compact: true, metrics: drive.metrics })
         : nothing
     }
   </div>`;

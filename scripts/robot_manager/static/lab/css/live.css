@@ -533,3 +533,39 @@ body.driving dialog[open] {
   margin: 8px 0;
   font-weight: 600;
 }
+
+/* Offline: opening a recording stays outside the folded block (js/live/live-view.js). */
+.live-offline-block {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+}
+.live-offline-block > .live-offline {
+  margin: 0;
+}
+.live-offline-open {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+/* 班の名前: a short line of its own above the save buttons. */
+.live-capture-group {
+  display: grid;
+  gap: 4px;
+  flex-basis: 100%;
+  font-size: 13px;
+  font-weight: 600;
+}
+.live-capture-group input {
+  width: min(100%, 240px);
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+  font-weight: 400;
+}
+.live-capture-group small {
+  font-weight: 400;
+  color: var(--muted);
+}

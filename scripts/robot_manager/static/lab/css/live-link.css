@@ -92,6 +92,18 @@
 .robot-help-teacher strong {
   margin-right: 8px;
 }
+/* The wheel chart's caption (live-ui.js wheelCaption): HTML so it keeps its size on a phone. */
+.robot-wheels .robot-wheels-note {
+  margin: 0;
+  padding: 6px 12px 10px;
+  font-size: 13px;
+  color: var(--muted);
+}
+/* The E-stop is pressed: the header says so in words next to the dot. */
+.robot-link[data-estop='true'] #robotLinkState {
+  color: #c62828;
+  font-weight: 700;
+}
 
 @media (max-width: 700px) {
   .robot-link-name {

@@ -6,6 +6,17 @@
     "failed": "接続できません",
     "reconnecting": "つながり直しています…"
   },
+  "stageShort": {
+    "idle": "未接続",
+    "connecting": "探し中",
+    "open": "接続中",
+    "failed": "失敗",
+    "reconnecting": "再接続中"
+  },
+  "estop": {
+    "long": "・非常停止中",
+    "short": "非常停止"
+  },
   "status": {
     "idle": "ロボットと同じWi-Fiにつなぎ、アドレスを確かめて「接続する」を押してください。",
     "connecting": "{host} のロボットを探しています…",
@@ -53,11 +64,13 @@
     "scanNone": "LiDARの値はまだ届いていません",
     "cameraNone": "カメラの画像はまだ届いていません",
     "cameraLive": "ロボットのカメラの、いまの画像です",
-    "wheels": "直近{seconds}秒 · 車輪の回転数 [rpm]（前進が正）· 実線＝実測　破線＝指令",
+    "wheels": "直近{seconds}秒 · 車輪の回転数（rpm、前進が正）· 実線＝実測　破線＝指令 · 線の右端の「左」「右」がどちらの車輪か",
     "estopPressed": "押されています（走りません）",
     "estopReleased": "解除されています",
     "streamUnused": "使いません",
     "streamMissing": "届いていません",
-    "streamRate": "{hz} 回/秒"
+    "streamRate": "{hz} 回/秒",
+    "wheelLeft": "左",
+    "wheelRight": "右"
   }
 }

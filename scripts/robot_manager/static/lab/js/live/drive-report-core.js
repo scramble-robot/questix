@@ -2,11 +2,12 @@
 // plus the small wording helpers of the report. No DOM: test/drive-report-core.test.mjs checks it
 // with made-up recordings.
 //
-// Time is counted from the first command the run sent (the moment the page took over), in the
+// Time is counted from the first moving command of the run (the moment the page took over), in the
 // robot's own clock (message stamps), so a reopened file gives the same report. The path is turned
 // so the robot starts at the origin facing up the page: x forward, y left at the start (REP-103).
 
-import { frontDistance } from './capture-core.js';
+import { frontDistance, wheelRpm } from './capture-core.js';
+import { commandZero } from './recording-core.js';
 import { fillSentence as fill } from '../core/content.js';
 
 const STILL_LINEAR = 0.02; // m/s: slower than this counts as standing
@@ -21,15 +22,9 @@ const MOVED_TURN = (2 * Math.PI) / 180; // rad of heading change
 const wrapAngle = (angle) => Math.atan2(Math.sin(angle), Math.cos(angle));
 const finite = (...values) => values.every(Number.isFinite);
 
-function startTime(recording) {
-  const twist = recording.streams.twist ?? [];
-  const firstCommand = twist.find((message) => finite(message.linear, message.angular));
-  if (firstCommand) return firstCommand.stamp;
-  const stamps = Object.values(recording.streams).flatMap((list) =>
-    list.length ? [list[0].stamp] : [],
-  );
-  return stamps.length ? Math.min(...stamps) : 0;
-}
+// The first moving command (recording-core commandZero): the same zero as the lesson charts and
+// the saved table.
+const startTime = commandZero;
 
 const commandSeries = (recording, t0) =>
   (recording.streams.twist ?? [])
@@ -220,8 +215,62 @@ const RUN_STATUS = {
   invalid: 'problem',
   failed: 'problem',
   no_answer: 'problem',
+  // A hand on the controller's stick took the robot over: meant to happen, not a fault.
+  controller: 'stopped',
 };
 const runStatusKind = (reason) => RUN_STATUS[reason] ?? 'stopped';
+
+/**
+ * The key of the words for how a run ended (drive-report.json `status`): the kind of
+ * runStatusKind, except that a controller takeover has words of its own.
+ */
+const runStatusKey = (reason) => (reason === 'controller' ? 'controller' : runStatusKind(reason));
+
+// --- the bench test: which way did the wheels turn? ---------------------------------------------
+
+const BENCH_SETTLE = 0.3; // s after the first command before the wheels count as up to speed
+const BENCH_TURNING = 2; // rpm: a wheel slower than this counts as standing
+const BENCH_EVEN = 0.25; // wheels within this share of each other count as equally fast
+
+/**
+ * What the wheels did during a bench press, from its recording: the mean measured rpm of each
+ * wheel (forward positive) while the press lasted, and the movement that follows from them —
+ * 'forward', 'backward', 'left', 'right' (on the spot), 'forwardLeft', 'forwardRight',
+ * 'backwardLeft', 'backwardRight' (driving while turning), or 'still'. Null when the recording has no wheel measurement then.
+ */
+function benchCheck(recording) {
+  const zero = commandZero(recording);
+  const commands = (recording.streams.twist ?? []).filter((message) =>
+    finite(message.linear, message.angular),
+  );
+  const moving = commands.filter(
+    (message) => Math.abs(message.linear) > COMMANDED || Math.abs(message.angular) > COMMANDED,
+  );
+  const end = moving.length ? moving[moving.length - 1].stamp : Infinity;
+  const held = (recording.streams.drive ?? []).filter(
+    (message) =>
+      finite(message.v, message.w) && message.stamp >= zero + BENCH_SETTLE && message.stamp <= end,
+  );
+  if (!held.length) return null;
+  const wheels = held.map((message) => wheelRpm(message, recording.config));
+  const mean = (side) => wheels.reduce((sum, rpm) => sum + rpm[side], 0) / wheels.length;
+  const left = mean('left');
+  const right = mean('right');
+  return { left, right, move: benchMove(left, right) };
+}
+
+function benchMove(left, right) {
+  const turningLeft = Math.abs(left) >= BENCH_TURNING;
+  const turningRight = Math.abs(right) >= BENCH_TURNING;
+  if (!turningLeft && !turningRight) return 'still';
+  const turn = right - left; // + = the robot turns left (REP-103)
+  if (turningLeft && turningRight && Math.sign(left) !== Math.sign(right))
+    return turn > 0 ? 'left' : 'right';
+  const direction = left + right > 0 ? 'forward' : 'backward';
+  const even = Math.abs(turn) <= BENCH_EVEN * Math.max(Math.abs(left), Math.abs(right));
+  if (even) return direction;
+  return direction + (turn > 0 ? 'Left' : 'Right');
+}
 
 const degreesOf = (radians) => (radians * 180) / Math.PI;
 
@@ -262,6 +311,8 @@ export {
   driveReport,
   isEmptyRun,
   runStatusKind,
+  runStatusKey,
+  benchCheck,
   describeTurn,
   describeOffset,
   describeTurnRate,

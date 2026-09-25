@@ -29,17 +29,27 @@
   "file": {
     "open": "記録ファイル・rosbagを開く",
     "saveJson": "記録を保存する（JSON）",
-    "saveCsv": "表計算用に保存する（CSV）",
-    "note": "JSONはこの教材でもう一度開けます。CSVは表計算ソフトやグラフ作成ツールで開けます（1行が1つのメッセージ、stream列で種類を選べます）。ロボットの管理画面（Robot Manager）の録画で記録したrosbag（.mcap）も開けます。",
-    "opened": "ファイル「{name}」を開きました（{seconds}秒ぶん）。",
+    "saveCsv": "表計算用に保存する（CSV・1行が1時刻）",
+    "note": "JSONはこの教材でもう一度開けます。表計算用のCSVは、1行目から走らせた条件が入り、その下に「指令からの時間」ごとの指令・実測・走った距離が並びます。ロボットの管理画面（Robot Manager）の録画で記録したrosbag（.mcap）も開けます。",
+    "opened": "ファイル「{name}」を開きました（{facts}、{seconds}秒ぶん）。",
     "openedBag": "rosbag「{name}」を開きました（{seconds}秒ぶん、{topics}）。",
     "assumedConfig": "rosbagには車輪の寸法が入っていないため、ロボットの標準値（半径{radius} m・間隔{separation} m）で計算しました。実機とつないでから開くと、その実機の値を使います。",
     "restored": "前回の記録（{time}）を表示しています。",
     "notKept": "記録が大きいため、ページを再読み込みすると消えます。残すときはファイルに保存してください。",
     "missing": "このファイルには、この実験に必要な{streams}がありません。",
-    "failed": "ファイルを開けませんでした：{reason}"
+    "failed": "ファイルを開けませんでした：{reason}",
+    "saveRawCsv": "すべてのメッセージをCSVで保存する",
+    "share": "先生やほかの班に渡すときは、JSONファイルを共有フォルダやClassroomなどに置きます。受け取った人は「記録ファイル・rosbagを開く」で開けます。",
+    "robot": "ロボット {robot}",
+    "conditions": "条件 {conditions}",
+    "conditionsUnknown": "設定：不明"
   },
   "recordOther": "記録だけする（{seconds}秒・ほかの端末の走行など）",
   "recordOtherNote": "「記録だけする」はロボットを動かさず、値を受け取るだけです。ほかの端末の実験で走っている様子を記録するときに使います。",
-  "offline": "実機があるときは（いまは未接続・記録ファイルもここから開けます）"
+  "offline": "実機につなぐ・記録を保存する（いまは未接続）",
+  "group": {
+    "label": "班の名前（なくても使えます）",
+    "placeholder": "例：3班",
+    "note": "記録とファイル名に入り、ほかの班と比べるときの目印になります。この端末に覚えておきます。"
+  }
 }

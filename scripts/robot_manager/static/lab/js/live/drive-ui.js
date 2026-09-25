@@ -9,7 +9,9 @@ import {
   confirmBox,
   driveEndedText,
 } from './drive-view.js';
-import { recordRobot, liveLink } from './capture.js';
+import { recordRobot, liveLink, openRecordingFile, groupName } from './capture.js';
+import { withRunInfo } from './recording-core.js';
+import { benchCheck } from './drive-report-core.js';
 import { runModeBadgeHtml } from '../shell/run-mode.js';
 import {
   addDriveRun,
@@ -25,6 +27,7 @@ import {
   driveHistoryList,
   reportCopy,
   compareLimit,
+  runStatusText,
 } from './drive-report-view.js';
 
 // The pieces of the driving experiments that belong to no lesson:
@@ -53,6 +56,7 @@ const bench = { ...BENCH_DEFAULTS, held: null, abort: null, note: '' };
 let selectedRun = null; // id of the run whose report the dialog shows; null = the newest
 let newestRun = null; // id of the newest run seen, so a new run (from any block) is shown at once
 let comparedRuns = []; // ids ticked to be drawn over the shown report (at most compareLimit)
+let historyNote = ''; // what happened to the last file opened into the history
 
 // --- stop bar --------------------------------------------------------------------------------
 
@@ -101,22 +105,53 @@ async function hold(move) {
   if (result.started)
     await new Promise((resolve) => setTimeout(resolve, BENCH_TAIL_SECONDS * 1000));
   finish.abort();
-  const recording = await recorded;
-  if (!result.started || recording instanceof Error || result.elapsed < BENCH_MIN_PRESS) return;
-  if (isEmptyRun(recording)) return;
+  const raw = await recorded;
+  if (!result.started || raw instanceof Error || result.elapsed < BENCH_MIN_PRESS) return;
+  if (isEmptyRun(raw)) return;
+  // Letting go of the button is how a bench move is meant to end.
+  const reason = result.reason === 'stopped' ? 'done' : result.reason;
+  const conditions = move.linear
+    ? { linear: bench.linear, label: `${bench.linear.toFixed(2)} m/s` }
+    : { angular: bench.angular, label: `${bench.angular.toFixed(2)} rad/s` };
+  const recording = withRunInfo(raw, {
+    lesson: 'bench',
+    conditions,
+    robot: liveLink().robot,
+    group: groupName(),
+    outcome: { reason, label: runStatusText(reason) },
+  });
+  bench.note = [bench.note, benchResult(recording, move)].filter(Boolean).join(' ');
+  update();
   addDriveRun({
     slot: 'bench',
     lesson: fill(driveCopy.lessons.bench, { move: driveCopy.bench[move.id] }),
-    conditions: move.linear
-      ? `${bench.linear.toFixed(2)} m/s`
-      : `${bench.angular.toFixed(2)} rad/s`,
+    conditions: conditions.label,
     ended: bench.note,
-    // Letting go of the button is how a bench move is meant to end.
-    reason: result.reason === 'stopped' ? 'done' : result.reason,
-    robot: liveLink().robot?.name ?? '',
+    reason,
+    robot: recording.robot?.name ?? '',
+    group: recording.group ?? '',
     cut: Boolean(recording.cut),
     recording,
   });
+}
+
+const signedRpm = (rpm) => `${rpm >= 0 ? '+' : '−'}${Math.abs(rpm).toFixed(0)}`;
+
+// After release, one line on which way the wheels turned: 「左 +10 rpm・右 +10 rpm：まっすぐ前進」,
+// and whether that is what the pressed button asked for.
+function benchResult(recording, move) {
+  const copy = driveCopy.bench;
+  const check = benchCheck(recording);
+  if (!check) return copy.noCheck;
+  const line = fill(copy.result, {
+    left: signedRpm(check.left),
+    right: signedRpm(check.right),
+    move: copy.moves[check.move],
+  });
+  if (check.move === 'still') return line;
+  const verdict =
+    check.move === move.id ? copy.expected : fill(copy.unexpected, { pressed: copy[move.id] });
+  return `${line} ${verdict}`;
 }
 
 // Releasing the button is the normal end of a bench move; anything else is worth a sentence.
@@ -190,7 +225,12 @@ function benchPanel(model) {
   return html`${heading}
     <p>${fill(driveCopy.bench.lead, { seconds: BENCH_MAX_SECONDS })}</p>
     ${driveChecklist(model)} ${driveTeacherDetails(model)}
-    ${confirmBox(model, { confirmDrive: confirmDriveSafety }, bench.held !== null)}
+    ${confirmBox(
+      model,
+      { confirmDrive: confirmDriveSafety },
+      bench.held !== null,
+      driveCopy.confirmBench,
+    )}
     <div class="drive-bench-speeds">
       ${speedSlider(model, 'linear', driveCopy.bench.speed)}
       ${speedSlider(model, 'angular', driveCopy.bench.turnSpeed)}
@@ -211,10 +251,67 @@ function placeStopBar() {
 
 // --- history -----------------------------------------------------------------------------------
 
+// Ticking 比べる draws the run over the shown report: its charts come first and are scrolled to.
 function toggleCompare(id) {
-  if (comparedRuns.includes(id)) comparedRuns = comparedRuns.filter((other) => other !== id);
+  const adding = !comparedRuns.includes(id);
+  if (!adding) comparedRuns = comparedRuns.filter((other) => other !== id);
   else if (comparedRuns.length < compareLimit) comparedRuns = [...comparedRuns, id];
   update();
+  if (!adding) return;
+  const charts = document.querySelector('#robotDriveLog [data-drive-report-charts]');
+  const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // The dialog scrolls on its own, so window-based revealElement would not move it.
+  charts?.scrollIntoView({ block: 'start', behavior: smooth ? 'smooth' : 'auto' });
+}
+
+// A recording saved here or by another group, added to the history so it can be compared.
+async function openIntoHistory(file) {
+  if (!file) return;
+  const copy = reportCopy;
+  try {
+    const { recording } = await openRecordingFile(file);
+    if (isEmptyRun(recording)) {
+      historyNote = fill(copy.openedEmpty, { name: file.name });
+    } else {
+      // Files saved before recordings named their lesson still carry it in the file name.
+      const named = Object.keys(driveCopy.lessons).find((key) => file.name.includes(key));
+      const slot = recording.lesson || named || 'file';
+      selectedRun = addDriveRun({
+        slot,
+        lesson: driveCopy.lessons[slot] ?? copy.fileLesson,
+        conditions: recording.conditions?.label ?? '',
+        ended: recording.outcome?.label ?? '',
+        reason: recording.outcome?.reason ?? '',
+        robot: recording.robot?.name ?? '',
+        group: recording.group ?? '',
+        source: 'file',
+        recording,
+      }).id;
+      newestRun = selectedRun;
+      historyNote = fill(copy.opened, { name: file.name });
+    }
+  } catch (error) {
+    historyNote = fill(copy.openFailed, { name: file.name, reason: error.message });
+  }
+  update();
+}
+
+function historyOpen() {
+  const copy = reportCopy;
+  return html`<div class="drive-history-open">
+    <label class="live-capture-open"
+      >${copy.openFile}
+      <input
+        data-drive-history-open
+        type="file"
+        accept=".json,.mcap,application/json"
+        @change=${(event) => {
+          openIntoHistory(event.target.files[0]);
+          event.target.value = '';
+        }}
+    /></label>
+    <p class="drive-note" role="status">${historyNote || copy.openNote}</p>
+  </div>`;
 }
 
 function historyPanel() {
@@ -222,7 +319,8 @@ function historyPanel() {
   const runs = driveRuns();
   if (!runs.length)
     return html`<h3>${copy.historyTitle}</h3>
-      <p>${copy.historyEmpty}</p>`;
+      <p>${copy.historyEmpty}</p>
+      ${historyOpen()}`;
   const shown = (selectedRun !== null && driveRun(selectedRun)) || runs[0];
   return html`<h3>${copy.historyTitle}</h3>
     <p>${copy.historyLead}</p>
@@ -236,6 +334,7 @@ function historyPanel() {
       },
       toggleCompare,
     })}
+    ${historyOpen()}
     ${driveReportView(shown, {
       saveRun: saveDriveRun,
       compare: comparedRuns.map(driveRun).filter(Boolean),

@@ -5,7 +5,7 @@ import {
   makeRecording,
   parseRecording,
   serializeRecording,
-  recordingCSV,
+  recordingFile,
 } from './recording-core.js';
 import { BAG_DEFAULT_CONFIG, readRosbag } from './rosbag-core.js';
 
@@ -204,24 +204,6 @@ async function openRecordingFile(file) {
   return { recording, assumedConfig: !hello };
 }
 
-const pad = (number) => String(number).padStart(2, '0');
-function fileStamp(iso) {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return 'recording';
-  return (
-    `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-` +
-    `${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
-  );
-}
-
-/** File name and contents for saving `recording` as JSON (`kind: 'json'`) or CSV. */
-function recordingFile(recording, lesson, kind) {
-  const base = `QUESTiX-LAB-${lesson}-${fileStamp(recording.recordedAt)}`;
-  if (kind === 'csv')
-    return { name: `${base}.csv`, text: recordingCSV(recording), type: 'text/csv;charset=utf-8' };
-  return { name: `${base}.json`, text: serializeRecording(recording), type: 'application/json' };
-}
-
 // --- keeping the last recording across a reload ----------------------------------------------
 
 // Per-browser convenience only: storage can be blocked, full or cleared, so a lesson must work
@@ -254,6 +236,34 @@ function keptRecording(slot) {
     return text ? parseRecording(text) : null;
   } catch {
     return null;
+  }
+}
+
+// --- 班の名前: which group made a recording ----------------------------------------------------
+
+// Typed once per browser (a class shares robots, not devices) and written into every recording
+// made here, so a file handed to the teacher or to another group says whose run it was.
+const GROUP_KEY = 'questix-lab-group';
+const MAX_GROUP_CHARS = 30;
+let group = readGroup();
+
+function readGroup() {
+  try {
+    return (localStorage.getItem(GROUP_KEY) ?? '').slice(0, MAX_GROUP_CHARS);
+  } catch {
+    return '';
+  }
+}
+
+const groupName = () => group.trim();
+
+function setGroupName(text) {
+  group = String(text ?? '').slice(0, MAX_GROUP_CHARS);
+  try {
+    if (group.trim()) localStorage.setItem(GROUP_KEY, group);
+    else localStorage.removeItem(GROUP_KEY);
+  } catch {
+    /* storage blocked: the name lasts until the page closes */
   }
 }
 
@@ -310,6 +320,9 @@ export {
   recordingFile,
   keepRecording,
   keptRecording,
+  groupName,
+  setGroupName,
+  MAX_GROUP_CHARS,
   liveLink,
   missingStreams,
   onLiveLink,

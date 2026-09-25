@@ -8,6 +8,8 @@ import {
   driveReport,
   isEmptyRun,
   runStatusKind,
+  runStatusKey,
+  benchCheck,
   describeTurn,
   describeOffset,
   describeTurnRate,
@@ -41,9 +43,14 @@ function straightRun({ x0 = 5, y0 = -2, theta0 = Math.PI / 2, t0 = 100 } = {}) {
   return { config: { wheel_radius: 0.1, wheel_separation: 0.5 }, streams: { twist, drive, odom } };
 }
 
-test('time starts at the first command and the path starts at the origin facing forward', () => {
+test('time starts at the first moving command and the path starts at the origin facing forward', () => {
   const report = driveReport(straightRun());
-  assert.equal(report.series.command[0].t, 0);
+  // Zero commands came from t = 0 s, the first 0.2 m/s at 1 s: that is the report's zero (the same
+  // as the lesson charts and the saved table), so the waiting before it has negative times.
+  assert.ok(Math.abs(report.series.command[0].t + 1) < 1e-9);
+  // (the series is thinned to one command per 0.05 s)
+  const firstMoving = report.series.command.find((sample) => sample.v > 0).t;
+  assert.ok(firstMoving >= 0 && firstMoving < 0.05, `first moving command at ${firstMoving}`);
   const { path } = report.series;
   assert.deepEqual([path[0].x, path[0].y], [0, 0]);
   // The robot faced +y in the odom frame; in the report it drives straight ahead (+x).
@@ -60,8 +67,9 @@ test('the summary gives distance, peak speed and how the robot stopped', () => {
   assert.ok(Math.abs(summary.turn) < 1e-9);
   assert.equal(summary.emergencyStop, false);
   assert.equal(summary.closest, null);
-  // The stop command came at t = 4 s; a 0.15 s lag needs about 0.35 s to fall below 0.02 m/s.
-  assert.ok(Math.abs(summary.stop.at - 4) < 0.05, `stop at ${summary.stop.at}`);
+  // The stop command came 3 s after the first moving one; a 0.15 s lag needs about 0.35 s to fall
+  // below 0.02 m/s.
+  assert.ok(Math.abs(summary.stop.at - 3) < 0.05, `stop at ${summary.stop.at}`);
   assert.ok(summary.stop.delay > 0.2 && summary.stop.delay < 0.5, `delay ${summary.stop.delay}`);
   assert.ok(summary.stop.distance > 0.01 && summary.stop.distance < 0.05);
 });
@@ -124,9 +132,10 @@ test('the kept series are thinned for storage', () => {
 
 test('the drive time runs from the first moving command to the zero command after the last', () => {
   const { summary } = driveReport(straightRun());
-  // Commands 0.2 m/s from 1 s to 4 s, sent every 0.04 s; the recording goes on until 6 s.
+  // Commands 0.2 m/s from 1 s to 4 s, sent every 0.04 s; the recording goes on until 6 s, which is
+  // 5 s after the first moving command.
   assert.ok(Math.abs(summary.driveSeconds - 3) < 0.05, `drive ${summary.driveSeconds}`);
-  assert.ok(Math.abs(summary.seconds - 6) < 1e-9, `recording ${summary.seconds}`);
+  assert.ok(Math.abs(summary.seconds - 5) < 1e-9, `recording ${summary.seconds}`);
 });
 
 test('a run that never moved is empty; a pure turn on the spot is not', () => {
@@ -171,4 +180,40 @@ test('run endings sort into ok, stopped and problem', () => {
   for (const reason of ['timeout', 'lost', 'emergency_stop', 'other_publisher', 'failed'])
     assert.equal(runStatusKind(reason), 'problem', reason);
   assert.equal(runStatusKind(''), 'stopped');
+  // A hand on the controller is a stop, not a problem, and has words of its own.
+  assert.equal(runStatusKind('controller'), 'stopped');
+  assert.equal(runStatusKey('controller'), 'controller');
+  assert.equal(runStatusKey('lost'), 'problem');
+  for (const key of ['ok', 'stopped', 'controller', 'problem']) assert.ok(copy.status[key], key);
+});
+
+// A bench press: the command for `seconds` from t = 1 s, the wheels following at once.
+function benchRun(
+  linear,
+  angular,
+  { seconds = 2, config = { wheel_radius: 0.05, wheel_separation: 0.3 } } = {},
+) {
+  const twist = [];
+  const drive = [];
+  for (let step = 0; step <= 200; step++) {
+    const t = step * 0.02;
+    const on = t >= 1 && t < 1 + seconds;
+    twist.push({ stamp: t, linear: on ? linear : 0, angular: on ? angular : 0 });
+    drive.push({ stamp: t, v: on ? linear : 0, w: on ? angular : 0, emergency_stop: false });
+  }
+  return { config, streams: { twist, drive } };
+}
+
+test('the bench check says which way the wheels turned while the button was held', () => {
+  const forward = benchCheck(benchRun(0.1, 0));
+  assert.equal(forward.move, 'forward');
+  // 0.1 m/s on a 0.05 m wheel is about 19 rpm on both sides.
+  assert.ok(Math.abs(forward.left - 19.1) < 0.2 && Math.abs(forward.right - 19.1) < 0.2);
+  assert.equal(benchCheck(benchRun(-0.1, 0)).move, 'backward');
+  assert.equal(benchCheck(benchRun(0, 0.5)).move, 'left');
+  assert.equal(benchCheck(benchRun(0, -0.5)).move, 'right');
+  assert.equal(benchCheck(benchRun(0.1, 0.5)).move, 'forwardLeft');
+  assert.equal(benchCheck(benchRun(-0.1, 0.5)).move, 'backwardLeft');
+  assert.equal(benchCheck(benchRun(0.001, 0)).move, 'still');
+  assert.equal(benchCheck({ config: {}, streams: { twist: [], drive: [] } }), null);
 });
