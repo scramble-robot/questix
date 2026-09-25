@@ -317,7 +317,8 @@ def test_lab_launcher_input_only_in_practice_launches():
                     'lab_max_speed': 0.8, 'lab_joy_quiet_sec': 1.0}
     shot_defaults = {'accept_lab_input': False, 'lab_joy_quiet_sec': 1.0,
                      'lab_min_fire_interval_sec': 2.0}
-    for variant in ('', '.dualshock', '.uart'):
+    # One hardware YAML per node; operator mappings live in questix_control_config.
+    for variant in ('',):
         esc_yaml = load_yaml(f'esc_motor_control_cpp/config/esc_motor_control_cpp{variant}.yaml')
         esc_parameters = esc_yaml['esc_motor_control']['ros__parameters']
         for name, value in esc_defaults.items():

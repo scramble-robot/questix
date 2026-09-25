@@ -1,3 +1,4 @@
+# Operator mappings/tuning moved to questix_control_config/config/controls.*.yaml.
 esc_motor_control:
   ros__parameters:
     # Use simulation time
@@ -19,10 +20,6 @@ esc_motor_control:
     max_speed: 1.0 # Maximum forward speed (maps to max_pulse_width)
     min_speed: -1.0 # Maximum reverse speed (maps to min_pulse_width)
 
-    # Roller spin button / ローラー回転ボタン
-    # Switch2 native index: ZR button = 7
-    full_speed_button: 7
-    full_speed_value: 1.0 # Speed value when full speed button is pressed
     # ローラモータのコマンド状態出力先
     # ここには実測回転数ではなく、ESCへ送っている現在の指令値が出ます。
     status_topic: "/roller_motor_status"

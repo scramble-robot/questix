@@ -11,6 +11,7 @@ from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
+from questix_control_config import control_actions
 
 
 def generate_launch_description():
@@ -50,6 +51,7 @@ def generate_launch_description():
         name='shot_component',
         parameters=[
             LaunchConfiguration('config_file'),
+            LaunchConfiguration('control_config_file'),
             {
                 'joy_topic': LaunchConfiguration('joy_topic'),
                 'accept_lab_input': ParameterValue(
@@ -60,6 +62,7 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        *control_actions(),
         config_file_arg,
         joy_topic_arg,
         accept_lab_input_arg,

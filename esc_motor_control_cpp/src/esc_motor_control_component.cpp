@@ -233,7 +233,7 @@ void EscMotorControlComponent::set_motor_speed(double speed) {
 // Joy callback
 // --------------------------------------------------------------------------
 void EscMotorControlComponent::joy_callback(const sensor_msgs::msg::Joy::SharedPtr msg) {
-  if (static_cast<int>(msg->buttons.size()) <= full_speed_button_) {
+  if (full_speed_button_ < 0 || static_cast<size_t>(full_speed_button_) >= msg->buttons.size()) {
     return;
   }
 

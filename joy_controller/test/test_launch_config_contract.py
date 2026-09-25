@@ -36,7 +36,8 @@ class LaunchConfigContract(unittest.TestCase):
                     self.assertIsNotNone(node)
                     self.assertEqual(node.attrib[condition], '$(var dual_stick)')
                     self.assertEqual([p.attrib['from'] for p in node.findall('param')
-                                      if 'from' in p.attrib], ['$(var ' + argument + ')'])
+                                      if 'from' in p.attrib],
+                                     ['$(var ' + argument + ')', '$(var control_config_file)'])
                     self.assertEqual(node.findall('param')[-1].attrib,
                                      {'name': 'joy_topic', 'value': '$(var joy_topic)'})
 

@@ -25,7 +25,10 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
       tilt_servo_id_(1),
       trigger_servo_id_(3),
       fire_button_(5),
-      tilt_axis_(-1),
+      tilt_up_axis_(-2),
+      tilt_down_axis_(-2),
+      tilt_up_axis_sign_(1),
+      tilt_down_axis_sign_(-1),
       tilt_up_button_index_(4),
       tilt_down_button_index_(6),
       tilt_step_angle_(5.0),
@@ -48,9 +51,6 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
       teardown_pending_(false),
       is_shooting_(false),
       last_button_state_(false),
-      last_tilt_value_(0.0F),
-      last_tilt_up_state_(false),
-      last_tilt_down_state_(false),
       current_tilt_position_(2048),
       current_tilt_angle_(0.0),
       last_command_time_(0, 0, RCL_ROS_TIME),
@@ -68,11 +68,12 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
   this->declare_parameter("tilt_servo_id", 1);
   this->declare_parameter("trigger_servo_id", 3);
   this->declare_parameter("fire_button", 5);  // R button (Switch2 native index)
-  // Tilt input mode / チルト入力モード
-  // - If tilt_axis >= 0: use the analog axis (D-pad / stick).
-  // - Otherwise: use tilt_up_button_index / tilt_down_button_index (button edge).
-  // tilt_axis が 0 以上なら軸モード、それ以外はボタンモードで動いて上下します。
-  this->declare_parameter("tilt_axis", -1);              // -1 = disabled (button mode)
+  // Legacy profiles still work. Explicit per-direction axes override tilt_axis.
+  this->declare_parameter("tilt_axis", -1);
+  this->declare_parameter("tilt_up_axis", -2);
+  this->declare_parameter("tilt_down_axis", -2);
+  this->declare_parameter("tilt_up_axis_sign", 1);
+  this->declare_parameter("tilt_down_axis_sign", -1);
   this->declare_parameter("tilt_up_button_index", 4);    // L button (Switch2 native index)
   this->declare_parameter("tilt_down_button_index", 6);  // ZL button (Switch2 native index)
   this->declare_parameter("tilt_step_angle", 5.0);       // チルトステップサイズ（度）
@@ -463,9 +464,30 @@ ShotComponent::CallbackReturn ShotComponent::on_configure(const rclcpp_lifecycle
   tilt_servo_id_ = this->get_parameter("tilt_servo_id").as_int();
   trigger_servo_id_ = this->get_parameter("trigger_servo_id").as_int();
   fire_button_ = this->get_parameter("fire_button").as_int();
-  tilt_axis_ = this->get_parameter("tilt_axis").as_int();
+  const int legacy_tilt_axis = this->get_parameter("tilt_axis").as_int();
+  tilt_up_axis_ = this->get_parameter("tilt_up_axis").as_int();
+  tilt_down_axis_ = this->get_parameter("tilt_down_axis").as_int();
+  if (tilt_up_axis_ == -2) tilt_up_axis_ = legacy_tilt_axis;
+  if (tilt_down_axis_ == -2) tilt_down_axis_ = legacy_tilt_axis;
+  tilt_up_axis_sign_ = this->get_parameter("tilt_up_axis_sign").as_int();
+  tilt_down_axis_sign_ = this->get_parameter("tilt_down_axis_sign").as_int();
   tilt_up_button_index_ = this->get_parameter("tilt_up_button_index").as_int();
   tilt_down_button_index_ = this->get_parameter("tilt_down_button_index").as_int();
+  if (tilt_up_axis_ < -1 || tilt_down_axis_ < -1 ||
+      (tilt_up_axis_sign_ != 1 && tilt_up_axis_sign_ != -1) ||
+      (tilt_down_axis_sign_ != 1 && tilt_down_axis_sign_ != -1) || tilt_up_button_index_ < 0 ||
+      tilt_down_button_index_ < 0 ||
+      (tilt_up_axis_ == tilt_down_axis_ &&
+       (tilt_up_axis_ == -1 ? tilt_up_button_index_ == tilt_down_button_index_
+                            : tilt_up_axis_sign_ == tilt_down_axis_sign_))) {
+    RCLCPP_ERROR(this->get_logger(), "Invalid or duplicate tilt direction inputs");
+    return CallbackReturn::FAILURE;
+  }
+  for (const auto& direction : {std::string("up"), std::string("down")}) {
+    const int axis = direction == "up" ? tilt_up_axis_ : tilt_down_axis_;
+    RCLCPP_INFO(this->get_logger(), "Tilt %s: %s ignored in %s mode", direction.c_str(),
+                axis == -1 ? "axis_sign" : "button_index", axis == -1 ? "button" : "axis");
+  }
   tilt_step_angle_ = this->get_parameter("tilt_step_angle").as_double();
   tilt_min_angle_ = this->get_parameter("tilt_min_angle").as_double();
   tilt_max_angle_ = this->get_parameter("tilt_max_angle").as_double();
@@ -528,20 +550,14 @@ ShotComponent::CallbackReturn ShotComponent::on_activate(const rclcpp_lifecycle:
   }
   is_shooting_ = false;
   last_button_state_ = false;
-  last_tilt_value_ = 0.0F;
-  last_tilt_up_state_ = false;
-  last_tilt_down_state_ = false;
+  tilt_edges_.reset();
   last_command_time_ = this->now();
 
   RCLCPP_INFO(this->get_logger(), "Shot component activated");
-  if (tilt_axis_ >= 0) {
-    RCLCPP_INFO(this->get_logger(), "Fire button: %d, Tilt mode: axis=%d, Tilt step: %.1f degrees",
-                fire_button_, tilt_axis_, tilt_step_angle_);
-  } else {
-    RCLCPP_INFO(this->get_logger(),
-                "Fire button: %d, Tilt mode: buttons up=%d down=%d, Tilt step: %.1f degrees",
-                fire_button_, tilt_up_button_index_, tilt_down_button_index_, tilt_step_angle_);
-  }
+  RCLCPP_INFO(this->get_logger(),
+              "Tilt up: axis=%d sign=%d button=%d; down: axis=%d sign=%d button=%d", tilt_up_axis_,
+              tilt_up_axis_sign_, tilt_up_button_index_, tilt_down_axis_, tilt_down_axis_sign_,
+              tilt_down_button_index_);
   RCLCPP_INFO(this->get_logger(), "Tilt range: %.1f - %.1f degrees", tilt_min_angle_,
               tilt_max_angle_);
   RCLCPP_INFO(this->get_logger(),
@@ -555,6 +571,7 @@ ShotComponent::CallbackReturn ShotComponent::on_activate(const rclcpp_lifecycle:
 }
 
 ShotComponent::CallbackReturn ShotComponent::on_deactivate(const rclcpp_lifecycle::State&) {
+  tilt_edges_.reset();
   // 射撃シーケンス中なら止めて best-effort で home に戻す（タイマーを残さない）
   cancelShotSequence();
   // 手動 deactivate を含め、deactivate では自動再遷移を必ず止める。故障検出から
@@ -570,6 +587,7 @@ ShotComponent::CallbackReturn ShotComponent::on_deactivate(const rclcpp_lifecycl
 }
 
 ShotComponent::CallbackReturn ShotComponent::on_cleanup(const rclcpp_lifecycle::State&) {
+  tilt_edges_.reset();
   fire_timer_.reset();
   teardown_pending_ = false;
   joy_subscription_.reset();
@@ -579,6 +597,7 @@ ShotComponent::CallbackReturn ShotComponent::on_cleanup(const rclcpp_lifecycle::
 }
 
 ShotComponent::CallbackReturn ShotComponent::on_shutdown(const rclcpp_lifecycle::State&) {
+  tilt_edges_.reset();
   fire_timer_.reset();
   runtime_fault_ = false;
   teardown_pending_ = false;
@@ -593,6 +612,7 @@ ShotComponent::CallbackReturn ShotComponent::on_shutdown(const rclcpp_lifecycle:
 }
 
 ShotComponent::CallbackReturn ShotComponent::on_error(const rclcpp_lifecycle::State&) {
+  tilt_edges_.reset();
   // 遷移中に ERROR / 例外が発生したときの後始末。リソースを解放して unconfigured
   // に戻し、auto_start 有効時はタイマーを再開して自動復帰に委ねる。
   fire_timer_.reset();
@@ -662,42 +682,17 @@ void ShotComponent::joyCallback(const sensor_msgs::msg::Joy::SharedPtr msg) {
     last_button_state_ = current_button_state;
   }
 
-  // axesが存在するかチェック
-  if (msg->axes.empty()) {
-    return;
-  }
-
-  // Tilt input: axis mode if tilt_axis >= 0, otherwise button mode (L / ZL).
-  // tilt_axis が 0 以上なら軸モード、それ以外はボタンモード。
   const auto step_tilt = [this](double delta_deg, const char* direction) {
     moveTiltTo(current_tilt_angle_ + delta_deg, direction);
   };
 
-  if (tilt_axis_ >= 0 && tilt_axis_ < static_cast<int>(msg->axes.size())) {
-    // Axis mode: rising edge detection at ±0.5
-    const float current_tilt_value = msg->axes[tilt_axis_];
-    if (current_tilt_value > 0.5F && last_tilt_value_ <= 0.5F) {
-      step_tilt(tilt_step_angle_, "up");
-    } else if (current_tilt_value < -0.5F && last_tilt_value_ >= -0.5F) {
-      step_tilt(-tilt_step_angle_, "down");
-    }
-    last_tilt_value_ = current_tilt_value;
-  } else {
-    // Button mode: L = up, ZL = down (rising edge)
-    const auto button_pressed = [&msg](int index) {
-      return index >= 0 && static_cast<size_t>(index) < msg->buttons.size() &&
-             msg->buttons[static_cast<size_t>(index)] == 1;
-    };
-    const bool tilt_up_pressed = button_pressed(tilt_up_button_index_);
-    const bool tilt_down_pressed = button_pressed(tilt_down_button_index_);
-
-    if (tilt_up_pressed && !last_tilt_up_state_) {
-      step_tilt(tilt_step_angle_, "up");
-    } else if (tilt_down_pressed && !last_tilt_down_state_) {
-      step_tilt(-tilt_step_angle_, "down");
-    }
-    last_tilt_up_state_ = tilt_up_pressed;
-    last_tilt_down_state_ = tilt_down_pressed;
+  const bool up = tiltInputPressed(msg->axes, msg->buttons, tilt_up_axis_, tilt_up_axis_sign_,
+                                   tilt_up_button_index_);
+  const bool down = tiltInputPressed(msg->axes, msg->buttons, tilt_down_axis_, tilt_down_axis_sign_,
+                                     tilt_down_button_index_);
+  const int direction = tilt_edges_.update(up, down);
+  if (direction != 0) {
+    step_tilt(direction * tilt_step_angle_, direction > 0 ? "up" : "down");
   }
 }
 

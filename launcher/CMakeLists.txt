@@ -33,6 +33,9 @@ if(BUILD_TESTING)
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
 
+  ament_add_pytest_test(test_control_profiles test/test_control_profiles.py
+    ENV "QUESTIX_SOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/.."
+  )
   ament_add_pytest_test(test_gpio_safety_launch test/test_gpio_safety_launch.py
     ENV "QUESTIX_SOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/.."
   )

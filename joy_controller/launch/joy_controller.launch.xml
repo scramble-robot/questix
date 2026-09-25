@@ -25,11 +25,13 @@ YAML 読み込みより後に置くことで launcher からの指定が勝つ�
          description="Path to the web (smartphone/browser) joy driver configuration YAML" />
     <arg name="controller_type" default="uart" description="Controller type: dualshock, uart, or web" />
     <arg name="joy_topic" default="/joy" description="Joy input topic (override only)" />
+    <include file="$(find-pkg-share questix_control_config)/launch/control_profile.launch.py" />
 
     <!-- Joy node (from joy package) - DualShock mode (also the fallback for unknown types) -->
     <group unless="$(or $(equals '$(var controller_type)' 'uart') $(equals '$(var controller_type)' 'web'))">
         <node pkg="joy" exec="joy_node" name="joy_node" output="screen">
             <param from="$(var joy_node_config_file)" />
+            <param from="$(var control_config_file)" />
         </node>
     </group>
 
@@ -37,6 +39,7 @@ YAML 読み込みより後に置くことで launcher からの指定が勝つ�
     <group if="$(equals '$(var controller_type)' 'uart')">
         <node pkg="uart_joy_driver" exec="uart_joy_driver_node" name="uart_joy_driver" output="screen">
             <param from="$(var uart_config_file)" />
+            <param from="$(var control_config_file)" />
         </node>
     </group>
 
@@ -50,12 +53,14 @@ YAML 読み込みより後に置くことで launcher からの指定が勝つ�
     <!-- Joy controller node (single stick mode) -->
     <node pkg="joy_controller" exec="joy_controller_node" name="joy_controller" output="screen" unless="$(var dual_stick)">
         <param from="$(var config_file)" />
+        <param from="$(var control_config_file)" />
         <param name="joy_topic" value="$(var joy_topic)" />
     </node>
 
     <!-- Joy controller dual stick node (dual stick mode) -->
-    <node pkg="joy_controller" exec="joy_controller_dual_stick_node" name="joy_controller" output="screen" if="$(var dual_stick)">
+    <node pkg="joy_controller" exec="joy_controller_dual_stick_node" name="joy_controller_dual_stick" output="screen" if="$(var dual_stick)">
         <param from="$(var dual_stick_config_file)" />
+        <param from="$(var control_config_file)" />
         <param name="joy_topic" value="$(var joy_topic)" />
     </node>
 </launch>

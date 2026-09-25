@@ -8,11 +8,12 @@ from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import ComposableNodeContainer
 from launch_ros.descriptions import ComposableNode
+from questix_control_config import control_actions
 
 
 def generate_launch_description():
-    # 単体launch はノード宣言デフォルトで起動する（launcher/config/drive_component.yaml と同値）。
-    # 設定を変えたい場合は launcher/config/drive_component.yaml を編集する（単一ソース）。
+    # 単体launch のハードウェア設定はノード宣言デフォルトを使用する。
+    # キー割り当て・速度は questix_control_config の共通プロファイルを使用する。
     container_name_arg = DeclareLaunchArgument(
         'container_name',
         default_value='drive_container',
@@ -29,12 +30,16 @@ def generate_launch_description():
                 package='motor_control_app',
                 plugin='motor_control_app::DriveComponent',
                 name='drive_component',
+                parameters=[LaunchConfiguration('control_config_file'),
+                            {'serial_port': LaunchConfiguration('serial_port')}],
             ),
         ],
         output='screen',
     )
 
     return LaunchDescription([
+        *control_actions(),
+        DeclareLaunchArgument('serial_port', default_value='/dev/ttyACM0'),
         container_name_arg,
         container,
     ])

@@ -8,6 +8,7 @@ from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
+from questix_control_config import control_actions
 
 
 def generate_launch_description():
@@ -38,7 +39,8 @@ def generate_launch_description():
         package='joy',
         executable='joy_node',
         name='joy_node',
-        parameters=[LaunchConfiguration('joy_node_config_file')],
+        parameters=[LaunchConfiguration('joy_node_config_file'),
+                    LaunchConfiguration('control_config_file')],
         output='screen'
     )
 
@@ -47,12 +49,14 @@ def generate_launch_description():
         package='joy_controller',
         executable='joy_controller_node',
         name='joy_controller',
-        parameters=[LaunchConfiguration('config_file')],
+        parameters=[LaunchConfiguration('config_file'),
+                    LaunchConfiguration('control_config_file')],
         output='screen',
         emulate_tty=True
     )
 
     return LaunchDescription([
+        *control_actions(),
         config_file_arg,
         joy_node_config_arg,
         joy_node,

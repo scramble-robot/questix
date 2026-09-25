@@ -1,4 +1,4 @@
-"""Questix Robot Manager — FastAPI backend for systemd service control."""
+"""QUESTiX Robot Manager — FastAPI backend for systemd service control."""
 
 import os
 import re
@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 
-from robot_manager import lab, logs, recorder, wifi_ap
+from robot_manager import control_runtime, controls, lab, logs, recorder, wifi_ap
 
 CONFIG_DIR = Path(os.environ.get("QUESTIX_CONFIG_DIR", "/etc/questix_robot"))
 MODE_FILE = CONFIG_DIR / "mode"
@@ -58,7 +58,7 @@ async def lifespan(_app: FastAPI):
         lab.shutdown()
 
 
-app = FastAPI(title="Questix Robot Manager", lifespan=lifespan)
+app = FastAPI(title="QUESTiX Robot Manager", lifespan=lifespan)
 
 # ---------------------------------------------------------------------------
 # Security middleware
@@ -82,6 +82,7 @@ app.include_router(wifi_ap.router)
 
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
+    """Apply browser security and cache revalidation headers."""
     response: Response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
@@ -102,6 +103,8 @@ _BOOL_VALUES = {"true", "false"}
 
 
 class ModeRequest(BaseModel):
+    """Select the mode to use at the next robot start."""
+
     mode: Literal["practice", "competition"]
 
 
@@ -109,6 +112,8 @@ _CONTROLLER_TYPES = {"uart", "dualshock", "web"}
 
 
 class LaunchConfig(BaseModel):
+    """Validate editable launch environment fields."""
+
     ROBOT_WS: str | None = None
     ROS_DOMAIN_ID: str | None = None
     ENABLE_LIDAR: str | None = None
@@ -121,6 +126,7 @@ class LaunchConfig(BaseModel):
     @field_validator("ROBOT_WS")
     @classmethod
     def validate_robot_ws(cls, v: str | None) -> str | None:
+        """Allow only supported workspace path characters."""
         if v is not None and not _SAFE_PATH_RE.match(v):
             raise ValueError("ROBOT_WS contains invalid characters")
         return v
@@ -128,6 +134,7 @@ class LaunchConfig(BaseModel):
     @field_validator("ROS_DOMAIN_ID")
     @classmethod
     def validate_domain_id(cls, v: str | None) -> str | None:
+        """Limit the ROS domain identifier to its supported range."""
         if v is not None:
             if not v.isdigit() or not (0 <= int(v) <= 232):
                 raise ValueError("ROS_DOMAIN_ID must be an integer 0-232")
@@ -136,6 +143,7 @@ class LaunchConfig(BaseModel):
     @field_validator("ENABLE_LIDAR", "ENABLE_SHOT", "ENABLE_DRIVE", "ENABLE_GPIO_REF", "ENABLE_RVIZ")
     @classmethod
     def validate_bool_flags(cls, v: str | None) -> str | None:
+        """Require the boolean strings consumed by the launcher."""
         if v is not None and v not in _BOOL_VALUES:
             raise ValueError("Value must be 'true' or 'false'")
         return v
@@ -143,6 +151,7 @@ class LaunchConfig(BaseModel):
     @field_validator("CONTROLLER_TYPE")
     @classmethod
     def validate_controller_type(cls, v: str | None) -> str | None:
+        """Restrict profiles to supported controller types."""
         if v is not None and v not in _CONTROLLER_TYPES:
             raise ValueError("CONTROLLER_TYPE must be one of: uart, dualshock, web")
         return v
@@ -207,6 +216,7 @@ def _service_status() -> str:
 
 @app.get("/api/status")
 def get_status():
+    """Return saved mode, launch settings and current service state."""
     return {
         "mode": _read_mode(),
         "service": _service_status(),
@@ -214,8 +224,29 @@ def get_status():
     }
 
 
+@app.get("/api/readiness")
+def get_readiness():
+    """Inspect saved configuration and setup paths without accessing hardware."""
+    config = _read_env()
+    controller = config.get('CONTROLLER_TYPE')
+    profile = {'ok': False, 'message': 'コントローラー設定を担当者に確認してください。'}
+    if controller in _CONTROLLER_TYPES:
+        try:
+            controls.read_profile(CONFIG_DIR, controller, config)
+            profile = {'ok': True, 'message': '読み込み・入力値の確認済み'}
+        except HTTPException as exc:
+            profile = {'ok': False, 'message': str(exc.detail)}
+    try:
+        control_runtime._ros_paths(config)
+        workspace = {'ok': True, 'message': 'ROS・ワークスペースの起動ファイルあり'}
+    except HTTPException as exc:
+        workspace = {'ok': False, 'message': str(exc.detail)}
+    return {'controller': controller, 'profile': profile, 'workspace': workspace}
+
+
 @app.post("/api/mode")
 def set_mode(req: ModeRequest):
+    """Save the next startup mode without restarting the robot."""
     previous = _read_mode()
     try:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -232,6 +263,7 @@ def set_mode(req: ModeRequest):
 
 @app.post("/api/service/{action}")
 def control_service(action: Literal["start", "stop", "restart"]):
+    """Run the requested service action with a bounded wait."""
     try:
         r = subprocess.run(
             ["systemctl", "--no-ask-password", action, f"{SERVICE_NAME}.service"],
@@ -241,16 +273,21 @@ def control_service(action: Literal["start", "stop", "restart"]):
             raise HTTPException(status_code=500, detail=r.stderr.strip() or r.stdout.strip())
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="systemctl timed out")
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail="サービス操作を実行できません。"
+                            "担当者にサービスのインストール状態を確認してください。") from exc
     return {"action": action, "result": "ok"}
 
 
 @app.get("/api/launch-config")
 def get_launch_config():
+    """Return the saved launch environment."""
     return _read_env()
 
 
 @app.put("/api/launch-config")
 def set_launch_config(config: LaunchConfig):
+    """Persist validated launch fields for the next robot start."""
     current = _read_env()
     update = {k: v for k, v in config.model_dump().items() if v is not None}
     current.update(update)
@@ -261,12 +298,31 @@ def set_launch_config(config: LaunchConfig):
     return current
 
 
+@app.get("/api/control-runtime")
+def get_control_runtime():
+    """Read running ROS parameters without applying any saved settings."""
+    return control_runtime.read_snapshot(_read_env())
+
+
+@app.get("/api/control-config/{controller}")
+def get_control_config(controller: Literal["uart", "dualshock"]):
+    """Return the saved controls for the selected controller profile."""
+    return controls.read_profile(CONFIG_DIR, controller, _read_env())
+
+
+@app.put("/api/control-config/{controller}")
+def set_control_config(controller: Literal["uart", "dualshock"], config: controls.ControlUpdate):
+    """Persist controls for the next robot start without restarting the service."""
+    return controls.write_profile(CONFIG_DIR, controller, _read_env(), config)
+
+
 # ---------------------------------------------------------------------------
 # Static file serving
 # ---------------------------------------------------------------------------
 
 @app.get("/")
 def index():
+    """Serve the Robot Manager interface."""
     return FileResponse(STATIC_DIR / "index.html")
 
 

@@ -136,7 +136,8 @@ void JoyControllerDualStickComponent::publishTwist(const sensor_msgs::msg::Joy::
   // Check if we have enough axes
   int max_axis = std::max(left_stick_vertical_axis_, right_stick_vertical_axis_);
 
-  if (static_cast<int>(msg->axes.size()) <= max_axis) {
+  if (left_stick_vertical_axis_ < 0 || right_stick_vertical_axis_ < 0 ||
+      static_cast<int>(msg->axes.size()) <= max_axis) {
     RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
                          "Not enough axes in joy message. Expected at least %d, got %zu",
                          max_axis + 1, msg->axes.size());

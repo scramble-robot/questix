@@ -3,6 +3,8 @@
 # (no venv, so ROS 2 keeps its apt environment); keep this list minimal for the same reason:
 # plain uvicorn, not uvicorn[standard], which also installed pyyaml, websockets, uvloop, httptools,
 # watchfiles and python-dotenv over the apt copies ROS 2 uses (python3-yaml, python3-websockets).
+# PyYAML (the controls profiles in controls.py) is deliberately not listed: robot_manager uses the
+# apt python3-yaml that ROS 2 already installs; CI installs the same version (6.0.1) for its tests.
 #
 # Tested together on Python 3.12 (Ubuntu 24.04, amd64): pytest and a live start of the manager.
 # To move to newer versions, change them here together and run the robot_manager tests.

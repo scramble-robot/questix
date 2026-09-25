@@ -1,3 +1,4 @@
+# Operator mappings/tuning moved to questix_control_config/config/controls.*.yaml.
 shot_component:
   ros__parameters:
     # Joy input topic
@@ -45,19 +46,7 @@ shot_component:
     baudrate: 115200
     tilt_servo_id: 11
     trigger_servo_id: 10
-    # Disc fire button / ディスク射出ボタン
-    # Switch2 (uart) native index: R = 5 / DualShock: R1 = 5
-    fire_button: 5
     fire_duration_ms: 300 # 射撃持続時間（ミリ秒）
-    # Tilt input mode / チルト入力モード
-    # - tilt_axis >= 0 : use that analog axis (e.g. D-pad vertical = 7).
-    # - tilt_axis < 0  : use tilt_up_button_index / tilt_down_button_index (button mode).
-    # 軸で動かしたいときは tilt_axis に軸番号を、ボタンで動かしたいときは
-    # tilt_axis: -1 にして下の button_index を使ってください。
-    tilt_axis: 7
-    # Switch2 native indices: L=4 (up), ZL=6 (down)
-    tilt_up_button_index: 4
-    tilt_down_button_index: 6
     fire_angle: 145.0 # 射撃角度（度）
     home_angle: 245.0 # ホーム角度（度）
     tilt_max_angle: 120.0 # チルト最大角度（度）

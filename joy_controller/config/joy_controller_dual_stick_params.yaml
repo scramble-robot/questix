@@ -1,21 +1,6 @@
-# Joy Controller Dual Stick Configuration
-# This file contains the default parameters for the dual stick differential drive controller
-
-# Movement control parameters
+# Node options; operator controls live in questix_control_config/config/controls.*.yaml
+# under joy_controller_dual_stick. Keep this wildcard for custom node names.
 /**:
   ros__parameters:
-    # Input scaling ratios
-    longitudinal_input_ratio: 0.05 # Wheel velocity scaling (same as joy_controller)
-    angular_input_ratio: 0.05 # Angular velocity scaling factor for turning sensitivity
-
-    # Differential drive stick mapping
-    # Left stick vertical axis controls left wheel velocity
-    # Right stick vertical axis controls right wheel velocity
-    left_stick_vertical_axis: 1 # Left stick Y axis = left wheel velocity
-    right_stick_vertical_axis: 4 # Right stick Y axis = right wheel velocity
-
-    # Joy input topic (can be remapped to /joy_gated)
     joy_topic: "/joy"
-
-    # Debug settings
-    debug_mode: false # Enable debug logging
+    debug_mode: false
