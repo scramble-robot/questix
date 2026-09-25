@@ -79,11 +79,18 @@ const room = createRoom({
     current.config.room = key;
     if (topicId === 'room') pause();
     resetRun(current, null);
+    if (topicId === 'room') status = firstStatus('room');
   },
   update: () => {
     if (topicId === 'room') update();
   },
 });
+
+// What to do first in a topic; the room topic says so once its map exists.
+function firstStatus(id) {
+  const topic = copy.topics[id];
+  return id === 'room' && room.map ? topic.readyStatus : topic.initialStatus;
+}
 
 const page = () => document.getElementById('planningPage');
 const experiment = () => experiments.get(topicId);
@@ -154,7 +161,7 @@ function openTopic(id) {
   const current = experiment();
   countedRun = current.complete ? current.run : null;
   if (current.complete) status = finishedStatus(current.run);
-  else status = current.run ? copy.status.resumable : copy.topics[id].initialStatus;
+  else status = current.run ? copy.status.resumable : firstStatus(id);
   render(null, page());
   update();
 }

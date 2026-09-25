@@ -29,13 +29,14 @@ LAB_BRIDGE_PORT = lab.LAB_BRIDGE_PORT
 
 _DEFAULT_CSP = "default-src 'self'"
 # QUESTiX LAB (/lab) renders lesson figures with inline style attributes, canvas data/blob
-# images, and listens to the lab bridge WebSocket. Scripts stay limited to 'self'; the
-# manager UI itself keeps the strict default policy.
+# images, listens to the lab bridge WebSocket and reads the records the bridge keeps on the
+# robot (GET /api/records*, /api/rosbags* on the bridge's port). Scripts stay limited to
+# 'self'; the manager UI itself keeps the strict default policy.
 _LAB_CSP = (
     "default-src 'self'; "
     "style-src 'self' 'unsafe-inline'; "
     "img-src 'self' data: blob:; "
-    f"connect-src 'self' ws://*:{LAB_BRIDGE_PORT}"
+    f"connect-src 'self' ws://*:{LAB_BRIDGE_PORT} http://*:{LAB_BRIDGE_PORT}"
 )
 
 

@@ -107,7 +107,10 @@ state, which stream is missing, record / stop, open / save.
   `test/recording-core.test.mjs`, `test/rosbag-core.test.mjs`).
 - Derive numbers from the message stamps (`pairByStamp`), never from arrival order: a reopened file
   or a rosbag must give the same result as the live recording.
-- Only `js/live/drive-link.js` sends frames to the robot. A lesson that drives passes
+- Only `js/live/drive-link.js` sends drive frames to the robot. The one other frame is `record_save`
+  (`saveRecordOnRobot` in `js/live/robot-link.js`): every finished recording is also kept on the
+  robot when its bridge offers it (`hello.records`), and `js/live/records-*.js` list and open those
+  records (`#records`, the picker in each lesson). It moves nothing. A lesson that drives passes
   `drive: { plan, program, placement, conditions, startLabel }` to `createLiveSession` (see its doc
   comment): `plan()` returns a `controller(elapsed, robot)` built from `js/live/drive-core.js`
   (programs, odometry goals) or a DOM-free module of the course (`js/control/live-drive.js`), plus
