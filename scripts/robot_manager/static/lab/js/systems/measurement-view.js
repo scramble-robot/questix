@@ -1,5 +1,7 @@
-import { html, svg, nothing, live, unsafeHTML } from '../vendor/lit-html.js';
+import { html, svg, nothing, live, unsafeHTML, ref } from '../vendor/lit-html.js';
 import { fillSentence as fill } from '../core/content.js';
+import { formatTick } from '../core/chart-scale.js';
+import { measurementPlotAxes } from './measurement-core.js';
 import { liveCaptureControls } from '../live/live-view.js';
 import { runModeBadgeHtml } from '../shell/run-mode.js';
 
@@ -10,9 +12,6 @@ import { runModeBadgeHtml } from '../shell/run-mode.js';
 const MODES = ['repeat', 'calibrate', 'model']; // in the order of the select
 const DIGITS = 3; // every measured value is shown to the same precision
 
-// Plot box inside the 730×250 drawing: the axes meet at (left, baseline) and the data is spread
-// over spanX × spanY pixels from there.
-const PLOT = { left: 60, baseline: 210, spanX: 590, spanY: 170 };
 const TRAIN_COLOR = '#418777'; // points the straight line is fitted to
 const TEST_COLOR = '#c18837'; // points held back to check the line with
 const FIT_COLOR = '#5d83bf';
@@ -21,50 +20,60 @@ const amount = (value) => (Number.isFinite(value) ? value.toFixed(DIGITS) : '—
 
 // --- the scatter plot -------------------------------------------------------------------------
 
-function plotScales(rows, correction) {
-  const maxInput = Math.max(1, ...rows.map((row) => row.x));
-  const minInput = Math.min(0, ...rows.map((row) => row.x));
-  const values = rows.map((row) => row.y + correction);
-  const low = Math.min(0, ...values);
-  const high = Math.max(1, ...values);
-  return {
-    minInput,
-    maxInput,
-    low,
-    high,
-    toX: (x) => PLOT.left + ((x - minInput) / (maxInput - minInput)) * PLOT.spanX,
-    toY: (y) => PLOT.baseline - ((y - low) / (high - low)) * PLOT.spanY,
-  };
-}
+const GRID_COLOR = '#dde5e8';
+const AXIS_COLOR = '#8a9ca2';
+const TICK_TEXT_COLOR = '#43555b';
+const TICK_TEXT = 13; // px on screen: the viewBox is as wide as the plot (measurementPlotAxes)
+const POINT_RADIUS = 5;
 
-function fitLine(fit, scales, correction) {
-  const at = (x) => scales.toY(fit.slope * x + fit.intercept + correction);
+function fitLine(fit, axes, correction) {
+  const at = (x) => axes.toY(fit.slope * x + fit.intercept + correction);
   return svg`<path
-    d="M${scales.toX(fit.min)},${at(fit.min)}L${scales.toX(fit.max)},${at(fit.max)}"
+    d="M${axes.toX(fit.min)},${at(fit.min)}L${axes.toX(fit.max)},${at(fit.max)}"
     stroke=${FIT_COLOR}
     stroke-width="2"
   />`;
 }
 
-function measurementPlot(rows, fit, correction, copy) {
-  const scales = plotScales(rows, correction);
-  return html`<svg viewBox="0 0 730 250" role="img" aria-label=${copy.panel.plotAria}>
-    <rect width="730" height="250" fill="#f6f8f9" />
-    <path d="M60,25V210H665" stroke="#8a9ca2" fill="none" />
-    ${rows.map(
+// Grid lines at the round ticks, the zero line thicker, labels at 13 px.
+function plotGrid(axes) {
+  const { box, x, y } = axes;
+  const yLines = y.ticks.map((value) => {
+    const top = axes.toY(value);
+    return svg`<line x1=${box.left} x2=${box.right} y1=${top} y2=${top}
+        stroke=${value === 0 ? AXIS_COLOR : GRID_COLOR} stroke-width=${value === 0 ? 2 : 1} />
+      <text x=${box.left - 6} y=${top + 4} text-anchor="end" font-size=${TICK_TEXT}
+        fill=${TICK_TEXT_COLOR}>${formatTick(value, y.step)}</text>`;
+  });
+  const xLines = x.ticks.map((value) => {
+    const left = axes.toX(value);
+    return svg`<line x1=${left} x2=${left} y1=${box.top} y2=${box.bottom}
+        stroke=${value === 0 ? AXIS_COLOR : GRID_COLOR} stroke-width=${value === 0 ? 2 : 1} />
+      <text x=${left} y=${box.bottom + 20} text-anchor="middle" font-size=${TICK_TEXT}
+        fill=${TICK_TEXT_COLOR}>${formatTick(value, x.step)}</text>`;
+  });
+  return [yLines, xLines];
+}
+
+function measurementPlot(model, fit, correction, copy) {
+  const axes = measurementPlotAxes(model.rows, correction, model.plotWidth);
+  return html`<svg
+    viewBox="0 0 ${axes.width} ${axes.height}"
+    role="img"
+    aria-label=${copy.panel.plotAria}
+  >
+    <rect width=${axes.width} height=${axes.height} fill="#f6f8f9" />
+    ${plotGrid(axes)}
+    ${model.rows.map(
       (row) =>
         svg`<circle
-          cx=${scales.toX(row.x)}
-          cy=${scales.toY(row.y + correction)}
-          r="5"
+          cx=${axes.toX(row.x)}
+          cy=${axes.toY(row.y + correction)}
+          r=${POINT_RADIUS}
           fill=${row.test ? TEST_COLOR : TRAIN_COLOR}
         />`,
     )}
-    ${fit ? fitLine(fit, scales, correction) : nothing}
-    <text x="60" y="236" font-size="14">${amount(scales.minInput)}</text>
-    <text x="610" y="236" font-size="14">${amount(scales.maxInput)}</text>
-    <text x="5" y="40" font-size="14">${amount(scales.high)}</text>
-    <text x="5" y="210" font-size="14">${amount(scales.low)}</text>
+    ${fit ? fitLine(fit, axes, correction) : nothing}
   </svg>`;
 }
 
@@ -157,57 +166,78 @@ function measurementResult(model, copy) {
 
 // --- the editable table of measurements ----------------------------------------------------------
 
+// Where the rows came from (a recording, a file, typed in) appears once any row says so.
+const hasSources = (rows) => rows.some((row) => row.from);
+
+// Rows from one recording or file arrive together, so the source is a full-width line above each
+// run of rows with the same source: readable on a phone, where a fifth column would squeeze the
+// number fields.
+// `fallback` names rows saved before rows said where they came from.
+function sourceLine(rows, index, copy, columns, fallback) {
+  if (!hasSources(rows)) return nothing;
+  const from = rows[index].from ?? fallback;
+  if (index > 0 && (rows[index - 1].from ?? fallback) === from) return nothing;
+  return html`<tr class="measurement-from-row">
+    <th colspan=${columns} scope="rowgroup">${fill(copy.labels.sourceLine, { source: from })}</th>
+  </tr>`;
+}
+
+const TABLE_COLUMNS = 4;
+
 function measurementRow(row, index, model, copy, actions) {
   const labels = copy.labels;
   const position = index + 1;
-  return html`<tr>
-    <td>
-      <input
-        aria-label=${fill(labels.rowInput, { row: position })}
-        data-row=${index}
-        data-col="x"
-        type="number"
-        step="any"
-        .value=${live(String(row.x))}
-        @change=${(event) => actions.editCell(index, 'x', event.target.value)}
-      />
-    </td>
-    <td>
-      <input
-        aria-label=${fill(labels.rowValue, { row: position })}
-        data-row=${index}
-        data-col="y"
-        type="number"
-        step="any"
-        .value=${live(String(row.y))}
-        @change=${(event) => actions.editCell(index, 'y', event.target.value)}
-      />
-    </td>
-    <td>
-      <input
-        aria-label=${fill(labels.rowTest, { row: position })}
-        data-row=${index}
-        data-col="test"
-        type="checkbox"
-        .checked=${live(Boolean(row.test))}
-        @change=${(event) => actions.editCell(index, 'test', event.target.checked)}
-      />
-    </td>
-    <td>
-      <button
-        data-remove=${index}
-        aria-label=${fill(labels.rowRemove, { row: position })}
-        @click=${() => actions.removeRow(index)}
-      >
-        ${labels.remove}
-      </button>
-    </td>
-  </tr>`;
+  const fallback =
+    model.source === copy.sources.example ? copy.sources.example : copy.sources.unknown;
+  return html`${sourceLine(model.rows, index, copy, TABLE_COLUMNS, fallback)}
+    <tr>
+      <td>
+        <input
+          aria-label=${fill(labels.rowInput, { row: position })}
+          data-row=${index}
+          data-col="x"
+          type="number"
+          step="any"
+          .value=${live(String(row.x))}
+          @change=${(event) => actions.editCell(index, 'x', event.target.value)}
+        />
+      </td>
+      <td>
+        <input
+          aria-label=${fill(labels.rowValue, { row: position })}
+          data-row=${index}
+          data-col="y"
+          type="number"
+          step="any"
+          .value=${live(String(row.y))}
+          @change=${(event) => actions.editCell(index, 'y', event.target.value)}
+        />
+      </td>
+      <td>
+        <input
+          aria-label=${fill(labels.rowTest, { row: position })}
+          data-row=${index}
+          data-col="test"
+          type="checkbox"
+          .checked=${live(Boolean(row.test))}
+          @change=${(event) => actions.editCell(index, 'test', event.target.checked)}
+        />
+      </td>
+      <td>
+        <button
+          data-remove=${index}
+          aria-label=${fill(labels.rowRemove, { row: position })}
+          @click=${() => actions.removeRow(index)}
+        >
+          ${labels.remove}
+        </button>
+      </td>
+    </tr>`;
 }
 
 function measurementTable(model, copy, actions) {
   const scenario = model.scenario;
-  return html`<div class="table-scroll">
+  return html`<div class="table-scroll" data-measure-table>
     <table>
       <thead>
         <tr>
@@ -270,6 +300,21 @@ function calibrationControls(model, copy, actions) {
   </div>`;
 }
 
+// 置き換える / 追加する for a file opened while the table already holds measurements.
+function choiceButtons(copy, actions) {
+  return html`<div class="measurement-choice" data-measure-choice>
+    <button class="primary" @click=${() => actions.chooseIncoming('replace')}>
+      ${copy.labels.replace}
+    </button>
+    <button @click=${() => actions.chooseIncoming('add')}>${copy.labels.add}</button>
+  </div>`;
+}
+
+const tableJump = (copy, actions) =>
+  html`<button class="quiet" data-measure-show-table @click=${actions.showTable}>
+    ${copy.labels.showTable}
+  </button>`;
+
 function importExport(model, copy, actions) {
   return html`<div class="measurement-import">
     <label
@@ -278,11 +323,17 @@ function importExport(model, copy, actions) {
         data-measure-file
         type="file"
         accept=".csv,text/csv"
-        @change=${(event) => actions.openCsv(event.target.files[0])}
+        @change=${(event) => {
+          actions.openCsv(event.target.files[0]);
+          // Picking the same file again (after fixing it) must fire change again.
+          event.target.value = '';
+        }}
     /></label>
     <button data-measure-export @click=${actions.saveCsv}>${copy.labels.saveCsv}</button>
     <p>${copy.panel.csvNote}</p>
     <p data-measure-message role="status">${model.message}</p>
+    ${model.csvChoice ? choiceButtons(copy, actions) : nothing}
+    ${model.csvJump ? tableJump(copy, actions) : nothing}
   </div>`;
 }
 
@@ -294,7 +345,7 @@ function pendingDrives(model, copy, actions) {
       ? html`<p role="status" data-drive-added>${model.live.added}</p>`
       : nothing;
   const text = copy.drives;
-  return html`<div class="measurement-drives">
+  return html`<div class="measurement-drives" data-measure-drives>
     <p>${text.intro}</p>
     <table>
       <thead>
@@ -305,22 +356,23 @@ function pendingDrives(model, copy, actions) {
       <tbody>
         ${pending.map(
           (drive, index) =>
-            html`<tr>
-              <td>${drive.number}</td>
-              <td>${drive.wheel.toFixed(1)}</td>
-              <td>${drive.turn + '°'}</td>
-              <td>
-                <input
-                  data-drive-floor=${index}
-                  aria-label=${fill(text.floorLabel, { number: drive.number })}
-                  type="number"
-                  step="0.1"
-                  min="0"
-                  .value=${live(drive.floor)}
-                  @change=${(event) => actions.setFloor(index, event.target.value)}
-                />
-              </td>
-            </tr>`,
+            html`${sourceLine(pending, index, copy, text.columns.length, copy.sources.unknown)}
+              <tr>
+                <td>${drive.number}</td>
+                <td>${drive.wheel.toFixed(1)}</td>
+                <td>${drive.turn + '°'}</td>
+                <td>
+                  <input
+                    data-drive-floor=${index}
+                    aria-label=${fill(text.floorLabel, { number: drive.number })}
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    .value=${live(drive.floor)}
+                    @change=${(event) => actions.setFloor(index, event.target.value)}
+                  />
+                </td>
+              </tr>`,
         )}
       </tbody>
     </table>
@@ -353,9 +405,21 @@ function driveDistanceSelect(model, copy, actions) {
 
 // Filling the table from the connected robot. A scenario without a `live` block says why its
 // reference quantity cannot come from the robot instead of offering a button that cannot work.
+// What the last recording or opened file did to the table. It stands outside the shared block,
+// whose offline form is folded: a learner who opened a file there must still see this sentence.
+function liveNote(model, copy, actions) {
+  const live = model.live;
+  if (!live.message) return nothing;
+  return html`<div class="measurement-live-note" data-measure-live-note>
+    <p role="status">${live.message}</p>
+    ${live.choice ? choiceButtons(copy, actions) : nothing}
+    ${live.jump && !live.choice ? tableJump(copy, actions) : nothing}
+  </div>`;
+}
+
 function liveCapture(model, copy, actions) {
   const panel = copy.panel;
-  return html`<div class="measurement-live">
+  return html`<div class="measurement-live" data-measure-live>
     <h3>
       ${model.live ? unsafeHTML(runModeBadgeHtml('live')) : nothing}
       ${model.live?.drive ? unsafeHTML(runModeBadgeHtml('drive')) : nothing} ${panel.liveTitle}
@@ -364,7 +428,8 @@ function liveCapture(model, copy, actions) {
       model.live
         ? html`<p>${model.live.text}</p>
             ${driveDistanceSelect(model, copy, actions)} ${pendingDrives(model, copy, actions)}
-            ${liveCaptureControls(model.live, actions)}
+            ${liveCaptureControls({ ...model.live, message: '' }, actions)}
+            ${liveNote(model, copy, actions)}
             <p>${model.live.referenceNote ?? panel.liveReferenceNote}</p>`
         : html`<p>${panel.liveUnavailable}</p>`
     }
@@ -380,13 +445,24 @@ function measurementPanel(model, copy, actions) {
     <summary>${panel.summary}</summary>
     <div class="measurement-lab">
       <h2>${panel.title}</h2>
+      ${
+        model.live
+          ? html`<button
+              class="quiet measurement-jump"
+              data-measure-jump
+              @click=${actions.jumpToLive}
+            >
+              ${panel.jumpToLive}
+            </button>`
+          : nothing
+      }
       <p>${scenario.text}</p>
       <p>${panel.guide}</p>
       <p>${panel.sampleBefore}<strong>${panel.sampleName}</strong>${panel.sampleAfter}</p>
       ${modeSelect(model, copy, actions)}
       <p>${axes}</p>
-      <div data-measure-plot>
-        ${measurementPlot(model.rows, model.mode === 'model' ? model.fit : null, correction, copy)}
+      <div data-measure-plot ${ref(actions.watchPlot)}>
+        ${measurementPlot(model, model.mode === 'model' ? model.fit : null, correction, copy)}
       </div>
       ${calibrationControls(model, copy, actions)}
       <div data-measure-result>${measurementResult(model, copy)}</div>

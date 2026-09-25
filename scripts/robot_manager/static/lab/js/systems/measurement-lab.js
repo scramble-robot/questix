@@ -1,7 +1,14 @@
 import { render } from '../vendor/lit-html.js';
 import { loadJson, fillSentence as fill } from '../core/content.js';
 import { downloadFile } from '../core/dom.js';
-import { measurementStats, fitMeasurement, parseMeasurementCSV } from './measurement-core.js';
+import {
+  measurementStats,
+  fitMeasurement,
+  parseMeasurementCSV,
+  measurementFileProblem,
+  recordingSourceLabel,
+  shortFileName,
+} from './measurement-core.js';
 import { measurementPanel } from './measurement-view.js';
 import { CAPTURE_DEFAULTS, onLiveLink, steadyMeasurements } from '../live/capture.js';
 import { driveRows, drivesOf } from '../live/recording-core.js';
@@ -24,6 +31,9 @@ import {
 // - `holds` (control): every held speed command becomes one input with repeated measurements;
 // - `drives` (SLAM): every drive between two stops gives the wheel-odometry distance, and the
 //   learner types in the distance measured on the floor for it — the robot cannot measure that.
+// Every row remembers where it came from (`from`: a group, a file, 実機 and the time), so a table
+// that collects several groups' recordings can still be read. A file opened while the table already
+// holds measurements does not silently mix in: the learner chooses 置き換える or 追加する.
 // Texts and the scenarios are in content/systems/measurement-lab.json.
 
 const copy = await loadJson('content/systems/measurement-lab.json');
@@ -195,15 +205,26 @@ function applyHolds(course, recording) {
   const measured = steadyMeasurements(rows);
   if (!measured.rows.length)
     return { ok: false, note: fill(copy.messages.liveNoHold, { seconds: MIN_HOLD_SECONDS }) };
+  const from = sourceLabel(recording);
+  const incoming = measured.rows.map((row) => ({ ...row, from }));
+  if (asksChoice(state))
+    return askChoice(state, {
+      kind: 'rows',
+      where: 'recording',
+      rows: incoming,
+      source: copy.sources.live,
+      notes: captureNotes(summary),
+    });
   const first = state.source !== copy.sources.live;
-  state.rows = (first ? [] : state.rows).concat(measured.rows).slice(0, MAX_ROWS);
+  state.rows = (first ? [] : state.rows).concat(incoming).slice(0, MAX_ROWS);
   state.source = copy.sources.live;
-  state.selectedX = measured.rows[0].x;
+  state.selectedX = incoming[0].x;
   state.correct = false;
+  state.jump = true;
   const note = fill(first ? copy.messages.liveRecorded : copy.messages.liveRecordedMore, {
     notes: captureNotes(summary),
     holds: measured.holds.length,
-    count: measured.rows.length,
+    count: incoming.length,
   });
   // The worked example's reference means nothing for the robot's numbers.
   return { ok: true, note: first ? `${note} ${copy.messages.liveReference}` : note };
@@ -214,18 +235,104 @@ function applyDrives(course, recording) {
   const state = labState(course);
   const drives = drivesOf(recording);
   if (!drives.length) return { ok: false, note: copy.messages.liveNoDrive };
-  // Drives still waiting for their floor distance stay; the new ones are numbered after them.
+  const from = sourceLabel(recording);
+  const found = drives.map((drive) => ({
+    wheel: Number((drive.distance * CM_PER_M).toFixed(DRIVE_DIGITS)),
+    turn: Math.round(Math.abs(drive.turn) * DEGREES_PER_RADIAN),
+    floor: '',
+    from,
+  }));
+  if (asksChoice(state))
+    return askChoice(state, { kind: 'drives', where: 'recording', drives: found });
+  addPending(state, found);
+  state.jump = true;
+  return { ok: true, note: fill(copy.messages.liveDrives, { count: drives.length }) };
+}
+
+// Drives still waiting for their floor distance stay; the new ones are numbered after them.
+function addPending(state, drives) {
   const last = Math.max(0, ...state.pending.map((drive) => drive.number));
   state.pending = state.pending.concat(
-    drives.map((drive, index) => ({
-      number: last + index + 1,
-      wheel: Number((drive.distance * CM_PER_M).toFixed(DRIVE_DIGITS)),
-      turn: Math.round(Math.abs(drive.turn) * DEGREES_PER_RADIAN),
-      floor: '',
-    })),
+    drives.map((drive, index) => ({ ...drive, number: last + index + 1 })),
   );
   state.added = '';
-  return { ok: true, note: fill(copy.messages.liveDrives, { count: drives.length }) };
+}
+
+// --- a second file: replace or add ------------------------------------------------------------
+
+// Set while a file the learner picked is being read, so `apply` can tell it from a run just
+// recorded (repeated runs of one group simply collect into the table).
+let openingFile = false;
+
+const sourceLabel = (recording) =>
+  recordingSourceLabel(recording, { group: copy.sources.group, live: copy.sources.liveAt }, fill);
+
+// Only a file asks, and only when the table already holds something other than the worked example
+// (or drives still wait for their floor distance).
+const asksChoice = (state) =>
+  openingFile && (state.source !== copy.sources.example || state.pending.length > 0);
+
+// Keeps what the file would put in the table until the learner presses 置き換える or 追加する.
+function askChoice(state, incoming) {
+  const count = incoming.kind === 'drives' ? incoming.drives.length : incoming.rows.length;
+  const ask = fill(copy.messages.choiceAsk, {
+    count,
+    unit: incoming.kind === 'drives' ? copy.messages.choiceDrives : copy.messages.choiceRows,
+  });
+  state.incoming = { ...incoming, ask };
+  state.jump = false;
+  return { ok: true, note: ask };
+}
+
+function acceptRows(state, incoming, replace) {
+  const fresh = replace || state.source === copy.sources.example;
+  state.rows = (fresh ? [] : state.rows).concat(incoming.rows).slice(0, MAX_ROWS);
+  const live = state.source === copy.sources.live || incoming.source === copy.sources.live;
+  state.source = !fresh && live ? copy.sources.live : incoming.source;
+  state.selectedX = incoming.rows[0].x;
+  state.correct = false;
+  const said = replace ? copy.messages.choiceReplaced : copy.messages.choiceAdded;
+  return [incoming.notes, fill(said, { count: incoming.rows.length, total: state.rows.length })]
+    .filter(Boolean)
+    .join(' ');
+}
+
+// Replacing drives starts the table over: the rows measured before and the drives still waiting go,
+// and the worked example stands in until the new drives get their floor distance.
+function acceptDrives(state, incoming, replace) {
+  if (replace) {
+    state.pending = [];
+    state.rows = exampleRows(scenarioOf(shown));
+    state.source = copy.sources.example;
+    state.reference = scenarioOf(shown).reference;
+    state.correct = false;
+  }
+  addPending(state, incoming.drives);
+  return fill(replace ? copy.messages.choiceDrivesReplaced : copy.messages.choiceDrivesAdded, {
+    count: incoming.drives.length,
+  });
+}
+
+function chooseIncoming(how) {
+  const state = labState(shown);
+  const incoming = state.incoming;
+  if (!incoming) return;
+  state.incoming = null;
+  const replace = how === 'replace';
+  const said =
+    incoming.kind === 'drives'
+      ? acceptDrives(state, incoming, replace)
+      : acceptRows(state, incoming, replace);
+  state.jump = true;
+  if (incoming.where === 'csv') state.message = said;
+  else {
+    const session = sessionOf(shown);
+    // The question was the lesson's part of the session's note; the answer takes its place.
+    session.note = session.note.includes(incoming.ask)
+      ? session.note.replace(incoming.ask, said)
+      : said;
+  }
+  update();
 }
 
 const APPLY = { holds: applyHolds, drives: applyDrives };
@@ -262,13 +369,19 @@ function liveModel(course) {
   const scenario = scenarioOf(course);
   const session = sessionOf(course);
   if (!session) return null;
+  const state = labState(course);
+  const model = session.model();
+  const driving = Boolean(model.drive?.allowed && model.link.connected);
   return {
-    ...session.model(),
+    ...model,
     message: session.note,
-    text: scenario.live.text,
+    // While the page may drive the robot, the record-only way ("走り終えた"…) is not the one shown.
+    text: driving ? (scenario.live.driveText ?? scenario.live.text) : scenario.live.text,
+    choice: state.incoming?.where === 'recording',
+    jump: Boolean(state.jump && session.note),
     referenceNote: scenario.live.referenceNote,
-    pending: labState(course).pending,
-    added: labState(course).added ?? '',
+    pending: state.pending,
+    added: state.added ?? '',
     driveDistance: scenario.live.kind === 'drives' ? driveDistance : null,
     driveDistances: scenario.live.kind === 'drives' ? DRIVE_DISTANCES : [],
   };
@@ -287,7 +400,12 @@ function addDrives() {
     update();
     return;
   }
-  const rows = measured.map((drive) => ({ x: Number(drive.floor), y: drive.wheel, test: false }));
+  const rows = measured.map((drive) => ({
+    x: Number(drive.floor),
+    y: drive.wheel,
+    test: false,
+    from: drive.from,
+  }));
   const kept = state.source === copy.sources.example ? [] : state.rows;
   state.rows = kept.concat(rows).slice(0, MAX_ROWS);
   state.source = copy.sources.live;
@@ -326,15 +444,63 @@ function buildModel(course) {
     correct: state.correct,
     source: state.source,
     message: state.message,
+    csvChoice: state.incoming?.where === 'csv',
+    csvJump: Boolean(state.jump && state.message && !state.incoming),
+    plotWidth: plotWidth || fallbackPlotWidth(),
   };
 }
 
 const host = () => document.getElementById('measurementEntry');
 
+// The plot is drawn at its on-screen width (measurement-core.js measurementPlotAxes). The panel
+// lives in a dialog that is closed at first, so the width is known only once the plot is laid
+// out; a ResizeObserver redraws it then and whenever the width changes (rotation, window size).
+const PLOT_SIDE_ROOM = 64; // px of dialog padding around the plot, for the first estimate
+const PLOT_MAX_WIDTH = 850; // px, .measurement-lab max-width
+let plotWidth = 0;
+let plotElement = null;
+const plotObserver =
+  typeof ResizeObserver === 'function'
+    ? new ResizeObserver((entries) => {
+        const width = Math.round(entries.at(-1).contentRect.width);
+        if (width > 0 && width !== plotWidth) {
+          plotWidth = width;
+          update();
+        }
+      })
+    : null;
+
+const fallbackPlotWidth = () =>
+  Math.min(PLOT_MAX_WIDTH, Math.max(0, window.innerWidth - PLOT_SIDE_ROOM));
+
+function watchPlot(element) {
+  if (!element || element === plotElement) return;
+  plotObserver?.disconnect();
+  plotElement = element;
+  plotObserver?.observe(element);
+}
+
 function update() {
   if (!shown) return;
   keepTable(shown);
   render(measurementPanel(buildModel(shown), copy, actions), host());
+}
+
+// Press → see inside the dialog: the jump links scroll the part they name into view.
+function scrollToPart(selector) {
+  const part = plotElement?.closest('.measurement-lab')?.querySelector(selector);
+  part?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  return part;
+}
+
+// After new numbers arrived: the drives waiting for their floor distance, otherwise the table.
+function showTable() {
+  const drives = scrollToPart('[data-measure-drives]');
+  if (drives) {
+    drives.querySelector('input[data-drive-floor]')?.focus({ preventScroll: true });
+    return;
+  }
+  scrollToPart('[data-measure-table]');
 }
 
 function editCell(index, column, value) {
@@ -353,18 +519,77 @@ function editCell(index, column, value) {
   update();
 }
 
+// Opening a file starts a new question: the answers to the previous one (a file error, a note on
+// the last recording, a choice not made) are cleared first.
+function clearNotes(state) {
+  state.message = '';
+  state.incoming = null;
+  state.jump = false;
+  const session = sessions.get(shown);
+  if (session) session.note = '';
+}
+
+// A rosbag, a recording or its CSV picked here by mistake is named as such (from the start of the
+// file, before the size limit, which such files usually exceed) rather than reported as a bad row.
+const FILE_PROBE_BYTES = 4096;
+
+// The browser's own reading error (a file moved or deleted after it was picked) is in English.
+async function fileText(blob) {
+  try {
+    return await blob.text();
+  } catch {
+    throw new Error(copy.messages.unreadable);
+  }
+}
+
+async function readCsv(file) {
+  const problem = measurementFileProblem(await fileText(file.slice(0, FILE_PROBE_BYTES)));
+  if (problem) {
+    const texts = copy.fileProblems[problem];
+    throw new Error(scenarioOf(shown).live ? texts.live : texts.plain);
+  }
+  if (file.size > MAX_CSV_BYTES) throw new Error(copy.messages.tooLarge);
+  return parseMeasurementCSV(await fileText(file));
+}
+
 async function openCsv(file) {
   if (!file) return;
   const state = labState(shown);
+  clearNotes(state);
   try {
-    if (file.size > MAX_CSV_BYTES) throw new Error(copy.messages.tooLarge);
-    state.rows = parseMeasurementCSV(await file.text());
-    state.source = file.name;
-    state.message = copy.messages.loaded.replace('{count}', String(state.rows.length));
+    const from = shortFileName(file.name);
+    const rows = (await readCsv(file)).map((row) => ({ ...row, from }));
+    if (state.source !== copy.sources.example) {
+      const ask = fill(copy.messages.choiceAsk, {
+        count: rows.length,
+        unit: copy.messages.choiceRows,
+      });
+      state.incoming = { kind: 'rows', where: 'csv', rows, source: file.name, ask };
+      state.message = ask;
+    } else {
+      state.rows = rows;
+      state.source = file.name;
+      state.selectedX = rows[0].x;
+      state.correct = false;
+      state.message = fill(copy.messages.loaded, { count: rows.length });
+      state.jump = true;
+    }
   } catch (error) {
     state.message = error.message;
   }
   update();
+}
+
+async function openRecording(file) {
+  const session = sessionOf(shown);
+  if (!file || !session) return;
+  clearNotes(labState(shown));
+  openingFile = true;
+  try {
+    await session.actions.openRecording(file);
+  } finally {
+    openingFile = false;
+  }
 }
 
 function saveCsv() {
@@ -399,7 +624,7 @@ const actions = {
   addRow() {
     const state = labState(shown);
     if (state.rows.length >= MAX_ROWS) return;
-    state.rows.push({ x: state.selectedX, y: 0, test: false });
+    state.rows.push({ x: state.selectedX, y: 0, test: false, from: copy.sources.typed });
     update();
   },
   removeRow(index) {
@@ -409,8 +634,14 @@ const actions = {
   editCell,
   openCsv,
   saveCsv,
-  startCapture: () => sessionOf(shown)?.actions.startCapture(),
-  startDriveCapture: () => sessionOf(shown)?.actions.startDriveCapture(),
+  startCapture() {
+    clearNotes(labState(shown));
+    return sessionOf(shown)?.actions.startCapture();
+  },
+  startDriveCapture() {
+    clearNotes(labState(shown));
+    return sessionOf(shown)?.actions.startDriveCapture();
+  },
   saveRun: (id, kind) => sessionOf(shown)?.actions.saveRun(id, kind),
   confirmDrive: (value) => sessionOf(shown)?.actions.confirmDrive(value),
   setDriveDistance(value) {
@@ -418,7 +649,11 @@ const actions = {
     update();
   },
   stopCapture: () => sessionOf(shown)?.actions.stopCapture(),
-  openRecording: (file) => sessionOf(shown)?.actions.openRecording(file),
+  openRecording,
+  chooseIncoming,
+  showTable,
+  jumpToLive: () => scrollToPart('[data-measure-live]'),
+  watchPlot,
   saveRecording: (kind) => sessionOf(shown)?.actions.saveRecording(kind),
   setFloor,
   addDrives,
@@ -436,6 +671,7 @@ function showMeasurementLab(course) {
   if (!scenarioOf(course)) return;
   shown = course;
   labState(course).message = '';
+  labState(course).incoming = null;
   sessionOf(course); // brings back the recording this browser kept, before the first draw
   // Rebuild the panel so its details element, focus and the supplement trigger start fresh.
   render(null, entry);

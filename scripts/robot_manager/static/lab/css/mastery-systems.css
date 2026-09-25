@@ -1171,3 +1171,31 @@ html {
 .measurement-drives input {
   width: 7em;
 }
+/* Where a row came from (a group, a file, 実機 and the time) and what an opened file did. */
+.measurement-lab tr.measurement-from-row th {
+  padding: 10px 8px 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.measurement-jump {
+  margin: 4px 0 8px;
+}
+.measurement-live-note {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  border-left: 4px solid var(--role-measured);
+  padding: 4px 0 4px 12px;
+  margin: 12px 0;
+}
+.measurement-live-note p {
+  margin: 0;
+}
+.measurement-choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0 8px;
+}
