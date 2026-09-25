@@ -3,6 +3,10 @@
   <arg name="controller_type" default="dualshock" description="Controller type: dualshock or uart" />
   <arg name="enable_gpio_ref" default="false" description="Use the gated joy topic supplied by the parent GPIO safety path" />
   <arg name="use_sim_time" default="false" description="Use simulation time" />
+  <!-- QUESTiX LAB may operate the launcher (roller /roller/lab, tilt /shot/lab/tilt, fire
+       /shot/lab/fire) only when this is true. questix_core sets it for practice runs only; it
+       stays false with enable_autoreferee (competition). The node YAMLs keep false as default. -->
+  <arg name="accept_lab_input" default="false" description="Let QUESTiX LAB operate the roller, tilt and fire (practice only; never with enable_autoreferee)" />
 
   <!-- Per-controller YAML profiles (auto-selected from controller_type).
        Override shot_config_file / esc_config_file to bypass selection. -->
@@ -21,11 +25,13 @@
   <include file="$(find-pkg-share motor_control_app)/launch/shot_component.launch.py">
     <arg name="config_file" value="$(var shot_config_file)"/>
     <arg name="joy_topic" value="$(var joy_topic_name)"/>
+    <arg name="accept_lab_input" value="$(var accept_lab_input)"/>
   </include>
 
   <!-- ESC Motor Control (C++) -->
   <include file="$(find-pkg-share esc_motor_control_cpp)/launch/esc_motor_control_cpp.launch.xml">
     <arg name="config_file" value="$(var esc_config_file)"/>
     <arg name="joy_topic" value="$(var joy_topic_name)"/>
+    <arg name="accept_lab_input" value="$(var accept_lab_input)"/>
   </include>
 </launch>
