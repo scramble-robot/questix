@@ -550,7 +550,7 @@ function controlChart({
     target,
     extra,
     breakdown,
-    fallback: fallback * factor,
+    fallback, // in the run's units: chartScale applies `factor` to every value itself
     factor,
   });
   const x = (seconds) => left + (seconds / DURATION) * plotWidth;
