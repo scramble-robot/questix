@@ -1,6 +1,7 @@
 import { html, nothing, unsafeHTML } from '../vendor/lit-html.js';
 import { fillSentence as fill } from '../core/content.js';
 import { liveCaptureControls } from '../live/live-view.js';
+import { robotStatePanel } from '../live/robot-state.js';
 import { runModeBadgeHtml } from '../shell/run-mode.js';
 
 // Templates of the measured room (planning topic `room`): measuring it with the robot, opening a
@@ -21,6 +22,8 @@ function robotSection(room, text, actions) {
         ? html`<p class="planning-room-note" role="status">${room.live.note}</p>`
         : nothing
     }
+    <p class="helper">${text.stateNote}</p>
+    ${robotStatePanel('planning-room', { name: text.memoName, placeholder: text.memoPlaceholder })}
   </section>`;
 }
 

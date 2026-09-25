@@ -436,6 +436,7 @@ function buildModel(course) {
   const selected = state.rows.filter((row) => row.x === state.selectedX).map((row) => row.y);
   const stats = measurementStats(selected);
   return {
+    course,
     scenario: shownScenario(course),
     live: liveModel(course),
     mode: state.mode,

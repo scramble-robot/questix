@@ -6,6 +6,7 @@ import { lessonBrief } from '../shell/lesson-brief.js';
 import { runModeBadgeHtml } from '../shell/run-mode.js';
 import { LAUNCH_TOPICS } from './core.js';
 import { launchMechanism, launchChart } from './render.js';
+import { robotStatePanel } from '../live/robot-state.js';
 import { fillSentence } from '../core/content.js';
 
 // Templates of the disc-launcher course. Every function is pure: it turns the model built by
@@ -501,6 +502,21 @@ function measurementPanel(measurement, copy, actions) {
   </aside>`;
 }
 
+// The robot while the discs are launched and measured: the 「実機の状態」 panel and its memo
+// (js/live/robot-state.js). The range itself is measured with a tape and typed in above.
+function robotStateCard(copy) {
+  const text = copy.measurement;
+  return html`<section class="card launch-robot-state">
+    <h2>${unsafeHTML(runModeBadgeHtml('live'))} ${text.robotTitle}</h2>
+    <p>${text.robotIntro}</p>
+    <p class="helper">${text.robotNote}</p>
+    ${robotStatePanel('launch-measure', {
+      name: text.memoName,
+      placeholder: text.memoPlaceholder,
+    })}
+  </section>`;
+}
+
 function measurementBody(model, copy, fragments, actions) {
   return html`<div class="launch-layout">
       ${measurementCard(model.measurement, model.chartWidth, copy, actions)}${measurementPanel(
@@ -509,6 +525,7 @@ function measurementBody(model, copy, fragments, actions) {
         actions,
       )}
     </div>
+    ${robotStateCard(copy)}
     <section class="card launch-reflection">${unsafeHTML(fragments.measureReflection)}</section>`;
 }
 

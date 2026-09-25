@@ -3,6 +3,7 @@ import { fillSentence as fill } from '../core/content.js';
 import { formatTick } from '../core/chart-scale.js';
 import { measurementPlotAxes } from './measurement-core.js';
 import { liveCaptureControls } from '../live/live-view.js';
+import { robotStatePanel } from '../live/robot-state.js';
 import { runModeBadgeHtml } from '../shell/run-mode.js';
 
 // Templates of the measurement lab, the panel that opens under the control, launch and SLAM
@@ -433,7 +434,16 @@ function liveCapture(model, copy, actions) {
             <p>${model.live.referenceNote ?? panel.liveReferenceNote}</p>`
         : html`<p>${panel.liveUnavailable}</p>`
     }
+    ${robotStatePart(model, copy)}
   </div>`;
+}
+
+// The robot while the learner measures (js/live/robot-state.js): its state in large numbers, and
+// the 測定メモ that takes a line of it before a typed value. Right under the record / drive
+// buttons, so a run is watched where it was started.
+function robotStatePart(model, copy) {
+  return html`<p class="helper">${copy.panel.robotState}</p>
+    ${robotStatePanel(`measurement-${model.course}`, { name: copy.panel.memoName })}`;
 }
 
 function measurementPanel(model, copy, actions) {

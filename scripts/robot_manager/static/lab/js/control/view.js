@@ -10,6 +10,7 @@ import {
 import { lessonLabel } from '../shell/lesson-ui.js';
 import { schoolTips } from '../shell/school-tips.js';
 import { liveCaptureControls, captureCopy } from '../live/live-view.js';
+import { robotStatePanel } from '../live/robot-state.js';
 import { lessonBrief } from '../shell/lesson-brief.js';
 import { runModeBadgeHtml } from '../shell/run-mode.js';
 import { CONTROL_GROUPS, CONTROL_TOPICS, LAST_SAMPLE, STOP_DISTANCE, controlLoad } from './core.js';
@@ -757,6 +758,7 @@ function liveCard(model, copy, actions) {
         ? html`<p class="control-live-recorded" role="status">${model.live.note}</p>`
         : nothing
     }
+    ${liveStatePanel(model, text)}
     ${
       shown
         ? html`<button
@@ -771,6 +773,15 @@ function liveCard(model, copy, actions) {
     ${model.live.run ? html`<button @click=${actions.clearLive}>${text.clear}</button>` : nothing}
     ${compareControls(model, text, actions)}
   </section>`;
+}
+
+// The robot's state while it is driven or recorded, live (js/live/robot-state.js); the charts
+// above show the recording only once it is over. Offline the capture block already offers the
+// connection, so the panel then shows nothing.
+function liveStatePanel(model, text) {
+  if (!model.live.capture.link.connected) return nothing;
+  return html`<p class="helper">${text.stateNote}</p>
+    ${robotStatePanel('control-live', { name: text.memoName, hideOffline: true })}`;
 }
 
 // The speed of the real step input; only offered while the card can drive the robot.
