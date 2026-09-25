@@ -6,7 +6,13 @@ drive topic (``/target_twist/lab``, twist_arbiter's lab input) for pages that ru
 experiment, under the rules of drive.DriveArbiter: nothing else may publish that topic, a node
 must listen, the emergency stop must be released, one page at a time, speed limits, and a
 dead-man timeout. twist_arbiter's status ends a run the controller takes over.
+
+Records kept on the robot (records.py, records_api.py, rosbags.py) need no ROS interface of
+their own: pages save and list them over the same port, the node records controller driving
+from the payloads it already builds, and rosbags are read from files.
 """
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 import json
 import threading
 import time
@@ -22,8 +28,9 @@ from sensor_msgs.msg import CompressedImage, LaserScan
 from std_msgs.msg import String
 from tf2_ros import Buffer, TransformException, TransformListener
 
-from . import messages
+from . import messages, records, rosbags
 from .drive import DriveArbiter
+from .records_api import RecordsApi
 from .static_site import find_lab_dir
 from .ws_server import LabWebSocketServer
 
@@ -100,6 +107,37 @@ class LabBridgeNode(Node):
         # itself in /drive_status (robots started without the GPIO safety path).
         self._estop = {'topic': False, 'drive': False}
 
+        # Records kept on the robot: pages' saves, controller driving recorded here, and
+        # Robot Manager's rosbags converted for the lessons.
+        mib = 1024 * 1024
+        self._store = records.RecordStore(
+            self.declare_parameter('records_dir', '~/.local/share/questix/lab-records').value,
+            self.declare_parameter('records_quota_mb', 500).value * mib,
+            self.declare_parameter('records_min_free_mb', 200).value * mib,
+            logger=self.get_logger())
+        auto_record = bool(self.declare_parameter('auto_record', True).value)
+        if self._store.enabled and not self._store.prepare():
+            self.get_logger().warning('cannot write records to %s: pages cannot save there'
+                                      % self._store.directory)
+        config = {'wheel_radius': wheel_radius, 'wheel_separation': wheel_separation}
+        convert = partial(
+            self._convert_bag, topics=topics, config=config, max_hz=max_hz,
+            max_points=self._scan_max_points, base_frame=self._base_frame)
+        self._records = RecordsApi(
+            self._store, self.declare_parameter('rosbag_dir', '/var/lib/questix/rosbags').value,
+            convert, self.declare_parameter('rosbag_max_seconds', 300.0).value,
+            self.declare_parameter('rosbag_convert_timeout_sec', 60.0).value,
+            topics=topics, logger=self.get_logger())
+        self._recorder = None
+        self._record_writer = None
+        self._record_limiters = {}
+        if auto_record and self._store.enabled:
+            self._record_writer = ThreadPoolExecutor(1, thread_name_prefix='lab_records')
+            self._recorder = records.AutoRecorder(
+                self._write_auto_record, config, topics, robot=self._robot)
+            self._record_limiters = {name: messages.RateLimiter(max_hz[name])
+                                     for name in records.RECORDING_STREAMS}
+
         self._limiters = {name: messages.RateLimiter(hz) for name, hz in max_hz.items()}
         self._counts = {name: 0 for name, topic in topics.items() if topic}
         self._rates = {}  # last status report; replaced whole, read by /api/state
@@ -107,11 +145,12 @@ class LabBridgeNode(Node):
 
         streams = {name: (topic or None) for name, topic in topics.items()}
         hello = messages.encode(messages.hello_payload(
-            streams, wheel_radius, wheel_separation, self._drive.allowed, self._robot))
+            streams, wheel_radius, wheel_separation, self._drive.allowed, self._robot,
+            self._records.hello()))
         self._server = LabWebSocketServer(
             host, port, hello, max_clients, self.get_logger(), site_dir,
             greeting=self._greeting, on_message=self._on_browser, on_disconnect=self._on_leave,
-            state_provider=self._state)
+            state_provider=self._state, records=self._records)
 
         self._drive_publisher = None
         if self._drive.allowed:
@@ -147,6 +186,10 @@ class LabBridgeNode(Node):
             'QUESTiX LAB bridge (%s) on ws://%s:%d, streams: %s'
             % ('may drive %s' % self._drive_topic if self._drive.allowed else 'read-only',
                host, self._server.port, ', '.join(sorted(self._counts)) or 'none'))
+        self.get_logger().info('records: %s (%s), rosbags: %s' % (
+            self._store.directory or 'not kept',
+            'controller driving recorded' if self._recorder else 'no auto recording',
+            self._records.rosbag_dir or 'none'))
         if site_dir is None:
             self.get_logger().warning(
                 'QUESTiX LAB site not found; set the lab_dir parameter to serve it from this port')
@@ -159,11 +202,19 @@ class LabBridgeNode(Node):
         return self.get_clock().now().nanoseconds * 1e-9
 
     def _relay(self, name, build):
+        """Hand a message to the pages and to the auto recorder, each at its own rate.
+
+        ``build`` returns the payload: a dict (JSON streams) or bytes (camera frames).
+        """
         self._counts[name] += 1
-        if not (self._server.client_count and self._limiters[name].ready(self._now())):
+        now = self._now()
+        send = self._server.client_count and self._limiters[name].ready(now)
+        keep = name in self._record_limiters and self._record_limiters[name].ready(now)
+        if not (send or keep):
             return
         try:
             payload = build()
+            text = messages.encode(payload) if send and isinstance(payload, dict) else payload
         except (AttributeError, TypeError, ValueError) as error:
             # e.g. a questix_msgs build that predates a field: skip the message, keep the
             # other streams alive, and say why instead of taking the node down.
@@ -171,7 +222,31 @@ class LabBridgeNode(Node):
                 'cannot convert a %s message, skipping it: %r' % (name, error),
                 throttle_duration_sec=10.0)
             return
-        self._server.publish(name, payload)
+        if send:
+            self._server.publish(name, text)
+        if keep:
+            # The recorder only reads the payload; a lab run in progress records itself.
+            self._recorder.feed(name, payload, time.monotonic(), lab_active=self._drive.active)
+
+    def _write_auto_record(self, recording):
+        """Save a finished auto record on the writer thread (the ROS thread keeps going)."""
+        self._record_writer.submit(self._save_auto_record, recording)
+
+    def _save_auto_record(self, recording):
+        try:
+            record_id = self._store.save(recording, records.SOURCE_AUTO)
+        except records.RecordError as error:
+            self.get_logger().warning('controller drive not recorded: %s' % error)
+            return
+        except Exception as error:  # noqa: B902 - on the writer thread nobody else would see it
+            self.get_logger().error('controller drive not recorded: %r' % (error,))
+            return
+        self.get_logger().info('recorded controller driving: %s' % record_id)
+
+    def _convert_bag(self, bag_dir, start, seconds, deadline, **options):
+        """Convert a bag window for RecordsApi (on a worker thread, never the ROS executor)."""
+        return rosbags.convert(bag_dir, start=start, seconds=seconds, deadline=deadline,
+                               **options)
 
     def _mount(self, frame):
         """Pose of ``frame`` in the base frame, or None while TF does not know it yet."""
@@ -190,19 +265,19 @@ class LabBridgeNode(Node):
         return self._mounts[frame]
 
     def _on_scan(self, msg):
-        self._relay('scan', lambda: messages.encode(messages.scan_payload(
-            msg, self._scan_max_points, self._mount(msg.header.frame_id))))
+        self._relay('scan', lambda: messages.scan_payload(
+            msg, self._scan_max_points, self._mount(msg.header.frame_id)))
 
     def _on_odom(self, msg):
-        self._relay('odom', lambda: messages.encode(messages.odom_payload(msg)))
+        self._relay('odom', lambda: messages.odom_payload(msg))
 
     def _on_drive(self, msg):
         if self._drive.allowed and self._estop['drive'] != bool(msg.emergency_stop):
             self._set_estop('drive', bool(msg.emergency_stop))
-        self._relay('drive', lambda: messages.encode(messages.drive_payload(msg)))
+        self._relay('drive', lambda: messages.drive_payload(msg))
 
     def _on_twist(self, msg):
-        self._relay('twist', lambda: messages.encode(messages.twist_payload(msg, self._now())))
+        self._relay('twist', lambda: messages.twist_payload(msg, self._now()))
 
     def _on_camera(self, msg):
         if messages.image_kind(msg.data) is None:
@@ -253,8 +328,9 @@ class LabBridgeNode(Node):
         """Snapshot for GET /api/state; runs on the WebSocket thread."""
         with self._drive_lock:
             drive_state = self._drive.state()
+        summary = dict(self._records.summary(), auto_record=self._recorder is not None)
         return messages.state_payload(drive_state, self._robot, self._rates,
-                                      self._drive.allowed, clients, max_clients)
+                                      self._drive.allowed, clients, max_clients, summary)
 
     def _on_leave(self, client_id):
         with self._drive_lock:
@@ -351,12 +427,17 @@ class LabBridgeNode(Node):
             self._counts[name] = 0
         self._rates = rates
         self._server.publish('status', messages.encode(messages.status_payload(rates)))
+        if self._recorder is not None:
+            self._recorder.tick(time.monotonic(), lab_active=self._drive.active)
 
     def destroy_node(self):
         with self._drive_lock:
             if self._drive.stop(None, time.monotonic()):
                 self._publish_twist(0.0, 0.0)
         self._server.stop()
+        if self._recorder is not None:
+            self._recorder.flush(time.monotonic())
+            self._record_writer.shutdown(wait=True)
         super().destroy_node()
 
 

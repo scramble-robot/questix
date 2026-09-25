@@ -8,7 +8,9 @@ Server to browser, text frames are JSON objects tagged by ``type``:
 
 * ``hello``  - protocol version, ``read_only``, ``robot`` (``name``: the robot_name parameter
   or the host name; ``domain``: ROS_DOMAIN_ID as an int, ``null`` when unset), robot
-  geometry, and the topic behind each stream.
+  geometry, the topic behind each stream, and ``records`` (``save``: pages may save
+  recordings on the robot; ``list``: ``GET /api/records`` answers; ``rosbags``: ``GET
+  /api/rosbags`` can convert Robot Manager's rosbags).
 * ``session`` - the id this connection has on the bridge (``drive_state.owner`` uses it).
 * ``drive_state`` - whether a page may drive the robot now and why not, who drives it,
   the limits, and why the last run ended (drive.DriveArbiter.state). A page whose request
@@ -20,8 +22,16 @@ Server to browser, text frames are JSON objects tagged by ``type``:
 * ``drive``  - measured/target wheel RPM, current, chassis velocity, emergency stop.
 * ``twist``  - commanded ``linear`` / ``angular`` velocity.
 * ``status`` - message rate per stream over the last reporting interval.
+* ``record_saved`` (``id``) / ``record_error`` (``message``, Japanese) - the answer to this
+  page's own ``record_save``, to that page only.
 
 Binary frames carry one compressed camera image (JPEG or PNG bytes, unmodified).
+
+Browser to server, always accepted:
+
+* ``{"type": "record_save", "recording": {...}}`` - keep a questix-lab-recording on the robot
+  (records.py; up to 8 MiB). The bridge checks format, version and geometry, makes the id
+  itself and answers ``record_saved`` or ``record_error``.
 
 Browser to server (only when the bridge runs with ``allow_drive``; otherwise ignored):
 
@@ -34,6 +44,7 @@ Browser to server (only when the bridge runs with ``allow_drive``; otherwise ign
 
 Plain HTTP ``GET /api/state`` on the same port returns ``state_payload`` as JSON (see
 ws_server.py), for robot_manager and for anyone checking the bridge without a WebSocket.
+``GET /api/records*`` and ``GET /api/rosbags*`` serve the records (records_api.py).
 
 scripts/robot_manager/static/lab/js/live/rosbag-core.js ports the scan/odom/drive/twist
 conversions below so the lab can read a rosbag into the same payloads; change both together.
@@ -75,8 +86,12 @@ def robot_identity(name='', environ=None):
     return {'name': name or socket.gethostname(), 'domain': domain}
 
 
-def hello_payload(streams, wheel_radius, wheel_separation, drive_allowed=False, robot=None):
-    """Describe the bridge to a newly connected browser; ``robot`` is robot_identity()."""
+def hello_payload(streams, wheel_radius, wheel_separation, drive_allowed=False, robot=None,
+                  records=None):
+    """Describe the bridge to a newly connected browser; ``robot`` is robot_identity().
+
+    ``records`` is records_api.RecordsApi.hello(); without it pages may neither save nor list.
+    """
     return {
         'type': 'hello',
         'protocol': PROTOCOL_VERSION,
@@ -84,6 +99,8 @@ def hello_payload(streams, wheel_radius, wheel_separation, drive_allowed=False, 
         'robot': robot if robot is not None else robot_identity(),
         'config': {'wheel_radius': wheel_radius, 'wheel_separation': wheel_separation},
         'streams': streams,
+        'records': records if records is not None else {
+            'save': False, 'list': False, 'rosbags': False},
     }
 
 
@@ -183,10 +200,13 @@ def drive_state_payload(state):
     return {'type': 'drive_state', **state}
 
 
-def state_payload(drive_state, robot, rates, drive_allowed, clients, max_clients):
+def state_payload(drive_state, robot, rates, drive_allowed, clients, max_clients,
+                  records=None):
     """Body of ``GET /api/state``: the bridge as robot_manager and teachers need to see it.
 
-    ``drive_state`` is DriveArbiter.state(), ``rates`` the last status report [Hz].
+    ``drive_state`` is DriveArbiter.state(), ``rates`` the last status report [Hz],
+    ``records`` records_api.RecordsApi.summary() (``dir``, ``count``, ``used_bytes``,
+    ``limit_bytes``, ``save``, ``auto_record``, ``rosbag_dir``) or None.
     """
     return {
         'protocol': PROTOCOL_VERSION,
@@ -196,6 +216,7 @@ def state_payload(drive_state, robot, rates, drive_allowed, clients, max_clients
         'max_clients': max_clients,
         'drive_state': drive_state,
         'rates': {name: round(hz, 1) for name, hz in rates.items()},
+        'records': records,
     }
 
 

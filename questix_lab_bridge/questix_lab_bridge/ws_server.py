@@ -16,6 +16,11 @@ except ``GET /api/state``: a JSON snapshot of the bridge (who is connected, may 
 drive, what blocks it) for robot_manager. ``state_provider(clients, max_clients)`` builds
 it on the server thread (messages.state_payload); without one only the client counts are
 reported.
+
+``records`` (records_api.RecordsApi) answers ``GET /api/records*`` and ``/api/rosbags*`` and the
+``record_save`` frame (a page saving a recording on the robot). Those run on a worker thread,
+never on the loop, so a large file or a slow rosbag conversion does not hold up the telemetry;
+the answer to a save goes to the page that sent it only, after anything already queued for it.
 """
 
 import asyncio
@@ -41,8 +46,13 @@ except ImportError:
     _serve = websockets.serve
     _LEGACY_API = True
 
-# Browsers only send short drive/stop requests, so keep their frames tiny.
-_MAX_INCOMING_BYTES = 1024
+# Browsers send short drive/stop requests, and a record_save with one recording (records.py
+# MAX_SAVE_BYTES, 8 MiB) plus its envelope. Any frame longer than _SMALL_FRAME goes to the
+# records API on a worker thread, which answers only a record_save.
+_MAX_INCOMING_BYTES = 8 * 1024 * 1024 + 4096
+_SMALL_FRAME = 1024
+# record_save frames handled at once over all pages (each holds its recording in memory).
+_MAX_PARALLEL_SAVES = 2
 
 STATE_PATH = '/api/state'
 
@@ -55,15 +65,21 @@ class _Client:
     def __init__(self, client_id):
         self.id = client_id
         self.slots = {}
+        self.outbox = []  # frames that must not be dropped (answers to this client's saves)
         self.event = asyncio.Event()
+        self.saving = asyncio.Lock()  # this client's saves are answered in order
 
 
 class LabWebSocketServer:
 
     def __init__(self, host, port, hello_text, max_clients=24, logger=None, site_dir=None,
-                 greeting=None, on_message=None, on_disconnect=None, state_provider=None):
+                 greeting=None, on_message=None, on_disconnect=None, state_provider=None,
+                 records=None):
         """``greeting(id)`` returns text frames sent right after ``hello`` to that client."""
         self._greeting = greeting
+        self._records = records
+        self._saves = None
+        self._tasks = set()
         self._state_provider = state_provider
         self._on_message = on_message
         self._on_disconnect = on_disconnect
@@ -132,6 +148,7 @@ class LabWebSocketServer:
 
     async def _main(self):
         self._stop = asyncio.Event()
+        self._saves = asyncio.Semaphore(_MAX_PARALLEL_SAVES)
         process_request = self._http_legacy if _LEGACY_API else self._http
         async with _serve(
                 self._handler, self._host, self._port, max_size=_MAX_INCOMING_BYTES,
@@ -143,14 +160,20 @@ class LabWebSocketServer:
     async def _http(self, connection, request):
         if _is_websocket_upgrade(request.headers):
             return None
-        status, headers, body = self._http_response(request.path, request.headers)
+        status, headers, body = await self._http_answer(request.path, request.headers)
         return Response(status, http.HTTPStatus(status).phrase, Headers(headers), body)
 
     async def _http_legacy(self, path, request_headers):
         if _is_websocket_upgrade(request_headers):
             return None
-        status, headers, body = self._http_response(path, request_headers)
+        status, headers, body = await self._http_answer(path, request_headers)
         return http.HTTPStatus(status), headers, body
+
+    async def _http_answer(self, target, request_headers):
+        if self._records is not None and self._records.handles(target):
+            return await asyncio.get_running_loop().run_in_executor(
+                None, self._records.http, target, request_headers)
+        return self._http_response(target, request_headers)
 
     def _http_response(self, target, request_headers=None):
         if urlsplit(target).path == STATE_PATH:
@@ -196,7 +219,14 @@ class LabWebSocketServer:
             client.slots.clear()
             sender = asyncio.ensure_future(self._sender(websocket, client))
             async for message in websocket:
-                if self._on_message is not None and isinstance(message, str):
+                if not isinstance(message, str):
+                    continue
+                if self._records is not None and (
+                        len(message) > _SMALL_FRAME or '"record_save"' in message):
+                    task = asyncio.ensure_future(self._save(client, message))
+                    self._tasks.add(task)  # the loop keeps only a weak reference
+                    task.add_done_callback(self._tasks.discard)
+                elif self._on_message is not None:
                     self._call(self._on_message, client.id, message)
         except websockets.ConnectionClosed:
             pass
@@ -216,16 +246,35 @@ class LabWebSocketServer:
             if self._logger is not None:
                 self._logger.error('WebSocket callback failed: %r' % (error,))
 
+    async def _save(self, client, text):
+        """Hand a record_save to the records API off the loop; queue its answer for the client."""
+        async with client.saving, self._saves:
+            try:
+                reply = await asyncio.get_running_loop().run_in_executor(
+                    None, self._records.save, text)
+            except Exception as error:  # noqa: B902 - logged, the connection stays up
+                self._log_error('record_save failed: %r' % (error,))
+                return
+        if reply is not None and client in self._clients:
+            client.outbox.append(json.dumps(reply, ensure_ascii=False, separators=(',', ':')))
+            client.event.set()
+
     async def _sender(self, websocket, client):
         try:
             while True:
                 await client.event.wait()
                 client.event.clear()
+                while client.outbox:
+                    await websocket.send(client.outbox.pop(0))
                 while client.slots:
                     stream = next(iter(client.slots))
                     await websocket.send(client.slots.pop(stream))
         except websockets.ConnectionClosed:
             pass
+
+    def _log_error(self, text):
+        if self._logger is not None:
+            self._logger.error(text)
 
     def _log(self, text):
         if self._logger is not None:

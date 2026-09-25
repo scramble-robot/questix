@@ -206,3 +206,85 @@ def test_a_failing_callback_keeps_the_connection():
         asyncio.run(scenario())
     finally:
         instance.stop()
+
+
+def _records_server(tmp_path, **options):
+    from questix_lab_bridge.records import RecordStore
+    from questix_lab_bridge.records_api import RecordsApi
+    store = RecordStore(tmp_path / 'records', 64 * 1024 * 1024, 0,
+                        disk_free=lambda path: 1 << 40)
+    store.prepare()
+    api = RecordsApi(store, str(tmp_path / 'bags'), None, rosbags_available=False)
+    received = []
+    instance = LabWebSocketServer('127.0.0.1', 0, '{"type":"hello"}', records=api,
+                                  on_message=lambda client, text: received.append(text),
+                                  **options)
+    instance.start()
+    return instance, store, received
+
+
+def _recording_frame(messages_count):
+    drive = [{'type': 'drive', 'stamp': i * 0.05, 'v': 0.2, 'w': 0.0, 'left': {'rpm': 38}}
+             for i in range(messages_count)]
+    return json.dumps({'type': 'record_save', 'recording': {
+        'format': 'questix-lab-recording', 'version': 1, 'source': 'live', 'name': 'run',
+        'recordedAt': '2026-09-25T01:51:02.000Z',
+        'config': {'wheel_radius': 0.1, 'wheel_separation': 0.5},
+        'topics': {}, 'streams': {'drive': drive}, 'group': '3班'}})
+
+
+def test_record_save_is_answered_to_the_sender_only(tmp_path):
+    instance, store, received = _records_server(tmp_path)
+
+    async def scenario():
+        url = 'ws://127.0.0.1:%d' % instance.port
+        async with websockets.connect(url) as saver, websockets.connect(url) as other:
+            await saver.recv()
+            await other.recv()
+            await _wait_for_clients(instance, 2)
+            big = _recording_frame(20000)  # about 1.5 MB, far above the old 1 kB frame limit
+            assert len(big) > 1_000_000
+            await saver.send(big)
+            await saver.send(_recording_frame(1))  # a small one goes the same way
+            await saver.send('{"type":"record_save","recording":{"format":"x"}}')
+            await saver.send('{"type":"stop"}')  # other frames still reach the node
+            replies = [json.loads(await asyncio.wait_for(saver.recv(), 10)) for _ in range(3)]
+            assert [reply['type'] for reply in replies] == [
+                'record_saved', 'record_saved', 'record_error']
+            assert replies[0]['id'] != replies[1]['id']
+            assert 'questix-lab-recording' in replies[2]['message']
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(other.recv(), 0.3)
+            return replies
+    try:
+        replies = asyncio.run(scenario())
+        assert received == ['{"type":"stop"}']
+        status, content_type, body = _http_get(instance.port, '/api/records')
+        assert status == 200 and content_type.startswith('application/json')
+        listing = json.loads(body)
+        assert {entry['id'] for entry in listing['records']} == {
+            replies[0]['id'], replies[1]['id']}
+        assert all(entry['group'] == '3班' for entry in listing['records'])
+        status, _, body = _http_get(instance.port, '/api/records/' + replies[0]['id'])
+        assert status == 200 and len(json.loads(body)['streams']['drive']) == 20000
+    finally:
+        instance.stop()
+
+
+def test_record_endpoints_allow_other_origins(tmp_path):
+    import urllib.error
+    import urllib.request
+    instance, _, _ = _records_server(tmp_path)
+    try:
+        for path in ('/api/records', '/api/rosbags', '/api/records/missing'):
+            request = urllib.request.Request('http://127.0.0.1:%d%s' % (instance.port, path))
+            try:
+                reply = urllib.request.urlopen(request, timeout=5)
+            except urllib.error.HTTPError as error:
+                reply = error
+            assert reply.headers['Access-Control-Allow-Origin'] == '*'
+            assert reply.headers['Cache-Control'] == 'no-store'
+        assert json.loads(_http_get(instance.port, '/api/rosbags')[2]) == {
+            'bags': [], 'dir': str(tmp_path / 'bags')}
+    finally:
+        instance.stop()

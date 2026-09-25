@@ -73,3 +73,25 @@ questix_lab_bridge:
     # Rate the held command is published at. drive_component's cmd_timeout_sec (1.0 s) is the
     # last line of defence if this node dies while driving.
     drive_rate_hz: 20.0
+
+    # Records kept on the robot (questix_lab_bridge/records.py), so every device connected to
+    # this robot can list, open and download them over this port (GET /api/records), and nothing
+    # is lost when a pupil changes or reloads a device. Pages save their runs here (record_save);
+    # the bridge also records controller driving by itself (auto_record) and caches rosbags it
+    # converted for the lessons. Created with the bridge user's permissions; "" = keep nothing.
+    records_dir: "~/.local/share/questix/lab-records"
+    # Space the records may take [MiB], and free space always left on the disk [MiB]. When full,
+    # automatic records and caches delete their own oldest; pages' records are never deleted
+    # automatically: saving from a page is refused until the teacher tidies the folder up.
+    records_quota_mb: 500
+    records_min_free_mb: 200
+    # Record driving nobody records from a page (the controller through twist_arbiter): from 1 s
+    # before the robot moves until it has stood still for 3 s, split every 180 s, shown in the
+    # lessons as 「コントローラーで走行」. Nothing is recorded while a lab driving run is active.
+    auto_record: true
+    # Robot Manager's rosbags (MCAP), listed for the lessons (GET /api/rosbags) and converted
+    # into recordings on request. robot_manager passes its OUTPUT_DIR (rosbag.env).
+    rosbag_dir: "/var/lib/questix/rosbags"
+    # Longest window converted from one bag [s], and how long one conversion may take [s].
+    rosbag_max_seconds: 300.0
+    rosbag_convert_timeout_sec: 60.0

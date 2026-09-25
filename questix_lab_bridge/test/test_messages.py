@@ -139,8 +139,17 @@ def test_state_payload():
         'protocol': messages.PROTOCOL_VERSION, 'read_only': False,
         'robot': {'name': 'r', 'domain': None}, 'clients': 3, 'max_clients': 24,
         'drive_state': {'allowed': True, 'blockers': []},
-        'rates': {'scan': 5.0, 'odom': 20.0}}
+        'rates': {'scan': 5.0, 'odom': 20.0}, 'records': None}
     assert messages.state_payload({}, {}, {}, False, 0, 24)['read_only'] is True
+    summary = {'count': 2, 'used_bytes': 10, 'limit_bytes': 100}
+    assert messages.state_payload({}, {}, {}, False, 0, 24, records=summary)['records'] == summary
+
+
+def test_hello_says_what_pages_may_do_with_records():
+    assert messages.hello_payload({}, 0.1, 0.5)['records'] == {
+        'save': False, 'list': False, 'rosbags': False}
+    records = {'save': True, 'list': True, 'rosbags': True}
+    assert messages.hello_payload({}, 0.1, 0.5, records=records)['records'] == records
 
 
 def test_session_and_drive_state_payloads():
