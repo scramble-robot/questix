@@ -32,6 +32,25 @@ esc_motor_control:
     # 発行元は operation_manager（契約: questix_msgs/README.md）。
     emergency_stop_topic: "/emergency_stop"
 
+    # QUESTiX LAB roller input / QUESTiX LAB からのローラー操作
+    # accept_lab_input: true のときだけ lab_topic (std_msgs/Float32, 出力割合 0..1) を購読する。
+    #   練習用の起動 (questix_core.launch.xml, enable_autoreferee=false) だけが launch 引数で
+    #   true にする。競技 (AutoReferee) では常に false。既定値はこの YAML の false。
+    #   Subscribed only when true; only practice launches set it (never competition).
+    # lab_max_speed: lab の指令はこの値で頭打ち (0..1)。Lab power is clamped to [0, this].
+    # lab_joy_quiet_sec: コントローラのローラーボタンを離してからこの秒数は lab を受け付けない。
+    #   ボタンを押すと即座にコントローラ優先になり、lab は 0 を送るまでロックされる。
+    #   The controller button must be idle this long; a press takes over at once and locks the
+    #   lab out until it sends 0.
+    # lab の指令が safety_timeout 秒途絶えるとローラーを止める (enable_safety_stop に関係なく)。
+    # Lab commands older than safety_timeout stop the roller (even with enable_safety_stop=false).
+    # 状態は /roller/status (std_msgs/String, JSON, 5 Hz) に出る。/roller_motor_status はそのまま。
+    # Status: /roller/status (JSON, 5 Hz); /roller_motor_status is unchanged.
+    accept_lab_input: false
+    lab_topic: "/roller/lab"
+    lab_max_speed: 0.8
+    lab_joy_quiet_sec: 1.0
+
     # Safety settings
     # Safety / timeout-stop behavior:
     # If no full-speed command arrives within safety_timeout seconds (e.g. the
