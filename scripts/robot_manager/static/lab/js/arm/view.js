@@ -212,10 +212,18 @@ function anglePresets(model, actions) {
 }
 
 function angleControls(model, copy, actions) {
+  // Pressing with the sliders on the current pose would "move" for a moment without moving.
+  const samePose = model.desired.every((angle, index) => angle === model.angles[index]);
   return html`${angleSlider(0, model, actions)}${angleSlider(1, model, actions)}${angleTicks}
-    <button class="primary full" id="armRun" ?disabled=${model.playing} @click=${actions.run}>
+    <button
+      class="primary full"
+      id="armRun"
+      ?disabled=${model.playing || samePose}
+      @click=${actions.run}
+    >
       この角度まで動かす
     </button>
+    ${samePose && !model.playing ? html`<p class="helper">${copy.controls.samePose}</p>` : nothing}
     ${model.topic === 'forward' ? anglePresets(model, actions) : nothing}
     <p class="helper">${copy.controls.angleHelp}</p>`;
 }

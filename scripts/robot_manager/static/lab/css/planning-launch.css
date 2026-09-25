@@ -670,7 +670,9 @@
     font-size: 19px;
   }
   .launch-metrics span {
-    font-size: 11px;
+    font-size: 12px; /* --figure-text-min */
+    word-break: keep-all;
+    overflow-wrap: anywhere;
   }
   .launch-playbar {
     padding: 14px;

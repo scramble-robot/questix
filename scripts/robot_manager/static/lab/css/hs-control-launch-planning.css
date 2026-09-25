@@ -389,3 +389,11 @@
   padding: 8px 10px;
   font-size: 15px;
 }
+
+/* Launch seek bar: the whole flight, with the part already watched shaded (js/launch/view.js). */
+#launchSeek {
+  accent-color: #1f6f63;
+  background: linear-gradient(to right, #9fcfc4 var(--watched, 0%), #dfe7e5 var(--watched, 0%));
+  border-radius: 999px;
+  height: 8px;
+}

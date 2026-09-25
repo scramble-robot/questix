@@ -117,7 +117,7 @@ function stepOutline(values, peak) {
 
 // Now (filled bars) against the reference (grey dotted outline), on one scale of "share of the
 // pixels", so the two can be compared although the images have different pixel counts (V5). The
-// last bin is the clipped band. Every label is HTML, so it stays readable on a phone.
+// last bin is the clipped band, its bar in the danger colour so a tall one stands out. Every label is HTML, so it stays readable on a phone.
 function histogram(model, copy) {
   const text = copy.capture.histogram;
   const now = shares(model.histogram);
@@ -139,7 +139,7 @@ function histogram(model, copy) {
         <rect x=${width - pitch} y="0" width=${pitch} height=${height} fill="#f6d5d2" />
         ${now.map(
           (value, index) =>
-            svg`<rect x=${index * pitch + (pitch - barWidth) / 2} y=${height - (height * value) / peak} width=${barWidth} height=${(height * value) / peak} fill="var(--role-measured)"/>`,
+            svg`<rect x=${index * pitch + (pitch - barWidth) / 2} y=${height - (height * value) / peak} width=${barWidth} height=${(height * value) / peak} fill=${index === now.length - 1 ? 'var(--role-danger)' : 'var(--role-measured)'}/>`,
         )}
         <path
           d=${stepOutline(before, peak)}

@@ -49,6 +49,14 @@ function timeLabel(model) {
   return `${phaseLabel(model)} · ${formatNumber(model.sample.t, 2)} 秒`;
 }
 
+// The slider spans the whole flight; the watched part is shaded, so a thumb at the end of the
+// watched part does not look like the end of the flight.
+function seekStyle(model) {
+  const last = model.run ? model.run.samples.length - 1 : 0;
+  const watched = last > 0 ? Math.round((model.observed / last) * 100) : 0;
+  return `--watched: ${watched}%`;
+}
+
 function playButtonLabel({ playing, run, atEnd }) {
   if (playing) return 'Ⅱ 一時停止';
   if (run && !atEnd) return '▶ 続きから見る';
@@ -126,8 +134,9 @@ function flightCard(model, copy, actions) {
         id="launchSeek"
         type="range"
         min="0"
-        max=${model.observed}
+        max=${model.run ? model.run.samples.length - 1 : 0}
         value="0"
+        style=${seekStyle(model)}
         .value=${String(model.index)}
         aria-label=${copy.flight.seekLabel}
         ?disabled=${!model.run}

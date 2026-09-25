@@ -429,7 +429,8 @@ const actions = {
   },
   seek(index) {
     pause();
-    experiment().index = index;
+    const current = experiment();
+    current.index = Math.min(index, current.observed); // the unwatched part cannot be jumped to
     update();
   },
   setPower(power) {

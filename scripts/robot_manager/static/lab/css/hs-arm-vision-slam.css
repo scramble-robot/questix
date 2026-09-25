@@ -362,7 +362,7 @@
   border-top: 2px dotted #6d7c83;
 }
 .vision-histogram-key .key-clipped {
-  background: #f6d5d2;
+  background: linear-gradient(to right, #f6d5d2 30%, var(--role-danger) 30% 70%, #f6d5d2 70%);
 }
 .vision-histogram-readout {
   font-size: 14px !important;
