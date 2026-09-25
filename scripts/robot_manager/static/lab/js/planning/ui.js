@@ -14,6 +14,7 @@ import { planningPage } from './view.js';
 import { createRoom } from './room-ui.js';
 import { onLiveLink } from '../live/capture.js';
 import { openRobotDialog } from '../live/live-ui.js';
+import { revealIfHidden } from '../core/reveal.js';
 
 // Path-planning course: state and behaviour. view.js turns the model into markup, render.js draws
 // the map, core.js plans and simulates. Texts live in content/planning.json.
@@ -286,6 +287,8 @@ const actions = {
     const current = experiment();
     if (current.run && !current.complete && !conditionsChanged(current)) play();
     else startRun();
+    // Press → see: on a phone the conditions card sits above the map, so bring the map on screen.
+    revealIfHidden(document.getElementById('planningCanvas'));
   },
   togglePlay() {
     if (playback.playing) {
