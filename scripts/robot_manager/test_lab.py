@@ -50,6 +50,7 @@ def test_config_round_trip_and_validation(lab):
         "CAMERA_TOPIC": "/cam/compressed", "AUTOSTART": "true"}
     assert lab._read_config() == {
         "CAMERA_TOPIC": "/cam/compressed", "AUTOSTART": "true", "ALLOW_DRIVE": "true",
+        "ALLOW_SHOOT": "true",
         "RECORDS_DIR": ""}
     lab.set_config(lab.LabConfig(AUTOSTART=False))
     assert lab._read_config()["AUTOSTART"] == "false"
@@ -96,6 +97,7 @@ def test_competition_mode_turns_autostart_off_and_stops_the_bridge(lab, monkeypa
     # Driving from the lessons is switched off with the stream.
     assert lab._read_config() == {
         "CAMERA_TOPIC": "/cam/compressed", "AUTOSTART": "false", "ALLOW_DRIVE": "false",
+        "ALLOW_SHOOT": "false",
         "RECORDS_DIR": ""}
     status = lab.get_status()
     assert status["running"] is False and status["last_stop_reason"] == "competition_mode"
@@ -144,6 +146,7 @@ def test_practice_mode_turns_autostart_back_on_and_starts_the_bridge(lab, monkey
     # Driving stays off: it is turned on deliberately, never by a mode switch.
     assert lab._read_config() == {
         "CAMERA_TOPIC": "/cam/compressed", "AUTOSTART": "true", "ALLOW_DRIVE": "true",
+        "ALLOW_SHOOT": "true",
         "RECORDS_DIR": ""}
     assert started == [True]
 
@@ -195,7 +198,7 @@ def test_drive_is_on_by_default_and_the_teacher_can_switch_it_off(lab):
     assert lab.get_status()["drive_allowed"] is True
     assert "-p allow_drive:=true" in lab._build_command(lab._read_config())
     lab.set_drive(lab.DriveRequest(allow=False))
-    assert "allow_drive" not in lab._build_command(lab._read_config())
+    assert "-p allow_drive:=false" in lab._build_command(lab._read_config())
     lab.set_drive(lab.DriveRequest(allow=True))
     # The settings form does not touch it.
     lab.set_config(lab.LabConfig(CAMERA_TOPIC="/cam/compressed"))
@@ -402,7 +405,7 @@ def test_competition_stops_the_bridge_even_if_lab_env_cannot_be_written(
     assert status["running"] is False and status["last_stop_reason"] == "competition_mode"
     # lab.env still says true, but driving counts as off until it can be written.
     assert status["drive_allowed"] is False and "sudo chown" in status["config_error"]
-    assert "allow_drive" not in lab._build_command(lab._read_config())
+    assert "-p allow_drive:=false -p allow_shoot:=false" in lab._build_command(lab._read_config())
 
 
 def test_manager_start_keeps_the_teachers_choice(lab, monkeypatch, tmp_path):
@@ -438,7 +441,7 @@ def test_forbidding_restarts_the_bridge_even_if_lab_env_cannot_be_written(
     read_only_lab_env('ALLOW_DRIVE="true"\n')
     lab._proc = _FakeProcess()
     status = lab.set_drive(lab.DriveRequest(allow=False))
-    assert len(started) == 1 and "allow_drive" not in started[0]
+    assert len(started) == 1 and "-p allow_drive:=false" in started[0]
     assert status["drive_allowed"] is False and status["config_error"]
 
 
@@ -475,3 +478,95 @@ def test_status_passes_the_bridges_records_summary_on(lab, monkeypatch):
     monkeypatch.setattr(lab, "_bridge_state", lambda: state)
     lab._proc = _FakeProcess()
     assert lab.get_status()["bridge"]["records"] == records
+
+
+def test_both_permissions_are_always_passed_explicitly(lab):
+    # lab_bridge.yaml says allow_drive: true for a bridge started by hand; a switched-off
+    # permission must never fall back to it.
+    script = lab._build_command(lab._read_config())
+    assert "-p allow_drive:=true -p allow_shoot:=true" in script
+    script = lab._build_command({"ALLOW_DRIVE": "false", "ALLOW_SHOOT": "no"})
+    assert "-p allow_drive:=false -p allow_shoot:=false" in script
+    assert "-p allow_drive:=false -p allow_shoot:=false" in lab._build_command({})
+
+
+def test_shoot_is_on_by_default_and_the_teacher_can_switch_it_off(lab):
+    status = lab.get_status()
+    assert status["shoot_allowed"] is True and status["shoot_running"] is None
+    lab.set_shoot(lab.DriveRequest(allow=False))
+    config = lab._read_config()
+    assert config["ALLOW_SHOOT"] == "false" and config["ALLOW_DRIVE"] == "true"
+    assert "-p allow_drive:=true -p allow_shoot:=false" in lab._build_command(config)
+    lab.set_shoot(lab.DriveRequest(allow=True))
+    lab.set_config(lab.LabConfig(CAMERA_TOPIC="/cam/compressed"))  # the form keeps it
+    assert lab._read_config()["ALLOW_SHOOT"] == "true"
+
+
+def test_shoot_switch_restarts_our_bridge_so_it_applies_at_once(lab, monkeypatch):
+    signals = []
+    monkeypatch.setattr(lab.os, "getpgid", lambda pid: pid)
+    monkeypatch.setattr(lab.os, "killpg", lambda pgid, sig: signals.append((pgid, sig)))
+    started = []
+
+    def fake_start():
+        config = lab._read_config()
+        started.append(config["ALLOW_SHOOT"])
+        lab._proc = _FakeProcess()
+        lab._started_allow_shoot = config["ALLOW_SHOOT"] == "true"
+    monkeypatch.setattr(lab, "start_bridge", fake_start)
+    lab._proc = _FakeProcess()
+    status = lab.set_shoot(lab.DriveRequest(allow=False))
+    assert signals == [(_FakeProcess.pid, lab.signal.SIGINT)]
+    assert started == ["false"]
+    assert status["shoot_allowed"] is False and status["shoot_running"] is False
+    assert status["drive_allowed"] is True  # the other switch is untouched
+
+
+def test_shoot_cannot_be_allowed_in_competition_mode(lab, tmp_path):
+    (tmp_path / "mode").write_text("competition\n")
+    with pytest.raises(HTTPException) as error:
+        lab.set_shoot(lab.DriveRequest(allow=True))
+    assert error.value.status_code == 409 and "発射" in error.value.detail
+    assert lab._read_config()["ALLOW_SHOOT"] == "false"
+    lab.set_shoot(lab.DriveRequest(allow=False))  # forbidding is always possible
+
+
+def test_competition_turns_shoot_off_and_practice_turns_it_on(lab, monkeypatch, tmp_path):
+    monkeypatch.setattr(lab, "start_bridge", lambda: None)
+    monkeypatch.setattr(lab.threading, "Thread", _run_now)
+    monkeypatch.setattr(lab, "_port_in_use", lambda: False)
+    # AUTOSTART already off, but lab.env still allows the launcher (edited by hand).
+    (tmp_path / "lab.env").write_text('AUTOSTART="false"\nALLOW_SHOOT="true"\n')
+    lab.disable_for_competition()
+    assert 'ALLOW_SHOOT="false"' in (tmp_path / "lab.env").read_text()
+    assert 'ALLOW_DRIVE="false"' in (tmp_path / "lab.env").read_text()
+    lab.enable_for_practice()
+    config = lab._read_config()
+    assert config["ALLOW_SHOOT"] == "true" and config["ALLOW_DRIVE"] == "true"
+
+
+def test_manager_start_keeps_the_teachers_shoot_choice(lab, monkeypatch, tmp_path):
+    seen = []
+    monkeypatch.setattr(lab, "start_bridge", lambda: seen.append(lab._read_config()))
+    monkeypatch.setattr(lab.threading, "Thread", _run_now)
+    (tmp_path / "lab.env").write_text('AUTOSTART="true"\nALLOW_SHOOT="false"\n')
+    lab.autostart()
+    assert seen[0]["ALLOW_SHOOT"] == "false" and seen[0]["ALLOW_DRIVE"] == "true"
+
+
+def test_forbidding_shoot_works_even_if_lab_env_cannot_be_written(
+        lab, monkeypatch, read_only_lab_env):
+    monkeypatch.setattr(lab.os, "getpgid", lambda pid: pid)
+    monkeypatch.setattr(lab.os, "killpg", lambda pgid, sig: None)
+    started = []
+
+    def fake_start():
+        started.append(lab._build_command(lab._read_config()))
+        lab._proc = _FakeProcess()
+    monkeypatch.setattr(lab, "start_bridge", fake_start)
+    read_only_lab_env('ALLOW_DRIVE="true"\nALLOW_SHOOT="true"\n')
+    lab._proc = _FakeProcess()
+    status = lab.set_shoot(lab.DriveRequest(allow=False))
+    assert len(started) == 1 and "-p allow_drive:=true -p allow_shoot:=false" in started[0]
+    assert status["shoot_allowed"] is False and status["drive_allowed"] is True
+    assert "sudo chown" in status["config_error"]

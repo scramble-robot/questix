@@ -645,6 +645,7 @@ async function refreshLabStatus() {
   document.getElementById("lab-stop").disabled = !data.running;
   showLabLog(data, serving);
   showLabDrive(data);
+  showLabShoot(data);
   showLabRecords(data.bridge);
   if (!labConfigLoaded) {
     document.getElementById("lab-camera").value = data.config.CAMERA_TOPIC || "";
@@ -843,6 +844,115 @@ function showLabDrive(data) {
     !setting && !(bridgeAllows && data.running);
 }
 
+// Why pages cannot use the launcher right now, from the bridge's shoot_state.blockers.
+function labShootBlockerText(blocker, bridge) {
+  const parts = blocker.parts || [];
+  const names = parts
+    .map((p) => (p === "roller" ? "ローラー(esc_motor_control)" : p === "shot" ? "発射台(shot_component)" : null))
+    .filter(Boolean)
+    .join("・");
+  switch (blocker.code) {
+    case "no_launcher": {
+      const domain = bridge.robot && bridge.robot.domain != null ? bridge.robot.domain : "未設定(0)";
+      return (
+        `${names || "発射装置"}が教材の指令を受け付けていません（ノードが動いていないか、練習用の起動ではないか、` +
+        `ROS_DOMAIN_ID ${domain} が違います）。大会用の起動では教材から発射できません。`
+      );
+    }
+    case "other_publisher":
+      return `ほかのノード（${(blocker.nodes || []).join(", ") || "不明なノード"}）が教材用の発射指令（/roller/lab・/shot/lab/*）を出しています。`;
+    case "emergency_stop":
+      return "非常停止が押されています";
+    case "controller":
+      return "コントローラーで発射装置を操作中です（ボタンを離すと教材から使えます）";
+    default:
+      return null; // not_allowed is the state line itself
+  }
+}
+
+// "教材からの発射": the same as driving, from the running bridge's shoot_state (an older bridge
+// without it counts as "cannot").
+function showLabShoot(data) {
+  const bridge = data.bridge;
+  const serving = data.running || data.external;
+  const shoot = (bridge && bridge.shoot_state) || {};
+  const bridgeAllows = shoot.allowed === true;
+  const setting = data.shoot_allowed;
+  const stale = !setting && bridgeAllows && !data.external;
+
+  let state;
+  let tone;
+  if (!serving) {
+    state = "配信が止まっています";
+    tone = "idle";
+  } else if (!bridge) {
+    state = "ブリッジの状態が分かりません（起動中か、状態を返さない古いブリッジです）";
+    tone = "idle";
+  } else if (stale) {
+    state =
+      "止めました（配信中のブリッジはまだ発射できます。『配信停止』→『配信開始』を押してください）";
+    tone = "driving";
+  } else if (bridgeAllows) {
+    state = "発射できます（生徒が教材で安全確認をして操作します）";
+    tone = "driving";
+  } else {
+    state = "止めています（教材からは発射できません）";
+    tone = "idle";
+  }
+  document.getElementById("lab-shoot-indicator").className =
+    `rec-indicator ${tone} lab-drive-status`;
+  document.getElementById("lab-shoot-state").textContent = state;
+
+  document.getElementById("lab-shoot-owner-row").hidden = !shoot.active;
+  document.getElementById("lab-shoot-owner").textContent = shoot.active
+    ? `生徒の端末 #${shoot.owner}（ローラー ${Math.round((shoot.roller ? shoot.roller.power : 0) * 100)}%）`
+    : "—";
+
+  const ready = document.getElementById("lab-shoot-ready");
+  ready.replaceChildren();
+  ready.hidden = !bridgeAllows;
+  if (bridgeAllows) {
+    const texts = (shoot.blockers || []).map((b) => labShootBlockerText(b, bridge)).filter(Boolean);
+    for (const text of texts) {
+      const item = document.createElement("li");
+      item.className = "blocked";
+      item.textContent = text;
+      ready.append(item);
+    }
+    if (!texts.length) {
+      const item = document.createElement("li");
+      item.className = "ready";
+      item.textContent = "生徒の教材から発射装置を使えます";
+      ready.append(item);
+    }
+  }
+
+  const shootable = bridgeAllows || setting;
+  document.getElementById("lab-shoot-card").classList.toggle("allowed", shootable);
+  // showLabDrive ran first and set the dot for driving; either permission lights it.
+  const dot = document.getElementById("tab-lab-dot");
+  dot.classList.toggle("driving", dot.classList.contains("driving") || shootable);
+  if (data.config_error) setLabError("lab-shoot-error", data.config_error);
+
+  document.getElementById("lab-shoot-allow").disabled = setting;
+  document.getElementById("lab-shoot-forbid").disabled =
+    !setting && !(bridgeAllows && data.running);
+}
+
+async function setLabShoot(allow) {
+  if (!confirm("配信中のブリッジを起動し直すため、生徒全員の接続が数秒切れます。よろしいですか？")) {
+    return;
+  }
+  try {
+    await api("/api/lab/shoot", { method: "POST", body: JSON.stringify({ allow }) });
+    toast(allow ? "教材からの発射を再開しました" : "教材からの発射を止めました", "success");
+    setLabError("lab-shoot-error", null);
+  } catch (e) {
+    setLabError("lab-shoot-error", e.message); // also toasted
+  }
+  await refreshLabStatus();
+}
+
 async function setLabDrive(allow) {
   if (!confirm("配信中のブリッジを起動し直すため、生徒全員の接続が数秒切れます。よろしいですか？")) {
     return;
@@ -872,6 +982,8 @@ async function labServeAction(path, done) {
 function setupLabEvents() {
   document.getElementById("lab-drive-allow").addEventListener("click", () => setLabDrive(true));
   document.getElementById("lab-drive-forbid").addEventListener("click", () => setLabDrive(false));
+  document.getElementById("lab-shoot-allow").addEventListener("click", () => setLabShoot(true));
+  document.getElementById("lab-shoot-forbid").addEventListener("click", () => setLabShoot(false));
   document
     .getElementById("lab-start")
     .addEventListener("click", () => labServeAction("/api/lab/start", "教材の配信を開始しました"));

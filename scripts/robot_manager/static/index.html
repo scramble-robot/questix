@@ -277,7 +277,7 @@
       </h2>
       <p class="lab-note">
         配信を開始すると、同じネットワークの端末から教材を開けます。教材はロボットのセンサーの値を
-        受け取ります。下の「教材からの走行」を許可したときだけ、教材の走行実験がロボットを動かします。
+        受け取ります。下の「教材からの走行」「教材からの発射」を許可したときだけ、教材がロボットの走行や発射台を動かします。
       </p>
 
       <div class="rec-status">
@@ -359,6 +359,43 @@
       </p>
     </section>
 
+    <section class="card lab-drive" id="lab-shoot-card">
+      <h2 class="lab-card-head">
+        <span class="card-title">教材からの発射</span>
+      </h2>
+      <!-- What the running bridge itself says (GET /api/state shoot_state), not only lab.env. -->
+      <p id="lab-shoot-indicator" class="rec-indicator idle lab-drive-status">
+        <span class="rec-dot"></span>
+        <span id="lab-shoot-state">配信が止まっています</span>
+      </p>
+      <div class="rec-status lab-drive-facts">
+        <div class="rec-status-row" id="lab-shoot-owner-row" hidden>
+          <span class="rec-status-label">いま操作しているのは</span>
+          <span id="lab-shoot-owner" class="rec-status-value">—</span>
+        </div>
+      </div>
+      <ul id="lab-shoot-ready" class="lab-drive-ready" hidden></ul>
+
+      <p id="lab-shoot-error" class="lab-inline-error" role="alert" hidden></p>
+
+      <div class="btn-group rec-controls">
+        <button class="btn btn-safe" id="lab-shoot-forbid">教材からの発射を止める</button>
+        <button class="btn btn-caution" id="lab-shoot-allow" disabled>教材からの発射を再開する</button>
+      </div>
+
+      <p class="lab-note">
+        練習モードでは、生徒が教材で「発射する方向に人がいない・的の周りに人がいない」のチェックを入れると、
+        ローラーの回転・発射台の角度・ディスク1枚の発射を教材から操作できます。コントローラーが優先です：
+        ローラーや発射のボタンを押すと、すぐにコントローラーの操作に切り替わり、教材の操作は止まります。
+      </p>
+      <p class="lab-note">
+        授業の外で使わせたくないときは「教材からの発射を止める」を押します（配信中のブリッジを自動で起動し直すので、
+        生徒の接続が数秒切れます）。大会モードでは使えず、練習モードに戻すと再開します。
+        ローラーは最大 80%、発射はローラーが1秒回ってから・前の発射から2秒あけて1枚ずつ（questix_lab_bridge の設定）。
+        教材の画面が閉じたり通信が 0.5 秒途切れたり 30 秒たったりするとローラーは止まり、どの端末からでも止められます。
+      </p>
+    </section>
+
     <section class="card">
       <h2>スマートフォンで開く</h2>
       <p class="lab-note">
@@ -395,7 +432,7 @@
         </div>
       </div>
       <button class="btn btn-save" id="lab-save-config">教材の設定を保存</button>
-      <p class="lab-note">設定は、次に配信を開始したときから有効になります。自動開始は最初からオンです。オンの間は、教材のページとロボットの値を、同じネットワークの全員が開けます（走行は「教材からの走行」で許可したときだけ）。大会モードに切り替えると、配信を止めて自動開始もオフにします（大会モードの間は自動で開始しません）。練習モードに戻すと、自動開始をオンに戻して配信を開始します。</p>
+      <p class="lab-note">設定は、次に配信を開始したときから有効になります。自動開始は最初からオンです。オンの間は、教材のページとロボットの値を、同じネットワークの全員が開けます（走行と発射は「教材からの走行」「教材からの発射」で許可したときだけ）。大会モードに切り替えると、配信を止めて自動開始もオフにします（大会モードの間は自動で開始しません）。練習モードに戻すと、自動開始をオンに戻して配信を開始します。</p>
     </section>
     </div><!-- /lab panel -->
 

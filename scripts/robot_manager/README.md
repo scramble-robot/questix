@@ -110,6 +110,19 @@ The **教材** tab starts and stops that bridge, so nobody has to run `ros2 laun
   `ROS_DOMAIN_ID`, another publisher on `/target_twist/lab`, emergency stop), the robot name,
   connected pages and which page drives. If `lab.env` cannot be written when switching off,
   driving still counts as off and the reason is shown as `config_error`.
+- **教材からの発射** (`ALLOW_SHOOT` in `lab.env`, `POST /api/lab/shoot`) does the same for the disc
+  launcher: the lessons may spin the roller, tilt and fire one disc at a time
+  (`questix_lab_bridge/README.md`, "Launcher experiments"); the learner ticks
+  「発射する方向に人がいない・的の周りに人がいない」 on the page, and the controller's launcher
+  buttons take over at any time. Same policy as driving: on by default in practice mode, the
+  card's 「教材からの発射を止める」 is the teacher's off switch, 大会モード turns it off, practice turns it
+  on, the teacher's choice survives a manager restart, a failed write still counts as off. The
+  card shows `bridge.shoot_state` (who operates it, what blocks it: launcher nodes not accepting
+  lab input, another publisher, emergency stop, controller in use). `/api/lab/status` carries
+  `shoot_allowed` / `shoot_running` like `drive_allowed` / `drive_running`.
+- Both permissions are always passed to the bridge explicitly (`-p allow_drive:=true|false
+  -p allow_shoot:=true|false`), so the defaults in `lab_bridge.yaml` (which lets a bridge started
+  by hand drive) never decide for a bridge started here.
 - A permission error on `mode`, `launch.env` or `lab.env` names the service user, the owner and
   the fix (`sudo chown <user>:<user> /etc/questix_robot …`). `scripts/check-robot-manager.sh`
   checks the same, plus that `wifi_ap.env` is readable.

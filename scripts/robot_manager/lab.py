@@ -11,6 +11,13 @@ own checks (questix_lab_bridge/questix_lab_bridge/drive.py); twist_arbiter lets 
 take over at any time. ``/api/lab/drive`` is the teacher's off switch. Competition mode turns
 driving off; going back to practice mode turns it on again.
 
+``ALLOW_SHOOT`` works the same way for the disc launcher (roller, tilt, firing one disc; the
+bridge's questix_lab_bridge/questix_lab_bridge/shoot.py): on by default in practice mode, each
+firing session confirmed by the learner's safety tick, the controller taking over at any time,
+``/api/lab/shoot`` the teacher's off switch, off in competition mode. Both permissions are always
+passed to the bridge explicitly (``-p allow_drive:=…`` / ``-p allow_shoot:=…``), so the defaults
+in its lab_bridge.yaml never decide.
+
 The status reports what the running bridge itself says (``GET /api/state`` on its port), so the
 tab shows whether pages can really drive now, also for a bridge started by hand, and how many
 records the bridge keeps on the robot (its ``records``: count, size, quota, folder).
@@ -81,6 +88,13 @@ _DEFAULT_CONFIG = {
     # (/api/lab/drive), competition mode switches it off and practice mode on again. Changed
     # only through set_drive and the mode switches, never by the settings form.
     "ALLOW_DRIVE": "true",
+    # "true": the bridge may publish the launcher's lab inputs (/roller/lab, /shot/lab/tilt,
+    # /shot/lab/fire) for the lessons' launcher experiments; the learner confirms each firing
+    # session on the page, and the controller's launcher buttons take over. Same policy as
+    # ALLOW_DRIVE: on by default in practice mode, the teacher can switch it off
+    # (/api/lab/shoot), competition mode switches it off and practice mode on again; changed only
+    # through set_shoot and the mode switches.
+    "ALLOW_SHOOT": "true",
     # Folder where the bridge keeps QUESTiX LAB records (pages' saves, controller driving, rosbag
     # conversions). Empty = the bridge's own default (records_dir in
     # questix_lab_bridge/config/lab_bridge.yaml, ~/.local/share/questix/lab-records of the user
@@ -99,11 +113,15 @@ _lock = threading.Lock()
 _proc: Optional[subprocess.Popen] = None
 _started_at: Optional[float] = None
 _last_stop_reason: Optional[str] = None
-# Whether the running bridge was started with allow_drive (lab.env may have changed since).
+# Permissions the lessons get from lab.env; each is passed to the bridge as its parameter.
+_PERMISSIONS = {"ALLOW_DRIVE": "allow_drive", "ALLOW_SHOOT": "allow_shoot"}
+# Whether the running bridge was started with allow_drive / allow_shoot (lab.env may have changed
+# since).
 _started_allow_drive = False
-# Driving had to be switched off but lab.env could not be written: it counts as "false" anyway
-# until a write succeeds, so a permission problem never leaves driving allowed.
-_drive_forced_off = False
+_started_allow_shoot = False
+# Permissions that had to be switched off but lab.env could not be written: they count as
+# "false" anyway until a write succeeds, so a permission problem never leaves them allowed.
+_forced_off: set[str] = set()
 # Why the last such write failed (shown in the tab until a write succeeds).
 _config_error: Optional[str] = None
 
@@ -173,14 +191,16 @@ def _read_config() -> dict[str, str]:
     config = dict(_DEFAULT_CONFIG)
     config.update({k: v for k, v in _read_env_file(LAB_ENV_FILE).items() if k in config})
     # A competition robot never takes lab commands, whatever lab.env says (it may have been edited
-    # by hand, or never written: driving is on by default).
-    if _drive_forced_off or _competition_mode():
-        config["ALLOW_DRIVE"] = "false"
+    # by hand, or never written: driving and the launcher are on by default).
+    competition = _competition_mode()
+    for key in _PERMISSIONS:
+        if competition or key in _forced_off:
+            config[key] = "false"
     return config
 
 
 def _write_config(values: dict[str, str]) -> None:
-    global _drive_forced_off, _config_error
+    global _config_error
     lines = [f'{key}="{value}"' for key, value in values.items()]
     try:
         LAB_ENV_FILE.write_text("\n".join(lines) + "\n")
@@ -188,25 +208,26 @@ def _write_config(values: dict[str, str]) -> None:
         raise HTTPException(status_code=403, detail=permission_detail(LAB_ENV_FILE))
     except OSError as e:
         raise HTTPException(status_code=500, detail=f"{LAB_ENV_FILE} に書き込めません: {e}")
-    _drive_forced_off = False
+    # What was written came from _read_config, so it already says "false" for every forced key.
+    _forced_off.clear()
     _config_error = None
 
 
-def _force_drive_off(config: dict[str, str], why: str) -> dict[str, str]:
-    """Write ``config`` with ALLOW_DRIVE=false; if that fails, log it and keep driving off anyway.
+def _force_off(config: dict[str, str], keys, why: str) -> dict[str, str]:
+    """Write ``config`` with ``keys`` (ALLOW_*) false; if that fails, log it and keep them off.
 
-    For the places where switching driving off must not fail: competition mode and
-    走行を禁止する. Returns the config with ALLOW_DRIVE=false.
+    For the places where switching a permission off must not fail: competition mode, 走行を禁止する
+    and 発射を禁止する. Returns the config with those keys false.
     """
-    global _drive_forced_off, _config_error
-    config = {**config, "ALLOW_DRIVE": "false"}
+    global _config_error
+    config = {**config, **{key: "false" for key in keys}}
     try:
         _write_config(config)
     except HTTPException as error:
-        _drive_forced_off = True
+        _forced_off.update(keys)
         _config_error = error.detail
-        logger.error("QUESTiX LAB (%s): %s — driving stays off until lab.env can be written",
-                     why, error.detail)
+        logger.error("QUESTiX LAB (%s): %s — %s stays off until lab.env can be written",
+                     why, error.detail, ", ".join(keys))
     return config
 
 
@@ -254,8 +275,10 @@ def _build_command(config: dict[str, str]) -> str:
     ]
     if camera_topic:  # an empty value would be an rcl parse error, and empty is the default
         args += ["-p", f"camera_topic:={camera_topic}"]
-    if config.get("ALLOW_DRIVE") == "true":
-        args += ["-p", "allow_drive:=true"]
+    # Always explicit: lab_bridge.yaml has its own defaults (allow_drive: true for a bridge started
+    # by hand), and a switched-off permission must never fall back to them.
+    for key, parameter in _PERMISSIONS.items():
+        args += ["-p", f"{parameter}:={'true' if config.get(key) == 'true' else 'false'}"]
     records_dir = config.get("RECORDS_DIR", "")
     if records_dir:
         if not _ABS_PATH_RE.match(records_dir):
@@ -393,10 +416,13 @@ def _status_payload() -> dict:
         # or not ours). The truth for driving is bridge.read_only.
         "drive_allowed": config.get("ALLOW_DRIVE") == "true",
         "drive_running": _started_allow_drive if managed else None,
+        # The same for the launcher; the truth is bridge.shoot_state.allowed.
+        "shoot_allowed": config.get("ALLOW_SHOOT") == "true",
+        "shoot_running": _started_allow_shoot if managed else None,
         # The running bridge's own GET /api/state (ours or started by hand); null when none
         # answers.
         "bridge": _bridge_state() if managed or external else None,
-        # A failed write of lab.env that did not fail the request (see _force_drive_off).
+        # A failed write of lab.env that did not fail the request (see _force_off).
         "config_error": _config_error,
         # The end of the last bridge's output, while none of ours runs or after a failure.
         "log_tail": _log_tail() if not managed or failed else None,
@@ -413,7 +439,7 @@ def get_status():
 @router.post("/start")
 def start_bridge():
     """Start the bridge (teaching pages + telemetry on the LAN; driving only if allowed)."""
-    global _proc, _started_at, _last_stop_reason, _started_allow_drive
+    global _proc, _started_at, _last_stop_reason, _started_allow_drive, _started_allow_shoot
     with _lock:
         if _proc is not None and _proc.poll() is None:
             raise HTTPException(status_code=409, detail="教材の配信は既に動いています")
@@ -425,9 +451,11 @@ def start_bridge():
         if not (LAB_DIR / "index.html").is_file():
             raise HTTPException(status_code=500, detail="教材のファイルが見つかりません")
         config = _read_config()
-        if _competition_mode() and config.get("ALLOW_DRIVE") == "true":
-            # lab.env may have been edited by hand; a competition robot never takes lab commands.
-            config = _force_drive_off(config, "competition mode")
+        if _competition_mode() and any(
+                _read_env_file(LAB_ENV_FILE).get(key) != "false" for key in _PERMISSIONS):
+            # _read_config already says false; this makes lab.env say it too (it may have been
+            # edited by hand). A competition robot never takes lab commands.
+            config = _force_off(config, tuple(_PERMISSIONS), "competition mode")
         script = _build_command(config)
         log = _open_log()
         try:
@@ -460,6 +488,7 @@ def start_bridge():
         _started_at = time.time()
         _last_stop_reason = None
         _started_allow_drive = config.get("ALLOW_DRIVE") == "true"
+        _started_allow_shoot = config.get("ALLOW_SHOOT") == "true"
         return _status_payload()
 
 
@@ -479,7 +508,7 @@ def set_config(config: LabConfig):
         key: (str(value).lower() if isinstance(value, bool) else value)
         for key, value in config.model_dump().items()
     }
-    _write_config({**_read_config(), **values})  # keeps ALLOW_DRIVE as it is
+    _write_config({**_read_config(), **values})  # keeps ALLOW_DRIVE / ALLOW_SHOOT as they are
     return values
 
 
@@ -493,19 +522,39 @@ def set_drive(request: DriveRequest):
     for it, and its bridge.read_only tells what it does.
 
     Forbidding always works: if lab.env cannot be written, driving stays off in this manager
-    (config_error says why) and the bridge is still restarted without allow_drive.
+    (config_error says why) and the bridge is still restarted with allow_drive:=false.
     """
-    if request.allow and _competition_mode():
-        raise HTTPException(status_code=409, detail="大会モードでは教材から走行させられません")
+    return _set_permission("ALLOW_DRIVE", request.allow,
+                           "大会モードでは教材から走行させられません", "走行を禁止する",
+                           "drive_setting")
+
+
+@router.post("/shoot")
+def set_shoot(request: DriveRequest):
+    """Allow or forbid the lessons' launcher experiments (roller, tilt, fire), like set_drive.
+
+    Our bridge is restarted at once, so the switch never says one thing while the bridge does
+    another; forbidding always works, even when lab.env cannot be written.
+    """
+    return _set_permission("ALLOW_SHOOT", request.allow,
+                           "大会モードでは教材から発射させられません", "発射を禁止する",
+                           "shoot_setting")
+
+
+def _set_permission(key: str, allow: bool, competition_detail: str, why: str,
+                    stop_reason: str) -> dict:
+    """Write one ALLOW_* switch and restart a bridge of ours so it applies (set_drive/set_shoot)."""
+    if allow and _competition_mode():
+        raise HTTPException(status_code=409, detail=competition_detail)
     config = _read_config()
-    if request.allow:
-        _write_config({**config, "ALLOW_DRIVE": "true"})
+    if allow:
+        _write_config({**config, key: "true"})
     else:
-        _force_drive_off(config, "走行を禁止する")
+        _force_off(config, (key,), why)
     with _lock:
         running = _proc is not None and _proc.poll() is None
         if running:
-            _stop_locked("drive_setting")
+            _stop_locked(stop_reason)
     if running:
         start_bridge()
     with _lock:
@@ -518,28 +567,32 @@ def disable_for_competition() -> None:
     Competition runs must not stream telemetry to the LAN: a bridge this manager started is
     stopped first (whatever happens to lab.env), then automatic start is turned off in lab.env
     (the checkbox shows it). Switching back to practice mode turns both on again
-    (enable_for_practice). Driving from the lessons (ALLOW_DRIVE) is turned off too, and back on
-    with practice mode. A failed write of lab.env is logged, not raised: the mode
+    (enable_for_practice). Driving and the launcher from the lessons (ALLOW_DRIVE, ALLOW_SHOOT)
+    are turned off too, and back on with practice mode. A failed write of lab.env is logged, not
+    raised: the mode
     switch itself has already happened, and autostart never runs in competition mode anyway.
     """
     with _lock:
         if _proc is not None and _proc.poll() is None:
             _stop_locked("competition_mode")
     config = _read_config()
-    if config.get("AUTOSTART") != "false" or config.get("ALLOW_DRIVE") != "false":
-        _force_drive_off({**config, "AUTOSTART": "false"}, "competition mode")
+    if config.get("AUTOSTART") != "false" or any(
+            _read_env_file(LAB_ENV_FILE).get(key) != "false" for key in _PERMISSIONS):
+        _force_off({**config, "AUTOSTART": "false"}, tuple(_PERMISSIONS), "competition mode")
 
 
 def enable_for_practice() -> None:
     """Undo disable_for_competition when the robot goes from competition back to practice mode.
 
-    Automatic start and driving from the lessons are turned on again, and the bridge is started
+    Automatic start, driving and the launcher from the lessons are turned on again, and the
+    bridge is started
     now, in the background like at boot, so the class can open the pages right away. A bridge
     that already runs (started here or by hand) is left alone.
     """
     config = _read_config()
-    if config.get("AUTOSTART") != "true" or config.get("ALLOW_DRIVE") != "true":
-        _write_config({**config, "AUTOSTART": "true", "ALLOW_DRIVE": "true"})
+    wanted = {"AUTOSTART": "true", **{key: "true" for key in _PERMISSIONS}}
+    if any(config.get(key) != value for key, value in wanted.items()):
+        _write_config({**config, **wanted})
     with _lock:
         running = (_proc is not None and _proc.poll() is None) or _port_in_use()
     if not running:
