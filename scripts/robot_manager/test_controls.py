@@ -61,7 +61,21 @@ class HttpResponse:
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    """Keep every configuration write inside the test directory."""
+    """Keep every configuration read and write inside the test directory.
+
+    The paths derived from CONFIG_DIR at import time (mode, start request, lab.env, ...) are moved
+    too: otherwise the tests read and write the real /etc/questix_robot, and the manager's start-up
+    would start a real QUESTiX LAB bridge (lab.env missing means AUTOSTART's default, true).
+    """
+    for module, names in ((backend, ('MODE_FILE', 'ENV_FILE', 'START_REQUEST_FILE',
+                                     'LAST_LAUNCH_FILE')),
+                          (backend.lab, ('LAUNCH_ENV_FILE', 'LAB_ENV_FILE', 'MODE_FILE')),
+                          (backend.recorder, ('LAUNCH_ENV_FILE', 'ROSBAG_ENV_FILE')),
+                          (backend.wifi_ap, ('WIFI_AP_ENV_FILE',))):
+        monkeypatch.setattr(module, 'CONFIG_DIR', tmp_path)
+        for name in names:
+            monkeypatch.setattr(module, name, tmp_path / getattr(module, name).name)
+    (tmp_path / 'lab.env').write_text('AUTOSTART=false\n')
     monkeypatch.setattr(backend, 'CONFIG_DIR', tmp_path)
     monkeypatch.setattr(backend, '_read_env', lambda: {})
     monkeypatch.delenv('ROBOT_WS', raising=False)
