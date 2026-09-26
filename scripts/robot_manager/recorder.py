@@ -99,13 +99,13 @@ def _read_config_for_api() -> dict[str, str]:
     try:
         return _read_config()
     except OSError as exc:
-        raise HTTPException(status_code=500, detail="録画設定を読み込めません") from exc
+        raise HTTPException(status_code=500, detail="記録設定を読み込めません") from exc
 
 
 def _write_config(config: dict[str, str]) -> None:
     """Write rosbag.env preserving a header comment."""
     lines = [
-        "# Questix rosbag recorder configuration",
+        "# QUESTiX rosbag recorder configuration",
         "# Managed by robot_manager — edit via Web UI or manually",
         "",
     ]
@@ -362,7 +362,7 @@ def start_recording():
     global _proc, _bag_name, _bag_path, _started_at, _last_stop_reason
     with _lock:
         if _proc is not None and _proc.poll() is None:
-            raise HTTPException(status_code=409, detail="録画中です")
+            raise HTTPException(status_code=409, detail="記録中です")
 
         config = _read_config_for_api()
         vehicle = config["VEHICLE_NAME"]
@@ -377,20 +377,20 @@ def start_recording():
         if min_free > 0 and free < min_free:
             raise HTTPException(
                 status_code=507,
-                detail=f"空き容量不足: {free // 1024**3}GB < {min_free // 1024**3}GB",
+                detail=f"空き容量が足りません: {free // 1024**3}GB < {min_free // 1024**3}GB",
             )
 
         try:
             output_dir.mkdir(parents=True, exist_ok=True)
         except OSError as e:
-            raise HTTPException(status_code=500, detail=f"出力フォルダを作成できません: {e}")
+            raise HTTPException(status_code=500, detail=f"保存先フォルダを作成できません: {e}")
 
         bag_name = f"{vehicle}_{datetime.now():%Y%m%d_%H%M%S}"
         bag_path = output_dir / bag_name
         try:
             script = _build_record_command(config, bag_path)
         except OSError as exc:
-            raise HTTPException(status_code=500, detail="録画設定を読み込めません") from exc
+            raise HTTPException(status_code=500, detail="記録設定を読み込めません") from exc
 
         try:
             proc = subprocess.Popen(
@@ -400,7 +400,7 @@ def start_recording():
                 stderr=subprocess.DEVNULL,
             )
         except OSError as e:
-            raise HTTPException(status_code=500, detail=f"録画を開始できません: {e}")
+            raise HTTPException(status_code=500, detail=f"記録を開始できません: {e}")
 
         _proc = proc
         _bag_name = bag_name
@@ -419,7 +419,7 @@ def start_recording():
             _last_stop_reason = "start_failed"
             raise HTTPException(
                 status_code=500,
-                detail="録画を開始できませんでした (ROS環境 / rosbag2 mcapプラグインを確認してください)",
+                detail="記録を開始できませんでした（ROS 環境と rosbag2 の mcap プラグインを確認してください）",
             )
 
         watcher = threading.Thread(
@@ -434,7 +434,7 @@ def stop_recording():
     """Stop the current recording (SIGINT so the bag is finalized)."""
     with _lock:
         if _proc is None or _proc.poll() is not None:
-            raise HTTPException(status_code=409, detail="録画していません")
+            raise HTTPException(status_code=409, detail="記録していません")
         name = _bag_name
         _stop_locked("stopped")
         return {"recording": False, "bag_name": name}
@@ -500,15 +500,15 @@ def delete_bag(ref: BagRef):
     """Delete a bag directory inside OUTPUT_DIR (name-validated, in-dir only)."""
     name = ref.bag_name
     if not name or "/" in name or name.startswith(".") or name in ("", ".", ".."):
-        raise HTTPException(status_code=400, detail="バッグ名が不正です")
+        raise HTTPException(status_code=400, detail="記録名が不正です")
     config = _read_config_for_api()
     output_dir = Path(config["OUTPUT_DIR"]).resolve()
     target = (output_dir / name).resolve()
     if target.parent != output_dir or not target.is_dir():
-        raise HTTPException(status_code=404, detail="バッグが見つかりません")
+        raise HTTPException(status_code=404, detail="記録が見つかりません")
     with _lock:
         if _bag_name == name and _proc is not None and _proc.poll() is None:
-            raise HTTPException(status_code=409, detail="録画中のバッグは削除できません")
+            raise HTTPException(status_code=409, detail="記録中のデータは削除できません")
     try:
         shutil.rmtree(target)
     except OSError as e:

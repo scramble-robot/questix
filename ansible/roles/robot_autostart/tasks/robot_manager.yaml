@@ -27,22 +27,33 @@
       [project]
       name = "robot_manager"
       version = "0.1.0"
-      dependencies = ["fastapi", "uvicorn[standard]"]
+      # Pinned in scripts/robot_manager/requirements.txt (shared with setup.py and the scripts).
+      dynamic = ["dependencies"]
+
+      [tool.setuptools.dynamic]
+      dependencies = { file = ["robot_manager/requirements.txt"] }
 
       [tool.setuptools.packages.find]
       where = ["."]
 
       [tool.setuptools.package-data]
-      robot_manager = ["static/*", "static/**/*"]
+      robot_manager = ["static/*", "static/**/*", "requirements.txt"]
     dest: /tmp/robot_manager_pkg/pyproject.toml
     owner: root
     group: root
     mode: "0644"
 
+# The exact versions robot_manager is tested with; see the comment in requirements.txt.
+- name: Install the pinned robot-manager dependencies
+  ansible.builtin.pip:
+    requirements: /tmp/robot_manager_pkg/robot_manager/requirements.txt
+    extra_args: "--break-system-packages --ignore-installed"
+    executable: pip3
+
 - name: Install robot-manager from local scripts directory
   ansible.builtin.pip:
     name: /tmp/robot_manager_pkg
-    extra_args: "--break-system-packages --ignore-installed"
+    extra_args: "--break-system-packages --ignore-installed --no-deps"
     executable: pip3
 
 - name: Deploy questix_robot_manager systemd service

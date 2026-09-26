@@ -192,10 +192,19 @@ def test_competition_service_launchers_always_enable_gpio_safety():
     for relative_path in launcher_paths:
         text = (SOURCE_ROOT / relative_path).read_text(encoding='utf-8')
         launcher_texts.append(text)
-        assert 'LAUNCH_ARGS="${LAUNCH_ARGS} enable_gpio_ref:=true"' in text
-        assert 'LAUNCH_ARGS="${LAUNCH_ARGS} enable_autoreferee:=true"' in text
-        assert 'enable_gpio_ref:=${ENABLE_GPIO_REF' not in text
-        assert 'if [ "${MODE}" != "competition" ]' in text
+        # Competition branch: both GPIO safety inputs fixed on, launch.env ignored.
+        start = text.index('if [ "${MODE}" = "competition" ]; then')
+        middle = text.index('\nelse\n', start)
+        end = text.index('\nfi\n', middle)
+        competition, practice = text[start:middle], text[middle:end]
+        assert 'LAUNCH_ARGS="${LAUNCH_ARGS} enable_gpio_ref:=true"' in competition
+        assert 'LAUNCH_ARGS="${LAUNCH_ARGS} enable_autoreferee:=true"' in competition
+        code = [line for line in competition.splitlines() if not line.strip().startswith('#')]
+        assert not any('ENABLE_GPIO_REF' in line for line in code)
+        # Practice branch (Robot Manager's 起動 only): no AutoReferee; GPIO safety on unless
+        # launch.env says exactly "false".
+        assert 'LAUNCH_ARGS="${LAUNCH_ARGS} enable_autoreferee:=false"' in practice
+        assert '"${ENABLE_GPIO_REF:-true}" = "false"' in practice
 
     safety_lines = [
         [
@@ -233,3 +242,105 @@ def test_installers_preserve_existing_environment_but_launcher_is_safe():
     assert 'launch.env already exists, skipping' in installer
     assert 'src: launch.env.j2' in ansible_tasks
     assert 'force: false' in ansible_tasks
+
+
+def test_twist_arbiter_only_in_practice_launches():
+    # Practice runs share /target_twist between the controller and QUESTiX LAB through
+    # twist_arbiter; a competition run (AutoReferee) must keep joy_controller -> /target_twist.
+    core = load_xml('launcher/launch/questix_core.launch.xml')
+    assert find_arg(core, 'enable_twist_arbiter').get('default') == 'true'
+    drive_include = next(
+        include for include in core.findall('.//include')
+        if 'drive_component.launch.xml' in include.get('file', '')
+    )
+    forwarded = next(
+        arg for arg in drive_include.findall('./arg') if arg.get('name') == 'enable_twist_arbiter')
+    assert forwarded.get('value') == (
+        '$(and $(var enable_twist_arbiter) $(not $(var enable_autoreferee)))')
+
+    drive = load_xml('launcher/launch/drive_component.launch.xml')
+    assert find_arg(drive, 'enable_twist_arbiter').get('default') == 'false'
+    controller_groups = [
+        group for group in drive.findall('./group')
+        if any('find-pkg-share joy_controller' in include.get('file', '')
+               for include in group.findall('./include'))
+    ]
+    assert len(controller_groups) == 2
+    for group in controller_groups:
+        remap = group.find('./set_remap')
+        assert remap is not None
+        assert remap.get('from') == '/target_twist'
+        assert remap.get('to') == '$(var controller_twist_topic)'
+    lets = {(let.get('value'), let.get('if'), let.get('unless')) for let in drive.findall('./let')}
+    assert ('/target_twist/joy', '$(var enable_twist_arbiter)', None) in lets
+    assert ('/target_twist', None, '$(var enable_twist_arbiter)') in lets
+
+    for relative_path in (
+        'systemd/questix_robot_launcher.sh',
+        'ansible/roles/robot_autostart/files/questix_robot_launcher.sh',
+    ):
+        text = (SOURCE_ROOT / relative_path).read_text(encoding='utf-8')
+        assert 'enable_twist_arbiter' not in text
+        assert 'LAUNCH_ARGS="${LAUNCH_ARGS} enable_autoreferee:=true"' in text
+
+
+def test_lab_launcher_input_only_in_practice_launches():
+    # Practice runs let QUESTiX LAB operate the roller, tilt and fire through the ESC and shot
+    # nodes' accept_lab_input; a competition run (AutoReferee) must never subscribe to those.
+    core = load_xml('launcher/launch/questix_core.launch.xml')
+    assert find_arg(core, 'enable_lab_shoot').get('default') == 'true'
+    shot_include = next(
+        include for include in core.findall('.//include')
+        if 'shot_component.launch.xml' in include.get('file', '')
+    )
+    forwarded = next(
+        arg for arg in shot_include.findall('./arg') if arg.get('name') == 'accept_lab_input')
+    assert forwarded.get('value') == (
+        '$(and $(var enable_lab_shoot) $(not $(var enable_autoreferee)))')
+
+    shot = load_xml('launcher/launch/shot_component.launch.xml')
+    assert find_arg(shot, 'accept_lab_input').get('default') == 'false'
+    node_includes = [
+        include for include in shot.findall('./include')
+        if 'find-pkg-share motor_control_app' in include.get('file', '')
+        or 'find-pkg-share esc_motor_control_cpp' in include.get('file', '')
+    ]
+    assert len(node_includes) == 2
+    for include in node_includes:
+        values = {arg.get('name'): arg.get('value') for arg in include.findall('./arg')}
+        assert values.get('accept_lab_input') == '$(var accept_lab_input)'
+
+    # The node launch files only forward the override; the YAML default stays false.
+    esc = load_xml('esc_motor_control_cpp/launch/esc_motor_control_cpp.launch.xml')
+    assert find_arg(esc, 'accept_lab_input').get('default') == 'false'
+    esc_params = {
+        param.get('name'): param.get('value') for param in esc.findall('./node/param')
+    }
+    assert esc_params.get('accept_lab_input') == '$(var accept_lab_input)'
+    shot_py = (
+        SOURCE_ROOT / 'motor_control_app/launch/shot_component.launch.py'
+    ).read_text(encoding='utf-8')
+    assert "'accept_lab_input',\n        default_value='false'" in shot_py
+
+    esc_defaults = {'accept_lab_input': False, 'lab_topic': '/roller/lab',
+                    'lab_max_speed': 0.8, 'lab_joy_quiet_sec': 1.0}
+    shot_defaults = {'accept_lab_input': False, 'lab_joy_quiet_sec': 1.0,
+                     'lab_min_fire_interval_sec': 2.0}
+    # One hardware YAML per node; operator mappings live in questix_control_config.
+    for variant in ('',):
+        esc_yaml = load_yaml(f'esc_motor_control_cpp/config/esc_motor_control_cpp{variant}.yaml')
+        esc_parameters = esc_yaml['esc_motor_control']['ros__parameters']
+        for name, value in esc_defaults.items():
+            assert esc_parameters[name] == value, (variant, name)
+        shot_yaml = load_yaml(f'motor_control_app/config/shot_config{variant}.yaml')
+        shot_parameters = shot_yaml['shot_component']['ros__parameters']
+        for name, value in shot_defaults.items():
+            assert shot_parameters[name] == value, (variant, name)
+
+    for relative_path in (
+        'systemd/questix_robot_launcher.sh',
+        'ansible/roles/robot_autostart/files/questix_robot_launcher.sh',
+    ):
+        text = (SOURCE_ROOT / relative_path).read_text(encoding='utf-8')
+        assert 'enable_lab_shoot' not in text
+        assert 'accept_lab_input' not in text

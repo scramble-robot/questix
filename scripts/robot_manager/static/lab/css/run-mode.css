@@ -1,0 +1,213 @@
+/* What an experiment runs on (js/shell/run-mode.js): the simulation, the connected robot, or values
+   measured on the robot. Each label has its own colour and its own mark, so the three stay apart
+   without relying on colour alone. The robot's colour is the one the control charts use for the
+   real recording (CHART_COLOURS.live in js/control/render.js). */
+:root {
+  --run-sim: #2f5f93;
+  --run-sim-soft: #e9f0f8;
+  --run-live: #a8435f;
+  --run-live-soft: #faedf1;
+  --run-data: #8a4b24;
+  --run-data-soft: #f8efe6;
+  --run-drive: #b3261e;
+  --run-drive-soft: #fdeceb;
+}
+
+.run-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px 3px 8px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.run-mode::before {
+  content: '';
+  flex: none;
+  width: 9px;
+  height: 9px;
+  box-sizing: border-box;
+}
+/* A screen: the model runs in the browser. */
+.run-mode-sim {
+  color: var(--run-sim);
+  background: var(--run-sim-soft);
+}
+.run-mode-sim::before {
+  width: 11px;
+  height: 8px;
+  border: 2px solid currentColor;
+  border-radius: 2px;
+}
+/* A signal dot: values arrive from the robot while it runs. */
+.run-mode-live {
+  color: var(--run-live);
+  background: var(--run-live-soft);
+}
+.run-mode-live::before {
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow:
+    0 0 0 2px var(--run-live-soft),
+    0 0 0 3px currentColor;
+  width: 7px;
+  height: 7px;
+  margin: 0 2px;
+}
+/* A ruler: numbers measured on the robot are typed in or opened as a file. */
+.run-mode-data {
+  color: var(--run-data);
+  background: var(--run-data-soft);
+}
+.run-mode-data::before {
+  width: 12px;
+  height: 7px;
+  border: 2px solid currentColor;
+  border-top: 0;
+  background: linear-gradient(currentColor, currentColor) 50% 0 / 2px 3px no-repeat;
+}
+/* A play triangle: the page itself moves the robot (only where the robot allows it). */
+.run-mode-drive {
+  color: var(--run-drive);
+  background: var(--run-drive-soft);
+}
+.run-mode-drive::before {
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 5px 0 5px 9px;
+  border-color: transparent transparent transparent currentColor;
+}
+.run-mode-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+h2 > .run-mode,
+h3 > .run-mode {
+  margin-right: 4px;
+  position: relative;
+  top: -1px;
+}
+
+/* First row of every lesson brief (js/shell/lesson-brief.js). */
+.lesson-brief .run-mode-strip {
+  grid-column: 1/-1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: -6px 0 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: #f5f8f7;
+}
+.lesson-brief .run-mode-strip[data-run-mode~='live'] {
+  background: var(--run-live-soft);
+}
+.lesson-brief .run-mode-strip[data-run-mode~='data'] {
+  background: var(--run-data-soft);
+}
+.run-mode-strip-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: #4d6469;
+}
+.lesson-brief .run-mode-strip p {
+  flex: 1 1 24em;
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.7;
+  color: #3d545b;
+}
+.run-mode-jump {
+  min-height: 0;
+  padding: 6px 12px;
+  font-size: 13px;
+  color: var(--run-live);
+  border-color: currentColor;
+  background: #fff;
+}
+
+/* Catalogue: labels on every card and their legend (js/shell/series-view.js). */
+.series-run-modes {
+  margin: 10px 0 14px;
+}
+.series-run-modes p {
+  margin: 8px 0 0;
+  padding-left: 10px;
+  border-left: 3px solid var(--run-live);
+  font-size: 14px;
+  line-height: 1.7;
+  color: #3d545b;
+}
+.series-run-modes[data-run-mode~='data'] p {
+  border-left-color: var(--run-data);
+}
+.series-run-legend {
+  margin: 16px 0 30px;
+  padding: 16px 20px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+}
+.series-run-legend h2 {
+  margin: 0;
+  font-size: 15px;
+}
+.series-run-legend > p {
+  margin: 4px 0 12px;
+  font-size: 14px;
+  color: #526b73;
+}
+.series-run-legend dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px 20px;
+  margin: 0;
+}
+.series-run-legend dt {
+  margin-bottom: 4px;
+}
+.series-run-legend dd {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #3d545b;
+}
+
+/* Course switcher: only the robot labels, small, under the summary. The switcher styles every
+   span as a block (mastery-systems.css), so the labels restate their own display. */
+.course-switcher .series-nav .run-mode-badges {
+  display: flex;
+  margin: 2px 0 0 20px;
+}
+.course-switcher .series-nav .run-mode-badges .run-mode {
+  display: inline-flex;
+  margin: 0;
+  font-size: 11px;
+  padding: 1px 7px 1px 6px;
+}
+
+/* The shared record / open block (js/live/live-view.js) carries the robot's colour. */
+.live-capture {
+  border-left: 4px solid var(--run-live);
+}
+
+/* Buttons that switch a lesson to robot data: the vision course's robot camera source and the
+   SLAM course's real-robot tab. */
+.run-mode-live-button {
+  color: var(--run-live);
+  border-color: currentColor;
+}
+
+@media (max-width: 760px) {
+  .series-run-legend dl {
+    grid-template-columns: 1fr;
+  }
+}

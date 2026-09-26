@@ -1,0 +1,106 @@
+# Web Joy Driver Configuration (Robot Manager: 「ブラウザ・スマホで操作」)
+# Smartphone/browser virtual controller served over HTTP + WebSocket.
+# ブラウザ・スマホで操作するための仮想コントローラー設定。
+# Operator mappings (key assignments, speeds, stick deadzone) are fixed in
+# questix_control_config/config/controls.web.yaml (not editable in robot_manager).
+# One device operates at a time; the others see the page read-only and may press
+# 止める (see README「操作権」).
+
+web_joy_driver:
+  ros__parameters:
+    # Joy output topic. The launcher overrides this to /joy_gated-compatible
+    # pipelines through joy_gate, so leave it at /joy here.
+    joy_topic: "/joy"
+
+    # HTTP/WebSocket bind address and port.
+    # 0.0.0.0 exposes the page on every interface (Wi-Fi AP / LAN).
+    # Open http://<robot-ip>:8899/ on the phone.
+    host: "0.0.0.0"
+    port: 8899
+
+    # Optional shared secret. When non-empty the page must be opened as
+    # http://<robot-ip>:8899/?token=<value>; WebSocket connections without a
+    # matching token are accepted and closed at once with code 4401, so the
+    # page shows its 認証エラー screen.
+    # 空文字で認証なし。LAN に他の端末がいる環境では設定を推奨。
+    auth_token: ""
+
+    # Joy publish rate (Hz). The last valid frame is re-sent at this rate,
+    # independent of how often the browser sends frames.
+    publish_rate: 50.0
+
+    # Neutral fallback: if no frame arrives for this many seconds
+    # (Wi-Fi drop, browser backgrounded), an all-zero Joy is published.
+    # 0 以下で無効（非推奨）。
+    message_timeout_sec: 0.5
+
+    # Array sizes. Defaults match the Switch2-native layout of uart_joy_driver:
+    #   buttons: A=0, B=1, X=2, Y=3, L=4, R=5, ZL=6, ZR=7,
+    #            Minus=8, Plus=9, Home=10, Capture=11, LStick=12, RStick=13
+    #   axes:    LX=0, LY=1, RX=3, RY=4, D-pad H=6, D-pad V=7 (left/up = +1)
+    # The shipped page (static/index.html) sends only LX/LY/RX/RY and buttons
+    # L/R/ZL/ZR (TILT ▲ / FIRE / TILT ▼ / ROLLER); the matching operator profile is
+    # questix_control_config/config/controls.web.yaml (tilt on buttons, no D-pad).
+    num_axes: 8
+    num_buttons: 14
+
+    # WebSocket keepalive: ping every ping_interval_sec, drop the client when a
+    # pong does not arrive within ping_timeout_sec. This is also when a silent
+    # operator (Wi-Fi lost) loses the operator role so another device can take
+    # it (about 3 s with these values); the robot is neutral after
+    # message_timeout_sec.
+    ping_interval_sec: 1.0
+    ping_timeout_sec: 2.0
+
+    # How often the node pushes a status message (E-stop state, frame age) to
+    # connected pages.
+    status_period_sec: 0.2
+
+    # Upper bound for the WebSocket closing handshake. A page that stopped
+    # reading (backgrounded browser) is dropped after this instead of the
+    # library default of 10 s, so hand-over and shutdown stay responsive.
+    close_timeout_sec: 1.0
+
+    # Directory containing index.html. Empty = the installed package share
+    # directory. Point this at the source tree for live page editing.
+    static_dir: ""
+
+    # Unified emergency stop topic (questix_msgs/EmergencyStop, reliable +
+    # transient_local) relayed to the page for DISPLAY ONLY; gating stays in
+    # joy_gate and the per-component subscribers. "" disables the display.
+    emergency_stop_topic: "/emergency_stop"
+
+    # Camera view shown between the sticks on the page. Off by default like
+    # questix_lab_bridge (no camera driver ships with this repository). Set it
+    # to a sensor_msgs/CompressedImage topic carrying JPEG or PNG bytes (what
+    # image_transport's "compressed" plugin, usb_cam, v4l2_camera and
+    # camera_ros publish under <image topic>/compressed), e.g.
+    # "/camera/image_raw/compressed". Other encodings (compressedDepth etc.)
+    # are logged and skipped. The page shows the panel only once a frame arrived.
+    # 画面中央のカメラ映像。JPEG/PNG の CompressedImage トピックを指定。空（既定）で非表示。
+    camera_topic: ""
+
+    # Upper bound of frames forwarded to browsers (Hz). Frames beyond this, or
+    # faster than a phone can read, are dropped (latest frame wins, no backlog).
+    # 0 以下で間引きなし。Wi-Fi の帯域に合わせて下げる。
+    camera_max_fps: 15.0
+
+    # The page shows a "no signal" badge over the last image when no frame has
+    # arrived for this many seconds. 0 以下で無効。
+    camera_timeout_sec: 2.0
+
+    # Name shown in the page header (and the tab title) so a phone on the
+    # wrong Wi-Fi notices which robot it controls. "" = the host name, like
+    # questix_lab_bridge's robot_name.
+    robot_name: ""
+
+    # twist_arbiter's latched status (std_msgs/String JSON). Read only: the page
+    # shows 「教材から走らせています」 while a QUESTiX LAB driving experiment has
+    # the robot. "" disables it. Competition launches do not run twist_arbiter.
+    arbiter_status_topic: "/twist_arbiter/status"
+
+    # Port of questix_lab_bridge on the same host. The page's 止める also sends
+    # {"type":"stop"} and {"type":"roller_stop"} there (browser -> bridge), so a
+    # lesson's driving run or roller session stops too. Keep equal to
+    # questix_lab_bridge's port. 0 = the page does not try.
+    lab_bridge_port: 8897

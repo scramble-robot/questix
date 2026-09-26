@@ -1,0 +1,394 @@
+/* High-school readability pass: control-launch-planning (see CONTRIBUTING.md, "Figures and charts"). */
+
+/* --- control ------------------------------------------------------------------------------ */
+
+/* Chromebook: the settings and the run button stay beside the figure and the charts while the
+   learner scrolls down to the charts (the header is about 108 px high at 1366 px). */
+@media (min-width: 821px) {
+  .control-guide {
+    position: sticky;
+    top: 120px;
+    max-height: calc(100vh - 132px);
+    overflow-y: auto;
+  }
+}
+
+/* 図の見方 comes before the figure, so after 実験 the figure, the playback bar and the rpm chart
+   below them are as close together as possible. */
+.control-visual .figure-guide {
+  border-top: 0;
+  border-bottom: 1px solid var(--line);
+}
+
+/* Both time charts have the same horizontal edges, so one moment of the run is at the same x in
+   the rpm chart and in the output chart: the output chart's <details> adds no side padding. */
+.control-graphs details {
+  margin: 0;
+  padding: 16px 0 0;
+}
+.control-graphs details > summary,
+.control-graphs details > p,
+.control-graphs details > .control-chart-legend {
+  margin-left: 24px;
+  margin-right: 24px;
+}
+.control-graphs details > p {
+  padding: 0;
+}
+@media (max-width: 620px) {
+  .control-graphs details {
+    margin: 0;
+    padding: 16px 0 0;
+  }
+  .control-graphs details > summary,
+  .control-graphs details > p,
+  .control-graphs details > .control-chart-legend {
+    margin-left: 16px;
+    margin-right: 16px;
+  }
+}
+
+.control-chart h3 {
+  font-size: 15px;
+}
+.control-chart text {
+  font-size: max(var(--figure-text-min), 13px);
+}
+
+/* Legend swatches follow the roles of js/core/palette.js: 今回 = actual, 目標 = target,
+   前回 = previous, 出来事 = event (a grey vertical line), FF = plan (dash-dot). */
+.control-chart-legend .event:before {
+  width: 0;
+  height: 16px;
+  border-top: 0;
+  border-left: 2px dashed var(--role-event);
+  margin: 0 8px 0 4px;
+}
+.control-chart-legend .ff-line:before {
+  border-top: 0;
+  height: 2px;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--role-plan) 0 10px,
+    transparent 10px 14px,
+    var(--role-plan) 14px 16px,
+    transparent 16px 20px
+  );
+}
+.control-chart-legend {
+  font-size: 14px;
+  color: #3f575d;
+}
+
+.control-compare small {
+  font-size: 13px;
+  color: #6a7c81;
+}
+
+/* One sentence under the result numbers that says what the run shows, with its numbers. */
+.control-summary {
+  margin: 18px 0 0;
+  padding: 14px 16px;
+  border-left: 4px solid var(--role-actual);
+  background: #f1f6f3;
+  font-size: 16px;
+  line-height: 1.8;
+}
+.control-metrics-simple {
+  grid-template-columns: minmax(0, 1fr);
+}
+.control-metrics-simple small {
+  font-size: 14px;
+}
+
+/* Numbered topic boxes (1-1, 1-2 …) that look like buttons, ✓ once the experiment was run. */
+.control-topic-nav {
+  margin-bottom: 8px;
+}
+.control-topic-nav button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 8px 14px 8px 8px;
+  border: 1px solid #bdd2ce;
+  border-radius: 10px;
+  background: white;
+  color: #28464d;
+  font-size: 14px;
+}
+.control-topic-nav button[aria-pressed='true'] {
+  border: 2px solid #285f55;
+  background: #eaf4ef;
+  color: #1f4e45;
+  font-weight: 650;
+}
+.control-topic-number {
+  display: inline-block;
+  min-width: 34px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: #e2ecea;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  text-align: center;
+}
+.control-topic-nav button[aria-pressed='true'] .control-topic-number {
+  background: #285f55;
+  color: white;
+}
+.control-topic-done {
+  color: var(--role-actual);
+  font-weight: 700;
+}
+@media (max-width: 620px) {
+  .control-topic-nav button {
+    flex: 1 1 calc(50% - 4px);
+    justify-content: flex-start;
+    text-align: left;
+    font-size: 13px;
+  }
+}
+
+/* --- launch ------------------------------------------------------------------------------- */
+
+/* The side view is drawn for the width it is shown at (js/launch/render.js picks a narrow layout
+   that fits 0–3 m on a phone), so it never needs to scroll sideways. The canvas sets its own
+   aspect-ratio. */
+.launch-flight-frame {
+  background: #17313c;
+}
+#launchFlight {
+  aspect-ratio: auto;
+  height: auto;
+}
+
+/* The key under the side view: each entry draws the same line or arrow as the canvas. */
+.launch-legend {
+  gap: 8px 18px;
+  font-size: 14px;
+  color: #dbe8ea;
+  padding: 10px 18px 14px;
+}
+.launch-legend > span:last-child {
+  margin-left: 0;
+  flex-basis: 100%;
+  color: #b8cbd1;
+  font-size: 13px;
+}
+.launch-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.launch-key:before {
+  content: '';
+  display: inline-block;
+  width: 24px;
+  height: 0;
+  border-top: 3px solid var(--scene-role-actual);
+}
+.launch-key-previous:before {
+  border-top: 2px dotted var(--scene-role-previous);
+}
+.launch-key-vacuum:before {
+  border-top: 3px dotted #f4f7f8;
+}
+.launch-key-target:before {
+  height: 10px;
+  border: 1.5px solid var(--scene-role-target);
+  background: rgb(184 128 12 / 40%);
+  width: 20px;
+}
+.launch-key-gravity:before {
+  border-top: 3px solid #ff8f8f;
+}
+.launch-key-drag:before {
+  border-top: 1.5px solid #fff;
+  border-bottom: 1.5px solid #fff;
+  height: 3px;
+}
+.launch-key-lift:before {
+  border-top: 5px solid #b48cff;
+}
+
+/* The key of the record chart (white card): hollow point, darker mean line, ◎ hit. */
+.launch-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin: 4px 22px 12px;
+  font-size: 14px;
+  color: #3f575d;
+}
+.launch-chart-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.launch-key-point:before,
+.launch-key-hit:before {
+  content: '';
+  box-sizing: border-box;
+  width: 13px;
+  height: 13px;
+  border: 2px solid var(--role-actual);
+  border-radius: 50%;
+}
+.launch-key-hit:before {
+  content: '◎';
+  border: 0;
+  width: auto;
+  height: auto;
+  color: var(--role-actual);
+  font-weight: 700;
+}
+.launch-key-mean:before {
+  content: '';
+  width: 24px;
+  border-top: 3px solid #0f6b4a;
+}
+.launch-chart-measured .launch-key-point:before {
+  border-color: var(--role-measured);
+}
+.launch-chart-measured .launch-key-mean:before {
+  border-top-color: #1c5aa6;
+}
+.launch-chart-legend .launch-key-target:before {
+  border-color: var(--role-target);
+  background: rgb(168 118 10 / 16%);
+}
+.launch-chart {
+  max-width: 100%;
+}
+
+.launch-arrows-button {
+  margin: 14px 0 6px;
+}
+.launch-power-detail {
+  margin: 4px 0 18px;
+}
+.launch-power-detail summary {
+  font-size: 13px;
+  color: #4d6469;
+}
+
+/* Measurement inputs look like the rest of the form controls. */
+.launch-guide input[type='number'],
+.launch-guide select {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid #b9cbcc;
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 16px;
+}
+.launch-guide input[type='number']:disabled {
+  background: #eef2f2;
+  color: #7a8b8f;
+}
+.launch-guide #launchSource {
+  max-width: none;
+  font-size: 16px;
+}
+
+/* --- planning ----------------------------------------------------------------------------- */
+
+/* The map's key: each entry draws the same line, hatch or shading as the canvas
+   (js/planning/render.js, roles of js/core/palette.js). */
+.planning-legend {
+  gap: 8px 16px;
+  font-size: 14px;
+  color: #d3e2e6;
+}
+.planning-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+[class^='planning-key-']:before {
+  content: '';
+  display: inline-block;
+  width: 26px;
+  height: 0;
+}
+.planning-key-planned:before {
+  height: 3px;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--scene-role-plan) 0 10px,
+    transparent 10px 14px,
+    var(--scene-role-plan) 14px 16px,
+    transparent 16px 20px
+  );
+}
+.planning-key-actual:before {
+  border-top: 3px solid var(--scene-role-actual);
+}
+.planning-key-previous:before,
+.planning-key-driven:before {
+  border-top: 2px dotted var(--scene-role-previous);
+}
+.planning-key-nogo:before {
+  width: 20px;
+  height: 14px;
+  background: repeating-linear-gradient(-45deg, #d9c9a399 0 1.5px, transparent 1.5px 6px);
+  border: 1px solid #d9c9a366;
+}
+.planning-key-search:before {
+  width: 26px;
+  height: 12px;
+  background: linear-gradient(
+    90deg,
+    rgb(79 134 224 / 85%) 0 30%,
+    rgb(79 134 224 / 50%) 30% 65%,
+    rgb(79 134 224 / 20%) 65%
+  );
+}
+
+/* Playback: a visible 再生位置 label and the time, as in the systems courses. */
+.planning-seek {
+  flex: 1 1 260px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+.planning-seek input {
+  flex: 1;
+  min-width: 90px;
+  min-height: 30px;
+  accent-color: var(--green);
+}
+.planning-seek-time {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  min-width: 88px;
+  text-align: right;
+}
+@media (max-width: 620px) {
+  .planning-seek {
+    flex-basis: 100%;
+    order: 3;
+  }
+}
+
+/* 探索方法: short option labels, full width, readable size. */
+.planning-guide select {
+  box-sizing: border-box;
+  min-height: 44px;
+  padding: 8px 10px;
+  font-size: 15px;
+}
+
+/* Launch seek bar: the whole flight, with the part already watched shaded (js/launch/view.js). */
+#launchSeek {
+  accent-color: #1f6f63;
+  background: linear-gradient(to right, #9fcfc4 var(--watched, 0%), #dfe7e5 var(--watched, 0%));
+  border-radius: 999px;
+  height: 8px;
+}

@@ -109,11 +109,11 @@ if [ "${INSTALL_GUI}" = true ]; then
   # Install dependencies
   apt-get install -y -qq python3-pip > /dev/null 2>&1 || true
 
-  # Copy source and pip install (force non-editable to override any prior editable installs)
-  cp -r "${REPO_DIR}/scripts/robot_manager" /opt/questix_robot/robot_manager
-  cp "${REPO_DIR}/scripts/setup.py" /opt/questix_robot/setup.py
+  # Copy source and pip install (non-editable). update-robot-manager.sh replaces the copy under
+  # /opt/questix_robot instead of copying into an existing directory, which used to nest the new
+  # files and reinstall the old ones.
   pip3 uninstall robot-manager -y -q 2>/dev/null || true
-  pip3 install /opt/questix_robot --break-system-packages -q
+  "${SCRIPT_DIR}/update-robot-manager.sh"
 
   # Install manager service
   sed \

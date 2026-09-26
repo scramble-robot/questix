@@ -79,6 +79,20 @@ ROS2 ロボティクスワークスペースと bash 環境を設定します。
 - `workspace_path`: ワークスペースのパス（デフォルト: `/home/{{ target_user }}/robot_ws`）
 - `ros_domain_id`: ROS2 ドメイン ID（デフォルト: `42`）
 
+### 5. wifi_access_point
+
+Raspberry Pi の Wi-Fi を QUESTiX 用のアクセスポイントにします（NetworkManager、WPA2-PSK）。
+
+**場所**: `ansible/roles/wifi_access_point/`
+
+**主な機能**:
+
+- アクセスポイントのプロファイル作成と即時切り替え（`sudo scripts/wifi-ap.sh up|down|status|remove`）
+- 接続した端末への DHCP（`10.42.0.x`）
+- `setup_kit.yaml` では `wifi_ap_enabled: true` のときだけ実行（既定は無効）
+
+詳細は `ansible/roles/wifi_access_point/README.md` を参照してください。
+
 ## 使用方法
 
 ### プレイブックでの使用

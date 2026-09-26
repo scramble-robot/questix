@@ -16,9 +16,11 @@ drive が使う `joy_controller_referee.launch.xml` 内の operation_manager は
 - `true` (competition): GPIO5とGPIO27を読み、GPIO27 AutoRefereeを
   safe-highとして追加判定
 
-`/etc/questix_robot/mode` が `competition` のときだけ実行される
-`questix_robot_launcher.sh` は、必ず `enable_gpio_ref:=true` と
-`enable_autoreferee:=true` を固定値で渡します。既存の `launch.env` に
+`questix_robot_launcher.sh` は、`/etc/questix_robot/mode` が `competition` のとき
+（電源投入時の自動起動を含む）、必ず `enable_gpio_ref:=true` と
+`enable_autoreferee:=true` を固定値で渡します。`practice` のときは電源投入時には起動せず、
+Robot Manager の「起動」が置いた起動要求があるときだけ、`enable_autoreferee:=false`
+（twist_arbiter と教材からの発射あり）と `launch.env` の `ENABLE_GPIO_REF`（既定 true）で起動します。既存の `launch.env` に
 `ENABLE_GPIO_REF=false` が残っていても competition 起動では無視され、GPIO5と
 GPIO27の安全系は常時有効です。`enable_gpio_ref:=false` は手動の開発・診断用途に
 限定されます。`enable_autoreferee:=true` と `enable_gpio_ref:=false` の組合せは
@@ -54,6 +56,24 @@ ros2 launch questix_launcher questix_core.launch.xml \
   enable_lidar:=false enable_shot:=false enable_drive:=false \
   enable_gpio_ref:=true enable_autoreferee:=false enable_rviz:=false
 ```
+
+## コントローラーと QUESTiX LAB の走行実験（twist_arbiter）
+
+`questix_core.launch.xml` は練習用の起動では切り替えノード `twist_arbiter` を入れます
+（`enable_twist_arbiter` 既定 `true`）。joy_controller の出力は `/target_twist/joy` に付け替えられ、
+QUESTiX LAB の教材ブリッジは `/target_twist/lab` に出し、`twist_arbiter` がどちらかを
+`/target_twist`（drive_component）へ渡します。起動し直す必要はありません。
+
+- ふだんはコントローラーの指令が通ります。
+- 教材が走り始めると、スティックが中立なら教材の指令に切り替わります。
+- 教材の走行中にスティックを倒すと、すぐにコントローラーへ戻り、教材の走行は止まります
+  （その走行が終わるまで教材は割り込めません）。
+- 教材の指令が途切れると、コントローラーに戻ります。
+
+`enable_autoreferee:=true`（大会用の起動、`questix_robot_launcher.sh`）では
+`enable_twist_arbiter` の値にかかわらず入れず、joy_controller が `/target_twist` を直接出す
+今までの経路のままです。規則は `twist_arbiter/include/twist_arbiter/arbiter_logic.hpp`、
+パラメータは `twist_arbiter/config/twist_arbiter.yaml` にあります。
 
 ## ファイル構成
 
@@ -208,3 +228,11 @@ journalctl -f
 - 各ノードを起動する前に、対応するハードウェアが接続されていることを確認してください
 - シリアルポートのアクセス権限が適切に設定されていることを確認してください
 - 複数のモータコントローラ（DDT/ESC）を同時に起動しないよう注意してください
+
+## 操作・速度の設定
+
+Joy のキー割り当て、射出・ローラー操作、走行速度・加速度は
+[QUESTiX 共通操作設定](../questix_control_config/README.md) に集約しています。
+robot_manager の「操作・速度」タブでコントローラー別に編集・保存し、
+ロボットの次回起動／再起動で反映します。保存による自動再起動は行いません。
+管理画面には未保存表示・初期値への復元・入力検証・同時編集の競合検出があります。

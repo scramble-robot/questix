@@ -1,0 +1,645 @@
+/* Live link to a real robot: header status button and the monitor dialog. */
+.robot-link {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.robot-link-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #b3bfbb;
+  flex-shrink: 0;
+}
+.robot-link[data-phase='open'] .robot-link-dot {
+  background: #2f9d7e;
+}
+.robot-link[data-phase='connecting'] .robot-link-dot,
+.robot-link[data-phase='error'] .robot-link-dot {
+  background: #d9903d;
+}
+.robot-link[data-phase='open'] {
+  color: var(--green);
+}
+.robot-dialog {
+  width: min(860px, calc(100% - 32px));
+}
+.robot-dialog > p {
+  font-size: 14px;
+}
+.robot-form label {
+  display: block;
+  font-size: 13px;
+  font-weight: 650;
+  margin-bottom: 8px;
+}
+.robot-form > div {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.robot-form input {
+  flex: 1;
+  min-width: 220px;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-variant-numeric: tabular-nums;
+}
+.robot-form input:disabled {
+  background: #eef1ef;
+  color: #5d726d;
+}
+.robot-status {
+  margin: 14px 0 18px;
+  padding: 12px 15px;
+  border-radius: 9px;
+  background: #eef5f0;
+  color: #376e60;
+  font-size: 13px;
+}
+.robot-monitor {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.robot-panels {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.robot-monitor figure {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.robot-monitor figcaption {
+  flex-direction: row;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.robot-monitor figure > p {
+  min-height: 0;
+}
+#robotScan {
+  aspect-ratio: 1;
+  background: var(--dark);
+}
+#robotCamera {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4/3;
+  object-fit: contain;
+  background: var(--dark);
+}
+#robotWheels {
+  height: 190px;
+}
+.robot-key {
+  display: inline-block;
+  width: 14px;
+  height: 3px;
+  border-radius: 2px;
+  vertical-align: middle;
+  margin: 0 4px 0 10px;
+}
+.robot-key-left {
+  background: #1c756b;
+}
+.robot-key-right {
+  background: #a65a32;
+}
+.robot-readings {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.robot-readings > div {
+  background: #fff;
+  padding: 12px 15px;
+}
+.robot-readings dt {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.robot-readings dd {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.robot-streams {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.robot-streams caption {
+  text-align: left;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.robot-streams th,
+.robot-streams td {
+  text-align: left;
+  padding: 8px 10px;
+  border-top: 1px solid var(--line);
+  font-weight: 400;
+}
+.robot-streams th {
+  font-weight: 600;
+}
+.robot-streams td:last-child {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.robot-dialog code {
+  font-size: 12px;
+  background: #eef1ef;
+  border-radius: 5px;
+  padding: 2px 5px;
+  word-break: break-all;
+}
+@media (max-width: 700px) {
+  .robot-panels,
+  .robot-readings {
+    grid-template-columns: 1fr;
+  }
+  .robot-link {
+    font-size: 12px;
+  }
+}
+
+/* The block a lesson shows when it can take measurements from the connected robot
+   (js/live/live-view.js). Used by the measurement lab and the feedback-control course. */
+.live-capture {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--green-soft);
+  padding: 14px 16px;
+  margin: 12px 0;
+  display: grid;
+  gap: 8px;
+}
+.live-capture p {
+  margin: 0;
+}
+.live-capture-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.live-capture-record,
+.live-capture-stop {
+  font-weight: 600;
+}
+.live-capture-progress {
+  font-variant-numeric: tabular-nums;
+}
+.live-capture-note {
+  font-size: 12px;
+  color: var(--muted);
+}
+.live-capture-files {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+.live-capture-files .live-capture-note {
+  flex-basis: 100%;
+}
+/* File pickers look like the buttons next to them; the native "no file chosen" text is hidden
+   because every lesson reports the opened file in its own status line. */
+.live-capture-open,
+.planning-scan-open {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  min-height: 44px;
+  padding: 10px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: white;
+  font-weight: 600;
+  cursor: pointer;
+}
+.live-capture-open input,
+.planning-scan-open input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+.live-capture-open:focus-within,
+.planning-scan-open:focus-within {
+  outline: 3px solid #518df0;
+  outline-offset: 3px;
+}
+.live-capture-open:has(input:disabled) {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* A log from the real robot has no IMU values (js/slam/view.js). */
+.slam-warning {
+  border-left: 4px solid var(--orange);
+  background: #fbf1ea;
+  padding: 8px 12px;
+  margin: 8px 0;
+  font-size: 14px;
+}
+
+/* Driving the robot from a lesson (js/live/drive-view.js, drive-ui.js). Orange marks everything
+   that moves the robot; the stop controls are red and large enough to hit without aiming. */
+.live-block {
+  display: grid;
+  gap: 12px;
+  margin: 12px 0;
+}
+.live-block > .live-capture {
+  margin: 0;
+}
+.drive-block {
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--orange);
+  border-radius: var(--radius);
+  background: white;
+  padding: 14px 16px;
+  display: grid;
+  gap: 10px;
+}
+.drive-block p {
+  margin: 0;
+}
+.drive-block h4 {
+  margin: 0;
+  color: var(--orange);
+}
+.drive-block-off {
+  border-left-color: var(--line);
+  background: #f7f9f8;
+}
+.drive-placement {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fff4e5;
+}
+.drive-blockers {
+  margin: 0;
+  padding: 10px 12px 10px 30px;
+  border-left: 4px solid #c62828;
+  border-radius: 8px;
+  background: #fff4e5;
+  color: var(--dark);
+  font-size: 14px;
+  display: grid;
+  gap: 4px;
+}
+.drive-teacher {
+  font-size: 13px;
+  color: #4d6469;
+}
+.drive-teacher summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.drive-teacher p {
+  margin: 6px 0 0;
+}
+.drive-relaunch {
+  display: block;
+  margin-top: 4px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: #f3f5f4;
+  color: var(--dark);
+  font-size: 12px;
+  overflow-wrap: break-word;
+  user-select: all;
+}
+.drive-ready {
+  color: var(--green);
+  font-weight: 600;
+}
+.drive-confirm {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-weight: 600;
+}
+.drive-confirm input {
+  margin-top: 3px;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  accent-color: var(--orange);
+}
+.drive-note {
+  font-size: 13px;
+  color: #4d6469;
+}
+.drive-actions {
+  align-items: center;
+}
+/* The main action of the block: filled, so it reads before the file buttons around it. */
+.drive-start:not(:disabled) {
+  font-weight: 700;
+  background: var(--orange);
+  border-color: var(--orange);
+  color: white;
+}
+.drive-start:disabled {
+  color: var(--muted);
+}
+.drive-why {
+  flex-basis: 100%;
+  font-size: 14px;
+  color: #4d6469;
+}
+.drive-result {
+  font-weight: 600;
+  color: var(--dark);
+}
+.drive-stop,
+.drive-bar-stop {
+  font-weight: 700;
+  background: #c62828;
+  border-color: #c62828;
+  color: white;
+  min-height: 52px;
+  min-width: 140px;
+}
+.drive-progress {
+  font-variant-numeric: tabular-nums;
+  color: var(--orange);
+  font-weight: 600;
+}
+
+/* The stop bar: above everything, moved into an open modal dialog while one is open. */
+.drive-bar-host {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2147483000;
+  pointer-events: none;
+}
+.drive-bar {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+  background: #fff4e5;
+  border-top: 3px solid #c62828;
+  box-shadow: 0 -6px 18px rgba(16, 40, 50, 0.18);
+}
+.drive-bar-dot {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #c62828;
+  animation: drive-bar-blink 1s steps(2, start) infinite;
+}
+@keyframes drive-bar-blink {
+  to {
+    visibility: hidden;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .drive-bar-dot {
+    animation: none;
+  }
+}
+/* No Esc key on a touch screen. */
+@media (hover: none) {
+  .drive-bar-esc {
+    display: none;
+  }
+}
+/* While the bar is up, the page and open dialogs keep room below their last buttons. */
+body.driving,
+body.driving dialog[open] {
+  padding-bottom: 96px;
+}
+@media (max-width: 560px) {
+  .drive-bar {
+    justify-content: space-between;
+    padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+  }
+  .drive-bar strong {
+    font-size: 14px;
+    line-height: 1.4;
+  }
+  .drive-bar-stop {
+    min-width: 96px;
+  }
+}
+
+/* Bench test in the 実機 dialog. */
+.robot-drive {
+  border-top: 1px solid var(--line);
+  margin-top: 12px;
+  padding-top: 8px;
+  display: grid;
+  gap: 8px;
+}
+.robot-drive h3,
+.robot-drive p {
+  margin: 0;
+}
+.drive-bench-speeds {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) 7em;
+  align-items: center;
+  gap: 8px 12px;
+}
+/* The label's parts join the parent grid, so both sliders start at the same x. */
+.drive-bench-speed {
+  display: contents;
+}
+.drive-bench-speed input {
+  accent-color: var(--orange);
+}
+.drive-bench-speed output {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.drive-bench-pad {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-areas:
+    '. forward .'
+    'left . right'
+    '. backward .';
+  gap: 8px;
+  max-width: 360px;
+  margin: 0 auto;
+  width: 100%;
+}
+.drive-bench-move {
+  min-height: 56px;
+  padding: 8px 4px;
+  font-weight: 700;
+  white-space: nowrap;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.drive-bench-move[data-drive-bench='forward'] {
+  grid-area: forward;
+}
+.drive-bench-move[data-drive-bench='left'] {
+  grid-area: left;
+}
+.drive-bench-move[data-drive-bench='right'] {
+  grid-area: right;
+}
+.drive-bench-move[data-drive-bench='backward'] {
+  grid-area: backward;
+}
+.drive-bench-move.held {
+  background: var(--orange);
+  border-color: var(--orange);
+  color: white;
+}
+
+/* The setting next to a drive block (real step speed, drive distance). */
+.control-live-speed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  font-weight: 600;
+}
+
+/* Offline: opening a recording stays outside the folded block (js/live/live-view.js). */
+.live-offline-block {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+}
+.live-offline-block > .live-offline {
+  margin: 0;
+}
+.live-offline-open {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+/* 班の名前: a short line of its own above the save buttons. */
+.live-capture-group {
+  display: grid;
+  gap: 4px;
+  flex-basis: 100%;
+  font-size: 13px;
+  font-weight: 600;
+}
+.live-capture-group input {
+  width: min(100%, 240px);
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+  font-weight: 400;
+}
+.live-capture-group small {
+  font-weight: 400;
+  color: var(--muted);
+}
+
+/* The button and the live strip under it (js/live/live-view.js): what live-view revealLiveRun
+   brings on screen when a run starts. */
+.live-run {
+  display: grid;
+  gap: 8px;
+}
+.live-capture-state.warn {
+  border-left: 4px solid var(--orange);
+  background: #fbf1ea;
+  padding: 8px 12px;
+  border-radius: 8px;
+}
+/* How the last run went, what the lesson made of it and whether the robot kept it: one box. */
+.live-result {
+  display: grid;
+  gap: 4px;
+  border-radius: 10px;
+  background: var(--green-soft);
+  padding: 10px 12px;
+}
+.live-result p {
+  margin: 0;
+}
+.live-result .drive-result {
+  font-weight: 650;
+}
+/* Offline: one line with the way to connect. */
+.live-block-off {
+  gap: 8px;
+}
+.live-offline-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 0;
+  color: #4d6469;
+  font-size: 14px;
+}
+/* 記録ファイルと保存: every file and record action of the block, folded. */
+.live-files {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fbfcfc;
+}
+.live-files > summary {
+  cursor: pointer;
+  min-height: 44px;
+  padding: 12px 14px;
+  font-weight: 650;
+}
+.live-files-hint {
+  margin-left: 6px;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--muted);
+}
+.live-files-body {
+  display: grid;
+  gap: 12px;
+  border-top: 1px solid var(--line);
+  padding: 12px 14px 14px;
+}
+.live-files-body p {
+  margin: 0;
+}
+.live-record-only,
+.live-compare {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+}
+.live-compare {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}

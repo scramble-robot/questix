@@ -1,0 +1,21 @@
+{
+  "start": 1758000000.0,
+  "counts": {
+    "drive": 80,
+    "twist": 80,
+    "odom": 80,
+    "scan": 20
+  },
+  "moveFrom": 1.0,
+  "moveTo": 3.5,
+  "speed": 0.2,
+  "wall": 1.5,
+  "travelled": 0.5,
+  "beams": 400,
+  "rpm": 19,
+  "mount": {
+    "x": 0.2,
+    "y": 0.0,
+    "yaw": 0.0
+  }
+}

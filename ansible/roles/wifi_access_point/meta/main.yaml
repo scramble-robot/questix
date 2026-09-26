@@ -1,0 +1,16 @@
+---
+# Role metadata for wifi_access_point
+
+galaxy_info:
+  author: Scramble Robot Team
+  description: Turn the Raspberry Pi Wi-Fi into a WPA2 access point with NetworkManager
+  license: MIT
+  min_ansible_version: "2.14"
+  platforms:
+    - name: Ubuntu
+      versions:
+        # ansible-lint's bundled Galaxy schema does not yet include noble.
+        # The kit playbook still enforces Ubuntu 24.04 before applying this role.
+        - all
+
+dependencies: []

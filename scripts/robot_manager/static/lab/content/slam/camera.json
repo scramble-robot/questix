@@ -1,0 +1,6 @@
+{
+  "unavailableTitle": "画像は記録されていません",
+  "unavailableNote": "このログには、カメラの画像データが含まれていません。",
+  "depthBadge": "デプス（模擬）",
+  "rgbBadge": "RGB-DカメラのRGB映像（模擬）"
+}

@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>QUESTiX LAB｜ロボットの技術を学ぶ実験室</title>
+<meta name="description" content="移動ロボットQUESTiXの技術を、条件の設定・実験・結果の観察・改善を通じて学ぶブラウザ教材。調べたい技術を選んで取り組めます。">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<!-- Cascade order matters: later sheets override earlier ones. -->
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/quiz.css">
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/rl-lab.css">
+<link rel="stylesheet" href="css/curriculum.css">
+<link rel="stylesheet" href="css/vision.css">
+<link rel="stylesheet" href="css/experiment.css">
+<link rel="stylesheet" href="css/control.css">
+<link rel="stylesheet" href="css/planning-launch.css">
+<link rel="stylesheet" href="css/school-supplement.css">
+<link rel="stylesheet" href="css/arm.css">
+<link rel="stylesheet" href="css/motor.css">
+<link rel="stylesheet" href="css/mastery-systems.css">
+<link rel="stylesheet" href="css/responsive-rl.css">
+<link rel="stylesheet" href="css/live.css">
+<link rel="stylesheet" href="css/live-link.css">
+<link rel="stylesheet" href="css/robot-state.css">
+<link rel="stylesheet" href="css/shoot.css">
+<link rel="stylesheet" href="css/drive-report.css">
+<link rel="stylesheet" href="css/records.css">
+<link rel="stylesheet" href="css/run-mode.css">
+<link rel="stylesheet" href="css/hs-systems.css">
+<link rel="stylesheet" href="css/hs-control-launch-planning.css">
+<link rel="stylesheet" href="css/hs-rl-quiz.css">
+<link rel="stylesheet" href="css/hs-arm-vision-slam.css">
+<link rel="stylesheet" href="css/hs-shell.css">
+<link rel="stylesheet" href="css/navigation.css">
+<link rel="stylesheet" href="css/slam-usb.css">
+</head>
+<body>
+<header class="site-header"><a class="brand" href="#series" aria-label="QUESTiX LAB 教材一覧へ"><img class="brand-logo" src="assets/questix-logo.svg" alt="QUESTiX" width="584" height="124"><span class="brand-lab">LAB</span></a><div class="header-actions"><button class="quiet robot-link" id="robotLinkOpen" data-phase="idle" data-stage="idle" aria-haspopup="dialog"><span class="robot-link-dot" aria-hidden="true"></span>実機 <span id="robotLinkName" class="robot-link-name" hidden></span> <span id="robotLinkState">未接続</span></button><button class="series-home" id="seriesHome" hidden><span aria-hidden="true">←</span> <span><span class="header-long">教材</span>一覧</span></button><details id="courseSwitcher" class="course-switcher"><summary><span class="switcher-label">教材を切り替える</span><span class="switcher-short">教材</span><strong id="currentCourseTitle">14科目から選ぶ</strong></summary><nav id="lessonNav" class="series-nav" aria-label="教材の切り替え"></nav></details></div></header>
+<main id="main"><aside id="masteryReview" class="quiz-review" aria-label="実力テストの復習" hidden></aside><aside id="quizReview" class="quiz-review" aria-label="小テストの復習" hidden></aside><section id="mechanicsPage" class="page" hidden></section><section id="trackingPage" class="page" hidden></section><section id="timingPage" class="page" hidden></section><section id="coordinationPage" class="page" hidden></section><section id="behaviorPage" class="page" hidden></section><section id="diagnosticsPage" class="page" hidden></section><section id="seriesPage" class="page"></section><section id="recordsPage" class="page records-page" hidden></section><section id="slamPage" class="page" hidden></section><section id="visionPage" class="page" hidden></section><section id="motorPage" class="page" hidden></section><section id="controlPage" class="page" hidden></section><section id="planningPage" class="page" hidden></section><section id="launchPage" class="page" hidden></section><section id="armPage" class="page" hidden></section>
+<section id="introPage" class="page" hidden>
+<div class="page-heading"><div><p class="eyebrow course-label" id="rlCourseLabel"></p><h1>荷物を届ける動き方を、試した経験から学ぶ</h1></div></div>
+<nav id="rlGroups" class="basics-topics basics-groups" aria-label="学ぶ順序"></nav><nav id="rlTopics" class="learning-subtopics" aria-label="この段階の実験"></nav>
+<div id="rlBasicsPanel"><div id="rlLessonBrief"></div><section id="rlFoundationLesson"><div class="basics-layout"><div class="basics-workspace"><section class="card basics-visual"><div class="basics-visual-heading"><p class="eyebrow" id="rlFigureStep"></p><h2 id="rlFigureTitle"></h2></div><div id="rlFigureGuide"></div><div id="rlFigure"></div><div id="rlMetrics" class="basics-calculation"></div><div id="rlObservation" class="basics-observation" role="status"></div></section><section id="rlExplanation" class="card rl-explanation"></section><section id="rlExtra" class="card rl-extra"></section></div><aside id="rlControls" class="guide card basics-guide"></aside></div><section id="rlQuestion" class="card basics-question"></section></section>
+<section id="rlRewardLesson" hidden><div id="rlRewardFigureGuide"></div>
+<div class="intro-layout experiment-layout">
+<div class="intro-visual card">
+<div class="section-top"><h2>学習前と学習後を比べる</h2><button id="primerReplay" class="small" disabled>▶ 走りを再生</button></div>
+<div class="comparison">
+<figure><figcaption><strong>学習前</strong><span>動きをランダムに選ぶ</span></figcaption><canvas id="primerBefore" width="600" height="400" role="img" aria-label="学習前のロボットの走行"></canvas><p id="primerBeforeCaption">進む・曲がるを試した走行の記録</p></figure>
+<figure><figcaption><strong id="primerAfterLabel">学習後</strong><span id="primerAfterSubtitle">これから学習します</span></figcaption><canvas id="primerAfter" width="600" height="400" role="img" aria-label="学習後のロボットの走行"></canvas><p id="primerAfterCaption">点数を決めて、学習させてみましょう</p></figure>
+</div>
+<div class="experience-strip"><span class="number-dot">1</span><span>動きを試す</span><span class="flow-arrow">→</span><span class="number-dot">2</span><span>結果から点数をもらう</span><span class="flow-arrow">→</span><span class="number-dot">3</span><span>動きの選び方を変える</span></div>
+<div id="primerEvidence" class="evidence" hidden></div><section id="primerComparison" class="primer-comparison" hidden></section>
+
+</div>
+<aside class="guide card">
+<p class="eyebrow">条件を決める · 報酬</p><h2>どんな動きに点数を付ける？</h2>
+<p>最初は動きをランダムに試します。試した動きと、その結果もらった点数から、点数が増えそうな動きを選ぶように学びます。この点数を<strong>報酬</strong>と呼びます。</p>
+<fieldset class="choice-list"><legend class="sr-only">報酬のルール</legend>
+<label class="choice"><input type="radio" name="primerRule" value="approach" checked><span><strong>届け先に近づくと加点</strong><small>1 m近づくと8点。離れると減点し、到着時はさらに8点。</small></span></label>
+<label class="choice"><input type="radio" name="primerRule" value="spin"><span><strong>回転すると加点</strong><small>左右どちらも、回る動きを1回選ぶと約23°回転して0.4点。</small></span></label>
+</fieldset>
+<button id="primerLearn" class="primary full">この報酬で学習させる →</button><p id="primerStatus" class="helper" role="status">左右の車輪の動かし方を、実際に試しながら学習します。</p>
+<div id="primerConclusion" class="conclusion" hidden></div>
+<details data-help-dialog><summary>点数で学ぶって、どういうこと？</summary><p>例えば1 m近づくと8点なら、2.0 mから1.8 mへ近づいた動きには、8×0.2＝1.6点を付けます。ロボットはこの報酬を使い、その状況で前進・左回転・右回転のどれがよさそうかという見積もりを直します。回転に点数を付ければ、届け先へ近づかなくても点数を増やせます。報酬は人が決める評価のルールなので、点数と届ける目的が合うか確かめる必要があります。</p></details>
+</aside></div>
+<p class="page-footnote">この実験では、前進・その場で左回転・その場で右回転の3つから選びます。距離と方向は正確に分かるものとし、800回の走行で学習します。学習後の比較は学んだ選び方を固定したテストです。次のコースでは、左右の車輪の速さも数値で調整します。</p>
+</section><div class="basics-footer"><p id="rlSummary"></p></div></div><section id="labPage" hidden></section></section>
+<section id="lessonFooter" class="card lesson-footer" hidden></section><section id="measurementEntry" class="card measurement-entry" hidden></section><section id="quizEntry" class="card quiz-entry" aria-label="小テストと実力テスト" hidden></section><section id="quizPage" class="page quiz-page" hidden></section><section id="masteryPage" class="page quiz-page" hidden></section>
+<section id="referencesEntry" class="card learning-resources" aria-label="もっと詳しく学ぶ・日本語の参考資料" hidden></section>
+</main>
+
+<dialog id="supplementDialog" class="supplement-dialog" aria-labelledby="supplementTitle">
+ <header class="supplement-heading"><div><p id="supplementLabel">補足の解説</p><h2 id="supplementTitle" tabindex="-1"></h2></div><button id="supplementClose" aria-label="補足を閉じる">×</button></header>
+ <div id="supplementBody" class="supplement-body" role="region" aria-label="解説の本文" tabindex="0"></div>
+ <footer class="supplement-footer"><button id="supplementBack">閉じて元の画面へ</button></footer>
+</dialog>
+<dialog id="robotDialog" class="robot-dialog" aria-labelledby="robotDialogTitle">
+ <header class="dialog-heading"><h2 id="robotDialogTitle">実機のQUESTiXとつなぐ</h2><button id="robotClose" aria-label="閉じる">×</button></header>
+ <nav id="robotDialogNav" class="robot-dialog-nav" hidden></nav>
+ <p>ロボットから届く値を、シミュレーターと同じ画面で見られます。ロボットと同じWi-Fiにつないで <code>http://ロボットのアドレス:8897/</code> を開くと、自動でつながります（Robot Managerに出るQRコードからも開けます）。走らせる実験は、先生が許可したときだけ低速で動きます。非常停止ボタンに手が届く所で実験してください。</p>
+ <form id="robotForm" class="robot-form"><label for="robotUrl">ロボットのアドレス</label><div><input id="robotUrl" type="text" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="http://10.42.0.1:8897/" aria-describedby="robotStatus"><button id="robotConnect" class="primary" type="submit">接続する</button><button id="robotDisconnect" type="button" hidden>切断する</button></div></form>
+ <div id="robotStatus" class="robot-status" role="status"></div>
+ <section id="robotMonitor" class="robot-monitor" tabindex="-1" hidden>
+  <div class="robot-panels">
+   <figure><figcaption><strong>LiDAR</strong><span>上が前、中央がロボット</span></figcaption><canvas id="robotScan" role="img" aria-label="LiDARが測った周囲の点"></canvas><p id="robotScanNote"></p></figure>
+   <figure><figcaption><strong>カメラ</strong><span>視覚の教材で「実機カメラの画像を使う」から取り込めます</span></figcaption><img id="robotCamera" alt="ロボットのカメラ画像" hidden><p id="robotCameraNote"></p></figure>
+  </div>
+  <figure class="robot-wheels"><figcaption><strong>車輪の指令と実測</strong><span><i class="robot-key robot-key-left"></i>左 <i class="robot-key robot-key-right"></i>右</span></figcaption><canvas id="robotWheels" role="img" aria-label="左右の車輪の回転数の指令と実測"></canvas></figure>
+  <dl class="robot-readings"><div><dt>位置の見積もり</dt><dd id="robotPose">—</dd></div><div><dt>実測の速度</dt><dd id="robotSpeed">—</dd></div><div><dt>速度の指令</dt><dd id="robotCommand">—</dd></div><div><dt>非常停止</dt><dd id="robotEstop">—</dd></div></dl>
+  <table class="robot-streams"><caption>受信している値</caption><tbody id="robotStreams"></tbody></table>
+ </section>
+ <section id="robotDrive" class="robot-drive" tabindex="-1" hidden></section>
+ <section id="robotDriveLog" class="robot-drive robot-drive-log" tabindex="-1"></section>
+ <details class="robot-help"><summary>つながらないときは</summary><ol><li>この端末が、ロボットと同じWi-Fiにつながっているか確かめます。</li><li>アドレスは、Robot Managerの「教材」タブに出ているもの（例：<code>http://10.42.0.1:8897/</code>）をそのまま入力します。<code>:8888</code> は管理画面の番号なので、教材には使いません。</li><li>それでもつながらないときは、先生にRobot Managerの「教材」タブで「配信開始」を押してもらいます。</li></ol><p class="robot-help-teacher"><strong>先生へ</strong>教材への配信は <code>questix_lab_bridge</code>（ポート8897）が行います。Robot Managerの「教材」タブの「配信開始」で起動し、大会モードに切り替えると止まります。つながっても値が届かないときは、ロボットのROSが起動しているか、配信とロボットの <code>ROS_DOMAIN_ID</code> が同じかを確かめてください。教材からの走行は、同じタブの「教材からの走行」で許可したときだけ有効です。カメラは <code>camera_topic</code> を設定した場合だけ届きます。同時につなげる端末は24台までです。</p></details>
+</dialog>
+<dialog id="recordPicker" class="record-picker" aria-labelledby="recordPickerTitle"></dialog>
+<div id="simulation" hidden><canvas id="arena" width="1000" height="660" role="img" aria-label="ロボットの走行コース"></canvas><input id="trailToggle" type="checkbox" checked><input id="sensorToggle" type="checkbox"><canvas id="cameraView" width="640" height="280"></canvas></div>
+<div id="driveBar" class="drive-bar-host"></div>
+<div id="shootBar" class="drive-bar-host shoot-bar-host"></div>
+<script type="module" src="js/main.js"></script>
+</body></html>

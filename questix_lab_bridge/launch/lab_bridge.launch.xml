@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<launch>
+  <arg name="config_file"
+       default="$(find-pkg-share questix_lab_bridge)/config/lab_bridge.yaml"
+       description="Parameter file of the QUESTiX LAB live bridge" />
+
+  <!-- Telemetry mirror for the QUESTiX LAB pages (read-only unless allow_drive is set in the config). -->
+  <node pkg="questix_lab_bridge" exec="lab_bridge_node" name="questix_lab_bridge" output="screen">
+    <param from="$(var config_file)" />
+  </node>
+</launch>

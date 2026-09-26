@@ -1,0 +1,579 @@
+/* Camera-image lessons use the same controls and observation surface. */
+.series-courses {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.series-course-body h2 {
+  font-size: 23px;
+  line-height: 1.5;
+}
+.vision-sourcebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  margin: 0 0 20px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.vision-sourcebar > div {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.vision-sourcebar > span {
+  overflow-wrap: anywhere;
+}
+.vision-file {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 9px 14px;
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  font-size: 13px;
+  cursor: pointer;
+}
+.vision-file:focus-within {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+}
+.vision-file input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+.vision-layout {
+  grid-template-columns: minmax(0, 1fr) 340px;
+}
+.vision-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+.vision-scene {
+  overflow: hidden;
+}
+.vision-image-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  padding: 24px;
+}
+.vision-image-pair figure {
+  margin: 0;
+  min-width: 0;
+}
+.vision-image-pair figcaption {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 12px;
+  font-size: 15px;
+}
+.vision-image-pair figcaption span {
+  font-size: 12px;
+  color: var(--muted);
+  min-height: 18px;
+  overflow-wrap: anywhere;
+}
+.vision-image-pair canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 8px;
+  background: #e8eeee;
+}
+#visionInput {
+  cursor: crosshair;
+}
+.vision-reading {
+  background: #edf5f2;
+  color: #345e55;
+  padding: 18px 24px;
+  font-size: 14px;
+  line-height: 1.85;
+  min-height: 74px;
+}
+.vision-pixel {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 22px 24px;
+}
+.vision-pixel p {
+  font-size: 13px;
+  line-height: 1.8;
+  margin: 0;
+}
+.vision-pixel > div {
+  display: grid;
+  grid-template-columns: repeat(9, 10px);
+  flex-shrink: 0;
+  border: 1px solid #aec1c5;
+}
+.vision-pixel i {
+  width: 10px;
+  height: 10px;
+  display: block;
+}
+.vision-pixel i.selected {
+  outline: 2px solid #f3c269;
+  position: relative;
+  z-index: 1;
+}
+.vision-select {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  margin: 18px 0;
+}
+.vision-select select {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  font-size: 13px;
+}
+.vision-layout .guide > button {
+  margin-bottom: 10px;
+}
+.vision-layout .guide .basics-slider {
+  font-size: 13px;
+  line-height: 1.7;
+}
+.vision-layout .guide .basics-slider output {
+  float: right;
+}
+.vision-labels {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 16px 0 10px;
+}
+.vision-labels button {
+  padding: 10px 6px;
+  font-size: 13px;
+}
+.vision-evidence {
+  padding: 24px;
+}
+.vision-evidence h2 {
+  font-size: 18px;
+}
+.vision-evidence h3 {
+  font-size: 16px;
+  margin: 24px 0 14px;
+}
+.vision-evidence p {
+  font-size: 13px;
+  line-height: 1.8;
+}
+.vision-dataset {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  max-height: 290px;
+  overflow-y: auto;
+  padding: 5px 0;
+}
+.vision-dataset > div {
+  position: relative;
+}
+.vision-dataset button[data-sample] {
+  width: 100%;
+  padding: 5px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+.vision-dataset img {
+  width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+.vision-remove {
+  position: absolute;
+  right: 0;
+  top: 0;
+  padding: 0;
+  width: 23px;
+  height: 23px;
+  font-size: 14px;
+  background: #fffef1;
+}
+.vision-test-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+.vision-test-grid button {
+  padding: 5px;
+  font-size: 11px;
+}
+.vision-test-grid img {
+  width: 100%;
+  height: auto;
+}
+.vision-test-grid span,
+.vision-test-grid small {
+  display: block;
+}
+.vision-test-grid small {
+  font-size: 10px;
+  color: var(--muted);
+  font-weight: 400;
+}
+.vision-test-grid .incorrect {
+  border-color: #d28b6b;
+  background: #fff6ed;
+}
+.vision-test-grid .correct {
+  border-color: #8bbb9f;
+  background: #f2faf5;
+}
+.vision-history {
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+  color: var(--muted);
+}
+.vision-bits {
+  display: grid;
+  grid-template-columns: repeat(4, 38px);
+  gap: 2px;
+  margin: 18px 0;
+}
+.vision-bits span {
+  display: grid;
+  place-items: center;
+  height: 38px;
+  font-size: 12px;
+  border: 1px solid #a8b6b9;
+}
+.vision-bits .black {
+  background: #182b34;
+  color: white;
+}
+.vision-bits .white {
+  background: white;
+  color: #1a363d;
+}
+.vision-reflect {
+  margin-top: 24px;
+  padding: 24px;
+}
+.vision-reflect h2 {
+  font-size: 18px;
+  margin-bottom: 10px;
+}
+.vision-reflect p {
+  font-size: 14px;
+  line-height: 1.85;
+  margin-bottom: 12px;
+}
+.vision-reflect details {
+  font-size: 13px;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+.vision-reflect details p {
+  margin-top: 12px;
+}
+.vision-detections {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+.vision-detections span {
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 13px;
+}
+.vision-detections b {
+  margin-left: 8px;
+  color: var(--green);
+}
+.vision-capture {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 1fr;
+  gap: 24px;
+  padding: 24px;
+  margin-bottom: 24px;
+}
+.vision-capture video {
+  width: 100%;
+  max-height: 340px;
+  background: #142d36;
+}
+.vision-capture p {
+  font-size: 14px;
+  line-height: 1.8;
+}
+.vision-real .method-grid h3 {
+  font-size: 16px;
+}
+.vision-real .method-grid p {
+  font-size: 14px;
+}
+.vision-groups {
+  margin-bottom: 10px;
+}
+.vision-groups button {
+  font-size: 15px;
+}
+.vision-subtopics {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+}
+.vision-subtopics button {
+  border-color: transparent;
+  background: transparent;
+  font-size: 14px;
+  padding: 9px 15px;
+}
+.vision-subtopics button[aria-pressed='true'] {
+  border-color: #bdd2ce;
+  background: white;
+  color: #285f55;
+}
+.vision-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  padding: 16px 0;
+}
+.vision-metrics span {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--muted);
+}
+.vision-metrics b {
+  font-size: 23px;
+  color: var(--ink);
+  font-weight: 600;
+}
+.vision-histogram {
+  display: block;
+  width: 100%;
+  max-height: 170px;
+  margin: 18px 0;
+}
+.vision-histogram text {
+  font-size: 12px;
+  fill: #59727c;
+}
+.vision-region-list {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 14px 0;
+}
+.vision-region-list span {
+  padding: 8px 12px;
+  background: #eef4f3;
+  border-radius: 6px;
+  font-size: 13px;
+}
+.vision-follow-map {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 8px;
+  margin: 16px 0;
+}
+.vision-playback {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.vision-evidence details {
+  margin-top: 18px;
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+  font-size: 14px;
+}
+.vision-layout .guide h3 {
+  font-size: 16px;
+  margin: 18px 0 10px;
+}
+.vision-layout .guide hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 20px 0;
+}
+.vision-layout .guide details {
+  font-size: 14px;
+  line-height: 1.8;
+  margin-top: 18px;
+}
+.vision-layout .guide details p {
+  font-size: 14px;
+  margin: 12px 0;
+}
+.vision-evidence .basics-slider {
+  display: block;
+  margin: 18px 0;
+  font-size: 14px;
+}
+.vision-evidence .basics-slider input {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+}
+.vision-evidence .basics-slider output {
+  float: right;
+}
+#vfWheels {
+  font-variant-numeric: tabular-nums;
+}
+.vision-image-pair figcaption {
+  padding: 0;
+}
+.vision-motion {
+  background: #172f3b;
+  color: #e4f0f1;
+}
+.vision-motion-top {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  padding: 16px 20px;
+  font-size: 14px;
+}
+.vision-motion-top span {
+  font-size: 13px;
+  color: #b9d6d8;
+}
+.vision-motion-player {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  padding: 0 20px 8px;
+  flex-wrap: wrap;
+}
+.vision-motion-player label {
+  font-size: 13px;
+}
+.vision-motion-player input {
+  flex: 1;
+  min-width: 100px;
+  accent-color: #8dd3b7;
+}
+.vision-motion-player button {
+  color: #263e43;
+}
+.vision-motion .vision-follow-map {
+  margin: 0;
+  border-radius: 0;
+  max-height: 220px;
+  object-fit: contain;
+}
+.vision-scene:has(.vision-motion:not([hidden])) .vision-image-pair {
+  padding: 16px 20px;
+  gap: 16px;
+}
+.vision-scene:has(.vision-motion:not([hidden])) .vision-image-pair canvas {
+  height: 115px;
+  object-fit: contain;
+  background: #e0e3e2;
+}
+.vision-workspace:has(.vision-motion:not([hidden])) .vision-reading {
+  padding: 12px 20px;
+  min-height: 0;
+}
+.vision-motion {
+  scroll-margin-top: 95px;
+}
+#visionPage .page-heading {
+  margin-bottom: 20px;
+}
+#visionPage .vision-subtopics {
+  margin-bottom: 16px;
+}
+@media (max-width: 1100px) {
+  .series-courses {
+    grid-template-columns: 1fr 1fr;
+  }
+  .vision-layout {
+    grid-template-columns: minmax(0, 1fr) 300px;
+  }
+  .vision-image-pair {
+    gap: 12px;
+    padding: 18px;
+  }
+  .vision-image-pair figcaption {
+    font-size: 13px;
+  }
+  .vision-dataset {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .vision-test-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+@media (max-width: 900px) {
+  .vision-layout {
+    grid-template-columns: 1fr;
+  }
+  .vision-topics button {
+    font-size: 12px;
+    line-height: 1.6;
+  }
+  .vision-sourcebar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .vision-capture {
+    grid-template-columns: 1fr;
+  }
+  .vision-dataset {
+    grid-template-columns: repeat(4, 1fr);
+  }
+  .vision-test-grid {
+    grid-template-columns: repeat(5, 1fr);
+  }
+}
+@media (max-width: 700px) {
+  .series-courses {
+    grid-template-columns: 1fr;
+  }
+  .vision-topics {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .vision-image-pair {
+    gap: 10px;
+    padding: 14px;
+  }
+  .vision-pixel {
+    padding: 18px;
+    gap: 12px;
+  }
+  .vision-dataset {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .vision-test-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .vision-evidence,
+  .vision-reflect {
+    padding: 20px;
+  }
+  .vision-sourcebar > div {
+    gap: 6px;
+  }
+  .vision-sourcebar button,
+  .vision-file {
+    font-size: 12px;
+  }
+}

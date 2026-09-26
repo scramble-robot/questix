@@ -2,8 +2,9 @@
 <!--
 ESC Motor Control (C++) standalone launch file
 パラメータは esc_motor_control_cpp.yaml が Single Source of Truth。
-例外: joy_topic は launcher が /joy <-> /joy_gated を切替えるための唯一の override。
-YAML の後に置くことで launcher からの指定が勝つようにする。
+例外: joy_topic は launcher が /joy <-> /joy_gated を切替えるための override、
+accept_lab_input は練習用起動だけが QUESTiX LAB のローラー操作を許可するための override。
+どちらも既定値は YAML と同じで、YAML の後に置くことで launcher からの指定が勝つようにする。
 -->
 <launch>
     <arg name="config_file"
@@ -12,9 +13,15 @@ YAML の後に置くことで launcher からの指定が勝つようにする�
     <arg name="joy_topic"
          default="/joy"
          description="Joy input topic (override-only, default matches YAML)" />
+    <arg name="accept_lab_input"
+         default="false"
+         description="Accept QUESTiX LAB roller commands on /roller/lab (override-only, default matches YAML; practice launches only)" />
+    <include file="$(find-pkg-share questix_control_config)/launch/control_profile.launch.py" />
 
     <node pkg="esc_motor_control_cpp" exec="esc_motor_control_node" name="esc_motor_control" output="screen">
         <param from="$(var config_file)" />
+        <param from="$(var control_config_file)" />
         <param name="joy_topic" value="$(var joy_topic)" />
+        <param name="accept_lab_input" value="$(var accept_lab_input)" />
     </node>
 </launch>

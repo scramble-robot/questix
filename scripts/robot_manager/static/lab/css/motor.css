@@ -1,0 +1,681 @@
+/* Motor course (js/motor/): figures with their own small viewBox and an HTML key, readouts and the
+   shared HTML chart (css/hs-arm-vision-slam.css, .html-chart). On a phone: figure → settings. */
+
+.motor-groups {
+  margin-bottom: 12px;
+}
+.motor-groups button[aria-current='step'],
+.motor-topics button[aria-pressed='true'] {
+  background: #e2efec;
+  border-color: #347e72;
+  color: #215f54;
+}
+/* Three steps side by side on a phone: words are not split inside, and the numbers stay 12 px. */
+@media (max-width: 600px) {
+  .motor-groups button {
+    font-size: 13px;
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+  }
+  .motor-groups button span {
+    font-size: 12px;
+  }
+}
+#motorPage .page-footnote {
+  font-size: 12px;
+}
+.motor-topics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 22px;
+}
+.motor-topics button {
+  font-size: 14px;
+}
+
+/* --- Layout --------------------------------------------------------------------------------- */
+
+.motor-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+  gap: 24px;
+  align-items: start;
+}
+.motor-main {
+  overflow: hidden;
+  padding: 0;
+  min-width: 0;
+  scroll-margin-top: 96px;
+}
+.motor-guide {
+  padding: 24px;
+  scroll-margin-top: 96px;
+}
+.motor-guide h2 {
+  font-size: 1.3rem;
+}
+.motor-guide p {
+  font-size: 15px;
+  line-height: 1.85;
+}
+.motor-guide .helper {
+  font-size: 13px;
+  line-height: 1.75;
+}
+.motor-guide .primary {
+  margin: 12px 0 4px;
+}
+.motor-guide #motorDirty:empty {
+  display: none;
+}
+.motor-guide details {
+  margin-top: 14px;
+}
+@media (max-width: 1000px) {
+  .motor-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+}
+
+/* --- Settings ------------------------------------------------------------------------------- */
+
+.motor-setting {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  margin: 20px 0;
+}
+.motor-setting output {
+  color: #1c6b5d;
+  font-variant-numeric: tabular-nums;
+}
+.motor-setting select,
+.motor-text textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  background: white;
+  color: #294a58;
+  border: 1px solid #cad8dc;
+  border-radius: 9px;
+  font-size: 15px;
+  min-height: 44px;
+}
+.motor-setting select:disabled {
+  background: #eef2f3;
+  color: #71838a;
+}
+.motor-setting-note {
+  font-size: 13px;
+  font-weight: 400;
+  color: #5b6f75;
+  line-height: 1.6;
+}
+.motor-setting input[type='range'],
+.motor-playback input[type='range'],
+.motor-gear-demo input[type='range'] {
+  width: 100%;
+  accent-color: #287b6c;
+  min-height: 32px;
+  cursor: pointer;
+}
+
+/* --- Figures -------------------------------------------------------------------------------- */
+
+.motor-figure {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.motor-figure text {
+  paint-order: stroke;
+}
+.motor-scene {
+  margin: 0;
+  background: #e5eef1;
+}
+.motor-scene figcaption {
+  padding: 14px 18px 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #294a58;
+}
+.motor-scene #motorScene,
+.motor-gear-scene #motorGearScene,
+.motor-questix > .motor-figure {
+  max-width: 480px;
+  margin: 0 auto;
+}
+.motor-gear-scene #motorGearScene {
+  max-width: 600px;
+}
+.motor-questix > .motor-figure {
+  max-width: 400px;
+}
+.motor-scene-key {
+  margin: 0;
+  padding: 0 18px 14px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #3d5660;
+}
+.motor-figure-key {
+  margin: 0;
+  list-style: none;
+  padding: 10px 18px 14px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: #294a58;
+}
+.motor-status {
+  padding: 12px 18px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  background: #d9e6e9;
+  color: #294a58;
+  font-size: 14px;
+}
+.motor-status strong {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Scene and its readouts side by side on a wide screen, the readouts in one row under it on a phone. */
+.motor-scene-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 200px;
+  background: #e5eef1;
+}
+.motor-scene-row .motor-metrics {
+  flex-direction: column;
+  justify-content: center;
+  background: #f5f9fa;
+}
+@media (max-width: 700px) {
+  .motor-scene-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .motor-scene-row .motor-metrics {
+    flex-direction: row;
+  }
+}
+.motor-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 20px;
+  padding: 16px 18px;
+}
+.motor-metrics div {
+  display: flex;
+  flex: 1;
+  min-width: 90px;
+  flex-direction: column;
+  gap: 4px;
+}
+.motor-metrics span {
+  color: #4d646d;
+  font-size: 13px;
+}
+.motor-metrics strong {
+  font-size: 1.25rem;
+  font-variant-numeric: tabular-nums;
+}
+.motor-charts {
+  padding: 4px 18px 8px;
+  display: grid;
+  gap: 4px;
+}
+.motor-charts:empty {
+  display: none;
+}
+.motor-chart-note {
+  margin: 0;
+  padding: 0 18px 8px;
+  font-size: 13px;
+  color: #4d646d;
+}
+.motor-playback {
+  display: grid;
+  grid-template-columns: auto minmax(100px, 1fr);
+  gap: 10px 14px;
+  align-items: center;
+  padding: 14px 18px;
+  border-top: 1px solid #e0e8e9;
+}
+.motor-playback button {
+  min-width: 132px;
+}
+.motor-event {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #3d5660;
+  font-size: 14px;
+  line-height: 1.7;
+}
+.motor-task {
+  margin: 0;
+  padding: 18px;
+  background: #edf5f2;
+  border-top: 1px solid #d9e6e2;
+  line-height: 1.85;
+  font-size: 15px;
+}
+.motor-task h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+.motor-task p {
+  margin: 6px 0;
+}
+.motor-note {
+  margin: 0;
+  padding: 14px 18px;
+  font-size: 13px;
+  line-height: 1.75;
+  color: #4d646d;
+}
+.motor-goal-met,
+.motor-goal-missed {
+  font-weight: 700;
+  margin-left: 4px;
+}
+.motor-goal-met {
+  color: var(--role-actual);
+}
+.motor-goal-missed {
+  color: #8a5a00;
+}
+
+/* --- KV box and help ------------------------------------------------------------------------ */
+
+.motor-kv {
+  padding: 14px 16px;
+  background: #edf5f2;
+  border-radius: 10px;
+  margin: 16px 0;
+}
+.motor-kv p {
+  margin: 6px 0;
+}
+.motor-kv small {
+  display: block;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.motor-spec {
+  display: grid;
+  gap: 8px;
+}
+.motor-spec > div {
+  display: grid;
+  grid-template-columns: 170px 1fr;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #f1f6f7;
+  border-radius: 8px;
+}
+.motor-spec dt {
+  font-weight: 700;
+}
+.motor-spec dd {
+  margin: 0;
+}
+@media (max-width: 560px) {
+  .motor-spec > div {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* --- Structure of a motor ------------------------------------------------------------------- */
+
+.motor-structure {
+  padding: 0;
+  overflow: hidden;
+  margin: 0 0 24px;
+}
+.motor-structure > header {
+  padding: 20px 22px 14px;
+}
+.motor-structure h2 {
+  font-size: 1.25rem;
+  margin: 0 0 12px;
+}
+.motor-structure nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.motor-structure nav button {
+  font-size: 14px;
+}
+.motor-structure nav button[aria-pressed='true'],
+.motor-coil-switch button[aria-pressed='true'] {
+  background: #e2efec;
+  border-color: #347e72;
+  color: #215f54;
+  font-weight: 700;
+}
+.motor-structure-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+  background: #e5eef1;
+}
+.motor-structure-picture {
+  margin: 0;
+  align-self: center;
+  background: #e5eef1;
+}
+.motor-structure-picture > .motor-figure {
+  max-width: 460px;
+  margin: 0 auto;
+}
+.motor-structure-copy {
+  padding: 22px;
+  background: #f5f9fa;
+}
+.motor-structure-copy h3 {
+  margin: 4px 0 10px;
+  font-size: 1.15rem;
+}
+.motor-structure-copy p {
+  font-size: 15px;
+  line-height: 1.85;
+}
+.motor-structure-note {
+  color: #3d5660;
+}
+.motor-structure-footnote {
+  margin: 0;
+  padding: 12px 22px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #4d646d;
+}
+.motor-structure-picture .motor-coil-switch,
+.motor-structure-picture .motor-coil-result {
+  margin: 0 18px 14px;
+}
+.motor-coil-switch {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.motor-coil-switch button {
+  padding: 10px 12px;
+  font-size: 14px;
+}
+.motor-coil-result {
+  padding: 10px 14px;
+  background: #edf5f2;
+  border-radius: 9px;
+}
+@media (max-width: 800px) {
+  .motor-structure-body {
+    grid-template-columns: 1fr;
+  }
+  .motor-structure-copy {
+    padding: 18px;
+  }
+}
+
+/* --- Transmission ---------------------------------------------------------------------------- */
+
+.motor-gear-heading {
+  padding: 18px 18px 4px;
+  background: #e5eef1;
+}
+.motor-gear-heading h3 {
+  margin: 0 0 6px;
+  font-size: 1.15rem;
+}
+.motor-gear-heading p {
+  margin: 0;
+  line-height: 1.75;
+}
+.motor-gear-demo {
+  padding: 16px 18px;
+  background: #f3f7f8;
+  border-bottom: 1px solid #dce5e8;
+}
+.motor-gear-demo label {
+  display: block;
+  font-weight: 650;
+}
+.motor-gear-demo output {
+  display: block;
+  font-weight: 700;
+  color: #1c6b5d;
+  font-variant-numeric: tabular-nums;
+}
+.motor-gear-demo p {
+  margin: 6px 0 0;
+  font-size: 14px;
+  color: #3d5660;
+}
+
+/* --- Choosing for QUESTiX ------------------------------------------------------------------ */
+
+.motor-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px;
+  padding: 18px;
+}
+.motor-choice-grid section {
+  padding: 16px;
+  background: #f1f6f7;
+  border-radius: 10px;
+}
+.motor-choice-grid h3 {
+  margin: 0 0 6px;
+  font-size: 16px;
+}
+.motor-choice-grid p {
+  margin: 0 0 10px;
+  font-size: 14px;
+  line-height: 1.7;
+}
+.motor-choice-options {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.motor-choice-options legend {
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 6px;
+  padding: 0;
+}
+.motor-choice-options label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  background: white;
+  border: 1px solid #cad8dc;
+  border-radius: 9px;
+  font-size: 14px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+.motor-choice-options label:has(input:checked) {
+  border-color: #347e72;
+  background: #e2efec;
+  font-weight: 700;
+}
+.motor-choice-options input {
+  margin: 3px 0 0;
+  accent-color: #287b6c;
+  flex-shrink: 0;
+}
+.motor-choice-check {
+  padding: 0 18px 18px;
+}
+.motor-classification,
+.motor-real {
+  padding: 18px;
+}
+.motor-classification {
+  border-top: 1px solid #e0e8e9;
+}
+.motor-classification h3 {
+  margin: 0 0 10px;
+  font-size: 16px;
+}
+.motor-classification dl {
+  margin: 0;
+  display: grid;
+  gap: 8px;
+}
+.motor-classification dl > div {
+  display: grid;
+  grid-template-columns: 170px 1fr;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #f1f6f7;
+  border-radius: 8px;
+}
+.motor-classification dt {
+  font-weight: 700;
+}
+.motor-classification dd {
+  margin: 0;
+}
+@media (max-width: 560px) {
+  .motor-classification dl > div {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* --- Real motors ------------------------------------------------------------------------------ */
+
+.motor-real h2 {
+  font-size: 1.25rem;
+  margin: 0 0 8px;
+}
+.motor-plan {
+  line-height: 1.8;
+  padding-left: 22px;
+}
+.motor-text {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-weight: 600;
+  margin: 16px 0;
+}
+.motor-text textarea {
+  font-weight: 400;
+  line-height: 1.7;
+}
+.motor-measure-pointer {
+  margin: 18px 0;
+  padding: 14px 16px;
+  background: #edf5f2;
+  border-radius: 10px;
+}
+.motor-measure-pointer h3 {
+  margin: 0 0 6px;
+  font-size: 16px;
+}
+.motor-measure-pointer p {
+  margin: 0 0 10px;
+  line-height: 1.75;
+}
+
+#motorPage :is(button, select, input, textarea):focus-visible {
+  outline: 3px solid #bf872e;
+  outline-offset: 3px;
+}
+
+/* Bench measurement of the drive wheels (topic 実物で確かめる): the shared live block (its strip
+   and folded 「実機の状態」 panel, css/live.css) next to the table 「指令 → 測った回転数」, whose
+   「分析に使う」 hands it to the measurement lab. */
+.motor-bench {
+  margin-top: 18px;
+}
+.motor-bench-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.motor-bench-table h3 {
+  margin: 0 0 8px;
+  font-size: 17px;
+}
+.motor-bench-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+.motor-bench-table th,
+.motor-bench-table td {
+  padding: 7px 6px;
+  border-bottom: 1px solid var(--line);
+  text-align: right;
+}
+.motor-bench-table td {
+  white-space: nowrap;
+}
+.motor-bench-stop {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+.motor-bench-table th:first-child,
+.motor-bench-table td:first-child {
+  text-align: center;
+}
+.motor-bench-table th {
+  color: #3d5660;
+  font-size: 13px;
+}
+.motor-bench-table tr.is-current {
+  background: #fff6dc;
+  font-weight: 700;
+}
+.motor-bench-value {
+  font-weight: 700;
+}
+.motor-bench-table td.motor-bench-state {
+  color: var(--muted);
+  text-align: center;
+}
+.motor-bench-result {
+  margin: 8px 0 0;
+  font-weight: 600;
+}
+.motor-bench-sample {
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border-left: 3px solid var(--role-target, #c18837);
+  background: #fff8e8;
+  font-size: 14px;
+}
+.motor-bench-analyse {
+  margin-top: 12px;
+}
+.motor-bench-analyse .helper {
+  margin: 6px 0 0;
+}
+@media (min-width: 900px) {
+  .motor-bench-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+@media (max-width: 420px) {
+  .motor-bench-table th,
+  .motor-bench-table td {
+    padding: 6px 3px;
+    font-size: 14px;
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "label": "この教材の実験",
+  "position": "実験 {number} / {total}",
+  "visited": "開いた実験 {visited} / {total}",
+  "previous": "前の実験",
+  "next": "次の実験",
+  "toSummary": "まとめの小テストへ",
+  "summaryNote": "最後の実験です。試し終えたら、下のまとめで確かめましょう。",
+  "stepsLabel": "実験の一覧（番号を押すとその実験へ移ります）",
+  "visitedMark": "開いた",
+  "currentMark": "いまの実験"
+}
