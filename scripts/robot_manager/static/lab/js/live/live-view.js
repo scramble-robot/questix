@@ -9,7 +9,7 @@ import { liveStateStrip, robotStatePanel } from './robot-state.js';
 // The one block of controls a lesson shows when it can take measurements from the real robot.
 // Pure templates — the lesson owns the state (live-session.js) and passes `actions`. Sentences live
 // in content/live/capture.json. From the top:
-// 1. what the learner does now: 教材が実機を走らせる (drive-view.js) when the page may drive, or
+// 1. what the learner does now: 教材から実機を走らせる (drive-view.js) when the page may drive, or
 //    the record button otherwise, with the compact live strip right under the button
 //    (robot-state.js liveStateStrip) and the result of the last run under that;
 // 2. folded, 「実機の状態をくわしく見る」: the full panel, for a session created with `state`;

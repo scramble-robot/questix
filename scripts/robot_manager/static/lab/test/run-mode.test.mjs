@@ -81,7 +81,7 @@ test('a course that uses the robot has at least one topic that does', () => {
 
 test('topicRunModes matches exact keys, whole courses and falls back to the simulation', () => {
   assert.deepEqual(topicRunModes('control-p').modes, ['sim', 'live', 'drive']);
-  // Firing discs from the lesson (js/live/shoot-ui.js) is the launcher's 教材が実機を動かす.
+  // Firing discs from the lesson (js/live/shoot-ui.js) is the launcher's 教材から実機を動かす.
   assert.deepEqual(topicRunModes('launch-measure').modes, ['live', 'drive', 'data']);
   assert.equal(topicRunModes('launch-measure').target, '.launch-shoot');
   assert.deepEqual(topicRunModes('motor-real').modes, ['live', 'drive', 'data']);
