@@ -230,7 +230,7 @@ function angleControls(model, copy, actions) {
 
 function targetField(axis, model, actions) {
   const id = axis === 'x' ? 'armTargetX' : 'armTargetZ';
-  const label = axis === 'x' ? '横位置 x (mm)' : '高さ z (mm)';
+  const label = axis === 'x' ? '横位置 x（mm）' : '高さ z（mm）';
   const bounds = model.targetBounds[axis];
   return html`<label for=${id}
     >${label}<input
@@ -597,7 +597,7 @@ function measurementColumn(model, copy, actions) {
         ${['x', 'y', 'z'].map(
           (axis) =>
             html`<label for="armMeasured${axis}"
-              >${axis} (mm)<input id="armMeasured${axis}" type="number" step="any" required
+              >${axis}（mm）<input id="armMeasured${axis}" type="number" step="any" required
             /></label>`,
         )}
       </div>
@@ -627,8 +627,8 @@ function measurementTable(measurements, copy) {
       <tr>
         <th>記録</th>
         <th>角度の出所</th>
-        <th>計算位置 x / y / z (mm)</th>
-        <th>測定位置 (mm)</th>
+        <th>計算位置 x / y / z（mm）</th>
+        <th>測定位置（mm）</th>
         <th>位置のずれ</th>
       </tr>
     </thead>

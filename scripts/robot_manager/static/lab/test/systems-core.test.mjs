@@ -101,11 +101,17 @@ const topics = Object.entries(SYSTEM_TOPICS).flatMap(([course, list]) =>
 // they use the run's numbers and only show what a topic is about, and added the coordination
 // 'target-move' event; those are covered by test/systems-results.test.mjs instead.
 const NEW_EVENT_KINDS = ['target-move'];
+// Status wording renamed on purpose (指示 → 指令, the site's term for commands to the motors).
+const RENAMED_STATUS = { '停止指示・減速中': '停止指令・減速中' };
+const renameStatus = (sample) =>
+  sample.status in RENAMED_STATUS ? { ...sample, status: RENAMED_STATUS[sample.status] } : sample;
+const renameCSV = (csv) =>
+  Object.entries(RENAMED_STATUS).reduce((text, [from, to]) => text.replaceAll(from, to), csv);
 const pinned = (run) => ({
   course: run.course,
   topic: run.topic,
   config: run.config,
-  samples: run.samples,
+  samples: run.samples.map(renameStatus),
   success: run.success,
   duration: run.duration,
   events: run.events
@@ -131,7 +137,7 @@ for (const [course, topic] of topics) {
       const expected = baseline.simulateSystem(course, topic, effective);
       const actual = current.simulateSystem(course, topic, input);
       assert.deepEqual(pinned(actual), pinned(expected), JSON.stringify(input));
-      assert.equal(current.systemCSV(actual), baseline.systemCSV(expected));
+      assert.equal(current.systemCSV(actual), renameCSV(baseline.systemCSV(expected)));
     }
   });
   test(`validateSystemConfig ${course}/${topic} matches the baseline`, () => {

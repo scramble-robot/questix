@@ -143,7 +143,7 @@
     },
     "realWall": "実際の壁",
     "target": "止まりたい位置",
-    "threshold": "停止指示を出す距離",
+    "threshold": "停止指令を出す距離",
     "usedRange": "判断に使った距離",
     "actualRange": "実際の距離",
     "mapWall": "地図に置いた壁",
@@ -151,7 +151,7 @@
     "keys": {
       "ghost": "点線で囲んだ薄い機体：距離を測ったときの位置",
       "target": "白い実線：止まりたい位置（壁の0.5 m手前）",
-      "threshold": "破線：停止指示を出す距離（壁まで0.6 m）",
+      "threshold": "破線：停止指令を出す距離（壁まで0.6 m）",
       "usedRange": "青：判断に使った距離",
       "actualRange": "緑：現在の実際の距離（観察用）",
       "mapWall": "青い太線：計算して地図に置いた壁",
@@ -208,7 +208,7 @@
   },
   "chartEvents": {
     "contact": "接触",
-    "stop": "停止指示"
+    "stop": "停止指令"
   },
   "diagnosticsSensorLines": {
     "missing": [
@@ -242,7 +242,7 @@
     ]
   },
   "thresholds": {
-    "timingStop": "停止指示を出す距離 {value} m",
+    "timingStop": "停止指令を出す距離 {value} m",
     "stopDistance": "停止の境目 {value} m",
     "staleLimit": "待てる時間 {value}秒",
     "impactBand": "±{value} m/秒²の帯の外に出たら停止"

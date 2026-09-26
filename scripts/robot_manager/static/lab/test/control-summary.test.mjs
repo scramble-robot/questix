@@ -45,7 +45,7 @@ test('from the P topic on, the sentence names the overshoot and the settling tim
   assert.equal(isSimpleTopic('p'), false);
   const sentence = runSummary(p, 'p', text);
   assert.match(sentence, /^最後の2秒の平均は26 rpmで、目標60 rpmまであと34 rpmです。/);
-  assert.match(sentence, /目標を越えることはなく/);
+  assert.match(sentence, /目標を超えることはなく/);
   assert.match(sentence, /落ち着きませんでした。$/);
   const i = run('i', { ki: 3 });
   assert.match(

@@ -51,7 +51,7 @@
     "eyebrow": "問 {number} / {total} · {concept}",
     "title": "こんな結果が出たら",
     "evidenceCaption": "この問題で使う測定例",
-    "evidenceNote": "教材の仕組みを考えるための例です。あなたの実験結果とは別です。",
+    "evidenceNote": "教材の仕組みを考えるための例です。自分の実験結果とは別です。",
     "check": "答えを確かめる",
     "unsure": "まだ分からない",
     "validation": "答えを一つ選ぶか、「まだ分からない」を押してください。",

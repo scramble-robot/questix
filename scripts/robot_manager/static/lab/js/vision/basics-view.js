@@ -175,7 +175,7 @@ function captureEvidence(model, copy) {
   return html`<h2>${text.evidenceTitle}</h2>
     ${histogram(model, copy)}
     <p class="vision-histogram-readout">
-      白つぶれに近い画素：<b>${model.whiteRatio}%</b>　画素数：<b
+      白飛びに近い画素：<b>${model.whiteRatio}%</b>　画素数：<b
         >${model.pixelCount.toLocaleString()}</b
       >
     </p>

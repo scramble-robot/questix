@@ -263,6 +263,8 @@ whole copy of the site.
   Snapshots are unaffected — the serializer does not descend into a hidden element — but a steps
   file must not pick controls by position across the whole page, because the hidden lab now
   contributes elements. Open the lab with `[data-rl-group="3"]` and address its controls by id.
+- Systems: the braking status reads 「停止指令・減速中」 (was 「停止指示・減速中」), the site's word for
+  commands to the motors. `test/systems-core.test.mjs` maps the baseline's status text before comparing.
 
 ## Snapshot files that are advisory, not gates
 

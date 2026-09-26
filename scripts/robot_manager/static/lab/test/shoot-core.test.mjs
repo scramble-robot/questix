@@ -362,7 +362,7 @@ test('every reason the page or the bridge can give has a sentence', () => {
 test('sentences are filled with the numbers and names they mention', () => {
   assert.equal(
     reasonSentence('spinning_up', copy, { seconds: '0.6' }),
-    '回転が安定するまで あと0.6秒',
+    '回転が安定するまで、あと0.6秒',
   );
   assert.equal(reasonSentence('made_up', copy), 'made_up', 'an unknown key stays visible');
   const values = blockerValues({ code: 'no_launcher', parts: ['roller', 'shot'] }, copy);

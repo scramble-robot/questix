@@ -8,7 +8,7 @@
   },
   "stageShort": {
     "idle": "未接続",
-    "connecting": "探し中",
+    "connecting": "接続中",
     "open": "接続済み",
     "failed": "失敗",
     "reconnecting": "再接続中"
@@ -65,7 +65,7 @@
     "scanNone": "LiDARの値はまだ届いていません",
     "cameraNone": "カメラの画像はまだ届いていません",
     "cameraLive": "ロボットのカメラの、いまの画像です",
-    "wheels": "直近{seconds}秒 · 車輪の回転数（rpm、前進が正）· 実線＝実測　破線＝指令 · 線の右端の「左」「右」がどちらの車輪か",
+    "wheels": "直近{seconds}秒 · 車輪の回転数（rpm、前進が正）· 実線＝実測　破線＝指令 · 線の右端の「左」「右」は車輪の左右",
     "estopPressed": "押されています",
     "estopReleased": "解除されています",
     "streamUnused": "使いません",

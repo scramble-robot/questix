@@ -66,7 +66,7 @@
     },
     "room": {
       "brief": {
-        "scene": "ここまでの地図は、教材が用意した部屋でした。最後は、実機のLiDARで自分たちの教室を測り、その地図で道を計画します。測った壁や机の脚が、そのまま障害物になります。",
+        "scene": "ここまでの地図は、教材で用意した部屋でした。最後は、実機のLiDARで自分たちの教室を測り、その地図で道を計画します。測った壁や机の脚が、そのまま障害物になります。",
         "purpose": "実際に測った地図でも、機体の幅と余裕を考えた道が見つかるか調べます。測ったときに人が走らせた道と、計算した道も比べます。",
         "first": "まず「部屋の地図を用意する」で、ロボットで部屋を測るか、スマホの3Dスキャンを開きます。地図ができたら、余裕を0 cmと15 cmにしてそれぞれ走らせ、道と「最も近づいた間隔」を比べてください。3Dスキャンでは、切り出す高さを「LiDARの高さだけ」に変えると、ロボットに見える地図では道がどう変わるかも比べられます。",
         "figure": "灰色の小さな四角は、その高さで何かがある場所です。ロボットで測った地図では、灰色の点線が測ったときに走らせた道です。スタートと目的地は、地図の上を押して置き直せます。"
@@ -143,7 +143,7 @@
     "地図は10 cm間隔の点で調べ、上下左右と斜めの8方向へ探索します。障害物の角を斜めに横切る移動も除外します。その後、障害物に触れずに直線でつなげる通過点をまとめます。地図を区切るのは計算のためで、ロボットの位置と向きは連続値です。",
     "機体の幅36 cm・車輪間隔32 cm・車輪半径6.5 cm。直進は最大0.4 m/秒で、左右の回転数から動きを計算します。滑り、加速・減速の遅れ、位置推定の誤差は省略しています。計画し直す場面の1秒の停止は説明用で、探索計算にかかった実時間ではありません。"
   ],
-  "hardwareGuideReferences": "\n\n参考: https://docs.nav2.org/rolling/getting_started/navigation_concepts/environmental_representation/\nhttps://docs.nav2.org/rolling/configuration_and_development/first_time_robot_setup_guide/footprint/setup_footprint/",
+  "hardwareGuideReferences": "\n\n参考：https://docs.nav2.org/rolling/getting_started/navigation_concepts/environmental_representation/\nhttps://docs.nav2.org/rolling/configuration_and_development/first_time_robot_setup_guide/footprint/setup_footprint/",
   "room": {
     "title": "部屋の地図を用意する",
     "steps": [
@@ -151,7 +151,7 @@
       "コントローラーで、周りの壁や机が見えるように低速で目的地まで走らせ、止めたら「測り終えた」を押します。6 m × 4 mの範囲に収まる走り方にしてください。",
       "記録ファイル（JSON）や、Robot Managerで記録したrosbag（.mcap）を開いても、同じように地図を作れます。"
     ],
-    "limits": "ロボットで測った地図は、車輪から求めた位置で点を重ねて作るので、長く走るとずれます（1分以内の短い走行がおすすめです）。どちらの地図も、光が届かなかった場所は空いているものとして扱います。この教材はロボットへ指示を送りません。",
+    "limits": "ロボットで測った地図は、車輪から求めた位置で点を重ねて作るので、長く走るとずれます（1分以内の短い走行がおすすめです）。どちらの地図も、光が届かなかった場所は空いているものとして扱います。この教材からロボットへ指令は送りません。",
     "seconds": 90,
     "recordLabel": "部屋を測る（最長{seconds}秒）",
     "stopLabel": "測り終えた（記録を終える）",

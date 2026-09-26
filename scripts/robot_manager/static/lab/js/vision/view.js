@@ -540,13 +540,16 @@ function realRobotNote(copy, actions) {
       <div>
         <h3>${text.captureHeading}</h3>
         <p>${text.captureText}</p>
-        <button id="visionRosDownload" @click=${actions.saveCameraScript}>RGB画像の保存</button
-        ><button id="visionRGBDDownload" @click=${actions.saveRgbdScript}>RGB-Dログの保存</button>
+        <button id="visionRosDownload" @click=${actions.saveCameraScript}>
+          RGB画像を撮るスクリプトを保存</button
+        ><button id="visionRGBDDownload" @click=${actions.saveRgbdScript}>
+          RGB-Dログを記録するスクリプトを保存
+        </button>
       </div>
       <div>
         <h3>${text.openHeading}</h3>
         <p>${text.openText}</p>
-        <button id="visionGuideDownload" @click=${actions.saveGuide}>実機の実験手順</button>
+        <button id="visionGuideDownload" @click=${actions.saveGuide}>実機の実験手順を保存</button>
       </div>
       <div>
         <h3>${text.cautionHeading}</h3>

@@ -23,7 +23,7 @@ const MESSAGES = {
   notConnected: '先に画面右上の「実機」からロボットに接続してください。',
   lost: '記録の途中でロボットとの接続が切れました。',
   aborted: '記録を中止しました。',
-  noSamples: '記録が届きませんでした。ロボットのノードが動いているか確かめてください。',
+  noSamples: 'ロボットから値が届きませんでした。ロボットのノードが動いているか確かめてください。',
 };
 
 const isConnected = () => robotState().phase === 'open';
