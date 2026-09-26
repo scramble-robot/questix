@@ -54,7 +54,7 @@ def read_snapshot(config):
             result = subprocess.run(command, input=json.dumps(requested), text=True,
                                     capture_output=True, timeout=_PROCESS_TIMEOUT, env=environment)
         except subprocess.TimeoutExpired as exc:
-            raise HTTPException(504, '実行中の設定取得がタイムアウトしました。') from exc
+            raise HTTPException(504, '実行中の設定の取得がタイムアウトしました。') from exc
         except OSError as exc:
             raise HTTPException(503, 'ROS 設定取得プロセスを起動できません。') from exc
         if result.returncode != 0:

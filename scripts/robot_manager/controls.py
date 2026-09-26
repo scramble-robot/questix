@@ -167,7 +167,7 @@ def _default_file(controller, env):
 def _decode(raw, controller):
     document = yaml.safe_load(raw)
     if not isinstance(document, dict):
-        raise ValueError('設定ファイルは ROS パラメータ YAML である必要があります。')
+        raise ValueError('設定ファイルが ROS パラメータの YAML 形式ではありません。')
     values = {}
     for node, section in document.items():
         if not isinstance(section, dict) or set(section) != {'ros__parameters'}:

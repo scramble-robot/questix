@@ -153,7 +153,7 @@
       <section class="card tuning-card">
         <div class="tuning-header">
           <div><h2>コントローラー設定</h2>
-            <p class="tuning-subtitle">機能名やキーを選んで、割り当てを変更。</p></div>
+            <p class="tuning-subtitle">機能名やキーを選んで、割り当てを変更します。</p></div>
         <div class="control-toolbar tuning-profile">
           <label for="controls-profile" class="tuning-sr-only">編集するコントローラー</label>
           <select id="controls-profile">
@@ -231,7 +231,7 @@
         <div class="tuning-savebar-actions">
           <div>
             <p id="controls-change-count" role="status" aria-live="polite">未保存の変更: 0 項目</p>
-            <p class="tuning-savebar-note">保存後、次にロボット制御を起動するときに使用</p>
+            <p class="tuning-savebar-note">保存すると、次にロボット制御を起動したときから使われます</p>
           </div>
           <button type="button" class="btn btn-save" id="controls-save" disabled>操作設定を保存</button>
         </div>
@@ -355,7 +355,7 @@
       </h2>
       <p class="lab-note">
         配信を開始すると、同じネットワークの端末から教材を開けます。教材はロボットのセンサーの値を
-        受け取ります。下の「教材からの走行」「教材からの発射」を許可したときだけ、教材がロボットの走行や発射台を動かします。
+        受け取ります。下の「教材からの走行」「教材からの発射」を許可したときだけ、教材からロボットを走らせたり発射台を動かしたりできます。
       </p>
 
       <div class="rec-status">
@@ -419,7 +419,7 @@
 
       <p class="lab-note">
         生徒が教材で安全確認のチェックを入れると、走行実験（ステップ応答・壁の前で止める・速さの往復・
-        決めた距離の走行・動作確認）が低速でロボットを動かします。コントローラーはいつでも優先です：
+        決めた距離の走行・動作確認）で、教材から低速でロボットを走らせられます。コントローラーはいつでも優先です：
         スティックを倒せば、すぐにコントローラーの操作に切り替わり、教材の走行は止まります。
         切り替えると配信中のブリッジを起動し直すので、生徒の接続が数秒切れます。
       </p>
@@ -529,7 +529,7 @@
         </div>
       </div>
       <button class="btn btn-save" id="lab-save-config">教材の設定を保存</button>
-      <p class="lab-note">設定は、次に配信を開始したときから有効になります。自動開始は最初からオンです。オンの間は、教材のページとロボットの値を、同じネットワークの全員が開けます（走行と発射は「教材からの走行」「教材からの発射」で許可したときだけ）。大会モードに切り替えると、配信を止めて自動開始・走行・発射をオフにします（大会モードの間は配信しません）。練習モードに戻すと、大会モードの前に選んでいた設定（自動開始・走行・発射）に戻します。</p>
+      <p class="lab-note">設定は、次に配信を開始したときから有効になります。自動開始は最初からオンです。オンの間は、同じネットワークの誰でも教材のページを開いて、ロボットの値を見られます（走行と発射は「教材からの走行」「教材からの発射」で許可したときだけ）。大会モードに切り替えると、配信を止めて自動開始・走行・発射をオフにします（大会モードの間は配信しません）。練習モードに戻すと、大会モードの前に選んでいた設定（自動開始・走行・発射）に戻します。</p>
     </section>
     </div><!-- /lab panel -->
     <div class="tab-panel" data-panel="admin" role="region" aria-label="管理設定">
@@ -537,7 +537,7 @@
     <!-- Launch Config -->
     <section class="card">
       <h2>機体・接続の設定</h2>
-      <p class="section-help">開発・キッティング担当者向け。保存した内容は次のロボット制御の起動・再起動で反映します。</p>
+      <p class="section-help">開発・キッティング担当者向け。保存した内容は次のロボット制御の起動・再起動で反映されます。</p>
       <div class="config-grid">
         <div class="config-item wide controller-type-row">
           <label for="controller-type">コントローラー</label>
@@ -600,7 +600,7 @@
       <p class="section-help">保存先や容量制限は担当者が準備します。変更は次回の記録開始時に使われます。</p>
       <div class="config-grid rec-config">
         <div class="config-item wide">
-          <label for="rec-vehicle">車両名 (号機)</label>
+          <label for="rec-vehicle">車両名（号機）</label>
           <input type="text" id="rec-vehicle" data-rec-config="VEHICLE_NAME"
             placeholder="robot1">
         </div>
@@ -618,15 +618,15 @@
             placeholder="/camera/image_raw /scan">
         </div>
         <div class="config-item">
-          <label for="rec-min-free">確保する空き容量 (GB)</label>
+          <label for="rec-min-free">確保する空き容量（GB）</label>
           <input type="number" id="rec-min-free" data-rec-config="MIN_FREE_GB" min="0" value="5">
         </div>
         <div class="config-item">
-          <label for="rec-max-split">ファイルの分割サイズ (MB)</label>
+          <label for="rec-max-split">ファイルの分割サイズ（MB）</label>
           <input type="number" id="rec-max-split" data-rec-config="MAX_SPLIT_MB" min="0" value="0">
         </div>
         <div class="config-item wide">
-          <label for="rec-max-duration">記録する時間 (秒 / 0=無制限)</label>
+          <label for="rec-max-duration">記録する時間（秒 / 0=無制限）</label>
           <input type="number" id="rec-max-duration" data-rec-config="MAX_DURATION_SEC" min="0"
             value="0">
         </div>

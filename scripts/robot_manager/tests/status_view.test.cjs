@@ -78,7 +78,7 @@ test('status strip: running vs next mode, E-stop, who drives', () => {
   assert.equal(rows.estop.text, '解除されています');
   assert.equal(rows.lab.text, '配信中・接続中の端末 4 台');
   assert.equal(rows.permissions.text, '走行: 許可・発射: 許可');
-  assert.equal(rows.driver.text, '教材（生徒の端末 #5）が走行中');
+  assert.equal(rows.driver.text, '生徒の端末 #5（教材から走行中）');
   const pressed = StatusView.overview(status,
     lab({ bridge: bridge({ blockers: [{ code: 'emergency_stop' }] }) }), 'UART / Switch');
   assert.equal(pressed.estop.text, '押されています');
@@ -90,7 +90,7 @@ test('status strip: running vs next mode, E-stop, who drives', () => {
   const forbidden = StatusView.overview({ mode: 'practice', service: 'active', running_mode: 'practice' },
     lab({ drive_allowed: false, shoot_allowed: false, bridge: bridge({ allowed: false }, { allowed: false }) }), 'Web');
   assert.match(forbidden.estop.text, /^分かりません/);
-  assert.equal(forbidden.driver.text, 'コントローラー（Web）・教材は動かしていません');
+  assert.equal(forbidden.driver.text, 'コントローラー（Web）・教材からは動かしていません');
 });
 
 test('header mode summary', () => {

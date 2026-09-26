@@ -59,15 +59,15 @@ QUESTiX Robot Manager の全タブとダイアログは、`static/style.css` の
 - 入力欄とボタンの基本高さは 44px、角丸は `--radius-control` に統一します。
   キーボードのフォーカス表示と無効状態の表示も共通です。
 - 画面幅 639px 以下では設定を1列にし、パス入力をラベルの下に配置します。
-  スタイル変更時は全4タブと管理設定、操作設定の編集ダイアログ、フォルダ選択をPC・モバイル幅で確認します。
+  スタイル変更時は全5タブと管理設定、操作設定の編集ダイアログ、フォルダ選択をPC・モバイル幅で確認します。
 
 ## 生徒向けの操作と管理設定
 
 通常のタブは「操作」「調整」「記録」「診断ログ」「教材」です。生徒が行う練習／大会モードの
-切り替えは「操作」に残し、機体構成・通信設定・録画の詳細設定は右上の「管理設定」に
+切り替えは「操作」に残し、機体構成・通信設定・記録の詳細設定は右上の「管理設定」に
 まとめています。これは画面の整理であり、利用者認証やアクセス権限の分離ではありません。
 状態は「ロボット制御：実行中／起動処理中／停止処理中／停止中／起動失敗」と表示します。
-実行中は制御プログラムの実行状態で、コントローラーの接続や操作可能を保証する表示ではありません。
+「実行中」は制御プログラムが動いていることを示すだけで、コントローラーの接続や操作できることを保証する表示ではありません。
 
 - ヘッダーには、ロボット名・モード（動作中のモードと次回のモード）・ロボット制御の状態・
   非常停止ボタンが押されているときはその表示と、常に **「すべて止める」** があります。
@@ -102,7 +102,7 @@ QUESTiX Robot Manager の全タブとダイアログは、`static/style.css` の
   「ひとつ前の設定を読み込む」は編集値を戻すだけで、「操作設定を保存」により確定します。
   既存の競合検出を使用し、外部編集でリビジョンが変わった場合は古い履歴を提示しません。
 
-授業用の標準設定の登録と録画メモは、この段階では追加していません。
+授業用の標準設定の登録と記録のメモは、この段階では追加していません。
 
 ## 練習モードの起動要求 (`start-request`)
 
@@ -178,7 +178,7 @@ The **教材** tab starts and stops that bridge, so nobody has to run `ros2 laun
   and VPN interfaces are left out). A page opened there connects to the robot automatically.
 - **配信停止** interrupts the process group (SIGINT, then SIGTERM/SIGKILL). The bridge is also
   stopped when robot_manager exits. A bridge that was started by hand is shown as
-  "配信中 (手動で起動)" and is not stopped from here.
+  "配信中（手動で起動）" and is not stopped from here.
 - `カメラのトピック` (`sensor_msgs/CompressedImage`, empty = no camera) is stored in
   `$QUESTIX_CONFIG_DIR/lab.env` and applies from the next start.
 - **起動時に配信を自動で開始する** (`AUTOSTART="true"` in `lab.env`, **on by default**) starts the
@@ -274,10 +274,10 @@ bag list shows each bag's full path to make that copy easy. Only MCAP-storage ba
 are accepted by `rosbag_manager` (db3/sqlite is rejected), which is why recording is
 fixed to `-s mcap`.
 
-Disk protection: recording refuses to start when free space is below `確保する空き容量 (GB)`
+Disk protection: recording refuses to start when free space is below `確保する空き容量（GB）`
 (`MIN_FREE_GB`, HTTP 507) and auto-stops (via SIGINT, so the bag is finalized) if
-free space drops below that threshold mid-recording. Optional `ファイルの分割サイズ (MB)`
-(`MAX_SPLIT_MB`) and `記録する時間 (秒 / 0=無制限)` (`MAX_DURATION_SEC`) cap per-file size and total
+free space drops below that threshold mid-recording. Optional `ファイルの分割サイズ（MB）`
+(`MAX_SPLIT_MB`) and `記録する時間（秒 / 0=無制限）` (`MAX_DURATION_SEC`) cap per-file size and total
 recording time.
 
 ### Prerequisites
@@ -354,7 +354,7 @@ node --test scripts/robot_manager/tests/web_joy_connection.test.cjs
 Joy のキー割り当て、射出・ローラー操作、走行速度・加速度は
 [QUESTiX 共通操作設定](../../questix_control_config/README.md) に集約しています。
 QUESTiX Robot Manager の「調整」タブでコントローラー別に編集・保存し、
-ロボットの次回起動／再起動で反映します。保存による自動再起動は行いません。
+ロボットの次回起動／再起動で反映されます。保存しても自動では再起動しません。
 管理画面には未保存表示・初期値への復元・入力検証・同時編集の競合検出があります。
 
 操作割り当てはコントローラー別のボタン名・軸名から選べます。名前の隣に
@@ -421,7 +421,7 @@ Linux の標準配置を表示するもので、接続機器の自動判別で�
 モータ RPM、低速不感帯、目標速度付近の緩和幅、全方向移動用の左右速度、
 単体起動専用の設定は画面に表示しません。保存時にも既存値を維持します。
 「速度・操作感を初期値に戻す」は表示中の6項目だけを対象とし、キー割り当ても維持します。
-「実行中の設定と比較」を押したときだけ、各項目に「実行中（取得時点）」を表示します。
+「ロボットの設定と比較」を押したときだけ、各項目に「実行中（取得時点）」を表示します。
 初回表示時には Launch 設定の
 コントローラーを選択し、編集対象・Launch 設定・読み込み時刻を表示します。
 

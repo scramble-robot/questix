@@ -95,7 +95,7 @@ web_joy_driver:
     robot_name: ""
 
     # twist_arbiter's latched status (std_msgs/String JSON). Read only: the page
-    # shows 「教材が走らせています」 while a QUESTiX LAB driving experiment has
+    # shows 「教材から走らせています」 while a QUESTiX LAB driving experiment has
     # the robot. "" disables it. Competition launches do not run twist_arbiter.
     arbiter_status_topic: "/twist_arbiter/status"
 

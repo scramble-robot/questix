@@ -129,7 +129,7 @@ async function api(path, opts = {}) {
     status = res.status;
     let data;
     try { data = await res.json(); }
-    catch { throw new Error(`サーバーから読み取れない応答が届きました (HTTP ${status})`); }
+    catch { throw new Error(`サーバーから読み取れない応答が届きました（HTTP ${status}）`); }
     if (!res.ok) {
       const detail = Array.isArray(data.detail)
         ? data.detail.map((item) => item.msg).join("; ") : data.detail;
@@ -253,7 +253,7 @@ function renderOverview() {
 
 function updateLaunchConfig(config) {
   if (configDirty) return;
-  document.getElementById('launch-save-state').textContent = '保存済みの設定です。変更は次のロボット制御の起動・再起動で反映します。';
+  document.getElementById('launch-save-state').textContent = '保存済みの設定です。変更は次のロボット制御の起動・再起動で反映されます。';
   const toggleKeys = ["ENABLE_LIDAR", "ENABLE_SHOT", "ENABLE_DRIVE", "ENABLE_GPIO_REF", "ENABLE_RVIZ"];
   for (const key of toggleKeys) {
     const input = document.querySelector(`[data-config="${key}"]`);
@@ -301,7 +301,7 @@ async function collectLogs() {
       method: "POST",
       body: JSON.stringify({ dest_dir: dest, sources }),
     });
-    toast(`ログを保存しました (${fmtBytes(data.size_bytes)})`, "success");
+    toast(`ログを保存しました（${fmtBytes(data.size_bytes)}）`, "success");
     renderLogResult(data);
   } catch {
     // already toasted
@@ -385,7 +385,7 @@ async function apiSilent(path) {
   let data;
   try { data = await res.json(); }
   catch {
-    const error = new Error(`読み取れない応答です (HTTP ${res.status})`);
+    const error = new Error(`読み取れない応答です（HTTP ${res.status}）`);
     error.status = res.status;
     throw error;
   }
@@ -434,7 +434,7 @@ async function refreshRecStatus() {
   // Notify once when an auto-stop happened
   if (!recording && data.last_stop_reason === "auto_stopped_low_disk" &&
       lastStopReasonShown !== "auto_stopped_low_disk") {
-    toast("ディスク空き容量不足のため記録を自動停止しました", "error");
+    toast("ディスクの空き容量が足りないため、記録を自動で停止しました", "error");
   }
   lastStopReasonShown = data.last_stop_reason;
 }
@@ -661,7 +661,7 @@ async function pickFolder() {
       body: JSON.stringify({ OUTPUT_DIR: folderSelectedPath }),
     });
     document.getElementById("rec-output").value = folderSelectedPath;
-    toast(`出力フォルダを設定しました: ${folderSelectedPath}`, "success");
+    toast(`記録の保存先フォルダを設定しました: ${folderSelectedPath}`, "success");
     closeFolderPicker();
     await refreshRecStatus();
     await refreshBagList();
@@ -813,13 +813,13 @@ async function refreshLabStatus() {
   document.getElementById("lab-state-text").textContent = data.running
     ? "配信中"
     : data.external
-      ? "配信中 (手動で起動)"
+      ? "配信中（手動で起動）"
       : data.last_stop_reason === "autostart_failed"
-        ? "停止中 (自動開始に失敗しました。ROS環境とビルドを確認してください)"
+        ? "停止中（自動開始に失敗しました。ROS 環境とビルドを確認してください）"
         : data.competition || data.last_stop_reason === "competition_mode"
-          ? "停止中 (大会モードでは配信しません)"
+          ? "停止中（大会モードでは配信しません）"
           : data.last_stop_reason === "start_failed" || data.last_stop_reason === "exited"
-            ? "停止中 (ブリッジが終了しました。「ブリッジのログ」を確認してください)"
+            ? "停止中（ブリッジが終了しました。「ブリッジのログ」を確認してください）"
             : "停止中";
   document.getElementById("lab-elapsed").textContent = data.running
     ? fmtDuration(data.elapsed_sec)
@@ -1042,7 +1042,7 @@ function showLabCapability(kind, data) {
   if (kind === "drive") {
     const robot = data.bridge && data.bridge.robot;
     document.getElementById("lab-drive-robot").textContent = robot
-      ? `${robot.name}（ROS_DOMAIN_ID ${robot.domain != null ? robot.domain : "未設定(0)"}）` : "—";
+      ? `${robot.name}（ROS_DOMAIN_ID ${robot.domain != null ? robot.domain : "未設定（0）"}）` : "—";
   }
   document.getElementById(`lab-${kind}-card`).classList.toggle("allowed", view.tone === "driving");
   // A lab.env write that failed without failing the request (e.g. owned by another user).
@@ -1103,7 +1103,7 @@ function setupLabEvents() {
           AUTOSTART: document.getElementById("lab-autostart").checked,
         }),
       });
-      toast("教材の設定を保存しました (次の配信開始から有効)", "success");
+      toast("教材の設定を保存しました（次の配信開始から有効）", "success");
     } catch {
       // already toasted
     }

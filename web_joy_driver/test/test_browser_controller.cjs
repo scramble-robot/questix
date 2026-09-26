@@ -325,7 +325,7 @@ test("止める from any page stops the node input and the lesson (drive and rol
 test("a failed lesson stop is reported only while a lesson drives", () => {
   const c = controller(); c.sockets[0].open();
   c.sockets[0].message(status({ arbiter: { active: "lab", reason: "lab", lab_locked: false } }));
-  assert.equal(c.$("banner").textContent, "教材が走らせています");
+  assert.equal(c.$("banner").textContent, "教材から走らせています");
   c.$("stop").dispatch("click");
   c.labSockets()[0].end();
   assert.equal(c.$("banner").className, "warn");
@@ -412,7 +412,7 @@ test("emergency stop outranks the lesson banner", () => {
   const c = controller(); c.sockets[0].open();
   c.sockets[0].message(status({ estop: true, estop_reason: "GPIO", arbiter: { active: "lab" } }));
   assert.equal(c.$("banner").className, "bad"); assert.equal(c.$("banner").textContent, "非常停止中");
-  assert.equal(c.$("estop").textContent, "非常停止: 停止中");
+  assert.equal(c.$("estop").textContent, "非常停止：押されています");
   c.sockets[0].message(status({ estop: false, arbiter: { active: "joy" } }));
   assert.equal(c.$("banner").className, "");
 });

@@ -588,11 +588,11 @@ def start_bridge():
     global _proc, _started_at, _last_stop_reason, _started_allow_drive, _started_allow_shoot
     with _lock:
         if _proc is not None and _proc.poll() is None:
-            raise HTTPException(status_code=409, detail="教材の配信は既に動いています")
+            raise HTTPException(status_code=409, detail="教材はすでに配信中です")
         if _port_in_use():
             raise HTTPException(
                 status_code=409,
-                detail=f"ポート {LAB_BRIDGE_PORT} は使用中です (手動で起動したブリッジを止めてください)",
+                detail=f"ポート {LAB_BRIDGE_PORT} は使用中です（手動で起動したブリッジを止めてください）",
             )
         if _competition_mode():
             # Competition runs must not stream telemetry to the LAN (disable_for_competition).
@@ -627,7 +627,7 @@ def start_bridge():
             raise HTTPException(
                 status_code=500,
                 detail=(
-                    "教材の配信を開始できませんでした (ROS環境 / questix_lab_bridge のビルドを確認してください)。"
+                    "教材の配信を開始できませんでした（ROS 環境と questix_lab_bridge のビルドを確認してください）。"
                     f"「ブリッジのログ」または {LOG_FILE} に理由が出ています"
                 ),
             )
@@ -643,7 +643,7 @@ def start_bridge():
 def stop_bridge():
     with _lock:
         if _proc is None or _proc.poll() is not None:
-            raise HTTPException(status_code=409, detail="教材の配信は動いていません")
+            raise HTTPException(status_code=409, detail="教材は配信していません")
         _stop_locked("stopped")
         return _status_payload()
 
@@ -672,7 +672,7 @@ def set_drive(request: DriveRequest):
     (config_error says why) and the bridge is still restarted with allow_drive:=false.
     """
     return _set_permission("ALLOW_DRIVE", request.allow,
-                           "大会モードでは教材から走行させられません", "走行を禁止する",
+                           "大会モードでは教材から走らせられません", "走行を禁止する",
                            "drive_setting")
 
 

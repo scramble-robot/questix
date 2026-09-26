@@ -456,7 +456,7 @@
     <span class="host" id="host"></span>
     <div class="spacer"></div>
     <div class="chips">
-      <span class="chip" id="estop">非常停止: --</span>
+      <span class="chip" id="estop">非常停止：--</span>
       <span class="chip" id="conn">未接続</span>
     </div>
     <div class="acts-row">
@@ -477,7 +477,7 @@
       <button type="button" id="modePointer" class="on">タッチ・マウス</button>
       <button type="button" id="modeKeyboard">キーボード</button>
     </div>
-    <p id="inputHelp">スティック領域をドラッグ、ボタンは押している間だけ動きます。指を離すと止まります。</p>
+    <p id="inputHelp">スティックの領域をドラッグします。ボタンは押している間だけ動きます。指を離すと止まります。</p>
   </div>
   <main>
     <section class="group move">
@@ -535,13 +535,13 @@
         <ul>
           <li><b>「移動」の左スティック</b>をドラッグ: 前後・左右に移動。土台の外に触れるとその位置がスティックの中心になります。</li>
           <li><b>「移動」の右スティック</b>を左右にドラッグ: 旋回。</li>
-          <li><b>「ショット」のボタン</b>: 中央の大きな <b>FIRE</b> が発射、その上下の <b>TILT</b> が砲の上下、左の <b>ROLLER</b> が回転。</li>
+          <li><b>「ショット」のボタン</b>: 中央の大きな <b>FIRE</b> で発射、その上下の <b>TILT</b> で発射台の角度を上下、左の <b>ROLLER</b> でローラーを回します。</li>
           <li>ボタンは<b>押している間だけ</b>有効。指を離すと止まります。</li>
           <li>複数の指で移動・旋回・ボタンを同時に操作できます。</li>
         </ul>
       </section>
       <section>
-        <h3>キーボード (PC)</h3>
+        <h3>キーボード（PC）</h3>
         <ul>
           <li><b><kbd>Space</kbd> を押したまま</b>操作キーを押します。Space を離すと全入力が解除されます。</li>
           <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / 矢印: 移動、<kbd>Q</kbd><kbd>E</kbd>: 旋回</li>
@@ -553,12 +553,12 @@
       <section>
         <h3>表示の見方</h3>
         <ul>
-          <li><b>ロボット名</b>: 左上。操作したいロボットの名前か確かめてください (違うときは Wi-Fi を確認)。</li>
+          <li><b>ロボット名</b>: 左上。操作したいロボットの名前か確かめてください（違うときは Wi-Fi を確認）。</li>
           <li><b>接続</b>: 「操作中」はこの端末で操作できる状態、「閲覧のみ」はほかの端末が操作している状態です。切れると自動で再接続します。</li>
-          <li><b>非常停止</b>: ロボット側の非常停止状態。停止中は入力しても動きません。</li>
-          <li><b>教材が走らせています</b>: QUESTiX LAB の教材がロボットを動かしている間に出ます。スティックを動かすとこの画面の操作に切り替わります。</li>
-          <li><b>カメラ</b>: ロボットのカメラ映像が届くと中央に表示します (ノード側で <code>camera_topic</code> を設定したときだけ)。</li>
-          <li>下部のメーターはロボットに送っている値です (前後・左右・旋回)。</li>
+          <li><b>非常停止</b>: ロボット側の非常停止の状態。押されている間は入力しても動きません。</li>
+          <li><b>教材から走らせています</b>: QUESTiX LAB の教材からロボットを動かしている間に出ます。スティックを動かすとこの画面の操作に切り替わります。</li>
+          <li><b>カメラ</b>: ロボットのカメラ映像が届くと中央に表示します（ノード側で <code>camera_topic</code> を設定したときだけ）。</li>
+          <li>下部のメーターはロボットに送っている値です（前後・左右・旋回）。</li>
         </ul>
       </section>
       <section>
@@ -572,7 +572,7 @@
       <section class="warnbox">
         <h3>安全</h3>
         <ul>
-          <li><b>「止める」はどの端末からでも押せます</b>。この画面からの操作をニュートラルにし、教材の走行とローラーにも止めるを送ります。操作中の端末は、指を離してから触れ直すまで動かせません。</li>
+          <li><b>「止める」はどの端末からでも押せます</b>。この画面からの操作をニュートラルにし、教材の走行とローラーにも停止を送ります。操作中の端末は、指を離してから触れ直すまで動かせません。</li>
           <li>接続が切れる・画面を閉じる・他のアプリに切り替えると、ロボットは<b>自動でニュートラル</b>に戻ります。</li>
           <li>「止める」はこのページと教材からの指令を止めるもので、GPIO 非常停止の代わりではありません。</li>
         </ul>
@@ -827,7 +827,7 @@
     const n = state.notice;
     if (n && Date.now() < n.until) return n;
     if (state.phase === "open" && state.arbiter && state.arbiter.active === "lab") {
-      return { cls: "info", text: "教材が走らせています",
+      return { cls: "info", text: "教材から走らせています",
         sub: state.controller ? "スティックを動かすとこの画面の操作に切り替わります。止めるときは「止める」"
           : "QUESTiX LAB の実験でロボットが動いています。止めるときは「止める」" };
     }
@@ -839,7 +839,7 @@
     switch (state.phase) {
       case "connecting": return { cls: "", title: "接続中…", sub: `${location.host} のロボットに接続しています` };
       case "closed": return { cls: "bad", title: "切断 / 再接続待ち", sub: "ロボット側は自動でニュートラルに戻ります。接続が回復すると自動で再開します" };
-      case "auth": return { cls: "bad", title: "認証エラー", sub: "URL の token が違うか、ありません。管理画面の QR または URL から開き直してください", reconnect: true };
+      case "auth": return { cls: "bad", title: "認証エラー", sub: "URL のトークンが違うか、含まれていません。管理画面の QR または URL から開き直してください", reconnect: true };
       default: break;
     }
     if (state.controller) return null;
@@ -861,13 +861,13 @@
     $("robotName").textContent = state.robot;
     document.title = state.robot ? `${state.robot} · ブラウザ・スマホで操作` : "ブラウザ・スマホで操作 · QUESTiX";
     const e = $("estop");
-    if (state.estop === true) { e.className = "chip bad"; e.textContent = "非常停止: 停止中"; }
-    else if (state.estop === false) { e.className = "chip ok"; e.textContent = "非常停止: 解除"; }
-    else { e.className = "chip"; e.textContent = state.phase === "open" ? "非常停止: 情報なし" : "非常停止: --"; }
+    if (state.estop === true) { e.className = "chip bad"; e.textContent = "非常停止：押されています"; }
+    else if (state.estop === false) { e.className = "chip ok"; e.textContent = "非常停止：解除されています"; }
+    else { e.className = "chip"; e.textContent = state.phase === "open" ? "非常停止：情報なし" : "非常停止：--"; }
     if (state.phase === "connecting") setChip("warn", "接続中…");
     else if (state.phase === "auth") setChip("bad", "認証エラー");
     else if (state.phase === "closed") setChip("bad", "切断");
-    else if (state.controller) setChip(state.lagging ? "warn" : "ok", state.lagging ? "操作中 (遅延)" : "操作中");
+    else if (state.controller) setChip(state.lagging ? "warn" : "ok", state.lagging ? "操作中（遅延）" : "操作中");
     else setChip("", "閲覧のみ");
     $("reconnect").hidden = state.phase !== "auth";
     $("releaseBtn").hidden = !(state.phase === "open" && state.controller);
@@ -920,7 +920,7 @@
     resetAll();
     const sent = send({ type: "stop" });
     const labWasDriving = !!(state.arbiter && state.arbiter.active === "lab");
-    notice("ok", "止めました", sent ? "教材にも止めるを送っています…" : "ロボットとの接続が切れています。教材に止めるを送っています…");
+    notice("ok", "止めました", sent ? "教材にも停止を送っています…" : "ロボットとの接続が切れています。教材に停止を送っています…");
     stopLab((ok) => {
       if (ok) notice("ok", "止めました", sent ? "この画面の操作と、教材の走行・ローラーを止めました" : "教材の走行・ローラーを止めました（この画面はロボットに接続していません）");
       else if (ok === false && labWasDriving) notice("warn", "教材の走行を止められませんでした", `教材の中継（ポート ${state.labPort}）に接続できません。教材の画面の「止める」か、非常停止ボタンを使ってください`, 10000);
@@ -1112,7 +1112,7 @@
       n.textContent = name;
     };
     group("押しながら操作", [[{ codes: ["Space"], label: "Space", cls: "space", note: "保持" }]]);
-    group("移動 (矢印でも可)", [
+    group("移動（矢印でも可）", [
       [{ codes: ["KeyW", "ArrowUp"], label: "W" }],
       [{ codes: ["KeyA", "ArrowLeft"], label: "A" }, { codes: ["KeyS", "ArrowDown"], label: "S" }, { codes: ["KeyD", "ArrowRight"], label: "D" }],
     ]);
@@ -1157,7 +1157,7 @@
   });
 
   // ---------------------------------------------------------------- input mode
-  const HELP_POINTER = "スティック領域をドラッグ、ボタンは押している間だけ動きます。指を離すと止まります。";
+  const HELP_POINTER = "スティックの領域をドラッグします。ボタンは押している間だけ動きます。指を離すと止まります。";
   function applyMode() {
     resetAll();
     if (!keyboardCapable) $("inputMode").value = "pointer";

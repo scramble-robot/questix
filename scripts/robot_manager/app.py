@@ -385,7 +385,7 @@ def _stop_service() -> dict:
     state = _service_status()
     if state in ("active", "deactivating", "activating"):
         return {"ok": False, "state": state, "detail": "",
-                "message": "ロボット制御に停止を指示しました。まだ止まりきっていません"}
+                "message": "ロボット制御に停止の要求を送りました。まだ止まりきっていません"}
     return {"ok": True, "state": state, "detail": "", "message": "ロボット制御を止めました"}
 
 

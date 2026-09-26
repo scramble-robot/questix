@@ -43,7 +43,7 @@ const StatusView = (() => {
 
   function domainOf(bridge) {
     const robot = bridge && bridge.robot;
-    return robot && robot.domain != null ? robot.domain : '未設定(0)';
+    return robot && robot.domain != null ? robot.domain : '未設定（0）';
   }
 
   // { text: plain words for the teacher, detail: the technical cause (twist_arbiter, topics...) }
@@ -234,15 +234,15 @@ const StatusView = (() => {
     const drive = (bridge && bridge.drive_state) || {};
     const shoot = (bridge && bridge.shoot_state) || {};
     const doing = [];
-    if (drive.active) doing.push(`教材（生徒の端末 #${drive.owner}）が走行中`);
-    if (shoot.active) doing.push(`教材（生徒の端末 #${shoot.owner}）が発射台を操作中`);
+    if (drive.active) doing.push(`生徒の端末 #${drive.owner}（教材から走行中）`);
+    if (shoot.active) doing.push(`生徒の端末 #${shoot.owner}（教材から発射台を操作中）`);
     if (service !== 'active') rows.driver = { text: 'だれも動かせません（ロボット制御が停止中）', tone: 'idle' };
     else if (doing.length) rows.driver = { text: doing.join('・'), tone: 'warn' };
     else {
       const controllerBusy = (shoot.blockers || []).some((b) => b.code === 'controller');
       rows.driver = {
         text: `コントローラー（${controllerName || '未確認'}）` +
-          (controllerBusy ? '・発射台を操作中' : '・教材は動かしていません'),
+          (controllerBusy ? '・発射台を操作中' : '・教材からは動かしていません'),
         tone: 'plain',
       };
     }
