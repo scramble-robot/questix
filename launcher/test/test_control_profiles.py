@@ -106,8 +106,9 @@ def test_integrated_profile_and_topic_overrides(expand, tmp_path, controller, ga
 
 @pytest.mark.parametrize('gated', ['true', 'false'])
 def test_saved_web_profile_is_ignored(expand, tmp_path, gated):
-    """The browser controller's buttons are fixed by its page: only the packaged profile applies."""
-    profile = yaml.safe_load((ROOT / 'questix_control_config/config/controls.web.yaml').read_text())
+    """The browser controller's buttons are fixed by its page: only the packaged one applies."""
+    packaged = ROOT / 'questix_control_config/config/controls.web.yaml'
+    profile = yaml.safe_load(packaged.read_text())
     saved = yaml.safe_load(yaml.safe_dump(profile))
     saved['shot_component']['ros__parameters']['fire_button'] = 2
     (tmp_path / 'controls.web.yaml').write_text(yaml.safe_dump(saved))

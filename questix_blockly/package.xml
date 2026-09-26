@@ -21,6 +21,7 @@
   <exec_depend>tf2_ros</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
   <exec_depend>questix_launcher</exec_depend>
+  <exec_depend>questix_control_config</exec_depend>
   <exec_depend>operation_manager</exec_depend>
   <exec_depend>joy_gate</exec_depend>
   <exec_depend>joy_controller</exec_depend>
