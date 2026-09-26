@@ -1,3 +1,4 @@
+import { mountUsb, stopUsb } from './usb-ui.js';
 import { render } from '../vendor/lit-html.js';
 import { loadJson, loadText } from '../core/content.js';
 import { downloadFile } from '../core/dom.js';
@@ -140,8 +141,8 @@ function buildModel() {
     hardware: isHardwareLog(),
     // QUESTiX has no IMU: a log recorded on it carries gyroZ = 0 throughout.
     noGyro: isHardwareLog() && log.frames.every((frame) => frame.gyroZ === 0),
-    hardwareVisible: view !== 'basics' && real,
-    experimentVisible: view !== 'basics' && (!real || isHardwareLog()),
+    hardwareVisible: view === 'experiment' && real,
+    experimentVisible: view === 'experiment' && (!real || isHardwareLog()),
     hardwareGuideHtml: hardware.html,
     briefHtml: experimentBrief(),
     importStatus,
@@ -216,16 +217,19 @@ const FOOTER_TOPICS = [
   ...SLAM_CHAPTERS.map((chapter) => ({ id: chapter.id, title: chapter.title })),
   { id: 'compare', title: copy.lessonTopics.compare },
   { id: 'real', title: copy.lessonTopics.real },
+  { id: 'usb', title: 'USB LiDARでSLAM' },
 ];
 
 function footerTopic() {
   if (view === 'basics') return basicsChapter;
+  if (view === 'usb') return 'usb';
   return real ? 'real' : 'compare';
 }
 
 function openFooterTopic(id) {
   if (id === 'compare') actions.setReal(false);
   else if (id === 'real') actions.setReal(true);
+  else if (id === 'usb') actions.showUsb();
   else {
     // Set first, so switching to ① does not report the previously open chapter on the way.
     basicsChapter = id;
@@ -499,12 +503,20 @@ function estimatesCsv() {
 // --- Actions ------------------------------------------------------------------------------------
 
 const actions = {
+  mountUsb,
+  showUsb() {
+    playback.playing = false;
+    view = 'usb';
+    update();
+  },
   showBasics() {
+    stopUsb();
     view = 'basics';
     playback.playing = false;
     update();
   },
   setReal(value) {
+    stopUsb();
     const wasReal = real;
     real = value;
     view = 'experiment';
@@ -643,6 +655,7 @@ const actions = {
 // --- Entry points -------------------------------------------------------------------------------
 
 function pauseSlam() {
+  stopUsb();
   playback.playing = false;
 }
 

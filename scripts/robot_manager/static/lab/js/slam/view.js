@@ -1,4 +1,4 @@
-import { html, nothing, unsafeHTML } from '../vendor/lit-html.js';
+import { html, nothing, unsafeHTML, ref } from '../vendor/lit-html.js';
 import { formatNumber } from '../core/dom.js';
 import { lessonLabel, EXPERIMENT_STEPS, SENSOR_COPY } from '../shell/lesson-ui.js';
 import { runModeBadgeHtml } from '../shell/run-mode.js';
@@ -44,6 +44,7 @@ const runLabel = (run, copy) =>
 
 function heading(model, copy) {
   if (model.view === 'basics') return copy.headings.basics;
+  if (model.view === 'usb') return 'USB LiDARでSLAM';
   return model.real ? copy.headings.hardware : copy.headings.simulation;
 }
 
@@ -59,17 +60,24 @@ function pageHeading(model, copy, actions) {
         ① 仕組み（7実験）</button
       ><button
         id="slamSimTab"
-        aria-pressed=${String(!basics && !model.real)}
+        aria-pressed=${String(model.view === 'experiment' && !model.real)}
         @click=${() => actions.setReal(false)}
       >
         ② 総合実験：センサーを比べる</button
       ><button
         id="slamRealTab"
         class="run-mode-live-button"
-        aria-pressed=${String(!basics && model.real)}
+        aria-pressed=${String(model.view === 'experiment' && model.real)}
         @click=${() => actions.setReal(true)}
       >
         ③ 実機で確かめる（ROS 2）
+      </button>
+      <button
+        id="slamUsbTab"
+        aria-pressed=${String(model.view === 'usb')}
+        @click=${actions.showUsb}
+      >
+        USB LiDARでSLAM
       </button>
     </nav>
   </div>`;
@@ -725,7 +733,7 @@ function experimentLayout(model, copy, actions) {
 // shell/supplement-ui.js hides the <details> and puts its own button before it, so the view's
 // visibility goes on a wrapper: bound on the details, it would show them again beside the button.
 function methodNote(model, copy, methodNoteHtml) {
-  return html`<div class="method-note-wrap" ?hidden=${model.view === 'basics'}>
+  return html`<div class="method-note-wrap" ?hidden=${model.view !== 'experiment'}>
     <details data-help-dialog class="method-note">
       <summary>${copy.methodNoteSummary}</summary>
       ${unsafeHTML(methodNoteHtml)}
@@ -737,9 +745,10 @@ function methodNote(model, copy, methodNoteHtml) {
 // inserted once and never re-rendered.
 function slamPage(model, copy, { basicsHtml, methodNoteHtml }, actions) {
   return html`${pageHeading(model, copy, actions)}
-    <div id="slamExperimentBrief" ?hidden=${model.view === 'basics'}>
+    <div id="slamExperimentBrief" ?hidden=${model.view !== 'experiment'}>
       ${unsafeHTML(model.briefHtml)}
     </div>
+    <section id="slamUsbHost" ?hidden=${model.view !== 'usb'} ${ref(actions.mountUsb)}></section>
     ${unsafeHTML(basicsHtml)}${hardwarePanel(model, copy, actions)}${stepNav(model, actions)}
     ${experimentLayout(model, copy, actions)}${methodNote(model, copy, methodNoteHtml)}`;
 }

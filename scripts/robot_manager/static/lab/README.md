@@ -161,3 +161,27 @@ Split mechanically from the single-file `QUESTiX-LAB.html` (one `<style>`, one `
 60 IIFE modules → ES modules with the same names and order). The split was verified by comparing
 the rendered DOM of both editions on 17 routes in headless Chrome before any content change.
 Module bodies are unchanged apart from `import`/`export` lines; most are still densely written.
+
+### USB LiDARでSLAM（ROS不要）
+
+「自己位置を知る」→「USB LiDARでSLAM」で、PCへ直接つないだYDLIDAR
+T-mini Plus（モデル151、CP2102、230400 baud）を使えます。PC版ChromeまたはEdgeの
+Web Serialを使用します。初回は「USBに接続」で機器の選択が必要です。
+他のLiDARモデルには対応していません。ROSドライバーなど、同じポートを使うアプリは
+停止してください。
+
+HTTPSまたはlocalhostで開く必要があります。ロボットのLAN IPへHTTPでアクセスした
+ページからUSB接続はできません。PC上にリポジトリを置き、以下を実行します。
+
+```bash
+python3 -m http.server 8000 --bind 127.0.0.1 --directory scripts/robot_manager/static/lab
+```
+
+PCのブラウザで `http://localhost:8000/#slam` を開きます。サーバーは静的ファイルの
+配信だけに使い、USB受信と地図計算はブラウザ内で完結します。
+
+距離の点を確認して「新しい地図を開始」を押し、LiDARを水平に保って壁や棚の角が
+見える範囲でゆっくり動かします。停止・再接続後の再開は新しい地図になります。
+教材の切り替え、タブの非表示、通信断で停止します。PNGは占有地図、JSONは地図・
+軌跡・座標系を保存します。32 m四方、解像度5 cmの学習用の局所SLAMであり、IMU・
+車輪・走査中の動き・ループ閉じ込みによる補正はありません。

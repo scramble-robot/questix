@@ -1,0 +1,31 @@
+#slamUsbHost .usb-controls {
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+#slamUsbHost button {
+  margin: 0.25rem;
+}
+.usb-figures {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+.usb-figures figure {
+  margin: 1rem 0;
+  min-width: 0;
+}
+.usb-figures canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.usb-figures figcaption {
+  font-size: 0.9rem;
+  margin-top: 0.5rem;
+}
+@media (max-width: 600px) {
+  .usb-figures {
+    grid-template-columns: 1fr;
+  }
+}

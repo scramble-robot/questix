@@ -241,6 +241,10 @@ whole copy of the site.
 
 ## Known intentional differences from the single-file original
 
+- SLAM USB extension: an additional USB LiDAR tab and tenth footer experiment connect a
+  T-mini Plus directly through Web Serial. The course also gains a USB mode badge. Existing
+  simulation and robot-recording tabs keep their behaviour; USB controls and figures are new.
+
 - Planning: the playback position slider never worked (the handler paused first, which wrote the
   current position back into the slider before its new value was read). It works now.
 - Planning: the saved hardware procedure (`.txt`) has line breaks between paragraphs.

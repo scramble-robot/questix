@@ -26,6 +26,10 @@
       "label": "実機で測って入力",
       "short": "実測",
       "description": "実機で測った値（距離・角度・CSVなど）を入力して使います。ロボットにつなぐ必要はありません。"
+    },
+    "usb": {
+      "label": "USB LiDAR",
+      "description": "PCに直接つないだLiDARの距離をブラウザで処理します。"
     }
   },
   "courses": {
@@ -77,7 +81,8 @@
     "slam": {
       "modes": [
         "sim",
-        "live"
+        "live",
+        "usb"
       ],
       "real": "実機のLiDARと車輪の記録から、位置と地図を計算できます。"
     },
@@ -121,6 +126,16 @@
     }
   },
   "topics": [
+    {
+      "keys": [
+        "slam-usb"
+      ],
+      "modes": [
+        "usb"
+      ],
+      "note": "T-mini PlusとWeb Serial対応ブラウザを使います。ROSは不要です。",
+      "target": "#usbConnect"
+    },
     {
       "keys": [
         "motor-real"
