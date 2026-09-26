@@ -1,0 +1,64 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+Visualization Manager:
+  Class: ""
+  Global Options:
+    Fixed Frame: odom
+    Background Color: 30; 35; 45
+    Frame Rate: 30
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Ground (1 m)
+      Enabled: true
+      Cell Size: 1
+      Plane Cell Count: 20
+      Color: 95; 110; 130
+      Alpha: 0.5
+    - Class: rviz_default_plugins/RobotModel
+      Name: QUESTiX
+      Enabled: true
+      Description Source: Topic
+      Description Topic:
+        Value: /robot_description
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+        History Policy: Keep Last
+        Depth: 1
+      Visual Enabled: true
+      Collision Enabled: false
+      Alpha: 1
+    - Class: rviz_default_plugins/Path
+      Name: Driving trail
+      Enabled: true
+      Topic:
+        Value: /simulation/path
+        Reliability Policy: Reliable
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Depth: 5
+      Color: 60; 210; 230
+      Line Style: Billboards
+      Line Width: 0.03
+      Pose Style: None
+    - Class: rviz_default_plugins/TF
+      Name: Robot axes
+      Enabled: true
+      Show Names: false
+      Show Axes: true
+      Show Arrows: false
+      Marker Scale: 0.35
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 9
+      Pitch: 0.8
+      Yaw: 0.8
+      Focal Point:
+        X: 0
+        Y: 1.5
+        Z: 0
+      Target Frame: odom
+Window Geometry:
+  Width: 1280
+  Height: 850
