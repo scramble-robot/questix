@@ -44,7 +44,7 @@ const runLabel = (run, copy) =>
 
 function heading(model, copy) {
   if (model.view === 'basics') return copy.headings.basics;
-  if (model.view === 'usb') return 'USB LiDARでSLAM';
+  if (model.view === 'usb') return copy.headings.usb;
   return model.real ? copy.headings.hardware : copy.headings.simulation;
 }
 
@@ -77,7 +77,7 @@ function pageHeading(model, copy, actions) {
         aria-pressed=${String(model.view === 'usb')}
         @click=${actions.showUsb}
       >
-        USB LiDARでSLAM
+        ${copy.usbTab}
       </button>
     </nav>
   </div>`;

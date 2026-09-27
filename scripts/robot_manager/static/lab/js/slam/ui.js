@@ -1,9 +1,9 @@
-import { mountUsb, stopUsb } from './usb-ui.js';
 import { render } from '../vendor/lit-html.js';
 import { loadJson, loadText } from '../core/content.js';
 import { downloadFile } from '../core/dom.js';
 import { lessonGuide, figureGuide } from '../shell/lesson-guide.js';
 import { generateSlamLog, estimateSlam, slamMetrics, validateSlamLog } from './engine.js';
+import { mountUsb, stopUsb } from './usb-ui.js';
 import { slamLogFromFile, slamLogFromRecording } from '../live/slam-recorder.js';
 import { recordRobot, recordingFile, liveLink, onLiveLink, groupName } from '../live/capture.js';
 import { missingInRecording, withRunInfo } from '../live/recording-core.js';
@@ -217,7 +217,7 @@ const FOOTER_TOPICS = [
   ...SLAM_CHAPTERS.map((chapter) => ({ id: chapter.id, title: chapter.title })),
   { id: 'compare', title: copy.lessonTopics.compare },
   { id: 'real', title: copy.lessonTopics.real },
-  { id: 'usb', title: 'USB LiDARでSLAM' },
+  { id: 'usb', title: copy.lessonTopics.usb },
 ];
 
 function footerTopic() {

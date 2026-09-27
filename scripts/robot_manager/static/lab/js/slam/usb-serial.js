@@ -80,9 +80,14 @@ export class UsbLidar {
         const { value, done } = await this.reader.read();
         if (done) break;
         if (value) {
-          this.info.push(...value);
-          const model = this.model ?? deviceModel(this.info);
-          if (model === null && this.info.length > 1024) this.info = this.info.slice(-128);
+          // Keep bytes only until the device descriptor is found: scans stream ~23 kB/s for
+          // as long as the lesson runs, and nothing else reads this buffer.
+          if (this.model == null) {
+            this.info.push(...value);
+            this.model = deviceModel(this.info);
+            if (this.model !== null) this.info = [];
+            else if (this.info.length > 1024) this.info = this.info.slice(-128);
+          }
           this.parser.feed(value);
         }
       }

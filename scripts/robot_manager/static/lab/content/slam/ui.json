@@ -1,12 +1,14 @@
 {
   "lessonTopics": {
     "compare": "総合実験：センサーを比べる",
-    "real": "実機で確かめる（ROS 2）"
+    "real": "実機で確かめる（ROS 2）",
+    "usb": "USB LiDARでSLAM"
   },
   "headings": {
     "basics": "目的の場所へ進むために、現在地と周囲の地図を知る",
     "simulation": "使うセンサーを変え、位置のずれを比べる",
-    "hardware": "実機のセンサーで、位置のずれを確かめる"
+    "hardware": "実機のセンサーで、位置のずれを確かめる",
+    "usb": "USBでつないだLiDARで、その場で地図を作る"
   },
   "goals": {
     "corridor": "途中の位置のずれにも注目し、LiDARだけでは位置を見分けにくい場所を探します。",
@@ -272,5 +274,6 @@
     },
     "chooseConditions": "自分で条件を選ぶ"
   },
-  "methodNoteSummary": "SLAMの仕組みと、この教材の範囲"
+  "methodNoteSummary": "SLAMの仕組みと、この教材の範囲",
+  "usbTab": "④ USB LiDARでSLAM"
 }

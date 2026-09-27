@@ -107,6 +107,22 @@ test('device descriptor validates every header byte', () => {
   bytes[3] = 1;
   assert.equal(deviceModel(bytes), null);
 });
+test('scan bytes are not kept once the device model is known', async () => {
+  const chunks = [Uint8Array.from([0xa5, 0x5a, 20, 0, 0, 0, 4, 151, ...new Array(19).fill(0)])];
+  for (let i = 0; i < 200; i++) chunks.push(new Uint8Array(1000));
+  const lidar = new UsbLidar(
+    null,
+    () => {},
+    () => {},
+  );
+  lidar.reader = {
+    read: async () => (chunks.length ? { value: chunks.shift(), done: false } : { done: true }),
+    releaseLock() {},
+  };
+  await lidar.read();
+  assert.equal(lidar.model, 151);
+  assert.equal(lidar.info.length, 0);
+});
 function mockPort(model = 151) {
   let controller;
   const writes = [];

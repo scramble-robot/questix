@@ -1,8 +1,19 @@
 {
-  "brief": {
-    "scene": "T-mini PlusをPCのUSBにつなぎ、部屋の壁を距離の点として測ります。ROSは使いません。",
-    "purpose": "連続する距離の点を重ね、センサーの位置と周囲の地図を同時に推定します。",
-    "first": "PCのChromeまたはEdgeで「USBに接続」を押し、CP2102を選びます。距離の点を確認して「新しい地図を開始」を押してください。"
+  "labels": {
+    "start": "USB接続へ",
+    "connect": "USBに接続",
+    "disconnect": "停止して切断",
+    "mapStart": "新しい地図を開始",
+    "mapStop": "地図作成を停止",
+    "stats": "測定点 {points} ／ 地図に使った回数 {accepted} ／ 照合できなかった回数 {rejected}",
+    "mapTitle": "作った地図",
+    "span": "表示幅",
+    "mapAria": "周囲の地図と推定した軌跡",
+    "scanTitle": "LiDARの距離",
+    "scanAria": "LiDARが測った距離の点",
+    "pose": "推定位置 x {x} m ／ y {y} m",
+    "savePng": "地図PNGを保存",
+    "saveJson": "地図JSONを保存"
   },
   "intro": "LiDARを水平に保ち、壁や棚の角が見える場所でゆっくり動かしてください。人や物が動かない場所で試します。",
   "limits": "これは学習用の局所SLAMです。車輪・IMUによる補正、走査中の動きの補正、周回後のずれの補正（ループ閉じ込み）はありません。地図は32 m四方、1画素5 cmです。",

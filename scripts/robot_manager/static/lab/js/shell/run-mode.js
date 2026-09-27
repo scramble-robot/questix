@@ -41,7 +41,7 @@ function runModeStripHtml(lessonKey) {
   if (!entry) return '';
   const badges = entry.modes.map(runModeBadgeHtml).join('');
   const jump = entry.target
-    ? `<button type="button" class="run-mode-jump" data-run-mode-target="${escapeHtml(entry.target)}">${escapeHtml(copy.jump)}</button>`
+    ? `<button type="button" class="run-mode-jump" data-run-mode-target="${escapeHtml(entry.target)}">${escapeHtml(entry.jump ?? copy.jump)}</button>`
     : '';
   return (
     `<div class="run-mode-strip" data-run-mode="${entry.modes.join(' ')}">` +

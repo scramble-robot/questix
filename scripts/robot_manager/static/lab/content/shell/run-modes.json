@@ -134,7 +134,8 @@
         "usb"
       ],
       "note": "T-mini PlusとWeb Serial対応ブラウザを使います。ROSは不要です。",
-      "target": "#usbConnect"
+      "target": "#usbConnect",
+      "jump": "USB接続へ ↓"
     },
     {
       "keys": [

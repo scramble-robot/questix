@@ -29,3 +29,10 @@
     grid-template-columns: 1fr;
   }
 }
+/* Four tabs: two per row on a phone instead of four squeezed columns. */
+@media (max-width: 600px) {
+  #slamPage .page-heading .slam-mode {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
