@@ -120,6 +120,7 @@ if [ "${INSTALL_GUI}" = true ]; then
     -e "s|^User=.*|User=${TARGET_USER}|" \
     -e "s|^Group=.*|Group=${TARGET_USER}|" \
     -e "s|--port [0-9]*|--port ${MANAGER_PORT}|" \
+    -e "s|^Environment=\"QUESTIX_SOURCE_DIR=.*\"|Environment=\"QUESTIX_SOURCE_DIR=${REPO_DIR}\"|" \
     "${REPO_DIR}/systemd/questix_robot_manager.service" > /etc/systemd/system/questix_robot_manager.service
 
   systemctl daemon-reload

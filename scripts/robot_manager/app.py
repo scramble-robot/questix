@@ -86,6 +86,9 @@ async def lifespan(_app: FastAPI):
         # robot stops, whatever happens to the rest of the shutdown.
         actuation.shutdown()
         lab.shutdown()
+        # A running recording is stopped with SIGINT (so rosbag2 finalizes the bag) and an
+        # evidence trial's finalize gets a bounded wait (recorder.SHUTDOWN_FINALIZE_TIMEOUT_SEC).
+        recorder.shutdown_recording()
 
 
 app = FastAPI(title="QUESTiX Robot Manager", lifespan=lifespan)
