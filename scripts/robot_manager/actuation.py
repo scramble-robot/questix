@@ -15,7 +15,8 @@ of the robot service, 「すべて止める」 and the manager's shutdown (``rev
 on is refused in competition mode and when the heartbeat cannot be started. When the heartbeat
 exits on its own the switches go off (noticed at the next status poll or switch) and nothing
 restarts it: the robot has already stopped when its lease ran out, and the teacher switches on
-again.
+again. Likewise, when the heartbeat cannot be told the switches (a failed write), both switches
+go off and it is stopped (``heartbeat_write_failed``): no switch stays on without a heartbeat.
 
 Turning a switch off (by the teacher or by ``revoke_all``) also turns off the matching QUESTiX
 LAB permission (lab.py: driving experiments / launcher experiments) through the listeners
@@ -49,6 +50,9 @@ START_GRACE_SEC = 1.0
 STOP_TIMEOUT_SEC = 2.0
 
 KINDS = ("drive", "launcher")
+# Why a switch went off without the teacher asking (also in last_off_reason).
+HEARTBEAT_EXITED = "heartbeat_exited"
+WRITE_FAILED = "heartbeat_write_failed"
 _NAMES = {"drive": "ロボットの走行制御", "launcher": "発射機構の操作"}
 
 router = APIRouter(prefix="/api/actuation")
@@ -62,6 +66,13 @@ _last_off_reason: Optional[str] = None
 _last_error: Optional[str] = None
 # Called as listener(kind, reason) after a switch went off (outside _lock).
 _revoke_listeners: list[Callable[[str, str], None]] = []
+
+
+class _HeartbeatWriteFailed(HTTPException):
+    """The heartbeat could not be told the switches; every switch is already off."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(status_code=503, detail=detail)
 
 
 class AuthorityRequest(BaseModel):
@@ -142,8 +153,29 @@ def _stop_heartbeat_locked() -> None:
             logger.error("actuation heartbeat (pid %s) did not exit", proc.pid)
 
 
-def _off_locked(kinds, reason: str) -> list[str]:
-    """Switch ``kinds`` off; return the ones that were on. Caller holds _lock."""
+def _write_failed_locked() -> list[str]:
+    """Switch all off and stop the heartbeat that could not be told. Caller holds _lock.
+
+    No switch may stay on without a heartbeat: the nodes stop when their lease runs out anyway,
+    but the tab and the lesson permissions must not keep showing it on. Returns the kinds that
+    were still on.
+    """
+    global _last_off_reason, _last_error
+    was_on = [kind for kind in KINDS if _authority[kind]]
+    _authority.update({kind: False for kind in KINDS})
+    _stop_heartbeat_locked()
+    _last_off_reason = WRITE_FAILED
+    _last_error = "送信プロセスに許可を伝えられませんでした。もう一度ONにしてください"
+    logger.warning("actuation heartbeat could not be told the switches: all switches off")
+    return was_on
+
+
+def _off_locked(kinds, reason: str) -> tuple[list[str], list[str]]:
+    """Switch ``kinds`` off. Caller holds _lock.
+
+    Returns the ``kinds`` that were on, and the other kinds a failed write to the heartbeat
+    switched off with them (reported as heartbeat_write_failed, not as ``reason``).
+    """
     global _last_off_reason
     was_on = [kind for kind in kinds if _authority[kind]]
     for kind in kinds:
@@ -153,10 +185,8 @@ def _off_locked(kinds, reason: str) -> list[str]:
     if not any(_authority.values()):
         _stop_heartbeat_locked()
     elif was_on and not _send_locked():
-        _authority.update({kind: False for kind in KINDS})
-        _stop_heartbeat_locked()
-        was_on = list(KINDS)
-    return was_on
+        return was_on, _write_failed_locked()
+    return was_on, []
 
 
 def _notify(kinds, reason: str) -> None:
@@ -168,17 +198,19 @@ def _notify(kinds, reason: str) -> None:
                 logger.exception("actuation revoke listener failed (%s, %s)", kind, reason)
 
 
-def _notify_revoked(reaped, others=(), reason: str = "") -> None:
-    """Tell the listeners once per kind: ``reaped`` (a dead heartbeat) first, then ``others``.
+def _notify_revoked(*groups) -> None:
+    """Tell the listeners once per kind; ``groups`` are ``(kinds, reason)`` pairs, first wins.
 
-    Every kind a reap switched off is reported with ``heartbeat_exited``, whatever the caller was
-    doing; a kind in ``others`` (the teacher's OFF, a revoke_all) that the reap already reported is
-    not reported again, so a listener never repeats its side effects (a bridge restart) for it.
-    Called outside _lock.
+    Callers pass what a reap switched off (heartbeat_exited) first, then what a failed write
+    switched off (heartbeat_write_failed), then what they were asked to switch off (the teacher's
+    OFF, a revoke_all). A kind already reported is not reported again, so a listener never repeats
+    its side effects (a bridge restart) for it. Called outside _lock.
     """
-    reaped = [kind for kind in KINDS if kind in set(reaped)]
-    _notify(reaped, "heartbeat_exited")
-    _notify([kind for kind in KINDS if kind in set(others) and kind not in reaped], reason)
+    told: set[str] = set()
+    for kinds, reason in groups:
+        batch = [kind for kind in KINDS if kind in set(kinds) and kind not in told]
+        told.update(batch)
+        _notify(batch, reason)
 
 
 def _reap_locked() -> list[str]:
@@ -190,7 +222,7 @@ def _reap_locked() -> list[str]:
     _proc = None
     _last_error = f"送信プロセスが終了しました（終了コード {code}）。もう一度ONにしてください"
     logger.warning("actuation heartbeat exited on its own (code %s): all switches off", code)
-    return _off_locked(KINDS, "heartbeat_exited")
+    return _off_locked(KINDS, HEARTBEAT_EXITED)[0]
 
 
 def _status_locked() -> dict:
@@ -219,7 +251,7 @@ def is_allowed(kind: str) -> bool:
     with _lock:
         reaped = _reap_locked()
         allowed = _authority.get(kind, False)
-    _notify_revoked(reaped)
+    _notify_revoked((reaped, HEARTBEAT_EXITED))
     return allowed
 
 
@@ -228,7 +260,7 @@ def status() -> dict:
     with _lock:
         reaped = _reap_locked()
         result = _status_locked()
-    _notify_revoked(reaped)
+    _notify_revoked((reaped, HEARTBEAT_EXITED))
     return result
 
 
@@ -241,22 +273,28 @@ def set_authority(kind: str, allow: bool) -> dict:
             # A heartbeat that died before this OFF switched both kinds off: the other kind's
             # lesson permission must go off too (reported as heartbeat_exited), not only this one.
             reaped = _reap_locked()
-            _off_locked([kind], "teacher")
+            # Telling the heartbeat that the other kind stays on can fail: then it is off too.
+            _, failed = _off_locked([kind], "teacher")
             result = _status_locked()
         # This kind's lesson permission goes off whether or not the switch was still on.
-        _notify_revoked(reaped, [kind], "teacher")
+        _notify_revoked((reaped, HEARTBEAT_EXITED), (failed, WRITE_FAILED), ([kind], "teacher"))
         return result
     if _competition_mode():
         raise HTTPException(status_code=409, detail=f"大会モードでは{_NAMES[kind]}の許可は使いません"
                             "（大会では AutoReferee と非常停止で動きます）")
     reaped: list[str] = []
+    failed: tuple[str, ...] = ()
     try:
         with _lock:
             reaped = _reap_locked()
             return _switch_on_locked(kind)
+    except _HeartbeatWriteFailed:
+        # Both switches went off (the other one may have been on): both lesson permissions too.
+        failed = KINDS
+        raise
     finally:
         # Also when switching on failed: what the reap switched off is reported.
-        _notify_revoked(reaped)
+        _notify_revoked((reaped, HEARTBEAT_EXITED), (failed, WRITE_FAILED))
 
 
 def _switch_on_locked(kind: str) -> dict:
@@ -288,10 +326,9 @@ def _switch_on_locked(kind: str) -> dict:
         _proc = proc
     _authority[kind] = True
     if not _send_locked():
-        _authority[kind] = False
-        _stop_heartbeat_locked()
-        _last_error = "送信プロセスに許可を伝えられませんでした。もう一度ONにしてください"
-        raise HTTPException(status_code=503, detail=_last_error)
+        # Not only this kind: a heartbeat that cannot be told leaves no switch on.
+        _write_failed_locked()
+        raise _HeartbeatWriteFailed(_last_error)
     _last_error = None
     return _status_locked()
 
@@ -300,11 +337,11 @@ def revoke_all(reason: str) -> dict:
     """Switch both authorities off (mode switch, service start/stop, 「すべて止める」). Never raises."""
     with _lock:
         reaped = _reap_locked()
-        revoked = _off_locked(KINDS, reason)
+        revoked, _ = _off_locked(KINDS, reason)  # all off: nothing is written to the heartbeat
         result = _status_locked()
     # The LAB permissions go off too, whether or not a switch was on (they need one anyway); a
     # kind a dead heartbeat had already switched off is reported once, as heartbeat_exited.
-    _notify_revoked(reaped, KINDS, reason)
+    _notify_revoked((reaped, HEARTBEAT_EXITED), (KINDS, reason))
     result["revoked"] = sorted(set(revoked) | set(reaped), key=KINDS.index)
     return result
 
