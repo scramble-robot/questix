@@ -21,12 +21,13 @@ import os
 import re
 import sys
 
-# Allowed ROS_DOMAIN_ID values, chosen to stay inside the standard Linux
-# ephemeral port range (32768-60999) per the DDS/RTPS discovery port formula
-# (7400 + 250 * domain_id [+ 2 for user traffic]); see
-# ansible/playbooks/vars/README.md for the derivation.
-ALLOWED_RANGES = ((0, 101), (215, 232))
-LEGACY_DOMAIN_ID = 42
+# The allowed ranges and the legacy value are QUESTiX's one ROS_DOMAIN_ID policy, shared with the
+# installed Robot Manager: robot_manager/ros_domain.py next to this script in the source checkout
+# (standard library only, so kitting needs nothing installed). Chosen to keep the DDS/RTPS
+# discovery ports (7400 + 250 * domain_id [+ 2 for user traffic]) out of the standard Linux
+# ephemeral port range (32768-60999); see ansible/playbooks/vars/README.md for the derivation.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from robot_manager.ros_domain import ALLOWED_RANGES, LEGACY_DOMAIN_ID  # noqa: E402
 STANDARD_EPHEMERAL_RANGE = (32768, 60999)
 EPHEMERAL_RANGE_PATH = "/proc/sys/net/ipv4/ip_local_port_range"
 

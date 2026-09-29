@@ -34,7 +34,8 @@ def test_command_sources_ros_and_serves_the_managers_lab_dir(lab, tmp_path):
 def test_camera_topic_is_passed_only_when_valid(lab, tmp_path):
     script = lab._build_command({"CAMERA_TOPIC": "/image_raw/compressed"}, {})
     assert "-p camera_topic:=/image_raw/compressed" in script
-    assert "ROS_DOMAIN_ID" not in script  # nothing configured -> keep the shell's own value
+    # Nothing configured: the domain the robot launcher then uses (${ROS_DOMAIN_ID:-42}).
+    assert "export ROS_DOMAIN_ID=42; " in script
     with pytest.raises(HTTPException):
         lab._build_command({"CAMERA_TOPIC": "/cam; rm -rf /"}, {})
 

@@ -155,9 +155,12 @@ set -u
 
 # Build launch arguments
 LAUNCH_ARGS=""
-LAUNCH_ARGS="${LAUNCH_ARGS} enable_lidar:=${ENABLE_LIDAR:-true}"
-LAUNCH_ARGS="${LAUNCH_ARGS} enable_shot:=${ENABLE_SHOT:-true}"
-LAUNCH_ARGS="${LAUNCH_ARGS} enable_drive:=${ENABLE_DRIVE:-true}"
+# A value missing from launch.env falls back to the fresh-kit topology
+# (ansible/roles/robot_autostart/defaults/main.yaml): LiDAR, launcher and drive off, GPIO safety on,
+# RViz off, DualShock. launcher/test/test_gpio_safety_launch.py keeps these in step.
+LAUNCH_ARGS="${LAUNCH_ARGS} enable_lidar:=${ENABLE_LIDAR:-false}"
+LAUNCH_ARGS="${LAUNCH_ARGS} enable_shot:=${ENABLE_SHOT:-false}"
+LAUNCH_ARGS="${LAUNCH_ARGS} enable_drive:=${ENABLE_DRIVE:-false}"
 if [ "${MODE}" = "competition" ]; then
   # Competition always requires both physical E-stop and AutoReferee GPIO safety inputs.
   # ENABLE_GPIO_REF from launch.env is intentionally ignored in this mode.
@@ -176,7 +179,19 @@ else
   LAUNCH_ARGS="${LAUNCH_ARGS} enable_autoreferee:=false"
 fi
 LAUNCH_ARGS="${LAUNCH_ARGS} enable_rviz:=${ENABLE_RVIZ:-false}"
-LAUNCH_ARGS="${LAUNCH_ARGS} controller_type:=${CONTROLLER_TYPE:-uart}"
+LAUNCH_ARGS="${LAUNCH_ARGS} controller_type:=${CONTROLLER_TYPE:-dualshock}"
+
+# QUESTiX's ROS_DOMAIN_ID policy (scripts/robot_manager/ros_domain.py; kitting and Robot Manager
+# refuse anything else). A value outside it is only warned about here, never refused or changed:
+# a robot that already runs in such a domain keeps running in it until someone re-kits it.
+ros_domain_allowed() {
+  [[ "$1" =~ ^[0-9]{1,3}$ ]] || return 1
+  local id=$((10#$1))
+  { [ "${id}" -ge 0 ] && [ "${id}" -le 101 ]; } || { [ "${id}" -ge 215 ] && [ "${id}" -le 232 ]; }
+}
+if ! ros_domain_allowed "${ROS_DOMAIN_ID:-42}"; then
+  log "WARNING: ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-42} is outside 0-101 / 215-232 (DDS ports may collide with ephemeral ports); set a valid one with Robot Manager or re-run ./setup.sh"
+fi
 
 log "ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-42}, Launching (${MODE}) with: ${LAUNCH_ARGS}"
 

@@ -11,6 +11,7 @@ import threading
 
 from fastapi import HTTPException
 
+from robot_manager import ros_domain
 from robot_manager.controls import GROUPS
 
 _lock = threading.Lock()
@@ -32,8 +33,12 @@ def _ros_paths(config):
 def read_snapshot(config):
     """Launch a short-lived GetParameters client without setting any ROS parameters."""
     domain = config.get('ROS_DOMAIN_ID', os.environ.get('ROS_DOMAIN_ID', '42'))
-    if not domain.isdigit() or not 0 <= int(domain) <= 232:
-        raise HTTPException(422, 'ROS_DOMAIN_ID は 0〜232 で指定してください。')
+    parsed = ros_domain.parse(domain)
+    if parsed is None:
+        raise HTTPException(
+            422, f'ROS_DOMAIN_ID が {domain!r} です。{ros_domain.ALLOWED_TEXT} で指定してください'
+            '（管理設定で直せます）。')
+    domain = str(parsed)  # the plain number, never the file's quoting
     ros_setup, workspace_setup = _ros_paths(config)
     if not _lock.acquire(blocking=False):
         raise HTTPException(409, '実行中の設定を取得しています。少し待ってから再試行してください。')

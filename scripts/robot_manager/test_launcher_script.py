@@ -94,7 +94,46 @@ def test_practice_gpio_safety_follows_launch_env(robot):
     robot.request()
     _, launched = robot.run()
     assert "enable_gpio_ref:=false" in launched[0].split()
-    assert "controller_type:=uart" in launched[0].split()  # the default
+    assert "controller_type:=dualshock" in launched[0].split()  # the fresh-kit default
+
+
+def test_missing_launch_env_values_fall_back_to_the_fresh_kit_topology(robot):
+    # Same values as ansible/roles/robot_autostart/defaults/main.yaml (see
+    # launcher/test/test_gpio_safety_launch.py): nothing that moves, GPIO safety on.
+    robot.mode("practice")
+    (robot.dir / "launch.env").write_text("ROS_DOMAIN_ID=7\n")
+    robot.request()
+    result, launched = robot.run()
+    assert result.returncode == 0, result.stderr
+    args = launched[0].split()
+    for expected in ("enable_lidar:=false", "enable_shot:=false", "enable_drive:=false",
+                     "enable_gpio_ref:=true", "enable_rviz:=false", "controller_type:=dualshock"):
+        assert expected in args, expected
+
+
+def test_existing_launch_env_values_are_used_as_they_are(robot):
+    # A robot configured before the fresh-kit defaults keeps its topology.
+    robot.mode("practice")
+    (robot.dir / "launch.env").write_text(
+        "ENABLE_LIDAR=true\nENABLE_SHOT=true\nENABLE_DRIVE=true\nCONTROLLER_TYPE=uart\n")
+    robot.request()
+    _, launched = robot.run()
+    args = launched[0].split()
+    for expected in ("enable_lidar:=true", "enable_shot:=true", "enable_drive:=true",
+                     "controller_type:=uart"):
+        assert expected in args, expected
+
+
+@pytest.mark.parametrize("domain, warned", [("7", False), ("42", False), ("232", False),
+                                            ("150", True), ("abc", True)])
+def test_a_domain_outside_the_policy_is_warned_about_but_still_launched(robot, domain, warned):
+    robot.mode("practice")
+    (robot.dir / "launch.env").write_text(f"ROS_DOMAIN_ID={domain}\n")
+    robot.request()
+    result, launched = robot.run()
+    assert result.returncode == 0 and len(launched) == 1  # never refused or changed here
+    assert (f"WARNING: ROS_DOMAIN_ID={domain} is outside" in result.stdout) is warned
+    assert f"ROS_DOMAIN_ID={domain}, Launching" in result.stdout
 
 
 @pytest.mark.parametrize("request_kwargs, reason", [
