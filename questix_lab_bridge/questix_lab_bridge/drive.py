@@ -10,6 +10,10 @@ Rules, all enforced here and not in the page:
 * Refused while something else publishes the drive topic (the controller: two sources
   on ``/target_twist`` would alternate every tick), while no drive node subscribes to
   it, and while the emergency stop is active. A blocker that appears mid-run stops it.
+* Refused (``estop_unknown``) until the E-stop state is known: only the node's
+  ``set_estop_known`` (called for ``/emergency_stop`` itself) clears it. Derived reports such as
+  ``/drive_status.emergency_stop`` may block (``set_emergency_stop(True)``) but never make the
+  state known, so "nothing heard" never counts as "released".
 * One page drives at a time (the owner). Any page may stop it (the stop bar); a page
   ending its own run asks with ``only_own`` so it never ends another pupil's run.
 * The owner repeats its command at least every ``deadman_sec``; silence stops the robot,
@@ -26,8 +30,9 @@ import math
 NOT_ALLOWED = 'not_allowed'
 NO_DRIVE_NODE = 'no_drive_node'
 OTHER_PUBLISHER = 'other_publisher'
+ESTOP_UNKNOWN = 'estop_unknown'  # /emergency_stop not observed yet
 EMERGENCY_STOP = 'emergency_stop'
-BLOCKER_ORDER = (NOT_ALLOWED, NO_DRIVE_NODE, OTHER_PUBLISHER, EMERGENCY_STOP)
+BLOCKER_ORDER = (NOT_ALLOWED, NO_DRIVE_NODE, OTHER_PUBLISHER, ESTOP_UNKNOWN, EMERGENCY_STOP)
 
 # Refusals of a single request (besides the blockers).
 BUSY = 'busy'
@@ -51,7 +56,8 @@ class DriveArbiter:
         self.deadman_sec = float(deadman_sec)
         self.max_run_sec = float(max_run_sec)
         self.stop_hold_sec = float(stop_hold_sec)
-        self._blockers = {} if self.allowed else {NOT_ALLOWED: None}
+        # Fail closed: the E-stop is unknown until /emergency_stop has been observed.
+        self._blockers = {ESTOP_UNKNOWN: True} if self.allowed else {NOT_ALLOWED: None}
         self.owner = None
         self.linear = 0.0
         self.angular = 0.0
@@ -76,7 +82,12 @@ class DriveArbiter:
         self._set_blocker(NO_DRIVE_NODE, True if not drive_subscribers else None, now)
 
     def set_emergency_stop(self, active, now):
+        """Whether any source says the E-stop is pressed (authoritative or derived)."""
         self._set_blocker(EMERGENCY_STOP, True if active else None, now)
+
+    def set_estop_known(self, known, now):
+        """Whether the authoritative ``/emergency_stop`` has been observed (never a derived one)."""
+        self._set_blocker(ESTOP_UNKNOWN, None if known else True, now)
 
     def _set_blocker(self, code, detail, now):
         if not self.allowed:

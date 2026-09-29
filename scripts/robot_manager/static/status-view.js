@@ -81,6 +81,12 @@ const StatusView = (() => {
             : 'ほかのプログラムが教材用の発射指令を出しています',
           detail: `${nodes} が ${kind === 'drive' ? '/target_twist/lab' : '/roller/lab・/shot/lab/*'} に出しています。`,
         };
+      case 'estop_unknown':
+        return {
+          text: '非常停止の状態をまだ確認できません',
+          detail: '/emergency_stop（operation_manager・GPIO の安全系）がまだ届いていません。' +
+            '届くまで教材からは動かせません（ENABLE_GPIO_REF と ROS_DOMAIN_ID を確かめてください）。',
+        };
       case 'emergency_stop':
         return { text: '非常停止ボタンが押されています', detail: null };
       case 'controller':
@@ -174,6 +180,10 @@ const StatusView = (() => {
     if (bridge && typeof bridge.emergency_stop === 'boolean') {
       return bridge.emergency_stop
         ? { text: '押されています', tone: 'danger' } : { text: '解除されています', tone: 'ok' };
+    }
+    // A bridge that reports it but has not heard /emergency_stop yet: unknown, never "released".
+    if (bridge && 'emergency_stop' in bridge) {
+      return { text: '分かりません（非常停止の状態をまだ確認できません）', tone: 'warn' };
     }
     const sources = [];
     if (bridge && bridge.read_only === false) sources.push(bridge.drive_state);

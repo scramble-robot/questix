@@ -53,6 +53,18 @@ _MAX_INCOMING_BYTES = 8 * 1024 * 1024 + 4096
 _SMALL_FRAME = 1024
 # record_save frames handled at once over all pages (each holds its recording in memory).
 _MAX_PARALLEL_SAVES = 2
+# record_save frames admitted (kept in memory until written) over all pages, the ones being
+# written included, and per page. Together with _MAX_INCOMING_BYTES this bounds what saves hold:
+# at most _MAX_ADMITTED_SAVES * 8 MiB (about 32 MiB) of frames. A save over either limit is not
+# kept: its frame is let go at once and the page gets a record_error in its turn.
+_MAX_ADMITTED_SAVES = 4
+_MAX_ADMITTED_SAVES_PER_CLIENT = 1
+# Answers a page may be owed at once (admitted and refused saves). Pages match answers to their
+# saves by order, so every save is answered, refusals included; a page that keeps sending past
+# this is misbehaving and is disconnected (the page then drops all its pending saves as lost).
+_MAX_OWED_ANSWERS_PER_CLIENT = 8
+# The record_error a refused save gets (the learner reads it; records.py's are Japanese too).
+SAVE_BUSY_MESSAGE = 'ロボットがほかの記録を保存しています。少し待ってから、もう一度保存してください。'
 
 STATE_PATH = '/api/state'
 
@@ -68,6 +80,8 @@ class _Client:
         self.outbox = []  # frames that must not be dropped (answers to this client's saves)
         self.event = asyncio.Event()
         self.saving = asyncio.Lock()  # this client's saves are answered in order
+        self.admitted_saves = 0  # its record_save frames kept for writing (see _admit_save)
+        self.owed_answers = 0  # its saves not answered yet, refused ones included
 
 
 class LabWebSocketServer:
@@ -79,6 +93,7 @@ class LabWebSocketServer:
         self._greeting = greeting
         self._records = records
         self._saves = None
+        self._admitted_saves = 0  # over all clients; loop thread only
         self._tasks = set()
         self._state_provider = state_provider
         self._on_message = on_message
@@ -223,9 +238,11 @@ class LabWebSocketServer:
                     continue
                 if self._records is not None and (
                         len(message) > _SMALL_FRAME or '"record_save"' in message):
-                    task = asyncio.ensure_future(self._save(client, message))
-                    self._tasks.add(task)  # the loop keeps only a weak reference
-                    task.add_done_callback(self._tasks.discard)
+                    if not self._admit_save(client, message):
+                        self._log_error('client %d sends saves faster than they are answered: '
+                                        'disconnected' % client.id)
+                        await websocket.close(1008, 'too many record_save frames')
+                        break
                 elif self._on_message is not None:
                     self._call(self._on_message, client.id, message)
         except websockets.ConnectionClosed:
@@ -246,15 +263,53 @@ class LabWebSocketServer:
             if self._logger is not None:
                 self._logger.error('WebSocket callback failed: %r' % (error,))
 
+    def _admit_save(self, client, message):
+        """Queue the answer to a large / record_save frame; False if the page owes too many.
+
+        Runs on the loop, never waits. Within the limits the frame is kept for writing; over them
+        (another save of this page, or _MAX_ADMITTED_SAVES in all, still in hand) only a refusal
+        is queued and the frame is let go. A large frame that is not a record_save gets no
+        answer, as before (records_api answers only a record_save).
+        """
+        if client.owed_answers >= _MAX_OWED_ANSWERS_PER_CLIENT:
+            return False
+        admit = (client.admitted_saves < _MAX_ADMITTED_SAVES_PER_CLIENT
+                 and self._admitted_saves < _MAX_ADMITTED_SAVES)
+        if not admit and '"record_save"' not in message:
+            return True  # nothing is owed for it
+        client.owed_answers += 1
+        if admit:
+            client.admitted_saves += 1
+            self._admitted_saves += 1
+        task = asyncio.ensure_future(self._save(client, message if admit else None))
+        self._tasks.add(task)  # the loop keeps only a weak reference
+        task.add_done_callback(self._tasks.discard)
+        return True
+
     async def _save(self, client, text):
-        """Hand a record_save to the records API off the loop; queue its answer for the client."""
-        async with client.saving, self._saves:
-            try:
-                reply = await asyncio.get_running_loop().run_in_executor(
-                    None, self._records.save, text)
-            except Exception as error:  # noqa: B902 - logged, the connection stays up
-                self._log_error('record_save failed: %r' % (error,))
-                return
+        """Hand a record_save to the records API off the loop; queue its answer for the client.
+
+        ``text`` None: the save was refused (_admit_save); it is answered with a record_error in
+        its turn, so the page's other saves keep their answers.
+        """
+        try:
+            async with client.saving:
+                if text is None:
+                    reply = {'type': 'record_error', 'message': SAVE_BUSY_MESSAGE}
+                else:
+                    async with self._saves:
+                        try:
+                            reply = await asyncio.get_running_loop().run_in_executor(
+                                None, self._records.save, text)
+                        except Exception as error:  # noqa: B902 - logged, the connection stays up
+                            self._log_error('record_save failed: %r' % (error,))
+                            reply = {'type': 'record_error',
+                                     'message': 'ロボットで記録を保存できませんでした。'}
+        finally:
+            client.owed_answers -= 1
+            if text is not None:
+                client.admitted_saves -= 1
+                self._admitted_saves -= 1
         if reply is not None and client in self._clients:
             client.outbox.append(json.dumps(reply, ensure_ascii=False, separators=(',', ':')))
             client.event.set()

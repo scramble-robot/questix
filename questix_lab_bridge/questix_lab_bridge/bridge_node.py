@@ -41,7 +41,7 @@ from tf2_ros import Buffer, TransformException, TransformListener
 from . import messages, records, rosbags
 from .drive import DriveArbiter
 from .records_api import RecordsApi
-from .shoot import ShootArbiter
+from .shoot import ShootArbiter, TiltCoalescer
 from .static_site import find_lab_dir
 from .ws_server import LabWebSocketServer
 
@@ -60,6 +60,10 @@ _SHOOT_REQUESTS = ('roller', 'roller_stop', 'tilt', 'fire')
 _TILT_GAP_SEC = 0.06
 _ESTOP_QOS = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
                         durability=DurabilityPolicy.TRANSIENT_LOCAL)
+# Finished controller-driving records admitted to the writer thread at once (the one being written
+# included). More are dropped with a warning: the ROS callbacks never wait for the disk, and at
+# most this many recordings are held in memory for writing.
+_AUTO_RECORD_BACKLOG = 2
 
 
 class LabBridgeNode(Node):
@@ -145,14 +149,17 @@ class LabBridgeNode(Node):
         self._shoot_sent_version = -1
         self._shoot_sent_at = 0.0
         # shot_component refuses tilts closer than 50 ms apart: faster requests are coalesced
-        # (latest wins) and sent at most every _TILT_GAP_SEC.
-        self._tilt_pending = None
-        self._tilt_sent_at = -1.0e9
+        # (latest wins) and sent at most every _TILT_GAP_SEC, only while the session that asked
+        # for them still runs (shoot.TiltCoalescer).
+        self._tilt = TiltCoalescer(_TILT_GAP_SEC)
         self._closing = False  # destroy_node() has begun
         # Either source reports an emergency stop: operation_manager's topic, or drive_component
         # itself in /drive_status (robots started without the GPIO safety path).
         self._estop = {'topic': False, 'drive': False}
-        self._estop_heard = False  # any E-stop report yet (topic or drive_status)
+        # The state is known only once /emergency_stop itself has been observed. /drive_status
+        # (and the launcher statuses) may add a pressed E-stop, but their "released" is derived
+        # and never counts: until then driving and the launcher stay refused (estop_unknown).
+        self._estop_known = False
 
         # Records kept on the robot: pages' saves, controller driving recorded here, and
         # Robot Manager's rosbags converted for the lessons.
@@ -177,9 +184,12 @@ class LabBridgeNode(Node):
             topics=topics, logger=self.get_logger())
         self._recorder = None
         self._record_writer = None
+        self._record_admission = None
         self._record_limiters = {}
         if auto_record and self._store.enabled:
             self._record_writer = ThreadPoolExecutor(1, thread_name_prefix='lab_records')
+            self._record_admission = records.BoundedWriter(
+                self._record_writer, _AUTO_RECORD_BACKLOG)
             self._recorder = records.AutoRecorder(
                 self._write_auto_record, config, topics, robot=self._robot)
             self._record_limiters = {name: messages.RateLimiter(max_hz[name])
@@ -295,8 +305,17 @@ class LabBridgeNode(Node):
             self._recorder.feed(name, payload, time.monotonic(), lab_active=self._drive.active)
 
     def _write_auto_record(self, recording):
-        """Save a finished auto record on the writer thread (the ROS thread keeps going)."""
-        self._record_writer.submit(self._save_auto_record, recording)
+        """Save a finished auto record on the writer thread (the ROS thread keeps going).
+
+        At most _AUTO_RECORD_BACKLOG are admitted at once (being written or waiting): a slow disk
+        then costs the newest controller drives, never unbounded memory or a waiting callback.
+        """
+        if self._record_admission.submit(self._save_auto_record, recording):
+            return True
+        self.get_logger().warning(
+            'controller drive not recorded: %d records are still being written'
+            % _AUTO_RECORD_BACKLOG, throttle_duration_sec=10.0)
+        return False
 
     def _save_auto_record(self, recording):
         try:
@@ -338,7 +357,8 @@ class LabBridgeNode(Node):
         self._relay('odom', lambda: messages.odom_payload(msg))
 
     def _on_drive(self, msg):
-        if not self._estop_heard or self._estop['drive'] != bool(msg.emergency_stop):
+        # Derived: may add a pressed E-stop, never makes the state known.
+        if self._estop['drive'] != bool(msg.emergency_stop):
             self._set_estop('drive', bool(msg.emergency_stop))
         self._relay('drive', lambda: messages.drive_payload(msg))
 
@@ -402,7 +422,8 @@ class LabBridgeNode(Node):
         with self._drive_lock:
             drive_state = self._drive.state()
             shoot_state = self._shoot.state(time.monotonic())
-            estop = any(self._estop.values()) if self._estop_heard else None
+            # None until /emergency_stop itself has been observed (see _estop_known).
+            estop = any(self._estop.values()) if self._estop_known else None
         summary = dict(self._records.summary(), auto_record=self._recorder is not None)
         return messages.state_payload(drive_state, self._robot, self._rates,
                                       self._drive.allowed, clients, max_clients, summary,
@@ -416,6 +437,7 @@ class LabBridgeNode(Node):
                 self.get_logger().warning('page %d disconnected while driving: stopped' % client_id)
                 self._send_drive_state(time.monotonic())
             if self._shoot.disconnect(client_id, time.monotonic()):
+                self._drop_pending_tilt()
                 self._publish_roller(0.0)
                 self.get_logger().warning(
                     'page %d disconnected while using the launcher: roller stopped' % client_id)
@@ -490,16 +512,23 @@ class LabBridgeNode(Node):
         self._set_estop('topic', bool(msg.active))
 
     def _set_estop(self, source, active):
+        """Record one E-stop report; only source 'topic' (/emergency_stop) makes the state known."""
         now = time.monotonic()
         with self._drive_lock:
             self._estop[source] = active
-            self._estop_heard = True
+            pressed = any(self._estop.values())
             was_active = self._drive.active
-            self._drive.set_emergency_stop(any(self._estop.values()), now)
+            # Pressed first, then known: a session never runs between the two.
+            self._drive.set_emergency_stop(pressed, now)
+            if source == 'topic':
+                self._estop_known = True
+                self._drive.set_estop_known(True, now)
             if was_active and not self._drive.active:
                 self._publish_twist(0.0, 0.0)
             was_active = self._shoot.active
-            self._shoot.set_emergency_stop(any(self._estop.values()), now)
+            self._shoot.set_emergency_stop(pressed, now)
+            if source == 'topic':
+                self._shoot.set_estop_known(True, now)
             self._after_shoot_change(was_active, now)
 
     def _publish_twist(self, linear, angular):
@@ -553,6 +582,8 @@ class LabBridgeNode(Node):
                         client_id, self._shoot.power, self._shoot.tilt))
             if was_owner == client_id and not self._shoot.active and kind != 'roller_stop':
                 self._publish_roller(0.0)  # e.g. a non-finite value ended the session
+            if not self._shoot.active:
+                self._drop_pending_tilt()  # roller_stop, or a request that ended the session
             if self._shoot.owner == client_id and was_owner is None:
                 self.get_logger().info('page %d operates the launcher' % client_id)
             if refused is not None:
@@ -589,23 +620,25 @@ class LabBridgeNode(Node):
             self._after_shoot_change(was_active, now)
             if power is not None:
                 self._publish_roller(power)
-            if self._tilt_pending is not None and now - self._tilt_sent_at >= _TILT_GAP_SEC:
-                deg, self._tilt_pending = self._tilt_pending, None
-                if not self._shoot.blockers():  # a blocker since: the request is void
-                    self._send_tilt(deg, now)
+            # A kept tilt only for the session that asked, still running and unblocked.
+            deg = self._tilt.due(self._shoot.session_token(), bool(self._shoot.blockers()), now)
+            if deg is not None:
+                self._shoot_publish('tilt', Float32(data=float(deg)))
 
     def _send_tilt(self, deg, now):
-        """Publish a tilt now, or keep it for the next tick if the last one was too recent."""
-        if now - self._tilt_sent_at < _TILT_GAP_SEC:
-            self._tilt_pending = deg
-            return
-        self._tilt_pending = None
-        self._tilt_sent_at = now
-        self._shoot_publish('tilt', Float32(data=float(deg)))
+        """Publish a tilt now, or keep it (with its session) for a tick if the last was too recent."""
+        deg = self._tilt.request(deg, self._shoot.session_token(), now)
+        if deg is not None:
+            self._shoot_publish('tilt', Float32(data=float(deg)))
+
+    def _drop_pending_tilt(self):
+        """Forget a coalesced tilt: its session ended (every session-ending path calls this)."""
+        self._tilt.drop()
 
     def _after_shoot_change(self, was_active, now):
         """Stop the roller at once if the session just ended; tell the pages. Holds the lock."""
         if was_active and not self._shoot.active:
+            self._drop_pending_tilt()
             self._publish_roller(0.0)
             self.get_logger().warning(
                 'launcher session ended: %s' % self._shoot.last_stop['reason'])
@@ -646,6 +679,7 @@ class LabBridgeNode(Node):
             if self._shoot.stop(None, time.monotonic()):
                 self._publish_roller(0.0)
                 stopped = True
+            self._drop_pending_tilt()
         return stopped
 
     def destroy_node(self):

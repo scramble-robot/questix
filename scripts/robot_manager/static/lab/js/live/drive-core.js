@@ -15,6 +15,7 @@ const DRIVE_BLOCKERS = [
   'not_allowed', // robot_manager has not allowed driving
   'no_drive_node', // nothing subscribes to /target_twist
   'other_publisher', // the controller (or anything else) publishes /target_twist
+  'estop_unknown', // the bridge has not heard /emergency_stop yet (fail closed)
   'emergency_stop',
   'busy', // another page drives the robot
   'running_here', // this page already runs something (another block, the bench test)
