@@ -55,6 +55,19 @@ def parse(raw) -> "int | None":
 _EXPORT_RE = re.compile(r"[0-9]{1,3}")
 
 
+def robot_domain(raw) -> "str | None":
+    """Return the domain the robot launcher runs in for launch.env's ``raw`` (see shell_export).
+
+    Missing or empty means LEGACY_DOMAIN_ID (``${ROS_DOMAIN_ID:-42}``); a plain number of up to
+    three digits is returned as it is, even outside ALLOWED_RANGES (the launcher only warns);
+    anything else is None (it could not be pasted into a command).
+    """
+    text = _unquote(raw)
+    if not text:
+        text = str(LEGACY_DOMAIN_ID)
+    return text if _EXPORT_RE.fullmatch(text) else None
+
+
 def shell_export(raw) -> str:
     """Return ``export ROS_DOMAIN_ID=<n>; `` for a shell that must join the robot's domain.
 
@@ -65,7 +78,5 @@ def shell_export(raw) -> str:
     plain number of up to three digits gives "" (the shell keeps its own value) and is never
     pasted into a command.
     """
-    text = _unquote(raw)
-    if not text:
-        text = str(LEGACY_DOMAIN_ID)
-    return f"export ROS_DOMAIN_ID={text}; " if _EXPORT_RE.fullmatch(text) else ""
+    domain = robot_domain(raw)
+    return f"export ROS_DOMAIN_ID={domain}; " if domain is not None else ""

@@ -6,6 +6,10 @@ After=network.target
 Type=simple
 User={{ target_user }}
 Group={{ target_user }}
+# The QUESTiX source checkout (repo root, two levels above robot_manager_src) an
+# experiment's evidence names by commit (robot_manager/trial.py). Same line as
+# systemd/questix_robot_manager.service, where scripts/install-robot-manager.sh sets REPO_DIR.
+Environment="QUESTIX_SOURCE_DIR={{ robot_manager_src | regex_replace('/+$', '') | dirname | dirname }}"
 ExecStart=/usr/bin/python3 -m uvicorn robot_manager.app:app --host 127.0.0.1 --port {{ robot_manager_port }}
 Restart=on-failure
 RestartSec=5

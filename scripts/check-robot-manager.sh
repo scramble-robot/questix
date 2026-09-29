@@ -267,6 +267,24 @@ if not keep and not revertible:
     print('  ✅ ありません')
 PYTHON
 
+section "実験の証拠記録のソース（QUESTIX_SOURCE_DIR）"
+# robot_manager/trial.py names the QUESTiX checkout an experiment ran from by its commit; the
+# service gets its repo root from the installer (REPO_DIR) or Ansible (robot_manager_src). Only
+# reads git; changes nothing. Without it the evidence trial searches ROBOT_WS and ROBOT_WS/src.
+source_dir="$(sed -n 's/^Environment="\{0,1\}QUESTIX_SOURCE_DIR=\([^"]*\)"\{0,1\}$/\1/p' <<< "$unit_text" | tail -n 1)"
+if [ -z "$source_dir" ]; then
+    info "未設定（実験の証拠記録は ROBOT_WS から探します。scripts/install-robot-manager.sh の再実行で設定されます）"
+elif [ -f "$source_dir/launcher/package.xml" ] && [ -f "$source_dir/systemd/questix_robot_launcher.sh" ]; then
+    commit="$(git -c safe.directory="$source_dir" -C "$source_dir" rev-parse HEAD 2> /dev/null || true)"
+    if [[ "$commit" =~ ^[0-9a-f]{40}$ ]]; then
+        ok "$source_dir（commit $commit）"
+    else
+        ng "$source_dir は QUESTiX のソースですが git の commit を読めません（git checkout ではない？）"
+    fi
+else
+    ng "QUESTIX_SOURCE_DIR=$source_dir は QUESTiX のソースではありません"
+fi
+
 section "API の応答（http://127.0.0.1:$PORT）"
 for path in /api/status /api/lab/status /api/wifi-ap; do
     code="$(curl -s -o /dev/null -w '%{http_code}' -m 5 "http://127.0.0.1:$PORT$path" || true)"

@@ -7,6 +7,10 @@ Type=simple
 # Change User/Group to match your system username
 User=ubuntu
 Group=ubuntu
+# The QUESTiX source checkout (repo root) an experiment's evidence names by commit
+# (robot_manager/trial.py). scripts/install-robot-manager.sh replaces it with its REPO_DIR;
+# the Ansible template sets it from robot_manager_src. Informational only: nothing runs from it.
+Environment="QUESTIX_SOURCE_DIR=/home/ubuntu/questix"
 ExecStart=/usr/bin/python3 -m uvicorn robot_manager.app:app --host 127.0.0.1 --port 8888
 Restart=on-failure
 RestartSec=5
