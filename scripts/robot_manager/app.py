@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 
-from robot_manager import control_runtime, controls, lab, logs, recorder, wifi_ap
+from robot_manager import control_runtime, controls, lab, logs, recorder, ros_domain, wifi_ap
 
 CONFIG_DIR = Path(os.environ.get("QUESTIX_CONFIG_DIR", "/etc/questix_robot"))
 MODE_FILE = CONFIG_DIR / "mode"
@@ -165,8 +165,10 @@ class LaunchConfig(BaseModel):
     def validate_domain_id(cls, v: str | None) -> str | None:
         """Limit the ROS domain identifier to its supported range."""
         if v is not None:
-            if not v.isdigit() or not (0 <= int(v) <= 232):
-                raise ValueError("ROS_DOMAIN_ID must be an integer 0-232")
+            # The kitting policy (robot_manager/ros_domain.py, shared with
+            # scripts/resolve_ros_domain_id.py): the manager never saves what kitting rejects.
+            if ros_domain.parse(v) is None:
+                raise ValueError(f"ROS_DOMAIN_ID must be an integer in {ros_domain.ALLOWED_TEXT}")
         return v
 
     @field_validator("ENABLE_LIDAR", "ENABLE_SHOT", "ENABLE_DRIVE", "ENABLE_GPIO_REF", "ENABLE_RVIZ")

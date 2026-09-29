@@ -234,6 +234,50 @@ def test_launch_environment_defaults_enable_gpio_safety():
     assert 'ENABLE_GPIO_REF={{ enable_gpio_ref | lower }}' in ansible_env.splitlines()
 
 
+# The fresh-kit topology (ENABLE_* is persistent launch topology, not the lessons' session
+# permissions): off except GPIO safety, DualShock. Every copy that can decide it must agree.
+FRESH_KIT_TOPOLOGY = {
+    'ENABLE_LIDAR': 'false',
+    'ENABLE_SHOT': 'false',
+    'ENABLE_DRIVE': 'false',
+    'ENABLE_GPIO_REF': 'true',
+    'ENABLE_RVIZ': 'false',
+    'CONTROLLER_TYPE': 'dualshock',
+}
+
+
+def test_every_fresh_kit_topology_authority_agrees():
+    role_defaults = load_yaml('ansible/roles/robot_autostart/defaults/main.yaml')
+    template = (
+        SOURCE_ROOT / 'ansible/roles/robot_autostart/templates/launch.env.j2'
+    ).read_text(encoding='utf-8').splitlines()
+    static_env = dict(
+        line.split('=', 1) for line in (
+            SOURCE_ROOT / 'systemd/questix_robot.env').read_text(encoding='utf-8').splitlines()
+        if line and not line.startswith('#') and '=' in line)
+    launchers = [
+        (SOURCE_ROOT / relative_path).read_text(encoding='utf-8')
+        for relative_path in (
+            'systemd/questix_robot_launcher.sh',
+            'ansible/roles/robot_autostart/files/questix_robot_launcher.sh',
+        )
+    ]
+    # The two launcher copies are one file (installer/unit consistency).
+    assert launchers[0] == launchers[1]
+    for key, value in FRESH_KIT_TOPOLOGY.items():
+        role_value = role_defaults[key.lower()]
+        assert (str(role_value).lower() if isinstance(role_value, bool) else role_value) == value
+        # The template only refers to the role default, never repeats a value.
+        filter_suffix = ' | lower' if isinstance(role_value, bool) else ''
+        assert f'{key}={{{{ {key.lower()}{filter_suffix} }}}}' in template, key
+        assert static_env[key] == value, key
+        # What the launcher uses when launch.env lacks the key.
+        assert f'${{{key}:-{value}}}' in launchers[0], key
+        for other in ('true', 'false', 'uart', 'dualshock', 'web'):
+            if other != value:
+                assert f'${{{key}:-{other}}}' not in launchers[0], (key, other)
+
+
 def test_installers_preserve_existing_environment_but_launcher_is_safe():
     installer = (
         SOURCE_ROOT / 'scripts/install-robot-manager.sh'

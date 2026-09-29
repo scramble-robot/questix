@@ -58,7 +58,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, field_validator
 
-from robot_manager import recorder
+from robot_manager import recorder, ros_domain
 
 CONFIG_DIR = Path(os.environ.get("QUESTIX_CONFIG_DIR", "/etc/questix_robot"))
 LAUNCH_ENV_FILE = CONFIG_DIR / "launch.env"
@@ -111,7 +111,6 @@ LEGACY_PERMISSION_KEYS = ("ALLOW_DRIVE", "ALLOW_SHOOT", "PRACTICE_ALLOW_DRIVE",
                           "PRACTICE_ALLOW_SHOOT")
 _ABS_PATH_RE = re.compile(r"^/[a-zA-Z0-9_/.~-]*$")
 _TOPIC_RE = re.compile(r"^/[A-Za-z0-9_/]*$")
-_DOMAIN_RE = re.compile(r"^\d{1,3}$")
 
 router = APIRouter(prefix="/api/lab")
 logger = logging.getLogger(__name__)
@@ -277,8 +276,7 @@ def _build_command(config: dict[str, str], permissions: dict[str, bool]) -> str:
         raise HTTPException(status_code=400, detail="CAMERA_TOPIC が不正です")
 
     # The robot runs in the domain from launch.env; the bridge must listen in the same one.
-    domain = launch_env.get("ROS_DOMAIN_ID", "")
-    export_domain = f"export ROS_DOMAIN_ID={domain}; " if _DOMAIN_RE.match(domain) else ""
+    export_domain = ros_domain.shell_export(launch_env.get("ROS_DOMAIN_ID"))
 
     args = [
         "ros2", "run", "questix_lab_bridge", "lab_bridge_node", "--ros-args",

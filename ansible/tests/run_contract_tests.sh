@@ -45,13 +45,25 @@ assert_not_contains() {
     fi
 }
 
-run_playbook() {
-    ansible-playbook "$@" -i localhost, --connection=local \
-        >/tmp/questix_contract_test_last.log 2>&1
-}
-
 TMP_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TMP_ROOT"' EXIT
+# Run-local (no shared /tmp path, so parallel runs never mix logs). The directory is removed on
+# exit, so a failed playbook prints the end of its log right away.
+PLAYBOOK_LOG="$TMP_ROOT/playbook.log"
+
+show_log_tail() {
+    echo "----- last lines of the playbook log -----"
+    tail -n 40 "$PLAYBOOK_LOG" 2>/dev/null || true
+    echo "------------------------------------------"
+}
+
+run_playbook() {
+    if ansible-playbook "$@" -i localhost, --connection=local >"$PLAYBOOK_LOG" 2>&1; then
+        return 0
+    fi
+    show_log_tail
+    return 1
+}
 
 # --- 1. Fresh launch.env rendering (shipping defaults) ----------------------
 FRESH_DIR="$TMP_ROOT/fresh"
@@ -66,8 +78,10 @@ if run_playbook ansible/tests/test_launch_env.yaml \
     assert_contains "$ENV_FILE" "ENABLE_RVIZ=false" "fresh render: ENABLE_RVIZ default false"
     assert_contains "$ENV_FILE" "CONTROLLER_TYPE=dualshock" "fresh render: CONTROLLER_TYPE default dualshock"
     assert_contains "$ENV_FILE" "ROS_DOMAIN_ID=11" "fresh render: ROS_DOMAIN_ID synced to resolved value"
+    # The lessons' drive/launch permissions are session-only (Robot Manager), never kit config.
+    assert_not_contains "$ENV_FILE" "ALLOW_" "fresh render: no QUESTiX LAB permission in launch.env"
 else
-    fail "fresh render: playbook run failed (see /tmp/questix_contract_test_last.log)"
+    fail "fresh render: playbook run failed (log shown above)"
 fi
 
 # --- 2. Existing launch.env preservation + domain-only sync -----------------
@@ -76,6 +90,8 @@ mkdir -p "$PRESERVE_DIR"
 cat >"$PRESERVE_DIR/launch.env" <<'EOF'
 # custom header a human wrote
 ENABLE_LIDAR=true
+ENABLE_SHOT=true
+ENABLE_DRIVE=true
 ROS_DOMAIN_ID=42
 CONTROLLER_TYPE=uart
 EOF
@@ -84,11 +100,14 @@ if run_playbook ansible/tests/test_launch_env.yaml \
     ENV_FILE="$PRESERVE_DIR/launch.env"
     assert_contains "$ENV_FILE" "ENABLE_LIDAR=true" "preserve: existing non-domain setting kept"
     assert_contains "$ENV_FILE" "CONTROLLER_TYPE=uart" "preserve: existing non-domain setting kept (2)"
+    assert_contains "$ENV_FILE" "ENABLE_SHOT=true" "preserve: an enabled launcher is not switched off by the new defaults"
+    assert_contains "$ENV_FILE" "ENABLE_DRIVE=true" "preserve: an enabled drive is not switched off by the new defaults"
+    assert_not_contains "$ENV_FILE" "ENABLE_DRIVE=false" "preserve: no fresh-kit value appended to an existing file"
     assert_contains "$ENV_FILE" "# custom header a human wrote" "preserve: existing comment kept"
     assert_contains "$ENV_FILE" "ROS_DOMAIN_ID=12" "domain sync: ROS_DOMAIN_ID updated to resolved value"
     assert_not_contains "$ENV_FILE" "ROS_DOMAIN_ID=42" "domain sync: stale legacy value removed"
 else
-    fail "preserve: playbook run failed (see /tmp/questix_contract_test_last.log)"
+    fail "preserve: playbook run failed (log shown above)"
 fi
 
 # --- 3. Duplicate ROS_DOMAIN_ID lines (documented last-wins behavior) -------
@@ -111,7 +130,7 @@ if run_playbook ansible/tests/test_launch_env.yaml \
     echo "INFO: duplicate ROS_DOMAIN_ID line count after sync: $DOMAIN_LINE_COUNT" \
         "(lineinfile replaces only the last match; pre-existing duplicate lines are not deleted -- known limitation, see README)"
 else
-    fail "duplicate: playbook run failed (see /tmp/questix_contract_test_last.log)"
+    fail "duplicate: playbook run failed (log shown above)"
 fi
 
 # --- 4. bashrc synchronization -----------------------------------------------
@@ -124,7 +143,7 @@ if run_playbook ansible/tests/test_bashrc_sync.yaml \
     assert_contains "$BASHRC_FILE" "export ROS_DOMAIN_ID=14" "bashrc sync: managed block exports resolved domain id"
     assert_contains "$BASHRC_FILE" "# BEGIN ANSIBLE MANAGED BLOCK - ROS2 Robotics Kit" "bashrc sync: managed block markers present"
 else
-    fail "bashrc sync: playbook run failed (see /tmp/questix_contract_test_last.log)"
+    fail "bashrc sync: playbook run failed (log shown above)"
 fi
 
 if run_playbook ansible/tests/test_bashrc_sync.yaml \
@@ -132,7 +151,7 @@ if run_playbook ansible/tests/test_bashrc_sync.yaml \
     assert_contains "$BASHRC_FILE" "export ROS_DOMAIN_ID=15" "bashrc sync: re-run updates to the new resolved value"
     assert_not_contains "$BASHRC_FILE" "export ROS_DOMAIN_ID=14" "bashrc sync: stale value replaced on re-run"
 else
-    fail "bashrc sync (re-run): playbook run failed (see /tmp/questix_contract_test_last.log)"
+    fail "bashrc sync (re-run): playbook run failed (log shown above)"
 fi
 
 # --- 5. Static shipping-default / mode / service-enabled regression checks --
@@ -147,7 +166,7 @@ assert_range_case() {
     local result
     if ansible-playbook ansible/tests/test_validate_ros_domain_id.yaml \
         -i localhost, --connection=local -e "ros_domain_id=$value" \
-        >/tmp/questix_contract_test_last.log 2>&1; then
+        >"$PLAYBOOK_LOG" 2>&1; then
         result="pass"
     else
         result="fail"
@@ -155,7 +174,8 @@ assert_range_case() {
     if [ "$result" = "$expect" ]; then
         pass "range assert: ros_domain_id=$value -> $expect"
     else
-        fail "range assert: ros_domain_id=$value expected $expect, got $result (see /tmp/questix_contract_test_last.log)"
+        show_log_tail
+        fail "range assert: ros_domain_id=$value expected $expect, got $result (log shown above)"
     fi
 }
 

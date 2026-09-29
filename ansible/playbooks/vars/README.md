@@ -46,6 +46,27 @@
 resolver 自体は `launch.env` や `.bashrc` を書き換えません。永続化は Ansible
 （`robot_autostart` / `robotics_workspace` ロール）の責務です。
 
+**範囲の定義元**: Python の定義は `scripts/robot_manager/ros_domain.py`（標準ライブラリのみ）の
+1か所です。kitting 時の resolver はソースチェックアウト内のこのモジュールを import するので、
+インストール済みの Robot Manager には依存しません。インストール後の Robot Manager（管理設定の
+保存、実行中の設定の取得）も同じモジュールを使います。import できない次のコピーは同じ値を
+書いており、`scripts/robot_manager/test_ros_domain.py` が一致を検査します:
+`ansible/playbooks/tasks/validate_ros_domain_id.yaml`（Jinja）、ロボットの起動スクリプト
+（`systemd/questix_robot_launcher.sh` と Ansible 側のコピー。範囲外は警告のみで起動は止めません）、
+管理設定フォームの `max`。
+
+**どの値が効くか**:
+
+| 段階 | 決め手 | 備考 |
+|---|---|---|
+| kitting（`./setup.sh`） | `QUESTIX_ROS_DOMAIN_ID` / `--override` → なければ `launch.env` と `~/.bashrc` の managed block の一致した値 | 食い違い・不正値・42 は対話で決める（非対話では失敗）。解決値を `-e ros_domain_id=` で Ansible へ渡す |
+| Ansible | `ros_domain_id`（resolver の値、または `setup_kit_vars.yaml` の 42） | `launch.env` の `ROS_DOMAIN_ID` 行と `~/.bashrc` の managed block をその値に同期。他の既存設定は変えない |
+| ロボット制御（`questix_robot.service`） | `/etc/questix_robot/launch.env`（無ければ 42） | 範囲外は警告して、その値のまま起動 |
+| QUESTiX LAB ブリッジ・rosbag 記録（Robot Manager） | `/etc/questix_robot/launch.env` の値をそのまま export（無ければ 42） | ロボットと同じ domain で動かすため、範囲外でも同じ値を使う |
+| 実行中の設定の取得（Robot Manager） | `launch.env`（無ければ Robot Manager の環境変数、それも無ければ 42） | 範囲外なら取得せず、直し方を表示 |
+| 管理設定での保存（Robot Manager） | 入力値 | 範囲外は保存しない（kitting と同じ判定） |
+| 対話シェル | `~/.bashrc` の managed block | Ansible が `launch.env` と同じ値に保つ |
+
 ### dev.yaml
 
 開発/テスト環境用の設定オーバーライドファイルです。コンテナや非Raspberry Pi環境でのテストに使用します。

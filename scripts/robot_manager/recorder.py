@@ -22,6 +22,8 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, field_validator
 
+from robot_manager import ros_domain
+
 CONFIG_DIR = Path(os.environ.get("QUESTIX_CONFIG_DIR", "/etc/questix_robot"))
 LAUNCH_ENV_FILE = CONFIG_DIR / "launch.env"
 ROSBAG_ENV_FILE = CONFIG_DIR / "rosbag.env"
@@ -267,10 +269,13 @@ def _build_record_command(config: dict[str, str], bag_path: Path) -> str:
         args += ["--max-bag-duration", str(max_duration)]
 
     record_cmd = " ".join(args)
+    # Record in the robot's domain (launch.env), like the lab bridge: robot_manager's own
+    # environment has none, and a non-interactive `bash -lc` never reaches the ~/.bashrc block.
+    export_domain = ros_domain.shell_export(_read_env_file(LAUNCH_ENV_FILE).get("ROS_DOMAIN_ID"))
     return (
         "source /opt/ros/jazzy/setup.bash && "
         f'source "{robot_ws}/install/setup.bash" 2>/dev/null; '
-        f"exec {record_cmd}"
+        f"{export_domain}exec {record_cmd}"
     )
 
 
