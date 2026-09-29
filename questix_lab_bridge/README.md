@@ -94,8 +94,10 @@ To use it:
 
 1. Start the robot as usual for practice: `ros2 launch questix_launcher questix_core.launch.xml`
    (competition launches, `enable_autoreferee:=true`, do not start `twist_arbiter`).
-2. Robot Manager runs the bridge with `allow_drive:=true` in practice mode (its 教材 tab switch
-   「教材からの走行を止める」 turns it off; competition mode turns it off, practice mode on).
+2. The teacher switches 教材からの走行 on in Robot Manager's 教材 tab; Robot Manager then runs the
+   bridge with `allow_drive:=true`. The switch holds for that session only: it is off at every
+   start of Robot Manager (and of the robot), after 配信停止, 「すべて止める」 and a switch to
+   competition mode, and stays off when the robot goes back to practice mode.
 3. Learners tick the safety check on the page and press the lesson's drive button.
 
 The bridge enforces every rule itself (`questix_lab_bridge/drive.py`, unit-tested), whatever a

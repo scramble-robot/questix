@@ -1008,7 +1008,7 @@ function showLabCapability(kind, data) {
   if (!toggle.dataset.busy) toggle.checked = view.allowed && !data.competition;
   toggle.disabled = view.toggleDisabled || Boolean(toggle.dataset.busy);
   document.getElementById(`lab-${kind}-toggle-state`).textContent = data.competition
-    ? '（大会モードのため禁止）' : view.allowed ? '（許可しています）' : '（禁止しています）';
+    ? '（大会モードのため OFF）' : view.allowed ? '（ON：許可しています）' : '（OFF：禁止しています）';
   const note = document.getElementById(`lab-${kind}-toggle-note`);
   note.textContent = view.toggleNote;
   note.hidden = !view.toggleNote;
@@ -1174,7 +1174,7 @@ async function stopAll() {
     const answer = await api('/api/stop-all', { method: 'POST' });
     const parts = document.getElementById('stop-all-parts');
     parts.replaceChildren();
-    for (const part of [answer.service, answer.lab]) {
+    for (const part of [answer.service, answer.lab, answer.lab_permissions].filter(Boolean)) {
       const item = document.createElement('li');
       item.textContent = part.message;
       item.className = part.ok ? 'ok' : 'failed';

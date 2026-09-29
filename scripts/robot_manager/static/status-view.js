@@ -114,7 +114,7 @@ const StatusView = (() => {
     if (lab.competition) {
       view.headline = '大会モードのため使えません';
       view.toggleDisabled = true;
-      view.toggleNote = '大会モードでは教材からは動かせません。練習モードに戻すと、先生が選んでいた設定に戻ります。';
+      view.toggleNote = '大会モードでは教材からは動かせません。練習モードに戻しても OFF のままです（先生が ON にしてください）。';
       return view;
     }
     if (lab.external && bridge) {
@@ -225,9 +225,9 @@ const StatusView = (() => {
     if (!lab) rows.permissions = { text: '確認中', tone: 'idle' };
     else if (lab.competition) rows.permissions = { text: '大会モードのため禁止', tone: 'idle' };
     else {
-      const word = (on) => (on ? '許可' : '禁止');
+      const word = (on) => (on ? 'ON' : 'OFF');
       rows.permissions = {
-        text: `走行: ${word(lab.drive_allowed)}・発射: ${word(lab.shoot_allowed)}`,
+        text: `教材からの走行: ${word(lab.drive_allowed)}・教材からの発射: ${word(lab.shoot_allowed)}`,
         tone: lab.drive_allowed || lab.shoot_allowed ? 'warn' : 'idle',
       };
     }
@@ -271,8 +271,8 @@ const StatusView = (() => {
     if (!lab) return '';
     if (lab.error) return `教材の設定を戻せませんでした（${lab.error}）`;
     const word = (on) => (on ? 'オン' : 'オフ');
-    const head = lab.restored ? '教材は大会モードの前の設定に戻しました' : '教材の設定をオンにしました';
-    return `${head}（配信の自動開始: ${word(lab.autostart)}・教材からの走行: ${lab.drive ? '許可' : '禁止'}・発射: ${lab.shoot ? '許可' : '禁止'}）`;
+    const head = lab.restored ? '教材の配信は大会モードの前の設定に戻しました' : '教材の配信の自動開始をオンにしました';
+    return `${head}（配信の自動開始: ${word(lab.autostart)}・教材からの走行: ${lab.drive ? 'ON' : 'OFF'}・発射: ${lab.shoot ? 'ON' : 'OFF'}。走行・発射は先生が教材タブで ON にしてください）`;
   }
 
   return {

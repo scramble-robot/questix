@@ -49,14 +49,16 @@ questix_lab_bridge:
 
     # Driving experiments from the pages (the only thing this node can publish).
     # true = pages may drive, each run confirmed by the learner's safety tick on the page.
-    # robot_manager passes its 教材からの走行 switch (on in practice mode, off in competition).
+    # false here, so a bridge started by hand never drives. robot_manager always passes its
+    # 教材からの走行 switch explicitly: off at every start of the manager, on only after the teacher
+    # switches it on for the session, always off in competition.
     # The page's commands go to twist_arbiter's lab input; the arbiter (practice launches of
     # questix_core) chooses between them and the controller, and a moved stick takes over.
     # Even when allowed, a page can drive only while
     #   - no other node publishes drive_topic,
     #   - twist_arbiter subscribes to it (the robot's ROS runs, same ROS_DOMAIN_ID), and
     #   - the emergency stop is released (emergency_stop_topic or /drive_status).
-    allow_drive: true
+    allow_drive: false
     drive_topic: "/target_twist/lab"
     # twist_arbiter's status: a run the controller takes over ends at once. Empty = not used.
     arbiter_status_topic: "/twist_arbiter/status"
