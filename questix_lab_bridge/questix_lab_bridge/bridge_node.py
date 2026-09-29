@@ -21,6 +21,7 @@ from the payloads it already builds, and rosbags are read from files.
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 import json
+import math
 import signal
 import threading
 import time
@@ -64,6 +65,9 @@ _ESTOP_QOS = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
 # included). More are dropped with a warning: the ROS callbacks never wait for the disk, and at
 # most this many recordings are held in memory for writing.
 _AUTO_RECORD_BACKLOG = 2
+# A new page gets the last /emergency_stop only if it arrived this recently (the pages count an
+# E-stop older than 1 s as stale).
+_ESTOP_GREETING_MAX_AGE_SEC = 1.0
 
 
 class LabBridgeNode(Node):
@@ -119,6 +123,15 @@ class LabBridgeNode(Node):
             'arbiter_status_topic', '/twist_arbiter/status').value
         self._arbiter_status = None
         estop_topic = self.declare_parameter('emergency_stop_topic', '/emergency_stop').value
+        # /emergency_stop is also a stream of its own (``estop``): the authoritative E-stop for
+        # the pages and the recordings. Its own subscription (below) feeds it.
+        topics['estop'] = estop_topic
+        # 10 Hz and on change at the source (operation_manager): every message is passed on.
+        max_hz['estop'] = 0.0
+        # The last /emergency_stop (encoded) and when it arrived (monotonic), for pages that
+        # connect later; only passed on while it is fresh, so a new page never sees an old state.
+        self._latest_estop = None
+        self._latest_estop_at = -math.inf
         drive_rate = self.declare_parameter('drive_rate_hz', 20.0).value
         self._drive_lock = threading.Lock()
         self._drive = DriveArbiter(
@@ -360,7 +373,8 @@ class LabBridgeNode(Node):
         # Derived: may add a pressed E-stop, never makes the state known.
         if self._estop['drive'] != bool(msg.emergency_stop):
             self._set_estop('drive', bool(msg.emergency_stop))
-        self._relay('drive', lambda: messages.drive_payload(msg))
+        stamp = self._now()
+        self._relay('drive', lambda: messages.drive_payload(msg, stamp))
 
     def _on_twist(self, msg):
         self._relay('twist', lambda: messages.twist_payload(msg, self._now()))
@@ -384,8 +398,14 @@ class LabBridgeNode(Node):
 
     def _greeting(self, client_id):
         with self._drive_lock:
-            return [messages.encode(messages.session_payload(client_id)), self._drive_state_text(),
-                    self._shoot_state_text(time.monotonic())]
+            greeting = [messages.encode(messages.session_payload(client_id)),
+                        self._drive_state_text(), self._shoot_state_text(time.monotonic())]
+        # The last /emergency_stop, so a page that connects later knows it at once (it is
+        # re-sent by operation_manager anyway; the page judges its age by bridge_stamp).
+        if (self._latest_estop is not None
+                and time.monotonic() - self._latest_estop_at <= _ESTOP_GREETING_MAX_AGE_SEC):
+            greeting.append(self._latest_estop)
+        return greeting
 
     def _on_browser(self, client_id, text):
         request = messages.parse_request(text)
@@ -510,6 +530,10 @@ class LabBridgeNode(Node):
 
     def _on_estop(self, msg):
         self._set_estop('topic', bool(msg.active))
+        payload = messages.estop_payload(msg, self._now())
+        self._latest_estop = messages.encode(payload)
+        self._latest_estop_at = time.monotonic()
+        self._relay('estop', lambda: payload)
 
     def _set_estop(self, source, active):
         """Record one E-stop report; only source 'topic' (/emergency_stop) makes the state known."""

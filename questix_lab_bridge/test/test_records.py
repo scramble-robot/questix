@@ -393,3 +393,15 @@ def test_nothing_is_admitted_once_the_writer_shuts_down():
     gate.set()
     executor.shutdown(wait=True)
     assert not writer.submit(write, 'late') and writer.backlog == 0
+
+
+def test_the_robot_keeps_every_stream_a_page_records():
+    # recording-core.js RECORDING_STREAMS (test/recording-core.test.mjs compares the two lists).
+    assert records.RECORDING_STREAMS == (
+        'drive', 'twist', 'scan', 'odom', 'roller', 'shot', 'estop')
+    streams = {stream: [{'type': stream, 'stamp': 1.0}] for stream in records.RECORDING_STREAMS}
+    recording = records.make_recording('lab', '', '2026-10-01T00:00:00.000Z',
+                                       {'wheel_radius': 0.1, 'wheel_separation': 0.5}, streams)
+    assert set(recording['streams']) == set(records.RECORDING_STREAMS)
+    assert recording['version'] == 1  # the new streams and wheel fields are optional additions
+    records.check_recording(recording)

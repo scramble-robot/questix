@@ -9,8 +9,11 @@
 //   config: { wheel_radius, wheel_separation },       // metres, as the bridge's hello reports it
 //   topics: { drive: '/drive_status', ... },            // the ROS topic behind each stream
 //   streams: { drive: [...], twist: [...], scan: [...], odom: [...] }
-//   // roller / shot (the launcher's /roller/status and /shot/status, since 2026-09) are optional
-//   // like every stream: older files lack them, and readers that do not need them ignore them.
+//   // roller / shot (the launcher's /roller/status and /shot/status, since 2026-09) and estop
+//   // (/emergency_stop itself, the authoritative E-stop, since 2026-10) are optional like every
+//   // stream: older files lack them, and readers that do not need them ignore them. Newer drive
+//   // messages also carry each wheel's feedback_stamp / feedback_age_sec / feedback_valid and a
+//   // bridge_stamp (messages.py); these are optional additions too, so the version stays 1.
 //   // optional, written since 2026-09 (older files simply lack them; readers fall back):
 //   lesson: 'control-speed',                            // the lesson / slot it was made for
 //   conditions: { speed: 0.2, label: '0.20 m/s' },      // the lesson's drive.conditions() + label
@@ -23,9 +26,14 @@
 // questix_lab_bridge/questix_lab_bridge/messages.py), each with a `stamp` in seconds of the
 // robot's clock, sorted by it. Lessons derive their numbers from the streams, never from the
 // order messages happened to arrive in, so a reopened file gives the same result as the recording.
+//
+// This is teaching data: what the bridge passed on to the pages (drive at about 20 Hz), not every
+// message on the robot. The evidence-grade record of a run is Robot Manager's rosbag (MCAP), which
+// keeps every message as ROS published it.
 
 import {
   wheelRpm,
+  wheelAuthority,
   frontDistance,
   driveSamples,
   captureSummary,
@@ -35,7 +43,9 @@ import {
 
 const RECORDING_FORMAT = 'questix-lab-recording';
 const RECORDING_VERSION = 1;
-const RECORDING_STREAMS = ['drive', 'twist', 'scan', 'odom', 'roller', 'shot'];
+// RECORDING_STREAMS in questix_lab_bridge/questix_lab_bridge/records.py: the same list, so a
+// recording the robot keeps loses nothing (test/recording-core.test.mjs compares the two).
+const RECORDING_STREAMS = ['drive', 'twist', 'scan', 'odom', 'roller', 'shot', 'estop'];
 const MAX_RECORDING_MESSAGES = 200000; // about 45 minutes of every stream at the bridge's rates
 
 const recordingError = (text) => new Error(text);
@@ -283,10 +293,15 @@ function commandZero(recording) {
 
 // One row per message, all streams in one table ordered by time, so a spreadsheet can filter by
 // the `stream` column and a plotting tool can draw any column against `time_s`. Units are in the
-// header. Wheel speeds are forward-positive for both wheels, derived from the chassis velocity as
-// the lessons do (the right motor's raw rpm is mirrored on the wire). The scan is reduced to the
-// wall straight ahead (`front_m`), the number the lessons use; the full ranges stay in the JSON.
+// header. `left_rpm` / `right_rpm` are forward-positive for both wheels, derived from the chassis
+// velocity as the lessons always did. The `*_native` columns (at the end, so existing columns keep
+// their place) are each wheel's own values as the robot sent them, in the motors' native sign
+// (left forward +, right forward -): generated target, raw and filtered measurement, with the
+// time of that wheel's feedback and its age (empty when unknown). `estop_authoritative` is 1 / 0
+// on the rows of /emergency_stop itself. The scan is reduced to the wall straight ahead
+// (`front_m`), the number the lessons use; the full ranges stay in the JSON.
 const isDrive = (stream) => stream === 'drive';
+const NATIVE_NAMES = { target_rpm: 'target', rpm_raw: 'raw', rpm: 'filtered' };
 const isOdom = (stream) => stream === 'odom';
 const moving = (stream) => isDrive(stream) || isOdom(stream);
 const wheel = (message, config, side) =>
@@ -322,7 +337,30 @@ const CSV_COLUMNS = [
   ['tilt_deg', (message, stream) => (stream === 'shot' ? message.tilt_deg : '')],
   ['shooting', (message, stream) => (stream === 'shot' ? Number(message.shooting === true) : '')],
   ['fired_count', (message, stream) => (stream === 'shot' ? message.fired_count : '')],
+  // Each wheel's own values (newer bridges), native sign, and its feedback time.
+  ...['target_rpm', 'rpm_raw', 'rpm'].flatMap((key) =>
+    ['left', 'right'].map((side) => [
+      `${side}_${NATIVE_NAMES[key]}_rpm_native`,
+      (message, stream) => (isDrive(stream) ? nativeCell(message[side]?.[key]) : ''),
+    ]),
+  ),
+  ...['left', 'right'].map((side) => [
+    `${side}_feedback_stamp_s`,
+    (message, stream) => (isDrive(stream) ? secondsCell(message[side]?.feedback_stamp) : ''),
+  ]),
+  ...['left', 'right'].map((side) => [
+    `${side}_feedback_age_s`,
+    (message, stream) => (isDrive(stream) ? secondsCell(message[side]?.feedback_age_sec) : ''),
+  ]),
+  [
+    'estop_authoritative',
+    (message, stream) => (stream === 'estop' ? Number(message.active === true) : ''),
+  ],
 ];
+
+// A number from a message, or '' (an older message, a null for "unknown").
+const nativeCell = (value) => (Number.isFinite(value) ? value : '');
+const secondsCell = (value) => (Number.isFinite(value) ? value.toFixed(6) : '');
 
 // A word from a status message, kept only when it cannot break the CSV (joy / lab / idle).
 const csvWord = (value) => (typeof value === 'string' && /^[a-z_]+$/.test(value) ? value : '');
@@ -393,7 +431,10 @@ const tableTrigger = (recording) =>
 function tableRow(sample, trigger, zero, config, distances) {
   const drive = sample.drive ?? null;
   const measured = drive && Number.isFinite(drive.v) && Number.isFinite(drive.w);
-  const wheels = measured ? wheelRpm(drive, config) : null;
+  // Each wheel's own filtered speed (forward-positive) when the message has it and it is valid;
+  // an older message falls back to the chassis velocity.
+  const direct = drive ? wheelAuthority(drive) : null;
+  const wheels = direct ? direct.filtered : measured ? wheelRpm(drive, config) : null;
   const front = sample.scan ? frontDistance(sample.scan) : null;
   return [
     digits(sample[trigger].stamp - zero, 3),

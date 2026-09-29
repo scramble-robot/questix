@@ -5,6 +5,10 @@ import {
   CAPTURE_DEFAULTS,
   forwardRpm,
   wheelRpm,
+  hasWheelAuthority,
+  forwardWheels,
+  wheelAuthority,
+  straightRpm,
   driveSamples,
   commandHolds,
   steadyMeasurements,
@@ -316,4 +320,91 @@ test('firstHold keeps a speed run up to its first change of command', () => {
     [0, 1],
   );
   assert.deepEqual(firstHold([]), []);
+});
+
+// --- each wheel's own values (bridges since the wheel-level telemetry authority) ------------
+
+// A /drive_status with each wheel's native values: left forward +, right forward -.
+const wheelDrive = (stamp, { target, raw, filtered, valid = true, v = 0 }) => ({
+  stamp,
+  v,
+  w: 0,
+  emergency_stop: false,
+  left: {
+    target_rpm: target,
+    rpm_raw: raw,
+    rpm: filtered,
+    feedback_stamp: valid ? stamp - 0.02 : null,
+    feedback_age_sec: valid ? 0.02 : null,
+    feedback_valid: valid,
+  },
+  right: {
+    target_rpm: -target,
+    rpm_raw: -raw,
+    rpm: -filtered,
+    feedback_stamp: valid ? stamp - 0.02 : null,
+    feedback_age_sec: valid ? 0.02 : null,
+    feedback_valid: valid,
+  },
+});
+
+test('the wire keeps native signs; only the learner adapter makes the right wheel forward-positive', () => {
+  const message = wheelDrive(10, { target: 31, raw: 35, filtered: 30 });
+  assert.equal(message.right.rpm, -30); // as the robot sent it
+  assert.ok(hasWheelAuthority(message));
+  const wheels = wheelAuthority(message);
+  assert.deepEqual(wheels.filtered, { left: 30, right: 30 });
+  assert.deepEqual(wheels.raw, { left: 35, right: 35 });
+  assert.deepEqual(wheels.target, { left: 31, right: 31 });
+  assert.deepEqual(forwardWheels(0, 0), { left: 0, right: 0 }); // never -0
+  assert.equal(straightRpm({ left: 10, right: 20 }), 15);
+  assert.ok(Number.isNaN(straightRpm(null)));
+});
+
+test('a recording with wheel authority keeps request, target, raw and filtered apart', () => {
+  // v says something else on purpose: the rows must not be recomputed from the chassis velocity.
+  const samples = [0, 1, 2].map((i) => ({
+    drive: wheelDrive(100 + i * 0.05, { target: 31, raw: 35, filtered: 30, v: 9 }),
+    twist: twist(100 + i * 0.05, 40),
+  }));
+  const rows = driveSamples(samples, config);
+  assert.equal(rows.length, 3);
+  const row = rows[0];
+  assert.equal(row.authority, 'wheel');
+  assert.ok(Math.abs(row.requestRpm - 40) < 1e-9);
+  assert.equal(row.commandRpm, row.requestRpm);
+  assert.equal(row.generatedTargetRpm, 31);
+  assert.equal(row.rawMeasuredRpm, 35);
+  assert.equal(row.filteredMeasuredRpm, 30);
+  assert.equal(row.measuredRpm, 30);
+  assert.deepEqual(row.wheels, { left: 30, right: 30 });
+  assert.deepEqual(row.rawWheels, { left: 35, right: 35 });
+  const run = liveControlRun(rows, 10);
+  assert.equal(run.samples[0].generatedTarget, 31);
+  assert.equal(run.samples[0].rawMeasured, 35);
+});
+
+test('wheel feedback that is not valid is not a measurement', () => {
+  const samples = [
+    { drive: wheelDrive(100, { target: 31, raw: 35, filtered: 30 }), twist: twist(100, 40) },
+    {
+      drive: wheelDrive(100.05, { target: 31, raw: 35, filtered: 30, valid: false }),
+      twist: twist(100.05, 40),
+    },
+  ];
+  const rows = driveSamples(samples, config);
+  assert.equal(rows.length, 1);
+  const stale = wheelAuthority(samples[1].drive);
+  assert.equal(stale.valid, false);
+  assert.equal(stale.filtered, null);
+  assert.deepEqual(stale.target, { left: 31, right: 31 }); // the node's own target stays known
+});
+
+test('an older recording falls back to the chassis velocity', () => {
+  const rows = driveSamples(recording([[1, 30, 28]]), config);
+  assert.equal(rows[0].authority, 'legacy');
+  assert.ok(Math.abs(rows[0].measuredRpm - 28) < 1e-9);
+  assert.ok(Number.isNaN(rows[0].generatedTargetRpm));
+  assert.ok(Number.isNaN(rows[0].rawMeasuredRpm));
+  assert.equal(rows[0].rawWheels, null);
 });

@@ -73,6 +73,11 @@ def drive_status(seconds):
     msg.right.velocity_rpm_raw = -rpm
     msg.right.target_rpm = -rpm
     msg.right.current_amp = 0.25
+    # Each wheel's feedback time, as drive_component sets it (20 ms before the status). The
+    # committed drive-approach.mcap predates this: its wheel stamps are 0 ("never received"), and
+    # test/rosbag-core.test.mjs says so; regenerating the fixture gives valid wheel feedback.
+    msg.left.header.stamp = stamp(seconds - 0.02)
+    msg.right.header.stamp = stamp(seconds - 0.02)
     msg.linear_velocity = speed_at(seconds)
     msg.angular_velocity = 0.0
     msg.emergency_stop = False

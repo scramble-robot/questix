@@ -47,15 +47,67 @@ def test_odom_payload_is_planar():
     assert (payload['v'], payload['w']) == (0.2, -0.1)
 
 
+def _feedback(stamp, rpm=8, raw=9, target=10):
+    return NS(header=NS(stamp=stamp), velocity_rpm=rpm, velocity_rpm_raw=raw, target_rpm=target,
+              current_amp=0.1234, fault_code=0)
+
+
 def test_drive_payload_and_nan_is_null():
-    wheel = NS(velocity_rpm=8, velocity_rpm_raw=9, target_rpm=10, current_amp=0.1234,
-               fault_code=0)
+    wheel = _feedback(NS(sec=12, nanosec=400000000))
     msg = NS(header=NS(stamp=_stamp()), left=wheel, right=wheel,
              linear_velocity=float('nan'), angular_velocity=0.0, emergency_stop=1)
-    payload = messages.drive_payload(msg)
+    payload = messages.drive_payload(msg, 20.25)
     assert payload['left'] == {'rpm': 8, 'rpm_raw': 9, 'target_rpm': 10,
-                               'current_amp': 0.123, 'fault_code': 0}
+                               'current_amp': 0.123, 'fault_code': 0,
+                               'feedback_stamp': pytest.approx(12.4),
+                               'feedback_age_sec': pytest.approx(0.1),
+                               'feedback_valid': True}
+    assert payload['bridge_stamp'] == 20.25
     assert payload['v'] is None and payload['emergency_stop'] is True
+    json.loads(messages.encode(payload))
+
+
+def test_wheels_keep_their_native_sign_and_every_quantity_apart():
+    # Driving straight forward: the right motor turns negative on the wire, and it stays so.
+    left = _feedback(NS(sec=12, nanosec=400000000), rpm=30, raw=33, target=31)
+    right = _feedback(NS(sec=12, nanosec=450000000), rpm=-29, raw=-35, target=-31)
+    msg = NS(header=NS(stamp=_stamp()), left=left, right=right,
+             linear_velocity=0.3, angular_velocity=0.0, emergency_stop=False)
+    payload = messages.drive_payload(msg)
+    assert (payload['left']['rpm'], payload['left']['rpm_raw'],
+            payload['left']['target_rpm']) == (30, 33, 31)
+    assert (payload['right']['rpm'], payload['right']['rpm_raw'],
+            payload['right']['target_rpm']) == (-29, -35, -31)
+    assert payload['right']['feedback_age_sec'] == pytest.approx(0.05)
+
+
+def test_a_wheel_without_feedback_or_with_an_impossible_age_is_unknown():
+    never = _feedback(NS(sec=0, nanosec=0))
+    later = _feedback(NS(sec=13, nanosec=0))  # after the status was published: not "fresh"
+    old = _feedback(NS(sec=11, nanosec=0))  # 1.5 s old
+    msg = NS(header=NS(stamp=_stamp()), left=never, right=later,
+             linear_velocity=0.0, angular_velocity=0.0, emergency_stop=False)
+    payload = messages.drive_payload(msg)
+    assert payload['left']['feedback_stamp'] is None
+    assert payload['left']['feedback_age_sec'] is None
+    assert payload['left']['feedback_valid'] is False
+    assert payload['right']['feedback_age_sec'] is None
+    assert payload['right']['feedback_valid'] is False
+    msg.right = old
+    right = messages.drive_payload(msg)['right']
+    assert right['feedback_age_sec'] == pytest.approx(1.5) and right['feedback_valid'] is False
+    assert messages.feedback_age(12.5, float('nan')) is None
+    assert messages.feedback_age(0.0, 12.0) is None
+
+
+def test_estop_payload_is_the_topic_itself():
+    msg = NS(header=NS(stamp=_stamp()), active=False, source='operation_manager',
+             reason='released')
+    payload = messages.estop_payload(msg, 12.6)
+    assert payload == {'type': 'estop', 'stamp': pytest.approx(12.5), 'bridge_stamp': 12.6,
+                       'active': False, 'source': 'operation_manager', 'reason': 'released'}
+    msg.header = NS(stamp=NS(sec=0, nanosec=0))
+    assert messages.estop_payload(msg, 12.6)['stamp'] == 12.6  # no stamp from the publisher
     json.loads(messages.encode(payload))
 
 

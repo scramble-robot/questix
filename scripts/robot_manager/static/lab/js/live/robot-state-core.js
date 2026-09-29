@@ -15,7 +15,8 @@ import { fillSentence as fill } from '../core/content.js';
 const HISTORY_SECONDS = 10; // the wheel charts show this much
 // Older than this, a value no longer describes the robot now: it is shown grey and left out of a
 // memo line. The LiDAR sends 5 scans a second at most (lab_bridge.yaml scan_max_hz), the rest 20.
-const STALE_SECONDS = { drive: 1, odom: 1, scan: 2, twist: 1 };
+// /emergency_stop comes at 10 Hz from operation_manager: silent for a second, its state is stale.
+const STALE_SECONDS = { drive: 1, odom: 1, scan: 2, twist: 1, estop: 1 };
 const STREAMS = ['drive', 'odom', 'scan', 'twist'];
 const MOVING_RPM = 1; // a wheel below this counts as standing still
 const COMMAND_MOVING = 1e-3; // |command| above this asks the robot to move (m/s or rad/s)
@@ -247,6 +248,27 @@ function poseModel(tracker, now) {
 }
 
 /**
+ * The emergency stop as the panel shows it: `{state, source}`, `state` one of 'pressed',
+ * 'released', 'stale' (heard, then silent for STALE_SECONDS.estop) or 'unknown' (never heard),
+ * `source` 'estop' (/emergency_stop itself) or 'drive' (the derived flag of /drive_status).
+ * Only /emergency_stop itself can say "released"; the derived flag may add a pressed E-stop but
+ * its false never counts as released (an older bridge without the estop stream stays unknown).
+ */
+function estopModel(tracker, now) {
+  const drive = tracker.latest.drive;
+  const derivedPressed = Boolean(
+    drive && !isStale(tracker, 'drive', now) && drive.emergency_stop === true,
+  );
+  const message = tracker.latest.estop;
+  if (message && !isStale(tracker, 'estop', now) && message.active === true)
+    return { state: 'pressed', source: 'estop' };
+  if (derivedPressed) return { state: 'pressed', source: 'drive' };
+  if (!message) return { state: 'unknown', source: null };
+  if (isStale(tracker, 'estop', now)) return { state: 'stale', source: 'estop' };
+  return { state: 'released', source: 'estop' };
+}
+
+/**
  * Everything the panel shows. `link` is capture.js liveLink() (connected, streams, config, robot),
  * `silent` robot-link's "no stream delivers", `driveState` the bridge's latest drive_state (or
  * null), `session` this page's id on the bridge, `now` [ms].
@@ -261,11 +283,15 @@ function robotStateModel(
   const command = freshCommand(tracker, now);
   const wheels = wheelsModel(tracker, now);
   const motion = motionModel(tracker, now);
+  const estop = estopModel(tracker, now);
   return {
     connected: true,
     robot: link.robot?.name ?? '',
     silent,
-    estop: drive && driveFresh ? Boolean(drive.emergency_stop) : null,
+    // true pressed, false released, null unknown or stale (estopState tells which).
+    estop: estop.state === 'pressed' ? true : estop.state === 'released' ? false : null,
+    estopState: estop.state,
+    estopSource: estop.source,
     driver: driverOf({ driveState, session, command, wheels: driveFresh ? wheels : null }),
     command,
     motion,
@@ -388,6 +414,7 @@ function freshnessText(stream, text) {
 export {
   HISTORY_SECONDS,
   STALE_SECONDS,
+  estopModel,
   FRONT_RANGE,
   DEGREES_PER_RADIAN,
   createStateTracker,

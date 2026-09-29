@@ -32,7 +32,7 @@ const text = await loadJson('content/live/robot-state.json');
 const REDRAW_MS = 100; // about 10 redraws a second
 const MEMO_PREFIX = 'questix-lab-state-memo:';
 const MEMO_MAX_CHARS = 20000;
-const STREAMS = ['drive', 'odom', 'scan', 'twist', 'drive_state'];
+const STREAMS = ['drive', 'odom', 'scan', 'twist', 'estop', 'drive_state'];
 
 const tracker = createStateTracker();
 const panels = new Map(); // place -> entry (see entryOf)

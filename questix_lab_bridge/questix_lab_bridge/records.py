@@ -29,7 +29,9 @@ import time
 
 RECORDING_FORMAT = 'questix-lab-recording'
 RECORDING_VERSION = 1  # RECORDING_VERSION in static/lab/js/live/recording-core.js
-RECORDING_STREAMS = ('drive', 'twist', 'scan', 'odom')
+# RECORDING_STREAMS in recording-core.js: the same list, so nothing a page recorded is dropped
+# silently when the robot keeps it (test_records.py checks the two stay equal).
+RECORDING_STREAMS = ('drive', 'twist', 'scan', 'odom', 'roller', 'shot', 'estop')
 MAX_RECORDING_MESSAGES = 200000  # MAX_RECORDING_MESSAGES in recording-core.js
 # Largest recording a page may save (the WebSocket frame limit is a little above it).
 MAX_SAVE_BYTES = 8 * 1024 * 1024
@@ -553,7 +555,7 @@ def payload_moving(stream, payload):
 class AutoRecorder:
     """Record controller driving from the payloads the bridge sends to the pages.
 
-    Feed it every scan/odom/drive/twist payload with ``feed(stream, payload, now, lab_active)``
+    Feed it every payload of RECORDING_STREAMS with ``feed(stream, payload, now, lab_active)``
     (``now``: a monotonic clock [s]) and call ``tick(now, lab_active)`` about once a second.
     Finished recordings go to ``sink(recording)`` on the caller's thread (the bridge writes
     them on a worker thread).

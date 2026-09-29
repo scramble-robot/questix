@@ -24,6 +24,7 @@ STREAM_TYPES = {
     'odom': 'nav_msgs/msg/Odometry',
     'drive': 'questix_msgs/msg/DriveStatus',
     'twist': 'geometry_msgs/msg/Twist',
+    'estop': 'questix_msgs/msg/EmergencyStop',
 }
 USABLE_STREAMS = ('drive', 'odom', 'scan')  # a bag with none of these has nothing to show
 TF_STATIC_TOPIC = '/tf_static'
@@ -269,6 +270,8 @@ def _payload(stream, msg, received_ns, max_points, mounts):
     if stream == 'odom':
         return messages.odom_payload(msg)
     if stream == 'drive':
-        return messages.drive_payload(msg)
+        return messages.drive_payload(msg, received_ns * 1e-9)
+    if stream == 'estop':
+        return messages.estop_payload(msg, received_ns * 1e-9)
     # Twist has no header: its stamp is when it was received, as live (the bag's receive time).
     return messages.twist_payload(msg, received_ns * 1e-9)

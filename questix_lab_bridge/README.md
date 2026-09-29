@@ -215,9 +215,37 @@ Text frames are JSON objects tagged by `type`: `hello` (sent first: protocol ver
 topic per stream, `read_only`, `robot`), `session` (this connection's id), `drive_state` (may a
 page drive now, blockers, owner id, limits, why the last run ended; on every change and once a
 second), `shoot_state` (the same for the launcher), `scan`, `odom`, `drive`, `twist`, `roller`,
-`shot`, and `status` (received rate per stream, once a second).
+`shot`, `estop`, and `status` (received rate per stream, once a second).
 Unmeasured LiDAR beams are `null`, never `0` or a large number. Binary frames are one camera
 image each, exactly as published. See `questix_lab_bridge/messages.py` for the fields.
+
+Wheel telemetry keeps four quantities with their own authority, never recomputed from `drive.v` /
+`drive.w`:
+
+| Quantity | Where | Time |
+| --- | --- | --- |
+| Request | `twist.linear` / `twist.angular` (/target_twist) | `twist.stamp` = the bridge's receipt (Twist has no header) |
+| Generated wheel target | `drive.left/right.target_rpm` | `drive.stamp` (publish time of /drive_status) |
+| Raw measurement | `drive.left/right.rpm_raw` | `drive.left/right.feedback_stamp` |
+| Filtered measurement | `drive.left/right.rpm` | `drive.left/right.feedback_stamp` |
+
+Wheel values keep the motors' **native sign** on the wire and in recordings (left forward +,
+right forward -); only the learner-facing code (`capture-core.js`) makes them forward-positive.
+Each wheel also carries `feedback_stamp` (`null` = no feedback yet), `feedback_age_sec`
+(`drive.stamp - feedback_stamp`, both on drive_component's clock; `null` when unknown or
+negative, never clamped to fresh) and `feedback_valid` (age known and ≤ 0.5 s); `drive` also has
+`bridge_stamp` (its receipt). `drive.emergency_stop` is the node's derived flag, kept for older
+pages.
+
+`estop` is `/emergency_stop` itself, the authoritative E-stop:
+`{"type": "estop", "stamp": <its header stamp, or the receipt if 0>, "bridge_stamp": <receipt>,
+"active": false, "source": "operation_manager", "reason": "released"}`. Every message is passed
+on, and a page that connects gets the last one if it arrived within 1 s. Pages show "released"
+only from this stream: never heard is unknown, silent for 1 s is stale; the derived
+`drive.emergency_stop` may add "pressed" but never makes it released.
+
+The 20 Hz JSON the pages get is teaching data, not every message on the robot: the
+evidence-grade record of a run is Robot Manager's rosbag (MCAP).
 
 `hello.robot` is `{"name": "<robot_name or host name>", "domain": <ROS_DOMAIN_ID as a number, or
 null when unset>}`. `hello.records` is `{"save": <pages may save here now>, "list": true,
