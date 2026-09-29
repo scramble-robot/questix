@@ -284,6 +284,52 @@ def test_the_authority_going_off_takes_the_lesson_permission_with_it(lab, actuat
     assert lab.get_status()["shoot_allowed"] is False
 
 
+@pytest.mark.parametrize("switched_off", ["drive", "launcher"])
+def test_a_teacher_off_after_an_unnoticed_heartbeat_exit_revokes_both_lesson_permissions(
+        lab, actuation, switched_off):
+    told = []
+    actuation.add_revoke_listener(lambda kind, reason: told.append((kind, reason)))
+    actuation.set_authority("drive", True)
+    actuation.set_authority("launcher", True)
+    lab.set_drive(lab.DriveRequest(allow=True))
+    lab.set_shoot(lab.DriveRequest(allow=True))
+    told.clear()
+    actuation.started[0].returncode = 1  # the heartbeat died; no status() poll noticed it yet
+    actuation.set_authority(switched_off, False)
+    with actuation._lock:
+        assert actuation._authority == {"drive": False, "launcher": False}
+    status = lab.get_status()
+    assert status["drive_allowed"] is False and status["shoot_allowed"] is False
+    # Both kinds reported once, as the reap they were; the teacher's kind is not repeated.
+    assert sorted(told) == [("drive", "heartbeat_exited"), ("launcher", "heartbeat_exited")]
+
+
+def test_revoke_all_after_an_unnoticed_heartbeat_exit_reports_each_kind_once(actuation):
+    told = []
+    actuation.add_revoke_listener(lambda kind, reason: told.append((kind, reason)))
+    actuation.set_authority("drive", True)
+    actuation.started[0].returncode = 1
+    result = actuation.revoke_all("stop_all")
+    assert result["revoked"] == ["drive"]
+    assert told == [("drive", "heartbeat_exited"), ("launcher", "stop_all")]
+
+
+def test_a_failed_switch_on_still_reports_what_the_reap_switched_off(actuation, monkeypatch):
+    told = []
+    actuation.add_revoke_listener(lambda kind, reason: told.append((kind, reason)))
+    actuation.set_authority("drive", True)
+    actuation.started[0].returncode = 1
+
+    def missing(config):
+        raise HTTPException(503, "ROS 環境が見つかりません。")
+
+    monkeypatch.setattr(actuation.control_runtime, "_ros_paths", missing)
+    with pytest.raises(HTTPException):
+        actuation.set_authority("launcher", True)
+    assert told == [("drive", "heartbeat_exited")]
+    assert actuation.status()["drive"] is False
+
+
 @pytest.fixture
 def app_module(lab, actuation, monkeypatch):
     from robot_manager import app as module

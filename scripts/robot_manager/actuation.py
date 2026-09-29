@@ -168,6 +168,19 @@ def _notify(kinds, reason: str) -> None:
                 logger.exception("actuation revoke listener failed (%s, %s)", kind, reason)
 
 
+def _notify_revoked(reaped, others=(), reason: str = "") -> None:
+    """Tell the listeners once per kind: ``reaped`` (a dead heartbeat) first, then ``others``.
+
+    Every kind a reap switched off is reported with ``heartbeat_exited``, whatever the caller was
+    doing; a kind in ``others`` (the teacher's OFF, a revoke_all) that the reap already reported is
+    not reported again, so a listener never repeats its side effects (a bridge restart) for it.
+    Called outside _lock.
+    """
+    reaped = [kind for kind in KINDS if kind in set(reaped)]
+    _notify(reaped, "heartbeat_exited")
+    _notify([kind for kind in KINDS if kind in set(others) and kind not in reaped], reason)
+
+
 def _reap_locked() -> list[str]:
     """Notice a heartbeat that exited on its own; switch all off. Caller holds _lock."""
     global _proc, _last_error
@@ -204,83 +217,95 @@ def peek(kind: str) -> bool:
 def is_allowed(kind: str) -> bool:
     """Return whether the teacher's switch for ``kind`` ("drive" / "launcher") is on now."""
     with _lock:
-        revoked = _reap_locked()
+        reaped = _reap_locked()
         allowed = _authority.get(kind, False)
-    _notify(revoked, "heartbeat_exited")
+    _notify_revoked(reaped)
     return allowed
 
 
 def status() -> dict:
     """Return the switches and the heartbeat state (a heartbeat that died switches all off)."""
     with _lock:
-        revoked = _reap_locked()
+        reaped = _reap_locked()
         result = _status_locked()
-    _notify(revoked, "heartbeat_exited")
+    _notify_revoked(reaped)
     return result
 
 
 def set_authority(kind: str, allow: bool) -> dict:
     """Switch one authority on or off; raises HTTPException when it cannot be switched on."""
-    global _proc, _last_error
     if kind not in KINDS:
         raise HTTPException(status_code=404, detail="unknown authority")
     if not allow:
         with _lock:
-            _reap_locked()
-            revoked = _off_locked([kind], "teacher")
+            # A heartbeat that died before this OFF switched both kinds off: the other kind's
+            # lesson permission must go off too (reported as heartbeat_exited), not only this one.
+            reaped = _reap_locked()
+            _off_locked([kind], "teacher")
             result = _status_locked()
-        _notify(revoked or [kind], "teacher")
+        # This kind's lesson permission goes off whether or not the switch was still on.
+        _notify_revoked(reaped, [kind], "teacher")
         return result
     if _competition_mode():
         raise HTTPException(status_code=409, detail=f"大会モードでは{_NAMES[kind]}の許可は使いません"
                             "（大会では AutoReferee と非常停止で動きます）")
-    with _lock:
-        revoked = _reap_locked()
-        if _proc is None:
-            config = _read_env_file(LAUNCH_ENV_FILE)
-            try:
-                command = _command(config)
-            except HTTPException as error:
-                _last_error = str(error.detail)
-                raise
-            environment = os.environ.copy()
-            environment.pop("ROS_DOMAIN_ID", None)  # the command exports the robot's domain
-            try:
-                proc = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
-                                        stderr=subprocess.DEVNULL, text=True, env=environment,
-                                        start_new_session=True)
-            except OSError as error:
-                _last_error = f"送信プロセスを起動できません: {error}"
-                raise HTTPException(status_code=503, detail=_last_error) from error
-            deadline = time.monotonic() + START_GRACE_SEC
-            while time.monotonic() < deadline and proc.poll() is None:
-                time.sleep(0.05)
-            if proc.poll() is not None:
-                _last_error = ("送信プロセスがすぐに終了しました（ROS 環境と questix_msgs の"
-                               "ビルドを確認してください）")
-                raise HTTPException(status_code=503, detail=_last_error)
-            _proc = proc
-        _authority[kind] = True
-        if not _send_locked():
-            _authority[kind] = False
-            _stop_heartbeat_locked()
-            _last_error = "送信プロセスに許可を伝えられませんでした。もう一度ONにしてください"
+    reaped: list[str] = []
+    try:
+        with _lock:
+            reaped = _reap_locked()
+            return _switch_on_locked(kind)
+    finally:
+        # Also when switching on failed: what the reap switched off is reported.
+        _notify_revoked(reaped)
+
+
+def _switch_on_locked(kind: str) -> dict:
+    """Start the heartbeat if needed and switch ``kind`` on. Caller holds _lock; may raise."""
+    global _proc, _last_error
+    if _proc is None:
+        config = _read_env_file(LAUNCH_ENV_FILE)
+        try:
+            command = _command(config)
+        except HTTPException as error:
+            _last_error = str(error.detail)
+            raise
+        environment = os.environ.copy()
+        environment.pop("ROS_DOMAIN_ID", None)  # the command exports the robot's domain
+        try:
+            proc = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL, text=True, env=environment,
+                                    start_new_session=True)
+        except OSError as error:
+            _last_error = f"送信プロセスを起動できません: {error}"
+            raise HTTPException(status_code=503, detail=_last_error) from error
+        deadline = time.monotonic() + START_GRACE_SEC
+        while time.monotonic() < deadline and proc.poll() is None:
+            time.sleep(0.05)
+        if proc.poll() is not None:
+            _last_error = ("送信プロセスがすぐに終了しました（ROS 環境と questix_msgs の"
+                           "ビルドを確認してください）")
             raise HTTPException(status_code=503, detail=_last_error)
-        _last_error = None
-        result = _status_locked()
-    _notify(revoked, "heartbeat_exited")
-    return result
+        _proc = proc
+    _authority[kind] = True
+    if not _send_locked():
+        _authority[kind] = False
+        _stop_heartbeat_locked()
+        _last_error = "送信プロセスに許可を伝えられませんでした。もう一度ONにしてください"
+        raise HTTPException(status_code=503, detail=_last_error)
+    _last_error = None
+    return _status_locked()
 
 
 def revoke_all(reason: str) -> dict:
     """Switch both authorities off (mode switch, service start/stop, 「すべて止める」). Never raises."""
     with _lock:
-        _reap_locked()
+        reaped = _reap_locked()
         revoked = _off_locked(KINDS, reason)
         result = _status_locked()
-    # The LAB permissions go off too, whether or not a switch was on (they need one anyway).
-    _notify(list(KINDS), reason)
-    result["revoked"] = revoked
+    # The LAB permissions go off too, whether or not a switch was on (they need one anyway); a
+    # kind a dead heartbeat had already switched off is reported once, as heartbeat_exited.
+    _notify_revoked(reaped, KINDS, reason)
+    result["revoked"] = sorted(set(revoked) | set(reaped), key=KINDS.index)
     return result
 
 
