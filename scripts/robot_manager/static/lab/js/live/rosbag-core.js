@@ -37,7 +37,10 @@ const STREAM_TYPES = {
   'nav_msgs/Odometry': 'odom',
   'questix_msgs/DriveStatus': 'drive',
   'geometry_msgs/Twist': 'twist',
+  'questix_msgs/EmergencyStop': 'estop',
 };
+// A bag needs one of these to be worth opening (an E-stop alone shows nothing).
+const LESSON_STREAMS = ['scan', 'odom', 'drive', 'twist'];
 
 const bagError = (text) => new Error(text);
 
@@ -330,20 +333,44 @@ function odomPayload(msg) {
   };
 }
 
-const wheel = (feedback) => ({
-  rpm: feedback.velocity_rpm,
-  rpm_raw: feedback.velocity_rpm_raw,
-  target_rpm: feedback.target_rpm,
-  current_amp: finite(feedback.current_amp, 3),
-  fault_code: feedback.fault_code,
-});
+// questix_lab_bridge messages.FEEDBACK_MAX_AGE_SEC (and motor_control_app kMaxFeedbackAgeSec).
+const FEEDBACK_MAX_AGE_SEC = 0.5;
 
-function drivePayload(msg) {
+// messages.feedback_age: the age of a wheel's feedback on drive_component's clock, or null when it
+// cannot be known (no stamp, not finite, negative) — never clamped to "fresh".
+function feedbackAge(published, feedbackStamp) {
+  if (!feedbackStamp || !published) return null;
+  const age = published - feedbackStamp;
+  if (!Number.isFinite(age) || age < 0) return null;
+  return Number(age.toFixed(4));
+}
+
+// messages.wheel_payload: native sign, the four authorities apart, the feedback time and age.
+function wheel(feedback, published) {
+  const raw = stampSeconds(feedback.header?.stamp ?? { sec: 0, nanosec: 0 });
+  const stamp = raw > 0 && Number.isFinite(raw) ? raw : null;
+  const age = feedbackAge(published, stamp);
+  return {
+    rpm: feedback.velocity_rpm,
+    rpm_raw: feedback.velocity_rpm_raw,
+    target_rpm: feedback.target_rpm,
+    current_amp: finite(feedback.current_amp, 3),
+    fault_code: feedback.fault_code,
+    feedback_stamp: stamp,
+    feedback_age_sec: age,
+    feedback_valid: age !== null && age <= FEEDBACK_MAX_AGE_SEC,
+  };
+}
+
+// messages.drive_payload; `bridgeStamp` is when it was received (the bag's log time).
+function drivePayload(msg, bridgeStamp = null) {
+  const published = stampSeconds(msg.header.stamp);
   return {
     type: 'drive',
-    stamp: stampSeconds(msg.header.stamp),
-    left: wheel(msg.left),
-    right: wheel(msg.right),
+    stamp: published,
+    bridge_stamp: bridgeStamp,
+    left: wheel(msg.left, published),
+    right: wheel(msg.right, published),
     v: finite(msg.linear_velocity, 4),
     w: finite(msg.angular_velocity, 4),
     emergency_stop: Boolean(msg.emergency_stop),
@@ -358,7 +385,27 @@ const twistPayload = (msg, stamp) => ({
   angular: finite(msg.angular.z, 4),
 });
 
-const PAYLOADS = { scan: scanPayload, odom: odomPayload, drive: drivePayload };
+// messages.estop_payload: /emergency_stop itself (the authoritative E-stop).
+function estopPayload(msg, bridgeStamp) {
+  const stamp = stampSeconds(msg.header.stamp);
+  return {
+    type: 'estop',
+    stamp: stamp > 0 && Number.isFinite(stamp) ? stamp : bridgeStamp,
+    bridge_stamp: bridgeStamp,
+    active: Boolean(msg.active),
+    source: String(msg.source ?? '').slice(0, 64),
+    reason: String(msg.reason ?? '').slice(0, 200),
+  };
+}
+
+// Each stream's conversion; `logTime` is the bag's receive time (the bridge's receipt, live).
+const PAYLOADS = {
+  scan: (msg) => scanPayload(msg),
+  odom: (msg) => odomPayload(msg),
+  drive: (msg, logTime) => drivePayload(msg, logTime),
+  estop: (msg, logTime) => estopPayload(msg, logTime),
+  twist: (msg, logTime) => twistPayload(msg, logTime),
+};
 
 // Where each frame sits on the robot, from the static transforms recorded in the bag: the same
 // `mount` questix_lab_bridge looks up in TF (messages.mount_from_transform). Only a frame whose
@@ -418,7 +465,7 @@ function pickChannels(channels, schemas) {
 function readRosbag(buffer) {
   const { schemas, channels, messages } = readMcap(buffer);
   const picked = pickChannels(channels, schemas);
-  if (!picked.size)
+  if (!LESSON_STREAMS.some((stream) => picked.has(stream)))
     throw bagError(
       'このrosbagには、教材で使うトピック（/drive_status・/target_twist・/scan・/odom）がありません。',
     );
@@ -439,9 +486,7 @@ function readRosbag(buffer) {
     first = first === null ? logTime : Math.min(first, logTime);
     last = last === null ? logTime : Math.max(last, logTime);
     const decoded = decodeCdr(message.data, definitions.get(stream));
-    streams[stream].push(
-      stream === 'twist' ? twistPayload(decoded, logTime) : PAYLOADS[stream](decoded),
-    );
+    streams[stream].push(PAYLOADS[stream](decoded, logTime));
   }
   for (const list of Object.values(streams)) list.sort((a, b) => a.stamp - b.stamp);
   const mounts = staticMounts(channels, schemas, messages);
@@ -461,4 +506,6 @@ export {
   scanPayload,
   odomPayload,
   drivePayload,
+  estopPayload,
+  feedbackAge,
 };

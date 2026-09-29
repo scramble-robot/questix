@@ -68,6 +68,8 @@
     "wheels": "直近{seconds}秒 · 車輪の回転数（rpm、前進が正）· 実線＝実測　破線＝指令 · 線の右端の「左」「右」は車輪の左右",
     "estopPressed": "押されています",
     "estopReleased": "解除されています",
+    "estopUnknown": "わかりません（非常停止の信号がまだ届いていません）",
+    "estopStale": "わかりません（非常停止の信号が途絶えています）",
     "streamUnused": "使いません",
     "streamMissing": "届いていません",
     "streamRate": "{hz} 回/秒",

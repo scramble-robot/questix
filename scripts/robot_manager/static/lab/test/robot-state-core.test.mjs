@@ -19,6 +19,7 @@ import {
   speedTop,
   sparkLines,
   stripModel,
+  estopModel,
 } from '../js/live/robot-state-core.js';
 
 const text = JSON.parse(
@@ -32,6 +33,8 @@ const RPM_PER_MPS = 60 / (2 * Math.PI * config.wheel_radius);
 const drive = (v, w = 0, emergency = false) => ({ type: 'drive', v, w, emergency_stop: emergency });
 const twist = (linear, angular = 0) => ({ type: 'twist', linear, angular });
 const odom = (x, y, theta) => ({ type: 'odom', x, y, theta });
+// /emergency_stop itself, as the bridge relays it (the authoritative E-stop).
+const estop = (active) => ({ type: 'estop', active, source: 'operation_manager' });
 // A scan with a wall `distance` metres straight ahead of the LiDAR, nothing elsewhere.
 function scanAhead(distance) {
   const count = 360;
@@ -169,6 +172,7 @@ test('freshness: seconds ago, grey once stale, and a command that is simply not 
 test('a memo line carries the state of that moment, and dashes for stale values', () => {
   const tracker = createStateTracker();
   ingest(tracker, 'drive', drive(0.2, 0), 0, config);
+  ingest(tracker, 'estop', estop(false), 0, config);
   ingest(tracker, 'odom', odom(0, 0, 0), 0, config);
   ingest(tracker, 'odom', odom(0.1, 0, 0.05), 50, config);
   ingest(tracker, 'scan', scanAhead(1.2), 50, config);
@@ -193,6 +197,7 @@ test('the strip: emergency stop, who drives, both wheels and the speed of the la
     const now = step * 100;
     ingest(tracker, 'twist', twist(step >= 10 ? 0.2 : 0), now, config);
     ingest(tracker, 'drive', drive(step >= 12 ? 0.2 : 0), now + 50, config);
+    ingest(tracker, 'estop', estop(false), now + 50, config);
   }
   const model = robotStateModel(tracker, { link, driveState, session: 's1', now: 2100 });
   const strip = stripModel(model);
@@ -266,4 +271,28 @@ test('signed numbers never show -0 or +0', () => {
   assert.equal(signed(-0.004, 2), '0.00');
   assert.equal(signed(3.4, 0), '+3');
   assert.equal(signed(-0.126, 2), '-0.13');
+});
+
+test('only /emergency_stop itself says released; never heard is unknown, silent is stale', () => {
+  const tracker = createStateTracker();
+  // An older bridge (no estop stream) and a released derived flag: not released, unknown.
+  ingest(tracker, 'drive', drive(0), 0, config);
+  assert.deepEqual(estopModel(tracker, 100), { state: 'unknown', source: null });
+  assert.equal(robotStateModel(tracker, { link, now: 100 }).estop, null);
+  // The derived flag may still add a pressed E-stop.
+  ingest(tracker, 'drive', drive(0, 0, true), 150, config);
+  assert.deepEqual(estopModel(tracker, 200), { state: 'pressed', source: 'drive' });
+  ingest(tracker, 'drive', drive(0), 250, config);
+  // The topic itself: released, then pressed.
+  ingest(tracker, 'estop', estop(false), 300, config);
+  assert.deepEqual(estopModel(tracker, 400), { state: 'released', source: 'estop' });
+  assert.equal(robotStateModel(tracker, { link, now: 400 }).estop, false);
+  ingest(tracker, 'estop', estop(true), 500, config);
+  assert.equal(robotStateModel(tracker, { link, now: 600 }).estopState, 'pressed');
+  // Silent for more than a second: stale, never the last word "released".
+  ingest(tracker, 'estop', estop(false), 700, config);
+  const later = robotStateModel(tracker, { link, now: 1800 });
+  assert.equal(later.estopState, 'stale');
+  assert.equal(later.estop, null);
+  assert.equal(stripModel(later).estop, 'unknown');
 });

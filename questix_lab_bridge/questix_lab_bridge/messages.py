@@ -21,8 +21,25 @@ Server to browser, text frames are JSON objects tagged by ``type``:
   (unmeasured beams are ``null``), and ``mount`` - the scan frame's pose ``x``, ``y``
   [m], ``yaw`` [rad] in the robot's base frame, from TF (``null`` until TF knows it).
 * ``odom``   - ``x``, ``y``, ``theta``, ``v``, ``w``.
-* ``drive``  - measured/target wheel RPM, current, chassis velocity, emergency stop.
-* ``twist``  - commanded ``linear`` / ``angular`` velocity.
+* ``drive``  - /drive_status: ``stamp`` (its publish time, drive_component's clock),
+  ``bridge_stamp`` (when the bridge received it), and per wheel (``left`` / ``right``) the
+  node's own values in the wheels' **native sign** (left forward +, right forward -): ``rpm``
+  (filtered measurement), ``rpm_raw`` (unfiltered measurement), ``target_rpm`` (the generated
+  wheel target), ``current_amp``, ``fault_code``, plus ``feedback_stamp`` (when that wheel's
+  last valid feedback arrived; ``null`` = never), ``feedback_age_sec`` (``stamp`` minus
+  ``feedback_stamp``, both on drive_component's clock; ``null`` when unknown or negative, never
+  clamped to fresh) and ``feedback_valid`` (age known and at most FEEDBACK_MAX_AGE_SEC). ``v`` /
+  ``w`` (chassis velocity computed by the node) and ``emergency_stop`` (the node's derived flag)
+  are kept for older pages. Four quantities with their own authority: the request is ``twist``,
+  the wheel target ``target_rpm``, the measurements ``rpm_raw`` and ``rpm``; nothing here is
+  recomputed from ``v`` / ``w``. Normalising to forward-positive is the learner-facing pages'
+  job (capture-core.js), never done on the wire.
+* ``twist``  - commanded ``linear`` / ``angular`` velocity (/target_twist, the upstream request);
+  Twist has no header, so ``stamp`` is the bridge's receipt time.
+* ``estop``  - /emergency_stop itself (questix_msgs/EmergencyStop), the authoritative E-stop:
+  ``stamp`` (its header stamp), ``bridge_stamp`` (receipt), ``active``, ``source``, ``reason``.
+  Pages show pressed / released only from this stream (unknown until it arrives, stale when it
+  stops); ``drive.emergency_stop`` may add a pressed E-stop but never makes it released.
 * ``roller`` - ``/roller/status`` as the roller ESC node sends it (``command`` 0..1, ``source``
   ``joy``/``lab``/``idle``, ``lab_accepted``, ``lab_locked``, ``estop``) plus ``stamp`` (receipt
   time [s]).
@@ -78,6 +95,9 @@ import os
 import socket
 
 PROTOCOL_VERSION = 1
+# A wheel's feedback older than this (on drive_component's clock) is not a measurement of now;
+# odometry::kMaxFeedbackAgeSec in motor_control_app uses the same limit.
+FEEDBACK_MAX_AGE_SEC = 0.5
 
 
 def stamp_seconds(stamp):
@@ -196,26 +216,63 @@ def odom_payload(msg):
     }
 
 
-def _wheel(feedback):
+def feedback_age(published, feedback_stamp):
+    """Age [s] of a wheel's feedback at ``published``, or None when it cannot be known.
+
+    Both are seconds of drive_component's clock. A missing stamp (0 / None), a non-finite value or
+    a negative age (clock jump, inconsistent stamps) is unknown, never "fresh".
+    """
+    if not feedback_stamp or not published:
+        return None
+    age = published - feedback_stamp
+    if not math.isfinite(age) or age < 0.0:
+        return None
+    return round(age, 4)
+
+
+def wheel_payload(feedback, published):
+    """One wheel of DriveStatus in its native sign, with its feedback time and freshness."""
+    stamp = stamp_seconds(feedback.header.stamp)
+    stamp = stamp if stamp > 0.0 and math.isfinite(stamp) else None
+    age = feedback_age(published, stamp)
     return {
         'rpm': feedback.velocity_rpm,
         'rpm_raw': feedback.velocity_rpm_raw,
         'target_rpm': feedback.target_rpm,
         'current_amp': _finite(feedback.current_amp, 3),
         'fault_code': feedback.fault_code,
+        'feedback_stamp': stamp,
+        'feedback_age_sec': age,
+        'feedback_valid': age is not None and age <= FEEDBACK_MAX_AGE_SEC,
     }
 
 
-def drive_payload(msg):
-    """Convert questix_msgs/DriveStatus (measured wheel feedback)."""
+def drive_payload(msg, bridge_stamp=None):
+    """Convert questix_msgs/DriveStatus; ``bridge_stamp`` is when the bridge received it [s]."""
+    published = stamp_seconds(msg.header.stamp)
     return {
         'type': 'drive',
-        'stamp': stamp_seconds(msg.header.stamp),
-        'left': _wheel(msg.left),
-        'right': _wheel(msg.right),
+        'stamp': published,
+        'bridge_stamp': bridge_stamp,
+        'left': wheel_payload(msg.left, published),
+        'right': wheel_payload(msg.right, published),
         'v': _finite(msg.linear_velocity, 4),
         'w': _finite(msg.angular_velocity, 4),
         'emergency_stop': bool(msg.emergency_stop),
+    }
+
+
+def estop_payload(msg, bridge_stamp):
+    """Convert questix_msgs/EmergencyStop (the authoritative E-stop) as it was received."""
+    stamp = stamp_seconds(msg.header.stamp)
+    return {
+        'type': 'estop',
+        # The publisher's stamp (same host clock as drive_component); its receipt if it left it 0.
+        'stamp': stamp if stamp > 0.0 and math.isfinite(stamp) else bridge_stamp,
+        'bridge_stamp': bridge_stamp,
+        'active': bool(msg.active),
+        'source': str(msg.source)[:64],
+        'reason': str(msg.reason)[:200],
     }
 
 

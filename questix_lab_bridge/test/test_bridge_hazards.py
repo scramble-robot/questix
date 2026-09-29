@@ -22,7 +22,7 @@ SHOT_OK = {'tilt_deg': 30.0, 'shooting': False, 'fired_count': 0, 'last_fire_sou
            'lab_accepted': True, 'estop': False, 'active': True}
 _METHODS = ('_after_shoot_change', '_send_tilt', '_drop_pending_tilt', '_on_shoot_request',
             '_on_shoot_tick', '_on_leave', '_stop_all', '_set_estop', '_on_drive', '_on_estop',
-            '_state', '_send_drive_state', '_send_shoot_state')
+            '_state', '_send_drive_state', '_send_shoot_state', '_greeting')
 
 
 class _Clock:
@@ -58,6 +58,9 @@ def node(monkeypatch):
     stub._tilt = shoot.TiltCoalescer(bridge_node._TILT_GAP_SEC)
     stub._estop = {'topic': False, 'drive': False}
     stub._estop_known = False
+    stub._latest_estop = None
+    stub._latest_estop_at = float('-inf')
+    stub._now = lambda: clock.now
     stub._drive_sent_version = stub._shoot_sent_version = -1
     stub._drive_sent_at = stub._shoot_sent_at = 0.0
     stub._server = types.SimpleNamespace(publish=lambda *a: None, publish_to=lambda *a: None)
@@ -79,7 +82,10 @@ def node(monkeypatch):
 
 
 def _estop_message(active):
-    return types.SimpleNamespace(active=active)
+    stamp = types.SimpleNamespace(sec=1000, nanosec=0)
+    return types.SimpleNamespace(active=active, header=types.SimpleNamespace(stamp=stamp),
+                                 source='operation_manager',
+                                 reason='pressed' if active else 'released')
 
 
 def _drive_status(pressed):
@@ -171,3 +177,21 @@ def test_a_heard_pressed_estop_ends_driving_and_the_launcher(node):
     assert not node._drive.active and not node._shoot.active
     assert ('twist', (0.0, 0.0)) in node.published and ('roller', 0.0) in node.published
     assert node._state([], 24)['emergency_stop'] is True
+
+
+def test_the_estop_topic_is_relayed_as_its_own_stream(node):
+    relayed = []
+    node._relay = lambda name, build: relayed.append((name, build()))
+    node._on_estop(_estop_message(True))
+    ((name, payload),) = relayed
+    assert name == 'estop'
+    assert payload['active'] is True and payload['source'] == 'operation_manager'
+    assert payload['stamp'] == 1000.0 and payload['bridge_stamp'] == node.clock.now
+
+
+def test_a_new_page_gets_the_last_estop_only_while_it_is_fresh(node):
+    assert not any('"estop"' in text for text in node._greeting(1))
+    node._on_estop(_estop_message(False))
+    assert any('"type":"estop"' in text for text in node._greeting(2))
+    node.clock.now += 1.5  # operation_manager went silent
+    assert not any('"estop"' in text for text in node._greeting(3))

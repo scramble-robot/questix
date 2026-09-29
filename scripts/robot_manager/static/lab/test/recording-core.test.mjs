@@ -1,6 +1,7 @@
 // Run with: node --test scripts/robot_manager/static/lab/test/*.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import {
   makeRecording,
   parseRecording,
@@ -16,6 +17,8 @@ import {
   commandZero,
   recordingTableCSV,
   recordingFile,
+  RECORDING_STREAMS,
+  RECORDING_VERSION,
 } from '../js/live/recording-core.js';
 
 const config = { wheel_radius: 0.1, wheel_separation: 0.5 };
@@ -294,5 +297,118 @@ test('the per-message CSV has columns for the roller command and the tilt', () =
   assert.equal(rows[1][header.indexOf('tilt_deg')], '42.5');
   assert.equal(rows[1][header.indexOf('fired_count')], '3');
   assert.equal(rows[1][header.indexOf('shooting')], '0');
+  assert.ok(rows.every((row) => row.length === header.length));
+});
+
+// --- wheel-level authority, the authoritative E-stop, and v1 compatibility ---------------------
+
+const wheelDrive = (stamp, filtered) => ({
+  type: 'drive',
+  stamp,
+  bridge_stamp: stamp + 0.001,
+  left: {
+    rpm: filtered,
+    rpm_raw: filtered + 2,
+    target_rpm: filtered + 1,
+    current_amp: 0.1,
+    feedback_stamp: stamp - 0.02,
+    feedback_age_sec: 0.02,
+    feedback_valid: true,
+  },
+  right: {
+    rpm: -filtered,
+    rpm_raw: -(filtered + 2),
+    target_rpm: -(filtered + 1),
+    current_amp: 0.2,
+    feedback_stamp: null,
+    feedback_age_sec: null,
+    feedback_valid: false,
+  },
+  v: 0.3,
+  w: 0,
+  emergency_stop: false,
+});
+const estop = (stamp, active) => ({
+  type: 'estop',
+  stamp,
+  bridge_stamp: stamp + 0.001,
+  active,
+  source: 'operation_manager',
+  reason: active ? 'pin 5 is true' : 'released',
+});
+
+test('the robot keeps exactly the streams a page records (records.py RECORDING_STREAMS)', () => {
+  const source = fs.readFileSync(
+    new URL('../../../../../questix_lab_bridge/questix_lab_bridge/records.py', import.meta.url),
+    'utf8',
+  );
+  const python = source.match(/^RECORDING_STREAMS = \(([^)]*)\)/m)[1];
+  const names = [...python.matchAll(/'([a-z_]+)'/g)].map((match) => match[1]);
+  assert.deepEqual(names, RECORDING_STREAMS);
+  assert.equal(Number(source.match(/^RECORDING_VERSION = (\d+)/m)[1]), RECORDING_VERSION);
+  assert.ok(RECORDING_STREAMS.includes('estop') && RECORDING_STREAMS.includes('roller'));
+});
+
+test('a new recording with the E-stop stream and wheel fields saves and opens again', () => {
+  const recording = makeRecording({
+    ...sample(),
+    streams: { drive: [wheelDrive(10.0, 30)], estop: [estop(9.9, false), estop(10.2, true)] },
+  });
+  assert.equal(recording.version, 1); // optional additions only
+  const back = parseRecording(serializeRecording(recording));
+  assert.deepEqual(back, recording);
+  assert.equal(back.streams.estop.length, 2);
+  assert.equal(back.streams.drive[0].right.rpm, -30); // native sign kept in the JSON
+  assert.equal(back.streams.drive[0].right.feedback_stamp, null);
+});
+
+test('an older v1 recording (no E-stop stream, no wheel fields) still opens and reads', () => {
+  const old = JSON.parse(serializeRecording(sample()));
+  delete old.streams.estop;
+  const back = parseRecording(JSON.stringify(old));
+  assert.equal(back.streams.estop, undefined);
+  const { rows } = driveRows(back);
+  assert.ok(rows.length > 0 && rows.every((row) => row.authority === 'legacy'));
+});
+
+test('the per-message CSV adds the native wheel values and the authoritative E-stop at the end', () => {
+  const recording = makeRecording({
+    ...sample(),
+    streams: { drive: [wheelDrive(10.0, 30), drive(10.1, 0.2)], estop: [estop(9.9, true)] },
+  });
+  const lines = recordingCSV(recording)
+    .replace(/^\uFEFF/, '')
+    .trim()
+    .split('\n');
+  const header = lines[0].split(',');
+  const added = [
+    'left_target_rpm_native',
+    'right_target_rpm_native',
+    'left_raw_rpm_native',
+    'right_raw_rpm_native',
+    'left_filtered_rpm_native',
+    'right_filtered_rpm_native',
+    'left_feedback_stamp_s',
+    'right_feedback_stamp_s',
+    'left_feedback_age_s',
+    'right_feedback_age_s',
+    'estop_authoritative',
+  ];
+  assert.deepEqual(header.slice(-added.length), added);
+  assert.equal(header.indexOf('fired_count'), header.length - added.length - 1);
+  const rows = lines.slice(1).map((line) => line.split(','));
+  const cell = (row, name) => row[header.indexOf(name)];
+  const [estopRow, newDrive, oldDrive] = rows;
+  assert.equal(cell(estopRow, 'estop_authoritative'), '1');
+  assert.equal(cell(newDrive, 'left_filtered_rpm_native'), '30');
+  assert.equal(cell(newDrive, 'right_filtered_rpm_native'), '-30');
+  assert.equal(cell(newDrive, 'right_raw_rpm_native'), '-32');
+  assert.equal(cell(newDrive, 'right_target_rpm_native'), '-31');
+  assert.equal(cell(newDrive, 'left_feedback_stamp_s'), '9.980000');
+  assert.equal(cell(newDrive, 'right_feedback_stamp_s'), ''); // never received
+  assert.equal(cell(newDrive, 'right_feedback_age_s'), '');
+  assert.equal(cell(newDrive, 'estop_authoritative'), '');
+  assert.equal(cell(oldDrive, 'left_filtered_rpm_native'), '0'); // the older fixture's rpm: 0
+  assert.equal(cell(oldDrive, 'left_feedback_stamp_s'), '');
   assert.ok(rows.every((row) => row.length === header.length));
 });

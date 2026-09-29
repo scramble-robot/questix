@@ -36,7 +36,8 @@ const FULL_RETRY_MS = 15000;
 const STOPPED_AFTER_FAILURES = 3;
 // Connected, but no stream has delivered anything for this long (milliseconds).
 const SILENT_MS = 4000;
-const STREAMS = ['scan', 'odom', 'drive', 'twist', 'roller', 'shot', 'camera'];
+// `estop` is /emergency_stop itself (the authoritative E-stop; older bridges do not send it).
+const STREAMS = ['scan', 'odom', 'drive', 'twist', 'roller', 'shot', 'estop', 'camera'];
 // The bridge's own state frames: kept as the latest of their type like a stream. `shoot_refused`
 // is an answer to this page only; it is passed on but not kept.
 const STATES = ['drive_state', 'shoot_state'];
