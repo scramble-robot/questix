@@ -137,8 +137,8 @@ clamps and fire interval) and report it in their status:
 | `/roller/lab` | `std_msgs/Float32` (0..1) | bridge → `esc_motor_control` |
 | `/shot/lab/tilt` | `std_msgs/Float32` [deg] | bridge → `shot_component` |
 | `/shot/lab/fire` | `std_msgs/Empty` | bridge → `shot_component` |
-| `/roller/status` | `std_msgs/String` JSON `{command, source: joy/lab/idle, lab_accepted, lab_locked, estop, lab_max_speed}` | `esc_motor_control` → bridge, 5 Hz |
-| `/shot/status` | `std_msgs/String` JSON `{tilt_deg, shooting, fired_count, last_fire_source: joy/lab/null, lab_accepted, estop, active, tilt_min_deg, tilt_max_deg, next_fire_in_sec, lab_refused}` | `shot_component` → bridge, 5 Hz and on change |
+| `/roller/status` | `std_msgs/String` JSON `{command, source: joy/lab/idle, lab_accepted, lab_locked, estop, authority, lab_max_speed}` | `esc_motor_control` → bridge, 5 Hz |
+| `/shot/status` | `std_msgs/String` JSON `{tilt_deg, shooting, fired_count, last_fire_source: joy/lab/null, lab_accepted, estop, authority, active, tilt_min_deg, tilt_max_deg, next_fire_in_sec, lab_refused}` | `shot_component` → bridge, 5 Hz and on change |
 
 Both statuses are mirrored to every page (streams `roller`, `shot`) whether or not `allow_shoot` is
 set. The controller always wins: pressing its roller button, or firing, takes the launcher over at
@@ -231,11 +231,16 @@ bridge's own caps; the effective limits, narrowed by the nodes' status, are in
 `roller` and `shot` are the status JSON exactly as the node sent it, plus `"type"` and `"stamp"`
 (receipt time [s]):
 `{"type": "roller", "stamp": 12.3, "command": 0.5, "source": "lab", "lab_accepted": true,
-"lab_locked": false, "estop": false}`,
+"lab_locked": false, "estop": false, "authority": true}`,
 `{"type": "shot", "stamp": 12.3, "tilt_deg": 30.0, "shooting": false, "fired_count": 2,
-"last_fire_source": "lab", "lab_accepted": true, "estop": false, "active": true,
-"tilt_min_deg": 0.0, "tilt_max_deg": 120.0, "next_fire_in_sec": 0.0, "lab_refused": null}`
-(`lab_refused`: why shot_component refused the last lab request, e.g. `interval`).
+"last_fire_source": "lab", "lab_accepted": true, "estop": false, "authority": true,
+"active": true, "tilt_min_deg": 0.0, "tilt_max_deg": 120.0, "next_fire_in_sec": 0.0,
+"lab_refused": null}`
+(`lab_refused`: why shot_component refused the last lab request, e.g. `interval` or
+`authority`). `estop` is true while the node treats the E-stop as engaged (pressed, never heard
+or silent); `authority` is false while the teacher's runtime authority for the launcher
+(`/actuation_authority`, practice launches) is off, silent or unknown, a separate reason from
+the E-stop. Both are informational for the bridge: the nodes themselves refuse to move.
 
 `shoot_state` (on every change and once a second; its time fields are exact when sent, count them
 down locally in between):

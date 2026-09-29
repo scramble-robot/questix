@@ -25,6 +25,9 @@ inline bool tiltInputPressed(const std::vector<float>& axes, const std::vector<i
 class TiltInputEdges {
 public:
   void reset() { up_ = down_ = false; }
+  // Treat both directions as held: a press that is still down (from before an activation or
+  // while the launcher was not allowed) moves nothing until it is released and pressed again.
+  void requireRelease() { up_ = down_ = true; }
 
   // One step on a fresh press. Conflicting simultaneous inputs produce no motion.
   int update(bool up, bool down) {

@@ -97,13 +97,24 @@ bool DifferentialDrive::commandStop() {
 }
 
 void DifferentialDrive::stop() {
-  // ウォッチドッグ・非常停止・シャットダウン用の即時停止。安全経路のため実測RPMに
-  // よるゲートは通さず、常に即座にブレーキ（stopMotor）を送る。
-  if (motor_lib_) {
-    stop_mode_ = true;
-    motor_lib_->stopMotor(left_motor_id_);
-    motor_lib_->stopMotor(right_motor_id_);
+  // ウォッチドッグ・非常停止・シャットダウン用の即時停止（結果は stopNow() で得られる）。
+  (void)stopNow();
+}
+
+bool DifferentialDrive::stopNow() {
+  // 安全経路のため実測RPMによるゲートも再送スロットルも通さず、常に即座に停止指令を送る。
+  if (!motor_lib_) {
+    return false;
   }
+  stop_mode_ = true;
+  const bool left = motor_lib_->stopMotorNow(left_motor_id_);
+  const bool right = motor_lib_->stopMotorNow(right_motor_id_);  // 左が失敗しても試す
+  return left && right;
+}
+
+bool DifferentialDrive::lastSentIsZero() const {
+  return motor_lib_ && motor_lib_->lastSentFrameIsZero(left_motor_id_) &&
+         motor_lib_->lastSentFrameIsZero(right_motor_id_);
 }
 
 bool DifferentialDrive::getCurrentVelocity(double& linear_x, double& angular_z) const {

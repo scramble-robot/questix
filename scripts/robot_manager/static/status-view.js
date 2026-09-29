@@ -123,6 +123,15 @@ const StatusView = (() => {
       view.toggleNote = '大会モードでは教材からは動かせません。練習モードに戻しても OFF のままです（先生が ON にしてください）。';
       return view;
     }
+    // The teacher's runtime authority for the robot (操作 tab) comes first: without it a lesson
+    // permission cannot be switched on (the manager refuses it too).
+    const authority = kind === 'drive' ? lab.drive_authority : lab.shoot_authority;
+    if (!setting && authority === false) {
+      view.toggleDisabled = true;
+      view.toggleNote = kind === 'drive'
+        ? '先に「操作」タブの「先生の操作許可」で「ロボットの走行制御」を ON にしてください。'
+        : '先に「操作」タブの「先生の操作許可」で「発射機構の操作」を ON にしてください。';
+    }
     if (lab.external && bridge) {
       view.toggleNote = '手動で起動したブリッジです。ここでの切り替えは反映されません（端末で Ctrl+C して「配信開始」を押してください）。';
     }

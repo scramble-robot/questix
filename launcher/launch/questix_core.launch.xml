@@ -38,6 +38,10 @@
         <arg name="enable_gpio_ref" value="$(var enable_gpio_ref)"/>
         <arg name="controller_type" value="$(var controller_type)"/>
         <arg name="accept_lab_input" value="$(and $(var enable_lab_shoot) $(not $(var enable_autoreferee)))"/>
+        <!-- Practice: the launcher moves only while the teacher's runtime authority
+             (/actuation_authority from Robot Manager) is fresh. Competition keeps the
+             AutoReferee / GPIO path and never depends on the classroom heartbeat. -->
+        <arg name="require_runtime_actuation_authority" value="$(not $(var enable_autoreferee))"/>
       </include>
     </group>
     <group if="$(var enable_drive)">
@@ -47,6 +51,9 @@
         <arg name="enable_operation_manager" value="false"/>
         <arg name="controller_type" value="$(var controller_type)"/>
         <arg name="enable_twist_arbiter" value="$(and $(var enable_twist_arbiter) $(not $(var enable_autoreferee)))"/>
+        <!-- Practice: the drive moves only while the teacher's runtime authority is fresh
+             (competition: false, see the shot include). -->
+        <arg name="require_runtime_actuation_authority" value="$(not $(var enable_autoreferee))"/>
       </include>
     </group>
     <group if="$(var enable_lidar)">

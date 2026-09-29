@@ -139,3 +139,19 @@ test('an E-stop not heard yet is unknown, never released, even while pages may m
   assert.equal(StatusView.estop({ bridge: { read_only: false,
     drive_state: { allowed: true, blockers: [] } } }, 'active').text, '解除されています');
 });
+
+test('a lesson permission cannot be switched on while the teacher runtime authority is off', () => {
+  const memory = StatusView.createBlockerMemory();
+  const off = lab({ drive_allowed: false, shoot_allowed: false, drive_authority: false,
+    shoot_authority: true });
+  const drive = StatusView.capability('drive', off, 'active', memory, 0);
+  assert.equal(drive.toggleDisabled, true);
+  assert.match(drive.toggleNote, /ロボットの走行制御/);
+  const shoot = StatusView.capability('shoot', off, 'active', memory, 0);
+  assert.equal(shoot.toggleDisabled, false);
+  // A permission that is on can always be switched off; an older manager without the field too.
+  const on = StatusView.capability('drive', lab({ drive_authority: false }), 'active', memory, 0);
+  assert.equal(on.toggleDisabled, false);
+  const older = StatusView.capability('drive', lab({ drive_allowed: false }), 'active', memory, 0);
+  assert.equal(older.toggleDisabled, false);
+});

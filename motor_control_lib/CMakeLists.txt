@@ -32,6 +32,9 @@ if(BUILD_TESTING)
   ament_auto_add_gtest(test_drive_stop_gate test/test_drive_stop_gate.cpp)
   ament_auto_add_gtest(test_differential_kinematics test/test_differential_kinematics.cpp)
   ament_auto_add_gtest(test_feetech_protocol test/test_feetech_protocol.cpp)
+  # DdtMotorLib with injected serial write failures on a pseudo terminal (openpty: libutil).
+  ament_auto_add_gtest(test_ddt_fault_injection test/test_ddt_fault_injection.cpp)
+  target_link_libraries(test_ddt_fault_injection util)
 endif()
 
 ament_auto_package(INSTALL_TO_SHARE)

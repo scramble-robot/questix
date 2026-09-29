@@ -57,6 +57,24 @@ public:
                       uint8_t& fault_code) override;
   bool stopMotor(int motor_id) override;
   bool stopAllMotors() override;
+
+  /**
+   * @brief 停止指令（指令値 0）をスロットル無しで今すぐ送り、その結果を返す。
+   *
+   * 安全停止（非常停止・許可の喪失・コマンドタイムアウト・フォールト）の境目用。stopMotor の
+   * 再送間隔スロットル（「既に停止中」とみなして送信を省く）を通らないため、呼ぶたびに実際に
+   * 送信を試みる。false は停止フレームが送れなかったことを意味し、その場合 last_sent_frames_
+   * は直前の（非ゼロかもしれない）成功フレームのまま残る（偽装しない）。
+   */
+  bool stopMotorNow(int motor_id);
+
+  /**
+   * @brief 最後に送信に成功した指令フレームが停止フレーム（指令値 0）か。
+   *
+   * 送信履歴が無いときは false（安全な停止状態の証拠にはならない）。「0 を送ろうとした」では
+   * なく「0 が送れた」ことだけを表す。
+   */
+  bool lastSentFrameIsZero(int motor_id) const;
   bool setMaxRpm(int max_rpm) override;
   int getMaxRpm() const override;
 
@@ -207,20 +225,20 @@ public:
   SerialLatencyStats getSerialLatencyStats() const;
 
   /**
-   * @brief 鮮度ゲート付きフィードバックポーリング。
-   *  保持フィードバックが max_age_sec より新しければ何もしない。古ければ、
-   *  ファームが既に実行中の「最後に送ったフレーム」をそのまま再送し、既存の
-   *  10ms タイムアウト内で新しいフィードバック応答を引き出す。新規プロトコル
-   *  コマンドは発行せず、固定スリープもしない（呼び出しは 1 回の
-   *  sendFrameWithFeedback で上限付き）。
+   * @brief 鮮度ゲート付きフィードバックポーリング（アイドル中専用）。
+   *  保持フィードバックが max_age_sec より新しければ何もしない。古ければ、最後に
+   *  **送信に成功した**フレームが停止フレーム（指令値 0、速度・電流モードとも）のときに
+   *  限り、それをそのまま再送して既存の 10ms タイムアウト内で新しいフィードバック応答を
+   *  引き出す（ブレーキバイト等の状態も保持）。新規プロトコルコマンドは発行せず、固定
+   *  スリープもしない（呼び出しは 1 回の sendFrameWithFeedback で上限付き）。
    *
-   *  保持フレームをそのまま再送するため、ブレーキバイト等のコマンド状態を厳密に
-   *  保持する。走行中はフィードバックが新鮮なので実質 no-op。アイドル時のみ
-   *  1 モータあたり最悪 ~10ms のシリアル待ちが加わる点に注意（呼び出し元が
-   *  単一スレッドエグゼキュータでステータスタイマーから呼ぶ前提）。
-   *  停止フレーム（指令値0）の再送は stopMotor と同じ stop_resend_interval_ms
-   *  スロットルに従う（残留回転中のブレーキ連打防止）。スロットル中は再送せず
-   *  false を返す（停止中の実測は多少古くても許容する）。
+   *  最後の成功フレームが非ゼロ（停止指令の送信に失敗して残ったもの）や、送信履歴が無い
+   *  ときは何も送らず false を返す: フィードバックのために駆動指令を再送・生成しない
+   *  （実測が stale になる方を選ぶ）。判定は ddt_protocol::decideIdleRefresh。
+   *  停止フレームの再送は stopMotor と同じ stop_resend_interval_ms スロットルに従う
+   *  （残留回転中のブレーキ連打防止）。スロットル中も再送せず false を返す。
+   *  アイドル時のみ 1 モータあたり最悪 ~10ms のシリアル待ちが加わる（呼び出し元が
+   *  単一スレッドエグゼキュータの制御 tick から呼ぶ前提）。
    * @return 呼び出し後にフィードバックが新鮮なら true。
    */
   bool refreshMotorFeedback(int motor_id, double max_age_sec = 0.05);
@@ -279,11 +297,16 @@ private:
 
   // Motor state tracking
   SerialLatencyStats serial_latency_stats_;  // 往復レイテンシ統計（state_mutex_ 保護）
-  std::map<int, int> motor_velocities_;      // motor_id -> target velocity_rpm
+  // motor_id -> 要求された目標 RPM（クランプ後）。送信の成否に関わらず更新されるため、
+  // DriveStatus.target_rpm は「生成された目標」であり、デバイスへ届いた証拠ではない
+  // （届いたかは last_sent_frames_ / lastSentFrameIsZero で判断する）。
+  std::map<int, int> motor_velocities_;
   std::map<int, MotorFeedback> motor_feedbacks_;  // motor_id -> feedback
   std::map<int, ControlMode> motor_modes_;        // motor_id -> control mode
   std::map<int, PiState> pi_states_;              // motor_id -> PI state
-  // motor_id -> 最後に送った駆動フレーム（refreshMotorFeedback の再送用）
+  // motor_id -> 最後に**送信に成功した**指令フレーム。送信に失敗したときは書き換えない
+  // （停止に失敗しても 0 に偽装しない）。refreshMotorFeedback はこれが停止フレームのときだけ
+  // 再送する。
   std::map<int, std::vector<uint8_t>> last_sent_frames_;
   // motor_id -> stopMotor() が実際にシリアル送信した直近時刻（再送間隔スロットリング用）
   std::map<int, std::chrono::steady_clock::time_point> last_stop_send_time_;
@@ -311,8 +334,13 @@ private:
   // Utility methods
   bool drainSerialOutput();
   bool sendCommand(const std::vector<uint8_t>& command, int retry_count = 3);
-  ssize_t writeSerial(const void* data, size_t size);
-  ssize_t readSerial(void* data, size_t size);
+
+protected:
+  // The only calls that touch the serial device's bytes. Virtual so a test can inject write
+  // failures and record what would have been sent (test/test_ddt_fault_injection.cpp); the
+  // production class uses write(2) / read(2) on serial_fd_.
+  virtual ssize_t writeSerial(const void* data, size_t size);
+  virtual ssize_t readSerial(void* data, size_t size);
 };
 
 }  // namespace motor_control_lib

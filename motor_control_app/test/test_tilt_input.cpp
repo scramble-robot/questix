@@ -64,3 +64,17 @@ TEST(TiltInput, ButtonsWorkWithoutAxesAndMissingInputsNeverFallback) {
   EXPECT_FALSE(tiltInputPressed({std::numeric_limits<float>::infinity()}, {}, 0, 1, 0));
   EXPECT_FALSE(tiltInputPressed({std::numeric_limits<float>::quiet_NaN()}, {}, 0, 1, 0));
 }
+
+// A press still held when the launcher becomes usable again steps nothing until released.
+TEST(TiltInput, RequireReleaseIgnoresAHeldPress) {
+  TiltInputEdges edges;
+  edges.requireRelease();
+  EXPECT_EQ(edges.update(true, false), 0);
+  EXPECT_EQ(edges.update(true, false), 0);
+  EXPECT_EQ(edges.update(false, false), 0);
+  EXPECT_EQ(edges.update(true, false), 1);
+  edges.requireRelease();
+  EXPECT_EQ(edges.update(false, true), 0);
+  EXPECT_EQ(edges.update(false, false), 0);
+  EXPECT_EQ(edges.update(false, true), -1);
+}

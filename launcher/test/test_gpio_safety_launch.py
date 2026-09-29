@@ -399,3 +399,64 @@ def test_lab_launcher_input_only_in_practice_launches():
         text = (SOURCE_ROOT / relative_path).read_text(encoding='utf-8')
         assert 'enable_lab_shoot' not in text
         assert 'accept_lab_input' not in text
+
+
+def test_runtime_actuation_authority_is_required_in_practice_only():
+    # Practice runs move the drive and the launcher only while the teacher's runtime authority
+    # (/actuation_authority from Robot Manager) is fresh; competition (AutoReferee) keeps the
+    # GPIO path and must never depend on the classroom heartbeat.
+    core = load_xml('launcher/launch/questix_core.launch.xml')
+    for name in ('drive_component.launch.xml', 'shot_component.launch.xml'):
+        include = next(
+            include for include in core.findall('.//include')
+            if name in include.get('file', ''))
+        values = {arg.get('name'): arg.get('value') for arg in include.findall('./arg')}
+        assert values.get('require_runtime_actuation_authority') == (
+            '$(not $(var enable_autoreferee))'), name
+
+    drive = load_xml('launcher/launch/drive_component.launch.xml')
+    assert find_arg(drive, 'require_runtime_actuation_authority').get('default') == 'true'
+    drive_node = next(
+        include for include in drive.findall('./include')
+        if 'drive_component.launch.py' in include.get('file', ''))
+    assert {arg.get('name'): arg.get('value') for arg in drive_node.findall('./arg')}.get(
+        'require_runtime_actuation_authority') == '$(var require_runtime_actuation_authority)'
+
+    shot = load_xml('launcher/launch/shot_component.launch.xml')
+    assert find_arg(shot, 'require_runtime_actuation_authority').get('default') == 'true'
+    node_includes = [
+        include for include in shot.findall('./include')
+        if 'find-pkg-share motor_control_app' in include.get('file', '')
+        or 'find-pkg-share esc_motor_control_cpp' in include.get('file', '')
+    ]
+    assert len(node_includes) == 2
+    for include in node_includes:
+        values = {arg.get('name'): arg.get('value') for arg in include.findall('./arg')}
+        assert values.get('require_runtime_actuation_authority') == (
+            '$(var require_runtime_actuation_authority)')
+
+    esc = load_xml('esc_motor_control_cpp/launch/esc_motor_control_cpp.launch.xml')
+    assert find_arg(esc, 'require_runtime_actuation_authority').get('default') == 'true'
+    esc_params = {
+        param.get('name'): param.get('value') for param in esc.findall('./node/param')
+    }
+    assert esc_params.get('require_runtime_actuation_authority') == (
+        '$(var require_runtime_actuation_authority)')
+    for relative_path in ('motor_control_app/launch/shot_component.launch.py',
+                          'motor_control_app/launch/drive_component.launch.py'):
+        text = (SOURCE_ROOT / relative_path).read_text(encoding='utf-8')
+        assert "'require_runtime_actuation_authority',\n" in text, relative_path
+        assert "LaunchConfiguration('require_runtime_actuation_authority'), value_type=bool" in (
+            text), relative_path
+
+    # The launch passes the authority switch, so no node YAML carries it; the E-stop is required
+    # (never opted out) in every integrated YAML.
+    for relative_path, node in (
+        ('launcher/config/drive_component.yaml', 'drive_component'),
+        ('motor_control_app/config/shot_config.yaml', 'shot_component'),
+        ('esc_motor_control_cpp/config/esc_motor_control_cpp.yaml', 'esc_motor_control'),
+    ):
+        parameters = load_yaml(relative_path)[node]['ros__parameters']
+        assert 'require_runtime_actuation_authority' not in parameters, relative_path
+        assert parameters['require_emergency_stop'] is True, relative_path
+        assert parameters['emergency_stop_timeout_sec'] == 1.0, relative_path

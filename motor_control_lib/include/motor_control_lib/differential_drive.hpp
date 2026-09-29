@@ -55,6 +55,18 @@ public:
    */
   bool commandStop();
 
+  /**
+   * @brief 安全停止: 左右とも停止指令をスロットル無しで今すぐ送り、両方送れたかを返す。
+   *
+   * 非常停止・許可の喪失・コマンドタイムアウト・フォールト用。片方が失敗してももう片方は
+   * 必ず試す。false のとき、少なくとも片方の最後の成功フレームは停止ではない可能性がある
+   * （DdtMotorLib::lastSentFrameIsZero）。stop() はこれを呼んで結果を捨てる互換 API。
+   */
+  bool stopNow();
+
+  /** @brief 左右とも、最後に送信に成功した指令が停止フレームか。 */
+  bool lastSentIsZero() const;
+
   // Configuration
   bool setWheelParams(double wheel_radius, double wheel_separation);
   bool setMotorIds(int left_motor_id, int right_motor_id);
