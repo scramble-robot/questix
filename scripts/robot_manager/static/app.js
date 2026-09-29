@@ -1299,8 +1299,74 @@ function setupEvents() {
 // Init
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// The teacher's runtime authority (操作 tab, /api/actuation)
+// ---------------------------------------------------------------------------
+
+let actuationPending = false;
+
+function renderActuation(data) {
+  const names = { drive: 'ロボットの走行制御', launcher: '発射機構の操作' };
+  for (const kind of ['drive', 'launcher']) {
+    const toggle = document.getElementById(`actuation-${kind}-toggle`);
+    toggle.checked = Boolean(data && data[kind]);
+    toggle.disabled = actuationPending || !data || (data.competition && !data[kind]);
+    document.getElementById(`actuation-${kind}-state`).textContent =
+      !data ? '（確認できません）' : data[kind] ? 'ON：動かせます' : 'OFF：動きません';
+  }
+  const state = document.getElementById('actuation-state');
+  if (!data) {
+    state.textContent = '許可の状態を確認できません。ロボットは許可がない間は動きません。';
+  } else if (data.competition) {
+    state.textContent = '大会モードでは使いません（大会用の起動は非常停止と AutoReferee で動きます）。';
+  } else if (data.drive || data.launcher) {
+    const on = ['drive', 'launcher'].filter((kind) => data[kind]).map((kind) => names[kind]);
+    state.textContent = `${on.join('・')}を許可しています（約 ${data.heartbeat_hz} 回/秒 送信中）。`;
+  } else {
+    state.textContent = '走行も発射も許可していません。練習で動かすときに ON にしてください。';
+  }
+  const error = document.getElementById('actuation-error');
+  error.textContent = data?.error || '';
+  error.hidden = !data?.error;
+}
+
+async function refreshActuation() {
+  try {
+    renderActuation(await apiSilent('/api/actuation/status'));
+  } catch {
+    renderActuation(null);
+  }
+}
+
+async function setActuation(kind, allow) {
+  actuationPending = true;
+  try {
+    renderActuation(await api(`/api/actuation/${kind}`, {
+      method: 'POST', body: JSON.stringify({ allow }),
+    }));
+    toast(allow ? 'ON にしました' : 'OFF にしました（教材からの同じ操作も OFF です）', 'success');
+  } catch {
+    // api() already said why; show what really holds now.
+  } finally {
+    actuationPending = false;
+    await refreshActuation();
+    refreshLabStatus();
+  }
+}
+
+function setupActuationEvents() {
+  for (const kind of ['drive', 'launcher']) {
+    document.getElementById(`actuation-${kind}-toggle`).addEventListener('change', (event) => {
+      setActuation(kind, event.target.checked);
+    });
+  }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   setupEvents();
+  setupActuationEvents();
+  refreshActuation();
+  setInterval(refreshActuation, 2000);
   refreshStatus();
   refreshReadiness();
   refreshRecConfig();

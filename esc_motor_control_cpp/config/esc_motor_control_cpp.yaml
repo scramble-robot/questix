@@ -25,9 +25,16 @@ esc_motor_control:
     status_topic: "/roller_motor_status"
     # 統一緊急停止トピック（questix_msgs/EmergencyStop, reliable + transient_local, 入力）。
     # active=true 受信で即時停止＋ボタン無視、active=false で解除する
-    # （復帰にはフルスピードボタンの再押下が必要）。空文字 "" で連動無効。
-    # 発行元は operation_manager（契約: questix_msgs/README.md）。
+    # （復帰にはフルスピードボタンの離す→押すが必要）。発行元は operation_manager
+    # （契約: questix_msgs/README.md）。一度も受信していない間と、受信後に
+    # emergency_stop_timeout_sec 途絶えた間も押下と同じに扱う。
+    # require_emergency_stop: false は単体診断の明示 opt-out のみ（統合起動では使わない）。
     emergency_stop_topic: "/emergency_stop"
+    require_emergency_stop: true
+    emergency_stop_timeout_sec: 1.0
+    # 教員の実行時許可（/actuation_authority の launcher_allowed）は
+    # require_runtime_actuation_authority で有効になる。値は launch が渡す（練習 true、
+    # 大会 false）ためこの YAML には置かない。
 
     # QUESTiX LAB roller input / QUESTiX LAB からのローラー操作
     # accept_lab_input: true のときだけ lab_topic (std_msgs/Float32, 出力割合 0..1) を購読する。

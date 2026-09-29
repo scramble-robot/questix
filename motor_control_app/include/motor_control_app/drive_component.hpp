@@ -6,12 +6,14 @@
 #ifndef MOTOR_CONTROL_APP__DRIVE_COMPONENT_HPP_
 #define MOTOR_CONTROL_APP__DRIVE_COMPONENT_HPP_
 
+#include <chrono>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "geometry_msgs/msg/transform_stamped.hpp"
 #include "geometry_msgs/msg/twist.hpp"
+#include "motor_control_app/actuation_gate.hpp"
 #include "motor_control_app/control_core.hpp"
 #include "motor_control_app/drive_control_tick.hpp"
 #include "motor_control_app/drive_watchdog.hpp"
@@ -19,6 +21,7 @@
 #include "motor_control_lib/ddt_motor_lib.hpp"
 #include "motor_control_lib/differential_drive.hpp"
 #include "nav_msgs/msg/odometry.hpp"
+#include "questix_msgs/msg/actuation_authority.hpp"
 #include "questix_msgs/msg/drive_status.hpp"
 #include "questix_msgs/msg/emergency_stop.hpp"
 #include "rcl_interfaces/msg/set_parameters_result.hpp"
@@ -51,6 +54,15 @@ namespace motor_control_app {
  * /emergency_stop（questix_msgs/EmergencyStop、契約は questix_msgs/README.md）を
  * 常時購読し、active=true で即時停止 + 以後の twist を無視、active=false で
  * twist 受付を再開する（モータは次の twist まで停止のまま = 自動復帰）。
+ * 未受信（起動直後）と、受信後に emergency_stop_timeout_sec 途絶えた状態も動かさない
+ * （require_emergency_stop=false は単体診断用の明示 opt-out）。
+ *
+ * 練習起動（require_runtime_actuation_authority=true）では、教員の実行時許可
+ * （questix_msgs/ActuationAuthority の drive_allowed、volatile、1.0 s のリース）がある間だけ
+ * 動かす。許可も E-stop も actuation_gate.hpp の純粋関数で判定し、閉じたら即時停止 + 目標破棄、
+ * 開いても次の /target_twist まで停止のまま。停止指令を送れなかったら stop fault として閉じ、
+ * 両輪へのゼロ送信が成功するまで一定間隔で再送する。ゲートはライフサイクルとは別で、閉じて
+ * いる間もフィードバックの取得（送信に成功したゼロの再送だけ）は続ける。
  */
 class DriveComponent : public rclcpp_lifecycle::LifecycleNode {
 public:
@@ -128,6 +140,38 @@ private:
   void emergencyStopCallback(const questix_msgs::msg::EmergencyStop::SharedPtr msg);
 
   /**
+   * @brief 教員の実行時許可（/actuation_authority）のコールバック
+   *
+   * 受信時刻（steady clock）と drive_allowed を記録し、閉じる方向の変化なら即座に停止する。
+   */
+  void authorityCallback(const questix_msgs::msg::ActuationAuthority::SharedPtr msg);
+
+  /**
+   * @brief 現在の E-stop・実行時許可・stop fault の入力を組み立てる（ages は steady clock）
+   */
+  actuation_gate::Inputs gateInputs() const;
+
+  /**
+   * @brief ゲートを評価し、閉じる変化（または閉じているのに武装が残る）なら停止する
+   * @param stopped_now 呼び出し側がこの直前に safetyStop 済み（二重送信しない）
+   * @return 現在の拒否理由（kNone で動かしてよい）
+   */
+  actuation_gate::Block applyGate(bool stopped_now = false);
+
+  /**
+   * @brief 非常停止として扱っている状態か（押下・未受信・途絶。実行時許可・stop fault とは別）
+   */
+  bool estopEngaged() const;
+
+  /**
+   * @brief 安全停止: スロットル無しで両輪へゼロを送り、目標を破棄する。
+   *
+   * 送信に失敗したら stop_fault_ を立てる（キャッシュをゼロに偽装しない）。
+   * @return 両輪への送信が成功したか（モータ未初期化は送る相手がないので false）
+   */
+  bool safetyStop(const char* reason);
+
+  /**
    * @brief auto_start タイマーコールバック
    *
    * unconfigured なら configure、inactive なら activate を試行し、
@@ -192,6 +236,8 @@ private:
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr twist_subscription_;
   // lifecycle 状態に依存せず常時生かす（コンストラクタで作成、on_cleanup でも破棄しない）
   rclcpp::Subscription<questix_msgs::msg::EmergencyStop>::SharedPtr emergency_stop_sub_;
+  // 教員の実行時許可（練習時のみ購読。volatile、ラッチしない）。E-stop 購読と同じく常時生かす
+  rclcpp::Subscription<questix_msgs::msg::ActuationAuthority>::SharedPtr authority_sub_;
   // 型付きステータス（questix_msgs/DriveStatus）。契約は questix_msgs/README.md。
   rclcpp_lifecycle::LifecyclePublisher<questix_msgs::msg::DriveStatus>::SharedPtr
       typed_status_publisher_;
@@ -296,7 +342,28 @@ private:
 
   // 状態フラグ
   bool motor_initialized_;
+  // 最後に受信した /emergency_stop の active。未受信の間は true（起動直後を解除扱いしない）
   bool emergency_stop_active_;
+
+  // E-stop の受信状態（コンストラクタで読むパラメータ。実行時変更は拒否）
+  bool require_emergency_stop_{true};       // false は単体診断の明示 opt-out のみ
+  double emergency_stop_timeout_sec_{1.0};  // 受信後の途絶判定 [s]。<=0 で無効
+  bool have_estop_msg_{false};
+  std::chrono::steady_clock::time_point last_estop_rx_{};
+
+  // 教員の実行時許可（練習: true、大会: false）。コンストラクタで読む
+  bool require_authority_{true};
+  std::string authority_topic_{"/actuation_authority"};
+  double authority_timeout_sec_{1.0};  // リース [s]。無効値は 1.0
+  bool have_authority_msg_{false};
+  bool authority_drive_allowed_{false};
+  std::chrono::steady_clock::time_point last_authority_rx_{};
+
+  // 停止指令を送れなかった（両輪へのゼロ送信成功まで閉じたまま、stop_retry_period で再送）
+  bool stop_fault_{false};
+  std::chrono::steady_clock::time_point last_stop_attempt_{};
+  // 前回評価したゲートの理由（閉じる変化の検出とログ用）
+  actuation_gate::Block last_block_{actuation_gate::Block::kEstopUnknown};
 };
 
 }  // namespace motor_control_app

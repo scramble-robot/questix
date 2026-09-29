@@ -66,9 +66,17 @@ std::vector<uint8_t> packCurrentFrame(uint8_t motor_id, int16_t current_raw) {
   return data_fields;
 }
 
-bool isZeroVelocityFrame(const std::vector<uint8_t>& frame) {
-  // Protocol 1 (0x64) で指令値 DATA[2..3] (big-endian) が 0 のフレーム。
+bool isZeroCommandFrame(const std::vector<uint8_t>& frame) {
+  // Protocol 1 (0x64) で指令値 DATA[2..3] (big-endian) が 0 のフレーム（速度・電流とも同位置）。
   return frame.size() == 10 && frame[1] == 0x64 && frame[2] == 0x00 && frame[3] == 0x00;
+}
+
+IdleRefresh decideIdleRefresh(bool feedback_fresh, bool has_cached_frame, bool cached_is_zero,
+                              bool throttled) {
+  if (feedback_fresh || !has_cached_frame || !cached_is_zero || throttled) {
+    return IdleRefresh::kNone;
+  }
+  return IdleRefresh::kResendZero;
 }
 
 ParseResult parseFeedbackFrame(uint8_t expected_motor_id, const std::vector<uint8_t>& frame,

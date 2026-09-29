@@ -73,13 +73,41 @@ std::vector<uint8_t> packCurrentFrame(uint8_t motor_id, int16_t current_raw);
 /**
  * @brief Protocol 1 (0x64) の指令値 0 フレーム（停止指令）かを判定する。
  *
- * DATA[1]==0x64 かつ DATA[2..3]（指令値）が 0 のとき true。ブレーキバイトの有無は問わない
- * （brake_on_stop 無効時の停止フレームも対象）。refreshMotorFeedback が停止フレームの
- * 再送を stopMotor と同じ再送間隔スロットルに従わせるための判定に使う。
+ * DATA[1]==0x64 かつ DATA[2..3]（指令値、big-endian）が 0 のとき true。速度フレーム
+ * （packVelocityFrame、目標 0 RPM）と電流フレーム（packCurrentFrame、電流 0）の両方で同じ
+ * バイト位置なので、制御モードに依らず「動かさない指令」を表す。ブレーキバイトの有無は問わない
+ * （brake_on_stop 無効時の停止フレームも対象）。
  *
  * @param frame 送信フレーム（全 10 バイトを期待。異なる長さは false）
  */
-bool isZeroVelocityFrame(const std::vector<uint8_t>& frame);
+bool isZeroCommandFrame(const std::vector<uint8_t>& frame);
+
+/**
+ * @brief アイドル中のフィードバック更新（refreshMotorFeedback）が取る動作。
+ */
+enum class IdleRefresh {
+  kNone,        ///< 何も送らない
+  kResendZero,  ///< 最後に送信に成功した停止フレーム（指令値 0）を再送する
+};
+
+/**
+ * @brief アイドル中のフィードバック更新で送ってよいものを決める（純ロジック）。
+ *
+ * アイドル中（駆動指令の武装解除中）は、フィードバックを得るためでも駆動指令を作らない:
+ * - フィードバックが新鮮なら何も送らない。
+ * - 古いときに再送してよいのは、最後に**送信に成功した**フレームが停止フレーム（指令値 0）の
+ *   場合だけ（再送間隔スロットル中は送らない）。
+ * - 最後の成功フレームが非ゼロ（停止指令の送信に失敗して残ったもの）、または送信履歴が無い
+ *   ときは送らない。フィードバックが途切れる（stale と報告される）ことを、意図しない駆動より
+ *   優先する。
+ *
+ * @param feedback_fresh   フィードバックが max_age 以内に得られている
+ * @param has_cached_frame 最後に送信に成功したフレームがある
+ * @param cached_is_zero   そのフレームが isZeroCommandFrame
+ * @param throttled        停止フレームの再送間隔（stop_resend_interval_ms）に達していない
+ */
+IdleRefresh decideIdleRefresh(bool feedback_fresh, bool has_cached_frame, bool cached_is_zero,
+                              bool throttled);
 
 /**
  * @brief Protocol 1 応答フレームのデコード結果。

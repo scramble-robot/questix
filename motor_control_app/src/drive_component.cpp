@@ -29,6 +29,14 @@ namespace {
 // 目安 [s]。この鮮度以内なら再取得しない（≈5Hz）。odometry::kMaxFeedbackAgeSec（stale 判定）
 // より十分小さくすること。
 constexpr double kIdleFeedbackMaxAgeSec = 0.2;
+
+// 停止指令を送れなかったとき（stop fault）の再送間隔 [s]。
+constexpr double kStopRetryPeriodSec = 0.5;
+
+double secondsSince(std::chrono::steady_clock::time_point then,
+                    std::chrono::steady_clock::time_point now) {
+  return std::chrono::duration<double>(now - then).count();
+}
 }  // namespace
 
 DriveComponent::DriveComponent(const rclcpp::NodeOptions& options)
@@ -36,7 +44,7 @@ DriveComponent::DriveComponent(const rclcpp::NodeOptions& options)
       last_cmd_time_(0, 0, RCL_ROS_TIME),
       cmd_timeout_sec_(1.0),
       motor_initialized_(false),
-      emergency_stop_active_(false) {
+      emergency_stop_active_(true) {
   // パラメーター宣言（取得は on_configure で行い、cleanup→configure で再読込できるようにする）
   declareParameters();
 
@@ -59,10 +67,43 @@ DriveComponent::DriveComponent(const rclcpp::NodeOptions& options)
   // 破棄される twist 購読と異なり、unconfigured での configure リトライ中も
   // 状態を追従する）。transient_local なので起動時に最新のラッチ状態を受信する。
   emergency_stop_topic_ = this->get_parameter("emergency_stop_topic").as_string();
+  require_emergency_stop_ = this->get_parameter("require_emergency_stop").as_bool();
+  emergency_stop_timeout_sec_ = this->get_parameter("emergency_stop_timeout_sec").as_double();
   if (!emergency_stop_topic_.empty()) {
     emergency_stop_sub_ = this->create_subscription<questix_msgs::msg::EmergencyStop>(
         emergency_stop_topic_, rclcpp::QoS(1).reliable().transient_local(),
         std::bind(&DriveComponent::emergencyStopCallback, this, std::placeholders::_1));
+  } else if (require_emergency_stop_) {
+    RCLCPP_ERROR(this->get_logger(),
+                 "emergency_stop_topic is empty but require_emergency_stop=true: the drive will "
+                 "never move (set require_emergency_stop:=false only for a diagnostic run)");
+  }
+  if (!require_emergency_stop_) {
+    RCLCPP_WARN(this->get_logger(),
+                "require_emergency_stop=false (diagnostic opt-out): the drive may move before "
+                "/emergency_stop is heard. Never use this in an integrated launch");
+  }
+
+  // 教員の実行時許可（練習時）。volatile + keep-last(1): 許可をラッチせず、発行元が止まれば
+  // リース（runtime_authority_timeout_sec）切れで閉じる。
+  require_authority_ = this->get_parameter("require_runtime_actuation_authority").as_bool();
+  authority_topic_ = this->get_parameter("runtime_authority_topic").as_string();
+  authority_timeout_sec_ = actuation_gate::authorityLease(
+      this->get_parameter("runtime_authority_timeout_sec").as_double());
+  if (require_authority_) {
+    if (authority_topic_.empty()) {
+      RCLCPP_ERROR(this->get_logger(),
+                   "runtime_authority_topic is empty but require_runtime_actuation_authority=true: "
+                   "the drive will never move");
+    } else {
+      authority_sub_ = this->create_subscription<questix_msgs::msg::ActuationAuthority>(
+          authority_topic_, rclcpp::QoS(1).reliable().durability_volatile(),
+          std::bind(&DriveComponent::authorityCallback, this, std::placeholders::_1));
+    }
+    RCLCPP_INFO(this->get_logger(),
+                "Practice runtime authority required on %s (lease %.2fs): the drive stays "
+                "stopped until the teacher switches driving on",
+                authority_topic_.c_str(), authority_timeout_sec_);
   }
 
   if (auto_start_) {
@@ -266,11 +307,8 @@ DriveComponent::CallbackReturn DriveComponent::on_activate(const rclcpp_lifecycl
 DriveComponent::CallbackReturn DriveComponent::on_deactivate(const rclcpp_lifecycle::State& state) {
   control_timer_.reset();
   status_timer_.reset();
-  // best-effort で停止指令（電流PI積分状態もリセットされる）
-  if (diff_drive_) {
-    diff_drive_->stop();
-  }
-  resetCommandState();
+  // 停止指令（電流PI積分状態もリセットされる）。失敗は stop fault として残す
+  safetyStop("deactivate");
   // 実走セッションの往復レイテンシ統計を記録に残す（制御周期引き上げの判断材料）。
   if (motor_lib_) {
     const auto stats = motor_lib_->getSerialLatencyStats();
@@ -396,8 +434,19 @@ void DriveComponent::declareParameters() {
   this->declare_parameter("auto_start", true);
   this->declare_parameter("connect_retry_period_sec", 1.0);
 
-  // 統一緊急停止トピック（questix_msgs/EmergencyStop）。空文字で連動無効。
+  // 統一緊急停止トピック（questix_msgs/EmergencyStop）。空文字で連動無効
+  // （require_emergency_stop=true のままなら動かない）。
   this->declare_parameter("emergency_stop_topic", "/emergency_stop");
+  // 未受信・途絶の /emergency_stop を「動かさない」とするか。false は単体診断の明示 opt-out。
+  this->declare_parameter("require_emergency_stop", true);
+  // 一度受信した後、この秒数（自分の steady clock での受信間隔）途絶えたら停止。<=0 で無効。
+  this->declare_parameter("emergency_stop_timeout_sec", 1.0);
+
+  // 教員の実行時許可（questix_msgs/ActuationAuthority）。練習起動（questix_core、
+  // enable_autoreferee=false）は true、大会起動は false を launch が必ず渡す。
+  this->declare_parameter("require_runtime_actuation_authority", true);
+  this->declare_parameter("runtime_authority_topic", "/actuation_authority");
+  this->declare_parameter("runtime_authority_timeout_sec", 1.0);
 
   // オドメトリ出力（実測 twist を積分して /odom を publish）。
   this->declare_parameter("publish_tf", true);
@@ -523,7 +572,7 @@ void DriveComponent::shutdownMotorLib() {
   if (motor_lib_ && motor_initialized_) {
     RCLCPP_INFO(this->get_logger(), "Shutting down motor library");
     if (diff_drive_) {
-      diff_drive_->stop();
+      (void)diff_drive_->stopNow();
     }
     motor_lib_->emergencyStop();
     motor_lib_->shutdown();
@@ -554,24 +603,30 @@ rcl_interfaces::msg::SetParametersResult DriveComponent::onParameterChange(
   // 再初期化なしで反映できないパラメータ。実行時変更は拒否する（受理して黙って無視すると
   // `ros2 param set` が成功を報告してしまい、変わっていないことに気付けない）。
   // 変更するには YAML（launcher/config/drive_component.yaml）を編集してノードを再起動する。
-  static const std::vector<std::string> kRequiresReconfigure = {"serial_port",
-                                                                "baud_rate",
-                                                                "left_motor_id",
-                                                                "right_motor_id",
-                                                                "max_motor_rpm",
-                                                                "control_mode",
-                                                                "control_rate",
-                                                                "status_publish_rate",
-                                                                "wheel_radius",
-                                                                "wheel_separation",
-                                                                "typed_status_topic",
-                                                                "odom_topic",
-                                                                "odom_frame_id",
-                                                                "base_frame_id",
-                                                                "publish_tf",
-                                                                "auto_start",
-                                                                "connect_retry_period_sec",
-                                                                "emergency_stop_topic"};
+  static const std::vector<std::string> kRequiresReconfigure = {
+      "serial_port",
+      "baud_rate",
+      "left_motor_id",
+      "right_motor_id",
+      "max_motor_rpm",
+      "control_mode",
+      "control_rate",
+      "status_publish_rate",
+      "wheel_radius",
+      "wheel_separation",
+      "typed_status_topic",
+      "odom_topic",
+      "odom_frame_id",
+      "base_frame_id",
+      "publish_tf",
+      "auto_start",
+      "connect_retry_period_sec",
+      "emergency_stop_topic",
+      "require_emergency_stop",
+      "emergency_stop_timeout_sec",
+      "require_runtime_actuation_authority",
+      "runtime_authority_topic",
+      "runtime_authority_timeout_sec"};
 
   bool control_core_dirty = false;
   bool current_pi_dirty = false;
@@ -753,10 +808,13 @@ void DriveComponent::twistCallback(const geometry_msgs::msg::Twist::SharedPtr ms
     return;
   }
 
-  // 非常停止中は目標を保存しない（解除後はモータ停止のまま、次の指令で再開 = 従来挙動）。
-  if (emergency_stop_active_) {
+  // 非常停止中・E-stop 不明/途絶・実行時許可なし・stop fault の間は目標を保存しない
+  // （開いた後もモータは停止のまま、開いた後に届いた次の指令で再開）。
+  const auto block = actuation_gate::evaluate(gateInputs());
+  if (block != actuation_gate::Block::kNone) {
     RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
-                         "Emergency stop active, ignoring twist command");
+                         "Actuation blocked (%s), ignoring twist command",
+                         actuation_gate::blockName(block));
     return;
   }
 
@@ -776,17 +834,45 @@ void DriveComponent::controlTimerCallback() {
   // control_core_ は diff_drive_ と同じライフサイクル（initializeMotorLib で構築、
   // shutdownMotorLib で破棄）だが、kDrive 経路で参照するため準備判定に含める。
   const bool motor_ready = motor_initialized_ && diff_drive_ != nullptr && control_core_ != nullptr;
+
+  // 停止指令を送れなかった後は、両輪へのゼロ送信が成功するまで一定間隔で再送する
+  // （成功しても停止のまま。次の /target_twist で初めて動く）。
+  if (stop_fault_ && motor_ready) {
+    const auto now_steady = std::chrono::steady_clock::now();
+    if (actuation_gate::shouldRetryStop(stop_fault_, secondsSince(last_stop_attempt_, now_steady),
+                                        kStopRetryPeriodSec)) {
+      last_stop_attempt_ = now_steady;
+      if (diff_drive_->stopNow()) {
+        stop_fault_ = false;
+        RCLCPP_INFO(this->get_logger(),
+                    "Stop fault cleared: zero sent to both wheels (still stopped until the next "
+                    "command)");
+      } else {
+        RCLCPP_ERROR_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
+                              "Stop fault: zero could not be sent yet, retrying every %.1fs",
+                              kStopRetryPeriodSec);
+      }
+    }
+  }
+
+  // E-stop・実行時許可・stop fault のゲート。閉じたら停止 + 武装解除（applyGate）。
+  const auto block = applyGate();
+
   const double elapsed = has_target_ ? (this->now() - last_cmd_time_).seconds() : 0.0;
   // isHealthy はキャッシュ済みフィードバックの fault コードを見るだけでシリアルには触らない
   const bool healthy = motor_ready && diff_drive_->isHealthy();
 
-  switch (drive_control_tick::decideTickAction(has_target_, motor_ready, emergency_stop_active_,
-                                               healthy, elapsed, cmd_timeout_sec_)) {
+  switch (drive_control_tick::decideTickAction(has_target_, motor_ready,
+                                               block != actuation_gate::Block::kNone, healthy,
+                                               elapsed, cmd_timeout_sec_)) {
     case drive_control_tick::TickAction::kIdle:
-      // 未武装（起動直後・タイムアウト/非常停止/フォールト停止後）。駆動指令は送らないが、
-      // フィードバックが古ければ低頻度で再取得する（外力で車輪が回された場合の観測と
-      // /drive_status の鮮度のため）。シリアル利用者を tick の1箇所に保つための配置。
-      if (motor_ready && !emergency_stop_active_ && motor_lib_) {
+      // 未武装（起動直後・タイムアウト/非常停止/フォールト停止後）またはゲートが閉じている。
+      // 駆動指令は送らないが、フィードバックが古ければ低頻度で再取得する（外力で車輪が回された
+      // 場合の観測と /drive_status の鮮度のため）。再取得が送るのは送信に成功したゼロだけで、
+      // 非ゼロの再送はしない（DdtMotorLib::refreshMotorFeedback）。押下を受信している間と
+      // stop fault の間（再送は上で行う）は送らない。
+      if (motor_ready && motor_lib_ && block != actuation_gate::Block::kEstopActive &&
+          block != actuation_gate::Block::kStopFault) {
         motor_lib_->refreshMotorFeedback(left_motor_id_, kIdleFeedbackMaxAgeSec);
         motor_lib_->refreshMotorFeedback(right_motor_id_, kIdleFeedbackMaxAgeSec);
       }
@@ -795,16 +881,14 @@ void DriveComponent::controlTimerCallback() {
       RCLCPP_WARN(this->get_logger(),
                   "Command timeout: no /target_twist for %.2fs (limit %.2fs), stopping motors",
                   elapsed, cmd_timeout_sec_);
-      // stop() は各ホイールの stopMotor を通り電流PI積分状態をリセットする。
-      // resetCommandState で武装解除（WARN はイベント毎に1回）。次の /target_twist で
-      // 自動的に再武装し、スルーレートクランプもゼロから再スタートする。
-      diff_drive_->stop();
-      resetCommandState();
+      // safetyStop は各ホイールへスロットル無しでゼロを送り（電流PI積分状態もリセット）、
+      // 武装解除する（WARN はイベント毎に1回）。次の /target_twist で自動的に再武装し、
+      // スルーレートクランプもゼロから再スタートする。送れなければ stop fault。
+      safetyStop("command timeout");
       return;
     case drive_control_tick::TickAction::kFaultStop:
       // モータ異常中は最後の指令を保持せず、明示的に停止指令を送って武装解除する。
-      diff_drive_->stop();
-      resetCommandState();
+      safetyStop("motor fault");
       RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
                            "Motor not healthy: sending stop command");
       return;
@@ -847,17 +931,20 @@ void DriveComponent::controlTimerCallback() {
 void DriveComponent::emergencyStopCallback(const questix_msgs::msg::EmergencyStop::SharedPtr msg) {
   const bool was_active = emergency_stop_active_;
   emergency_stop_active_ = msg->active;
+  have_estop_msg_ = true;
+  last_estop_rx_ = std::chrono::steady_clock::now();
 
   const bool motor_ready = motor_initialized_ && diff_drive_ != nullptr;
+  bool stopped_now = false;
   switch (drive_watchdog::decideEstopAction(was_active, msg->active, motor_ready)) {
     case drive_watchdog::EstopAction::kStopNow:
       RCLCPP_WARN(this->get_logger(), "非常停止を受信 (source=%s, reason=%s)。モータを停止します",
                   msg->source.c_str(), msg->reason.c_str());
-      // best-effort の即時停止。物理非常停止でモータ電源が落ちている場合は
-      // シリアル書込みが失敗し得るが、teardown へはエスカレートしない
-      // （デバイス消失は既存の configure リトライ経路が処理する）。
-      diff_drive_->stop();
-      resetCommandState();
+      // スロットル無しの即時停止 + 目標破棄。物理非常停止でモータ電源が落ちている場合は
+      // シリアル書込みが失敗し得る。その場合は stop fault として閉じたまま再送する
+      // （teardown へはエスカレートしない。デバイス消失は既存の configure リトライ経路）。
+      safetyStop("emergency stop");
+      stopped_now = true;
       break;
     case drive_watchdog::EstopAction::kClear:
       RCLCPP_INFO(this->get_logger(),
@@ -873,6 +960,80 @@ void DriveComponent::emergencyStopCallback(const questix_msgs::msg::EmergencySto
       }
       break;
   }
+  // 途絶からの復帰・未受信からの初回受信を含め、ゲートの状態を更新する（開いても動かない）。
+  applyGate(stopped_now);
+}
+
+void DriveComponent::authorityCallback(const questix_msgs::msg::ActuationAuthority::SharedPtr msg) {
+  have_authority_msg_ = true;
+  authority_drive_allowed_ = msg->drive_allowed;
+  last_authority_rx_ = std::chrono::steady_clock::now();
+  // OFF への変化は制御 tick を待たずに停止する（ON への変化は何も動かさない）。
+  applyGate();
+}
+
+actuation_gate::Inputs DriveComponent::gateInputs() const {
+  const auto now = std::chrono::steady_clock::now();
+  actuation_gate::Inputs in;
+  in.require_estop = require_emergency_stop_;
+  in.estop_known = have_estop_msg_;
+  in.estop_active = emergency_stop_active_;
+  in.estop_age_sec = have_estop_msg_ ? secondsSince(last_estop_rx_, now) : 0.0;
+  in.estop_timeout_sec = emergency_stop_timeout_sec_;
+  in.require_authority = require_authority_;
+  in.authority_known = have_authority_msg_;
+  in.authority_allowed = authority_drive_allowed_;
+  in.authority_age_sec = have_authority_msg_ ? secondsSince(last_authority_rx_, now) : 0.0;
+  in.authority_timeout_sec = authority_timeout_sec_;
+  in.stop_fault = stop_fault_;
+  return in;
+}
+
+bool DriveComponent::estopEngaged() const {
+  auto in = gateInputs();
+  in.stop_fault = false;
+  in.require_authority = false;
+  return actuation_gate::isEstopBlock(actuation_gate::evaluate(in));
+}
+
+actuation_gate::Block DriveComponent::applyGate(bool stopped_now) {
+  const auto block = actuation_gate::evaluate(gateInputs());
+  const auto action = actuation_gate::decideGateAction(last_block_, block, has_target_);
+  if (block != last_block_) {
+    if (block == actuation_gate::Block::kNone) {
+      RCLCPP_INFO(this->get_logger(),
+                  "Actuation allowed again (was %s); the drive stays stopped until a new command",
+                  actuation_gate::blockName(last_block_));
+    } else {
+      RCLCPP_WARN(this->get_logger(), "Actuation blocked: %s (was %s)",
+                  actuation_gate::blockName(block), actuation_gate::blockName(last_block_));
+    }
+  }
+  last_block_ = block;
+  if (action == actuation_gate::GateAction::kSafetyStop && !stopped_now) {
+    safetyStop(actuation_gate::blockName(block));
+  }
+  return block;
+}
+
+bool DriveComponent::safetyStop(const char* reason) {
+  // 目標は送信の成否によらず必ず破棄する（古い目標を後で復活させない）。
+  resetCommandState();
+  if (!motor_initialized_ || !diff_drive_) {
+    return false;  // 送る相手がない（未通電・未構成）。駆動指令も出ていない
+  }
+  last_stop_attempt_ = std::chrono::steady_clock::now();
+  if (diff_drive_->stopNow()) {
+    return true;
+  }
+  if (!stop_fault_) {
+    RCLCPP_ERROR(this->get_logger(),
+                 "Stop fault (%s): the zero command could not be sent to both wheels. Actuation "
+                 "stays closed and the zero is retried every %.1fs",
+                 reason, kStopRetryPeriodSec);
+  }
+  stop_fault_ = true;
+  return false;
 }
 
 void DriveComponent::statusTimerCallback() {
@@ -898,7 +1059,8 @@ void DriveComponent::statusTimerCallback() {
     typed_msg.right = toMotorFeedbackMsg(right_fb, now);
     typed_msg.linear_velocity = status.current_linear_velocity;
     typed_msg.angular_velocity = status.current_angular_velocity;
-    typed_msg.emergency_stop = emergency_stop_active_;
+    // 非常停止として扱っている間（押下・未受信・途絶）は true。実行時許可の有無とは別。
+    typed_msg.emergency_stop = estopEngaged();
     typed_status_publisher_->publish(typed_msg);
 
     // 左右両輪のフィードバックが新鮮なときのみ実測 twist を積分する。stale（非常停止・

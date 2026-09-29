@@ -15,7 +15,12 @@ left there are ignored, and dropped the next time lab.env is written), so a rest
 manager or of the robot always starts with both off. They also go off on 配信停止, on
 「すべて止める」 (``revoke_permissions``), when the robot is switched to competition mode (and stay
 off when it comes back to practice mode), and when the bridge this manager started exits on its
-own. Restarting the bridge to apply a switch keeps them. Each run is still confirmed by the
+own. Restarting the bridge to apply a switch keeps them. They also need the teacher's runtime
+authority for the robot (actuation.py, 操作 tab: ロボットの走行制御 / 発射機構の操作), which the
+nodes themselves enforce for the controller and the lessons alike: a lesson permission cannot be
+switched on while its authority is off, and it goes off whenever that authority goes off
+(``_on_authority_revoked``); switching the authority on never switches a lesson permission on.
+Each run is still confirmed by the
 learner's safety tick on the page and bounded by the bridge's own checks, and the controller takes
 over at any time. Both permissions are always passed to the bridge explicitly
 (``-p allow_drive:=…`` / ``-p allow_shoot:=…``), so the defaults in its lab_bridge.yaml (both
@@ -58,7 +63,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, field_validator
 
-from robot_manager import recorder, ros_domain
+from robot_manager import actuation, recorder, ros_domain
 
 CONFIG_DIR = Path(os.environ.get("QUESTIX_CONFIG_DIR", "/etc/questix_robot"))
 LAUNCH_ENV_FILE = CONFIG_DIR / "launch.env"
@@ -122,6 +127,8 @@ _started_at: Optional[float] = None
 _last_stop_reason: Optional[str] = None
 # The lessons' actuator permissions, each passed to the bridge as its parameter.
 _PERMISSIONS = {"ALLOW_DRIVE": "allow_drive", "ALLOW_SHOOT": "allow_shoot"}
+# The teacher's runtime authority each permission needs (actuation.py).
+_AUTHORITY = {"ALLOW_DRIVE": "drive", "ALLOW_SHOOT": "launcher"}
 # What the teacher allowed in this session (guarded by _lock). Only this process holds them: they
 # start off, are never read from or written to lab.env, and revoke_permissions switches both off.
 _runtime_permissions = {key: False for key in _PERMISSIONS}
@@ -567,6 +574,9 @@ def _status_payload() -> dict:
         # The permissions belong to this session of the manager: both start off after a restart
         # of the manager or the robot, 配信停止, 「すべて止める」 and competition mode.
         "permissions_transient": True,
+        # The teacher's runtime authority each permission needs (操作 tab, actuation.py).
+        "drive_authority": actuation.peek("drive"),
+        "shoot_authority": actuation.peek("launcher"),
         # The running bridge's own GET /api/state (ours or started by hand); null when none
         # answers.
         "bridge": _bridge_state() if managed or external else None,
@@ -681,7 +691,8 @@ def set_drive(request: DriveRequest):
     what it does.
     """
     return _set_permission("ALLOW_DRIVE", request.allow,
-                           "大会モードでは教材から走らせられません", "drive_setting")
+                           "大会モードでは教材から走らせられません", "drive_setting",
+                           "先に「操作」タブで「ロボットの走行制御」をONにしてください")
 
 
 @router.post("/shoot")
@@ -692,17 +703,23 @@ def set_shoot(request: DriveRequest):
     while the bridge does another.
     """
     return _set_permission("ALLOW_SHOOT", request.allow,
-                           "大会モードでは教材から発射させられません", "shoot_setting")
+                           "大会モードでは教材から発射させられません", "shoot_setting",
+                           "先に「操作」タブで「発射機構の操作」をONにしてください")
 
 
-def _set_permission(key: str, allow: bool, competition_detail: str, stop_reason: str) -> dict:
+def _set_permission(key: str, allow: bool, competition_detail: str, stop_reason: str,
+                    authority_detail: str = "") -> dict:
     """Set one runtime permission and restart a bridge of ours so it applies (set_drive/set_shoot).
 
     The restart is ours, not a stop: the permissions are kept for the new bridge. If that bridge
-    does not come up, both permissions go off (a later 配信開始 starts with them off).
+    does not come up, both permissions go off (a later 配信開始 starts with them off). Allowing
+    needs the teacher's runtime authority for the same actuator (actuation.py); it is checked
+    before taking _lock, since noticing a dead heartbeat calls back into this module.
     """
     if allow and _competition_mode():
         raise HTTPException(status_code=409, detail=competition_detail)
+    if allow and not actuation.is_allowed(_AUTHORITY[key]):
+        raise HTTPException(status_code=409, detail=authority_detail)
     with _lock:
         # First notice a bridge that died on its own (that revokes), then apply this switch, so
         # the teacher's choice made now is not taken back by an exit that happened before it.
@@ -745,6 +762,32 @@ def revoke_permissions(reason: str) -> dict:
                                 f"「配信開始」で再開できます: {error.detail}）")}
     return {"ok": True, "revoked": revoked, "restarted": bool(restart),
             "message": "教材からの走行・発射をOFFにしました"}
+
+
+def _on_authority_revoked(kind: str, reason: str) -> None:
+    """Switch the lesson permission off after the teacher's runtime authority for ``kind`` did.
+
+    Registered with actuation.add_revoke_listener. Never raises; a bridge of ours that was started
+    with the permission on is restarted with it off (as set_drive / set_shoot would).
+    """
+    key = next((key for key, value in _AUTHORITY.items() if value == kind), None)
+    if key is None:
+        return
+    with _lock:
+        started = _started_allow_drive if key == "ALLOW_DRIVE" else _started_allow_shoot
+        needed = _runtime_permissions[key] or (started and _proc is not None)
+    if not needed:
+        return
+    try:
+        _set_permission(key, False, "", f"authority_{reason}")
+    except HTTPException as error:
+        logger.warning("QUESTiX LAB: lesson permission off after the %s authority went off (%s), "
+                       "but the bridge did not come back: %s", kind, reason, error.detail)
+        with _lock:
+            _runtime_permissions[key] = False
+
+
+actuation.add_revoke_listener(_on_authority_revoked)
 
 
 def disable_for_competition() -> None:

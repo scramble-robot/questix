@@ -39,11 +39,14 @@ enum class Refusal {
   kInterval,
   kInvalid,
   kRateLimited,  // the tilt servo got a command less than command_rate_limit_ms ago
+  kAuthority,    // the teacher's runtime authority for the launcher is off, silent or unknown
 };
 
 struct Conditions {
   bool accept{false};
   bool estop{false};
+  // The teacher's runtime authority (practice); true when it is not required (competition).
+  bool authority{false};
   bool active{false};
   bool shooting{false};
   double now_sec{0.0};
@@ -69,6 +72,8 @@ inline const char* refusalName(Refusal refusal) {
       return "invalid";
     case Refusal::kRateLimited:
       return "rate_limited";
+    case Refusal::kAuthority:
+      return "authority";
     case Refusal::kNone:
     default:
       return "none";
@@ -82,6 +87,9 @@ inline Refusal checkCommon(const Conditions& c) {
   }
   if (c.estop) {
     return Refusal::kEmergencyStop;
+  }
+  if (!c.authority) {
+    return Refusal::kAuthority;
   }
   if (!c.active) {
     return Refusal::kInactive;
@@ -174,6 +182,9 @@ struct Status {
   FireSource last_fire_source{FireSource::kNone};
   bool lab_accepted{false};
   bool estop{false};
+  // The teacher's runtime authority for the launcher (true when not required). Separate from
+  // estop: losing it is not an emergency stop.
+  bool authority{false};
   bool active{false};
   double tilt_min_deg{0.0};
   double tilt_max_deg{0.0};
@@ -194,11 +205,11 @@ inline std::string statusJson(const Status& s) {
   std::snprintf(buffer, sizeof(buffer),
                 "{\"tilt_deg\": %.1f, \"shooting\": %s, \"fired_count\": %ld, "
                 "\"last_fire_source\": %s, \"lab_accepted\": %s, \"estop\": %s, "
-                "\"active\": %s, \"tilt_min_deg\": %.1f, \"tilt_max_deg\": %.1f, "
-                "\"next_fire_in_sec\": %.2f, \"lab_refused\": %s}",
+                "\"authority\": %s, \"active\": %s, \"tilt_min_deg\": %.1f, "
+                "\"tilt_max_deg\": %.1f, \"next_fire_in_sec\": %.2f, \"lab_refused\": %s}",
                 finite(s.tilt_deg), flag(s.shooting), s.fired_count,
                 fireSourceJson(s.last_fire_source), flag(s.lab_accepted), flag(s.estop),
-                flag(s.active), finite(s.tilt_min_deg), finite(s.tilt_max_deg),
+                flag(s.authority), flag(s.active), finite(s.tilt_min_deg), finite(s.tilt_max_deg),
                 finite(s.next_fire_in_sec), refused);
   return std::string(buffer);
 }
