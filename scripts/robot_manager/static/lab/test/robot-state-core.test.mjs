@@ -296,3 +296,80 @@ test('only /emergency_stop itself says released; never heard is unknown, silent 
   assert.equal(later.estop, null);
   assert.equal(stripModel(later).estop, 'unknown');
 });
+
+// --- each wheel's own values (bridges with the wheel-level telemetry authority) ---------------
+
+// A /drive_status whose chassis velocity says something else on purpose (about 999 rpm): the
+// panel must read each wheel's own values, never recompute them from v / w.
+const directDrive = ({ filtered = 30, raw = 35, target = 31, valid = true } = {}) => ({
+  type: 'drive',
+  v: (999 / RPM_PER_MPS) * 1,
+  w: 0,
+  emergency_stop: false,
+  left: {
+    rpm: filtered,
+    rpm_raw: raw,
+    target_rpm: target,
+    feedback_stamp: valid ? 99.98 : null,
+    feedback_age_sec: valid ? 0.02 : null,
+    feedback_valid: valid,
+  },
+  right: {
+    rpm: -filtered,
+    rpm_raw: -raw,
+    target_rpm: -target,
+    feedback_stamp: valid ? 99.98 : null,
+    feedback_age_sec: valid ? 0.02 : null,
+    feedback_valid: valid,
+  },
+});
+
+test('the live panel reads each wheel itself: filtered, raw and the generated target', () => {
+  const tracker = createStateTracker();
+  const message = directDrive();
+  ingest(tracker, 'twist', twist(0.5), 0, config);
+  ingest(tracker, 'drive', message, 10, config);
+  const model = robotStateModel(tracker, { link, now: 50 });
+  assert.equal(model.wheels.authority, 'wheel');
+  assert.equal(model.wheels.left, 30);
+  assert.equal(model.wheels.right, 30); // forward-positive for the learner
+  assert.equal(model.wheels.rawLeft, 35);
+  assert.equal(model.wheels.rawRight, 35);
+  assert.equal(model.wheels.targetLeft, 31);
+  assert.equal(model.wheels.targetRight, 31);
+  // The upstream request stays its own value (0.5 m/s as wheels), not the generated target.
+  assert.ok(Math.abs(model.wheels.requestLeft - 0.5 * RPM_PER_MPS) < 1e-6);
+  assert.ok(![model.wheels.left, model.wheels.targetLeft].some((v) => Math.abs(v - 999) < 1));
+  assert.equal(message.right.rpm, -30); // the raw JSON keeps the native sign
+  const strip = stripModel(model);
+  assert.equal(strip.left, 30);
+  assert.equal(strip.right, 30);
+});
+
+test('invalid wheel feedback is no fresh measurement; the generated target stays', () => {
+  const tracker = createStateTracker();
+  ingest(tracker, 'drive', directDrive({ valid: false }), 10, config);
+  const model = robotStateModel(tracker, { link, now: 50 });
+  assert.equal(model.wheels.stale, true);
+  assert.equal(model.wheels.measurementValid, false);
+  assert.ok(Number.isNaN(model.wheels.left) && Number.isNaN(model.wheels.rawLeft));
+  assert.equal(model.wheels.targetLeft, 31);
+  assert.equal(model.wheels.targetRight, 31);
+  assert.equal(model.motion.stale, true); // v / w come from that feedback too
+  const strip = stripModel(model);
+  assert.equal(strip.left, null);
+  assert.equal(strip.speed, null);
+  const line = snapshotLine(model, new Date(2026, 8, 25, 14, 3, 7), text.memo);
+  assert.match(line, /左 — rpm・右 — rpm/);
+});
+
+test('an older bridge without wheel fields falls back to the chassis velocity and the command', () => {
+  const tracker = createStateTracker();
+  ingest(tracker, 'twist', twist(0.2), 0, config);
+  ingest(tracker, 'drive', drive(0.1), 10, config);
+  const model = robotStateModel(tracker, { link, now: 50 });
+  assert.equal(model.wheels.authority, 'legacy');
+  assert.ok(Math.abs(model.wheels.left - 0.1 * RPM_PER_MPS) < 1e-6);
+  assert.ok(Math.abs(model.wheels.targetLeft - 0.2 * RPM_PER_MPS) < 1e-6);
+  assert.ok(Number.isNaN(model.wheels.rawLeft));
+});

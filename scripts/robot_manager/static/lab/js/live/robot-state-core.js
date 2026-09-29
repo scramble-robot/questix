@@ -1,4 +1,4 @@
-import { wheelRpm, forwardRpm, frontDistance, scanMount } from './capture-core.js';
+import { wheelRpm, wheelAuthority, forwardRpm, frontDistance, scanMount } from './capture-core.js';
 import { fillSentence as fill } from '../core/content.js';
 
 // The 「実機の状態」 panel's arithmetic, with no DOM and no WebSocket (test/robot-state-core.test.mjs):
@@ -8,8 +8,10 @@ import { fillSentence as fill } from '../core/content.js';
 // with their arrival time; robot-state-view.js draws the model.
 //
 // Units follow REP-103 (metres, radians, seconds; x forward, y left, theta counter-clockwise).
-// Wheel speeds are rpm counted forward-positive for both wheels, from the chassis velocity as
-// everywhere in the material (capture-core wheelRpm: the raw right-wheel feedback is mirrored).
+// Wheel speeds are rpm counted forward-positive for both wheels. A /drive_status with each
+// wheel's own values (newer bridges) is read from them (capture-core wheelAuthority: filtered,
+// raw and the generated target, the right wheel negated only here); an older one falls back to
+// the chassis velocity (capture-core wheelRpm) with the fresh /target_twist as its target.
 // Times given to this module (`now`, arrival times) are milliseconds of one monotonic clock.
 
 const HISTORY_SECONDS = 10; // the wheel charts show this much
@@ -50,7 +52,10 @@ const finite = (...values) => values.every(Number.isFinite);
 /** A fresh state: nothing received, no trail. */
 function createStateTracker() {
   return {
-    history: [], // {at, left, right, targetLeft, targetRight, speed, command} of HISTORY_SECONDS
+    // {at, left, right (filtered measurement), rawLeft, rawRight, targetLeft, targetRight (the
+    // generated wheel target; the command's wheels for an older bridge), requestLeft, requestRight
+    // (the upstream /target_twist as wheels), speed, command, measurementValid, authority}
+    history: [],
     received: {}, // stream -> arrival time [ms] of its latest message
     latest: {}, // stream -> its latest message
     origin: null, // odom pose the trail is measured from
@@ -75,25 +80,57 @@ function freshCommand(tracker, now) {
   return { linear: twist.linear, angular: twist.angular };
 }
 
+const NO_WHEELS = { left: NaN, right: NaN };
+
+// One /drive_status into the history. Four quantities stay apart: the upstream request
+// (/target_twist), the generated wheel target, the filtered and the raw measurement. With each
+// wheel's own values, a measurement whose feedback is not valid is left unknown (never replaced by
+// the chassis velocity) while the generated target, the node's own, is kept.
 function addWheels(tracker, drive, now, config) {
-  if (!config || !finite(drive.v, drive.w)) return;
-  const measured = wheelRpm(drive, config);
   const command = freshCommand(tracker, now);
-  const target = command
-    ? wheelRpm({ v: command.linear, w: command.angular }, config)
-    : { left: NaN, right: NaN };
+  const request =
+    command && config ? wheelRpm({ v: command.linear, w: command.angular }, config) : NO_WHEELS;
+  const direct = wheelAuthority(drive);
+  let entry;
+  if (direct) {
+    entry = {
+      measured: direct.filtered ?? NO_WHEELS,
+      raw: direct.raw ?? NO_WHEELS,
+      target: direct.target ?? NO_WHEELS,
+      speed: direct.valid && finite(drive.v) ? drive.v : NaN,
+      measurementValid: direct.valid,
+      authority: 'wheel',
+    };
+  } else {
+    if (!config || !finite(drive.v, drive.w)) return;
+    entry = {
+      measured: wheelRpm(drive, config),
+      raw: NO_WHEELS,
+      target: request,
+      speed: drive.v,
+      measurementValid: true,
+      authority: 'legacy',
+    };
+  }
+  const { measured, raw, target } = entry;
   tracker.history.push({
     at: now,
     left: measured.left,
     right: measured.right,
+    rawLeft: raw.left,
+    rawRight: raw.right,
     targetLeft: target.left,
     targetRight: target.right,
-    speed: drive.v,
+    requestLeft: request.left,
+    requestRight: request.right,
+    speed: entry.speed,
     command: command ? command.linear : NaN,
+    measurementValid: entry.measurementValid,
+    authority: entry.authority,
   });
   const values = [measured.left, measured.right, target.left, target.right].filter(Number.isFinite);
   tracker.peakRpm = Math.max(tracker.peakRpm, ...values.map(Math.abs));
-  const speeds = [drive.v, command?.linear].filter(Number.isFinite);
+  const speeds = [entry.speed, command?.linear].filter(Number.isFinite);
   tracker.peakSpeed = Math.max(tracker.peakSpeed, ...speeds.map(Math.abs));
   while (tracker.history.length && now - tracker.history[0].at > HISTORY_SECONDS * 1000)
     tracker.history.shift();
@@ -197,14 +234,26 @@ function wheelsModel(tracker, now) {
   return {
     left: last.left,
     right: last.right,
+    rawLeft: last.rawLeft,
+    rawRight: last.rawRight,
     targetLeft: last.targetLeft,
     targetRight: last.targetRight,
-    stale: isStale(tracker, 'drive', now),
+    requestLeft: last.requestLeft,
+    requestRight: last.requestRight,
+    authority: last.authority,
+    measurementValid: last.measurementValid,
+    // Stale when /drive_status stopped, and when its wheel feedback is not valid: then the
+    // measurement is unknown (the target stays).
+    stale: isStale(tracker, 'drive', now) || last.measurementValid === false,
     series: {
       left: toPoints('left'),
       right: toPoints('right'),
+      rawLeft: toPoints('rawLeft'),
+      rawRight: toPoints('rawRight'),
       targetLeft: toPoints('targetLeft'),
       targetRight: toPoints('targetRight'),
+      requestLeft: toPoints('requestLeft'),
+      requestRight: toPoints('requestRight'),
       speed: toPoints('speed'),
       command: toPoints('command'),
     },
@@ -234,7 +283,9 @@ function frontModel(tracker, now) {
 function motionModel(tracker, now) {
   const drive = tracker.latest.drive;
   if (!drive || !finite(drive.v, drive.w)) return null;
-  return { speed: drive.v, turn: drive.w, stale: isStale(tracker, 'drive', now) };
+  // The chassis velocity is computed from the wheel feedback: not valid there, not valid here.
+  const invalid = wheelAuthority(drive)?.valid === false;
+  return { speed: drive.v, turn: drive.w, stale: invalid || isStale(tracker, 'drive', now) };
 }
 
 function poseModel(tracker, now) {
@@ -278,7 +329,6 @@ function robotStateModel(
   { link, silent = false, driveState = null, session = null, now },
 ) {
   if (!link?.connected) return { connected: false, phase: link?.phase ?? 'idle' };
-  const drive = tracker.latest.drive;
   const driveFresh = !isStale(tracker, 'drive', now);
   const command = freshCommand(tracker, now);
   const wheels = wheelsModel(tracker, now);
@@ -292,7 +342,12 @@ function robotStateModel(
     estop: estop.state === 'pressed' ? true : estop.state === 'released' ? false : null,
     estopState: estop.state,
     estopSource: estop.source,
-    driver: driverOf({ driveState, session, command, wheels: driveFresh ? wheels : null }),
+    driver: driverOf({
+      driveState,
+      session,
+      command,
+      wheels: driveFresh && wheels && !wheels.stale ? wheels : null,
+    }),
     command,
     motion,
     wheels,

@@ -9,7 +9,7 @@ import {
   disconnectRobot,
 } from './robot-link.js';
 import { wheelRpm } from './slam-recorder.js';
-import { scanMount } from './capture-core.js';
+import { scanMount, wheelAuthority } from './capture-core.js';
 import { loadJson, fillSentence } from '../core/content.js';
 import { html, render, nothing } from '../vendor/lit-html.js';
 
@@ -451,18 +451,28 @@ function recordWheels(drive) {
     latestEstop?.active === true && performance.now() - latestEstopAt <= ESTOP_STALE_MS;
   showEstopPressed(topicPressed || drive.emergency_stop === true);
   const config = robotState().hello?.config;
-  if (!config || !Number.isFinite(drive.v) || !Number.isFinite(drive.w)) return;
-  // Both curves go through the same kinematics, so command and measurement share one sign convention
-  // (the raw per-wheel RPM cannot be compared directly: the right motor is mirrored on the wire).
-  const rpm = wheelRpm(drive, config);
-  const twist = latestRobot('twist');
-  const target =
-    twist &&
-    drive.stamp - twist.stamp < TWIST_FRESH_SECONDS &&
-    Number.isFinite(twist.linear) &&
-    Number.isFinite(twist.angular)
-      ? wheelRpm({ v: twist.linear, w: twist.angular }, config)
-      : { left: NaN, right: NaN };
+  const none = { left: NaN, right: NaN };
+  // Each wheel's own values when the bridge sends them (filtered measurement and the generated
+  // target, made forward-positive by capture-core; invalid feedback is no measurement); an older
+  // bridge falls back to the chassis velocity and the fresh command through the kinematics.
+  const direct = wheelAuthority(drive);
+  let rpm;
+  let target;
+  if (direct) {
+    rpm = direct.filtered ?? none;
+    target = direct.target ?? none;
+  } else {
+    if (!config || !Number.isFinite(drive.v) || !Number.isFinite(drive.w)) return;
+    rpm = wheelRpm(drive, config);
+    const twist = latestRobot('twist');
+    target =
+      twist &&
+      drive.stamp - twist.stamp < TWIST_FRESH_SECONDS &&
+      Number.isFinite(twist.linear) &&
+      Number.isFinite(twist.angular)
+        ? wheelRpm({ v: twist.linear, w: twist.angular }, config)
+        : none;
+  }
   const at = performance.now();
   history.push({
     at,
