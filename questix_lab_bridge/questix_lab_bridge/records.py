@@ -679,3 +679,47 @@ class AutoRecorder:
             streams=streams, lesson=AUTO_LESSON, conditions={'label': label}, robot=self._robot,
             outcome={'reason': 'done', 'label': outcome_label})
         self._sink(recording)
+
+
+class BoundedWriter:
+    """Hand work to an executor with at most ``limit`` items admitted at once (running + waiting).
+
+    For the auto records: a callback that finishes a recording never waits for the disk, and at
+    most ``limit`` recordings are held for writing; one more is refused (:meth:`submit` returns
+    False) and the caller says so. A finished item frees its place whatever happened to it.
+    """
+
+    def __init__(self, executor, limit):
+        self._executor = executor
+        self.limit = int(limit)
+        self._admitted = 0
+        self._lock = threading.Lock()
+
+    @property
+    def backlog(self):
+        """Items admitted and not finished yet."""
+        with self._lock:
+            return self._admitted
+
+    def submit(self, fn, *args):
+        """Run ``fn(*args)`` on the executor if there is room; return whether it was admitted."""
+        with self._lock:
+            if self._admitted >= self.limit:
+                return False
+            self._admitted += 1
+        try:
+            self._executor.submit(self._run, fn, args)
+        except RuntimeError:  # the executor is shutting down
+            self._release()
+            return False
+        return True
+
+    def _run(self, fn, args):
+        try:
+            fn(*args)
+        finally:
+            self._release()
+
+    def _release(self):
+        with self._lock:
+            self._admitted -= 1

@@ -166,3 +166,10 @@ test('a run of this page blocks the other start buttons of the page', () => {
     ['running_here'],
   );
 });
+
+test('an E-stop the bridge has not heard yet keeps driving off (never dropped as unknown)', () => {
+  const driveState = { ...readyState, blockers: [{ code: 'estop_unknown', nodes: null }] };
+  const readiness = driveReadiness({ link: OPEN, driveState, confirmed: true });
+  assert.equal(readiness.ready, false);
+  assert.deepEqual(readiness.blockers, [{ code: 'estop_unknown', nodes: null }]);
+});

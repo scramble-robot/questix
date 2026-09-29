@@ -125,3 +125,17 @@ test('the E-stop row uses the bridge report even when pages may not move the rob
   // No report yet (or an older bridge): unknown rather than a guess.
   assert.match(StatusView.estop(lab(null), 'active').text, /^分かりません/);
 });
+
+test('an E-stop not heard yet is unknown, never released, even while pages may move the robot', () => {
+  const blockers = [{ code: 'estop_unknown', nodes: null }];
+  const unknown = StatusView.estop({ bridge: { read_only: false, emergency_stop: null,
+    drive_state: { allowed: true, blockers }, shoot_state: { allowed: true, blockers } } }, 'active');
+  assert.equal(unknown.text, '分かりません（非常停止の状態をまだ確認できません）');
+  assert.notEqual(unknown.tone, 'ok');
+  // The card says why nothing can move.
+  assert.equal(StatusView.blockerText('drive', blockers[0], {}, 'active').text,
+    '非常停止の状態をまだ確認できません');
+  // An older bridge without the field still falls back to its blockers.
+  assert.equal(StatusView.estop({ bridge: { read_only: false,
+    drive_state: { allowed: true, blockers: [] } } }, 'active').text, '解除されています');
+});

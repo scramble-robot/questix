@@ -19,6 +19,7 @@ def ready_arbiter(**options):
     arbiter = ShootArbiter(allowed=True, **options)
     arbiter.set_graph([], ['/esc_motor_control'], ['/shot_component'], 0.0)
     feed(arbiter, 0.0)
+    arbiter.set_estop_known(True, 0.0)  # /emergency_stop heard: released
     return arbiter
 
 
@@ -50,7 +51,7 @@ def test_not_allowed_refuses_everything_and_publishes_nothing():
 
 def test_nothing_heard_yet_means_no_launcher():
     arbiter = ShootArbiter(allowed=True)
-    assert codes(arbiter) == [shoot.NO_LAUNCHER]
+    assert codes(arbiter) == [shoot.NO_LAUNCHER, shoot.ESTOP_UNKNOWN]
     assert arbiter.roller(1, 0.5, 0.0) == shoot.NO_LAUNCHER
     assert arbiter.state(0.0)['blockers'][0]['parts'] == ['roller', 'shot']
 
@@ -334,3 +335,135 @@ def test_state_shape():
     assert state['limits'] == {'max_power': 0.8, 'min_fire_power': 0.2, 'spin_up_sec': 1.0,
                                'fire_interval_sec': 2.0, 'tilt_min': 0.0, 'tilt_max': 120.0,
                                'deadman': 0.5, 'seconds': 30.0}
+
+
+# --- E-stop unknown until /emergency_stop is heard (S3) ------------------------------------------
+
+def test_the_launcher_is_refused_until_the_estop_topic_is_heard():
+    arbiter = ShootArbiter(allowed=True)
+    arbiter.set_graph([], ['/esc_motor_control'], ['/shot_component'], 0.0)
+    feed(arbiter, 0.0)  # both statuses say estop: false, which is derived: still unknown
+    assert codes(arbiter) == [shoot.ESTOP_UNKNOWN]
+    assert arbiter.roller(1, 0.5, 0.0) == shoot.ESTOP_UNKNOWN
+    assert arbiter.tilt_to(1, 30.0, 0.0) == (shoot.ESTOP_UNKNOWN, None)
+    assert arbiter.fire(1, True, 0.0) == shoot.ESTOP_UNKNOWN
+    arbiter.set_emergency_stop(False, 0.1)  # e.g. /drive_status released: still unknown
+    assert codes(arbiter) == [shoot.ESTOP_UNKNOWN]
+    arbiter.set_estop_known(True, 0.2)  # /emergency_stop itself: released
+    assert codes(arbiter) == []
+    assert arbiter.roller(1, 0.5, 0.2) is None
+
+
+def test_a_derived_pressed_estop_blocks_before_the_topic_is_heard():
+    arbiter = ShootArbiter(allowed=True)
+    arbiter.set_graph([], ['/esc_motor_control'], ['/shot_component'], 0.0)
+    feed(arbiter, 0.0, roller={'estop': True})
+    assert codes(arbiter) == [shoot.ESTOP_UNKNOWN, shoot.EMERGENCY_STOP]
+    arbiter.set_estop_known(True, 0.1)  # known now, still pressed by the roller's own report
+    assert codes(arbiter) == [shoot.EMERGENCY_STOP]
+
+
+def test_estop_unknown_is_reported_to_the_pages():
+    arbiter = ShootArbiter(allowed=True)
+    blockers = arbiter.state(0.0)['blockers']
+    assert {'code': shoot.ESTOP_UNKNOWN, 'nodes': None, 'parts': None} in blockers
+
+
+# --- a coalesced tilt belongs to its session (S3) -----------------------------------------------
+
+def _tilt_session(gap=0.06):
+    arbiter = ready_arbiter()
+    tilt = shoot.TiltCoalescer(gap)
+    assert arbiter.roller(1, 0.0, 0.0) is None  # a session without spinning
+    refused, deg = arbiter.tilt_to(1, 30.0, 0.0)
+    assert refused is None and tilt.request(deg, arbiter.session_token(), 0.0) == 30.0
+    refused, deg = arbiter.tilt_to(1, 40.0, 0.02)  # inside the gap: kept
+    assert refused is None and tilt.request(deg, arbiter.session_token(), 0.02) is None
+    assert tilt.pending == (40.0, (1, arbiter.session))
+    return arbiter, tilt
+
+
+def _due(arbiter, tilt, now):
+    return tilt.due(arbiter.session_token(), bool(arbiter.blockers()), now)
+
+
+def test_a_kept_tilt_is_sent_once_while_its_session_runs():
+    arbiter, tilt = _tilt_session()
+    assert _due(arbiter, tilt, 0.05) is None  # still inside the gap
+    assert _due(arbiter, tilt, 0.1) == 40.0
+    assert _due(arbiter, tilt, 0.2) is None  # once
+
+
+def _ended_by(end):
+    arbiter, tilt = _tilt_session()
+    end(arbiter)
+    assert not arbiter.active
+    # Even without tilt.drop(): the token no longer matches anything that runs.
+    assert _due(arbiter, tilt, 0.1) is None
+    assert tilt.pending is None
+
+
+def test_a_kept_tilt_dies_with_a_disconnect():
+    _ended_by(lambda arbiter: arbiter.disconnect(1, 0.03))
+
+
+def test_a_kept_tilt_dies_with_an_explicit_stop():
+    _ended_by(lambda arbiter: arbiter.stop(2, 0.03))  # any page's roller_stop / stop-all
+
+
+def test_a_kept_tilt_dies_with_the_deadman():
+    _ended_by(lambda arbiter: arbiter.tick(0.6))  # no roller heartbeat for deadman_sec
+
+
+def test_a_kept_tilt_dies_with_the_time_limit():
+    def end(arbiter):
+        for step in range(1, 40):  # heartbeats keep the deadman happy until the time limit
+            now = step * 0.1
+            arbiter.roller(1, 0.0, now)
+            feed(arbiter, now)
+            arbiter.tick(now)
+            if not arbiter.active:
+                return
+    arbiter, tilt = _tilt_session()
+    arbiter.max_spin_sec = 1.0
+    end(arbiter)
+    assert arbiter.last_stop['reason'] == shoot.TIME_LIMIT
+    assert _due(arbiter, tilt, 4.0) is None
+
+
+def test_a_kept_tilt_dies_with_a_blocker():
+    _ended_by(lambda arbiter: feed(arbiter, 0.03, roller={'source': 'joy'}))  # controller
+
+
+def test_a_kept_tilt_dies_with_the_estop():
+    _ended_by(lambda arbiter: arbiter.set_emergency_stop(True, 0.03))
+
+
+def test_a_kept_tilt_dies_with_an_invalid_request():
+    _ended_by(lambda arbiter: arbiter.roller(1, float('nan'), 0.03))
+
+
+def test_a_kept_tilt_is_never_inherited_by_the_next_session():
+    arbiter, tilt = _tilt_session()
+    arbiter.stop(1, 0.03)
+    assert arbiter.roller(1, 0.0, 0.04) is None  # the same page starts a new session at once
+    assert arbiter.active and arbiter.owner == 1
+    assert _due(arbiter, tilt, 0.1) is None  # the old session's tilt is void
+
+
+def test_a_kept_tilt_is_void_while_blocked_even_if_the_session_survived():
+    arbiter, tilt = _tilt_session()
+    token = arbiter.session_token()
+    assert tilt.due(token, True, 0.1) is None
+    assert tilt.pending is None
+
+
+def test_drop_forgets_a_kept_tilt():
+    arbiter, tilt = _tilt_session()
+    tilt.drop()
+    assert _due(arbiter, tilt, 0.1) is None
+
+
+def test_no_tilt_is_kept_without_a_session():
+    tilt = shoot.TiltCoalescer(0.06)
+    assert tilt.request(30.0, None, 0.0) is None and tilt.pending is None
