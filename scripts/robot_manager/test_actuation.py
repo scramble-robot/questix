@@ -330,6 +330,80 @@ def test_a_failed_switch_on_still_reports_what_the_reap_switched_off(actuation, 
     assert actuation.status()["drive"] is False
 
 
+def _break_heartbeat_stdin(proc):
+    """Make every later write to the (still running) heartbeat fail, as a broken pipe would."""
+    def write(text):
+        raise OSError(32, "Broken pipe")
+
+    proc.stdin.write = write
+
+
+def _assert_no_switch_without_heartbeat(actuation):
+    status = actuation.status()
+    if not status["running"]:
+        assert status["drive"] is False and status["launcher"] is False
+    return status
+
+
+@pytest.mark.parametrize("already_on, switched_on, lesson",
+                         [("launcher", "drive", "set_shoot"), ("drive", "launcher", "set_drive")])
+def test_a_failed_write_while_the_other_switch_is_on_switches_both_off(
+        lab, actuation, already_on, switched_on, lesson):
+    told = []
+    actuation.add_revoke_listener(lambda kind, reason: told.append((kind, reason)))
+    actuation.set_authority(already_on, True)
+    getattr(lab, lesson)(lab.DriveRequest(allow=True))
+    told.clear()
+    (proc,) = actuation.started
+    assert proc.poll() is None  # the heartbeat is still running; only the write fails
+    _break_heartbeat_stdin(proc)
+    with pytest.raises(HTTPException) as error:
+        actuation.set_authority(switched_on, True)
+    assert error.value.status_code == 503
+    status = _assert_no_switch_without_heartbeat(actuation)
+    assert status["drive"] is False and status["launcher"] is False and status["running"] is False
+    assert status["last_off_reason"] == "heartbeat_write_failed" and status["error"]
+    assert proc.stdin.closed_by_parent  # stopped, not left behind
+    lab_status = lab.get_status()
+    assert lab_status["drive_allowed"] is False and lab_status["shoot_allowed"] is False
+    # Each kind once, as the transport failure it was (never as the teacher's OFF).
+    assert told == [("drive", "heartbeat_write_failed"), ("launcher", "heartbeat_write_failed")]
+
+
+def test_a_failed_write_for_the_first_switch_leaves_nothing_on(lab, actuation, monkeypatch):
+    class _Unwritable(_FakeHeartbeat):
+        def __init__(self, command, **kwargs):
+            super().__init__(command, **kwargs)
+            _break_heartbeat_stdin(self)
+
+    monkeypatch.setattr(actuation.subprocess, "Popen", lambda command, **kw: _Unwritable(command))
+    with pytest.raises(HTTPException) as error:
+        actuation.set_authority("drive", True)
+    assert error.value.status_code == 503
+    status = _assert_no_switch_without_heartbeat(actuation)
+    assert status["drive"] is False and status["launcher"] is False and status["running"] is False
+    lab_status = lab.get_status()
+    assert lab_status["drive_allowed"] is False and lab_status["shoot_allowed"] is False
+
+
+def test_a_failed_write_on_a_teacher_off_takes_the_other_switch_with_it(lab, actuation):
+    told = []
+    actuation.add_revoke_listener(lambda kind, reason: told.append((kind, reason)))
+    actuation.set_authority("drive", True)
+    actuation.set_authority("launcher", True)
+    lab.set_drive(lab.DriveRequest(allow=True))
+    lab.set_shoot(lab.DriveRequest(allow=True))
+    told.clear()
+    _break_heartbeat_stdin(actuation.started[0])
+    status = actuation.set_authority("drive", False)
+    assert status["drive"] is False and status["launcher"] is False and status["running"] is False
+    assert status["last_off_reason"] == "heartbeat_write_failed"
+    _assert_no_switch_without_heartbeat(actuation)
+    lab_status = lab.get_status()
+    assert lab_status["drive_allowed"] is False and lab_status["shoot_allowed"] is False
+    assert told == [("launcher", "heartbeat_write_failed"), ("drive", "teacher")]
+
+
 @pytest.fixture
 def app_module(lab, actuation, monkeypatch):
     from robot_manager import app as module
