@@ -12,9 +12,9 @@
 #   sudo scripts/update-robot-manager.sh --if-installed   update only an existing install
 #                                                         (used by scripts/wifi-ap.sh up)
 #   scripts/update-robot-manager.sh --check               exit 0 = up to date, 1 = outdated
-#                                                         (files, pinned versions or the robot
-#                                                         launcher), 2 = not
-#                                                         installed
+#                                                         (files, pinned versions, the robot
+#                                                         launcher or the QUESTiX Local helper),
+#                                                         2 = not installed
 #
 # Exit status of an update: 0 when Robot Manager is up to date (updated or already current).
 
@@ -78,6 +78,56 @@ launcher_current() {
 install_launcher() {
     echo "🔄 ロボット制御の起動スクリプトを更新します（次のロボット制御の起動から使われます）..."
     install -m 0755 "$LAUNCHER_SOURCE" "$LAUNCHER_TARGET"
+}
+
+# QUESTiX Local (管理設定 → ネットワーク): Robot Manager, which runs as the robot user, applies
+# access point changes only through this root-owned helper and its oneshot unit, and polkit lets
+# that user start only that unit. Installing them never starts or changes the access point.
+NETWORK_ADMIN_SOURCE="$SOURCE_DIR/network_admin.py"
+NETWORK_ADMIN_TARGET="$INSTALL_DIR/questix_network_admin.py"
+NETWORK_UNIT_SOURCE="$REPO_ROOT/systemd/questix_network_admin.service"
+NETWORK_UNIT_TARGET=/etc/systemd/system/questix_network_admin.service
+POLKIT_SOURCE="$REPO_ROOT/systemd/50-questix-robot.rules"
+POLKIT_TARGET=/etc/polkit-1/rules.d/50-questix-robot.rules
+
+# The robot user the manager runs as (User= of its unit); empty when unknown or root.
+manager_user() {
+    local user
+    user="$(systemctl show -P User "$SERVICE.service" 2> /dev/null || true)"
+    if [[ "$user" =~ ^[a-z_][a-z0-9_-]*$ ]] && [ "$user" != root ]; then
+        echo "$user"
+    fi
+}
+
+# The polkit rules for that user, as scripts/install-robot-manager.sh writes them.
+expected_polkit() {
+    sed -e "s|ubuntu|$1|g" "$POLKIT_SOURCE"
+}
+
+# 0 when the helper (root-owned, not writable by others), its unit and the polkit rules match.
+network_admin_current() {
+    cmp -s "$NETWORK_ADMIN_SOURCE" "$NETWORK_ADMIN_TARGET" || return 1
+    [ "$(stat -c '%u %g %a' "$NETWORK_ADMIN_TARGET")" = "0 0 755" ] || return 1
+    cmp -s "$NETWORK_UNIT_SOURCE" "$NETWORK_UNIT_TARGET" || return 1
+    local user
+    user="$(manager_user)"
+    [ -z "$user" ] || cmp -s <(expected_polkit "$user") "$POLKIT_TARGET"
+}
+
+install_network_admin() {
+    echo "🔄 QUESTiX Local の切り替え部品を更新します（アクセスポイントの状態は変えません）..."
+    install -d -o root -g root -m 0755 "$INSTALL_DIR"
+    install -o root -g root -m 0755 "$NETWORK_ADMIN_SOURCE" "$NETWORK_ADMIN_TARGET"
+    install -o root -g root -m 0644 "$NETWORK_UNIT_SOURCE" "$NETWORK_UNIT_TARGET"
+    systemctl daemon-reload
+    local user
+    user="$(manager_user)"
+    if [ -n "$user" ]; then
+        install -d -m 0755 /etc/polkit-1/rules.d
+        expected_polkit "$user" > "$POLKIT_TARGET.new"
+        chmod 0644 "$POLKIT_TARGET.new"
+        mv "$POLKIT_TARGET.new" "$POLKIT_TARGET"
+    fi
 }
 
 # Every pinned dependency must be installed in exactly that version; prints the ones that are not.
@@ -204,7 +254,10 @@ main() {
     deps_current && deps_ok=1
     local launcher_ok=0
     launcher_current && launcher_ok=1
-    if [ "$files_ok" = 1 ] && [ "$deps_ok" = 1 ] && [ "$launcher_ok" = 1 ]; then
+    local network_ok=0
+    network_admin_current && network_ok=1
+    if [ "$files_ok" = 1 ] && [ "$deps_ok" = 1 ] && [ "$launcher_ok" = 1 ] \
+        && [ "$network_ok" = 1 ]; then
         [ "$mode" = --check ] && exit 0
         echo "✅ Robot Manager は最新です。"
         exit 0
@@ -214,6 +267,7 @@ main() {
     [ "$(id -u)" -eq 0 ] || die "root で実行してください（sudo）。"
     [ "$deps_ok" = 1 ] || install_requirements
     [ "$launcher_ok" = 1 ] || install_launcher
+    [ "$network_ok" = 1 ] || install_network_admin
     if [ "$files_ok" = 0 ]; then
         echo "🔄 Robot Manager をこのリポジトリの版に更新します ..."
         install_package

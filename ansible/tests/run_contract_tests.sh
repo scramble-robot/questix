@@ -306,6 +306,125 @@ assert_contains "$DESKTOP_TASKS" "WARNING: the Robot Manager desktop shortcut is
 assert_contains "ansible/playbooks/setup_kit.yaml" "Desktop shortcut not trusted" \
     "desktop trust: the completion message does not claim trust it did not verify"
 
+# --- 11. QUESTiX Local (Robot Manager network card) ------------------------------
+# The root helper writes the same files as the wifi_access_point role: render the role's own
+# templates with Ansible and compare them with the helper's render_* output (first line = header).
+for case in \
+    '{"wifi_ap_state": "up", "wifi_ap_interface": "wlan0", "wifi_ap_ssid": "QUESTiX 3F2A", "wifi_ap_password": "ab\"c'"'"'d;e:f", "wifi_ap_band": "a", "wifi_ap_channel": 40, "wifi_ap_country": "JP", "wifi_ap_address": "10.43.0.1/24"}' \
+    '{"wifi_ap_state": "down", "wifi_ap_interface": "wlan0", "wifi_ap_ssid": "QUESTiX-3F2A", "wifi_ap_password": "Abc23456defg", "wifi_ap_band": "bg", "wifi_ap_channel": 6, "wifi_ap_country": "JP", "wifi_ap_address": "10.42.0.1/24"}'; do
+    RENDER_DIR="$(mktemp -d "$TMP_ROOT/render.XXXX")"
+    printf '%s' "$case" > "$RENDER_DIR/vars.json"
+    if run_playbook ansible/tests/test_wifi_ap_render.yaml -e "render_dir=$RENDER_DIR" \
+        -e "wifi_ap_connection_name=questix-ap" -e "@$RENDER_DIR/vars.json"; then
+        if PYTHONPATH=scripts python3 - "$RENDER_DIR" << 'PYTHON'
+import json, pathlib, sys
+from robot_manager import network_admin as na
+directory = pathlib.Path(sys.argv[1])
+values = {k.removeprefix("wifi_ap_"): v for k, v in json.loads((directory / "vars.json").read_text()).items()}
+body = lambda text: text.split("\n", 1)[1]
+ok = body((directory / "keyfile").read_text()) == na.render_keyfile(values)
+ok = ok and body((directory / "settings").read_text()) == na.render_settings(values)
+sys.exit(0 if ok else 1)
+PYTHON
+        then
+            pass "QUESTiX Local: helper renders the role's keyfile and settings ($(printf '%s' "$case" | cut -c1-30)...)"
+        else
+            fail "QUESTiX Local: helper output differs from the role's templates"
+            diff <(tail -n +2 "$RENDER_DIR/keyfile") <(PYTHONPATH=scripts python3 -c "import json,sys; from robot_manager import network_admin as na; v={k[8:]:x for k,x in json.load(open('$RENDER_DIR/vars.json')).items()}; sys.stdout.write(na.render_keyfile(v))") || true
+        fi
+    else
+        fail "QUESTiX Local: template render failed (log shown above)"
+    fi
+done
+assert_contains "ansible/roles/wifi_access_point/tasks/main.yaml" \
+    "options cfg80211 ieee80211_regdom={{ wifi_ap_country }}" "QUESTiX Local: regulatory domain line of the role"
+assert_contains "scripts/robot_manager/network_admin.py" \
+    'f"options cfg80211 ieee80211_regdom={s['"'"'country'"'"']}\n"' "QUESTiX Local: same regulatory domain line in the helper"
+
+# polkit: the static rules and the template are the same apart from the user, and the new rule
+# allows only `start` of questix_network_admin.service.
+if diff <(sed 's|"ubuntu"|"{{ target_user }}"|' systemd/50-questix-robot.rules) \
+    ansible/roles/robot_autostart/templates/50-questix-robot.rules.j2 >/dev/null; then
+    pass "QUESTiX Local: polkit static rules and Ansible template are identical"
+else
+    fail "QUESTiX Local: polkit static rules and Ansible template differ"
+fi
+if python3 - systemd/50-questix-robot.rules << 'PYTHON'
+import re, sys
+text = open(sys.argv[1]).read()
+rules = re.findall(r"polkit\.addRule\(function\(action, subject\) \{(.*?)\n\}\);", text, re.S)
+network = [r for r in rules if "questix_network_admin.service" in r]
+assert len(network) == 1, "one rule for the network unit"
+rule = network[0]
+assert re.findall(r'action\.lookup\("verb"\) === "(\w+)"', rule) == ["start"], "verb start only"
+assert 'action.lookup("unit") === "questix_network_admin.service"' in rule
+assert 'subject.user === "ubuntu"' in rule
+assert "org.freedesktop.systemd1.manage-units" in rule
+# No rule without a unit check.
+assert all('action.lookup("unit") ===' in r for r in rules), "every rule names its unit"
+PYTHON
+then
+    pass "QUESTiX Local: polkit allows only starting questix_network_admin.service for the robot user"
+else
+    fail "QUESTiX Local: polkit rule is broader than start of questix_network_admin.service"
+fi
+
+UNIT=systemd/questix_network_admin.service
+assert_contains "$UNIT" "Type=oneshot" "QUESTiX Local: helper unit is a oneshot"
+assert_contains "$UNIT" "User=root" "QUESTiX Local: helper unit runs as root"
+assert_contains "$UNIT" "ExecStart=/usr/bin/python3 -I /opt/questix_robot/questix_network_admin.py apply" \
+    "QUESTiX Local: helper unit runs the root-owned copy with python3 -I"
+assert_not_contains "$UNIT" "[Install]" "QUESTiX Local: helper unit is never enabled (no AP at boot or setup)"
+RM_TASKS=ansible/roles/robot_autostart/tasks/robot_manager.yaml
+if python3 - "$RM_TASKS" << 'PYTHON'
+import sys, yaml
+tasks = yaml.safe_load(open(sys.argv[1]))
+helper = [t for t in tasks if t.get("ansible.builtin.copy", {}).get("dest") == "/opt/questix_robot/questix_network_admin.py"]
+unit = [t for t in tasks if t.get("ansible.builtin.copy", {}).get("dest") == "/etc/systemd/system/questix_network_admin.service"]
+assert len(helper) == 1 and len(unit) == 1
+copy = helper[0]["ansible.builtin.copy"]
+assert (copy["owner"], copy["group"], copy["mode"]) == ("root", "root", "0755")
+assert helper[0]["ansible.builtin.copy"]["src"].endswith("scripts/robot_manager/network_admin.py")
+apt = [t["ansible.builtin.apt"]["name"] for t in tasks if "ansible.builtin.apt" in t]
+assert any("dnsmasq-base" in names and "iw" in names for names in apt)
+# The helper unit is neither started nor enabled by setup, and nothing brings the AP up here.
+for t in tasks:
+    unit_name = str(t.get("ansible.builtin.systemd", {}).get("name", ""))
+    assert "questix_network_admin" not in unit_name
+    assert "nmcli" not in str(t.get("ansible.builtin.command", ""))
+PYTHON
+then
+    pass "QUESTiX Local: setup installs the root-owned helper, its unit and tools, and starts nothing"
+else
+    fail "QUESTiX Local: setup tasks for the helper are wrong"
+fi
+assert_contains "ansible/playbooks/vars/setup_kit_vars.yaml" "wifi_ap_enabled: false" \
+    "QUESTiX Local: fresh kits still create no access point (wifi_ap_enabled: false)"
+assert_contains "ansible/playbooks/setup_kit.yaml" "{ role: wifi_access_point, when: wifi_ap_enabled | bool }" \
+    "QUESTiX Local: wifi_ap_enabled keeps its meaning"
+for installer in scripts/install-robot-manager.sh scripts/update-robot-manager.sh; do
+    assert_contains "$installer" "questix_network_admin" "QUESTiX Local: $installer installs the helper"
+done
+assert_contains scripts/install-robot-manager.sh \
+    'install -o root -g root -m 0755 "${REPO_DIR}/scripts/robot_manager/network_admin.py"' \
+    "QUESTiX Local: installer copies the helper root-owned"
+assert_contains scripts/update-robot-manager.sh \
+    'install -o root -g root -m 0755 "$NETWORK_ADMIN_SOURCE" "$NETWORK_ADMIN_TARGET"' \
+    "QUESTiX Local: updater copies the helper root-owned"
+# Robot Manager stays an unprivileged, local-only service; nothing grants sudo.
+for unit in systemd/questix_robot_manager.service ansible/roles/robot_autostart/templates/questix_robot_manager.service.j2; do
+    assert_contains "$unit" "--host 127.0.0.1" "QUESTiX Local: $unit listens on 127.0.0.1 only"
+    assert_not_contains "$unit" "User=root" "QUESTiX Local: $unit does not run as root"
+done
+# (scripts/prepare-base-system.sh, the ISO base image, has its own sudoers line; it is not part of
+# the kit setup or Robot Manager and is reviewed separately.)
+if grep -rIl "NOPASSWD" ansible/roles ansible/playbooks systemd scripts/robot_manager \
+    scripts/install-robot-manager.sh scripts/update-robot-manager.sh scripts/wifi-ap.sh >/dev/null 2>&1; then
+    fail "QUESTiX Local: a NOPASSWD sudoers entry exists in the kit setup or Robot Manager"
+else
+    pass "QUESTiX Local: no NOPASSWD sudoers entry in the kit setup or Robot Manager"
+fi
+
 REAL_BASHRC_AFTER="$(real_bashrc_fingerprint)"
 if [ "$REAL_BASHRC_BEFORE" = "$REAL_BASHRC_AFTER" ]; then
     pass "isolation: real user ~/.bashrc remained byte-identical"

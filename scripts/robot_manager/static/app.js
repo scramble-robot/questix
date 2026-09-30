@@ -875,6 +875,164 @@ async function refreshAccessPoint() {
   }
   renderJoinQr();
   suggestWebJoyUrl();
+  renderNetwork();
+}
+
+// ---------------------------------------------------------------------------
+// 管理設定: ネットワーク / QUESTiX Local (texts: network-view.js; changes: wifi_ap.py → helper)
+// ---------------------------------------------------------------------------
+
+const network = { passwordShown: false, formLoaded: false, polling: false, lastJob: "" };
+
+function renderNetwork() {
+  const ap = joinQr.accessPoint;
+  const view = NetworkView.summary(ap);
+  document.getElementById("net-status").dataset.state = view.state;
+  document.getElementById("net-state").textContent = view.label;
+  document.getElementById("net-text").textContent = view.text;
+  const facts = document.getElementById("net-facts");
+  facts.replaceChildren(...NetworkView.facts(ap).flatMap(([label, value]) => {
+    const dt = document.createElement("dt");
+    dt.textContent = label;
+    const dd = document.createElement("dd");
+    dd.textContent = value;
+    return [dt, dd];
+  }));
+  const configured = Boolean(ap && ap.configured);
+  document.getElementById("net-password-row").hidden = !configured;
+  document.getElementById("net-password").textContent = NetworkView.passwordText(ap, network.passwordShown);
+  const show = document.getElementById("net-password-show");
+  show.textContent = network.passwordShown ? "隠す" : "表示";
+  show.setAttribute("aria-pressed", String(network.passwordShown));
+  const notice = document.getElementById("net-notice");
+  notice.textContent = view.notice;
+  notice.hidden = !view.notice;
+  notice.dataset.tone = view.tone;
+  document.getElementById("net-start").disabled = !view.canStart;
+  document.getElementById("net-stop").disabled = !view.canStop;
+  document.getElementById("net-save").disabled = !view.canSave;
+  document.getElementById("net-password-new").disabled = !view.canRegenerate;
+  const tech = document.getElementById("net-tech");
+  const rows = configured ? [
+    ["国の設定", ap.country || "JP"],
+    ["アドレス", ap.address && ap.prefix ? `${ap.address}/${ap.prefix}` : "—"],
+    ["SSH（同じ Wi-Fi の PC から）", ap.ssh || "—"],
+    ["教材の URL", ap.lab_url || "—"],
+  ] : [];
+  tech.replaceChildren(...rows.flatMap(([label, value]) => {
+    const dt = document.createElement("dt");
+    dt.textContent = label;
+    const dd = document.createElement("dd");
+    dd.textContent = value;
+    return [dt, dd];
+  }));
+  if (!network.formLoaded && ap) fillNetworkForm(ap);
+  if (view.state === "applying") pollNetworkJob();
+}
+
+function fillChannelOptions(band, selected) {
+  const select = document.getElementById("net-channel");
+  const channels = NetworkView.channelOptions(band).map(String);
+  if (selected && selected !== "auto" && !channels.includes(String(selected))) channels.push(String(selected));
+  select.replaceChildren(new Option("自動（周囲を調べて空いているものを選ぶ）", "auto"),
+    ...channels.map((channel) => new Option(`${channel} ch`, channel)));
+  select.value = selected && channels.includes(String(selected)) ? String(selected) : "auto";
+}
+
+function fillNetworkForm(ap) {
+  const configured = Boolean(ap.configured);
+  document.getElementById("net-ssid").value = configured ? ap.ssid : "";
+  document.getElementById("net-ssid").placeholder = configured ? "" : "QUESTiX-（機体ごとに自動）";
+  document.getElementById("net-password-input").value = "";
+  const band = configured && ap.band === "a" ? "a" : "bg";
+  document.getElementById("net-band").value = band;
+  fillChannelOptions(band, configured ? ap.channel : "auto");
+  const custom = configured && ap.address && ap.address !== "10.42.0.1";
+  document.getElementById("net-address-auto").checked = !custom;
+  document.getElementById("net-address-manual").checked = Boolean(custom);
+  document.getElementById("net-address").value = custom ? `${ap.address}/${ap.prefix}` : "";
+  network.formLoaded = true;
+}
+
+function networkForm() {
+  return {
+    ssid: document.getElementById("net-ssid").value,
+    password: document.getElementById("net-password-input").value,
+    band: document.getElementById("net-band").value,
+    channel: document.getElementById("net-channel").value,
+    addressMode: document.getElementById("net-address-manual").checked ? "manual" : "auto",
+    address: document.getElementById("net-address").value,
+  };
+}
+
+// While a change runs, follow it once a second; afterwards refresh the card and the QR codes.
+async function pollNetworkJob() {
+  if (network.polling) return;
+  network.polling = true;
+  try {
+    for (;;) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      let job;
+      try { job = await apiSilent("/api/wifi-ap/job"); } catch { continue; }
+      if (job.state !== "running") {
+        const key = `${job.id}:${job.state}`;
+        if (key !== network.lastJob) {
+          network.lastJob = key;
+          const text = [job.message, job.lab_message].filter(Boolean).join(" ");
+          if (text) toast(text, job.state === "failed" ? "error" : "success");
+        }
+        network.formLoaded = false;
+        break;
+      }
+    }
+  } finally {
+    network.polling = false;
+  }
+  await refreshAccessPoint();
+  refreshLabStatus();
+}
+
+async function networkChange(path, method, body, action) {
+  if (!confirm(NetworkView.confirmText(action, joinQr.accessPoint))) return;
+  for (const id of ["net-start", "net-stop", "net-save", "net-password-new"]) {
+    document.getElementById(id).disabled = true;
+  }
+  try {
+    const job = await api(path, { method, body: body ? JSON.stringify(body) : undefined });
+    if (joinQr.accessPoint) joinQr.accessPoint.job = job;
+    network.passwordShown = false;
+    renderNetwork();
+    pollNetworkJob();
+  } catch {
+    refreshAccessPoint();
+  }
+}
+
+function setupNetworkEvents() {
+  document.getElementById("net-start").addEventListener("click", () =>
+    networkChange("/api/wifi-ap/start", "POST", null, "start"));
+  document.getElementById("net-stop").addEventListener("click", () =>
+    networkChange("/api/wifi-ap/stop", "POST", null, "stop"));
+  document.getElementById("net-password-new").addEventListener("click", () =>
+    networkChange("/api/wifi-ap/regenerate-password", "POST", null, "regenerate"));
+  document.getElementById("net-password-show").addEventListener("click", () => {
+    network.passwordShown = !network.passwordShown;
+    renderNetwork();
+  });
+  document.getElementById("net-band").addEventListener("change", (event) => {
+    fillChannelOptions(event.target.value, "auto");
+  });
+  document.getElementById("net-address").addEventListener("input", () => {
+    document.getElementById("net-address-manual").checked = true;
+  });
+  document.getElementById("net-save").addEventListener("click", () => {
+    const { body, error } = NetworkView.configChanges(networkForm(), joinQr.accessPoint);
+    if (error) {
+      toast(error, "error");
+      return;
+    }
+    networkChange("/api/wifi-ap/config", "PUT", body, "save");
+  });
 }
 
 function labUrlForPhones() {
@@ -1381,6 +1539,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Poll recorder status more frequently for a live elapsed/size readout
   setInterval(refreshRecStatus, 2000);
   setupLabEvents();
+  setupNetworkEvents();
   refreshLabStatus();
   setInterval(refreshLabStatus, 3000);
   refreshAccessPoint();

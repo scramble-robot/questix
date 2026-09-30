@@ -1,0 +1,25 @@
+# QUESTiX Local: applies one access point change requested from Robot Manager (管理設定 →
+# ネットワーク / QUESTiX Local). Robot Manager runs as the robot user and may start only this unit
+# (polkit: 50-questix-robot.rules, verb start). It runs a root-owned copy of
+# scripts/robot_manager/network_admin.py that reads /etc/questix_robot/network_request.json once,
+# validates it and applies it like the wifi_access_point role. It has no install section: it is
+# never enabled and never runs at boot, so installing it does not start the access point.
+# The same file is installed by scripts/install-robot-manager.sh, scripts/update-robot-manager.sh
+# and the Ansible robot_autostart role (no per-kit values in it).
+[Unit]
+Description=QUESTiX Local access point change (Robot Manager)
+After=NetworkManager.service
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/bin/python3 -I /opt/questix_robot/questix_network_admin.py apply
+Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin
+TimeoutStartSec=120
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=questix_network_admin
