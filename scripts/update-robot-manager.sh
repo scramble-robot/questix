@@ -11,13 +11,19 @@
 #   sudo scripts/update-robot-manager.sh                  install or update if outdated
 #   sudo scripts/update-robot-manager.sh --if-installed   update only an existing install
 #                                                         (used by scripts/wifi-ap.sh up)
-#   scripts/update-robot-manager.sh --check               exit 0 = up to date, 1 = outdated
+#   sudo scripts/update-robot-manager.sh --check          exit 0 = up to date, 1 = outdated
 #                                                         (files, pinned versions, the robot
 #                                                         launcher, the QUESTiX Local helper or
-#                                                         legacy privilege files),
-#                                                         2 = not installed
+#                                                         removable legacy privilege files),
+#                                                         2 = not installed,
+#                                                         3 = attention: an unsafe legacy
+#                                                         privilege state an operator has to fix
+#                                                         (e.g. the old image's known password),
+#                                                         or one that cannot be checked without
+#                                                         root; never reported as up to date
 #
 # Exit status of an update: 0 when Robot Manager is up to date (updated or already current).
+# An unsafe legacy privilege state stops the update before it changes anything.
 
 set -euo pipefail
 
@@ -135,13 +141,17 @@ install_network_admin() {
 # sudoers file): removed on every update, only when QUESTiX wrote them.
 LEGACY_CLEANUP="$REPO_ROOT/scripts/cleanup_legacy_privileges.py"
 
-# 0 when nothing is left to remove (or it cannot be seen without root).
-legacy_current() {
-    python3 -I "$LEGACY_CLEANUP" --check > /dev/null
+# The cleanup's --check result: 0 clean, 1 removable, 2 unsafe or undetermined (an operator has
+# to act; without root the sudoers and shadow files cannot be read, so it is never "clean").
+LEGACY_STATE=0
+LEGACY_REPORT=""
+check_legacy() {
+    LEGACY_STATE=0
+    LEGACY_REPORT="$(python3 -I "$LEGACY_CLEANUP" --check 2>&1)" || LEGACY_STATE=$?
 }
 
 cleanup_legacy() {
-    echo "🔒 古い版が残した広い権限（旧 .pkla・パスワードなしの sudo）を確認します ..."
+    echo "🔒 古い版が残した広い権限（旧 .pkla・パスワードなしの sudo）を取り除きます ..."
     python3 -I "$LEGACY_CLEANUP" || die "権限の整理を安全のため中止しました（上のメッセージを確認）。"
 }
 
@@ -272,7 +282,14 @@ main() {
     local network_ok=0
     network_admin_current && network_ok=1
     local legacy_ok=0
-    legacy_current && legacy_ok=1
+    check_legacy
+    [ "$LEGACY_STATE" = 0 ] && legacy_ok=1
+    if [ "$LEGACY_STATE" != 0 ] && [ "$LEGACY_STATE" != 1 ]; then
+        # Unsafe or undetermined: never "up to date", and no update until an operator acted.
+        echo "$LEGACY_REPORT" >&2
+        [ "$mode" = --check ] && exit 3
+        die "古い版の権限の状態を安全に整理できません（上のメッセージの操作をしてから再実行してください）。"
+    fi
     if [ "$files_ok" = 1 ] && [ "$deps_ok" = 1 ] && [ "$launcher_ok" = 1 ] \
         && [ "$network_ok" = 1 ] && [ "$legacy_ok" = 1 ]; then
         [ "$mode" = --check ] && exit 0

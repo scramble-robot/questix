@@ -499,8 +499,8 @@ assert_contains "$ISO_APPLY" "A NOPASSWD sudo rule is in the image" "image: buil
 assert_contains "$ISO_APPLY" "The ubuntu account is not locked" "image: build fails on an unlocked account"
 assert_contains "$ISO_APPLY" "SSH is enabled before the first-boot enrollment" "image: build fails on enabled SSH"
 assert_not_contains "$ISO_APPLY" "first-boot-setup.sh" "image: no .bashrc first-boot script"
-assert_contains "$ISO_APPLY" '-m 0755 "$ISO_FILES_DIR/questix-first-boot-enroll.sh"' \
-    "image: enrollment helper installed root-owned"
+assert_contains scripts/iso/image-build-lib.sh 'install -D -m 0755 "$iso_dir/questix-first-boot-enroll.sh"' \
+    "image: enrollment helper installed 0755 (root-owned by the root build)"
 
 # The role's decisions, with a fake cleanup script.
 FAKE_CLEANUP="$TMP_ROOT/fake_cleanup.py"
@@ -530,6 +530,32 @@ for pending in 0 1; do
         fail "cleanup role: playbook failed (pending=$pending)"
     fi
 done
+# 2 = unsafe (e.g. the old image's known password): the setup must fail, and nothing is removed.
+export FAKE_CLEANUP_LOG="$TMP_ROOT/fake_cleanup.2.log" FAKE_CLEANUP_PENDING=2
+if run_playbook ansible/tests/test_legacy_cleanup.yaml -e "legacy_privilege_cleanup_script=$FAKE_CLEANUP" \
+    > /dev/null 2>&1; then
+    fail "cleanup role: an unsafe state (exit 2) did not fail the setup"
+elif grep -q "Unsafe legacy privilege state" "$PLAYBOOK_LOG" \
+    && [ "$(grep -cv -- '--check' "$FAKE_CLEANUP_LOG" || true)" = 0 ]; then
+    pass "cleanup role: an unsafe state (exit 2) fails the setup without a cleanup run"
+else
+    fail "cleanup role: exit 2 not reported as unsafe"
+    show_log_tail
+fi
+# The update and install paths never treat an unsafe state as clean.
+UPDATER=scripts/update-robot-manager.sh
+assert_contains "$UPDATER" 'LEGACY_REPORT="$(python3 -I "$LEGACY_CLEANUP" --check 2>&1)" || LEGACY_STATE=$?' \
+    "legacy exit contract: the updater reads the cleanup's --check status"
+assert_contains "$UPDATER" '[ "$mode" = --check ] && exit 3' \
+    "legacy exit contract: update --check reports an unsafe state as 3 (never up to date)"
+assert_contains "$UPDATER" '[ "$LEGACY_STATE" = 0 ] && legacy_ok=1' \
+    "legacy exit contract: only 0 counts as clean in the updater"
+assert_contains "$UPDATER" "古い版の権限の状態を安全に整理できません" \
+    "legacy exit contract: an update stops on an unsafe state"
+assert_contains scripts/check-robot-manager.sh '3) ng "古い版が残した権限に' \
+    "legacy exit contract: check-robot-manager reports update --check 3"
+assert_contains scripts/install-robot-manager.sh 'if [ "$legacy_state" != 0 ] && [ "$legacy_state" != 1 ]; then' \
+    "legacy exit contract: the installer stops before any change on an unsafe state"
 if run_playbook ansible/tests/test_legacy_cleanup.yaml -e "legacy_privilege_cleanup_script=$TMP_ROOT/missing.py" &&
     grep -q "Legacy privilege cleanup skipped" "$PLAYBOOK_LOG"; then
     pass "cleanup role: skipped with a message when the script is not there (image build)"
@@ -537,6 +563,9 @@ else
     fail "cleanup role: missing script not handled"
 fi
 unset FAKE_CLEANUP_LOG FAKE_CLEANUP_PENDING
+
+# --- 13. Custom image build (scripts/iso/image-build-lib.sh, apply-ansible-config.sh) ---
+. ansible/tests/image_build_contract.sh
 
 REAL_BASHRC_AFTER="$(real_bashrc_fingerprint)"
 if [ "$REAL_BASHRC_BEFORE" = "$REAL_BASHRC_AFTER" ]; then

@@ -208,10 +208,19 @@ A QUESTiX custom image has **no initial password** and no passwordless sudo rule
 4. If the enrollment fails or is interrupted, the account stays locked, SSH stays disabled,
    and the next boot asks again.
 
+The image is built from the checkout that runs `scripts/apply-ansible-config.sh`:
+- That commit is cloned to `/home/ubuntu/questix` (tracked files only, owned by `ubuntu`).
+- The workspace is built there by `ubuntu` (`questix_image_build=true`), so the first boot needs no download.
+- The build fails if the finished tree breaks the first-enrollment policy (`scripts/iso/image-build-lib.sh`).
+
 Robots set up from an older image or installer: `scripts/update-robot-manager.sh`,
-`scripts/install-robot-manager.sh` and the setup playbooks remove the old image's
-`/etc/sudoers.d/ubuntu` (only when it is exactly that rule and the user has a password) and the
-legacy polkit `.pkla` (`scripts/cleanup_legacy_privileges.py`).
+`scripts/install-robot-manager.sh` and the setup playbooks run `scripts/cleanup_legacy_privileges.py`.
+- It removes the legacy polkit `.pkla`.
+- It removes the old image's `/etc/sudoers.d/ubuntu` only when the file is exactly that rule and the
+  user has a safe password.
+- While `ubuntu` still has the old known password `ubuntu`, it stops with exit 2 and asks for
+  `sudo passwd ubuntu`. The update, the installer and the setup stop there too.
+- It exits 0 when clean, 1 when a real run would remove something, and 2 when an operator has to act.
 
 ### Triggers
 

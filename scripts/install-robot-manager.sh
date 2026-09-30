@@ -34,6 +34,17 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
+# Before any change: an unsafe legacy privilege state (e.g. the old custom image's known password
+# with its NOPASSWD:ALL rule) needs an operator first (scripts/cleanup_legacy_privileges.py).
+legacy_state=0
+legacy_report="$(python3 -I "${REPO_DIR}/scripts/cleanup_legacy_privileges.py" --check 2>&1)" \
+  || legacy_state=$?
+if [ "$legacy_state" != 0 ] && [ "$legacy_state" != 1 ]; then
+  echo "$legacy_report" >&2
+  echo "Error: unsafe legacy privilege state; fix it as shown above, then run the installer again." >&2
+  exit 1
+fi
+
 echo "=== Questix Robot Installer ==="
 echo "  User:       ${TARGET_USER}"
 echo "  Workspace:  ${ROBOT_WS}"

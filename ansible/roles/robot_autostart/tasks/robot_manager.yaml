@@ -95,12 +95,14 @@
     mode: "0644"
   notify: reload_systemd
 
+# The custom image build (questix_image_build, a chroot without a running systemd) only enables
+# it; it starts at the image's first boot.
 - name: Enable and start questix_robot_manager service
   ansible.builtin.systemd:
     name: questix_robot_manager
     enabled: true
-    state: started
-    daemon_reload: true
+    state: "{{ omit if questix_image_build | default(false) | bool else 'started' }}"
+    daemon_reload: "{{ not (questix_image_build | default(false) | bool) }}"
 
 - name: Ensure Desktop directory exists
   ansible.builtin.file:
@@ -109,7 +111,9 @@
     owner: "{{ target_user }}"
     group: "{{ target_user }}"
     mode: "0755"
-  become: false
+  # The kit user's own work: as that user also when the playbook runs as root (image build).
+  become: "{{ questix_image_build | default(false) | bool }}"
+  become_user: "{{ target_user }}"
   failed_when: false
 
 - name: Deploy desktop shortcut
@@ -119,7 +123,9 @@
     owner: "{{ target_user }}"
     group: "{{ target_user }}"
     mode: "0755"
-  become: false
+  # The kit user's own work: as that user also when the playbook runs as root (image build).
+  become: "{{ questix_image_build | default(false) | bool }}"
+  become_user: "{{ target_user }}"
   failed_when: false
 
 # Trust needs the desktop's metadata service (a GNOME session). Without it `gio set` fails; the

@@ -2,7 +2,8 @@
 # Remove what older QUESTiX versions left that makes the robot user root-equivalent:
 # - the legacy polkit .pkla (manage-units for every unit, passwordless pkexec);
 # - the old custom image's /etc/sudoers.d/ubuntu (NOPASSWD:ALL), only when it is exactly that,
-#   the user has a usable password, and visudo -c passes before and after.
+#   the user has a usable password that is not the old image's known one, and visudo -c passes
+#   before and after.
 # An administrator's own rules are kept and reported. Last role of the setup playbooks: a run
 # that still relied on NOPASSWD for become has finished every other task by then.
 
@@ -16,15 +17,25 @@
     msg: "Legacy privilege cleanup skipped: {{ legacy_privilege_cleanup_script }} not found"
   when: not legacy_privilege_cleanup_source.stat.exists
 
-# --check only reads, so it also runs in check mode and reports what a real run would remove.
+# --check only reads, so it also runs in check mode. Its exit status: 0 clean, 1 a real run
+# removes something, 2 unsafe or undetermined (e.g. the old image's known password): the setup
+# stops there instead of reporting success.
 - name: Check for legacy privilege files
   ansible.builtin.command:
     argv: [python3, -I, "{{ legacy_privilege_cleanup_script }}", --check]
   register: legacy_privilege_cleanup_check
   changed_when: false
-  failed_when: legacy_privilege_cleanup_check.rc not in [0, 1]
+  failed_when: legacy_privilege_cleanup_check.rc not in [0, 1, 2]
   check_mode: false
   when: legacy_privilege_cleanup_source.stat.exists
+
+- name: Stop on an unsafe legacy privilege state
+  ansible.builtin.fail:
+    msg: "{{ ['Unsafe legacy privilege state; an operator has to act first:']
+      + legacy_privilege_cleanup_check.stdout_lines }}"
+  when:
+    - legacy_privilege_cleanup_source.stat.exists
+    - legacy_privilege_cleanup_check.rc == 2
 
 - name: Remove legacy privilege files
   ansible.builtin.command:

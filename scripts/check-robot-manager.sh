@@ -232,6 +232,7 @@ case $? in
     0) ok "リポジトリと同じで、依存ライブラリも固定版（scripts/robot_manager/requirements.txt）です" ;;
     1) ng "リポジトリまたは固定版と違います（sudo scripts/update-robot-manager.sh で更新）" ;;
     2) ng "インストールされていません" ;;
+    3) ng "古い版が残した権限に、先生・管理者の操作が必要な状態があります（上のメッセージを確認。sudo で実行してください）" ;;
 esac
 
 section "apt より優先されている pip のライブラリ（ROS 2 への影響）"
