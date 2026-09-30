@@ -197,6 +197,22 @@ baseline to Lyrical.
 
 The release job is present but disabled; manual dispatch does not publish GitHub releases.
 
+### First boot of a custom image
+
+A QUESTiX custom image has **no initial password** and no passwordless sudo rule:
+
+1. The `ubuntu` account is locked and SSH is disabled.
+2. On the first boot, the console (tty1, a screen and keyboard) asks for a new password for `ubuntu`
+   (`questix-first-boot.service`, `scripts/iso/questix-first-boot-enroll.sh`).
+3. Once it is set, SSH is enabled and the normal login starts. `sudo` asks for that password.
+4. If the enrollment fails or is interrupted, the account stays locked, SSH stays disabled,
+   and the next boot asks again.
+
+Robots set up from an older image or installer: `scripts/update-robot-manager.sh`,
+`scripts/install-robot-manager.sh` and the setup playbooks remove the old image's
+`/etc/sudoers.d/ubuntu` (only when it is exactly that rule and the user has a password) and the
+legacy polkit `.pkla` (`scripts/cleanup_legacy_privileges.py`).
+
 ### Triggers
 
 - **Manual dispatch**: Build and test ISO artifacts

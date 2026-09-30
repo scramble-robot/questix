@@ -1,0 +1,44 @@
+---
+# Remove what older QUESTiX versions left that makes the robot user root-equivalent:
+# - the legacy polkit .pkla (manage-units for every unit, passwordless pkexec);
+# - the old custom image's /etc/sudoers.d/ubuntu (NOPASSWD:ALL), only when it is exactly that,
+#   the user has a usable password, and visudo -c passes before and after.
+# An administrator's own rules are kept and reported. Last role of the setup playbooks: a run
+# that still relied on NOPASSWD for become has finished every other task by then.
+
+- name: Look for the cleanup script
+  ansible.builtin.stat:
+    path: "{{ legacy_privilege_cleanup_script }}"
+  register: legacy_privilege_cleanup_source
+
+- name: Report that the cleanup is skipped
+  ansible.builtin.debug:
+    msg: "Legacy privilege cleanup skipped: {{ legacy_privilege_cleanup_script }} not found"
+  when: not legacy_privilege_cleanup_source.stat.exists
+
+# --check only reads, so it also runs in check mode and reports what a real run would remove.
+- name: Check for legacy privilege files
+  ansible.builtin.command:
+    argv: [python3, -I, "{{ legacy_privilege_cleanup_script }}", --check]
+  register: legacy_privilege_cleanup_check
+  changed_when: false
+  failed_when: legacy_privilege_cleanup_check.rc not in [0, 1]
+  check_mode: false
+  when: legacy_privilege_cleanup_source.stat.exists
+
+- name: Remove legacy privilege files
+  ansible.builtin.command:
+    argv: [python3, -I, "{{ legacy_privilege_cleanup_script }}"]
+  register: legacy_privilege_cleanup_run
+  changed_when: "'removed ' in legacy_privilege_cleanup_run.stdout"
+  when:
+    - legacy_privilege_cleanup_source.stat.exists
+    - legacy_privilege_cleanup_check.rc == 1
+
+- name: Report the legacy privilege cleanup
+  ansible.builtin.debug:
+    msg: "{{ (legacy_privilege_cleanup_run.stdout_lines | default([]))
+      + (legacy_privilege_cleanup_check.stdout_lines | default([])) }}"
+  when:
+    - legacy_privilege_cleanup_source.stat.exists
+    - legacy_privilege_cleanup_check.stdout | default('') | length > 0

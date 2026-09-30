@@ -17,6 +17,8 @@ echo "🤖 Applying Ansible configuration for $ARCHITECTURE with ROS2 $ROS2_DIST
 WORK_DIR="/tmp/iso-work"
 CHROOT_DIR="$WORK_DIR/chroot"
 ANSIBLE_DIR="$(pwd)/ansible"
+# First-boot enrollment (installed into the image by the final configuration below).
+ISO_FILES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/iso"
 
 # Copy Ansible files to chroot
 echo "📋 Copying Ansible files..."
@@ -72,10 +74,14 @@ cd /tmp/ansible
 # Set target user as ubuntu (created in base system preparation)
 export ANSIBLE_REMOTE_USER=ubuntu
 
-# Run the playbook
+# Run the playbook. SSH: the playbooks do not manage it (prepare-base-system.sh installs
+# openssh-server; the units are disabled below, and the image enables remote login only after the
+# first-boot enrollment set a password). No autologin: the first login of the image is the
+# console enrollment.
 ansible-playbook \
     -i localhost_inventory.ini \
     -e "ros2_distro=$ROS2_DISTRO" \
+    -e "enable_autologin=false" \
     -e "ansible_user=ubuntu" \
     -e "ansible_env={'HOME': '/home/ubuntu'}" \
     --connection=local \
@@ -135,58 +141,48 @@ fi
 
 # Final system configuration
 echo "🔧 Applying final system configuration..."
+install -D -o root -g root -m 0755 "$ISO_FILES_DIR/questix-first-boot-enroll.sh" \
+    "$CHROOT_DIR/usr/local/sbin/questix-first-boot-enroll"
+install -D -o root -g root -m 0644 "$ISO_FILES_DIR/questix-first-boot.service" \
+    "$CHROOT_DIR/etc/systemd/system/questix-first-boot.service"
 chroot "$CHROOT_DIR" /bin/bash << 'CHROOT_EOF'
+set -e
 export HOME=/root
 export LC_ALL=C
 export DEBIAN_FRONTEND=noninteractive
 
-# Enable services
-systemctl enable ssh
 systemctl enable NetworkManager
 
-# Configure automatic login for first boot setup
-mkdir -p /etc/systemd/system/getty@tty1.service.d
-cat > /etc/systemd/system/getty@tty1.service.d/autologin.conf << 'AUTOLOGIN_EOF'
-[Service]
-ExecStart=
-ExecStart=-/sbin/agetty --autologin ubuntu --noclear %I $TERM
-AUTOLOGIN_EOF
+# First-enrollment policy, whatever the roles above did: no known password (the account is
+# locked), no NOPASSWD rule, no console autologin, SSH installed but not enabled. The console
+# enrollment unit sets the password, then enables SSH and disables itself.
+passwd -l ubuntu
+rm -f /etc/sudoers.d/ubuntu
+rm -f /etc/systemd/system/getty@tty1.service.d/autologin.conf
+for unit in ssh.socket ssh.service; do
+    if [ -e "/usr/lib/systemd/system/$unit" ]; then
+        systemctl disable "$unit"
+    fi
+done
+systemctl enable questix-first-boot.service
 
-# Create first boot setup script
-cat > /home/ubuntu/first-boot-setup.sh << 'SETUP_EOF'
-#!/bin/bash
-echo "🤖 Welcome to ROS2 Robotics Kit!"
-echo "📍 This system is pre-configured with ROS2 and robotics tools."
-echo ""
-echo "💡 Quick start:"
-echo "  - ROS2 workspace: ~/robot_ws (use 'rw' alias)"
-echo "  - Test ROS2: ros2 topic list"
-echo "  - Check hardware: gpio_status"
-echo ""
-echo "🔧 First-time setup:"
-echo "  1. Change password: passwd"
-echo "  2. Configure WiFi: sudo nmtui"
-echo "  3. Update system: sudo apt update && sudo apt upgrade"
-echo ""
-echo "📚 Documentation: https://github.com/your-repo/questix_core"
-
-# Disable autologin after first boot
-sudo rm -f /etc/systemd/system/getty@tty1.service.d/autologin.conf
-sudo systemctl daemon-reload
-
-# Remove this script
-rm -f /home/ubuntu/first-boot-setup.sh
-SETUP_EOF
-
-chmod +x /home/ubuntu/first-boot-setup.sh
-chown ubuntu:ubuntu /home/ubuntu/first-boot-setup.sh
-
-# Add first boot setup to .bashrc
-echo "" >> /home/ubuntu/.bashrc
-echo "# First boot setup" >> /home/ubuntu/.bashrc
-echo "if [ -f ~/first-boot-setup.sh ]; then" >> /home/ubuntu/.bashrc
-echo "    ~/first-boot-setup.sh" >> /home/ubuntu/.bashrc
-echo "fi" >> /home/ubuntu/.bashrc
+# Refuse to produce an image that breaks the policy.
+if grep -rqs 'NOPASSWD' /etc/sudoers /etc/sudoers.d; then
+    echo "❌ A NOPASSWD sudo rule is in the image" >&2
+    exit 1
+fi
+if [ "$(passwd -S ubuntu | awk '{print $2}')" != L ]; then
+    echo "❌ The ubuntu account is not locked" >&2
+    exit 1
+fi
+if grep -qsE '^[[:space:]]*AutomaticLoginEnable[[:space:]]*=[[:space:]]*[Tt]rue' /etc/gdm3/custom.conf; then
+    echo "❌ Desktop autologin is enabled in the image" >&2
+    exit 1
+fi
+if systemctl is-enabled --quiet ssh.socket 2> /dev/null || systemctl is-enabled --quiet ssh.service 2> /dev/null; then
+    echo "❌ SSH is enabled before the first-boot enrollment" >&2
+    exit 1
+fi
 
 # Final cleanup
 apt-get clean

@@ -13,7 +13,8 @@
 #                                                         (used by scripts/wifi-ap.sh up)
 #   scripts/update-robot-manager.sh --check               exit 0 = up to date, 1 = outdated
 #                                                         (files, pinned versions, the robot
-#                                                         launcher or the QUESTiX Local helper),
+#                                                         launcher, the QUESTiX Local helper or
+#                                                         legacy privilege files),
 #                                                         2 = not installed
 #
 # Exit status of an update: 0 when Robot Manager is up to date (updated or already current).
@@ -89,9 +90,6 @@ NETWORK_UNIT_SOURCE="$REPO_ROOT/systemd/questix_network_admin.service"
 NETWORK_UNIT_TARGET=/etc/systemd/system/questix_network_admin.service
 POLKIT_SOURCE="$REPO_ROOT/systemd/50-questix-robot.rules"
 POLKIT_TARGET=/etc/polkit-1/rules.d/50-questix-robot.rules
-# Older versions deployed this .pkla (manage-units for every unit, passwordless pkexec); polkit
-# still honours it and it would undo the per-unit rules above, so it must not exist.
-LEGACY_PKLA=/etc/polkit-1/localauthority/50-local.d/50-questix-robot.pkla
 
 # The robot user the manager runs as (User= of its unit); empty when unknown or root.
 manager_user() {
@@ -107,10 +105,8 @@ expected_polkit() {
     sed -e "s|ubuntu|$1|g" "$POLKIT_SOURCE"
 }
 
-# 0 when the helper (root-owned, not writable by others), its unit and the polkit rules match
-# and the legacy .pkla is gone.
+# 0 when the helper (root-owned, not writable by others), its unit and the polkit rules match.
 network_admin_current() {
-    [ ! -e "$LEGACY_PKLA" ] && [ ! -L "$LEGACY_PKLA" ] || return 1
     cmp -s "$NETWORK_ADMIN_SOURCE" "$NETWORK_ADMIN_TARGET" || return 1
     [ "$(stat -c '%u %g %a' "$NETWORK_ADMIN_TARGET")" = "0 0 755" ] || return 1
     cmp -s "$NETWORK_UNIT_SOURCE" "$NETWORK_UNIT_TARGET" || return 1
@@ -125,7 +121,6 @@ install_network_admin() {
     install -o root -g root -m 0755 "$NETWORK_ADMIN_SOURCE" "$NETWORK_ADMIN_TARGET"
     install -o root -g root -m 0644 "$NETWORK_UNIT_SOURCE" "$NETWORK_UNIT_TARGET"
     systemctl daemon-reload
-    rm -f "$LEGACY_PKLA"
     local user
     user="$(manager_user)"
     if [ -n "$user" ]; then
@@ -134,6 +129,20 @@ install_network_admin() {
         chmod 0644 "$POLKIT_TARGET.new"
         mv "$POLKIT_TARGET.new" "$POLKIT_TARGET"
     fi
+}
+
+# Root-equivalent leftovers of older versions (legacy .pkla, the old image's NOPASSWD:ALL
+# sudoers file): removed on every update, only when QUESTiX wrote them.
+LEGACY_CLEANUP="$REPO_ROOT/scripts/cleanup_legacy_privileges.py"
+
+# 0 when nothing is left to remove (or it cannot be seen without root).
+legacy_current() {
+    python3 -I "$LEGACY_CLEANUP" --check > /dev/null
+}
+
+cleanup_legacy() {
+    echo "🔒 古い版が残した広い権限（旧 .pkla・パスワードなしの sudo）を確認します ..."
+    python3 -I "$LEGACY_CLEANUP" || die "権限の整理を安全のため中止しました（上のメッセージを確認）。"
 }
 
 # Every pinned dependency must be installed in exactly that version; prints the ones that are not.
@@ -262,8 +271,10 @@ main() {
     launcher_current && launcher_ok=1
     local network_ok=0
     network_admin_current && network_ok=1
+    local legacy_ok=0
+    legacy_current && legacy_ok=1
     if [ "$files_ok" = 1 ] && [ "$deps_ok" = 1 ] && [ "$launcher_ok" = 1 ] \
-        && [ "$network_ok" = 1 ]; then
+        && [ "$network_ok" = 1 ] && [ "$legacy_ok" = 1 ]; then
         [ "$mode" = --check ] && exit 0
         echo "✅ Robot Manager は最新です。"
         exit 0
@@ -274,6 +285,7 @@ main() {
     [ "$deps_ok" = 1 ] || install_requirements
     [ "$launcher_ok" = 1 ] || install_launcher
     [ "$network_ok" = 1 ] || install_network_admin
+    [ "$legacy_ok" = 1 ] || cleanup_legacy
     if [ "$files_ok" = 0 ]; then
         echo "🔄 Robot Manager をこのリポジトリの版に更新します ..."
         install_package

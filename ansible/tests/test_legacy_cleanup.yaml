@@ -1,0 +1,11 @@
+---
+# Source-only harness for the legacy_privilege_cleanup role: it runs a fake cleanup script (no
+# root, no /etc) given by run_contract_tests.sh, so the role's decisions can be checked.
+- name: Exercise the legacy privilege cleanup role
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Run the role against the fake script
+      ansible.builtin.include_role:
+        name: legacy_privilege_cleanup

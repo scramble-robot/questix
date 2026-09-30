@@ -1,0 +1,28 @@
+# QUESTiX custom image: first-boot account enrollment on the console (tty1).
+# Installed and enabled by scripts/apply-ansible-config.sh; runs scripts/iso/questix-first-boot-enroll.sh
+# (as /usr/local/sbin/questix-first-boot-enroll, root:root 0755) until a password is set, then
+# disables itself. Until then the robot user's password is locked and SSH is disabled.
+# The console login (getty@tty1) and a display manager start only after this unit ends. Its
+# prompts go to the console (bash prints read -p prompts on stderr), never to the journal.
+[Unit]
+Description=QUESTiX first-boot account setup (console)
+ConditionPathExists=!/var/lib/questix/first-boot-enrolled
+After=systemd-user-sessions.service plymouth-quit-wait.service systemd-vconsole-setup.service
+Before=getty@tty1.service display-manager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/questix-first-boot-enroll
+Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+# Waits for a person at the console as long as it takes.
+TimeoutStartSec=infinity
+
+[Install]
+WantedBy=multi-user.target

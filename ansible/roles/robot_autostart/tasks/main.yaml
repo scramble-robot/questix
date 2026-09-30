@@ -61,13 +61,6 @@
     group: root
     mode: "0644"
 
-# Older versions deployed a legacy .pkla (manage-units for every unit, passwordless pkexec).
-# polkit still honours it, and it would undo the per-unit limits of the rules above.
-- name: Remove the legacy polkit .pkla
-  ansible.builtin.file:
-    path: /etc/polkit-1/localauthority/50-local.d/50-questix-robot.pkla
-    state: absent
-
 # Robot Manager Web UI (optional, skip by default)
 - name: Install robot-manager Web UI
   ansible.builtin.include_tasks: robot_manager.yaml

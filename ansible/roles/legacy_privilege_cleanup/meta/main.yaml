@@ -1,0 +1,15 @@
+---
+# Role metadata for legacy_privilege_cleanup
+
+galaxy_info:
+  author: Scramble Robot Team
+  description: Remove root-equivalent leftovers of older QUESTiX images and installers
+  license: MIT
+  min_ansible_version: "2.14"
+  platforms:
+    - name: Ubuntu
+      versions:
+        # ansible-lint's bundled Galaxy schema does not yet include noble.
+        - all
+
+dependencies: []

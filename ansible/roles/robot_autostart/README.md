@@ -101,6 +101,6 @@ sudo systemctl enable questix_robot
 # polkit ルール配置（questix_robot.service の start/stop/restart と、
 # questix_network_admin.service の start だけをパスワードなしで許可）
 sudo sed "s|ubuntu|$USER|g" systemd/50-questix-robot.rules | sudo tee /etc/polkit-1/rules.d/50-questix-robot.rules
-# 旧版の .pkla（全ユニットの manage-units とパスワードなし pkexec）が残っていれば削除
-sudo rm -f /etc/polkit-1/localauthority/50-local.d/50-questix-robot.pkla
+# 旧版の .pkla・NOPASSWD:ALL が残っていれば削除（QUESTiX が書いたものだけ）
+sudo python3 -I scripts/cleanup_legacy_privileges.py
 ```

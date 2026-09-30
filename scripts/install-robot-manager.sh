@@ -101,13 +101,10 @@ chmod 0644 /etc/polkit-1/rules.d/50-questix-robot.rules
 echo "  -> /etc/polkit-1/rules.d/50-questix-robot.rules deployed"
 
 # The JavaScript rules above are the only QUESTiX polkit authority. Older versions also deployed a
-# legacy .pkla (manage-units for every unit and passwordless pkexec), which polkit still honours
-# and which would undo the per-unit limits above: remove it (the path is QUESTiX's own).
-LEGACY_PKLA=/etc/polkit-1/localauthority/50-local.d/50-questix-robot.pkla
-if [ -e "$LEGACY_PKLA" ] || [ -L "$LEGACY_PKLA" ]; then
-  rm -f "$LEGACY_PKLA"
-  echo "  -> legacy $LEGACY_PKLA removed"
-fi
+# legacy .pkla (every unit and passwordless pkexec) and old custom images a NOPASSWD:ALL sudoers
+# file: remove what QUESTiX itself wrote (scripts/cleanup_legacy_privileges.py; an
+# administrator's own rules are kept and reported).
+python3 -I "${REPO_DIR}/scripts/cleanup_legacy_privileges.py"
 
 # ---------- 5. Robot Manager Web UI (optional) ----------
 if [ "${INSTALL_GUI}" = true ]; then

@@ -368,29 +368,6 @@ then
 else
     fail "QUESTiX Local: polkit rule is broader than start of questix_network_admin.service"
 fi
-# The legacy .pkla (manage-units for every unit, passwordless pkexec) would undo those limits:
-# none is shipped, and every install path removes one left by an older version.
-if [ -z "$(git ls-files '*.pkla')" ]; then
-    pass "polkit: no .pkla is shipped"
-else
-    fail "polkit: a .pkla is shipped ($(git ls-files '*.pkla' | tr '\n' ' '))"
-fi
-LEGACY_PKLA_PATH=/etc/polkit-1/localauthority/50-local.d/50-questix-robot.pkla
-assert_contains scripts/install-robot-manager.sh "LEGACY_PKLA=$LEGACY_PKLA_PATH" \
-    "polkit: install-robot-manager.sh removes the legacy .pkla"
-assert_contains scripts/update-robot-manager.sh "LEGACY_PKLA=$LEGACY_PKLA_PATH" \
-    "polkit: update-robot-manager.sh removes the legacy .pkla"
-if python3 - ansible/roles/robot_autostart/tasks/main.yaml "$LEGACY_PKLA_PATH" << 'PYTHON'
-import sys, yaml
-tasks = yaml.safe_load(open(sys.argv[1]))
-assert any(t.get("ansible.builtin.file", {}) == {"path": sys.argv[2], "state": "absent"}
-           for t in tasks)
-PYTHON
-then
-    pass "polkit: robot_autostart removes the legacy .pkla"
-else
-    fail "polkit: robot_autostart does not remove the legacy .pkla"
-fi
 
 UNIT=systemd/questix_network_admin.service
 assert_contains "$UNIT" "Type=oneshot" "QUESTiX Local: helper unit is a oneshot"
@@ -458,14 +435,108 @@ for unit in systemd/questix_robot_manager.service ansible/roles/robot_autostart/
     assert_contains "$unit" "--host 127.0.0.1" "QUESTiX Local: $unit listens on 127.0.0.1 only"
     assert_not_contains "$unit" "User=root" "QUESTiX Local: $unit does not run as root"
 done
-# (scripts/prepare-base-system.sh, the ISO base image, has its own sudoers line; it is not part of
-# the kit setup or Robot Manager and is reviewed separately.)
-if grep -rIl "NOPASSWD" ansible/roles ansible/playbooks systemd scripts/robot_manager \
-    scripts/install-robot-manager.sh scripts/update-robot-manager.sh scripts/wifi-ap.sh >/dev/null 2>&1; then
-    fail "QUESTiX Local: a NOPASSWD sudoers entry exists in the kit setup or Robot Manager"
+# The QUESTiX Local change never adds a sudo rule (checked with section 12's scanner).
+if python3 ansible/tests/scan_privileges.py nopasswd ansible/roles ansible/playbooks systemd \
+    scripts/robot_manager scripts/install-robot-manager.sh scripts/update-robot-manager.sh \
+    scripts/wifi-ap.sh > "$TMP_ROOT/hits"; then
+    pass "QUESTiX Local: no NOPASSWD sudoers rule in the kit setup or Robot Manager"
 else
-    pass "QUESTiX Local: no NOPASSWD sudoers entry in the kit setup or Robot Manager"
+    fail "QUESTiX Local: a NOPASSWD sudoers rule exists: $(tr '\n' ' ' < "$TMP_ROOT/hits")"
 fi
+
+# --- 12. Legacy root-equivalent defaults (custom image, polkit, sudoers) ---------
+# Shipping and runtime paths (the tests and the cleanup script's own description of what it
+# removes excluded) carry no known password, no NOPASSWD:ALL and no broad polkit rule.
+SHIPPING=(scripts systemd ansible/roles ansible/playbooks .github setup.sh setup_dev.sh)
+for check in nopasswd known-password autologin-ubuntu broad-polkit; do
+    if python3 ansible/tests/scan_privileges.py "$check" "${SHIPPING[@]}" > "$TMP_ROOT/hits"; then
+        pass "legacy privileges: no $check in shipping paths"
+    else
+        fail "legacy privileges: $check still shipped: $(tr '\n' ' ' < "$TMP_ROOT/hits")"
+    fi
+done
+if git ls-files '*.pkla' | grep -q .; then
+    fail "legacy privileges: a .pkla file is still in the repository"
+else
+    pass "legacy privileges: no .pkla file in the repository"
+fi
+for installer in scripts/install-robot-manager.sh scripts/update-robot-manager.sh; do
+    assert_not_contains "$installer" "localauthority/50-local.d/50-questix-robot.pkla\"" \
+        "legacy privileges: $installer deploys no .pkla"
+    assert_contains "$installer" "cleanup_legacy_privileges.py" \
+        "legacy privileges: $installer removes stale legacy files"
+done
+assert_contains ansible/playbooks/setup_kit.yaml "{ role: legacy_privilege_cleanup }" \
+    "legacy privileges: setup_kit ends with the cleanup role"
+assert_contains ansible/playbooks/setup_dev.yaml "name: legacy_privilege_cleanup" \
+    "legacy privileges: setup_dev runs the cleanup role"
+# The robot service keeps exactly its three verbs.
+if python3 - systemd/50-questix-robot.rules << 'PYTHON'
+import re, sys
+text = open(sys.argv[1]).read()
+rules = re.findall(r"polkit\.addRule\(function\(action, subject\) \{(.*?)\n\}\);", text, re.S)
+robot = [r for r in rules if 'action.lookup("unit") === "questix_robot.service"' in r]
+assert len(robot) == 1 and len(rules) == 2
+assert sorted(re.findall(r'action\.lookup\("verb"\) === "(\w+)"', robot[0])) == ["restart", "start", "stop"]
+assert "policykit.exec" not in text
+PYTHON
+then
+    pass "legacy privileges: polkit = questix_robot start/stop/restart + network start, nothing else"
+else
+    fail "legacy privileges: polkit rules are not the two narrow rules"
+fi
+
+# The custom image: locked account, SSH off until the console enrollment, no autologin.
+assert_contains scripts/prepare-base-system.sh "passwd -l ubuntu" "image: the account is created locked"
+assert_not_contains scripts/prepare-base-system.sh "chpasswd" "image: no password is baked in"
+assert_not_contains scripts/prepare-base-system.sh "systemctl enable ssh" "image: base system does not enable SSH"
+ISO_APPLY=scripts/apply-ansible-config.sh
+assert_contains "$ISO_APPLY" '-e "enable_autologin=false"' "image: Ansible adds no autologin"
+assert_contains "$ISO_APPLY" "systemctl enable questix-first-boot.service" "image: first-boot enrollment enabled"
+assert_contains "$ISO_APPLY" 'systemctl disable "$unit"' "image: SSH units disabled before the image is built"
+assert_contains "$ISO_APPLY" "rm -f /etc/sudoers.d/ubuntu" "image: no legacy sudoers file"
+assert_contains "$ISO_APPLY" "A NOPASSWD sudo rule is in the image" "image: build fails on a NOPASSWD rule"
+assert_contains "$ISO_APPLY" "The ubuntu account is not locked" "image: build fails on an unlocked account"
+assert_contains "$ISO_APPLY" "SSH is enabled before the first-boot enrollment" "image: build fails on enabled SSH"
+assert_not_contains "$ISO_APPLY" "first-boot-setup.sh" "image: no .bashrc first-boot script"
+assert_contains "$ISO_APPLY" '-m 0755 "$ISO_FILES_DIR/questix-first-boot-enroll.sh"' \
+    "image: enrollment helper installed root-owned"
+
+# The role's decisions, with a fake cleanup script.
+FAKE_CLEANUP="$TMP_ROOT/fake_cleanup.py"
+cat > "$FAKE_CLEANUP" << 'PYTHON'
+import os, sys
+log = os.environ["FAKE_CLEANUP_LOG"]
+with open(log, "a") as out:
+    out.write(" ".join(sys.argv[1:]) + "\n")
+if "--check" in sys.argv:
+    print("would remove /etc/sudoers.d/ubuntu" if os.environ["FAKE_CLEANUP_PENDING"] == "1" else "")
+    sys.exit(int(os.environ["FAKE_CLEANUP_PENDING"]))
+print("removed /etc/sudoers.d/ubuntu: legacy NOPASSWD:ALL rule")
+PYTHON
+for pending in 0 1; do
+    export FAKE_CLEANUP_LOG="$TMP_ROOT/fake_cleanup.$pending.log" FAKE_CLEANUP_PENDING=$pending
+    if run_playbook ansible/tests/test_legacy_cleanup.yaml -e "legacy_privilege_cleanup_script=$FAKE_CLEANUP"; then
+        runs="$(grep -cv -- '--check' "$FAKE_CLEANUP_LOG" || true)"
+        if [ "$pending" = 1 ] && [ "$runs" = 1 ] && grep -qE 'changed=1 ' "$PLAYBOOK_LOG"; then
+            pass "cleanup role: a pending cleanup runs once and reports a change"
+        elif [ "$pending" = 0 ] && [ "$runs" = 0 ] && grep -qE 'changed=0 ' "$PLAYBOOK_LOG"; then
+            pass "cleanup role: nothing pending, nothing run (idempotent second run)"
+        else
+            fail "cleanup role: pending=$pending ran $runs time(s)"
+            show_log_tail
+        fi
+    else
+        fail "cleanup role: playbook failed (pending=$pending)"
+    fi
+done
+if run_playbook ansible/tests/test_legacy_cleanup.yaml -e "legacy_privilege_cleanup_script=$TMP_ROOT/missing.py" &&
+    grep -q "Legacy privilege cleanup skipped" "$PLAYBOOK_LOG"; then
+    pass "cleanup role: skipped with a message when the script is not there (image build)"
+else
+    fail "cleanup role: missing script not handled"
+fi
+unset FAKE_CLEANUP_LOG FAKE_CLEANUP_PENDING
 
 REAL_BASHRC_AFTER="$(real_bashrc_fingerprint)"
 if [ "$REAL_BASHRC_BEFORE" = "$REAL_BASHRC_AFTER" ]; then

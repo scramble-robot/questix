@@ -107,6 +107,19 @@ Raspberry Pi の Wi-Fi を QUESTiX 用のアクセスポイントにします（
 
 詳細は `ansible/roles/wifi_access_point/README.md` を参照してください。
 
+### 8. legacy_privilege_cleanup
+
+旧版の QUESTiX が残した、ロボットのユーザーを root 相当にする設定を取り除きます。`setup_kit.yaml` では最後のロール、`setup_dev.yaml` では root が要る最後の処理として実行します。
+
+**場所**: `ansible/roles/legacy_privilege_cleanup/`（処理は `scripts/cleanup_legacy_privileges.py` の 1 か所だけで、`scripts/install-robot-manager.sh` と `scripts/update-robot-manager.sh` も同じものを使います）
+
+**主な機能**:
+
+- 旧 `.pkla`（`/etc/polkit-1/localauthority/50-local.d/50-questix-robot.pkla`。すべての unit の操作とパスワードなしの pkexec を許していた）を削除
+- 旧 custom image の `/etc/sudoers.d/ubuntu`（`ubuntu ALL=(ALL) NOPASSWD:ALL`）を、内容が完全に一致し、ユーザーにパスワードが設定され、`visudo -c` が前後とも通るときだけ削除
+- それ以外の sudoers（管理者が書いたもの）は残して WARNING を出す
+- 2 回目の実行では何もしません
+
 ## 使用方法
 
 ### プレイブックでの使用
