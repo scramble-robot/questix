@@ -65,6 +65,36 @@
     mode: "0644"
   notify: reload_systemd
 
+# QUESTiX Local (Robot Manager 管理設定 → ネットワーク). Robot Manager runs as target_user and applies
+# access point changes only by starting questix_network_admin.service (polkit: start of that unit
+# only, 50-questix-robot.rules), which runs this root-owned helper. Same files as
+# scripts/install-robot-manager.sh and scripts/update-robot-manager.sh. The unit has no [Install]
+# section and is never enabled or started here: a fresh kit keeps the access point off
+# (wifi_ap_enabled keeps deciding whether setup creates it).
+- name: Install the QUESTiX Local tools (DHCP for the shared mode, regulatory domain)
+  ansible.builtin.apt:
+    name:
+      - dnsmasq-base
+      - iw
+    state: present
+
+- name: Deploy the QUESTiX Local helper (root-owned)
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../scripts/robot_manager/network_admin.py"
+    dest: /opt/questix_robot/questix_network_admin.py
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy the QUESTiX Local oneshot unit (not enabled)
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../systemd/questix_network_admin.service"
+    dest: /etc/systemd/system/questix_network_admin.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: reload_systemd
+
 - name: Enable and start questix_robot_manager service
   ansible.builtin.systemd:
     name: questix_robot_manager

@@ -68,6 +68,12 @@ fi
 echo "[2/6] Installing launcher script to /opt/questix_robot/ ..."
 install -d -m 0755 /opt/questix_robot
 install -m 0755 "${REPO_DIR}/systemd/questix_robot_launcher.sh" /opt/questix_robot/
+# QUESTiX Local (Robot Manager 管理設定 → ネットワーク): the root-owned helper and its oneshot unit.
+# The unit has no [Install] section and is never enabled: the access point stays as it is.
+install -o root -g root -m 0755 "${REPO_DIR}/scripts/robot_manager/network_admin.py" \
+  /opt/questix_robot/questix_network_admin.py
+install -o root -g root -m 0644 "${REPO_DIR}/systemd/questix_network_admin.service" \
+  /etc/systemd/system/questix_network_admin.service
 
 # ---------- 3. systemd service (ROS2) ----------
 echo "[3/6] Installing questix_robot.service ..."
@@ -107,7 +113,9 @@ if [ "${INSTALL_GUI}" = true ]; then
   echo "[5/5] Installing Robot Manager Web UI ..."
 
   # Install dependencies
-  apt-get install -y -qq python3-pip > /dev/null 2>&1 || true
+  # dnsmasq-base / iw: the access point's DHCP (NetworkManager's shared mode) and regulatory domain,
+  # for QUESTiX Local in 管理設定. Installing them does not switch the Wi-Fi.
+  apt-get install -y -qq python3-pip dnsmasq-base iw > /dev/null 2>&1 || true
 
   # Copy source and pip install (non-editable). update-robot-manager.sh replaces the copy under
   # /opt/questix_robot instead of copying into an existing directory, which used to nest the new

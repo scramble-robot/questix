@@ -37,6 +37,18 @@ sudo scripts/wifi-ap.sh remove    # プロファイルと設定を削除
 > バックグラウンドで適用を続け、ログを `/var/log/questix-wifi-ap.log` に残します。
 > `up` 後は、アクセスポイントに接続して `ssh <user>@10.42.0.1` で入り直してください。
 
+## Robot Manager の画面から切り替える（QUESTiX Local）
+
+Robot Manager の「管理設定」→「ネットワーク / QUESTiX Local」で、端末を使わずに開始・停止と、SSID・パスワード（表示・新しく生成）・周波数帯（2.4 / 5 GHz）・チャンネル（自動または 1/6/11、36/40/44/48）・アドレス（通常は自動）を変更できます。
+
+- Robot Manager はロボットのユーザーのまま動き、ネットワークを直接は変えません。検証した要求を `/etc/questix_robot/network_request.json` に書き、`questix_network_admin.service` を起動します（polkit でこのユーザーに許すのは、この unit の `start` だけ）。
+- この unit は root 所有の `/opt/questix_robot/questix_network_admin.py`（`scripts/robot_manager/network_admin.py` のコピー）を動かし、要求を一度だけ読み、値を検証し直して、このロールと同じ 3 つのファイル（keyfile・`wifi_ap.env`・規制ドメイン）を書き、同じ順序で `nmcli` を実行します。同じ内容になることは `ansible/tests/run_contract_tests.sh` がこのロールのテンプレートと比べて確かめます。
+- パスワードはコマンドライン・ログ・画面へのエラーには出しません。画面では伏せ字で、［表示］を押したときだけ見えます。
+- 停止してもプロファイルは消しません（削除は `sudo scripts/wifi-ap.sh remove`）。学校の Wi-Fi の認証情報・802.1X・プロキシは扱いません。停止すると保存済みの Wi-Fi プロファイルに戻ります。
+- 共有モード（`ipv4.method=shared`）のままです。有線LANなどに外への経路があると、生徒の端末もそこから外へ出られます（画面の「外へのネットワーク」に表示）。
+- 練習モードで教材の自動開始（AUTOSTART）がオンなら、開始のあとに教材の配信も始めます（大会モードでは始めません。AUTOSTART は書き換えません）。
+- 部品（helper・unit・polkit）は `setup_kit.yaml`（`robot_autostart`）、`scripts/install-robot-manager.sh`、`scripts/update-robot-manager.sh` が入れます。入れるだけでアクセスポイントは始めません（`wifi_ap_enabled: false` の意味は変わりません）。
+
 ## 複数台を同じ部屋で使う
 
 何もしなくても、台ごとに別のアクセスポイントになります。

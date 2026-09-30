@@ -585,7 +585,7 @@ main {
 }
 
 /* Shared form controls, including settings, tuning and the folder picker. */
-input[type="text"], input[type="number"], select {
+input[type="text"], input[type="number"], input[type="password"], select {
   min-width: 0;
   max-width: 100%;
   min-height: 44px;
@@ -1410,3 +1410,66 @@ input[type="checkbox"] { accent-color: var(--accent); }
     padding: 0.3rem 0.6rem; }
   .status-strip dd { font-size: 0.9rem; }
 }
+
+/* 管理設定: ネットワーク / QUESTiX Local */
+.net-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin: 0.5rem 0;
+}
+.net-state {
+  flex: none;
+  padding: 0.25rem 0.75rem;
+  border-radius: var(--radius-control);
+  border: 2px solid var(--border-input);
+  background: var(--bg-input);
+  font-weight: 700;
+}
+.net-status[data-state="running"] .net-state { border-color: var(--green); color: var(--green); }
+.net-status[data-state="applying"] .net-state { border-color: var(--orange); color: var(--orange); }
+.net-status[data-state="stopped"] .net-state,
+.net-status[data-state="unconfigured"] .net-state { color: var(--text-dim); }
+.net-text { min-width: 0; color: var(--text-dim); }
+.net-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.25rem 1rem;
+  margin: 0.5rem 0;
+}
+.net-facts dt { color: var(--text-dim); }
+.net-facts dd { margin: 0; overflow-wrap: anywhere; }
+.net-password-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.5rem 0;
+}
+.net-password-row[hidden] { display: none; }
+.net-password-label { color: var(--text-dim); }
+.net-password { font-size: 1.1rem; overflow-wrap: anywhere; }
+.net-notice {
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-control);
+  background: var(--accent-soft);
+}
+.net-notice[data-tone="error"] { background: var(--danger-soft); border: 1px solid var(--red); }
+.net-edit, .net-details, .net-address { margin-top: 0.75rem; }
+.net-edit > summary, .net-details > summary, .net-address > summary { cursor: pointer; }
+.net-address label { display: block; margin-bottom: 0.25rem; }
+@media (max-width: 600px) {
+  .net-facts { grid-template-columns: minmax(0, 1fr); }
+  .net-facts dd { margin-bottom: 0.25rem; }
+}
+/* Long teacher-facing labels: label above its field. */
+.network-card .config-item {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.5rem;
+}
+.network-card .config-item input[type="text"],
+.network-card .config-item input[type="password"],
+.network-card .config-item select { width: 100%; }
