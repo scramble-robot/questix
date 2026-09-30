@@ -18,6 +18,17 @@ user start only that unit), which runs the root-owned helper ``network_admin.py`
 writes ``network_status.json`` without secrets. One change runs at a time (409 otherwise);
 ``GET /api/wifi-ap/job`` reports it. After a successful start in practice mode, QUESTiX LAB is
 started through lab.py when its automatic start (AUTOSTART) is on; never in competition mode.
+
+Binding to 127.0.0.1 and the loopback-only CORS policy do not stop a web page opened in the
+robot's own browser from sending a "simple" cross-site POST (a form, text/plain): the browser
+sends it without asking and only hides the answer. Every request that changes the network
+therefore has to pass ``_browser_mutation_guard``: ``Content-Type: application/json`` (which a
+cross-site page can only send after a CORS preflight the manager refuses), a JSON object body
+(``{}`` for start / stop / new password), an ``Origin``, when the browser sends one, equal to
+this manager's own loopback origin, and no ``Sec-Fetch-Site`` other than same-origin / none.
+The Host header itself is limited to 127.0.0.1 / localhost for the whole app (app.py,
+TrustedHostMiddleware), which also keeps DNS-rebinding pages from reading GET /api/wifi-ap.
+Scripts that call these endpoints send the JSON header like the page does.
 """
 
 import getpass
@@ -211,6 +222,48 @@ class AccessPointConfig(BaseModel):
     address: Optional[str] = None
 
 
+LOOPBACK_HOSTS = ("127.0.0.1", "localhost")
+
+
+def _host_name(host: str) -> str:
+    return host.rsplit(":", 1)[0].lower() if host.count(":") == 1 else host.lower()
+
+
+def _browser_mutation_guard(request: Request) -> None:
+    """Refuse a network change that a cross-site page could have sent (see the module doc)."""
+    media_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if media_type != "application/json":
+        raise HTTPException(status_code=415,
+                            detail="Content-Type: application/json の要求だけを受け付けます")
+    host = request.headers.get("host", "")
+    if _host_name(host) not in LOOPBACK_HOSTS:
+        raise HTTPException(status_code=403, detail="このロボットの画面からの要求ではありません")
+    origin = request.headers.get("origin")
+    if origin is not None and origin.lower() != f"http://{host}".lower():
+        raise HTTPException(status_code=403, detail="このロボットの画面からの要求ではありません")
+    fetch_site = request.headers.get("sec-fetch-site")
+    if fetch_site is not None and fetch_site not in ("same-origin", "none"):
+        raise HTTPException(status_code=403, detail="このロボットの画面からの要求ではありません")
+
+
+async def _json_body(request: Request):
+    """Return the guarded request's JSON body ({} when empty); 422 without echoing it."""
+    _browser_mutation_guard(request)
+    raw = await request.body()
+    if not raw.strip():
+        return {}
+    try:
+        return json.loads(raw)
+    except (ValueError, UnicodeDecodeError):
+        raise HTTPException(status_code=422, detail="JSON で送ってください")
+
+
+async def _empty_body(request: Request) -> None:
+    body = await _json_body(request)
+    if body != {}:
+        raise HTTPException(status_code=422, detail="この操作に本文は要りません（{} を送ってください）")
+
+
 def _refuse(field: str, message: str):
     # Never the submitted value: it may be the password.
     raise HTTPException(status_code=422, detail=f"{field}: {message}")
@@ -374,28 +427,27 @@ def _submit(action: str, settings: Optional[dict] = None) -> JSONResponse:
 @router.put("/config")
 async def put_config(request: Request):
     """Save SSID / password / band / channel / address (applied at once while the AP is on)."""
-    try:
-        body = await request.json()
-    except ValueError:
-        raise HTTPException(status_code=422, detail="JSON で送ってください")
-    return _submit("configure", _validated_settings(body))
+    return _submit("configure", _validated_settings(await _json_body(request)))
 
 
 @router.post("/start")
-def start_access_point():
+async def start_access_point(request: Request):
     """Start QUESTiX Local (creates the settings on the first start, like wifi-ap.sh up)."""
+    await _empty_body(request)
     return _submit("start")
 
 
 @router.post("/stop")
-def stop_access_point():
+async def stop_access_point(request: Request):
     """Stop QUESTiX Local; NetworkManager's saved Wi-Fi client profiles take over."""
+    await _empty_body(request)
     return _submit("stop")
 
 
 @router.post("/regenerate-password")
-def regenerate_password():
+async def regenerate_password(request: Request):
     """Generate a new password (applied at once while the access point is on)."""
+    await _empty_body(request)
     return _submit("regenerate_password")
 
 

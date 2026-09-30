@@ -11,7 +11,11 @@ copy of this file (``/opt/questix_robot/questix_network_admin.py``, installed by
 
 - reads the request once (no symlink, a regular file of the settings directory's owner, at most
   4 KiB), removes it, and accepts only the actions and keys listed here, validated again;
-- reads the saved settings (``wifi_ap.env``) as data, never as shell code, and validates them too;
+- trusts saved settings (``wifi_ap.env``) only when root wrote them: the settings directory
+  belongs to the robot user, who could replace the file, so a file that is not root's, is
+  writable by group or others, is a link or has other links, is refused (``settings_untrusted``)
+  instead of becoming a way to pass values the API does not offer (interface, country, state);
+  a trusted file is still read as data, never as shell code, and validated again;
 - writes the same three files as the ``wifi_access_point`` role (NetworkManager keyfile, settings,
   regulatory domain; ``ansible/tests/run_contract_tests.sh`` renders the role's templates and
   compares them with ``render_*`` below) and applies them with the role's nmcli/iw steps;
@@ -82,7 +86,10 @@ SETTINGS_NAME = "wifi_ap.env"
 KEYFILE_PATH = "/etc/NetworkManager/system-connections/questix-ap.nmconnection"
 REGDOM_PATH = "/etc/modprobe.d/questix-wifi-regdom.conf"
 SYS_NET = "/sys/class/net"
-LOCK_PATH = "/run/questix_network_admin.lock"
+# RuntimeDirectory= of questix_network_admin.service (the unit's only writable place in /run).
+LOCK_PATH = "/run/questix_network_admin/lock"
+# Owners whose wifi_ap.env is trusted: root (the role, scripts/wifi-ap.sh and this helper).
+TRUSTED_SETTINGS_UIDS = frozenset({0})
 TOOL_PATH = "/usr/sbin:/usr/bin:/sbin:/bin"
 COMMAND_TIMEOUT_SEC = 60
 
@@ -96,6 +103,8 @@ MESSAGES = {
     "bad_request": "要求の形式が正しくありません。",
     "invalid_settings": "設定の値が正しくありません。",
     "settings_unreadable": "保存されている設定を読み取れません（sudo scripts/wifi-ap.sh status で確認してください）。",
+    "settings_untrusted": "保存されている設定のファイルを信頼できません（root 以外が作り直した可能性があります）。"
+                          "管理者が確認し、sudo scripts/wifi-ap.sh up で作り直してください。",
     "not_configured": "QUESTiX Local はまだ設定されていません。",
     "address_conflict": "指定したアドレスは、このロボットの別のネットワークと重なっています。",
     "no_free_address": "空いているアドレスが見つかりません。詳細設定でアドレスを指定してください。",
@@ -312,27 +321,29 @@ def _open_dir(path):
     return os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
 
 
-def read_private_file(dir_fd, name, limit, owners=None):
+def read_private_file(dir_fd, name, limit, owners=None, code="bad_request"):
     """Return the bytes of a regular file in dir_fd, or None when it does not exist.
 
-    No symlink (O_NOFOLLOW), one link only, at most ``limit`` bytes, and owned by one of
-    ``owners`` when given.
+    No symlink (O_NOFOLLOW), one link only, at most ``limit`` bytes, not writable by group or
+    others, and owned by one of ``owners`` when given; otherwise AdminError(code).
     """
     try:
         fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=dir_fd)
     except FileNotFoundError:
         return None
     except OSError as error:
-        raise AdminError("bad_request", f"cannot open {name}: {error.strerror}")
+        raise AdminError(code, f"cannot open {name}: {error.strerror}")
     try:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > limit:
-            raise AdminError("bad_request", f"{name} is not a small regular file")
+            raise AdminError(code, f"{name} is not a small regular file")
+        if info.st_mode & 0o022:
+            raise AdminError(code, f"{name} is writable by group or others")
         if owners is not None and info.st_uid not in owners:
-            raise AdminError("bad_request", f"{name} has an unexpected owner")
+            raise AdminError(code, f"{name} has an unexpected owner (uid {info.st_uid})")
         data = os.read(fd, limit + 1)
         if len(data) > limit:
-            raise AdminError("bad_request", f"{name} is too large")
+            raise AdminError(code, f"{name} is too large")
         return data
     finally:
         os.close(fd)
@@ -366,8 +377,10 @@ class Paths:
     """Where the helper reads and writes. The service always uses the defaults (tests do not)."""
 
     def __init__(self, config_dir=CONFIG_DIR, keyfile=KEYFILE_PATH, regdom=REGDOM_PATH,
-                 sys_net=SYS_NET, lock=LOCK_PATH, tool_path=TOOL_PATH):
+                 sys_net=SYS_NET, lock=LOCK_PATH, tool_path=TOOL_PATH,
+                 trusted_uids=TRUSTED_SETTINGS_UIDS):
         self.config_dir = config_dir
+        self.trusted_uids = frozenset(trusted_uids)
         self.keyfile = keyfile
         self.regdom = regdom
         self.sys_net = sys_net
@@ -494,7 +507,8 @@ class Helper:
 
     def load(self, dir_fd):
         """Return the saved settings, or None when the access point was never configured."""
-        data = read_private_file(dir_fd, SETTINGS_NAME, MAX_SETTINGS_BYTES)
+        data = read_private_file(dir_fd, SETTINGS_NAME, MAX_SETTINGS_BYTES,
+                                 owners=self.paths.trusted_uids, code="settings_untrusted")
         if data is None:
             return None
         try:

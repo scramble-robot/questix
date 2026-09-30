@@ -82,7 +82,9 @@ class Kit:
         self.paths = na.Paths(
             config_dir=str(self.config), keyfile=str(self.nm / "questix-ap.nmconnection"),
             regdom=str(self.modprobe / "questix-wifi-regdom.conf"), sys_net=str(self.sys_net),
-            lock=str(root / "lock"), tool_path=f"{self.bin}:/usr/bin:/bin")
+            lock=str(root / "lock"), tool_path=f"{self.bin}:/usr/bin:/bin",
+            # The files this test writes belong to the test's user; the service trusts root only.
+            trusted_uids={os.geteuid()})
 
     @property
     def keyfile(self) -> Path:
@@ -372,6 +374,76 @@ def test_a_second_run_at_the_same_time_is_refused(kit):
         code, status = kit.run()
     assert code == 1 and status["code"] == "busy"
     assert not kit.keyfile.exists()
+
+
+ROLE_SETTINGS = (
+    "# Ansible managed\n"
+    "WIFI_AP_STATE=up\nWIFI_AP_INTERFACE=wlan1\nWIFI_AP_SSID='QUESTiX 3F2A'\n"
+    "WIFI_AP_PASSWORD=abcdefgh1\nWIFI_AP_BAND=bg\nWIFI_AP_CHANNEL=6\n"
+    "WIFI_AP_COUNTRY=US\nWIFI_AP_ADDRESS=10.42.0.1/24\n")
+
+
+def trusted_settings(kit, mode=0o640):
+    (kit.sys_net / "wlan1").mkdir()
+    kit.settings.write_text(ROLE_SETTINGS)
+    kit.settings.chmod(mode)
+
+
+def test_root_settings_keep_cli_interface_and_country(kit):
+    # `wifi-ap.sh up --interface wlan1 --country US` (root): inherited, never changed by the API.
+    trusted_settings(kit)
+    code, _ = kit.run("configure", {"ssid": "QUESTiX Room 3"})
+    assert code == 0
+    saved = kit.saved()
+    assert saved["interface"] == "wlan1" and saved["country"] == "US"
+    assert "interface-name=wlan1\n" in kit.keyfile.read_text()
+    assert ["iw", "reg", "set", "US"] in kit.calls()
+
+
+def test_settings_of_another_owner_are_not_trusted(kit):
+    # The robot user owns the directory and could replace the root file with its own.
+    trusted_settings(kit)
+    kit.paths.trusted_uids = frozenset({os.geteuid() + 1})
+    code, status = kit.run("start")
+    assert code == 1 and status["code"] == "settings_untrusted"
+    assert not kit.keyfile.exists() and nm_calls(kit) == []
+    assert "wlan1" not in json.dumps(kit.calls())
+
+
+@pytest.mark.parametrize("mode", [0o660, 0o642, 0o646, 0o666])
+def test_writable_settings_are_not_trusted(kit, mode):
+    trusted_settings(kit, mode)
+    code, status = kit.run("start")
+    assert code == 1 and status["code"] == "settings_untrusted"
+    assert not kit.keyfile.exists()
+
+
+def test_symlinked_settings_are_not_trusted(kit):
+    real = kit.root / "real.env"
+    real.write_text(ROLE_SETTINGS)
+    real.chmod(0o640)
+    kit.settings.symlink_to(real)
+    assert kit.run("start")[1]["code"] == "settings_untrusted"
+    assert not kit.keyfile.exists()
+
+
+def test_hard_linked_settings_are_not_trusted(kit):
+    trusted_settings(kit)
+    os.link(kit.settings, kit.root / "second-link")
+    assert kit.run("start")[1]["code"] == "settings_untrusted"
+
+
+def test_the_service_trusts_root_only():
+    assert na.Paths().trusted_uids == frozenset({0})
+    assert na.Paths().lock == "/run/questix_network_admin/lock"
+
+
+@pytest.mark.skipif(os.geteuid() != 0, reason="needs root to give the settings file another owner")
+def test_settings_owned_by_the_robot_user_are_refused_by_default_paths(kit):
+    trusted_settings(kit)
+    os.chown(kit.settings, 4242, 4242)
+    kit.paths.trusted_uids = na.TRUSTED_SETTINGS_UIDS
+    assert kit.run("start")[1]["code"] == "settings_untrusted"
 
 
 def test_settings_written_by_the_role_are_read_as_data(kit):

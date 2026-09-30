@@ -13,6 +13,7 @@ from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
@@ -111,6 +112,11 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["Content-Type"],
 )
+# Added last, so it runs first: only requests addressed to this machine's loopback names are
+# served. A DNS-rebinding page (Host: attacker.example resolving to 127.0.0.1) gets 400 and can
+# neither read GET answers (such as the access point password for the QR codes) nor change
+# anything. SSH port forwarding to http://localhost:<port> keeps working.
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(wifi_ap.LOOPBACK_HOSTS))
 
 app.include_router(recorder.router)
 app.include_router(logs.router)
