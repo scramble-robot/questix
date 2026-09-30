@@ -105,8 +105,47 @@
   font-weight: 700;
 }
 
-@media (max-width: 700px) {
-  .robot-link-name {
-    max-width: 6em;
+/* Wider than a phone, the header's 実機 button is two lines: where it is connected (● 実機 name)
+   on the first, the connection and E-stop state on the second. One long line pushed into the
+   logo on an iPad in landscape. live-ui.js still only sets the name, the state text and the data
+   attributes; phones keep one short word next to the dot (hs-shell.css). */
+@media (min-width: 601px) {
+  .header-actions > .robot-link {
+    display: grid;
+    grid-template-columns: auto minmax(0, auto);
+    grid-template-areas:
+      'dot where'
+      '. state';
+    align-items: center;
+    justify-items: start;
+    column-gap: 6px;
+    row-gap: 2px;
+    min-width: 0;
+    flex: 0 1 auto;
+    text-align: left;
+    line-height: 1.25;
+  }
+  .robot-link > .robot-link-dot {
+    grid-area: dot;
+  }
+  .robot-link > .robot-link-where {
+    grid-area: where;
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .robot-link-where > .robot-link-label {
+    flex: none;
+  }
+  .robot-link-where > .robot-link-name {
+    min-width: 0;
+    max-width: 12em;
+  }
+  .robot-link > #robotLinkState {
+    grid-area: state;
+    font-size: 12px;
+    white-space: nowrap;
   }
 }

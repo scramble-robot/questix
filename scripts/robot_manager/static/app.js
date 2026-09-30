@@ -248,7 +248,9 @@ function renderOverview() {
     el.dataset.tone = row.tone;
   }
   document.getElementById('header-robot').textContent = rows.robot.text;
-  document.getElementById('header-estop').hidden = rows.estop.text !== '押されています';
+  const headerEstop = StatusView.headerEstop(rows.estop);
+  document.getElementById('header-estop').dataset.state = headerEstop.state;
+  document.getElementById('header-estop-state').textContent = headerEstop.label;
 }
 
 function updateLaunchConfig(config) {

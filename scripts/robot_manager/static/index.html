@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>QUESTiX Robot Manager</title>
-  <link rel="stylesheet" href="/static/style.css?v=33">
+  <link rel="stylesheet" href="/static/style.css?v=34">
 </head>
 
 <body>
@@ -21,13 +21,20 @@
         <span class="indicator-label">ロボット制御：</span><span class="indicator-label-short" aria-hidden="true">制御：</span>
         <span id="service-status-text">確認中</span>
       </div>
-      <span id="header-estop" class="header-chip danger" hidden>非常停止ボタンが押されています</span>
+    </div>
+    <!-- E-stop · すべて止める · 管理設定 stay together on one row. The E-stop block is always shown,
+         one fixed size in every state, so 「すべて止める」 and 管理設定 never move. -->
+    <div class="header-controls">
+    <div id="header-estop" class="header-estop" data-state="unknown" role="status" aria-live="polite">
+      <span class="header-estop-title">非常停止ボタン</span>
+      <span id="header-estop-state" class="header-estop-state">不明</span>
     </div>
     <!-- One tap, no confirmation: stops the robot service and whatever a lesson runs. -->
     <button type="button" class="btn btn-stop btn-stop-all" id="stop-all"
       aria-describedby="stop-all-help">すべて止める</button>
     <span id="stop-all-help" class="tuning-sr-only">ロボット制御を停止し、教材の走行と発射も止めます。確認なしですぐに実行します。</span>
     <button type="button" class="btn btn-small" id="open-admin" aria-pressed="false">管理設定</button>
+    </div>
     </div>
   </header>
 
@@ -699,8 +706,8 @@
   <script src="/static/web-joy-connection.js?v=3"></script>
   <script src="/static/operator-guide.js?v=4"></script>
   <script src="/static/control-labels.js?v=4"></script>
-  <script src="/static/status-view.js?v=1"></script>
-  <script src="/static/app.js?v=16"></script>
+  <script src="/static/status-view.js?v=2"></script>
+  <script src="/static/app.js?v=17"></script>
   <script src="/static/controller-map.js?v=12"></script>
   <script src="/static/controls.js?v=22"></script>
 </body>

@@ -126,6 +126,30 @@ test('the E-stop row uses the bridge report even when pages may not move the rob
   assert.match(StatusView.estop(lab(null), 'active').text, /^分かりません/);
 });
 
+test('the header E-stop block always has one of three states, taken from the E-stop row', () => {
+  const lab = (emergencyStop) => ({ bridge: { read_only: true, shoot_state: { allowed: false },
+    drive_state: { allowed: false, blockers: [] }, emergency_stop: emergencyStop } });
+  const header = (labState, service) => StatusView.headerEstop(StatusView.estop(labState, service));
+  assert.deepEqual(header(lab(true), 'active'), { state: 'pressed', label: '押されている' });
+  assert.deepEqual(header(lab(false), 'active'), { state: 'released', label: '解除中' });
+  // Not reported, no bridge, robot control stopped, no row at all: unknown, never hidden.
+  assert.deepEqual(header(lab(null), 'active'), { state: 'unknown', label: '不明' });
+  assert.deepEqual(header(null, 'active'), { state: 'unknown', label: '不明' });
+  assert.deepEqual(header(lab(true), 'inactive'), { state: 'unknown', label: '不明' });
+  assert.deepEqual(StatusView.headerEstop(undefined), { state: 'unknown', label: '不明' });
+});
+
+test('the header E-stop block is in the page from the start and is never hidden', () => {
+  const html = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'static', 'index.html'), 'utf8');
+  const block = html.match(/<div id="header-estop"[^>]*>/);
+  assert.ok(block, 'header-estop block exists');
+  assert.doesNotMatch(block[0], /\bhidden\b/);
+  assert.match(block[0], /data-state="unknown"/);
+  assert.match(html, /<span id="header-estop-state"[^>]*>不明<\/span>/);
+  const app = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'static', 'app.js'), 'utf8');
+  assert.doesNotMatch(app, /header-estop'\)\.hidden/);
+});
+
 test('an E-stop not heard yet is unknown, never released, even while pages may move the robot', () => {
   const blockers = [{ code: 'estop_unknown', nodes: null }];
   const unknown = StatusView.estop({ bridge: { read_only: false, emergency_stop: null,
@@ -154,4 +178,11 @@ test('a lesson permission cannot be switched on while the teacher runtime author
   assert.equal(on.toggleDisabled, false);
   const older = StatusView.capability('drive', lab({ drive_allowed: false }), 'active', memory, 0);
   assert.equal(older.toggleDisabled, false);
+});
+
+test('an E-stop not heard yet shows as unknown in the header block', () => {
+  const blockers = [{ code: 'estop_unknown', nodes: null }];
+  const row = StatusView.estop({ bridge: { read_only: false, emergency_stop: null,
+    drive_state: { allowed: true, blockers }, shoot_state: { allowed: true, blockers } } }, 'active');
+  assert.deepEqual(StatusView.headerEstop(row), { state: 'unknown', label: '不明' });
 });
