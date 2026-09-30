@@ -22,7 +22,7 @@
       alias rs='cd $ROBOT_WS/src'
       alias rb='cd $ROBOT_WS && colcon build --symlink-install'
       alias rt='cd $ROBOT_WS && colcon test'
-      alias gpio_status='raspi-gpio get'
+      alias gpio_status='gpioinfo {{ gpio_status_chip }}'
     state: present
     create: true
   become: false

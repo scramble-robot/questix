@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Fake rosdep for ansible/tests (ros2_build): logs the call and the index it reads.
+set -euo pipefail
+echo "rosdep $* ROS_HOME=${ROS_HOME:-}" >>"$FAKE_ROS_LOG"
+echo "#All required rosdeps installed successfully"

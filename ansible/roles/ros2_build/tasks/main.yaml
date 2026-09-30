@@ -1,15 +1,187 @@
 ---
-# ROS2 Build Tasks - Build workspace with colcon
+# ROS2 Build Tasks - make the QUESTiX workspace runnable on a fresh kit.
+#
+# workspace_path is the QUESTiX checkout itself (setup_kit_vars.yaml: ~/questix); its external
+# packages (dependency.repos) go to workspace_path/src. After this role:
+#   - every repository of dependency.repos is in src/ (missing ones imported; existing ones are
+#     left exactly as they are: `vcs import --skip-existing`, no update policy of its own),
+#   - the workspace's rosdep keys are installed,
+#   - `colcon build --symlink-install` has built it and install/setup.bash exists,
+#   - the packages in workspace_required_packages resolve with `ros2 pkg prefix`, and
+#     questix_lab_bridge's lab_bridge_node is an executable,
+#   - src/ build/ install/ log/ belong to target_user.
+# Imports and builds run as the user who runs setup.sh (become: false), never as root; only the
+# apt part of rosdep runs as root. Nothing here starts a node or sends a motor command.
+# Check mode (the CI dry run) skips the whole build: it would need the network and the ROS tools.
 
-- name: Build ROS2 workspace with symlink install
-  ansible.builtin.shell: |
-    cd {{ workspace_path | default('/home/' + (ansible_user | default(ansible_env.SUDO_USER)) + '/robot_ws') }}
-    source /opt/ros/{{ ros2_distro | default('jazzy') }}/setup.bash
-    colcon build --symlink-install
-  become: false
-  register: colcon_build_result
-  changed_when: true
+- name: Check that workspace_path is the QUESTiX checkout
+  ansible.builtin.stat:
+    path: "{{ workspace_path }}/dependency.repos"
+  register: workspace_repos_file
 
-- name: Display colcon build result
-  ansible.builtin.debug:
-    msg: "Colcon build completed: {{ colcon_build_result.stdout_lines[-5:] if colcon_build_result.stdout_lines else 'No output' }}"
+- name: Require the QUESTiX checkout at workspace_path
+  ansible.builtin.assert:
+    that:
+      - workspace_repos_file.stat.exists
+    fail_msg: >-
+      {{ workspace_path }}/dependency.repos not found. setup.sh builds the QUESTiX checkout in
+      place: clone the repository to {{ workspace_path }} (or pass -e workspace_path=<checkout>).
+    quiet: true
+
+- name: Build the QUESTiX workspace
+  when: not ansible_check_mode
+  block:
+    - name: Check who runs the build
+      ansible.builtin.command: id -un
+      become: false
+      register: workspace_build_user
+      changed_when: false
+
+    - name: Require the build to run as the kit user, not root
+      ansible.builtin.assert:
+        that:
+          - workspace_build_user.stdout == target_user
+          - target_user != 'root' or not workspace_build_refuse_root | bool
+        fail_msg: >-
+          The workspace must be built by {{ target_user }} (running: {{ workspace_build_user.stdout }}).
+          Run ./setup.sh as that user; it asks for the sudo password itself.
+        quiet: true
+
+    - name: Read dependency.repos
+      ansible.builtin.slurp:
+        src: "{{ workspace_path }}/dependency.repos"
+      register: workspace_repos_raw
+
+    - name: List the external repositories
+      ansible.builtin.set_fact:
+        workspace_repo_names: >-
+          {{ ((workspace_repos_raw.content | b64decode | from_yaml).repositories | default({})) | list }}
+
+    - name: Find the external repositories already in src/
+      ansible.builtin.stat:
+        path: "{{ workspace_path }}/src/{{ item }}"
+      loop: "{{ workspace_repo_names }}"
+      register: workspace_repo_dirs
+
+    - name: List the external repositories to import
+      ansible.builtin.set_fact:
+        workspace_repos_missing: >-
+          {{ workspace_repo_dirs.results | rejectattr('stat.exists') | map(attribute='item') | list }}
+
+    - name: Create src/ for the external repositories
+      ansible.builtin.file:
+        path: "{{ workspace_path }}/src"
+        state: directory
+        mode: "0755"
+      become: false
+
+    # Existing checkouts are never updated or reset here (a second setup keeps local work).
+    - name: Import the missing external repositories (dependency.repos)
+      ansible.builtin.command:
+        cmd: vcs import --input dependency.repos --skip-existing src
+        chdir: "{{ workspace_path }}"
+      become: false
+      register: workspace_vcs_import
+      changed_when: true
+      when: workspace_repos_missing | length > 0
+
+    # rosdep reads the index `rosdep update` (ros2_installation role, as the user) wrote to the
+    # user's ~/.ros; only its apt-get needs root.
+    - name: Install the workspace's rosdep dependencies
+      ansible.builtin.command:
+        argv:
+          - rosdep
+          - install
+          - --from-paths
+          - "{{ workspace_path }}"
+          - --ignore-src
+          - --rosdistro
+          - "{{ ros2_distro }}"
+          - -r
+          - -y
+      become: "{{ workspace_rosdep_become }}"
+      environment:
+        ROS_HOME: "{{ workspace_user_ros_home }}"
+      register: workspace_rosdep_install
+      changed_when: "'executing command' in workspace_rosdep_install.stdout"
+
+    - name: Build the workspace (colcon build --symlink-install)
+      ansible.builtin.shell:
+        cmd: |
+          set -eo pipefail
+          # ROS setup files read unset variables: never enable nounset around them.
+          source "{{ workspace_ros_setup }}"
+          colcon build --symlink-install 2>&1 | tail -n 40
+        chdir: "{{ workspace_path }}"
+        executable: /bin/bash
+      become: false
+      register: workspace_colcon_build
+      changed_when: true
+
+    - name: Check that install/setup.bash exists
+      ansible.builtin.stat:
+        path: "{{ workspace_path }}/install/setup.bash"
+      register: workspace_install_setup
+
+    - name: Require install/setup.bash
+      ansible.builtin.assert:
+        that:
+          - workspace_install_setup.stat.exists
+        fail_msg: "colcon build finished but {{ workspace_path }}/install/setup.bash is missing"
+        quiet: true
+
+    - name: Check who owns the workspace directories
+      ansible.builtin.stat:
+        path: "{{ workspace_path }}/{{ item }}"
+      loop: [src, build, install, log]
+      register: workspace_dir_owners
+
+    - name: Require the workspace directories to belong to the kit user
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.pw_name == target_user
+        fail_msg: "{{ item.item }}/ is missing or not owned by {{ target_user }}"
+        quiet: true
+      loop: "{{ workspace_dir_owners.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Resolve the required QUESTiX packages
+      ansible.builtin.shell:
+        cmd: |
+          set -e
+          source "{{ workspace_ros_setup }}"
+          source "{{ workspace_path }}/install/setup.bash"
+          for package in {{ workspace_required_packages | map('quote') | join(' ') }}; do
+            prefix="$(ros2 pkg prefix "$package")"  # a package that does not resolve stops here
+            printf '%s %s\n' "$package" "$prefix"
+          done
+          ros2 pkg executables questix_lab_bridge
+        chdir: "{{ workspace_path }}"
+        executable: /bin/bash
+      become: false
+      register: workspace_packages
+      changed_when: false
+
+    - name: Require the lab bridge executable
+      ansible.builtin.assert:
+        that:
+          - "'questix_lab_bridge lab_bridge_node' in workspace_packages.stdout"
+          - "(workspace_path ~ '/install/questix_lab_bridge') in workspace_packages.stdout"
+        fail_msg: "questix_lab_bridge / lab_bridge_node do not resolve from {{ workspace_path }}/install"
+        quiet: true
+
+    - name: Record that the workspace is ready
+      ansible.builtin.set_fact:
+        workspace_build_ready: true
+
+    - name: Display workspace build result
+      ansible.builtin.debug:
+        msg:
+          - "Workspace built at: {{ workspace_path }}"
+          - >-
+            External repositories imported:
+            {{ workspace_repos_missing | join(', ') if workspace_repos_missing else 'none (all present)' }}
+          - "Resolved packages:"
+          - "{{ workspace_packages.stdout_lines }}"

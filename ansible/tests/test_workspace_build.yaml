@@ -1,0 +1,14 @@
+---
+# Source-only harness for the ros2_build role (fresh-kit workspace build). run_contract_tests.sh
+# points workspace_path at a temp copy of dependency.repos and puts fake vcs / rosdep / colcon /
+# ros2 first on PATH, so the real role tasks run with no network, no ROS and no root.
+
+- hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    target_user: "{{ lookup('env', 'USER') }}"
+  tasks:
+    - name: Exercise ros2_build tasks
+      ansible.builtin.include_role:
+        name: ros2_build

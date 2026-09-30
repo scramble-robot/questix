@@ -60,18 +60,42 @@
     - { role: ros2_installation }
     - { role: raspberry_pi_setup }
     - { role: hardware_interfaces }
+    - { role: openssh_server }
     - { role: robotics_workspace }
+    # Imports dependency.repos, runs rosdep and colcon build, and checks the packages resolve:
+    # the kit is not usable (Robot Manager's lesson bridge, the robot service) until it is built.
+    - { role: ros2_build }
     - { role: robot_autostart }
     - { role: display_settings }
     # Off unless wifi_ap_enabled: switching the Wi-Fi to AP mode drops a Wi-Fi client connection.
     - { role: wifi_access_point, when: wifi_ap_enabled | bool }
 
   post_tasks:
+    # Reached only when every role succeeded, including ros2_build's package checks: the
+    # workspace is built, not just created. Check mode (the CI dry run) builds nothing.
     - name: Display completion message
       ansible.builtin.debug:
         msg:
-          - "🤖 ROS2 robotics kit environment setup completed for Raspberry Pi 5!"
-          - "🏗️  Workspace created at: {{ workspace_path }}"
+          - >-
+            {{ '🤖 ROS2 robotics kit environment setup completed for Raspberry Pi 5!'
+            if workspace_build_ready | default(false) | bool
+            else '🧪 Check mode: nothing was built; the kit is NOT set up' }}
+          - >-
+            {{ '🏗️  Workspace built at: ' ~ workspace_path
+            ~ ' (dependency.repos imported, rosdep installed, colcon build --symlink-install)'
+            if workspace_build_ready | default(false) | bool
+            else '🏗️  Workspace NOT built: ' ~ workspace_path }}
+          - >-
+            {{ '📦 QUESTiX ROS packages ready: ' ~ (workspace_required_packages | default([]) | join(', '))
+            ~ ' (questix_lab_bridge lab_bridge_node resolves)'
+            if workspace_build_ready | default(false) | bool else '📦 QUESTiX ROS packages: not checked' }}
+          - "🖥️  Robot Manager installed: http://localhost:{{ robot_manager_port | default(8888) }}"
+          - >-
+            {{ '🔑 SSH: openssh-server, ' ~ (openssh_unit | default('ssh')) ~ ' enabled and active'
+            if install_openssh_server | default(true) | bool else '🔑 SSH: not managed (install_openssh_server=false)' }}
+          - >-
+            {{ '🖱️  Desktop shortcut trusted' if desktop_shortcut_trusted | default(false) | bool
+            else '⚠️  Desktop shortcut not trusted (see the warning above; Robot Manager works without it)' }}
           - "🔧 Robotics development tools installed"
           - "🔌 GPIO, I2C, and SPI interfaces enabled"
           - "📝 Environment aliases added to .bashrc"
@@ -83,6 +107,6 @@
           - "1. Reboot the system: sudo reboot"
           - "2. Source your bashrc: source ~/.bashrc"
           - "3. Navigate to workspace: rw"
-          - "4. Test GPIO access: gpio_status"
+          - "4. Show the GPIO lines (read-only): gpio_status"
           - "5. Test ROS2: ros2 topic list"
           - "6. Switch to competition mode: echo competition | sudo tee /etc/questix_robot/mode"

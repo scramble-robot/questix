@@ -92,10 +92,39 @@
   become: false
   failed_when: false
 
+# Trust needs the desktop's metadata service (a GNOME session). Without it `gio set` fails; the
+# shortcut then asks once before launching. That is not a setup failure, but it is reported as a
+# warning and never shown as success: the trust is read back.
 - name: Mark desktop shortcut as trusted (GNOME)
   ansible.builtin.command:
     cmd: gio set "/home/{{ target_user }}/Desktop/questix_robot_manager.desktop" metadata::trusted true
   become: true
   become_user: "{{ target_user }}"
+  register: desktop_trust_set
   failed_when: false
   changed_when: false
+
+- name: Read back the desktop shortcut trust
+  ansible.builtin.command:
+    cmd: gio info --attributes=metadata::trusted "/home/{{ target_user }}/Desktop/questix_robot_manager.desktop"
+  become: true
+  become_user: "{{ target_user }}"
+  register: desktop_trust_info
+  failed_when: false
+  changed_when: false
+
+- name: Record whether the desktop shortcut is trusted
+  ansible.builtin.set_fact:
+    desktop_shortcut_trusted: >-
+      {{ desktop_trust_info.rc == 0 and 'metadata::trusted: true' in desktop_trust_info.stdout }}
+
+- name: Warn that the desktop shortcut is not trusted
+  ansible.builtin.debug:
+    msg:
+      - "WARNING: the Robot Manager desktop shortcut is not marked as trusted."
+      - "gio set: rc={{ desktop_trust_set.rc }} {{ desktop_trust_set.stderr | default('') | trim }}"
+      - "gio info: rc={{ desktop_trust_info.rc }} {{ desktop_trust_info.stderr | default('') | trim }}"
+      - "Robot Manager itself is installed (http://localhost:{{ robot_manager_port }}). To trust the icon,"
+      - "log in to the desktop and run: gio set ~/Desktop/questix_robot_manager.desktop metadata::trusted true"
+      - "(or right-click the icon and choose Allow Launching)."
+  when: not desktop_shortcut_trusted | bool
