@@ -1,0 +1,357 @@
+/* Controller key-mapping course (js/keymap/). */
+.keymap-topics {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 7px;
+  margin-bottom: 22px;
+}
+.keymap-topics button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  text-align: left;
+  font-size: 13px;
+  padding: 12px;
+  line-height: 1.6;
+}
+.keymap-topics button > span {
+  border-radius: 50%;
+  background: #edf3f1;
+  min-width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+}
+.keymap-topics button[aria-current='step'] {
+  border-color: #508c81;
+  background: var(--green-soft);
+  color: #195f55;
+}
+.keymap-topics button[aria-current='step'] > span {
+  background: var(--green);
+  color: #fff;
+}
+
+.keymap-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  gap: 20px;
+  align-items: start;
+}
+.keymap-column {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+.keymap-layout .card {
+  margin: 0;
+  min-width: 0; /* a wide table scrolls inside its card instead of widening the column */
+}
+.keymap-card-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.keymap-card-heading h2 {
+  margin: 0;
+}
+.keymap-note {
+  color: var(--orange);
+}
+
+/* The on-screen controller. */
+.keymap-pad {
+  display: block;
+  width: 100%;
+  max-width: 420px;
+  margin: 8px auto 0;
+  touch-action: none; /* dragging a stick must not scroll the page */
+  user-select: none;
+}
+.keymap-pad-body {
+  fill: #e8eeee;
+  stroke: #b7c7c4;
+  stroke-width: 2;
+}
+.keymap-pad-button rect {
+  fill: #fff;
+  stroke: #8fa6a2;
+  stroke-width: 1.5;
+}
+.keymap-pad-button text {
+  font-size: 12px;
+  fill: #253a3f;
+  pointer-events: none;
+}
+.keymap-pad-button,
+.keymap-pad-stick {
+  cursor: pointer;
+  outline: none;
+}
+.keymap-pad-button[data-pressed='true'] rect {
+  fill: var(--green);
+  stroke: var(--green);
+}
+.keymap-pad-button[data-pressed='true'] text:not(.keymap-pad-index) {
+  fill: #fff;
+}
+.keymap-pad .keymap-pad-index {
+  font-size: 10px;
+  fill: var(--muted);
+}
+.keymap-pad-button:focus-visible rect,
+.keymap-pad-stick:focus-visible .keymap-pad-well {
+  stroke: #2a78d6;
+  stroke-width: 3;
+}
+.keymap-pad-well {
+  fill: #d6e1df;
+  stroke: #9fb3af;
+  stroke-width: 1.5;
+}
+.keymap-pad-knob {
+  fill: #4e6a67;
+}
+
+/* What the controller sends. */
+.keymap-readout h3,
+.keymap-mapping h3 {
+  font-size: 14px;
+  margin: 16px 0 8px;
+}
+.keymap-readout-summary {
+  font-weight: 600;
+  line-height: 1.7;
+}
+.keymap-buttons {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.keymap-buttons li {
+  display: grid;
+  justify-items: center;
+  padding: 4px 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  font-variant-numeric: tabular-nums;
+}
+.keymap-buttons li span {
+  font-size: 11px;
+  color: var(--muted);
+}
+.keymap-buttons li[data-on='true'] {
+  background: var(--green);
+  border-color: var(--green);
+  color: #fff;
+}
+.keymap-buttons li[data-on='true'] span {
+  color: #e8f2ee;
+}
+.keymap-axes {
+  display: grid;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.keymap-axes li {
+  display: grid;
+  grid-template-columns: 3.2em minmax(0, 1fr) 4em;
+  align-items: center;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.keymap-axes strong {
+  text-align: right;
+}
+.keymap-axis-bar {
+  position: relative;
+  height: 12px;
+  border-radius: 6px;
+  background: #e5ecea;
+}
+.keymap-axis-bar::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  background: #9fb3af;
+}
+.keymap-axis-bar i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 6px;
+  background: var(--role-measured);
+}
+
+/* The mapping form. */
+.keymap-fields {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+.keymap-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(7.5em, 9em);
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-left: 4px solid transparent;
+  border-radius: 6px;
+}
+.keymap-field > span {
+  display: grid;
+  gap: 2px;
+  font-weight: 600;
+}
+.keymap-field small {
+  font-weight: 400;
+  color: var(--muted);
+}
+.keymap-field[data-flagged='true'] {
+  border-left-color: var(--role-danger);
+  background: #fdf0ef;
+}
+.keymap-deadzone input[type='range'] {
+  width: 100%;
+}
+.keymap-problems {
+  margin: 0;
+  padding-left: 1.2em;
+  line-height: 1.7;
+}
+.keymap-problems li[data-code='none'] {
+  color: var(--green);
+}
+.keymap-problems li:not([data-code='none']) {
+  color: var(--role-danger);
+}
+
+/* The robot model. */
+.keymap-field-view {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  border-radius: 12px;
+  background: #1c323e;
+}
+.keymap-grid line {
+  stroke: #2f4a57;
+  stroke-width: 1;
+}
+.keymap-trail {
+  fill: none;
+  stroke: var(--scene-role-actual);
+  stroke-width: 3;
+  opacity: 0.6;
+}
+.keymap-robot-body {
+  fill: #d9eaee;
+}
+.keymap-robot-nose {
+  fill: #e56b2d;
+}
+.keymap-roller {
+  fill: #7f9097;
+}
+.keymap-roller[data-on='true'] {
+  fill: var(--scene-role-target);
+}
+.keymap-disc {
+  fill: #ebc27c;
+}
+.keymap-disc[data-weak='true'] {
+  fill: #e69a89;
+}
+.keymap-command {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0 0;
+}
+.keymap-command > div {
+  display: grid;
+  grid-template-columns: 7em minmax(0, 1fr);
+  gap: 8px;
+}
+.keymap-command dt {
+  color: var(--muted);
+}
+.keymap-command dd {
+  margin: 0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Topic blocks. */
+.keymap-find table,
+.keymap-apply table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+}
+.keymap-find th,
+.keymap-find td,
+.keymap-apply th,
+.keymap-apply td {
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: middle;
+}
+.keymap-find td:last-child {
+  text-align: right;
+}
+.keymap-table-scroll {
+  overflow-x: auto;
+}
+.keymap-apply code {
+  font-size: 13px;
+  white-space: nowrap;
+}
+.keymap-refused {
+  color: var(--role-danger);
+  font-weight: 600;
+}
+.keymap-steps {
+  line-height: 1.8;
+  padding-left: 1.4em;
+}
+.keymap-reflection {
+  margin-top: 20px;
+}
+
+@media (max-width: 900px) {
+  .keymap-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .keymap-topics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 600px) {
+  .keymap-layout .card,
+  .keymap-reflection {
+    padding: 14px;
+  }
+  .keymap-axes li {
+    grid-template-columns: 2.8em minmax(0, 1fr) 3.4em;
+    font-size: 13px;
+  }
+  .keymap-field {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .keymap-command > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+}

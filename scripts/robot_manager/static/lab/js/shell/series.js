@@ -17,6 +17,7 @@ import { initControl, activateControl, reviewControl } from '../control/ui.js';
 import { initPlanning, activatePlanning, reviewPlanning } from '../planning/ui.js';
 import { initLaunch, activateLaunch, reviewLaunch } from '../launch/ui.js';
 import { initArm, activateArm, reviewArm } from '../arm/ui.js';
+import { initKeymap, activateKeymap, reviewKeymap } from '../keymap/ui.js';
 import { reviewRL } from '../rl/foundations.js';
 import { initQuizzes } from '../quiz/ui.js';
 import { initMastery } from '../quiz/mastery-ui.js';
@@ -168,6 +169,7 @@ const activators = {
   planning: activatePlanning,
   launch: activateLaunch,
   arm: activateArm,
+  keymap: activateKeymap,
 };
 
 function show(name, updateHash = true) {
@@ -242,6 +244,7 @@ const reviewLessons = {
   control: reviewControl,
   launch: reviewLaunch,
   arm: reviewArm,
+  keymap: reviewKeymap,
   vision: reviewVision,
   slam: reviewSlam,
   planning: reviewPlanning,
@@ -305,6 +308,7 @@ initControl();
 initPlanning();
 initLaunch();
 initArm();
+initKeymap();
 initSystems();
 const mastery = initMastery({
   openTest: showMastery,
