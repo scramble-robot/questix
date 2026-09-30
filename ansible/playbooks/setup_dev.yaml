@@ -119,6 +119,12 @@
         - "alias cb='cd $COLCON_WS && colcon build'"
         - "alias ct='cd $COLCON_WS && colcon test'"
 
+    # Last task that needs root: removes the legacy .pkla and an old custom image's NOPASSWD:ALL
+    # sudoers file (exact matches only; an administrator's own rules are kept).
+    - name: Remove legacy root-equivalent privilege files
+      ansible.builtin.include_role:
+        name: legacy_privilege_cleanup
+
     - name: Display completion message
       ansible.builtin.debug:
         msg:

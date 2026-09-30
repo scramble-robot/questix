@@ -105,15 +105,14 @@ apt-get install -y \
     openssh-server \
     network-manager
 
-# Create default user for ROS2
+# Create default user for ROS2. No password is baked into the image: the account stays locked
+# (and SSH disabled) until someone sets a password at the robot's console on first boot
+# (scripts/iso/questix-first-boot-enroll.sh, enabled by scripts/apply-ansible-config.sh).
+# sudo asks for that password: the image has no NOPASSWD rule.
 useradd -m -s /bin/bash -G sudo,adm,dialout,cdrom,floppy,audio,dip,video,plugdev,netdev,gpio ubuntu
-echo "ubuntu:ubuntu" | chpasswd
+passwd -l ubuntu
 
-# Enable password-less sudo for ubuntu user
-echo "ubuntu ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/ubuntu
-
-# Set up SSH
-systemctl enable ssh
+# SSH: the package only. Remote login is enabled by the first-boot enrollment, not here.
 mkdir -p /home/ubuntu/.ssh
 chown ubuntu:ubuntu /home/ubuntu/.ssh
 chmod 700 /home/ubuntu/.ssh

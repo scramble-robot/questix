@@ -68,6 +68,8 @@
     - { role: display_settings }
     # Off unless wifi_ap_enabled: switching the Wi-Fi to AP mode drops a Wi-Fi client connection.
     - { role: wifi_access_point, when: wifi_ap_enabled | bool }
+    # Last: removes the legacy .pkla and the old image's NOPASSWD:ALL sudoers file (exact matches).
+    - { role: legacy_privilege_cleanup }
 
   post_tasks:
     # Reached only when every role succeeded, including ros2_build's package checks: the
