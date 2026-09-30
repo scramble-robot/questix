@@ -375,6 +375,25 @@ assert_contains "$UNIT" "User=root" "QUESTiX Local: helper unit runs as root"
 assert_contains "$UNIT" "ExecStart=/usr/bin/python3 -I /opt/questix_robot/questix_network_admin.py apply" \
     "QUESTiX Local: helper unit runs the root-owned copy with python3 -I"
 assert_not_contains "$UNIT" "[Install]" "QUESTiX Local: helper unit is never enabled (no AP at boot or setup)"
+# Sandbox of the root oneshot (systemd-analyze security: 8.9 before, 4.9 with these).
+for directive in "ProtectSystem=strict" \
+    "ReadWritePaths=/etc/questix_robot -/etc/NetworkManager/system-connections -/etc/modprobe.d" \
+    "RuntimeDirectory=questix_network_admin" "NoNewPrivileges=yes" "PrivateDevices=yes" \
+    "ProtectHome=yes" "ProtectKernelTunables=yes" "ProtectKernelModules=yes" "ProtectKernelLogs=yes" \
+    "ProtectControlGroups=yes" "RestrictSUIDSGID=yes" "RestrictNamespaces=yes" "LockPersonality=yes" \
+    "RestrictAddressFamilies=AF_UNIX AF_NETLINK"; do
+    assert_contains "$UNIT" "$directive" "QUESTiX Local: helper unit sets $directive"
+done
+assert_contains scripts/robot_manager/network_admin.py 'LOCK_PATH = "/run/questix_network_admin/lock"' \
+    "QUESTiX Local: the helper's lock is in the unit's RuntimeDirectory"
+if command -v systemd-analyze >/dev/null 2>&1; then
+    if systemd-analyze verify "$UNIT" >"$TMP_ROOT/verify.log" 2>&1; then
+        pass "QUESTiX Local: systemd-analyze verify accepts the helper unit"
+    else
+        fail "QUESTiX Local: systemd-analyze verify rejects the helper unit"
+        cat "$TMP_ROOT/verify.log"
+    fi
+fi
 RM_TASKS=ansible/roles/robot_autostart/tasks/robot_manager.yaml
 if python3 - "$RM_TASKS" << 'PYTHON'
 import sys, yaml

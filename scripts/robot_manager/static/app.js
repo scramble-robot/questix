@@ -998,7 +998,9 @@ async function networkChange(path, method, body, action) {
     document.getElementById(id).disabled = true;
   }
   try {
-    const job = await api(path, { method, body: body ? JSON.stringify(body) : undefined });
+    // Always a JSON body ({} for start / stop / new password): the manager refuses a network
+    // change without Content-Type: application/json (wifi_ap.py _browser_mutation_guard).
+    const job = await api(path, { method, body: JSON.stringify(body || {}) });
     if (joinQr.accessPoint) joinQr.accessPoint.job = job;
     network.passwordShown = false;
     renderNetwork();

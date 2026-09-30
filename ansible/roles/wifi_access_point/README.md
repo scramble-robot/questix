@@ -44,6 +44,8 @@ Robot Manager の「管理設定」→「ネットワーク / QUESTiX Local」�
 - Robot Manager はロボットのユーザーのまま動き、ネットワークを直接は変えません。検証した要求を `/etc/questix_robot/network_request.json` に書き、`questix_network_admin.service` を起動します（polkit でこのユーザーに許すのは、この unit の `start` だけ）。
 - この unit は root 所有の `/opt/questix_robot/questix_network_admin.py`（`scripts/robot_manager/network_admin.py` のコピー）を動かし、要求を一度だけ読み、値を検証し直して、このロールと同じ 3 つのファイル（keyfile・`wifi_ap.env`・規制ドメイン）を書き、同じ順序で `nmcli` を実行します。同じ内容になることは `ansible/tests/run_contract_tests.sh` がこのロールのテンプレートと比べて確かめます。
 - パスワードはコマンドライン・ログ・画面へのエラーには出しません。画面では伏せ字で、［表示］を押したときだけ見えます。
+- ネットワークを変える要求（開始・停止・設定保存・新しいパスワード）は、`Content-Type: application/json` で、このロボットの画面（`http://127.0.0.1` / `http://localhost`）から来たものだけを受け付けます。ロボットのブラウザで開いた別のサイトからの送信は拒否します。スクリプトから呼ぶときは `-H 'Content-Type: application/json' -d '{}'` を付けてください。
+- helper が引き継ぐ保存済みの設定（`wifi_ap.env`）は、root が書いたもの（このロール・`wifi-ap.sh`・helper）だけです。root 以外の所有、group/other が書き込める、リンクになっている、のいずれかなら使わずに止まります（`--interface` / `--country` で root が設定した値はそのまま引き継ぎます）。
 - 停止してもプロファイルは消しません（削除は `sudo scripts/wifi-ap.sh remove`）。学校の Wi-Fi の認証情報・802.1X・プロキシは扱いません。停止すると保存済みの Wi-Fi プロファイルに戻ります。
 - 共有モード（`ipv4.method=shared`）のままです。有線LANなどに外への経路があると、生徒の端末もそこから外へ出られます（画面の「外へのネットワーク」に表示）。
 - 練習モードで教材の自動開始（AUTOSTART）がオンなら、開始のあとに教材の配信も始めます（大会モードでは始めません。AUTOSTART は書き換えません）。
