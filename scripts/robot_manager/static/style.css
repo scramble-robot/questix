@@ -1339,8 +1339,18 @@ input[type="checkbox"] { accent-color: var(--accent); }
 /* Header: robot name, mode, service state and the one-tap 「すべて止める」. */
 .header-status { display: flex; align-items: center; gap: 0.35rem 0.75rem; flex-wrap: wrap; min-width: 0; }
 .header-robot { font-size: var(--font-small); font-weight: 700; overflow-wrap: anywhere; }
-.header-chip { font-size: var(--font-small); font-weight: 700; padding: 0.1rem 0.55rem; border-radius: 999px; }
-.header-chip.danger { background: var(--red); color: var(--on-danger); }
+/* The E-stop block beside 「すべて止める」: the same fixed box in every state (no reflow when the
+   button is pressed or released); the state is in words as well as colour. */
+.header-estop { flex: none; box-sizing: border-box; width: 8.5rem; height: 48px; display: grid;
+  align-content: center; justify-items: center; gap: 0.1rem; padding: 0 0.4rem; border: 2px solid var(--border-input);
+  border-radius: var(--radius-control); background: var(--bg-input); color: var(--text-dim);
+  text-align: center; line-height: 1.15; white-space: nowrap; overflow: hidden; }
+.header-estop-title { font-size: 0.75rem; font-weight: 600; }
+.header-estop-state { font-size: 0.95rem; font-weight: 800; }
+.header-estop[data-state="pressed"] { background: var(--red); border-color: var(--red); color: var(--on-danger); }
+.header-estop[data-state="released"] { background: var(--green); border-color: var(--green); color: var(--on-accent); }
+#open-admin { white-space: nowrap; flex: none; }
+.header-controls { display: flex; align-items: center; gap: 0.65rem; flex: none; flex-wrap: nowrap; }
 .btn-stop-all { flex: none; min-height: 48px; padding: 0.5rem 1.1rem; font-size: 1rem; font-weight: 800;
   letter-spacing: 0.04em; box-shadow: 0 0 0 2px #ff174455; }
 .stop-all-parts { list-style: none; margin-top: 0.5rem; display: grid; gap: 0.3rem; }
@@ -1379,18 +1389,22 @@ input[type="checkbox"] { accent-color: var(--accent); }
 
 /* Phones: two compact header rows (title + 管理設定, status + すべて止める), one-line status rows. */
 @media (max-width: 639px) {
-  .app-chrome header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center;
+  .app-chrome header { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center;
     gap: 0.3rem 0.6rem; padding: 0.45rem 1rem; }
-  .app-chrome .header-actions { display: contents; }
-  header h1 { grid-column: 1; grid-row: 1; font-size: 0.95rem; }
-  #open-admin { grid-column: 2; grid-row: 1; min-height: 36px; padding-block: 0.2rem; }
-  .header-status { grid-column: 1; grid-row: 2; gap: 0 0.5rem; font-size: 0.8rem; line-height: 1.45; }
+  .app-chrome .header-actions, .app-chrome .header-controls { display: contents; }
+  header h1 { grid-column: 1 / 3; grid-row: 1; font-size: 0.95rem; }
+  #open-admin { grid-column: 3; grid-row: 1; min-height: 36px; padding-block: 0.2rem; }
+  .header-status { grid-column: 1 / -1; grid-row: 2; gap: 0 0.5rem; font-size: 0.8rem; line-height: 1.45; }
   .header-status .indicator { margin-right: 0; font-size: 0.8rem; gap: 0.3rem; }
   .indicator-label { display: none; }
   .indicator-label-short { display: inline; }
   .header-mode { font-size: 0.8rem; }
   .header-robot { font-size: 0.8rem; }
-  .btn-stop-all { grid-column: 2; grid-row: 2; padding-inline: 0.8rem; font-size: 0.95rem; }
+  /* Phones: E-stop and すべて止める share their own row under the status (same row in every state). */
+  .btn-stop-all { grid-column: 3; grid-row: 3; padding-inline: 0.8rem; font-size: 0.95rem; }
+  .header-estop { grid-column: 2; grid-row: 3; width: 6.6rem; height: 48px; }
+  .header-estop-title { font-size: 0.7rem; }
+  .header-estop-state { font-size: 0.85rem; }
   .status-strip { grid-template-columns: minmax(0, 1fr); gap: 0.35rem; }
   .status-strip > div { grid-template-columns: 7.2em minmax(0, 1fr); column-gap: 0.6rem; align-items: baseline;
     padding: 0.3rem 0.6rem; }

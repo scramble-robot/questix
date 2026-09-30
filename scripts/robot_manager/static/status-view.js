@@ -204,6 +204,19 @@ const StatusView = (() => {
     return pressed ? { text: '押されています', tone: 'danger' } : { text: '解除されています', tone: 'ok' };
   }
 
+  // The header's E-stop block: always shown, one of three words. Only reads the row estop() made
+  // (its tone), so the 操作 tab and the header can never disagree.
+  const HEADER_ESTOP = {
+    pressed: '押されている',
+    released: '解除中',
+    unknown: '不明',
+  };
+  function headerEstop(row) {
+    const tone = row && row.tone;
+    const state = tone === 'danger' ? 'pressed' : tone === 'ok' ? 'released' : 'unknown';
+    return { state, label: HEADER_ESTOP[state] };
+  }
+
   // Rows of the 操作 tab's status strip.
   function overview(status, lab, controllerName) {
     const service = status ? status.service : 'unknown';
@@ -296,7 +309,7 @@ const StatusView = (() => {
 
   return {
     MODE, SERVICE, SETTLE_MS, createBlockerMemory, stableBlockers, blockerText, capability,
-    modeSummary, estop, overview, controllerUrl, labRestoredText,
+    modeSummary, estop, headerEstop, overview, controllerUrl, labRestoredText,
   };
 })();
 if (typeof module !== 'undefined') module.exports = StatusView;
