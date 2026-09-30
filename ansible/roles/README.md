@@ -70,7 +70,7 @@ ROS2 ロボティクスワークスペースと bash 環境を設定します。
 **主な機能**:
 
 - ロボティクスワークスペースディレクトリの作成
-- bash エイリアスの設定（rw, rs, rb, rt, gpio_status）
+- bash エイリアスの設定（rw, rs, rb, rt, gpio_status。gpio_status は `gpioinfo gpiochip4` で GPIO の線を読むだけ）
 - ROS2 環境変数の設定（ROS_DOMAIN_ID, ROBOT_WS）
 
 **変数**:
@@ -79,7 +79,28 @@ ROS2 ロボティクスワークスペースと bash 環境を設定します。
 - `workspace_path`: ワークスペースのパス（デフォルト: `/home/{{ target_user }}/robot_ws`）
 - `ros_domain_id`: ROS2 ドメイン ID（デフォルト: `42`）
 
-### 5. wifi_access_point
+### 5. ros2_build
+
+QUESTiX のワークスペース（`~/questix`）を、Fresh キットで動く状態までビルドします（`setup_kit.yaml`）。
+
+**場所**: `ansible/roles/ros2_build/`
+
+**主な機能**:
+
+- `dependency.repos` のうち `src/` にないものだけを取り込む（既存のものは更新しない）
+- rosdep の依存を導入し、`colcon build --symlink-install` を実行（ユーザー権限）
+- `questix_lab_bridge`（`lab_bridge_node`）などが解決できることを確かめる。できなければセットアップは失敗する
+
+詳細は `ansible/roles/ros2_build/README.md` を参照してください。
+
+### 6. openssh_server
+
+`openssh-server` を導入し、Ubuntu の既定の設定のまま SSH を有効にします（`install_openssh_server: true`）。
+`false` のときは何もしません（削除・停止・設定変更をしない）。
+
+詳細は `ansible/roles/openssh_server/README.md` を参照してください。
+
+### 7. wifi_access_point
 
 Raspberry Pi の Wi-Fi を QUESTiX 用のアクセスポイントにします（NetworkManager、WPA2-PSK）。
 
@@ -137,7 +158,15 @@ ansible/roles/
 │   ├── tasks/
 │   └── README.md
 ├── ros2_build/
-│   └── tasks/
+│   ├── defaults/
+│   ├── meta/
+│   ├── tasks/
+│   └── README.md
+├── openssh_server/
+│   ├── defaults/
+│   ├── meta/
+│   ├── tasks/
+│   └── README.md
 ├── raspberry_pi_setup/
 │   ├── defaults/
 │   │   └── main.yaml
@@ -174,6 +203,8 @@ ansible/roles/
 2. `raspberry_pi_setup` - 独立して実行可能
 3. `hardware_interfaces` - 独立して実行可能
 4. `robotics_workspace` - `ros2_installation` の後に実行される必要があります
+5. `ros2_build` - `ros2_installation`（colcon / vcstool / rosdep）と `robotics_workspace` の後、`robot_autostart` の前
+6. `openssh_server` - 独立して実行可能
 
 ## テスト
 

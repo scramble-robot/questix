@@ -5,3 +5,8 @@ target_user: "{{ ansible_user | default(ansible_env.SUDO_USER) }}"
 workspace_path: "/home/{{ target_user }}/robot_ws"
 bashrc_path: "/home/{{ target_user }}/.bashrc"
 ros_domain_id: 42
+# `gpio_status` lists this chip's lines (read-only: gpioinfo does not request a line, so it never
+# takes GPIO5 from gpio_reader). Same chip as gpio_reader/config/gpio_reader*.yaml chip_name.
+# raspi-gpio is not available on Ubuntu 24.04 for Raspberry Pi 5; gpioinfo comes with gpiod
+# (raspberry_pi_setup role).
+gpio_status_chip: gpiochip4

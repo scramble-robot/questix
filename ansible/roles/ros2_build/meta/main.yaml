@@ -1,0 +1,16 @@
+---
+# Role metadata for ros2_build
+
+galaxy_info:
+  author: Scramble Robot Team
+  description: Import dependencies and build the QUESTiX ROS 2 workspace
+  license: MIT
+  min_ansible_version: "2.14"
+  platforms:
+    - name: Ubuntu
+      versions:
+        # ansible-lint's bundled Galaxy schema does not yet include noble.
+        # The kit playbook still enforces Ubuntu 24.04 before applying this role.
+        - all
+
+dependencies: []

@@ -114,8 +114,10 @@ the kit playbook against `localhost`.
    ```
 
    This runs `ansible-playbook ansible/playbooks/setup_kit.yaml` locally and
-   installs ROS 2 Jazzy, enables GPIO/I2C/SPI, applies udev rules, and creates
-   `~/robot_ws`.
+   installs ROS 2 Jazzy, enables GPIO/I2C/SPI, applies udev rules, installs
+   openssh-server, and builds the QUESTiX workspace (the checkout, e.g. `~/questix`:
+   `dependency.repos` imported into `src/`, rosdep, `colcon build --symlink-install`).
+   It reports the setup as completed only after the QUESTiX packages resolve.
 
 5. **Reboot and verify**
 
@@ -124,8 +126,8 @@ the kit playbook against `localhost`.
    # After logging back in:
    source ~/.bashrc
    ros2 --version
-   gpio_status
-   rw   # cd into ~/robot_ws
+   gpio_status   # list the GPIO lines (read-only, gpiochip4)
+   rw   # cd into the workspace
    ```
 
 ## 📁 Project Structure
@@ -239,7 +241,7 @@ cw  # Navigate to workspace
 # After installation and reboot
 source ~/.bashrc
 ros2 --version
-gpio_status  # Check GPIO
+gpio_status  # List GPIO lines (read-only, gpiochip4)
 rw  # Navigate to robot workspace
 ```
 

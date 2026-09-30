@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Fake ros2 for ansible/tests (ros2_build): answers the package queries the role checks.
+set -euo pipefail
+echo "ros2 $*" >>"$FAKE_ROS_LOG"
+case "$1 $2" in
+    "pkg prefix") [ -d "install/$3" ] && echo "$PWD/install/$3" || { echo "Package not found" >&2; exit 1; } ;;
+    "pkg executables") echo "$3 lab_bridge_node" ;;
+    *) exit 1 ;;
+esac
