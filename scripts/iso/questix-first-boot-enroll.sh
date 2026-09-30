@@ -9,8 +9,9 @@
 # the robot's own screen and keyboard sets a password here. Then, and only then:
 #   1. the password is set (read from the console without echo, handed to chpasswd on stdin:
 #      never on a command line, in a log or in a file);
-#   2. SSH host keys are generated and SSH (ssh.socket on Ubuntu 24.04) is enabled and started;
-#   3. the enrollment marker is written and this unit disables itself.
+#   2. SSH host keys are generated and SSH (ssh.socket on Ubuntu 24.04) is enabled, started and
+#      checked active;
+#   3. only then the enrollment marker is written and this unit disables itself.
 # Any failure locks the account again and leaves SSH disabled; the next boot asks again.
 # sudo keeps asking for the user's password (no rule of its own is added or kept here).
 
@@ -43,6 +44,7 @@ fail() {
     say "❌ $*"
     passwd -l "$ENROLL_USER" > /dev/null 2>&1
     systemctl disable ssh.socket ssh.service > /dev/null 2>&1
+    systemctl stop ssh.socket ssh.service > /dev/null 2>&1
     say "   アカウントはロックしたままです。SSH も無効のままです。次の起動でもう一度設定できます。"
     exit 1
 }
@@ -99,14 +101,20 @@ main() {
     fi
     first=""
 
+    # SSH is enabled only now, after the password; the marker only once SSH is really up, so a
+    # failure anywhere before it leaves no marker and the next boot asks again.
     local unit
     unit="$(ssh_unit)"
     ssh-keygen -A > /dev/null || fail "SSH の鍵を作れませんでした。"
     systemctl enable "$unit" > /dev/null || fail "SSH を有効にできませんでした。"
+    systemctl start "$unit" > /dev/null || fail "SSH を開始できませんでした。"
+    systemctl is-active --quiet "$unit" || fail "SSH が動いていません。"
     mkdir -p "$STATE_DIR" || fail "設定済みの印を書けませんでした。"
     date -u +%Y-%m-%dT%H:%M:%SZ > "$MARKER" || fail "設定済みの印を書けませんでした。"
-    systemctl disable "$SELF_UNIT" > /dev/null 2>&1
-    systemctl start --no-block "$unit" > /dev/null 2>&1
+    # With the marker written, the unit's ConditionPathExists= already keeps it from running
+    # again; disabling it only tidies up.
+    systemctl disable "$SELF_UNIT" > /dev/null 2>&1 \
+        || say "⚠️  $SELF_UNIT を無効にできませんでした（設定済みの印があるため、次回は動きません）。"
 
     say ""
     say "✅ 設定しました。ログイン画面に進みます。"

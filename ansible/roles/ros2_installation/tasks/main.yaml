@@ -119,7 +119,9 @@
     line: "source /opt/ros/{{ ros2_distro_to_use }}/setup.bash"
     state: present
     create: true
-  become: false
+  # The kit user's own work: as that user also when the playbook runs as root (image build).
+  become: "{{ questix_image_build | default(false) | bool }}"
+  become_user: "{{ ansible_user | default(ansible_env.SUDO_USER) }}"
 
 - name: Source ROS2 environment for verification
   ansible.builtin.shell: |
@@ -178,7 +180,9 @@
 
 - name: Update rosdep
   ansible.builtin.command: rosdep update
-  become: false
+  # The kit user's own work: as that user also when the playbook runs as root (image build).
+  become: "{{ questix_image_build | default(false) | bool }}"
+  become_user: "{{ ansible_user | default(ansible_env.SUDO_USER) }}"
   changed_when: false
 
 # Clean up temporary files

@@ -10,7 +10,9 @@
 #   - the packages in workspace_required_packages resolve with `ros2 pkg prefix`, and
 #     questix_lab_bridge's lab_bridge_node is an executable,
 #   - src/ build/ install/ log/ belong to target_user.
-# Imports and builds run as the user who runs setup.sh (become: false), never as root; only the
+# Imports and builds run as the user who runs setup.sh (become: false; the custom image build,
+# which runs the playbook as root in a chroot, becomes that user: questix_image_build), never as
+# root; only the
 # apt part of rosdep runs as root. Nothing here starts a node or sends a motor command.
 # Check mode (the CI dry run) skips the whole build: it would need the network and the ROS tools.
 
@@ -33,7 +35,9 @@
   block:
     - name: Check who runs the build
       ansible.builtin.command: id -un
-      become: false
+      # The kit user's own work: as that user also when the playbook runs as root (image build).
+      become: "{{ questix_image_build | default(false) | bool }}"
+      become_user: "{{ target_user }}"
       register: workspace_build_user
       changed_when: false
 
@@ -73,14 +77,18 @@
         path: "{{ workspace_path }}/src"
         state: directory
         mode: "0755"
-      become: false
+      # The kit user's own work: as that user also when the playbook runs as root (image build).
+      become: "{{ questix_image_build | default(false) | bool }}"
+      become_user: "{{ target_user }}"
 
     # Existing checkouts are never updated or reset here (a second setup keeps local work).
     - name: Import the missing external repositories (dependency.repos)
       ansible.builtin.command:
         cmd: vcs import --input dependency.repos --skip-existing src
         chdir: "{{ workspace_path }}"
-      become: false
+      # The kit user's own work: as that user also when the playbook runs as root (image build).
+      become: "{{ questix_image_build | default(false) | bool }}"
+      become_user: "{{ target_user }}"
       register: workspace_vcs_import
       changed_when: true
       when: workspace_repos_missing | length > 0
@@ -114,7 +122,9 @@
           colcon build --symlink-install 2>&1 | tail -n 40
         chdir: "{{ workspace_path }}"
         executable: /bin/bash
-      become: false
+      # The kit user's own work: as that user also when the playbook runs as root (image build).
+      become: "{{ questix_image_build | default(false) | bool }}"
+      become_user: "{{ target_user }}"
       register: workspace_colcon_build
       changed_when: true
 
@@ -160,7 +170,9 @@
           ros2 pkg executables questix_lab_bridge
         chdir: "{{ workspace_path }}"
         executable: /bin/bash
-      become: false
+      # The kit user's own work: as that user also when the playbook runs as root (image build).
+      become: "{{ questix_image_build | default(false) | bool }}"
+      become_user: "{{ target_user }}"
       register: workspace_packages
       changed_when: false
 

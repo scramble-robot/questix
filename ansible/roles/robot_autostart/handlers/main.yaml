@@ -1,6 +1,9 @@
 ---
 # Handlers for robot_autostart role
 
+# Not in the custom image build's chroot (questix_image_build): no systemd runs there, and the
+# image's first boot loads the units anyway.
 - name: reload_systemd
   ansible.builtin.systemd:
     daemon_reload: true
+  when: not (questix_image_build | default(false) | bool)

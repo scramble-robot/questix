@@ -116,7 +116,12 @@ Raspberry Pi の Wi-Fi を QUESTiX 用のアクセスポイントにします（
 **主な機能**:
 
 - 旧 `.pkla`（`/etc/polkit-1/localauthority/50-local.d/50-questix-robot.pkla`。すべての unit の操作とパスワードなしの pkexec を許していた）を削除
-- 旧 custom image の `/etc/sudoers.d/ubuntu`（`ubuntu ALL=(ALL) NOPASSWD:ALL`）を、内容が完全に一致し、ユーザーにパスワードが設定され、`visudo -c` が前後とも通るときだけ削除
+- 旧 custom image の `/etc/sudoers.d/ubuntu`（`ubuntu ALL=(ALL) NOPASSWD:ALL`）を、次のすべてを満たすときだけ削除
+  - 内容が完全に一致する
+  - ユーザーに既知の初期値（`ubuntu`）ではないパスワードが設定されている
+  - `visudo -c` が前後とも通る
+- `ubuntu` のパスワードがまだ `ubuntu` のとき、ロックされているとき、確かめられないときは、setup を失敗させる（`sudo passwd ubuntu` を求める）
+- 終了コード: 0 = 何もない、1 = 削除するものがある（`--check`）、2 = 管理者の操作が必要
 - それ以外の sudoers（管理者が書いたもの）は残して WARNING を出す
 - 2 回目の実行では何もしません
 

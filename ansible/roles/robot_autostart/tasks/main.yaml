@@ -50,7 +50,8 @@
   ansible.builtin.systemd:
     name: questix_robot
     enabled: true
-    daemon_reload: true
+    # No systemd runs in the custom image build's chroot (questix_image_build).
+    daemon_reload: "{{ not (questix_image_build | default(false) | bool) }}"
 
 - name: Deploy polkit rules for passwordless service management (.rules, Ubuntu
     24.04+)

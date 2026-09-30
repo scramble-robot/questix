@@ -5,7 +5,9 @@
   ansible.builtin.debug:
     msg: "System reboot is required to enable hardware interfaces"
 
+# Not in the custom image build's chroot (questix_image_build): udev reads the rules at boot.
 - name: reload_udev
   ansible.builtin.systemd:
     name: udev
     state: reloaded
+  when: not (questix_image_build | default(false) | bool)
