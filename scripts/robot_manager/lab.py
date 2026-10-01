@@ -5,21 +5,21 @@ authentication), so learners' devices cannot open ``/lab/`` here. The ``questix_
 node can: it serves the same teaching pages on the LAN and mirrors robot telemetry to them.
 This module starts and stops that node so nobody has to type ``ros2 launch``.
 
-With ``ALLOW_DRIVE`` on (the default in practice mode) pages may run low-speed driving
-experiments, each confirmed by the learner's safety tick on the page and bounded by the bridge's
-own checks (questix_lab_bridge/questix_lab_bridge/drive.py); twist_arbiter lets the controller
-take over at any time. ``/api/lab/drive`` is the teacher's off switch. Competition mode turns
-driving off (and does not stream at all); going back to practice mode restores what the teacher had
-chosen before competition mode (``PRACTICE_*`` in lab.env), so an explicit forbid survives the
-round trip.
-
-``ALLOW_SHOOT`` works the same way for the disc launcher (roller, tilt, firing one disc; the
-bridge's questix_lab_bridge/questix_lab_bridge/shoot.py): on by default in practice mode, each
-firing session confirmed by the learner's safety tick, the controller taking over at any time,
-``/api/lab/shoot`` the teacher's off switch, off in competition mode and restored with practice
-mode like driving. Both permissions are always
-passed to the bridge explicitly (``-p allow_drive:=…`` / ``-p allow_shoot:=…``), so the defaults
-in its lab_bridge.yaml never decide.
+Serving the pages is a setting (``AUTOSTART`` in lab.env, on by default). Moving the robot from
+the pages is not: the two actuator permissions (``ALLOW_DRIVE``: low-speed driving experiments,
+questix_lab_bridge/questix_lab_bridge/drive.py; ``ALLOW_SHOOT``: roller, tilt and firing one disc,
+questix_lab_bridge/questix_lab_bridge/shoot.py) live only in this process
+(``_runtime_permissions``), start off, and are switched on by the teacher for this session with
+``/api/lab/drive`` / ``/api/lab/shoot``. They are never read from lab.env (values an older manager
+left there are ignored, and dropped the next time lab.env is written), so a restart of the
+manager or of the robot always starts with both off. They also go off on 配信停止, on
+「すべて止める」 (``revoke_permissions``), when the robot is switched to competition mode (and stay
+off when it comes back to practice mode), and when the bridge this manager started exits on its
+own. Restarting the bridge to apply a switch keeps them. Each run is still confirmed by the
+learner's safety tick on the page and bounded by the bridge's own checks, and the controller takes
+over at any time. Both permissions are always passed to the bridge explicitly
+(``-p allow_drive:=…`` / ``-p allow_shoot:=…``), so the defaults in its lab_bridge.yaml (both
+false) never decide.
 
 The status reports what the running bridge itself says (``GET /api/state`` on its port), so the
 tab shows whether pages can really drive now, also for a bridge started by hand, and how many
@@ -93,19 +93,6 @@ _DEFAULT_CONFIG = {
     # the pages without anyone pressing 配信開始 first. On by default for classes; switching to
     # competition mode turns it off (disable_for_competition), and it never starts in that mode.
     "AUTOSTART": "true",
-    # "true": the bridge may publish twist_arbiter's lab input for the lessons' driving
-    # experiments; each run is confirmed by the learner on the page, and moving the controller's
-    # stick takes over. On by default in practice mode; the teacher can switch it off
-    # (/api/lab/drive), competition mode switches it off and practice mode on again. Changed
-    # only through set_drive and the mode switches, never by the settings form.
-    "ALLOW_DRIVE": "true",
-    # "true": the bridge may publish the launcher's lab inputs (/roller/lab, /shot/lab/tilt,
-    # /shot/lab/fire) for the lessons' launcher experiments; the learner confirms each firing
-    # session on the page, and the controller's launcher buttons take over. Same policy as
-    # ALLOW_DRIVE: on by default in practice mode, the teacher can switch it off
-    # (/api/lab/shoot), competition mode switches it off and practice mode on again; changed only
-    # through set_shoot and the mode switches.
-    "ALLOW_SHOOT": "true",
     # Folder where the bridge keeps QUESTiX LAB records (pages' saves, controller driving, rosbag
     # conversions). Empty = the bridge's own default (records_dir in
     # questix_lab_bridge/config/lab_bridge.yaml, ~/.local/share/questix/lab-records of the user
@@ -114,11 +101,14 @@ _DEFAULT_CONFIG = {
 }
 # What the teacher had chosen in practice mode, saved by disable_for_competition and restored (then
 # cleared) by enable_for_practice. Kept in lab.env next to the live values, never in _read_config.
+# Only settings: the actuator permissions are never saved, so never restored either.
 _PRACTICE_KEYS = {
     "AUTOSTART": "PRACTICE_AUTOSTART",
-    "ALLOW_DRIVE": "PRACTICE_ALLOW_DRIVE",
-    "ALLOW_SHOOT": "PRACTICE_ALLOW_SHOOT",
 }
+# lab.env keys written by earlier managers (the permissions used to be settings). Never read; a
+# write of lab.env leaves them out, since it writes only _DEFAULT_CONFIG and _PRACTICE_KEYS.
+LEGACY_PERMISSION_KEYS = ("ALLOW_DRIVE", "ALLOW_SHOOT", "PRACTICE_ALLOW_DRIVE",
+                          "PRACTICE_ALLOW_SHOOT")
 _ABS_PATH_RE = re.compile(r"^/[a-zA-Z0-9_/.~-]*$")
 _TOPIC_RE = re.compile(r"^/[A-Za-z0-9_/]*$")
 _DOMAIN_RE = re.compile(r"^\d{1,3}$")
@@ -131,16 +121,17 @@ _lock = threading.Lock()
 _proc: Optional[subprocess.Popen] = None
 _started_at: Optional[float] = None
 _last_stop_reason: Optional[str] = None
-# Permissions the lessons get from lab.env; each is passed to the bridge as its parameter.
+# The lessons' actuator permissions, each passed to the bridge as its parameter.
 _PERMISSIONS = {"ALLOW_DRIVE": "allow_drive", "ALLOW_SHOOT": "allow_shoot"}
-# Whether the running bridge was started with allow_drive / allow_shoot (lab.env may have changed
-# since).
+# What the teacher allowed in this session (guarded by _lock). Only this process holds them: they
+# start off, are never read from or written to lab.env, and revoke_permissions switches both off.
+_runtime_permissions = {key: False for key in _PERMISSIONS}
+# Whether the running bridge was started with allow_drive / allow_shoot (the permissions may have
+# changed since).
 _started_allow_drive = False
 _started_allow_shoot = False
-# Permissions that had to be switched off but lab.env could not be written: they count as
-# "false" anyway until a write succeeds, so a permission problem never leaves them allowed.
-_forced_off: set[str] = set()
-# Why the last such write failed (shown in the tab until a write succeeds).
+# Why the last write of lab.env that did not fail its request failed (competition mode, shown in
+# the tab until a write succeeds).
 _config_error: Optional[str] = None
 
 
@@ -206,19 +197,31 @@ def _read_env_file(path: Path) -> dict[str, str]:
 
 
 def _read_config() -> dict[str, str]:
+    """Return the settings in lab.env (no actuator permissions: see _permissions)."""
     config = dict(_DEFAULT_CONFIG)
     config.update({k: v for k, v in _read_env_file(LAB_ENV_FILE).items() if k in config})
-    # A competition robot never takes lab commands, whatever lab.env says (it may have been edited
-    # by hand, or never written: driving and the launcher are on by default).
-    competition = _competition_mode()
-    for key in _PERMISSIONS:
-        if competition or key in _forced_off:
-            config[key] = "false"
     return config
 
 
+def _permissions() -> dict[str, bool]:
+    """Return the actuator permissions in effect now. Caller must hold _lock.
+
+    A competition robot never takes lab commands, whatever was allowed before.
+    """
+    competition = _competition_mode()
+    return {key: allowed and not competition for key, allowed in _runtime_permissions.items()}
+
+
+def _revoke_locked() -> bool:
+    """Switch both actuator permissions off; return whether one was on. Caller must hold _lock."""
+    was_on = any(_runtime_permissions.values())
+    for key in _runtime_permissions:
+        _runtime_permissions[key] = False
+    return was_on
+
+
 def _read_practice_snapshot() -> dict[str, str]:
-    """Return the saved practice-mode values (AUTOSTART, ALLOW_*) or {} when none is saved."""
+    """Return the saved practice-mode values (AUTOSTART) or {} when none is saved."""
     raw = _read_env_file(LAB_ENV_FILE)
     return {key: raw[saved] for key, saved in _PRACTICE_KEYS.items()
             if raw.get(saved) in ("true", "false")}
@@ -237,28 +240,7 @@ def _write_config(values: dict[str, str], practice: Optional[dict[str, str]] = N
         raise HTTPException(status_code=403, detail=permission_detail(LAB_ENV_FILE))
     except OSError as e:
         raise HTTPException(status_code=500, detail=f"{LAB_ENV_FILE} に書き込めません: {e}")
-    # What was written came from _read_config, so it already says "false" for every forced key.
-    _forced_off.clear()
     _config_error = None
-
-
-def _force_off(config: dict[str, str], keys, why: str,
-               practice: Optional[dict[str, str]] = None) -> dict[str, str]:
-    """Write ``config`` with ``keys`` (ALLOW_*) false; if that fails, log it and keep them off.
-
-    For the places where switching a permission off must not fail: competition mode, 走行を禁止する
-    and 発射を禁止する. Returns the config with those keys false.
-    """
-    global _config_error
-    config = {**config, **{key: "false" for key in keys}}
-    try:
-        _write_config(config, practice)
-    except HTTPException as error:
-        _forced_off.update(keys)
-        _config_error = error.detail
-        logger.error("QUESTiX LAB (%s): %s — %s stays off until lab.env can be written",
-                     why, error.detail, ", ".join(keys))
-    return config
 
 
 def _competition_mode() -> bool:
@@ -278,8 +260,11 @@ def _rosbag_dir() -> Optional[str]:
     return output_dir if _ABS_PATH_RE.match(output_dir) else None
 
 
-def _build_command(config: dict[str, str]) -> str:
-    """Build the `bash -lc` script that sources ROS and runs the bridge node."""
+def _build_command(config: dict[str, str], permissions: dict[str, bool]) -> str:
+    """Build the `bash -lc` script that sources ROS and runs the bridge node.
+
+    ``config`` is the lab.env settings, ``permissions`` the actuator permissions to start with.
+    """
     launch_env = _read_env_file(LAUNCH_ENV_FILE)
     robot_ws = launch_env.get("ROBOT_WS", "/home/ubuntu/robot_ws")
     if not _ABS_PATH_RE.match(robot_ws):
@@ -305,10 +290,10 @@ def _build_command(config: dict[str, str]) -> str:
     ]
     if camera_topic:  # an empty value would be an rcl parse error, and empty is the default
         args += ["-p", f"camera_topic:={camera_topic}"]
-    # Always explicit: lab_bridge.yaml has its own defaults (allow_drive: true for a bridge started
-    # by hand), and a switched-off permission must never fall back to them.
+    # Always explicit: lab_bridge.yaml has its own defaults (for a bridge started by hand), and the
+    # permissions of this session must never fall back to them. Anything but True is off.
     for key, parameter in _PERMISSIONS.items():
-        args += ["-p", f"{parameter}:={'true' if config.get(key) == 'true' else 'false'}"]
+        args += ["-p", f"{parameter}:={'true' if permissions.get(key) is True else 'false'}"]
     records_dir = config.get("RECORDS_DIR", "")
     if records_dir:
         if not _ABS_PATH_RE.match(records_dir):
@@ -536,17 +521,33 @@ def _stop_locked(reason: str) -> None:
     _last_stop_reason = reason
 
 
-def _status_payload() -> dict:
+def _reap_locked() -> bool:
+    """Notice that our bridge exited on its own; return whether one runs. Caller must hold _lock.
+
+    An exit nobody asked for (crash, port taken, ROS missing) takes the actuator permissions with
+    it, so starting the pages again never brings them back by itself. It is noticed here, i.e. at
+    the next status poll, start or permission switch, not at the moment of the exit.
+    """
     global _proc, _started_at, _last_stop_reason
-    managed = _proc is not None and _proc.poll() is None
-    if _proc is not None and not managed:
-        # The node exited on its own (crash, port taken, ROS missing).
-        _proc = None
-        _started_at = None
-        _last_stop_reason = "exited"
+    if _proc is None:
+        return False
+    if _proc.poll() is None:
+        return True
+    _proc = None
+    _started_at = None
+    _last_stop_reason = "exited"
+    if _revoke_locked():
+        logger.warning("QUESTiX LAB bridge exited on its own: driving and launching from the "
+                       "lessons switched off")
+    return False
+
+
+def _status_payload() -> dict:
+    managed = _reap_locked()
     # A bridge started by hand (ros2 launch) is reported, but not ours to stop.
     external = not managed and _port_in_use()
     config = _read_config()
+    permissions = _permissions()
     failed = _last_stop_reason in _FAILURE_REASONS
     return {
         "running": managed,
@@ -558,17 +559,20 @@ def _status_payload() -> dict:
         "elapsed_sec": int(time.time() - _started_at) if managed and _started_at else 0,
         "last_stop_reason": _last_stop_reason,
         "config": config,
-        # What lab.env asks for, and what the bridge started here was started with (null: none,
-        # or not ours). The truth for driving is bridge.read_only.
-        "drive_allowed": config.get("ALLOW_DRIVE") == "true",
+        # What the teacher allowed in this session, and what the bridge started here was started
+        # with (null: none, or not ours). The truth for driving is bridge.read_only.
+        "drive_allowed": permissions["ALLOW_DRIVE"],
         "drive_running": _started_allow_drive if managed else None,
         # The same for the launcher; the truth is bridge.shoot_state.allowed.
-        "shoot_allowed": config.get("ALLOW_SHOOT") == "true",
+        "shoot_allowed": permissions["ALLOW_SHOOT"],
         "shoot_running": _started_allow_shoot if managed else None,
+        # The permissions belong to this session of the manager: both start off after a restart
+        # of the manager or the robot, 配信停止, 「すべて止める」 and competition mode.
+        "permissions_transient": True,
         # The running bridge's own GET /api/state (ours or started by hand); null when none
         # answers.
         "bridge": _bridge_state() if managed or external else None,
-        # A failed write of lab.env that did not fail the request (see _force_off).
+        # A failed write of lab.env that did not fail the request (disable_for_competition).
         "config_error": _config_error,
         # The end of the last bridge's output, while none of ours runs or after a failure.
         "log_tail": _log_tail() if not managed or failed else None,
@@ -587,7 +591,7 @@ def start_bridge():
     """Start the bridge (teaching pages + telemetry on the LAN; driving only if allowed)."""
     global _proc, _started_at, _last_stop_reason, _started_allow_drive, _started_allow_shoot
     with _lock:
-        if _proc is not None and _proc.poll() is None:
+        if _reap_locked():
             raise HTTPException(status_code=409, detail="教材はすでに配信中です")
         if _port_in_use():
             raise HTTPException(
@@ -603,7 +607,8 @@ def start_bridge():
         if not (LAB_DIR / "index.html").is_file():
             raise HTTPException(status_code=500, detail="教材のファイルが見つかりません")
         config = _read_config()
-        script = _build_command(config)
+        permissions = _permissions()
+        script = _build_command(config, permissions)
         log = _open_log()
         try:
             proc = subprocess.Popen(
@@ -634,28 +639,35 @@ def start_bridge():
         _proc = proc
         _started_at = time.time()
         _last_stop_reason = None
-        _started_allow_drive = config.get("ALLOW_DRIVE") == "true"
-        _started_allow_shoot = config.get("ALLOW_SHOOT") == "true"
+        _started_allow_drive = permissions["ALLOW_DRIVE"]
+        _started_allow_shoot = permissions["ALLOW_SHOOT"]
         return _status_payload()
 
 
 @router.post("/stop")
 def stop_bridge():
+    """配信停止: stop our bridge; driving and launching from the lessons go off with it."""
     with _lock:
-        if _proc is None or _proc.poll() is not None:
+        if not _reap_locked():
+            _revoke_locked()  # also when nothing ran: 配信停止 always ends the permissions
             raise HTTPException(status_code=409, detail="教材は配信していません")
         _stop_locked("stopped")
+        _revoke_locked()
         return _status_payload()
 
 
 @router.put("/config")
 def set_config(config: LabConfig):
-    """Persist bridge settings; they take effect the next time the bridge starts."""
+    """Persist bridge settings; they take effect the next time the bridge starts.
+
+    The actuator permissions are not settings and are untouched (legacy ALLOW_* keys in lab.env
+    are dropped by the write).
+    """
     values = {
         key: (str(value).lower() if isinstance(value, bool) else value)
         for key, value in config.model_dump().items()
     }
-    _write_config({**_read_config(), **values})  # keeps ALLOW_DRIVE / ALLOW_SHOOT as they are
+    _write_config({**_read_config(), **values})
     return values
 
 
@@ -663,105 +675,141 @@ def set_config(config: LabConfig):
 def set_drive(request: DriveRequest):
     """Allow or forbid the lessons' driving experiments, and restart our bridge to apply it.
 
-    A bridge this manager runs is restarted at once, so the switch never says one thing while
-    the bridge does another (every connected page drops for a few seconds and reconnects). A
-    bridge started by hand keeps its own parameters: the status reports drive_running = null
-    for it, and its bridge.read_only tells what it does.
-
-    Forbidding always works: if lab.env cannot be written, driving stays off in this manager
-    (config_error says why) and the bridge is still restarted with allow_drive:=false.
+    The permission holds for this session of the manager only (see _runtime_permissions); nothing
+    is written to lab.env. A bridge this manager runs is restarted at once, keeping the
+    permissions, so the switch never says one thing while the bridge does another (every connected
+    page drops for a few seconds and reconnects). A bridge started by hand keeps its own
+    parameters: the status reports drive_running = null for it, and its bridge.read_only tells
+    what it does.
     """
     return _set_permission("ALLOW_DRIVE", request.allow,
-                           "大会モードでは教材から走らせられません", "走行を禁止する",
-                           "drive_setting")
+                           "大会モードでは教材から走らせられません", "drive_setting")
 
 
 @router.post("/shoot")
 def set_shoot(request: DriveRequest):
     """Allow or forbid the lessons' launcher experiments (roller, tilt, fire), like set_drive.
 
-    Our bridge is restarted at once, so the switch never says one thing while the bridge does
-    another; forbidding always works, even when lab.env cannot be written.
+    For this session only; our bridge is restarted at once, so the switch never says one thing
+    while the bridge does another.
     """
     return _set_permission("ALLOW_SHOOT", request.allow,
-                           "大会モードでは教材から発射させられません", "発射を禁止する",
-                           "shoot_setting")
+                           "大会モードでは教材から発射させられません", "shoot_setting")
 
 
-def _set_permission(key: str, allow: bool, competition_detail: str, why: str,
-                    stop_reason: str) -> dict:
-    """Write one ALLOW_* switch and restart a bridge of ours so it applies (set_drive/set_shoot)."""
+def _set_permission(key: str, allow: bool, competition_detail: str, stop_reason: str) -> dict:
+    """Set one runtime permission and restart a bridge of ours so it applies (set_drive/set_shoot).
+
+    The restart is ours, not a stop: the permissions are kept for the new bridge. If that bridge
+    does not come up, both permissions go off (a later 配信開始 starts with them off).
+    """
     if allow and _competition_mode():
         raise HTTPException(status_code=409, detail=competition_detail)
-    config = _read_config()
-    if allow:
-        _write_config({**config, key: "true"})
-    else:
-        _force_off(config, (key,), why)
     with _lock:
-        running = _proc is not None and _proc.poll() is None
+        # First notice a bridge that died on its own (that revokes), then apply this switch, so
+        # the teacher's choice made now is not taken back by an exit that happened before it.
+        running = _reap_locked()
+        _runtime_permissions[key] = bool(allow)
         if running:
             _stop_locked(stop_reason)
     if running and not _competition_mode():  # a competition robot does not stream at all
-        start_bridge()
+        try:
+            start_bridge()
+        except HTTPException:
+            with _lock:
+                _revoke_locked()
+            raise
     with _lock:
         return _status_payload()
+
+
+def revoke_permissions(reason: str) -> dict:
+    """Switch driving and launching from the lessons off, e.g. for 「すべて止める」 (app.py).
+
+    Never raises. A bridge this manager runs with a permission on is restarted with both off, so
+    it cannot take lab commands any more (pages drop for a few seconds and reconnect); a bridge
+    started by hand keeps its own parameters. Returns ``{"ok", "revoked", "restarted",
+    "message"}``.
+    """
+    with _lock:
+        revoked = _revoke_locked()
+        running = _reap_locked()
+        restart = running and (_started_allow_drive or _started_allow_shoot)
+        if restart:
+            _stop_locked(reason)
+    if restart and not _competition_mode():
+        try:
+            start_bridge()
+        except HTTPException as error:
+            logger.warning("QUESTiX LAB bridge not restarted after %s: %s", reason, error.detail)
+            return {"ok": True, "revoked": revoked, "restarted": False,
+                    "message": ("教材からの走行・発射をOFFにしました（教材の配信は止まりました。"
+                                f"「配信開始」で再開できます: {error.detail}）")}
+    return {"ok": True, "revoked": revoked, "restarted": bool(restart),
+            "message": "教材からの走行・発射をOFFにしました"}
 
 
 def disable_for_competition() -> None:
     """Keep the bridge off once the robot is switched to competition mode (app.py /api/mode).
 
     Competition runs must not stream telemetry to the LAN: a bridge this manager started is
-    stopped first (whatever happens to lab.env), then automatic start, driving and the launcher
-    from the lessons (AUTOSTART, ALLOW_DRIVE, ALLOW_SHOOT) are turned off in lab.env. What the
-    teacher had chosen for practice is saved first (PRACTICE_* in lab.env, only if nothing is
-    saved yet, so competition -> competition keeps the practice values), and enable_for_practice
-    restores exactly that. A failed write of lab.env is logged, not raised: the mode switch itself
-    has already happened, and autostart never runs in competition mode anyway.
+    stopped first and driving and the launcher from the lessons are switched off (whatever happens
+    to lab.env), then automatic start (AUTOSTART) is turned off in lab.env. What the teacher had
+    chosen for it in practice is saved first (PRACTICE_AUTOSTART in lab.env, only if nothing is
+    saved yet, so competition -> competition keeps the practice value), and enable_for_practice
+    restores exactly that; the permissions are not saved and stay off. A failed write of lab.env
+    is logged, not raised: the mode switch itself has already happened, and autostart never runs
+    in competition mode anyway.
     """
+    global _config_error
     with _lock:
-        if _proc is not None and _proc.poll() is None:
+        _revoke_locked()
+        if _reap_locked():
             _stop_locked("competition_mode")
+    raw = _read_env_file(LAB_ENV_FILE)
     snapshot = None
     if not _read_practice_snapshot():
-        raw = _read_env_file(LAB_ENV_FILE)
-        snapshot = {}
-        for key in _PRACTICE_KEYS:
-            value = raw.get(key, _DEFAULT_CONFIG[key])
-            # A forbid that could not be written still counts as a forbid.
-            snapshot[key] = "false" if key in _forced_off or value != "true" else "true"
+        snapshot = {key: "true" if raw.get(key, _DEFAULT_CONFIG[key]) == "true" else "false"
+                    for key in _PRACTICE_KEYS}
     config = _read_config()
-    if snapshot is not None or config.get("AUTOSTART") != "false" or any(
-            _read_env_file(LAB_ENV_FILE).get(key) != "false" for key in _PERMISSIONS):
-        _force_off({**config, "AUTOSTART": "false"}, tuple(_PERMISSIONS), "competition mode",
-                   practice=snapshot)
+    legacy = any(key in raw for key in LEGACY_PERMISSION_KEYS)
+    if snapshot is not None or config.get("AUTOSTART") != "false" or legacy:
+        try:
+            _write_config({**config, "AUTOSTART": "false"}, snapshot)
+        except HTTPException as error:
+            _config_error = error.detail
+            logger.error("QUESTiX LAB (competition mode): %s", error.detail)
 
 
 def enable_for_practice() -> dict:
     """Undo disable_for_competition when the robot goes from competition back to practice mode.
 
-    Automatic start and the two permissions get the values the teacher had before competition
-    mode (all on when nothing was saved, e.g. the mode file was changed by hand), and the saved
-    values are cleared. When automatic start is on, the bridge is started now, in the background
+    Automatic start gets the value the teacher had before competition mode (on when nothing was
+    saved, e.g. the mode file was changed by hand), and the saved value is cleared. Driving and
+    launching from the lessons are never restored: they start off, and the teacher switches them
+    on for the session. When automatic start is on, the bridge is started now, in the background
     like at boot, so the class can open the pages right away; a bridge that already runs (started
     here or by hand) is left alone. Returns what is on now, for the manager's message:
-    ``{"restored": bool, "autostart": bool, "drive": bool, "shoot": bool}``.
+    ``{"restored": bool, "autostart": bool, "drive": False, "shoot": False}``.
     """
+    with _lock:
+        _revoke_locked()
     snapshot = _read_practice_snapshot()
     config = _read_config()
     wanted = {key: snapshot.get(key, "true") for key in _PRACTICE_KEYS}
-    if any(config.get(key) != value for key, value in wanted.items()) or snapshot:
+    legacy = any(key in _read_env_file(LAB_ENV_FILE) for key in LEGACY_PERMISSION_KEYS)
+    if any(config.get(key) != value for key, value in wanted.items()) or snapshot or legacy:
         _write_config({**config, **wanted}, practice={})
     if wanted["AUTOSTART"] == "true":
         with _lock:
-            running = (_proc is not None and _proc.poll() is None) or _port_in_use()
+            running = _reap_locked() or _port_in_use()
         if not running:
             threading.Thread(target=_autostart, name="lab-practice-start", daemon=True).start()
     return {
         "restored": bool(snapshot),
         "autostart": wanted["AUTOSTART"] == "true",
-        "drive": wanted["ALLOW_DRIVE"] == "true",
-        "shoot": wanted["ALLOW_SHOOT"] == "true",
+        "drive": False,
+        "shoot": False,
     }
 
 
@@ -796,3 +844,4 @@ def shutdown() -> None:
     """Stop a bridge this manager started; called when robot_manager exits."""
     with _lock:
         _stop_locked("manager_shutdown")
+        _revoke_locked()

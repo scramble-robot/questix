@@ -189,14 +189,14 @@ The **教材** tab starts and stops that bridge, so nobody has to run `ros2 laun
   child of robot_manager and stops with it. While it is on, every device on the network may
   see the pages and the read-only telemetry.
 - **大会モード** (`competition` in `$QUESTIX_CONFIG_DIR/mode`): switching to it from this UI stops
-  a bridge started here and writes `AUTOSTART`, `ALLOW_DRIVE` and `ALLOW_SHOOT` false, after saving
-  the teacher's practice values as `PRACTICE_AUTOSTART` / `PRACTICE_ALLOW_DRIVE` /
-  `PRACTICE_ALLOW_SHOOT` in `lab.env` (only when none are saved yet). 配信開始 is refused (409) in
-  that mode and the tab disables streaming and both switches with the reason. Switching back to
-  練習モード restores exactly the saved values (all on when none were saved, e.g. the mode file was
-  edited by hand), clears them, and starts the bridge if automatic start is on; the toast says
-  what is on now, so a teacher's explicit forbid is never silently lifted. Automatic start is also
-  skipped while the mode file says `competition`, even if it was changed by hand.
+  a bridge started here, switches driving and launching from the lessons off, and writes
+  `AUTOSTART` false, after saving the teacher's practice value as `PRACTICE_AUTOSTART` in
+  `lab.env` (only when none is saved yet). 配信開始 is refused (409) in that mode and the tab
+  disables streaming and both switches with the reason. Switching back to 練習モード restores the
+  saved `AUTOSTART` (on when none was saved, e.g. the mode file was edited by hand), clears it, and
+  starts the bridge if automatic start is on; driving and launching from the lessons stay **off**
+  (the toast says so). Automatic start is also skipped while the mode file says `competition`,
+  even if it was changed by hand.
 - The bridge's stdout/stderr go to `~/.cache/questix/lab-bridge.log` of the service user
   (truncated on every start; discarded if that file cannot be written). While no bridge of ours
   runs, or after a failed start, `/api/lab/status` carries its last 15 lines as `log_tail` and
@@ -204,34 +204,43 @@ The **教材** tab starts and stops that bridge, so nobody has to run `ros2 laun
 - `/api/lab/status` also carries `bridge`: the running bridge's own `GET /api/state` (ours or one
   started by hand; `null` when none answers within 0.5 s). The tab takes the driving state from
   it (`bridge.read_only`), not from `lab.env`.
-- **教材からの走行** (`ALLOW_DRIVE` in `lab.env`, `POST /api/lab/drive`) lets the lessons' driving
-  experiments move the robot (`questix_lab_bridge/README.md`, "Driving experiments"); each run is
-  confirmed by the learner's safety tick, and `twist_arbiter` lets the controller take over at any
-  time. On by default in practice mode; the card's switch 「教材からの走行を許可する」 (one switch,
-  its state next to it) is the teacher's off switch. 大会モード turns it off (and it always reads
-  as off in that mode), going back to practice restores the teacher's choice. Switching restarts
-  a bridge started here (every connected page drops for a few seconds); a bridge started by hand
-  keeps its own `allow_drive`. The card's headline combines the permission with what blocks it
-  now (「許可済み・いまは走行できません（非常停止ボタンが押されています）」); a missing
-  `twist_arbiter` / launcher node is shown only after it lasted 6 s, because a restarted bridge
-  reports it for a few seconds while it discovers the ROS graph. The plain reason is on the card;
-  the technical cause (`twist_arbiter`, `ROS_DOMAIN_ID`, topics, limits) is under
-  「先生・技術者向けの詳しい情報」. If `lab.env` cannot be written when switching off, driving
-  still counts as off and the reason is shown as `config_error`.
-- **教材からの発射** (`ALLOW_SHOOT` in `lab.env`, `POST /api/lab/shoot`) does the same for the disc
-  launcher: the lessons may spin the roller, tilt and fire one disc at a time
-  (`questix_lab_bridge/README.md`, "Launcher experiments"); the learner ticks
-  「発射する方向に人がいない・的の周りに人がいない」 on the page, and the controller's launcher
-  buttons take over at any time. Same policy as driving: on by default in practice mode, the
-  card's switch 「教材からの発射を許可する」 is the teacher's off switch, 大会モード turns it off,
-  practice restores the teacher's choice, the choice survives a manager restart, a failed write
-  still counts as off. The
-  card shows `bridge.shoot_state` (who operates it, what blocks it: launcher nodes not accepting
-  lab input, another publisher, emergency stop, controller in use). `/api/lab/status` carries
-  `shoot_allowed` / `shoot_running` like `drive_allowed` / `drive_running`.
+- **教材からの走行・発射 are session permissions, not settings.** They live only in the
+  robot_manager process and are never read from or written to `lab.env`, so every start of the
+  manager (and every boot of the robot) begins with both **off**, even while the pages are served
+  automatically. The teacher switches them on for the session; they go off again on 配信停止,
+  「すべて止める」, a switch to 大会モード (and stay off when going back to practice), and when the
+  bridge started here exits on its own (noticed at the next status poll, start or switch).
+  `ALLOW_DRIVE`, `ALLOW_SHOOT`, `PRACTICE_ALLOW_DRIVE` and `PRACTICE_ALLOW_SHOOT` left in `lab.env`
+  by an older manager are ignored and dropped the next time `lab.env` is written.
+  `/api/lab/status` says `permissions_transient: true`.
+- **教材からの走行** (`POST /api/lab/drive`) lets the lessons' driving experiments move the robot
+  (`questix_lab_bridge/README.md`, "Driving experiments"); each run is confirmed by the learner's
+  safety tick, and `twist_arbiter` lets the controller take over at any time. Off at every start;
+  the card's switch 「教材からの走行を許可する」 (one switch, its state ON/OFF next to it) is the
+  teacher's on and off switch. 大会モード turns it off (and it always reads as off in that mode).
+  Switching restarts a bridge started here, keeping the permissions of the session (every
+  connected page drops for a few seconds); if that bridge does not come up, both permissions go
+  off. A bridge started by hand keeps its own `allow_drive`. The card's headline combines the
+  permission with what blocks it now (「許可済み・いまは走行できません（非常停止ボタンが押されています）」);
+  a missing `twist_arbiter` / launcher node is shown only after it lasted 6 s, because a restarted
+  bridge reports it for a few seconds while it discovers the ROS graph. The plain reason is on the
+  card; the technical cause (`twist_arbiter`, `ROS_DOMAIN_ID`, topics, limits) is under
+  「先生・技術者向けの詳しい情報」.
+- **教材からの発射** (`POST /api/lab/shoot`) does the same for the disc launcher: the lessons may
+  spin the roller, tilt and fire one disc at a time (`questix_lab_bridge/README.md`, "Launcher
+  experiments"); the learner ticks 「発射する方向に人がいない・的の周りに人がいない」 on the page,
+  and the controller's launcher buttons take over at any time. Same policy as driving: off at every
+  start, the card's switch 「教材からの発射を許可する」 is the teacher's on and off switch,
+  大会モード turns it off. The card shows `bridge.shoot_state` (who operates it, what blocks it:
+  launcher nodes not accepting lab input, another publisher, emergency stop, controller in use).
+  `/api/lab/status` carries `shoot_allowed` / `shoot_running` like `drive_allowed` /
+  `drive_running`.
+- **すべて止める** (`POST /api/stop-all`) stops the lessons' runs, then switches both permissions
+  off (a bridge of ours that had one on is restarted with both off; the pages reconnect and keep
+  serving), then stops the robot service.
 - Both permissions are always passed to the bridge explicitly (`-p allow_drive:=true|false
-  -p allow_shoot:=true|false`), so the defaults in `lab_bridge.yaml` (which lets a bridge started
-  by hand drive) never decide for a bridge started here.
+  -p allow_shoot:=true|false`), so the defaults in `lab_bridge.yaml` (both false, for a bridge
+  started by hand) never decide for a bridge started here.
 - A permission error on `mode`, `launch.env` or `lab.env` names the service user, the owner and
   the fix (`sudo chown <user>:<user> /etc/questix_robot …`). `scripts/check-robot-manager.sh`
   checks the same, plus that `wifi_ap.env` is readable.

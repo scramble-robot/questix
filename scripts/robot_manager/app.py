@@ -63,8 +63,10 @@ _LAB_CSP = (
 async def lifespan(_app: FastAPI):
     """Start the lab bridge if lab.env asks for it; a bridge started here must not outlive us.
 
-    The teacher's permissions for driving and launching from the lessons (ALLOW_DRIVE /
-    ALLOW_SHOOT in lab.env) are kept as they are across a restart of the manager. A practice start
+    The teacher's permissions for driving and launching from the lessons are not settings: they
+    live only in this process (lab._runtime_permissions) and start off, so a restart of the
+    manager or of the robot never brings them back (ALLOW_* left in lab.env by an older manager
+    are ignored). A practice start
     request left behind (the manager stopped between writing it and the launcher reading it) is
     removed, so it can never start the robot later.
 
@@ -507,13 +509,16 @@ def stop_all():
     """「すべて止める」: stop the robot service and end any lesson run and launcher session.
 
     One request, no confirmation. The lessons get their stop first (it takes well under a second
-    and also covers a robot whose ROS was started by hand), then the robot service is stopped.
-    The lab bridge keeps running (no restart, pages stay connected); the teacher's permissions
-    for driving and launching from the lessons are not changed.
+    and also covers a robot whose ROS was started by hand), then driving and launching from the
+    lessons are switched off (a bridge of ours that had one on is restarted with both off, so the
+    pages reconnect after a few seconds and keep serving), then the robot service is stopped. The
+    teacher switches the permissions on again for the next run.
     """
     lesson = lab.stop_lesson_motion()
+    permissions = lab.revoke_permissions("stop_all")
     service = _stop_service()
-    return {"ok": lesson["ok"] and service["ok"], "lab": lesson,
+    return {"ok": lesson["ok"] and permissions["ok"] and service["ok"], "lab": lesson,
+            "lab_permissions": permissions,
             "service": {key: service[key] for key in ("ok", "state", "message")}}
 
 

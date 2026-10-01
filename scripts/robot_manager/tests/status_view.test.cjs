@@ -53,7 +53,7 @@ test('competition mode disables the switches with the reason', () => {
     drive_allowed: false }), 'active', StatusView.createBlockerMemory(), 0);
   assert.equal(view.headline, '大会モードのため使えません');
   assert.equal(view.toggleDisabled, true);
-  assert.match(view.toggleNote, /練習モードに戻すと、先生が選んでいた設定に戻ります/);
+  assert.match(view.toggleNote, /練習モードに戻しても OFF のままです/);
 });
 
 test('forbidden, stale and running states', () => {
@@ -77,7 +77,7 @@ test('status strip: running vs next mode, E-stop, who drives', () => {
   assert.equal(rows.mode.tone, 'warn');
   assert.equal(rows.estop.text, '解除されています');
   assert.equal(rows.lab.text, '配信中・接続中の端末 4 台');
-  assert.equal(rows.permissions.text, '走行: 許可・発射: 許可');
+  assert.equal(rows.permissions.text, '教材からの走行: ON・教材からの発射: ON');
   assert.equal(rows.driver.text, '生徒の端末 #5（教材から走行中）');
   const pressed = StatusView.overview(status,
     lab({ bridge: bridge({ blockers: [{ code: 'emergency_stop' }] }) }), 'UART / Switch');
@@ -108,11 +108,12 @@ test('browser controller URL: access point, then LAN, then the page', () => {
   assert.equal(StatusView.controllerUrl(null, [], 'http://robot.local:8899/'), 'http://robot.local:8899/');
 });
 
-test('going back to practice says what the lessons are set to', () => {
-  assert.equal(StatusView.labRestoredText({ restored: true, autostart: true, drive: false, shoot: true }),
-    '教材は大会モードの前の設定に戻しました（配信の自動開始: オン・教材からの走行: 禁止・発射: 許可）');
-  assert.match(StatusView.labRestoredText({ restored: false, autostart: true, drive: true, shoot: true }),
-    /^教材の設定をオンにしました/);
+test('going back to practice says what the lessons are set to (driving and launching stay off)', () => {
+  assert.equal(StatusView.labRestoredText({ restored: true, autostart: true, drive: false, shoot: false }),
+    '教材の配信は大会モードの前の設定に戻しました（配信の自動開始: オン・教材からの走行: OFF・発射: OFF。' +
+    '走行・発射は先生が教材タブで ON にしてください）');
+  assert.match(StatusView.labRestoredText({ restored: false, autostart: true, drive: false, shoot: false }),
+    /^教材の配信の自動開始をオンにしました/);
   assert.equal(StatusView.labRestoredText(null), '');
 });
 
