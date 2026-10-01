@@ -1,0 +1,730 @@
+/* High-school readability pass: shell (see CONTRIBUTING.md, "Figures and charts"). */
+
+/* Lesson brief (js/shell/lesson-brief.js): 最初に試すこと is its own card with the start button,
+   right under the course's navigation on every screen; the brief under it keeps the situation and
+   the purpose, which a phone cuts to two lines until the learner opens them. */
+.lesson-quickstart {
+  margin: 12px 0 14px;
+  padding: 16px 20px;
+  border: 1px solid #b9d3cb;
+  border-left: 4px solid var(--green);
+  border-radius: 12px;
+  background: #eef6f3;
+}
+.lesson-quickstart h2 {
+  font-size: 16px;
+  color: #1c5f57;
+  margin: 0 0 6px;
+}
+.lesson-quickstart p {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.8;
+  color: #304651;
+  max-width: 72ch;
+}
+.lesson-quickstart p + p {
+  margin-top: 8px;
+}
+.lesson-quickstart-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin-top: 12px;
+}
+.lesson-brief .lesson-brief-purpose {
+  grid-column: 1/-1;
+}
+.lesson-brief-more {
+  display: none;
+}
+@media (max-width: 600px) {
+  .lesson-quickstart {
+    padding: 14px 16px;
+  }
+  .lesson-quickstart p {
+    font-size: 14px;
+  }
+  .lesson-brief {
+    gap: 12px;
+    padding: 16px;
+  }
+  .lesson-brief:not(.is-open) .lesson-brief-scene p,
+  .lesson-brief:not(.is-open) .lesson-brief-purpose p {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .lesson-brief:not(.is-open) .lesson-brief-scene p + p,
+  .lesson-brief:not(.is-open) .lesson-brief-purpose p + p {
+    display: none;
+  }
+  .lesson-brief .lesson-brief-scene {
+    padding-bottom: 0;
+    border-bottom: 0;
+  }
+  .lesson-brief-more {
+    display: block;
+    justify-self: start;
+    min-height: 40px;
+    padding: 6px 14px;
+    font-size: 14px;
+    color: #1e5350;
+  }
+}
+
+/* The run-mode row of the brief: neutral and compact — red/pink stays on the drive badge only. */
+.lesson-brief .run-mode-strip,
+.lesson-brief .run-mode-strip[data-run-mode~='live'],
+.lesson-brief .run-mode-strip[data-run-mode~='data'] {
+  background: #f5f8f7;
+  padding: 8px 12px;
+}
+.lesson-brief .run-mode-strip p {
+  font-size: 13px;
+  line-height: 1.6;
+}
+.lesson-brief .run-mode-jump {
+  color: #1e5350;
+  padding: 4px 10px;
+}
+
+/* Phone header: one row (logo · 実機 · 一覧 · 教材 ▾) instead of ~150 px. The robot's state stays
+   visible as the dot's colour; its name and state text are in the 実機 dialog. navigation.css is
+   loaded after this file, hence the body prefix. */
+.switcher-short {
+  display: none;
+}
+@media (max-width: 600px) {
+  body .site-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 12px;
+    min-height: 0;
+  }
+  body .site-header .brand-logo {
+    width: 96px;
+  }
+  body .site-header .brand-lab {
+    font-size: 13px;
+  }
+  body .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: nowrap;
+  }
+  body .header-actions > button,
+  body .course-switcher > summary {
+    min-height: 40px;
+    padding: 6px 10px;
+    font-size: 14px;
+  }
+  /* The connection keeps one short word next to the dot (live-ui.js data-short: 接続済み / 未接続 /
+     非常停止); the full sentence stays in the text for screen readers. */
+  body .header-actions > .robot-link {
+    gap: 4px;
+    padding: 6px 8px;
+  }
+  body .robot-link #robotLinkState {
+    font-size: 0;
+  }
+  body .robot-link #robotLinkState::after {
+    content: attr(data-short);
+    font-size: 12px;
+    font-weight: 600;
+  }
+  body .robot-link .robot-link-name,
+  body .header-actions .header-long,
+  body .course-switcher .switcher-label,
+  body .course-switcher #currentCourseTitle {
+    display: none;
+  }
+  body .course-switcher .switcher-short {
+    display: inline;
+    font-weight: 700;
+    color: #1e5350;
+  }
+  /* 「教材 ⌄」 on one line, the same height as the buttons beside it (base.css pads every details). */
+  body .course-switcher {
+    padding: 0;
+  }
+  body .course-switcher > summary {
+    flex-direction: row;
+    align-items: center;
+    padding-right: 30px;
+  }
+  body .course-switcher > summary::after {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    line-height: 1;
+    transform: translateY(-70%); /* ⌄ sits low in its line box */
+  }
+  body .course-switcher[open] > summary::after {
+    transform: translateY(-30%) rotate(180deg);
+  }
+}
+@media (max-width: 600px) {
+  /* The labels say it; the sentence behind them is on wider screens and in each label's title. */
+  .lesson-brief .run-mode-strip-label,
+  .lesson-brief .run-mode-strip p {
+    display: none;
+  }
+  .lesson-brief .run-mode-strip {
+    gap: 6px 8px;
+  }
+  .lesson-brief .run-mode-strip .run-mode {
+    font-size: 12px;
+  }
+}
+
+/* Supplement buttons keep their word on phones, so they read as something to press. */
+@media (max-width: 600px) {
+  .supplement-trigger .supplement-trigger-action {
+    font-size: 13px;
+    gap: 4px;
+    font-weight: 600;
+    color: #1e5350;
+  }
+}
+
+/* Catalogue (js/shell/series-view.js): the start button for newcomers, the folded label legend. */
+.series-start {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  margin-top: 18px;
+}
+.series-start .primary {
+  min-height: 52px;
+  padding: 12px 22px;
+  font-size: 16px;
+}
+.series-start-list {
+  color: #1e5350;
+  font-weight: 600;
+}
+/* The course name and its arrow wrap as one piece, never the arrow alone on a phone. */
+.series-start-title {
+  white-space: nowrap;
+}
+/* Space between the robot card and the group links under it. */
+#seriesPage .series-group-index {
+  margin-top: 16px;
+}
+/* The labels' legend, folded right under the catalogue heading: one small line until opened. */
+details.series-run-legend {
+  margin: 0 0 18px;
+  padding: 10px 16px;
+}
+details.series-run-legend > summary {
+  cursor: pointer;
+  list-style: revert;
+  font-size: 15px;
+  font-weight: 700;
+  color: #28483f;
+}
+.series-run-legend-hint {
+  margin-left: 8px;
+  font-size: 13px;
+  font-weight: 400;
+  color: #526b73;
+}
+details.series-run-legend[open] > summary {
+  margin-bottom: 8px;
+}
+.series-course .series-run-modes {
+  margin: 10px 0 0;
+}
+.series-course .series-run-modes p {
+  font-size: 13px;
+}
+
+/* The real-robot block folded while no robot is connected (js/live/live-view.js). */
+.live-offline {
+  margin: 12px 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f7f9f8;
+}
+.live-offline > summary {
+  cursor: pointer;
+  padding: 12px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #4d6469;
+}
+.live-offline[open] > .live-capture {
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 12px 12px;
+}
+
+/* Course switcher on phones: one line per course, no cover pictures, labels as marks only. */
+@media (max-width: 600px) {
+  body .course-switcher .series-nav .course-nav-cover {
+    display: none;
+  }
+  body .course-nav-links {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+  body .course-switcher .series-nav a {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    min-height: 44px;
+  }
+  body .course-switcher .series-nav span:not(.course-nav-cover) {
+    margin-left: 0;
+  }
+  body .course-switcher .series-nav .run-mode {
+    font-size: 0;
+    gap: 0;
+    padding: 3px;
+  }
+}
+@media (max-width: 600px) {
+  body .course-switcher .series-nav a > span:not(.course-nav-cover):not(.run-mode-badges) {
+    display: none;
+  }
+  body .course-switcher .series-nav a > strong br {
+    display: none;
+  }
+}
+@media (max-width: 600px) {
+  body .course-switcher .series-nav a {
+    justify-content: flex-start;
+    text-align: left;
+    flex-wrap: nowrap;
+  }
+  body .course-switcher .series-nav a > strong {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  body .course-switcher .series-nav .run-mode-badges {
+    flex: none;
+    flex-wrap: nowrap;
+    gap: 4px;
+  }
+  body .course-switcher .series-nav .run-mode-badges .run-mode {
+    font-size: 0;
+    gap: 0;
+    padding: 4px;
+  }
+}
+@media (max-width: 600px) {
+  body .course-switcher .series-nav a {
+    flex-direction: row;
+    align-items: center;
+  }
+  body .course-switcher .series-nav .run-mode-badges {
+    margin: 0 0 0 auto;
+  }
+}
+
+/* The measurement-lab entry is only a supplement button (its details open in the shared dialog), so
+   it should not sit inside an otherwise empty white card. */
+body .measurement-entry {
+  padding: 0;
+  background: none;
+  border: 0;
+  box-shadow: none;
+}
+body .measurement-entry > .supplement-trigger {
+  margin: 0;
+}
+
+/* One scroll offset for the sticky header, instead of the per-course values spread over
+   curriculum.css, mastery-systems.css and arm.css (they disagreed, so things scrolled into view
+   ended up under the header). :root outranks their html selectors. */
+:root {
+  scroll-padding-top: 116px;
+}
+@media (max-width: 600px) {
+  :root {
+    scroll-padding-top: 76px;
+  }
+}
+
+/* Catalogue robot section (js/shell/series-view.js): the isometric CAD view with its sensor
+   callouts beside the description. The figure's text is sized in its viewBox so it stays at
+   12 px or more when the figure is about 300 px wide on a phone. */
+.series-robot {
+  grid-template-columns: minmax(260px, 420px) minmax(0, 1fr);
+  align-items: start;
+}
+.questix-hardware-figure {
+  grid-row: span 2;
+  margin: 0;
+  padding: 12px;
+  border-radius: 14px;
+  background: #f3f5f3;
+}
+.questix-hardware-figure svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.questix-hardware-figure figcaption {
+  padding: 4px 8px 4px;
+  color: #56696e;
+  font-size: 13px;
+  line-height: 1.7;
+}
+@media (max-width: 800px) {
+  .series-robot {
+    grid-template-columns: 1fr;
+  }
+  .questix-hardware-figure {
+    grid-row: auto;
+    width: 100%;
+    max-width: 480px;
+    margin: 0 auto;
+  }
+}
+@media (max-width: 600px) {
+  .series-robot {
+    padding: 16px;
+    gap: 18px;
+  }
+  .questix-hardware-figure {
+    padding: 6px;
+  }
+}
+
+/* もっと詳しく学ぶ (js/shell/learning-resources.js): the reading list under every course. The card
+   is a supplement button with a caption; the list itself opens in the shared dialog. Nothing
+   here is smaller than 12 px, so it stays readable on a phone. */
+.learning-resources {
+  max-width: 1240px;
+  width: calc(100% - 80px);
+  margin: 24px auto 52px;
+  padding: 0;
+  background: #f8fbfa;
+}
+.learning-resources > .supplement-trigger {
+  margin: 0;
+  padding: 23px 28px 12px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.learning-resources .supplement-trigger-copy {
+  font-size: 19px;
+  font-weight: 650;
+}
+.learning-resources .reference-count {
+  font-size: 13px;
+  font-weight: 400;
+  color: #526b65;
+  margin-left: 10px;
+}
+.learning-resources .supplement-trigger-action {
+  font-size: 14px;
+  white-space: nowrap;
+}
+/* Starts under the heading's words, past the 24 px cue icon of the button (28 + 24 + gap). */
+.learning-resources .reference-caption {
+  margin: 0;
+  padding: 0 28px 22px 62px;
+  font-size: 14px;
+  color: #566f69;
+}
+.supplement-body .reference-intro {
+  font-size: 14px;
+  color: #5c716a;
+  margin-bottom: 24px;
+}
+.reference-list {
+  display: grid;
+  gap: 18px;
+}
+.reference-item {
+  padding: 23px;
+  border: 1px solid #d8e4de;
+  border-radius: 12px;
+  background: #fbfdfc;
+  min-width: 0;
+}
+.reference-meta {
+  display: flex;
+  gap: 8px 18px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  margin-bottom: 13px;
+  font-size: 12px;
+  color: #5d726a;
+}
+.reference-meta > span:first-child {
+  font-weight: 650;
+  color: #256b5c;
+}
+.supplement-body .reference-item h3 {
+  font-size: 19px;
+  line-height: 1.7;
+  margin: 0 0 5px;
+}
+.reference-item h3 a {
+  color: #1a6b5c;
+  text-decoration: underline;
+  text-decoration-color: #93b8ac;
+  text-underline-offset: 4px;
+  overflow-wrap: anywhere;
+}
+.reference-item h3 a:hover {
+  color: #104a40;
+  text-decoration-color: currentColor;
+}
+.reference-item h3 a:focus-visible {
+  outline: 3px solid #397fcc;
+  outline-offset: 4px;
+  border-radius: 3px;
+}
+.reference-external {
+  font-size: 16px;
+  margin-left: 7px;
+  white-space: nowrap;
+}
+.supplement-body .reference-item p {
+  font-size: 14px;
+  line-height: 1.85;
+  margin: 12px 0 0;
+}
+.supplement-body .reference-item .reference-publisher {
+  font-size: 12px;
+  color: #60766e;
+  margin: 4px 0 0;
+}
+.supplement-body .reference-item .reference-site {
+  font-size: 12px;
+  color: #60766e;
+  margin: 2px 0 12px;
+  overflow-wrap: anywhere;
+}
+.supplement-body .reference-start {
+  padding: 13px 15px;
+  background: #edf4f0;
+  border-radius: 8px;
+}
+.reference-start strong {
+  display: block;
+  font-size: 12px;
+  color: #2f6757;
+  margin-bottom: 4px;
+}
+.supplement-body .reference-item .reference-book-note {
+  font-size: 12px;
+  color: #786445;
+}
+.reference-policy {
+  margin-top: 24px;
+  border-top: 1px solid #dde5e1;
+  padding-top: 18px;
+}
+.reference-policy summary {
+  font-size: 13px;
+  color: #526b65;
+  padding: 5px 0;
+}
+.supplement-body .reference-policy p {
+  font-size: 13px;
+  line-height: 1.85;
+  margin: 12px 0 0;
+}
+.supplement-body .reference-network {
+  font-size: 12px;
+  color: #65796f;
+  margin: 18px 0 0;
+}
+@media (max-width: 600px) {
+  .learning-resources {
+    width: calc(100% - 36px);
+  }
+  .learning-resources > .supplement-trigger {
+    padding: 18px 18px 12px;
+  }
+  .learning-resources .supplement-trigger-copy {
+    font-size: 17px;
+  }
+  .learning-resources .reference-count {
+    display: block;
+    margin: 4px 0 0;
+    font-size: 12px;
+  }
+  .learning-resources .reference-caption {
+    padding: 0 18px 18px;
+    font-size: 13px;
+  }
+  .learning-resources .supplement-trigger .supplement-trigger-action {
+    font-size: 13px;
+    gap: 5px;
+  }
+  .reference-item {
+    padding: 18px 16px;
+  }
+  .supplement-body .reference-item h3 {
+    font-size: 17px;
+  }
+  .reference-meta {
+    gap: 6px 14px;
+  }
+  .supplement-body .reference-start {
+    padding: 12px;
+  }
+}
+
+/* One footer under every course (js/shell/lesson-progress.js): where the learner is among the
+   course's experiments, a numbered list to jump to any of them, and previous / next. */
+/* Same column as the summary card under it (#quizEntry in mastery-systems.css). */
+#lessonFooter {
+  max-width: 1240px;
+  width: calc(100% - 80px);
+  margin: 32px auto 0;
+  padding: 22px 26px;
+  overflow: visible;
+}
+.lesson-footer nav {
+  display: grid;
+  gap: 14px;
+}
+.lesson-footer-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 16px;
+}
+.lesson-footer-head .eyebrow {
+  margin: 0;
+}
+.lesson-footer-visited {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.lesson-footer-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.lesson-footer-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 10px;
+  border: 1px solid #d3dfdc;
+  border-radius: 10px;
+  background: #fff;
+  color: #274a47;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+}
+.lesson-footer-step.is-current {
+  border-color: #1f6f63;
+  background: #e8f3f0;
+  box-shadow: inset 0 0 0 1px #1f6f63;
+}
+.lesson-footer-number {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #eef3f2;
+  color: #36524f;
+  font-size: 13px;
+  font-weight: 700;
+}
+.lesson-footer-step.is-visited .lesson-footer-number {
+  background: #d7ece5;
+  color: #1f6f63;
+}
+.lesson-footer-step.is-current .lesson-footer-number {
+  background: #1f6f63;
+  color: #fff;
+}
+.lesson-footer-note {
+  margin: 0;
+  color: #36524f;
+}
+.lesson-footer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 10px;
+}
+.lesson-footer-actions button {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  min-height: 48px;
+}
+.lesson-footer-actions button span {
+  font-weight: 700;
+}
+.lesson-footer-next {
+  margin-left: auto;
+}
+/* The summary before the last experiment: a short note instead of the quiz buttons. */
+.quiz-entry-notice h2 {
+  font-size: 18px;
+}
+.quiz-entry-notice p {
+  margin: 6px 0;
+}
+@media (max-width: 700px) {
+  #lessonFooter {
+    width: calc(100% - 36px);
+    padding: 16px;
+  }
+}
+@media (max-width: 600px) {
+  /* Numbers only; the experiment on screen keeps its name. */
+  .lesson-footer-steps {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .lesson-footer-steps li {
+    flex: none;
+  }
+  .lesson-footer-step {
+    width: auto;
+    min-width: 44px;
+    padding: 6px 8px;
+    justify-content: center;
+  }
+  .lesson-footer-step:not(.is-current) .lesson-footer-title {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .lesson-footer-actions button {
+    flex: 1 1 100%;
+    justify-content: center;
+  }
+  .lesson-footer-next {
+    order: -1;
+    margin-left: 0;
+  }
+}

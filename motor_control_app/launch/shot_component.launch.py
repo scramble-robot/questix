@@ -10,6 +10,8 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
+from questix_control_config import control_actions
 
 
 def generate_launch_description():
@@ -33,6 +35,15 @@ def generate_launch_description():
         description='Joy input topic (override-only, default matches YAML)'
     )
 
+    # accept_lab_input は練習用起動 (questix_launcher) だけが QUESTiX LAB の
+    # チルト・射出を許可するための override。既定値は YAML と同じ false。
+    accept_lab_input_arg = DeclareLaunchArgument(
+        'accept_lab_input',
+        default_value='false',
+        description='Accept QUESTiX LAB tilt/fire requests (override-only, default matches '
+                    'YAML; practice launches only)'
+    )
+
     # shot componentノード
     shot_component_node = Node(
         package='motor_control_app',
@@ -40,13 +51,20 @@ def generate_launch_description():
         name='shot_component',
         parameters=[
             LaunchConfiguration('config_file'),
-            {'joy_topic': LaunchConfiguration('joy_topic')},
+            LaunchConfiguration('control_config_file'),
+            {
+                'joy_topic': LaunchConfiguration('joy_topic'),
+                'accept_lab_input': ParameterValue(
+                    LaunchConfiguration('accept_lab_input'), value_type=bool),
+            },
         ],
         output='screen'
     )
 
     return LaunchDescription([
+        *control_actions(),
         config_file_arg,
         joy_topic_arg,
+        accept_lab_input_arg,
         shot_component_node
     ])

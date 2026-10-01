@@ -58,7 +58,7 @@ class CollectRequest(BaseModel):
     @classmethod
     def _validate_dest(cls, v: str) -> str:
         if not _ABS_PATH_RE.match(v):
-            raise ValueError("保存先は安全な絶対パスである必要があります")
+            raise ValueError("保存先には安全な絶対パスを指定してください")
         return v
 
     @field_validator("sources")

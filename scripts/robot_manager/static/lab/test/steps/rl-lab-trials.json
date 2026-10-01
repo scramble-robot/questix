@@ -1,0 +1,23 @@
+[
+  { "click": "[data-rl-group=\"3\"]" },
+  { "click": "#trainNow", "wait": 20000, "frames": 60 },
+  { "click": "#testNow", "frames": 1500 },
+  { "click": "#sceneNext", "wait": 4000 },
+  { "click": "[data-trial=\"3\"]", "frames": 300 },
+  { "click": "#openSensorFromGuide" },
+  { "click": "[data-sensor=imu]" },
+  { "click": "#showOverview" },
+  { "click": "[data-stage=improve]" },
+  { "click": "#inspectExample", "frames": 200 },
+  { "click": "[data-stage=improve]" },
+  { "input": "#hypothesis", "value": "壁から離れる" },
+  { "click": "[name=improvement][value=clearance]" },
+  { "click": "#applyImprovement" },
+  { "click": "[data-stage=learn]" },
+  { "click": "[data-stage=test]" },
+  { "click": "[data-stage=setup]" },
+  { "click": "#trainNow", "wait": 20000, "frames": 60 },
+  { "click": "#testNow", "frames": 1500 },
+  { "click": "#sceneNext", "wait": 4000 },
+  { "click": "#freshBatch", "frames": 1500 }
+]

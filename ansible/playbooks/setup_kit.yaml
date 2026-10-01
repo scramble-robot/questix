@@ -60,6 +60,8 @@
     - { role: robotics_workspace }
     - { role: robot_autostart }
     - { role: display_settings }
+    # Off unless wifi_ap_enabled: switching the Wi-Fi to AP mode drops a Wi-Fi client connection.
+    - { role: wifi_access_point, when: wifi_ap_enabled | bool }
 
   post_tasks:
     - name: Display completion message

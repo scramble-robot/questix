@@ -1,0 +1,106 @@
+{
+  "title": "実機の状態",
+  "label": "実機の状態（ロボットから届いた値）",
+  "offline": "実機の状態：ロボットにつながっていないので、表示できません。",
+  "connect": "実機につなぐ",
+  "connecting": "実機の状態：ロボットにつないでいるところです…",
+  "linked": "{robot} につながっています",
+  "linkedNoName": "ロボットにつながっています",
+  "silent": "つながっていますが、ロボットから値が届いていません。",
+  "estop": {
+    "pressed": "非常停止：押されています",
+    "pressedNote": "車輪は回りません。先生と一緒に周りを確かめてから解除してください。",
+    "released": "非常停止：解除されています",
+    "unknown": "非常停止：車輪の状態が届いていないため、わかりません"
+  },
+  "driver": {
+    "title": "いま走らせているのは",
+    "me": "この画面（教材の走行）",
+    "page": "ほかの端末の教材",
+    "controller": "コントローラー（または別のノード）",
+    "unknown": "指令なし（車輪が手などで回されています）",
+    "none": "だれも走らせていません",
+    "commandVsMeasured": "指令 {command} m/秒 → 測定 {measured} m/秒",
+    "noCommand": "速度の指令は出ていません"
+  },
+  "wheels": {
+    "left": "左の車輪",
+    "right": "右の車輪",
+    "command": "指令 {rpm} rpm",
+    "noCommand": "指令なし",
+    "chartLabel": "{side}の回転数の、最近{seconds}秒の変化。実線が測った回転数、破線が指令。",
+    "yTitle": "回転数（rpm）",
+    "xTitle": "時間（秒、0がいま）",
+    "measured": "測定",
+    "target": "指令"
+  },
+  "motion": {
+    "speed": "前後の速さ",
+    "turn": "回転の速さ",
+    "turnDegrees": "約{degrees}°/秒・左回りが＋"
+  },
+  "pose": {
+    "title": "表示を始めてからの動き",
+    "label": "上から見た図。上が表示を始めたときの前向き。青い線が車輪から求めた通り道、○が始めた位置。",
+    "heading": "向き",
+    "headingValue": "{degrees}°",
+    "headingNote": "左回りが＋",
+    "moved": "前へ {forward} m・左へ {left} m",
+    "grid": "1マス {cm} cm",
+    "none": "位置の見積もり（/odom）が届いていません。",
+    "reset": "ここを起点にする"
+  },
+  "front": {
+    "title": "前の物までの距離（LiDAR）",
+    "label": "LiDARから前を見た扇形の図。点が測った物、線が前の物までの距離。",
+    "value": "{metres} m",
+    "clear": "{range} m以内に物がありません",
+    "none": "LiDAR（/scan）が届いていません。",
+    "grid": "扇形の半径 {range} m・線は1 mごと"
+  },
+  "fresh": {
+    "title": "値が届いた時刻",
+    "streams": {
+      "drive": "車輪",
+      "odom": "位置",
+      "scan": "LiDAR",
+      "twist": "指令"
+    },
+    "ago": "{seconds}秒前",
+    "long": "{seconds}秒以上前",
+    "never": "届いていません",
+    "idle": "出ていません",
+    "staleNote": "灰色の値は古くなっています（止まっている・届いていない）。"
+  },
+  "memo": {
+    "label": "測定メモ",
+    "placeholder": "気づいたことや、測った値を書きます。",
+    "snapshot": "いまの状態をメモに添える",
+    "snapshotNote": "押した瞬間の車輪の回転数・速さ・向き・前の距離・非常停止を、メモの最後に1行で書き足します。",
+    "offline": "ロボットにつなぐと、いまの状態をメモに添えられます。",
+    "save": "メモを保存（テキスト）",
+    "kept": "メモはこの端末のブラウザに残ります。大事なメモは保存してください。",
+    "fileName": "QUESTiX-LAB-測定メモ-{place}.txt",
+    "fileHeading": "QUESTiX LAB 測定メモ（{place}）",
+    "line": "{time} 左 {left} rpm・右 {right} rpm／前後 {speed} m/秒・回転 {turn} rad/秒／向き {heading}°／前 {front} m／非常停止：{estop}",
+    "estopPressed": "押されています",
+    "estopReleased": "解除されています",
+    "unknown": "—"
+  },
+  "more": "実機の状態をくわしく見る",
+  "strip": {
+    "label": "いまの実機（車輪・速さ・非常停止）",
+    "estop": {
+      "pressed": "非常停止：押されています",
+      "released": "非常停止：解除されています",
+      "unknown": "非常停止：わかりません（車輪の状態が届いていません）"
+    },
+    "left": "左の車輪",
+    "right": "右の車輪",
+    "speed": "前後の速さ",
+    "measured": "実測（実線）",
+    "command": "指令（破線）",
+    "span": "最近{seconds}秒・上下±{top} m/秒",
+    "sparkLabel": "前後の速さの最近10秒。実線が実測、破線が指令、上下の端が±{top} m/秒。"
+  }
+}

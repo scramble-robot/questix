@@ -12,10 +12,12 @@
 
 #include "esc_motor_control_cpp/full_speed_logic.hpp"
 #include "esc_motor_control_cpp/pwm_backend.hpp"
+#include "esc_motor_control_cpp/roller_lab_logic.hpp"
 #include "questix_msgs/msg/emergency_stop.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/joy.hpp"
 #include "std_msgs/msg/float32.hpp"
+#include "std_msgs/msg/string.hpp"
 
 namespace esc_motor_control_cpp {
 
@@ -33,6 +35,11 @@ private:
   void emergency_stop_callback(const questix_msgs::msg::EmergencyStop::SharedPtr msg);
   void safety_check();
   void publish_status();
+  // QUESTiX LAB roller input (/roller/lab) and its status (/roller/status)
+  void lab_callback(const std_msgs::msg::Float32::SharedPtr msg);
+  void lab_tick();
+  void publish_roller_status();
+  static double steady_now_sec();
 
   // ---------- Motor control ----------
   void set_motor_speed(double speed);
@@ -58,11 +65,17 @@ private:
   int neutral_pulse_width_us_;
   std::string pwm_backend_name_;  // "auto", "pigpio", "lgpio", "simulation"
   int gpio_chip_num_;             // lgpio chip number
+  // QUESTiX LAB: accept /roller/lab (practice launches only; see roller_lab_logic.hpp)
+  bool accept_lab_input_{false};
+  std::string lab_topic_;
+  double lab_max_speed_{0.8};
+  double lab_joy_quiet_sec_{1.0};
 
   // ---------- State ----------
   double current_speed_{0.0};
   bool emergency_stop_active_{false};
   FullSpeedLogic full_speed_logic_;
+  RollerLabLogic roller_lab_logic_;
   std::mutex lock_;
 
   // ---------- PWM ----------
@@ -72,6 +85,10 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joy_sub_;
   rclcpp::Subscription<questix_msgs::msg::EmergencyStop>::SharedPtr emergency_stop_sub_;
   rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr status_pub_;
+  rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr lab_sub_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr roller_status_pub_;
+  rclcpp::TimerBase::SharedPtr roller_status_timer_;
+  rclcpp::TimerBase::SharedPtr lab_timer_;
   rclcpp::TimerBase::SharedPtr status_timer_;
   rclcpp::TimerBase::SharedPtr safety_timer_;
 };

@@ -1,0 +1,56 @@
+# QUESTiX operator controls — one file per controller, shared by all launch paths.
+# ROS node sections prevent unrelated parameters from leaking between nodes.
+# Signed input ratios reverse direction. Units: linear m/s, angular rad/s.
+# Each tilt direction selects its own axis (-1 uses its button index).
+# axis_sign: +1 = positive half-axis, -1 = negative half-axis; used only in axis mode.
+# Acceleration/taper: 0 disables shaping. max_motor_rpm must be <= 475.
+# Dual-stick and joy_axis_drive sections apply only to their standalone modes.
+# Hardware ports, GPIO safety and lifecycle settings remain in each package.
+joy_controller:
+  ros__parameters:
+    longitudinal_input_ratio: 2.0
+    lateral_input_ratio: 0.3
+    angular_input_ratio: 6.0
+    linear_x_axis: 1
+    linear_y_axis: 0
+    angular_z_axis: 3
+joy_controller_dual_stick:
+  ros__parameters:
+    longitudinal_input_ratio: 0.05
+    angular_input_ratio: 0.05
+    left_stick_vertical_axis: 1
+    right_stick_vertical_axis: 4
+shot_component:
+  ros__parameters:
+    fire_button: 5
+    tilt_up_axis: 7
+    tilt_up_axis_sign: 1
+    tilt_down_axis: 7
+    tilt_down_axis_sign: -1
+    tilt_up_button_index: 4
+    tilt_down_button_index: 6
+esc_motor_control:
+  ros__parameters:
+    full_speed_button: 7
+    full_speed_value: 1.0
+drive_component:
+  ros__parameters:
+    max_motor_rpm: 475
+    max_linear_accel: 3.0
+    max_angular_accel: 3.0
+    slew_taper_band_linear: 0.2
+    slew_taper_band_angular: 0.2
+    min_command_rpm: 5
+joy_axis_drive:
+  ros__parameters:
+    max_motor_rpm: 100
+    left_axis_index: 1
+    right_axis_index: 4
+    invert_left_axis: false
+    invert_right_axis: true
+joy_node:
+  ros__parameters:
+    deadzone: 0.1
+uart_joy_driver:
+  ros__parameters:
+    deadzone: 0.05

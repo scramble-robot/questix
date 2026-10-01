@@ -1,0 +1,156 @@
+/* Printable connection card: black on white, fits one A4 page (or A5 when printed two-up). */
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans JP", sans-serif;
+  background: #eef1f4;
+  color: #111;
+}
+
+.sheet {
+  max-width: 190mm;
+  margin: 2rem auto;
+  padding: 12mm;
+  background: #fff;
+  border: 1px solid #cfd6dd;
+  border-radius: 8px;
+}
+
+header {
+  border-bottom: 2px solid #111;
+  padding-bottom: 4mm;
+  margin-bottom: 6mm;
+}
+
+.brand {
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  color: #e4572e;
+}
+
+h1 {
+  font-size: 1.9rem;
+  word-break: break-all;
+}
+
+.message {
+  padding: 1rem;
+  background: #fff4e5;
+  border-radius: 6px;
+}
+
+.steps {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8mm;
+}
+
+.steps.three {
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 5mm;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.step h2 {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1.2rem;
+  margin-bottom: 3mm;
+}
+
+.number {
+  display: inline-grid;
+  place-items: center;
+  width: 1.8rem;
+  height: 1.8rem;
+  border-radius: 50%;
+  background: #111;
+  color: #fff;
+  font-size: 1rem;
+}
+
+.qr-box .qr {
+  display: block;
+  width: 100%;
+  max-width: 70mm;
+  height: auto;
+  margin: 0 auto;
+}
+
+.hint {
+  font-size: 0.85rem;
+  margin: 3mm 0;
+}
+
+dl div {
+  display: flex;
+  gap: 0.6rem;
+  padding: 1.5mm 0;
+  border-top: 1px solid #ddd;
+}
+
+dt {
+  min-width: 5.5em;
+  font-size: 0.8rem;
+  color: #555;
+}
+
+dd {
+  font-weight: 700;
+  word-break: break-all;
+}
+
+.mono {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 1.05rem;
+}
+
+footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 8mm;
+  font-size: 0.8rem;
+  color: #444;
+}
+
+footer button {
+  padding: 0.5rem 1.2rem;
+  font: inherit;
+  font-weight: 700;
+  border: 1px solid #111;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+}
+
+@media (max-width: 560px) {
+  .steps,
+  .steps.three {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media print {
+  body {
+    background: #fff;
+  }
+  .sheet {
+    margin: 0;
+    border: none;
+  }
+  footer button {
+    display: none;
+  }
+}

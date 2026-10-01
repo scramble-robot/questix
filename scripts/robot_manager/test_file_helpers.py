@@ -114,7 +114,7 @@ class ReadEnvFileTests(unittest.TestCase):
                 recorder._read_config_for_api()
 
         self.assertEqual(raised.exception.status_code, 500)
-        self.assertEqual(raised.exception.detail, "録画設定を読み込めません")
+        self.assertEqual(raised.exception.detail, "記録設定を読み込めません")
         self.assertNotIn("/private", raised.exception.detail)
 
 

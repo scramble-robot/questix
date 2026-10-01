@@ -1,0 +1,36 @@
+:root {
+  font-family:
+    Inter,
+    'Noto Sans JP',
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+  color: #253a3f;
+  background: #f3f5f4;
+  font-synthesis: none;
+  --green: #1c756b;
+  --green-soft: #e8f2ee;
+  --line: #dde5e1;
+  --muted: #667975;
+  --dark: #102832;
+  --orange: #a65a32;
+  --radius: 18px;
+  /* What a colour means (js/core/palette.js holds the same values and the rules). */
+  --role-actual: #1a9e6e;
+  --role-measured: #2a78d6;
+  --role-target: #a8760a;
+  --role-plan: #b8438a;
+  --role-previous: #9aa5ae;
+  --role-event: #5f6f76;
+  --role-danger: #c62828;
+  --scene-role-actual: #1f9a6a;
+  --scene-role-measured: #4f86e0;
+  --scene-role-target: #b8800c;
+  --scene-role-plan: #cc5fb4;
+  --scene-role-previous: #8c9aa3;
+  --scene-role-event: #c9d3d8;
+  --scene-role-danger: #ff6b6b;
+  /* Smallest text a figure may show on screen, however it is scaled. */
+  --figure-text-min: 12px;
+}

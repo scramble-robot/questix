@@ -1,0 +1,140 @@
+# QUESTiX LAB live bridge: subscriptions -> WebSocket. Nothing is published unless allow_drive
+# or allow_shoot is true (see the drive and launcher sections below, drive.py and shoot.py).
+questix_lab_bridge:
+  ros__parameters:
+    host: "0.0.0.0"
+    # Must match LAB_BRIDGE_PORT of robot_manager (scripts/robot_manager/app.py), which allows
+    # the /lab page to connect to this port, and DEFAULT_PORT in static/lab/js/live/robot-link.js.
+    port: 8897
+    # Pages connected at once; further browsers are refused. Sized for a class: every pupil's
+    # phone or tablet (about 20) plus the teachers' laptops. Each page gets the same telemetry
+    # (latest-wins, some tens of kB/s per page with the camera off), so the Wi-Fi limits it long
+    # before the Raspberry Pi does.
+    max_clients: 24
+    # Name shown to pages and to robot_manager (hello.robot.name, GET /api/state), so a class
+    # with several robots can tell them apart. Empty = this machine's host name.
+    robot_name: ""
+    # The same port also serves the QUESTiX LAB pages over plain HTTP, so learners can open
+    # http://<robot-ip>:8897/ directly. Empty = find scripts/robot_manager/static/lab
+    # automatically (source tree, $ROBOT_WS/src/*, /opt/questix_robot/robot_manager).
+    lab_dir: ""
+
+    # An empty topic name disables that stream.
+    scan_topic: "/scan"
+    odom_topic: "/odom"
+    drive_status_topic: "/drive_status"
+    target_twist_topic: "/target_twist"
+    # sensor_msgs/CompressedImage (JPEG/PNG), e.g. "/image_raw/compressed". No camera driver is
+    # part of this repository, so the stream is off by default.
+    camera_topic: ""
+
+    # Upper bounds for what is forwarded to browsers (latest message wins).
+    scan_max_hz: 5.0
+    scan_max_points: 360
+    odom_max_hz: 20.0
+    drive_max_hz: 20.0
+    twist_max_hz: 20.0
+    camera_max_fps: 10.0
+
+    # Each scan carries where its frame sits on the robot, looked up in TF (the static
+    # base_link -> laser_frame transform of launcher/launch/lidar_driver.launch.xml).
+    base_frame: "base_link"
+
+    # Reported to the page for wheel-odometry lessons. Keep identical to wheel_radius /
+    # wheel_separation in launcher/config/drive_component.yaml (the values the robot drives with).
+    # BAG_DEFAULT_CONFIG in scripts/robot_manager/static/lab/js/live/rosbag-core.js repeats them for
+    # rosbags opened without a robot connected.
+    wheel_radius: 0.1
+    wheel_separation: 0.5
+
+    # Driving experiments from the pages (the only thing this node can publish).
+    # true = pages may drive, each run confirmed by the learner's safety tick on the page.
+    # robot_manager passes its 教材からの走行 switch (on in practice mode, off in competition).
+    # The page's commands go to twist_arbiter's lab input; the arbiter (practice launches of
+    # questix_core) chooses between them and the controller, and a moved stick takes over.
+    # Even when allowed, a page can drive only while
+    #   - no other node publishes drive_topic,
+    #   - twist_arbiter subscribes to it (the robot's ROS runs, same ROS_DOMAIN_ID), and
+    #   - the emergency stop is released (emergency_stop_topic or /drive_status).
+    allow_drive: true
+    drive_topic: "/target_twist/lab"
+    # twist_arbiter's status: a run the controller takes over ends at once. Empty = not used.
+    arbiter_status_topic: "/twist_arbiter/status"
+    emergency_stop_topic: "/emergency_stop"
+    # Upper bounds for what a page may command; faster requests are clamped. Keep them low:
+    # learners run these experiments next to the robot.
+    drive_max_linear: 0.3   # [m/s]
+    drive_max_angular: 1.0  # [rad/s]
+    # The driving page repeats its command about 10 times a second. Silence for this long
+    # (closed tab, sleeping laptop, lost Wi-Fi) stops the robot.
+    drive_deadman_sec: 0.5
+    # One run (from the first command to stop) may not last longer than this.
+    drive_max_run_sec: 30.0
+    # Rate the held command is published at. drive_component's cmd_timeout_sec (1.0 s) is the
+    # last line of defence if this node dies while driving.
+    drive_rate_hz: 20.0
+
+    # The disc launcher's status (std_msgs/String JSON), mirrored to every page as the streams
+    # "roller" and "shot" whether or not allow_shoot is set. Empty = not mirrored (and no
+    # launcher experiments: the bridge needs both to decide).
+    roller_status_topic: "/roller/status"   # esc_motor_control
+    shot_status_topic: "/shot/status"       # shot_component
+
+    # Launcher experiments from the pages: roller power, tilt and firing one disc
+    # (questix_lab_bridge/shoot.py). Default false in the node; robot_manager passes its
+    # 教材からの発射 switch (on in practice mode, off in competition), each firing session
+    # confirmed by the learner's safety tick on the page. Even when allowed, a page can operate
+    # the launcher only while
+    #   - esc_motor_control and shot_component subscribe to the lab topics and report
+    #     lab_accepted (their accept_lab_input; practice launches only) in their status,
+    #   - no other node publishes the lab topics,
+    #   - the emergency stop is released (emergency_stop_topic, /drive_status or either status),
+    #   - the controller is not using the launcher (a pressed button takes over at once).
+    allow_shoot: false
+    roller_lab_topic: "/roller/lab"         # std_msgs/Float32, 0..1
+    tilt_lab_topic: "/shot/lab/tilt"        # std_msgs/Float32, degrees
+    fire_lab_topic: "/shot/lab/fire"        # std_msgs/Empty, one disc
+    # Caps for what a page may command. The effective limits are these narrowed by what the
+    # nodes report in their status (never wider): the roller power by esc_motor_control's
+    # lab_max_speed, the tilt range by shot_component's tilt_min_angle / tilt_max_angle
+    # (motor_control_app/config/shot_config*.yaml: 0 / 120). Pages get the effective ones in
+    # shoot_state.limits.
+    shoot_max_power: 0.8    # fraction 0..1
+    shoot_tilt_min: 0.0     # [deg]
+    shoot_tilt_max: 120.0   # [deg]
+    # Shortest time between two shots of any source [s]; shot_component enforces its own
+    # lab_min_fire_interval_sec as well (and its status next_fire_in_sec counts here: the later
+    # wins). A page fires only after the roller has been commanded at 0.2 or more for 1.0 s
+    # without a break (fixed in shoot.py).
+    shoot_fire_interval_sec: 2.0
+    # The page repeats the roller command about 10 times a second; silence for this long (closed
+    # tab, lost Wi-Fi) stops the roller.
+    shoot_deadman_sec: 0.5
+    # One session (from the first command to the stop) may not last longer than this [s].
+    shoot_max_spin_sec: 30.0
+    # Rate the roller command is published at during a session (esc_motor_control drops lab
+    # commands older than 1.0 s, and stops the roller if this node dies). Tilts are sent on
+    # request, at most every 60 ms (shot_component refuses closer than 50 ms).
+    shoot_rate_hz: 20.0
+
+    # Records kept on the robot (questix_lab_bridge/records.py), so every device connected to
+    # this robot can list, open and download them over this port (GET /api/records), and nothing
+    # is lost when a pupil changes or reloads a device. Pages save their runs here (record_save);
+    # the bridge also records controller driving by itself (auto_record) and caches rosbags it
+    # converted for the lessons. Created with the bridge user's permissions; "" = keep nothing.
+    records_dir: "~/.local/share/questix/lab-records"
+    # Space the records may take [MiB], and free space always left on the disk [MiB]. When full,
+    # automatic records and caches delete their own oldest; pages' records are never deleted
+    # automatically: saving from a page is refused until the teacher tidies the folder up.
+    records_quota_mb: 500
+    records_min_free_mb: 200
+    # Record driving nobody records from a page (the controller through twist_arbiter): from 1 s
+    # before the robot moves until it has stood still for 3 s, split every 180 s, shown in the
+    # lessons as 「コントローラーで走行」. Nothing is recorded while a lab driving run is active.
+    auto_record: true
+    # Robot Manager's rosbags (MCAP), listed for the lessons (GET /api/rosbags) and converted
+    # into recordings on request. robot_manager passes its OUTPUT_DIR (rosbag.env).
+    rosbag_dir: "/var/lib/questix/rosbags"
+    # Longest window converted from one bag [s], and how long one conversion may take [s].
+    rosbag_max_seconds: 300.0
+    rosbag_convert_timeout_sec: 60.0

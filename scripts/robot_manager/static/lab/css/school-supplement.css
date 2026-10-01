@@ -1,0 +1,504 @@
+/* Optional school connections stay beside the current experiment's instructions. */
+.school-tip {
+  margin: 0 0 22px;
+  border: 1px solid #d7e3df;
+  border-radius: 12px;
+  background: #f7faf8;
+  overflow: hidden;
+}
+.school-tip > summary {
+  padding: 15px 18px;
+  cursor: pointer;
+  color: #396c63;
+  line-height: 1.6;
+}
+.school-tip > summary:hover {
+  background: #eef5f1;
+}
+.school-tip > summary:focus-visible {
+  outline: 3px solid #4b8378;
+  outline-offset: -4px;
+  border-radius: 10px;
+}
+.school-tip-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  margin-right: 18px;
+  white-space: nowrap;
+}
+.school-tip-topic {
+  font-size: 14px;
+  font-weight: 600;
+  color: #29413e;
+}
+.school-tip-body {
+  padding: 20px 24px 24px;
+  border-top: 1px solid #d7e3df;
+}
+.school-tip-body p {
+  font-size: 14px;
+  line-height: 1.85;
+  margin: 0 0 12px;
+  color: #405751;
+}
+.school-tip-body .school-tip-subjects {
+  font-size: 12px;
+  color: #53776e;
+  margin-bottom: 18px;
+}
+.school-tip-grid {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 30px;
+}
+.school-tip-body h3 {
+  font-size: 14px;
+  margin: 0 0 8px;
+  color: #29413e;
+}
+.school-tip-body h4 {
+  font-size: 12px;
+  margin: 0 0 8px;
+  color: #53776e;
+}
+.school-tip-example {
+  padding: 16px 18px;
+  background: #fff;
+  border: 1px solid #e0e9e5;
+  border-radius: 9px;
+  margin-top: 16px;
+}
+.school-tip-example .school-tip-formula {
+  font-size: 15px;
+  font-weight: 600;
+  color: #29413e;
+  overflow-wrap: anywhere;
+}
+.school-tip-example p:last-child {
+  margin-bottom: 0;
+}
+.school-tip-observe {
+  border-left: 1px solid #d7e3df;
+  padding-left: 26px;
+}
+.school-tip-body .school-tip-note {
+  font-size: 12px;
+  line-height: 1.8;
+  color: #667b75;
+  margin: 18px 0 0;
+}
+@media (max-width: 760px) {
+  .school-tip > summary {
+    padding: 13px 15px;
+  }
+  .school-tip-label {
+    display: inline-block;
+    margin-right: 8px;
+  }
+  .school-tip-topic {
+    display: block;
+    padding-left: 16px;
+    margin-top: 3px;
+  }
+  .school-tip-body {
+    padding: 18px 16px;
+  }
+  .school-tip-grid {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .school-tip-observe {
+    border-left: 0;
+    border-top: 1px solid #d7e3df;
+    padding: 20px 0 0;
+    margin-top: 20px;
+  }
+  .school-tip-example {
+    padding: 14px;
+  }
+}
+/* Reference reading uses a dialog; experiment settings and evidence stay inline. */
+html {
+  scrollbar-gutter: stable;
+}
+body.supplement-is-open {
+  overflow: hidden;
+}
+.supplement-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  width: 100%;
+  text-align: left;
+  background: #fff;
+  border: 1px solid #dbe5e1;
+  color: #345a53;
+  padding: 14px 17px;
+  margin: 14px 0;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.7;
+  box-shadow: none;
+}
+.supplement-trigger:hover {
+  border-color: #89aaa0;
+  background: #f6faf8;
+}
+.supplement-trigger-copy {
+  min-width: 0;
+}
+.supplement-trigger-action {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  flex: none;
+  color: #57756d;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.supplement-trigger-action svg {
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+.supplement-tip-trigger {
+  background: #f7faf8;
+  margin: 0 0 22px;
+}
+.supplement-tip-trigger .school-tip-label {
+  display: block;
+  margin: 0 0 3px;
+  font-size: 12px;
+}
+.supplement-tip-trigger .school-tip-topic {
+  padding: 0;
+  margin: 0;
+  font-size: 14px;
+}
+.supplement-dialog {
+  width: min(880px, calc(100% - 40px));
+  max-width: none;
+  max-height: calc(100dvh - 48px);
+  padding: 0;
+  border: 1px solid #d7e2de;
+  border-radius: 18px;
+  background: #fff;
+  color: #253a3f;
+  box-shadow: 0 24px 90px #071f3940;
+  overflow: hidden;
+}
+.supplement-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+.supplement-dialog::backdrop {
+  background: #10283299;
+}
+.supplement-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 24px;
+  justify-content: space-between;
+  padding: 24px 28px 20px;
+  border-bottom: 1px solid #e0e8e4;
+  flex: none;
+}
+.supplement-heading p {
+  font-size: 12px;
+  font-weight: 650;
+  color: #5c7b71;
+  margin: 0 0 7px;
+  letter-spacing: 0.03em;
+}
+.supplement-heading h2 {
+  font-size: 22px;
+  line-height: 1.6;
+  margin: 0;
+  font-weight: 650;
+}
+#supplementTitle:focus {
+  outline: none;
+}
+#supplementClose {
+  flex: none;
+  padding: 0;
+  min-width: 44px;
+  min-height: 44px;
+  font-size: 27px;
+  font-weight: 400;
+  background: #f4f7f5;
+  border-color: transparent;
+  line-height: 1;
+}
+.supplement-body {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  min-height: 0;
+  padding: 24px 28px 28px;
+  font-size: 16px;
+  line-height: 1.85;
+  overflow-wrap: anywhere;
+}
+#supplementBody:focus-visible {
+  outline: 2px solid #518df0;
+  outline-offset: -3px;
+}
+.supplement-body p,
+.supplement-body li {
+  font-size: 16px;
+  line-height: 1.85;
+}
+.supplement-body p {
+  margin: 0 0 18px;
+}
+.supplement-body h2,
+.supplement-body h3 {
+  font-size: 18px;
+  line-height: 1.7;
+  margin: 0 0 12px;
+}
+.supplement-body h4 {
+  font-size: 15px;
+  line-height: 1.7;
+}
+.supplement-body li + li {
+  margin-top: 12px;
+}
+.supplement-body ol,
+.supplement-body ul {
+  padding-left: 24px;
+}
+.supplement-body a {
+  color: #22695f;
+  text-underline-offset: 3px;
+}
+.supplement-body pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 18px;
+  background: #132d37;
+  color: #e2eeee;
+  border-radius: 9px;
+  font-size: 14px;
+  line-height: 1.7;
+}
+.supplement-body table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.supplement-body th,
+.supplement-body td {
+  border-bottom: 1px solid var(--line);
+  padding: 10px 8px;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.supplement-body button {
+  margin: 5px 5px 5px 0;
+}
+.supplement-body .method-grid {
+  grid-template-columns: 1fr;
+  gap: 22px;
+}
+.supplement-body .helper,
+.supplement-body .school-tip-note {
+  font-size: 13px;
+  color: #667b75;
+}
+.supplement-body .school-tip-body {
+  padding: 0;
+  border: 0;
+}
+.supplement-body .school-tip-subjects {
+  font-size: 13px;
+  margin-bottom: 24px;
+}
+.supplement-body .school-tip-grid {
+  grid-template-columns: 1fr;
+  gap: 0;
+}
+.supplement-body .school-tip-observe {
+  border-left: 0;
+  border-top: 1px solid #d7e3df;
+  padding: 20px 0 0;
+  margin-top: 24px;
+}
+.supplement-body .school-tip-example {
+  background: #f5f8f6;
+}
+.supplement-body .school-tip-formula {
+  font-size: 17px;
+}
+.school-grade-tabs {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+  margin: 22px 0;
+}
+.supplement-body .school-grade-tabs button {
+  margin: 0;
+  min-height: 48px;
+  padding: 9px 5px;
+  background: #f3f6f5;
+  border: 1px solid #d3dfda;
+  border-radius: 8px;
+  color: #3d5953;
+  font-size: 15px;
+}
+.school-grade-tabs button[aria-selected='true'] {
+  background: #3c7369;
+  color: #fff;
+  border-color: #3c7369;
+  font-weight: 700;
+}
+.supplement-body .school-grade-tabs button[aria-selected='true'] {
+  background: #3c7369;
+  color: #fff;
+  border-color: #3c7369;
+}
+.school-grade-tabs small {
+  font-size: 11px;
+  font-weight: 400;
+  margin-left: 4px;
+}
+.school-grade-tabs button:focus-visible,
+.school-grade-panel:focus-visible {
+  outline: 3px solid #397fcc;
+  outline-offset: 3px;
+}
+.supplement-body .school-grade-note {
+  padding: 12px 15px;
+  border-left: 3px solid #aac5ba;
+  background: #f4f8f5;
+  font-size: 14px;
+}
+.school-column-head,
+.school-subjects > div {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(0, 2fr);
+  gap: 24px;
+}
+.school-column-head {
+  padding: 12px 0;
+  color: #61746e;
+  font-size: 12px;
+  border-bottom: 1px solid #ccdcd4;
+}
+.school-subjects {
+  margin: 0;
+}
+.school-subjects > div {
+  padding: 22px 0;
+  border-bottom: 1px solid #e0e8e4;
+}
+.school-subjects dt {
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 1.7;
+}
+.school-subject-name {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: #5e776e;
+  margin-bottom: 5px;
+}
+.school-subjects dd {
+  margin: 0;
+  min-width: 0;
+}
+.supplement-body .school-subjects p {
+  font-size: 15px;
+  margin: 0 0 10px;
+  line-height: 1.85;
+}
+.school-experiment-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  font-size: 14px;
+  line-height: 1.8;
+}
+.school-experiment-links a {
+  padding: 5px 0;
+  text-decoration-thickness: 1px;
+}
+.supplement-body .school-curriculum-source {
+  margin: 24px 0 0;
+}
+@media (max-width: 600px) {
+  .school-grade-tabs {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin: 18px 0;
+  }
+  .school-column-head {
+    display: none;
+  }
+  .school-subjects > div {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding: 20px 0;
+  }
+  .school-subjects > div:first-child {
+    border-top: 1px solid #e0e8e4;
+  }
+  .school-subject-name {
+    display: inline;
+    margin-right: 10px;
+  }
+}
+.supplement-body .control-hardware-body {
+  padding: 0;
+}
+.supplement-footer {
+  padding: 14px 28px;
+  border-top: 1px solid #e0e8e4;
+  background: #f8faf9;
+  display: flex;
+  justify-content: flex-end;
+  flex: none;
+}
+.supplement-footer button {
+  font-size: 14px;
+  background: #fff;
+}
+@media (max-width: 600px) {
+  .supplement-trigger {
+    gap: 10px;
+    padding: 13px 14px;
+  }
+  .supplement-trigger-action {
+    font-size: 0;
+    gap: 0;
+  }
+  .supplement-trigger-action svg {
+    width: 20px;
+    height: 20px;
+  }
+  .supplement-dialog {
+    width: calc(100% - 20px);
+    max-height: calc(100dvh - 24px);
+    border-radius: 14px;
+  }
+  .supplement-heading {
+    padding: 18px 18px 16px;
+    gap: 12px;
+  }
+  .supplement-heading h2 {
+    font-size: 19px;
+  }
+  .supplement-body {
+    padding: 20px 18px;
+  }
+  .supplement-footer {
+    padding: 12px 18px;
+  }
+  .supplement-footer button {
+    width: 100%;
+  }
+  .supplement-body .school-tip-example {
+    padding: 15px;
+  }
+}

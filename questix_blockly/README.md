@@ -92,8 +92,8 @@ test/                       制御テストと起動中の結合検証
 既存 `joy_gate` → `joy_controller` → `/target_twist` → simulator → `/odom`。
 操作許可は既存の `operation_manager` を通します。
 
-制御設定は `questix_launcher/config/drive_component.yaml`、Joy倍率は
-`joy_controller/config/joy_controller_params.yaml`、モデルは `description_launch` から取得します。
+車輪の寸法は `questix_launcher/config/drive_component.yaml`、加速度・RPM上限・Joy倍率などの操作設定は
+`questix_control_config/config/controls.uart.yaml`（パッケージの初期値）、モデルは `description_launch` から取得します。
 共有ライブラリ・画面はインストール先から取得し、外側の試作ディレクトリやユーザー固有パスには依存しません。
 
 ## 検証

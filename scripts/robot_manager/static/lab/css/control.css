@@ -1,0 +1,931 @@
+/* Control engineering uses the same purpose / operation / observation hierarchy. */
+.series-courses {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.control-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 330px;
+  gap: 24px;
+  align-items: start;
+}
+#controlPage .basics-groups {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+#controlPage .basics-groups button {
+  font-size: 14px;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  min-width: 0;
+}
+.control-calibration {
+  padding: 22px;
+}
+.control-calibration h2 {
+  font-size: 17px;
+}
+.control-calibration p {
+  font-size: 14px;
+  color: #5b737a;
+  margin: 12px 0 0;
+}
+.control-calibration table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 15px;
+  margin-top: 18px;
+}
+.control-calibration th,
+.control-calibration td {
+  padding: 12px 8px;
+  text-align: center;
+  border-bottom: 1px solid var(--line);
+}
+.control-calibration th {
+  text-align: left;
+  font-weight: 650;
+}
+.control-select-input {
+  display: block;
+  width: 100%;
+  margin: 10px 0 20px;
+  padding: 12px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  font-family: inherit;
+  font-size: 14px;
+  color: inherit;
+}
+.control-guide > label.control-select {
+  margin-bottom: 0;
+}
+.control-contributions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  background: #f1f6f3;
+  padding: 18px 22px;
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+.control-contributions strong {
+  display: block;
+  margin-top: 5px;
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+.control-contributions small {
+  flex-basis: 100%;
+  font-size: 13px;
+  margin-top: 10px;
+}
+.control-contributions b {
+  font-weight: 400;
+  color: #68827b;
+}
+.control-chart-legend .ff-line:before {
+  border-color: var(--role-plan);
+}
+.control-chart-legend .fb-line:before {
+  border-color: var(--role-measured);
+  border-top-style: solid;
+}
+.control-previous-note {
+  font-size: 13px;
+  padding: 12px 24px 0;
+  margin: 0;
+  color: #5a727a;
+}
+.control-method-comparison {
+  margin-top: 22px;
+}
+.control-method-comparison p {
+  font-size: 14px;
+}
+.control-method-comparison table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.control-method-comparison th,
+.control-method-comparison td {
+  padding: 12px;
+  border: 1px solid var(--line);
+  text-align: left;
+}
+.control-method-comparison th {
+  font-weight: 600;
+  background: #f5f8f6;
+}
+@media (max-width: 700px) {
+  #controlPage .basics-groups {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .control-calibration {
+    padding: 18px;
+  }
+  .control-calibration table {
+    font-size: 13px;
+  }
+  .control-calibration th,
+  .control-calibration td {
+    padding: 10px 4px;
+  }
+  .control-contributions {
+    padding: 16px;
+    font-size: 12px;
+  }
+  .control-contributions strong {
+    font-size: 16px;
+  }
+  .control-method-comparison table {
+    min-width: 540px;
+  }
+}
+.control-workspace {
+  min-width: 0;
+  display: grid;
+  gap: 22px;
+}
+.control-guide p,
+.control-explanation p,
+.control-question p,
+.control-hardware p,
+.control-hardware li {
+  font-size: 16px;
+  line-height: 1.85;
+}
+.control-guide .choice-list {
+  margin-top: 12px;
+}
+.control-guide legend {
+  font-size: 15px;
+  margin-bottom: 12px;
+  font-weight: 650;
+}
+.control-guide .choice strong {
+  font-size: 15px;
+}
+.control-guide .choice small {
+  font-size: 14px;
+}
+.control-setting {
+  display: block;
+  margin: 20px 0 26px;
+}
+.control-setting > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 15px;
+  font-weight: 650;
+}
+.control-setting output {
+  font-variant-numeric: tabular-nums;
+  color: #326b62;
+  background: #eef5f1;
+  padding: 3px 9px;
+  border-radius: 6px;
+}
+.control-setting input {
+  display: block;
+  width: 100%;
+  margin: 15px 0 9px;
+  accent-color: var(--green);
+  min-height: 28px;
+}
+.control-setting small {
+  font-size: 14px;
+  color: #647779;
+  line-height: 1.7;
+  display: block;
+}
+.control-select {
+  display: block;
+  font-size: 15px;
+  font-weight: 650;
+  margin-bottom: 20px;
+}
+.control-select select {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  font: inherit;
+}
+.control-guide .helper {
+  font-size: 14px !important;
+}
+.control-guide > .text-button {
+  display: block;
+  margin: 16px auto 0;
+}
+.control-time {
+  color: #687c83;
+  font-size: 14px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+#controlRobot {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #182d38;
+}
+.control-readings {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 20px 22px;
+}
+.control-readings span {
+  display: block;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #5e737b;
+  min-height: 20px;
+}
+.control-readings strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+.control-playbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 22px 18px;
+}
+.control-playbar button {
+  font-size: 14px;
+  white-space: nowrap;
+}
+.control-playbar input {
+  flex: 1;
+  min-width: 40px;
+  accent-color: var(--green);
+}
+.control-playbar > span {
+  font-size: 12px;
+  color: #647779;
+  white-space: nowrap;
+}
+.control-visual .figure-guide {
+  margin: 0;
+  border-top: 1px solid var(--line);
+}
+.control-visual {
+  scroll-margin-top: 100px;
+}
+.depth-diagram {
+  padding: 8px 16px;
+  background: #193641;
+  color: #d9e8e8;
+}
+.depth-diagram svg {
+  display: block;
+  width: 100%;
+  max-height: 215px;
+}
+.depth-diagram text {
+  fill: #d9e8e8;
+  font: 15px system-ui;
+}
+.depth-alignment {
+  display: block;
+  width: 100%;
+  max-height: 125px;
+}
+.depth-alignment text {
+  font: 15px system-ui;
+}
+.depth-result {
+  background: #f1f6f4;
+  padding: 18px;
+  border-radius: 10px;
+  margin: 16px 0;
+  font-size: 15px;
+  line-height: 1.8;
+}
+.depth-result p {
+  margin: 8px 0 0;
+}
+#visionRoot[data-chapter='stereo'] .vision-image-pair canvas {
+  height: auto;
+  object-fit: contain;
+}
+#slamCameraChoice {
+  display: block;
+  font-size: 14px;
+  margin: 12px 0;
+}
+#slamCameraChoice[hidden] {
+  display: none;
+}
+#slamCameraMode {
+  display: block;
+  margin: 8px 0;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  font: inherit;
+  max-width: 100%;
+}
+.control-speed {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #647779;
+  white-space: nowrap;
+}
+.control-speed select {
+  font: inherit;
+  color: var(--ink);
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 7px 5px;
+  min-height: 34px;
+}
+.control-graphs .section-top {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.control-compare {
+  font-size: 13px;
+  color: #596e76;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.control-compare input {
+  accent-color: var(--green);
+  width: 17px;
+  height: 17px;
+}
+.control-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  padding: 0 24px;
+  font-size: 13px;
+  color: #556e74;
+}
+.control-chart-legend span:before {
+  content: '';
+  display: inline-block;
+  width: 20px;
+  border-top: 3px solid var(--role-actual);
+  vertical-align: middle;
+  margin-right: 6px;
+}
+.control-chart-legend .target:before {
+  border-top: 2px dashed var(--role-target);
+}
+.control-chart-legend .previous:before {
+  border-top: 2px dotted var(--role-previous);
+}
+/* The recording from the real robot, drawn on the same axes as the simulation
+   (the "measured" role: what the robot measured, see js/core/palette.js). */
+.control-chart-legend .live:before {
+  border-top: 3px solid var(--role-measured);
+}
+.control-live {
+  padding: 22px;
+  margin-top: 16px;
+}
+.control-live h2 {
+  font-size: 17px;
+}
+.control-live > p {
+  font-size: 14px;
+  color: #4d6469;
+}
+.control-live .live-capture {
+  margin-top: 14px;
+}
+.control-live-howto > summary {
+  cursor: pointer;
+  min-height: 44px;
+  padding: 10px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #4d6469;
+}
+.control-live-howto > p {
+  font-size: 14px;
+  color: #4d6469;
+}
+.control-live-after {
+  margin-top: 12px;
+}
+.control-chart {
+  padding: 14px 16px 0;
+}
+.control-chart h3 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 14px;
+  margin: 0 12px;
+}
+.control-chart h3 span {
+  font-weight: 400;
+  color: #61777f;
+}
+.control-chart svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+.control-chart text {
+  font-family: system-ui;
+  font-size: 14px;
+}
+/* Direct labels (今回・前回・目標・出来事) carry their role colour as an attribute. */
+.control-chart text:not([fill]) {
+  fill: #60767e;
+}
+.control-graphs details {
+  padding: 16px 12px 0;
+  margin: 0 16px;
+}
+.control-graphs details > p {
+  padding: 0 12px;
+  font-size: 14px;
+}
+.control-graphs details label {
+  margin-top: 10px;
+}
+.control-graphs summary {
+  font-size: 14px;
+}
+.control-chart-note {
+  padding: 12px 24px 18px;
+  font-size: 14px;
+  color: #5b7279;
+  margin: 0;
+}
+.control-results,
+.control-explanation,
+.control-question,
+.control-history,
+.control-hardware {
+  margin-top: 24px;
+  padding: 26px;
+}
+.control-result-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+.control-result-heading p:not(.eyebrow) {
+  color: #5b737a;
+  font-size: 14px;
+}
+.control-result-heading button {
+  white-space: nowrap;
+}
+.control-result-heading h2 {
+  font-size: 20px;
+}
+.control-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 24px;
+  padding: 18px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.control-metrics span,
+.control-metrics small {
+  display: block;
+  color: #62767a;
+  font-size: 14px;
+  line-height: 1.7;
+}
+.control-metrics strong {
+  display: block;
+  font-size: 26px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  margin: 8px 0;
+}
+.control-metrics small {
+  font-size: 12px;
+}
+.control-result-note {
+  margin: 18px 0 0;
+  font-size: 15px;
+}
+.control-alert {
+  padding: 16px;
+  margin-top: 18px;
+  background: #fff1e8;
+  color: #8f4e2f;
+  border-radius: 8px;
+}
+.control-loop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 24px 0;
+  flex-wrap: wrap;
+}
+.control-loop span {
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: #eff5f2;
+  font-size: 14px;
+}
+.control-loop b {
+  color: #8aa29c;
+  font-weight: 400;
+}
+.control-question label {
+  display: block;
+  margin: 20px 0 10px;
+  font-size: 15px;
+  font-weight: 650;
+}
+.control-question label span {
+  font-weight: 400;
+  font-size: 13px;
+  color: #6a7c81;
+}
+.control-question textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 14px;
+  border: 1px solid #cbd8d9;
+  border-radius: 8px;
+  font: 15px/1.8 inherit;
+  resize: vertical;
+  min-height: 88px;
+}
+.control-question details p {
+  font-size: 15px;
+  color: #3e6862;
+  background: #eff6f1;
+  padding: 16px;
+  border-radius: 8px;
+}
+.control-history summary,
+.control-hardware summary,
+.control-explanation summary,
+.control-question summary {
+  font-size: 15px;
+}
+.control-history p {
+  font-size: 14px;
+  margin-top: 16px;
+}
+.control-table-scroll {
+  overflow: auto;
+}
+.control-history table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 14px;
+}
+.control-history th,
+.control-history td {
+  text-align: left;
+  padding: 12px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+.control-history th {
+  background: #f3f6f5;
+  font-weight: 650;
+}
+.control-hardware-body {
+  margin-top: 22px;
+}
+.control-hardware ol {
+  padding-left: 24px;
+}
+.control-hardware li {
+  padding-left: 4px;
+  margin-bottom: 16px;
+}
+.control-hardware .control-sources {
+  font-size: 14px;
+}
+.control-sources a {
+  color: #317268;
+  text-underline-offset: 3px;
+}
+.control-badges {
+  border-top: 1px solid var(--line);
+  margin-top: 22px;
+  padding-top: 20px;
+}
+.control-badges p {
+  font-size: 13px;
+  margin: 10px 0;
+}
+.control-badges > span {
+  display: block;
+  margin: 8px 0;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 14px;
+  color: #657777;
+}
+.control-badges .achieved {
+  color: #326b62;
+  background: #eaf4ec;
+  border-color: #9fbfaf;
+}
+#controlPage button:focus-visible,
+#controlPage input:focus-visible,
+#controlPage select:focus-visible,
+#controlPage textarea:focus-visible {
+  outline: 3px solid #439fbb;
+  outline-offset: 3px;
+}
+
+@media (max-width: 1050px) {
+  .control-layout {
+    grid-template-columns: minmax(0, 1fr) 290px;
+    gap: 18px;
+  }
+  .control-playbar {
+    flex-wrap: wrap;
+  }
+  .control-playbar input {
+    min-width: 80px;
+  }
+  .control-guide {
+    padding: 22px;
+  }
+}
+@media (max-width: 820px) {
+  .control-layout {
+    grid-template-columns: 1fr;
+  }
+  .control-guide {
+    grid-row: 1;
+  }
+  .control-workspace {
+    grid-row: 2;
+  }
+  .control-results,
+  .control-explanation,
+  .control-question,
+  .control-history,
+  .control-hardware {
+    padding: 22px;
+  }
+  .control-metrics {
+    gap: 16px;
+  }
+  .control-metrics strong {
+    font-size: 23px;
+  }
+}
+@media (max-width: 620px) {
+  .series-courses {
+    grid-template-columns: 1fr;
+  }
+  .control-readings {
+    padding: 16px;
+    gap: 8px;
+  }
+  .control-readings strong {
+    font-size: 16px;
+  }
+  .control-readings span {
+    font-size: 12px; /* --figure-text-min */
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+  }
+  .control-metrics {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+  .control-metrics > div {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+  }
+  .control-metrics small {
+    grid-column: 1 / -1;
+  }
+  .control-metrics strong {
+    font-size: 22px;
+    margin: 0 0 5px;
+  }
+  .control-result-heading {
+    display: block;
+  }
+  .control-result-heading button {
+    margin-bottom: 20px;
+  }
+  .control-playbar {
+    padding: 0 16px 16px;
+  }
+  .control-playbar button {
+    font-size: 13px;
+  }
+  .control-chart {
+    padding: 12px 4px 0;
+  }
+  .control-chart text {
+    font-size: 13px;
+  }
+  .control-chart-legend {
+    gap: 10px;
+    padding: 0 16px;
+    font-size: 12px;
+  }
+  .control-chart h3 {
+    margin: 0 12px;
+  }
+  .control-graphs details {
+    margin: 0 8px;
+    padding: 16px 4px 0;
+  }
+  .control-loop {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 8px;
+  }
+  .control-loop > b:nth-of-type(2) {
+    display: none;
+  }
+  .control-loop span {
+    font-size: 13px;
+    padding: 10px;
+  }
+  .control-question label span {
+    display: block;
+    margin-top: 6px;
+  }
+}
+
+/* Real runs on the control charts, and the comparison table under the chart (js/control/view.js).
+   The legend draws a compared run's or the real command's line with its own dash pattern. */
+.control-chart-legend .swatch:before {
+  display: none;
+}
+.control-legend-swatch {
+  width: 24px;
+  height: 8px;
+  margin-right: 6px;
+  vertical-align: middle;
+  overflow: visible;
+}
+.control-chart-legend .live {
+  overflow-wrap: anywhere;
+}
+.control-live-scale,
+.control-compare-conclusion {
+  margin: 12px 24px 0;
+  padding: 10px 14px;
+  border-left: 4px solid var(--role-measured);
+  background: #f1f5fb;
+  font-size: 14px;
+  line-height: 1.7;
+}
+.control-compare-conclusion {
+  font-size: 15px;
+  font-weight: 600;
+}
+.control-guide > .control-live-jump {
+  margin-top: 10px;
+  font-size: 14px;
+}
+.control-compare-table {
+  margin: 16px 0 0;
+  padding: 0 24px;
+}
+.control-compare-table h3 {
+  font-size: 15px;
+  margin: 0 0 8px;
+}
+.control-compare-table > .helper {
+  margin: 10px 0 0;
+}
+.control-compare-table .control-compare-conclusion {
+  margin: 12px 0 0;
+}
+.control-compare-wide {
+  display: block;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+}
+.control-compare-wide th,
+.control-compare-wide td {
+  border-bottom: 1px solid var(--line);
+  padding: 5px 8px;
+  text-align: left;
+  white-space: nowrap;
+  vertical-align: top;
+}
+.control-compare-wide .control-compare-settings {
+  white-space: normal;
+  min-width: 9em;
+  max-width: 16em;
+  overflow-wrap: anywhere;
+}
+.control-compare-table small {
+  display: block;
+  color: #6a7c81;
+  font-size: 12px;
+}
+.control-compare-table .stale {
+  color: #6a7c81;
+}
+.control-compare-table small.control-compare-stale {
+  color: #8a5a00;
+}
+.control-compare-cards {
+  display: none;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  gap: 10px;
+}
+.control-compare-cards li {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.control-compare-cards h4 {
+  margin: 0;
+  font-size: 15px;
+}
+.control-compare-cards p {
+  margin: 2px 0 8px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.control-compare-cards dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.control-compare-cards dt {
+  font-size: 12px;
+  color: #5d7176;
+}
+.control-compare-cards dd {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.control-compare-cards details {
+  margin-top: 6px;
+  font-size: 13px;
+}
+.control-compare-cards details dl {
+  margin-top: 6px;
+}
+@media (max-width: 620px) {
+  .control-compare-wide {
+    display: none;
+  }
+  .control-compare-cards {
+    display: grid;
+  }
+  .control-compare-table {
+    padding: 0 16px;
+  }
+  .control-live-scale,
+  .control-compare-conclusion {
+    margin-left: 16px;
+    margin-right: 16px;
+  }
+}
+.control-back-to-live {
+  display: block;
+  margin: 8px 24px 0;
+  font-size: 14px;
+}
+@media (max-width: 620px) {
+  .control-back-to-live {
+    margin: 8px 16px 0;
+  }
+}

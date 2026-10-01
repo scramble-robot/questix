@@ -1,0 +1,685 @@
+/* High-school readability pass: arm-vision-slam (see CONTRIBUTING.md, "Figures and charts"). */
+
+/* ---- Shared by the three courses ------------------------------------------------------- */
+
+/* A reflection answer stays folded until the learner has predicted it (C1). */
+:is(#armPage, #visionPage, #slamPage) .reflection-answer {
+  margin: 14px 0 0;
+}
+:is(#armPage, #visionPage, #slamPage) .reflection-answer > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 8px 16px;
+  border: 1px solid #9cc3b6;
+  border-radius: 999px;
+  background: #f0f7f4;
+  color: #1c5f55;
+  font-weight: 650;
+  cursor: pointer;
+}
+:is(#armPage, #visionPage, #slamPage) .reflection-answer[open] > summary {
+  background: transparent;
+  border-color: transparent;
+  padding-left: 0;
+}
+
+/* ---- Arm ------------------------------------------------------------------------------- */
+
+/* Figure and result on the left, controls on the right; on a phone the four cards are read as
+   figure → main controls → result → details (C3). */
+.arm-main-col,
+.arm-side-col {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-width: 0;
+}
+.arm-result-card .arm-status {
+  border-radius: var(--radius) var(--radius) 0 0;
+  min-height: 0;
+}
+.arm-result-card .arm-status:only-child {
+  border-radius: var(--radius);
+}
+.arm-guide-more:empty {
+  display: none;
+}
+.arm-guide-more > details:first-child,
+.arm-guide-more > .supplement-trigger:first-child {
+  margin-top: 0;
+}
+@media (max-width: 800px) {
+  .arm-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .arm-main-col,
+  .arm-side-col {
+    display: contents;
+  }
+  .arm-figure-card {
+    order: 1;
+  }
+  .arm-guide {
+    order: 2;
+  }
+  .arm-result-card {
+    order: 3;
+  }
+  .arm-guide.arm-guide-more {
+    order: 4;
+  }
+}
+
+/* The key of the side view, in HTML so it stays readable when the canvas is narrow (A1, A3). */
+.arm-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0;
+  padding: 10px 16px 12px;
+  list-style: none;
+  background: #192f3b;
+  color: #d9e6eb;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.arm-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.arm-legend i {
+  display: inline-block;
+  flex: none;
+  width: 24px;
+  height: 0;
+  font-style: normal;
+}
+.arm-key-link1 {
+  border-top: 7px solid #83d7c2;
+  border-radius: 4px;
+}
+.arm-key-link2 {
+  border-top: 7px solid #96b8ed;
+  border-radius: 4px;
+}
+.arm-legend .arm-key-tip {
+  width: 12px;
+  height: 12px;
+  border: 3px solid #f4ede0;
+  border-radius: 50%;
+}
+.arm-key-ghost {
+  border-top: 3px solid #e3eef2aa;
+}
+.arm-key-trail {
+  border-top: 3px dotted #f4ede0;
+}
+.arm-key-projection {
+  border-top: 2px dashed #83d7c2;
+}
+.arm-legend .arm-key-angle {
+  width: 18px;
+  height: 9px;
+  border: 2px solid #96b8ed;
+  border-bottom: 0;
+  border-radius: 9px 9px 0 0;
+}
+.arm-legend .arm-key-reach {
+  height: 12px;
+  border: 1px solid #83d7c2;
+  border-radius: 6px;
+  background: #497f7088;
+}
+.arm-legend :is(.arm-key-target, .arm-key-contact) {
+  width: auto;
+  height: auto;
+  font-weight: 700;
+}
+.arm-key-target::before {
+  content: '⊕';
+  color: #f3d68b;
+}
+.arm-key-contact::before {
+  content: '✕';
+  color: var(--scene-role-danger);
+}
+.arm-legend .arm-key-post {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #8a6f64;
+}
+.arm-key-axis-x {
+  border-top: 3px solid #e5484d;
+}
+.arm-key-axis-y {
+  border-top: 3px solid #2fa84f;
+}
+.arm-key-axis-z {
+  border-top: 3px solid #3b82f6;
+}
+.arm-key-drop {
+  border-top: 2px dashed #f1dca7;
+}
+.arm-legend .arm-key-number,
+.arm-joint-dot {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 3px solid var(--joint-color, #9bb4bb);
+  border-radius: 50%;
+  background: #f4f8f9;
+  color: #10252f;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 1;
+}
+.arm-legend .arm-key-number {
+  width: 22px;
+}
+.arm-joint-dot {
+  margin-right: 8px;
+  vertical-align: middle;
+}
+.arm-angle-label > span {
+  display: inline-flex;
+  align-items: center;
+}
+.arm-calculation strong {
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+.arm-calculation > div > span {
+  flex: none;
+}
+.arm-playbar {
+  border-top: 1px solid var(--line);
+}
+@media (max-width: 600px) {
+  .arm-legend {
+    padding: 8px 12px 10px;
+  }
+  .arm-readings dt {
+    font-size: 12px;
+  }
+  .arm-view-head > span {
+    white-space: normal;
+  }
+}
+
+/* ---- Vision ---------------------------------------------------------------------------- */
+
+.vision-result {
+  overflow: hidden;
+}
+.vision-result .vision-reading:empty {
+  display: none;
+}
+.vision-result:has(.vision-reading:empty):has(.vision-pixel[hidden]) {
+  display: none;
+}
+/* The images get a frame, so an over-exposed white picture still reads as a picture (V4). */
+.vision-image-pair canvas {
+  outline: 1px solid #b9c9c6;
+  outline-offset: -1px;
+}
+.vision-pending {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 14px;
+}
+.vision-pending strong {
+  font-size: 15px;
+}
+/* Figure guide above the images: read before looking, and the controls follow the images. */
+.vision-scene > .figure-guide {
+  border-top: 0;
+  border-bottom: 1px solid #e0e8e6;
+}
+
+/* Colour bar of a depth image in metres, and the hatch of "not measured" (V3); also used by the
+   SLAM camera view. */
+.depth-color-key {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  padding: 0 24px 18px;
+  font-size: 13px;
+  color: #3d5660;
+}
+.depth-color-key strong {
+  font-size: 13px;
+}
+.depth-color-scale {
+  position: relative;
+}
+.depth-color-bar {
+  height: 14px;
+  border-radius: 3px;
+}
+.depth-color-ticks {
+  position: relative;
+  height: 18px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.depth-color-ticks span {
+  position: absolute;
+  top: 2px;
+  transform: translateX(-50%);
+}
+.depth-color-ticks span::before {
+  content: '';
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  height: 5px;
+  border-left: 1px solid #3d5660;
+}
+.depth-color-ends {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+}
+.depth-color-missing {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.depth-color-missing i {
+  display: inline-block;
+  width: 26px;
+  height: 14px;
+  border-radius: 3px;
+  background: repeating-linear-gradient(-45deg, #969fa8 0 2px, #2d333e 2px 6px);
+}
+
+/* Brightness histogram: now (filled) against the reference (dotted), labels in HTML (V5). */
+.vision-histogram-figure {
+  margin: 16px 0 8px;
+}
+.vision-histogram-figure figcaption {
+  font-size: 14px;
+  font-weight: 650;
+  margin-bottom: 8px;
+}
+.vision-histogram-plot {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: stretch;
+}
+.vision-histogram-y {
+  writing-mode: vertical-rl;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+}
+.vision-histogram-figure .vision-histogram {
+  width: 100%;
+  height: 140px;
+  max-height: none;
+  margin: 0;
+}
+.vision-histogram-x {
+  display: flex;
+  justify-content: space-between;
+  margin-left: 26px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.vision-histogram-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+.vision-histogram-key li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.vision-histogram-key i {
+  display: inline-block;
+  width: 18px;
+  height: 12px;
+}
+.vision-histogram-key .key-now {
+  background: var(--role-measured);
+}
+.vision-histogram-key .key-before {
+  height: 0;
+  border-top: 2px dotted #6d7c83;
+}
+.vision-histogram-key .key-clipped {
+  background: linear-gradient(to right, #f6d5d2 30%, var(--role-danger) 30% 70%, #f6d5d2 70%);
+}
+.vision-histogram-readout {
+  font-size: 14px !important;
+}
+/* The three kinds of box of the region search, as drawn in the image (V6). */
+.vision-region-key span,
+.vision-region-list span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.vision-region-key i {
+  display: inline-block;
+  width: 18px;
+  height: 12px;
+  border: 2px solid currentColor;
+}
+.vision-region-key [data-kind='correct'] i {
+  color: #13875f;
+}
+.vision-region-key [data-kind='extra'] i {
+  color: #c2379a;
+  border-style: dashed;
+}
+.vision-region-key [data-kind='missed'] i {
+  color: #b8860b;
+  border-style: dotted;
+}
+.vision-region-list [data-kind='correct'] {
+  box-shadow: inset 3px 0 #13875f;
+}
+.vision-region-list [data-kind='extra'] {
+  box-shadow: inset 3px 0 #c2379a;
+}
+/* On a phone: images → main controls → result → evidence (C3, V2, V18). */
+@media (max-width: 900px) {
+  .vision-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .vision-layout > .vision-workspace {
+    display: contents;
+  }
+  .vision-layout .vision-scene {
+    order: 1;
+  }
+  .vision-layout > .guide {
+    order: 2;
+  }
+  .vision-layout .vision-result {
+    order: 3;
+  }
+  .vision-layout .vision-evidence {
+    order: 4;
+  }
+}
+/* Images one above the other, full width, on a phone (V2). */
+@media (max-width: 600px) {
+  .vision-image-pair {
+    grid-template-columns: 1fr;
+    gap: 14px;
+    padding: 14px 16px;
+  }
+  .vision-image-pair figcaption {
+    font-size: 14px;
+    margin-bottom: 8px;
+  }
+  .vision-image-pair figcaption span {
+    font-size: 12px;
+  }
+  .vision-pending {
+    padding: 14px;
+  }
+  /* Stacked, the images of the moving chapters need not be squeezed to 115 px: at full width
+     their overlays (widths in px, the lost-line band) stay readable. */
+  .vision-scene:has(.vision-motion:not([hidden])) .vision-image-pair canvas {
+    height: auto;
+  }
+}
+
+/* ---- SLAM ------------------------------------------------------------------------------ */
+
+#slamPage .basics-result {
+  overflow: hidden;
+}
+#slamPage .basics-result #slamFigureGuide:empty {
+  display: none;
+}
+/* On a phone: figure → controls → what was calculated → evidence (S1, C3). The RL course uses
+   the same class names, so every rule here is scoped to the SLAM page. */
+@media (max-width: 900px) {
+  #slamPage .basics-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  #slamPage .basics-workspace {
+    display: contents;
+  }
+  #slamPage .basics-visual {
+    order: 1;
+  }
+  #slamPage .basics-guide {
+    order: 2;
+  }
+  #slamPage .basics-result {
+    order: 3;
+  }
+  #slamPage .basics-evidence {
+    order: 4;
+  }
+  #slamPage .pose-comparison {
+    grid-template-columns: 1fr;
+  }
+}
+/* The mechanism figures are drawn in a 680-unit viewBox. Shrunk into a phone, their 14-unit
+   labels would be 7 px, so the labels grow as the figure narrows (≥ 12 px on screen; S1). */
+#basicsFigure {
+  container-type: inline-size;
+}
+@container (max-width: 460px) {
+  #basicsFigure > svg text {
+    font-size: 25px !important;
+  }
+}
+@container (min-width: 461px) and (max-width: 700px) {
+  #basicsFigure > svg text {
+    font-size: 18px !important;
+  }
+}
+
+/* HTML-labelled line chart (js/core/html-chart.js; SLAM and motor courses): the SVG stretches, the
+   text stays at its size (S2, S3). */
+.html-chart {
+  margin: 12px 0 4px;
+  padding: 0 4px 0 0;
+}
+.html-chart-y-title,
+.html-chart-x-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #3d5660;
+}
+.html-chart-x-title {
+  text-align: center;
+  margin-top: 26px;
+}
+.html-chart-area {
+  position: relative;
+  height: 200px;
+  margin: 10px 0 0 42px;
+  border-left: 1px solid #8fa3a8;
+  border-bottom: 1px solid #8fa3a8;
+}
+.html-chart-area > svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.html-chart-area > span {
+  position: absolute;
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.html-chart-tick-y {
+  right: calc(100% + 6px);
+  transform: translateY(-50%);
+  color: #587079;
+}
+.html-chart-tick-x {
+  top: calc(100% + 5px);
+  transform: translateX(-50%);
+  color: #587079;
+}
+.html-chart-line-label {
+  transform: translate(-100%, -115%);
+  font-weight: 700;
+  background: #ffffffd9;
+  padding: 0 3px;
+  border-radius: 3px;
+}
+.html-chart-hline-label {
+  left: 4px;
+  transform: translateY(-115%);
+  font-weight: 700;
+}
+.html-chart-vline-label {
+  top: 2px;
+  transform: translateX(4px);
+  font-weight: 600;
+}
+.html-chart-vline-label.flip {
+  transform: translateX(calc(-100% - 4px));
+}
+.html-chart-band-label {
+  bottom: 4px;
+  transform: translateX(-50%);
+  color: #7a5a06;
+  font-weight: 700;
+  background: #fff6dccc;
+  padding: 0 4px;
+  border-radius: 3px;
+}
+@media (max-width: 600px) {
+  .html-chart-area {
+    height: 180px;
+    margin-left: 36px;
+  }
+}
+
+/* Robot's-eye comparison of the localization chapter: drawing and HTML key (S3). */
+.slam-overlay {
+  display: grid;
+  grid-template-columns: minmax(0, 260px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+}
+.slam-overlay svg {
+  width: 100%;
+  height: auto;
+}
+.slam-overlay-key {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+  font-size: 14px;
+  color: #3d5660;
+}
+.slam-overlay-key i {
+  display: inline-block;
+  width: 26px;
+  height: 0;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+.slam-overlay-key .key-measured {
+  border-top: 3px solid var(--role-measured);
+}
+.slam-overlay-key .key-predicted {
+  border-top: 3px dashed var(--role-plan);
+}
+.slam-chart-title {
+  font-size: 15px;
+  margin: 20px 0 0;
+}
+@media (max-width: 600px) {
+  .slam-overlay {
+    grid-template-columns: 1fr;
+  }
+  .slam-overlay svg {
+    max-width: 280px;
+    margin: 0 auto;
+  }
+}
+
+/* In-chapter tabs look like buttons, not plain text; the open one is filled (V13). */
+:is(#visionPage .vision-subtopics, #slamPage .learning-subtopics) button {
+  border: 1px solid #c3d4d0;
+  background: #fbfdfc;
+  color: #2f4f57;
+}
+:is(#visionPage .vision-subtopics, #slamPage .learning-subtopics) button[aria-pressed='true'] {
+  border-color: var(--green);
+  background: var(--green);
+  color: #fff;
+}
+
+/* The side view of the distance chapter and the top view of the stereo chapter are 640 units
+   wide; their labels grow as they narrow so they stay at 12 px or more. */
+.vision-world-diagram,
+.depth-diagram {
+  container-type: inline-size;
+}
+@container (max-width: 460px) {
+  :is(.vision-world-diagram, .depth-diagram) svg text {
+    font-size: 26px !important;
+  }
+}
+@container (min-width: 461px) and (max-width: 700px) {
+  :is(.vision-world-diagram, .depth-diagram) svg text {
+    font-size: 18px !important;
+  }
+}
+
+/* Capture chapter on a phone: a small copy of the changed image stays at the top of the controls
+   card while the sliders below it move (js/vision/basics-view.js captureControls). */
+.vision-preview {
+  display: none;
+}
+@media (max-width: 600px) {
+  .vision-preview {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    position: sticky;
+    top: 8px;
+    z-index: 2;
+    margin: 8px 0 12px;
+    padding: 8px;
+    border-radius: 10px;
+    background: #10252c;
+    color: #e8f0f2;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .vision-preview canvas {
+    width: 150px;
+    height: auto;
+    flex: none;
+    border-radius: 4px;
+    image-rendering: pixelated;
+  }
+}

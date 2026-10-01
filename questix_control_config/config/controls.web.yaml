@@ -1,0 +1,59 @@
+# QUESTiX operator controls for the browser controller (controller_type=web, web_joy_driver).
+# Same Switch2-native indices as UART, but the web page only sends what it shows:
+#   「移動」left stick = axes 0 (left/right) / 1 (forward/back), right stick = axes 3 (turn) / 4,
+#   「ショット」TILT ▲ = button 4, FIRE = button 5, TILT ▼ = button 6, ROLLER = button 7.
+# There is no D-pad on the page, so tilt uses buttons (tilt_*_axis: -1) instead of axis 7.
+# ROS node sections prevent unrelated parameters from leaking between nodes.
+# Signed input ratios reverse direction. Units: linear m/s, angular rad/s.
+# Each tilt direction selects its own axis (-1 uses its button index).
+# axis_sign: +1 = positive half-axis, -1 = negative half-axis; used only in axis mode.
+# Acceleration/taper: 0 disables shaping. max_motor_rpm must be <= 475.
+# Dual-stick and joy_axis_drive sections apply only to their standalone modes.
+# Hardware ports, network settings, timeouts, GPIO safety and lifecycle settings remain in
+# each package (web_joy_driver/config/web_joy_driver_params.yaml for the page server).
+joy_controller:
+  ros__parameters:
+    longitudinal_input_ratio: 2.0
+    lateral_input_ratio: 0.3
+    angular_input_ratio: 6.0
+    linear_x_axis: 1
+    linear_y_axis: 0
+    angular_z_axis: 3
+joy_controller_dual_stick:
+  ros__parameters:
+    longitudinal_input_ratio: 0.05
+    angular_input_ratio: 0.05
+    left_stick_vertical_axis: 1
+    right_stick_vertical_axis: 4
+shot_component:
+  ros__parameters:
+    fire_button: 5
+    tilt_up_axis: -1
+    tilt_up_axis_sign: 1
+    tilt_down_axis: -1
+    tilt_down_axis_sign: -1
+    tilt_up_button_index: 4
+    tilt_down_button_index: 6
+esc_motor_control:
+  ros__parameters:
+    full_speed_button: 7
+    full_speed_value: 1.0
+drive_component:
+  ros__parameters:
+    max_motor_rpm: 475
+    max_linear_accel: 3.0
+    max_angular_accel: 3.0
+    slew_taper_band_linear: 0.2
+    slew_taper_band_angular: 0.2
+    min_command_rpm: 5
+joy_axis_drive:
+  ros__parameters:
+    max_motor_rpm: 100
+    left_axis_index: 1
+    right_axis_index: 4
+    invert_left_axis: false
+    invert_right_axis: true
+# Server-side stick dead zone of the browser sticks (0.0-1.0), applied to every axis.
+web_joy_driver:
+  ros__parameters:
+    deadzone: 0.05

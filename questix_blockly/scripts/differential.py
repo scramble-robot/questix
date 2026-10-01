@@ -10,11 +10,27 @@ FIELDS = ('max_linear_accel', 'max_angular_accel',
           'wheel_separation', 'min_command_rpm')
 
 
+def _ros_parameters(path, node):
+    return yaml.safe_load(Path(path).read_text())[node]['ros__parameters']
+
+
+def drive_parameters():
+    """Drive hardware (wheels) from questix_launcher, operator tuning from the packaged profile.
+
+    Acceleration, taper, deadband and the RPM limit live in questix_control_config's
+    controls.uart.yaml (the robot's default controller); drive_component.yaml keeps the rest.
+    """
+    hardware = Path(get_package_share_directory('questix_launcher')) / 'config/drive_component.yaml'
+    profile = (Path(get_package_share_directory('questix_control_config'))
+               / 'config/controls.uart.yaml')
+    return {**_ros_parameters(hardware, 'drive_component'),
+            **_ros_parameters(profile, 'drive_component')}
+
+
 class DifferentialDrive:
     def __init__(self):
         root = Path(get_package_prefix('questix_blockly')) / 'lib'
-        self.config = yaml.safe_load((Path(get_package_share_directory('questix_launcher')) / 'config/drive_component.yaml')
-                                     .read_text())['drive_component']['ros__parameters']
+        self.config = drive_parameters()
         self.lib = ctypes.CDLL(str(root / 'libquestix_control.so'))
         self.lib.questix_create.argtypes = [ctypes.POINTER(ctypes.c_double)]
         self.lib.questix_create.restype = ctypes.c_void_p
