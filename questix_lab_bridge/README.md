@@ -55,7 +55,7 @@ it is a classroom tool that is switched on from the manager when a lesson needs 
 | `wheel_radius`, `wheel_separation` | `0.1`, `0.5` | Only reported to the page for wheel-odometry lessons. Keep identical to `launcher/config/drive_component.yaml`. |
 | `allow_drive` | `false` | Let pages drive the robot (next section). robot_manager passes `true` while 教材からの走行 is allowed. |
 | `drive_topic` | `/target_twist/lab` | `geometry_msgs/Twist` published for the pages: `twist_arbiter`'s lab input. |
-| `emergency_stop_topic` | `/emergency_stop` | `questix_msgs/EmergencyStop` (reliable, transient local). `/drive_status`'s `emergency_stop` counts too. |
+| `emergency_stop_topic` | `/emergency_stop` | `questix_msgs/EmergencyStop` (reliable, transient local). The only source that makes the E-stop state known: until it has been heard, driving and the launcher are refused (`estop_unknown`) and `GET /api/state` reports `emergency_stop: null`. `/drive_status`'s `emergency_stop` (and the launcher statuses' `estop`) can add a pressed E-stop, never a released one. Empty = never known, so pages never move the robot. |
 | `drive_max_linear`, `drive_max_angular` | `0.3`, `1.0` | Upper bounds [m/s], [rad/s]; faster requests are clamped. |
 | `drive_deadman_sec` | `0.5` | The driving page repeats its command every 0.1 s; silence this long stops the robot. |
 | `drive_max_run_sec` | `30.0` | Longest single run, from its first command to its stop. |
@@ -109,6 +109,7 @@ page sends:
 | Another node publishes `drive_topic` | Refused / running run stopped (`other_publisher`, with the node names). Checked every 0.5 s in the ROS graph. |
 | No node subscribes to `drive_topic` | Refused (`no_drive_node`): no `twist_arbiter` (not a practice launch, or another `ROS_DOMAIN_ID`). |
 | `twist_arbiter` gives the robot to the controller | Stopped (`controller`): the stick moved, or it was held when the run started. |
+| `/emergency_stop` not heard yet | Refused (`estop_unknown`). A released `/drive_status` does not count. |
 | Emergency stop active | Refused / stopped (`emergency_stop`). |
 | Another page drives | Refused (`busy`). Any page may **stop** any run (`{"type":"stop"}`, the stop bar); a page ending its own experiment sends `"scope":"mine"` and cannot end someone else's. |
 | No command for `drive_deadman_sec` | Stopped (`timeout`): closed tab, sleeping laptop, lost Wi-Fi. |
@@ -136,8 +137,8 @@ clamps and fire interval) and report it in their status:
 | `/roller/lab` | `std_msgs/Float32` (0..1) | bridge → `esc_motor_control` |
 | `/shot/lab/tilt` | `std_msgs/Float32` [deg] | bridge → `shot_component` |
 | `/shot/lab/fire` | `std_msgs/Empty` | bridge → `shot_component` |
-| `/roller/status` | `std_msgs/String` JSON `{command, source: joy/lab/idle, lab_accepted, lab_locked, estop, lab_max_speed}` | `esc_motor_control` → bridge, 5 Hz |
-| `/shot/status` | `std_msgs/String` JSON `{tilt_deg, shooting, fired_count, last_fire_source: joy/lab/null, lab_accepted, estop, active, tilt_min_deg, tilt_max_deg, next_fire_in_sec, lab_refused}` | `shot_component` → bridge, 5 Hz and on change |
+| `/roller/status` | `std_msgs/String` JSON `{command, source: joy/lab/idle, lab_accepted, lab_locked, estop, authority, lab_max_speed}` | `esc_motor_control` → bridge, 5 Hz |
+| `/shot/status` | `std_msgs/String` JSON `{tilt_deg, shooting, fired_count, last_fire_source: joy/lab/null, lab_accepted, estop, authority, active, tilt_min_deg, tilt_max_deg, next_fire_in_sec, lab_refused}` | `shot_component` → bridge, 5 Hz and on change |
 
 Both statuses are mirrored to every page (streams `roller`, `shot`) whether or not `allow_shoot` is
 set. The controller always wins: pressing its roller button, or firing, takes the launcher over at
@@ -151,6 +152,7 @@ page sends:
 | `allow_shoot` false | Every request ignored (`hello.shoot.allowed` and `shoot_state.allowed` false); nothing is ever published. |
 | Nobody subscribes to `/roller/lab` or `/shot/lab/fire`, a status is silent for 1 s, says `lab_accepted: false`, or `shot_component` is not `active` | Refused / session ended (`no_launcher`, with `parts`: `roller`, `shot`). Competition launches never accept lab input. |
 | Another node publishes one of the three lab topics | Refused / ended (`other_publisher`, with the node names). Checked every 0.5 s. |
+| `/emergency_stop` not heard yet | Refused (`estop_unknown`); `estop: false` in the statuses does not count. |
 | Emergency stop (`/emergency_stop`, `/drive_status`, or `estop` in either status) | Refused / ended (`emergency_stop`, `parts` naming the source). |
 | Controller in use: `/roller/status` `source: "joy"` now or within the last 1 s, `lab_locked` outside an E-stop, `/shot/status` `lab_locked` (if the node reports it), or a controller shot within the last 1 s | Refused / ended (`controller`). |
 | Another page owns the launcher | Refused (`busy`). Any page may stop the roller (`roller_stop`). |
@@ -213,9 +215,37 @@ Text frames are JSON objects tagged by `type`: `hello` (sent first: protocol ver
 topic per stream, `read_only`, `robot`), `session` (this connection's id), `drive_state` (may a
 page drive now, blockers, owner id, limits, why the last run ended; on every change and once a
 second), `shoot_state` (the same for the launcher), `scan`, `odom`, `drive`, `twist`, `roller`,
-`shot`, and `status` (received rate per stream, once a second).
+`shot`, `estop`, and `status` (received rate per stream, once a second).
 Unmeasured LiDAR beams are `null`, never `0` or a large number. Binary frames are one camera
 image each, exactly as published. See `questix_lab_bridge/messages.py` for the fields.
+
+Wheel telemetry keeps four quantities with their own authority, never recomputed from `drive.v` /
+`drive.w`:
+
+| Quantity | Where | Time |
+| --- | --- | --- |
+| Request | `twist.linear` / `twist.angular` (/target_twist) | `twist.stamp` = the bridge's receipt (Twist has no header) |
+| Generated wheel target | `drive.left/right.target_rpm` | `drive.stamp` (publish time of /drive_status) |
+| Raw measurement | `drive.left/right.rpm_raw` | `drive.left/right.feedback_stamp` |
+| Filtered measurement | `drive.left/right.rpm` | `drive.left/right.feedback_stamp` |
+
+Wheel values keep the motors' **native sign** on the wire and in recordings (left forward +,
+right forward -); only the learner-facing code (`capture-core.js`) makes them forward-positive.
+Each wheel also carries `feedback_stamp` (`null` = no feedback yet), `feedback_age_sec`
+(`drive.stamp - feedback_stamp`, both on drive_component's clock; `null` when unknown or
+negative, never clamped to fresh) and `feedback_valid` (age known and ≤ 0.5 s); `drive` also has
+`bridge_stamp` (its receipt). `drive.emergency_stop` is the node's derived flag, kept for older
+pages.
+
+`estop` is `/emergency_stop` itself, the authoritative E-stop:
+`{"type": "estop", "stamp": <its header stamp, or the receipt if 0>, "bridge_stamp": <receipt>,
+"active": false, "source": "operation_manager", "reason": "released"}`. Every message is passed
+on, and a page that connects gets the last one if it arrived within 1 s. Pages show "released"
+only from this stream: never heard is unknown, silent for 1 s is stale; the derived
+`drive.emergency_stop` may add "pressed" but never makes it released.
+
+The 20 Hz JSON the pages get is teaching data, not every message on the robot: the
+evidence-grade record of a run is Robot Manager's rosbag (MCAP).
 
 `hello.robot` is `{"name": "<robot_name or host name>", "domain": <ROS_DOMAIN_ID as a number, or
 null when unset>}`. `hello.records` is `{"save": <pages may save here now>, "list": true,
@@ -229,11 +259,16 @@ bridge's own caps; the effective limits, narrowed by the nodes' status, are in
 `roller` and `shot` are the status JSON exactly as the node sent it, plus `"type"` and `"stamp"`
 (receipt time [s]):
 `{"type": "roller", "stamp": 12.3, "command": 0.5, "source": "lab", "lab_accepted": true,
-"lab_locked": false, "estop": false}`,
+"lab_locked": false, "estop": false, "authority": true}`,
 `{"type": "shot", "stamp": 12.3, "tilt_deg": 30.0, "shooting": false, "fired_count": 2,
-"last_fire_source": "lab", "lab_accepted": true, "estop": false, "active": true,
-"tilt_min_deg": 0.0, "tilt_max_deg": 120.0, "next_fire_in_sec": 0.0, "lab_refused": null}`
-(`lab_refused`: why shot_component refused the last lab request, e.g. `interval`).
+"last_fire_source": "lab", "lab_accepted": true, "estop": false, "authority": true,
+"active": true, "tilt_min_deg": 0.0, "tilt_max_deg": 120.0, "next_fire_in_sec": 0.0,
+"lab_refused": null}`
+(`lab_refused`: why shot_component refused the last lab request, e.g. `interval` or
+`authority`). `estop` is true while the node treats the E-stop as engaged (pressed, never heard
+or silent); `authority` is false while the teacher's runtime authority for the launcher
+(`/actuation_authority`, practice launches) is off, silent or unknown, a separate reason from
+the E-stop. Both are informational for the bridge: the nodes themselves refuse to move.
 
 `shoot_state` (on every change and once a second; its time fields are exact when sent, count them
 down locally in between):
@@ -251,8 +286,8 @@ down locally in between):
  "last_stop": null}
 ```
 
-`blockers[].code` is one of `not_allowed`, `no_launcher`, `other_publisher`, `emergency_stop`,
-`controller` (display order); `nodes` lists other publishers, `parts` which of `roller` / `shot`
+`blockers[].code` is one of `not_allowed`, `no_launcher`, `other_publisher`, `estop_unknown`,
+`emergency_stop`, `controller` (display order); `nodes` lists other publishers, `parts` which of `roller` / `shot`
 (or `topic` for the E-stop topic) is concerned. `roller.since_sec` is how long the roller has been
 commanded at `min_fire_power` or more (0 otherwise); `spin_ready_in_sec` is `null` while it is
 not. `limits.max_power` / `tilt_min` / `tilt_max` are the effective limits (the bridge's caps
@@ -263,7 +298,14 @@ it, or `null`.
 
 Any page may send `{"type": "record_save", "recording": {...}}` (one frame, up to 8 MiB; the only
 frame larger than 1 kB the bridge accepts) and gets, to itself only, `{"type": "record_saved",
-"id": "<id>"}` or `{"type": "record_error", "message": "<Japanese>"}`.
+"id": "<id>"}` or `{"type": "record_error", "message": "<Japanese>"}`. Every save is answered, in
+the order sent. The bridge keeps at most one save per page and four over all pages in memory
+(about 32 MiB of frames), two of them written at a time; a save over either limit is answered at
+once in its turn with a `record_error` asking to try again, and its frame is not kept. A page that
+is owed eight answers and keeps sending saves is disconnected. A tilt kept back by the 60 ms gap
+is sent only while the session that asked for it still runs. Of the controller driving the bridge
+records itself, at most two finished records are held for writing (one written, one waiting); a
+further one is dropped with a warning, and no ROS callback ever waits for the disk.
 
 Browsers send (all ignored unless `allow_drive` is set):
 

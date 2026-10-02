@@ -70,7 +70,7 @@ ROS2 ロボティクスワークスペースと bash 環境を設定します。
 **主な機能**:
 
 - ロボティクスワークスペースディレクトリの作成
-- bash エイリアスの設定（rw, rs, rb, rt, gpio_status）
+- bash エイリアスの設定（rw, rs, rb, rt, gpio_status。gpio_status は `gpioinfo gpiochip4` で GPIO の線を読むだけ）
 - ROS2 環境変数の設定（ROS_DOMAIN_ID, ROBOT_WS）
 
 **変数**:
@@ -79,7 +79,21 @@ ROS2 ロボティクスワークスペースと bash 環境を設定します。
 - `workspace_path`: ワークスペースのパス（デフォルト: `/home/{{ target_user }}/robot_ws`）
 - `ros_domain_id`: ROS2 ドメイン ID（デフォルト: `42`）
 
-### 5. wifi_access_point
+### 5. ros2_build
+
+QUESTiX のワークスペース（`~/questix`）を、Fresh キットで動く状態までビルドします（`setup_kit.yaml`）。
+
+**場所**: `ansible/roles/ros2_build/`
+
+**主な機能**:
+
+- `dependency.repos` のうち `src/` にないものだけを取り込む（既存のものは更新しない）
+- rosdep の依存を導入し、`colcon build --symlink-install` を実行（ユーザー権限）
+- `questix_lab_bridge`（`lab_bridge_node`）などが解決できることを確かめる。できなければセットアップは失敗する
+
+詳細は `ansible/roles/ros2_build/README.md` を参照してください。
+
+### 6. wifi_access_point
 
 Raspberry Pi の Wi-Fi を QUESTiX 用のアクセスポイントにします（NetworkManager、WPA2-PSK）。
 
@@ -92,6 +106,24 @@ Raspberry Pi の Wi-Fi を QUESTiX 用のアクセスポイントにします（
 - `setup_kit.yaml` では `wifi_ap_enabled: true` のときだけ実行（既定は無効）
 
 詳細は `ansible/roles/wifi_access_point/README.md` を参照してください。
+
+### 8. legacy_privilege_cleanup
+
+旧版の QUESTiX が残した、ロボットのユーザーを root 相当にする設定を取り除きます。`setup_kit.yaml` では最後のロール、`setup_dev.yaml` では root が要る最後の処理として実行します。
+
+**場所**: `ansible/roles/legacy_privilege_cleanup/`（処理は `scripts/cleanup_legacy_privileges.py` の 1 か所だけで、`scripts/install-robot-manager.sh` と `scripts/update-robot-manager.sh` も同じものを使います）
+
+**主な機能**:
+
+- 旧 `.pkla`（`/etc/polkit-1/localauthority/50-local.d/50-questix-robot.pkla`。すべての unit の操作とパスワードなしの pkexec を許していた）を削除
+- 旧 custom image の `/etc/sudoers.d/ubuntu`（`ubuntu ALL=(ALL) NOPASSWD:ALL`）を、次のすべてを満たすときだけ削除
+  - 内容が完全に一致する
+  - ユーザーに既知の初期値（`ubuntu`）ではないパスワードが設定されている
+  - `visudo -c` が前後とも通る
+- `ubuntu` のパスワードがまだ `ubuntu` のとき、ロックされているとき、確かめられないときは、setup を失敗させる（`sudo passwd ubuntu` を求める）
+- 終了コード: 0 = 何もない、1 = 削除するものがある（`--check`）、2 = 管理者の操作が必要
+- それ以外の sudoers（管理者が書いたもの）は残して WARNING を出す
+- 2 回目の実行では何もしません
 
 ## 使用方法
 
@@ -137,7 +169,10 @@ ansible/roles/
 │   ├── tasks/
 │   └── README.md
 ├── ros2_build/
-│   └── tasks/
+│   ├── defaults/
+│   ├── meta/
+│   ├── tasks/
+│   └── README.md
 ├── raspberry_pi_setup/
 │   ├── defaults/
 │   │   └── main.yaml
@@ -174,6 +209,7 @@ ansible/roles/
 2. `raspberry_pi_setup` - 独立して実行可能
 3. `hardware_interfaces` - 独立して実行可能
 4. `robotics_workspace` - `ros2_installation` の後に実行される必要があります
+5. `ros2_build` - `ros2_installation`（colcon / vcstool / rosdep）と `robotics_workspace` の後、`robot_autostart` の前
 
 ## テスト
 

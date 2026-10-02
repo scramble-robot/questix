@@ -21,6 +21,10 @@
       "student": "ロボットの走る準備ができていません。先生に伝えてください。",
       "teacher": "{nodes} も教材用の指令（/target_twist/lab）を出しています。教材ブリッジが2つ動いていないか確かめてください。"
     },
+    "estop_unknown": {
+      "student": "非常停止の状態をまだ確認できません。先生に伝えてください。",
+      "teacher": "ロボットの非常停止の状態（/emergency_stop）がまだ届いていません。operation_manager と GPIO の安全系（ENABLE_GPIO_REF）が動いているか、ROS_DOMAIN_ID が教材の配信と同じかを確かめてください。届くまで教材からは動かせません。"
+    },
     "emergency_stop": {
       "student": "非常停止：押されています。先生と一緒に周りを確かめてから解除してください。"
     },

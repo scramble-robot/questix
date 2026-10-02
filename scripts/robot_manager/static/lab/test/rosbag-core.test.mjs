@@ -73,8 +73,47 @@ test('scans are decimated like the bridge does, and unmeasured beams are null', 
   assert.deepEqual(scan.mount, expected.mount);
 });
 
+// The committed fixture was written before drive_status carried each wheel's feedback time: its
+// wheel stamps are 0, which the contract reads as "no feedback received". A reader today reports
+// that (feedback_valid false) and never takes such a wheel value as a measurement.
+test('a wheel without a feedback stamp is not a measurement, even from a bag', () => {
+  const { streams } = readRosbag(bytes());
+  const moving = streams.drive.find((drive) => drive.v > 0);
+  assert.equal(moving.left.feedback_stamp, null);
+  assert.equal(moving.left.feedback_age_sec, null);
+  assert.equal(moving.left.feedback_valid, false);
+  assert.ok(moving.bridge_stamp > 0); // the bag's receive time
+  const recording = makeRecording({
+    source: 'rosbag',
+    name: 'drive-approach.mcap',
+    recordedAt: new Date(0).toISOString(),
+    config: BAG_DEFAULT_CONFIG,
+    streams,
+  });
+  assert.equal(driveRows(recording).rows.length, 0);
+});
+
+// Without the per-wheel fields (what an older reader produced) the lessons fall back to the
+// chassis velocity: the same numbers as a live recording of that time.
+function legacyWheel(wheel) {
+  const copy = { ...wheel };
+  delete copy.feedback_stamp;
+  return copy;
+}
+const legacy = (bag) => ({
+  ...bag,
+  streams: {
+    ...bag.streams,
+    drive: bag.streams.drive.map((drive) => ({
+      ...drive,
+      left: legacyWheel(drive.left),
+      right: legacyWheel(drive.right),
+    })),
+  },
+});
+
 test('the lessons read the same numbers from a bag as from a live recording', () => {
-  const bag = readRosbag(bytes());
+  const bag = legacy(readRosbag(bytes()));
   const recording = makeRecording({
     source: 'rosbag',
     name: 'drive-approach.mcap',

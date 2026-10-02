@@ -114,8 +114,10 @@ the kit playbook against `localhost`.
    ```
 
    This runs `ansible-playbook ansible/playbooks/setup_kit.yaml` locally and
-   installs ROS 2 Jazzy, enables GPIO/I2C/SPI, applies udev rules, and creates
-   `~/robot_ws`.
+   installs ROS 2 Jazzy, enables GPIO/I2C/SPI, applies udev rules, and
+   builds the QUESTiX workspace (the checkout, e.g. `~/questix`: `dependency.repos`
+   imported into `src/`, rosdep, `colcon build --symlink-install`).
+   It reports the setup as completed only after the QUESTiX packages resolve.
 
 5. **Reboot and verify**
 
@@ -124,8 +126,8 @@ the kit playbook against `localhost`.
    # After logging back in:
    source ~/.bashrc
    ros2 --version
-   gpio_status
-   rw   # cd into ~/robot_ws
+   gpio_status   # list the GPIO lines (read-only, gpiochip4)
+   rw   # cd into the workspace
    ```
 
 ## 📁 Project Structure
@@ -195,6 +197,31 @@ baseline to Lyrical.
 
 The release job is present but disabled; manual dispatch does not publish GitHub releases.
 
+### First boot of a custom image
+
+A QUESTiX custom image has **no initial password** and no passwordless sudo rule:
+
+1. The `ubuntu` account is locked and SSH is disabled.
+2. On the first boot, the console (tty1, a screen and keyboard) asks for a new password for `ubuntu`
+   (`questix-first-boot.service`, `scripts/iso/questix-first-boot-enroll.sh`).
+3. Once it is set, SSH is enabled and the normal login starts. `sudo` asks for that password.
+4. If the enrollment fails or is interrupted, the account stays locked, SSH stays disabled,
+   and the next boot asks again.
+
+The image is built from the checkout that runs `scripts/apply-ansible-config.sh`:
+- That commit is cloned to `/home/ubuntu/questix` (tracked files only, owned by `ubuntu`).
+- The workspace is built there by `ubuntu` (`questix_image_build=true`), so the first boot needs no download.
+- The build fails if the finished tree breaks the first-enrollment policy (`scripts/iso/image-build-lib.sh`).
+
+Robots set up from an older image or installer: `scripts/update-robot-manager.sh`,
+`scripts/install-robot-manager.sh` and the setup playbooks run `scripts/cleanup_legacy_privileges.py`.
+- It removes the legacy polkit `.pkla`.
+- It removes the old image's `/etc/sudoers.d/ubuntu` only when the file is exactly that rule and the
+  user has a safe password.
+- While `ubuntu` still has the old known password `ubuntu`, it stops with exit 2 and asks for
+  `sudo passwd ubuntu`. The update, the installer and the setup stop there too.
+- It exits 0 when clean, 1 when a real run would remove something, and 2 when an operator has to act.
+
 ### Triggers
 
 - **Manual dispatch**: Build and test ISO artifacts
@@ -239,7 +266,7 @@ cw  # Navigate to workspace
 # After installation and reboot
 source ~/.bashrc
 ros2 --version
-gpio_status  # Check GPIO
+gpio_status  # List GPIO lines (read-only, gpiochip4)
 rw  # Navigate to robot workspace
 ```
 

@@ -21,6 +21,7 @@ const SHOOT_BLOCKERS = [
   'not_allowed', // robot_manager has not allowed firing from the lessons
   'no_launcher', // esc_motor_control / shot_component missing or not accepting lab input
   'other_publisher', // something else publishes the launcher's lab topics
+  'estop_unknown', // the bridge has not heard /emergency_stop yet (fail closed)
   'emergency_stop',
   'controller', // the controller uses the launcher (it always wins)
   'busy', // another page operates the launcher

@@ -34,6 +34,17 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
+# Before any change: an unsafe legacy privilege state (e.g. the old custom image's known password
+# with its NOPASSWD:ALL rule) needs an operator first (scripts/cleanup_legacy_privileges.py).
+legacy_state=0
+legacy_report="$(python3 -I "${REPO_DIR}/scripts/cleanup_legacy_privileges.py" --check 2>&1)" \
+  || legacy_state=$?
+if [ "$legacy_state" != 0 ] && [ "$legacy_state" != 1 ]; then
+  echo "$legacy_report" >&2
+  echo "Error: unsafe legacy privilege state; fix it as shown above, then run the installer again." >&2
+  exit 1
+fi
+
 echo "=== Questix Robot Installer ==="
 echo "  User:       ${TARGET_USER}"
 echo "  Workspace:  ${ROBOT_WS}"
@@ -68,6 +79,12 @@ fi
 echo "[2/6] Installing launcher script to /opt/questix_robot/ ..."
 install -d -m 0755 /opt/questix_robot
 install -m 0755 "${REPO_DIR}/systemd/questix_robot_launcher.sh" /opt/questix_robot/
+# QUESTiX Local (Robot Manager 管理設定 → ネットワーク): the root-owned helper and its oneshot unit.
+# The unit has no [Install] section and is never enabled: the access point stays as it is.
+install -o root -g root -m 0755 "${REPO_DIR}/scripts/robot_manager/network_admin.py" \
+  /opt/questix_robot/questix_network_admin.py
+install -o root -g root -m 0644 "${REPO_DIR}/systemd/questix_network_admin.service" \
+  /etc/systemd/system/questix_network_admin.service
 
 # ---------- 3. systemd service (ROS2) ----------
 echo "[3/6] Installing questix_robot.service ..."
@@ -94,20 +111,20 @@ sed -e "s|ubuntu|${TARGET_USER}|g" \
 chmod 0644 /etc/polkit-1/rules.d/50-questix-robot.rules
 echo "  -> /etc/polkit-1/rules.d/50-questix-robot.rules deployed"
 
-# Deploy legacy .pkla rules (Ubuntu 22.04, polkit <0.113)
-if [ -d /etc/polkit-1/localauthority/50-local.d ]; then
-  install -m 0644 \
-    "${REPO_DIR}/systemd/50-questix-robot.pkla" \
-    /etc/polkit-1/localauthority/50-local.d/50-questix-robot.pkla
-  echo "  -> /etc/polkit-1/localauthority/50-local.d/50-questix-robot.pkla deployed"
-fi
+# The JavaScript rules above are the only QUESTiX polkit authority. Older versions also deployed a
+# legacy .pkla (every unit and passwordless pkexec) and old custom images a NOPASSWD:ALL sudoers
+# file: remove what QUESTiX itself wrote (scripts/cleanup_legacy_privileges.py; an
+# administrator's own rules are kept and reported).
+python3 -I "${REPO_DIR}/scripts/cleanup_legacy_privileges.py"
 
 # ---------- 5. Robot Manager Web UI (optional) ----------
 if [ "${INSTALL_GUI}" = true ]; then
   echo "[5/5] Installing Robot Manager Web UI ..."
 
   # Install dependencies
-  apt-get install -y -qq python3-pip > /dev/null 2>&1 || true
+  # dnsmasq-base / iw: the access point's DHCP (NetworkManager's shared mode) and regulatory domain,
+  # for QUESTiX Local in 管理設定. Installing them does not switch the Wi-Fi.
+  apt-get install -y -qq python3-pip dnsmasq-base iw > /dev/null 2>&1 || true
 
   # Copy source and pip install (non-editable). update-robot-manager.sh replaces the copy under
   # /opt/questix_robot instead of copying into an existing directory, which used to nest the new
@@ -120,6 +137,7 @@ if [ "${INSTALL_GUI}" = true ]; then
     -e "s|^User=.*|User=${TARGET_USER}|" \
     -e "s|^Group=.*|Group=${TARGET_USER}|" \
     -e "s|--port [0-9]*|--port ${MANAGER_PORT}|" \
+    -e "s|^Environment=\"QUESTIX_SOURCE_DIR=.*\"|Environment=\"QUESTIX_SOURCE_DIR=${REPO_DIR}\"|" \
     "${REPO_DIR}/systemd/questix_robot_manager.service" > /etc/systemd/system/questix_robot_manager.service
 
   systemctl daemon-reload

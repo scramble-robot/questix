@@ -18,6 +18,10 @@ def lab(tmp_path, monkeypatch):
     monkeypatch.setattr(module, "LOG_FILE", tmp_path / "cache" / "lab-bridge.log")
     # The recorder's rosbag.env (OUTPUT_DIR is passed to the bridge): never the machine's own.
     monkeypatch.setattr(module.recorder, "ROSBAG_ENV_FILE", tmp_path / "rosbag.env")
+    # The teacher has switched the robot's runtime authority on (操作 tab, actuation.py), which a
+    # lesson permission needs; tests of that rule switch it off themselves.
+    monkeypatch.setattr(module.actuation, "_authority", {"drive": True, "launcher": True})
+    monkeypatch.setattr(module.actuation, "_proc", None)
     return module
 
 
@@ -821,7 +825,9 @@ def test_stop_all_switches_both_permissions_off(lab, monkeypatch):
     app_module.lab.set_shoot(app_module.lab.DriveRequest(allow=True))
     answer = app_module.stop_all()
     assert calls == ["lesson", "service"]
-    assert answer["ok"] is True and answer["lab_permissions"]["revoked"] is True
+    # The teacher's runtime authority goes off first and takes both lesson permissions with it.
+    assert answer["ok"] is True and answer["actuation"]["revoked"] == ["drive", "launcher"]
+    assert answer["actuation"]["drive"] is False and answer["actuation"]["launcher"] is False
     status = app_module.lab.get_status()
     assert status["drive_allowed"] is False and status["shoot_allowed"] is False
 

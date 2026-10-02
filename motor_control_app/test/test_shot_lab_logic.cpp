@@ -30,6 +30,7 @@ shot_lab::Conditions ready(double now_sec = 100.0) {
   shot_lab::Conditions c;
   c.accept = true;
   c.estop = false;
+  c.authority = true;
   c.active = true;
   c.shooting = false;
   c.now_sec = now_sec;
@@ -68,6 +69,20 @@ TEST(ShotLabTilt, RefusedDuringEmergencyStop) {
   c.estop = true;
   c.active = false;  // the node tears down on E-stop; the E-stop reason wins
   EXPECT_EQ(shot_lab::decideTilt(c, 45.0, kMinDeg, kMaxDeg).refusal, Refusal::kEmergencyStop);
+}
+
+// The teacher's runtime authority is its own reason, after the E-stop and before the lifecycle.
+TEST(ShotLabTilt, RefusedWithoutTheTeachersAuthority) {
+  auto c = ready();
+  c.authority = false;
+  EXPECT_EQ(shot_lab::decideTilt(c, 30.0, kMinDeg, kMaxDeg).refusal, Refusal::kAuthority);
+  EXPECT_EQ(shot_lab::decideFire(c, -kInf, kInterval), Refusal::kAuthority);
+  c.estop = true;
+  EXPECT_EQ(shot_lab::decideFire(c, -kInf, kInterval), Refusal::kEmergencyStop);
+  c.estop = false;
+  c.active = false;
+  EXPECT_EQ(shot_lab::decideFire(c, -kInf, kInterval), Refusal::kAuthority);
+  EXPECT_STREQ(shot_lab::refusalName(Refusal::kAuthority), "authority");
 }
 
 TEST(ShotLabTilt, RefusedWhenInactive) {
@@ -194,16 +209,18 @@ TEST(ShotLabStatus, JsonHasEveryField) {
   s.last_fire_source = shot_lab::FireSource::kLab;
   s.lab_accepted = true;
   s.estop = false;
+  s.authority = true;
   s.active = true;
   s.tilt_min_deg = 0.0;
   s.tilt_max_deg = 120.0;
   s.next_fire_in_sec = 1.25;
   s.lab_refused = Refusal::kInterval;
-  EXPECT_EQ(shot_lab::statusJson(s),
-            "{\"tilt_deg\": 42.0, \"shooting\": true, \"fired_count\": 3, "
-            "\"last_fire_source\": \"lab\", \"lab_accepted\": true, \"estop\": false, "
-            "\"active\": true, \"tilt_min_deg\": 0.0, \"tilt_max_deg\": 120.0, "
-            "\"next_fire_in_sec\": 1.25, \"lab_refused\": \"interval\"}");
+  EXPECT_EQ(
+      shot_lab::statusJson(s),
+      "{\"tilt_deg\": 42.0, \"shooting\": true, \"fired_count\": 3, "
+      "\"last_fire_source\": \"lab\", \"lab_accepted\": true, \"estop\": false, "
+      "\"authority\": true, \"active\": true, \"tilt_min_deg\": 0.0, \"tilt_max_deg\": 120.0, "
+      "\"next_fire_in_sec\": 1.25, \"lab_refused\": \"interval\"}");
 }
 
 TEST(ShotLabStatus, NullsAndNonFinite) {

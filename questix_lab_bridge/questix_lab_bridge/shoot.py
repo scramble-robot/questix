@@ -12,6 +12,8 @@ Rules, all enforced here and not in the page (the launcher nodes check again on 
   - ``no_launcher``: nobody subscribes to the roller or fire topic, a status topic is silent
     for ``status_timeout_sec``, a status says ``lab_accepted: false`` (the node runs without
     ``accept_lab_input``: a competition launch) or the shot node is not ``active``;
+  - ``estop_unknown``: ``/emergency_stop`` has not been observed yet (``set_estop_known``); the
+    statuses' and ``/drive_status``'s own ``estop: false`` never make it known;
   - ``emergency_stop``: ``/emergency_stop``, ``/drive_status`` or either status says so;
   - ``controller``: the controller uses the launcher (``/roller/status`` ``source: "joy"`` now
     or within ``controller_quiet_sec``, ``lab_locked`` outside an E-stop, ``/shot/status``
@@ -44,9 +46,11 @@ import math
 NOT_ALLOWED = 'not_allowed'
 NO_LAUNCHER = 'no_launcher'
 OTHER_PUBLISHER = 'other_publisher'
+ESTOP_UNKNOWN = 'estop_unknown'  # /emergency_stop not observed yet
 EMERGENCY_STOP = 'emergency_stop'
 CONTROLLER = 'controller'
-BLOCKER_ORDER = (NOT_ALLOWED, NO_LAUNCHER, OTHER_PUBLISHER, EMERGENCY_STOP, CONTROLLER)
+BLOCKER_ORDER = (NOT_ALLOWED, NO_LAUNCHER, OTHER_PUBLISHER, ESTOP_UNKNOWN, EMERGENCY_STOP,
+                 CONTROLLER)
 
 # Refusals of a single request (besides the blockers).
 BUSY = 'busy'  # another page owns the launcher
@@ -98,6 +102,7 @@ class ShootArbiter:
         self._status = {ROLLER: None, SHOT: None}
         self._status_at = {ROLLER: -math.inf, SHOT: -math.inf}
         self._estop_topic = False
+        self._estop_known = False  # /emergency_stop observed (set_estop_known); fail closed
         self._joy_fired_at = -math.inf
         self._joy_roller_at = -math.inf  # /roller/status last said source "joy"
         self._node_fire_ready_at = -math.inf  # /shot/status next_fire_in_sec, as a time
@@ -116,7 +121,10 @@ class ShootArbiter:
         self.lab_fired = 0  # shots fired from the pages since the bridge started
         self.last_stop = None  # {'reason', 'by'} of the session that ended last
         self.version = 0  # bumped on every change the pages should hear about
-        self._update_blockers(0.0)  # nothing heard yet: no_launcher
+        # A session: bumped whenever one starts, so work queued for it (a coalesced tilt) can
+        # tell that its session is over even if the same page starts the next one.
+        self.session = 0
+        self._update_blockers(0.0)  # nothing heard yet: no_launcher, estop_unknown
 
     @property
     def active(self):
@@ -134,6 +142,15 @@ class ShootArbiter:
         """``/emergency_stop`` or ``/drive_status`` (the statuses carry their own ``estop``)."""
         self._estop_topic = bool(active)
         self._update_blockers(now)
+
+    def set_estop_known(self, known, now):
+        """Whether the authoritative ``/emergency_stop`` has been observed (never a derived one)."""
+        self._estop_known = bool(known)
+        self._update_blockers(now)
+
+    def session_token(self):
+        """``(owner, session)`` of the running session, or None: what a queued command belongs to."""
+        return (self.owner, self.session) if self.active else None
 
     def set_roller_status(self, status, now):
         """Feed one ``/roller/status`` JSON object (Contract A); anything else is ignored."""
@@ -227,6 +244,7 @@ class ShootArbiter:
             controller.append(SHOT)
         self._set_blocker(NO_LAUNCHER, missing or None, now)
         self._set_blocker(OTHER_PUBLISHER, self._others or None, now)
+        self._set_blocker(ESTOP_UNKNOWN, None if self._estop_known else True, now)
         self._set_blocker(EMERGENCY_STOP, estop or None, now)
         self._set_blocker(CONTROLLER, controller or None, now)
 
@@ -263,6 +281,7 @@ class ShootArbiter:
     def _begin(self, client, now):
         if self.owner is None:
             self.owner = client
+            self.session += 1
             self._started_at = now
             self.last_stop = None
             self.version += 1
@@ -454,6 +473,53 @@ class ShootArbiter:
             'deadman': self.deadman_sec,
             'seconds': self.max_spin_sec,
         }
+
+
+class TiltCoalescer:
+    """Tilt commands at most every ``gap_sec`` (shot_component refuses closer ones), latest wins.
+
+    A tilt asked for too soon is kept with the session token it was accepted for
+    (:meth:`ShootArbiter.session_token`) and sent later only if that very session still runs and
+    nothing blocks it: a tilt left over from a session that ended (the page left or stopped, a
+    deadman or time limit, a blocker, 「すべて止める」, a new session in its place) is dropped, never
+    sent. :meth:`drop` forgets it at once; the token check covers any path that does not call it.
+    """
+
+    def __init__(self, gap_sec):
+        self.gap_sec = float(gap_sec)
+        self._pending = None  # (degrees, token)
+        self._sent_at = -math.inf
+
+    @property
+    def pending(self):
+        return self._pending
+
+    def request(self, deg, token, now):
+        """Return ``deg`` to publish now, or None when it is kept for :meth:`due`."""
+        if token is None:
+            self._pending = None
+            return None
+        if now - self._sent_at < self.gap_sec:
+            self._pending = (deg, token)
+            return None
+        self._pending = None
+        self._sent_at = now
+        return deg
+
+    def due(self, token, blocked, now):
+        """Return the kept tilt to publish now, or None (none, too soon, or void)."""
+        if self._pending is None or now - self._sent_at < self.gap_sec:
+            return None
+        deg, pending_token = self._pending
+        self._pending = None
+        if token is None or pending_token != token or blocked:
+            return None  # its session is over, another one runs, or something blocks it
+        self._sent_at = now
+        return deg
+
+    def drop(self):
+        """Forget the kept tilt (its session ended)."""
+        self._pending = None
 
 
 def _number(value):

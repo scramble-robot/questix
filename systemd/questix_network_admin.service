@@ -1,0 +1,49 @@
+# QUESTiX Local: applies one access point change requested from Robot Manager (管理設定 →
+# ネットワーク / QUESTiX Local). Robot Manager runs as the robot user and may start only this unit
+# (polkit: 50-questix-robot.rules, verb start). It runs a root-owned copy of
+# scripts/robot_manager/network_admin.py that reads /etc/questix_robot/network_request.json once,
+# validates it and applies it like the wifi_access_point role. It has no install section: it is
+# never enabled and never runs at boot, so installing it does not start the access point.
+# The same file is installed by scripts/install-robot-manager.sh, scripts/update-robot-manager.sh
+# and the Ansible robot_autostart role (no per-kit values in it).
+[Unit]
+Description=QUESTiX Local access point change (Robot Manager)
+After=NetworkManager.service
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/bin/python3 -I /opt/questix_robot/questix_network_admin.py apply
+Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin
+TimeoutStartSec=120
+UMask=0077
+# Sandbox (systemd-analyze security). The helper writes only these three places; NetworkManager,
+# which reads the keyfile, runs outside this sandbox. The lock lives in RuntimeDirectory.
+ProtectSystem=strict
+ReadWritePaths=/etc/questix_robot -/etc/NetworkManager/system-connections -/etc/modprobe.d
+RuntimeDirectory=questix_network_admin
+RuntimeDirectoryMode=0700
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+# nmcli talks to NetworkManager over D-Bus (AF_UNIX); iw and ip use netlink (AF_NETLINK).
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+# Not set yet, to be decided on a Pi 5 (see the PR): CapabilityBoundingSet= (the helper needs at
+# least CAP_NET_ADMIN for `iw reg set`, CAP_DAC_OVERRIDE for the robot user's settings directory
+# and CAP_CHOWN for the settings file's group), MemoryDenyWriteExecute=, SystemCallFilter=.
+# PrivateNetwork= cannot be used: the helper must reach the host's NetworkManager and netlink.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=questix_network_admin

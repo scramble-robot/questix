@@ -44,6 +44,15 @@ def generate_launch_description():
                     'YAML; practice launches only)'
     )
 
+    # 教員の実行時許可（/actuation_authority）がある間だけ発射機構を動かす。questix_core は
+    # 大会起動（enable_autoreferee）で false を渡す。YAML には置かない（ノード既定値も true）。
+    require_authority_arg = DeclareLaunchArgument(
+        'require_runtime_actuation_authority',
+        default_value='true',
+        description='Move the launcher only while the teacher runtime authority is fresh '
+                    '(competition launches pass false)'
+    )
+
     # shot componentノード
     shot_component_node = Node(
         package='motor_control_app',
@@ -56,6 +65,8 @@ def generate_launch_description():
                 'joy_topic': LaunchConfiguration('joy_topic'),
                 'accept_lab_input': ParameterValue(
                     LaunchConfiguration('accept_lab_input'), value_type=bool),
+                'require_runtime_actuation_authority': ParameterValue(
+                    LaunchConfiguration('require_runtime_actuation_authority'), value_type=bool),
             },
         ],
         output='screen'
@@ -66,5 +77,6 @@ def generate_launch_description():
         config_file_arg,
         joy_topic_arg,
         accept_lab_input_arg,
+        require_authority_arg,
         shot_component_node
     ])

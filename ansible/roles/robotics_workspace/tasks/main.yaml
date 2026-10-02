@@ -8,7 +8,9 @@
     owner: "{{ target_user }}"
     group: "{{ target_user }}"
     mode: "0755"
-  become: false
+  # The kit user's own work: as that user also when the playbook runs as root (image build).
+  become: "{{ questix_image_build | default(false) | bool }}"
+  become_user: "{{ target_user }}"
 
 - name: Add ROS2 robotics workspace setup to bashrc
   ansible.builtin.blockinfile:
@@ -22,7 +24,9 @@
       alias rs='cd $ROBOT_WS/src'
       alias rb='cd $ROBOT_WS && colcon build --symlink-install'
       alias rt='cd $ROBOT_WS && colcon test'
-      alias gpio_status='raspi-gpio get'
+      alias gpio_status='gpioinfo {{ gpio_status_chip }}'
     state: present
     create: true
-  become: false
+  # The kit user's own work: as that user also when the playbook runs as root (image build).
+  become: "{{ questix_image_build | default(false) | bool }}"
+  become_user: "{{ target_user }}"

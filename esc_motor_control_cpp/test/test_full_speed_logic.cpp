@@ -194,6 +194,43 @@ TEST(FullSpeedLogicTest, RepeatedNormalCyclesWork) {
   }
 }
 
+// A press held through an E-stop or a lost runtime authority never restarts the roller when it
+// becomes usable again: it needs a release and a new press (the old node code passed a held
+// press as "released" while stopped, which re-armed the latch and restarted on release).
+TEST(FullSpeedLogicTest, HeldPressThroughAnInhibitDoesNotRestart) {
+  auto logic = makeLogic(1.0);
+  EXPECT_TRUE(logic.onButton(true, 0.0).start_full_speed);
+  const auto r_block = logic.onButton(true, 0.1, /*inhibited=*/true);
+  EXPECT_TRUE(r_block.stop);
+  EXPECT_FALSE(logic.isActive());
+  EXPECT_FALSE(logic.onButton(true, 0.2, true).stop);  // still held and inhibited: nothing
+  // Usable again, button still held: ignored.
+  const auto r_held = logic.onButton(true, 0.3);
+  EXPECT_FALSE(r_held.start_full_speed);
+  EXPECT_TRUE(r_held.ignored_press);
+  EXPECT_FALSE(logic.onButton(false, 0.4).start_full_speed);
+  EXPECT_TRUE(logic.onButton(true, 0.5).start_full_speed);
+}
+
+TEST(FullSpeedLogicTest, ReleaseWhileInhibitedStillReArms) {
+  auto logic = makeLogic(1.0);
+  logic.onButton(true, 0.0);
+  EXPECT_TRUE(logic.inhibit().stop);
+  EXPECT_FALSE(logic.onButton(false, 0.1, true).start_full_speed);
+  EXPECT_FALSE(logic.onButton(true, 0.2, true).start_full_speed);  // pressed while inhibited
+  EXPECT_FALSE(logic.onButton(true, 0.3).start_full_speed);        // that press is old
+  logic.onButton(false, 0.4);
+  EXPECT_TRUE(logic.onButton(true, 0.5).start_full_speed);
+}
+
+TEST(FullSpeedLogicTest, InhibitWhileIdleSendsNoStopButNeedsARelease) {
+  auto logic = makeLogic(1.0);
+  EXPECT_FALSE(logic.inhibit().stop);
+  EXPECT_TRUE(logic.onButton(true, 0.0).ignored_press);
+  logic.onButton(false, 0.1);
+  EXPECT_TRUE(logic.onButton(true, 0.2).start_full_speed);
+}
+
 int main(int argc, char** argv) {
   testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

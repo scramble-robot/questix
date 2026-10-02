@@ -1,0 +1,16 @@
+---
+# Contract test: render the wifi_access_point role's own templates into a temp directory, so
+# run_contract_tests.sh can compare them with what the QUESTiX Local helper
+# (scripts/robot_manager/network_admin.py) writes. No become, no NetworkManager, no /etc.
+- name: Render the access point templates
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Render the keyfile and the settings file
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../roles/wifi_access_point/templates/{{ item.src }}"
+        dest: "{{ render_dir }}/{{ item.dest }}"
+        mode: "0600"
+      loop:
+        - { src: questix-ap.nmconnection.j2, dest: keyfile }
+        - { src: wifi_ap.env.j2, dest: settings }

@@ -361,6 +361,29 @@ const DRAWINGS = {
     rect(460, 209, 79, 30, '#386952', 15) +
     text(499, 231, '+10', COLOR.mint, 22, 'middle') +
     arrow(285, 170, 315, 170, COLOR.muted, 2),
+  keymap: () =>
+    // A controller whose numbered inputs are wired to what the robot does.
+    path(
+      'M44 118Q44 86 86 86H214Q256 86 256 118L270 206Q273 234 245 229L205 216H95L55 229Q27 234 30 206Z',
+      COLOR.line,
+      3,
+    ) +
+    circle(108, 176, 22, '#263f4c', COLOR.mint, 3) +
+    circle(192, 176, 22, '#263f4c', COLOR.line, 2) +
+    rect(193, 104, 34, 24, '#3a5360', 7, COLOR.gold) +
+    text(210, 122, '5', COLOR.gold, 17, 'middle') +
+    rect(73, 104, 34, 24, '#3a5360', 7) +
+    text(90, 122, '4', COLOR.muted, 17, 'middle') +
+    text(108, 182, '1', COLOR.mint, 17, 'middle') +
+    text(150, 70, 'ボタンと軸の番号', COLOR.muted, 19, 'middle') +
+    path('M132 176Q240 176 318 124', COLOR.mint, 2, '5 6') +
+    path('M230 116Q280 116 318 196', COLOR.gold, 2, '5 6') +
+    rect(322, 100, 110, 44, '#25463f', 8) +
+    text(377, 129, '前後：軸1', COLOR.mint, 18, 'middle') +
+    rect(322, 176, 110, 44, '#453c2a', 8) +
+    text(377, 205, '発射：5', COLOR.gold, 18, 'middle') +
+    arrow(440, 160, 470, 160, COLOR.muted, 2) +
+    topRobot(522, 160, 0, 0.9),
 };
 
 // `decorative` drops the title, description and ids for small copies next to a visible course

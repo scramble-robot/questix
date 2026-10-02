@@ -22,10 +22,10 @@ const INPUT_DIGITS = 1; // rows of one hold must share the exact same input to b
 const VALUE_DIGITS = 3;
 const MOVING_RPM = 1; // rpm below which the robot counts as standing still
 
-// Forward-positive wheel speed [rpm] for both wheels. The raw per-wheel feedback cannot be used
-// directly (the right motor is mirrored on the wire), so the differential-drive kinematics are
-// inverted from the chassis velocity, which already carries the robot's own sign convention:
-// v_left = v - w*L/2, v_right = v + w*L/2.
+// Forward-positive wheel speed [rpm] for both wheels from the chassis velocity: the
+// differential-drive kinematics inverted, v_left = v - w*L/2, v_right = v + w*L/2. This is the
+// legacy path, for recordings made before the bridge reported each wheel's own values
+// (wheelAuthority below) and for commands (a Twist has no wheels).
 function wheelRpm(drive, config) {
   const toRpm = (speed) => (speed / (2 * Math.PI * config.wheel_radius)) * 60;
   const half = (drive.w * config.wheel_separation) / 2;
@@ -38,6 +38,56 @@ function forwardRpm(metresPerSecond, config) {
   return (metresPerSecond / (2 * Math.PI * config.wheel_radius)) * 60;
 }
 
+// --- each wheel's own values (questix_lab_bridge since the wheel-level telemetry authority) ------
+//
+// /drive_status carries four quantities with their own authority, and they are kept apart:
+//   request            /target_twist (the command; paired by stamp, see driveSamples)
+//   generated target   left/right.target_rpm   (what drive_component asked each wheel for)
+//   raw measurement    left/right.rpm_raw      (unfiltered wire value)
+//   filtered measure   left/right.rpm          (low-pass filtered, as the robot reports it)
+// On the wire every wheel value keeps the motors' native sign: left forward is +, right forward
+// is -. Only here, for the learner, are they made forward-positive (right is negated); the raw
+// JSON and the per-message CSV keep the native values.
+
+/** Whether a /drive_status message reports each wheel's own values (newer bridges). */
+const hasWheelAuthority = (drive) =>
+  Boolean(
+    drive?.left &&
+    drive?.right &&
+    'feedback_stamp' in drive.left &&
+    'feedback_stamp' in drive.right,
+  );
+
+const negate = (value) => (value === 0 ? 0 : -value);
+
+/** Native wheel values (left +, right - forward) as forward-positive for the learner. */
+const forwardWheels = (left, right) => ({ left, right: negate(right) });
+
+/**
+ * A message's wheels, forward-positive: `{valid, target, raw, filtered}` ({left, right} rpm each)
+ * or null for a message without them (then only the legacy wheelRpm path is left). A measurement
+ * whose feedback is not valid (never received, older than the bridge's limit, or of unknown age)
+ * is null: stale feedback describes an earlier moment and is never shown as the current speed.
+ * The target is the node's own and stays known either way.
+ */
+function wheelAuthority(drive) {
+  if (!hasWheelAuthority(drive)) return null;
+  const pair = (key) =>
+    Number.isFinite(drive.left[key]) && Number.isFinite(drive.right[key])
+      ? forwardWheels(drive.left[key], drive.right[key])
+      : null;
+  const valid = drive.left.feedback_valid === true && drive.right.feedback_valid === true;
+  return {
+    valid,
+    target: pair('target_rpm'),
+    raw: valid ? pair('rpm_raw') : null,
+    filtered: valid ? pair('rpm') : null,
+  };
+}
+
+/** The straight-ahead aggregate of forward-positive wheels: their average (NaN without them). */
+const straightRpm = (wheels) => (wheels ? (wheels.left + wheels.right) / 2 : NaN);
+
 function requireConfig(config) {
   if (!config || !(config.wheel_radius > 0) || !(config.wheel_separation > 0))
     throw new Error('ロボットから車輪の寸法を受け取れませんでした。');
@@ -47,6 +97,13 @@ function requireConfig(config) {
  * Normalise raw `{drive, twist}` samples into one row per moment, with the time counted from the
  * first sample. `twist` may be null or older than the drive feedback; then the row has no command
  * (`commandRpm` is NaN) instead of being paired with a command that has already been replaced.
+ *
+ * Each row keeps the four quantities apart (rpm, straight-ahead aggregate): `requestRpm` (the
+ * command, = `commandRpm`), `generatedTargetRpm`, `rawMeasuredRpm` and `filteredMeasuredRpm`
+ * (= `measuredRpm`, what the lessons plot). A message with each wheel's own values
+ * (`authority: 'wheel'`) takes them from there; a row whose wheel feedback is not valid is left
+ * out, as it measures nothing now. An older message (`authority: 'legacy'`) falls back to the
+ * chassis velocity; it has no generated target or raw measurement (NaN).
  */
 function driveSamples(raw, config) {
   requireConfig(config);
@@ -58,20 +115,31 @@ function driveSamples(raw, config) {
     const drive = sample.drive;
     const time = drive.stamp - start;
     if (!(time > previous) && rows.length) continue;
-    if (!Number.isFinite(drive.v) || !Number.isFinite(drive.w)) continue;
+    const wheels = wheelAuthority(drive);
+    if (wheels ? !wheels.filtered : !Number.isFinite(drive.v) || !Number.isFinite(drive.w))
+      continue;
     previous = time;
     const twist = sample.twist;
     const fresh =
       twist && Number.isFinite(twist.linear) && drive.stamp - twist.stamp < COMMAND_FRESH_SECONDS;
+    const commandRpm = fresh ? forwardRpm(twist.linear, config) : NaN;
+    const measuredRpm = wheels ? straightRpm(wheels.filtered) : forwardRpm(drive.v, config);
     rows.push({
       time,
-      measuredRpm: forwardRpm(drive.v, config),
-      commandRpm: fresh ? forwardRpm(twist.linear, config) : NaN,
+      measuredRpm,
+      commandRpm,
+      requestRpm: commandRpm,
+      generatedTargetRpm: wheels ? straightRpm(wheels.target) : NaN,
+      rawMeasuredRpm: wheels ? straightRpm(wheels.raw) : NaN,
+      filteredMeasuredRpm: measuredRpm,
+      authority: wheels ? 'wheel' : 'legacy',
       measuredV: drive.v,
       measuredW: drive.w,
       commandV: fresh ? twist.linear : NaN,
       commandW: fresh ? twist.angular : NaN,
-      wheels: wheelRpm(drive, config),
+      wheels: wheels ? wheels.filtered : wheelRpm(drive, config),
+      rawWheels: wheels ? wheels.raw : null,
+      targetWheels: wheels ? wheels.target : null,
       emergencyStop: Boolean(drive.emergency_stop),
     });
   }
@@ -157,6 +225,9 @@ function commandStart(rows) {
 /**
  * A recording shaped like a simulated control run, so the speed charts can draw it next to the
  * simulation: `time` from the first command (see commandStart), `measured` and `target` in rpm.
+ * `target` is the request (the command, as the simulation's set point); `generatedTarget` (what
+ * drive_component asked the wheels for) and `rawMeasured` come along for recordings with each
+ * wheel's own values (NaN otherwise), so a comparison can use the direct authorities.
  * Samples after `duration` are dropped rather than squeezed, so the time axis keeps its meaning.
  */
 function liveControlRun(rows, duration) {
@@ -167,6 +238,8 @@ function liveControlRun(rows, duration) {
       time: row.time - start,
       measured: row.measuredRpm,
       target: row.commandRpm,
+      generatedTarget: row.generatedTargetRpm ?? NaN,
+      rawMeasured: row.rawMeasuredRpm ?? NaN,
     }))
     .filter((sample) => sample.time >= 0 && sample.time <= duration);
   return { samples, seconds: samples.length ? samples[samples.length - 1].time : 0 };
@@ -422,6 +495,10 @@ export {
   COMMAND_FRESH_SECONDS,
   wheelRpm,
   forwardRpm,
+  hasWheelAuthority,
+  forwardWheels,
+  wheelAuthority,
+  straightRpm,
   driveSamples,
   commandHolds,
   steadyMeasurements,

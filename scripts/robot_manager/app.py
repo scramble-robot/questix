@@ -13,11 +13,13 @@ from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 
-from robot_manager import control_runtime, controls, lab, logs, recorder, ros_domain, wifi_ap
+from robot_manager import (actuation, control_runtime, controls, lab, logs, recorder, ros_domain,
+                           wifi_ap)
 
 CONFIG_DIR = Path(os.environ.get("QUESTIX_CONFIG_DIR", "/etc/questix_robot"))
 MODE_FILE = CONFIG_DIR / "mode"
@@ -68,7 +70,9 @@ async def lifespan(_app: FastAPI):
     manager or of the robot never brings them back (ALLOW_* left in lab.env by an older manager
     are ignored). A practice start
     request left behind (the manager stopped between writing it and the launcher reading it) is
-    removed, so it can never start the robot later.
+    removed, so it can never start the robot later. The teacher's runtime authority for driving
+    and the launcher (actuation.py) is the same kind of session state: off at every start, and
+    switched off (its heartbeat ends) when the manager exits.
 
     A lifespan instead of add_event_handler/on_event: Starlette 1.0 removed the event handlers
     from the application (FastAPI 0.135 no longer offers app.add_event_handler), while lifespan
@@ -79,7 +83,13 @@ async def lifespan(_app: FastAPI):
     try:
         yield
     finally:
+        # The teacher's runtime authority first: its heartbeat publishes an explicit off and the
+        # robot stops, whatever happens to the rest of the shutdown.
+        actuation.shutdown()
         lab.shutdown()
+        # A running recording is stopped with SIGINT (so rosbag2 finalizes the bag) and an
+        # evidence trial's finalize gets a bounded wait (recorder.SHUTDOWN_FINALIZE_TIMEOUT_SEC).
+        recorder.shutdown_recording()
 
 
 app = FastAPI(title="QUESTiX Robot Manager", lifespan=lifespan)
@@ -102,11 +112,17 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["Content-Type"],
 )
+# Added last, so it runs first: only requests addressed to this machine's loopback names are
+# served. A DNS-rebinding page (Host: attacker.example resolving to 127.0.0.1) gets 400 and can
+# neither read GET answers (such as the access point password for the QR codes) nor change
+# anything. SSH port forwarding to http://localhost:<port> keeps working.
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(wifi_ap.LOOPBACK_HOSTS))
 
 app.include_router(recorder.router)
 app.include_router(logs.router)
 app.include_router(lab.router)
 app.include_router(wifi_ap.router)
+app.include_router(actuation.router)
 
 
 @app.middleware("http")
@@ -442,7 +458,13 @@ def get_readiness():
 
 @app.post("/api/mode")
 def set_mode(req: ModeRequest):
-    """Save the next startup mode without restarting the robot."""
+    """Save the next startup mode without restarting the robot.
+
+    Entering either mode switches the teacher's runtime authority off (actuation.py): a practice
+    robot starts every session with driving and the launcher off, and a competition robot never
+    uses it.
+    """
+    authority = actuation.revoke_all(f"mode_{req.mode}")
     previous = _read_mode()
     try:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -470,6 +492,7 @@ def set_mode(req: ModeRequest):
         "running_mode": running,
         # The robot keeps running in its old mode until it is restarted.
         "restart_needed": running is not None and running != req.mode,
+        "actuation": authority,
     }
 
 
@@ -479,8 +502,11 @@ def control_service(action: Literal["start", "stop", "restart"]):
 
     In practice mode a start or restart first writes the start request the launcher needs
     (START_REQUEST_FILE); the answer says whether the practice launch is running afterwards
-    (``ok``, ``message``), never just that systemctl returned.
+    (``ok``, ``message``), never just that systemctl returned. Every action switches the
+    teacher's runtime authority off first (actuation.py): a new launch starts with driving and
+    the launcher off.
     """
+    actuation.revoke_all(f"service_{action}")
     if action == "stop":
         stopped = _stop_service()
         if not stopped["ok"] and stopped["detail"]:
@@ -510,17 +536,22 @@ def control_service(action: Literal["start", "stop", "restart"]):
 def stop_all():
     """「すべて止める」: stop the robot service and end any lesson run and launcher session.
 
-    One request, no confirmation. The lessons get their stop first (it takes well under a second
+    One request, no confirmation. The teacher's runtime authority goes off first (actuation.py:
+    its heartbeat publishes an explicit off, so drive and launcher stop at once, controller
+    included, and the matching lesson permissions go off). The lessons get their stop next (it
+    takes well under a second
     and also covers a robot whose ROS was started by hand), then driving and launching from the
     lessons are switched off (a bridge of ours that had one on is restarted with both off, so the
     pages reconnect after a few seconds and keep serving), then the robot service is stopped. The
     teacher switches the permissions on again for the next run.
     """
+    authority = actuation.revoke_all("stop_all")
     lesson = lab.stop_lesson_motion()
     permissions = lab.revoke_permissions("stop_all")
     service = _stop_service()
     return {"ok": lesson["ok"] and permissions["ok"] and service["ok"], "lab": lesson,
             "lab_permissions": permissions,
+            "actuation": {key: authority[key] for key in ("drive", "launcher", "revoked")},
             "service": {key: service[key] for key in ("ok", "state", "message")}}
 
 

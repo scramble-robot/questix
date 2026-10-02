@@ -1,0 +1,7 @@
+---
+# Default variables for legacy_privilege_cleanup role
+#
+# The one implementation of the cleanup, shared with scripts/install-robot-manager.sh and
+# scripts/update-robot-manager.sh. Skipped (with a message) when the checkout's scripts/ is not
+# next to the playbooks, as in the custom image build, whose fresh image has no such leftovers.
+legacy_privilege_cleanup_script: "{{ playbook_dir }}/../../scripts/cleanup_legacy_privileges.py"

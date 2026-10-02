@@ -13,6 +13,7 @@ This role creates a ROS2 robotics workspace and configures bash environment with
 - `workspace_path`: Path to create workspace (default: `/home/{{ target_user }}/robot_ws`)
 - `bashrc_path`: Path to bashrc file (default: `/home/{{ target_user }}/.bashrc`)
 - `ros_domain_id`: ROS2 domain ID (default: `42`)
+- `gpio_status_chip`: GPIO chip the `gpio_status` alias lists with `gpioinfo` (default: `gpiochip4`, the chip `gpio_reader` reads; read-only)
 
 ## Dependencies
 

@@ -248,7 +248,9 @@ function renderOverview() {
     el.dataset.tone = row.tone;
   }
   document.getElementById('header-robot').textContent = rows.robot.text;
-  document.getElementById('header-estop').hidden = rows.estop.text !== '押されています';
+  const headerEstop = StatusView.headerEstop(rows.estop);
+  document.getElementById('header-estop').dataset.state = headerEstop.state;
+  document.getElementById('header-estop-state').textContent = headerEstop.label;
 }
 
 function updateLaunchConfig(config) {
@@ -411,7 +413,10 @@ async function refreshRecStatus() {
   // Mirror recording state onto the 記録 tab so it is visible from any tab
   document.getElementById("tab-rec-dot").classList.toggle("recording", recording);
   document.getElementById("rec-state-text").textContent = recording ? "記録中" : "記録していません";
+  const trialView = TrialView.status(data);
+  document.getElementById("rec-mode").textContent = trialView.mode;
   document.getElementById("rec-bag-name").textContent = recording ? data.bag_name : "—";
+  renderTrialEvidence(trialView);
   document.getElementById("rec-elapsed").textContent = recording ? fmtDuration(data.elapsed_sec) : "—";
   document.getElementById("rec-size").textContent = recording ? fmtBytes(data.size_bytes) : "—";
 
@@ -428,8 +433,12 @@ async function refreshRecStatus() {
   fill.classList.toggle("low", low);
 
   // Buttons
-  document.getElementById("rec-start").disabled = recording || low;
+  // `starting` also covers the after-run parameter capture of the last evidence recording.
+  const busy = recording || Boolean(data.starting);
+  document.getElementById("rec-start").disabled = busy || low;
   document.getElementById("rec-stop").disabled = !recording;
+  document.getElementById("rec-trial-mode").disabled = busy;
+  for (const input of document.querySelectorAll("[data-trial]")) input.disabled = busy;
 
   // Notify once when an auto-stop happened
   if (!recording && data.last_stop_reason === "auto_stopped_low_disk" &&
@@ -437,6 +446,74 @@ async function refreshRecStatus() {
     toast("ディスクの空き容量が足りないため、記録を自動で停止しました", "error");
   }
   lastStopReasonShown = data.last_stop_reason;
+}
+
+// The running 証拠付き記録, or the last one's verdict (TrialView.status).
+function renderTrialEvidence(view) {
+  const box = document.getElementById("trial-evidence");
+  box.hidden = view.rows.length === 0;
+  if (box.hidden) return;
+  document.getElementById("trial-evidence-heading").textContent = view.heading;
+  const badge = document.getElementById("trial-evidence-badge");
+  badge.className = "evidence-badge " + view.badge.state;
+  badge.textContent = view.badge.text;
+  const rows = document.getElementById("trial-evidence-rows");
+  rows.replaceChildren(...view.rows.map(([label, value]) => {
+    const row = document.createElement("div");
+    row.className = "rec-status-row";
+    const name = document.createElement("span");
+    name.className = "rec-status-label";
+    name.textContent = label;
+    const text = document.createElement("span");
+    text.className = "rec-status-value";
+    text.textContent = value;
+    row.append(name, text);
+    return row;
+  }));
+  const list = document.getElementById("trial-warnings");
+  list.hidden = view.warnings.length === 0;
+  list.replaceChildren(...view.warnings.map((warning) => {
+    const item = document.createElement("li");
+    item.textContent = warning;
+    return item;
+  }));
+}
+
+// The 証拠付き記録 form, one input per TrialView.FIELDS entry (the API accepts nothing else).
+function buildTrialFields() {
+  const grid = document.getElementById("trial-fields");
+  grid.replaceChildren(...TrialView.FIELDS.map((field) => {
+    const item = document.createElement("div");
+    item.className = "config-item trial-field" + (field.wide ? " wide" : "");
+    const label = document.createElement("label");
+    label.htmlFor = `trial-${field.key}`;
+    label.textContent = field.label;
+    const input = document.createElement("input");
+    input.id = `trial-${field.key}`;
+    input.dataset.trial = field.key;
+    input.autocomplete = "off";
+    if (field.kind === "number") {
+      input.type = "number";
+      input.inputMode = "decimal";
+      input.min = "0";
+      input.max = String(field.max);
+      input.step = "any";
+    } else {
+      input.type = "text";
+      // No pattern attribute: TrialView.metadata checks the IDs before sending (the browser's
+      // v-flag pattern syntax differs from Python's re).
+      input.maxLength = field.max || (field.pattern === TrialView.ID_PATTERN ? 64 : 32);
+    }
+    if (field.placeholder) input.placeholder = field.placeholder;
+    item.append(label, input);
+    return item;
+  }));
+}
+
+function trialValues() {
+  const values = {};
+  for (const input of document.querySelectorAll("[data-trial]")) values[input.dataset.trial] = input.value;
+  return values;
 }
 
 async function refreshRecConfig() {
@@ -731,10 +808,31 @@ function setupFolderPickerEvents() {
 
 function setupRecorderEvents() {
   setupFolderPickerEvents();
+  buildTrialFields();
+  const trialMode = document.getElementById("rec-trial-mode");
+  trialMode.addEventListener("change", () => {
+    document.getElementById("trial-form").hidden = !trialMode.checked;
+    document.getElementById("rec-start").textContent = TrialView.startLabel(trialMode.checked);
+  });
+
   document.getElementById("rec-start").addEventListener("click", async () => {
+    let request = { method: "POST" };
+    let path = "/api/rosbag/start";
+    if (trialMode.checked) {
+      const { body, errors } = TrialView.metadata(trialValues());
+      if (errors.length) {
+        toast(errors[0], "error");
+        return;
+      }
+      path = "/api/rosbag/start-trial";
+      request = { method: "POST", body: JSON.stringify(body) };
+    }
     try {
-      const data = await api("/api/rosbag/start", { method: "POST" });
-      toast(`記録を開始しました: ${data.bag_name}`, "success");
+      const data = await api(path, request);
+      toast(TrialView.startedText(data), "success");
+      // The evidence box under the status lists them while the recording runs.
+      const warnings = (data.warnings || []).length;
+      if (warnings) toast(`証拠付き記録の注意が ${warnings} 件あります（記録カードに表示）`, "error");
       await refreshRecStatus();
     } catch {
       // already toasted
@@ -873,6 +971,166 @@ async function refreshAccessPoint() {
   }
   renderJoinQr();
   suggestWebJoyUrl();
+  renderNetwork();
+}
+
+// ---------------------------------------------------------------------------
+// 管理設定: ネットワーク / QUESTiX Local (texts: network-view.js; changes: wifi_ap.py → helper)
+// ---------------------------------------------------------------------------
+
+const network = { passwordShown: false, formLoaded: false, polling: false, lastJob: "" };
+
+function renderNetwork() {
+  const ap = joinQr.accessPoint;
+  const view = NetworkView.summary(ap);
+  document.getElementById("net-status").dataset.state = view.state;
+  document.getElementById("net-state").textContent = view.label;
+  document.getElementById("net-text").textContent = view.text;
+  const facts = document.getElementById("net-facts");
+  facts.replaceChildren(...NetworkView.facts(ap).flatMap(([label, value]) => {
+    const dt = document.createElement("dt");
+    dt.textContent = label;
+    const dd = document.createElement("dd");
+    dd.textContent = value;
+    return [dt, dd];
+  }));
+  const configured = Boolean(ap && ap.configured);
+  document.getElementById("net-password-row").hidden = !configured;
+  document.getElementById("net-password").textContent = NetworkView.passwordText(ap, network.passwordShown);
+  const show = document.getElementById("net-password-show");
+  show.textContent = network.passwordShown ? "隠す" : "表示";
+  show.setAttribute("aria-pressed", String(network.passwordShown));
+  const notice = document.getElementById("net-notice");
+  notice.textContent = view.notice;
+  notice.hidden = !view.notice;
+  notice.dataset.tone = view.tone;
+  document.getElementById("net-start").disabled = !view.canStart;
+  document.getElementById("net-stop").disabled = !view.canStop;
+  document.getElementById("net-save").disabled = !view.canSave;
+  document.getElementById("net-password-new").disabled = !view.canRegenerate;
+  const tech = document.getElementById("net-tech");
+  const rows = configured ? [
+    ["国の設定", ap.country || "JP"],
+    ["アドレス", ap.address && ap.prefix ? `${ap.address}/${ap.prefix}` : "—"],
+    ["SSH（同じ Wi-Fi の PC から）", ap.ssh || "—"],
+    ["教材の URL", ap.lab_url || "—"],
+  ] : [];
+  tech.replaceChildren(...rows.flatMap(([label, value]) => {
+    const dt = document.createElement("dt");
+    dt.textContent = label;
+    const dd = document.createElement("dd");
+    dd.textContent = value;
+    return [dt, dd];
+  }));
+  if (!network.formLoaded && ap) fillNetworkForm(ap);
+  if (view.state === "applying") pollNetworkJob();
+}
+
+function fillChannelOptions(band, selected) {
+  const select = document.getElementById("net-channel");
+  const channels = NetworkView.channelOptions(band).map(String);
+  if (selected && selected !== "auto" && !channels.includes(String(selected))) channels.push(String(selected));
+  select.replaceChildren(new Option("自動（周囲を調べて空いているものを選ぶ）", "auto"),
+    ...channels.map((channel) => new Option(`${channel} ch`, channel)));
+  select.value = selected && channels.includes(String(selected)) ? String(selected) : "auto";
+}
+
+function fillNetworkForm(ap) {
+  const configured = Boolean(ap.configured);
+  document.getElementById("net-ssid").value = configured ? ap.ssid : "";
+  document.getElementById("net-ssid").placeholder = configured ? "" : "QUESTiX-（機体ごとに自動）";
+  document.getElementById("net-password-input").value = "";
+  const band = configured && ap.band === "a" ? "a" : "bg";
+  document.getElementById("net-band").value = band;
+  fillChannelOptions(band, configured ? ap.channel : "auto");
+  const custom = configured && ap.address && ap.address !== "10.42.0.1";
+  document.getElementById("net-address-auto").checked = !custom;
+  document.getElementById("net-address-manual").checked = Boolean(custom);
+  document.getElementById("net-address").value = custom ? `${ap.address}/${ap.prefix}` : "";
+  network.formLoaded = true;
+}
+
+function networkForm() {
+  return {
+    ssid: document.getElementById("net-ssid").value,
+    password: document.getElementById("net-password-input").value,
+    band: document.getElementById("net-band").value,
+    channel: document.getElementById("net-channel").value,
+    addressMode: document.getElementById("net-address-manual").checked ? "manual" : "auto",
+    address: document.getElementById("net-address").value,
+  };
+}
+
+// While a change runs, follow it once a second; afterwards refresh the card and the QR codes.
+async function pollNetworkJob() {
+  if (network.polling) return;
+  network.polling = true;
+  try {
+    for (;;) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      let job;
+      try { job = await apiSilent("/api/wifi-ap/job"); } catch { continue; }
+      if (job.state !== "running") {
+        const key = `${job.id}:${job.state}`;
+        if (key !== network.lastJob) {
+          network.lastJob = key;
+          const text = [job.message, job.lab_message].filter(Boolean).join(" ");
+          if (text) toast(text, job.state === "failed" ? "error" : "success");
+        }
+        network.formLoaded = false;
+        break;
+      }
+    }
+  } finally {
+    network.polling = false;
+  }
+  await refreshAccessPoint();
+  refreshLabStatus();
+}
+
+async function networkChange(path, method, body, action) {
+  if (!confirm(NetworkView.confirmText(action, joinQr.accessPoint))) return;
+  for (const id of ["net-start", "net-stop", "net-save", "net-password-new"]) {
+    document.getElementById(id).disabled = true;
+  }
+  try {
+    // Always a JSON body ({} for start / stop / new password): the manager refuses a network
+    // change without Content-Type: application/json (wifi_ap.py _browser_mutation_guard).
+    const job = await api(path, { method, body: JSON.stringify(body || {}) });
+    if (joinQr.accessPoint) joinQr.accessPoint.job = job;
+    network.passwordShown = false;
+    renderNetwork();
+    pollNetworkJob();
+  } catch {
+    refreshAccessPoint();
+  }
+}
+
+function setupNetworkEvents() {
+  document.getElementById("net-start").addEventListener("click", () =>
+    networkChange("/api/wifi-ap/start", "POST", null, "start"));
+  document.getElementById("net-stop").addEventListener("click", () =>
+    networkChange("/api/wifi-ap/stop", "POST", null, "stop"));
+  document.getElementById("net-password-new").addEventListener("click", () =>
+    networkChange("/api/wifi-ap/regenerate-password", "POST", null, "regenerate"));
+  document.getElementById("net-password-show").addEventListener("click", () => {
+    network.passwordShown = !network.passwordShown;
+    renderNetwork();
+  });
+  document.getElementById("net-band").addEventListener("change", (event) => {
+    fillChannelOptions(event.target.value, "auto");
+  });
+  document.getElementById("net-address").addEventListener("input", () => {
+    document.getElementById("net-address-manual").checked = true;
+  });
+  document.getElementById("net-save").addEventListener("click", () => {
+    const { body, error } = NetworkView.configChanges(networkForm(), joinQr.accessPoint);
+    if (error) {
+      toast(error, "error");
+      return;
+    }
+    networkChange("/api/wifi-ap/config", "PUT", body, "save");
+  });
 }
 
 function labUrlForPhones() {
@@ -1299,8 +1557,74 @@ function setupEvents() {
 // Init
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// The teacher's runtime authority (操作 tab, /api/actuation)
+// ---------------------------------------------------------------------------
+
+let actuationPending = false;
+
+function renderActuation(data) {
+  const names = { drive: 'ロボットの走行制御', launcher: '発射機構の操作' };
+  for (const kind of ['drive', 'launcher']) {
+    const toggle = document.getElementById(`actuation-${kind}-toggle`);
+    toggle.checked = Boolean(data && data[kind]);
+    toggle.disabled = actuationPending || !data || (data.competition && !data[kind]);
+    document.getElementById(`actuation-${kind}-state`).textContent =
+      !data ? '（確認できません）' : data[kind] ? 'ON：動かせます' : 'OFF：動きません';
+  }
+  const state = document.getElementById('actuation-state');
+  if (!data) {
+    state.textContent = '許可の状態を確認できません。ロボットは許可がない間は動きません。';
+  } else if (data.competition) {
+    state.textContent = '大会モードでは使いません（大会用の起動は非常停止と AutoReferee で動きます）。';
+  } else if (data.drive || data.launcher) {
+    const on = ['drive', 'launcher'].filter((kind) => data[kind]).map((kind) => names[kind]);
+    state.textContent = `${on.join('・')}を許可しています（約 ${data.heartbeat_hz} 回/秒 送信中）。`;
+  } else {
+    state.textContent = '走行も発射も許可していません。練習で動かすときに ON にしてください。';
+  }
+  const error = document.getElementById('actuation-error');
+  error.textContent = data?.error || '';
+  error.hidden = !data?.error;
+}
+
+async function refreshActuation() {
+  try {
+    renderActuation(await apiSilent('/api/actuation/status'));
+  } catch {
+    renderActuation(null);
+  }
+}
+
+async function setActuation(kind, allow) {
+  actuationPending = true;
+  try {
+    renderActuation(await api(`/api/actuation/${kind}`, {
+      method: 'POST', body: JSON.stringify({ allow }),
+    }));
+    toast(allow ? 'ON にしました' : 'OFF にしました（教材からの同じ操作も OFF です）', 'success');
+  } catch {
+    // api() already said why; show what really holds now.
+  } finally {
+    actuationPending = false;
+    await refreshActuation();
+    refreshLabStatus();
+  }
+}
+
+function setupActuationEvents() {
+  for (const kind of ['drive', 'launcher']) {
+    document.getElementById(`actuation-${kind}-toggle`).addEventListener('change', (event) => {
+      setActuation(kind, event.target.checked);
+    });
+  }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   setupEvents();
+  setupActuationEvents();
+  refreshActuation();
+  setInterval(refreshActuation, 2000);
   refreshStatus();
   refreshReadiness();
   refreshRecConfig();
@@ -1313,6 +1637,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Poll recorder status more frequently for a live elapsed/size readout
   setInterval(refreshRecStatus, 2000);
   setupLabEvents();
+  setupNetworkEvents();
   refreshLabStatus();
   setInterval(refreshLabStatus, 3000);
   refreshAccessPoint();

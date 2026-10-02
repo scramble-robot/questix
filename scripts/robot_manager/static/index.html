@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>QUESTiX Robot Manager</title>
-  <link rel="stylesheet" href="/static/style.css?v=33">
+  <link rel="stylesheet" href="/static/style.css?v=36">
 </head>
 
 <body>
@@ -21,13 +21,20 @@
         <span class="indicator-label">ロボット制御：</span><span class="indicator-label-short" aria-hidden="true">制御：</span>
         <span id="service-status-text">確認中</span>
       </div>
-      <span id="header-estop" class="header-chip danger" hidden>非常停止ボタンが押されています</span>
+    </div>
+    <!-- E-stop · すべて止める · 管理設定 stay together on one row. The E-stop block is always shown,
+         one fixed size in every state, so 「すべて止める」 and 管理設定 never move. -->
+    <div class="header-controls">
+    <div id="header-estop" class="header-estop" data-state="unknown" role="status" aria-live="polite">
+      <span class="header-estop-title">非常停止ボタン</span>
+      <span id="header-estop-state" class="header-estop-state">不明</span>
     </div>
     <!-- One tap, no confirmation: stops the robot service and whatever a lesson runs. -->
     <button type="button" class="btn btn-stop btn-stop-all" id="stop-all"
       aria-describedby="stop-all-help">すべて止める</button>
     <span id="stop-all-help" class="tuning-sr-only">ロボット制御を停止し、教材の走行と発射も止めます。確認なしですぐに実行します。</span>
     <button type="button" class="btn btn-small" id="open-admin" aria-pressed="false">管理設定</button>
+    </div>
     </div>
   </header>
 
@@ -112,6 +119,32 @@
       </div>
       <p id="restart-help" class="section-help">再起動すると、動作をいったん止め、保存したモードと設定でロボット制御を起動し直します。</p>
       <p id="practice-start-help" class="section-help">練習モードでは、電源を入れても自動では起動しません。「起動」を押すと練習用の構成（教材からの走行・発射に対応）で起動します。練習用の起動が異常終了しても自動では起動し直さないので、もう一度「起動」を押してください。</p>
+    </section>
+
+    <!-- The teacher's runtime authority (actuation.py): drive_component, shot_component and
+         esc_motor_control move only while it is fresh, for the controller and the lessons alike. -->
+    <section class="card" id="actuation-card" aria-labelledby="actuation-heading">
+      <h2 id="actuation-heading">先生の操作許可（練習）</h2>
+      <p id="actuation-state" class="section-help" role="status">確認しています。</p>
+      <div class="lab-permission-row">
+        <label class="toggle-switch" for="actuation-drive-toggle">
+          <input type="checkbox" id="actuation-drive-toggle" aria-describedby="actuation-drive-state">
+          <span class="slider"></span>
+        </label>
+        <label for="actuation-drive-toggle" class="lab-permission-label">ロボットの走行制御
+          <span id="actuation-drive-state" class="lab-permission-state">—</span></label>
+      </div>
+      <div class="lab-permission-row">
+        <label class="toggle-switch" for="actuation-launcher-toggle">
+          <input type="checkbox" id="actuation-launcher-toggle" aria-describedby="actuation-launcher-state">
+          <span class="slider"></span>
+        </label>
+        <label for="actuation-launcher-toggle" class="lab-permission-label">発射機構の操作（ローラー・チルト・発射）
+          <span id="actuation-launcher-state" class="lab-permission-state">—</span></label>
+      </div>
+      <p id="actuation-error" class="lab-inline-error" role="alert" hidden></p>
+      <p class="section-help">練習用の起動では、ここを ON にしている間だけ、コントローラーでも教材でもロボットが動きます。はじめは OFF です。Robot Manager の再起動・ロボットの再起動・モードの切り替え・ロボット制御の起動／再起動／停止・「すべて止める」で OFF に戻ります。OFF にすると同じ動作の「教材からの走行／発射」の許可も OFF になります（ON にしても教材の許可は ON になりません）。</p>
+      <p class="section-help">ロボットは約 1 秒この許可を受け取れないと止まります（この PC の Robot Manager が止まった場合も同じです）。大会用の起動では使いません（大会は非常停止と AutoReferee で動きます）。非常停止ボタンの代わりにはなりません。</p>
     </section>
 
     <section class="card">
@@ -255,6 +288,10 @@
       <!-- Live recording status -->
       <div id="rec-status" class="rec-status">
         <div class="rec-status-row">
+          <span class="rec-status-label">記録の種類</span>
+          <span id="rec-mode" class="rec-status-value">—</span>
+        </div>
+        <div class="rec-status-row">
           <span class="rec-status-label">記録名</span>
           <span id="rec-bag-name" class="rec-status-value">—</span>
         </div>
@@ -280,6 +317,39 @@
         <div class="disk-gauge-sub">
           <span>記録フォルダ使用量</span>
           <span id="disk-used-text">—</span>
+        </div>
+      </div>
+
+      <!-- Evidence of the running or the last 証拠付き記録 (trial-view.js) -->
+      <div class="trial-evidence" id="trial-evidence" hidden>
+        <div class="trial-evidence-head">
+          <span id="trial-evidence-heading"></span>
+          <span id="trial-evidence-badge" class="evidence-badge"></span>
+        </div>
+        <div class="rec-status" id="trial-evidence-rows"></div>
+        <ul class="trial-warnings" id="trial-warnings" hidden></ul>
+      </div>
+
+      <!-- 証拠付き記録: the same recorder plus evidence (POST /api/rosbag/start-trial) -->
+      <div class="trial-block">
+        <div class="config-item wide">
+          <label for="rec-trial-mode">
+            証拠付きで記録する（ソース・設定・非常停止と許可の状態を bag と一緒に保存）
+          </label>
+          <label class="toggle-switch small">
+            <input type="checkbox" id="rec-trial-mode">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div id="trial-form" hidden>
+          <p class="section-help trial-note">
+            氏名・学籍番号・メールアドレス・学校名は書かないでください（保存する項目にありません）。
+            班IDは <code>teamA</code> のような匿名の記号にしてください。どの項目も空欄でかまいません。
+            ロボット制御が動いていて、<code>/drive_component</code>・<code>/target_twist</code>・
+            <code>/drive_status</code>・<code>/emergency_stop</code> がそろっていないと開始できません。
+            記録中のパラメータ変更は止めず、開始時と停止時の差として残します。
+          </p>
+          <div class="config-grid rec-config" id="trial-fields"></div>
         </div>
       </div>
 
@@ -537,6 +607,68 @@
     </div><!-- /lab panel -->
     <div class="tab-panel" data-panel="admin" role="region" aria-label="管理設定">
       <div class="notice"><strong>管理設定</strong><p>機体の準備・開発・診断のための設定です。日常のモード切り替えは「操作」から行えます。</p></div>
+    <!-- QUESTiX Local: the robot's own Wi-Fi access point (wifi_ap.py → root helper) -->
+    <section class="card network-card" id="network-card">
+      <h2>ネットワーク / QUESTiX Local</h2>
+      <p class="section-help">ロボットの Wi-Fi を、生徒の端末が直接つなぐアクセスポイント「QUESTiX Local」にします。学校の Wi-Fi のパスワードやプロキシの設定はここでは扱いません。</p>
+      <div class="net-status" id="net-status" data-state="unknown">
+        <span class="net-state" id="net-state">確認中</span>
+        <span class="net-text" id="net-text"></span>
+      </div>
+      <dl class="net-facts" id="net-facts"></dl>
+      <div class="net-password-row" id="net-password-row" hidden>
+        <span class="net-password-label">パスワード</span>
+        <code class="net-password" id="net-password">••••••••</code>
+        <button type="button" class="btn btn-small" id="net-password-show" aria-pressed="false">表示</button>
+        <button type="button" class="btn btn-small" id="net-password-new">新しく生成</button>
+      </div>
+      <p class="net-notice" id="net-notice" role="status" hidden></p>
+      <div class="btn-group net-actions">
+        <button type="button" class="btn btn-start" id="net-start">開始</button>
+        <button type="button" class="btn btn-stop" id="net-stop">停止</button>
+      </div>
+      <details class="net-edit">
+        <summary>設定を変える（名前・パスワード・周波数帯・チャンネル）</summary>
+        <div class="config-grid">
+          <div class="config-item wide">
+            <label for="net-ssid">SSID（Wi-Fi の名前。2〜32 文字の英数字・空白・_ . -）</label>
+            <input type="text" id="net-ssid" maxlength="32" autocomplete="off" spellcheck="false">
+          </div>
+          <div class="config-item wide">
+            <label for="net-password-input">新しいパスワード（変えるときだけ。8〜63 文字、空白と \ は使えません）</label>
+            <input type="password" id="net-password-input" maxlength="63" autocomplete="new-password" spellcheck="false">
+          </div>
+          <div class="config-item">
+            <label for="net-band">周波数帯</label>
+            <select id="net-band">
+              <option value="bg">2.4 GHz（どの端末でもつながる）</option>
+              <option value="a">5 GHz（混みにくい。対応端末のみ）</option>
+            </select>
+          </div>
+          <div class="config-item">
+            <label for="net-channel">チャンネル</label>
+            <select id="net-channel"></select>
+          </div>
+        </div>
+        <details class="net-address">
+          <summary>ロボットのアドレス（通常は自動のままにしてください）</summary>
+          <div class="config-grid">
+            <div class="config-item wide">
+              <label><input type="radio" name="net-address-mode" value="auto" id="net-address-auto" checked> 自動（10.42.0.1/24。有線LANと重なるときは別の範囲を選びます）</label>
+              <label><input type="radio" name="net-address-mode" value="manual" id="net-address-manual"> 指定する</label>
+              <input type="text" id="net-address" placeholder="10.42.0.1/24" autocomplete="off" spellcheck="false">
+            </div>
+          </div>
+        </details>
+        <button type="button" class="btn btn-save" id="net-save">設定を保存</button>
+      </details>
+      <details class="net-details">
+        <summary>くわしい情報</summary>
+        <dl class="net-facts" id="net-tech"></dl>
+        <p class="section-help">外へのネットワーク: NetworkManager の共有モード（ipv4.method=shared）で動くため、ロボットに有線LANなどの外への経路（default route）があると、生徒の端末もその経路で外に出られます。外に出したくないときは、有線LANを抜いて使ってください。</p>
+        <p class="section-help">停止すると、ロボットは保存済みの Wi-Fi（学校の Wi-Fi など）に自動でつなぎます。国の設定は JP に固定です。端末からは <code>sudo scripts/wifi-ap.sh status</code> でも確認できます。</p>
+      </details>
+    </section>
     <!-- Launch Config -->
     <section class="card">
       <h2>機体・接続の設定</h2>
@@ -673,8 +805,10 @@
   <script src="/static/web-joy-connection.js?v=3"></script>
   <script src="/static/operator-guide.js?v=4"></script>
   <script src="/static/control-labels.js?v=4"></script>
-  <script src="/static/status-view.js?v=1"></script>
-  <script src="/static/app.js?v=16"></script>
+  <script src="/static/status-view.js?v=2"></script>
+  <script src="/static/network-view.js?v=1"></script>
+  <script src="/static/trial-view.js?v=1"></script>
+  <script src="/static/app.js?v=20"></script>
   <script src="/static/controller-map.js?v=12"></script>
   <script src="/static/controls.js?v=22"></script>
 </body>

@@ -23,6 +23,9 @@ const REQUIRED_TEXT = ['title', 'publisher', 'level', 'description', 'start'];
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 // Lists waiting for a course that is not on the site yet.
 const PENDING_COURSES = ['motor'];
+// Courses on the site whose reading list is not written yet: every url needs the check
+// CONTRIBUTING.md describes (Reading lists) before it is listed. The page hides the card meanwhile.
+const COURSES_WITHOUT_LIST = ['keymap'];
 const courseIds = LESSONS.map((lesson) => lesson.id);
 
 const entries = () =>
@@ -39,7 +42,17 @@ test('every list belongs to a course of the site, or to the motor course', () =>
 });
 
 test('every course of the site has a reading list', () => {
-  for (const course of courseIds) assert.ok(courseResources(data, course), course);
+  for (const course of courseIds) {
+    if (COURSES_WITHOUT_LIST.includes(course)) {
+      assert.equal(
+        courseResources(data, course),
+        null,
+        `${course} has a list now: drop it from COURSES_WITHOUT_LIST`,
+      );
+      continue;
+    }
+    assert.ok(courseResources(data, course), course);
+  }
   assert.equal(courseResources(data, 'series'), null, 'the catalogue has none');
 });
 

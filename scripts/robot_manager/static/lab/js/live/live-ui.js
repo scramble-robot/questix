@@ -9,7 +9,7 @@ import {
   disconnectRobot,
 } from './robot-link.js';
 import { wheelRpm } from './slam-recorder.js';
-import { scanMount } from './capture-core.js';
+import { scanMount, wheelAuthority } from './capture-core.js';
 import { loadJson, fillSentence } from '../core/content.js';
 import { html, render, nothing } from '../vendor/lit-html.js';
 
@@ -26,6 +26,7 @@ const STREAM_LABEL = {
   camera: 'カメラ',
   roller: 'ローラーの状態',
   shot: '発射機構の状態',
+  estop: '非常停止',
 };
 // The dialog's own table of contents: nav key → section id (drive-ui.js renders the bench). The
 // run history lives in 記録の一覧, reached by the last button.
@@ -45,7 +46,12 @@ const COLORS = {
 };
 
 let history = [];
-let estopPressed = false; // from the latest /drive_status, shown next to the header's dot
+// Shown next to the header's dot: /emergency_stop itself pressed, or the derived flag of the
+// latest /drive_status pressed (that flag may add a press but never says "released").
+let estopPressed = false;
+let latestEstop = null; // the last /emergency_stop (the estop stream) and when it arrived [ms]
+let latestEstopAt = -Infinity;
+const ESTOP_STALE_MS = 1000; // operation_manager sends it 10 times a second
 let cameraUrl = '';
 let frameRequested = false;
 let addressProblem = ''; // the sentence normalizeRobotUrl threw for the typed address
@@ -208,9 +214,27 @@ function wheelCaption() {
   caption.textContent = fillSentence(copy.monitor.wheels, { seconds: HISTORY_SECONDS });
 }
 
+// Pressed / released only from /emergency_stop itself; never heard or silent is "unknown".
 function estopText(drive) {
-  if (!drive) return '—';
-  return drive.emergency_stop ? copy.monitor.estopPressed : copy.monitor.estopReleased;
+  const fresh = latestEstop && performance.now() - latestEstopAt <= ESTOP_STALE_MS;
+  if ((fresh && latestEstop.active === true) || drive?.emergency_stop === true)
+    return copy.monitor.estopPressed;
+  if (fresh) return copy.monitor.estopReleased;
+  return latestEstop ? copy.monitor.estopStale : copy.monitor.estopUnknown;
+}
+
+function showEstopPressed(pressed) {
+  if (pressed === estopPressed) return;
+  estopPressed = pressed;
+  const state = robotState();
+  showHeader(state, linkStage(state));
+}
+
+function recordEstop(message) {
+  latestEstop = message;
+  latestEstopAt = performance.now();
+  showEstopPressed(message.active === true || latestRobot('drive')?.emergency_stop === true);
+  requestRedraw();
 }
 function readings() {
   const odom = latestRobot('odom');
@@ -362,6 +386,8 @@ function showState(state) {
   if (!open) {
     resetMonitor();
     estopPressed = false;
+    latestEstop = null;
+    latestEstopAt = -Infinity;
   }
   requestRedraw();
 }
@@ -421,24 +447,32 @@ function clearAddressProblem() {
 }
 
 function recordWheels(drive) {
-  if (Boolean(drive.emergency_stop) !== estopPressed) {
-    estopPressed = Boolean(drive.emergency_stop);
-    const state = robotState();
-    showHeader(state, linkStage(state));
-  }
+  const topicPressed =
+    latestEstop?.active === true && performance.now() - latestEstopAt <= ESTOP_STALE_MS;
+  showEstopPressed(topicPressed || drive.emergency_stop === true);
   const config = robotState().hello?.config;
-  if (!config || !Number.isFinite(drive.v) || !Number.isFinite(drive.w)) return;
-  // Both curves go through the same kinematics, so command and measurement share one sign convention
-  // (the raw per-wheel RPM cannot be compared directly: the right motor is mirrored on the wire).
-  const rpm = wheelRpm(drive, config);
-  const twist = latestRobot('twist');
-  const target =
-    twist &&
-    drive.stamp - twist.stamp < TWIST_FRESH_SECONDS &&
-    Number.isFinite(twist.linear) &&
-    Number.isFinite(twist.angular)
-      ? wheelRpm({ v: twist.linear, w: twist.angular }, config)
-      : { left: NaN, right: NaN };
+  const none = { left: NaN, right: NaN };
+  // Each wheel's own values when the bridge sends them (filtered measurement and the generated
+  // target, made forward-positive by capture-core; invalid feedback is no measurement); an older
+  // bridge falls back to the chassis velocity and the fresh command through the kinematics.
+  const direct = wheelAuthority(drive);
+  let rpm;
+  let target;
+  if (direct) {
+    rpm = direct.filtered ?? none;
+    target = direct.target ?? none;
+  } else {
+    if (!config || !Number.isFinite(drive.v) || !Number.isFinite(drive.w)) return;
+    rpm = wheelRpm(drive, config);
+    const twist = latestRobot('twist');
+    target =
+      twist &&
+      drive.stamp - twist.stamp < TWIST_FRESH_SECONDS &&
+      Number.isFinite(twist.linear) &&
+      Number.isFinite(twist.angular)
+        ? wheelRpm({ v: twist.linear, w: twist.angular }, config)
+        : none;
+  }
   const at = performance.now();
   history.push({
     at,
@@ -484,6 +518,7 @@ function initLive() {
   onRobot('odom', requestRedraw);
   onRobot('twist', requestRedraw);
   onRobot('drive', recordWheels);
+  onRobot('estop', recordEstop);
   onRobot('camera', showCamera);
   showState(robotState());
   showDialogNav();

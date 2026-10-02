@@ -281,8 +281,10 @@ bool DdtMotorLib::stopMotor(int motor_id) {
   // 再送し続けると、残留回転がある間は毎回新規の制動として作用し、収束せず持続的な振動
   // （リミットサイクル）を起こすことがある（cf. 停止直後の足回り振動の rosbag 解析）。
   // 停止状態が続いている間は、再送間隔未満の呼び出しは実際のシリアル送信をスキップする。
-  auto vel_it = motor_velocities_.find(motor_id);
-  bool already_stopped = vel_it != motor_velocities_.end() && vel_it->second == 0;
+  // 「停止中」の判断は、要求目標（motor_velocities_）ではなく、最後に送信に成功したフレームが
+  // 停止フレームかで行う: 停止指令の送信に失敗していたら、次の呼び出しで必ず送り直す。
+  motor_velocities_[motor_id] = 0;
+  const bool already_stopped = lastSentFrameIsZero(motor_id);
   if (already_stopped && stop_resend_interval_ms_ > 0) {
     auto now = std::chrono::steady_clock::now();
     auto last_it = last_stop_send_time_.find(motor_id);
@@ -300,6 +302,30 @@ bool DdtMotorLib::stopMotor(int motor_id) {
     last_stop_send_time_[motor_id] = std::chrono::steady_clock::now();
   }
   return success;
+}
+
+bool DdtMotorLib::stopMotorNow(int motor_id) {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+  if (!initialized_) {
+    return false;
+  }
+  motor_velocities_[motor_id] = 0;
+  auto mode_it = motor_modes_.find(motor_id);
+  if (mode_it != motor_modes_.end() && mode_it->second == ControlMode::Current) {
+    resetCurrentPiStateForStop(motor_id);
+    return sendMotorCurrentRaw(motor_id, 0);
+  }
+  const bool success = sendMotorVelocity(motor_id, 0, brake_on_stop_);
+  if (success) {
+    last_stop_send_time_[motor_id] = std::chrono::steady_clock::now();
+  }
+  return success;
+}
+
+bool DdtMotorLib::lastSentFrameIsZero(int motor_id) const {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+  auto frame_it = last_sent_frames_.find(motor_id);
+  return frame_it != last_sent_frames_.end() && ddt_protocol::isZeroCommandFrame(frame_it->second);
 }
 
 bool DdtMotorLib::stopAllMotors() {
@@ -842,31 +868,41 @@ bool DdtMotorLib::refreshMotorFeedback(int motor_id, double max_age_sec) {
     }
   }
 
-  // 古い/未受信: ファームが実行中の最後のフレームをそのまま再送してフィードバックを引き出す。
+  // 古い/未受信: 最後に送信に成功したフレームが停止フレーム（指令値0）のときだけ、それを
+  // そのまま再送してフィードバックを引き出す。非ゼロ（停止指令の送信失敗で残ったもの）や
+  // 送信履歴なしでは何も送らない: フィードバックのために駆動指令を再送・生成しない。
   auto frame_it = last_sent_frames_.find(motor_id);
-  if (frame_it == last_sent_frames_.end()) {
-    return false;  // 送信履歴なし（未指令）
+  const bool has_frame = frame_it != last_sent_frames_.end();
+  const bool zero_frame = has_frame && ddt_protocol::isZeroCommandFrame(frame_it->second);
+  if (has_frame && !zero_frame) {
+    RCLCPP_WARN_THROTTLE(logger_, throttle_clock_, 5000,
+                         "モーター %d: 最後に送信できた指令が停止ではないため、アイドル中の"
+                         "フィードバック取得を行いません（停止の送信に失敗している可能性）",
+                         motor_id);
   }
 
-  // 停止フレーム（指令値0）の再送は stopMotor と同じ再送間隔スロットルに従う。
-  // ステータスタイマ（~10Hz）経由の再送がスロットルをバイパスすると、残留回転がある間
-  // ブレーキが毎回新規の制動として作用し続けてしまう。スロットル中は再送せず、保持
-  // フィードバックのまま返す（停止中の実測は多少古くても許容。鮮度は feedback_age_sec
-  // で観測できる）。
-  const bool stop_frame = ddt_protocol::isZeroVelocityFrame(frame_it->second);
-  if (stop_frame && stop_resend_interval_ms_ > 0) {
+  // 停止フレームの再送は stopMotor と同じ再送間隔スロットルに従う。制御 tick 経由の再送が
+  // スロットルをバイパスすると、残留回転がある間ブレーキが毎回新規の制動として作用し続けて
+  // しまう。スロットル中は再送せず、保持フィードバックのまま返す（停止中の実測は多少古くても
+  // 許容。鮮度は feedback_age_sec で観測できる）。
+  bool throttled = false;
+  if (zero_frame && stop_resend_interval_ms_ > 0) {
     auto now = std::chrono::steady_clock::now();
     auto last_it = last_stop_send_time_.find(motor_id);
-    if (last_it != last_stop_send_time_.end() &&
+    throttled =
+        last_it != last_stop_send_time_.end() &&
         std::chrono::duration_cast<std::chrono::milliseconds>(now - last_it->second).count() <
-            stop_resend_interval_ms_) {
-      return false;
-    }
+            stop_resend_interval_ms_;
   }
-  sendFrameWithFeedback(motor_id, frame_it->second);
-  if (stop_frame) {
-    last_stop_send_time_[motor_id] = std::chrono::steady_clock::now();
+  // フィードバックが新鮮な場合は上で返しているため、ここでは stale として判定する。
+  if (ddt_protocol::decideIdleRefresh(false, has_frame, zero_frame, throttled) !=
+      ddt_protocol::IdleRefresh::kResendZero) {
+    return false;
   }
+  // 再送するのは停止フレームのコピー（送信中に last_sent_frames_ が更新されても安全）。
+  const std::vector<uint8_t> zero = frame_it->second;
+  sendFrameWithFeedback(motor_id, zero);
+  last_stop_send_time_[motor_id] = std::chrono::steady_clock::now();
 
   fb_it = motor_feedbacks_.find(motor_id);
   return fb_it != motor_feedbacks_.end() && fb_it->second.has_feedback &&

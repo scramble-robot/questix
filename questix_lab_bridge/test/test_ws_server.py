@@ -244,11 +244,14 @@ def test_record_save_is_answered_to_the_sender_only(tmp_path):
             await _wait_for_clients(instance, 2)
             big = _recording_frame(20000)  # about 1.5 MB, far above the old 1 kB frame limit
             assert len(big) > 1_000_000
-            await saver.send(big)
-            await saver.send(_recording_frame(1))  # a small one goes the same way
-            await saver.send('{"type":"record_save","recording":{"format":"x"}}')
+            # One save at a time per page (_MAX_ADMITTED_SAVES_PER_CLIENT): each is answered first.
+            replies = []
+            for frame in (big, _recording_frame(1),  # a small one goes the same way
+                          '{"type":"record_save","recording":{"format":"x"}}'):
+                await saver.send(frame)
+                replies.append(json.loads(await asyncio.wait_for(saver.recv(), 10)))
             await saver.send('{"type":"stop"}')  # other frames still reach the node
-            replies = [json.loads(await asyncio.wait_for(saver.recv(), 10)) for _ in range(3)]
+            await asyncio.sleep(0.2)
             assert [reply['type'] for reply in replies] == [
                 'record_saved', 'record_saved', 'record_error']
             assert replies[0]['id'] != replies[1]['id']
@@ -287,4 +290,175 @@ def test_record_endpoints_allow_other_origins(tmp_path):
         assert json.loads(_http_get(instance.port, '/api/rosbags')[2]) == {
             'bags': [], 'dir': str(tmp_path / 'bags')}
     finally:
+        instance.stop()
+
+
+# --- bounded record_save admission (S3) ----------------------------------------------------------
+
+class _SlowRecords:
+    """records_api stand-in whose saves wait for a gate (a slow disk); one may fail."""
+
+    def __init__(self):
+        self.gate = threading.Event()
+        self.started = []
+
+    def save(self, text):
+        self.started.append(text)
+        self.gate.wait(10)
+        if '"fail"' in text:
+            raise OSError('disk gone')
+        return {'type': 'record_saved', 'id': 'r%d' % len(self.started)}
+
+
+def _save_frame(tag='x'):
+    return '{"type":"record_save","recording":{"name":"%s"}}' % tag
+
+
+def _slow_server():
+    from questix_lab_bridge import ws_server
+    records = _SlowRecords()
+    instance = LabWebSocketServer('127.0.0.1', 0, '{"type":"hello"}', records=records)
+    instance.start()
+    return instance, records, ws_server
+
+
+async def _until(condition, timeout=5.0):
+    deadline = asyncio.get_running_loop().time() + timeout
+    while not condition():
+        assert asyncio.get_running_loop().time() < deadline, 'condition not reached'
+        await asyncio.sleep(0.01)
+
+
+def _client(instance, index=0):
+    return sorted(instance._clients, key=lambda client: client.id)[index]
+
+
+def test_a_page_flooding_saves_keeps_one_in_memory_and_gets_the_rest_refused_in_order():
+    instance, records, ws_server = _slow_server()
+
+    async def scenario():
+        url = 'ws://127.0.0.1:%d' % instance.port
+        async with websockets.connect(url) as page:
+            await page.recv()
+            await _wait_for_clients(instance, 1)
+            for tag in 'abcde':
+                await page.send(_save_frame(tag))
+            await _until(lambda: _client(instance).owed_answers == 5)
+            client = _client(instance)
+            # Only the first frame is kept (being written); the others were let go at once.
+            assert client.admitted_saves == 1 and instance._admitted_saves == 1
+            await _until(lambda: len(records.started) == 1)
+            # Telemetry still flows while the save waits for the disk.
+            instance.publish('status', '{"type":"status"}')
+            assert json.loads(await asyncio.wait_for(page.recv(), 5))['type'] == 'status'
+            records.gate.set()
+            replies = [json.loads(await asyncio.wait_for(page.recv(), 5)) for _ in range(5)]
+            # In order: the page matches answers to its saves by position.
+            assert [reply['type'] for reply in replies] == ['record_saved'] + ['record_error'] * 4
+            assert all(reply['message'] == ws_server.SAVE_BUSY_MESSAGE for reply in replies[1:])
+            assert len(records.started) == 1
+            await _until(lambda: client.owed_answers == 0)
+            assert client.admitted_saves == 0 and instance._admitted_saves == 0
+    try:
+        asyncio.run(scenario())
+    finally:
+        records.gate.set()
+        instance.stop()
+
+
+def test_a_page_owing_too_many_answers_is_disconnected():
+    instance, records, ws_server = _slow_server()
+
+    async def scenario():
+        url = 'ws://127.0.0.1:%d' % instance.port
+        async with websockets.connect(url) as page:
+            await page.recv()
+            await _wait_for_clients(instance, 1)
+            with pytest.raises(websockets.ConnectionClosed) as closed:
+                for index in range(ws_server._MAX_OWED_ANSWERS_PER_CLIENT + 5):
+                    await page.send(_save_frame(str(index)))
+                    await asyncio.sleep(0.01)
+                await asyncio.wait_for(page.recv(), 5)
+            assert closed.value.rcvd is None or closed.value.rcvd.code == 1008
+        records.gate.set()
+        await _until(lambda: instance._admitted_saves == 0)
+    try:
+        asyncio.run(scenario())
+    finally:
+        records.gate.set()
+        instance.stop()
+
+
+def test_the_global_bound_holds_across_pages():
+    instance, records, ws_server = _slow_server()
+    total = ws_server._MAX_ADMITTED_SAVES
+
+    async def scenario():
+        url = 'ws://127.0.0.1:%d' % instance.port
+        pages = [await websockets.connect(url) for _ in range(total + 1)]
+        try:
+            for page in pages:
+                await page.recv()
+            await _wait_for_clients(instance, total + 1)
+            for page in pages[:total]:
+                await page.send(_save_frame())
+            await _until(lambda: instance._admitted_saves == total)
+            # One page more: refused, and answered at once (it owes nothing else).
+            await pages[total].send(_save_frame('late'))
+            reply = json.loads(await asyncio.wait_for(pages[total].recv(), 5))
+            assert reply == {'type': 'record_error', 'message': ws_server.SAVE_BUSY_MESSAGE}
+            assert instance._admitted_saves == total
+            records.gate.set()
+            for page in pages[:total]:
+                assert json.loads(await asyncio.wait_for(page.recv(), 5))['type'] == 'record_saved'
+            await _until(lambda: instance._admitted_saves == 0)
+        finally:
+            for page in pages:
+                await page.close()
+    try:
+        asyncio.run(scenario())
+    finally:
+        records.gate.set()
+        instance.stop()
+
+
+def test_a_failed_save_is_answered_and_frees_its_place():
+    instance, records, _ = _slow_server()
+    records.gate.set()
+
+    async def scenario():
+        url = 'ws://127.0.0.1:%d' % instance.port
+        async with websockets.connect(url) as page:
+            await page.recv()
+            await _wait_for_clients(instance, 1)
+            await page.send(_save_frame('fail'))
+            reply = json.loads(await asyncio.wait_for(page.recv(), 5))
+            assert reply['type'] == 'record_error'  # answered, so the page's queue stays in step
+            await page.send(_save_frame('ok'))
+            assert json.loads(await asyncio.wait_for(page.recv(), 5))['type'] == 'record_saved'
+            assert instance._admitted_saves == 0
+    try:
+        asyncio.run(scenario())
+    finally:
+        instance.stop()
+
+
+def test_leaving_with_a_save_in_hand_leaks_nothing():
+    instance, records, _ = _slow_server()
+
+    async def scenario():
+        url = 'ws://127.0.0.1:%d' % instance.port
+        async with websockets.connect(url) as page:
+            await page.recv()
+            await _wait_for_clients(instance, 1)
+            await page.send(_save_frame('a'))
+            await page.send(_save_frame('b'))
+            await _until(lambda: instance._admitted_saves == 1 and len(records.started) == 1)
+        await _wait_for_clients(instance, 0)
+        records.gate.set()
+        await _until(lambda: instance._admitted_saves == 0 and not instance._tasks)
+    try:
+        asyncio.run(scenario())
+    finally:
+        records.gate.set()
         instance.stop()

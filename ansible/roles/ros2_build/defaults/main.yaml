@@ -1,0 +1,19 @@
+---
+# Default variables for ros2_build role (build the QUESTiX workspace on a fresh kit)
+
+target_user: "{{ ansible_user | default(ansible_env.SUDO_USER) }}"
+workspace_path: "/home/{{ target_user }}/questix"
+ros2_distro: jazzy
+workspace_ros_setup: "/opt/ros/{{ ros2_distro }}/setup.bash"
+# rosdep reads the user's index (`rosdep update` runs as the user); only apt-get needs root.
+workspace_user_ros_home: "/home/{{ target_user }}/.ros"
+workspace_rosdep_become: true
+# A kit's workspace is never built by root (it would leave root-owned build/ install/ log/).
+# Only the isolated contract tests, when run as root, set this false.
+workspace_build_refuse_root: true
+# Must resolve with `ros2 pkg prefix` after the build (the robot service, Robot Manager's lesson
+# bridge and the messages both use).
+workspace_required_packages:
+  - questix_launcher
+  - questix_msgs
+  - questix_lab_bridge

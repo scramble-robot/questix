@@ -55,16 +55,47 @@ TEST(PackVelocityFrame, BrakeSetsByte7) {
   EXPECT_EQ(frame[9], ddt::crc8Maxim(payloadOf(frame)));
 }
 
-TEST(IsZeroVelocityFrame, ClassifiesStopFrames) {
+TEST(IsZeroCommandFrame, ClassifiesStopFrames) {
   // 停止フレーム: 指令値0（ブレーキ有無は問わない）
-  EXPECT_TRUE(ddt::isZeroVelocityFrame(ddt::packVelocityFrame(1, 0, 10, true)));
-  EXPECT_TRUE(ddt::isZeroVelocityFrame(ddt::packVelocityFrame(1, 0, 10, false)));
+  EXPECT_TRUE(ddt::isZeroCommandFrame(ddt::packVelocityFrame(1, 0, 10, true)));
+  EXPECT_TRUE(ddt::isZeroCommandFrame(ddt::packVelocityFrame(1, 0, 10, false)));
   // 非停止フレーム: 指令値が非ゼロ
-  EXPECT_FALSE(ddt::isZeroVelocityFrame(ddt::packVelocityFrame(1, 100, 10, true)));
-  EXPECT_FALSE(ddt::isZeroVelocityFrame(ddt::packVelocityFrame(1, -1, 10, false)));
+  EXPECT_FALSE(ddt::isZeroCommandFrame(ddt::packVelocityFrame(1, 100, 10, true)));
+  EXPECT_FALSE(ddt::isZeroCommandFrame(ddt::packVelocityFrame(1, -1, 10, false)));
   // Protocol 1 以外や不正長は対象外
-  EXPECT_FALSE(ddt::isZeroVelocityFrame(ddt::packModeFrame(1, 0x02)));
-  EXPECT_FALSE(ddt::isZeroVelocityFrame(std::vector<uint8_t>{}));
+  EXPECT_FALSE(ddt::isZeroCommandFrame(ddt::packModeFrame(1, 0x02)));
+  EXPECT_FALSE(ddt::isZeroCommandFrame(std::vector<uint8_t>{}));
+}
+
+TEST(IsZeroCommandFrame, CoversCurrentModeFramesToo) {
+  // 電流フレームも同じバイト位置に指令値を持つ: 電流 0 は停止、非ゼロは駆動。
+  EXPECT_TRUE(ddt::isZeroCommandFrame(ddt::packCurrentFrame(1, 0)));
+  EXPECT_FALSE(ddt::isZeroCommandFrame(ddt::packCurrentFrame(1, 1)));
+  EXPECT_FALSE(ddt::isZeroCommandFrame(ddt::packCurrentFrame(1, -300)));
+}
+
+// アイドル中のフィードバック更新は、最後に送信に成功した停止フレームだけを再送する。
+TEST(DecideIdleRefresh, FreshFeedbackSendsNothing) {
+  EXPECT_EQ(ddt::decideIdleRefresh(true, true, true, false), ddt::IdleRefresh::kNone);
+}
+
+TEST(DecideIdleRefresh, StaleFeedbackResendsASuccessfulZero) {
+  // nonzero -> 停止フレーム送信成功 -> アイドル: 停止フレームだけが再送される（実機検証の経路）。
+  EXPECT_EQ(ddt::decideIdleRefresh(false, true, true, false), ddt::IdleRefresh::kResendZero);
+  // 再送間隔スロットル中は送らない。
+  EXPECT_EQ(ddt::decideIdleRefresh(false, true, true, true), ddt::IdleRefresh::kNone);
+}
+
+TEST(DecideIdleRefresh, NeverReplaysANonzeroFrame) {
+  // nonzero -> 停止フレームの送信失敗 -> 最後の成功フレームは nonzero のまま: 再送しない。
+  EXPECT_EQ(ddt::decideIdleRefresh(false, true, false, false), ddt::IdleRefresh::kNone);
+  EXPECT_EQ(ddt::decideIdleRefresh(false, true, false, true), ddt::IdleRefresh::kNone);
+}
+
+TEST(DecideIdleRefresh, NoHistoryGeneratesNothing) {
+  // 送信履歴が無い / 不明: フィードバックのためでも指令フレームを作らない。
+  EXPECT_EQ(ddt::decideIdleRefresh(false, false, false, false), ddt::IdleRefresh::kNone);
+  EXPECT_EQ(ddt::decideIdleRefresh(false, false, true, false), ddt::IdleRefresh::kNone);
 }
 
 TEST(PackVelocityFrame, AccelTimeSetsByte6) {

@@ -29,7 +29,9 @@ import time
 
 RECORDING_FORMAT = 'questix-lab-recording'
 RECORDING_VERSION = 1  # RECORDING_VERSION in static/lab/js/live/recording-core.js
-RECORDING_STREAMS = ('drive', 'twist', 'scan', 'odom')
+# RECORDING_STREAMS in recording-core.js: the same list, so nothing a page recorded is dropped
+# silently when the robot keeps it (test_records.py checks the two stay equal).
+RECORDING_STREAMS = ('drive', 'twist', 'scan', 'odom', 'roller', 'shot', 'estop')
 MAX_RECORDING_MESSAGES = 200000  # MAX_RECORDING_MESSAGES in recording-core.js
 # Largest recording a page may save (the WebSocket frame limit is a little above it).
 MAX_SAVE_BYTES = 8 * 1024 * 1024
@@ -553,7 +555,7 @@ def payload_moving(stream, payload):
 class AutoRecorder:
     """Record controller driving from the payloads the bridge sends to the pages.
 
-    Feed it every scan/odom/drive/twist payload with ``feed(stream, payload, now, lab_active)``
+    Feed it every payload of RECORDING_STREAMS with ``feed(stream, payload, now, lab_active)``
     (``now``: a monotonic clock [s]) and call ``tick(now, lab_active)`` about once a second.
     Finished recordings go to ``sink(recording)`` on the caller's thread (the bridge writes
     them on a worker thread).
@@ -679,3 +681,47 @@ class AutoRecorder:
             streams=streams, lesson=AUTO_LESSON, conditions={'label': label}, robot=self._robot,
             outcome={'reason': 'done', 'label': outcome_label})
         self._sink(recording)
+
+
+class BoundedWriter:
+    """Hand work to an executor with at most ``limit`` items admitted at once (running + waiting).
+
+    For the auto records: a callback that finishes a recording never waits for the disk, and at
+    most ``limit`` recordings are held for writing; one more is refused (:meth:`submit` returns
+    False) and the caller says so. A finished item frees its place whatever happened to it.
+    """
+
+    def __init__(self, executor, limit):
+        self._executor = executor
+        self.limit = int(limit)
+        self._admitted = 0
+        self._lock = threading.Lock()
+
+    @property
+    def backlog(self):
+        """Items admitted and not finished yet."""
+        with self._lock:
+            return self._admitted
+
+    def submit(self, fn, *args):
+        """Run ``fn(*args)`` on the executor if there is room; return whether it was admitted."""
+        with self._lock:
+            if self._admitted >= self.limit:
+                return False
+            self._admitted += 1
+        try:
+            self._executor.submit(self._run, fn, args)
+        except RuntimeError:  # the executor is shutting down
+            self._release()
+            return False
+        return True
+
+    def _run(self, fn, args):
+        try:
+            fn(*args)
+        finally:
+            self._release()
+
+    def _release(self):
+        with self._lock:
+            self._admitted -= 1

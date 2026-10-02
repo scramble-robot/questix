@@ -81,6 +81,12 @@ const StatusView = (() => {
             : 'ほかのプログラムが教材用の発射指令を出しています',
           detail: `${nodes} が ${kind === 'drive' ? '/target_twist/lab' : '/roller/lab・/shot/lab/*'} に出しています。`,
         };
+      case 'estop_unknown':
+        return {
+          text: '非常停止の状態をまだ確認できません',
+          detail: '/emergency_stop（operation_manager・GPIO の安全系）がまだ届いていません。' +
+            '届くまで教材からは動かせません（ENABLE_GPIO_REF と ROS_DOMAIN_ID を確かめてください）。',
+        };
       case 'emergency_stop':
         return { text: '非常停止ボタンが押されています', detail: null };
       case 'controller':
@@ -116,6 +122,15 @@ const StatusView = (() => {
       view.toggleDisabled = true;
       view.toggleNote = '大会モードでは教材からは動かせません。練習モードに戻しても OFF のままです（先生が ON にしてください）。';
       return view;
+    }
+    // The teacher's runtime authority for the robot (操作 tab) comes first: without it a lesson
+    // permission cannot be switched on (the manager refuses it too).
+    const authority = kind === 'drive' ? lab.drive_authority : lab.shoot_authority;
+    if (!setting && authority === false) {
+      view.toggleDisabled = true;
+      view.toggleNote = kind === 'drive'
+        ? '先に「操作」タブの「先生の操作許可」で「ロボットの走行制御」を ON にしてください。'
+        : '先に「操作」タブの「先生の操作許可」で「発射機構の操作」を ON にしてください。';
     }
     if (lab.external && bridge) {
       view.toggleNote = '手動で起動したブリッジです。ここでの切り替えは反映されません（端末で Ctrl+C して「配信開始」を押してください）。';
@@ -175,6 +190,10 @@ const StatusView = (() => {
       return bridge.emergency_stop
         ? { text: '押されています', tone: 'danger' } : { text: '解除されています', tone: 'ok' };
     }
+    // A bridge that reports it but has not heard /emergency_stop yet: unknown, never "released".
+    if (bridge && 'emergency_stop' in bridge) {
+      return { text: '分かりません（非常停止の状態をまだ確認できません）', tone: 'warn' };
+    }
     const sources = [];
     if (bridge && bridge.read_only === false) sources.push(bridge.drive_state);
     if (bridge && bridge.shoot_state && bridge.shoot_state.allowed === true) sources.push(bridge.shoot_state);
@@ -183,6 +202,19 @@ const StatusView = (() => {
     }
     const pressed = sources.some((s) => (s && s.blockers || []).some((b) => b.code === 'emergency_stop'));
     return pressed ? { text: '押されています', tone: 'danger' } : { text: '解除されています', tone: 'ok' };
+  }
+
+  // The header's E-stop block: always shown, one of three words. Only reads the row estop() made
+  // (its tone), so the 操作 tab and the header can never disagree.
+  const HEADER_ESTOP = {
+    pressed: '押されている',
+    released: '解除中',
+    unknown: '不明',
+  };
+  function headerEstop(row) {
+    const tone = row && row.tone;
+    const state = tone === 'danger' ? 'pressed' : tone === 'ok' ? 'released' : 'unknown';
+    return { state, label: HEADER_ESTOP[state] };
   }
 
   // Rows of the 操作 tab's status strip.
@@ -277,7 +309,7 @@ const StatusView = (() => {
 
   return {
     MODE, SERVICE, SETTLE_MS, createBlockerMemory, stableBlockers, blockerText, capability,
-    modeSummary, estop, overview, controllerUrl, labRestoredText,
+    modeSummary, estop, headerEstop, overview, controllerUrl, labRestoredText,
   };
 })();
 if (typeof module !== 'undefined') module.exports = StatusView;

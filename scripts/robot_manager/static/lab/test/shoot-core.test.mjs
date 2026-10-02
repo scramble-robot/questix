@@ -432,3 +432,13 @@ test('the launcher state shows fresh statuses only', () => {
   assert.equal(odd.roller.source, 'idle');
   assert.equal(odd.roller.percent, null);
 });
+
+test('an E-stop the bridge has not heard yet keeps the launcher off', () => {
+  const readiness = shootReadiness({
+    link: link(),
+    shootState: state({ blockers: [{ code: 'estop_unknown', nodes: null, parts: null }] }),
+    confirmed: true,
+  });
+  assert.equal(readiness.ready, false);
+  assert.deepEqual(codes(readiness), ['estop_unknown']);
+});

@@ -60,14 +60,19 @@ DDT M0602C の Protocol 1 応答フレームをデコードした 1 モータ分
   (`evaluate_controllability()`)の毎回実行時に発行する。
   すなわち GPIO 更新毎(公称 ~20 Hz)+ 100 ms watchdog timer。
   `active = !controllable`。
-- **発行者不在環境**: operation_manager は `enable_gpio_ref=true` の構成
+- **発行者不在・未受信はフェイルクローズ**: operation_manager は `enable_gpio_ref=true` の構成
   でdrive/shotの有無に依存せず `questix_core.launch.xml` から起動する。
-  standalone `joy_controller_referee.launch.xml` も互換性のため起動できる。購読側は
-  メッセージを一度も受信していない間は通常動作を継続しなければならない
-  (発行者不在で停止してはならない)。
-- **staleness 検出**: 購読側は「一度以上受信した後に」タイムアウト
-  (推奨 1.0 s)を超えて受信が途絶えた場合をフェイルセーフ条件として
-  扱ってよい(shot_component が実装)。
+  standalone `joy_controller_referee.launch.xml` も互換性のため起動できる。
+  統合構成(`questix_core`)の購読側(drive_component / shot_component / esc_motor_control)は、
+  **一度も受信していない間は「非常停止の状態が不明」として動かさない**(`require_emergency_stop`
+  既定 true)。したがって `enable_gpio_ref=false` の練習起動では /emergency_stop が無く、
+  走行・発射はできない。受信状態はモータとの通信(フィードバックの取得)とは別で、
+  drive_component は動かさないまま実測の取得を続ける。
+- **staleness 検出**: 購読側は「一度以上受信した後に」`emergency_stop_timeout_sec`
+  (既定 1.0 s、自分の単調時計による受信間隔)を超えて受信が途絶えたら、押下と同じく停止して
+  動かさない。受信が戻っても、解除だけでは動き出さない(新しい指令が必要)。
+- **診断用の明示 opt-out**: 単体の診断起動に限り `require_emergency_stop:=false` で未受信を
+  許せる(押下を受信したときの停止はそのまま)。統合構成は opt-out しない。
 
 ## 復帰挙動(active=false 受信時)
 
@@ -75,9 +80,25 @@ DDT M0602C の Protocol 1 応答フレームをデコードした 1 モータ分
 
 | 購読者 | 停止時(active=true) | 解除時(active=false) |
 |---|---|---|
-| `drive_component` | フラグ設定 + `diff_drive_->stop()` を即時実行(best-effort)。以後の `/target_twist` は無視 | フラグ解除。`/target_twist` 受付再開。モータは次の twist コマンドまで停止のまま |
-| `shot_component` | deactivate→cleanup でサーボバス解放(unconfigured へ) | auto-start 再アーム。configure→activate を自動リトライ |
-| `esc_motor_control` | フラグ設定 + `set_motor_speed(0.0)` 即時実行。停止中はボタン入力を無視 | フラグ解除。フルスピードボタンの**新たな押下エッジ**まで 0 のまま(押しっぱなしでは再始動しない) |
+| `drive_component` | 停止指令をスロットル無しで即時送信 + 目標を破棄。以後の `/target_twist` は無視。停止指令を送れなかったら stop fault(送信に成功するまで動かさない) | `/target_twist` 受付再開。モータは解除**後**に届いた次の twist コマンドまで停止のまま |
+| `shot_component` | deactivate→cleanup でサーボバス解放(unconfigured へ) | auto-start 再アーム。configure→activate を自動リトライ(実行時許可が必要な構成では許可も必要) |
+| `esc_motor_control` | `set_motor_speed(0.0)` 即時実行。停止中はボタン入力を無視 | フルスピードボタンの**離す→押す**まで 0 のまま(押しっぱなしでは再始動しない)。教材入力は 0 を受けるまでロック |
+
+## `/actuation_authority` トピック契約(練習時の実行時許可)
+
+- **型**: `questix_msgs/msg/ActuationAuthority`(`drive_allowed`, `launcher_allowed`)
+- **QoS**: reliable + **volatile** + keep-last(1)。**transient_local にしない**(許可をラッチしない)。
+- **発行元**: Robot Manager(教員が「ロボットの走行制御」「発射機構の操作」を ON にしている間だけ、
+  約 5 Hz)。Robot Manager の起動・Pi の再起動・練習モードへの切替・大会モードへの切替・
+  「すべて止める」・Robot Manager の終了ではすべて OFF から始まる/OFF になる。
+- **購読側**: `require_runtime_actuation_authority` が true のとき(`questix_core` の練習起動)、
+  drive_component / shot_component / esc_motor_control は、自分の単調時計で
+  `runtime_authority_timeout_sec`(既定 1.0 s)以内に受信した `*_allowed=true` がある間だけ動かす。
+  未受信・false・途絶はすべて OFF。OFF になったら停止(drive: 即時停止 + 目標破棄、
+  shot: 安全 teardown、ESC: 0 + ラッチ解除)。許可が戻っても、それだけでは動き出さない。
+- **大会起動**(`enable_autoreferee:=true`)は `require_runtime_actuation_authority:=false`。
+  AutoReferee と GPIO 安全系は従来どおりで、教室用の heartbeat が無くても止まらない。
+- 非常停止とは別の理由として扱う(許可の喪失を非常停止に見せかけない)。
 
 ## 型付きステータストピック契約
 

@@ -32,6 +32,15 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
   this->declare_parameter<std::string>("status_topic", "/roller_motor_status");
   // 統一緊急停止トピック（questix_msgs/EmergencyStop, 入力）。空文字で連動無効。
   this->declare_parameter<std::string>("emergency_stop_topic", "/emergency_stop");
+  // 未受信・途絶の /emergency_stop を押下と同じに扱う（false は単体診断の明示 opt-out のみ）。
+  this->declare_parameter<bool>("require_emergency_stop", true);
+  // 一度受信した後、この秒数（steady clock の受信間隔）途絶えたら停止。<=0 で無効。
+  this->declare_parameter<double>("emergency_stop_timeout_sec", 1.0);
+  // 教員の実行時許可（questix_msgs/ActuationAuthority の launcher_allowed）。練習起動は true、
+  // 大会起動（enable_autoreferee）は false を launch が必ず渡す。
+  this->declare_parameter<bool>("require_runtime_actuation_authority", true);
+  this->declare_parameter<std::string>("runtime_authority_topic", "/actuation_authority");
+  this->declare_parameter<double>("runtime_authority_timeout_sec", 1.0);
   this->declare_parameter<int>("min_pulse_width", 0);         // μs (speed=-1.0)
   this->declare_parameter<int>("max_pulse_width", 2000);      // μs (speed=1.0)
   this->declare_parameter<int>("neutral_pulse_width", 1000);  // μs (ESC arm/idle)
@@ -56,6 +65,12 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
   joy_topic_ = this->get_parameter("joy_topic").as_string();
   status_topic_ = this->get_parameter("status_topic").as_string();
   emergency_stop_topic_ = this->get_parameter("emergency_stop_topic").as_string();
+  require_emergency_stop_ = this->get_parameter("require_emergency_stop").as_bool();
+  emergency_stop_timeout_sec_ = this->get_parameter("emergency_stop_timeout_sec").as_double();
+  require_authority_ = this->get_parameter("require_runtime_actuation_authority").as_bool();
+  authority_topic_ = this->get_parameter("runtime_authority_topic").as_string();
+  authority_timeout_sec_ =
+      rollerAuthorityLease(this->get_parameter("runtime_authority_timeout_sec").as_double());
   min_pulse_width_us_ = this->get_parameter("min_pulse_width").as_int();
   max_pulse_width_us_ = this->get_parameter("max_pulse_width").as_int();
   neutral_pulse_width_us_ = this->get_parameter("neutral_pulse_width").as_int();
@@ -92,6 +107,30 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
     emergency_stop_sub_ = this->create_subscription<questix_msgs::msg::EmergencyStop>(
         emergency_stop_topic_, rclcpp::QoS(1).reliable().transient_local(),
         std::bind(&EscMotorControlComponent::emergency_stop_callback, this, std::placeholders::_1));
+  } else if (require_emergency_stop_) {
+    RCLCPP_ERROR(this->get_logger(),
+                 "emergency_stop_topic is empty but require_emergency_stop=true: the roller will "
+                 "never spin");
+  }
+  if (!require_emergency_stop_) {
+    RCLCPP_WARN(this->get_logger(),
+                "require_emergency_stop=false (diagnostic opt-out): the roller may spin before "
+                "/emergency_stop is heard. Never use this in an integrated launch");
+  }
+  if (require_authority_) {
+    if (authority_topic_.empty()) {
+      RCLCPP_ERROR(this->get_logger(),
+                   "runtime_authority_topic is empty but require_runtime_actuation_authority=true: "
+                   "the roller will never spin");
+    } else {
+      authority_sub_ = this->create_subscription<questix_msgs::msg::ActuationAuthority>(
+          authority_topic_, rclcpp::QoS(1).reliable().durability_volatile(),
+          std::bind(&EscMotorControlComponent::authority_callback, this, std::placeholders::_1));
+    }
+    RCLCPP_INFO(this->get_logger(),
+                "Practice runtime authority required on %s (lease %.2fs): the roller stays at 0 "
+                "until the teacher switches the launcher on",
+                authority_topic_.c_str(), authority_timeout_sec_);
   }
 
   // QUESTiX LAB roller input: subscribed only when accept_lab_input (practice launches).
@@ -115,6 +154,9 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
   }
   roller_status_timer_ = this->create_wall_timer(
       200ms, std::bind(&EscMotorControlComponent::publish_roller_status, this));
+  // Leases (E-stop silence, authority) expire without a message: check them periodically.
+  gate_timer_ =
+      this->create_wall_timer(100ms, std::bind(&EscMotorControlComponent::apply_gate, this));
   if (lab_sub_) {
     lab_timer_ =
         this->create_wall_timer(100ms, std::bind(&EscMotorControlComponent::lab_tick, this));
@@ -211,7 +253,8 @@ int EscMotorControlComponent::speed_to_pulse_us(double speed) const {
 void EscMotorControlComponent::set_motor_speed(double speed) {
   std::lock_guard<std::mutex> guard(lock_);
 
-  if (emergency_stop_active_) {
+  // Evaluated now, not from the last timer tick: nothing nonzero leaves while the gate is closed.
+  if (evaluate_gate_locked() != RollerBlock::kNone) {
     speed = 0.0;
   }
 
@@ -245,10 +288,11 @@ void EscMotorControlComponent::joy_callback(const sensor_msgs::msg::Joy::SharedP
     // The controller always wins: a press hands a lab-driven roller back to the controller
     // and locks the lab out until it sends 0 (roller_lab_logic.hpp).
     lab_preempted = roller_lab_logic_.onJoyButton(raw_pressed, steady_now_sec());
-    // 非常停止中はボタンを離した扱いにして、ラッチが armed になるのを防ぐ。
-    // （解除後に押しっぱなしのまま再始動しないようにする。復帰には離す→押すが必要。）
-    const bool full_speed_pressed = raw_pressed && !emergency_stop_active_;
-    r = full_speed_logic_.onButton(full_speed_pressed, this->now().seconds());
+    // 非常停止（押下・未受信・途絶）または実行時許可なしの間は、押されているボタンでラッチを
+    // 解除して「離す」を要求する。解除・許可の復帰後も押しっぱなしでは再始動せず、離す→押すが
+    // 必要（押下を「離した」扱いにすると、その時点で再アームされてしまうため使わない）。
+    const bool inhibited = evaluate_gate_locked() != RollerBlock::kNone;
+    r = full_speed_logic_.onButton(raw_pressed, this->now().seconds(), inhibited);
   }
   // Lock released before set_motor_speed(), which takes lock_ itself.
 
@@ -285,6 +329,8 @@ void EscMotorControlComponent::emergency_stop_callback(
     // 保持したまま呼ぶとデッドロックする。フラグ更新だけ行い、停止指令はロック解放後。
     transition = decideEstopTransition(emergency_stop_active_, msg->active);
     emergency_stop_active_ = msg->active;
+    have_estop_msg_ = true;
+    last_estop_rx_sec_ = steady_now_sec();
     if (transition.send_stop) {
       roller_lab_logic_.onEmergencyStop(true, steady_now_sec());
     }
@@ -300,6 +346,75 @@ void EscMotorControlComponent::emergency_stop_callback(
                 msg->source.c_str());
   }
   if (transition.send_stop || transition.log_release) {
+    publish_roller_status();
+  }
+  apply_gate();
+}
+
+void EscMotorControlComponent::authority_callback(
+    const questix_msgs::msg::ActuationAuthority::SharedPtr msg) {
+  if (!msg) {
+    return;
+  }
+  {
+    std::lock_guard<std::mutex> guard(lock_);
+    have_authority_msg_ = true;
+    authority_allowed_ = msg->launcher_allowed;
+    last_authority_rx_sec_ = steady_now_sec();
+  }
+  apply_gate();
+}
+
+RollerBlock EscMotorControlComponent::evaluate_gate_locked() const {
+  const double now = steady_now_sec();
+  RollerGateInputs in;
+  in.require_estop = require_emergency_stop_;
+  in.estop_known = have_estop_msg_;
+  in.estop_active = emergency_stop_active_;
+  in.estop_age_sec = have_estop_msg_ ? now - last_estop_rx_sec_ : 0.0;
+  in.estop_timeout_sec = emergency_stop_timeout_sec_;
+  in.require_authority = require_authority_;
+  in.authority_known = have_authority_msg_;
+  in.authority_allowed = authority_allowed_;
+  in.authority_age_sec = have_authority_msg_ ? now - last_authority_rx_sec_ : 0.0;
+  in.authority_timeout_sec = authority_timeout_sec_;
+  return evaluateRollerGate(in);
+}
+
+void EscMotorControlComponent::apply_gate() {
+  RollerBlock previous = RollerBlock::kNone;
+  RollerBlock now_block = RollerBlock::kNone;
+  bool stop = false;
+  {
+    std::lock_guard<std::mutex> guard(lock_);
+    previous = gate_;
+    now_block = evaluate_gate_locked();
+    gate_ = now_block;
+    if (now_block != RollerBlock::kNone) {
+      // Closing (or closed with something still spinning): stop, clear the latch so a held
+      // button needs a release, and lock a lab run until it sends 0.
+      if (previous == RollerBlock::kNone || current_speed_ != 0.0 || full_speed_logic_.isActive() ||
+          roller_lab_logic_.labActive()) {
+        full_speed_logic_.inhibit();
+        roller_lab_logic_.onBlocked(steady_now_sec());
+        stop = true;
+      }
+    }
+  }
+  // Lock released before set_motor_speed(), which takes lock_ itself.
+  if (stop) {
+    set_motor_speed(0.0);
+  }
+  if (now_block != previous) {
+    if (now_block == RollerBlock::kNone) {
+      RCLCPP_INFO(this->get_logger(),
+                  "Roller allowed again (was %s): press the full-speed button again (or send a "
+                  "new lab run) to spin",
+                  rollerBlockName(previous));
+    } else {
+      RCLCPP_WARN(this->get_logger(), "Roller blocked: %s (was %s); roller at 0",
+                  rollerBlockName(now_block), rollerBlockName(previous));
+    }
     publish_roller_status();
   }
 }
@@ -320,8 +435,9 @@ void EscMotorControlComponent::lab_callback(const std_msgs::msg::Float32::Shared
   {
     std::lock_guard<std::mutex> guard(lock_);
     const bool was_active = roller_lab_logic_.labActive();
+    const RollerBlock block = evaluate_gate_locked();
     decision = roller_lab_logic_.onLab(msg->data, steady_now_sec(), full_speed_logic_.isActive(),
-                                       emergency_stop_active_);
+                                       isRollerEstopBlock(block), !isRollerAuthorityBlock(block));
     source_changed = was_active != roller_lab_logic_.labActive();
   }
   // Lock released before set_motor_speed(), which takes lock_ itself.
@@ -361,7 +477,9 @@ void EscMotorControlComponent::publish_roller_status() {
     status.source = roller_lab_logic_.sourceName(full_speed_logic_.isActive());
     status.lab_accepted = roller_lab_logic_.config().accept;
     status.lab_locked = roller_lab_logic_.labLocked();
-    status.estop = emergency_stop_active_;
+    const RollerBlock block = evaluate_gate_locked();
+    status.estop = isRollerEstopBlock(block);
+    status.authority = !isRollerAuthorityBlock(block);
     status.lab_max_speed = roller_lab_logic_.config().max_speed;
   }
   std_msgs::msg::String msg;
@@ -385,7 +503,7 @@ void EscMotorControlComponent::safety_check() {
   if (r.timed_out) {
     RCLCPP_WARN(this->get_logger(), "Safety timeout: stopping motor");
   }
-  if (r.stop && !emergency_stop_active_) {
+  if (r.stop) {
     set_motor_speed(0.0);
   }
 }

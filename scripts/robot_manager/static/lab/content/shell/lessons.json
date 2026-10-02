@@ -143,6 +143,24 @@
       "button": "seriesRL",
       "nav": "navRL",
       "canvas": "seriesRlRobot"
+    },
+    {
+      "id": "keymap",
+      "pages": [
+        "keymapPage"
+      ],
+      "title": "コントローラーの割り当てを決める",
+      "summary": "入力の番号・割り当て・不感帯",
+      "purpose": "ボタンとスティックの番号から、ロボットの働きを割り当てる",
+      "description": "コントローラーが送るボタンとスティックの値を番号で読み、前後・旋回・ローラー・発射を割り当てます。向きの符号や不感帯を調整して模型で確かめ、Robot Managerで実機に反映する表にまとめます。",
+      "tags": [
+        "ボタンと軸の番号",
+        "割り当ての重なり",
+        "向き・不感帯"
+      ],
+      "button": "seriesKeymap",
+      "nav": "navKeymap",
+      "canvas": "seriesKeymapRobot"
     }
   ],
   "groups": [
@@ -175,7 +193,8 @@
         "coordination",
         "behavior",
         "diagnostics",
-        "rl"
+        "rl",
+        "keymap"
       ]
     }
   ],

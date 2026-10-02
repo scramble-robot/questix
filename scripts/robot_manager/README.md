@@ -6,6 +6,9 @@ uvicorn on `127.0.0.1:8888`.
 - `app.py` — service control (mode, start/stop/restart with the practice start request,
   「すべて止める」 `/api/stop-all`, launch config).
 - `recorder.py` — rosbag recording console (`/api/rosbag/*`).
+- `trial.py` — experiment evidence for a recording (metadata, source identity, runtime ROS
+  environment, parameters before/after, bag integrity); passive (`POST /api/rosbag/start-trial`,
+  記録 tab 「証拠付きで記録する」: `static/trial-view.js`).
 - `logs.py` — log collection console (`/api/logs/*`).
 - `lab.py` — QUESTiX LAB console (`/api/lab/*`): starts/stops the lab bridge and allows or
   forbids driving from the lessons.
@@ -302,6 +305,107 @@ recording time.
   to the configured `OUTPUT_DIR` (default `/var/lib/questix/rosbags`).
 
 Recorder settings are persisted to `${QUESTIX_CONFIG_DIR:-/etc/questix_robot}/rosbag.env`.
+
+## 実験の証拠記録 (experiment evidence backend)
+
+走行実験の rosbag を、あとから「どのソース・どの設定・どの環境で・非常停止と先生の許可が
+どうだったか」まで確かめられるようにする記録モードです。**録画の仕組みは増やさず**、上の
+generic recorder と同じ 1 本の `ros2 bag record` プロセス・ロック・状態を使い、bag と同じ
+ディレクトリに証拠（sidecar）を置きます。
+
+画面: 記録タブの「証拠付きで記録する」を ON にすると、試行ID・班ID（匿名）・号機ID・条件・床面・
+積載・バッテリー・メモの欄が出て、「証拠付きで記録開始」が `start-trial` を呼びます（OFF なら従来の
+`start`）。欄は下の「メタデータ」の項目だけで、空欄は送りません（試行IDは日時から自動）。送る前に
+`trial.py` と同じ規則で確かめ（`static/trial-view.js`、`tests/trial_view.test.cjs` が同じ値に
+保ちます）、最終的な判定はサーバーの `validate_metadata` です。記録中は試行ID / 班 / 条件と開始時の
+注意を、止めたあとは前回の結果（確定中… / OK / 要確認 / 失敗、記録名、止まった理由、証拠の場所、
+注意）を表示します。
+
+- generic 録画: `POST /api/rosbag/start` — 従来どおり。メタデータも sidecar もなし。
+- 証拠付き記録: `POST /api/rosbag/start-trial` — 同じ recorder + 証拠。応答と
+  `GET /api/rosbag/status` の `trial` / `last_trial` に `trial_id` と `bag_name` を出すので、
+  QUESTiX LAB の JSON 記録（学習者向けの派生データ）と将来ひも付けられます。証拠の本体は
+  rosbag（MCAP）+ sidecar で、LAB の JSON とは別物として扱い、1 つにまとめません。
+
+### やらないこと（passive）
+
+ROS に対して行うのは `topic list` / `node list` / `param dump` / `bag info` の読み取りだけです。
+publish、`ros2 param set`、lifecycle 遷移、E-stop の解除、シリアルデバイスの操作、parameter の
+変更・復元、A/B の自動化は行いません。before/after の parameter とその diff は変更を**記録**
+するだけで、記録中の変更を**防ぐ**ロックはありません。
+
+### 実行環境（ロボットと同じ ROS ドメイン）
+
+開始のたびに `launch.env` の `ROBOT_WS` と `ROS_DOMAIN_ID` を読み、ロボットの起動スクリプトと
+同じ規則（`ros_domain.robot_domain`）でドメインを決めます。未設定ならロボットと同じ既定値 42、
+キッティング方針（0〜101 / 215〜232）の外でもロボットがその値で動いていればそのまま使い、
+warning として記録します（別のドメインへ移ることはありません）。Robot Manager 自身の
+`ROS_DOMAIN_ID` は使いません。`/opt/ros/jazzy/setup.bash` と `${ROBOT_WS}/install/setup.bash`
+の両方が必須で、どちらかが無ければ証拠ディレクトリを作る前・recorder を起動する前に失敗します
+（HTTP 503、exit code 90〜93）。source 後の `ROS_DISTRO` / `ROS_DOMAIN_ID` /
+`RMW_IMPLEMENTATION` などを `runtime.effective_env` に記録します。
+
+### ソースの特定（QUESTIX_SOURCE_DIR）
+
+インストール済みの Robot Manager（`/opt/questix_robot/...`、site-packages）は git checkout
+ではないので、ソースの根拠にしません。次の順に探します。
+
+1. サービスの環境変数 `QUESTIX_SOURCE_DIR`（`scripts/install-robot-manager.sh` が `REPO_DIR`、
+   Ansible が `robot_manager_src` の 2 つ上を `questix_robot_manager.service` に設定）
+2. `${ROBOT_WS}` 自身
+3. `${ROBOT_WS}/src/*`
+
+ディレクトリ名は信用せず、「git の top-level」かつ「QUESTiX のマーカー
+（`launcher/package.xml` と `systemd/questix_robot_launcher.sh`）あり」かつ「40 桁の commit」
+がそろったものだけを使います。dirty（未コミットの変更あり）は記録します。見つからなければ
+証拠付き記録は HTTP 503 で拒否します（generic 録画は影響を受けません）。
+`scripts/check-robot-manager.sh` がこの設定を読み取り専用で確認します。
+
+### preflight と記録するトピック
+
+開始前に次がそろっていなければ recorder を起動しません（HTTP 409）。
+
+- 必須: ノード `/drive_component`、トピック `/target_twist`、`/drive_status`、`/emergency_stop`
+- 任意: `/actuation_authority`（先生の実行時許可。許可を ON にしている間だけ出て、大会用の
+  起動には無いため任意）、`/joy`、`/joy_gated`、`/odom`、`/diagnostics`、`/parameter_events`
+
+記録は `-a`（全トピック）で、`EXCLUDE_TOPICS` が必須トピックや `/actuation_authority` に
+当たるパターンは、この記録に限って外します（warning に残します）。先生の実行時許可の状態は、
+Robot Manager 自身の値を開始時と停止直後に `questix_trial.yaml` の `runtime_authority` に
+記録します。
+
+### メタデータ（個人情報なし）
+
+`trial_id` / `team_id`（匿名の班 ID）/ `robot_id` / `condition_label` / `floor` / `payload_kg` /
+`battery_voltage` / `memo` だけを受け付けます。氏名・学籍番号・メールなどの項目は schema に
+なく、未知のキーは HTTP 422 で拒否します。
+
+### sidecar と順序
+
+```text
+OUTPUT_DIR/
+├── .trial_<bag>.evidence.tmp/   # 作成中 / 失敗時だけ残る（一覧・削除 API には出ない）
+└── <bag>/
+    ├── metadata.yaml           # rosbag2 の所有物（sidecar は上書きしない）
+    ├── *.mcap
+    ├── questix_trial.yaml      # schema_version、trial、timing、recording、runtime、source、
+    │                           # runtime_authority、preflight、結果（integrity）、warnings
+    ├── source_identity.txt     # commit / branch / dirty / describe（diff 本文は保存しない）
+    ├── topic_list.txt
+    ├── drive_params_before.yaml / drive_params_after.yaml
+    ├── joy_params_before.yaml / joy_params_after.yaml   # /joy_controller がある場合
+    ├── parameter_diff.txt
+    ├── bag_info.txt
+    └── recorder.log
+```
+
+停止は SIGINT → recorder 終了 → after parameter の取得（ここまで終わってから停止 API が返り、
+その間は次の開始を HTTP 409 で断る）→ バックグラウンドで `ros2 bag info`・integrity 判定・
+sidecar の移動、の順です。integrity が `ok` になるのは「SIGINT だけで終了」かつ「bag info が
+読める」かつ「必須トピックがそれぞれ 1 件以上」のときだけで、SIGTERM/SIGKILL への escalation は
+`ok` になりません。途中で失敗しても bag と証拠は消さず、staging を残して warning にします。
+空き容量ガード（`MIN_FREE_GB`）と低容量の自動停止は generic と共通です。Robot Manager の終了時は
+録画を SIGINT で止め、証拠の確定を上限つき（90 秒）で待ちます。
 
 ## 診断ログの保存 (log collection)
 

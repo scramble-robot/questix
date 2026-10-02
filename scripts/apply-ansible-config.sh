@@ -1,6 +1,16 @@
 #!/bin/bash
 # apply-ansible-config.sh
-# Apply Ansible configuration to the chroot environment
+# Apply the QUESTiX Ansible configuration to the custom image's chroot (after
+# scripts/prepare-base-system.sh, before scripts/build-iso.sh).
+#
+# The image is built from the checkout this script is in (not from the current directory: the
+# workflow runs it from /tmp/iso-build): that commit is cloned to /home/ubuntu/questix in the
+# image and the playbook runs from there, so the workspace is built in the image (a first boot
+# needs no download) and Robot Manager, its QUESTiX Local helper and the legacy cleanup are the
+# same revision. The playbook runs as root in the chroot with questix_image_build=true: the kit
+# user's own tasks (home, workspace import and build) become that user, services are enabled but
+# not started, and systemd/udev are not reloaded (none runs in a chroot). Functions:
+# scripts/iso/image-build-lib.sh (contract-tested by ansible/tests/test_image_build_contract.sh).
 
 set -e
 
@@ -14,41 +24,41 @@ fi
 
 echo "🤖 Applying Ansible configuration for $ARCHITECTURE with ROS2 $ROS2_DISTRO"
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+ISO_FILES_DIR="$SCRIPT_DIR/iso"
 WORK_DIR="/tmp/iso-work"
 CHROOT_DIR="$WORK_DIR/chroot"
-ANSIBLE_DIR="$(pwd)/ansible"
+IMAGE_USER=ubuntu
+IMAGE_SOURCE="/home/$IMAGE_USER/questix"
+# Ansible for the build only, in a venv removed afterwards (Ubuntu 24.04's pip refuses the system
+# Python, PEP 668). The same version as .github/workflows/ansible-check.yaml.
+IMAGE_ANSIBLE_VENV=/opt/questix-image-ansible
+IMAGE_ANSIBLE_VERSION=14.2.0
 
-# Copy Ansible files to chroot
-echo "📋 Copying Ansible files..."
-mkdir -p "$CHROOT_DIR/tmp/ansible"
-cp -r "$ANSIBLE_DIR"/* "$CHROOT_DIR/tmp/ansible/"
+# shellcheck source=iso/image-build-lib.sh
+. "$ISO_FILES_DIR/image-build-lib.sh"
 
-# Create inventory for localhost
-cat > "$CHROOT_DIR/tmp/ansible/localhost_inventory.ini" << EOF
-[localhost]
-127.0.0.1 ansible_connection=local ansible_python_interpreter=/usr/bin/python3
+echo "📋 Installing the QUESTiX source into the image..."
+questix_image_install_source "$REPO_ROOT" "$CHROOT_DIR" "$IMAGE_USER"
 
-[localhost:vars]
-ansible_user=root
-ansible_become=false
-EOF
+# Local inventory. No ansible_become here: an inventory variable would override the play's
+# `become` and every task's own become, including the kit user's tasks.
+printf '%s\n' '[localhost]' \
+    '127.0.0.1 ansible_connection=local ansible_python_interpreter=/usr/bin/python3' \
+    > "$CHROOT_DIR/tmp/questix-image-inventory.ini"
 
-# Install Ansible in chroot
-echo "📦 Installing Ansible in chroot environment..."
+echo "📦 Installing Ansible $IMAGE_ANSIBLE_VERSION in the chroot (build only)..."
 chroot "$CHROOT_DIR" /bin/bash << CHROOT_EOF
+set -e
 export HOME=/root
 export LC_ALL=C
 export DEBIAN_FRONTEND=noninteractive
-
-# Update package lists
 apt-get update
-
-# Install Ansible
-apt-get install -y python3-pip python3-dev
-pip3 install ansible
-
-# Verify Ansible installation
-ansible --version
+apt-get install -y python3-venv sudo git
+python3 -m venv "$IMAGE_ANSIBLE_VENV"
+"$IMAGE_ANSIBLE_VENV/bin/pip" install --quiet "ansible==$IMAGE_ANSIBLE_VERSION"
+"$IMAGE_ANSIBLE_VENV/bin/ansible" --version
 CHROOT_EOF
 
 # Apply appropriate playbook based on architecture
@@ -63,37 +73,39 @@ fi
 # Run Ansible playbook
 echo "🚀 Running Ansible playbook: $PLAYBOOK"
 chroot "$CHROOT_DIR" /bin/bash << CHROOT_EOF
+set -e
 export HOME=/root
 export LC_ALL=C
 export DEBIAN_FRONTEND=noninteractive
+cd "$IMAGE_SOURCE/ansible"
 
-cd /tmp/ansible
-
-# Set target user as ubuntu (created in base system preparation)
-export ANSIBLE_REMOTE_USER=ubuntu
-
-# Run the playbook
-ansible-playbook \
-    -i localhost_inventory.ini \
+# SSH: the playbooks do not manage it (prepare-base-system.sh installs openssh-server; the units
+# are disabled below, and the image enables remote login only after the first-boot enrollment set
+# a password). No autologin: the first login of the image is the console enrollment.
+# questix_image_build: see the header of this script.
+"$IMAGE_ANSIBLE_VENV/bin/ansible-playbook" \
+    -i /tmp/questix-image-inventory.ini \
     -e "ros2_distro=$ROS2_DISTRO" \
-    -e "ansible_user=ubuntu" \
-    -e "ansible_env={'HOME': '/home/ubuntu'}" \
+    -e "questix_image_build=true" \
+    -e "enable_autologin=false" \
+    -e "ansible_user=$IMAGE_USER" \
+    -e "workspace_path=$IMAGE_SOURCE" \
+    -e "ansible_env={'HOME': '/home/$IMAGE_USER'}" \
     --connection=local \
-    playbooks/$PLAYBOOK
+    "playbooks/$PLAYBOOK"
 
-# Clean up Ansible installation to save space
-pip3 uninstall -y ansible
-apt-get remove -y python3-dev
+# The build's Ansible is not part of the image.
+rm -rf "$IMAGE_ANSIBLE_VENV" /tmp/questix-image-inventory.ini
+rm -rf /root/.ansible "/home/$IMAGE_USER/.ansible"
 apt-get autoremove -y
 apt-get clean
 rm -rf /var/lib/apt/lists/*
-rm -rf /tmp/ansible
 CHROOT_EOF
 
 # Post-configuration for robotics kit
 if [ "$ARCHITECTURE" = "arm64" ]; then
     echo "🔧 Applying Raspberry Pi 5 specific configurations..."
-    
+
     # Configure boot settings for Raspberry Pi
     chroot "$CHROOT_DIR" /bin/bash << 'CHROOT_EOF'
 # Enable necessary modules
@@ -135,58 +147,51 @@ fi
 
 # Final system configuration
 echo "🔧 Applying final system configuration..."
+questix_image_install_first_boot "$ISO_FILES_DIR" "$CHROOT_DIR"
 chroot "$CHROOT_DIR" /bin/bash << 'CHROOT_EOF'
+set -e
 export HOME=/root
 export LC_ALL=C
 export DEBIAN_FRONTEND=noninteractive
 
-# Enable services
-systemctl enable ssh
 systemctl enable NetworkManager
 
-# Configure automatic login for first boot setup
-mkdir -p /etc/systemd/system/getty@tty1.service.d
-cat > /etc/systemd/system/getty@tty1.service.d/autologin.conf << 'AUTOLOGIN_EOF'
-[Service]
-ExecStart=
-ExecStart=-/sbin/agetty --autologin ubuntu --noclear %I $TERM
-AUTOLOGIN_EOF
+# First-enrollment policy, whatever the roles above did: no known password (the account is
+# locked), no NOPASSWD rule, no console autologin, SSH installed but not enabled. The console
+# enrollment unit sets the password, then enables SSH and disables itself.
+passwd -l ubuntu
+rm -f /etc/sudoers.d/ubuntu
+rm -f /etc/systemd/system/getty@tty1.service.d/autologin.conf
+for unit in ssh.socket ssh.service; do
+    if [ -e "/usr/lib/systemd/system/$unit" ]; then
+        systemctl disable "$unit"
+    fi
+done
+systemctl enable questix-first-boot.service
 
-# Create first boot setup script
-cat > /home/ubuntu/first-boot-setup.sh << 'SETUP_EOF'
-#!/bin/bash
-echo "🤖 Welcome to ROS2 Robotics Kit!"
-echo "📍 This system is pre-configured with ROS2 and robotics tools."
-echo ""
-echo "💡 Quick start:"
-echo "  - ROS2 workspace: ~/robot_ws (use 'rw' alias)"
-echo "  - Test ROS2: ros2 topic list"
-echo "  - Check hardware: gpio_status"
-echo ""
-echo "🔧 First-time setup:"
-echo "  1. Change password: passwd"
-echo "  2. Configure WiFi: sudo nmtui"
-echo "  3. Update system: sudo apt update && sudo apt upgrade"
-echo ""
-echo "📚 Documentation: https://github.com/your-repo/questix_core"
-
-# Disable autologin after first boot
-sudo rm -f /etc/systemd/system/getty@tty1.service.d/autologin.conf
-sudo systemctl daemon-reload
-
-# Remove this script
-rm -f /home/ubuntu/first-boot-setup.sh
-SETUP_EOF
-
-chmod +x /home/ubuntu/first-boot-setup.sh
-chown ubuntu:ubuntu /home/ubuntu/first-boot-setup.sh
-
-# Add first boot setup to .bashrc
-echo "" >> /home/ubuntu/.bashrc
-echo "# First boot setup" >> /home/ubuntu/.bashrc
-echo "if [ -f ~/first-boot-setup.sh ]; then" >> /home/ubuntu/.bashrc
-echo "    ~/first-boot-setup.sh" >> /home/ubuntu/.bashrc
-echo "fi" >> /home/ubuntu/.bashrc
+# Refuse to produce an image that breaks the policy (inside the chroot; the same checks run
+# again on the file tree after this block).
+visudo -cf /etc/sudoers
+if grep -rqs 'NOPASSWD' /etc/sudoers /etc/sudoers.d; then
+    echo "❌ A NOPASSWD sudo rule is in the image" >&2
+    exit 1
+fi
+if [ "$(passwd -S ubuntu | awk '{print $2}')" != L ]; then
+    echo "❌ The ubuntu account is not locked" >&2
+    exit 1
+fi
+if grep -qsE '^[[:space:]]*AutomaticLoginEnable[[:space:]]*=[[:space:]]*[Tt]rue' /etc/gdm3/custom.conf; then
+    echo "❌ Desktop autologin is enabled in the image" >&2
+    exit 1
+fi
+if systemctl is-enabled --quiet ssh.socket 2> /dev/null || systemctl is-enabled --quiet ssh.service 2> /dev/null; then
+    echo "❌ SSH is enabled before the first-boot enrollment" >&2
+    exit 1
+fi
+if [ "$(systemctl is-enabled questix-first-boot.service)" != enabled ]; then
+    echo "❌ questix-first-boot.service is not enabled" >&2
+    exit 1
+fi
 
 # Final cleanup
 apt-get clean
@@ -201,6 +206,10 @@ rm -f /home/ubuntu/.bash_history
 
 exit 0
 CHROOT_EOF
+
+# The same postconditions again from outside, on the file tree the image is made of.
+questix_image_verify_security "$CHROOT_DIR" "$IMAGE_USER" \
+    || { echo "❌ The image does not meet the first-enrollment policy" >&2; exit 1; }
 
 echo "✅ Ansible configuration applied successfully"
 echo "🎯 System configured for $ARCHITECTURE with ROS2 $ROS2_DISTRO"

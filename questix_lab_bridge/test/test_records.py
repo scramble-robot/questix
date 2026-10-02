@@ -334,3 +334,74 @@ def test_flush_keeps_a_drive_in_progress(auto):
     feeder.run(2.0, speed=0.2)
     feeder.recorder.flush(feeder.t)
     assert len(saved) == 1
+
+
+# --- bounded auto-record admission (S3) ----------------------------------------------------------
+
+def _blocked_writer(limit=2):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    from questix_lab_bridge.records import BoundedWriter
+    gate = threading.Event()
+    done = []
+    executor = ThreadPoolExecutor(1)
+
+    def write(item):
+        gate.wait(5)
+        if item == 'boom':
+            raise OSError('disk full')
+        done.append(item)
+    return BoundedWriter(executor, limit), write, gate, done, executor
+
+
+def test_auto_records_beyond_the_bound_are_dropped_not_queued():
+    writer, write, gate, done, executor = _blocked_writer(limit=2)
+    try:
+        # The first is being written (blocked), the second waits: the bound is reached.
+        assert writer.submit(write, 'a') and writer.submit(write, 'b')
+        assert [writer.submit(write, extra) for extra in 'cde'] == [False, False, False]
+        assert writer.backlog == 2  # never more held than the bound
+        gate.set()
+        executor.shutdown(wait=True)
+        assert done == ['a', 'b'] and writer.backlog == 0
+    finally:
+        gate.set()
+        executor.shutdown(wait=True)
+
+
+def test_room_comes_back_after_writing_and_after_a_failure():
+    import time
+    writer, write, gate, done, executor = _blocked_writer(limit=1)
+    try:
+        assert writer.submit(write, 'boom')  # this one fails on the writer thread
+        assert not writer.submit(write, 'x')
+        gate.set()
+        deadline = time.monotonic() + 5
+        while writer.backlog and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert writer.backlog == 0  # the failure freed its place
+        assert writer.submit(write, 'y')
+        executor.shutdown(wait=True)
+        assert done == ['y'] and writer.backlog == 0
+    finally:
+        gate.set()
+        executor.shutdown(wait=True)
+
+
+def test_nothing_is_admitted_once_the_writer_shuts_down():
+    writer, write, gate, done, executor = _blocked_writer(limit=2)
+    gate.set()
+    executor.shutdown(wait=True)
+    assert not writer.submit(write, 'late') and writer.backlog == 0
+
+
+def test_the_robot_keeps_every_stream_a_page_records():
+    # recording-core.js RECORDING_STREAMS (test/recording-core.test.mjs compares the two lists).
+    assert records.RECORDING_STREAMS == (
+        'drive', 'twist', 'scan', 'odom', 'roller', 'shot', 'estop')
+    streams = {stream: [{'type': stream, 'stamp': 1.0}] for stream in records.RECORDING_STREAMS}
+    recording = records.make_recording('lab', '', '2026-10-01T00:00:00.000Z',
+                                       {'wheel_radius': 0.1, 'wheel_separation': 0.5}, streams)
+    assert set(recording['streams']) == set(records.RECORDING_STREAMS)
+    assert recording['version'] == 1  # the new streams and wheel fields are optional additions
+    records.check_recording(recording)

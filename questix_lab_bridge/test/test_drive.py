@@ -6,6 +6,7 @@ def ready_arbiter(**options):
     arbiter = DriveArbiter(allowed=True, max_linear=0.3, max_angular=1.0, deadman_sec=0.5,
                            max_run_sec=30.0, stop_hold_sec=0.3, **options)
     arbiter.set_graph([], ['/drive_component'], 0.0)
+    arbiter.set_estop_known(True, 0.0)  # /emergency_stop heard: released
     return arbiter
 
 
@@ -139,3 +140,37 @@ def test_controller_takeover_ends_the_run():
     assert arbiter.last_stop == {'reason': drive.CONTROLLER, 'by': None}
     assert arbiter.run_seconds(0.6) == 0.0
     assert arbiter.tick(0.6) == (0.0, 0.0)
+
+
+# --- E-stop unknown until /emergency_stop is heard (S3) ------------------------------------------
+
+def test_driving_is_refused_until_the_estop_topic_is_heard():
+    arbiter = DriveArbiter(allowed=True, max_linear=0.3, max_angular=1.0)
+    arbiter.set_graph([], ['/twist_arbiter'], 0.0)
+    assert arbiter.request(1, 0.1, 0.0, 0.0) == drive.ESTOP_UNKNOWN
+    assert arbiter.tick(0.1) is None
+    assert arbiter.state()['blockers'] == [{'code': drive.ESTOP_UNKNOWN, 'nodes': None}]
+    arbiter.set_emergency_stop(False, 0.1)  # a derived "released" (/drive_status): no change
+    assert arbiter.request(1, 0.1, 0.0, 0.1) == drive.ESTOP_UNKNOWN
+    arbiter.set_estop_known(True, 0.2)
+    assert arbiter.request(1, 0.1, 0.0, 0.2) is None
+
+
+def test_a_heard_pressed_estop_blocks_and_a_derived_one_blocks_before_it():
+    arbiter = DriveArbiter(allowed=True, max_linear=0.3, max_angular=1.0)
+    arbiter.set_graph([], ['/twist_arbiter'], 0.0)
+    arbiter.set_emergency_stop(True, 0.0)  # derived pressed, before the topic
+    assert [b['code'] for b in arbiter.state()['blockers']] == [
+        drive.ESTOP_UNKNOWN, drive.EMERGENCY_STOP]
+    arbiter.set_estop_known(True, 0.1)
+    assert arbiter.request(1, 0.1, 0.0, 0.1) == drive.EMERGENCY_STOP
+    arbiter.set_emergency_stop(False, 0.2)
+    assert arbiter.request(1, 0.1, 0.0, 0.2) is None
+    arbiter.set_emergency_stop(True, 0.3)  # pressed during the run: it ends at once
+    assert not arbiter.active and arbiter.last_stop['reason'] == drive.EMERGENCY_STOP
+    assert arbiter.tick(0.35) == (0.0, 0.0)  # the usual stop hold
+
+
+def test_not_allowed_is_not_also_estop_unknown():
+    arbiter = DriveArbiter(allowed=False, max_linear=0.3, max_angular=1.0)
+    assert [b['code'] for b in arbiter.state()['blockers']] == [drive.NOT_ALLOWED]
