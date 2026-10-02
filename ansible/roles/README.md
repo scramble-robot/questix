@@ -93,14 +93,7 @@ QUESTiX のワークスペース（`~/questix`）を、Fresh キットで動く�
 
 詳細は `ansible/roles/ros2_build/README.md` を参照してください。
 
-### 6. openssh_server
-
-`openssh-server` を導入し、Ubuntu の既定の設定のまま SSH を有効にします（`install_openssh_server: true`）。
-`false` のときは何もしません（削除・停止・設定変更をしない）。
-
-詳細は `ansible/roles/openssh_server/README.md` を参照してください。
-
-### 7. wifi_access_point
+### 6. wifi_access_point
 
 Raspberry Pi の Wi-Fi を QUESTiX 用のアクセスポイントにします（NetworkManager、WPA2-PSK）。
 
@@ -162,11 +155,6 @@ ansible/roles/
 │   ├── meta/
 │   ├── tasks/
 │   └── README.md
-├── openssh_server/
-│   ├── defaults/
-│   ├── meta/
-│   ├── tasks/
-│   └── README.md
 ├── raspberry_pi_setup/
 │   ├── defaults/
 │   │   └── main.yaml
@@ -204,7 +192,6 @@ ansible/roles/
 3. `hardware_interfaces` - 独立して実行可能
 4. `robotics_workspace` - `ros2_installation` の後に実行される必要があります
 5. `ros2_build` - `ros2_installation`（colcon / vcstool / rosdep）と `robotics_workspace` の後、`robot_autostart` の前
-6. `openssh_server` - 独立して実行可能
 
 ## テスト
 

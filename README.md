@@ -114,9 +114,9 @@ the kit playbook against `localhost`.
    ```
 
    This runs `ansible-playbook ansible/playbooks/setup_kit.yaml` locally and
-   installs ROS 2 Jazzy, enables GPIO/I2C/SPI, applies udev rules, installs
-   openssh-server, and builds the QUESTiX workspace (the checkout, e.g. `~/questix`:
-   `dependency.repos` imported into `src/`, rosdep, `colcon build --symlink-install`).
+   installs ROS 2 Jazzy, enables GPIO/I2C/SPI, applies udev rules, and
+   builds the QUESTiX workspace (the checkout, e.g. `~/questix`: `dependency.repos`
+   imported into `src/`, rosdep, `colcon build --symlink-install`).
    It reports the setup as completed only after the QUESTiX packages resolve.
 
 5. **Reboot and verify**

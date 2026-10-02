@@ -1,8 +1,0 @@
----
-# Default variables for openssh_server role
-#
-# true: install openssh-server and make sure SSH is enabled and running with Ubuntu's own
-# configuration (maintenance and VS Code Remote SSH on a kit).
-# false: this role does nothing. It never removes the package, stops or disables SSH, or
-# touches /etc/ssh/sshd_config*.
-install_openssh_server: true

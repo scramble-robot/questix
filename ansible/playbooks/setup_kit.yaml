@@ -60,7 +60,6 @@
     - { role: ros2_installation }
     - { role: raspberry_pi_setup }
     - { role: hardware_interfaces }
-    - { role: openssh_server }
     - { role: robotics_workspace }
     # Imports dependency.repos, runs rosdep and colcon build, and checks the packages resolve:
     # the kit is not usable (Robot Manager's lesson bridge, the robot service) until it is built.
@@ -90,9 +89,6 @@
             ~ ' (questix_lab_bridge lab_bridge_node resolves)'
             if workspace_build_ready | default(false) | bool else '📦 QUESTiX ROS packages: not checked' }}
           - "🖥️  Robot Manager installed: http://localhost:{{ robot_manager_port | default(8888) }}"
-          - >-
-            {{ '🔑 SSH: openssh-server, ' ~ (openssh_unit | default('ssh')) ~ ' enabled and active'
-            if install_openssh_server | default(true) | bool else '🔑 SSH: not managed (install_openssh_server=false)' }}
           - >-
             {{ '🖱️  Desktop shortcut trusted' if desktop_shortcut_trusted | default(false) | bool
             else '⚠️  Desktop shortcut not trusted (see the warning above; Robot Manager works without it)' }}
