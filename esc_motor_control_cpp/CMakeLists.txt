@@ -65,6 +65,7 @@ if(BUILD_TESTING)
 
   ament_auto_add_gtest(test_full_speed_logic test/test_full_speed_logic.cpp)
   ament_auto_add_gtest(test_estop_logic test/test_estop_logic.cpp)
+  ament_auto_add_gtest(test_roller_lab_logic test/test_roller_lab_logic.cpp)
 endif()
 
 ament_auto_package(INSTALL_TO_SHARE launch config)

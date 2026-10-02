@@ -41,8 +41,12 @@ def setup(context):
     description = document.toxml()
     joy_config = str(Path(get_package_share_directory('joy_controller')) /
                      'config/joy_controller_params.yaml')
+    # Speed ratios and axes are operator tuning: the packaged default profile
+    # (questix_control_config, controls.uart.yaml) is applied after the node's own YAML.
+    control_profile = str(Path(get_package_share_directory('questix_control_config')) /
+                          'config/controls.uart.yaml')
     import yaml
-    ratios = yaml.safe_load(Path(joy_config).read_text())['joy_controller']['ros__parameters']
+    ratios = yaml.safe_load(Path(control_profile).read_text())['joy_controller']['ros__parameters']
     linear_scale = float(ratios['longitudinal_input_ratio'])
     angular_scale = float(ratios['angular_input_ratio'])
     if not all(math.isfinite(x) and x > 0 for x in (linear_scale, angular_scale)):
@@ -52,7 +56,7 @@ def setup(context):
              name='operation_manager_node', output='screen'),
         Node(package='joy_gate', executable='joy_gate_node', name='joy_gate', output='screen'),
         Node(package='joy_controller', executable='joy_controller_node',
-             name='joy_controller', output='screen', parameters=[joy_config, {
+             name='joy_controller', output='screen', parameters=[joy_config, control_profile, {
                  'joy_topic': '/joy_gated', 'linear_x_axis': 1,
                  'angular_z_axis': 2, 'lateral_input_ratio': 0.0}]),
         Node(package='esc_motor_control_cpp', executable='esc_motor_control_node',

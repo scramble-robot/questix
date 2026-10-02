@@ -1,0 +1,1267 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0a0e14">
+<title>ブラウザ・スマホで操作 · QUESTiX</title>
+<style>
+  :root {
+    --bg: #0a0e14; --bg2: #0d131c; --panel: #121925; --panel2: #172131;
+    --line: #223044; --line2: #2e3f58; --fg: #e8edf5; --dim: #8b97ac; --mute: #5d6b84;
+    --cyan: #22d3ee; --cyan-dim: rgba(34, 211, 238, .18);
+    --green: #34d399; --amber: #fbbf24; --red: #f43f5e; --blue: #60a5fa;
+    --ok: var(--green); --warn: var(--amber); --bad: var(--red); --accent: var(--cyan);
+    --radius: 14px;
+    --font: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", "Hiragino Sans", sans-serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+    font: 14px/1.35 var(--font);
+    touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+    overscroll-behavior: none; overflow: hidden;
+  }
+  body {
+    background:
+      radial-gradient(900px 420px at 50% -8%, rgba(34, 211, 238, .14), transparent 60%),
+      linear-gradient(180deg, var(--bg) 0%, var(--bg2) 100%);
+  }
+  button { font: inherit; cursor: pointer; }
+  kbd {
+    font: 600 11px/1 var(--mono); padding: 3px 6px; border-radius: 5px;
+    border: 1px solid var(--line2); border-bottom-width: 2px; background: var(--panel2); color: var(--fg);
+  }
+  #app {
+    height: 100%; height: 100dvh; display: grid; grid-template-rows: auto auto auto 1fr auto;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  /* Explicit rows: #banner is display:none when empty and must not shift main/footer. */
+  header { grid-row: 1; }
+  #banner { grid-row: 2; }
+  #controls { grid-row: 3; }
+  main { grid-row: 4; }
+  footer { grid-row: 5; }
+
+  /* ------------------------------------------------------------ header */
+  header {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 12px; min-height: 44px;
+    background: rgba(18, 25, 37, .88); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line);
+  }
+  .brand { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+  .brand svg { width: 24px; height: 24px; filter: drop-shadow(0 0 6px rgba(34, 211, 238, .55)); }
+  .brand h1 { font-size: 15px; margin: 0; font-weight: 700; letter-spacing: .04em; }
+  .brand .tag {
+    font: 700 10px/1 var(--mono); letter-spacing: .12em; padding: 4px 6px; border-radius: 4px;
+    color: var(--cyan); border: 1px solid rgba(34, 211, 238, .45); background: var(--cyan-dim);
+  }
+  header .host { color: var(--mute); font: 12px var(--mono); }
+  /* Which robot this page drives: a phone on the wrong Wi-Fi should notice. */
+  .robot {
+    display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 42vw; padding: 3px 9px;
+    border-radius: 8px; border: 1px solid var(--line2); background: var(--bg); color: var(--fg);
+    font: 700 12px/1.2 var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .robot[hidden] { display: none; }
+  .robot svg { width: 14px; height: 14px; flex: none; }
+  .robot span { overflow: hidden; text-overflow: ellipsis; }
+  .spacer { flex: 1; }
+  .chips { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--panel); font-size: 12px; white-space: nowrap; color: var(--dim);
+    transition: border-color .2s, color .2s;
+  }
+  .chip::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--mute); flex: none; }
+  .chip.ok { color: var(--fg); border-color: rgba(52, 211, 153, .45); }
+  .chip.ok::before { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  .chip.warn { color: var(--fg); border-color: rgba(251, 191, 36, .5); }
+  .chip.warn::before { background: var(--warn); box-shadow: 0 0 8px var(--warn); animation: blink 1s infinite; }
+  .chip.bad { color: var(--fg); border-color: rgba(244, 63, 94, .55); }
+  .chip.bad::before { background: var(--bad); box-shadow: 0 0 8px var(--bad); }
+  @keyframes blink { 50% { opacity: .35; } }
+  /* Every tappable control is at least 44 x 44 px. */
+  button.icon {
+    background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 10px;
+    padding: 6px 12px; font-size: 14px; touch-action: manipulation; min-height: 44px; min-width: 44px;
+  }
+  button.icon:active { background: var(--panel2); }
+  button.icon.primary { border-color: rgba(34, 211, 238, .6); background: var(--cyan-dim); color: var(--cyan); font-weight: 600; }
+  button.icon.square { padding: 0; width: 44px; font-size: 17px; }
+  button[hidden] { display: none; }
+
+  /* ------------------------------------------------------------ banner */
+  #banner { display: none; padding: 8px 12px; text-align: center; font-weight: 700; letter-spacing: .04em; }
+  #banner.bad { display: block; background: var(--bad); color: #fff; animation: pulse-bg 1.2s infinite; }
+  #banner.warn { display: block; background: var(--warn); color: #201700; }
+  #banner.info { display: block; background: var(--accent); color: #041014; }
+  #banner.ok { display: block; background: var(--ok); color: #03140d; }
+  #banner .sub { display: block; font-weight: 400; font-size: 12px; opacity: .92; }
+  #banner .acts { display: flex; justify-content: center; gap: 8px; margin-top: 6px; }
+  #banner .acts button {
+    min-height: 44px; padding: 6px 16px; border-radius: 10px; font-weight: 700; touch-action: manipulation;
+    border: 1px solid rgba(0, 0, 0, .35); background: rgba(255, 255, 255, .85); color: #111;
+  }
+  #banner .acts button.quiet { background: transparent; color: inherit; }
+  @keyframes pulse-bg { 50% { filter: brightness(.8); } }
+
+  /* ------------------------------------------------------------ controls */
+  #controls {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 6px 12px;
+    background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  .seg { display: inline-flex; padding: 3px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line); }
+  .seg button {
+    background: transparent; color: var(--dim); border: 0; border-radius: 8px; padding: 6px 14px; font-size: 13px; font-weight: 600;
+    touch-action: manipulation; min-height: 44px;
+  }
+  .seg button.on { background: var(--panel2); color: var(--cyan); box-shadow: inset 0 0 0 1px rgba(34, 211, 238, .4); }
+  /* Keyboard mode needs a real keyboard: hidden on touch-only devices. */
+  .touch-only .seg { display: none; }
+  #inputMode { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+  #inputHelp { margin: 0; color: var(--dim); font-size: 12px; flex: 1 1 260px; min-width: 0; }
+  #inputHelp kbd { margin: 0 1px; }
+  .acts-row { display: inline-flex; gap: 8px; }
+  #stop {
+    border-color: rgba(244, 63, 94, .7); background: rgba(244, 63, 94, .16); color: #ffd0d8; font-weight: 800;
+    padding: 6px 16px; letter-spacing: .06em;
+  }
+  #stop::before {
+    content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 7px; border-radius: 2px;
+    background: var(--bad); vertical-align: 0;
+  }
+
+  /* ------------------------------------------------------------ main */
+  /* Two compact groups instead of full-screen zones: "移動" holds both
+     sticks side by side, "ショット" holds the action cluster. When the node
+     relays a camera (#app.has-cam) the live view fills the middle column. */
+  main {
+    position: relative; display: grid; min-height: 0; align-items: center; align-content: center;
+    justify-content: space-between; gap: 10px; padding: 10px; grid-template-columns: auto auto;
+  }
+  .has-cam main {
+    grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: minmax(0, 1fr);
+    justify-content: stretch; align-content: stretch;
+  }
+  .cam {
+    display: none; position: relative; min-width: 0; min-height: 0; align-self: stretch; overflow: hidden;
+    border-radius: 16px; border: 1px solid var(--line); background: #000;
+  }
+  .has-cam .cam { display: block; }
+  .cam img {
+    display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; -webkit-user-drag: none;
+  }
+  .cam img:not([src]) { visibility: hidden; }
+  .cam .group-label { text-shadow: 0 1px 3px rgba(0, 0, 0, .8); }
+  .cam .group-label .hint { font: 10px var(--mono); }
+  /* Keyboard mode keeps the camera visible: the key map takes the cards' place. */
+  .cam-badge {
+    position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 4px; padding: 12px; text-align: center; pointer-events: none; background: rgba(10, 14, 20, .55);
+  }
+  .cam-badge[hidden] { display: none; }
+  .cam-badge b { font-size: 14px; }
+  .cam-badge span { font-size: 12px; color: var(--dim); }
+  .cam-badge.stale { background: rgba(10, 14, 20, .35); }
+  .cam-badge.stale b { color: var(--amber); }
+  .group {
+    position: relative; min-width: 0; border-radius: 16px; padding: 30px 8px 8px;
+    border: 1px solid var(--line); background: rgba(18, 25, 37, .55);
+  }
+  .group-label {
+    position: absolute; left: 10px; top: 8px; z-index: 1; display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; font-weight: 700; letter-spacing: .08em; color: var(--dim); pointer-events: none;
+  }
+  .group-label b { font: 700 10px/1 var(--mono); color: var(--cyan); padding: 3px 5px; border-radius: 4px; background: var(--cyan-dim); }
+  .group-label .hint { font-weight: 400; letter-spacing: 0; color: var(--mute); }
+  .group.move { display: flex; gap: 8px; }
+  .zone {
+    position: relative; overflow: hidden; border-radius: 12px; background: rgba(10, 14, 20, .45);
+    width: clamp(180px, 24vw, 240px); height: clamp(180px, 34vh, 240px);
+  }
+  .zone-label {
+    position: absolute; left: 0; right: 0; top: 8px; z-index: 1; text-align: center; pointer-events: none;
+    font-size: 11px; font-weight: 700; letter-spacing: .06em; color: var(--dim);
+  }
+  .rest {
+    position: absolute; left: 0; right: 0; bottom: 8px; text-align: center; pointer-events: none; transition: opacity .18s;
+    color: var(--mute); font-size: 10px; line-height: 1.3;
+  }
+  .zone.active .rest { opacity: 0; }
+  .group.shot { display: flex; flex-direction: column; }
+
+  /* action cluster: FIRE sits where the thumb rests, TILT above/below it in
+     the direction it moves the shooter, ROLLER off to the side.
+     --bs: small button size, --bf: FIRE size. */
+  .buttons {
+    --bs: 72px; --bf: 108px;
+    display: grid; gap: 10px; margin: auto 0; padding: 6px 8px 4px;
+    grid-template-columns: var(--bs) var(--bf); grid-template-rows: var(--bs) var(--bf) var(--bs);
+    grid-template-areas: ". up" "roller fire" ". down";
+  }
+  .btn {
+    --c: var(--blue);
+    position: relative; border-radius: 18px; border: 1.5px solid color-mix(in srgb, var(--c) 45%, var(--line2));
+    background: linear-gradient(180deg, color-mix(in srgb, var(--c) 14%, var(--panel2)), color-mix(in srgb, var(--c) 5%, var(--panel)));
+    color: var(--fg); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    padding: 0 4px; touch-action: none; box-shadow: 0 3px 0 rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.05);
+    transition: transform .06s, background .1s, box-shadow .1s;
+  }
+  .btn .ico { font-size: 22px; line-height: 1; font-weight: 800; color: var(--c); }
+  .btn .label { font-size: 11px; font-weight: 800; letter-spacing: .06em; line-height: 1.1; white-space: nowrap; }
+  .btn .sub { font-size: 10px; color: var(--dim); line-height: 1.1; white-space: nowrap; }
+  .btn kbd { position: absolute; right: 6px; top: 6px; display: none; }
+  .keyboard .btn kbd { display: inline-block; }
+  .btn.up { grid-area: up; }
+  .btn.down { grid-area: down; }
+  .btn.roller { --c: var(--amber); grid-area: roller; }
+  .btn.fire {
+    --c: var(--red); grid-area: fire; border-radius: 50%; border-width: 2px;
+    box-shadow: 0 3px 0 rgba(0,0,0,.4), 0 0 0 5px rgba(244, 63, 94, .12), inset 0 1px 0 rgba(255,255,255,.05);
+  }
+  .btn.fire .ico { font-size: 32px; }
+  .btn.fire .label { font-size: 14px; }
+  .btn.fire kbd { right: 14px; top: 12px; }
+  .btn.active {
+    transform: translateY(2px); box-shadow: 0 0 0 1px var(--c), 0 0 24px color-mix(in srgb, var(--c) 55%, transparent);
+    background: color-mix(in srgb, var(--c) 55%, var(--panel)); border-color: var(--c);
+  }
+  .btn.active .ico, .btn.active .sub { color: #fff; }
+
+  /* sticks: parked at a home position; touching the base anchors there,
+     touching elsewhere in the zone floats the stick to the finger. */
+  .stick {
+    --s: 150px;
+    position: absolute; width: var(--s); height: var(--s); margin: calc(var(--s) / -2) 0 0 calc(var(--s) / -2);
+    left: 50%; top: 50%; border-radius: 50%; pointer-events: none;
+    background: radial-gradient(circle, rgba(34, 211, 238, .05), rgba(34, 211, 238, .02) 60%, transparent 72%);
+    border: 1.5px dashed var(--line2); box-shadow: 0 0 0 6px rgba(34, 211, 238, .04);
+    transition: border-color .15s, box-shadow .15s;
+  }
+  .zone .stick { top: 50%; }
+  .stick .arr { position: absolute; font-size: 10px; color: var(--mute); font-weight: 700; z-index: 1; }
+  .stick .arr.n { top: 7px; left: 50%; transform: translateX(-50%); }
+  .stick .arr.s { bottom: 7px; left: 50%; transform: translateX(-50%); }
+  .stick .arr.w { left: 10px; top: 50%; transform: translateY(-50%); }
+  .stick .arr.e { right: 10px; top: 50%; transform: translateY(-50%); }
+  .stick .arr.big { font-size: 18px; color: var(--dim); }
+  .stick::before, .stick::after { content: ""; position: absolute; left: 50%; top: 50%; background: rgba(34, 211, 238, .18); }
+  .stick::before { width: 1px; height: 100%; transform: translate(-50%, -50%); }
+  .stick::after { width: 100%; height: 1px; transform: translate(-50%, -50%); }
+  .knob {
+    position: absolute; width: 62px; height: 62px; margin: -31px 0 0 -31px; border-radius: 50%; left: 50%; top: 50%; z-index: 2;
+    background: radial-gradient(circle at 35% 30%, #3b4c63, #24314a 45%, #151d2b 100%);
+    border: 1px solid var(--line2);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, .5), 0 0 0 3px rgba(34, 211, 238, .08), inset 0 -3px 6px rgba(0, 0, 0, .35);
+    transition: background .15s, box-shadow .15s;
+  }
+  .stick.on .knob {
+    background: radial-gradient(circle at 35% 30%, #4fe3f7, var(--cyan) 45%, #0b7f97 100%); border-color: transparent;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, .5), 0 0 18px rgba(34, 211, 238, .55), inset 0 -3px 6px rgba(0, 0, 0, .35);
+  }
+
+  /* keyboard map (shown only in keyboard mode) */
+  #keymap {
+    position: absolute; inset: 0; display: none; align-items: center; justify-content: center; gap: 22px; flex-wrap: wrap;
+    padding: 10px; pointer-events: none; z-index: 2; background: rgba(10, 14, 20, .55);
+  }
+  .keyboard #keymap { display: flex; }
+  .keyboard .group { opacity: .35; }
+  .keyboard .rest, .keyboard .zone-label { visibility: hidden; }
+  .keyboard.has-cam main { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+  .keyboard.has-cam .group { display: none; }
+  .keyboard.has-cam #keymap { position: static; grid-column: 1; background: none; padding: 4px 0 0; }
+  .kgroup { display: grid; gap: 6px; justify-items: center; }
+  .kgroup .krow { display: flex; gap: 6px; }
+  .kgroup .kname { font-size: 11px; font-weight: 700; letter-spacing: .08em; color: var(--dim); }
+  .kgroup .kname b { color: var(--fg); }
+  .key {
+    --c: var(--cyan);
+    min-width: 40px; height: 40px; padding: 0 10px; border-radius: 9px; display: grid; place-items: center;
+    font: 700 14px/1 var(--mono); color: var(--fg); background: var(--panel); border: 1px solid var(--line2);
+    border-bottom-width: 3px; transition: background .06s, transform .06s, box-shadow .06s;
+  }
+  .key.space { min-width: 200px; --c: var(--green); }
+  .key.fire { --c: var(--red); }
+  .key.roller { --c: var(--amber); }
+  .key.tilt { --c: var(--blue); }
+  .key small { font: 500 10px/1 var(--font); color: var(--dim); margin-left: 6px; }
+  .key.down {
+    background: color-mix(in srgb, var(--c) 30%, var(--panel)); border-color: var(--c); transform: translateY(2px); border-bottom-width: 1px;
+    box-shadow: 0 0 16px color-mix(in srgb, var(--c) 50%, transparent);
+  }
+  .key.down small { color: var(--fg); }
+
+  /* connection overlay */
+  #overlay {
+    position: absolute; inset: 0; z-index: 5; display: flex; align-items: center; justify-content: center; padding: 16px;
+    background: rgba(10, 14, 20, .78); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+  }
+  #overlay[hidden] { display: none; }
+  .ov {
+    max-width: 380px; width: 100%; text-align: center; padding: 20px 18px; border-radius: 18px;
+    background: var(--panel); border: 1px solid var(--line2); box-shadow: 0 20px 60px rgba(0, 0, 0, .5);
+  }
+  .ov .spin {
+    width: 42px; height: 42px; margin: 0 auto 12px; border-radius: 50%;
+    border: 3px solid var(--line2); border-top-color: var(--cyan); animation: spin .9s linear infinite;
+  }
+  .ov.bad .spin { border-top-color: var(--bad); animation: none; }
+  .ov.bad .spin::after { content: "!"; display: block; text-align: center; font-weight: 800; color: var(--bad); line-height: 36px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .ov h2 { margin: 0 0 4px; font-size: 17px; }
+  .ov p { margin: 0; color: var(--dim); font-size: 13px; }
+  .ov p + p { margin-top: 8px; }
+  .ov .who { color: var(--mute); font: 12px var(--mono); }
+  .ov button { margin-top: 14px; padding: 9px 18px; font-size: 14px; }
+  .ov button[hidden] { display: none; }
+  /* Someone else operates: this page is a read-only view, the camera stays visible. */
+  #overlay.viewer { align-items: flex-start; background: rgba(10, 14, 20, .5); backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .ov.viewer .spin { border-color: var(--amber); animation: none; }
+  .ov.viewer .spin::after { content: "1"; display: block; text-align: center; font-weight: 800; color: var(--amber); line-height: 36px; }
+  .ov.free .spin { border-color: var(--ok); animation: none; }
+  .ov.free .spin::after { content: "▶"; display: block; text-align: center; color: var(--ok); line-height: 36px; }
+
+  /* ------------------------------------------------------------ footer */
+  footer {
+    display: flex; align-items: center; gap: 14px; padding: 6px 12px; border-top: 1px solid var(--line);
+    background: var(--panel); color: var(--dim); font-size: 11px; white-space: nowrap; overflow: hidden;
+  }
+  .meter { display: inline-flex; align-items: center; gap: 6px; }
+  .meter .ml { font-weight: 700; letter-spacing: .06em; width: 26px; }
+  .meter .bar { position: relative; width: 84px; height: 8px; border-radius: 4px; background: var(--bg); border: 1px solid var(--line); overflow: hidden; }
+  .meter .bar::before { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--line2); }
+  .meter .fill { position: absolute; top: 0; bottom: 0; left: 50%; width: 0; background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
+  .meter.turn .fill { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
+  .meter .mv { font: 11px var(--mono); width: 40px; color: var(--fg); text-align: right; }
+  footer .stat { font: 11px var(--mono); overflow: hidden; text-overflow: ellipsis; }
+  footer .raw { font: 10px var(--mono); color: var(--mute); overflow: hidden; text-overflow: ellipsis; }
+  #reconnect[hidden] { display: none; }
+
+  /* ------------------------------------------------------------ help */
+  #help {
+    position: fixed; inset: 0; z-index: 20; display: flex; align-items: flex-end; justify-content: center;
+    background: rgba(0, 0, 0, .55); padding: 0;
+  }
+  #help[hidden] { display: none; }
+  .sheet {
+    width: min(100%, 720px); max-height: 88vh; max-height: 88dvh; overflow: auto; touch-action: pan-y;
+    background: var(--panel); border: 1px solid var(--line2); border-bottom: 0; border-radius: 18px 18px 0 0;
+    padding: 14px 18px calc(18px + env(safe-area-inset-bottom)); box-shadow: 0 -20px 60px rgba(0, 0, 0, .5);
+  }
+  .sheet .top { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .sheet h2 { margin: 0; font-size: 16px; flex: 1; }
+  .sheet .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+  .sheet section { background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+  .sheet h3 { margin: 0 0 6px; font-size: 13px; color: var(--cyan); letter-spacing: .04em; }
+  .sheet ul { margin: 0; padding-left: 16px; color: var(--dim); font-size: 12.5px; line-height: 1.55; }
+  .sheet li b { color: var(--fg); }
+  .sheet .warnbox { border-color: rgba(251, 191, 36, .45); }
+  .sheet .warnbox h3 { color: var(--amber); }
+
+  /* ------------------------------------------------------------ responsive */
+  @media (max-height: 480px) and (orientation: landscape) {
+    header { min-height: 36px; padding: 4px 10px; }
+    #controls { padding: 4px 10px; }
+    #inputHelp { display: none; }
+    main { gap: 6px; padding: 6px; }
+    .group { border-radius: 12px; padding: 26px 6px 6px; }
+    .group.move { gap: 6px; }
+    .zone { width: clamp(170px, 24vw, 220px); height: min(52vh, 210px); border-radius: 10px; }
+    .buttons { --bs: 54px; --bf: 80px; gap: 7px; padding: 4px 6px 2px; }
+    .stick { --s: 120px; }
+    .stick .arr { font-size: 9px; }
+    .stick .arr.n { top: 4px; } .stick .arr.s { bottom: 4px; } .stick .arr.w { left: 7px; } .stick .arr.e { right: 7px; }
+    .knob { width: 52px; height: 52px; margin: -26px 0 0 -26px; }
+    .key { height: 32px; min-width: 32px; font-size: 12px; }
+    .key.space { min-width: 150px; }
+    #keymap { gap: 12px; }
+    footer { padding: 3px 10px; }
+    .cam { border-radius: 12px; }
+  }
+  @media (orientation: portrait) {
+    /* Cluster above, both sticks along the bottom edge under the thumbs.
+       With a camera: view on top filling the spare height, cluster, sticks. */
+    main { grid-template-columns: 1fr; align-content: end; justify-items: stretch; }
+    .has-cam main { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) auto auto; align-content: stretch; }
+    .keyboard.has-cam main { grid-template-rows: minmax(0, 1fr) auto; }
+    .cam { order: -2; }
+    .group.shot { justify-self: end; order: -1; }
+    .group.move { justify-content: space-between; }
+    .zone { width: calc(50% - 4px); height: clamp(170px, 26vh, 220px); }
+    .buttons { --bs: 62px; --bf: 92px; margin: 0; }
+    .key.space { min-width: 160px; }
+  }
+  @media (max-width: 520px) {
+    header { gap: 6px; padding: 6px 8px; }
+    header .host, .brand .tag, .brand h1 { display: none; }
+    /* Row 1: logo, robot name, ? and full screen. Row 2: the status chips, then
+       操作をやめる / 止める (on a row of their own when they do not fit). */
+    .chips { order: 5; flex: 1 1 auto; }
+    .acts-row { order: 6; margin-left: auto; }
+    .chip { padding: 3px 8px; font-size: 11px; }
+    .robot { max-width: none; flex: 0 1 auto; }
+    /* No hint line: the zones carry their own hints and the help sheet the rest,
+       so a notice banner never pushes the cards under the header. */
+    #controls { gap: 6px 10px; }
+    #inputHelp { display: none; }
+    footer { padding: 5px 8px; }
+    .meter { flex: 1 1 0; min-width: 0; gap: 4px; }
+    .meter .ml { width: auto; flex: none; }
+    .meter .bar { flex: 1 1 auto; width: auto; min-width: 20px; }
+    .meter .mv { width: 36px; flex: none; }
+  }
+  @media (max-width: 900px) {
+    header .host, .brand .tag { display: none; }
+  }
+  /* Phones: the meters only; debug numbers would clip them. A touch-only phone has
+     nothing left in the controls row (no keyboard switch, no hint line). */
+  @media (max-width: 520px), (max-height: 480px) {
+    footer .stat, footer .raw, footer .spacer { display: none; }
+    footer { justify-content: space-between; gap: 8px; }
+    .touch-only #controls { display: none; }
+  }
+  @media (max-height: 480px) and (orientation: landscape) {
+    .brand h1 { display: none; }
+    #banner { padding: 4px 10px; }
+    #banner .sub { display: inline; margin-left: 10px; }
+    #banner .acts { display: inline-flex; margin: 0 0 0 12px; vertical-align: middle; }
+    #overlay { padding: 8px; }
+    .ov { max-width: 560px; padding: 10px 14px; }
+    .ov .spin { width: 28px; height: 28px; margin-bottom: 6px; border-width: 2px; }
+    .ov.bad .spin::after, .ov.viewer .spin::after, .ov.free .spin::after { line-height: 24px; font-size: 13px; }
+    .ov h2 { font-size: 15px; }
+    .ov p { font-size: 12px; }
+    .ov p + p { margin-top: 4px; }
+    .ov button { margin-top: 8px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .chip.warn::before, #banner.bad, .ov .spin { animation: none; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="brand" aria-label="QUESTiX ブラウザ・スマホで操作">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5 20.2 7.2v9.6L12 21.5 3.8 16.8V7.2Z" fill="none" stroke="#22d3ee" stroke-width="1.6" stroke-linejoin="round"/><circle cx="12" cy="10" r="2.4" fill="#22d3ee"/><path d="M12 12.4v4.2M8.8 16.6h6.4" stroke="#22d3ee" stroke-width="1.6" stroke-linecap="round"/></svg>
+      <h1>QUESTiX</h1><span class="tag">ブラウザ・スマホで操作</span>
+    </div>
+    <span class="robot" id="robot" title="操作するロボット" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="4.5" width="11" height="8" rx="2" fill="none" stroke="#22d3ee" stroke-width="1.4"/><circle cx="6" cy="8.5" r="1.1" fill="#22d3ee"/><circle cx="10" cy="8.5" r="1.1" fill="#22d3ee"/><path d="M8 4.5V2" stroke="#22d3ee" stroke-width="1.4" stroke-linecap="round"/></svg><span id="robotName"></span></span>
+    <span class="host" id="host"></span>
+    <div class="spacer"></div>
+    <div class="chips">
+      <span class="chip" id="estop">非常停止：--</span>
+      <span class="chip" id="conn">未接続</span>
+    </div>
+    <div class="acts-row">
+      <button class="icon" id="releaseBtn" title="操作をほかの端末に譲る" hidden>操作をやめる</button>
+      <button class="icon" id="stop" title="この画面の操作と、教材の走行・ローラーを止めます（どの端末からでも押せます）">止める</button>
+    </div>
+    <button class="icon primary" id="reconnect" hidden>再接続</button>
+    <button class="icon square" id="helpBtn" title="操作ガイド" aria-label="操作ガイド">?</button>
+    <button class="icon square" id="fullscreen" title="全画面" aria-label="全画面">⛶</button>
+  </header>
+  <div id="banner" role="status"></div>
+  <div id="controls">
+    <select id="inputMode" aria-hidden="true" tabindex="-1">
+      <option value="pointer">タッチ・マウス</option>
+      <option value="keyboard">キーボード</option>
+    </select>
+    <div class="seg" role="group" aria-label="操作方法">
+      <button type="button" id="modePointer" class="on">タッチ・マウス</button>
+      <button type="button" id="modeKeyboard">キーボード</button>
+    </div>
+    <p id="inputHelp">スティックの領域をドラッグします。ボタンは押している間だけ動きます。指を離すと止まります。</p>
+  </div>
+  <main>
+    <section class="group move">
+      <div class="group-label"><b>L R</b> 移動</div>
+      <div class="zone left" id="leftZone">
+        <div class="zone-label">前後・左右</div>
+        <div class="rest">土台の外に触れるとその場にスティックが出ます</div>
+        <div class="stick" id="leftStick"><span class="arr n">前</span><span class="arr s">後</span><span class="arr w">左</span><span class="arr e">右</span><div class="knob"></div></div>
+      </div>
+      <div class="zone turn" id="rightZone">
+        <div class="zone-label">旋回</div>
+        <div class="rest">左右にドラッグ</div>
+        <div class="stick" id="rightStick"><span class="arr w big">↶</span><span class="arr e big">↷</span><div class="knob"></div></div>
+      </div>
+    </section>
+    <section class="cam" id="cam" aria-label="カメラ映像">
+      <img id="camImg" alt="" decoding="async" draggable="false">
+      <div class="group-label"><b>▣</b> カメラ <span class="hint" id="camInfo"></span></div>
+      <div class="cam-badge" id="camBadge"><b id="camBadgeTitle">カメラ待機中</b><span id="camBadgeSub">ロボットから映像が届くと表示します</span></div>
+    </section>
+    <section class="group shot">
+      <div class="group-label"><b>◎</b> ショット</div>
+      <div class="buttons" id="buttons"></div>
+    </section>
+    <div id="keymap" aria-hidden="true"></div>
+    <div id="overlay">
+      <div class="ov" id="ovBox">
+        <div class="spin"></div>
+        <h2 id="ovTitle">接続中…</h2>
+        <p id="ovSub">ロボットに接続しています</p>
+        <p class="who" id="ovWho"></p>
+        <button class="icon primary" id="overlayReconnect" hidden>再接続</button>
+        <button class="icon primary" id="claimBtn" hidden>操作する</button>
+        <button class="icon primary" id="requestBtn" hidden>操作したいと伝える</button>
+      </div>
+    </div>
+  </main>
+  <footer>
+    <div class="meter"><span class="ml">前後</span><div class="bar"><div class="fill" id="mFwd"></div></div><span class="mv" id="vFwd">0.00</span></div>
+    <div class="meter"><span class="ml">左右</span><div class="bar"><div class="fill" id="mLat"></div></div><span class="mv" id="vLat">0.00</span></div>
+    <div class="meter turn"><span class="ml">旋回</span><div class="bar"><div class="fill" id="mTurn"></div></div><span class="mv" id="vTurn">0.00</span></div>
+    <span class="stat" id="dbgStat"></span>
+    <span class="spacer"></span>
+    <span class="raw" id="dbgAxes">axes --</span>
+    <span class="raw" id="dbgButtons">btn --</span>
+  </footer>
+</div>
+
+<div id="help" hidden>
+  <div class="sheet" role="dialog" aria-labelledby="helpTitle">
+    <div class="top"><h2 id="helpTitle">操作ガイド</h2><button class="icon" id="helpClose">閉じる</button></div>
+    <div class="grid">
+      <section>
+        <h3>タッチ・マウス</h3>
+        <ul>
+          <li><b>「移動」の左スティック</b>をドラッグ: 前後・左右に移動。土台の外に触れるとその位置がスティックの中心になります。</li>
+          <li><b>「移動」の右スティック</b>を左右にドラッグ: 旋回。</li>
+          <li><b>「ショット」のボタン</b>: 中央の大きな <b>FIRE</b> で発射、その上下の <b>TILT</b> で発射台の角度を上下、左の <b>ROLLER</b> でローラーを回します。</li>
+          <li>ボタンは<b>押している間だけ</b>有効。指を離すと止まります。</li>
+          <li>複数の指で移動・旋回・ボタンを同時に操作できます。</li>
+        </ul>
+      </section>
+      <section>
+        <h3>キーボード（PC）</h3>
+        <ul>
+          <li><b><kbd>Space</kbd> を押したまま</b>操作キーを押します。Space を離すと全入力が解除されます。</li>
+          <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / 矢印: 移動、<kbd>Q</kbd><kbd>E</kbd>: 旋回</li>
+          <li><kbd>I</kbd><kbd>K</kbd>: TILT ▲▼、<kbd>F</kbd>: FIRE、<kbd>R</kbd>: ROLLER</li>
+          <li><kbd>Esc</kbd>: この端末の入力をすべて解除。</li>
+          <li>キーはキーボード上の位置で判定します。タッチだけの端末では表示しません。</li>
+        </ul>
+      </section>
+      <section>
+        <h3>表示の見方</h3>
+        <ul>
+          <li><b>ロボット名</b>: 左上。操作したいロボットの名前か確かめてください（違うときは Wi-Fi を確認）。</li>
+          <li><b>接続</b>: 「操作中」はこの端末で操作できる状態、「閲覧のみ」はほかの端末が操作している状態です。切れると自動で再接続します。</li>
+          <li><b>非常停止</b>: ロボット側の非常停止の状態。押されている間は入力しても動きません。</li>
+          <li><b>教材から走らせています</b>: QUESTiX LAB の教材からロボットを動かしている間に出ます。スティックを動かすとこの画面の操作に切り替わります。</li>
+          <li><b>カメラ</b>: ロボットのカメラ映像が届くと中央に表示します（ノード側で <code>camera_topic</code> を設定したときだけ）。</li>
+          <li>下部のメーターはロボットに送っている値です（前後・左右・旋回）。</li>
+        </ul>
+      </section>
+      <section>
+        <h3>1 台ずつ操作</h3>
+        <ul>
+          <li>教材と同じく、<b>操作できるのは 1 台だけ</b>です。ほかの端末には「ほかの端末（…）が操作中です」と、その端末の種類と IP アドレスが出ます。</li>
+          <li>代わるときは「操作したいと伝える」を押すと、操作中の端末に「譲る」ボタンが出ます。操作中の端末で「操作をやめる」を押しても代われます。</li>
+          <li>操作中の端末の接続が切れたときや画面を閉じたときも、ほかの端末が「操作する」を押せるようになります。</li>
+        </ul>
+      </section>
+      <section class="warnbox">
+        <h3>安全</h3>
+        <ul>
+          <li><b>「止める」はどの端末からでも押せます</b>。この画面からの操作をニュートラルにし、教材の走行とローラーにも停止を送ります。操作中の端末は、指を離してから触れ直すまで動かせません。</li>
+          <li>接続が切れる・画面を閉じる・他のアプリに切り替えると、ロボットは<b>自動でニュートラル</b>に戻ります。</li>
+          <li>「止める」はこのページと教材からの指令を止めるもので、GPIO 非常停止の代わりではありません。</li>
+        </ul>
+      </section>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  "use strict";
+  // ----------------------------------------------------------------------
+  // Layout: Switch2-native indices (same as uart_joy_driver). The operator
+  // profile is questix_control_config/config/controls.web.yaml; keep it (and
+  // robot_manager's web diagram) in sync when changing these indices.
+  //   buttons: A=0 B=1 X=2 Y=3 L=4 R=5 ZL=6 ZR=7 Minus=8 Plus=9 Home=10 Capture=11 LStick=12 RStick=13
+  //   axes:    LX=0 LY=1 RX=3 RY=4 DpadH=6 DpadV=7   (left / up = +1)
+  // ----------------------------------------------------------------------
+  const NUM_AXES = 8, NUM_BUTTONS = 14;
+  const LAYOUT = {
+    leftStick: { x: 0, y: 1 },
+    rightStick: { x: 3, y: 4 },
+    // DOM order matters: tests address FIRE as the second button element.
+    // `cls` places the button in the CSS grid cluster (up / fire / down / roller).
+    buttons: [
+      { index: 4, name: "TILT ▲", label: "TILT", sub: "上に向ける", ico: "▲", key: "I", cls: "up" },
+      { index: 5, name: "FIRE", label: "FIRE", sub: "発射", ico: "◎", key: "F", cls: "fire" },
+      { index: 6, name: "TILT ▼", label: "TILT", sub: "下に向ける", ico: "▼", key: "K", cls: "down" },
+      { index: 7, name: "ROLLER", label: "ROLLER", sub: "回転", ico: "↻", key: "R", cls: "roller" },
+    ],
+  };
+  const STICK_RADIUS = 60;         // px of travel for full deflection
+  const HEARTBEAT_MS = 100;        // resend the current state at least this often
+  const RECONNECT_MIN_MS = 500, RECONNECT_MAX_MS = 5000;
+  const CAM_STALE_MS = 3000;       // no camera frame received by this page for this long -> badge
+  const DEFAULT_LAB_PORT = 8897;   // questix_lab_bridge; the node's welcome carries the real one
+  const LAB_STOP_TIMEOUT_MS = 2500;
+  const NOTICE_MS = 6000, REQUEST_NOTICE_MS = 20000;
+  const CLOSE_AUTH_FAILED = 4401;
+
+  const axes = new Array(NUM_AXES).fill(0);
+  const buttons = new Array(NUM_BUTTONS).fill(0);
+  const heldKeys = new Set();
+  let focused = document.hasFocus();
+  const $ = (id) => document.getElementById(id);
+  const params = new URLSearchParams(location.search);
+  const token = params.get("token") || "";
+  $("host").textContent = location.host;
+  const attr = (el, name, value) => { if (el.setAttribute) el.setAttribute(name, value); };
+  const haptic = (ms) => { if (navigator.vibrate) { try { navigator.vibrate(ms); } catch (e) { /* ignore */ } } };
+  const media = (query) => { try { return !!(window.matchMedia && window.matchMedia(query).matches); } catch (e) { return false; } };
+  // Keyboard mode needs a keyboard: hidden on touch-only devices (a touch screen
+  // and no mouse / trackpad: phones and plain tablets). Unknown devices keep it.
+  const keyboardCapable = !(media("(any-pointer: coarse)") && !media("(any-pointer: fine)"));
+  const touchScreen = (navigator.maxTouchPoints || 0) > 0;
+  // Identifies this browser tab across reconnects, so a Wi-Fi drop does not lock
+  // the operator out behind its own stale connection. Not a secret.
+  const pageId = (() => {
+    const make = () => Array.from({ length: 16 }, () => Math.floor(Math.random() * 36).toString(36)).join("");
+    try {
+      let v = sessionStorage.getItem("questix-web-joy-page");
+      if (!v) { v = make(); sessionStorage.setItem("questix-web-joy-page", v); }
+      return v;
+    } catch (e) { return make(); }
+  })();
+
+  // ---------------------------------------------------------------- state
+  const state = {
+    phase: "connecting",   // connecting | open | closed | auth
+    controller: false,     // this page is the operator
+    owner: null,           // {id, label, address, since_sec} of the operator, or null
+    you: null,             // this connection {id, label, address}
+    robot: "",
+    labPort: DEFAULT_LAB_PORT,
+    estop: null, estopReason: "",
+    arbiter: null,         // twist_arbiter status {active, reason, lab_locked} or null
+    lagging: false,
+    wantControl: true,     // (re)connect asking for the operator role
+    reclaim: false,        // the role was given up only because the page was hidden
+    notice: null,          // {cls, text, sub, until, actions}
+    clients: 0,
+  };
+  const who = (c) => c ? `${c.label || "端末"}・${c.address || "?"}` : "";
+
+  // ---------------------------------------------------------------- transport
+  let ws = null, reconnectDelay = RECONNECT_MIN_MS, reconnectTimer = null;
+  let dirty = false, rafPending = false;
+  const isOpen = () => !!ws && ws.readyState === WebSocket.OPEN;
+  function canInput() {
+    return focused && !document.hidden && isOpen() && state.controller;
+  }
+  function send(payload) {
+    if (!isOpen()) return false;
+    ws.send(JSON.stringify(payload));
+    return true;
+  }
+
+  function wsUrl() {
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    const q = [];
+    if (token) q.push("token=" + encodeURIComponent(token));
+    q.push("cid=" + pageId, "claim=" + (state.wantControl || state.reclaim ? "1" : "0"));
+    if (touchScreen) q.push("touch=1");
+    return `${proto}://${location.host}/ws?${q.join("&")}`;
+  }
+  function sendNow() {
+    dirty = false;
+    send({ type: "joy", axes, buttons });
+  }
+  function markDirty() {
+    dirty = true;
+    renderDebug();
+    if (rafPending) return;
+    rafPending = true;
+    requestAnimationFrame(() => { rafPending = false; if (dirty) sendNow(); });
+  }
+  function connect() {
+    clearTimeout(reconnectTimer);
+    if (document.hidden) return;
+    resetAll();
+    if (ws) ws.close();
+    state.phase = "connecting"; state.controller = false;
+    const socket = new WebSocket(wsUrl());
+    socket.binaryType = "arraybuffer";
+    ws = socket;
+    render();
+    socket.onopen = () => {
+      if (ws !== socket) return;
+      resetAll(); reconnectDelay = RECONNECT_MIN_MS; state.phase = "open"; render();
+    };
+    socket.onmessage = (ev) => {
+      if (ws !== socket) return;
+      if (typeof ev.data !== "string") { onCameraFrame(ev.data); return; }
+      let msg; try { msg = JSON.parse(ev.data); } catch (e) { return; }
+      onMessage(msg);
+    };
+    socket.onclose = (ev) => {
+      if (ws !== socket) return;
+      ws = null;
+      resetAll();
+      camera.disconnected();
+      state.controller = false; state.lagging = false;
+      if (ev.code === CLOSE_AUTH_FAILED || ev.code === 1008) {
+        state.phase = "auth"; render(); return;
+      }
+      state.phase = "closed"; render();
+      if (!document.hidden) reconnectTimer = setTimeout(connect, reconnectDelay);
+      reconnectDelay = Math.min(RECONNECT_MAX_MS, reconnectDelay * 2);
+    };
+    socket.onerror = () => { /* onclose follows */ };
+  }
+  const manualReconnect = () => { clearTimeout(reconnectTimer); connect(); };
+  $("reconnect").addEventListener("click", manualReconnect);
+  $("overlayReconnect").addEventListener("click", manualReconnect);
+  setInterval(() => { if (isOpen() && state.controller) sendNow(); }, HEARTBEAT_MS);
+
+  function setRole(controller) {
+    const was = state.controller;
+    state.controller = !!controller;
+    if (was && !state.controller) resetAll();  // lost the role: never keep a held input
+    if (!state.reclaim && !document.hidden) state.wantControl = state.controller;
+  }
+  function onMessage(msg) {
+    switch (msg.type) {
+      case "welcome":
+        state.you = msg.you || null;
+        if (msg.robot && msg.robot.name) state.robot = String(msg.robot.name);
+        if (Number.isInteger(msg.lab_bridge_port)) state.labPort = msg.lab_bridge_port;
+        state.owner = msg.owner || null;
+        state.reclaim = false;
+        setRole(msg.controller);
+        break;
+      case "status": onStatus(msg); return;
+      case "stopped": {
+        const mine = !!(state.you && msg.by && msg.by.id === state.you.id);
+        if (mine) return;  // our own button already said so
+        if (state.controller) {
+          resetAll();
+          notice("warn", `${who(msg.by)} で「止める」が押されました`, "もう一度動かすには、指を離してから触れ直してください");
+        } else {
+          notice("info", `${who(msg.by)} で「止める」が押されました`, "");
+        }
+        return;
+      }
+      case "refused":
+        state.owner = msg.owner || state.owner;
+        notice("warn", `ほかの端末（${who(msg.owner)}）が操作中です`, "操作できるのは 1 台だけです");
+        return;
+      case "request_sent":
+        notice("info", msg.repeat ? "もう伝えてあります" : "操作中の端末に伝えました",
+          `${who(msg.owner)} で「譲る」が押されると、この端末で操作できます`);
+        return;
+      case "handover_request":
+        if (!state.controller || !msg.from) return;
+        notice("info", `${who(msg.from)} が操作したいと言っています`, "譲ると、この端末では操作できなくなります", REQUEST_NOTICE_MS, [
+          { label: "譲る", run: () => { resetAll(); state.wantControl = false; send({ type: "release", to: msg.from.id }); clearNotice(); } },
+          { label: "あとで", quiet: true, run: () => clearNotice() },
+        ]);
+        return;
+      default: return;
+    }
+    render();
+  }
+
+  function onStatus(s) {
+    state.estop = s.estop === true ? true : s.estop === false ? false : null;
+    state.estopReason = s.estop_reason || "";
+    state.arbiter = s.arbiter && typeof s.arbiter === "object" ? s.arbiter : null;
+    state.owner = s.owner || null;
+    state.clients = s.clients || 0;
+    setRole(s.controller);
+    state.lagging = s.hold === "timeout" && !!s.controller;
+    camera.status(s);
+    const hold = { active: "送信中", timeout: "タイムアウト→ニュートラル", released: "フレーム未受信" }[s.hold] || s.hold;
+    const age = s.rx_age_ms == null ? "-" : Math.round(s.rx_age_ms);
+    $("dbgStat").textContent = `${hold} · 遅延 ${age}ms · 接続 ${s.clients}${s.controller ? "" : " · 閲覧のみ"}`;
+    // A viewer's meters show what the operator is sending.
+    if (!state.controller && Array.isArray(s.axes)) renderMeters(s.axes.map(Number));
+    render();
+  }
+
+  // ---------------------------------------------------------------- notices + rendering
+  let noticeTimer = null;
+  function notice(cls, text, sub, ms = NOTICE_MS, actions = null) {
+    state.notice = { cls, text, sub, until: Date.now() + ms, actions };
+    clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(render, ms + 50);
+    render();
+  }
+  function clearNotice() { state.notice = null; clearTimeout(noticeTimer); render(); }
+
+  function setChip(cls, text) { const el = $("conn"); el.className = "chip " + cls; el.textContent = text; }
+  function setBanner(b) {
+    const el = $("banner");
+    el.textContent = "";
+    if (!b) { el.className = ""; return; }
+    el.className = b.cls; el.textContent = b.text;
+    if (b.sub) { const s = document.createElement("span"); s.className = "sub"; s.textContent = b.sub; el.appendChild(s); }
+    if (b.actions) {
+      const row = document.createElement("div"); row.className = "acts";
+      for (const a of b.actions) {
+        const btn = document.createElement("button");
+        btn.type = "button"; btn.textContent = a.label; if (a.quiet) btn.className = "quiet";
+        btn.addEventListener("click", a.run);
+        row.appendChild(btn);
+      }
+      el.appendChild(row);
+    }
+  }
+  function banner() {
+    if (state.estop === true) return { cls: "bad", text: "非常停止中", sub: state.estopReason };
+    const n = state.notice;
+    if (n && Date.now() < n.until) return n;
+    if (state.phase === "open" && state.arbiter && state.arbiter.active === "lab") {
+      return { cls: "info", text: "教材から走らせています",
+        sub: state.controller ? "スティックを動かすとこの画面の操作に切り替わります。止めるときは「止める」"
+          : "QUESTiX LAB の実験でロボットが動いています。止めるときは「止める」" };
+    }
+    if (state.phase === "closed") return { cls: "warn", text: "ロボットとの接続が切れました", sub: "ロボット側は自動でニュートラルに戻ります" };
+    if (state.phase === "auth") return { cls: "bad", text: "トークンが違います", sub: "" };
+    return null;
+  }
+  function overlay() {
+    switch (state.phase) {
+      case "connecting": return { cls: "", title: "接続中…", sub: `${location.host} のロボットに接続しています` };
+      case "closed": return { cls: "bad", title: "切断 / 再接続待ち", sub: "ロボット側は自動でニュートラルに戻ります。接続が回復すると自動で再開します" };
+      case "auth": return { cls: "bad", title: "認証エラー", sub: "URL のトークンが違うか、含まれていません。管理画面の QR または URL から開き直してください", reconnect: true };
+      default: break;
+    }
+    if (state.controller) return null;
+    const me = state.you ? `この端末: ${who(state.you)}` : "";
+    if (state.owner) {
+      const min = Math.floor((state.owner.since_sec || 0) / 60);
+      const since = min >= 1 ? `${min} 分前から操作しています` : "操作を始めたところです";
+      return { cls: "viewer", viewer: true, title: `ほかの端末（${who(state.owner)}）が操作中です`,
+        sub: `操作できるのは 1 台だけです（${since}）。代わるときは「操作したいと伝える」を押すか、その端末で「操作をやめる」を押してもらってください。「止める」はこの端末からも押せます。`,
+        who: me, request: true };
+    }
+    return { cls: "free", viewer: true, title: "いまは誰も操作していません",
+      sub: "「操作する」を押すと、この端末で操作できます。", who: me, claim: true };
+  }
+  function render() {
+    // header
+    const robotEl = $("robot");
+    robotEl.hidden = !state.robot;
+    $("robotName").textContent = state.robot;
+    document.title = state.robot ? `${state.robot} · ブラウザ・スマホで操作` : "ブラウザ・スマホで操作 · QUESTiX";
+    const e = $("estop");
+    if (state.estop === true) { e.className = "chip bad"; e.textContent = "非常停止：押されています"; }
+    else if (state.estop === false) { e.className = "chip ok"; e.textContent = "非常停止：解除されています"; }
+    else { e.className = "chip"; e.textContent = state.phase === "open" ? "非常停止：情報なし" : "非常停止：--"; }
+    if (state.phase === "connecting") setChip("warn", "接続中…");
+    else if (state.phase === "auth") setChip("bad", "認証エラー");
+    else if (state.phase === "closed") setChip("bad", "切断");
+    else if (state.controller) setChip(state.lagging ? "warn" : "ok", state.lagging ? "操作中（遅延）" : "操作中");
+    else setChip("", "閲覧のみ");
+    $("reconnect").hidden = state.phase !== "auth";
+    $("releaseBtn").hidden = !(state.phase === "open" && state.controller);
+    // overlay over the controls whenever this page cannot operate
+    const ov = overlay();
+    $("overlay").hidden = !ov;
+    if (ov) {
+      $("overlay").className = ov.viewer ? "viewer" : "";
+      $("ovBox").className = "ov " + ov.cls;
+      $("ovTitle").textContent = ov.title;
+      $("ovSub").textContent = ov.sub || "";
+      $("ovWho").textContent = ov.who || "";
+      $("overlayReconnect").hidden = !ov.reconnect;
+      $("claimBtn").hidden = !ov.claim;
+      $("requestBtn").hidden = !ov.request;
+    }
+    setBanner(banner());
+  }
+
+  // ---------------------------------------------------------------- stop
+  // 止める works on every page, operator or not: the node drops the browser
+  // input to neutral (and ignores the operator until it lets go), and the lab
+  // bridge ends a lesson's driving run and roller session. Both are plain
+  // "stop" requests any page may send; nothing else is sent to the bridge.
+  function stopLab(done) {
+    const port = state.labPort;
+    if (!port) { done(null); return; }
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    let sock, finished = false, timer = null;
+    const finish = (ok) => {
+      if (finished) return;
+      finished = true; clearTimeout(timer);
+      try { sock.close(); } catch (e) { /* ignore */ }
+      done(ok);
+    };
+    try { sock = new WebSocket(`${proto}://${location.hostname}:${port}/`); } catch (e) { done(false); return; }
+    timer = setTimeout(() => finish(false), LAB_STOP_TIMEOUT_MS);
+    sock.onopen = () => {
+      try {
+        sock.send(JSON.stringify({ type: "stop" }));
+        sock.send(JSON.stringify({ type: "roller_stop" }));
+      } catch (e) { finish(false); return; }
+      finish(true);  // queued frames are sent before the close frame
+    };
+    sock.onerror = () => finish(false);
+    sock.onclose = () => finish(false);
+    sock.onmessage = () => {};
+  }
+  function stopAll() {
+    resetAll();
+    const sent = send({ type: "stop" });
+    const labWasDriving = !!(state.arbiter && state.arbiter.active === "lab");
+    notice("ok", "止めました", sent ? "教材にも停止を送っています…" : "ロボットとの接続が切れています。教材に停止を送っています…");
+    stopLab((ok) => {
+      if (ok) notice("ok", "止めました", sent ? "この画面の操作と、教材の走行・ローラーを止めました" : "教材の走行・ローラーを止めました（この画面はロボットに接続していません）");
+      else if (ok === false && labWasDriving) notice("warn", "教材の走行を止められませんでした", `教材の中継（ポート ${state.labPort}）に接続できません。教材の画面の「止める」か、非常停止ボタンを使ってください`, 10000);
+      else notice("ok", "止めました", sent ? "この画面の操作を止めました（教材の中継は動いていません）" : "ロボットとの接続が切れています。ロボット側は自動でニュートラルに戻ります");
+    });
+  }
+  $("stop").addEventListener("click", () => { stopAll(); $("stop").blur(); });
+  $("releaseBtn").addEventListener("click", () => {
+    resetAll(); state.wantControl = false; state.reclaim = false; send({ type: "release" }); $("releaseBtn").blur();
+  });
+  $("claimBtn").addEventListener("click", () => { state.wantControl = true; send({ type: "claim" }); });
+  $("requestBtn").addEventListener("click", () => { send({ type: "request" }); });
+
+  // ---------------------------------------------------------------- camera
+  // The node relays sensor_msgs/CompressedImage frames as binary WebSocket
+  // messages (one JPEG/PNG per message). The newest frame always wins: while
+  // the <img> is still decoding, later frames replace the pending one and
+  // are never queued, so a slow phone lags by at most one image. The panel
+  // appears only once a frame has arrived, so a robot without a camera driver
+  // keeps the plain two-card layout.
+  const camera = (() => {
+    const img = $("camImg"), badge = $("camBadge");
+    const supported = typeof Blob !== "undefined" && typeof URL !== "undefined" && !!URL.createObjectURL;
+    let enabled = false, decoding = false, pending = null, shownUrl = null;
+    let lastFrameAt = 0, frames = 0;
+    const times = [];  // receive timestamps of the last 2 s for the fps hint
+    function mime(buf) {
+      const b = new Uint8Array(buf, 0, Math.min(8, buf.byteLength));
+      if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return "image/png";
+      return "image/jpeg";  // FF D8 FF; anything else is skipped by the node
+    }
+    function show(buf) {
+      decoding = true;
+      const url = URL.createObjectURL(new Blob([buf], { type: mime(buf) }));
+      const done = () => {
+        decoding = false;
+        if (shownUrl) URL.revokeObjectURL(shownUrl);
+        shownUrl = url;
+        if (pending) { const next = pending; pending = null; show(next); }
+      };
+      img.onload = done;
+      img.onerror = done;
+      img.src = url;
+    }
+    function setBadge(cls, title, sub) {
+      if (!cls) { badge.hidden = true; return; }
+      badge.hidden = false; badge.className = "cam-badge " + cls;
+      $("camBadgeTitle").textContent = title; $("camBadgeSub").textContent = sub || "";
+    }
+    const layout = () => $("app").classList.toggle("has-cam", enabled && frames > 0);
+    function onFrame(buf) {
+      if (!enabled) return;
+      frames += 1;
+      lastFrameAt = Date.now();
+      times.push(lastFrameAt);
+      if (frames === 1) { layout(); setBadge(supported ? "" : "stale", "このブラウザでは表示できません", "画像の表示に対応していません"); }
+      if (!supported) return;
+      if (decoding) pending = buf; else show(buf);
+    }
+    function status(s) {
+      const state = s.camera;
+      enabled = !!state && state !== "disabled";
+      layout();
+      if (!enabled || !frames) return;
+      const now = Date.now();
+      while (times.length && now - times[0] > 2000) times.shift();
+      $("camInfo").textContent = `${(times.length / 2).toFixed(0)} fps`;
+      if (!supported) setBadge("stale", "このブラウザでは表示できません", "画像の表示に対応していません");
+      else if (state === "stale") setBadge("stale", "映像が止まっています", `最後の映像から ${Math.round((s.camera_age_ms || 0) / 1000)} 秒`);
+      else if (now - lastFrameAt > CAM_STALE_MS) setBadge("stale", "映像の受信が遅れています", "通信が不安定な可能性があります");
+      else setBadge("");
+    }
+    function disconnected() { lastFrameAt = 0; pending = null; }
+    return { onFrame, status, disconnected };
+  })();
+  function onCameraFrame(buf) { camera.onFrame(buf); }
+
+  // ---------------------------------------------------------------- sticks
+  function makeStick(zoneEl, stickEl, map) {
+    const knob = stickEl.querySelector(".knob");
+    let pointerId = null, ox = 0, oy = 0;
+    const zoneRect = () => zoneEl.getBoundingClientRect();
+    function set(dx, dy) {
+      const len = Math.hypot(dx, dy);
+      if (len > STICK_RADIUS) { dx *= STICK_RADIUS / len; dy *= STICK_RADIUS / len; }
+      knob.style.transform = `translate(${dx}px, ${dy}px)`;
+      // ROS joy convention: left = +1 (X), up = +1 (Y).
+      axes[map.x] = +(-dx / STICK_RADIUS).toFixed(3);
+      axes[map.y] = +(-dy / STICK_RADIUS).toFixed(3);
+      markDirty();
+    }
+    function release() {
+      pointerId = null; stickEl.classList.remove("on"); zoneEl.classList.remove("active"); knob.style.transform = "";
+      stickEl.style.left = ""; stickEl.style.top = "";  // back to the CSS home position
+      axes[map.x] = 0; axes[map.y] = 0; markDirty();
+    }
+    zoneEl.addEventListener("pointerdown", (ev) => {
+      if (!canInput() || $("inputMode").value !== "pointer" || ev.button !== 0) return;
+      if (pointerId !== null) return;
+      pointerId = ev.pointerId;
+      zoneEl.setPointerCapture(ev.pointerId);
+      const r = zoneRect();
+      const px = ev.clientX - r.left, py = ev.clientY - r.top;
+      // Inside the parked base: anchor there (fixed stick). Outside: float to the finger.
+      const b = stickEl.getBoundingClientRect();
+      const bw = b.width || 0, bh = b.height || 0;
+      const bx = b.left - r.left + bw / 2, by = b.top - r.top + bh / 2;
+      const onBase = Math.hypot(px - bx, py - by) <= Math.max(bw, bh) / 2;
+      if (onBase) { ox = bx; oy = by; }
+      else { ox = px; oy = py; stickEl.style.left = ox + "px"; stickEl.style.top = oy + "px"; }
+      stickEl.classList.add("on"); zoneEl.classList.add("active");
+      set(px - ox, py - oy);
+      ev.preventDefault();
+    });
+    zoneEl.addEventListener("pointermove", (ev) => {
+      if (ev.pointerId !== pointerId) return;
+      const r = zoneRect();
+      set(ev.clientX - r.left - ox, ev.clientY - r.top - oy);
+      ev.preventDefault();
+    });
+    for (const t of ["pointerup", "pointercancel", "lostpointercapture"]) {
+      zoneEl.addEventListener(t, (ev) => { if (ev.pointerId === pointerId) release(); });
+    }
+    return { release };
+  }
+  const sticks = [
+    makeStick($("leftZone"), $("leftStick"), LAYOUT.leftStick),
+    makeStick($("rightZone"), $("rightStick"), LAYOUT.rightStick),
+  ];
+
+  // ---------------------------------------------------------------- buttons
+  const buttonEls = [];
+  const child = (parent, tag, cls, text) => {
+    const el = document.createElement(tag);
+    if (cls) el.className = cls;
+    if (text != null) el.textContent = text;
+    parent.appendChild(el);
+    return el;
+  };
+  for (const b of LAYOUT.buttons) {
+    const el = document.createElement("div");
+    el.className = "btn " + (b.cls || "");
+    attr(el, "role", "button");
+    attr(el, "aria-label", b.name);
+    child(el, "span", "ico", b.ico);
+    child(el, "span", "label", b.label);
+    child(el, "span", "sub", b.sub);
+    child(el, "kbd", "", b.key);
+    let pointerId = null;
+    const press = (on) => { buttons[b.index] = on ? 1 : 0; el.classList.toggle("active", on); markDirty(); };
+    el.addEventListener("pointerdown", (ev) => {
+      if (!canInput() || $("inputMode").value !== "pointer" || ev.button !== 0) return;
+      if (pointerId !== null) return;
+      pointerId = ev.pointerId; el.setPointerCapture(ev.pointerId); press(true); haptic(12); ev.preventDefault();
+    });
+    for (const t of ["pointerup", "pointercancel", "lostpointercapture"]) {
+      el.addEventListener(t, (ev) => { if (ev.pointerId === pointerId) { pointerId = null; press(false); } });
+    }
+    el.release = () => { pointerId = null; press(false); };
+    $("buttons").appendChild(el);
+    buttonEls.push(el);
+  }
+
+  // ---------------------------------------------------------------- keyboard
+  // Space must be pressed before action keys. Releasing it clears every key,
+  // so OS key repeat cannot revive an input after blur, stop or reconnect.
+  const KEY_BUTTONS = { KeyI: 4, KeyF: 5, KeyK: 6, KeyR: 7 };
+  const CONTROL_KEYS = new Set([
+    "Space", "KeyW", "KeyA", "KeyS", "KeyD", "ArrowUp", "ArrowLeft", "ArrowDown", "ArrowRight",
+    "KeyQ", "KeyE", ...Object.keys(KEY_BUTTONS),
+  ]);
+  const down = (...codes) => codes.some((code) => heldKeys.has(code)) ? 1 : 0;
+
+  // On-screen key map: lights up while the matching key (or its alias) is held.
+  const keyEls = {};
+  (function buildKeymap() {
+    const root = $("keymap");
+    const group = (name, rows) => {
+      const g = child(root, "div", "kgroup");
+      for (const row of rows) {
+        const r = child(g, "div", "krow");
+        for (const k of row) {
+          const el = child(r, "div", "key " + (k.cls || ""), k.label);
+          if (k.note) child(el, "small", "", k.note);
+          keyEls[k.codes[0]] = { el, codes: k.codes };
+        }
+      }
+      const n = child(g, "div", "kname");
+      n.textContent = name;
+    };
+    group("押しながら操作", [[{ codes: ["Space"], label: "Space", cls: "space", note: "保持" }]]);
+    group("移動（矢印でも可）", [
+      [{ codes: ["KeyW", "ArrowUp"], label: "W" }],
+      [{ codes: ["KeyA", "ArrowLeft"], label: "A" }, { codes: ["KeyS", "ArrowDown"], label: "S" }, { codes: ["KeyD", "ArrowRight"], label: "D" }],
+    ]);
+    group("旋回", [[{ codes: ["KeyQ"], label: "Q", note: "左" }, { codes: ["KeyE"], label: "E", note: "右" }]]);
+    group("ショット", [
+      [{ codes: ["KeyI"], label: "I", cls: "tilt", note: "TILT ▲" }, { codes: ["KeyK"], label: "K", cls: "tilt", note: "TILT ▼" }],
+      [{ codes: ["KeyF"], label: "F", cls: "fire", note: "FIRE" }, { codes: ["KeyR"], label: "R", cls: "roller", note: "ROLLER" }],
+    ]);
+  })();
+  function renderKeys() {
+    for (const k of Object.values(keyEls)) k.el.classList.toggle("down", !!down(...k.codes));
+  }
+  function renderKeyboard() {
+    let x = down("KeyA", "ArrowLeft") - down("KeyD", "ArrowRight");
+    let y = down("KeyW", "ArrowUp") - down("KeyS", "ArrowDown");
+    const length = Math.max(1, Math.hypot(x, y));
+    axes[LAYOUT.leftStick.x] = +(x / length).toFixed(3);
+    axes[LAYOUT.leftStick.y] = +(y / length).toFixed(3);
+    axes[LAYOUT.rightStick.x] = down("KeyQ") - down("KeyE");
+    for (const [code, index] of Object.entries(KEY_BUTTONS)) buttons[index] = down(code);
+    buttonEls.forEach((el, i) => el.classList.toggle("active", !!buttons[LAYOUT.buttons[i].index]));
+    renderKeys();
+    markDirty();
+  }
+  document.addEventListener("keydown", (ev) => {
+    if (ev.code === "Escape") { resetAll(); closeHelp(); return; }
+    if (ev.ctrlKey || ev.altKey || ev.metaKey) { resetAll(); return; }
+    if (ev.isComposing || !canInput() || $("inputMode").value !== "keyboard") return;
+    if (ev.target.closest("input, select, textarea, button, a, [contenteditable]")) return;
+    if (!CONTROL_KEYS.has(ev.code)) return;
+    ev.preventDefault();
+    if (ev.repeat || (ev.code !== "Space" && !heldKeys.has("Space"))) return;
+    heldKeys.add(ev.code);
+    renderKeyboard();
+  });
+  document.addEventListener("keyup", (ev) => {
+    if (!heldKeys.has(ev.code)) return;
+    ev.preventDefault();
+    if (ev.code === "Space") { resetAll(); return; }
+    heldKeys.delete(ev.code);
+    renderKeyboard();
+  });
+
+  // ---------------------------------------------------------------- input mode
+  const HELP_POINTER = "スティックの領域をドラッグします。ボタンは押している間だけ動きます。指を離すと止まります。";
+  function applyMode() {
+    resetAll();
+    if (!keyboardCapable) $("inputMode").value = "pointer";
+    const keyboard = $("inputMode").value === "keyboard";
+    $("app").classList.toggle("keyboard", keyboard);
+    $("modePointer").className = keyboard ? "" : "on";
+    $("modeKeyboard").className = keyboard ? "on" : "";
+    attr($("modePointer"), "aria-pressed", String(!keyboard));
+    attr($("modeKeyboard"), "aria-pressed", String(keyboard));
+    const help = $("inputHelp");
+    help.textContent = "";
+    if (keyboard) {
+      const parts = [["Space", " を押したまま "], ["WASD", " 移動 "], ["Q/E", " 旋回 "], ["I/K", " TILT "], ["F", " FIRE "], ["R", " ROLLER"]];
+      for (const [key, text] of parts) { child(help, "kbd", "", key); child(help, "span", "", text); }
+      child(help, "span", "", "。Space を離すか ");
+      child(help, "kbd", "", "Esc");
+      child(help, "span", "", " で入力解除。");
+    } else {
+      help.textContent = HELP_POINTER;
+    }
+    $("inputMode").blur();
+  }
+  $("app").classList.toggle("touch-only", !keyboardCapable);
+  $("inputMode").addEventListener("change", applyMode);
+  $("modePointer").addEventListener("click", () => { $("inputMode").value = "pointer"; applyMode(); $("modePointer").blur(); });
+  $("modeKeyboard").addEventListener("click", () => { $("inputMode").value = "keyboard"; applyMode(); $("modeKeyboard").blur(); });
+  if (params.get("mode") === "keyboard" && keyboardCapable) { $("inputMode").value = "keyboard"; applyMode(); }
+
+  // ---------------------------------------------------------------- help sheet
+  function closeHelp() { $("help").hidden = true; }
+  $("helpBtn").addEventListener("click", () => { resetAll(); $("help").hidden = false; $("helpBtn").blur(); });
+  $("helpClose").addEventListener("click", closeHelp);
+  if (location.hash === "#help") $("help").hidden = false;
+  $("help").addEventListener("pointerdown", (ev) => { if (ev.target === $("help")) closeHelp(); });
+
+  // ---------------------------------------------------------------- safety
+  function resetAll() {
+    heldKeys.clear();
+    for (const s of sticks) s.release();
+    for (const el of buttonEls) el.release();
+    axes.fill(0); buttons.fill(0);
+    renderKeys();
+    sendNow();
+  }
+  // Hidden page: let go of everything and of the operator role, so another
+  // device may take over; coming back takes the role again if it is still free.
+  function onHidden() {
+    resetAll();
+    if (isOpen() && state.controller) { state.reclaim = true; send({ type: "release" }); }
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) { onHidden(); return; }
+    resetAll(); requestWakeLock();
+    if (!ws && state.phase !== "auth") connect();
+    else if (isOpen() && state.reclaim) {
+      state.reclaim = false;
+      if (!state.controller && !state.owner) { state.wantControl = true; send({ type: "claim" }); }
+    }
+  });
+  window.addEventListener("pagehide", onHidden);
+  window.addEventListener("blur", () => { focused = false; resetAll(); });
+  window.addEventListener("focus", () => { focused = true; resetAll(); });
+  document.addEventListener("contextmenu", (ev) => ev.preventDefault());
+
+  // ---------------------------------------------------------------- misc
+  let wakeLock = null;
+  async function requestWakeLock() {
+    if (!("wakeLock" in navigator) || document.hidden || wakeLock) return;
+    try {
+      wakeLock = await navigator.wakeLock.request("screen");
+      wakeLock.addEventListener("release", () => { wakeLock = null; });
+    } catch (e) { wakeLock = null; }
+  }
+  document.addEventListener("pointerdown", () => { if (!wakeLock) requestWakeLock(); }, { once: false });
+
+  const fsBtn = $("fullscreen");
+  if (!document.documentElement.requestFullscreen) fsBtn.style.display = "none";
+  fsBtn.addEventListener("click", () => {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else document.documentElement.requestFullscreen().catch(() => {});
+  });
+
+  // Bipolar meter: value in [-1, 1], positive grows to the right of center.
+  function setMeter(fillId, valueId, v) {
+    const pct = Math.min(1, Math.abs(v)) * 50;
+    const fill = $(fillId);
+    fill.style.left = (v >= 0 ? 50 : 50 - pct) + "%";
+    fill.style.width = pct + "%";
+    $(valueId).textContent = (v >= 0 ? "+" : "") + v.toFixed(2);
+  }
+  function renderMeters(a) {
+    const at = (i) => (Number.isFinite(a[i]) ? a[i] : 0);
+    setMeter("mFwd", "vFwd", at(LAYOUT.leftStick.y));
+    setMeter("mLat", "vLat", -at(LAYOUT.leftStick.x));   // right = +
+    setMeter("mTurn", "vTurn", -at(LAYOUT.rightStick.x)); // right turn = +
+  }
+  function renderDebug() {
+    renderMeters(axes);
+    $("dbgAxes").textContent = "axes " + axes.map((v) => v.toFixed(2)).join(" ");
+    $("dbgButtons").textContent = "btn " + buttons.join("");
+  }
+  renderDebug();
+  connect();
+})();
+</script>
+</body>
+</html>

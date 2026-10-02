@@ -1,30 +1,6 @@
-# Joy Controller Configuration
-# This file contains the default parameters for the joy_controller package
-
-# Movement control parameters
+# Hardware-independent node options. Operator controls live in
+# questix_control_config/config/controls.*.yaml (joy_controller section).
 joy_controller:
   ros__parameters:
-    # Use simulation time
     use_sim_time: false
-
-    # Input scaling ratios / 入力スケール
-    # Lower these values to make the robot slower and easier to control.
-    # 数値を小さくすると、ロボットの最高速度を抑えて扱いやすくできます。
-    longitudinal_input_ratio: 2.0 # Forward/backward speed / 前後移動の速度
-    lateral_input_ratio: 0.3 # Left/right speed for holonomic robots / 全方向移動の左右速度
-    # Rotation direction and speed / 旋回の向きと速度
-    # Positive and negative switch the turning direction. Smaller absolute values reduce turning speed.
-    # 符号で旋回方向、絶対値で旋回速度が決まります。逆回転なら符号を反転してください。
-    angular_input_ratio: 6.0
-
-    # Controller mapping (button and axis indices)
-    linear_x_axis: 1 # Axis for forward/backward (typically left stick Y)
-    linear_y_axis: 0 # Axis for left/right (typically left stick X)
-    angular_z_axis: 3 # Axis for rotation (typically right stick X)
-
-    # NOTE: サーボ/ショット系のパラメータはこのノードでは宣言されていません。
-    # ショット系の設定は launcher/config/shot_config.*.yaml を参照してください。
-    # （未宣言キーを書いても ROS 2 は黙って無視するため、ここには置かないこと）
-
-    # Debug settings
-    debug_mode: false # Enable debug logging
+    debug_mode: false

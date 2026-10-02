@@ -1,0 +1,10 @@
+# Third-party code keeps its upstream formatting so it can be diffed against the source.
+js/vendor/
+assets/
+# Downloadable files are delivered to learners byte-for-byte.
+content/
+# The page shell is whitespace-sensitive inline markup (header, chips, flow strips); reflowing it
+# would put visible spaces between inline elements. Its content is laid out by the modules.
+index.html
+# Pre-refactor modules the tests pin behaviour against; kept byte-for-byte as they were.
+test/baseline/

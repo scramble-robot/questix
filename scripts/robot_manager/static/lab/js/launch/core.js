@@ -1,0 +1,451 @@
+// Disc-launcher course: maths only. No DOM, no window — importable from Node and unit-tested in
+// test/launch-core.test.mjs.
+//
+// Educational, uncalibrated horizontal-disc model. No hardware commands. Only the disc's diameter
+// and thickness come from the real part; every other figure is a teaching assumption, which the
+// learner is told about in content/launch.json.
+
+const LAUNCH_SPEC = Object.freeze({
+  diameter: 0.18, // metres
+  thickness: 0.02, // metres
+  mass: 0.018, // kilograms
+  height: 0.22, // metres: centre of the disc at the moment of release (the outlet on the CAD side view)
+  gravity: 9.81, // metres per second squared
+  density: 1.2, // kilograms per cubic metre (air)
+  dt: 0.004, // seconds per integration step
+});
+const LAUNCH_TOPICS = [
+  { id: 'power', title: '出力と飛距離を調べる' },
+  { id: 'forces', title: '飛行中の力を考える' },
+  { id: 'target', title: 'データから的を狙う' },
+  { id: 'measure', title: '実機の測定で確かめる' },
+];
+const LAUNCH_TARGETS = [1.2, 1.5, 1.8]; // metres from the muzzle; about 62 %, 76 % and 90 % output
+
+// Assumed output → release-speed curve. Not a measured motor curve: below the dead zone the roller
+// never pushes the disc out, and the exponent only bends the curve towards the slower end.
+const RELEASE_DEAD_ZONE = 10; // percent of output
+const MAX_POWER = 100; // percent of output
+const MAX_RELEASE_SPEED = 8; // metres per second at full output
+const RELEASE_CURVE_EXPONENT = 0.85;
+
+// Aerodynamics of a disc held flat. The coefficients are linear/quadratic stand-ins for a real
+// polar curve; alpha is the angle of attack in radians.
+const LIFT_SLOPE = 1.4; // lift coefficient per radian
+const MAX_LIFT_COEFFICIENT = 0.9;
+const PARASITE_DRAG_COEFFICIENT = 0.18; // drag coefficient at alpha = 0
+const INDUCED_DRAG_FACTOR = 1.3; // extra drag coefficient per radian squared
+const STILL_SPEED = 1e-8; // metres per second: below this the flight direction is undefined
+
+const RELEASE_SPEED_SPREAD = 0.08; // ±4 % of release speed when variation is on
+const MAX_STEPS = 5000; // 20 s of flight at LAUNCH_SPEC.dt; reaching it means the model is wrong
+
+const MAX_RANGE = 30; // metres: longest flight distance a learner may record
+const MAX_CSV_CHARS = 100000; // 100 KB of measurement CSV
+const MAX_CSV_ROWS = 300;
+const UNSIGNED_DECIMAL = /^(?:\d+(?:\.\d*)?|\.\d+)$/;
+const MAX_TILT = 180; // degrees: the widest tilt a row read from a file may name
+
+const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+
+function launchSpeed(power) {
+  if (!Number.isFinite(power) || power < 0 || power > MAX_POWER)
+    throw new Error('出力は0〜100%で入力してください。');
+  if (power <= RELEASE_DEAD_ZONE) return 0;
+  const abovePedestal = (power - RELEASE_DEAD_ZONE) / (MAX_POWER - RELEASE_DEAD_ZONE);
+  return MAX_RELEASE_SPEED * Math.pow(abovePedestal, RELEASE_CURVE_EXPONENT);
+}
+
+// Gravity alone: used before release and whenever the air is switched off.
+function weightOnly(weight) {
+  return {
+    fx: 0,
+    fz: -weight,
+    dragX: 0,
+    dragZ: 0,
+    liftX: 0,
+    liftZ: 0,
+    weight,
+    drag: 0,
+    lift: 0,
+    alpha: 0,
+  };
+}
+
+// Newtons acting on the disc at velocity (vx, vz), split up so that render.js can draw each one.
+function launchForces(vx, vz, air = true) {
+  const spec = LAUNCH_SPEC;
+  const speed = Math.hypot(vx, vz);
+  const weight = spec.mass * spec.gravity;
+  if (!air || speed < STILL_SPEED) return weightOnly(weight);
+  // Disc plane is held horizontal. Angle of attack is relative to the flight velocity.
+  const alpha = clamp(-Math.atan2(vz, vx), -Math.PI / 2, Math.PI / 2);
+  const liftCoefficient = clamp(LIFT_SLOPE * alpha, -MAX_LIFT_COEFFICIENT, MAX_LIFT_COEFFICIENT);
+  const dragCoefficient = PARASITE_DRAG_COEFFICIENT + INDUCED_DRAG_FACTOR * alpha * alpha;
+  // 0.5 * rho * v^2 * A: the force, in newtons, that the coefficients scale.
+  const pressureForce = 0.5 * spec.density * speed * speed * Math.PI * (spec.diameter / 2) ** 2;
+  const drag = pressureForce * dragCoefficient;
+  const lift = pressureForce * liftCoefficient;
+  // Drag opposes the velocity; lift is perpendicular to it (the velocity turned a quarter turn).
+  const dragX = (-drag * vx) / speed;
+  const dragZ = (-drag * vz) / speed;
+  const liftX = (-lift * vz) / speed;
+  const liftZ = (lift * vx) / speed;
+  return {
+    fx: dragX + liftX,
+    fz: dragZ + liftZ - weight,
+    dragX,
+    dragZ,
+    liftX,
+    liftZ,
+    weight,
+    drag,
+    lift,
+    alpha,
+  };
+}
+
+// mulberry32: a small seeded generator, so that a topic replays identically for every learner.
+function seededRandom(seed) {
+  let state = seed >>> 0;
+  return () => {
+    state += 0x6d2b79f5;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const sampleAt = (state, air) => ({ ...state, ...launchForces(state.vx, state.vz, air) });
+
+// One midpoint (RK2) step of the flight. Positions in metres, velocities in metres per second.
+function nextState(state, air) {
+  const spec = LAUNCH_SPEC;
+  const start = launchForces(state.vx, state.vz, air);
+  const midVx = state.vx + ((start.fx / spec.mass) * spec.dt) / 2;
+  const midVz = state.vz + ((start.fz / spec.mass) * spec.dt) / 2;
+  const mid = launchForces(midVx, midVz, air);
+  return {
+    t: state.t + spec.dt,
+    x: state.x + midVx * spec.dt,
+    z: state.z + midVz * spec.dt,
+    vx: state.vx + (mid.fx / spec.mass) * spec.dt,
+    vz: state.vz + (mid.fz / spec.mass) * spec.dt,
+  };
+}
+
+// The step that crosses the floor is cut at the crossing, so that the range is the first contact of
+// the lower disc face rather than the end of a whole time step.
+function touchdown(state, beyond) {
+  const floor = LAUNCH_SPEC.thickness / 2;
+  const ratio = (state.z - floor) / (state.z - beyond.z);
+  return {
+    t: state.t + LAUNCH_SPEC.dt * ratio,
+    x: state.x + (beyond.x - state.x) * ratio,
+    z: floor,
+    vx: state.vx + (beyond.vx - state.vx) * ratio,
+    vz: state.vz + (beyond.vz - state.vz) * ratio,
+  };
+}
+
+function releaseSpeed(power, variation, seed) {
+  const nominal = launchSpeed(power);
+  if (!variation) return nominal;
+  // Seeded variation models release-speed variability only, not lateral motion.
+  const random = seededRandom(seed);
+  return nominal * (1 + (random() - 0.5) * RELEASE_SPEED_SPREAD);
+}
+
+function unreleasedRun(config) {
+  const start = { t: 0, x: 0, z: LAUNCH_SPEC.height, vx: 0, vz: 0 };
+  return {
+    config,
+    samples: [sampleAt(start, false)],
+    range: 0,
+    time: 0,
+    speed: 0,
+    status: 'not-released',
+  };
+}
+
+function launchExperiment({ power = 40, air = true, variation = false, seed = 1 } = {}) {
+  const config = { power, air, variation, seed };
+  const speed = releaseSpeed(power, variation, seed);
+  if (speed === 0) return unreleasedRun(config);
+  let state = { t: 0, x: 0, z: LAUNCH_SPEC.height, vx: speed, vz: 0 };
+  const samples = [sampleAt(state, air)];
+  for (let step = 0; step < MAX_STEPS; step++) {
+    const candidate = nextState(state, air);
+    if (candidate.z <= LAUNCH_SPEC.thickness / 2) {
+      const landing = touchdown(state, candidate);
+      samples.push(sampleAt(landing, air));
+      return { config, samples, range: landing.x, time: landing.t, speed, status: 'landed' };
+    }
+    state = candidate;
+    samples.push(sampleAt(state, air));
+  }
+  throw new Error('計算が終了しませんでした。');
+}
+
+// Recorded launches collapsed to one row per output setting, in ascending order of output.
+function launchGroups(rows) {
+  const rangesByPower = new Map();
+  for (const row of rows) {
+    if (
+      !Number.isFinite(row.power) ||
+      !Number.isFinite(row.range) ||
+      row.power < 0 ||
+      row.power > MAX_POWER ||
+      row.range < 0 ||
+      row.range > MAX_RANGE
+    )
+      throw new Error('出力0〜100%、飛距離0〜30 mの数値を入力してください。');
+    if (!rangesByPower.has(row.power)) rangesByPower.set(row.power, []);
+    rangesByPower.get(row.power).push(row.range);
+  }
+  return [...rangesByPower]
+    .sort(([a], [b]) => a - b)
+    .map(([power, ranges]) => ({
+      power,
+      mean: ranges.reduce((sum, range) => sum + range, 0) / ranges.length,
+      min: Math.min(...ranges),
+      max: Math.max(...ranges),
+      count: ranges.length,
+    }));
+}
+
+// Why the records cannot answer "which output reaches `target`?" — null when they can.
+function estimateObstacle(groups, target) {
+  if (!Number.isFinite(target) || target <= 0 || target > MAX_RANGE)
+    return '狙う距離は0より大きく、30 m以下で入力してください。';
+  if (groups.length < 2)
+    return '異なる出力で2種類以上の記録が必要です。まず小さい出力と大きい出力で測ってください。';
+  if (groups.some((group, index) => index && group.mean <= groups[index - 1].mean))
+    return '出力を増やしても平均の飛距離が増えていない区間があります。同じ出力でもう数枚測り、条件が変わっていないか確かめてください。';
+  if (target < groups[0].mean || target > groups.at(-1).mean)
+    return '狙う距離をはさむ測定値がありません。測定した範囲の外には予測を延ばしません。';
+  return null;
+}
+
+// Linear interpolation between the two measured outputs that bracket `target`. It never
+// extrapolates: a target outside the measured range is refused above.
+function launchEstimate(rows, target) {
+  const groups = launchGroups(rows);
+  const obstacle = estimateObstacle(groups, target);
+  if (obstacle) return { ok: false, message: obstacle, groups };
+  const upperIndex = Math.max(
+    1,
+    groups.findIndex((group) => group.mean >= target),
+  );
+  const low = groups[upperIndex - 1];
+  const high = groups[upperIndex];
+  const power =
+    low.power + ((high.power - low.power) * (target - low.mean)) / (high.mean - low.mean);
+  return {
+    ok: true,
+    power,
+    low,
+    high,
+    groups,
+    message: '両側の測定値の間から求めた候補です。次の1枚で届くか確かめてください。',
+  };
+}
+
+// Optional columns of a file saved from the real-robot table: the tilt of the shot [deg] and the
+// time it was fired (「10:51:02」). Empty cells are allowed (rows typed in by hand have neither).
+const CLOCK = /^\d{1,2}:\d{2}(?::\d{2})?$/;
+
+function parseShotDetails(cells, columns, lineNumber) {
+  const details = {};
+  const tilt = columns.tilt >= 0 ? cells[columns.tilt] : '';
+  const time = columns.time >= 0 ? cells[columns.time] : '';
+  if (tilt) {
+    if (!UNSIGNED_DECIMAL.test(tilt) || Number(tilt) > MAX_TILT)
+      throw new Error(lineNumber + '行目の角度は0〜180の数値で入力してください。');
+    details.tilt = Number(tilt);
+  }
+  if (time) {
+    if (!CLOCK.test(time))
+      throw new Error(lineNumber + '行目の時刻は 10:51:02 の形で入力してください。');
+    details.time = time;
+  }
+  return details;
+}
+
+function parseMeasurementRow(cells, columnCount, columns, lineNumber) {
+  if (cells.length !== columnCount || !cells[columns.power] || !cells[columns.range])
+    throw new Error(lineNumber + '行目に出力と飛距離がありません。');
+  // Rows exported from the simulator carry another source; they must not pose as measurements.
+  if (columns.source >= 0 && cells[columns.source] !== 'measured')
+    throw new Error('模擬データは実機の測定として読み込めません。');
+  if (!UNSIGNED_DECIMAL.test(cells[columns.power]) || !UNSIGNED_DECIMAL.test(cells[columns.range]))
+    throw new Error(lineNumber + '行目は数値だけで入力してください。');
+  return {
+    power: Number(cells[columns.power]),
+    range: Number(cells[columns.range]),
+    ...parseShotDetails(cells, columns, lineNumber),
+  };
+}
+
+function launchParseCSV(text) {
+  if (typeof text !== 'string' || text.length > MAX_CSV_CHARS)
+    throw new Error('CSVは100 KB以下にしてください。');
+  const lines = text
+    .replace(/^﻿/, '') // spreadsheets prepend a byte-order mark
+    .trim()
+    .split(/\r?\n/)
+    .filter((line) => line.trim());
+  const header = (lines.shift() || '').split(',').map((cell) => cell.trim());
+  const columns = {
+    power: header.indexOf('output_pct'),
+    range: header.indexOf('range_m'),
+    source: header.indexOf('source'),
+    tilt: header.indexOf('tilt_deg'),
+    time: header.indexOf('time'),
+  };
+  if (columns.power < 0 || columns.range < 0)
+    throw new Error('1行目に output_pct,range_m の列名が必要です。');
+  if (!lines.length || lines.length > MAX_CSV_ROWS)
+    throw new Error('測定値を1〜300行で入力してください。');
+  const rows = lines.map((line, index) => {
+    const cells = line.split(',').map((cell) => cell.trim());
+    // +2: the header line plus counting from 1, so the number matches the learner's spreadsheet.
+    return parseMeasurementRow(cells, header.length, columns, index + 2);
+  });
+  launchGroups(rows); // reuses the range checks, and their learner-facing message
+  return rows;
+}
+
+const CSV_HEADER = '﻿source,output_pct,range_m'; // BOM so spreadsheets read UTF-8
+const SHOT_COLUMNS = ',tilt_deg,time'; // only when a row came from a shot of the real launcher
+const RANGE_DECIMALS = 4; // sub-millimetre: past anything a learner can measure, but lossless here
+
+const hasShotDetails = (row) => Number.isFinite(row.tilt) || Boolean(row.time);
+
+/**
+ * The rows as CSV (`source` names where they came from). Rows fired from the lesson also carry
+ * their tilt and time; a table without such rows keeps the three columns it always had.
+ */
+function launchCSV(rows, source = 'measured') {
+  const details = rows.some(hasShotDetails);
+  const body = rows
+    .map((row) => {
+      const cells = [source, row.power, row.range.toFixed(RANGE_DECIMALS)];
+      if (details) cells.push(Number.isFinite(row.tilt) ? row.tilt : '', row.time ?? '');
+      return cells.join(',');
+    })
+    .join('\n');
+  return CSV_HEADER + (details ? SHOT_COLUMNS : '') + '\n' + body;
+}
+
+// --- The one table of the real-robot measurement (topic 実機で測る) -------------------------------
+
+/**
+ * The rows of the measurement table, one per disc, in the order they were added: a disc fired from
+ * the lesson (`shot: true`, with its time and tilt), one typed in by hand (`typed: true`) or one
+ * read from a CSV. Each row says whether its distance is still to be typed (`waiting`) and which
+ * fields the learner fills in (`entry`: null, 'range' for a fired disc, 'both' for a typed row,
+ * whose output is typed as well). `number` counts the discs, 1…N.
+ */
+function launchTableRows(rows) {
+  return rows.map((row, index) => {
+    const waiting = !Number.isFinite(row.range);
+    let entry = null;
+    if (waiting) entry = row.typed ? 'both' : 'range';
+    let kind = 'file';
+    if (row.shot) kind = 'shot';
+    else if (row.typed) kind = 'typed';
+    return {
+      id: row.id ?? null,
+      number: index + 1,
+      kind,
+      time: row.time ?? null,
+      power: Number.isFinite(row.power) ? row.power : null,
+      tilt: Number.isFinite(row.tilt) ? row.tilt : null,
+      range: waiting ? null : row.range,
+      waiting,
+      entry,
+    };
+  });
+}
+
+const PERCENT = 100;
+const TILT_DECIMALS = 1;
+
+/**
+ * The discs a recorded launcher session fired (a record 「出力を調整して飛ばす（実機から1枚発射）」
+ * kept on the robot): every rise of /shot/status fired_count is a disc, at that message's stamp
+ * [s], with the tilt it reported and the roller command [%] last reported at or before it.
+ * Returns [{percent, tilt, at: Date, source}] (`source`: last_fire_source, 'lab' or 'joy').
+ */
+function launcherShots(recording) {
+  const rollers = recording?.streams?.roller ?? [];
+  const shots = recording?.streams?.shot ?? [];
+  const fired = [];
+  let count = null;
+  for (const message of shots) {
+    if (!Number.isInteger(message.fired_count)) continue;
+    const rise = count === null ? 0 : message.fired_count - count;
+    count = message.fired_count;
+    if (rise <= 0) continue;
+    const roller = rollers.filter((entry) => entry.stamp <= message.stamp).at(-1);
+    const percent = Number.isFinite(roller?.command) ? Math.round(roller.command * PERCENT) : null;
+    const tilt = Number.isFinite(message.tilt_deg)
+      ? Number(message.tilt_deg.toFixed(TILT_DECIMALS))
+      : null;
+    for (let disc = 0; disc < rise; disc += 1)
+      fired.push({
+        percent,
+        tilt,
+        at: new Date(message.stamp * 1000),
+        source: message.last_fire_source ?? null,
+      });
+  }
+  return fired;
+}
+
+// --- What the scene and the record chart share ---------------------------------------------------
+
+const LAUNCH_TOLERANCE = 0.15; // metres either side of a target's centre that count as a hit
+const RANGE_TICK = 0.5; // metres between the labelled lines of the record chart
+const MIN_CHART_RANGE = 2; // metres: the first few records do not fill the whole chart
+const CHART_HEADROOM = 1.05; // share of the furthest value kept free above it
+
+/** Whether a disc that came down at `range` hit a target centred at `target` (null: no target). */
+function launchHit(range, target) {
+  return Number.isFinite(target) && Math.abs(range - target) <= LAUNCH_TOLERANCE + 1e-9;
+}
+
+/**
+ * The record chart's distance axis: 0 to a whole number of 0.5 m steps above every record and the
+ * whole target band, so the axis is read in round half metres. `{ max, step, ticks }`.
+ */
+function launchRangeAxis(rows, target = null) {
+  const band = Number.isFinite(target) ? target + LAUNCH_TOLERANCE : 0;
+  const furthest =
+    Math.max(MIN_CHART_RANGE, band, ...rows.map((row) => row.range)) * CHART_HEADROOM;
+  const max = Math.ceil(furthest / RANGE_TICK - 1e-9) * RANGE_TICK;
+  const ticks = [];
+  for (let value = 0; value <= max + 1e-9; value += RANGE_TICK)
+    ticks.push(Number(value.toFixed(1)));
+  return { max, step: RANGE_TICK, ticks };
+}
+
+export {
+  LAUNCH_SPEC,
+  LAUNCH_TOPICS,
+  LAUNCH_TARGETS,
+  LAUNCH_TOLERANCE,
+  launchHit,
+  launchRangeAxis,
+  launchSpeed,
+  launchForces,
+  launchExperiment,
+  launchGroups,
+  launchEstimate,
+  launchParseCSV,
+  launchCSV,
+  launchTableRows,
+  launcherShots,
+};

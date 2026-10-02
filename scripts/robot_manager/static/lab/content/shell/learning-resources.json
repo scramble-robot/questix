@@ -1,0 +1,375 @@
+{
+  "checkedOn": "2026-09-25",
+  "checkMethod": "Each url was requested on its checkedOn date with `curl -sI -L --max-time 10`; where the server refuses HEAD (400/405), with a plain `curl -s -L --max-time 15` GET, and the page title was compared with the entry. checkResult is the final status of that request. See CONTRIBUTING.md (Reading lists).",
+  "copy": {
+    "summary": "もっと詳しく学ぶ",
+    "count": "日本語の参考資料 · {count}件",
+    "action": "資料を見る",
+    "intro": "気になった資料を一つ選び、「読むところ」から始めてみてください。リンクは新しいタブで開きます。",
+    "caption": "{course}の内容を、記事・動画や専門書でさらに学べます。",
+    "start": "読むところ",
+    "external": "外部サイト",
+    "newTab": "（外部サイト・新しいタブで開く）",
+    "bookNote": "リンク先は出版社の紹介・目次です。本文を読むには書籍の購入や図書館での利用が必要です。",
+    "policyTitle": "資料を選んだ基準と確認日",
+    "policy": [
+      "研究機関、技術を開発する企業、著者が明らかな専門出版社、講師を公開している教育サービスから選び、教材との関係と日本語の説明を確認しています。記事は本文、授業動画は公開ページの解説、書籍は出版社の内容紹介・目次を確認しました。書籍の全文や動画の全編を確認したという意味ではありません。",
+      "各資料は基礎理論や考え方を学ぶためのものです。古い資料も、今も使える原理の説明を選んでいます。プログラムの実行環境や製品の設定は、利用する版によって異なります。"
+    ],
+    "reviewedOn": "内容の確認日：",
+    "checkedOn": "リンクを開けることの確認日：",
+    "network": "外部資料を開くにはインターネット接続が必要です。ロボットのWi-Fiにつないでいる間は開けないことがあります。教材の実験は、インターネットにつながっていなくても使えます。",
+    "kinds": {
+      "article": "記事・無料",
+      "video": "授業動画・解説・無料",
+      "book": "書籍・有料"
+    }
+  },
+  "courses": {
+    "motor": {
+      "reviewedOn": "2026-09-24",
+      "resources": [
+        {
+          "title": "モータの構成要素",
+          "publisher": "ニデック · モーターメーカー",
+          "kind": "article",
+          "level": "内部の仕組みを調べる",
+          "url": "https://www.nidec.com/jp/technology/motor/basic/00002/",
+          "description": "電流が作る磁場や、固定側と回転側の役割を図で学べます。実験で見たコイルと磁石を、実際のモーターの構造に結び付けて読めます。",
+          "start": "電磁石と永久磁石、固定子と回転子の説明から。",
+          "checkedOn": "2026-09-25",
+          "checkResult": "HEAD 200"
+        },
+        {
+          "title": "ブラシレスDCモータ",
+          "publisher": "ニデック · モーターメーカー",
+          "kind": "article",
+          "level": "回路と構造を深める",
+          "url": "https://www.nidec.com/jp/technology/motor/basic/00005/",
+          "description": "ブラシを使う代わりに、電子回路で電流を切り替える仕組みを説明しています。回路・磁石・コイルの役割を整理できます。",
+          "start": "冒頭の特徴と、図1.7のシステム構成。専門的な分類は後から読めます。",
+          "checkedOn": "2026-09-25",
+          "checkResult": "HEAD 200"
+        },
+        {
+          "title": "DDT M0602C_112 製品仕様",
+          "publisher": "スイッチサイエンス · 国内販売元",
+          "kind": "article",
+          "level": "実機の仕様表を読む",
+          "url": "https://www.switch-science.com/products/7647",
+          "description": "QUESTiXの駆動輪に使う部品の仕様です。定格の回転数・トルク、無負荷や回転を止めたときの値が、どう違うかを確認できます。",
+          "start": "「特徴」と「仕様」。定格とストールの行を読み比べます。",
+          "checkedOn": "2026-09-25",
+          "checkResult": "HEAD 200"
+        }
+      ]
+    },
+    "mechanics": {
+      "reviewedOn": "2026-09-22",
+      "resources": [
+        {
+          "title": "慣性の法則",
+          "publisher": "Try IT（トライグループ）",
+          "kind": "video",
+          "level": "基礎を振り返る",
+          "url": "https://www.try-it.jp/chapters-2190/sections-2217/lessons-2231/",
+          "description": "出力を0にしても、すぐには止まらないのはなぜか。身近な物の動きから、力と慣性の関係を振り返れます。",
+          "start": "動画と、その下の「この動画の要点まとめ」。中学理科の内容です。",
+          "checkedOn": "2026-09-25",
+          "checkResult": "HEAD 200"
+        }
+      ]
+    },
+    "control": {
+      "reviewedOn": "2026-09-22",
+      "resources": [
+        {
+          "title": "PID制御",
+          "publisher": "MathWorks · 制御・解析ソフトウェア開発元",
+          "kind": "article",
+          "level": "仕組みを深める",
+          "url": "https://jp.mathworks.com/discovery/pid-control.html",
+          "description": "目標と測定値を比べて出力を直す仕組みと、P・I・Dそれぞれの役割を整理できます。実験で見た回転数のグラフと比べてみましょう。",
+          "start": "冒頭の制御の図と、P・I・Dの説明。後半の数式は発展内容です。",
+          "checkedOn": "2026-09-25",
+          "checkResult": "HEAD 200"
+        },
+        {
+          "title": "フィードフォワード制御",
+          "publisher": "アズビル · 計測・制御機器メーカー",
+          "kind": "article",
+          "level": "身近な例で考える",
+          "url": "https://www.azbil.com/jp/withazbil/trivia/202504.html",
+          "description": "あらかじめ必要な出力を見込む方法と、結果を測って修正する方法の違いを、給湯器などの例から学べます。",
+          "start": "フィードバック制御との比較。モーター以外にも同じ考え方が使われます。",
+          "checkedOn": "2026-09-25",
+          "checkResult": "HEAD 200"
+        }
+      ]
+    },
+    "launch": {
+      "reviewedOn": "2026-09-22",
+      "resources": [
+        {
+          "title": "水平投射の見方：y方向の運動に注目",
+          "publisher": "Try IT · 鈴木誠治先生",
+          "kind": "video",
+          "level": "基礎を振り返る",
+          "url": "https://www.try-it.jp/chapters-8001/sections-8036/lessons-8047/",
+          "description": "横へ飛ぶ動きと、重力で落ちる動きを分けて考えます。空気の力を入れる前の、射出実験の基本モデルにつながります。",
+          "start": "この授業と、ページ内の次のポイント「x方向の運動に注目」。高校物理の内容です。",
+          "checkedOn": "2026-09-25",
+          "checkResult": "HEAD 200"
+        },
+        {
+          "title": "飛行機の姿勢と地上試験の話",
+          "publisher": "JAXA航空技術部門 · 航空研究者のコラム",
+          "kind": "article",
+          "level": "実際の研究を知る",
+          "url": "https://www.aero.jaxa.jp/topics/column/0254.html",
+          "description": "空気の流れに対する傾きが、持ち上げる力にどう関わるかを考えられます。飛行機を例にした解説で、ディスク固有の飛距離を求める資料ではありません。",
+          "start": "「揚力」「迎角」と、風洞で条件を変えて調べる説明。",
+          "checkedOn": "2026-09-25",
+          "checkResult": "HEAD 200"
+        }
+      ]
+    },
+    "arm": {
+      "reviewedOn": "2026-09-22",
+      "resources": [
+        {
+          "title": "逆運動学",
+          "publisher": "MathWorks · ロボティクス用ソフトウェア開発元",
+          "kind": "article",
+          "level": "図から仕組みを学ぶ",
+          "url": "https://jp.mathworks.com/discovery/inverse-kinematics.html",
+          "description": "関節角度から手先の位置を求める順運動学と、その逆の計算を図で比べられます。同じ位置に届く姿勢が複数ある理由も扱います。",
+          "start": "順運動学と逆運動学の図。数値計算の手法は、さらに進みたい人向けです。",
+          "checkedOn": "2026-09-25",
+          "checkResult": "HEAD 200"
+        },
+        {
+          "title": "絵ときでわかる ロボット工学（第2版）",
+          "publisher": "オーム社 · 川嶋健嗣・只野耕太郎 著",
+          "kind": "book",
+          "level": "数式にも進む",
+          "url": "https://www.ohmsha.co.jp/book/9784274215810.html",
+          "description": "アームの角度・位置の関係を、図と計算で学ぶための専門書です。三角比やベクトルなど、計算に使う数学も扱っています。",
+          "start": "第3章「ロボットアームの運動学」。必要な数学は第2章で確認できます。",
+          "checkedOn": "2026-09-25",
+          "checkResult": "HEAD 200"
+        }
+      ]
+    },
+    "vision": {
+      "reviewedOn": "2026-09-22",
+      "resources": [
+        {
+          "title": "有無検査（数量・欠品）",
+          "publisher": "キーエンス · 画像処理機器メーカー",
+          "kind": "article",
+          "level": "実物の画像で考える",
+          "url": "https://www.keyence.co.jp/ss/products/vision/visionbasics/use/exists.jsp",
+          "description": "画像から必要な部分を白・黒で分け、つながった領域を数える方法を、工場の検査例で学べます。教材の「まとまりを見つける」と結び付けて読めます。",
+          "start": "「有無検査の基本 ～2値化処理とブロブ解析～」の画像。",
+          "checkedOn": "2026-09-25",
+          "checkResult": "GET 200 (HEAD refused with 400)"
+        },
+        {
+          "title": "道路のひび・わだち・凹凸を見逃さない",
+          "publisher": "リコー経済社会研究所 · 自社開発技術の取材",
+          "kind": "article",
+          "level": "奥行きの使い道を知る",
+          "url": "https://blogs.ricoh.co.jp/RISB/technology/post_254.html",
+          "description": "左右から見た画像の違いを使って、道路の凹凸を測る実例です。RGB-Dカメラの実験で学んだ「視差」が、どこで役立つかを考えられます。",
+          "start": "ステレオカメラと視差の説明、路面を測った図。",
+          "checkedOn": "2026-09-25",
+          "checkResult": "HEAD 200"
+        },
+        {
+          "title": "Ultralytics YOLOによる物体検出",
+          "publisher": "Ultralytics · YOLO実装の開発元",
+          "kind": "article",
+          "level": "プログラムにも進む",
+          "url": "https://docs.ultralytics.com/ja/tasks/detect/",
+          "description": "検出した物を囲む枠、物の種類、確信の度合いを表すスコアの読み方を確認できます。学習済みモデルで画像を調べるコードも掲載されています。",
+          "start": "日本語本文の冒頭と「推論」「結果の出力」。コードを試すにはPythonの環境が必要です。",
+          "checkedOn": "2026-09-25",
+          "checkResult": "HEAD 200"
+        }
+      ]
+    },
+    "slam": {
+      "reviewedOn": "2026-09-22",
+      "resources": [
+        {
+          "title": "SLAMとは？",
+          "publisher": "MathWorks · ロボティクス用ソフトウェア開発元",
+          "kind": "article",
+          "level": "仕組みを整理する",
+          "url": "https://jp.mathworks.com/discovery/slam.html",
+          "description": "移動しながら自分の位置と地図を求める流れを、掃除ロボットなどの例で整理できます。カメラを使う方法とLiDARを使う方法の違いも扱います。",
+          "start": "「SLAMの仕組みとは」と「SLAMの手法・種類」。",
+          "checkedOn": "2026-09-25",
+          "checkResult": "HEAD 200"
+        },
+        {
+          "title": "詳解 確率ロボティクス — Pythonによる基礎アルゴリズムの実装",
+          "publisher": "講談社 · 上田隆一 著",
+          "kind": "book",
+          "level": "数式・プログラムへ",
+          "url": "https://www.kspub.co.jp/book/detail/5170069.html",
+          "description": "車輪やセンサーの誤差を含めて位置を推定し、地図を作る計算へ進めます。確率・行列・Pythonを使う発展的な専門書です。",
+          "start": "第3・4章の動きと誤差のモデルから。自己位置推定は第5・6章、SLAMは第8・9章です。",
+          "checkedOn": "2026-09-25",
+          "checkResult": "HEAD 200"
+        }
+      ]
+    },
+    "tracking": {
+      "reviewedOn": "2026-09-22",
+      "resources": [
+        {
+          "title": "等速直線運動",
+          "publisher": "Try IT（トライグループ）",
+          "kind": "video",
+          "level": "基礎を振り返る",
+          "url": "https://www.try-it.jp/chapters-2190/sections-2202/lessons-2212/",
+          "description": "速さと向きが変わらないとき、何秒後にどこまで進むかを求めます。教材で最初に使う、相手の行き先の予測を理解する土台になります。",
+          "start": "時間と移動距離の計算。読み終えたら、途中で曲がる相手にも同じ予測が使えるか考えてみましょう。",
+          "checkedOn": "2026-09-25",
+          "checkResult": "HEAD 200"
+        },
+        {
+          "title": "カルマンフィルター",
+          "publisher": "MathWorks · 計測・解析ソフトウェア開発元",
+          "kind": "article",
+          "level": "予測の次の仕組みへ",
+          "url": "https://jp.mathworks.com/discovery/kalman-filter.html",
+          "description": "動きの予測と、ばらつく測定値を組み合わせて位置を推定する方法です。物が一時的に隠れたときの追跡例も見られます。",
+          "start": "「コンピュータービジョン」のボールの例から。計算を深く学ぶには確率や行列を使います。",
+          "checkedOn": "2026-09-25",
+          "checkResult": "HEAD 200"
+        }
+      ]
+    },
+    "timing": {
+      "reviewedOn": "2026-09-22",
+      "resources": [
+        {
+          "title": "ROS 2 入門",
+          "publisher": "MathWorks · ROS連携ソフトウェア開発元",
+          "kind": "article",
+          "level": "実機の通信へ進む",
+          "url": "https://jp.mathworks.com/help/ros/ug/get-started-with-ros-2.html",
+          "description": "ロボットのプログラム同士が情報をやり取りする仕組みを学べます。受け取る情報の残し方や届け方を選ぶ設定は、教材の通信の実験につながります。",
+          "start": "「トピックとサービス品質ポリシー」のHistory・Depth・Reliability。実行例にはMATLABとROS Toolboxが必要です。",
+          "checkedOn": "2026-09-25",
+          "checkResult": "GET 200 (HEAD refused with 405)"
+        }
+      ]
+    },
+    "planning": {
+      "reviewedOn": "2026-09-22",
+      "resources": [
+        {
+          "title": "MATLABによるモーション プランニング",
+          "publisher": "MathWorks · 経路計画ソフトウェア開発元",
+          "kind": "article",
+          "level": "探索の仕組みを深める",
+          "url": "https://jp.mathworks.com/campaigns/offers/next/getting-started-with-motion-planning-in-matlab-ebook.html",
+          "description": "どの道を先に調べるかを決めるA*や、障害物の周囲にロボットの大きさ分の余裕を設ける方法を学べます。",
+          "start": "「グリッドベース A*」と「MATLABのPRM」。日本語の解説は読めますが、実行例には別途ソフトウェアが必要です。",
+          "checkedOn": "2026-09-25",
+          "checkResult": "HEAD 200"
+        }
+      ]
+    },
+    "coordination": {
+      "reviewedOn": "2026-09-22",
+      "resources": [
+        {
+          "title": "カメラ キャリブレーションとは",
+          "publisher": "MathWorks · 画像計測ソフトウェア開発元",
+          "kind": "article",
+          "level": "座標と測定を深める",
+          "url": "https://jp.mathworks.com/help/vision/ug/camera-calibration.html",
+          "description": "カメラで見た位置を実際の位置に対応させるために、何を調べるかを学べます。カメラの位置・向きやレンズの性質が測定に関わります。",
+          "start": "カメラの内部・外部パラメーターと座標変換の図。後半の数式では行列を使います。",
+          "checkedOn": "2026-09-25",
+          "checkResult": "GET 200 (HEAD refused with 405)"
+        },
+        {
+          "title": "絵ときでわかる ロボット工学（第2版）",
+          "publisher": "オーム社 · 川嶋健嗣・只野耕太郎 著",
+          "kind": "book",
+          "level": "数式にも進む",
+          "url": "https://www.ohmsha.co.jp/book/9784274215810.html",
+          "description": "位置だけでなく向きも含めて、ロボットの姿勢を計算で表す方法を学べます。カメラとアームで基準が違うときの座標の扱いを深めるための専門書です。",
+          "start": "第3章の「剛体の位置・姿勢表現」。ベクトルや行列は第2章で確認できます。",
+          "checkedOn": "2026-09-25",
+          "checkResult": "HEAD 200"
+        }
+      ]
+    },
+    "behavior": {
+      "reviewedOn": "2026-09-22",
+      "resources": [
+        {
+          "title": "「状態遷移図」と「状態遷移表」で見えるもの",
+          "publisher": "技術評論社 · 石原一宏 著",
+          "kind": "article",
+          "level": "身近な例で考える",
+          "url": "https://gihyo.jp/dev/serial/01/test_up/0004",
+          "description": "ストップウォッチを例に、状態と切り替わる条件を図や表にします。ロボットの「走る・待つ・止まる」に、決め忘れた条件がないか考える助けになります。",
+          "start": "「状態遷移図を使うことで見えるもの」の図と、その次の表。",
+          "checkedOn": "2026-09-25",
+          "checkResult": "HEAD 200"
+        }
+      ]
+    },
+    "diagnostics": {
+      "reviewedOn": "2026-09-22",
+      "resources": [
+        {
+          "title": "異常検知とは",
+          "publisher": "MathWorks · 計測・解析ソフトウェア開発元",
+          "kind": "article",
+          "level": "データの見方を広げる",
+          "url": "https://jp.mathworks.com/discovery/anomaly-detection.html",
+          "description": "1回だけ外れた値、変化が続く場合、複数のセンサーを比べて初めて分かる異常を図で確認できます。教材の「いつもと違う」の判定を深められます。",
+          "start": "「異常の種類」のグラフから。異常を見つける考え方の資料で、実機の安全回路の設計書ではありません。",
+          "checkedOn": "2026-09-25",
+          "checkResult": "HEAD 200"
+        }
+      ]
+    },
+    "rl": {
+      "reviewedOn": "2026-09-22",
+      "resources": [
+        {
+          "title": "強化学習とは",
+          "publisher": "MathWorks · 強化学習ソフトウェア開発元",
+          "kind": "article",
+          "level": "仕組みを整理する",
+          "url": "https://jp.mathworks.com/discovery/reinforcement-learning.html",
+          "description": "観測して行動し、報酬を受け取って学ぶ流れを整理できます。学習がうまく進まないときに、報酬や観測を見直す考え方も扱います。",
+          "start": "「強化学習の仕組み」と学習の流れの図。実験の「動く→点数→学ぶ」と対応させて読めます。",
+          "checkedOn": "2026-09-25",
+          "checkResult": "HEAD 200"
+        },
+        {
+          "title": "強化学習アルゴリズム入門 —「平均」からはじめる基礎と応用",
+          "publisher": "オーム社 · 曽我部東馬 著",
+          "kind": "book",
+          "level": "数式・プログラムへ",
+          "url": "https://www.ohmsha.co.jp/book/9784274223716.html",
+          "description": "もらった点数の平均から、行動のよさを見積もる計算へ進めます。未経験の方法も試す仕組みや、先の報酬を考える計算を学ぶための専門書です。",
+          "start": "第1章の平均・期待値・価値、第2章の多腕バンディット問題。実装にはPythonまたはMATLABを使います。",
+          "checkedOn": "2026-09-25",
+          "checkResult": "HEAD 200"
+        }
+      ]
+    }
+  }
+}

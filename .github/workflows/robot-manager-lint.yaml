@@ -1,21 +1,27 @@
 ---
-name: Robot Manager Lint
+name: Robot Manager Checks
 
 # The ROS 2 build/test workflow ignores "scripts/**", and its static-analysis
 # job excludes "./scripts/*" from flake8/pydocstyle, so the FastAPI-based
-# robot_manager and other scripts/ Python were never linted in CI. This job
-# fills that gap. Same flake8/pydocstyle configuration as the ROS workflow's
-# static-analysis job, scoped to scripts/.
+# robot_manager and other scripts/ Python were never linted or tested in CI.
+# These jobs fill that gap: the same flake8/pydocstyle configuration as the ROS
+# workflow's static-analysis job scoped to scripts/, robot_manager's pytest
+# suite, and the QUESTiX LAB teaching site's Node tests and Prettier check.
+# None of them needs ROS, hardware or systemd.
 on:
   push:
     branches: [main]
     paths:
       - "scripts/**"
+      - "questix_control_config/**"
+      - "uart_joy_driver/src/joy_line_parser.cpp"
       - ".github/workflows/robot-manager-lint.yaml"
   pull_request:
     branches: [main]
     paths:
       - "scripts/**"
+      - "questix_control_config/**"
+      - "uart_joy_driver/src/joy_line_parser.cpp"
       - ".github/workflows/robot-manager-lint.yaml"
 
 permissions:
@@ -62,3 +68,61 @@ jobs:
             -not -path "*/install/*" \
             -not -path "*/log/*" \
             | xargs -r python -m pydocstyle --ignore=D100,D101,D102,D103,D104,D105,D107,D203,D213,D400,D415
+
+  python-tests:
+    name: robot_manager pytest + controller UI tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      # PyYAML is not a pip dependency of robot_manager: on the robot it uses the apt copy ROS 2
+      # already needs (python3-yaml, 6.0.1 on Ubuntu 24.04), so CI installs that version here.
+      - name: Install robot_manager and test dependencies
+        run: python -m pip install ./scripts "pytest==8.3.3" "PyYAML==6.0.1"
+
+      # Configuration API and lab console; no hardware or systemd is touched.
+      - name: Run pytest
+        env:
+          PYTHONPATH: scripts
+        run: python -m pytest -q scripts/robot_manager
+
+      - name: Test controller names, diagrams, saved versus edited values, and web joy URLs
+        run: node --test scripts/robot_manager/tests/*.test.cjs
+
+  lab-tests:
+    name: QUESTiX LAB tests + Prettier
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: scripts/robot_manager/static/lab
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"  # the version the lab tests are developed on
+
+      # Tests that compare against a pre-refactor copy of the site skip
+      # themselves here because LAB_BASELINE is not set.
+      - name: Run Node tests
+        run: node --test test/*.test.mjs
+
+      # The site has no package.json (no build step), so Prettier is pinned
+      # here; CONTRIBUTING.md makes its formatting mandatory.
+      - name: Check formatting with Prettier
+        run: npx --yes prettier@3.9.8 --check .

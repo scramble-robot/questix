@@ -11,6 +11,7 @@
 #include <exception>
 #include <functional>
 #include <lifecycle_msgs/msg/state.hpp>
+#include <limits>
 #include <string>
 #include <thread>
 
@@ -24,7 +25,10 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
       tilt_servo_id_(1),
       trigger_servo_id_(3),
       fire_button_(5),
-      tilt_axis_(-1),
+      tilt_up_axis_(-2),
+      tilt_down_axis_(-2),
+      tilt_up_axis_sign_(1),
+      tilt_down_axis_sign_(-1),
       tilt_up_button_index_(4),
       tilt_down_button_index_(6),
       tilt_step_angle_(5.0),
@@ -47,23 +51,29 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
       teardown_pending_(false),
       is_shooting_(false),
       last_button_state_(false),
-      last_tilt_value_(0.0F),
-      last_tilt_up_state_(false),
-      last_tilt_down_state_(false),
       current_tilt_position_(2048),
       current_tilt_angle_(0.0),
-      last_command_time_(0, 0, RCL_ROS_TIME) {
+      last_command_time_(0, 0, RCL_ROS_TIME),
+      accept_lab_input_(false),
+      lab_joy_quiet_sec_(1.0),
+      lab_min_fire_interval_sec_(2.0),
+      joy_launcher_active_at_sec_(-std::numeric_limits<double>::infinity()),
+      last_fire_sec_(-std::numeric_limits<double>::infinity()),
+      fired_count_(0),
+      last_fire_source_(shot_lab::FireSource::kNone),
+      last_lab_refusal_(shot_lab::Refusal::kNone) {
   // パラメーター宣言（取得は on_configure で行い、cleanup→configure で再読込できるようにする）
   this->declare_parameter("port", "/dev/servo");
   this->declare_parameter("baudrate", 115200);
   this->declare_parameter("tilt_servo_id", 1);
   this->declare_parameter("trigger_servo_id", 3);
   this->declare_parameter("fire_button", 5);  // R button (Switch2 native index)
-  // Tilt input mode / チルト入力モード
-  // - If tilt_axis >= 0: use the analog axis (D-pad / stick).
-  // - Otherwise: use tilt_up_button_index / tilt_down_button_index (button edge).
-  // tilt_axis が 0 以上なら軸モード、それ以外はボタンモードで動いて上下します。
-  this->declare_parameter("tilt_axis", -1);              // -1 = disabled (button mode)
+  // Legacy profiles still work. Explicit per-direction axes override tilt_axis.
+  this->declare_parameter("tilt_axis", -1);
+  this->declare_parameter("tilt_up_axis", -2);
+  this->declare_parameter("tilt_down_axis", -2);
+  this->declare_parameter("tilt_up_axis_sign", 1);
+  this->declare_parameter("tilt_down_axis_sign", -1);
   this->declare_parameter("tilt_up_button_index", 4);    // L button (Switch2 native index)
   this->declare_parameter("tilt_down_button_index", 6);  // ZL button (Switch2 native index)
   this->declare_parameter("tilt_step_angle", 5.0);       // チルトステップサイズ（度）
@@ -81,6 +91,49 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
   // 空文字で連動無効）
   this->declare_parameter("emergency_stop_topic", "/emergency_stop");
   this->declare_parameter("emergency_stop_timeout_sec", 1.0);
+  // QUESTiX LAB launcher input（練習用起動のみ true。条件は shot_lab_logic.hpp）
+  this->declare_parameter("accept_lab_input", false);
+  this->declare_parameter("lab_joy_quiet_sec", 1.0);
+  this->declare_parameter("lab_min_fire_interval_sec", 2.0);
+
+  accept_lab_input_ = this->get_parameter("accept_lab_input").as_bool();
+  // on_configure re-reads the tilt range; reading it here too lets /shot/status report the
+  // configured range while the node still waits for the servos.
+  tilt_min_angle_ = this->get_parameter("tilt_min_angle").as_double();
+  tilt_max_angle_ = this->get_parameter("tilt_max_angle").as_double();
+  const double requested_quiet = this->get_parameter("lab_joy_quiet_sec").as_double();
+  lab_joy_quiet_sec_ =
+      std::isfinite(requested_quiet) && requested_quiet >= 0.0 ? requested_quiet : 1.0;
+  const double requested_interval = this->get_parameter("lab_min_fire_interval_sec").as_double();
+  lab_min_fire_interval_sec_ =
+      std::isfinite(requested_interval) && requested_interval >= 0.0 ? requested_interval : 2.0;
+  if (lab_joy_quiet_sec_ != requested_quiet || lab_min_fire_interval_sec_ != requested_interval) {
+    RCLCPP_WARN(this->get_logger(),
+                "Invalid lab_joy_quiet_sec=%g or lab_min_fire_interval_sec=%g; using %.1f / %.1f",
+                requested_quiet, requested_interval, lab_joy_quiet_sec_,
+                lab_min_fire_interval_sec_);
+  }
+
+  // /shot/status is observation only and reports in every lifecycle state.
+  shot_status_pub_ =
+      rclcpp::create_publisher<std_msgs::msg::String>(*this, "/shot/status", rclcpp::QoS(10));
+  shot_status_timer_ = this->create_wall_timer(std::chrono::milliseconds(200),
+                                               std::bind(&ShotComponent::publishShotStatus, this));
+  if (accept_lab_input_) {
+    // Requests are checked in the callbacks (ACTIVE, E-stop, controller, interval), never queued.
+    lab_tilt_sub_ = this->create_subscription<std_msgs::msg::Float32>(
+        "/shot/lab/tilt", 1,
+        std::bind(&ShotComponent::labTiltCallback, this, std::placeholders::_1));
+    lab_fire_sub_ = this->create_subscription<std_msgs::msg::Empty>(
+        "/shot/lab/fire", 1,
+        std::bind(&ShotComponent::labFireCallback, this, std::placeholders::_1));
+    RCLCPP_INFO(this->get_logger(),
+                "QUESTiX LAB launcher input on /shot/lab/tilt and /shot/lab/fire "
+                "(controller quiet %.1f s, fire interval %.1f s)",
+                lab_joy_quiet_sec_, lab_min_fire_interval_sec_);
+  } else {
+    RCLCPP_INFO(this->get_logger(), "QUESTiX LAB launcher input disabled (accept_lab_input=false)");
+  }
 
   auto_start_ = this->get_parameter("auto_start").as_bool();
   const double requested_retry_period = this->get_parameter("connect_retry_period_sec").as_double();
@@ -411,9 +464,30 @@ ShotComponent::CallbackReturn ShotComponent::on_configure(const rclcpp_lifecycle
   tilt_servo_id_ = this->get_parameter("tilt_servo_id").as_int();
   trigger_servo_id_ = this->get_parameter("trigger_servo_id").as_int();
   fire_button_ = this->get_parameter("fire_button").as_int();
-  tilt_axis_ = this->get_parameter("tilt_axis").as_int();
+  const int legacy_tilt_axis = this->get_parameter("tilt_axis").as_int();
+  tilt_up_axis_ = this->get_parameter("tilt_up_axis").as_int();
+  tilt_down_axis_ = this->get_parameter("tilt_down_axis").as_int();
+  if (tilt_up_axis_ == -2) tilt_up_axis_ = legacy_tilt_axis;
+  if (tilt_down_axis_ == -2) tilt_down_axis_ = legacy_tilt_axis;
+  tilt_up_axis_sign_ = this->get_parameter("tilt_up_axis_sign").as_int();
+  tilt_down_axis_sign_ = this->get_parameter("tilt_down_axis_sign").as_int();
   tilt_up_button_index_ = this->get_parameter("tilt_up_button_index").as_int();
   tilt_down_button_index_ = this->get_parameter("tilt_down_button_index").as_int();
+  if (tilt_up_axis_ < -1 || tilt_down_axis_ < -1 ||
+      (tilt_up_axis_sign_ != 1 && tilt_up_axis_sign_ != -1) ||
+      (tilt_down_axis_sign_ != 1 && tilt_down_axis_sign_ != -1) || tilt_up_button_index_ < 0 ||
+      tilt_down_button_index_ < 0 ||
+      (tilt_up_axis_ == tilt_down_axis_ &&
+       (tilt_up_axis_ == -1 ? tilt_up_button_index_ == tilt_down_button_index_
+                            : tilt_up_axis_sign_ == tilt_down_axis_sign_))) {
+    RCLCPP_ERROR(this->get_logger(), "Invalid or duplicate tilt direction inputs");
+    return CallbackReturn::FAILURE;
+  }
+  for (const auto& direction : {std::string("up"), std::string("down")}) {
+    const int axis = direction == "up" ? tilt_up_axis_ : tilt_down_axis_;
+    RCLCPP_INFO(this->get_logger(), "Tilt %s: %s ignored in %s mode", direction.c_str(),
+                axis == -1 ? "axis_sign" : "button_index", axis == -1 ? "button" : "axis");
+  }
   tilt_step_angle_ = this->get_parameter("tilt_step_angle").as_double();
   tilt_min_angle_ = this->get_parameter("tilt_min_angle").as_double();
   tilt_max_angle_ = this->get_parameter("tilt_max_angle").as_double();
@@ -476,20 +550,14 @@ ShotComponent::CallbackReturn ShotComponent::on_activate(const rclcpp_lifecycle:
   }
   is_shooting_ = false;
   last_button_state_ = false;
-  last_tilt_value_ = 0.0F;
-  last_tilt_up_state_ = false;
-  last_tilt_down_state_ = false;
+  tilt_edges_.reset();
   last_command_time_ = this->now();
 
   RCLCPP_INFO(this->get_logger(), "Shot component activated");
-  if (tilt_axis_ >= 0) {
-    RCLCPP_INFO(this->get_logger(), "Fire button: %d, Tilt mode: axis=%d, Tilt step: %.1f degrees",
-                fire_button_, tilt_axis_, tilt_step_angle_);
-  } else {
-    RCLCPP_INFO(this->get_logger(),
-                "Fire button: %d, Tilt mode: buttons up=%d down=%d, Tilt step: %.1f degrees",
-                fire_button_, tilt_up_button_index_, tilt_down_button_index_, tilt_step_angle_);
-  }
+  RCLCPP_INFO(this->get_logger(),
+              "Tilt up: axis=%d sign=%d button=%d; down: axis=%d sign=%d button=%d", tilt_up_axis_,
+              tilt_up_axis_sign_, tilt_up_button_index_, tilt_down_axis_, tilt_down_axis_sign_,
+              tilt_down_button_index_);
   RCLCPP_INFO(this->get_logger(), "Tilt range: %.1f - %.1f degrees", tilt_min_angle_,
               tilt_max_angle_);
   RCLCPP_INFO(this->get_logger(),
@@ -503,6 +571,7 @@ ShotComponent::CallbackReturn ShotComponent::on_activate(const rclcpp_lifecycle:
 }
 
 ShotComponent::CallbackReturn ShotComponent::on_deactivate(const rclcpp_lifecycle::State&) {
+  tilt_edges_.reset();
   // 射撃シーケンス中なら止めて best-effort で home に戻す（タイマーを残さない）
   cancelShotSequence();
   // 手動 deactivate を含め、deactivate では自動再遷移を必ず止める。故障検出から
@@ -518,6 +587,7 @@ ShotComponent::CallbackReturn ShotComponent::on_deactivate(const rclcpp_lifecycl
 }
 
 ShotComponent::CallbackReturn ShotComponent::on_cleanup(const rclcpp_lifecycle::State&) {
+  tilt_edges_.reset();
   fire_timer_.reset();
   teardown_pending_ = false;
   joy_subscription_.reset();
@@ -527,18 +597,22 @@ ShotComponent::CallbackReturn ShotComponent::on_cleanup(const rclcpp_lifecycle::
 }
 
 ShotComponent::CallbackReturn ShotComponent::on_shutdown(const rclcpp_lifecycle::State&) {
+  tilt_edges_.reset();
   fire_timer_.reset();
   runtime_fault_ = false;
   teardown_pending_ = false;
   stopAutoStartTimers();
   emergency_stop_sub_.reset();
   joy_subscription_.reset();
+  lab_tilt_sub_.reset();
+  lab_fire_sub_.reset();
   disconnectServo();
   RCLCPP_INFO(this->get_logger(), "Shot component shut down");
   return CallbackReturn::SUCCESS;
 }
 
 ShotComponent::CallbackReturn ShotComponent::on_error(const rclcpp_lifecycle::State&) {
+  tilt_edges_.reset();
   // 遷移中に ERROR / 例外が発生したときの後始末。リソースを解放して unconfigured
   // に戻し、auto_start 有効時はタイマーを再開して自動復帰に委ねる。
   fire_timer_.reset();
@@ -580,6 +654,14 @@ void ShotComponent::disconnectServo() {
 }
 
 void ShotComponent::joyCallback(const sensor_msgs::msg::Joy::SharedPtr msg) {
+  // Record controller use of the launcher (fire button, tilt input) for the QUESTiX LAB quiet
+  // rule before any early return: a held button blocks lab requests in every state.
+  if (msg &&
+      shot_lab::joyUsesLauncher(msg->buttons, msg->axes, fire_button_,
+                                {tilt_up_axis_, tilt_up_axis_sign_, tilt_up_button_index_},
+                                {tilt_down_axis_, tilt_down_axis_sign_, tilt_down_button_index_})) {
+    joy_launcher_active_at_sec_ = steadyNowSec();
+  }
   if (this->get_current_state().id() != lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE) {
     return;
   }
@@ -596,65 +678,132 @@ void ShotComponent::joyCallback(const sensor_msgs::msg::Joy::SharedPtr msg) {
 
     // ボタンが押された瞬間を検出（立ち上がりエッジ）
     if (current_button_state && !last_button_state_) {
-      executeShotSequence();
+      executeShotSequence(shot_lab::FireSource::kJoy);
     }
 
     last_button_state_ = current_button_state;
   }
 
-  // axesが存在するかチェック
-  if (msg->axes.empty()) {
-    return;
-  }
-
-  // Tilt input: axis mode if tilt_axis >= 0, otherwise button mode (L / ZL).
-  // tilt_axis が 0 以上なら軸モード、それ以外はボタンモード。
   const auto step_tilt = [this](double delta_deg, const char* direction) {
-    if (!canSendCommand()) {
-      RCLCPP_DEBUG(this->get_logger(), "Tilt command rate limited");
-      return;
-    }
-    double new_angle = current_tilt_angle_ + delta_deg;
-    current_tilt_angle_ = clampAngle(new_angle);
-    current_tilt_position_ = angleToServoPosition(current_tilt_angle_);
-    if (servo_controller_->setPosition(tilt_servo_id_, current_tilt_position_, false)) {
-      RCLCPP_INFO(this->get_logger(), "Tilt %s: angle=%.1f deg", direction, current_tilt_angle_);
-      last_command_time_ = this->now();
-    } else {
-      RCLCPP_ERROR(this->get_logger(), "Failed to move tilt %s", direction);
-      triggerAutoRecovery();
-    }
+    moveTiltTo(current_tilt_angle_ + delta_deg, direction);
   };
 
-  if (tilt_axis_ >= 0 && tilt_axis_ < static_cast<int>(msg->axes.size())) {
-    // Axis mode: rising edge detection at ±0.5
-    const float current_tilt_value = msg->axes[tilt_axis_];
-    if (current_tilt_value > 0.5F && last_tilt_value_ <= 0.5F) {
-      step_tilt(tilt_step_angle_, "up");
-    } else if (current_tilt_value < -0.5F && last_tilt_value_ >= -0.5F) {
-      step_tilt(-tilt_step_angle_, "down");
-    }
-    last_tilt_value_ = current_tilt_value;
-  } else {
-    // Button mode: L = up, ZL = down (rising edge)
-    const auto button_pressed = [&msg](int index) {
-      return index >= 0 && static_cast<size_t>(index) < msg->buttons.size() &&
-             msg->buttons[static_cast<size_t>(index)] == 1;
-    };
-    const bool tilt_up_pressed = button_pressed(tilt_up_button_index_);
-    const bool tilt_down_pressed = button_pressed(tilt_down_button_index_);
-
-    if (tilt_up_pressed && !last_tilt_up_state_) {
-      step_tilt(tilt_step_angle_, "up");
-    } else if (tilt_down_pressed && !last_tilt_down_state_) {
-      step_tilt(-tilt_step_angle_, "down");
-    }
-    last_tilt_up_state_ = tilt_up_pressed;
-    last_tilt_down_state_ = tilt_down_pressed;
+  const bool up = tiltInputPressed(msg->axes, msg->buttons, tilt_up_axis_, tilt_up_axis_sign_,
+                                   tilt_up_button_index_);
+  const bool down = tiltInputPressed(msg->axes, msg->buttons, tilt_down_axis_, tilt_down_axis_sign_,
+                                     tilt_down_button_index_);
+  const int direction = tilt_edges_.update(up, down);
+  if (direction != 0) {
+    step_tilt(direction * tilt_step_angle_, direction > 0 ? "up" : "down");
   }
 }
 
-void ShotComponent::executeShotSequence() {
+bool ShotComponent::moveTiltTo(double angle_deg, const char* label) {
+  if (!servo_controller_) {
+    return false;
+  }
+  if (!canSendCommand()) {
+    RCLCPP_DEBUG(this->get_logger(), "Tilt command rate limited");
+    return false;
+  }
+  current_tilt_angle_ = clampAngle(angle_deg);
+  current_tilt_position_ = angleToServoPosition(current_tilt_angle_);
+  if (servo_controller_->setPosition(tilt_servo_id_, current_tilt_position_, false)) {
+    RCLCPP_INFO(this->get_logger(), "Tilt %s: angle=%.1f deg", label, current_tilt_angle_);
+    last_command_time_ = this->now();
+    publishShotStatus();
+    return true;
+  }
+  RCLCPP_ERROR(this->get_logger(), "Failed to move tilt %s", label);
+  triggerAutoRecovery();
+  return false;
+}
+
+double ShotComponent::steadyNowSec() {
+  return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+shot_lab::Conditions ShotComponent::labConditions() {
+  shot_lab::Conditions conditions;
+  conditions.accept = accept_lab_input_;
+  // Same E-stop view as the lifecycle linkage: the latest /emergency_stop (or its timeout).
+  conditions.estop = have_estop_msg_ && estop_active_;
+  conditions.active =
+      this->get_current_state().id() == lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE &&
+      servo_controller_ && servo_controller_->isConnected();
+  conditions.shooting = is_shooting_;
+  conditions.now_sec = steadyNowSec();
+  conditions.joy_active_at_sec = joy_launcher_active_at_sec_;
+  conditions.joy_quiet_sec = lab_joy_quiet_sec_;
+  return conditions;
+}
+
+void ShotComponent::recordLabRefusal(shot_lab::Refusal refusal, const char* request) {
+  RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 2000, "QUESTiX LAB %s refused: %s",
+                       request, shot_lab::refusalName(refusal));
+  if (last_lab_refusal_ != refusal) {
+    last_lab_refusal_ = refusal;
+    publishShotStatus();
+  }
+}
+
+void ShotComponent::labTiltCallback(const std_msgs::msg::Float32::SharedPtr msg) {
+  if (!msg) {
+    return;
+  }
+  const auto decision =
+      shot_lab::decideTilt(labConditions(), msg->data, tilt_min_angle_, tilt_max_angle_);
+  if (decision.refusal != shot_lab::Refusal::kNone) {
+    recordLabRefusal(decision.refusal, "tilt");
+    return;
+  }
+  if (!canSendCommand()) {
+    recordLabRefusal(shot_lab::Refusal::kRateLimited, "tilt");
+    return;
+  }
+  last_lab_refusal_ = shot_lab::Refusal::kNone;
+  moveTiltTo(decision.target_deg, "lab");
+}
+
+void ShotComponent::labFireCallback(const std_msgs::msg::Empty::SharedPtr msg) {
+  if (!msg) {
+    return;
+  }
+  const auto refusal =
+      shot_lab::decideFire(labConditions(), last_fire_sec_, lab_min_fire_interval_sec_);
+  if (refusal != shot_lab::Refusal::kNone) {
+    recordLabRefusal(refusal, "fire");
+    return;
+  }
+  last_lab_refusal_ = shot_lab::Refusal::kNone;
+  RCLCPP_INFO(this->get_logger(), "QUESTiX LAB fire request accepted");
+  executeShotSequence(shot_lab::FireSource::kLab);
+}
+
+void ShotComponent::publishShotStatus() {
+  if (!shot_status_pub_) {
+    return;
+  }
+  shot_lab::Status status;
+  status.tilt_deg = current_tilt_angle_;
+  status.shooting = is_shooting_;
+  status.fired_count = fired_count_;
+  status.last_fire_source = last_fire_source_;
+  status.lab_accepted = accept_lab_input_;
+  status.estop = have_estop_msg_ && estop_active_;
+  status.active =
+      this->get_current_state().id() == lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE;
+  status.tilt_min_deg = tilt_min_angle_;
+  status.tilt_max_deg = tilt_max_angle_;
+  status.next_fire_in_sec =
+      shot_lab::nextFireInSec(steadyNowSec(), last_fire_sec_, lab_min_fire_interval_sec_);
+  status.lab_refused = last_lab_refusal_;
+  std_msgs::msg::String msg;
+  msg.data = shot_lab::statusJson(status);
+  shot_status_pub_->publish(msg);
+}
+
+void ShotComponent::executeShotSequence(shot_lab::FireSource source) {
   if (is_shooting_) {
     return;  // 既に射撃中の場合は無視
   }
@@ -673,8 +822,12 @@ void ShotComponent::executeShotSequence() {
   // 2. sleep で executor をブロックせず、ワンショットタイマーで home 復帰する。
   //    is_shooting_ は home 復帰完了（fireTimerCallback）まで保持して多重発射を防ぐ。
   is_shooting_ = true;
+  last_fire_sec_ = steadyNowSec();
+  ++fired_count_;
+  last_fire_source_ = source;
   fire_timer_ = this->create_wall_timer(std::chrono::milliseconds(fire_duration_ms_),
                                         std::bind(&ShotComponent::fireTimerCallback, this));
+  publishShotStatus();
 }
 
 void ShotComponent::fireTimerCallback() {
@@ -696,6 +849,7 @@ void ShotComponent::fireTimerCallback() {
 
   is_shooting_ = false;
   RCLCPP_INFO(this->get_logger(), "Shot sequence completed");
+  publishShotStatus();
 }
 
 void ShotComponent::cancelShotSequence() {

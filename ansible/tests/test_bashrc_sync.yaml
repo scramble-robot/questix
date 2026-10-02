@@ -1,0 +1,15 @@
+---
+# Source-only harness for the robotics_workspace role's bashrc block, which is
+# the other half of the launch.env == bashrc == resolved ros_domain_id
+# invariant. Exercises the real role tasks against a caller-supplied temp
+# bashrc/workspace path. See run_contract_tests.sh.
+
+- hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    target_user: "{{ lookup('env', 'USER') }}"
+  tasks:
+    - name: Exercise robotics_workspace tasks
+      ansible.builtin.include_role:
+        name: robotics_workspace

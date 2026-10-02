@@ -1,0 +1,19 @@
+# Chooses which velocity command reaches drive_component (/target_twist): the controller's or a
+# QUESTiX LAB driving experiment's. Started by practice launches only (questix_core.launch.xml,
+# enable_twist_arbiter); competition launches keep joy_controller -> /target_twist direct.
+# Rules: include/twist_arbiter/arbiter_logic.hpp.
+twist_arbiter:
+  ros__parameters:
+    joy_topic: "/target_twist/joy"   # joy_controller's output, remapped by the launch file
+    lab_topic: "/target_twist/lab"   # questix_lab_bridge drive_topic
+    output_topic: "/target_twist"    # drive_component's input
+    status_topic: "/twist_arbiter/status"
+    # A stick command below these counts as neutral: the lab may take over, and small noise on a
+    # resting stick does not take the robot back. Anything above hands it to the controller.
+    neutral_linear: 0.02    # [m/s]
+    neutral_angular: 0.05   # [rad/s]
+    # The lab input quiet this long = its run ended: the controller is active again.
+    lab_timeout_sec: 0.3
+    # No controller command this long = no controller: the lab may take over.
+    joy_timeout_sec: 0.5
+    tick_hz: 20.0

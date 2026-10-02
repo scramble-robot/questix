@@ -1,0 +1,112 @@
+/* Connecting to the robot: header state and the 実機 dialog (js/live/robot-link.js, live-ui.js). */
+.robot-link[data-stage='failed'] .robot-link-dot {
+  background: #c62828;
+}
+.robot-link-name {
+  font-weight: 650;
+  max-width: 10em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* In-dialog table of contents: stays at the top while the dialog scrolls (about three screens on
+   a phone once connected). The dialog's padding is 28px (base.css), hence the negative margins. */
+.robot-dialog-nav {
+  position: sticky;
+  top: -28px;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: -12px -28px 12px;
+  padding: 8px 28px;
+  background: #fff;
+  border-bottom: 1px solid var(--line);
+}
+.robot-dialog-nav button {
+  min-height: 36px;
+  padding: 4px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--green-soft);
+  color: var(--green);
+  font-size: 13px;
+}
+.robot-dialog > section {
+  scroll-margin-top: 64px;
+}
+.robot-dialog > section:focus:not(:focus-visible) {
+  outline: none;
+}
+
+.robot-status {
+  display: grid;
+  gap: 8px;
+}
+.robot-status p,
+.robot-status dl {
+  margin: 0;
+}
+.robot-status-line strong {
+  margin-right: 8px;
+}
+.robot-status[data-stage='failed'],
+.robot-status[data-stage='reconnecting'] {
+  background: #fdf1e6;
+  color: #7a4a1f;
+}
+.robot-status-warn {
+  padding: 8px 10px;
+  border-radius: 7px;
+  background: #fdecea;
+  color: #8a2a1f;
+}
+.robot-identity {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+}
+.robot-identity dt {
+  display: inline;
+  font-weight: 650;
+  margin-right: 6px;
+}
+.robot-identity dd {
+  display: inline;
+  margin: 0;
+}
+.robot-form input[aria-invalid='true'] {
+  border-color: #c62828;
+}
+
+.robot-help ol {
+  margin: 8px 0;
+  padding-left: 1.4em;
+  font-size: 14px;
+}
+.robot-help-teacher {
+  font-size: 13px;
+  color: var(--muted);
+}
+.robot-help-teacher strong {
+  margin-right: 8px;
+}
+/* The wheel chart's caption (live-ui.js wheelCaption): HTML so it keeps its size on a phone. */
+.robot-wheels .robot-wheels-note {
+  margin: 0;
+  padding: 6px 12px 10px;
+  font-size: 13px;
+  color: var(--muted);
+}
+/* The E-stop is pressed: the header says so in words next to the dot. */
+.robot-link[data-estop='true'] #robotLinkState {
+  color: #c62828;
+  font-weight: 700;
+}
+
+@media (max-width: 700px) {
+  .robot-link-name {
+    max-width: 6em;
+  }
+}

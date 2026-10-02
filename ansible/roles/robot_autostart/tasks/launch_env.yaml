@@ -1,0 +1,28 @@
+---
+# Deploy launch.env and synchronize ROS_DOMAIN_ID.
+#
+# Split out of tasks/main.yaml so it can be exercised directly (against a temp
+# directory, via questix_robot_config_dir) by ansible/tests/ contract tests
+# without running the rest of the role (which needs root/systemd).
+
+- name: Deploy launch environment file
+  ansible.builtin.template:
+    src: launch.env.j2
+    dest: "{{ questix_robot_config_dir }}/launch.env"
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: "0644"
+    force: false
+
+# force: false above means an existing launch.env is never overwritten, so a
+# previously-resolved ROS_DOMAIN_ID would otherwise go stale across re-setups.
+# This keeps every other existing launch.env setting untouched.
+- name: Synchronize ROS_DOMAIN_ID in launch environment file
+  ansible.builtin.lineinfile:
+    path: "{{ questix_robot_config_dir }}/launch.env"
+    regexp: "^ROS_DOMAIN_ID="
+    line: "ROS_DOMAIN_ID={{ ros_domain_id }}"
+    insertafter: EOF
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: "0644"

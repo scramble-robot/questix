@@ -1,0 +1,84 @@
+{
+  "stage": {
+    "idle": "未接続",
+    "connecting": "接続しています…",
+    "open": "つながっています",
+    "failed": "接続できません",
+    "reconnecting": "つながり直しています…"
+  },
+  "stageShort": {
+    "idle": "未接続",
+    "connecting": "接続中",
+    "open": "接続済み",
+    "failed": "失敗",
+    "reconnecting": "再接続中"
+  },
+  "estop": {
+    "long": "・非常停止：押されています",
+    "short": "非常停止"
+  },
+  "status": {
+    "idle": "ロボットと同じWi-Fiにつなぎ、アドレスを確かめて「接続する」を押してください。",
+    "connecting": "{host} のロボットを探しています…",
+    "open": "つながりました。ロボットから届いた値を表示しています。"
+  },
+  "problems": {
+    "timeout": "{host} に届きません。この端末がロボットのWi-Fiにつながっているか確かめてください。",
+    "refused": "{host} から返事がありません。ロボットの電源が入っているか、先生がRobot Managerの「教材」タブで「配信開始」を押しているかを確かめてください。",
+    "full": "同時につなげる端末の数（{limit}台）を超えています。使っていない画面やタブを閉じてから、もう一度つないでください。",
+    "stopped": "ロボット側の配信が止まっているようです（大会モードに切り替えたか、先生が配信を止めた可能性があります）。",
+    "lost": "ロボットとの接続が切れました。{seconds}秒ごとにつなぎ直しています。",
+    "blocked": "このページからは {host} につなげません。ブラウザで {address} を開いてください。",
+    "version": "ロボット側のソフトウェアと教材の版が合いません。先生に、ロボットと教材の版をそろえてもらってください。"
+  },
+  "retry": "{seconds}秒後にもう一度試します。",
+  "address": {
+    "empty": "ロボットのアドレスを入力してください。例：{example}",
+    "invalid": "アドレスの形が正しくありません。Robot Managerに出ているアドレス（例：{example}）をそのまま入力してください。",
+    "scheme": "http:// か ws:// で始まるアドレス、またはIPアドレスだけを入力してください。例：{example}",
+    "managerPort": "{managerPort}はロボットの管理画面（Robot Manager）の番号です。教材は{port}につなぎます。"
+  },
+  "buttons": {
+    "connect": "接続する",
+    "cancel": "接続をやめる",
+    "disconnect": "切断する"
+  },
+  "identity": {
+    "robot": "ロボット",
+    "domainUnset": "未設定（0と同じ）",
+    "drive": "教材からの走行",
+    "driveAllowed": "教材から走らせられます",
+    "driveReadOnly": "値の受信だけ（先生が教材からの走行を止めています）",
+    "teacher": "先生・技術者向けの詳しい情報",
+    "domainLine": "このロボットの配信の ROS_DOMAIN_ID：{domain}。値が届かないときは、ロボットのROSと同じ番号か確かめます。"
+  },
+  "silent": "ロボットの値が届いていません。ロボットのROSが起動しているか、ROS_DOMAIN_ID（{domain}）がロボットと同じかを先生に確かめてもらってください。",
+  "silentNoDomain": "ロボットの値が届いていません。ロボットのROSが起動しているか、ROS_DOMAIN_IDがロボットと同じかを先生に確かめてもらってください。",
+  "nav": {
+    "label": "この画面の中を移動",
+    "monitor": "受信している値",
+    "drive": "動作確認",
+    "records": "記録の一覧"
+  },
+  "monitor": {
+    "scanCount": "{measured} / {total} 本の測定 · 測れなかった方向は描きません",
+    "scanNone": "LiDARの値はまだ届いていません",
+    "cameraNone": "カメラの画像はまだ届いていません",
+    "cameraLive": "ロボットのカメラの、いまの画像です",
+    "wheels": "直近{seconds}秒 · 車輪の回転数（rpm、前進が正）· 実線＝実測　破線＝指令 · 線の右端の「左」「右」は車輪の左右",
+    "estopPressed": "押されています",
+    "estopReleased": "解除されています",
+    "streamUnused": "使いません",
+    "streamMissing": "届いていません",
+    "streamRate": "{hz} 回/秒",
+    "wheelLeft": "左",
+    "wheelRight": "右"
+  },
+  "save": {
+    "notConnected": "ロボットとの接続が切れていました",
+    "off": "このロボットは記録の保存を受け付けていません",
+    "tooBig": "記録が大きすぎます（{limit} MBまで）",
+    "timeout": "ロボットから返事がありませんでした",
+    "lost": "保存の途中でロボットとの接続が切れました"
+  }
+}

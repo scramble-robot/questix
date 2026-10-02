@@ -1,0 +1,11 @@
+---
+# Source-only harness for ansible/playbooks/tasks/validate_ros_domain_id.yaml.
+# Runs the real assert tasks directly, bypassing setup_kit.yaml's ARM64/aarch64
+# pre_task gate so this can run on any dev machine (e.g. WSL amd64).
+
+- hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Run the ROS_DOMAIN_ID validation tasks
+      ansible.builtin.include_tasks: ../playbooks/tasks/validate_ros_domain_id.yaml

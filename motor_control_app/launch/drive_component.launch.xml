@@ -1,11 +1,12 @@
 <?xml version="1.0"?>
 <launch>
   <!-- Launch arguments -->
-  <!-- 単体launch はノード宣言デフォルトで起動する（launcher/config/drive_component.yaml と同値）。 -->
-  <!-- 設定を変えたい場合は launcher/config/drive_component.yaml を編集する（単一ソース）。 -->
+  <!-- 単体launch のハードウェア設定はノード宣言デフォルトを使用する。 -->
+  <!-- キー割り当て・速度は questix_control_config の共通プロファイルを使用する。 -->
   <arg name="serial_port"
        default="/dev/ttyACM0"
        description="Serial port for motor communication" />
+  <include file="$(find-pkg-share questix_control_config)/launch/control_profile.launch.py" />
 
   <!-- DriveComponent Node -->
   <node pkg="motor_control_app"
@@ -14,6 +15,7 @@
         output="screen"
         respawn="true"
         respawn_delay="2.0">
+    <param from="$(var control_config_file)" />
     <param name="serial_port" value="$(var serial_port)" />
   </node>
 </launch>

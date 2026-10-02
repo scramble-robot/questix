@@ -1,3 +1,4 @@
+# Operator mappings/tuning moved to questix_control_config/config/controls.*.yaml.
 # UART Joy Driver Configuration
 # Switch-style controller connected via UART serial
 
@@ -15,9 +16,6 @@ uart_joy_driver:
     # Joy publish rate (Hz)
     # UARTの受信とは別に、最後の有効なJoyをこの周期で再送します。
     publish_rate: 50.0
-
-    # Stick deadzone (0.0-1.0)
-    deadzone: 0.05
 
     # Publish a neutral Joy message if input stops.
     # UART入力が完全に止まったとき、この秒数でニュートラルに戻します。

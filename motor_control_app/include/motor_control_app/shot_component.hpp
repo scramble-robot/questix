@@ -14,8 +14,13 @@
 #include <rclcpp_components/register_node_macro.hpp>
 #include <rclcpp_lifecycle/lifecycle_node.hpp>
 #include <sensor_msgs/msg/joy.hpp>
+#include <std_msgs/msg/empty.hpp>
+#include <std_msgs/msg/float32.hpp>
+#include <std_msgs/msg/string.hpp>
 #include <string>
 
+#include "motor_control_app/shot_lab_logic.hpp"
+#include "motor_control_app/tilt_input.hpp"
 #include "motor_control_lib/servo_control.hpp"
 
 namespace motor_control_app {
@@ -35,6 +40,13 @@ namespace motor_control_app {
 // 連動は auto_start=true のときのみ有効で、手動 deactivate 済み（タイマー停止中）の
 // ノードは非常停止解除でも再 activate しない。
 // なお joy_gate は従来どおり /gpio/controllable（std_msgs/Bool）を購読する。
+//
+// QUESTiX LAB: accept_lab_input=true（練習用起動のみ）のとき /shot/lab/tilt（std_msgs/Float32,
+// 目標チルト角 [deg]）と /shot/lab/fire（std_msgs/Empty, 1発射出）を購読する。適用条件は
+// shot_lab_logic.hpp（ACTIVE・非常停止解除・射撃中でない・コントローラの射撃/チルト入力が
+// lab_joy_quiet_sec 静止、射出は lab_min_fire_interval_sec 間隔）。コントローラと同じ
+// moveTiltTo / executeShotSequence を使う。状態は /shot/status（std_msgs/String, JSON）に
+// 5 Hz と変化時に出す（accept_lab_input に関係なく常に出す観測用）。
 class ShotComponent : public rclcpp_lifecycle::LifecycleNode {
 public:
   using CallbackReturn = rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
@@ -51,7 +63,16 @@ public:
 
 private:
   void joyCallback(const sensor_msgs::msg::Joy::SharedPtr msg);
-  void executeShotSequence();
+  void executeShotSequence(shot_lab::FireSource source);
+  // Moves the tilt servo to angle_deg (clamped to the tilt range); shared by the controller and
+  // QUESTiX LAB. Returns false when rate limited or the servo write failed.
+  bool moveTiltTo(double angle_deg, const char* label);
+  void labTiltCallback(const std_msgs::msg::Float32::SharedPtr msg);
+  void labFireCallback(const std_msgs::msg::Empty::SharedPtr msg);
+  shot_lab::Conditions labConditions();
+  void recordLabRefusal(shot_lab::Refusal refusal, const char* request);
+  void publishShotStatus();
+  static double steadyNowSec();
   void fireTimerCallback();
   void cancelShotSequence();
   void autoStartTimerCallback();
@@ -76,7 +97,12 @@ private:
   int tilt_servo_id_;
   int trigger_servo_id_;
   int fire_button_;
-  int tilt_axis_;
+  // Per-direction axis: -1 uses the button; -2 inherits legacy tilt_axis.
+  // axis_sign is +1/-1 and applies only when that direction uses an axis.
+  int tilt_up_axis_;
+  int tilt_down_axis_;
+  int tilt_up_axis_sign_;
+  int tilt_down_axis_sign_;
   int tilt_up_button_index_;
   int tilt_down_button_index_;
   double tilt_step_angle_;
@@ -107,12 +133,23 @@ private:
 
   bool is_shooting_;
   bool last_button_state_;
-  float last_tilt_value_;
-  bool last_tilt_up_state_;
-  bool last_tilt_down_state_;
+  TiltInputEdges tilt_edges_;
   int current_tilt_position_;
   double current_tilt_angle_;
   rclcpp::Time last_command_time_;
+
+  // QUESTiX LAB launcher input (see shot_lab_logic.hpp). Timing uses steady_clock seconds.
+  bool accept_lab_input_;
+  double lab_joy_quiet_sec_;
+  double lab_min_fire_interval_sec_;
+  // Last /joy message that used the fire button or the tilt input (-inf = never).
+  double joy_launcher_active_at_sec_;
+  // Last shot from any source (-inf = none yet), shots since start, and who fired last.
+  double last_fire_sec_;
+  long fired_count_;
+  shot_lab::FireSource last_fire_source_;
+  // Last refused lab request (kNone after an applied one), shown in /shot/status.
+  shot_lab::Refusal last_lab_refusal_;
 
   rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joy_subscription_;
   // All callbacks intentionally use the node's default MutuallyExclusive callback group:
@@ -127,6 +164,12 @@ private:
   // 射撃シーケンス用ワンショットタイマー。fire 位置到達後 fire_duration_ms で
   // 発火し home 復帰する。executor をブロックしないための置き換え（issue #83）。
   rclcpp::TimerBase::SharedPtr fire_timer_;
+  // QUESTiX LAB input (only when accept_lab_input) and status (always). The status publisher is
+  // a plain rclcpp publisher so it also reports while the node is not ACTIVE.
+  rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr lab_tilt_sub_;
+  rclcpp::Subscription<std_msgs::msg::Empty>::SharedPtr lab_fire_sub_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr shot_status_pub_;
+  rclcpp::TimerBase::SharedPtr shot_status_timer_;
 };
 
 }  // namespace motor_control_app

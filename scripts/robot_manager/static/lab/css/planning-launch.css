@@ -1,0 +1,741 @@
+/* Path planning shares the series purpose / operation / observation layout. */
+.planning-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 24px;
+  align-items: start;
+}
+.planning-workspace {
+  min-width: 0;
+  display: grid;
+  gap: 20px;
+}
+.planning-guide {
+  padding: 24px;
+}
+.planning-guide p {
+  font-size: 15px;
+}
+.planning-guide .primary {
+  margin-top: 24px;
+}
+.planning-guide details p {
+  font-size: 14px;
+}
+.planning-guide details button + button {
+  margin-top: 10px;
+}
+.planning-guide select {
+  width: 100%;
+  white-space: normal;
+  font-size: 14px;
+  margin-top: 10px;
+}
+.planning-edit {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.planning-edit button {
+  font-size: 14px;
+  padding: 9px 11px;
+}
+.planning-check {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  line-height: 1.7;
+  font-size: 15px;
+  margin: 18px 0;
+}
+.planning-check input {
+  width: 18px;
+  height: 18px;
+  margin: 4px 0;
+  flex-shrink: 0;
+  accent-color: var(--green);
+}
+.planning-check strong,
+.planning-check small {
+  display: block;
+}
+.planning-check small {
+  font-size: 14px;
+  color: var(--muted);
+  font-weight: 400;
+  margin-top: 6px;
+}
+.planning-slider {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 15px;
+  margin: 20px 0 12px;
+}
+.planning-slider output {
+  font-weight: 700;
+  white-space: nowrap;
+}
+#planningMargin {
+  width: 100%;
+  accent-color: var(--green);
+}
+#planningCanvas {
+  aspect-ratio: 720/500;
+  cursor: crosshair;
+}
+.planning-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 12px 20px;
+  background: #152e39;
+  color: #bad0d6;
+  font-size: 13px;
+}
+.planning-planned:before,
+.planning-actual:before {
+  content: '';
+  display: inline-block;
+  width: 22px;
+  vertical-align: middle;
+  margin-right: 7px;
+  border-top: 2px dashed #edcc88;
+}
+.planning-actual:before {
+  border-top: 2px solid #8ee0c6;
+}
+/* The path the robot was driven along while the room was measured (js/planning/render.js). */
+.planning-driven:before {
+  content: '';
+  display: inline-block;
+  width: 22px;
+  vertical-align: middle;
+  margin-right: 7px;
+  border-top: 2px dotted #c99ad6;
+}
+.planning-room .live-capture {
+  margin-bottom: 4px;
+}
+.planning-playbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  flex-wrap: wrap;
+}
+.planning-playbar button {
+  font-size: 14px;
+}
+.planning-playbar > input {
+  flex: 1;
+  min-width: 80px;
+  width: 120px;
+  accent-color: var(--green);
+}
+.planning-playbar label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.planning-playbar select {
+  padding: 8px;
+  min-height: 40px;
+}
+.planning-readings {
+  margin: 0;
+  padding: 0 20px 16px;
+  font-size: 14px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.planning-status {
+  padding: 18px 22px;
+  margin: 0;
+  background: #ecf4f1;
+  font-size: 15px;
+  min-height: 84px;
+}
+.planning-map-help {
+  padding: 16px 22px;
+}
+.planning-map-help p {
+  font-size: 14px;
+}
+.planning-metrics {
+  display: grid;
+  grid-template-columns: 1.25fr 1fr 1fr 1.2fr;
+  gap: 18px;
+  padding: 0 22px 20px;
+}
+.planning-metrics span {
+  display: block;
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 7px;
+}
+.planning-metrics strong {
+  font-size: 23px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+.planning-metrics > div:first-child strong {
+  font-size: 17px;
+}
+.planning-reflection {
+  padding: 22px;
+  border-top: 1px solid var(--line);
+}
+.planning-reflection p {
+  font-size: 15px;
+  margin: 0;
+}
+.planning-table {
+  overflow: auto;
+  padding: 0 20px 20px;
+}
+.planning-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  white-space: nowrap;
+}
+.planning-table th,
+.planning-table td {
+  padding: 12px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+  font-variant-numeric: tabular-nums;
+}
+.planning-table tbody th {
+  font-weight: 500;
+}
+.planning-gap {
+  display: block;
+  min-width: 70px;
+  padding-bottom: 5px;
+  background: linear-gradient(#cae7dc, #cae7dc) left bottom/var(--gap) 4px no-repeat;
+}
+.planning-explanation {
+  padding: 24px;
+  margin-top: 24px;
+}
+.planning-explanation p,
+.planning-hardware p,
+.planning-hardware li {
+  font-size: 15px;
+  line-height: 1.85;
+}
+.planning-hardware {
+  padding: 24px;
+  margin-top: 20px;
+}
+.planning-hardware > summary {
+  font-size: 17px;
+  font-weight: 650;
+  color: var(--green);
+}
+.planning-hardware ol {
+  padding-left: 24px;
+}
+.planning-hardware li {
+  margin-bottom: 12px;
+}
+.planning-hardware a {
+  color: var(--green);
+}
+#planningTime {
+  font-size: 14px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+#planningHistory .section-top span {
+  font-size: 13px;
+  color: var(--muted);
+}
+@media (max-width: 960px) {
+  .planning-layout {
+    grid-template-columns: 1fr;
+  }
+  .planning-guide {
+    grid-row: 1;
+  }
+  .planning-metrics {
+    grid-template-columns: 1fr 1fr;
+  }
+  .planning-topics {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+@media (max-width: 600px) {
+  .series-nav a {
+    min-height: 42px;
+  }
+  .series-nav span {
+    display: none;
+  }
+  .series-nav a:last-child:nth-child(odd) {
+    grid-column: 1/-1;
+  }
+  .planning-topics button {
+    min-height: 62px;
+    line-height: 1.5;
+  }
+  .planning-legend {
+    gap: 10px;
+    font-size: 12px;
+    padding: 12px;
+  }
+  .planning-playbar {
+    gap: 8px;
+    padding: 12px;
+  }
+  .planning-playbar label {
+    font-size: 12px;
+  }
+  .planning-status {
+    padding: 18px;
+  }
+  .planning-metrics {
+    padding: 0 18px 18px;
+  }
+  .planning-explanation,
+  .planning-hardware {
+    padding: 20px;
+  }
+  .planning-workspace .section-top {
+    padding: 18px;
+  }
+  .planning-workspace .section-top h2 {
+    font-size: 15px;
+  }
+}
+
+.planning-guide .planning-first-run {
+  margin: 4px 0 18px;
+}
+.planning-table th small {
+  display: block;
+  font-weight: 400;
+  color: var(--muted);
+  margin-top: 4px;
+}
+@media (min-width: 1221px) and (max-width: 1360px) {
+  .site-header {
+    gap: 12px;
+    padding-inline: 20px;
+  }
+  .series-nav strong {
+    font-size: 13px;
+  }
+  .series-nav a {
+    padding-inline: 4px;
+  }
+}
+
+.planning-command {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: #15303b;
+  color: #d3e8e7;
+  border-radius: 9px;
+  padding: 16px;
+  font-size: 14px;
+}
+
+/* Horizontal-disc experiments: the same setup / observation / improvement rhythm. */
+.launch-topics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.launch-source-label {
+  display: block;
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+.launch-guide #launchSource {
+  width: 100%;
+  max-width: none;
+  margin-bottom: 24px;
+}
+.launch-intro > summary {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--green);
+}
+.launch-intro[open] > .launch-mechanism {
+  margin-top: 20px;
+}
+.launch-model-note {
+  margin: 0;
+  padding: 0 22px 16px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.launch-topics {
+  margin-bottom: 20px;
+}
+.launch-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 24px;
+  align-items: start;
+}
+.launch-workspace {
+  display: grid;
+  gap: 22px;
+  min-width: 0;
+}
+.launch-intro {
+  padding: 20px 24px;
+  margin-bottom: 24px;
+}
+.launch-intro > p {
+  margin: 12px 0 0;
+  font-size: 14px;
+}
+.launch-mechanism {
+  display: grid;
+  grid-template-columns: 130px minmax(220px, 1fr) 130px;
+  align-items: center;
+  gap: 20px;
+}
+.launch-mechanism canvas {
+  width: 100%;
+  display: block;
+}
+.launch-mechanism svg {
+  display: block;
+  width: 100%;
+  max-height: 154px;
+}
+.launch-mechanism span {
+  display: block;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+.launch-disc-dim svg {
+  height: 105px;
+}
+.launch-guide {
+  padding: 24px;
+}
+.launch-guide p {
+  font-size: 15px;
+}
+.launch-guide .helper {
+  font-size: 13px;
+  line-height: 1.75;
+}
+.launch-power-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 14px;
+  margin: 24px 0 14px;
+  gap: 12px;
+}
+.launch-power-label output {
+  font-size: 25px;
+  font-weight: 700;
+  color: var(--green);
+  font-variant-numeric: tabular-nums;
+}
+#launchPower {
+  width: 100%;
+  accent-color: var(--green);
+  margin-bottom: 12px;
+}
+.launch-guide .primary {
+  margin: 14px 0;
+}
+.launch-check {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 14px;
+  margin-top: 16px;
+}
+.launch-check input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--green);
+}
+.launch-hint {
+  margin-bottom: 20px;
+}
+.launch-model p {
+  font-size: 13px;
+  line-height: 1.85;
+}
+#launchFlight {
+  display: block;
+  width: 100%;
+  aspect-ratio: 760/350;
+}
+.launch-legend {
+  display: flex;
+  gap: 20px;
+  background: #17313c;
+  color: #9bddcd;
+  font-size: 13px;
+  padding: 8px 22px 16px;
+  flex-wrap: wrap;
+}
+.launch-legend > span:last-child {
+  margin-left: auto;
+  color: #b6c6ce;
+}
+.launch-vacuum {
+  color: #e6c58a;
+}
+.launch-playbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 20px;
+}
+.launch-playbar input {
+  min-width: 60px;
+  flex: 1;
+  accent-color: var(--green);
+}
+.launch-status {
+  padding: 18px 22px;
+  background: #ecf4f1;
+  margin: 0;
+  font-size: 15px;
+  min-height: 88px;
+}
+.launch-result {
+  padding: 20px 22px;
+  border-top: 1px solid var(--line);
+}
+.launch-result > p {
+  margin: 16px 0 0;
+  font-size: 14px;
+  color: var(--muted);
+}
+.launch-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr 1.4fr;
+  gap: 16px;
+}
+.launch-metrics span {
+  display: block;
+  font-size: 13px;
+  color: var(--muted);
+}
+.launch-metrics strong {
+  display: block;
+  font-size: 22px;
+  margin-top: 5px;
+  font-variant-numeric: tabular-nums;
+}
+.launch-data {
+  padding-bottom: 22px;
+}
+.launch-data > p,
+.launch-data > details {
+  margin: 0 22px 16px;
+  font-size: 14px;
+}
+.launch-data > details > summary {
+  margin-bottom: 12px;
+}
+.launch-chart {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.launch-table {
+  padding: 0 22px;
+  overflow: auto;
+}
+.launch-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  white-space: nowrap;
+}
+.launch-table th,
+.launch-table td {
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+  padding: 10px 8px;
+}
+.launch-reflection {
+  padding: 24px;
+  margin-top: 24px;
+}
+.launch-reflection p,
+.launch-reflection li {
+  font-size: 15px;
+  line-height: 1.85;
+}
+.launch-reflection li {
+  margin-bottom: 12px;
+}
+.launch-reflection a {
+  color: var(--green);
+}
+.launch-reflection details {
+  margin-top: 18px;
+}
+.launch-file-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 20px 22px;
+}
+.launch-guide form > label,
+.launch-guide > label[for='launchMeasuredTarget'] {
+  display: block;
+  font-size: 14px;
+  margin: 18px 0 8px;
+}
+.launch-guide input[type='number'] {
+  width: 100%;
+}
+.launch-calibration {
+  background: #eff5f3;
+  border-radius: 9px;
+  padding: 16px;
+  line-height: 1.8;
+  font-size: 15px;
+  margin: 16px 0 20px;
+}
+#launchTime {
+  font-size: 13px;
+  white-space: nowrap;
+  color: var(--muted);
+}
+#launchSource {
+  max-width: 165px;
+  font-size: 13px;
+}
+.launch-cover {
+  background: #203947;
+}
+#launchProgress {
+  font-weight: 700;
+  color: var(--green);
+}
+@media (max-width: 960px) {
+  .launch-layout {
+    grid-template-columns: 1fr;
+  }
+  .launch-guide {
+    grid-row: 1;
+  }
+  .launch-topics {
+    grid-template-columns: 1fr 1fr;
+  }
+  .launch-guide .launch-model {
+    margin-top: 18px;
+  }
+  .launch-intro {
+    padding: 18px;
+  }
+  .launch-mechanism {
+    grid-template-columns: 90px minmax(180px, 1fr) 100px;
+    gap: 12px;
+  }
+}
+@media (max-width: 600px) {
+  .launch-mechanism {
+    grid-template-columns: minmax(0, 1fr) 90px;
+    gap: 10px;
+  }
+  .launch-mechanism > div:first-child {
+    display: none;
+  }
+  .launch-mechanism svg {
+    min-width: 0;
+  }
+  .launch-intro > p {
+    font-size: 13px;
+  }
+  .launch-topics button {
+    min-height: 62px;
+    font-size: 12px;
+    line-height: 1.6;
+  }
+  .launch-metrics {
+    gap: 9px;
+  }
+  .launch-metrics strong {
+    font-size: 19px;
+  }
+  .launch-metrics span {
+    font-size: 12px; /* --figure-text-min */
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+  }
+  .launch-playbar {
+    padding: 14px;
+    gap: 10px;
+  }
+  .launch-playbar button {
+    font-size: 12px;
+  }
+  .launch-status,
+  .launch-result,
+  .launch-reflection {
+    padding: 18px;
+  }
+  .launch-legend {
+    font-size: 11px;
+    gap: 10px;
+    padding-inline: 14px;
+  }
+  .launch-data .section-top {
+    gap: 8px;
+  }
+  .launch-data .section-top h2 {
+    font-size: 15px;
+  }
+  #launchSource {
+    max-width: 130px;
+    font-size: 12px;
+  }
+  .launch-mechanism .launch-disc-dim span {
+    font-size: 10px;
+  }
+}
+.planning-room-source {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+  margin-top: 10px;
+}
+.planning-room-source h3 {
+  margin: 0 0 6px;
+}
+.planning-scan-settings {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  margin: 8px 0;
+}
+.planning-scan-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.planning-scan-field input[type='number'] {
+  width: 5em;
+}
+.planning-room-place {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.planning-room-place button[aria-pressed='true'] {
+  outline: 2px solid var(--green, #236f61);
+}
