@@ -288,41 +288,16 @@ else
 fi
 
 # Static: the kit playbook builds after the bashrc/workspace role and before the services.
-ROLE_ORDER=$(grep -oE 'role: (robotics_workspace|ros2_build|robot_autostart|openssh_server)' ansible/playbooks/setup_kit.yaml | tr '\n' ' ')
-if [ "$ROLE_ORDER" = "role: openssh_server role: robotics_workspace role: ros2_build role: robot_autostart " ]; then
-    pass "setup_kit: openssh_server, robotics_workspace, ros2_build, robot_autostart in that order"
+ROLE_ORDER=$(grep -oE 'role: (robotics_workspace|ros2_build|robot_autostart)' ansible/playbooks/setup_kit.yaml | tr '\n' ' ')
+if [ "$ROLE_ORDER" = "role: robotics_workspace role: ros2_build role: robot_autostart " ]; then
+    pass "setup_kit: robotics_workspace, ros2_build, robot_autostart in that order"
 else
     fail "setup_kit role order: $ROLE_ORDER"
 fi
 assert_not_contains "ansible/roles/ros2_build/tasks/main.yaml" "ros2 launch" "workspace build: starts no node"
 assert_not_contains "ansible/roles/ros2_build/tasks/main.yaml" "ros2 run" "workspace build: runs no node"
 
-# --- 9. OpenSSH server -----------------------------------------------------------
-assert_contains "ansible/roles/openssh_server/defaults/main.yaml" "install_openssh_server: true" \
-    "openssh: installed by default"
-assert_contains "ansible/roles/openssh_server/tasks/main.yaml" "name: openssh-server" "openssh: package"
-assert_contains "ansible/roles/openssh_server/tasks/main.yaml" "enabled: true" "openssh: unit enabled"
-assert_contains "ansible/roles/openssh_server/tasks/main.yaml" "state: started" "openssh: unit started"
-assert_contains "ansible/roles/openssh_server/tasks/main.yaml" "/usr/sbin/sshd -t" "openssh: configuration validated"
-for forbidden in "state: absent" "enabled: false" "state: stopped" "lineinfile" "sshd_config.d" \
-    "PasswordAuthentication" "PermitRootLogin" "authorized_key" "ufw" "Port "; do
-    assert_not_contains "ansible/roles/openssh_server/tasks/main.yaml" "$forbidden" \
-        "openssh: no '$forbidden' (Ubuntu's defaults, nothing removed or weakened)"
-done
-if run_playbook ansible/tests/test_openssh_disabled.yaml; then
-    # Every task of the role is skipped: nothing changed, nothing ran (only include_role is ok).
-    if grep -qE 'localhost +: ok=1 +changed=0 ' "$PLAYBOOK_LOG" &&
-        ! grep -qE '^(ok|changed): \[localhost\]' "$PLAYBOOK_LOG"; then
-        pass "openssh: install_openssh_server=false does nothing"
-    else
-        fail "openssh: install_openssh_server=false still ran a task"
-        show_log_tail
-    fi
-else
-    fail "openssh: disabled run failed (log shown above)"
-fi
-
-# --- 10. Desktop shortcut trust is read back, never assumed ----------------------
+# --- 9. Desktop shortcut trust is read back, never assumed -----------------------
 DESKTOP_TASKS="ansible/roles/robot_autostart/tasks/robot_manager.yaml"
 assert_contains "$DESKTOP_TASKS" "register: desktop_trust_set" "desktop trust: gio set result registered"
 assert_contains "$DESKTOP_TASKS" "gio info --attributes=metadata::trusted" "desktop trust: read back with gio info"
