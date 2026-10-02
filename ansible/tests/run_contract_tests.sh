@@ -368,6 +368,29 @@ then
 else
     fail "QUESTiX Local: polkit rule is broader than start of questix_network_admin.service"
 fi
+# The legacy .pkla (manage-units for every unit, passwordless pkexec) would undo those limits:
+# none is shipped, and every install path removes one left by an older version.
+if [ -z "$(git ls-files '*.pkla')" ]; then
+    pass "polkit: no .pkla is shipped"
+else
+    fail "polkit: a .pkla is shipped ($(git ls-files '*.pkla' | tr '\n' ' '))"
+fi
+LEGACY_PKLA_PATH=/etc/polkit-1/localauthority/50-local.d/50-questix-robot.pkla
+assert_contains scripts/install-robot-manager.sh "LEGACY_PKLA=$LEGACY_PKLA_PATH" \
+    "polkit: install-robot-manager.sh removes the legacy .pkla"
+assert_contains scripts/update-robot-manager.sh "LEGACY_PKLA=$LEGACY_PKLA_PATH" \
+    "polkit: update-robot-manager.sh removes the legacy .pkla"
+if python3 - ansible/roles/robot_autostart/tasks/main.yaml "$LEGACY_PKLA_PATH" << 'PYTHON'
+import sys, yaml
+tasks = yaml.safe_load(open(sys.argv[1]))
+assert any(t.get("ansible.builtin.file", {}) == {"path": sys.argv[2], "state": "absent"}
+           for t in tasks)
+PYTHON
+then
+    pass "polkit: robot_autostart removes the legacy .pkla"
+else
+    fail "polkit: robot_autostart does not remove the legacy .pkla"
+fi
 
 UNIT=systemd/questix_network_admin.service
 assert_contains "$UNIT" "Type=oneshot" "QUESTiX Local: helper unit is a oneshot"

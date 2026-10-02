@@ -89,6 +89,9 @@ NETWORK_UNIT_SOURCE="$REPO_ROOT/systemd/questix_network_admin.service"
 NETWORK_UNIT_TARGET=/etc/systemd/system/questix_network_admin.service
 POLKIT_SOURCE="$REPO_ROOT/systemd/50-questix-robot.rules"
 POLKIT_TARGET=/etc/polkit-1/rules.d/50-questix-robot.rules
+# Older versions deployed this .pkla (manage-units for every unit, passwordless pkexec); polkit
+# still honours it and it would undo the per-unit rules above, so it must not exist.
+LEGACY_PKLA=/etc/polkit-1/localauthority/50-local.d/50-questix-robot.pkla
 
 # The robot user the manager runs as (User= of its unit); empty when unknown or root.
 manager_user() {
@@ -104,8 +107,10 @@ expected_polkit() {
     sed -e "s|ubuntu|$1|g" "$POLKIT_SOURCE"
 }
 
-# 0 when the helper (root-owned, not writable by others), its unit and the polkit rules match.
+# 0 when the helper (root-owned, not writable by others), its unit and the polkit rules match
+# and the legacy .pkla is gone.
 network_admin_current() {
+    [ ! -e "$LEGACY_PKLA" ] && [ ! -L "$LEGACY_PKLA" ] || return 1
     cmp -s "$NETWORK_ADMIN_SOURCE" "$NETWORK_ADMIN_TARGET" || return 1
     [ "$(stat -c '%u %g %a' "$NETWORK_ADMIN_TARGET")" = "0 0 755" ] || return 1
     cmp -s "$NETWORK_UNIT_SOURCE" "$NETWORK_UNIT_TARGET" || return 1
@@ -120,6 +125,7 @@ install_network_admin() {
     install -o root -g root -m 0755 "$NETWORK_ADMIN_SOURCE" "$NETWORK_ADMIN_TARGET"
     install -o root -g root -m 0644 "$NETWORK_UNIT_SOURCE" "$NETWORK_UNIT_TARGET"
     systemctl daemon-reload
+    rm -f "$LEGACY_PKLA"
     local user
     user="$(manager_user)"
     if [ -n "$user" ]; then

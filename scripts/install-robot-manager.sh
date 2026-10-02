@@ -100,12 +100,13 @@ sed -e "s|ubuntu|${TARGET_USER}|g" \
 chmod 0644 /etc/polkit-1/rules.d/50-questix-robot.rules
 echo "  -> /etc/polkit-1/rules.d/50-questix-robot.rules deployed"
 
-# Deploy legacy .pkla rules (Ubuntu 22.04, polkit <0.113)
-if [ -d /etc/polkit-1/localauthority/50-local.d ]; then
-  install -m 0644 \
-    "${REPO_DIR}/systemd/50-questix-robot.pkla" \
-    /etc/polkit-1/localauthority/50-local.d/50-questix-robot.pkla
-  echo "  -> /etc/polkit-1/localauthority/50-local.d/50-questix-robot.pkla deployed"
+# The JavaScript rules above are the only QUESTiX polkit authority. Older versions also deployed a
+# legacy .pkla (manage-units for every unit and passwordless pkexec), which polkit still honours
+# and which would undo the per-unit limits above: remove it (the path is QUESTiX's own).
+LEGACY_PKLA=/etc/polkit-1/localauthority/50-local.d/50-questix-robot.pkla
+if [ -e "$LEGACY_PKLA" ] || [ -L "$LEGACY_PKLA" ]; then
+  rm -f "$LEGACY_PKLA"
+  echo "  -> legacy $LEGACY_PKLA removed"
 fi
 
 # ---------- 5. Robot Manager Web UI (optional) ----------
