@@ -413,7 +413,10 @@ async function refreshRecStatus() {
   // Mirror recording state onto the 記録 tab so it is visible from any tab
   document.getElementById("tab-rec-dot").classList.toggle("recording", recording);
   document.getElementById("rec-state-text").textContent = recording ? "記録中" : "記録していません";
+  const trialView = TrialView.status(data);
+  document.getElementById("rec-mode").textContent = trialView.mode;
   document.getElementById("rec-bag-name").textContent = recording ? data.bag_name : "—";
+  renderTrialEvidence(trialView);
   document.getElementById("rec-elapsed").textContent = recording ? fmtDuration(data.elapsed_sec) : "—";
   document.getElementById("rec-size").textContent = recording ? fmtBytes(data.size_bytes) : "—";
 
@@ -430,8 +433,12 @@ async function refreshRecStatus() {
   fill.classList.toggle("low", low);
 
   // Buttons
-  document.getElementById("rec-start").disabled = recording || low;
+  // `starting` also covers the after-run parameter capture of the last evidence recording.
+  const busy = recording || Boolean(data.starting);
+  document.getElementById("rec-start").disabled = busy || low;
   document.getElementById("rec-stop").disabled = !recording;
+  document.getElementById("rec-trial-mode").disabled = busy;
+  for (const input of document.querySelectorAll("[data-trial]")) input.disabled = busy;
 
   // Notify once when an auto-stop happened
   if (!recording && data.last_stop_reason === "auto_stopped_low_disk" &&
@@ -439,6 +446,74 @@ async function refreshRecStatus() {
     toast("ディスクの空き容量が足りないため、記録を自動で停止しました", "error");
   }
   lastStopReasonShown = data.last_stop_reason;
+}
+
+// The running 証拠付き記録, or the last one's verdict (TrialView.status).
+function renderTrialEvidence(view) {
+  const box = document.getElementById("trial-evidence");
+  box.hidden = view.rows.length === 0;
+  if (box.hidden) return;
+  document.getElementById("trial-evidence-heading").textContent = view.heading;
+  const badge = document.getElementById("trial-evidence-badge");
+  badge.className = "evidence-badge " + view.badge.state;
+  badge.textContent = view.badge.text;
+  const rows = document.getElementById("trial-evidence-rows");
+  rows.replaceChildren(...view.rows.map(([label, value]) => {
+    const row = document.createElement("div");
+    row.className = "rec-status-row";
+    const name = document.createElement("span");
+    name.className = "rec-status-label";
+    name.textContent = label;
+    const text = document.createElement("span");
+    text.className = "rec-status-value";
+    text.textContent = value;
+    row.append(name, text);
+    return row;
+  }));
+  const list = document.getElementById("trial-warnings");
+  list.hidden = view.warnings.length === 0;
+  list.replaceChildren(...view.warnings.map((warning) => {
+    const item = document.createElement("li");
+    item.textContent = warning;
+    return item;
+  }));
+}
+
+// The 証拠付き記録 form, one input per TrialView.FIELDS entry (the API accepts nothing else).
+function buildTrialFields() {
+  const grid = document.getElementById("trial-fields");
+  grid.replaceChildren(...TrialView.FIELDS.map((field) => {
+    const item = document.createElement("div");
+    item.className = "config-item trial-field" + (field.wide ? " wide" : "");
+    const label = document.createElement("label");
+    label.htmlFor = `trial-${field.key}`;
+    label.textContent = field.label;
+    const input = document.createElement("input");
+    input.id = `trial-${field.key}`;
+    input.dataset.trial = field.key;
+    input.autocomplete = "off";
+    if (field.kind === "number") {
+      input.type = "number";
+      input.inputMode = "decimal";
+      input.min = "0";
+      input.max = String(field.max);
+      input.step = "any";
+    } else {
+      input.type = "text";
+      // No pattern attribute: TrialView.metadata checks the IDs before sending (the browser's
+      // v-flag pattern syntax differs from Python's re).
+      input.maxLength = field.max || (field.pattern === TrialView.ID_PATTERN ? 64 : 32);
+    }
+    if (field.placeholder) input.placeholder = field.placeholder;
+    item.append(label, input);
+    return item;
+  }));
+}
+
+function trialValues() {
+  const values = {};
+  for (const input of document.querySelectorAll("[data-trial]")) values[input.dataset.trial] = input.value;
+  return values;
 }
 
 async function refreshRecConfig() {
@@ -733,10 +808,31 @@ function setupFolderPickerEvents() {
 
 function setupRecorderEvents() {
   setupFolderPickerEvents();
+  buildTrialFields();
+  const trialMode = document.getElementById("rec-trial-mode");
+  trialMode.addEventListener("change", () => {
+    document.getElementById("trial-form").hidden = !trialMode.checked;
+    document.getElementById("rec-start").textContent = TrialView.startLabel(trialMode.checked);
+  });
+
   document.getElementById("rec-start").addEventListener("click", async () => {
+    let request = { method: "POST" };
+    let path = "/api/rosbag/start";
+    if (trialMode.checked) {
+      const { body, errors } = TrialView.metadata(trialValues());
+      if (errors.length) {
+        toast(errors[0], "error");
+        return;
+      }
+      path = "/api/rosbag/start-trial";
+      request = { method: "POST", body: JSON.stringify(body) };
+    }
     try {
-      const data = await api("/api/rosbag/start", { method: "POST" });
-      toast(`記録を開始しました: ${data.bag_name}`, "success");
+      const data = await api(path, request);
+      toast(TrialView.startedText(data), "success");
+      // The evidence box under the status lists them while the recording runs.
+      const warnings = (data.warnings || []).length;
+      if (warnings) toast(`証拠付き記録の注意が ${warnings} 件あります（記録カードに表示）`, "error");
       await refreshRecStatus();
     } catch {
       // already toasted

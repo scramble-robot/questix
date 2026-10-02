@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>QUESTiX Robot Manager</title>
-  <link rel="stylesheet" href="/static/style.css?v=35">
+  <link rel="stylesheet" href="/static/style.css?v=36">
 </head>
 
 <body>
@@ -288,6 +288,10 @@
       <!-- Live recording status -->
       <div id="rec-status" class="rec-status">
         <div class="rec-status-row">
+          <span class="rec-status-label">記録の種類</span>
+          <span id="rec-mode" class="rec-status-value">—</span>
+        </div>
+        <div class="rec-status-row">
           <span class="rec-status-label">記録名</span>
           <span id="rec-bag-name" class="rec-status-value">—</span>
         </div>
@@ -313,6 +317,39 @@
         <div class="disk-gauge-sub">
           <span>記録フォルダ使用量</span>
           <span id="disk-used-text">—</span>
+        </div>
+      </div>
+
+      <!-- Evidence of the running or the last 証拠付き記録 (trial-view.js) -->
+      <div class="trial-evidence" id="trial-evidence" hidden>
+        <div class="trial-evidence-head">
+          <span id="trial-evidence-heading"></span>
+          <span id="trial-evidence-badge" class="evidence-badge"></span>
+        </div>
+        <div class="rec-status" id="trial-evidence-rows"></div>
+        <ul class="trial-warnings" id="trial-warnings" hidden></ul>
+      </div>
+
+      <!-- 証拠付き記録: the same recorder plus evidence (POST /api/rosbag/start-trial) -->
+      <div class="trial-block">
+        <div class="config-item wide">
+          <label for="rec-trial-mode">
+            証拠付きで記録する（ソース・設定・非常停止と許可の状態を bag と一緒に保存）
+          </label>
+          <label class="toggle-switch small">
+            <input type="checkbox" id="rec-trial-mode">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div id="trial-form" hidden>
+          <p class="section-help trial-note">
+            氏名・学籍番号・メールアドレス・学校名は書かないでください（保存する項目にありません）。
+            班IDは <code>teamA</code> のような匿名の記号にしてください。どの項目も空欄でかまいません。
+            ロボット制御が動いていて、<code>/drive_component</code>・<code>/target_twist</code>・
+            <code>/drive_status</code>・<code>/emergency_stop</code> がそろっていないと開始できません。
+            記録中のパラメータ変更は止めず、開始時と停止時の差として残します。
+          </p>
+          <div class="config-grid rec-config" id="trial-fields"></div>
         </div>
       </div>
 
@@ -770,7 +807,8 @@
   <script src="/static/control-labels.js?v=4"></script>
   <script src="/static/status-view.js?v=2"></script>
   <script src="/static/network-view.js?v=1"></script>
-  <script src="/static/app.js?v=19"></script>
+  <script src="/static/trial-view.js?v=1"></script>
+  <script src="/static/app.js?v=20"></script>
   <script src="/static/controller-map.js?v=12"></script>
   <script src="/static/controls.js?v=22"></script>
 </body>

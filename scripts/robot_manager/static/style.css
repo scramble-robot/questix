@@ -797,6 +797,99 @@ input[type="checkbox"] { accent-color: var(--accent); }
   margin-bottom: 1rem;
 }
 
+/* 証拠付き記録 (trial-view.js): the switch, its form and the last trial's evidence. */
+.trial-block {
+  margin-bottom: 0.9rem;
+}
+
+.trial-note {
+  margin: 0.6rem 0;
+}
+
+.trial-note code {
+  font-family: "JetBrains Mono", "Fira Code", "Consolas", monospace;
+  font-size: var(--font-small);
+  background: var(--bg-input);
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+}
+
+.trial-field {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.4rem;
+}
+
+.config-item.trial-field input[type="text"],
+.config-item.trial-field input[type="number"] {
+  width: 100%;
+  text-align: left;
+}
+
+.trial-evidence {
+  margin-bottom: 0.9rem;
+}
+
+.trial-evidence-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem 0.75rem;
+  font-size: var(--font-small);
+  color: var(--text-dim);
+  margin-bottom: 0.4rem;
+}
+
+.trial-evidence .rec-status {
+  margin-bottom: 0;
+}
+
+.trial-evidence .rec-status-row {
+  gap: 1rem;
+  align-items: baseline;
+}
+
+.trial-evidence .rec-status-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.evidence-badge {
+  font-size: var(--font-small);
+  padding: 0.1rem 0.6rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+}
+
+.evidence-badge.recording,
+.evidence-badge.pending {
+  color: var(--accent);
+}
+
+.evidence-badge.ok {
+  color: var(--green);
+}
+
+.evidence-badge.warning {
+  color: var(--orange);
+}
+
+.evidence-badge.failed {
+  color: var(--red);
+}
+
+.trial-warnings {
+  list-style: disc;
+  padding-left: 1.25rem;
+  margin-top: 0.5rem;
+  color: var(--orange);
+  font-size: var(--font-small);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
 .rec-config {
   margin-bottom: 0;
 }
