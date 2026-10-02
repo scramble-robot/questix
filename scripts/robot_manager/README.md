@@ -7,7 +7,8 @@ uvicorn on `127.0.0.1:8888`.
   「すべて止める」 `/api/stop-all`, launch config).
 - `recorder.py` — rosbag recording console (`/api/rosbag/*`).
 - `trial.py` — experiment evidence for a recording (metadata, source identity, runtime ROS
-  environment, parameters before/after, bag integrity); passive, no UI (`POST /api/rosbag/start-trial`).
+  environment, parameters before/after, bag integrity); passive (`POST /api/rosbag/start-trial`,
+  記録 tab 「証拠付きで記録する」: `static/trial-view.js`).
 - `logs.py` — log collection console (`/api/logs/*`).
 - `lab.py` — QUESTiX LAB console (`/api/lab/*`): starts/stops the lab bridge and allows or
   forbids driving from the lessons.
@@ -310,7 +311,15 @@ Recorder settings are persisted to `${QUESTIX_CONFIG_DIR:-/etc/questix_robot}/ro
 走行実験の rosbag を、あとから「どのソース・どの設定・どの環境で・非常停止と先生の許可が
 どうだったか」まで確かめられるようにする記録モードです。**録画の仕組みは増やさず**、上の
 generic recorder と同じ 1 本の `ros2 bag record` プロセス・ロック・状態を使い、bag と同じ
-ディレクトリに証拠（sidecar）を置きます。画面（UI）はまだありません（API のみ）。
+ディレクトリに証拠（sidecar）を置きます。
+
+画面: 記録タブの「証拠付きで記録する」を ON にすると、試行ID・班ID（匿名）・号機ID・条件・床面・
+積載・バッテリー・メモの欄が出て、「証拠付きで記録開始」が `start-trial` を呼びます（OFF なら従来の
+`start`）。欄は下の「メタデータ」の項目だけで、空欄は送りません（試行IDは日時から自動）。送る前に
+`trial.py` と同じ規則で確かめ（`static/trial-view.js`、`tests/trial_view.test.cjs` が同じ値に
+保ちます）、最終的な判定はサーバーの `validate_metadata` です。記録中は試行ID / 班 / 条件と開始時の
+注意を、止めたあとは前回の結果（確定中… / OK / 要確認 / 失敗、記録名、止まった理由、証拠の場所、
+注意）を表示します。
 
 - generic 録画: `POST /api/rosbag/start` — 従来どおり。メタデータも sidecar もなし。
 - 証拠付き記録: `POST /api/rosbag/start-trial` — 同じ recorder + 証拠。応答と
