@@ -26,13 +26,15 @@
   "wheels": {
     "left": "左の車輪",
     "right": "右の車輪",
-    "command": "指令 {rpm} rpm",
-    "noCommand": "指令なし",
-    "chartLabel": "{side}の回転数の、最近{seconds}秒の変化。実線が測った回転数、破線が指令。",
+    "command": "送った指令 {rpm} rpm",
+    "noCommand": "送った指令なし",
+    "chartLabel": "{side}の回転数の、最近{seconds}秒の変化。太い実線がモータから届いた生の値、細く薄い線がなめらかにした値、破線がモータに送った指令。値が届かなかった間は線を切っています。",
     "yTitle": "回転数（rpm）",
     "xTitle": "時間（秒、0がいま）",
-    "measured": "測定",
-    "target": "指令"
+    "raw": "生の値",
+    "filtered": "なめらか",
+    "filteredValue": "なめらかにした値 {rpm} rpm",
+    "target": "送った指令"
   },
   "motion": {
     "speed": "前後の速さ",
@@ -72,6 +74,7 @@
     "idle": "出ていません",
     "staleNote": "灰色の値は古くなっています（止まっている・届いていない）。"
   },
+  "rateNote": "この画面の値は、ロボットが1秒に50回測った値を1秒に20回に間引いたものです。細かい揺れを調べるときは、記録（rosbag）を使います。",
   "memo": {
     "label": "測定メモ",
     "placeholder": "気づいたことや、測った値を書きます。",
@@ -98,9 +101,9 @@
     "left": "左の車輪",
     "right": "右の車輪",
     "speed": "前後の速さ",
-    "measured": "実測（実線）",
+    "measured": "実測・生の値（実線）",
     "command": "指令（破線）",
     "span": "最近{seconds}秒・上下±{top} m/秒",
-    "sparkLabel": "前後の速さの最近10秒。実線が実測、破線が指令、上下の端が±{top} m/秒。"
+    "sparkLabel": "前後の速さの最近10秒。実線が車輪の生の値から求めた実測、破線が指令、上下の端が±{top} m/秒。"
   }
 }
