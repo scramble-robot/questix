@@ -204,6 +204,9 @@ private:
    * @brief 現在のパラメータから制御コアの設定を組み立てる（readParameters の後に呼ぶ）
    */
   control_core::Config makeControlCoreConfig() const;
+  // velocity_run_lqr_enabled=true（velocity モード）なのに RUN 閾値が両方 0 で、
+  // LQR+FF が適用されない設定か（ControlCore::velocityRunLqrApplicable() の WARN 用）。
+  bool velocityRunLqrLacksRunThreshold() const;
 
   /**
    * @brief 走行チューニング用パラメータの実行時変更コールバック。

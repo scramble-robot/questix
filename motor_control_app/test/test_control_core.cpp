@@ -854,3 +854,63 @@ TEST(ControlCoreLqr, VelocityRunConfigChangePreservesSlewAndDriveMode) {
   EXPECT_EQ(control.mode(), core::DriveMode::kRun);
   EXPECT_FALSE(control.stopMode());
 }
+
+// --- RUN 閾値なしの LQR と符号反転の防止 ------------------------------------------------
+//
+// RUN 閾値が 0 / 0 だと RUN は不感帯（min_command_rpm）の直上から始まり、一次遅れモデルが
+// 当てはまらない低 RPM 域まで LQR が効いてしまう。さらに ±max_correction_rpm の補正で
+// 指令の符号が目標と逆になり得る。どちらも設定に依存せず防ぐこと。
+
+TEST(ControlCoreLqr, LqrIsNotAppliedWithoutRunThreshold) {
+  core::Config config = lqrConfig(0.5, 1.0, 0.05, 20.0);
+  config.run_enter_rpm = 0;
+  config.run_exit_rpm = 0;
+  core::ControlCore control(config);
+  EXPECT_FALSE(control.velocityRunLqrApplicable());
+  const auto res = driveStraight(control, -10.0, 1.0, 200);
+  EXPECT_FALSE(res.lqr_active);
+  EXPECT_EQ(res.left_cmd, res.left_ref);  // FF のみ = 従来出力
+  EXPECT_FALSE(control.leftOmegaHat().has_value());
+}
+
+TEST(ControlCoreLqr, CorrectionNeverReversesCommandSign) {
+  // 実測が目標を大きく上回り続ける（左 +1000 / 右 -1000 RPM）。強い FB と大きな補正上限で
+  // 補正は目標を超えて逆向きに出ようとするが、指令は 0 で止まり逆転指令にはならない。
+  core::ControlCore control(lqrConfig(100.0, 0.0, 0.0, 200.0));
+  core::WheelFeedback fb;
+  fb.valid = true;
+  fb.left_rpm = 1000;
+  fb.right_rpm = -1000;
+  bool clamped = false;
+  for (int k = 0; k < 100; ++k) {
+    const auto out = control.step(0.5, 0.0, kControlDt, fb);
+    if (out.mode != core::DriveMode::kRun) {
+      continue;
+    }
+    ASSERT_TRUE(out.lqr_active);
+    ASSERT_GT(out.left_ref_rpm, 0);
+    ASSERT_LT(out.right_ref_rpm, 0);
+    EXPECT_GE(out.left_rpm, 0);
+    EXPECT_LE(out.right_rpm, 0);
+    clamped = clamped || (out.left_rpm == 0 && out.right_rpm == 0);
+  }
+  EXPECT_TRUE(clamped);  // 符号ガードが実際に効く状況を作れていること
+}
+
+TEST(ControlCoreLqr, DisablingRunThresholdClearsControllerState) {
+  // 走行中に RUN 閾値を 0 / 0 にすると LQR は適用されなくなる。旧状態を残すと、閾値を
+  // 戻したときに古い推定から再開してしまうため、適用可否が変わった時点で捨てる。
+  core::ControlCore control(lqrConfig(0.5, 1.0, 0.05, 20.0));
+  driveStraight(control, -10.0, 1.0, 200);
+  ASSERT_TRUE(control.leftOmegaHat().has_value());
+  ASSERT_TRUE(control.velocityRunLqrApplicable());
+
+  core::Config next = lqrConfig(0.5, 1.0, 0.05, 20.0);
+  next.run_enter_rpm = 0;
+  next.run_exit_rpm = 0;
+  control.setConfig(next);
+  EXPECT_FALSE(control.velocityRunLqrApplicable());
+  EXPECT_FALSE(control.leftOmegaHat().has_value());
+  EXPECT_EQ(control.leftDisturbanceHat(), 0.0);
+  EXPECT_EQ(control.mode(), core::DriveMode::kRun);  // 走行状態は維持
+}

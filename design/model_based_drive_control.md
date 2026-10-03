@@ -222,7 +222,7 @@ current モード制御則 = i_ff（FF） + 状態 FB（LQR ゲイン） + 外�
 
 **実装（コードは入れてあり、`velocity_run_lqr_enabled: false` で眠っている。go の場合に YAML で有効化）**
 - `motor_control_lib/wheel_velocity_lqr.hpp`: スカラー DARE でゲイン計算、`u = ref + lead*(Δref)/b − dist*d̂/b − K(x̂ − ref)`、補正量を `max_correction_rpm` でクランプ。積分は持たず、定常誤差は $\hat d$ で補償。
-- `ControlCore`: RUN かつ FB 有効のときだけ適用。FB 無効・遷移・`reset()` でオブザーバ/LQR 状態を破棄。`drive_component` は `getMotorFeedbackData().velocity_rpm_raw`（生値）を両輪の鮮度 ≤ `velocity_run_feedback_max_age_sec` のときに渡す。
+- `ControlCore`: RUN かつ FB 有効、かつ RUN 閾値（`drive_fsm_run_*`）が設定されているときだけ適用（両方 0 なら RUN が不感帯直上から始まりモデルが当てはまらないため適用せず、`drive_component` が WARN）。補正後の指令は目標と逆符号にしない（0 で止める）。FB 無効・遷移・`reset()` でオブザーバ/LQR 状態を破棄。`drive_component` は `getMotorFeedbackData().velocity_rpm_raw`（生値）を両輪の鮮度 ≤ `velocity_run_feedback_max_age_sec` のときに渡す。
 - 外側ループは内側より十分遅く（q 小・r 大、K ≲ 0.3 目安）、位相進み（lead）は控えめに。
 - `kCreep` では従来処理、`kStop` では `commandStop()`。`kRun → kCreep/kStop` 遷移でリセット。
 - 既存 `drive_slew` との二重化を避けるため、RUN では「参照整形 = drive_slew の出力」に対して外側 FB を足す形にする（drive_slew は残す）。

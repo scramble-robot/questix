@@ -173,7 +173,9 @@ public:
     out.stop = (mode_ == DriveMode::kStop);
 
     // RUN 域の外側 LQR+FF。FB が無効なら FF のみ（従来挙動）に戻し、状態もリセットする。
-    if (mode_ == DriveMode::kRun && config_.velocity_run.enabled) {
+    // RUN 閾値が無効（0 / 0）だと RUN は不感帯の直上から始まり、一次遅れモデルが当てはまらない
+    // 低 RPM 域まで LQR が効いてしまうため適用しない（velocityRunLqrApplicable()）。
+    if (mode_ == DriveMode::kRun && velocityRunLqrApplicable()) {
       if (feedback.valid) {
         ensureLqrGains(dt_sec);
         const double sign = config_.velocity_run.invert_measured ? -1.0 : 1.0;
@@ -214,21 +216,34 @@ public:
    * 次の有効なフィードバックで実測 RPM から初期化し直す。
    * velocity_run 以外（スルーレート・不感帯など）の変更では車輪制御器の状態は消さない。
    * RUN 閾値（run_enter_rpm / run_exit_rpm）は、変更でモードが移れば step() 側の遷移処理が
-   * resetWheelControllers() を呼ぶため、ここでは判定に含めない。
+   * resetWheelControllers() を呼ぶため、ここでは判定に含めない。ただし閾値の有効/無効が
+   * 切り替わって LQR の適用可否（velocityRunLqrApplicable()）が変わったときは状態を捨てる。
    *
    * LQR ゲインは変更の有無によらず捨て、次の tick で再計算する。
    */
   void setConfig(const Config& config) {
     const bool velocity_run_changed = velocityRunChanged(config_.velocity_run, config.velocity_run);
+    const bool was_applicable = velocityRunLqrApplicable();
     config_ = config;
     lqr_gains_.reset();
     lqr_gains_dt_ = 0.0;
-    if (velocity_run_changed) {
+    if (velocity_run_changed || was_applicable != velocityRunLqrApplicable()) {
       resetWheelControllers();
     }
   }
 
   const Config& config() const { return config_; }
+
+  /**
+   * @brief RUN 域 LQR+FF が適用され得る設定か。
+   *
+   * enabled=true でも RUN 閾値（run_enter_rpm / run_exit_rpm）が両方 0 なら false。
+   * そのときは FF のみ（従来挙動）で、drive_component が WARN で知らせる。
+   */
+  bool velocityRunLqrApplicable() const {
+    return config_.velocity_run.enabled &&
+           motor_control_lib::drive_mode_fsm::runThresholdEnabled(fsmConfig());
+  }
 
   // 現在のスルーレート状態（ログ・テスト用）
   double lastLinear() const { return last_linear_; }
@@ -316,7 +331,14 @@ private:
 
     const double u = motor_control_lib::wheel_velocity_lqr::step(
         w.lqr, lqr_params_, *lqr_gains_, static_cast<double>(ref_rpm), x_hat, d_hat);
-    const int cmd = static_cast<int>(std::lround(u));
+    int cmd = static_cast<int>(std::lround(u));
+    // 補正で指令の符号が目標と逆にならないようにする（逆転指令は送らない。0 で止める）。
+    // run_exit_rpm > max_correction_rpm なら通常は届かないが、設定に依存しない安全装置。
+    if (ref_rpm > 0) {
+      cmd = std::max(cmd, 0);
+    } else if (ref_rpm < 0) {
+      cmd = std::min(cmd, 0);
+    }
 
     motor_control_lib::wheel_observer::step(os, observer_params_, measured_rpm,
                                             static_cast<double>(cmd));
