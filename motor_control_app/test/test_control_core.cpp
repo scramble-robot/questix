@@ -914,3 +914,108 @@ TEST(ControlCoreLqr, DisablingRunThresholdClearsControllerState) {
   EXPECT_EQ(control.leftDisturbanceHat(), 0.0);
   EXPECT_EQ(control.mode(), core::DriveMode::kRun);  // 走行状態は維持
 }
+
+// --- 輪ごとの LQR 適用範囲（L1 / L2）------------------------------------------------------
+//
+// 走行状態（STOP/CREEP/RUN）は左右の大きい方の |目標| で決まる。旋回では遅い側の輪が RUN 域の
+// 外（0 や逆向きを含む）にあり得るため、LQR+FF の適用は輪ごとに判定する
+// （ControlCore::wheelInRunRange: 目標 != 0 かつ |目標| >= run_exit_rpm）。範囲外の輪は FF のみ
+// （目標そのまま）で、その輪の状態を捨てる。
+
+namespace {
+
+// 目標 twist を保ったまま、左右に固定の実測（モータフレーム: 前進は左が正、右が負）を
+// 返し続けて ticks 回まわす。最後の出力を返す。
+core::Output holdWithFeedback(core::ControlCore& control, double linear, double angular,
+                              int left_measured, int right_measured, int ticks) {
+  core::WheelFeedback fb;
+  fb.valid = true;
+  fb.left_rpm = left_measured;
+  fb.right_rpm = right_measured;
+  core::Output out;
+  for (int k = 0; k < ticks; ++k) {
+    out = control.step(linear, angular, kControlDt, fb);
+  }
+  return out;
+}
+
+}  // namespace
+
+TEST(ControlCoreLqrPerWheel, ZeroReferenceWheelGetsNoCorrection) {
+  // 左輪を軸にした旋回: 左の目標は 0、右は約 191 rpm で車体は RUN。強い FB と大きな補正上限で、
+  // 左の実測が 0 からずれていても左には何も足さない（以前は ±max_correction_rpm が出得た）。
+  core::ControlCore control(lqrConfig(100.0, 1.0, 0.05, 20.0));
+  const double linear = 1.0;
+  const double angular = 2.0 * linear / yamlConfig().wheel_separation;  // 左輪の速度 = 0
+  const auto out = holdWithFeedback(control, linear, angular, -30, -150, 200);
+  ASSERT_EQ(out.mode, core::DriveMode::kRun);
+  ASSERT_EQ(out.left_ref_rpm, 0);
+  EXPECT_EQ(out.left_rpm, 0);
+  EXPECT_FALSE(out.left_lqr_active);
+  EXPECT_FALSE(control.leftOmegaHat().has_value());  // その輪の状態は持たない
+  EXPECT_TRUE(out.right_lqr_active);
+  EXPECT_TRUE(out.lqr_active);
+  EXPECT_NE(out.right_rpm, out.right_ref_rpm);  // 右には補正が掛かっている
+}
+
+TEST(ControlCoreLqrPerWheel, WheelBelowRunExitIsFeedforwardOnly) {
+  // 左の目標が run_exit_rpm(30) を下回る旋回（左 ≈ 10 rpm、右 ≈ 181 rpm）。
+  core::ControlCore control(lqrConfig(100.0, 1.0, 0.05, 20.0));
+  const double angular = (1.0 - 10.0 / 95.4929658551372) / 0.25;
+  const auto out = holdWithFeedback(control, 1.0, angular, 25, -150, 200);
+  ASSERT_EQ(out.mode, core::DriveMode::kRun);
+  ASSERT_GT(out.left_ref_rpm, 0);
+  ASSERT_LT(out.left_ref_rpm, 30);
+  EXPECT_EQ(out.left_rpm, out.left_ref_rpm);
+  EXPECT_FALSE(out.left_lqr_active);
+  EXPECT_FALSE(control.leftOmegaHat().has_value());
+  EXPECT_TRUE(out.right_lqr_active);
+}
+
+TEST(ControlCoreLqrPerWheel, DifferentSpeedsAreCorrectedIndependently) {
+  // 両輪とも RUN 域（左 ≈ 48 rpm、右 ≈ 143 rpm）。各輪は自分の実測でだけ補正される。
+  core::ControlCore control(lqrConfig(0.5, 0.0, 0.0, 20.0));
+  const auto out = holdWithFeedback(control, 1.0, 2.0, 48, -133, 300);
+  ASSERT_TRUE(out.left_lqr_active);
+  ASSERT_TRUE(out.right_lqr_active);
+  // 左は実測 ≈ 目標なので補正はほぼ 0、右は 10 rpm 遅い（右は前進が負）ので負の向きに増やす。
+  ASSERT_LT(out.right_ref_rpm, 0);
+  EXPECT_LE(std::abs(out.left_rpm - out.left_ref_rpm), 1);
+  EXPECT_LT(out.right_rpm, out.right_ref_rpm);
+}
+
+TEST(ControlCoreLqrPerWheel, ReversalStartsTheWheelStateAgain) {
+  // 加速度制限なしで前進 → 後退に一気に切り替える。|目標| は RUN 域のまま符号だけが変わるので、
+  // 前進で育った外乱推定を後退へ持ち越さないこと（符号が変わった tick で捨て直す）。
+  auto config = lqrConfig(0.5, 1.0, 0.05, 20.0);
+  config.max_linear_accel = 0.0;
+  config.max_angular_accel = 0.0;
+  core::ControlCore control(config);
+  holdWithFeedback(control, 1.0, 0.0, 85, -85, 300);  // 10 rpm 遅い前進で外乱推定が育つ
+  ASSERT_GT(std::abs(control.leftDisturbanceHat()), 1.0);
+  const auto out = holdWithFeedback(control, -1.0, 0.0, 85, -85, 1);
+  ASSERT_EQ(out.mode, core::DriveMode::kRun);
+  ASSERT_LT(out.left_ref_rpm, 0);
+  EXPECT_TRUE(out.left_lqr_active);
+  EXPECT_EQ(control.leftDisturbanceHat(), 0.0);  // 実測から初期化し直した直後
+  EXPECT_EQ(control.rightDisturbanceHat(), 0.0);
+  EXPECT_LE(out.left_rpm, 0);  // 逆転指令の安全装置は維持
+  EXPECT_GE(out.right_rpm, 0);
+}
+
+TEST(ControlCoreLqrPerWheel, LostFeedbackDropsBothWheelsAndRestartsFromTheMeasurement) {
+  core::ControlCore control(lqrConfig(0.5, 1.0, 0.05, 20.0));
+  holdWithFeedback(control, 1.0, 2.0, 40, -130, 200);
+  ASSERT_TRUE(control.leftOmegaHat().has_value());
+  // フィードバックが失効した tick: 両輪とも FF のみ・状態なし
+  const auto lost = control.step(1.0, 2.0, kControlDt, core::WheelFeedback{});
+  EXPECT_FALSE(lost.lqr_active);
+  EXPECT_EQ(lost.left_rpm, lost.left_ref_rpm);
+  EXPECT_EQ(lost.right_rpm, lost.right_ref_rpm);
+  EXPECT_FALSE(control.leftOmegaHat().has_value());
+  EXPECT_FALSE(control.rightOmegaHat().has_value());
+  // 戻ったら実測から初期化（外乱推定は 0 から）
+  holdWithFeedback(control, 1.0, 2.0, 44, -140, 1);
+  EXPECT_EQ(control.leftDisturbanceHat(), 0.0);
+  ASSERT_TRUE(control.leftOmegaHat().has_value());
+}

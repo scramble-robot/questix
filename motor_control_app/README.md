@@ -92,6 +92,12 @@ control_rate Hz の固定 tick:
 | `velocity_run_invert_measured` | false | ○ | 実測 RPM の符号反転（正帰還になる場合のみ） |
 | `velocity_run_feedback_max_age_sec` | 0.1 | ○ | 両輪の `velocity_rpm_raw` がこれより古ければ FF のみ（> 0） |
 
+走行状態（STOP / CREEP / RUN）は左右の大きい方の |目標| で車体に 1 つだが、補正の適用は
+**輪ごと**に判定する: その輪の目標が 0 でなく、|目標| が `drive_fsm_run_exit_rpm`（0 なら
+enter と同値、enter より大きければ enter）以上の輪だけに掛ける。旋回で遅い側・0・逆向きの輪は
+FF のみ（目標そのまま）で、その輪のオブザーバ / LQR 状態は捨てる。目標の符号が変わった
+（前後反転）輪も状態を捨て直し、実測から初期化する。
+
 `velocity_run_*`（上表のうち `velocity_run_feedback_max_age_sec` を除く）を実行時に変更すると、
 旧モデルで育ったオブザーバ / LQR の内部状態（推定 RPM・外乱推定・入力履歴・前回参照）は
 破棄され、次の有効なフィードバックで実測 RPM から初期化し直される。走行中に LQR を
