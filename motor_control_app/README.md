@@ -131,9 +131,9 @@ ON/OFF しても、変更前のモデル由来の推定値が新しい設定へ�
 
 | パラメータ | 既定値 |
 |---|---|
-| `serial_port` / `baud_rate` | `/dev/ttyACM0` / 57600（M0602C 仕様固定） |
+| `serial_port` / `baud_rate` | `/dev/ttyACM0` / 57600（実機で使っている値。データシートとの食い違いは下の「未確認の食い違い」） |
 | `left_motor_id` / `right_motor_id` | 4 / 5 |
-| `max_motor_rpm` | 475（仕様上限にクランプ） |
+| `max_motor_rpm` | 475（`DdtMotorLib::kSpecVelocityMaxRpm` にクランプ。データシートは ±330 rpm と記載、下記） |
 | `control_mode` | `"velocity"`（`"current"` で電流モード） |
 | `control_rate` | 50.0 Hz（シリアル往復 2 モータ直列が周期予算に収まる必要あり） |
 | `serial_response_timeout_ms` | 10（従来の固定値）。フィードバック応答待ちの上限 [ms]、範囲 [2, 50]（外はクランプ + WARN）。下限の目安は応答フレーム伝送 1.74 ms + ファーム処理の実測値 + 余裕。実測は停止時 INFO「シリアル往復レイテンシ統計」 |
@@ -166,6 +166,81 @@ ros2 param dump /drive_component
 
 シリアル往復レイテンシの統計は deactivate 時に INFO ログへ出力される
 （`DdtMotorLib::getSerialLatencyStats`、制御周期引き上げ検討の実測材料）。
+
+## velocity / current モード実装のレビュー（既知の制約と根拠）
+
+足回りの前後振動の切り分け（車輪を浮かせた試験と床上試験。手順は `scripts/identify/README.md`）の
+前に、制御実装を見直した結果。方針は「既定の走行挙動を変えない」: 修正は既定 OFF の機能内の
+明確なバグだけで、挙動を変える改善は起動時の警告・文書・既定 OFF のパラメータに留めた。
+
+| 論点 | 判断 | 既定挙動への影響 |
+|---|---|---|
+| L1 RUN 判定は左右の大きい方。目標 0 の輪に ±`velocity_run_max_correction_rpm` が出得た | **修正**: 目標 0 の輪は補正せず 0、状態を捨てる | なし（LQR は既定 OFF） |
+| L2 輪ごとの適用範囲の判定がなかった（旋回の遅い側に一次遅れモデル外の補正） | **修正**: その輪の \|目標\| ≥ run_exit の輪だけ補正、他は FF のみ。符号反転でも状態を捨てる | なし（同上） |
+| V-ticks `velocity_run_model_delay_ticks` などは tick 単位 | 起動時 WARN（LQR 有効かつ `control_rate` ≠ 50）。YAML の 50 Hz 前提の書き方を周期によらない表現に | なし |
+| V3 停止の最後は停止フレームに切り替わり、減速はファーム（加速度バイト 1 = 最速）任せ | 文書化のみ。「停止フレームだけ加速度バイトを大きくする」案は未検証（実装するなら既定 OFF のパラメータで） | なし |
+| V4 停止フレームの高頻度送信でファームが減速を完了できない（ファームは受信フレームごとに内部状態を更新している可能性） | 文書化。定速中の送信頻度を変える試験の手順を `scripts/identify/README.md` に | なし |
+| V5 LQR は一次遅れモデル。~1.8 Hz 振動を表現できず、オブザーバは外乱と見なす | YAML / README に「振動対策ではない」。`test_control_core` の共振モデルで固定 | なし |
+| C1 current モード既定ゲイン（純 P 0.001 A/rpm、±1 A） | 既定値は変えず、起動時 WARN（`current_ki` ≤ 0 のとき）と下の評価前提 | なし |
+| C2 current モードのランプ二重（ホストの加速度制限 + ライブラリの `current_max_accel_rpm_per_sec`） | 確認の結果、**二重になっていない**: ライブラリ側は既定 0（無効）で、設定する呼び出しがリポジトリに無い。ホストの加速度制限だけが効く | なし |
+| C3 `current_invert_measured: true` が既定、実機での符号確認の記録なし | current モード起動時 WARN。確認手順を下に | なし |
+| C4/C5 ホスト速度ループは 1 rpm 分解能・50 Hz で、ゲイン上限が負荷慣性で大きく変わる | 文書化（浮かせた状態は慣性が小さく、床上と同じゲインでは発振しやすい） | なし |
+| C6 指令途絶時のドライバの挙動がデータシートに無い | current モード起動時 WARN と下の安全注意 | なし |
+| 周期: current PI は実測 dt、`ControlCore` は固定 dt | 整合を確認（下）。初回・異常時のフォールバック 0.01 s は周期によらない定数（`current_ki` = 0 の既定では効かない） | なし |
+| 周期: tick の overrun | 下に記載。`/drive_control_sample` の `tick_duration_sec` と `header.stamp` の間隔で見える | なし |
+| 観測: `/drive_status` と制御 tick が別タイマー | 同じフレームの重複・取りこぼしがある。tick 単位の解析は `/drive_control_sample` | なし |
+| 観測: フィードバック失効の前でも、応答タイムアウトの tick は同じフレームがオブザーバに 2 回入る | 文書化のみ（`velocity_run_feedback_max_age_sec` 0.1 s = 5 tick までは同じ実測を新しい観測として扱う。直すなら `ControlCore` の入力に「新しいフレームか」を足す） | なし |
+
+### 周期と時間の扱い
+
+- **固定 dt と実測 dt**: スルーレート・運動学・LQR は `dt = 1/control_rate` の定数（`ControlCore`）。
+  current モードの PI（`DdtMotorLib::runCurrentLoopStep`）はモータごとの実測 dt を使い、0 以下・
+  0.2 s 超は 0.01 s に置き換える。50 Hz では実測 ≈ 0.02 s で両者は一致する。`control_rate` を
+  上げても PI の dt は実測に追従するので整合は崩れないが、停止・リセット直後の最初の 1 回だけは
+  0.01 s を使う（積分ゲイン 0 の既定では影響しない）。
+- **overrun**: tick が周期を超えると、rclcpp の wall timer は遅れた分の周期を飛ばして次の周期から
+  再開する（溜まった tick を連続で実行しない）。dt は定数のままなので、overrun の間はホストの
+  加速度制限が実時間では緩く（遅く）効く。`Control tick overrun` の WARN（5 秒に 1 回）と
+  `/drive_control_sample` で確認できる。
+- **1 tick の所要時間**: 2 モータ直列で 1 問 1 答。正常 ≈ 7 ms（10 byte の送信 1.74 ms + ファーム
+  処理 + 応答 1.74 ms、× 2）。応答が無いと 1 モータあたり `serial_response_timeout_ms`（既定 10 ms）
+  待つ。送信前の `tcflush(TCIFLUSH)` は前回の遅れた応答を捨てる。捨てた後に同じモータの遅れた
+  応答が届くと、それをこの送受信の応答として受け取る（1 フレーム古い。CRC では区別できない）。
+  `tcdrain` は 10 byte の送信完了（≈1.74 ms）を待つ。
+- **アイドル中のフィードバック**: 未武装の tick は、保持しているフィードバックが 0.2 s より古ければ
+  最後に送れた停止フレームを再送して応答を取る。停止フレームの再送は `stop_resend_interval_ms`
+  （既定 300 ms）のスロットルにも従うので、実際の周期は ≈ 3 Hz（最大 age ≈ 0.32 s）。
+- **非常停止の待ち**: 全コールバックが同じ相互排他グループで直列に走るため、`/emergency_stop` の
+  コールバックは実行中の tick が終わるまで待つ。既定で正常 ≈ 7 ms、両モータが応答しないと
+  ≈ 2 × (10 + 2) ms ≈ 25 ms（`serial_response_timeout_ms` を 50 にすると 100 ms を超える）。
+  `command_wait_ms` > 0 はさらにその分を足す。その後の停止送信は即時（スロットルなし）。
+- **`/drive_status` と制御 tick**: `status_publish_rate` と `control_rate` は別のタイマーで、位相は
+  そろっていない。同じ 50 Hz でも `/drive_status` は同じフィードバックを 2 回出したり 1 つ飛ばしたり
+  する（車輪ごとの `header.stamp` = 受信時刻で判別できる）。
+
+### current モード（実験的）の評価前提と安全注意
+
+- **ゲイン（C1）**: 既定 `current_kp: 0.001` A/rpm・`current_ki: 0.0`・`max_current_amp: 1.0` は
+  評価の出発点。純 P なので、摩擦に釣り合う電流を出すには定常偏差が要る（例: 0.1 A に 100 rpm の
+  偏差）。走行制御として機能するかは未評価。
+- **符号（C3）の確認手順**: 車輪を浮かせ、`max_current_amp` を小さく（例 0.3）、`current_ki: 0` で
+  起動する。小さい正の目標（例 20 rpm 相当）を与え、`/drive_control_sample` の `command_current_raw`
+  と `velocity_rpm_raw` を見る。目標に向かって回り、偏差が縮むなら符号は正しい。偏差が広がって
+  電流が上限に張り付くなら正帰還: すぐ止めて `current_invert_measured` を反転する。左右とも確認する。
+- **ゲインと負荷（C4/C5）**: ホストの速度ループは 1 rpm 分解能の実測を 50 Hz で見るだけで、
+  ゲインの上限は負荷慣性で大きく変わる。浮かせた車輪は慣性が小さく、床上と同じゲインでは
+  発振しやすい。浮かせた試験は低ゲインから上げ、床上では改めて詰める。
+- **指令の途絶（C6）**: ホストからの指令が途絶えたときにドライバが何をするか（電流を 0 にするか、
+  最後の電流を保持するか）はデータシートに無い。保持する場合、current モードは速度の上限なく
+  加速し得る（特に浮かせた車輪）。`cmd_timeout_sec` はホストが動いている間の途絶しか止めない。
+  `max_current_amp` を小さく保ち、非常停止をすぐ押せる状態で試す。
+
+### 未確認の食い違い（データシートとリポジトリ）
+
+M6 規格書 V1.0 は通信 115200 baud・最大 500 Hz・速度 ±330 rpm と記載しているが、リポジトリは
+`baud_rate: 57600`、`max_motor_rpm: 475`（`kSpecVelocityMaxRpm`）を使っている。実機での確認待ちの
+ため、**今回コードは変更していない**。往復時間・`serial_response_timeout_ms` の下限の見積もり
+（10 byte で 1.74 ms）は 57600 baud を前提にしている。
 
 ## テスト
 

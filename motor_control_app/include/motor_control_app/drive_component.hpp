@@ -226,6 +226,11 @@ private:
   // velocity_run_lqr_enabled=true（velocity モード）なのに RUN 閾値が両方 0 で、
   // LQR+FF が適用されない設定か（ControlCore::velocityRunLqrApplicable() の WARN 用）。
   bool velocityRunLqrLacksRunThreshold() const;
+  // velocity RUN LQR+FF が有効なのに control_rate が 50 Hz でない（tick 単位のパラメータの
+  // 意味が同定時と変わる）なら WARN する。
+  void warnIfLqrTicksAssumeAnotherRate();
+  // current モードの評価前提（ゲイン・符号・指令途絶時の挙動）を起動時に WARN する。
+  void warnCurrentModeAssumptions();
 
   /**
    * @brief 走行チューニング用パラメータの実行時変更コールバック。

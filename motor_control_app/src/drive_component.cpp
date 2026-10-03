@@ -26,12 +26,17 @@ namespace motor_control_app {
 
 namespace {
 // 未武装（駆動指令を送っていない）間にフィードバック快照の鮮度を維持するポーリング周期の
-// 目安 [s]。この鮮度以内なら再取得しない（≈5Hz）。odometry::kMaxFeedbackAgeSec（stale 判定）
-// より十分小さくすること。
+// 目安 [s]。この鮮度以内なら再取得しない。再取得は停止フレームの再送なので
+// stop_resend_interval_ms のスロットルにも従い、実際の周期は長い方になる（既定 300 ms で
+// ≈3 Hz、最大 age ≈0.32 s）。odometry::kMaxFeedbackAgeSec（stale 判定）より十分小さくすること。
 constexpr double kIdleFeedbackMaxAgeSec = 0.2;
 
 // 停止指令を送れなかったとき（stop fault）の再送間隔 [s]。
 constexpr double kStopRetryPeriodSec = 0.5;
+
+// velocity_run_model_delay_ticks・オブザーバ/LQR のゲインは tick 単位で、同定と既定値は
+// control_rate 50 Hz を前提にしている。
+constexpr double kLqrTickRateHz = 50.0;
 
 double secondsSince(std::chrono::steady_clock::time_point then,
                     std::chrono::steady_clock::time_point now) {
@@ -260,6 +265,10 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
                 "velocity_run_lqr_enabled=true ですが drive_fsm_run_enter_rpm / "
                 "drive_fsm_run_exit_rpm が両方 0 のため LQR+FF は適用しません（FF のみ）。"
                 "同定で決めた RUN 閾値を設定してください");
+  }
+  warnIfLqrTicksAssumeAnotherRate();
+  if (control_mode_ == "current") {
+    warnCurrentModeAssumptions();
   }
   RCLCPP_INFO(this->get_logger(),
               "  velocity_run_lqr: %s  tau=%.3fs delay=%d ticks q=%.3f r=%.3f lead=%.2f dist=%.2f "
@@ -694,6 +703,43 @@ void DriveComponent::shutdownMotorLib() {
   motor_initialized_ = false;
 }
 
+void DriveComponent::warnIfLqrTicksAssumeAnotherRate() {
+  const bool lqr_effective = velocity_run_lqr_enabled_ && control_mode_ == "velocity" &&
+                             !velocityRunLqrLacksRunThreshold();
+  if (!lqr_effective || std::abs(control_rate_ - kLqrTickRateHz) < 1e-9) {
+    return;
+  }
+  RCLCPP_WARN(this->get_logger(),
+              "velocity_run_lqr is enabled with control_rate=%.1f Hz, but its tick-based "
+              "parameters assume %.0f Hz: velocity_run_model_delay_ticks=%d is now %.1f ms "
+              "(%.1f ms at %.0f Hz), and the observer gains (l_x, l_d) and q/r act per tick. "
+              "Identify the drive again at this rate before relying on the correction",
+              control_rate_, kLqrTickRateHz, velocity_run_model_delay_ticks_,
+              1000.0 * velocity_run_model_delay_ticks_ / control_rate_,
+              1000.0 * velocity_run_model_delay_ticks_ / kLqrTickRateHz, kLqrTickRateHz);
+}
+
+void DriveComponent::warnCurrentModeAssumptions() {
+  // 既定値は変えない（走行挙動を変えない）。評価の前提を起動時に知らせるだけ。
+  if (current_ki_ <= 0.0) {
+    RCLCPP_WARN(this->get_logger(),
+                "current mode with a pure P speed loop (current_kp=%.4f A/rpm, current_ki=%.4f, "
+                "max_current_amp=%.2f A): friction leaves a large steady speed error, e.g. "
+                "%.2f A at 50 rpm of error. These defaults are a starting point for evaluation, "
+                "not a working drive tuning (motor_control_app/README.md)",
+                current_kp_, current_ki_, max_current_amp_, current_kp_ * 50.0);
+  }
+  RCLCPP_WARN(this->get_logger(),
+              "current mode: current_invert_measured=%s has no recorded check on this robot. "
+              "Confirm the sign with the wheels lifted before driving (README: current mode sign "
+              "check); a wrong sign is positive feedback",
+              current_invert_measured_ ? "true" : "false");
+  RCLCPP_WARN(this->get_logger(),
+              "current mode: what the DDT driver does when commands stop is not documented. If it "
+              "holds the last current, an unloaded (lifted) wheel accelerates without a speed "
+              "limit. Keep max_current_amp low and the emergency stop at hand");
+}
+
 bool DriveComponent::velocityRunLqrLacksRunThreshold() const {
   return velocity_run_lqr_enabled_ && control_mode_ == "velocity" &&
          drive_fsm_run_enter_rpm_ <= 0 && drive_fsm_run_exit_rpm_ <= 0;
@@ -1020,6 +1066,9 @@ rcl_interfaces::msg::SetParametersResult DriveComponent::onParameterChange(
   }
   if (control_core_dirty && control_core_) {
     control_core_->setConfig(makeControlCoreConfig());
+  }
+  if (lqr_or_run_threshold_changed) {
+    warnIfLqrTicksAssumeAnotherRate();
   }
   if (lqr_or_run_threshold_changed && velocityRunLqrLacksRunThreshold()) {
     RCLCPP_WARN(this->get_logger(),
