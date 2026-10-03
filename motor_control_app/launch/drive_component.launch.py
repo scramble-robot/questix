@@ -18,9 +18,11 @@ def _launch_setup(context, *args, **kwargs):
     config_file = LaunchConfiguration('config_file').perform(context)
     parameters = [config_file] if config_file else []
     parameters.append(LaunchConfiguration('control_config_file'))
-    # The teacher's runtime authority: practice launches keep the default true, questix_core
-    # passes false for competition (enable_autoreferee). Not in the YAML (one source per launch).
+    # The E-stop requirement (questix_core: enable_gpio_ref) and the teacher's runtime authority
+    # (practice opt-in, never in competition). Not in the YAML (one source per launch).
     parameters.append({
+        'require_emergency_stop': ParameterValue(
+            LaunchConfiguration('require_emergency_stop'), value_type=bool),
         'require_runtime_actuation_authority': ParameterValue(
             LaunchConfiguration('require_runtime_actuation_authority'), value_type=bool),
     })
@@ -47,9 +49,14 @@ def generate_launch_description():
             default_value='',
             description='drive_component parameter YAML (empty = node defaults)'),
         DeclareLaunchArgument(
-            'require_runtime_actuation_authority',
+            'require_emergency_stop',
             default_value='true',
+            description='Treat an unheard or silent /emergency_stop as pressed (questix_core '
+                        'passes enable_gpio_ref; a received active=true always stops)'),
+        DeclareLaunchArgument(
+            'require_runtime_actuation_authority',
+            default_value='false',
             description='Drive only while the teacher runtime authority (/actuation_authority) '
-                        'is fresh (competition launches pass false)'),
+                        'is fresh (practice opt-in; competition launches pass false)'),
         OpaqueFunction(function=_launch_setup),
     ])

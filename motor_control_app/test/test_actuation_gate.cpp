@@ -72,6 +72,41 @@ TEST(ActuationGate, DiagnosticOptOutStillStopsOnAPressedEstop) {
   EXPECT_EQ(gate::evaluate(in), Block::kEstopActive);
 }
 
+// A practice launch without the GPIO safety path (enable_gpio_ref:=false) and without the
+// teacher's authority opt-in (the questix_core default) moves like 3.2.0: nothing has to be
+// heard first and a silent /emergency_stop is not a stop, but a received pressed one still is.
+TEST(ActuationGate, PracticeWithoutGpioRefAndAuthorityMovesWithNothingHeard) {
+  gate::Inputs in;  // nothing heard
+  in.require_estop = false;
+  in.require_authority = false;
+  EXPECT_EQ(gate::evaluate(in), Block::kNone);
+  in.estop_known = true;
+  in.estop_active = false;
+  in.estop_age_sec = 30.0;  // no publisher any more: not stale when not required
+  EXPECT_EQ(gate::evaluate(in), Block::kNone);
+  in.estop_active = true;
+  EXPECT_EQ(gate::evaluate(in), Block::kEstopActive);
+  in.estop_active = false;
+  in.stop_fault = true;  // an unconfirmed stop still closes it
+  EXPECT_EQ(gate::evaluate(in), Block::kStopFault);
+}
+
+// The teacher's authority is not an emergency stop: with the E-stop path off (no publisher) an
+// opted-in authority still decides on its own, and its reasons never read as E-stop reasons.
+TEST(ActuationGate, AuthorityIsIndependentOfTheEstop) {
+  gate::Inputs in;  // nothing heard
+  in.require_estop = false;
+  EXPECT_EQ(gate::evaluate(in), Block::kAuthorityUnknown);
+  EXPECT_FALSE(gate::isEstopBlock(gate::evaluate(in)));
+  in.authority_known = true;
+  in.authority_allowed = true;
+  in.authority_age_sec = 0.1;
+  EXPECT_EQ(gate::evaluate(in), Block::kNone);
+  in.authority_allowed = false;
+  EXPECT_EQ(gate::evaluate(in), Block::kAuthorityOff);
+  EXPECT_FALSE(gate::isEstopBlock(gate::evaluate(in)));
+}
+
 // A11 / A12: the teacher's authority is a lease.
 TEST(ActuationGate, AuthorityOffOrSilentCloses) {
   auto in = open();

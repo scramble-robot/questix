@@ -161,12 +161,13 @@ drive_component:
     # 統一緊急停止トピック（questix_msgs/EmergencyStop, reliable + transient_local）。
     # active=true 受信で即時停止＋twist 無視、active=false で twist 受付を再開する
     # （モータは次の指令まで停止のまま）。発行元は operation_manager（契約: questix_msgs/README.md）。
-    # 一度も受信していない間（enable_gpio_ref=false の起動を含む）と、受信後に
-    # emergency_stop_timeout_sec 途絶えた間も動かさない（フィードバックの取得は続ける）。
-    # require_emergency_stop: false は単体診断の明示 opt-out のみ（統合起動では使わない）。
+    # require_emergency_stop（launch が渡すためこの YAML には置かない）が true の間は、一度も
+    # 受信していない間と、受信後に emergency_stop_timeout_sec 途絶えた間も動かさない
+    # （フィードバックの取得は続ける）。questix_core は enable_gpio_ref を渡す（発行元の
+    # operation_manager はその時だけ起動する）。false でも受信した active=true では止まる。
     emergency_stop_topic: "/emergency_stop"
-    require_emergency_stop: true
     emergency_stop_timeout_sec: 1.0
-    # 教員の実行時許可（/actuation_authority、questix_msgs/ActuationAuthority）は
-    # require_runtime_actuation_authority で有効になる。値は launch が渡す（練習 true、
-    # 大会 false）ためこの YAML には置かない。リースは runtime_authority_timeout_sec（既定 1.0 s）。
+    # 教員の実行時許可（/actuation_authority、questix_msgs/ActuationAuthority）は非常停止とは
+    # 別の概念で、require_runtime_actuation_authority（練習での opt-in、既定 false、大会では
+    # 使わない）が true のときだけ走行を止める。値は launch が渡すためこの YAML には置かない。
+    # リースは runtime_authority_timeout_sec（既定 1.0 s）。

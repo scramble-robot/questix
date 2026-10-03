@@ -16,11 +16,16 @@ accept_lab_input は練習用起動だけが QUESTiX LAB のローラー操作�
     <arg name="accept_lab_input"
          default="false"
          description="Accept QUESTiX LAB roller commands on /roller/lab (override-only, default matches YAML; practice launches only)" />
-    <!-- Not in the YAML: the node default is true (practice) and questix_core always passes it
-         (false for competition), so the value has one source per launch. -->
-    <arg name="require_runtime_actuation_authority"
+    <!-- Neither is in the YAML: questix_core always passes both, so each value has one source
+         per launch. require_emergency_stop follows enable_gpio_ref (only operation_manager
+         publishes /emergency_stop; a received active=true always stops). The teacher's runtime
+         authority is a practice opt-in, never used in competition. -->
+    <arg name="require_emergency_stop"
          default="true"
-         description="Spin the roller only while the teacher's runtime authority (/actuation_authority) is fresh (competition: false)" />
+         description="Treat an unheard or silent /emergency_stop as pressed (questix_core: enable_gpio_ref)" />
+    <arg name="require_runtime_actuation_authority"
+         default="false"
+         description="Spin the roller only while the teacher's runtime authority (/actuation_authority) is fresh (practice opt-in; competition: false)" />
     <include file="$(find-pkg-share questix_control_config)/launch/control_profile.launch.py" />
 
     <node pkg="esc_motor_control_cpp" exec="esc_motor_control_node" name="esc_motor_control" output="screen">
@@ -28,6 +33,7 @@ accept_lab_input は練習用起動だけが QUESTiX LAB のローラー操作�
         <param from="$(var control_config_file)" />
         <param name="joy_topic" value="$(var joy_topic)" />
         <param name="accept_lab_input" value="$(var accept_lab_input)" />
+        <param name="require_emergency_stop" value="$(var require_emergency_stop)" />
         <param name="require_runtime_actuation_authority" value="$(var require_runtime_actuation_authority)" />
     </node>
 </launch>

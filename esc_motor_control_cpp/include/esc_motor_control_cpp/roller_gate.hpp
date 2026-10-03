@@ -24,12 +24,12 @@ enum class RollerBlock {
 };
 
 struct RollerGateInputs {
-  bool require_estop{true};  // false only for an explicit diagnostic opt-out
+  bool require_estop{true};  // questix_core: enable_gpio_ref (false: no /emergency_stop publisher)
   bool estop_known{false};
   bool estop_active{true};
   double estop_age_sec{0.0};
   double estop_timeout_sec{1.0};  // <= 0 or non-finite: no staleness check
-  bool require_authority{true};   // practice true, competition false
+  bool require_authority{true};   // the node passes its opt-in (default false; competition false)
   bool authority_known{false};
   bool authority_allowed{false};
   double authority_age_sec{0.0};

@@ -1,10 +1,12 @@
 """The teacher's runtime actuation authority for a practice robot (操作 tab).
 
-Practice launches of questix_core start drive_component, shot_component and esc_motor_control
-with ``require_runtime_actuation_authority:=true``: they move the wheels (``drive``) or the
+The authority is a permission, not an emergency stop. By default it is the precondition for
+QUESTiX LAB's lesson permissions (lab.py) and the controller drives without it, as in 3.2.0. A
+practice launch may opt in with ``require_runtime_actuation_authority:=true`` on questix_core:
+drive_component, shot_component and esc_motor_control then move the wheels (``drive``) or the
 launcher (``launcher``: roller, tilt, fire) only while a fresh questix_msgs/ActuationAuthority on
-``/actuation_authority`` says so. That applies to the controller and to QUESTiX LAB alike, and it
-is enforced in those nodes, not here. Competition launches pass false and never depend on this.
+``/actuation_authority`` says so, for the controller and QUESTiX LAB alike, enforced in those
+nodes, not here. Competition launches never depend on this.
 
 This module holds the two switches (``_authority``) and a heartbeat child process
 (actuation_heartbeat.py, sourced like the lab bridge: ROS, then ROBOT_WS from launch.env, and
@@ -14,9 +16,10 @@ reboot too), and go off again on practice / competition mode switches, a start, 
 of the robot service, 「すべて止める」 and the manager's shutdown (``revoke_all``). Switching one
 on is refused in competition mode and when the heartbeat cannot be started. When the heartbeat
 exits on its own the switches go off (noticed at the next status poll or switch) and nothing
-restarts it: the robot has already stopped when its lease ran out, and the teacher switches on
-again. Likewise, when the heartbeat cannot be told the switches (a failed write), both switches
-go off and it is stopped (``heartbeat_write_failed``): no switch stays on without a heartbeat.
+restarts it: the lesson permissions go off with them (and an opted-in robot has already stopped
+when its lease ran out), and the teacher switches on again. Likewise, when the heartbeat cannot
+be told the switches (a failed write), both switches go off and it is stopped
+(``heartbeat_write_failed``): no switch stays on without a heartbeat.
 
 Turning a switch off (by the teacher or by ``revoke_all``) also turns off the matching QUESTiX
 LAB permission (lab.py: driving experiments / launcher experiments) through the listeners

@@ -44,13 +44,23 @@ def generate_launch_description():
                     'YAML; practice launches only)'
     )
 
-    # 教員の実行時許可（/actuation_authority）がある間だけ発射機構を動かす。questix_core は
-    # 大会起動（enable_autoreferee）で false を渡す。YAML には置かない（ノード既定値も true）。
+    # 未受信・途絶の /emergency_stop を押下として扱うか。questix_core は enable_gpio_ref を渡す
+    # （/emergency_stop の発行元 operation_manager はその時だけ起動する）。受信した active=true
+    # は常に止める。YAML には置かない（ノード既定値も true）。
+    require_estop_arg = DeclareLaunchArgument(
+        'require_emergency_stop',
+        default_value='true',
+        description='Treat an unheard or silent /emergency_stop as pressed (questix_core '
+                    'passes enable_gpio_ref)'
+    )
+
+    # true のとき、教員の実行時許可（/actuation_authority）がある間だけ発射機構を動かす。
+    # 練習での opt-in で、大会起動（enable_autoreferee）では使わない。YAML には置かない。
     require_authority_arg = DeclareLaunchArgument(
         'require_runtime_actuation_authority',
-        default_value='true',
+        default_value='false',
         description='Move the launcher only while the teacher runtime authority is fresh '
-                    '(competition launches pass false)'
+                    '(practice opt-in; competition launches pass false)'
     )
 
     # shot componentノード
@@ -65,6 +75,8 @@ def generate_launch_description():
                 'joy_topic': LaunchConfiguration('joy_topic'),
                 'accept_lab_input': ParameterValue(
                     LaunchConfiguration('accept_lab_input'), value_type=bool),
+                'require_emergency_stop': ParameterValue(
+                    LaunchConfiguration('require_emergency_stop'), value_type=bool),
                 'require_runtime_actuation_authority': ParameterValue(
                     LaunchConfiguration('require_runtime_actuation_authority'), value_type=bool),
             },
@@ -77,6 +89,7 @@ def generate_launch_description():
         config_file_arg,
         joy_topic_arg,
         accept_lab_input_arg,
+        require_estop_arg,
         require_authority_arg,
         shot_component_node
     ])

@@ -76,12 +76,12 @@ DriveComponent::DriveComponent(const rclcpp::NodeOptions& options)
   } else if (require_emergency_stop_) {
     RCLCPP_ERROR(this->get_logger(),
                  "emergency_stop_topic is empty but require_emergency_stop=true: the drive will "
-                 "never move (set require_emergency_stop:=false only for a diagnostic run)");
+                 "never move");
   }
   if (!require_emergency_stop_) {
     RCLCPP_WARN(this->get_logger(),
-                "require_emergency_stop=false (diagnostic opt-out): the drive may move before "
-                "/emergency_stop is heard. Never use this in an integrated launch");
+                "require_emergency_stop=false (no GPIO safety path, enable_gpio_ref:=false): the "
+                "drive may move without /emergency_stop; a received active=true still stops it");
   }
 
   // 教員の実行時許可（練習時）。volatile + keep-last(1): 許可をラッチせず、発行元が止まれば
@@ -492,9 +492,9 @@ void DriveComponent::declareParameters() {
   // 一度受信した後、この秒数（自分の steady clock での受信間隔）途絶えたら停止。<=0 で無効。
   this->declare_parameter("emergency_stop_timeout_sec", 1.0);
 
-  // 教員の実行時許可（questix_msgs/ActuationAuthority）。練習起動（questix_core、
-  // enable_autoreferee=false）は true、大会起動は false を launch が必ず渡す。
-  this->declare_parameter("require_runtime_actuation_authority", true);
+  // 教員の実行時許可（questix_msgs/ActuationAuthority）。非常停止とは別の概念で、練習での
+  // opt-in（既定 false）。大会起動（enable_autoreferee）では launch が常に false を渡す。
+  this->declare_parameter("require_runtime_actuation_authority", false);
   this->declare_parameter("runtime_authority_topic", "/actuation_authority");
   this->declare_parameter("runtime_authority_timeout_sec", 1.0);
 

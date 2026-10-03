@@ -61,6 +61,34 @@ TEST(RollerGate, DiagnosticOptOutStillStopsOnAPressedEstop) {
   EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kEstopActive);
 }
 
+// enable_gpio_ref:=false without the authority opt-in (questix_core default): like 3.2.0 the
+// roller may spin with nothing heard, a silent E-stop is not a stop, a pressed one still is.
+TEST(RollerGate, PracticeWithoutGpioRefAndAuthoritySpinsWithNothingHeard) {
+  RollerGateInputs in;  // nothing heard
+  in.require_estop = false;
+  in.require_authority = false;
+  EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kNone);
+  in.estop_known = true;
+  in.estop_active = false;
+  in.estop_age_sec = 30.0;
+  EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kNone);
+  in.estop_active = true;
+  EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kEstopActive);
+}
+
+// The teacher's authority is not an emergency stop: it decides on its own when opted in.
+TEST(RollerGate, AuthorityIsIndependentOfTheEstop) {
+  RollerGateInputs in;  // nothing heard
+  in.require_estop = false;
+  EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kAuthorityUnknown);
+  EXPECT_FALSE(esc_motor_control_cpp::isRollerEstopBlock(evaluateRollerGate(in)));
+  in.authority_known = true;
+  in.authority_allowed = false;
+  in.authority_age_sec = 0.1;
+  EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kAuthorityOff);
+  EXPECT_FALSE(esc_motor_control_cpp::isRollerEstopBlock(evaluateRollerGate(in)));
+}
+
 TEST(RollerGate, AuthorityIsALease) {
   auto in = open();
   in.authority_allowed = false;

@@ -31,14 +31,16 @@ enum class Block {
 };
 
 struct Inputs {
-  // /emergency_stop (questix_msgs/EmergencyStop). require_estop=false only for an explicit
-  // diagnostic opt-out; the integrated launches never set it.
+  // /emergency_stop (questix_msgs/EmergencyStop). questix_core sets require_estop from
+  // enable_gpio_ref (operation_manager, its only publisher, runs only then); a received pressed
+  // E-stop always closes the gate.
   bool require_estop{true};
   bool estop_known{false};
   bool estop_active{true};
   double estop_age_sec{0.0};
   double estop_timeout_sec{1.0};  // <= 0 or non-finite: no staleness check
-  // The teacher's runtime authority (questix_msgs/ActuationAuthority, practice only).
+  // The teacher's runtime authority (questix_msgs/ActuationAuthority): a permission, not an
+  // E-stop. The node passes its require_runtime_actuation_authority (practice opt-in).
   bool require_authority{true};
   bool authority_known{false};
   bool authority_allowed{false};

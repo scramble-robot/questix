@@ -42,10 +42,12 @@ namespace motor_control_app {
 // 連動は auto_start=true のときのみ有効で、手動 deactivate 済み（タイマー停止中）の
 // ノードは非常停止解除でも再 activate しない。
 // なお joy_gate は従来どおり /gpio/controllable（std_msgs/Bool）を購読する。
-// require_emergency_stop=true（既定。false は単体診断の明示 opt-out）では、/emergency_stop を
-// 一度も受信していない間・受信が途絶えた間も非常停止として扱い、自動起動もコマンドもしない。
+// require_emergency_stop=true（ノード既定。questix_core は enable_gpio_ref を渡す）では、
+// /emergency_stop を一度も受信していない間・受信が途絶えた間も非常停止として扱い、自動起動も
+// コマンドもしない。false でも受信した active=true では止まる。
 //
-// 練習起動（require_runtime_actuation_authority=true）では、教員の実行時許可
+// 教員の実行時許可は非常停止とは別の概念で、require_runtime_actuation_authority=true
+// （練習での opt-in、既定 false、大会では使わない）の時だけ、教員の実行時許可
 // （questix_msgs/ActuationAuthority の launcher_allowed、1.0 s のリース）がない間は自動起動
 // （configure/activate）を保留し、コントローラ・QUESTiX LAB の射撃とチルトを断る。ACTIVE 中に
 // 許可が切れたら非常停止と同じ安全 teardown（deactivate→cleanup）を行い、理由は非常停止とは
@@ -144,7 +146,7 @@ private:
   // 未受信の /emergency_stop を非常停止として扱うか（false は単体診断の明示 opt-out）
   bool require_emergency_stop_{true};
   // 教員の実行時許可（練習: true、大会: false）。コンストラクタで一度だけ読む
-  bool require_authority_{true};
+  bool require_authority_{false};
   std::string authority_topic_{"/actuation_authority"};
   double authority_timeout_sec_{1.0};
   bool have_authority_msg_{false};

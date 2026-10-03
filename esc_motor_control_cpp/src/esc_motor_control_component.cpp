@@ -36,9 +36,9 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
   this->declare_parameter<bool>("require_emergency_stop", true);
   // 一度受信した後、この秒数（steady clock の受信間隔）途絶えたら停止。<=0 で無効。
   this->declare_parameter<double>("emergency_stop_timeout_sec", 1.0);
-  // 教員の実行時許可（questix_msgs/ActuationAuthority の launcher_allowed）。練習起動は true、
-  // 大会起動（enable_autoreferee）は false を launch が必ず渡す。
-  this->declare_parameter<bool>("require_runtime_actuation_authority", true);
+  // 教員の実行時許可（questix_msgs/ActuationAuthority の launcher_allowed）。非常停止とは別の
+  // 概念で、練習での opt-in（既定 false）。大会起動（enable_autoreferee）では常に false。
+  this->declare_parameter<bool>("require_runtime_actuation_authority", false);
   this->declare_parameter<std::string>("runtime_authority_topic", "/actuation_authority");
   this->declare_parameter<double>("runtime_authority_timeout_sec", 1.0);
   this->declare_parameter<int>("min_pulse_width", 0);         // μs (speed=-1.0)
@@ -114,8 +114,8 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
   }
   if (!require_emergency_stop_) {
     RCLCPP_WARN(this->get_logger(),
-                "require_emergency_stop=false (diagnostic opt-out): the roller may spin before "
-                "/emergency_stop is heard. Never use this in an integrated launch");
+                "require_emergency_stop=false (no GPIO safety path, enable_gpio_ref:=false): the "
+                "roller may spin without /emergency_stop; a received active=true still stops it");
   }
   if (require_authority_) {
     if (authority_topic_.empty()) {

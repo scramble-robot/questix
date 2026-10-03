@@ -11,7 +11,8 @@ YAML を Single Source of Truth とし、個別パラメータの launch 引数�
   <arg name="enable_operation_manager" default="true" description="Start operation_manager in standalone referee launch" />
   <arg name="controller_type" default="uart" description="Controller type: dualshock, uart, or web" />
   <arg name="enable_twist_arbiter" default="false" description="Route the controller through twist_arbiter so QUESTiX LAB driving experiments and the controller share /target_twist (practice only; the stick always takes over)" />
-  <arg name="require_runtime_actuation_authority" default="true" description="Drive only while the teacher's runtime authority (/actuation_authority, Robot Manager) is fresh; questix_core passes false for competition (enable_autoreferee)" />
+  <arg name="require_emergency_stop" default="true" description="Treat an unheard or silent /emergency_stop as pressed; questix_core passes enable_gpio_ref (only operation_manager publishes it)" />
+  <arg name="require_runtime_actuation_authority" default="false" description="Drive only while the teacher's runtime authority (/actuation_authority, Robot Manager) is fresh (practice opt-in; questix_core never sets it for competition)" />
 
   <!-- With twist_arbiter the controller publishes to its own input and the arbiter owns
        /target_twist; without it (competition) joy_controller drives /target_twist directly. -->
@@ -45,6 +46,7 @@ YAML を Single Source of Truth とし、個別パラメータの launch 引数�
   <!-- Include drive Component Launch -->
   <include file="$(find-pkg-share motor_control_app)/launch/drive_component.launch.py">
     <arg name="config_file" value="$(var drive_config_file)" />
+    <arg name="require_emergency_stop" value="$(var require_emergency_stop)" />
     <arg name="require_runtime_actuation_authority" value="$(var require_runtime_actuation_authority)" />
   </include>
 </launch>

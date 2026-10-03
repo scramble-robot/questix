@@ -60,19 +60,22 @@ DDT M0602C の Protocol 1 応答フレームをデコードした 1 モータ分
   (`evaluate_controllability()`)の毎回実行時に発行する。
   すなわち GPIO 更新毎(公称 ~20 Hz)+ 100 ms watchdog timer。
   `active = !controllable`。
-- **発行者不在・未受信はフェイルクローズ**: operation_manager は `enable_gpio_ref=true` の構成
-  でdrive/shotの有無に依存せず `questix_core.launch.xml` から起動する。
+- **GPIO 安全系があるときは未受信をフェイルクローズ**: operation_manager は `enable_gpio_ref=true`
+  の構成でdrive/shotの有無に依存せず `questix_core.launch.xml` から起動する。
   standalone `joy_controller_referee.launch.xml` も互換性のため起動できる。
-  統合構成(`questix_core`)の購読側(drive_component / shot_component / esc_motor_control)は、
-  **一度も受信していない間は「非常停止の状態が不明」として動かさない**(`require_emergency_stop`
-  既定 true)。したがって `enable_gpio_ref=false` の練習起動では /emergency_stop が無く、
-  走行・発射はできない。受信状態はモータとの通信(フィードバックの取得)とは別で、
-  drive_component は動かさないまま実測の取得を続ける。
-- **staleness 検出**: 購読側は「一度以上受信した後に」`emergency_stop_timeout_sec`
+  `questix_core` は購読側(drive_component / shot_component / esc_motor_control)の
+  `require_emergency_stop` に `enable_gpio_ref` をそのまま渡す。
+  - `enable_gpio_ref=true`(大会は常にこれ): **一度も受信していない間は「非常停止の状態が不明」
+    として動かさない**。受信状態はモータとの通信(フィードバックの取得)とは別で、
+    drive_component は動かさないまま実測の取得を続ける。
+  - `enable_gpio_ref=false`(練習のみ): 発行元が起動しないので、未受信・途絶では止めない
+    (3.2.0 と同じ)。それでも `active=true` を受信したら止める。
+  ノード単体の既定値は `require_emergency_stop=true`(フェイルクローズ)。
+- **staleness 検出**: `require_emergency_stop=true` の購読側は「一度以上受信した後に」`emergency_stop_timeout_sec`
   (既定 1.0 s、自分の単調時計による受信間隔)を超えて受信が途絶えたら、押下と同じく停止して
   動かさない。受信が戻っても、解除だけでは動き出さない(新しい指令が必要)。
-- **診断用の明示 opt-out**: 単体の診断起動に限り `require_emergency_stop:=false` で未受信を
-  許せる(押下を受信したときの停止はそのまま)。統合構成は opt-out しない。
+- **単体起動**: `drive_component.launch.xml` / `shot_component.launch.xml` などの単体起動も
+  `require_emergency_stop:=false` で未受信を許せる(押下を受信したときの停止はそのまま)。
 
 ## 復帰挙動(active=false 受信時)
 
@@ -91,12 +94,16 @@ DDT M0602C の Protocol 1 応答フレームをデコードした 1 モータ分
 - **発行元**: Robot Manager(教員が「ロボットの走行制御」「発射機構の操作」を ON にしている間だけ、
   約 5 Hz)。Robot Manager の起動・Pi の再起動・練習モードへの切替・大会モードへの切替・
   「すべて止める」・Robot Manager の終了ではすべて OFF から始まる/OFF になる。
-- **購読側**: `require_runtime_actuation_authority` が true のとき(`questix_core` の練習起動)、
+- **非常停止とは別の概念**: 教員の許可は「動かしてよいか」の許可で、非常停止ではない。既定では
+  Robot Manager の中で QUESTiX LAB(教材)の走行・発射の許可の前提として使うだけで、
+  drive_component / shot_component / esc_motor_control はこれを見ずにコントローラで動く(3.2.0 と同じ)。
+- **購読側(opt-in)**: `questix_core` の `require_runtime_actuation_authority:=true`(練習のみ、既定 false、
+  環境変数からは読まない)を明示したときだけ、
   drive_component / shot_component / esc_motor_control は、自分の単調時計で
   `runtime_authority_timeout_sec`(既定 1.0 s)以内に受信した `*_allowed=true` がある間だけ動かす。
   未受信・false・途絶はすべて OFF。OFF になったら停止(drive: 即時停止 + 目標破棄、
   shot: 安全 teardown、ESC: 0 + ラッチ解除)。許可が戻っても、それだけでは動き出さない。
-- **大会起動**(`enable_autoreferee:=true`)は `require_runtime_actuation_authority:=false`。
+- **大会起動**(`enable_autoreferee:=true`)は opt-in しても常に `require_runtime_actuation_authority:=false`。
   AutoReferee と GPIO 安全系は従来どおりで、教室用の heartbeat が無くても止まらない。
 - 非常停止とは別の理由として扱う(許可の喪失を非常停止に見せかけない)。
 

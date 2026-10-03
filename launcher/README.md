@@ -22,8 +22,18 @@ drive が使う `joy_controller_referee.launch.xml` 内の operation_manager は
 Robot Manager の「起動」が置いた起動要求があるときだけ、`enable_autoreferee:=false`
 （twist_arbiter と教材からの発射あり）と `launch.env` の `ENABLE_GPIO_REF`（既定 true）で起動します。既存の `launch.env` に
 `ENABLE_GPIO_REF=false` が残っていても competition 起動では無視され、GPIO5と
-GPIO27の安全系は常時有効です。`enable_gpio_ref:=false` は手動の開発・診断用途に
-限定されます。`enable_autoreferee:=true` と `enable_gpio_ref:=false` の組合せは
+GPIO27の安全系は常時有効です。
+
+`/emergency_stop` の発行元は operation_manager だけなので、`questix_core` は
+drive/shot/ESC の `require_emergency_stop` に `enable_gpio_ref` をそのまま渡します。
+`enable_gpio_ref:=true` では未受信・途絶を押下として扱い、`enable_gpio_ref:=false`
+（練習のみ）では 3.2.0 と同じく未受信でも動きます（受信した `active=true` では止まります）。
+
+先生の実行時許可（`/actuation_authority`、Robot Manager の操作タブ）は非常停止とは別の
+概念です。既定（`require_runtime_actuation_authority:=false`）では教材の許可の前提に
+使うだけで、コントローラは許可なしで動きます。練習で許可がない間はコントローラでも
+動かさないようにする場合だけ `require_runtime_actuation_authority:=true` を明示します
+（大会起動では常に無効）。`enable_autoreferee:=true` と `enable_gpio_ref:=false` の組合せは
 通常運用上無効であり、`questix_core.launch.xml` はその組合せを検出して起動を
 中止します。
 

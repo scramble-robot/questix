@@ -93,9 +93,9 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
   this->declare_parameter("emergency_stop_timeout_sec", 1.0);
   // 未受信の /emergency_stop を非常停止として扱う（false は単体診断の明示 opt-out のみ）
   this->declare_parameter("require_emergency_stop", true);
-  // 教員の実行時許可（questix_msgs/ActuationAuthority の launcher_allowed）。練習起動は true、
-  // 大会起動（enable_autoreferee）は false を launch が必ず渡す。
-  this->declare_parameter("require_runtime_actuation_authority", true);
+  // 教員の実行時許可（questix_msgs/ActuationAuthority の launcher_allowed）。非常停止とは別の
+  // 概念で、練習での opt-in（既定 false）。大会起動（enable_autoreferee）では常に false。
+  this->declare_parameter("require_runtime_actuation_authority", false);
   this->declare_parameter("runtime_authority_topic", "/actuation_authority");
   this->declare_parameter("runtime_authority_timeout_sec", 1.0);
   // QUESTiX LAB launcher input（練習用起動のみ true。条件は shot_lab_logic.hpp）
@@ -164,8 +164,8 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
   require_emergency_stop_ = this->get_parameter("require_emergency_stop").as_bool();
   if (!require_emergency_stop_) {
     RCLCPP_WARN(this->get_logger(),
-                "require_emergency_stop=false (diagnostic opt-out): the launcher may move before "
-                "/emergency_stop is heard. Never use this in an integrated launch");
+                "require_emergency_stop=false (no GPIO safety path, enable_gpio_ref:=false): the "
+                "launcher may move without /emergency_stop; a received active=true still stops it");
   } else if (emergency_stop_topic_.empty()) {
     RCLCPP_ERROR(this->get_logger(),
                  "emergency_stop_topic is empty but require_emergency_stop=true: the launcher "

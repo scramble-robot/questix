@@ -24,9 +24,11 @@
 namespace esc_motor_control_cpp {
 
 // The roller spins only while roller_gate.hpp says so: the E-stop is known and released
-// (require_emergency_stop; unknown and silent count as pressed) and, in practice launches
-// (require_runtime_actuation_authority), the teacher's launcher authority is fresh. When it closes
-// the roller goes to 0 and the full-speed latch needs a release; nothing restarts by itself.
+// (with require_emergency_stop, which questix_core sets from enable_gpio_ref, unknown and silent
+// count as pressed) and, only when a practice launch opts in to
+// (require_runtime_actuation_authority, default false), the teacher's launcher authority is fresh.
+// When it closes the roller goes to 0 and the full-speed latch needs a release; nothing restarts
+// by itself.
 class EscMotorControlComponent : public rclcpp::Node {
 public:
   explicit EscMotorControlComponent(const rclcpp::NodeOptions& options);
@@ -87,7 +89,7 @@ private:
   bool require_emergency_stop_{true};
   double emergency_stop_timeout_sec_{1.0};
   // The teacher's runtime authority (practice true, competition false)
-  bool require_authority_{true};
+  bool require_authority_{false};
   std::string authority_topic_{"/actuation_authority"};
   double authority_timeout_sec_{1.0};
 

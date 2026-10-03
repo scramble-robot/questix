@@ -55,9 +55,11 @@ namespace motor_control_app {
  * 常時購読し、active=true で即時停止 + 以後の twist を無視、active=false で
  * twist 受付を再開する（モータは次の twist まで停止のまま = 自動復帰）。
  * 未受信（起動直後）と、受信後に emergency_stop_timeout_sec 途絶えた状態も動かさない
- * （require_emergency_stop=false は単体診断用の明示 opt-out）。
+ * （require_emergency_stop=true の時。questix_core は enable_gpio_ref を渡す。false でも
+ * 受信した active=true では止まる）。
  *
- * 練習起動（require_runtime_actuation_authority=true）では、教員の実行時許可
+ * 教員の実行時許可は非常停止とは別の概念で、require_runtime_actuation_authority=true
+ * （練習での opt-in、既定 false、大会では使わない）の時だけ、教員の実行時許可
  * （questix_msgs/ActuationAuthority の drive_allowed、volatile、1.0 s のリース）がある間だけ
  * 動かす。許可も E-stop も actuation_gate.hpp の純粋関数で判定し、閉じたら即時停止 + 目標破棄、
  * 開いても次の /target_twist まで停止のまま。停止指令を送れなかったら stop fault として閉じ、
@@ -375,7 +377,7 @@ private:
   std::chrono::steady_clock::time_point last_estop_rx_{};
 
   // 教員の実行時許可（練習: true、大会: false）。コンストラクタで読む
-  bool require_authority_{true};
+  bool require_authority_{false};
   std::string authority_topic_{"/actuation_authority"};
   double authority_timeout_sec_{1.0};  // リース [s]。無効値は 1.0
   bool have_authority_msg_{false};
