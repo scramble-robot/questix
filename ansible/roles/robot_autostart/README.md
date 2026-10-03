@@ -60,11 +60,11 @@ single source。`launch.env.j2` はそこから参照するのみで値を重複
 | `ENABLE_LIDAR` | `false` | YDLiDAR の有効化 |
 | `ENABLE_SHOT` | `false` | 射出コンポーネントの有効化 |
 | `ENABLE_DRIVE` | `false` | 駆動コンポーネントの有効化 |
-| `ENABLE_GPIO_REF` | `true` | 手動 `ros2 launch`（`launch.env` を読み込む場合）の GPIO 安全系の既定値。systemd ランチャー（practice / competition）は値を無視して常に有効。Robot Manager からは無効化できず、保存時に `false` は `true` へ書き換えられる。他の項目と異なり出荷時も `true`（無効化すると手動 `ros2 launch` で GPIO 安全系がデフォルト無効になるため） |
+| `ENABLE_GPIO_REF` | `true` | 互換のために残している legacy 項目で、どこからも読まれない。systemd ランチャー（practice / competition）は `enable_gpio_ref:=true` を固定で渡し、`questix_core` の既定値もリテラルの `true`（環境変数 `ENABLE_GPIO_REF` は参照しない）。Robot Manager からは `false` にできず、保存時に `false` は `true` へ書き換えられる |
 | `ENABLE_RVIZ` | `false` | RViz 可視化の有効化 |
 | `CONTROLLER_TYPE` | `dualshock` | コントローラ種別（`uart`、`dualshock`、`web`） |
 
-出荷時に全コンポーネントを無効（`ENABLE_GPIO_REF` を除く）にしているのは、初回起動時に
+出荷時に全コンポーネントを無効（legacy 項目の `ENABLE_GPIO_REF` を除く）にしているのは、初回起動時に
 モーターや LiDAR が意図せず動作しないようにするためです。運用者が必要なコンポーネントを
 明示的に有効化してください。
 
@@ -74,8 +74,12 @@ Ansible は `launch.env` を `force: false` で配置するため、既存ファ
 
 既存環境に `ENABLE_GPIO_REF=false` が残っていても、ランチャーは practice / competition とも
 `enable_gpio_ref:=true` を固定で渡すため安全系を無効化できません。
-`enable_autoreferee:=true` かつ `enable_gpio_ref:=false` は通常運用上の無効な
-組合せです。後者を明示的に無効化する操作は手動の開発・診断に限定してください。
+`questix_core` の `enable_gpio_ref` の既定値もリテラルの `true` で、環境変数
+`ENABLE_GPIO_REF`（`launch.env` を `source` した shell を含む）は GPIO 安全系の判断に使われません。
+GPIO 安全系なし（no-GPIO）は、手動の診断起動でその都度 launch 引数 `enable_gpio_ref:=false` を
+明示したときだけです。この指定はその launch プロセスだけのもので、どこにも保存されないため、
+プロセスの終了後や電源の入れ直し後の次の起動は GPIO 監視ありに戻ります。
+`enable_autoreferee:=true` かつ `enable_gpio_ref:=false` は無効な組合せで、launch が拒否します。
 
 ## 手動デプロイ
 

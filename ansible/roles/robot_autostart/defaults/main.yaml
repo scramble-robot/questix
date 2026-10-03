@@ -13,10 +13,11 @@ robot_mode: practice
 # Shipping defaults for a freshly-kitted launch.env (single source of truth for
 # ansible/roles/robot_autostart/templates/launch.env.j2). A robot ships with every
 # launch component off so a first boot never drives motors/LiDAR/RViz unexpectedly;
-# operators opt components in explicitly. ENABLE_GPIO_REF stays true: it is the
-# manual/diagnostic GPIO safety path (the systemd launcher forces it true in
-# practice and competition regardless of this value - see robot_autostart/README.md),
-# so shipping it disabled would default manual `ros2 launch` invocations to no GPIO safety.
+# operators opt components in explicitly. ENABLE_GPIO_REF stays true as a legacy/
+# compatibility field that nothing reads: the systemd launcher passes enable_gpio_ref:=true
+# in practice and competition, and questix_core defaults to a literal true (no environment
+# authority). No-GPIO needs an explicit enable_gpio_ref:=false launch argument; see
+# robot_autostart/README.md.
 enable_lidar: false
 enable_shot: false
 enable_drive: false

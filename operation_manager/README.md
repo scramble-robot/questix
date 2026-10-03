@@ -26,8 +26,9 @@ Parameters:
 - `emergency_stop_topic`: topic name for the unified emergency stop state (default `/emergency_stop`)
 - `gpio_safety_enabled` (default `true`): `false` runs the node without the GPIO safety path
   (`config/operation_manager.no_gpio.yaml`, used by `questix_core` with
-  `enable_gpio_ref:=false`, an explicit manual diagnostic launch only; the production launcher
-  always passes `enable_gpio_ref:=true`). It then reads no GPIO, publishes no
+  `enable_gpio_ref:=false`, an explicit manual diagnostic launch only: the launch argument must be
+  given on that launch, the `ENABLE_GPIO_REF` environment variable never selects it, and nothing
+  persists it; the production launcher always passes `enable_gpio_ref:=true`). It then reads no GPIO, publishes no
   `/gpio/controllable` and no pin diagnostics (one WARN status instead), and still owns
   `/emergency_stop`: `active=false`, reason `released (no GPIO safety path)`, every 100 ms.
   Every actuating node and QUESTiX LAB therefore keep one rule (unheard, silent or active

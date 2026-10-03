@@ -53,6 +53,17 @@ def test_profiles_select_the_expected_gpio_inputs_and_polarities():
     assert default_manager == practice_manager
 
 
+def test_core_defaults_gpio_safety_on_without_environment_authority():
+    # Issue #168: GPIO5 monitoring is the default for every launch. The no-GPIO diagnostic needs
+    # an explicit enable_gpio_ref:=false on the launch itself; ENABLE_GPIO_REF in the environment
+    # (an export, a sourced launch.env) must never select it.
+    core = load_xml('launcher/launch/questix_core.launch.xml')
+    default = find_arg(core, 'enable_gpio_ref').get('default')
+    assert default == 'true'
+    assert 'ENABLE_GPIO_REF' not in default
+    assert '$(env' not in default
+
+
 def test_core_defaults_to_practice_and_selects_both_profile_files():
     core = load_xml('launcher/launch/questix_core.launch.xml')
     assert find_arg(core, 'enable_autoreferee').get('default') == 'false'
@@ -254,9 +265,9 @@ def test_launch_environment_defaults_enable_gpio_safety():
     assert 'ENABLE_GPIO_REF=true' in systemd_env.splitlines()
     # ENABLE_LIDAR/SHOT/DRIVE/RVIZ and CONTROLLER_TYPE ship disabled/dualshock
     # (see robot_autostart/defaults/main.yaml), but GPIO safety is the
-    # exception: it must default to enabled even though the systemd launcher
-    # ignores this value and always forces it true in practice and competition,
-    # because this is also the default for manual/diagnostic `ros2 launch` runs.
+    # exception: it ships true even though nothing reads it any more (the systemd
+    # launcher passes enable_gpio_ref:=true, questix_core defaults to a literal true),
+    # so a legacy-field reader never sees GPIO safety off.
     assert role_defaults['enable_gpio_ref'] is True
     assert 'ENABLE_GPIO_REF={{ enable_gpio_ref | lower }}' in ansible_env.splitlines()
 
@@ -299,8 +310,8 @@ def test_every_fresh_kit_topology_authority_agrees():
         assert f'{key}={{{{ {key.lower()}{filter_suffix} }}}}' in template, key
         assert static_env[key] == value, key
         if key == 'ENABLE_GPIO_REF':
-            # The launcher never reads it (always enable_gpio_ref:=true, issue #168); it is only
-            # the default for manual launches that source launch.env.
+            # The launcher never reads it (always enable_gpio_ref:=true, issue #168), and neither
+            # does questix_core's default: a legacy/compatibility field only.
             assert f'${{{key}' not in launchers[0]
             continue
         # What the launcher uses when launch.env lacks the key.

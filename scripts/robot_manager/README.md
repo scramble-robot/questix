@@ -160,6 +160,16 @@ it is, so a legacy `false` stays visible until the next save, which rewrites it 
 save logs each changed key as `launch-config updated: KEY old -> new` (journal of
 `questix_robot_manager`).
 
+The `ENABLE_GPIO_REF` environment variable is not an authority for `questix_core` GPIO safety
+either: `enable_gpio_ref` defaults to a literal `true`, so neither an exported variable nor a
+shell that sourced `launch.env` selects the no-GPIO mode. `ENABLE_GPIO_REF=true` stays in
+`launch.env` only as a legacy/compatibility field that nothing reads.
+
+No-GPIO requires the explicit launch argument `enable_gpio_ref:=false`. The override is
+process-local and is not persisted (not in `launch.env`, `mode`, `start-request`, a unit's
+`Environment` or Robot Manager's settings); after the diagnostic process ends or the robot is
+power-cycled, the next plain/manual launch defaults to GPIO monitoring enabled.
+
 `enable_gpio_ref:=false` remains a capability of `questix_core.launch.xml` for explicit manual
 diagnostic `ros2 launch` runs only (with `enable_autoreferee:=false`): operation_manager then
 reads no GPIO and publishes `/emergency_stop` released (`released (no GPIO safety path)`), so a
