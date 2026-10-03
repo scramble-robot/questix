@@ -250,8 +250,9 @@ def read_emergency_stop(environment):
 @pytest.mark.parametrize(
     ('launch_arguments', 'expect_estop', 'expect_teacher_permission_required'),
     [
-        # Practice without the GPIO safety path (ENABLE_GPIO_REF=false): operation_manager still
-        # owns /emergency_stop and reports released, so the robot (and QUESTiX LAB) can move.
+        # Manual diagnostic run without the GPIO safety path (enable_gpio_ref:=false, never passed
+        # by the production launcher): operation_manager still owns /emergency_stop and reports
+        # released, so the robot (and QUESTiX LAB) can move.
         (['enable_gpio_ref:=false'], (False, NO_GPIO_REASON), False),
         # Practice with the GPIO safety path but no GPIO hardware here: GPIO5 is never received,
         # so operation_manager reports the E-stop as active.

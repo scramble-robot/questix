@@ -35,7 +35,8 @@
   <let name="gpio_reader_config_file" value="$(find-pkg-share gpio_reader)/config/gpio_reader.practice.yaml" unless="$(var enable_autoreferee)"/>
   <let name="gpio_reader_config_file" value="$(find-pkg-share gpio_reader)/config/gpio_reader.competition.yaml" if="$(var enable_autoreferee)"/>
   <!-- operation_manager always runs and owns /emergency_stop; without the GPIO safety path it
-       reads no GPIO and reports "released (no GPIO safety path)" (practice only). -->
+       reads no GPIO and reports "released (no GPIO safety path)" (an explicit manual diagnostic
+       run only; questix_robot_launcher.sh always passes enable_gpio_ref:=true). -->
   <let name="operation_manager_config_file" value="$(find-pkg-share operation_manager)/config/operation_manager.practice.yaml" unless="$(var enable_autoreferee)"/>
   <let name="operation_manager_config_file" value="$(find-pkg-share operation_manager)/config/operation_manager.competition.yaml" if="$(var enable_autoreferee)"/>
   <let name="operation_manager_config_file" value="$(find-pkg-share operation_manager)/config/operation_manager.no_gpio.yaml" unless="$(var enable_gpio_ref)"/>

@@ -125,7 +125,8 @@ def test_core_defaults_to_practice_and_selects_both_profile_files():
         None,
         '$(find-pkg-share operation_manager)/config/operation_manager.competition.yaml',
     ) in lets
-    # Without the GPIO safety path (practice only): no GPIO read, /emergency_stop still owned.
+    # Without the GPIO safety path (explicit manual diagnostic only; production launches always
+    # pass enable_gpio_ref:=true): no GPIO read, /emergency_stop still owned.
     assert (
         'operation_manager_config_file',
         None,
@@ -204,7 +205,7 @@ def test_core_always_owns_exactly_one_operation_manager():
     assert integrated_manager_count(True, True, False) == 1
 
 
-def test_competition_service_launchers_always_enable_gpio_safety():
+def test_production_service_launchers_always_enable_gpio_safety():
     launcher_paths = (
         'systemd/questix_robot_launcher.sh',
         'ansible/roles/robot_autostart/files/questix_robot_launcher.sh',
@@ -222,10 +223,15 @@ def test_competition_service_launchers_always_enable_gpio_safety():
         assert 'LAUNCH_ARGS="${LAUNCH_ARGS} enable_autoreferee:=true"' in competition
         code = [line for line in competition.splitlines() if not line.strip().startswith('#')]
         assert not any('ENABLE_GPIO_REF' in line for line in code)
-        # Practice branch (Robot Manager's 起動 only): no AutoReferee; GPIO safety on unless
-        # launch.env says exactly "false".
+        # Practice branch (Robot Manager's 起動 only): no AutoReferee, GPIO5 physical E-stop
+        # always on whatever launch.env says (issue #168).
+        assert 'LAUNCH_ARGS="${LAUNCH_ARGS} enable_gpio_ref:=true"' in practice
         assert 'LAUNCH_ARGS="${LAUNCH_ARGS} enable_autoreferee:=false"' in practice
-        assert '"${ENABLE_GPIO_REF:-true}" = "false"' in practice
+        # No production branch, nor anything else in the launcher, reads ENABLE_GPIO_REF or
+        # passes the manual-diagnostic enable_gpio_ref:=false.
+        code = [line for line in text.splitlines() if not line.strip().startswith('#')]
+        assert not any('ENABLE_GPIO_REF' in line for line in code)
+        assert not any('enable_gpio_ref:=false' in line for line in code)
 
     safety_lines = [
         [
@@ -248,9 +254,9 @@ def test_launch_environment_defaults_enable_gpio_safety():
     assert 'ENABLE_GPIO_REF=true' in systemd_env.splitlines()
     # ENABLE_LIDAR/SHOT/DRIVE/RVIZ and CONTROLLER_TYPE ship disabled/dualshock
     # (see robot_autostart/defaults/main.yaml), but GPIO safety is the
-    # exception: it must default to enabled even though the competition
-    # systemd launcher ignores this value and always forces it true, because
-    # this is also the default for manual/diagnostic `ros2 launch` runs.
+    # exception: it must default to enabled even though the systemd launcher
+    # ignores this value and always forces it true in practice and competition,
+    # because this is also the default for manual/diagnostic `ros2 launch` runs.
     assert role_defaults['enable_gpio_ref'] is True
     assert 'ENABLE_GPIO_REF={{ enable_gpio_ref | lower }}' in ansible_env.splitlines()
 
@@ -292,6 +298,11 @@ def test_every_fresh_kit_topology_authority_agrees():
         filter_suffix = ' | lower' if isinstance(role_value, bool) else ''
         assert f'{key}={{{{ {key.lower()}{filter_suffix} }}}}' in template, key
         assert static_env[key] == value, key
+        if key == 'ENABLE_GPIO_REF':
+            # The launcher never reads it (always enable_gpio_ref:=true, issue #168); it is only
+            # the default for manual launches that source launch.env.
+            assert f'${{{key}' not in launchers[0]
+            continue
         # What the launcher uses when launch.env lacks the key.
         assert f'${{{key}:-{value}}}' in launchers[0], key
         for other in ('true', 'false', 'uart', 'dualshock', 'web'):
