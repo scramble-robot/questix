@@ -9,7 +9,7 @@ import tempfile
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
-from fit_models import fit_first_order  # noqa: E402
+from fit_models import analyze, fit_first_order  # noqa: E402
 
 
 def synth(tau=0.12, delay=1, dt=0.02, levels=(50, 100, 200, 400), hold=4.0, settle=3.0, noise=1.0,
@@ -89,7 +89,51 @@ def main():
         names = [e[0] for e in discover([os.path.join(d, f"ds{i}.csv") for i in range(3)])]
         assert names == ["ds1", "ds2"], names  # ds2 は旧形式（キー無し）なので対象
     check_free_run_rejects_oscillation()
+    check_ramped_steps_keep_run_boundary()
     print("OK")
+
+
+def ramped(accel, tau=0.049, dt=0.02, noise=2.0, seed=0):
+    """加速度上限でランプになった指令（/drive_status の target_rpm 相当）と一次遅れの応答。"""
+    rng = np.random.default_rng(seed)
+    levels = (20, 30, 40, 60, 80, 100, 150, 200, 300, 400)
+    sched = []
+    for s in (1, -1):
+        for lv in levels:
+            sched += [(0, 3.0), (s * lv, 4.0)]
+    sched.append((0, 3.0))
+    ref = np.concatenate([np.full(int(d / dt), v, dtype=float) for v, d in sched])
+    step = accel / (2.0 * math.pi * 0.1) * 60.0 * dt  # [rpm/tick]（wheel_radius 0.1）
+    u = np.zeros_like(ref)
+    for k in range(1, len(ref)):
+        u[k] = u[k - 1] + np.clip(ref[k] - u[k - 1], -step, step)
+    u = np.round(u)
+    a = math.exp(-dt / tau)
+    x = 0.0
+    om = np.zeros_like(u)
+    for k in range(len(u)):
+        om[k] = round(x + rng.normal(0.0, noise))
+        x = a * x + (1.0 - a) * u[k]
+    t = np.arange(len(u)) * dt
+    return {"t": t, "left_target": u, "left_meas": om, "right_target": -u, "right_meas": -om}
+
+
+def check_ramped_steps_keep_run_boundary():
+    """加速度上限 3 m/s²（ランプ ~1.4 s）でも、一定区間だけでなくランプを含めて判定する。
+
+    一定区間だけで R² を取ると過渡が入らず全レベルが 0.9 未満になり、run_enter が出なかった
+    （実機で起きた）。ランプを含めればステップと同じ境界になり、ランプが長い旨を警告する。
+    """
+    step_like = analyze(ramped(1000.0))
+    slow = analyze(ramped(3.0))
+    recommended = analyze(ramped(20.0))
+    print("run_enter step/slow/recommended:", step_like["suggested"]["drive_fsm_run_enter_rpm"],
+          slow["suggested"]["drive_fsm_run_enter_rpm"], recommended["suggested"]["drive_fsm_run_enter_rpm"])
+    assert slow["suggested"]["drive_fsm_run_enter_rpm"] is not None, slow["suggested"]
+    assert (slow["suggested"]["drive_fsm_run_enter_rpm"]
+            == step_like["suggested"]["drive_fsm_run_enter_rpm"]), (slow["suggested"], step_like["suggested"])
+    assert slow["warnings"], "ランプが長いときは警告する"
+    assert not recommended["warnings"], recommended["warnings"]  # 推奨設定では警告しない
 
 
 def check_free_run_rejects_oscillation():
