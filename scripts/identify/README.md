@@ -86,7 +86,7 @@ ident_<robot>_<floor>_<YYYYmmdd_HHMM>/
 ## 実機なしの確認
 
 ```bash
-bash scripts/identify/test_evidence.sh   # ros2 をスタブに差し替えた 60 assertion
+bash scripts/identify/test_evidence.sh   # ros2 をスタブに差し替えた 64 assertion
 python3 scripts/identify/test_step_sequence.py
 bash scripts/identify/record.sh --help
 bash -n scripts/identify/record.sh scripts/identify/lib_evidence.sh
