@@ -85,14 +85,33 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      # The checkout gives every source a fresh mtime, so the cached build/ tree
+      # below still recompiles everything; ccache (content-hashed) is what
+      # turns an unchanged translation unit into a cache hit. Restored before
+      # the container starts so the bind-mounted directory is owned by the
+      # runner, not created by docker as root. The sloppiness settings are the
+      # ones ccache requires to cache precompiled headers (motor_control_app).
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/ccache
+          key: ccache-v1-${{ matrix.ros_distro }}-${{ matrix.architecture }}-${{ github.sha }}
+          restore-keys: |
+            ccache-v1-${{ matrix.ros_distro }}-${{ matrix.architecture }}-
+
       - name: Start ROS container
         run: |
+          mkdir -p "$RUNNER_TEMP/ccache"
           docker pull ros:${{ matrix.ros_distro }}-ros-base
           docker run -d --name ros_build \
             --init \
             -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
+            -v "$RUNNER_TEMP/ccache:/ccache" \
             -w "$GITHUB_WORKSPACE" \
             -e DEBIAN_FRONTEND=noninteractive \
+            -e CCACHE_DIR=/ccache \
+            -e CCACHE_MAXSIZE=500M \
+            -e CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime \
             ros:${{ matrix.ros_distro }}-ros-base \
             tail -f /dev/null
           docker exec ros_build git config --global --add safe.directory '*'
@@ -172,11 +191,17 @@ jobs:
           source /opt/ros/$ROS_DISTRO/setup.bash
           PARALLEL_WORKERS=$(nproc)
           echo "Using $PARALLEL_WORKERS parallel workers for build"
+          ccache --zero-stats
           colcon build \
             --event-handlers console_cohesion+ \
             --parallel-workers $PARALLEL_WORKERS \
             --cmake-args -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+              -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             --symlink-install
+          colcon_status=$?
+          ccache --show-stats
+          exit $colcon_status
           EOF
           build_status=$?
           set -e

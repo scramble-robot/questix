@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Fake ccache for ansible/tests (ros2_build): logs the call and keeps --set-config values in a file
+# next to the log, so a second run can read back what the first one set.
+set -euo pipefail
+echo "ccache $*" >>"$FAKE_ROS_LOG"
+conf="$(dirname "$FAKE_ROS_LOG")/fake_ccache.conf"
+touch "$conf"
+case "${1:-}" in
+    --get-config) sed -n "s/^$2=//p" "$conf" ;;
+    --set-config)
+        key="${2%%=*}"
+        sed -i "/^$key=/d" "$conf"
+        echo "$2" >>"$conf"
+        ;;
+esac

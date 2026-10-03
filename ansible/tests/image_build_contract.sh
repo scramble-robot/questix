@@ -178,7 +178,7 @@ for path in ["ansible/roles/ros2_build/tasks/main.yaml", "ansible/roles/robotics
                 assert task.get("become_user"), task.get("name")
                 become_user += 1
     walk(yaml.safe_load(text))
-assert become_user == 11, become_user
+assert become_user == 12, become_user
 tasks = yaml.safe_load(open("ansible/roles/robot_autostart/tasks/robot_manager.yaml"))
 start = next(t for t in tasks if t["name"] == "Enable and start questix_robot_manager service")
 assert "questix_image_build" in start["ansible.builtin.systemd"]["state"]
@@ -188,7 +188,7 @@ for path in ["ansible/roles/robot_autostart/handlers/main.yaml", "ansible/roles/
             assert "questix_image_build" in handler.get("when", ""), (path, handler["name"])
 PYTHON
 then
-    pass "image build: kit user tasks become the user (11), no start/reload in the chroot"
+    pass "image build: kit user tasks become the user (12), no start/reload in the chroot"
 else
     fail "image build: roles are not ready for the image build"
 fi
