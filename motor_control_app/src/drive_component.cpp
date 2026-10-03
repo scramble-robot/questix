@@ -252,10 +252,19 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
                 "では無視します",
                 control_mode_.c_str());
   }
+  if (velocityRunLqrLacksRunThreshold()) {
+    RCLCPP_WARN(this->get_logger(),
+                "velocity_run_lqr_enabled=true ですが drive_fsm_run_enter_rpm / "
+                "drive_fsm_run_exit_rpm が両方 0 のため LQR+FF は適用しません（FF のみ）。"
+                "同定で決めた RUN 閾値を設定してください");
+  }
   RCLCPP_INFO(this->get_logger(),
               "  velocity_run_lqr: %s  tau=%.3fs delay=%d ticks q=%.3f r=%.3f lead=%.2f dist=%.2f "
               "obs[l_x=%.2f l_d=%.3f] max_corr=%.1f rpm invert=%s fb_max_age=%.2fs",
-              (velocity_run_lqr_enabled_ && control_mode_ == "velocity") ? "enabled" : "disabled",
+              (velocity_run_lqr_enabled_ && control_mode_ == "velocity" &&
+               !velocityRunLqrLacksRunThreshold())
+                  ? "enabled"
+                  : "disabled",
               velocity_run_model_tau_sec_, velocity_run_model_delay_ticks_, velocity_run_q_,
               velocity_run_r_, velocity_run_lead_gain_, velocity_run_disturbance_gain_,
               velocity_run_observer_l_x_, velocity_run_observer_l_d_,
@@ -643,6 +652,11 @@ void DriveComponent::shutdownMotorLib() {
   motor_initialized_ = false;
 }
 
+bool DriveComponent::velocityRunLqrLacksRunThreshold() const {
+  return velocity_run_lqr_enabled_ && control_mode_ == "velocity" &&
+         drive_fsm_run_enter_rpm_ <= 0 && drive_fsm_run_exit_rpm_ <= 0;
+}
+
 control_core::Config DriveComponent::makeControlCoreConfig() const {
   control_core::Config config;
   config.max_linear_accel = max_linear_accel_;
@@ -706,6 +720,7 @@ rcl_interfaces::msg::SetParametersResult DriveComponent::onParameterChange(
   bool control_core_dirty = false;
   bool current_pi_dirty = false;
   bool warn_lqr_ignored = false;
+  bool lqr_or_run_threshold_changed = false;
   std::vector<std::function<void()>> staged;
   // Phase 1: validate and stage typed values only. No member or subsystem writes.
   try {
@@ -751,6 +766,7 @@ rcl_interfaces::msg::SetParametersResult DriveComponent::onParameterChange(
         const int value = static_cast<int>(raw);
         staged.emplace_back([this, value]() { drive_fsm_run_enter_rpm_ = value; });
         control_core_dirty = true;
+        lqr_or_run_threshold_changed = true;
       } else if (name == "drive_fsm_run_exit_rpm") {
         const auto raw = param.get_value<int64_t>();
         if (raw < 0 || raw > std::numeric_limits<int>::max()) {
@@ -759,12 +775,14 @@ rcl_interfaces::msg::SetParametersResult DriveComponent::onParameterChange(
         const int value = static_cast<int>(raw);
         staged.emplace_back([this, value]() { drive_fsm_run_exit_rpm_ = value; });
         control_core_dirty = true;
+        lqr_or_run_threshold_changed = true;
       } else if (name == "velocity_run_lqr_enabled") {
         const auto value = param.get_value<bool>();
         staged.emplace_back([this, value]() { velocity_run_lqr_enabled_ = value; });
         control_core_dirty = true;
         // 警告は commit 成功後に出す（後続パラメータでリクエスト全体が失敗し得るため）。
         warn_lqr_ignored = value && control_mode_ != "velocity";
+        lqr_or_run_threshold_changed = true;
       } else if (name == "velocity_run_model_tau_sec") {
         const auto value = param.get_value<double>();
         if (!std::isfinite(value) || value <= 0.0) {
@@ -957,6 +975,11 @@ rcl_interfaces::msg::SetParametersResult DriveComponent::onParameterChange(
   }
   if (control_core_dirty && control_core_) {
     control_core_->setConfig(makeControlCoreConfig());
+  }
+  if (lqr_or_run_threshold_changed && velocityRunLqrLacksRunThreshold()) {
+    RCLCPP_WARN(this->get_logger(),
+                "velocity_run_lqr_enabled=true ですが RUN 閾値が両方 0 のため LQR+FF は"
+                "適用しません（FF のみ）");
   }
   if (warn_lqr_ignored) {
     RCLCPP_WARN(this->get_logger(),
