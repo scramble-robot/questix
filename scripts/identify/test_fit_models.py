@@ -79,6 +79,15 @@ def main():
         assert "| r1 | tile | 0 | 1 |" in suff and "繰り返し<2" in suff
         for fn in ("summary.md", "summary.csv", "summary.png"):
             assert os.path.exists(os.path.join(outdir, fn)), fn
+
+        # record.sh がステップ列の中断を残したデータセット（他の送り手の割り込みなど）は除外する
+        from batch_fit import discover
+        with open(os.path.join(d, "ds0.meta.yaml"), "a") as f:
+            f.write('step_sequence: "aborted_foreign_publisher"\n')
+        with open(os.path.join(d, "ds1.meta.yaml"), "a") as f:
+            f.write('step_sequence: "completed"\n')
+        names = [e[0] for e in discover([os.path.join(d, f"ds{i}.csv") for i in range(3)])]
+        assert names == ["ds1", "ds2"], names  # ds2 は旧形式（キー無し）なので対象
     print("OK")
 
 

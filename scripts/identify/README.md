@@ -18,6 +18,7 @@
 | `batch_fit.py` | `record.sh` の出力を**まとめて同定**し、一覧表（`summary.md/csv`）・1 枚図（`summary.png`）・十分性判定（`sufficiency.md`）を出力 |
 | `handout.md` | 講義用 1 ページ手順書（受講者がログを取って提出するまで） |
 | `test_fit_models.py` | 合成データでの検算 |
+| `test_step_sequence.py` | `step_sequence.py` の他の送り手検出・スケジュールの検算（ROS 不要） |
 | `test_evidence.sh` | `lib_evidence.sh` と `record.sh` preflight の実機なし検証（`ros2` をスタブに差し替え） |
 
 ## 最短の流れ（講義で「1 回ずつ取って順次回収」する運用）
@@ -34,6 +35,8 @@ cat results/summary.md results/sufficiency.md       # τ / d / R² / RUN 境界�
 
 - `/drive_component` ノードが存在する
 - `/drive_status` と `/target_twist` が見えている
+- `/target_twist` に他の送り手（`twist_arbiter` / `joy_controller` など）から指令が流れていない
+  （`IDENT_LISTEN_SEC` 秒、既定 2 秒聞く）
 - `/drive_component` の `control_mode` パラメータが取得できる
 - `questix_msgs/msg/MotorFeedback` に `velocity_rpm_raw` がある
 
@@ -41,11 +44,19 @@ cat results/summary.md results/sufficiency.md       # τ / d / R² / RUN 境界�
 LPF 後 RPM しか残らず、`fit_models.py` は（黙って切り替えずに）エラーで止まる。
 それなら記録する前に止めるほうがよい、という判断。
 
+`/target_twist` の検査は、コントローラ接続中の統合起動を想定したもの。`twist_arbiter`（練習）や
+`joy_controller`（競技）は `/joy` のたびに `/target_twist` へ流すため、ステップ入力に中立の 0 や
+スティック操作が混ざってデータが汚れ、スティック優先の仕組みも素通りする。`twist_arbiter` は
+publisher を常に持つが入力が無ければ何も流さないので、publisher の数ではなく実際の流れで判定する。
+`step_sequence.py` 自身も開始前に聞き、実行中に自分が送っていない値を受けたら中断して 0 を送り、
+終了コード 3 で終わる。`record.sh` はそれを `meta.yaml` の `step_sequence: "aborted_foreign_publisher"`
+として残し（完走は `"completed"`）、`batch_fit.py` は completed 以外のデータセットを除外する。
+
 ## 記録される証跡（出力ディレクトリ契約）
 
 ```
 ident_<robot>_<floor>_<YYYYmmdd_HHMM>/
-├── meta.yaml                            # 試験条件 + source/環境の要約（単純値のみ）
+├── meta.yaml                            # 試験条件 + source/環境の要約（単純値のみ）+ step_sequence の完走可否
 ├── source_identity.txt                  # 完全 commit SHA・ブランチ・detached・dirty・ROS 環境・host
 ├── git_status.txt                       # dirty なら git status --porcelain（clean なら空）
 ├── drive_component_params_before.yaml   # 記録直前の実効パラメータ（ros2 param dump）
@@ -73,7 +84,8 @@ ident_<robot>_<floor>_<YYYYmmdd_HHMM>/
 ## 実機なしの確認
 
 ```bash
-bash scripts/identify/test_evidence.sh   # ros2 をスタブに差し替えた 52 assertion
+bash scripts/identify/test_evidence.sh   # ros2 をスタブに差し替えた 60 assertion
+python3 scripts/identify/test_step_sequence.py
 bash scripts/identify/record.sh --help
 bash -n scripts/identify/record.sh scripts/identify/lib_evidence.sh
 ```
@@ -94,7 +106,8 @@ bash -n scripts/identify/record.sh scripts/identify/lib_evidence.sh
 
 ## 手順（velocity モード）
 
-1. 車輪を浮かせ（ジャッキアップ）、非常停止が効くことを確認する。
+1. 車輪を浮かせ（ジャッキアップ）、非常停止が効くことを確認する。コントローラは外す（または joy を
+   止める）。`/target_twist` に他から流れていると `step_sequence.py` は開始しない／中断する。
 2. `launcher/config/drive_component.yaml` を同定用に: `control_mode: velocity`,
    `brake_on_stop: false`。加速度上限は操作設定側にあるので、Robot Manager の「調整」タブ
    （保存先 `controls.<controller>.yaml`、`questix_control_config/README.md` 参照）で
