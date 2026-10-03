@@ -59,7 +59,8 @@ Phase A システム同定用の記録ハーネス（授業の手動操縦ロガ
   --yes          対話をスキップして既定値を使う
   -h, --help     このヘルプ
 
-環境変数: IDENT_LISTEN_SEC  preflight で /target_twist を聞く時間 [s]（既定 2）
+環境変数: IDENT_LISTEN_SEC             preflight で /target_twist を聞く時間 [s]（既定 2）
+          IDENT_BAG_STOP_TIMEOUT_SEC  bag を SIGINT で閉じるまで待つ上限 [s]（既定 15。超えたら SIGTERM）
 
 出力: <out>/ident_<robot>_<floor>_<YYYYmmdd_HHMM>/
         meta.yaml, source_identity.txt, git_status.txt,
@@ -84,6 +85,11 @@ while [[ $# -gt 0 ]]; do
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
+
+if ! env --default-signal=INT true 2>/dev/null; then
+  echo "error: env --default-signal が使えません（coreutils 8.31 以降が必要。Ubuntu 24.04 は対応）" >&2
+  exit 1
+fi
 
 for cmd in ros2 python3; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -234,16 +240,40 @@ fi
 # ---- 記録 -------------------------------------------------------------------
 
 BAG_PID=""
+# SIGINT で bag を閉じるまで待つ上限 [s]。超えたら SIGTERM -> SIGKILL（無限に待たない）。
+BAG_STOP_TIMEOUT_SEC="${IDENT_BAG_STOP_TIMEOUT_SEC:-15}"
 cleanup() {
-  if [[ -n "$BAG_PID" ]] && kill -0 "$BAG_PID" 2>/dev/null; then
-    kill -INT "$BAG_PID" 2>/dev/null || true
-    wait "$BAG_PID" 2>/dev/null || true
+  local waited=0 limit=$((BAG_STOP_TIMEOUT_SEC * 10))
+  if [[ -z "$BAG_PID" ]]; then
+    return 0
   fi
+  if kill -0 "$BAG_PID" 2>/dev/null; then
+    kill -INT "$BAG_PID" 2>/dev/null || true
+    while kill -0 "$BAG_PID" 2>/dev/null && [[ "$waited" -lt "$limit" ]]; do
+      sleep 0.1
+      waited=$((waited + 1))
+    done
+    if kill -0 "$BAG_PID" 2>/dev/null; then
+      echo "warning: ros2 bag record が SIGINT で ${BAG_STOP_TIMEOUT_SEC}s 以内に止まりません。" >&2
+      echo "         SIGTERM で止めます（bag の末尾が欠ける可能性があります）" >&2
+      kill -TERM "$BAG_PID" 2>/dev/null || true
+      waited=0
+      while kill -0 "$BAG_PID" 2>/dev/null && [[ "$waited" -lt 50 ]]; do
+        sleep 0.1
+        waited=$((waited + 1))
+      done
+      kill -KILL "$BAG_PID" 2>/dev/null || true
+    fi
+  fi
+  wait "$BAG_PID" 2>/dev/null || true
+  BAG_PID=""
 }
 trap 'cleanup; rm -f "$TOPIC_LIST"' EXIT INT TERM
 
 echo "recording -> $DEST/bag"
-ros2 bag record -o "$DEST/bag" "${RECORD_TOPICS[@]}" >"$DEST/bag_record.log" 2>&1 &
+# 非対話シェルの `&` 起動は SIGINT を無視（SIG_IGN）で継承し、ros2（Python）は SIGINT の
+# ハンドラを入れないため、cleanup の kill -INT が効かず bag が閉じない。env で既定に戻して起動する。
+env --default-signal=INT ros2 bag record -o "$DEST/bag" "${RECORD_TOPICS[@]}" >"$DEST/bag_record.log" 2>&1 &
 BAG_PID=$!
 sleep 2
 
@@ -253,7 +283,6 @@ STEP_RC=$?
 set -e
 
 cleanup
-BAG_PID=""
 
 # ステップ列の完走可否を meta.yaml に残す。completed 以外は batch_fit.py が同定から外す。
 case "$STEP_RC" in

@@ -160,11 +160,12 @@ case "$1 ${2:-}" in
   "bag record")     shift 2
                     while [[ $# -gt 0 && "$1" != "-o" ]]; do shift; done
                     [[ "${1:-}" == "-o" ]] && mkdir -p "$2"
-                    # `&` 起動の非対話 bash は SIGINT を SIG_IGN で継承し trap できないため、
-                    # record.sh の kill -INT はこのスタブには効かない（実 ros2 bag record は
-                    # Python プロセスで自前ハンドラを持つのでそちらは効く）。有限時間で終わらせて
-                    # cleanup の wait を解く。
-                    sleep 3 ;;
+                    # 実 ros2 bag record と同じく SIGINT で閉じる。`&` 起動で SIGINT を SIG_IGN の
+                    # まま継承していると trap できず 30 秒止まらない（実機で起きた詰まりの再現）。
+                    trap 'kill "$SLEEP_PID" 2>/dev/null; echo "stub bag: closed on SIGINT"; exit 0' INT
+                    sleep 30 &
+                    SLEEP_PID=$!
+                    wait "$SLEEP_PID" ;;
   "topic echo")     # STUB_TWIST_TRAFFIC=1 なら他の送り手が /target_twist に流している
                     if [[ "${STUB_TWIST_TRAFFIC:-0}" == "1" ]]; then
                       printf 'linear:\n  x: 0.0\n'
@@ -224,11 +225,14 @@ PYSTUB
 chmod +x "$STUB_DIR/python3"
 
 FULL_OUT="$TMP/full"
+FULL_START=$SECONDS
 OUT="$(STUB_NODES='/drive_component' \
   STUB_TOPICS='/drive_status /target_twist /odom' \
   STUB_PARAM_STATE="$TMP/param_state" \
   PATH="$STUB_DIR:$PATH" bash "$SCRIPT_DIR/record.sh" --yes --out "$FULL_OUT" 2>&1)"
 check "スタブ環境で最後まで完走" "$?" "0"
+if [[ $((SECONDS - FULL_START)) -lt 15 ]]; then ok "bag record は SIGINT ですぐ閉じる（詰まらない）"; else ng "bag record の停止待ちで詰まった ($((SECONDS - FULL_START))s)"; fi
+if [[ "$OUT" != *"SIGINT で"*"以内に止まりません"* ]]; then ok "SIGTERM へのフォールバックを使わない"; else ng "SIGINT が効かず SIGTERM にフォールバックした"; fi
 
 DEST="$(find "$FULL_OUT" -maxdepth 1 -type d -name 'ident_*' | head -1)"
 if [[ -n "$DEST" ]]; then ok "ident_<robot>_<condition>_<timestamp> を作る"; else ng "出力ディレクトリが無い"; fi
