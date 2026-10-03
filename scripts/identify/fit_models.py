@@ -17,6 +17,12 @@
 モデル（velocity モード）:  ω_{k+1} = a ω_k + (1-a) u_{k-d} + c
   u = 指令 RPM（target_rpm）、ω = 実測 RPM（生値）、d = むだ時間 [tick]、c = 定数外乱。
   d を 0..max_delay で総当たりし、各 d について (a, c) を最小二乗で求め、R² 最大の d を採用。
+
+当てはまりの R² は「自由応答」で測る: 求めたモデルを実測の初期値と指令 u だけで走らせ
+（途中で実測を使わない）、実測と比べる。1 tick 先予測の R²（ω_k から ω_{k+1} を当てる）は
+50 Hz では「次の値 ≒ 今の値」だけで 1 に近づき、一次遅れで表せない振動（例: 目標 95 rpm で
+実測 59〜118 rpm を 1.8 Hz 往復）でも 0.97 以上になって判定に使えない。参考値として
+r2_onestep に残す。
   τ = -dt / ln(a)。
 モデル（current モード）:   ω_{k+1} = a ω_k + b i_{k-d} + c   （i = 電流 [A]）
 
@@ -86,11 +92,29 @@ def load_bag(path, topic="/drive_status"):
 
 
 # ----------------------------------------------------------------------------- 同定
+def free_run_r2(omega, u, a, b, c, d):
+    """モデルを実測の初期値と指令だけで走らせた応答の R²（k = d+1.. を比較）。発散は -inf。"""
+    n = len(omega)
+    if n < d + 3:
+        return float("-inf")
+    sim = np.empty(n - d)
+    sim[0] = omega[d]
+    for i in range(n - d - 1):
+        sim[i + 1] = a * sim[i] + b * u[i] + c  # sim[i] = ω_{d+i}、入力は u_{(d+i)-d}
+    y = omega[d + 1:]
+    pred = sim[1:]
+    if not np.all(np.isfinite(pred)):
+        return float("-inf")
+    ss_tot = float(np.sum((y - y.mean()) ** 2)) or 1e-12
+    return 1.0 - float(np.sum((y - pred) ** 2)) / ss_tot
+
+
 def fit_first_order(omega, u, dt, max_delay=4, unity_gain=True):
     """Fit ω_{k+1} = a ω_k + b u_{k-d} + c by least squares.
 
     unity_gain=True なら b = 1 - a に拘束（velocity モード）。
-    戻り値: dict(a, b, c, delay, tau, r2)
+    戻り値: dict(a, b, c, delay, tau, r2, r2_onestep)。r2 は自由応答の R²（判定用）、
+    r2_onestep は 1 tick 先予測の R²（参考。モデルの良し悪しをほとんど区別しない）。
     """
     best = None
     n = len(omega)
@@ -113,9 +137,11 @@ def fit_first_order(omega, u, dt, max_delay=4, unity_gain=True):
             pred = A @ coef
         ss_res = float(np.sum((y - pred) ** 2))
         ss_tot = float(np.sum((y - y.mean()) ** 2)) or 1e-12
-        r2 = 1.0 - ss_res / ss_tot
+        r2_onestep = 1.0 - ss_res / ss_tot
+        r2 = free_run_r2(omega, u, float(a), float(b), float(c), d)
         tau = -dt / math.log(a) if 0.0 < a < 1.0 else float("nan")
-        cand = dict(a=float(a), b=float(b), c=float(c), delay=d, tau=tau, r2=r2)
+        cand = dict(a=float(a), b=float(b), c=float(c), delay=d, tau=tau, r2=r2,
+                    r2_onestep=r2_onestep)
         if best is None or r2 > best["r2"]:
             best = cand
     return best
@@ -180,6 +206,7 @@ def analyze(data, mode="velocity", dt=None, max_delay=4, min_segment=25, r2_thre
                 tau=float(np.nanmean([f["tau"] for f in fits])),
                 delay=int(round(np.mean([f["delay"] for f in fits]))),
                 r2=float(np.mean([f["r2"] for f in fits])),
+                r2_onestep=float(np.mean([f["r2_onestep"] for f in fits])),
                 n=len(fits),
             )
         sides[side] = dict(overall=overall, per_level=levels)
@@ -204,11 +231,15 @@ def print_report(res):
     for side in ("left", "right"):
         o = res["sides"][side]["overall"]
         print(f"\n[{side}] overall: a={o['a']:.4f} b={o['b']:.4f} c={o['c']:+.3f} "
-              f"delay={o['delay']} tick tau={o['tau']*1000:.1f} ms R2={o['r2']:.3f}")
-        print(f"  {'level':>7} {'n':>3} {'tau[ms]':>8} {'delay':>5} {'R2':>6}")
+              f"delay={o['delay']} tick tau={o['tau']*1000:.1f} ms R2={o['r2']:.3f} "
+              f"(1 tick 先予測 {o['r2_onestep']:.3f})")
+        print(f"  {'level':>7} {'n':>3} {'tau[ms]':>8} {'delay':>5} {'R2':>6} {'R2_1step':>8}")
         for lv in sorted(res["sides"][side]["per_level"]):
             v = res["sides"][side]["per_level"][lv]
-            print(f"  {lv:7.0f} {v['n']:3d} {v['tau']*1000:8.1f} {v['delay']:5d} {v['r2']:6.3f}")
+            print(f"  {lv:7.0f} {v['n']:3d} {v['tau']*1000:8.1f} {v['delay']:5d} {v['r2']:6.3f} "
+                  f"{v['r2_onestep']:8.3f}")
+    print("\nR2 = 自由応答（モデルを指令だけで走らせて実測と比較。判定に使う）、"
+          "R2_1step = 1 tick 先予測（参考。ほぼ常に 1 に近い）")
 
 
 def to_yaml_lines(res):
@@ -217,7 +248,8 @@ def to_yaml_lines(res):
     for side in ("left", "right"):
         o = res["sides"][side]["overall"]
         lines += [f"{side}:", f"  a: {o['a']:.6f}", f"  b: {o['b']:.6f}", f"  c: {o['c']:.4f}",
-                  f"  delay_ticks: {o['delay']}", f"  tau_sec: {o['tau']:.5f}", f"  r2: {o['r2']:.4f}",
+                  f"  delay_ticks: {o['delay']}", f"  tau_sec: {o['tau']:.5f}", f"  r2: {o['r2']:.4f}  # 自由応答",
+                  f"  r2_onestep: {o['r2_onestep']:.4f}  # 1 tick 先予測（参考）",
                   "  per_level:"]
         for lv in sorted(res["sides"][side]["per_level"]):
             v = res["sides"][side]["per_level"][lv]
