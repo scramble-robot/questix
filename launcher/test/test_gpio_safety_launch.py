@@ -125,9 +125,21 @@ def test_core_defaults_to_practice_and_selects_both_profile_files():
         None,
         '$(find-pkg-share operation_manager)/config/operation_manager.competition.yaml',
     ) in lets
+    # Without the GPIO safety path (practice only): no GPIO read, /emergency_stop still owned.
+    assert (
+        'operation_manager_config_file',
+        None,
+        '$(var enable_gpio_ref)',
+        '$(find-pkg-share operation_manager)/config/operation_manager.no_gpio.yaml',
+    ) in lets
+    manager_lets = [item for item in core.findall('./let')
+                    if item.get('name') == 'operation_manager_config_file']
+    assert manager_lets[-1].get('unless') == '$(var enable_gpio_ref)'  # the last let wins
 
 
-def test_core_owns_exactly_one_operation_manager_when_gpio_ref_is_enabled():
+def test_core_always_owns_exactly_one_operation_manager():
+    # operation_manager is the single owner of /emergency_stop with or without the GPIO safety
+    # path; only gpio_reader depends on enable_gpio_ref.
     core = load_xml('launcher/launch/questix_core.launch.xml')
     manager_includes = [
         include for include in core.findall('.//include')
@@ -138,7 +150,15 @@ def test_core_owns_exactly_one_operation_manager_when_gpio_ref_is_enabled():
         group for group in core.findall('.//group')
         if manager_includes[0] in list(group)
     )
-    assert manager_group.get('if') == '$(var enable_gpio_ref)'
+    assert manager_group.get('if') is None
+    assert manager_group.get('unless') == (
+        '$(and $(var enable_autoreferee) $(not $(var enable_gpio_ref)))')
+    reader_include = next(
+        include for include in core.findall('.//include')
+        if 'find-pkg-share gpio_reader' in include.get('file', ''))
+    reader_group = next(
+        group for group in core.findall('.//group') if reader_include in list(group))
+    assert reader_group.get('if') == '$(var enable_gpio_ref)'
 
     drive_include = next(
         include for include in core.findall('.//include')
@@ -173,7 +193,7 @@ def test_core_owns_exactly_one_operation_manager_when_gpio_ref_is_enabled():
 
     def integrated_manager_count(enable_drive, enable_shot, enable_gpio_ref):
         del enable_shot  # operation_manager ownership is independent of shot.
-        core_manager_count = int(enable_gpio_ref)
+        core_manager_count = 1
         nested_manager_enabled = manager_arg.get('value') != 'false'
         nested_manager_count = int(
             enable_drive and enable_gpio_ref and nested_manager_enabled)
@@ -181,6 +201,7 @@ def test_core_owns_exactly_one_operation_manager_when_gpio_ref_is_enabled():
 
     assert integrated_manager_count(False, False, True) == 1
     assert integrated_manager_count(True, True, True) == 1
+    assert integrated_manager_count(True, True, False) == 1
 
 
 def test_competition_service_launchers_always_enable_gpio_safety():
@@ -401,62 +422,121 @@ def test_lab_launcher_input_only_in_practice_launches():
         assert 'accept_lab_input' not in text
 
 
-def test_runtime_actuation_authority_is_required_in_practice_only():
-    # Practice runs move the drive and the launcher only while the teacher's runtime authority
-    # (/actuation_authority from Robot Manager) is fresh; competition (AutoReferee) keeps the
-    # GPIO path and must never depend on the classroom heartbeat.
-    core = load_xml('launcher/launch/questix_core.launch.xml')
-    for name in ('drive_component.launch.xml', 'shot_component.launch.xml'):
-        include = next(
-            include for include in core.findall('.//include')
-            if name in include.get('file', ''))
-        values = {arg.get('name'): arg.get('value') for arg in include.findall('./arg')}
-        assert values.get('require_runtime_actuation_authority') == (
-            '$(not $(var enable_autoreferee))'), name
+def _include_args(root, file_name):
+    include = next(
+        include for include in root.findall('.//include')
+        if file_name in include.get('file', ''))
+    return {arg.get('name'): arg.get('value') for arg in include.findall('./arg')}
 
-    drive = load_xml('launcher/launch/drive_component.launch.xml')
-    assert find_arg(drive, 'require_runtime_actuation_authority').get('default') == 'true'
-    drive_node = next(
-        include for include in drive.findall('./include')
-        if 'drive_component.launch.py' in include.get('file', ''))
-    assert {arg.get('name'): arg.get('value') for arg in drive_node.findall('./arg')}.get(
-        'require_runtime_actuation_authority') == '$(var require_runtime_actuation_authority)'
 
-    shot = load_xml('launcher/launch/shot_component.launch.xml')
-    assert find_arg(shot, 'require_runtime_actuation_authority').get('default') == 'true'
+def _launcher_node_includes(shot):
     node_includes = [
         include for include in shot.findall('./include')
         if 'find-pkg-share motor_control_app' in include.get('file', '')
         or 'find-pkg-share esc_motor_control_cpp' in include.get('file', '')
     ]
     assert len(node_includes) == 2
-    for include in node_includes:
-        values = {arg.get('name'): arg.get('value') for arg in include.findall('./arg')}
-        assert values.get('require_runtime_actuation_authority') == (
-            '$(var require_runtime_actuation_authority)')
+    return [{arg.get('name'): arg.get('value') for arg in include.findall('./arg')}
+            for include in node_includes]
+
+
+def test_teacher_permission_is_a_practice_opt_in():
+    # The teacher's permission (/actuation_authority from Robot Manager) is a permission,
+    # not an emergency stop: by default a practice run drives and shoots without it (as 3.2.0
+    # did), a practice run may opt in, and competition (AutoReferee) never depends on it.
+    core = load_xml('launcher/launch/questix_core.launch.xml')
+    core_arg = find_arg(core, 'require_teacher_permission')
+    assert core_arg.get('default') == 'false'
+    assert '$(env' not in core_arg.get('default')
+    for name in ('drive_component.launch.xml', 'shot_component.launch.xml'):
+        assert _include_args(core, name).get('require_teacher_permission') == (
+            '$(and $(var require_teacher_permission) '
+            '$(not $(var enable_autoreferee)))'), name
+
+    drive = load_xml('launcher/launch/drive_component.launch.xml')
+    assert find_arg(drive, 'require_teacher_permission').get('default') == 'false'
+    assert _include_args(drive, 'drive_component.launch.py').get(
+        'require_teacher_permission') == '$(var require_teacher_permission)'
+
+    shot = load_xml('launcher/launch/shot_component.launch.xml')
+    assert find_arg(shot, 'require_teacher_permission').get('default') == 'false'
+    for values in _launcher_node_includes(shot):
+        assert values.get('require_teacher_permission') == (
+            '$(var require_teacher_permission)')
 
     esc = load_xml('esc_motor_control_cpp/launch/esc_motor_control_cpp.launch.xml')
-    assert find_arg(esc, 'require_runtime_actuation_authority').get('default') == 'true'
+    assert find_arg(esc, 'require_teacher_permission').get('default') == 'false'
     esc_params = {
         param.get('name'): param.get('value') for param in esc.findall('./node/param')
     }
-    assert esc_params.get('require_runtime_actuation_authority') == (
-        '$(var require_runtime_actuation_authority)')
+    assert esc_params.get('require_teacher_permission') == (
+        '$(var require_teacher_permission)')
     for relative_path in ('motor_control_app/launch/shot_component.launch.py',
                           'motor_control_app/launch/drive_component.launch.py'):
         text = (SOURCE_ROOT / relative_path).read_text(encoding='utf-8')
-        assert "'require_runtime_actuation_authority',\n" in text, relative_path
-        assert "LaunchConfiguration('require_runtime_actuation_authority'), value_type=bool" in (
+        assert "'require_teacher_permission',\n" in text, relative_path
+        assert "LaunchConfiguration('require_teacher_permission'), value_type=bool" in (
             text), relative_path
+        default = text.split("'require_teacher_permission',\n", 1)[1].split('\n', 1)[0]
+        assert "default_value='false'" in default, relative_path
 
-    # The launch passes the authority switch, so no node YAML carries it; the E-stop is required
-    # (never opted out) in every integrated YAML.
+    # The node defaults agree with the launch defaults (an opt-in everywhere).
+    for relative_path in ('motor_control_app/src/drive_component.cpp',
+                          'motor_control_app/src/shot_component.cpp',
+                          'esc_motor_control_cpp/src/esc_motor_control_component.cpp'):
+        text = (SOURCE_ROOT / relative_path).read_text(encoding='utf-8')
+        assert '"require_teacher_permission", false);' in text, relative_path
+        assert '"require_teacher_permission", true);' not in text, relative_path
+
+    # The service launchers never opt in on their own.
+    for relative_path in (
+        'systemd/questix_robot_launcher.sh',
+        'ansible/roles/robot_autostart/files/questix_robot_launcher.sh',
+    ):
+        text = (SOURCE_ROOT / relative_path).read_text(encoding='utf-8')
+        assert 'require_teacher_permission' not in text, relative_path
+
+
+def test_emergency_stop_is_always_published_and_always_required():
+    # /emergency_stop always has its publisher (operation_manager, see
+    # test_core_always_owns_exactly_one_operation_manager), so every actuating node keeps one
+    # rule: an unheard or silent E-stop counts as pressed. No launch switches it off; only an
+    # explicit diagnostic run may set require_emergency_stop:=false.
+    for relative_path in (
+        'launcher/launch/questix_core.launch.xml',
+        'launcher/launch/drive_component.launch.xml',
+        'launcher/launch/shot_component.launch.xml',
+        'esc_motor_control_cpp/launch/esc_motor_control_cpp.launch.xml',
+        'motor_control_app/launch/drive_component.launch.py',
+        'motor_control_app/launch/shot_component.launch.py',
+    ):
+        text = (SOURCE_ROOT / relative_path).read_text(encoding='utf-8')
+        assert 'require_emergency_stop' not in text, relative_path
     for relative_path, node in (
         ('launcher/config/drive_component.yaml', 'drive_component'),
         ('motor_control_app/config/shot_config.yaml', 'shot_component'),
         ('esc_motor_control_cpp/config/esc_motor_control_cpp.yaml', 'esc_motor_control'),
     ):
         parameters = load_yaml(relative_path)[node]['ros__parameters']
-        assert 'require_runtime_actuation_authority' not in parameters, relative_path
+        assert 'require_teacher_permission' not in parameters, relative_path
         assert parameters['require_emergency_stop'] is True, relative_path
+        assert parameters['emergency_stop_topic'] == '/emergency_stop', relative_path
         assert parameters['emergency_stop_timeout_sec'] == 1.0, relative_path
+    for relative_path in ('motor_control_app/src/drive_component.cpp',
+                          'motor_control_app/src/shot_component.cpp',
+                          'esc_motor_control_cpp/src/esc_motor_control_component.cpp'):
+        text = (SOURCE_ROOT / relative_path).read_text(encoding='utf-8')
+        assert '"require_emergency_stop", true);' in text, relative_path
+
+    # The profile without the GPIO safety path reads no GPIO but publishes the same topic.
+    no_gpio = load_yaml('operation_manager/config/operation_manager.no_gpio.yaml')
+    parameters = no_gpio['operation_manager_node']['ros__parameters']
+    assert parameters['gpio_safety_enabled'] is False
+    assert parameters['emergency_stop_topic'] == '/emergency_stop'
+    assert 'safe_low_pins' not in parameters
+    for profile in ('operation_manager.practice.yaml', 'operation_manager.competition.yaml',
+                    'operation_manager.yaml'):
+        parameters = load_yaml(f'operation_manager/config/{profile}')[
+            'operation_manager_node']['ros__parameters']
+        assert parameters.get('gpio_safety_enabled', True) is True, profile
+        assert parameters['emergency_stop_topic'] == '/emergency_stop', profile

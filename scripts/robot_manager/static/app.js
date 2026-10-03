@@ -1570,18 +1570,18 @@ function renderActuation(data) {
     toggle.checked = Boolean(data && data[kind]);
     toggle.disabled = actuationPending || !data || (data.competition && !data[kind]);
     document.getElementById(`actuation-${kind}-state`).textContent =
-      !data ? '（確認できません）' : data[kind] ? 'ON：動かせます' : 'OFF：動きません';
+      !data ? '（確認できません）' : data[kind] ? 'ON：教材から動かせます' : 'OFF：教材からは動かせません';
   }
   const state = document.getElementById('actuation-state');
   if (!data) {
-    state.textContent = '許可の状態を確認できません。ロボットは許可がない間は動きません。';
+    state.textContent = '許可の状態を確認できません。許可がない間は教材からは動かせません。';
   } else if (data.competition) {
     state.textContent = '大会モードでは使いません（大会用の起動は非常停止と AutoReferee で動きます）。';
   } else if (data.drive || data.launcher) {
     const on = ['drive', 'launcher'].filter((kind) => data[kind]).map((kind) => names[kind]);
     state.textContent = `${on.join('・')}を許可しています（約 ${data.heartbeat_hz} 回/秒 送信中）。`;
   } else {
-    state.textContent = '走行も発射も許可していません。練習で動かすときに ON にしてください。';
+    state.textContent = '走行も発射も許可していません。教材から動かすときに ON にしてください。';
   }
   const error = document.getElementById('actuation-error');
   error.textContent = data?.error || '';

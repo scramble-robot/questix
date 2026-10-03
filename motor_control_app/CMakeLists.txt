@@ -131,6 +131,15 @@ if(BUILD_TESTING)
   ament_target_dependencies(test_motor_status_msg motor_control_lib)
 
   ament_auto_add_gtest(test_ddt_feedback_format test/test_ddt_feedback_format.cpp)
+
+  # The real DriveComponent on a fake motor (pseudo terminal), loaded with the integrated
+  # hardware YAML and an operator profile from this source tree, as questix_core does.
+  ament_auto_add_gtest(test_drive_component_node test/test_drive_component_node.cpp TIMEOUT 120)
+  target_link_libraries(test_drive_component_node drive_component util)
+  ament_target_dependencies(test_drive_component_node motor_control_lib)
+  target_compile_definitions(test_drive_component_node PRIVATE
+    QUESTIX_DRIVE_HARDWARE_YAML="${CMAKE_CURRENT_SOURCE_DIR}/../launcher/config/drive_component.yaml"
+    QUESTIX_DRIVE_CONTROL_YAML="${CMAKE_CURRENT_SOURCE_DIR}/../questix_control_config/config/controls.dualshock.yaml")
 endif()
 
 ament_auto_package(INSTALL_TO_SHARE config launch)

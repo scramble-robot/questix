@@ -159,6 +159,61 @@ TEST(OperationManagerNodeTest, PublishesFailSafeStatesDiagnosticsAndContractQos)
   (void)controllable_sub;
 }
 
+// Without the GPIO safety path the node still owns /emergency_stop: it reports "released" with
+// its reason, keeps publishing it (so subscribers never see it go silent), reads no GPIO and
+// does not claim a GPIO judgement on /gpio/controllable.
+TEST(OperationManagerNodeTest, WithoutGpioStillPublishesAReleasedEmergencyStop) {
+  const std::string estop_topic = "/test_operation_manager_no_gpio/emergency_stop";
+  auto observer = std::make_shared<rclcpp::Node>("operation_manager_no_gpio_observer");
+
+  int estop_count = 0;
+  questix_msgs::msg::EmergencyStop::SharedPtr last_estop;
+  diagnostic_msgs::msg::DiagnosticArray::SharedPtr last_diagnostic;
+  auto estop_sub = observer->create_subscription<questix_msgs::msg::EmergencyStop>(
+      estop_topic, rclcpp::QoS(1).reliable().transient_local(),
+      [&](questix_msgs::msg::EmergencyStop::SharedPtr msg) {
+        last_estop = msg;
+        ++estop_count;
+      });
+  auto diagnostic_sub = observer->create_subscription<diagnostic_msgs::msg::DiagnosticArray>(
+      "/diagnostics", 10, [&last_diagnostic](diagnostic_msgs::msg::DiagnosticArray::SharedPtr msg) {
+        last_diagnostic = msg;
+      });
+  auto gpio5_pub = observer->create_publisher<std_msgs::msg::Bool>("/gpio_5", 10);
+
+  rclcpp::NodeOptions options;
+  options.parameter_overrides({
+      rclcpp::Parameter("gpio_safety_enabled", false),
+      rclcpp::Parameter("emergency_stop_topic", estop_topic),
+  });
+  auto manager = std::make_shared<operation_manager::OperationManagerComponent>(options);
+
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(observer);
+  executor.add_node(manager);
+
+  ASSERT_TRUE(spin_until(executor, [&]() { return last_estop && last_diagnostic; }));
+  EXPECT_FALSE(last_estop->active);
+  EXPECT_EQ(last_estop->source, "operation_manager");
+  EXPECT_EQ(last_estop->reason, operation_manager::OperationManagerComponent::kNoGpioReason);
+  EXPECT_EQ(last_diagnostic->status[0].level, diagnostic_msgs::msg::DiagnosticStatus::WARN);
+
+  // It keeps coming (subscribers time out a silent /emergency_stop after 1.0 s).
+  const int seen = estop_count;
+  ASSERT_TRUE(spin_until(executor, [&]() { return estop_count >= seen + 3; }, 1000ms));
+  EXPECT_FALSE(last_estop->active);
+
+  // No GPIO is read and no GPIO judgement is published.
+  EXPECT_EQ(gpio5_pub->get_subscription_count(), 0U);
+  EXPECT_TRUE(observer->get_publishers_info_by_topic("/gpio/controllable").empty());
+  const auto publisher_info = observer->get_publishers_info_by_topic(estop_topic);
+  ASSERT_EQ(publisher_info.size(), 1U);
+  EXPECT_EQ(publisher_info[0].qos_profile().durability(), rclcpp::DurabilityPolicy::TransientLocal);
+
+  (void)estop_sub;
+  (void)diagnostic_sub;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
