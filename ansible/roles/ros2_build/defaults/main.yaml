@@ -11,6 +11,17 @@ workspace_rosdep_become: true
 # A kit's workspace is never built by root (it would leave root-owned build/ install/ log/).
 # Only the isolated contract tests, when run as root, set this false.
 workspace_build_refuse_root: true
+# Build through ccache: a rebuild after `git pull` or a branch switch, where most files come back
+# unchanged, reuses the compiled objects. The build passes the compiler launcher to CMake, which
+# keeps it in each package's CMakeCache, so the kit user's own `colcon build --symlink-install`
+# in workspace_path uses ccache too. The sloppiness is what ccache needs to cache precompiled
+# headers (motor_control_app); max_size bounds the cache in ~/.cache/ccache on the SD card.
+workspace_ccache: true
+workspace_ccache_config:
+  sloppiness: include_file_ctime,include_file_mtime,pch_defines,time_macros
+  max_size: 2G
+# Installing the ccache package needs root; only the isolated contract tests set this false.
+workspace_ccache_install: true
 # Must resolve with `ros2 pkg prefix` after the build (the robot service, Robot Manager's lesson
 # bridge and the messages both use).
 workspace_required_packages:
