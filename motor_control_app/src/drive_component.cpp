@@ -106,6 +106,9 @@ DriveComponent::DriveComponent(const rclcpp::NodeOptions& options)
                 authority_topic_.c_str(), authority_timeout_sec_);
   }
 
+  // 起動時のゲート状態（何も受信していない状態）。ログの初期値で、何も送らない。
+  last_block_ = actuation_gate::evaluate(gateInputs());
+
   if (auto_start_) {
     const auto period = std::chrono::duration<double>(std::max(0.5, connect_retry_period_sec_));
     auto_start_timer_ =
@@ -1197,28 +1200,43 @@ void DriveComponent::authorityCallback(const questix_msgs::msg::ActuationAuthori
   applyGate();
 }
 
+actuation_gate::EstopInputs DriveComponent::estopInputs() const {
+  actuation_gate::EstopInputs in;
+  in.required = require_emergency_stop_;
+  in.known = have_estop_msg_;
+  in.active = emergency_stop_active_;
+  in.age_sec =
+      have_estop_msg_ ? secondsSince(last_estop_rx_, std::chrono::steady_clock::now()) : 0.0;
+  in.timeout_sec = emergency_stop_timeout_sec_;
+  return in;
+}
+
+actuation_gate::AuthorityInputs DriveComponent::authorityInputs() const {
+  actuation_gate::AuthorityInputs in;
+  in.required = require_authority_;
+  if (!require_authority_) {
+    return in;  // disabled: nothing else is looked at
+  }
+  in.known = have_authority_msg_;
+  in.allowed = authority_drive_allowed_;
+  in.age_sec = have_authority_msg_
+                   ? secondsSince(last_authority_rx_, std::chrono::steady_clock::now())
+                   : 0.0;
+  in.timeout_sec = authority_timeout_sec_;
+  return in;
+}
+
 actuation_gate::Inputs DriveComponent::gateInputs() const {
-  const auto now = std::chrono::steady_clock::now();
   actuation_gate::Inputs in;
-  in.require_estop = require_emergency_stop_;
-  in.estop_known = have_estop_msg_;
-  in.estop_active = emergency_stop_active_;
-  in.estop_age_sec = have_estop_msg_ ? secondsSince(last_estop_rx_, now) : 0.0;
-  in.estop_timeout_sec = emergency_stop_timeout_sec_;
-  in.require_authority = require_authority_;
-  in.authority_known = have_authority_msg_;
-  in.authority_allowed = authority_drive_allowed_;
-  in.authority_age_sec = have_authority_msg_ ? secondsSince(last_authority_rx_, now) : 0.0;
-  in.authority_timeout_sec = authority_timeout_sec_;
+  in.estop = estopInputs();
+  in.authority = authorityInputs();
   in.stop_fault = stop_fault_;
   return in;
 }
 
 bool DriveComponent::estopEngaged() const {
-  auto in = gateInputs();
-  in.stop_fault = false;
-  in.require_authority = false;
-  return actuation_gate::isEstopBlock(actuation_gate::evaluate(in));
+  // Only the E-stop: the teacher's authority is a permission and never reads as an E-stop.
+  return actuation_gate::evaluateEstop(estopInputs()) != actuation_gate::Block::kNone;
 }
 
 actuation_gate::Block DriveComponent::applyGate(bool stopped_now) {

@@ -17,12 +17,13 @@ namespace {
 
 RollerGateInputs open() {
   RollerGateInputs in;
-  in.estop_known = true;
-  in.estop_active = false;
-  in.estop_age_sec = 0.1;
-  in.authority_known = true;
-  in.authority_allowed = true;
-  in.authority_age_sec = 0.1;
+  in.authority.required = true;  // the opt-in, so the authority rules are exercised
+  in.estop.known = true;
+  in.estop.active = false;
+  in.estop.age_sec = 0.1;
+  in.authority.known = true;
+  in.authority.allowed = true;
+  in.authority.age_sec = 0.1;
   return in;
 }
 
@@ -32,32 +33,42 @@ TEST(RollerGate, OpenOnlyWithAFreshReleaseAndTheTeachersAuthority) {
   EXPECT_EQ(evaluateRollerGate(open()), RollerBlock::kNone);
 }
 
+TEST(RollerGate, DefaultsRequireTheEstopButNotTheAuthority) {
+  RollerGateInputs in;
+  EXPECT_TRUE(in.estop.required);
+  EXPECT_FALSE(in.authority.required);
+  in.estop.known = true;
+  in.estop.active = false;
+  EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kNone);
+}
+
 TEST(RollerGate, NothingHeardIsClosedEstopFirst) {
   RollerGateInputs in;
+  in.authority.required = true;
   EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kEstopUnknown);
-  in.estop_known = true;
-  in.estop_active = false;
+  in.estop.known = true;
+  in.estop.active = false;
   EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kAuthorityUnknown);
 }
 
 TEST(RollerGate, PressedOrSilentEstopCloses) {
   auto in = open();
-  in.estop_active = true;
+  in.estop.active = true;
   EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kEstopActive);
   in = open();
-  in.estop_age_sec = 1.5;
+  in.estop.age_sec = 1.5;
   EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kEstopStale);
-  in.estop_age_sec = std::numeric_limits<double>::quiet_NaN();
+  in.estop.age_sec = std::numeric_limits<double>::quiet_NaN();
   EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kEstopStale);
 }
 
 TEST(RollerGate, DiagnosticOptOutStillStopsOnAPressedEstop) {
   auto in = open();
-  in.require_estop = false;
-  in.estop_known = false;
+  in.estop.required = false;
+  in.estop.known = false;
   EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kNone);
-  in.estop_known = true;
-  in.estop_active = true;
+  in.estop.known = true;
+  in.estop.active = true;
   EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kEstopActive);
 }
 
@@ -65,45 +76,46 @@ TEST(RollerGate, DiagnosticOptOutStillStopsOnAPressedEstop) {
 // roller may spin with nothing heard, a silent E-stop is not a stop, a pressed one still is.
 TEST(RollerGate, PracticeWithoutGpioRefAndAuthoritySpinsWithNothingHeard) {
   RollerGateInputs in;  // nothing heard
-  in.require_estop = false;
-  in.require_authority = false;
+  in.estop.required = false;
+  in.authority.required = false;
   EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kNone);
-  in.estop_known = true;
-  in.estop_active = false;
-  in.estop_age_sec = 30.0;
+  in.estop.known = true;
+  in.estop.active = false;
+  in.estop.age_sec = 30.0;
   EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kNone);
-  in.estop_active = true;
+  in.estop.active = true;
   EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kEstopActive);
 }
 
 // The teacher's authority is not an emergency stop: it decides on its own when opted in.
 TEST(RollerGate, AuthorityIsIndependentOfTheEstop) {
   RollerGateInputs in;  // nothing heard
-  in.require_estop = false;
+  in.estop.required = false;
+  in.authority.required = true;
   EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kAuthorityUnknown);
   EXPECT_FALSE(esc_motor_control_cpp::isRollerEstopBlock(evaluateRollerGate(in)));
-  in.authority_known = true;
-  in.authority_allowed = false;
-  in.authority_age_sec = 0.1;
+  in.authority.known = true;
+  in.authority.allowed = false;
+  in.authority.age_sec = 0.1;
   EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kAuthorityOff);
   EXPECT_FALSE(esc_motor_control_cpp::isRollerEstopBlock(evaluateRollerGate(in)));
 }
 
 TEST(RollerGate, AuthorityIsALease) {
   auto in = open();
-  in.authority_allowed = false;
+  in.authority.allowed = false;
   EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kAuthorityOff);
   in = open();
-  in.authority_age_sec = 1.2;
+  in.authority.age_sec = 1.2;
   EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kAuthorityStale);
-  in.authority_timeout_sec = 0.0;  // invalid: falls back to 1.0, never endless
+  in.authority.timeout_sec = 0.0;  // invalid: falls back to 1.0, never endless
   EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kAuthorityStale);
 }
 
 TEST(RollerGate, CompetitionDoesNotNeedTheClassroomHeartbeat) {
   auto in = open();
-  in.require_authority = false;
-  in.authority_known = false;
+  in.authority.required = false;
+  in.authority.known = false;
   EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kNone);
 }
 
@@ -113,4 +125,33 @@ TEST(RollerGate, ReasonsAreSeparate) {
   EXPECT_TRUE(esc_motor_control_cpp::isRollerAuthorityBlock(RollerBlock::kAuthorityStale));
   EXPECT_FALSE(esc_motor_control_cpp::isRollerAuthorityBlock(RollerBlock::kEstopActive));
   EXPECT_STREQ(esc_motor_control_cpp::rollerBlockName(RollerBlock::kAuthorityOff), "authority_off");
+}
+
+// Disabled means disabled: an authority that is not required is never looked at.
+TEST(RollerGate, DisabledAuthorityIsNeverLookedAt) {
+  esc_motor_control_cpp::RollerAuthorityInputs authority;
+  authority.required = false;
+  for (const bool known : {false, true}) {
+    for (const bool allowed : {false, true}) {
+      for (const double age : {0.0, 5.0, std::numeric_limits<double>::quiet_NaN()}) {
+        authority.known = known;
+        authority.allowed = allowed;
+        authority.age_sec = age;
+        EXPECT_EQ(esc_motor_control_cpp::evaluateRollerAuthority(authority), RollerBlock::kNone);
+      }
+    }
+  }
+}
+
+// A not-required E-stop only stops on a received pressed state.
+TEST(RollerGate, NotRequiredEstopOnlyStopsWhenPressed) {
+  esc_motor_control_cpp::RollerEstopInputs estop;
+  estop.required = false;
+  EXPECT_EQ(esc_motor_control_cpp::evaluateRollerEstop(estop), RollerBlock::kNone);
+  estop.known = true;
+  estop.active = false;
+  estop.age_sec = 3600.0;
+  EXPECT_EQ(esc_motor_control_cpp::evaluateRollerEstop(estop), RollerBlock::kNone);
+  estop.active = true;
+  EXPECT_EQ(esc_motor_control_cpp::evaluateRollerEstop(estop), RollerBlock::kEstopActive);
 }

@@ -154,6 +154,11 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
   }
   roller_status_timer_ = this->create_wall_timer(
       200ms, std::bind(&EscMotorControlComponent::publish_roller_status, this));
+  // The gate as it starts (nothing heard yet), so the first change is logged against it.
+  {
+    std::lock_guard<std::mutex> guard(lock_);
+    gate_ = evaluate_gate_locked();
+  }
   // Leases (E-stop silence, authority) expire without a message: check them periodically.
   gate_timer_ =
       this->create_wall_timer(100ms, std::bind(&EscMotorControlComponent::apply_gate, this));
@@ -368,16 +373,19 @@ void EscMotorControlComponent::authority_callback(
 RollerBlock EscMotorControlComponent::evaluate_gate_locked() const {
   const double now = steady_now_sec();
   RollerGateInputs in;
-  in.require_estop = require_emergency_stop_;
-  in.estop_known = have_estop_msg_;
-  in.estop_active = emergency_stop_active_;
-  in.estop_age_sec = have_estop_msg_ ? now - last_estop_rx_sec_ : 0.0;
-  in.estop_timeout_sec = emergency_stop_timeout_sec_;
-  in.require_authority = require_authority_;
-  in.authority_known = have_authority_msg_;
-  in.authority_allowed = authority_allowed_;
-  in.authority_age_sec = have_authority_msg_ ? now - last_authority_rx_sec_ : 0.0;
-  in.authority_timeout_sec = authority_timeout_sec_;
+  in.estop.required = require_emergency_stop_;
+  in.estop.known = have_estop_msg_;
+  in.estop.active = emergency_stop_active_;
+  in.estop.age_sec = have_estop_msg_ ? now - last_estop_rx_sec_ : 0.0;
+  in.estop.timeout_sec = emergency_stop_timeout_sec_;
+  // The teacher's authority is a separate permission; disabled (the default) it is not looked at.
+  in.authority.required = require_authority_;
+  if (require_authority_) {
+    in.authority.known = have_authority_msg_;
+    in.authority.allowed = authority_allowed_;
+    in.authority.age_sec = have_authority_msg_ ? now - last_authority_rx_sec_ : 0.0;
+    in.authority.timeout_sec = authority_timeout_sec_;
+  }
   return evaluateRollerGate(in);
 }
 

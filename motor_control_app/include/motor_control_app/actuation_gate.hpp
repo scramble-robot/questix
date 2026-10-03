@@ -9,9 +9,18 @@
 
 #include <cmath>
 
-// Whether the drive may actuate at all right now: the E-stop state and the teacher's runtime
-// authority (practice), both fail-closed, plus a stop that could not be confirmed. ROS-free and
-// clock-injected (ages in seconds of the node's steady clock) so every rule is unit-tested.
+// Whether the drive may actuate at all right now. Two separate concepts are judged separately
+// and only then combined:
+//
+// * the emergency stop (a safety function, /emergency_stop): evaluateEstop. With
+//   EstopInputs::required (questix_core: enable_gpio_ref) an unheard or silent E-stop counts as
+//   pressed; without it only a received pressed E-stop stops.
+// * the teacher's runtime authority (a permission, not an emergency stop, /actuation_authority):
+//   evaluateAuthority. It is a practice opt-in; when not required it is never looked at and
+//   always allows.
+//
+// plus a stop that could not be confirmed. ROS-free and clock-injected (ages in seconds of the
+// node's steady clock) so every rule is unit-tested.
 //
 // Separate from the lifecycle: an ACTIVE node keeps polling feedback (passive telemetry, only a
 // successfully sent zero frame is ever re-sent) while this gate is closed; it only decides
@@ -22,30 +31,37 @@ namespace motor_control_app::actuation_gate {
 enum class Block {
   kNone,              // may actuate (a fresh command is still needed)
   kStopFault,         // a safety stop could not be sent: stays closed until a zero succeeds
-  kEstopUnknown,      // /emergency_stop never received
+  kEstopUnknown,      // /emergency_stop never received (only when the E-stop is required)
   kEstopActive,       // E-stop pressed
-  kEstopStale,        // /emergency_stop received once, then silent for longer than its timeout
-  kAuthorityUnknown,  // no runtime authority heartbeat received
-  kAuthorityOff,      // the teacher's authority says drive off
-  kAuthorityStale,    // heartbeat silent for longer than its lease
+  kEstopStale,        // /emergency_stop received once, then silent (only when required)
+  kAuthorityUnknown,  // no runtime authority heartbeat received (only when opted in)
+  kAuthorityOff,      // the teacher's authority says drive off (only when opted in)
+  kAuthorityStale,    // heartbeat silent for longer than its lease (only when opted in)
+};
+
+// The emergency stop: /emergency_stop (questix_msgs/EmergencyStop).
+struct EstopInputs {
+  // questix_core passes enable_gpio_ref (operation_manager, the only publisher, runs only then).
+  bool required{true};
+  bool known{false};
+  bool active{true};
+  double age_sec{0.0};
+  double timeout_sec{1.0};  // <= 0 or non-finite: no staleness check
+};
+
+// The teacher's runtime authority: questix_msgs/ActuationAuthority (one flag of it). A
+// permission, not an emergency stop; the default is "not required" (practice opt-in).
+struct AuthorityInputs {
+  bool required{false};
+  bool known{false};
+  bool allowed{false};
+  double age_sec{0.0};
+  double timeout_sec{1.0};  // <= 0 or non-finite: treated as 1.0 (a lease must expire)
 };
 
 struct Inputs {
-  // /emergency_stop (questix_msgs/EmergencyStop). questix_core sets require_estop from
-  // enable_gpio_ref (operation_manager, its only publisher, runs only then); a received pressed
-  // E-stop always closes the gate.
-  bool require_estop{true};
-  bool estop_known{false};
-  bool estop_active{true};
-  double estop_age_sec{0.0};
-  double estop_timeout_sec{1.0};  // <= 0 or non-finite: no staleness check
-  // The teacher's runtime authority (questix_msgs/ActuationAuthority): a permission, not an
-  // E-stop. The node passes its require_runtime_actuation_authority (practice opt-in).
-  bool require_authority{true};
-  bool authority_known{false};
-  bool authority_allowed{false};
-  double authority_age_sec{0.0};
-  double authority_timeout_sec{1.0};  // <= 0 or non-finite: treated as 1.0 (a lease must expire)
+  EstopInputs estop;
+  AuthorityInputs authority;
   bool stop_fault{false};
 };
 
@@ -62,41 +78,59 @@ inline double authorityLease(double timeout_sec) {
   return std::isfinite(timeout_sec) && timeout_sec > 0.0 ? timeout_sec : kDefaultLeaseSec;
 }
 
+// The E-stop alone: kNone (released, or not required and not heard), or an E-stop reason.
+inline Block evaluateEstop(const EstopInputs& in) {
+  if (!in.known) {
+    return in.required ? Block::kEstopUnknown : Block::kNone;
+  }
+  if (in.active) {
+    return Block::kEstopActive;  // a received pressed E-stop always stops
+  }
+  if (in.required && isStale(in.age_sec, in.timeout_sec)) {
+    return Block::kEstopStale;
+  }
+  return Block::kNone;
+}
+
+// The teacher's authority alone: kNone (allowed, or not required), or an authority reason.
+// Not required means disabled: none of the other fields is looked at.
+inline Block evaluateAuthority(const AuthorityInputs& in) {
+  if (!in.required) {
+    return Block::kNone;
+  }
+  if (!in.known) {
+    return Block::kAuthorityUnknown;
+  }
+  // A lease: silence always closes it, even when the last heartbeat said "allowed".
+  if (!(in.age_sec <= authorityLease(in.timeout_sec))) {
+    return Block::kAuthorityStale;
+  }
+  if (!in.allowed) {
+    return Block::kAuthorityOff;
+  }
+  return Block::kNone;
+}
+
+// Both, plus the stop fault: the first reason in Block order.
 inline Block evaluate(const Inputs& in) {
   if (in.stop_fault) {
     return Block::kStopFault;
   }
-  if (in.require_estop) {
-    if (!in.estop_known) {
-      return Block::kEstopUnknown;
-    }
-    if (in.estop_active) {
-      return Block::kEstopActive;
-    }
-    if (isStale(in.estop_age_sec, in.estop_timeout_sec)) {
-      return Block::kEstopStale;
-    }
-  } else if (in.estop_known && in.estop_active) {
-    return Block::kEstopActive;  // opted out of requiring it, but a pressed E-stop still stops
+  const Block estop = evaluateEstop(in.estop);
+  if (estop != Block::kNone) {
+    return estop;
   }
-  if (in.require_authority) {
-    if (!in.authority_known) {
-      return Block::kAuthorityUnknown;
-    }
-    // A lease: silence always closes it, even when the last heartbeat said "allowed".
-    if (!(in.authority_age_sec <= authorityLease(in.authority_timeout_sec))) {
-      return Block::kAuthorityStale;
-    }
-    if (!in.authority_allowed) {
-      return Block::kAuthorityOff;
-    }
-  }
-  return Block::kNone;
+  return evaluateAuthority(in.authority);
 }
 
 inline bool isEstopBlock(Block block) {
   return block == Block::kEstopUnknown || block == Block::kEstopActive ||
          block == Block::kEstopStale;
+}
+
+inline bool isAuthorityBlock(Block block) {
+  return block == Block::kAuthorityUnknown || block == Block::kAuthorityOff ||
+         block == Block::kAuthorityStale;
 }
 
 inline const char* blockName(Block block) {

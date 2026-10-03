@@ -149,7 +149,20 @@ private:
   void authorityCallback(const questix_msgs::msg::ActuationAuthority::SharedPtr msg);
 
   /**
-   * @brief 現在の E-stop・実行時許可・stop fault の入力を組み立てる（ages は steady clock）
+   * @brief 非常停止（/emergency_stop）の入力を組み立てる（age は steady clock）
+   */
+  actuation_gate::EstopInputs estopInputs() const;
+
+  /**
+   * @brief 教員の実行時許可（/actuation_authority）の入力を組み立てる。非常停止とは別の概念。
+   *
+   * require_runtime_actuation_authority=false（既定）では required=false だけを返し、
+   * 受信状態は一切見ない（購読も作らない）。
+   */
+  actuation_gate::AuthorityInputs authorityInputs() const;
+
+  /**
+   * @brief 非常停止・実行時許可・stop fault をまとめたゲート入力
    */
   actuation_gate::Inputs gateInputs() const;
 
@@ -161,7 +174,8 @@ private:
   actuation_gate::Block applyGate(bool stopped_now = false);
 
   /**
-   * @brief 非常停止として扱っている状態か（押下・未受信・途絶。実行時許可・stop fault とは別）
+   * @brief 非常停止として扱っている状態か（押下、require_emergency_stop の時は未受信・途絶も。
+   *        実行時許可・stop fault とは別）
    */
   bool estopEngaged() const;
 
@@ -371,12 +385,12 @@ private:
   bool emergency_stop_active_;
 
   // E-stop の受信状態（コンストラクタで読むパラメータ。実行時変更は拒否）
-  bool require_emergency_stop_{true};       // false は単体診断の明示 opt-out のみ
+  bool require_emergency_stop_{true};       // questix_core: enable_gpio_ref
   double emergency_stop_timeout_sec_{1.0};  // 受信後の途絶判定 [s]。<=0 で無効
   bool have_estop_msg_{false};
   std::chrono::steady_clock::time_point last_estop_rx_{};
 
-  // 教員の実行時許可（練習: true、大会: false）。コンストラクタで読む
+  // 教員の実行時許可（非常停止とは別の概念。練習での opt-in、既定 false）。コンストラクタで読む
   bool require_authority_{false};
   std::string authority_topic_{"/actuation_authority"};
   double authority_timeout_sec_{1.0};  // リース [s]。無効値は 1.0
@@ -387,7 +401,7 @@ private:
   // 停止指令を送れなかった（両輪へのゼロ送信成功まで閉じたまま、stop_retry_period で再送）
   bool stop_fault_{false};
   std::chrono::steady_clock::time_point last_stop_attempt_{};
-  // 前回評価したゲートの理由（閉じる変化の検出とログ用）
+  // 前回評価したゲートの理由（閉じる変化の検出とログ用）。コンストラクタで初期評価する
   actuation_gate::Block last_block_{actuation_gate::Block::kEstopUnknown};
 };
 

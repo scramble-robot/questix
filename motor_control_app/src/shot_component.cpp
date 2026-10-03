@@ -529,21 +529,21 @@ bool ShotComponent::estopBlocks() const {
 }
 
 actuation_gate::Block ShotComponent::authorityBlock() const {
+  // 教員の許可だけを見る（非常停止は estopBlocks() が別の概念として扱う）。無効なら何も見ない。
   if (!require_authority_) {
     return actuation_gate::Block::kNone;
   }
-  actuation_gate::Inputs in;
-  in.require_estop = false;  // E-stop は estopBlocks() が別の理由として扱う
-  in.require_authority = true;
-  in.authority_known = have_authority_msg_;
-  in.authority_allowed = authority_launcher_allowed_;
-  in.authority_age_sec =
+  actuation_gate::AuthorityInputs in;
+  in.required = true;
+  in.known = have_authority_msg_;
+  in.allowed = authority_launcher_allowed_;
+  in.age_sec =
       have_authority_msg_
           ? std::chrono::duration<double>(std::chrono::steady_clock::now() - last_authority_rx_)
                 .count()
           : 0.0;
-  in.authority_timeout_sec = authority_timeout_sec_;
-  return actuation_gate::evaluate(in);
+  in.timeout_sec = authority_timeout_sec_;
+  return actuation_gate::evaluateAuthority(in);
 }
 
 void ShotComponent::authorityCallback(const questix_msgs::msg::ActuationAuthority::SharedPtr msg) {

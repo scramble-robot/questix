@@ -79,7 +79,7 @@ def wait_for_parameter(node_name, parameter_name, environment):
         if last_result.returncode == 0:
             value_lines = [
                 line for line in last_result.stdout.splitlines()
-                if 'values are:' in line
+                if 'values are:' in line or 'value is:' in line
             ]
             assert value_lines, last_result.stdout
             return value_lines[-1]
@@ -203,6 +203,80 @@ def test_practice_core_launch_keeps_gpio_safety_nodes_alive():
             time.sleep(0.2)
         assert expected_nodes <= observed_nodes
         assert process.poll() is None
+    finally:
+        output = stop_process(process)
+    assert 'InvalidParameterValueException' not in output
+    assert 'parameter_value_from failed' not in output
+
+
+def topic_subscription_count(topic, environment):
+    """Return how many subscriptions the graph shows for a topic (0 when it does not exist)."""
+    result = run_command(['ros2', 'topic', 'info', topic, '--no-daemon'], environment)
+    for line in result.stdout.splitlines():
+        if line.startswith('Subscription count:'):
+            return int(line.split(':', 1)[1])
+    return 0
+
+
+ACTUATING_NODES = ('/drive_component', '/shot_component', '/esc_motor_control')
+
+
+@pytest.mark.parametrize(
+    ('launch_arguments', 'expect_estop_required', 'expect_authority_required'),
+    [
+        # Practice without the GPIO safety path (ENABLE_GPIO_REF=false): as 3.2.0, nothing to
+        # wait for, and the teacher's authority (a permission) is off unless opted in.
+        (['enable_gpio_ref:=false'], False, False),
+        # Practice with the GPIO safety path: the E-stop is required, the authority still is not.
+        (['enable_gpio_ref:=true'], True, False),
+        # A practice opt-in to the teacher's authority.
+        (['enable_gpio_ref:=false', 'require_runtime_actuation_authority:=true'], False, True),
+        # Competition never depends on the classroom heartbeat, even when asked to.
+        (['enable_gpio_ref:=true', 'enable_autoreferee:=true',
+          'require_runtime_actuation_authority:=true'], True, False),
+    ],
+)
+def test_core_launch_passes_the_estop_and_authority_switches(
+        launch_arguments, expect_estop_required, expect_authority_required):
+    """
+    Start questix_core with drive and launcher and read what every actuating node got.
+
+    Disabled must mean disabled: without the opt-in no node subscribes to /actuation_authority.
+    """
+    environment = isolated_ros_environment(10 + len(launch_arguments) * 3 +
+                                           int(expect_estop_required) +
+                                           2 * int(expect_authority_required))
+    arguments = ['enable_lidar:=false', 'enable_shot:=true', 'enable_drive:=true',
+                 'enable_rviz:=false', 'controller_type:=dualshock']
+    if not any(argument.startswith('enable_autoreferee:=') for argument in launch_arguments):
+        arguments.append('enable_autoreferee:=false')
+    process = start_process(
+        ['ros2', 'launch', 'questix_launcher', 'questix_core.launch.xml',
+         *arguments, *launch_arguments],
+        environment,
+    )
+    expected_estop = f'Boolean value is: {expect_estop_required}'
+    expected_authority = f'Boolean value is: {expect_authority_required}'
+    try:
+        for node in ACTUATING_NODES:
+            assert wait_for_parameter(node, 'require_emergency_stop', environment) == (
+                expected_estop), node
+            assert wait_for_parameter(
+                node, 'require_runtime_actuation_authority', environment) == (
+                expected_authority), node
+        # Graph discovery is not instant: wait for the expected count (the opt-in), or watch for
+        # a while that none appears (disabled).
+        expected_subscriptions = len(ACTUATING_NODES) if expect_authority_required else 0
+        deadline = time.monotonic() + 15.0
+        subscriptions = topic_subscription_count('/actuation_authority', environment)
+        while time.monotonic() < deadline:
+            if expect_authority_required and subscriptions == expected_subscriptions:
+                break
+            if not expect_authority_required and subscriptions != 0:
+                break
+            time.sleep(0.2)
+            subscriptions = topic_subscription_count('/actuation_authority', environment)
+        assert subscriptions == expected_subscriptions
     finally:
         output = stop_process(process)
     assert 'InvalidParameterValueException' not in output
