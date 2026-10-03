@@ -43,8 +43,7 @@ DriveComponent::DriveComponent(const rclcpp::NodeOptions& options)
     : rclcpp_lifecycle::LifecycleNode("drive_component", options),
       last_cmd_time_(0, 0, RCL_ROS_TIME),
       cmd_timeout_sec_(1.0),
-      motor_initialized_(false),
-      emergency_stop_active_(true) {
+      motor_initialized_(false) {
   // パラメーター宣言（取得は on_configure で行い、cleanup→configure で再読込できるようにする）
   declareParameters();
 
@@ -63,26 +62,15 @@ DriveComponent::DriveComponent(const rclcpp::NodeOptions& options)
                 requested_retry_period);
   }
 
-  // /emergency_stop 購読は lifecycle 状態に依存せず常時生かす（on_cleanup で
-  // 破棄される twist 購読と異なり、unconfigured での configure リトライ中も
-  // 状態を追従する）。transient_local なので起動時に最新のラッチ状態を受信する。
-  emergency_stop_topic_ = this->get_parameter("emergency_stop_topic").as_string();
-  require_emergency_stop_ = this->get_parameter("require_emergency_stop").as_bool();
-  emergency_stop_timeout_sec_ = this->get_parameter("emergency_stop_timeout_sec").as_double();
-  if (!emergency_stop_topic_.empty()) {
-    emergency_stop_sub_ = this->create_subscription<questix_msgs::msg::EmergencyStop>(
-        emergency_stop_topic_, rclcpp::QoS(1).reliable().transient_local(),
-        std::bind(&DriveComponent::emergencyStopCallback, this, std::placeholders::_1));
-  } else if (require_emergency_stop_) {
-    RCLCPP_ERROR(this->get_logger(),
-                 "emergency_stop_topic is empty but require_emergency_stop=true: the drive will "
-                 "never move (set require_emergency_stop:=false only for a diagnostic run)");
-  }
-  if (!require_emergency_stop_) {
-    RCLCPP_WARN(this->get_logger(),
-                "require_emergency_stop=false (diagnostic opt-out): the drive may move before "
-                "/emergency_stop is heard. Never use this in an integrated launch");
-  }
+  // /emergency_stop は共通の EmergencyStopMonitor（questix_safety）が購読・判定する。
+  // lifecycle 状態に依存せず常時生かす（on_cleanup で破棄される twist 購読と異なり、
+  // unconfigured での configure リトライ中も状態を追従する）。
+  estop_monitor_ = std::make_unique<questix_safety::EmergencyStopMonitor>(
+      *this, questix_safety::EmergencyStopMonitor::declareAndRead(*this), "drive",
+      [this](const questix_msgs::msg::EmergencyStop& msg,
+             const questix_safety::EmergencyStopMonitor::Change& change) {
+        onEmergencyStop(msg, change);
+      });
 
   // 教員の許可（練習時）。volatile + keep-last(1): 許可をラッチせず、発行元が止まれば
   // リース（teacher_permission_timeout_sec）切れで閉じる。
@@ -1155,18 +1143,17 @@ void DriveComponent::controlTimerCallback() {
   }
 }
 
-void DriveComponent::emergencyStopCallback(const questix_msgs::msg::EmergencyStop::SharedPtr msg) {
-  const bool was_active = emergency_stop_active_;
-  emergency_stop_active_ = msg->active;
-  have_estop_msg_ = true;
-  last_estop_rx_ = std::chrono::steady_clock::now();
+void DriveComponent::onEmergencyStop(const questix_msgs::msg::EmergencyStop& msg,
+                                     const questix_safety::EmergencyStopMonitor::Change& change) {
+  // 未受信の間は押下扱い（was_active=true）。受信状態そのものは estop_monitor_ が持つ。
+  const bool was_active = change.was_active;
 
   const bool motor_ready = motor_initialized_ && diff_drive_ != nullptr;
   bool stopped_now = false;
-  switch (drive_watchdog::decideEstopAction(was_active, msg->active, motor_ready)) {
+  switch (drive_watchdog::decideEstopAction(was_active, msg.active, motor_ready)) {
     case drive_watchdog::EstopAction::kStopNow:
       RCLCPP_WARN(this->get_logger(), "非常停止を受信 (source=%s, reason=%s)。モータを停止します",
-                  msg->source.c_str(), msg->reason.c_str());
+                  msg.source.c_str(), msg.reason.c_str());
       // スロットル無しの即時停止 + 目標破棄。物理非常停止でモータ電源が落ちている場合は
       // シリアル書込みが失敗し得る。その場合は stop fault として閉じたまま再送する
       // （teardown へはエスカレートしない。デバイス消失は既存の configure リトライ経路）。
@@ -1177,13 +1164,13 @@ void DriveComponent::emergencyStopCallback(const questix_msgs::msg::EmergencySto
       RCLCPP_INFO(this->get_logger(),
                   "非常停止が解除されました (source=%s)。twist 受付を再開します"
                   "（モータは次の指令まで停止のまま）",
-                  msg->source.c_str());
+                  msg.source.c_str());
       break;
     case drive_watchdog::EstopAction::kNone:
-      if (msg->active && !was_active) {
+      if (msg.active && !was_active) {
         RCLCPP_WARN(this->get_logger(),
                     "非常停止を受信 (source=%s, reason=%s)。モータ未初期化のため指令なし",
-                    msg->source.c_str(), msg->reason.c_str());
+                    msg.source.c_str(), msg.reason.c_str());
       }
       break;
   }
@@ -1200,16 +1187,7 @@ void DriveComponent::teacherPermissionCallback(
   applyGate();
 }
 
-actuation_gate::EstopInputs DriveComponent::estopInputs() const {
-  actuation_gate::EstopInputs in;
-  in.required = require_emergency_stop_;
-  in.known = have_estop_msg_;
-  in.active = emergency_stop_active_;
-  in.age_sec =
-      have_estop_msg_ ? secondsSince(last_estop_rx_, std::chrono::steady_clock::now()) : 0.0;
-  in.timeout_sec = emergency_stop_timeout_sec_;
-  return in;
-}
+actuation_gate::EstopInputs DriveComponent::estopInputs() const { return estop_monitor_->inputs(); }
 
 actuation_gate::TeacherPermissionInputs DriveComponent::teacherPermissionInputs() const {
   actuation_gate::TeacherPermissionInputs in;
@@ -1236,7 +1214,7 @@ actuation_gate::Inputs DriveComponent::gateInputs() const {
 
 bool DriveComponent::estopEngaged() const {
   // Only the E-stop: the teacher's permission is a permission and never reads as an E-stop.
-  return actuation_gate::evaluateEstop(estopInputs()) != actuation_gate::Block::kNone;
+  return estop_monitor_->engaged();
 }
 
 actuation_gate::Block DriveComponent::applyGate(bool stopped_now) {

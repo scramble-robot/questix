@@ -16,6 +16,7 @@
 #include "esc_motor_control_cpp/roller_lab_logic.hpp"
 #include "questix_msgs/msg/actuation_authority.hpp"
 #include "questix_msgs/msg/emergency_stop.hpp"
+#include "questix_safety/emergency_stop_monitor.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/joy.hpp"
 #include "std_msgs/msg/float32.hpp"
@@ -40,7 +41,9 @@ private:
 
   // ---------- Callbacks ----------
   void joy_callback(const sensor_msgs::msg::Joy::SharedPtr msg);
-  void emergency_stop_callback(const questix_msgs::msg::EmergencyStop::SharedPtr msg);
+  // /emergency_stop を受信したとき（estop_monitor_ から呼ばれる）。
+  void on_emergency_stop(const questix_msgs::msg::EmergencyStop& msg,
+                         const questix_safety::EmergencyStopMonitor::Change& change);
   void teacher_permission_callback(const questix_msgs::msg::ActuationAuthority::SharedPtr msg);
   // Re-evaluates the gate (100 ms timer and every E-stop / teacher permission message); on closing
   // it stops the roller, clears the latch and locks the lab.
@@ -72,8 +75,6 @@ private:
   bool test_mode_;
   std::string joy_topic_;
   std::string status_topic_;
-  // 統一緊急停止トピック（questix_msgs/EmergencyStop, 入力）。空文字で連動無効。
-  std::string emergency_stop_topic_;
   int min_pulse_width_us_;
   int max_pulse_width_us_;
   int neutral_pulse_width_us_;
@@ -85,20 +86,13 @@ private:
   double lab_max_speed_{0.8};
   double lab_joy_quiet_sec_{1.0};
 
-  // E-stop reception (require_emergency_stop=false is an explicit diagnostic opt-out only)
-  bool require_emergency_stop_{true};
-  double emergency_stop_timeout_sec_{1.0};
-  // The teacher's permission (practice true, competition false)
+  // The teacher's permission (a practice opt-in; never in competition)
   bool require_teacher_permission_{false};
   std::string teacher_permission_topic_{"/actuation_authority"};
   double teacher_permission_timeout_sec_{1.0};
 
   // ---------- State ----------
   double current_speed_{0.0};
-  // Last /emergency_stop active flag received (the gate also needs have_estop_msg_).
-  bool emergency_stop_active_{false};
-  bool have_estop_msg_{false};
-  double last_estop_rx_sec_{0.0};  // steady clock
   bool have_teacher_permission_msg_{false};
   bool teacher_permission_allowed_{false};
   double last_teacher_permission_rx_sec_{0.0};  // steady clock
@@ -112,7 +106,8 @@ private:
 
   // ---------- ROS I/O ----------
   rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joy_sub_;
-  rclcpp::Subscription<questix_msgs::msg::EmergencyStop>::SharedPtr emergency_stop_sub_;
+  // /emergency_stop: subscription and state (the shared questix_safety check)
+  std::unique_ptr<questix_safety::EmergencyStopMonitor> estop_monitor_;
   // volatile + keep-last(1): the teacher permission is never latched
   rclcpp::Subscription<questix_msgs::msg::ActuationAuthority>::SharedPtr teacher_permission_sub_;
   rclcpp::TimerBase::SharedPtr gate_timer_;

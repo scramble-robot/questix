@@ -11,6 +11,7 @@
 #include <memory>
 #include <questix_msgs/msg/actuation_authority.hpp>
 #include <questix_msgs/msg/emergency_stop.hpp>
+#include <questix_safety/emergency_stop_monitor.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_components/register_node_macro.hpp>
 #include <rclcpp_lifecycle/lifecycle_node.hpp>
@@ -88,7 +89,9 @@ private:
   void fireTimerCallback();
   void cancelShotSequence();
   void autoStartTimerCallback();
-  void emergencyStopCallback(const questix_msgs::msg::EmergencyStop::SharedPtr msg);
+  // /emergency_stop を受信したとき（estop_monitor_ から呼ばれる）。エッジで teardown / 自動起動。
+  void onEmergencyStop(const questix_msgs::msg::EmergencyStop& msg,
+                       const questix_safety::EmergencyStopMonitor::Change& change);
   void emergencyStopTimeoutCallback();
   void teacherPermissionCallback(const questix_msgs::msg::ActuationAuthority::SharedPtr msg);
   // 100 ms 周期: 実行時許可のリース切れ・変化を検出し、閉じたら teardown、開いたら自動起動。
@@ -133,18 +136,9 @@ private:
   int command_rate_limit_ms_;
   bool auto_start_;
   double connect_retry_period_sec_;
-  double emergency_stop_timeout_sec_;
-  // 非常停止連動トピック（空文字で連動無効、周期リトライのみ）
-  std::string emergency_stop_topic_;
-  // /emergency_stop の受信状況。未受信（have_estop_msg_=false）なら
-  // 非常停止状態が分からないため周期リトライにフォールバックする。
-  bool have_estop_msg_;
-  // 最終受信の active 値。true = 非常停止発動（旧 /gpio/controllable の否定に相当）
-  bool estop_active_;
+  // /emergency_stop の途絶で teardown した（次の受信まで押下扱い）。受信状態そのものは
+  // estop_monitor_ が持つ。
   bool estop_timed_out_;
-  std::chrono::steady_clock::time_point last_estop_msg_time_;
-  // 未受信の /emergency_stop を非常停止として扱うか（false は単体診断の明示 opt-out）
-  bool require_emergency_stop_{true};
   // 教員の許可（練習: true、大会: false）。コンストラクタで一度だけ読む
   bool require_teacher_permission_{false};
   std::string teacher_permission_topic_{"/actuation_authority"};
@@ -187,8 +181,9 @@ private:
   // these entities are split across callback groups, synchronize lifecycle/emergency-stop
   // state, timer pointers, runtime_fault_, teardown_pending_, is_shooting_, servo_controller_,
   // and servo serial I/O.
-  // lifecycle 状態に依存せず常時生かす（unconfigured でも非常停止解除を検知するため）
-  rclcpp::Subscription<questix_msgs::msg::EmergencyStop>::SharedPtr emergency_stop_sub_;
+  // /emergency_stop の購読と判定（questix_safety の共通チェック）。lifecycle 状態に依存せず
+  // 常時生かす（unconfigured でも非常停止解除を検知するため）
+  std::unique_ptr<questix_safety::EmergencyStopMonitor> estop_monitor_;
   rclcpp::TimerBase::SharedPtr auto_start_timer_;
   rclcpp::TimerBase::SharedPtr emergency_stop_timeout_timer_;
   // 教員の許可（volatile、ラッチしない）とリース判定タイマー

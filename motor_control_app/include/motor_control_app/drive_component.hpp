@@ -24,6 +24,7 @@
 #include "questix_msgs/msg/actuation_authority.hpp"
 #include "questix_msgs/msg/drive_status.hpp"
 #include "questix_msgs/msg/emergency_stop.hpp"
+#include "questix_safety/emergency_stop_monitor.hpp"
 #include "rcl_interfaces/msg/set_parameters_result.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_components/register_node_macro.hpp"
@@ -133,13 +134,15 @@ private:
   void publishOdometry(double linear, double angular, bool feedback_fresh, const rclcpp::Time& now);
 
   /**
-   * @brief /emergency_stop メッセージのコールバック関数
+   * @brief /emergency_stop を受信したとき（estop_monitor_ から呼ばれる）
    *
    * ライフサイクル状態に依存せず常時受信する。立ち上がりエッジで即時停止
    * （best-effort）、立ち下がりエッジで twist 受付を再開する。
    * @param msg 受信した EmergencyStop メッセージ
+   * @param change 初回受信か・直前の active（未受信の間は true）
    */
-  void emergencyStopCallback(const questix_msgs::msg::EmergencyStop::SharedPtr msg);
+  void onEmergencyStop(const questix_msgs::msg::EmergencyStop& msg,
+                       const questix_safety::EmergencyStopMonitor::Change& change);
 
   /**
    * @brief 教員の許可（/actuation_authority）のコールバック
@@ -253,8 +256,9 @@ private:
   // split across callback groups, synchronize motor_initialized_, diff_drive_, command state,
   // timer pointers, and all motor serial operations before enabling concurrent execution.
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr twist_subscription_;
-  // lifecycle 状態に依存せず常時生かす（コンストラクタで作成、on_cleanup でも破棄しない）
-  rclcpp::Subscription<questix_msgs::msg::EmergencyStop>::SharedPtr emergency_stop_sub_;
+  // /emergency_stop の購読と判定（questix_safety の共通チェック）。lifecycle 状態に依存せず
+  // 常時生かす（コンストラクタで作成、on_cleanup でも破棄しない）
+  std::unique_ptr<questix_safety::EmergencyStopMonitor> estop_monitor_;
   // 教員の許可（練習時のみ購読。volatile、ラッチしない）。E-stop 購読と同じく常時生かす
   rclcpp::Subscription<questix_msgs::msg::ActuationAuthority>::SharedPtr teacher_permission_sub_;
   // 型付きステータス（questix_msgs/DriveStatus）。契約は questix_msgs/README.md。
@@ -291,8 +295,6 @@ private:
   int max_motor_rpm_;
   double status_publish_rate_;
   std::string typed_status_topic_;  // 型付き DriveStatus トピック
-  // 統一緊急停止トピック（空文字で連動無効）。コンストラクタで一度だけ読む。
-  std::string emergency_stop_topic_;
 
   // 制御モード関連
   std::string control_mode_;  // "velocity" | "current"
@@ -381,14 +383,6 @@ private:
 
   // 状態フラグ
   bool motor_initialized_;
-  // 最後に受信した /emergency_stop の active。未受信の間は true（起動直後を解除扱いしない）
-  bool emergency_stop_active_;
-
-  // E-stop の受信状態（コンストラクタで読むパラメータ。実行時変更は拒否）
-  bool require_emergency_stop_{true};       // false は単体診断の明示 opt-out のみ
-  double emergency_stop_timeout_sec_{1.0};  // 受信後の途絶判定 [s]。<=0 で無効
-  bool have_estop_msg_{false};
-  std::chrono::steady_clock::time_point last_estop_rx_{};
 
   // 教員の許可（非常停止とは別の概念。練習での opt-in、既定 false）。コンストラクタで読む
   bool require_teacher_permission_{false};

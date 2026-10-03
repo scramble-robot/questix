@@ -68,8 +68,8 @@ DDT M0602C の Protocol 1 応答フレームをデコードした 1 モータ分
   - `enable_gpio_ref=false`(練習のみ、`operation_manager.no_gpio.yaml`、
     `gpio_safety_enabled: false`): GPIO を読まず `/gpio/controllable` も出さない。
     `active=false`、reason `released (no GPIO safety path)` を 100 ms 毎に出す。
-- **未受信はフェイルクローズ**: 購読側(drive_component / shot_component / esc_motor_control、
-  QUESTiX LAB ブリッジ)は構成によらず、**一度も受信していない間は「非常停止の状態が不明」
+- **未受信はフェイルクローズ**: 購読側(drive_component / shot_component / esc_motor_control は
+  共通の `questix_safety::EmergencyStopMonitor`、QUESTiX LAB ブリッジ)は構成によらず、**一度も受信していない間は「非常停止の状態が不明」
   として動かさない**(`require_emergency_stop: true`)。受信状態はモータとの通信
   (フィードバックの取得)とは別で、drive_component は動かさないまま実測の取得を続ける。
 - **staleness 検出**: 購読側は「一度以上受信した後に」`emergency_stop_timeout_sec`

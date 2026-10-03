@@ -7,6 +7,8 @@
 
 #include <cmath>
 
+#include "questix_safety/estop_check.hpp"
+
 namespace esc_motor_control_cpp {
 
 // Whether the roller may spin at all right now (ROS-free, clock-injected: ages in seconds of
@@ -14,8 +16,9 @@ namespace esc_motor_control_cpp {
 // the emergency stop (a safety function; with RollerEstopInputs::required, false only for an
 // explicit diagnostic opt-out, unknown and silent count as pressed) and the teacher's permission
 // (/actuation_authority; not an emergency stop; a practice opt-in, never looked at when not
-// required). The rules are the same as motor_control_app/actuation_gate.hpp (drive and shot);
-// the two packages do not depend on each other, so keep both headers and their tests in step.
+// required). The E-stop rule is the shared questix_safety one (estop_check.hpp), as for the drive
+// and the shot; the teacher permission rules match motor_control_app/actuation_gate.hpp (the two
+// packages do not depend on each other, so keep those and their tests in step).
 enum class RollerBlock {
   kNone,                      // may spin (a fresh press or lab command is still needed)
   kEstopUnknown,              // /emergency_stop never received (only when required)
@@ -26,13 +29,7 @@ enum class RollerBlock {
   kTeacherPermissionStale,    // heartbeat silent for longer than its lease (only when opted in)
 };
 
-struct RollerEstopInputs {
-  bool required{true};  // false only for an explicit diagnostic opt-out
-  bool known{false};
-  bool active{true};
-  double age_sec{0.0};
-  double timeout_sec{1.0};  // <= 0 or non-finite: no staleness check
-};
+using RollerEstopInputs = questix_safety::EstopInputs;
 
 struct RollerTeacherPermissionInputs {
   bool required{false};  // practice opt-in (require_teacher_permission)
@@ -47,26 +44,28 @@ struct RollerGateInputs {
   RollerTeacherPermissionInputs teacher_permission;
 };
 
-inline bool rollerSignalStale(double age_sec, double timeout_sec) {
-  return std::isfinite(timeout_sec) && timeout_sec > 0.0 && !(age_sec <= timeout_sec);
-}
-
 inline double rollerTeacherPermissionLease(double timeout_sec) {
   return std::isfinite(timeout_sec) && timeout_sec > 0.0 ? timeout_sec : 1.0;
 }
 
+// The shared E-stop state as this gate's reason.
+inline RollerBlock toRollerBlock(questix_safety::EstopState state) {
+  switch (state) {
+    case questix_safety::EstopState::kReleased:
+      return RollerBlock::kNone;
+    case questix_safety::EstopState::kUnknown:
+      return RollerBlock::kEstopUnknown;
+    case questix_safety::EstopState::kPressed:
+      return RollerBlock::kEstopActive;
+    case questix_safety::EstopState::kStale:
+      return RollerBlock::kEstopStale;
+  }
+  return RollerBlock::kEstopUnknown;  // fail closed on anything unexpected
+}
+
 // The E-stop alone: kNone (released, or not required and not heard), or an E-stop reason.
 inline RollerBlock evaluateRollerEstop(const RollerEstopInputs& in) {
-  if (!in.known) {
-    return in.required ? RollerBlock::kEstopUnknown : RollerBlock::kNone;
-  }
-  if (in.active) {
-    return RollerBlock::kEstopActive;  // a received pressed E-stop always stops
-  }
-  if (in.required && rollerSignalStale(in.age_sec, in.timeout_sec)) {
-    return RollerBlock::kEstopStale;
-  }
-  return RollerBlock::kNone;
+  return toRollerBlock(questix_safety::evaluateEstop(in));
 }
 
 // The teacher's permission alone. Not required means disabled: nothing else is looked at.

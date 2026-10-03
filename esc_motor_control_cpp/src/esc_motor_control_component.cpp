@@ -64,9 +64,6 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
   test_mode_ = this->get_parameter("test_mode").as_bool();
   joy_topic_ = this->get_parameter("joy_topic").as_string();
   status_topic_ = this->get_parameter("status_topic").as_string();
-  emergency_stop_topic_ = this->get_parameter("emergency_stop_topic").as_string();
-  require_emergency_stop_ = this->get_parameter("require_emergency_stop").as_bool();
-  emergency_stop_timeout_sec_ = this->get_parameter("emergency_stop_timeout_sec").as_double();
   require_teacher_permission_ = this->get_parameter("require_teacher_permission").as_bool();
   teacher_permission_topic_ = this->get_parameter("teacher_permission_topic").as_string();
   teacher_permission_timeout_sec_ = rollerTeacherPermissionLease(
@@ -101,22 +98,14 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
       joy_topic_, 1,
       std::bind(&EscMotorControlComponent::joy_callback, this, std::placeholders::_1));
 
-  // 統一緊急停止トピック。transient_local なので起動時に最新のラッチ状態を受信する
-  // （契約: questix_msgs/README.md）。
-  if (!emergency_stop_topic_.empty()) {
-    emergency_stop_sub_ = this->create_subscription<questix_msgs::msg::EmergencyStop>(
-        emergency_stop_topic_, rclcpp::QoS(1).reliable().transient_local(),
-        std::bind(&EscMotorControlComponent::emergency_stop_callback, this, std::placeholders::_1));
-  } else if (require_emergency_stop_) {
-    RCLCPP_ERROR(this->get_logger(),
-                 "emergency_stop_topic is empty but require_emergency_stop=true: the roller will "
-                 "never spin");
-  }
-  if (!require_emergency_stop_) {
-    RCLCPP_WARN(this->get_logger(),
-                "require_emergency_stop=false (diagnostic opt-out): the roller may spin before "
-                "/emergency_stop is heard. Never use this in an integrated launch");
-  }
+  // 統一緊急停止トピックは共通の EmergencyStopMonitor（questix_safety）が購読・判定する
+  // （transient_local なので起動時に最新のラッチ状態を受信する。契約: questix_msgs/README.md）。
+  estop_monitor_ = std::make_unique<questix_safety::EmergencyStopMonitor>(
+      *this, questix_safety::EmergencyStopMonitor::declareAndRead(*this), "roller",
+      [this](const questix_msgs::msg::EmergencyStop& msg,
+             const questix_safety::EmergencyStopMonitor::Change& change) {
+        on_emergency_stop(msg, change);
+      });
   if (require_teacher_permission_) {
     if (teacher_permission_topic_.empty()) {
       RCLCPP_ERROR(this->get_logger(),
@@ -322,21 +311,16 @@ void EscMotorControlComponent::joy_callback(const sensor_msgs::msg::Joy::SharedP
 // --------------------------------------------------------------------------
 // Emergency stop callback
 // --------------------------------------------------------------------------
-void EscMotorControlComponent::emergency_stop_callback(
-    const questix_msgs::msg::EmergencyStop::SharedPtr msg) {
-  if (!msg) {
-    return;
-  }
-
+void EscMotorControlComponent::on_emergency_stop(
+    const questix_msgs::msg::EmergencyStop& msg,
+    const questix_safety::EmergencyStopMonitor::Change& change) {
   EstopTransition transition;
   {
     std::lock_guard<std::mutex> guard(lock_);
     // set_motor_speed() は lock_ を取り直すため、ここでは保持したまま呼ばない。
     // 保持したまま呼ぶとデッドロックする。フラグ更新だけ行い、停止指令はロック解放後。
-    transition = decideEstopTransition(emergency_stop_active_, msg->active);
-    emergency_stop_active_ = msg->active;
-    have_estop_msg_ = true;
-    last_estop_rx_sec_ = steady_now_sec();
+    // 初回受信の前は「解除」から見た変化として扱う（初回の押下で停止、初回の解除はログのみ）。
+    transition = decideEstopTransition(change.first ? false : change.was_active, msg.active);
     if (transition.send_stop) {
       roller_lab_logic_.onEmergencyStop(true, steady_now_sec());
     }
@@ -344,12 +328,12 @@ void EscMotorControlComponent::emergency_stop_callback(
 
   if (transition.send_stop) {
     RCLCPP_WARN(this->get_logger(), "非常停止を受信 (source=%s, reason=%s)。モータを停止します",
-                msg->source.c_str(), msg->reason.c_str());
+                msg.source.c_str(), msg.reason.c_str());
     set_motor_speed(0.0);
   } else if (transition.log_release) {
     RCLCPP_INFO(this->get_logger(),
                 "非常停止が解除されました (source=%s)。フルスピードボタンの再押下まで停止のまま",
-                msg->source.c_str());
+                msg.source.c_str());
   }
   if (transition.send_stop || transition.log_release) {
     publish_roller_status();
@@ -374,11 +358,7 @@ void EscMotorControlComponent::teacher_permission_callback(
 RollerBlock EscMotorControlComponent::evaluate_gate_locked() const {
   const double now = steady_now_sec();
   RollerGateInputs in;
-  in.estop.required = require_emergency_stop_;
-  in.estop.known = have_estop_msg_;
-  in.estop.active = emergency_stop_active_;
-  in.estop.age_sec = have_estop_msg_ ? now - last_estop_rx_sec_ : 0.0;
-  in.estop.timeout_sec = emergency_stop_timeout_sec_;
+  in.estop = estop_monitor_->inputs();
   // The teacher's permission is a separate permission; disabled (the default) it is not looked at.
   in.teacher_permission.required = require_teacher_permission_;
   if (require_teacher_permission_) {

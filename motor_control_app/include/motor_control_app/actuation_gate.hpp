@@ -9,6 +9,8 @@
 
 #include <cmath>
 
+#include "questix_safety/estop_check.hpp"
+
 // Whether the drive may actuate at all right now. Two separate concepts are judged separately
 // and only then combined:
 //
@@ -40,15 +42,9 @@ enum class Block {
   kTeacherPermissionStale,    // heartbeat silent for longer than its lease (only when opted in)
 };
 
-// The emergency stop: /emergency_stop (questix_msgs/EmergencyStop).
-struct EstopInputs {
-  // false only for an explicit diagnostic opt-out (require_emergency_stop).
-  bool required{true};
-  bool known{false};
-  bool active{true};
-  double age_sec{0.0};
-  double timeout_sec{1.0};  // <= 0 or non-finite: no staleness check
-};
+// The emergency stop: /emergency_stop (questix_msgs/EmergencyStop). The rule and its inputs are
+// the shared questix_safety one (estop_check.hpp; the node gets them from EmergencyStopMonitor).
+using EstopInputs = questix_safety::EstopInputs;
 
 // The teacher's permission: questix_msgs/ActuationAuthority (one flag of it). A
 // permission, not an emergency stop; the default is "not required" (practice opt-in).
@@ -68,11 +64,7 @@ struct Inputs {
 
 inline constexpr double kDefaultLeaseSec = 1.0;
 
-// A signal received once is stale when it has been silent for longer than timeout_sec.
-// timeout_sec <= 0 or non-finite disables the check (E-stop only; see teacherPermissionLease).
-inline bool isStale(double age_sec, double timeout_sec) {
-  return std::isfinite(timeout_sec) && timeout_sec > 0.0 && !(age_sec <= timeout_sec);
-}
+using questix_safety::isStale;
 
 // The teacher permission is a lease: it always expires. An invalid timeout falls back to the
 // default.
@@ -80,18 +72,24 @@ inline double teacherPermissionLease(double timeout_sec) {
   return std::isfinite(timeout_sec) && timeout_sec > 0.0 ? timeout_sec : kDefaultLeaseSec;
 }
 
+// The shared E-stop state as this gate's reason.
+inline Block toBlock(questix_safety::EstopState state) {
+  switch (state) {
+    case questix_safety::EstopState::kReleased:
+      return Block::kNone;
+    case questix_safety::EstopState::kUnknown:
+      return Block::kEstopUnknown;
+    case questix_safety::EstopState::kPressed:
+      return Block::kEstopActive;
+    case questix_safety::EstopState::kStale:
+      return Block::kEstopStale;
+  }
+  return Block::kEstopUnknown;  // fail closed on anything unexpected
+}
+
 // The E-stop alone: kNone (released, or not required and not heard), or an E-stop reason.
 inline Block evaluateEstop(const EstopInputs& in) {
-  if (!in.known) {
-    return in.required ? Block::kEstopUnknown : Block::kNone;
-  }
-  if (in.active) {
-    return Block::kEstopActive;  // a received pressed E-stop always stops
-  }
-  if (in.required && isStale(in.age_sec, in.timeout_sec)) {
-    return Block::kEstopStale;
-  }
-  return Block::kNone;
+  return toBlock(questix_safety::evaluateEstop(in));
 }
 
 // The teacher's permission alone: kNone (allowed, or not required), or a teacher permission reason.
@@ -118,7 +116,7 @@ inline Block evaluate(const Inputs& in) {
   if (in.stop_fault) {
     return Block::kStopFault;
   }
-  const Block estop = evaluateEstop(in.estop);
+  const Block estop = toBlock(questix_safety::evaluateEstop(in.estop));
   if (estop != Block::kNone) {
     return estop;
   }

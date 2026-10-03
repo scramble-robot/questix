@@ -26,6 +26,7 @@
 - `esc_motor_control_cpp/`: C++ package for ESC/DDT motor control.
 - `joy_controller/`, `uart_joy_driver/`, `joy_gate/`, `gpio_reader/`: Input, gating, and GPIO-related packages.
 - `operation_manager/`: Operational state management.
+- `questix_safety/`: the shared `/emergency_stop` check (header-only `estop_check.hpp` + `EmergencyStopMonitor`). drive_component, shot_component and esc_motor_control use it for the subscription, the parameters and the fail-closed rule; do not reimplement E-stop reception in a node.
 - `launcher/`: Integrated entry point for ROS launch files. The ROS package name is `questix_launcher`.
 - `description_launch/`: URDF, RViz, and xacro assets.
 - `ansible/`, `scripts/`, `systemd/`: OS setup, ISO build tooling, and resident services.

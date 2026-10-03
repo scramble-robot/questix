@@ -40,12 +40,6 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
       command_rate_limit_ms_(50),
       auto_start_(true),
       connect_retry_period_sec_(3.0),
-      emergency_stop_timeout_sec_(1.0),
-      emergency_stop_topic_("/emergency_stop"),
-      have_estop_msg_(false),
-      // 未受信時の既定は「非常停止中」扱い（旧 controllable_=false と同値）。
-      // have_estop_msg_=false の間はこの値は使われず周期リトライにフォールバックする。
-      estop_active_(true),
       estop_timed_out_(false),
       runtime_fault_(false),
       teardown_pending_(false),
@@ -150,27 +144,15 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
                 "Invalid connect_retry_period_sec=%g; using the default 3.0 seconds",
                 requested_retry_period);
   }
-  emergency_stop_topic_ = this->get_parameter("emergency_stop_topic").as_string();
-  const double requested_estop_timeout =
-      this->get_parameter("emergency_stop_timeout_sec").as_double();
-  emergency_stop_timeout_sec_ =
-      shot_auto_start::normalizeControllableTimeout(requested_estop_timeout, 1.0);
-  if (!std::isfinite(requested_estop_timeout)) {
-    RCLCPP_WARN(this->get_logger(),
-                "Invalid emergency_stop_timeout_sec=%g; using the default 1.0 seconds",
-                requested_estop_timeout);
-  }
-
-  require_emergency_stop_ = this->get_parameter("require_emergency_stop").as_bool();
-  if (!require_emergency_stop_) {
-    RCLCPP_WARN(this->get_logger(),
-                "require_emergency_stop=false (diagnostic opt-out): the launcher may move before "
-                "/emergency_stop is heard. Never use this in an integrated launch");
-  } else if (emergency_stop_topic_.empty()) {
-    RCLCPP_ERROR(this->get_logger(),
-                 "emergency_stop_topic is empty but require_emergency_stop=true: the launcher "
-                 "will never start");
-  }
+  // /emergency_stop は共通の EmergencyStopMonitor（questix_safety）が購読・判定する
+  // （transient_local なので起動時に最新のラッチ状態を受信する。契約: questix_msgs/README.md）。
+  // lifecycle の連動は auto_start=true のときだけで、手動運用でもコマンドの可否には使う。
+  estop_monitor_ = std::make_unique<questix_safety::EmergencyStopMonitor>(
+      *this, questix_safety::EmergencyStopMonitor::declareAndRead(*this), "launcher",
+      [this](const questix_msgs::msg::EmergencyStop& msg,
+             const questix_safety::EmergencyStopMonitor::Change& change) {
+        onEmergencyStop(msg, change);
+      });
   require_teacher_permission_ = this->get_parameter("require_teacher_permission").as_bool();
   teacher_permission_topic_ = this->get_parameter("teacher_permission_topic").as_string();
   teacher_permission_timeout_sec_ = actuation_gate::teacherPermissionLease(
@@ -181,13 +163,6 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
     auto_start_timer_ =
         this->create_wall_timer(std::chrono::duration_cast<std::chrono::nanoseconds>(period),
                                 std::bind(&ShotComponent::autoStartTimerCallback, this));
-  }
-  if (!emergency_stop_topic_.empty()) {
-    // transient_local なので起動時に最新のラッチ状態を受信する（契約: questix_msgs/README.md）。
-    // lifecycle の連動は auto_start=true のときだけで、手動運用でもコマンドの可否には使う。
-    emergency_stop_sub_ = this->create_subscription<questix_msgs::msg::EmergencyStop>(
-        emergency_stop_topic_, rclcpp::QoS(1).reliable().transient_local(),
-        std::bind(&ShotComponent::emergencyStopCallback, this, std::placeholders::_1));
   }
   if (require_teacher_permission_) {
     if (teacher_permission_topic_.empty()) {
@@ -210,8 +185,8 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
   }
 
   if (auto_start_) {
-    if (!emergency_stop_topic_.empty()) {
-      if (emergency_stop_timeout_sec_ > 0.0) {
+    if (!estop_monitor_->topic().empty()) {
+      if (estop_monitor_->timeoutSec() > 0.0) {
         emergency_stop_timeout_timer_ =
             this->create_wall_timer(std::chrono::milliseconds(100),
                                     std::bind(&ShotComponent::emergencyStopTimeoutCallback, this));
@@ -221,7 +196,7 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
                 "Shot component created (auto_start=true, retry=%.1fs, estop_topic=%s). "
                 "サーボ通電（非常停止解除）を待って自動起動します",
                 connect_retry_period_sec_,
-                emergency_stop_topic_.empty() ? "<disabled>" : emergency_stop_topic_.c_str());
+                estop_monitor_->topic().empty() ? "<disabled>" : estop_monitor_->topic().c_str());
   } else {
     RCLCPP_INFO(this->get_logger(),
                 "Shot component created (auto_start=false). "
@@ -420,25 +395,21 @@ void ShotComponent::stopAutoStartTimers() {
   }
 }
 
-void ShotComponent::emergencyStopCallback(const questix_msgs::msg::EmergencyStop::SharedPtr msg) {
-  if (!msg) {
-    return;
-  }
-  const bool first = !have_estop_msg_;
-  const bool prev = estop_active_;
+void ShotComponent::onEmergencyStop(const questix_msgs::msg::EmergencyStop& msg,
+                                    const questix_safety::EmergencyStopMonitor::Change& change) {
+  const bool first = change.first;
+  // 途絶で teardown した後は押下扱いだったので、解除の受信はエッジとして扱う。
   const bool recovered = estop_timed_out_;
-  have_estop_msg_ = true;
-  estop_active_ = msg->active;
+  const bool prev = recovered || change.was_active;
   estop_timed_out_ = false;
-  last_estop_msg_time_ = std::chrono::steady_clock::now();
   if (recovered) {
-    RCLCPP_INFO(this->get_logger(), "%s reception recovered", emergency_stop_topic_.c_str());
+    RCLCPP_INFO(this->get_logger(), "%s reception recovered", estop_monitor_->topic().c_str());
   }
-  if (!first && estop_active_ == prev) {
+  if (!first && msg.active == prev) {
     return;  // 値に変化なし（評価毎に配信されるため、エッジのみ処理する）
   }
 
-  if (estop_active_) {
+  if (msg.active) {
     // 非常停止押下。サーボバスが断たれるため、ACTIVE / 自動起動途中の INACTIVE は
     // 解体してサーボ接続を解放し、unconfigured で解除を待つ。
     // 手動 deactivate 済み（タイマー停止中）のノードは操作者の制御を尊重して触らない。
@@ -447,13 +418,13 @@ void ShotComponent::emergencyStopCallback(const questix_msgs::msg::EmergencyStop
       RCLCPP_WARN(this->get_logger(),
                   "非常停止押下を検出（source=%s, reason=%s）。"
                   "deactivate→cleanup してサーボ接続を解放します",
-                  msg->source.c_str(), msg->reason.c_str());
+                  msg.source.c_str(), msg.reason.c_str());
       transitionToUnconfiguredForAutoRecovery("emergency_stop active");
     } else if (state_id == lifecycle_msgs::msg::State::PRIMARY_STATE_INACTIVE &&
                auto_start_timer_ && !auto_start_timer_->is_canceled()) {
       RCLCPP_WARN(this->get_logger(),
                   "非常停止押下を検出（source=%s, reason=%s）。cleanup してサーボ接続を解放します",
-                  msg->source.c_str(), msg->reason.c_str());
+                  msg.source.c_str(), msg.reason.c_str());
       transitionToUnconfiguredForAutoRecovery("emergency_stop active");
     }
     return;
@@ -466,7 +437,7 @@ void ShotComponent::emergencyStopCallback(const questix_msgs::msg::EmergencyStop
   }
   if (!first) {
     RCLCPP_INFO(this->get_logger(), "非常停止解除を検出（source=%s）。起動シーケンスを開始します",
-                msg->source.c_str());
+                msg.source.c_str());
   }
   // 周期を仕切り直してから即時試行する。失敗時（サーボ起動中など）は
   // connect_retry_period_sec 周期のリトライに引き継ぐ。
@@ -482,13 +453,12 @@ void ShotComponent::emergencyStopCallback(const questix_msgs::msg::EmergencyStop
 
 void ShotComponent::emergencyStopTimeoutCallback() {
   try {
-    if (estop_timed_out_ || emergency_stop_timeout_sec_ <= 0.0 || !have_estop_msg_) {
+    const double timeout_sec = estop_monitor_->timeoutSec();
+    if (estop_timed_out_ || timeout_sec <= 0.0 || !estop_monitor_->heard()) {
       return;
     }
-    const double elapsed =
-        std::chrono::duration<double>(std::chrono::steady_clock::now() - last_estop_msg_time_)
-            .count();
-    if (!shot_auto_start::isControllableSignalStale(emergency_stop_timeout_sec_, !estop_active_,
+    const double elapsed = estop_monitor_->ageSec();
+    if (!shot_auto_start::isControllableSignalStale(timeout_sec, !estop_monitor_->active(),
                                                     elapsed)) {
       return;
     }
@@ -501,11 +471,10 @@ void ShotComponent::emergencyStopTimeoutCallback() {
     if (shot_auto_start::shouldHoldManualLifecycle(state_id, timer_canceled)) {
       return;
     }
-    estop_timed_out_ = true;
-    estop_active_ = true;
+    estop_timed_out_ = true;  // 次の受信まで押下扱い（estopBlocks）
     RCLCPP_WARN(this->get_logger(),
                 "%s reception timed out after %.2fs; applying fail-safe teardown",
-                emergency_stop_topic_.c_str(), elapsed);
+                estop_monitor_->topic().c_str(), elapsed);
     transitionToUnconfiguredForAutoRecovery("emergency_stop timeout");
   } catch (const std::exception& error) {
     RCLCPP_ERROR(this->get_logger(), "Emergency stop timeout callback failed: %s", error.what());
@@ -516,17 +485,9 @@ void ShotComponent::emergencyStopTimeoutCallback() {
 }
 
 bool ShotComponent::estopBlocks() const {
-  if (!have_estop_msg_) {
-    return require_emergency_stop_;
-  }
-  if (estop_active_) {
-    return true;  // 押下、またはタイムアウトで押下扱いにした
-  }
-  // タイムアウトのラッチ（手動 lifecycle 中は保留される）に頼らず、途絶そのものを見る。
-  const double age =
-      std::chrono::duration<double>(std::chrono::steady_clock::now() - last_estop_msg_time_)
-          .count();
-  return actuation_gate::isStale(age, emergency_stop_timeout_sec_);
+  // 共通のチェック（押下・未受信・途絶）に、途絶 teardown のラッチ（次の受信まで）を加える。
+  // ラッチ（手動 lifecycle 中は保留される）に頼らず、途絶そのものは monitor が見る。
+  return estop_timed_out_ || estop_monitor_->engaged();
 }
 
 actuation_gate::Block ShotComponent::teacherPermissionBlock() const {
@@ -754,7 +715,7 @@ ShotComponent::CallbackReturn ShotComponent::on_shutdown(const rclcpp_lifecycle:
     teacher_permission_timer_->cancel();
   }
   teacher_permission_sub_.reset();
-  emergency_stop_sub_.reset();
+  estop_monitor_->unsubscribe();
   joy_subscription_.reset();
   lab_tilt_sub_.reset();
   lab_fire_sub_.reset();
