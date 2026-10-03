@@ -205,7 +205,8 @@ if [ "$(id -u)" -eq 0 ]; then REFUSE_ROOT=false; fi # only an isolated test may 
 run_build() {
     PATH="$FAKE_TOOLS:$PATH" run_playbook ansible/tests/test_workspace_build.yaml \
         -e "workspace_path=$BUILD_WS" -e "workspace_ros_setup=$FAKE_TOOLS/setup.bash" \
-        -e "workspace_rosdep_become=false" -e "workspace_build_refuse_root=$REFUSE_ROOT" "$@"
+        -e "workspace_rosdep_become=false" -e "workspace_build_refuse_root=$REFUSE_ROOT" \
+        -e "workspace_ccache_install=false" "$@"
 }
 count_calls() { grep -c "^$1" "$FAKE_ROS_LOG" || true; }
 
@@ -221,6 +222,13 @@ if run_build; then
         "workspace build: rosdep installs the workspace's keys"
     assert_contains "$FAKE_ROS_LOG" "ROS_HOME=/home/$USER/.ros" "workspace build: rosdep reads the kit user's index"
     assert_contains "$FAKE_ROS_LOG" "colcon build --symlink-install" "workspace build: colcon build --symlink-install"
+    assert_contains "$FAKE_ROS_LOG" \
+        "--cmake-args -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache" \
+        "workspace build: compiles through ccache (kept in CMakeCache for the user's own builds)"
+    FAKE_CCACHE_CONF="$(dirname "$FAKE_ROS_LOG")/fake_ccache.conf"
+    assert_contains "$FAKE_CCACHE_CONF" "sloppiness=include_file_ctime,include_file_mtime,pch_defines,time_macros" \
+        "workspace build: ccache sloppiness lets it cache precompiled headers"
+    assert_contains "$FAKE_CCACHE_CONF" "max_size=2G" "workspace build: ccache size bounded on the SD card"
     assert_contains "$FAKE_ROS_LOG" "ros2 pkg prefix questix_lab_bridge" "workspace build: questix_lab_bridge must resolve"
     assert_contains "$FAKE_ROS_LOG" "ros2 pkg executables questix_lab_bridge" "workspace build: lab_bridge_node must resolve"
     assert_contains "$PLAYBOOK_LOG" "Workspace built at: $BUILD_WS" "workspace build: result reported"
@@ -258,7 +266,8 @@ chmod +x "$BROKEN_TOOLS/colcon"
 if PATH="$BROKEN_TOOLS:$FAKE_TOOLS:$PATH" ansible-playbook ansible/tests/test_workspace_build.yaml \
     -i localhost, --connection=local -e "workspace_path=$BUILD_WS" \
     -e "workspace_ros_setup=$FAKE_TOOLS/setup.bash" -e "workspace_rosdep_become=false" \
-    -e "workspace_build_refuse_root=$REFUSE_ROOT" >"$PLAYBOOK_LOG" 2>&1; then
+    -e "workspace_build_refuse_root=$REFUSE_ROOT" -e "workspace_ccache_install=false" \
+    >"$PLAYBOOK_LOG" 2>&1; then
     fail "workspace build: a build without questix_lab_bridge was reported as success"
 else
     assert_not_contains "$PLAYBOOK_LOG" "Workspace built at:" "workspace build: a missing questix_lab_bridge fails the setup"

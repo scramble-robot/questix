@@ -6,7 +6,8 @@
 #   - every repository of dependency.repos is in src/ (missing ones imported; existing ones are
 #     left exactly as they are: `vcs import --skip-existing`, no update policy of its own),
 #   - the workspace's rosdep keys are installed,
-#   - `colcon build --symlink-install` has built it and install/setup.bash exists,
+#   - `colcon build --symlink-install` has built it (through ccache: workspace_ccache) and
+#     install/setup.bash exists,
 #   - the packages in workspace_required_packages resolve with `ros2 pkg prefix`, and
 #     questix_lab_bridge's lab_bridge_node is an executable,
 #   - src/ build/ install/ log/ belong to target_user.
@@ -50,6 +51,35 @@
           The workspace must be built by {{ target_user }} (running: {{ workspace_build_user.stdout }}).
           Run ./setup.sh as that user; it asks for the sudo password itself.
         quiet: true
+
+    - name: Install ccache
+      ansible.builtin.apt:
+        name: ccache
+        state: present
+      become: true
+      when: workspace_ccache | bool and workspace_ccache_install | bool
+
+    # The user's own ccache config (`ccache --set-config` writes the file ccache itself reads).
+    # Changed only when ccache reads back a different value afterwards: it prints values in its
+    # own form (sloppiness order, "2.0 GB" for 2G), so the wanted string is never compared.
+    - name: Configure ccache for the kit user
+      ansible.builtin.shell:
+        cmd: |
+          set -eo pipefail
+          before="$(ccache --get-config {{ item.key | quote }})"
+          ccache --set-config {{ (item.key ~ '=' ~ item.value) | quote }}
+          after="$(ccache --get-config {{ item.key | quote }})"
+          if [ "$before" != "$after" ]; then echo changed; fi
+        executable: /bin/bash
+      # The kit user's own work: as that user also when the playbook runs as root (image build).
+      become: "{{ questix_image_build | default(false) | bool }}"
+      become_user: "{{ target_user }}"
+      loop: "{{ workspace_ccache_config | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      register: workspace_ccache_configured
+      changed_when: "'changed' in workspace_ccache_configured.stdout"
+      when: workspace_ccache | bool
 
     - name: Read dependency.repos
       ansible.builtin.slurp:
@@ -119,9 +149,16 @@
           set -eo pipefail
           # ROS setup files read unset variables: never enable nounset around them.
           source "{{ workspace_ros_setup }}"
-          colcon build --symlink-install 2>&1 | tail -n 40
+          colcon build --symlink-install {{ workspace_ccache_cmake_args }} 2>&1 | tail -n 40
         chdir: "{{ workspace_path }}"
         executable: /bin/bash
+      vars:
+        workspace_ccache_cmake_args: >-
+          {{ '--cmake-args -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache'
+          if workspace_ccache | bool else '' }}
+      # The image build compiles once and ships the result: no cache to carry in the image (the
+      # launcher is still recorded, so the kit's later builds use ccache).
+      environment: "{{ {'CCACHE_DISABLE': '1'} if questix_image_build | default(false) | bool else {} }}"
       # The kit user's own work: as that user also when the playbook runs as root (image build).
       become: "{{ questix_image_build | default(false) | bool }}"
       become_user: "{{ target_user }}"

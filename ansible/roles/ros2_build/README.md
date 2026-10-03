@@ -16,7 +16,12 @@ and before `robot_autostart`). Before this role, a freshly set-up kit had an emp
 3. Installs the workspace's rosdep keys (`rosdep install --from-paths <workspace> --ignore-src
    --rosdistro jazzy -r -y`). It reads the index the `ros2_installation` role's `rosdep update`
    wrote as the user (`ROS_HOME=~/.ros`); only this step runs as root (for apt-get).
-4. `colcon build --symlink-install` as the user.
+4. Installs ccache and sets the user's ccache config (`workspace_ccache_config`: the sloppiness
+   precompiled headers need, `max_size` 2G), then `colcon build --symlink-install` as the user with
+   `CMAKE_{C,CXX}_COMPILER_LAUNCHER=ccache`. CMake keeps the launcher in each package's cache, so
+   the user's own later `colcon build --symlink-install` in the checkout uses ccache too. The image
+   build compiles with `CCACHE_DISABLE=1` (no cache in the image). `workspace_ccache: false` turns
+   it off for new build directories.
 5. Checks: `install/setup.bash` exists; `src/ build/ install/ log/` belong to `target_user`;
    `ros2 pkg prefix` resolves every package of `workspace_required_packages`;
    `ros2 pkg executables questix_lab_bridge` lists `lab_bridge_node`. A failed check fails the

@@ -156,13 +156,17 @@ ros2 param dump /drive_component
 で 1 回だけ解析し、全ターゲットで再利用します（`-DMOTOR_CONTROL_APP_USE_PCH=OFF` で無効化）。
 ビルドログに `-Winvalid-pch` の警告が出たら再利用が効いていません（結果は同じで、速度だけ落ちる）。
 
-手元（Raspberry Pi 5 を含む）で速くするには、いつもの `colcon build --symlink-install` のまま
-ccache を通すのが手軽です（pull・ブランチ切り替え後の再コンパイルが速くなる）:
+キット（Raspberry Pi 5）は `./setup.sh` の `ros2_build` ロールが ccache の導入・設定と
+ワークスペースへの組み込みまで行います。既存のキットも `./setup.sh` を再実行すれば入り、以降は
+いつもの `colcon build --symlink-install` のまま ccache が使われます（pull・ブランチ切り替え後の
+再コンパイルが速くなる）。
+
+開発 PC で同じことをするには:
 
 ```bash
 sudo apt install ccache
-# PCH と併用するための設定（一度だけ。~/.config/ccache/ccache.conf に保存される）
-ccache --set-config sloppiness=pch_defines,time_macros,include_file_mtime,include_file_ctime
+# PCH と併用するための設定（一度だけ）
+ccache --set-config sloppiness=include_file_ctime,include_file_mtime,pch_defines,time_macros
 ```
 
 `~/.colcon/defaults.yaml`（コマンドで `--cmake-args` を付けるとこちらは上書きされる）:
