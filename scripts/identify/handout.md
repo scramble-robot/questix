@@ -50,5 +50,17 @@ python3 scripts/identify/batch_fit.py ~/ident_data/ident_* --out ~/ident_data/re
 （`bag/` だけ出すと、どの条件で測ったか分からなくなり同定に使えない。）
 運営は `batch_fit.py` で全員分をまとめ、`sufficiency.md` で「どの条件のデータが足りているか」を判定して、順次 `launcher/config/drive_component.yaml` の `velocity_run_*` / `drive_fsm_run_*` を更新する。
 
+## 発展：振動の原因を切り分ける（先生と一緒に、車輪を浮かせて）
+前後に揺れる原因が「車輪 1 回転ごとの引っかかり」か「モータの中の速度制御の揺れ（約 1.8 Hz）」か、
+その重なりかを、回転数を変えて調べる。各回転数で 10 回転以上回すため約 9 分かかる。
+```bash
+bash scripts/identify/record.sh --levels 20,30,40,60,80,100,120,150 --hold 30
+python3 scripts/identify/ripple_analysis.py --bag ~/ident_data/ident_<ID>_<床>_<日時>/bag --plot ~/ident_data/ripple
+```
+- 「卓越周波数：回転数によらず一定」→ モータの速度制御の揺れ。「回転数に比例（次数 ≈ 1）」→ 1 回転ごとの揺れ。
+- 1 次の振幅が 100 rpm 付近で大きくなるなら、1 回転ごとの揺れが速度制御の揺れと重なって大きくなっている。
+- 電源を切って車輪を手で 1 回転回し、引っかかりの数を数える（その数の次数が強く出ていないか）。
+- 手順の詳細（電源の入れ直しでの位置の比較、送信頻度を変える試験、床の上での取り方）は `scripts/identify/README.md`「振動の切り分け」。
+
 ---
 背景資料：`design/model_based_drive_control.md`（計画）、`~/workspace/mpc_study/README.md` 5.4 節（LQR+FF）

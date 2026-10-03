@@ -90,6 +90,8 @@ drive_component:
     # 注意: 振動対策ではない。モデルは一次遅れ + むだ時間で、ファーム速度ループの ~1.8 Hz の
     #   振動（2 次的な共振）は表現できない。オブザーバはその振動を外乱と見なし、補正は追従の
     #   定常偏差を減らすためのもの（test_control_core の共振モデルのテストが根拠）。
+    #   特に外乱補償（disturbance_gain > 0）は共振付近（~100 rpm）の揺れを補正上限まで
+    #   励起し得る（仮定値の 2 次モデルで約 8 倍）。共振を同定するまで有効にしないこと。
     # 注意: tick 単位の値（model_delay_ticks、オブザーバの l_x / l_d、q / r）は control_rate に
     #   依存する（既定・同定は 50 Hz 前提）。control_rate を変えたら同定し直す（起動時に WARN）。
     velocity_run_lqr_enabled: false

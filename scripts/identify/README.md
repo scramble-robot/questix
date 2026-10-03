@@ -16,9 +16,11 @@
 | `step_sequence.py` | `/target_twist` にステップ列を publish（車輪 RPM 指定、直進 or 旋回） |
 | `fit_models.py` | rosbag2 または CSV 1 本から一次遅れ + むだ時間を最小二乗で同定し、`identified_params.yaml` を出力 |
 | `batch_fit.py` | `record.sh` の出力を**まとめて同定**し、一覧表（`summary.md/csv`）・1 枚図（`summary.png`）・十分性判定（`sufficiency.md`）を出力 |
+| `ripple_analysis.py` | 車輪速度の揺れを「回転に同期する成分」と「周波数が一定の成分」に分ける（振動の切り分け、下の「振動の切り分け」）。rosbag2 または CSV |
 | `handout.md` | 講義用 1 ページ手順書（受講者がログを取って提出するまで） |
 | `test_fit_models.py` | 合成データでの検算 |
 | `test_step_sequence.py` | `step_sequence.py` の他の送り手検出・スケジュールの検算（ROS 不要） |
+| `test_ripple_analysis.py` | `ripple_analysis.py` の検算（回転同期の 1 次 + 1.8 Hz 一定の合成データ。ROS 不要） |
 | `test_evidence.sh` | `lib_evidence.sh` と `record.sh` preflight の実機なし検証（`ros2` をスタブに差し替え） |
 
 ## 最短の流れ（講義で「1 回ずつ取って順次回収」する運用）
@@ -76,8 +78,8 @@ ident_<robot>_<floor>_<YYYYmmdd_HHMM>/
   Phase A はパラメータ固定が前提なので、before/after に差分があれば warning を出し
   `parameter_diff.txt` を残す（証跡品質の低下であって、記録済み bag を捨てる理由ではないので
   hard fail にはしない）。
-- **記録 topic**：必須は `/drive_status` `/target_twist`。`/odom` `/emergency_stop` は
-  存在するときだけ足す（無くても失敗しない）。`/joy` `/joy_gated` は足さない
+- **記録 topic**：必須は `/drive_status` `/target_twist`。`/odom` `/emergency_stop`
+  `/drive_control_sample`（制御 tick ごとの診断サンプル）は存在するときだけ足す（無くても失敗しない）。`/joy` `/joy_gated` は足さない
   — `step_sequence.py` が `/target_twist` へ直接 publish する同定試験では、これらは
   同定入力の authority ではないため。
 - **bag integrity**：停止後に `ros2 bag info` を保存し、必須 topic が見当たらない／
@@ -153,6 +155,87 @@ bash -n scripts/identify/record.sh scripts/identify/lib_evidence.sh
 `control_mode: current`（既存 PI）で同じステップ列を取り、`--mode current` で同定する。
 このとき入力は `/drive_status` の `current_amp`（実測トルク電流）になる。
 電流を直接ステップで与える経路（PI を通さない）は未実装（計画 Phase A の残項目）。
+
+## 振動の切り分け（車輪を浮かせた試験）
+
+前後方向の振動の原因を、(a) 1 回転周期の機械要因（偏心・コギング・タイヤ）、(b) ファーム速度ループの
+約 1.8 Hz の振動、(c) 両者の重なり（回転周波数が ~1.8 Hz = ~108 rpm 付近で共振）に切り分ける。
+解析は `ripple_analysis.py`。`/drive_control_sample`（`drive_component` の既定で出ている）が記録に
+あれば、tick ごとの欠落（`seq`）と同じフレームの重複（`feedback_new`）を除いた生の速度・位置で解析する。
+旧 bag は `/drive_status` の車輪ごとの受信時刻で重複を除く。
+
+### 1. 回転数を変えて記録する
+
+1. 車輪を浮かせ、非常停止が効くことを確認する。コントローラは外す。`control_mode: velocity`、
+   `velocity_run_lqr_enabled: false`（既定）のまま。加速度上限は通常の設定でよい（各レベルの始め
+   1 s は解析で捨てる）。
+2. 各レベルで **10 回転以上**（= 600 / rpm 秒以上）保持する。`--hold` は全レベル共通なので、
+   いちばん遅いレベルで決める（20 rpm なら 30 s）:
+   ```bash
+   bash scripts/identify/record.sh --levels 20,30,40,60,80,100,120,150 --hold 30
+   ```
+   正転・逆転の両方を回すので約 9 分（8 レベル × 2 方向 × (30 + 3) s）。共振が疑われる
+   95〜110 rpm を細かく見たいときは `--levels 90,95,100,105,110,115 --hold 10` を別に取る。
+3. 解析:
+   ```bash
+   python3 scripts/identify/ripple_analysis.py --bag ~/ident_data/ident_<ID>_<床>_<日時>/bag \
+       --json ripple.json --plot ripple_png
+   ```
+   ROS 2 の無い PC では、先に Pi で `--bag <dir> --export-csv samples.csv` として CSV に書き出し、
+   `--csv samples.csv` で解析する。QUESTiX LAB の生データ CSV（`-messages.csv`）も `--csv` で読める
+   （20 Hz に間引かれ、位置が無いので回転角は速度の積分になる。目安として使う）。
+
+### 2. 結果の読み方
+
+- **区間ごとの行**: 平均回転数、卓越周波数とその振幅、**1 次**（1 回転に 1 回）の同期成分の振幅、
+  同期成分を引いた残り（**非同期**）の卓越周波数。
+- **卓越周波数の判定**: 回転数を変えても周波数が一定 →「回転数によらず一定（ループ・構造）」、
+  回転周波数に比例 →「回転同期」（次数も出る）。回転数が 1 水準だけ・範囲が狭いと「判別不能」。
+- **1 次の同期成分の振幅と回転数**（`--json` の `order1.by_rpm`、PNG の左図）: 振幅が ~100 rpm 付近で
+  山になるなら、1 回転周期の外乱がファームのループの共振で増幅されている（(c)）。回転数によらず
+  ほぼ一定なら (a) の機械要因がそのまま見えている。
+- **forward / turn**: 左右の和（前後）と差（旋回）。前後の振動が左右同相の揺れ（和に残る）か、
+  左右で逆相（差に残る）かが分かる。
+- **[判別不能]**: エンコーダの誤差による見かけの変動（既定: 平均速度の 1 % × 次数。
+  `--encoder-error-pct`）を下回る成分。実際の揺れか測定の誤差か区別できない。
+- `angle_speed_ratio`（JSON）: 位置から求めた回転の速さ ÷ 速度の平均。1 から外れたら、
+  「0..32767 で 1 回転」の前提か巻き戻しのつなぎ直しを疑う（位置の分解能は 4096/回転 = 8 LSB 刻み）。
+
+### 3. 手回しでディテント（コギング）の数を数える
+
+非常停止を押してモータの電源を切った状態で、車輪をゆっくり 1 回転手で回し、引っかかり
+（ディテント）の数を数える。その数が次数スペクトルに強く出る次数（`orders`）と一致すれば、
+その成分はコギングトルクによる。左右とも数える。
+
+### 4. 電源を入れ直して `position_raw` を比べる（絶対位置か）
+
+1. 車輪にテープで印を付け、停止中に `ros2 topic echo --once /drive_control_sample` で
+   `left.position_raw` / `right.position_raw` を読む。
+2. 車輪を動かさずに非常停止 → 解除（モータの電源を入れ直す）。`drive_component` が再接続したら
+   もう一度読む。8 LSB 程度の差なら電源をまたいで位置が保たれている。
+3. 電源を切った状態で車輪を手で約半回転回し、電源を入れて読む。値が回した分（約 16384）
+   変わっていれば絶対位置、電源投入時の位置が毎回同じ値（例 0）なら電源投入時を 0 とする相対位置。
+   結果を `questix_msgs/README.md` の `position_raw` の説明に反映する。
+
+### 5. 定速中の送信頻度を変える（ファームが受信フレームごとに状態を更新するか）
+
+停止フレームを高頻度で送るとファームが減速を完了できない（`stop_resend_interval_ms` の経緯）ことから、
+ファームが受信したフレームごとに内部状態（ランプや積分）を更新している可能性がある。定速走行中の
+揺れが送信頻度に左右されるかを確かめる:
+
+1. `launcher/config/drive_component.yaml` の `control_rate` を 50 / 25 にして（実行時変更不可。
+   変えたら `drive_component` を再起動）、それぞれ同じレベルで記録する:
+   `bash scripts/identify/record.sh --levels 60,105 --hold 20`。
+2. `ripple_analysis.py` で比べる。非同期成分の周波数・振幅が送信頻度で変わるなら、ファームのループは
+   フレームの受信と結びついている。変わらなければ送信頻度とは独立。
+3. 終わったら `control_rate: 50.0` に戻す（`velocity_run_*` の tick 単位の値は 50 Hz 前提。
+   LQR が有効だと起動時に WARN が出る）。
+
+### 6. 床の上で取る
+
+床上では `record.sh`（自動でステップ指令を出す）を使わず、コントローラで一定速度に保って
+Robot Manager の記録（rosbag）を取る。解析は `--window T0,T1`（受信時刻 [s]）で定速の範囲を
+指定する。浮かせた試験と同じ回転数で比べ、共振の山が負荷（慣性・摩擦）でどう動くかを見る。
 
 ## CSV で試す（ROS なし）
 

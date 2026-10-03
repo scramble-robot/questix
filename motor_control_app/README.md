@@ -180,7 +180,7 @@ ros2 param dump /drive_component
 | V-ticks `velocity_run_model_delay_ticks` などは tick 単位 | 起動時 WARN（LQR 有効かつ `control_rate` ≠ 50）。YAML の 50 Hz 前提の書き方を周期によらない表現に | なし |
 | V3 停止の最後は停止フレームに切り替わり、減速はファーム（加速度バイト 1 = 最速）任せ | 文書化のみ。「停止フレームだけ加速度バイトを大きくする」案は未検証（実装するなら既定 OFF のパラメータで） | なし |
 | V4 停止フレームの高頻度送信でファームが減速を完了できない（ファームは受信フレームごとに内部状態を更新している可能性） | 文書化。定速中の送信頻度を変える試験の手順を `scripts/identify/README.md` に | なし |
-| V5 LQR は一次遅れモデル。~1.8 Hz 振動を表現できず、オブザーバは外乱と見なす | YAML / README に「振動対策ではない」。`test_control_core` の共振モデルで固定 | なし |
+| V5 LQR は一次遅れモデル。~1.8 Hz 振動を表現できず、オブザーバは外乱と見なす | YAML / README に「振動対策ではない」。`test_control_core` の共振モデル（仮定値の 2 次系）で固定: 状態 FB だけでは揺れは減らず（≈10 → 12 rpm）、**外乱補償（`velocity_run_disturbance_gain` > 0）は共振付近の揺れを補正上限まで励起する（≈10 → 84 rpm）**。共振を同定するまで外乱補償を有効にしない | なし |
 | C1 current モード既定ゲイン（純 P 0.001 A/rpm、±1 A） | 既定値は変えず、起動時 WARN（`current_ki` ≤ 0 のとき）と下の評価前提 | なし |
 | C2 current モードのランプ二重（ホストの加速度制限 + ライブラリの `current_max_accel_rpm_per_sec`） | 確認の結果、**二重になっていない**: ライブラリ側は既定 0（無効）で、設定する呼び出しがリポジトリに無い。ホストの加速度制限だけが効く | なし |
 | C3 `current_invert_measured: true` が既定、実機での符号確認の記録なし | current モード起動時 WARN。確認手順を下に | なし |
