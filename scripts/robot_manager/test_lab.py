@@ -11,6 +11,8 @@ from fastapi import HTTPException
 @pytest.fixture
 def lab(tmp_path, monkeypatch):
     monkeypatch.setenv("QUESTIX_CONFIG_DIR", str(tmp_path))
+    # QUESTiX LAB exists in lesson mode only (modes.uses_lab); tests of other modes write theirs.
+    (tmp_path / "mode").write_text("lesson\n")
     from robot_manager import lab as module
     module = importlib.reload(module)
     # Never ask a bridge that happens to run on this machine, never write to the real ~/.cache.
@@ -88,7 +90,7 @@ def test_autostart_is_skipped_in_competition_mode(lab, monkeypatch, tmp_path):
     assert started == []
 
 
-def test_competition_mode_turns_autostart_off_and_stops_the_bridge(lab, monkeypatch):
+def test_competition_mode_turns_autostart_off_and_stops_the_bridge(lab, monkeypatch, tmp_path):
     signals = []
     # Never signal a real process group from a test.
     monkeypatch.setattr(lab.os, "getpgid", lambda pid: pid)
@@ -97,7 +99,8 @@ def test_competition_mode_turns_autostart_off_and_stops_the_bridge(lab, monkeypa
     lab.set_drive(lab.DriveRequest(allow=True))
     lab.set_shoot(lab.DriveRequest(allow=True))
     lab._proc = _FakeProcess()
-    lab.disable_for_competition()
+    (tmp_path / "mode").write_text("competition\n")  # app.py writes the mode, then calls this
+    lab.disable_outside_lessons()
     assert signals == [(_FakeProcess.pid, lab.signal.SIGINT)]
     assert lab._read_config() == {
         "CAMERA_TOPIC": "/cam/compressed", "AUTOSTART": "false", "RECORDS_DIR": ""}
@@ -106,7 +109,7 @@ def test_competition_mode_turns_autostart_off_and_stops_the_bridge(lab, monkeypa
     status = lab.get_status()
     assert status["running"] is False and status["last_stop_reason"] == "competition_mode"
     assert status["drive_allowed"] is False and status["shoot_allowed"] is False
-    lab.disable_for_competition()  # nothing running, already off: no error
+    lab.disable_outside_lessons()  # nothing running, already off: no error
 
 
 def test_autostart_failure_is_reported(lab, monkeypatch):
@@ -147,7 +150,7 @@ def test_practice_mode_turns_autostart_back_on_and_starts_the_bridge(lab, monkey
     monkeypatch.setattr(lab.threading, "Thread", _run_now)
     monkeypatch.setattr(lab, "_port_in_use", lambda: False)
     lab.set_config(lab.LabConfig(CAMERA_TOPIC="/cam/compressed", AUTOSTART=False))
-    now = lab.enable_for_practice()
+    now = lab.enable_for_lessons()
     assert lab._read_config() == {
         "CAMERA_TOPIC": "/cam/compressed", "AUTOSTART": "true", "RECORDS_DIR": ""}
     # Driving and launching stay off: the teacher turns them on, never a mode switch.
@@ -162,7 +165,7 @@ def test_practice_mode_leaves_a_running_bridge_alone(lab, monkeypatch):
     monkeypatch.setattr(lab, "start_bridge", lambda: started.append(True))
     monkeypatch.setattr(lab.threading, "Thread", _run_now)
     monkeypatch.setattr(lab, "_port_in_use", lambda: True)  # e.g. started by hand
-    lab.enable_for_practice()
+    lab.enable_for_lessons()
     assert started == []
     assert lab.get_status()["last_stop_reason"] is None
 
@@ -171,15 +174,46 @@ def test_mode_switches_call_the_lab_console(lab, monkeypatch, tmp_path):
     from robot_manager import app as app_module
     app_module = importlib.reload(app_module)
     calls = []
-    monkeypatch.setattr(app_module.lab, "disable_for_competition", lambda: calls.append("off"))
-    monkeypatch.setattr(app_module.lab, "enable_for_practice", lambda: calls.append("on"))
+    monkeypatch.setattr(app_module.lab, "disable_outside_lessons", lambda: calls.append("off"))
+    monkeypatch.setattr(app_module.lab, "enable_for_lessons", lambda: calls.append("on"))
+    app_module.set_mode(app_module.ModeRequest(mode="lesson"))
+    assert calls == []  # lesson -> lesson: the teacher's own checkbox choice stays
     app_module.set_mode(app_module.ModeRequest(mode="practice"))
-    assert calls == []  # practice -> practice: the learner's own checkbox choice stays
+    assert calls == ["off"]  # QUESTiX LAB is for lessons only
+    assert (tmp_path / "mode").read_text() == "practice\n"
     app_module.set_mode(app_module.ModeRequest(mode="competition"))
-    assert calls == ["off"]
-    assert (tmp_path / "mode").read_text() == "competition\n"
-    app_module.set_mode(app_module.ModeRequest(mode="practice"))
-    assert calls == ["off", "on"]
+    assert calls == ["off", "off"]  # stays off (the lesson choice saved once is kept)
+    app_module.set_mode(app_module.ModeRequest(mode="lesson"))
+    assert calls == ["off", "off", "on"]
+
+
+@pytest.mark.parametrize("mode", ["practice", "competition"])
+def test_nothing_of_questix_lab_works_outside_lesson_mode(lab, tmp_path, monkeypatch, mode):
+    (tmp_path / "mode").write_text(mode + "\n")
+    with pytest.raises(HTTPException) as error:
+        lab.start_bridge()
+    assert error.value.status_code == 409 and "教材モードに切り替えると" in error.value.detail
+    for setter in (lab.set_drive, lab.set_shoot):
+        with pytest.raises(HTTPException) as error:
+            setter(lab.DriveRequest(allow=True))
+        assert error.value.status_code == 409
+    started = []
+    monkeypatch.setattr(lab.threading, "Thread", lambda **kwargs: started.append(kwargs))
+    lab.set_config(lab.LabConfig(AUTOSTART=True))
+    lab.autostart()  # lab.env may say true when the mode file was changed by hand
+    assert started == []
+    status = lab.get_status()
+    assert status["available"] is False and status["mode"] == mode
+    assert status["drive_allowed"] is False and status["shoot_allowed"] is False
+
+
+def test_practice_mode_stops_the_bridge_with_its_own_reason(lab, monkeypatch, tmp_path):
+    monkeypatch.setattr(lab.os, "getpgid", lambda pid: pid)
+    monkeypatch.setattr(lab.os, "killpg", lambda pgid, sig: None)
+    lab._proc = _FakeProcess()
+    (tmp_path / "mode").write_text("practice\n")
+    lab.disable_outside_lessons()
+    assert lab.get_status()["last_stop_reason"] == "not_lesson_mode"
 
 
 def test_manager_lifespan_starts_and_stops_the_lab_console(lab, monkeypatch):
@@ -420,7 +454,7 @@ def test_competition_stops_the_bridge_even_if_lab_env_cannot_be_written(
     read_only_lab_env('AUTOSTART="true"\nALLOW_DRIVE="true"\n')
     lab.set_drive(lab.DriveRequest(allow=True))  # the session's permission, not in lab.env
     lab._proc = _FakeProcess()
-    lab.disable_for_competition()  # logged, not raised
+    lab.disable_outside_lessons()  # logged, not raised
     assert signals == [(_FakeProcess.pid, lab.signal.SIGINT)]
     status = lab.get_status()
     assert status["running"] is False and status["last_stop_reason"] == "competition_mode"
@@ -574,10 +608,10 @@ def test_competition_round_trip_drops_legacy_keys_and_keeps_the_settings(lab, mo
     (tmp_path / "lab.env").write_text(
         'CAMERA_TOPIC="/cam/compressed"\nAUTOSTART="false"\nALLOW_DRIVE="true"\n'
         'ALLOW_SHOOT="true"\nRECORDS_DIR="/srv/lab"\n')
-    lab.disable_for_competition()
+    lab.disable_outside_lessons()
     text = (tmp_path / "lab.env").read_text()
     assert "ALLOW_" not in text  # written anyway, to drop them
-    lab.enable_for_practice()
+    lab.enable_for_lessons()
     text = (tmp_path / "lab.env").read_text()
     assert "ALLOW_" not in text
     assert lab._read_config() == {
@@ -606,7 +640,7 @@ def test_forbidding_shoot_works_even_if_lab_env_cannot_be_written(
     assert status["config_error"] is None
 
 
-# --- the teacher's choices across competition mode ------------------------------------------------
+# --- the teacher's choices across leaving lesson mode ------------------------------------------------
 
 def test_an_allow_never_survives_a_competition_round_trip(lab, monkeypatch, tmp_path):
     started = []
@@ -616,11 +650,11 @@ def test_an_allow_never_survives_a_competition_round_trip(lab, monkeypatch, tmp_
     lab.set_drive(lab.DriveRequest(allow=True))
     lab.set_shoot(lab.DriveRequest(allow=True))
     (tmp_path / "mode").write_text("competition\n")
-    lab.disable_for_competition()
-    lab.disable_for_competition()  # competition -> competition keeps the practice AUTOSTART
+    lab.disable_outside_lessons()
+    lab.disable_outside_lessons()  # competition -> competition keeps the lesson AUTOSTART
     assert lab._runtime_permissions == {"ALLOW_DRIVE": False, "ALLOW_SHOOT": False}
-    (tmp_path / "mode").write_text("practice\n")
-    now = lab.enable_for_practice()
+    (tmp_path / "mode").write_text("lesson\n")
+    now = lab.enable_for_lessons()
     assert now == {"restored": True, "autostart": True, "drive": False, "shoot": False}
     status = lab.get_status()
     assert status["drive_allowed"] is False and status["shoot_allowed"] is False
@@ -635,10 +669,10 @@ def test_autostart_off_survives_a_competition_round_trip(lab, monkeypatch, tmp_p
     monkeypatch.setattr(lab, "_port_in_use", lambda: False)
     lab.set_config(lab.LabConfig(AUTOSTART=False))
     (tmp_path / "mode").write_text("competition\n")
-    lab.disable_for_competition()
+    lab.disable_outside_lessons()
     lab.set_config(lab.LabConfig(CAMERA_TOPIC="/cam/compressed"))  # keeps the saved values
-    (tmp_path / "mode").write_text("practice\n")
-    assert lab.enable_for_practice()["autostart"] is False
+    (tmp_path / "mode").write_text("lesson\n")
+    assert lab.enable_for_lessons()["autostart"] is False
     assert lab._read_config()["AUTOSTART"] == "false" and started == []
 
 

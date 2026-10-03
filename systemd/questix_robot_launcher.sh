@@ -1,21 +1,26 @@
 #!/usr/bin/env bash
 # ExecStart of questix_robot.service: starts the QUESTiX robot's ROS 2 launch for the saved mode.
 #
-# competition: always launches (also at power-on) with the competition safety profile.
-# practice:    launches only when someone pressed 起動 / 再起動 in Robot Manager just now. Robot
-#              Manager writes a start request (${CONFIG_DIR}/start-request) right before
-#              `systemctl start|restart`; this script consumes it (deletes it) and runs the practice
-#              launch (enable_autoreferee:=false: questix_core then adds twist_arbiter and the lab
-#              launcher input, so QUESTiX LAB can drive and fire). Without a fresh request (power-on,
-#              `systemctl start` by hand, or Restart=on-failure after a crash) it logs and exits 0,
-#              so practice mode never starts the robot by itself.
+# Three modes (scripts/robot_manager/modes.py repeats them; test_launcher_script.py keeps them
+# identical):
+# competition: 本番. Always launches (also at power-on) with the competition safety profile.
+# practice:    練習. The controller drives freely; no QUESTiX LAB (no twist_arbiter, no lab
+#              launcher input) and no teacher permission.
+# lesson:      教材. QUESTiX LAB can drive and fire (twist_arbiter and the lab launcher input),
+#              and the drive and launcher move only while the teacher's permission
+#              (/actuation_authority, Robot Manager's 操作 tab) is on, controller included.
+# practice and lesson launch only when someone pressed 起動 / 再起動 in Robot Manager just now.
+# Robot Manager writes a start request (${CONFIG_DIR}/start-request) right before
+# `systemctl start|restart`; this script consumes it (deletes it) and runs the launch. Without a
+# fresh request (power-on, `systemctl start` by hand, or Restart=on-failure after a crash) it logs
+# and exits 0, so these modes never start the robot by themselves.
 #
-# Consequence of consuming the request: a practice launch that crashes is NOT restarted by
-# Restart=on-failure (the restart finds no request and exits 0; the unit ends up inactive).
+# Consequence of consuming the request: a practice or lesson launch that crashes is NOT restarted
+# by Restart=on-failure (the restart finds no request and exits 0; the unit ends up inactive).
 # Press 起動 again in Robot Manager. Competition launches keep Restart=on-failure as before.
 #
 # The start request is a small key=value file (never sourced):
-#   mode=practice
+#   mode=practice (or lesson)
 #   requested_at=<seconds since the epoch>
 #   boot_id=<the kernel's boot id when it was written>
 # It counts only for the same boot, when it asks for the saved mode, and when it is at most
@@ -56,7 +61,7 @@ consume_start_request() {
   rm -f "${START_REQUEST_FILE}" 2> /dev/null && [ ! -e "${START_REQUEST_FILE}" ]
 }
 
-# Why the start request cannot start a practice launch now; empty when it can.
+# Why the start request cannot start a ${MODE} launch now; empty when it can.
 start_request_problem() {
   local requested_mode requested_at requested_boot now age
   if [ ! -f "${START_REQUEST_FILE}" ]; then
@@ -66,7 +71,7 @@ start_request_problem() {
   requested_mode="$(request_value mode)"
   requested_at="$(request_value requested_at)"
   requested_boot="$(request_value boot_id)"
-  if [ "${requested_mode}" != "practice" ]; then
+  if [ "${requested_mode}" != "${MODE}" ]; then
     echo "the start request asks for mode '${requested_mode}'"
     return
   fi
@@ -104,8 +109,8 @@ if [ -f "${MODE_FILE}" ]; then
 fi
 
 if [ "${MODE}" != "competition" ]; then
-  if [ "${MODE}" != "practice" ]; then
-    log "Mode is '${MODE}' (neither 'competition' nor 'practice'). Skipping ROS2 launch."
+  if [ "${MODE}" != "practice" ] && [ "${MODE}" != "lesson" ]; then
+    log "Mode is '${MODE}' (not 'competition', 'practice' or 'lesson'). Skipping ROS2 launch."
     consume_start_request || true
     exit 0
   fi
@@ -114,17 +119,17 @@ if [ "${MODE}" != "competition" ]; then
     if [ -e "${START_REQUEST_FILE}" ] && ! consume_start_request; then
       log "Could not delete ${START_REQUEST_FILE}."
     fi
-    log "Mode is 'practice': ${PROBLEM}. Skipping ROS2 launch (practice starts only from Robot Manager's 起動 / 再起動)."
+    log "Mode is '${MODE}': ${PROBLEM}. Skipping ROS2 launch (${MODE} starts only from Robot Manager's 起動 / 再起動)."
     exit 0
   fi
   # Consume the request before launching: a crash and Restart=on-failure must not relaunch.
   if ! consume_start_request; then
-    log "Mode is 'practice' but ${START_REQUEST_FILE} cannot be deleted. Skipping ROS2 launch."
+    log "Mode is '${MODE}' but ${START_REQUEST_FILE} cannot be deleted. Skipping ROS2 launch."
     exit 0
   fi
-  log "Mode is 'practice' and Robot Manager asked to start. Starting the practice ROS2 launch..."
+  log "Mode is '${MODE}' and Robot Manager asked to start. Starting the ${MODE} ROS2 launch..."
 else
-  # A practice start request never applies to a competition launch; drop a leftover one.
+  # A practice / lesson start request never applies to a competition launch; drop a leftover one.
   consume_start_request || true
   log "Mode is 'competition'. Starting ROS2 launch..."
 fi
@@ -167,16 +172,25 @@ if [ "${MODE}" = "competition" ]; then
   LAUNCH_ARGS="${LAUNCH_ARGS} enable_gpio_ref:=true"
   LAUNCH_ARGS="${LAUNCH_ARGS} enable_autoreferee:=true"
 else
-  # Practice: the GPIO safety path follows launch.env (Robot Manager's 管理設定), on unless it
-  # says exactly "false". Without AutoReferee, questix_core's practice defaults add twist_arbiter
-  # (controller or QUESTiX LAB on /target_twist, the stick always wins) and let the ESC and shot
-  # nodes accept the lab's launcher input.
+  # Practice and lesson: the GPIO safety path follows launch.env (Robot Manager's 管理設定), on
+  # unless it says exactly "false" (without it operation_manager still publishes /emergency_stop).
   PRACTICE_GPIO_REF="true"
   if [ "${ENABLE_GPIO_REF:-true}" = "false" ]; then
     PRACTICE_GPIO_REF="false"
   fi
   LAUNCH_ARGS="${LAUNCH_ARGS} enable_gpio_ref:=${PRACTICE_GPIO_REF}"
   LAUNCH_ARGS="${LAUNCH_ARGS} enable_autoreferee:=false"
+  if [ "${MODE}" = "lesson" ]; then
+    # Lesson: QUESTiX LAB shares /target_twist through twist_arbiter (the stick always wins) and
+    # may operate the launcher; drive and launcher move only with the teacher's permission.
+    LAUNCH_ARGS="${LAUNCH_ARGS} enable_twist_arbiter:=true enable_lab_shoot:=true"
+    LAUNCH_ARGS="${LAUNCH_ARGS} require_teacher_permission:=true"
+  else
+    # Practice: the controller alone (joy_controller -> /target_twist), no lab input, no
+    # teacher permission.
+    LAUNCH_ARGS="${LAUNCH_ARGS} enable_twist_arbiter:=false enable_lab_shoot:=false"
+    LAUNCH_ARGS="${LAUNCH_ARGS} require_teacher_permission:=false"
+  fi
 fi
 LAUNCH_ARGS="${LAUNCH_ARGS} enable_rviz:=${ENABLE_RVIZ:-false}"
 LAUNCH_ARGS="${LAUNCH_ARGS} controller_type:=${CONTROLLER_TYPE:-dualshock}"

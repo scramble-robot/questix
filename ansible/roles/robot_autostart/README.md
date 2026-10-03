@@ -5,12 +5,16 @@ systemd による ROS 2 ノードの自動起動を設定するロール。
 ## 動作概要
 
 - `/etc/questix_robot/mode` が `competition` の時のみ、ブート時に `ros2 launch questix_launcher questix_core.launch.xml` を `enable_gpio_ref:=true`、`enable_autoreferee:=true` 付きで自動実行
-- `practice`（デフォルト）の時、ブート時や手動の `systemctl start` ではサービスは即正常終了し、ノードは起動しない。
-  Robot Manager の「起動」「再起動」だけが、直前に起動要求（`/etc/questix_robot/start-request`）を書いてから
-  サービスを起動し、ランチャーはそれを消費して `enable_autoreferee:=false`（練習用の構成。`enable_gpio_ref` は
-  `launch.env` の `ENABLE_GPIO_REF`）で起動する。要求は同じブート・120 秒以内のものだけ有効で、消費されるため
-  練習用の起動が異常終了しても `Restart=on-failure` では起動し直さない（詳細は
-  `scripts/robot_manager/README.md` の「練習モードの起動要求」）
+- `practice`（デフォルト、練習）と `lesson`（教材）の時、ブート時や手動の `systemctl start` ではサービスは即正常終了し、
+  ノードは起動しない。Robot Manager の「起動」「再起動」だけが、直前に起動要求（`/etc/questix_robot/start-request`、
+  保存したモードと同じ `mode=`）を書いてからサービスを起動し、ランチャーはそれを消費して `enable_autoreferee:=false`
+  （`enable_gpio_ref` は `launch.env` の `ENABLE_GPIO_REF`）で起動する。
+  - `practice`: コントローラーだけ（`enable_twist_arbiter:=false enable_lab_shoot:=false require_teacher_permission:=false`）。
+    教材（QUESTiX LAB）と先生の許可は使わない。
+  - `lesson`: 教材から走行・発射でき（`enable_twist_arbiter:=true enable_lab_shoot:=true`）、コントローラーも教材も
+    先生の許可がある間だけ動く（`require_teacher_permission:=true`）。
+  要求は同じブート・120 秒以内のものだけ有効で、消費されるため異常終了しても `Restart=on-failure` では起動し直さない
+  （詳細は `scripts/robot_manager/README.md` の「練習モードの起動要求」）
 - その他の Launch 引数は `/etc/questix_robot/launch.env` で制御
 - competition では GPIO5 physical E-stop と GPIO27 AutoReferee が必須のため、`launch.env` の `ENABLE_GPIO_REF` は無視して GPIO 安全系を常時有効化
 
@@ -18,7 +22,7 @@ systemd による ROS 2 ノードの自動起動を設定するロール。
 
 | 変数 | デフォルト | 説明 |
 |------|-----------|------|
-| `robot_mode` | `practice` | `competition` or `practice` |
+| `robot_mode` | `practice` | `lesson`（教材）/ `practice`（練習）/ `competition`（大会）。それ以外は失敗 |
 | `install_robot_manager` | `false` | Web管理GUI のインストール（privateリポジトリ） |
 | `robot_manager_repo` | `git+ssh://...` | robot-manager の Git URL |
 | `robot_manager_version` | `main` | robot-manager のブランチ/タグ |
@@ -31,9 +35,9 @@ systemd による ROS 2 ノードの自動起動を設定するロール。
 echo competition | sudo tee /etc/questix_robot/mode
 sudo systemctl restart questix_robot
 
-# 練習モードに切替
+# 練習モード・教材モードに切替（起動は Robot Manager の「起動」から。systemctl だけでは起動しない）
 echo practice | sudo tee /etc/questix_robot/mode
-sudo systemctl restart questix_robot
+echo lesson | sudo tee /etc/questix_robot/mode
 
 # サービス状態確認
 sudo systemctl status questix_robot
