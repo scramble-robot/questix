@@ -156,17 +156,25 @@ ros2 param dump /drive_component
 で 1 回だけ解析し、全ターゲットで再利用します（`-DMOTOR_CONTROL_APP_USE_PCH=OFF` で無効化）。
 ビルドログに `-Winvalid-pch` の警告が出たら再利用が効いていません（結果は同じで、速度だけ落ちる）。
 
-手元で速くするには:
+手元（Raspberry Pi 5 を含む）で速くするには、いつもの `colcon build --symlink-install` のまま
+ccache を通すのが手軽です（pull・ブランチ切り替え後の再コンパイルが速くなる）:
 
 ```bash
-# 開発中はテストをビルドしない（gtest 14 本 + gtest 本体を省く）
-colcon build --packages-select motor_control_app --cmake-args -DBUILD_TESTING=OFF
-# ccache で 2 回目以降を速くする（PCH と併用するための設定込み）
-export CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime
-colcon build --cmake-args -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-# Raspberry Pi 5: rclcpp を含む 1 ファイルで 1〜1.5 GB 使うため、並列数を絞ってスワップを避ける
-MAKEFLAGS=-j2 colcon build --parallel-workers 1 --packages-select motor_control_app
+sudo apt install ccache
+# PCH と併用するための設定（一度だけ。~/.config/ccache/ccache.conf に保存される）
+ccache --set-config sloppiness=pch_defines,time_macros,include_file_mtime,include_file_ctime
 ```
+
+`~/.colcon/defaults.yaml`（コマンドで `--cmake-args` を付けるとこちらは上書きされる）:
+
+```yaml
+build:
+  cmake-args:
+    - -DCMAKE_C_COMPILER_LAUNCHER=ccache
+    - -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+```
+
+このパッケージだけを触っている間は `--packages-select motor_control_app` で他を省けます。
 
 ## テスト
 
