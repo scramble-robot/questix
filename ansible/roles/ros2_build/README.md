@@ -16,7 +16,8 @@ and before `robot_autostart`). Before this role, a freshly set-up kit had an emp
 3. Installs the workspace's rosdep keys (`rosdep install --from-paths <workspace> --ignore-src
    --rosdistro jazzy -r -y`). It reads the index the `ros2_installation` role's `rosdep update`
    wrote as the user (`ROS_HOME=~/.ros`); only this step runs as root (for apt-get).
-4. `colcon build --symlink-install` as the user.
+4. `colcon build --symlink-install` as the user, with `workspace_build_jobs` (default 2) packages at
+   once and `MAKEFLAGS=-j<same>` in each, so a Raspberry Pi 5 does not run out of memory and swap.
 5. Checks: `install/setup.bash` exists; `src/ build/ install/ log/` belong to `target_user`;
    `ros2 pkg prefix` resolves every package of `workspace_required_packages`;
    `ros2 pkg executables questix_lab_bridge` lists `lab_bridge_node`. A failed check fails the

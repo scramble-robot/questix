@@ -186,6 +186,9 @@ for v in 102 214 233 -1 abc; do assert_range_case "$v" fail; done
 # $BASHRC_FILE was rendered by the real robotics_workspace role in section 4.
 assert_contains "$BASHRC_FILE" "alias gpio_status='gpioinfo gpiochip4'" \
     "gpio helper: gpio_status lists gpiochip4 read-only (gpio_reader's chip)"
+assert_contains "$BASHRC_FILE" \
+    "alias rb='cd \$ROBOT_WS && MAKEFLAGS=-j2 colcon build --symlink-install --parallel-workers 2'" \
+    "build helper: rb bounds parallelism like the ros2_build role"
 assert_not_contains "$BASHRC_FILE" "raspi-gpio" "gpio helper: no raspi-gpio (absent on Ubuntu 24.04 / Pi 5)"
 assert_not_contains "ansible/playbooks/setup_kit.yaml" "raspi-gpio" "gpio helper: completion message names no raspi-gpio"
 assert_contains "gpio_reader/config/gpio_reader.yaml" 'chip_name: "/dev/gpiochip4"' \
@@ -221,6 +224,8 @@ if run_build; then
         "workspace build: rosdep installs the workspace's keys"
     assert_contains "$FAKE_ROS_LOG" "ROS_HOME=/home/$USER/.ros" "workspace build: rosdep reads the kit user's index"
     assert_contains "$FAKE_ROS_LOG" "colcon build --symlink-install" "workspace build: colcon build --symlink-install"
+    assert_contains "$FAKE_ROS_LOG" "--parallel-workers 2 MAKEFLAGS=-j2" \
+        "workspace build: parallelism bounded (2 packages x 2 jobs keeps a Pi 5 out of swap)"
     assert_contains "$FAKE_ROS_LOG" "ros2 pkg prefix questix_lab_bridge" "workspace build: questix_lab_bridge must resolve"
     assert_contains "$FAKE_ROS_LOG" "ros2 pkg executables questix_lab_bridge" "workspace build: lab_bridge_node must resolve"
     assert_contains "$PLAYBOOK_LOG" "Workspace built at: $BUILD_WS" "workspace build: result reported"

@@ -119,9 +119,11 @@
           set -eo pipefail
           # ROS setup files read unset variables: never enable nounset around them.
           source "{{ workspace_ros_setup }}"
-          colcon build --symlink-install 2>&1 | tail -n 40
+          colcon build --symlink-install --parallel-workers {{ workspace_build_jobs | int }} 2>&1 | tail -n 40
         chdir: "{{ workspace_path }}"
         executable: /bin/bash
+      environment:
+        MAKEFLAGS: "-j{{ workspace_build_jobs | int }}"
       # The kit user's own work: as that user also when the playbook runs as root (image build).
       become: "{{ questix_image_build | default(false) | bool }}"
       become_user: "{{ target_user }}"

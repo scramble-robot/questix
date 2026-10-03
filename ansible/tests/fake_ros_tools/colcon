@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Fake colcon for ansible/tests (ros2_build): logs the call and leaves what a build leaves.
 set -euo pipefail
-echo "colcon $*" >>"$FAKE_ROS_LOG"
+echo "colcon $* MAKEFLAGS=${MAKEFLAGS:-}" >>"$FAKE_ROS_LOG"
 mkdir -p build log install/questix_lab_bridge install/questix_launcher install/questix_msgs
 : >install/setup.bash
 echo "Summary: 3 packages finished"

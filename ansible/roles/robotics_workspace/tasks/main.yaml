@@ -22,11 +22,13 @@
       export ROBOT_WS={{ workspace_path }}
       alias rw='cd $ROBOT_WS'
       alias rs='cd $ROBOT_WS/src'
-      alias rb='cd $ROBOT_WS && colcon build --symlink-install'
+      alias rb='cd $ROBOT_WS && MAKEFLAGS=-j{{ rb_jobs }} colcon build --symlink-install --parallel-workers {{ rb_jobs }}'
       alias rt='cd $ROBOT_WS && colcon test'
       alias gpio_status='gpioinfo {{ gpio_status_chip }}'
     state: present
     create: true
+  vars:
+    rb_jobs: "{{ workspace_build_jobs | int }}"
   # The kit user's own work: as that user also when the playbook runs as root (image build).
   become: "{{ questix_image_build | default(false) | bool }}"
   become_user: "{{ target_user }}"

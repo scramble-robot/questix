@@ -11,6 +11,12 @@ workspace_rosdep_become: true
 # A kit's workspace is never built by root (it would leave root-owned build/ install/ log/).
 # Only the isolated contract tests, when run as root, set this false.
 workspace_build_refuse_root: true
+# Build parallelism on the kit: colcon builds this many packages at once and make runs this many
+# compilers in each (MAKEFLAGS), so at most N*N compilers run together. A translation unit that
+# includes rclcpp needs 1-1.5 GB; 2 keeps a Raspberry Pi 5 8 GB at about 4 compilers (~6 GB) and out
+# of swap, which unbounded (4 packages x 4 jobs) is not. Same value in the ros2_build and
+# robotics_workspace roles (the bashrc `rb` alias); keep them identical.
+workspace_build_jobs: 2
 # Must resolve with `ros2 pkg prefix` after the build (the robot service, Robot Manager's lesson
 # bridge and the messages both use).
 workspace_required_packages:

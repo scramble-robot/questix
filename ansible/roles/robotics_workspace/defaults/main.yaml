@@ -5,6 +5,12 @@ target_user: "{{ ansible_user | default(ansible_env.SUDO_USER) }}"
 workspace_path: "/home/{{ target_user }}/robot_ws"
 bashrc_path: "/home/{{ target_user }}/.bashrc"
 ros_domain_id: 42
+# Build parallelism on the kit: colcon builds this many packages at once and make runs this many
+# compilers in each (MAKEFLAGS), so at most N*N compilers run together. A translation unit that
+# includes rclcpp needs 1-1.5 GB; 2 keeps a Raspberry Pi 5 8 GB at about 4 compilers (~6 GB) and out
+# of swap, which unbounded (4 packages x 4 jobs) is not. Same value in the ros2_build and
+# robotics_workspace roles (the bashrc `rb` alias); keep them identical.
+workspace_build_jobs: 2
 # `gpio_status` lists this chip's lines (read-only: gpioinfo does not request a line, so it never
 # takes GPIO5 from gpio_reader). Same chip as gpio_reader/config/gpio_reader*.yaml chip_name.
 # raspi-gpio is not available on Ubuntu 24.04 for Raspberry Pi 5; gpioinfo comes with gpiod
