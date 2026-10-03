@@ -19,6 +19,7 @@ QUESTiX のモータ制御 ROS 2 ノード群です。シリアル通信・制�
 | Sub | `/target_twist` | `geometry_msgs/Twist` | depth 1。ACTIVE のときのみ処理 |
 | Sub | `/emergency_stop` | `questix_msgs/EmergencyStop` | reliable + transient_local |
 | Pub | `/drive_status` | `questix_msgs/DriveStatus` | `status_publish_rate` Hz |
+| Pub | `/drive_control_sample` | `questix_msgs/DriveControlSample` | 制御 tick ごと（`control_rate` Hz）。**診断専用**。`publish_control_sample: false` で止まる |
 | Pub | `/odom` + TF `odom→base_link` | `nav_msgs/Odometry` | 実測 RPM の積分 |
 
 ## 制御構造
@@ -109,6 +110,16 @@ ON/OFF しても、変更前のモデル由来の推定値が新しい設定へ�
 |---|---|---|---|
 | `measured_lpf_tau_sec` | 0.15 | ○ | 実測RPMローパス（**レポート/odom経路のみ**、制御は生値）。`velocity_rpm_raw` に生値が併記される |
 | `status_publish_rate` | 50.0 | × | `/drive_status` の publish レート |
+| `publish_control_sample` | true | × | 制御 tick ごとの診断サンプル `/drive_control_sample` を出すか |
+| `control_sample_topic` | `/drive_control_sample` | × | 診断サンプルの出力先 |
+
+`/drive_control_sample`（`questix_msgs/DriveControlSample`）は制御 tick の最後に 1 回 publish
+される（reliable + volatile + keep_last(100)、ACTIVE の間だけ）。`/drive_status` は別タイマーで
+最新の快照を読むため、tick と 1 対 1 に対応しない（同じフィードバックを 2 回出す・1 つ飛ばす
+ことがある）。tick ごとの記録・解析にはこちらを使う: `seq` で欠落、`feedback_new` /
+`feedback_count` で同じフレームの重複を判別でき、補正前の目標・送った指令・往復時間・
+ワイヤ値（速度・位置・電流の生値）が同じ tick に揃っている。制御・安全判断には使わない。
+契約は `questix_msgs/README.md`。
 
 ### 構成（再起動が必要 = 実行時変更は拒否される）
 

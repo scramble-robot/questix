@@ -148,6 +148,14 @@ drive_component:
     # 型付きステータス出力先（questix_msgs/DriveStatus）。契約は questix_msgs/README.md。
     # 左右モータの電流/速度/位置/fault を型付きで確認したいときはこちらを echo してください。
     typed_status_topic: "/drive_status"
+    # 制御 tick ごとの診断サンプル（questix_msgs/DriveControlSample、control_rate で publish、
+    # reliable + volatile + keep_last(100)、lifecycle ACTIVE の間だけ）。tick の連番 seq、
+    # 両輪の補正前目標・送った指令・この tick で新しいフィードバックを受けたか・往復時間・
+    # ワイヤ値（速度・位置・電流の生値）を 1 メッセージにまとめる。rosbag で記録して解析する
+    # 診断専用で、制御・安全判断には使わない（契約: questix_msgs/README.md）。
+    # 実行時変更は不可（publisher は configure で作る）。止めるときは false にして再起動。
+    publish_control_sample: true
+    control_sample_topic: "/drive_control_sample"
 
     # オドメトリ出力（実測RPM由来の twist を積分し status_publish_rate 周期で publish）。
     # フィードバックが 0.5 秒以上更新されない間（非常停止・未通電を含む）は積分を止め、

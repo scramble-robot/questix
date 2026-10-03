@@ -15,6 +15,7 @@
 #include "geometry_msgs/msg/twist.hpp"
 #include "motor_control_app/actuation_gate.hpp"
 #include "motor_control_app/control_core.hpp"
+#include "motor_control_app/drive_control_sample_msg.hpp"
 #include "motor_control_app/drive_control_tick.hpp"
 #include "motor_control_app/drive_watchdog.hpp"
 #include "motor_control_app/odometry_integrator.hpp"
@@ -22,6 +23,7 @@
 #include "motor_control_lib/differential_drive.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "questix_msgs/msg/actuation_authority.hpp"
+#include "questix_msgs/msg/drive_control_sample.hpp"
 #include "questix_msgs/msg/drive_status.hpp"
 #include "questix_msgs/msg/emergency_stop.hpp"
 #include "rcl_interfaces/msg/set_parameters_result.hpp"
@@ -107,6 +109,23 @@ private:
    * 低頻度で再取得のみ行う。
    */
   void controlTimerCallback();
+
+  /**
+   * @brief 制御 tick の本体（controlTimerCallback から 1 tick に 1 回呼ぶ）。
+   *
+   * tick が何をしたか（アクション・送信の成否・指令値）を tick_sample_ に書き込む。
+   * 途中の return があっても controlTimerCallback が最後に診断サンプルを 1 回 publish する。
+   */
+  void runControlTick();
+
+  /**
+   * @brief 診断サンプル（questix_msgs/DriveControlSample）を 1 tick ぶん publish する。
+   *
+   * 制御にも安全判断にも使わない（契約は questix_msgs/README.md）。publish_control_sample=false
+   * なら何もしない。
+   */
+  void publishControlSample(const rclcpp::Time& tick_stamp,
+                            std::chrono::steady_clock::time_point tick_start);
 
   /**
    * @brief モータステータスをパブリッシュするタイマーコールバック
@@ -244,6 +263,9 @@ private:
   // 型付きステータス（questix_msgs/DriveStatus）。契約は questix_msgs/README.md。
   rclcpp_lifecycle::LifecyclePublisher<questix_msgs::msg::DriveStatus>::SharedPtr
       typed_status_publisher_;
+  // 制御 tick ごとの診断サンプル（publish_control_sample=true のときだけ作る）。
+  rclcpp_lifecycle::LifecyclePublisher<questix_msgs::msg::DriveControlSample>::SharedPtr
+      control_sample_publisher_;
   // ホイールオドメトリ（nav_msgs/Odometry）と odom->base_link TF。
   rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::Odometry>::SharedPtr odom_publisher_;
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
@@ -275,6 +297,9 @@ private:
   int max_motor_rpm_;
   double status_publish_rate_;
   std::string typed_status_topic_;  // 型付き DriveStatus トピック
+  // 制御 tick ごとの診断サンプル（questix_msgs/DriveControlSample）。実行時変更不可
+  bool publish_control_sample_{true};
+  std::string control_sample_topic_{"/drive_control_sample"};
   // 統一緊急停止トピック（空文字で連動無効）。コンストラクタで一度だけ読む。
   std::string emergency_stop_topic_;
 
@@ -387,6 +412,14 @@ private:
   std::chrono::steady_clock::time_point last_stop_attempt_{};
   // 前回評価したゲートの理由（閉じる変化の検出とログ用）
   actuation_gate::Block last_block_{actuation_gate::Block::kEstopUnknown};
+
+  // 診断サンプル: 制御 tick の間だけ in_control_tick_ = true で、tick の中の処理（safetyStop を
+  // 含む）が tick_sample_ に何をしたかを書き込む。コールバックはすべて同じ相互排他グループで
+  // 直列に走るため（上の ROS 2 通信の注記）、tick の外の safetyStop（非常停止コールバック等）が
+  // 書き込むことはない。
+  drive_control_sample::TickInput tick_sample_{};
+  bool in_control_tick_{false};
+  uint32_t control_sample_seq_{0};  // ノード起動から 0 で始まり、publish ごとに +1
 };
 
 }  // namespace motor_control_app

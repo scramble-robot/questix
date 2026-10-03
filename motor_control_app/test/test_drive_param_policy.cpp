@@ -297,3 +297,14 @@ int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
+
+TEST_F(DriveParamPolicyTest, ControlSampleIsOnByDefaultAndNotRuntimeChangeable) {
+  // 診断サンプル（/drive_control_sample）は既定で有効。publisher は configure で作るため、
+  // 実行時の変更は拒否する（受理して黙って無視しない）。
+  EXPECT_TRUE(node_->get_parameter("publish_control_sample").as_bool());
+  EXPECT_EQ(node_->get_parameter("control_sample_topic").as_string(), "/drive_control_sample");
+  EXPECT_FALSE(
+      node_->set_parameter(rclcpp::Parameter("publish_control_sample", false)).successful);
+  EXPECT_FALSE(node_->set_parameter(rclcpp::Parameter("control_sample_topic", "/x")).successful);
+  EXPECT_TRUE(node_->get_parameter("publish_control_sample").as_bool());
+}

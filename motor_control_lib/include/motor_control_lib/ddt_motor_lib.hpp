@@ -225,6 +225,27 @@ public:
   SerialLatencyStats getSerialLatencyStats() const;
 
   /**
+   * @brief 1 モータ分の送受信の記録（診断トピック /drive_control_sample 用。制御には使わない）。
+   *  制御 tick の前後で取得して差を取ると、その tick で新しいフィードバックを受信したか
+   *  （feedback_count の増加）・送受信があったか（transactions の増加）が分かる。
+   *  カウンタはライブラリ生成以降の累積（initializeMotor で戻らない。shutdown で消える）。
+   */
+  struct MotorTransactionStats {
+    uint64_t feedback_count{0};  // 有効フィードバックフレームの受信数（parseFeedback 成功で +1）
+    uint64_t transactions{0};    // 書込に成功して応答を待った回数（書込失敗は含まない）
+    uint64_t response_timeouts{0};  // そのうち有効な応答が無かった回数
+    double last_roundtrip_ms{std::nan("")};  // 直近の送受信の往復時間 [ms]（応答なしは NaN）
+    bool last_response_timeout{false};       // 直近の送受信で有効な応答が無かったか
+    int16_t last_current_raw_sent{0};  // current モードで最後に送信成功した電流 raw（未送信 0）
+  };
+
+  /**
+   * @brief 指定モータの送受信の記録を取得する（state_mutex_ で保護）。
+   * @return 登録済みモータなら true。未登録なら false（out は既定値）。
+   */
+  bool getMotorTransactionStats(int motor_id, MotorTransactionStats& out) const;
+
+  /**
    * @brief 鮮度ゲート付きフィードバックポーリング（アイドル中専用）。
    *  保持フィードバックが max_age_sec より新しければ何もしない。古ければ、最後に
    *  **送信に成功した**フレームが停止フレーム（指令値 0、速度・電流モードとも）のときに
@@ -304,6 +325,8 @@ private:
   std::map<int, MotorFeedback> motor_feedbacks_;  // motor_id -> feedback
   std::map<int, ControlMode> motor_modes_;        // motor_id -> control mode
   std::map<int, PiState> pi_states_;              // motor_id -> PI state
+  // motor_id -> 送受信の記録（診断用。initializeMotor では消さない累積値）
+  std::map<int, MotorTransactionStats> transaction_stats_;
   // motor_id -> 最後に**送信に成功した**指令フレーム。送信に失敗したときは書き換えない
   // （停止に失敗しても 0 に偽装しない）。refreshMotorFeedback はこれが停止フレームのときだけ
   // 再送する。
