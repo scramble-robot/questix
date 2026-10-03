@@ -590,11 +590,10 @@ void DriveComponent::readParameters() {
         std::clamp<int64_t>(raw, motor_control_lib::DdtMotorLib::kMinResponseTimeoutMs,
                             motor_control_lib::DdtMotorLib::kMaxResponseTimeoutMs);
     if (clamped != raw) {
-      RCLCPP_WARN(this->get_logger(),
-                  "serial_response_timeout_ms=%ld is outside [%d, %d]; using %ld ms",
-                  static_cast<long>(raw), motor_control_lib::DdtMotorLib::kMinResponseTimeoutMs,
-                  motor_control_lib::DdtMotorLib::kMaxResponseTimeoutMs,
-                  static_cast<long>(clamped));
+      RCLCPP_WARN(
+          this->get_logger(), "serial_response_timeout_ms=%ld is outside [%d, %d]; using %ld ms",
+          static_cast<long>(raw), motor_control_lib::DdtMotorLib::kMinResponseTimeoutMs,
+          motor_control_lib::DdtMotorLib::kMaxResponseTimeoutMs, static_cast<long>(clamped));
     }
     serial_response_timeout_ms_ = static_cast<int>(clamped);
   }
@@ -1298,8 +1297,9 @@ void DriveComponent::runControlTick() {
                out.right_ref_rpm, motor_control_lib::drive_mode_fsm::toString(out.mode),
                out.lqr_active ? "on" : "off");
 
-  // tick 所要時間の監視。シリアル応答待ち（最悪 serial_response_timeout_ms × 2）が周期予算を超えると
-  // 制御周期が崩れるため、超過を可視化する（実機での control_rate 選定の材料）。
+  // tick 所要時間の監視。シリアル応答待ち（最悪 serial_response_timeout_ms × 2）が
+  // 周期予算を超えると制御周期が崩れるため、超過を可視化する
+  // （実機での control_rate 選定の材料）。
   const double tick_ms =
       std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tick_start)
           .count();

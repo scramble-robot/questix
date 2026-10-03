@@ -256,10 +256,10 @@ public:
    */
   struct MotorTransactionStats {
     uint64_t feedback_count{0};  // 有効フィードバックフレームの受信数（parseFeedback 成功で +1）
-    uint64_t transactions{0};    // 書込に成功して応答を待った回数（書込失敗は含まない）
+    uint64_t transactions{0};  // 書込に成功して応答を待った回数（書込失敗は含まない）
     uint64_t response_timeouts{0};  // そのうち有効な応答が無かった回数
     double last_roundtrip_ms{std::nan("")};  // 直近の送受信の往復時間 [ms]（応答なしは NaN）
-    bool last_response_timeout{false};       // 直近の送受信で有効な応答が無かったか
+    bool last_response_timeout{false};  // 直近の送受信で有効な応答が無かったか
     int16_t last_current_raw_sent{0};  // current モードで最後に送信成功した電流 raw（未送信 0）
   };
 

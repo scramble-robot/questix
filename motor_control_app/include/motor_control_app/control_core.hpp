@@ -101,7 +101,7 @@ struct Output {
   double linear{0.0};      // スルーレート適用後の車体前進速度指令 [m/s]
   double angular{0.0};     // スルーレート適用後の車体角速度指令 [rad/s]
   bool lqr_active{false};  // この tick で RUN LQR 補正をどちらかの輪に適用したか
-  bool left_lqr_active{false};   // 左輪に適用したか（輪ごとの適用範囲は wheelInRunRange()）
+  bool left_lqr_active{false};  // 左輪に適用したか（輪ごとの適用範囲は wheelInRunRange()）
   bool right_lqr_active{false};  // 右輪に適用したか
 };
 

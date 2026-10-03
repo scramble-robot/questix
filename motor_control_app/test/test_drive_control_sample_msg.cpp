@@ -68,7 +68,7 @@ TEST(DriveControlSampleMsg, TimeoutIsNaNAndNotNew) {
 
 TEST(DriveControlSampleMsg, ATickWithoutExchangeDoesNotRepeatTheLastRoundtrip) {
   auto in = answeredWheel();
-  in.stats_before = in.stats_after;  // an idle tick: no exchange with this motor
+  in.stats_before = in.stats_after;             // an idle tick: no exchange with this motor
   in.stats_after.last_response_timeout = true;  // left over from an earlier tick
   const auto msg = sample::toWheelSampleMsg(in, false, kNow);
   EXPECT_FALSE(msg.feedback_new);

@@ -305,15 +305,14 @@ TEST_F(DriveParamPolicyTest, SerialResponseTimeoutDefaultsToTheFormerFixedValue)
   EXPECT_EQ(node_->get_parameter("serial_response_timeout_ms").as_int(), 10);
   EXPECT_EQ(node_->get_parameter("serial_response_timeout_ms").as_int(),
             motor_control_lib::DdtMotorLib::kDefaultResponseTimeoutMs);
-  EXPECT_FALSE(
-      node_->set_parameter(rclcpp::Parameter("serial_response_timeout_ms", 5)).successful);
+  EXPECT_FALSE(node_->set_parameter(rclcpp::Parameter("serial_response_timeout_ms", 5)).successful);
   EXPECT_EQ(node_->get_parameter("serial_response_timeout_ms").as_int(), 10);
 }
 
 TEST(DriveParamPolicyClamp, OutOfRangeResponseTimeoutIsClampedWhenRead) {
   rclcpp::init(0, nullptr);
-  for (const auto& [requested, applied] : std::vector<std::pair<int, int>>{
-           {0, 2}, {1, 2}, {2, 2}, {12, 12}, {50, 50}, {500, 50}}) {
+  for (const auto& [requested, applied] :
+       std::vector<std::pair<int, int>>{{0, 2}, {1, 2}, {2, 2}, {12, 12}, {50, 50}, {500, 50}}) {
     rclcpp::NodeOptions options;
     options.append_parameter_override("auto_start", false);
     options.append_parameter_override("serial_response_timeout_ms", requested);
@@ -330,8 +329,7 @@ TEST_F(DriveParamPolicyTest, ControlSampleIsOnByDefaultAndNotRuntimeChangeable) 
   // 実行時の変更は拒否する（受理して黙って無視しない）。
   EXPECT_TRUE(node_->get_parameter("publish_control_sample").as_bool());
   EXPECT_EQ(node_->get_parameter("control_sample_topic").as_string(), "/drive_control_sample");
-  EXPECT_FALSE(
-      node_->set_parameter(rclcpp::Parameter("publish_control_sample", false)).successful);
+  EXPECT_FALSE(node_->set_parameter(rclcpp::Parameter("publish_control_sample", false)).successful);
   EXPECT_FALSE(node_->set_parameter(rclcpp::Parameter("control_sample_topic", "/x")).successful);
   EXPECT_TRUE(node_->get_parameter("publish_control_sample").as_bool());
 }

@@ -41,7 +41,7 @@ struct WheelInput {
 struct TickInput {
   uint32_t seq{0};
   rclcpp::Time tick_start{0, 0, RCL_ROS_TIME};  // header.stamp
-  rclcpp::Time now{0, 0, RCL_ROS_TIME};         // feedback_stamp を求める基準（tick の終わり）
+  rclcpp::Time now{0, 0, RCL_ROS_TIME};  // feedback_stamp を求める基準（tick の終わり）
   double control_period_sec{0.0};
   double tick_duration_sec{0.0};
   bool current_mode{false};

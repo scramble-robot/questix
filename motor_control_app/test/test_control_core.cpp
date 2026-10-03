@@ -1037,7 +1037,7 @@ public:
     double damping{0.15};    // 仮定値: 減衰比（減衰の悪いループ）
     int delay_ticks{1};      // 仮定値: 指令が効き始めるまでのむだ時間 [tick]
     double ripple_rpm{0.0};  // 1 回転に 1 回の外乱の大きさ（速度指令に換算した rpm）
-    int substeps{20};        // 1 tick の中の積分ステップ数
+    int substeps{20};  // 1 tick の中の積分ステップ数
   };
 
   explicit ResonantFirmwarePlant(const Params& params) : params_(params) {}
