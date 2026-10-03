@@ -24,8 +24,8 @@
 namespace esc_motor_control_cpp {
 
 // The roller spins only while roller_gate.hpp says so: the E-stop is known and released
-// (with require_emergency_stop, which questix_core sets from enable_gpio_ref, unknown and silent
-// count as pressed) and, only when a practice launch opts in to
+// (require_emergency_stop; unknown and silent count as pressed, and operation_manager always
+// publishes it in questix_core) and, only when a practice launch opts in to
 // (require_runtime_actuation_authority, default false), the teacher's launcher authority is fresh.
 // When it closes the roller goes to 0 and the full-speed latch needs a release; nothing restarts
 // by itself.

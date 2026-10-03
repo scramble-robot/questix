@@ -7,9 +7,6 @@
        /shot/lab/fire) only when this is true. questix_core sets it for practice runs only; it
        stays false with enable_autoreferee (competition). The node YAMLs keep false as default. -->
   <arg name="accept_lab_input" default="false" description="Let QUESTiX LAB operate the roller, tilt and fire (practice only; never with enable_autoreferee)" />
-  <!-- An unheard or silent /emergency_stop counts as pressed. questix_core passes enable_gpio_ref
-       (only operation_manager publishes it); a received active=true always stops. -->
-  <arg name="require_emergency_stop" default="true" description="Treat an unheard or silent /emergency_stop as pressed (questix_core: enable_gpio_ref)" />
   <!-- With true the launcher (shot and ESC) moves only while the teacher's runtime authority
        (/actuation_authority, Robot Manager) is fresh. Practice opt-in; never in competition. -->
   <arg name="require_runtime_actuation_authority" default="false" description="Move the launcher only while the teacher's runtime authority is fresh (practice opt-in; competition: false)" />
@@ -31,7 +28,6 @@
     <arg name="config_file" value="$(var shot_config_file)"/>
     <arg name="joy_topic" value="$(var joy_topic_name)"/>
     <arg name="accept_lab_input" value="$(var accept_lab_input)"/>
-    <arg name="require_emergency_stop" value="$(var require_emergency_stop)"/>
     <arg name="require_runtime_actuation_authority" value="$(var require_runtime_actuation_authority)"/>
   </include>
 
@@ -40,7 +36,6 @@
     <arg name="config_file" value="$(var esc_config_file)"/>
     <arg name="joy_topic" value="$(var joy_topic_name)"/>
     <arg name="accept_lab_input" value="$(var accept_lab_input)"/>
-    <arg name="require_emergency_stop" value="$(var require_emergency_stop)"/>
     <arg name="require_runtime_actuation_authority" value="$(var require_runtime_actuation_authority)"/>
   </include>
 </launch>

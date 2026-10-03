@@ -114,8 +114,8 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
   }
   if (!require_emergency_stop_) {
     RCLCPP_WARN(this->get_logger(),
-                "require_emergency_stop=false (no GPIO safety path, enable_gpio_ref:=false): the "
-                "roller may spin without /emergency_stop; a received active=true still stops it");
+                "require_emergency_stop=false (diagnostic opt-out): the roller may spin before "
+                "/emergency_stop is heard. Never use this in an integrated launch");
   }
   if (require_authority_) {
     if (authority_topic_.empty()) {

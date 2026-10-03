@@ -18,11 +18,9 @@ def _launch_setup(context, *args, **kwargs):
     config_file = LaunchConfiguration('config_file').perform(context)
     parameters = [config_file] if config_file else []
     parameters.append(LaunchConfiguration('control_config_file'))
-    # The E-stop requirement (questix_core: enable_gpio_ref) and the teacher's runtime authority
-    # (practice opt-in, never in competition). Not in the YAML (one source per launch).
+    # The teacher's runtime authority (practice opt-in, never in competition). Not in the YAML
+    # (one source per launch).
     parameters.append({
-        'require_emergency_stop': ParameterValue(
-            LaunchConfiguration('require_emergency_stop'), value_type=bool),
         'require_runtime_actuation_authority': ParameterValue(
             LaunchConfiguration('require_runtime_actuation_authority'), value_type=bool),
     })
@@ -48,11 +46,6 @@ def generate_launch_description():
             'config_file',
             default_value='',
             description='drive_component parameter YAML (empty = node defaults)'),
-        DeclareLaunchArgument(
-            'require_emergency_stop',
-            default_value='true',
-            description='Treat an unheard or silent /emergency_stop as pressed (questix_core '
-                        'passes enable_gpio_ref; a received active=true always stops)'),
         DeclareLaunchArgument(
             'require_runtime_actuation_authority',
             default_value='false',

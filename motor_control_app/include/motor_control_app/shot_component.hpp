@@ -42,9 +42,9 @@ namespace motor_control_app {
 // 連動は auto_start=true のときのみ有効で、手動 deactivate 済み（タイマー停止中）の
 // ノードは非常停止解除でも再 activate しない。
 // なお joy_gate は従来どおり /gpio/controllable（std_msgs/Bool）を購読する。
-// require_emergency_stop=true（ノード既定。questix_core は enable_gpio_ref を渡す）では、
-// /emergency_stop を一度も受信していない間・受信が途絶えた間も非常停止として扱い、自動起動も
-// コマンドもしない。false でも受信した active=true では止まる。
+// require_emergency_stop=true（既定。false は単体診断の明示 opt-out）では、/emergency_stop を
+// 一度も受信していない間・受信が途絶えた間も非常停止として扱い、自動起動もコマンドもしない
+// （operation_manager は questix_core で常に起動し、GPIO 安全系なしでも解除を出す）。
 //
 // 教員の実行時許可は非常停止とは別の概念で、require_runtime_actuation_authority=true
 // （練習での opt-in、既定 false、大会では使わない）の時だけ、教員の実行時許可

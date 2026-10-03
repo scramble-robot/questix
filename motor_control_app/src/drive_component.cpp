@@ -76,12 +76,12 @@ DriveComponent::DriveComponent(const rclcpp::NodeOptions& options)
   } else if (require_emergency_stop_) {
     RCLCPP_ERROR(this->get_logger(),
                  "emergency_stop_topic is empty but require_emergency_stop=true: the drive will "
-                 "never move");
+                 "never move (set require_emergency_stop:=false only for a diagnostic run)");
   }
   if (!require_emergency_stop_) {
     RCLCPP_WARN(this->get_logger(),
-                "require_emergency_stop=false (no GPIO safety path, enable_gpio_ref:=false): the "
-                "drive may move without /emergency_stop; a received active=true still stops it");
+                "require_emergency_stop=false (diagnostic opt-out): the drive may move before "
+                "/emergency_stop is heard. Never use this in an integrated launch");
   }
 
   // 教員の実行時許可（練習時）。volatile + keep-last(1): 許可をラッチせず、発行元が止まれば

@@ -125,9 +125,21 @@ def test_core_defaults_to_practice_and_selects_both_profile_files():
         None,
         '$(find-pkg-share operation_manager)/config/operation_manager.competition.yaml',
     ) in lets
+    # Without the GPIO safety path (practice only): no GPIO read, /emergency_stop still owned.
+    assert (
+        'operation_manager_config_file',
+        None,
+        '$(var enable_gpio_ref)',
+        '$(find-pkg-share operation_manager)/config/operation_manager.no_gpio.yaml',
+    ) in lets
+    manager_lets = [item for item in core.findall('./let')
+                    if item.get('name') == 'operation_manager_config_file']
+    assert manager_lets[-1].get('unless') == '$(var enable_gpio_ref)'  # the last let wins
 
 
-def test_core_owns_exactly_one_operation_manager_when_gpio_ref_is_enabled():
+def test_core_always_owns_exactly_one_operation_manager():
+    # operation_manager is the single owner of /emergency_stop with or without the GPIO safety
+    # path; only gpio_reader depends on enable_gpio_ref.
     core = load_xml('launcher/launch/questix_core.launch.xml')
     manager_includes = [
         include for include in core.findall('.//include')
@@ -138,7 +150,15 @@ def test_core_owns_exactly_one_operation_manager_when_gpio_ref_is_enabled():
         group for group in core.findall('.//group')
         if manager_includes[0] in list(group)
     )
-    assert manager_group.get('if') == '$(var enable_gpio_ref)'
+    assert manager_group.get('if') is None
+    assert manager_group.get('unless') == (
+        '$(and $(var enable_autoreferee) $(not $(var enable_gpio_ref)))')
+    reader_include = next(
+        include for include in core.findall('.//include')
+        if 'find-pkg-share gpio_reader' in include.get('file', ''))
+    reader_group = next(
+        group for group in core.findall('.//group') if reader_include in list(group))
+    assert reader_group.get('if') == '$(var enable_gpio_ref)'
 
     drive_include = next(
         include for include in core.findall('.//include')
@@ -173,7 +193,7 @@ def test_core_owns_exactly_one_operation_manager_when_gpio_ref_is_enabled():
 
     def integrated_manager_count(enable_drive, enable_shot, enable_gpio_ref):
         del enable_shot  # operation_manager ownership is independent of shot.
-        core_manager_count = int(enable_gpio_ref)
+        core_manager_count = 1
         nested_manager_enabled = manager_arg.get('value') != 'false'
         nested_manager_count = int(
             enable_drive and enable_gpio_ref and nested_manager_enabled)
@@ -181,6 +201,7 @@ def test_core_owns_exactly_one_operation_manager_when_gpio_ref_is_enabled():
 
     assert integrated_manager_count(False, False, True) == 1
     assert integrated_manager_count(True, True, True) == 1
+    assert integrated_manager_count(True, True, False) == 1
 
 
 def test_competition_service_launchers_always_enable_gpio_safety():
@@ -476,54 +497,21 @@ def test_runtime_actuation_authority_is_a_practice_opt_in():
         assert 'require_runtime_actuation_authority' not in text, relative_path
 
 
-def test_emergency_stop_is_required_exactly_when_its_publisher_runs():
-    # Only operation_manager publishes /emergency_stop, and questix_core starts it only with
-    # enable_gpio_ref. With the GPIO safety path an unheard or silent E-stop counts as pressed;
-    # without it (a practice run with ENABLE_GPIO_REF=false) the robot moves as 3.2.0 did, and a
-    # received active=true still stops it (the nodes' gate, see test_actuation_gate.cpp).
-    core = load_xml('launcher/launch/questix_core.launch.xml')
-    gpio_group = next(
-        group for group in core.iter('group')
-        if group.get('if') == '$(var enable_gpio_ref)'
-        and any('find-pkg-share operation_manager' in include.get('file', '')
-                for include in group.findall('./include')))
-    assert gpio_group is not None
-    for name in ('drive_component.launch.xml', 'shot_component.launch.xml'):
-        assert _include_args(core, name).get('require_emergency_stop') == (
-            '$(var enable_gpio_ref)'), name
-    # Competition cannot run without the GPIO path, so it always requires the E-stop.
-    assert find_arg(core, 'enable_autoreferee').get('default') == 'false'
-    fail_fast_group = next(
-        group for group in core.findall('./group')
-        if group.find('./timer/shutdown') is not None)
-    assert fail_fast_group.get('if') == (
-        '$(and $(var enable_autoreferee) $(not $(var enable_gpio_ref)))')
-
-    # Child launches default to the fail-closed value and forward it to every actuating node.
-    drive = load_xml('launcher/launch/drive_component.launch.xml')
-    assert find_arg(drive, 'require_emergency_stop').get('default') == 'true'
-    assert _include_args(drive, 'drive_component.launch.py').get(
-        'require_emergency_stop') == '$(var require_emergency_stop)'
-    shot = load_xml('launcher/launch/shot_component.launch.xml')
-    assert find_arg(shot, 'require_emergency_stop').get('default') == 'true'
-    for values in _launcher_node_includes(shot):
-        assert values.get('require_emergency_stop') == '$(var require_emergency_stop)'
-    esc = load_xml('esc_motor_control_cpp/launch/esc_motor_control_cpp.launch.xml')
-    assert find_arg(esc, 'require_emergency_stop').get('default') == 'true'
-    esc_params = {
-        param.get('name'): param.get('value') for param in esc.findall('./node/param')
-    }
-    assert esc_params.get('require_emergency_stop') == '$(var require_emergency_stop)'
-    for relative_path in ('motor_control_app/launch/shot_component.launch.py',
-                          'motor_control_app/launch/drive_component.launch.py'):
+def test_emergency_stop_is_always_published_and_always_required():
+    # /emergency_stop always has its publisher (operation_manager, see
+    # test_core_always_owns_exactly_one_operation_manager), so every actuating node keeps one
+    # rule: an unheard or silent E-stop counts as pressed. No launch switches it off; only an
+    # explicit diagnostic run may set require_emergency_stop:=false.
+    for relative_path in (
+        'launcher/launch/questix_core.launch.xml',
+        'launcher/launch/drive_component.launch.xml',
+        'launcher/launch/shot_component.launch.xml',
+        'esc_motor_control_cpp/launch/esc_motor_control_cpp.launch.xml',
+        'motor_control_app/launch/drive_component.launch.py',
+        'motor_control_app/launch/shot_component.launch.py',
+    ):
         text = (SOURCE_ROOT / relative_path).read_text(encoding='utf-8')
-        assert "LaunchConfiguration('require_emergency_stop'), value_type=bool" in text, (
-            relative_path)
-        default = text.split("'require_emergency_stop',\n", 1)[1].split('\n', 1)[0]
-        assert "default_value='true'" in default, relative_path
-
-    # The launch passes both switches, so no node YAML carries either (one source per launch;
-    # a stale YAML true would otherwise be overridden silently).
+        assert 'require_emergency_stop' not in text, relative_path
     for relative_path, node in (
         ('launcher/config/drive_component.yaml', 'drive_component'),
         ('motor_control_app/config/shot_config.yaml', 'shot_component'),
@@ -531,13 +519,24 @@ def test_emergency_stop_is_required_exactly_when_its_publisher_runs():
     ):
         parameters = load_yaml(relative_path)[node]['ros__parameters']
         assert 'require_runtime_actuation_authority' not in parameters, relative_path
-        assert 'require_emergency_stop' not in parameters, relative_path
+        assert parameters['require_emergency_stop'] is True, relative_path
         assert parameters['emergency_stop_topic'] == '/emergency_stop', relative_path
         assert parameters['emergency_stop_timeout_sec'] == 1.0, relative_path
-
-    # The node defaults stay fail-closed for a bare `ros2 run`.
     for relative_path in ('motor_control_app/src/drive_component.cpp',
                           'motor_control_app/src/shot_component.cpp',
                           'esc_motor_control_cpp/src/esc_motor_control_component.cpp'):
         text = (SOURCE_ROOT / relative_path).read_text(encoding='utf-8')
         assert '"require_emergency_stop", true);' in text, relative_path
+
+    # The profile without the GPIO safety path reads no GPIO but publishes the same topic.
+    no_gpio = load_yaml('operation_manager/config/operation_manager.no_gpio.yaml')
+    parameters = no_gpio['operation_manager_node']['ros__parameters']
+    assert parameters['gpio_safety_enabled'] is False
+    assert parameters['emergency_stop_topic'] == '/emergency_stop'
+    assert 'safe_low_pins' not in parameters
+    for profile in ('operation_manager.practice.yaml', 'operation_manager.competition.yaml',
+                    'operation_manager.yaml'):
+        parameters = load_yaml(f'operation_manager/config/{profile}')[
+            'operation_manager_node']['ros__parameters']
+        assert parameters.get('gpio_safety_enabled', True) is True, profile
+        assert parameters['emergency_stop_topic'] == '/emergency_stop', profile

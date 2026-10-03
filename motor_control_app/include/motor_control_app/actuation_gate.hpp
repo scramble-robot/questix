@@ -13,8 +13,9 @@
 // and only then combined:
 //
 // * the emergency stop (a safety function, /emergency_stop): evaluateEstop. With
-//   EstopInputs::required (questix_core: enable_gpio_ref) an unheard or silent E-stop counts as
-//   pressed; without it only a received pressed E-stop stops.
+//   EstopInputs::required (the default; operation_manager always publishes it in questix_core,
+//   also without the GPIO safety path) an unheard or silent E-stop counts as pressed; the
+//   diagnostic opt-out only stops on a received pressed E-stop.
 // * the teacher's runtime authority (a permission, not an emergency stop, /actuation_authority):
 //   evaluateAuthority. It is a practice opt-in; when not required it is never looked at and
 //   always allows.
@@ -41,7 +42,7 @@ enum class Block {
 
 // The emergency stop: /emergency_stop (questix_msgs/EmergencyStop).
 struct EstopInputs {
-  // questix_core passes enable_gpio_ref (operation_manager, the only publisher, runs only then).
+  // false only for an explicit diagnostic opt-out (require_emergency_stop).
   bool required{true};
   bool known{false};
   bool active{true};

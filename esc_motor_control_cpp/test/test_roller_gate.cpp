@@ -72,9 +72,9 @@ TEST(RollerGate, DiagnosticOptOutStillStopsOnAPressedEstop) {
   EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kEstopActive);
 }
 
-// enable_gpio_ref:=false without the authority opt-in (questix_core default): like 3.2.0 the
-// roller may spin with nothing heard, a silent E-stop is not a stop, a pressed one still is.
-TEST(RollerGate, PracticeWithoutGpioRefAndAuthoritySpinsWithNothingHeard) {
+// The diagnostic opt-out without the authority opt-in: the roller may spin with nothing heard,
+// a silent E-stop is not a stop, a pressed one still is.
+TEST(RollerGate, DiagnosticOptOutWithoutAuthoritySpinsWithNothingHeard) {
   RollerGateInputs in;  // nothing heard
   in.estop.required = false;
   in.authority.required = false;

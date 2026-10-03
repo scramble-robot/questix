@@ -55,8 +55,8 @@ namespace motor_control_app {
  * 常時購読し、active=true で即時停止 + 以後の twist を無視、active=false で
  * twist 受付を再開する（モータは次の twist まで停止のまま = 自動復帰）。
  * 未受信（起動直後）と、受信後に emergency_stop_timeout_sec 途絶えた状態も動かさない
- * （require_emergency_stop=true の時。questix_core は enable_gpio_ref を渡す。false でも
- * 受信した active=true では止まる）。
+ * （operation_manager は questix_core で常に起動し、GPIO 安全系なしでも解除を出す。
+ * require_emergency_stop=false は単体診断の明示 opt-out で、そのときも押下の受信では止まる）。
  *
  * 教員の実行時許可は非常停止とは別の概念で、require_runtime_actuation_authority=true
  * （練習での opt-in、既定 false、大会では使わない）の時だけ、教員の実行時許可
@@ -385,7 +385,7 @@ private:
   bool emergency_stop_active_;
 
   // E-stop の受信状態（コンストラクタで読むパラメータ。実行時変更は拒否）
-  bool require_emergency_stop_{true};       // questix_core: enable_gpio_ref
+  bool require_emergency_stop_{true};       // false は単体診断の明示 opt-out のみ
   double emergency_stop_timeout_sec_{1.0};  // 受信後の途絶判定 [s]。<=0 で無効
   bool have_estop_msg_{false};
   std::chrono::steady_clock::time_point last_estop_rx_{};

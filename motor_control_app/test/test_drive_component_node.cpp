@@ -8,15 +8,17 @@
 // stands in for the motor's /dev/ttyACM0 and a fake motor on its other end records every command
 // frame and answers it like a M0602C (echoing the commanded speed, fault 0). The node is loaded
 // with the integrated hardware YAML (launcher/config/drive_component.yaml) and the DualShock
-// operator profile, as questix_core does, and then given the switches questix_core passes.
+// operator profile, as questix_core does, and then given the switch questix_core passes. The test
+// plays operation_manager: /emergency_stop at 10 Hz, "released (no GPIO safety path)" for a
+// practice robot without the GPIO safety path.
 //
 // What this pins down:
-// * a practice robot without the GPIO safety path (require_emergency_stop:=false) and without
-//   the teacher's authority opt-in (require_runtime_actuation_authority:=false, the default)
-//   drives on /target_twist as 3.2.0 did, and a received pressed E-stop still stops it;
+// * a practice robot without the GPIO safety path and without the teacher's authority opt-in
+//   (the default) drives on /target_twist, as 3.2.0 did; it stops when /emergency_stop goes
+//   silent (operation_manager gone) and when a pressed E-stop is received;
 // * the disabled authority is really disabled: no /actuation_authority subscription, and an
 //   "off" heartbeat changes nothing;
-// * with the GPIO safety path an unheard E-stop keeps the drive stopped until it is released;
+// * an unheard E-stop keeps the drive stopped until a release is heard;
 // * the opted-in authority gates the drive, and it is never reported as an emergency stop.
 #include <fcntl.h>
 #include <gtest/gtest.h>
@@ -184,10 +186,8 @@ private:
   std::vector<std::vector<uint8_t>> commands_;
 };
 
-struct Switches {
-  bool require_emergency_stop;
-  bool require_runtime_actuation_authority;
-};
+// operation_manager's /emergency_stop reason without the GPIO safety path.
+constexpr char kNoGpioReason[] = "released (no GPIO safety path)";
 
 class DriveComponentNode : public ::testing::Test {
 protected:
@@ -209,9 +209,10 @@ protected:
     std::remove(overrides_path_.c_str());
   }
 
-  // Starts the node as questix_core would (hardware YAML, operator profile, launch switches),
-  // on this test's own topics and the fake motor's serial line.
-  void start(const Switches& switches) {
+  // Starts the node as questix_core would (hardware YAML, operator profile, launch switch), on
+  // this test's own topics and the fake motor's serial line. The E-stop requirement comes from
+  // the integrated YAML (never overridden here).
+  void start(bool require_runtime_actuation_authority) {
     ASSERT_FALSE(motor_.path().empty()) << "openpty failed";
     static int counter = 0;
     prefix_ = "/drive_node_test_" + std::to_string(getpid()) + "_" + std::to_string(counter++);
@@ -226,10 +227,8 @@ protected:
           << "    typed_status_topic: \"" << prefix_ << "/drive_status\"\n"
           << "    emergency_stop_topic: \"" << prefix_ << "/emergency_stop\"\n"
           << "    runtime_authority_topic: \"" << prefix_ << "/actuation_authority\"\n"
-          << "    require_emergency_stop: " << (switches.require_emergency_stop ? "true" : "false")
-          << "\n"
           << "    require_runtime_actuation_authority: "
-          << (switches.require_runtime_actuation_authority ? "true" : "false") << "\n";
+          << (require_runtime_actuation_authority ? "true" : "false") << "\n";
     }
     rclcpp::NodeOptions options;
     // Later files win: hardware YAML, operator profile, then this test's overrides.
@@ -267,6 +266,11 @@ protected:
     while (std::chrono::steady_clock::now() < deadline) {
       if (std::chrono::steady_clock::now() >= next_input) {
         next_input += 50ms;  // a controller at 20 Hz, a heartbeat at 20 Hz
+        // operation_manager evaluates every 100 ms and publishes each time.
+        if (send_estop_ && (++estop_tick_ % 2 == 0)) {
+          publishEstop(estop_active_,
+                       estop_active_ ? "pin 5 is true, expected false; " : kNoGpioReason);
+        }
         if (send_twist_) {
           geometry_msgs::msg::Twist twist;
           twist.linear.x = 0.5;
@@ -295,12 +299,22 @@ protected:
 
   bool droveBothWheels() const { return motor_.drove(kLeftId) && motor_.drove(kRightId); }
 
-  void publishEstop(bool active) {
+  void publishEstop(bool active, const std::string& reason) {
     questix_msgs::msg::EmergencyStop msg;
     msg.active = active;
-    msg.source = "test";
-    msg.reason = active ? "pressed" : "released";
+    msg.source = "operation_manager";
+    msg.reason = reason;
     estop_pub_->publish(msg);
+  }
+
+  // Plays operation_manager without the GPIO safety path: "released" at 10 Hz.
+  void operationManagerWithoutGpio() {
+    send_estop_ = true;
+    estop_active_ = false;
+  }
+
+  bool lastCommandsAreZero() const {
+    return motor_.lastCommandIsZero(kLeftId) && motor_.lastCommandIsZero(kRightId);
   }
 
   FakeMotor motor_;
@@ -316,6 +330,9 @@ protected:
   questix_msgs::msg::DriveStatus last_status_;
   bool have_status_{false};
   bool send_twist_{false};
+  bool send_estop_{false};
+  bool estop_active_{false};
+  int estop_tick_{0};
   bool send_authority_{false};
   bool authority_allowed_{false};
 };
@@ -330,20 +347,31 @@ TEST_F(DriveComponentNode, NodeDefaultsRequireTheEstopButNotTheAuthority) {
 }
 
 // Practice without the GPIO safety path (ENABLE_GPIO_REF=false) and without the authority
-// opt-in: /target_twist drives both wheels with nothing else heard, as in 3.2.0.
-TEST_F(DriveComponentNode, PracticeWithoutGpioRefDrivesOnTargetTwist) {
-  start({false, false});
+// opt-in: with operation_manager's "released (no GPIO safety path)" /target_twist drives both
+// wheels, as in 3.2.0; when that /emergency_stop goes silent the drive stops.
+TEST_F(DriveComponentNode, PracticeWithoutGpioDrivesOnTargetTwist) {
+  start(false);
+  EXPECT_TRUE(drive_->get_parameter("require_emergency_stop").as_bool());  // integrated YAML
+  operationManagerWithoutGpio();
   send_twist_ = true;
   EXPECT_TRUE(spinUntil([this]() { return droveBothWheels(); }, 3s))
       << "no nonzero command reached the wheels";
   ASSERT_TRUE(spinUntil([this]() { return have_status_; }, 2s));
   EXPECT_FALSE(last_status_.emergency_stop);
+
+  send_estop_ = false;  // operation_manager gone: silent for longer than 1.0 s
+  ASSERT_TRUE(spinUntil([this]() { return lastCommandsAreZero(); }, 3s));
+  motor_.clear();
+  spinFor(500ms);
+  EXPECT_FALSE(motor_.drove(kLeftId));
+  EXPECT_FALSE(motor_.drove(kRightId));
 }
 
 // Disabled means disabled: no /actuation_authority subscription at all, and a heartbeat saying
 // "drive off" changes nothing.
 TEST_F(DriveComponentNode, DisabledAuthorityIsNotSubscribedAndChangesNothing) {
-  start({false, false});
+  start(false);
+  operationManagerWithoutGpio();
   spinFor(300ms);  // discovery
   EXPECT_EQ(authority_pub_->get_subscription_count(), 0u);
   send_authority_ = true;
@@ -356,31 +384,30 @@ TEST_F(DriveComponentNode, DisabledAuthorityIsNotSubscribedAndChangesNothing) {
   EXPECT_FALSE(motor_.lastCommandIsZero(kLeftId));
 }
 
-// Without the GPIO safety path a received pressed E-stop still stops the drive, twists are
-// ignored while it is pressed, and after the release a new twist drives again.
-TEST_F(DriveComponentNode, NotRequiredEstopStillStopsWhenPressed) {
-  start({false, false});
+// A received pressed E-stop stops the drive, twists are ignored while it is pressed, and after
+// the release a new twist drives again.
+TEST_F(DriveComponentNode, PressedEstopStopsAndReleaseDrivesAgain) {
+  start(false);
+  operationManagerWithoutGpio();
   send_twist_ = true;
   ASSERT_TRUE(spinUntil([this]() { return droveBothWheels(); }, 3s));
 
-  publishEstop(true);
-  ASSERT_TRUE(spinUntil(
-      [this]() { return motor_.lastCommandIsZero(kLeftId) && motor_.lastCommandIsZero(kRightId); },
-      2s));
+  estop_active_ = true;
+  ASSERT_TRUE(spinUntil([this]() { return lastCommandsAreZero(); }, 2s));
   motor_.clear();
   spinFor(500ms);  // twists keep coming
   EXPECT_FALSE(motor_.drove(kLeftId));
   EXPECT_FALSE(motor_.drove(kRightId));
   ASSERT_TRUE(spinUntil([this]() { return have_status_ && last_status_.emergency_stop; }, 2s));
 
-  publishEstop(false);
+  estop_active_ = false;
   EXPECT_TRUE(spinUntil([this]() { return droveBothWheels(); }, 3s));
 }
 
-// With the GPIO safety path (require_emergency_stop:=true) an unheard E-stop counts as pressed:
-// no twist moves the drive until a release has been heard.
-TEST_F(DriveComponentNode, RequiredEstopUnheardKeepsTheDriveStopped) {
-  start({true, false});
+// An unheard E-stop (operation_manager not up yet) counts as pressed: no twist moves the drive
+// until a release has been heard.
+TEST_F(DriveComponentNode, UnheardEstopKeepsTheDriveStopped) {
+  start(false);
   send_twist_ = true;
   spinFor(1000ms);
   EXPECT_FALSE(motor_.drove(kLeftId));
@@ -388,13 +415,14 @@ TEST_F(DriveComponentNode, RequiredEstopUnheardKeepsTheDriveStopped) {
   ASSERT_TRUE(spinUntil([this]() { return have_status_; }, 2s));
   EXPECT_TRUE(last_status_.emergency_stop);
 
-  publishEstop(false);
+  operationManagerWithoutGpio();
   EXPECT_TRUE(spinUntil([this]() { return droveBothWheels(); }, 3s));
 }
 
 // The opted-in authority gates the drive on its own, and is never an emergency stop.
 TEST_F(DriveComponentNode, OptedInAuthorityGatesTheDriveButIsNotAnEstop) {
-  start({false, true});
+  start(true);
+  operationManagerWithoutGpio();
   spinFor(300ms);  // discovery
   EXPECT_EQ(authority_pub_->get_subscription_count(), 1u);
   send_twist_ = true;
@@ -408,9 +436,7 @@ TEST_F(DriveComponentNode, OptedInAuthorityGatesTheDriveButIsNotAnEstop) {
   ASSERT_TRUE(spinUntil([this]() { return droveBothWheels(); }, 3s));
 
   authority_allowed_ = false;
-  ASSERT_TRUE(spinUntil(
-      [this]() { return motor_.lastCommandIsZero(kLeftId) && motor_.lastCommandIsZero(kRightId); },
-      2s));
+  ASSERT_TRUE(spinUntil([this]() { return lastCommandsAreZero(); }, 2s));
   motor_.clear();
   spinFor(500ms);
   EXPECT_FALSE(motor_.drove(kLeftId));

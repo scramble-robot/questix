@@ -60,22 +60,23 @@ DDT M0602C の Protocol 1 応答フレームをデコードした 1 モータ分
   (`evaluate_controllability()`)の毎回実行時に発行する。
   すなわち GPIO 更新毎(公称 ~20 Hz)+ 100 ms watchdog timer。
   `active = !controllable`。
-- **GPIO 安全系があるときは未受信をフェイルクローズ**: operation_manager は `enable_gpio_ref=true`
-  の構成でdrive/shotの有無に依存せず `questix_core.launch.xml` から起動する。
-  standalone `joy_controller_referee.launch.xml` も互換性のため起動できる。
-  `questix_core` は購読側(drive_component / shot_component / esc_motor_control)の
-  `require_emergency_stop` に `enable_gpio_ref` をそのまま渡す。
-  - `enable_gpio_ref=true`(大会は常にこれ): **一度も受信していない間は「非常停止の状態が不明」
-    として動かさない**。受信状態はモータとの通信(フィードバックの取得)とは別で、
-    drive_component は動かさないまま実測の取得を続ける。
-  - `enable_gpio_ref=false`(練習のみ): 発行元が起動しないので、未受信・途絶では止めない
-    (3.2.0 と同じ)。それでも `active=true` を受信したら止める。
-  ノード単体の既定値は `require_emergency_stop=true`(フェイルクローズ)。
-- **staleness 検出**: `require_emergency_stop=true` の購読側は「一度以上受信した後に」`emergency_stop_timeout_sec`
+- **発行元は常に起動する**: operation_manager は drive/shot の有無にも `enable_gpio_ref` にも
+  依存せず `questix_core.launch.xml` から常に起動する(standalone
+  `joy_controller_referee.launch.xml` も互換性のため起動できる)。
+  - `enable_gpio_ref=true`(大会は常にこれ): GPIO を判定し `active = !controllable`。
+    reason は `pin 5 ...`(物理 E-stop)/ `pin 27 ...`(AutoReferee)で入力を区別する。
+  - `enable_gpio_ref=false`(練習のみ、`operation_manager.no_gpio.yaml`、
+    `gpio_safety_enabled: false`): GPIO を読まず `/gpio/controllable` も出さない。
+    `active=false`、reason `released (no GPIO safety path)` を 100 ms 毎に出す。
+- **未受信はフェイルクローズ**: 購読側(drive_component / shot_component / esc_motor_control、
+  QUESTiX LAB ブリッジ)は構成によらず、**一度も受信していない間は「非常停止の状態が不明」
+  として動かさない**(`require_emergency_stop: true`)。受信状態はモータとの通信
+  (フィードバックの取得)とは別で、drive_component は動かさないまま実測の取得を続ける。
+- **staleness 検出**: 購読側は「一度以上受信した後に」`emergency_stop_timeout_sec`
   (既定 1.0 s、自分の単調時計による受信間隔)を超えて受信が途絶えたら、押下と同じく停止して
   動かさない。受信が戻っても、解除だけでは動き出さない(新しい指令が必要)。
-- **単体起動**: `drive_component.launch.xml` / `shot_component.launch.xml` などの単体起動も
-  `require_emergency_stop:=false` で未受信を許せる(押下を受信したときの停止はそのまま)。
+- **診断用の明示 opt-out**: 単体の診断起動に限り `require_emergency_stop:=false` で未受信を
+  許せる(押下を受信したときの停止はそのまま)。統合構成は opt-out しない。
 
 ## 復帰挙動(active=false 受信時)
 

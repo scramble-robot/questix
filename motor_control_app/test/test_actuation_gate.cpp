@@ -85,10 +85,9 @@ TEST(ActuationGate, DiagnosticOptOutStillStopsOnAPressedEstop) {
   EXPECT_EQ(gate::evaluate(in), Block::kEstopActive);
 }
 
-// A practice launch without the GPIO safety path (enable_gpio_ref:=false) and without the
-// teacher's authority opt-in (the questix_core default) moves like 3.2.0: nothing has to be
-// heard first and a silent /emergency_stop is not a stop, but a received pressed one still is.
-TEST(ActuationGate, PracticeWithoutGpioRefAndAuthorityMovesWithNothingHeard) {
+// The diagnostic opt-out without the authority opt-in: nothing has to be heard first and a silent
+// /emergency_stop is not a stop, but a received pressed one still is.
+TEST(ActuationGate, DiagnosticOptOutWithoutAuthorityMovesWithNothingHeard) {
   gate::Inputs in;  // nothing heard
   in.estop.required = false;
   in.authority.required = false;
@@ -233,8 +232,8 @@ TEST(ActuationGate, DisabledAuthorityIsNeverLookedAt) {
   }
 }
 
-// An E-stop that is not required (no publisher, enable_gpio_ref:=false) only stops on a received
-// pressed state: never heard, released, or silent for any time is not a stop.
+// An E-stop that is not required (diagnostic opt-out) only stops on a received pressed state:
+// never heard, released, or silent for any time is not a stop.
 TEST(ActuationGate, NotRequiredEstopOnlyStopsWhenPressed) {
   gate::EstopInputs estop;
   estop.required = false;
@@ -247,4 +246,18 @@ TEST(ActuationGate, NotRequiredEstopOnlyStopsWhenPressed) {
   }
   estop.active = true;
   EXPECT_EQ(gate::evaluateEstop(estop), Block::kEstopActive);
+}
+
+// Practice without the GPIO safety path: operation_manager still publishes /emergency_stop as
+// released, so the required E-stop is known and released and the drive may move; when that
+// publisher goes silent the drive stops like with the GPIO path.
+TEST(ActuationGate, PracticeWithoutGpioMovesOnOperationManagersRelease) {
+  gate::Inputs in;  // the integrated defaults: E-stop required, authority not
+  EXPECT_EQ(gate::evaluate(in), Block::kEstopUnknown);  // operation_manager not heard yet
+  in.estop.known = true;
+  in.estop.active = false;  // "released (no GPIO safety path)"
+  in.estop.age_sec = 0.1;
+  EXPECT_EQ(gate::evaluate(in), Block::kNone);
+  in.estop.age_sec = 1.5;  // operation_manager died
+  EXPECT_EQ(gate::evaluate(in), Block::kEstopStale);
 }

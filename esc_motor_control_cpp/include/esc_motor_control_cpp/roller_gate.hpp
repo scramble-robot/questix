@@ -11,8 +11,8 @@ namespace esc_motor_control_cpp {
 
 // Whether the roller may spin at all right now (ROS-free, clock-injected: ages in seconds of
 // the node's steady clock). Two separate concepts are judged separately and only then combined:
-// the emergency stop (a safety function; with RollerEstopInputs::required, which questix_core
-// sets from enable_gpio_ref, unknown and silent count as pressed) and the teacher's runtime
+// the emergency stop (a safety function; with RollerEstopInputs::required, false only for an
+// explicit diagnostic opt-out, unknown and silent count as pressed) and the teacher's runtime
 // authority (a permission, not an emergency stop; a practice opt-in, never looked at when not
 // required). The rules are the same as motor_control_app/actuation_gate.hpp (drive and shot);
 // the two packages do not depend on each other, so keep both headers and their tests in step.
@@ -27,7 +27,7 @@ enum class RollerBlock {
 };
 
 struct RollerEstopInputs {
-  bool required{true};  // questix_core: enable_gpio_ref (false: no /emergency_stop publisher)
+  bool required{true};  // false only for an explicit diagnostic opt-out
   bool known{false};
   bool active{true};
   double age_sec{0.0};

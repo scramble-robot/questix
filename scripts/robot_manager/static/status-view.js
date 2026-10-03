@@ -84,8 +84,8 @@ const StatusView = (() => {
       case 'estop_unknown':
         return {
           text: '非常停止の状態をまだ確認できません',
-          detail: '/emergency_stop（operation_manager・GPIO の安全系）がまだ届いていません。' +
-            '届くまで教材からは動かせません（ENABLE_GPIO_REF と ROS_DOMAIN_ID を確かめてください）。',
+          detail: '/emergency_stop（operation_manager）がまだ届いていません。' +
+            '届くまで教材からは動かせません（ロボット制御が起動しているかと ROS_DOMAIN_ID を確かめてください）。',
         };
       case 'emergency_stop':
         return { text: '非常停止ボタンが押されています', detail: null };

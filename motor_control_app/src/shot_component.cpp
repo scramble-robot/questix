@@ -164,8 +164,8 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
   require_emergency_stop_ = this->get_parameter("require_emergency_stop").as_bool();
   if (!require_emergency_stop_) {
     RCLCPP_WARN(this->get_logger(),
-                "require_emergency_stop=false (no GPIO safety path, enable_gpio_ref:=false): the "
-                "launcher may move without /emergency_stop; a received active=true still stops it");
+                "require_emergency_stop=false (diagnostic opt-out): the launcher may move before "
+                "/emergency_stop is heard. Never use this in an integrated launch");
   } else if (emergency_stop_topic_.empty()) {
     RCLCPP_ERROR(this->get_logger(),
                  "emergency_stop_topic is empty but require_emergency_stop=true: the launcher "
