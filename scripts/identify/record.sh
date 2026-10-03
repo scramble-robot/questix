@@ -45,8 +45,9 @@ Phase A システム同定用の記録ハーネス（授業の手動操縦ロガ
   2. ロボット ID / 床 / 電池電圧 / 積載 / ファーム / メモ を対話で聞いて meta.yaml に保存
   3. source identity（完全 SHA・ブランチ・dirty・ROS 環境）と実効パラメータを保存
   4. ros2 bag record を開始（必須 topic + 存在する optional topic）
-  5. step_sequence.py でステップ列を publish（Ctrl-C で即 0 を publish して終了。
-     他の送り手の指令を受けたら中断し、meta.yaml の step_sequence に残して終了コード 3）
+  5. step_sequence.py でステップ列を publish（終われば自動で 6 へ進む。Ctrl-C は途中で
+     止めたいときだけ: 0 を publish して終了し、meta.yaml に step_sequence: interrupted と残す。
+     他の送り手の指令を受けたら中断し、aborted_foreign_publisher と残して終了コード 3）
   6. bag を停止し、実効パラメータを再取得して before/after を突き合わせ、bag info を保存
 
 オプション:
@@ -258,6 +259,7 @@ BAG_PID=""
 case "$STEP_RC" in
   0) STEP_STATUS="completed" ;;
   3) STEP_STATUS="aborted_foreign_publisher" ;;
+  130) STEP_STATUS="interrupted" ;;
   *) STEP_STATUS="failed_rc_${STEP_RC}" ;;
 esac
 echo "step_sequence: \"${STEP_STATUS}\"" >>"$DEST/meta.yaml"

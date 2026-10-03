@@ -51,6 +51,8 @@ def build_schedule(levels, hold, sign, cycles, settle):
 
 # 他の publisher を検出したときの終了コード（record.sh が区別して表示する）
 EXIT_FOREIGN_PUBLISHER = 3
+# Ctrl-C で中断したときの終了コード（シェルの慣例 128 + SIGINT。record.sh が中断として残す）
+EXIT_INTERRUPTED = 130
 
 
 class ForeignTwistDetector:
@@ -210,6 +212,7 @@ def main():
                 break
     except KeyboardInterrupt:
         node.get_logger().warn("interrupted: publishing zero")
+        rc = EXIT_INTERRUPTED
     finally:
         # 最後に送った非 0 が drive_component に残らないよう 0 を送る。他の送り手（スティック）が
         # 動かしているときは長く送り続けて操作と競合しないよう、数回だけにする。

@@ -50,7 +50,9 @@ LPF 後 RPM しか残らず、`fit_models.py` は（黙って切り替えずに�
 publisher を常に持つが入力が無ければ何も流さないので、publisher の数ではなく実際の流れで判定する。
 `step_sequence.py` 自身も開始前に聞き、実行中に自分が送っていない値を受けたら中断して 0 を送り、
 終了コード 3 で終わる。`record.sh` はそれを `meta.yaml` の `step_sequence: "aborted_foreign_publisher"`
-として残し（完走は `"completed"`）、`batch_fit.py` は completed 以外のデータセットを除外する。
+として残し（完走は `"completed"`、Ctrl-C で途中終了なら `"interrupted"`）、`batch_fit.py` は
+completed 以外のデータセットを除外する。ステップ列が終われば `record.sh` は自分で後片付け
+（bag 停止・パラメータ再取得・bag info）まで進むので、Ctrl-C は途中で止めたいときだけ使う。
 
 ## 記録される証跡（出力ディレクトリ契約）
 
