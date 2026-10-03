@@ -260,6 +260,15 @@ contains "中断を meta.yaml に残す" "$(cat "$ADEST/meta.yaml" 2>/dev/null)"
 if [[ -f "$ADEST/bag_info.txt" ]]; then ok "中断しても証跡（bag_info.txt）は残す"; else ng "中断時に bag_info.txt が無い"; fi
 contains "同定に使えないことを warning で知らせる" "$OUT" "このデータは同定に使えません"
 
+INT_OUT="$TMP/interrupted"
+OUT="$(STUB_NODES='/drive_component' \
+  STUB_TOPICS='/drive_status /target_twist' \
+  STUB_STEP_RC=130 \
+  PATH="$STUB_DIR:$PATH" bash "$SCRIPT_DIR/record.sh" --yes --out "$INT_OUT" 2>&1)"
+check "Ctrl-C で中断したら終了コード 130" "$?" "130"
+IDEST="$(find "$INT_OUT" -maxdepth 1 -type d -name 'ident_*' | head -1)"
+contains "中断を completed と取り違えない" "$(cat "$IDEST/meta.yaml" 2>/dev/null)" 'step_sequence: "interrupted"'
+
 echo
 echo "passed: $PASS, failed: $FAIL"
 [[ "$FAIL" -eq 0 ]]
