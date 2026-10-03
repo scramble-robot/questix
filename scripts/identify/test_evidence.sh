@@ -165,6 +165,12 @@ case "$1 ${2:-}" in
                     # Python プロセスで自前ハンドラを持つのでそちらは効く）。有限時間で終わらせて
                     # cleanup の wait を解く。
                     sleep 3 ;;
+  "topic echo")     # STUB_TWIST_TRAFFIC=1 なら他の送り手が /target_twist に流している
+                    if [[ "${STUB_TWIST_TRAFFIC:-0}" == "1" ]]; then
+                      printf 'linear:\n  x: 0.0\n'
+                    else
+                      exit 124
+                    fi ;;
   "bag info")       printf 'Files:             bag_0.mcap\nMessages:          4213\nTopic information: Topic: /drive_status | Count: 3200\n                   Topic: /target_twist | Count: 1013\n' ;;
   "interface show") if [[ "${STUB_RAW:-1}" == "1" ]]; then
                       printf 'int32 target_rpm\nfloat32 velocity_rpm\nfloat32 velocity_rpm_raw\n'
@@ -194,6 +200,13 @@ check "velocity_rpm_raw 契約不成立なら hard fail" "$?" "1"
 contains "velocity_rpm_raw 欠落を明示" "$OUT" "velocity_rpm_raw がありません"
 if [[ ! -d "$TMP/out" ]]; then ok "preflight 失敗時は出力ディレクトリを作らない"; else ng "preflight 失敗なのに出力ディレクトリができた"; fi
 
+rm -rf "$TMP/out"
+OUT="$(STUB_NODES='/drive_component' STUB_TOPICS='/drive_status /target_twist' STUB_TWIST_TRAFFIC=1 \
+  IDENT_LISTEN_SEC=1 run_preflight)"
+check "/target_twist に他の送り手が流していれば異常終了" "$?" "1"
+contains "他の送り手を明示" "$OUT" "他の送り手から指令が流れています"
+if [[ ! -d "$TMP/out" ]]; then ok "他の送り手で止めたときは出力ディレクトリを作らない"; else ng "他の送り手なのに出力ディレクトリができた"; fi
+
 bash "$SCRIPT_DIR/record.sh" --help >/dev/null
 check "--help は正常終了" "$?" "0"
 contains "--help に出力ファイル契約" "$(bash "$SCRIPT_DIR/record.sh" --help)" "source_identity.txt"
@@ -206,7 +219,7 @@ echo "== 出力ディレクトリ契約 =="
 # record.sh の証跡まわりの配線だけで、ステップ列そのものの正しさではない。
 cat >"$STUB_DIR/python3" <<'PYSTUB'
 #!/usr/bin/env bash
-exit 0
+exit "${STUB_STEP_RC:-0}"
 PYSTUB
 chmod +x "$STUB_DIR/python3"
 
@@ -233,6 +246,19 @@ contains "bag_info.txt を保存" "$(cat "$DEST/bag_info.txt")" "/drive_status"
 
 if [[ -f "$DEST/parameter_diff.txt" ]]; then ok "before/after 差分を parameter_diff.txt に残す"; else ng "parameter_diff.txt が無い"; fi
 contains "パラメータ変化を warning で知らせる" "$OUT" "実効パラメータが変わっています"
+
+contains "完走を meta.yaml に残す" "$(cat "$DEST/meta.yaml")" 'step_sequence: "completed"'
+
+ABORT_OUT="$TMP/aborted"
+OUT="$(STUB_NODES='/drive_component' \
+  STUB_TOPICS='/drive_status /target_twist' \
+  STUB_STEP_RC=3 \
+  PATH="$STUB_DIR:$PATH" bash "$SCRIPT_DIR/record.sh" --yes --out "$ABORT_OUT" 2>&1)"
+check "他の送り手で中断したら終了コード 3" "$?" "3"
+ADEST="$(find "$ABORT_OUT" -maxdepth 1 -type d -name 'ident_*' | head -1)"
+contains "中断を meta.yaml に残す" "$(cat "$ADEST/meta.yaml" 2>/dev/null)" 'step_sequence: "aborted_foreign_publisher"'
+if [[ -f "$ADEST/bag_info.txt" ]]; then ok "中断しても証跡（bag_info.txt）は残す"; else ng "中断時に bag_info.txt が無い"; fi
+contains "同定に使えないことを warning で知らせる" "$OUT" "このデータは同定に使えません"
 
 echo
 echo "passed: $PASS, failed: $FAIL"

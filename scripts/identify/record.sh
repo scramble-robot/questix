@@ -24,6 +24,8 @@ TURN=""
 YES=""
 
 NODE="/drive_component"
+# preflight で /target_twist に他の送り手が流していないか聞く時間 [s]
+LISTEN_SEC="${IDENT_LISTEN_SEC:-2}"
 REQUIRED_TOPICS="/drive_status,/target_twist"
 # 存在するときだけ記録に足す。無いことを失敗条件にしない。
 # /joy /joy_gated は足さない: step_sequence.py が /target_twist へ直接 publish する
@@ -38,11 +40,13 @@ usage() {
 Phase A システム同定用の記録ハーネス（授業の手動操縦ロガーではない）。
 
 やること:
-  1. preflight: drive_component / 必須 topic / control_mode / velocity_rpm_raw を確認
+  1. preflight: drive_component / 必須 topic / /target_twist に他の送り手が流していないか /
+     control_mode / velocity_rpm_raw を確認
   2. ロボット ID / 床 / 電池電圧 / 積載 / ファーム / メモ を対話で聞いて meta.yaml に保存
   3. source identity（完全 SHA・ブランチ・dirty・ROS 環境）と実効パラメータを保存
   4. ros2 bag record を開始（必須 topic + 存在する optional topic）
-  5. step_sequence.py でステップ列を publish（Ctrl-C で即 0 を publish して終了）
+  5. step_sequence.py でステップ列を publish（Ctrl-C で即 0 を publish して終了。
+     他の送り手の指令を受けたら中断し、meta.yaml の step_sequence に残して終了コード 3）
   6. bag を停止し、実効パラメータを再取得して before/after を突き合わせ、bag info を保存
 
 オプション:
@@ -53,6 +57,8 @@ Phase A システム同定用の記録ハーネス（授業の手動操縦ロガ
   --turn         旋回で取る（左右逆回転）
   --yes          対話をスキップして既定値を使う
   -h, --help     このヘルプ
+
+環境変数: IDENT_LISTEN_SEC  preflight で /target_twist を聞く時間 [s]（既定 2）
 
 出力: <out>/ident_<robot>_<floor>_<YYYYmmdd_HHMM>/
         meta.yaml, source_identity.txt, git_status.txt,
@@ -105,6 +111,18 @@ for t in "${REQ_ARR[@]}"; do
   grep -qxF "$t" "$TOPIC_LIST" || fail "$t が見えません。drive_component の起動と ROS_DOMAIN_ID を確認してください"
   echo "  topic $t: OK"
 done
+
+# /target_twist には通常 twist_arbiter（練習）/ joy_controller（競技）も publish する。
+# コントローラ接続中は /joy のたびに流れ、ステップ入力に混ざって同定データが汚れる
+# （スティック優先の仕組みも素通りする）。publisher の有無ではなく実際の流れで判定する
+# （twist_arbiter は publisher を常に持つが、入力が無ければ何も流さない）。
+# step_sequence.py も開始前と実行中に同じ検査をする。ここは対話の前に止めるための早期検査。
+if timeout "$LISTEN_SEC" ros2 topic echo --once /target_twist >/dev/null 2>&1; then
+  fail "/target_twist に他の送り手から指令が流れています（コントローラ接続中など）。
+       コントローラを外すか joy を止め、/target_twist に他から流れない状態で実行してください
+       （送り手は ros2 topic info -v /target_twist で確認できます）"
+fi
+echo "  /target_twist: 他の送り手からの流れなし（${LISTEN_SEC}s 待機）"
 
 CONTROL_MODE="$(ros2 param get "$NODE" control_mode 2>/dev/null | awk '{print $NF}' || true)"
 [[ -n "$CONTROL_MODE" ]] || fail "$NODE の control_mode パラメータを取得できません"
@@ -228,10 +246,21 @@ ros2 bag record -o "$DEST/bag" "${RECORD_TOPICS[@]}" >"$DEST/bag_record.log" 2>&
 BAG_PID=$!
 sleep 2
 
+set +e
 python3 "$SCRIPT_DIR/step_sequence.py" --levels "$LEVELS" --hold "$HOLD" --settle "$SETTLE" --sign both $TURN
+STEP_RC=$?
+set -e
 
 cleanup
 BAG_PID=""
+
+# ステップ列の完走可否を meta.yaml に残す。completed 以外は batch_fit.py が同定から外す。
+case "$STEP_RC" in
+  0) STEP_STATUS="completed" ;;
+  3) STEP_STATUS="aborted_foreign_publisher" ;;
+  *) STEP_STATUS="failed_rc_${STEP_RC}" ;;
+esac
+echo "step_sequence: \"${STEP_STATUS}\"" >>"$DEST/meta.yaml"
 
 # ---- 記録後の証跡 -----------------------------------------------------------
 
@@ -273,3 +302,10 @@ echo "  params   : $(basename "$PARAM_BEFORE") / $(basename "$PARAM_AFTER")"
 echo "  bag      : $DEST/bag"
 echo "  bag info : $BAG_INFO"
 echo "解析: python3 $SCRIPT_DIR/batch_fit.py $DEST"
+
+if [[ "$STEP_RC" -ne 0 ]]; then
+  echo >&2
+  echo "warning: ステップ列が完走していません（step_sequence: ${STEP_STATUS}）。" >&2
+  echo "         このデータは同定に使えません（batch_fit.py は除外します）。証跡として残します。" >&2
+  exit "$STEP_RC"
+fi

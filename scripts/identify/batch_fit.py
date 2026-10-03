@@ -47,6 +47,15 @@ def read_meta(path):
     return meta
 
 
+def completed_run(name, meta):
+    """record.sh がステップ列の完走を記録していないデータセットを除外する（旧データは対象）。"""
+    status = meta.get("step_sequence", "completed")
+    if status != "completed":
+        print(f"skip (step_sequence: {status}): {name}", file=sys.stderr)
+        return False
+    return True
+
+
 def discover(items):
     """Resolve CLI items into [(name, kind, data_path, meta)] with kind in {bag, csv}."""
     out = []
@@ -66,7 +75,7 @@ def discover(items):
                         read_meta(os.path.splitext(it)[0] + ".meta.yaml")))
         else:
             print(f"skip (unknown): {it}", file=sys.stderr)
-    return out
+    return [entry for entry in out if completed_run(entry[0], entry[3])]
 
 
 # ----------------------------------------------------------------------------- 集計

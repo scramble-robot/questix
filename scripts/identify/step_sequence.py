@@ -21,6 +21,12 @@ wheel_radius から車体前進速度 [m/s] に換算して publish する（左
     ros2 bag record /drive_status /target_twist -o ident_velocity_YYYYMMDD
 
 安全: 非常停止が効くことを確認してから実行する。Ctrl-C で即座に 0 を publish して終了する。
+
+他の送り手との競合: /target_twist には通常 twist_arbiter（練習）や joy_controller（競技）も
+publish する（コントローラ接続中は /joy のたびに流れる）。混ざると同定データが汚れ、スティック
+優先の仕組みも素通りするため、開始前に --listen-before 秒聞いて何か流れていれば開始しない。
+実行中も、自分が送っていない値を受け取ったら（スティック操作など）中断して 0 を送り終了する。
+コントローラを外す（または joy を止める）か、/target_twist に他から流れない起動で使うこと。
 """
 from __future__ import annotations
 
@@ -41,6 +47,57 @@ def build_schedule(levels, hold, sign, cycles, settle):
                 seq.append((s * lv, hold))
     seq.append((0, settle))
     return seq
+
+
+# 他の publisher を検出したときの終了コード（record.sh が区別して表示する）
+EXIT_FOREIGN_PUBLISHER = 3
+
+
+class ForeignTwistDetector:
+    """自分が送っていない Twist（他の publisher からの指令）を見分ける。
+
+    自分の publish も同じ topic の購読に返ってくるため、いま送っている値と一致するものは
+    自分のものとみなす。値を切り替えた直後の grace_sec 秒だけは、遅れて届く 1 つ前の値も
+    自分のものとみなす（それ以降に 1 つ前の値が届けば他者。ステップ中に割り込む中立の 0 が
+    典型）。中立（0）を送っている区間の他者の 0 は見分けられないが、その間は車輪も
+    止まっているのでデータにも安全にも影響しない。
+    """
+
+    def __init__(self, grace_sec=0.2, tol=1e-9):
+        self._grace = grace_sec
+        self._tol = tol
+        self._current = None
+        self._previous = None
+        self._switched_at = None
+
+    def expect(self, linear_x, angular_z, now):
+        """これから publish する値を登録する。now は単調時刻 [s]。"""
+        value = (float(linear_x), float(angular_z))
+        if value != self._current:
+            self._previous = self._current
+            self._current = value
+            self._switched_at = now
+
+    def _matches(self, value, linear_x, angular_z):
+        return (value is not None
+                and math.isclose(linear_x, value[0], abs_tol=self._tol)
+                and math.isclose(angular_z, value[1], abs_tol=self._tol))
+
+    def is_foreign(self, linear_x, angular_z, now, other_axes_zero=True):
+        """受け取った値が自分の送った値でなければ True。now は単調時刻 [s]。"""
+        if not other_axes_zero:
+            return True
+        if self._matches(self._current, linear_x, angular_z):
+            return False
+        in_grace = self._switched_at is not None and now - self._switched_at <= self._grace
+        return not (in_grace and self._matches(self._previous, linear_x, angular_z))
+
+
+def twist_values(rpm, args):
+    """車輪 RPM から (linear_x, angular_z) を返す。"""
+    if args.turn:
+        return 0.0, rpm_to_angular(rpm, args.wheel_radius, args.wheel_separation)
+    return rpm_to_linear(rpm, args.wheel_radius), 0.0
 
 
 def rpm_to_linear(rpm, wheel_radius):
@@ -64,6 +121,8 @@ def main():
     ap.add_argument("--wheel-radius", type=float, default=0.1)
     ap.add_argument("--wheel-separation", type=float, default=0.5)
     ap.add_argument("--turn", action="store_true", help="直進ではなく旋回（angular_z）で与える")
+    ap.add_argument("--listen-before", type=float, default=2.0,
+                    help="開始前に topic を聞く時間 [s]。この間に何か流れていれば開始しない")
     ap.add_argument("--dry-run", action="store_true", help="スケジュールを表示して終了")
     args = ap.parse_args()
 
@@ -92,31 +151,75 @@ def main():
     node = rclpy.create_node("identify_step_sequence")
     pub = node.create_publisher(Twist, args.topic, 10)
     period = 1.0 / args.rate
+    detector = ForeignTwistDetector()
+    state = {"listening": True, "foreign": None}
+
+    def on_twist(msg):
+        other_zero = (msg.linear.y == 0.0 and msg.linear.z == 0.0
+                      and msg.angular.x == 0.0 and msg.angular.y == 0.0)
+        if state["foreign"] is not None:
+            return
+        if state["listening"] or detector.is_foreign(msg.linear.x, msg.angular.z, time.monotonic(),
+                                                     other_zero):
+            state["foreign"] = (msg.linear.x, msg.angular.z)
+
+    node.create_subscription(Twist, args.topic, on_twist, 10)
+
+    def spin_until(deadline):
+        while state["foreign"] is None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0.0:
+                return
+            rclpy.spin_once(node, timeout_sec=remaining)
 
     def publish(rpm):
+        lx, az = twist_values(rpm, args)
+        detector.expect(lx, az, time.monotonic())
         msg = Twist()
-        if args.turn:
-            msg.angular.z = rpm_to_angular(rpm, args.wheel_radius, args.wheel_separation)
-        else:
-            msg.linear.x = rpm_to_linear(rpm, args.wheel_radius)
+        msg.linear.x = lx
+        msg.angular.z = az
         pub.publish(msg)
 
+    def foreign_message(when):
+        lx, az = state["foreign"]
+        return (f"{when} {args.topic} に他の送り手からの指令を受信しました "
+                f"(linear_x={lx:+.3f}, angular_z={az:+.3f})。コントローラを外すか joy を止め、"
+                f"{args.topic} に他から流れない状態で実行してください "
+                f"(`ros2 topic info -v {args.topic}` で publisher を確認できます)")
+
+    # 開始前: 何も publish せずに聞く。ここで流れていれば一切動かさずに終わる。
+    spin_until(time.monotonic() + max(0.0, args.listen_before))
+    if state["foreign"] is not None:
+        node.get_logger().error(foreign_message("開始前に"))
+        node.destroy_node()
+        rclpy.shutdown()
+        return EXIT_FOREIGN_PUBLISHER
+    state["listening"] = False
+
+    rc = 0
     try:
         for rpm, dur in schedule:
             node.get_logger().info(f"step: {rpm} rpm for {dur:.1f} s")
             t_end = time.monotonic() + dur
-            while time.monotonic() < t_end:
+            while time.monotonic() < t_end and state["foreign"] is None:
                 publish(rpm)
-                time.sleep(period)
+                spin_until(min(t_end, time.monotonic() + period))
+            if state["foreign"] is not None:
+                node.get_logger().error(foreign_message("実行中に") + "。中断します")
+                rc = EXIT_FOREIGN_PUBLISHER
+                break
     except KeyboardInterrupt:
         node.get_logger().warn("interrupted: publishing zero")
     finally:
-        for _ in range(int(args.rate)):
+        # 最後に送った非 0 が drive_component に残らないよう 0 を送る。他の送り手（スティック）が
+        # 動かしているときは長く送り続けて操作と競合しないよう、数回だけにする。
+        zeros = 3 if rc == EXIT_FOREIGN_PUBLISHER else int(args.rate)
+        for _ in range(zeros):
             publish(0)
             time.sleep(period)
         node.destroy_node()
         rclpy.shutdown()
-    return 0
+    return rc
 
 
 if __name__ == "__main__":
