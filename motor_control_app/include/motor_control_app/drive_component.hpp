@@ -58,8 +58,8 @@ namespace motor_control_app {
  * （operation_manager は questix_core で常に起動し、GPIO 安全系なしでも解除を出す。
  * require_emergency_stop=false は単体診断の明示 opt-out で、そのときも押下の受信では止まる）。
  *
- * 教員の実行時許可は非常停止とは別の概念で、require_runtime_actuation_authority=true
- * （練習での opt-in、既定 false、大会では使わない）の時だけ、教員の実行時許可
+ * 教員の許可は非常停止とは別の概念で、require_teacher_permission=true
+ * （練習での opt-in、既定 false、大会では使わない）の時だけ、教員の許可
  * （questix_msgs/ActuationAuthority の drive_allowed、volatile、1.0 s のリース）がある間だけ
  * 動かす。許可も E-stop も actuation_gate.hpp の純粋関数で判定し、閉じたら即時停止 + 目標破棄、
  * 開いても次の /target_twist まで停止のまま。停止指令を送れなかったら stop fault として閉じ、
@@ -142,11 +142,11 @@ private:
   void emergencyStopCallback(const questix_msgs::msg::EmergencyStop::SharedPtr msg);
 
   /**
-   * @brief 教員の実行時許可（/actuation_authority）のコールバック
+   * @brief 教員の許可（/actuation_authority）のコールバック
    *
    * 受信時刻（steady clock）と drive_allowed を記録し、閉じる方向の変化なら即座に停止する。
    */
-  void authorityCallback(const questix_msgs::msg::ActuationAuthority::SharedPtr msg);
+  void teacherPermissionCallback(const questix_msgs::msg::ActuationAuthority::SharedPtr msg);
 
   /**
    * @brief 非常停止（/emergency_stop）の入力を組み立てる（age は steady clock）
@@ -154,12 +154,12 @@ private:
   actuation_gate::EstopInputs estopInputs() const;
 
   /**
-   * @brief 教員の実行時許可（/actuation_authority）の入力を組み立てる。非常停止とは別の概念。
+   * @brief 教員の許可（/actuation_authority）の入力を組み立てる。非常停止とは別の概念。
    *
-   * require_runtime_actuation_authority=false（既定）では required=false だけを返し、
+   * require_teacher_permission=false（既定）では required=false だけを返し、
    * 受信状態は一切見ない（購読も作らない）。
    */
-  actuation_gate::AuthorityInputs authorityInputs() const;
+  actuation_gate::TeacherPermissionInputs teacherPermissionInputs() const;
 
   /**
    * @brief 非常停止・実行時許可・stop fault をまとめたゲート入力
@@ -255,8 +255,8 @@ private:
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr twist_subscription_;
   // lifecycle 状態に依存せず常時生かす（コンストラクタで作成、on_cleanup でも破棄しない）
   rclcpp::Subscription<questix_msgs::msg::EmergencyStop>::SharedPtr emergency_stop_sub_;
-  // 教員の実行時許可（練習時のみ購読。volatile、ラッチしない）。E-stop 購読と同じく常時生かす
-  rclcpp::Subscription<questix_msgs::msg::ActuationAuthority>::SharedPtr authority_sub_;
+  // 教員の許可（練習時のみ購読。volatile、ラッチしない）。E-stop 購読と同じく常時生かす
+  rclcpp::Subscription<questix_msgs::msg::ActuationAuthority>::SharedPtr teacher_permission_sub_;
   // 型付きステータス（questix_msgs/DriveStatus）。契約は questix_msgs/README.md。
   rclcpp_lifecycle::LifecyclePublisher<questix_msgs::msg::DriveStatus>::SharedPtr
       typed_status_publisher_;
@@ -390,13 +390,13 @@ private:
   bool have_estop_msg_{false};
   std::chrono::steady_clock::time_point last_estop_rx_{};
 
-  // 教員の実行時許可（非常停止とは別の概念。練習での opt-in、既定 false）。コンストラクタで読む
-  bool require_authority_{false};
-  std::string authority_topic_{"/actuation_authority"};
-  double authority_timeout_sec_{1.0};  // リース [s]。無効値は 1.0
-  bool have_authority_msg_{false};
-  bool authority_drive_allowed_{false};
-  std::chrono::steady_clock::time_point last_authority_rx_{};
+  // 教員の許可（非常停止とは別の概念。練習での opt-in、既定 false）。コンストラクタで読む
+  bool require_teacher_permission_{false};
+  std::string teacher_permission_topic_{"/actuation_authority"};
+  double teacher_permission_timeout_sec_{1.0};  // リース [s]。無効値は 1.0
+  bool have_teacher_permission_msg_{false};
+  bool teacher_permission_drive_allowed_{false};
+  std::chrono::steady_clock::time_point last_teacher_permission_rx_{};
 
   // 停止指令を送れなかった（両輪へのゼロ送信成功まで閉じたまま、stop_retry_period で再送）
   bool stop_fault_{false};

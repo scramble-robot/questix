@@ -16,8 +16,8 @@
 //   EstopInputs::required (the default; operation_manager always publishes it in questix_core,
 //   also without the GPIO safety path) an unheard or silent E-stop counts as pressed; the
 //   diagnostic opt-out only stops on a received pressed E-stop.
-// * the teacher's runtime authority (a permission, not an emergency stop, /actuation_authority):
-//   evaluateAuthority. It is a practice opt-in; when not required it is never looked at and
+// * the teacher's permission (a permission, not an emergency stop, /actuation_authority):
+//   evaluateTeacherPermission. It is a practice opt-in; when not required it is never looked at and
 //   always allows.
 //
 // plus a stop that could not be confirmed. ROS-free and clock-injected (ages in seconds of the
@@ -30,14 +30,14 @@ namespace motor_control_app::actuation_gate {
 
 // Why actuation is refused, in the order they are checked (the first applies).
 enum class Block {
-  kNone,              // may actuate (a fresh command is still needed)
-  kStopFault,         // a safety stop could not be sent: stays closed until a zero succeeds
-  kEstopUnknown,      // /emergency_stop never received (only when the E-stop is required)
-  kEstopActive,       // E-stop pressed
-  kEstopStale,        // /emergency_stop received once, then silent (only when required)
-  kAuthorityUnknown,  // no runtime authority heartbeat received (only when opted in)
-  kAuthorityOff,      // the teacher's authority says drive off (only when opted in)
-  kAuthorityStale,    // heartbeat silent for longer than its lease (only when opted in)
+  kNone,                      // may actuate (a fresh command is still needed)
+  kStopFault,                 // a safety stop could not be sent: stays closed until a zero succeeds
+  kEstopUnknown,              // /emergency_stop never received (only when the E-stop is required)
+  kEstopActive,               // E-stop pressed
+  kEstopStale,                // /emergency_stop received once, then silent (only when required)
+  kTeacherPermissionUnknown,  // no teacher permission heartbeat received (only when opted in)
+  kTeacherPermissionOff,      // the teacher's permission says drive off (only when opted in)
+  kTeacherPermissionStale,    // heartbeat silent for longer than its lease (only when opted in)
 };
 
 // The emergency stop: /emergency_stop (questix_msgs/EmergencyStop).
@@ -50,9 +50,9 @@ struct EstopInputs {
   double timeout_sec{1.0};  // <= 0 or non-finite: no staleness check
 };
 
-// The teacher's runtime authority: questix_msgs/ActuationAuthority (one flag of it). A
+// The teacher's permission: questix_msgs/ActuationAuthority (one flag of it). A
 // permission, not an emergency stop; the default is "not required" (practice opt-in).
-struct AuthorityInputs {
+struct TeacherPermissionInputs {
   bool required{false};
   bool known{false};
   bool allowed{false};
@@ -62,20 +62,21 @@ struct AuthorityInputs {
 
 struct Inputs {
   EstopInputs estop;
-  AuthorityInputs authority;
+  TeacherPermissionInputs teacher_permission;
   bool stop_fault{false};
 };
 
 inline constexpr double kDefaultLeaseSec = 1.0;
 
 // A signal received once is stale when it has been silent for longer than timeout_sec.
-// timeout_sec <= 0 or non-finite disables the check (E-stop only; see authorityLease).
+// timeout_sec <= 0 or non-finite disables the check (E-stop only; see teacherPermissionLease).
 inline bool isStale(double age_sec, double timeout_sec) {
   return std::isfinite(timeout_sec) && timeout_sec > 0.0 && !(age_sec <= timeout_sec);
 }
 
-// The authority is a lease: it always expires. An invalid timeout falls back to the default.
-inline double authorityLease(double timeout_sec) {
+// The teacher permission is a lease: it always expires. An invalid timeout falls back to the
+// default.
+inline double teacherPermissionLease(double timeout_sec) {
   return std::isfinite(timeout_sec) && timeout_sec > 0.0 ? timeout_sec : kDefaultLeaseSec;
 }
 
@@ -93,21 +94,21 @@ inline Block evaluateEstop(const EstopInputs& in) {
   return Block::kNone;
 }
 
-// The teacher's authority alone: kNone (allowed, or not required), or an authority reason.
+// The teacher's permission alone: kNone (allowed, or not required), or a teacher permission reason.
 // Not required means disabled: none of the other fields is looked at.
-inline Block evaluateAuthority(const AuthorityInputs& in) {
+inline Block evaluateTeacherPermission(const TeacherPermissionInputs& in) {
   if (!in.required) {
     return Block::kNone;
   }
   if (!in.known) {
-    return Block::kAuthorityUnknown;
+    return Block::kTeacherPermissionUnknown;
   }
   // A lease: silence always closes it, even when the last heartbeat said "allowed".
-  if (!(in.age_sec <= authorityLease(in.timeout_sec))) {
-    return Block::kAuthorityStale;
+  if (!(in.age_sec <= teacherPermissionLease(in.timeout_sec))) {
+    return Block::kTeacherPermissionStale;
   }
   if (!in.allowed) {
-    return Block::kAuthorityOff;
+    return Block::kTeacherPermissionOff;
   }
   return Block::kNone;
 }
@@ -121,7 +122,7 @@ inline Block evaluate(const Inputs& in) {
   if (estop != Block::kNone) {
     return estop;
   }
-  return evaluateAuthority(in.authority);
+  return evaluateTeacherPermission(in.teacher_permission);
 }
 
 inline bool isEstopBlock(Block block) {
@@ -129,9 +130,9 @@ inline bool isEstopBlock(Block block) {
          block == Block::kEstopStale;
 }
 
-inline bool isAuthorityBlock(Block block) {
-  return block == Block::kAuthorityUnknown || block == Block::kAuthorityOff ||
-         block == Block::kAuthorityStale;
+inline bool isTeacherPermissionBlock(Block block) {
+  return block == Block::kTeacherPermissionUnknown || block == Block::kTeacherPermissionOff ||
+         block == Block::kTeacherPermissionStale;
 }
 
 inline const char* blockName(Block block) {
@@ -146,12 +147,12 @@ inline const char* blockName(Block block) {
       return "estop_active";
     case Block::kEstopStale:
       return "estop_stale";
-    case Block::kAuthorityUnknown:
-      return "authority_unknown";
-    case Block::kAuthorityOff:
-      return "authority_off";
-    case Block::kAuthorityStale:
-      return "authority_stale";
+    case Block::kTeacherPermissionUnknown:
+      return "teacher_permission_unknown";
+    case Block::kTeacherPermissionOff:
+      return "teacher_permission_off";
+    case Block::kTeacherPermissionStale:
+      return "teacher_permission_stale";
   }
   return "unknown";
 }

@@ -248,7 +248,7 @@ def read_emergency_stop(environment):
 
 
 @pytest.mark.parametrize(
-    ('launch_arguments', 'expect_estop', 'expect_authority_required'),
+    ('launch_arguments', 'expect_estop', 'expect_teacher_permission_required'),
     [
         # Practice without the GPIO safety path (ENABLE_GPIO_REF=false): operation_manager still
         # owns /emergency_stop and reports released, so the robot (and QUESTiX LAB) can move.
@@ -256,27 +256,27 @@ def read_emergency_stop(environment):
         # Practice with the GPIO safety path but no GPIO hardware here: GPIO5 is never received,
         # so operation_manager reports the E-stop as active.
         (['enable_gpio_ref:=true'], (True, 'pin 5 not received; '), False),
-        # A practice opt-in to the teacher's authority (a permission, not an E-stop).
-        (['enable_gpio_ref:=false', 'require_runtime_actuation_authority:=true'],
+        # A practice opt-in to the teacher's permission (a permission, not an E-stop).
+        (['enable_gpio_ref:=false', 'require_teacher_permission:=true'],
          (False, NO_GPIO_REASON), True),
         # Competition never depends on the classroom heartbeat, even when asked to.
         (['enable_gpio_ref:=true', 'enable_autoreferee:=true',
-          'require_runtime_actuation_authority:=true'],
+          'require_teacher_permission:=true'],
          (True, 'pin 5 not received; pin 27 not received; '), False),
     ],
 )
-def test_core_launch_publishes_the_estop_and_passes_the_authority_switch(
-        launch_arguments, expect_estop, expect_authority_required):
+def test_core_launch_publishes_the_estop_and_passes_the_teacher_permission_switch(
+        launch_arguments, expect_estop, expect_teacher_permission_required):
     """
     Start questix_core with drive and launcher and read what every actuating node got.
 
     /emergency_stop always comes from operation_manager and is always required. The teacher's
-    authority is an opt-in, and disabled must mean disabled: no node subscribes to
+    permission is an opt-in, and disabled must mean disabled: no node subscribes to
     /actuation_authority without it.
     """
     environment = isolated_ros_environment(10 + len(launch_arguments) * 3 +
                                            int(expect_estop[0]) +
-                                           2 * int(expect_authority_required))
+                                           2 * int(expect_teacher_permission_required))
     arguments = ['enable_lidar:=false', 'enable_shot:=true', 'enable_drive:=true',
                  'enable_rviz:=false', 'controller_type:=dualshock']
     if not any(argument.startswith('enable_autoreferee:=') for argument in launch_arguments):
@@ -286,24 +286,24 @@ def test_core_launch_publishes_the_estop_and_passes_the_authority_switch(
          *arguments, *launch_arguments],
         environment,
     )
-    expected_authority = f'Boolean value is: {expect_authority_required}'
+    expected_teacher_permission = f'Boolean value is: {expect_teacher_permission_required}'
     try:
         for node in ACTUATING_NODES:
             assert wait_for_parameter(node, 'require_emergency_stop', environment) == (
                 'Boolean value is: True'), node
             assert wait_for_parameter(
-                node, 'require_runtime_actuation_authority', environment) == (
-                expected_authority), node
+                node, 'require_teacher_permission', environment) == (
+                expected_teacher_permission), node
         assert read_emergency_stop(environment) == expect_estop
         # Graph discovery is not instant: wait for the expected count (the opt-in), or watch for
         # a while that none appears (disabled).
-        expected_subscriptions = len(ACTUATING_NODES) if expect_authority_required else 0
+        expected_subscriptions = len(ACTUATING_NODES) if expect_teacher_permission_required else 0
         deadline = time.monotonic() + 15.0
         subscriptions = topic_subscription_count('/actuation_authority', environment)
         while time.monotonic() < deadline:
-            if expect_authority_required and subscriptions == expected_subscriptions:
+            if expect_teacher_permission_required and subscriptions == expected_subscriptions:
                 break
-            if not expect_authority_required and subscriptions != 0:
+            if not expect_teacher_permission_required and subscriptions != 0:
                 break
             time.sleep(0.2)
             subscriptions = topic_subscription_count('/actuation_authority', environment)

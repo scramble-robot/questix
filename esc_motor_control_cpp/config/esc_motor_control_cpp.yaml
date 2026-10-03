@@ -33,8 +33,8 @@ esc_motor_control:
     emergency_stop_topic: "/emergency_stop"
     require_emergency_stop: true
     emergency_stop_timeout_sec: 1.0
-    # 教員の実行時許可（/actuation_authority の launcher_allowed）は非常停止とは別の概念で、
-    # require_runtime_actuation_authority（練習での opt-in、既定 false、大会では使わない）が
+    # 教員の許可（/actuation_authority の launcher_allowed）は非常停止とは別の概念で、
+    # require_teacher_permission（練習での opt-in、既定 false、大会では使わない）が
     # true のときだけ効く。値は launch が渡すためこの YAML には置かない。
 
     # QUESTiX LAB roller input / QUESTiX LAB からのローラー操作

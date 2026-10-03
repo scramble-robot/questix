@@ -17,10 +17,10 @@ accept_lab_input は練習用起動だけが QUESTiX LAB のローラー操作�
          default="false"
          description="Accept QUESTiX LAB roller commands on /roller/lab (override-only, default matches YAML; practice launches only)" />
     <!-- Not in the YAML: questix_core always passes it, so the value has one source per launch.
-         The teacher's runtime authority is a practice opt-in, never used in competition. -->
-    <arg name="require_runtime_actuation_authority"
+         The teacher's permission is a practice opt-in, never used in competition. -->
+    <arg name="require_teacher_permission"
          default="false"
-         description="Spin the roller only while the teacher's runtime authority (/actuation_authority) is fresh (practice opt-in; competition: false)" />
+         description="Spin the roller only while the teacher's permission (/actuation_authority) is fresh (practice opt-in; competition: false)" />
     <include file="$(find-pkg-share questix_control_config)/launch/control_profile.launch.py" />
 
     <node pkg="esc_motor_control_cpp" exec="esc_motor_control_node" name="esc_motor_control" output="screen">
@@ -28,6 +28,6 @@ accept_lab_input は練習用起動だけが QUESTiX LAB のローラー操作�
         <param from="$(var control_config_file)" />
         <param name="joy_topic" value="$(var joy_topic)" />
         <param name="accept_lab_input" value="$(var accept_lab_input)" />
-        <param name="require_runtime_actuation_authority" value="$(var require_runtime_actuation_authority)" />
+        <param name="require_teacher_permission" value="$(var require_teacher_permission)" />
     </node>
 </launch>

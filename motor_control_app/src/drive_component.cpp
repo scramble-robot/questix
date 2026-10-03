@@ -84,26 +84,26 @@ DriveComponent::DriveComponent(const rclcpp::NodeOptions& options)
                 "/emergency_stop is heard. Never use this in an integrated launch");
   }
 
-  // 教員の実行時許可（練習時）。volatile + keep-last(1): 許可をラッチせず、発行元が止まれば
-  // リース（runtime_authority_timeout_sec）切れで閉じる。
-  require_authority_ = this->get_parameter("require_runtime_actuation_authority").as_bool();
-  authority_topic_ = this->get_parameter("runtime_authority_topic").as_string();
-  authority_timeout_sec_ = actuation_gate::authorityLease(
-      this->get_parameter("runtime_authority_timeout_sec").as_double());
-  if (require_authority_) {
-    if (authority_topic_.empty()) {
+  // 教員の許可（練習時）。volatile + keep-last(1): 許可をラッチせず、発行元が止まれば
+  // リース（teacher_permission_timeout_sec）切れで閉じる。
+  require_teacher_permission_ = this->get_parameter("require_teacher_permission").as_bool();
+  teacher_permission_topic_ = this->get_parameter("teacher_permission_topic").as_string();
+  teacher_permission_timeout_sec_ = actuation_gate::teacherPermissionLease(
+      this->get_parameter("teacher_permission_timeout_sec").as_double());
+  if (require_teacher_permission_) {
+    if (teacher_permission_topic_.empty()) {
       RCLCPP_ERROR(this->get_logger(),
-                   "runtime_authority_topic is empty but require_runtime_actuation_authority=true: "
+                   "teacher_permission_topic is empty but require_teacher_permission=true: "
                    "the drive will never move");
     } else {
-      authority_sub_ = this->create_subscription<questix_msgs::msg::ActuationAuthority>(
-          authority_topic_, rclcpp::QoS(1).reliable().durability_volatile(),
-          std::bind(&DriveComponent::authorityCallback, this, std::placeholders::_1));
+      teacher_permission_sub_ = this->create_subscription<questix_msgs::msg::ActuationAuthority>(
+          teacher_permission_topic_, rclcpp::QoS(1).reliable().durability_volatile(),
+          std::bind(&DriveComponent::teacherPermissionCallback, this, std::placeholders::_1));
     }
     RCLCPP_INFO(this->get_logger(),
-                "Practice runtime authority required on %s (lease %.2fs): the drive stays "
+                "Teacher permission required on %s (lease %.2fs): the drive stays "
                 "stopped until the teacher switches driving on",
-                authority_topic_.c_str(), authority_timeout_sec_);
+                teacher_permission_topic_.c_str(), teacher_permission_timeout_sec_);
   }
 
   // 起動時のゲート状態（何も受信していない状態）。ログの初期値で、何も送らない。
@@ -495,11 +495,11 @@ void DriveComponent::declareParameters() {
   // 一度受信した後、この秒数（自分の steady clock での受信間隔）途絶えたら停止。<=0 で無効。
   this->declare_parameter("emergency_stop_timeout_sec", 1.0);
 
-  // 教員の実行時許可（questix_msgs/ActuationAuthority）。非常停止とは別の概念で、練習での
+  // 教員の許可（questix_msgs/ActuationAuthority）。非常停止とは別の概念で、練習での
   // opt-in（既定 false）。大会起動（enable_autoreferee）では launch が常に false を渡す。
-  this->declare_parameter("require_runtime_actuation_authority", false);
-  this->declare_parameter("runtime_authority_topic", "/actuation_authority");
-  this->declare_parameter("runtime_authority_timeout_sec", 1.0);
+  this->declare_parameter("require_teacher_permission", false);
+  this->declare_parameter("teacher_permission_topic", "/actuation_authority");
+  this->declare_parameter("teacher_permission_timeout_sec", 1.0);
 
   // オドメトリ出力（実測 twist を積分して /odom を publish）。
   this->declare_parameter("publish_tf", true);
@@ -695,30 +695,29 @@ rcl_interfaces::msg::SetParametersResult DriveComponent::onParameterChange(
   // 再初期化なしで反映できないパラメータ。実行時変更は拒否する（受理して黙って無視すると
   // `ros2 param set` が成功を報告してしまい、変わっていないことに気付けない）。
   // 変更するには YAML（launcher/config/drive_component.yaml）を編集してノードを再起動する。
-  static const std::vector<std::string> kRequiresReconfigure = {
-      "serial_port",
-      "baud_rate",
-      "left_motor_id",
-      "right_motor_id",
-      "max_motor_rpm",
-      "control_mode",
-      "control_rate",
-      "status_publish_rate",
-      "wheel_radius",
-      "wheel_separation",
-      "typed_status_topic",
-      "odom_topic",
-      "odom_frame_id",
-      "base_frame_id",
-      "publish_tf",
-      "auto_start",
-      "connect_retry_period_sec",
-      "emergency_stop_topic",
-      "require_emergency_stop",
-      "emergency_stop_timeout_sec",
-      "require_runtime_actuation_authority",
-      "runtime_authority_topic",
-      "runtime_authority_timeout_sec"};
+  static const std::vector<std::string> kRequiresReconfigure = {"serial_port",
+                                                                "baud_rate",
+                                                                "left_motor_id",
+                                                                "right_motor_id",
+                                                                "max_motor_rpm",
+                                                                "control_mode",
+                                                                "control_rate",
+                                                                "status_publish_rate",
+                                                                "wheel_radius",
+                                                                "wheel_separation",
+                                                                "typed_status_topic",
+                                                                "odom_topic",
+                                                                "odom_frame_id",
+                                                                "base_frame_id",
+                                                                "publish_tf",
+                                                                "auto_start",
+                                                                "connect_retry_period_sec",
+                                                                "emergency_stop_topic",
+                                                                "require_emergency_stop",
+                                                                "emergency_stop_timeout_sec",
+                                                                "require_teacher_permission",
+                                                                "teacher_permission_topic",
+                                                                "teacher_permission_timeout_sec"};
 
   bool control_core_dirty = false;
   bool current_pi_dirty = false;
@@ -1192,10 +1191,11 @@ void DriveComponent::emergencyStopCallback(const questix_msgs::msg::EmergencySto
   applyGate(stopped_now);
 }
 
-void DriveComponent::authorityCallback(const questix_msgs::msg::ActuationAuthority::SharedPtr msg) {
-  have_authority_msg_ = true;
-  authority_drive_allowed_ = msg->drive_allowed;
-  last_authority_rx_ = std::chrono::steady_clock::now();
+void DriveComponent::teacherPermissionCallback(
+    const questix_msgs::msg::ActuationAuthority::SharedPtr msg) {
+  have_teacher_permission_msg_ = true;
+  teacher_permission_drive_allowed_ = msg->drive_allowed;
+  last_teacher_permission_rx_ = std::chrono::steady_clock::now();
   // OFF への変化は制御 tick を待たずに停止する（ON への変化は何も動かさない）。
   applyGate();
 }
@@ -1211,31 +1211,31 @@ actuation_gate::EstopInputs DriveComponent::estopInputs() const {
   return in;
 }
 
-actuation_gate::AuthorityInputs DriveComponent::authorityInputs() const {
-  actuation_gate::AuthorityInputs in;
-  in.required = require_authority_;
-  if (!require_authority_) {
+actuation_gate::TeacherPermissionInputs DriveComponent::teacherPermissionInputs() const {
+  actuation_gate::TeacherPermissionInputs in;
+  in.required = require_teacher_permission_;
+  if (!require_teacher_permission_) {
     return in;  // disabled: nothing else is looked at
   }
-  in.known = have_authority_msg_;
-  in.allowed = authority_drive_allowed_;
-  in.age_sec = have_authority_msg_
-                   ? secondsSince(last_authority_rx_, std::chrono::steady_clock::now())
+  in.known = have_teacher_permission_msg_;
+  in.allowed = teacher_permission_drive_allowed_;
+  in.age_sec = have_teacher_permission_msg_
+                   ? secondsSince(last_teacher_permission_rx_, std::chrono::steady_clock::now())
                    : 0.0;
-  in.timeout_sec = authority_timeout_sec_;
+  in.timeout_sec = teacher_permission_timeout_sec_;
   return in;
 }
 
 actuation_gate::Inputs DriveComponent::gateInputs() const {
   actuation_gate::Inputs in;
   in.estop = estopInputs();
-  in.authority = authorityInputs();
+  in.teacher_permission = teacherPermissionInputs();
   in.stop_fault = stop_fault_;
   return in;
 }
 
 bool DriveComponent::estopEngaged() const {
-  // Only the E-stop: the teacher's authority is a permission and never reads as an E-stop.
+  // Only the E-stop: the teacher's permission is a permission and never reads as an E-stop.
   return actuation_gate::evaluateEstop(estopInputs()) != actuation_gate::Block::kNone;
 }
 

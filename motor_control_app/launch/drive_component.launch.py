@@ -18,11 +18,11 @@ def _launch_setup(context, *args, **kwargs):
     config_file = LaunchConfiguration('config_file').perform(context)
     parameters = [config_file] if config_file else []
     parameters.append(LaunchConfiguration('control_config_file'))
-    # The teacher's runtime authority (practice opt-in, never in competition). Not in the YAML
+    # The teacher's permission (practice opt-in, never in competition). Not in the YAML
     # (one source per launch).
     parameters.append({
-        'require_runtime_actuation_authority': ParameterValue(
-            LaunchConfiguration('require_runtime_actuation_authority'), value_type=bool),
+        'require_teacher_permission': ParameterValue(
+            LaunchConfiguration('require_teacher_permission'), value_type=bool),
     })
 
     drive_component_node = Node(
@@ -47,9 +47,9 @@ def generate_launch_description():
             default_value='',
             description='drive_component parameter YAML (empty = node defaults)'),
         DeclareLaunchArgument(
-            'require_runtime_actuation_authority',
+            'require_teacher_permission',
             default_value='false',
-            description='Drive only while the teacher runtime authority (/actuation_authority) '
+            description='Drive only while the teacher permission (/actuation_authority) '
                         'is fresh (practice opt-in; competition launches pass false)'),
         OpaqueFunction(function=_launch_setup),
     ])

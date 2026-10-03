@@ -46,8 +46,8 @@ namespace motor_control_app {
 // 一度も受信していない間・受信が途絶えた間も非常停止として扱い、自動起動もコマンドもしない
 // （operation_manager は questix_core で常に起動し、GPIO 安全系なしでも解除を出す）。
 //
-// 教員の実行時許可は非常停止とは別の概念で、require_runtime_actuation_authority=true
-// （練習での opt-in、既定 false、大会では使わない）の時だけ、教員の実行時許可
+// 教員の許可は非常停止とは別の概念で、require_teacher_permission=true
+// （練習での opt-in、既定 false、大会では使わない）の時だけ、教員の許可
 // （questix_msgs/ActuationAuthority の launcher_allowed、1.0 s のリース）がない間は自動起動
 // （configure/activate）を保留し、コントローラ・QUESTiX LAB の射撃とチルトを断る。ACTIVE 中に
 // 許可が切れたら非常停止と同じ安全 teardown（deactivate→cleanup）を行い、理由は非常停止とは
@@ -90,13 +90,13 @@ private:
   void autoStartTimerCallback();
   void emergencyStopCallback(const questix_msgs::msg::EmergencyStop::SharedPtr msg);
   void emergencyStopTimeoutCallback();
-  void authorityCallback(const questix_msgs::msg::ActuationAuthority::SharedPtr msg);
+  void teacherPermissionCallback(const questix_msgs::msg::ActuationAuthority::SharedPtr msg);
   // 100 ms 周期: 実行時許可のリース切れ・変化を検出し、閉じたら teardown、開いたら自動起動。
-  void authorityTimerCallback();
+  void teacherPermissionTimerCallback();
   // 非常停止として扱うか（押下・途絶、require_emergency_stop なら未受信も）。
   bool estopBlocks() const;
   // 実行時許可の拒否理由（kNone で許可あり、または大会起動で不要）。
-  actuation_gate::Block authorityBlock() const;
+  actuation_gate::Block teacherPermissionBlock() const;
   void tryAutoStart();
   void transitionToUnconfiguredForAutoRecovery(const char* reason) noexcept;
   void handleSafetyTeardownState(const char* reason, uint8_t state_id) noexcept;
@@ -145,15 +145,15 @@ private:
   std::chrono::steady_clock::time_point last_estop_msg_time_;
   // 未受信の /emergency_stop を非常停止として扱うか（false は単体診断の明示 opt-out）
   bool require_emergency_stop_{true};
-  // 教員の実行時許可（練習: true、大会: false）。コンストラクタで一度だけ読む
-  bool require_authority_{false};
-  std::string authority_topic_{"/actuation_authority"};
-  double authority_timeout_sec_{1.0};
-  bool have_authority_msg_{false};
-  bool authority_launcher_allowed_{false};
-  std::chrono::steady_clock::time_point last_authority_rx_{};
+  // 教員の許可（練習: true、大会: false）。コンストラクタで一度だけ読む
+  bool require_teacher_permission_{false};
+  std::string teacher_permission_topic_{"/actuation_authority"};
+  double teacher_permission_timeout_sec_{1.0};
+  bool have_teacher_permission_msg_{false};
+  bool teacher_permission_launcher_allowed_{false};
+  std::chrono::steady_clock::time_point last_teacher_permission_rx_{};
   // 前回の判定で許可があったか（変化の検出用）。起動時は許可なし
-  bool authority_was_allowed_{false};
+  bool teacher_permission_was_allowed_{false};
   // ACTIVE 中に検出したサーボ通信故障のフラグ。autoStartTimerCallback が拾って
   // deactivate→cleanup→再接続の自動復帰を行う。
   std::atomic<bool> runtime_fault_;
@@ -191,9 +191,9 @@ private:
   rclcpp::Subscription<questix_msgs::msg::EmergencyStop>::SharedPtr emergency_stop_sub_;
   rclcpp::TimerBase::SharedPtr auto_start_timer_;
   rclcpp::TimerBase::SharedPtr emergency_stop_timeout_timer_;
-  // 教員の実行時許可（volatile、ラッチしない）とリース判定タイマー
-  rclcpp::Subscription<questix_msgs::msg::ActuationAuthority>::SharedPtr authority_sub_;
-  rclcpp::TimerBase::SharedPtr authority_timer_;
+  // 教員の許可（volatile、ラッチしない）とリース判定タイマー
+  rclcpp::Subscription<questix_msgs::msg::ActuationAuthority>::SharedPtr teacher_permission_sub_;
+  rclcpp::TimerBase::SharedPtr teacher_permission_timer_;
   // 射撃シーケンス用ワンショットタイマー。fire 位置到達後 fire_duration_ms で
   // 発火し home 復帰する。executor をブロックしないための置き換え（issue #83）。
   rclcpp::TimerBase::SharedPtr fire_timer_;

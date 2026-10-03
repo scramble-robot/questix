@@ -12,18 +12,18 @@ namespace esc_motor_control_cpp {
 // Whether the roller may spin at all right now (ROS-free, clock-injected: ages in seconds of
 // the node's steady clock). Two separate concepts are judged separately and only then combined:
 // the emergency stop (a safety function; with RollerEstopInputs::required, false only for an
-// explicit diagnostic opt-out, unknown and silent count as pressed) and the teacher's runtime
-// authority (a permission, not an emergency stop; a practice opt-in, never looked at when not
+// explicit diagnostic opt-out, unknown and silent count as pressed) and the teacher's permission
+// (/actuation_authority; not an emergency stop; a practice opt-in, never looked at when not
 // required). The rules are the same as motor_control_app/actuation_gate.hpp (drive and shot);
 // the two packages do not depend on each other, so keep both headers and their tests in step.
 enum class RollerBlock {
-  kNone,              // may spin (a fresh press or lab command is still needed)
-  kEstopUnknown,      // /emergency_stop never received (only when required)
-  kEstopActive,       // E-stop pressed
-  kEstopStale,        // /emergency_stop received once, then silent (only when required)
-  kAuthorityUnknown,  // no runtime authority heartbeat received (only when opted in)
-  kAuthorityOff,      // the teacher's authority says launcher off (only when opted in)
-  kAuthorityStale,    // heartbeat silent for longer than its lease (only when opted in)
+  kNone,                      // may spin (a fresh press or lab command is still needed)
+  kEstopUnknown,              // /emergency_stop never received (only when required)
+  kEstopActive,               // E-stop pressed
+  kEstopStale,                // /emergency_stop received once, then silent (only when required)
+  kTeacherPermissionUnknown,  // no teacher permission heartbeat received (only when opted in)
+  kTeacherPermissionOff,      // the teacher's permission says launcher off (only when opted in)
+  kTeacherPermissionStale,    // heartbeat silent for longer than its lease (only when opted in)
 };
 
 struct RollerEstopInputs {
@@ -34,8 +34,8 @@ struct RollerEstopInputs {
   double timeout_sec{1.0};  // <= 0 or non-finite: no staleness check
 };
 
-struct RollerAuthorityInputs {
-  bool required{false};  // practice opt-in (require_runtime_actuation_authority)
+struct RollerTeacherPermissionInputs {
+  bool required{false};  // practice opt-in (require_teacher_permission)
   bool known{false};
   bool allowed{false};
   double age_sec{0.0};
@@ -44,14 +44,14 @@ struct RollerAuthorityInputs {
 
 struct RollerGateInputs {
   RollerEstopInputs estop;
-  RollerAuthorityInputs authority;
+  RollerTeacherPermissionInputs teacher_permission;
 };
 
 inline bool rollerSignalStale(double age_sec, double timeout_sec) {
   return std::isfinite(timeout_sec) && timeout_sec > 0.0 && !(age_sec <= timeout_sec);
 }
 
-inline double rollerAuthorityLease(double timeout_sec) {
+inline double rollerTeacherPermissionLease(double timeout_sec) {
   return std::isfinite(timeout_sec) && timeout_sec > 0.0 ? timeout_sec : 1.0;
 }
 
@@ -69,19 +69,19 @@ inline RollerBlock evaluateRollerEstop(const RollerEstopInputs& in) {
   return RollerBlock::kNone;
 }
 
-// The teacher's authority alone. Not required means disabled: nothing else is looked at.
-inline RollerBlock evaluateRollerAuthority(const RollerAuthorityInputs& in) {
+// The teacher's permission alone. Not required means disabled: nothing else is looked at.
+inline RollerBlock evaluateRollerTeacherPermission(const RollerTeacherPermissionInputs& in) {
   if (!in.required) {
     return RollerBlock::kNone;
   }
   if (!in.known) {
-    return RollerBlock::kAuthorityUnknown;
+    return RollerBlock::kTeacherPermissionUnknown;
   }
-  if (!(in.age_sec <= rollerAuthorityLease(in.timeout_sec))) {
-    return RollerBlock::kAuthorityStale;
+  if (!(in.age_sec <= rollerTeacherPermissionLease(in.timeout_sec))) {
+    return RollerBlock::kTeacherPermissionStale;
   }
   if (!in.allowed) {
-    return RollerBlock::kAuthorityOff;
+    return RollerBlock::kTeacherPermissionOff;
   }
   return RollerBlock::kNone;
 }
@@ -91,7 +91,7 @@ inline RollerBlock evaluateRollerGate(const RollerGateInputs& in) {
   if (estop != RollerBlock::kNone) {
     return estop;
   }
-  return evaluateRollerAuthority(in.authority);
+  return evaluateRollerTeacherPermission(in.teacher_permission);
 }
 
 inline bool isRollerEstopBlock(RollerBlock block) {
@@ -99,9 +99,10 @@ inline bool isRollerEstopBlock(RollerBlock block) {
          block == RollerBlock::kEstopStale;
 }
 
-inline bool isRollerAuthorityBlock(RollerBlock block) {
-  return block == RollerBlock::kAuthorityUnknown || block == RollerBlock::kAuthorityOff ||
-         block == RollerBlock::kAuthorityStale;
+inline bool isRollerTeacherPermissionBlock(RollerBlock block) {
+  return block == RollerBlock::kTeacherPermissionUnknown ||
+         block == RollerBlock::kTeacherPermissionOff ||
+         block == RollerBlock::kTeacherPermissionStale;
 }
 
 inline const char* rollerBlockName(RollerBlock block) {
@@ -114,12 +115,12 @@ inline const char* rollerBlockName(RollerBlock block) {
       return "estop_active";
     case RollerBlock::kEstopStale:
       return "estop_stale";
-    case RollerBlock::kAuthorityUnknown:
-      return "authority_unknown";
-    case RollerBlock::kAuthorityOff:
-      return "authority_off";
-    case RollerBlock::kAuthorityStale:
-      return "authority_stale";
+    case RollerBlock::kTeacherPermissionUnknown:
+      return "teacher_permission_unknown";
+    case RollerBlock::kTeacherPermissionOff:
+      return "teacher_permission_off";
+    case RollerBlock::kTeacherPermissionStale:
+      return "teacher_permission_stale";
   }
   return "unknown";
 }

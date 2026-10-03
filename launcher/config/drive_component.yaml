@@ -168,7 +168,7 @@ drive_component:
     emergency_stop_topic: "/emergency_stop"
     require_emergency_stop: true
     emergency_stop_timeout_sec: 1.0
-    # 教員の実行時許可（/actuation_authority、questix_msgs/ActuationAuthority）は非常停止とは
-    # 別の概念で、require_runtime_actuation_authority（練習での opt-in、既定 false、大会では
+    # 教員の許可（/actuation_authority、questix_msgs/ActuationAuthority）は非常停止とは
+    # 別の概念で、require_teacher_permission（練習での opt-in、既定 false、大会では
     # 使わない）が true のときだけ走行を止める。値は launch が渡すためこの YAML には置かない。
-    # リースは runtime_authority_timeout_sec（既定 1.0 s）。
+    # リースは teacher_permission_timeout_sec（既定 1.0 s）。

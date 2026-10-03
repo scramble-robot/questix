@@ -440,44 +440,44 @@ def _launcher_node_includes(shot):
             for include in node_includes]
 
 
-def test_runtime_actuation_authority_is_a_practice_opt_in():
-    # The teacher's runtime authority (/actuation_authority from Robot Manager) is a permission,
+def test_teacher_permission_is_a_practice_opt_in():
+    # The teacher's permission (/actuation_authority from Robot Manager) is a permission,
     # not an emergency stop: by default a practice run drives and shoots without it (as 3.2.0
     # did), a practice run may opt in, and competition (AutoReferee) never depends on it.
     core = load_xml('launcher/launch/questix_core.launch.xml')
-    core_arg = find_arg(core, 'require_runtime_actuation_authority')
+    core_arg = find_arg(core, 'require_teacher_permission')
     assert core_arg.get('default') == 'false'
     assert '$(env' not in core_arg.get('default')
     for name in ('drive_component.launch.xml', 'shot_component.launch.xml'):
-        assert _include_args(core, name).get('require_runtime_actuation_authority') == (
-            '$(and $(var require_runtime_actuation_authority) '
+        assert _include_args(core, name).get('require_teacher_permission') == (
+            '$(and $(var require_teacher_permission) '
             '$(not $(var enable_autoreferee)))'), name
 
     drive = load_xml('launcher/launch/drive_component.launch.xml')
-    assert find_arg(drive, 'require_runtime_actuation_authority').get('default') == 'false'
+    assert find_arg(drive, 'require_teacher_permission').get('default') == 'false'
     assert _include_args(drive, 'drive_component.launch.py').get(
-        'require_runtime_actuation_authority') == '$(var require_runtime_actuation_authority)'
+        'require_teacher_permission') == '$(var require_teacher_permission)'
 
     shot = load_xml('launcher/launch/shot_component.launch.xml')
-    assert find_arg(shot, 'require_runtime_actuation_authority').get('default') == 'false'
+    assert find_arg(shot, 'require_teacher_permission').get('default') == 'false'
     for values in _launcher_node_includes(shot):
-        assert values.get('require_runtime_actuation_authority') == (
-            '$(var require_runtime_actuation_authority)')
+        assert values.get('require_teacher_permission') == (
+            '$(var require_teacher_permission)')
 
     esc = load_xml('esc_motor_control_cpp/launch/esc_motor_control_cpp.launch.xml')
-    assert find_arg(esc, 'require_runtime_actuation_authority').get('default') == 'false'
+    assert find_arg(esc, 'require_teacher_permission').get('default') == 'false'
     esc_params = {
         param.get('name'): param.get('value') for param in esc.findall('./node/param')
     }
-    assert esc_params.get('require_runtime_actuation_authority') == (
-        '$(var require_runtime_actuation_authority)')
+    assert esc_params.get('require_teacher_permission') == (
+        '$(var require_teacher_permission)')
     for relative_path in ('motor_control_app/launch/shot_component.launch.py',
                           'motor_control_app/launch/drive_component.launch.py'):
         text = (SOURCE_ROOT / relative_path).read_text(encoding='utf-8')
-        assert "'require_runtime_actuation_authority',\n" in text, relative_path
-        assert "LaunchConfiguration('require_runtime_actuation_authority'), value_type=bool" in (
+        assert "'require_teacher_permission',\n" in text, relative_path
+        assert "LaunchConfiguration('require_teacher_permission'), value_type=bool" in (
             text), relative_path
-        default = text.split("'require_runtime_actuation_authority',\n", 1)[1].split('\n', 1)[0]
+        default = text.split("'require_teacher_permission',\n", 1)[1].split('\n', 1)[0]
         assert "default_value='false'" in default, relative_path
 
     # The node defaults agree with the launch defaults (an opt-in everywhere).
@@ -485,8 +485,8 @@ def test_runtime_actuation_authority_is_a_practice_opt_in():
                           'motor_control_app/src/shot_component.cpp',
                           'esc_motor_control_cpp/src/esc_motor_control_component.cpp'):
         text = (SOURCE_ROOT / relative_path).read_text(encoding='utf-8')
-        assert '"require_runtime_actuation_authority", false);' in text, relative_path
-        assert '"require_runtime_actuation_authority", true);' not in text, relative_path
+        assert '"require_teacher_permission", false);' in text, relative_path
+        assert '"require_teacher_permission", true);' not in text, relative_path
 
     # The service launchers never opt in on their own.
     for relative_path in (
@@ -494,7 +494,7 @@ def test_runtime_actuation_authority_is_a_practice_opt_in():
         'ansible/roles/robot_autostart/files/questix_robot_launcher.sh',
     ):
         text = (SOURCE_ROOT / relative_path).read_text(encoding='utf-8')
-        assert 'require_runtime_actuation_authority' not in text, relative_path
+        assert 'require_teacher_permission' not in text, relative_path
 
 
 def test_emergency_stop_is_always_published_and_always_required():
@@ -518,7 +518,7 @@ def test_emergency_stop_is_always_published_and_always_required():
         ('esc_motor_control_cpp/config/esc_motor_control_cpp.yaml', 'esc_motor_control'),
     ):
         parameters = load_yaml(relative_path)[node]['ros__parameters']
-        assert 'require_runtime_actuation_authority' not in parameters, relative_path
+        assert 'require_teacher_permission' not in parameters, relative_path
         assert parameters['require_emergency_stop'] is True, relative_path
         assert parameters['emergency_stop_topic'] == '/emergency_stop', relative_path
         assert parameters['emergency_stop_timeout_sec'] == 1.0, relative_path

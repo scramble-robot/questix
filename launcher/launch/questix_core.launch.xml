@@ -16,12 +16,12 @@
        shot/ESC nodes' accept_lab_input; the controller always takes over. Not read from the
        environment, and never on with AutoReferee (competition): see the shot include below. -->
   <arg name="enable_lab_shoot" default="true" description="Let QUESTiX LAB operate the roller, tilt and fire (practice only; ignored with enable_autoreferee)"/>
-  <!-- The teacher's runtime authority (/actuation_authority from Robot Manager's 操作 tab) is a
+  <!-- The teacher's permission (/actuation_authority from Robot Manager's 操作 tab) is a
        permission, not an emergency stop: by default it only gates QUESTiX LAB's 教材 permissions
        in Robot Manager, and the controller drives as soon as the robot is up. true makes the
-       drive and launcher nodes also stop without a fresh authority (opt-in for practice). Not
+       drive and launcher nodes also stop without a fresh permission (opt-in for practice). Not
        read from the environment, and never on with AutoReferee (competition). -->
-  <arg name="require_runtime_actuation_authority" default="false" description="Move the drive and launcher only while the teacher's runtime authority is fresh (practice opt-in; ignored with enable_autoreferee)"/>
+  <arg name="require_teacher_permission" default="false" description="Move the drive and launcher only while the teacher's permission is fresh (practice opt-in; ignored with enable_autoreferee)"/>
   <arg name="enable_rviz" default="$(env ENABLE_RVIZ false)" description="Enable RViz visualization"/>
   <!-- AutoReferee operation without the GPIO safety path is an invalid configuration. -->
   <group if="$(and $(var enable_autoreferee) $(not $(var enable_gpio_ref)))">
@@ -47,9 +47,9 @@
         <arg name="enable_gpio_ref" value="$(var enable_gpio_ref)"/>
         <arg name="controller_type" value="$(var controller_type)"/>
         <arg name="accept_lab_input" value="$(and $(var enable_lab_shoot) $(not $(var enable_autoreferee)))"/>
-        <!-- The teacher's runtime authority is opt-in (see the arg above); competition keeps
+        <!-- The teacher's permission is opt-in (see the arg above); competition keeps
              the AutoReferee / GPIO path and never depends on the classroom heartbeat. -->
-        <arg name="require_runtime_actuation_authority" value="$(and $(var require_runtime_actuation_authority) $(not $(var enable_autoreferee)))"/>
+        <arg name="require_teacher_permission" value="$(and $(var require_teacher_permission) $(not $(var enable_autoreferee)))"/>
       </include>
     </group>
     <group if="$(var enable_drive)">
@@ -59,8 +59,8 @@
         <arg name="enable_operation_manager" value="false"/>
         <arg name="controller_type" value="$(var controller_type)"/>
         <arg name="enable_twist_arbiter" value="$(and $(var enable_twist_arbiter) $(not $(var enable_autoreferee)))"/>
-        <!-- The teacher's authority: see the shot include. -->
-        <arg name="require_runtime_actuation_authority" value="$(and $(var require_runtime_actuation_authority) $(not $(var enable_autoreferee)))"/>
+        <!-- The teacher's permission: see the shot include. -->
+        <arg name="require_teacher_permission" value="$(and $(var require_teacher_permission) $(not $(var enable_autoreferee)))"/>
       </include>
     </group>
     <group if="$(var enable_lidar)">

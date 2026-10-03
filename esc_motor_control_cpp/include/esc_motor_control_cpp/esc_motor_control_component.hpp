@@ -26,7 +26,7 @@ namespace esc_motor_control_cpp {
 // The roller spins only while roller_gate.hpp says so: the E-stop is known and released
 // (require_emergency_stop; unknown and silent count as pressed, and operation_manager always
 // publishes it in questix_core) and, only when a practice launch opts in to
-// (require_runtime_actuation_authority, default false), the teacher's launcher authority is fresh.
+// (require_teacher_permission, default false), the teacher's launcher permission is fresh.
 // When it closes the roller goes to 0 and the full-speed latch needs a release; nothing restarts
 // by itself.
 class EscMotorControlComponent : public rclcpp::Node {
@@ -41,9 +41,9 @@ private:
   // ---------- Callbacks ----------
   void joy_callback(const sensor_msgs::msg::Joy::SharedPtr msg);
   void emergency_stop_callback(const questix_msgs::msg::EmergencyStop::SharedPtr msg);
-  void authority_callback(const questix_msgs::msg::ActuationAuthority::SharedPtr msg);
-  // Re-evaluates the gate (100 ms timer and every E-stop / authority message); on closing it
-  // stops the roller, clears the latch and locks the lab.
+  void teacher_permission_callback(const questix_msgs::msg::ActuationAuthority::SharedPtr msg);
+  // Re-evaluates the gate (100 ms timer and every E-stop / teacher permission message); on closing
+  // it stops the roller, clears the latch and locks the lab.
   void apply_gate();
   // The current gate (lock_ held).
   RollerBlock evaluate_gate_locked() const;
@@ -88,10 +88,10 @@ private:
   // E-stop reception (require_emergency_stop=false is an explicit diagnostic opt-out only)
   bool require_emergency_stop_{true};
   double emergency_stop_timeout_sec_{1.0};
-  // The teacher's runtime authority (practice true, competition false)
-  bool require_authority_{false};
-  std::string authority_topic_{"/actuation_authority"};
-  double authority_timeout_sec_{1.0};
+  // The teacher's permission (practice true, competition false)
+  bool require_teacher_permission_{false};
+  std::string teacher_permission_topic_{"/actuation_authority"};
+  double teacher_permission_timeout_sec_{1.0};
 
   // ---------- State ----------
   double current_speed_{0.0};
@@ -99,9 +99,9 @@ private:
   bool emergency_stop_active_{false};
   bool have_estop_msg_{false};
   double last_estop_rx_sec_{0.0};  // steady clock
-  bool have_authority_msg_{false};
-  bool authority_allowed_{false};
-  double last_authority_rx_sec_{0.0};  // steady clock
+  bool have_teacher_permission_msg_{false};
+  bool teacher_permission_allowed_{false};
+  double last_teacher_permission_rx_sec_{0.0};  // steady clock
   RollerBlock gate_{RollerBlock::kEstopUnknown};
   FullSpeedLogic full_speed_logic_;
   RollerLabLogic roller_lab_logic_;
@@ -113,8 +113,8 @@ private:
   // ---------- ROS I/O ----------
   rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joy_sub_;
   rclcpp::Subscription<questix_msgs::msg::EmergencyStop>::SharedPtr emergency_stop_sub_;
-  // volatile + keep-last(1): the authority is never latched
-  rclcpp::Subscription<questix_msgs::msg::ActuationAuthority>::SharedPtr authority_sub_;
+  // volatile + keep-last(1): the teacher permission is never latched
+  rclcpp::Subscription<questix_msgs::msg::ActuationAuthority>::SharedPtr teacher_permission_sub_;
   rclcpp::TimerBase::SharedPtr gate_timer_;
   rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr status_pub_;
   rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr lab_sub_;

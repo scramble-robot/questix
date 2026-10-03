@@ -123,7 +123,7 @@
 
     <!-- The teacher's runtime authority (actuation.py): a permission, not an E-stop. By default
          it gates the lesson permissions only; the nodes enforce it only when a practice launch
-         opts in (require_runtime_actuation_authority:=true). -->
+         opts in (require_teacher_permission:=true). -->
     <section class="card" id="actuation-card" aria-labelledby="actuation-heading">
       <h2 id="actuation-heading">先生の操作許可（練習）</h2>
       <p id="actuation-state" class="section-help" role="status">確認しています。</p>
@@ -145,7 +145,7 @@
       </div>
       <p id="actuation-error" class="lab-inline-error" role="alert" hidden></p>
       <p class="section-help">ここを ON にしている間だけ、「教材」タブで教材からの走行／発射を許可できます。コントローラーでの操作はこの許可とは関係なく動きます（非常停止とは別のものです）。はじめは OFF です。Robot Manager の再起動・ロボットの再起動・モードの切り替え・ロボット制御の起動／再起動／停止・「すべて止める」で OFF に戻ります。OFF にすると同じ動作の「教材からの走行／発射」の許可も OFF になります（ON にしても教材の許可は ON になりません）。</p>
-      <p class="section-help">手動の起動で <code>require_runtime_actuation_authority:=true</code> を指定したときだけ、コントローラーでの操作にもこの許可が必要になり、約 1 秒この許可を受け取れないと止まります（この PC の Robot Manager が止まった場合も同じです）。大会用の起動では使いません（大会は非常停止と AutoReferee で動きます）。非常停止ボタンの代わりにはなりません。</p>
+      <p class="section-help">手動の起動で <code>require_teacher_permission:=true</code> を指定したときだけ、コントローラーでの操作にもこの許可が必要になり、約 1 秒この許可を受け取れないと止まります（この PC の Robot Manager が止まった場合も同じです）。大会用の起動では使いません（大会は非常停止と AutoReferee で動きます）。非常停止ボタンの代わりにはなりません。</p>
     </section>
 
     <section class="card">

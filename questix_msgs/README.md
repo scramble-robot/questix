@@ -90,6 +90,11 @@ DDT M0602C の Protocol 1 応答フレームをデコードした 1 モータ分
 
 ## `/actuation_authority` トピック契約(練習時の実行時許可)
 
+教員の許可(teacher permission)。ノードのパラメータとコードは `teacher_permission`
+(`require_teacher_permission`、`teacher_permission_topic`、`teacher_permission_timeout_sec`)で
+呼ぶ。トピック名 `/actuation_authority` と型 `ActuationAuthority` は、記録済みの rosbag と
+Robot Manager との互換のためそのまま。
+
 - **型**: `questix_msgs/msg/ActuationAuthority`(`drive_allowed`, `launcher_allowed`)
 - **QoS**: reliable + **volatile** + keep-last(1)。**transient_local にしない**(許可をラッチしない)。
 - **発行元**: Robot Manager(教員が「ロボットの走行制御」「発射機構の操作」を ON にしている間だけ、
@@ -98,13 +103,13 @@ DDT M0602C の Protocol 1 応答フレームをデコードした 1 モータ分
 - **非常停止とは別の概念**: 教員の許可は「動かしてよいか」の許可で、非常停止ではない。既定では
   Robot Manager の中で QUESTiX LAB(教材)の走行・発射の許可の前提として使うだけで、
   drive_component / shot_component / esc_motor_control はこれを見ずにコントローラで動く(3.2.0 と同じ)。
-- **購読側(opt-in)**: `questix_core` の `require_runtime_actuation_authority:=true`(練習のみ、既定 false、
+- **購読側(opt-in)**: `questix_core` の `require_teacher_permission:=true`(練習のみ、既定 false、
   環境変数からは読まない)を明示したときだけ、
   drive_component / shot_component / esc_motor_control は、自分の単調時計で
-  `runtime_authority_timeout_sec`(既定 1.0 s)以内に受信した `*_allowed=true` がある間だけ動かす。
+  `teacher_permission_timeout_sec`(既定 1.0 s)以内に受信した `*_allowed=true` がある間だけ動かす。
   未受信・false・途絶はすべて OFF。OFF になったら停止(drive: 即時停止 + 目標破棄、
   shot: 安全 teardown、ESC: 0 + ラッチ解除)。許可が戻っても、それだけでは動き出さない。
-- **大会起動**(`enable_autoreferee:=true`)は opt-in しても常に `require_runtime_actuation_authority:=false`。
+- **大会起動**(`enable_autoreferee:=true`)は opt-in しても常に `require_teacher_permission:=false`。
   AutoReferee と GPIO 安全系は従来どおりで、教室用の heartbeat が無くても止まらない。
 - 非常停止とは別の理由として扱う(許可の喪失を非常停止に見せかけない)。
 

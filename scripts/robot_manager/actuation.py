@@ -2,7 +2,7 @@
 
 The authority is a permission, not an emergency stop. By default it is the precondition for
 QUESTiX LAB's lesson permissions (lab.py) and the controller drives without it, as in 3.2.0. A
-practice launch may opt in with ``require_runtime_actuation_authority:=true`` on questix_core:
+practice launch may opt in with ``require_teacher_permission:=true`` on questix_core:
 drive_component, shot_component and esc_motor_control then move the wheels (``drive``) or the
 launcher (``launcher``: roller, tilt, fire) only while a fresh questix_msgs/ActuationAuthority on
 ``/actuation_authority`` says so, for the controller and QUESTiX LAB alike, enforced in those
@@ -45,7 +45,7 @@ CONFIG_DIR = Path(os.environ.get("QUESTIX_CONFIG_DIR", "/etc/questix_robot"))
 LAUNCH_ENV_FILE = CONFIG_DIR / "launch.env"
 MODE_FILE = CONFIG_DIR / "mode"
 HEARTBEAT_SCRIPT = Path(__file__).with_name("actuation_heartbeat.py")
-# The nodes' lease (runtime_authority_timeout_sec) and the heartbeat rate, for the tab.
+# The nodes' lease (teacher_permission_timeout_sec) and the heartbeat rate, for the tab.
 LEASE_SEC = 1.0
 HEARTBEAT_HZ = 5.0
 # A heartbeat that exits this fast failed to start (ROS missing, questix_msgs not built).

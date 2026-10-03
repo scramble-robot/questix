@@ -35,9 +35,9 @@ QUESTiX LAB は構成によらず「未受信・途絶・押下なら止める�
 物理非常停止回路（RLY1）の動力遮断はこの設定に関係なく働きますが、押下は ROS に伝わりません。
 
 先生の実行時許可（`/actuation_authority`、Robot Manager の操作タブ）は非常停止とは別の
-概念です。既定（`require_runtime_actuation_authority:=false`）では教材の許可の前提に
+概念です。既定（`require_teacher_permission:=false`）では教材の許可の前提に
 使うだけで、コントローラは許可なしで動きます。練習で許可がない間はコントローラでも
-動かさないようにする場合だけ `require_runtime_actuation_authority:=true` を明示します
+動かさないようにする場合だけ `require_teacher_permission:=true` を明示します
 （大会起動では常に無効）。
 
 GPIO5の物理非常停止回路はRLY1で左右DDT駆動モーター、ローラー用ESC、Shot用サーボ、

@@ -24,8 +24,8 @@ shot_component:
     emergency_stop_topic: "/emergency_stop"
     emergency_stop_timeout_sec: 1.0  # 受信途絶でfail-safe teardownするまでの秒数（0以下で無効）
     require_emergency_stop: true
-    # 教員の実行時許可（/actuation_authority の launcher_allowed）は非常停止とは別の概念で、
-    # require_runtime_actuation_authority（練習での opt-in、既定 false、大会では使わない）が
+    # 教員の許可（/actuation_authority の launcher_allowed）は非常停止とは別の概念で、
+    # require_teacher_permission（練習での opt-in、既定 false、大会では使わない）が
     # true のときだけ効く。値は launch が渡すためこの YAML には置かない。有効時は許可がない間は
     # 自動起動を保留し、ACTIVE 中に切れたら停止する（理由は /shot/status の authority で区別）。
 
