@@ -303,6 +303,19 @@ if [ "$ROLE_ORDER" = "role: robotics_workspace role: ros2_build role: robot_auto
 else
     fail "setup_kit role order: $ROLE_ORDER"
 fi
+# `./setup.sh --tags ros2_build` on an existing kit: the target checks and the build, nothing else.
+assert_contains setup.sh '-e "ros_domain_id=${ROS_DOMAIN_ID}" "$@"' "setup.sh: passes extra arguments (--tags) on"
+if ansible-playbook ansible/playbooks/setup_kit.yaml -i localhost, --list-tasks --tags ros2_build \
+    >"$PLAYBOOK_LOG" 2>&1; then
+    assert_contains "$PLAYBOOK_LOG" "Verify target architecture" "--tags ros2_build: target checks still run"
+    assert_contains "$PLAYBOOK_LOG" "Validate ROS_DOMAIN_ID" "--tags ros2_build: ROS_DOMAIN_ID check still runs"
+    assert_contains "$PLAYBOOK_LOG" "ros2_build : Build the workspace" "--tags ros2_build: builds the workspace"
+    assert_not_contains "$PLAYBOOK_LOG" "robot_autostart :" "--tags ros2_build: no other role runs"
+    assert_not_contains "$PLAYBOOK_LOG" "ros2_installation :" "--tags ros2_build: no apt upgrade / ROS install"
+else
+    show_log_tail
+    fail "--tags ros2_build: --list-tasks failed (log shown above)"
+fi
 assert_not_contains "ansible/roles/ros2_build/tasks/main.yaml" "ros2 launch" "workspace build: starts no node"
 assert_not_contains "ansible/roles/ros2_build/tasks/main.yaml" "ros2 run" "workspace build: runs no node"
 

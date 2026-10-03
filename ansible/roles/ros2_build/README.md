@@ -27,6 +27,9 @@ and before `robot_autostart`). Before this role, a freshly set-up kit had an emp
    `ros2 pkg executables questix_lab_bridge` lists `lab_bridge_node`. A failed check fails the
    setup, so the completion message only appears for a built workspace.
 
+On an existing kit this role can run alone: `./setup.sh --tags ros2_build` runs the target and
+ROS_DOMAIN_ID checks and this role, and no other role (no apt upgrade, no service changes).
+
 It starts no node and sends no command. A second `setup.sh` imports nothing new, lets rosdep find
 nothing to install and rebuilds incrementally. Check mode builds nothing.
 

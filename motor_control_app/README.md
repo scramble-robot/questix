@@ -157,7 +157,7 @@ ros2 param dump /drive_component
 ビルドログに `-Winvalid-pch` の警告が出たら再利用が効いていません（結果は同じで、速度だけ落ちる）。
 
 キット（Raspberry Pi 5）は `./setup.sh` の `ros2_build` ロールが ccache の導入・設定と
-ワークスペースへの組み込みまで行います。既存のキットも `./setup.sh` を再実行すれば入り、以降は
+ワークスペースへの組み込みまで行います。既存のキットも `./setup.sh --tags ros2_build`（このロールだけ実行）で入り、以降は
 いつもの `colcon build --symlink-install` のまま ccache が使われます（pull・ブランチ切り替え後の
 再コンパイルが速くなる）。
 
