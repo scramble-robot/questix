@@ -12,6 +12,7 @@
 #include <pty.h>
 #include <unistd.h>
 
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <memory>
@@ -160,6 +161,34 @@ TEST_F(DdtTransactionStats, CountersSurviveReinitialization) {
   ASSERT_TRUE(lib_->setMotorVelocity(kLeft, 10));
   ASSERT_TRUE(lib_->initializeMotor(kLeft, ControlMode::Velocity));
   EXPECT_EQ(stats(kLeft).feedback_count, 3u);  // cumulative: a duplicate is never re-counted
+}
+
+// The response timeout: the library default is the former fixed 10 ms, and a set value is clamped.
+TEST(DdtResponseTimeout, DefaultIsTheFormerFixedValueAndSetValuesAreClamped) {
+  EXPECT_EQ(DdtMotorLib::kDefaultResponseTimeoutMs, 10);
+  DdtMotorLib lib("/nonexistent", 57600);  // never opened
+  EXPECT_EQ(lib.getResponseTimeoutMs(), 10);
+  EXPECT_EQ(lib.setResponseTimeoutMs(1), 2);
+  EXPECT_EQ(lib.setResponseTimeoutMs(-5), 2);
+  EXPECT_EQ(lib.setResponseTimeoutMs(2), 2);
+  EXPECT_EQ(lib.setResponseTimeoutMs(17), 17);
+  EXPECT_EQ(lib.setResponseTimeoutMs(50), 50);
+  EXPECT_EQ(lib.setResponseTimeoutMs(51), 50);
+  EXPECT_EQ(lib.getResponseTimeoutMs(), 50);
+  EXPECT_EQ(DdtMotorLib::clampResponseTimeoutMs(10), 10);
+}
+
+// A silent motor costs the configured wait (a lower bound only: the scheduler may add to it).
+TEST_F(DdtTransactionStats, SilentMotorWaitsTheConfiguredTimeout) {
+  ASSERT_TRUE(lib_->initializeMotor(kLeft, ControlMode::Velocity));
+  lib_->answer = false;
+  lib_->setResponseTimeoutMs(40);
+  const auto start = std::chrono::steady_clock::now();
+  ASSERT_TRUE(lib_->setMotorVelocity(kLeft, 40));
+  const double waited_ms =
+      std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+  EXPECT_GE(waited_ms, 39.0);
+  EXPECT_TRUE(stats(kLeft).last_response_timeout);
 }
 
 }  // namespace

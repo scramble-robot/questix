@@ -41,6 +41,16 @@ public:
   // M0602C 仕様の速度ループ指令範囲上限 [rpm]（-475..475）。これを超える指令は仕様外。
   static constexpr int kSpecVelocityMaxRpm = 475;
 
+  // 指令送信後にフィードバック応答を待つ上限 [ms]（setResponseTimeoutMs）。
+  // 既定 10 ms は従来の固定値。下限 2 ms は応答フレームの伝送（10 byte @57600 baud ≈ 1.74 ms）
+  // だけで尽きる値、上限 50 ms は 2 モータ直列で 50 Hz の周期予算（20 ms）を大きく超える値。
+  static constexpr int kDefaultResponseTimeoutMs = 10;
+  static constexpr int kMinResponseTimeoutMs = 2;
+  static constexpr int kMaxResponseTimeoutMs = 50;
+
+  /// 応答タイムアウトを [kMinResponseTimeoutMs, kMaxResponseTimeoutMs] に丸める（純関数）。
+  static int clampResponseTimeoutMs(int timeout_ms);
+
   explicit DdtMotorLib(const std::string& serial_port = "/dev/ttyACM0", int baud_rate = 115200);
   virtual ~DdtMotorLib();
 
@@ -141,12 +151,26 @@ public:
 
   /**
    * @brief 指令送信後の追加待機時間 [ms] を設定（velocity / current 送信経路共通）。
-   *  - 既定 0（待機なし）。応答待ち（最大10ms）が自然なコマンド間隔になるため通常は不要。
+   *  - 既定 0（待機なし）。応答待ち（最大 response_timeout_ms、既定 10ms）が自然なコマンド
+   *    間隔になるため通常は不要。
    *  - DDT M0602C の最小コマンド間隔が実機検証で必要と判明した場合のみ >0 を設定する。
    *  - 注意: 待機は state_mutex_ 保持中に行われるため、>0 にするとその分呼び出し元を
    *    ブロックする（50Hz 指令なら 20ms 未満に収めること）。
    */
   void setCommandWaitMs(int wait_ms);
+
+  /**
+   * @brief 指令送信後にフィードバック応答を待つ上限 [ms] を設定する（全モータ共通）。
+   *  - 既定 kDefaultResponseTimeoutMs（10 ms、従来の固定値）。
+   *  - [kMinResponseTimeoutMs, kMaxResponseTimeoutMs] にクランプし、適用値を INFO で出す。
+   *  - 応答が来れば待ちはその時点で終わる。この値が効くのは応答が来ない（遅い）ときだけで、
+   *    その場合の 1 モータあたりの最悪待ち時間になる（2 モータ直列で 2 倍が tick に乗る）。
+   *  - 下限の目安: 応答フレームの伝送 1.74 ms（10 byte @57600 baud）+ ファーム処理の実測値 +
+   *    余裕。実測は deactivate 時の INFO「シリアル往復レイテンシ統計」（max / ema）で確認する。
+   * @return 適用した値 [ms]
+   */
+  int setResponseTimeoutMs(int timeout_ms);
+  int getResponseTimeoutMs() const;
 
   /**
    * @brief 停止状態が継続している間の、ブレーキ指令の再送間隔 [ms] を設定（velocity モードのみ）。
@@ -249,7 +273,7 @@ public:
    * @brief 鮮度ゲート付きフィードバックポーリング（アイドル中専用）。
    *  保持フィードバックが max_age_sec より新しければ何もしない。古ければ、最後に
    *  **送信に成功した**フレームが停止フレーム（指令値 0、速度・電流モードとも）のときに
-   *  限り、それをそのまま再送して既存の 10ms タイムアウト内で新しいフィードバック応答を
+   *  限り、それをそのまま再送して応答タイムアウト（既定 10ms）内で新しいフィードバック応答を
    *  引き出す（ブレーキバイト等の状態も保持）。新規プロトコルコマンドは発行せず、固定
    *  スリープもしない（呼び出しは 1 回の sendFrameWithFeedback で上限付き）。
    *
@@ -258,7 +282,7 @@ public:
    *  （実測が stale になる方を選ぶ）。判定は ddt_protocol::decideIdleRefresh。
    *  停止フレームの再送は stopMotor と同じ stop_resend_interval_ms スロットルに従う
    *  （残留回転中のブレーキ連打防止）。スロットル中も再送せず false を返す。
-   *  アイドル時のみ 1 モータあたり最悪 ~10ms のシリアル待ちが加わる（呼び出し元が
+   *  アイドル時のみ 1 モータあたり最悪 応答タイムアウトぶんのシリアル待ちが加わる（呼び出し元が
    *  単一スレッドエグゼキュータの制御 tick から呼ぶ前提）。
    * @return 呼び出し後にフィードバックが新鮮なら true。
    */
@@ -305,6 +329,7 @@ private:
   bool brake_on_stop_;  // 停止時に電気ブレーキを使う（velocity モードのみ）
   int accel_time_0p1ms_per_rpm_;  // ファーム加速時間 DATA[6] [0.1ms/rpm]（velocity モードのみ）
   int command_wait_ms_;  // 指令送信後の追加待機 [ms]。0で無効（実機の間隔要件用の保険）
+  int response_timeout_ms_;  // 指令送信後のフィードバック応答待ちの上限 [ms]
   double measured_lpf_tau_sec_;  // 実測RPMローパスの時定数 [s]。<=0で無効（生値）
   int stop_resend_interval_ms_;  // 停止継続中のブレーキ再送間隔 [ms]。0で無効（毎回送信）
 

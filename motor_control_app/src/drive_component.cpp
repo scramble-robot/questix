@@ -230,6 +230,7 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
   RCLCPP_INFO(this->get_logger(), "  base_frame_id: %s", base_frame_id_.c_str());
   RCLCPP_INFO(this->get_logger(), "  cmd_timeout_sec: %.2f", cmd_timeout_sec_);
   RCLCPP_INFO(this->get_logger(), "  control_rate: %.1f", control_rate_);
+  RCLCPP_INFO(this->get_logger(), "  serial_response_timeout_ms: %d", serial_response_timeout_ms_);
   RCLCPP_INFO(this->get_logger(), "  control_mode: %s", control_mode_.c_str());
   if (control_mode_ == "current") {
     RCLCPP_INFO(
@@ -481,12 +482,17 @@ void DriveComponent::declareParameters() {
 
   // 制御 tick の周期 [Hz]。スルーレート制限の dt = 1/control_rate（固定）になり、
   // 加速度プロファイルが上流の publish レート（DualShock 20Hz / UART 50Hz）に依存しない。
-  // 指令+フィードバックのシリアル往復（2モータで正常 ≈ 7ms、最悪 ≈ 20ms）がこの周期予算に
+  // 指令+フィードバックのシリアル往復（2モータで正常 ≈ 7ms、応答なしは最悪
+  // 2 × serial_response_timeout_ms、既定で ≈ 20ms）がこの周期予算に
   // 収まる必要がある（超過は "Control tick overrun" 警告が出る）。
   this->declare_parameter("control_rate", 50.0);
 
   // 指令送信後の追加待機 [ms]。0で無効。実機の最小コマンド間隔要件用の保険
   this->declare_parameter("command_wait_ms", 0);
+
+  // 指令送信後にフィードバック応答を待つ上限 [ms]。既定 10 は従来の固定値。範囲 [2, 50] の外は
+  // クランプして WARN。詳細は DdtMotorLib::setResponseTimeoutMs。
+  this->declare_parameter("serial_response_timeout_ms", 10);
 
   // 停止継続中のブレーキ再送間隔 [ms]。高頻度でブレーキを再送し続けると、残留回転が
   // ある間は毎回新規の制動として作用し、収束せず持続的な振動を起こすことがある。
@@ -569,6 +575,20 @@ void DriveComponent::readParameters() {
   cmd_timeout_sec_ = this->get_parameter("cmd_timeout_sec").as_double();
   control_rate_ = this->get_parameter("control_rate").as_double();
   command_wait_ms_ = static_cast<int>(this->get_parameter("command_wait_ms").as_int());
+  {
+    const int64_t raw = this->get_parameter("serial_response_timeout_ms").as_int();
+    const int64_t clamped =
+        std::clamp<int64_t>(raw, motor_control_lib::DdtMotorLib::kMinResponseTimeoutMs,
+                            motor_control_lib::DdtMotorLib::kMaxResponseTimeoutMs);
+    if (clamped != raw) {
+      RCLCPP_WARN(this->get_logger(),
+                  "serial_response_timeout_ms=%ld is outside [%d, %d]; using %ld ms",
+                  static_cast<long>(raw), motor_control_lib::DdtMotorLib::kMinResponseTimeoutMs,
+                  motor_control_lib::DdtMotorLib::kMaxResponseTimeoutMs,
+                  static_cast<long>(clamped));
+    }
+    serial_response_timeout_ms_ = static_cast<int>(clamped);
+  }
   stop_resend_interval_ms_ =
       static_cast<int>(this->get_parameter("stop_resend_interval_ms").as_int());
   measured_lpf_tau_sec_ = this->get_parameter("measured_lpf_tau_sec").as_double();
@@ -602,6 +622,9 @@ bool DriveComponent::initializeMotorLib() {
 
     // 指令送信後の追加待機（既定 0 = 無効）
     motor_lib_->setCommandWaitMs(command_wait_ms_);
+
+    // フィードバック応答待ちの上限（既定 10 ms = 従来の固定値）
+    motor_lib_->setResponseTimeoutMs(serial_response_timeout_ms_);
 
     // 停止継続中のブレーキ再送間隔（停止直後の持続振動の緩和用）
     motor_lib_->setStopResendIntervalMs(stop_resend_interval_ms_);
@@ -719,6 +742,7 @@ rcl_interfaces::msg::SetParametersResult DriveComponent::onParameterChange(
       "max_motor_rpm",
       "control_mode",
       "control_rate",
+      "serial_response_timeout_ms",
       "status_publish_rate",
       "wheel_radius",
       "wheel_separation",
@@ -1225,7 +1249,7 @@ void DriveComponent::runControlTick() {
                out.right_ref_rpm, motor_control_lib::drive_mode_fsm::toString(out.mode),
                out.lqr_active ? "on" : "off");
 
-  // tick 所要時間の監視。シリアル応答待ち（最悪 10ms × 2）が周期予算を超えると
+  // tick 所要時間の監視。シリアル応答待ち（最悪 serial_response_timeout_ms × 2）が周期予算を超えると
   // 制御周期が崩れるため、超過を可視化する（実機での control_rate 選定の材料）。
   const double tick_ms =
       std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tick_start)

@@ -367,6 +367,10 @@ private:
   // 指令送信後の追加待機 [ms]。0で無効（DDT M0602C の間隔要件用の保険）
   int command_wait_ms_{0};
 
+  // 指令送信後にフィードバック応答を待つ上限 [ms]（DdtMotorLib::setResponseTimeoutMs、
+  // [2, 50] にクランプ）。既定 10 は従来の固定値。実行時変更不可
+  int serial_response_timeout_ms_{10};
+
   // 停止継続中のブレーキ再送間隔 [ms]。0で無効（毎回送信、従来挙動）
   int stop_resend_interval_ms_{300};
 
