@@ -1148,6 +1148,25 @@ function controllerUrlForPhones() {
 
 function suggestWebJoyUrl() {
   WebJoyConnection.suggest(controllerUrlForPhones());
+  mirrorJoinQr();
+}
+
+// 操作 tab: the same join QR codes as the 教材 tab (① Wi-Fi, ② QUESTiX LAB, ③ the browser
+// controller), side by side, copied from what renderJoinQr drew. ③ stays visible: when the robot
+// does not use the browser controller it says how to switch to it instead of a QR code.
+function mirrorJoinQr() {
+  for (const part of ["wifi", "url", "controller"]) {
+    const source = document.getElementById(`lab-${part}-qr`);
+    const target = document.getElementById(`joy-${part}-qr`);
+    target.replaceChildren(...Array.from(source.childNodes || [], (node) => node.cloneNode(true)));
+    document.getElementById(`joy-${part}-caption`).textContent =
+      document.getElementById(`lab-${part}-caption`).textContent;
+  }
+  if (document.getElementById("lab-controller-figure").hidden) {
+    document.getElementById("joy-controller-qr").replaceChildren();
+    document.getElementById("joy-controller-caption").textContent =
+      "③ コントローラー: 次回の起動で使うコントローラーが Web（ブラウザ・スマホ）のときに表示します（管理設定の「コントローラー」）。";
+  }
 }
 
 // 操作 tab: whether the browser controller is the one the robot uses.
@@ -1155,11 +1174,12 @@ function renderWebJoyType() {
   const type = latestStatus?.launch_config?.CONTROLLER_TYPE;
   const web = type === 'web';
   document.getElementById('web-joy-type').textContent = web
-    ? '次回の起動で使うコントローラーは Web（ブラウザ・スマホ）です。ロボット制御の起動中は、下の URL か「教材」タブの ③ の QR で開けます。'
+    ? '次回の起動で使うコントローラーは Web（ブラウザ・スマホ）です。ロボット制御の起動中は、下の ③ の QR か URL で開けます。'
     : `次回の起動で使うコントローラーは ${type ? ControlLabels.controllerName(type) : '未確認'} です。ブラウザ・スマホで操作するには、管理設定の「コントローラー」を Web にして保存し、ロボット制御を起動・再起動してください。`;
   document.getElementById('web-joy-type').classList.toggle('check-warning', !web);
   document.getElementById('web-joy-admin').hidden = web;
   renderJoinQr();
+  mirrorJoinQr();
 }
 
 function renderJoinQr() {
