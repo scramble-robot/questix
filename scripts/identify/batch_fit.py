@@ -192,6 +192,8 @@ def main():
         rows.append(row)
         print(f"{name:40s} tau={row['tau_ms']:6.1f} ms delay={row['delay_ticks']} "
               f"R2(L/R)={row['r2_left']:.3f}/{row['r2_right']:.3f} run_enter={row['run_enter']}")
+        for w in res.get("warnings", []):
+            print(f"  warning: {w}")
 
     if not rows:
         return 1
@@ -214,6 +216,9 @@ def main():
         md.append(f"| {r['name']} | {r['robot_id']} | {r['floor']} | {r['payload_kg']} | {r['battery_voltage']} | "
                   f"{r['tau_ms']:.0f} | {r['delay_ticks']} | {r['r2_left']:.2f}/{r['r2_right']:.2f} | "
                   f"{r['run_enter'] if r['run_enter'] is not None else '-'} |")
+    warned = [(name, w) for name, _, res in results for w in res.get("warnings", [])]
+    if warned:
+        md += ["", "## 警告", ""] + [f"- {name}: {w}" for name, w in warned]
     taus = [r["tau_ms"] for r in rows if np.isfinite(r["tau_ms"])]
     enters = [r["run_enter"] for r in rows if r["run_enter"] is not None]
     md += ["", "## 全体の目安（YAML 転記候補）", "",

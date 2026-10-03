@@ -99,14 +99,18 @@ def free_run_r2(omega, u, a, b, c, d):
         return float("-inf")
     sim = np.empty(n - d)
     sim[0] = omega[d]
-    for i in range(n - d - 1):
-        sim[i + 1] = a * sim[i] + b * u[i] + c  # sim[i] = ω_{d+i}、入力は u_{(d+i)-d}
     y = omega[d + 1:]
-    pred = sim[1:]
-    if not np.all(np.isfinite(pred)):
+    with np.errstate(over="ignore", invalid="ignore"):  # 不安定な候補（|a| >= 1）は発散する
+        for i in range(n - d - 1):
+            sim[i + 1] = a * sim[i] + b * u[i] + c  # sim[i] = ω_{d+i}、入力は u_{(d+i)-d}
+        pred = sim[1:]
+        if not np.all(np.isfinite(pred)):
+            return float("-inf")
+        ss_res = float(np.sum((y - pred) ** 2))
+    if not math.isfinite(ss_res):
         return float("-inf")
     ss_tot = float(np.sum((y - y.mean()) ** 2)) or 1e-12
-    return 1.0 - float(np.sum((y - pred) ** 2)) / ss_tot
+    return 1.0 - ss_res / ss_tot
 
 
 def fit_first_order(omega, u, dt, max_delay=4, unity_gain=True):
@@ -159,14 +163,32 @@ def segments_by_level(target, min_len):
     return segs
 
 
+def ramp_start(target, s):
+    """レベル区間 s の直前にある指令のランプ（加速度上限による坂）の始まりを返す。
+
+    直前 3 サンプルが同じ値（= 前の一定区間）になるところまで遡る。ランプが無ければ s。
+    """
+    k = s
+    while k >= 3 and not (target[k - 1] == target[k - 2] == target[k - 3]):
+        k -= 1
+    return k
+
+
 def fit_per_level(omega, u, dt, max_delay, unity_gain, min_len):
+    """レベルごとに当てはめる。窓は「ランプの始まりの少し前 .. レベル区間の終わり」。
+
+    /drive_status の target_rpm はスルーレート後の指令なので、加速度上限が小さいとステップが
+    ランプになり、一定区間だけでは過渡がほぼ入らない（定常のノイズだけを見て R² が下がる）。
+    ランプ全体を窓に含めて過渡を捉える。各 fit に ramp_sec（ランプの長さ [s]）を付ける。
+    """
     res = {}
     for s, e, lv in segments_by_level(u, min_len):
         if lv == 0.0:
             continue
-        # ステップ直前の数サンプルを含めて過渡を捉える
-        s0 = max(0, s - max_delay - 2)
+        r0 = ramp_start(u, s)
+        s0 = max(0, r0 - max_delay - 2)
         fit = fit_first_order(omega[s0:e], u[s0:e], dt, max_delay, unity_gain)
+        fit["ramp_sec"] = (s - r0) * dt
         key = abs(lv)
         res.setdefault(key, []).append(fit)
     return res
@@ -207,6 +229,7 @@ def analyze(data, mode="velocity", dt=None, max_delay=4, min_segment=25, r2_thre
                 delay=int(round(np.mean([f["delay"] for f in fits]))),
                 r2=float(np.mean([f["r2"] for f in fits])),
                 r2_onestep=float(np.mean([f["r2_onestep"] for f in fits])),
+                ramp_sec=float(np.mean([f["ramp_sec"] for f in fits])),
                 n=len(fits),
             )
         sides[side] = dict(overall=overall, per_level=levels)
@@ -216,10 +239,20 @@ def analyze(data, mode="velocity", dt=None, max_delay=4, min_segment=25, r2_thre
         return min(ok) if ok else None
 
     goods = [x for x in (min_good_level("left"), min_good_level("right")) if x is not None]
+    warnings = []
+    tau_ref = float(np.nanmean([sides[s]["overall"]["tau"] for s in ("left", "right")]))
+    ramps = [v["ramp_sec"] for s in ("left", "right") for v in sides[s]["per_level"].values()]
+    # 推奨設定（max_linear_accel 20.0）では 400 rpm のランプが約 0.2 s。既定の 3.0 だと約 1.4 s。
+    ramp_limit = max(0.5, 5.0 * tau_ref) if np.isfinite(tau_ref) else 0.5
+    if ramps and max(ramps) > ramp_limit:
+        warnings.append(
+            f"指令がステップではなくランプになっています（最長 {max(ramps):.2f} s）。"
+            "加速度上限（Robot Manager「調整」の max_linear_accel）が小さいまま記録した可能性が"
+            "あります。同定用には 20.0 に上げて取り直すと τ・むだ時間の精度が上がります")
     run_enter = int(max(goods)) if len(goods) == 2 else None
     tau_avg = float(np.nanmean([sides[s]["overall"]["tau"] for s in ("left", "right")]))
     delay_avg = int(round(np.mean([sides[s]["overall"]["delay"] for s in ("left", "right")])))
-    return dict(dt=dt, mode=mode, sides=sides, n_samples=len(t),
+    return dict(dt=dt, mode=mode, sides=sides, n_samples=len(t), warnings=warnings,
                 suggested=dict(velocity_run_model_tau_sec=tau_avg,
                                velocity_run_model_delay_ticks=delay_avg,
                                drive_fsm_run_enter_rpm=run_enter))
@@ -233,13 +266,16 @@ def print_report(res):
         print(f"\n[{side}] overall: a={o['a']:.4f} b={o['b']:.4f} c={o['c']:+.3f} "
               f"delay={o['delay']} tick tau={o['tau']*1000:.1f} ms R2={o['r2']:.3f} "
               f"(1 tick 先予測 {o['r2_onestep']:.3f})")
-        print(f"  {'level':>7} {'n':>3} {'tau[ms]':>8} {'delay':>5} {'R2':>6} {'R2_1step':>8}")
+        print(f"  {'level':>7} {'n':>3} {'tau[ms]':>8} {'delay':>5} {'R2':>6} {'R2_1step':>8} "
+              f"{'ramp[s]':>7}")
         for lv in sorted(res["sides"][side]["per_level"]):
             v = res["sides"][side]["per_level"][lv]
             print(f"  {lv:7.0f} {v['n']:3d} {v['tau']*1000:8.1f} {v['delay']:5d} {v['r2']:6.3f} "
-                  f"{v['r2_onestep']:8.3f}")
+                  f"{v['r2_onestep']:8.3f} {v['ramp_sec']:7.2f}")
     print("\nR2 = 自由応答（モデルを指令だけで走らせて実測と比較。判定に使う）、"
-          "R2_1step = 1 tick 先予測（参考。ほぼ常に 1 に近い）")
+          "R2_1step = 1 tick 先予測（参考。ほぼ常に 1 に近い）、ramp = 指令がレベルに達するまでの時間")
+    for w in res.get("warnings", []):
+        print(f"warning: {w}")
 
 
 def to_yaml_lines(res):

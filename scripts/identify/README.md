@@ -140,6 +140,9 @@ bash -n scripts/identify/record.sh scripts/identify/lib_evidence.sh
    - R² は**自由応答**で測る（求めたモデルを実測の初期値と指令だけで走らせ、実測と比べる）。
      `R2_1step`（1 tick 先予測の R²）は参考値。50 Hz では「次の値 ≒ 今の値」だけで 1 に近づき、
      一次遅れで表せない振動でも 0.97 以上になるため、判定には使わない。
+   - レベル別の窓は「指令のランプ（加速度上限による坂）の始まり .. レベルの終わり」。一定区間だけ
+     だと過渡が入らず、定常のノイズだけで R² が決まってしまう。`ramp[s]` 列がランプの長さで、
+     0.5 s（または 5τ）を超えると「加速度上限が小さいまま記録した」旨の warning を出す。
    - `suggested`: YAML に転記する値（`velocity_run_model_tau_sec`, `velocity_run_model_delay_ticks`,
      `drive_fsm_run_enter_rpm`）。`drive_fsm_run_exit_rpm` は enter より 5〜10 RPM 低く。
 5. 結果の YAML と rosbag 名を `design/identification/` に残し、`launcher/config/drive_component.yaml`
