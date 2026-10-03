@@ -137,6 +137,9 @@ bash -n scripts/identify/record.sh scripts/identify/lib_evidence.sh
    - `overall`: 全区間の一次遅れ当てはめ（τ, むだ時間, R²）
    - `per_level`: |目標 RPM| ごとの R²。**R² ≥ 0.9 の最小レベルが `drive_fsm_run_enter_rpm` の目安**。
      低レベルで R² が低い（振動が一次で表せない）なら、その領域は CREEP に残す。
+   - R² は**自由応答**で測る（求めたモデルを実測の初期値と指令だけで走らせ、実測と比べる）。
+     `R2_1step`（1 tick 先予測の R²）は参考値。50 Hz では「次の値 ≒ 今の値」だけで 1 に近づき、
+     一次遅れで表せない振動でも 0.97 以上になるため、判定には使わない。
    - `suggested`: YAML に転記する値（`velocity_run_model_tau_sec`, `velocity_run_model_delay_ticks`,
      `drive_fsm_run_enter_rpm`）。`drive_fsm_run_exit_rpm` は enter より 5〜10 RPM 低く。
 5. 結果の YAML と rosbag 名を `design/identification/` に残し、`launcher/config/drive_component.yaml`

@@ -88,7 +88,25 @@ def main():
             f.write('step_sequence: "completed"\n')
         names = [e[0] for e in discover([os.path.join(d, f"ds{i}.csv") for i in range(3)])]
         assert names == ["ds1", "ds2"], names  # ds2 は旧形式（キー無し）なので対象
+    check_free_run_rejects_oscillation()
     print("OK")
+
+
+def check_free_run_rejects_oscillation():
+    """一次遅れで表せない低速振動は、1 tick 先予測では R² が高くても自由応答で不合格になる。"""
+    dt = 0.02
+    t = np.arange(0, 4, dt)
+    u = np.full_like(t, 95.0)
+    u[:10] = 0.0
+    x = np.zeros_like(t)
+    for k in range(1, len(t)):
+        x[k] = x[k - 1] + dt / (0.08 + dt) * (u[k - 1] - x[k - 1])
+    # 実機ログ相当: 目標 95 rpm 一定で実測が 59〜118 rpm を 1.8 Hz で往復
+    om = np.round(x + np.where(t > 0.3, 25.0 * np.sin(2.0 * math.pi * 1.8 * t), 0.0))
+    fit = fit_first_order(om, u, dt)
+    print("oscillation fit:", fit)
+    assert fit["r2_onestep"] > 0.9, fit  # 旧指標は素通りしてしまう
+    assert fit["r2"] < 0.9, fit          # 自由応答では当てはまらないと判定する
 
 
 if __name__ == "__main__":

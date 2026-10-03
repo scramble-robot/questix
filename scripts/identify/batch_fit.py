@@ -140,8 +140,8 @@ def make_figure(results, out_png, r2_threshold):
     axs[0].set_xlabel("|目標 RPM|"); axs[0].set_ylabel("τ [ms]"); axs[0].grid(alpha=0.3)
     axs[0].set_title("レベル別 時定数 τ（実線: 左, 破線: 右）")
     axs[1].axhline(r2_threshold, color="gray", ls=":", label=f"R² 基準 {r2_threshold}")
-    axs[1].set_xlabel("|目標 RPM|"); axs[1].set_ylabel("R²"); axs[1].set_ylim(0, 1.02); axs[1].grid(alpha=0.3)
-    axs[1].set_title("レベル別 一次遅れの当てはまり R²")
+    axs[1].set_xlabel("|目標 RPM|"); axs[1].set_ylabel("R²（自由応答）"); axs[1].set_ylim(-0.5, 1.02); axs[1].grid(alpha=0.3)
+    axs[1].set_title("レベル別 一次遅れの当てはまり R²（自由応答。-0.5 未満は下端）")
     handles, labels = axs[0].get_legend_handles_labels()
     if handles:
         axs[0].legend(fontsize=7, loc="best")
@@ -206,7 +206,9 @@ def main():
             w.writerow({k: r[k] for k in fields})
 
     # Markdown
-    md = ["# 同定結果一覧", "", "| name | robot | floor | payload | V | τ [ms] | delay | R² L/R | run_enter |",
+    md = ["# 同定結果一覧", "", "R² は自由応答（モデルを指令だけで走らせて実測と比べる）。1 tick 先予測の R² は"
+          " ほぼ常に 1 に近く判定に使えないため載せない（fit_models.py の出力には参考値として出る）。", "",
+          "| name | robot | floor | payload | V | τ [ms] | delay | R² L/R | run_enter |",
           "|---|---|---|---|---|---|---|---|---|"]
     for r in rows:
         md.append(f"| {r['name']} | {r['robot_id']} | {r['floor']} | {r['payload_kg']} | {r['battery_voltage']} | "

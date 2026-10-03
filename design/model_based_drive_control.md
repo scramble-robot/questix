@@ -148,14 +148,14 @@ current モード制御則 = i_ff（FF） + 状態 FB（LQR ゲイン） + 外�
 **変更**
 - `scripts/identify/` に以下を追加（Python、ROS 2 依存は rosbag 読みのみ）
   - `step_sequence.py`: `/target_twist` に所定のステップ列を publish する（車輪を浮かせた状態で使用）。velocity モード: 左右同 rpm で 0→50→100→200→400→200→100→50→0、各 4 s 保持、正負。current モード: 既存 PI を経由せず電流を直接与える経路が必要なため、`single_ddt_motor` ノード or 新規 `--current-raw` オプションで電流ステップ ±0.3 / 0.6 / 1.0 A（`max_current_amp` の範囲内）。
-  - `fit_models.py`: rosbag（`/drive_status`: `left/right.current_amp, velocity_rpm_raw, target_rpm`、header.stamp）から、一次遅れ + むだ時間（velocity）/ $a, b_i, d$（current）を最小二乗で当てはめ、rpm 域ごとの当てはまり（R²、残差の周期性）を出力。結果を `identified_params.yaml` として書き出す。実測 RPM は LPF 前の `velocity_rpm_raw`（PR #144 で追加）を使う。`velocity_rpm` は `measured_lpf_tau_sec` のローパス後で、τ・むだ時間の同定を歪めるため使わない。
+  - `fit_models.py`: rosbag（`/drive_status`: `left/right.current_amp, velocity_rpm_raw, target_rpm`、header.stamp）から、一次遅れ + むだ時間（velocity）/ $a, b_i, d$（current）を最小二乗で当てはめ、rpm 域ごとの当てはまり（R²、残差の周期性）を出力。R² は自由応答（モデルを指令だけで走らせて実測と比較）で測る。1 tick 先予測の R² は 50 Hz では振動していても 1 に近くなり判定に使えない。結果を `identified_params.yaml` として書き出す。実測 RPM は LPF 前の `velocity_rpm_raw`（PR #144 で追加）を使う。`velocity_rpm` は `measured_lpf_tau_sec` のローパス後で、τ・むだ時間の同定を歪めるため使わない。
 - 収集手順書 `scripts/identify/README.md`（安全手順含む: ジャッキアップ、非常停止の確認、`max_current_amp` 維持、温度監視は Protocol 2 未実装のため手で触って確認、連続通電時間の上限）。
 
 **成果物**: rosbag 一式、`identified_params.yaml`、当てはまりレポート（rpm 域 × 一次/二次の可否）。
 
 **受け入れ基準**
 - current: 3 水準の電流ステップで $a, b_i$ がレベル間で ±20 % 以内に収まる。$b_i$ から逆算した $K_t$ が 0.44 Nm/A の ±30 % 以内（外れたら負荷・単位を疑う）。
-- velocity: RUN とみなす rpm 域で一次遅れ + むだ時間の R² ≥ 0.9。CREEP 境界（一次で当てはまらなくなる rpm）を数値で記録。
+- velocity: RUN とみなす rpm 域で一次遅れ + むだ時間の R²（自由応答）≥ 0.9。CREEP 境界（一次で当てはまらなくなる rpm）を数値で記録。
 - むだ時間 $d$ を tick 単位で特定（期待 1〜2）。
 
 **リスク**: 車輪浮かせ状態では負荷が実走行と違う（$d$ が小さい）。実走行での再同定は Phase D 後に行い、オブザーバが差を吸収できるかを見る。
