@@ -149,6 +149,25 @@ ros2 param dump /drive_component
 シリアル往復レイテンシの統計は deactivate 時に INFO ログへ出力される
 （`DdtMotorLib::getSerialLatencyStats`、制御周期引き上げ検討の実測材料）。
 
+## ビルド時間
+
+各ターゲットは 1 ファイル構成で、時間の大半は rclcpp / rclcpp_lifecycle ヘッダーの解析です。
+`CMakeLists.txt` はこれをプリコンパイル済みヘッダー（共有ライブラリ用と実行ファイル用の 2 つ）
+で 1 回だけ解析し、全ターゲットで再利用します（`-DMOTOR_CONTROL_APP_USE_PCH=OFF` で無効化）。
+ビルドログに `-Winvalid-pch` の警告が出たら再利用が効いていません（結果は同じで、速度だけ落ちる）。
+
+手元で速くするには:
+
+```bash
+# 開発中はテストをビルドしない（gtest 14 本 + gtest 本体を省く）
+colcon build --packages-select motor_control_app --cmake-args -DBUILD_TESTING=OFF
+# ccache で 2 回目以降を速くする（PCH と併用するための設定込み）
+export CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime
+colcon build --cmake-args -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+# Raspberry Pi 5: rclcpp を含む 1 ファイルで 1〜1.5 GB 使うため、並列数を絞ってスワップを避ける
+MAKEFLAGS=-j2 colcon build --parallel-workers 1 --packages-select motor_control_app
+```
+
 ## テスト
 
 ```bash
