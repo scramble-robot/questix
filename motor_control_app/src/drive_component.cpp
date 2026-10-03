@@ -26,12 +26,17 @@ namespace motor_control_app {
 
 namespace {
 // 未武装（駆動指令を送っていない）間にフィードバック快照の鮮度を維持するポーリング周期の
-// 目安 [s]。この鮮度以内なら再取得しない（≈5Hz）。odometry::kMaxFeedbackAgeSec（stale 判定）
-// より十分小さくすること。
+// 目安 [s]。この鮮度以内なら再取得しない。再取得は停止フレームの再送なので
+// stop_resend_interval_ms のスロットルにも従い、実際の周期は長い方になる（既定 300 ms で
+// ≈3 Hz、最大 age ≈0.32 s）。odometry::kMaxFeedbackAgeSec（stale 判定）より十分小さくすること。
 constexpr double kIdleFeedbackMaxAgeSec = 0.2;
 
 // 停止指令を送れなかったとき（stop fault）の再送間隔 [s]。
 constexpr double kStopRetryPeriodSec = 0.5;
+
+// velocity_run_model_delay_ticks・オブザーバ/LQR のゲインは tick 単位で、同定と既定値は
+// control_rate 50 Hz を前提にしている。
+constexpr double kLqrTickRateHz = 50.0;
 
 double secondsSince(std::chrono::steady_clock::time_point then,
                     std::chrono::steady_clock::time_point now) {
@@ -222,12 +227,15 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
   RCLCPP_INFO(this->get_logger(), "  max_motor_rpm: %d", max_motor_rpm_);
   RCLCPP_INFO(this->get_logger(), "  status_publish_rate: %.1f", status_publish_rate_);
   RCLCPP_INFO(this->get_logger(), "  typed_status_topic: %s", typed_status_topic_.c_str());
+  RCLCPP_INFO(this->get_logger(), "  publish_control_sample: %s  control_sample_topic: %s",
+              publish_control_sample_ ? "true" : "false", control_sample_topic_.c_str());
   RCLCPP_INFO(this->get_logger(), "  publish_tf: %s", publish_tf_ ? "true" : "false");
   RCLCPP_INFO(this->get_logger(), "  odom_topic: %s", odom_topic_.c_str());
   RCLCPP_INFO(this->get_logger(), "  odom_frame_id: %s", odom_frame_id_.c_str());
   RCLCPP_INFO(this->get_logger(), "  base_frame_id: %s", base_frame_id_.c_str());
   RCLCPP_INFO(this->get_logger(), "  cmd_timeout_sec: %.2f", cmd_timeout_sec_);
   RCLCPP_INFO(this->get_logger(), "  control_rate: %.1f", control_rate_);
+  RCLCPP_INFO(this->get_logger(), "  serial_response_timeout_ms: %d", serial_response_timeout_ms_);
   RCLCPP_INFO(this->get_logger(), "  control_mode: %s", control_mode_.c_str());
   if (control_mode_ == "current") {
     RCLCPP_INFO(
@@ -258,6 +266,10 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
                 "drive_fsm_run_exit_rpm が両方 0 のため LQR+FF は適用しません（FF のみ）。"
                 "同定で決めた RUN 閾値を設定してください");
   }
+  warnIfLqrTicksAssumeAnotherRate();
+  if (control_mode_ == "current") {
+    warnCurrentModeAssumptions();
+  }
   RCLCPP_INFO(this->get_logger(),
               "  velocity_run_lqr: %s  tau=%.3fs delay=%d ticks q=%.3f r=%.3f lead=%.2f dist=%.2f "
               "obs[l_x=%.2f l_d=%.3f] max_corr=%.1f rpm invert=%s fb_max_age=%.2fs",
@@ -278,6 +290,14 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
   // LifecyclePublisher のため on_activate まで publish は無効
   typed_status_publisher_ =
       this->create_publisher<questix_msgs::msg::DriveStatus>(typed_status_topic_, 1);
+
+  // 制御 tick ごとの診断サンプル。reliable + volatile + keep_last(100): rosbag の記録側が
+  // 一時的に遅れても（ディスク書込の詰まり等）2 秒ぶん（50 Hz）までは欠落させずに渡すため。
+  // 診断専用なので transient_local にはしない（late join に古い tick を渡さない）。
+  if (publish_control_sample_ && !control_sample_topic_.empty()) {
+    control_sample_publisher_ = this->create_publisher<questix_msgs::msg::DriveControlSample>(
+        control_sample_topic_, rclcpp::QoS(rclcpp::KeepLast(100)).reliable().durability_volatile());
+  }
 
   // オドメトリ publisher（LifecyclePublisher が ACTIVE ゲートを担う）と TF broadcaster。
   odom_publisher_ = this->create_publisher<nav_msgs::msg::Odometry>(odom_topic_, 10);
@@ -363,6 +383,7 @@ DriveComponent::CallbackReturn DriveComponent::on_cleanup(const rclcpp_lifecycle
   status_timer_.reset();
   twist_subscription_.reset();
   typed_status_publisher_.reset();
+  control_sample_publisher_.reset();
   resetOdometry();
   shutdownMotorLib();
   RCLCPP_INFO(this->get_logger(), "Drive component cleaned up");
@@ -377,6 +398,7 @@ DriveComponent::CallbackReturn DriveComponent::on_shutdown(const rclcpp_lifecycl
   status_timer_.reset();
   twist_subscription_.reset();
   typed_status_publisher_.reset();
+  control_sample_publisher_.reset();
   resetOdometry();
   shutdownMotorLib();
   RCLCPP_INFO(this->get_logger(), "Drive component shut down");
@@ -390,6 +412,7 @@ DriveComponent::CallbackReturn DriveComponent::on_error(const rclcpp_lifecycle::
   status_timer_.reset();
   twist_subscription_.reset();
   typed_status_publisher_.reset();
+  control_sample_publisher_.reset();
   resetOdometry();
   shutdownMotorLib();
   if (auto_start_ && auto_start_timer_) {
@@ -415,6 +438,10 @@ void DriveComponent::declareParameters() {
   this->declare_parameter("status_publish_rate", 50.0);
   // 型付きステータストピック（questix_msgs/DriveStatus）
   this->declare_parameter("typed_status_topic", "/drive_status");
+  // 制御 tick ごとの診断サンプル（questix_msgs/DriveControlSample、control_rate で publish）。
+  // 記録・解析専用で制御・安全判断には使わない。契約は questix_msgs/README.md。
+  this->declare_parameter("publish_control_sample", true);
+  this->declare_parameter("control_sample_topic", "/drive_control_sample");
 
   // 制御モード関連 (後方互換のため velocity 既定)
   this->declare_parameter("control_mode", std::string("velocity"));
@@ -464,12 +491,17 @@ void DriveComponent::declareParameters() {
 
   // 制御 tick の周期 [Hz]。スルーレート制限の dt = 1/control_rate（固定）になり、
   // 加速度プロファイルが上流の publish レート（DualShock 20Hz / UART 50Hz）に依存しない。
-  // 指令+フィードバックのシリアル往復（2モータで正常 ≈ 7ms、最悪 ≈ 20ms）がこの周期予算に
+  // 指令+フィードバックのシリアル往復（2モータで正常 ≈ 7ms、応答なしは最悪
+  // 2 × serial_response_timeout_ms、既定で ≈ 20ms）がこの周期予算に
   // 収まる必要がある（超過は "Control tick overrun" 警告が出る）。
   this->declare_parameter("control_rate", 50.0);
 
   // 指令送信後の追加待機 [ms]。0で無効。実機の最小コマンド間隔要件用の保険
   this->declare_parameter("command_wait_ms", 0);
+
+  // 指令送信後にフィードバック応答を待つ上限 [ms]。既定 10 は従来の固定値。範囲 [2, 50] の外は
+  // クランプして WARN。詳細は DdtMotorLib::setResponseTimeoutMs。
+  this->declare_parameter("serial_response_timeout_ms", 10);
 
   // 停止継続中のブレーキ再送間隔 [ms]。高頻度でブレーキを再送し続けると、残留回転が
   // ある間は毎回新規の制動として作用し、収束せず持続的な振動を起こすことがある。
@@ -515,6 +547,8 @@ void DriveComponent::readParameters() {
   max_motor_rpm_ = this->get_parameter("max_motor_rpm").as_int();
   status_publish_rate_ = this->get_parameter("status_publish_rate").as_double();
   typed_status_topic_ = this->get_parameter("typed_status_topic").as_string();
+  publish_control_sample_ = this->get_parameter("publish_control_sample").as_bool();
+  control_sample_topic_ = this->get_parameter("control_sample_topic").as_string();
   control_mode_ = this->get_parameter("control_mode").as_string();
   current_kp_ = this->get_parameter("current_kp").as_double();
   current_ki_ = this->get_parameter("current_ki").as_double();
@@ -550,6 +584,19 @@ void DriveComponent::readParameters() {
   cmd_timeout_sec_ = this->get_parameter("cmd_timeout_sec").as_double();
   control_rate_ = this->get_parameter("control_rate").as_double();
   command_wait_ms_ = static_cast<int>(this->get_parameter("command_wait_ms").as_int());
+  {
+    const int64_t raw = this->get_parameter("serial_response_timeout_ms").as_int();
+    const int64_t clamped =
+        std::clamp<int64_t>(raw, motor_control_lib::DdtMotorLib::kMinResponseTimeoutMs,
+                            motor_control_lib::DdtMotorLib::kMaxResponseTimeoutMs);
+    if (clamped != raw) {
+      RCLCPP_WARN(
+          this->get_logger(), "serial_response_timeout_ms=%ld is outside [%d, %d]; using %ld ms",
+          static_cast<long>(raw), motor_control_lib::DdtMotorLib::kMinResponseTimeoutMs,
+          motor_control_lib::DdtMotorLib::kMaxResponseTimeoutMs, static_cast<long>(clamped));
+    }
+    serial_response_timeout_ms_ = static_cast<int>(clamped);
+  }
   stop_resend_interval_ms_ =
       static_cast<int>(this->get_parameter("stop_resend_interval_ms").as_int());
   measured_lpf_tau_sec_ = this->get_parameter("measured_lpf_tau_sec").as_double();
@@ -583,6 +630,9 @@ bool DriveComponent::initializeMotorLib() {
 
     // 指令送信後の追加待機（既定 0 = 無効）
     motor_lib_->setCommandWaitMs(command_wait_ms_);
+
+    // フィードバック応答待ちの上限（既定 10 ms = 従来の固定値）
+    motor_lib_->setResponseTimeoutMs(serial_response_timeout_ms_);
 
     // 停止継続中のブレーキ再送間隔（停止直後の持続振動の緩和用）
     motor_lib_->setStopResendIntervalMs(stop_resend_interval_ms_);
@@ -652,6 +702,43 @@ void DriveComponent::shutdownMotorLib() {
   motor_initialized_ = false;
 }
 
+void DriveComponent::warnIfLqrTicksAssumeAnotherRate() {
+  const bool lqr_effective = velocity_run_lqr_enabled_ && control_mode_ == "velocity" &&
+                             !velocityRunLqrLacksRunThreshold();
+  if (!lqr_effective || std::abs(control_rate_ - kLqrTickRateHz) < 1e-9) {
+    return;
+  }
+  RCLCPP_WARN(this->get_logger(),
+              "velocity_run_lqr is enabled with control_rate=%.1f Hz, but its tick-based "
+              "parameters assume %.0f Hz: velocity_run_model_delay_ticks=%d is now %.1f ms "
+              "(%.1f ms at %.0f Hz), and the observer gains (l_x, l_d) and q/r act per tick. "
+              "Identify the drive again at this rate before relying on the correction",
+              control_rate_, kLqrTickRateHz, velocity_run_model_delay_ticks_,
+              1000.0 * velocity_run_model_delay_ticks_ / control_rate_,
+              1000.0 * velocity_run_model_delay_ticks_ / kLqrTickRateHz, kLqrTickRateHz);
+}
+
+void DriveComponent::warnCurrentModeAssumptions() {
+  // 既定値は変えない（走行挙動を変えない）。評価の前提を起動時に知らせるだけ。
+  if (current_ki_ <= 0.0) {
+    RCLCPP_WARN(this->get_logger(),
+                "current mode with a pure P speed loop (current_kp=%.4f A/rpm, current_ki=%.4f, "
+                "max_current_amp=%.2f A): friction leaves a large steady speed error, e.g. "
+                "%.2f A at 50 rpm of error. These defaults are a starting point for evaluation, "
+                "not a working drive tuning (motor_control_app/README.md)",
+                current_kp_, current_ki_, max_current_amp_, current_kp_ * 50.0);
+  }
+  RCLCPP_WARN(this->get_logger(),
+              "current mode: current_invert_measured=%s has no recorded check on this robot. "
+              "Confirm the sign with the wheels lifted before driving (README: current mode sign "
+              "check); a wrong sign is positive feedback",
+              current_invert_measured_ ? "true" : "false");
+  RCLCPP_WARN(this->get_logger(),
+              "current mode: what the DDT driver does when commands stop is not documented. If it "
+              "holds the last current, an unloaded (lifted) wheel accelerates without a speed "
+              "limit. Keep max_current_amp low and the emergency stop at hand");
+}
+
 bool DriveComponent::velocityRunLqrLacksRunThreshold() const {
   return velocity_run_lqr_enabled_ && control_mode_ == "velocity" &&
          drive_fsm_run_enter_rpm_ <= 0 && drive_fsm_run_exit_rpm_ <= 0;
@@ -700,10 +787,13 @@ rcl_interfaces::msg::SetParametersResult DriveComponent::onParameterChange(
       "max_motor_rpm",
       "control_mode",
       "control_rate",
+      "serial_response_timeout_ms",
       "status_publish_rate",
       "wheel_radius",
       "wheel_separation",
       "typed_status_topic",
+      "publish_control_sample",
+      "control_sample_topic",
       "odom_topic",
       "odom_frame_id",
       "base_frame_id",
@@ -976,6 +1066,9 @@ rcl_interfaces::msg::SetParametersResult DriveComponent::onParameterChange(
   if (control_core_dirty && control_core_) {
     control_core_->setConfig(makeControlCoreConfig());
   }
+  if (lqr_or_run_threshold_changed) {
+    warnIfLqrTicksAssumeAnotherRate();
+  }
   if (lqr_or_run_threshold_changed && velocityRunLqrLacksRunThreshold()) {
     RCLCPP_WARN(this->get_logger(),
                 "velocity_run_lqr_enabled=true ですが RUN 閾値が両方 0 のため LQR+FF は"
@@ -1036,6 +1129,52 @@ void DriveComponent::twistCallback(const geometry_msgs::msg::Twist::SharedPtr ms
 
 void DriveComponent::controlTimerCallback() {
   const auto tick_start = std::chrono::steady_clock::now();
+  const rclcpp::Time tick_stamp = this->now();
+
+  // この tick の診断サンプル。送受信の前のカウンタを取っておき、tick の後と比べる。
+  tick_sample_ = drive_control_sample::TickInput{};
+  if (motor_lib_ && control_sample_publisher_) {
+    motor_lib_->getMotorTransactionStats(left_motor_id_, tick_sample_.left.stats_before);
+    motor_lib_->getMotorTransactionStats(right_motor_id_, tick_sample_.right.stats_before);
+  }
+  in_control_tick_ = true;
+  runControlTick();
+  in_control_tick_ = false;
+  publishControlSample(tick_stamp, tick_start);
+}
+
+void DriveComponent::publishControlSample(const rclcpp::Time& tick_stamp,
+                                          std::chrono::steady_clock::time_point tick_start) {
+  if (!control_sample_publisher_) {
+    return;
+  }
+  auto& sample = tick_sample_;
+  sample.seq = control_sample_seq_++;
+  sample.tick_start = tick_stamp;
+  sample.control_period_sec = drive_control_tick::tickDtSec(control_rate_);
+  sample.current_mode = (control_mode_ == "current");
+  if (control_core_) {
+    sample.drive_mode = control_core_->mode();
+  }
+  if (sample.tick_action != questix_msgs::msg::DriveControlSample::TICK_DRIVE && control_core_) {
+    // 駆動しなかった tick の整形後指令は制御コアの保持値（停止・リセット後は 0）。
+    sample.shaped_linear = control_core_->lastLinear();
+    sample.shaped_angular = control_core_->lastAngular();
+  }
+  if (motor_lib_) {
+    motor_lib_->getMotorTransactionStats(left_motor_id_, sample.left.stats_after);
+    motor_lib_->getMotorTransactionStats(right_motor_id_, sample.right.stats_after);
+    motor_lib_->getMotorFeedbackData(left_motor_id_, sample.left.feedback);
+    motor_lib_->getMotorFeedbackData(right_motor_id_, sample.right.feedback);
+  }
+  sample.now = this->now();
+  sample.tick_duration_sec =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - tick_start).count();
+  control_sample_publisher_->publish(drive_control_sample::toDriveControlSampleMsg(sample));
+}
+
+void DriveComponent::runControlTick() {
+  const auto tick_start = std::chrono::steady_clock::now();
 
   // control_core_ は diff_drive_ と同じライフサイクル（initializeMotorLib で構築、
   // shutdownMotorLib で破棄）だが、kDrive 経路で参照するため準備判定に含める。
@@ -1048,7 +1187,10 @@ void DriveComponent::controlTimerCallback() {
     if (actuation_gate::shouldRetryStop(stop_fault_, secondsSince(last_stop_attempt_, now_steady),
                                         kStopRetryPeriodSec)) {
       last_stop_attempt_ = now_steady;
-      if (diff_drive_->stopNow()) {
+      const bool zero_sent = diff_drive_->stopNow();
+      tick_sample_.stop_frame = true;
+      tick_sample_.command_sent = zero_sent;
+      if (zero_sent) {
         stop_fault_ = false;
         RCLCPP_INFO(this->get_logger(),
                     "Stop fault cleared: zero sent to both wheels (still stopped until the next "
@@ -1068,10 +1210,12 @@ void DriveComponent::controlTimerCallback() {
   // isHealthy はキャッシュ済みフィードバックの fault コードを見るだけでシリアルには触らない
   const bool healthy = motor_ready && diff_drive_->isHealthy();
 
+  using SampleMsg = questix_msgs::msg::DriveControlSample;
   switch (drive_control_tick::decideTickAction(has_target_, motor_ready,
                                                block != actuation_gate::Block::kNone, healthy,
                                                elapsed, cmd_timeout_sec_)) {
     case drive_control_tick::TickAction::kIdle:
+      tick_sample_.tick_action = SampleMsg::TICK_IDLE;
       // 未武装（起動直後・タイムアウト/非常停止/フォールト停止後）またはゲートが閉じている。
       // 駆動指令は送らないが、フィードバックが古ければ低頻度で再取得する（外力で車輪が回された
       // 場合の観測と /drive_status の鮮度のため）。再取得が送るのは送信に成功したゼロだけで、
@@ -1084,6 +1228,7 @@ void DriveComponent::controlTimerCallback() {
       }
       return;
     case drive_control_tick::TickAction::kTimeoutStop:
+      tick_sample_.tick_action = SampleMsg::TICK_TIMEOUT_STOP;
       RCLCPP_WARN(this->get_logger(),
                   "Command timeout: no /target_twist for %.2fs (limit %.2fs), stopping motors",
                   elapsed, cmd_timeout_sec_);
@@ -1093,12 +1238,14 @@ void DriveComponent::controlTimerCallback() {
       safetyStop("command timeout");
       return;
     case drive_control_tick::TickAction::kFaultStop:
+      tick_sample_.tick_action = SampleMsg::TICK_FAULT_STOP;
       // モータ異常中は最後の指令を保持せず、明示的に停止指令を送って武装解除する。
       safetyStop("motor fault");
       RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
                            "Motor not healthy: sending stop command");
       return;
     case drive_control_tick::TickAction::kDrive:
+      tick_sample_.tick_action = SampleMsg::TICK_DRIVE;
       break;
   }
 
@@ -1128,6 +1275,15 @@ void DriveComponent::controlTimerCallback() {
   // 済ませているため、送信先は停止指令か生の車輪 RPM のどちらかになる。
   const bool sent =
       out.stop ? diff_drive_->commandStop() : diff_drive_->setWheelRpm(out.left_rpm, out.right_rpm);
+  tick_sample_.command_sent = sent;
+  tick_sample_.stop_frame = out.stop;
+  tick_sample_.lqr_active = out.lqr_active;
+  tick_sample_.shaped_linear = out.linear;
+  tick_sample_.shaped_angular = out.angular;
+  tick_sample_.left.ref_rpm = out.left_ref_rpm;
+  tick_sample_.right.ref_rpm = out.right_ref_rpm;
+  tick_sample_.left.command_rpm = out.stop ? 0 : out.left_rpm;
+  tick_sample_.right.command_rpm = out.stop ? 0 : out.right_rpm;
   if (!sent) {
     RCLCPP_ERROR_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
                           "Failed to set motor velocity");
@@ -1141,8 +1297,9 @@ void DriveComponent::controlTimerCallback() {
                out.right_ref_rpm, motor_control_lib::drive_mode_fsm::toString(out.mode),
                out.lqr_active ? "on" : "off");
 
-  // tick 所要時間の監視。シリアル応答待ち（最悪 10ms × 2）が周期予算を超えると
-  // 制御周期が崩れるため、超過を可視化する（実機での control_rate 選定の材料）。
+  // tick 所要時間の監視。シリアル応答待ち（最悪 serial_response_timeout_ms × 2）が
+  // 周期予算を超えると制御周期が崩れるため、超過を可視化する
+  // （実機での control_rate 選定の材料）。
   const double tick_ms =
       std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tick_start)
           .count();
@@ -1248,7 +1405,12 @@ bool DriveComponent::safetyStop(const char* reason) {
     return false;  // 送る相手がない（未通電・未構成）。駆動指令も出ていない
   }
   last_stop_attempt_ = std::chrono::steady_clock::now();
-  if (diff_drive_->stopNow()) {
+  const bool zero_sent = diff_drive_->stopNow();
+  if (in_control_tick_) {
+    tick_sample_.stop_frame = true;
+    tick_sample_.command_sent = zero_sent;
+  }
+  if (zero_sent) {
     return true;
   }
   if (!stop_fault_) {

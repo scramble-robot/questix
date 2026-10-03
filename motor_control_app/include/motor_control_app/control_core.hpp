@@ -100,7 +100,9 @@ struct Output {
   int right_ref_rpm{0};
   double linear{0.0};      // スルーレート適用後の車体前進速度指令 [m/s]
   double angular{0.0};     // スルーレート適用後の車体角速度指令 [rad/s]
-  bool lqr_active{false};  // この tick で RUN LQR 補正が実際に適用されたか
+  bool lqr_active{false};  // この tick で RUN LQR 補正をどちらかの輪に適用したか
+  bool left_lqr_active{false};  // 左輪に適用したか（輪ごとの適用範囲は wheelInRunRange()）
+  bool right_lqr_active{false};  // 右輪に適用したか
 };
 
 /**
@@ -109,7 +111,11 @@ struct Output {
  * 1 ステップの流れ:
  *   目標 twist -> スルーレート制限（テーパー付き）-> 運動学変換（左右車輪 RPM）
  *   -> 最近接整数へ丸め -> 走行状態機械（停止/低速/走行。ヒステリシス付き）
- *   -> [RUN かつ LQR 有効かつ FB あり] オブザーバ + LQR+FF で車輪 RPM を補正
+ *   -> [RUN かつ LQR 有効かつ FB あり] その輪が RUN 域にあればオブザーバ + LQR+FF で補正
+ *
+ * 走行状態（STOP/CREEP/RUN）は車体で 1 つ（左右の大きい方の |目標| で決める）だが、
+ * LQR+FF の適用は輪ごとに判定する（wheelInRunRange()）。旋回で片輪だけ遅い・0・逆向きの
+ * ときに、RUN 域にない輪へ補正を掛けないため。
  *
  * 既存の純粋関数（drive_slew / differential_kinematics / drive_mode_fsm / wheel_observer /
  * wheel_velocity_lqr）を合成した層で、ロジックの単一ソースはそれぞれの関数側にある。
@@ -179,14 +185,34 @@ public:
       if (feedback.valid) {
         ensureLqrGains(dt_sec);
         const double sign = config_.velocity_run.invert_measured ? -1.0 : 1.0;
-        out.left_rpm = runWheel(left_, out.left_ref_rpm, sign * feedback.left_rpm);
-        out.right_rpm = runWheel(right_, out.right_ref_rpm, sign * feedback.right_rpm);
-        out.lqr_active = lqr_gains_.has_value();
+        out.left_lqr_active =
+            applyWheel(left_, out.left_ref_rpm, sign * feedback.left_rpm, out.left_rpm);
+        out.right_lqr_active =
+            applyWheel(right_, out.right_ref_rpm, sign * feedback.right_rpm, out.right_rpm);
+        out.lqr_active = out.left_lqr_active || out.right_lqr_active;
       } else {
         resetWheelControllers();
       }
     }
     return out;
+  }
+
+  /**
+   * @brief 1 輪の目標 RPM がその輪に LQR+FF を掛けてよい範囲（RUN 域）にあるか。
+   *
+   * 定義: 目標が 0 でなく、|目標| >= 抜け閾値（run_exit_rpm。drive_mode_fsm と同じ正規化:
+   * 0 なら run_enter_rpm、enter より大きければ enter）。車体の RUN 判定は左右の大きい方で
+   * 行うため、RUN 中も遅い側の輪はこの範囲を下回り得る（その輪は FF のみ = 目標そのまま）。
+   * RUN 閾値が無効（0 / 0）なら常に false（LQR はそもそも適用されない）。
+   */
+  bool wheelInRunRange(int ref_rpm) const {
+    const auto fsm = fsmConfig();
+    if (ref_rpm == 0 || !motor_control_lib::drive_mode_fsm::runThresholdEnabled(fsm)) {
+      return false;
+    }
+    const int enter = fsm.run_enter_rpm > 0 ? fsm.run_enter_rpm : fsm.run_exit_rpm;
+    const int exit = std::min(fsm.run_exit_rpm > 0 ? fsm.run_exit_rpm : enter, enter);
+    return std::abs(ref_rpm) >= exit;
   }
 
   /**
@@ -270,6 +296,7 @@ private:
   struct WheelState {
     motor_control_lib::wheel_observer::State observer;
     motor_control_lib::wheel_velocity_lqr::State lqr;
+    int ref_sign{0};  // 補正中の目標の符号（+1 / -1）。0 = 補正していない（状態なし）
   };
 
   motor_control_lib::drive_mode_fsm::Config fsmConfig() const {
@@ -313,6 +340,25 @@ private:
     lqr_gains_dt_ = dt_sec;
   }
 
+  // 1 輪ぶんの適用判定。RUN 域にない輪（目標 0 を含む）は補正せず目標をそのまま返し、その輪の
+  // オブザーバ / LQR 状態を捨てる（次に RUN 域へ入ったら実測から初期化し直す）。目標の符号が
+  // 変わった（前後反転）ときも、逆向きの推定・外乱・入力履歴を持ち越さないよう捨て直す。
+  // @return この輪に補正を適用したか
+  bool applyWheel(WheelState& w, int ref_rpm, double measured_rpm, int& cmd_out) {
+    if (!wheelInRunRange(ref_rpm) || !lqr_gains_.has_value()) {
+      w = WheelState{};
+      cmd_out = ref_rpm;
+      return false;
+    }
+    const int ref_sign = ref_rpm > 0 ? 1 : -1;
+    if (w.ref_sign != ref_sign) {
+      w = WheelState{};
+      w.ref_sign = ref_sign;
+    }
+    cmd_out = runWheel(w, ref_rpm, measured_rpm);
+    return true;
+  }
+
   // 1 輪ぶんのオブザーバ + LQR+FF。ゲインが無い（収束失敗）なら FF のみ = 参照そのまま。
   int runWheel(WheelState& w, int ref_rpm, double measured_rpm) {
     if (!lqr_gains_.has_value()) {
@@ -334,6 +380,7 @@ private:
     int cmd = static_cast<int>(std::lround(u));
     // 補正で指令の符号が目標と逆にならないようにする（逆転指令は送らない。0 で止める）。
     // run_exit_rpm > max_correction_rpm なら通常は届かないが、設定に依存しない安全装置。
+    // 目標 0 の輪はここに来ない（applyWheel が補正せず 0 を返す）。
     if (ref_rpm > 0) {
       cmd = std::max(cmd, 0);
     } else if (ref_rpm < 0) {

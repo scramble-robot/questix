@@ -914,3 +914,252 @@ TEST(ControlCoreLqr, DisablingRunThresholdClearsControllerState) {
   EXPECT_EQ(control.leftDisturbanceHat(), 0.0);
   EXPECT_EQ(control.mode(), core::DriveMode::kRun);  // 走行状態は維持
 }
+
+// --- 輪ごとの LQR 適用範囲（L1 / L2）------------------------------------------------------
+//
+// 走行状態（STOP/CREEP/RUN）は左右の大きい方の |目標| で決まる。旋回では遅い側の輪が RUN 域の
+// 外（0 や逆向きを含む）にあり得るため、LQR+FF の適用は輪ごとに判定する
+// （ControlCore::wheelInRunRange: 目標 != 0 かつ |目標| >= run_exit_rpm）。範囲外の輪は FF のみ
+// （目標そのまま）で、その輪の状態を捨てる。
+
+namespace {
+
+// 目標 twist を保ったまま、左右に固定の実測（モータフレーム: 前進は左が正、右が負）を
+// 返し続けて ticks 回まわす。最後の出力を返す。
+core::Output holdWithFeedback(core::ControlCore& control, double linear, double angular,
+                              int left_measured, int right_measured, int ticks) {
+  core::WheelFeedback fb;
+  fb.valid = true;
+  fb.left_rpm = left_measured;
+  fb.right_rpm = right_measured;
+  core::Output out;
+  for (int k = 0; k < ticks; ++k) {
+    out = control.step(linear, angular, kControlDt, fb);
+  }
+  return out;
+}
+
+}  // namespace
+
+TEST(ControlCoreLqrPerWheel, ZeroReferenceWheelGetsNoCorrection) {
+  // 左輪を軸にした旋回: 左の目標は 0、右は約 191 rpm で車体は RUN。強い FB と大きな補正上限で、
+  // 左の実測が 0 からずれていても左には何も足さない（以前は ±max_correction_rpm が出得た）。
+  core::ControlCore control(lqrConfig(100.0, 1.0, 0.05, 20.0));
+  const double linear = 1.0;
+  const double angular = 2.0 * linear / yamlConfig().wheel_separation;  // 左輪の速度 = 0
+  const auto out = holdWithFeedback(control, linear, angular, -30, -150, 200);
+  ASSERT_EQ(out.mode, core::DriveMode::kRun);
+  ASSERT_EQ(out.left_ref_rpm, 0);
+  EXPECT_EQ(out.left_rpm, 0);
+  EXPECT_FALSE(out.left_lqr_active);
+  EXPECT_FALSE(control.leftOmegaHat().has_value());  // その輪の状態は持たない
+  EXPECT_TRUE(out.right_lqr_active);
+  EXPECT_TRUE(out.lqr_active);
+  EXPECT_NE(out.right_rpm, out.right_ref_rpm);  // 右には補正が掛かっている
+}
+
+TEST(ControlCoreLqrPerWheel, WheelBelowRunExitIsFeedforwardOnly) {
+  // 左の目標が run_exit_rpm(30) を下回る旋回（左 ≈ 10 rpm、右 ≈ 181 rpm）。
+  core::ControlCore control(lqrConfig(100.0, 1.0, 0.05, 20.0));
+  const double angular = (1.0 - 10.0 / 95.4929658551372) / 0.25;
+  const auto out = holdWithFeedback(control, 1.0, angular, 25, -150, 200);
+  ASSERT_EQ(out.mode, core::DriveMode::kRun);
+  ASSERT_GT(out.left_ref_rpm, 0);
+  ASSERT_LT(out.left_ref_rpm, 30);
+  EXPECT_EQ(out.left_rpm, out.left_ref_rpm);
+  EXPECT_FALSE(out.left_lqr_active);
+  EXPECT_FALSE(control.leftOmegaHat().has_value());
+  EXPECT_TRUE(out.right_lqr_active);
+}
+
+TEST(ControlCoreLqrPerWheel, DifferentSpeedsAreCorrectedIndependently) {
+  // 両輪とも RUN 域（左 ≈ 48 rpm、右 ≈ 143 rpm）。各輪は自分の実測でだけ補正される。
+  core::ControlCore control(lqrConfig(0.5, 0.0, 0.0, 20.0));
+  const auto out = holdWithFeedback(control, 1.0, 2.0, 48, -133, 300);
+  ASSERT_TRUE(out.left_lqr_active);
+  ASSERT_TRUE(out.right_lqr_active);
+  // 左は実測 ≈ 目標なので補正はほぼ 0、右は 10 rpm 遅い（右は前進が負）ので負の向きに増やす。
+  ASSERT_LT(out.right_ref_rpm, 0);
+  EXPECT_LE(std::abs(out.left_rpm - out.left_ref_rpm), 1);
+  EXPECT_LT(out.right_rpm, out.right_ref_rpm);
+}
+
+TEST(ControlCoreLqrPerWheel, ReversalStartsTheWheelStateAgain) {
+  // 加速度制限なしで前進 → 後退に一気に切り替える。|目標| は RUN 域のまま符号だけが変わるので、
+  // 前進で育った外乱推定を後退へ持ち越さないこと（符号が変わった tick で捨て直す）。
+  auto config = lqrConfig(0.5, 1.0, 0.05, 20.0);
+  config.max_linear_accel = 0.0;
+  config.max_angular_accel = 0.0;
+  core::ControlCore control(config);
+  holdWithFeedback(control, 1.0, 0.0, 85, -85, 300);  // 10 rpm 遅い前進で外乱推定が育つ
+  ASSERT_GT(std::abs(control.leftDisturbanceHat()), 1.0);
+  const auto out = holdWithFeedback(control, -1.0, 0.0, 85, -85, 1);
+  ASSERT_EQ(out.mode, core::DriveMode::kRun);
+  ASSERT_LT(out.left_ref_rpm, 0);
+  EXPECT_TRUE(out.left_lqr_active);
+  EXPECT_EQ(control.leftDisturbanceHat(), 0.0);  // 実測から初期化し直した直後
+  EXPECT_EQ(control.rightDisturbanceHat(), 0.0);
+  EXPECT_LE(out.left_rpm, 0);  // 逆転指令の安全装置は維持
+  EXPECT_GE(out.right_rpm, 0);
+}
+
+TEST(ControlCoreLqrPerWheel, LostFeedbackDropsBothWheelsAndRestartsFromTheMeasurement) {
+  core::ControlCore control(lqrConfig(0.5, 1.0, 0.05, 20.0));
+  holdWithFeedback(control, 1.0, 2.0, 40, -130, 200);
+  ASSERT_TRUE(control.leftOmegaHat().has_value());
+  // フィードバックが失効した tick: 両輪とも FF のみ・状態なし
+  const auto lost = control.step(1.0, 2.0, kControlDt, core::WheelFeedback{});
+  EXPECT_FALSE(lost.lqr_active);
+  EXPECT_EQ(lost.left_rpm, lost.left_ref_rpm);
+  EXPECT_EQ(lost.right_rpm, lost.right_ref_rpm);
+  EXPECT_FALSE(control.leftOmegaHat().has_value());
+  EXPECT_FALSE(control.rightOmegaHat().has_value());
+  // 戻ったら実測から初期化（外乱推定は 0 から）
+  holdWithFeedback(control, 1.0, 2.0, 44, -140, 1);
+  EXPECT_EQ(control.leftDisturbanceHat(), 0.0);
+  ASSERT_TRUE(control.leftOmegaHat().has_value());
+}
+
+// --- 共振モデル: ファーム速度ループを 2 次系で表す（V5 の根拠）----------------------------
+//
+// 実機ログの「目標一定でも約 1.8 Hz で往復する」揺れを、ファーム速度ループの閉ループが
+// 2 次の共振（固有周波数 ~1.8 Hz、減衰の悪い）を持つと仮定して表す。1 回転に 1 回の外乱
+// （回転周波数 = rpm / 60 で回転数に比例）を入れると、回転周波数が共振に近い回転数で揺れが
+// 最大になる。ここで固定するのは定性的な性質だけで、定数はすべて仮定値。車輪を浮かせた試験の
+// 同定（scripts/identify/ripple_analysis.py）で置き換えること。
+
+namespace {
+
+class ResonantFirmwarePlant {
+public:
+  struct Params {
+    double natural_hz{1.8};  // 仮定値: 固有周波数 [Hz]（実機ログの揺れの周波数）
+    double damping{0.15};    // 仮定値: 減衰比（減衰の悪いループ）
+    int delay_ticks{1};      // 仮定値: 指令が効き始めるまでのむだ時間 [tick]
+    double ripple_rpm{0.0};  // 1 回転に 1 回の外乱の大きさ（速度指令に換算した rpm）
+    int substeps{20};  // 1 tick の中の積分ステップ数
+  };
+
+  explicit ResonantFirmwarePlant(const Params& params) : params_(params) {}
+
+  // 1 tick 進め、整数に量子化した実測 RPM を返す（フィードバックは整数 rpm）。
+  int step(int commanded_rpm, double dt_sec) {
+    const double u = hist_[params_.delay_ticks];
+    for (int i = static_cast<int>(hist_.size()) - 1; i > 0; --i) hist_[i] = hist_[i - 1];
+    hist_[0] = static_cast<double>(commanded_rpm);
+    const double wn = 2.0 * M_PI * params_.natural_hz;
+    const double h = dt_sec / params_.substeps;
+    for (int k = 0; k < params_.substeps; ++k) {
+      const double ripple = params_.ripple_rpm * std::sin(2.0 * M_PI * revolutions_);
+      const double accel = wn * wn * (u + ripple - rpm_) - 2.0 * params_.damping * wn * rate_;
+      rate_ += accel * h;  // 半陰的オイラー（振動系で発散しにくい）
+      rpm_ += rate_ * h;
+      revolutions_ += rpm_ / 60.0 * h;
+    }
+    return static_cast<int>(std::lround(rpm_));
+  }
+
+  double rpm() const { return rpm_; }
+
+private:
+  Params params_;
+  double rpm_{0.0};
+  double rate_{0.0};  // [rpm/s]
+  double revolutions_{0.0};
+  std::array<double, 5> hist_{};
+};
+
+// 揺れの片振幅 [rpm]: settle 秒の後の measure 秒間の真の速度の (最大 - 最小) / 2。
+struct Swing {
+  double min{1e9};
+  double max{-1e9};
+  void add(double value) {
+    min = std::min(min, value);
+    max = std::max(max, value);
+  }
+  double amplitude() const { return 0.5 * (max - min); }
+};
+
+constexpr double kResonanceSettleSec = 8.0;
+constexpr double kResonanceMeasureSec = 8.0;
+constexpr double kRippleRpm = 3.0;
+
+// ホストは一定の指令を送るだけ（ControlCore を通さない）。
+double openLoopSwing(int commanded_rpm) {
+  ResonantFirmwarePlant::Params params;
+  params.ripple_rpm = kRippleRpm;
+  ResonantFirmwarePlant plant(params);
+  Swing swing;
+  const int settle = static_cast<int>(kResonanceSettleSec / kControlDt);
+  const int total = settle + static_cast<int>(kResonanceMeasureSec / kControlDt);
+  for (int k = 0; k < total; ++k) {
+    plant.step(commanded_rpm, kControlDt);
+    if (k >= settle) swing.add(plant.rpm());
+  }
+  return swing.amplitude();
+}
+
+// ControlCore（左輪）を通して直進させたときの左輪の揺れ。
+double closedLoopSwing(const core::Config& config, double wheel_rpm) {
+  ResonantFirmwarePlant::Params params;
+  params.ripple_rpm = kRippleRpm;
+  ResonantFirmwarePlant left(params);
+  ResonantFirmwarePlant right(params);
+  core::ControlCore control(config);
+  const double linear = wheel_rpm / 95.4929658551372;  // wheel_radius 0.1 m
+  core::WheelFeedback fb;
+  Swing swing;
+  const int settle = static_cast<int>(kResonanceSettleSec / kControlDt);
+  const int total = settle + static_cast<int>(kResonanceMeasureSec / kControlDt);
+  for (int k = 0; k < total; ++k) {
+    const auto out = control.step(linear, 0.0, kControlDt, fb);
+    fb.valid = true;
+    fb.left_rpm = left.step(out.stop ? 0 : out.left_rpm, kControlDt);
+    // 右輪はモータフレームで前進が負。プラントは前進を正で回すので符号を合わせる。
+    fb.right_rpm = -right.step(out.stop ? 0 : -out.right_rpm, kControlDt);
+    if (k >= settle) swing.add(left.rpm());
+  }
+  return swing.amplitude();
+}
+
+}  // namespace
+
+TEST(ControlCoreResonance, RotationRippleIsLargestWhereRotationMeetsTheResonance) {
+  // 1 回転に 1 回の外乱を 40〜200 rpm で掃引: 揺れが最大になるのは回転周波数が共振
+  // （1.8 Hz × 60 = 108 rpm、減衰ぶん少し下）に近い回転数。
+  int peak_rpm = 0;
+  double peak = 0.0;
+  for (int rpm = 40; rpm <= 200; rpm += 5) {
+    const double swing = openLoopSwing(rpm);
+    if (swing > peak) {
+      peak = swing;
+      peak_rpm = rpm;
+    }
+  }
+  EXPECT_GE(peak_rpm, 95);
+  EXPECT_LE(peak_rpm, 110);
+  // 共振で増幅される（遠い回転数の 2 倍より大きい）
+  EXPECT_GT(peak, 2.0 * openLoopSwing(40));
+  EXPECT_GT(peak, 2.0 * openLoopSwing(200));
+}
+
+TEST(ControlCoreResonance, FirstOrderLqrDoesNotDampTheResonance) {
+  // 既存の RUN 域 LQR+FF（一次遅れ + むだ時間モデル）を有効にしても、共振付近の揺れは減らない。
+  // 一次遅れモデルは 2 次の共振を表せず、オブザーバは揺れを外乱と見なすため。
+  // LQR は振動対策ではない（launcher/config/drive_component.yaml、README の V5）。
+  // このモデルでの値（仮定値の定数による。実機の値ではない）: LQR なし ≈ 10 rpm、
+  // 状態 FB のみ（q=0.5）≈ 12 rpm、外乱補償（disturbance_gain=1, l_d=0.05）≈ 84 rpm。
+  const double feedforward = closedLoopSwing(yamlConfig(), 105.0);
+  ASSERT_GT(feedforward, 1.0);  // 共振で揺れている
+
+  // 状態 FB だけでは揺れは減らない
+  const double feedback_only = closedLoopSwing(lqrConfig(0.5, 0.0, 0.0, 20.0), 105.0);
+  EXPECT_GT(feedback_only, 0.8 * feedforward)
+      << "FB only " << feedback_only << " rpm, off " << feedforward << " rpm";
+
+  // 外乱補償は共振を外乱と見なして打ち消そうとし、d̂ / (1 - a)（50 Hz・τ 0.1 s で約 5.5 倍）
+  // を返すため、補正上限（max_correction_rpm）まで振れて共振を励起する。
+  const double with_disturbance = closedLoopSwing(lqrConfig(0.5, 1.0, 0.05, 20.0), 105.0);
+  EXPECT_GT(with_disturbance, 2.0 * feedforward)
+      << "with disturbance " << with_disturbance << " rpm, off " << feedforward << " rpm";
+}

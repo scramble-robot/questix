@@ -35,6 +35,7 @@ DdtMotorLib::DdtMotorLib(const std::string& serial_port, int baud_rate)
       brake_on_stop_(true),
       accel_time_0p1ms_per_rpm_(50),
       command_wait_ms_(0),
+      response_timeout_ms_(kDefaultResponseTimeoutMs),
       measured_lpf_tau_sec_(0.0),
       stop_resend_interval_ms_(200),
       serial_fd_(-1) {
@@ -71,6 +72,7 @@ void DdtMotorLib::shutdown() {
     motor_modes_.clear();
     pi_states_.clear();
     last_sent_frames_.clear();
+    transaction_stats_.clear();
     initialized_ = false;
     RCLCPP_INFO(logger_, "DDTモータライブラリが終了されました");
   }
@@ -480,6 +482,23 @@ void DdtMotorLib::setCommandWaitMs(int wait_ms) {
   }
 }
 
+int DdtMotorLib::clampResponseTimeoutMs(int timeout_ms) {
+  return std::clamp(timeout_ms, kMinResponseTimeoutMs, kMaxResponseTimeoutMs);
+}
+
+int DdtMotorLib::setResponseTimeoutMs(int timeout_ms) {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+  response_timeout_ms_ = clampResponseTimeoutMs(timeout_ms);
+  RCLCPP_INFO(logger_, "フィードバック応答タイムアウト: %d ms%s", response_timeout_ms_,
+              response_timeout_ms_ != timeout_ms ? "（指定値を範囲に丸めました）" : "");
+  return response_timeout_ms_;
+}
+
+int DdtMotorLib::getResponseTimeoutMs() const {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+  return response_timeout_ms_;
+}
+
 void DdtMotorLib::setStopResendIntervalMs(int interval_ms) {
   std::lock_guard<std::recursive_mutex> lock(state_mutex_);
   stop_resend_interval_ms_ = std::max(0, interval_ms);
@@ -540,12 +559,14 @@ bool DdtMotorLib::sendMotorCurrentRaw(int motor_id, int16_t current_raw) {
   if (success) {
     // refreshMotorFeedback の再送用に、実行中フレームをそのまま保存。
     last_sent_frames_[motor_id] = data_fields;
+    transaction_stats_[motor_id].last_current_raw_sent = current_raw;
     RCLCPP_DEBUG(logger_, "モーター %d 電流指令: raw=%d", motor_id, static_cast<int>(current_raw));
   }
   return success;
 }
 
 bool DdtMotorLib::sendFrameWithFeedback(int motor_id, const std::vector<uint8_t>& frame) {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
   if (serial_fd_ < 0) {
     return false;
   }
@@ -555,7 +576,8 @@ bool DdtMotorLib::sendFrameWithFeedback(int motor_id, const std::vector<uint8_t>
   tcflush(serial_fd_, TCIFLUSH);
 
   // 書込は最大3回まで再試行する。書込成功後はフィードバックを1回だけ待つ。
-  // 固定スリープは行わない: 応答待ち（最大10ms）が自然なコマンド間隔になる。
+  // 固定スリープは行わない: 応答待ち（最大 response_timeout_ms_、既定 10ms）が自然な
+  // コマンド間隔になる。
   for (int attempt = 0; attempt < 3; ++attempt) {
     // 往復レイテンシ計測: 書込開始→フィードバック受信完了。制御周期引き上げ
     // （タイムアウト短縮・tick 高周期化）の判断材料として統計を蓄積する。
@@ -571,15 +593,26 @@ bool DdtMotorLib::sendFrameWithFeedback(int motor_id, const std::vector<uint8_t>
     }
 
     std::vector<uint8_t> feedback_frame;
-    if (readFeedbackFrame(motor_id, feedback_frame, /*timeout_ms=*/10)) {
-      parseFeedback(motor_id, feedback_frame);
-      recordSerialRoundtrip(std::chrono::duration<double, std::milli>(
-                                std::chrono::steady_clock::now() - roundtrip_start)
-                                .count());
+    auto& tx = transaction_stats_[motor_id];
+    ++tx.transactions;
+    if (readFeedbackFrame(motor_id, feedback_frame, response_timeout_ms_)) {
+      const bool parsed = parseFeedback(motor_id, feedback_frame);
+      const double roundtrip_ms = std::chrono::duration<double, std::milli>(
+                                      std::chrono::steady_clock::now() - roundtrip_start)
+                                      .count();
+      recordSerialRoundtrip(roundtrip_ms);
+      tx.last_response_timeout = !parsed;
+      tx.last_roundtrip_ms = parsed ? roundtrip_ms : std::nan("");
+      if (!parsed) {
+        ++tx.response_timeouts;
+      }
     } else {
-      RCLCPP_DEBUG(logger_, "モーター %d フィードバック未受信 (10ms timeout)", motor_id);
-      std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+      RCLCPP_DEBUG(logger_, "モーター %d フィードバック未受信 (%dms timeout)", motor_id,
+                   response_timeout_ms_);
       ++serial_latency_stats_.timeouts;
+      ++tx.response_timeouts;
+      tx.last_response_timeout = true;
+      tx.last_roundtrip_ms = std::nan("");
     }
     // 実機の最小コマンド間隔要件が判明した場合の保険（既定 0 = 待機なし）。
     if (command_wait_ms_ > 0) {
@@ -727,6 +760,7 @@ bool DdtMotorLib::parseFeedback(int expected_motor_id, const std::vector<uint8_t
   fb.fault_code = decoded.fault_code;
   fb.has_feedback = true;
   fb.last_feedback_time = feedback_now;
+  ++transaction_stats_[expected_motor_id].feedback_count;
 
   // PI 状態側にも保存（受信失敗時のフォールバック用）
   auto pi_it = pi_states_.find(expected_motor_id);
@@ -848,6 +882,19 @@ bool DdtMotorLib::getMotorFeedbackData(int motor_id, MotorFeedbackData& out) con
     out.feedback_age_sec =
         std::chrono::duration<double>(std::chrono::steady_clock::now() - fb.last_feedback_time)
             .count();
+  }
+  return true;
+}
+
+bool DdtMotorLib::getMotorTransactionStats(int motor_id, MotorTransactionStats& out) const {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+  out = MotorTransactionStats{};
+  if (motor_velocities_.find(motor_id) == motor_velocities_.end()) {
+    return false;
+  }
+  auto it = transaction_stats_.find(motor_id);
+  if (it != transaction_stats_.end()) {
+    out = it->second;
   }
   return true;
 }
