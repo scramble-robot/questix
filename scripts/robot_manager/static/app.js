@@ -1074,7 +1074,7 @@ async function pollNetworkJob() {
         const key = `${job.id}:${job.state}`;
         if (key !== network.lastJob) {
           network.lastJob = key;
-          const text = [job.message, job.lab_message].filter(Boolean).join(" ");
+          const text = [job.message, job.lab_message, job.controller_message].filter(Boolean).join(" ");
           if (text) toast(text, job.state === "failed" ? "error" : "success");
         }
         network.formLoaded = false;

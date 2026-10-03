@@ -32,7 +32,7 @@ function renderCard(data) {
     .append(qrSvg(wifiQrText(data.ssid, data.password), `Wi-Fi ${data.ssid} に接続するQRコード`));
   document.getElementById("lab-qr").append(qrSvg(data.lab_url, `${data.lab_url} を開くQRコード`));
   // A third QR code for the browser controller, only when the robot uses it (CONTROLLER_TYPE=web).
-  // A card written by wifi-ap.sh carries no controller_type and keeps two steps.
+  // A card written by wifi-ap.sh carries launch.env's controller type as well.
   if (data.controller_type === "web" && data.controller_url) {
     document.getElementById("card-controller-url").textContent = data.controller_url;
     document
