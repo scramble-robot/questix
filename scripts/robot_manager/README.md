@@ -119,10 +119,10 @@ when Robot Manager asked for it a moment ago:
 2. The launcher accepts the request only for the same boot, for `mode=practice` while the mode
    file says `practice`, and when it is at most 120 s old; it deletes the request in any case, then
    runs `ros2 launch questix_launcher questix_core.launch.xml enable_autoreferee:=false
-   enable_gpio_ref:=<ENABLE_GPIO_REF from launch.env, default true> controller_type:=…
-   enable_lidar/shot/drive/rviz:=…` (the same as competition except the safety profile). With
-   AutoReferee off, questix_core's practice defaults add `twist_arbiter` and let the ESC and shot
-   nodes accept QUESTiX LAB's launcher input, so the lessons can drive and fire.
+   enable_gpio_ref:=true controller_type:=… enable_lidar/shot/drive/rviz:=…` (the same as
+   competition except AutoReferee). With AutoReferee off, questix_core's practice defaults add
+   `twist_arbiter` and let the ESC and shot nodes accept QUESTiX LAB's launcher input, so the
+   lessons can drive and fire.
 3. Without a usable request (power-on, `systemctl start` by hand, a stale request) it logs why and
    exits 0, as before.
 4. Every launch writes `$QUESTIX_CONFIG_DIR/last-launch` (`mode`, `started_at`, `boot_id`);
@@ -145,15 +145,37 @@ For tests, `QUESTIX_CONFIG_DIR`, `QUESTIX_BOOT_ID_FILE` and `QUESTIX_ROS_SETUP` 
 launcher's paths (the service sets none of them); `test_launcher_script.py` runs the real script
 with a fake `ros2` and `logger`.
 
-## Competition GPIO safety
+## GPIO safety (physical E-stop)
 
-The `ENABLE_GPIO_REF` field in `launch.env` applies to practice launches started from Robot
-Manager (default and recommended: `true`) and to manual development and diagnostics. When `/etc/questix_robot/mode` is `competition`, the production launcher
-ignores that field and always passes `enable_gpio_ref:=true` together with
-`enable_autoreferee:=true`. Therefore an existing `launch.env` containing
-`ENABLE_GPIO_REF=false` cannot disable the GPIO5 physical E-stop and GPIO27
-AutoReferee safety path. `enable_autoreferee:=true` with `enable_gpio_ref:=false` is
-not a valid operational configuration.
+GPIO5 ROS monitoring of the physical E-stop is not an operating setting (issue #168). The
+production launcher ignores `ENABLE_GPIO_REF` in `launch.env` and always passes
+`enable_gpio_ref:=true`: with `enable_autoreferee:=false` in practice, with
+`enable_autoreferee:=true` (GPIO5 and GPIO27 AutoReferee) in competition. An existing `launch.env`
+containing `ENABLE_GPIO_REF=false` therefore disables neither.
+
+Robot Manager has no switch for it: the 管理設定 card shows it as always on, and
+`PUT /api/launch-config` refuses `ENABLE_GPIO_REF` other than `"true"` (422; `"true"` is still
+accepted from older, cached pages). `GET /api/launch-config` and `/api/status` report the file as
+it is, so a legacy `false` stays visible until the next save, which rewrites it to `true`. Every
+save logs each changed key as `launch-config updated: KEY old -> new` (journal of
+`questix_robot_manager`).
+
+The `ENABLE_GPIO_REF` environment variable is not an authority for `questix_core` GPIO safety
+either: `enable_gpio_ref` defaults to a literal `true`, so neither an exported variable nor a
+shell that sourced `launch.env` selects the no-GPIO mode. `ENABLE_GPIO_REF=true` stays in
+`launch.env` only as a legacy/compatibility field that nothing reads.
+
+No-GPIO requires the explicit launch argument `enable_gpio_ref:=false`. The override is
+process-local and is not persisted (not in `launch.env`, `mode`, `start-request`, a unit's
+`Environment` or Robot Manager's settings); after the diagnostic process ends or the robot is
+power-cycled, the next plain/manual launch defaults to GPIO monitoring enabled.
+
+`enable_gpio_ref:=false` remains a capability of `questix_core.launch.xml` for explicit manual
+diagnostic `ros2 launch` runs only (with `enable_autoreferee:=false`): operation_manager then
+reads no GPIO and publishes `/emergency_stop` released (`released (no GPIO safety path)`), so a
+press of the E-stop button reaches ROS no more (RLY1 still cuts the power). The production
+launcher never uses it. `enable_autoreferee:=true` with `enable_gpio_ref:=false` is not a valid
+configuration and `questix_core.launch.xml` refuses it.
 
 ## QUESTiX LAB (`/lab/`)
 

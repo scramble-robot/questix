@@ -48,7 +48,7 @@
     },
     "estop_unknown": {
       "student": "非常停止の状態をまだ確認できません。先生に伝えてください。",
-      "teacher": "ロボットの非常停止の状態（/emergency_stop）がまだ届いていません。ロボット制御が起動しているか（/emergency_stop は operation_manager が、安全入力（GPIO）を使わない練習でも出します）、ROS_DOMAIN_ID が教材の配信と同じかを確かめてください。届くまで教材からは動かせません。"
+      "teacher": "ロボットの非常停止の状態（/emergency_stop）がまだ届いていません。ロボット制御が起動しているか（/emergency_stop は operation_manager が、安全入力（GPIO）を使わない手動の診断起動でも出します）、ROS_DOMAIN_ID が教材の配信と同じかを確かめてください。届くまで教材からは動かせません。"
     },
     "emergency_stop": {
       "student": "非常停止：押されています。周りを確かめてから、先生と一緒に解除してください。"

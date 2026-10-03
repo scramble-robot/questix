@@ -5,7 +5,10 @@
   <arg name="enable_lidar" default="$(env ENABLE_LIDAR false)" description="Enable YDLiDAR"/>
   <arg name="enable_shot" default="$(env ENABLE_SHOT true)" description="Enable Shot component"/>
   <arg name="enable_drive" default="$(env ENABLE_DRIVE true)" description="Enable drive component"/>
-  <arg name="enable_gpio_ref" default="$(env ENABLE_GPIO_REF true)" description="Enable GPIO safety path (gpio_reader, operation_manager, and joy gating)"/>
+  <!-- GPIO5 monitoring is the default for every launch (issue #168). A literal default, never
+       $(env ENABLE_GPIO_REF ...): no environment (a sourced launch.env, an export) selects the
+       no-GPIO diagnostic; only an explicit enable_gpio_ref:=false on this one launch does. -->
+  <arg name="enable_gpio_ref" default="true" description="Enable GPIO safety path (gpio_reader, operation_manager, and joy gating). false: explicit manual diagnostic only, for this launch process"/>
   <arg name="enable_autoreferee" default="false" description="Use competition GPIO profile with AutoReferee GPIO27"/>
   <arg name="controller_type" default="$(env CONTROLLER_TYPE dualshock)" description="Controller type: dualshock, uart, or web (smartphone browser)"/>
   <!-- Practice runs route the controller through twist_arbiter so QUESTiX LAB driving experiments
@@ -35,7 +38,8 @@
   <let name="gpio_reader_config_file" value="$(find-pkg-share gpio_reader)/config/gpio_reader.practice.yaml" unless="$(var enable_autoreferee)"/>
   <let name="gpio_reader_config_file" value="$(find-pkg-share gpio_reader)/config/gpio_reader.competition.yaml" if="$(var enable_autoreferee)"/>
   <!-- operation_manager always runs and owns /emergency_stop; without the GPIO safety path it
-       reads no GPIO and reports "released (no GPIO safety path)" (practice only). -->
+       reads no GPIO and reports "released (no GPIO safety path)" (an explicit manual diagnostic
+       run only; questix_robot_launcher.sh always passes enable_gpio_ref:=true). -->
   <let name="operation_manager_config_file" value="$(find-pkg-share operation_manager)/config/operation_manager.practice.yaml" unless="$(var enable_autoreferee)"/>
   <let name="operation_manager_config_file" value="$(find-pkg-share operation_manager)/config/operation_manager.competition.yaml" if="$(var enable_autoreferee)"/>
   <let name="operation_manager_config_file" value="$(find-pkg-share operation_manager)/config/operation_manager.no_gpio.yaml" unless="$(var enable_gpio_ref)"/>

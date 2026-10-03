@@ -63,9 +63,10 @@ DDT M0602C の Protocol 1 応答フレームをデコードした 1 モータ分
 - **発行元は常に起動する**: operation_manager は drive/shot の有無にも `enable_gpio_ref` にも
   依存せず `questix_core.launch.xml` から常に起動する(standalone
   `joy_controller_referee.launch.xml` も互換性のため起動できる)。
-  - `enable_gpio_ref=true`(大会は常にこれ): GPIO を判定し `active = !controllable`。
+  - `enable_gpio_ref=true`(production の practice / competition 起動は常にこれ): GPIO を判定し `active = !controllable`。
     reason は `pin 5 ...`(物理 E-stop)/ `pin 27 ...`(AutoReferee)で入力を区別する。
-  - `enable_gpio_ref=false`(練習のみ、`operation_manager.no_gpio.yaml`、
+  - `enable_gpio_ref=false`(手動の明示的な診断起動のみ。launch 引数 `enable_gpio_ref:=false` をその都度明示したときだけで、
+    環境変数 `ENABLE_GPIO_REF` では選ばれず(既定はリテラルの `true`)、保存もされない。production ランチャーは使わない。`operation_manager.no_gpio.yaml`、
     `gpio_safety_enabled: false`): GPIO を読まず `/gpio/controllable` も出さない。
     `active=false`、reason `released (no GPIO safety path)` を 100 ms 毎に出す。
 - **未受信はフェイルクローズ**: 購読側(drive_component / shot_component / esc_motor_control は
