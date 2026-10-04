@@ -153,9 +153,10 @@ production launcher ignores `ENABLE_GPIO_REF` in `launch.env` and always passes
 `enable_autoreferee:=true` (GPIO5 and GPIO27 AutoReferee) in competition. An existing `launch.env`
 containing `ENABLE_GPIO_REF=false` therefore disables neither.
 
-Robot Manager has no switch for it: the 管理設定 card shows it as always on, and
-`PUT /api/launch-config` refuses `ENABLE_GPIO_REF` other than `"true"` (422; `"true"` is still
-accepted from older, cached pages). `GET /api/launch-config` and `/api/status` report the file as
+Robot Manager has no switch or item for it in the 管理設定 card (the header's 非常停止ボタン
+shows the live state while the QUESTiX LAB bridge serves it), and `PUT /api/launch-config`
+refuses `ENABLE_GPIO_REF` other than `"true"` (422; `"true"` is still accepted from older, cached
+pages). `GET /api/launch-config` and `/api/status` report the file as
 it is, so a legacy `false` stays visible until the next save, which rewrites it to `true`. Every
 save logs each changed key as `launch-config updated: KEY old -> new` (journal of
 `questix_robot_manager`).

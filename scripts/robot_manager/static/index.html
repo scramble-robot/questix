@@ -704,11 +704,8 @@
             <span class="slider"></span>
           </label>
         </div>
-        <!-- Not a setting (issue #168): every production launch reads GPIO5. -->
-        <div class="config-item wide" id="gpio-safety-fixed">
-          <label>安全入力（GPIO5、非常停止ボタン）</label>
-          <p class="section-help">練習・大会のどちらの起動でも常に有効です（非常停止ボタンの押下がロボット制御に伝わります）。ここでは切り替えられません。</p>
-        </div>
+        <!-- No GPIO5 item (issue #168): it is not a setting (every production launch reads GPIO5);
+             the header's 非常停止ボタン shows its live state. -->
         <div class="config-item">
           <label>RViz</label>
           <label class="toggle-switch small">
