@@ -10,51 +10,60 @@
     - vars/setup_kit_vars.yaml
 
   pre_tasks:
-    - name: Verify target architecture
-      ansible.builtin.assert:
-        that:
-          - ansible_architecture == "aarch64"
-        fail_msg: "This playbook is designed for ARM64/aarch64 architecture only. Current: {{ ansible_architecture }}"
-        success_msg: "Architecture verification passed: {{ ansible_architecture }}"
+    # The target and ROS_DOMAIN_ID checks run on every setup, also when `./setup.sh --tags <role>`
+    # applies one role to an existing kit.
+    - name: Check the target before any role runs
+      tags: [always]
+      block:
+        - name: Verify target architecture
+          ansible.builtin.assert:
+            that:
+              - ansible_architecture == "aarch64"
+            fail_msg: "This playbook is designed for ARM64/aarch64 architecture only. Current: {{ ansible_architecture }}"
+            success_msg: "Architecture verification passed: {{ ansible_architecture }}"
 
-    - name: Display system information
-      ansible.builtin.debug:
-        msg:
-          - "Target Host: {{ inventory_hostname }}"
-          - "OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
-          - "Architecture: {{ ansible_architecture }}"
-          - "ROS2 Distribution: {{ ros2_distro }}"
-          - "Target: Raspberry Pi 5 Robotics Kit"
+        - name: Display system information
+          ansible.builtin.debug:
+            msg:
+              - "Target Host: {{ inventory_hostname }}"
+              - "OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+              - "Architecture: {{ ansible_architecture }}"
+              - "ROS2 Distribution: {{ ros2_distro }}"
+              - "Target: Raspberry Pi 5 Robotics Kit"
 
-    - name: Check Ubuntu version compatibility for Raspberry Pi 5
-      ansible.builtin.assert:
-        that:
-          - ansible_distribution == "Ubuntu"
-          - ansible_distribution_version == target_ubuntu_version
-        fail_msg: >-
-          This playbook is optimized for Ubuntu {{ target_ubuntu_version }} on
-          Raspberry Pi 5. Current: {{ ansible_distribution }}
-          {{ ansible_distribution_version }}
-        success_msg: >-
-          Ubuntu version check passed: {{ ansible_distribution }}
-          {{ ansible_distribution_version }}
+        - name: Check Ubuntu version compatibility for Raspberry Pi 5
+          ansible.builtin.assert:
+            that:
+              - ansible_distribution == "Ubuntu"
+              - ansible_distribution_version == target_ubuntu_version
+            fail_msg: >-
+              This playbook is optimized for Ubuntu {{ target_ubuntu_version }} on
+              Raspberry Pi 5. Current: {{ ansible_distribution }}
+              {{ ansible_distribution_version }}
+            success_msg: >-
+              Ubuntu version check passed: {{ ansible_distribution }}
+              {{ ansible_distribution_version }}
 
-    - name: Check if running on Raspberry Pi
-      ansible.builtin.shell: |
-        if [ -f /proc/device-tree/model ]; then
-          cat /proc/device-tree/model
-        else
-          echo "Unknown"
-        fi
-      register: pi_model
-      changed_when: false
+        - name: Check if running on Raspberry Pi
+          ansible.builtin.shell: |
+            if [ -f /proc/device-tree/model ]; then
+              cat /proc/device-tree/model
+            else
+              echo "Unknown"
+            fi
+          register: pi_model
+          changed_when: false
 
-    - name: Display Raspberry Pi model
-      ansible.builtin.debug:
-        msg: "Detected device: {{ pi_model.stdout }}"
+        - name: Display Raspberry Pi model
+          ansible.builtin.debug:
+            msg: "Detected device: {{ pi_model.stdout }}"
 
-    - name: Validate ROS_DOMAIN_ID before any state-changing role runs
-      ansible.builtin.include_tasks: tasks/validate_ros_domain_id.yaml
+        - name: Validate ROS_DOMAIN_ID before any state-changing role runs
+          ansible.builtin.include_tasks:
+            file: tasks/validate_ros_domain_id.yaml
+            # An include's tags are not its tasks' tags: `apply` gives them `always` too.
+            apply:
+              tags: [always]
 
   roles:
     - { role: ros2_installation }
@@ -63,7 +72,8 @@
     - { role: robotics_workspace }
     # Imports dependency.repos, runs rosdep and colcon build, and checks the packages resolve:
     # the kit is not usable (Robot Manager's lesson bridge, the robot service) until it is built.
-    - { role: ros2_build }
+    # Tagged so an existing kit can rebuild alone: ./setup.sh --tags ros2_build
+    - { role: ros2_build, tags: [ros2_build] }
     - { role: robot_autostart }
     - { role: display_settings }
     # Off unless wifi_ap_enabled: switching the Wi-Fi to AP mode drops a Wi-Fi client connection.
