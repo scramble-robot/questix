@@ -15,9 +15,11 @@ import { fillSentence as fill } from '../core/content.js';
 // Times given to this module (`now`, arrival times) are milliseconds of one monotonic clock.
 
 const HISTORY_SECONDS = 10; // the wheel charts show this much
-// Two /drive_status further apart than this are not joined by a line: the bridge sends them at
-// 20 Hz (lab_bridge.yaml drive_max_hz, 0.05 s apart), so 0.5 s is ten missed messages, a gap
-// (the link stalled, the node restarted) the chart must show rather than draw a straight line over.
+// Two /drive_status further apart than this are not joined by a line. The bridge forwards at most
+// drive_max_hz (lab_bridge.yaml, 20) of drive_component's 50 Hz, newest wins with at least
+// 1/drive_max_hz between two: every third message, 0.06 s apart (about 17 Hz). 0.5 s is about
+// eight missed messages, a gap (the link stalled, the node restarted) the chart must show rather
+// than draw a straight line over.
 const WHEEL_GAP_SECONDS = 0.5;
 // Older than this, a value no longer describes the robot now: it is shown grey and left out of a
 // memo line. The LiDAR sends 5 scans a second at most (lab_bridge.yaml scan_max_hz), the rest 20.

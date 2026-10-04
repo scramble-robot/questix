@@ -49,7 +49,7 @@ it is a classroom tool that is switched on from the manager when a lesson needs 
 | `drive_status_topic` | `/drive_status` | `questix_msgs/DriveStatus`. |
 | `target_twist_topic` | `/target_twist` | `geometry_msgs/Twist`. |
 | `camera_topic` | `""` (off) | `sensor_msgs/CompressedImage`, JPEG or PNG only. No camera driver ships with this repository. |
-| `scan_max_hz`, `odom_max_hz`, `drive_max_hz`, `twist_max_hz`, `camera_max_fps` | 5 / 20 / 20 / 20 / 10 | Upper bound of what is forwarded; the newest message wins. |
+| `scan_max_hz`, `odom_max_hz`, `drive_max_hz`, `twist_max_hz`, `camera_max_fps` | 5 / 20 / 20 / 20 / 10 | Upper bound of what is forwarded (and kept in records); the newest message wins, at least 1/max_hz apart. A faster source is thinned to whole steps of it: the 50 Hz `/drive_status` at 20 arrives every third message, about 17 Hz. |
 | `scan_max_points` | `360` | Scans are decimated by an integer stride to at most this many beams. |
 | `base_frame` | `base_link` | Each scan carries `mount` (`x`, `y`, `yaw` of the scan frame in this frame), looked up once per frame in TF — on QUESTiX the static transform of `launcher/launch/lidar_driver.launch.xml`. `null` (and a throttled warning) while TF does not know it; the lab then uses its default mount. |
 | `wheel_radius`, `wheel_separation` | `0.1`, `0.5` | Only reported to the page for wheel-odometry lessons. Keep identical to `launcher/config/drive_component.yaml`. |
@@ -244,8 +244,8 @@ on, and a page that connects gets the last one if it arrived within 1 s. Pages s
 only from this stream: never heard is unknown, silent for 1 s is stale; the derived
 `drive.emergency_stop` may add "pressed" but never makes it released.
 
-The 20 Hz JSON the pages get is teaching data, not every message on the robot: the
-evidence-grade record of a run is Robot Manager's rosbag (MCAP).
+The JSON the pages get (at most 20 Hz, about 17 Hz for `/drive_status`) is teaching data, not
+every message on the robot: the evidence-grade record of a run is Robot Manager's rosbag (MCAP).
 
 `hello.robot` is `{"name": "<robot_name or host name>", "domain": <ROS_DOMAIN_ID as a number, or
 null when unset>}`. `hello.records` is `{"save": <pages may save here now>, "list": true,
