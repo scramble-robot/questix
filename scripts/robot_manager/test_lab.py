@@ -447,13 +447,14 @@ def test_permission_error_includes_an_existing_lab_env(lab, tmp_path, read_only_
 
 
 def test_competition_stops_the_bridge_even_if_lab_env_cannot_be_written(
-        lab, monkeypatch, read_only_lab_env):
+        lab, monkeypatch, tmp_path, read_only_lab_env):
     signals = []
     monkeypatch.setattr(lab.os, "getpgid", lambda pid: pid)
     monkeypatch.setattr(lab.os, "killpg", lambda pgid, sig: signals.append((pgid, sig)))
     read_only_lab_env('AUTOSTART="true"\nALLOW_DRIVE="true"\n')
     lab.set_drive(lab.DriveRequest(allow=True))  # the session's permission, not in lab.env
     lab._proc = _FakeProcess()
+    (tmp_path / "mode").write_text("competition\n")  # app.py writes the mode, then calls this
     lab.disable_outside_lessons()  # logged, not raised
     assert signals == [(_FakeProcess.pid, lab.signal.SIGINT)]
     status = lab.get_status()
