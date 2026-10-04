@@ -24,6 +24,7 @@
 #include "questix_msgs/msg/actuation_authority.hpp"
 #include "questix_msgs/msg/drive_status.hpp"
 #include "questix_msgs/msg/emergency_stop.hpp"
+#include "questix_safety/emergency_stop_monitor.hpp"
 #include "rcl_interfaces/msg/set_parameters_result.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_components/register_node_macro.hpp"
@@ -55,9 +56,11 @@ namespace motor_control_app {
  * 常時購読し、active=true で即時停止 + 以後の twist を無視、active=false で
  * twist 受付を再開する（モータは次の twist まで停止のまま = 自動復帰）。
  * 未受信（起動直後）と、受信後に emergency_stop_timeout_sec 途絶えた状態も動かさない
- * （require_emergency_stop=false は単体診断用の明示 opt-out）。
+ * （operation_manager は questix_core で常に起動し、GPIO 安全系なしでも解除を出す。
+ * require_emergency_stop=false は単体診断の明示 opt-out で、そのときも押下の受信では止まる）。
  *
- * 練習起動（require_runtime_actuation_authority=true）では、教員の実行時許可
+ * 教員の許可は非常停止とは別の概念で、require_teacher_permission=true
+ * （練習での opt-in、既定 false、大会では使わない）の時だけ、教員の許可
  * （questix_msgs/ActuationAuthority の drive_allowed、volatile、1.0 s のリース）がある間だけ
  * 動かす。許可も E-stop も actuation_gate.hpp の純粋関数で判定し、閉じたら即時停止 + 目標破棄、
  * 開いても次の /target_twist まで停止のまま。停止指令を送れなかったら stop fault として閉じ、
@@ -131,23 +134,38 @@ private:
   void publishOdometry(double linear, double angular, bool feedback_fresh, const rclcpp::Time& now);
 
   /**
-   * @brief /emergency_stop メッセージのコールバック関数
+   * @brief /emergency_stop を受信したとき（estop_monitor_ から呼ばれる）
    *
    * ライフサイクル状態に依存せず常時受信する。立ち上がりエッジで即時停止
    * （best-effort）、立ち下がりエッジで twist 受付を再開する。
    * @param msg 受信した EmergencyStop メッセージ
+   * @param change 初回受信か・直前の active（未受信の間は true）
    */
-  void emergencyStopCallback(const questix_msgs::msg::EmergencyStop::SharedPtr msg);
+  void onEmergencyStop(const questix_msgs::msg::EmergencyStop& msg,
+                       const questix_safety::EmergencyStopMonitor::Change& change);
 
   /**
-   * @brief 教員の実行時許可（/actuation_authority）のコールバック
+   * @brief 教員の許可（/actuation_authority）のコールバック
    *
    * 受信時刻（steady clock）と drive_allowed を記録し、閉じる方向の変化なら即座に停止する。
    */
-  void authorityCallback(const questix_msgs::msg::ActuationAuthority::SharedPtr msg);
+  void teacherPermissionCallback(const questix_msgs::msg::ActuationAuthority::SharedPtr msg);
 
   /**
-   * @brief 現在の E-stop・実行時許可・stop fault の入力を組み立てる（ages は steady clock）
+   * @brief 非常停止（/emergency_stop）の入力を組み立てる（age は steady clock）
+   */
+  actuation_gate::EstopInputs estopInputs() const;
+
+  /**
+   * @brief 教員の許可（/actuation_authority）の入力を組み立てる。非常停止とは別の概念。
+   *
+   * require_teacher_permission=false（既定）では required=false だけを返し、
+   * 受信状態は一切見ない（購読も作らない）。
+   */
+  actuation_gate::TeacherPermissionInputs teacherPermissionInputs() const;
+
+  /**
+   * @brief 非常停止・実行時許可・stop fault をまとめたゲート入力
    */
   actuation_gate::Inputs gateInputs() const;
 
@@ -159,7 +177,8 @@ private:
   actuation_gate::Block applyGate(bool stopped_now = false);
 
   /**
-   * @brief 非常停止として扱っている状態か（押下・未受信・途絶。実行時許可・stop fault とは別）
+   * @brief 非常停止として扱っている状態か（押下、require_emergency_stop の時は未受信・途絶も。
+   *        実行時許可・stop fault とは別）
    */
   bool estopEngaged() const;
 
@@ -237,10 +256,11 @@ private:
   // split across callback groups, synchronize motor_initialized_, diff_drive_, command state,
   // timer pointers, and all motor serial operations before enabling concurrent execution.
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr twist_subscription_;
-  // lifecycle 状態に依存せず常時生かす（コンストラクタで作成、on_cleanup でも破棄しない）
-  rclcpp::Subscription<questix_msgs::msg::EmergencyStop>::SharedPtr emergency_stop_sub_;
-  // 教員の実行時許可（練習時のみ購読。volatile、ラッチしない）。E-stop 購読と同じく常時生かす
-  rclcpp::Subscription<questix_msgs::msg::ActuationAuthority>::SharedPtr authority_sub_;
+  // /emergency_stop の購読と判定（questix_safety の共通チェック）。lifecycle 状態に依存せず
+  // 常時生かす（コンストラクタで作成、on_cleanup でも破棄しない）
+  std::unique_ptr<questix_safety::EmergencyStopMonitor> estop_monitor_;
+  // 教員の許可（練習時のみ購読。volatile、ラッチしない）。E-stop 購読と同じく常時生かす
+  rclcpp::Subscription<questix_msgs::msg::ActuationAuthority>::SharedPtr teacher_permission_sub_;
   // 型付きステータス（questix_msgs/DriveStatus）。契約は questix_msgs/README.md。
   rclcpp_lifecycle::LifecyclePublisher<questix_msgs::msg::DriveStatus>::SharedPtr
       typed_status_publisher_;
@@ -275,8 +295,6 @@ private:
   int max_motor_rpm_;
   double status_publish_rate_;
   std::string typed_status_topic_;  // 型付き DriveStatus トピック
-  // 統一緊急停止トピック（空文字で連動無効）。コンストラクタで一度だけ読む。
-  std::string emergency_stop_topic_;
 
   // 制御モード関連
   std::string control_mode_;  // "velocity" | "current"
@@ -365,27 +383,19 @@ private:
 
   // 状態フラグ
   bool motor_initialized_;
-  // 最後に受信した /emergency_stop の active。未受信の間は true（起動直後を解除扱いしない）
-  bool emergency_stop_active_;
 
-  // E-stop の受信状態（コンストラクタで読むパラメータ。実行時変更は拒否）
-  bool require_emergency_stop_{true};       // false は単体診断の明示 opt-out のみ
-  double emergency_stop_timeout_sec_{1.0};  // 受信後の途絶判定 [s]。<=0 で無効
-  bool have_estop_msg_{false};
-  std::chrono::steady_clock::time_point last_estop_rx_{};
-
-  // 教員の実行時許可（練習: true、大会: false）。コンストラクタで読む
-  bool require_authority_{true};
-  std::string authority_topic_{"/actuation_authority"};
-  double authority_timeout_sec_{1.0};  // リース [s]。無効値は 1.0
-  bool have_authority_msg_{false};
-  bool authority_drive_allowed_{false};
-  std::chrono::steady_clock::time_point last_authority_rx_{};
+  // 教員の許可（非常停止とは別の概念。練習での opt-in、既定 false）。コンストラクタで読む
+  bool require_teacher_permission_{false};
+  std::string teacher_permission_topic_{"/actuation_authority"};
+  double teacher_permission_timeout_sec_{1.0};  // リース [s]。無効値は 1.0
+  bool have_teacher_permission_msg_{false};
+  bool teacher_permission_drive_allowed_{false};
+  std::chrono::steady_clock::time_point last_teacher_permission_rx_{};
 
   // 停止指令を送れなかった（両輪へのゼロ送信成功まで閉じたまま、stop_retry_period で再送）
   bool stop_fault_{false};
   std::chrono::steady_clock::time_point last_stop_attempt_{};
-  // 前回評価したゲートの理由（閉じる変化の検出とログ用）
+  // 前回評価したゲートの理由（閉じる変化の検出とログ用）。コンストラクタで初期評価する
   actuation_gate::Block last_block_{actuation_gate::Block::kEstopUnknown};
 };
 

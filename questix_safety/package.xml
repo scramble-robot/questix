@@ -1,26 +1,20 @@
 <?xml version="1.0"?>
-<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-    <name>esc_motor_control_cpp</name>
+    <name>questix_safety</name>
     <version>3.2.0</version>
-    <description>C++ ROS2 ESC motor control node with pigpio/lgpio backend support</description>
+    <description>Shared /emergency_stop check for the QUESTiX actuating nodes (drive, shot, ESC): one subscription, one fail-closed rule</description>
     <maintainer email="aki.grade2580@outlook.jp">asa-naki</maintainer>
     <license>MIT</license>
 
     <buildtool_depend>ament_cmake_auto</buildtool_depend>
 
-    <depend>questix_msgs</depend>
-    <depend>questix_safety</depend>
     <depend>rclcpp</depend>
-    <depend>rclcpp_components</depend>
-    <depend>std_msgs</depend>
-    <depend>sensor_msgs</depend>
+    <depend>questix_msgs</depend>
 
     <test_depend>ament_cmake_gtest</test_depend>
+    <test_depend>rclcpp_lifecycle</test_depend>
     <test_depend>ament_lint_auto</test_depend>
     <test_depend>ament_lint_common</test_depend>
-
-    <exec_depend>questix_control_config</exec_depend>
 
     <export>
         <build_type>ament_cmake</build_type>

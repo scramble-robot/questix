@@ -7,9 +7,9 @@
        /shot/lab/fire) only when this is true. questix_core sets it for practice runs only; it
        stays false with enable_autoreferee (competition). The node YAMLs keep false as default. -->
   <arg name="accept_lab_input" default="false" description="Let QUESTiX LAB operate the roller, tilt and fire (practice only; never with enable_autoreferee)" />
-  <!-- The launcher (shot and ESC) moves only while the teacher's runtime authority
-       (/actuation_authority, Robot Manager) is fresh. questix_core passes false for competition. -->
-  <arg name="require_runtime_actuation_authority" default="true" description="Move the launcher only while the teacher's runtime authority is fresh (competition: false)" />
+  <!-- With true the launcher (shot and ESC) moves only while the teacher's permission
+       (/actuation_authority, Robot Manager) is fresh. Practice opt-in; never in competition. -->
+  <arg name="require_teacher_permission" default="false" description="Move the launcher only while the teacher's permission is fresh (practice opt-in; competition: false)" />
 
   <!-- Hardware configuration; operator mappings are in questix_control_config. -->
   <arg name="shot_config_file"
@@ -28,7 +28,7 @@
     <arg name="config_file" value="$(var shot_config_file)"/>
     <arg name="joy_topic" value="$(var joy_topic_name)"/>
     <arg name="accept_lab_input" value="$(var accept_lab_input)"/>
-    <arg name="require_runtime_actuation_authority" value="$(var require_runtime_actuation_authority)"/>
+    <arg name="require_teacher_permission" value="$(var require_teacher_permission)"/>
   </include>
 
   <!-- ESC Motor Control (C++) -->
@@ -36,6 +36,6 @@
     <arg name="config_file" value="$(var esc_config_file)"/>
     <arg name="joy_topic" value="$(var joy_topic_name)"/>
     <arg name="accept_lab_input" value="$(var accept_lab_input)"/>
-    <arg name="require_runtime_actuation_authority" value="$(var require_runtime_actuation_authority)"/>
+    <arg name="require_teacher_permission" value="$(var require_teacher_permission)"/>
   </include>
 </launch>

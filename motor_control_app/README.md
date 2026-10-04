@@ -149,6 +149,37 @@ ros2 param dump /drive_component
 シリアル往復レイテンシの統計は deactivate 時に INFO ログへ出力される
 （`DdtMotorLib::getSerialLatencyStats`、制御周期引き上げ検討の実測材料）。
 
+## ビルド時間
+
+各ターゲットは 1 ファイル構成で、時間の大半は rclcpp / rclcpp_lifecycle ヘッダーの解析です。
+`CMakeLists.txt` はこれをプリコンパイル済みヘッダー（共有ライブラリ用と実行ファイル用の 2 つ）
+で 1 回だけ解析し、全ターゲットで再利用します（`-DMOTOR_CONTROL_APP_USE_PCH=OFF` で無効化）。
+ビルドログに `-Winvalid-pch` の警告が出たら再利用が効いていません（結果は同じで、速度だけ落ちる）。
+
+キット（Raspberry Pi 5）は `./setup.sh` の `ros2_build` ロールが ccache の導入・設定と
+ワークスペースへの組み込みまで行います。既存のキットも `./setup.sh --tags ros2_build`（このロールだけ実行）で入り、以降は
+いつもの `colcon build --symlink-install` のまま ccache が使われます（pull・ブランチ切り替え後の
+再コンパイルが速くなる）。
+
+開発 PC で同じことをするには:
+
+```bash
+sudo apt install ccache
+# PCH と併用するための設定（一度だけ）
+ccache --set-config sloppiness=include_file_ctime,include_file_mtime,pch_defines,time_macros
+```
+
+`~/.colcon/defaults.yaml`（コマンドで `--cmake-args` を付けるとこちらは上書きされる）:
+
+```yaml
+build:
+  cmake-args:
+    - -DCMAKE_C_COMPILER_LAUNCHER=ccache
+    - -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+```
+
+このパッケージだけを触っている間は `--packages-select motor_control_app` で他を省けます。
+
 ## テスト
 
 ```bash
