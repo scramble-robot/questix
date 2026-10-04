@@ -7,7 +7,9 @@ ros2_distro: jazzy
 ros_domain_id: 42
 questix_robot_config_dir: /etc/questix_robot
 
-# Robot mode: "practice" (default, safe) or "competition" (auto-launch on boot)
+# Robot mode (scripts/robot_manager/modes.py): "practice" (default, safe: the controller alone,
+# started from Robot Manager), "lesson" (QUESTiX LAB with the teacher's permission, started from
+# Robot Manager) or "competition" (auto-launch on boot)
 robot_mode: practice
 
 # Shipping defaults for a freshly-kitted launch.env (single source of truth for

@@ -801,6 +801,7 @@ def _authority_snapshot() -> dict:
         "launcher": bool(state.get("launcher")),
         "heartbeat_running": bool(state.get("running")),
         "competition": bool(state.get("competition")),
+        "mode": state.get("mode"),
         "at": datetime.now().isoformat(timespec="seconds"),
     }
 
