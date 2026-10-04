@@ -111,8 +111,8 @@ def test_the_settings_page_has_no_gpio_safety_switch():
     script = (STATIC / "app.js").read_text(encoding="utf-8")
     assert 'data-config="ENABLE_GPIO_REF"' not in html
     assert '"ENABLE_GPIO_REF"' not in script
-    # It is shown as always on instead.
-    assert 'id="gpio-safety-fixed"' in html
+    # Nor a read-only item for it: it is not a setting; the header shows the live E-stop state.
+    assert 'id="gpio-safety-fixed"' not in html
     # The other settings keep their inputs.
     for key in ("ENABLE_LIDAR", "ENABLE_SHOT", "ENABLE_DRIVE", "ENABLE_RVIZ", "CONTROLLER_TYPE"):
         assert f'data-config="{key}"' in html, key
