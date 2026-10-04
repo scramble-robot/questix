@@ -1003,6 +1003,51 @@ TEST(ControlCoreLqrPerWheel, ReversalStartsTheWheelStateAgain) {
   EXPECT_GE(out.right_rpm, 0);
 }
 
+TEST(ControlCoreLqrPerWheel, WheelEntersAtRunEnterAndStaysUntilRunExit) {
+  // lqrConfig は run_enter 40 / run_exit 30。加速度制限なしで左輪の目標だけを動かす
+  // （右は ≈ 95 rpm で車体は RUN のまま）。
+  auto config = lqrConfig(0.5, 0.0, 0.0, 20.0);
+  config.max_linear_accel = 0.0;
+  config.max_angular_accel = 0.0;
+  core::ControlCore control(config);
+  const double kRpmPerMps = 95.4929658551372;  // wheel_radius 0.1 m
+  const double separation = yamlConfig().wheel_separation;
+  // 左 = left_rpm、右 = 95 rpm になる (linear, angular)
+  auto twist = [&](double left_rpm) {
+    const double vl = left_rpm / kRpmPerMps;
+    const double vr = 95.0 / kRpmPerMps;
+    return std::make_pair((vl + vr) / 2.0, (vr - vl) / separation);
+  };
+  auto hold = [&](double left_rpm, int ticks) {
+    const auto [linear, angular] = twist(left_rpm);
+    return holdWithFeedback(control, linear, angular, static_cast<int>(left_rpm) - 3, -92, ticks);
+  };
+  // 入り閾値の手前（35 rpm）: まだ補正しない
+  auto out = hold(35.0, 50);
+  ASSERT_EQ(out.mode, core::DriveMode::kRun);
+  EXPECT_FALSE(out.left_lqr_active);
+  // 入り閾値を超える（45 rpm）: 補正を始める
+  out = hold(45.0, 50);
+  EXPECT_TRUE(out.left_lqr_active);
+  // 入りと抜けの間（35 rpm）に戻っても、補正中なので続け、状態も保つ
+  out = hold(35.0, 1);
+  EXPECT_TRUE(out.left_lqr_active);
+  EXPECT_TRUE(control.leftOmegaHat().has_value());
+  // 抜け閾値をまたいで揺れる（29 / 31 rpm）: 29 で抜けた後は 31 に戻っても入り直さず、
+  // 適用/解除（とそのたびの状態の破棄）が tick ごとに入れ替わらない
+  for (int k = 0; k < 20; ++k) {
+    out = hold(k % 2 == 0 ? 29.0 : 31.0, 1);
+    EXPECT_FALSE(out.left_lqr_active) << "tick " << k;
+  }
+  EXPECT_FALSE(control.leftOmegaHat().has_value());
+  // 入りと抜けの間（35 rpm）でもまだ入らない
+  out = hold(35.0, 1);
+  EXPECT_FALSE(out.left_lqr_active);
+  // 入り閾値を超えれば、また補正する
+  out = hold(45.0, 1);
+  EXPECT_TRUE(out.left_lqr_active);
+}
+
 TEST(ControlCoreLqrPerWheel, LostFeedbackDropsBothWheelsAndRestartsFromTheMeasurement) {
   core::ControlCore control(lqrConfig(0.5, 1.0, 0.05, 20.0));
   holdWithFeedback(control, 1.0, 2.0, 40, -130, 200);

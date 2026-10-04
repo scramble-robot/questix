@@ -200,19 +200,22 @@ public:
   /**
    * @brief 1 輪の目標 RPM がその輪に LQR+FF を掛けてよい範囲（RUN 域）にあるか。
    *
-   * 定義: 目標が 0 でなく、|目標| >= 抜け閾値（run_exit_rpm。drive_mode_fsm と同じ正規化:
-   * 0 なら run_enter_rpm、enter より大きければ enter）。車体の RUN 判定は左右の大きい方で
-   * 行うため、RUN 中も遅い側の輪はこの範囲を下回り得る（その輪は FF のみ = 目標そのまま）。
-   * RUN 閾値が無効（0 / 0）なら常に false（LQR はそもそも適用されない）。
+   * 定義: 目標が 0 でなく、補正していない輪は |目標| >= 入り閾値（run_enter_rpm）で入り、
+   * 補正中の輪（engaged）は |目標| >= 抜け閾値（run_exit_rpm）の間とどまる。閾値は
+   * drive_mode_fsm と同じ正規化（片方が 0 なら他方、exit は enter 以下）。車体の走行状態と同じ
+   * ヒステリシスを輪ごとにも持たせ、抜け閾値付近の目標で補正の適用/解除（とそのたびの状態の
+   * 破棄）が tick ごとに入れ替わって指令が最大 ±max_correction_rpm 跳ねるのを防ぐ。
+   * 車体の RUN 判定は左右の大きい方で行うため、RUN 中も遅い側の輪はこの範囲を下回り得る
+   * （その輪は FF のみ = 目標そのまま）。RUN 閾値が無効（0 / 0）なら常に false。
    */
-  bool wheelInRunRange(int ref_rpm) const {
+  bool wheelInRunRange(int ref_rpm, bool engaged = false) const {
     const auto fsm = fsmConfig();
     if (ref_rpm == 0 || !motor_control_lib::drive_mode_fsm::runThresholdEnabled(fsm)) {
       return false;
     }
     const int enter = fsm.run_enter_rpm > 0 ? fsm.run_enter_rpm : fsm.run_exit_rpm;
     const int exit = std::min(fsm.run_exit_rpm > 0 ? fsm.run_exit_rpm : enter, enter);
-    return std::abs(ref_rpm) >= exit;
+    return std::abs(ref_rpm) >= (engaged ? exit : enter);
   }
 
   /**
@@ -340,17 +343,20 @@ private:
     lqr_gains_dt_ = dt_sec;
   }
 
-  // 1 輪ぶんの適用判定。RUN 域にない輪（目標 0 を含む）は補正せず目標をそのまま返し、その輪の
-  // オブザーバ / LQR 状態を捨てる（次に RUN 域へ入ったら実測から初期化し直す）。目標の符号が
+  // 1 輪ぶんの適用判定（入り/抜けのヒステリシスは wheelInRunRange()）。RUN 域にない輪（目標 0
+  // を含む）は補正せず目標をそのまま返し、その輪の オブザーバ / LQR 状態を捨てる（次に RUN
+  // 域へ入ったら実測から初期化し直す）。目標の符号が
   // 変わった（前後反転）ときも、逆向きの推定・外乱・入力履歴を持ち越さないよう捨て直す。
   // @return この輪に補正を適用したか
   bool applyWheel(WheelState& w, int ref_rpm, double measured_rpm, int& cmd_out) {
-    if (!wheelInRunRange(ref_rpm) || !lqr_gains_.has_value()) {
+    const int ref_sign = ref_rpm > 0 ? 1 : (ref_rpm < 0 ? -1 : 0);
+    // 同じ向きで補正中の輪だけが抜け閾値までとどまる。向きが変わった輪は新しく入り直す。
+    const bool engaged = ref_sign != 0 && w.ref_sign == ref_sign;
+    if (!wheelInRunRange(ref_rpm, engaged) || !lqr_gains_.has_value()) {
       w = WheelState{};
       cmd_out = ref_rpm;
       return false;
     }
-    const int ref_sign = ref_rpm > 0 ? 1 : -1;
     if (w.ref_sign != ref_sign) {
       w = WheelState{};
       w.ref_sign = ref_sign;
