@@ -99,6 +99,9 @@ DDT M0602C の Protocol 1 応答フレームをデコードした 1 モータ分
 - **欠落の検出**: `seq` の飛び。**重複の検出**: 輪ごとの `feedback_new == false`(または
   `feedback_count` が前の sample と同じ)は同じフレームの繰り返しなので、解析では 1 回だけ数える。
   idle の間は数 tick に 1 回しかフレームが来ない(停止フレームの再送間隔に従う)。
+  `feedback_count` は tick の外の送受信(非常停止コールバックの即時停止、configure/activate 時の
+  初期化)でも増えるので、sample 間で 2 以上増えても `seq` が連続していればサンプルの欠落ではない
+  (間のフレームは sample に載らない)。
 - **診断専用**: 記録・解析のためのもので、**制御・安全判断に使わない**。購読するノードを作らない
   (`/drive_status` が状態の契約、`/emergency_stop` が安全の契約)。
 - **既存トピックを変えない理由**: `MotorFeedback` / `DriveStatus` にフィールドを足すと型ハッシュが

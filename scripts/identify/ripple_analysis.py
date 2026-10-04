@@ -107,7 +107,9 @@ def frames_from_control_samples(rows):
                 stats["duplicates_removed"][side] += 1
                 continue
             if last_count[side] is not None and count > last_count[side] + 1:
-                # 受信はしたが、そのフレームを載せたサンプルが欠落した
+                # 受信したがどのサンプルにも載らなかったフレーム: サンプルの欠落のほか、tick の外の
+                # 送受信（非常停止コールバックの即時停止など）や 1 tick 内の複数回の送受信でも増える
+                # （questix_msgs/README.md）。seq の欠落とは別に数える。
                 stats["frames_missing"][side] += count - last_count[side] - 1
             last_count[side] = count
             w = wheels[side]
@@ -656,7 +658,7 @@ def report(result):
     if "seq_gaps" in stats:
         lines.append(f"samples={stats['samples']} seq の飛び={stats['seq_gaps']}"
                      f"（欠落 {stats['lost_samples']}） 重複除去={stats['duplicates_removed']}"
-                     f" 欠落フレーム={stats['frames_missing']}")
+                     f" 載らなかったフレーム={stats['frames_missing']}")
     else:
         lines.append(f"samples={stats['samples']} 重複除去={stats['duplicates_removed']}")
     for name in ("left", "right", "forward", "turn"):

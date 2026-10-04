@@ -22,7 +22,9 @@ bool feedback_new          # true when THIS tick's serial exchanges received a n
                            # frame repeated (do not count them twice in an analysis).
 uint32 feedback_count      # valid feedback frames received from this motor since the library was
                            # created (wraps at 2^32). Consecutive samples with the same count carry
-                           # the same frame.
+                           # the same frame. Exchanges outside a tick (the E-stop callback's
+                           # immediate stop, configure/activate) also count, so a step of 2 or more
+                           # with a contiguous seq is not a lost sample.
 builtin_interfaces/Time feedback_stamp  # receipt time of the last valid feedback frame (node
                            # clock); 0 = never received. Not the tick time (see header.stamp).
 float32 roundtrip_ms       # [ms] write start -> feedback frame complete, for this motor's last
