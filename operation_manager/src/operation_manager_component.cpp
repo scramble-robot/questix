@@ -22,25 +22,44 @@ namespace operation_manager {
 
 OperationManagerComponent::OperationManagerComponent(const rclcpp::NodeOptions& options)
     : Node("operation_manager_node", options) {
+  // false: no GPIO safety path (questix_core enable_gpio_ref:=false, practice only). The node
+  // still owns /emergency_stop and publishes "released" with that reason, so every subscriber
+  // keeps one rule (unheard or silent = stopped) whatever the robot is wired with.
+  this->declare_parameter<bool>("gpio_safety_enabled", true);
   this->declare_parameter<std::vector<int64_t>>("safe_low_pins", std::vector<int64_t>{5});
   this->declare_parameter<std::vector<int64_t>>("safe_high_pins", std::vector<int64_t>{});
   this->declare_parameter<double>("timeout_seconds", 1.0);
   this->declare_parameter<std::string>("emergency_stop_topic", "/emergency_stop");
 
-  const auto safe_low_pins = this->get_parameter("safe_low_pins").as_integer_array();
-  const auto safe_high_pins = this->get_parameter("safe_high_pins").as_integer_array();
-  const auto timeout_seconds = this->get_parameter("timeout_seconds").as_double();
+  gpio_safety_enabled_ = this->get_parameter("gpio_safety_enabled").as_bool();
   emergency_stop_topic_ = this->get_parameter("emergency_stop_topic").as_string();
-  safety_evaluator_ =
-      std::make_unique<GpioSafetyEvaluator>(safe_low_pins, safe_high_pins, timeout_seconds);
-
-  controllable_pub_ = this->create_publisher<std_msgs::msg::Bool>("/gpio/controllable", 1);
   diagnostics_pub_ =
       this->create_publisher<diagnostic_msgs::msg::DiagnosticArray>("/diagnostics", 1);
   // Latched so late-joining subscribers immediately receive the current state
   // (topic contract: see questix_msgs/README.md).
   emergency_stop_pub_ = this->create_publisher<questix_msgs::msg::EmergencyStop>(
       emergency_stop_topic_, emergency_stop_qos());
+
+  if (!gpio_safety_enabled_) {
+    // No GPIO is read and /gpio/controllable is not published (nothing was judged).
+    eval_timer_ =
+        this->create_wall_timer(std::chrono::milliseconds(100),
+                                std::bind(&OperationManagerComponent::publish_without_gpio, this));
+    publish_without_gpio();
+    RCLCPP_WARN(this->get_logger(),
+                "GPIO safety path disabled (gpio_safety_enabled=false): the physical E-stop is "
+                "not monitored; %s reports \"%s\"",
+                emergency_stop_topic_.c_str(), kNoGpioReason);
+    return;
+  }
+
+  const auto safe_low_pins = this->get_parameter("safe_low_pins").as_integer_array();
+  const auto safe_high_pins = this->get_parameter("safe_high_pins").as_integer_array();
+  const auto timeout_seconds = this->get_parameter("timeout_seconds").as_double();
+  safety_evaluator_ =
+      std::make_unique<GpioSafetyEvaluator>(safe_low_pins, safe_high_pins, timeout_seconds);
+
+  controllable_pub_ = this->create_publisher<std_msgs::msg::Bool>("/gpio/controllable", 1);
 
   for (const auto pin : safety_evaluator_->monitored_pins()) {
     std::string topic_name = "gpio_" + std::to_string(pin);
@@ -63,6 +82,27 @@ OperationManagerComponent::~OperationManagerComponent() {}
 
 rclcpp::QoS OperationManagerComponent::emergency_stop_qos() {
   return rclcpp::QoS(1).reliable().transient_local();
+}
+
+void OperationManagerComponent::publish_without_gpio() {
+  const rclcpp::Time now = this->now();
+
+  diagnostic_msgs::msg::DiagnosticStatus status;
+  status.name = "operation_manager: gpio_controllability";
+  status.hardware_id = "gpio";
+  status.level = diagnostic_msgs::msg::DiagnosticStatus::WARN;
+  status.message = "GPIO safety path disabled: the physical E-stop is not monitored";
+  diagnostic_msgs::msg::DiagnosticArray diag_array;
+  diag_array.header.stamp = now;
+  diag_array.status.push_back(status);
+  diagnostics_pub_->publish(diag_array);
+
+  questix_msgs::msg::EmergencyStop estop_msg;
+  estop_msg.header.stamp = now;
+  estop_msg.active = false;
+  estop_msg.source = "operation_manager";
+  estop_msg.reason = kNoGpioReason;
+  emergency_stop_pub_->publish(estop_msg);
 }
 
 void OperationManagerComponent::gpio_callback(const std_msgs::msg::Bool::SharedPtr msg,

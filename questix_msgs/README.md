@@ -117,14 +117,19 @@ DDT M0602C の Protocol 1 応答フレームをデコードした 1 モータ分
   (`evaluate_controllability()`)の毎回実行時に発行する。
   すなわち GPIO 更新毎(公称 ~20 Hz)+ 100 ms watchdog timer。
   `active = !controllable`。
-- **発行者不在・未受信はフェイルクローズ**: operation_manager は `enable_gpio_ref=true` の構成
-  でdrive/shotの有無に依存せず `questix_core.launch.xml` から起動する。
-  standalone `joy_controller_referee.launch.xml` も互換性のため起動できる。
-  統合構成(`questix_core`)の購読側(drive_component / shot_component / esc_motor_control)は、
-  **一度も受信していない間は「非常停止の状態が不明」として動かさない**(`require_emergency_stop`
-  既定 true)。したがって `enable_gpio_ref=false` の練習起動では /emergency_stop が無く、
-  走行・発射はできない。受信状態はモータとの通信(フィードバックの取得)とは別で、
-  drive_component は動かさないまま実測の取得を続ける。
+- **発行元は常に起動する**: operation_manager は drive/shot の有無にも `enable_gpio_ref` にも
+  依存せず `questix_core.launch.xml` から常に起動する(standalone
+  `joy_controller_referee.launch.xml` も互換性のため起動できる)。
+  - `enable_gpio_ref=true`(production の practice / competition 起動は常にこれ): GPIO を判定し `active = !controllable`。
+    reason は `pin 5 ...`(物理 E-stop)/ `pin 27 ...`(AutoReferee)で入力を区別する。
+  - `enable_gpio_ref=false`(手動の明示的な診断起動のみ。launch 引数 `enable_gpio_ref:=false` をその都度明示したときだけで、
+    環境変数 `ENABLE_GPIO_REF` では選ばれず(既定はリテラルの `true`)、保存もされない。production ランチャーは使わない。`operation_manager.no_gpio.yaml`、
+    `gpio_safety_enabled: false`): GPIO を読まず `/gpio/controllable` も出さない。
+    `active=false`、reason `released (no GPIO safety path)` を 100 ms 毎に出す。
+- **未受信はフェイルクローズ**: 購読側(drive_component / shot_component / esc_motor_control は
+  共通の `questix_safety::EmergencyStopMonitor`、QUESTiX LAB ブリッジ)は構成によらず、**一度も受信していない間は「非常停止の状態が不明」
+  として動かさない**(`require_emergency_stop: true`)。受信状態はモータとの通信
+  (フィードバックの取得)とは別で、drive_component は動かさないまま実測の取得を続ける。
 - **staleness 検出**: 購読側は「一度以上受信した後に」`emergency_stop_timeout_sec`
   (既定 1.0 s、自分の単調時計による受信間隔)を超えて受信が途絶えたら、押下と同じく停止して
   動かさない。受信が戻っても、解除だけでは動き出さない(新しい指令が必要)。
@@ -143,17 +148,26 @@ DDT M0602C の Protocol 1 応答フレームをデコードした 1 モータ分
 
 ## `/actuation_authority` トピック契約(練習時の実行時許可)
 
+教員の許可(teacher permission)。ノードのパラメータとコードは `teacher_permission`
+(`require_teacher_permission`、`teacher_permission_topic`、`teacher_permission_timeout_sec`)で
+呼ぶ。トピック名 `/actuation_authority` と型 `ActuationAuthority` は、記録済みの rosbag と
+Robot Manager との互換のためそのまま。
+
 - **型**: `questix_msgs/msg/ActuationAuthority`(`drive_allowed`, `launcher_allowed`)
 - **QoS**: reliable + **volatile** + keep-last(1)。**transient_local にしない**(許可をラッチしない)。
 - **発行元**: Robot Manager(教員が「ロボットの走行制御」「発射機構の操作」を ON にしている間だけ、
   約 5 Hz)。Robot Manager の起動・Pi の再起動・練習モードへの切替・大会モードへの切替・
   「すべて止める」・Robot Manager の終了ではすべて OFF から始まる/OFF になる。
-- **購読側**: `require_runtime_actuation_authority` が true のとき(`questix_core` の練習起動)、
+- **非常停止とは別の概念**: 教員の許可は「動かしてよいか」の許可で、非常停止ではない。既定では
+  Robot Manager の中で QUESTiX LAB(教材)の走行・発射の許可の前提として使うだけで、
+  drive_component / shot_component / esc_motor_control はこれを見ずにコントローラで動く(3.2.0 と同じ)。
+- **購読側(opt-in)**: `questix_core` の `require_teacher_permission:=true`(練習のみ、既定 false、
+  環境変数からは読まない)を明示したときだけ、
   drive_component / shot_component / esc_motor_control は、自分の単調時計で
-  `runtime_authority_timeout_sec`(既定 1.0 s)以内に受信した `*_allowed=true` がある間だけ動かす。
+  `teacher_permission_timeout_sec`(既定 1.0 s)以内に受信した `*_allowed=true` がある間だけ動かす。
   未受信・false・途絶はすべて OFF。OFF になったら停止(drive: 即時停止 + 目標破棄、
   shot: 安全 teardown、ESC: 0 + ラッチ解除)。許可が戻っても、それだけでは動き出さない。
-- **大会起動**(`enable_autoreferee:=true`)は `require_runtime_actuation_authority:=false`。
+- **大会起動**(`enable_autoreferee:=true`)は opt-in しても常に `require_teacher_permission:=false`。
   AutoReferee と GPIO 安全系は従来どおりで、教室用の heartbeat が無くても止まらない。
 - 非常停止とは別の理由として扱う(許可の喪失を非常停止に見せかけない)。
 

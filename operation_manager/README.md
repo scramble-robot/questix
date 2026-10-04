@@ -24,6 +24,15 @@ Parameters:
 - `safe_high_pins`: pins whose safe value is `true` (stop on `false`)
 - `timeout_seconds`: maximum allowed age of GPIO update before marking not controllable
 - `emergency_stop_topic`: topic name for the unified emergency stop state (default `/emergency_stop`)
+- `gpio_safety_enabled` (default `true`): `false` runs the node without the GPIO safety path
+  (`config/operation_manager.no_gpio.yaml`, used by `questix_core` with
+  `enable_gpio_ref:=false`, an explicit manual diagnostic launch only: the launch argument must be
+  given on that launch, the `ENABLE_GPIO_REF` environment variable never selects it, and nothing
+  persists it; the production launcher always passes `enable_gpio_ref:=true`). It then reads no GPIO, publishes no
+  `/gpio/controllable` and no pin diagnostics (one WARN status instead), and still owns
+  `/emergency_stop`: `active=false`, reason `released (no GPIO safety path)`, every 100 ms.
+  Every actuating node and QUESTiX LAB therefore keep one rule (unheard, silent or active
+  means stop) with or without GPIO.
 
 The two pin lists define the monitored pins; no separate parallel
 `monitored_pins` array exists. Startup fails for an empty configuration,
@@ -40,6 +49,7 @@ Profiles:
   `safe_high_pins: [27]`
 - `config/operation_manager.yaml`: backward-compatible safe practice default,
   also omitting `safe_high_pins`
+- `config/operation_manager.no_gpio.yaml`: `gpio_safety_enabled: false` (no GPIO safety path)
 
 GPIO5 is the raw indication from the physical emergency-stop circuit. The
 circuit independently removes motor power through RLY1; GPIO5 reports its state

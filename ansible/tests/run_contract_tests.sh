@@ -74,7 +74,7 @@ if run_playbook ansible/tests/test_launch_env.yaml \
     assert_contains "$ENV_FILE" "ENABLE_LIDAR=false" "fresh render: ENABLE_LIDAR default false"
     assert_contains "$ENV_FILE" "ENABLE_SHOT=false" "fresh render: ENABLE_SHOT default false"
     assert_contains "$ENV_FILE" "ENABLE_DRIVE=false" "fresh render: ENABLE_DRIVE default false"
-    assert_contains "$ENV_FILE" "ENABLE_GPIO_REF=true" "fresh render: ENABLE_GPIO_REF default true (manual-launch safety)"
+    assert_contains "$ENV_FILE" "ENABLE_GPIO_REF=true" "fresh render: ENABLE_GPIO_REF default true (legacy field, never false)"
     assert_contains "$ENV_FILE" "ENABLE_RVIZ=false" "fresh render: ENABLE_RVIZ default false"
     assert_contains "$ENV_FILE" "CONTROLLER_TYPE=dualshock" "fresh render: CONTROLLER_TYPE default dualshock"
     assert_contains "$ENV_FILE" "ROS_DOMAIN_ID=11" "fresh render: ROS_DOMAIN_ID synced to resolved value"
@@ -205,7 +205,8 @@ if [ "$(id -u)" -eq 0 ]; then REFUSE_ROOT=false; fi # only an isolated test may 
 run_build() {
     PATH="$FAKE_TOOLS:$PATH" run_playbook ansible/tests/test_workspace_build.yaml \
         -e "workspace_path=$BUILD_WS" -e "workspace_ros_setup=$FAKE_TOOLS/setup.bash" \
-        -e "workspace_rosdep_become=false" -e "workspace_build_refuse_root=$REFUSE_ROOT" "$@"
+        -e "workspace_rosdep_become=false" -e "workspace_build_refuse_root=$REFUSE_ROOT" \
+        -e "workspace_ccache_install=false" "$@"
 }
 count_calls() { grep -c "^$1" "$FAKE_ROS_LOG" || true; }
 
@@ -221,6 +222,13 @@ if run_build; then
         "workspace build: rosdep installs the workspace's keys"
     assert_contains "$FAKE_ROS_LOG" "ROS_HOME=/home/$USER/.ros" "workspace build: rosdep reads the kit user's index"
     assert_contains "$FAKE_ROS_LOG" "colcon build --symlink-install" "workspace build: colcon build --symlink-install"
+    assert_contains "$FAKE_ROS_LOG" \
+        "--cmake-args -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache" \
+        "workspace build: compiles through ccache (kept in CMakeCache for the user's own builds)"
+    FAKE_CCACHE_CONF="$(dirname "$FAKE_ROS_LOG")/fake_ccache.conf"
+    assert_contains "$FAKE_CCACHE_CONF" "sloppiness=include_file_ctime,include_file_mtime,pch_defines,time_macros" \
+        "workspace build: ccache sloppiness lets it cache precompiled headers"
+    assert_contains "$FAKE_CCACHE_CONF" "max_size=2G" "workspace build: ccache size bounded on the SD card"
     assert_contains "$FAKE_ROS_LOG" "ros2 pkg prefix questix_lab_bridge" "workspace build: questix_lab_bridge must resolve"
     assert_contains "$FAKE_ROS_LOG" "ros2 pkg executables questix_lab_bridge" "workspace build: lab_bridge_node must resolve"
     assert_contains "$PLAYBOOK_LOG" "Workspace built at: $BUILD_WS" "workspace build: result reported"
@@ -258,7 +266,8 @@ chmod +x "$BROKEN_TOOLS/colcon"
 if PATH="$BROKEN_TOOLS:$FAKE_TOOLS:$PATH" ansible-playbook ansible/tests/test_workspace_build.yaml \
     -i localhost, --connection=local -e "workspace_path=$BUILD_WS" \
     -e "workspace_ros_setup=$FAKE_TOOLS/setup.bash" -e "workspace_rosdep_become=false" \
-    -e "workspace_build_refuse_root=$REFUSE_ROOT" >"$PLAYBOOK_LOG" 2>&1; then
+    -e "workspace_build_refuse_root=$REFUSE_ROOT" -e "workspace_ccache_install=false" \
+    >"$PLAYBOOK_LOG" 2>&1; then
     fail "workspace build: a build without questix_lab_bridge was reported as success"
 else
     assert_not_contains "$PLAYBOOK_LOG" "Workspace built at:" "workspace build: a missing questix_lab_bridge fails the setup"
@@ -293,6 +302,19 @@ if [ "$ROLE_ORDER" = "role: robotics_workspace role: ros2_build role: robot_auto
     pass "setup_kit: robotics_workspace, ros2_build, robot_autostart in that order"
 else
     fail "setup_kit role order: $ROLE_ORDER"
+fi
+# `./setup.sh --tags ros2_build` on an existing kit: the target checks and the build, nothing else.
+assert_contains setup.sh '-e "ros_domain_id=${ROS_DOMAIN_ID}" "$@"' "setup.sh: passes extra arguments (--tags) on"
+if ansible-playbook ansible/playbooks/setup_kit.yaml -i localhost, --list-tasks --tags ros2_build \
+    >"$PLAYBOOK_LOG" 2>&1; then
+    assert_contains "$PLAYBOOK_LOG" "Verify target architecture" "--tags ros2_build: target checks still run"
+    assert_contains "$PLAYBOOK_LOG" "Validate ROS_DOMAIN_ID" "--tags ros2_build: ROS_DOMAIN_ID check still runs"
+    assert_contains "$PLAYBOOK_LOG" "ros2_build : Build the workspace" "--tags ros2_build: builds the workspace"
+    assert_not_contains "$PLAYBOOK_LOG" "robot_autostart :" "--tags ros2_build: no other role runs"
+    assert_not_contains "$PLAYBOOK_LOG" "ros2_installation :" "--tags ros2_build: no apt upgrade / ROS install"
+else
+    show_log_tail
+    fail "--tags ros2_build: --list-tasks failed (log shown above)"
 fi
 assert_not_contains "ansible/roles/ros2_build/tasks/main.yaml" "ros2 launch" "workspace build: starts no node"
 assert_not_contains "ansible/roles/ros2_build/tasks/main.yaml" "ros2 run" "workspace build: runs no node"

@@ -24,10 +24,13 @@ public:
   explicit OperationManagerComponent(const rclcpp::NodeOptions& options);
   virtual ~OperationManagerComponent();
   static rclcpp::QoS emergency_stop_qos();
+  // /emergency_stop reason while the GPIO safety path is disabled (gpio_safety_enabled=false).
+  static constexpr const char* kNoGpioReason = "released (no GPIO safety path)";
 
 private:
   void gpio_callback(const std_msgs::msg::Bool::SharedPtr msg, unsigned int pin);
   void evaluate_controllability();
+  void publish_without_gpio();
 
   std::map<unsigned int, rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr> gpio_subs_;
   std::unique_ptr<GpioSafetyEvaluator> safety_evaluator_;
@@ -40,6 +43,7 @@ private:
   rclcpp::TimerBase::SharedPtr eval_timer_;
 
   std::string emergency_stop_topic_;
+  bool gpio_safety_enabled_{true};
 };
 
 }  // namespace operation_manager

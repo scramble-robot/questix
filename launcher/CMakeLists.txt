@@ -39,8 +39,9 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_gpio_safety_launch test/test_gpio_safety_launch.py
     ENV "QUESTIX_SOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/.."
   )
+  # Starts questix_core several times (the E-stop / authority switch matrix): allow for it.
   ament_add_pytest_test(test_gpio_safety_runtime test/test_gpio_safety_runtime.py
-    TIMEOUT 90
+    TIMEOUT 300
   )
 endif()
 

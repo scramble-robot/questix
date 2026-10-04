@@ -242,6 +242,37 @@ M6 規格書 V1.0 は通信 115200 baud・最大 500 Hz・速度 ±330 rpm と�
 ため、**今回コードは変更していない**。往復時間・`serial_response_timeout_ms` の下限の見積もり
 （10 byte で 1.74 ms）は 57600 baud を前提にしている。
 
+## ビルド時間
+
+各ターゲットは 1 ファイル構成で、時間の大半は rclcpp / rclcpp_lifecycle ヘッダーの解析です。
+`CMakeLists.txt` はこれをプリコンパイル済みヘッダー（共有ライブラリ用と実行ファイル用の 2 つ）
+で 1 回だけ解析し、全ターゲットで再利用します（`-DMOTOR_CONTROL_APP_USE_PCH=OFF` で無効化）。
+ビルドログに `-Winvalid-pch` の警告が出たら再利用が効いていません（結果は同じで、速度だけ落ちる）。
+
+キット（Raspberry Pi 5）は `./setup.sh` の `ros2_build` ロールが ccache の導入・設定と
+ワークスペースへの組み込みまで行います。既存のキットも `./setup.sh --tags ros2_build`（このロールだけ実行）で入り、以降は
+いつもの `colcon build --symlink-install` のまま ccache が使われます（pull・ブランチ切り替え後の
+再コンパイルが速くなる）。
+
+開発 PC で同じことをするには:
+
+```bash
+sudo apt install ccache
+# PCH と併用するための設定（一度だけ）
+ccache --set-config sloppiness=include_file_ctime,include_file_mtime,pch_defines,time_macros
+```
+
+`~/.colcon/defaults.yaml`（コマンドで `--cmake-args` を付けるとこちらは上書きされる）:
+
+```yaml
+build:
+  cmake-args:
+    - -DCMAKE_C_COMPILER_LAUNCHER=ccache
+    - -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+```
+
+このパッケージだけを触っている間は `--packages-select motor_control_app` で他を省けます。
+
 ## テスト
 
 ```bash

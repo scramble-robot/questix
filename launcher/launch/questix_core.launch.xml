@@ -5,7 +5,10 @@
   <arg name="enable_lidar" default="$(env ENABLE_LIDAR false)" description="Enable YDLiDAR"/>
   <arg name="enable_shot" default="$(env ENABLE_SHOT true)" description="Enable Shot component"/>
   <arg name="enable_drive" default="$(env ENABLE_DRIVE true)" description="Enable drive component"/>
-  <arg name="enable_gpio_ref" default="$(env ENABLE_GPIO_REF true)" description="Enable GPIO safety path (gpio_reader, operation_manager, and joy gating)"/>
+  <!-- GPIO5 monitoring is the default for every launch (issue #168). A literal default, never
+       $(env ENABLE_GPIO_REF ...): no environment (a sourced launch.env, an export) selects the
+       no-GPIO diagnostic; only an explicit enable_gpio_ref:=false on this one launch does. -->
+  <arg name="enable_gpio_ref" default="true" description="Enable GPIO safety path (gpio_reader, operation_manager, and joy gating). false: explicit manual diagnostic only, for this launch process"/>
   <arg name="enable_autoreferee" default="false" description="Use competition GPIO profile with AutoReferee GPIO27"/>
   <arg name="controller_type" default="$(env CONTROLLER_TYPE dualshock)" description="Controller type: dualshock, uart, or web (smartphone browser)"/>
   <!-- Practice runs route the controller through twist_arbiter so QUESTiX LAB driving experiments
@@ -16,6 +19,12 @@
        shot/ESC nodes' accept_lab_input; the controller always takes over. Not read from the
        environment, and never on with AutoReferee (competition): see the shot include below. -->
   <arg name="enable_lab_shoot" default="true" description="Let QUESTiX LAB operate the roller, tilt and fire (practice only; ignored with enable_autoreferee)"/>
+  <!-- The teacher's permission (/actuation_authority from Robot Manager's 操作 tab) is a
+       permission, not an emergency stop: by default it only gates QUESTiX LAB's 教材 permissions
+       in Robot Manager, and the controller drives as soon as the robot is up. true makes the
+       drive and launcher nodes also stop without a fresh permission (opt-in for practice). Not
+       read from the environment, and never on with AutoReferee (competition). -->
+  <arg name="require_teacher_permission" default="false" description="Move the drive and launcher only while the teacher's permission is fresh (practice opt-in; ignored with enable_autoreferee)"/>
   <arg name="enable_rviz" default="$(env ENABLE_RVIZ false)" description="Enable RViz visualization"/>
   <!-- AutoReferee operation without the GPIO safety path is an invalid configuration. -->
   <group if="$(and $(var enable_autoreferee) $(not $(var enable_gpio_ref)))">
@@ -28,8 +37,12 @@
   <!-- Profile YAML files are the single source of truth for GPIO pins and polarity. -->
   <let name="gpio_reader_config_file" value="$(find-pkg-share gpio_reader)/config/gpio_reader.practice.yaml" unless="$(var enable_autoreferee)"/>
   <let name="gpio_reader_config_file" value="$(find-pkg-share gpio_reader)/config/gpio_reader.competition.yaml" if="$(var enable_autoreferee)"/>
+  <!-- operation_manager always runs and owns /emergency_stop; without the GPIO safety path it
+       reads no GPIO and reports "released (no GPIO safety path)" (an explicit manual diagnostic
+       run only; questix_robot_launcher.sh always passes enable_gpio_ref:=true). -->
   <let name="operation_manager_config_file" value="$(find-pkg-share operation_manager)/config/operation_manager.practice.yaml" unless="$(var enable_autoreferee)"/>
   <let name="operation_manager_config_file" value="$(find-pkg-share operation_manager)/config/operation_manager.competition.yaml" if="$(var enable_autoreferee)"/>
+  <let name="operation_manager_config_file" value="$(find-pkg-share operation_manager)/config/operation_manager.no_gpio.yaml" unless="$(var enable_gpio_ref)"/>
   <!-- All child processes stay disabled while the invalid branch reports and exits. -->
   <group unless="$(and $(var enable_autoreferee) $(not $(var enable_gpio_ref)))">
     <include file="$(find-pkg-share questix_control_config)/launch/control_profile.launch.py" />
@@ -38,10 +51,9 @@
         <arg name="enable_gpio_ref" value="$(var enable_gpio_ref)"/>
         <arg name="controller_type" value="$(var controller_type)"/>
         <arg name="accept_lab_input" value="$(and $(var enable_lab_shoot) $(not $(var enable_autoreferee)))"/>
-        <!-- Practice: the launcher moves only while the teacher's runtime authority
-             (/actuation_authority from Robot Manager) is fresh. Competition keeps the
-             AutoReferee / GPIO path and never depends on the classroom heartbeat. -->
-        <arg name="require_runtime_actuation_authority" value="$(not $(var enable_autoreferee))"/>
+        <!-- The teacher's permission is opt-in (see the arg above); competition keeps
+             the AutoReferee / GPIO path and never depends on the classroom heartbeat. -->
+        <arg name="require_teacher_permission" value="$(and $(var require_teacher_permission) $(not $(var enable_autoreferee)))"/>
       </include>
     </group>
     <group if="$(var enable_drive)">
@@ -51,9 +63,8 @@
         <arg name="enable_operation_manager" value="false"/>
         <arg name="controller_type" value="$(var controller_type)"/>
         <arg name="enable_twist_arbiter" value="$(and $(var enable_twist_arbiter) $(not $(var enable_autoreferee)))"/>
-        <!-- Practice: the drive moves only while the teacher's runtime authority is fresh
-             (competition: false, see the shot include). -->
-        <arg name="require_runtime_actuation_authority" value="$(not $(var enable_autoreferee))"/>
+        <!-- The teacher's permission: see the shot include. -->
+        <arg name="require_teacher_permission" value="$(and $(var require_teacher_permission) $(not $(var enable_autoreferee)))"/>
       </include>
     </group>
     <group if="$(var enable_lidar)">
@@ -63,10 +74,12 @@
       <include file="$(find-pkg-share gpio_reader)/launch/gpio_reader.launch.xml">
         <arg name="config_file" value="$(var gpio_reader_config_file)"/>
       </include>
-      <include file="$(find-pkg-share operation_manager)/launch/operation_manager.launch.xml">
-        <arg name="config_file" value="$(var operation_manager_config_file)"/>
-      </include>
     </group>
+    <!-- The single owner of /emergency_stop, with or without the GPIO safety path: every
+         actuating node and QUESTiX LAB stop while it is unheard, silent or active. -->
+    <include file="$(find-pkg-share operation_manager)/launch/operation_manager.launch.xml">
+      <arg name="config_file" value="$(var operation_manager_config_file)"/>
+    </include>
     <!-- RViz Visualization -->
     <node pkg="rviz2" exec="rviz2" name="rviz2" output="screen" if="$(var enable_rviz)" args="-d $(find-pkg-share ydlidar_ros2_driver)/config/ydlidar.rviz">
       <param name="use_sim_time" value="$(var use_sim_time)"/>
