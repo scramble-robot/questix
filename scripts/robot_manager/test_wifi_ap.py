@@ -8,6 +8,7 @@ import asyncio
 import importlib
 import json
 import threading
+from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
@@ -230,6 +231,25 @@ def test_lab_already_serving_is_fine(wifi_ap, helper, monkeypatch):
     assert wait(wifi_ap)["lab"] == "running"
 
 
+def test_start_says_where_the_browser_controller_opens(wifi_ap, helper, tmp_path, monkeypatch):
+    # In every mode: the controller is served by the robot launch, not by QUESTiX LAB.
+    monkeypatch.setattr(wifi_ap.lab, "_competition_mode", lambda: True)
+    (tmp_path / "wifi_ap.env").write_text(SETTINGS)
+    (tmp_path / "launch.env").write_text("CONTROLLER_TYPE=web\n")
+    post(wifi_ap.start_access_point)
+    job = wait(wifi_ap)
+    assert job["lab"] == "competition"
+    assert job["controller_message"] == (
+        "ブラウザのコントローラーは http://10.42.0.1:8899/ で開けます（ロボット制御の起動中）。")
+
+
+def test_no_controller_message_for_other_controllers(wifi_ap, helper, tmp_path):
+    (tmp_path / "wifi_ap.env").write_text(SETTINGS)
+    (tmp_path / "launch.env").write_text("CONTROLLER_TYPE=dualshock\n")
+    post(wifi_ap.start_access_point)
+    assert "controller_message" not in wait(wifi_ap)
+
+
 def test_stop_does_not_touch_the_lab(wifi_ap, helper, tmp_path):
     (tmp_path / "wifi_ap.env").write_text(SETTINGS)
     post(wifi_ap.stop_access_point)
@@ -449,3 +469,13 @@ def test_page_request_passes_the_app(manager, wifi_ap, helper):
     assert wait(wifi_ap)["state"] == "succeeded"
     status, _ = asgi(manager, "GET", "/api/wifi-ap", {"host": "localhost:8888"})
     assert status == 200
+
+
+def test_the_controller_port_is_the_same_everywhere(wifi_ap):
+    root = Path(__file__).resolve().parents[2]
+    params = (root / "web_joy_driver/config/web_joy_driver_params.yaml").read_text()
+    assert f"port: {wifi_ap.WEB_JOY_PORT}" in params
+    script = (root / "scripts/wifi-ap.sh").read_text()
+    assert f"\nWEB_JOY_PORT={wifi_ap.WEB_JOY_PORT}  #" in script
+    # wifi-ap.sh card carries the controller type, so a printed card gets the third QR code too.
+    assert "'controller_type': os.environ['CARD_CONTROLLER_TYPE']" in script
