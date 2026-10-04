@@ -49,6 +49,7 @@ public:
 
   int master_fd{-1};
   bool answer{true};
+  bool corrupt_crc{false};  // answer with a full 10-byte frame whose CRC does not match
   int16_t speed{0};
 
 protected:
@@ -56,7 +57,10 @@ protected:
     const auto* bytes = static_cast<const uint8_t*>(data);
     // Answer motion commands (10-byte frames) only; the mode frame needs no response.
     if (answer && master_fd >= 0 && size == 10 && bytes[1] != 0xA0) {
-      const auto frame = feedbackFrame(bytes[0], speed, 1234);
+      auto frame = feedbackFrame(bytes[0], speed, 1234);
+      if (corrupt_crc) {
+        frame.back() ^= 0xFF;
+      }
       if (write(master_fd, frame.data(), frame.size()) != static_cast<ssize_t>(frame.size())) {
         return -1;
       }
@@ -142,6 +146,25 @@ TEST_F(DdtTransactionStats, SilentMotorCountsATimeoutAndNoFrame) {
   ASSERT_TRUE(lib_->setMotorVelocity(kLeft, 40));
   EXPECT_FALSE(stats(kLeft).last_response_timeout);
   EXPECT_EQ(stats(kLeft).feedback_count, 2u);
+}
+
+// A frame that arrives but is not valid feedback (CRC mismatch) counts as "no valid response" in
+// both the per-motor record (the diagnostic topic) and the latency statistics (the deactivate log).
+TEST_F(DdtTransactionStats, InvalidFrameCountsAsNoValidResponseEverywhere) {
+  ASSERT_TRUE(lib_->initializeMotor(kLeft, ControlMode::Velocity));
+  const Stats before = stats(kLeft);
+  const auto latency_before = lib_->getSerialLatencyStats();
+  lib_->corrupt_crc = true;
+  ASSERT_TRUE(lib_->setMotorVelocity(kLeft, 40));
+  const Stats after = stats(kLeft);
+  const auto latency_after = lib_->getSerialLatencyStats();
+  EXPECT_EQ(after.transactions, before.transactions + 1);
+  EXPECT_EQ(after.feedback_count, before.feedback_count);  // nothing valid was parsed
+  EXPECT_EQ(after.response_timeouts, before.response_timeouts + 1);
+  EXPECT_TRUE(after.last_response_timeout);
+  EXPECT_TRUE(std::isnan(after.last_roundtrip_ms));
+  EXPECT_EQ(latency_after.samples, latency_before.samples);  // no round trip recorded
+  EXPECT_EQ(latency_after.timeouts, latency_before.timeouts + 1);
 }
 
 TEST_F(DdtTransactionStats, CurrentModeKeepsTheLastCurrentSent) {

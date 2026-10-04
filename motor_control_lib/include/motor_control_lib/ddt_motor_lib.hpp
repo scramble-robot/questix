@@ -240,11 +240,12 @@ public:
    *  応答 1.74ms @57600baud/10byte フレーム）。タイムアウト時はカウントのみ。
    */
   struct SerialLatencyStats {
-    uint64_t samples{0};   // 応答を受信できた往復の回数
-    uint64_t timeouts{0};  // フィードバック未受信（タイムアウト）の回数
-    double last_ms{0.0};   // 直近の往復時間 [ms]
-    double ema_ms{0.0};    // 指数移動平均 [ms]（alpha=0.05）
-    double max_ms{0.0};    // 起動以降の最大 [ms]
+    uint64_t samples{0};   // 有効なフィードバックを受信できた往復の回数
+    uint64_t timeouts{0};  // 有効なフィードバックが無かった回数（タイムアウトと、届いたフレームが
+                           // CRC 不一致・別 ID だったもの。診断トピックの response_timeout と同じ）
+    double last_ms{0.0};  // 直近の往復時間 [ms]
+    double ema_ms{0.0};   // 指数移動平均 [ms]（alpha=0.05）
+    double max_ms{0.0};   // 起動以降の最大 [ms]
   };
   SerialLatencyStats getSerialLatencyStats() const;
 

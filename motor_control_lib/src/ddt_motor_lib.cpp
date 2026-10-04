@@ -600,11 +600,15 @@ bool DdtMotorLib::sendFrameWithFeedback(int motor_id, const std::vector<uint8_t>
       const double roundtrip_ms = std::chrono::duration<double, std::milli>(
                                       std::chrono::steady_clock::now() - roundtrip_start)
                                       .count();
-      recordSerialRoundtrip(roundtrip_ms);
+      // 10 byte は届いたが有効なフィードバックでない（CRC 不一致・別 ID）ものは、診断トピックと
+      // 同じく「有効な応答なし」として数える（往復時間の統計には入れない）。
       tx.last_response_timeout = !parsed;
       tx.last_roundtrip_ms = parsed ? roundtrip_ms : std::nan("");
-      if (!parsed) {
+      if (parsed) {
+        recordSerialRoundtrip(roundtrip_ms);
+      } else {
         ++tx.response_timeouts;
+        ++serial_latency_stats_.timeouts;
       }
     } else {
       RCLCPP_DEBUG(logger_, "モーター %d フィードバック未受信 (%dms timeout)", motor_id,
