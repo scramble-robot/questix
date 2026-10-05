@@ -22,6 +22,7 @@
 #include <string>
 
 #include "motor_control_app/actuation_gate.hpp"
+#include "motor_control_app/shot_auto_start.hpp"
 #include "motor_control_app/shot_lab_logic.hpp"
 #include "motor_control_app/tilt_input.hpp"
 #include "motor_control_lib/servo_control.hpp"
@@ -38,8 +39,12 @@ namespace motor_control_app {
 //
 // さらに emergency_stop_topic（既定 /emergency_stop、questix_msgs/EmergencyStop、
 // operation_manager が配信。契約は questix_msgs/README.md）を購読し、非常停止解除
-// （active true→false）で即時に configure→activate、押下（false→true）で
-// deactivate→cleanup する。トピック未受信の環境では従来の周期リトライにフォールバック。
+// （active true→false）で起動の試行期間を始め、押下（false→true）で deactivate→cleanup する。
+// 試行期間（startup_window_sec）の間は startup_retry_period_sec の短い周期で configure
+// （接続 + サーボ 1 回の応答確認、上限 servo_response_timeout_ms）と activate を 1 段ずつ
+// 試す。解除のコールバックでは待たないので、サーボが通電直後に応答しなくても /emergency_stop
+// の受信処理を止めない（issue #175）。期限後は connect_retry_period_sec の周期リトライに戻る。
+// トピック未受信の環境では従来の周期リトライにフォールバック。
 // 連動は auto_start=true のときのみ有効で、手動 deactivate 済み（タイマー停止中）の
 // ノードは非常停止解除でも再 activate しない。
 // なお joy_gate は従来どおり /gpio/controllable（std_msgs/Bool）を購読する。
@@ -89,6 +94,12 @@ private:
   void fireTimerCallback();
   void cancelShotSequence();
   void autoStartTimerCallback();
+  // 起動の試行期間を始める（非常停止解除・許可・構成成功から）。待たずに戻る。
+  void requestStartup();
+  // 試行期間を終える（押下・途絶・許可なし・ACTIVE 到達・deactivate・shutdown）。
+  void endStartup();
+  // 試行期間中の短い周期のタイマー。configure か activate を 1 段だけ試す。
+  void startupTimerCallback();
   // /emergency_stop を受信したとき（estop_monitor_ から呼ばれる）。エッジで teardown / 自動起動。
   void onEmergencyStop(const questix_msgs::msg::EmergencyStop& msg,
                        const questix_safety::EmergencyStopMonitor::Change& change);
@@ -136,6 +147,11 @@ private:
   int command_rate_limit_ms_;
   bool auto_start_;
   double connect_retry_period_sec_;
+  // 起動の試行期間（issue #175）: 短い周期、期間の長さ、サーボ応答の上限。
+  double startup_retry_period_sec_{0.2};
+  double startup_window_sec_{5.0};
+  int servo_response_timeout_ms_{100};
+  shot_auto_start::StartupEpisode startup_episode_{};
   // /emergency_stop の途絶で teardown した（次の受信まで押下扱い）。受信状態そのものは
   // estop_monitor_ が持つ。
   bool estop_timed_out_;
@@ -185,6 +201,8 @@ private:
   // 常時生かす（unconfigured でも非常停止解除を検知するため）
   std::unique_ptr<questix_safety::EmergencyStopMonitor> estop_monitor_;
   rclcpp::TimerBase::SharedPtr auto_start_timer_;
+  // 起動の試行期間だけ動く短い周期のタイマー（auto_start=true のときだけ作る）
+  rclcpp::TimerBase::SharedPtr startup_timer_;
   rclcpp::TimerBase::SharedPtr emergency_stop_timeout_timer_;
   // 教員の許可（volatile、ラッチしない）とリース判定タイマー
   rclcpp::Subscription<questix_msgs::msg::ActuationAuthority>::SharedPtr teacher_permission_sub_;

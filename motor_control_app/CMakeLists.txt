@@ -142,6 +142,12 @@ if(BUILD_TESTING)
   target_compile_definitions(test_drive_component_node PRIVATE
     QUESTIX_DRIVE_HARDWARE_YAML="${CMAKE_CURRENT_SOURCE_DIR}/../launcher/config/drive_component.yaml"
     QUESTIX_DRIVE_CONTROL_YAML="${CMAKE_CURRENT_SOURCE_DIR}/../questix_control_config/config/controls.dualshock.yaml")
+
+  # The real ShotComponent on a fake servo bus (pseudo terminal): startup after an E-stop release
+  # never blocks the executor (issue #175).
+  ament_auto_add_gtest(test_shot_component_node test/test_shot_component_node.cpp TIMEOUT 120)
+  target_link_libraries(test_shot_component_node shot_component util)
+  ament_target_dependencies(test_shot_component_node motor_control_lib)
 endif()
 
 ament_auto_package(INSTALL_TO_SHARE config launch)
