@@ -35,12 +35,12 @@ if(BUILD_TESTING)
   ament_auto_add_gtest(test_wheel_velocity_lqr test/test_wheel_velocity_lqr.cpp)
   ament_auto_add_gtest(test_differential_kinematics test/test_differential_kinematics.cpp)
   ament_auto_add_gtest(test_feetech_protocol test/test_feetech_protocol.cpp)
-  # DdtMotorLib with injected serial write failures on a pseudo terminal (openpty: libutil).
-  ament_auto_add_gtest(test_ddt_fault_injection test/test_ddt_fault_injection.cpp)
-  target_link_libraries(test_ddt_fault_injection util)
   # FeetechServoController against a fake servo on a pseudo terminal (response deadline, issue #175).
   ament_auto_add_gtest(test_feetech_transaction test/test_feetech_transaction.cpp)
   target_link_libraries(test_feetech_transaction util)
+  # DdtMotorLib with injected serial write failures on a pseudo terminal (openpty: libutil).
+  ament_auto_add_gtest(test_ddt_fault_injection test/test_ddt_fault_injection.cpp)
+  target_link_libraries(test_ddt_fault_injection util)
 endif()
 
 ament_auto_package(INSTALL_TO_SHARE)
