@@ -7,14 +7,25 @@ shot_component:
     # Lifecycle auto start / ライフサイクル自動起動
     # 非常停止中はサーボが通電されず接続できないため、unconfigured で待機し
     # connect_retry_period_sec 間隔で接続を再試行、成功したら自動で activate する。
-    # false にすると ros2 lifecycle set で手動遷移する運用になる。
+    # false にすると ros2 lifecycle set で手動遷移する運用になる（手動 configure は待たずに
+    # サーボへ 1 回だけ問い合わせ、応答がなければ失敗する。操作者が再度要求する）。
     auto_start: true
     connect_retry_period_sec: 3.0
+    # 起動の試行期間 (issue #175, auto_start=true のときのみ)。非常停止の解除・教員の許可・
+    # 構成の成功から startup_window_sec の間、startup_retry_period_sec ごとに configure
+    # (接続 + サーボ 1 回の応答確認) と activate を 1 段ずつ試す。解除のコールバックでは待たない
+    # ので、通電直後のサーボ無応答の間も /emergency_stop の受信処理は止まらない。期限後は
+    # connect_retry_period_sec の周期リトライに戻る (WARN 1 行)。範囲外は 0.05..1.0 s / 0.5..60 s。
+    startup_retry_period_sec: 0.2
+    startup_window_sec: 5.0
+    # サーボの応答待ちの上限 [ms] (すべての送受信: 応答確認・home・チルト・射撃)。10..500 に制限。
+    # 送受信 1 回の所要は、これに RS485 切替の固定待ち約 7.5 ms を足した程度が上限になる。
+    servo_response_timeout_ms: 100
 
     # E-stop linkage / 非常停止連動（auto_start=true のときのみ有効）
     # operation_manager が配信する /emergency_stop（questix_msgs/EmergencyStop,
     # reliable + transient_local。契約: questix_msgs/README.md）を購読し、
-    # 非常停止解除 (active true→false) で即時に configure→activate、
+    # 非常停止解除 (active true→false) で起動の試行期間を始め (上記)、
     # 押下 (active false→true) で deactivate→cleanup してサーボ接続を解放する。
     # require_emergency_stop: true では、トピック未受信の間も非常停止として扱い、接続・射撃・
     # チルトをしない（operation_manager は questix_core で常に起動し、GPIO 安全系なしでも
