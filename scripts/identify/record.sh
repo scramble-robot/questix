@@ -322,35 +322,57 @@ META
 
 # 変える前の値（NAME=VALUE）。終了時（成功・失敗・Ctrl-C）に restore_params で戻す。
 ORIGINAL_PARAMS=()
+# 元の値に戻せなかったものがあれば 1。終了コードを EXIT_RESTORE_FAILED にし、meta.yaml に残す。
+RESTORE_FAILED=0
+EXIT_RESTORE_FAILED=5
+param_value() {  # param_value NAME -> 実効値（取得できなければ空）
+  ros2 param get "$NODE" "$1" 2>/dev/null | awk '{print $NF}' || true
+}
 restore_params() {
   local kv name value now
   for kv in "${ORIGINAL_PARAMS[@]}"; do
     name="${kv%%=*}"
     value="${kv#*=}"
     if ros2 param set "$NODE" "$name" "$value" >/dev/null 2>&1; then
-      now="$(ros2 param get "$NODE" "$name" 2>/dev/null | awk '{print $NF}' || true)"
+      now="$(param_value "$name")"
       if [[ "$now" == "$value" ]]; then
         echo "parameter restored: $name = $value"
         echo "param_restored_${name}: ${value}" >>"$DEST/meta.yaml"
         continue
       fi
     fi
+    RESTORE_FAILED=1
     echo "error: $NODE の $name を元の値 $value に戻せませんでした。手で戻してください:" >&2
     echo "       ros2 param set $NODE $name $value" >&2
     echo "param_restore_failed_${name}: ${value}" >>"$DEST/meta.yaml"
   done
   ORIGINAL_PARAMS=()
 }
+# 終了時（成功・失敗・Ctrl-C）の後片付け。戻せないパラメータがあれば終了コードを上書きする。
+on_exit() {
+  local rc=$?
+  if declare -F cleanup >/dev/null; then cleanup; fi
+  restore_params
+  rm -f "$TOPIC_LIST"
+  if [[ "$RESTORE_FAILED" == 1 ]]; then
+    echo "error: 元に戻せなかったパラメータがあります（終了コード $EXIT_RESTORE_FAILED）" >&2
+    exit "$EXIT_RESTORE_FAILED"
+  fi
+  exit "$rc"
+}
 # 途中で失敗しても、それまでに変えたものは戻す
-trap 'restore_params; rm -f "$TOPIC_LIST"' EXIT
+trap on_exit EXIT
 for kv in "${SET_PARAMS[@]}"; do
   name="${kv%%=*}"
   value="${kv#*=}"
-  original="$(ros2 param get "$NODE" "$name" 2>/dev/null | awk '{print $NF}' || true)"
+  original="$(param_value "$name")"
   [[ -n "$original" ]] || fail "$NODE の $name を取得できません（変更しません）"
-  ros2 param set "$NODE" "$name" "$value" >/dev/null 2>&1 \
-    || fail "$NODE の $name を $value に設定できませんでした（それまでに変えたものは戻します）"
   ORIGINAL_PARAMS+=("$name=$original")
+  ros2 param set "$NODE" "$name" "$value" >/dev/null 2>&1 \
+    || fail "$NODE の $name を $value に設定できませんでした（変えたものは戻します）"
+  now="$(param_value "$name")"
+  [[ "$now" == "$value" ]] \
+    || fail "$NODE の $name を $value に設定したのに、読み戻した値が '$now' です（変えたものは戻します）"
   echo "parameter set for this recording: $name = $value (was $original)"
   echo "param_override_${name}: {value: ${value}, original: ${original}}" >>"$DEST/meta.yaml"
 done
@@ -394,7 +416,8 @@ cleanup() {
   wait "$BAG_PID" 2>/dev/null || true
   BAG_PID=""
 }
-trap 'cleanup; restore_params; rm -f "$TOPIC_LIST"' EXIT INT TERM
+trap on_exit EXIT
+trap 'cleanup; restore_params' INT TERM
 
 echo "recording -> $DEST/bag"
 # 非対話シェルの `&` 起動は SIGINT を無視（SIG_IGN）で継承し、ros2（Python）は SIGINT の
@@ -421,6 +444,7 @@ cleanup
 case "$STEP_RC" in
   0) STEP_STATUS="completed" ;;
   3) STEP_STATUS="aborted_foreign_publisher" ;;
+  4) STEP_STATUS="aborted_emergency_stop" ;;
   130) STEP_STATUS="interrupted" ;;
   *) STEP_STATUS="failed_rc_${STEP_RC}" ;;
 esac
@@ -434,6 +458,9 @@ fi
 
 # 記録後の値を残してから、試験の間だけ変えたパラメータを元に戻す
 restore_params
+if [[ "$RESTORE_FAILED" == 1 ]]; then
+  echo "param_restore: failed" >>"$DEST/meta.yaml"
+fi
 
 PARAM_DIFF="$DEST/parameter_diff.txt"
 set +e

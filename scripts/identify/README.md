@@ -53,7 +53,11 @@ LPF 後 RPM しか残らず、`fit_models.py` は（黙って切り替えずに�
 スティック操作が混ざってデータが汚れ、スティック優先の仕組みも素通りする。`twist_arbiter` は
 publisher を常に持つが入力が無ければ何も流さないので、publisher の数ではなく実際の流れで判定する。
 `step_sequence.py` 自身も開始前に聞き、実行中に自分が送っていない値を受けたら中断して 0 を送り、
-終了コード 3 で終わる。`record.sh` はそれを `meta.yaml` の `step_sequence: "aborted_foreign_publisher"`
+終了コード 3 で終わる。また `/emergency_stop` を購読し、非常停止の押下を受けたら（または受信が 1 秒
+途絶えたら）中断して 0 を送り、終了コード 4 で終わる（押下の後に解除しても、残りのステップは再開しない。
+drive_component は押下中は指令を止めるが、送り続けると解除した瞬間に残りのステップで再び動くため）。
+開始前に解除を受信できなければ開始しない。`record.sh` はそれぞれ `meta.yaml` の
+`step_sequence: "aborted_foreign_publisher"` / `"aborted_emergency_stop"`
 として残し（完走は `"completed"`、Ctrl-C で途中終了なら `"interrupted"`）、`batch_fit.py` は
 completed 以外のデータセットを除外する。ステップ列が終われば `record.sh` は自分で後片付け
 （bag 停止・パラメータ再取得・bag info）まで進むので、Ctrl-C は途中で止めたいときだけ使う。
@@ -90,7 +94,7 @@ ident_<robot>_<floor>_<YYYYmmdd_HHMM>/
 ## 実機なしの確認
 
 ```bash
-bash scripts/identify/test_evidence.sh   # ros2 をスタブに差し替えた 74 assertion
+bash scripts/identify/test_evidence.sh   # ros2 をスタブに差し替えた 82 assertion
 python3 scripts/identify/test_step_sequence.py
 bash scripts/identify/record.sh --help
 bash -n scripts/identify/record.sh scripts/identify/lib_evidence.sh
@@ -275,8 +279,10 @@ bash scripts/identify/record.sh --levels 20,40,80,150 --hold 10              # �
 bash scripts/identify/record.sh --levels 20,40,80,150 --hold 10 --set-param stop_resend_interval_ms=0
 ```
 
-`--set-param` は記録の間だけ値を変え、終了時（Ctrl-C・失敗を含む）に元の値へ戻して確かめる
-（`meta.yaml` に `param_override_*` と `param_restored_*`）。変えてよいのは `min_command_rpm` と
+`--set-param` は記録の間だけ値を変え（設定した直後に読み戻して確かめ、違えば記録しない）、終了時
+（Ctrl-C・失敗を含む）に元の値へ戻して確かめる（`meta.yaml` に `param_override_*` と `param_restored_*`）。
+戻せなかったときは手で戻すコマンドを表示し、`meta.yaml` に `param_restore_failed_*` を残して
+終了コード 5 で終わる。変えてよいのは `min_command_rpm` と
 `stop_resend_interval_ms` だけ。比べるのは、停止指令からの停止までの時間と回った角度（position の差。
 300 ms でも正確に出る）、速度の符号の反転（行き過ぎ）、減速の曲線の折れ（0 のときだけ見える）。
 無負荷で差が出なくても、床の上で出ないとは言えない。

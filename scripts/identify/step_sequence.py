@@ -29,6 +29,11 @@ wheel_radius から車体前進速度 [m/s] に換算して publish する（左
     ros2 bag record /drive_status /target_twist -o ident_velocity_YYYYMMDD
 
 安全: 非常停止が効くことを確認してから実行する。Ctrl-C で即座に 0 を publish して終了する。
+非常停止との連動: /emergency_stop（questix_msgs/EmergencyStop）を購読し、押下（active=true）を受けたら、
+または受信が --estop-timeout 秒途絶えたら、ステップ列を中断して 0 を送り、終了コード 4 で終わる
+（drive_component は押下中は指令を止めるが、ここが送り続けると解除した瞬間に残りのステップで再び
+動くため）。開始前に解除（active=false）を受信できなければ開始しない。--no-estop-watch で無効
+（/emergency_stop の無い単体診断だけ）。
 
 他の送り手との競合: /target_twist には通常 twist_arbiter（練習）や joy_controller（競技）も
 publish する（コントローラ接続中は /joy のたびに流れる）。混ざると同定データが汚れ、スティック
@@ -112,6 +117,44 @@ def start_gate_problems(schedule, min_command_rpm):
 
 # 他の publisher を検出したときの終了コード（record.sh が区別して表示する）
 EXIT_FOREIGN_PUBLISHER = 3
+# 非常停止の押下・受信途絶で中断したときの終了コード（record.sh が区別して残す）
+EXIT_EMERGENCY_STOP = 4
+
+
+class EstopGuard:
+    """/emergency_stop の状態から、ステップ列を続けてよいかを決める（ROS に依存しない判定だけ）.
+
+    続けてよいのは、解除（active=false）を受信していて、最後の受信から timeout_sec 以内のときだけ。
+    押下（active=true）を一度でも受けたら、その後に解除を受けても中断のまま（解除で残りのステップが
+    再び動き出さないように）。
+    """
+
+    def __init__(self, timeout_sec=1.0):
+        self._timeout = timeout_sec
+        self._last = None
+        self._released = False
+        self.reason = None
+
+    def update(self, active, now):
+        self._last = now
+        if active:
+            if self.reason is None:
+                self.reason = "非常停止の押下を受信しました"
+            self._released = False
+        elif self.reason is None:
+            self._released = True
+
+    def ok(self, now):
+        if self.reason is not None:
+            return False
+        if self._last is None or not self._released:
+            return False
+        if now - self._last > self._timeout:
+            self.reason = f"/emergency_stop の受信が {self._timeout:.1f} 秒途絶えました"
+            return False
+        return True
+
+
 # Ctrl-C で中断したときの終了コード（シェルの慣例 128 + SIGINT。record.sh が中断として残す）
 EXIT_INTERRUPTED = 130
 
@@ -216,6 +259,11 @@ def main():
     ap.add_argument("--listen-before", type=float, default=2.0,
                     help="開始前に topic を聞く時間 [s]。この間に何か流れていれば開始しない")
     ap.add_argument("--dry-run", action="store_true", help="スケジュールを表示して終了")
+    ap.add_argument("--estop-topic", default="/emergency_stop")
+    ap.add_argument("--estop-timeout", type=float, default=1.0,
+                    help="/emergency_stop の受信がこの秒数途絶えたら中断する")
+    ap.add_argument("--no-estop-watch", action="store_true",
+                    help="/emergency_stop を見ない（/emergency_stop の無い単体診断だけ）")
     ap.add_argument("--min-command-rpm", type=int, default=None,
                     help="drive_component の min_command_rpm。渡すと、停止判定のために指令どおりに"
                     "回らないステップがあれば開始しない（record.sh が実効値を渡す）")
@@ -256,12 +304,32 @@ def main():
         print("rclpy / geometry_msgs が見つかりません。ROS 2 環境を source してください", file=sys.stderr)
         return 1
 
+    EmergencyStop = None
+    if not args.no_estop_watch:
+        try:
+            from questix_msgs.msg import EmergencyStop
+        except ImportError:
+            print("questix_msgs が見つかりません（非常停止との連動に必要）。questix のワークスペースを "
+                  "source するか、単体診断なら --no-estop-watch を付けてください", file=sys.stderr)
+            return 1
+
     rclpy.init()
     node = rclpy.create_node("identify_step_sequence")
     pub = node.create_publisher(Twist, args.topic, 10)
     period = 1.0 / args.rate
     detector = ForeignTwistDetector()
+    guard = EstopGuard(args.estop_timeout)
     state = {"listening": True, "foreign": None}
+    if EmergencyStop is not None:
+        from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+        estop_qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                               durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        node.create_subscription(
+            EmergencyStop, args.estop_topic,
+            lambda msg: guard.update(msg.active, time.monotonic()), estop_qos)
+
+    def estop_blocks():
+        return EmergencyStop is not None and not guard.ok(time.monotonic())
 
     def on_twist(msg):
         other_zero = (msg.linear.y == 0.0 and msg.linear.z == 0.0
@@ -275,7 +343,7 @@ def main():
     node.create_subscription(Twist, args.topic, on_twist, 10)
 
     def spin_until(deadline):
-        while state["foreign"] is None:
+        while state["foreign"] is None and not (not state["listening"] and estop_blocks()):
             remaining = deadline - time.monotonic()
             if remaining <= 0.0:
                 return
@@ -303,6 +371,12 @@ def main():
         node.destroy_node()
         rclpy.shutdown()
         return EXIT_FOREIGN_PUBLISHER
+    if estop_blocks():
+        reason = guard.reason or f"{args.estop_topic} で解除（active=false）を受信できません"
+        node.get_logger().error(f"開始前に: {reason}。非常停止を解除してから実行してください")
+        node.destroy_node()
+        rclpy.shutdown()
+        return EXIT_EMERGENCY_STOP
     state["listening"] = False
 
     rc = 0
@@ -310,9 +384,13 @@ def main():
         for rpm, dur in schedule:
             node.get_logger().info(f"step: {rpm} rpm for {dur:.1f} s")
             t_end = time.monotonic() + dur
-            while time.monotonic() < t_end and state["foreign"] is None:
+            while time.monotonic() < t_end and state["foreign"] is None and not estop_blocks():
                 publish(rpm)
                 spin_until(min(t_end, time.monotonic() + period))
+            if estop_blocks():
+                node.get_logger().error(f"実行中に: {guard.reason}。中断します")
+                rc = EXIT_EMERGENCY_STOP
+                break
             if state["foreign"] is not None:
                 node.get_logger().error(foreign_message("実行中に") + "。中断します")
                 rc = EXIT_FOREIGN_PUBLISHER
