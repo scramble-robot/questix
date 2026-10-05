@@ -38,6 +38,9 @@ if(BUILD_TESTING)
   # DdtMotorLib with injected serial write failures on a pseudo terminal (openpty: libutil).
   ament_auto_add_gtest(test_ddt_fault_injection test/test_ddt_fault_injection.cpp)
   target_link_libraries(test_ddt_fault_injection util)
+  # FeetechServoController against a fake servo on a pseudo terminal (response deadline, issue #175).
+  ament_auto_add_gtest(test_feetech_transaction test/test_feetech_transaction.cpp)
+  target_link_libraries(test_feetech_transaction util)
 endif()
 
 ament_auto_package(INSTALL_TO_SHARE)
