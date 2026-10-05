@@ -36,8 +36,12 @@ bool response_timeout      # true when this motor's last exchange in this tick g
 # --- the wire fields of the last valid feedback frame (Protocol 1 response, see MotorFeedback) ---
 uint8 mode                 # firmware control mode (DATA[1]): 1 = current loop, 2 = velocity loop
 int16 velocity_rpm_raw     # [rpm] measured speed, UNFILTERED integer wire value (DATA[4..5])
-uint16 position_raw        # rotor position (DATA[6..7]): 0..32767 <-> 0..360 deg. The encoder
-                           # resolves 4096 steps per turn, so the value moves in steps of 8 LSB;
-                           # whether it is absolute across power cycles is not confirmed.
+uint16 position_raw        # rotor position (DATA[6..7]): 0..32767 <-> 0..360 deg. The wire value
+                           # moves in steps of 1 LSB (all eight residues mod 8 occur); the sensor's
+                           # true resolution is not known. Observed on one robot (2026-10-05):
+                           # unchanged (+-1 LSB) across a motor power cycle without moving the
+                           # wheel, one wrap per turn while the motor drives it, but a hand-turned
+                           # ~90 deg read as only ~9-17 deg (unexplained). Do not treat it as a
+                           # calibrated absolute angle.
 int16 current_raw          # torque current (DATA[2..3]): -32767..32767 <-> -8..+8 A
 uint8 fault_code           # DATA[8]; 0 = no fault

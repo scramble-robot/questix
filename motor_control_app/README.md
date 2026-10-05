@@ -136,7 +136,7 @@ ON/OFF しても、変更前のモデル由来の推定値が新しい設定へ�
 | `max_motor_rpm` | 475（`DdtMotorLib::kSpecVelocityMaxRpm` にクランプ。データシートは ±330 rpm と記載、下記） |
 | `control_mode` | `"velocity"`（`"current"` で電流モード） |
 | `control_rate` | 50.0 Hz（シリアル往復 2 モータ直列が周期予算に収まる必要あり） |
-| `serial_response_timeout_ms` | 10（従来の固定値）。フィードバック応答待ちの上限 [ms]、範囲 [2, 50]（外はクランプ + WARN）。下限の目安は応答フレーム伝送 1.74 ms + ファーム処理の実測値 + 余裕。実測は停止時 INFO「シリアル往復レイテンシ統計」 |
+| `serial_response_timeout_ms` | 10（従来の固定値）。フィードバック応答待ちの上限 [ms]、範囲 [2, 50]（外はクランプ + WARN）。下限の目安は応答フレーム伝送 1.74 ms + ファーム処理の実測値 + 余裕。実測は bag の `/drive_control_sample` の `roundtrip_ms` / `response_timeout`（周期ごと・左右ごと）。INFO「シリアル往復レイテンシ統計」は lifecycle の deactivate のときだけ出る（サービスの停止や launch の Ctrl+C では出ない） |
 | `wheel_radius` / `wheel_separation` | 0.1 / 0.5 m |
 | `auto_start` / `connect_retry_period_sec` | true / 1.0 |
 | `publish_tf` / `odom_topic` / `odom_frame_id` / `base_frame_id` | true / `/odom` / `odom` / `base_link` |

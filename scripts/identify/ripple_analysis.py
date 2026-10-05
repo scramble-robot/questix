@@ -34,7 +34,16 @@
 
 エンコーダの誤差による見かけの速度変動（既定: 平均速度の約 1% × 次数）を下回る成分は
 「判別不能」とする（--encoder-error-pct）。周波数 f の成分の次数は f / 回転周波数なので、
-閾値は pct/100 × f × 60 [rpm]（回転数によらない）。
+閾値は pct/100 × f × 60 [rpm]（回転数によらない）。この 1 % は校正していない仮定で、統計的な
+検出限界ではない（「判別不能」はピークが無いことではなく、原因を区別できないことを示す）。
+
+追跡する次数（--track-orders、既定 20）: 指定した次数の振幅を、最大のピークを選ぶのではなく、
+回転角の位相（n × 回転角）への最小二乗で区間ごとに直接求める。機体どうし・測定どうしで同じ成分を
+比べるため。20 は ID13 の浮かせた試験（2026-10-05、50 Hz）の 20〜60 rpm で最大だった次数。
+標本化の上限（ナイキスト = サンプル周波数 / 2、50 Hz の記録なら 25 Hz）を超える成分は、
+|f − k × サンプル周波数| の低い周波数に折り返して見える。追跡する次数の周波数が上限を超える区間は
+「折り返し」と示し、その振幅は元の周波数の振幅として一意には定まらない（参考値）。卓越ピークが
+追跡する次数の折り返し先と一致するときも、その旨を示す。
 
 出力: 標準出力のテキスト要約、--json に数値要約、--plot <dir> に PNG（matplotlib があるときだけ）。
 """
@@ -59,7 +68,8 @@ MIN_SEGMENT_RPM = 10.0  # これより遅い指令の区間は使わない
 SETTLE_SEC = 1.0  # 指令が変わってから捨てる時間
 MIN_SEGMENT_SEC = 3.0
 MIN_SEGMENT_REVS = 3.0
-MAX_ORDER = 8
+MAX_ORDER = 8  # 同期平均で引く次数の上限（これより高い次数は「残差」に残る）
+TRACK_ORDERS = (20,)  # 振幅を直接求める次数（上の説明を参照）
 MIN_PEAK_HZ = 0.3  # これより下の時間スペクトルは卓越周波数の候補にしない
 ENCODER_ERROR_PCT = 1.0
 # 区間をまたいだ周波数の判定
@@ -421,7 +431,32 @@ def resolvable(freq_hz, amp_rpm, encoder_error_pct):
     return bool(amp_rpm > encoder_error_pct / 100.0 * freq_hz * 60.0)
 
 
-def analyze_segment(wheel, start, stop, encoder_error_pct=ENCODER_ERROR_PCT):
+def alias_frequency(freq_hz, sample_hz):
+    """周波数 freq_hz の成分がサンプル周波数 sample_hz で見える周波数（0..sample_hz/2）."""
+    return abs(((freq_hz + sample_hz / 2.0) % sample_hz) - sample_hz / 2.0)
+
+
+def order_fit(rev, values, order):
+    """回転角の位相 order × 回転角 の正弦波へ最小二乗で当てはめた振幅（不等間隔のまま）."""
+    phase = 2.0 * math.pi * order * (rev - rev[0])
+    basis = np.column_stack([np.ones(len(rev)), np.cos(phase), np.sin(phase)])
+    coef, *_ = np.linalg.lstsq(basis, values, rcond=None)
+    return float(math.hypot(coef[1], coef[2]))
+
+
+def _mark_tracked(peak, tracked, tolerance_hz):
+    """卓越ピークが追跡する次数（またはその折り返し先）と一致するなら印を付ける."""
+    if not peak:
+        return
+    for item in tracked:
+        if abs(peak["freq_hz"] - item["observed_hz"]) <= tolerance_hz:
+            peak["tracked_order"] = item["order"]
+            peak["aliased"] = item["aliased"]
+            return
+
+
+def analyze_segment(wheel, start, stop, encoder_error_pct=ENCODER_ERROR_PCT,
+                    track_orders=TRACK_ORDERS):
     t = wheel["t"][start:stop]
     rpm = wheel["rpm"][start:stop]
     rev = wheel["rev"][start:stop]
@@ -439,12 +474,30 @@ def analyze_segment(wheel, start, stop, encoder_error_pct=ENCODER_ERROR_PCT):
         if np.any(np.isfinite(wheel["command"][start:stop])) else None,
     }
     grid, uniform_rpm, step = uniform(t, rpm)
+    sample_hz = 1.0 / step
+    out["nyquist_hz"] = sample_hz / 2.0
     freq, amp = amplitude_spectrum(uniform_rpm, step)
     peak = dominant_peak(freq, amp)
     if peak:
         peak["order"] = peak["freq_hz"] / f_rot if f_rot > 0 else None
         peak["resolvable"] = resolvable(peak["freq_hz"], peak["amp_rpm"], encoder_error_pct)
     out["time_peak"] = peak
+    # 追跡する次数: 振幅を直接求め、標本化の上限を超えるなら折り返し先を示す
+    duration = t[-1] - t[0]
+    tracked = []
+    for order in track_orders:
+        f_true = order * f_rot
+        observed = alias_frequency(f_true, sample_hz)
+        tracked.append({
+            "order": order, "freq_hz": f_true, "observed_hz": observed,
+            "aliased": bool(f_true > sample_hz / 2.0),
+            # 折り返し先が区間の長さで分けられないほど低いと、平均（定数項）と区別できない
+            "ill_conditioned": bool(observed < 2.0 / duration) if duration > 0 else True,
+            "amp_rpm": order_fit(rev, rpm, order) if f_rot > 0 else None,
+        })
+    out["tracked_orders"] = tracked
+    tolerance_hz = max(2.0 / duration, 0.05) if duration > 0 else 0.05
+    _mark_tracked(peak, tracked, tolerance_hz)
     # 回転角と速度の整合（位置から求めた角度のとき、カウント/回転の前提や向きの確認）。
     # 比が 1 から大きく外れたら 1 回転 = 32768 カウントの前提か巻き戻しを疑う。
     if abs(mean_rpm) > 1e-9:
@@ -471,25 +524,36 @@ def analyze_segment(wheel, start, stop, encoder_error_pct=ENCODER_ERROR_PCT):
             rpeak["order"] = rpeak["freq_hz"] / f_rot if f_rot > 0 else None
             rpeak["resolvable"] = resolvable(rpeak["freq_hz"], rpeak["amp_rpm"],
                                              encoder_error_pct)
+        _mark_tracked(rpeak, tracked, tolerance_hz)
         out["residual_peak"] = rpeak
+        out["residual_max_order"] = max_order  # 残差はこの次数までを引いたもの
     else:
         out["orders"] = []
         out["residual_peak"] = None
+        out["residual_max_order"] = 0
     out["_spectrum"] = (freq, amp)
     return out
 
 
 # ----------------------------------------------------------------------------- 判定
-def classify(points, rel_rms=CLASSIFY_REL_RMS, min_spread=CLASSIFY_MIN_ROT_SPREAD):
+def classify(points, rel_rms=CLASSIFY_REL_RMS, min_spread=CLASSIFY_MIN_ROT_SPREAD,
+             segments=None, peaks=None):
     """(回転周波数, 卓越周波数) の組から、周波数が回転数に比例するか一定かを判定する.
 
     返り値の kind: "rotation_synchronous"（f = k × 回転周波数、k は次数）, "fixed_frequency"
     （f ≒ 一定）, "unclear"（どちらも当てはまらない / 両方当てはまる）, "insufficient"
-    （区間が 2 つ未満、または回転数の範囲が狭すぎる）。
+    （使える点が 2 つ未満、または回転数の範囲が狭すぎる）。
+    segments / peaks（定速区間の数、ピークがあった区間の数）を渡すと、点が足りない理由を
+    「区間が足りない」と「ピークがエンコーダ誤差の仮定以下」に分けて示す。
     """
     pts = [(fr, f) for fr, f in points if fr > 0 and f is not None and math.isfinite(f)]
     if len(pts) < 2:
-        return {"kind": "insufficient", "reason": "定速区間が 2 つ未満（回転数が 1 水準のみ）"}
+        if segments is not None and segments >= 2:
+            reason = (f"判別できるピークが {len(pts)} 個（定速区間 {segments}、ピーク "
+                      f"{peaks if peaks is not None else '?'}。残りはエンコーダ誤差の仮定以下）")
+        else:
+            reason = "定速区間が 2 つ未満（回転数が 1 水準のみ）"
+        return {"kind": "insufficient", "reason": reason}
     fr = np.array([p[0] for p in pts])
     f = np.array([p[1] for p in pts])
     if fr.max() / fr.min() < min_spread:
@@ -550,11 +614,12 @@ def combine_wheels(left, right):
 
 
 def analyze(data, encoder_error_pct=ENCODER_ERROR_PCT, window=None, min_rpm=MIN_SEGMENT_RPM,
-            settle=SETTLE_SEC, min_sec=MIN_SEGMENT_SEC, min_revs=MIN_SEGMENT_REVS):
+            settle=SETTLE_SEC, min_sec=MIN_SEGMENT_SEC, min_revs=MIN_SEGMENT_REVS,
+            track_orders=TRACK_ORDERS):
     """読み込んだデータ全体を解析し、JSON にできる要約を返す."""
     result = {"source": data["source"], "angle_source": data["angle_source"],
-              "stats": data["stats"], "encoder_error_pct": encoder_error_pct, "wheels": {},
-              "_spectra": {}}
+              "stats": data["stats"], "encoder_error_pct": encoder_error_pct,
+              "track_orders": list(track_orders), "wheels": {}, "_spectra": {}}
     forward_wheels = {}
     for side in SIDES:
         raw = data["wheels"][side]
@@ -564,30 +629,41 @@ def analyze(data, encoder_error_pct=ENCODER_ERROR_PCT, window=None, min_rpm=MIN_
         wheel = forward_wheel(raw, side, data["angle_source"])
         forward_wheels[side] = wheel
         result["wheels"][side] = summarize_wheel(
-            wheel, side, result, encoder_error_pct, window, min_rpm, settle, min_sec, min_revs)
+            wheel, side, result, encoder_error_pct, window, min_rpm, settle, min_sec, min_revs,
+            track_orders)
     if len(forward_wheels) == 2:
         combined = combine_wheels(forward_wheels["left"], forward_wheels["right"])
         if combined:
             for name, wheel in combined.items():
                 result["wheels"][name] = summarize_wheel(
                     wheel, name, result, encoder_error_pct, window, min_rpm, settle, min_sec,
-                    min_revs)
+                    min_revs, track_orders)
     return result
 
 
 def summarize_wheel(wheel, name, result, encoder_error_pct, window, min_rpm, settle, min_sec,
-                    min_revs):
+                    min_revs, track_orders=TRACK_ORDERS):
     segments = []
     for start, stop in constant_segments(wheel, min_rpm, settle, min_sec, min_revs, window):
-        seg = analyze_segment(wheel, start, stop, encoder_error_pct)
+        seg = analyze_segment(wheel, start, stop, encoder_error_pct, track_orders)
         result["_spectra"][(name, len(segments))] = seg.pop("_spectrum")
         segments.append(seg)
     raw_points = [(s["rotation_hz"], s["time_peak"]["freq_hz"]) for s in segments
                   if s["time_peak"] and s["time_peak"]["resolvable"]]
     res_points = [(s["rotation_hz"], s["residual_peak"]["freq_hz"]) for s in segments
                   if s.get("residual_peak") and s["residual_peak"]["resolvable"]]
+    raw_peaks = sum(1 for s in segments if s["time_peak"])
+    res_peaks = sum(1 for s in segments if s.get("residual_peak"))
     sync_rows = _sync_order1_summary(segments)
     sync_resolvable = [r for r in sync_rows if r["resolvable"]]
+    tracked = {}
+    for s in segments:
+        for item in s.get("tracked_orders", []):
+            tracked.setdefault(str(item["order"]), []).append({
+                "rotation_rpm": s["rotation_hz"] * 60.0, "command_rpm": s["command_rpm"],
+                "amp_rpm": item["amp_rpm"], "freq_hz": item["freq_hz"],
+                "observed_hz": item["observed_hz"], "aliased": item["aliased"],
+                "ill_conditioned": item["ill_conditioned"]})
     return {
         "frames": int(len(wheel["t"])),
         "segments": segments,
@@ -597,8 +673,11 @@ def summarize_wheel(wheel, name, result, encoder_error_pct, window, min_rpm, set
                       "peak_amp_rpm": s["time_peak"]["amp_rpm"] if s["time_peak"] else None,
                       "order1_amp_rpm": s["orders"][0]["amp_rpm"] if s["orders"] else None}
                      for s in segments],
-        "dominant": classify(raw_points),
-        "non_synchronous": classify(res_points),
+        "dominant": classify(raw_points, segments=len(segments), peaks=raw_peaks),
+        # 「非同期」と呼ぶが、中身は 1..residual_max_order 次の同期成分を引いた残り。
+        # それより高い次数の同期成分（例 20 次）はここに残る（キーは互換のため変えない）。
+        "non_synchronous": classify(res_points, segments=len(segments), peaks=res_peaks),
+        "tracked_orders": tracked,
         "order1": {
             "segments_resolvable": len(sync_resolvable),
             "segments": len(sync_rows),
@@ -618,23 +697,42 @@ KIND_TEXT = {
 }
 
 
+def _tracked_note(peak):
+    if "tracked_order" not in peak:
+        return ""
+    if peak["aliased"]:
+        return f" [{peak['tracked_order']}次の折り返し]"
+    return f" [{peak['tracked_order']}次]"
+
+
 def describe(name, summary):
     lines = [f"[{name}] frames={summary['frames']} 定速区間={len(summary['segments'])}"]
     for s in summary["segments"]:
         peak = s["time_peak"]
         o1 = s["orders"][0] if s["orders"] else None
         res = s.get("residual_peak")
+        tracked_text = "".join(
+            f"  {item['order']}次 {item['amp_rpm']:.2f} rpm"
+            + (f" [折り返し {item['freq_hz']:.1f}→{item['observed_hz']:.1f} Hz、参考値"
+               + ("・平均と区別困難" if item["ill_conditioned"] else "") + "]"
+               if item["aliased"] else f" ({item['freq_hz']:.2f} Hz)")
+            for item in s.get("tracked_orders", []) if item["amp_rpm"] is not None)
         lines.append(
             f"  {s['mean_rpm']:7.1f} rpm (回転 {s['rotation_hz'] * 60:.0f} rpm = "
             f"{s['rotation_hz']:.2f} Hz, {s['revolutions']} 回転, "
             f"p2p {s['p2p_rpm']:.1f})"
             + (f"  卓越 {peak['freq_hz']:.2f} Hz {peak['amp_rpm']:.2f} rpm"
-               + ("" if peak["resolvable"] else " [判別不能]") if peak else "")
+               + ("" if peak["resolvable"] else " [判別不能]")
+               + _tracked_note(peak) if peak else "")
             + (f"  1次 {o1['amp_rpm']:.2f} rpm" + ("" if o1["resolvable"] else " [判別不能]")
                if o1 else "")
-            + (f"  非同期 {res['freq_hz']:.2f} Hz {res['amp_rpm']:.2f} rpm"
-               + ("" if res["resolvable"] else " [判別不能]") if res else ""))
-    for key, label in (("dominant", "卓越周波数"), ("non_synchronous", "同期成分を除いた残り")):
+            + (f"  残差(1〜{s['residual_max_order']}次を除く) {res['freq_hz']:.2f} Hz "
+               f"{res['amp_rpm']:.2f} rpm"
+               + ("" if res["resolvable"] else " [判別不能]")
+               + _tracked_note(res) if res else "")
+            + tracked_text)
+    for key, label in (("dominant", "卓越周波数"),
+                       ("non_synchronous", f"1〜{MAX_ORDER}次の同期成分を除いた残り")):
         c = summary[key]
         text = KIND_TEXT[c["kind"]]
         if c["kind"] == "insufficient":
@@ -653,7 +751,8 @@ def describe(name, summary):
 
 def report(result):
     lines = [f"source={result['source']} angle={result['angle_source']} "
-             f"encoder_error={result['encoder_error_pct']}%/次数"]
+             f"encoder_error={result['encoder_error_pct']}%/次数（未校正の仮定） "
+             f"追跡する次数={result.get('track_orders', [])}"]
     stats = result["stats"]
     if "seq_gaps" in stats:
         lines.append(f"samples={stats['samples']} seq の飛び={stats['seq_gaps']}"
@@ -733,6 +832,8 @@ def main(argv=None):
     p.add_argument("--settle", type=float, default=SETTLE_SEC)
     p.add_argument("--min-sec", type=float, default=MIN_SEGMENT_SEC)
     p.add_argument("--min-revs", type=float, default=MIN_SEGMENT_REVS)
+    p.add_argument("--track-orders", default=",".join(str(n) for n in TRACK_ORDERS),
+                   help="振幅を直接求める次数（カンマ区切り、空で無効。既定 20）")
     args = p.parse_args(argv)
 
     if args.export_csv:
@@ -742,8 +843,9 @@ def main(argv=None):
         return 0
     data = load_bag(args.bag) if args.bag else load_csv(args.csv)
     window = tuple(float(v) for v in args.window.split(",")) if args.window else None
+    track_orders = tuple(int(v) for v in args.track_orders.split(",") if v.strip())
     result = analyze(data, args.encoder_error_pct, window, args.min_rpm, args.settle,
-                     args.min_sec, args.min_revs)
+                     args.min_sec, args.min_revs, track_orders)
     print(report(result))
     if args.json:
         with open(args.json, "w", encoding="utf-8") as f:

@@ -133,7 +133,8 @@ drive_component:
     # 応答が来れば待ちはその時点で終わるので、効くのは応答が無い・遅いときだけ（そのとき
     # 1 モータあたりこの時間、2 モータ直列で 2 倍が制御 tick に乗る）。
     # 下限の目安 = 応答フレームの伝送 1.74 ms（10 byte @57600 baud）+ ファーム処理の実測値 + 余裕。
-    # 実測は deactivate（停止）時の INFO「シリアル往復レイテンシ統計」（max / ema）で確認する。
+    # 実測は bag の /drive_control_sample の roundtrip_ms / response_timeout で確認する（INFO
+    # 「シリアル往復レイテンシ統計」は lifecycle の deactivate のときだけ出て、サービスの停止では出ない）。
     # 往復の max より短くすると、遅れた応答を取りこぼし、次の送受信の前の入力クリアで捨てる。
     serial_response_timeout_ms: 10
 

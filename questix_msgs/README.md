@@ -30,7 +30,7 @@ DDT M0602C の Protocol 1 応答フレームをデコードした 1 モータ分
 | `velocity_rpm` | `int16` | 実測輪速 [RPM](DATA[4..5], 符号付き)。`measured_lpf_tau_sec > 0` のときはローパス済み(既定 tau=0.15s) |
 | `velocity_rpm_raw` | `int16` | 実測輪速のフィルタ前生値 [RPM]。同定・振動解析用(ローパス済み値はファーム速度ループの ~1.8Hz 振動を約半分に見せる) |
 | `target_rpm` | `int16` | 最終指令値 [RPM](`max_motor_rpm` でクランプ後) |
-| `position_raw` | `uint16` | ロータ位置(DATA[6..7])。0..32767 ↔ 0..360 deg。エンコーダの実分解能は 1 回転 4096 で、値は 8 LSB 刻みで動く。電源投入をまたいで絶対位置かどうかは未確認 |
+| `position_raw` | `uint16` | ロータ位置(DATA[6..7])。0..32767 ↔ 0..360 deg。ワイヤ値は 1 LSB 刻みで動く(8 で割った余りは 0〜7 がすべて出る。センサの真の分解能は不明)。1 台での観察(2026-10-05、`scripts/identify/README.md`「4.」): 車輪を動かさずにモータの電源を入れ直すと同じ値(±1 LSB)、モータで回すと 1 回転で 1 周、ただし手で約 90° 回したときの変化は約 9〜17° で、理由は未解明。校正済みの絶対角としては扱わない |
 | `temperature` | `uint8` | [deg C] **現状常に 0**。DDT Protocol 2 (0x74) 未実装。実装時にフィールドを変えずに済むよう定義だけ残している |
 | `fault_code` | `uint8` | DATA[8]。0 = 正常、非0 = ファーム故障ビット |
 
@@ -67,7 +67,7 @@ DDT M0602C の Protocol 1 応答フレームをデコードした 1 モータ分
 | `tick_action` | `uint8` | tick の動作。`TICK_IDLE=0`(未武装・ゲートが閉) / `TICK_DRIVE=1` / `TICK_TIMEOUT_STOP=2` / `TICK_FAULT_STOP=3` |
 | `lqr_active` | `bool` | velocity RUN 域 LQR+FF の補正をこの tick に適用したか |
 | `shaped_linear` / `shaped_angular` | `float64` | 加速度制限・テーパー後の車体指令 [m/s] / [rad/s](REP-103) |
-| `command_sent` | `bool` | tick の指令(駆動・停止・安全停止)を両輪に書けたか。idle tick は安全停止をしたときだけ true(フィードバック取得のための停止フレーム再送は指令に含めない) |
+| `command_sent` | `bool` | tick の指令(駆動・停止・安全停止)を両輪について、書き込みの失敗なく処理できたか。**実際にフレームを送ったことの証拠ではない**: 停止が続く間は `stop_resend_interval_ms`(既定 300 ms)のあいだ停止フレームの再送を省き、それでも true になる(その輪の `feedback_new` は false、`roundtrip_ms` は NaN)。送受信の有無は `feedback_new` で見る。idle tick は安全停止をしたときだけ true(フィードバック取得のための停止フレーム再送は指令に含めない) |
 | `stop_frame` | `bool` | tick の指令が停止フレーム(目標 0)だったか |
 | `left` / `right` | `DriveControlWheelSample` | 車輪ごと(下表) |
 

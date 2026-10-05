@@ -30,10 +30,14 @@ uint8 tick_action          # TICK_*
 bool lqr_active            # the velocity RUN LQR+FF correction was applied this tick
 float64 shaped_linear      # [m/s] chassis command after the acceleration limit and taper
 float64 shaped_angular     # [rad/s] (REP-103: counter-clockwise positive)
-bool command_sent          # the tick's command (drive, stop or safety stop) was written to both
-                           # wheels. false when a write failed, and on an idle tick unless that
-                           # tick made a safety stop (the actuation gate closed, or a stop-fault
-                           # retry); an idle feedback refresh is not a command
+bool command_sent          # the tick's command (drive, stop or safety stop) was handled for both
+                           # wheels without a failed write. NOT proof that a frame went out: while
+                           # a wheel stays stopped, DdtMotorLib skips re-sending the stop frame for
+                           # stop_resend_interval_ms and still reports success (then that wheel's
+                           # feedback_new is false and roundtrip_ms is NaN). false when a write
+                           # failed, and on an idle tick unless that tick made a safety stop (the
+                           # actuation gate closed, or a stop-fault retry); an idle feedback
+                           # refresh is not a command
 bool stop_frame            # the tick's command was a stop frame (target 0)
 
 DriveControlWheelSample left

@@ -255,3 +255,61 @@ def test_classify_needs_two_speeds():
     assert ra.classify([(0.5, 1.8), (1.0, 1.81), (1.5, 1.79)])["kind"] == "fixed_frequency"
     assert ra.classify([(0.5, 0.5), (1.0, 1.0), (1.5, 1.52)])["kind"] == "rotation_synchronous"
     assert ra.classify([(0.5, 0.9), (1.0, 3.0), (1.5, 0.4)])["kind"] == "unclear"
+
+
+def _steady_wheel(rotation_rps, ripple_rpm, order, seconds=20.0, dt=DT):
+    """一定の回転 + order 次の揺れ（回転角の位相）だけを持つ 1 輪（前進が正）."""
+    t = 100.0 + np.arange(0.0, seconds, dt)
+    rev = rotation_rps * (t - t[0])
+    rpm = rotation_rps * 60.0 + ripple_rpm * np.sin(2 * math.pi * order * rev)
+    return {"t": t, "rpm": rpm, "rev": rev, "current": np.full(len(t), np.nan),
+            "command": np.full(len(t), rotation_rps * 60.0)}
+
+
+def test_a_tracked_order_below_the_nyquist_frequency_is_fit_directly():
+    # 30 rpm（0.5 rev/s）の 20 次 = 10 Hz、50 Hz の記録の上限 25 Hz より下
+    wheel = _steady_wheel(0.5, 0.7, 20)
+    seg = ra.analyze_segment(wheel, 0, len(wheel["t"]), track_orders=(20,))
+    assert seg["nyquist_hz"] == pytest.approx(25.0, rel=1e-6)
+    item = seg["tracked_orders"][0]
+    assert item["order"] == 20 and not item["aliased"]
+    assert item["freq_hz"] == pytest.approx(10.0, rel=1e-6)
+    assert item["amp_rpm"] == pytest.approx(0.7, rel=0.02)
+    assert seg["time_peak"]["freq_hz"] == pytest.approx(10.0, abs=0.06)
+    assert seg["time_peak"]["tracked_order"] == 20
+    assert seg["time_peak"]["aliased"] is False
+    # 同期平均は 8 次までなので、20 次は残差に残る
+    assert seg["residual_max_order"] <= ra.MAX_ORDER
+    assert seg["residual_peak"]["tracked_order"] == 20
+
+
+def test_a_tracked_order_above_the_nyquist_frequency_is_marked_as_aliased():
+    # 120 rpm（2 rev/s）の 20 次 = 40 Hz → 50 Hz の記録では |40 − 50| = 10 Hz に見える
+    wheel = _steady_wheel(2.0, 0.5, 20)
+    seg = ra.analyze_segment(wheel, 0, len(wheel["t"]), track_orders=(20,))
+    item = seg["tracked_orders"][0]
+    assert item["aliased"] is True
+    assert item["freq_hz"] == pytest.approx(40.0, rel=1e-6)
+    assert item["observed_hz"] == pytest.approx(10.0, abs=1e-6)
+    assert not item["ill_conditioned"]
+    assert item["amp_rpm"] == pytest.approx(0.5, rel=0.05)
+    assert seg["time_peak"]["freq_hz"] == pytest.approx(10.0, abs=0.06)
+    assert seg["time_peak"]["tracked_order"] == 20
+    assert seg["time_peak"]["aliased"] is True
+    assert "20次の折り返し" in ra._tracked_note(seg["time_peak"])
+
+
+def test_alias_frequency_folds_into_the_observable_band():
+    assert ra.alias_frequency(6.66, 50.0) == pytest.approx(6.66)
+    assert ra.alias_frequency(26.5, 50.0) == pytest.approx(23.5)
+    assert ra.alias_frequency(49.67, 50.0) == pytest.approx(0.33)
+    assert ra.alias_frequency(60.0, 50.0) == pytest.approx(10.0)
+
+
+def test_insufficient_says_whether_segments_or_resolvable_peaks_are_missing():
+    few_segments = ra.classify([(1.0, 1.8)], segments=1, peaks=1)
+    assert "定速区間が 2 つ未満" in few_segments["reason"]
+    few_peaks = ra.classify([(1.0, 1.8)], segments=16, peaks=16)
+    assert few_peaks["kind"] == "insufficient"
+    assert "判別できるピークが 1 個" in few_peaks["reason"]
+    assert "定速区間 16" in few_peaks["reason"]
