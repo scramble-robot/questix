@@ -40,7 +40,9 @@ cat results/summary.md results/sufficiency.md       # τ / d / R² / RUN 境界�
 - `/target_twist` に他の送り手（`twist_arbiter` / `joy_controller` など）から指令が流れていない
   （`IDENT_LISTEN_SEC` 秒、既定 2 秒聞く）
 - `/drive_component` の `control_mode` パラメータが取得できる
+- `/drive_component` の `wheel_radius` / `wheel_separation` が取得できる（車輪 RPM → twist の換算に使う）
 - `questix_msgs/msg/MotorFeedback` に `velocity_rpm_raw` がある
+- 指定したレベルが `drive_component` の停止判定（`min_command_rpm`）で止められない（下の「微速」）
 
 最後の 1 つは τ・むだ時間の意味に直結する。`velocity_rpm_raw` が無い旧 msg で記録すると
 LPF 後 RPM しか残らず、`fit_models.py` は（黙って切り替えずに）エラーで止まる。
@@ -88,7 +90,7 @@ ident_<robot>_<floor>_<YYYYmmdd_HHMM>/
 ## 実機なしの確認
 
 ```bash
-bash scripts/identify/test_evidence.sh   # ros2 をスタブに差し替えた 64 assertion
+bash scripts/identify/test_evidence.sh   # ros2 をスタブに差し替えた 74 assertion
 python3 scripts/identify/test_step_sequence.py
 bash scripts/identify/record.sh --help
 bash -n scripts/identify/record.sh scripts/identify/lib_evidence.sh
@@ -259,6 +261,53 @@ bash -n scripts/identify/record.sh scripts/identify/lib_evidence.sh
 床上では `record.sh`（自動でステップ指令を出す）を使わず、コントローラで一定速度に保って
 Robot Manager の記録（rosbag）を取る。解析は `--window T0,T1`（受信時刻 [s]）で定速の範囲を
 指定する。浮かせた試験と同じ回転数で比べ、共振の山が負荷（慣性・摩擦）でどう動くかを見る。
+ただし微速の信地旋回（下の 8.）は `record.sh` で取れる。
+
+### 7. 停止指令の間引きを比べる（`stop_resend_interval_ms`）
+
+停止中は停止フレームの再送を `stop_resend_interval_ms`（既定 300 ms）ごとに間引く。その間は
+フィードバックも来ないので、停止直前の速度は約 0.32 s ごとにしか分からない（LAB の生値の段差）。
+間引きは「高頻度で送るとファームが減速を終えられない（2 段階停止）」という床上の体感の比較で
+決めた値で、記録されたデータは無い。浮かせた状態で比べる（0 なら毎周期送って毎周期応答が来る）:
+
+```bash
+bash scripts/identify/record.sh --levels 20,40,80,150 --hold 10              # 既定 300 ms
+bash scripts/identify/record.sh --levels 20,40,80,150 --hold 10 --set-param stop_resend_interval_ms=0
+```
+
+`--set-param` は記録の間だけ値を変え、終了時（Ctrl-C・失敗を含む）に元の値へ戻して確かめる
+（`meta.yaml` に `param_override_*` と `param_restored_*`）。変えてよいのは `min_command_rpm` と
+`stop_resend_interval_ms` だけ。比べるのは、停止指令からの停止までの時間と回った角度（position の差。
+300 ms でも正確に出る）、速度の符号の反転（行き過ぎ）、減速の曲線の折れ（0 のときだけ見える）。
+無負荷で差が出なくても、床の上で出ないとは言えない。
+
+### 8. 微速（3〜10 rpm、さらに 1〜2 rpm）と信地旋回
+
+`drive_component` の停止判定（`motor_control_lib/drive_stop_gate.hpp`）は、車輪 RPM が
+`min_command_rpm`（既定 5）未満なら停止指令にし、止まった状態から動き出すには
+`min_command_rpm + 2` 以上を要る（`min_command_rpm` を 0 にしても下限 1、動き出し 3 rpm）。
+`record.sh` は記録の前にこれを確かめ、回らないレベルがあれば理由を出して止まる。
+
+```bash
+# 3 / 5 / 10 rpm（記録の間だけ min_command_rpm を 0 に）
+bash scripts/identify/record.sh --schedule 3:60,5:60,10:30 --set-param min_command_rpm=0
+# 1 / 2 rpm も: 4 rpm で 1 s 助走してから 0 を通らずに下げる
+bash scripts/identify/record.sh --schedule 1:150,2:90,5:60,10:30 --set-param min_command_rpm=0 \
+    --lead-in-rpm 4 --lead-in-sec 1
+# 信地旋回（床の上で負荷をかける。左の車輪を止め右だけ回す。レベルは回す輪の RPM）
+bash scripts/identify/record.sh --schedule 3:60,5:60 --set-param min_command_rpm=0 --pattern pivot-left
+```
+
+- `--schedule rpm:秒,...` はレベルごとの保持時間（`--levels`/`--hold` より優先）、`--sign pos|neg|both`
+  で向きを選べる（既定 both）。
+- `min_command_rpm` は「低速域でファームの速度ループが収束せず振動する」ための不感帯として入った
+  値（経緯は未検証）。車輪を浮かせ、非常停止に手を添えて行い、振動が大きければ止める。
+- 信地旋回は機体が回る。周りに十分な空間を取り、5 rpm（車輪の周速 約 0.05 m/s）以下で行う。
+  止める側の車輪には速度 0 の指令が出る（停止フレームではない）。
+- 解析: `ripple_analysis.py` は既定で 10 rpm 未満・3 回転未満の区間を捨てるので、
+  `--min-rpm 0.5 --min-revs 2` を付ける（1 rpm × 150 s = 2.5 回転）。微速では `velocity_rpm_raw` が
+  整数（モータ側で切り捨てとみられる）でほとんど 0 か 1 になるため、回転の速さは position から求める。
+  助走（1 s）は区間の最短時間（3 s）より短いので解析から外れる。
 
 ## CSV で試す（ROS なし）
 

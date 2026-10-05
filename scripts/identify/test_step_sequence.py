@@ -5,7 +5,11 @@ import sys
 from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(__file__))
-from step_sequence import ForeignTwistDetector, build_schedule, twist_values  # noqa: E402
+import pytest  # noqa: E402
+
+from step_sequence import (  # noqa: E402
+    ForeignTwistDetector, build_schedule, parse_schedule, rpm_to_linear, start_gate_problems,
+    twist_values)
 
 
 def test_own_values_are_not_foreign():
@@ -47,6 +51,64 @@ def test_schedule_brackets_levels_with_zero():
     assert sched[0] == (0, 3.0)
     assert sched[-1] == (0, 3.0)
     assert [r for r, _ in sched if r != 0] == [50, 100, -50, -100]
+
+
+def test_schedule_with_per_level_holds():
+    sched = build_schedule(parse_schedule("3:60,5:60,10:30"), 0.0, "pos", 1, 3.0)
+    assert sched == [(0, 3.0), (3, 60.0), (0, 3.0), (5, 60.0), (0, 3.0), (10, 30.0), (0, 3.0)]
+
+
+def test_parse_schedule_rejects_bad_items():
+    for text in ("3", "0:10", "3:0", "", "a:1"):
+        with pytest.raises(ValueError):
+            parse_schedule(text)
+
+
+def test_lead_in_goes_to_slow_levels_without_passing_zero():
+    sched = build_schedule([(1, 150.0), (5, 60.0)], 0.0, "both", 1, 3.0,
+                           lead_in_rpm=4, lead_in_sec=1.0)
+    assert sched == [(0, 3.0), (4, 1.0), (1, 150.0), (0, 3.0), (5, 60.0),
+                     (0, 3.0), (-4, 1.0), (-1, 150.0), (0, 3.0), (-5, 60.0), (0, 3.0)]
+
+
+def test_start_gate_matches_drive_stop_gate():
+    # min_command_rpm=5: 走行は 5 rpm 以上、止まった状態からの動き出しは 7 rpm 以上
+    assert start_gate_problems([(0, 3.0), (10, 30.0), (0, 3.0)], 5) == []
+    assert len(start_gate_problems([(0, 3.0), (5, 60.0)], 5)) == 1  # 動き出せない
+    assert len(start_gate_problems([(0, 3.0), (3, 60.0)], 5)) == 1  # 停止指令になる
+    # min_command_rpm=0 でも下限は 1 rpm、動き出しは 3 rpm 以上
+    assert start_gate_problems([(0, 3.0), (3, 60.0)], 0) == []
+    assert len(start_gate_problems([(0, 3.0), (2, 60.0)], 0)) == 1
+    # 助走で 3 rpm 以上に入ってから 1 rpm へ下げるのは通る
+    assert start_gate_problems([(0, 3.0), (4, 1.0), (1, 150.0), (0, 3.0)], 0) == []
+
+
+def _wheel_rpms(lx, az, args):
+    """drive_component の差動二輪の換算（v_left = v - w*sep/2, v_right = v + w*sep/2）."""
+    unit = rpm_to_linear(1, args.wheel_radius)
+    left = (lx - az * args.wheel_separation / 2.0) / unit
+    right = (lx + az * args.wheel_separation / 2.0) / unit
+    return left, right
+
+
+def test_pivot_keeps_one_wheel_still():
+    args = SimpleNamespace(turn=False, pattern="pivot-left", wheel_radius=0.1, wheel_separation=0.5)
+    left, right = _wheel_rpms(*twist_values(5, args), args)
+    assert left == pytest.approx(0.0, abs=1e-9)
+    assert right == pytest.approx(5.0)
+    args.pattern = "pivot-right"
+    left, right = _wheel_rpms(*twist_values(-3, args), args)
+    assert left == pytest.approx(-3.0)
+    assert right == pytest.approx(0.0, abs=1e-9)
+
+
+def test_spin_and_straight_patterns():
+    args = SimpleNamespace(turn=False, pattern="spin", wheel_radius=0.1, wheel_separation=0.5)
+    left, right = _wheel_rpms(*twist_values(10, args), args)
+    assert left == pytest.approx(-10.0) and right == pytest.approx(10.0)
+    args.pattern = "straight"
+    left, right = _wheel_rpms(*twist_values(10, args), args)
+    assert left == pytest.approx(10.0) and right == pytest.approx(10.0)
 
 
 if __name__ == "__main__":
