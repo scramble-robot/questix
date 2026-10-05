@@ -8,8 +8,8 @@ sys.path.insert(0, os.path.dirname(__file__))
 import pytest  # noqa: E402
 
 from step_sequence import (  # noqa: E402
-    ForeignTwistDetector, build_schedule, parse_schedule, rpm_to_linear, start_gate_problems,
-    twist_values)
+    EstopGuard, ForeignTwistDetector, build_schedule, parse_schedule, rpm_to_linear,
+    start_gate_problems, twist_values)
 
 
 def test_own_values_are_not_foreign():
@@ -109,6 +109,25 @@ def test_spin_and_straight_patterns():
     args.pattern = "straight"
     left, right = _wheel_rpms(*twist_values(10, args), args)
     assert left == pytest.approx(10.0) and right == pytest.approx(10.0)
+
+
+def test_estop_guard_needs_a_fresh_release():
+    guard = EstopGuard(timeout_sec=1.0)
+    assert not guard.ok(0.0)  # 何も受信していない
+    guard.update(False, 0.0)
+    assert guard.ok(0.5)
+    assert not guard.ok(1.6)  # 受信が途絶えた
+    assert "途絶" in guard.reason
+
+
+def test_estop_guard_stays_stopped_after_a_press():
+    guard = EstopGuard(timeout_sec=1.0)
+    guard.update(False, 0.0)
+    guard.update(True, 0.1)
+    assert not guard.ok(0.2)
+    guard.update(False, 0.3)  # 解除されても、残りのステップは再開しない
+    assert not guard.ok(0.4)
+    assert "押下" in guard.reason
 
 
 if __name__ == "__main__":
