@@ -50,13 +50,13 @@ void JoyControllerComponent::loadParameters() {
   // Movement parameters
   // デフォルト値は config/joy_controller_params.yaml と同値に保つこと（単一ソース原則）。
   // 乖離すると YAML を渡さない起動経路だけ挙動が変わり、原因究明が難しい。
-  declare_parameter("longitudinal_input_ratio", 2.0);
+  declare_parameter("longitudinal_input_ratio", 1.0);
   get_parameter("longitudinal_input_ratio", longitudinal_input_ratio_);
 
-  declare_parameter("lateral_input_ratio", 0.3);
+  declare_parameter("lateral_input_ratio", 0.15);
   get_parameter("lateral_input_ratio", lateral_input_ratio_);
 
-  declare_parameter("angular_input_ratio", 6.0);
+  declare_parameter("angular_input_ratio", 3.0);
   get_parameter("angular_input_ratio", angular_input_ratio_);
 
   // Controller mapping

@@ -84,7 +84,7 @@ void SingleDdtMotorComponent::initializeParameters() {
   // パラメータの宣言とデフォルト値の設定
   this->declare_parameter("serial_port", "/dev/ttyACM0");
   this->declare_parameter("baud_rate", 57600);
-  this->declare_parameter("wheel_radius", 0.1);
+  this->declare_parameter("wheel_radius", 0.05);
   this->declare_parameter("motor_id", 1);
   this->declare_parameter("max_motor_rpm", 100);
   this->declare_parameter("velocity_scale_factor", 60.0);  // デフォルトのスケールファクター

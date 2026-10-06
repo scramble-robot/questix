@@ -10,7 +10,7 @@ single_ddt_motor_node:
     # モータ設定
     motor_id: 4
     max_motor_rpm: 100
-    wheel_radius: 0.1  # meters
+    wheel_radius: 0.05  # meters (10 cm wheel)
 
     # 制御パラメータ
     # RPM = linear_x * velocity_scale_factor

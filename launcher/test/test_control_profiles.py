@@ -151,7 +151,7 @@ def test_dual_stick_keeps_its_own_scaling(expand):
     nodes = expand('joy_controller/launch/joy_controller.launch.xml', dual_stick='true')
     assert '/joy_controller' not in nodes
     dual = nodes['/joy_controller_dual_stick']
-    assert dual['longitudinal_input_ratio'] == 0.05
+    assert dual['longitudinal_input_ratio'] == 0.025
     assert dual['angular_input_ratio'] == 0.05
     assert dual['left_stick_vertical_axis'] == 1
 
@@ -169,7 +169,7 @@ def test_dual_stick_keeps_its_own_scaling(expand):
     ('uart_joy_driver/launch/uart_joy_driver.launch.xml', 'uart_joy_driver', 'deadzone', 0.05),
     ('web_joy_driver/launch/web_joy_driver.launch.xml', 'web_joy_driver', 'deadzone', 0.05),
     ('joy_controller/launch/joy_controller.launch.py',
-     'joy_controller', 'angular_input_ratio', 6.0),
+     'joy_controller', 'angular_input_ratio', 3.0),
 ])
 def test_standalone_entry_points(expand, relative_path, node, key, value):
     """Both Python and XML standalone entry points consume the central defaults."""
@@ -201,5 +201,5 @@ def test_composed_drive_receives_profile_and_serial_port(expand, extension):
     nodes = expand(f'motor_control_app/launch/drive_component_container.launch.{extension}',
                    serial_port='/dev/test-port')
     assert nodes['/drive_component']['max_motor_rpm'] == 475
-    assert nodes['/drive_component']['max_linear_accel'] == 3.0
+    assert nodes['/drive_component']['max_linear_accel'] == 1.5
     assert nodes['/drive_component']['serial_port'] == '/dev/test-port'

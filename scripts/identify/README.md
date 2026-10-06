@@ -113,7 +113,7 @@ bash -n scripts/identify/record.sh scripts/identify/lib_evidence.sh
 2. `launcher/config/drive_component.yaml` を同定用に: `control_mode: velocity`,
    `brake_on_stop: false`。加速度上限は操作設定側にあるので、Robot Manager の「調整」タブ
    （保存先 `controls.<controller>.yaml`、`questix_control_config/README.md` 参照）で
-   `max_linear_accel` を `20.0` にする。drive_component.yaml に書いても操作設定が後から
+   `max_linear_accel` を `10.0` にする。drive_component.yaml に書いても操作設定が後から
    読み込まれて上書きされる。いずれもステップが鈍らないよう十分大きく、終わったら元に戻す。
    ファーム側加速時間は
    `drive_component` 内部で 1 固定なので設定不要。`drive_fsm_run_*` と

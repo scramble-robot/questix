@@ -44,7 +44,7 @@ questix_lab_bridge:
     # wheel_separation in launcher/config/drive_component.yaml (the values the robot drives with).
     # BAG_DEFAULT_CONFIG in scripts/robot_manager/static/lab/js/live/rosbag-core.js repeats them for
     # rosbags opened without a robot connected.
-    wheel_radius: 0.1
+    wheel_radius: 0.05
     wheel_separation: 0.5
 
     # Driving experiments from the pages (the only thing this node can publish).

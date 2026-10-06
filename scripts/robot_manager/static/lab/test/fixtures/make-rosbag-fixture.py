@@ -43,7 +43,9 @@ MOVE_FROM = 1.0  # s
 MOVE_TO = 3.5  # s
 SPEED = 0.2  # m/s
 WALL = 1.5  # m from the LiDAR to the wall at the start
-WHEEL_RADIUS = 0.1  # m, launcher/config/drive_component.yaml
+# m, launcher/config/drive_component.yaml. The committed drive-approach.mcap predates the fix from
+# 0.1 to 0.05 (its wheel rpm, 19, follows 0.1); regenerating it gives 38 rpm and a new expected.json.
+WHEEL_RADIUS = 0.05
 BEAMS = 400  # more than the bridge's 360, so the reader has to decimate like the bridge does
 LIDAR_X = 0.2  # m ahead of base_link, launcher/launch/lidar_driver.launch.xml
 

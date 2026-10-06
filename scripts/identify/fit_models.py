@@ -242,13 +242,14 @@ def analyze(data, mode="velocity", dt=None, max_delay=4, min_segment=25, r2_thre
     warnings = []
     tau_ref = float(np.nanmean([sides[s]["overall"]["tau"] for s in ("left", "right")]))
     ramps = [v["ramp_sec"] for s in ("left", "right") for v in sides[s]["per_level"].values()]
-    # 推奨設定（max_linear_accel 20.0）では 400 rpm のランプが約 0.2 s。既定の 3.0 だと約 1.4 s。
+    # 推奨設定（max_linear_accel 10.0）では 400 rpm のランプが約 0.2 s。既定の 1.5 だと約 1.4 s
+    # （wheel_radius 0.05 m）。
     ramp_limit = max(0.5, 5.0 * tau_ref) if np.isfinite(tau_ref) else 0.5
     if ramps and max(ramps) > ramp_limit:
         warnings.append(
             f"指令がステップではなくランプになっています（最長 {max(ramps):.2f} s）。"
             "加速度上限（Robot Manager「調整」の max_linear_accel）が小さいまま記録した可能性が"
-            "あります。同定用には 20.0 に上げて取り直すと τ・むだ時間の精度が上がります")
+            "あります。同定用には 10.0 に上げて取り直すと τ・むだ時間の精度が上がります")
     run_enter = int(max(goods)) if len(goods) == 2 else None
     tau_avg = float(np.nanmean([sides[s]["overall"]["tau"] for s in ("left", "right")]))
     delay_avg = int(round(np.mean([sides[s]["overall"]["delay"] for s in ("left", "right")])))

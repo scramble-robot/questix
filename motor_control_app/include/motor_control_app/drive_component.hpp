@@ -311,8 +311,8 @@ private:
   // 目標接近時のレート絞り幅（実効的なジャーク制限）。残差がこの幅に入ると 1 ステップの
   // 上限を残差比例で縮め、飽和点で加速度がステップで 0 に落ちないようにする。0 で無効
   // （従来の一次レート制限）。詳細は drive_slew::clampRateTapered。
-  double slew_taper_band_linear_{0.2};   // [m/s]
-  double slew_taper_band_angular_{0.2};  // [rad/s]
+  double slew_taper_band_linear_{0.1};   // [m/s]
+  double slew_taper_band_angular_{0.1};  // [rad/s]
 
   // 制御 tick の周期 [Hz]。スルーレート制限の dt は 1/control_rate の定数になる
   double control_rate_{50.0};

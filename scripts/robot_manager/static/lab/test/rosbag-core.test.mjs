@@ -124,7 +124,12 @@ test('the lessons read the same numbers from a bag as from a live recording', ()
   });
   const run = liveControlRun(driveRows(recording).rows, 16);
   near(run.samples[0].time, 0, 1e-9, 'step at t = 0');
-  near(run.samples[0].target, (expected.speed / (2 * Math.PI * 0.1)) * 60, 1e-6, 'target rpm');
+  near(
+    run.samples[0].target,
+    (expected.speed / (2 * Math.PI * BAG_DEFAULT_CONFIG.wheel_radius)) * 60,
+    1e-6,
+    'target rpm',
+  );
   const approach = liveDistanceRun(wallRows(recording), 16);
   assert.equal(approach.approached, true);
   near(approach.samples[0].measured, expected.wall, 0.01, 'approach starts at the wall distance');

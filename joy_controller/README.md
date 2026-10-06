@@ -52,9 +52,9 @@ robot_manager の「操作・速度」タブで編集できます。
 
 | パラメータ | 既定値 | 意味 |
 |---|---|---|
-| `longitudinal_input_ratio` | 2.0 | フルスティック時の前後速度 [m/s] |
-| `lateral_input_ratio` | 0.3 | フルスティック時の左右速度 [m/s]（ホロノミック用。差動駆動では未使用） |
-| `angular_input_ratio` | 6.0 | フルスティック時の旋回速度 [rad/s]。符号で旋回方向 |
+| `longitudinal_input_ratio` | 1.0 | フルスティック時の前後速度 [m/s] |
+| `lateral_input_ratio` | 0.15 | フルスティック時の左右速度 [m/s]（ホロノミック用。差動駆動では未使用） |
+| `angular_input_ratio` | 3.0 | フルスティック時の旋回速度 [rad/s]。符号で旋回方向 |
 | `linear_x_axis` | 1 | 前後の軸番号（通常 左スティック Y） |
 | `linear_y_axis` | 0 | 左右の軸番号（通常 左スティック X） |
 | `angular_z_axis` | 3 | 旋回の軸番号（通常 右スティック X） |
@@ -65,7 +65,7 @@ robot_manager の「操作・速度」タブで編集できます。
 
 | パラメータ | 既定値 | 意味 |
 |---|---|---|
-| `longitudinal_input_ratio` | 0.05 | 車輪速度スケール |
+| `longitudinal_input_ratio` | 0.025 | 車輪速度スケール |
 | `angular_input_ratio` | 0.05 | 旋回成分スケール |
 | `left_stick_vertical_axis` | 1 | 左車輪の軸番号 |
 | `right_stick_vertical_axis` | 4 | 右車輪の軸番号 |
@@ -88,7 +88,7 @@ YAMLを変更してノードを再起動してください。両モードの `jo
 即時反映されるパラメータの変更例:
 
 ```bash
-ros2 param set /joy_controller longitudinal_input_ratio 1.0
+ros2 param set /joy_controller longitudinal_input_ratio 0.5
 ros2 param set /joy_controller debug_mode true
 ```
 

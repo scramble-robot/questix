@@ -47,7 +47,10 @@ class DriveSimulation(Node):
         self.create_service(SetBool, '/simulation/emergency_stop', self.on_estop)
         self.create_service(Trigger, '/simulation/reset', self.on_reset)
         self.create_timer(0.02, self.tick)
-        self.get_logger().info('Differential drive: production control core, radius 0.1 m, track 0.5 m; ideal wheel response')
+        self.get_logger().info(
+            'Differential drive: production control core, radius %g m, track %g m; '
+            'ideal wheel response' % (self.drive.config['wheel_radius'],
+                                      self.drive.config['wheel_separation']))
 
     def on_joy(self, msg):
         # SDL standard layout: B latches stop; A releases it. B takes priority.

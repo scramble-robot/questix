@@ -18,7 +18,10 @@ drive_component:
     connect_retry_period_sec: 1.0
 
     # ロボット物理パラメータ
-    wheel_radius: 0.1 # ホイール半径 [m]
+    # 3.x までの 0.1 は直径 10 cm の実機に対して 2 倍の誤りだった。0.05 への修正に合わせて
+    # 操作設定（controls.*.yaml）の m/s・rad/s 値を半分にし、同じスティック操作で同じ車輪 RPM
+    # になるようにしてある。RPM 単位のパラメータ（min_command_rpm など）は影響を受けない。
+    wheel_radius: 0.05 # ホイール半径 [m]（直径 10 cm）
     wheel_separation: 0.5 # ホイール間隔 [m]
 
     # モータ設定

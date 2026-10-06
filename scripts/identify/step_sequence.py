@@ -120,7 +120,7 @@ def main():
     ap.add_argument("--cycles", type=int, default=1)
     ap.add_argument("--rate", type=float, default=50.0, help="publish レート [Hz]")
     ap.add_argument("--topic", default="/target_twist")
-    ap.add_argument("--wheel-radius", type=float, default=0.1)
+    ap.add_argument("--wheel-radius", type=float, default=0.05)
     ap.add_argument("--wheel-separation", type=float, default=0.5)
     ap.add_argument("--turn", action="store_true", help="直進ではなく旋回（angular_z）で与える")
     ap.add_argument("--listen-before", type=float, default=2.0,

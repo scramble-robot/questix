@@ -114,8 +114,8 @@ function programCommand(steps, elapsed) {
 
 // --- closed loop on odometry: drive a distance or turn an angle ------------------------------
 
-// Below these the wheels fall into drive_component's min_command_rpm dead band (5 rpm is about
-// 0.05 m/s with 0.1 m wheels) and the robot would stop short instead of creeping to the goal.
+// Below these the wheels come near drive_component's min_command_rpm dead band (5 rpm is about
+// 0.026 m/s with 0.05 m wheels) and the robot would stop short instead of creeping to the goal.
 const MIN_LINEAR = 0.06; // m/s
 const MIN_ANGULAR = 0.3; // rad/s (the wheels then turn at about 0.075 m/s)
 const SLOWDOWN = 1.5; // 1/s: speed = SLOWDOWN × what is left, so the robot eases into the goal

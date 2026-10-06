@@ -6,7 +6,7 @@ import { stepProgram, programSeconds, programCommand } from '../live/drive-core.
 // drive-link runs, test/control-live-drive.test.mjs checks them with made-up scans.
 //
 // - Speed topics: a step input, the same experiment as the simulation but at a speed the lab may
-//   command (the simulated 20–80 rpm would be 0.2–0.8 m/s with QUESTiX's 0.1 m wheels).
+//   command (the simulated 20–80 rpm would be 0.1–0.4 m/s with QUESTiX's 0.05 m wheels).
 // - Distance topics: the learner's own P/I/D gains close the loop on the LiDAR's distance to the
 //   wall, exactly as in the simulation (error = distance − 0.50 m, output −1…1), with the output
 //   scaled to the lab's speed limit instead of the simulated motor's full speed.
