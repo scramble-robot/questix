@@ -9,7 +9,7 @@ import pytest  # noqa: E402
 
 from step_sequence import (  # noqa: E402
     EXIT_EMERGENCY_STOP, EXIT_ESTOP_NOT_RECEIVED, EstopGuard, ForeignTwistDetector, build_schedule,
-    parse_schedule, rpm_to_linear, start_gate_problems, start_refusal, twist_values)
+    max_rpm_problems, parse_schedule, rpm_to_linear, start_gate_problems, start_refusal, twist_values)
 
 
 def test_own_values_are_not_foreign():
@@ -151,3 +151,12 @@ if __name__ == "__main__":
             fn()
             print(f"ok   - {name}")
     print("OK")
+
+
+def test_max_rpm_problems_refuses_clipped_levels():
+    """max_motor_rpm（と仕様上限 475）を超えるレベルは、同定の入力が変わるので拒否する."""
+    schedule = [(0, 3.0), (300, 4.0), (0, 3.0), (-400, 4.0), (0, 3.0)]
+    assert max_rpm_problems(schedule, 475) == []
+    assert len(max_rpm_problems(schedule, 330)) == 1  # -400 だけ
+    assert len(max_rpm_problems(schedule, 200)) == 2
+    assert len(max_rpm_problems([(500, 1.0)], 900)) == 1  # 仕様上限 475 で切り詰められる

@@ -12,8 +12,8 @@ wheel_radius から車体前進速度 [m/s] に換算して publish する（左
 
 例:
   ros2 run ... ではなく直接:
-    python3 step_sequence.py --levels 50,100,200,400 --hold 4.0 --sign both --dry-run
-    python3 step_sequence.py --levels 50,100,200,400 --hold 4.0 --sign both
+    python3 step_sequence.py --levels 50,100,200,300 --hold 4.0 --sign both --dry-run
+    python3 step_sequence.py --levels 50,100,200,300 --hold 4.0 --sign both
   旋回で取る（左右逆回転。車輪 RPM は angular_z*wheel_separation/2 相当）:
     python3 step_sequence.py --levels 30,60,120 --hold 4.0 --turn --wheel-separation 0.5
   レベルごとに保持時間を変える（rpm:秒）:
@@ -117,6 +117,20 @@ def start_gate_problems(schedule, min_command_rpm):
                             "か min_command_rpm を下げる）")
         previous = rpm
     return problems
+
+
+# drive_component は車輪の指令を max_motor_rpm に、motor_control_lib は
+# DdtMotorLib::kSpecVelocityMaxRpm（475）に切り詰める。切り詰められたステップは、同定の入力が
+# 指定と変わる。
+SPEC_VELOCITY_MAX_RPM = 475
+
+
+def max_rpm_problems(schedule, max_command_rpm):
+    """スケジュールのうち、上限で切り詰められるステップを文で返す（空なら問題なし）."""
+    limit = min(int(max_command_rpm), SPEC_VELOCITY_MAX_RPM)
+    return [f"step {index}: {rpm} rpm は上限 {limit} rpm（max_motor_rpm={max_command_rpm}、"
+            f"仕様上限 {SPEC_VELOCITY_MAX_RPM}）を超え、切り詰められる"
+            for index, (rpm, _) in enumerate(schedule) if abs(rpm) > limit]
 
 
 # 他の publisher を検出したときの終了コード（record.sh が区別して表示する）
@@ -266,7 +280,7 @@ def rpm_to_angular(rpm, wheel_radius, wheel_separation):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--levels", default="50,100,200,400", help="車輪 RPM のレベル（カンマ区切り）")
+    ap.add_argument("--levels", default="50,100,200,300", help="車輪 RPM のレベル（カンマ区切り）")
     ap.add_argument("--hold", type=float, default=4.0, help="各レベルの保持時間 [s]")
     ap.add_argument("--schedule", default="",
                     help="レベルごとの保持時間 rpm:秒（カンマ区切り）。指定すると --levels/--hold より優先")
@@ -299,6 +313,9 @@ def main():
     ap.add_argument("--min-command-rpm", type=int, default=None,
                     help="drive_component の min_command_rpm。渡すと、停止判定のために指令どおりに"
                     "回らないステップがあれば開始しない（record.sh が実効値を渡す）")
+    ap.add_argument("--max-command-rpm", type=int, default=None,
+                    help="drive_component の max_motor_rpm。渡すと、上限で切り詰められるステップが"
+                    "あれば開始しない（record.sh が実効値を渡す）")
     args = ap.parse_args()
 
     if args.pattern and args.turn and args.pattern != "spin":
@@ -323,6 +340,13 @@ def main():
         if problems:
             print("停止判定のため指令どおりに回らないステップがあります（開始しません）:",
                   file=sys.stderr)
+            for line in problems:
+                print(f"  {line}", file=sys.stderr)
+            return 2
+    if args.max_command_rpm is not None:
+        problems = max_rpm_problems(schedule, args.max_command_rpm)
+        if problems:
+            print("上限で切り詰められるステップがあります（開始しません）:", file=sys.stderr)
             for line in problems:
                 print(f"  {line}", file=sys.stderr)
             return 2

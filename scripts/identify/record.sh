@@ -17,7 +17,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/lib_evidence.sh"
 
 OUT_ROOT="${IDENT_OUT:-$HOME/ident_data}"
-LEVELS="20,30,40,60,80,100,150,200,300,400"
+LEVELS="20,30,40,60,80,100,150,200,300"  # M6 規格書の ±330 rpm に収める（README）
 HOLD="4.0"
 SETTLE="3.0"
 TURN=""
@@ -78,6 +78,8 @@ Phase A システム同定用の記録ハーネス（授業の手動操縦ロガ
   --lead-in-rpm R / --lead-in-sec S
                  R より遅いレベルの前に同じ向きで R を S 秒送り、0 を通らずにレベルへ移る
                  （止まった状態からの動き出しには min_command_rpm + 2 rpm 以上が要るため）
+                 レベル（助走を含む）が max_motor_rpm（と仕様上限 475）を超えるステップ列は、
+                 切り詰められて同定の入力が変わるため、記録の前に拒否する
   --set-param NAME=VALUE
                  記録の間だけ drive_component のパラメータを変える（繰り返し可）。変えてよいのは
                  min_command_rpm と stop_resend_interval_ms だけ。変える前の値を記録し、終了時
@@ -233,6 +235,18 @@ if [[ -n "$GATE_MIN" ]]; then
     || fail "ステップ列が min_command_rpm=${GATE_MIN} の停止判定に掛かります（上の理由を参照）"
   echo "  停止判定（min_command_rpm=${GATE_MIN}）: 全レベルが指令どおりに回る"
 fi
+
+# 指定したレベルが max_motor_rpm（と仕様上限 475）で切り詰められないかを確かめる。切り詰められた
+# ステップは、同定の入力が指定と変わる。
+MAX_MOTOR_RPM="$(ros2 param get "$NODE" max_motor_rpm 2>/dev/null | awk '{print $NF}' || true)"
+[[ -n "$MAX_MOTOR_RPM" ]] || fail "$NODE の max_motor_rpm を取得できません"
+MAX_ARGS=(--levels "$LEVELS" --hold "$HOLD" --settle "$SETTLE" --sign "$SIGN"
+          --pattern "$PATTERN_EFFECTIVE" --lead-in-rpm "$LEAD_IN_RPM" --lead-in-sec "$LEAD_IN_SEC"
+          --max-command-rpm "$MAX_MOTOR_RPM" --dry-run)
+[[ -n "$SCHEDULE" ]] && MAX_ARGS+=(--schedule "$SCHEDULE")
+python3 "$SCRIPT_DIR/step_sequence.py" "${MAX_ARGS[@]}" >/dev/null \
+  || fail "ステップ列が max_motor_rpm=${MAX_MOTOR_RPM} で切り詰められます（上の理由を参照）"
+echo "  上限（max_motor_rpm=${MAX_MOTOR_RPM}）: 全レベルが上限以下"
 
 mapfile -t RECORD_TOPICS < <(evidence_select_topics "$REQUIRED_TOPICS" "$OPTIONAL_TOPICS" "$TOPIC_LIST")
 echo "  記録対象: ${RECORD_TOPICS[*]}"
@@ -436,6 +450,7 @@ STEP_ARGS=(--levels "$LEVELS" --hold "$HOLD" --settle "$SETTLE" --sign "$SIGN"
 [[ -n "$SCHEDULE" ]] && STEP_ARGS+=(--schedule "$SCHEDULE")
 MIN_COMMAND_RPM="$(ros2 param get "$NODE" min_command_rpm 2>/dev/null | awk '{print $NF}' || true)"
 [[ -n "$MIN_COMMAND_RPM" ]] && STEP_ARGS+=(--min-command-rpm "$MIN_COMMAND_RPM")
+STEP_ARGS+=(--max-command-rpm "$MAX_MOTOR_RPM")
 python3 "$SCRIPT_DIR/step_sequence.py" "${STEP_ARGS[@]}"
 STEP_RC=$?
 set -e
