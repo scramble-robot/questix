@@ -236,7 +236,8 @@ def test_legacy_tilt_profile_migrates_without_writing_on_read(client, tmp_path, 
     legacy['shot_component'] = {'fire_button': 2, 'tilt_axis': axis,
                                 'tilt_up_button_index': 3, 'tilt_down_button_index': 1}
     path = tmp_path / 'controls.uart.yaml'
-    raw = yaml.safe_dump({node: {'ros__parameters': params} for node, params in legacy.items()})
+    raw = controls.UNITS_MARKER + '\n' + yaml.safe_dump(
+        {node: {'ros__parameters': params} for node, params in legacy.items()})
     path.write_text(raw)
     current = profile(client)
     assert path.read_text() == raw
@@ -249,6 +250,57 @@ def test_legacy_tilt_profile_migrates_without_writing_on_read(client, tmp_path, 
     assert response.status_code == 200, response.text
     assert profile(client)['values'] == current['values']
     assert 'tilt_axis' not in yaml.safe_load(path.read_text())['shot_component']['ros__parameters']
+
+
+def test_profile_saved_before_the_wheel_radius_fix_is_not_used(client, tmp_path, monkeypatch):
+    """An unmarked profile holds old-unit speeds: show defaults, warn, no undo, save marks it."""
+    before = profile(client)
+    assert before['legacy_warning'] is None
+    old_units = deepcopy(before['values'])
+    old_units['joy_controller']['longitudinal_input_ratio'] = 2.0
+    old_units['drive_component']['max_linear_accel'] = 3.0
+    path = tmp_path / 'controls.uart.yaml'
+    raw = yaml.safe_dump({node: {'ros__parameters': params} for node, params in old_units.items()})
+    path.write_text(raw)
+    (tmp_path / 'controls.uart.history.json').write_text('{}')
+    current = profile(client)
+    assert current['values'] == before['values'] == current['defaults']
+    assert current['legacy_warning'] and '#179' in current['legacy_warning']
+    assert current['previous_values'] is None
+    assert current['source'] != str(path)
+    assert path.read_text() == raw  # reading never rewrites the file
+    monkeypatch.setattr(backend, '_read_env', lambda: {'CONTROLLER_TYPE': 'uart'})
+    readiness = client.get('/api/readiness').json()['profile']
+    assert readiness == {'ok': True, 'message': current['legacy_warning']}
+    response = client.put('/api/control-config/uart', json={
+        'revision': current['revision'], 'values': current['values']})
+    assert response.status_code == 200, response.text
+    assert controls.UNITS_MARKER + '\n' in path.read_text()
+    saved = profile(client)
+    assert saved['legacy_warning'] is None and saved['source'] == str(path)
+
+
+@pytest.mark.parametrize('marker', ['# questix_controls_units: 1', '#questix_controls_units: 2'])
+def test_other_or_malformed_units_marker_is_legacy(client, tmp_path, marker):
+    """Only the exact current generation line makes a saved profile usable."""
+    before = profile(client)
+    changed = deepcopy(before['values'])
+    changed['joy_controller']['angular_input_ratio'] = 6.0
+    (tmp_path / 'controls.uart.yaml').write_text(marker + '\n' + yaml.safe_dump(
+        {node: {'ros__parameters': params} for node, params in changed.items()}))
+    current = profile(client)
+    assert current['legacy_warning'] and current['values'] == before['values']
+
+
+def test_units_generation_matches_the_launch_resolver_and_packaged_profiles():
+    """The launch side (questix_control_config) repeats the generation and the marker pattern."""
+    root = Path(__file__).resolve().parents[2]
+    launch_source = (root / 'questix_control_config/questix_control_config/__init__.py').read_text()
+    assert f"UNITS_GENERATION = '{controls.UNITS_GENERATION}'" in launch_source
+    assert controls._UNITS_MARKER.pattern in launch_source.replace('\\\\', '\\')
+    for controller in controls.CONTROLLERS:
+        packaged = (root / f'questix_control_config/config/controls.{controller}.yaml').read_bytes()
+        assert controls._units_generation(packaged) == controls.UNITS_GENERATION
 
 
 def test_independent_tilt_save_reload_and_duplicate_validation(client):

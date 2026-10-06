@@ -1,3 +1,4 @@
+# questix_controls_units: 2  (m/s and rad/s read with the real wheel_radius 0.05 m, #179)
 # QUESTiX operator controls — one file per controller, shared by all launch paths.
 # ROS node sections prevent unrelated parameters from leaking between nodes.
 # Signed input ratios reverse direction. Units: linear m/s, angular rad/s.

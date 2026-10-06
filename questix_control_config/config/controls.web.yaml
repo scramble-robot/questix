@@ -1,3 +1,4 @@
+# questix_controls_units: 2  (m/s and rad/s read with the real wheel_radius 0.05 m, #179)
 # QUESTiX operator controls for the browser controller (controller_type=web, web_joy_driver).
 # Same Switch2-native indices as UART, but the web page only sends what it shows:
 #   「移動」left stick = axes 0 (left/right) / 1 (forward/back), right stick = axes 3 (turn) / 4,
