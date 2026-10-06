@@ -160,6 +160,7 @@ case "$1 ${2:-}" in
                       wheel_radius) echo "Double value is: 0.1" ;;
                       wheel_separation) echo "Double value is: 0.5" ;;
                       min_command_rpm) echo "Integer value is: 5" ;;
+                      max_motor_rpm) echo "Integer value is: ${STUB_MAX_MOTOR_RPM:-475}" ;;
                       stop_resend_interval_ms) echo "Integer value is: 300" ;;
                       *) exit 1 ;;
                     esac ;;
@@ -235,6 +236,13 @@ OUT="$(STUB_NODES='/drive_component' STUB_TOPICS='/drive_status /target_twist' \
 check "停止判定で回らないレベルなら記録前に異常終了" "$?" "1"
 contains "停止判定の理由を明示" "$OUT" "min_command_rpm=5 未満なので停止指令になる"
 if [[ ! -d "$TMP/out" ]]; then ok "停止判定で止めたときは出力ディレクトリを作らない"; else ng "停止判定なのに出力ディレクトリができた"; fi
+
+rm -rf "$TMP/out"
+OUT="$(STUB_NODES='/drive_component' STUB_TOPICS='/drive_status /target_twist' STUB_MAX_MOTOR_RPM=330 \
+  PATH="$STUB_DIR:$PATH" bash "$SCRIPT_DIR/record.sh" --yes --out "$TMP/out" --levels 100,400 2>&1)"
+check "max_motor_rpm で切り詰められるレベルなら記録前に異常終了" "$?" "1"
+contains "上限の理由を明示" "$OUT" "400 rpm は上限 330 rpm"
+if [[ ! -d "$TMP/out" ]]; then ok "上限で止めたときは出力ディレクトリを作らない"; else ng "上限なのに出力ディレクトリができた"; fi
 
 OUT="$(bash "$SCRIPT_DIR/record.sh" --yes --out "$TMP/out" --set-param max_motor_rpm=900 2>&1)"
 check "--set-param は許可したパラメータだけ" "$?" "2"

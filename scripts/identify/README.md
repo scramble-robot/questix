@@ -43,8 +43,14 @@ cat results/summary.md results/sufficiency.md       # τ / d / R² / RUN 境界�
 - `/drive_component` の `wheel_radius` / `wheel_separation` が取得できる（車輪 RPM → twist の換算に使う）
 - `questix_msgs/msg/MotorFeedback` に `velocity_rpm_raw` がある
 - 指定したレベルが `drive_component` の停止判定（`min_command_rpm`）で止められない（下の「微速」）
+- 指定したレベル（助走を含む）が `drive_component` の `max_motor_rpm` と仕様上限 475 rpm
+  （`DdtMotorLib::kSpecVelocityMaxRpm`）を超えない。超えたステップは切り詰められ、同定の入力が
+  指定と変わるため、記録の前に拒否する。なお M6 規格書 V1.0 は速度 ±330 rpm と記載しており
+  （`motor_control_app/README.md` の「未確認の食い違い」）、以前の既定のレベルの 400 rpm は
+  その範囲外になるため、既定のレベルは 300 rpm までにした（`record.sh` は 20〜300、
+  `step_sequence.py` は 50〜300）。搭載モータの仕様が確定するまで、330 rpm を超えるレベルは避ける
 
-最後の 1 つは τ・むだ時間の意味に直結する。`velocity_rpm_raw` が無い旧 msg で記録すると
+`velocity_rpm_raw` の確認は τ・むだ時間の意味に直結する。`velocity_rpm_raw` が無い旧 msg で記録すると
 LPF 後 RPM しか残らず、`fit_models.py` は（黙って切り替えずに）エラーで止まる。
 それなら記録する前に止めるほうがよい、という判断。
 
@@ -133,7 +139,7 @@ bash -n scripts/identify/record.sh scripts/identify/lib_evidence.sh
 3. 統合起動し、別端末で記録と刺激を開始:
    ```bash
    ros2 bag record /drive_status /target_twist -o ident_velocity_$(date +%Y%m%d_%H%M)
-   python3 scripts/identify/step_sequence.py --levels 50,100,200,400 --hold 4.0 --sign both
+   python3 scripts/identify/step_sequence.py --levels 50,100,200,300 --hold 4.0 --sign both
    ```
    旋回側（低 RPM 域が多い）も取る場合:
    `python3 scripts/identify/step_sequence.py --levels 20,40,80,140 --hold 4.0 --turn`
