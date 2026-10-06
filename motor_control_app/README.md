@@ -201,7 +201,11 @@ ros2 param dump /drive_component
 - **overrun**: tick が周期を超えると、rclcpp の wall timer は遅れた分の周期を飛ばして次の周期から
   再開する（溜まった tick を連続で実行しない）。dt は定数のままなので、overrun の間はホストの
   加速度制限が実時間では緩く（遅く）効く。`Control tick overrun` の WARN（5 秒に 1 回）と
-  `/drive_control_sample` で確認できる。
+  `/drive_control_sample` で確認できる。**WARN は駆動指令を送る tick だけで判定する**（待機の
+  tick（非常停止中・未武装・ゲートが閉じている）は判定の前に return するので、超過しても WARN は
+  出ない）。2026-10-06 には、非常停止の解除の直後に DDT が応答しない間の待機の tick が 21〜24 ms
+  かかり（68 tick）、WARN は 0 件だった。超過の有無は journal ではなく、bag の `tick_duration_sec`
+  （全 tick を記録）で見る。
 - **1 tick の所要時間**: 2 モータ直列で 1 問 1 答。正常 ≈ 7 ms（10 byte の送信 1.74 ms + ファーム
   処理 + 応答 1.74 ms、× 2）。応答が無いと 1 モータあたり `serial_response_timeout_ms`（既定 10 ms）
   待つ。送信前の `tcflush(TCIFLUSH)` は前回の遅れた応答を捨てる。捨てた後に同じモータの遅れた

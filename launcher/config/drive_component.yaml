@@ -119,7 +119,9 @@ drive_component:
     # プロファイルが上流の publish レート（DualShock 20Hz / UART 50Hz）に依存しない。
     # シリアル送信もこの tick のみが行う（指令+フィードバック往復: 2モータで正常 ≈ 7ms、
     # フィードバック落ち時は最悪 ≈ 20ms）。往復時間が周期予算 1/control_rate を超えると
-    # "Control tick overrun" 警告が出る。その場合は control_rate を下げる。
+    # "Control tick overrun" 警告が出る。その場合は control_rate を下げる（警告は駆動指令を送る
+    # tick だけで判定し、待機中の tick の超過は出ない。全 tick は /drive_control_sample の
+    # tick_duration_sec で見る。motor_control_app/README.md「周期と時間の扱い」）。
     control_rate: 50.0
 
     # 指令送信後の追加待機 [ms]。0で待機なし（既定）。
