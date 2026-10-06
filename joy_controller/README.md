@@ -52,9 +52,9 @@ robot_manager の「操作・速度」タブで編集できます。
 
 | パラメータ | 既定値 | 意味 |
 |---|---|---|
-| `longitudinal_input_ratio` | 2.0 | フルスティック時の前後速度 [m/s] |
+| `longitudinal_input_ratio` | 1.0 | フルスティック時の前後速度 [m/s]（2026-10 に車輪半径を実寸 0.05 m に直したとき、車輪の回転数が変わらないよう 2.0 から半分にした。#179） |
 | `lateral_input_ratio` | 0.3 | フルスティック時の左右速度 [m/s]（ホロノミック用。差動駆動では未使用） |
-| `angular_input_ratio` | 6.0 | フルスティック時の旋回速度 [rad/s]。符号で旋回方向 |
+| `angular_input_ratio` | 3.0 | フルスティック時の旋回速度 [rad/s]。符号で旋回方向（同上、6.0 から半分） |
 | `linear_x_axis` | 1 | 前後の軸番号（通常 左スティック Y） |
 | `linear_y_axis` | 0 | 左右の軸番号（通常 左スティック X） |
 | `angular_z_axis` | 3 | 旋回の軸番号（通常 右スティック X） |
@@ -65,7 +65,7 @@ robot_manager の「操作・速度」タブで編集できます。
 
 | パラメータ | 既定値 | 意味 |
 |---|---|---|
-| `longitudinal_input_ratio` | 0.05 | 車輪速度スケール |
+| `longitudinal_input_ratio` | 0.025 | 車輪速度スケール [m/s]（同上、0.05 から半分） |
 | `angular_input_ratio` | 0.05 | 旋回成分スケール |
 | `left_stick_vertical_axis` | 1 | 左車輪の軸番号 |
 | `right_stick_vertical_axis` | 4 | 右車輪の軸番号 |

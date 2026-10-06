@@ -36,10 +36,10 @@ public:
   };
 
   struct Config {
-    double neutral_linear{0.02};   // [m/s] a stick command below this is neutral
-    double neutral_angular{0.05};  // [rad/s]
-    double lab_timeout_sec{0.3};   // lab input quiet this long = its run ended
-    double joy_timeout_sec{0.5};   // no controller command this long = no controller
+    double neutral_linear{0.01};    // [m/s] a stick command below this is neutral
+    double neutral_angular{0.025};  // [rad/s]
+    double lab_timeout_sec{0.3};    // lab input quiet this long = its run ended
+    double joy_timeout_sec{0.5};    // no controller command this long = no controller
   };
 
   void configure(const Config& config) { config_ = config; }
