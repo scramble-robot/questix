@@ -41,7 +41,10 @@ uint16 position_raw        # rotor position (DATA[6..7]): 0..32767 <-> 0..360 de
                            # true resolution is not known. Observed on one robot (2026-10-05):
                            # unchanged (+-1 LSB) across a motor power cycle without moving the
                            # wheel, one wrap per turn while the motor drives it, but a hand-turned
-                           # ~90 deg read as only ~9-17 deg (unexplained). Do not treat it as a
-                           # calibrated absolute angle.
+                           # ~90 deg read as only ~9-17 deg (unexplained). 2026-10-06: after
+                           # hand turns while the E-stop was pressed (DDT power possibly cut, not
+                           # verified) the value did not follow the turned angle but returned to
+                           # the same value at the same angle. Do not use it as an angle or a turn
+                           # count across a power loss, nor as a calibrated absolute angle.
 int16 current_raw          # torque current (DATA[2..3]): -32767..32767 <-> -8..+8 A
 uint8 fault_code           # DATA[8]; 0 = no fault

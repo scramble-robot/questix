@@ -362,6 +362,16 @@ EDEST="$(find "$ESTOP_OUT" -maxdepth 1 -type d -name 'ident_*' | head -1)"
 contains "非常停止での中断を meta.yaml に残す" "$(cat "$EDEST/meta.yaml" 2>/dev/null)" \
   'step_sequence: "aborted_emergency_stop"'
 
+NORX_OUT="$TMP/estop_not_received"
+OUT="$(STUB_NODES='/drive_component' \
+  STUB_TOPICS='/drive_status /target_twist' \
+  STUB_STEP_RC=6 \
+  PATH="$STUB_DIR:$PATH" bash "$SCRIPT_DIR/record.sh" --yes --out "$NORX_OUT" 2>&1)"
+check "/emergency_stop を受信できず開始しなかったら終了コード 6" "$?" "6"
+NDEST="$(find "$NORX_OUT" -maxdepth 1 -type d -name 'ident_*' | head -1)"
+contains "受信できなかった拒否を押下と分けて meta.yaml に残す" "$(cat "$NDEST/meta.yaml" 2>/dev/null)" \
+  'step_sequence: "refused_estop_not_received"'
+
 INT_OUT="$TMP/interrupted"
 OUT="$(STUB_NODES='/drive_component' \
   STUB_TOPICS='/drive_status /target_twist' \

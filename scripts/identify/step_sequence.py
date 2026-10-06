@@ -32,7 +32,10 @@ wheel_radius から車体前進速度 [m/s] に換算して publish する（左
 非常停止との連動: /emergency_stop（questix_msgs/EmergencyStop）を購読し、押下（active=true）を受けたら、
 または受信が --estop-timeout 秒途絶えたら、ステップ列を中断して 0 を送り、終了コード 4 で終わる
 （drive_component は押下中は指令を止めるが、ここが送り続けると解除した瞬間に残りのステップで再び
-動くため）。開始前に解除（active=false）を受信できなければ開始しない。--no-estop-watch で無効
+動くため）。開始前に解除（active=false）を受信できなければ開始しない: 押下を受信していれば終了コード 4、
+1 件も受信できない（または開始前に途絶えた）ときは終了コード 6。最初の受信は、購読を始めてから
+--estop-wait 秒まで待つ（購読の接続には数秒かかることがある。--listen-before とは別）。開始前に、
+最初の受信までの時間・受信件数・publisher の数を表示する。--no-estop-watch で無効
 （/emergency_stop の無い単体診断だけ）。
 
 他の送り手との競合: /target_twist には通常 twist_arbiter（練習）や joy_controller（競技）も
@@ -45,6 +48,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
 import sys
 import time
 
@@ -119,6 +123,9 @@ def start_gate_problems(schedule, min_command_rpm):
 EXIT_FOREIGN_PUBLISHER = 3
 # 非常停止の押下・受信途絶で中断したときの終了コード（record.sh が区別して残す）
 EXIT_EMERGENCY_STOP = 4
+# 開始前に /emergency_stop を 1 件も受信できなかった（または開始前に途絶えた）ときの終了コード。
+# 押下を受信した（4）のとは別に残す（record.sh が区別して残す）
+EXIT_ESTOP_NOT_RECEIVED = 6
 
 
 class EstopGuard:
@@ -134,10 +141,17 @@ class EstopGuard:
         self._last = None
         self._released = False
         self.reason = None
+        self.pressed = False  # 押下を一度でも受信した
+        self.count = 0  # 受信件数
+        self.first_at = None  # 最初の受信の時刻
 
     def update(self, active, now):
         self._last = now
+        self.count += 1
+        if self.first_at is None:
+            self.first_at = now
         if active:
+            self.pressed = True
             if self.reason is None:
                 self.reason = "非常停止の押下を受信しました"
             self._released = False
@@ -153,6 +167,21 @@ class EstopGuard:
             self.reason = f"/emergency_stop の受信が {self._timeout:.1f} 秒途絶えました"
             return False
         return True
+
+
+def start_refusal(guard, now, topic="/emergency_stop"):
+    """開始してよいかを決める。よければ None、だめなら (終了コード, 理由).
+
+    押下を受信していれば EXIT_EMERGENCY_STOP。1 件も受信していない、または受信が途絶えたときは
+    EXIT_ESTOP_NOT_RECEIVED（非常停止が押されたとは限らないので、押下とは分けて残す）。
+    """
+    if guard.ok(now):
+        return None
+    if guard.pressed:
+        return EXIT_EMERGENCY_STOP, guard.reason
+    if guard.count == 0:
+        return EXIT_ESTOP_NOT_RECEIVED, f"{topic} を 1 件も受信できません"
+    return EXIT_ESTOP_NOT_RECEIVED, guard.reason or f"{topic} で解除（active=false）を受信できません"
 
 
 # Ctrl-C で中断したときの終了コード（シェルの慣例 128 + SIGINT。record.sh が中断として残す）
@@ -262,6 +291,9 @@ def main():
     ap.add_argument("--estop-topic", default="/emergency_stop")
     ap.add_argument("--estop-timeout", type=float, default=1.0,
                     help="/emergency_stop の受信がこの秒数途絶えたら中断する")
+    ap.add_argument("--estop-wait", type=float, default=10.0,
+                    help="購読を始めてから /emergency_stop の最初の受信を待つ最長の時間 [s]。"
+                    "--listen-before より短ければ --listen-before まで聞く")
     ap.add_argument("--no-estop-watch", action="store_true",
                     help="/emergency_stop を見ない（/emergency_stop の無い単体診断だけ）")
     ap.add_argument("--min-command-rpm", type=int, default=None,
@@ -365,18 +397,35 @@ def main():
                 f"(`ros2 topic info -v {args.topic}` で publisher を確認できます)")
 
     # 開始前: 何も publish せずに聞く。ここで流れていれば一切動かさずに終わる。
-    spin_until(time.monotonic() + max(0.0, args.listen_before))
+    t_listen = time.monotonic()
+    spin_until(t_listen + max(0.0, args.listen_before))
+    if EmergencyStop is not None:
+        # 購読の接続（discovery）には数秒かかることがある。最初の受信だけ、もう少し待つ
+        # （待つ間も、他の送り手の検出は続ける）。
+        wait_end = t_listen + max(args.listen_before, args.estop_wait)
+        while guard.count == 0 and state["foreign"] is None and time.monotonic() < wait_end:
+            rclpy.spin_once(node, timeout_sec=min(0.1, max(0.0, wait_end - time.monotonic())))
+        first = (f"{guard.first_at - t_listen:.2f} s" if guard.first_at is not None
+                 else f"なし（{max(args.listen_before, args.estop_wait):.1f} s 待った）")
+        rmw = os.environ.get("RMW_IMPLEMENTATION", "unset")
+        node.get_logger().info(
+            f"{args.estop_topic}: 最初の受信まで {first}、受信 {guard.count} 件、publisher "
+            f"{node.count_publishers(args.estop_topic)}、RMW_IMPLEMENTATION={rmw}")
     if state["foreign"] is not None:
         node.get_logger().error(foreign_message("開始前に"))
         node.destroy_node()
         rclpy.shutdown()
         return EXIT_FOREIGN_PUBLISHER
-    if estop_blocks():
-        reason = guard.reason or f"{args.estop_topic} で解除（active=false）を受信できません"
-        node.get_logger().error(f"開始前に: {reason}。非常停止を解除してから実行してください")
+    refusal = start_refusal(guard, time.monotonic(), args.estop_topic) if EmergencyStop else None
+    if refusal is not None:
+        code, reason = refusal
+        node.get_logger().error(f"開始前に: {reason}。非常停止を解除してから実行してください"
+                                if code == EXIT_EMERGENCY_STOP else
+                                f"開始前に: {reason}。operation_manager が動いているか、"
+                                f"`ros2 topic info -v {args.estop_topic}` で確かめてください")
         node.destroy_node()
         rclpy.shutdown()
-        return EXIT_EMERGENCY_STOP
+        return code
     state["listening"] = False
 
     rc = 0
