@@ -60,7 +60,9 @@ Phase A システム同定用の記録ハーネス（授業の手動操縦ロガ
   4. ros2 bag record を開始（必須 topic + 存在する optional topic）
   5. step_sequence.py でステップ列を publish（終われば自動で 6 へ進む。Ctrl-C は途中で
      止めたいときだけ: 0 を publish して終了し、meta.yaml に step_sequence: interrupted と残す。
-     他の送り手の指令を受けたら中断し、aborted_foreign_publisher と残して終了コード 3）
+     他の送り手の指令を受けたら中断し、aborted_foreign_publisher と残して終了コード 3。
+     非常停止の押下で中断・拒否したら aborted_emergency_stop と終了コード 4、開始前に
+     /emergency_stop を受信できなければ refused_estop_not_received と終了コード 6）
   6. bag を停止し、実効パラメータを再取得して before/after を突き合わせ、bag info を保存
 
 オプション:
@@ -445,6 +447,7 @@ case "$STEP_RC" in
   0) STEP_STATUS="completed" ;;
   3) STEP_STATUS="aborted_foreign_publisher" ;;
   4) STEP_STATUS="aborted_emergency_stop" ;;
+  6) STEP_STATUS="refused_estop_not_received" ;;
   130) STEP_STATUS="interrupted" ;;
   *) STEP_STATUS="failed_rc_${STEP_RC}" ;;
 esac

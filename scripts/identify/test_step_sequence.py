@@ -8,8 +8,8 @@ sys.path.insert(0, os.path.dirname(__file__))
 import pytest  # noqa: E402
 
 from step_sequence import (  # noqa: E402
-    EstopGuard, ForeignTwistDetector, build_schedule, parse_schedule, rpm_to_linear,
-    start_gate_problems, twist_values)
+    EXIT_EMERGENCY_STOP, EXIT_ESTOP_NOT_RECEIVED, EstopGuard, ForeignTwistDetector, build_schedule,
+    parse_schedule, rpm_to_linear, start_gate_problems, start_refusal, twist_values)
 
 
 def test_own_values_are_not_foreign():
@@ -128,6 +128,21 @@ def test_estop_guard_stays_stopped_after_a_press():
     guard.update(False, 0.3)  # 解除されても、残りのステップは再開しない
     assert not guard.ok(0.4)
     assert "押下" in guard.reason
+
+
+def test_start_refusal_separates_press_from_no_message():
+    guard = EstopGuard(timeout_sec=1.0)
+    code, reason = start_refusal(guard, 2.0)  # 2 秒聞いて 1 件も受信していない
+    assert code == EXIT_ESTOP_NOT_RECEIVED and "1 件も" in reason
+    guard.update(False, 2.5)  # 遅れて届いた解除
+    assert start_refusal(guard, 2.6) is None
+    assert guard.count == 1 and guard.first_at == 2.5
+    code, reason = start_refusal(guard, 4.0)  # 開始前に途絶えた（押下ではない）
+    assert code == EXIT_ESTOP_NOT_RECEIVED and "途絶" in reason
+    pressed = EstopGuard(timeout_sec=1.0)
+    pressed.update(True, 0.1)
+    code, reason = start_refusal(pressed, 0.2)
+    assert code == EXIT_EMERGENCY_STOP and "押下" in reason
 
 
 if __name__ == "__main__":
