@@ -20,6 +20,8 @@
 | `test_fit_models.py` | 合成データでの検算 |
 | `test_step_sequence.py` | `step_sequence.py` の他の送り手検出・スケジュールの検算（ROS 不要） |
 | `test_evidence.sh` | `lib_evidence.sh` と `record.sh` preflight の実機なし検証（`ros2` をスタブに差し替え） |
+| `check_drive_mode.sh` | DDT モータが実際にどの制御モード（応答フレームの mode）で動いているかを確かめる（読み取りのみ。下の「制御モードの確認」）。判定は `drive_mode_check.py` |
+| `test_drive_mode_check.py` | `drive_mode_check.py` の集計・判定・フレーム組み立ての検算（ROS 不要） |
 
 ## 最短の流れ（講義で「1 回ずつ取って順次回収」する運用）
 
@@ -105,6 +107,30 @@ bash -n scripts/identify/record.sh scripts/identify/lib_evidence.sh
    `ros2 interface show questix_msgs/msg/MotorFeedback` を手で叩き、preflight の 4 条件が
    満たされることを確認する（満たされていれば `record.sh` は preflight を通過する）。
 4. 車輪を浮かせたことを確認してから本番実行する。
+
+## 制御モードの確認（`check_drive_mode.sh`）
+
+`drive_component` の `control_mode` と、各輪の応答フレームの mode（DATA[1]。1 = 電流ループ、
+2 = 速度ループ）が一致するかを確かめる。`/drive_status` を聞くだけで、モータを動かす指令は送らない。
+同定や電流モードの試験の前に一度実行する。
+
+```bash
+bash scripts/identify/check_drive_mode.sh                # 現在の mode（約 3 s）
+bash scripts/identify/check_drive_mode.sh --estop-cycle  # 続けて非常停止の押下・解除の後も確かめる
+```
+
+- 確かめる理由: モード切替フレーム（`ddt_protocol::packModeFrame`）は DATA[8] にモード値、DATA[9] に
+  CRC8 を入れているが、同関数のコメントに引用された仕様は「DATA[9] がモード値、CRC なし」。仕様の
+  とおりなら切替は効かず、モータは電源投入時のモードのまま動く。スクリプトは送信しているバイト列と
+  仕様のレイアウトも並べて表示する。
+- `control_mode: velocity` で mode が速度ループなら一致。ただし速度ループが電源投入時の既定なら、
+  切替フレームが効いているかはこれでは分からない。分けるには、車輪を浮かせて
+  `control_mode: current` で起動し直して実行する（mode が速度ループのままなら切替が効いていない。
+  その状態では電流指令の生値が速度指令として解釈されるので、すぐに velocity に戻す）。
+- `--estop-cycle`: 非常停止で DDT の電源が切れる機体（ID13）では、解除の後に電源投入時のモードに戻り
+  得る。`drive_component` は解除のときにモード切替フレームを送り直さない。
+- 終了コード: 0 = 一致 / 1 = 不一致（または解除の後に mode が変わった）/ 2 = 判定できない
+  （非常停止中・未通電・inactive で新しい応答が無い）/ 3 = 実行環境の不足。
 
 ## 手順（velocity モード）
 
