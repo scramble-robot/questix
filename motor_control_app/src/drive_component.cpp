@@ -51,7 +51,13 @@ std::string velocityDampingProblem(const std::string& name, double value) {
                                       {"velocity_damping_max_correction_rpm", 0.0, 100.0},
                                       {"velocity_damping_load_on_amp", 0.0, 8.0},
                                       {"velocity_damping_load_off_amp", 0.0, 8.0},
-                                      {"velocity_damping_load_tau_sec", 0.02, 5.0}};
+                                      {"velocity_damping_load_tau_sec", 0.02, 5.0},
+                                      // 遅れ上乗せ・行き過ぎ差し引き（wheel_lag_assist.hpp）
+                                      {"velocity_lag_assist_gain", 0.0, 3.0},
+                                      {"velocity_lag_assist_overshoot_gain", 0.0, 3.0},
+                                      {"velocity_lag_assist_deadband_rpm", 0.0, 30.0},
+                                      {"velocity_lag_assist_model_tau_sec", 0.01, 1.0},
+                                      {"velocity_lag_assist_max_rpm", 0.0, 50.0}};
   for (const auto& range : kRanges) {
     if (name != range.name) {
       continue;
@@ -214,7 +220,12 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
       {"velocity_damping_max_correction_rpm", velocity_damping_max_correction_rpm_},
       {"velocity_damping_load_on_amp", velocity_damping_load_on_amp_},
       {"velocity_damping_load_off_amp", velocity_damping_load_off_amp_},
-      {"velocity_damping_load_tau_sec", velocity_damping_load_tau_sec_}};
+      {"velocity_damping_load_tau_sec", velocity_damping_load_tau_sec_},
+      {"velocity_lag_assist_gain", velocity_lag_assist_gain_},
+      {"velocity_lag_assist_overshoot_gain", velocity_lag_assist_overshoot_gain_},
+      {"velocity_lag_assist_deadband_rpm", velocity_lag_assist_deadband_rpm_},
+      {"velocity_lag_assist_model_tau_sec", velocity_lag_assist_model_tau_sec_},
+      {"velocity_lag_assist_max_rpm", velocity_lag_assist_max_rpm_}};
   for (const auto& [name, value] : damping_params) {
     const std::string problem = velocityDampingProblem(name, value);
     if (!problem.empty()) {
@@ -325,6 +336,21 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
       velocity_damping_max_correction_rpm_, velocity_damping_load_on_amp_,
       velocity_damping_load_off_amp_, velocity_damping_load_tau_sec_,
       velocity_damping_load_on_amp_ > 0.0 ? "" : " (ゲート無効: 浮かせても補正が掛かる)");
+  const bool lag_assist_requested =
+      velocity_lag_assist_gain_ > 0.0 || velocity_lag_assist_overshoot_gain_ > 0.0;
+  if (lag_assist_requested && control_mode_ != "velocity") {
+    RCLCPP_WARN(this->get_logger(),
+                "velocity_lag_assist_* は velocity モード専用のため control_mode='%s' では"
+                "無視します",
+                control_mode_.c_str());
+  }
+  RCLCPP_INFO(this->get_logger(),
+              "  velocity_lag_assist: %s  gain=%.2f overshoot_gain=%.2f deadband=%.1f rpm "
+              "model_tau=%.3fs max=%.1f rpm（負荷ゲートは velocity_damping_load_* と共通）",
+              (lag_assist_requested && control_mode_ == "velocity") ? "enabled" : "disabled",
+              velocity_lag_assist_gain_, velocity_lag_assist_overshoot_gain_,
+              velocity_lag_assist_deadband_rpm_, velocity_lag_assist_model_tau_sec_,
+              velocity_lag_assist_max_rpm_);
 
   // twist 購読（コールバックは ACTIVE のときのみ処理する）
   twist_subscription_ = this->create_subscription<geometry_msgs::msg::Twist>(
@@ -525,6 +551,15 @@ void DriveComponent::declareParameters() {
   this->declare_parameter("velocity_damping_load_off_amp", 0.3);
   this->declare_parameter("velocity_damping_load_tau_sec", 0.3);
 
+  // velocity モードの遅れ上乗せ・行き過ぎ差し引き（実機試験用。velocity モードのみ有効）。
+  // gain と overshoot_gain がともに 0 で無効。負荷ゲートは velocity_damping_load_* を共用する。
+  // 詳細は motor_control_lib/wheel_lag_assist.hpp、範囲は velocityDampingProblem()。
+  this->declare_parameter("velocity_lag_assist_gain", 0.0);
+  this->declare_parameter("velocity_lag_assist_overshoot_gain", 0.0);
+  this->declare_parameter("velocity_lag_assist_deadband_rpm", 3.0);
+  this->declare_parameter("velocity_lag_assist_model_tau_sec", 0.06);
+  this->declare_parameter("velocity_lag_assist_max_rpm", 15.0);
+
   // コマンド受信タイムアウト [s]（velocity/current 両モードで有効。制御 tick 内で判定）
   this->declare_parameter("cmd_timeout_sec", 1.0);
 
@@ -621,6 +656,14 @@ void DriveComponent::readParameters() {
   velocity_damping_load_on_amp_ = this->get_parameter("velocity_damping_load_on_amp").as_double();
   velocity_damping_load_off_amp_ = this->get_parameter("velocity_damping_load_off_amp").as_double();
   velocity_damping_load_tau_sec_ = this->get_parameter("velocity_damping_load_tau_sec").as_double();
+  velocity_lag_assist_gain_ = this->get_parameter("velocity_lag_assist_gain").as_double();
+  velocity_lag_assist_overshoot_gain_ =
+      this->get_parameter("velocity_lag_assist_overshoot_gain").as_double();
+  velocity_lag_assist_deadband_rpm_ =
+      this->get_parameter("velocity_lag_assist_deadband_rpm").as_double();
+  velocity_lag_assist_model_tau_sec_ =
+      this->get_parameter("velocity_lag_assist_model_tau_sec").as_double();
+  velocity_lag_assist_max_rpm_ = this->get_parameter("velocity_lag_assist_max_rpm").as_double();
   cmd_timeout_sec_ = this->get_parameter("cmd_timeout_sec").as_double();
   control_rate_ = this->get_parameter("control_rate").as_double();
   command_wait_ms_ = static_cast<int>(this->get_parameter("command_wait_ms").as_int());
@@ -763,6 +806,16 @@ control_core::Config DriveComponent::makeControlCoreConfig() const {
   config.velocity_damping.load_on_amp = velocity_damping_load_on_amp_;
   config.velocity_damping.load_off_amp = velocity_damping_load_off_amp_;
   config.velocity_damping.load_tau_sec = velocity_damping_load_tau_sec_;
+  // 遅れ上乗せ・行き過ぎ差し引きも velocity モード専用。負荷ゲートはダンピングと共通の値。
+  const bool velocity = control_mode_ == "velocity";
+  config.velocity_lag_assist.gain = velocity ? velocity_lag_assist_gain_ : 0.0;
+  config.velocity_lag_assist.overshoot_gain = velocity ? velocity_lag_assist_overshoot_gain_ : 0.0;
+  config.velocity_lag_assist.deadband_rpm = velocity_lag_assist_deadband_rpm_;
+  config.velocity_lag_assist.model_tau_sec = velocity_lag_assist_model_tau_sec_;
+  config.velocity_lag_assist.max_rpm = velocity_lag_assist_max_rpm_;
+  config.velocity_lag_assist.load_on_amp = velocity_damping_load_on_amp_;
+  config.velocity_lag_assist.load_off_amp = velocity_damping_load_off_amp_;
+  config.velocity_lag_assist.load_tau_sec = velocity_damping_load_tau_sec_;
   return config;
 }
 
@@ -802,6 +855,7 @@ rcl_interfaces::msg::SetParametersResult DriveComponent::onParameterChange(
   bool current_pi_dirty = false;
   bool warn_lqr_ignored = false;
   bool warn_damping_ignored = false;
+  bool warn_lag_assist_ignored = false;
   bool lqr_or_run_threshold_changed = false;
   std::vector<std::function<void()>> staged;
   // Phase 1: validate and stage typed values only. No member or subsystem writes.
@@ -983,6 +1037,30 @@ rcl_interfaces::msg::SetParametersResult DriveComponent::onParameterChange(
                              : &velocity_damping_load_tau_sec_;
         staged.emplace_back([target, value]() { *target = value; });
         control_core_dirty = true;
+
+        // --- 遅れ上乗せ・行き過ぎ差し引き（制御コアへ反映。変えた次の tick は補正 0 から） ---
+      } else if (name == "velocity_lag_assist_gain" ||
+                 name == "velocity_lag_assist_overshoot_gain" ||
+                 name == "velocity_lag_assist_deadband_rpm" ||
+                 name == "velocity_lag_assist_model_tau_sec" ||
+                 name == "velocity_lag_assist_max_rpm") {
+        const auto value = param.get_value<double>();
+        const std::string problem = velocityDampingProblem(name, value);
+        if (!problem.empty()) {
+          throw std::invalid_argument(problem);
+        }
+        double* target =
+            (name == "velocity_lag_assist_gain")             ? &velocity_lag_assist_gain_
+            : (name == "velocity_lag_assist_overshoot_gain") ? &velocity_lag_assist_overshoot_gain_
+            : (name == "velocity_lag_assist_deadband_rpm")   ? &velocity_lag_assist_deadband_rpm_
+            : (name == "velocity_lag_assist_model_tau_sec")  ? &velocity_lag_assist_model_tau_sec_
+                                                             : &velocity_lag_assist_max_rpm_;
+        staged.emplace_back([target, value]() { *target = value; });
+        control_core_dirty = true;
+        warn_lag_assist_ignored =
+            warn_lag_assist_ignored ||
+            (value > 0.0 && control_mode_ != "velocity" &&
+             (name == "velocity_lag_assist_gain" || name == "velocity_lag_assist_overshoot_gain"));
       } else if (name == "cmd_timeout_sec") {
         const auto value = param.get_value<double>();
         staged.emplace_back([this, value]() { cmd_timeout_sec_ = value; });
@@ -1107,6 +1185,11 @@ rcl_interfaces::msg::SetParametersResult DriveComponent::onParameterChange(
   if (warn_damping_ignored) {
     RCLCPP_WARN(this->get_logger(),
                 "velocity_damping_gain_sec は velocity モード専用です（現在 '%s'、無視）",
+                control_mode_.c_str());
+  }
+  if (warn_lag_assist_ignored) {
+    RCLCPP_WARN(this->get_logger(),
+                "velocity_lag_assist_* は velocity モード専用です（現在 '%s'、無視）",
                 control_mode_.c_str());
   }
   if (warn_lqr_ignored) {

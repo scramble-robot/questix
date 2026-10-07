@@ -140,6 +140,39 @@ ros2 param set /drive_component velocity_damping_gain_sec 0.0               # �
 
 続けて車輪を浮かせて同じ回転数を回し、揺れが増えていない（量子化の 1〜2 rpm のまま）ことも確かめる。
 
+### 遅れ上乗せ・行き過ぎ差し引き（velocity モードのみ、**実機試験用・既定は無効**）
+
+床の上の低速（15〜40 rpm、その場旋回）の約 1.75 Hz の揺れは、共振ダンピングでは 15 rpm で変わらず
+25/40 rpm で 3 割ほどしか減らなかった。|I| は 15 rpm でも 1.4 A と大きく、摩擦で車輪が引っかかる →
+ファームが電流を積み増して滑り出す → 行き過ぎて逆トルクで止める、の繰り返しと見ている
+（`scripts/identify/current_stats.py`）。そこで、実測が本来の応答（一次遅れ `model_tau`）より遅れた分を
+指令に上乗せしてファームの積み増しを速め、行き過ぎた分を差し引く（`motor_control_lib/wheel_lag_assist.hpp`）。
+共振ダンピングの後に足し、掛ける条件・リセット・符号の安全装置はダンピングと同じ。負荷ゲートは
+`velocity_damping_load_*` を共用する。
+
+摩擦 + PI + 慣性の簡易シミュレーションでは揺れは減らなかった（上乗せはファームの積分を通じて主に
+「ばね」として効き、周波数が上がる）。ただし同じモデルは共振ダンピングで低速も収まると予測し実機と
+合わないので、効くかどうかは実機で確かめる。
+
+| パラメータ | 既定値 | 実行時変更 | 効き |
+|---|---|---|---|
+| `velocity_lag_assist_gain` | 0.0 | ○ | 遅れ 1 rpm あたりの上乗せ（0..3）。0 で上乗せなし |
+| `velocity_lag_assist_overshoot_gain` | 0.0 | ○ | 行き過ぎ 1 rpm あたりの差し引き（0..3）。0 で差し引きなし |
+| `velocity_lag_assist_deadband_rpm` | 3.0 | ○ | これ以内の遅れ・行き過ぎは無視 [RPM]（0..30） |
+| `velocity_lag_assist_model_tau_sec` | 0.06 | ○ | 本来の応答の時定数 [s]（0.01..1）。通常の追従遅れを上乗せしないため |
+| `velocity_lag_assist_max_rpm` | 15.0 | ○ | 上乗せ・差し引きそれぞれの上限 [RPM]（0..50） |
+
+試し方（その場旋回、補正なしの記録 `ident_dev_carpet_20261008_0109` と比べる）:
+
+```bash
+ros2 param set /drive_component velocity_lag_assist_gain 1.0
+ros2 param set /drive_component velocity_lag_assist_overshoot_gain 1.0
+bash scripts/identify/record.sh --levels 15,25,40 --hold 6 --turn
+python3 scripts/identify/current_stats.py ~/ident_data/<新しい記録>/bag
+ros2 param set /drive_component velocity_lag_assist_gain 0.0                 # 元に戻す
+ros2 param set /drive_component velocity_lag_assist_overshoot_gain 0.0
+```
+
 ### 観測・レポート
 
 | パラメータ | 既定値 | 実行時変更 | 効き |

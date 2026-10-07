@@ -113,6 +113,20 @@ drive_component:
     velocity_damping_load_off_amp: 0.3       # [A] 0..8（load_on より小さく）
     velocity_damping_load_tau_sec: 0.3       # [s] 0.02..5 |I| の平滑化
 
+    # ---- velocity モードの遅れ上乗せ・行き過ぎ差し引き（実機試験用、既定は無効）----
+    # 床の上の低速（15〜40 rpm）で、摩擦で車輪が引っかかる → ファームが電流を積み増して滑り出す →
+    # 行き過ぎて逆トルクで止める、を約 1.75 Hz で繰り返す揺れへの試み。実測が本来の応答（一次遅れ
+    # model_tau）より deadband を超えて遅れた分 × gain を指令に上乗せし（ファームの積み増しを速める）、
+    # 行き過ぎた分 × overshoot_gain を差し引く。上限はそれぞれ max。共振ダンピングの後に足す。
+    # 負荷ゲートは上の velocity_damping_load_* を共用（浮かせた車輪には掛けない）。
+    # 簡易シミュレーションでは効かなかった（詳細は motor_control_lib/wheel_lag_assist.hpp）。実機で
+    # ros2 param set で試し、効いた値が分かるまで既定は 0 のまま。
+    velocity_lag_assist_gain: 0.0            # [RPM/RPM] 0..3、0 で上乗せなし
+    velocity_lag_assist_overshoot_gain: 0.0  # [RPM/RPM] 0..3、0 で差し引きなし
+    velocity_lag_assist_deadband_rpm: 3.0    # [RPM] 0..30 これ以内の遅れ・行き過ぎは無視
+    velocity_lag_assist_model_tau_sec: 0.06  # [s] 0.01..1 本来の応答（浮かせた同定値 57 ms）
+    velocity_lag_assist_max_rpm: 15.0        # [RPM] 0..50 上乗せ・差し引きそれぞれの上限
+
     # /target_twist 受信タイムアウト（制御 tick 内で判定）。
     # 指令がこの秒数途絶えたら走行モータを停止する（velocity/current 両モードで有効）。
     # 上流（uart_joy_driver/joy_gate/joy_controller）が停止しても暴走を防ぐ安全機能。

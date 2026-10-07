@@ -367,6 +367,13 @@ private:
   double velocity_damping_load_on_amp_{0.6};
   double velocity_damping_load_off_amp_{0.3};
   double velocity_damping_load_tau_sec_{0.3};
+  // velocity モードの遅れ上乗せ・行き過ぎ差し引き（wheel_lag_assist.hpp、実機試験用）。
+  // gain と overshoot_gain がともに 0 で無効。負荷ゲートは velocity_damping_load_* を共用。
+  double velocity_lag_assist_gain_{0.0};
+  double velocity_lag_assist_overshoot_gain_{0.0};
+  double velocity_lag_assist_deadband_rpm_{3.0};
+  double velocity_lag_assist_model_tau_sec_{0.06};
+  double velocity_lag_assist_max_rpm_{15.0};
 
   // 指令送信後の追加待機 [ms]。0で無効（DDT M0602C の間隔要件用の保険）
   int command_wait_ms_{0};

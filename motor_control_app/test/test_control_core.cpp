@@ -1221,3 +1221,164 @@ TEST(ControlCoreRateDamper, ChangingTheGainAtRuntimeDoesNotJump) {
   EXPECT_EQ(out.left_rpm, out.left_ref_rpm);
   EXPECT_EQ(out.right_rpm, out.right_ref_rpm);
 }
+
+// ---- 遅れ上乗せ・行き過ぎ差し引き（wheel_lag_assist、実機試験用） ----
+// 効くかどうかは実機で確かめる（摩擦の引っかかりはここのプラントでは再現しない）。ここでは
+// 既定で無効・掛かる条件・安全装置・浮かせた車輪で振動を作らないこと、を固定する。
+
+namespace {
+
+core::Config lagAssistConfig(double gain, double overshoot_gain, bool load_gate = true) {
+  core::Config config = yamlConfig();
+  config.velocity_lag_assist.gain = gain;
+  config.velocity_lag_assist.overshoot_gain = overshoot_gain;
+  config.velocity_lag_assist.deadband_rpm = 3.0;
+  config.velocity_lag_assist.model_tau_sec = 0.06;
+  config.velocity_lag_assist.max_rpm = 15.0;
+  // 負荷ゲートは velocity_damping_load_* と共通（drive_component が同じ値を渡す）
+  config.velocity_lag_assist.load_on_amp = load_gate ? 0.6 : 0.0;
+  config.velocity_lag_assist.load_off_amp = 0.3;
+  config.velocity_lag_assist.load_tau_sec = 0.3;
+  return config;
+}
+
+// 直進で左輪 target_rpm を保ち、後半 10 秒の左輪の実速度の p2p と、補正を掛け得たかを返す
+struct AssistResult {
+  double p2p{0.0};
+  bool active{false};
+};
+AssistResult holdWithAssist(const core::Config& config, DampingPlant left, DampingPlant right,
+                            double target_rpm) {
+  core::ControlCore control(config);
+  const double linear = target_rpm / 60.0 * 2.0 * M_PI * config.wheel_radius;
+  core::WheelFeedback fb;
+  AssistResult res;
+  double lo = 1e9;
+  double hi = -1e9;
+  for (int k = 0; k < 800; ++k) {
+    const auto out = control.step(linear, 0.0, kControlDt, fb);
+    fb.valid = true;
+    fb.left_rpm = left.step(out.stop ? 0 : out.left_rpm);
+    fb.right_rpm = right.step(out.stop ? 0 : out.right_rpm);
+    fb.left_current_amp = left.current();
+    fb.right_current_amp = right.current();
+    if (k >= 300) {
+      lo = std::min(lo, left.truth());
+      hi = std::max(hi, left.truth());
+      res.active = res.active || out.lag_assist_active;
+    }
+  }
+  res.p2p = hi - lo;
+  return res;
+}
+
+}  // namespace
+
+TEST(ControlCoreLagAssist, DisabledByDefault) {
+  const auto config = yamlConfig();
+  EXPECT_FALSE(motor_control_lib::wheel_lag_assist::enabled(config.velocity_lag_assist));
+  core::ControlCore control(config);
+  core::WheelFeedback fb;
+  fb.valid = true;
+  fb.left_current_amp = 2.0;
+  fb.right_current_amp = 2.0;
+  for (int k = 0; k < 100; ++k) {
+    fb.left_rpm = 0;  // 引っかかって止まったまま
+    fb.right_rpm = 0;
+    const auto out = control.step(0.157, 0.0, kControlDt, fb);
+    EXPECT_FALSE(out.lag_assist_active);
+    EXPECT_EQ(out.left_rpm, out.left_ref_rpm);
+    EXPECT_EQ(out.right_rpm, out.right_ref_rpm);
+  }
+}
+
+TEST(ControlCoreLagAssist, BoostsAWheelThatIsStuck) {
+  // 実測が 0 のまま（引っかかり）なら、遅れ − 不感帯に比例して上乗せする（上限 max_rpm）
+  core::ControlCore control(lagAssistConfig(1.0, 1.0));
+  core::WheelFeedback fb;
+  fb.valid = true;
+  fb.left_current_amp = 2.0;
+  fb.right_current_amp = -2.0;
+  core::Output out;
+  for (int k = 0; k < 150; ++k) {
+    out = control.step(0.157, 0.0, kControlDt, fb);  // 左 +15 / 右 -15 rpm
+  }
+  ASSERT_EQ(out.left_ref_rpm, 15);
+  ASSERT_EQ(out.right_ref_rpm, -15);
+  EXPECT_TRUE(out.lag_assist_active);
+  EXPECT_EQ(out.left_rpm, 15 + 12);  // 遅れ 15 − 不感帯 3
+  EXPECT_EQ(out.right_rpm, -15 - 12);
+}
+
+TEST(ControlCoreLagAssist, LiftedWheelsStayQuiet) {
+  // 浮かせた（一次遅れ 57 ms、本来の応答のモデルとほぼ同じ）車輪では、負荷ゲートを外しても
+  // 上限のゲインで振動を作らない（遅れが不感帯に収まり、補正がほとんど掛からない）
+  for (const double rpm : {15.0, 40.0, 95.0}) {
+    const auto off = holdWithAssist(lagAssistConfig(0.0, 0.0, false), DampingPlant::lifted(61),
+                                    DampingPlant::lifted(62), rpm);
+    const auto on = holdWithAssist(lagAssistConfig(3.0, 3.0, false), DampingPlant::lifted(61),
+                                   DampingPlant::lifted(62), rpm);
+    EXPECT_LT(on.p2p, off.p2p + 2.0) << rpm << " rpm: off " << off.p2p << " on " << on.p2p;
+    // 負荷ゲートがあれば浮かせた電流では掛けない
+    const auto gated = holdWithAssist(lagAssistConfig(3.0, 3.0, true), DampingPlant::lifted(61),
+                                      DampingPlant::lifted(62), rpm);
+    EXPECT_FALSE(gated.active) << rpm << " rpm";
+    EXPECT_DOUBLE_EQ(gated.p2p, off.p2p) << rpm << " rpm";
+  }
+}
+
+TEST(ControlCoreLagAssist, NeverReversesTheCommand) {
+  auto config = lagAssistConfig(3.0, 3.0);
+  config.velocity_lag_assist.max_rpm = 50.0;
+  core::ControlCore control(config);
+  core::WheelFeedback fb;
+  fb.valid = true;
+  fb.left_current_amp = 2.0;
+  fb.right_current_amp = 2.0;
+  for (int k = 0; k < 200; ++k) {
+    fb.left_rpm = (k % 10 < 5) ? 0 : 200;
+    fb.right_rpm = -fb.left_rpm;
+    const auto out = control.step(0.157, 0.0, kControlDt, fb);
+    if (out.stop) {
+      continue;
+    }
+    EXPECT_GE(out.left_rpm, 0) << "k=" << k;
+    EXPECT_LE(out.right_rpm, 0) << "k=" << k;
+  }
+}
+
+TEST(ControlCoreLagAssist, ReversingTheTargetRestartsBumpless) {
+  // 目標の符号が変わった最初の tick は補正 0（本来の応答のモデルを実測から取り直す）
+  auto config = lagAssistConfig(1.0, 1.0);
+  config.max_linear_accel = 0.0;  // 目標をそのまま反転させる
+  config.slew_taper_band_linear = 0.0;
+  core::ControlCore control(config);
+  core::WheelFeedback fb;
+  fb.valid = true;
+  fb.left_current_amp = 2.0;
+  fb.right_current_amp = 2.0;
+  fb.left_rpm = 15;
+  fb.right_rpm = -15;
+  for (int k = 0; k < 100; ++k) {
+    control.step(0.157, 0.0, kControlDt, fb);
+  }
+  const auto out = control.step(-0.157, 0.0, kControlDt, fb);
+  ASSERT_EQ(out.left_ref_rpm, -15);
+  EXPECT_EQ(out.left_rpm, out.left_ref_rpm);
+  EXPECT_EQ(out.right_rpm, out.right_ref_rpm);
+}
+
+TEST(ControlCoreLagAssist, ChangingTheGainAtRuntimeDoesNotJump) {
+  core::ControlCore control(lagAssistConfig(1.0, 1.0));
+  core::WheelFeedback fb;
+  fb.valid = true;
+  fb.left_current_amp = 2.0;
+  fb.right_current_amp = 2.0;
+  for (int k = 0; k < 150; ++k) {
+    control.step(0.157, 0.0, kControlDt, fb);  // 実測 0 のまま = 上乗せ中
+  }
+  control.setConfig(lagAssistConfig(2.0, 1.0));
+  const auto out = control.step(0.157, 0.0, kControlDt, fb);
+  EXPECT_EQ(out.left_rpm, out.left_ref_rpm);
+  EXPECT_EQ(out.right_rpm, out.right_ref_rpm);
+}

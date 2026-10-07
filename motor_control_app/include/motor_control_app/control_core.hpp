@@ -13,6 +13,7 @@
 #include "motor_control_app/drive_slew.hpp"
 #include "motor_control_lib/differential_kinematics.hpp"
 #include "motor_control_lib/drive_mode_fsm.hpp"
+#include "motor_control_lib/wheel_lag_assist.hpp"
 #include "motor_control_lib/wheel_observer.hpp"
 #include "motor_control_lib/wheel_rate_damper.hpp"
 #include "motor_control_lib/wheel_velocity_lqr.hpp"
@@ -79,6 +80,11 @@ struct Config {
   // 有効なときだけ掛ける。実測の符号は velocity_run.invert_measured に従う（同じ配線の事実）。
   // 負荷ゲート（load_*）で、各輪の電流が小さい（車輪を浮かせた等）間は補正を弱め・切る。
   motor_control_lib::wheel_rate_damper::Params velocity_damping;
+
+  // velocity モードの遅れ上乗せ・行き過ぎ差し引き（motor_control_lib/wheel_lag_assist.hpp）。
+  // gain / overshoot_gain がともに 0 で無効（既定 = 従来と同じ出力）。掛ける条件・実測の符号・
+  // リセットは共振ダンピングと同じ（ダンピングの後に足す）。実機試験用。
+  motor_control_lib::wheel_lag_assist::Params velocity_lag_assist;
 };
 
 /**
@@ -113,6 +119,8 @@ struct Output {
   bool lqr_active{false};  // この tick で RUN LQR 補正が実際に適用されたか
   bool damping_active{false};  // この tick で共振ダンピング補正をどちらかの輪に掛けたか
                                // （負荷ゲートが 0 の輪は掛けていない扱い）
+  bool lag_assist_active{false};  // この tick で遅れ上乗せ・行き過ぎ差し引きを掛け得たか
+                                  // （負荷ゲートが 0 の輪は掛けていない扱い）
 };
 
 /**
@@ -123,6 +131,7 @@ struct Output {
  *   -> 最近接整数へ丸め -> 走行状態機械（停止/低速/走行。ヒステリシス付き）
  *   -> [RUN かつ LQR 有効かつ FB あり] オブザーバ + LQR+FF で車輪 RPM を補正
  *   -> [停止以外かつダンピング有効かつ FB あり] 共振のダンピング補正を足す
+ *   -> [停止以外かつ遅れ上乗せ有効かつ FB あり] 遅れの上乗せ・行き過ぎの差し引きを足す
  *
  * 既存の純粋関数（drive_slew / differential_kinematics / drive_mode_fsm / wheel_observer /
  * wheel_velocity_lqr）を合成した層で、ロジックの単一ソースはそれぞれの関数側にある。
@@ -137,7 +146,9 @@ class ControlCore {
 public:
   explicit ControlCore(const Config& config)
       : config_(config),
-        damping_params_(motor_control_lib::wheel_rate_damper::sanitize(config.velocity_damping)) {}
+        damping_params_(motor_control_lib::wheel_rate_damper::sanitize(config.velocity_damping)),
+        lag_assist_params_(
+            motor_control_lib::wheel_lag_assist::sanitize(config.velocity_lag_assist)) {}
 
   /**
    * @brief 1 制御ステップを実行する（フィードバックなし = 従来 API。FF のみ）。
@@ -215,6 +226,22 @@ public:
     } else {
       resetDampers();
     }
+
+    // 遅れの上乗せ・行き過ぎの差し引き（摩擦で引っかかった間にファームの積み増しを速める）。
+    // ダンピングの後に足す。条件とリセットはダンピングと同じ。
+    if (mode_ != DriveMode::kStop &&
+        motor_control_lib::wheel_lag_assist::enabled(lag_assist_params_) && feedback.valid) {
+      const double sign = config_.velocity_run.invert_measured ? -1.0 : 1.0;
+      const bool left =
+          assistWheel(left_assist_, left_assist_dir_, out.left_ref_rpm, sign * feedback.left_rpm,
+                      feedback.left_current_amp, dt_sec, out.left_rpm);
+      const bool right =
+          assistWheel(right_assist_, right_assist_dir_, out.right_ref_rpm,
+                      sign * feedback.right_rpm, feedback.right_current_amp, dt_sec, out.right_rpm);
+      out.lag_assist_active = left || right;
+    } else {
+      resetLagAssists();
+    }
     return out;
   }
 
@@ -265,6 +292,13 @@ public:
       resetDampers();
     }
     damping_params_ = damping;
+    const auto lag_assist =
+        motor_control_lib::wheel_lag_assist::sanitize(config.velocity_lag_assist);
+    if (lagAssistChanged(lag_assist_params_, lag_assist) ||
+        config.velocity_run.invert_measured != config_.velocity_run.invert_measured) {
+      resetLagAssists();
+    }
+    lag_assist_params_ = lag_assist;
     config_ = config;
     lqr_gains_.reset();
     lqr_gains_dt_ = 0.0;
@@ -390,6 +424,14 @@ private:
     left_ = WheelState{};
     right_ = WheelState{};
     resetDampers();
+    resetLagAssists();
+  }
+
+  void resetLagAssists() {
+    motor_control_lib::wheel_lag_assist::reset(left_assist_);
+    motor_control_lib::wheel_lag_assist::reset(right_assist_);
+    left_assist_dir_ = 0;
+    right_assist_dir_ = 0;
   }
 
   void resetDampers() {
@@ -416,6 +458,40 @@ private:
     }
     cmd = damped;
     return state.load_scale > 0.0;
+  }
+
+  // 1 輪ぶんの遅れ上乗せ・行き過ぎ差し引きを cmd に足す。目標 0 や目標の符号が変わった輪は
+  // 状態を捨てる（本来の応答のモデルを実測から取り直す）。符号の安全装置はダンピングと同じ。
+  // 戻り値: 補正を掛け得たか（負荷ゲートが 0 のときは false）。
+  bool assistWheel(motor_control_lib::wheel_lag_assist::State& state, int& dir, int ref_rpm,
+                   double measured_rpm, double current_amp, double dt_sec, int& cmd) {
+    const int ref_dir = (ref_rpm > 0) - (ref_rpm < 0);
+    if (ref_dir == 0 || ref_dir != dir) {
+      motor_control_lib::wheel_lag_assist::reset(state);
+      dir = ref_dir;
+      if (ref_dir == 0) {
+        return false;
+      }
+    }
+    const double correction = motor_control_lib::wheel_lag_assist::step(
+        state, lag_assist_params_, static_cast<double>(ref_rpm), measured_rpm, current_amp, dt_sec);
+    int assisted = static_cast<int>(std::lround(static_cast<double>(cmd) + correction));
+    if (ref_rpm > 0) {
+      assisted = std::max(assisted, 0);
+    } else {
+      assisted = std::min(assisted, 0);
+    }
+    cmd = assisted;
+    return state.load_scale > 0.0;
+  }
+
+  static bool lagAssistChanged(const motor_control_lib::wheel_lag_assist::Params& before,
+                               const motor_control_lib::wheel_lag_assist::Params& after) {
+    return before.gain != after.gain || before.overshoot_gain != after.overshoot_gain ||
+           before.deadband_rpm != after.deadband_rpm ||
+           before.model_tau_sec != after.model_tau_sec || before.max_rpm != after.max_rpm ||
+           before.load_on_amp != after.load_on_amp || before.load_off_amp != after.load_off_amp ||
+           before.load_tau_sec != after.load_tau_sec;
   }
 
   // velocity_run のうち、オブザーバ / LQR の意味を変えるメンバが変わったか。
@@ -453,6 +529,14 @@ private:
   motor_control_lib::wheel_rate_damper::Params damping_params_;
   motor_control_lib::wheel_rate_damper::State left_damper_;
   motor_control_lib::wheel_rate_damper::State right_damper_;
+
+  // 遅れ上乗せ・行き過ぎ差し引きの状態（sanitize 済みのパラメータ）と、状態を作ったときの目標の
+  // 符号（-1 / 0 / +1。符号が変わったら状態を捨てる）
+  motor_control_lib::wheel_lag_assist::Params lag_assist_params_;
+  motor_control_lib::wheel_lag_assist::State left_assist_;
+  motor_control_lib::wheel_lag_assist::State right_assist_;
+  int left_assist_dir_{0};
+  int right_assist_dir_{0};
 };
 
 }  // namespace motor_control_app::control_core
