@@ -363,6 +363,10 @@ private:
   double velocity_damping_gain_sec_{0.0};
   double velocity_damping_filter_tau_sec_{0.08};
   double velocity_damping_max_correction_rpm_{30.0};
+  // 負荷ゲート: 各輪の電流が小さい（車輪を浮かせた等）間は補正を弱め・切る。on 0 でゲート無効
+  double velocity_damping_load_on_amp_{0.6};
+  double velocity_damping_load_off_amp_{0.3};
+  double velocity_damping_load_tau_sec_{0.3};
 
   // 指令送信後の追加待機 [ms]。0で無効（DDT M0602C の間隔要件用の保険）
   int command_wait_ms_{0};

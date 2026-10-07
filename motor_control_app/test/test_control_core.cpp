@@ -917,12 +917,18 @@ TEST(ControlCoreLqr, DisablingRunThresholdClearsControllerState) {
 
 // --- 共振ダンピング（velocity_damping、motor_control_lib/wheel_rate_damper.hpp）----------------
 //
-// 実機計測（2026-10-07、ripple_analysis.py）: 車輪を浮かせると揺れは量子化の 1 rpm 以内、
-// 床の上では回転数によらず約 1.4 Hz（その場旋回）で p2p 17〜49 rpm。機体の慣性が載ると
-// ファーム速度ループが減衰の弱い 2 次のモードになる、というモデルで確かめる。
-//  - 床の上: 2 次系（固有周波数 1.0〜2.2 Hz、減衰比 0.02）+ 路面の乱れ（決定的な疑似乱数）
-//  - 浮かせた / 軽い: 一次遅れ（時定数 0.01〜0.08 s。ファームのループが速く安定）
-// 実機の代わりではない。ゲインの上限（速いループでの安定性）の回帰を CI で固定するためのもの。
+// 実機計測（2026-10-07、ripple_analysis.py / current_stats.py）: 車輪を浮かせると揺れは量子化の
+// 1 rpm 以内、床の上では回転数によらず約 1.4 Hz（その場旋回）で p2p 17〜49 rpm。機体の慣性が
+// 載るとファーム速度ループが減衰の弱い 2 次のモードになる、というモデルで確かめる。
+//  - 床の上: 2 次系（固有周波数 1.0〜2.2 Hz、減衰比 0.02）+ 路面の乱れ（決定的な疑似乱数）。
+//    電流 = 摩擦 1.0 A + 慣性 × 加速度（揺れで ±数 A。実測の |I| 平均 0.48〜2.1 A）
+//  - 浮かせた: 一次遅れ（同定値 τ = 57 ms、むだ時間 0、R² 1.00。batch_fit.py、2026-10-07）。
+//    電流は |I| 平均 0.13〜0.25 A（補正で p2p 80 rpm 振動していても電流の RMS は約 0.2 A）。
+//    実機では浮かせて補正を掛けると振動した（gain 0.08 で p2p 10 rpm、0.12 で約 80 rpm）が、この
+//    一次遅れのモデルでは再現しない（毎 tick 変わる指令へのファームの応答がステップ応答と違う、
+//    など原因は未確認）。だから浮かせた状態では負荷ゲートで補正を切る、という設計で、ここでは
+//    「ゲートが補正を切ること」を確かめる。
+// 実機の代わりではない。負荷ゲートと補正の効き・安定性の回帰を CI で固定するためのもの。
 
 namespace {
 
@@ -930,25 +936,48 @@ namespace {
 // 路面の乱れは指令に足す速度相当の外乱（固定シードの LCG なので実行環境によらず同じ列）。
 class DampingPlant {
 public:
+  // 床の上（機体の慣性が載った、減衰の弱いモード）
   static DampingPlant resonant(double natural_hz, double damping_ratio, uint32_t seed) {
     DampingPlant p(seed);
-    p.resonant_ = true;
-    p.wn_ = 2.0 * M_PI * natural_hz;
-    p.zeta_ = damping_ratio;
+    p.setResonant(natural_hz, damping_ratio);
+    p.setLoaded(true);
     return p;
   }
+  // 浮かせた: 速く安定した一次遅れ
   static DampingPlant lag(double tau_sec, uint32_t seed) {
     DampingPlant p(seed);
     p.tau_ = tau_sec;
+    p.setLoaded(false);
     return p;
+  }
+  // 浮かせた（同定値）
+  static DampingPlant lifted(uint32_t seed) { return lag(kLiftedTauSec, seed); }
+  static constexpr double kLiftedTauSec = 0.057;
+
+  void setLag(double tau_sec) {
+    resonant_ = false;
+    tau_ = tau_sec;
+  }
+  void setResonant(double natural_hz, double damping_ratio) {
+    resonant_ = true;
+    wn_ = 2.0 * M_PI * natural_hz;
+    zeta_ = damping_ratio;
+  }
+  // 電流のモデル（負荷ゲートの入力）と路面の乱れの大きさを、床 / 浮かせたで切り替える
+  void setLoaded(bool loaded) {
+    // 浮かせた: 実測で |I| 平均 0.13〜0.25 A。補正で p2p 80 rpm 振動しても電流の RMS は約 0.2 A
+    friction_amp_ = loaded ? 1.0 : 0.15;
+    amp_per_rpm_per_sec_ = loaded ? 0.017 : 0.0002;
+    noise_rpm_ = loaded ? 3.0 : 0.3;
   }
 
   // 1 tick（kControlDt）進め、量子化した実測 RPM を返す。
   int step(int cmd_rpm) {
-    disturbance_ = 0.9 * disturbance_ + 3.0 * noise();
+    disturbance_ = 0.9 * disturbance_ + noise_rpm_ * noise();
     constexpr int kSub = 10;
     const double h = kControlDt / kSub;
     const double u = static_cast<double>(cmd_rpm) + disturbance_;
+    const double before = y_;
     for (int i = 0; i < kSub; ++i) {
       if (resonant_) {
         const double accel = wn_ * wn_ * (u - y_) - 2.0 * zeta_ * wn_ * v_;
@@ -958,9 +987,12 @@ public:
         y_ += h / tau_ * (u - y_);
       }
     }
+    const double accel = (y_ - before) / kControlDt;  // [rpm/s]
+    current_ = (y_ >= 0.0 ? 1.0 : -1.0) * friction_amp_ + amp_per_rpm_per_sec_ * accel;
     return static_cast<int>(std::lround(y_));
   }
   double truth() const { return y_; }
+  double current() const { return current_; }
 
 private:
   explicit DampingPlant(uint32_t seed) : rng_(seed) {}
@@ -981,14 +1013,22 @@ private:
   double y_{0.0};
   double v_{0.0};
   double disturbance_{0.0};
+  double friction_amp_{0.2};
+  double amp_per_rpm_per_sec_{0.0};
+  double noise_rpm_{0.3};
+  double current_{0.0};
   uint32_t rng_;
 };
 
-core::Config dampingConfig(double gain_sec) {
+core::Config dampingConfig(double gain_sec, bool load_gate = true) {
   core::Config config = yamlConfig();
   config.velocity_damping.gain_sec = gain_sec;
   config.velocity_damping.filter_tau_sec = 0.08;
   config.velocity_damping.max_correction_rpm = 30.0;
+  // launcher/config/drive_component.yaml の既定値。load_gate=false で無効（常に全量）
+  config.velocity_damping.load_on_amp = load_gate ? 0.6 : 0.0;
+  config.velocity_damping.load_off_amp = 0.3;
+  config.velocity_damping.load_tau_sec = 0.3;
   return config;
 }
 
@@ -999,8 +1039,8 @@ struct SwingResult {
   bool damping_active{false};
 };
 SwingResult holdSpeed(double gain_sec, DampingPlant left, DampingPlant right,
-                      double target_rpm = 60.0) {
-  core::ControlCore control(dampingConfig(gain_sec));
+                      double target_rpm = 60.0, bool load_gate = true) {
+  core::ControlCore control(dampingConfig(gain_sec, load_gate));
   const double linear = target_rpm / 60.0 * 2.0 * M_PI * yamlConfig().wheel_radius;
   constexpr int kTicks = 800;    // 16 s
   constexpr int kMeasure = 500;  // 後半 10 s
@@ -1012,6 +1052,8 @@ SwingResult holdSpeed(double gain_sec, DampingPlant left, DampingPlant right,
     fb.valid = true;
     fb.left_rpm = left.step(out.stop ? 0 : out.left_rpm);
     fb.right_rpm = right.step(out.stop ? 0 : out.right_rpm);
+    fb.left_current_amp = left.current();
+    fb.right_current_amp = right.current();
     if (k >= kTicks - kMeasure) {
       samples.push_back(left.truth());
       res.damping_active = res.damping_active || out.damping_active;
@@ -1064,18 +1106,58 @@ TEST(ControlCoreRateDamper, DampsTheLoadedResonance) {
   }
 }
 
-TEST(ControlCoreRateDamper, DoesNotDestabilizeAFastUnloadedLoop) {
-  // 車輪を浮かせた・軽いときはファームのループが速く安定（実測で揺れ 1 rpm 以内）。補正が
-  // 遅れて届くので、ゲインが大きすぎるとここでナイキスト付近の発振が起きる。推奨値とその
-  // 1.75 倍まで、揺れが補正なしより増えない（+10% 以内）ことを固定する。
-  for (const double tau : {0.01, 0.03, 0.08}) {
-    const auto off = holdSpeed(0.0, DampingPlant::lag(tau, 21), DampingPlant::lag(tau, 22));
-    for (const double gain : {kRecommendedGain, 0.14}) {
-      const auto on = holdSpeed(gain, DampingPlant::lag(tau, 21), DampingPlant::lag(tau, 22));
-      EXPECT_LT(on.rms, 1.1 * off.rms)
-          << "tau " << tau << " gain " << gain << ": off " << off.rms << " on " << on.rms;
+TEST(ControlCoreRateDamper, LoadGateKeepsLiftedWheelsQuiet) {
+  // 浮かせた電流（0.2 A 前後）では負荷ゲートが補正を切る（上限の gain 0.2 でも）。指令は目標
+  // そのままで、揺れは補正なしと同じ。
+  for (const double gain : {kRecommendedGain, 0.2}) {
+    for (const double rpm : {20.0, 60.0, 95.0, 150.0}) {
+      const auto off = holdSpeed(0.0, DampingPlant::lifted(21), DampingPlant::lifted(22), rpm);
+      const auto on = holdSpeed(gain, DampingPlant::lifted(21), DampingPlant::lifted(22), rpm);
+      EXPECT_FALSE(on.damping_active) << "gain " << gain << " rpm " << rpm;
+      EXPECT_DOUBLE_EQ(on.rms, off.rms) << "gain " << gain << " rpm " << rpm;
     }
   }
+}
+
+TEST(ControlCoreRateDamper, LiftingWhileDampedFadesOut) {
+  // 床の上で補正が効いている最中に持ち上げても、電流が下がって 1 s 以内に補正が抜け、
+  // 浮かせた後の揺れは補正なしと同じ程度に収まる
+  core::ControlCore control(dampingConfig(kRecommendedGain));
+  auto left = DampingPlant::resonant(1.4, 0.02, 51);
+  auto right = DampingPlant::resonant(1.4, 0.02, 52);
+  const double linear = 95.0 / 60.0 * 2.0 * M_PI * yamlConfig().wheel_radius;
+  core::WheelFeedback fb;
+  bool active_before_lift = false;
+  int last_active_tick = -1;
+  std::vector<double> after;
+  constexpr int kLiftTick = 1000;  // 20 s
+  for (int k = 0; k < 1500; ++k) {
+    if (k == kLiftTick) {
+      for (auto* plant : {&left, &right}) {
+        plant->setLag(DampingPlant::kLiftedTauSec);
+        plant->setLoaded(false);
+      }
+    }
+    const auto out = control.step(linear, 0.0, kControlDt, fb);
+    fb.valid = true;
+    fb.left_rpm = left.step(out.left_rpm);
+    fb.right_rpm = right.step(out.right_rpm);
+    fb.left_current_amp = left.current();
+    fb.right_current_amp = right.current();
+    if (k < kLiftTick) {
+      active_before_lift = active_before_lift || out.damping_active;
+    } else if (out.damping_active) {
+      last_active_tick = k;
+    }
+    if (k >= kLiftTick + 100) {  // 持ち上げてから 2 s 後以降
+      after.push_back(left.truth());
+    }
+  }
+  EXPECT_TRUE(active_before_lift);
+  EXPECT_LT((last_active_tick - kLiftTick) * kControlDt, 1.0);
+  const double p2p =
+      *std::max_element(after.begin(), after.end()) - *std::min_element(after.begin(), after.end());
+  EXPECT_LT(p2p, 5.0);
 }
 
 TEST(ControlCoreRateDamper, InactiveWithoutFeedbackAndRestartsBumpless) {
@@ -1091,6 +1173,8 @@ TEST(ControlCoreRateDamper, InactiveWithoutFeedbackAndRestartsBumpless) {
   fb.valid = true;
   fb.left_rpm = 20;  // 目標から大きく外れていても跳ねない
   fb.right_rpm = -20;
+  fb.left_current_amp = 2.0;  // 床の上
+  fb.right_current_amp = -2.0;
   const auto first = control.step(0.628, 0.0, kControlDt, fb);
   EXPECT_TRUE(first.damping_active);
   EXPECT_EQ(first.left_rpm, first.left_ref_rpm);
@@ -1104,6 +1188,8 @@ TEST(ControlCoreRateDamper, NeverReversesTheCommand) {
   core::ControlCore control(config);
   core::WheelFeedback fb;
   fb.valid = true;
+  fb.left_current_amp = 2.0;  // 床の上（負荷ゲートが開いている）
+  fb.right_current_amp = 2.0;
   for (int k = 0; k < 200; ++k) {
     fb.left_rpm = (k % 10 < 5) ? 10 : 200;
     fb.right_rpm = -fb.left_rpm;
@@ -1127,6 +1213,8 @@ TEST(ControlCoreRateDamper, ChangingTheGainAtRuntimeDoesNotJump) {
     fb.valid = true;
     fb.left_rpm = left.step(out.left_rpm);
     fb.right_rpm = right.step(out.right_rpm);
+    fb.left_current_amp = left.current();
+    fb.right_current_amp = right.current();
   }
   control.setConfig(dampingConfig(0.12));
   const auto out = control.step(0.628, 0.0, kControlDt, fb);

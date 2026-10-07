@@ -99,12 +99,19 @@ drive_component:
     # 床の上で回転数によらず約 1.4〜1.8 Hz で揺れ続ける（車輪を浮かせると揺れない）のは、機体の
     # 慣性が載ったファーム速度ループの減衰不足（2026-10-07 の実機計測）。追従誤差の変化率に逆らう
     # 補正を速度指令に足してダンピングを補う。定常の速さは変えない。current モードでは無視（WARN）。
-    # 既定は無効（0）。推奨 0.08 から試す（手順は motor_control_app/README.md「共振ダンピング」）。
-    # 上限 0.2: 大きすぎると、ファームのループが速い状態（車輪を浮かせた等）で 25 Hz 付近の発振。
+    # 既定は無効（0）。床の上の実測（その場旋回）で 0.08 / 0.12 が効いた（95 rpm で振幅 1/5 前後）。
     # 停止中・目標 0 の輪・フィードバックが velocity_run_feedback_max_age_sec より古いときは掛けない。
     velocity_damping_gain_sec: 0.0           # [s] 0..0.2、0 で無効
     velocity_damping_filter_tau_sec: 0.08    # [s] 0.02..0.5 微分の前の一次ローパス
     velocity_damping_max_correction_rpm: 30.0  # [RPM] 0..100 補正量の上限（安全装置）
+    # 負荷ゲート: 床の上だけで効かせる。車輪を浮かせると補正自体が振動を作る（実測: gain 0.08 で
+    # p2p 10 rpm、0.12 で約 80 rpm）ため、各輪の電流 |I| を load_tau で平滑化し、load_off 以下で
+    # 補正 0、load_on 以上で全量、その間は線形。実測の |I| 平均は床 0.48〜2.1 A、浮かせて 0.13〜0.25 A
+    # （補正で振動していても 0.5 A 未満）。浮かせると 1 s 以内に補正が抜ける。
+    # load_on 0 でゲート無効（浮かせても補正が掛かる。試験以外で使わない）。
+    velocity_damping_load_on_amp: 0.6        # [A] 0..8
+    velocity_damping_load_off_amp: 0.3       # [A] 0..8（load_on より小さく）
+    velocity_damping_load_tau_sec: 0.3       # [s] 0.02..5 |I| の平滑化
 
     # /target_twist 受信タイムアウト（制御 tick 内で判定）。
     # 指令がこの秒数途絶えたら走行モータを停止する（velocity/current 両モードで有効）。

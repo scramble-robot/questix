@@ -22,6 +22,7 @@
 #include "motor_control_app/drive_slew.hpp"
 #include "motor_control_app/lifecycle_auto_start.hpp"
 #include "motor_control_app/motor_status_msg.hpp"
+#include "motor_control_lib/ddt_protocol.hpp"
 
 using namespace std::chrono_literals;
 
@@ -47,7 +48,10 @@ std::string velocityDampingProblem(const std::string& name, double value) {
   };
   static constexpr Range kRanges[] = {{"velocity_damping_gain_sec", 0.0, 0.2},
                                       {"velocity_damping_filter_tau_sec", 0.02, 0.5},
-                                      {"velocity_damping_max_correction_rpm", 0.0, 100.0}};
+                                      {"velocity_damping_max_correction_rpm", 0.0, 100.0},
+                                      {"velocity_damping_load_on_amp", 0.0, 8.0},
+                                      {"velocity_damping_load_off_amp", 0.0, 8.0},
+                                      {"velocity_damping_load_tau_sec", 0.02, 5.0}};
   for (const auto& range : kRanges) {
     if (name != range.name) {
       continue;
@@ -207,7 +211,10 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
   const std::pair<const char*, double> damping_params[] = {
       {"velocity_damping_gain_sec", velocity_damping_gain_sec_},
       {"velocity_damping_filter_tau_sec", velocity_damping_filter_tau_sec_},
-      {"velocity_damping_max_correction_rpm", velocity_damping_max_correction_rpm_}};
+      {"velocity_damping_max_correction_rpm", velocity_damping_max_correction_rpm_},
+      {"velocity_damping_load_on_amp", velocity_damping_load_on_amp_},
+      {"velocity_damping_load_off_amp", velocity_damping_load_off_amp_},
+      {"velocity_damping_load_tau_sec", velocity_damping_load_tau_sec_}};
   for (const auto& [name, value] : damping_params) {
     const std::string problem = velocityDampingProblem(name, value);
     if (!problem.empty()) {
@@ -310,10 +317,14 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
                 control_mode_.c_str());
   }
   RCLCPP_INFO(
-      this->get_logger(), "  velocity_damping: %s  gain=%.3fs tau=%.3fs max_corr=%.1f rpm",
+      this->get_logger(),
+      "  velocity_damping: %s  gain=%.3fs tau=%.3fs max_corr=%.1f rpm "
+      "load_gate[on=%.2fA off=%.2fA tau=%.2fs]%s",
       (velocity_damping_gain_sec_ > 0.0 && control_mode_ == "velocity") ? "enabled" : "disabled",
       velocity_damping_gain_sec_, velocity_damping_filter_tau_sec_,
-      velocity_damping_max_correction_rpm_);
+      velocity_damping_max_correction_rpm_, velocity_damping_load_on_amp_,
+      velocity_damping_load_off_amp_, velocity_damping_load_tau_sec_,
+      velocity_damping_load_on_amp_ > 0.0 ? "" : " (ゲート無効: 浮かせても補正が掛かる)");
 
   // twist 購読（コールバックは ACTIVE のときのみ処理する）
   twist_subscription_ = this->create_subscription<geometry_msgs::msg::Twist>(
@@ -509,6 +520,10 @@ void DriveComponent::declareParameters() {
   this->declare_parameter("velocity_damping_gain_sec", 0.0);
   this->declare_parameter("velocity_damping_filter_tau_sec", 0.08);
   this->declare_parameter("velocity_damping_max_correction_rpm", 30.0);
+  // 負荷ゲート（床の上だけで効かせる）。平滑化した |I| が off 以下で補正 0、on 以上で全量。
+  this->declare_parameter("velocity_damping_load_on_amp", 0.6);
+  this->declare_parameter("velocity_damping_load_off_amp", 0.3);
+  this->declare_parameter("velocity_damping_load_tau_sec", 0.3);
 
   // コマンド受信タイムアウト [s]（velocity/current 両モードで有効。制御 tick 内で判定）
   this->declare_parameter("cmd_timeout_sec", 1.0);
@@ -603,6 +618,9 @@ void DriveComponent::readParameters() {
       this->get_parameter("velocity_damping_filter_tau_sec").as_double();
   velocity_damping_max_correction_rpm_ =
       this->get_parameter("velocity_damping_max_correction_rpm").as_double();
+  velocity_damping_load_on_amp_ = this->get_parameter("velocity_damping_load_on_amp").as_double();
+  velocity_damping_load_off_amp_ = this->get_parameter("velocity_damping_load_off_amp").as_double();
+  velocity_damping_load_tau_sec_ = this->get_parameter("velocity_damping_load_tau_sec").as_double();
   cmd_timeout_sec_ = this->get_parameter("cmd_timeout_sec").as_double();
   control_rate_ = this->get_parameter("control_rate").as_double();
   command_wait_ms_ = static_cast<int>(this->get_parameter("command_wait_ms").as_int());
@@ -742,6 +760,9 @@ control_core::Config DriveComponent::makeControlCoreConfig() const {
       (control_mode_ == "velocity") ? velocity_damping_gain_sec_ : 0.0;
   config.velocity_damping.filter_tau_sec = velocity_damping_filter_tau_sec_;
   config.velocity_damping.max_correction_rpm = velocity_damping_max_correction_rpm_;
+  config.velocity_damping.load_on_amp = velocity_damping_load_on_amp_;
+  config.velocity_damping.load_off_amp = velocity_damping_load_off_amp_;
+  config.velocity_damping.load_tau_sec = velocity_damping_load_tau_sec_;
   return config;
 }
 
@@ -947,6 +968,20 @@ rcl_interfaces::msg::SetParametersResult DriveComponent::onParameterChange(
           throw std::invalid_argument(problem);
         }
         staged.emplace_back([this, value]() { velocity_damping_max_correction_rpm_ = value; });
+        control_core_dirty = true;
+      } else if (name == "velocity_damping_load_on_amp" ||
+                 name == "velocity_damping_load_off_amp" ||
+                 name == "velocity_damping_load_tau_sec") {
+        const auto value = param.get_value<double>();
+        const std::string problem = velocityDampingProblem(name, value);
+        if (!problem.empty()) {
+          throw std::invalid_argument(problem);
+        }
+        double* target = (name == "velocity_damping_load_on_amp") ? &velocity_damping_load_on_amp_
+                         : (name == "velocity_damping_load_off_amp")
+                             ? &velocity_damping_load_off_amp_
+                             : &velocity_damping_load_tau_sec_;
+        staged.emplace_back([target, value]() { *target = value; });
         control_core_dirty = true;
       } else if (name == "cmd_timeout_sec") {
         const auto value = param.get_value<double>();
@@ -1213,6 +1248,11 @@ void DriveComponent::controlTimerCallback() {
       feedback.valid = true;
       feedback.left_rpm = left_fb.velocity_rpm_raw;
       feedback.right_rpm = right_fb.velocity_rpm_raw;
+      // 共振ダンピングの負荷ゲート（床か浮かせたか）に使う実測トルク電流
+      feedback.left_current_amp =
+          motor_control_lib::ddt_protocol::currentRawToAmp(left_fb.current_raw);
+      feedback.right_current_amp =
+          motor_control_lib::ddt_protocol::currentRawToAmp(right_fb.current_raw);
     }
   }
   const auto out = control_core_->step(target_linear_, target_angular_, dt, feedback);

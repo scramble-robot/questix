@@ -77,6 +77,7 @@ struct Config {
   // velocity モードの共振ダンピング（motor_control_lib/wheel_rate_damper.hpp）。gain_sec 0 で無効
   // （既定 = 従来と同じ出力）。停止以外の状態で、目標が 0 でない輪に、両輪のフィードバックが
   // 有効なときだけ掛ける。実測の符号は velocity_run.invert_measured に従う（同じ配線の事実）。
+  // 負荷ゲート（load_*）で、各輪の電流が小さい（車輪を浮かせた等）間は補正を弱め・切る。
   motor_control_lib::wheel_rate_damper::Params velocity_damping;
 };
 
@@ -89,6 +90,9 @@ struct WheelFeedback {
   bool valid{false};
   int left_rpm{0};
   int right_rpm{0};
+  // 実測トルク電流 [A]（符号は問わない）。共振ダンピングの負荷ゲート（床か浮かせたか）に使う
+  double left_current_amp{0.0};
+  double right_current_amp{0.0};
 };
 
 /**
@@ -108,6 +112,7 @@ struct Output {
   double angular{0.0};     // スルーレート適用後の車体角速度指令 [rad/s]
   bool lqr_active{false};  // この tick で RUN LQR 補正が実際に適用されたか
   bool damping_active{false};  // この tick で共振ダンピング補正をどちらかの輪に掛けたか
+                               // （負荷ゲートが 0 の輪は掛けていない扱い）
 };
 
 /**
@@ -202,10 +207,10 @@ public:
     if (mode_ != DriveMode::kStop &&
         motor_control_lib::wheel_rate_damper::enabled(damping_params_) && feedback.valid) {
       const double sign = config_.velocity_run.invert_measured ? -1.0 : 1.0;
-      const bool left =
-          dampWheel(left_damper_, out.left_ref_rpm, sign * feedback.left_rpm, dt_sec, out.left_rpm);
+      const bool left = dampWheel(left_damper_, out.left_ref_rpm, sign * feedback.left_rpm,
+                                  feedback.left_current_amp, dt_sec, out.left_rpm);
       const bool right = dampWheel(right_damper_, out.right_ref_rpm, sign * feedback.right_rpm,
-                                   dt_sec, out.right_rpm);
+                                   feedback.right_current_amp, dt_sec, out.right_rpm);
       out.damping_active = left || right;
     } else {
       resetDampers();
@@ -252,6 +257,9 @@ public:
     if (damping.gain_sec != damping_params_.gain_sec ||
         damping.filter_tau_sec != damping_params_.filter_tau_sec ||
         damping.max_correction_rpm != damping_params_.max_correction_rpm ||
+        damping.load_on_amp != damping_params_.load_on_amp ||
+        damping.load_off_amp != damping_params_.load_off_amp ||
+        damping.load_tau_sec != damping_params_.load_tau_sec ||
         config.velocity_run.invert_measured != config_.velocity_run.invert_measured) {
       // 次の tick は補正 0 から始まる（初回は内部状態を実測で初期化するだけ）
       resetDampers();
@@ -391,14 +399,15 @@ private:
 
   // 1 輪ぶんのダンピング補正を cmd に足す。目標 0 の輪は補正せず状態を捨てる。
   // 補正で指令の符号が目標と逆にならないようにする（LQR と同じ安全装置。0 で止める）。
+  // 戻り値: 補正を掛けたか（負荷ゲートが 0 のときは false）。
   bool dampWheel(motor_control_lib::wheel_rate_damper::State& state, int ref_rpm,
-                 double measured_rpm, double dt_sec, int& cmd) {
+                 double measured_rpm, double current_amp, double dt_sec, int& cmd) {
     if (ref_rpm == 0) {
       motor_control_lib::wheel_rate_damper::reset(state);
       return false;
     }
     const double correction = motor_control_lib::wheel_rate_damper::step(
-        state, damping_params_, static_cast<double>(ref_rpm), measured_rpm, dt_sec);
+        state, damping_params_, static_cast<double>(ref_rpm), measured_rpm, current_amp, dt_sec);
     int damped = static_cast<int>(std::lround(static_cast<double>(cmd) + correction));
     if (ref_rpm > 0) {
       damped = std::max(damped, 0);
@@ -406,7 +415,7 @@ private:
       damped = std::min(damped, 0);
     }
     cmd = damped;
-    return true;
+    return state.load_scale > 0.0;
   }
 
   // velocity_run のうち、オブザーバ / LQR の意味を変えるメンバが変わったか。
