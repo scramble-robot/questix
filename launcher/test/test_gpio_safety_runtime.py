@@ -17,12 +17,18 @@ import pytest
 
 STARTUP_TIMEOUT_SECONDS = 15.0
 COMMAND_TIMEOUT_SECONDS = 5.0
+# Domains 1-101 only: from 102 on, the DDS discovery ports (7400 + 250 * domain) fall into the
+# Linux ephemeral range (32768-60999), where another process's socket can hold them and the
+# launch is never discovered (cf. scripts/robot_manager/ros_domain.py). 0 is the default of the
+# other packages' tests running in parallel and 78 is questix_blockly's.
+TEST_DOMAIN_IDS = tuple(domain for domain in range(1, 102) if domain != 78)
 
 
 def isolated_ros_environment(offset):
     """Return an environment using a test-specific local ROS domain."""
     environment = os.environ.copy()
-    environment['ROS_DOMAIN_ID'] = str(100 + ((os.getpid() + offset) % 100))
+    environment['ROS_DOMAIN_ID'] = str(
+        TEST_DOMAIN_IDS[(os.getpid() + offset) % len(TEST_DOMAIN_IDS)])
     environment['ROS_AUTOMATIC_DISCOVERY_RANGE'] = 'LOCALHOST'
     environment.pop('ROS_LOCALHOST_ONLY', None)
     return environment
