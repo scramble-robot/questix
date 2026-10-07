@@ -18,11 +18,16 @@ TOPIC="/drive_status"
 DURATION="3.0"
 AFTER_SEC="6.0"
 ESTOP_CYCLE=""
+DOMAIN=""
+LAUNCH_ENV="${QUESTIX_CONFIG_DIR:-/etc/questix_robot}/launch.env"
+# questix_robot_launcher.sh と同じ既定値（launch.env に ROS_DOMAIN_ID が無いとき）
+LAUNCHER_DEFAULT_DOMAIN=42
 
 usage() {
   cat <<'USAGE'
 使い方:
   bash scripts/identify/check_drive_mode.sh [--duration S] [--estop-cycle] [--after-sec S]
+                                            [--domain N]
 
 DDT モータの応答フレームの mode が drive_component の control_mode と一致するかを確かめる。
 /drive_status を聞くだけで、モータを動かす指令は送らない（車輪を浮かせる必要はない）。
@@ -33,6 +38,9 @@ DDT モータの応答フレームの mode が drive_component の control_mode 
                   非常停止で DDT の電源が切れる機体（ID13 など）で、電源投入時のモードに
                   戻っていないかを見る
   --after-sec S   非常停止を解除した後に聞く時間 [s]（既定 6。DDT の起動に 1.3〜1.6 s）
+  --domain N      ROS_DOMAIN_ID を指定する。既定はロボットの起動と同じ値
+                  （/etc/questix_robot/launch.env の ROS_DOMAIN_ID、無ければ 42）。
+                  シェルの ROS_DOMAIN_ID とは違うことがあるので、使った値を表示する
   -h, --help      このヘルプ
 
 前提: drive_component が active（統合起動中）で、非常停止は解除されていること。
@@ -54,6 +62,7 @@ while [[ $# -gt 0 ]]; do
     --duration) DURATION="$2"; shift 2 ;;
     --estop-cycle) ESTOP_CYCLE="--estop-cycle"; shift ;;
     --after-sec) AFTER_SEC="$2"; shift 2 ;;
+    --domain) DOMAIN="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown option: $1" >&2; usage >&2; exit 3 ;;
   esac
@@ -67,12 +76,74 @@ done
 python3 -c 'import rclpy, questix_msgs.msg' 2>/dev/null \
   || fail "rclpy または questix_msgs を import できません。QUESTiX のワークスペースを source してください"
 
-echo "=== preflight ==="
-ros2 node list 2>/dev/null | grep -qxF "$NODE" \
-  || fail "$NODE が見つかりません。drive_component の起動と ROS_DOMAIN_ID を確認してください"
-echo "  node $NODE: OK"
+# launch.env の KEY の値（source しない。最後の行が有効、前後の空白と引用符を外す）。
+launch_env_value() {
+  [[ -r "$LAUNCH_ENV" ]] || return 0
+  sed -n "s/^[[:space:]]*$1=//p" "$LAUNCH_ENV" | tail -n 1 \
+    | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"\(.*\)"$/\1/' -e "s/^'\\(.*\\)'$/\\1/"
+}
 
-ros2 topic list 2>/dev/null | grep -qxF "$TOPIC" \
+echo "=== preflight ==="
+# ロボット（questix_robot.service）は launch.env の ROS_DOMAIN_ID で動く。シェルの値が違うと
+# drive_component が見えないので、指定が無ければロボットと同じ値に合わせる。
+SHELL_DOMAIN="${ROS_DOMAIN_ID:-}"
+if [[ -z "$DOMAIN" ]]; then
+  if [[ -r "$LAUNCH_ENV" ]]; then
+    DOMAIN="$(launch_env_value ROS_DOMAIN_ID)"
+    DOMAIN="${DOMAIN:-$LAUNCHER_DEFAULT_DOMAIN}"
+    DOMAIN_SOURCE="$LAUNCH_ENV"
+  else
+    DOMAIN="${SHELL_DOMAIN:-0}"
+    DOMAIN_SOURCE="シェル（$LAUNCH_ENV が読めない）"
+  fi
+else
+  DOMAIN_SOURCE="--domain"
+fi
+[[ "$DOMAIN" =~ ^[0-9]+$ ]] || fail "ROS_DOMAIN_ID '$DOMAIN'（$DOMAIN_SOURCE）が数字ではありません"
+export ROS_DOMAIN_ID="$DOMAIN"
+if [[ "${SHELL_DOMAIN:-0}" != "$DOMAIN" ]]; then
+  echo "  ROS_DOMAIN_ID: $DOMAIN（$DOMAIN_SOURCE。シェルの値 ${SHELL_DOMAIN:-未設定=0} とは違うので合わせた）"
+else
+  echo "  ROS_DOMAIN_ID: $DOMAIN（$DOMAIN_SOURCE）"
+fi
+
+# 見つからないときの手がかり（読み取りだけ。何も起動・停止しない）。
+diagnose_missing_node() {
+  echo "error: $NODE が見つかりません（ROS_DOMAIN_ID=$DOMAIN）" >&2
+  local active enable_drive nodes
+  active="$(systemctl is-active questix_robot.service 2>/dev/null || true)"
+  enable_drive="$(launch_env_value ENABLE_DRIVE)"
+  echo "  questix_robot.service: ${active:-不明}" >&2
+  if [[ -r "$LAUNCH_ENV" ]]; then
+    echo "  $LAUNCH_ENV の ENABLE_DRIVE: ${enable_drive:-未設定（既定 true）}" >&2
+  fi
+  nodes="$(ros2 node list --no-daemon --spin-time 3 2>/dev/null || true)"
+  if [[ -n "$nodes" ]]; then
+    echo "  このドメインで見えるノード:" >&2
+    sed 's/^/    /' <<<"$nodes" >&2
+  else
+    echo "  このドメインではノードが 1 つも見えません" >&2
+  fi
+  echo "  確認すること:" >&2
+  [[ "$active" != "active" ]] && echo "    - ロボットが起動していない（Robot Manager で起動する）" >&2
+  [[ "${enable_drive,,}" == "false" ]] \
+    && echo "    - 走行（drive）を起動しない設定になっている（Robot Manager の起動設定で走行を有効にする）" >&2
+  echo "    - ロボットが別の ROS_DOMAIN_ID で動いている（--domain N で指定）" >&2
+  echo "    - ros2 daemon が古い情報を持っている（ros2 daemon stop の後にもう一度）" >&2
+  echo "    - ロボットとは別の PC で実行している（ロボットの Pi で実行する）" >&2
+  exit 3
+}
+
+# ros2 daemon が古い情報を返すことがあるので、見つからなければ daemon を使わずに聞き直す。
+if ros2 node list 2>/dev/null | grep -qxF "$NODE" \
+    || ros2 node list --no-daemon --spin-time 3 2>/dev/null | grep -qxF "$NODE"; then
+  echo "  node $NODE: OK"
+else
+  diagnose_missing_node
+fi
+
+{ ros2 topic list 2>/dev/null | grep -qxF "$TOPIC" \
+    || ros2 topic list --no-daemon --spin-time 3 2>/dev/null | grep -qxF "$TOPIC"; } \
   || fail "$TOPIC が見えません。drive_component の起動と ROS_DOMAIN_ID を確認してください"
 echo "  topic $TOPIC: OK"
 

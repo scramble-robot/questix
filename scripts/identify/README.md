@@ -129,6 +129,9 @@ bash scripts/identify/check_drive_mode.sh --estop-cycle  # 続けて非常停止
   その状態では電流指令の生値が速度指令として解釈されるので、すぐに velocity に戻す）。
 - `--estop-cycle`: 非常停止で DDT の電源が切れる機体（ID13）では、解除の後に電源投入時のモードに戻り
   得る。`drive_component` は解除のときにモード切替フレームを送り直さない。
+- ROS_DOMAIN_ID は既定でロボットの起動と同じ値（`/etc/questix_robot/launch.env`、無ければ 42）を使う。
+  シェルの値とは違うことがある（`--domain N` で指定）。`/drive_component` が見えないときは、
+  ロボットのサービスの状態・`ENABLE_DRIVE`・そのドメインで見えるノードを表示する。
 - 終了コード: 0 = 一致 / 1 = 不一致（または解除の後に mode が変わった）/ 2 = 判定できない
   （非常停止中・未通電・inactive で新しい応答が無い）/ 3 = 実行環境の不足。
 
