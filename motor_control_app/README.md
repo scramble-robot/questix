@@ -47,12 +47,14 @@ control_rate Hz の固定 tick:
 
 ### 走行チューニング（路面・フィーリング調整で触る面）
 
+2026-10（#179）：`wheel_radius` を実寸の 0.05 m に直した。m/s・rad/s 単位の値（下の加速度・緩和幅、操作の倍率、LAB の走行の上限、twist_arbiter の中立の幅）は、車輪の回転数（＝走り方）が変わらないよう同時に半分にした。それ以前の値は、実際の速度の 2 倍の数値で書かれていた。
+
 | パラメータ | 既定値 | 単位 | 実行時変更 | 効き |
 |---|---|---|---|---|
-| `max_linear_accel` | 3.0 | m/s² | ○ | 前後の追従性の主レバー。0以下で制限無効 |
-| `max_angular_accel` | 3.0 | rad/s² | ○ | 旋回の追従性。上げると低RPMファームループを励起し得る |
-| `slew_taper_band_linear` | 0.2 | m/s | ○ | 目標接近時のジャーク抑制幅 |
-| `slew_taper_band_angular` | 0.2 | rad/s | ○ | 旋回振動抑制の主レバー |
+| `max_linear_accel` | 1.5 | m/s² | ○ | 前後の追従性の主レバー。0以下で制限無効 |
+| `max_angular_accel` | 1.5 | rad/s² | ○ | 旋回の追従性。上げると低RPMファームループを励起し得る |
+| `slew_taper_band_linear` | 0.1 | m/s | ○ | 目標接近時のジャーク抑制幅 |
+| `slew_taper_band_angular` | 0.1 | rad/s | ○ | 旋回振動抑制の主レバー |
 | `min_command_rpm` | 5 | RPM | ○ | 低速不感帯（ファーム不安定域を指令しない）。上げすぎると旋回低速側が消える |
 
 ### 停止挙動（実機評価で確定済み。加速整形とは独立）
@@ -137,7 +139,7 @@ ON/OFF しても、変更前のモデル由来の推定値が新しい設定へ�
 | `control_mode` | `"velocity"`（`"current"` で電流モード） |
 | `control_rate` | 50.0 Hz（シリアル往復 2 モータ直列が周期予算に収まる必要あり） |
 | `serial_response_timeout_ms` | 10（従来の固定値）。フィードバック応答待ちの上限 [ms]、範囲 [2, 50]（外はクランプ + WARN）。下限の目安は応答フレーム伝送 1.74 ms + ファーム処理の実測値 + 余裕。実測は bag の `/drive_control_sample` の `roundtrip_ms` / `response_timeout`（周期ごと・左右ごと）。INFO「シリアル往復レイテンシ統計」は lifecycle の deactivate のときだけ出る（サービスの停止や launch の Ctrl+C では出ない） |
-| `wheel_radius` / `wheel_separation` | 0.1 / 0.5 m |
+| `wheel_radius` / `wheel_separation` | 0.05 / 0.5 m（半径は直径 100 mm の実寸。2026-10 まで 0.1 の誤り。#179） |
 | `auto_start` / `connect_retry_period_sec` | true / 1.0 |
 | `publish_tf` / `odom_topic` / `odom_frame_id` / `base_frame_id` | true / `/odom` / `odom` / `base_link` |
 | `typed_status_topic` / `emergency_stop_topic` | `/drive_status` / `/emergency_stop` |

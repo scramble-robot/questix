@@ -76,6 +76,8 @@ def expand(monkeypatch, tmp_path):
 
 
 DRIVERS = {'uart': 'uart_joy_driver', 'dualshock': 'joy_node', 'web': 'web_joy_driver'}
+# A saved profile is used only with the current unit generation (wheel_radius 0.05 m, #179).
+UNITS_MARKER = f'# questix_controls_units: {questix_control_config.UNITS_GENERATION}\n'
 
 
 @pytest.mark.parametrize('controller', ['uart', 'dualshock'])
@@ -90,7 +92,7 @@ def test_integrated_profile_and_topic_overrides(expand, tmp_path, controller, ga
                'drive_component': ('max_motor_rpm', 120)}
     for node, (key, value) in changes.items():
         profile[node]['ros__parameters'][key] = value
-    (tmp_path / f'controls.{controller}.yaml').write_text(yaml.safe_dump(profile))
+    (tmp_path / f'controls.{controller}.yaml').write_text(UNITS_MARKER + yaml.safe_dump(profile))
     nodes = expand('launcher/launch/questix_core.launch.xml', controller_type=controller,
                    enable_gpio_ref=gated, enable_lidar='false', enable_rviz='false')
     for node, (key, value) in changes.items():
@@ -102,6 +104,20 @@ def test_integrated_profile_and_topic_overrides(expand, tmp_path, controller, ga
     driver = DRIVERS[controller]
     assert nodes['/' + driver]['deadzone'] == profile[driver]['ros__parameters']['deadzone']
     assert not (set(DRIVERS.values()) - {driver}) & set(nodes)  # only the selected driver
+
+
+@pytest.mark.parametrize('marker', ['', '# questix_controls_units: 1\n'])
+def test_saved_profile_from_before_the_wheel_radius_fix_is_ignored(expand, tmp_path, marker):
+    """Old-unit speeds would drive twice as fast with the real radius: the defaults apply."""
+    packaged = ROOT / 'questix_control_config/config/controls.dualshock.yaml'
+    profile = yaml.safe_load(packaged.read_text())
+    profile['joy_controller']['ros__parameters']['longitudinal_input_ratio'] = 2.0
+    profile['drive_component']['ros__parameters']['max_linear_accel'] = 3.0
+    (tmp_path / 'controls.dualshock.yaml').write_text(marker + yaml.safe_dump(profile))
+    nodes = expand('launcher/launch/questix_core.launch.xml', controller_type='dualshock',
+                   enable_gpio_ref='true', enable_lidar='false', enable_rviz='false')
+    assert nodes['/joy_controller']['longitudinal_input_ratio'] == 1.0
+    assert nodes['/drive_component']['max_linear_accel'] == 1.5
 
 
 @pytest.mark.parametrize('gated', ['true', 'false'])
@@ -151,7 +167,7 @@ def test_dual_stick_keeps_its_own_scaling(expand):
     nodes = expand('joy_controller/launch/joy_controller.launch.xml', dual_stick='true')
     assert '/joy_controller' not in nodes
     dual = nodes['/joy_controller_dual_stick']
-    assert dual['longitudinal_input_ratio'] == 0.05
+    assert dual['longitudinal_input_ratio'] == 0.025
     assert dual['angular_input_ratio'] == 0.05
     assert dual['left_stick_vertical_axis'] == 1
 
@@ -169,7 +185,7 @@ def test_dual_stick_keeps_its_own_scaling(expand):
     ('uart_joy_driver/launch/uart_joy_driver.launch.xml', 'uart_joy_driver', 'deadzone', 0.05),
     ('web_joy_driver/launch/web_joy_driver.launch.xml', 'web_joy_driver', 'deadzone', 0.05),
     ('joy_controller/launch/joy_controller.launch.py',
-     'joy_controller', 'angular_input_ratio', 6.0),
+     'joy_controller', 'angular_input_ratio', 3.0),
 ])
 def test_standalone_entry_points(expand, relative_path, node, key, value):
     """Both Python and XML standalone entry points consume the central defaults."""
@@ -201,5 +217,5 @@ def test_composed_drive_receives_profile_and_serial_port(expand, extension):
     nodes = expand(f'motor_control_app/launch/drive_component_container.launch.{extension}',
                    serial_port='/dev/test-port')
     assert nodes['/drive_component']['max_motor_rpm'] == 475
-    assert nodes['/drive_component']['max_linear_accel'] == 3.0
+    assert nodes['/drive_component']['max_linear_accel'] == 1.5
     assert nodes['/drive_component']['serial_port'] == '/dev/test-port'

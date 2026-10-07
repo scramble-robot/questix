@@ -20,8 +20,8 @@ TwistArbiterComponent::TwistArbiterComponent(const rclcpp::NodeOptions& options)
       this->declare_parameter<std::string>("status_topic", "/twist_arbiter/status");
   const double tick_hz = this->declare_parameter<double>("tick_hz", 20.0);
   ArbiterLogic::Config config;
-  config.neutral_linear = this->declare_parameter<double>("neutral_linear", 0.02);
-  config.neutral_angular = this->declare_parameter<double>("neutral_angular", 0.05);
+  config.neutral_linear = this->declare_parameter<double>("neutral_linear", 0.01);
+  config.neutral_angular = this->declare_parameter<double>("neutral_angular", 0.025);
   config.lab_timeout_sec = this->declare_parameter<double>("lab_timeout_sec", 0.3);
   config.joy_timeout_sec = this->declare_parameter<double>("joy_timeout_sec", 0.5);
   logic_.configure(config);

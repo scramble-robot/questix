@@ -585,7 +585,7 @@ function comparisonRows() {
 // Driving the real robot from this card (live-drive.js): the speed of the real step input, and
 // the robot's wheel radius for the rpm shown next to it (as the bridge reported it).
 let liveStepSpeed = STEP_SPEEDS[1];
-const REAL_WHEEL_RADIUS = 0.1; // m, until the robot has told us (launcher/config/drive_component.yaml)
+const REAL_WHEEL_RADIUS = 0.05; // m, until the robot has told us (launcher/config/drive_component.yaml)
 
 function stepSpeedOptions() {
   const config = { wheel_radius: liveLink().config?.wheel_radius ?? REAL_WHEEL_RADIUS };

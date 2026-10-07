@@ -8,8 +8,21 @@ sys.path.insert(0, os.path.dirname(__file__))
 import pytest  # noqa: E402
 
 from step_sequence import (  # noqa: E402
-    EXIT_EMERGENCY_STOP, EXIT_ESTOP_NOT_RECEIVED, EstopGuard, ForeignTwistDetector, build_schedule,
-    max_rpm_problems, parse_schedule, rpm_to_linear, start_gate_problems, start_refusal, twist_values)
+    DEFAULT_WHEEL_RADIUS, DEFAULT_WHEEL_SEPARATION, EXIT_EMERGENCY_STOP, EXIT_ESTOP_NOT_RECEIVED,
+    EstopGuard, ForeignTwistDetector, build_schedule, max_rpm_problems, parse_schedule,
+    rpm_to_linear, start_gate_problems, start_refusal, twist_values)
+
+
+def test_standalone_defaults_match_drive_component():
+    """単体で使うときの既定が drive_component と違うと、指定と違う rpm で走る（#179）。"""
+    import re
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    with open(os.path.join(root, 'launcher/config/drive_component.yaml'), encoding='utf-8') as f:
+        text = f.read()
+    for key, default in (('wheel_radius', DEFAULT_WHEEL_RADIUS),
+                         ('wheel_separation', DEFAULT_WHEEL_SEPARATION)):
+        match = re.search(rf'^\s*{key}:\s*([0-9.]+)', text, re.MULTILINE)
+        assert match and float(match.group(1)) == default, key
 
 
 def test_own_values_are_not_foreign():

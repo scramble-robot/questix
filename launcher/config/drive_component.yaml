@@ -18,7 +18,7 @@ drive_component:
     connect_retry_period_sec: 1.0
 
     # ロボット物理パラメータ
-    wheel_radius: 0.1 # ホイール半径 [m]
+    wheel_radius: 0.05 # ホイール半径 [m]（直径 100 mm。2026-10 まで 0.1 の誤り、#179）
     wheel_separation: 0.5 # ホイール間隔 [m]
 
     # モータ設定

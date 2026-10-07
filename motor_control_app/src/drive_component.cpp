@@ -421,7 +421,7 @@ void DriveComponent::declareParameters() {
   // DDTモータライブラリのパラメータを宣言
   this->declare_parameter("serial_port", "/dev/ttyACM0");
   this->declare_parameter("baud_rate", 57600);
-  this->declare_parameter("wheel_radius", 0.1);
+  this->declare_parameter("wheel_radius", 0.05);
   this->declare_parameter("wheel_separation", 0.5);
   this->declare_parameter("left_motor_id", 4);
   this->declare_parameter("right_motor_id", 5);
@@ -442,13 +442,13 @@ void DriveComponent::declareParameters() {
   this->declare_parameter("integral_limit_amp", 0.3);
   this->declare_parameter("current_zero_deadband_rpm", 5);
   this->declare_parameter("current_invert_measured", true);
-  this->declare_parameter("max_linear_accel", 3.0);
-  this->declare_parameter("max_angular_accel", 3.0);
+  this->declare_parameter("max_linear_accel", 1.5);
+  this->declare_parameter("max_angular_accel", 1.5);
 
   // 目標接近時のレート絞り幅（実効ジャーク制限）。0 で無効＝従来の一次レート制限。
   // 詳細は drive_slew::clampRateTapered。
-  this->declare_parameter("slew_taper_band_linear", 0.2);
-  this->declare_parameter("slew_taper_band_angular", 0.2);
+  this->declare_parameter("slew_taper_band_linear", 0.1);
+  this->declare_parameter("slew_taper_band_angular", 0.1);
 
   // 停止時の電気ブレーキ（velocity モードのみ有効）
   this->declare_parameter("brake_on_stop", false);
