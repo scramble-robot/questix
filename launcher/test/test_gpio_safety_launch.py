@@ -522,7 +522,7 @@ def test_teacher_permission_is_a_practice_opt_in():
         assert "default_value='false'" in default, relative_path
 
     # The node defaults agree with the launch defaults (an opt-in everywhere).
-    for relative_path in ('motor_control_app/src/drive_component.cpp',
+    for relative_path in ('motor_control_app/src/drive_component_params.cpp',
                           'motor_control_app/src/shot_component.cpp',
                           'esc_motor_control_cpp/src/esc_motor_control_component.cpp'):
         text = (SOURCE_ROOT / relative_path).read_text(encoding='utf-8')
@@ -563,7 +563,7 @@ def test_emergency_stop_is_always_published_and_always_required():
         assert parameters['require_emergency_stop'] is True, relative_path
         assert parameters['emergency_stop_topic'] == '/emergency_stop', relative_path
         assert parameters['emergency_stop_timeout_sec'] == 1.0, relative_path
-    for relative_path in ('motor_control_app/src/drive_component.cpp',
+    for relative_path in ('motor_control_app/src/drive_component_params.cpp',
                           'motor_control_app/src/shot_component.cpp',
                           'esc_motor_control_cpp/src/esc_motor_control_component.cpp'):
         text = (SOURCE_ROOT / relative_path).read_text(encoding='utf-8')
