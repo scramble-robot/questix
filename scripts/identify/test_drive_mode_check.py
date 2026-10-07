@@ -32,7 +32,8 @@ def test_crc_matches_ddt_protocol():
 
 def test_repeated_and_unreceived_frames_are_not_counted():
     # 同じ受信時刻は 1 フレーム、受信時刻 0 は未受信
-    summary = wheel((0, 2), (100, 2), (100, 2), (200, 2))
+    ms = 1_000_000
+    summary = wheel((0, 2), (100 * ms, 2), (100 * ms, 2), (200 * ms, 2))
     assert summary.frames == 2
 
 
@@ -44,8 +45,9 @@ def test_frames_older_than_the_window_are_ignored():
 
 
 def test_judge():
-    assert dmc.judge(wheel((1, 2), (2, 2)), 2) == dmc.OK
-    assert dmc.judge(wheel((1, 2), (2, 1)), 2) == dmc.MISMATCH
+    ms = 1_000_000
+    assert dmc.judge(wheel((20 * ms, 2), (40 * ms, 2)), 2) == dmc.OK
+    assert dmc.judge(wheel((20 * ms, 2), (40 * ms, 1)), 2) == dmc.MISMATCH
     assert dmc.judge(wheel((1, 2)), 1) == dmc.MISMATCH
     assert dmc.judge(wheel(), 2) == dmc.NO_FEEDBACK
 
