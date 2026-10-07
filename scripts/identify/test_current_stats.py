@@ -23,3 +23,17 @@ def test_stats_measures_current_and_command_steps():
     assert s["rpm_p2p"] == 1.0
     assert abs(s["cmd_step_rms"] - 2.0) < 1e-9
     assert cs.stats(samples[:5]) is None
+
+
+def test_stats_counts_stalls_and_reverse_current():
+    # 後退（rpm 負）で、4 フレームに 1 回ほぼ止まり、そのとき電流が平均と逆向き（ブレーキ）
+    samples = []
+    for k in range(20):
+        stalled = k % 4 == 0
+        rpm = -1.0 if stalled else -20.0
+        cur = 1.0 if stalled else -2.0
+        samples.append((k * 0.02, rpm, cur, -15.0))
+    s = cs.stats(samples, stall_rpm=2.0)
+    assert s["min_forward_rpm"] == 1.0
+    assert abs(s["stall_pct"] - 25.0) < 1e-9
+    assert abs(s["reverse_i_pct"] - 25.0) < 1e-9

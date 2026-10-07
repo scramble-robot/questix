@@ -15,6 +15,10 @@
   - 電流 |I| の平均、電流の RMS（平均まわり）、|I| の 95 パーセンタイル [A]
   - 速度（velocity_rpm_raw）の平均と p2p [rpm]
   - 送った指令（target_rpm）の tick ごとの変化の RMS [rpm]（補正の細かさ）
+  - 進行方向の最低速度 [rpm] と、ほぼ止まっている（進行方向に --stall-rpm 以下）フレームの割合
+    （スティックスリップなら周期ごとに車輪が止まりかける）
+  - 電流が区間の平均と逆向きのフレームの割合（逆トルク = ブレーキがかかっている割合）。
+    電流の符号規約に依らないよう、区間の平均電流（摩擦に逆らって進める向き）を基準にする
 
 ROS 2（rosbag2_py）が必要。numpy は使わない。
 
@@ -94,7 +98,7 @@ def segments(twists, settle, min_sec):
     return out
 
 
-def stats(samples):
+def stats(samples, stall_rpm=2.0):
     """区間内のフレームの集計（フレームが少なければ None）。"""
     if len(samples) < 10:
         return None
@@ -104,6 +108,9 @@ def stats(samples):
     mean_cur = sum(cur) / len(cur)
     abs_cur = sorted(abs(c) for c in cur)
     steps = [b - a for a, b in zip(cmd, cmd[1:])]
+    direction = 1.0 if sum(rpm) >= 0.0 else -1.0
+    forward = [r * direction for r in rpm]
+    drive_sign = 1.0 if mean_cur >= 0.0 else -1.0
     return {
         "n": len(samples),
         "abs_i_mean": sum(abs_cur) / len(abs_cur),
@@ -112,6 +119,9 @@ def stats(samples):
         "rpm_mean": sum(rpm) / len(rpm),
         "rpm_p2p": max(rpm) - min(rpm),
         "cmd_step_rms": math.sqrt(sum(s * s for s in steps) / len(steps)) if steps else 0.0,
+        "min_forward_rpm": min(forward),
+        "stall_pct": 100.0 * sum(1 for r in forward if r <= stall_rpm) / len(forward),
+        "reverse_i_pct": 100.0 * sum(1 for c in cur if c * drive_sign < 0.0) / len(cur),
     }
 
 
@@ -134,6 +144,8 @@ def main(argv=None):
     ap.add_argument("bags", nargs="+", help="rosbag2 ディレクトリ（複数可）")
     ap.add_argument("--settle", type=float, default=1.0)
     ap.add_argument("--min-sec", type=float, default=2.0)
+    ap.add_argument("--stall-rpm", type=float, default=2.0,
+                    help="進行方向にこれ以下を「ほぼ停止」と数える [rpm]")
     args = ap.parse_args(argv)
     for bag in args.bags:
         radius, separation, _ = read_geometry(bag, 0.05, 0.5)
@@ -141,16 +153,18 @@ def main(argv=None):
         gain = damping_gain(bag)
         name = os.path.basename(os.path.dirname(os.path.abspath(bag.rstrip("/"))))
         print(f"\n=== {name}  velocity_damping_gain_sec={gain}")
-        print("  輪    目標rpm  実測rpm  p2p  |I|平均  I_RMS  |I|p95  指令変化RMS  フレーム")
+        print("  輪    目標rpm  実測rpm  p2p  |I|平均  I_RMS  |I|p95  指令変化RMS  フレーム"
+              "  最低rpm  停止%  逆電流%")
         for t0, t1, (v, w) in segments(twists, args.settle, args.min_sec):
             refs = dict(zip(SIDES, wheel_reference_rpm(v, w, radius, separation)))
             for side in SIDES:
-                s = stats([f for f in frames[side] if t0 <= f[0] <= t1])
+                s = stats([f for f in frames[side] if t0 <= f[0] <= t1], args.stall_rpm)
                 if s is None:
                     continue
                 print(f"  {side:5s} {refs[side]:7.0f}  {s['rpm_mean']:7.1f} {s['rpm_p2p']:5.0f}"
                       f"  {s['abs_i_mean']:6.2f} {s['i_rms']:6.2f} {s['abs_i_p95']:6.2f}"
-                      f"  {s['cmd_step_rms']:10.2f}  {s['n']:6d}")
+                      f"  {s['cmd_step_rms']:10.2f}  {s['n']:6d}"
+                      f"  {s['min_forward_rpm']:7.0f} {s['stall_pct']:6.1f} {s['reverse_i_pct']:7.1f}")
     return 0
 
 
