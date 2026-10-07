@@ -27,6 +27,23 @@ def find_arg(root, name):
     return next(arg for arg in root.findall('./arg') if arg.get('name') == name)
 
 
+def launcher_mode_branches(text):
+    """Split the robot launcher's arguments into its competition / lesson / practice parts."""
+    start = text.index('if [ "${MODE}" = "competition" ]; then')
+    end = text.index('LAUNCH_ARGS="${LAUNCH_ARGS} enable_rviz:=')
+    block = text[start:end]
+    competition, rest = block.split('\nelse\n', 1)
+    lesson_and_practice = rest.split('if [ "${MODE}" = "lesson" ]; then', 1)[1]
+    lesson, practice = lesson_and_practice.split('\n  else\n', 1)
+    return competition, lesson, practice
+
+
+LAUNCHER_SCRIPTS = (
+    'systemd/questix_robot_launcher.sh',
+    'ansible/roles/robot_autostart/files/questix_robot_launcher.sh',
+)
+
+
 def test_profiles_select_the_expected_gpio_inputs_and_polarities():
     practice_reader = load_yaml('gpio_reader/config/gpio_reader.practice.yaml')
     competition_reader = load_yaml('gpio_reader/config/gpio_reader.competition.yaml')
@@ -373,12 +390,14 @@ def test_twist_arbiter_only_in_practice_launches():
     assert ('/target_twist/joy', '$(var enable_twist_arbiter)', None) in lets
     assert ('/target_twist', None, '$(var enable_twist_arbiter)') in lets
 
-    for relative_path in (
-        'systemd/questix_robot_launcher.sh',
-        'ansible/roles/robot_autostart/files/questix_robot_launcher.sh',
-    ):
+    # The robot launcher: lesson mode (QUESTiX LAB) asks for twist_arbiter, practice turns it off,
+    # competition leaves it to questix_core (off with AutoReferee).
+    for relative_path in LAUNCHER_SCRIPTS:
         text = (SOURCE_ROOT / relative_path).read_text(encoding='utf-8')
-        assert 'enable_twist_arbiter' not in text
+        competition, lesson, practice = launcher_mode_branches(text)
+        assert 'enable_twist_arbiter' not in competition
+        assert 'enable_twist_arbiter:=true' in lesson
+        assert 'enable_twist_arbiter:=false' in practice
         assert 'LAUNCH_ARGS="${LAUNCH_ARGS} enable_autoreferee:=true"' in text
 
 
@@ -435,12 +454,12 @@ def test_lab_launcher_input_only_in_practice_launches():
         for name, value in shot_defaults.items():
             assert shot_parameters[name] == value, (variant, name)
 
-    for relative_path in (
-        'systemd/questix_robot_launcher.sh',
-        'ansible/roles/robot_autostart/files/questix_robot_launcher.sh',
-    ):
+    for relative_path in LAUNCHER_SCRIPTS:
         text = (SOURCE_ROOT / relative_path).read_text(encoding='utf-8')
-        assert 'enable_lab_shoot' not in text
+        competition, lesson, practice = launcher_mode_branches(text)
+        assert 'enable_lab_shoot' not in competition
+        assert 'enable_lab_shoot:=true' in lesson
+        assert 'enable_lab_shoot:=false' in practice
         assert 'accept_lab_input' not in text
 
 
@@ -510,13 +529,13 @@ def test_teacher_permission_is_a_practice_opt_in():
         assert '"require_teacher_permission", false);' in text, relative_path
         assert '"require_teacher_permission", true);' not in text, relative_path
 
-    # The service launchers never opt in on their own.
-    for relative_path in (
-        'systemd/questix_robot_launcher.sh',
-        'ansible/roles/robot_autostart/files/questix_robot_launcher.sh',
-    ):
+    # The robot launcher opts in for lesson mode only (教材); practice and competition never.
+    for relative_path in LAUNCHER_SCRIPTS:
         text = (SOURCE_ROOT / relative_path).read_text(encoding='utf-8')
-        assert 'require_teacher_permission' not in text, relative_path
+        competition, lesson, practice = launcher_mode_branches(text)
+        assert 'require_teacher_permission' not in competition, relative_path
+        assert 'require_teacher_permission:=true' in lesson, relative_path
+        assert 'require_teacher_permission:=false' in practice, relative_path
 
 
 def test_emergency_stop_is_always_published_and_always_required():

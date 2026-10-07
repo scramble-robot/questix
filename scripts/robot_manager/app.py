@@ -18,16 +18,17 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 
-from robot_manager import (actuation, control_runtime, controls, lab, logs, recorder, ros_domain,
-                           wifi_ap)
+from robot_manager import (actuation, control_runtime, controls, lab, logs, modes, recorder,
+                           ros_domain, wifi_ap)
 
 CONFIG_DIR = Path(os.environ.get("QUESTIX_CONFIG_DIR", "/etc/questix_robot"))
 MODE_FILE = CONFIG_DIR / "mode"
 ENV_FILE = CONFIG_DIR / "launch.env"
 SERVICE_NAME = "questix_robot"
-# Practice mode starts the robot only on request: before `systemctl start|restart` in practice
-# mode the manager writes this file, and systemd/questix_robot_launcher.sh consumes it (see the
-# format there). Without it the launcher skips practice launches (power-on, a crash restart).
+# Practice and lesson modes start the robot only on request (modes.STARTED_ON_REQUEST): before
+# `systemctl start|restart` in those modes the manager writes this file, and
+# systemd/questix_robot_launcher.sh consumes it (see the format there). Without it the launcher
+# skips those launches (power-on, a crash restart).
 START_REQUEST_FILE = CONFIG_DIR / "start-request"
 # Written by the launcher right before each launch: what is running (mode, time, boot id).
 LAST_LAUNCH_FILE = CONFIG_DIR / "last-launch"
@@ -68,7 +69,7 @@ async def lifespan(_app: FastAPI):
     The teacher's permissions for driving and launching from the lessons are not settings: they
     live only in this process (lab._runtime_permissions) and start off, so a restart of the
     manager or of the robot never brings them back (ALLOW_* left in lab.env by an older manager
-    are ignored). A practice start
+    are ignored). A practice or lesson start
     request left behind (the manager stopped between writing it and the launcher reading it) is
     removed, so it can never start the robot later. The teacher's runtime authority for driving
     and the launcher (actuation.py) is the same kind of session state: off at every start, and
@@ -95,8 +96,8 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="QUESTiX Robot Manager", lifespan=lifespan)
 
 # When a stop of the robot service was last asked for through this manager (any page), so the
-# pages can tell a practice launch that ended by itself (not restarted: see START_REQUEST_FILE)
-# from one that was stopped.
+# pages can tell a practice or lesson launch that ended by itself (not restarted: see
+# START_REQUEST_FILE) from one that was stopped.
 _stop_requested_at: float | None = None
 
 # ---------------------------------------------------------------------------
@@ -150,7 +151,7 @@ _BOOL_VALUES = {"true", "false"}
 class ModeRequest(BaseModel):
     """Select the mode to use at the next robot start."""
 
-    mode: Literal["practice", "competition"]
+    mode: Literal["lesson", "practice", "competition"]  # modes.MODES
 
 
 _CONTROLLER_TYPES = set(controls.CONTROLLERS)
@@ -203,8 +204,8 @@ class LaunchConfig(BaseModel):
         """Refuse switching the GPIO safety path off; it is not an operating setting."""
         if v is not None and v != "true":
             raise ValueError("ENABLE_GPIO_REF cannot be turned off from Robot Manager: the "
-                             "physical E-stop (GPIO5) is always on in practice and competition. "
-                             "Reload the page and save again.")
+                             "physical E-stop (GPIO5) is always on in lesson, practice and "
+                             "competition. Reload the page and save again.")
         return v
 
     @field_validator("CONTROLLER_TYPE")
@@ -221,10 +222,7 @@ class LaunchConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 def _read_mode() -> str:
-    try:
-        return MODE_FILE.read_text().strip()
-    except FileNotFoundError:
-        return "practice"
+    return modes.read(MODE_FILE)
 
 
 def _read_env() -> dict[str, str]:
@@ -342,12 +340,12 @@ def _last_launch() -> dict[str, str]:
 
 
 def _running_mode(service: str) -> str | None:
-    """Return the running launch's mode: practice / competition / unknown, or None if stopped."""
+    """Return the running launch's mode (modes.MODES or unknown), or None if stopped."""
     if service not in ("active", "reloading", "deactivating"):
         return None
     mode = _last_launch().get("mode")
     # "unknown": started before this version of the launcher, which did not record it.
-    return mode if mode in ("practice", "competition") else "unknown"
+    return mode if mode in modes.MODES else "unknown"
 
 
 def _wait_for(predicate, seconds: float) -> bool:
@@ -360,15 +358,18 @@ def _wait_for(predicate, seconds: float) -> bool:
         time.sleep(POLL_SEC)
 
 
-_NAMES = {"practice": "練習用", "competition": "大会用"}
+_NAMES = modes.NAMES
 
 
 def _start_result(action: str, mode: str, requested_at: float | None) -> dict:
     """Say what a start/restart really did (the toast must never claim a start that did not happen).
 
-    Practice: the launcher must take the request (START_PICKUP_SEC) and the launch must still run
-    START_SETTLE_SEC later. Competition: the launch must still run after START_SETTLE_SEC.
+    Practice and lesson: the launcher must take the request (START_PICKUP_SEC) and the launch must
+    still run START_SETTLE_SEC later. Competition: the launch must still run after
+    START_SETTLE_SEC.
     """
+    name = _NAMES.get(mode, "")
+    label = modes.LABELS.get(mode, "")
     def result(ok: bool, message: str, state: str) -> dict:
         return {"action": action, "result": "ok", "ok": ok, "mode": mode, "state": state,
                 "running_mode": _running_mode(state), "message": message}
@@ -378,7 +379,7 @@ def _start_result(action: str, mode: str, requested_at: float | None) -> dict:
         if not taken:
             _remove_start_request()  # must never start the robot later
             state = _service_status()
-            return result(False, "起動できませんでした：ロボットの起動スクリプトが練習モードの起動に"
+            return result(False, f"起動できませんでした：ロボットの起動スクリプトが{label}の起動に"
                           "対応していないか、応答がありません。担当者に起動スクリプトの更新"
                           "（scripts/install-robot-manager.sh の再実行）を依頼してください。", state)
     time.sleep(START_SETTLE_SEC)
@@ -390,14 +391,14 @@ def _start_result(action: str, mode: str, requested_at: float | None) -> dict:
         launched_after = False
     if state == "active":
         if requested_at is not None and not launched_after:
-            return result(False, "起動できませんでした：起動スクリプトが練習用の起動を受け付けませんでした。"
+            return result(False, f"起動できませんでした：起動スクリプトが{name}の起動を受け付けませんでした。"
                           "診断ログ（ロボット制御のログ）で理由を確認してください。", state)
         return result(True, f"{_NAMES.get(mode, '')}の構成で起動しました", state)
     if requested_at is not None and not launched_after:
-        return result(False, "起動できませんでした：起動スクリプトが練習用の起動を受け付けませんでした。"
+        return result(False, f"起動できませんでした：起動スクリプトが{name}の起動を受け付けませんでした。"
                       "診断ログ（ロボット制御のログ）で理由を確認してください。", state)
-    if mode == "practice":
-        return result(False, "起動できませんでした：練習用の起動がすぐに終了しました（練習モードでは"
+    if mode in modes.STARTED_ON_REQUEST:
+        return result(False, f"起動できませんでした：{name}の起動がすぐに終了しました（{label}では"
                       "自動で起動し直しません）。診断ログ（ロボット制御のログ）を確認してください。", state)
     return result(False, "起動できませんでした：ロボット制御がすぐに終了しました。"
                   "診断ログ（ロボット制御のログ）を確認してください。", state)
@@ -472,9 +473,10 @@ def get_readiness():
 def set_mode(req: ModeRequest):
     """Save the next startup mode without restarting the robot.
 
-    Entering either mode switches the teacher's runtime authority off (actuation.py): a practice
-    robot starts every session with driving and the launcher off, and a competition robot never
-    uses it.
+    Entering any mode switches the teacher's runtime authority off (actuation.py): a lesson robot
+    starts every session with driving and the launcher off, and the other modes never use it.
+    QUESTiX LAB exists only in lesson mode (modes.uses_lab): entering another mode stops the
+    bridge and keeps it off; coming back to lesson mode restores the teacher's choices.
     """
     authority = actuation.revoke_all(f"mode_{req.mode}")
     previous = _read_mode()
@@ -483,14 +485,14 @@ def set_mode(req: ModeRequest):
         MODE_FILE.write_text(req.mode + "\n")
     except PermissionError:
         raise HTTPException(status_code=403, detail=lab.permission_detail(MODE_FILE))
-    # QUESTiX LAB streams telemetry to the LAN: off for competitions; back to the teacher's
-    # practice choices (not simply on) for practice.
+    # QUESTiX LAB streams telemetry to the LAN and takes lab commands: only in lesson mode; back
+    # to the teacher's lesson choices (not simply on) when lesson mode comes back.
     lab_now = None
-    if req.mode == "competition":
-        lab.disable_for_competition()
-    elif previous == "competition":
+    if not modes.uses_lab(req.mode):
+        lab.disable_outside_lessons()
+    elif not modes.uses_lab(previous):
         try:
-            lab_now = lab.enable_for_practice()
+            lab_now = lab.enable_for_lessons()
         except HTTPException as error:
             lab_now = {"error": str(error.detail)}
     service = _service_status()
@@ -498,7 +500,7 @@ def set_mode(req: ModeRequest):
     return {
         "mode": req.mode,
         "previous": previous,
-        # What QUESTiX LAB is set to now after going back to practice (None otherwise).
+        # What QUESTiX LAB is set to now after going back to lesson mode (None otherwise).
         "lab": lab_now,
         "service": service,
         "running_mode": running,
@@ -512,8 +514,8 @@ def set_mode(req: ModeRequest):
 def control_service(action: Literal["start", "stop", "restart"]):
     """Run the requested service action and report what really happened.
 
-    In practice mode a start or restart first writes the start request the launcher needs
-    (START_REQUEST_FILE); the answer says whether the practice launch is running afterwards
+    In practice and lesson mode a start or restart first writes the start request the launcher
+    needs (START_REQUEST_FILE); the answer says whether that launch is running afterwards
     (``ok``, ``message``), never just that systemctl returned. Every action switches the
     teacher's runtime authority off first (actuation.py): a new launch starts with driving and
     the launcher off.
@@ -527,9 +529,9 @@ def control_service(action: Literal["start", "stop", "restart"]):
                 "mode": _read_mode(), "running_mode": None, "message": stopped["message"]}
     mode = _read_mode()
     requested_at = None
-    if mode == "practice":
+    if mode in modes.STARTED_ON_REQUEST:
         try:
-            requested_at = _write_start_request("practice")
+            requested_at = _write_start_request(mode)
         except PermissionError:
             raise HTTPException(status_code=403, detail=lab.permission_detail(START_REQUEST_FILE))
         except OSError as error:
