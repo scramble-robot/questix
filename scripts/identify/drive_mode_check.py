@@ -38,6 +38,10 @@ EXPECTED_MODE = {"velocity": MODE_VELOCITY_LOOP, "current": MODE_CURRENT_LOOP}
 # アイドル中のフィードバック再取得は最大 0.2 s ごと + 停止フレームの再送間隔 0.3 s。
 # これより古い受信時刻のフレームは「いまの状態」として数えない。
 STALE_MARGIN_SEC = 0.5
+# 各輪の受信時刻は drive_component が publish のたびに「now − フィードバックの経過時間」で計算し
+# 直す（motor_status_msg.hpp）ので、同じフレームでも数 µs ずれる。応答は制御 tick（50 Hz）より
+# 速くは来ないので、これより近い受信時刻は同じフレームとみなす。
+SAME_FRAME_TOLERANCE_NS = 5_000_000
 
 OK = "ok"
 MISMATCH = "mismatch"
@@ -106,14 +110,20 @@ def new_summaries():
     return {side: WheelSummary() for side in SIDES}
 
 
+def same_frame(summary: WheelSummary, stamp_ns: int) -> bool:
+    """直前に数えたフレームと同じフレームか（受信時刻がほぼ同じ）。"""
+    return (summary.last_stamp_ns > 0
+            and abs(stamp_ns - summary.last_stamp_ns) < SAME_FRAME_TOLERANCE_NS)
+
+
 def add_sample(summary: WheelSummary, stamp_ns: int, mode: int, fault: int, current_amp: float,
                rpm_raw: int, min_stamp_ns: int = 0) -> bool:
     """応答フレーム 1 つを集計に足す。数えたら True。
 
-    受信時刻 0（未受信）、min_stamp_ns より古いもの、直前と同じ受信時刻（同じフレームが
-    /drive_status に繰り返し載ったもの）は数えない。
+    受信時刻 0（未受信）、min_stamp_ns より古いもの、直前とほぼ同じ受信時刻（同じフレームが
+    /drive_status に繰り返し載ったもの。SAME_FRAME_TOLERANCE_NS）は数えない。
     """
-    if stamp_ns <= 0 or stamp_ns < min_stamp_ns or stamp_ns == summary.last_stamp_ns:
+    if stamp_ns <= 0 or stamp_ns < min_stamp_ns or same_frame(summary, stamp_ns):
         return False
     summary.last_stamp_ns = stamp_ns
     if summary.frames == 0:
@@ -132,7 +142,7 @@ def note_skipped(summary: WheelSummary, stamp_ns: int, now_ns_: int) -> None:
     """数えなかったフレームの理由を記録する（add_sample が False を返したとき）。"""
     if stamp_ns <= 0:
         summary.unreceived += 1
-    elif stamp_ns != summary.last_stamp_ns:
+    elif not same_frame(summary, stamp_ns):
         summary.stale += 1
         age = (now_ns_ - stamp_ns) / 1e9
         if summary.newest_stale_age_sec < 0 or age < summary.newest_stale_age_sec:

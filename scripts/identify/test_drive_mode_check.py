@@ -76,3 +76,11 @@ def test_hints_put_the_estop_first():
     summaries = dmc.new_summaries()
     assert "非常停止" in dmc.no_feedback_hints(summaries, 10, 10)[0]
     assert "応答が止まって" in dmc.no_feedback_hints(summaries, 10, 0)[0]
+
+
+def test_restamped_copies_of_one_frame_count_once():
+    # drive_component は publish のたびに受信時刻を計算し直すので、同じフレームでも µs ずれる
+    ms = 1_000_000
+    summary = wheel((1000 * ms, 2), (1000 * ms + 3_000, 2), (1000 * ms - 2_000, 2),
+                    (1020 * ms, 2), (1320 * ms, 2))
+    assert summary.frames == 3
