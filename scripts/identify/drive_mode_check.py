@@ -95,6 +95,10 @@ class WheelSummary:
     rpm_max: int = 0
     last_stamp_ns: int = 0
     estop_flags: int = 0
+    # 数えなかったフレームの内訳（判定不能のときの手がかり）
+    unreceived: int = 0  # 受信時刻 0 = drive_component が一度も応答を受けていない
+    stale: int = 0  # 聞き始めより古い応答（その後の応答が無い）
+    newest_stale_age_sec: float = -1.0
 
 
 def new_summaries():
@@ -122,6 +126,26 @@ def add_sample(summary: WheelSummary, stamp_ns: int, mode: int, fault: int, curr
     summary.rpm_min = min(summary.rpm_min, rpm_raw)
     summary.rpm_max = max(summary.rpm_max, rpm_raw)
     return True
+
+
+def note_skipped(summary: WheelSummary, stamp_ns: int, now_ns_: int) -> None:
+    """数えなかったフレームの理由を記録する（add_sample が False を返したとき）。"""
+    if stamp_ns <= 0:
+        summary.unreceived += 1
+    elif stamp_ns != summary.last_stamp_ns:
+        summary.stale += 1
+        age = (now_ns_ - stamp_ns) / 1e9
+        if summary.newest_stale_age_sec < 0 or age < summary.newest_stale_age_sec:
+            summary.newest_stale_age_sec = age
+
+
+def no_feedback_reason(summary: WheelSummary) -> str:
+    """新しい応答が無かった理由の説明。"""
+    if summary.unreceived and not summary.stale:
+        return "受信時刻 0: drive_component はこのモータから一度も応答を受けていない"
+    if summary.stale:
+        return f"最後の応答は約 {summary.newest_stale_age_sec:.1f} 秒前で、その後の応答が無い"
+    return "応答の情報なし"
 
 
 def judge(summary: WheelSummary, expected: int) -> str:
@@ -179,23 +203,26 @@ def collect(topic: str, duration: float, min_stamp_ns: int = 0):
     if min_stamp_ns <= 0:
         min_stamp_ns = node.get_clock().now().nanoseconds - int(STALE_MARGIN_SEC * 1e9)
     summaries = new_summaries()
-    received = [0]
+    received = [0, 0]  # [/drive_status の件数, そのうち emergency_stop=true の件数]
 
     def on_status(msg):
         received[0] += 1
+        received[1] += int(msg.emergency_stop)
         for side in SIDES:
             fb = getattr(msg, side)
             stamp_ns = fb.header.stamp.sec * 1_000_000_000 + fb.header.stamp.nanosec
             if add_sample(summaries[side], stamp_ns, fb.mode, fb.fault_code, fb.current_amp,
                           fb.velocity_rpm_raw, min_stamp_ns):
                 summaries[side].estop_flags += int(msg.emergency_stop)
+            else:
+                note_skipped(summaries[side], stamp_ns, node.get_clock().now().nanoseconds)
 
     node.create_subscription(DriveStatus, topic, on_status, 10)
     end = time.monotonic() + duration
     while time.monotonic() < end:
         rclpy.spin_once(node, timeout_sec=0.1)
     node.destroy_node()
-    return summaries, received[0]
+    return summaries, tuple(received)
 
 
 def now_ns() -> int:
@@ -208,20 +235,43 @@ def now_ns() -> int:
     return stamp
 
 
-def report(title: str, summaries, received: int, expected: int) -> list:
-    """集計を表示し、左右の判定を返す。"""
+def report(title: str, summaries, received, expected: int) -> list:
+    """集計を表示し、左右の判定を返す。received は (件数, emergency_stop=true の件数)。"""
+    count, estop_count = received
     print(f"\n=== {title} ===")
-    print(f"  /drive_status 受信 {received} 件。期待する mode: {mode_name(expected)} ({expected})")
+    print(f"  /drive_status 受信 {count} 件（emergency_stop=true {estop_count} 件）。"
+          f"期待する mode: {mode_name(expected)} ({expected})")
     verdicts = []
     for side in SIDES:
         print(describe(side, summaries[side], expected))
-        verdicts.append(judge(summaries[side], expected))
-    if received == 0:
+        verdict = judge(summaries[side], expected)
+        if verdict == NO_FEEDBACK:
+            print(f"         {no_feedback_reason(summaries[side])}")
+        verdicts.append(verdict)
+    if count == 0:
         print("  → /drive_status が届きません。drive_component の起動と ROS_DOMAIN_ID を確認")
     elif NO_FEEDBACK in verdicts:
-        print("  → 新しい応答がありません。非常停止中（ID13 は DDT の電源が切れる）、"
-              "drive_component が active でない、モータ未通電のいずれか")
+        for hint in no_feedback_hints(summaries, count, estop_count):
+            print(f"  → {hint}")
     return verdicts
+
+
+def no_feedback_hints(summaries, count: int, estop_count: int) -> list:
+    """判定不能のときに確かめることを、原因の可能性が高い順に返す。"""
+    hints = []
+    if estop_count:
+        hints.append("drive_component は非常停止中と判断しています（/drive_status の emergency_stop）。"
+                     "その間はモータと送受信しません。ロボットの非常停止と、GPIO の安全系"
+                     "（GPIO5 / GPIO27。ros2 topic echo /emergency_stop の reason）を確認")
+    if any(summaries[s].unreceived and not summaries[s].stale for s in SIDES):
+        hints.append("一度も応答が無い輪があります。DDT の電源、serial_port、モータ ID"
+                     "（left_motor_id / right_motor_id）、RS485 の配線を確認")
+    if not hints:
+        hints.append("応答が止まっています。drive_component の lifecycle（ros2 lifecycle get "
+                     "/drive_component）、DDT の電源、drive_component のログ（'Actuation blocked: "
+                     "<理由>'、'Stop fault'）を確認。教員の許可待ちだけでは止まりません（許可待ちの間も"
+                     "停止フレームの再送で応答を取り続けます。止まるのは非常停止の押下と Stop fault）")
+    return hints
 
 
 def explain(control_mode: str, summaries, expected: int) -> None:

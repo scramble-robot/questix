@@ -61,3 +61,18 @@ def test_describe_marks_the_result():
     assert " OK " in dmc.describe("left", wheel((1, 2)), 2)
     assert " NG " in dmc.describe("left", wheel((1, 2)), 1)
     assert "判定不能" in dmc.describe("left", wheel(), 2)
+
+
+def test_no_feedback_reason_tells_never_from_stopped():
+    never = dmc.WheelSummary()
+    dmc.note_skipped(never, 0, 10**9)
+    assert "一度も" in dmc.no_feedback_reason(never)
+    stopped = dmc.WheelSummary()
+    dmc.note_skipped(stopped, 10**9, 3 * 10**9)
+    assert "2.0 秒前" in dmc.no_feedback_reason(stopped)
+
+
+def test_hints_put_the_estop_first():
+    summaries = dmc.new_summaries()
+    assert "非常停止" in dmc.no_feedback_hints(summaries, 10, 10)[0]
+    assert "応答が止まって" in dmc.no_feedback_hints(summaries, 10, 0)[0]
