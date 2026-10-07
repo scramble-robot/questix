@@ -212,6 +212,52 @@ def test_practice_core_launch_keeps_gpio_safety_nodes_alive():
     assert 'parameter_value_from failed' not in output
 
 
+def test_gpio_ref_environment_does_not_select_the_no_gpio_diagnostic():
+    """
+    Leave enable_gpio_ref out with ENABLE_GPIO_REF=false exported: GPIO safety stays on.
+
+    Issue #168: the no-GPIO diagnostic needs an explicit enable_gpio_ref:=false on the launch;
+    an exported variable or a sourced legacy launch.env must not select it.
+    """
+    environment = isolated_ros_environment(4)
+    environment['ENABLE_GPIO_REF'] = 'false'
+    process = start_process(
+        [
+            'ros2', 'launch', 'questix_launcher', 'questix_core.launch.xml',
+            'enable_lidar:=false',
+            'enable_shot:=false',
+            'enable_drive:=false',
+            'enable_autoreferee:=false',
+            'enable_rviz:=false',
+        ],
+        environment,
+    )
+    expected_nodes = {'/gpio_reader_node', '/operation_manager_node'}
+    observed_nodes = set()
+    deadline = time.monotonic() + STARTUP_TIMEOUT_SECONDS
+    try:
+        while time.monotonic() < deadline:
+            assert process.poll() is None, 'questix_core exited during startup'
+            result = run_command(['ros2', 'node', 'list', '--no-daemon'], environment)
+            if result.returncode == 0:
+                observed_nodes = set(result.stdout.splitlines())
+                if expected_nodes <= observed_nodes:
+                    break
+            time.sleep(0.2)
+        assert expected_nodes <= observed_nodes
+        # The GPIO profile, not the no-GPIO one: no GPIO hardware here, so GPIO5 is never
+        # received and the E-stop is active (never "released (no GPIO safety path)").
+        assert wait_for_parameter(
+            '/operation_manager_node', 'gpio_safety_enabled', environment) == (
+            'Boolean value is: True')
+        assert read_emergency_stop(environment) == (True, 'pin 5 not received; ')
+        assert process.poll() is None
+    finally:
+        output = stop_process(process)
+    assert 'InvalidParameterValueException' not in output
+    assert 'parameter_value_from failed' not in output
+
+
 def topic_subscription_count(topic, environment):
     """Return how many subscriptions the graph shows for a topic (0 when it does not exist)."""
     result = run_command(['ros2', 'topic', 'info', topic, '--no-daemon'], environment)
@@ -250,8 +296,9 @@ def read_emergency_stop(environment):
 @pytest.mark.parametrize(
     ('launch_arguments', 'expect_estop', 'expect_teacher_permission_required'),
     [
-        # Practice without the GPIO safety path (ENABLE_GPIO_REF=false): operation_manager still
-        # owns /emergency_stop and reports released, so the robot (and QUESTiX LAB) can move.
+        # Manual diagnostic run without the GPIO safety path (enable_gpio_ref:=false, never passed
+        # by the production launcher): operation_manager still owns /emergency_stop and reports
+        # released, so the robot (and QUESTiX LAB) can move.
         (['enable_gpio_ref:=false'], (False, NO_GPIO_REASON), False),
         # Practice with the GPIO safety path but no GPIO hardware here: GPIO5 is never received,
         # so operation_manager reports the E-stop as active.

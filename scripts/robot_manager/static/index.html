@@ -706,13 +706,8 @@
             <span class="slider"></span>
           </label>
         </div>
-        <div class="config-item">
-          <label title="大会モードでは常に有効です。OFF でも非常停止の状態（解除）は配信され、コントローラーと教材から動かせます（非常停止ボタンの押下はロボット制御に伝わりません）">安全入力（GPIO、非常停止ボタン）：教材用・練習用の起動で使用</label>
-          <label class="toggle-switch small">
-            <input type="checkbox" data-config="ENABLE_GPIO_REF">
-            <span class="slider"></span>
-          </label>
-        </div>
+        <!-- No GPIO5 item (issue #168): it is not a setting (every production launch reads GPIO5);
+             the header's 非常停止ボタン shows its live state. -->
         <div class="config-item">
           <label>RViz</label>
           <label class="toggle-switch small">

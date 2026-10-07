@@ -1,6 +1,7 @@
 operation_manager_node:
   ros__parameters:
-    # Practice without the GPIO safety path (questix_core enable_gpio_ref:=false). No GPIO is
+    # Explicit manual diagnostic run without the GPIO safety path (questix_core
+    # enable_gpio_ref:=false; production launches always read GPIO5). No GPIO is
     # read and /gpio/controllable is not published; /emergency_stop still comes from this node
     # (active=false, reason "released (no GPIO safety path)") so that the drive, the launcher
     # and QUESTiX LAB keep their one rule: an unheard or silent /emergency_stop means stop.

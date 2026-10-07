@@ -165,6 +165,8 @@ class LaunchConfig(BaseModel):
     ENABLE_LIDAR: str | None = None
     ENABLE_SHOT: str | None = None
     ENABLE_DRIVE: str | None = None
+    # Not editable: the GPIO5 physical E-stop is always on in production launches (issue #168).
+    # Accepted only as "true" so a save from an older, cached page still works.
     ENABLE_GPIO_REF: str | None = None
     ENABLE_RVIZ: str | None = None
     CONTROLLER_TYPE: str | None = None
@@ -188,12 +190,22 @@ class LaunchConfig(BaseModel):
                 raise ValueError(f"ROS_DOMAIN_ID must be an integer in {ros_domain.ALLOWED_TEXT}")
         return v
 
-    @field_validator("ENABLE_LIDAR", "ENABLE_SHOT", "ENABLE_DRIVE", "ENABLE_GPIO_REF", "ENABLE_RVIZ")
+    @field_validator("ENABLE_LIDAR", "ENABLE_SHOT", "ENABLE_DRIVE", "ENABLE_RVIZ")
     @classmethod
     def validate_bool_flags(cls, v: str | None) -> str | None:
         """Require the boolean strings consumed by the launcher."""
         if v is not None and v not in _BOOL_VALUES:
             raise ValueError("Value must be 'true' or 'false'")
+        return v
+
+    @field_validator("ENABLE_GPIO_REF")
+    @classmethod
+    def validate_gpio_ref(cls, v: str | None) -> str | None:
+        """Refuse switching the GPIO safety path off; it is not an operating setting."""
+        if v is not None and v != "true":
+            raise ValueError("ENABLE_GPIO_REF cannot be turned off from Robot Manager: the "
+                             "physical E-stop (GPIO5) is always on in lesson, practice and "
+                             "competition. Reload the page and save again.")
         return v
 
     @field_validator("CONTROLLER_TYPE")
@@ -566,14 +578,34 @@ def get_launch_config():
 @app.put("/api/launch-config")
 def set_launch_config(config: LaunchConfig):
     """Persist validated launch fields for the next robot start."""
-    current = _read_env()
+    previous = _read_env()
+    current = dict(previous)
     update = {k: v for k, v in config.model_dump().items() if v is not None}
     current.update(update)
+    # A legacy ENABLE_GPIO_REF=false (saved by older versions' 管理設定) is migrated on the next
+    # save. The production launcher ignores the key either way; manual launches that source
+    # launch.env then default to the GPIO safety path as well.
+    if "ENABLE_GPIO_REF" in current:
+        current["ENABLE_GPIO_REF"] = "true"
     try:
         _write_env(current)
     except PermissionError:
         raise HTTPException(status_code=403, detail=lab.permission_detail(ENV_FILE))
+    _log_launch_config_changes(previous, current)
     return current
+
+
+def _log_launch_config_changes(previous: dict[str, str], current: dict[str, str]) -> None:
+    """Record each changed launch.env key as old -> new (launch.env holds no secrets).
+
+    WARNING level: uvicorn configures no handler for this logger, and only WARNING and above
+    reach stderr (the journal) through logging's last-resort handler.
+    """
+    for key in sorted(set(previous) | set(current)):
+        old, new = previous.get(key), current.get(key)
+        if old != new:
+            logger.warning("launch-config updated: %s %s -> %s", key,
+                           "(unset)" if old is None else old, "(unset)" if new is None else new)
 
 
 @app.get("/api/control-runtime")

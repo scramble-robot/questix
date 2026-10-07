@@ -20,23 +20,39 @@ drive が使う `joy_controller_referee.launch.xml` 内の operation_manager は
 （電源投入時の自動起動を含む）、必ず `enable_gpio_ref:=true` と
 `enable_autoreferee:=true` を固定値で渡します。`practice`（練習）と `lesson`（教材）のときは
 電源投入時には起動せず、Robot Manager の「起動」が置いた起動要求があるときだけ、
-`enable_autoreferee:=false` と `launch.env` の `ENABLE_GPIO_REF`（既定 true）で起動します。
+`enable_gpio_ref:=true` と `enable_autoreferee:=false` で起動します。
 練習は `enable_twist_arbiter:=false enable_lab_shoot:=false require_teacher_permission:=false`
 （コントローラーだけ）、教材は `enable_twist_arbiter:=true enable_lab_shoot:=true
 require_teacher_permission:=true`（教材から走行・発射でき、先生の許可がある間だけ動く）を渡します
-（モードの定義は `scripts/robot_manager/modes.py`）。既存の `launch.env` に
-`ENABLE_GPIO_REF=false` が残っていても competition 起動では無視され、GPIO5と
-GPIO27の安全系は常時有効です。`enable_autoreferee:=true` と `enable_gpio_ref:=false` の組合せは
+（モードの定義は `scripts/robot_manager/modes.py`）。
+`launch.env` の `ENABLE_GPIO_REF` はどのモードでも読まないため、既存の `launch.env` に
+`ENABLE_GPIO_REF=false` が残っていても、教材・練習では GPIO5、competition では GPIO5 と
+GPIO27 の安全系が常時有効です（issue #168）。`enable_autoreferee:=true` と `enable_gpio_ref:=false` の組合せは
 通常運用上無効であり、`questix_core.launch.xml` はその組合せを検出して起動を
 中止します。
 
 `/emergency_stop` の発行元は operation_manager だけで、`questix_core` は operation_manager を
-`enable_gpio_ref` に関係なく常に起動します。`enable_gpio_ref:=false`（練習・教材のみ）では
-`operation_manager.no_gpio.yaml` で GPIO を読まず、`/emergency_stop` に
-`active=false`、reason `released (no GPIO safety path)` を出し続けます。drive / shot / ESC と
-QUESTiX LAB は構成によらず「未受信・途絶・押下なら止める」の一つの規則だけを持ち
-（`require_emergency_stop: true`）、GPIO 安全系なしでもコントローラと教材から動かせます。
-物理非常停止回路（RLY1）の動力遮断はこの設定に関係なく働きますが、押下は ROS に伝わりません。
+`enable_gpio_ref` に関係なく常に起動します。`enable_gpio_ref:=false` は `questix_core` を手で
+`ros2 launch` する明示的な診断用途だけに残る機能で（`enable_autoreferee:=false` のときのみ。
+production の `questix_robot_launcher.sh` は渡しません）、`operation_manager.no_gpio.yaml` で
+GPIO を読まず、`/emergency_stop` に `active=false`、reason `released (no GPIO safety path)` を
+出し続けます。drive / shot / ESC と QUESTiX LAB は構成によらず「未受信・途絶・押下なら止める」の
+一つの規則だけを持ち（`require_emergency_stop: true`）、この診断構成でもコントローラと教材から
+動かせます。物理非常停止回路（RLY1）の動力遮断はこの設定に関係なく働きますが、診断構成では
+押下が ROS に伝わらない（ソフトウェア停止・診断が働かない）ため、通常運用では使いません。
+
+GPIO5 監視はすべての起動の既定です。`questix_core.launch.xml` の `enable_gpio_ref` の既定値は
+リテラルの `true` で、環境変数 `ENABLE_GPIO_REF`（export した値や、`launch.env` を `source` した
+shell）は GPIO 安全系の判断に使いません。no-GPIO にするには、その診断起動の launch 引数として
+`enable_gpio_ref:=false` を毎回明示します。この指定はその launch プロセスだけのもので、どこにも
+保存されません。プロセスの終了後や Raspberry Pi の電源の入れ直し後、次の手動起動（引数なし）と
+production 起動は GPIO 監視ありに戻ります。
+
+```bash
+# 手動診断（その都度明示。drive / shot は安全に無効化した条件で）
+ros2 launch questix_launcher questix_core.launch.xml \
+  enable_gpio_ref:=false enable_autoreferee:=false
+```
 
 先生の許可（`/actuation_authority`、Robot Manager の操作タブ）は非常停止とは別の
 概念です。`questix_core` の既定（`require_teacher_permission:=false`）ではコントローラは

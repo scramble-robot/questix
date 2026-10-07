@@ -92,13 +92,20 @@ def test_practice_with_a_fresh_request_runs_the_practice_launch_once(robot):
     assert len(launched) == 1
 
 
-def test_practice_gpio_safety_follows_launch_env(robot):
-    robot.mode("practice")
-    (robot.dir / "launch.env").write_text("ENABLE_GPIO_REF=false\n")
-    robot.request()
-    _, launched = robot.run()
-    assert "enable_gpio_ref:=false" in launched[0].split()
-    assert "controller_type:=dualshock" in launched[0].split()  # the fresh-kit default
+@pytest.mark.parametrize("mode", ["practice", "lesson"])
+@pytest.mark.parametrize("value", ["false", "true", "", "no"])
+def test_practice_gpio_safety_ignores_launch_env(robot, mode, value):
+    # Issue #168: a legacy ENABLE_GPIO_REF=false (saved by older 管理設定) must not disable the
+    # GPIO5 physical E-stop in a production practice or lesson launch.
+    robot.mode(mode)
+    (robot.dir / "launch.env").write_text(f"ENABLE_GPIO_REF={value}\n")
+    robot.request(mode)
+    result, launched = robot.run()
+    assert result.returncode == 0, result.stderr
+    args = launched[0].split()
+    assert "enable_gpio_ref:=true" in args and "enable_gpio_ref:=false" not in args
+    assert "enable_autoreferee:=false" in args
+    assert "controller_type:=dualshock" in args  # the fresh-kit default
 
 
 def test_missing_launch_env_values_fall_back_to_the_fresh_kit_topology(robot):
@@ -218,6 +225,7 @@ def test_competition_is_unchanged_and_drops_a_leftover_request(robot):
     # questix_core itself keeps the lab input and the teacher permission off in competition.
     assert not any(arg.startswith(("enable_twist_arbiter", "enable_lab_shoot",
                                    "require_teacher_permission")) for arg in args)
+    assert "enable_gpio_ref:=false" not in args
     assert not (robot.dir / "start-request").exists()
     assert "mode=competition" in (robot.dir / "last-launch").read_text()
 

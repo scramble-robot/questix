@@ -163,22 +163,21 @@ LAUNCH_ARGS=""
 # A value missing from launch.env falls back to the fresh-kit topology
 # (ansible/roles/robot_autostart/defaults/main.yaml): LiDAR, launcher and drive off, GPIO safety on,
 # RViz off, DualShock. launcher/test/test_gpio_safety_launch.py keeps these in step.
+# The GPIO5 physical E-stop path is not part of that topology: every production launch (lesson,
+# practice and competition) passes enable_gpio_ref:=true, and ENABLE_GPIO_REF from launch.env is
+# ignored here, so a legacy ENABLE_GPIO_REF=false cannot disable it (issue #168). Only a manual
+# diagnostic `ros2 launch ... enable_gpio_ref:=false` runs without it.
 LAUNCH_ARGS="${LAUNCH_ARGS} enable_lidar:=${ENABLE_LIDAR:-false}"
 LAUNCH_ARGS="${LAUNCH_ARGS} enable_shot:=${ENABLE_SHOT:-false}"
 LAUNCH_ARGS="${LAUNCH_ARGS} enable_drive:=${ENABLE_DRIVE:-false}"
 if [ "${MODE}" = "competition" ]; then
   # Competition always requires both physical E-stop and AutoReferee GPIO safety inputs.
-  # ENABLE_GPIO_REF from launch.env is intentionally ignored in this mode.
   LAUNCH_ARGS="${LAUNCH_ARGS} enable_gpio_ref:=true"
   LAUNCH_ARGS="${LAUNCH_ARGS} enable_autoreferee:=true"
 else
-  # Practice and lesson: the GPIO safety path follows launch.env (Robot Manager's 管理設定), on
-  # unless it says exactly "false" (without it operation_manager still publishes /emergency_stop).
-  PRACTICE_GPIO_REF="true"
-  if [ "${ENABLE_GPIO_REF:-true}" = "false" ]; then
-    PRACTICE_GPIO_REF="false"
-  fi
-  LAUNCH_ARGS="${LAUNCH_ARGS} enable_gpio_ref:=${PRACTICE_GPIO_REF}"
+  # Practice and lesson (Robot Manager's 起動 only): GPIO5 physical E-stop always on, no
+  # AutoReferee. ENABLE_GPIO_REF in launch.env is a legacy field and is never read.
+  LAUNCH_ARGS="${LAUNCH_ARGS} enable_gpio_ref:=true"
   LAUNCH_ARGS="${LAUNCH_ARGS} enable_autoreferee:=false"
   if [ "${MODE}" = "lesson" ]; then
     # Lesson: QUESTiX LAB shares /target_twist through twist_arbiter (the stick always wins) and

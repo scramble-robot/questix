@@ -264,7 +264,8 @@ function renderOverview() {
 function updateLaunchConfig(config) {
   if (configDirty) return;
   document.getElementById('launch-save-state').textContent = '保存済みの設定です。変更は次のロボット制御の起動・再起動で反映されます。';
-  const toggleKeys = ["ENABLE_LIDAR", "ENABLE_SHOT", "ENABLE_DRIVE", "ENABLE_GPIO_REF", "ENABLE_RVIZ"];
+  // ENABLE_GPIO_REF is not editable: the physical E-stop is always on (issue #168).
+  const toggleKeys = ["ENABLE_LIDAR", "ENABLE_SHOT", "ENABLE_DRIVE", "ENABLE_RVIZ"];
   for (const key of toggleKeys) {
     const input = document.querySelector(`[data-config="${key}"]`);
     if (input && config[key] !== undefined) {
