@@ -7,7 +7,7 @@
 # Usage:
 #   sudo scripts/wifi-ap.sh up [options]   access point on, now and at every boot; updates an outdated
 #                                          Robot Manager (scripts/update-robot-manager.sh) and turns on
-#                                          the QUESTiX LAB bridge (except in competition mode)
+#                                          the QUESTiX LAB bridge (lesson mode only)
 #   sudo scripts/wifi-ap.sh down           access point off; saved Wi-Fi client profiles take over
 #   sudo scripts/wifi-ap.sh status         SSID, password, address and connected devices
 #   sudo scripts/wifi-ap.sh card [FILE]    printable card with the Wi-Fi and QUESTiX LAB QR codes
@@ -308,10 +308,13 @@ command_up() {
 
 # Learners join the access point to open the teaching pages, so the bridge that serves them
 # (started by robot_manager) is switched on with it: AUTOSTART for the next boots, and a start
-# request now. Competition mode keeps the bridge off (robot_manager turned AUTOSTART off).
+# request now. Only lesson mode (教材) serves it; practice and competition keep it off
+# (robot_manager turned AUTOSTART off when it left lesson mode).
 enable_lab_bridge() {
-    if [ "$(cat "$CONFIG_DIR/mode" 2> /dev/null)" = competition ]; then
-        echo "ℹ️  大会モードのため、教材の配信（QUESTiX LAB）は開始しません。"
+    local mode
+    mode="$(tr -d '[:space:]' < "$CONFIG_DIR/mode" 2> /dev/null || true)"
+    if [ "$mode" != lesson ]; then
+        echo "ℹ️  教材モードではないため（${mode:-practice}）、教材の配信（QUESTiX LAB）は開始しません。"
         return
     fi
     local lab_env="$CONFIG_DIR/lab.env"

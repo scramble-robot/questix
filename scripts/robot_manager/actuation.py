@@ -1,20 +1,21 @@
-"""The teacher's runtime actuation authority for a practice robot (操作 tab).
+"""The teacher's permission for a lesson robot (操作 tab; modes.LESSON, 教材モード).
 
-The authority is a permission, not an emergency stop. By default it is the precondition for
-QUESTiX LAB's lesson permissions (lab.py) and the controller drives without it, as in 3.2.0. A
-practice launch may opt in with ``require_teacher_permission:=true`` on questix_core:
-drive_component, shot_component and esc_motor_control then move the wheels (``drive``) or the
+The permission is not an emergency stop. It is used in lesson mode only
+(``modes.uses_teacher_permission``): the robot launcher then starts questix_core with
+``require_teacher_permission:=true``,
+so drive_component, shot_component and esc_motor_control move the wheels (``drive``) or the
 launcher (``launcher``: roller, tilt, fire) only while a fresh questix_msgs/ActuationAuthority on
 ``/actuation_authority`` says so, for the controller and QUESTiX LAB alike, enforced in those
-nodes, not here. Competition launches never depend on this.
+nodes, not here. It is also the precondition for QUESTiX LAB's lesson permissions (lab.py).
+Practice mode (the controller alone) and competition mode never use it.
 
 This module holds the two switches (``_authority``) and a heartbeat child process
 (actuation_heartbeat.py, sourced like the lab bridge: ROS, then ROBOT_WS from launch.env, and
 the robot's ROS_DOMAIN_ID) that publishes them at 5 Hz while any is on. The switches are never
 settings: they live only in this process, start off at every start of the manager (so after a
-reboot too), and go off again on practice / competition mode switches, a start, restart or stop
-of the robot service, 「すべて止める」 and the manager's shutdown (``revoke_all``). Switching one
-on is refused in competition mode and when the heartbeat cannot be started. When the heartbeat
+reboot too), and go off again on every mode switch, a start, restart or stop of the robot service,
+「すべて止める」 and the manager's shutdown (``revoke_all``). Switching one on is refused outside
+lesson mode and when the heartbeat cannot be started. When the heartbeat
 exits on its own the switches go off (noticed at the next status poll or switch) and nothing
 restarts it: the lesson permissions go off with them (and an opted-in robot has already stopped
 when its lease ran out), and the teacher switches on again. Likewise, when the heartbeat cannot
@@ -39,7 +40,7 @@ from typing import Callable, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from robot_manager import control_runtime, ros_domain
+from robot_manager import control_runtime, modes, ros_domain
 
 CONFIG_DIR = Path(os.environ.get("QUESTIX_CONFIG_DIR", "/etc/questix_robot"))
 LAUNCH_ENV_FILE = CONFIG_DIR / "launch.env"
@@ -102,11 +103,12 @@ def _read_env_file(path: Path) -> dict[str, str]:
     return values
 
 
+def _mode() -> str:
+    return modes.read(MODE_FILE)
+
+
 def _competition_mode() -> bool:
-    try:
-        return MODE_FILE.read_text().strip() == "competition"
-    except OSError:
-        return False
+    return _mode() == modes.COMPETITION
 
 
 def _command(config: dict[str, str]) -> list[str]:
@@ -233,6 +235,9 @@ def _status_locked() -> dict:
         "drive": _authority["drive"],
         "launcher": _authority["launcher"],
         "running": _proc is not None,
+        # The saved mode, and whether the switches can be used in it (lesson mode only).
+        "mode": _mode(),
+        "available": modes.uses_teacher_permission(_mode()),
         "competition": _competition_mode(),
         "last_off_reason": _last_off_reason,
         "error": _last_error,
@@ -282,9 +287,11 @@ def set_authority(kind: str, allow: bool) -> dict:
         # This kind's lesson permission goes off whether or not the switch was still on.
         _notify_revoked((reaped, HEARTBEAT_EXITED), (failed, WRITE_FAILED), ([kind], "teacher"))
         return result
-    if _competition_mode():
-        raise HTTPException(status_code=409, detail=f"大会モードでは{_NAMES[kind]}の許可は使いません"
-                            "（大会では AutoReferee と非常停止で動きます）")
+    mode = _mode()
+    if not modes.uses_teacher_permission(mode):
+        raise HTTPException(status_code=409, detail=(
+            f"{modes.LABELS.get(mode, '今のモード')}では{_NAMES[kind]}の許可は使いません"
+            "（先生の許可は教材モードだけで使います）"))
     reaped: list[str] = []
     failed: tuple[str, ...] = ()
     try:
