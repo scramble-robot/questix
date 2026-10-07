@@ -95,6 +95,17 @@ drive_component:
     velocity_run_invert_measured: false    # 実測 RPM の符号を反転（正帰還になる場合のみ true）
     velocity_run_feedback_max_age_sec: 0.1 # [s] 両輪のフィードバックがこれより古ければ FF のみ
 
+    # ---- velocity モードの共振ダンピング（motor_control_lib/wheel_rate_damper.hpp）----
+    # 床の上で回転数によらず約 1.4〜1.8 Hz で揺れ続ける（車輪を浮かせると揺れない）のは、機体の
+    # 慣性が載ったファーム速度ループの減衰不足（2026-10-07 の実機計測）。追従誤差の変化率に逆らう
+    # 補正を速度指令に足してダンピングを補う。定常の速さは変えない。current モードでは無視（WARN）。
+    # 既定は無効（0）。推奨 0.08 から試す（手順は motor_control_app/README.md「共振ダンピング」）。
+    # 上限 0.2: 大きすぎると、ファームのループが速い状態（車輪を浮かせた等）で 25 Hz 付近の発振。
+    # 停止中・目標 0 の輪・フィードバックが velocity_run_feedback_max_age_sec より古いときは掛けない。
+    velocity_damping_gain_sec: 0.0           # [s] 0..0.2、0 で無効
+    velocity_damping_filter_tau_sec: 0.08    # [s] 0.02..0.5 微分の前の一次ローパス
+    velocity_damping_max_correction_rpm: 30.0  # [RPM] 0..100 補正量の上限（安全装置）
+
     # /target_twist 受信タイムアウト（制御 tick 内で判定）。
     # 指令がこの秒数途絶えたら走行モータを停止する（velocity/current 両モードで有効）。
     # 上流（uart_joy_driver/joy_gate/joy_controller）が停止しても暴走を防ぐ安全機能。

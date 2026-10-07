@@ -357,6 +357,13 @@ private:
   bool velocity_run_invert_measured_{false};
   double velocity_run_feedback_max_age_sec_{0.1};
 
+  // velocity モードの共振ダンピング（motor_control_lib/wheel_rate_damper.hpp）。velocity モードのみ
+  // 有効。gain 0 で無効（既定 = 従来挙動）。範囲は drive_component.cpp の
+  // velocityDampingProblem()。
+  double velocity_damping_gain_sec_{0.0};
+  double velocity_damping_filter_tau_sec_{0.08};
+  double velocity_damping_max_correction_rpm_{30.0};
+
   // 指令送信後の追加待機 [ms]。0で無効（DDT M0602C の間隔要件用の保険）
   int command_wait_ms_{0};
 

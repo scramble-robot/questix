@@ -103,6 +103,38 @@ ON/OFF しても、変更前のモデル由来の推定値が新しい設定へ�
 ため、この破棄の対象に含めない（古くなった時点で既存のフィードバック無効経路が同じ状態を
 リセットする）。
 
+### 共振ダンピング（velocity モードのみ、**既定は無効**）
+
+床の上で回転数によらず約 1.4〜1.8 Hz で揺れ続ける症状（車輪を浮かせると揺れない）は、機体の
+慣性が載ったファーム速度ループの減衰不足（2026-10-07 の実機計測、`scripts/identify/ripple_analysis.py`）。
+ファームのゲインは変えられないため、ホストが追従誤差の変化率に逆らう補正を速度指令に足して
+ダンピングを補う（`motor_control_lib/wheel_rate_damper.hpp`）。定常の速さは変えない。
+停止中・目標 0 の輪・両輪のフィードバックが `velocity_run_feedback_max_age_sec` より古いときは
+掛けない。実測の符号は `velocity_run_invert_measured` に従う。
+
+| パラメータ | 既定値 | 実行時変更 | 効き |
+|---|---|---|---|
+| `velocity_damping_gain_sec` | 0.0 | ○ | 補正の強さ [s]（0..0.2）。0 で無効。推奨 0.08 から |
+| `velocity_damping_filter_tau_sec` | 0.08 | ○ | 微分の前の一次ローパス [s]（0.02..0.5） |
+| `velocity_damping_max_correction_rpm` | 30.0 | ○ | 補正量の上限 [RPM]（0..100）。補正で指令の符号が目標と逆になることはない |
+
+ゲインの上限: 補正は 1 tick 遅れて届くため、ファームのループが速い状態（車輪を浮かせた・軽い）で
+大きすぎると 25 Hz 付近で発振する。シミュレーション（`test_control_core` の
+`ControlCoreRateDamper*`）では 0.2 前後から。走行中に変えても次の tick は補正 0 から始まる。
+
+試し方（狭い場所で可）: 床の上でその場旋回の記録を、補正なし・ありで取り、`ripple_analysis.py`
+（ブランチ `feat/drive-measurement-fidelity` の `scripts/identify/`）の振れ幅（p2p）と卓越周波数の
+振幅を比べる。
+
+```bash
+bash scripts/identify/record.sh --levels 60,95 --hold 8 --turn               # 補正なし
+ros2 param set /drive_component velocity_damping_gain_sec 0.08
+bash scripts/identify/record.sh --levels 60,95 --hold 8 --turn               # 補正あり
+ros2 param set /drive_component velocity_damping_gain_sec 0.0               # 元に戻す
+```
+
+続けて車輪を浮かせて同じ回転数を回し、揺れが増えていない（量子化の 1〜2 rpm のまま）ことも確かめる。
+
 ### 観測・レポート
 
 | パラメータ | 既定値 | 実行時変更 | 効き |

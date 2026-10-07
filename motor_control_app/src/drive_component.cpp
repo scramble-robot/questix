@@ -8,12 +8,15 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <exception>
 #include <filesystem>
 #include <functional>
 #include <lifecycle_msgs/msg/state.hpp>
 #include <limits>
 #include <stdexcept>
+#include <string>
+#include <utility>
 
 #include "motor_control_app/drive_control_tick.hpp"
 #include "motor_control_app/drive_slew.hpp"
@@ -32,6 +35,33 @@ constexpr double kIdleFeedbackMaxAgeSec = 0.2;
 
 // 停止指令を送れなかったとき（stop fault）の再送間隔 [s]。
 constexpr double kStopRetryPeriodSec = 0.5;
+
+// 共振ダンピング（velocity_damping_*）の受け付ける範囲。範囲内なら空文字列、外なら理由を返す。
+// gain の上限 0.2 s は、ファームのループが速い状態（車輪を浮かせた等）で補正が発振し始める値
+// （motor_control_lib/wheel_rate_damper.hpp、test_control_core の ControlCoreRateDamper）。
+std::string velocityDampingProblem(const std::string& name, double value) {
+  struct Range {
+    const char* name;
+    double min;
+    double max;
+  };
+  static constexpr Range kRanges[] = {{"velocity_damping_gain_sec", 0.0, 0.2},
+                                      {"velocity_damping_filter_tau_sec", 0.02, 0.5},
+                                      {"velocity_damping_max_correction_rpm", 0.0, 100.0}};
+  for (const auto& range : kRanges) {
+    if (name != range.name) {
+      continue;
+    }
+    if (std::isfinite(value) && value >= range.min && value <= range.max) {
+      return "";
+    }
+    char reason[160];
+    std::snprintf(reason, sizeof(reason), "%s requires a finite value in [%g, %g] (got %g)",
+                  range.name, range.min, range.max, value);
+    return reason;
+  }
+  return "";
+}
 
 double secondsSince(std::chrono::steady_clock::time_point then,
                     std::chrono::steady_clock::time_point now) {
@@ -174,6 +204,18 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
     return CallbackReturn::FAILURE;
   }
 
+  const std::pair<const char*, double> damping_params[] = {
+      {"velocity_damping_gain_sec", velocity_damping_gain_sec_},
+      {"velocity_damping_filter_tau_sec", velocity_damping_filter_tau_sec_},
+      {"velocity_damping_max_correction_rpm", velocity_damping_max_correction_rpm_}};
+  for (const auto& [name, value] : damping_params) {
+    const std::string problem = velocityDampingProblem(name, value);
+    if (!problem.empty()) {
+      RCLCPP_ERROR(this->get_logger(), "%s", problem.c_str());
+      return CallbackReturn::FAILURE;
+    }
+  }
+
   if (!lifecycle_auto_start::isValidStatusPublishRate(control_rate_)) {
     RCLCPP_ERROR(this->get_logger(),
                  "Invalid control_rate=%g; value must produce a positive, representable "
@@ -261,6 +303,17 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
               velocity_run_observer_l_x_, velocity_run_observer_l_d_,
               velocity_run_max_correction_rpm_, velocity_run_invert_measured_ ? "true" : "false",
               velocity_run_feedback_max_age_sec_);
+  if (velocity_damping_gain_sec_ > 0.0 && control_mode_ != "velocity") {
+    RCLCPP_WARN(this->get_logger(),
+                "velocity_damping_gain_sec は velocity モード専用のため control_mode='%s' では"
+                "無視します",
+                control_mode_.c_str());
+  }
+  RCLCPP_INFO(
+      this->get_logger(), "  velocity_damping: %s  gain=%.3fs tau=%.3fs max_corr=%.1f rpm",
+      (velocity_damping_gain_sec_ > 0.0 && control_mode_ == "velocity") ? "enabled" : "disabled",
+      velocity_damping_gain_sec_, velocity_damping_filter_tau_sec_,
+      velocity_damping_max_correction_rpm_);
 
   // twist 購読（コールバックは ACTIVE のときのみ処理する）
   twist_subscription_ = this->create_subscription<geometry_msgs::msg::Twist>(
@@ -450,6 +503,13 @@ void DriveComponent::declareParameters() {
   this->declare_parameter("velocity_run_invert_measured", false);
   this->declare_parameter("velocity_run_feedback_max_age_sec", 0.1);
 
+  // velocity モードの共振ダンピング（velocity モードのみ有効。current モードでは無視）。
+  // gain 0 で無効。詳細は motor_control_lib/wheel_rate_damper.hpp、範囲は
+  // velocityDampingProblem()。
+  this->declare_parameter("velocity_damping_gain_sec", 0.0);
+  this->declare_parameter("velocity_damping_filter_tau_sec", 0.08);
+  this->declare_parameter("velocity_damping_max_correction_rpm", 30.0);
+
   // コマンド受信タイムアウト [s]（velocity/current 両モードで有効。制御 tick 内で判定）
   this->declare_parameter("cmd_timeout_sec", 1.0);
 
@@ -538,6 +598,11 @@ void DriveComponent::readParameters() {
   velocity_run_invert_measured_ = this->get_parameter("velocity_run_invert_measured").as_bool();
   velocity_run_feedback_max_age_sec_ =
       this->get_parameter("velocity_run_feedback_max_age_sec").as_double();
+  velocity_damping_gain_sec_ = this->get_parameter("velocity_damping_gain_sec").as_double();
+  velocity_damping_filter_tau_sec_ =
+      this->get_parameter("velocity_damping_filter_tau_sec").as_double();
+  velocity_damping_max_correction_rpm_ =
+      this->get_parameter("velocity_damping_max_correction_rpm").as_double();
   cmd_timeout_sec_ = this->get_parameter("cmd_timeout_sec").as_double();
   control_rate_ = this->get_parameter("control_rate").as_double();
   command_wait_ms_ = static_cast<int>(this->get_parameter("command_wait_ms").as_int());
@@ -672,6 +737,11 @@ control_core::Config DriveComponent::makeControlCoreConfig() const {
   config.velocity_run.observer_l_d = velocity_run_observer_l_d_;
   config.velocity_run.max_correction_rpm = velocity_run_max_correction_rpm_;
   config.velocity_run.invert_measured = velocity_run_invert_measured_;
+  // 共振ダンピングも velocity モード専用（current モードはファーム速度ループを使わない）。
+  config.velocity_damping.gain_sec =
+      (control_mode_ == "velocity") ? velocity_damping_gain_sec_ : 0.0;
+  config.velocity_damping.filter_tau_sec = velocity_damping_filter_tau_sec_;
+  config.velocity_damping.max_correction_rpm = velocity_damping_max_correction_rpm_;
   return config;
 }
 
@@ -710,6 +780,7 @@ rcl_interfaces::msg::SetParametersResult DriveComponent::onParameterChange(
   bool control_core_dirty = false;
   bool current_pi_dirty = false;
   bool warn_lqr_ignored = false;
+  bool warn_damping_ignored = false;
   bool lqr_or_run_threshold_changed = false;
   std::vector<std::function<void()>> staged;
   // Phase 1: validate and stage typed values only. No member or subsystem writes.
@@ -850,6 +921,33 @@ rcl_interfaces::msg::SetParametersResult DriveComponent::onParameterChange(
           throw std::invalid_argument(name + " requires a finite positive value");
         }
         staged.emplace_back([this, value]() { velocity_run_feedback_max_age_sec_ = value; });
+
+        // --- 共振ダンピング（制御コアへ反映。走行中に変えても次の tick は補正 0 から） ---
+      } else if (name == "velocity_damping_gain_sec") {
+        const auto value = param.get_value<double>();
+        const std::string problem = velocityDampingProblem(name, value);
+        if (!problem.empty()) {
+          throw std::invalid_argument(problem);
+        }
+        staged.emplace_back([this, value]() { velocity_damping_gain_sec_ = value; });
+        control_core_dirty = true;
+        warn_damping_ignored = value > 0.0 && control_mode_ != "velocity";
+      } else if (name == "velocity_damping_filter_tau_sec") {
+        const auto value = param.get_value<double>();
+        const std::string problem = velocityDampingProblem(name, value);
+        if (!problem.empty()) {
+          throw std::invalid_argument(problem);
+        }
+        staged.emplace_back([this, value]() { velocity_damping_filter_tau_sec_ = value; });
+        control_core_dirty = true;
+      } else if (name == "velocity_damping_max_correction_rpm") {
+        const auto value = param.get_value<double>();
+        const std::string problem = velocityDampingProblem(name, value);
+        if (!problem.empty()) {
+          throw std::invalid_argument(problem);
+        }
+        staged.emplace_back([this, value]() { velocity_damping_max_correction_rpm_ = value; });
+        control_core_dirty = true;
       } else if (name == "cmd_timeout_sec") {
         const auto value = param.get_value<double>();
         staged.emplace_back([this, value]() { cmd_timeout_sec_ = value; });
@@ -970,6 +1068,11 @@ rcl_interfaces::msg::SetParametersResult DriveComponent::onParameterChange(
     RCLCPP_WARN(this->get_logger(),
                 "velocity_run_lqr_enabled=true ですが RUN 閾値が両方 0 のため LQR+FF は"
                 "適用しません（FF のみ）");
+  }
+  if (warn_damping_ignored) {
+    RCLCPP_WARN(this->get_logger(),
+                "velocity_damping_gain_sec は velocity モード専用です（現在 '%s'、無視）",
+                control_mode_.c_str());
   }
   if (warn_lqr_ignored) {
     RCLCPP_WARN(this->get_logger(),

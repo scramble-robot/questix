@@ -14,6 +14,7 @@
 #include "motor_control_lib/differential_kinematics.hpp"
 #include "motor_control_lib/drive_mode_fsm.hpp"
 #include "motor_control_lib/wheel_observer.hpp"
+#include "motor_control_lib/wheel_rate_damper.hpp"
 #include "motor_control_lib/wheel_velocity_lqr.hpp"
 
 namespace motor_control_app::control_core {
@@ -72,6 +73,11 @@ struct Config {
 
   // velocity モード RUN 域の外側 LQR+FF（Phase E）
   VelocityRunLqrConfig velocity_run;
+
+  // velocity モードの共振ダンピング（motor_control_lib/wheel_rate_damper.hpp）。gain_sec 0 で無効
+  // （既定 = 従来と同じ出力）。停止以外の状態で、目標が 0 でない輪に、両輪のフィードバックが
+  // 有効なときだけ掛ける。実測の符号は velocity_run.invert_measured に従う（同じ配線の事実）。
+  motor_control_lib::wheel_rate_damper::Params velocity_damping;
 };
 
 /**
@@ -101,6 +107,7 @@ struct Output {
   double linear{0.0};      // スルーレート適用後の車体前進速度指令 [m/s]
   double angular{0.0};     // スルーレート適用後の車体角速度指令 [rad/s]
   bool lqr_active{false};  // この tick で RUN LQR 補正が実際に適用されたか
+  bool damping_active{false};  // この tick で共振ダンピング補正をどちらかの輪に掛けたか
 };
 
 /**
@@ -110,6 +117,7 @@ struct Output {
  *   目標 twist -> スルーレート制限（テーパー付き）-> 運動学変換（左右車輪 RPM）
  *   -> 最近接整数へ丸め -> 走行状態機械（停止/低速/走行。ヒステリシス付き）
  *   -> [RUN かつ LQR 有効かつ FB あり] オブザーバ + LQR+FF で車輪 RPM を補正
+ *   -> [停止以外かつダンピング有効かつ FB あり] 共振のダンピング補正を足す
  *
  * 既存の純粋関数（drive_slew / differential_kinematics / drive_mode_fsm / wheel_observer /
  * wheel_velocity_lqr）を合成した層で、ロジックの単一ソースはそれぞれの関数側にある。
@@ -122,7 +130,9 @@ struct Output {
  */
 class ControlCore {
 public:
-  explicit ControlCore(const Config& config) : config_(config) {}
+  explicit ControlCore(const Config& config)
+      : config_(config),
+        damping_params_(motor_control_lib::wheel_rate_damper::sanitize(config.velocity_damping)) {}
 
   /**
    * @brief 1 制御ステップを実行する（フィードバックなし = 従来 API。FF のみ）。
@@ -186,6 +196,20 @@ public:
         resetWheelControllers();
       }
     }
+
+    // 共振のダンピング（機体の慣性でファーム速度ループの減衰が弱くなるモードを抑える）。
+    // LQR の補正の後に足す。フィードバックが無効・無効設定・停止中は状態を捨てる。
+    if (mode_ != DriveMode::kStop &&
+        motor_control_lib::wheel_rate_damper::enabled(damping_params_) && feedback.valid) {
+      const double sign = config_.velocity_run.invert_measured ? -1.0 : 1.0;
+      const bool left =
+          dampWheel(left_damper_, out.left_ref_rpm, sign * feedback.left_rpm, dt_sec, out.left_rpm);
+      const bool right = dampWheel(right_damper_, out.right_ref_rpm, sign * feedback.right_rpm,
+                                   dt_sec, out.right_rpm);
+      out.damping_active = left || right;
+    } else {
+      resetDampers();
+    }
     return out;
   }
 
@@ -224,6 +248,15 @@ public:
   void setConfig(const Config& config) {
     const bool velocity_run_changed = velocityRunChanged(config_.velocity_run, config.velocity_run);
     const bool was_applicable = velocityRunLqrApplicable();
+    const auto damping = motor_control_lib::wheel_rate_damper::sanitize(config.velocity_damping);
+    if (damping.gain_sec != damping_params_.gain_sec ||
+        damping.filter_tau_sec != damping_params_.filter_tau_sec ||
+        damping.max_correction_rpm != damping_params_.max_correction_rpm ||
+        config.velocity_run.invert_measured != config_.velocity_run.invert_measured) {
+      // 次の tick は補正 0 から始まる（初回は内部状態を実測で初期化するだけ）
+      resetDampers();
+    }
+    damping_params_ = damping;
     config_ = config;
     lqr_gains_.reset();
     lqr_gains_dt_ = 0.0;
@@ -348,6 +381,32 @@ private:
   void resetWheelControllers() {
     left_ = WheelState{};
     right_ = WheelState{};
+    resetDampers();
+  }
+
+  void resetDampers() {
+    motor_control_lib::wheel_rate_damper::reset(left_damper_);
+    motor_control_lib::wheel_rate_damper::reset(right_damper_);
+  }
+
+  // 1 輪ぶんのダンピング補正を cmd に足す。目標 0 の輪は補正せず状態を捨てる。
+  // 補正で指令の符号が目標と逆にならないようにする（LQR と同じ安全装置。0 で止める）。
+  bool dampWheel(motor_control_lib::wheel_rate_damper::State& state, int ref_rpm,
+                 double measured_rpm, double dt_sec, int& cmd) {
+    if (ref_rpm == 0) {
+      motor_control_lib::wheel_rate_damper::reset(state);
+      return false;
+    }
+    const double correction = motor_control_lib::wheel_rate_damper::step(
+        state, damping_params_, static_cast<double>(ref_rpm), measured_rpm, dt_sec);
+    int damped = static_cast<int>(std::lround(static_cast<double>(cmd) + correction));
+    if (ref_rpm > 0) {
+      damped = std::max(damped, 0);
+    } else {
+      damped = std::min(damped, 0);
+    }
+    cmd = damped;
+    return true;
   }
 
   // velocity_run のうち、オブザーバ / LQR の意味を変えるメンバが変わったか。
@@ -380,6 +439,11 @@ private:
   motor_control_lib::wheel_observer::Params observer_params_{};
   std::optional<motor_control_lib::wheel_velocity_lqr::Gains> lqr_gains_;
   double lqr_gains_dt_{0.0};
+
+  // 共振ダンピングの状態（sanitize 済みのパラメータ）
+  motor_control_lib::wheel_rate_damper::Params damping_params_;
+  motor_control_lib::wheel_rate_damper::State left_damper_;
+  motor_control_lib::wheel_rate_damper::State right_damper_;
 };
 
 }  // namespace motor_control_app::control_core
