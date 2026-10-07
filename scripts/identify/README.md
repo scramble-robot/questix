@@ -22,6 +22,8 @@
 | `test_evidence.sh` | `lib_evidence.sh` と `record.sh` preflight の実機なし検証（`ros2` をスタブに差し替え） |
 | `check_drive_mode.sh` | DDT モータが実際にどの制御モード（応答フレームの mode）で動いているかを確かめる（読み取りのみ。下の「制御モードの確認」）。判定は `drive_mode_check.py` |
 | `test_drive_mode_check.py` | `drive_mode_check.py` の集計・判定・フレーム組み立ての検算（ROS 不要） |
+| `probe_ddt_serial.py` | DDT が RS485 で応答するかを生のバイト列で確かめる（ROS 不要。drive_component を止めて使う。送るのは速度 0 の停止フレームだけ）。下の「DDT が応答しないとき」 |
+| `test_probe_ddt_serial.py` | `probe_ddt_serial.py` のフレーム組み立てと応答の分類の検算 |
 
 ## 最短の流れ（講義で「1 回ずつ取って順次回収」する運用）
 
@@ -134,6 +136,26 @@ bash scripts/identify/check_drive_mode.sh --estop-cycle  # 続けて非常停止
   ロボットのサービスの状態・`ENABLE_DRIVE`・そのドメインで見えるノードを表示する。
 - 終了コード: 0 = 一致 / 1 = 不一致（または解除の後に mode が変わった）/ 2 = 判定できない
   （非常停止中・未通電・inactive で新しい応答が無い）/ 3 = 実行環境の不足。
+
+## DDT が応答しないとき（`probe_ddt_serial.py`）
+
+`check_drive_mode.sh` が「受信時刻 0: 一度も応答を受けていない」と出したら、drive_component は
+送っているのに DDT が答えていない。drive_component（`ros2 launch` / ロボットのサービス）を止めてから、
+ポートに直接つないで応答を生のバイト列で見る:
+
+```bash
+python3 scripts/identify/probe_ddt_serial.py                 # /dev/ttyACM0、ID 4,5
+python3 scripts/identify/probe_ddt_serial.py --ids 1-20      # ID が違う疑いがあるとき
+python3 scripts/identify/probe_ddt_serial.py --port /dev/serial/by-id/<変換器>
+```
+
+- 送るのは速度 0・ブレーキなしの停止フレーム（drive_component が停止中に送るものと同じ）だけ。
+  それでも実機のバスに書き込むので、車輪を浮かせるなど動いても安全な状態で使う。
+- ポートを他のプロセスが開いていれば実行しない（応答を取り合うため）。
+- 結果: `ok`（正しい応答。mode・速度・fault も表示）/ `none`（1 バイトも返らない: 電源・配線・ID）/
+  `echo`（送ったフレームが返るだけ: 変換器のエコー）/ `garbage`（壊れた応答: ボーレート・A/B・他の機器）。
+- udev（`ansible/roles/hardware_interfaces`）では CH340 `1a86:7523` が `/dev/servo`、CP2102 が
+  `/dev/lidar`。DDT の RS485 変換器はそれ以外（例: `1a86 USB Single Serial` → `/dev/ttyACM0`）。
 
 ## 手順（velocity モード）
 
