@@ -9,7 +9,8 @@ const bridge = (drive = {}, shoot = {}, extra = {}) => ({
   ...extra,
 });
 const lab = (overrides = {}) => ({
-  running: true, external: false, competition: false, drive_allowed: true, shoot_allowed: true,
+  running: true, external: false, mode: 'lesson', available: true, competition: false,
+  drive_allowed: true, shoot_allowed: true,
   bridge: bridge(), ...overrides,
 });
 
@@ -48,12 +49,32 @@ test('a stopped robot service is named as the reason', () => {
   assert.match(view.reasons[0].detail, /esc_motor_control・shot_component/);
 });
 
-test('competition mode disables the switches with the reason', () => {
-  const view = StatusView.capability('drive', lab({ competition: true, running: false, bridge: null,
-    drive_allowed: false }), 'active', StatusView.createBlockerMemory(), 0);
-  assert.equal(view.headline, '大会モードのため使えません');
-  assert.equal(view.toggleDisabled, true);
-  assert.match(view.toggleNote, /練習モードに戻しても OFF のままです/);
+test('competition and practice mode disable the switches with the reason', () => {
+  for (const [mode, label] of [['competition', '大会モード'], ['practice', '練習モード']]) {
+    const data = lab({ mode, available: false, competition: mode === 'competition', running: false,
+      bridge: null, drive_allowed: false });
+    const view = StatusView.capability('drive', data, 'active', StatusView.createBlockerMemory(), 0);
+    assert.equal(view.headline, `${label}のため使えません`);
+    assert.equal(view.toggleDisabled, true);
+    assert.match(view.toggleNote, /教材モードに戻しても OFF のままです/);
+    const rows = StatusView.overview({ mode, service: 'inactive', robot_name: 'host' }, data, '');
+    assert.equal(rows.lab.text, `${label}のため配信しません`);
+    assert.equal(rows.permissions.text, `${label}のため禁止`);
+  }
+});
+
+test('lesson mode keeps QUESTiX LAB available; the mode strip knows all three modes', () => {
+  assert.equal(StatusView.labUnavailable(lab()), null);
+  assert.equal(StatusView.labUnavailable(null), null);
+  assert.deepEqual(StatusView.MODE, { lesson: '教材', practice: '練習', competition: '大会' });
+  const rows = StatusView.overview({ mode: 'lesson', service: 'inactive', robot_name: 'host' }, lab(), '');
+  assert.equal(rows.mode.text, '次回の起動は教材（「起動」を押したときだけ起動します）');
+  const practice = StatusView.overview({ mode: 'practice', service: 'inactive', robot_name: 'host' },
+    lab({ mode: 'practice', available: false }), '');
+  assert.equal(practice.mode.text, '次回の起動は練習（「起動」を押したときだけ起動します）');
+  const competition = StatusView.overview({ mode: 'competition', service: 'inactive', robot_name: 'host' },
+    lab({ mode: 'competition', available: false, competition: true }), '');
+  assert.equal(competition.mode.text, '次回の起動は大会（電源を入れると自動で起動します）');
 });
 
 test('forbidden, stale and running states', () => {

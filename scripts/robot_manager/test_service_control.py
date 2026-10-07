@@ -49,7 +49,7 @@ class FakeService:
         elif self.launcher == "old":
             launched = False  # the old launcher skips practice and leaves the file alone
         else:
-            fresh = request.exists() and "mode=practice" in request.read_text()
+            fresh = request.exists() and f"mode={mode}" in request.read_text()
             if request.exists():
                 request.unlink()
             launched = fresh
@@ -78,6 +78,43 @@ def test_practice_start_writes_a_request_and_reports_the_practice_launch(app, se
     assert not app.START_REQUEST_FILE.exists()
     status = app.get_status()
     assert status["mode"] == "practice" and status["running_mode"] == "practice"
+
+
+def test_lesson_start_writes_a_lesson_request_and_reports_the_lesson_launch(app, service,
+                                                                            tmp_path):
+    (tmp_path / "mode").write_text("lesson\n")
+    seen = []
+    real = service.systemctl
+
+    def systemctl(action):
+        seen.append(app.START_REQUEST_FILE.read_text())
+        real(action)
+    app._systemctl = systemctl
+    answer = app.control_service("start")
+    assert seen[0].splitlines()[0] == "mode=lesson"
+    assert answer["ok"] is True and answer["message"] == "教材用の構成で起動しました"
+    assert answer["running_mode"] == "lesson"
+    assert app.get_status()["running_mode"] == "lesson"
+
+
+def test_a_lesson_launch_that_ends_at_once_is_reported_as_such(app, tmp_path, monkeypatch):
+    fake = FakeService(app, launch_survives=False)
+    monkeypatch.setattr(app, "_systemctl", fake.systemctl)
+    monkeypatch.setattr(app, "_service_status", fake.status)
+    (tmp_path / "mode").write_text("lesson\n")
+    answer = app.control_service("start")
+    assert answer["ok"] is False
+    assert "教材用の起動がすぐに終了しました（教材モードでは自動で起動し直しません）" in answer["message"]
+
+
+def test_the_mode_api_accepts_the_three_modes_and_nothing_else(app, service, monkeypatch):
+    monkeypatch.setattr(app.lab, "disable_outside_lessons", lambda: None)
+    monkeypatch.setattr(app.lab, "enable_for_lessons", lambda: None)
+    for mode in ("lesson", "practice", "competition"):
+        assert app.set_mode(app.ModeRequest(mode=mode))["mode"] == mode
+        assert app.get_status()["mode"] == mode
+    with pytest.raises(Exception):
+        app.ModeRequest(mode="classroom")
 
 
 def test_request_is_written_before_systemctl_in_the_launchers_format(app, service, monkeypatch,
@@ -160,7 +197,7 @@ def test_running_mode_differs_from_the_next_mode_after_a_switch(app, service, tm
                                                                 monkeypatch):
     (tmp_path / "mode").write_text("practice\n")
     app.control_service("start")
-    monkeypatch.setattr(app.lab, "disable_for_competition", lambda: None)
+    monkeypatch.setattr(app.lab, "disable_outside_lessons", lambda: None)
     answer = app.set_mode(app.ModeRequest(mode="competition"))
     assert answer["running_mode"] == "practice" and answer["restart_needed"] is True
     status = app.get_status()

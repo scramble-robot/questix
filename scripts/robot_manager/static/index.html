@@ -97,14 +97,16 @@
       <div class="mode-display">
         <span id="mode-label" class="mode-badge">未確認</span>
       </div>
-      <div class="toggle-row">
-        <span class="toggle-label">練習</span>
-        <label class="toggle-switch">
-          <input type="checkbox" id="mode-toggle" aria-label="大会モードを選択">
-          <span class="slider"></span>
-        </label>
-        <span class="toggle-label">大会</span>
-      </div>
+      <!-- modes.py: lesson (教材) / practice (練習) / competition (大会). -->
+      <fieldset class="mode-choice" id="mode-choice">
+        <legend class="visually-hidden">次回起動のモード</legend>
+        <label class="mode-option"><input type="radio" name="mode" value="lesson">
+          <span>教材</span><small>授業。教材から動かせます。走行・発射は先生の許可がある間だけ</small></label>
+        <label class="mode-option"><input type="radio" name="mode" value="practice">
+          <span>練習</span><small>コントローラーで自由に練習。教材・先生の許可は使いません</small></label>
+        <label class="mode-option"><input type="radio" name="mode" value="competition">
+          <span>大会</span><small>電源を入れると大会用の構成で自動起動</small></label>
+      </fieldset>
       <p id="mode-apply-note" class="section-help">モードは保存後、次回のロボット起動・再起動で反映されます。</p>
     </section>
 
@@ -118,14 +120,14 @@
         <button class="btn btn-stop" data-service-action="stop">停止</button>
       </div>
       <p id="restart-help" class="section-help">再起動すると、動作をいったん止め、保存したモードと設定でロボット制御を起動し直します。</p>
-      <p id="practice-start-help" class="section-help">練習モードでは、電源を入れても自動では起動しません。「起動」を押すと練習用の構成（教材からの走行・発射に対応）で起動します。練習用の起動が異常終了しても自動では起動し直さないので、もう一度「起動」を押してください。</p>
+      <p id="practice-start-help" class="section-help">教材モードと練習モードでは、電源を入れても自動では起動しません。「起動」を押すと保存したモードの構成で起動します。異常終了しても自動では起動し直さないので、もう一度「起動」を押してください。</p>
     </section>
 
-    <!-- The teacher's runtime authority (actuation.py): a permission, not an E-stop. By default
-         it gates the lesson permissions only; the nodes enforce it only when a practice launch
-         opts in (require_teacher_permission:=true). -->
+    <!-- The teacher's permission (actuation.py): a permission, not an E-stop. Lesson mode only:
+         the lesson launch passes require_teacher_permission:=true, so the nodes move the drive
+         and the launcher only while it is on, controller included. -->
     <section class="card" id="actuation-card" aria-labelledby="actuation-heading">
-      <h2 id="actuation-heading">先生の操作許可（練習）</h2>
+      <h2 id="actuation-heading">先生の操作許可（教材モード）</h2>
       <p id="actuation-state" class="section-help" role="status">確認しています。</p>
       <div class="lab-permission-row">
         <label class="toggle-switch" for="actuation-drive-toggle">
@@ -144,8 +146,8 @@
           <span id="actuation-launcher-state" class="lab-permission-state">—</span></label>
       </div>
       <p id="actuation-error" class="lab-inline-error" role="alert" hidden></p>
-      <p class="section-help">ここを ON にしている間だけ、「教材」タブで教材からの走行／発射を許可できます。コントローラーでの操作はこの許可とは関係なく動きます（非常停止とは別のものです）。はじめは OFF です。Robot Manager の再起動・ロボットの再起動・モードの切り替え・ロボット制御の起動／再起動／停止・「すべて止める」で OFF に戻ります。OFF にすると同じ動作の「教材からの走行／発射」の許可も OFF になります（ON にしても教材の許可は ON になりません）。</p>
-      <p class="section-help">手動の起動で <code>require_teacher_permission:=true</code> を指定したときだけ、コントローラーでの操作にもこの許可が必要になり、約 1 秒この許可を受け取れないと止まります（この PC の Robot Manager が止まった場合も同じです）。大会用の起動では使いません（大会は非常停止と AutoReferee で動きます）。非常停止ボタンの代わりにはなりません。</p>
+      <p class="section-help">教材モードで使います。ここを ON にしている間だけ、ロボットはコントローラーでも教材からも動き、「教材」タブで教材からの走行／発射を許可できます（非常停止とは別のものです）。練習モードと大会モードでは使いません。はじめは OFF です。Robot Manager の再起動・ロボットの再起動・モードの切り替え・ロボット制御の起動／再起動／停止・「すべて止める」で OFF に戻ります。OFF にすると同じ動作の「教材からの走行／発射」の許可も OFF になります（ON にしても教材の許可は ON になりません）。</p>
+      <p class="section-help">ロボットは約 1 秒この許可を受け取れないと止まります（この PC の Robot Manager が止まった場合も同じです）。非常停止ボタンの代わりにはなりません。</p>
     </section>
 
     <section class="card">
@@ -429,7 +431,7 @@
         受け取ります。下の「教材からの走行」「教材からの発射」を許可したときだけ、教材からロボットを走らせたり発射台を動かしたりできます。
       </p>
       <p class="lab-note" id="lab-permission-reset-note">
-        教材からの走行・発射は、はじめは OFF です。授業のたびに先生が ON にしてください。Robot Manager の再起動・ロボットの再起動・「配信停止」・「すべて止める」・大会モードへの切り替えで OFF に戻ります（練習モードに戻しても OFF のままです）。
+        教材からの走行・発射は、はじめは OFF です。授業のたびに先生が ON にしてください。Robot Manager の再起動・ロボットの再起動・「配信停止」・「すべて止める」・教材モード以外への切り替えで OFF に戻ります（教材モードに戻しても OFF のままです）。
       </p>
 
       <div class="rec-status">
@@ -448,7 +450,7 @@
       </div>
       <p id="lab-records-dir" class="lab-note lab-records-dir" hidden></p>
 
-      <p id="lab-competition-note" class="lab-drive-warning" hidden>大会モードでは教材を配信しません（練習モードに切り替えると配信できます）。</p>
+      <p id="lab-competition-note" class="lab-drive-warning" hidden>教材モード以外では教材を配信しません（教材モードに切り替えると配信できます）。</p>
       <p id="lab-serve-error" class="lab-inline-error" role="alert" hidden></p>
       <details id="lab-log" class="lab-log" hidden>
         <summary>ブリッジのログ</summary>
@@ -507,9 +509,9 @@
         </div>
         <ul id="lab-drive-tech" class="lab-tech-list"></ul>
         <p class="lab-note">
-          練習用の起動（questix_core、enable_autoreferee:=false）では切り替えノード twist_arbiter が入り、
+          教材用の起動（questix_core、enable_twist_arbiter:=true）では切り替えノード twist_arbiter が入り、
           コントローラーと教材の指令（/target_twist/lab）のどちらかを /target_twist に渡します。
-          大会用の起動（enable_autoreferee:=true）には入らないため、教材からは走らせられません。
+          練習用・大会用の起動には入らないため、教材からは走らせられません。
           上限は前後 0.3 m/s・回転 1.0 rad/s（questix_lab_bridge の設定）で、教材の画面が閉じたり通信が
           0.5 秒途切れたりすると止まり、どの端末の停止バーでも止められます。
         </p>
@@ -554,8 +556,8 @@
         <summary>先生・技術者向けの詳しい情報</summary>
         <ul id="lab-shoot-tech" class="lab-tech-list"></ul>
         <p class="lab-note">
-          練習用の起動では、ローラー（esc_motor_control）と発射台（shot_component）が教材の入力
-          （/roller/lab・/shot/lab/*）を受け付けます。大会用の起動（enable_autoreferee:=true）では受け付けません。
+          教材用の起動では、ローラー（esc_motor_control）と発射台（shot_component）が教材の入力
+          （/roller/lab・/shot/lab/*）を受け付けます。練習用・大会用の起動では受け付けません。
           ローラーは最大 80%、発射はローラーが1秒回ってから・前の発射から2秒あけて1枚ずつ（questix_lab_bridge の設定）。
           教材の画面が閉じたり通信が 0.5 秒途切れたり 30 秒たったりするとローラーは止まり、どの端末からでも止められます。
         </p>
@@ -603,7 +605,7 @@
         </div>
       </div>
       <button class="btn btn-save" id="lab-save-config">教材の設定を保存</button>
-      <p class="lab-note">設定は、次に配信を開始したときから有効になります。自動開始は最初からオンです。オンの間は、同じネットワークの誰でも教材のページを開いて、ロボットの値を見られます（走行と発射は「教材からの走行」「教材からの発射」で許可したときだけ）。大会モードに切り替えると、配信を止めて自動開始・走行・発射をオフにします（大会モードの間は配信しません）。練習モードに戻すと、大会モードの前に選んでいた設定（自動開始・走行・発射）に戻します。</p>
+      <p class="lab-note">設定は、次に配信を開始したときから有効になります。自動開始は最初からオンです。オンの間は、同じネットワークの誰でも教材のページを開いて、ロボットの値を見られます（走行と発射は「教材からの走行」「教材からの発射」で許可したときだけ）。練習モード・大会モードに切り替えると、配信を止めて自動開始・走行・発射をオフにします（教材モード以外の間は配信しません）。教材モードに戻すと、切り替える前に選んでいた自動開始の設定に戻します（走行・発射はオフのままです）。</p>
     </section>
     </div><!-- /lab panel -->
     <div class="tab-panel" data-panel="admin" role="region" aria-label="管理設定">

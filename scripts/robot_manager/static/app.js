@@ -189,6 +189,14 @@ async function refreshStatus() {
   }
 }
 
+// What each mode does (modes.py), under the mode choice.
+const MODE_NOTES = {
+  lesson: '教材モード：電源を入れても自動では起動しません。「起動」を押すと教材用の構成で起動します。教材から走行・発射でき、コントローラーも教材も、先生が「操作」タブで許可している間だけ動きます。',
+  practice: '練習モード：電源を入れても自動では起動しません。「起動」を押すと練習用の構成で起動します。コントローラーは許可なしで動きます（教材は使いません）。',
+  competition: '大会モード：電源を入れると大会用の構成で自動で起動します（教材・先生の許可は使いません）。',
+};
+let modePending = false;
+
 function updateMode(status) {
   const mode = status.mode;
   const label = document.getElementById("mode-label");
@@ -196,16 +204,16 @@ function updateMode(status) {
   label.textContent = names[mode] || '未確認';
   document.getElementById('header-mode').textContent = StatusView.modeSummary(status);
   label.className = `mode-badge ${mode}`;
-  document.getElementById("mode-toggle").checked = mode === "competition";
+  for (const radio of document.querySelectorAll('#mode-choice input[name="mode"]')) {
+    if (!modePending) radio.checked = radio.value === mode;
+  }
   const running = status.service === 'active' ? names[status.running_mode] : null;
   const differs = running && running !== names[mode]
     ? `いまは${running}の構成で動いています。再起動すると${names[mode]}の構成になります。` : '';
-  document.getElementById('mode-apply-note').textContent = (mode === 'practice'
-    ? '練習モード：電源を入れても自動では起動しません。「起動」を押すと練習用の構成（教材からの走行・発射に対応）で起動します。'
-    : '大会モード：電源を入れると大会用の構成で自動で起動します（教材からは動かせません）。') + differs;
-  document.getElementById('practice-start-help').hidden = mode !== 'practice';
+  document.getElementById('mode-apply-note').textContent = (MODE_NOTES[mode] || '') + differs;
+  document.getElementById('practice-start-help').hidden = mode === 'competition';
   const start = document.getElementById('service-start');
-  start.textContent = mode === 'practice' ? '起動（練習用）' : mode === 'competition' ? '起動（大会用）' : '起動';
+  start.textContent = names[mode] ? `起動（${names[mode]}用）` : '起動';
 }
 
 function updateServiceIndicator(status) {
@@ -915,8 +923,8 @@ async function refreshLabStatus() {
       ? "配信中（手動で起動）"
       : data.last_stop_reason === "autostart_failed"
         ? "停止中（自動開始に失敗しました。ROS 環境とビルドを確認してください）"
-        : data.competition || data.last_stop_reason === "competition_mode"
-          ? "停止中（大会モードでは配信しません）"
+        : StatusView.labUnavailable(data)
+          ? `停止中（${StatusView.labUnavailable(data)}では配信しません。教材モードで配信できます）`
           : data.last_stop_reason === "start_failed" || data.last_stop_reason === "exited"
             ? "停止中（ブリッジが終了しました。「ブリッジのログ」を確認してください）"
             : "停止中";
@@ -943,16 +951,21 @@ async function refreshLabStatus() {
   joinQr.serving = serving;
   renderJoinQr();
 
-  document.getElementById("lab-start").disabled = serving || Boolean(data.competition);
+  const unavailable = StatusView.labUnavailable(data);
+  document.getElementById("lab-start").disabled = serving || Boolean(unavailable);
   document.getElementById("lab-stop").disabled = !data.running;
-  document.getElementById("lab-competition-note").hidden = !data.competition;
-  document.getElementById("lab-autostart").disabled = Boolean(data.competition);
+  const modeNote = document.getElementById("lab-competition-note");
+  modeNote.hidden = !unavailable;
+  if (unavailable) {
+    modeNote.textContent = `${unavailable}では教材を配信しません（教材モードに切り替えると配信できます）。`;
+  }
+  document.getElementById("lab-autostart").disabled = Boolean(unavailable);
   showLabLog(data, serving);
   showLabCapability("drive", data);
   showLabCapability("shoot", data);
   // Either permission (asked for or in force) lights the tab's dot in orange.
   document.getElementById("tab-lab-dot").classList.toggle("driving",
-    !data.competition && (data.drive_allowed || data.shoot_allowed ||
+    !unavailable && (data.drive_allowed || data.shoot_allowed ||
       Boolean(data.bridge && (data.bridge.read_only === false || data.bridge.shoot_state?.allowed))));
   showLabRecords(data.bridge);
   renderOverview();
@@ -1168,8 +1181,8 @@ function renderJoinQr() {
   const url = labUrlForPhones();
   const web = latestStatus?.launch_config?.CONTROLLER_TYPE === 'web';
   const controllerUrl = web ? controllerUrlForPhones() : '';
-  const competition = Boolean(latestLab && latestLab.competition);
-  const key = JSON.stringify([ap, url, joinQr.serving, controllerUrl, competition]);
+  const unavailable = StatusView.labUnavailable(latestLab);
+  const key = JSON.stringify([ap, url, joinQr.serving, controllerUrl, unavailable]);
   if (key === joinQr.drawn) return;
   joinQr.drawn = key;
 
@@ -1192,7 +1205,7 @@ function renderJoinQr() {
   if (url) {
     urlBox.append(qrSvg(url, `${url} を開くQRコード`));
     urlCaption.textContent =
-      `② 教材: ${url}` + (joinQr.serving ? "" : competition ? "（大会モードでは配信しません）"
+      `② 教材: ${url}` + (joinQr.serving ? "" : unavailable ? `（${unavailable}では配信しません）`
         : "（配信停止中です。「配信開始」を押してください）");
   } else {
     urlCaption.textContent = "② ネットワークに接続されていません";
@@ -1264,10 +1277,11 @@ function showLabCapability(kind, data) {
   document.getElementById(`lab-${kind}-state`).textContent = view.headline;
 
   const toggle = document.getElementById(`lab-${kind}-toggle`);
-  if (!toggle.dataset.busy) toggle.checked = view.allowed && !data.competition;
+  const unavailable = StatusView.labUnavailable(data);
+  if (!toggle.dataset.busy) toggle.checked = view.allowed && !unavailable;
   toggle.disabled = view.toggleDisabled || Boolean(toggle.dataset.busy);
-  document.getElementById(`lab-${kind}-toggle-state`).textContent = data.competition
-    ? '（大会モードのため OFF）' : view.allowed ? '（ON：許可しています）' : '（OFF：禁止しています）';
+  document.getElementById(`lab-${kind}-toggle-state`).textContent = unavailable
+    ? `（${unavailable}のため OFF）` : view.allowed ? '（ON：許可しています）' : '（OFF：禁止しています）';
   const note = document.getElementById(`lab-${kind}-toggle-note`);
   note.textContent = view.toggleNote;
   note.hidden = !view.toggleNote;
@@ -1456,40 +1470,54 @@ async function stopAll() {
   }
 }
 
+async function saveMode(newMode) {
+  const label = `${StatusView.MODE[newMode]}モード`;
+  const previous = latestStatus?.mode;
+  if (!confirm(`${label}を次回起動用に保存しますか？ 実行中のモードは変わりません。`)) {
+    if (latestStatus) updateMode(latestStatus);
+    return;
+  }
+  modePending = true;
+  const radios = document.querySelectorAll('#mode-choice input[name="mode"]');
+  for (const radio of radios) radio.disabled = true;
+  try {
+    const answer = await api("/api/mode", {
+      method: "POST",
+      body: JSON.stringify({ mode: newMode }),
+    });
+    // The robot keeps its running mode until its next start; QUESTiX LAB follows the saved mode
+    // at once (lab.py: leaving lesson mode stops the lessons and forbids driving and launching;
+    // coming back restores what the teacher had chosen before).
+    toast(
+      newMode !== "lesson"
+        ? `${label}を保存しました` + (previous === "lesson"
+          ? "（教材の配信・自動開始・走行と発射の許可はすぐにオフにしました）" : "")
+        : `${label}を保存しました。${StatusView.labRestoredText(answer.lab)}`,
+      answer.lab && answer.lab.error ? "error" : "success",
+    );
+    modePending = false;
+    await refreshStatus();
+    if (answer.restart_needed) offerApply(`${label}`);
+    // The server turned AUTOSTART off (leaving lesson mode) or back on; show it in the checkbox.
+    labConfigLoaded = false;
+    await refreshLabStatus();
+    refreshActuation();
+  } catch {
+    modePending = false;
+    if (latestStatus) updateMode(latestStatus);
+  } finally {
+    modePending = false;
+    for (const radio of radios) radio.disabled = false;
+  }
+}
+
 function setupEvents() {
   setupTabs();
 
-  // Mode toggle
-  document.getElementById("mode-toggle").addEventListener("change", async (e) => {
-    const newMode = e.target.checked ? "competition" : "practice";
-    const label = newMode === "competition" ? "大会モード" : "練習モード";
-    if (!confirm(`${label}を次回起動用に保存しますか？ 実行中のモードは変わりません。`)) {
-      e.target.checked = !e.target.checked;
-      return;
-    }
-    try {
-      const answer = await api("/api/mode", {
-        method: "POST",
-        body: JSON.stringify({ mode: newMode }),
-      });
-      // The robot keeps its running mode until its next start; QUESTiX LAB follows the saved
-      // mode at once (lab.py: competition stops the lessons and forbids driving and launching;
-      // practice restores what the teacher had chosen before).
-      toast(
-        newMode === "competition"
-          ? `${label}を保存しました（教材の配信・自動開始・走行と発射の許可はすぐにオフにしました）`
-          : `${label}を保存しました。${StatusView.labRestoredText(answer.lab)}`,
-        answer.lab && answer.lab.error ? "error" : "success",
-      );
-      await refreshStatus();
-      if (answer.restart_needed) offerApply(`${label}`);
-      // The server turned AUTOSTART off (competition) or on (practice); show it in the checkbox.
-      labConfigLoaded = false;
-      await refreshLabStatus();
-    } catch {
-      e.target.checked = !e.target.checked;
-    }
-  });
+  // Mode choice (lesson / practice / competition)
+  for (const radio of document.querySelectorAll('#mode-choice input[name="mode"]')) {
+    radio.addEventListener("change", (e) => saveMode(e.target.value));
+  }
 
   document.getElementById('stop-all').addEventListener('click', stopAll);
   document.getElementById('stop-all-dismiss').addEventListener('click', () => {
@@ -1569,20 +1597,23 @@ function renderActuation(data) {
   for (const kind of ['drive', 'launcher']) {
     const toggle = document.getElementById(`actuation-${kind}-toggle`);
     toggle.checked = Boolean(data && data[kind]);
-    toggle.disabled = actuationPending || !data || (data.competition && !data[kind]);
+    toggle.disabled = actuationPending || !data || (data.available === false && !data[kind]);
     document.getElementById(`actuation-${kind}-state`).textContent =
-      !data ? '（確認できません）' : data[kind] ? 'ON：教材から動かせます' : 'OFF：教材からは動かせません';
+      !data ? '（確認できません）' : data.available === false && !data[kind] ? '（教材モードで使います）'
+        : data[kind] ? 'ON：動かせます' : 'OFF：動きません';
   }
   const state = document.getElementById('actuation-state');
   if (!data) {
     state.textContent = '許可の状態を確認できません。許可がない間は教材からは動かせません。';
-  } else if (data.competition) {
-    state.textContent = '大会モードでは使いません（大会用の起動は非常停止と AutoReferee で動きます）。';
+  } else if (data.available === false) {
+    state.textContent = data.competition
+      ? '大会モードでは使いません（大会用の起動は非常停止と AutoReferee で動きます）。'
+      : '練習モードでは使いません（コントローラーは許可なしで動きます）。先生の許可は教材モードで使います。';
   } else if (data.drive || data.launcher) {
     const on = ['drive', 'launcher'].filter((kind) => data[kind]).map((kind) => names[kind]);
     state.textContent = `${on.join('・')}を許可しています（約 ${data.heartbeat_hz} 回/秒 送信中）。`;
   } else {
-    state.textContent = '走行も発射も許可していません。教材から動かすときに ON にしてください。';
+    state.textContent = '走行も発射も許可していません。教材モードでは、ON にするまでコントローラーでも教材からも動きません。';
   }
   const error = document.getElementById('actuation-error');
   error.textContent = data?.error || '';

@@ -13,9 +13,10 @@ questix_lab_bridge/questix_lab_bridge/shoot.py) live only in this process
 ``/api/lab/drive`` / ``/api/lab/shoot``. They are never read from lab.env (values an older manager
 left there are ignored, and dropped the next time lab.env is written), so a restart of the
 manager or of the robot always starts with both off. They also go off on 配信停止, on
-「すべて止める」 (``revoke_permissions``), when the robot is switched to competition mode (and stay
-off when it comes back to practice mode), and when the bridge this manager started exits on its
-own. Restarting the bridge to apply a switch keeps them. They also need the teacher's runtime
+「すべて止める」 (``revoke_permissions``), when the robot leaves lesson mode (and stay off when it
+comes back to lesson mode), and when the bridge this manager started exits on its own. QUESTiX
+LAB exists only in lesson mode (教材, modes.uses_lab): in practice and competition mode the bridge
+does not run and nothing can be allowed. Restarting the bridge to apply a switch keeps them. They also need the teacher's runtime
 authority for the robot (actuation.py, 操作 tab: ロボットの走行制御 / 発射機構の操作), which the
 nodes themselves enforce for the controller and the lessons alike: a lesson permission cannot be
 switched on while its authority is off, and it goes off whenever that authority goes off
@@ -63,14 +64,14 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, field_validator
 
-from robot_manager import actuation, recorder, ros_domain
+from robot_manager import actuation, modes, recorder, ros_domain
 
 CONFIG_DIR = Path(os.environ.get("QUESTIX_CONFIG_DIR", "/etc/questix_robot"))
 LAUNCH_ENV_FILE = CONFIG_DIR / "launch.env"
 LAB_ENV_FILE = CONFIG_DIR / "lab.env"
-# Written by app.py (/api/mode) and read by the robot launcher; "competition" or "practice".
+# Written by app.py (/api/mode) and read by the robot launcher; one of modes.MODES.
 MODE_FILE = CONFIG_DIR / "mode"
-COMPETITION_MODE = "competition"
+COMPETITION_MODE = modes.COMPETITION
 LAB_DIR = Path(__file__).parent / "static" / "lab"
 
 # Keep in sync with `port` in questix_lab_bridge/config/lab_bridge.yaml, LAB_BRIDGE_PORT in
@@ -95,8 +96,8 @@ _DEFAULT_CONFIG = {
     # with the repository).
     "CAMERA_TOPIC": "",
     # "true": start the bridge whenever robot_manager starts (i.e. at boot), so a class can open
-    # the pages without anyone pressing 配信開始 first. On by default for classes; switching to
-    # competition mode turns it off (disable_for_competition), and it never starts in that mode.
+    # the pages without anyone pressing 配信開始 first. On by default for classes; leaving lesson
+    # mode turns it off (disable_outside_lessons), and it never starts outside lesson mode.
     "AUTOSTART": "true",
     # Folder where the bridge keeps QUESTiX LAB records (pages' saves, controller driving, rosbag
     # conversions). Empty = the bridge's own default (records_dir in
@@ -104,9 +105,11 @@ _DEFAULT_CONFIG = {
     # running it). Set by hand in lab.env; an absolute path.
     "RECORDS_DIR": "",
 }
-# What the teacher had chosen in practice mode, saved by disable_for_competition and restored (then
-# cleared) by enable_for_practice. Kept in lab.env next to the live values, never in _read_config.
-# Only settings: the actuator permissions are never saved, so never restored either.
+# What the teacher had chosen in lesson mode, saved by disable_outside_lessons and restored (then
+# cleared) by enable_for_lessons. Kept in lab.env next to the live values, never in _read_config.
+# Only settings: the actuator permissions are never saved, so never restored either. The lab.env
+# key keeps its old name (PRACTICE_*: lesson mode used to be called practice) so that a saved value
+# survives the update.
 _PRACTICE_KEYS = {
     "AUTOSTART": "PRACTICE_AUTOSTART",
 }
@@ -136,7 +139,7 @@ _runtime_permissions = {key: False for key in _PERMISSIONS}
 # changed since).
 _started_allow_drive = False
 _started_allow_shoot = False
-# Why the last write of lab.env that did not fail its request failed (competition mode, shown in
+# Why the last write of lab.env that did not fail its request failed (leaving lesson mode, shown in
 # the tab until a write succeeds).
 _config_error: Optional[str] = None
 
@@ -212,10 +215,10 @@ def _read_config() -> dict[str, str]:
 def _permissions() -> dict[str, bool]:
     """Return the actuator permissions in effect now. Caller must hold _lock.
 
-    A competition robot never takes lab commands, whatever was allowed before.
+    Outside lesson mode the robot never takes lab commands, whatever was allowed before.
     """
-    competition = _competition_mode()
-    return {key: allowed and not competition for key, allowed in _runtime_permissions.items()}
+    available = _lab_available()
+    return {key: allowed and available for key, allowed in _runtime_permissions.items()}
 
 
 def _revoke_locked() -> bool:
@@ -227,14 +230,14 @@ def _revoke_locked() -> bool:
 
 
 def _read_practice_snapshot() -> dict[str, str]:
-    """Return the saved practice-mode values (AUTOSTART) or {} when none is saved."""
+    """Return the saved lesson-mode values (AUTOSTART) or {} when none is saved."""
     raw = _read_env_file(LAB_ENV_FILE)
     return {key: raw[saved] for key, saved in _PRACTICE_KEYS.items()
             if raw.get(saved) in ("true", "false")}
 
 
 def _write_config(values: dict[str, str], practice: Optional[dict[str, str]] = None) -> None:
-    """Write lab.env: ``values`` plus the practice snapshot (None keeps it, {} clears it)."""
+    """Write lab.env: ``values`` plus the lesson snapshot (None keeps it, {} clears it)."""
     global _config_error
     if practice is None:
         practice = _read_practice_snapshot()
@@ -249,11 +252,22 @@ def _write_config(values: dict[str, str], practice: Optional[dict[str, str]] = N
     _config_error = None
 
 
+def _mode() -> str:
+    return modes.read(MODE_FILE)
+
+
 def _competition_mode() -> bool:
-    try:
-        return MODE_FILE.read_text().strip() == COMPETITION_MODE
-    except OSError:
-        return False
+    return _mode() == COMPETITION_MODE
+
+
+def _lab_available() -> bool:
+    """Whether QUESTiX LAB may run now: lesson mode only (modes.uses_lab)."""
+    return modes.uses_lab(_mode())
+
+
+def _unavailable_detail(what: str) -> str:
+    """Why ``what`` cannot happen outside lesson mode, for the teacher."""
+    return f"{modes.LABELS.get(_mode(), '今のモード')}では{what}（教材モードに切り替えると使えます）"
 
 
 def _rosbag_dir() -> Optional[str]:
@@ -558,7 +572,10 @@ def _status_payload() -> dict:
         "running": managed,
         "external": external,
         "port": LAB_BRIDGE_PORT,
-        # Competition mode: no streaming, no lab driving or launching (the tab disables them).
+        # The saved mode; QUESTiX LAB is available (streaming, lab driving and launching) in
+        # lesson mode only, and the tab disables everything otherwise.
+        "mode": _mode(),
+        "available": _lab_available(),
         "competition": _competition_mode(),
         "urls": [f"http://{a}:{LAB_BRIDGE_PORT}/" for a in _lan_addresses()],
         "elapsed_sec": int(time.time() - _started_at) if managed and _started_at else 0,
@@ -572,7 +589,7 @@ def _status_payload() -> dict:
         "shoot_allowed": permissions["ALLOW_SHOOT"],
         "shoot_running": _started_allow_shoot if managed else None,
         # The permissions belong to this session of the manager: both start off after a restart
-        # of the manager or the robot, 配信停止, 「すべて止める」 and competition mode.
+        # of the manager or the robot, 配信停止, 「すべて止める」 and leaving lesson mode.
         "permissions_transient": True,
         # The teacher's runtime authority each permission needs (操作 tab, actuation.py).
         "drive_authority": actuation.peek("drive"),
@@ -580,7 +597,7 @@ def _status_payload() -> dict:
         # The running bridge's own GET /api/state (ours or started by hand); null when none
         # answers.
         "bridge": _bridge_state() if managed or external else None,
-        # A failed write of lab.env that did not fail the request (disable_for_competition).
+        # A failed write of lab.env that did not fail the request (disable_outside_lessons).
         "config_error": _config_error,
         # The end of the last bridge's output, while none of ours runs or after a failure.
         "log_tail": _log_tail() if not managed or failed else None,
@@ -606,12 +623,9 @@ def start_bridge():
                 status_code=409,
                 detail=f"ポート {LAB_BRIDGE_PORT} は使用中です（手動で起動したブリッジを止めてください）",
             )
-        if _competition_mode():
-            # Competition runs must not stream telemetry to the LAN (disable_for_competition).
-            raise HTTPException(
-                status_code=409,
-                detail="大会モードでは教材を配信しません（練習モードに切り替えると配信できます）",
-            )
+        if not _lab_available():
+            # Only lesson mode streams telemetry to the LAN (disable_outside_lessons).
+            raise HTTPException(status_code=409, detail=_unavailable_detail("教材を配信しません"))
         if not (LAB_DIR / "index.html").is_file():
             raise HTTPException(status_code=500, detail="教材のファイルが見つかりません")
         config = _read_config()
@@ -690,8 +704,7 @@ def set_drive(request: DriveRequest):
     parameters: the status reports drive_running = null for it, and its bridge.read_only tells
     what it does.
     """
-    return _set_permission("ALLOW_DRIVE", request.allow,
-                           "大会モードでは教材から走らせられません", "drive_setting",
+    return _set_permission("ALLOW_DRIVE", request.allow, "教材から走らせられません", "drive_setting",
                            "先に「操作」タブで「ロボットの走行制御」をONにしてください")
 
 
@@ -702,12 +715,11 @@ def set_shoot(request: DriveRequest):
     For this session only; our bridge is restarted at once, so the switch never says one thing
     while the bridge does another.
     """
-    return _set_permission("ALLOW_SHOOT", request.allow,
-                           "大会モードでは教材から発射させられません", "shoot_setting",
+    return _set_permission("ALLOW_SHOOT", request.allow, "教材から発射させられません", "shoot_setting",
                            "先に「操作」タブで「発射機構の操作」をONにしてください")
 
 
-def _set_permission(key: str, allow: bool, competition_detail: str, stop_reason: str,
+def _set_permission(key: str, allow: bool, unavailable_what: str, stop_reason: str,
                     authority_detail: str = "") -> dict:
     """Set one runtime permission and restart a bridge of ours so it applies (set_drive/set_shoot).
 
@@ -716,8 +728,8 @@ def _set_permission(key: str, allow: bool, competition_detail: str, stop_reason:
     needs the teacher's runtime authority for the same actuator (actuation.py); it is checked
     before taking _lock, since noticing a dead heartbeat calls back into this module.
     """
-    if allow and _competition_mode():
-        raise HTTPException(status_code=409, detail=competition_detail)
+    if allow and not _lab_available():
+        raise HTTPException(status_code=409, detail=_unavailable_detail(unavailable_what))
     if allow and not actuation.is_allowed(_AUTHORITY[key]):
         raise HTTPException(status_code=409, detail=authority_detail)
     with _lock:
@@ -727,7 +739,7 @@ def _set_permission(key: str, allow: bool, competition_detail: str, stop_reason:
         _runtime_permissions[key] = bool(allow)
         if running:
             _stop_locked(stop_reason)
-    if running and not _competition_mode():  # a competition robot does not stream at all
+    if running and _lab_available():  # outside lesson mode the bridge does not run at all
         try:
             start_bridge()
         except HTTPException:
@@ -752,7 +764,7 @@ def revoke_permissions(reason: str) -> dict:
         restart = running and (_started_allow_drive or _started_allow_shoot)
         if restart:
             _stop_locked(reason)
-    if restart and not _competition_mode():
+    if restart and _lab_available():
         try:
             start_bridge()
         except HTTPException as error:
@@ -790,23 +802,23 @@ def _on_authority_revoked(kind: str, reason: str) -> None:
 actuation.add_revoke_listener(_on_authority_revoked)
 
 
-def disable_for_competition() -> None:
-    """Keep the bridge off once the robot is switched to competition mode (app.py /api/mode).
+def disable_outside_lessons() -> None:
+    """Keep the bridge off once the robot leaves lesson mode (app.py /api/mode).
 
-    Competition runs must not stream telemetry to the LAN: a bridge this manager started is
-    stopped first and driving and the launcher from the lessons are switched off (whatever happens
-    to lab.env), then automatic start (AUTOSTART) is turned off in lab.env. What the teacher had
-    chosen for it in practice is saved first (PRACTICE_AUTOSTART in lab.env, only if nothing is
-    saved yet, so competition -> competition keeps the practice value), and enable_for_practice
-    restores exactly that; the permissions are not saved and stay off. A failed write of lab.env
-    is logged, not raised: the mode switch itself has already happened, and autostart never runs
-    in competition mode anyway.
+    Only lesson mode streams telemetry to the LAN and takes lab commands: a bridge this manager
+    started is stopped first and driving and the launcher from the lessons are switched off
+    (whatever happens to lab.env), then automatic start (AUTOSTART) is turned off in lab.env. What
+    the teacher had chosen for it in lesson mode is saved first (PRACTICE_AUTOSTART in lab.env,
+    only if nothing is saved yet, so practice -> competition keeps the lesson value), and
+    enable_for_lessons restores exactly that; the permissions are not saved and stay off. A failed
+    write of lab.env is logged, not raised: the mode switch itself has already happened, and
+    autostart never runs outside lesson mode anyway.
     """
     global _config_error
     with _lock:
         _revoke_locked()
         if _reap_locked():
-            _stop_locked("competition_mode")
+            _stop_locked("competition_mode" if _competition_mode() else "not_lesson_mode")
     raw = _read_env_file(LAB_ENV_FILE)
     snapshot = None
     if not _read_practice_snapshot():
@@ -819,13 +831,13 @@ def disable_for_competition() -> None:
             _write_config({**config, "AUTOSTART": "false"}, snapshot)
         except HTTPException as error:
             _config_error = error.detail
-            logger.error("QUESTiX LAB (competition mode): %s", error.detail)
+            logger.error("QUESTiX LAB (left lesson mode): %s", error.detail)
 
 
-def enable_for_practice() -> dict:
-    """Undo disable_for_competition when the robot goes from competition back to practice mode.
+def enable_for_lessons() -> dict:
+    """Undo disable_outside_lessons when the robot comes back to lesson mode.
 
-    Automatic start gets the value the teacher had before competition mode (on when nothing was
+    Automatic start gets the value the teacher had before leaving lesson mode (on when nothing was
     saved, e.g. the mode file was changed by hand), and the saved value is cleared. Driving and
     launching from the lessons are never restored: they start off, and the teacher switches them
     on for the session. When automatic start is on, the bridge is started now, in the background
@@ -845,7 +857,7 @@ def enable_for_practice() -> dict:
         with _lock:
             running = _reap_locked() or _port_in_use()
         if not running:
-            threading.Thread(target=_autostart, name="lab-practice-start", daemon=True).start()
+            threading.Thread(target=_autostart, name="lab-lesson-start", daemon=True).start()
     return {
         "restored": bool(snapshot),
         "autostart": wanted["AUTOSTART"] == "true",
@@ -874,9 +886,10 @@ def autostart() -> None:
     """
     if _read_config().get("AUTOSTART") != "true":
         return
-    if _competition_mode():
+    if not _lab_available():
         # lab.env may still say true when the mode file was changed by hand.
-        logger.info("QUESTiX LAB bridge not started automatically: competition mode")
+        logger.info("QUESTiX LAB bridge not started automatically: %s (lesson mode only)",
+                    _mode())
         return
     threading.Thread(target=_autostart, name="lab-autostart", daemon=True).start()
 

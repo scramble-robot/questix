@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from robot_manager import app
+from robot_manager import app, modes
 
 REPO = Path(__file__).resolve().parents[2]
 LAUNCHER = REPO / "systemd" / "questix_robot_launcher.sh"
@@ -80,6 +80,10 @@ def test_practice_with_a_fresh_request_runs_the_practice_launch_once(robot):
     assert args[:3] == ["launch", "questix_launcher", "questix_core.launch.xml"]
     assert "enable_autoreferee:=false" in args and "enable_gpio_ref:=true" in args
     assert "controller_type:=web" in args
+    # Practice: the controller alone, no QUESTiX LAB and no teacher permission.
+    for expected in ("enable_twist_arbiter:=false", "enable_lab_shoot:=false",
+                     "require_teacher_permission:=false"):
+        assert expected in args, expected
     assert not (robot.dir / "start-request").exists()  # consumed: a crash is not relaunched
     last = (robot.dir / "last-launch").read_text()
     assert "mode=practice" in last and f"boot_id={BOOT_ID}" in last
@@ -88,13 +92,14 @@ def test_practice_with_a_fresh_request_runs_the_practice_launch_once(robot):
     assert len(launched) == 1
 
 
+@pytest.mark.parametrize("mode", ["practice", "lesson"])
 @pytest.mark.parametrize("value", ["false", "true", "", "no"])
-def test_practice_gpio_safety_ignores_launch_env(robot, value):
+def test_practice_gpio_safety_ignores_launch_env(robot, mode, value):
     # Issue #168: a legacy ENABLE_GPIO_REF=false (saved by older 管理設定) must not disable the
-    # GPIO5 physical E-stop in a production practice launch.
-    robot.mode("practice")
+    # GPIO5 physical E-stop in a production practice or lesson launch.
+    robot.mode(mode)
     (robot.dir / "launch.env").write_text(f"ENABLE_GPIO_REF={value}\n")
-    robot.request()
+    robot.request(mode)
     result, launched = robot.run()
     assert result.returncode == 0, result.stderr
     args = launched[0].split()
@@ -142,6 +147,58 @@ def test_a_domain_outside_the_policy_is_warned_about_but_still_launched(robot, d
     assert f"ROS_DOMAIN_ID={domain}, Launching" in result.stdout
 
 
+def test_lesson_with_a_fresh_request_runs_the_lesson_launch(robot):
+    robot.mode("lesson")
+    robot.request(mode="lesson")
+    result, launched = robot.run()
+    assert result.returncode == 0, result.stderr
+    assert len(launched) == 1
+    args = launched[0].split()
+    # Lesson: QUESTiX LAB shares the drive and the launcher; both need the teacher's permission.
+    for expected in ("enable_autoreferee:=false", "enable_gpio_ref:=true",
+                     "enable_twist_arbiter:=true", "enable_lab_shoot:=true",
+                     "require_teacher_permission:=true"):
+        assert expected in args, expected
+    assert not (robot.dir / "start-request").exists()
+    assert "mode=lesson" in (robot.dir / "last-launch").read_text()
+
+
+def test_lesson_without_a_request_does_not_launch(robot):
+    robot.mode("lesson")
+    result, launched = robot.run()
+    assert result.returncode == 0 and launched == []
+    assert "Mode is 'lesson': no start request" in result.stdout
+
+
+@pytest.mark.parametrize("saved, requested", [("practice", "lesson"), ("lesson", "practice")])
+def test_a_request_for_another_mode_never_launches(robot, saved, requested):
+    # The mode was switched after 起動 was pressed: the request is not for this mode.
+    robot.mode(saved)
+    robot.request(mode=requested)
+    result, launched = robot.run()
+    assert result.returncode == 0 and launched == []
+    assert f"asks for mode '{requested}'" in result.stdout
+    assert not (robot.dir / "start-request").exists()
+
+
+def test_unknown_mode_never_launches(robot):
+    robot.mode("classroom")
+    robot.request(mode="classroom")
+    result, launched = robot.run()
+    assert result.returncode == 0 and launched == []
+    assert "not 'competition', 'practice' or 'lesson'" in result.stdout
+    assert not (robot.dir / "start-request").exists()
+
+
+def test_launcher_knows_exactly_the_modes_of_modes_py():
+    # modes.py is the one list for Robot Manager; the script repeats it.
+    text = LAUNCHER.read_text()
+    for mode in modes.MODES:
+        assert f"'{mode}'" in text or f'"{mode}"' in text, mode
+    assert set(modes.STARTED_ON_REQUEST) == {"practice", "lesson"}
+    assert modes.DEFAULT == "practice" and 'MODE="practice"' in text
+
+
 @pytest.mark.parametrize("request_kwargs, reason", [
     ({"age": 600}, "600 s old"),
     ({"boot_id": "another-boot"}, "earlier boot"),
@@ -165,6 +222,9 @@ def test_competition_is_unchanged_and_drops_a_leftover_request(robot):
     args = launched[0].split()
     # Competition always keeps both GPIO safety inputs, whatever launch.env says.
     assert "enable_gpio_ref:=true" in args and "enable_autoreferee:=true" in args
+    # questix_core itself keeps the lab input and the teacher permission off in competition.
+    assert not any(arg.startswith(("enable_twist_arbiter", "enable_lab_shoot",
+                                   "require_teacher_permission")) for arg in args)
     assert "enable_gpio_ref:=false" not in args
     assert not (robot.dir / "start-request").exists()
     assert "mode=competition" in (robot.dir / "last-launch").read_text()
@@ -178,3 +238,12 @@ def test_manager_writes_a_request_the_launcher_accepts(robot, monkeypatch):
     app._write_start_request("practice")
     _, launched = robot.run()
     assert len(launched) == 1 and "enable_autoreferee:=false" in launched[0]
+
+
+def test_manager_writes_a_lesson_request_the_launcher_accepts(robot, monkeypatch):
+    monkeypatch.setattr(app, "START_REQUEST_FILE", robot.dir / "start-request")
+    monkeypatch.setattr(app, "_boot_id", lambda: BOOT_ID)
+    robot.mode("lesson")
+    app._write_start_request("lesson")
+    _, launched = robot.run()
+    assert len(launched) == 1 and "require_teacher_permission:=true" in launched[0]
