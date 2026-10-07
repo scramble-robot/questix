@@ -24,6 +24,8 @@
 | `test_drive_mode_check.py` | `drive_mode_check.py` の集計・判定・フレーム組み立ての検算（ROS 不要） |
 | `probe_ddt_serial.py` | DDT が RS485 で応答するかを生のバイト列で確かめる（ROS 不要。drive_component を止めて使う。送るのは速度 0 の停止フレームだけ）。下の「DDT が応答しないとき」 |
 | `test_probe_ddt_serial.py` | `probe_ddt_serial.py` のフレーム組み立てと応答の分類の検算 |
+| `ripple_by_twist.py` | `ripple_analysis.py`（ブランチ `feat/drive-measurement-fidelity`）を、区間の区切りに `/target_twist`（補正前の目標）を使って実行する。共振ダンピング（`velocity_damping_gain_sec` > 0）の記録は送った指令が毎 tick 変わり、そのままでは「定速区間=0」になるため |
+| `test_ripple_by_twist.py` | `ripple_by_twist.py` の目標 RPM の計算と受け渡しの検算 |
 
 ## 最短の流れ（講義で「1 回ずつ取って順次回収」する運用）
 

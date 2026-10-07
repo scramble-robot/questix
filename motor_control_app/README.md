@@ -122,9 +122,10 @@ ON/OFF しても、変更前のモデル由来の推定値が新しい設定へ�
 大きすぎると 25 Hz 付近で発振する。シミュレーション（`test_control_core` の
 `ControlCoreRateDamper*`）では 0.2 前後から。走行中に変えても次の tick は補正 0 から始まる。
 
-試し方（狭い場所で可）: 床の上でその場旋回の記録を、補正なし・ありで取り、`ripple_analysis.py`
-（ブランチ `feat/drive-measurement-fidelity` の `scripts/identify/`）の振れ幅（p2p）と卓越周波数の
-振幅を比べる。
+試し方（狭い場所で可）: 床の上でその場旋回の記録を、補正なし・ありで取り、振れ幅（p2p）と卓越周波数の
+振幅を比べる。解析は `scripts/identify/ripple_by_twist.py`（`ripple_analysis.py` を、区間の区切りに
+補正前の目標 `/target_twist` を使って実行する。補正ありでは送った指令が毎 tick 変わるので、
+`ripple_analysis.py` を直接使うと定速区間が見つからない）。
 
 ```bash
 bash scripts/identify/record.sh --levels 60,95 --hold 8 --turn               # 補正なし
