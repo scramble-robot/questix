@@ -51,7 +51,7 @@ python3 scripts/identify/batch_fit.py ~/ident_data/ident_* --out ~/ident_data/re
 運営は `batch_fit.py` で全員分をまとめ、`sufficiency.md` で「どの条件のデータが足りているか」を判定して、順次 `launcher/config/drive_component.yaml` の `velocity_run_*` / `drive_fsm_run_*` を更新する。
 
 ## 発展：振動の原因を切り分ける（先生と一緒に、車輪を浮かせて）
-前後に揺れる原因が「車輪 1 回転ごとの引っかかり」か「モータの中の速度制御の揺れ（約 1.8 Hz）」か、
+前後に揺れる原因が「車輪 1 回転ごとの引っかかり」か「回転の速さによらない揺れ（床の上では約 1.5〜1.75 Hz。原因はまだ分かっていない）」か、
 その重なりかを、回転数を変えて調べる。各回転数で 10 回転以上回すため約 9 分かかる。
 ```bash
 bash scripts/identify/record.sh --levels 20,30,40,60,80,100,120,150 --hold 30

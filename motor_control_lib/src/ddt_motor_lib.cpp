@@ -874,8 +874,8 @@ bool DdtMotorLib::getMotorFeedbackData(int motor_id, MotorFeedbackData& out) con
     out.mode = fb.mode;
     out.current_raw = fb.current;
     // レポート用途はローパス済み実測 RPM を返す（tau<=0 で生値）。生値も併せて返す:
-    // ローパスは既定 tau=0.15s (fc≒1.06Hz) でファーム速度ループの ~1.8Hz 振動を
-    // 約半分に見せるため、同定・振動解析は velocity_rpm_raw を使うこと。
+    // ローパスは既定 tau=0.15s (fc≒1.06Hz) で床の上の約 1.5〜1.75Hz の速度変動（原因は
+    // 未確定）を約半分に見せるため、同定・振動解析は velocity_rpm_raw を使うこと。
     out.velocity_rpm = static_cast<int16_t>(measuredRpmForReport(fb));
     // control_core の観測器 (velocity RUN LQR) もこの生値を使う。
     out.velocity_rpm_raw = fb.speed;

@@ -20,7 +20,7 @@
 | `handout.md` | 講義用 1 ページ手順書（受講者がログを取って提出するまで） |
 | `test_fit_models.py` | 合成データでの検算 |
 | `test_step_sequence.py` | `step_sequence.py` の他の送り手検出・スケジュールの検算（ROS 不要） |
-| `test_ripple_analysis.py` | `ripple_analysis.py` の検算（回転同期の 1 次 + 1.8 Hz 一定の合成データ。ROS 不要） |
+| `test_ripple_analysis.py` | `ripple_analysis.py` の検算（回転同期の 1 次 + 1.8 Hz 一定〔仮定値〕の合成データ。ROS 不要） |
 | `test_evidence.sh` | `lib_evidence.sh` と `record.sh` preflight の実機なし検証（`ros2` をスタブに差し替え） |
 
 ## 最短の流れ（講義で「1 回ずつ取って順次回収」する運用）
@@ -174,8 +174,11 @@ bash -n scripts/identify/record.sh scripts/identify/lib_evidence.sh
 
 ## 振動の切り分け（車輪を浮かせた試験）
 
-前後方向の振動の原因を、(a) 1 回転周期の機械要因（偏心・コギング・タイヤ）、(b) ファーム速度ループの
-約 1.8 Hz の振動、(c) 両者の重なり（回転周波数が ~1.8 Hz = ~108 rpm 付近で共振）に切り分ける。
+前後方向の振動の原因を、(a) 回転に同期する機械要因（偏心・コギング・タイヤ。1 次や 20 次など）、
+(b) 回転数によらない周波数一定の振動、(c) 両者の重なり（回転の次数の周波数が (b) の周波数に重なる
+回転数で共振）に切り分ける。2026-10 の実機試験では、床の上で約 1.5〜1.75 Hz の速度変動が出た
+（浮かせた状態では出ない。原因は未確定）。以前は (b) を「ファーム速度ループの約 1.8 Hz の振動」と
+書いていたが、その根拠のログは無い。
 解析は `ripple_analysis.py`。`/drive_control_sample`（`drive_component` の既定で出ている）が記録に
 あれば、tick ごとの欠落（`seq`）と同じフレームの重複（`feedback_new`）を除いた生の速度・位置で解析する。
 旧 bag は `/drive_status` の車輪ごとの受信時刻で重複を除く。

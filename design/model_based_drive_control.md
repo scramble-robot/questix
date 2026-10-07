@@ -33,7 +33,7 @@ PR #144 との関係: PR #144（走行チューニング基盤の整理）が土
 | 制御周期 | 固定 50 Hz tick、dt は定数 | `drive_control_tick.hpp`, `control_rate: 50.0` |
 | velocity モード | ホストは目標 rpm を送るだけ。加減速は `drive_slew`（レート制限 + テーパー）に一本化。ファーム `accel_time` は内部で 1 固定（実質なし。PR #144 で公開パラメータから廃止） | `control_core.hpp`, YAML コメント |
 | current モード | ソフト PI: rpm 誤差 → 電流指令、`max_current_amp: 1.0` で固定クランプ、積分は純 P 起動 | `ddt_current_pi.hpp`, `DdtMotorLib::runCurrentLoopStep` |
-| 低 RPM の問題 | ファーム速度ループが低速で減衰不足（目標 95 rpm で 59〜118 rpm を ≈1.8 Hz 往復）。対策は `min_command_rpm` 不感帯と `drive_stop_gate` ヒステリシス | YAML コメント, `drive_stop_gate.hpp` |
+| 低 RPM の問題 | 床の上で約 1.5〜1.75 Hz の速度変動が出る（2026-09-19・10-06・10-07 の実機試験、ID13・ID14・ID15。浮かせた状態では出ない）。原因は未確定（約 1.5〜1.7 Hz 付近の共振が有力）。以前の記述「ファーム速度ループが低速で減衰不足（目標 95 rpm で 59〜118 rpm を ≈1.8 Hz 往復）」は元のログが無く、当時の 10 Hz 記録での折り返しの可能性もあるため、断定しない（2026-10 訂正）。既存の対策は `min_command_rpm` 不感帯と `drive_stop_gate` ヒステリシス | YAML コメント, `drive_stop_gate.hpp` |
 | 停止の問題 | ブレーキ再送の扱い（`stop_resend_interval_ms: 300`, `brake_on_stop: false`）で調整済み。2 段階停止はファーム目標再送が主因 | YAML コメント |
 | フィードバック | 毎 tick 電流 raw・rpm（整数、ノイズ大）・位置。温度は Protocol 2 未実装で常に 0 | `MotorFeedback.msg` |
 | 通信 | RS-485 1 問 1 答、2 モータ往復 ≈ 7 ms（落ちると 20 ms）。**最低 1 tick のむだ時間** | `drive_control_refactor.md` P2 |
