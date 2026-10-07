@@ -3,7 +3,8 @@
 FastAPI-based web control panel for the `questix_robot` systemd service, served by
 uvicorn on `127.0.0.1:8888`.
 
-- `app.py` — service control (mode, start/stop/restart with the practice start request,
+- `modes.py` — the three modes (`lesson` 教材 / `practice` 練習 / `competition` 大会) and what each uses.
+- `app.py` — service control (mode, start/stop/restart with the practice / lesson start request,
   「すべて止める」 `/api/stop-all`, launch config).
 - `recorder.py` — rosbag recording console (`/api/rosbag/*`).
 - `trial.py` — experiment evidence for a recording (metadata, source identity, runtime ROS
@@ -88,11 +89,16 @@ QUESTiX Robot Manager の全タブとダイアログは、`static/style.css` の
 - モードの保存値は**次回起動用**です。変更しても実行中のモードは変わりません。ロボット制御が
   動いているときにモードや操作設定を保存すると、画面上部に「今すぐ再起動して反映」を出します
   （押すと通常の再起動確認のあとで再起動します）。
-- **練習モードの起動**: 電源投入時、練習モードではロボット制御を起動しません（今までどおり）。
-  「起動」「再起動」を押すと練習用の構成で起動します（下の「練習モードの起動要求」）。大会モードの
-  起動は今までどおりで、電源投入時にも起動します。起動の結果は、実際に起動したかどうかで表示します
-  （「練習用の構成で起動しました」「起動できませんでした：…」）。ロボット制御が動いている間は「起動」を
-  押せません。
+- **3 つのモード** (`modes.py`; `$QUESTIX_CONFIG_DIR/mode`):
+  - **教材** (`lesson`): 授業。教材（QUESTiX LAB）から走行・発射でき、コントローラーも教材も、先生が
+    「操作」タブの許可を ON にしている間だけ動きます（`require_teacher_permission:=true`）。
+  - **練習** (`practice`, 既定): コントローラーで自由に練習。教材と先生の許可は使いません
+    （twist_arbiter も教材の入力も起動しません）。モードファイルが無い・読めないときもこれです。
+  - **大会** (`competition`): 電源を入れると大会用の構成（GPIO5 + GPIO27、AutoReferee）で自動起動。
+- **教材・練習モードの起動**: 電源投入時にはロボット制御を起動しません。「起動」「再起動」を押すと
+  保存したモードの構成で起動します（下の「練習モードの起動要求」）。大会モードの起動は今までどおりで、
+  電源投入時にも起動します。起動の結果は、実際に起動したかどうかで表示します（「練習用の構成で起動
+  しました」「起動できませんでした：…」）。ロボット制御が動いている間は「起動」を押せません。
 - 起動前の確認では保存プロファイルとROS・ワークスペースの起動ファイルを確認します。
   コントローラーの物理接続や安全状態の自動判定は行いません。
   旧サービスで `/api/readiness` がない場合は既存APIで保存設定を確認し、起動環境は未確認と表示します。
@@ -113,19 +119,21 @@ QUESTiX Robot Manager の全タブとダイアログは、`static/style.css` の
 ## 練習モードの起動要求 (`start-request`)
 
 `systemd/questix_robot_launcher.sh` (the `questix_robot` service's `ExecStart`, also shipped as
-`ansible/roles/robot_autostart/files/questix_robot_launcher.sh`) launches in practice mode only
-when Robot Manager asked for it a moment ago:
+`ansible/roles/robot_autostart/files/questix_robot_launcher.sh`) launches in practice and lesson
+mode (`modes.STARTED_ON_REQUEST`) only when Robot Manager asked for it a moment ago:
 
-1. 起動 / 再起動 in practice mode: the manager writes `$QUESTIX_CONFIG_DIR/start-request`
-   (atomically, with its own permissions: `mode=practice`, `requested_at=<epoch s>`,
+1. 起動 / 再起動 in practice or lesson mode: the manager writes `$QUESTIX_CONFIG_DIR/start-request`
+   (atomically, with its own permissions: `mode=<the saved mode>`, `requested_at=<epoch s>`,
    `boot_id=<kernel boot id>`), then runs `systemctl start|restart questix_robot`.
-2. The launcher accepts the request only for the same boot, for `mode=practice` while the mode
-   file says `practice`, and when it is at most 120 s old; it deletes the request in any case, then
-   runs `ros2 launch questix_launcher questix_core.launch.xml enable_autoreferee:=false
+2. The launcher accepts the request only for the same boot, for the mode the mode file says, and
+   when it is at most 120 s old; it deletes the request in any case, then runs
+   `ros2 launch questix_launcher questix_core.launch.xml enable_autoreferee:=false
    enable_gpio_ref:=true controller_type:=… enable_lidar/shot/drive/rviz:=…` (the same as
-   competition except AutoReferee). With AutoReferee off, questix_core's practice defaults add
-   `twist_arbiter` and let the ESC and shot nodes accept QUESTiX LAB's launcher input, so the
-   lessons can drive and fire.
+   competition except AutoReferee) plus, by mode:
+   - practice: `enable_twist_arbiter:=false enable_lab_shoot:=false
+     require_teacher_permission:=false` (the controller alone);
+   - lesson: `enable_twist_arbiter:=true enable_lab_shoot:=true require_teacher_permission:=true`
+     (QUESTiX LAB can drive and fire; everything moves only with the teacher's permission).
 3. Without a usable request (power-on, `systemctl start` by hand, a stale request) it logs why and
    exits 0, as before.
 4. Every launch writes `$QUESTIX_CONFIG_DIR/last-launch` (`mode`, `started_at`, `boot_id`);
@@ -134,14 +142,14 @@ when Robot Manager asked for it a moment ago:
 
 The manager then waits up to 4 s for the launcher to take the request and 1.5 s more, and answers
 with what happened (`ok`, `message`, `state`, `running_mode`). If the request is still there (an
-older launcher that skips practice mode: rerun `scripts/install-robot-manager.sh` or the
+older launcher that skips practice or lesson mode: rerun `scripts/install-robot-manager.sh` or the
 `robot_autostart` role) it removes it and says so; a request is also removed when `systemctl`
 fails, on 「すべて止める」 / 停止, and whenever the manager starts, so a leftover can never start the
 robot later.
 
-**Restart=on-failure**: the request is consumed before launching, so a practice launch that crashes
-is *not* restarted (the restart finds no request and exits 0; the unit ends up inactive). The
-操作 tab says so when a practice launch ends without a stop through the manager; press 起動 again
+**Restart=on-failure**: the request is consumed before launching, so a practice or lesson launch
+that crashes is *not* restarted (the restart finds no request and exits 0; the unit ends up
+inactive). The 操作 tab says so when such a launch ends without a stop through the manager; press 起動 again
 after checking the 診断ログ. Competition launches are restarted as before.
 
 For tests, `QUESTIX_CONFIG_DIR`, `QUESTIX_BOOT_ID_FILE` and `QUESTIX_ROS_SETUP` override the
@@ -152,7 +160,7 @@ with a fake `ros2` and `logger`.
 
 GPIO5 ROS monitoring of the physical E-stop is not an operating setting (issue #168). The
 production launcher ignores `ENABLE_GPIO_REF` in `launch.env` and always passes
-`enable_gpio_ref:=true`: with `enable_autoreferee:=false` in practice, with
+`enable_gpio_ref:=true`: with `enable_autoreferee:=false` in practice and lesson, with
 `enable_autoreferee:=true` (GPIO5 and GPIO27 AutoReferee) in competition. An existing `launch.env`
 containing `ENABLE_GPIO_REF=false` therefore disables neither.
 
@@ -217,15 +225,18 @@ The **教材** tab starts and stops that bridge, so nobody has to run `ros2 laun
   tab says "自動開始に失敗しました". Nothing in systemd or Ansible changes: the bridge stays a
   child of robot_manager and stops with it. While it is on, every device on the network may
   see the pages and the read-only telemetry.
-- **大会モード** (`competition` in `$QUESTIX_CONFIG_DIR/mode`): switching to it from this UI stops
-  a bridge started here, switches driving and launching from the lessons off, and writes
-  `AUTOSTART` false, after saving the teacher's practice value as `PRACTICE_AUTOSTART` in
-  `lab.env` (only when none is saved yet). 配信開始 is refused (409) in that mode and the tab
-  disables streaming and both switches with the reason. Switching back to 練習モード restores the
-  saved `AUTOSTART` (on when none was saved, e.g. the mode file was edited by hand), clears it, and
-  starts the bridge if automatic start is on; driving and launching from the lessons stay **off**
-  (the toast says so). Automatic start is also skipped while the mode file says `competition`,
-  even if it was changed by hand.
+- **教材モードだけ** (`lesson` in `$QUESTIX_CONFIG_DIR/mode`, `modes.uses_lab`): switching to
+  練習 or 大会 from this UI stops a bridge started here, switches driving and launching from the
+  lessons off, and writes `AUTOSTART` false, after saving the teacher's lesson value as
+  `PRACTICE_AUTOSTART` in `lab.env` (only when none is saved yet; the key keeps its old name, lesson
+  mode used to be called practice). 配信開始 and both permissions are refused (409) outside lesson
+  mode and the tab disables streaming and both switches with the reason (`/api/lab/status`:
+  `mode`, `available`). Switching back to 教材モード restores the saved `AUTOSTART` (on when none
+  was saved, e.g. the mode file was edited by hand), clears it, and starts the bridge if automatic
+  start is on; driving and launching from the lessons stay **off** (the toast says so). Automatic
+  start is also skipped outside lesson mode, even if the mode file was changed by hand.
+  **Updating from an earlier version**: a robot whose mode file says `practice` used to serve the
+  lessons; it is now 練習 (no QUESTiX LAB). Choose 教材 in the 操作 tab for classes.
 - The bridge's stdout/stderr go to `~/.cache/questix/lab-bridge.log` of the service user
   (truncated on every start; discarded if that file cannot be written). While no bridge of ours
   runs, or after a failed start, `/api/lab/status` carries its last 15 lines as `log_tail` and
@@ -237,7 +248,7 @@ The **教材** tab starts and stops that bridge, so nobody has to run `ros2 laun
   robot_manager process and are never read from or written to `lab.env`, so every start of the
   manager (and every boot of the robot) begins with both **off**, even while the pages are served
   automatically. The teacher switches them on for the session; they go off again on 配信停止,
-  「すべて止める」, a switch to 大会モード (and stay off when going back to practice), and when the
+  「すべて止める」, leaving 教材モード (and stay off when going back to it), and when the
   bridge started here exits on its own (noticed at the next status poll, start or switch).
   `ALLOW_DRIVE`, `ALLOW_SHOOT`, `PRACTICE_ALLOW_DRIVE` and `PRACTICE_ALLOW_SHOOT` left in `lab.env`
   by an older manager are ignored and dropped the next time `lab.env` is written.

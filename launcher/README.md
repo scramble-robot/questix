@@ -18,11 +18,15 @@ drive が使う `joy_controller_referee.launch.xml` 内の operation_manager は
 
 `questix_robot_launcher.sh` は、`/etc/questix_robot/mode` が `competition` のとき
 （電源投入時の自動起動を含む）、必ず `enable_gpio_ref:=true` と
-`enable_autoreferee:=true` を固定値で渡します。`practice` のときは電源投入時には起動せず、
-Robot Manager の「起動」が置いた起動要求があるときだけ、`enable_gpio_ref:=true` と
-`enable_autoreferee:=false`（twist_arbiter と教材からの発射あり）で起動します。
-`launch.env` の `ENABLE_GPIO_REF` はどちらのモードでも読まないため、既存の `launch.env` に
-`ENABLE_GPIO_REF=false` が残っていても、practice では GPIO5、competition では GPIO5 と
+`enable_autoreferee:=true` を固定値で渡します。`practice`（練習）と `lesson`（教材）のときは
+電源投入時には起動せず、Robot Manager の「起動」が置いた起動要求があるときだけ、
+`enable_gpio_ref:=true` と `enable_autoreferee:=false` で起動します。
+練習は `enable_twist_arbiter:=false enable_lab_shoot:=false require_teacher_permission:=false`
+（コントローラーだけ）、教材は `enable_twist_arbiter:=true enable_lab_shoot:=true
+require_teacher_permission:=true`（教材から走行・発射でき、先生の許可がある間だけ動く）を渡します
+（モードの定義は `scripts/robot_manager/modes.py`）。
+`launch.env` の `ENABLE_GPIO_REF` はどのモードでも読まないため、既存の `launch.env` に
+`ENABLE_GPIO_REF=false` が残っていても、教材・練習では GPIO5、competition では GPIO5 と
 GPIO27 の安全系が常時有効です（issue #168）。`enable_autoreferee:=true` と `enable_gpio_ref:=false` の組合せは
 通常運用上無効であり、`questix_core.launch.xml` はその組合せを検出して起動を
 中止します。
@@ -50,10 +54,10 @@ ros2 launch questix_launcher questix_core.launch.xml \
   enable_gpio_ref:=false enable_autoreferee:=false
 ```
 
-先生の実行時許可（`/actuation_authority`、Robot Manager の操作タブ）は非常停止とは別の
-概念です。既定（`require_teacher_permission:=false`）では教材の許可の前提に
-使うだけで、コントローラは許可なしで動きます。練習で許可がない間はコントローラでも
-動かさないようにする場合だけ `require_teacher_permission:=true` を明示します
+先生の許可（`/actuation_authority`、Robot Manager の操作タブ）は非常停止とは別の
+概念です。`questix_core` の既定（`require_teacher_permission:=false`）ではコントローラは
+許可なしで動きます（手動の `ros2 launch` も同じ）。Robot Manager の教材モードの起動だけが
+`require_teacher_permission:=true` を渡し、許可がない間はコントローラでも教材からも動きません
 （大会起動では常に無効）。
 
 GPIO5の物理非常停止回路はRLY1で左右DDT駆動モーター、ローラー用ESC、Shot用サーボ、

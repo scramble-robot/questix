@@ -1,6 +1,15 @@
 ---
 # Robot Autostart Setup Tasks
 
+- name: Validate robot mode
+  ansible.builtin.assert:
+    that:
+      - robot_mode in ['lesson', 'practice', 'competition']
+    fail_msg: >-
+      robot_mode must be lesson, practice or competition (scripts/robot_manager/modes.py),
+      not {{ robot_mode }}
+    quiet: true
+
 - name: Create robot config directory
   ansible.builtin.file:
     path: /etc/questix_robot
