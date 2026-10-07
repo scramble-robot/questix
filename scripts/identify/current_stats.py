@@ -19,6 +19,8 @@
     （スティックスリップなら周期ごとに車輪が止まりかける）
   - 電流が区間の平均と逆向きのフレームの割合（逆トルク = ブレーキがかかっている割合）。
     電流の符号規約に依らないよう、区間の平均電流（摩擦に逆らって進める向き）を基準にする
+  - フィードバックの間隔の最大 [ms] と、--gap-ms を超えた欠けの回数。フィードバックは
+    指令 1 回に 1 回返るので、欠けは「指令がモータに届かなかった / 制御 tick が遅れた」を表す
 
 ROS 2（rosbag2_py）が必要。numpy は使わない。
 
@@ -98,7 +100,7 @@ def segments(twists, settle, min_sec):
     return out
 
 
-def stats(samples, stall_rpm=2.0):
+def stats(samples, stall_rpm=2.0, gap_sec=0.03):
     """区間内のフレームの集計（フレームが少なければ None）。"""
     if len(samples) < 10:
         return None
@@ -111,6 +113,7 @@ def stats(samples, stall_rpm=2.0):
     direction = 1.0 if sum(rpm) >= 0.0 else -1.0
     forward = [r * direction for r in rpm]
     drive_sign = 1.0 if mean_cur >= 0.0 else -1.0
+    gaps = [b[0] - a[0] for a, b in zip(samples, samples[1:])]
     return {
         "n": len(samples),
         "abs_i_mean": sum(abs_cur) / len(abs_cur),
@@ -122,6 +125,8 @@ def stats(samples, stall_rpm=2.0):
         "min_forward_rpm": min(forward),
         "stall_pct": 100.0 * sum(1 for r in forward if r <= stall_rpm) / len(forward),
         "reverse_i_pct": 100.0 * sum(1 for c in cur if c * drive_sign < 0.0) / len(cur),
+        "max_gap_ms": 1000.0 * max(gaps),
+        "gaps": sum(1 for g in gaps if g > gap_sec),
     }
 
 
@@ -146,6 +151,8 @@ def main(argv=None):
     ap.add_argument("--min-sec", type=float, default=2.0)
     ap.add_argument("--stall-rpm", type=float, default=2.0,
                     help="進行方向にこれ以下を「ほぼ停止」と数える [rpm]")
+    ap.add_argument("--gap-ms", type=float, default=30.0,
+                    help="フィードバックの間隔がこれを超えたら欠けと数える [ms]（制御周期 20 ms）")
     args = ap.parse_args(argv)
     for bag in args.bags:
         radius, separation, _ = read_geometry(bag, 0.05, 0.5)
@@ -154,17 +161,19 @@ def main(argv=None):
         name = os.path.basename(os.path.dirname(os.path.abspath(bag.rstrip("/"))))
         print(f"\n=== {name}  velocity_damping_gain_sec={gain}")
         print("  輪    目標rpm  実測rpm  p2p  |I|平均  I_RMS  |I|p95  指令変化RMS  フレーム"
-              "  最低rpm  停止%  逆電流%")
+              "  最低rpm  停止%  逆電流%  最大間隔ms  欠け")
         for t0, t1, (v, w) in segments(twists, args.settle, args.min_sec):
             refs = dict(zip(SIDES, wheel_reference_rpm(v, w, radius, separation)))
             for side in SIDES:
-                s = stats([f for f in frames[side] if t0 <= f[0] <= t1], args.stall_rpm)
+                s = stats([f for f in frames[side] if t0 <= f[0] <= t1], args.stall_rpm,
+                          args.gap_ms / 1000.0)
                 if s is None:
                     continue
                 print(f"  {side:5s} {refs[side]:7.0f}  {s['rpm_mean']:7.1f} {s['rpm_p2p']:5.0f}"
                       f"  {s['abs_i_mean']:6.2f} {s['i_rms']:6.2f} {s['abs_i_p95']:6.2f}"
                       f"  {s['cmd_step_rms']:10.2f}  {s['n']:6d}"
-                      f"  {s['min_forward_rpm']:7.0f} {s['stall_pct']:6.1f} {s['reverse_i_pct']:7.1f}")
+                      f"  {s['min_forward_rpm']:7.0f} {s['stall_pct']:6.1f} {s['reverse_i_pct']:7.1f}"
+                      f"  {s['max_gap_ms']:9.0f} {s['gaps']:5d}")
     return 0
 
 

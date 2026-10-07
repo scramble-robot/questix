@@ -37,3 +37,12 @@ def test_stats_counts_stalls_and_reverse_current():
     assert s["min_forward_rpm"] == 1.0
     assert abs(s["stall_pct"] - 25.0) < 1e-9
     assert abs(s["reverse_i_pct"] - 25.0) < 1e-9
+
+
+def test_stats_counts_feedback_gaps():
+    times = [k * 0.02 for k in range(20)]
+    times[10:] = [t + 0.06 for t in times[10:]]  # 1 か所 80 ms 空く
+    samples = [(t, 20.0, 1.0, 20.0) for t in times]
+    s = cs.stats(samples)
+    assert s["gaps"] == 1
+    assert abs(s["max_gap_ms"] - 80.0) < 1e-6
