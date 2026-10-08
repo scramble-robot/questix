@@ -14,6 +14,7 @@
 #include "motor_control_lib/differential_kinematics.hpp"
 #include "motor_control_lib/drive_mode_fsm.hpp"
 #include "motor_control_lib/wheel_observer.hpp"
+#include "motor_control_lib/wheel_velocity_damping.hpp"
 #include "motor_control_lib/wheel_velocity_lqr.hpp"
 
 namespace motor_control_app::control_core {
@@ -72,6 +73,12 @@ struct Config {
 
   // velocity モード RUN 域の外側 LQR+FF（Phase E）
   VelocityRunLqrConfig velocity_run;
+
+  // velocity モードの速度誤差の位相進み（床の上の揺れに減衰を足す。低速の張り付きには効かない。
+  // design/drive_floor_oscillation.md）。gain_sec = 0 で無効。停止以外の全状態で効く。
+  // 実測 RPM は指令と同じ符号として使う（velocity_run.invert_measured は LQR 専用で、ここには
+  // 掛けない）。
+  motor_control_lib::wheel_velocity_damping::Params velocity_damping;
 };
 
 /**
@@ -94,13 +101,14 @@ struct WheelFeedback {
 struct Output {
   bool stop{true};                   // 停止指令を送るべきか。mode == kStop と同値
   DriveMode mode{DriveMode::kStop};  // 走行状態（Phase B）
-  int left_rpm{0};      // 左車輪の指令 RPM（RUN で LQR 有効なら補正後）
+  int left_rpm{0};  // 左車輪の指令 RPM（LQR / 速度誤差の位相進みが有効なら補正後）
   int right_rpm{0};     // 右車輪の指令 RPM
   int left_ref_rpm{0};  // 補正前の左車輪目標 RPM（参照整形 + 運動学の結果）
   int right_ref_rpm{0};
   double linear{0.0};      // スルーレート適用後の車体前進速度指令 [m/s]
   double angular{0.0};     // スルーレート適用後の車体角速度指令 [rad/s]
   bool lqr_active{false};  // この tick で RUN LQR 補正が実際に適用されたか
+  bool damping_active{false};  // この tick で速度誤差の位相進みを評価したか（有効 + FB あり）
 };
 
 /**
@@ -110,9 +118,11 @@ struct Output {
  *   目標 twist -> スルーレート制限（テーパー付き）-> 運動学変換（左右車輪 RPM）
  *   -> 最近接整数へ丸め -> 走行状態機械（停止/低速/走行。ヒステリシス付き）
  *   -> [RUN かつ LQR 有効かつ FB あり] オブザーバ + LQR+FF で車輪 RPM を補正
+ *   -> [停止以外かつ位相進み有効かつ FB あり] 速度誤差の位相進みを車輪 RPM に加算
  *
  * 既存の純粋関数（drive_slew / differential_kinematics / drive_mode_fsm / wheel_observer /
- * wheel_velocity_lqr）を合成した層で、ロジックの単一ソースはそれぞれの関数側にある。
+ * wheel_velocity_lqr / wheel_velocity_damping）を合成した層で、ロジックの単一ソースは
+ * それぞれの関数側にある。
  * ここに集約する意図は、ホスト側の制御状態（スルーレートの前回指令 + 走行状態 +
  * オブザーバ/LQR 状態）を 1 つのオブジェクトに閉じ込め、シリアル接続なしで閉ループ
  * シミュレーションテストを書けるようにすること。
@@ -172,19 +182,39 @@ public:
     out.mode = mode_;
     out.stop = (mode_ == DriveMode::kStop);
 
+    // 速度誤差の位相進み（床の上の揺れに減衰を足す）。CREEP を含む停止以外の全状態で評価する。
+    // FB が無効なら状態を捨てて補正 0（従来挙動）。
+    double left_damping = 0.0;
+    double right_damping = 0.0;
+    if (mode_ != DriveMode::kStop && velocityDampingEnabled()) {
+      if (feedback.valid) {
+        left_damping = dampingCorrection(left_, out.left_ref_rpm, feedback.left_rpm, dt_sec);
+        right_damping = dampingCorrection(right_, out.right_ref_rpm, feedback.right_rpm, dt_sec);
+        out.damping_active = true;
+      } else {
+        resetDamping();
+      }
+    }
+
     // RUN 域の外側 LQR+FF。FB が無効なら FF のみ（従来挙動）に戻し、状態もリセットする。
     // RUN 閾値が無効（0 / 0）だと RUN は不感帯の直上から始まり、一次遅れモデルが当てはまらない
     // 低 RPM 域まで LQR が効いてしまうため適用しない（velocityRunLqrApplicable()）。
+    // 位相進みの補正は LQR の出力に足し、オブザーバには最終的に送る指令を渡す。
     if (mode_ == DriveMode::kRun && velocityRunLqrApplicable()) {
       if (feedback.valid) {
         ensureLqrGains(dt_sec);
         const double sign = config_.velocity_run.invert_measured ? -1.0 : 1.0;
-        out.left_rpm = runWheel(left_, out.left_ref_rpm, sign * feedback.left_rpm);
-        out.right_rpm = runWheel(right_, out.right_ref_rpm, sign * feedback.right_rpm);
+        out.left_rpm = runWheel(left_, out.left_ref_rpm, sign * feedback.left_rpm, left_damping);
+        out.right_rpm =
+            runWheel(right_, out.right_ref_rpm, sign * feedback.right_rpm, right_damping);
         out.lqr_active = lqr_gains_.has_value();
       } else {
         resetWheelControllers();
       }
+    }
+    if (!out.lqr_active) {
+      out.left_rpm = withCorrection(out.left_ref_rpm, left_damping);
+      out.right_rpm = withCorrection(out.right_ref_rpm, right_damping);
     }
     return out;
   }
@@ -220,15 +250,22 @@ public:
    * 切り替わって LQR の適用可否（velocityRunLqrApplicable()）が変わったときは状態を捨てる。
    *
    * LQR ゲインは変更の有無によらず捨て、次の tick で再計算する。
+   *
+   * velocity_damping（速度誤差の位相進み）のパラメータが変わったときは、その差分・ローパスの
+   * 状態だけを捨てる（次の有効なフィードバックから補正 0 で始め直す）。
    */
   void setConfig(const Config& config) {
     const bool velocity_run_changed = velocityRunChanged(config_.velocity_run, config.velocity_run);
+    const bool damping_changed =
+        velocityDampingChanged(config_.velocity_damping, config.velocity_damping);
     const bool was_applicable = velocityRunLqrApplicable();
     config_ = config;
     lqr_gains_.reset();
     lqr_gains_dt_ = 0.0;
     if (velocity_run_changed || was_applicable != velocityRunLqrApplicable()) {
       resetWheelControllers();
+    } else if (damping_changed) {
+      resetDamping();
     }
   }
 
@@ -243,6 +280,12 @@ public:
   bool velocityRunLqrApplicable() const {
     return config_.velocity_run.enabled &&
            motor_control_lib::drive_mode_fsm::runThresholdEnabled(fsmConfig());
+  }
+
+  /// 速度誤差の位相進みが補正を出し得る設定か（gain_sec > 0 かつ上限 > 0）。
+  bool velocityDampingEnabled() const {
+    return motor_control_lib::wheel_velocity_damping::enabled(
+        motor_control_lib::wheel_velocity_damping::sanitize(config_.velocity_damping));
   }
 
   // 現在のスルーレート状態（ログ・テスト用）
@@ -270,6 +313,8 @@ private:
   struct WheelState {
     motor_control_lib::wheel_observer::State observer;
     motor_control_lib::wheel_velocity_lqr::State lqr;
+    motor_control_lib::wheel_velocity_damping::State damping;
+    int damping_ref_sign{0};  // 位相進みの状態を作ったときの目標の向き（-1 / 0 / +1）
   };
 
   motor_control_lib::drive_mode_fsm::Config fsmConfig() const {
@@ -313,8 +358,10 @@ private:
     lqr_gains_dt_ = dt_sec;
   }
 
-  // 1 輪ぶんのオブザーバ + LQR+FF。ゲインが無い（収束失敗）なら FF のみ = 参照そのまま。
-  int runWheel(WheelState& w, int ref_rpm, double measured_rpm) {
+  // 1 輪ぶんのオブザーバ + LQR+FF。ゲインが無い（収束失敗）なら FF のみ = 参照そのまま
+  // （このとき step() 側が位相進みの補正 extra_rpm を足す）。extra_rpm は LQR の出力に足し、
+  // 丸め・符号保護の後の実際の指令でオブザーバを進める。
+  int runWheel(WheelState& w, int ref_rpm, double measured_rpm, double extra_rpm) {
     if (!lqr_gains_.has_value()) {
       return ref_rpm;
     }
@@ -331,7 +378,7 @@ private:
 
     const double u = motor_control_lib::wheel_velocity_lqr::step(
         w.lqr, lqr_params_, *lqr_gains_, static_cast<double>(ref_rpm), x_hat, d_hat);
-    int cmd = static_cast<int>(std::lround(u));
+    int cmd = static_cast<int>(std::lround(u + extra_rpm));
     // 補正で指令の符号が目標と逆にならないようにする（逆転指令は送らない。0 で止める）。
     // run_exit_rpm > max_correction_rpm なら通常は届かないが、設定に依存しない安全装置。
     if (ref_rpm > 0) {
@@ -350,6 +397,39 @@ private:
     right_ = WheelState{};
   }
 
+  void resetDamping() {
+    for (WheelState* w : {&left_, &right_}) {
+      motor_control_lib::wheel_velocity_damping::reset(w->damping);
+      w->damping_ref_sign = 0;
+    }
+  }
+
+  // 目標 ref_rpm に補正 correction_rpm を足して丸め、目標と逆の符号にならないよう 0 で止める。
+  // 目標 0 の輪には補正を出さない（その輪は止めておく）。
+  static int withCorrection(int ref_rpm, double correction_rpm) {
+    if (ref_rpm == 0) {
+      return 0;
+    }
+    const int cmd = static_cast<int>(std::lround(static_cast<double>(ref_rpm) + correction_rpm));
+    return ref_rpm > 0 ? std::max(cmd, 0) : std::min(cmd, 0);
+  }
+
+  // 1 輪ぶんの位相進みの補正 [RPM]。目標 0 の輪と、向きが変わった輪は状態を捨て直す
+  // （逆向きの誤差の履歴で差分を作らない）。
+  double dampingCorrection(WheelState& w, int ref_rpm, int measured_rpm, double dt_sec) {
+    const int ref_sign = (ref_rpm > 0) - (ref_rpm < 0);
+    if (ref_sign != w.damping_ref_sign) {
+      motor_control_lib::wheel_velocity_damping::reset(w.damping);
+      w.damping_ref_sign = ref_sign;
+    }
+    if (ref_sign == 0) {
+      return 0.0;
+    }
+    return motor_control_lib::wheel_velocity_damping::step(
+        w.damping, motor_control_lib::wheel_velocity_damping::sanitize(config_.velocity_damping),
+        static_cast<double>(ref_rpm), static_cast<double>(measured_rpm), dt_sec);
+  }
+
   // velocity_run のうち、オブザーバ / LQR の意味を変えるメンバが変わったか。
   // 値は drive_component の検証を通った後のものをそのまま保持しているため、変更検出には
   // 厳密比較で足りる（許容誤差を持たせると「変えたのに state が残る」側に倒れる）。
@@ -362,6 +442,13 @@ private:
            before.observer_l_x != after.observer_l_x || before.observer_l_d != after.observer_l_d ||
            before.max_correction_rpm != after.max_correction_rpm ||
            before.invert_measured != after.invert_measured;
+  }
+
+  static bool velocityDampingChanged(
+      const motor_control_lib::wheel_velocity_damping::Params& before,
+      const motor_control_lib::wheel_velocity_damping::Params& after) {
+    return before.gain_sec != after.gain_sec || before.filter_tau_sec != after.filter_tau_sec ||
+           before.max_correction_rpm != after.max_correction_rpm;
   }
 
   Config config_;

@@ -57,6 +57,11 @@ struct DriveParamPolicyAccess {
             static_cast<double>(n.velocity_run_invert_measured_),
             n.velocity_run_feedback_max_age_sec_};
   }
+  // 速度誤差の位相進みのメンバ
+  static std::vector<double> velocityDampingSnapshot(const DriveComponent& n) {
+    return {n.velocity_damping_gain_sec_, n.velocity_damping_filter_tau_sec_,
+            n.velocity_damping_max_correction_rpm_};
+  }
 };
 }  // namespace motor_control_app
 
@@ -287,6 +292,55 @@ TEST_F(DriveParamPolicyTest, FsmAndVelocityRunValidationRejectsWithoutSideEffect
         << bad.get_name() << "=" << bad.value_to_string();
     EXPECT_EQ(motor_control_app::DriveParamPolicyAccess::velocityRunSnapshot(*node_), before);
     EXPECT_EQ(motor_control_app::DriveParamPolicyAccess::snapshot(*node_), before_base);
+    EXPECT_EQ(node_->get_parameter(bad.get_name()).get_parameter_value(), old);
+  }
+}
+
+TEST_F(DriveParamPolicyTest, VelocityDampingDefaultsToDisabled) {
+  // 既定は無効（gain 0 = 従来挙動）
+  const auto members = motor_control_app::DriveParamPolicyAccess::velocityDampingSnapshot(*node_);
+  EXPECT_DOUBLE_EQ(members[0], 0.0);  // velocity_damping_gain_sec
+}
+
+TEST_F(DriveParamPolicyTest, VelocityDampingIsLiveTunableAndAtomic) {
+  const std::vector<rclcpp::Parameter> allowed = {
+      rclcpp::Parameter("velocity_damping_gain_sec", 0.05),
+      rclcpp::Parameter("velocity_damping_filter_tau_sec", 0.04),
+      rclcpp::Parameter("velocity_damping_max_correction_rpm", 8.0)};
+  const auto before = motor_control_app::DriveParamPolicyAccess::velocityDampingSnapshot(*node_);
+  for (bool rejected_first : {false, true}) {
+    auto request = allowed;
+    request.insert(rejected_first ? request.begin() : request.end(),
+                   rclcpp::Parameter("control_rate", 100.0));
+    EXPECT_FALSE(node_->set_parameters_atomically(request).successful);
+    EXPECT_EQ(motor_control_app::DriveParamPolicyAccess::velocityDampingSnapshot(*node_), before);
+  }
+  ASSERT_TRUE(node_->set_parameters_atomically(allowed).successful);
+  const std::vector<double> expected = {0.05, 0.04, 8.0};
+  EXPECT_EQ(motor_control_app::DriveParamPolicyAccess::velocityDampingSnapshot(*node_), expected);
+  // 0 で無効に戻せる
+  EXPECT_TRUE(node_->set_parameter(rclcpp::Parameter("velocity_damping_gain_sec", 0.0)).successful);
+}
+
+TEST_F(DriveParamPolicyTest, VelocityDampingValidationRejectsWithoutSideEffects) {
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  const double inf = std::numeric_limits<double>::infinity();
+  std::vector<rclcpp::Parameter> invalid;
+  for (const auto& name : {"velocity_damping_gain_sec", "velocity_damping_filter_tau_sec",
+                           "velocity_damping_max_correction_rpm"}) {
+    invalid.emplace_back(name, nan);
+    invalid.emplace_back(name, inf);
+    invalid.emplace_back(name, -0.1);
+    invalid.emplace_back(name, 1);  // 型違い（double で宣言）
+  }
+  const auto before = motor_control_app::DriveParamPolicyAccess::velocityDampingSnapshot(*node_);
+  for (const auto& bad : invalid) {
+    const auto old = node_->get_parameter(bad.get_name()).get_parameter_value();
+    EXPECT_FALSE(
+        node_->set_parameters_atomically({rclcpp::Parameter("velocity_damping_gain_sec", 0.5), bad})
+            .successful)
+        << bad.get_name() << "=" << bad.value_to_string();
+    EXPECT_EQ(motor_control_app::DriveParamPolicyAccess::velocityDampingSnapshot(*node_), before);
     EXPECT_EQ(node_->get_parameter(bad.get_name()).get_parameter_value(), old);
   }
 }

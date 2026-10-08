@@ -261,6 +261,20 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
               velocity_run_observer_l_x_, velocity_run_observer_l_d_,
               velocity_run_max_correction_rpm_, velocity_run_invert_measured_ ? "true" : "false",
               velocity_run_feedback_max_age_sec_);
+  if (velocity_damping_gain_sec_ > 0.0 && control_mode_ != "velocity") {
+    RCLCPP_WARN(this->get_logger(),
+                "velocity_damping_gain_sec > 0 は velocity モード専用のため control_mode='%s' "
+                "では無視します",
+                control_mode_.c_str());
+  }
+  RCLCPP_INFO(this->get_logger(),
+              "  velocity_damping: %s  gain=%.3fs filter_tau=%.3fs max_corr=%.1f rpm",
+              (velocity_damping_gain_sec_ > 0.0 && velocity_damping_max_correction_rpm_ > 0.0 &&
+               control_mode_ == "velocity")
+                  ? "enabled"
+                  : "disabled",
+              velocity_damping_gain_sec_, velocity_damping_filter_tau_sec_,
+              velocity_damping_max_correction_rpm_);
 
   // twist 購読（コールバックは ACTIVE のときのみ処理する）
   twist_subscription_ = this->create_subscription<geometry_msgs::msg::Twist>(
@@ -450,6 +464,13 @@ void DriveComponent::declareParameters() {
   this->declare_parameter("velocity_run_invert_measured", false);
   this->declare_parameter("velocity_run_feedback_max_age_sec", 0.1);
 
+  // velocity モードの速度誤差の位相進み（床の上の揺れに減衰を足す。低速の張り付きには効かない。
+  // velocity モードのみ有効）。gain 0 で無効（既定）。詳細は
+  // motor_control_lib/wheel_velocity_damping.hpp と design/drive_floor_oscillation.md。
+  this->declare_parameter("velocity_damping_gain_sec", 0.0);
+  this->declare_parameter("velocity_damping_filter_tau_sec", 0.03);
+  this->declare_parameter("velocity_damping_max_correction_rpm", 10.0);
+
   // コマンド受信タイムアウト [s]（velocity/current 両モードで有効。制御 tick 内で判定）
   this->declare_parameter("cmd_timeout_sec", 1.0);
 
@@ -538,6 +559,11 @@ void DriveComponent::readParameters() {
   velocity_run_invert_measured_ = this->get_parameter("velocity_run_invert_measured").as_bool();
   velocity_run_feedback_max_age_sec_ =
       this->get_parameter("velocity_run_feedback_max_age_sec").as_double();
+  velocity_damping_gain_sec_ = this->get_parameter("velocity_damping_gain_sec").as_double();
+  velocity_damping_filter_tau_sec_ =
+      this->get_parameter("velocity_damping_filter_tau_sec").as_double();
+  velocity_damping_max_correction_rpm_ =
+      this->get_parameter("velocity_damping_max_correction_rpm").as_double();
   cmd_timeout_sec_ = this->get_parameter("cmd_timeout_sec").as_double();
   control_rate_ = this->get_parameter("control_rate").as_double();
   command_wait_ms_ = static_cast<int>(this->get_parameter("command_wait_ms").as_int());
@@ -672,6 +698,10 @@ control_core::Config DriveComponent::makeControlCoreConfig() const {
   config.velocity_run.observer_l_d = velocity_run_observer_l_d_;
   config.velocity_run.max_correction_rpm = velocity_run_max_correction_rpm_;
   config.velocity_run.invert_measured = velocity_run_invert_measured_;
+  // 速度誤差の位相進みもファーム速度ループを前提にした補正なので velocity モード専用。
+  config.velocity_damping.gain_sec = control_mode_ == "velocity" ? velocity_damping_gain_sec_ : 0.0;
+  config.velocity_damping.filter_tau_sec = velocity_damping_filter_tau_sec_;
+  config.velocity_damping.max_correction_rpm = velocity_damping_max_correction_rpm_;
   return config;
 }
 
@@ -710,6 +740,7 @@ rcl_interfaces::msg::SetParametersResult DriveComponent::onParameterChange(
   bool control_core_dirty = false;
   bool current_pi_dirty = false;
   bool warn_lqr_ignored = false;
+  bool warn_damping_ignored = false;
   bool lqr_or_run_threshold_changed = false;
   std::vector<std::function<void()>> staged;
   // Phase 1: validate and stage typed values only. No member or subsystem writes.
@@ -850,6 +881,30 @@ rcl_interfaces::msg::SetParametersResult DriveComponent::onParameterChange(
           throw std::invalid_argument(name + " requires a finite positive value");
         }
         staged.emplace_back([this, value]() { velocity_run_feedback_max_age_sec_ = value; });
+
+        // --- 速度誤差の位相進み（制御コアへ反映） ---
+      } else if (name == "velocity_damping_gain_sec") {
+        const auto value = param.get_value<double>();
+        if (!std::isfinite(value) || value < 0.0) {
+          throw std::invalid_argument(name + " requires a finite nonnegative value (0 = disabled)");
+        }
+        staged.emplace_back([this, value]() { velocity_damping_gain_sec_ = value; });
+        control_core_dirty = true;
+        warn_damping_ignored = value > 0.0 && control_mode_ != "velocity";
+      } else if (name == "velocity_damping_filter_tau_sec") {
+        const auto value = param.get_value<double>();
+        if (!std::isfinite(value) || value < 0.0) {
+          throw std::invalid_argument(name + " requires a finite nonnegative value");
+        }
+        staged.emplace_back([this, value]() { velocity_damping_filter_tau_sec_ = value; });
+        control_core_dirty = true;
+      } else if (name == "velocity_damping_max_correction_rpm") {
+        const auto value = param.get_value<double>();
+        if (!std::isfinite(value) || value < 0.0) {
+          throw std::invalid_argument(name + " requires a finite nonnegative value");
+        }
+        staged.emplace_back([this, value]() { velocity_damping_max_correction_rpm_ = value; });
+        control_core_dirty = true;
       } else if (name == "cmd_timeout_sec") {
         const auto value = param.get_value<double>();
         staged.emplace_back([this, value]() { cmd_timeout_sec_ = value; });
@@ -976,6 +1031,11 @@ rcl_interfaces::msg::SetParametersResult DriveComponent::onParameterChange(
                 "velocity_run_lqr_enabled は velocity モード専用です（現在 '%s'、無視）",
                 control_mode_.c_str());
   }
+  if (warn_damping_ignored) {
+    RCLCPP_WARN(this->get_logger(),
+                "velocity_damping_gain_sec は velocity モード専用です（現在 '%s'、無視）",
+                control_mode_.c_str());
+  }
   result.reason = "Parameters updated successfully";
   return result;
 }
@@ -1097,8 +1157,9 @@ void DriveComponent::controlTimerCallback() {
   // 制御則の詳細は control_core.hpp / drive_slew.hpp を参照。
   const double dt = drive_control_tick::tickDtSec(control_rate_);
 
-  // 実測車輪 RPM（生値、モータフレーム）を制御コアへ渡す。RUN 域 LQR+FF（velocity モード、
-  // 有効時のみ）が使う。両輪のフィードバックが新鮮でなければ valid=false = FF のみ（従来挙動）。
+  // 実測車輪 RPM（生値、モータフレーム）を制御コアへ渡す。RUN 域 LQR+FF と速度誤差の位相進み
+  // （どちらも velocity モード、有効時のみ）が使う。両輪のフィードバックが新鮮でなければ
+  // valid=false = 補正なし（従来挙動）。
   control_core::WheelFeedback feedback;
   if (motor_lib_) {
     motor_control_lib::DdtMotorLib::MotorFeedbackData left_fb, right_fb;

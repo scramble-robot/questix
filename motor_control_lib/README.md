@@ -54,6 +54,7 @@ DDT M0602C 1 台との UART 通信を担当します。
 | `differential_kinematics.hpp` | twist <-> 車輪RPM（右輪の符号反転を含む） |
 | `drive_stop_gate.hpp` | 低速不感帯 + 停止/走行ヒステリシス |
 | `ddt_current_pi.hpp` | 電流モードの PI（アンチワインドアップ付き） |
+| `wheel_velocity_damping.hpp` | velocity モードの速度誤差の位相進み（床の上の揺れに減衰を足す。既定無効） |
 | `ddt_protocol.hpp` | フレーム pack/unpack、CRC |
 
 ## 使用例（motor_control_app の drive_component が実際の利用者）
@@ -77,7 +78,8 @@ colcon test --packages-select motor_control_lib
 ```
 
 閉ループ挙動の回帰テスト（ファーム速度ループのプラントモデル込み）は
-`motor_control_app/test/test_control_core.cpp` にあります。
+`motor_control_app/test/test_control_core.cpp` と
+`motor_control_app/test/test_velocity_damping_closed_loop.cpp` にあります。
 
 ## トラブルシューティング
 

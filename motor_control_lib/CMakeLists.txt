@@ -33,6 +33,7 @@ if(BUILD_TESTING)
   ament_auto_add_gtest(test_drive_mode_fsm test/test_drive_mode_fsm.cpp)
   ament_auto_add_gtest(test_wheel_observer test/test_wheel_observer.cpp)
   ament_auto_add_gtest(test_wheel_velocity_lqr test/test_wheel_velocity_lqr.cpp)
+  ament_auto_add_gtest(test_wheel_velocity_damping test/test_wheel_velocity_damping.cpp)
   ament_auto_add_gtest(test_differential_kinematics test/test_differential_kinematics.cpp)
   ament_auto_add_gtest(test_feetech_protocol test/test_feetech_protocol.cpp)
   # DdtMotorLib with injected serial write failures on a pseudo terminal (openpty: libutil).

@@ -357,6 +357,14 @@ private:
   bool velocity_run_invert_measured_{false};
   double velocity_run_feedback_max_age_sec_{0.1};
 
+  // velocity モードの速度誤差の位相進み（床の上の揺れに減衰を足す。低速の張り付きには効かない。
+  // velocity モードのみ有効）。gain 0 で無効（既定 = 従来挙動）。
+  // 設計と根拠は design/drive_floor_oscillation.md。
+  // フィードバックの鮮度判定は velocity_run_feedback_max_age_sec を共用する。
+  double velocity_damping_gain_sec_{0.0};
+  double velocity_damping_filter_tau_sec_{0.03};
+  double velocity_damping_max_correction_rpm_{10.0};
+
   // 指令送信後の追加待機 [ms]。0で無効（DDT M0602C の間隔要件用の保険）
   int command_wait_ms_{0};
 
