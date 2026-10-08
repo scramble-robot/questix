@@ -26,6 +26,9 @@
 | `test_probe_ddt_serial.py` | `probe_ddt_serial.py` のフレーム組み立てと応答の分類の検算 |
 | `ripple_by_twist.py` | `ripple_analysis.py`（ブランチ `feat/drive-measurement-fidelity`）を、区間の区切りに `/target_twist`（補正前の目標）を使って実行する。共振ダンピング（`velocity_damping_gain_sec` > 0）の記録は送った指令が毎 tick 変わり、そのままでは「定速区間=0」になるため |
 | `test_ripple_by_twist.py` | `ripple_by_twist.py` の目標 RPM の計算と受け渡しの検算 |
+| `cycle_profile.py` | 定速区間の揺れを 1 周期ずつ重ね、毎周期同じ形か（先回りで打ち消せるか）を HTML の図と表にする（周波数・周期のばらつき・波形の再現性 R²・1 周期前予測 R²・停止時間・逆電流・電流→速度の遅れ）。ROS 不要 |
+| `mcap_lite.py` | ROS 2 なしで rosbag2 の MCAP（圧縮なし = record.sh の既定）を読む最小リーダ（LAB の `rosbag-core.js` と同じ読み方） |
+| `test_cycle_profile.py` | `cycle_profile.py` の周期の切り出し・指標・判定・図と、`mcap_lite.py` の読み取り（LAB のテスト用 mcap）の検算 |
 
 ## 最短の流れ（講義で「1 回ずつ取って順次回収」する運用）
 
