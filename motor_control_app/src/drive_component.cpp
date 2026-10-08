@@ -233,6 +233,11 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
       return CallbackReturn::FAILURE;
     }
   }
+  if (!validFirmwareAccelTime(firmware_accel_time_0p1ms_per_rpm_)) {
+    RCLCPP_ERROR(this->get_logger(),
+                 "firmware_accel_time_0p1ms_per_rpm は 1..255 で指定してください");
+    return CallbackReturn::FAILURE;
+  }
 
   if (!lifecycle_auto_start::isValidStatusPublishRate(control_rate_)) {
     RCLCPP_ERROR(this->get_logger(),
@@ -576,6 +581,8 @@ void DriveComponent::declareParameters() {
   // ある間は毎回新規の制動として作用し、収束せず持続的な振動を起こすことがある。
   // 0で無効（毎回送信、従来挙動）。
   this->declare_parameter("stop_resend_interval_ms", 300);
+  // ファーム側加速時間 DATA[6] [0.1 ms/rpm]（velocity モードのみ）。走行は 1。試験用（1..255）
+  this->declare_parameter("firmware_accel_time_0p1ms_per_rpm", 1);
 
   // 実測RPMローパスの時定数 [s]。フィードバック速度のノイズを平滑化する（レポート/オドメトリ
   // 経路のみ、PI制御は生値のまま）。0以下で無効。詳細は DdtMotorLib::setMeasuredLowpassTau。
@@ -669,6 +676,11 @@ void DriveComponent::readParameters() {
   command_wait_ms_ = static_cast<int>(this->get_parameter("command_wait_ms").as_int());
   stop_resend_interval_ms_ =
       static_cast<int>(this->get_parameter("stop_resend_interval_ms").as_int());
+  {
+    // 範囲外（int に収まらない値を含む）は on_configure の validFirmwareAccelTime で弾く
+    const auto raw = this->get_parameter("firmware_accel_time_0p1ms_per_rpm").as_int();
+    firmware_accel_time_0p1ms_per_rpm_ = (raw >= 1 && raw <= 255) ? static_cast<int>(raw) : -1;
+  }
   measured_lpf_tau_sec_ = this->get_parameter("measured_lpf_tau_sec").as_double();
   publish_tf_ = this->get_parameter("publish_tf").as_bool();
   odom_topic_ = this->get_parameter("odom_topic").as_string();
@@ -690,13 +702,12 @@ bool DriveComponent::initializeMotorLib() {
     // 停止時の電気ブレーキ設定（velocity モードのみ有効）
     motor_lib_->setBrakeOnStop(brake_on_stop_);
 
-    // ファーム側加速時間（velocity モードのみ有効）。実機評価で 1 に確定:
+    // ファーム側加速時間（velocity モードのみ有効）。走行は 1（実質平滑化なし）で使う:
     // 1 より大きくすると高RPM の直進が乱れる。加速プロファイルの整形はホスト側の
-    // スルーレート制限（max_*_accel + slew_taper_band_*）に一本化し、ファーム側の
-    // 平滑化は実質無効（1 = 0.1ms/rpm）で固定する。パラメータとしては公開しない
-    // （二重の加速プロファイルがチューニングを非直交にしていたため廃止）。
-    constexpr int kFirmwareAccelTime0p1msPerRpm = 1;
-    motor_lib_->setAccelTime(kFirmwareAccelTime0p1msPerRpm);
+    // スルーレート制限（max_*_accel + slew_taper_band_*）に一本化している。
+    // firmware_accel_time_0p1ms_per_rpm はファームの挙動を調べる試験用（YAML 参照）。
+    motor_lib_->setAccelTime(firmware_accel_time_0p1ms_per_rpm_);
+    warnFirmwareAccelTimeForTesting();
 
     // 指令送信後の追加待機（既定 0 = 無効）
     motor_lib_->setCommandWaitMs(command_wait_ms_);
@@ -767,6 +778,17 @@ void DriveComponent::shutdownMotorLib() {
   diff_drive_.reset();
   motor_lib_.reset();
   motor_initialized_ = false;
+}
+
+bool DriveComponent::validFirmwareAccelTime(int value) { return value >= 1 && value <= 255; }
+
+void DriveComponent::warnFirmwareAccelTimeForTesting() const {
+  if (firmware_accel_time_0p1ms_per_rpm_ != 1) {
+    RCLCPP_WARN(this->get_logger(),
+                "firmware_accel_time_0p1ms_per_rpm=%d は試験用の値です（走行は 1。1 より大きいと"
+                "高RPM の直進が乱れることがある）",
+                firmware_accel_time_0p1ms_per_rpm_);
+  }
 }
 
 bool DriveComponent::velocityRunLqrLacksRunThreshold() const {
@@ -1091,6 +1113,19 @@ rcl_interfaces::msg::SetParametersResult DriveComponent::onParameterChange(
           if (motor_lib_) {
             motor_lib_->setMeasuredLowpassTau(value);
           }
+        });
+      } else if (name == "firmware_accel_time_0p1ms_per_rpm") {
+        const auto raw = param.get_value<int64_t>();
+        if (raw < 1 || raw > 255) {
+          throw std::invalid_argument(name + " must be in 1..255");
+        }
+        const int value = static_cast<int>(raw);
+        staged.emplace_back([this, value]() {
+          firmware_accel_time_0p1ms_per_rpm_ = value;
+          if (motor_lib_) {
+            motor_lib_->setAccelTime(value);
+          }
+          warnFirmwareAccelTimeForTesting();
         });
       } else if (name == "command_wait_ms") {
         const auto raw = param.get_value<int64_t>();

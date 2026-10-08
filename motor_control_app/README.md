@@ -173,6 +173,24 @@ ros2 param set /drive_component velocity_lag_assist_gain 0.0                 # �
 ros2 param set /drive_component velocity_lag_assist_overshoot_gain 0.0
 ```
 
+### ファーム加速時間の試験（`firmware_accel_time_0p1ms_per_rpm`、走行は 1）
+
+「1 より大きくすると高RPM の直進が乱れた」（PR #142 で定数化した理由）は、目標が一定でも起きるなら、
+ファームがフレームを受け取るたびに内部の加速ランプを実測からやり直していることを示す（20 ms ごとの
+再送のたびに、負荷・摩擦を押し返す誤差が「加速時間で 20 ms に戻る分」に削られる）。目標一定の区間で
+1 と 20 を比べて調べる（制御周期は変えない。狭い場所で取れるようその場旋回で）。
+
+```bash
+bash scripts/identify/record.sh --levels 60,95 --hold 6 --turn               # 1（既定）
+ros2 param set /drive_component firmware_accel_time_0p1ms_per_rpm 20
+bash scripts/identify/record.sh --levels 60,95 --hold 6 --turn               # 20
+ros2 param set /drive_component firmware_accel_time_0p1ms_per_rpm 1           # 元に戻す
+python3 scripts/identify/current_stats.py ~/ident_data/<1 の記録>/bag ~/ident_data/<20 の記録>/bag
+```
+
+20 で実測の平均が目標より下がり p2p や |I| の出方が変わる → やり直しあり。一定速度で差がない →
+加減速中だけの話（ファームのランプがホストの加速度制限に重なって遅れる）。
+
 ### 観測・レポート
 
 | パラメータ | 既定値 | 実行時変更 | 効き |
@@ -199,6 +217,8 @@ ros2 param set /drive_component velocity_lag_assist_overshoot_gain 0.0
 - `min_linear_accel` / `min_angular_accel` / `accel_demand_ref_linear` / `accel_demand_ref_angular`
   — デマンド適応加速度。実機評価で逆効果と確定しコードごと削除。
 - `accel_time_0p1ms_per_rpm` — ファーム側加速時間。実機確定値 1（実質平滑化なし）をコード内定数化。
+  ファームの挙動を調べる試験用に `firmware_accel_time_0p1ms_per_rpm`（既定 1、1..255、実行時変更可、
+  1 以外は WARN）として戻した。走行は 1 のまま使う（下の「ファーム加速時間の試験」）。
 
 ## チューニングワークフロー
 

@@ -226,6 +226,10 @@ private:
   // velocity_run_lqr_enabled=true（velocity モード）なのに RUN 閾値が両方 0 で、
   // LQR+FF が適用されない設定か（ControlCore::velocityRunLqrApplicable() の WARN 用）。
   bool velocityRunLqrLacksRunThreshold() const;
+  // firmware_accel_time_0p1ms_per_rpm の受け付ける範囲（1..255）
+  static bool validFirmwareAccelTime(int value);
+  // firmware_accel_time_0p1ms_per_rpm が走行用の 1 でなければ WARN（試験用の値）
+  void warnFirmwareAccelTimeForTesting() const;
 
   /**
    * @brief 走行チューニング用パラメータの実行時変更コールバック。
@@ -380,6 +384,9 @@ private:
 
   // 停止継続中のブレーキ再送間隔 [ms]。0で無効（毎回送信、従来挙動）
   int stop_resend_interval_ms_{300};
+  // ファーム側加速時間 DATA[6] [0.1 ms/rpm]（velocity モードのみ）。走行は 1、それ以外は試験用。
+  // readParameters で範囲外（1..255 以外）は -1 にし、on_configure で弾く。
+  int firmware_accel_time_0p1ms_per_rpm_{1};
 
   // 実測RPMローパスの時定数 [s]。<=0で無効（生値）。レポート/オドメトリ経路のみ平滑化する
   double measured_lpf_tau_sec_{0.15};
