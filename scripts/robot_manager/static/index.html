@@ -167,13 +167,29 @@
       <p id="web-joy-type" class="web-joy-type" role="status">コントローラーの設定を確認しています。</p>
       <button type="button" class="btn btn-small" id="web-joy-admin" hidden>管理設定を開く</button>
       <p>PC・iPhone・iPad はアプリ不要です。「ブラウザで操作」を開き、タッチ・マウスまたはキーボードを選べます。</p>
+      <!-- The same join QR codes as the 教材 tab's 「スマートフォンで開く」 (copied by app.js
+           mirrorJoinQr): ① Wi-Fi, ② QUESTiX LAB, ③ the browser controller. -->
+      <div class="lab-qr-grid" id="joy-qr-grid">
+        <figure class="lab-qr">
+          <div id="joy-wifi-qr" class="lab-qr-image"></div>
+          <figcaption id="joy-wifi-caption">① Wi-Fi</figcaption>
+        </figure>
+        <figure class="lab-qr">
+          <div id="joy-url-qr" class="lab-qr-image"></div>
+          <figcaption id="joy-url-caption">② 教材</figcaption>
+        </figure>
+        <figure class="lab-qr">
+          <div id="joy-controller-qr" class="lab-qr-image"></div>
+          <figcaption id="joy-controller-caption">③ コントローラー</figcaption>
+        </figure>
+      </div>
       <form id="web-joy-qr-form" novalidate>
-        <label for="web-joy-url">操作ページの URL</label>
+        <label for="web-joy-url">操作ページの URL（ポートやトークンを変えたときは直して QR を作れます）</label>
         <input id="web-joy-url" type="url" inputmode="url" autocomplete="off" spellcheck="false"
           placeholder="http://192.168.1.100:8899/" aria-describedby="web-joy-help" maxlength="2048">
         <p id="web-joy-help">ロボットの Wi-Fi（アクセスポイント）がオンならそのアドレス、それ以外はロボットの LAN アドレスを自動で入れます。操作する端末をロボットと同じネットワークに接続してください。ポートや認証トークンを変更した場合は URL に反映してください。</p>
         <a id="web-joy-browser" class="btn btn-save" target="_blank" rel="noopener noreferrer" hidden>ブラウザで操作 ↗</a>
-        <button type="submit" class="btn btn-save">接続用 QR を表示</button>
+        <button type="submit" class="btn btn-save">この URL の QR を表示</button>
       </form>
       <p id="web-joy-qr-status" role="status" aria-live="polite"></p>
       <div id="web-joy-qr-result" hidden>

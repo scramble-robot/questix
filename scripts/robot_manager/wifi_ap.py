@@ -355,6 +355,21 @@ def _start_lab() -> str:
     return "started"
 
 
+def _controller_message() -> str:
+    """Where the browser controller opens after a start; "" unless CONTROLLER_TYPE=web.
+
+    The browser controller (web_joy_driver) is served by the robot launch, not by QUESTiX LAB, so
+    it is reachable over the access point in every mode while the robot runs.
+    """
+    if lab._read_env_file(lab.LAUNCH_ENV_FILE).get("CONTROLLER_TYPE", "") != "web":
+        return ""
+    address = (_read_settings() or {}).get("address", "").split("/")[0]
+    if not address:
+        return ""
+    return (f"ブラウザのコントローラーは http://{address}:{WEB_JOY_PORT}/ で開けます"
+            "（ロボット制御の起動中）。")
+
+
 def _finish(request_id: str, **fields) -> None:
     global _job
     with _job_lock:
@@ -390,6 +405,9 @@ def _run_job(request_id: str, action: str) -> None:
         if state == "succeeded" and action == "start":
             lab_result = _start_lab()
             fields.update(lab=lab_result, lab_message=LAB_MESSAGES[lab_result])
+            controller = _controller_message()
+            if controller:
+                fields["controller_message"] = controller
         _finish(request_id, **fields)
     except Exception:  # never leave the job "running" forever
         logger.exception("QUESTiX Local job failed")
