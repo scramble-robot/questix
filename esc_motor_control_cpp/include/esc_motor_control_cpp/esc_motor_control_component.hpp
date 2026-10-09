@@ -12,6 +12,7 @@
 
 #include "esc_motor_control_cpp/full_speed_logic.hpp"
 #include "esc_motor_control_cpp/pwm_backend.hpp"
+#include "esc_motor_control_cpp/pwm_command.hpp"
 #include "esc_motor_control_cpp/roller_gate.hpp"
 #include "esc_motor_control_cpp/roller_lab_logic.hpp"
 #include "questix_msgs/msg/actuation_authority.hpp"
@@ -59,7 +60,8 @@ private:
   static double steady_now_sec();
 
   // ---------- Motor control ----------
-  void set_motor_speed(double speed);
+  bool set_motor_speed(double speed);
+  bool send_pulse(int pulse_us, double speed, bool initializing = false);
 
   /// Convert speed value [-1.0, 1.0] → pulse width in microseconds
   int speed_to_pulse_us(double speed) const;
@@ -103,6 +105,7 @@ private:
 
   // ---------- PWM ----------
   std::unique_ptr<PwmBackend> pwm_;
+  PwmCommand pwm_command_;
 
   // ---------- ROS I/O ----------
   rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joy_sub_;
