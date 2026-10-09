@@ -6,6 +6,7 @@
 #ifndef ESC_MOTOR_CONTROL_CPP__PWM_BACKEND_HPP_
 #define ESC_MOTOR_CONTROL_CPP__PWM_BACKEND_HPP_
 
+#include <cstdio>
 #include <memory>
 #include <string>
 
@@ -36,6 +37,12 @@ public:
   /// Set servo pulse width in microseconds (0=off, 500-2500 valid range)
   virtual bool set_servo_pulse(int gpio_pin, int pulse_width_us) = 0;
 
+  /// Stop pulses and drive the claimed output Low. Both operations are attempted.
+  virtual bool stop_signal(int gpio_pin) = 0;
+
+  /// Last backend API error (negative), or zero after success.
+  virtual int last_error() const = 0;
+
   /// Release resources
   virtual void cleanup() = 0;
 
@@ -53,24 +60,42 @@ public:
   ~PigpioBackend() override { cleanup(); }
 
   bool initialize(int gpio_pin) override {
+    gpio_pin_ = gpio_pin;
     int rc = gpioInitialise();
+    last_error_ = rc < 0 ? rc : 0;
     if (rc < 0) {
       return false;
     }
     initialized_ = true;
     // Set the pin as output
-    gpioSetMode(gpio_pin, PI_OUTPUT);
-    return true;
+    last_error_ = gpioSetMode(gpio_pin, PI_OUTPUT);
+    return last_error_ == 0;
   }
 
   bool set_servo_pulse(int gpio_pin, int pulse_width_us) override {
-    if (!initialized_) return false;
-    int rc = gpioServo(gpio_pin, pulse_width_us);
-    return rc == 0;
+    if (!initialized_) {
+      last_error_ = -1;
+      return false;
+    }
+    last_error_ = gpioServo(gpio_pin, pulse_width_us);
+    return last_error_ == 0;
   }
+
+  bool stop_signal(int gpio_pin) override {
+    const bool stopped = set_servo_pulse(gpio_pin, 0);
+    const int stop_error = last_error_;
+    const int low_error = initialized_ ? gpioWrite(gpio_pin, 0) : -1;
+    last_error_ = !stopped ? stop_error : low_error;
+    if (!stopped) std::fprintf(stderr, "pigpio: servo stop failed (%d)\n", stop_error);
+    if (low_error < 0) std::fprintf(stderr, "pigpio: Low write failed (%d)\n", low_error);
+    return stopped && low_error == 0;
+  }
+
+  int last_error() const override { return last_error_; }
 
   void cleanup() override {
     if (initialized_) {
+      stop_signal(gpio_pin_);
       gpioTerminate();
       initialized_ = false;
     }
@@ -80,6 +105,8 @@ public:
 
 private:
   bool initialized_{false};
+  int gpio_pin_{-1};
+  int last_error_{0};
 };
 #endif
 
@@ -93,13 +120,16 @@ public:
   ~LgpioBackend() override { cleanup(); }
 
   bool initialize(int gpio_pin) override {
+    gpio_pin_ = gpio_pin;
     handle_ = lgGpiochipOpen(chip_num_);
+    last_error_ = handle_ < 0 ? handle_ : 0;
     if (handle_ < 0) {
       return false;
     }
     // Claim the pin for output
     int rc = lgGpioClaimOutput(handle_, 0, gpio_pin, 0);
     if (rc < 0) {
+      last_error_ = rc;
       lgGpiochipClose(handle_);
       handle_ = -1;
       return false;
@@ -109,16 +139,35 @@ public:
   }
 
   bool set_servo_pulse(int gpio_pin, int pulse_width_us) override {
-    if (!initialized_ || handle_ < 0) return false;
+    if (!initialized_ || handle_ < 0) {
+      last_error_ = -1;
+      return false;
+    }
     // lgTxServo(handle, gpio, pulseWidth, servoFrequency, offset, cycles)
     // pulseWidth: 0 (off) or 500-2500, frequency: 50Hz, offset: 0, cycles: 0 (infinite)
     int rc = lgTxServo(handle_, gpio_pin, pulse_width_us, 50, 0, 0);
+    last_error_ = rc < 0 ? rc : 0;
     return rc >= 0;
   }
 
+  bool stop_signal(int gpio_pin) override {
+    const bool stopped = set_servo_pulse(gpio_pin, 0);
+    const int stop_error = last_error_;
+    const int low_error = initialized_ ? lgGpioWrite(handle_, gpio_pin, 0) : -1;
+    last_error_ = !stopped ? stop_error : (low_error < 0 ? low_error : 0);
+    // No ROS logger here: report each failure even during backend destruction.
+    if (!stopped) std::fprintf(stderr, "lgpio: servo stop failed (%d)\n", stop_error);
+    if (low_error < 0) std::fprintf(stderr, "lgpio: Low write failed (%d)\n", low_error);
+    return stopped && low_error >= 0;
+  }
+
+  int last_error() const override { return last_error_; }
+
   void cleanup() override {
     if (initialized_ && handle_ >= 0) {
-      lgGpiochipClose(handle_);
+      stop_signal(gpio_pin_);
+      const int rc = lgGpiochipClose(handle_);
+      if (rc < 0) std::fprintf(stderr, "lgpio: chip close failed (%d)\n", rc);
       handle_ = -1;
       initialized_ = false;
     }
@@ -129,6 +178,8 @@ public:
 private:
   int chip_num_{0};
   int handle_{-1};
+  int gpio_pin_{-1};
+  int last_error_{0};
   bool initialized_{false};
 };
 #endif
@@ -140,6 +191,9 @@ class SimulationBackend : public PwmBackend {
 public:
   bool initialize(int /*gpio_pin*/) override { return true; }
   bool set_servo_pulse(int /*gpio_pin*/, int /*pulse_width_us*/) override { return true; }
+  // Simulation owns no output; stopping and cleanup have no physical side effects.
+  bool stop_signal(int /*gpio_pin*/) override { return true; }
+  int last_error() const override { return 0; }
   void cleanup() override {}
   std::string name() const override { return "simulation"; }
 };
