@@ -209,6 +209,9 @@ private:
 // fixed source names, so nothing needs escaping.
 struct RollerStatus {
   double command{0.0};
+  bool pwm_fault{false};
+  int applied_pulse_us{-1};
+  std::string pwm_backend{"none"};
   const char* source{"idle"};
   bool lab_accepted{false};
   bool lab_locked{false};
@@ -220,15 +223,17 @@ struct RollerStatus {
 
 inline std::string rollerStatusJson(const RollerStatus& status) {
   const auto finite = [](double value) { return std::isfinite(value) ? value : 0.0; };
-  char buffer[256];
+  char buffer[512];
   std::snprintf(buffer, sizeof(buffer),
                 "{\"command\": %.3f, \"source\": \"%s\", \"lab_accepted\": %s, "
                 "\"lab_locked\": %s, \"estop\": %s, \"authority\": %s, "
-                "\"lab_max_speed\": %.3f}",
+                "\"lab_max_speed\": %.3f, \"pwm_fault\": %s, \"applied_pulse_us\": %d, "
+                "\"pwm_backend\": \"%s\"}",
                 finite(status.command), status.source ? status.source : "idle",
                 status.lab_accepted ? "true" : "false", status.lab_locked ? "true" : "false",
                 status.estop ? "true" : "false", status.authority ? "true" : "false",
-                finite(status.lab_max_speed));
+                finite(status.lab_max_speed), status.pwm_fault ? "true" : "false",
+                status.applied_pulse_us, status.pwm_backend.c_str());
   return std::string(buffer);
 }
 
