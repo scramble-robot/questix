@@ -39,9 +39,14 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_gpio_safety_launch test/test_gpio_safety_launch.py
     ENV "QUESTIX_SOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/.."
   )
-  # Starts questix_core several times (the E-stop / authority switch matrix): allow for it.
+  # The GPIO safety launch logic, resolved without ROS (launch expansion, test/conftest.py).
+  ament_add_pytest_test(test_gpio_safety_launch_expansion
+    test/test_gpio_safety_launch_expansion.py
+    ENV "QUESTIX_SOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/.."
+  )
+  # Starts questix_core once per operation_manager profile: allow for it.
   ament_add_pytest_test(test_gpio_safety_runtime test/test_gpio_safety_runtime.py
-    TIMEOUT 300
+    TIMEOUT 180
   )
 endif()
 
