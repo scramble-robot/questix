@@ -13,6 +13,8 @@ ament_auto_find_build_dependencies()
 # Drive Component (as a shared library for component loading)
 ament_auto_add_library(drive_component SHARED
   src/drive_component.cpp
+  src/drive_component_control.cpp
+  src/drive_component_params.cpp
 )
 ament_target_dependencies(drive_component motor_control_lib)
 
@@ -55,6 +57,8 @@ ament_target_dependencies(drive_component_node motor_control_lib)
 # Shot Component (as a shared library for component loading)
 ament_auto_add_library(shot_component SHARED
   src/shot_component.cpp
+  src/shot_component_control.cpp
+  src/shot_component_lifecycle.cpp
 )
 ament_target_dependencies(shot_component motor_control_lib)
 
