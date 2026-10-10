@@ -147,12 +147,11 @@ jobs:
           EOF
           fi
 
-      - name: Generate rosdep keys
+      - name: Update rosdep
         run: |
           docker exec -i ros_build bash << 'EOF'
           rosdep init || true
           rosdep update
-          rosdep keys --from-paths . --rosdistro $ROS_DISTRO > rosdep_keys.txt || echo "No rosdep keys found"
           EOF
 
       # Bump the "build-v1-" epoch in the key/restore-keys below (v1 -> v2 ...)
@@ -175,13 +174,6 @@ jobs:
           docker exec -i ros_build bash << 'EOF'
           apt-get -yqq update
           rosdep install -yqq --from-paths . --ignore-src --rosdistro $ROS_DISTRO
-          EOF
-
-      - name: Setup colcon mixin
-        run: |
-          docker exec -i ros_build bash << 'EOF'
-          colcon mixin add default https://raw.githubusercontent.com/colcon/colcon-mixin-repository/master/index.yaml || true
-          colcon mixin update default || true
           EOF
 
       - name: Build ROS2 packages
@@ -224,13 +216,24 @@ jobs:
             exit 1
           fi
           set +e
+          # questix_launcher's runtime smoke test (questix_core launches) is the longest test.
+          # Everything is built, so it need not wait for its dependencies' tests (colcon test
+          # keeps the build order): run it in a second colcon test next to the rest.
           docker exec -i ros_build bash << 'EOF'
           source /opt/ros/$ROS_DISTRO/setup.bash
           source install/setup.bash
+          colcon --log-base log/launcher test \
+            --event-handlers console_cohesion+ \
+            --packages-select questix_launcher &
+          launcher_pid=$!
           colcon test \
             --event-handlers console_cohesion+ \
             --parallel-workers $(nproc) \
-            --packages-skip ydlidar_ros2_driver ydlidar_sdk_vendor
+            --packages-skip ydlidar_ros2_driver ydlidar_sdk_vendor questix_launcher
+          others_status=$?
+          wait "$launcher_pid"
+          launcher_status=$?
+          exit $(( others_status || launcher_status ))
           EOF
           test_status=$?
           # colcon test may exit 0 even when tests failed; colcon test-result

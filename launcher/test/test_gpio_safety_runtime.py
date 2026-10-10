@@ -4,19 +4,38 @@
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
-"""ROS 2 runtime smoke tests for installed GPIO safety parameter profiles."""
+"""
+ROS 2 runtime smoke tests for installed GPIO safety parameter profiles.
+
+questix_core is started once per operation_manager profile (no GPIO, practice, competition) to
+check what the running nodes really do: the installed profiles load with typed integer arrays,
+the nodes stay up, every actuating node requires /emergency_stop, operation_manager publishes it,
+and /actuation_authority is subscribed only on the teacher's opt-in. Which arguments select
+which profile and switches (the whole matrix, the safety-only and environment variants and the
+invalid AutoReferee configuration) is resolved without ROS in
+test_gpio_safety_launch_expansion.py.
+
+The graph is read by an rclpy node inside this test process (parameter services, the node and
+subscription graph, the latched /emergency_stop), not by one ros2 CLI process per query: each
+CLI call starts Python and DDS discovery again, which made this test slow on CI runners.
+"""
 
 import os
-from pathlib import Path
 import signal
 import subprocess
 import time
 
 import pytest
+from questix_msgs.msg import EmergencyStop
+from rcl_interfaces.msg import ParameterType
+from rcl_interfaces.srv import GetParameters
+import rclpy
+from rclpy.context import Context
+from rclpy.executors import SingleThreadedExecutor
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 
 
 STARTUP_TIMEOUT_SECONDS = 15.0
-COMMAND_TIMEOUT_SECONDS = 5.0
 # Domains 1-101 only: from 102 on, the DDS discovery ports (7400 + 250 * domain) fall into the
 # Linux ephemeral range (32768-60999), where another process's socket can hold them and the
 # launch is never discovered (cf. scripts/robot_manager/ros_domain.py). 0 is the default of the
@@ -32,19 +51,6 @@ def isolated_ros_environment(offset):
     environment['ROS_AUTOMATIC_DISCOVERY_RANGE'] = 'LOCALHOST'
     environment.pop('ROS_LOCALHOST_ONLY', None)
     return environment
-
-
-def run_command(command, environment, timeout=COMMAND_TIMEOUT_SECONDS):
-    """Run a ROS command and capture text output."""
-    return subprocess.run(
-        command,
-        env=environment,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        timeout=timeout,
-        check=False,
-    )
 
 
 def start_process(command, environment):
@@ -75,257 +81,135 @@ def stop_process(process):
     return output
 
 
-def wait_for_parameter(node_name, parameter_name, environment):
-    """Wait until a node is alive and returns a parameter value."""
-    deadline = time.monotonic() + STARTUP_TIMEOUT_SECONDS
-    last_result = None
-    while time.monotonic() < deadline:
+class GraphProbe:
+    """An rclpy node in the test's ROS domain that reads what the launched nodes expose."""
+
+    def __init__(self, environment):
+        # The discovery range is read from the process environment when the context starts.
+        previous_range = os.environ.get('ROS_AUTOMATIC_DISCOVERY_RANGE')
+        os.environ['ROS_AUTOMATIC_DISCOVERY_RANGE'] = environment['ROS_AUTOMATIC_DISCOVERY_RANGE']
         try:
-            last_result = run_command(
-                ['ros2', 'param', 'get', node_name, parameter_name], environment)
-        except subprocess.TimeoutExpired:
-            continue  # a loaded machine (parallel colcon test): retry until the deadline
-        if last_result.returncode == 0:
-            value_lines = [
-                line for line in last_result.stdout.splitlines()
-                if 'values are:' in line or 'value is:' in line
-            ]
-            assert value_lines, last_result.stdout
-            return value_lines[-1]
-        time.sleep(0.2)
-    output = last_result.stdout if last_result is not None else 'command not run'
-    pytest.fail(f'{node_name} did not provide {parameter_name}: {output}')
+            self.context = Context()
+            rclpy.init(context=self.context, domain_id=int(environment['ROS_DOMAIN_ID']))
+        finally:
+            if previous_range is None:
+                os.environ.pop('ROS_AUTOMATIC_DISCOVERY_RANGE', None)
+            else:
+                os.environ['ROS_AUTOMATIC_DISCOVERY_RANGE'] = previous_range
+        self.node = rclpy.create_node('gpio_safety_runtime_probe', context=self.context)
+        self.executor = SingleThreadedExecutor(context=self.context)
+        self.executor.add_node(self.node)
+        self.estop = None
+        self.node.create_subscription(
+            EmergencyStop, '/emergency_stop', self._receive_estop,
+            QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                       durability=DurabilityPolicy.TRANSIENT_LOCAL))
 
+    def _receive_estop(self, message):
+        if self.estop is None:  # the first (latched) one, as ros2 topic echo --once read it
+            self.estop = (message.active, message.reason)
 
-def installed_profile_path(profile_name, environment):
-    """Resolve a profile from the installed operation_manager package share."""
-    result = run_command(['ros2', 'pkg', 'prefix', 'operation_manager'], environment)
-    assert result.returncode == 0, result.stdout
-    path = (
-        Path(result.stdout.strip()) / 'share' / 'operation_manager' / 'config' /
-        profile_name
-    )
-    assert path.is_file(), f'installed profile not found: {path}'
-    return path
-
-
-@pytest.mark.parametrize(
-    ('profile_name', 'expected_safe_high'),
-    [
-        ('operation_manager.practice.yaml', 'Integer values are: []'),
-        ('operation_manager.competition.yaml', 'Integer values are: [27]'),
-    ],
-)
-def test_installed_profiles_load_with_typed_integer_arrays(profile_name, expected_safe_high):
-    """Load installed YAML through rclcpp and verify both polarity arrays."""
-    environment = isolated_ros_environment(0 if 'practice' in profile_name else 1)
-    profile_path = installed_profile_path(profile_name, environment)
-    node_name = '/operation_manager_node'
-    process = start_process(
-        [
-            'ros2', 'run', 'operation_manager', 'operation_manager_node',
-            '--ros-args', '--params-file', str(profile_path),
-        ],
-        environment,
-    )
-    try:
-        safe_low = wait_for_parameter(node_name, 'safe_low_pins', environment)
-        safe_high = wait_for_parameter(node_name, 'safe_high_pins', environment)
-        assert process.poll() is None, 'operation_manager exited after loading its profile'
-        assert safe_low == 'Integer values are: [5]'
-        assert safe_high == expected_safe_high
-    finally:
-        output = stop_process(process)
-    assert 'InvalidParameterValueException' not in output
-    assert 'parameter_value_from failed' not in output
-
-
-def test_invalid_autoreferee_configuration_starts_no_child_processes():
-    """Reject the invalid profile before any hardware-facing child can start."""
-    environment = isolated_ros_environment(3)
-    process = start_process(
-        [
-            'ros2', 'launch', 'questix_launcher', 'questix_core.launch.xml',
-            'enable_lidar:=true',
-            'enable_shot:=true',
-            'enable_drive:=true',
-            'enable_gpio_ref:=false',
-            'enable_autoreferee:=true',
-            'enable_rviz:=true',
-        ],
-        environment,
-    )
-    forbidden_nodes = {
-        '/gpio_reader_node',
-        '/operation_manager_node',
-        '/drive_component',
-        '/shot_component',
-        '/esc_motor_control',
-        '/ydlidar_ros2_driver_node',
-        '/rviz2',
-    }
-    observed_nodes = set()
-    deadline = time.monotonic() + STARTUP_TIMEOUT_SECONDS
-    while process.poll() is None and time.monotonic() < deadline:
-        result = run_command(['ros2', 'node', 'list', '--no-daemon'], environment)
-        if result.returncode == 0:
-            observed_nodes.update(result.stdout.splitlines())
-        time.sleep(0.02)
-
-    try:
-        assert process.poll() is not None, 'invalid questix_core launch did not exit'
-        assert process.returncode == 0
-    finally:
-        output = stop_process(process)
-
-    assert 'ERROR: enable_autoreferee=true requires enable_gpio_ref=true' in output
-    assert forbidden_nodes.isdisjoint(observed_nodes)
-    assert 'process started with pid' not in output
-
-
-def test_practice_core_launch_keeps_gpio_safety_nodes_alive():
-    """Start the installed practice safety-only launch and verify both nodes survive."""
-    environment = isolated_ros_environment(2)
-    process = start_process(
-        [
-            'ros2', 'launch', 'questix_launcher', 'questix_core.launch.xml',
-            'enable_lidar:=false',
-            'enable_shot:=false',
-            'enable_drive:=false',
-            'enable_gpio_ref:=true',
-            'enable_autoreferee:=false',
-            'enable_rviz:=false',
-        ],
-        environment,
-    )
-    expected_nodes = {'/gpio_reader_node', '/operation_manager_node'}
-    observed_nodes = set()
-    deadline = time.monotonic() + STARTUP_TIMEOUT_SECONDS
-    try:
+    def spin_until(self, condition, timeout):
+        """Spin until condition() holds or the timeout passes; return condition()."""
+        deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            assert process.poll() is None, 'questix_core exited during practice startup'
-            result = run_command(['ros2', 'node', 'list', '--no-daemon'], environment)
-            if result.returncode == 0:
-                observed_nodes = set(result.stdout.splitlines())
-                if expected_nodes <= observed_nodes:
-                    break
-            time.sleep(0.2)
-        assert expected_nodes <= observed_nodes
-        assert process.poll() is None
-    finally:
-        output = stop_process(process)
-    assert 'InvalidParameterValueException' not in output
-    assert 'parameter_value_from failed' not in output
+            if condition():
+                return True
+            self.executor.spin_once(timeout_sec=0.05)
+        return condition()
 
+    def node_names(self):
+        """Return the fully qualified node names the graph shows."""
+        return {
+            (namespace.rstrip('/') + '/' + name)
+            for name, namespace in self.node.get_node_names_and_namespaces()
+        }
 
-def test_gpio_ref_environment_does_not_select_the_no_gpio_diagnostic():
-    """
-    Leave enable_gpio_ref out with ENABLE_GPIO_REF=false exported: GPIO safety stays on.
+    def wait_for_nodes(self, node_names, process):
+        """Wait until the graph shows every node (discovery is not instant) while it runs."""
+        expected = set(node_names)
 
-    Issue #168: the no-GPIO diagnostic needs an explicit enable_gpio_ref:=false on the launch;
-    an exported variable or a sourced legacy launch.env must not select it.
-    """
-    environment = isolated_ros_environment(4)
-    environment['ENABLE_GPIO_REF'] = 'false'
-    process = start_process(
-        [
-            'ros2', 'launch', 'questix_launcher', 'questix_core.launch.xml',
-            'enable_lidar:=false',
-            'enable_shot:=false',
-            'enable_drive:=false',
-            'enable_autoreferee:=false',
-            'enable_rviz:=false',
-        ],
-        environment,
-    )
-    expected_nodes = {'/gpio_reader_node', '/operation_manager_node'}
-    observed_nodes = set()
-    deadline = time.monotonic() + STARTUP_TIMEOUT_SECONDS
-    try:
-        while time.monotonic() < deadline:
+        def present():
             assert process.poll() is None, 'questix_core exited during startup'
-            result = run_command(['ros2', 'node', 'list', '--no-daemon'], environment)
-            if result.returncode == 0:
-                observed_nodes = set(result.stdout.splitlines())
-                if expected_nodes <= observed_nodes:
-                    break
-            time.sleep(0.2)
-        assert expected_nodes <= observed_nodes
-        # The GPIO profile, not the no-GPIO one: no GPIO hardware here, so GPIO5 is never
-        # received and the E-stop is active (never "released (no GPIO safety path)").
-        assert wait_for_parameter(
-            '/operation_manager_node', 'gpio_safety_enabled', environment) == (
-            'Boolean value is: True')
-        assert read_emergency_stop(environment) == (True, 'pin 5 not received; ')
-        assert process.poll() is None
-    finally:
-        output = stop_process(process)
-    assert 'InvalidParameterValueException' not in output
-    assert 'parameter_value_from failed' not in output
+            return expected <= self.node_names()
 
+        if not self.spin_until(present, STARTUP_TIMEOUT_SECONDS):
+            pytest.fail(f'{sorted(expected - self.node_names())} not in the graph: '
+                        f'{sorted(self.node_names())}')
 
-def topic_subscription_count(topic, environment):
-    """Return how many subscriptions the graph shows for a topic (0 when it does not exist)."""
-    result = run_command(['ros2', 'topic', 'info', topic, '--no-daemon'], environment)
-    for line in result.stdout.splitlines():
-        if line.startswith('Subscription count:'):
-            return int(line.split(':', 1)[1])
-    return 0
+    def parameters(self, node_name, names):
+        """Wait until a node answers and return {name: (ParameterType, value)}."""
+        client = self.node.create_client(GetParameters, f'{node_name}/get_parameters')
+        try:
+            if not self.spin_until(client.service_is_ready, STARTUP_TIMEOUT_SECONDS):
+                pytest.fail(f'{node_name} did not provide {names}')
+            future = client.call_async(GetParameters.Request(names=list(names)))
+            if not self.spin_until(future.done, STARTUP_TIMEOUT_SECONDS):
+                pytest.fail(f'{node_name} did not answer for {names}')
+        finally:
+            self.node.destroy_client(client)
+        values = {}
+        for name, value in zip(names, future.result().values):
+            if value.type == ParameterType.PARAMETER_BOOL:
+                values[name] = (value.type, value.bool_value)
+            elif value.type == ParameterType.PARAMETER_INTEGER_ARRAY:
+                values[name] = (value.type, list(value.integer_array_value))
+            else:
+                values[name] = (value.type, None)
+        return values
+
+    def read_emergency_stop(self):
+        """Return (active, reason) of the latched /emergency_stop, or None if it never came."""
+        self.spin_until(lambda: self.estop is not None, STARTUP_TIMEOUT_SECONDS)
+        return self.estop
+
+    def subscription_count(self, topic):
+        """Return how many subscriptions the graph shows for a topic."""
+        self.executor.spin_once(timeout_sec=0.0)
+        return self.node.count_subscribers(topic)
+
+    def close(self):
+        """Destroy the probe node and its context."""
+        self.executor.shutdown()
+        self.node.destroy_node()
+        rclpy.shutdown(context=self.context)
 
 
 ACTUATING_NODES = ('/drive_component', '/shot_component', '/esc_motor_control')
+GPIO_SAFETY_NODES = ('/gpio_reader_node', '/operation_manager_node')
 NO_GPIO_REASON = 'released (no GPIO safety path)'
-
-
-def read_emergency_stop(environment):
-    """Return (active, reason) of the latched /emergency_stop, or None if it never came."""
-    deadline = time.monotonic() + STARTUP_TIMEOUT_SECONDS
-    while time.monotonic() < deadline:
-        try:
-            result = run_command(
-                ['ros2', 'topic', 'echo', '--once', '--qos-reliability', 'reliable',
-                 '--qos-durability', 'transient_local', '/emergency_stop',
-                 'questix_msgs/msg/EmergencyStop'],
-                environment, timeout=COMMAND_TIMEOUT_SECONDS + 5.0)
-        except subprocess.TimeoutExpired:
-            continue
-        fields = {}
-        for line in result.stdout.splitlines():
-            key, _, value = line.partition(':')
-            fields[key.strip()] = value.strip().strip("'")
-        if 'active' in fields:
-            return fields['active'] == 'true', fields.get('reason', '')
-        time.sleep(0.2)
-    return None
+BOOL = ParameterType.PARAMETER_BOOL
+INTEGER_ARRAY = ParameterType.PARAMETER_INTEGER_ARRAY
 
 
 @pytest.mark.parametrize(
-    ('launch_arguments', 'expect_estop', 'expect_teacher_permission_required'),
+    ('launch_arguments', 'expect_estop', 'expect_teacher_permission_required',
+     'expect_safe_pins'),
     [
         # Manual diagnostic run without the GPIO safety path (enable_gpio_ref:=false, never passed
-        # by the production launcher): operation_manager still owns /emergency_stop and reports
-        # released, so the robot (and QUESTiX LAB) can move.
-        (['enable_gpio_ref:=false'], (False, NO_GPIO_REASON), False),
+        # by the production launcher), opted in to the teacher's permission (a permission, not an
+        # E-stop): operation_manager still owns /emergency_stop and reports released, so the
+        # robot (and QUESTiX LAB) can move.
+        (['enable_gpio_ref:=false', 'require_teacher_permission:=true'],
+         (False, NO_GPIO_REASON), True, None),
         # Practice with the GPIO safety path but no GPIO hardware here: GPIO5 is never received,
         # so operation_manager reports the E-stop as active.
-        (['enable_gpio_ref:=true'], (True, 'pin 5 not received; '), False),
-        # A practice opt-in to the teacher's permission (a permission, not an E-stop).
-        (['enable_gpio_ref:=false', 'require_teacher_permission:=true'],
-         (False, NO_GPIO_REASON), True),
+        (['enable_gpio_ref:=true'], (True, 'pin 5 not received; '), False, ([5], [])),
         # Competition never depends on the classroom heartbeat, even when asked to.
         (['enable_gpio_ref:=true', 'enable_autoreferee:=true',
           'require_teacher_permission:=true'],
-         (True, 'pin 5 not received; pin 27 not received; '), False),
+         (True, 'pin 5 not received; pin 27 not received; '), False, ([5], [27])),
     ],
 )
 def test_core_launch_publishes_the_estop_and_passes_the_teacher_permission_switch(
-        launch_arguments, expect_estop, expect_teacher_permission_required):
+        launch_arguments, expect_estop, expect_teacher_permission_required, expect_safe_pins):
     """
-    Start questix_core with drive and launcher and read what every actuating node got.
+    Start questix_core with drive and launcher and read what every node got and does.
 
     /emergency_stop always comes from operation_manager and is always required. The teacher's
     permission is an opt-in, and disabled must mean disabled: no node subscribes to
-    /actuation_authority without it.
+    /actuation_authority without it. With the GPIO safety path, the installed profile's pin
+    arrays load as typed integer arrays and gpio_reader and operation_manager stay up.
     """
     environment = isolated_ros_environment(10 + len(launch_arguments) * 3 +
                                            int(expect_estop[0]) +
@@ -334,34 +218,42 @@ def test_core_launch_publishes_the_estop_and_passes_the_teacher_permission_switc
                  'enable_rviz:=false', 'controller_type:=dualshock']
     if not any(argument.startswith('enable_autoreferee:=') for argument in launch_arguments):
         arguments.append('enable_autoreferee:=false')
+    probe = GraphProbe(environment)
     process = start_process(
         ['ros2', 'launch', 'questix_launcher', 'questix_core.launch.xml',
          *arguments, *launch_arguments],
         environment,
     )
-    expected_teacher_permission = f'Boolean value is: {expect_teacher_permission_required}'
     try:
         for node in ACTUATING_NODES:
-            assert wait_for_parameter(node, 'require_emergency_stop', environment) == (
-                'Boolean value is: True'), node
-            assert wait_for_parameter(
-                node, 'require_teacher_permission', environment) == (
-                expected_teacher_permission), node
-        assert read_emergency_stop(environment) == expect_estop
+            assert probe.parameters(
+                node, ('require_emergency_stop', 'require_teacher_permission')) == {
+                'require_emergency_stop': (BOOL, True),
+                'require_teacher_permission': (BOOL, expect_teacher_permission_required),
+            }, node
+        if expect_safe_pins is not None:
+            assert probe.parameters(
+                '/operation_manager_node',
+                ('safe_low_pins', 'safe_high_pins', 'gpio_safety_enabled')) == {
+                'safe_low_pins': (INTEGER_ARRAY, expect_safe_pins[0]),
+                'safe_high_pins': (INTEGER_ARRAY, expect_safe_pins[1]),
+                'gpio_safety_enabled': (BOOL, True),
+            }
+            probe.wait_for_nodes(GPIO_SAFETY_NODES, process)
+        assert probe.read_emergency_stop() == expect_estop
         # Graph discovery is not instant: wait for the expected count (the opt-in), or watch for
         # a while that none appears (disabled).
         expected_subscriptions = len(ACTUATING_NODES) if expect_teacher_permission_required else 0
-        deadline = time.monotonic() + 15.0
-        subscriptions = topic_subscription_count('/actuation_authority', environment)
-        while time.monotonic() < deadline:
-            if expect_teacher_permission_required and subscriptions == expected_subscriptions:
-                break
-            if not expect_teacher_permission_required and subscriptions != 0:
-                break
-            time.sleep(0.2)
-            subscriptions = topic_subscription_count('/actuation_authority', environment)
-        assert subscriptions == expected_subscriptions
+        if expect_teacher_permission_required:
+            probe.spin_until(
+                lambda: probe.subscription_count('/actuation_authority') == (
+                    expected_subscriptions), 15.0)
+        else:
+            probe.spin_until(lambda: probe.subscription_count('/actuation_authority') != 0, 15.0)
+        assert probe.subscription_count('/actuation_authority') == expected_subscriptions
+        assert process.poll() is None, 'questix_core exited during the checks'
     finally:
         output = stop_process(process)
+        probe.close()
     assert 'InvalidParameterValueException' not in output
     assert 'parameter_value_from failed' not in output
