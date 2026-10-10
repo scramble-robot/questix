@@ -203,12 +203,15 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
   RCLCPP_INFO(this->get_logger(), "  max_motor_rpm: %d", max_motor_rpm_);
   RCLCPP_INFO(this->get_logger(), "  status_publish_rate: %.1f", status_publish_rate_);
   RCLCPP_INFO(this->get_logger(), "  typed_status_topic: %s", typed_status_topic_.c_str());
+  RCLCPP_INFO(this->get_logger(), "  publish_control_sample: %s  control_sample_topic: %s",
+              publish_control_sample_ ? "true" : "false", control_sample_topic_.c_str());
   RCLCPP_INFO(this->get_logger(), "  publish_tf: %s", publish_tf_ ? "true" : "false");
   RCLCPP_INFO(this->get_logger(), "  odom_topic: %s", odom_topic_.c_str());
   RCLCPP_INFO(this->get_logger(), "  odom_frame_id: %s", odom_frame_id_.c_str());
   RCLCPP_INFO(this->get_logger(), "  base_frame_id: %s", base_frame_id_.c_str());
   RCLCPP_INFO(this->get_logger(), "  cmd_timeout_sec: %.2f", cmd_timeout_sec_);
   RCLCPP_INFO(this->get_logger(), "  control_rate: %.1f", control_rate_);
+  RCLCPP_INFO(this->get_logger(), "  serial_response_timeout_ms: %d", serial_response_timeout_ms_);
   RCLCPP_INFO(this->get_logger(), "  control_mode: %s", control_mode_.c_str());
   if (control_mode_ == "current") {
     RCLCPP_INFO(
@@ -239,6 +242,10 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
                 "drive_fsm_run_exit_rpm が両方 0 のため LQR+FF は適用しません（FF のみ）。"
                 "同定で決めた RUN 閾値を設定してください");
   }
+  warnIfLqrTicksAssumeAnotherRate();
+  if (control_mode_ == "current") {
+    warnCurrentModeAssumptions();
+  }
   RCLCPP_INFO(this->get_logger(),
               "  velocity_run_lqr: %s  tau=%.3fs delay=%d ticks q=%.3f r=%.3f lead=%.2f dist=%.2f "
               "obs[l_x=%.2f l_d=%.3f] max_corr=%.1f rpm invert=%s fb_max_age=%.2fs",
@@ -259,6 +266,14 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
   // LifecyclePublisher のため on_activate まで publish は無効
   typed_status_publisher_ =
       this->create_publisher<questix_msgs::msg::DriveStatus>(typed_status_topic_, 1);
+
+  // 制御 tick ごとの診断サンプル。reliable + volatile + keep_last(100): rosbag の記録側が
+  // 一時的に遅れても（ディスク書込の詰まり等）2 秒ぶん（50 Hz）までは欠落させずに渡すため。
+  // 診断専用なので transient_local にはしない（late join に古い tick を渡さない）。
+  if (publish_control_sample_ && !control_sample_topic_.empty()) {
+    control_sample_publisher_ = this->create_publisher<questix_msgs::msg::DriveControlSample>(
+        control_sample_topic_, rclcpp::QoS(rclcpp::KeepLast(100)).reliable().durability_volatile());
+  }
 
   // オドメトリ publisher（LifecyclePublisher が ACTIVE ゲートを担う）と TF broadcaster。
   odom_publisher_ = this->create_publisher<nav_msgs::msg::Odometry>(odom_topic_, 10);
@@ -344,6 +359,7 @@ DriveComponent::CallbackReturn DriveComponent::on_cleanup(const rclcpp_lifecycle
   status_timer_.reset();
   twist_subscription_.reset();
   typed_status_publisher_.reset();
+  control_sample_publisher_.reset();
   resetOdometry();
   shutdownMotorLib();
   RCLCPP_INFO(this->get_logger(), "Drive component cleaned up");
@@ -358,6 +374,7 @@ DriveComponent::CallbackReturn DriveComponent::on_shutdown(const rclcpp_lifecycl
   status_timer_.reset();
   twist_subscription_.reset();
   typed_status_publisher_.reset();
+  control_sample_publisher_.reset();
   resetOdometry();
   shutdownMotorLib();
   RCLCPP_INFO(this->get_logger(), "Drive component shut down");
@@ -371,6 +388,7 @@ DriveComponent::CallbackReturn DriveComponent::on_error(const rclcpp_lifecycle::
   status_timer_.reset();
   twist_subscription_.reset();
   typed_status_publisher_.reset();
+  control_sample_publisher_.reset();
   resetOdometry();
   shutdownMotorLib();
   if (auto_start_ && auto_start_timer_) {

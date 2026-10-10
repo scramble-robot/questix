@@ -28,8 +28,9 @@ namespace motor_control_app {
 
 namespace {
 // 未武装（駆動指令を送っていない）間にフィードバック快照の鮮度を維持するポーリング周期の
-// 目安 [s]。この鮮度以内なら再取得しない（≈5Hz）。odometry::kMaxFeedbackAgeSec（stale 判定）
-// より十分小さくすること。
+// 目安 [s]。この鮮度以内なら再取得しない。再取得は停止フレームの再送なので
+// stop_resend_interval_ms のスロットルにも従い、実際の周期は長い方になる（既定 300 ms で
+// ≈3 Hz、最大 age ≈0.32 s）。odometry::kMaxFeedbackAgeSec（stale 判定）より十分小さくすること。
 constexpr double kIdleFeedbackMaxAgeSec = 0.2;
 
 // 停止指令を送れなかったとき（stop fault）の再送間隔 [s]。
@@ -65,6 +66,9 @@ bool DriveComponent::initializeMotorLib() {
 
     // 指令送信後の追加待機（既定 0 = 無効）
     motor_lib_->setCommandWaitMs(command_wait_ms_);
+
+    // フィードバック応答待ちの上限（既定 10 ms = 従来の固定値）
+    motor_lib_->setResponseTimeoutMs(serial_response_timeout_ms_);
 
     // 停止継続中のブレーキ再送間隔（停止直後の持続振動の緩和用）
     motor_lib_->setStopResendIntervalMs(stop_resend_interval_ms_);
@@ -180,6 +184,52 @@ void DriveComponent::twistCallback(const geometry_msgs::msg::Twist::SharedPtr ms
 
 void DriveComponent::controlTimerCallback() {
   const auto tick_start = std::chrono::steady_clock::now();
+  const rclcpp::Time tick_stamp = this->now();
+
+  // この tick の診断サンプル。送受信の前のカウンタを取っておき、tick の後と比べる。
+  tick_sample_ = drive_control_sample::TickInput{};
+  if (motor_lib_ && control_sample_publisher_) {
+    motor_lib_->getMotorTransactionStats(left_motor_id_, tick_sample_.left.stats_before);
+    motor_lib_->getMotorTransactionStats(right_motor_id_, tick_sample_.right.stats_before);
+  }
+  in_control_tick_ = true;
+  runControlTick();
+  in_control_tick_ = false;
+  publishControlSample(tick_stamp, tick_start);
+}
+
+void DriveComponent::publishControlSample(const rclcpp::Time& tick_stamp,
+                                          std::chrono::steady_clock::time_point tick_start) {
+  if (!control_sample_publisher_) {
+    return;
+  }
+  auto& sample = tick_sample_;
+  sample.seq = control_sample_seq_++;
+  sample.tick_start = tick_stamp;
+  sample.control_period_sec = drive_control_tick::tickDtSec(control_rate_);
+  sample.current_mode = (control_mode_ == "current");
+  if (control_core_) {
+    sample.drive_mode = control_core_->mode();
+  }
+  if (sample.tick_action != questix_msgs::msg::DriveControlSample::TICK_DRIVE && control_core_) {
+    // 駆動しなかった tick の整形後指令は制御コアの保持値（停止・リセット後は 0）。
+    sample.shaped_linear = control_core_->lastLinear();
+    sample.shaped_angular = control_core_->lastAngular();
+  }
+  if (motor_lib_) {
+    motor_lib_->getMotorTransactionStats(left_motor_id_, sample.left.stats_after);
+    motor_lib_->getMotorTransactionStats(right_motor_id_, sample.right.stats_after);
+    motor_lib_->getMotorFeedbackData(left_motor_id_, sample.left.feedback);
+    motor_lib_->getMotorFeedbackData(right_motor_id_, sample.right.feedback);
+  }
+  sample.now = this->now();
+  sample.tick_duration_sec =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - tick_start).count();
+  control_sample_publisher_->publish(drive_control_sample::toDriveControlSampleMsg(sample));
+}
+
+void DriveComponent::runControlTick() {
+  const auto tick_start = std::chrono::steady_clock::now();
 
   // control_core_ は diff_drive_ と同じライフサイクル（initializeMotorLib で構築、
   // shutdownMotorLib で破棄）だが、kDrive 経路で参照するため準備判定に含める。
@@ -192,7 +242,10 @@ void DriveComponent::controlTimerCallback() {
     if (actuation_gate::shouldRetryStop(stop_fault_, secondsSince(last_stop_attempt_, now_steady),
                                         kStopRetryPeriodSec)) {
       last_stop_attempt_ = now_steady;
-      if (diff_drive_->stopNow()) {
+      const bool zero_sent = diff_drive_->stopNow();
+      tick_sample_.stop_frame = true;
+      tick_sample_.command_sent = zero_sent;
+      if (zero_sent) {
         stop_fault_ = false;
         RCLCPP_INFO(this->get_logger(),
                     "Stop fault cleared: zero sent to both wheels (still stopped until the next "
@@ -212,10 +265,12 @@ void DriveComponent::controlTimerCallback() {
   // isHealthy はキャッシュ済みフィードバックの fault コードを見るだけでシリアルには触らない
   const bool healthy = motor_ready && diff_drive_->isHealthy();
 
+  using SampleMsg = questix_msgs::msg::DriveControlSample;
   switch (drive_control_tick::decideTickAction(has_target_, motor_ready,
                                                block != actuation_gate::Block::kNone, healthy,
                                                elapsed, cmd_timeout_sec_)) {
     case drive_control_tick::TickAction::kIdle:
+      tick_sample_.tick_action = SampleMsg::TICK_IDLE;
       // 未武装（起動直後・タイムアウト/非常停止/フォールト停止後）またはゲートが閉じている。
       // 駆動指令は送らないが、フィードバックが古ければ低頻度で再取得する（外力で車輪が回された
       // 場合の観測と /drive_status の鮮度のため）。再取得が送るのは送信に成功したゼロだけで、
@@ -228,6 +283,7 @@ void DriveComponent::controlTimerCallback() {
       }
       return;
     case drive_control_tick::TickAction::kTimeoutStop:
+      tick_sample_.tick_action = SampleMsg::TICK_TIMEOUT_STOP;
       RCLCPP_WARN(this->get_logger(),
                   "Command timeout: no /target_twist for %.2fs (limit %.2fs), stopping motors",
                   elapsed, cmd_timeout_sec_);
@@ -237,12 +293,14 @@ void DriveComponent::controlTimerCallback() {
       safetyStop("command timeout");
       return;
     case drive_control_tick::TickAction::kFaultStop:
+      tick_sample_.tick_action = SampleMsg::TICK_FAULT_STOP;
       // モータ異常中は最後の指令を保持せず、明示的に停止指令を送って武装解除する。
       safetyStop("motor fault");
       RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
                            "Motor not healthy: sending stop command");
       return;
     case drive_control_tick::TickAction::kDrive:
+      tick_sample_.tick_action = SampleMsg::TICK_DRIVE;
       break;
   }
 
@@ -272,6 +330,15 @@ void DriveComponent::controlTimerCallback() {
   // 済ませているため、送信先は停止指令か生の車輪 RPM のどちらかになる。
   const bool sent =
       out.stop ? diff_drive_->commandStop() : diff_drive_->setWheelRpm(out.left_rpm, out.right_rpm);
+  tick_sample_.command_sent = sent;
+  tick_sample_.stop_frame = out.stop;
+  tick_sample_.lqr_active = out.lqr_active;
+  tick_sample_.shaped_linear = out.linear;
+  tick_sample_.shaped_angular = out.angular;
+  tick_sample_.left.ref_rpm = out.left_ref_rpm;
+  tick_sample_.right.ref_rpm = out.right_ref_rpm;
+  tick_sample_.left.command_rpm = out.stop ? 0 : out.left_rpm;
+  tick_sample_.right.command_rpm = out.stop ? 0 : out.right_rpm;
   if (!sent) {
     RCLCPP_ERROR_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
                           "Failed to set motor velocity");
@@ -285,8 +352,9 @@ void DriveComponent::controlTimerCallback() {
                out.right_ref_rpm, motor_control_lib::drive_mode_fsm::toString(out.mode),
                out.lqr_active ? "on" : "off");
 
-  // tick 所要時間の監視。シリアル応答待ち（最悪 10ms × 2）が周期予算を超えると
-  // 制御周期が崩れるため、超過を可視化する（実機での control_rate 選定の材料）。
+  // tick 所要時間の監視。シリアル応答待ち（最悪 serial_response_timeout_ms × 2）が
+  // 周期予算を超えると制御周期が崩れるため、超過を可視化する
+  // （実機での control_rate 選定の材料）。
   const double tick_ms =
       std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tick_start)
           .count();
@@ -398,7 +466,12 @@ bool DriveComponent::safetyStop(const char* reason) {
     return false;  // 送る相手がない（未通電・未構成）。駆動指令も出ていない
   }
   last_stop_attempt_ = std::chrono::steady_clock::now();
-  if (diff_drive_->stopNow()) {
+  const bool zero_sent = diff_drive_->stopNow();
+  if (in_control_tick_) {
+    tick_sample_.stop_frame = true;
+    tick_sample_.command_sent = zero_sent;
+  }
+  if (zero_sent) {
     return true;
   }
   if (!stop_fault_) {

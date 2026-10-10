@@ -24,7 +24,7 @@
     <param name="max_motor_rpm" value="$(var max_motor_rpm)" />
     <param name="velocity_scale_factor" value="$(var velocity_scale_factor)" />
     <param name="baud_rate" value="57600" />
-    <param name="wheel_radius" value="0.1" />
+    <param name="wheel_radius" value="0.05" />
     <param name="status_publish_rate" value="5.0" />
     <param name="watchdog_timeout" value="1.0" />
     <remap from="cmd_vel" to="/cmd_vel" />

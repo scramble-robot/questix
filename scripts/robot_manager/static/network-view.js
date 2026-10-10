@@ -65,7 +65,7 @@ const NetworkView = (() => {
       notice = job.message || '切り替えに失敗しました。';
       tone = 'error';
     } else if (job.state === 'succeeded') {
-      notice = [job.message, job.lab_message].filter(Boolean).join(' ');
+      notice = [job.message, job.lab_message, job.controller_message].filter(Boolean).join(' ');
       tone = 'ok';
     }
     if (!available && ap) {

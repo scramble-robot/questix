@@ -17,7 +17,7 @@ using Reason = ArbiterLogic::Reason;
 
 ArbiterLogic makeArbiter() {
   ArbiterLogic logic;
-  logic.configure(ArbiterLogic::Config{});  // 0.02 m/s, 0.05 rad/s, lab 0.3 s, joy 0.5 s
+  logic.configure(ArbiterLogic::Config{});  // 0.01 m/s, 0.025 rad/s, lab 0.3 s, joy 0.5 s
   return logic;
 }
 
@@ -86,7 +86,7 @@ TEST(ArbiterLogicTest, QuietLabHandsBackToTheController) {
 TEST(ArbiterLogicTest, SmallStickNoiseDoesNotTakeOver) {
   auto logic = makeArbiter();
   logic.onLab(0.1, 0.0, 0.0);
-  EXPECT_FALSE(logic.onJoy(0.01, 0.03, 0.05).has_value());
+  EXPECT_FALSE(logic.onJoy(0.005, 0.015, 0.05).has_value());
   EXPECT_EQ(logic.source(), Source::kLab);
 }
 

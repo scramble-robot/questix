@@ -19,7 +19,6 @@
 #include <lifecycle_msgs/msg/state.hpp>
 #include <limits>
 #include <string>
-#include <thread>
 
 #include "motor_control_app/shot_angle.hpp"
 #include "motor_control_app/shot_auto_start.hpp"
@@ -87,6 +86,10 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
   // Lifecycle 自動遷移。非常停止解除でサーボが通電するまで configure を再試行する。
   this->declare_parameter("auto_start", true);
   this->declare_parameter("connect_retry_period_sec", 3.0);
+  // 非常停止解除などからの起動の試行期間（issue #175）: 短い周期と期間の長さ、サーボ応答の上限
+  this->declare_parameter("startup_retry_period_sec", 0.2);
+  this->declare_parameter("startup_window_sec", 5.0);
+  this->declare_parameter("servo_response_timeout_ms", 100);
   // 非常停止連動トピック（questix_msgs/EmergencyStop、auto_start=true のときのみ有効、
   // 空文字で連動無効）
   this->declare_parameter("emergency_stop_topic", "/emergency_stop");
@@ -150,6 +153,26 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
                 "Invalid connect_retry_period_sec=%g; using the default 3.0 seconds",
                 requested_retry_period);
   }
+  const double requested_startup_period =
+      this->get_parameter("startup_retry_period_sec").as_double();
+  startup_retry_period_sec_ = std::clamp(
+      shot_auto_start::normalizePositivePeriod(requested_startup_period, 0.2), 0.05, 1.0);
+  const double requested_startup_window = this->get_parameter("startup_window_sec").as_double();
+  startup_window_sec_ = std::clamp(
+      shot_auto_start::normalizePositivePeriod(requested_startup_window, 5.0), 0.5, 60.0);
+  const int64_t requested_response_ms = this->get_parameter("servo_response_timeout_ms").as_int();
+  servo_response_timeout_ms_ =
+      static_cast<int>(std::clamp<int64_t>(requested_response_ms, 10, 500));
+  if (startup_retry_period_sec_ != requested_startup_period ||
+      startup_window_sec_ != requested_startup_window ||
+      servo_response_timeout_ms_ != requested_response_ms) {
+    RCLCPP_WARN(this->get_logger(),
+                "Invalid startup_retry_period_sec=%g / startup_window_sec=%g / "
+                "servo_response_timeout_ms=%ld; using %.2f s / %.1f s / %d ms",
+                requested_startup_period, requested_startup_window,
+                static_cast<long>(requested_response_ms), startup_retry_period_sec_,
+                startup_window_sec_, servo_response_timeout_ms_);
+  }
   // /emergency_stop は共通の EmergencyStopMonitor（questix_safety）が購読・判定する
   // （transient_local なので起動時に最新のラッチ状態を受信する。契約: questix_msgs/README.md）。
   // lifecycle の連動は auto_start=true のときだけで、手動運用でもコマンドの可否には使う。
@@ -169,6 +192,12 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
     auto_start_timer_ =
         this->create_wall_timer(std::chrono::duration_cast<std::chrono::nanoseconds>(period),
                                 std::bind(&ShotComponent::autoStartTimerCallback, this));
+    // 試行期間の間だけ動かす（requestStartup で開始、endStartup で停止）
+    startup_timer_ =
+        this->create_wall_timer(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                    std::chrono::duration<double>(startup_retry_period_sec_)),
+                                std::bind(&ShotComponent::startupTimerCallback, this));
+    startup_timer_->cancel();
   }
   if (require_teacher_permission_) {
     if (teacher_permission_topic_.empty()) {
@@ -199,9 +228,11 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
       }
     }
     RCLCPP_INFO(this->get_logger(),
-                "Shot component created (auto_start=true, retry=%.1fs, estop_topic=%s). "
+                "Shot component created (auto_start=true, retry=%.1fs, startup %.2fs x %.1fs, "
+                "servo response %d ms, estop_topic=%s). "
                 "サーボ通電（非常停止解除）を待って自動起動します",
-                connect_retry_period_sec_,
+                connect_retry_period_sec_, startup_retry_period_sec_, startup_window_sec_,
+                servo_response_timeout_ms_,
                 estop_monitor_->topic().empty() ? "<disabled>" : estop_monitor_->topic().c_str());
   } else {
     RCLCPP_INFO(this->get_logger(),
@@ -212,6 +243,9 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
 
 ShotComponent::~ShotComponent() {
   stopAutoStartTimers();
+  if (startup_timer_) {
+    startup_timer_->cancel();
+  }
   if (fire_timer_) {
     fire_timer_->cancel();
   }

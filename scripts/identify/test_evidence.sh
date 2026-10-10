@@ -149,7 +149,29 @@ cat >"$STUB_DIR/ros2" <<'STUB'
 case "$1 ${2:-}" in
   "node list")      printf '%s\n' ${STUB_NODES:-} ;;
   "topic list")     printf '%s\n' ${STUB_TOPICS:-} ;;
-  "param get")      [[ -n "${STUB_NODES:-}" ]] && echo "String value is: velocity" ;;
+  "param get")      [[ -n "${STUB_NODES:-}" ]] || exit 1
+                    # STUB_PARAM_DIR があれば、param set で書いた値を返す（読み戻しの確認用）
+                    if [[ -n "${STUB_PARAM_DIR:-}" && -f "$STUB_PARAM_DIR/${4:-}" ]]; then
+                      echo "Integer value is: $(cat "$STUB_PARAM_DIR/$4")"
+                      exit 0
+                    fi
+                    case "${4:-}" in
+                      control_mode) echo "String value is: velocity" ;;
+                      wheel_radius) echo "Double value is: 0.1" ;;
+                      wheel_separation) echo "Double value is: 0.5" ;;
+                      min_command_rpm) echo "Integer value is: 5" ;;
+                      max_motor_rpm) echo "Integer value is: ${STUB_MAX_MOTOR_RPM:-475}" ;;
+                      stop_resend_interval_ms) echo "Integer value is: 300" ;;
+                      *) exit 1 ;;
+                    esac ;;
+  "param set")      [[ -n "${STUB_PARAM_LOG:-}" ]] && echo "set ${4:-} ${5:-}" >>"$STUB_PARAM_LOG"
+                    # STUB_PARAM_SET_FAIL_VALUE と同じ値への設定は失敗させる（復元の失敗の再現）
+                    if [[ -n "${STUB_PARAM_SET_FAIL_VALUE:-}" && "${5:-}" == "$STUB_PARAM_SET_FAIL_VALUE" ]]; then
+                      echo "Setting parameter failed"
+                      exit 1
+                    fi
+                    [[ -n "${STUB_PARAM_DIR:-}" ]] && printf '%s' "${5:-}" >"$STUB_PARAM_DIR/${4:-}"
+                    echo "Set parameter successful" ;;
   "param dump")     # STUB_PARAM_STATE がある場合、2 回目の dump は値を変えて差分を作る
                     if [[ -n "${STUB_PARAM_STATE:-}" && -e "$STUB_PARAM_STATE" ]]; then
                       printf 'drive_component:\n  ros__parameters:\n    control_mode: current\n'
@@ -208,6 +230,24 @@ check "/target_twist に他の送り手が流していれば異常終了" "$?" "
 contains "他の送り手を明示" "$OUT" "他の送り手から指令が流れています"
 if [[ ! -d "$TMP/out" ]]; then ok "他の送り手で止めたときは出力ディレクトリを作らない"; else ng "他の送り手なのに出力ディレクトリができた"; fi
 
+rm -rf "$TMP/out"
+OUT="$(STUB_NODES='/drive_component' STUB_TOPICS='/drive_status /target_twist' \
+  PATH="$STUB_DIR:$PATH" bash "$SCRIPT_DIR/record.sh" --yes --out "$TMP/out" --schedule 3:60,10:30 2>&1)"
+check "停止判定で回らないレベルなら記録前に異常終了" "$?" "1"
+contains "停止判定の理由を明示" "$OUT" "min_command_rpm=5 未満なので停止指令になる"
+if [[ ! -d "$TMP/out" ]]; then ok "停止判定で止めたときは出力ディレクトリを作らない"; else ng "停止判定なのに出力ディレクトリができた"; fi
+
+rm -rf "$TMP/out"
+OUT="$(STUB_NODES='/drive_component' STUB_TOPICS='/drive_status /target_twist' STUB_MAX_MOTOR_RPM=330 \
+  PATH="$STUB_DIR:$PATH" bash "$SCRIPT_DIR/record.sh" --yes --out "$TMP/out" --levels 100,400 2>&1)"
+check "max_motor_rpm で切り詰められるレベルなら記録前に異常終了" "$?" "1"
+contains "上限の理由を明示" "$OUT" "400 rpm は上限 330 rpm"
+if [[ ! -d "$TMP/out" ]]; then ok "上限で止めたときは出力ディレクトリを作らない"; else ng "上限なのに出力ディレクトリができた"; fi
+
+OUT="$(bash "$SCRIPT_DIR/record.sh" --yes --out "$TMP/out" --set-param max_motor_rpm=900 2>&1)"
+check "--set-param は許可したパラメータだけ" "$?" "2"
+contains "--set-param の拒否理由を明示" "$OUT" "min_command_rpm stop_resend_interval_ms"
+
 bash "$SCRIPT_DIR/record.sh" --help >/dev/null
 check "--help は正常終了" "$?" "0"
 contains "--help に出力ファイル契約" "$(bash "$SCRIPT_DIR/record.sh" --help)" "source_identity.txt"
@@ -220,6 +260,8 @@ echo "== 出力ディレクトリ契約 =="
 # record.sh の証跡まわりの配線だけで、ステップ列そのものの正しさではない。
 cat >"$STUB_DIR/python3" <<'PYSTUB'
 #!/usr/bin/env bash
+# 記録前の停止判定の確認（--dry-run）は通し、ステップ列の本番だけ STUB_STEP_RC で終わる
+for arg in "$@"; do [[ "$arg" == "--dry-run" ]] && exit 0; done
 exit "${STUB_STEP_RC:-0}"
 PYSTUB
 chmod +x "$STUB_DIR/python3"
@@ -263,6 +305,80 @@ ADEST="$(find "$ABORT_OUT" -maxdepth 1 -type d -name 'ident_*' | head -1)"
 contains "中断を meta.yaml に残す" "$(cat "$ADEST/meta.yaml" 2>/dev/null)" 'step_sequence: "aborted_foreign_publisher"'
 if [[ -f "$ADEST/bag_info.txt" ]]; then ok "中断しても証跡（bag_info.txt）は残す"; else ng "中断時に bag_info.txt が無い"; fi
 contains "同定に使えないことを warning で知らせる" "$OUT" "このデータは同定に使えません"
+
+SET_OUT="$TMP/setparam"
+PARAM_LOG="$TMP/param_log"
+mkdir -p "$TMP/pstate1"
+OUT="$(STUB_NODES='/drive_component' \
+  STUB_TOPICS='/drive_status /target_twist' \
+  STUB_PARAM_LOG="$PARAM_LOG" STUB_PARAM_DIR="$TMP/pstate1" \
+  PATH="$STUB_DIR:$PATH" bash "$SCRIPT_DIR/record.sh" --yes --out "$SET_OUT" \
+    --set-param stop_resend_interval_ms=0 2>&1)"
+check "--set-param つきで完走" "$?" "0"
+SDEST="$(find "$SET_OUT" -maxdepth 1 -type d -name 'ident_*' | head -1)"
+check "--set-param: 変更してから元の値に戻す" "$(cat "$PARAM_LOG" 2>/dev/null | tr '\n' ';')" \
+  "set stop_resend_interval_ms 0;set stop_resend_interval_ms 300;"
+contains "--set-param: 変更を meta.yaml に残す" "$(cat "$SDEST/meta.yaml" 2>/dev/null)" \
+  "param_override_stop_resend_interval_ms: {value: 0, original: 300}"
+contains "--set-param: 戻したことを meta.yaml に残す" "$(cat "$SDEST/meta.yaml" 2>/dev/null)" \
+  "param_restored_stop_resend_interval_ms: 300"
+
+rm -f "$PARAM_LOG"
+mkdir -p "$TMP/pstate2"
+OUT="$(STUB_NODES='/drive_component' \
+  STUB_TOPICS='/drive_status /target_twist' \
+  STUB_PARAM_LOG="$PARAM_LOG" STUB_PARAM_DIR="$TMP/pstate2" STUB_STEP_RC=130 \
+  PATH="$STUB_DIR:$PATH" bash "$SCRIPT_DIR/record.sh" --yes --out "$TMP/setparam_int" \
+    --set-param stop_resend_interval_ms=0 2>&1)"
+check "--set-param: 中断しても元の値に戻す" "$(cat "$PARAM_LOG" 2>/dev/null | tr '\n' ';')" \
+  "set stop_resend_interval_ms 0;set stop_resend_interval_ms 300;"
+
+# 読み戻した値が設定した値と違えば、記録を始めずに異常終了する（stub は状態を持たない＝常に 300）
+rm -f "$PARAM_LOG"
+OUT="$(STUB_NODES='/drive_component' \
+  STUB_TOPICS='/drive_status /target_twist' STUB_PARAM_LOG="$PARAM_LOG" \
+  PATH="$STUB_DIR:$PATH" bash "$SCRIPT_DIR/record.sh" --yes --out "$TMP/setparam_rb" \
+    --set-param stop_resend_interval_ms=0 2>&1)"
+check "--set-param: 読み戻しが違えば異常終了" "$?" "1"
+contains "--set-param: 読み戻しの食い違いを明示" "$OUT" "読み戻した値が '300'"
+if [[ ! -d "$(find "$TMP/setparam_rb" -maxdepth 1 -type d -name 'ident_*' -print -quit 2>/dev/null)/bag" ]]; then
+  ok "--set-param: 読み戻しが違えば記録しない"
+else
+  ng "--set-param: 読み戻しが違うのに記録した"
+fi
+
+# 元の値に戻せなければ、ステップ列が完走しても終了コード 5 で終わり、meta.yaml に残す
+mkdir -p "$TMP/pstate3"
+OUT="$(STUB_NODES='/drive_component' \
+  STUB_TOPICS='/drive_status /target_twist' STUB_PARAM_DIR="$TMP/pstate3" \
+  STUB_PARAM_SET_FAIL_VALUE=300 \
+  PATH="$STUB_DIR:$PATH" bash "$SCRIPT_DIR/record.sh" --yes --out "$TMP/setparam_rf" \
+    --set-param stop_resend_interval_ms=0 2>&1)"
+check "--set-param: 戻せなければ終了コード 5" "$?" "5"
+RFDEST="$(find "$TMP/setparam_rf" -maxdepth 1 -type d -name 'ident_*' | head -1)"
+contains "--set-param: 戻せなかったことを meta.yaml に残す" "$(cat "$RFDEST/meta.yaml" 2>/dev/null)" \
+  "param_restore_failed_stop_resend_interval_ms: 300"
+contains "--set-param: 手で戻すコマンドを示す" "$OUT" "ros2 param set /drive_component stop_resend_interval_ms 300"
+
+ESTOP_OUT="$TMP/estop"
+OUT="$(STUB_NODES='/drive_component' \
+  STUB_TOPICS='/drive_status /target_twist' \
+  STUB_STEP_RC=4 \
+  PATH="$STUB_DIR:$PATH" bash "$SCRIPT_DIR/record.sh" --yes --out "$ESTOP_OUT" 2>&1)"
+check "非常停止で中断したら終了コード 4" "$?" "4"
+EDEST="$(find "$ESTOP_OUT" -maxdepth 1 -type d -name 'ident_*' | head -1)"
+contains "非常停止での中断を meta.yaml に残す" "$(cat "$EDEST/meta.yaml" 2>/dev/null)" \
+  'step_sequence: "aborted_emergency_stop"'
+
+NORX_OUT="$TMP/estop_not_received"
+OUT="$(STUB_NODES='/drive_component' \
+  STUB_TOPICS='/drive_status /target_twist' \
+  STUB_STEP_RC=6 \
+  PATH="$STUB_DIR:$PATH" bash "$SCRIPT_DIR/record.sh" --yes --out "$NORX_OUT" 2>&1)"
+check "/emergency_stop を受信できず開始しなかったら終了コード 6" "$?" "6"
+NDEST="$(find "$NORX_OUT" -maxdepth 1 -type d -name 'ident_*' | head -1)"
+contains "受信できなかった拒否を押下と分けて meta.yaml に残す" "$(cat "$NDEST/meta.yaml" 2>/dev/null)" \
+  'step_sequence: "refused_estop_not_received"'
 
 INT_OUT="$TMP/interrupted"
 OUT="$(STUB_NODES='/drive_component' \

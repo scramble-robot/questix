@@ -145,7 +145,7 @@ def check_free_run_rejects_oscillation():
     x = np.zeros_like(t)
     for k in range(1, len(t)):
         x[k] = x[k - 1] + dt / (0.08 + dt) * (u[k - 1] - x[k - 1])
-    # 実機ログ相当: 目標 95 rpm 一定で実測が 59〜118 rpm を 1.8 Hz で往復
+    # 以前の記録（元のログ無し）を模した仮定の揺れ: 目標 95 rpm 一定で実測が 59〜118 rpm を 1.8 Hz で往復
     om = np.round(x + np.where(t > 0.3, 25.0 * np.sin(2.0 * math.pi * 1.8 * t), 0.0))
     fit = fit_first_order(om, u, dt)
     print("oscillation fit:", fit)

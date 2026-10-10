@@ -7,6 +7,6 @@ joy_controller:
     debug_mode: true
 
     # More conservative movement settings for testing
-    longitudinal_input_ratio: 0.5
+    longitudinal_input_ratio: 0.25
     lateral_input_ratio: 0.2
-    angular_input_ratio: 0.5
+    angular_input_ratio: 0.25

@@ -26,6 +26,12 @@ using namespace std::chrono_literals;
 
 namespace motor_control_app {
 
+namespace {
+// velocity_run_model_delay_ticks・オブザーバ/LQR のゲインは tick 単位で、同定と既定値は
+// control_rate 50 Hz を前提にしている。
+constexpr double kLqrTickRateHz = 50.0;
+}  // namespace
+
 void DriveComponent::declareParameters() {
   // 既定値は launcher/config/drive_component.yaml（統合起動の Single Source of Truth）と
   // 同値に保つこと。乖離すると単体 launch と統合起動で走行挙動が変わる。
@@ -34,7 +40,7 @@ void DriveComponent::declareParameters() {
   // DDTモータライブラリのパラメータを宣言
   this->declare_parameter("serial_port", "/dev/ttyACM0");
   this->declare_parameter("baud_rate", 57600);
-  this->declare_parameter("wheel_radius", 0.1);
+  this->declare_parameter("wheel_radius", 0.05);
   this->declare_parameter("wheel_separation", 0.5);
   this->declare_parameter("left_motor_id", 4);
   this->declare_parameter("right_motor_id", 5);
@@ -42,6 +48,10 @@ void DriveComponent::declareParameters() {
   this->declare_parameter("status_publish_rate", 50.0);
   // 型付きステータストピック（questix_msgs/DriveStatus）
   this->declare_parameter("typed_status_topic", "/drive_status");
+  // 制御 tick ごとの診断サンプル（questix_msgs/DriveControlSample、control_rate で publish）。
+  // 記録・解析専用で制御・安全判断には使わない。契約は questix_msgs/README.md。
+  this->declare_parameter("publish_control_sample", true);
+  this->declare_parameter("control_sample_topic", "/drive_control_sample");
 
   // 制御モード関連 (後方互換のため velocity 既定)
   this->declare_parameter("control_mode", std::string("velocity"));
@@ -51,13 +61,13 @@ void DriveComponent::declareParameters() {
   this->declare_parameter("integral_limit_amp", 0.3);
   this->declare_parameter("current_zero_deadband_rpm", 5);
   this->declare_parameter("current_invert_measured", true);
-  this->declare_parameter("max_linear_accel", 3.0);
-  this->declare_parameter("max_angular_accel", 3.0);
+  this->declare_parameter("max_linear_accel", 1.5);
+  this->declare_parameter("max_angular_accel", 1.5);
 
   // 目標接近時のレート絞り幅（実効ジャーク制限）。0 で無効＝従来の一次レート制限。
   // 詳細は drive_slew::clampRateTapered。
-  this->declare_parameter("slew_taper_band_linear", 0.2);
-  this->declare_parameter("slew_taper_band_angular", 0.2);
+  this->declare_parameter("slew_taper_band_linear", 0.1);
+  this->declare_parameter("slew_taper_band_angular", 0.1);
 
   // 停止時の電気ブレーキ（velocity モードのみ有効）
   this->declare_parameter("brake_on_stop", false);
@@ -91,12 +101,17 @@ void DriveComponent::declareParameters() {
 
   // 制御 tick の周期 [Hz]。スルーレート制限の dt = 1/control_rate（固定）になり、
   // 加速度プロファイルが上流の publish レート（DualShock 20Hz / UART 50Hz）に依存しない。
-  // 指令+フィードバックのシリアル往復（2モータで正常 ≈ 7ms、最悪 ≈ 20ms）がこの周期予算に
+  // 指令+フィードバックのシリアル往復（2モータで正常 ≈ 7ms、応答なしは最悪
+  // 2 × serial_response_timeout_ms、既定で ≈ 20ms）がこの周期予算に
   // 収まる必要がある（超過は "Control tick overrun" 警告が出る）。
   this->declare_parameter("control_rate", 50.0);
 
   // 指令送信後の追加待機 [ms]。0で無効。実機の最小コマンド間隔要件用の保険
   this->declare_parameter("command_wait_ms", 0);
+
+  // 指令送信後にフィードバック応答を待つ上限 [ms]。既定 10 は従来の固定値。範囲 [2, 50] の外は
+  // クランプして WARN。詳細は DdtMotorLib::setResponseTimeoutMs。
+  this->declare_parameter("serial_response_timeout_ms", 10);
 
   // 停止継続中のブレーキ再送間隔 [ms]。高頻度でブレーキを再送し続けると、残留回転が
   // ある間は毎回新規の制動として作用し、収束せず持続的な振動を起こすことがある。
@@ -142,6 +157,8 @@ void DriveComponent::readParameters() {
   max_motor_rpm_ = this->get_parameter("max_motor_rpm").as_int();
   status_publish_rate_ = this->get_parameter("status_publish_rate").as_double();
   typed_status_topic_ = this->get_parameter("typed_status_topic").as_string();
+  publish_control_sample_ = this->get_parameter("publish_control_sample").as_bool();
+  control_sample_topic_ = this->get_parameter("control_sample_topic").as_string();
   control_mode_ = this->get_parameter("control_mode").as_string();
   current_kp_ = this->get_parameter("current_kp").as_double();
   current_ki_ = this->get_parameter("current_ki").as_double();
@@ -177,6 +194,19 @@ void DriveComponent::readParameters() {
   cmd_timeout_sec_ = this->get_parameter("cmd_timeout_sec").as_double();
   control_rate_ = this->get_parameter("control_rate").as_double();
   command_wait_ms_ = static_cast<int>(this->get_parameter("command_wait_ms").as_int());
+  {
+    const int64_t raw = this->get_parameter("serial_response_timeout_ms").as_int();
+    const int64_t clamped =
+        std::clamp<int64_t>(raw, motor_control_lib::DdtMotorLib::kMinResponseTimeoutMs,
+                            motor_control_lib::DdtMotorLib::kMaxResponseTimeoutMs);
+    if (clamped != raw) {
+      RCLCPP_WARN(
+          this->get_logger(), "serial_response_timeout_ms=%ld is outside [%d, %d]; using %ld ms",
+          static_cast<long>(raw), motor_control_lib::DdtMotorLib::kMinResponseTimeoutMs,
+          motor_control_lib::DdtMotorLib::kMaxResponseTimeoutMs, static_cast<long>(clamped));
+    }
+    serial_response_timeout_ms_ = static_cast<int>(clamped);
+  }
   stop_resend_interval_ms_ =
       static_cast<int>(this->get_parameter("stop_resend_interval_ms").as_int());
   measured_lpf_tau_sec_ = this->get_parameter("measured_lpf_tau_sec").as_double();
@@ -184,6 +214,43 @@ void DriveComponent::readParameters() {
   odom_topic_ = this->get_parameter("odom_topic").as_string();
   odom_frame_id_ = this->get_parameter("odom_frame_id").as_string();
   base_frame_id_ = this->get_parameter("base_frame_id").as_string();
+}
+
+void DriveComponent::warnIfLqrTicksAssumeAnotherRate() {
+  const bool lqr_effective = velocity_run_lqr_enabled_ && control_mode_ == "velocity" &&
+                             !velocityRunLqrLacksRunThreshold();
+  if (!lqr_effective || std::abs(control_rate_ - kLqrTickRateHz) < 1e-9) {
+    return;
+  }
+  RCLCPP_WARN(this->get_logger(),
+              "velocity_run_lqr is enabled with control_rate=%.1f Hz, but its tick-based "
+              "parameters assume %.0f Hz: velocity_run_model_delay_ticks=%d is now %.1f ms "
+              "(%.1f ms at %.0f Hz), and the observer gains (l_x, l_d) and q/r act per tick. "
+              "Identify the drive again at this rate before relying on the correction",
+              control_rate_, kLqrTickRateHz, velocity_run_model_delay_ticks_,
+              1000.0 * velocity_run_model_delay_ticks_ / control_rate_,
+              1000.0 * velocity_run_model_delay_ticks_ / kLqrTickRateHz, kLqrTickRateHz);
+}
+
+void DriveComponent::warnCurrentModeAssumptions() {
+  // 既定値は変えない（走行挙動を変えない）。評価の前提を起動時に知らせるだけ。
+  if (current_ki_ <= 0.0) {
+    RCLCPP_WARN(this->get_logger(),
+                "current mode with a pure P speed loop (current_kp=%.4f A/rpm, current_ki=%.4f, "
+                "max_current_amp=%.2f A): friction leaves a large steady speed error, e.g. "
+                "%.2f A at 50 rpm of error. These defaults are a starting point for evaluation, "
+                "not a working drive tuning (motor_control_app/README.md)",
+                current_kp_, current_ki_, max_current_amp_, current_kp_ * 50.0);
+  }
+  RCLCPP_WARN(this->get_logger(),
+              "current mode: current_invert_measured=%s has no recorded check on this robot. "
+              "Confirm the sign with the wheels lifted before driving (README: current mode sign "
+              "check); a wrong sign is positive feedback",
+              current_invert_measured_ ? "true" : "false");
+  RCLCPP_WARN(this->get_logger(),
+              "current mode: what the DDT driver does when commands stop is not documented. If it "
+              "holds the last current, an unloaded (lifted) wheel accelerates without a speed "
+              "limit. Keep max_current_amp low and the emergency stop at hand");
 }
 
 bool DriveComponent::velocityRunLqrLacksRunThreshold() const {
@@ -233,10 +300,13 @@ rcl_interfaces::msg::SetParametersResult DriveComponent::onParameterChange(
                                                                 "max_motor_rpm",
                                                                 "control_mode",
                                                                 "control_rate",
+                                                                "serial_response_timeout_ms",
                                                                 "status_publish_rate",
                                                                 "wheel_radius",
                                                                 "wheel_separation",
                                                                 "typed_status_topic",
+                                                                "publish_control_sample",
+                                                                "control_sample_topic",
                                                                 "odom_topic",
                                                                 "odom_frame_id",
                                                                 "base_frame_id",
@@ -508,6 +578,9 @@ rcl_interfaces::msg::SetParametersResult DriveComponent::onParameterChange(
   }
   if (control_core_dirty && control_core_) {
     control_core_->setConfig(makeControlCoreConfig());
+  }
+  if (lqr_or_run_threshold_changed) {
+    warnIfLqrTicksAssumeAnotherRate();
   }
   if (lqr_or_run_threshold_changed && velocityRunLqrLacksRunThreshold()) {
     RCLCPP_WARN(this->get_logger(),

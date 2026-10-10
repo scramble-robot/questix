@@ -79,6 +79,24 @@ public:
  */
 class FeetechServoController : public ServoControllerBase {
 public:
+  // 直近の送受信の結果（readRegister / writeRegister / getCurrentPosition / setPosition の後で
+  // lastResult() から読む）。kNoResponse は 1 バイトも返らなかった場合で、サーボが未通電の
+  // ときに予期される結果なので、ライブラリは DEBUG でだけ記録し、呼び出し側が要約して記録する。
+  enum class TransactionResult {
+    kOk,
+    kNotConnected,
+    kWriteFailed,
+    kNoResponse,
+    kIncomplete,
+    kChecksum,
+    kErrorResponse,
+    kUnexpected,
+    kIoError
+  };
+  static const char* resultName(TransactionResult result);
+
+  // 応答待ちの上限 [ms]（コマンド送信後、応答フレームがそろうまで）。既定 1500 ms は従来値。
+  static constexpr int kDefaultResponseTimeoutMs = 1500;
   /**
    * @brief コンストラクタ
    * @param port シリアルポート
@@ -100,6 +118,12 @@ public:
   bool writeRegister(uint8_t servo_id, uint16_t address, uint16_t value) override;
   bool isConnected() const override;
 
+  // 応答待ちの上限を設定する（1..5000 ms に制限、既定 kDefaultResponseTimeoutMs）。
+  // 送信前後の RS485 切替待ち（約 7.5 ms）はこの上限に含まない。
+  void setResponseTimeoutMs(int timeout_ms);
+  int responseTimeoutMs() const { return response_timeout_ms_; }
+  TransactionResult lastResult() const { return last_result_; }
+
 private:
   struct RegisterInfo {
     std::string name;
@@ -113,6 +137,8 @@ private:
   int baudrate_;
   int serial_fd_;
   bool connected_;
+  int response_timeout_ms_{kDefaultResponseTimeoutMs};
+  TransactionResult last_result_{TransactionResult::kOk};
 
   // ログ出力用ロガー（デフォルトは "FeetechServoController"、コンストラクタで注入可能）
   rclcpp::Logger logger_{rclcpp::get_logger("FeetechServoController")};

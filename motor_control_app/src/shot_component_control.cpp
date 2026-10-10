@@ -14,7 +14,6 @@
 #include <lifecycle_msgs/msg/state.hpp>
 #include <limits>
 #include <string>
-#include <thread>
 
 #include "motor_control_app/shot_angle.hpp"
 #include "motor_control_app/shot_auto_start.hpp"
@@ -40,6 +39,7 @@ void ShotComponent::onEmergencyStop(const questix_msgs::msg::EmergencyStop& msg,
     // 非常停止押下。サーボバスが断たれるため、ACTIVE / 自動起動途中の INACTIVE は
     // 解体してサーボ接続を解放し、unconfigured で解除を待つ。
     // 手動 deactivate 済み（タイマー停止中）のノードは操作者の制御を尊重して触らない。
+    endStartup();
     const uint8_t state_id = this->get_current_state().id();
     if (state_id == lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE) {
       RCLCPP_WARN(this->get_logger(),
@@ -66,16 +66,10 @@ void ShotComponent::onEmergencyStop(const questix_msgs::msg::EmergencyStop& msg,
     RCLCPP_INFO(this->get_logger(), "非常停止解除を検出（source=%s）。起動シーケンスを開始します",
                 msg.source.c_str());
   }
-  // 周期を仕切り直してから即時試行する。失敗時（サーボ起動中など）は
-  // connect_retry_period_sec 周期のリトライに引き継ぐ。
-  auto_start_timer_->reset();
-  try {
-    tryAutoStart();
-  } catch (const std::exception& error) {
-    RCLCPP_ERROR(this->get_logger(), "E-stop release auto-start failed: %s", error.what());
-  } catch (...) {
-    RCLCPP_ERROR(this->get_logger(), "E-stop release auto-start failed with unknown exception");
-  }
+  // ここでは待たない（サーボの接続・応答確認はこのコールバックの外、試行期間の短い周期で
+  // 行う）。同期で configure すると、通電直後のサーボ無応答の間 /emergency_stop の受信処理が
+  // 止まり、自分の途絶判定が発火していた（issue #175）。
+  requestStartup();
 }
 
 void ShotComponent::emergencyStopTimeoutCallback() {
@@ -99,6 +93,7 @@ void ShotComponent::emergencyStopTimeoutCallback() {
       return;
     }
     estop_timed_out_ = true;  // 次の受信まで押下扱い（estopBlocks）
+    endStartup();
     RCLCPP_WARN(this->get_logger(),
                 "%s reception timed out after %.2fs; applying fail-safe teardown",
                 estop_monitor_->topic().c_str(), elapsed);
@@ -161,6 +156,7 @@ void ShotComponent::teacherPermissionTimerCallback() {
       // 以後の射撃・チルトは断る。押しっぱなしの入力は、許可が戻っても離すまで無視する。
       last_button_state_ = true;
       tilt_edges_.requireRelease();
+      endStartup();
       const uint8_t state_id = this->get_current_state().id();
       RCLCPP_WARN(this->get_logger(),
                   "Launcher teacher permission lost (%s): stopping the launcher (not an emergency "
@@ -181,10 +177,7 @@ void ShotComponent::teacherPermissionTimerCallback() {
                 "Launcher teacher permission granted: starting up (a new press or request is "
                 "needed to move)");
     publishShotStatus();
-    if (auto_start_timer_ && !auto_start_timer_->is_canceled()) {
-      auto_start_timer_->reset();
-      tryAutoStart();
-    }
+    requestStartup();  // 待たずに戻る（接続・応答確認は試行期間の短い周期で行う）
   } catch (const std::exception& error) {
     RCLCPP_ERROR(this->get_logger(), "Teacher permission check failed: %s", error.what());
   } catch (...) {
@@ -260,7 +253,9 @@ bool ShotComponent::moveTiltTo(double angle_deg, const char* label) {
     publishShotStatus();
     return true;
   }
-  RCLCPP_ERROR(this->get_logger(), "Failed to move tilt %s", label);
+  RCLCPP_ERROR(
+      this->get_logger(), "Failed to move tilt %s (%s)", label,
+      motor_control_lib::FeetechServoController::resultName(servo_controller_->lastResult()));
   triggerAutoRecovery();
   return false;
 }
@@ -361,7 +356,9 @@ void ShotComponent::executeShotSequence(shot_lab::FireSource source) {
   // 1. 射撃位置に移動
   int fire_position = angleToServoPosition(fire_angle_);
   if (!servo_controller_->setPosition(trigger_servo_id_, fire_position, false)) {
-    RCLCPP_ERROR(this->get_logger(), "Failed to move to fire position");
+    RCLCPP_ERROR(
+        this->get_logger(), "Failed to move to fire position (%s)",
+        motor_control_lib::FeetechServoController::resultName(servo_controller_->lastResult()));
     triggerAutoRecovery();
     return;
   }

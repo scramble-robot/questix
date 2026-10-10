@@ -11,6 +11,7 @@
 #include <termios.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <cstring>
@@ -51,8 +52,38 @@ bool FeetechServoController::connect() {
   RCLCPP_DEBUG(logger_, "Serial port status: 0x%x", status);
 
   connected_ = true;
-  RCLCPP_INFO(logger_, "Connected to servo controller: %s @ %d bps", port_.c_str(), baudrate_);
+  // 非常停止の解除直後は呼び出し側が短い間隔で接続と応答確認を繰り返すため、接続・切断は
+  // DEBUG に留める（成功した構成は呼び出し側が記録する）。
+  RCLCPP_DEBUG(logger_, "Connected to servo controller: %s @ %d bps", port_.c_str(), baudrate_);
   return true;
+}
+
+const char* FeetechServoController::resultName(TransactionResult result) {
+  switch (result) {
+    case TransactionResult::kOk:
+      return "ok";
+    case TransactionResult::kNotConnected:
+      return "not_connected";
+    case TransactionResult::kWriteFailed:
+      return "write_failed";
+    case TransactionResult::kNoResponse:
+      return "no_response";
+    case TransactionResult::kIncomplete:
+      return "incomplete";
+    case TransactionResult::kChecksum:
+      return "checksum";
+    case TransactionResult::kErrorResponse:
+      return "error_response";
+    case TransactionResult::kUnexpected:
+      return "unexpected_response";
+    case TransactionResult::kIoError:
+      return "io_error";
+  }
+  return "unknown";
+}
+
+void FeetechServoController::setResponseTimeoutMs(int timeout_ms) {
+  response_timeout_ms_ = std::clamp(timeout_ms, 1, 5000);
 }
 
 int32_t FeetechServoController::getCurrentPosition(uint8_t servo_id) {
@@ -63,8 +94,11 @@ int32_t FeetechServoController::getCurrentPosition(uint8_t servo_id) {
 
   if (position != -1) {
     RCLCPP_DEBUG(logger_, "Position read successfully: %d", position);
+  } else if (last_result_ == TransactionResult::kNoResponse) {
+    // 未通電のサーボで予期される結果。呼び出し側が要約して記録する。
+    RCLCPP_DEBUG(logger_, "Failed to read position (no response)");
   } else {
-    RCLCPP_ERROR(logger_, "Failed to read position");
+    RCLCPP_ERROR(logger_, "Failed to read position (%s)", resultName(last_result_));
   }
 
   return position;
@@ -75,7 +109,7 @@ void FeetechServoController::disconnect() {
     close(serial_fd_);
     serial_fd_ = -1;
     connected_ = false;
-    RCLCPP_INFO(logger_, "Disconnected from servo controller");
+    RCLCPP_DEBUG(logger_, "Disconnected from servo controller");
   }
 }
 
@@ -85,10 +119,12 @@ int FeetechServoController::sendCommand(const uint8_t* cmd_bytes, size_t cmd_len
                                         uint8_t* response, size_t max_response_length,
                                         bool expect_response) {
   if (!connected_ || serial_fd_ == -1) {
+    last_result_ = TransactionResult::kNotConnected;
     RCLCPP_ERROR(logger_, "Not connected to servo controller");
     return -1;
   }
 
+  last_result_ = TransactionResult::kOk;
   try {
     // デバッグ: 送信コマンドを16進ダンプ（高速コマンド時は出力を削減）
     if (cmd_bytes[1] != 6) {  // 書き込みコマンド以外のみ表示
@@ -114,6 +150,7 @@ int FeetechServoController::sendCommand(const uint8_t* cmd_bytes, size_t cmd_len
     // コマンド送信
     ssize_t bytes_written = write(serial_fd_, cmd_bytes, cmd_length);
     if (bytes_written != static_cast<ssize_t>(cmd_length)) {
+      last_result_ = TransactionResult::kWriteFailed;
       RCLCPP_ERROR(logger_, "Failed to write complete command");
       ioctl(serial_fd_, TIOCMBIC, &rts);  // RTS無効（エラー時も必ず実行）
       return -1;
@@ -151,12 +188,13 @@ int FeetechServoController::sendCommand(const uint8_t* cmd_bytes, size_t cmd_len
       expected_length = max_response_length;
     }
 
-    // 全体タイムアウト: 従来の 500ms x 最大 3 リトライ相当を上限として維持する。
+    // 全体タイムアウト: response_timeout_ms_（既定 1500 ms = 従来の 500ms x 最大 3 リトライ相当）。
     const auto overall_deadline =
-        std::chrono::steady_clock::now() + std::chrono::milliseconds(1500);
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(response_timeout_ms_);
 
     size_t total = 0;
     bool timed_out = false;
+    bool io_error = false;
     bool error_frame = false;
 
     while (total < expected_length) {
@@ -199,24 +237,35 @@ int FeetechServoController::sendCommand(const uint8_t* cmd_bytes, size_t cmd_len
           }
         } else if (n == 0) {
           // EOF 相当（切断など）。これ以上読めないためループを終了。
+          io_error = true;
           break;
         } else {
           RCLCPP_ERROR(logger_, "Read error: %s", strerror(errno));
+          io_error = true;
           break;
         }
       } else if (select_result == 0) {
-        RCLCPP_WARN(logger_, "Read timeout while waiting for response (received %zu/%zu bytes)",
-                    total, expected_length);
         timed_out = true;
         break;
       } else {
         RCLCPP_ERROR(logger_, "Select error: %s", strerror(errno));
+        io_error = true;
         break;
       }
     }
 
     if (total == 0) {
-      RCLCPP_ERROR(logger_, "No response received (timeout=%s)", timed_out ? "true" : "false");
+      // 1 バイトも返らない: 未通電のサーボで予期される結果なので DEBUG に留め、
+      // 呼び出し側（lastResult() を見る）が要約して記録する。
+      last_result_ = io_error ? TransactionResult::kIoError : TransactionResult::kNoResponse;
+      RCLCPP_DEBUG(logger_, "No response received within %d ms (timeout=%s)", response_timeout_ms_,
+                   timed_out ? "true" : "false");
+      return -1;
+    }
+    if (total < expected_length) {
+      last_result_ = io_error ? TransactionResult::kIoError : TransactionResult::kIncomplete;
+      RCLCPP_WARN(logger_, "Incomplete response (received %zu/%zu bytes within %d ms)", total,
+                  expected_length, response_timeout_ms_);
       return -1;
     }
 
@@ -235,10 +284,12 @@ int FeetechServoController::sendCommand(const uint8_t* cmd_bytes, size_t cmd_len
       return static_cast<int>(total);
     }
 
+    last_result_ = TransactionResult::kChecksum;
     RCLCPP_ERROR(logger_, "Checksum verification failed (received %zu bytes)", total);
     return -1;
 
   } catch (const std::exception& e) {
+    last_result_ = TransactionResult::kIoError;
     RCLCPP_ERROR(logger_, "Communication error: %s", e.what());
     return -1;
   }
@@ -246,6 +297,7 @@ int FeetechServoController::sendCommand(const uint8_t* cmd_bytes, size_t cmd_len
 
 int32_t FeetechServoController::readRegister(uint8_t servo_id, uint16_t address) {
   if (!connected_) {
+    last_result_ = TransactionResult::kNotConnected;
     return -1;
   }
 
@@ -263,16 +315,21 @@ int32_t FeetechServoController::readRegister(uint8_t servo_id, uint16_t address)
     return static_cast<int32_t>(value);
   } else if (response_length > 0 && (response[1] & 0x80)) {
     // エラーレスポンス
+    last_result_ = TransactionResult::kErrorResponse;
     RCLCPP_ERROR(logger_, "Error response: 0x%X", static_cast<int>(response[1]));
     return -1;
-  } else {
-    RCLCPP_ERROR(logger_, "Invalid response length: %d", response_length);
+  } else if (response_length > 0) {
+    last_result_ = TransactionResult::kUnexpected;
+    RCLCPP_ERROR(logger_, "Unexpected read response (%d bytes)", response_length);
     return -1;
   }
+  // response_length < 0: sendCommand が結果を last_result_ に設定し、必要なら記録済み。
+  return -1;
 }
 
 bool FeetechServoController::writeRegister(uint8_t servo_id, uint16_t address, uint16_t value) {
   if (!connected_) {
+    last_result_ = TransactionResult::kNotConnected;
     return false;
   }
 
@@ -288,22 +345,30 @@ bool FeetechServoController::writeRegister(uint8_t servo_id, uint16_t address, u
     uint16_t echo_value = (response[4] << 8) | response[5];
 
     bool success = (echo_addr == address && echo_value == value);
+    if (!success) {
+      last_result_ = TransactionResult::kUnexpected;
+    }
     RCLCPP_DEBUG(logger_, "Write register %u = %u -> %s", address, value,
                  success ? "SUCCESS" : "FAILED");
     return success;
   } else if (response_length > 0 && (response[1] & 0x80)) {
     // エラーレスポンス
+    last_result_ = TransactionResult::kErrorResponse;
     RCLCPP_ERROR(logger_, "Write error response: 0x%X", static_cast<int>(response[1]));
     return false;
-  } else {
-    RCLCPP_ERROR(logger_, "Invalid write response length: %d", response_length);
+  } else if (response_length > 0) {
+    last_result_ = TransactionResult::kUnexpected;
+    RCLCPP_ERROR(logger_, "Unexpected write response (%d bytes)", response_length);
     return false;
   }
+  // response_length < 0: sendCommand が結果を last_result_ に設定し、必要なら記録済み。
+  return false;
 }
 
 bool FeetechServoController::setPosition(uint8_t servo_id, uint16_t position, bool enable_torque,
                                          double timeout) {
   if (!connected_) {
+    last_result_ = TransactionResult::kNotConnected;
     RCLCPP_ERROR(logger_, "Not connected to servo controller");
     return false;
   }
@@ -314,7 +379,9 @@ bool FeetechServoController::setPosition(uint8_t servo_id, uint16_t position, bo
   try {
     // 位置コマンド送信（応答確認を簡素化）
     if (!writeRegister(servo_id, 128, position)) {  // Goal Position
-      RCLCPP_ERROR(logger_, "Failed to set position for servo %d", static_cast<int>(servo_id));
+      // 結果の記録は呼び出し側に任せる（lastResult() で理由が分かる）。
+      RCLCPP_DEBUG(logger_, "Failed to set position for servo %d (%s)", static_cast<int>(servo_id),
+                   resultName(last_result_));
       return false;
     }
 
@@ -324,6 +391,7 @@ bool FeetechServoController::setPosition(uint8_t servo_id, uint16_t position, bo
     return true;
 
   } catch (const std::exception& e) {
+    last_result_ = TransactionResult::kIoError;
     RCLCPP_ERROR(logger_, "setPosition error: %s", e.what());
     return false;
   }

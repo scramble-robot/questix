@@ -66,3 +66,22 @@ test("browser link works without QR generation and never keeps a stale URL", () 
   assert.equal(link.hidden, true);
   assert.equal(link.href, undefined);
 });
+
+test("the 操作 tab shows the same join QR codes as the 教材 tab, side by side", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const html = fs.readFileSync(path.join(__dirname, "../static/index.html"), "utf8");
+  const app = fs.readFileSync(path.join(__dirname, "../static/app.js"), "utf8");
+  const grid = html.slice(html.indexOf('id="joy-qr-grid"'), html.indexOf('id="web-joy-qr-form"'));
+  // ① Wi-Fi, ② QUESTiX LAB, ③ the browser controller, in the 教材 tab's order (mirrorJoinQr).
+  assert.deepEqual([...grid.matchAll(/id="joy-(\w+)-qr"/g)].map((m) => m[1]),
+    ["wifi", "url", "controller"]);
+  for (const part of ["wifi", "url", "controller"]) {
+    assert.match(html, new RegExp(`id="lab-${part}-qr"`));
+    assert.match(html, new RegExp(`id="joy-${part}-caption"`));
+  }
+  assert.match(html, /<div class="lab-qr-grid" id="joy-qr-grid">/);
+  // Redrawn whenever the 教材 tab's codes or the controller type can change.
+  assert.match(app, /function suggestWebJoyUrl\(\) \{[^}]*mirrorJoinQr\(\);/);
+  assert.match(app, /function renderWebJoyType\(\) \{[\s\S]*?renderJoinQr\(\);\n  mirrorJoinQr\(\);\n\}/);
+});
