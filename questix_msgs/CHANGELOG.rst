@@ -11,6 +11,9 @@ Forthcoming
   with 3.2.0 keep the old layout (read them with the 3.2.0 definitions).
   velocity_rpm itself is unchanged (low-pass filtered when
   measured_lpf_tau_sec > 0, as in 3.2.0)
+* feat: add MotionPermission for /motion_permission, the motion permission (L2) that
+  operation_manager's MotionPermissionManager combines from votes (the referee's
+  /motion_vote/referee, the teacher's /actuation_authority); separate from the emergency stop
 * feat: add DriveControlSample and DriveControlWheelSample for the diagnostic
   per-control-tick topic /drive_control_sample (drive_component). They leave
   MotorFeedback and DriveStatus as they are (type hash and recorded-bag

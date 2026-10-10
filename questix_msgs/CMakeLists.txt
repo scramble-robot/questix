@@ -18,6 +18,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/DriveControlWheelSample.msg"
   "msg/DriveStatus.msg"
   "msg/EmergencyStop.msg"
+  "msg/MotionPermission.msg"
   "msg/MotorFeedback.msg"
   DEPENDENCIES builtin_interfaces std_msgs
 )

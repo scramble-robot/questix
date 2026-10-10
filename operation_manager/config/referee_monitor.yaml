@@ -1,0 +1,11 @@
+# RefereeMonitor: the AutoReferee's GPIO27 as the referee's vote for the motion permission (L2).
+# Competition launches only. A defeat is a state of the game, not an emergency stop.
+referee_monitor:
+  ros__parameters:
+    # Safe-high: true = the robot may move. Hardware also reads true when the AutoReferee is
+    # disconnected, unpowered or its primary side is open (pin_27_signal_limit in /diagnostics).
+    referee_pins: [27]
+    # Silence of the pin for longer than this = not allowed.
+    timeout_seconds: 1.0
+    # Listed as votes.referee in operation_manager.permission.yaml.
+    vote_topic: "/motion_vote/referee"

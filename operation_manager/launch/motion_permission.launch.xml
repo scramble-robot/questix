@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<!--
+The motion permission (L2): MotionPermissionManager, and RefereeMonitor when the referee votes.
+YAML (operation_manager.permission.yaml, referee_monitor.yaml) is the single source of truth;
+the only override is the running mode, which questix_core passes from its robot_mode.
+-->
+<launch>
+  <arg name="robot_mode" description="The running mode: lesson, practice or competition" />
+  <arg name="enable_referee" default="false" description="Start RefereeMonitor (GPIO27 AutoReferee vote; competition only)" />
+  <arg name="permission_config_file"
+       default="$(find-pkg-share operation_manager)/config/operation_manager.permission.yaml"
+       description="Votes each mode needs" />
+  <arg name="referee_config_file"
+       default="$(find-pkg-share operation_manager)/config/referee_monitor.yaml"
+       description="RefereeMonitor configuration" />
+
+  <node pkg="operation_manager" exec="motion_permission_manager_node"
+        name="motion_permission_manager" output="screen">
+    <param from="$(var permission_config_file)" />
+    <param name="mode" value="$(var robot_mode)" />
+  </node>
+
+  <node pkg="operation_manager" exec="referee_monitor_node" name="referee_monitor"
+        output="screen" if="$(var enable_referee)">
+    <param from="$(var referee_config_file)" />
+  </node>
+</launch>

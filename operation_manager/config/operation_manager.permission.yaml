@@ -1,0 +1,26 @@
+# The motion permission (L2, /motion_permission): which votes each mode needs.
+# MotionPermissionManager knows nothing else (no GPIO, no teacher, no referee). A new condition is
+# a node that publishes a vote (questix_msgs/ActuationAuthority, reliable + volatile, never latched)
+# and one line here. Contract: questix_msgs/README.md.
+motion_permission_manager:
+  ros__parameters:
+    # The running mode. questix_core passes its robot_mode after this file; a mode that is not in
+    # `modes` refuses to start (an unknown mode never means "allowed").
+    mode: "practice"
+    # The modes this robot knows (scripts/robot_manager/modes.py; launcher/test keeps them equal).
+    modes: ["lesson", "practice", "competition"]
+    # A vote older than this is stale (the votes' own contract: 5 Hz or faster, 1.0 s lease).
+    lease_sec: 1.0
+    publish_rate_hz: 20.0
+    topic: "/motion_permission"
+    votes:
+      # RefereeMonitor: the AutoReferee's GPIO27 (competition launches only).
+      referee: "/motion_vote/referee"
+      # Robot Manager's 操作 tab: the teacher's permission (a heartbeat while switched on).
+      teacher: "/actuation_authority"
+    # The votes each mode needs. practice is left out on purpose: it needs none (always allowed;
+    # ROS 2 cannot type an empty YAML list). /motion_permission is still published in practice,
+    # so every actuator keeps one rule: no /motion_permission, no motion.
+    required:
+      lesson: ["teacher"]
+      competition: ["referee"]
