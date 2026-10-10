@@ -20,13 +20,11 @@ class LaunchConfigContract(unittest.TestCase):
             ('joy_controller_dual_stick_node', 'dual_stick_config_file',
              'joy_controller_dual_stick_params.yaml', 'if'),
         ]
-        for launch_file, joy_topic in [
-            ('joy_controller.launch.xml', '/joy'),
-            ('joy_controller_referee.launch.xml', '/joy_gated'),
-        ]:
+        for launch_file in ['joy_controller.launch.xml']:
             root = ET.parse(root_dir / 'launch' / launch_file).getroot()
             args = {arg.attrib['name']: arg.attrib['default'] for arg in root.findall('arg')}
-            self.assertEqual(args['joy_topic'], joy_topic)
+            # Nothing gates /joy any more (joy_gate was removed): no joy_topic override.
+            self.assertNotIn('joy_topic', args)
             for executable, argument, filename, condition in cases:
                 with self.subTest(launch=launch_file, mode=executable):
                     self.assertEqual(args[argument],
@@ -38,8 +36,8 @@ class LaunchConfigContract(unittest.TestCase):
                     self.assertEqual([p.attrib['from'] for p in node.findall('param')
                                       if 'from' in p.attrib],
                                      ['$(var ' + argument + ')', '$(var control_config_file)'])
-                    self.assertEqual(node.findall('param')[-1].attrib,
-                                     {'name': 'joy_topic', 'value': '$(var joy_topic)'})
+                    self.assertEqual([p.attrib for p in node.findall('param')
+                                      if 'name' in p.attrib], [])
 
     def test_dual_yaml_selector_survives_node_rename(self):
         """Wildcard YAML must apply to standalone and launch-renamed nodes."""

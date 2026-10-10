@@ -51,18 +51,23 @@ def setup(context):
     angular_scale = float(ratios['angular_input_ratio'])
     if not all(math.isfinite(x) and x > 0 for x in (linear_scale, angular_scale)):
         raise ValueError('Joy input ratios must be finite and positive')
+    operation_manager = Path(get_package_share_directory('operation_manager')) / 'config'
     nodes = [
-        Node(package='operation_manager', executable='operation_manager_node',
-             name='operation_manager_node', output='screen'),
-        Node(package='joy_gate', executable='joy_gate_node', name='joy_gate', output='screen'),
+        # The robot's own stop and permission decisions, as in a practice launch: the simulated
+        # E-stop button (drive_sim's /gpio_5) and an always-allowed motion permission.
+        Node(package='operation_manager', executable='emergency_stop_manager_node',
+             name='emergency_stop_manager', output='screen',
+             parameters=[str(operation_manager / 'emergency_stop_manager.yaml')]),
+        Node(package='operation_manager', executable='motion_permission_manager_node',
+             name='motion_permission_manager', output='screen',
+             parameters=[str(operation_manager / 'operation_manager.permission.yaml'),
+                         {'mode': 'practice'}]),
         Node(package='joy_controller', executable='joy_controller_node',
              name='joy_controller', output='screen', parameters=[joy_config, control_profile, {
-                 'joy_topic': '/joy_gated', 'linear_x_axis': 1,
-                 'angular_z_axis': 2, 'lateral_input_ratio': 0.0}]),
+                 'linear_x_axis': 1, 'angular_z_axis': 2, 'lateral_input_ratio': 0.0}]),
         Node(package='esc_motor_control_cpp', executable='esc_motor_control_node',
              name='esc_motor_control', output='screen', parameters=[{
-                 'test_mode': True, 'pwm_backend': 'simulation', 'joy_topic': '/joy_gated',
-                 'full_speed_button': 10}]),
+                 'test_mode': True, 'pwm_backend': 'simulation', 'full_speed_button': 10}]),
         Node(package='robot_state_publisher', executable='robot_state_publisher',
              parameters=[{'robot_description': description}], output='screen'),
         Node(package='questix_blockly', executable='drive_sim.py',

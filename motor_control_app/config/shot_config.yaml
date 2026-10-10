@@ -31,7 +31,6 @@ shot_component:
     # チルトをしない（operation_manager は questix_core で常に起動し、GPIO 安全系なしでも
     # "released (no GPIO safety path)" を出す）。false は単体診断の明示 opt-out のみで、
     # そのときだけ未受信の環境で connect_retry_period_sec の周期リトライにフォールバックする。
-    # ※ joy_gate は従来どおり /gpio/controllable を購読する。
     emergency_stop_topic: "/emergency_stop"
     emergency_stop_timeout_sec: 1.0  # 受信途絶でfail-safe teardownするまでの秒数（0以下で無効）
     require_emergency_stop: true

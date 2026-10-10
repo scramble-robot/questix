@@ -70,23 +70,27 @@ JOY_NODE = "/joy_controller"
 # evaluate_integrity).
 REQUIRED_NODES = (DRIVE_NODE,)
 REQUIRED_TOPICS = ("/target_twist", "/drive_status", "/emergency_stop")
-# The teacher's runtime actuation authority (practice launches). Recorded whenever it
-# exists, and never excluded from the bag (see protected_topics), but optional: it is
-# only published while the teacher has switched something on, and competition
-# launches never have it. Its state is also taken from Robot Manager itself at start
-# and at stop (questix_trial.yaml runtime_authority).
+# The teacher's runtime actuation authority (lesson launches: the teacher's vote for the motion
+# permission). Recorded whenever it exists, and never excluded from the bag (see
+# protected_topics), but optional: it is only published while the teacher has switched
+# something on, and practice and competition launches never have it. Its state is also taken
+# from Robot Manager itself at start and at stop (questix_trial.yaml runtime_authority).
 AUTHORITY_TOPIC = "/actuation_authority"
+# The motion permission the actuators obeyed (operation_manager, every launch of this version).
+# Like the authority: recorded whenever it exists and never excluded, optional for launches of
+# older versions.
+MOTION_PERMISSION_TOPIC = "/motion_permission"
 # Recorded when present; their absence is normal (no joystick, no LiDAR, ...).
 OPTIONAL_TOPICS = (
     AUTHORITY_TOPIC,
+    MOTION_PERMISSION_TOPIC,
     "/joy",
-    "/joy_gated",
     "/odom",
     "/diagnostics",
     "/parameter_events",
 )
 # Topics an evidence recording must never drop through EXCLUDE_TOPICS.
-PROTECTED_TOPICS = REQUIRED_TOPICS + (AUTHORITY_TOPIC,)
+PROTECTED_TOPICS = REQUIRED_TOPICS + (AUTHORITY_TOPIC, MOTION_PERMISSION_TOPIC)
 
 ROS_SETUP = "/opt/ros/jazzy/setup.bash"
 

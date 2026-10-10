@@ -95,11 +95,18 @@ QUESTiX Robot Manager の全タブとダイアログは、`static/style.css` の
     教材モードで起動したロボットが動いている間だけ ON にできます）。
   - **練習** (`practice`, 既定): コントローラーで自由に練習。教材と先生の許可は使いません
     （twist_arbiter も教材の入力も起動しません）。モードファイルが無い・読めないときもこれです。
-  - **大会** (`competition`): 電源を入れると大会用の構成（GPIO5 + GPIO27、AutoReferee）で自動起動。
+  - **大会** (`competition`): 電源を入れると大会用の構成（非常停止は GPIO5、AutoReferee の GPIO27 は
+    走行許可の審判の票）で自動起動。
 - **教材・練習モードの起動**: 電源投入時にはロボット制御を起動しません。「起動」「再起動」を押すと
   保存したモードの構成で起動します（下の「練習モードの起動要求」）。大会モードの起動は今までどおりで、
   電源投入時にも起動します。起動の結果は、実際に起動したかどうかで表示します（「練習用の構成で起動
   しました」「起動できませんでした：…」）。ロボット制御が動いている間は「起動」を押せません。
+- **ロボットが動かないとき**（「操作」タブ）: 「なぜ動かないか確認」を押すと、ロボットから非常停止
+  （`/emergency_stop`、L1）と走行許可（`/motion_permission`、L2）を一度だけ読み取り（`GET
+  /api/motion-state`、`motion_state.py` と `read_motion_state.py`。ROS とロボットの ROS_DOMAIN_ID で
+  数秒だけ動く読み取り専用のプロセス）、走行と発射機構それぞれを止めている理由（先生の操作許可が OFF、
+  AutoReferee が止めている、非常停止が押されている など）を表示します。何も変更しません。どのモードでも
+  使えます。
 - 起動前の確認では保存プロファイルとROS・ワークスペースの起動ファイルを確認します。
   コントローラーの物理接続や安全状態の自動判定は行いません。
   旧サービスで `/api/readiness` がない場合は既存APIで保存設定を確認し、起動環境は未確認と表示します。
@@ -425,10 +432,11 @@ warning として記録します（別のドメインへ移ることはありま
 開始前に次がそろっていなければ recorder を起動しません（HTTP 409）。
 
 - 必須: ノード `/drive_component`、トピック `/target_twist`、`/drive_status`、`/emergency_stop`
-- 任意: `/actuation_authority`（先生の実行時許可。許可を ON にしている間だけ出て、大会用の
-  起動には無いため任意）、`/joy`、`/joy_gated`、`/odom`、`/diagnostics`、`/parameter_events`
+- 任意: `/actuation_authority`（先生の実行時許可。教材モードで許可を ON にしている間だけ出て、
+  練習・大会の起動には無いため任意）、`/motion_permission`（アクチュエータが従った走行許可）、
+  `/joy`、`/odom`、`/diagnostics`、`/parameter_events`
 
-記録は `-a`（全トピック）で、`EXCLUDE_TOPICS` が必須トピックや `/actuation_authority` に
+記録は `-a`（全トピック）で、`EXCLUDE_TOPICS` が必須トピックや `/actuation_authority`、`/motion_permission` に
 当たるパターンは、この記録に限って外します（warning に残します）。先生の実行時許可の状態は、
 Robot Manager 自身の値を開始時と停止直後に `questix_trial.yaml` の `runtime_authority` に
 記録します。

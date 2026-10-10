@@ -1670,7 +1670,34 @@ async function setActuation(kind, allow) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Why the robot does not move (/api/motion-state, read once on request)
+// ---------------------------------------------------------------------------
+
+async function checkMotionState() {
+  const button = document.getElementById('motion-state-check');
+  const summary = document.getElementById('motion-state-summary');
+  button.disabled = true;
+  summary.textContent = 'ロボットから読み取っています…';
+  try {
+    const view = MotionStateView.describe(await api('/api/motion-state'));
+    for (const key of ['estop', 'drive', 'launcher']) {
+      const cell = document.getElementById(`motion-state-${key}`);
+      cell.textContent = view[key].text;
+      cell.dataset.tone = view[key].tone;
+    }
+    document.getElementById('motion-state-result').hidden = false;
+    summary.textContent = view.summary;
+  } catch {
+    // api() already said why.
+    summary.textContent = '読み取れませんでした。';
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function setupActuationEvents() {
+  document.getElementById('motion-state-check').addEventListener('click', checkMotionState);
   for (const kind of ['drive', 'launcher']) {
     document.getElementById(`actuation-${kind}-toggle`).addEventListener('change', (event) => {
       setActuation(kind, event.target.checked);

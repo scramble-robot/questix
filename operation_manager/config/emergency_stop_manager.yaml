@@ -1,0 +1,12 @@
+# The emergency stop (L1): the physical E-stop circuit's GPIO5, in every mode.
+# safe_low_pins are safe when false: GPIO5 false = released, true = pressed (stop).
+# Nothing that is not a safety function belongs here: the AutoReferee (GPIO27) is the referee's
+# vote for the motion permission (referee_monitor.yaml), not an emergency stop.
+emergency_stop_manager:
+  ros__parameters:
+    safe_low_pins: [5]
+    # A GPIO update older than this counts as pressed.
+    timeout_seconds: 1.0
+    # questix_msgs/EmergencyStop, reliable + transient_local + keep-last 1, on every GPIO update
+    # and every 100 ms. Contract: questix_msgs/README.md.
+    emergency_stop_topic: "/emergency_stop"

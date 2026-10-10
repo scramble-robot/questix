@@ -23,7 +23,7 @@ UNITS_MARKER = f'# questix_controls_units: {questix_control_config.UNITS_GENERAT
 @pytest.mark.parametrize('controller', ['uart', 'dualshock'])
 @pytest.mark.parametrize('gated', ['true', 'false'])
 def test_integrated_profile_and_topic_overrides(expand, tmp_path, controller, gated):
-    """A saved profile reaches all consumers and cannot undo the GPIO topic gate."""
+    """A saved profile reaches all consumers, with or without the GPIO safety path."""
     profile = yaml.safe_load((ROOT / 'questix_control_config/config'
                               / f'controls.{controller}.yaml').read_text())
     changes = {'joy_controller': ('angular_z_axis', 6),
@@ -37,8 +37,11 @@ def test_integrated_profile_and_topic_overrides(expand, tmp_path, controller, ga
                    enable_gpio_ref=gated, enable_lidar='false', enable_rviz='false')
     for node, (key, value) in changes.items():
         assert nodes['/' + node][key] == value
-    for node in ('joy_controller', 'shot_component', 'esc_motor_control'):
-        assert nodes['/' + node]['joy_topic'] == ('/joy_gated' if gated == 'true' else '/joy')
+    # Nothing gates /joy (joy_gate was removed): every consumer reads /joy with or without GPIO.
+    assert 'joy_topic' not in nodes['/joy_controller']  # the node's default, /joy
+    for node in ('shot_component', 'esc_motor_control'):
+        assert nodes['/' + node]['joy_topic'] == '/joy'
+    assert '/joy_gate' not in nodes
     assert nodes['/shot_component']['tilt_servo_id'] == 11  # hardware settings preserved
     assert nodes['/drive_component']['cmd_timeout_sec'] == 1.0  # watchdog preserved
     driver = DRIVERS[controller]
@@ -71,8 +74,11 @@ def test_saved_web_profile_is_ignored(expand, tmp_path, gated):
     nodes = expand('launcher/launch/questix_core.launch.xml', controller_type='web',
                    enable_gpio_ref=gated, enable_lidar='false', enable_rviz='false')
     assert nodes['/shot_component']['fire_button'] == 5
-    for node in ('joy_controller', 'shot_component', 'esc_motor_control'):
-        assert nodes['/' + node]['joy_topic'] == ('/joy_gated' if gated == 'true' else '/joy')
+    # Nothing gates /joy (joy_gate was removed): every consumer reads /joy with or without GPIO.
+    assert 'joy_topic' not in nodes['/joy_controller']  # the node's default, /joy
+    for node in ('shot_component', 'esc_motor_control'):
+        assert nodes['/' + node]['joy_topic'] == '/joy'
+    assert '/joy_gate' not in nodes
     assert not {'uart_joy_driver', 'joy_node'} & set(nodes)  # only the browser driver
 
 
@@ -226,7 +232,6 @@ def test_a_legacy_tilt_axis_is_reported_as_ignored(expand, warnings, tmp_path):
     ('launcher/launch/questix_core.launch.xml',
      {'enable_lidar': 'false', 'enable_rviz': 'false', 'controller_type': 'web'}),
     ('joy_controller/launch/joy_controller.launch.xml', {'dual_stick': 'true'}),
-    ('joy_controller/launch/joy_controller_referee.launch.xml', {}),
     ('motor_control_app/launch/drive_component_container.launch.py', {}),
     ('motor_control_app/launch/joy_axis_drive.launch.xml', {}),
     ('esc_motor_control_cpp/launch/esc_motor_control_cpp.launch.xml', {}),

@@ -1,15 +1,40 @@
 <?xml version="1.0"?>
+<!--
+The robot-wide stop and permission decisions, three components with no shared state
+(design/safety_permission_input_refactor.md, section 3.3):
+  emergency_stop_manager      the emergency stop (L1): GPIO5 -> /emergency_stop
+  motion_permission_manager   the motion permission (L2): votes -> /motion_permission
+  referee_monitor             GPIO27 (AutoReferee) -> the referee's vote (enable_referee)
+YAML is the single source of truth; the only overrides are the running mode, which questix_core
+passes from its robot_mode, and which configuration to start.
+-->
 <launch>
-  <!-- Launch arguments -->
-  <arg name="config_file" 
-       default="$(find-pkg-share operation_manager)/config/operation_manager.yaml" 
-       description="Path to operation_manager configuration file" />
+  <arg name="robot_mode" description="The running mode: lesson, practice or competition" />
+  <arg name="enable_gpio_safety" default="true" description="Read GPIO5 for /emergency_stop. false: explicit manual diagnostic only (released, no GPIO read)" />
+  <arg name="enable_referee" default="false" description="Start RefereeMonitor (GPIO27 AutoReferee vote; competition only)" />
+  <arg name="permission_config_file"
+       default="$(find-pkg-share operation_manager)/config/operation_manager.permission.yaml"
+       description="Votes each mode needs" />
+  <arg name="referee_config_file"
+       default="$(find-pkg-share operation_manager)/config/referee_monitor.yaml"
+       description="RefereeMonitor configuration" />
 
-  <!-- Operation Manager Node -->
-  <node pkg="operation_manager" 
-        exec="operation_manager_node" 
-        name="operation_manager_node" 
-        output="screen">
-    <param from="$(var config_file)" />
+  <let name="emergency_stop_config_file" value="$(find-pkg-share operation_manager)/config/emergency_stop_manager.yaml" if="$(var enable_gpio_safety)" />
+  <let name="emergency_stop_config_file" value="$(find-pkg-share operation_manager)/config/emergency_stop_manager.no_gpio.yaml" unless="$(var enable_gpio_safety)" />
+
+  <node pkg="operation_manager" exec="emergency_stop_manager_node"
+        name="emergency_stop_manager" output="screen">
+    <param from="$(var emergency_stop_config_file)" />
+  </node>
+
+  <node pkg="operation_manager" exec="motion_permission_manager_node"
+        name="motion_permission_manager" output="screen">
+    <param from="$(var permission_config_file)" />
+    <param name="mode" value="$(var robot_mode)" />
+  </node>
+
+  <node pkg="operation_manager" exec="referee_monitor_node" name="referee_monitor"
+        output="screen" if="$(var enable_referee)">
+    <param from="$(var referee_config_file)" />
   </node>
 </launch>

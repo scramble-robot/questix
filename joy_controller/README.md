@@ -13,7 +13,7 @@
 
 | 方向 | トピック | 型 | 備考 |
 |---|---|---|---|
-| Sub | `joy_topic` パラメータで指定（既定 `/joy`、referee 構成では `/joy_gated`） | `sensor_msgs/Joy` | |
+| Sub | `joy_topic` パラメータで指定（既定 `/joy`） | `sensor_msgs/Joy` | |
 | Pub | `/target_twist` | `geometry_msgs/Twist` | depth 1。`drive_component` が購読 |
 
 軸→速度は**純粋な線形写像**です。デッドゾーン処理は入力ドライバ側
@@ -36,10 +36,10 @@ ros2 launch joy_controller joy_controller.launch.xml controller_type:=web
 
 # デュアルスティックモード
 ros2 launch joy_controller joy_controller.launch.xml dual_stick:=true
-
-# GPIO レフェリーゲート付き（/joy_gated 経由）
-ros2 launch joy_controller joy_controller_referee.launch.xml
 ```
+
+`/joy` を間で止めるノードはありません。止める判断はアクチュエータが非常停止（`/emergency_stop`）と
+走行許可（`/motion_permission`）で行います。
 
 ## パラメータ
 
@@ -58,7 +58,7 @@ robot_manager の「操作・速度」タブで編集できます。
 | `linear_x_axis` | 1 | 前後の軸番号（通常 左スティック Y） |
 | `linear_y_axis` | 0 | 左右の軸番号（通常 左スティック X） |
 | `angular_z_axis` | 3 | 旋回の軸番号（通常 右スティック X） |
-| `joy_topic` | `/joy` | 入力トピック（launcher が `/joy_gated` へ切替える唯一のインライン override） |
+| `joy_topic` | `/joy` | 入力トピック |
 | `debug_mode` | false | デバッグログ |
 
 ### joy_controller_dual_stick_node

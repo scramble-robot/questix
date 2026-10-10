@@ -95,7 +95,7 @@ ident_<robot>_<floor>_<YYYYmmdd_HHMM>/
   `parameter_diff.txt` を残す（証跡品質の低下であって、記録済み bag を捨てる理由ではないので
   hard fail にはしない）。
 - **記録 topic**：必須は `/drive_status` `/target_twist`。`/odom` `/emergency_stop`
-  `/drive_control_sample`（制御 tick ごとの診断サンプル）は存在するときだけ足す（無くても失敗しない）。`/joy` `/joy_gated` は足さない
+  `/drive_control_sample`（制御 tick ごとの診断サンプル）は存在するときだけ足す（無くても失敗しない）。`/joy` は足さない
   — `step_sequence.py` が `/target_twist` へ直接 publish する同定試験では、これらは
   同定入力の authority ではないため。
 - **bag integrity**：停止後に `ros2 bag info` を保存し、必須 topic が見当たらない／

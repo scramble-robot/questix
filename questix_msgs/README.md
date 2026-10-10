@@ -12,7 +12,7 @@ QUESTiX 共通メッセージ定義パッケージ。統一緊急停止インタ
 | `header` | `std_msgs/Header` | `stamp` = 判定時刻。`frame_id` は未使用(`""`) |
 | `active` | `bool` | `true` = 緊急停止発動 |
 | `source` | `string` | 発行元識別子(例: `"operation_manager"`) |
-| `reason` | `string` | 原因(例: `"pin 5 not received; "`、`"pin 27 is false, expected true; "`、`"pin 27 timeout; "`)。解除時は `"released"` |
+| `reason` | `string` | 原因(例: `"pin 5 not received; "`、`"pin 5 is true, expected false; "`、`"pin 5 timeout; "`)。解除時は `"released"` |
 
 ### `MotionPermission.msg`
 
@@ -135,18 +135,16 @@ DDT M0602C の Protocol 1 応答フレームをデコードした 1 モータ分
 - **QoS**: reliable + transient_local + keep-last(1)
   (`rclcpp::QoS(1).reliable().transient_local()`)。
   購読側も同一 QoS を使うこと。late-join した購読者は最新のラッチ状態を即時受信する。
-- **発行元**: `operation_manager`。GPIO controllability 判定
-  (`evaluate_controllability()`)の毎回実行時に発行する。
-  すなわち GPIO 更新毎(公称 ~20 Hz)+ 100 ms watchdog timer。
-  `active = !controllable`。
-- **発行元は常に起動する**: operation_manager は drive/shot の有無にも `enable_gpio_ref` にも
-  依存せず `questix_core.launch.xml` から常に起動する(standalone
-  `joy_controller_referee.launch.xml` も互換性のため起動できる)。
-  - `enable_gpio_ref=true`(production の practice / competition 起動は常にこれ): GPIO を判定し `active = !controllable`。
-    reason は `pin 5 ...`(物理 E-stop)/ `pin 27 ...`(AutoReferee)で入力を区別する。
+- **発行元**: operation_manager の `EmergencyStopManager`(ノード `emergency_stop_manager`、
+  `source` は `operation_manager`)。入力は物理非常停止回路の GPIO5 だけ(安全機能だけを扱う。
+  AutoReferee の撃破(GPIO27)は試合の状態で、走行許可 `/motion_permission` の審判の票)。
+  GPIO 更新毎(公称 ~20 Hz)+ 100 ms タイマーで発行する。
+- **発行元は常に起動する**: drive/shot の有無にも `enable_gpio_ref` にもモードにも依存せず
+  `questix_core.launch.xml` から常に起動する。
+  - `enable_gpio_ref=true`(production の起動は常にこれ): GPIO5 を判定する。reason は `pin 5 ...`。
   - `enable_gpio_ref=false`(手動の明示的な診断起動のみ。launch 引数 `enable_gpio_ref:=false` をその都度明示したときだけで、
-    環境変数 `ENABLE_GPIO_REF` では選ばれず(既定はリテラルの `true`)、保存もされない。production ランチャーは使わない。`operation_manager.no_gpio.yaml`、
-    `gpio_safety_enabled: false`): GPIO を読まず `/gpio/controllable` も出さない。
+    環境変数 `ENABLE_GPIO_REF` では選ばれず(既定はリテラルの `true`)、保存もされない。production ランチャーは使わない。
+    `emergency_stop_manager.no_gpio.yaml`、`gpio_safety_enabled: false`): GPIO を読まず、
     `active=false`、reason `released (no GPIO safety path)` を 100 ms 毎に出す。
 - **未受信はフェイルクローズ**: 購読側(drive_component / shot_component / esc_motor_control は
   共通の `questix_safety::EmergencyStopMonitor`、QUESTiX LAB ブリッジ)は構成によらず、**一度も受信していない間は「非常停止の状態が不明」
@@ -161,19 +159,15 @@ DDT M0602C の Protocol 1 応答フレームをデコードした 1 モータ分
   (3.2.0 までは未受信でも動いた)。規則を保ったまま動かすには、別の端末で発行元を起動する:
 
   ```bash
-  # Raspberry Pi で物理非常停止(GPIO5)を判定する
+  # Raspberry Pi で物理非常停止(GPIO5)を判定する。走行許可は練習(票なしで常に許可)
   ros2 launch gpio_reader gpio_reader.launch.xml
-  ros2 launch operation_manager operation_manager.launch.xml
+  ros2 launch operation_manager operation_manager.launch.xml robot_mode:=practice
   # GPIO のない PC やベンチの診断(押下は ROS に伝わらない。RLY1 の動力遮断は別に働く)
-  ros2 launch operation_manager operation_manager.launch.xml \
-    config_file:=$(ros2 pkg prefix operation_manager)/share/operation_manager/config/operation_manager.no_gpio.yaml
-  # 走行許可(練習は票なしで常に許可)
-  ros2 launch operation_manager motion_permission.launch.xml robot_mode:=practice
+  ros2 launch operation_manager operation_manager.launch.xml robot_mode:=practice \
+    enable_gpio_safety:=false
   ```
 
-  `questix_launcher` の `drive_component.launch.xml enable_gpio_ref:=true` は operation_manager の
-  非常停止を自分で起動する(gpio_reader と走行許可は起動しない)ので、足すのは gpio_reader と走行許可
-  だけにする。発行元を二つにしない。
+  どちらも非常停止と走行許可の発行元を一度に起動する。発行元を二つにしない。
 - **診断用の明示 opt-out**: 発行元なしで動かす単体の診断に限り、ノードのパラメータ
   `require_emergency_stop` を false にできる(押下を受信したときの停止はそのまま。走行許可は
   `require_motion_permission`、下の「`/motion_permission` トピック契約」)。launch 引数では
@@ -265,7 +259,7 @@ operation_manager の `MotionPermissionManager` だけが購読する(`operation
 | `joy_axis_drive_status` | `DriveStatus` | `joy_axis_drive` | 相対名。`linear/angular_velocity = 0.0` |
 | `/diagnostics` | `diagnostic_msgs/DiagnosticArray` | `operation_manager` | 標準集約トピック。rqt_runtime_monitor が設定なしで表示 |
 
-`operation_manager` の GPIO27 診断には `pin_27_signal_limit` が含まれる。
+`operation_manager` の GPIO27 診断(`RefereeMonitor`、`operation_manager: referee`)には `pin_27_signal_limit` が含まれる。
 GPIO27=`true` は許可だけでなく、AutoReferee未接続、クライアント無通電、
 一次側断線でも発生し、現行ハードウェアでは区別できないことを示す。
 
@@ -306,7 +300,10 @@ QUESTiX Launcher / `drive_component` 起動中でも、`/dev/ttyACM0` を別プ�
   | `motor_status` | `std_msgs/String`(JSON) | `joy_axis_drive` | `joy_axis_drive_status` |
   | `/gpio/controllable_diagnostic` | `std_msgs/String`(自由文) | `operation_manager` | `/diagnostics` |
   | `/roller_emergency_status` | `std_msgs/Bool`(transient_local) | `esc_motor_control` | `/emergency_stop`(`active`) |
-- `joy_gate` は従来どおり `/gpio/controllable` を購読する(スコープ外)。
+- `/gpio/controllable`(`std_msgs/Bool`)と `joy_gate`(`/joy_gated`)は削除済み。入力を間で 0 にする
+  代わりに、アクチュエータが `/emergency_stop` と `/motion_permission` で止まる。
+- 大会の撃破(GPIO27)は `/emergency_stop` から外し、走行許可(`/motion_permission`、`referee:off`)に
+  移した。撃破では shot_component はサーボバスを解放しない(電源は入ったまま)。
 - drive_component の受信 staleness タイムアウトは未実装
   (既存のコマンド watchdog と物理電源断がフェイルセーフを担う)。
   ハートビートを利用したタイムアウト追加はフォローアップ候補。

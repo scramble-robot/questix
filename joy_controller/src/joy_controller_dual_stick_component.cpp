@@ -29,7 +29,7 @@ JoyControllerDualStickComponent::JoyControllerDualStickComponent(const rclcpp::N
   // Load parameters
   loadParameters();
 
-  // Get joy input topic name (default: /joy, can be remapped to /joy_gated)
+  // Get joy input topic name (default: /joy)
   declare_parameter("joy_topic", "/joy");
   std::string joy_topic = get_parameter("joy_topic").as_string();
 

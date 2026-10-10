@@ -8,8 +8,7 @@
 
 web_joy_driver:
   ros__parameters:
-    # Joy output topic. The launcher overrides this to /joy_gated-compatible
-    # pipelines through joy_gate, so leave it at /joy here.
+    # Joy output topic (joy_controller, shot_component and esc_motor_control read /joy).
     joy_topic: "/joy"
 
     # HTTP/WebSocket bind address and port.
@@ -66,8 +65,8 @@ web_joy_driver:
     static_dir: ""
 
     # Unified emergency stop topic (questix_msgs/EmergencyStop, reliable +
-    # transient_local) relayed to the page for DISPLAY ONLY; gating stays in
-    # joy_gate and the per-component subscribers. "" disables the display.
+    # transient_local) relayed to the page for DISPLAY ONLY; the actuators stop on
+    # /emergency_stop and /motion_permission themselves. "" disables the display.
     emergency_stop_topic: "/emergency_stop"
 
     # Camera view shown between the sticks on the page. Off by default like

@@ -37,7 +37,7 @@ NODE="/drive_component"
 LISTEN_SEC="${IDENT_LISTEN_SEC:-2}"
 REQUIRED_TOPICS="/drive_status,/target_twist"
 # 存在するときだけ記録に足す。無いことを失敗条件にしない。
-# /joy /joy_gated は足さない: step_sequence.py が /target_twist へ直接 publish する
+# /joy は足さない: step_sequence.py が /target_twist へ直接 publish する
 # 同定試験では、これらは同定入力の authority ではないため。
 # /drive_control_sample: drive_component の制御 tick ごとの診断サンプル（seq で欠落、feedback_new で
 # 重複を判別できる。ripple_analysis.py が優先して使う）。publish_control_sample=false なら無い。
