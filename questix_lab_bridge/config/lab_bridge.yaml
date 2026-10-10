@@ -28,7 +28,10 @@ questix_lab_bridge:
     # part of this repository, so the stream is off by default.
     camera_topic: ""
 
-    # Upper bounds for what is forwarded to browsers (latest message wins).
+    # Upper bounds for what is forwarded to browsers (latest message wins), also used for the
+    # records this bridge keeps. A message goes out only when at least 1/max_hz has passed since
+    # the last one, so a faster source is thinned to whole steps of it: drive_component's 50 Hz
+    # /drive_status at drive_max_hz 20 arrives every third message, about 17 Hz.
     scan_max_hz: 5.0
     scan_max_points: 360
     odom_max_hz: 20.0

@@ -22,7 +22,7 @@
 ## Main directories
 
 - `motor_control_lib/`: Shared library for motor control.
-- `motor_control_app/`: ROS 2 nodes and components for drive, shot, single DDT, and related motor-control applications.
+- `motor_control_app/`: ROS 2 nodes and components for drive, shot, single DDT, and related motor-control applications. `drive_component` also publishes `/drive_control_sample` (`questix_msgs/DriveControlSample`, one per control tick, on by default via `publish_control_sample`): diagnostic only, for recording and analysis; never base a control or safety decision on it, and leave `MotorFeedback` / `DriveStatus` unchanged (type hash and recorded-bag compatibility).
 - `esc_motor_control_cpp/`: C++ package for ESC/DDT motor control.
 - `joy_controller/`, `uart_joy_driver/`, `joy_gate/`, `gpio_reader/`: Input, gating, and GPIO-related packages.
 - `operation_manager/`: Operational state management.

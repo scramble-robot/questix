@@ -15,6 +15,12 @@ import { fillSentence as fill } from '../core/content.js';
 // Times given to this module (`now`, arrival times) are milliseconds of one monotonic clock.
 
 const HISTORY_SECONDS = 10; // the wheel charts show this much
+// Two /drive_status further apart than this are not joined by a line. The bridge forwards at most
+// drive_max_hz (lab_bridge.yaml, 20) of drive_component's 50 Hz, newest wins with at least
+// 1/drive_max_hz between two: every third message, 0.06 s apart (about 17 Hz). 0.5 s is about
+// eight missed messages, a gap (the link stalled, the node restarted) the chart must show rather
+// than draw a straight line over.
+const WHEEL_GAP_SECONDS = 0.5;
 // Older than this, a value no longer describes the robot now: it is shown grey and left out of a
 // memo line. The LiDAR sends 5 scans a second at most (lab_bridge.yaml scan_max_hz), the rest 20.
 // /emergency_stop comes at 10 Hz from operation_manager: silent for a second, its state is stale.
@@ -54,7 +60,9 @@ function createStateTracker() {
   return {
     // {at, left, right (filtered measurement), rawLeft, rawRight, targetLeft, targetRight (the
     // generated wheel target; the command's wheels for an older bridge), requestLeft, requestRight
-    // (the upstream /target_twist as wheels), speed, command, measurementValid, authority}
+    // (the upstream /target_twist as wheels), speed (the node's chassis speed, from the filtered
+    // wheels), rawSpeed (the chassis speed from the raw wheels), command, measurementValid,
+    // authority}
     history: [],
     received: {}, // stream -> arrival time [ms] of its latest message
     latest: {}, // stream -> its latest message
@@ -81,6 +89,13 @@ function freshCommand(tracker, now) {
 }
 
 const NO_WHEELS = { left: NaN, right: NaN };
+
+// The chassis speed [m/s] of forward-positive wheels [rpm]: their average times the wheel's
+// circumference per minute. NaN without both wheels or the wheel radius.
+function chassisSpeed(wheels, config) {
+  if (!finite(wheels.left, wheels.right) || !(config?.wheel_radius > 0)) return NaN;
+  return (((wheels.left + wheels.right) / 2) * 2 * Math.PI * config.wheel_radius) / 60;
+}
 
 // One /drive_status into the history. Four quantities stay apart: the upstream request
 // (/target_twist), the generated wheel target, the filtered and the raw measurement. With each
@@ -124,13 +139,16 @@ function addWheels(tracker, drive, now, config) {
     requestLeft: request.left,
     requestRight: request.right,
     speed: entry.speed,
+    rawSpeed: chassisSpeed(raw, config),
     command: command ? command.linear : NaN,
     measurementValid: entry.measurementValid,
     authority: entry.authority,
   });
-  const values = [measured.left, measured.right, target.left, target.right].filter(Number.isFinite);
-  tracker.peakRpm = Math.max(tracker.peakRpm, ...values.map(Math.abs));
-  const speeds = [entry.speed, command?.linear].filter(Number.isFinite);
+  const values = [measured.left, measured.right, raw.left, raw.right, target.left, target.right];
+  tracker.peakRpm = Math.max(tracker.peakRpm, ...values.filter(Number.isFinite).map(Math.abs));
+  const speeds = [entry.speed, tracker.history.at(-1).rawSpeed, command?.linear].filter(
+    Number.isFinite,
+  );
   tracker.peakSpeed = Math.max(tracker.peakSpeed, ...speeds.map(Math.abs));
   while (tracker.history.length && now - tracker.history[0].at > HISTORY_SECONDS * 1000)
     tracker.history.shift();
@@ -224,13 +242,26 @@ function driverOf({ driveState, session, command, wheels }) {
   return turning ? 'unknown' : 'none';
 }
 
+// The history of `value(entry)` as chart points [[seconds before now, value]]. A missing value
+// stays in as NaN and a pause longer than WHEEL_GAP_SECONDS gets a NaN point of its own, so the
+// charts (html-chart, sparkLines) break the line there instead of joining across the gap.
+function historyPoints(history, now, value) {
+  const points = [];
+  let previous = null;
+  for (const entry of history) {
+    const seconds = (entry.at - now) / 1000;
+    if (previous !== null && (entry.at - previous) / 1000 > WHEEL_GAP_SECONDS)
+      points.push([seconds, NaN]);
+    points.push([seconds, value(entry)]);
+    previous = entry.at;
+  }
+  return points;
+}
+
 function wheelsModel(tracker, now) {
   const last = tracker.history.at(-1);
   if (!last) return null;
-  const toPoints = (key) =>
-    tracker.history
-      .map((entry) => [(entry.at - now) / 1000, entry[key]])
-      .filter(([, v]) => finite(v));
+  const toPoints = (key) => historyPoints(tracker.history, now, (entry) => entry[key]);
   return {
     left: last.left,
     right: last.right,
@@ -255,6 +286,12 @@ function wheelsModel(tracker, now) {
       requestLeft: toPoints('requestLeft'),
       requestRight: toPoints('requestRight'),
       speed: toPoints('speed'),
+      rawSpeed: toPoints('rawSpeed'),
+      // The strip's line: the speed from the raw wheels, or the node's speed where there are no
+      // raw wheels (an older bridge, no wheel radius). Invalid feedback has neither: a gap.
+      stripSpeed: historyPoints(tracker.history, now, (entry) =>
+        Number.isFinite(entry.rawSpeed) ? entry.rawSpeed : entry.speed,
+      ),
       command: toPoints('command'),
     },
   };
@@ -394,6 +431,8 @@ function sparkLines(points, top) {
  * 'unknown'), who drives, both wheels (rpm, forward positive) and the chassis speed (m/s) — null
  * where nothing fresh arrived — and the last HISTORY_SECONDS of the measured speed and of the
  * command as sparkline polylines (`measured`, `command`: lists of `points` strings) on ±`top`.
+ * The measured line is the chassis speed from the raw wheel feedback (unsmoothed), the node's
+ * filtered speed only where the raw wheels are missing.
  */
 function stripModel(model) {
   if (!model.connected) return { connected: false, phase: model.phase };
@@ -414,7 +453,7 @@ function stripModel(model) {
     top,
     width: SPARK_WIDTH,
     height: SPARK_HEIGHT,
-    measured: sparkLines(series?.speed ?? [], top),
+    measured: sparkLines(series?.stripSpeed ?? [], top),
     commanded: sparkLines(series?.command ?? [], top),
   };
 }
@@ -468,6 +507,7 @@ function freshnessText(stream, text) {
 
 export {
   HISTORY_SECONDS,
+  WHEEL_GAP_SECONDS,
   STALE_SECONDS,
   estopModel,
   FRONT_RANGE,

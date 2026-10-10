@@ -2,6 +2,15 @@
 Changelog for package questix_msgs
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+* feat: add DriveControlSample and DriveControlWheelSample for the diagnostic
+  per-control-tick topic /drive_control_sample (drive_component). MotorFeedback
+  and DriveStatus are unchanged (type hash and recorded-bag compatibility)
+* docs: /drive_status default rate is 50 Hz; note the 4096-step encoder behind
+  position_raw
+* Contributors: Yuichiroh Kobayashi
+
 3.2.0 (2026-09-07)
 ------------------
 * fix: integrate physical e-stop and competition auto-referee input (`#140 <https://github.com/scramble-robot/questix/issues/140>`_)

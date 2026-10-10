@@ -38,6 +38,9 @@ if(BUILD_TESTING)
   # DdtMotorLib with injected serial write failures on a pseudo terminal (openpty: libutil).
   ament_auto_add_gtest(test_ddt_fault_injection test/test_ddt_fault_injection.cpp)
   target_link_libraries(test_ddt_fault_injection util)
+  # DdtMotorLib's per-motor transaction record with feedback answered over a pseudo terminal.
+  ament_auto_add_gtest(test_ddt_transaction_stats test/test_ddt_transaction_stats.cpp)
+  target_link_libraries(test_ddt_transaction_stats util)
 endif()
 
 ament_auto_package(INSTALL_TO_SHARE)
