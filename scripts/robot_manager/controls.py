@@ -5,6 +5,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import tempfile
 from pathlib import Path
 from typing import Literal, get_args
@@ -75,6 +76,16 @@ FIXED_CONTROLLERS = ('web',)
 # Input-driver sections each profile carries. The UART and DualShock files have always
 # held both joy_node and uart_joy_driver; the browser profile holds only web_joy_driver.
 _DRIVER_NODES = ('joy_node', 'uart_joy_driver', 'web_joy_driver')
+# Unit generation of the m/s and rad/s values (questix_control_config UNITS_GENERATION, kept
+# identical by test_controls.py). Generation 2 reads them with the real wheel_radius 0.05 m
+# (#179). A saved profile without the marker holds values meant for the old 0.1 m: the robot
+# launch ignores it, and so does this editor (packaged defaults shown, a warning, no undo).
+UNITS_GENERATION = '2'
+UNITS_MARKER = f'# questix_controls_units: {UNITS_GENERATION}'
+_UNITS_MARKER = re.compile(r'^# questix_controls_units: (\S+)', re.MULTILINE)
+LEGACY_WARNING = ('保存されていた操作設定は、車輪半径の修正（#179）より前の単位のため使っていません。'
+                  'そのまま使うと速度・加速度が2倍になります。標準の値を表示しています。'
+                  '確認して保存し直してください。')
 _PROFILE_DRIVERS = {
     'uart': ('joy_node', 'uart_joy_driver'),
     'dualshock': ('joy_node', 'uart_joy_driver'),
@@ -186,6 +197,11 @@ def _decode(raw, controller):
     return validate(values, controller)
 
 
+def _units_generation(raw):
+    match = _UNITS_MARKER.search(raw.decode('utf-8', errors='replace'))
+    return match.group(1) if match else None
+
+
 def read_profile(config_dir, controller, env):
     """Read persisted values, exposing defaults and an optimistic concurrency token."""
     default_file = _default_file(controller, env)
@@ -195,7 +211,11 @@ def read_profile(config_dir, controller, env):
         default_raw = default_file.read_bytes()
         saved_raw = saved_file.read_bytes() if saved_file.exists() and not fixed else None
         defaults = _decode(default_raw, controller)
+        # A broken saved file stays an error even when it is also legacy.
         values = _decode(saved_raw, controller) if saved_raw is not None else defaults
+        legacy = saved_raw is not None and _units_generation(saved_raw) != UNITS_GENERATION
+        if legacy:
+            values = defaults
     except (OSError, ValueError, yaml.YAMLError) as exc:
         raise HTTPException(503, f'操作設定を読み込めません: {exc}') from exc
     revision = hashlib.sha256(
@@ -204,18 +224,23 @@ def read_profile(config_dir, controller, env):
     previous = None
     history_warning = None
     try:
-        history = json.loads((config_dir / f'controls.{controller}.history.json').read_text())
-        if revision in history:
-            previous = validate(history[revision], controller)
+        # A legacy profile's undo entry would bring back old-unit values.
+        if not legacy:
+            history = json.loads(
+                (config_dir / f'controls.{controller}.history.json').read_text())
+            if revision in history:
+                previous = validate(history[revision], controller)
     except FileNotFoundError:
         pass
     except (OSError, ValueError, TypeError):
         history_warning = '前の設定を読み込めません。現在の設定は使用できます。'
     return {'controller': controller, 'revision': revision, 'values': values,
             'previous_values': previous, 'history_warning': history_warning,
+            'legacy_warning': LEGACY_WARNING if legacy else None,
             'defaults': defaults, 'groups': schema(controller), 'apply_on_restart': True,
             'editable': not fixed,
-            'source': str(saved_file if saved_raw is not None else default_file)}
+            'source': str(saved_file if saved_raw is not None and not legacy
+                          else default_file)}
 
 
 def write_profile(config_dir, controller, env, update):
@@ -237,6 +262,7 @@ def write_profile(config_dir, controller, env, update):
                                     '再読み込みして変更を確認してください。')
             document = {node: {'ros__parameters': params} for node, params in values.items()}
             raw = ('# QUESTiX controls — applied on next robot start/restart.\n'
+                   + UNITS_MARKER + '\n'
                    + yaml.safe_dump(document, allow_unicode=True, sort_keys=False))
             default_file = _default_file(controller, env)
             revision = hashlib.sha256(

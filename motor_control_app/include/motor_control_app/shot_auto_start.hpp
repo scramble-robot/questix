@@ -101,6 +101,34 @@ inline bool isControllableSignalStale(double timeout_sec, bool controllable, dou
 
 inline bool isValidPositivePeriod(double value) { return std::isfinite(value) && value > 0.0; }
 
+// 起動の試行期間（issue #175）。非常停止の解除・教員の許可・構成の成功で始まり、その間は
+// startup_retry_period_sec の短い周期で configure / activate を 1 段ずつ試す（1 回のコールバック
+// で待つのはサーボ応答の上限 servo_response_timeout_ms まで）。期限を過ぎたら終了し、以降は
+// connect_retry_period_sec の周期リトライに戻る。押下・途絶・許可なし・ACTIVE 到達・
+// deactivate・shutdown でも終了する。時刻は steady clock の秒。
+struct StartupEpisode {
+  bool active{false};
+  double deadline_sec{0.0};
+  int attempts{0};
+};
+
+enum class StartupStep { kIdle, kAttempt, kExpired };
+
+inline void beginStartupEpisode(StartupEpisode& episode, double now_sec, double window_sec) {
+  episode.active = true;
+  episode.deadline_sec = now_sec + window_sec;
+  episode.attempts = 0;
+}
+
+inline void endStartupEpisode(StartupEpisode& episode) { episode = StartupEpisode{}; }
+
+inline StartupStep decideStartupStep(const StartupEpisode& episode, double now_sec) {
+  if (!episode.active) {
+    return StartupStep::kIdle;
+  }
+  return now_sec < episode.deadline_sec ? StartupStep::kAttempt : StartupStep::kExpired;
+}
+
 inline double normalizePositivePeriod(double value, double fallback) {
   return isValidPositivePeriod(value) ? value : fallback;
 }

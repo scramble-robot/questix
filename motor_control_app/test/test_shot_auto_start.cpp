@@ -21,6 +21,8 @@ using motor_control_app::shot_auto_start::normalizeControllableTimeout;
 using motor_control_app::shot_auto_start::normalizePositivePeriod;
 using motor_control_app::shot_auto_start::SafetyTeardownAction;
 using motor_control_app::shot_auto_start::shouldHoldManualLifecycle;
+using motor_control_app::shot_auto_start::StartupEpisode;
+using motor_control_app::shot_auto_start::StartupStep;
 
 // /gpio/controllable 未受信（enable_gpio_ref=false 等）は周期リトライにフォールバック
 TEST(ShotAutoStart, UnconfiguredWithoutControllableFallsBackToConfigure) {
@@ -128,6 +130,48 @@ TEST(ShotParameters, NonFiniteControllableTimeoutFallsBackToDefault) {
   EXPECT_DOUBLE_EQ(normalizeControllableTimeout(std::numeric_limits<double>::quiet_NaN(), 1.0),
                    1.0);
   EXPECT_DOUBLE_EQ(normalizeControllableTimeout(std::numeric_limits<double>::infinity(), 1.0), 1.0);
+}
+
+// 起動の試行期間（issue #175）: 解除・許可・構成成功で始まり、期限まで短い周期で試し、
+// 期限を過ぎたら一度だけ終了を知らせ、終了後は何もしない。
+TEST(ShotStartupEpisode, IdleUntilStarted) {
+  const StartupEpisode episode;
+  EXPECT_FALSE(episode.active);
+  EXPECT_EQ(motor_control_app::shot_auto_start::decideStartupStep(episode, 100.0),
+            StartupStep::kIdle);
+}
+
+TEST(ShotStartupEpisode, AttemptsUntilTheWindowEndsThenExpires) {
+  namespace sas = motor_control_app::shot_auto_start;
+  StartupEpisode episode;
+  sas::beginStartupEpisode(episode, 10.0, 5.0);
+  EXPECT_TRUE(episode.active);
+  EXPECT_EQ(episode.attempts, 0);
+  EXPECT_EQ(sas::decideStartupStep(episode, 10.0), StartupStep::kAttempt);
+  EXPECT_EQ(sas::decideStartupStep(episode, 14.99), StartupStep::kAttempt);
+  EXPECT_EQ(sas::decideStartupStep(episode, 15.0), StartupStep::kExpired);
+  EXPECT_EQ(sas::decideStartupStep(episode, 60.0), StartupStep::kExpired);
+}
+
+TEST(ShotStartupEpisode, RestartingResetsTheWindowAndTheAttempts) {
+  namespace sas = motor_control_app::shot_auto_start;
+  StartupEpisode episode;
+  sas::beginStartupEpisode(episode, 10.0, 5.0);
+  episode.attempts = 7;
+  sas::beginStartupEpisode(episode, 14.0, 5.0);  // a new release edge
+  EXPECT_EQ(episode.attempts, 0);
+  EXPECT_EQ(sas::decideStartupStep(episode, 18.0), StartupStep::kAttempt);
+}
+
+TEST(ShotStartupEpisode, EndingStopsAttemptsAndClearsState) {
+  namespace sas = motor_control_app::shot_auto_start;
+  StartupEpisode episode;
+  sas::beginStartupEpisode(episode, 10.0, 5.0);
+  episode.attempts = 3;
+  sas::endStartupEpisode(episode);  // press, timeout, permission off, ACTIVE, deactivate
+  EXPECT_FALSE(episode.active);
+  EXPECT_EQ(episode.attempts, 0);
+  EXPECT_EQ(sas::decideStartupStep(episode, 11.0), StartupStep::kIdle);
 }
 
 }  // namespace

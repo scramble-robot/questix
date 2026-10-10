@@ -269,6 +269,14 @@ def twist_values(rpm, args):
     return rpm_to_linear(rpm, args.wheel_radius), 0.0
 
 
+# 単体で使うときの既定。drive_component の wheel_radius / wheel_separation
+# (launcher/config/drive_component.yaml) と同じ値にする。違うと、指定した rpm と実際の車輪の
+# rpm がずれる（半径が 2 倍なら 2 倍の速さ）。record.sh はノードから読んだ値を渡す。
+# 半径は実寸の 0.05 m（直径 100 mm。2026-10 まで 0.1 の誤り、#179）。
+DEFAULT_WHEEL_RADIUS = 0.05
+DEFAULT_WHEEL_SEPARATION = 0.5
+
+
 def rpm_to_linear(rpm, wheel_radius):
     return rpm / 60.0 * 2.0 * math.pi * wheel_radius
 
@@ -292,8 +300,10 @@ def main():
     ap.add_argument("--cycles", type=int, default=1)
     ap.add_argument("--rate", type=float, default=50.0, help="publish レート [Hz]")
     ap.add_argument("--topic", default="/target_twist")
-    ap.add_argument("--wheel-radius", type=float, default=0.1)
-    ap.add_argument("--wheel-separation", type=float, default=0.5)
+    ap.add_argument("--wheel-radius", type=float, default=DEFAULT_WHEEL_RADIUS,
+                    help="drive_component の wheel_radius [m] と同じ値（既定: %(default)s）")
+    ap.add_argument("--wheel-separation", type=float, default=DEFAULT_WHEEL_SEPARATION,
+                    help="drive_component の wheel_separation [m] と同じ値（既定: %(default)s）")
     ap.add_argument("--turn", action="store_true", help="直進ではなく旋回（angular_z）で与える"
                     "（--pattern spin と同じ）")
     ap.add_argument("--pattern", choices=PATTERNS, default=None,

@@ -5,7 +5,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { speedStep, wallApproach, WALL_MIN_GAP, WALL_MAX_SPEED } from '../js/control/live-drive.js';
+import {
+  speedStep,
+  wallApproach,
+  WALL_MIN_GAP,
+  WALL_MAX_SPEED,
+  WALL_SECONDS,
+} from '../js/control/live-drive.js';
 import { STOP_DISTANCE } from '../js/control/core.js';
 
 const MESSAGES = { tooClose: 'close', noWall: 'none', lost: 'lost', hit: 'hit' };
@@ -107,5 +113,5 @@ test('the wall run ends by itself once the robot holds the stop distance', () =>
   assert.equal(command, null, 'the controller ended the run');
   assert.equal(controller.result.settled, true);
   assert.ok(Math.abs(controller.result.distance - STOP_DISTANCE) < 0.05);
-  assert.ok(time < 16, `settled after ${time.toFixed(1)} s`);
+  assert.ok(time < WALL_SECONDS, `settled after ${time.toFixed(1)} s`);
 });

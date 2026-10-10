@@ -56,7 +56,7 @@ it is a classroom tool that is switched on from the manager when a lesson needs 
 | `allow_drive` | `false` | Let pages drive the robot (next section). robot_manager passes `true` while 教材からの走行 is allowed. |
 | `drive_topic` | `/target_twist/lab` | `geometry_msgs/Twist` published for the pages: `twist_arbiter`'s lab input. |
 | `emergency_stop_topic` | `/emergency_stop` | `questix_msgs/EmergencyStop` (reliable, transient local). The only source that makes the E-stop state known: until it has been heard, driving and the launcher are refused (`estop_unknown`) and `GET /api/state` reports `emergency_stop: null`. `/drive_status`'s `emergency_stop` (and the launcher statuses' `estop`) can add a pressed E-stop, never a released one. Empty = never known, so pages never move the robot. |
-| `drive_max_linear`, `drive_max_angular` | `0.3`, `1.0` | Upper bounds [m/s], [rad/s]; faster requests are clamped. |
+| `drive_max_linear`, `drive_max_angular` | `0.15`, `0.5` | Upper bounds [m/s], [rad/s]; faster requests are clamped. |
 | `drive_deadman_sec` | `0.5` | The driving page repeats its command every 0.1 s; silence this long stops the robot. |
 | `drive_max_run_sec` | `30.0` | Longest single run, from its first command to its stop. |
 | `drive_rate_hz` | `20.0` | Rate the held command is published at. |
