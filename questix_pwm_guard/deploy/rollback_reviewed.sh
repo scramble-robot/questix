@@ -2,6 +2,51 @@
 # REVIEW BEFORE EXECUTION. Restores exactly the recorded paths; never starts robot/PWM.
 # Current Low/export must be preserved until the operator approves an ESC-OFF reboot/migration.
 set -euo pipefail
+# Command lookup is fixed before the first external command. Invoke with a clean environment.
+export PATH=/usr/bin:/bin LANG=C
+unset BASH_ENV ENV CDPATH
+# The operator must execute a reviewed root-managed copy, not a development checkout.
+check_reviewed_source() {
+/usr/bin/python3 -I - "${BASH_SOURCE[0]}" <<'PY_SOURCE'
+import hashlib,json,os,stat,sys
+from pathlib import Path
+script=Path(sys.argv[1])
+if script.absolute().resolve() != script.absolute():
+    raise SystemExit('installer source path must be canonical')
+root=script.absolute().parents[2]
+def protected(path):
+    for candidate in (path,*path.parents):
+        info=candidate.lstat()
+        if info.st_uid != 0 or info.st_mode & 0o022 or not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
+            raise SystemExit('unsafe installer source path: '+str(candidate))
+    if path.is_file() and path.stat().st_nlink != 1:
+        raise SystemExit('linked installer source file')
+protected(script)
+receipt=root/'reviewed-installer-source.json'
+protected(receipt)
+if stat.S_IMODE(receipt.stat().st_mode) != 0o600:
+    raise SystemExit('installer approval receipt must be mode0600')
+data=json.loads(receipt.read_text())
+if data.get('schema') != 1 or data.get('contract') != 'rp1-installer-source-v1':
+    raise SystemExit('unsupported installer source approval')
+files=data['source_files']
+records=''.join(f'{name}:{digest}\n' for name,digest in sorted(files.items()))
+if hashlib.sha256(records.encode()).hexdigest()!=data['source_digest']:
+    raise SystemExit('installer source approval table mismatch')
+for name,digest in files.items():
+    if not name or name.startswith('/') or any(p in ('','.', '..') for p in name.split('/')):
+        raise SystemExit('invalid installer source inventory')
+    path=root/name
+    protected(path)
+    if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest()!=digest:
+        raise SystemExit('installer source differs from approval: '+name)
+required=('questix_pwm_guard/deploy/install_reviewed.sh','questix_pwm_guard/deploy/rollback_reviewed.sh',
+          'questix_pwm_guard/deploy/review_manifest.py')
+if any(name not in files for name in required) or str(script.relative_to(root)) not in files:
+    raise SystemExit('incomplete installer source approval')
+PY_SOURCE
+}
+check_reviewed_source
 [[ $# == 1 && $EUID == 0 ]] || exit 2
 backup=$(realpath -- "$1")
 [[ "$backup" == /var/backups/questix-rp1-* && ! -L "$1" ]] || exit 2
@@ -40,6 +85,7 @@ for p in "${paths[@]}"; do
     cp -a -- "$backup$p" "$p"
   fi
 done
+check_reviewed_source
 systemctl daemon-reload
 rm -- /var/lib/questix_pwm_guard/deployment-in-progress
 echo 'RECORDED_PATHS_RESTORED=1; unit enable state was not changed. ESC OFF across operator-approved reboot. Verify PWM0 pinmux/export before lgpio.'

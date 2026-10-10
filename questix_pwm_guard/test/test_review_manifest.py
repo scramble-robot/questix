@@ -24,8 +24,8 @@ class ReviewManifestTest(unittest.TestCase):
                 file = prefix / package / 'share' / package / 'package.xml'
                 file.parent.mkdir(parents=True, exist_ok=True)
                 file.write_text('<package/>')
-            data = dict(schema=2, contract='rp1-reviewed-v2', prefix=str(prefix),
-                        source_digest=digest, source_files={}, install_files=manifest.install_files(prefix))
+            data = dict(schema=3, contract='rp1-reviewed-v3', prefix=str(prefix),
+                        source_digest=digest, source_files={}, install_layout=manifest.install_layout(prefix), install_files=manifest.install_files(prefix))
             self.assertEqual(manifest.verify(data, arm64=True), prefix)
             binary = prefix / manifest.ELFS[2]
             binary.write_bytes(b'old ARM64 executable')

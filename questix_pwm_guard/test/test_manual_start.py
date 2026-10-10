@@ -40,6 +40,25 @@ class PrivilegedHelperTest(unittest.TestCase):
             self.assertEqual(manual.main(), 1)
             run.assert_not_called()
 
+    def test_current_and_installed_approvals_checked_before_authorize(self):
+        from unittest.mock import patch, Mock
+        data={'prefix':'/opt/questix_pwm_guard/releases/'+'a'*64}
+        approved=Mock()
+        module={'trusted_json':Mock(return_value=data), 'verify':Mock(), 'approved_manifest':approved}
+        with patch.object(manual.Path,'exists',return_value=False), \
+                patch.object(manual.Path,'read_text',return_value='READY'), \
+                patch.object(manual.runpy,'run_path',return_value=module):
+            manual.validate_deployment()
+            self.assertEqual(approved.call_count,2)
+            original=Path(data['prefix'])/'reviewed-release.json'
+            self.assertEqual(approved.call_args_list[0].args,
+                             (original,Path('/etc/questix_pwm_guard/approved-release.sha256')))
+            self.assertEqual(approved.call_args_list[1].args,
+                             (original,Path('/etc/questix_pwm_guard/runtime-approved.sha256')))
+            approved.side_effect=ValueError('revoked')
+            with self.assertRaisesRegex(ValueError,'revoked'):
+                manual.validate_deployment()
+
     def test_unit_removes_user_environment_before_both_privileged_helpers(self):
         text=(Path(__file__).parents[1]/'systemd/50-rp1-pwm.conf').read_text()
         self.assertIn('EnvironmentFile=\n', text)

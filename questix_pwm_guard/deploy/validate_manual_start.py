@@ -34,6 +34,9 @@ def validate_deployment():
     module = runpy.run_path('/opt/questix_pwm_guard/review_manifest.py')
     data = module['trusted_json'](config/'reviewed-release.json')
     module['verify'](data, arm64=True, require_frozen=True)
+    original = Path(data['prefix'])/'reviewed-release.json'
+    module['approved_manifest'](original, config/'approved-release.sha256')
+    module['approved_manifest'](original, config/'runtime-approved.sha256')
 
 
 def main():

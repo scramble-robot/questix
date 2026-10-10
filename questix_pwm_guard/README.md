@@ -148,7 +148,16 @@ python3 -I questix_pwm_guard/deploy/review_manifest.py seal \
 # After an independent review records the exact manifest SHA (not a hash guessed from this prefix):
 # the operator records that SHA in root-owned mode 0600
 # /etc/questix_pwm_guard/approved-release.sha256. Keep its parent root-owned and non-writable.
-sudo bash questix_pwm_guard/deploy/install_reviewed.sh /path/to/reviewed/install scramble
+# Prepare a source receipt as an ordinary user; this is evidence, not self-approval:
+python3 -I questix_pwm_guard/deploy/review_manifest.py source-seal \
+  /path/to/reviewed/source /path/to/reviewed/source/reviewed-installer-source.json
+# The root operator independently reviews the exact source table/digest and copies the
+# reviewed source and receipt into a versioned root-managed tree. Keep source/ancestors
+# root-owned, go-w removed, no symlinks/hardlinks; receipt mode0600. Check copied SHA.
+# Execute only that protected copy, using fixed executables and an empty environment:
+/usr/bin/sudo /usr/bin/env -i PATH=/usr/bin:/bin LANG=C /bin/bash --noprofile --norc \
+  /root/questix-reviewed/SOURCE_ID/questix_pwm_guard/deploy/install_reviewed.sh \
+  /path/to/reviewed/install scramble
 ```
 
 The manifest records the whole install prefix's file hashes, including Python bytecode, and rejects old ELFs,
@@ -213,3 +222,51 @@ Software verification does not release E-stop or shooting HOLD. Before powered
 motion/shooting, validate the reviewed ARM64 deployment, neutral/Low and complete
 normal/fault shutdown waveforms, and independently approve the physical setup and
 power-cut protection. Initial short Low snapshots do not cover those conditions.
+
+## Privileged source, public runtime layout and approval withdrawal
+
+Installer and rollback must be invoked from an independently reviewed root-managed
+source snapshot with `reviewed-installer-source.json` at its root, root-owned mode0600.
+The receipt binds every file in the six source packages and the standard launcher,
+including both scripts and all helpers/templates/DTS. Its source digest is evidence,
+not approval by itself: the operator must review it independently before copying it
+into the protected source tree. A development checkout is not a root execution source.
+Use the clean-environment `/usr/bin/env -i ... /bin/bash --noprofile --norc` invocation
+above for rollback too, with its recorded backup argument. The caller must trust those
+system executables. Script-body PATH assignment cannot prevent Bash startup code or
+loader injection that runs before the script; do not preserve caller environment.
+Both scripts fix PATH before external operations, check source/file ancestors, links,
+receipt permissions and every source SHA before executing helpers, and recheck before
+completion. Store the independent expected SHA and the protected-copy checks in the
+operator's deployment evidence. Student login and classroom buttons are unchanged.
+
+Manifest schema3 (`rp1-reviewed-v3`) requires the approved `install_layout` table:
+all directories, including empty ones, and each file's intended mode. Runtime is
+public-readable educational material: files become0644 plus independently approved
+execute bits, directories0755; this is an intentional normalization, not byte-for-byte
+preservation of access permissions. Do not place private keys, credentials or other
+confidential data in this public runtime prefix. The approval receipt itself remains
+0600. Special permission bits are refused. Source execute-mode changes and published
+mode/directory changes are rejected, and the frozen original binds the layout as well
+as file bytes. Old schema2 manifests are not silently upgraded; rebuild/reseal/review
+and reinstall the complete ARM64 release. The embedded V2 source-identity marker is
+still a source digest marker, not the manifest schema or an independent approval.
+
+`approved-release.sha256` is the current administrative approval; installation records
+the exact installed original-manifest digest in root0600 `runtime-approved.sha256`.
+The manual validator checks both against the retained original manifest. The daemon
+also checks the two strict root0600 digest records before AUTHORIZE and ARM, including
+ARM using an already issued ticket. Missing/mismatched/malformed records or unsafe
+files deny new authorization/arming. STATUS, LOW and recovery remain available.
+These file checks spawn no process and do not execute setup/workspace code; no hard
+real-time I/O bound is claimed.
+
+Removing or replacing current approval prevents new authorization/ARM. It does not
+stop an active session or cut ESC power. A root administrator remains trusted and can
+replace privileged configuration; this is not isolation against root. For immediate
+operational withdrawal, independently ensure ESC power OFF, stop robot under the
+reviewed procedure, verify/retain required Low/export, and block subsequent starts.
+Do not stop guard, unexport, remove the drop-in, or fallback to the editable workspace
+as an automatic consequence of approval loss. Existing runtime release/backup evidence
+must be retained. Restoring matching approval is an explicit administrator decision.
+The old SD at27467b1 has not received these changes and no physical tests are implied.

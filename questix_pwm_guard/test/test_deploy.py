@@ -38,6 +38,10 @@ class DeploymentTest(unittest.TestCase):
                              '/var/backups', '/var/tmp', '/var/lib/questix_pwm_guard',
                              '/run/questix-rp1-install.lock'):
                 text = text.replace(original, str(root)+original)
+            text = text.replace('for candidate in (path,*path.parents):',
+                f'for candidate in (path,*(p for p in path.parents if p == Path({str(source)!r}) '
+                f'or Path({str(source)!r}) in p.parents)):')
+            text = text.replace('export PATH=/usr/bin:/bin LANG=C', f'export PATH={tools}:/usr/bin:/bin LANG=C')
             text = text.replace('.st_uid != 0', '.st_uid != '+str(os.getuid()))
             script.write_text(text)
             helper = source/'questix_pwm_guard/deploy/review_manifest.py'
@@ -58,6 +62,21 @@ class DeploymentTest(unittest.TestCase):
             (root/'boot/firmware/config.txt').write_text('# preserved boot config\n')
             old_launcher = root/'opt/questix_robot/questix_robot_launcher.sh'
             old_launcher.write_text('# legacy launcher preserved\n')
+            rollback = source/'questix_pwm_guard/deploy/rollback_reviewed.sh'
+            rollback_text = rollback.read_text().replace('$EUID == 0', '$EUID == '+str(os.getuid()))
+            for original in ('/etc/questix_pwm_guard', '/etc/systemd/system', '/opt/questix_pwm_guard',
+                         '/opt/questix_robot', '/boot/firmware', '/var/backups',
+                         '/var/lib/questix_pwm_guard', '/run/questix-rp1-install.lock'):
+                rollback_text = rollback_text.replace(original, str(root)+original)
+            rollback.write_text(rollback_text)
+            rollback_text = rollback.read_text().replace('.st_uid != 0', '.st_uid != '+str(os.getuid()))
+            rollback_text = rollback_text.replace('for candidate in (path,*path.parents):',
+                f'for candidate in (path,*(p for p in path.parents if p == Path({str(source)!r}) '
+                f'or Path({str(source)!r}) in p.parents)):')
+            rollback_text = rollback_text.replace('export PATH=/usr/bin:/bin LANG=C', f'export PATH={tools}:/usr/bin:/bin LANG=C')
+            rollback.write_text(rollback_text)
+            for path in (source, *source.rglob('*')):
+                path.chmod(0o755 if path.is_dir() else 0o644)
             digest = seal.digest(source)
             marker = f'QUESTIX_RP1_REVIEW_V2:{digest}'.encode()
             for relative in seal.REQUIRED:
@@ -69,9 +88,9 @@ class DeploymentTest(unittest.TestCase):
                 file = prefix/package/'share'/package/'package.xml'
                 file.parent.mkdir(parents=True, exist_ok=True)
                 file.write_text('<package/>')
-            data = dict(schema=2, contract='rp1-reviewed-v2', source_digest=digest,
+            data = dict(schema=3, contract='rp1-reviewed-v3', source_digest=digest,
                         source_files={str(p.relative_to(source)):seal.sha(p) for p in seal.source_files(source)},
-                        prefix=str(prefix), install_files=seal.install_files(prefix))
+                        prefix=str(prefix), install_layout=seal.install_layout(prefix), install_files=seal.install_files(prefix))
             if failure == 'prefix':
                 # The CLI path has copied selected artifacts, but the approved table refers elsewhere.
                 other = base/'other'
@@ -82,6 +101,10 @@ class DeploymentTest(unittest.TestCase):
             approval = root/'etc/questix_pwm_guard/approved-release.sha256'
             approval.write_text(seal.sha(manifest)+'\n')
             approval.chmod(0o600)
+            receipt = source/'reviewed-installer-source.json'
+            receipt.write_text(json.dumps(dict(schema=1, contract='rp1-installer-source-v1',
+                source_digest=digest, source_files=data['source_files'])))
+            receipt.chmod(0o600)
             tools.mkdir()
             scripts = {
                 'uname':'#!/bin/sh\necho aarch64\n',
@@ -128,12 +151,6 @@ class DeploymentTest(unittest.TestCase):
                     self.assertIn(f'RP1_REVIEW_PREFIX={runtime}\n', (config/'reviewed-launch.env').read_text())
                 backup = re.search(r'^BACKUP=(.*)$', result.stdout, re.M).group(1)
                 rollback = source/'questix_pwm_guard/deploy/rollback_reviewed.sh'
-                rollback_text = rollback.read_text().replace('$EUID == 0', '$EUID == '+str(os.getuid()))
-                for original in ('/etc/questix_pwm_guard', '/etc/systemd/system', '/opt/questix_pwm_guard',
-                                 '/opt/questix_robot', '/boot/firmware', '/var/backups',
-                                 '/var/lib/questix_pwm_guard', '/run/questix-rp1-install.lock'):
-                    rollback_text = rollback_text.replace(original, str(root)+original)
-                rollback.write_text(rollback_text)
                 restored = subprocess.run(['bash', str(rollback), backup],
                     env=dict(os.environ, PATH=f'{tools}:/usr/bin:/bin'),
                     capture_output=True, text=True, timeout=30)

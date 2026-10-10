@@ -15,8 +15,10 @@ def waitfor(test, timeout=2):
     raise AssertionError('deadline exceeded')
 with tempfile.TemporaryDirectory(prefix='questix-ipc-') as directory:
     d=Path(directory);sock=d/'control';ledger=d/'writes'
+    approval=d/'approved';pinned=d/'pinned'
+    for path in (approval,pinned):path.write_text('a'*64+'\n');path.chmod(0o600)
     def launch():
-        p=subprocess.Popen([server,'--socket',str(sock),'--lock',str(d/'lock'),'--fake-log',str(ledger),'--allowed-uid',str(os.getuid()),'--admin-uid',str(os.getuid()),'--socket-gid',str(os.getgid())],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        p=subprocess.Popen([server,'--approval-file',str(approval),'--runtime-approval-file',str(pinned),'--socket',str(sock),'--lock',str(d/'lock'),'--fake-log',str(ledger),'--allowed-uid',str(os.getuid()),'--admin-uid',str(os.getuid()),'--socket-gid',str(os.getgid())],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
         waitfor(lambda:sock.exists() or p.poll() is not None)
         assert p.poll() is None, p.communicate()
         return p
@@ -27,9 +29,28 @@ with tempfile.TemporaryDirectory(prefix='questix-ipc-') as directory:
     p=launch()
     try:
         a=connect(sock);assert call(a,'ARM')[1]=='0'
+        for variant in ('missing','mismatch','mode','symlink','fifo'):
+            approval.unlink()
+            if variant=='symlink':approval.symlink_to(pinned)
+            elif variant=='fifo':os.mkfifo(approval)
+            elif variant!='missing':
+                approval.write_text(('b' if variant=='mismatch' else 'a')*64+'\n')
+                approval.chmod(0o644 if variant=='mode' else 0o600)
+            assert call(a,'AUTHORIZE')[1]=='0'
+            assert call(a,'STATUS')[1]=='1' and call(a,'LOW')[1]=='1'
+            if approval.exists() or approval.is_symlink():approval.unlink()
+            approval.write_text('a'*64+'\n');approval.chmod(0o600)
+        assert call(a,'AUTHORIZE')[1]=='1'
+        approval.unlink()
+        assert call(a,'ARM')[1]=='0' # existing ticket cannot start after revocation
+        approval.write_text('a'*64+'\n');approval.chmod(0o600)
         # Root/admin socket is not an owner; permission to authorize does not grant a session.
         c,s=authorize_and_arm(a)
         assert call(c,'COMMAND',s,2,1800)[1]=='1'
+        approval.unlink()
+        assert call(c,'COMMAND',s,2,1800)[1]=='0' # duplicate sequence still refused
+        assert call(c,'STATUS')[2]=='ACTIVE' # revoke is not an automatic active-session stop
+        approval.write_text('a'*64+'\n');approval.chmod(0o600)
         attacker=connect(sock);assert call(attacker,'COMMAND',s,3,2000)[1]=='0';attacker.close()
         assert call(c,'SHUTDOWN',s,3)[1]=='1'
         assert call(c,'COMMAND',s,4,1000)[1]=='0'

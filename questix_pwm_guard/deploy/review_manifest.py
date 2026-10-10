@@ -61,6 +61,50 @@ def install_files(prefix):
     return files
 
 
+def install_layout(prefix):
+    """Approved public-readable runtime layout, including empty directories and execute bits."""
+    layout = {}
+    for path in sorted(prefix.rglob('*')):
+        info = path.lstat()
+        name = str(path.relative_to(prefix))
+        if name == 'reviewed-release.json':
+            continue
+        if stat.S_ISDIR(info.st_mode):
+            layout[name] = {'kind': 'directory', 'mode': 0o755}
+        elif stat.S_ISREG(info.st_mode):
+            if info.st_mode & 0o7000:
+                raise ValueError('special runtime permission bits are not supported')
+            layout[name] = {'kind': 'file', 'mode': 0o644 | (info.st_mode & 0o111)}
+        else:
+            raise ValueError(f'nonregular runtime layout: {name}')
+    return layout
+
+
+def validate_layout(data):
+    layout = data['install_layout']
+    if not isinstance(layout, dict) or not layout:
+        raise ValueError('missing runtime layout')
+    validate_inventory({name: '0'*64 for name in layout})
+    files = set()
+    for name, entry in layout.items():
+        if not isinstance(entry, dict) or set(entry) != {'kind', 'mode'}:
+            raise ValueError('invalid runtime layout entry')
+        kind, mode = entry['kind'], entry['mode']
+        if type(mode) is not int:
+            raise ValueError('invalid runtime mode')
+        if kind == 'directory' and mode == 0o755:
+            pass
+        elif kind == 'file' and mode & ~0o111 == 0o644:
+            files.add(name)
+        else:
+            raise ValueError('unsupported runtime kind/mode')
+        for parent in Path(name).parents:
+            if parent != Path('.') and layout.get(str(parent)) != {'kind': 'directory', 'mode': 0o755}:
+                raise ValueError('missing runtime parent directory')
+    if files != set(data['install_files']):
+        raise ValueError('runtime layout and file inventory differ')
+
+
 def protected_path(path):
     """Root ownership through every ancestor prevents rename/replacement by the robot."""
     for candidate in (path, *path.parents):
@@ -96,12 +140,12 @@ def verify_frozen(data, prefix):
     original = trusted_json(original_manifest)
     if (sha(original_manifest) != release
             or original['prefix'] != frozen.get('original_prefix')
-            or any(original[key] != data[key] for key in ('source_digest', 'source_files', 'install_files'))):
+            or any(original[key] != data[key] for key in ('source_digest', 'source_files', 'install_files', 'install_layout'))):
         raise ValueError('frozen runtime differs from original approval')
 
 
 def verify(data, arm64=False, require_frozen=False):
-    if data['schema'] != 2 or data['contract'] != 'rp1-reviewed-v2':
+    if data['schema'] != 3 or data['contract'] != 'rp1-reviewed-v3':
         raise ValueError('unsupported review manifest')
     records = ''.join(f'{name}:{digest}\n' for name, digest in sorted(data['source_files'].items()))
     if hashlib.sha256(records.encode()).hexdigest() != data['source_digest']:
@@ -110,8 +154,15 @@ def verify(data, arm64=False, require_frozen=False):
     if not prefix.is_absolute() or prefix.resolve() != prefix:
         raise ValueError('review prefix must be canonical')
     validate_inventory(data['install_files'])
+    validate_layout(data)
     if require_frozen:
         verify_frozen(data, prefix)
+    if install_layout(prefix) != data['install_layout']:
+        raise ValueError('reviewed runtime layout changed')
+    if 'frozen_runtime' in data:
+        for name, entry in data['install_layout'].items():
+            if stat.S_IMODE((prefix/name).lstat().st_mode) != entry['mode']:
+                raise ValueError('frozen runtime mode changed')
     if install_files(prefix) != data['install_files']:
         raise ValueError('reviewed install content changed')
     for relative in REQUIRED:
@@ -157,6 +208,9 @@ def freeze(manifest, source, destination):
         raise ValueError('installer prefix differs from approved manifest')
     verify(data, arm64=True)
     destination.mkdir(mode=0o700)
+    for name, entry in sorted(data['install_layout'].items()):
+        if entry['kind'] == 'directory':
+            (destination/name).mkdir(mode=0o755, parents=True, exist_ok=True)
     root_fd = os.open(source, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
     try:
         for name, expected in sorted(data['install_files'].items()):
@@ -178,7 +232,10 @@ def freeze(manifest, source, destination):
                     target.parent.mkdir(parents=True, exist_ok=True)
                     with target.open('xb') as output:
                         shutil.copyfileobj(stream, output)
-                    target.chmod(0o644 | (info.st_mode & 0o111))
+                    mode = 0o644 | (info.st_mode & 0o111)
+                    if info.st_mode & 0o7000 or mode != data['install_layout'][name]['mode']:
+                        raise ValueError('source execute mode changed during copy')
+                    target.chmod(mode)
                 if sha(target) != expected:
                     raise ValueError(f'copied runtime differs from approved inventory: {name}')
             finally:
@@ -256,12 +313,19 @@ def trusted_json(path):
 
 def main():
     operation = sys.argv[1]
-    if operation == 'digest':
+    if operation == 'source-seal':
+        root = Path(sys.argv[2]).resolve()
+        data = {'schema': 1, 'contract': 'rp1-installer-source-v1',
+                'source_digest': digest(root),
+                'source_files': {str(p.relative_to(root)): sha(p) for p in source_files(root)}}
+        Path(sys.argv[3]).write_text(json.dumps(data, indent=2) + '\n')
+    elif operation == 'digest':
         print(digest(Path(sys.argv[2]).resolve()))
     elif operation == 'seal':
         root, prefix = (Path(v).resolve() for v in sys.argv[2:4])
-        data = {'schema': 2, 'contract': 'rp1-reviewed-v2', 'prefix': str(prefix),
+        data = {'schema': 3, 'contract': 'rp1-reviewed-v3', 'prefix': str(prefix),
                 'source_digest': digest(root), 'install_files': install_files(prefix),
+                'install_layout': install_layout(prefix),
                 'source_files': {str(p.relative_to(root)): sha(p) for p in source_files(root)}}
         verify(data)
         Path(sys.argv[4]).write_text(json.dumps(data, indent=2) + '\n')

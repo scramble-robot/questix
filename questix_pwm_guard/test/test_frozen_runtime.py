@@ -39,9 +39,9 @@ class FrozenRuntimeTest(unittest.TestCase):
             file = self.source / package / 'share' / package / 'package.xml'
             file.parent.mkdir(parents=True, exist_ok=True)
             file.write_text('<package/>')
-        self.data = dict(schema=2, contract='rp1-reviewed-v2', prefix=str(self.source),
+        self.data = dict(schema=3, contract='rp1-reviewed-v3', prefix=str(self.source),
                          source_digest=seal.hashlib.sha256(b'').hexdigest(), source_files={},
-                         install_files=seal.install_files(self.source))
+                         install_layout=seal.install_layout(self.source), install_files=seal.install_files(self.source))
         self.manifest = self.base / 'input.json'
         self.manifest.write_text(json.dumps(self.data))
         self.manifest.chmod(0o600)
@@ -192,6 +192,7 @@ class FrozenRuntimeTest(unittest.TestCase):
             env=env, capture_output=True, text=True, timeout=90)
         self.assertEqual(build.returncode, 0, build.stdout + build.stderr)
         self.data['install_files'] = seal.install_files(self.source)
+        self.data['install_layout'] = seal.install_layout(self.source)
         self.manifest.write_text(json.dumps(self.data))
         frozen = seal.publish(self.freeze())
         prefix = Path(frozen['prefix'])
@@ -205,6 +206,40 @@ class FrozenRuntimeTest(unittest.TestCase):
         self.assertIn('reviewed\n' + str(prefix / 'frozen_probe'), run.stdout)
         self.assertNotIn(str(self.source), run.stdout)
         self.assertEqual(seal.verify(frozen, require_frozen=True), prefix)
+
+    def test_empty_directory_and_public_read_policy_are_approved(self):
+        (self.source/'empty/nested').mkdir(parents=True)
+        (self.source/'local_setup.bash').chmod(0o600)
+        self.data['install_layout'] = seal.install_layout(self.source)
+        self.manifest.write_text(json.dumps(self.data))
+        published = seal.publish(self.freeze())
+        prefix = Path(published['prefix'])
+        self.assertTrue((prefix/'empty/nested').is_dir())
+        self.assertEqual((prefix/'local_setup.bash').stat().st_mode & 0o777, 0o644)
+        (prefix/'empty/nested').rmdir()
+        with self.assertRaisesRegex(ValueError, 'layout changed'):
+            seal.verify(published, require_frozen=True)
+
+    def test_execute_mode_change_is_rejected_before_and_after_copy(self):
+        file = self.source/'local_setup.bash'
+        file.chmod(0o755)
+        with self.assertRaisesRegex(ValueError, 'layout changed'):
+            self.freeze()
+        file.chmod(0o644)
+        published = seal.publish(self.freeze())
+        (Path(published['prefix'])/'local_setup.bash').chmod(0o755)
+        with self.assertRaises(ValueError):
+            seal.verify(published, require_frozen=True)
+
+    def test_special_mode_and_missing_layout_are_rejected(self):
+        file = self.source/'local_setup.bash'
+        file.chmod(0o4644)
+        with self.assertRaisesRegex(ValueError, 'special runtime'):
+            seal.verify(self.data)
+        file.chmod(0o644)
+        legacy = dict(self.data, schema=2, contract='rp1-reviewed-v2')
+        with self.assertRaisesRegex(ValueError, 'unsupported review'):
+            seal.verify(legacy)
 
     @unittest.skipUnless(os.geteuid() == 0, 'real root-to-unprivileged DAC check requires root')
     def test_unprivileged_process_cannot_write_real_root_owned_release(self):

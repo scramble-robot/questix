@@ -2,6 +2,51 @@
 # REVIEW BEFORE EXECUTION. Installs sealed ARM64 assets; never enables/starts/export/reboots.
 # Usage: sudo bash install_reviewed.sh <reviewed-colcon-install-prefix> <robot-user>
 set -euo pipefail
+# Command lookup is fixed before the first external command. Invoke with a clean environment.
+export PATH=/usr/bin:/bin LANG=C
+unset BASH_ENV ENV CDPATH
+# The operator must execute a reviewed root-managed copy, not a development checkout.
+check_reviewed_source() {
+/usr/bin/python3 -I - "${BASH_SOURCE[0]}" <<'PY_SOURCE'
+import hashlib,json,os,stat,sys
+from pathlib import Path
+script=Path(sys.argv[1])
+if script.absolute().resolve() != script.absolute():
+    raise SystemExit('installer source path must be canonical')
+root=script.absolute().parents[2]
+def protected(path):
+    for candidate in (path,*path.parents):
+        info=candidate.lstat()
+        if info.st_uid != 0 or info.st_mode & 0o022 or not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
+            raise SystemExit('unsafe installer source path: '+str(candidate))
+    if path.is_file() and path.stat().st_nlink != 1:
+        raise SystemExit('linked installer source file')
+protected(script)
+receipt=root/'reviewed-installer-source.json'
+protected(receipt)
+if stat.S_IMODE(receipt.stat().st_mode) != 0o600:
+    raise SystemExit('installer approval receipt must be mode0600')
+data=json.loads(receipt.read_text())
+if data.get('schema') != 1 or data.get('contract') != 'rp1-installer-source-v1':
+    raise SystemExit('unsupported installer source approval')
+files=data['source_files']
+records=''.join(f'{name}:{digest}\n' for name,digest in sorted(files.items()))
+if hashlib.sha256(records.encode()).hexdigest()!=data['source_digest']:
+    raise SystemExit('installer source approval table mismatch')
+for name,digest in files.items():
+    if not name or name.startswith('/') or any(p in ('','.', '..') for p in name.split('/')):
+        raise SystemExit('invalid installer source inventory')
+    path=root/name
+    protected(path)
+    if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest()!=digest:
+        raise SystemExit('installer source differs from approval: '+name)
+required=('questix_pwm_guard/deploy/install_reviewed.sh','questix_pwm_guard/deploy/rollback_reviewed.sh',
+          'questix_pwm_guard/deploy/review_manifest.py')
+if any(name not in files for name in required) or str(script.relative_to(root)) not in files:
+    raise SystemExit('incomplete installer source approval')
+PY_SOURCE
+}
+check_reviewed_source
 [[ $# == 2 && $EUID == 0 ]] || { echo 'root and two arguments required' >&2; exit 2; }
 review_prefix=$(realpath -- "$1")
 robot_user=$2
@@ -167,12 +212,14 @@ install -m 0644 "$stage/50-rp1-pwm.conf" /etc/systemd/system/questix_robot.servi
 install -m 0644 "$stage/questix-gpio13-pwm.dtbo" /boot/firmware/overlays/questix-gpio13-pwm.dtbo
 install -m 0644 "$stage/config.txt" /boot/firmware/config.txt
 # Verify the protected runtime; subsequent edits to the build prefix cannot change it.
-/usr/bin/python3 -I - "$script_dir/review_manifest.py" "$manifest" <<'PY'
+/usr/bin/python3 -I - "$stage/review_manifest.py" "$manifest" <<'PY'
 import json,runpy,sys
 from pathlib import Path
 module=runpy.run_path(sys.argv[1]);data=json.loads(Path(sys.argv[2]).read_text())
 module['verify'](data,arm64=True,require_frozen=True)
-files=('/opt/questix_pwm_guard/questix_pwm_guard','/opt/questix_pwm_guard/questix_pwm_ctl',
+pinned=Path('/etc/questix_pwm_guard/runtime-approved.sha256')
+pinned.write_text(data['frozen_runtime']['approved_manifest_sha256']+'\n');pinned.chmod(0o600)
+files=('/etc/questix_pwm_guard/runtime-approved.sha256','/opt/questix_pwm_guard/questix_pwm_guard','/opt/questix_pwm_guard/questix_pwm_ctl',
        '/opt/questix_pwm_guard/validate_manual_start.py','/opt/questix_pwm_guard/review_manifest.py',
        '/opt/questix_robot/questix_robot_launcher.sh','/etc/questix_pwm_guard/esc.yaml',
        '/etc/questix_pwm_guard/reviewed-launch.env',
@@ -183,6 +230,8 @@ target=Path('/etc/questix_pwm_guard/reviewed-release.json')
 target.write_text(json.dumps(data,indent=2)+'\n');target.chmod(0o600)
 module['verify'](data,arm64=True,require_frozen=True)
 PY
+/usr/bin/python3 -I "$stage/review_manifest.py" approved "$runtime_prefix/reviewed-release.json" "$approval"
+check_reviewed_source
 systemctl daemon-reload
 printf 'READY\n' > /etc/questix_pwm_guard/deployment-state
 rm -- /var/lib/questix_pwm_guard/deployment-in-progress

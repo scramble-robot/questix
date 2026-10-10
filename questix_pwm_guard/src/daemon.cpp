@@ -59,6 +59,27 @@ uint64_t generation() {
   if (rc != ssize_t(sizeof(n)) || n == 0) throw std::runtime_error("session generation failed");
   return n;
 }
+// Only fixed-size root approval records are read; no child process or workspace code runs.
+std::string approval_digest(const std::string& path, uid_t admin) {
+  int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+  if (fd < 0) return {};
+  struct stat info {};
+  char bytes[66];
+  ssize_t count = -1;
+  if (fstat(fd, &info) == 0 && S_ISREG(info.st_mode) && info.st_uid == admin &&
+      (info.st_mode & 07777) == 0600 && info.st_nlink == 1 &&
+      (info.st_size == 64 || info.st_size == 65))
+    count = read(fd, bytes, sizeof(bytes));
+  close(fd);
+  if (count != 64 && !(count == 65 && bytes[64] == '\n')) return {};
+  for (int i = 0; i < 64; ++i)
+    if (!((bytes[i] >= '0' && bytes[i] <= '9') || (bytes[i] >= 'a' && bytes[i] <= 'f'))) return {};
+  return std::string(bytes, 64);
+}
+bool approval_matches(const std::string& current, const std::string& installed, uid_t admin) {
+  auto expected = approval_digest(installed, admin);
+  return !expected.empty() && approval_digest(current, admin) == expected;
+}
 #ifdef QUESTIX_TEST_FAKE_IO
 class Ledger : public q::Output {
 public:
@@ -84,6 +105,8 @@ int run(int argc, char** argv) {
   std::string socket_path = "/run/questix_pwm_guard/control.sock",
               lock_path = "/run/questix_pwm_guard/lock";
   std::string fake_log;
+  std::string approval_file = "/etc/questix_pwm_guard/approved-release.sha256",
+              installed_approval = "/etc/questix_pwm_guard/runtime-approved.sha256";
   uid_t allowed = uid_t(-1), admin = 0;
   gid_t socket_group = 0;
   bool recovery = false;
@@ -97,6 +120,14 @@ int run(int argc, char** argv) {
     if (i + 1 >= argc) throw std::runtime_error("missing option value");
     std::string v = argv[++i];
 #ifdef QUESTIX_TEST_FAKE_IO
+    if (k == "--approval-file") {
+      approval_file = v;
+      continue;
+    }
+    if (k == "--runtime-approval-file") {
+      installed_approval = v;
+      continue;
+    }
     if (k == "--fake-log") {
       fake_log = v;
       continue;
@@ -231,12 +262,13 @@ int run(int argc, char** argv) {
             ok = true;
           } else if (r.op == "AUTHORIZE" && peer.uid == admin && owner < 0 && r.session == 0 &&
                      r.seq == 0 && r.pulse == 0) {
-            ok = core.authorize(t);
+            ok = approval_matches(approval_file, installed_approval, admin) && core.authorize(t);
           } else if (r.op == "LOW" && peer.uid == admin) {
             ok = core.emergency_low();
           } else if (r.op == "ARM" && peer.uid == allowed && owner < 0 && r.session == 0 &&
                      r.seq == 0 && r.pulse == 0) {
-            ok = core.arm(generation(), t);
+            ok = approval_matches(approval_file, installed_approval, admin) &&
+                 core.arm(generation(), t);
             if (ok) {
               owner = fd;
               peer.owns = true;
