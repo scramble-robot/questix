@@ -61,27 +61,42 @@ function driverBlock(model, text) {
   </div>`;
 }
 
+// The measured lines of a wheel: the raw feedback is the line to read (solid, thick); the
+// node's low-pass filtered value is a thin, faint helper under it, told apart by width, opacity
+// and its own direct label, never by colour alone.
+const FILTERED_WIDTH = 1.25;
+const FILTERED_OPACITY = 0.55;
+
+const sideKey = (side, key) => `${key}${side === 'left' ? 'Left' : 'Right'}`;
+
 function wheelChart(model, side, text) {
   const words = text.wheels;
   const series = model.wheels?.series;
-  const targetKey = side === 'left' ? 'targetLeft' : 'targetRight';
   return htmlChart({
     label: fill(words.chartLabel, { side: words[side], seconds: model.historySeconds }),
     yTitle: words.yTitle,
     xTitle: words.xTitle,
     x: model.timeAxis,
     y: model.wheelAxis,
-    // The dashed command is drawn over the measurement: where the wheel follows it exactly, the
-    // dashes still show on the solid line instead of disappearing under it.
+    // Drawn bottom to top: the filtered helper, the raw measurement over it, and the dashed
+    // command over both: where the wheel follows it exactly, the dashes still show on the solid
+    // line instead of disappearing under it.
     series: [
       {
         points: series?.[side] ?? [],
         color: measured.color,
-        width: 3,
-        label: words.measured,
+        width: FILTERED_WIDTH,
+        opacity: FILTERED_OPACITY,
+        label: words.filtered,
       },
       {
-        points: series?.[targetKey] ?? [],
+        points: series?.[sideKey(side, 'raw')] ?? [],
+        color: measured.color,
+        width: 3,
+        label: words.raw,
+      },
+      {
+        points: series?.[sideKey(side, 'target')] ?? [],
         color: target.color,
         dash: target.dash,
         width: target.width,
@@ -92,21 +107,30 @@ function wheelChart(model, side, text) {
 }
 
 function wheelCard(model, side, text) {
+  const words = text.wheels;
   const wheels = model.wheels;
-  const value = wheels?.[side];
-  const command = wheels?.[side === 'left' ? 'targetLeft' : 'targetRight'];
+  const filtered = wheels?.[side];
+  const raw = wheels?.[sideKey(side, 'raw')];
+  // The raw feedback is the big number; an older bridge without it shows the filtered value as
+  // before, with no second line.
+  const hasRaw = Number.isFinite(raw);
+  const command = wheels?.[sideKey(side, 'target')];
   const stale = !wheels || wheels.stale;
   return html`<div class=${stale ? 'rs-card rs-wheel is-stale' : 'rs-card rs-wheel'}>
-    <p class="rs-label">${text.wheels[side]}</p>
+    <p class="rs-label">${words[side]}</p>
     <p class="rs-big" data-rs-wheel=${side}>
-      <span class="rs-number">${fixed(value, 1)}</span><span class="rs-unit">rpm</span>
+      <span class="rs-number">${fixed(hasRaw ? raw : filtered, 1)}</span
+      ><span class="rs-unit">rpm</span>
     </p>
+    ${
+      hasRaw
+        ? html`<p class="rs-sub" data-rs-wheel-filtered=${side}>
+            ${fill(words.filteredValue, { rpm: fixed(filtered, 1) })}
+          </p>`
+        : nothing
+    }
     <p class="rs-sub">
-      ${
-        Number.isFinite(command)
-          ? fill(text.wheels.command, { rpm: command.toFixed(1) })
-          : text.wheels.noCommand
-      }
+      ${Number.isFinite(command) ? fill(words.command, { rpm: command.toFixed(1) }) : words.noCommand}
     </p>
     ${wheelChart(model, side, text)}
   </div>`;
@@ -324,6 +348,7 @@ function robotStateView(model, text, actions, status = '') {
       ${motionCard(model, text)} ${poseCard(model, text, actions)} ${frontCard(model, text)}
     </div>
     ${freshList(model, text)}
+    <p class="helper" data-rs-rate-note>${text.rateNote}</p>
   </section>`;
 }
 

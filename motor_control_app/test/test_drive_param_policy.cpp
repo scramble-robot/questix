@@ -14,6 +14,7 @@
 #include <memory>
 #include <rclcpp/rclcpp.hpp>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "motor_control_app/drive_component.hpp"
@@ -22,6 +23,7 @@ namespace motor_control_app {
 // Initialize parameter members without lifecycle configure or hardware access.
 struct DriveParamPolicyAccess {
   static void initialize(DriveComponent& node) { node.readParameters(); }
+  static int responseTimeoutMs(const DriveComponent& n) { return n.serial_response_timeout_ms_; }
   static std::vector<double> snapshot(const DriveComponent& n) {
     return {n.max_linear_accel_,
             n.max_angular_accel_,
@@ -296,4 +298,38 @@ TEST_F(DriveParamPolicyTest, FsmAndVelocityRunValidationRejectsWithoutSideEffect
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
+}
+
+TEST_F(DriveParamPolicyTest, SerialResponseTimeoutDefaultsToTheFormerFixedValue) {
+  // 既定 10 ms は従来の固定値（既定挙動を変えない）。シリアル設定なので実行時変更は拒否。
+  EXPECT_EQ(node_->get_parameter("serial_response_timeout_ms").as_int(), 10);
+  EXPECT_EQ(node_->get_parameter("serial_response_timeout_ms").as_int(),
+            motor_control_lib::DdtMotorLib::kDefaultResponseTimeoutMs);
+  EXPECT_FALSE(node_->set_parameter(rclcpp::Parameter("serial_response_timeout_ms", 5)).successful);
+  EXPECT_EQ(node_->get_parameter("serial_response_timeout_ms").as_int(), 10);
+}
+
+TEST(DriveParamPolicyClamp, OutOfRangeResponseTimeoutIsClampedWhenRead) {
+  rclcpp::init(0, nullptr);
+  for (const auto& [requested, applied] :
+       std::vector<std::pair<int, int>>{{0, 2}, {1, 2}, {2, 2}, {12, 12}, {50, 50}, {500, 50}}) {
+    rclcpp::NodeOptions options;
+    options.append_parameter_override("auto_start", false);
+    options.append_parameter_override("serial_response_timeout_ms", requested);
+    auto node = std::make_shared<motor_control_app::DriveComponent>(options);
+    motor_control_app::DriveParamPolicyAccess::initialize(*node);
+    EXPECT_EQ(motor_control_app::DriveParamPolicyAccess::responseTimeoutMs(*node), applied)
+        << "requested " << requested;
+  }
+  rclcpp::shutdown();
+}
+
+TEST_F(DriveParamPolicyTest, ControlSampleIsOnByDefaultAndNotRuntimeChangeable) {
+  // 診断サンプル（/drive_control_sample）は既定で有効。publisher は configure で作るため、
+  // 実行時の変更は拒否する（受理して黙って無視しない）。
+  EXPECT_TRUE(node_->get_parameter("publish_control_sample").as_bool());
+  EXPECT_EQ(node_->get_parameter("control_sample_topic").as_string(), "/drive_control_sample");
+  EXPECT_FALSE(node_->set_parameter(rclcpp::Parameter("publish_control_sample", false)).successful);
+  EXPECT_FALSE(node_->set_parameter(rclcpp::Parameter("control_sample_topic", "/x")).successful);
+  EXPECT_TRUE(node_->get_parameter("publish_control_sample").as_bool());
 }

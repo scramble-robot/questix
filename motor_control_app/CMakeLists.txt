@@ -129,6 +129,8 @@ if(BUILD_TESTING)
   ament_auto_add_gtest(test_lifecycle_auto_start test/test_lifecycle_auto_start.cpp)
   ament_auto_add_gtest(test_motor_status_msg test/test_motor_status_msg.cpp)
   ament_target_dependencies(test_motor_status_msg motor_control_lib)
+  ament_auto_add_gtest(test_drive_control_sample_msg test/test_drive_control_sample_msg.cpp)
+  ament_target_dependencies(test_drive_control_sample_msg motor_control_lib)
 
   ament_auto_add_gtest(test_ddt_feedback_format test/test_ddt_feedback_format.cpp)
 

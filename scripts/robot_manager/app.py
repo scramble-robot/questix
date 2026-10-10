@@ -457,8 +457,10 @@ def get_readiness():
     profile = {'ok': False, 'message': 'コントローラー設定を担当者に確認してください。'}
     if controller in _CONTROLLER_TYPES:
         try:
-            controls.read_profile(CONFIG_DIR, controller, config)
-            profile = {'ok': True, 'message': '読み込み・入力値の確認済み'}
+            current = controls.read_profile(CONFIG_DIR, controller, config)
+            # A legacy profile is ignored and the defaults apply: usable, but say so.
+            profile = {'ok': True,
+                       'message': current['legacy_warning'] or '読み込み・入力値の確認済み'}
         except HTTPException as exc:
             profile = {'ok': False, 'message': str(exc.detail)}
     try:

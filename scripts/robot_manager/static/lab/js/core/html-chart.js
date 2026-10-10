@@ -14,11 +14,26 @@ const HLINE_LABEL_SPAN = 40; // percent of the plot width a threshold's label ma
 const percentX = (scale, value) => ((value - scale.min) / (scale.max - scale.min || 1)) * 100;
 const percentY = (scale, value) => 100 - ((value - scale.min) / (scale.max - scale.min || 1)) * 100;
 
+const finitePoint = ([px, py]) => Number.isFinite(px) && Number.isFinite(py);
+
+// The runs of finite points: a point with a missing (non-finite) value ends a run, so a gap in
+// the data is never bridged by a straight line. Data without gaps is one run, drawn as before.
+function runs(points) {
+  const result = [[]];
+  for (const point of points) {
+    if (finitePoint(point)) result.at(-1).push(point);
+    else if (result.at(-1).length) result.push([]);
+  }
+  return result.filter((run) => run.length);
+}
+
 function polyline(points, x, y, line) {
-  const coordinates = points
-    .map(([px, py]) => `${(percentX(x, px) * PLOT) / 100},${(percentY(y, py) * PLOT) / 100}`)
-    .join(' ');
-  return svg`<polyline points=${coordinates} fill="none" stroke=${line.color} stroke-width=${line.width ?? 2.5} stroke-dasharray=${line.dash || nothing} stroke-linejoin="round" vector-effect="non-scaling-stroke" opacity=${line.opacity ?? 1}/>`;
+  return runs(points).map((run) => {
+    const coordinates = run
+      .map(([px, py]) => `${(percentX(x, px) * PLOT) / 100},${(percentY(y, py) * PLOT) / 100}`)
+      .join(' ');
+    return svg`<polyline points=${coordinates} fill="none" stroke=${line.color} stroke-width=${line.width ?? 2.5} stroke-dasharray=${line.dash || nothing} stroke-linejoin="round" vector-effect="non-scaling-stroke" opacity=${line.opacity ?? 1}/>`;
+  });
 }
 
 function grid(x, y) {
@@ -39,15 +54,14 @@ function clearOfThresholds(label, thresholds) {
   if (hit !== undefined) label.top = hit + LABEL_GAP;
 }
 
-// Direct labels at the right end of each line, pushed apart so they never overlap; with
-// `thresholds` (percent tops of threshold lines) they also keep clear of the thresholds' labels.
+// Direct labels at the right end of each line (its last finite point), pushed apart so they never
+// overlap; with `thresholds` (percent tops of threshold lines) they also keep clear of the
+// thresholds' labels.
 function lineLabels(series, x, y, thresholds = []) {
   const labels = series
-    .filter((line) => line.label && line.points.length)
-    .map((line) => {
-      const [px, py] = line.points.at(-1);
-      return { line, left: percentX(x, px), top: percentY(y, py) };
-    })
+    .map((line) => ({ line, end: line.label ? line.points.findLast(finitePoint) : undefined }))
+    .filter(({ end }) => end)
+    .map(({ line, end: [px, py] }) => ({ line, left: percentX(x, px), top: percentY(y, py) }))
     .sort((a, b) => a.top - b.top);
   for (let i = 1; i < labels.length; i++)
     labels[i].top = Math.max(labels[i].top, labels[i - 1].top + LABEL_GAP);
@@ -65,7 +79,8 @@ function lineLabels(series, x, y, thresholds = []) {
 /**
  * spec: {
  *   label, xTitle, yTitle, x, y (niceScale results),
- *   series: [{points: [[x, y]], color, dash, width, opacity, label, labelColor}],
+ *   series: [{points: [[x, y]], color, dash, width, opacity, label, labelColor}] — a point with
+ *     a non-finite x or y is a gap: the line stops there and starts again after it,
  *   bands: [{from, to, label}]    — a shaded x range,
  *   hlines: [{y, label, color, dash}] — a threshold across the plot,
  *   vlines: [{x, label, color, dash}] — a marked position or moment,

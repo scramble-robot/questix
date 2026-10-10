@@ -101,6 +101,15 @@ jobs:
       - name: Test controller names, diagrams, saved versus edited values, and web joy URLs
         run: node --test scripts/robot_manager/tests/*.test.cjs
 
+      # System identification and ripple analysis (scripts/identify): pure Python + NumPy on
+      # synthetic data, no ROS (rosbag2_py and matplotlib are imported only when used). NumPy is
+      # pinned to the apt version the robot has (python3-numpy 1.26.4 on Ubuntu 24.04).
+      - name: Install identification test dependencies
+        run: python -m pip install "numpy==1.26.4"
+
+      - name: Run identification pytest
+        run: python -m pytest -q scripts/identify
+
   lab-tests:
     name: QUESTiX LAB tests + Prettier
     runs-on: ubuntu-24.04
