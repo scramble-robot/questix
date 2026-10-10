@@ -151,7 +151,13 @@ TEST_F(EmergencyStopMonitorTest, SubscribesWithTheContractQosOnALifecycleNode) {
   EXPECT_EQ(calls, 1);
   EXPECT_EQ(monitor.state(), EstopState::kReleased);
 
-  const auto info = publisher_node->get_subscriptions_info_by_topic(topic);
+  // The message arriving does not mean the publisher's graph shows the subscription yet.
+  auto info = publisher_node->get_subscriptions_info_by_topic(topic);
+  const auto graph_deadline = std::chrono::steady_clock::now() + 3s;
+  while (info.size() != 1u && std::chrono::steady_clock::now() < graph_deadline) {
+    executor.spin_some(10ms);
+    info = publisher_node->get_subscriptions_info_by_topic(topic);
+  }
   ASSERT_EQ(info.size(), 1u);
   EXPECT_EQ(info[0].qos_profile().reliability(), rclcpp::ReliabilityPolicy::Reliable);
   EXPECT_EQ(info[0].qos_profile().durability(), rclcpp::DurabilityPolicy::TransientLocal);

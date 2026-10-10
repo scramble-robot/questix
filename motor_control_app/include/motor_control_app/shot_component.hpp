@@ -9,9 +9,10 @@
 #include <atomic>
 #include <chrono>
 #include <memory>
-#include <questix_msgs/msg/actuation_authority.hpp>
 #include <questix_msgs/msg/emergency_stop.hpp>
+#include <questix_msgs/msg/motion_permission.hpp>
 #include <questix_safety/emergency_stop_monitor.hpp>
+#include <questix_safety/permission_monitor.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_components/register_node_macro.hpp>
 #include <rclcpp_lifecycle/lifecycle_node.hpp>
@@ -52,12 +53,13 @@ namespace motor_control_app {
 // 一度も受信していない間・受信が途絶えた間も非常停止として扱い、自動起動もコマンドもしない
 // （operation_manager は questix_core で常に起動し、GPIO 安全系なしでも解除を出す）。
 //
-// 教員の許可は非常停止とは別の概念で、require_teacher_permission=true
-// （練習での opt-in、既定 false、大会では使わない）の時だけ、教員の許可
-// （questix_msgs/ActuationAuthority の launcher_allowed、1.0 s のリース）がない間は自動起動
-// （configure/activate）を保留し、コントローラ・QUESTiX LAB の射撃とチルトを断る。ACTIVE 中に
-// 許可が切れたら非常停止と同じ安全 teardown（deactivate→cleanup）を行い、理由は非常停止とは
-// 別に記録する（/shot/status の authority）。許可が戻っても、押しっぱなしの入力では動かない。
+// 走行許可（L2、/motion_permission の launcher_allowed、questix_msgs/MotionPermission、volatile、
+// motion_permission_timeout_sec のリース）は非常停止とは別の概念で、大会の審判・教材の先生の許可を
+// MotionPermissionManager がまとめたもの。許可がない間は自動起動（configure/activate とホーム移動）
+// を保留し、コントローラ・QUESTiX LAB の射撃とチルトを断る。ACTIVE 中に許可がなくなったら、射撃中の
+// シーケンスだけ止めて home に戻し、サーボバスは解放しない（電源は入ったまま。復帰で再接続と
+// ホーム移動を待たない）。非常停止（電源が切れる）は従来どおり deactivate→cleanup。両方が閉じて
+// いるときは非常停止の反応と理由が優先する。許可が戻っても、押しっぱなしの入力では動かない。
 //
 // QUESTiX LAB: accept_lab_input=true（練習用起動のみ）のとき /shot/lab/tilt（std_msgs/Float32,
 // 目標チルト角 [deg]）と /shot/lab/fire（std_msgs/Empty, 1発射出）を購読する。適用条件は
@@ -104,13 +106,16 @@ private:
   void onEmergencyStop(const questix_msgs::msg::EmergencyStop& msg,
                        const questix_safety::EmergencyStopMonitor::Change& change);
   void emergencyStopTimeoutCallback();
-  void teacherPermissionCallback(const questix_msgs::msg::ActuationAuthority::SharedPtr msg);
-  // 100 ms 周期: 実行時許可のリース切れ・変化を検出し、閉じたら teardown、開いたら自動起動。
-  void teacherPermissionTimerCallback();
+  // /motion_permission を受信したとき（permission_monitor_ から呼ばれる）。
+  void onMotionPermission(const questix_msgs::msg::MotionPermission& msg,
+                          const questix_safety::PermissionMonitor::Change& change);
+  // 100 ms 周期と受信ごと: 走行許可のリース切れ・変化を検出し、閉じたら射撃・チルトを止め
+  // （バスは保持）、開いたら自動起動を再開する。
+  void applyPermission();
   // 非常停止として扱うか（押下・途絶、require_emergency_stop なら未受信も）。
   bool estopBlocks() const;
-  // 実行時許可の拒否理由（kNone で許可あり、または大会起動で不要）。
-  actuation_gate::Block teacherPermissionBlock() const;
+  // 走行許可の拒否理由（kNone で許可あり、require_motion_permission=false の診断起動でも kNone）。
+  actuation_gate::Block permissionBlock() const;
   void tryAutoStart();
   void transitionToUnconfiguredForAutoRecovery(const char* reason) noexcept;
   void handleSafetyTeardownState(const char* reason, uint8_t state_id) noexcept;
@@ -155,15 +160,8 @@ private:
   // /emergency_stop の途絶で teardown した（次の受信まで押下扱い）。受信状態そのものは
   // estop_monitor_ が持つ。
   bool estop_timed_out_;
-  // 教員の許可（練習: true、大会: false）。コンストラクタで一度だけ読む
-  bool require_teacher_permission_{false};
-  std::string teacher_permission_topic_{"/actuation_authority"};
-  double teacher_permission_timeout_sec_{1.0};
-  bool have_teacher_permission_msg_{false};
-  bool teacher_permission_launcher_allowed_{false};
-  std::chrono::steady_clock::time_point last_teacher_permission_rx_{};
-  // 前回の判定で許可があったか（変化の検出用）。起動時は許可なし
-  bool teacher_permission_was_allowed_{false};
+  // 前回の判定で走行許可があったか（変化の検出用）。起動時は許可なし
+  bool permission_was_allowed_{false};
   // ACTIVE 中に検出したサーボ通信故障のフラグ。autoStartTimerCallback が拾って
   // deactivate→cleanup→再接続の自動復帰を行う。
   std::atomic<bool> runtime_fault_;
@@ -204,9 +202,10 @@ private:
   // 起動の試行期間だけ動く短い周期のタイマー（auto_start=true のときだけ作る）
   rclcpp::TimerBase::SharedPtr startup_timer_;
   rclcpp::TimerBase::SharedPtr emergency_stop_timeout_timer_;
-  // 教員の許可（volatile、ラッチしない）とリース判定タイマー
-  rclcpp::Subscription<questix_msgs::msg::ActuationAuthority>::SharedPtr teacher_permission_sub_;
-  rclcpp::TimerBase::SharedPtr teacher_permission_timer_;
+  // /motion_permission（launcher_allowed）の購読と判定（volatile、ラッチしない）と、
+  // リース切れを検出するタイマー
+  std::unique_ptr<questix_safety::PermissionMonitor> permission_monitor_;
+  rclcpp::TimerBase::SharedPtr permission_timer_;
   // 射撃シーケンス用ワンショットタイマー。fire 位置到達後 fire_duration_ms で
   // 発火し home 復帰する。executor をブロックしないための置き換え（issue #83）。
   rclcpp::TimerBase::SharedPtr fire_timer_;

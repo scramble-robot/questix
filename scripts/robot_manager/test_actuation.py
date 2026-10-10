@@ -74,6 +74,9 @@ def actuation(tmp_path, monkeypatch):
                                  TimeoutExpired=subprocess.TimeoutExpired)
     monkeypatch.setattr(module, "subprocess", fake)
     monkeypatch.setattr(module, "START_GRACE_SEC", 0.0)
+    # The robot runs a lesson launch (app.py's real source asks systemd and last-launch).
+    module.running = {"mode": "lesson"}
+    monkeypatch.setattr(module, "_running_mode_source", lambda: module.running["mode"])
     module.started = started
     return module
 
@@ -412,6 +415,8 @@ def app_module(lab, actuation, monkeypatch):
     module = importlib.reload(module)
     monkeypatch.setattr(module, "actuation", actuation)
     monkeypatch.setattr(module, "lab", lab)
+    # Importing app installs its own running-mode source (systemd); keep the test's lesson launch.
+    monkeypatch.setattr(actuation, "_running_mode_source", lambda: actuation.running["mode"])
     return module
 
 
@@ -488,3 +493,25 @@ def test_manager_shutdown_ends_the_heartbeat(app_module, actuation, monkeypatch)
     asyncio.run(run())
     assert actuation.status()["launcher"] is False
     assert actuation.started[0].stdin.closed_by_parent
+
+
+@pytest.mark.parametrize("running", [None, "practice", "competition", "unknown"])
+def test_switching_on_needs_a_running_lesson_launch(actuation, running):
+    # Saved lesson mode, but the robot runs another launch (or none): refused, nothing started.
+    actuation.running["mode"] = running
+    with pytest.raises(HTTPException) as error:
+        actuation.set_authority("drive", True)
+    assert error.value.status_code == 409
+    assert "教材モードで起動" in error.value.detail
+    assert actuation.started == []
+    status = actuation.status()
+    assert status["available"] is False and status["running_mode"] == running
+    assert status["mode"] == "lesson"
+
+
+def test_a_running_lesson_launch_with_another_saved_mode_is_not_usable(actuation, tmp_path):
+    # The teacher saved practice for the next start: the switches stay off until then.
+    (tmp_path / "mode").write_text("practice\n")
+    with pytest.raises(HTTPException):
+        actuation.set_authority("launcher", True)
+    assert actuation.status()["available"] is False

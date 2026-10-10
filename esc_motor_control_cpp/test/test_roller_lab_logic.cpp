@@ -214,18 +214,18 @@ TEST(RollerLabLogic, EmergencyStopWhileLabIdleDoesNotLock) {
   EXPECT_FALSE(logic.labLocked());
 }
 
-// The teacher's runtime authority is its own reason and locks like the E-stop.
-TEST(RollerLabLogic, RefusedWithoutAuthorityAndLockedWhenItReturns) {
+// The motion permission (L2) is its own reason and locks like the E-stop.
+TEST(RollerLabLogic, RefusedWithoutPermissionAndLockedWhenItReturns) {
   auto logic = makeLogic();
-  const auto d = logic.onLab(0.5, 10.0, false, false, /*authority=*/false);
+  const auto d = logic.onLab(0.5, 10.0, false, false, /*permission=*/false);
   EXPECT_FALSE(d.apply);
-  EXPECT_EQ(d.refusal, Refusal::kAuthority);
+  EXPECT_EQ(d.refusal, Refusal::kPermission);
   EXPECT_EQ(logic.onLab(0.5, 10.1, false, false, true).refusal, Refusal::kLocked);
   logic.onLab(0.0, 10.2, false, false, true);
   EXPECT_TRUE(logic.onLab(0.5, 10.3, false, false, true).apply);
   // The E-stop reason comes first.
   EXPECT_EQ(makeLogic().onLab(0.5, 11.0, false, true, false).refusal, Refusal::kEmergencyStop);
-  EXPECT_STREQ(RollerLabLogic::refusalName(Refusal::kAuthority), "authority");
+  EXPECT_STREQ(RollerLabLogic::refusalName(Refusal::kPermission), "permission");
 }
 
 TEST(RollerLabLogic, BlockedEdgeStopsAndLocksLabRoller) {
@@ -253,7 +253,7 @@ TEST(RollerStatusJson, FormatsAllFields) {
   status.lab_max_speed = 0.8;
   EXPECT_EQ(rollerStatusJson(status),
             "{\"command\": 0.500, \"source\": \"lab\", \"lab_accepted\": true, "
-            "\"lab_locked\": false, \"estop\": false, \"authority\": true, "
+            "\"lab_locked\": false, \"estop\": false, \"permission\": true, "
             "\"lab_max_speed\": 0.800}");
 }
 

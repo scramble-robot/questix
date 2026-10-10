@@ -194,7 +194,7 @@ TEST(FullSpeedLogicTest, RepeatedNormalCyclesWork) {
   }
 }
 
-// A press held through an E-stop or a lost runtime authority never restarts the roller when it
+// A press held through an E-stop or a lost motion permission never restarts the roller when it
 // becomes usable again: it needs a release and a new press (the old node code passed a held
 // press as "released" while stopped, which re-armed the latch and restarted on release).
 TEST(FullSpeedLogicTest, HeldPressThroughAnInhibitDoesNotRestart) {

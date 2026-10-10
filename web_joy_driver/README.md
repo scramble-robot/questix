@@ -144,12 +144,12 @@ Esc（キーボード）はこの端末の入力を離すだけで、ほかの�
 
 ## 教材との関係
 
-- 練習用の起動（`questix_core.launch.xml`、`enable_autoreferee` なし）では `twist_arbiter` が
+- 教材用の起動（`questix_core.launch.xml`、`robot_mode:=lesson`）では `twist_arbiter` が
   コントローラー（この画面を含む）と教材の走行実験のどちらを `/target_twist` に通すかを選びます。
   スティックを動かせば、今までどおりすぐにコントローラーの操作に切り替わります（`twist_arbiter` の動き）。
 - このノードは `arbiter_status_topic`（`/twist_arbiter/status`、`std_msgs/String` の JSON、latched）を
   **購読するだけ**で、`active` が `lab` の間、全端末に「教材から走らせています」を表示します。
-  `twist_arbiter` がいない（大会用の起動）ときは何も出しません。
+  `twist_arbiter` がいない（練習用・大会用の起動）ときは何も出しません。
 - 教材の走行を止める ROS の手段は `/target_twist/lab` などへの publish しかなく、それは
   `questix_lab_bridge` が「ほかの publisher」として拒否する（安全のための仕様）ため、
   ページがブラウザから中継の WebSocket に止める要求を送ります。このノードは publisher を増やしません。

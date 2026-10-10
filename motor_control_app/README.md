@@ -11,7 +11,8 @@ QUESTiX のモータ制御 ROS 2 ノード群です。シリアル通信・制�
 | `joy_axis_drive` | 左右軸→左右輪の直結デバッグ用（運動学なし、レガシー） |
 
 `drive_component`・`shot_component`（と `esc_motor_control`）は `/emergency_stop` を一度も
-受信していない間、または途絶えている間は動きません（`require_emergency_stop: true`）。
+受信していない間、または途絶えている間は動きません（`require_emergency_stop: true`）。走行許可
+`/motion_permission` も同じです（`require_motion_permission: true`）。
 このパッケージの launch（`drive_component.launch.*`、`drive_component_container.launch.*`、
 `shot_component.launch.*`）や `ros2 run` は発行元の operation_manager を起動しないので、
 単体で動かすときは別の端末で発行元を起動してください。手順と診断用の opt-out は
@@ -26,6 +27,7 @@ QUESTiX のモータ制御 ROS 2 ノード群です。シリアル通信・制�
 |---|---|---|---|
 | Sub | `/target_twist` | `geometry_msgs/Twist` | depth 1。ACTIVE のときのみ処理 |
 | Sub | `/emergency_stop` | `questix_msgs/EmergencyStop` | reliable + transient_local |
+| Sub | `/motion_permission` | `questix_msgs/MotionPermission` | reliable + volatile。`drive_allowed` |
 | Pub | `/drive_status` | `questix_msgs/DriveStatus` | `status_publish_rate` Hz |
 | Pub | `/drive_control_sample` | `questix_msgs/DriveControlSample` | 制御 tick ごと（`control_rate` Hz）。**診断専用**。`publish_control_sample: false` で止まる |
 | Pub | `/odom` + TF `odom→base_link` | `nav_msgs/Odometry` | 実測 RPM の積分 |

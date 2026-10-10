@@ -62,9 +62,10 @@ void ShotComponent::tryAutoStart() {
   if (!auto_start_timer_) {
     return;
   }
-  // 非常停止（押下・途絶・未受信）または実行時許可なしの間は configure/activate しない。
+  // 非常停止（押下・途絶・未受信）または走行許可なしの間は configure/activate しない
+  // （activate はトリガーをホームへ動かす）。
   const auto hold = [this]() {
-    return estopBlocks() || teacherPermissionBlock() != actuation_gate::Block::kNone;
+    return estopBlocks() || permissionBlock() != actuation_gate::Block::kNone;
   };
   uint8_t state_id = this->get_current_state().id();
   auto action = decideAutoStartAction(state_id, true, !hold());
@@ -75,8 +76,8 @@ void ShotComponent::tryAutoStart() {
                            "（解除で自動再開します）");
     } else {
       RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 30000,
-                           "発射機構の操作が許可されていないため接続試行を保留しています (%s)",
-                           actuation_gate::blockName(teacherPermissionBlock()));
+                           "発射機構の走行許可がないため接続試行を保留しています (%s)",
+                           actuation_gate::blockName(permissionBlock()));
     }
     return;
   }
@@ -159,7 +160,7 @@ void ShotComponent::startupTimerCallback() {
       case shot_auto_start::StartupStep::kAttempt:
         break;
     }
-    if (estopBlocks() || teacherPermissionBlock() != actuation_gate::Block::kNone) {
+    if (estopBlocks() || permissionBlock() != actuation_gate::Block::kNone) {
       // 押下・途絶・許可なしの間は試さない（解除・許可で新しい試行期間が始まる）。
       endStartup();
       return;
@@ -418,10 +419,10 @@ ShotComponent::CallbackReturn ShotComponent::on_shutdown(const rclcpp_lifecycle:
   teardown_pending_ = false;
   stopAutoStartTimers();
   endStartup();
-  if (teacher_permission_timer_) {
-    teacher_permission_timer_->cancel();
+  if (permission_timer_) {
+    permission_timer_->cancel();
   }
-  teacher_permission_sub_.reset();
+  permission_monitor_->unsubscribe();
   estop_monitor_->unsubscribe();
   joy_subscription_.reset();
   lab_tilt_sub_.reset();

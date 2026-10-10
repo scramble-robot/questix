@@ -19,8 +19,8 @@ public:
 
   void configure(double timeout_sec) { timeout_sec_ = timeout_sec; }
 
-  // inhibited: the roller may not spin now (E-stop pressed, unknown or silent, or no runtime
-  // authority). A held press then clears the latch and requires a release, so the roller never
+  // inhibited: the roller may not spin now (no motion permission, or the E-stop pressed, unknown
+  // or silent). A held press then clears the latch and requires a release, so the roller never
   // restarts from a press that was already down when it became usable again; a release still
   // re-arms it for the next press.
   Result onButton(bool pressed, double now_sec, bool inhibited = false) {

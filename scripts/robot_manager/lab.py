@@ -563,6 +563,8 @@ def _reap_locked() -> bool:
 
 def _status_payload() -> dict:
     managed = _reap_locked()
+    # Like the bridge's own state below, this may wait briefly (systemd) while _lock is held.
+    running_mode = actuation.running_mode()
     # A bridge started by hand (ros2 launch) is reported, but not ours to stop.
     external = not managed and _port_in_use()
     config = _read_config()
@@ -594,6 +596,10 @@ def _status_payload() -> dict:
         # The teacher's runtime authority each permission needs (操作 tab, actuation.py).
         "drive_authority": actuation.peek("drive"),
         "shoot_authority": actuation.peek("launcher"),
+        # The robot's running launch (None while stopped): the permissions can be switched on only
+        # while it is a lesson launch (actuation.switches_available).
+        "running_mode": running_mode,
+        "switches_available": actuation.switches_available(running_mode),
         # The running bridge's own GET /api/state (ours or started by hand); null when none
         # answers.
         "bridge": _bridge_state() if managed or external else None,
@@ -730,6 +736,10 @@ def _set_permission(key: str, allow: bool, unavailable_what: str, stop_reason: s
     """
     if allow and not _lab_available():
         raise HTTPException(status_code=409, detail=_unavailable_detail(unavailable_what))
+    if allow and not actuation.switches_available():
+        raise HTTPException(status_code=409, detail=(
+            "教材モードで起動（再起動）したロボットでだけ使えます（いま動いている構成が教材用では"
+            "ありません）"))
     if allow and not actuation.is_allowed(_AUTHORITY[key]):
         raise HTTPException(status_code=409, detail=authority_detail)
     with _lock:

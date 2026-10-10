@@ -32,7 +32,7 @@ test('a missing twist_arbiter right after a bridge restart is shown only once it
   assert.equal(view.headline, '許可済み・ロボットの状態を確認しています…');
   assert.deepEqual(view.reasons, []);
   view = StatusView.capability('drive', data, 'active', memory, 1000 + StatusView.SETTLE_MS);
-  assert.match(view.headline, /^許可済み・いまは走行できません（ロボット制御が練習用の構成で動いていないか/);
+  assert.match(view.headline, /^許可済み・いまは走行できません（ロボット制御が教材用の構成で動いていないか/);
   assert.match(view.reasons[0].detail, /twist_arbiter.*ROS_DOMAIN_ID 7/);
   assert.doesNotMatch(view.reasons[0].text, /twist_arbiter|ROS_DOMAIN_ID/); // jargon only in details
   // It went away and comes back: the wait starts again.
@@ -258,4 +258,20 @@ test('operation_manager reasons in the teacher\'s words', () => {
   assert.equal(StatusView.estopReasonText('something new'), 'something new');
   assert.equal(StatusView.estopReasonText(''), '');
   assert.equal(StatusView.estopReasonText(null), '');
+});
+
+test('lesson permissions wait for a running lesson launch', () => {
+  // Saved lesson mode, but the robot runs a practice launch (or none): the switch is disabled and
+  // says what to do; a permission that is already on can still be switched off.
+  for (const [running, note] of [['practice', /練習用の構成で動いています。教材モードで「再起動」/],
+    [null, /止まっています。教材モードで「起動」/]]) {
+    const data = lab({ drive_allowed: false, switches_available: false, running_mode: running,
+      drive_authority: false });
+    const view = StatusView.capability('drive', data, 'active', StatusView.createBlockerMemory(), 0);
+    assert.equal(view.toggleDisabled, true);
+    assert.match(view.toggleNote, note);
+  }
+  const on = lab({ switches_available: false, running_mode: 'practice' });
+  assert.equal(StatusView.capability('drive', on, 'active', StatusView.createBlockerMemory(), 0)
+    .toggleDisabled, false);
 });

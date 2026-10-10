@@ -33,13 +33,18 @@ esc_motor_control:
     emergency_stop_topic: "/emergency_stop"
     require_emergency_stop: true
     emergency_stop_timeout_sec: 1.0
-    # 教員の許可（/actuation_authority の launcher_allowed）は非常停止とは別の概念で、
-    # require_teacher_permission（練習での opt-in、既定 false、大会では使わない）が
-    # true のときだけ効く。値は launch が渡すためこの YAML には置かない。
+    # 走行許可（L2、/motion_permission の launcher_allowed、reliable + volatile）は非常停止とは
+    # 別の概念で、operation_manager の MotionPermissionManager がモードごとの票（大会: 審判 GPIO27、
+    # 教材: 先生の許可、練習: なし）をまとめたもの。未受信・motion_permission_timeout_sec の途絶・
+    # false の間はローラーを 0 にする（許可が戻ってもボタンの離す→押すが必要）。
+    # require_motion_permission: false は単体診断の明示 opt-out のみ（統合起動では使わない）。
+    motion_permission_topic: "/motion_permission"
+    require_motion_permission: true
+    motion_permission_timeout_sec: 0.5
 
     # QUESTiX LAB roller input / QUESTiX LAB からのローラー操作
     # accept_lab_input: true のときだけ lab_topic (std_msgs/Float32, 出力割合 0..1) を購読する。
-    #   練習用の起動 (questix_core.launch.xml, enable_autoreferee=false) だけが launch 引数で
+    #   教材用の起動 (questix_core.launch.xml, robot_mode:=lesson) だけが launch 引数で
     #   true にする。競技 (AutoReferee) では常に false。既定値はこの YAML の false。
     #   Subscribed only when true; only practice launches set it (never competition).
     # lab_max_speed: lab の指令はこの値で頭打ち (0..1)。Lab power is clamped to [0, this].

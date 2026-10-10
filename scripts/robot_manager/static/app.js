@@ -1622,9 +1622,15 @@ function renderActuation(data) {
       !data ? '（確認できません）' : data.available === false && !data[kind] ? '（教材モードで使います）'
         : data[kind] ? 'ON：動かせます' : 'OFF：動きません';
   }
+  const running = { lesson: '教材', practice: '練習', competition: '大会' }[data?.running_mode];
   const state = document.getElementById('actuation-state');
   if (!data) {
     state.textContent = '許可の状態を確認できません。許可がない間は教材からは動かせません。';
+  } else if (data.available === false && data.mode === 'lesson') {
+    // Saved for lessons, but the running launch is not one: what runs decides what the robot does.
+    state.textContent = data.running_mode
+      ? `いまは${running || '別'}用の構成で動いています。教材モードで「再起動」すると使えます。`
+      : 'ロボット制御が止まっています。教材モードで「起動」すると使えます。';
   } else if (data.available === false) {
     state.textContent = data.competition
       ? '大会モードでは使いません（大会用の起動は非常停止と AutoReferee で動きます）。'

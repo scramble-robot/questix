@@ -142,11 +142,13 @@ void DriveComponent::declareParameters() {
   // 一度受信した後、この秒数（自分の steady clock での受信間隔）途絶えたら停止。<=0 で無効。
   this->declare_parameter("emergency_stop_timeout_sec", 1.0);
 
-  // 教員の許可（questix_msgs/ActuationAuthority）。非常停止とは別の概念で、練習での
-  // opt-in（既定 false）。大会起動（enable_autoreferee）では launch が常に false を渡す。
-  this->declare_parameter("require_teacher_permission", false);
-  this->declare_parameter("teacher_permission_topic", "/actuation_authority");
-  this->declare_parameter("teacher_permission_timeout_sec", 1.0);
+  // 走行許可（L2、questix_msgs/MotionPermission の drive_allowed）。非常停止とは別の概念で、
+  // 未受信・途絶・false は動かさない。false は単体診断の明示 opt-out だけ（統合起動では使わない）。
+  this->declare_parameter("motion_permission_topic", "/motion_permission");
+  this->declare_parameter("require_motion_permission", true);
+  // 受信後、この秒数（自分の steady clock での受信間隔）途絶えたら閉じる（無効値は
+  // 0.5、常に失効する）。
+  this->declare_parameter("motion_permission_timeout_sec", 0.5);
 
   // オドメトリ出力（実測 twist を積分して /odom を publish）。
   this->declare_parameter("publish_tf", true);
@@ -392,9 +394,9 @@ rcl_interfaces::msg::SetParametersResult DriveComponent::onParameterChange(
                                                                 "emergency_stop_topic",
                                                                 "require_emergency_stop",
                                                                 "emergency_stop_timeout_sec",
-                                                                "require_teacher_permission",
-                                                                "teacher_permission_topic",
-                                                                "teacher_permission_timeout_sec"};
+                                                                "motion_permission_topic",
+                                                                "require_motion_permission",
+                                                                "motion_permission_timeout_sec"};
 
   bool control_core_dirty = false;
   bool current_pi_dirty = false;

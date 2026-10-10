@@ -5,48 +5,39 @@
 // https://opensource.org/licenses/MIT.
 #pragma once
 
-#include <cmath>
-
 #include "questix_safety/estop_check.hpp"
+#include "questix_safety/permission_check.hpp"
 
 namespace esc_motor_control_cpp {
 
 // Whether the roller may spin at all right now (ROS-free, clock-injected: ages in seconds of
-// the node's steady clock). Two separate concepts are judged separately and only then combined:
-// the emergency stop (a safety function; with RollerEstopInputs::required, false only for an
-// explicit diagnostic opt-out, unknown and silent count as pressed) and the teacher's permission
-// (/actuation_authority; not an emergency stop; a practice opt-in, never looked at when not
-// required). The E-stop rule is the shared questix_safety one (estop_check.hpp), as for the drive
-// and the shot; the teacher permission rules match motor_control_app/actuation_gate.hpp (the two
-// packages do not depend on each other, so keep those and their tests in step).
+// the node's steady clock). Two separate concepts, two gates in a fixed order
+// (design/safety_permission_input_refactor.md, section 2.1), as for the drive and the shot:
+// 1. the motion permission (L2, /motion_permission launcher_allowed; not an emergency stop: the
+//    referee in competition, the teacher in a lesson, always allowed in practice), then
+// 2. the emergency stop (L1, a safety function, the last gate: its reason wins when both are
+//    closed; with RollerEstopInputs::required, false only for an explicit diagnostic opt-out,
+//    unknown and silent count as pressed).
+// The rules are the shared questix_safety ones (estop_check.hpp, permission_check.hpp); the
+// reasons match motor_control_app/actuation_gate.hpp (the two packages do not depend on each
+// other, so keep the names and their tests in step).
 enum class RollerBlock {
-  kNone,                      // may spin (a fresh press or lab command is still needed)
-  kEstopUnknown,              // /emergency_stop never received (only when required)
-  kEstopActive,               // E-stop pressed
-  kEstopStale,                // /emergency_stop received once, then silent (only when required)
-  kTeacherPermissionUnknown,  // no teacher permission heartbeat received (only when opted in)
-  kTeacherPermissionOff,      // the teacher's permission says launcher off (only when opted in)
-  kTeacherPermissionStale,    // heartbeat silent for longer than its lease (only when opted in)
+  kNone,               // may spin (a fresh press or lab command is still needed)
+  kEstopUnknown,       // /emergency_stop never received (only when required)
+  kEstopActive,        // E-stop pressed
+  kEstopStale,         // /emergency_stop received once, then silent (only when required)
+  kPermissionUnknown,  // /motion_permission never received (only when required)
+  kPermissionStale,    // /motion_permission silent for longer than its lease (only when required)
+  kPermissionOff,      // /motion_permission says the launcher may not move
 };
 
 using RollerEstopInputs = questix_safety::EstopInputs;
-
-struct RollerTeacherPermissionInputs {
-  bool required{false};  // practice opt-in (require_teacher_permission)
-  bool known{false};
-  bool allowed{false};
-  double age_sec{0.0};
-  double timeout_sec{1.0};  // <= 0 or non-finite: treated as 1.0 (a lease expires)
-};
+using RollerPermissionInputs = questix_safety::PermissionInputs;
 
 struct RollerGateInputs {
+  RollerPermissionInputs permission;
   RollerEstopInputs estop;
-  RollerTeacherPermissionInputs teacher_permission;
 };
-
-inline double rollerTeacherPermissionLease(double timeout_sec) {
-  return std::isfinite(timeout_sec) && timeout_sec > 0.0 ? timeout_sec : 1.0;
-}
 
 // The shared E-stop state as this gate's reason.
 inline RollerBlock toRollerBlock(questix_safety::EstopState state) {
@@ -63,34 +54,40 @@ inline RollerBlock toRollerBlock(questix_safety::EstopState state) {
   return RollerBlock::kEstopUnknown;  // fail closed on anything unexpected
 }
 
+// The shared permission state as this gate's reason.
+inline RollerBlock toRollerBlock(questix_safety::PermissionState state) {
+  switch (state) {
+    case questix_safety::PermissionState::kAllowed:
+      return RollerBlock::kNone;
+    case questix_safety::PermissionState::kUnknown:
+      return RollerBlock::kPermissionUnknown;
+    case questix_safety::PermissionState::kStale:
+      return RollerBlock::kPermissionStale;
+    case questix_safety::PermissionState::kOff:
+      return RollerBlock::kPermissionOff;
+  }
+  return RollerBlock::kPermissionUnknown;  // fail closed on anything unexpected
+}
+
 // The E-stop alone: kNone (released, or not required and not heard), or an E-stop reason.
 inline RollerBlock evaluateRollerEstop(const RollerEstopInputs& in) {
   return toRollerBlock(questix_safety::evaluateEstop(in));
 }
 
-// The teacher's permission alone. Not required means disabled: nothing else is looked at.
-inline RollerBlock evaluateRollerTeacherPermission(const RollerTeacherPermissionInputs& in) {
-  if (!in.required) {
-    return RollerBlock::kNone;
-  }
-  if (!in.known) {
-    return RollerBlock::kTeacherPermissionUnknown;
-  }
-  if (!(in.age_sec <= rollerTeacherPermissionLease(in.timeout_sec))) {
-    return RollerBlock::kTeacherPermissionStale;
-  }
-  if (!in.allowed) {
-    return RollerBlock::kTeacherPermissionOff;
-  }
-  return RollerBlock::kNone;
+// The motion permission alone: kNone (allowed, or not required), or a permission reason.
+inline RollerBlock evaluateRollerPermission(const RollerPermissionInputs& in) {
+  return toRollerBlock(questix_safety::evaluatePermission(in));
 }
 
+// Both gates in their order (L2, then L1): spinning needs both open; when both are closed the
+// later gate (the E-stop) is the reason.
 inline RollerBlock evaluateRollerGate(const RollerGateInputs& in) {
-  const RollerBlock estop = evaluateRollerEstop(in.estop);
+  RollerBlock block = evaluateRollerPermission(in.permission);  // L2
+  const RollerBlock estop = evaluateRollerEstop(in.estop);      // L1: the last gate wins
   if (estop != RollerBlock::kNone) {
-    return estop;
+    block = estop;
   }
-  return evaluateRollerTeacherPermission(in.teacher_permission);
+  return block;
 }
 
 inline bool isRollerEstopBlock(RollerBlock block) {
@@ -98,10 +95,9 @@ inline bool isRollerEstopBlock(RollerBlock block) {
          block == RollerBlock::kEstopStale;
 }
 
-inline bool isRollerTeacherPermissionBlock(RollerBlock block) {
-  return block == RollerBlock::kTeacherPermissionUnknown ||
-         block == RollerBlock::kTeacherPermissionOff ||
-         block == RollerBlock::kTeacherPermissionStale;
+inline bool isRollerPermissionBlock(RollerBlock block) {
+  return block == RollerBlock::kPermissionUnknown || block == RollerBlock::kPermissionStale ||
+         block == RollerBlock::kPermissionOff;
 }
 
 inline const char* rollerBlockName(RollerBlock block) {
@@ -114,12 +110,12 @@ inline const char* rollerBlockName(RollerBlock block) {
       return "estop_active";
     case RollerBlock::kEstopStale:
       return "estop_stale";
-    case RollerBlock::kTeacherPermissionUnknown:
-      return "teacher_permission_unknown";
-    case RollerBlock::kTeacherPermissionOff:
-      return "teacher_permission_off";
-    case RollerBlock::kTeacherPermissionStale:
-      return "teacher_permission_stale";
+    case RollerBlock::kPermissionUnknown:
+      return "permission_unknown";
+    case RollerBlock::kPermissionStale:
+      return "permission_stale";
+    case RollerBlock::kPermissionOff:
+      return "permission_off";
   }
   return "unknown";
 }

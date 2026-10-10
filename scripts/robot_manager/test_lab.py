@@ -24,6 +24,10 @@ def lab(tmp_path, monkeypatch):
     # lesson permission needs; tests of that rule switch it off themselves.
     monkeypatch.setattr(module.actuation, "_authority", {"drive": True, "launcher": True})
     monkeypatch.setattr(module.actuation, "_proc", None)
+    # The robot runs a lesson launch (app.py's real source asks systemd and last-launch), and
+    # actuation reads this test's saved mode (it is not reloaded here).
+    monkeypatch.setattr(module.actuation, "_running_mode_source", lambda: "lesson")
+    monkeypatch.setattr(module.actuation, "MODE_FILE", tmp_path / "mode")
     return module
 
 
@@ -850,6 +854,8 @@ def test_revoke_restarts_a_bridge_that_had_a_permission_on(lab, monkeypatch):
 def test_stop_all_switches_both_permissions_off(lab, monkeypatch):
     from robot_manager import app as app_module
     app_module = importlib.reload(app_module)
+    # Importing app installs its own running-mode source (systemd): a lesson launch runs here.
+    monkeypatch.setattr(app_module.actuation, "_running_mode_source", lambda: "lesson")
     calls = []
     monkeypatch.setattr(app_module.lab, "stop_lesson_motion",
                         lambda: calls.append("lesson") or {"ok": True, "message": "止めました"})
@@ -942,3 +948,18 @@ def test_manager_shutdown_ends_the_permissions(lab):
     lab.set_drive(lab.DriveRequest(allow=True))
     lab.shutdown()
     assert lab._runtime_permissions == {"ALLOW_DRIVE": False, "ALLOW_SHOOT": False}
+
+
+@pytest.mark.parametrize("running", [None, "practice", "competition", "unknown"])
+def test_lesson_permissions_need_a_running_lesson_launch(lab, monkeypatch, running):
+    # Saved lesson mode, but the robot runs something else (or nothing): the running launch decides
+    # what the robot does, so the lesson permissions stay off until it is restarted as a lesson.
+    monkeypatch.setattr(lab.actuation, "_running_mode_source", lambda: running)
+    for setter in (lab.set_drive, lab.set_shoot):
+        with pytest.raises(HTTPException) as error:
+            setter(lab.DriveRequest(allow=True))
+        assert error.value.status_code == 409
+        assert "教材モードで起動" in error.value.detail
+    status = lab.get_status()
+    assert status["drive_allowed"] is False and status["shoot_allowed"] is False
+    assert status["running_mode"] == running and status["switches_available"] is False

@@ -14,9 +14,10 @@
 #include "esc_motor_control_cpp/pwm_backend.hpp"
 #include "esc_motor_control_cpp/roller_gate.hpp"
 #include "esc_motor_control_cpp/roller_lab_logic.hpp"
-#include "questix_msgs/msg/actuation_authority.hpp"
 #include "questix_msgs/msg/emergency_stop.hpp"
+#include "questix_msgs/msg/motion_permission.hpp"
 #include "questix_safety/emergency_stop_monitor.hpp"
+#include "questix_safety/permission_monitor.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/joy.hpp"
 #include "std_msgs/msg/float32.hpp"
@@ -24,12 +25,11 @@
 
 namespace esc_motor_control_cpp {
 
-// The roller spins only while roller_gate.hpp says so: the E-stop is known and released
-// (require_emergency_stop; unknown and silent count as pressed, and operation_manager always
-// publishes it in questix_core) and, only when a practice launch opts in to
-// (require_teacher_permission, default false), the teacher's launcher permission is fresh.
-// When it closes the roller goes to 0 and the full-speed latch needs a release; nothing restarts
-// by itself.
+// The roller spins only while roller_gate.hpp says so: the motion permission (L2,
+// /motion_permission launcher_allowed: the referee, the teacher, or always in practice) is fresh
+// and allows it, and the E-stop (L1) is known and released (require_emergency_stop; unknown and
+// silent count as pressed, and operation_manager always publishes it in questix_core). When it
+// closes the roller goes to 0 and the full-speed latch needs a release; nothing restarts by itself.
 class EscMotorControlComponent : public rclcpp::Node {
 public:
   explicit EscMotorControlComponent(const rclcpp::NodeOptions& options);
@@ -44,9 +44,11 @@ private:
   // /emergency_stop を受信したとき（estop_monitor_ から呼ばれる）。
   void on_emergency_stop(const questix_msgs::msg::EmergencyStop& msg,
                          const questix_safety::EmergencyStopMonitor::Change& change);
-  void teacher_permission_callback(const questix_msgs::msg::ActuationAuthority::SharedPtr msg);
-  // Re-evaluates the gate (100 ms timer and every E-stop / teacher permission message); on closing
-  // it stops the roller, clears the latch and locks the lab.
+  // /motion_permission を受信したとき（permission_monitor_ から呼ばれる）。
+  void on_motion_permission(const questix_msgs::msg::MotionPermission& msg,
+                            const questix_safety::PermissionMonitor::Change& change);
+  // Re-evaluates the gate (100 ms timer and every E-stop / permission message); on closing it stops
+  // the roller, clears the latch and locks the lab.
   void apply_gate();
   // The current gate (lock_ held).
   RollerBlock evaluate_gate_locked() const;
@@ -86,16 +88,8 @@ private:
   double lab_max_speed_{0.8};
   double lab_joy_quiet_sec_{1.0};
 
-  // The teacher's permission (a practice opt-in; never in competition)
-  bool require_teacher_permission_{false};
-  std::string teacher_permission_topic_{"/actuation_authority"};
-  double teacher_permission_timeout_sec_{1.0};
-
   // ---------- State ----------
   double current_speed_{0.0};
-  bool have_teacher_permission_msg_{false};
-  bool teacher_permission_allowed_{false};
-  double last_teacher_permission_rx_sec_{0.0};  // steady clock
   RollerBlock gate_{RollerBlock::kEstopUnknown};
   FullSpeedLogic full_speed_logic_;
   RollerLabLogic roller_lab_logic_;
@@ -108,8 +102,9 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joy_sub_;
   // /emergency_stop: subscription and state (the shared questix_safety check)
   std::unique_ptr<questix_safety::EmergencyStopMonitor> estop_monitor_;
-  // volatile + keep-last(1): the teacher permission is never latched
-  rclcpp::Subscription<questix_msgs::msg::ActuationAuthority>::SharedPtr teacher_permission_sub_;
+  // /motion_permission (launcher_allowed): subscription and state (the shared questix_safety
+  // check; volatile + keep-last(1), never latched)
+  std::unique_ptr<questix_safety::PermissionMonitor> permission_monitor_;
   rclcpp::TimerBase::SharedPtr gate_timer_;
   rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr status_pub_;
   rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr lab_sub_;

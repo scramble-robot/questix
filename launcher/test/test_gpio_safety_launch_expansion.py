@@ -5,14 +5,14 @@
 # https://opensource.org/licenses/MIT.
 
 """
-What questix_core hands each node for every GPIO safety switch, resolved without ROS.
+What questix_core hands each node for every mode and GPIO safety switch, resolved without ROS.
 
 These are the launch-logic halves of the runtime smoke tests: the launch argument matrix, the
-safety-only and environment variants and the invalid AutoReferee configuration are resolved by
+safety-only and environment variants and the invalid configurations are resolved by
 expanding (or, for the invalid one, running) the real launch description in-process, with every
 process execution intercepted. test_gpio_safety_runtime.py starts questix_core once per
 operation_manager profile and checks that the nodes really take these values and what they do
-with them (typed profile arrays, the E-stop, the /actuation_authority subscriptions).
+with them (typed profile arrays, the E-stop, the /motion_permission subscriptions).
 """
 
 from launch import LaunchDescription, LaunchService
@@ -30,7 +30,7 @@ GPIO_SAFETY_NODES = ('/gpio_reader_node', '/operation_manager_node')
 RUNTIME_ARGUMENTS = {'enable_lidar': 'false', 'enable_shot': 'true', 'enable_drive': 'true',
                      'enable_rviz': 'false', 'controller_type': 'dualshock'}
 SAFETY_ONLY_ARGUMENTS = {'enable_lidar': 'false', 'enable_shot': 'false', 'enable_drive': 'false',
-                         'enable_autoreferee': 'false', 'enable_rviz': 'false'}
+                         'robot_mode': 'practice', 'enable_rviz': 'false'}
 
 
 def operation_manager_profile(root, profile):
@@ -41,46 +41,44 @@ def operation_manager_profile(root, profile):
 
 
 @pytest.mark.parametrize(
-    ('launch_arguments', 'expect_profile', 'expect_teacher_permission_required'),
+    ('launch_arguments', 'expect_profile'),
     [
-        # Manual diagnostic run without the GPIO safety path.
-        ({'enable_gpio_ref': 'false'}, 'operation_manager.no_gpio.yaml', False),
-        # Practice with the GPIO safety path.
-        ({'enable_gpio_ref': 'true'}, 'operation_manager.practice.yaml', False),
-        # A practice opt-in to the teacher's permission (a permission, not an E-stop).
-        ({'enable_gpio_ref': 'false', 'require_teacher_permission': 'true'},
-         'operation_manager.no_gpio.yaml', True),
-        # Competition never depends on the classroom heartbeat, even when asked to.
-        ({'enable_gpio_ref': 'true', 'enable_autoreferee': 'true',
-          'require_teacher_permission': 'true'},
-         'operation_manager.competition.yaml', False),
+        # Manual diagnostic run without the GPIO safety path (practice, and lesson: allowed as
+        # in #170 until section 9 of the design decides it).
+        ({'robot_mode': 'practice', 'enable_gpio_ref': 'false'}, 'operation_manager.no_gpio.yaml'),
+        ({'robot_mode': 'lesson', 'enable_gpio_ref': 'false'}, 'operation_manager.no_gpio.yaml'),
+        # The three production modes, always with the GPIO safety path.
+        ({'robot_mode': 'practice', 'enable_gpio_ref': 'true'}, 'operation_manager.practice.yaml'),
+        ({'robot_mode': 'lesson', 'enable_gpio_ref': 'true'}, 'operation_manager.practice.yaml'),
+        ({'robot_mode': 'competition', 'enable_gpio_ref': 'true'},
+         'operation_manager.competition.yaml'),
     ],
 )
-def test_core_launch_passes_the_estop_profile_and_the_teacher_permission_switch(
-        expand, source_packages, launch_arguments, expect_profile,
-        expect_teacher_permission_required):
+def test_core_launch_wires_each_mode(expand, source_packages, launch_arguments, expect_profile):
     """
-    Every actuating node requires /emergency_stop; the teacher's permission only on opt-in.
+    The same actuators in every mode; the mode decides the inputs and the votes.
 
-    operation_manager (the E-stop's single owner) gets exactly the profile the switches select,
-    with or without the GPIO safety path, and gpio_reader runs only with it.
+    Every actuating node requires /emergency_stop and /motion_permission whatever the mode
+    (no launch switches either). operation_manager (the E-stop's single owner) gets exactly the
+    profile the switches select, gpio_reader runs only with the GPIO safety path, the motion
+    permission runs for the mode with the referee in competition, and QUESTiX LAB's inputs
+    (twist_arbiter, the launcher nodes' lab input) exist in lesson mode only.
     """
-    arguments = {'enable_autoreferee': 'false', **RUNTIME_ARGUMENTS, **launch_arguments}
+    arguments = {**RUNTIME_ARGUMENTS, **launch_arguments}
+    mode = arguments['robot_mode']
     nodes = expand(CORE_LAUNCH, **arguments)
     for node in ACTUATING_NODES:
         assert nodes[node]['require_emergency_stop'] is True, node
-        assert nodes[node]['require_teacher_permission'] is (
-            expect_teacher_permission_required), node
+        assert nodes[node]['require_motion_permission'] is True, node
+        assert not any('teacher_permission' in name for name in nodes[node]), node
     assert nodes['/operation_manager_node'] == operation_manager_profile(
         source_packages, expect_profile)
     assert ('/gpio_reader_node' in nodes) is (arguments['enable_gpio_ref'] == 'true')
-    # The motion permission (L2) for the running mode, the referee only in competition.
-    competition = arguments['enable_autoreferee'] == 'true'
-    expect_mode = ('competition' if competition
-                   else 'lesson' if arguments.get('require_teacher_permission') == 'true'
-                   else 'practice')
-    assert nodes['/motion_permission_manager']['mode'] == expect_mode
-    assert ('/referee_monitor' in nodes) is competition
+    assert nodes['/motion_permission_manager']['mode'] == mode
+    assert ('/referee_monitor' in nodes) is (mode == 'competition')
+    assert ('/twist_arbiter' in nodes) is (mode == 'lesson')
+    for node in ('/shot_component', '/esc_motor_control'):
+        assert nodes[node]['accept_lab_input'] is (mode == 'lesson'), node
 
 
 def test_safety_only_practice_launch_runs_the_same_gpio_safety_nodes(expand):
@@ -91,7 +89,7 @@ def test_safety_only_practice_launch_runs_the_same_gpio_safety_nodes(expand):
     keeps alive.
     """
     safety_only = expand(CORE_LAUNCH, enable_gpio_ref='true', **SAFETY_ONLY_ARGUMENTS)
-    full = expand(CORE_LAUNCH, enable_gpio_ref='true', enable_autoreferee='false',
+    full = expand(CORE_LAUNCH, enable_gpio_ref='true', robot_mode='practice',
                   **RUNTIME_ARGUMENTS)
     for node in GPIO_SAFETY_NODES:
         assert safety_only[node] == full[node], node
@@ -115,10 +113,25 @@ def test_gpio_ref_environment_does_not_select_the_no_gpio_diagnostic(expand, mon
     assert 'gpio_safety_enabled' not in from_environment['/operation_manager_node']
 
 
-def test_invalid_autoreferee_configuration_starts_no_child_processes(
-        source_packages, monkeypatch):
+@pytest.mark.parametrize(
+    ('launch_arguments', 'expect_error'),
+    [
+        ({'robot_mode': 'competition', 'enable_gpio_ref': 'false'},
+         'ERROR: robot_mode=competition requires enable_gpio_ref=true'),
+        ({'robot_mode': 'holiday', 'enable_gpio_ref': 'true'},
+         "ERROR: robot_mode must be lesson, practice or competition (got 'holiday')"),
+        # An argument robot_mode replaced: refused instead of silently running practice.
+        ({'enable_autoreferee': 'true', 'enable_gpio_ref': 'true'}, 'replaced by robot_mode'),
+        ({'robot_mode': 'practice', 'require_teacher_permission': 'false'},
+         'replaced by robot_mode'),
+        ({'robot_mode': 'lesson', 'enable_twist_arbiter': 'true'}, 'replaced by robot_mode'),
+        ({'robot_mode': 'lesson', 'enable_lab_shoot': 'true'}, 'replaced by robot_mode'),
+    ],
+)
+def test_invalid_configuration_starts_no_child_processes(
+        source_packages, monkeypatch, launch_arguments, expect_error):
     """
-    Reject the invalid profile before any hardware-facing child can start.
+    Reject an invalid configuration before any hardware-facing child can start.
 
     Runs the real launch service (event loop, timer, shutdown) in-process, with every process
     execution and component load intercepted.
@@ -150,11 +163,10 @@ def test_invalid_autoreferee_configuration_starts_no_child_processes(
             'enable_lidar': 'true',
             'enable_shot': 'true',
             'enable_drive': 'true',
-            'enable_gpio_ref': 'false',
-            'enable_autoreferee': 'true',
             'enable_rviz': 'true',
+            **launch_arguments,
         }.items(),
     )]))
     assert service.run() == 0
-    assert 'ERROR: enable_autoreferee=true requires enable_gpio_ref=true' in logged
+    assert any(expect_error in line for line in logged), logged
     assert started == []
