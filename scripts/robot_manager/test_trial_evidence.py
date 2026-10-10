@@ -359,8 +359,11 @@ class WorkspaceSourceGateTests(unittest.TestCase):
             self.assertIn(f"exit {code}", prelude)
 
     def test_missing_ros_setup_exits_90(self):
-        rt = trial.resolve_runtime_env({"ROBOT_WS": "/ws"}, {})
-        code, _out, err = trial.run_shell(rt, "echo should_not_run")
+        with tempfile.TemporaryDirectory() as tmp:
+            missing_setup = str(Path(tmp) / "missing_ros_setup.bash")
+            with patch.object(trial, "ROS_SETUP", missing_setup):
+                rt = trial.resolve_runtime_env({"ROBOT_WS": "/ws"}, {})
+                code, _out, err = trial.run_shell(rt, "echo should_not_run")
         self.assertEqual(code, 90)
         self.assertIn("ROS setup not found", err)
 

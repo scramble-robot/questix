@@ -68,8 +68,8 @@ struct SysfsTest : testing::Test {
     return std::string(std::istreambuf_iterator<char>(f), {});
   }
   void own() {
-    put(cfg.owner_file,
-        fs::canonical(base / "dt/rp1/pwm@98000").string() + "\n1\n20000000\nboot-test\n");
+    put(cfg.owner_file, "COMMITTED\n" + fs::canonical(base / "dt/rp1/pwm@98000").string() +
+                            "\n1\n20000000\nboot-test\n");
     fs::permissions(cfg.owner_file, fs::perms::owner_read | fs::perms::owner_write);
   }
 };
@@ -161,4 +161,91 @@ TEST_F(SysfsTest, OwnershipSymlinkAndWorldWritableMarkerAreRejected) {
   fs::create_symlink(base / "old-owner", cfg.owner_file);
   q::SysfsOutput second(cfg);
   EXPECT_FALSE(second.initialize());
+}
+
+TEST_F(SysfsTest, FailedExportCannotAuthorizeLaterUnknownExport) {
+  fs::remove_all(channel());
+  q::SysfsOutput first(cfg);
+  EXPECT_FALSE(first.initialize());
+  EXPECT_FALSE(fs::exists(cfg.owner_file));
+  EXPECT_TRUE(fs::exists(cfg.owner_file.string() + ".pending"));
+  fs::create_directories(channel());
+  put(channel() / "period", "20000000");
+  put(channel() / "polarity", "normal");
+  put(channel() / "enable", "1");
+  put(channel() / "duty_cycle", "1800000");
+  q::SysfsOutput recovery(cfg);
+  EXPECT_FALSE(recovery.initialize(true));
+  EXPECT_EQ(read(channel() / "duty_cycle"), "1800000");
+}
+TEST_F(SysfsTest, PendingAndLegacyMarkersNeverAuthorizeRecovery) {
+  own();
+  const auto committed = read(cfg.owner_file);
+  for (const auto& marker : {committed.substr(10), std::string("PENDING\n") + committed}) {
+    put(cfg.owner_file, marker);
+    q::SysfsOutput recovery(cfg);
+    EXPECT_FALSE(recovery.initialize(true));
+    EXPECT_EQ(read(channel() / "duty_cycle"), "1800000\n");
+  }
+}
+TEST_F(SysfsTest, GroupReadableMarkerIsRejected) {
+  own();
+  fs::permissions(cfg.owner_file, fs::perms::group_read, fs::perm_options::add);
+  q::SysfsOutput recovery(cfg);
+  EXPECT_FALSE(recovery.initialize(true));
+}
+TEST_F(SysfsTest, FaultLowStillMonitorsDutyAndUnknownHardwareState) {
+  own();
+  q::SysfsOutput output(cfg);
+  ASSERT_TRUE(output.initialize());
+  q::Core core(output);
+  ASSERT_TRUE(core.start());
+  ASSERT_TRUE(core.authorize(0));
+  ASSERT_TRUE(core.arm(42, 0));
+  ASSERT_TRUE(core.complete(42, 1, 2000));
+  core.tick(3000);
+  ASSERT_EQ(core.state(), q::State::FaultLow);
+  put(channel() / "duty_cycle", "1800000");
+  core.tick(3010);
+  EXPECT_EQ(read(channel() / "duty_cycle"), "0");
+  EXPECT_EQ(core.fault_error(), -ETIMEDOUT);
+  EXPECT_FALSE(core.command(42, 2, 1000, 3020));
+}
+
+TEST_F(SysfsTest, CompatibleSubstringIsNotControllerIdentity) {
+  own();
+  put(base / "dt/rp1/pwm@98000/compatible", "raspberrypi,rp1-pwm-other");
+  q::SysfsOutput output(cfg);
+  EXPECT_FALSE(output.initialize());
+}
+
+TEST_F(SysfsTest, FaultLowUnknownAttributesNeverProduceANeutralRepair) {
+  own();
+  for (const auto& entry :
+       {std::make_pair("period", "10000000"), std::make_pair("polarity", "inversed"),
+        std::make_pair("enable", "0"), std::make_pair("duty_cycle", "missing")}) {
+    put(channel() / "period", "20000000");
+    put(channel() / "polarity", "normal");
+    put(channel() / "enable", "1");
+    put(channel() / "duty_cycle", "0");
+    q::SysfsOutput output(cfg);
+    ASSERT_TRUE(output.initialize());
+    q::Core core(output);
+    ASSERT_TRUE(core.start());
+    ASSERT_TRUE(core.authorize(0));
+    ASSERT_TRUE(core.arm(42, 0));
+    ASSERT_TRUE(core.complete(42, 1, 2000));
+    core.tick(3000);
+    ASSERT_EQ(core.state(), q::State::FaultLow);
+    if (entry.second == std::string("missing"))
+      fs::remove(channel() / entry.first);
+    else
+      put(channel() / entry.first, entry.second);
+    core.tick(3010);
+    EXPECT_EQ(core.state(), q::State::FaultUnknown);
+    EXPECT_EQ(core.applied(), -1);
+    EXPECT_EQ(core.fault_error(), -ETIMEDOUT);
+    EXPECT_FALSE(core.authorize(3020));
+    EXPECT_FALSE(core.command(42, 2, 1000, 3030));
+  }
 }

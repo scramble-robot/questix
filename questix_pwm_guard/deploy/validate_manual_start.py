@@ -3,7 +3,7 @@
 
 No shell execution, no file creation, no E-stop bypass. Launcher consumes the same request.
 """
-import subprocess, sys, time
+import fcntl, runpy, subprocess, sys, time
 from pathlib import Path
 
 def validate(config=Path('/etc/questix_robot'), boot=Path('/proc/sys/kernel/random/boot_id'), now=None):
@@ -25,10 +25,25 @@ def validate(config=Path('/etc/questix_robot'), boot=Path('/proc/sys/kernel/rand
         raise ValueError('stale start-request')
     return mode
 
+def validate_deployment():
+    config = Path('/etc/questix_pwm_guard')
+    if Path('/var/lib/questix_pwm_guard/deployment-in-progress').exists():
+        raise ValueError('RP1 deployment is incomplete')
+    if (config/'deployment-state').read_text().strip() != 'READY':
+        raise ValueError('RP1 deployment requires recovery')
+    module = runpy.run_path('/opt/questix_pwm_guard/review_manifest.py')
+    data = module['trusted_json'](config/'reviewed-release.json')
+    module['verify'](data, arm64=True)
+
+
 def main():
     try:
-        validate()
-        return subprocess.run(['/opt/questix_pwm_guard/questix_pwm_ctl','authorize'],check=False,timeout=2).returncode
+        with open('/run/questix-rp1-install.lock', 'a') as lock:
+            fcntl.flock(lock, fcntl.LOCK_SH | fcntl.LOCK_NB)
+            validate_deployment()
+            validate()
+            return subprocess.run(['/opt/questix_pwm_guard/questix_pwm_ctl','authorize'],check=False,timeout=2,
+                              env={'PATH':'/usr/bin:/bin','LANG':'C'}).returncode
     except (OSError,ValueError,subprocess.TimeoutExpired) as error:
         print(f'RP1 manual start rejected: {error}',file=sys.stderr)
         return 1

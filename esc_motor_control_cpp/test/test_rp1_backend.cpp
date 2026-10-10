@@ -16,6 +16,14 @@
 #include "esc_motor_control_cpp/pwm_command.hpp"
 #include "questix_pwm_guard/core.hpp"
 #include "questix_pwm_guard/protocol.hpp"
+// Test-only peer credentials for the unprivileged fakeguard; never linked into product ELFs.
+extern "C" int __real_getsockopt(int, int, int, void*, socklen_t*);
+extern "C" int __wrap_getsockopt(int fd, int level, int option, void* value, socklen_t* size) {
+  const int result = __real_getsockopt(fd, level, option, value, size);
+  if (result == 0 && level == SOL_SOCKET && option == SO_PEERCRED)
+    static_cast<ucred*>(value)->uid = 0;
+  return result;
+}
 namespace {
 namespace q = questix_pwm_guard;
 class FakeOutput : public q::Output {
@@ -76,6 +84,7 @@ protected:
         continue;
       }
       if (silent) continue;
+      std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms.load()));
       q::Request r;
       bool ok = false;
       if (q::parse_request(std::string(b, n), r)) {
@@ -92,9 +101,10 @@ protected:
         else if (r.op == "STATUS")
           ok = true;
       }
-      auto reply = std::string("1 ") + (ok ? "1 " : "0 ") + q::state_name(core.state()) + " " +
-                   std::to_string(core.applied()) + " " + std::to_string(core.session()) + " " +
-                   std::to_string(ok ? 0 : core.error());
+      auto reply = std::string("1 ") + (ok ? "1 " : "0 ") +
+                   (drain_forever ? "DRAINING" : q::state_name(core.state())) + " " +
+                   std::to_string(drain_forever ? 1000 : core.applied()) + " " +
+                   std::to_string(core.session()) + " " + std::to_string(ok ? 0 : core.error());
       send(fd, reply.data(), reply.size(), MSG_NOSIGNAL);
     }
     if (fd >= 0) close(fd);
@@ -103,6 +113,8 @@ protected:
   int server{-1};
   std::thread thread;
   std::atomic<bool> done{false}, silent{false};
+  std::atomic<int> delay_ms{0};
+  std::atomic<bool> drain_forever{false};
   FakeOutput output;
 };
 TEST_F(BackendTest, LifecycleDrainsThenRejectsNeutralAndHoldsLow) {
@@ -148,5 +160,19 @@ TEST_F(BackendTest, NoFallbackAndTerminalCommandPolicy) {
   EXPECT_FALSE(command.send(*b, 13, 1000, 0, changed, error));
   EXPECT_TRUE(command.fault());
   EXPECT_EQ(output.last, 0);
+}
+TEST_F(BackendTest, ShutdownBudgetIncludesFirstAndFinalRpc) {
+  esc_motor_control_cpp::Rp1HardwareBackend b(socket_path);
+  ASSERT_TRUE(b.initialize(13));
+  ASSERT_TRUE(b.complete_arm());
+  delay_ms = 80;
+  drain_forever = true;
+  auto begin = std::chrono::steady_clock::now();
+  EXPECT_FALSE(b.graceful_shutdown());
+  const auto elapsed = std::chrono::steady_clock::now() - begin;
+  EXPECT_GE(elapsed, std::chrono::milliseconds(780));
+  EXPECT_LT(elapsed, std::chrono::milliseconds(850));
+  EXPECT_TRUE(b.terminal());
+  EXPECT_FALSE(b.set_servo_pulse(13, 1000));
 }
 }  // namespace

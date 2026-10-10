@@ -187,6 +187,14 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
     }
   }
 
+  const int range_min = std::min(speed_to_pulse_us(min_speed_), speed_to_pulse_us(max_speed_));
+  const int range_max = std::max(speed_to_pulse_us(min_speed_), speed_to_pulse_us(max_speed_));
+  if (range_min < 500 && range_max > 0) {
+    RCLCPP_ERROR(this->get_logger(),
+                 "ESC pulse configuration: continuous speed interval intersects 1-499 us; "
+                 "such requests fail closed without changing the legacy mapping");
+  }
+
   // ---- ESC initialisation ----
   initialize_esc();
   if (pwm_ && pwm_->name() == "rp1_hw") {
@@ -228,7 +236,9 @@ void EscMotorControlComponent::begin_shutdown() {
     if (lab_timer_) lab_timer_->cancel();
   }
   RCLCPP_INFO(this->get_logger(), "ESC shutdown_begin");
-  // Callbacks observe stopping_ under lock_; no output mutation races this sequence.
+  // Serialize backend state/Client updates with status reads as well as command callbacks.
+  // The guard drains independently while this lock is held; no ROS heartbeat is required.
+  std::lock_guard<std::mutex> guard(lock_);
   if (pwm_ && pwm_->name() == "rp1_hw") {
     const bool low = pwm_->graceful_shutdown();
     if (low)
@@ -237,9 +247,11 @@ void EscMotorControlComponent::begin_shutdown() {
       RCLCPP_ERROR(this->get_logger(), "ESC Low request failed; output not confirmed safe");
     pwm_->cleanup();
   } else {
-    if (pwm_) pwm_->set_servo_pulse(pwm_pin_, speed_to_pulse_us(0.0));
-    std::this_thread::sleep_for(500ms);
-    if (pwm_) pwm_->cleanup();
+    if (pwm_) {
+      // Use the same latched/terminal policy; a destructor must not re-emit neutral after Low.
+      if (send_pulse(speed_to_pulse_us(0.0), 0.0)) std::this_thread::sleep_for(500ms);
+      pwm_->cleanup();
+    }
   }
 }
 

@@ -135,7 +135,7 @@ public:
     return ok;
   }
   void tick(int64_t now) {
-    if (state_ != State::FaultLow && state_ != State::FaultUnknown && !out_.check()) {
+    if (state_ != State::FaultUnknown && !out_.check()) {
       fault(out_.error());
       return;
     }

@@ -54,14 +54,15 @@ protected:
 };
 }  // namespace
 
-TEST_F(PwmCommandTest, FailedRunPreservesAppliedPulseAndLatchesFault) {
+TEST_F(PwmCommandTest, FailedRunImmediatelyStopsSignalAndLatchesFault) {
   ASSERT_TRUE(send(1800, 0.8));
   backend.results = {false};
   EXPECT_FALSE(send(2000, 1.0));
-  EXPECT_EQ(command.applied_pulse_us(), 1800);
+  EXPECT_EQ(command.applied_pulse_us(), 0);
+  EXPECT_EQ(backend.stops, 1);
   EXPECT_TRUE(command.fault());
   EXPECT_EQ(errors, std::vector<int>({-42}));
-  EXPECT_TRUE(command.needs_stop(1000));
+  EXPECT_FALSE(command.needs_stop(1000));
 }
 
 TEST_F(PwmCommandTest, FaultRejectsEveryNonzeroCommandUntilRestart) {
@@ -70,7 +71,7 @@ TEST_F(PwmCommandTest, FaultRejectsEveryNonzeroCommandUntilRestart) {
   EXPECT_FALSE(send(2000, 1.0));
   EXPECT_FALSE(send(0, -1.0));
   EXPECT_EQ(backend.pulses, std::vector<int>({1800}));
-  EXPECT_TRUE(send(1000, 0.0));
+  EXPECT_FALSE(send(1000, 0.0));
   EXPECT_TRUE(command.fault());
   EXPECT_FALSE(send(2000, 1.0));
   EXPECT_FALSE(command.needs_stop(1000));
@@ -132,6 +133,7 @@ TEST_F(PwmCommandTest, LogsOnlyRequestChangesIncludingFailedRequests) {
   EXPECT_TRUE(send(1000, 0.0));
   EXPECT_TRUE(send(1000, 0.0));
   backend.results = {false};
+  backend.stop_ok = false;
   EXPECT_FALSE(send(2000, 1.0));
   EXPECT_TRUE(send(1000, 0.0));
   EXPECT_TRUE(send(1000, 0.0));
@@ -160,4 +162,25 @@ TEST(PwmStatusTest, AddsDiagnosticsWithoutRemovingExistingKeys) {
        {"command", "source", "lab_accepted", "lab_locked", "estop", "authority", "lab_max_speed"}) {
     EXPECT_NE(json.find(std::string("\"") + key + "\""), std::string::npos);
   }
+}
+
+TEST_F(PwmCommandTest, LowFallbackRejectsLaterNeutralEvenForLegacyBackend) {
+  ASSERT_TRUE(send(2000, 1.0));
+  backend.results = {false, false};
+  EXPECT_FALSE(send(1000, 0.0));
+  const auto writes = backend.pulses.size();
+  EXPECT_FALSE(send(1000, 0.0));
+  EXPECT_FALSE(send(1800, .8));
+  EXPECT_EQ(backend.pulses.size(), writes);
+  EXPECT_EQ(command.applied_pulse_us(), 0);
+}
+
+TEST_F(PwmCommandTest, IntermediateInvalidPulseNeverReachesBackend) {
+  ASSERT_TRUE(send(1000, 0));
+  EXPECT_FALSE(send(250, -.75));
+  EXPECT_EQ(backend.pulses, std::vector<int>({1000}));
+  EXPECT_EQ(backend.stops, 1);
+  EXPECT_EQ(command.applied_pulse_us(), 0);
+  EXPECT_TRUE(command.fault());
+  EXPECT_FALSE(send(1000, 0));
 }

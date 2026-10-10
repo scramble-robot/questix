@@ -87,3 +87,68 @@ assets from backup if present. Neither script proves Low while unexported/unpowe
 
 No operator should execute deployment until the separate review/physical-test prompt
 and actual safety conditions are satisfied.
+
+## Review corrections and deployment gate (v2)
+
+The v2 owner record begins `COMMITTED`, is root-owned mode 0600, and is published
+atomically only after this guard successfully exports and validates enabled Low.
+A `.pending` file records incomplete initialization and never authorizes recovery.
+Old unversioned markers are rejected: **do not upgrade a live owner or remove its
+marker/export to make startup pass**. Preserve ESC OFF and review an orderly reboot
+and the actual pinmux/export before migration. `FAULT_LOW` remains monitored;
+unexpected duty is driven back to API Low, while unknown period/polarity/enable or
+failed readback becomes `FAULT_UNKNOWN`. The original fault remains latched.
+
+Privileged robot callbacks no longer read the user-owned `launch.env`: the opt-in
+drop-in resets `EnvironmentFile`, uses Python isolated mode, and gives the native
+AUTHORIZE child a fixed environment. The unprivileged standard launcher still reads
+normal configuration, then pins the reviewed local install and ESC YAML from the
+root-owned `reviewed-launch.env`. Parent colcon overlays are not sourced. Root guard
+writes are limited to the reviewed Ubuntu Pi 5 PWM0 device path and its runtime
+folder; capabilities are empty. A differing sysfs device path needs explicit review.
+
+Before the two-argument installer can be used, build the **reviewed source** for
+ARM64, including the launcher and its runtime dependencies. Each guard/ctl and ESC
+node/component ELF embeds the source digest of the six reviewed package trees and
+standard launcher. With the build complete and review checks passed, seal it:
+
+```sh
+python3 -I questix_pwm_guard/deploy/review_manifest.py seal \
+  /path/to/reviewed/source /path/to/reviewed/install \
+  /path/to/reviewed/install/reviewed-release.json
+# After an independent review records the exact manifest SHA (not a hash guessed from this prefix):
+# the operator records that SHA in root-owned mode 0600
+# /etc/questix_pwm_guard/approved-release.sha256. Keep its parent root-owned and non-writable.
+sudo bash questix_pwm_guard/deploy/install_reviewed.sh /path/to/reviewed/install scramble
+```
+
+The manifest records the whole install prefix's file hashes, including Python bytecode, and rejects old ELFs,
+changed dependencies, missing runtime packages and YAML/setup changes. Its digest
+is source identity, **not independent approval or a measured safety result**. Do not
+seal an unreviewed build to bypass the gate. The installer requires the separately approved manifest SHA, freezes it in root-owned
+staging, and compares copied native binaries/helpers/config inputs against that fixed
+table before installation. An ELF source marker alone authenticates nothing. It verifies
+its own source identity, stages DT compilation before asset changes, records all backup paths and
+absences, and publishes `READY` only after final verification. A durable deployment
+in-progress record blocks manual authorization after any interrupted update; never
+rerun a partial installer blindly. Installer/validator/rollback share a deployment
+lock. Installer requires robot and guard quiescent and never stops a running Low
+owner to satisfy that check. It installs the reviewed standard launcher, but does
+not replace the source workspace, enable/start services, reboot, or export GPIO.
+
+Rollback restores the recorded paths and retains withdrawn assets, including
+originally absent paths. It does not stop a live guard, change unit enable state,
+restore unrecorded custom assets, or guarantee pinmux. Review the backup and keep
+ESC OFF through an operator-approved reboot before choosing lgpio. Existing custom
+symlinks and unsafe privileged directories require separate review.
+
+Shutdown's 800 ms budget begins at entry and bounds each RPC and sleep by the same
+monotonic deadline. Linux scheduling still supplies no hard real-time guarantee.
+Legacy backend run-write failures immediately attempt signal stop; successful Low
+fallback is terminal and later neutral is refused. Actual requests in the invalid
+1–499 us interval are rejected and stopped without silently changing the mapping.
+
+Software verification does not release E-stop or shooting HOLD. Before powered
+motion/shooting, validate the reviewed ARM64 deployment, neutral/Low and complete
+normal/fault shutdown waveforms, and independently approve the physical setup and
+power-cut protection. Initial short Low snapshots do not cover those conditions.

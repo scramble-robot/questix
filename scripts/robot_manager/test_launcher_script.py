@@ -251,3 +251,30 @@ def test_manager_writes_a_lesson_request_the_launcher_accepts(robot, monkeypatch
     app._write_start_request("lesson")
     _, launched = robot.run()
     assert len(launched) == 1 and "require_teacher_permission:=true" in launched[0]
+
+
+def test_reviewed_rp1_prefix_and_yaml_override_editable_configuration(robot, tmp_path):
+    robot.mode("lesson")
+    robot.request("lesson")
+    guard_config = robot.dir.parent / "questix_pwm_guard"
+    guard_config.mkdir()
+    prefix = tmp_path / "reviewed_install"
+    prefix.mkdir()
+    # The reviewed local setup supplies a harmless fake ros2 after the real Jazzy base setup.
+    (prefix / "local_setup.bash").write_text(
+        f'export PATH="{tmp_path / "bin"}:$PATH"\n'
+        f'printf "%s" "$QUESTIX_ESC_CONFIG_FILE" > "{tmp_path / "yaml_seen"}"\n')
+    (guard_config / "reviewed-launch.env").write_text(
+        f'RP1_REVIEW_PREFIX={prefix}\nRP1_REVIEW_CONFIG={guard_config / "esc.yaml"}\n')
+    (robot.dir / "launch.env").write_text(
+        'QUESTIX_ESC_CONFIG_FILE=/old/esc.yaml\nROBOT_WS=/old/workspace\n'
+        'QUESTIX_ROS_SETUP=/old/setup.bash\nAMENT_PREFIX_PATH=/old/install\n')
+    ros2 = tmp_path / 'bin/ros2'
+    ros2.write_text(ros2.read_text() +
+                    f'printf "%s" "$QUESTIX_ESC_CONFIG_FILE" > "{tmp_path / "yaml_effective"}"\n')
+    result, launched = robot.run()
+    assert result.returncode == 0, result.stderr
+    assert len(launched) == 1
+    assert (tmp_path / "yaml_effective").read_text() == str(guard_config / "esc.yaml")
+    # The effective value is pinned again after sourcing all setup files.
+    assert (tmp_path / "yaml_seen").read_text() == '/old/esc.yaml'

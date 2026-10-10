@@ -21,11 +21,19 @@ public:
 
   bool send(PwmBackend& backend, int pin, int pulse_us, double speed, const ChangeLog& changed,
             const ErrorLog& error) {
-    if (backend.terminal() && pulse_us != 0) {
+    if ((backend.terminal() || terminal_low_) && pulse_us != 0) {
       pwm_fault_ = true;
       return false;
     }
     if (pwm_fault_ && speed != 0.0) return false;
+    // Linear legacy mappings can cross 1..499 us even when their endpoints are valid.
+    // Reject the actual request before any backend API call; never clamp it into another command.
+    if (!valid_pulse(pulse_us)) {
+      pwm_fault_ = true;
+      error(-EINVAL);
+      stop_failed_neutral(backend, pin, error);
+      return false;
+    }
     if (requested_pulse_us_ != pulse_us) {
       changed(requested_pulse_us_, pulse_us, speed);
       requested_pulse_us_ = pulse_us;
@@ -35,7 +43,10 @@ public:
       stop_failed_neutral(backend, pin, error);
       return false;
     }
-    if (speed != 0.0) return false;
+    if (speed != 0.0) {
+      stop_failed_neutral(backend, pin, error);
+      return false;
+    }
     // One immediate retry for a stop/arm request. The first failure remains latched.
     if (attempt(backend, pin, pulse_us, error)) return true;
     stop_failed_neutral(backend, pin, error);
@@ -76,12 +87,14 @@ private:
   void stop_failed_neutral(PwmBackend& backend, int pin, const ErrorLog& error) {
     if (backend.stop_signal(pin)) {
       applied_pulse_us_ = 0;
+      terminal_low_ = true;
     } else {
       error(backend.last_error());
     }
   }
 
   bool pwm_fault_{false};
+  bool terminal_low_{false};
   int applied_pulse_us_{-1};  // Unknown until a backend operation succeeds.
   int requested_pulse_us_{-1};
 };

@@ -9,6 +9,7 @@
 #include <sys/un.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
@@ -42,14 +43,27 @@ public:
       close();
       return false;
     }
+    ucred peer{};
+    socklen_t size = sizeof(peer);
+    if (getsockopt(fd_, SOL_SOCKET, SO_PEERCRED, &peer, &size) < 0 || size != sizeof(peer) ||
+        peer.uid != 0) {
+      close();
+      return false;
+    }
     return true;
   }
   Reply call(const std::string& op, uint64_t session = 0, uint64_t seq = 0, int pulse = 0) {
+    return call_until(op, session, seq, pulse,
+                      std::chrono::steady_clock::now() + std::chrono::milliseconds(100));
+  }
+  Reply call_until(const std::string& op, uint64_t session, uint64_t seq, int pulse,
+                   std::chrono::steady_clock::time_point deadline) {
     Reply r;
     if (fd_ < 0) return r;
     std::string frame = "1 " + op + " " + std::to_string(session) + " " + std::to_string(seq) +
                         " " + std::to_string(pulse);
-    auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
+    auto end =
+        std::min(deadline, std::chrono::steady_clock::now() + std::chrono::milliseconds(100));
     if (!wait(POLLOUT, end) ||
         send(fd_, frame.data(), frame.size(), MSG_NOSIGNAL) != ssize_t(frame.size()) ||
         !wait(POLLIN, end)) {
@@ -68,6 +82,14 @@ public:
     std::string extra;
     if (!(in >> version >> ok >> r.state >> r.applied >> r.session >> r.error) || version != 1 ||
         (ok != 0 && ok != 1) || (in >> extra)) {
+      close();
+      return Reply{};
+    }
+    const bool low = r.state == "LOW_IDLE" || r.state == "TERMINAL_LOW" || r.state == "FAULT_LOW";
+    const bool neutral = r.state == "ARMING" || r.state == "DRAINING";
+    if (r.error > 0 || !((low && r.applied == 0) || (neutral && r.applied == 1000) ||
+                         (r.state == "ACTIVE" && r.applied >= 500 && r.applied <= 2500) ||
+                         (r.state == "FAULT_UNKNOWN" && r.applied == -1))) {
       close();
       return Reply{};
     }

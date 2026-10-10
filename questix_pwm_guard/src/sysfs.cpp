@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 #include <fstream>
+#include <sstream>
 #include <thread>
 namespace questix_pwm_guard {
 namespace fs = std::filesystem;
@@ -56,7 +57,11 @@ bool SysfsOutput::initialize(bool recovery_only) {
           node.compare(node.size() - suffix.size(), suffix.size(), suffix) != 0)
         continue;
       auto compatible = read_file(e.path() / "device/of_node/compatible");
-      if (compatible.find("raspberrypi,rp1-pwm") == std::string::npos) continue;
+      bool rp1 = false;
+      std::istringstream entries(compatible);
+      for (std::string entry; std::getline(entries, entry, '\0');)
+        if (entry == "raspberrypi,rp1-pwm") rp1 = true;
+      if (!rp1) continue;
       if (!chip_.empty()) throw std::runtime_error("ambiguous PWM0 controller");
       chip_ = e.path();
     }
@@ -64,13 +69,14 @@ bool SysfsOutput::initialize(bool recovery_only) {
       throw std::runtime_error("RP1 PWM0 channel unavailable");
     channel_ = chip_ / ("pwm" + std::to_string(config_.channel));
     bool existing = fs::exists(channel_);
-    const std::string owner = fs::canonical(chip_ / "device/of_node").string() + "\n1\n20000000\n" +
-                              read_file(config_.boot_id_file);
+    const fs::path pending = config_.owner_file.string() + ".pending";
+    const std::string owner = "COMMITTED\n" + fs::canonical(chip_ / "device/of_node").string() +
+                              "\n1\n20000000\n" + read_file(config_.boot_id_file);
     if (existing) {
       int fd = open(config_.owner_file.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
       struct stat st {};
       if (fd < 0 || fstat(fd, &st) < 0 || !S_ISREG(st.st_mode) || st.st_uid != geteuid() ||
-          (st.st_mode & 0022)) {
+          (st.st_mode & 0777) != 0600) {
         if (fd >= 0) close(fd);
         throw std::runtime_error("unknown export owner");
       }
@@ -81,10 +87,12 @@ bool SysfsOutput::initialize(bool recovery_only) {
         throw std::runtime_error("export ownership mismatch");
     }
     if (!existing) {
+      if (fs::exists(config_.owner_file)) throw std::runtime_error("stale owner requires review");
       if (recovery_only) throw std::runtime_error("no exported output to recover");
-      // Only a fresh kernel export can establish ownership. Never overwrite an existing marker.
-      int marker = open(config_.owner_file.c_str(),
-                        O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
+      // PENDING is never trusted by recovery, even after a crash or export failure.
+      // Publish COMMITTED only after our successful export and validated Low setup.
+      int marker =
+          open(pending.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
       if (marker < 0) {
         error_ = -errno;
         return false;
@@ -118,7 +126,19 @@ bool SysfsOutput::initialize(bool recovery_only) {
       return false;
     }
     initialized_ = true;
-    return write_pulse(0);
+    if (!write_pulse(0)) return false;
+    if (!existing) {
+      // link is atomic and refuses replacement; both files are in the root-owned runtime dir.
+      if (link(pending.c_str(), config_.owner_file.c_str()) < 0) {
+        error_ = -errno;
+        return false;
+      }
+      if (unlink(pending.c_str()) < 0) {
+        error_ = -errno;
+        return false;
+      }
+    }
+    return true;
   } catch (const std::exception&) {
     error_ = -EINVAL;
     return false;

@@ -4,6 +4,7 @@
 // license that can be found in the LICENSE file or at
 // https://opensource.org/licenses/MIT.
 #pragma once
+#include <algorithm>
 #include <chrono>
 #include <string>
 #include <thread>
@@ -49,19 +50,20 @@ public:
     return accept(client_.call("STOP", session_, ++seq_));
   }
   bool graceful_shutdown() override {
+    const auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(800);
     if (!ready_) return false;
-    if (terminal_) return stop_signal(13);
+    if (terminal_) return accept(client_.call_until("STOP", session_, ++seq_, 0, end));
     terminal_ = true;
-    auto r = client_.call("SHUTDOWN", session_, ++seq_);
+    auto r = client_.call_until("SHUTDOWN", session_, ++seq_, 0, end);
     if (!accept(r)) return false;
-    auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(800);
     while (std::chrono::steady_clock::now() < end) {
-      r = client_.call("STATUS");
+      r = client_.call_until("STATUS", 0, 0, 0, end);
       if (!accept(r)) return false;
       if (r.session != session_) return fail(ESTALE);
       if (r.state == "TERMINAL_LOW" && r.applied == 0) return true;
       if (r.state != "DRAINING") return fail(EIO);
-      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      std::this_thread::sleep_until(
+          std::min(end, std::chrono::steady_clock::now() + std::chrono::milliseconds(10)));
     }
     return fail(ETIMEDOUT);
   }
@@ -83,9 +85,16 @@ private:
     return false;
   }
   bool accept(const questix_pwm_guard::Reply& r) {
+    if (ready_ && r.ok && r.session != session_) {
+      client_.close();
+      terminal_ = true;
+      state_ = "UNKNOWN";
+      applied_ = -1;
+      return fail(ESTALE);
+    }
     state_ = r.state;
     applied_ = r.applied;
-    error_ = r.ok ? 0 : r.error;
+    error_ = r.error;
     if (!r.ok || r.state == "FAULT_LOW" || r.state == "FAULT_UNKNOWN") {
       terminal_ = true;
       if (!error_) error_ = -EIO;

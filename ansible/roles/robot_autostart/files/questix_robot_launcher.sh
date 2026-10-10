@@ -36,6 +36,8 @@ set -euo pipefail
 CONFIG_DIR="${QUESTIX_CONFIG_DIR:-/etc/questix_robot}"
 MODE_FILE="${CONFIG_DIR}/mode"
 ENV_FILE="${CONFIG_DIR}/launch.env"
+# Captured before user configuration; this root-managed opt-in cannot be redirected by it.
+readonly RP1_REVIEW_FILE="${CONFIG_DIR%/*}/questix_pwm_guard/reviewed-launch.env"
 START_REQUEST_FILE="${CONFIG_DIR}/start-request"
 LAST_LAUNCH_FILE="${CONFIG_DIR}/last-launch"
 START_REQUEST_MAX_AGE_SEC=120
@@ -142,6 +144,21 @@ if [ -f "${ENV_FILE}" ]; then
   set +a
 fi
 
+# Apply the reviewed opt-in after editable configuration. No workspace/environment override.
+RP1_REVIEW_PREFIX=""
+if [ -f "${RP1_REVIEW_FILE}" ]; then
+  # shellcheck disable=SC1090
+  source "${RP1_REVIEW_FILE}"
+  [[ -n "${RP1_REVIEW_PREFIX}" && -f "${RP1_REVIEW_PREFIX}/local_setup.bash" ]] || exit 1
+  unset AMENT_PREFIX_PATH CMAKE_PREFIX_PATH COLCON_PREFIX_PATH LD_LIBRARY_PATH PYTHONPATH
+  unset PYTHONHOME PYTHONUSERBASE LD_PRELOAD LD_AUDIT BASH_ENV ENV
+  unset COLCON_PYTHON_EXECUTABLE COLCON_CURRENT_PREFIX
+  PATH=/usr/bin:/bin
+  export PYTHONNOUSERSITE=1
+  ROS_DISTRO=jazzy
+  QUESTIX_ROS_SETUP=/opt/ros/jazzy/setup.bash
+fi
+
 # Determine ROS2 distro and workspace (env vars or defaults)
 ROS_DISTRO="${ROS_DISTRO:-jazzy}"
 ROBOT_WS="${ROBOT_WS:-/home/ubuntu/robot_ws}"
@@ -152,7 +169,13 @@ ROS_SETUP="${QUESTIX_ROS_SETUP:-/opt/ros/${ROS_DISTRO}/setup.bash}"
 set +u
 # shellcheck disable=SC1090
 source "${ROS_SETUP}"
-if [ -f "${ROBOT_WS}/install/setup.bash" ]; then
+if [ -n "${RP1_REVIEW_PREFIX}" ]; then
+  # local_setup avoids colcon's recorded parent overlays; ROS Jazzy was sourced above.
+  # shellcheck disable=SC1090
+  source "${RP1_REVIEW_PREFIX}/local_setup.bash"
+  export QUESTIX_ESC_CONFIG_FILE="${RP1_REVIEW_CONFIG}"
+  export PYTHONDONTWRITEBYTECODE=1
+elif [ -f "${ROBOT_WS}/install/setup.bash" ]; then
   # shellcheck disable=SC1090
   source "${ROBOT_WS}/install/setup.bash"
 fi

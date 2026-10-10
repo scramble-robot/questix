@@ -61,11 +61,11 @@ TEST_F(PwmDiagnosticsTest, InvalidConfigurationLogsErrorWithoutChangingParameter
   EXPECT_EQ(node.get_parameter("neutral_pulse_width").as_int(), 3000);
 }
 
-TEST_F(PwmDiagnosticsTest, DefaultEndpointsAreValidAndSimulationIsReported) {
+TEST_F(PwmDiagnosticsTest, DefaultIntervalWarnsAndSimulationIsReported) {
   rclcpp::NodeOptions options;
   options.append_parameter_override("test_mode", true);
   esc_motor_control_cpp::EscMotorControlComponent node(options);
-  EXPECT_FALSE(has_error("ESC pulse configuration"));
+  EXPECT_TRUE(has_error("continuous speed interval intersects 1-499 us"));
   bool simulation = false;
   for (const auto& log : logs) {
     if (log.second == "PWM backend: simulation") simulation = true;

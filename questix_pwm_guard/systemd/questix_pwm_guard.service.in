@@ -20,7 +20,11 @@ KillSignal=SIGTERM
 NoNewPrivileges=yes
 ProtectHome=yes
 ProtectSystem=strict
-ReadWritePaths=/run/questix_pwm_guard /sys
+ReadOnlyPaths=/sys
+# Reviewed Ubuntu 24.04 Pi 5 PWM0 controller. A different path requires an explicit review.
+ReadWritePaths=/run/questix_pwm_guard /sys/devices/platform/axi/1000120000.pcie/1f00098000.pwm
+CapabilityBoundingSet=
+AmbientCapabilities=
 PrivateTmp=yes
 RestrictAddressFamilies=AF_UNIX
 RestrictSUIDSGID=yes
