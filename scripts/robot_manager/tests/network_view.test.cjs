@@ -70,6 +70,14 @@ test('success notice includes what happened to QUESTiX LAB', () => {
   assert.equal(view.notice, 'QUESTiX Local を開始しました。 教材の配信を開始しました。');
 });
 
+test('success notice says where the browser controller opens (CONTROLLER_TYPE=web)', () => {
+  const view = NetworkView.summary(ap({ job: { state: 'succeeded', message: 'QUESTiX Local を開始しました。',
+    lab_message: '大会モードのため、教材は配信しません。',
+    controller_message: 'ブラウザのコントローラーは http://10.42.0.1:8899/ で開けます（ロボット制御の起動中）。' } }));
+  assert.equal(view.notice, 'QUESTiX Local を開始しました。 大会モードのため、教材は配信しません。 ' +
+    'ブラウザのコントローラーは http://10.42.0.1:8899/ で開けます（ロボット制御の起動中）。');
+});
+
 test('helper not installed: nothing can be pressed and the fix is named', () => {
   const view = NetworkView.summary(ap({ admin_available: false }));
   assert.equal(view.canStart || view.canStop || view.canSave, false);

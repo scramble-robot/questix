@@ -10,7 +10,8 @@
 #                                          the QUESTiX LAB bridge (lesson mode only)
 #   sudo scripts/wifi-ap.sh down           access point off; saved Wi-Fi client profiles take over
 #   sudo scripts/wifi-ap.sh status         SSID, password, address and connected devices
-#   sudo scripts/wifi-ap.sh card [FILE]    printable card with the Wi-Fi and QUESTiX LAB QR codes
+#   sudo scripts/wifi-ap.sh card [FILE]    printable card with the Wi-Fi and QUESTiX LAB QR codes, and
+#                                          the browser controller's when CONTROLLER_TYPE=web
 #                                          (also in robot_manager: 教材 tab → 印刷用の接続カード)
 #   sudo scripts/wifi-ap.sh remove         delete the access point profile and its settings
 #
@@ -42,6 +43,7 @@ CONFIG_DIR="${QUESTIX_CONFIG_DIR:-/etc/questix_robot}"
 ROBOT_MANAGER_URL=http://127.0.0.1:8888
 CARD_SOURCE_DIR="$REPO_ROOT/scripts/robot_manager/static"
 LAB_BRIDGE_PORT=8897  # questix_lab_bridge/config/lab_bridge.yaml
+WEB_JOY_PORT=8899  # web_joy_driver/config/web_joy_driver_params.yaml (robot_manager wifi_ap.py)
 DEFAULT_ADDRESS=10.42.0.1/24
 PASSWORD_LENGTH=12
 # No 0/O, 1/l/I: the password is read off a screen and typed on a phone.
@@ -303,7 +305,21 @@ command_up() {
     "$REPO_ROOT/scripts/update-robot-manager.sh" --if-installed \
         || echo "⚠️  Robot Manager を更新できませんでした。sudo scripts/update-robot-manager.sh で再実行してください。"
     enable_lab_bridge
+    print_controller_hint
     print_join_hint
+}
+
+# CONTROLLER_TYPE from robot_manager's launch.env (read, never sourced); empty when unset.
+controller_type() {
+    [ -r "$CONFIG_DIR/launch.env" ] || return 0
+    sed -n 's/^CONTROLLER_TYPE=//p' "$CONFIG_DIR/launch.env" 2> /dev/null | tail -n 1 | tr -d "\"'[:space:]"
+}
+
+# The browser controller (web_joy_driver) is served by the robot launch, not by QUESTiX LAB, so it
+# is reachable over the access point in every mode while the robot runs.
+print_controller_hint() {
+    [ "$(controller_type)" = web ] || return 0
+    echo "🎮 ブラウザのコントローラー: http://${WIFI_AP_ADDRESS%/*}:$WEB_JOY_PORT/（ロボット制御の起動中に開けます）"
 }
 
 # Learners join the access point to open the teaching pages, so the bridge that serves them
@@ -416,7 +432,8 @@ command_card() {
     CARD_SOURCE_DIR="$CARD_SOURCE_DIR" CARD_OUTPUT="$output" \
         CARD_LAB_URL="http://${WIFI_AP_ADDRESS%/*}:$LAB_BRIDGE_PORT/" \
         CARD_SSID="$WIFI_AP_SSID" CARD_PASSWORD="$WIFI_AP_PASSWORD" \
-        CARD_ADDRESS="${WIFI_AP_ADDRESS%/*}" python3 - << 'PYTHON'
+        CARD_ADDRESS="${WIFI_AP_ADDRESS%/*}" CARD_CONTROLLER_TYPE="$(controller_type)" \
+        CARD_CONTROLLER_URL="http://${WIFI_AP_ADDRESS%/*}:$WEB_JOY_PORT/" python3 - << 'PYTHON'
 import json, os, pathlib
 source = pathlib.Path(os.environ['CARD_SOURCE_DIR'])
 page = (source / 'ap-card.html').read_text()
@@ -426,6 +443,9 @@ data = {
     'password': os.environ['CARD_PASSWORD'],
     'address': os.environ['CARD_ADDRESS'],
     'lab_url': os.environ['CARD_LAB_URL'],
+    # ap-card.js adds the third QR code only for CONTROLLER_TYPE=web.
+    'controller_type': os.environ['CARD_CONTROLLER_TYPE'],
+    'controller_url': os.environ['CARD_CONTROLLER_URL'],
 }
 def inline_script(name):
     # "</script" inside a script would end it early.
