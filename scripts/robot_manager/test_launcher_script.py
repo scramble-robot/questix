@@ -39,6 +39,7 @@ def robot(tmp_path):
 
     class Robot:
         dir = config
+        launcher = LAUNCHER
 
         def mode(self, mode):
             (config / "mode").write_text(mode + "\n")
@@ -53,7 +54,7 @@ def robot(tmp_path):
                        QUESTIX_BOOT_ID_FILE=str(tmp_path / "boot_id"),
                        QUESTIX_ROS_SETUP=str(tmp_path / "setup.bash"),
                        ROBOT_WS=str(tmp_path / "no_ws"))
-            result = subprocess.run(["bash", str(LAUNCHER)], env=env, capture_output=True,
+            result = subprocess.run(["bash", str(self.launcher)], env=env, capture_output=True,
                                     text=True, timeout=20, check=False)
             launched = calls.read_text().splitlines() if calls.exists() else []
             return result, launched
@@ -258,9 +259,17 @@ def test_reviewed_rp1_prefix_and_yaml_override_editable_configuration(robot, tmp
     robot.request("lesson")
     guard_config = robot.dir.parent / "questix_pwm_guard"
     guard_config.mkdir()
+    # Execute a temporary copy with only the fixed Jazzy underlay path relocated.
+    # Production keeps its pinned path; this CI fixture needs no ROS installation.
+    launcher_text = LAUNCHER.read_text()
+    fixed_setup = 'QUESTIX_ROS_SETUP=/opt/ros/jazzy/setup.bash'
+    assert launcher_text.count(fixed_setup) == 1
+    robot.launcher = tmp_path / "reviewed_launcher.sh"
+    robot.launcher.write_text(launcher_text.replace(
+        fixed_setup, f'QUESTIX_ROS_SETUP="{tmp_path / "setup.bash"}"'))
     prefix = tmp_path / "reviewed_install"
     prefix.mkdir()
-    # The reviewed local setup supplies a harmless fake ros2 after the real Jazzy base setup.
+    # The reviewed local setup supplies a harmless fake ros2 after the isolated base setup.
     (prefix / "local_setup.bash").write_text(
         f'export PATH="{tmp_path / "bin"}:$PATH"\n'
         f'printf "%s" "$QUESTIX_ESC_CONFIG_FILE" > "{tmp_path / "yaml_seen"}"\n')
