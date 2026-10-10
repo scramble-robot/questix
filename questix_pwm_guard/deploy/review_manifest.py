@@ -8,8 +8,11 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
+import shutil
 import stat
 import sys
+import tempfile
 import xml.etree.ElementTree as ET
 
 PACKAGES = ('questix_msgs', 'questix_control_config', 'questix_safety',
@@ -21,6 +24,7 @@ ELFS = ('questix_pwm_guard/lib/questix_pwm_guard/questix_pwm_guard',
 REQUIRED = ELFS + ('setup.bash', 'local_setup.bash',
                   'questix_launcher/share/questix_launcher/launch/questix_core.launch.xml',
                   'esc_motor_control_cpp/share/esc_motor_control_cpp/config/esc_motor_control_cpp.yaml')
+RELEASE_ROOT = Path('/opt/questix_pwm_guard/releases')
 
 
 def sha(path):
@@ -45,11 +49,58 @@ def digest(root):
 
 
 def install_files(prefix):
-    return {str(p.relative_to(prefix)): sha(p) for p in sorted(prefix.rglob('*'))
-            if p.is_file() and p.relative_to(prefix) != Path('reviewed-release.json')}
+    files = {}
+    for path in sorted(prefix.rglob('*')):
+        info = path.lstat()
+        if stat.S_ISDIR(info.st_mode):
+            continue
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError(f'release must contain only directories and regular files: {path}')
+        if path.relative_to(prefix) != Path('reviewed-release.json'):
+            files[str(path.relative_to(prefix))] = sha(path)
+    return files
 
 
-def verify(data, arm64=False):
+def protected_path(path):
+    """Root ownership through every ancestor prevents rename/replacement by the robot."""
+    for candidate in (path, *path.parents):
+        info = candidate.lstat()
+        if (info.st_uid != 0 or info.st_mode & 0o022 or stat.S_ISLNK(info.st_mode)
+                or not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode))):
+            raise ValueError(f'runtime path is not root protected: {candidate}')
+    if path.is_file() and path.stat().st_nlink != 1:
+        raise ValueError(f'linked runtime file: {path}')
+
+
+def validate_inventory(files):
+    if not isinstance(files, dict) or not files:
+        raise ValueError('empty or invalid install inventory')
+    for name, digest in files.items():
+        if (not isinstance(name, str) or not name or name.startswith('/')
+                or any(part in ('', '.', '..') for part in name.split('/'))
+                or name == 'reviewed-release.json'
+                or not isinstance(digest, str) or not re.fullmatch('[0-9a-f]{64}', digest)):
+            raise ValueError('noncanonical install inventory')
+
+
+def verify_frozen(data, prefix):
+    frozen = data.get('frozen_runtime', {})
+    release = frozen.get('approved_manifest_sha256', '')
+    if (not re.fullmatch('[0-9a-f]{64}', release)
+            or prefix != RELEASE_ROOT / release):
+        raise ValueError('runtime must use an approved frozen release path')
+    protected_path(prefix)
+    for path in prefix.rglob('*'):
+        protected_path(path)
+    original_manifest = prefix / 'reviewed-release.json'
+    original = trusted_json(original_manifest)
+    if (sha(original_manifest) != release
+            or original['prefix'] != frozen.get('original_prefix')
+            or any(original[key] != data[key] for key in ('source_digest', 'source_files', 'install_files'))):
+        raise ValueError('frozen runtime differs from original approval')
+
+
+def verify(data, arm64=False, require_frozen=False):
     if data['schema'] != 2 or data['contract'] != 'rp1-reviewed-v2':
         raise ValueError('unsupported review manifest')
     records = ''.join(f'{name}:{digest}\n' for name, digest in sorted(data['source_files'].items()))
@@ -58,6 +109,9 @@ def verify(data, arm64=False):
     prefix = Path(data['prefix'])
     if not prefix.is_absolute() or prefix.resolve() != prefix:
         raise ValueError('review prefix must be canonical')
+    validate_inventory(data['install_files'])
+    if require_frozen:
+        verify_frozen(data, prefix)
     if install_files(prefix) != data['install_files']:
         raise ValueError('reviewed install content changed')
     for relative in REQUIRED:
@@ -93,6 +147,85 @@ def verify(data, arm64=False):
         if path.stat().st_uid != 0 or path.stat().st_mode & 0o022 or sha(path) != expected:
             raise ValueError(f'changed deployed asset: {filename}')
     return prefix
+
+
+def freeze(manifest, source, destination):
+    """Copy approved bytes with no-follow descriptor traversal, without running setup/code."""
+    data = trusted_json(manifest)
+    source, destination = Path(source), Path(destination)
+    if source != Path(data['prefix']) or source.resolve() != source:
+        raise ValueError('installer prefix differs from approved manifest')
+    verify(data, arm64=True)
+    destination.mkdir(mode=0o700)
+    root_fd = os.open(source, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        for name, expected in sorted(data['install_files'].items()):
+            parent = os.dup(root_fd)
+            try:
+                parts = name.split('/')
+                for part in parts[:-1]:
+                    child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+                                    | os.O_CLOEXEC, dir_fd=parent)
+                    os.close(parent)
+                    parent = child
+                fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+                             | os.O_CLOEXEC, dir_fd=parent)
+                with os.fdopen(fd, 'rb') as stream:
+                    info = os.fstat(stream.fileno())
+                    if not stat.S_ISREG(info.st_mode):
+                        raise ValueError(f'nonregular runtime input: {name}')
+                    target = destination / name
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    with target.open('xb') as output:
+                        shutil.copyfileobj(stream, output)
+                    target.chmod(0o644 | (info.st_mode & 0o111))
+                if sha(target) != expected:
+                    raise ValueError(f'copied runtime differs from approved inventory: {name}')
+            finally:
+                os.close(parent)
+    finally:
+        os.close(root_fd)
+    # Preserve the exact independent approval, not just a relabeled derived manifest.
+    shutil.copyfile(manifest, destination / 'reviewed-release.json')
+    (destination / 'reviewed-release.json').chmod(0o600)
+    for path in destination.rglob('*'):
+        if path.is_dir():
+            path.chmod(0o755)
+    destination.chmod(0o755)
+    data['frozen_runtime'] = {'approved_manifest_sha256': sha(Path(manifest)),
+                              'original_prefix': str(source)}
+    data['prefix'] = str(destination)
+    verify(data, arm64=True)
+    return data
+
+
+def publish(data):
+    """Never overwrite a version. Existing identical protected versions may be reused."""
+    source = Path(data['prefix'])
+    verify(data, arm64=True)
+    # The parent is privileged and checked before mkdir, not inherited from a user path.
+    protected_path(RELEASE_ROOT.parent)
+    RELEASE_ROOT.mkdir(mode=0o755, exist_ok=True)
+    protected_path(RELEASE_ROOT)
+    target = RELEASE_ROOT / data['frozen_runtime']['approved_manifest_sha256']
+    data = dict(data, prefix=str(target))
+    if target.exists() or target.is_symlink():
+        verify(data, arm64=True, require_frozen=True)
+    else:
+        # /var/tmp and /opt may be different filesystems. Copy into a private directory
+        # on the release filesystem, verify again, then publish with a same-filesystem rename.
+        pending = Path(tempfile.mkdtemp(prefix='.pending-', dir=RELEASE_ROOT))
+        try:
+            runtime = pending / 'runtime'
+            shutil.copytree(source, runtime, symlinks=True)
+            verify(dict(data, prefix=str(runtime)), arm64=True)
+            for path in (runtime, *runtime.rglob('*')):
+                protected_path(path)
+            os.rename(runtime, target)
+            verify(data, arm64=True, require_frozen=True)
+        finally:
+            shutil.rmtree(pending)
+    return data
 
 
 def approved_manifest(path, approval):
@@ -136,6 +269,14 @@ def main():
         approved_manifest(sys.argv[2], sys.argv[3])
     elif operation == 'verify':
         verify(json.loads(Path(sys.argv[2]).read_text()), len(sys.argv) > 3)
+    elif operation == 'freeze':
+        data = freeze(sys.argv[2], sys.argv[3], sys.argv[4])
+        Path(sys.argv[5]).write_text(json.dumps(data, indent=2) + '\n')
+        Path(sys.argv[5]).chmod(0o600)
+    elif operation == 'publish':
+        data = publish(trusted_json(sys.argv[2]))
+        Path(sys.argv[2]).write_text(json.dumps(data, indent=2) + '\n')
+        print(data['prefix'])
     else:
         raise ValueError('unknown operation')
 

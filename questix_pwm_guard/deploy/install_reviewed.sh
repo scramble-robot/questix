@@ -44,9 +44,12 @@ approval=/etc/questix_pwm_guard/approved-release.sha256
 /usr/bin/python3 -I "$script_dir/review_manifest.py" approved "$manifest" "$approval"
 /usr/bin/python3 -I "$script_dir/review_manifest.py" verify "$manifest" ARM64
 expected_digest=$(/usr/bin/python3 -I "$script_dir/review_manifest.py" digest "$script_dir/../..")
-/usr/bin/python3 -I - "$manifest" "$expected_digest" <<'PY'
+/usr/bin/python3 -I - "$manifest" "$expected_digest" "$review_prefix" <<'PY'
 import json,sys
-if json.load(open(sys.argv[1]))['source_digest'] != sys.argv[2]:
+data=json.load(open(sys.argv[1]))
+if data['prefix'] != sys.argv[3]:
+    raise SystemExit('installer prefix differs from approved manifest')
+if data['source_digest'] != sys.argv[2]:
     raise SystemExit('installer source and sealed ARM64 build differ')
 PY
 # Compile and stage everything before modifying installed assets. A missing tool/invalid DT is inert.
@@ -57,9 +60,12 @@ install -m 0600 "$manifest" "$stage/input-manifest.json"
 manifest="$stage/input-manifest.json"
 /usr/bin/python3 -I "$script_dir/review_manifest.py" approved "$manifest" "$approval"
 /usr/bin/python3 -I "$script_dir/review_manifest.py" verify "$manifest" ARM64
-/usr/bin/python3 -I - "$manifest" "$expected_digest" <<'PY_FROZEN'
+/usr/bin/python3 -I - "$manifest" "$expected_digest" "$review_prefix" <<'PY_FROZEN'
 import json,sys
-if json.load(open(sys.argv[1]))['source_digest'] != sys.argv[2]:
+data=json.load(open(sys.argv[1]))
+if data['prefix'] != sys.argv[3]:
+ raise SystemExit('installer prefix differs from frozen approval')
+if data['source_digest'] != sys.argv[2]:
  raise SystemExit('frozen manifest identity mismatch')
 PY_FROZEN
 for binary in questix_pwm_guard questix_pwm_ctl; do
@@ -79,7 +85,6 @@ source=(stage/'canonical-esc.yaml').read_text()
 if source.count('pwm_backend: "auto"') != 1:
     raise SystemExit('unexpected canonical backend config')
 (stage/'esc.yaml').write_text(source.replace('pwm_backend: "auto"','pwm_backend: "rp1_hw"'))
-(stage/'reviewed-launch.env').write_text(f'RP1_REVIEW_PREFIX={prefix}\nRP1_REVIEW_CONFIG=/etc/questix_pwm_guard/esc.yaml\n')
 PY
 for relative in systemd/questix_pwm_guard.service.in systemd/50-rp1-pwm.conf deploy/gpio13-rp1-pwm.dts; do
   install -m 0644 "$script_dir/../$relative" "$stage/$(basename -- "$relative")"
@@ -106,6 +111,10 @@ for name,digest in expected.items():
  if hashlib.sha256((stage/name).read_bytes()).hexdigest()!=digest:
   raise SystemExit(f'staged asset differs from reviewed source/build: {name}')
 PY_STAGE
+# Freeze all runtime packages, not only the selected native binaries. Copy races must
+# fail against the independently approved, already root-frozen inventory before mutation.
+/usr/bin/python3 -I "$stage/review_manifest.py" freeze "$manifest" "$review_prefix" \
+  "$stage/runtime" "$stage/frozen-release.json"
 dtc -@ -I dts -O dtb -o "$stage/questix-gpio13-pwm.dtbo" "$stage/gpio13-rp1-pwm.dts"
 cp -a /boot/firmware/config.txt "$stage/config.txt"
 if ! grep -Fxq 'dtoverlay=questix-gpio13-pwm' "$stage/config.txt"; then
@@ -144,6 +153,10 @@ chmod 0600 /var/lib/questix_pwm_guard/deployment-in-progress
 install -d -m 0755 /etc/questix_pwm_guard /opt/questix_pwm_guard /etc/systemd/system/questix_robot.service.d
 printf 'PARTIAL\n' > /etc/questix_pwm_guard/deployment-state
 printf '%s\n' "$backup" > /etc/questix_pwm_guard/recovery-backup
+runtime_prefix=$(/usr/bin/python3 -I "$stage/review_manifest.py" publish "$stage/frozen-release.json")
+manifest="$stage/frozen-release.json"
+printf 'RP1_REVIEW_PREFIX=%s\nRP1_REVIEW_CONFIG=/etc/questix_pwm_guard/esc.yaml\n' \
+  "$runtime_prefix" > "$stage/reviewed-launch.env"
 install -m 0755 "$stage/questix_pwm_guard" "$stage/questix_pwm_ctl" /opt/questix_pwm_guard/
 install -m 0644 "$stage/validate_manual_start.py" "$stage/review_manifest.py" /opt/questix_pwm_guard/
 install -d -m 0755 /opt/questix_robot
@@ -153,12 +166,12 @@ install -m 0644 "$stage/questix_pwm_guard.service" /etc/systemd/system/questix_p
 install -m 0644 "$stage/50-rp1-pwm.conf" /etc/systemd/system/questix_robot.service.d/50-rp1-pwm.conf
 install -m 0644 "$stage/questix-gpio13-pwm.dtbo" /boot/firmware/overlays/questix-gpio13-pwm.dtbo
 install -m 0644 "$stage/config.txt" /boot/firmware/config.txt
-# Verify the original prefix again after copying, and bind all deployed runtime assets to it.
+# Verify the protected runtime; subsequent edits to the build prefix cannot change it.
 /usr/bin/python3 -I - "$script_dir/review_manifest.py" "$manifest" <<'PY'
 import json,runpy,sys
 from pathlib import Path
 module=runpy.run_path(sys.argv[1]);data=json.loads(Path(sys.argv[2]).read_text())
-module['verify'](data,arm64=True)
+module['verify'](data,arm64=True,require_frozen=True)
 files=('/opt/questix_pwm_guard/questix_pwm_guard','/opt/questix_pwm_guard/questix_pwm_ctl',
        '/opt/questix_pwm_guard/validate_manual_start.py','/opt/questix_pwm_guard/review_manifest.py',
        '/opt/questix_robot/questix_robot_launcher.sh','/etc/questix_pwm_guard/esc.yaml',
@@ -168,7 +181,7 @@ files=('/opt/questix_pwm_guard/questix_pwm_guard','/opt/questix_pwm_guard/questi
 data['deployed_files']={p:module['sha'](Path(p)) for p in files}
 target=Path('/etc/questix_pwm_guard/reviewed-release.json')
 target.write_text(json.dumps(data,indent=2)+'\n');target.chmod(0o600)
-module['verify'](data,arm64=True)
+module['verify'](data,arm64=True,require_frozen=True)
 PY
 systemctl daemon-reload
 printf 'READY\n' > /etc/questix_pwm_guard/deployment-state

@@ -62,6 +62,35 @@ explicit simulation. Live RP1 configuration requires 0/2000/1000 us mapping and 
 finite safety timeout in (0,1]. Invalid intermediate pulse widths are rejected,
 not remapped. The guard enforces the deployed 2000 us maximum independently.
 
+## Trust contract: reliability monitoring, not isolation from classroom code
+
+The robot account (`scramble` on ID13) remains the desktop auto-login and classroom
+account. This opt-in does not introduce a dedicated ESC UID or change student login,
+lesson/practice start/stop buttons, or classroom editing/build commands.
+
+All code running as the configured robot UID is inside the trusted control domain.
+The guard checks the UID and session owner, **not** the identity of the ESC executable.
+After root AUTHORIZE, any process of that UID can claim the first ARM and issue valid
+commands without the ROS gates. The owner socket prevents a second connection from
+using an existing session; it does not authenticate the first owner as the ROS ESC.
+The manual request's mode/boot/time checks do not independently authenticate a human:
+the robot account can write the request and use its existing unit-start permission.
+
+Operators accepting this contract must treat both intentional bypass and accidental
+ticket capture/direct guard use by same-UID classroom code as outside the guard's
+protection. Documentation is a deployment acceptance condition, not technical
+enforcement. Do not run code that requires isolation from the actuators under this
+account and claim that the guard supplies that isolation. Revisit account/process
+separation and authenticated safety inputs if such isolation becomes a requirement.
+ROS topic authentication is not added here. Freezing reviewed runtime artifacts below
+does not authenticate ROS publishers or make the editable launch.env trusted against
+the account that owns it.
+
+The implemented boundary covers approved runtime file integrity, session/sequence,
+expiry and best-effort disconnect/fault handling. It cannot cover Linux hangs, every
+other GPIO path or arbitrary code in the robot account. Physical E-stop and powered
+test approval remain separate; no software review releases shooting HOLD.
+
 ## Reviewed deployment (not executed here)
 
 `deploy/` is an explicit ID13 opt-in path, separate from generic kit/Ansible defaults.
@@ -135,6 +164,38 @@ rerun a partial installer blindly. Installer/validator/rollback share a deployme
 lock. Installer requires robot and guard quiescent and never stops a running Low
 owner to satisfy that check. It installs the reviewed standard launcher, but does
 not replace the source workspace, enable/start services, reboot, or export GPIO.
+
+The reviewed release must be a standalone **non-symlink install**, with relocatable
+colcon local setup/hooks and runtime dependencies. The ordinary student workspace
+and its `--symlink-install` build workflow stay unchanged; do not seal that mutable
+development tree as a release. Inspect external absolute references, Python `.pth`
+files and ELF search paths before approving a release; hashes alone cannot prove
+that approved script code has no external dependency. The fixed Jazzy underlay is
+separate from the reviewed prefix and must also remain administrator managed.
+
+Installation now freezes **every approved install file** into
+`/opt/questix_pwm_guard/releases/<approved-manifest-sha256>/`. Copy traversal refuses
+symlinks/special files and rechecks all copied bytes before installed-asset changes.
+The CLI prefix must equal the independently approved manifest's prefix. Publication
+uses a private root staging directory and never overwrites a version. Root owns all
+runtime files and ancestors; the robot cannot write them or replace their paths.
+The exact original approval is retained as mode-0600 `reviewed-release.json` inside
+the release. The deployed root manifest binds that approval, file table and frozen
+path; the standard launcher uses only that path. Source digest is not a runtime
+release ID: different dependencies/build artifacts need their own approved manifest.
+
+Startup rejects legacy mutable-prefix manifests, writable/non-root paths, links and
+changed bytes. Old SD installation is **not upgraded by this source commit**: build,
+independently approve and install a new ARM64 release before attempting robot start.
+Later edits or deletion of the original build/install cannot change frozen bytes.
+Logs/cache/output belong outside the runtime. If relocation or read-only execution
+fails, keep startup blocked and correct the build/output paths; do not silently fall
+back to the editable prefix. Backup/rollback includes the version tree beneath
+`/opt/questix_pwm_guard`, preserves withdrawn evidence and does not start services.
+
+ARMING's fixed 3 s value is a **completion deadline**, not a minimum neutral hold.
+The regular ESC component waits 2 s before COMPLETE; another allowed-UID client can
+complete sooner. A minimum duration in the guard is not added by this change.
 
 Rollback restores the recorded paths and retains withdrawn assets, including
 originally absent paths. It does not stop a live guard, change unit enable state,

@@ -9,6 +9,7 @@ import json
 import os
 import pwd
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
@@ -40,12 +41,23 @@ class DeploymentTest(unittest.TestCase):
             text = text.replace('.st_uid != 0', '.st_uid != '+str(os.getuid()))
             script.write_text(text)
             helper = source/'questix_pwm_guard/deploy/review_manifest.py'
-            helper.write_text(helper.read_text().replace('.st_uid != 0', '.st_uid != '+str(os.getuid())))
+            helper_text = helper.read_text().replace('.st_uid != 0', '.st_uid != '+str(os.getuid()))
+            helper_text = helper_text.replace('/opt/questix_pwm_guard', str(root)+'/opt/questix_pwm_guard')
+            # Model / as fixture root; real /tmp is intentionally not a privileged ancestor.
+            helper_text = helper_text.replace('for candidate in (path, *path.parents):',
+                f'for candidate in (path, *(p for p in path.parents if p == Path({str(root)!r}) '
+                f'or Path({str(root)!r}) in p.parents)):')
+            helper.write_text(helper_text)
             for folder in ('etc/questix_robot', 'etc/questix_pwm_guard', 'boot/firmware/overlays',
-                           'var/backups', 'var/tmp', 'run'):
+                           'var/backups', 'var/tmp', 'run', 'opt/questix_robot'):
                 (root/folder).mkdir(mode=0o755, parents=True, exist_ok=True)
+            for path in (root, *root.rglob('*')):
+                if path.is_dir():
+                    path.chmod(0o755)
             (root/'etc/questix_robot/mode').write_text('lesson')
             (root/'boot/firmware/config.txt').write_text('# preserved boot config\n')
+            old_launcher = root/'opt/questix_robot/questix_robot_launcher.sh'
+            old_launcher.write_text('# legacy launcher preserved\n')
             digest = seal.digest(source)
             marker = f'QUESTIX_RP1_REVIEW_V2:{digest}'.encode()
             for relative in seal.REQUIRED:
@@ -60,6 +72,11 @@ class DeploymentTest(unittest.TestCase):
             data = dict(schema=2, contract='rp1-reviewed-v2', source_digest=digest,
                         source_files={str(p.relative_to(source)):seal.sha(p) for p in seal.source_files(source)},
                         prefix=str(prefix), install_files=seal.install_files(prefix))
+            if failure == 'prefix':
+                # The CLI path has copied selected artifacts, but the approved table refers elsewhere.
+                other = base/'other'
+                shutil.copytree(prefix, other)
+                data['prefix'] = str(other)
             manifest = prefix/'reviewed-release.json'
             manifest.write_text(json.dumps(data))
             approval = root/'etc/questix_pwm_guard/approved-release.sha256'
@@ -72,10 +89,20 @@ class DeploymentTest(unittest.TestCase):
                 'systemctl':'#!/bin/sh\nif [ "$1" = show ]; then echo inactive; fi\n',
                 'dtc':'#!/bin/sh\nexit 42\n',
             }
+            if failure not in ('dtc', 'copy', 'prefix'):
+                scripts['dtc'] = ('#!/bin/sh\nwhile [ "$#" -gt 0 ]; do\n'
+                                  'if [ "$1" = -o ]; then shift; printf compiled > "$1"; fi\n'
+                                  'shift\ndone\n')
+            if failure == 'original':
+                scripts['dtc'] += f'printf modified > "{prefix}/local_setup.bash"\n'
             if failure == 'copy':
                 scripts['install'] = ('#!/bin/sh\n/usr/bin/install "$@" || exit $?\n'
                     'for arg in "$@"; do\n case "$arg" in *stage-*/questix_pwm_ctl)\n'
                     ' printf substituted > "$arg";;\n esac\ndone\n')
+            if failure == 'write':
+                scripts['install'] = ('#!/bin/sh\n/usr/bin/install "$@" || exit $?\n'
+                    f'for arg in "$@"; do\n [ "$arg" != "{root}/etc/systemd/system/questix_pwm_guard.service" ] '
+                    '|| exit 47\ndone\n')
             for tool, content in scripts.items():
                 file = tools/tool
                 file.write_text(content)
@@ -83,9 +110,47 @@ class DeploymentTest(unittest.TestCase):
             result = subprocess.run(['bash', str(script), str(prefix), pwd.getpwuid(os.getuid()).pw_name],
                                     env=dict(os.environ, PATH=f'{tools}:/usr/bin:/bin'),
                                     capture_output=True, text=True, timeout=30)
+            if failure in ('success', 'original', 'write'):
+                self.assertEqual(result.returncode, 47 if failure == 'write' else 0,
+                                 result.stdout+result.stderr)
+                config = root/'etc/questix_pwm_guard'
+                if failure == 'write':
+                    self.assertEqual((config/'deployment-state').read_text(), 'PARTIAL\n')
+                    self.assertTrue((root/'var/lib/questix_pwm_guard/deployment-in-progress').exists())
+                else:
+                    self.assertEqual((config/'deployment-state').read_text(), 'READY\n')
+                    frozen = json.loads((config/'reviewed-release.json').read_text())
+                    runtime = Path(frozen['prefix'])
+                    self.assertNotEqual(runtime, prefix)
+                    self.assertEqual(runtime.parent, root/'opt/questix_pwm_guard/releases')
+                    self.assertEqual(frozen['frozen_runtime']['approved_manifest_sha256'], seal.sha(manifest))
+                    self.assertEqual(seal.install_files(runtime), data['install_files'])
+                    self.assertIn(f'RP1_REVIEW_PREFIX={runtime}\n', (config/'reviewed-launch.env').read_text())
+                backup = re.search(r'^BACKUP=(.*)$', result.stdout, re.M).group(1)
+                rollback = source/'questix_pwm_guard/deploy/rollback_reviewed.sh'
+                rollback_text = rollback.read_text().replace('$EUID == 0', '$EUID == '+str(os.getuid()))
+                for original in ('/etc/questix_pwm_guard', '/etc/systemd/system', '/opt/questix_pwm_guard',
+                                 '/opt/questix_robot', '/boot/firmware', '/var/backups',
+                                 '/var/lib/questix_pwm_guard', '/run/questix-rp1-install.lock'):
+                    rollback_text = rollback_text.replace(original, str(root)+original)
+                rollback.write_text(rollback_text)
+                restored = subprocess.run(['bash', str(rollback), backup],
+                    env=dict(os.environ, PATH=f'{tools}:/usr/bin:/bin'),
+                    capture_output=True, text=True, timeout=30)
+                self.assertEqual(restored.returncode, 0, restored.stdout+restored.stderr)
+                self.assertEqual(old_launcher.read_text(), '# legacy launcher preserved\n')
+                self.assertEqual((root/'boot/firmware/config.txt').read_text(), '# preserved boot config\n')
+                self.assertFalse((root/'opt/questix_pwm_guard').exists())
+                self.assertFalse((root/'etc/systemd/system/questix_pwm_guard.service').exists())
+                self.assertFalse((root/'var/lib/questix_pwm_guard/deployment-in-progress').exists())
+                self.assertTrue(list((Path(backup)/'withdrawn').glob('*')) if (Path(backup)/'withdrawn').exists()
+                                else list(Path(backup).glob('withdrawn-*')))
+                return
             self.assertNotEqual(result.returncode, 0, result.stdout)
             if failure == 'copy':
                 self.assertIn('staged asset differs', result.stderr)
+            elif failure == 'prefix':
+                self.assertIn('installer prefix differs', result.stderr)
             else:
                 self.assertEqual(result.returncode, 42, result.stderr)
             self.assertEqual((root/'boot/firmware/config.txt').read_text(), '# preserved boot config\n')
@@ -99,6 +164,18 @@ class DeploymentTest(unittest.TestCase):
 
     def test_substituted_staged_binary_is_rejected_before_asset_changes(self):
         self.exercise('copy')
+
+    def test_cli_manifest_prefix_mismatch_is_rejected(self):
+        self.exercise('prefix')
+
+    def test_frozen_runtime_publication_and_rollback(self):
+        self.exercise('success')
+
+    def test_original_prefix_change_after_freeze_does_not_change_release(self):
+        self.exercise('original')
+
+    def test_partial_write_failure_blocks_start_and_rollback_restores(self):
+        self.exercise('write')
 
 
 if __name__ == '__main__':

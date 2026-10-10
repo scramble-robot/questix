@@ -33,7 +33,7 @@ def validate_deployment():
         raise ValueError('RP1 deployment requires recovery')
     module = runpy.run_path('/opt/questix_pwm_guard/review_manifest.py')
     data = module['trusted_json'](config/'reviewed-release.json')
-    module['verify'](data, arm64=True)
+    module['verify'](data, arm64=True, require_frozen=True)
 
 
 def main():
