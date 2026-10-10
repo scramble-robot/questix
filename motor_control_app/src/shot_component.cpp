@@ -13,7 +13,6 @@
 #include <lifecycle_msgs/msg/state.hpp>
 #include <limits>
 #include <string>
-#include <thread>
 
 #include "motor_control_app/shot_angle.hpp"
 #include "motor_control_app/shot_auto_start.hpp"
@@ -81,6 +80,10 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
   // Lifecycle 自動遷移。非常停止解除でサーボが通電するまで configure を再試行する。
   this->declare_parameter("auto_start", true);
   this->declare_parameter("connect_retry_period_sec", 3.0);
+  // 非常停止解除などからの起動の試行期間（issue #175）: 短い周期と期間の長さ、サーボ応答の上限
+  this->declare_parameter("startup_retry_period_sec", 0.2);
+  this->declare_parameter("startup_window_sec", 5.0);
+  this->declare_parameter("servo_response_timeout_ms", 100);
   // 非常停止連動トピック（questix_msgs/EmergencyStop、auto_start=true のときのみ有効、
   // 空文字で連動無効）
   this->declare_parameter("emergency_stop_topic", "/emergency_stop");
@@ -144,6 +147,26 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
                 "Invalid connect_retry_period_sec=%g; using the default 3.0 seconds",
                 requested_retry_period);
   }
+  const double requested_startup_period =
+      this->get_parameter("startup_retry_period_sec").as_double();
+  startup_retry_period_sec_ = std::clamp(
+      shot_auto_start::normalizePositivePeriod(requested_startup_period, 0.2), 0.05, 1.0);
+  const double requested_startup_window = this->get_parameter("startup_window_sec").as_double();
+  startup_window_sec_ = std::clamp(
+      shot_auto_start::normalizePositivePeriod(requested_startup_window, 5.0), 0.5, 60.0);
+  const int64_t requested_response_ms = this->get_parameter("servo_response_timeout_ms").as_int();
+  servo_response_timeout_ms_ =
+      static_cast<int>(std::clamp<int64_t>(requested_response_ms, 10, 500));
+  if (startup_retry_period_sec_ != requested_startup_period ||
+      startup_window_sec_ != requested_startup_window ||
+      servo_response_timeout_ms_ != requested_response_ms) {
+    RCLCPP_WARN(this->get_logger(),
+                "Invalid startup_retry_period_sec=%g / startup_window_sec=%g / "
+                "servo_response_timeout_ms=%ld; using %.2f s / %.1f s / %d ms",
+                requested_startup_period, requested_startup_window,
+                static_cast<long>(requested_response_ms), startup_retry_period_sec_,
+                startup_window_sec_, servo_response_timeout_ms_);
+  }
   // /emergency_stop は共通の EmergencyStopMonitor（questix_safety）が購読・判定する
   // （transient_local なので起動時に最新のラッチ状態を受信する。契約: questix_msgs/README.md）。
   // lifecycle の連動は auto_start=true のときだけで、手動運用でもコマンドの可否には使う。
@@ -163,6 +186,12 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
     auto_start_timer_ =
         this->create_wall_timer(std::chrono::duration_cast<std::chrono::nanoseconds>(period),
                                 std::bind(&ShotComponent::autoStartTimerCallback, this));
+    // 試行期間の間だけ動かす（requestStartup で開始、endStartup で停止）
+    startup_timer_ =
+        this->create_wall_timer(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                    std::chrono::duration<double>(startup_retry_period_sec_)),
+                                std::bind(&ShotComponent::startupTimerCallback, this));
+    startup_timer_->cancel();
   }
   if (require_teacher_permission_) {
     if (teacher_permission_topic_.empty()) {
@@ -193,9 +222,11 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
       }
     }
     RCLCPP_INFO(this->get_logger(),
-                "Shot component created (auto_start=true, retry=%.1fs, estop_topic=%s). "
+                "Shot component created (auto_start=true, retry=%.1fs, startup %.2fs x %.1fs, "
+                "servo response %d ms, estop_topic=%s). "
                 "サーボ通電（非常停止解除）を待って自動起動します",
-                connect_retry_period_sec_,
+                connect_retry_period_sec_, startup_retry_period_sec_, startup_window_sec_,
+                servo_response_timeout_ms_,
                 estop_monitor_->topic().empty() ? "<disabled>" : estop_monitor_->topic().c_str());
   } else {
     RCLCPP_INFO(this->get_logger(),
@@ -206,6 +237,9 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
 
 ShotComponent::~ShotComponent() {
   stopAutoStartTimers();
+  if (startup_timer_) {
+    startup_timer_->cancel();
+  }
   if (fire_timer_) {
     fire_timer_->cancel();
   }
@@ -287,15 +321,21 @@ void ShotComponent::tryAutoStart() {
     }
     return;
   }
+  // 1 回の呼び出しで進めるのは 1 段（configure か activate）だけ。各段のサーボ通信は
+  // servo_response_timeout_ms が上限なので、/emergency_stop の受信処理を長く止めない（#175）。
   if (action == AutoStartAction::kConfigure) {
     RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 30000,
                          "サーボ接続を試行します（非常停止中は失敗し、解除後に自動復帰します）");
     state_id = this->configure().id();
-    // 接続に成功したら同一周期内で activate まで進める（非常停止解除エッジからの
-    // 即時起動と、タイマー経路の起動を同じ動きにする）
     action = decideAutoStartAction(state_id, true, !hold());
-  }
-  if (action == AutoStartAction::kActivate) {
+    if (action == AutoStartAction::kActivate) {
+      // 構成できた: activate は次の短い周期で、その時点の非常停止・許可を見てから行う。
+      if (!startup_episode_.active) {
+        requestStartup();
+      }
+      return;
+    }
+  } else if (action == AutoStartAction::kActivate) {
     state_id = this->activate().id();
     action = decideAutoStartAction(state_id, true, !hold());
   }
@@ -306,6 +346,63 @@ void ShotComponent::tryAutoStart() {
     RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 30000,
                          "Shot auto-start transition ended in unexpected state: %u",
                          static_cast<unsigned int>(state_id));
+  }
+}
+
+void ShotComponent::requestStartup() {
+  if (!startup_timer_ || !auto_start_timer_ || auto_start_timer_->is_canceled()) {
+    return;  // auto_start=false、または手動運用（タイマー停止中）
+  }
+  shot_auto_start::beginStartupEpisode(startup_episode_, steadyNowSec(), startup_window_sec_);
+  // 周期リトライの位相も仕切り直す（試行期間の後はこちらが引き継ぐ）
+  auto_start_timer_->reset();
+  startup_timer_->reset();
+}
+
+void ShotComponent::endStartup() {
+  shot_auto_start::endStartupEpisode(startup_episode_);
+  if (startup_timer_) {
+    startup_timer_->cancel();
+  }
+}
+
+void ShotComponent::startupTimerCallback() {
+  try {
+    switch (shot_auto_start::decideStartupStep(startup_episode_, steadyNowSec())) {
+      case shot_auto_start::StartupStep::kIdle:
+        endStartup();
+        return;
+      case shot_auto_start::StartupStep::kExpired: {
+        const int attempts = startup_episode_.attempts;
+        endStartup();
+        const uint8_t state_id = this->get_current_state().id();
+        if (attempts > 0 && state_id != lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE) {
+          RCLCPP_WARN(this->get_logger(),
+                      "サーボ（tilt %d / trigger %d）が %.1f 秒（%d 回の試行）で起動できません"
+                      "でした。以後は %.1f 秒ごとに再試行します（未通電なら想定どおりです）",
+                      tilt_servo_id_, trigger_servo_id_, startup_window_sec_, attempts,
+                      connect_retry_period_sec_);
+        }
+        return;
+      }
+      case shot_auto_start::StartupStep::kAttempt:
+        break;
+    }
+    if (estopBlocks() || teacherPermissionBlock() != actuation_gate::Block::kNone) {
+      // 押下・途絶・許可なしの間は試さない（解除・許可で新しい試行期間が始まる）。
+      endStartup();
+      return;
+    }
+    ++startup_episode_.attempts;
+    autoStartTimerCallback();
+    if (this->get_current_state().id() == lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE ||
+        !auto_start_timer_ || auto_start_timer_->is_canceled()) {
+      endStartup();
+    }
+  } catch (const std::exception& error) {
+    RCLCPP_ERROR(this->get_logger(), "Shot startup callback failed: %s", error.what());
+  } catch (...) {
+    RCLCPP_ERROR(this->get_logger(), "Shot startup callback failed with unknown exception");
   }
 }
 
@@ -413,6 +510,7 @@ void ShotComponent::onEmergencyStop(const questix_msgs::msg::EmergencyStop& msg,
     // 非常停止押下。サーボバスが断たれるため、ACTIVE / 自動起動途中の INACTIVE は
     // 解体してサーボ接続を解放し、unconfigured で解除を待つ。
     // 手動 deactivate 済み（タイマー停止中）のノードは操作者の制御を尊重して触らない。
+    endStartup();
     const uint8_t state_id = this->get_current_state().id();
     if (state_id == lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE) {
       RCLCPP_WARN(this->get_logger(),
@@ -439,16 +537,10 @@ void ShotComponent::onEmergencyStop(const questix_msgs::msg::EmergencyStop& msg,
     RCLCPP_INFO(this->get_logger(), "非常停止解除を検出（source=%s）。起動シーケンスを開始します",
                 msg.source.c_str());
   }
-  // 周期を仕切り直してから即時試行する。失敗時（サーボ起動中など）は
-  // connect_retry_period_sec 周期のリトライに引き継ぐ。
-  auto_start_timer_->reset();
-  try {
-    tryAutoStart();
-  } catch (const std::exception& error) {
-    RCLCPP_ERROR(this->get_logger(), "E-stop release auto-start failed: %s", error.what());
-  } catch (...) {
-    RCLCPP_ERROR(this->get_logger(), "E-stop release auto-start failed with unknown exception");
-  }
+  // ここでは待たない（サーボの接続・応答確認はこのコールバックの外、試行期間の短い周期で
+  // 行う）。同期で configure すると、通電直後のサーボ無応答の間 /emergency_stop の受信処理が
+  // 止まり、自分の途絶判定が発火していた（issue #175）。
+  requestStartup();
 }
 
 void ShotComponent::emergencyStopTimeoutCallback() {
@@ -472,6 +564,7 @@ void ShotComponent::emergencyStopTimeoutCallback() {
       return;
     }
     estop_timed_out_ = true;  // 次の受信まで押下扱い（estopBlocks）
+    endStartup();
     RCLCPP_WARN(this->get_logger(),
                 "%s reception timed out after %.2fs; applying fail-safe teardown",
                 estop_monitor_->topic().c_str(), elapsed);
@@ -534,6 +627,7 @@ void ShotComponent::teacherPermissionTimerCallback() {
       // 以後の射撃・チルトは断る。押しっぱなしの入力は、許可が戻っても離すまで無視する。
       last_button_state_ = true;
       tilt_edges_.requireRelease();
+      endStartup();
       const uint8_t state_id = this->get_current_state().id();
       RCLCPP_WARN(this->get_logger(),
                   "Launcher teacher permission lost (%s): stopping the launcher (not an emergency "
@@ -554,10 +648,7 @@ void ShotComponent::teacherPermissionTimerCallback() {
                 "Launcher teacher permission granted: starting up (a new press or request is "
                 "needed to move)");
     publishShotStatus();
-    if (auto_start_timer_ && !auto_start_timer_->is_canceled()) {
-      auto_start_timer_->reset();
-      tryAutoStart();
-    }
+    requestStartup();  // 待たずに戻る（接続・応答確認は試行期間の短い周期で行う）
   } catch (const std::exception& error) {
     RCLCPP_ERROR(this->get_logger(), "Teacher permission check failed: %s", error.what());
   } catch (...) {
@@ -606,6 +697,9 @@ ShotComponent::CallbackReturn ShotComponent::on_configure(const rclcpp_lifecycle
 
   // サーボコントローラー接続（非常停止中はポートが無い / 開けない場合がある）
   servo_controller_ = std::make_shared<motor_control_lib::FeetechServoController>(port, baudrate);
+  // すべての送受信（応答確認・home・チルト・射撃）の応答待ちの上限。未通電のサーボで
+  // executor を長く止めないため（issue #175）。
+  servo_controller_->setResponseTimeoutMs(servo_response_timeout_ms_);
   if (!servo_controller_->connect()) {
     RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 30000,
                          "サーボ接続に失敗しました (port=%s)。通電を待って再試行します",
@@ -614,13 +708,16 @@ ShotComponent::CallbackReturn ShotComponent::on_configure(const rclcpp_lifecycle
     return CallbackReturn::FAILURE;
   }
 
-  // ポートが開けても未通電ならサーボは応答しないため、実際に1レジスタ読んで確認する
-  std::this_thread::sleep_for(std::chrono::milliseconds(500));  // 初期化待機
+  // ポートが開けても未通電ならサーボは応答しないため、実際に1レジスタ読んで確認する。
+  // 待たずに 1 回だけ読み、応答がなければ FAILURE で戻る（自動起動は試行期間の短い周期で
+  // 再試行する。手動 configure なら操作者が再度要求する）。
   int32_t current_pos = servo_controller_->getCurrentPosition(tilt_servo_id_);
   if (current_pos == -1) {
-    RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 30000,
-                         "サーボ %d が応答しません（非常停止による未通電の可能性）。再試行します",
-                         tilt_servo_id_);
+    RCLCPP_WARN_THROTTLE(
+        this->get_logger(), *this->get_clock(), 30000,
+        "サーボ %d が応答しません（%s、非常停止による未通電の可能性）。再試行します",
+        tilt_servo_id_,
+        motor_control_lib::FeetechServoController::resultName(servo_controller_->lastResult()));
     disconnectServo();
     return CallbackReturn::FAILURE;
   }
@@ -676,6 +773,7 @@ ShotComponent::CallbackReturn ShotComponent::on_activate(const rclcpp_lifecycle:
   if (auto_start_timer_) {
     auto_start_timer_->cancel();
   }
+  endStartup();
   return CallbackReturn::SUCCESS;
 }
 
@@ -691,6 +789,7 @@ ShotComponent::CallbackReturn ShotComponent::on_deactivate(const rclcpp_lifecycl
   if (auto_start_timer_) {
     auto_start_timer_->cancel();
   }
+  endStartup();
   RCLCPP_INFO(this->get_logger(), "Shot component deactivated (joy input ignored)");
   return CallbackReturn::SUCCESS;
 }
@@ -711,6 +810,7 @@ ShotComponent::CallbackReturn ShotComponent::on_shutdown(const rclcpp_lifecycle:
   runtime_fault_ = false;
   teardown_pending_ = false;
   stopAutoStartTimers();
+  endStartup();
   if (teacher_permission_timer_) {
     teacher_permission_timer_->cancel();
   }
@@ -834,7 +934,9 @@ bool ShotComponent::moveTiltTo(double angle_deg, const char* label) {
     publishShotStatus();
     return true;
   }
-  RCLCPP_ERROR(this->get_logger(), "Failed to move tilt %s", label);
+  RCLCPP_ERROR(
+      this->get_logger(), "Failed to move tilt %s (%s)", label,
+      motor_control_lib::FeetechServoController::resultName(servo_controller_->lastResult()));
   triggerAutoRecovery();
   return false;
 }
@@ -935,7 +1037,9 @@ void ShotComponent::executeShotSequence(shot_lab::FireSource source) {
   // 1. 射撃位置に移動
   int fire_position = angleToServoPosition(fire_angle_);
   if (!servo_controller_->setPosition(trigger_servo_id_, fire_position, false)) {
-    RCLCPP_ERROR(this->get_logger(), "Failed to move to fire position");
+    RCLCPP_ERROR(
+        this->get_logger(), "Failed to move to fire position (%s)",
+        motor_control_lib::FeetechServoController::resultName(servo_controller_->lastResult()));
     triggerAutoRecovery();
     return;
   }

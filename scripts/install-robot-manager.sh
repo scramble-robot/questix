@@ -166,7 +166,8 @@ fi
 echo "Done!"
 echo ""
 echo "Next steps:"
-echo "  - Set mode:  echo competition | sudo tee /etc/questix_robot/mode"
+echo "  - Set mode:  Robot Manager (教材 / 練習 / 大会), or"
+echo "               echo lesson|practice|competition | sudo tee /etc/questix_robot/mode"
 echo "  - Start now: sudo systemctl start questix_robot"
 echo "  - Check:     sudo systemctl status questix_robot"
 if [ "${INSTALL_GUI}" = true ]; then

@@ -112,7 +112,7 @@ class LabBridgeNode(Node):
         self._tf_listener = TransformListener(self._tf_buffer, self)
         self._mounts = {}  # scan frame -> mount; static on this robot, so looked up once
         # Geometry is only reported to the page (it must match drive_component's values).
-        wheel_radius = self.declare_parameter('wheel_radius', 0.1).value
+        wheel_radius = self.declare_parameter('wheel_radius', 0.05).value
         wheel_separation = self.declare_parameter('wheel_separation', 0.5).value
 
         # Driving from the pages (off unless allow_drive; see drive.py for every rule).
@@ -136,8 +136,8 @@ class LabBridgeNode(Node):
         self._drive_lock = threading.Lock()
         self._drive = DriveArbiter(
             allowed=allow_drive and bool(self._drive_topic),
-            max_linear=self.declare_parameter('drive_max_linear', 0.3).value,
-            max_angular=self.declare_parameter('drive_max_angular', 1.0).value,
+            max_linear=self.declare_parameter('drive_max_linear', 0.15).value,
+            max_angular=self.declare_parameter('drive_max_angular', 0.5).value,
             deadman_sec=self.declare_parameter('drive_deadman_sec', 0.5).value,
             max_run_sec=self.declare_parameter('drive_max_run_sec', 30.0).value)
         self._drive_sent_version = -1

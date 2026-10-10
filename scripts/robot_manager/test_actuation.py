@@ -53,6 +53,8 @@ class _FakeHeartbeat:
 @pytest.fixture
 def actuation(tmp_path, monkeypatch):
     monkeypatch.setenv("QUESTIX_CONFIG_DIR", str(tmp_path))
+    # The teacher's permission exists in lesson mode only (modes.uses_teacher_permission).
+    (tmp_path / "mode").write_text("lesson\n")
     from robot_manager import actuation as module
     module = importlib.reload(module)
     ros = tmp_path / "ros.bash"
@@ -420,16 +422,40 @@ def test_every_mode_switch_and_service_action_switches_the_authority_off(app_mod
     monkeypatch.setattr(app_module, "_start_result", lambda action, mode, at: {"ok": True})
     monkeypatch.setattr(app_module, "_stop_service",
                         lambda: {"ok": True, "state": "inactive", "detail": "", "message": ""})
-    for call in (lambda: app_module.set_mode(app_module.ModeRequest(mode="practice")),
+    monkeypatch.setattr(app_module.lab, "disable_outside_lessons", lambda: None)
+    monkeypatch.setattr(app_module.lab, "enable_for_lessons", lambda: None)
+    for call in (lambda: app_module.set_mode(app_module.ModeRequest(mode="lesson")),
                  lambda: app_module.control_service("start"),
                  lambda: app_module.control_service("restart"),
                  lambda: app_module.control_service("stop")):
         actuation.set_authority("drive", True)
         call()
         assert actuation.status()["drive"] is False
-    actuation.set_authority("launcher", True)
-    app_module.set_mode(app_module.ModeRequest(mode="competition"))
-    assert actuation.status()["launcher"] is False
+    for other in ("practice", "competition"):
+        app_module.set_mode(app_module.ModeRequest(mode="lesson"))
+        actuation.set_authority("launcher", True)
+        app_module.set_mode(app_module.ModeRequest(mode=other))
+        assert actuation.status()["launcher"] is False
+
+
+@pytest.mark.parametrize("mode", ["practice", "competition"])
+def test_the_switches_are_refused_outside_lesson_mode(actuation, tmp_path, mode):
+    # Practice (the controller alone) and competition never use the teacher's permission.
+    (tmp_path / "mode").write_text(mode + "\n")
+    for kind in ("drive", "launcher"):
+        with pytest.raises(HTTPException) as error:
+            actuation.set_authority(kind, True)
+        assert error.value.status_code == 409 and "教材モードだけ" in error.value.detail
+    status = actuation.status()
+    assert status["available"] is False and status["mode"] == mode
+    assert status["drive"] is False and status["launcher"] is False
+
+
+def test_a_missing_mode_file_means_practice(actuation, tmp_path):
+    (tmp_path / "mode").unlink()
+    with pytest.raises(HTTPException):
+        actuation.set_authority("drive", True)
+    assert actuation.status()["mode"] == "practice"
 
 
 def test_stop_all_switches_the_authority_off_before_anything_else(app_module, actuation, lab,

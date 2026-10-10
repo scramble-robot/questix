@@ -27,6 +27,23 @@ def find_arg(root, name):
     return next(arg for arg in root.findall('./arg') if arg.get('name') == name)
 
 
+def launcher_mode_branches(text):
+    """Split the robot launcher's arguments into its competition / lesson / practice parts."""
+    start = text.index('if [ "${MODE}" = "competition" ]; then')
+    end = text.index('LAUNCH_ARGS="${LAUNCH_ARGS} enable_rviz:=')
+    block = text[start:end]
+    competition, rest = block.split('\nelse\n', 1)
+    lesson_and_practice = rest.split('if [ "${MODE}" = "lesson" ]; then', 1)[1]
+    lesson, practice = lesson_and_practice.split('\n  else\n', 1)
+    return competition, lesson, practice
+
+
+LAUNCHER_SCRIPTS = (
+    'systemd/questix_robot_launcher.sh',
+    'ansible/roles/robot_autostart/files/questix_robot_launcher.sh',
+)
+
+
 def test_profiles_select_the_expected_gpio_inputs_and_polarities():
     practice_reader = load_yaml('gpio_reader/config/gpio_reader.practice.yaml')
     competition_reader = load_yaml('gpio_reader/config/gpio_reader.competition.yaml')
@@ -51,6 +68,17 @@ def test_profiles_select_the_expected_gpio_inputs_and_polarities():
     assert 'safe_high_pins' not in default_manager[
         'operation_manager_node']['ros__parameters']
     assert default_manager == practice_manager
+
+
+def test_core_defaults_gpio_safety_on_without_environment_authority():
+    # Issue #168: GPIO5 monitoring is the default for every launch. The no-GPIO diagnostic needs
+    # an explicit enable_gpio_ref:=false on the launch itself; ENABLE_GPIO_REF in the environment
+    # (an export, a sourced launch.env) must never select it.
+    core = load_xml('launcher/launch/questix_core.launch.xml')
+    default = find_arg(core, 'enable_gpio_ref').get('default')
+    assert default == 'true'
+    assert 'ENABLE_GPIO_REF' not in default
+    assert '$(env' not in default
 
 
 def test_core_defaults_to_practice_and_selects_both_profile_files():
@@ -125,7 +153,8 @@ def test_core_defaults_to_practice_and_selects_both_profile_files():
         None,
         '$(find-pkg-share operation_manager)/config/operation_manager.competition.yaml',
     ) in lets
-    # Without the GPIO safety path (practice only): no GPIO read, /emergency_stop still owned.
+    # Without the GPIO safety path (explicit manual diagnostic only; production launches always
+    # pass enable_gpio_ref:=true): no GPIO read, /emergency_stop still owned.
     assert (
         'operation_manager_config_file',
         None,
@@ -204,7 +233,7 @@ def test_core_always_owns_exactly_one_operation_manager():
     assert integrated_manager_count(True, True, False) == 1
 
 
-def test_competition_service_launchers_always_enable_gpio_safety():
+def test_production_service_launchers_always_enable_gpio_safety():
     launcher_paths = (
         'systemd/questix_robot_launcher.sh',
         'ansible/roles/robot_autostart/files/questix_robot_launcher.sh',
@@ -222,10 +251,15 @@ def test_competition_service_launchers_always_enable_gpio_safety():
         assert 'LAUNCH_ARGS="${LAUNCH_ARGS} enable_autoreferee:=true"' in competition
         code = [line for line in competition.splitlines() if not line.strip().startswith('#')]
         assert not any('ENABLE_GPIO_REF' in line for line in code)
-        # Practice branch (Robot Manager's 起動 only): no AutoReferee; GPIO safety on unless
-        # launch.env says exactly "false".
+        # Practice branch (Robot Manager's 起動 only): no AutoReferee, GPIO5 physical E-stop
+        # always on whatever launch.env says (issue #168).
+        assert 'LAUNCH_ARGS="${LAUNCH_ARGS} enable_gpio_ref:=true"' in practice
         assert 'LAUNCH_ARGS="${LAUNCH_ARGS} enable_autoreferee:=false"' in practice
-        assert '"${ENABLE_GPIO_REF:-true}" = "false"' in practice
+        # No production branch, nor anything else in the launcher, reads ENABLE_GPIO_REF or
+        # passes the manual-diagnostic enable_gpio_ref:=false.
+        code = [line for line in text.splitlines() if not line.strip().startswith('#')]
+        assert not any('ENABLE_GPIO_REF' in line for line in code)
+        assert not any('enable_gpio_ref:=false' in line for line in code)
 
     safety_lines = [
         [
@@ -248,9 +282,9 @@ def test_launch_environment_defaults_enable_gpio_safety():
     assert 'ENABLE_GPIO_REF=true' in systemd_env.splitlines()
     # ENABLE_LIDAR/SHOT/DRIVE/RVIZ and CONTROLLER_TYPE ship disabled/dualshock
     # (see robot_autostart/defaults/main.yaml), but GPIO safety is the
-    # exception: it must default to enabled even though the competition
-    # systemd launcher ignores this value and always forces it true, because
-    # this is also the default for manual/diagnostic `ros2 launch` runs.
+    # exception: it ships true even though nothing reads it any more (the systemd
+    # launcher passes enable_gpio_ref:=true, questix_core defaults to a literal true),
+    # so a legacy-field reader never sees GPIO safety off.
     assert role_defaults['enable_gpio_ref'] is True
     assert 'ENABLE_GPIO_REF={{ enable_gpio_ref | lower }}' in ansible_env.splitlines()
 
@@ -292,6 +326,11 @@ def test_every_fresh_kit_topology_authority_agrees():
         filter_suffix = ' | lower' if isinstance(role_value, bool) else ''
         assert f'{key}={{{{ {key.lower()}{filter_suffix} }}}}' in template, key
         assert static_env[key] == value, key
+        if key == 'ENABLE_GPIO_REF':
+            # The launcher never reads it (always enable_gpio_ref:=true, issue #168), and neither
+            # does questix_core's default: a legacy/compatibility field only.
+            assert f'${{{key}' not in launchers[0]
+            continue
         # What the launcher uses when launch.env lacks the key.
         assert f'${{{key}:-{value}}}' in launchers[0], key
         for other in ('true', 'false', 'uart', 'dualshock', 'web'):
@@ -351,12 +390,14 @@ def test_twist_arbiter_only_in_practice_launches():
     assert ('/target_twist/joy', '$(var enable_twist_arbiter)', None) in lets
     assert ('/target_twist', None, '$(var enable_twist_arbiter)') in lets
 
-    for relative_path in (
-        'systemd/questix_robot_launcher.sh',
-        'ansible/roles/robot_autostart/files/questix_robot_launcher.sh',
-    ):
+    # The robot launcher: lesson mode (QUESTiX LAB) asks for twist_arbiter, practice turns it off,
+    # competition leaves it to questix_core (off with AutoReferee).
+    for relative_path in LAUNCHER_SCRIPTS:
         text = (SOURCE_ROOT / relative_path).read_text(encoding='utf-8')
-        assert 'enable_twist_arbiter' not in text
+        competition, lesson, practice = launcher_mode_branches(text)
+        assert 'enable_twist_arbiter' not in competition
+        assert 'enable_twist_arbiter:=true' in lesson
+        assert 'enable_twist_arbiter:=false' in practice
         assert 'LAUNCH_ARGS="${LAUNCH_ARGS} enable_autoreferee:=true"' in text
 
 
@@ -413,12 +454,12 @@ def test_lab_launcher_input_only_in_practice_launches():
         for name, value in shot_defaults.items():
             assert shot_parameters[name] == value, (variant, name)
 
-    for relative_path in (
-        'systemd/questix_robot_launcher.sh',
-        'ansible/roles/robot_autostart/files/questix_robot_launcher.sh',
-    ):
+    for relative_path in LAUNCHER_SCRIPTS:
         text = (SOURCE_ROOT / relative_path).read_text(encoding='utf-8')
-        assert 'enable_lab_shoot' not in text
+        competition, lesson, practice = launcher_mode_branches(text)
+        assert 'enable_lab_shoot' not in competition
+        assert 'enable_lab_shoot:=true' in lesson
+        assert 'enable_lab_shoot:=false' in practice
         assert 'accept_lab_input' not in text
 
 
@@ -488,13 +529,13 @@ def test_teacher_permission_is_a_practice_opt_in():
         assert '"require_teacher_permission", false);' in text, relative_path
         assert '"require_teacher_permission", true);' not in text, relative_path
 
-    # The service launchers never opt in on their own.
-    for relative_path in (
-        'systemd/questix_robot_launcher.sh',
-        'ansible/roles/robot_autostart/files/questix_robot_launcher.sh',
-    ):
+    # The robot launcher opts in for lesson mode only (教材); practice and competition never.
+    for relative_path in LAUNCHER_SCRIPTS:
         text = (SOURCE_ROOT / relative_path).read_text(encoding='utf-8')
-        assert 'require_teacher_permission' not in text, relative_path
+        competition, lesson, practice = launcher_mode_branches(text)
+        assert 'require_teacher_permission' not in competition, relative_path
+        assert 'require_teacher_permission:=true' in lesson, relative_path
+        assert 'require_teacher_permission:=false' in practice, relative_path
 
 
 def test_emergency_stop_is_always_published_and_always_required():

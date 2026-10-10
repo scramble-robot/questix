@@ -585,7 +585,8 @@ async function loadControls(controller) {
       : "ロボットの設定を比較する機能がまだ使えません。担当者に管理画面のプログラムの更新・再起動を確認してもらってください。";
     controlsDirty = false;
     renderControls();
-    if (profile.history_warning) controlMessage(profile.history_warning);
+    const warnings = [profile.legacy_warning, profile.history_warning].filter(Boolean);
+    if (warnings.length) controlMessage(warnings.join(" "));
   } catch (error) {
     controlProfile = null;
     controlDraft = null;

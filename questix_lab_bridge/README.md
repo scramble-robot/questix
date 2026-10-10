@@ -49,14 +49,14 @@ it is a classroom tool that is switched on from the manager when a lesson needs 
 | `drive_status_topic` | `/drive_status` | `questix_msgs/DriveStatus`. |
 | `target_twist_topic` | `/target_twist` | `geometry_msgs/Twist`. |
 | `camera_topic` | `""` (off) | `sensor_msgs/CompressedImage`, JPEG or PNG only. No camera driver ships with this repository. |
-| `scan_max_hz`, `odom_max_hz`, `drive_max_hz`, `twist_max_hz`, `camera_max_fps` | 5 / 20 / 20 / 20 / 10 | Upper bound of what is forwarded; the newest message wins. |
+| `scan_max_hz`, `odom_max_hz`, `drive_max_hz`, `twist_max_hz`, `camera_max_fps` | 5 / 20 / 20 / 20 / 10 | Upper bound of what is forwarded (and kept in records); the newest message wins, at least 1/max_hz apart. A faster source is thinned to whole steps of it: the 50 Hz `/drive_status` at 20 arrives every third message, about 17 Hz. |
 | `scan_max_points` | `360` | Scans are decimated by an integer stride to at most this many beams. |
 | `base_frame` | `base_link` | Each scan carries `mount` (`x`, `y`, `yaw` of the scan frame in this frame), looked up once per frame in TF — on QUESTiX the static transform of `launcher/launch/lidar_driver.launch.xml`. `null` (and a throttled warning) while TF does not know it; the lab then uses its default mount. |
 | `wheel_radius`, `wheel_separation` | `0.1`, `0.5` | Only reported to the page for wheel-odometry lessons. Keep identical to `launcher/config/drive_component.yaml`. |
 | `allow_drive` | `false` | Let pages drive the robot (next section). robot_manager passes `true` while 教材からの走行 is allowed. |
 | `drive_topic` | `/target_twist/lab` | `geometry_msgs/Twist` published for the pages: `twist_arbiter`'s lab input. |
 | `emergency_stop_topic` | `/emergency_stop` | `questix_msgs/EmergencyStop` (reliable, transient local). The only source that makes the E-stop state known: until it has been heard, driving and the launcher are refused (`estop_unknown`) and `GET /api/state` reports `emergency_stop: null`. `/drive_status`'s `emergency_stop` (and the launcher statuses' `estop`) can add a pressed E-stop, never a released one. Empty = never known, so pages never move the robot. |
-| `drive_max_linear`, `drive_max_angular` | `0.3`, `1.0` | Upper bounds [m/s], [rad/s]; faster requests are clamped. |
+| `drive_max_linear`, `drive_max_angular` | `0.15`, `0.5` | Upper bounds [m/s], [rad/s]; faster requests are clamped. |
 | `drive_deadman_sec` | `0.5` | The driving page repeats its command every 0.1 s; silence this long stops the robot. |
 | `drive_max_run_sec` | `30.0` | Longest single run, from its first command to its stop. |
 | `drive_rate_hz` | `20.0` | Rate the held command is published at. |
@@ -244,8 +244,8 @@ on, and a page that connects gets the last one if it arrived within 1 s. Pages s
 only from this stream: never heard is unknown, silent for 1 s is stale; the derived
 `drive.emergency_stop` may add "pressed" but never makes it released.
 
-The 20 Hz JSON the pages get is teaching data, not every message on the robot: the
-evidence-grade record of a run is Robot Manager's rosbag (MCAP).
+The JSON the pages get (at most 20 Hz, about 17 Hz for `/drive_status`) is teaching data, not
+every message on the robot: the evidence-grade record of a run is Robot Manager's rosbag (MCAP).
 
 `hello.robot` is `{"name": "<robot_name or host name>", "domain": <ROS_DOMAIN_ID as a number, or
 null when unset>}`. `hello.records` is `{"save": <pages may save here now>, "list": true,

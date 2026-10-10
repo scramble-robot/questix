@@ -6,17 +6,19 @@ import { stepProgram, programSeconds, programCommand } from '../live/drive-core.
 // drive-link runs, test/control-live-drive.test.mjs checks them with made-up scans.
 //
 // - Speed topics: a step input, the same experiment as the simulation but at a speed the lab may
-//   command (the simulated 20–80 rpm would be 0.2–0.8 m/s with QUESTiX's 0.1 m wheels).
+//   command (the simulated 20–80 rpm would be 0.1–0.4 m/s with QUESTiX's 0.05 m wheels).
 // - Distance topics: the learner's own P/I/D gains close the loop on the LiDAR's distance to the
 //   wall, exactly as in the simulation (error = distance − 0.50 m, output −1…1), with the output
 //   scaled to the lab's speed limit instead of the simulated motor's full speed.
 
-const STEP_SPEEDS = [0.1, 0.2, 0.3]; // m/s offered for the real step
+const STEP_SPEEDS = [0.05, 0.1, 0.15]; // m/s offered for the real step
 const STEP_HOLD = 5; // seconds at the step speed; the simulation settles within about 3 s
 const STEP_LEAD = 1; // seconds standing still before the step, so the recording shows rest
 const STEP_TAIL = 2; // seconds standing still after it
-const WALL_SECONDS = 16; // as long as a simulated run (core.js DURATION)
-const WALL_MAX_SPEED = 0.25; // m/s at output 100 %, never above the bridge's limit
+// Longer than a simulated run (core.js DURATION, 16 s): at the lab's real top speed the robot needs
+// about 19 s from 1.5 m to hold the stop distance (#179 corrected the wheel radius, so m/s are real).
+const WALL_SECONDS = 20;
+const WALL_MAX_SPEED = 0.15; // m/s at output 100 %, never above the bridge's limit (0.15)
 const WALL_START_MIN = 0.9; // m: closer than this, the approach is too short to show anything
 const WALL_MIN_GAP = 0.25; // m: the run ends at once when the LiDAR sees the wall this close
 const SCAN_STALE = 0.6; // seconds without a scan: stand still (the controller would be blind)

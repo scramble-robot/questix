@@ -420,6 +420,57 @@ main {
   border: 1px solid var(--red);
 }
 
+.mode-badge.lesson {
+  background: var(--accent-soft);
+  color: var(--green);
+  border: 1px solid var(--green);
+}
+
+/* Mode choice: lesson / practice / competition (modes.py) */
+.mode-choice {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.5rem;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.mode-option {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+
+.mode-option input {
+  align-self: flex-start;
+  margin: 0 0 0.2rem;
+}
+
+.mode-option span {
+  font-weight: 700;
+}
+
+.mode-option small {
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.mode-option:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.mode-option:has(input:disabled) {
+  cursor: progress;
+  opacity: 0.7;
+}
+
 .toggle-row {
   display: flex;
   align-items: center;
@@ -1566,3 +1617,13 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .network-card .config-item input[type="text"],
 .network-card .config-item input[type="password"],
 .network-card .config-item select { width: 100%; }
+
+/* Text for screen readers only (e.g. the mode choice's legend). */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

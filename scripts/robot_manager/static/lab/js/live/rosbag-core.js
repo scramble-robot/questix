@@ -26,7 +26,7 @@ const OP = {
 
 // Must stay equal to the defaults in questix_lab_bridge/config/lab_bridge.yaml (and so to
 // launcher/config/drive_component.yaml): a bag carries no wheel geometry of its own.
-const BAG_DEFAULT_CONFIG = { wheel_radius: 0.1, wheel_separation: 0.5 };
+const BAG_DEFAULT_CONFIG = { wheel_radius: 0.05, wheel_separation: 0.5 };
 const BAG_SCAN_MAX_POINTS = 360; // questix_lab_bridge `scan_max_points`
 const COMMAND_TOPIC = '/target_twist'; // the command drive_component follows
 const STATIC_TF_TOPIC = '/tf_static';

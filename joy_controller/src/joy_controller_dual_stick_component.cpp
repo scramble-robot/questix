@@ -55,7 +55,7 @@ void JoyControllerDualStickComponent::loadParameters() {
   // Movement parameters
   // デフォルト値は config/joy_controller_dual_stick_params.yaml
   // と同値に保つこと（単一ソース原則）。
-  declare_parameter("longitudinal_input_ratio", 0.05);
+  declare_parameter("longitudinal_input_ratio", 0.025);
   get_parameter("longitudinal_input_ratio", longitudinal_input_ratio_);
 
   declare_parameter("angular_input_ratio", 0.05);

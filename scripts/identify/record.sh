@@ -17,11 +17,20 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/lib_evidence.sh"
 
 OUT_ROOT="${IDENT_OUT:-$HOME/ident_data}"
-LEVELS="20,30,40,60,80,100,150,200,300,400"
+LEVELS="20,30,40,60,80,100,150,200,300"  # M6 規格書の ±330 rpm に収める（README）
 HOLD="4.0"
 SETTLE="3.0"
 TURN=""
 YES=""
+SCHEDULE=""
+LEAD_IN_RPM="0"
+LEAD_IN_SEC="0"
+PATTERN=""
+SIGN="both"
+# 試験の間だけ変える drive_component のパラメータ（NAME=VALUE）。終了時に元の値へ戻す。
+SET_PARAMS=()
+# --set-param で変えてよいパラメータ（実行時変更でき、試験のために変える必要があるものだけ）
+ALLOWED_SET_PARAMS="min_command_rpm stop_resend_interval_ms"
 
 NODE="/drive_component"
 # preflight で /target_twist に他の送り手が流していないか聞く時間 [s]
@@ -30,12 +39,16 @@ REQUIRED_TOPICS="/drive_status,/target_twist"
 # 存在するときだけ記録に足す。無いことを失敗条件にしない。
 # /joy /joy_gated は足さない: step_sequence.py が /target_twist へ直接 publish する
 # 同定試験では、これらは同定入力の authority ではないため。
-OPTIONAL_TOPICS="/odom,/emergency_stop"
+# /drive_control_sample: drive_component の制御 tick ごとの診断サンプル（seq で欠落、feedback_new で
+# 重複を判別できる。ripple_analysis.py が優先して使う）。publish_control_sample=false なら無い。
+OPTIONAL_TOPICS="/odom,/emergency_stop,/drive_control_sample"
 
 usage() {
   cat <<'USAGE'
 使い方:
-  bash scripts/identify/record.sh [--out DIR] [--levels L] [--hold S] [--settle S] [--turn] [--yes]
+  bash scripts/identify/record.sh [--out DIR] [--levels L] [--hold S] [--schedule R:S,...]
+       [--settle S] [--sign pos|neg|both] [--turn | --pattern P]
+       [--lead-in-rpm R --lead-in-sec S] [--set-param NAME=VALUE ...] [--yes]
 
 Phase A システム同定用の記録ハーネス（授業の手動操縦ロガーではない）。
 
@@ -47,15 +60,30 @@ Phase A システム同定用の記録ハーネス（授業の手動操縦ロガ
   4. ros2 bag record を開始（必須 topic + 存在する optional topic）
   5. step_sequence.py でステップ列を publish（終われば自動で 6 へ進む。Ctrl-C は途中で
      止めたいときだけ: 0 を publish して終了し、meta.yaml に step_sequence: interrupted と残す。
-     他の送り手の指令を受けたら中断し、aborted_foreign_publisher と残して終了コード 3）
+     他の送り手の指令を受けたら中断し、aborted_foreign_publisher と残して終了コード 3。
+     非常停止の押下で中断・拒否したら aborted_emergency_stop と終了コード 4、開始前に
+     /emergency_stop を受信できなければ refused_estop_not_received と終了コード 6）
   6. bag を停止し、実効パラメータを再取得して before/after を突き合わせ、bag info を保存
 
 オプション:
   --out DIR      出力先ルート（既定: $IDENT_OUT または ~/ident_data）
   --levels L     車輪 RPM のレベル（カンマ区切り）
   --hold S       各レベルの保持時間 [s]
+  --schedule R:S,...  レベルごとの保持時間（例 3:60,5:60,10:30）。--levels/--hold より優先
   --settle S     レベル間の 0 保持時間 [s]
-  --turn         旋回で取る（左右逆回転）
+  --sign X       pos（正転のみ）/ neg（逆転のみ）/ both（既定）
+  --turn         旋回で取る（左右逆回転。--pattern spin と同じ）
+  --pattern P    straight / spin / pivot-left / pivot-right（左・右の車輪を止め、もう片方だけを
+                 回す信地旋回。床の上で負荷をかける試験。レベルは回す輪の RPM）
+  --lead-in-rpm R / --lead-in-sec S
+                 R より遅いレベルの前に同じ向きで R を S 秒送り、0 を通らずにレベルへ移る
+                 （止まった状態からの動き出しには min_command_rpm + 2 rpm 以上が要るため）
+                 レベル（助走を含む）が max_motor_rpm（と仕様上限 475）を超えるステップ列は、
+                 切り詰められて同定の入力が変わるため、記録の前に拒否する
+  --set-param NAME=VALUE
+                 記録の間だけ drive_component のパラメータを変える（繰り返し可）。変えてよいのは
+                 min_command_rpm と stop_resend_interval_ms だけ。変える前の値を記録し、終了時
+                 （Ctrl-C・失敗を含む）に元へ戻して確認する。params_before/after は変えた後の値
   --yes          対話をスキップして既定値を使う
   -h, --help     このヘルプ
 
@@ -80,11 +108,42 @@ while [[ $# -gt 0 ]]; do
     --hold) HOLD="$2"; shift 2 ;;
     --settle) SETTLE="$2"; shift 2 ;;
     --turn) TURN="--turn"; shift ;;
+    --schedule) SCHEDULE="$2"; shift 2 ;;
+    --sign) SIGN="$2"; shift 2 ;;
+    --pattern) PATTERN="$2"; shift 2 ;;
+    --lead-in-rpm) LEAD_IN_RPM="$2"; shift 2 ;;
+    --lead-in-sec) LEAD_IN_SEC="$2"; shift 2 ;;
+    --set-param) SET_PARAMS+=("$2"); shift 2 ;;
     --yes) YES="1"; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
+
+case "$SIGN" in pos|neg|both) ;; *) echo "error: --sign は pos / neg / both" >&2; exit 2 ;; esac
+if [[ -n "$PATTERN" && -n "$TURN" && "$PATTERN" != "spin" ]]; then
+  echo "error: --turn と --pattern は同時に指定できません" >&2
+  exit 2
+fi
+for kv in "${SET_PARAMS[@]}"; do
+  name="${kv%%=*}"
+  value="${kv#*=}"
+  if [[ "$kv" != *=* || -z "$name" || -z "$value" ]]; then
+    echo "error: --set-param は NAME=VALUE の形にしてください: $kv" >&2
+    exit 2
+  fi
+  if [[ " $ALLOWED_SET_PARAMS " != *" $name "* ]]; then
+    echo "error: --set-param で変えられるのは $ALLOWED_SET_PARAMS だけです: $name" >&2
+    exit 2
+  fi
+  if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+    echo "error: --set-param の値は 0 以上の整数にしてください: $kv" >&2
+    exit 2
+  fi
+done
+
+PATTERN_EFFECTIVE="${PATTERN:-straight}"
+[[ -n "$TURN" ]] && PATTERN_EFFECTIVE="spin"
 
 if ! env --default-signal=INT true 2>/dev/null; then
   echo "error: env --default-signal が使えません（coreutils 8.31 以降が必要。Ubuntu 24.04 は対応）" >&2
@@ -124,16 +183,28 @@ done
 # （スティック優先の仕組みも素通りする）。publisher の有無ではなく実際の流れで判定する
 # （twist_arbiter は publisher を常に持つが、入力が無ければ何も流さない）。
 # step_sequence.py も開始前と実行中に同じ検査をする。ここは対話の前に止めるための早期検査。
-if timeout "$LISTEN_SEC" ros2 topic echo --once /target_twist >/dev/null 2>&1; then
-  fail "/target_twist に他の送り手から指令が流れています（コントローラ接続中など）。
+set +e
+LISTEN_ERR="$(timeout "$LISTEN_SEC" ros2 topic echo --once /target_twist geometry_msgs/msg/Twist 2>&1 >/dev/null)"
+LISTEN_RC=$?
+set -e
+case "$LISTEN_RC" in
+  0) fail "/target_twist に他の送り手から指令が流れています（コントローラ接続中など）。
        コントローラを外すか joy を止め、/target_twist に他から流れない状態で実行してください
-       （送り手は ros2 topic info -v /target_twist で確認できます）"
-fi
-echo "  /target_twist: 他の送り手からの流れなし（${LISTEN_SEC}s 待機）"
+       （送り手は ros2 topic info -v /target_twist で確認できます）" ;;
+  124) echo "  /target_twist: 他の送り手からの流れなし（${LISTEN_SEC}s 待機）" ;;
+  *) fail "/target_twist を聞く ros2 topic echo が失敗しました（終了コード $LISTEN_RC）: ${LISTEN_ERR}" ;;
+esac
 
 CONTROL_MODE="$(ros2 param get "$NODE" control_mode 2>/dev/null | awk '{print $NF}' || true)"
 [[ -n "$CONTROL_MODE" ]] || fail "$NODE の control_mode パラメータを取得できません"
 echo "  control_mode: $CONTROL_MODE"
+
+# 車輪 RPM -> twist の換算は drive_component と同じ寸法で行う（信地旋回で片輪を 0 にするため）
+WHEEL_RADIUS="$(ros2 param get "$NODE" wheel_radius 2>/dev/null | awk '{print $NF}' || true)"
+WHEEL_SEPARATION="$(ros2 param get "$NODE" wheel_separation 2>/dev/null | awk '{print $NF}' || true)"
+[[ -n "$WHEEL_RADIUS" && -n "$WHEEL_SEPARATION" ]] \
+  || fail "$NODE の wheel_radius / wheel_separation を取得できません"
+echo "  wheel_radius: $WHEEL_RADIUS m, wheel_separation: $WHEEL_SEPARATION m"
 
 # Phase A は LPF 前の生 RPM で同定する。velocity_rpm_raw が無い msg 定義で記録すると
 # LPF 後 RPM しか残らず τ・むだ時間の意味が変わるため、記録前に止める（fit_models.py と同じ契約）。
@@ -148,6 +219,34 @@ if ! grep -q '\bvelocity_rpm_raw\b' <<<"$MOTOR_FEEDBACK_DEF"; then
        questix_msgs をビルドして source し直してください（PR #144 以降）"
 fi
 echo "  questix_msgs/MotorFeedback.velocity_rpm_raw: OK"
+
+# 指定したレベルが停止判定（min_command_rpm）で止められないかを、対話・記録の前に確かめる。
+# --set-param min_command_rpm=N を指定したときはその値で判定する。
+GATE_MIN="$(ros2 param get "$NODE" min_command_rpm 2>/dev/null | awk '{print $NF}' || true)"
+for kv in "${SET_PARAMS[@]}"; do
+  [[ "${kv%%=*}" == "min_command_rpm" ]] && GATE_MIN="${kv#*=}"
+done
+if [[ -n "$GATE_MIN" ]]; then
+  GATE_ARGS=(--levels "$LEVELS" --hold "$HOLD" --settle "$SETTLE" --sign "$SIGN"
+             --pattern "$PATTERN_EFFECTIVE" --lead-in-rpm "$LEAD_IN_RPM" --lead-in-sec "$LEAD_IN_SEC"
+             --min-command-rpm "$GATE_MIN" --dry-run)
+  [[ -n "$SCHEDULE" ]] && GATE_ARGS+=(--schedule "$SCHEDULE")
+  python3 "$SCRIPT_DIR/step_sequence.py" "${GATE_ARGS[@]}" >/dev/null \
+    || fail "ステップ列が min_command_rpm=${GATE_MIN} の停止判定に掛かります（上の理由を参照）"
+  echo "  停止判定（min_command_rpm=${GATE_MIN}）: 全レベルが指令どおりに回る"
+fi
+
+# 指定したレベルが max_motor_rpm（と仕様上限 475）で切り詰められないかを確かめる。切り詰められた
+# ステップは、同定の入力が指定と変わる。
+MAX_MOTOR_RPM="$(ros2 param get "$NODE" max_motor_rpm 2>/dev/null | awk '{print $NF}' || true)"
+[[ -n "$MAX_MOTOR_RPM" ]] || fail "$NODE の max_motor_rpm を取得できません"
+MAX_ARGS=(--levels "$LEVELS" --hold "$HOLD" --settle "$SETTLE" --sign "$SIGN"
+          --pattern "$PATTERN_EFFECTIVE" --lead-in-rpm "$LEAD_IN_RPM" --lead-in-sec "$LEAD_IN_SEC"
+          --max-command-rpm "$MAX_MOTOR_RPM" --dry-run)
+[[ -n "$SCHEDULE" ]] && MAX_ARGS+=(--schedule "$SCHEDULE")
+python3 "$SCRIPT_DIR/step_sequence.py" "${MAX_ARGS[@]}" >/dev/null \
+  || fail "ステップ列が max_motor_rpm=${MAX_MOTOR_RPM} で切り詰められます（上の理由を参照）"
+echo "  上限（max_motor_rpm=${MAX_MOTOR_RPM}）: 全レベルが上限以下"
 
 mapfile -t RECORD_TOPICS < <(evidence_select_topics "$REQUIRED_TOPICS" "$OPTIONAL_TOPICS" "$TOPIC_LIST")
 echo "  記録対象: ${RECORD_TOPICS[*]}"
@@ -220,14 +319,79 @@ hostname: "$(hostname 2>/dev/null || echo unknown)"
 ros_distro: "${ROS_DISTRO:-unset}"
 ros_domain_id: "${ROS_DOMAIN_ID:-unset}"
 rmw_implementation: "${RMW_IMPLEMENTATION:-unset}"
-pattern: "${TURN:-straight}"
+pattern: "${PATTERN_EFFECTIVE}"
 levels_rpm: [${LEVELS}]
 hold_sec: ${HOLD}
+schedule: "${SCHEDULE}"
+sign: "${SIGN}"
+lead_in_rpm: ${LEAD_IN_RPM}
+lead_in_sec: ${LEAD_IN_SEC}
+wheel_radius: ${WHEEL_RADIUS}
+wheel_separation: ${WHEEL_SEPARATION}
 settle_sec: ${SETTLE}
 recorded_topics: [$(printf '"%s", ' "${RECORD_TOPICS[@]}" | sed 's/, $//')]
 notes: "${NOTES}"
 # 詳細: source_identity.txt / git_status.txt / drive_component_params_*.yaml / bag_info.txt
 META
+
+# ---- 試験の間だけのパラメータ変更（--set-param）----------------------------
+
+# 変える前の値（NAME=VALUE）。終了時（成功・失敗・Ctrl-C）に restore_params で戻す。
+ORIGINAL_PARAMS=()
+# 元の値に戻せなかったものがあれば 1。終了コードを EXIT_RESTORE_FAILED にし、meta.yaml に残す。
+RESTORE_FAILED=0
+EXIT_RESTORE_FAILED=5
+param_value() {  # param_value NAME -> 実効値（取得できなければ空）
+  ros2 param get "$NODE" "$1" 2>/dev/null | awk '{print $NF}' || true
+}
+restore_params() {
+  local kv name value now
+  for kv in "${ORIGINAL_PARAMS[@]}"; do
+    name="${kv%%=*}"
+    value="${kv#*=}"
+    if ros2 param set "$NODE" "$name" "$value" >/dev/null 2>&1; then
+      now="$(param_value "$name")"
+      if [[ "$now" == "$value" ]]; then
+        echo "parameter restored: $name = $value"
+        echo "param_restored_${name}: ${value}" >>"$DEST/meta.yaml"
+        continue
+      fi
+    fi
+    RESTORE_FAILED=1
+    echo "error: $NODE の $name を元の値 $value に戻せませんでした。手で戻してください:" >&2
+    echo "       ros2 param set $NODE $name $value" >&2
+    echo "param_restore_failed_${name}: ${value}" >>"$DEST/meta.yaml"
+  done
+  ORIGINAL_PARAMS=()
+}
+# 終了時（成功・失敗・Ctrl-C）の後片付け。戻せないパラメータがあれば終了コードを上書きする。
+on_exit() {
+  local rc=$?
+  if declare -F cleanup >/dev/null; then cleanup; fi
+  restore_params
+  rm -f "$TOPIC_LIST"
+  if [[ "$RESTORE_FAILED" == 1 ]]; then
+    echo "error: 元に戻せなかったパラメータがあります（終了コード $EXIT_RESTORE_FAILED）" >&2
+    exit "$EXIT_RESTORE_FAILED"
+  fi
+  exit "$rc"
+}
+# 途中で失敗しても、それまでに変えたものは戻す
+trap on_exit EXIT
+for kv in "${SET_PARAMS[@]}"; do
+  name="${kv%%=*}"
+  value="${kv#*=}"
+  original="$(param_value "$name")"
+  [[ -n "$original" ]] || fail "$NODE の $name を取得できません（変更しません）"
+  ORIGINAL_PARAMS+=("$name=$original")
+  ros2 param set "$NODE" "$name" "$value" >/dev/null 2>&1 \
+    || fail "$NODE の $name を $value に設定できませんでした（変えたものは戻します）"
+  now="$(param_value "$name")"
+  [[ "$now" == "$value" ]] \
+    || fail "$NODE の $name を $value に設定したのに、読み戻した値が '$now' です（変えたものは戻します）"
+  echo "parameter set for this recording: $name = $value (was $original)"
+  echo "param_override_${name}: {value: ${value}, original: ${original}}" >>"$DEST/meta.yaml"
+done
 
 # ---- 実効パラメータ snapshot（記録直前）------------------------------------
 
@@ -268,7 +432,8 @@ cleanup() {
   wait "$BAG_PID" 2>/dev/null || true
   BAG_PID=""
 }
-trap 'cleanup; rm -f "$TOPIC_LIST"' EXIT INT TERM
+trap on_exit EXIT
+trap 'cleanup; restore_params' INT TERM
 
 echo "recording -> $DEST/bag"
 # 非対話シェルの `&` 起動は SIGINT を無視（SIG_IGN）で継承し、ros2（Python）は SIGINT の
@@ -278,7 +443,15 @@ BAG_PID=$!
 sleep 2
 
 set +e
-python3 "$SCRIPT_DIR/step_sequence.py" --levels "$LEVELS" --hold "$HOLD" --settle "$SETTLE" --sign both $TURN
+STEP_ARGS=(--levels "$LEVELS" --hold "$HOLD" --settle "$SETTLE" --sign "$SIGN"
+           --pattern "$PATTERN_EFFECTIVE" --wheel-radius "$WHEEL_RADIUS"
+           --wheel-separation "$WHEEL_SEPARATION"
+           --lead-in-rpm "$LEAD_IN_RPM" --lead-in-sec "$LEAD_IN_SEC")
+[[ -n "$SCHEDULE" ]] && STEP_ARGS+=(--schedule "$SCHEDULE")
+MIN_COMMAND_RPM="$(ros2 param get "$NODE" min_command_rpm 2>/dev/null | awk '{print $NF}' || true)"
+[[ -n "$MIN_COMMAND_RPM" ]] && STEP_ARGS+=(--min-command-rpm "$MIN_COMMAND_RPM")
+STEP_ARGS+=(--max-command-rpm "$MAX_MOTOR_RPM")
+python3 "$SCRIPT_DIR/step_sequence.py" "${STEP_ARGS[@]}"
 STEP_RC=$?
 set -e
 
@@ -288,6 +461,8 @@ cleanup
 case "$STEP_RC" in
   0) STEP_STATUS="completed" ;;
   3) STEP_STATUS="aborted_foreign_publisher" ;;
+  4) STEP_STATUS="aborted_emergency_stop" ;;
+  6) STEP_STATUS="refused_estop_not_received" ;;
   130) STEP_STATUS="interrupted" ;;
   *) STEP_STATUS="failed_rc_${STEP_RC}" ;;
 esac
@@ -297,6 +472,12 @@ echo "step_sequence: \"${STEP_STATUS}\"" >>"$DEST/meta.yaml"
 
 if ! ros2 param dump "$NODE" >"$PARAM_AFTER" 2>/dev/null; then
   echo "warning: 記録後の param dump に失敗しました（before/after 比較なし）" >&2
+fi
+
+# 記録後の値を残してから、試験の間だけ変えたパラメータを元に戻す
+restore_params
+if [[ "$RESTORE_FAILED" == 1 ]]; then
+  echo "param_restore: failed" >>"$DEST/meta.yaml"
 fi
 
 PARAM_DIFF="$DEST/parameter_diff.txt"

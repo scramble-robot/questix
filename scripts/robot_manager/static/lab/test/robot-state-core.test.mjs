@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {
   HISTORY_SECONDS,
+  WHEEL_GAP_SECONDS,
   createStateTracker,
   resetPose,
   ingest,
@@ -372,4 +373,89 @@ test('an older bridge without wheel fields falls back to the chassis velocity an
   assert.ok(Math.abs(model.wheels.left - 0.1 * RPM_PER_MPS) < 1e-6);
   assert.ok(Math.abs(model.wheels.targetLeft - 0.2 * RPM_PER_MPS) < 1e-6);
   assert.ok(Number.isNaN(model.wheels.rawLeft));
+});
+
+// --- raw feedback first, gaps kept (the lifted-wheel tests read the unsmoothed wheel) ----------
+
+test('the raw wheel feedback is its own series beside the filtered one and the sent command', () => {
+  const tracker = createStateTracker();
+  for (let at = 0; at <= 200; at += 50)
+    ingest(tracker, 'drive', directDrive({ filtered: 30, raw: 35 + at / 50 }), at, config);
+  const { series } = robotStateModel(tracker, { link, now: 200 }).wheels;
+  assert.deepEqual(
+    series.rawLeft.map(([, rpm]) => rpm),
+    [35, 36, 37, 38, 39],
+  );
+  assert.deepEqual(
+    series.rawRight.map(([, rpm]) => rpm),
+    [35, 36, 37, 38, 39],
+  ); // forward-positive
+  assert.ok(series.left.every(([, rpm]) => rpm === 30));
+  assert.ok(series.targetLeft.every(([, rpm]) => rpm === 31));
+});
+
+test('missing feedback and pauses longer than the gap limit break the wheel lines', () => {
+  const tracker = createStateTracker();
+  ingest(tracker, 'drive', directDrive(), 0, config);
+  ingest(tracker, 'drive', directDrive(), 50, config);
+  ingest(tracker, 'drive', directDrive({ valid: false }), 100, config); // feedback not valid
+  ingest(tracker, 'drive', directDrive(), 150, config);
+  // Nothing for longer than WHEEL_GAP_SECONDS, then the stream resumes.
+  const resume = 150 + WHEEL_GAP_SECONDS * 1000 + 50;
+  ingest(tracker, 'drive', directDrive(), resume, config);
+  ingest(tracker, 'drive', directDrive(), resume + 50, config);
+  const { series } = robotStateModel(tracker, { link, now: resume + 50 }).wheels;
+  // The invalid sample stays in as NaN instead of being dropped (which would join the line).
+  assert.ok(Number.isNaN(series.rawLeft[2][1]));
+  // A NaN point marks the pause before the first sample after it.
+  assert.equal(series.rawLeft.length, 7);
+  assert.ok(Number.isNaN(series.rawLeft[4][1]));
+  assert.equal(series.rawLeft[4][0], series.rawLeft[5][0]);
+  // Three runs: before the invalid sample, between it and the pause, after the pause.
+  assert.equal(sparkLines(series.rawLeft, 60).length, 2); // a run of one point draws nothing
+  const runs = series.rawLeft
+    .map(([, rpm]) => (Number.isFinite(rpm) ? 'x' : ' '))
+    .join('')
+    .split(' ')
+    .filter(Boolean);
+  assert.deepEqual(runs, ['xx', 'x', 'xx']);
+  // The generated target is the node's own and stays through invalid feedback, not the pause.
+  assert.equal(series.targetLeft[2][1], 31);
+  assert.ok(Number.isNaN(series.targetLeft[4][1]));
+});
+
+test('the strip draws the chassis speed from the raw wheels', () => {
+  const tracker = createStateTracker();
+  // Raw 35 rpm on both wheels; the node's own v says 999 rpm on purpose.
+  ingest(tracker, 'drive', directDrive({ raw: 35 }), 0, config);
+  ingest(tracker, 'drive', directDrive({ raw: 35 }), 50, config);
+  const model = robotStateModel(tracker, { link, now: 50 });
+  const expected = 35 / RPM_PER_MPS;
+  const [, speed] = model.wheels.series.rawSpeed.at(-1);
+  assert.ok(Math.abs(speed - expected) < 1e-12);
+  assert.deepEqual(model.wheels.series.stripSpeed, model.wheels.series.rawSpeed);
+  const strip = stripModel(model);
+  assert.equal(strip.measured.length, 1);
+  assert.deepEqual(strip.measured, sparkLines(model.wheels.series.rawSpeed, strip.top));
+  // A raw speed above the bridge limit grows the strip's axis like any measured speed.
+  assert.ok(speedTop(tracker, { linear: 0.1 }) >= expected);
+  // Turning in place: the raw wheels cancel, the speed is zero.
+  const turning = createStateTracker();
+  const spin = directDrive({ raw: 35 });
+  spin.right.rpm_raw = 35; // native sign: right wheel turning backwards
+  ingest(turning, 'drive', spin, 0, config);
+  assert.equal(robotStateModel(turning, { link, now: 0 }).wheels.series.rawSpeed[0][1], 0);
+});
+
+test('an older bridge without raw wheels keeps the node speed in the strip', () => {
+  const tracker = createStateTracker();
+  ingest(tracker, 'drive', drive(0.1), 0, config);
+  ingest(tracker, 'drive', drive(0.12), 50, config);
+  const model = robotStateModel(tracker, { link, now: 50 });
+  assert.ok(model.wheels.series.rawSpeed.every(([, v]) => Number.isNaN(v)));
+  assert.deepEqual(
+    model.wheels.series.stripSpeed.map(([, v]) => v),
+    [0.1, 0.12],
+  );
+  assert.deepEqual(stripModel(model).measured, sparkLines(model.wheels.series.speed, 0.3));
 });

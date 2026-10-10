@@ -27,7 +27,7 @@
 // robot's clock, sorted by it. Lessons derive their numbers from the streams, never from the
 // order messages happened to arrive in, so a reopened file gives the same result as the recording.
 //
-// This is teaching data: what the bridge passed on to the pages (drive at about 20 Hz), not every
+// This is teaching data: what the bridge passed on to the pages (drive at about 17 Hz), not every
 // message on the robot. The evidence-grade record of a run is Robot Manager's rosbag (MCAP), which
 // keeps every message as ROS published it.
 

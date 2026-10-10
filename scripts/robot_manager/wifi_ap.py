@@ -16,8 +16,9 @@ writes it to ``network_request.json`` in the settings directory and starts
 user start only that unit), which runs the root-owned helper ``network_admin.py`` installed in
 ``/opt/questix_robot``. The helper validates everything again, applies it like the role and
 writes ``network_status.json`` without secrets. One change runs at a time (409 otherwise);
-``GET /api/wifi-ap/job`` reports it. After a successful start in practice mode, QUESTiX LAB is
-started through lab.py when its automatic start (AUTOSTART) is on; never in competition mode.
+``GET /api/wifi-ap/job`` reports it. After a successful start in lesson mode, QUESTiX LAB is
+started through lab.py when its automatic start (AUTOSTART) is on; never in practice or
+competition mode.
 
 Binding to 127.0.0.1 and the loopback-only CORS policy do not stop a web page opened in the
 robot's own browser from sending a "simple" cross-site POST (a form, text/plain): the browser
@@ -197,6 +198,7 @@ LAB_MESSAGES = {
     "started": "教材の配信を開始しました。",
     "running": "教材の配信は動作中です。",
     "competition": "大会モードのため、教材は配信しません。",
+    "not_lesson": "練習モードのため、教材は配信しません（教材モードで配信できます）。",
     "autostart_off": "教材の自動開始がオフのため、配信は開始していません（教材タブから開始できます）。",
     "failed": "教材の配信を開始できませんでした（教材タブで確認してください）。",
 }
@@ -336,9 +338,11 @@ def _systemctl_start() -> subprocess.CompletedProcess:
 
 
 def _start_lab() -> str:
-    """Start QUESTiX LAB after a successful start: practice mode with AUTOSTART on only."""
+    """Start QUESTiX LAB after a successful start: lesson mode with AUTOSTART on only."""
     if lab._competition_mode():
         return "competition"
+    if not lab._lab_available():
+        return "not_lesson"
     if lab._read_config().get("AUTOSTART") != "true":
         return "autostart_off"
     try:

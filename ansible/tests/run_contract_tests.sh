@@ -74,7 +74,7 @@ if run_playbook ansible/tests/test_launch_env.yaml \
     assert_contains "$ENV_FILE" "ENABLE_LIDAR=false" "fresh render: ENABLE_LIDAR default false"
     assert_contains "$ENV_FILE" "ENABLE_SHOT=false" "fresh render: ENABLE_SHOT default false"
     assert_contains "$ENV_FILE" "ENABLE_DRIVE=false" "fresh render: ENABLE_DRIVE default false"
-    assert_contains "$ENV_FILE" "ENABLE_GPIO_REF=true" "fresh render: ENABLE_GPIO_REF default true (manual-launch safety)"
+    assert_contains "$ENV_FILE" "ENABLE_GPIO_REF=true" "fresh render: ENABLE_GPIO_REF default true (legacy field, never false)"
     assert_contains "$ENV_FILE" "ENABLE_RVIZ=false" "fresh render: ENABLE_RVIZ default false"
     assert_contains "$ENV_FILE" "CONTROLLER_TYPE=dualshock" "fresh render: CONTROLLER_TYPE default dualshock"
     assert_contains "$ENV_FILE" "ROS_DOMAIN_ID=11" "fresh render: ROS_DOMAIN_ID synced to resolved value"

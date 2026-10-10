@@ -10,7 +10,7 @@
 // with the integrated hardware YAML (launcher/config/drive_component.yaml) and the DualShock
 // operator profile, as questix_core does, and then given the switch questix_core passes. The test
 // plays operation_manager: /emergency_stop at 10 Hz, "released (no GPIO safety path)" for a
-// practice robot without the GPIO safety path.
+// manual diagnostic run without the GPIO safety path.
 //
 // What this pins down:
 // * a practice robot without the GPIO safety path and without the teacher's permission opt-in
@@ -346,8 +346,9 @@ TEST_F(DriveComponentNode, NodeDefaultsRequireTheEstopButNotTheAuthority) {
   EXPECT_FALSE(node->get_parameter("require_teacher_permission").as_bool());
 }
 
-// Practice without the GPIO safety path (ENABLE_GPIO_REF=false) and without the teacher permission
-// opt-in: with operation_manager's "released (no GPIO safety path)" /target_twist drives both
+// A manual diagnostic run without the GPIO safety path (enable_gpio_ref:=false; production launches
+// always read GPIO5) and without the teacher permission opt-in: with operation_manager's
+// "released (no GPIO safety path)" /target_twist drives both
 // wheels, as in 3.2.0; when that /emergency_stop goes silent the drive stops.
 TEST_F(DriveComponentNode, PracticeWithoutGpioDrivesOnTargetTwist) {
   start(false);

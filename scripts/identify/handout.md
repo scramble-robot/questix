@@ -50,5 +50,18 @@ python3 scripts/identify/batch_fit.py ~/ident_data/ident_* --out ~/ident_data/re
 （`bag/` だけ出すと、どの条件で測ったか分からなくなり同定に使えない。）
 運営は `batch_fit.py` で全員分をまとめ、`sufficiency.md` で「どの条件のデータが足りているか」を判定して、順次 `launcher/config/drive_component.yaml` の `velocity_run_*` / `drive_fsm_run_*` を更新する。
 
+## 発展：振動の原因を切り分ける（先生と一緒に、車輪を浮かせて。床の上との比較は別の安全計画で）
+前後に揺れる原因が「車輪 1 回転ごとの引っかかり」か「回転の速さによらない揺れ（床の上では約 1.5〜1.75 Hz。原因はまだ分かっていない）」か、
+その重なりかを、回転数を変えて調べる。各回転数で 10 回転以上回すため約 9 分かかる。
+```bash
+bash scripts/identify/record.sh --levels 20,30,40,60,80,100,120,150 --hold 30
+python3 scripts/identify/ripple_analysis.py --bag ~/ident_data/ident_<ID>_<床>_<日時>/bag --plot ~/ident_data/ripple
+```
+- 「卓越周波数：回転数によらず一定」→ 回転の速さによらない揺れ（モータの速度制御・車体の共振など。どれかはこの試験だけでは決まらない）。「回転数に比例（次数 ≈ 1）」→ 1 回転ごとの揺れ。
+- 1 次の振幅がある回転数の付近で大きくなるなら、1 回転ごとの揺れが何かの共振と重なって大きくなっている可能性がある。
+- 床の上で出る揺れ（約 1.5〜1.75 Hz）は、浮かせた試験だけでは原因が決まらない。同じ回転数・同じ記録の方法で床の上と比べる（床の上は作業責任者の許可と安全計画が要る）。
+- 電源を切って車輪を手で 1 回転回し、引っかかりの数を数える（その数の次数が強く出ていないか）。
+- 手順の詳細（電源の入れ直しでの位置の比較、送信頻度を変える試験、床の上での取り方）は `scripts/identify/README.md`「振動の切り分け」。
+
 ---
 背景資料：`design/model_based_drive_control.md`（計画）、`~/workspace/mpc_study/README.md` 5.4 節（LQR+FF）

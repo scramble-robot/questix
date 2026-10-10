@@ -2,7 +2,14 @@
    Pure functions of /api/status, /api/lab/status and /api/wifi-ap (no DOM), exported for the
    node tests like operator-guide.js. */
 const StatusView = (() => {
-  const MODE = { practice: '練習', competition: '大会' };
+  // modes.py: lesson (教材), practice (練習), competition (大会).
+  const MODE = { lesson: '教材', practice: '練習', competition: '大会' };
+
+  // QUESTiX LAB exists in lesson mode only: why it is unavailable in the saved mode, or null.
+  function labUnavailable(lab) {
+    if (!lab || lab.available !== false) return null;
+    return `${MODE[lab.mode] || '今の'}モード`;
+  }
   const SERVICE = {
     active: '実行中', activating: '起動処理中', deactivating: '停止処理中', inactive: '停止中',
     failed: '起動失敗', unknown: '状態未確認',
@@ -117,10 +124,11 @@ const StatusView = (() => {
       view.toggleDisabled = true;
       return view;
     }
-    if (lab.competition) {
-      view.headline = '大会モードのため使えません';
+    const unavailable = labUnavailable(lab);
+    if (unavailable) {
+      view.headline = `${unavailable}のため使えません`;
       view.toggleDisabled = true;
-      view.toggleNote = '大会モードでは教材からは動かせません。練習モードに戻しても OFF のままです（先生が ON にしてください）。';
+      view.toggleNote = `${unavailable}では教材からは動かせません（教材モードで使えます）。教材モードに戻しても OFF のままです（先生が ON にしてください）。`;
       return view;
     }
     // The teacher's runtime authority for the robot (操作 tab) comes first: without it a lesson
@@ -239,8 +247,8 @@ const StatusView = (() => {
           : { text: `動作中（モード不明）・次回の起動は${next}`, tone: 'warn' };
       } else {
         rows.mode = {
-          text: `次回の起動は${next}` + (status.mode === 'practice'
-            ? '（「起動」を押したときだけ起動します）' : '（電源を入れると自動で起動します）'),
+          text: `次回の起動は${next}` + (status.mode === 'competition'
+            ? '（電源を入れると自動で起動します）' : '（「起動」を押したときだけ起動します）'),
           tone: 'idle',
         };
       }
@@ -249,13 +257,13 @@ const StatusView = (() => {
       tone: service === 'active' ? 'ok' : service === 'failed' ? 'danger' : 'idle' };
     rows.estop = estop(lab, service);
     if (!lab) rows.lab = { text: '確認中', tone: 'idle' };
-    else if (lab.competition) rows.lab = { text: '大会モードのため配信しません', tone: 'idle' };
+    else if (labUnavailable(lab)) rows.lab = { text: `${labUnavailable(lab)}のため配信しません`, tone: 'idle' };
     else if (serving) {
       const clients = bridge && bridge.clients != null ? `・接続中の端末 ${bridge.clients} 台` : '';
       rows.lab = { text: `配信中${clients}`, tone: 'ok' };
     } else rows.lab = { text: '停止中', tone: 'idle' };
     if (!lab) rows.permissions = { text: '確認中', tone: 'idle' };
-    else if (lab.competition) rows.permissions = { text: '大会モードのため禁止', tone: 'idle' };
+    else if (labUnavailable(lab)) rows.permissions = { text: `${labUnavailable(lab)}のため禁止`, tone: 'idle' };
     else {
       const word = (on) => (on ? 'ON' : 'OFF');
       rows.permissions = {
@@ -298,7 +306,7 @@ const StatusView = (() => {
     return fallback || '';
   }
 
-  // Toast text after a mode switch back to practice: what QUESTiX LAB is set to now.
+  // Toast text after a mode switch back to lesson mode: what QUESTiX LAB is set to now.
   function labRestoredText(lab) {
     if (!lab) return '';
     if (lab.error) return `教材の設定を戻せませんでした（${lab.error}）`;
@@ -308,7 +316,7 @@ const StatusView = (() => {
   }
 
   return {
-    MODE, SERVICE, SETTLE_MS, createBlockerMemory, stableBlockers, blockerText, capability,
+    MODE, labUnavailable, SERVICE, SETTLE_MS, createBlockerMemory, stableBlockers, blockerText, capability,
     modeSummary, estop, headerEstop, overview, controllerUrl, labRestoredText,
   };
 })();
