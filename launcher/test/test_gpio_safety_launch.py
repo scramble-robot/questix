@@ -121,6 +121,7 @@ def test_core_defaults_to_practice_and_selects_both_profile_files():
     assert any('ydlidar_launch.py' in path for path in guarded_files)
     assert any('gpio_reader.launch.xml' in path for path in guarded_files)
     assert any('operation_manager.launch.xml' in path for path in guarded_files)
+    assert any('motion_permission.launch.xml' in path for path in guarded_files)
     assert valid_group.find(".//node[@name='rviz2']") is not None
 
     lets = {(
@@ -172,7 +173,7 @@ def test_core_always_owns_exactly_one_operation_manager():
     core = load_xml('launcher/launch/questix_core.launch.xml')
     manager_includes = [
         include for include in core.findall('.//include')
-        if 'find-pkg-share operation_manager' in include.get('file', '')
+        if 'operation_manager)/launch/operation_manager.launch.xml' in include.get('file', '')
     ]
     assert len(manager_includes) == 1
     manager_group = next(
@@ -581,3 +582,36 @@ def test_emergency_stop_is_always_published_and_always_required():
             'operation_manager_node']['ros__parameters']
         assert parameters.get('gpio_safety_enabled', True) is True, profile
         assert parameters['emergency_stop_topic'] == '/emergency_stop', profile
+
+
+def test_core_always_publishes_the_motion_permission_for_the_running_mode():
+    # The motion permission (L2) runs in every configuration, with or without the GPIO safety
+    # path; the referee votes only with AutoReferee. Its mode follows the arguments.
+    core = load_xml('launcher/launch/questix_core.launch.xml')
+    include = next(
+        include for include in core.findall('.//include')
+        if 'motion_permission.launch.xml' in include.get('file', ''))
+    group = next(group for group in core.findall('.//group') if include in list(group))
+    assert group.get('if') is None
+    assert group.get('unless') == (
+        '$(and $(var enable_autoreferee) $(not $(var enable_gpio_ref)))')
+    values = {arg.get('name'): arg.get('value') for arg in include.findall('./arg')}
+    assert values == {'robot_mode': '$(var permission_mode)',
+                      'enable_referee': '$(var enable_autoreferee)'}
+    lets = [(item.get('value'), item.get('if')) for item in core.findall('./let')
+            if item.get('name') == 'permission_mode']
+    assert lets == [('practice', None), ('lesson', '$(var require_teacher_permission)'),
+                    ('competition', '$(var enable_autoreferee)')]
+
+    permission = load_yaml('operation_manager/config/operation_manager.permission.yaml')[
+        'motion_permission_manager']['ros__parameters']
+    # The modes Robot Manager and the robot launcher know (scripts/robot_manager/modes.py).
+    assert permission['modes'] == ['lesson', 'practice', 'competition']
+    assert permission['required'] == {'lesson': ['teacher'], 'competition': ['referee']}
+    assert permission['votes'] == {'referee': '/motion_vote/referee',
+                                   'teacher': '/actuation_authority'}
+    assert permission['topic'] == '/motion_permission'
+    referee = load_yaml('operation_manager/config/referee_monitor.yaml')[
+        'referee_monitor']['ros__parameters']
+    assert referee['vote_topic'] == permission['votes']['referee']
+    assert referee['referee_pins'] == [27]

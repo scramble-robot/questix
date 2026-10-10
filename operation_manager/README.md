@@ -86,6 +86,28 @@ fresh period.
 | competition | any | false | false |
 | any | missing or stale required input | - | false |
 
+## Motion permission (L2)
+
+Two more components, with no state shared with the node above or with each other (each also runs
+as its own process; `launch/motion_permission.launch.xml`, started by `questix_core`):
+
+- `RefereeMonitor` (`referee_monitor_node`, `config/referee_monitor.yaml`, competition only):
+  GPIO27 as the referee's vote `/motion_vote/referee` (questix_msgs/ActuationAuthority,
+  reliable + volatile; on every GPIO update and every 100 ms). true = may move; false, not
+  received or older than `timeout_seconds` = may not. Its pin diagnostics (with
+  `pin_27_signal_limit`) go to `/diagnostics` as `operation_manager: referee` (WARN when the
+  referee stops the robot, ERROR when the signal is missing).
+- `MotionPermissionManager` (`motion_permission_manager_node`,
+  `config/operation_manager.permission.yaml`): combines the votes the running `mode` needs into
+  `/motion_permission` (questix_msgs/MotionPermission, reliable + volatile, 20 Hz and at once on
+  a change). It knows only votes: `votes.<name>: <topic>`, `required.<mode>: [<name>, ...]`
+  (a mode left out needs none), `modes` (the known modes; another one refuses to start, as does
+  a required vote without a topic), `lease_sec`. A new condition is a vote node plus one line
+  in that YAML. Rule: `questix_safety/motion_permission_rule.hpp`.
+
+While the actuators do not read `/motion_permission` yet, the E-stop above still includes GPIO27
+in competition (`config/operation_manager.competition.yaml`). Contract: `questix_msgs/README.md`.
+
 Build:
 - colcon build --packages-select operation_manager
 

@@ -74,6 +74,13 @@ def test_core_launch_passes_the_estop_profile_and_the_teacher_permission_switch(
     assert nodes['/operation_manager_node'] == operation_manager_profile(
         source_packages, expect_profile)
     assert ('/gpio_reader_node' in nodes) is (arguments['enable_gpio_ref'] == 'true')
+    # The motion permission (L2) for the running mode, the referee only in competition.
+    competition = arguments['enable_autoreferee'] == 'true'
+    expect_mode = ('competition' if competition
+                   else 'lesson' if arguments.get('require_teacher_permission') == 'true'
+                   else 'practice')
+    assert nodes['/motion_permission_manager']['mode'] == expect_mode
+    assert ('/referee_monitor' in nodes) is competition
 
 
 def test_safety_only_practice_launch_runs_the_same_gpio_safety_nodes(expand):

@@ -14,6 +14,19 @@ QUESTiX 共通メッセージ定義パッケージ。統一緊急停止インタ
 | `source` | `string` | 発行元識別子(例: `"operation_manager"`) |
 | `reason` | `string` | 原因(例: `"pin 5 not received; "`、`"pin 27 is false, expected true; "`、`"pin 27 timeout; "`)。解除時は `"released"` |
 
+### `MotionPermission.msg`
+
+走行許可(L2)。非常停止(L1)とは別の概念で、`/motion_permission` で配信する。契約は下の
+「`/motion_permission` トピック契約」。
+
+| フィールド | 型 | 意味 |
+|---|---|---|
+| `header` | `std_msgs/Header` | `stamp` = 判定時刻(情報のみ。鮮度の判定には使わない) |
+| `drive_allowed` | `bool` | 車輪を動かしてよいか(drive_component が見る) |
+| `launcher_allowed` | `bool` | ローラー・チルト・射撃を動かしてよいか(shot_component / esc_motor_control が見る) |
+| `mode` | `string` | 実行中のモード(`lesson` / `practice` / `competition`、表示用) |
+| `drive_blockers` / `launcher_blockers` | `string[]` | 許可しない理由(例: `referee:off`、`teacher:stale`、`teacher:unknown`)。許可なら空(表示用。アクチュエータは bool だけを見る) |
+
 ### `MotorFeedback.msg`
 
 DDT M0602C の Protocol 1 応答フレームをデコードした 1 モータ分のフィードバック。
@@ -198,6 +211,45 @@ Robot Manager との互換のためそのまま。
 - **大会起動**(`enable_autoreferee:=true`)は opt-in しても常に `require_teacher_permission:=false`。
   AutoReferee と GPIO 安全系は従来どおりで、教室用の heartbeat が無くても止まらない。
 - 非常停止とは別の理由として扱う(許可の喪失を非常停止に見せかけない)。
+
+## `/motion_permission` トピック契約(走行許可、L2)
+
+- **型**: `questix_msgs/msg/MotionPermission`
+- **QoS**: reliable + **volatile** + keep-last(1)。**transient_local にしない**(許可をラッチしない)。
+- **発行元**: operation_manager の `MotionPermissionManager`(`questix_core` で常に起動)。20 Hz と、
+  判定が変わったときはすぐに出す。練習(票なし)でも出し続ける。
+- **判定**: 実行中のモードが必要とする票(`operation_manager/config/operation_manager.permission.yaml`
+  の `required`)をすべて満たすときだけ許可。票ごとに、未受信 → `<name>:unknown`、
+  リース(`lease_sec`、1.0 s)切れ → `<name>:stale`(両方のフラグ)、受信した false → `<name>:off`
+  (そのフラグ)。規則は `questix_safety/motion_permission_rule.hpp`。
+
+  | モード | 必要な票 |
+  |---|---|
+  | `lesson`(教材) | `teacher`(`/actuation_authority`、Robot Manager の 操作 タブ) |
+  | `practice`(練習) | なし(常に許可) |
+  | `competition`(大会) | `referee`(`/motion_vote/referee`、RefereeMonitor が GPIO27 から) |
+
+  知らないモード、または一覧にない票を必要とするモードでは起動しない(不明なモードを「許可」に倒さない)。
+- **購読側**: `questix_safety::PermissionMonitor`(`motion_permission_topic`、
+  `require_motion_permission`、`motion_permission_timeout_sec`、既定 0.5 s)。自分の単調時計で
+  リースを判定し、未受信・途絶・false はすべて「許可なし」。許可が戻っても、それだけでは動き出さない
+  (新しい指令が必要)。`require_motion_permission:=false` は単体診断の明示 opt-out だけ。
+- **非常停止との関係**: 両方が閉じているときは非常停止(L1)が優先する(反応も理由も非常停止のもの)。
+  非常停止はモータへの出口の直前の最後のゲート。
+
+## 票(`/motion_vote/*`、`/actuation_authority`)
+
+走行許可の入力。型はすべて `questix_msgs/msg/ActuationAuthority`(`drive_allowed`、
+`launcher_allowed`、`source`)で、QoS とリースは `/actuation_authority` と同じ
+(reliable + volatile + keep-last(1)、5 Hz 以上、1.0 s のリース)。
+
+| トピック | 発行元 | 中身 |
+|---|---|---|
+| `/motion_vote/referee` | operation_manager の `RefereeMonitor`(大会のみ) | GPIO27(AutoReferee AR_in、safe-high)。true = 動いてよい。未受信・`timeout_seconds` 途絶・false は不可。GPIO 更新ごと + 100 ms。撃破は試合の状態で、非常停止ではない |
+| `/actuation_authority` | Robot Manager(教材のみ) | 先生の許可(下の契約) |
+
+条件を足すときは、票を出すノードを書き、`operation_manager.permission.yaml` の `votes` と `required` に
+1 行ずつ足す。
 
 ## 型付きステータストピック契約
 

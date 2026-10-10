@@ -43,6 +43,12 @@
   <let name="operation_manager_config_file" value="$(find-pkg-share operation_manager)/config/operation_manager.practice.yaml" unless="$(var enable_autoreferee)"/>
   <let name="operation_manager_config_file" value="$(find-pkg-share operation_manager)/config/operation_manager.competition.yaml" if="$(var enable_autoreferee)"/>
   <let name="operation_manager_config_file" value="$(find-pkg-share operation_manager)/config/operation_manager.no_gpio.yaml" unless="$(var enable_gpio_ref)"/>
+  <!-- The running mode of the motion permission (L2, /motion_permission), from the arguments that
+       describe the configuration: competition with AutoReferee, lesson with the teacher's
+       permission, practice otherwise. The last let wins. -->
+  <let name="permission_mode" value="practice"/>
+  <let name="permission_mode" value="lesson" if="$(var require_teacher_permission)"/>
+  <let name="permission_mode" value="competition" if="$(var enable_autoreferee)"/>
   <!-- All child processes stay disabled while the invalid branch reports and exits. -->
   <group unless="$(and $(var enable_autoreferee) $(not $(var enable_gpio_ref)))">
     <include file="$(find-pkg-share questix_control_config)/launch/control_profile.launch.py" />
@@ -79,6 +85,13 @@
          actuating node and QUESTiX LAB stop while it is unheard, silent or active. -->
     <include file="$(find-pkg-share operation_manager)/launch/operation_manager.launch.xml">
       <arg name="config_file" value="$(var operation_manager_config_file)"/>
+    </include>
+    <!-- The motion permission (L2): MotionPermissionManager always (practice needs no vote but
+         still publishes), RefereeMonitor (GPIO27) in competition. Not read by any actuator yet:
+         the E-stop above still includes GPIO27 in competition. -->
+    <include file="$(find-pkg-share operation_manager)/launch/motion_permission.launch.xml">
+      <arg name="robot_mode" value="$(var permission_mode)"/>
+      <arg name="enable_referee" value="$(var enable_autoreferee)"/>
     </include>
     <!-- RViz Visualization -->
     <node pkg="rviz2" exec="rviz2" name="rviz2" output="screen" if="$(var enable_rviz)" args="-d $(find-pkg-share ydlidar_ros2_driver)/config/ydlidar.rviz">

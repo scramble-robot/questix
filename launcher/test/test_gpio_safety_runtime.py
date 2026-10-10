@@ -242,8 +242,10 @@ def test_core_launch_publishes_the_estop_and_passes_the_teacher_permission_switc
             probe.wait_for_nodes(GPIO_SAFETY_NODES, process)
         assert probe.read_emergency_stop() == expect_estop
         # Graph discovery is not instant: wait for the expected count (the opt-in), or watch for
-        # a while that none appears (disabled).
-        expected_subscriptions = len(ACTUATING_NODES) if expect_teacher_permission_required else 0
+        # a while that none appears (disabled). With the opt-in (lesson), MotionPermissionManager
+        # also listens: the teacher's heartbeat is that mode's vote for /motion_permission.
+        expected_subscriptions = (len(ACTUATING_NODES) + 1
+                                  if expect_teacher_permission_required else 0)
         if expect_teacher_permission_required:
             probe.spin_until(
                 lambda: probe.subscription_count('/actuation_authority') == (

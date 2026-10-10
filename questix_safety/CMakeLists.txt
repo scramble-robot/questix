@@ -8,7 +8,8 @@ endif()
 find_package(ament_cmake_auto REQUIRED)
 ament_auto_find_build_dependencies()
 
-# Header-only: include/questix_safety/{estop_check,emergency_stop_monitor}.hpp.
+# Header-only: include/questix_safety/{estop_check,emergency_stop_monitor}.hpp (L1, the E-stop),
+# {permission_check,permission_monitor,motion_permission_rule}.hpp (L2, the motion permission).
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
@@ -21,6 +22,9 @@ if(BUILD_TESTING)
   find_package(rclcpp_lifecycle REQUIRED)
   ament_auto_add_gtest(test_emergency_stop_monitor test/test_emergency_stop_monitor.cpp)
   ament_target_dependencies(test_emergency_stop_monitor rclcpp_lifecycle)
+  ament_auto_add_gtest(test_permission_check test/test_permission_check.cpp)
+  ament_auto_add_gtest(test_permission_monitor test/test_permission_monitor.cpp)
+  ament_target_dependencies(test_permission_monitor rclcpp_lifecycle)
 endif()
 
 ament_auto_package()

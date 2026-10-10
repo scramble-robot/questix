@@ -2,6 +2,11 @@
 Changelog for package operation_manager
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+* feat: add RefereeMonitor (GPIO27 as the referee's vote) and MotionPermissionManager (votes ->
+  /motion_permission for the running mode), separate components launched by questix_core
+
 3.2.0 (2026-09-07)
 ------------------
 * fix: integrate physical e-stop and competition auto-referee input (`#140 <https://github.com/scramble-robot/questix/issues/140>`_)
