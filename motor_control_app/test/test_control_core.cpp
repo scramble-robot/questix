@@ -19,6 +19,13 @@
 // （追従遅れ・低RPM域の減衰不足・量子化）だけを模したもので、ゲインや振動周波数の
 // 絶対値を実機と一致させる意図はない。実機検証（Raspberry Pi 5 + 実車）が
 // authoritative であることは変わらない。
+//
+// 注意（2026-10）: 「低RPM域の減衰不足」「不安定域（kUnstableBelowRpm）」「約 1.8 Hz」は
+// 2026-07 の記録（元のログが無い）に基づく仮定で、実機で確かめた性質ではない。このファイルの
+// 「不安定域」「84%」を含むテストは、その仮定の合成モデルを検査するだけで、実機の不安定域を
+// 示すものではない。yamlConfig() は #179 の修正より前の値（wheel_radius 0.1 m、
+// フルスティック 6.0 rad/s など）を使う回帰用のモデルで、現在の実機の動作点を保証しない
+// （車輪の RPM は修正の前後で同じ）。
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -59,7 +66,8 @@ core::Config yamlConfig() {
 
 constexpr double kControlDt = 0.02;  // control_rate 50 Hz
 // joy_controller の angular_input_ratio 6.0 / longitudinal_input_ratio 2.0 =
-// フルスティックの目標値
+// フルスティックの目標値（#179 の修正より前の値。修正後は 3.0 / 1.0 と wheel_radius 0.05 で、
+// 車輪の RPM は同じ）
 constexpr double kFullStickAngular = 6.0;  // [rad/s]
 constexpr double kFullStickLinear = 2.0;   // [m/s]
 
@@ -70,8 +78,10 @@ constexpr double kLinearQuantum = 0.0105;  // [m/s]
 
 // M0602C ファーム速度ループの簡易プラントモデル（1 車輪ぶん）。
 //  - 一次遅れ: 指令 RPM への追従遅れ
-//  - 低RPM域の減衰不足: |rpm| が kUnstableBelowRpm 未満のとき、実機ログで観測された振動
+//  - 低RPM域の減衰不足: |rpm| が kUnstableBelowRpm 未満のとき、以前の記録にある振動
 //    （目標 95 RPM 一定で実測 59〜118 RPM を約 1.8 Hz で往復）を模した正弦を重畳する
+//    （仮定値。元のログは無い。2026-10 の実機試験で確認できたのは床の上の約 1.5〜1.75 Hz の
+//    速度変動で、原因は未確定）
 //  - 量子化: フィードバックの実測 RPM は整数
 class FirmwarePlant {
 public:
@@ -184,8 +194,8 @@ TEST(ControlCoreSettling, FullStickTurnSettlesInAboutTwoSeconds) {
 }
 
 // max_angular_accel を上げれば旋回の追従は比例して速くなる（実機での主レバー）。
-// ただし低RPMファーム速度ループの励起とのトレードオフがあるため、実機で段階的に
-// 上げて振動が出ない上限を探す前提の数値（design §3.2）。
+// ただし低RPMファーム速度ループの励起とのトレードオフ（仮定。2026-10 時点で未確認）があるため、
+// 実機で段階的に上げて振動が出ない上限を探す前提の数値（design §3.2）。
 TEST(ControlCoreSettling, RaisingMaxAngularAccelSpeedsUpTurning) {
   auto faster = yamlConfig();
   faster.max_angular_accel = 6.0;
@@ -242,7 +252,8 @@ TEST(ControlCoreSettling, ForwardStepIsMonotonicWithoutOvershoot) {
 // --- 低速不感帯と停止ヒステリシス -------------------------------------------------------
 
 // min_command_rpm 未満に収まる微小な旋回指令は停止に丸められる
-// （低RPMのファーム速度ループ不安定域を指令しないため）。
+// （低RPMのファーム速度ループ不安定域を指令しないため。
+// その不安定域は 2026-10 時点で未確認の仮定）。
 TEST(ControlCoreDeadband, TinyTurnCommandStaysStopped) {
   core::ControlCore control(yamlConfig());
   // 車輪 RPM = angular * (separation/2) / (2π*radius) * 60 = angular * 23.87
@@ -344,12 +355,13 @@ TEST(ControlCoreClosedLoop, ResetRestartsRampFromZero) {
   EXPECT_LE(out.linear, 3.0 * kControlDt + 1e-9);
 }
 
-// design §3.2 / §3.3 の核心: 動作点がファーム速度ループの不安定域にある限り、
-// ホスト側の指令をどれだけ平滑化しても実測の振動は消えない。
-// ホスト指令が完全に一定（p-p 0 RPM）でも、プラントの実測は約 50 RPM p-p で振動する。
+// design §3.2 / §3.3 の旧仮説を合成モデルで表したもの: 動作点がプラントモデルの
+// 「不安定域」（仮定）にある限り、ホスト側の指令をどれだけ平滑化してもモデルの出力の振動は消えない。
+// ホスト指令が完全に一定（p-p 0 RPM）でも、プラントの出力は約 50 RPM p-p で振動する。
+// 実機の性質を確かめるテストではない（2026-10。上の注意を参照）。
 TEST(ControlCoreClosedLoop, ConstantHostCommandStillOscillatesInsideUnstableRegion) {
   core::ControlCore control(yamlConfig());
-  // 目標 4.0 rad/s -> 車輪 95 RPM = 実機ログの不安定動作点
+  // 目標 4.0 rad/s -> 車輪 95 RPM = 以前の記録の動作点（元のログは無い）
   constexpr double kUnstableTarget = 4.0;
   for (int i = 0; i < 400; ++i) {
     control.step(0.0, kUnstableTarget, kControlDt);
@@ -382,8 +394,9 @@ TEST(ControlCoreClosedLoop, ConstantHostCommandStillOscillatesInsideUnstableRegi
   EXPECT_GT(measured_max - measured_min, 40) << "プラントモデルが不安定域を模していない";
 }
 
-// フルスティック旋回の動作点（143 RPM）は不安定域の外に出る。旋回レンジ 0〜143 RPM の
-// 84% が不安定域（<120 RPM）に入るため、旋回の低〜中速が丸ごと問題領域になる。
+// フルスティック旋回の動作点（143 RPM）と、プラントモデルの仮定の上限（kUnstableBelowRpm =
+// 120 RPM）の比を固定する。120/143 ≈ 84% は仮定に基づく算術で、実機の不安定域の割合ではない
+// （2026-10。上の注意を参照）。
 // 動作点が変わったらこのテストで気づけるようにしておく（design §3.2）。
 TEST(ControlCoreOperatingPoint, TurnRangeMostlyOverlapsUnstableRegion) {
   core::ControlCore control(yamlConfig());
@@ -1067,11 +1080,12 @@ TEST(ControlCoreLqrPerWheel, LostFeedbackDropsBothWheelsAndRestartsFromTheMeasur
 
 // --- 共振モデル: ファーム速度ループを 2 次系で表す（V5 の根拠）----------------------------
 //
-// 実機ログの「目標一定でも約 1.8 Hz で往復する」揺れを、ファーム速度ループの閉ループが
-// 2 次の共振（固有周波数 ~1.8 Hz、減衰の悪い）を持つと仮定して表す。1 回転に 1 回の外乱
-// （回転周波数 = rpm / 60 で回転数に比例）を入れると、回転周波数が共振に近い回転数で揺れが
-// 最大になる。ここで固定するのは定性的な性質だけで、定数はすべて仮定値。車輪を浮かせた試験の
-// 同定（scripts/identify/ripple_analysis.py）で置き換えること。
+// 以前の記録の「目標一定でも約 1.8 Hz で往復する」揺れを、ファーム速度ループの閉ループが
+// 2 次の共振（固有周波数 ~1.8 Hz、減衰の悪い）を持つと仮定して表す（2026-10 の実機試験では、
+// 床の上で約 1.5〜1.75 Hz の速度変動を確認。原因がファーム速度ループかは未確定）。
+// 1 回転に 1 回の外乱（回転周波数 = rpm / 60 で回転数に比例）を入れると、回転周波数が
+// 共振に近い回転数で揺れが最大になる。ここで固定するのは定性的な性質だけで、定数はすべて
+// 仮定値。車輪を浮かせた試験の同定（scripts/identify/ripple_analysis.py）で置き換えること。
 
 namespace {
 

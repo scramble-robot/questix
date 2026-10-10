@@ -26,9 +26,9 @@ int16 velocity_rpm      # measured wheel speed [RPM] (DATA[4..5], signed).
                         # filter is disabled).
 int16 velocity_rpm_raw  # measured wheel speed [RPM], UNFILTERED wire value.
                         # Use this for system identification / oscillation
-                        # analysis: the filtered value understates ~1.8 Hz
-                        # firmware-loop oscillation by about half at the
-                        # default tau (0.15 s).
+                        # analysis: at the default tau (0.15 s) the filtered
+                        # value understates the ~1.5-1.75 Hz speed oscillation
+                        # seen on the floor (cause unconfirmed) by about half.
 int16 target_rpm        # last commanded target [RPM] (clamped to max_motor_rpm)
 uint16 position_raw     # rotor position (DATA[6..7]): 0..32767 <-> 0..360 deg
 uint8 temperature       # [deg C] CURRENTLY ALWAYS 0: requires DDT Protocol 2
