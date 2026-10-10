@@ -43,7 +43,7 @@ class DeploymentTest(unittest.TestCase):
             helper.write_text(helper.read_text().replace('.st_uid != 0', '.st_uid != '+str(os.getuid())))
             for folder in ('etc/questix_robot', 'etc/questix_pwm_guard', 'boot/firmware/overlays',
                            'var/backups', 'var/tmp', 'run'):
-                (root/folder).mkdir(parents=True, exist_ok=True)
+                (root/folder).mkdir(mode=0o755, parents=True, exist_ok=True)
             (root/'etc/questix_robot/mode').write_text('lesson')
             (root/'boot/firmware/config.txt').write_text('# preserved boot config\n')
             digest = seal.digest(source)
