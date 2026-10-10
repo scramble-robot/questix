@@ -16,6 +16,8 @@ int main(int argc, char* argv[]) {
 
   rclcpp::spin(node);
 
+  node->begin_shutdown();
+
   try {
     rclcpp::shutdown();
   } catch (...) {

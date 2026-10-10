@@ -43,12 +43,23 @@ public:
   /// Last backend API error (negative), or zero after success.
   virtual int last_error() const = 0;
 
+  // Optional guarded lifecycle. Legacy backends keep their existing cleanup policy.
+  virtual bool complete_arm() { return true; }
+  virtual bool graceful_shutdown() { return false; }
+  virtual bool terminal() const { return false; }
+  virtual std::string output_state() const { return "LEGACY"; }
+  virtual int applied_hint() const { return -1; }
+
   /// Release resources
   virtual void cleanup() = 0;
 
   /// Human-readable backend name
   virtual std::string name() const = 0;
 };
+
+}  // namespace esc_motor_control_cpp
+#include "esc_motor_control_cpp/rp1_hardware_backend.hpp"
+namespace esc_motor_control_cpp {
 
 // ---------------------------------------------------------------------------
 // pigpio backend
@@ -199,11 +210,16 @@ public:
 };
 
 /// Factory: try to create the requested backend.
-/// @param preferred  "auto", "pigpio", "lgpio", or "simulation"
+/// @param preferred  "auto", "pigpio", "lgpio", "rp1_hw", or "simulation"
 /// @param chip_num   GPIO chip number (lgpio only, typically 0 for Pi4, 4 for Pi5)
 /// @param out_name   filled with the name of the actually created backend
-inline std::unique_ptr<PwmBackend> make_pwm_backend(const std::string& preferred, int chip_num,
-                                                    std::string& out_name) {
+inline std::unique_ptr<PwmBackend> make_pwm_backend(
+    const std::string& preferred, int chip_num, std::string& out_name,
+    const std::string& rp1_socket = "/run/questix_pwm_guard/control.sock") {
+  if (preferred == "rp1_hw") {
+    out_name = "rp1_hw";
+    return std::make_unique<Rp1HardwareBackend>(rp1_socket);
+  }
   auto try_pigpio = [&]() -> std::unique_ptr<PwmBackend> {
 #ifdef HAVE_PIGPIO
     return std::make_unique<PigpioBackend>();
@@ -235,7 +251,7 @@ inline std::unique_ptr<PwmBackend> make_pwm_backend(const std::string& preferred
       return b;
     }
   } else if (preferred == "auto") {
-    // Try pigpio first (hardware PWM), fall back to lgpio
+    // Legacy servo implementations; neither selects RP1 kernel hardware PWM.
     if (auto b = try_pigpio()) {
       out_name = b->name();
       return b;

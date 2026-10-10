@@ -255,7 +255,7 @@ TEST(RollerStatusJson, FormatsAllFields) {
             "{\"command\": 0.500, \"source\": \"lab\", \"lab_accepted\": true, "
             "\"lab_locked\": false, \"estop\": false, \"authority\": true, "
             "\"lab_max_speed\": 0.800, \"pwm_fault\": false, \"applied_pulse_us\": -1, "
-            "\"pwm_backend\": \"none\"}");
+            "\"pwm_backend\": \"none\", \"pwm_output_state\": \"UNKNOWN\", \"pwm_error\": 0}");
 }
 
 TEST(RollerStatusJson, NonFiniteBecomesZero) {
