@@ -14,6 +14,10 @@ and /actuation_authority is subscribed only on the teacher's opt-in. Which argum
 which profile and switches (the whole matrix, the safety-only and environment variants and the
 invalid AutoReferee configuration) is resolved without ROS in
 test_gpio_safety_launch_expansion.py.
+
+The graph is read by an rclpy node inside this test process (parameter services, the node and
+subscription graph, the latched /emergency_stop), not by one ros2 CLI process per query: each
+CLI call starts Python and DDS discovery again, which made this test slow on CI runners.
 """
 
 import os
@@ -22,10 +26,16 @@ import subprocess
 import time
 
 import pytest
+from questix_msgs.msg import EmergencyStop
+from rcl_interfaces.msg import ParameterType
+from rcl_interfaces.srv import GetParameters
+import rclpy
+from rclpy.context import Context
+from rclpy.executors import SingleThreadedExecutor
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 
 
 STARTUP_TIMEOUT_SECONDS = 15.0
-COMMAND_TIMEOUT_SECONDS = 5.0
 # Domains 1-101 only: from 102 on, the DDS discovery ports (7400 + 250 * domain) fall into the
 # Linux ephemeral range (32768-60999), where another process's socket can hold them and the
 # launch is never discovered (cf. scripts/robot_manager/ros_domain.py). 0 is the default of the
@@ -41,19 +51,6 @@ def isolated_ros_environment(offset):
     environment['ROS_AUTOMATIC_DISCOVERY_RANGE'] = 'LOCALHOST'
     environment.pop('ROS_LOCALHOST_ONLY', None)
     return environment
-
-
-def run_command(command, environment, timeout=COMMAND_TIMEOUT_SECONDS):
-    """Run a ROS command and capture text output."""
-    return subprocess.run(
-        command,
-        env=environment,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        timeout=timeout,
-        check=False,
-    )
 
 
 def start_process(command, environment):
@@ -84,78 +81,105 @@ def stop_process(process):
     return output
 
 
-def wait_for_parameter(node_name, parameter_name, environment):
-    """Wait until a node is alive and returns a parameter value."""
-    deadline = time.monotonic() + STARTUP_TIMEOUT_SECONDS
-    last_result = None
-    while time.monotonic() < deadline:
+class GraphProbe:
+    """An rclpy node in the test's ROS domain that reads what the launched nodes expose."""
+
+    def __init__(self, environment):
+        # The discovery range is read from the process environment when the context starts.
+        previous_range = os.environ.get('ROS_AUTOMATIC_DISCOVERY_RANGE')
+        os.environ['ROS_AUTOMATIC_DISCOVERY_RANGE'] = environment['ROS_AUTOMATIC_DISCOVERY_RANGE']
         try:
-            last_result = run_command(
-                ['ros2', 'param', 'get', node_name, parameter_name], environment)
-        except subprocess.TimeoutExpired:
-            continue  # a loaded machine (parallel colcon test): retry until the deadline
-        if last_result.returncode == 0:
-            value_lines = [
-                line for line in last_result.stdout.splitlines()
-                if 'values are:' in line or 'value is:' in line
-            ]
-            assert value_lines, last_result.stdout
-            return value_lines[-1]
-        time.sleep(0.2)
-    output = last_result.stdout if last_result is not None else 'command not run'
-    pytest.fail(f'{node_name} did not provide {parameter_name}: {output}')
+            self.context = Context()
+            rclpy.init(context=self.context, domain_id=int(environment['ROS_DOMAIN_ID']))
+        finally:
+            if previous_range is None:
+                os.environ.pop('ROS_AUTOMATIC_DISCOVERY_RANGE', None)
+            else:
+                os.environ['ROS_AUTOMATIC_DISCOVERY_RANGE'] = previous_range
+        self.node = rclpy.create_node('gpio_safety_runtime_probe', context=self.context)
+        self.executor = SingleThreadedExecutor(context=self.context)
+        self.executor.add_node(self.node)
+        self.estop = None
+        self.node.create_subscription(
+            EmergencyStop, '/emergency_stop', self._receive_estop,
+            QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                       durability=DurabilityPolicy.TRANSIENT_LOCAL))
 
+    def _receive_estop(self, message):
+        if self.estop is None:  # the first (latched) one, as ros2 topic echo --once read it
+            self.estop = (message.active, message.reason)
 
-def wait_for_nodes(node_names, process, environment):
-    """Wait until the graph shows every node (discovery is not instant) while the launch runs."""
-    observed_nodes = set()
-    deadline = time.monotonic() + STARTUP_TIMEOUT_SECONDS
-    while time.monotonic() < deadline:
-        assert process.poll() is None, 'questix_core exited during startup'
-        result = run_command(['ros2', 'node', 'list', '--no-daemon'], environment)
-        if result.returncode == 0:
-            observed_nodes = set(result.stdout.splitlines())
-            if set(node_names) <= observed_nodes:
+    def spin_until(self, condition, timeout):
+        """Spin until condition() holds or the timeout passes; return condition()."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if condition():
                 return True
-        time.sleep(0.2)
-    pytest.fail(f'{sorted(set(node_names) - observed_nodes)} not in the graph: '
-                f'{sorted(observed_nodes)}')
+            self.executor.spin_once(timeout_sec=0.05)
+        return condition()
 
+    def node_names(self):
+        """Return the fully qualified node names the graph shows."""
+        return {
+            (namespace.rstrip('/') + '/' + name)
+            for name, namespace in self.node.get_node_names_and_namespaces()
+        }
 
-def topic_subscription_count(topic, environment):
-    """Return how many subscriptions the graph shows for a topic (0 when it does not exist)."""
-    result = run_command(['ros2', 'topic', 'info', topic, '--no-daemon'], environment)
-    for line in result.stdout.splitlines():
-        if line.startswith('Subscription count:'):
-            return int(line.split(':', 1)[1])
-    return 0
+    def wait_for_nodes(self, node_names, process):
+        """Wait until the graph shows every node (discovery is not instant) while it runs."""
+        expected = set(node_names)
+
+        def present():
+            assert process.poll() is None, 'questix_core exited during startup'
+            return expected <= self.node_names()
+
+        if not self.spin_until(present, STARTUP_TIMEOUT_SECONDS):
+            pytest.fail(f'{sorted(expected - self.node_names())} not in the graph: '
+                        f'{sorted(self.node_names())}')
+
+    def parameters(self, node_name, names):
+        """Wait until a node answers and return {name: (ParameterType, value)}."""
+        client = self.node.create_client(GetParameters, f'{node_name}/get_parameters')
+        try:
+            if not self.spin_until(client.service_is_ready, STARTUP_TIMEOUT_SECONDS):
+                pytest.fail(f'{node_name} did not provide {names}')
+            future = client.call_async(GetParameters.Request(names=list(names)))
+            if not self.spin_until(future.done, STARTUP_TIMEOUT_SECONDS):
+                pytest.fail(f'{node_name} did not answer for {names}')
+        finally:
+            self.node.destroy_client(client)
+        values = {}
+        for name, value in zip(names, future.result().values):
+            if value.type == ParameterType.PARAMETER_BOOL:
+                values[name] = (value.type, value.bool_value)
+            elif value.type == ParameterType.PARAMETER_INTEGER_ARRAY:
+                values[name] = (value.type, list(value.integer_array_value))
+            else:
+                values[name] = (value.type, None)
+        return values
+
+    def read_emergency_stop(self):
+        """Return (active, reason) of the latched /emergency_stop, or None if it never came."""
+        self.spin_until(lambda: self.estop is not None, STARTUP_TIMEOUT_SECONDS)
+        return self.estop
+
+    def subscription_count(self, topic):
+        """Return how many subscriptions the graph shows for a topic."""
+        self.executor.spin_once(timeout_sec=0.0)
+        return self.node.count_subscribers(topic)
+
+    def close(self):
+        """Destroy the probe node and its context."""
+        self.executor.shutdown()
+        self.node.destroy_node()
+        rclpy.shutdown(context=self.context)
 
 
 ACTUATING_NODES = ('/drive_component', '/shot_component', '/esc_motor_control')
 GPIO_SAFETY_NODES = ('/gpio_reader_node', '/operation_manager_node')
 NO_GPIO_REASON = 'released (no GPIO safety path)'
-
-
-def read_emergency_stop(environment):
-    """Return (active, reason) of the latched /emergency_stop, or None if it never came."""
-    deadline = time.monotonic() + STARTUP_TIMEOUT_SECONDS
-    while time.monotonic() < deadline:
-        try:
-            result = run_command(
-                ['ros2', 'topic', 'echo', '--once', '--qos-reliability', 'reliable',
-                 '--qos-durability', 'transient_local', '/emergency_stop',
-                 'questix_msgs/msg/EmergencyStop'],
-                environment, timeout=COMMAND_TIMEOUT_SECONDS + 5.0)
-        except subprocess.TimeoutExpired:
-            continue
-        fields = {}
-        for line in result.stdout.splitlines():
-            key, _, value = line.partition(':')
-            fields[key.strip()] = value.strip().strip("'")
-        if 'active' in fields:
-            return fields['active'] == 'true', fields.get('reason', '')
-        time.sleep(0.2)
-    return None
+BOOL = ParameterType.PARAMETER_BOOL
+INTEGER_ARRAY = ParameterType.PARAMETER_INTEGER_ARRAY
 
 
 @pytest.mark.parametrize(
@@ -170,13 +194,11 @@ def read_emergency_stop(environment):
          (False, NO_GPIO_REASON), True, None),
         # Practice with the GPIO safety path but no GPIO hardware here: GPIO5 is never received,
         # so operation_manager reports the E-stop as active.
-        (['enable_gpio_ref:=true'], (True, 'pin 5 not received; '), False,
-         ('Integer values are: [5]', 'Integer values are: []')),
+        (['enable_gpio_ref:=true'], (True, 'pin 5 not received; '), False, ([5], [])),
         # Competition never depends on the classroom heartbeat, even when asked to.
         (['enable_gpio_ref:=true', 'enable_autoreferee:=true',
           'require_teacher_permission:=true'],
-         (True, 'pin 5 not received; pin 27 not received; '), False,
-         ('Integer values are: [5]', 'Integer values are: [27]')),
+         (True, 'pin 5 not received; pin 27 not received; '), False, ([5], [27])),
     ],
 )
 def test_core_launch_publishes_the_estop_and_passes_the_teacher_permission_switch(
@@ -196,45 +218,42 @@ def test_core_launch_publishes_the_estop_and_passes_the_teacher_permission_switc
                  'enable_rviz:=false', 'controller_type:=dualshock']
     if not any(argument.startswith('enable_autoreferee:=') for argument in launch_arguments):
         arguments.append('enable_autoreferee:=false')
+    probe = GraphProbe(environment)
     process = start_process(
         ['ros2', 'launch', 'questix_launcher', 'questix_core.launch.xml',
          *arguments, *launch_arguments],
         environment,
     )
-    expected_teacher_permission = f'Boolean value is: {expect_teacher_permission_required}'
     try:
         for node in ACTUATING_NODES:
-            assert wait_for_parameter(node, 'require_emergency_stop', environment) == (
-                'Boolean value is: True'), node
-            assert wait_for_parameter(
-                node, 'require_teacher_permission', environment) == (
-                expected_teacher_permission), node
+            assert probe.parameters(
+                node, ('require_emergency_stop', 'require_teacher_permission')) == {
+                'require_emergency_stop': (BOOL, True),
+                'require_teacher_permission': (BOOL, expect_teacher_permission_required),
+            }, node
         if expect_safe_pins is not None:
-            safe_low = wait_for_parameter(
-                '/operation_manager_node', 'safe_low_pins', environment)
-            safe_high = wait_for_parameter(
-                '/operation_manager_node', 'safe_high_pins', environment)
-            assert (safe_low, safe_high) == expect_safe_pins
-            assert wait_for_parameter(
-                '/operation_manager_node', 'gpio_safety_enabled', environment) == (
-                'Boolean value is: True')
-            assert wait_for_nodes(GPIO_SAFETY_NODES, process, environment)
-        assert read_emergency_stop(environment) == expect_estop
+            assert probe.parameters(
+                '/operation_manager_node',
+                ('safe_low_pins', 'safe_high_pins', 'gpio_safety_enabled')) == {
+                'safe_low_pins': (INTEGER_ARRAY, expect_safe_pins[0]),
+                'safe_high_pins': (INTEGER_ARRAY, expect_safe_pins[1]),
+                'gpio_safety_enabled': (BOOL, True),
+            }
+            probe.wait_for_nodes(GPIO_SAFETY_NODES, process)
+        assert probe.read_emergency_stop() == expect_estop
         # Graph discovery is not instant: wait for the expected count (the opt-in), or watch for
         # a while that none appears (disabled).
         expected_subscriptions = len(ACTUATING_NODES) if expect_teacher_permission_required else 0
-        deadline = time.monotonic() + 15.0
-        subscriptions = topic_subscription_count('/actuation_authority', environment)
-        while time.monotonic() < deadline:
-            if expect_teacher_permission_required and subscriptions == expected_subscriptions:
-                break
-            if not expect_teacher_permission_required and subscriptions != 0:
-                break
-            time.sleep(0.2)
-            subscriptions = topic_subscription_count('/actuation_authority', environment)
-        assert subscriptions == expected_subscriptions
+        if expect_teacher_permission_required:
+            probe.spin_until(
+                lambda: probe.subscription_count('/actuation_authority') == (
+                    expected_subscriptions), 15.0)
+        else:
+            probe.spin_until(lambda: probe.subscription_count('/actuation_authority') != 0, 15.0)
+        assert probe.subscription_count('/actuation_authority') == expected_subscriptions
         assert process.poll() is None, 'questix_core exited during the checks'
     finally:
         output = stop_process(process)
+        probe.close()
     assert 'InvalidParameterValueException' not in output
     assert 'parameter_value_from failed' not in output

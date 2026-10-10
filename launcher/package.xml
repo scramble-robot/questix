@@ -41,10 +41,9 @@
     <test_depend>ament_cmake_pytest</test_depend>
     <test_depend>python3-yaml</test_depend>
     <test_depend>ros2launch</test_depend>
-    <test_depend>ros2node</test_depend>
-    <test_depend>ros2param</test_depend>
-    <test_depend>ros2pkg</test_depend>
-    <test_depend>ros2run</test_depend>
+    <test_depend>questix_msgs</test_depend>
+    <test_depend>rcl_interfaces</test_depend>
+    <test_depend>rclpy</test_depend>
 
     <exec_depend>questix_control_config</exec_depend>
 
