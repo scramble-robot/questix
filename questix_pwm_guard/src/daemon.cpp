@@ -251,7 +251,9 @@ int run(int argc, char** argv) {
             else if (r.op == "STOP")
               ok = core.stop(r.session, r.seq, t);
           }
-          error = ok ? 0 : (core.error() ? core.error() : -EPERM);
+          // A successful STATUS/STOP does not clear the latched output fault.
+          error = core.fault_error() ? core.fault_error()
+                                     : (ok ? 0 : (core.error() ? core.error() : -EPERM));
         }
         std::string reply = "1 " + std::to_string(ok ? 1 : 0) + " " + q::state_name(core.state()) +
                             " " + std::to_string(core.applied()) + " " +

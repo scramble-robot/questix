@@ -1,5 +1,5 @@
 """Real subprocess/socket fault tests with a compile-time fake Output, never sysfs/GPIO."""
-import os, signal, socket, subprocess, sys, tempfile, time
+import errno, os, signal, socket, subprocess, sys, tempfile, time
 from pathlib import Path
 server = sys.argv[1]
 def connect(path):
@@ -38,6 +38,9 @@ with tempfile.TemporaryDirectory(prefix='questix-ipc-') as directory:
         # Lease expiry, with the client socket still open, stops the output.
         c,s=authorize_and_arm(a);assert call(c,'COMMAND',s,2,1800)[1]=='1'
         time.sleep(1.1);r=call(c,'COMMAND',s,3,1000);assert r[1]=='0' and r[2]=='FAULT_LOW' and r[3]=='0'
+        # Successful diagnostic/stop RPCs must retain the original lease fault cause.
+        r=call(c,'STATUS');assert r[1]=='1' and int(r[5])==-errno.ETIMEDOUT
+        r=call(c,'STOP',s,4);assert r[1]=='1' and r[2]=='FAULT_LOW' and int(r[5])==-errno.ETIMEDOUT
         c.close();time.sleep(.03)
         # Real owner process SIGKILL and SIGSTOP, not just voluntary socket close.
         owner_code = """import socket,sys,signal
