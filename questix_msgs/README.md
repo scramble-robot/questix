@@ -27,6 +27,34 @@ QUESTiX 共通メッセージ定義パッケージ。統一緊急停止インタ
 | `mode` | `string` | 実行中のモード(`lesson` / `practice` / `competition`、表示用) |
 | `drive_blockers` / `launcher_blockers` | `string[]` | 許可しない理由(例: `referee:off`、`teacher:stale`、`teacher:unknown`)。許可なら空(表示用。アクチュエータは bool だけを見る) |
 
+### `LauncherCommand.msg`
+
+発射機構(ローラー・チルト・射撃)への指令。走行の `geometry_msgs/Twist`(`/target_twist`)に対応する
+発射側の型(入力の選択、L3)。`/launcher_command`(機構が従う)と、入力ごとの `/launcher_command/joy`・
+`/launcher_command/lab`。esc_motor_control は `roller_power`、shot_component は `tilt_deg`・`tilt_steps`・
+`fire_seq` だけを使い、どちらも `/emergency_stop` と `/motion_permission` には従ったまま。
+
+| フィールド | 型 | 意味 |
+|---|---|---|
+| `header` | `std_msgs/Header` | `stamp` = 送信時刻(情報のみ) |
+| `roller_power` | `float32` | ローラー出力 0..1(0 = 止める)。送られている間だけ回る(途切れたら止まる) |
+| `tilt_deg` | `float32` | チルトの目標角 [deg](教材)。NaN = 目標なし |
+| `tilt_steps` | `int32` | チルトの段数の累計(コントローラー: 上 +1・下 -1)。変化した分だけ動かす |
+| `fire_seq` | `uint32` | 射撃要求の累計。増えたら 1 発(1 メッセージで最大 1 発) |
+| `source` | `string` | `"joy"` / `"lab"` |
+
+射撃・チルトは「パルス」ではなく累計と目標なので、keep-last(1) で落ちても重複しても数が変わらない。
+送信元が変わったとき・指令が途切れた後の最初のメッセージは基準になるだけで、何も動かさない。
+
+### `ArbiterStatus.msg`
+
+command_arbiter(教材モードのみ)が機構ごとに出す選択の結果(`/command_arbiter/status`、5 Hz と変化時)。
+`mechanism`(`drive` / `launcher`)、`active_source`(`joy` / `lab`)、`switch_reason`、`lab_permitted`
+(先生の教材の許可 `/lab_permission`)、`lab_locked`(コントローラーが割り込んだ)、`lab_refusal`(教材の
+指令を断った理由。空なら受付中)、`lab_count`(受け取った教材の指令の数。ブリッジが自分の走行と
+対応付けるため)と、適用中の教材の制限(走行: `max_linear`・`max_angular`、発射: `max_power`・
+`tilt_min_deg`・`tilt_max_deg`・射撃の前提と間隔)。非常停止と走行許可は見ない(アクチュエータの仕事)。
+
 ### `MotorFeedback.msg`
 
 DDT M0602C の Protocol 1 応答フレームをデコードした 1 モータ分のフィードバック。
