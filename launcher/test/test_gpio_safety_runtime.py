@@ -106,6 +106,22 @@ def wait_for_parameter(node_name, parameter_name, environment):
     pytest.fail(f'{node_name} did not provide {parameter_name}: {output}')
 
 
+def wait_for_nodes(node_names, process, environment):
+    """Wait until the graph shows every node (discovery is not instant) while the launch runs."""
+    observed_nodes = set()
+    deadline = time.monotonic() + STARTUP_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        assert process.poll() is None, 'questix_core exited during startup'
+        result = run_command(['ros2', 'node', 'list', '--no-daemon'], environment)
+        if result.returncode == 0:
+            observed_nodes = set(result.stdout.splitlines())
+            if set(node_names) <= observed_nodes:
+                return True
+        time.sleep(0.2)
+    pytest.fail(f'{sorted(set(node_names) - observed_nodes)} not in the graph: '
+                f'{sorted(observed_nodes)}')
+
+
 def topic_subscription_count(topic, environment):
     """Return how many subscriptions the graph shows for a topic (0 when it does not exist)."""
     result = run_command(['ros2', 'topic', 'info', topic, '--no-daemon'], environment)
@@ -202,8 +218,7 @@ def test_core_launch_publishes_the_estop_and_passes_the_teacher_permission_switc
             assert wait_for_parameter(
                 '/operation_manager_node', 'gpio_safety_enabled', environment) == (
                 'Boolean value is: True')
-            result = run_command(['ros2', 'node', 'list', '--no-daemon'], environment)
-            assert set(GPIO_SAFETY_NODES) <= set(result.stdout.splitlines()), result.stdout
+            assert wait_for_nodes(GPIO_SAFETY_NODES, process, environment)
         assert read_emergency_stop(environment) == expect_estop
         # Graph discovery is not instant: wait for the expected count (the opt-in), or watch for
         # a while that none appears (disabled).
