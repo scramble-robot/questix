@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Root ExecStartPre: authorize one ARM only for an existing manual practice/lesson request.
+
 No shell execution, no file creation, no E-stop bypass. Launcher consumes the same request.
 """
 import subprocess, sys, time
