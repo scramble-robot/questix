@@ -21,6 +21,7 @@ ELFS = ('questix_pwm_guard/lib/questix_pwm_guard/questix_pwm_guard',
         'questix_pwm_guard/lib/questix_pwm_guard/questix_pwm_ctl',
         'esc_motor_control_cpp/lib/esc_motor_control_cpp/esc_motor_control_node',
         'esc_motor_control_cpp/lib/libesc_motor_control_component.so')
+PROGRAMS = ELFS[:3]
 REQUIRED = ELFS + ('setup.bash', 'local_setup.bash',
                   'questix_launcher/share/questix_launcher/launch/questix_core.launch.xml',
                   'esc_motor_control_cpp/share/esc_motor_control_cpp/config/esc_motor_control_cpp.yaml')
@@ -35,11 +36,20 @@ def source_files(root):
     files = []
     for package in PACKAGES:
         folder = root / package
-        if not folder.is_dir():
-            raise ValueError(f'missing source package: {package}')
-        files.extend(p for p in folder.rglob('*') if p.is_file()
-                     and '__pycache__' not in p.parts and p.suffix != '.pyc')
-    files.append(root / 'systemd/questix_robot_launcher.sh')
+        if not stat.S_ISDIR(folder.lstat().st_mode):
+            raise ValueError(f'missing or aliased source package: {package}')
+        for path in folder.rglob('*'):
+            mode = path.lstat().st_mode
+            if stat.S_ISDIR(mode):
+                continue
+            if not stat.S_ISREG(mode):
+                raise ValueError(f'nonregular reviewed source: {path}')
+            if '__pycache__' not in path.relative_to(root).parts and path.suffix != '.pyc':
+                files.append(path)
+    launcher = root / 'systemd/questix_robot_launcher.sh'
+    if not stat.S_ISREG(launcher.lstat().st_mode):
+        raise ValueError('nonregular reviewed launcher')
+    files.append(launcher)
     return sorted(files)
 
 
@@ -103,6 +113,11 @@ def validate_layout(data):
                 raise ValueError('missing runtime parent directory')
     if files != set(data['install_files']):
         raise ValueError('runtime layout and file inventory differ')
+    # Root-owned programs must remain executable by the non-root robot account.
+    # Shared libraries and sourced setup files do not require execute permission.
+    for name in PROGRAMS:
+        if layout.get(name) != {'kind': 'file', 'mode': 0o755}:
+            raise ValueError(f'reviewed executable must have mode 0755: {name}')
 
 
 def protected_path(path):

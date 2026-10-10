@@ -270,3 +270,19 @@ Do not stop guard, unexport, remove the drop-in, or fallback to the editable wor
 as an automatic consequence of approval loss. Existing runtime release/backup evidence
 must be retained. Restoring matching approval is an explicit administrator decision.
 The old SD at27467b1 has not received these changes and no physical tests are implied.
+
+
+Source receipt verification independently enumerates exactly the six source package
+folders (`launcher` is the source name) and `systemd/questix_robot_launcher.sh`, then
+requires exact equality with receipt keys before executing any source helper. Entries
+inside `__pycache__` and files ending `.pyc` are the fixed generated-cache exclusions;
+links/special entries and unsafe source paths are rejected. Installer and rollback use
+the same rule. A receipt covering only mandatory scripts, missing files, stale entries
+or additional unapproved files is refused.
+
+The three required ELF programs (guard, CLI and ESC node) must have approved public
+mode0755; verify/seal/freeze reject0644 or owner-only execute modes even when their
+bytes and manifest hashes agree. The shared component library and sourced setup files
+remain valid0644. Normalized public reading, student login/actions and schema3 stay
+unchanged. Fresh source identity requires a new reviewed ARM64 build and approval;
+this software change does not deploy or operate the robot.

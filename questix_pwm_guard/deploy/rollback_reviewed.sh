@@ -30,6 +30,29 @@ data=json.loads(receipt.read_text())
 if data.get('schema') != 1 or data.get('contract') != 'rp1-installer-source-v1':
     raise SystemExit('unsupported installer source approval')
 files=data['source_files']
+# Bootstrap independently: do not execute a helper to learn what must be approved.
+packages=('questix_msgs','questix_control_config','questix_safety',
+          'questix_pwm_guard','esc_motor_control_cpp','launcher')
+actual=set()
+for package in packages:
+    folder=root/package
+    protected(folder)
+    if not folder.is_dir():
+        raise SystemExit('missing reviewed source package: '+package)
+    for path in folder.rglob('*'):
+        protected(path)
+        if path.is_dir():
+            continue
+        relative=path.relative_to(root)
+        if '__pycache__' not in relative.parts and path.suffix != '.pyc':
+            actual.add(str(relative))
+launcher=root/'systemd/questix_robot_launcher.sh'
+protected(launcher)
+if not launcher.is_file():
+    raise SystemExit('missing reviewed launcher')
+actual.add(str(launcher.relative_to(root)))
+if set(files) != actual:
+    raise SystemExit('installer source approval inventory mismatch')
 records=''.join(f'{name}:{digest}\n' for name,digest in sorted(files.items()))
 if hashlib.sha256(records.encode()).hexdigest()!=data['source_digest']:
     raise SystemExit('installer source approval table mismatch')

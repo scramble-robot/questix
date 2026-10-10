@@ -20,6 +20,7 @@ class ReviewManifestTest(unittest.TestCase):
                 file = prefix / name
                 file.parent.mkdir(parents=True, exist_ok=True)
                 file.write_bytes(b'\x7fELF\x02\x01' + b'\x00' * 12 + b'\xb7\x00' + marker)
+                file.chmod(0o755 if name in manifest.PROGRAMS else 0o644)
             for package in manifest.PACKAGES[:-1] + ('questix_launcher',):
                 file = prefix / package / 'share' / package / 'package.xml'
                 file.parent.mkdir(parents=True, exist_ok=True)

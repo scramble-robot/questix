@@ -35,6 +35,7 @@ class FrozenRuntimeTest(unittest.TestCase):
             file = self.source / relative
             file.parent.mkdir(parents=True, exist_ok=True)
             file.write_bytes(b'\x7fELF\x02\x01' + b'\x00'*12 + b'\xb7\x00' + marker)
+            file.chmod(0o755 if relative in seal.PROGRAMS else 0o644)
         for package in seal.PACKAGES[:-1] + ('questix_launcher',):
             file = self.source / package / 'share' / package / 'package.xml'
             file.parent.mkdir(parents=True, exist_ok=True)
@@ -92,6 +93,47 @@ class FrozenRuntimeTest(unittest.TestCase):
         # Hardlinking to mutable originals would fail this independent-inode check.
         self.assertNotEqual((prefix / seal.ELFS[2]).stat().st_ino,
                             (self.source / seal.ELFS[2]).stat().st_ino)
+
+    def test_required_programs_must_be_executable_by_robot(self):
+        for name in seal.PROGRAMS:
+            file=self.source/name
+            for mode in (0o644,0o744,0o754,0o745):
+                with self.subTest(program=name,mode=oct(mode)):
+                    file.chmod(mode)
+                    data=dict(self.data,install_layout=seal.install_layout(self.source))
+                    self.manifest.write_text(json.dumps(data))
+                    with self.assertRaisesRegex(ValueError,'mode 0755'):
+                        seal.verify(data,arm64=True)
+                    with self.assertRaisesRegex(ValueError,'mode 0755'):
+                        self.freeze()
+                    self.assertFalse((self.base/'staged').exists())
+            file.chmod(0o755)
+        self.manifest.write_text(json.dumps(self.data))
+        # Shared libraries and sourced setup remain public-readable without execute bits.
+        for name in (seal.ELFS[3],'setup.bash','local_setup.bash'):
+            self.assertEqual((self.source/name).stat().st_mode & 0o777,0o644)
+        published=seal.publish(self.freeze())
+        self.assertEqual(seal.verify(published,arm64=True,require_frozen=True),Path(published['prefix']))
+
+    def test_seal_cli_rejects_approved_nonexecutable_program(self):
+        repo=Path(__file__).parents[2]
+        digest=seal.digest(repo)
+        for name in seal.ELFS:
+            (self.source/name).write_bytes(b'\x7fELF\x02\x01'+b'\x00'*12+b'\xb7\x00'
+                +('QUESTIX_RP1_REVIEW_V2:'+digest).encode())
+        output=self.base/'sealed.json'
+        for mode in (0o644,0o744,0o755):
+            (self.source/seal.PROGRAMS[2]).chmod(mode)
+            run=subprocess.run(['/usr/bin/python3','-I',str(repo/'questix_pwm_guard/deploy/review_manifest.py'),
+                'seal',str(repo),str(self.source),str(output)],capture_output=True,text=True,timeout=20)
+            if mode==0o755:
+                self.assertEqual(run.returncode,0,run.stderr)
+                data=json.loads(output.read_text())
+                self.assertEqual(seal.verify(data,arm64=True),self.source)
+            else:
+                self.assertNotEqual(run.returncode,0)
+                self.assertIn('mode 0755',run.stderr)
+                self.assertFalse(output.exists())
 
     def test_cli_prefix_mismatch_rejected_without_creating_runtime(self):
         other = self.base / 'other'

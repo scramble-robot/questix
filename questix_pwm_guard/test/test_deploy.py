@@ -83,6 +83,9 @@ class DeploymentTest(unittest.TestCase):
                 file = prefix/relative
                 file.parent.mkdir(parents=True, exist_ok=True)
                 file.write_bytes(b'\x7fELF\x02\x01'+b'\x00'*12+b'\xb7\x00'+marker)
+                file.chmod(0o755 if relative in seal.PROGRAMS else 0o644)
+            if failure == 'nonexec':
+                (prefix/seal.PROGRAMS[2]).chmod(0o644)
             (prefix/seal.REQUIRED[-1]).write_text('pwm_backend: "auto"\n')
             for package in seal.PACKAGES[:-1]+('questix_launcher',):
                 file = prefix/package/'share'/package/'package.xml'
@@ -168,6 +171,8 @@ class DeploymentTest(unittest.TestCase):
                 self.assertIn('staged asset differs', result.stderr)
             elif failure == 'prefix':
                 self.assertIn('installer prefix differs', result.stderr)
+            elif failure == 'nonexec':
+                self.assertIn('mode 0755', result.stderr)
             else:
                 self.assertEqual(result.returncode, 42, result.stderr)
             self.assertEqual((root/'boot/firmware/config.txt').read_text(), '# preserved boot config\n')
@@ -175,6 +180,9 @@ class DeploymentTest(unittest.TestCase):
             self.assertFalse((root/'etc/systemd/system/questix_pwm_guard.service').exists())
             self.assertFalse((root/'etc/questix_pwm_guard/deployment-state').exists())
             self.assertFalse(list((root/'var/backups').iterdir()))
+
+    def test_approved_nonexecutable_node_is_rejected_before_asset_changes(self):
+        self.exercise('nonexec')
 
     def test_dt_compile_failure_does_not_modify_installed_assets(self):
         self.exercise('dtc')
