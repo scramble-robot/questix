@@ -581,3 +581,16 @@ def test_emergency_stop_is_always_published_and_always_required():
             'operation_manager_node']['ros__parameters']
         assert parameters.get('gpio_safety_enabled', True) is True, profile
         assert parameters['emergency_stop_topic'] == '/emergency_stop', profile
+
+
+def test_reviewed_esc_config_is_forwarded_to_the_shot_launch():
+    core = load_xml('launcher/launch/questix_core.launch.xml')
+    arg = find_arg(core, 'esc_config_file')
+    assert arg.get('default') == (
+        '$(env QUESTIX_ESC_CONFIG_FILE '
+        '$(find-pkg-share esc_motor_control_cpp)/config/esc_motor_control_cpp.yaml)')
+    shot = next(include for include in core.findall('.//include')
+                if include.get('file', '').endswith('/launch/shot_component.launch.xml'))
+    forwarded = next(arg for arg in shot.findall('./arg')
+                     if arg.get('name') == 'esc_config_file')
+    assert forwarded.get('value') == '$(var esc_config_file)'

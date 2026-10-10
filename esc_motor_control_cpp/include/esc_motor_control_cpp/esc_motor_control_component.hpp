@@ -35,10 +35,13 @@ class EscMotorControlComponent : public rclcpp::Node {
 public:
   explicit EscMotorControlComponent(const rclcpp::NodeOptions& options);
   ~EscMotorControlComponent() override;
+  void begin_shutdown();
 
 private:
+  friend struct EscLeaseTestAccess;
   // ---------- Initialisation ----------
   void initialize_esc();
+  void renew_pwm_lease();
 
   // ---------- Callbacks ----------
   void joy_callback(const sensor_msgs::msg::Joy::SharedPtr msg);
@@ -81,7 +84,9 @@ private:
   int max_pulse_width_us_;
   int neutral_pulse_width_us_;
   std::string pwm_backend_name_;  // "auto", "pigpio", "lgpio", "simulation"
-  int gpio_chip_num_;             // lgpio chip number
+  std::string rp1_guard_socket_;
+  bool stopping_{false};
+  int gpio_chip_num_;  // lgpio chip number
   // QUESTiX LAB: accept /roller/lab (practice launches only; see roller_lab_logic.hpp)
   bool accept_lab_input_{false};
   std::string lab_topic_;
@@ -121,6 +126,7 @@ private:
   rclcpp::TimerBase::SharedPtr lab_timer_;
   rclcpp::TimerBase::SharedPtr status_timer_;
   rclcpp::TimerBase::SharedPtr safety_timer_;
+  rclcpp::TimerBase::SharedPtr pwm_lease_timer_;
 };
 
 }  // namespace esc_motor_control_cpp

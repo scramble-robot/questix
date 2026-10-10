@@ -127,6 +127,11 @@ while any page drives.
 
 ## Launcher experiments
 
+The roller PWM diagnostics report requested/API-accepted values, not measured voltage,
+physical pulse width or motor rotation. `pwm_output_state` is the backend/guard state;
+`pwm_error` is its last error code. A terminal Low or fault requires a new authorized
+session for the opt-in RP1 backend. These fields do not grant launcher permission.
+
 Lessons can also spin the disc launcher's roller, tilt it and fire one disc. The bridge publishes
 the launcher nodes' lab inputs, and the nodes decide themselves whether to apply them
 (`accept_lab_input`, set only by practice launches; E-stop; the controller's quiet time; their own
@@ -137,7 +142,7 @@ clamps and fire interval) and report it in their status:
 | `/roller/lab` | `std_msgs/Float32` (0..1) | bridge → `esc_motor_control` |
 | `/shot/lab/tilt` | `std_msgs/Float32` [deg] | bridge → `shot_component` |
 | `/shot/lab/fire` | `std_msgs/Empty` | bridge → `shot_component` |
-| `/roller/status` | `std_msgs/String` JSON `{command, source: joy/lab/idle, lab_accepted, lab_locked, estop, authority, lab_max_speed}` | `esc_motor_control` → bridge, 5 Hz |
+| `/roller/status` | `std_msgs/String` JSON `{command, source: joy/lab/idle, lab_accepted, lab_locked, estop, authority, lab_max_speed, pwm_fault, applied_pulse_us, pwm_backend, pwm_output_state, pwm_error}` | `esc_motor_control` → bridge, 5 Hz |
 | `/shot/status` | `std_msgs/String` JSON `{tilt_deg, shooting, fired_count, last_fire_source: joy/lab/null, lab_accepted, estop, authority, active, tilt_min_deg, tilt_max_deg, next_fire_in_sec, lab_refused}` | `shot_component` → bridge, 5 Hz and on change |
 
 Both statuses are mirrored to every page (streams `roller`, `shot`) whether or not `allow_shoot` is

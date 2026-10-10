@@ -212,6 +212,8 @@ struct RollerStatus {
   bool pwm_fault{false};
   int applied_pulse_us{-1};
   std::string pwm_backend{"none"};
+  std::string pwm_output_state{"UNKNOWN"};
+  int pwm_error{0};
   const char* source{"idle"};
   bool lab_accepted{false};
   bool lab_locked{false};
@@ -228,12 +230,13 @@ inline std::string rollerStatusJson(const RollerStatus& status) {
                 "{\"command\": %.3f, \"source\": \"%s\", \"lab_accepted\": %s, "
                 "\"lab_locked\": %s, \"estop\": %s, \"authority\": %s, "
                 "\"lab_max_speed\": %.3f, \"pwm_fault\": %s, \"applied_pulse_us\": %d, "
-                "\"pwm_backend\": \"%s\"}",
+                "\"pwm_backend\": \"%s\", \"pwm_output_state\": \"%s\", \"pwm_error\": %d}",
                 finite(status.command), status.source ? status.source : "idle",
                 status.lab_accepted ? "true" : "false", status.lab_locked ? "true" : "false",
                 status.estop ? "true" : "false", status.authority ? "true" : "false",
                 finite(status.lab_max_speed), status.pwm_fault ? "true" : "false",
-                status.applied_pulse_us, status.pwm_backend.c_str());
+                status.applied_pulse_us, status.pwm_backend.c_str(),
+                status.pwm_output_state.c_str(), status.pwm_error);
   return std::string(buffer);
 }
 

@@ -1,0 +1,30 @@
+[Unit]
+Description=QUESTiX RP1 PWM owner (API Low hold, independent ROS lease)
+Before=questix_robot.service
+
+[Service]
+Type=notify
+User=root
+Group=@ROBOT_GROUP@
+RuntimeDirectory=questix_pwm_guard
+RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=yes
+ExecStart=/opt/questix_pwm_guard/questix_pwm_guard --allowed-uid @ROBOT_UID@ --socket-gid @ROBOT_GID@
+ExecStopPost=/opt/questix_pwm_guard/questix_pwm_guard --recover-low
+Restart=on-failure
+RestartSec=1
+WatchdogSec=2
+TimeoutStartSec=5
+TimeoutStopSec=3
+KillSignal=SIGTERM
+NoNewPrivileges=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/run/questix_pwm_guard /sys
+PrivateTmp=yes
+RestrictAddressFamilies=AF_UNIX
+RestrictSUIDSGID=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

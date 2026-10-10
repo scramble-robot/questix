@@ -26,9 +26,11 @@ def robot(tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     calls = tmp_path / "ros2.calls"
+    request_now = int(time.time())
+    (bin_dir / "date").write_text(f'#!/bin/sh\n echo {request_now}\n')
     (bin_dir / "ros2").write_text(f'#!/bin/sh\necho "$*" >> "{calls}"\n')
     (bin_dir / "logger").write_text(f'#!/bin/sh\necho "$*" >> "{tmp_path / "logger.log"}"\n')
-    for tool in ("ros2", "logger"):
+    for tool in ("ros2", "logger", "date"):
         (bin_dir / tool).chmod(0o755)
     (tmp_path / "boot_id").write_text(BOOT_ID + "\n")
     (tmp_path / "setup.bash").write_text("")
@@ -43,7 +45,7 @@ def robot(tmp_path):
 
         def request(self, mode="practice", age=0, boot_id=BOOT_ID):
             (config / "start-request").write_text(
-                f"mode={mode}\nrequested_at={int(time.time()) - age}\nboot_id={boot_id}\n")
+                f"mode={mode}\nrequested_at={request_now - age}\nboot_id={boot_id}\n")
 
         def run(self):
             env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}",
@@ -232,6 +234,7 @@ def test_competition_is_unchanged_and_drops_a_leftover_request(robot):
 
 def test_manager_writes_a_request_the_launcher_accepts(robot, monkeypatch):
     # The same format on both sides: app.py writes it, the script reads it.
+    monkeypatch.setattr(app, "CONFIG_DIR", robot.dir)
     monkeypatch.setattr(app, "START_REQUEST_FILE", robot.dir / "start-request")
     monkeypatch.setattr(app, "_boot_id", lambda: BOOT_ID)
     robot.mode("practice")
@@ -241,6 +244,7 @@ def test_manager_writes_a_request_the_launcher_accepts(robot, monkeypatch):
 
 
 def test_manager_writes_a_lesson_request_the_launcher_accepts(robot, monkeypatch):
+    monkeypatch.setattr(app, "CONFIG_DIR", robot.dir)
     monkeypatch.setattr(app, "START_REQUEST_FILE", robot.dir / "start-request")
     monkeypatch.setattr(app, "_boot_id", lambda: BOOT_ID)
     robot.mode("lesson")

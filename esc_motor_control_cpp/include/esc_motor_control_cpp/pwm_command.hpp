@@ -21,12 +21,20 @@ public:
 
   bool send(PwmBackend& backend, int pin, int pulse_us, double speed, const ChangeLog& changed,
             const ErrorLog& error) {
+    if (backend.terminal() && pulse_us != 0) {
+      pwm_fault_ = true;
+      return false;
+    }
     if (pwm_fault_ && speed != 0.0) return false;
     if (requested_pulse_us_ != pulse_us) {
       changed(requested_pulse_us_, pulse_us, speed);
       requested_pulse_us_ = pulse_us;
     }
     if (attempt(backend, pin, pulse_us, error)) return true;
+    if (backend.name() == "rp1_hw") {
+      stop_failed_neutral(backend, pin, error);
+      return false;
+    }
     if (speed != 0.0) return false;
     // One immediate retry for a stop/arm request. The first failure remains latched.
     if (attempt(backend, pin, pulse_us, error)) return true;
@@ -39,6 +47,8 @@ public:
     const bool sent = send(backend, pin, neutral_us, 0.0, changed, error);
     return sent && !pwm_fault_;  // Never declare ready after even one arm failure.
   }
+
+  void latch_fault() { pwm_fault_ = true; }
 
   bool fault() const { return pwm_fault_; }
   int applied_pulse_us() const { return applied_pulse_us_; }
