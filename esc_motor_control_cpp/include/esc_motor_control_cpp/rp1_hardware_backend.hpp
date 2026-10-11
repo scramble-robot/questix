@@ -52,12 +52,16 @@ public:
   bool graceful_shutdown() override {
     const auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(800);
     if (!ready_) return false;
-    if (terminal_) return accept(client_.call_until("STOP", session_, ++seq_, 0, end));
+    if (terminal_) {
+      auto r = client_.call_until("STOP", session_, ++seq_, 0, end);
+      accept(r);  // Preserve the fault diagnostic even when the Low request succeeded.
+      return r.ok && r.applied == 0 && (r.state == "FAULT_LOW" || r.state == "TERMINAL_LOW");
+    }
     terminal_ = true;
     auto r = client_.call_until("SHUTDOWN", session_, ++seq_, 0, end);
     if (!accept(r)) return false;
     while (std::chrono::steady_clock::now() < end) {
-      r = client_.call_until("STATUS", 0, 0, 0, end);
+      r = client_.call_until("REPORT", session_, 0, 0, end);
       if (!accept(r)) return false;
       if (r.session != session_) return fail(ESTALE);
       if (r.state == "TERMINAL_LOW" && r.applied == 0) return true;

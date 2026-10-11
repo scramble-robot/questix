@@ -32,8 +32,8 @@ inline const char* state_name(State s) {
 }
 struct Config {
   int neutral_us{1000};
-  int max_us{2000};
-  int lease_ms{1000};
+  int max_us{2500};
+  int lease_ms{500};
   int arm_ms{3000};
   int drain_ms{500};
   void validate() const {
@@ -47,6 +47,7 @@ public:
   virtual ~Output() = default;
   virtual bool write_pulse(int us) = 0;
   virtual int error() const = 0;
+  virtual bool emergency_low() { return write_pulse(0); }
   virtual bool check() { return true; }
 };
 // All calls are serialized by the daemon event loop. Times are injected monotonic milliseconds.
@@ -57,22 +58,13 @@ public:
   }
   bool start() { return low(false); }
   int fault_error() const { return fault_error_; }
-  bool authorize(int64_t now) {
-    tick(now);
-    if (state_ == State::Arming || state_ == State::Active || state_ == State::Draining ||
-        state_ == State::FaultUnknown)
-      return reject(EBUSY);
-    if (!low(false)) return false;
-    state_ = State::LowIdle;
-    fault_error_ = 0;
-    ticket_until_ = now + 30000;
-    return true;
-  }
   bool arm(uint64_t generation, int64_t now) {
     tick(now);
-    if (state_ != State::LowIdle || ticket_until_ == 0 || now >= ticket_until_ || generation == 0)
+    if ((state_ != State::LowIdle && state_ != State::TerminalLow && state_ != State::FaultLow) ||
+        generation == 0 || generation == session_)
       return reject(EPERM);
-    ticket_until_ = 0;
+    if (!low(false)) return false;
+    fault_error_ = 0;
     session_ = generation;
     seq_ = 0;
     if (!write(config_.neutral_us)) return false;
@@ -82,7 +74,11 @@ public:
   }
   bool complete(uint64_t session, uint64_t seq, int64_t now) {
     tick(now);
-    if (!valid(session, seq) || state_ != State::Arming) return reject(EPERM);
+    if (!valid(session, seq)) {
+      if (state_ == State::Active) return fail_command(EPROTO);
+      return reject(EPERM);
+    }
+    if (state_ != State::Arming) return reject(EPERM);
     seq_ = seq;
     state_ = State::Active;
     deadline_ = now + config_.lease_ms;
@@ -90,8 +86,11 @@ public:
   }
   bool command(uint64_t session, uint64_t seq, int us, int64_t now) {
     tick(now);
-    if (!valid(session, seq) || (state_ != State::Active && state_ != State::Arming))
+    if (!valid(session, seq)) {
+      if (state_ == State::Active) return fail_command(EPROTO);
       return reject(EPERM);
+    }
+    if (state_ != State::Active && state_ != State::Arming) return reject(EPERM);
     if (us != 0 && (us < 500 || us > config_.max_us)) return fail_command(EINVAL);
     if (state_ == State::Arming && us != config_.neutral_us) return reject(EPERM);
     seq_ = seq;
@@ -104,10 +103,8 @@ public:
     tick(now);
     if (session != session_ || session == 0) return reject(EPERM);
     if (state_ == State::Draining || state_ == State::TerminalLow) return true;
-    if (!valid(session, seq) || (state_ != State::Active && state_ != State::Arming))
-      return reject(EPERM);
+    if (state_ != State::Active && state_ != State::Arming) return reject(EPERM);
     seq_ = seq;
-    ticket_until_ = 0;
     if (!write(config_.neutral_us)) return false;
     state_ = State::Draining;
     deadline_ = now + config_.drain_ms;
@@ -115,7 +112,7 @@ public:
   }
   bool stop(uint64_t session, uint64_t seq, int64_t now) {
     tick(now);
-    if (!valid(session, seq)) return reject(EPERM);
+    if (session == 0 || session != session_) return reject(EPERM);
     seq_ = seq;
     const bool latched = fault_error_ != 0;
     const bool ok = low(true);
@@ -127,19 +124,22 @@ public:
     if (state_ == State::Draining) return;  // Accepted normal shutdown has a fixed deadline.
     if (state_ == State::Arming || state_ == State::Active) fault(ECONNRESET);
   }
+  void protocol_fault() { fault(EPROTO); }
   bool emergency_low() {
-    ticket_until_ = 0;
     const bool latched = fault_error_ != 0;
     const bool ok = low(true);
     if (ok && latched) state_ = State::FaultLow;
     return ok;
   }
   void tick(int64_t now) {
-    if (state_ != State::FaultUnknown && !out_.check()) {
+    if (state_ == State::FaultUnknown) {
+      fault(fault_error_ ? fault_error_ : EIO);
+      return;
+    }
+    if (!out_.check()) {
       fault(out_.error());
       return;
     }
-    if (ticket_until_ && now >= ticket_until_) ticket_until_ = 0;
     if ((state_ == State::Arming || state_ == State::Active) && now >= deadline_)
       fault(ETIMEDOUT);
     else if (state_ == State::Draining && now >= deadline_)
@@ -179,9 +179,8 @@ private:
     return false;
   }
   bool low(bool terminal) {
-    ticket_until_ = 0;
     // Always issue a Low write, including recovery from an unknown output state.
-    if (out_.write_pulse(0)) {
+    if (out_.emergency_low()) {
       applied_ = 0;
       state_ = terminal ? State::TerminalLow : State::LowIdle;
       error_ = 0;
@@ -194,10 +193,9 @@ private:
     return false;
   }
   void fault(int code) {
-    ticket_until_ = 0;
     error_ = code < 0 ? code : -code;
     if (!fault_error_) fault_error_ = error_;
-    if (out_.write_pulse(0)) {
+    if (out_.emergency_low()) {
       applied_ = 0;
       state_ = State::FaultLow;
     } else {
@@ -214,6 +212,5 @@ private:
   uint64_t session_{0};
   uint64_t seq_{0};
   int64_t deadline_{0};
-  int64_t ticket_until_{0};
 };
 }  // namespace questix_pwm_guard

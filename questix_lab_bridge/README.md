@@ -128,9 +128,12 @@ while any page drives.
 ## Launcher experiments
 
 The roller PWM diagnostics report requested/API-accepted values, not measured voltage,
-physical pulse width or motor rotation. `pwm_output_state` is the backend/guard state;
-`pwm_error` is its last error code. A terminal Low or fault requires a new authorized
-session for the opt-in RP1 backend. These fields do not grant launcher permission.
+physical pulse width or motor rotation. `pwm_fault=false` in simulation means that no hardware
+has been accessed; it is not hardware health confirmation. `applied_pulse_us=-1` means unknown.
+Legacy backends report `pwm_output_state="LEGACY"`. For `rp1_hw`, `applied_pulse_us` is the guard's
+reported value, not the local PwmCommand cache. `pwm_error` is the last backend/guard error code.
+A terminal Low or fault requires a new owner connection/session; it cannot resume the old session.
+These fields do not grant launcher permission.
 
 Lessons can also spin the disc launcher's roller, tilt it and fire one disc. The bridge publishes
 the launcher nodes' lab inputs, and the nodes decide themselves whether to apply them

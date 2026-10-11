@@ -58,10 +58,6 @@ ament_auto_add_executable(esc_motor_control_node
 )
 target_link_libraries(esc_motor_control_node esc_motor_control_component)
 
-include(../questix_pwm_guard/cmake/review_identity.cmake)
-questix_review_identity(esc_motor_control_component)
-questix_review_identity(esc_motor_control_node)
-
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   list(APPEND AMENT_LINT_AUTO_EXCLUDE ament_cmake_uncrustify)
@@ -75,6 +71,7 @@ if(BUILD_TESTING)
   ament_auto_add_gtest(test_rp1_backend test/test_rp1_backend.cpp)
   target_link_options(test_rp1_backend PRIVATE "-Wl,--wrap=getsockopt")
   ament_auto_add_gtest(test_rp1_lease test/test_rp1_lease.cpp)
+  target_link_options(test_rp1_lease PRIVATE "-Wl,--export-dynamic-symbol=getsockopt")
   find_package(rcutils REQUIRED)
   ament_auto_add_gtest(test_pwm_diagnostics test/test_pwm_diagnostics.cpp)
   ament_target_dependencies(test_pwm_diagnostics rcutils)

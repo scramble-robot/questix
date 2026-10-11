@@ -28,21 +28,21 @@ struct GuardTest : testing::Test {
   q::Core core{out};
   void active() {
     ASSERT_TRUE(core.start());
-    ASSERT_TRUE(core.authorize(0));
     ASSERT_TRUE(core.arm(42, 0));
     ASSERT_TRUE(core.complete(42, 1, 2000));
   }
 };
-TEST_F(GuardTest, NoAutomaticArmAndTicketExpires) {
+TEST_F(GuardTest, ExplicitNewSessionArmNeedsNoTicket) {
   ASSERT_TRUE(core.start());
-  EXPECT_FALSE(core.arm(42, 0));
-  ASSERT_TRUE(core.authorize(0));
-  EXPECT_FALSE(core.arm(42, 30000));
-  EXPECT_EQ(out.writes.back(), 0);
+  EXPECT_EQ(core.state(), q::State::LowIdle);
+  ASSERT_TRUE(core.arm(42, 0));
+  EXPECT_FALSE(core.arm(43, 1));
+  ASSERT_TRUE(core.stop(42, 0, 2));
+  EXPECT_FALSE(core.arm(42, 3));
+  EXPECT_TRUE(core.arm(43, 3));
 }
 TEST_F(GuardTest, ArmDeadlineCannotBeExtendedByNeutral) {
   core.start();
-  core.authorize(0);
   ASSERT_TRUE(core.arm(42, 0));
   EXPECT_TRUE(core.command(42, 1, 1000, 2900));
   core.tick(3000);
@@ -79,13 +79,27 @@ TEST_F(GuardTest, UnexpectedDisconnectHasNoDrain) {
   EXPECT_EQ(core.state(), q::State::FaultLow);
   EXPECT_EQ(out.writes.back(), 0);
 }
-TEST_F(GuardTest, SequenceAndGenerationRejectReplay) {
+TEST_F(GuardTest, ActiveSequenceViolationFaultsLow) {
   active();
-  EXPECT_FALSE(core.command(41, 2, 1800, 2100));
-  EXPECT_FALSE(core.command(42, 1, 1800, 2100));
   ASSERT_TRUE(core.command(42, 2, 1800, 2100));
   EXPECT_FALSE(core.command(42, 2, 2000, 2101));
-  EXPECT_EQ(core.applied(), 1800);
+  EXPECT_EQ(core.state(), q::State::FaultLow);
+  EXPECT_EQ(core.applied(), 0);
+  EXPECT_EQ(core.fault_error(), -EPROTO);
+}
+TEST_F(GuardTest, OwnerStopAndShutdownIgnoreStaleSequence) {
+  active();
+  ASSERT_TRUE(core.command(42, 10, 1800, 2100));
+  EXPECT_TRUE(core.stop(42, 0, 2101));
+  EXPECT_EQ(core.applied(), 0);
+  ASSERT_TRUE(core.arm(43, 2200));
+  ASSERT_TRUE(core.complete(43, 10, 4200));
+  ASSERT_TRUE(core.command(43, 11, 1800, 4201));
+  ASSERT_TRUE(core.shutdown(43, 1, 4202));
+  ASSERT_TRUE(core.shutdown(43, 0, 4600));
+  core.tick(4702);
+  EXPECT_EQ(core.state(), q::State::TerminalLow);
+  EXPECT_EQ(core.applied(), 0);
 }
 TEST_F(GuardTest, WriteFailureStopsAndLatchedCauseSurvivesStop) {
   active();
@@ -98,21 +112,25 @@ TEST_F(GuardTest, WriteFailureStopsAndLatchedCauseSurvivesStop) {
   EXPECT_FALSE(core.command(42, 4, 1000, 2300));
   EXPECT_EQ(core.fault_error(), -EIO);
 }
-TEST_F(GuardTest, FailedLowIsUnknownAndCannotAuthorize) {
+TEST_F(GuardTest, FailedLowIsRetriedEveryUnknownTick) {
   active();
   out.results = {false, false};
   EXPECT_FALSE(core.command(42, 2, 1800, 2100));
   EXPECT_EQ(core.state(), q::State::FaultUnknown);
   EXPECT_EQ(core.applied(), -1);
-  EXPECT_FALSE(core.authorize(2200));
+  const auto attempts = out.writes.size();
+  out.results = {false, false};
+  core.tick(2101);
+  core.tick(2102);
+  EXPECT_EQ(out.writes.size(), attempts + 2);
+  EXPECT_EQ(core.state(), q::State::FaultUnknown);
 }
 TEST_F(GuardTest, InvalidPulseFailsClosedAndManualRecoveryIsRequired) {
   active();
   EXPECT_FALSE(core.command(42, 2, 499, 2100));
   EXPECT_EQ(core.applied(), 0);
   EXPECT_EQ(core.state(), q::State::FaultLow);
-  EXPECT_FALSE(core.arm(43, 2200));
-  ASSERT_TRUE(core.authorize(2300));
+  EXPECT_FALSE(core.command(42, 3, 1000, 2200));
   ASSERT_TRUE(core.arm(43, 2300));
   EXPECT_FALSE(core.command(42, 3, 1000, 2400));
 }
@@ -122,4 +140,19 @@ TEST(GuardProtocol, StrictUnsignedVersionedFields) {
   for (const auto& s : {"2 ARM 0 0 0", "1 ARM -1 0 0", "1 ARM 0 +1 0", "1 COMMAND 42 2 1800 extra",
                         "1 BOGUS 0 0 0", "1 ARM 18446744073709551616 0 0"})
     EXPECT_FALSE(q::parse_request(s, r));
+}
+
+TEST_F(GuardTest, PulseWidthBoundaryContract) {
+  active();
+  EXPECT_TRUE(core.command(42, 2, 500, 2100));
+  EXPECT_TRUE(core.command(42, 3, 2500, 2101));
+  EXPECT_FALSE(core.command(42, 4, 2501, 2102));
+  EXPECT_EQ(core.state(), q::State::FaultLow);
+  EXPECT_EQ(out.writes.back(), 0);
+}
+TEST_F(GuardTest, SubminimumPulseFaultsLow) {
+  active();
+  EXPECT_FALSE(core.command(42, 2, 499, 2100));
+  EXPECT_EQ(core.state(), q::State::FaultLow);
+  EXPECT_EQ(out.writes.back(), 0);
 }

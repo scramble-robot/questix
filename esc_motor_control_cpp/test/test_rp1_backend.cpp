@@ -60,7 +60,6 @@ protected:
   void serve() {
     q::Core core(output);
     core.start();
-    core.authorize(0);
     auto epoch = std::chrono::steady_clock::now();
     auto now = [&] {
       return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -98,13 +97,15 @@ protected:
           ok = core.stop(r.session, r.seq, now());
         else if (r.op == "SHUTDOWN")
           ok = core.shutdown(r.session, r.seq, now());
-        else if (r.op == "STATUS")
+        else if (r.op == "REPORT")
           ok = true;
       }
-      auto reply = std::string("1 ") + (ok ? "1 " : "0 ") +
-                   (drain_forever ? "DRAINING" : q::state_name(core.state())) + " " +
-                   std::to_string(drain_forever ? 1000 : core.applied()) + " " +
-                   std::to_string(core.session()) + " " + std::to_string(ok ? 0 : core.error());
+      auto reply =
+          std::string("1 ") + (ok ? "1 " : "0 ") +
+          (drain_forever ? "DRAINING" : q::state_name(core.state())) + " " +
+          std::to_string(drain_forever ? 1000 : core.applied()) + " " +
+          std::to_string(core.session()) + " " +
+          std::to_string(core.fault_error() ? core.fault_error() : (ok ? 0 : core.error()));
       send(fd, reply.data(), reply.size(), MSG_NOSIGNAL);
     }
     if (fd >= 0) close(fd);
@@ -174,5 +175,18 @@ TEST_F(BackendTest, ShutdownBudgetIncludesFirstAndFinalRpc) {
   EXPECT_LT(elapsed, std::chrono::milliseconds(850));
   EXPECT_TRUE(b.terminal());
   EXPECT_FALSE(b.set_servo_pulse(13, 1000));
+}
+TEST_F(BackendTest, FaultLowShutdownSucceedsWithoutClearingFaultDiagnostic) {
+  esc_motor_control_cpp::Rp1HardwareBackend b(socket_path);
+  ASSERT_TRUE(b.initialize(13));
+  ASSERT_TRUE(b.complete_arm());
+  ASSERT_TRUE(b.set_servo_pulse(13, 1800));
+  std::this_thread::sleep_for(std::chrono::milliseconds(600));
+  EXPECT_FALSE(b.set_servo_pulse(13, 1000));
+  EXPECT_EQ(b.output_state(), "FAULT_LOW");
+  EXPECT_EQ(b.applied_hint(), 0);
+  EXPECT_TRUE(b.graceful_shutdown());
+  EXPECT_EQ(b.last_error(), -ETIMEDOUT);
+  EXPECT_EQ(output.last, 0);
 }
 }  // namespace

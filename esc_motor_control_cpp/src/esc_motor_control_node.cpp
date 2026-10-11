@@ -11,12 +11,17 @@
 int main(int argc, char* argv[]) {
   rclcpp::init(argc, argv);
 
-  rclcpp::NodeOptions options;
-  auto node = std::make_shared<esc_motor_control_cpp::EscMotorControlComponent>(options);
-
-  rclcpp::spin(node);
-
-  node->begin_shutdown();
+  int result = 0;
+  try {
+    rclcpp::NodeOptions options;
+    auto node = std::make_shared<esc_motor_control_cpp::EscMotorControlComponent>(options);
+    rclcpp::spin(node);
+    node->begin_shutdown();
+  } catch (const std::exception& error) {
+    RCLCPP_FATAL(rclcpp::get_logger("esc_motor_control"), "ESC configuration/startup failed: %s",
+                 error.what());
+    result = 1;
+  }
 
   try {
     rclcpp::shutdown();
@@ -24,5 +29,5 @@ int main(int argc, char* argv[]) {
     // Guard against double shutdown (e.g. SIGINT handler already called it)
   }
 
-  return 0;
+  return result;
 }

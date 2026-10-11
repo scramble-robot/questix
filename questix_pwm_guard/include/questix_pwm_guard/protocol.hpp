@@ -27,10 +27,12 @@ inline bool parse_request(const std::string& frame, Request& r) {
   const bool fields =
       (in >> version >> r.op >> s >> q >> p) && version == "1" && !(in >> extra) &&
       decimal(s, r.session) && decimal(q, r.seq) && decimal(p, r.pulse) &&
-      (r.op == "STATUS" || r.op == "AUTHORIZE" || r.op == "LOW" || r.op == "ARM" ||
+      (r.op == "STATUS" || r.op == "REPORT" || r.op == "LOW" || r.op == "ARM" ||
        r.op == "COMPLETE" || r.op == "COMMAND" || r.op == "SHUTDOWN" || r.op == "STOP");
   if (!fields) return false;
-  if (r.op == "STATUS" || r.op == "AUTHORIZE" || r.op == "LOW" || r.op == "ARM")
+  if (r.op == "REPORT") return r.session != 0 && r.seq == 0 && r.pulse == 0;
+  if (r.op == "STOP" || r.op == "SHUTDOWN") return r.pulse == 0;
+  if (r.op == "STATUS" || r.op == "LOW" || r.op == "ARM")
     return r.session == 0 && r.seq == 0 && r.pulse == 0;
   return r.session != 0 && r.seq != 0 && (r.op == "COMMAND" || r.pulse == 0);
 }

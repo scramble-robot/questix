@@ -8,14 +8,12 @@
 #include "questix_pwm_guard/client.hpp"
 int main(int argc, char** argv) {
   if (argc < 2 || argc > 3) {
-    std::cerr << "usage: questix_pwm_ctl status|authorize|low [socket]\n";
+    std::cerr << "usage: questix_pwm_ctl status|low [socket]\n";
     return 2;
   }
   std::string op = argv[1];
   if (op == "status")
     op = "STATUS";
-  else if (op == "authorize")
-    op = "AUTHORIZE";
   else if (op == "low")
     op = "LOW";
   else

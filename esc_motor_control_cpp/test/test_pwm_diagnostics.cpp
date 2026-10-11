@@ -53,7 +53,7 @@ TEST_F(PwmDiagnosticsTest, InvalidConfigurationLogsErrorWithoutChangingParameter
   options.append_parameter_override("max_pulse_width", 3000);
   options.append_parameter_override("neutral_pulse_width", 3000);
   esc_motor_control_cpp::EscMotorControlComponent node(options);
-  EXPECT_TRUE(has_error("min_speed maps to 499 us"));
+  EXPECT_FALSE(has_error("minimum reachable speed maps to"));
   EXPECT_TRUE(has_error("max_speed maps to 3000 us"));
   EXPECT_TRUE(has_error("neutral maps to 3000 us"));
   EXPECT_EQ(node.get_parameter("min_pulse_width").as_int(), 499);
@@ -61,14 +61,23 @@ TEST_F(PwmDiagnosticsTest, InvalidConfigurationLogsErrorWithoutChangingParameter
   EXPECT_EQ(node.get_parameter("neutral_pulse_width").as_int(), 3000);
 }
 
-TEST_F(PwmDiagnosticsTest, DefaultIntervalWarnsAndSimulationIsReported) {
+TEST_F(PwmDiagnosticsTest, DefaultReachableIntervalHasNoFalseErrorAndSimulationIsReported) {
   rclcpp::NodeOptions options;
   options.append_parameter_override("test_mode", true);
   esc_motor_control_cpp::EscMotorControlComponent node(options);
-  EXPECT_TRUE(has_error("continuous speed interval intersects 1-499 us"));
+  EXPECT_FALSE(has_error("continuous speed interval intersects 1-499 us"));
   bool simulation = false;
   for (const auto& log : logs) {
     if (log.second == "PWM backend: simulation") simulation = true;
   }
   EXPECT_TRUE(simulation);
+}
+
+TEST_F(PwmDiagnosticsTest, MissingGuardThrowsWithoutSimulationFallback) {
+  rclcpp::NodeOptions options;
+  options.append_parameter_override("test_mode", false);
+  options.append_parameter_override("pwm_backend", std::string("rp1_hw"));
+  options.append_parameter_override("rp1_guard_socket", std::string("/nonexistent/questix-guard"));
+  EXPECT_THROW(esc_motor_control_cpp::EscMotorControlComponent node(options), std::runtime_error);
+  for (const auto& log : logs) EXPECT_NE(log.second, "PWM backend: simulation");
 }

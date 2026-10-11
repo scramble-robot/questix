@@ -24,6 +24,7 @@ public:
   bool initialize(bool recovery_only = false);
   bool write_pulse(int us) override;
   bool check() override;
+  bool emergency_low() override;
   int error() const override { return error_; }
   const std::filesystem::path& chip() const { return chip_; }
   // Never unexport in destructor: exported enabled duty=0 is the Low-hold contract.

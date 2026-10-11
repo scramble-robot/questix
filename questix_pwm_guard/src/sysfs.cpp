@@ -109,6 +109,12 @@ bool SysfsOutput::initialize(bool recovery_only) {
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
       if (!fs::exists(channel_ / "enable")) throw std::runtime_error("export not ready");
     }
+    if (existing && recovery_only) {
+      // Ownership is already validated. Try to suppress an unexpected waveform even
+      // when its attributes cannot establish a confirmed Low state.
+      initialized_ = true;
+      return emergency_low();
+    }
     // Existing state must match before any mutation. Inverse polarity duty=0 would be High.
     if (existing && (get("polarity") != "normal" ||
                      get("period") != std::to_string(config_.period_ns) || get("enable") != "1"))
@@ -166,6 +172,28 @@ bool SysfsOutput::write_pulse(int us) {
     error_ = -EIO;
     return false;
   }
+}
+bool SysfsOutput::emergency_low() {
+  if (!initialized_) {
+    error_ = -ENODEV;
+    return false;
+  }
+  // Never change an unowned channel. initialized_ follows validated ownership/export.
+  // Unknown/inverse polarity cannot use duty=0 (it may mean High); disable instead.
+  bool normal = false;
+  try {
+    normal = get("polarity") == "normal";
+  } catch (const std::exception&) {
+    // Missing polarity still permits a best-effort disable.
+  }
+  if (!put(normal ? "duty_cycle" : "enable", "0")) return false;
+  if (normal) expected_us_ = 0;
+  if (!normal) {
+    error_ = -ESTALE;
+    return false;
+  }
+  // A successful safety write alone never turns unknown attributes into confirmed Low.
+  return check();
 }
 bool SysfsOutput::check() {
   if (!initialized_) {

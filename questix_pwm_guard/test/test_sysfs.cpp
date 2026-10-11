@@ -96,7 +96,7 @@ TEST_F(SysfsTest, InversePolarityCannotBeCalledLow) {
   put(channel() / "polarity", "inversed\n");
   q::SysfsOutput o(cfg);
   EXPECT_FALSE(o.initialize(true));
-  EXPECT_EQ(read(channel() / "duty_cycle"), "1800000\n");
+  EXPECT_EQ(read(channel() / "enable"), "0");
 }
 TEST_F(SysfsTest, DifferentBootOwnershipIsRejected) {
   own();
@@ -200,7 +200,6 @@ TEST_F(SysfsTest, FaultLowStillMonitorsDutyAndUnknownHardwareState) {
   ASSERT_TRUE(output.initialize());
   q::Core core(output);
   ASSERT_TRUE(core.start());
-  ASSERT_TRUE(core.authorize(0));
   ASSERT_TRUE(core.arm(42, 0));
   ASSERT_TRUE(core.complete(42, 1, 2000));
   core.tick(3000);
@@ -232,7 +231,6 @@ TEST_F(SysfsTest, FaultLowUnknownAttributesNeverProduceANeutralRepair) {
     ASSERT_TRUE(output.initialize());
     q::Core core(output);
     ASSERT_TRUE(core.start());
-    ASSERT_TRUE(core.authorize(0));
     ASSERT_TRUE(core.arm(42, 0));
     ASSERT_TRUE(core.complete(42, 1, 2000));
     core.tick(3000);
@@ -245,7 +243,39 @@ TEST_F(SysfsTest, FaultLowUnknownAttributesNeverProduceANeutralRepair) {
     EXPECT_EQ(core.state(), q::State::FaultUnknown);
     EXPECT_EQ(core.applied(), -1);
     EXPECT_EQ(core.fault_error(), -ETIMEDOUT);
-    EXPECT_FALSE(core.authorize(3020));
     EXPECT_FALSE(core.command(42, 2, 1000, 3030));
+  }
+}
+
+TEST_F(SysfsTest, ActiveUnexpectedAttributesAttemptLowAndKeepUnknown) {
+  own();
+  for (const auto& attr : {std::string("period"), std::string("enable"), std::string("polarity"),
+                           std::string("missing_polarity")}) {
+    put(channel() / "period", "20000000");
+    put(channel() / "enable", "1");
+    put(channel() / "polarity", "normal");
+    put(channel() / "duty_cycle", "0");
+    q::SysfsOutput output(cfg);
+    ASSERT_TRUE(output.initialize());
+    q::Core core(output);
+    ASSERT_TRUE(core.start());
+    ASSERT_TRUE(core.arm(42, 0));
+    ASSERT_TRUE(core.complete(42, 1, 2000));
+    ASSERT_TRUE(core.command(42, 2, 1800, 2100));
+    if (attr == "missing_polarity")
+      fs::remove(channel() / "polarity");
+    else
+      put(channel() / attr, attr == "period" ? "10000000" : attr == "enable" ? "0" : "inversed");
+    core.tick(2101);
+    EXPECT_EQ(core.state(), q::State::FaultUnknown);
+    EXPECT_EQ(core.applied(), -1);
+    const auto safe_attr = attr == "period" || attr == "enable" ? "duty_cycle" : "enable";
+    EXPECT_EQ(read(channel() / safe_attr), "0");
+    put(channel() / safe_attr, "1800000");
+    core.tick(2102);
+    EXPECT_EQ(read(channel() / safe_attr), "0");
+    q::SysfsOutput recovery(cfg);
+    EXPECT_FALSE(recovery.initialize(true));
+    EXPECT_EQ(read(channel() / safe_attr), "0");
   }
 }

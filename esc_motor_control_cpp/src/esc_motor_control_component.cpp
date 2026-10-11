@@ -174,7 +174,7 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
 
   // Diagnostic only: do not rewrite pulse settings or their existing mapping.
   for (const auto& entry :
-       {std::make_pair("min_speed", speed_to_pulse_us(min_speed_)),
+       {std::make_pair("minimum reachable speed", speed_to_pulse_us(std::max(min_speed_, 0.0))),
         std::make_pair("max_speed", speed_to_pulse_us(max_speed_)),
         std::make_pair("speed=0", speed_to_pulse_us(0.0)),
         std::make_pair("neutral", neutral_pulse_width_us_ > 0
@@ -187,8 +187,10 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
     }
   }
 
-  const int range_min = std::min(speed_to_pulse_us(min_speed_), speed_to_pulse_us(max_speed_));
-  const int range_max = std::max(speed_to_pulse_us(min_speed_), speed_to_pulse_us(max_speed_));
+  const int range_min =
+      std::min(speed_to_pulse_us(std::max(min_speed_, 0.0)), speed_to_pulse_us(max_speed_));
+  const int range_max =
+      std::max(speed_to_pulse_us(std::max(min_speed_, 0.0)), speed_to_pulse_us(max_speed_));
   if (range_min < 500 && range_max > 0) {
     RCLCPP_ERROR(this->get_logger(),
                  "ESC pulse configuration: continuous speed interval intersects 1-499 us; "
@@ -240,11 +242,14 @@ void EscMotorControlComponent::begin_shutdown() {
   // The guard drains independently while this lock is held; no ROS heartbeat is required.
   std::lock_guard<std::mutex> guard(lock_);
   if (pwm_ && pwm_->name() == "rp1_hw") {
-    const bool low = pwm_->graceful_shutdown();
+    const bool stopped = pwm_->graceful_shutdown();
+    const bool low =
+        stopped || (pwm_->applied_hint() == 0 && (pwm_->output_state() == "FAULT_LOW" ||
+                                                  pwm_->output_state() == "TERMINAL_LOW"));
     if (low)
       RCLCPP_INFO(this->get_logger(), "ESC low_api_accepted (not a physical measurement)");
     else
-      RCLCPP_ERROR(this->get_logger(), "ESC Low request failed; output not confirmed safe");
+      RCLCPP_ERROR(this->get_logger(), "ESC Low request failed; guard output state UNKNOWN");
     pwm_->cleanup();
   } else {
     if (pwm_) {
@@ -488,12 +493,13 @@ void EscMotorControlComponent::apply_gate() {
     if (now_block != RollerBlock::kNone || pwm_command_.fault()) {
       // Closing (or closed with something still spinning): stop, clear the latch so a held
       // button needs a release, and lock a lab run until it sends 0.
+      const bool rp1_terminal = pwm_ && pwm_->name() == "rp1_hw" && pwm_->terminal();
       if ((previous == RollerBlock::kNone && now_block != RollerBlock::kNone) ||
-          pwm_command_.needs_stop(speed_to_pulse_us(0.0)) || full_speed_logic_.isActive() ||
-          roller_lab_logic_.labActive()) {
+          (!rp1_terminal && pwm_command_.needs_stop(speed_to_pulse_us(0.0))) ||
+          full_speed_logic_.isActive() || roller_lab_logic_.labActive()) {
         full_speed_logic_.inhibit();
         roller_lab_logic_.onBlocked(steady_now_sec());
-        stop = true;
+        stop = !rp1_terminal;
       }
     }
   }

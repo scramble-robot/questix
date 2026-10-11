@@ -1,6 +1,5 @@
 [Unit]
 Description=QUESTiX RP1 PWM owner (API Low hold, independent ROS lease)
-Before=questix_robot.service
 
 [Service]
 Type=notify
@@ -9,7 +8,7 @@ Group=@ROBOT_GROUP@
 RuntimeDirectory=questix_pwm_guard
 RuntimeDirectoryMode=0750
 RuntimeDirectoryPreserve=yes
-ExecStart=/opt/questix_pwm_guard/questix_pwm_guard --allowed-uid @ROBOT_UID@ --socket-gid @ROBOT_GID@
+ExecStart=/opt/questix_pwm_guard/questix_pwm_guard --allowed-uid @ROBOT_UID@ --socket-gid @ROBOT_GID@ --lease-ms 500
 ExecStopPost=/opt/questix_pwm_guard/questix_pwm_guard --recover-low
 Restart=on-failure
 RestartSec=1

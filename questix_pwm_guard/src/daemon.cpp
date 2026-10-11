@@ -13,6 +13,7 @@
 #include <sys/un.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -59,27 +60,6 @@ uint64_t generation() {
   if (rc != ssize_t(sizeof(n)) || n == 0) throw std::runtime_error("session generation failed");
   return n;
 }
-// Only fixed-size root approval records are read; no child process or workspace code runs.
-std::string approval_digest(const std::string& path, uid_t admin) {
-  int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
-  if (fd < 0) return {};
-  struct stat info {};
-  char bytes[66];
-  ssize_t count = -1;
-  if (fstat(fd, &info) == 0 && S_ISREG(info.st_mode) && info.st_uid == admin &&
-      (info.st_mode & 07777) == 0600 && info.st_nlink == 1 &&
-      (info.st_size == 64 || info.st_size == 65))
-    count = read(fd, bytes, sizeof(bytes));
-  close(fd);
-  if (count != 64 && !(count == 65 && bytes[64] == '\n')) return {};
-  for (int i = 0; i < 64; ++i)
-    if (!((bytes[i] >= '0' && bytes[i] <= '9') || (bytes[i] >= 'a' && bytes[i] <= 'f'))) return {};
-  return std::string(bytes, 64);
-}
-bool approval_matches(const std::string& current, const std::string& installed, uid_t admin) {
-  auto expected = approval_digest(installed, admin);
-  return !expected.empty() && approval_digest(current, admin) == expected;
-}
 #ifdef QUESTIX_TEST_FAKE_IO
 class Ledger : public q::Output {
 public:
@@ -105,8 +85,10 @@ int run(int argc, char** argv) {
   std::string socket_path = "/run/questix_pwm_guard/control.sock",
               lock_path = "/run/questix_pwm_guard/lock";
   std::string fake_log;
-  std::string approval_file = "/etc/questix_pwm_guard/approved-release.sha256",
-              installed_approval = "/etc/questix_pwm_guard/runtime-approved.sha256";
+  q::Config config;
+#ifdef QUESTIX_TEST_FAKE_IO
+  int throw_after_pulse = -1;
+#endif
   uid_t allowed = uid_t(-1), admin = 0;
   gid_t socket_group = 0;
   bool recovery = false;
@@ -120,16 +102,12 @@ int run(int argc, char** argv) {
     if (i + 1 >= argc) throw std::runtime_error("missing option value");
     std::string v = argv[++i];
 #ifdef QUESTIX_TEST_FAKE_IO
-    if (k == "--approval-file") {
-      approval_file = v;
-      continue;
-    }
-    if (k == "--runtime-approval-file") {
-      installed_approval = v;
-      continue;
-    }
     if (k == "--fake-log") {
       fake_log = v;
+      continue;
+    }
+    if (k == "--throw-after-pulse") {
+      if (!q::decimal(v, throw_after_pulse)) throw std::runtime_error("invalid test pulse");
       continue;
     }
     if (k == "--admin-uid") {
@@ -137,7 +115,9 @@ int run(int argc, char** argv) {
       continue;
     }
 #endif
-    if (k == "--socket") {
+    if (k == "--lease-ms") {
+      if (!q::decimal(v, config.lease_ms)) throw std::runtime_error("invalid lease");
+    } else if (k == "--socket") {
       socket_path = v;
     } else if (k == "--lock") {
       lock_path = v;
@@ -151,6 +131,7 @@ int run(int argc, char** argv) {
       throw std::runtime_error("unknown option: " + k);
     }
   }
+  config.validate();
   if (allowed == uid_t(-1) && !recovery) throw std::runtime_error("--allowed-uid required");
   int lock = open(lock_path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
   struct stat st {};
@@ -169,8 +150,19 @@ int run(int argc, char** argv) {
       throw std::runtime_error("RP1 Low initialization failed: " + std::to_string(hw->error()));
     output = std::move(hw);
   }
-  q::Core core(*output);
+  q::Core core(*output, config);
   if (!core.start()) throw std::runtime_error("Low request failed");
+  struct LowOnExit {
+    q::Core& core;
+    ~LowOnExit() noexcept {
+      try {
+        core.emergency_low();
+      } catch (...) {
+        // Destructors must not mask an event-loop exception. Recovery and the physical
+        // emergency power cut remain necessary if this best-effort request fails.
+      }
+    }
+  } low_on_exit{core};
   if (recovery) {
     std::cout << "low_api_accepted; physical state unmeasured\n";
     return 0;
@@ -234,8 +226,12 @@ int run(int argc, char** argv) {
       if (fd >= 0) {
         ucred c{};
         socklen_t size = sizeof(c);
-        if (peers.size() >= 16 || getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &c, &size) < 0 ||
-            (c.uid != allowed && c.uid != admin))
+        const auto robot_peers = std::count_if(
+            peers.begin(), peers.end(), [&](const auto& p) { return p.second.uid != admin; });
+        const auto admin_peers = peers.size() - size_t(robot_peers);
+        if (getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &c, &size) < 0 ||
+            (c.uid != allowed && c.uid != admin) ||
+            (c.uid == admin ? admin_peers >= 1 : robot_peers >= 15))
           close(fd);
         else
           peers.emplace(fd, Peer{c.uid, false});
@@ -254,21 +250,21 @@ int run(int argc, char** argv) {
         q::Request r;
         bool ok = false;
         int error = -EPROTO;
-        if (q::parse_request(std::string(b, len), r)) {
+        if (!q::parse_request(std::string(b, len), r)) {
+          if (fd == owner && core.state() == q::State::Active) core.protocol_fault();
+        } else {
           auto& peer = peers.at(fd);
           auto t = now_ms();
           core.tick(t);
-          if (r.op == "STATUS") {
+          if (r.op == "STATUS" && peer.uid == admin) {
             ok = true;
-          } else if (r.op == "AUTHORIZE" && peer.uid == admin && owner < 0 && r.session == 0 &&
-                     r.seq == 0 && r.pulse == 0) {
-            ok = approval_matches(approval_file, installed_approval, admin) && core.authorize(t);
+          } else if (r.op == "REPORT" && peer.owns && fd == owner && r.session == core.session()) {
+            ok = true;
           } else if (r.op == "LOW" && peer.uid == admin) {
             ok = core.emergency_low();
-          } else if (r.op == "ARM" && peer.uid == allowed && owner < 0 && r.session == 0 &&
-                     r.seq == 0 && r.pulse == 0) {
-            ok = approval_matches(approval_file, installed_approval, admin) &&
-                 core.arm(generation(), t);
+          } else if (r.op == "ARM" && peer.uid == allowed && peer.uid != admin && owner < 0 &&
+                     r.session == 0 && r.seq == 0 && r.pulse == 0) {
+            ok = core.arm(generation(), t);
             if (ok) {
               owner = fd;
               peer.owns = true;
@@ -279,10 +275,14 @@ int run(int argc, char** argv) {
             else if (r.op == "COMMAND")
               ok = core.command(r.session, r.seq, r.pulse, t);
             else if (r.op == "SHUTDOWN")
-              ok = core.shutdown(r.session, r.seq, t);
+              ok = core.shutdown(core.session(), r.seq, t);
             else if (r.op == "STOP")
-              ok = core.stop(r.session, r.seq, t);
+              ok = core.stop(core.session(), r.seq, t);
           }
+#ifdef QUESTIX_TEST_FAKE_IO
+          if (ok && r.op == "COMMAND" && r.pulse == throw_after_pulse)
+            throw std::runtime_error("injected event-loop exception after active output");
+#endif
           // A successful STATUS/STOP does not clear the latched output fault.
           error = core.fault_error() ? core.fault_error()
                                      : (ok ? 0 : (core.error() ? core.error() : -EPERM));
