@@ -2,8 +2,10 @@
 # SPDX-License-Identifier: MIT
 """Operator control profiles reach every node (launch expansion: conftest.expand)."""
 
+import math
 import os
 from pathlib import Path
+import re
 
 import pytest
 import questix_control_config
@@ -99,14 +101,32 @@ def test_unknown_controller_type_fails_before_nodes(expand):
                enable_lidar='false', enable_rviz='false')
 
 
-def test_dual_stick_keeps_its_own_scaling(expand):
-    """Moving controls must not apply the faster single-stick scales to dual-stick mode."""
-    nodes = expand('joy_controller/launch/joy_controller.launch.xml', dual_stick='true')
+@pytest.mark.parametrize('controller', ['uart', 'dualshock', 'web'])
+def test_dual_stick_drives_like_3_2_0(expand, controller):
+    """A full dual-stick deflection leaves the stop gate at 3.2.0's wheel speed.
+
+    3.2.0 started the dual-stick node as /joy_controller with 2.0 m/s and 6.0 at wheel_radius
+    0.1 m (about 191 rpm). Its own scale (0.05, later 0.025) never reached the stop gate's exit
+    (min_command_rpm + kExitMarginRpm), so the robot did not move at all.
+    """
+    nodes = expand('joy_controller/launch/joy_controller.launch.xml', dual_stick='true',
+                   controller_type=controller)
     assert '/joy_controller' not in nodes
     dual = nodes['/joy_controller_dual_stick']
-    assert dual['longitudinal_input_ratio'] == 0.025
-    assert dual['angular_input_ratio'] == 0.05
+    assert dual['longitudinal_input_ratio'] == 1.0
+    assert dual['angular_input_ratio'] == 6.0  # [1/m] on the wheel speed difference
     assert dual['left_stick_vertical_axis'] == 1
+
+    hardware = yaml.safe_load((ROOT / 'launcher/config/drive_component.yaml').read_text())
+    wheel_radius = hardware['drive_component']['ros__parameters']['wheel_radius']
+    profile = yaml.safe_load((ROOT / 'questix_control_config/config'
+                              / f'controls.{controller}.yaml').read_text())
+    min_command_rpm = profile['drive_component']['ros__parameters']['min_command_rpm']
+    gate = (ROOT / 'motor_control_lib/include/motor_control_lib/drive_stop_gate.hpp').read_text()
+    exit_margin = int(re.search(r'kExitMarginRpm = (\d+);', gate).group(1))
+    full_stick_rpm = dual['longitudinal_input_ratio'] / (2 * math.pi * wheel_radius) * 60
+    assert full_stick_rpm >= min_command_rpm + exit_margin
+    assert full_stick_rpm == pytest.approx(2.0 / (2 * math.pi * 0.1) * 60)  # 3.2.0
 
 
 @pytest.mark.parametrize('relative_path,node,key,value', [
