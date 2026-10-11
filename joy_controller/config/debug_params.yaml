@@ -6,7 +6,9 @@ joy_controller:
     # Enable debug mode
     debug_mode: true
 
-    # More conservative movement settings for testing
+    # More conservative movement settings for testing. They apply only when the node starts
+    # without the operator profile (ros2 run ... --params-file this file): every launch reads
+    # questix_control_config's profile after config_file, uses its ratios and warns about these.
     longitudinal_input_ratio: 0.25
     lateral_input_ratio: 0.2
     angular_input_ratio: 0.25
