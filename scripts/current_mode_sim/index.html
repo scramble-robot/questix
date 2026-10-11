@@ -1,0 +1,1129 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>電流モード試験台</title>
+<style>
+/* Layout: a bench instrument. Controls on the left, two wheel scopes (speed over current) on the
+   right; everything stacks to one column on a phone. */
+:root {
+  color-scheme: light;
+  --page: #f4f3ef;
+  --surface: #fcfcfb;
+  --panel: #ffffff;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #7d7b75;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --line: rgba(11, 11, 11, 0.12);
+  --control: #ecebe6;
+  --control-hover: #e2e1da;
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --target: #52514e;
+  --good: #0ca30c;
+  --good-ink: #006300;
+  --critical: #d03b3b;
+  --warn-ink: #8a5a00;
+  --warn-bg: #fff3d6;
+  --crit-bg: #fde8e6;
+  --good-bg: #e6f4e6;
+  --focus: #2a78d6;
+  --font-ui: "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-num: ui-monospace, "SFMono-Regular", "Noto Sans Mono", "DejaVu Sans Mono", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0f0f0e;
+    --surface: #1a1a19;
+    --panel: #161615;
+    --ink: #f0efec;
+    --ink-2: #c3c2b7;
+    --muted: #8f8d86;
+    --grid: #2c2c2a;
+    --axis: #3d3d3a;
+    --line: rgba(255, 255, 255, 0.10);
+    --control: #262624;
+    --control-hover: #31312e;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --target: #c3c2b7;
+    --good-ink: #0ca30c;
+    --warn-ink: #f2b84b;
+    --warn-bg: #2e2412;
+    --crit-bg: #331616;
+    --good-bg: #132813;
+    --focus: #3987e5;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0f0f0e;
+  --surface: #1a1a19;
+  --panel: #161615;
+  --ink: #f0efec;
+  --ink-2: #c3c2b7;
+  --muted: #8f8d86;
+  --grid: #2c2c2a;
+  --axis: #3d3d3a;
+  --line: rgba(255, 255, 255, 0.10);
+  --control: #262624;
+  --control-hover: #31312e;
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --target: #c3c2b7;
+  --good-ink: #0ca30c;
+  --warn-ink: #f2b84b;
+  --warn-bg: #2e2412;
+  --crit-bg: #331616;
+  --good-bg: #132813;
+  --focus: #3987e5;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; }
+body {
+  background: var(--page);
+  color: var(--ink);
+  font: 14px/1.55 var(--font-ui);
+}
+.num, input[type="number"], .mono { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+.bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px;
+  padding-block: 12px; padding-inline: 16px;
+  border-bottom: 1px solid var(--line); background: var(--panel);
+  position: sticky; top: 0; z-index: 5;
+}
+.bar h1 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: 0.02em; text-wrap: balance; }
+.bar .sub { color: var(--ink-2); font-size: 12px; min-width: 0; flex: 1 1 260px; }
+.pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.pill {
+  display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px;
+  border-radius: 999px; border: 1px solid var(--line); font-size: 12px; white-space: nowrap;
+  background: var(--control);
+}
+.pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.pill.ok::before { background: var(--good); }
+.pill.bad::before { background: var(--critical); }
+.pill.plain::before { display: none; }
+
+.layout {
+  display: grid; grid-template-columns: minmax(280px, 340px) minmax(0, 1fr); gap: 16px;
+  padding-block: 16px; padding-inline: 16px; max-width: 1500px; margin: 0 auto;
+}
+@media (max-width: 900px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+
+.controls { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.group { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px; }
+.group h2 {
+  margin: 0 0 8px; font-size: 11px; font-weight: 700; letter-spacing: 0.12em;
+  color: var(--ink-2); text-transform: uppercase;
+}
+.row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.stack { display: flex; flex-direction: column; gap: 8px; }
+button, select, input[type="number"] {
+  font: inherit; color: var(--ink); background: var(--control);
+  border: 1px solid var(--line); border-radius: 4px; padding: 5px 10px;
+}
+button { cursor: pointer; }
+button:hover:not(:disabled) { background: var(--control-hover); }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+button.primary { background: var(--ink); color: var(--panel); border-color: var(--ink); }
+button.primary:hover:not(:disabled) { background: var(--ink-2); }
+button.danger { color: var(--critical); border-color: var(--critical); background: transparent; }
+select { width: 100%; }
+label { display: flex; align-items: center; gap: 8px; }
+.param { display: grid; grid-template-columns: minmax(0, 1fr) 110px; gap: 4px 8px; align-items: center; }
+.param label { display: block; font-size: 12px; color: var(--ink-2); min-width: 0; overflow-wrap: anywhere; }
+.param label code { color: var(--ink); font-family: var(--font-num); font-size: 11px; }
+.param input[type="number"] { width: 100%; padding: 4px 6px; }
+.param input.changed { border-color: var(--series-1); box-shadow: inset 0 0 0 1px var(--series-1); }
+.slider { display: grid; grid-template-columns: 72px minmax(0, 1fr) 64px; gap: 8px; align-items: center; }
+.slider input { width: 100%; }
+.note { font-size: 12px; color: var(--ink-2); margin: 6px 0 0; }
+.msg { font-size: 12px; margin: 6px 0 0; min-height: 1.2em; overflow-wrap: anywhere; }
+.msg.err { color: var(--critical); }
+.msg.ok { color: var(--good-ink); }
+
+.scope { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--panel); }
+
+.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 700px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.tile { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; min-width: 0; }
+.tile .k { font-size: 11px; color: var(--ink-2); letter-spacing: 0.06em; }
+.tile .v { font-size: 20px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+.tile .v small { font-size: 12px; color: var(--ink-2); font-weight: 400; }
+
+.wheel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px; min-width: 0; }
+.wheel-head { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-bottom: 8px; }
+.wheel-head h2 { margin: 0; font-size: 15px; }
+.guard {
+  display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 4px;
+  font-size: 12px; font-weight: 600; background: var(--good-bg); color: var(--good-ink);
+}
+.guard.trip { background: var(--crit-bg); color: var(--critical); }
+.guard .icon { font-family: var(--font-num); }
+.guard-text { font-size: 12px; color: var(--ink-2); flex: 1 1 240px; min-width: 0; overflow-wrap: anywhere; }
+.chart { position: relative; }
+.chart canvas { display: block; width: 100%; height: 190px; background: var(--surface); border-radius: 4px; }
+.chart + .chart { margin-top: 8px; }
+.chart .title { position: absolute; left: 50px; top: 4px; font-size: 11px; color: var(--ink-2); pointer-events: none; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--ink-2); margin: 4px 0 0 46px; }
+.key { display: inline-flex; align-items: center; gap: 6px; }
+.key i { display: inline-block; width: 18px; height: 0; border-top: 2px solid var(--series-1); }
+.key i.k2 { border-top-color: var(--series-2); }
+.key i.kt { border-top: 2px dashed var(--target); }
+.key i.kd { border-top: 2px dotted var(--series-2); }
+.key i.km { border-top: 1px dashed var(--muted); }
+.tip {
+  position: absolute; pointer-events: none; background: var(--panel); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 4px; padding: 4px 8px; font-size: 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15); white-space: nowrap; z-index: 2;
+}
+
+.robot { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px; min-width: 0; }
+.robot-grid { display: grid; grid-template-columns: minmax(0, 1fr) 230px; gap: 12px; align-items: start; }
+@media (max-width: 760px) { .robot-grid { grid-template-columns: minmax(0, 1fr); } }
+.topview { position: relative; min-width: 0; }
+.topview canvas { display: block; width: 100%; height: 360px; background: var(--surface); border-radius: 4px; }
+.readout { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; margin: 0; font-size: 13px; }
+.readout dt { color: var(--ink-2); }
+.readout dd { margin: 0; text-align: right; font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.state-chip { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 4px; font-size: 12px; font-weight: 600; background: var(--control); }
+.state-chip.lifted { background: var(--warn-bg); color: var(--warn-ink); }
+.keys { font-size: 12px; color: var(--ink-2); margin: 8px 0 0; }
+.keys kbd { font-family: var(--font-num); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 3px; padding: 0 4px; background: var(--control); }
+.table-wrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { padding: 6px 10px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { font-size: 11px; color: var(--ink-2); font-weight: 600; letter-spacing: 0.04em; }
+
+.log { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; }
+.log ol { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow: auto; font-family: var(--font-num); font-size: 12px; }
+.log li { padding: 2px 0; border-bottom: 1px dotted var(--line); overflow-wrap: anywhere; }
+.log li.warn { color: var(--warn-ink); }
+.log li.error { color: var(--critical); }
+.facts { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 16px; font-size: 13px; color: var(--ink-2); }
+.facts ul { margin: 6px 0; padding-left: 1.2em; }
+.facts li { max-width: 75ch; }
+.alert {
+  display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 6px;
+  background: var(--crit-bg); color: var(--ink); border: 1px solid var(--critical);
+}
+.alert h2 { margin: 0; font-size: 15px; color: var(--critical); }
+.alert p { margin: 0; font-size: 13px; max-width: 80ch; }
+.alert .row button.fix { background: var(--panel); border-color: var(--critical); font-weight: 600; }
+.banner {
+  background: var(--warn-bg); color: var(--warn-ink); border-radius: 6px; padding: 8px 12px; font-size: 13px;
+}
+.badge-ex { font-size: 11px; padding: 1px 6px; border-radius: 3px; background: var(--warn-bg); color: var(--warn-ink); margin-left: 6px; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+</head>
+<body>
+<header class="bar">
+  <h1>電流モード試験台</h1>
+  <div class="sub">QUESTiX 足回りの current モード（PI＋摩擦補償＋暴走ガード）を、本物の drive_component と擬似モータで動かして見る</div>
+  <div class="pills">
+    <span class="pill bad" id="conn">切断</span>
+    <span class="pill plain" id="source">—</span>
+    <span class="pill plain" id="load">負荷: —</span>
+    <span class="pill plain" id="tick">tick: —</span>
+  </div>
+</header>
+
+<main class="layout">
+  <aside class="controls">
+    <div class="banner" id="offline">バックエンドに接続していません。<code class="mono">python3 scripts/current_mode_sim/sim_server.py</code> を起動してください（下のグラフは<strong>例</strong>です）。</div>
+
+    <section class="group sim-only" aria-labelledby="h-load">
+      <h2 id="h-load">負荷（擬似モータ）</h2>
+      <div class="stack">
+        <label for="plant">車輪の負荷</label>
+        <select id="plant"></select>
+        <div class="row">
+          <button id="pickup" type="button">持ち上げる（浮かせる）</button>
+          <button id="putdown" type="button">床に置く</button>
+        </div>
+        <label><input type="checkbox" id="drop"> 応答を止める（途絶の試験）</label>
+      </div>
+    </section>
+
+    <section class="group sim-only" aria-labelledby="h-drive">
+      <h2 id="h-drive">走行指令</h2>
+      <div class="stack">
+        <div class="row" id="profiles"></div>
+        <div class="row"><button id="stop" type="button" class="primary">停止</button></div>
+        <label><input type="checkbox" id="manual"> 手動で走らせる</label>
+        <div class="slider"><label for="lin">前後</label><input type="range" id="lin" min="-0.6" max="0.6" step="0.01" value="0"><span class="num" id="lin-v">0.00 m/s</span></div>
+        <div class="slider"><label for="ang">旋回</label><input type="range" id="ang" min="-3" max="3" step="0.05" value="0"><span class="num" id="ang-v">0.00 rad/s</span></div>
+        <p class="note">ノードは /target_twist が 1 s 途絶えると止まります。手動中はページが 0.1 s ごとに送り直します。</p>
+      </div>
+    </section>
+
+    <section class="group" aria-labelledby="h-params">
+      <h2 id="h-params">パラメータ（drive_component）</h2>
+      <div class="stack">
+        <div class="row" id="gain-presets"></div>
+        <div class="row" id="ff-presets"></div>
+        <div class="stack" id="params"></div>
+        <label><input type="checkbox" id="p-current_invert_measured"> 実測の符号を反転（current_invert_measured）</label>
+        <div class="row"><button id="apply" type="button" class="primary">適用</button><button id="revert" type="button">元に戻す</button></div>
+        <p class="msg" id="param-msg" role="status"></p>
+      </div>
+    </section>
+
+    <section class="group sim-only" aria-labelledby="h-guard">
+      <h2 id="h-guard">暴走ガード</h2>
+      <p class="note" style="margin-top:0">作動した車輪は電流 0 でラッチし、走行はフォールト停止します。current モードのパラメータを変えるか、ノードを再起動すると解除されます。</p>
+      <div class="row" style="margin-top:8px"><button id="reset" type="button" class="danger">ガード解除（ノード再起動）</button></div>
+      <p class="msg" id="reset-msg" role="status"></p>
+    </section>
+  </aside>
+
+  <section class="scope" aria-label="計測">
+    <div class="alert" id="guard-alert" role="alert" hidden>
+      <h2 id="ga-title">■ 暴走ガードが作動して止まっています</h2>
+      <p id="ga-text"></p>
+      <p id="ga-how">作動したままの車輪には電流が流れません（安全のため、床に置くだけでは解除されません）。原因を直してから解除してください。</p>
+      <div class="row" id="ga-actions"></div>
+      <p class="msg" id="ga-msg" role="status"></p>
+    </div>
+    <div class="toolbar">
+      <div class="seg" role="group" aria-label="表示する時間幅">
+        <button type="button" id="w10" aria-pressed="true">10 s</button>
+        <button type="button" id="w30" aria-pressed="false">30 s</button>
+      </div>
+      <button type="button" id="pause" aria-pressed="false">一時停止</button>
+      <label><input type="checkbox" id="flip" checked> 右輪を前進＝正で表示</label>
+      <button type="button" id="clear-stats">統計をリセット</button>
+    </div>
+
+    <div class="tiles">
+      <div class="tile"><div class="k">ピーク速度（左 / 右）</div><div class="v num" id="peak">— <small>rpm</small></div></div>
+      <div class="tile"><div class="k">追従誤差 RMS（表示範囲）</div><div class="v num" id="rms">— <small>rpm</small></div></div>
+      <div class="tile"><div class="k">最大電流指令（表示範囲）</div><div class="v num" id="imax">— <small>A</small></div></div>
+      <div class="tile"><div class="k">ガード</div><div class="v" id="guard-sum">—</div></div>
+    </div>
+
+    <article class="robot" id="robot-panel" aria-labelledby="h-robot">
+      <div class="wheel-head">
+        <h2 id="h-robot">ロボットの動き（上から見た図）</h2>
+        <span class="state-chip" id="robot-state">—</span>
+        <span class="guard-text" id="robot-note"></span>
+        <button type="button" id="reset-pose">位置をリセット</button>
+      </div>
+      <div class="robot-grid">
+        <div class="topview"><canvas id="c-top" aria-label="ロボットの位置と軌跡"></canvas></div>
+        <div>
+          <dl class="readout">
+            <dt>位置 x / y</dt><dd id="r-xy">—</dd>
+            <dt>向き</dt><dd id="r-th">—</dd>
+            <dt>前後速度</dt><dd id="r-v">—</dd>
+            <dt>旋回</dt><dd id="r-w">—</dd>
+            <dt>走行距離</dt><dd id="r-dist">—</dd>
+            <dt>オドメトリのずれ</dt><dd id="r-err">—</dd>
+          </dl>
+          <p class="keys"><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> または <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> で操縦、<kbd>Space</kbd> で停止（「手動で走らせる」がオンになります）。床の上では「床の上用（目安）」ゲインを適用してください。</p>
+        </div>
+      </div>
+      <div class="legend"><span class="key sim-key"><i></i>真の軌跡（擬似モータの車体）</span><span class="key"><i class="kd"></i>オドメトリ（drive_component の /odom）</span><span class="key"><i class="km"></i>格子 0.5 m</span></div>
+      <div class="chart"><canvas id="c-v" aria-label="車体の前後速度"></canvas><span class="title">前後速度 [m/s]</span></div>
+      <div class="legend"><span class="key"><i class="kt"></i>指令（加速度制限の後）</span><span class="key sim-key"><i></i>真の速度</span><span class="key"><i class="kd"></i>オドメトリ</span></div>
+      <div class="chart"><canvas id="c-w" aria-label="車体の旋回角速度"></canvas><span class="title">旋回の角速度 [rad/s]</span></div>
+      <div class="legend"><span class="key"><i class="kt"></i>指令（加速度制限の後）</span><span class="key sim-key"><i></i>真の角速度</span><span class="key"><i class="kd"></i>オドメトリ</span></div>
+    </article>
+
+    <article class="wheel" id="wheel-left">
+      <div class="wheel-head">
+        <h2>左輪</h2>
+        <span class="guard" id="g-left"><span class="icon">●</span><span class="lbl">正常</span></span>
+        <span class="guard-text" id="gt-left"></span>
+      </div>
+      <div class="chart"><canvas id="c-left-speed" aria-label="左輪の速度"></canvas><span class="title">速度 [rpm]</span></div>
+      <div class="legend"><span class="key"><i class="kt"></i>目標</span><span class="key"><i></i>実測（モータの報告）</span><span class="key sim-key"><i class="kd"></i>真の速度（擬似モータ）</span></div>
+      <div class="chart"><canvas id="c-left-current" aria-label="左輪の電流"></canvas><span class="title">電流 [A]</span></div>
+      <div class="legend"><span class="key"><i></i>指令</span><span class="key"><i class="k2"></i>実測（モータの報告）</span><span class="key"><i class="km"></i>±上限 max_current_amp</span></div>
+    </article>
+
+    <article class="wheel" id="wheel-right">
+      <div class="wheel-head">
+        <h2>右輪</h2>
+        <span class="guard" id="g-right"><span class="icon">●</span><span class="lbl">正常</span></span>
+        <span class="guard-text" id="gt-right"></span>
+      </div>
+      <div class="chart"><canvas id="c-right-speed" aria-label="右輪の速度"></canvas><span class="title">速度 [rpm]</span></div>
+      <div class="legend"><span class="key"><i class="kt"></i>目標</span><span class="key"><i></i>実測（モータの報告）</span><span class="key sim-key"><i class="kd"></i>真の速度（擬似モータ）</span></div>
+      <div class="chart"><canvas id="c-right-current" aria-label="右輪の電流"></canvas><span class="title">電流 [A]</span></div>
+      <div class="legend"><span class="key"><i></i>指令</span><span class="key"><i class="k2"></i>実測（モータの報告）</span><span class="key"><i class="km"></i>±上限 max_current_amp</span></div>
+    </article>
+
+    <div class="table-wrap">
+      <table aria-label="最新の値">
+        <thead><tr><th>最新の値</th><th>目標 rpm</th><th>実測 rpm</th><th>真の速度 rpm</th><th>電流指令 A</th><th>電流実測 A</th><th>モータのモード</th><th>新しい応答</th></tr></thead>
+        <tbody>
+          <tr><td>左輪</td><td class="num" id="t-left-ref">—</td><td class="num" id="t-left-meas">—</td><td class="num" id="t-left-true">—</td><td class="num" id="t-left-icmd">—</td><td class="num" id="t-left-imeas">—</td><td id="t-left-mode">—</td><td id="t-left-new">—</td></tr>
+          <tr><td>右輪</td><td class="num" id="t-right-ref">—</td><td class="num" id="t-right-meas">—</td><td class="num" id="t-right-true">—</td><td class="num" id="t-right-icmd">—</td><td class="num" id="t-right-imeas">—</td><td id="t-right-mode">—</td><td id="t-right-new">—</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <section class="log" aria-labelledby="h-log">
+      <h2 id="h-log" style="margin:0 0 6px;font-size:11px;letter-spacing:0.12em;color:var(--ink-2)">ノードのログ（新しい順）</h2>
+      <ol id="log"></ol>
+    </section>
+
+    <section class="facts" aria-labelledby="h-facts">
+      <h2 id="h-facts" style="margin:6px 0 0;font-size:13px;color:var(--ink)">このシミュレーションの前提</h2>
+      <ul>
+        <li>制御しているのは本物の drive_component（このワークスペースのビルド）です。擬似モータは M0602C のプロトコルで応答し、1 輪の運動方程式 J dω/dt = K<sub>t</sub> i − 摩擦 で車輪を動かします。</li>
+        <li>K<sub>t</sub> 0.44 Nm/A・無負荷電流 ≤ 0.25 A・無負荷回転 約 470 rpm は M0602C 仕様書の値です。慣性と摩擦は推定値（浮かせた車輪 約 4.7e-4 kg·m²、床の上は機体質量/2 × 0.05² m²）で、実機では測っていません。</li>
+        <li>実測はモータの応答で届くので 1 周期（20 ms）遅れ、1 rpm 単位です。床の上の負荷は直進の近似で、旋回の慣性は表していません。</li>
+        <li>D 項は入れていません。50 Hz では実測 1 rpm の変化が 50 rpm/s の微分になり、むだ時間と合わせて浮かせた軽い車輪を不安定にするためです。応答は摩擦補償で改善します。</li>
+        <li>擬似モータは指令が途絶えると最後の電流を保持します（実機の挙動は仕様書に無く、最悪の場合を想定）。</li>
+      </ul>
+    </section>
+  </section>
+</main>
+
+<script>
+'use strict';
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const WHEELS = ['left', 'right'];
+  const MAX_KEEP_SEC = 35;
+  const PARAM_FIELDS = [
+    ['current_kp', 'P ゲイン', 'A/rpm', 0.0005],
+    ['current_ki', 'I ゲイン', 'A/(rpm·s)', 0.001],
+    ['max_current_amp', '電流の上限', 'A', 0.1],
+    ['integral_limit_amp', '積分項の上限', 'A', 0.05],
+    ['current_ff_static_amp', '摩擦補償 静止分', 'A', 0.01],
+    ['current_ff_viscous_amp_per_rpm', '摩擦補償 粘性分', 'A/rpm', 0.0001],
+    ['current_guard_overspeed_margin_rpm', 'ガード 目標超過', 'rpm', 5],
+    ['current_guard_overspeed_time_sec', 'ガード 継続時間', 's', 0.05],
+  ];
+  const GAIN_PRESETS = [
+    ['浮かせた車輪用（既定）', { current_kp: 0.0015, current_ki: 0.004 }],
+    ['床の上用（目安）', { current_kp: 0.02, current_ki: 0.05 }],
+    ['旧 YAML（純 P）', { current_kp: 0.001, current_ki: 0.0 }],
+  ];
+  const FF_PRESETS = [
+    ['補償なし', { current_ff_static_amp: 0, current_ff_viscous_amp_per_rpm: 0 }],
+    ['浮かせた車輪の推定', { current_ff_static_amp: 0.08, current_ff_viscous_amp_per_rpm: 0.00036 }],
+    ['床 6 kg の推定', { current_ff_static_amp: 0.15, current_ff_viscous_amp_per_rpm: 0.00036 }],
+  ];
+  const GUARD_LABEL = { against: 'ブレーキ電流で加速', overspeed: '目標超過', oscillation: '発振', stale: '応答なし', mode: 'モータが電流モードでない' };
+  const TICK_LABEL = { idle: '待機', drive: '走行', timeout_stop: '指令途絶で停止', fault_stop: 'フォールト停止' };
+
+  const state = {
+    ws: null, connected: false, source: null, demo: true,
+    params: {}, maxCurrent: 1.0,
+    data: { t: [], left: [], right: [], body: [] },
+    markers: [],
+    pathTrue: [], pathOdom: [], lifted: false,
+    geometry: { wheel_radius: 0.05, wheel_separation: 0.5 },
+    view: { cx: 0, cy: 0, span: 3 },
+    guard: { left: null, right: null },
+    windowSec: 10, paused: false, pausedAt: null, flip: true,
+    peak: { left: 0, right: 0 },
+    hover: null, dirty: true,
+  };
+
+  // ---------- connection ----------
+  function connect() {
+    const ws = new WebSocket(`ws://${location.host}/ws`);
+    state.ws = ws;
+    ws.onopen = () => setConn(true);
+    ws.onclose = () => { setConn(false); setTimeout(connect, 1000); };
+    ws.onerror = () => ws.close();
+    ws.onmessage = (ev) => { try { onMessage(JSON.parse(ev.data)); } catch (e) { console.error(e); } };
+  }
+  function send(obj) {
+    if (state.ws && state.ws.readyState === 1) { state.ws.send(JSON.stringify(obj)); return true; }
+    return false;
+  }
+  function setConn(on) {
+    state.connected = on;
+    const pill = $('conn');
+    pill.textContent = on ? '接続中' : '切断';
+    pill.className = 'pill ' + (on ? 'ok' : 'bad');
+    $('offline').hidden = on;
+  }
+
+  function onMessage(m) {
+    switch (m.type) {
+      case 'hello': onHello(m); break;
+      case 'sample': onSample(m); break;
+      case 'plant': onPlant(m); break;
+      case 'guard': onGuard(m); break;
+      case 'log': addLog(m.level, m.text); break;
+      case 'params': setParams(m.params); showMsg('param-msg', '適用しました', 'ok'); break;
+      case 'pose_reset': state.pathTrue = []; state.pathOdom = []; state.dirty = true; break;
+      case 'error': showMsg(state.lastMsgTarget || 'param-msg', m.text, 'err'); addLog('error', m.text); break;
+    }
+  }
+
+  function onHello(m) {
+    state.source = m.source;
+    if (state.demo) { state.demo = false; clearData(); }
+    $('source').textContent = m.source === 'robot' ? '実機（読み取りのみ）' : 'シミュレーション';
+    document.querySelectorAll('.sim-only').forEach((el) => { el.hidden = m.source === 'robot'; });
+    document.querySelectorAll('.sim-key').forEach((el) => { el.hidden = m.source === 'robot'; });
+    $('apply').disabled = m.source === 'robot';
+    const plant = $('plant');
+    plant.innerHTML = '';
+    for (const p of m.plants || []) {
+      const o = document.createElement('option');
+      o.value = p.id; o.textContent = p.label; plant.appendChild(o);
+    }
+    const prof = $('profiles');
+    prof.innerHTML = '';
+    for (const p of m.profiles || []) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.textContent = p.label;
+      b.addEventListener('click', () => { resetStats(); send({ type: 'run_profile', profile: p.id }); setManual(false); });
+      prof.appendChild(b);
+    }
+    if (m.params && Object.keys(m.params).length) setParams(m.params);
+    if (m.geometry) state.geometry = m.geometry;
+    if (m.source === 'robot') setRobotState('実機（/odom のみ）', false);
+  }
+
+  function setRobotState(text, lifted) {
+    const chip = $('robot-state');
+    chip.textContent = text;
+    chip.className = 'state-chip' + (lifted ? ' lifted' : '');
+    $('robot-note').textContent = lifted ? '持ち上げ中: 車体は止まり、車輪だけが回っています' : '';
+  }
+
+  function onPlant(m) {
+    $('plant').value = m.plant;
+    $('load').textContent = '負荷: ' + (m.lifted ? '浮かせた車輪' : '床の上') + '（' + m.label + '）';
+    state.lifted = !!m.lifted;
+    setRobotState(m.lifted ? '持ち上げ中' : '床の上（' + m.label + '）', m.lifted);
+    renderAlert();
+    state.dirty = true;
+  }
+
+  function onGuard(m) {
+    const reason = m.reason === 'none' ? null : m.reason;
+    if (reason && state.guard[m.wheel] !== reason) {
+      const t = lastT();
+      state.markers.push({ t, wheel: m.wheel, reason });
+    }
+    state.guard[m.wheel] = reason;
+    renderGuard(m.wheel, reason, m.text || '');
+    state.dirty = true;
+  }
+
+  function renderGuard(wheel, reason, text) {
+    const chip = $('g-' + wheel);
+    chip.className = 'guard' + (reason ? ' trip' : '');
+    chip.querySelector('.icon').textContent = reason ? '■' : '●';
+    chip.querySelector('.lbl').textContent = reason ? '作動: ' + (GUARD_LABEL[reason] || reason) : '正常';
+    $('gt-' + wheel).textContent = reason ? text.split(' / ')[0] : '';
+    const trips = WHEELS.filter((w) => state.guard[w]).map((w) => (w === 'left' ? '左' : '右') + ': ' + (GUARD_LABEL[state.guard[w]] || state.guard[w]));
+    $('guard-sum').textContent = trips.length ? trips.join(' / ') : '作動なし';
+    $('guard-sum').style.color = trips.length ? 'var(--critical)' : '';
+    renderAlert();
+  }
+
+  // The banner names what tripped and offers the fix that usually applies, each clearing the latch.
+  function renderAlert() {
+    const reasons = [...new Set(WHEELS.map((w) => state.guard[w]).filter(Boolean))];
+    const box = $('guard-alert');
+    box.hidden = !reasons.length || state.source !== 'sim';
+    if (box.hidden) { showMsg('ga-msg', '', ''); return; }
+    const wheels = WHEELS.filter((w) => state.guard[w]).map((w) => (w === 'left' ? '左輪' : '右輪')).join('・');
+    $('ga-title').textContent = `■ 暴走ガードが作動して止まっています（${wheels}: ${reasons.map((r) => GUARD_LABEL[r] || r).join('、')}）`;
+    const text = {
+      oscillation: '電流が上限で正負に振れました。負荷に対してゲインが高すぎます（浮かせた車輪に床用のゲイン、走行中に持ち上げた等）。',
+      against: 'ブレーキ方向の電流なのに車輪が速くなりました。current_invert_measured の符号が逆（正帰還）の可能性が高いです。',
+      overspeed: '目標より速いまま減速しませんでした。摩擦補償の過補償か外力が考えられます。',
+      mode: 'モータが電流ループを報告していません。電流指令が速度目標として読まれるので止めました。',
+    };
+    $('ga-text').textContent = reasons.map((r) => text[r] || r).join(' ');
+    const actions = [];
+    const kp = state.params.current_kp || 0;
+    if (reasons.includes('oscillation')) {
+      if (state.lifted) actions.push(['床に置いて解除', () => { send({ type: 'put_down' }); send({ type: 'clear_guard' }); }]);
+      if (kp > 0.005) actions.push(['浮かせた車輪用ゲインにして解除', () => send({ type: 'set_params', params: { current_kp: 0.0015, current_ki: 0.004 } })]);
+    }
+    if (reasons.includes('against')) actions.push(['符号を反転して解除', () => send({ type: 'set_params', params: { current_invert_measured: !state.params.current_invert_measured } })]);
+    if (reasons.includes('overspeed')) actions.push(['摩擦補償を 0 にして解除', () => send({ type: 'set_params', params: { current_ff_static_amp: 0, current_ff_viscous_amp_per_rpm: 0 } })]);
+    if (!reasons.includes('mode')) actions.push(['そのまま解除', () => send({ type: 'clear_guard' })]);
+    actions.push(['ノードを再起動して解除', () => { state.lastMsgTarget = 'ga-msg'; send({ type: 'reset_node' }); }]);
+    const row = $('ga-actions');
+    row.innerHTML = '';
+    actions.forEach(([label, fn], i) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.textContent = label;
+      if (i === 0) b.className = 'fix';
+      b.addEventListener('click', () => { state.lastMsgTarget = 'ga-msg'; showMsg('ga-msg', '送信しました…', ''); fn(); });
+      row.appendChild(b);
+    });
+    if (state.lifted && kp > 0.005 && reasons.includes('oscillation')) {
+      showMsg('ga-msg', '浮かせたまま床用ゲインで解除すると、走らせた瞬間にまた発振で止まります', '');
+    }
+  }
+
+  // ---------- data ----------
+  function clearData() {
+    state.data = { t: [], left: [], right: [], body: [] };
+    state.markers = [];
+    state.pathTrue = [];
+    state.pathOdom = [];
+    resetStats();
+  }
+  function pushPath(path, p) {
+    if (!p) return;
+    const last = path[path.length - 1];
+    if (last && Math.hypot(p.x - last.x, p.y - last.y) < 0.005) return;
+    path.push({ x: p.x, y: p.y });
+    if (path.length > 6000) path.splice(0, path.length - 6000);
+  }
+  function resetStats() { state.peak = { left: 0, right: 0 }; state.dirty = true; }
+  function lastT() { const t = state.data.t; return t.length ? t[t.length - 1] : 0; }
+
+  function onSample(m) {
+    const d = state.data;
+    if (d.t.length && m.t < d.t[d.t.length - 1] - 1) clearData();  // the node restarted
+    d.t.push(m.t);
+    for (const w of WHEELS) {
+      const s = m.wheels[w];
+      d[w].push(s);
+      state.peak[w] = Math.max(state.peak[w], Math.abs(s.measured_rpm));
+    }
+    d.body.push({ cmdV: m.shaped_linear, cmdW: m.shaped_angular, robot: m.robot || null, odom: m.odom || null, odomTruth: m.odom_truth || null });
+    pushPath(state.pathTrue, m.robot && !m.robot.lifted ? m.robot : null);
+    pushPath(state.pathOdom, m.odom);
+    while (d.t.length && d.t[0] < m.t - MAX_KEEP_SEC) { d.t.shift(); d.left.shift(); d.right.shift(); d.body.shift(); }
+    state.markers = state.markers.filter((k) => k.t >= m.t - MAX_KEEP_SEC);
+    const tick = $('tick');
+    tick.textContent = 'tick: ' + (TICK_LABEL[m.tick_action] || m.tick_action) + (m.control_mode ? '（' + m.control_mode + '）' : '');
+    tick.className = 'pill plain';
+    state.latest = m;
+    state.dirty = true;
+  }
+
+  // ---------- params ----------
+  function buildParams() {
+    const box = $('params');
+    for (const [key, label, unit, step] of PARAM_FIELDS) {
+      const row = document.createElement('div');
+      row.className = 'param';
+      row.innerHTML = `<label for="p-${key}">${label} [${unit}]<br><code>${key}</code></label><input type="number" id="p-${key}" step="${step}" min="0">`;
+      box.appendChild(row);
+      row.querySelector('input').addEventListener('input', markChanged);
+    }
+    $('p-current_invert_measured').addEventListener('change', markChanged);
+    for (const [label, values] of GAIN_PRESETS) addPreset('gain-presets', label, values);
+    for (const [label, values] of FF_PRESETS) addPreset('ff-presets', label, values);
+  }
+  function addPreset(boxId, label, values) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.textContent = label;
+    b.addEventListener('click', () => {
+      for (const [k, v] of Object.entries(values)) $('p-' + k).value = v;
+      markChanged();
+      showMsg('param-msg', '入力欄に入れました。「適用」でノードへ送ります', '');
+    });
+    $(boxId).appendChild(b);
+  }
+  function setParams(p) {
+    state.params = Object.assign({}, state.params, p);
+    if (state.source) renderAlert();
+    if (typeof p.max_current_amp === 'number') state.maxCurrent = p.max_current_amp;
+    for (const [key] of PARAM_FIELDS) if (key in p) $('p-' + key).value = p[key];
+    if ('current_invert_measured' in p) $('p-current_invert_measured').checked = !!p.current_invert_measured;
+    markChanged();
+  }
+  function changedParams() {
+    const out = {};
+    for (const [key] of PARAM_FIELDS) {
+      const el = $('p-' + key);
+      const v = parseFloat(el.value);
+      if (!Number.isNaN(v) && v !== state.params[key]) out[key] = v;
+    }
+    const inv = $('p-current_invert_measured').checked;
+    if (inv !== !!state.params.current_invert_measured) out.current_invert_measured = inv;
+    return out;
+  }
+  function markChanged() {
+    const ch = changedParams();
+    for (const [key] of PARAM_FIELDS) $('p-' + key).classList.toggle('changed', key in ch);
+  }
+  function showMsg(id, text, kind) {
+    const el = $(id);
+    el.textContent = text;
+    el.className = 'msg' + (kind ? ' ' + kind : '');
+  }
+
+  // ---------- manual drive ----------
+  let manualTimer = null;
+  function setManual(on) {
+    $('manual').checked = on;
+    if (manualTimer) { clearInterval(manualTimer); manualTimer = null; }
+    if (on) manualTimer = setInterval(() => send({ type: 'twist', linear: +$('lin').value, angular: +$('ang').value }), 100);
+  }
+
+  // ---------- charts ----------
+  function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+  function niceStep(span, target) {
+    const raw = span / target;
+    const p = Math.pow(10, Math.floor(Math.log10(raw)));
+    const n = raw / p;
+    return (n >= 5 ? 10 : n >= 2 ? 5 : n >= 1 ? 2 : 1) * p;
+  }
+  function fitCanvas(c) {
+    const dpr = window.devicePixelRatio || 1;
+    const w = Math.max(10, Math.round(c.clientWidth * dpr));
+    const h = Math.max(10, Math.round(c.clientHeight * dpr));
+    if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+    return dpr;
+  }
+
+  // series: [{values:[...], color, dash, width}] all sharing state.data.t
+  function drawChart(canvas, t, series, opts) {
+    const dpr = fitCanvas(canvas);
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width / dpr, H = canvas.height / dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    const L = 46, R = 10, T = 20, B = 22;
+    const pw = W - L - R, ph = H - T - B;
+    const tEnd = opts.tEnd, tStart = tEnd - state.windowSec;
+    // visible range
+    let i0 = 0;
+    while (i0 < t.length && t[i0] < tStart) i0++;
+    let lo = Infinity, hi = -Infinity;
+    for (const s of series) {
+      for (let i = i0; i < t.length; i++) { const v = s.values[i]; if (v == null) continue; if (v < lo) lo = v; if (v > hi) hi = v; }
+    }
+    for (const g of opts.guides || []) { lo = Math.min(lo, g); hi = Math.max(hi, g); }
+    if (!isFinite(lo)) { lo = opts.minSpan ? -opts.minSpan : -1; hi = -lo; }
+    const span = Math.max(hi - lo, opts.minSpan || 1);
+    const mid = (hi + lo) / 2;
+    lo = mid - span * 0.55; hi = mid + span * 0.55;
+    const step = niceStep(hi - lo, 4);
+    lo = Math.floor(lo / step) * step; hi = Math.ceil(hi / step) * step;
+    const x = (tt) => L + ((tt - tStart) / state.windowSec) * pw;
+    const y = (v) => T + (1 - (v - lo) / (hi - lo)) * ph;
+
+    ctx.font = '11px ' + css('--font-num');
+    ctx.textBaseline = 'middle';
+    // grid + y labels
+    ctx.strokeStyle = css('--grid'); ctx.lineWidth = 1; ctx.fillStyle = css('--muted'); ctx.textAlign = 'right';
+    for (let v = lo; v <= hi + step / 2; v += step) {
+      const yy = Math.round(y(v)) + 0.5;
+      ctx.beginPath(); ctx.moveTo(L, yy); ctx.lineTo(W - R, yy); ctx.stroke();
+      ctx.fillText(fmt(v, step), L - 6, yy);
+    }
+    // zero line
+    if (lo < 0 && hi > 0) { ctx.strokeStyle = css('--axis'); ctx.beginPath(); ctx.moveTo(L, Math.round(y(0)) + 0.5); ctx.lineTo(W - R, Math.round(y(0)) + 0.5); ctx.stroke(); }
+    // x labels (seconds)
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillStyle = css('--muted');
+    const xs = state.windowSec <= 10 ? 2 : 5;
+    for (let s = Math.ceil(tStart / xs) * xs; s <= tEnd; s += xs) ctx.fillText(s.toFixed(0) + ' s', x(s), H - B + 5);
+    // guides
+    for (const g of opts.guides || []) {
+      ctx.strokeStyle = css('--muted'); ctx.setLineDash([3, 4]); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(L, y(g)); ctx.lineTo(W - R, y(g)); ctx.stroke(); ctx.setLineDash([]);
+    }
+    // guard markers
+    for (const mk of state.markers) {
+      if ((opts.wheel !== 'any' && mk.wheel !== opts.wheel) || mk.t < tStart || mk.t > tEnd) continue;
+      const xx = Math.round(x(mk.t)) + 0.5;
+      ctx.strokeStyle = css('--critical'); ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(xx, T); ctx.lineTo(xx, T + ph); ctx.stroke();
+      ctx.fillStyle = css('--critical'); ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.fillText('■ ガード: ' + (GUARD_LABEL[mk.reason] || mk.reason), Math.min(xx + 4, W - R - 150), T + 2);
+    }
+    // series
+    ctx.save();
+    ctx.beginPath(); ctx.rect(L, T, pw, ph); ctx.clip();
+    for (const s of series) {
+      ctx.strokeStyle = s.color; ctx.lineWidth = s.width || 2; ctx.setLineDash(s.dash || []);
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      let started = false;
+      for (let i = Math.max(0, i0 - 1); i < t.length; i++) {
+        const v = s.values[i];
+        if (v == null) { started = false; continue; }
+        const px = x(t[i]), py = y(v);
+        if (!started) { ctx.moveTo(px, py); started = true; } else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+    ctx.setLineDash([]);
+    // hover crosshair
+    const hv = state.hover;
+    if (hv && hv.canvas === canvas && t.length) {
+      const th = tStart + ((hv.x - L) / pw) * state.windowSec;
+      let best = -1, bd = Infinity;
+      for (let i = i0; i < t.length; i++) { const dd = Math.abs(t[i] - th); if (dd < bd) { bd = dd; best = i; } }
+      if (best >= 0) {
+        const xx = Math.round(x(t[best])) + 0.5;
+        ctx.strokeStyle = css('--axis'); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(xx, T); ctx.lineTo(xx, T + ph); ctx.stroke();
+        for (const s of series) {
+          const v = s.values[best]; if (v == null) continue;
+          ctx.fillStyle = css('--surface'); ctx.strokeStyle = s.color; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.arc(xx, y(v), 4, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        }
+        return { x: xx, index: best, t: t[best] };
+      }
+    }
+    return null;
+  }
+  function fmt(v, step) {
+    const d = step >= 1 ? 0 : step >= 0.1 ? 1 : 2;
+    return (Math.abs(v) < step / 1e6 ? 0 : v).toFixed(d);
+  }
+
+  function seriesFor(wheel) {
+    const rows = state.data[wheel];
+    const sign = wheel === 'right' && state.flip ? -1 : 1;
+    const pick = (k) => rows.map((r) => (r[k] == null ? null : sign * r[k]));
+    return {
+      ref: pick('ref_rpm'), meas: pick('measured_rpm'), tru: pick('true_rpm'),
+      icmd: pick('current_cmd_amp'), imeas: pick('current_meas_amp'),
+    };
+  }
+
+  function bodySeries() {
+    const rows = state.data.body;
+    const pick = (f) => rows.map((r) => { const v = f(r); return v == null ? null : v; });
+    return {
+      cmdV: pick((r) => r.cmdV), trueV: pick((r) => (r.robot ? r.robot.v : null)), odomV: pick((r) => (r.odom ? r.odom.v : null)),
+      cmdW: pick((r) => r.cmdW), trueW: pick((r) => (r.robot ? r.robot.w : null)), odomW: pick((r) => (r.odom ? r.odom.w : null)),
+    };
+  }
+
+  function draw() {
+    requestAnimationFrame(draw);
+    if (!state.dirty) return;
+    state.dirty = false;
+    const t = state.data.t;
+    const tEnd = state.paused && state.pausedAt != null ? state.pausedAt : Math.max(lastT(), state.windowSec);
+    const c1 = css('--series-1'), c2 = css('--series-2'), ct = css('--target');
+    let rmsSum = 0, rmsN = 0, imax = 0;
+    const tips = [];
+    const f = (v, d) => (v == null ? '—' : v.toFixed(d));
+    for (const w of WHEELS) {
+      const s = seriesFor(w);
+      const hasTrue = s.tru.some((v) => v != null);
+      const cs = $('c-' + w + '-speed'), cc = $('c-' + w + '-current');
+      const h1 = drawChart(cs, t, [
+        { values: s.ref, color: ct, dash: [6, 4] },
+        { values: s.meas, color: c1 },
+        ...(hasTrue ? [{ values: s.tru, color: c2, dash: [2, 3], width: 2 }] : []),
+      ], { tEnd, wheel: w, minSpan: 40 });
+      const h2 = drawChart(cc, t, [
+        { values: s.icmd, color: c1 },
+        { values: s.imeas, color: c2, width: 1.5 },
+      ], { tEnd, wheel: w, minSpan: 0.4, guides: [state.maxCurrent, -state.maxCurrent] });
+      if (h1) { const i = h1.index; tips.push({ canvas: cs, h: h1, html: `${h1.t.toFixed(2)} s　目標 <b class="num">${f(s.ref[i], 0)}</b>　実測 <b class="num">${f(s.meas[i], 0)}</b>` + (s.tru[i] != null ? `　真 <b class="num">${f(s.tru[i], 1)}</b>` : '') + ' rpm' }); }
+      if (h2) { const i = h2.index; tips.push({ canvas: cc, h: h2, html: `${h2.t.toFixed(2)} s　指令 <b class="num">${f(s.icmd[i], 3)}</b>　実測 <b class="num">${f(s.imeas[i], 3)}</b> A` }); }
+      for (let i = 0; i < t.length; i++) {
+        if (t[i] < tEnd - state.windowSec || t[i] > tEnd) continue;
+        if (s.meas[i] != null && s.ref[i] != null) { const e = s.meas[i] - s.ref[i]; rmsSum += e * e; rmsN++; }
+        if (s.icmd[i] != null) imax = Math.max(imax, Math.abs(s.icmd[i]));
+      }
+    }
+    const b = bodySeries();
+    const hasTrueBody = b.trueV.some((v) => v != null);
+    const cv = $('c-v'), cw = $('c-w');
+    const hv = drawChart(cv, t, [
+      { values: b.cmdV, color: ct, dash: [6, 4] },
+      ...(hasTrueBody ? [{ values: b.trueV, color: c1 }] : []),
+      { values: b.odomV, color: c2, dash: [2, 3] },
+    ], { tEnd, wheel: 'any', minSpan: 0.2 });
+    const hw = drawChart(cw, t, [
+      { values: b.cmdW, color: ct, dash: [6, 4] },
+      ...(hasTrueBody ? [{ values: b.trueW, color: c1 }] : []),
+      { values: b.odomW, color: c2, dash: [2, 3] },
+    ], { tEnd, wheel: 'any', minSpan: 0.4 });
+    if (hv) { const i = hv.index; tips.push({ canvas: cv, h: hv, html: `${hv.t.toFixed(2)} s　指令 <b class="num">${f(b.cmdV[i], 2)}</b>　真 <b class="num">${f(b.trueV[i], 2)}</b>　odom <b class="num">${f(b.odomV[i], 2)}</b> m/s` }); }
+    if (hw) { const i = hw.index; tips.push({ canvas: cw, h: hw, html: `${hw.t.toFixed(2)} s　指令 <b class="num">${f(b.cmdW[i], 2)}</b>　真 <b class="num">${f(b.trueW[i], 2)}</b>　odom <b class="num">${f(b.odomW[i], 2)}</b> rad/s` }); }
+    renderTip(tips);
+    drawTop();
+    renderRobot();
+    $('peak').innerHTML = `${Math.round(state.peak.left)} / ${Math.round(state.peak.right)} <small>rpm</small>`;
+    $('rms').innerHTML = rmsN ? `${Math.sqrt(rmsSum / rmsN).toFixed(1)} <small>rpm</small>` : '— <small>rpm</small>';
+    $('imax').innerHTML = `${imax.toFixed(2)} <small>A / 上限 ${state.maxCurrent.toFixed(2)}</small>`;
+    renderTable();
+  }
+
+  // ---------- top view ----------
+  function latestBody() {
+    const rows = state.data.body;
+    return rows.length ? rows[rows.length - 1] : null;
+  }
+  function drawTop() {
+    const canvas = $('c-top');
+    const dpr = fitCanvas(canvas);
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width / dpr, H = canvas.height / dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    const last = latestBody();
+    const pose = last ? (last.robot || last.odom) : null;
+    // follow the robot and fit the recent paths (smoothed so the view does not jump)
+    const pts = [...state.pathTrue.slice(-1500), ...state.pathOdom.slice(-1500)];
+    let cx = pose ? pose.x : 0, cy = pose ? pose.y : 0, span = 3;
+    if (pts.length) {
+      let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+      for (const p of pts.concat(pose ? [pose] : [])) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y); }
+      cx = (x0 + x1) / 2; cy = (y0 + y1) / 2;
+      // 0.6 m of margin on every side: the robot body reaches about 0.3 m past its pose point
+      span = Math.max(3, (x1 - x0) + 1.2, ((y1 - y0) + 1.2) * (W / H));
+    }
+    const v = state.view;
+    const k = matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : 0.3;
+    v.cx += (cx - v.cx) * k; v.cy += (cy - v.cy) * k; v.span += (span - v.span) * k;
+    if (Math.abs(cx - v.cx) > 1e-3 || Math.abs(span - v.span) > 1e-3) state.dirty = true;
+    const scale = W / v.span;
+    const sx = (x) => W / 2 + (x - v.cx) * scale;
+    const sy = (y) => H / 2 - (y - v.cy) * scale;
+    // grid every 0.5 m (1 m when zoomed out)
+    const step = v.span > 12 ? 1 : 0.5;
+    ctx.lineWidth = 1;
+    const xmin = v.cx - W / 2 / scale, xmax = v.cx + W / 2 / scale;
+    const ymin = v.cy - H / 2 / scale, ymax = v.cy + H / 2 / scale;
+    for (let x = Math.floor(xmin / step) * step; x <= xmax; x += step) {
+      ctx.strokeStyle = Math.abs(x) < 1e-6 ? css('--axis') : css('--grid');
+      ctx.beginPath(); ctx.moveTo(Math.round(sx(x)) + 0.5, 0); ctx.lineTo(Math.round(sx(x)) + 0.5, H); ctx.stroke();
+    }
+    for (let y = Math.floor(ymin / step) * step; y <= ymax; y += step) {
+      ctx.strokeStyle = Math.abs(y) < 1e-6 ? css('--axis') : css('--grid');
+      ctx.beginPath(); ctx.moveTo(0, Math.round(sy(y)) + 0.5); ctx.lineTo(W, Math.round(sy(y)) + 0.5); ctx.stroke();
+    }
+    // scale bar
+    ctx.fillStyle = css('--muted'); ctx.strokeStyle = css('--muted'); ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(12, H - 14); ctx.lineTo(12 + scale, H - 14); ctx.stroke();
+    ctx.font = '11px ' + css('--font-num'); ctx.textBaseline = 'bottom'; ctx.textAlign = 'left';
+    ctx.fillText('1 m', 12, H - 18);
+    ctx.fillText('原点 ＋', sx(0) + 4, sy(0) - 2);
+    // paths
+    const path = (pts2, color, dash) => {
+      if (pts2.length < 2) return;
+      ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.setLineDash(dash); ctx.lineJoin = 'round';
+      ctx.beginPath(); ctx.moveTo(sx(pts2[0].x), sy(pts2[0].y));
+      for (const p of pts2) ctx.lineTo(sx(p.x), sy(p.y));
+      ctx.stroke(); ctx.setLineDash([]);
+    };
+    path(state.pathOdom, css('--series-2'), [4, 4]);
+    path(state.pathTrue, css('--series-1'), []);
+    // robots: the odometry estimate as a ghost, the true body solid
+    if (last && last.odom && last.robot) drawRobot(ctx, sx, sy, scale, last.odom, true);
+    if (pose) drawRobot(ctx, sx, sy, scale, pose, false);
+    if (!pose) {
+      ctx.fillStyle = css('--muted'); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('データを待っています', W / 2, H / 2);
+    }
+  }
+  function drawRobot(ctx, sx, sy, scale, p, ghost) {
+    const half = state.geometry.wheel_separation / 2, r = state.geometry.wheel_radius;
+    ctx.save();
+    ctx.translate(sx(p.x), sy(p.y));
+    ctx.rotate(-p.theta);
+    ctx.scale(scale, scale);
+    ctx.lineWidth = 2 / scale;
+    if (ghost) {
+      ctx.setLineDash([4 / scale, 4 / scale]);
+      ctx.strokeStyle = css('--series-2');
+      ctx.strokeRect(-0.18, -half + 0.03, 0.40, 2 * half - 0.06);
+      ctx.restore();
+      return;
+    }
+    ctx.fillStyle = css('--control'); ctx.strokeStyle = css('--ink');
+    ctx.globalAlpha = state.lifted ? 0.55 : 1;
+    if (state.lifted) ctx.setLineDash([6 / scale, 4 / scale]);
+    ctx.fillRect(-0.18, -half + 0.03, 0.40, 2 * half - 0.06);
+    ctx.strokeRect(-0.18, -half + 0.03, 0.40, 2 * half - 0.06);
+    ctx.setLineDash([]);
+    ctx.fillStyle = css('--ink');
+    for (const y of [half, -half]) ctx.fillRect(-r, y - 0.02, 2 * r, 0.04);  // wheels
+    ctx.fillStyle = css('--series-1');
+    ctx.beginPath(); ctx.moveTo(0.2, 0); ctx.lineTo(0.08, 0.08); ctx.lineTo(0.08, -0.08); ctx.closePath(); ctx.fill();  // heading
+    ctx.restore();
+  }
+  function renderRobot() {
+    const last = latestBody();
+    const p = last ? (last.robot || last.odom) : null;
+    const f = (v, d) => (v == null ? '—' : v.toFixed(d));
+    $('r-xy').textContent = p ? `${f(p.x, 2)} / ${f(p.y, 2)} m` : '—';
+    $('r-th').textContent = p ? `${f(p.theta * 180 / Math.PI, 0)}°` : '—';
+    $('r-v').textContent = p ? `${f(p.v, 2)} m/s` : '—';
+    $('r-w').textContent = p ? `${f(p.w, 2)} rad/s` : '—';
+    $('r-dist').textContent = last && last.robot ? `${f(last.robot.distance, 2)} m` : '—';
+    // compare /odom with where the robot was when that /odom arrived (not with the pose now)
+    const ref = last && (last.odomTruth || last.robot);
+    $('r-err').textContent = ref && last.odom
+      ? `${f(Math.hypot(ref.x - last.odom.x, ref.y - last.odom.y), 3)} m` : '—';
+  }
+
+  const tipEl = document.createElement('div');
+  tipEl.className = 'tip'; tipEl.hidden = true;
+  function renderTip(tips) {
+    if (!tips.length) { tipEl.hidden = true; return; }
+    const { canvas, h, html } = tips[0];
+    const parent = canvas.parentElement;
+    if (tipEl.parentElement !== parent) parent.appendChild(tipEl);
+    tipEl.innerHTML = html;
+    tipEl.hidden = false;
+    const left = Math.min(Math.max(h.x + 10, 0), parent.clientWidth - tipEl.offsetWidth - 4);
+    tipEl.style.left = left + 'px';
+    tipEl.style.top = '22px';
+  }
+
+  function renderTable() {
+    const m = state.latest;
+    for (const w of WHEELS) {
+      const r = m && m.wheels[w];
+      const sign = w === 'right' && state.flip ? -1 : 1;
+      const f = (v, d) => (v == null ? '—' : (sign * v).toFixed(d));
+      $(`t-${w}-ref`).textContent = r ? f(r.ref_rpm, 0) : '—';
+      $(`t-${w}-meas`).textContent = r ? f(r.measured_rpm, 0) : '—';
+      $(`t-${w}-true`).textContent = r && r.true_rpm != null ? f(r.true_rpm, 1) : '—';
+      $(`t-${w}-icmd`).textContent = r ? f(r.current_cmd_amp, 3) : '—';
+      $(`t-${w}-imeas`).textContent = r ? f(r.current_meas_amp, 3) : '—';
+      $(`t-${w}-new`).textContent = r ? (r.feedback_new ? 'あり' : 'なし') : '—';
+      $(`t-${w}-mode`).textContent = r && r.mode != null ? ({ 1: '電流', 2: '速度' }[r.mode] || String(r.mode)) : '—';
+    }
+  }
+
+  // ---------- log ----------
+  function addLog(level, text) {
+    const li = document.createElement('li');
+    li.className = level;
+    const now = new Date();
+    li.textContent = `${now.toLocaleTimeString('ja-JP', { hour12: false })}  ${text}`;
+    const ol = $('log');
+    ol.insertBefore(li, ol.firstChild);
+    while (ol.children.length > 40) ol.removeChild(ol.lastChild);
+  }
+
+  // ---------- demo data (until the backend answers) ----------
+  function loadDemo() {
+    const d = state.data;
+    for (let k = 0; k <= 300; k++) {
+      const t = k * 0.02;
+      const ref = Math.min(100, t * 286 * 0.6);
+      const meas = ref < 100 ? ref * 0.85 : 100 - 18 * Math.exp(-(t - 0.6) * 4) * Math.cos((t - 0.6) * 9);
+      const icmd = 0.11 + (ref < 100 ? 0.06 : 0.04 * Math.exp(-(t - 0.6) * 3));
+      for (const w of WHEELS) {
+        const sign = w === 'right' ? -1 : 1;
+        d[w].push({ ref_rpm: sign * Math.round(ref), measured_rpm: sign * Math.round(meas), current_cmd_amp: sign * icmd, current_meas_amp: sign * icmd * 0.97, feedback_new: true });
+      }
+      // example body: an arc at the wheel speed above (marked 例 in the source pill)
+      const v = meas * 2 * Math.PI * 0.05 / 60, th = 0.25 * t;
+      const x = t < 0.01 ? 0 : (v / 0.25) * Math.sin(th), y = t < 0.01 ? 0 : (v / 0.25) * (1 - Math.cos(th));
+      const robot = { x, y, theta: th, v, w: 0.25, distance: v * t, lifted: false };
+      const odom = { x: x * 1.03, y: y * 0.97, theta: th, v: v * 0.98, w: 0.24 };
+      d.body.push({ cmdV: ref * 2 * Math.PI * 0.05 / 60, cmdW: 0.25, robot, odom });
+      pushPath(state.pathTrue, robot); pushPath(state.pathOdom, odom);
+      d.t.push(t);
+    }
+    state.peak = { left: 103, right: 103 };
+    $('source').innerHTML = '例（未接続）<span class="badge-ex">例</span>';
+    state.dirty = true;
+  }
+
+  // ---------- wiring ----------
+  function wire() {
+    buildParams();
+    $('plant').addEventListener('change', (e) => send({ type: 'set_plant', plant: e.target.value }));
+    $('pickup').addEventListener('click', () => send({ type: 'pick_up' }));
+    $('putdown').addEventListener('click', () => send({ type: 'put_down' }));
+    $('drop').addEventListener('change', (e) => send({ type: 'drop_answers', on: e.target.checked }));
+    $('stop').addEventListener('click', () => { setManual(false); send({ type: 'stop' }); });
+    $('manual').addEventListener('change', (e) => setManual(e.target.checked));
+    $('lin').addEventListener('input', (e) => { $('lin-v').textContent = (+e.target.value).toFixed(2) + ' m/s'; });
+    $('ang').addEventListener('input', (e) => { $('ang-v').textContent = (+e.target.value).toFixed(2) + ' rad/s'; });
+    $('apply').addEventListener('click', () => {
+      const ch = changedParams();
+      if (!Object.keys(ch).length) { showMsg('param-msg', '変更はありません', ''); return; }
+      state.lastMsgTarget = 'param-msg';
+      showMsg('param-msg', '送信中…', '');
+      if (!send({ type: 'set_params', params: ch })) showMsg('param-msg', 'バックエンドに接続していません', 'err');
+    });
+    $('revert').addEventListener('click', () => { setParams(state.params); showMsg('param-msg', '', ''); });
+    $('reset').addEventListener('click', () => {
+      state.lastMsgTarget = 'reset-msg';
+      showMsg('reset-msg', '再起動中…（数秒）', '');
+      if (!send({ type: 'reset_node' })) showMsg('reset-msg', 'バックエンドに接続していません', 'err');
+      else setTimeout(() => { if ($('reset-msg').textContent.startsWith('再起動中')) showMsg('reset-msg', '要求を送りました。ログを確認してください', ''); }, 6000);
+    });
+    const setWindow = (sec) => {
+      state.windowSec = sec;
+      $('w10').setAttribute('aria-pressed', String(sec === 10));
+      $('w30').setAttribute('aria-pressed', String(sec === 30));
+      state.dirty = true;
+    };
+    $('w10').addEventListener('click', () => setWindow(10));
+    $('w30').addEventListener('click', () => setWindow(30));
+    $('pause').addEventListener('click', (e) => {
+      state.paused = !state.paused;
+      state.pausedAt = state.paused ? Math.max(lastT(), state.windowSec) : null;
+      e.target.setAttribute('aria-pressed', String(state.paused));
+      e.target.textContent = state.paused ? '再開' : '一時停止';
+      state.dirty = true;
+    });
+    $('flip').addEventListener('change', (e) => { state.flip = e.target.checked; state.dirty = true; });
+    $('clear-stats').addEventListener('click', resetStats);
+    $('reset-pose').addEventListener('click', () => send({ type: 'reset_pose' }));
+    const KEYS = { ArrowUp: ['lin', 0.4], KeyW: ['lin', 0.4], ArrowDown: ['lin', -0.4], KeyS: ['lin', -0.4],
+                   ArrowLeft: ['ang', 1.5], KeyA: ['ang', 1.5], ArrowRight: ['ang', -1.5], KeyD: ['ang', -1.5] };
+    const setAxis = (id, value) => {
+      $(id).value = value;
+      $(id).dispatchEvent(new Event('input'));
+    };
+    window.addEventListener('keydown', (e) => {
+      if (state.source !== 'sim' || e.target.closest('input, select, textarea')) return;
+      if (e.code === 'Space') {
+        e.preventDefault();
+        if (document.activeElement) document.activeElement.blur();  // do not also press a focused button
+        setAxis('lin', 0); setAxis('ang', 0); setManual(false); send({ type: 'stop' });
+        return;
+      }
+      const k = KEYS[e.code];
+      if (!k) return;
+      e.preventDefault();
+      if (!$('manual').checked) setManual(true);
+      setAxis(k[0], k[1]);
+    });
+    window.addEventListener('keyup', (e) => {
+      const k = KEYS[e.code];
+      if (k && $('manual').checked) setAxis(k[0], 0);
+    });
+    document.querySelectorAll('canvas').forEach((c) => {
+      c.addEventListener('mousemove', (e) => { const r = c.getBoundingClientRect(); state.hover = { canvas: c, x: e.clientX - r.left }; state.dirty = true; });
+      c.addEventListener('mouseleave', () => { state.hover = null; state.dirty = true; });
+    });
+    window.addEventListener('resize', () => { state.dirty = true; });
+    matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { state.dirty = true; });
+    new MutationObserver(() => { state.dirty = true; }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  }
+
+  wire();
+  loadDemo();
+  requestAnimationFrame(draw);
+  connect();
+})();
+</script>
+</body>
+</html>

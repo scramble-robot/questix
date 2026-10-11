@@ -165,7 +165,7 @@ production launcher ignores `ENABLE_GPIO_REF` in `launch.env` and always passes
 containing `ENABLE_GPIO_REF=false` therefore disables neither.
 
 Robot Manager has no switch or item for it in the 管理設定 card (the header's 非常停止ボタン
-shows the live state while the QUESTiX LAB bridge serves it), and `PUT /api/launch-config`
+shows the live state in every mode: see "E-stop display" below), and `PUT /api/launch-config`
 refuses `ENABLE_GPIO_REF` other than `"true"` (422; `"true"` is still accepted from older, cached
 pages). `GET /api/launch-config` and `/api/status` report the file as
 it is, so a legacy `false` stays visible until the next save, which rewrites it to `true`. Every
@@ -188,6 +188,29 @@ reads no GPIO and publishes `/emergency_stop` released (`released (no GPIO safet
 press of the E-stop button reaches ROS no more (RLY1 still cuts the power). The production
 launcher never uses it. `enable_autoreferee:=true` with `enable_gpio_ref:=false` is not a valid
 configuration and `questix_core.launch.xml` refuses it.
+
+### E-stop display (`estop_monitor.py`)
+
+The header's 非常停止ボタン and the 操作 tab's E-stop row come from `/api/status`
+`emergency_stop`, in lesson, practice and competition mode alike (the QUESTiX LAB bridge, which
+used to be their only source, runs in lesson mode only). While the robot service is active,
+`estop_monitor.py` keeps one listener child, `estop_listener.py`, subscribed to
+`/emergency_stop` (questix_msgs/EmergencyStop, reliable + transient_local + keep-last(1)), sourced
+like the actuation heartbeat: ROS, then `ROBOT_WS` from `launch.env`, in the robot's
+`ROS_DOMAIN_ID`. It publishes nothing and offers no services; it stops when the service is not
+active, follows a changed domain or workspace, and is retried after 10 s when it cannot start or
+exits.
+
+| `state` | shown | when |
+|---|---|---|
+| `pressed` | 押されています（operation_manager's reason in words, e.g. 非常停止ボタンが押されているか、つながっていません） | `active: true` |
+| `released` | 解除されています (header 解除中) | `active: false` |
+| `released`, reason `released (no GPIO safety path)` | 解除されています（…診断用の起動です） (header 不明) | manual `enable_gpio_ref:=false` |
+| `unknown` (`note`) | 確認しています / 届いていません / 途絶えています / the error | `starting`, `not_heard` (5 s), `silent` (no report for 1.5 s), `unavailable` |
+
+It is a display only: drive_component, shot_component, esc_motor_control and the lab bridge keep
+judging `/emergency_stop` themselves, and nothing here lets anything move. Unknown is never shown
+as released.
 
 ## QUESTiX LAB (`/lab/`)
 

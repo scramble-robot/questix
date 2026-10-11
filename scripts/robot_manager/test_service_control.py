@@ -24,6 +24,13 @@ def app(tmp_path, monkeypatch):
     monkeypatch.setattr(module, "START_SETTLE_SEC", 0.0)
     monkeypatch.setattr(module, "STOP_SETTLE_SEC", 0.2)
     monkeypatch.setattr(module, "POLL_SEC", 0.02)
+    # No real /emergency_stop listener (test_estop_monitor.py tests it with a fake process).
+    module.estop_seen = []
+
+    def observe(service):
+        module.estop_seen.append(service)
+        return {"state": "unknown", "note": "robot_stopped"}
+    monkeypatch.setattr(module.estop_monitor, "observe", observe)
     return module
 
 
@@ -78,6 +85,8 @@ def test_practice_start_writes_a_request_and_reports_the_practice_launch(app, se
     assert not app.START_REQUEST_FILE.exists()
     status = app.get_status()
     assert status["mode"] == "practice" and status["running_mode"] == "practice"
+    # The E-stop state is reported in practice mode too (no QUESTiX LAB bridge there).
+    assert status["emergency_stop"]["state"] == "unknown" and app.estop_seen == ["active"]
 
 
 def test_lesson_start_writes_a_lesson_request_and_reports_the_lesson_launch(app, service,

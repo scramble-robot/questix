@@ -65,8 +65,8 @@ robot_manager の「操作・速度」タブで編集できます。
 
 | パラメータ | 既定値 | 意味 |
 |---|---|---|
-| `longitudinal_input_ratio` | 0.025 | 車輪速度スケール [m/s]（同上、0.05 から半分） |
-| `angular_input_ratio` | 0.05 | 旋回成分スケール |
+| `longitudinal_input_ratio` | 1.0 | 車輪速度スケール [m/s]（倒し切りで約 191 rpm、3.2.0 と同じ） |
+| `angular_input_ratio` | 6.0 | 旋回成分スケール [1/m]（左右の速度差に掛ける。車輪半径に依存しない） |
 | `left_stick_vertical_axis` | 1 | 左車輪の軸番号 |
 | `right_stick_vertical_axis` | 4 | 右車輪の軸番号 |
 | `joy_topic` | `/joy` | 入力トピック |

@@ -75,13 +75,19 @@ control_rate Hz の固定 tick:
 
 ### 電流モード（実験的、`control_mode: "current"` のとき有効）
 
+電流指令 = 摩擦補償（目標だけから）+ `current_kp` × 誤差 + 積分項（電流 [A] で保持）。
+手順と注意は下の「current モード（実験的）の評価前提と安全注意」。
+
 | パラメータ | 既定値 | 実行時変更 | 効き |
 |---|---|---|---|
-| `current_kp` / `current_ki` | 0.001 / 0.0 | ○ | ホスト側 RPM→電流 PI ゲイン [A/rpm] |
-| `max_current_amp` | 1.0 | ○ | 電流指令の安全クランプ [A] |
-| `integral_limit_amp` | 0.3 | ○ | アンチワインドアップ [A] |
+| `current_kp` / `current_ki` | 0.0015 / 0.004 | ○ | ホスト側 RPM→電流 PI ゲイン [A/rpm]・[A/(rpm·s)]。0 以上（負は正帰還なので拒否）。既定は浮かせた車輪の出発点 |
+| `max_current_amp` | 1.0 | ○ | 電流指令の安全クランプ [A]。0〜4（`kMaxCurrentLimitAmp`、相電流保護 4.6 A より下） |
+| `integral_limit_amp` | 0.3 | ○ | 積分項の上限 [A]。出力が上限に張り付く間は積分しない（条件付き積分） |
 | `current_zero_deadband_rpm` | 5 | ○ | 静止時の微振動防止 |
-| `current_invert_measured` | true | ○ | 実測符号反転（正帰還防止） |
+| `current_invert_measured` | false | ○ | 実測符号反転。誤ると正帰還（暴走ガードの `against` で止まる）。2026-10 まで true |
+| `current_ff_static_amp` | 0.0 | ○ | 摩擦補償: 静止（クーロン）摩擦分 [A]。\|目標\| < 10 rpm では比例で立ち上げる |
+| `current_ff_viscous_amp_per_rpm` | 0.0 | ○ | 摩擦補償: 粘性摩擦分 [A/rpm] |
+| `current_guard_overspeed_margin_rpm` / `current_guard_overspeed_time_sec` | 50 / 0.3 | ○ | 暴走ガードの目標超過の判定（> 0。ガードは無効にできない） |
 
 ### モデルベース走行制御（実験的、**既定は無効**。velocity モードのみ）
 
@@ -124,7 +130,7 @@ ON/OFF しても、変更前のモデル由来の推定値が新しい設定へ�
 
 | パラメータ | 既定値 | 実行時変更 | 効き |
 |---|---|---|---|
-| `measured_lpf_tau_sec` | 0.15 | ○ | 実測RPMローパス（**レポート/odom経路のみ**、制御は生値）。`velocity_rpm_raw` に生値が併記される |
+| `measured_lpf_tau_sec` | 0.15 | ○ | 実測RPMローパス（**レポートと /odom の twist のみ**、制御と /odom の位置の積分は生値）。`velocity_rpm_raw` に生値が併記される。2026-10 まで /odom の位置はローパス後の実測を状態タイマーで「最新の実測 × 経過時間」で積分しており、旋回しながら進むと向きの遅れが位置のずれになった（擬似モータの S 字 3.2 m で約 0.5 m）。いまは制御 tick で、生値を実測の受信時刻で台形積分し（`integrateOdometry`）、配信時刻（スタンプ）まで最後の実測の速度で延ばして publish する（延ばした分は積分に残さない、上限 0.1 s）。同じ条件で約 0.017 m |
 | `status_publish_rate` | 50.0 | × | `/drive_status` の publish レート |
 | `publish_control_sample` | true | × | 制御 tick ごとの診断サンプル `/drive_control_sample` を出すか |
 | `control_sample_topic` | `/drive_control_sample` | × | 診断サンプルの出力先 |
@@ -194,9 +200,11 @@ ros2 param dump /drive_component
 | V3 停止の最後は停止フレームに切り替わり、減速はファーム（加速度バイト 1 = 最速）任せ | 文書化のみ。「停止フレームだけ加速度バイトを大きくする」案は未検証（実装するなら既定 OFF のパラメータで） | なし |
 | V4 停止フレームの高頻度送信でファームが減速を完了できない（ファームは受信フレームごとに内部状態を更新している可能性） | 文書化。定速中の送信頻度を変える試験の手順を `scripts/identify/README.md` に | なし |
 | V5 LQR は一次遅れモデル。床の上の約 1.5〜1.75 Hz の速度変動（原因は未確定：共振、回転の次数の脈動、摩擦・接触、制御・推定のどれかは識別できていない）を再現・抑制できるかは未検証、オブザーバは外乱と見なす | YAML / README に「振動対策ではない」。`test_control_core` の共振モデル（仮定値の 2 次系）で固定: 状態 FB だけでは揺れは減らず（≈10 → 12 rpm）、**外乱補償（`velocity_run_disturbance_gain` > 0）は共振付近の揺れを補正上限まで励起する（≈10 → 84 rpm）**。これは仮定値のモデルの上の結果で、実機の周波数・増幅率ではない。原因の同定と安全の確認が済むまで外乱補償を有効にしない | なし |
-| C1 current モード既定ゲイン（純 P 0.001 A/rpm、±1 A） | 既定値は変えず、起動時 WARN（`current_ki` ≤ 0 のとき）と下の評価前提 | なし |
+| C1 current モード既定ゲイン（純 P 0.001 A/rpm、±1 A） | **2026-10 に変更**: 純 P は摩擦に負けて目標 100 rpm に対し浮かせて約 15 rpm、床の上ではほぼ動かない（推定モデル）。既定を浮かせた車輪で安定する PI（0.0015 / 0.004）にし、摩擦補償を追加。床用の値は下の手順で決める | current モードのみ |
 | C2 current モードのランプ二重（ホストの加速度制限 + ライブラリの `current_max_accel_rpm_per_sec`） | 確認の結果、**二重になっていない**: ライブラリ側は既定 0（無効）で、設定する呼び出しがリポジトリに無い。ホストの加速度制限だけが効く | なし |
-| C3 `current_invert_measured: true` が既定、実機での符号確認の記録なし | current モード起動時 WARN。確認手順を下に | なし |
+| C3 `current_invert_measured: true` が既定、実機での符号確認の記録なし | **2026-10 に false へ変更**（velocity モードで指令と実測が同符号、ファームの速度ループも同じ電流指令の上にあるため）。実機は未確認なので、誤っていても暴走ガードが止める | current モードのみ |
+| C7 浮かせた車輪の暴走（正帰還・床用ゲインの発振・古い実測での電流） | **追加**: 暴走ガード（`against` / `overspeed` / `oscillation`、電流 0 でラッチ → フォールト停止）と、有効な応答が 3 回続けて無いときの電流 0。`test_ddt_current_guard`（擬似的な車輪）で確認 | current モードのみ |
+| C8 負の `current_kp` / `current_ki` を受け付けていた（正帰還）。積分を `rpm·s` で持ち、`current_ki` の変更で電流が跳ねた | **修正**: 負のゲインは configure・実行時とも拒否。積分項は電流 [A] で持つ | current モードのみ |
 | C4/C5 ホスト速度ループは 1 rpm 分解能・50 Hz で、ゲイン上限が負荷慣性で大きく変わる | 文書化（浮かせた状態は慣性が小さく、床上と同じゲインでは発振しやすい） | なし |
 | C6 指令途絶時のドライバの挙動がデータシートに無い | current モード起動時 WARN と下の安全注意 | なし |
 | 周期: current PI は実測 dt、`ControlCore` は固定 dt | 整合を確認（下）。初回・異常時のフォールバック 0.01 s は周期によらない定数（`current_ki` = 0 の既定では効かない） | なし |
@@ -237,20 +245,50 @@ ros2 param dump /drive_component
 
 ### current モード（実験的）の評価前提と安全注意
 
-- **ゲイン（C1）**: 既定 `current_kp: 0.001` A/rpm・`current_ki: 0.0`・`max_current_amp: 1.0` は
-  評価の出発点。純 P なので、摩擦に釣り合う電流を出すには定常偏差が要る（例: 0.1 A に 100 rpm の
-  偏差）。走行制御として機能するかは未評価。
-- **符号（C3）の確認手順**: 車輪を浮かせ、`max_current_amp` を小さく（例 0.3）、`current_ki: 0` で
-  起動する。小さい正の目標（例 20 rpm 相当）を与え、`/drive_control_sample` の `command_current_raw`
-  と `velocity_rpm_raw` を見る。目標に向かって回り、偏差が縮むなら符号は正しい。偏差が広がって
-  電流が上限に張り付くなら正帰還: すぐ止めて `current_invert_measured` を反転する。左右とも確認する。
-- **ゲインと負荷（C4/C5）**: ホストの速度ループは 1 rpm 分解能の実測を 50 Hz で見るだけで、
-  ゲインの上限は負荷慣性で大きく変わる。浮かせた車輪は慣性が小さく、床上と同じゲインでは
-  発振しやすい。浮かせた試験は低ゲインから上げ、床上では改めて詰める。
+ゲインと摩擦補償の考え方、暴走ガード、実機で進める順番。数値は M0602C 仕様書（K<sub>t</sub> 0.44
+Nm/A、無負荷電流 ≤ 0.25 A）と推定値（浮かせた車輪の慣性 約 4.7e-4 kg·m²、床の上は機体質量/2 ×
+r²）からの見積もりで、実機では測っていない。`scripts/current_mode_sim/`（擬似モータ + 本物の
+drive_component + ブラウザのモニタ）で同じ条件を手元で再現できる。
+
+- **ゲインは負荷で 20 倍変わる（C4/C5）**: 1 A で車輪が 1 秒に速くなる量は、浮かせた車輪で約
+  9000 rpm、6 kg の機体の床の上で約 500 rpm。50 Hz・1 tick のむだ時間では、P のループ利得
+  （0.02 s × その値 × `current_kp`）が 0.25 を超えると振動的、1 で不安定。既定の
+  0.0015 / 0.004 は浮かせた車輪で安定（床の上では遅いが安全側）。床の上の目安は 0.02 / 0.05 で、
+  これを浮かせた車輪で使うと発振する（ガードが `oscillation` で止める）。
+- **D 項は使わない**: 50 Hz では実測 1 rpm の変化が 50 rpm/s の微分になり、1 tick のむだ時間と
+  合わせると浮かせた軽い車輪を不安定にする（推定モデルの数値実験で、Kd = 5e-5 A/(rpm/s) から
+  発散）。応答の改善は摩擦補償で行う。
+- **摩擦補償**: 目標 RPM だけから決まる電流を足す（実測は使わないので補償そのものは発振の原因に
+  ならない）。過補償は車輪が目標を超えて回る形で出る（ガードが `overspeed` で止める）。浮かせた
+  ときと床の上で値が違う。
+- **符号（C3）**: 既定 false。誤ると正帰還で、「回転を止める向きの電流なのに速くなる」形で
+  現れ、ガードが `against` で止める（擬似的な車輪では 50 rpm 未満、0.3 s 以内）。
+- **暴走ガード**: 作動するとその車輪は電流 0 でラッチし、`isHealthy()` が false になって走行は
+  フォールト停止する（ノードのログ `Current guard tripped: <wheel> wheel ..., reason <理由>`）。
+  解除は lifecycle の再構成か、current モードのパラメータ（ゲイン・上限・符号・摩擦補償・ガード）
+  の変更。有効な応答が 3 回続けて無いときは、ラッチせずに電流 0 を送る（古い実測のまま電流を
+  出し続けない）。ガードはホストが動いている間だけ働く。
 - **指令の途絶（C6）**: ホストからの指令が途絶えたときにドライバが何をするか（電流を 0 にするか、
-  最後の電流を保持するか）はデータシートに無い。保持する場合、current モードは速度の上限なく
-  加速し得る（特に浮かせた車輪）。`cmd_timeout_sec` はホストが動いている間の途絶しか止めない。
+  最後の電流を保持するか）はデータシートに無い。保持する場合、ホストが止まると current モードは
+  速度の上限なく加速し得る（特に浮かせた車輪）。ガードもホストの中なので効かない。
   `max_current_amp` を小さく保ち、非常停止をすぐ押せる状態で試す。
+- **停止**: current モードの停止フレームは電流 0（惰性で止まる）。目標をランプで下げる通常の停止は
+  PI が減速させるが、`cmd_timeout_sec`・許可の喪失・フォールトの停止は惰性になる（velocity モードは
+  ファームが減速する）。床の上で試すときは十分な空間を取る。
+
+**実機で進める順番**（各段で `/drive_control_sample` を記録する。`command_current_raw` と
+`velocity_rpm_raw` を見る）:
+
+1. **浮かせる・符号**: 車輪を浮かせ、非常停止が効くことを確認。`control_mode: current`、既定の
+   ゲイン、`max_current_amp: 0.3`。小さな目標（20〜50 rpm）を与える。目標へ向かって回れば符号は
+   正しい。ガードが `against` で止めたら `current_invert_measured` を反転する。左右とも確認する。
+2. **浮かせる・摩擦**: 一定の目標（例 50 rpm と 200 rpm）で数秒回し、定常の電流（積分項が摩擦と
+   釣り合った値）を読む。2 点を直線で結び、傾きを `current_ff_viscous_amp_per_rpm`、0 rpm の
+   切片を `current_ff_static_amp` にする（浮かせたときの値）。入れた後に追従が速くなり、
+   `overspeed` が出ないこと。
+3. **床の上**: 作業責任者の許可・停止の手段・十分な空間を確保。浮かせ用のゲインのまま低速から。
+   遅ければ `current_kp` / `current_ki` を段階的に上げる（目安 0.02 / 0.05）。床の上の摩擦を手順 2
+   と同じ方法で測り直す。床用のゲインのまま持ち上げると `oscillation` で止まることも確認する。
 
 ### 未確認の食い違い（データシートとリポジトリ）
 
@@ -299,14 +337,19 @@ colcon test --packages-select motor_control_app
 - `test_control_core`: ファーム速度ループの簡易プラントモデル（仮定値。#179 の修正より前の `wheel_radius` 0.1 m などの値を使う回帰用のモデルで、現在の実機の動作点・不安定域を保証しない）込み閉ループシミュレーション
   （指令列のレート不変性・整定時間・停止ヒステリシスの回帰）
 - `test_drive_param_policy`: 実行時パラメータ変更ポリシー（live 反映 / 拒否）の回帰
+- `motor_control_lib` の `test_ddt_current_guard`: current モードを擬似的な車輪（疑似端末上の
+  M0602C 応答 + 1 輪の運動モデル）で動かし、浮かせた車輪の符号誤り・床用ゲイン・走行中の
+  持ち上げ・応答の途絶で止まること、正常なゲインでは止まらないことを確かめる
 
 ### Runtime parameter transaction
 
 `set_parameters_atomically` の要求は、全値を検証・stageしてから反映します。
 拒否時はmember、制御ライブラリ設定、ROS parameter storeを保持します。
-`current_kp` / `current_ki` は有限値、`max_current_amp` / `integral_limit_amp` は
-有限かつ0以上、`current_zero_deadband_rpm` は0〜INT_MAX、
-`current_invert_measured` はboolを受理します。追加の物理上限は設けません。
+`current_kp` / `current_ki` / `integral_limit_amp` / `current_ff_*` は有限かつ0以上
+（負のゲインは正帰還になるため拒否）、`max_current_amp` は0〜4 A（`kMaxCurrentLimitAmp`）、
+`current_guard_overspeed_*` は有限かつ正（ガードは無効にできない）、
+`current_zero_deadband_rpm` は0〜INT_MAX、`current_invert_measured` はboolを受理します。
+current モードでは configure 時にも同じ規則で検証し、外れていれば configure を失敗させます。
 既存integer runtime設定はintへ安全に変換できる範囲とし、負値による無効化は維持します。
 
 レイテンシの `ema_ms` / `ema=` は指数移動平均（alpha=0.05）です。

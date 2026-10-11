@@ -15,6 +15,8 @@
 #include <lifecycle_msgs/msg/state.hpp>
 #include <limits>
 #include <stdexcept>
+#include <string>
+#include <utility>
 
 #include "motor_control_app/drive_component.hpp"
 #include "motor_control_app/drive_control_tick.hpp"
@@ -55,12 +57,18 @@ void DriveComponent::declareParameters() {
 
   // 制御モード関連 (後方互換のため velocity 既定)
   this->declare_parameter("control_mode", std::string("velocity"));
-  this->declare_parameter("current_kp", 0.001);
-  this->declare_parameter("current_ki", 0.0);
+  // current モード（control_mode "current" のときだけ使う）。詳細は
+  // launcher/config/drive_component.yaml。
+  this->declare_parameter("current_kp", 0.0015);
+  this->declare_parameter("current_ki", 0.004);
   this->declare_parameter("max_current_amp", 1.0);
   this->declare_parameter("integral_limit_amp", 0.3);
   this->declare_parameter("current_zero_deadband_rpm", 5);
-  this->declare_parameter("current_invert_measured", true);
+  this->declare_parameter("current_invert_measured", false);
+  this->declare_parameter("current_ff_static_amp", 0.0);
+  this->declare_parameter("current_ff_viscous_amp_per_rpm", 0.0);
+  this->declare_parameter("current_guard_overspeed_margin_rpm", 50.0);
+  this->declare_parameter("current_guard_overspeed_time_sec", 0.3);
   this->declare_parameter("max_linear_accel", 1.5);
   this->declare_parameter("max_angular_accel", 1.5);
 
@@ -166,6 +174,13 @@ void DriveComponent::readParameters() {
   integral_limit_amp_ = this->get_parameter("integral_limit_amp").as_double();
   current_zero_deadband_rpm_ = this->get_parameter("current_zero_deadband_rpm").as_int();
   current_invert_measured_ = this->get_parameter("current_invert_measured").as_bool();
+  current_ff_static_amp_ = this->get_parameter("current_ff_static_amp").as_double();
+  current_ff_viscous_amp_per_rpm_ =
+      this->get_parameter("current_ff_viscous_amp_per_rpm").as_double();
+  current_guard_overspeed_margin_rpm_ =
+      this->get_parameter("current_guard_overspeed_margin_rpm").as_double();
+  current_guard_overspeed_time_sec_ =
+      this->get_parameter("current_guard_overspeed_time_sec").as_double();
   max_linear_accel_ = this->get_parameter("max_linear_accel").as_double();
   max_angular_accel_ = this->get_parameter("max_angular_accel").as_double();
   slew_taper_band_linear_ = this->get_parameter("slew_taper_band_linear").as_double();
@@ -232,25 +247,86 @@ void DriveComponent::warnIfLqrTicksAssumeAnotherRate() {
               1000.0 * velocity_run_model_delay_ticks_ / kLqrTickRateHz, kLqrTickRateHz);
 }
 
+namespace {
+
+// current モードのパラメータ 1 つの検証（configure 時と実行時変更で同じ規則）。
+// 問題が無ければ空文字、あれば理由を返す。
+std::string checkCurrentParam(const std::string& name, double value) {
+  if (!std::isfinite(value)) {
+    return name + " requires a finite value";
+  }
+  if (name == "current_guard_overspeed_margin_rpm" || name == "current_guard_overspeed_time_sec") {
+    // 暴走ガードは無効にできない（0 以下は拒否）
+    return value > 0.0 ? "" : name + " requires a positive value (the guard cannot be disabled)";
+  }
+  if (value < 0.0) {
+    // 負のゲインは正帰還（暴走）、負の上限・補償は意味を持たない
+    return name + " requires a nonnegative value";
+  }
+  if (name == "max_current_amp" && value > motor_control_lib::ddt_current_pi::kMaxCurrentLimitAmp) {
+    return name + " must be at most " +
+           std::to_string(motor_control_lib::ddt_current_pi::kMaxCurrentLimitAmp) +
+           " A (below the M0602C phase-current protection)";
+  }
+  return "";
+}
+
+bool isCurrentDoubleParam(const std::string& name) {
+  return name == "current_kp" || name == "current_ki" || name == "max_current_amp" ||
+         name == "integral_limit_amp" || name == "current_ff_static_amp" ||
+         name == "current_ff_viscous_amp_per_rpm" || name == "current_guard_overspeed_margin_rpm" ||
+         name == "current_guard_overspeed_time_sec";
+}
+
+}  // namespace
+
+std::string DriveComponent::currentModeParamsError() const {
+  const std::pair<const char*, double> values[] = {
+      {"current_kp", current_kp_},
+      {"current_ki", current_ki_},
+      {"max_current_amp", max_current_amp_},
+      {"integral_limit_amp", integral_limit_amp_},
+      {"current_ff_static_amp", current_ff_static_amp_},
+      {"current_ff_viscous_amp_per_rpm", current_ff_viscous_amp_per_rpm_},
+      {"current_guard_overspeed_margin_rpm", current_guard_overspeed_margin_rpm_},
+      {"current_guard_overspeed_time_sec", current_guard_overspeed_time_sec_}};
+  for (const auto& [name, value] : values) {
+    const auto error = checkCurrentParam(name, value);
+    if (!error.empty()) {
+      return error;
+    }
+  }
+  if (current_zero_deadband_rpm_ < 0) {
+    return "current_zero_deadband_rpm requires a nonnegative value";
+  }
+  return "";
+}
+
 void DriveComponent::warnCurrentModeAssumptions() {
-  // 既定値は変えない（走行挙動を変えない）。評価の前提を起動時に知らせるだけ。
-  if (current_ki_ <= 0.0) {
+  // 評価の前提を起動時に知らせる（current モードは実機で未調整）。
+  RCLCPP_WARN(this->get_logger(),
+              "current mode: the PI gains depend on the load inertia, which is about 20x larger on "
+              "the floor than with the wheels lifted. current_kp=%.4f A/rpm, current_ki=%.4f "
+              "A/(rpm*s) are the lifted-wheel starting values and are slow on the floor; floor "
+              "gains (about 10x or more) oscillate if the wheels are lifted. The runaway guard "
+              "stops a wheel at 0 A when that happens (motor_control_app/README.md, current mode)",
+              current_kp_, current_ki_);
+  if (current_ff_static_amp_ <= 0.0 && current_ff_viscous_amp_per_rpm_ <= 0.0) {
     RCLCPP_WARN(this->get_logger(),
-                "current mode with a pure P speed loop (current_kp=%.4f A/rpm, current_ki=%.4f, "
-                "max_current_amp=%.2f A): friction leaves a large steady speed error, e.g. "
-                "%.2f A at 50 rpm of error. These defaults are a starting point for evaluation, "
-                "not a working drive tuning (motor_control_app/README.md)",
-                current_kp_, current_ki_, max_current_amp_, current_kp_ * 50.0);
+                "current mode: no friction feedforward (current_ff_static_amp and "
+                "current_ff_viscous_amp_per_rpm are 0); the integral term alone has to carry the "
+                "friction. Measure them as in the README and set them");
   }
   RCLCPP_WARN(this->get_logger(),
-              "current mode: current_invert_measured=%s has no recorded check on this robot. "
-              "Confirm the sign with the wheels lifted before driving (README: current mode sign "
-              "check); a wrong sign is positive feedback",
+              "current mode: current_invert_measured=%s has no recorded check on this robot. A "
+              "wrong sign is positive feedback; the guard stops it (reason 'against'). Try it "
+              "with the wheels lifted first",
               current_invert_measured_ ? "true" : "false");
   RCLCPP_WARN(this->get_logger(),
               "current mode: what the DDT driver does when commands stop is not documented. If it "
               "holds the last current, an unloaded (lifted) wheel accelerates without a speed "
-              "limit. Keep max_current_amp low and the emergency stop at hand");
+              "limit (the host guard cannot act when the host stops). Keep max_current_amp low "
+              "and the emergency stop at hand");
 }
 
 bool DriveComponent::velocityRunLqrLacksRunThreshold() const {
@@ -322,6 +398,8 @@ rcl_interfaces::msg::SetParametersResult DriveComponent::onParameterChange(
 
   bool control_core_dirty = false;
   bool current_pi_dirty = false;
+  bool current_ff_dirty = false;
+  bool current_guard_dirty = false;
   bool warn_lqr_ignored = false;
   bool lqr_or_run_threshold_changed = false;
   std::vector<std::function<void()>> staged;
@@ -506,34 +584,37 @@ rcl_interfaces::msg::SetParametersResult DriveComponent::onParameterChange(
             motor_lib_->setCommandWaitMs(value);
           }
         });
-      } else if (name == "current_kp") {
+      } else if (isCurrentDoubleParam(name)) {
         const auto value = param.get_value<double>();
-        if (!std::isfinite(value)) {
-          throw std::invalid_argument(name + " requires a finite value");
+        const auto error = checkCurrentParam(name, value);
+        if (!error.empty()) {
+          throw std::invalid_argument(error);
         }
-        staged.emplace_back([this, value]() { current_kp_ = value; });
-        current_pi_dirty = true;
-      } else if (name == "current_ki") {
-        const auto value = param.get_value<double>();
-        if (!std::isfinite(value)) {
-          throw std::invalid_argument(name + " requires a finite value");
+        if (name == "current_kp") {
+          staged.emplace_back([this, value]() { current_kp_ = value; });
+          current_pi_dirty = true;
+        } else if (name == "current_ki") {
+          staged.emplace_back([this, value]() { current_ki_ = value; });
+          current_pi_dirty = true;
+        } else if (name == "max_current_amp") {
+          staged.emplace_back([this, value]() { max_current_amp_ = value; });
+          current_pi_dirty = true;
+        } else if (name == "integral_limit_amp") {
+          staged.emplace_back([this, value]() { integral_limit_amp_ = value; });
+          current_pi_dirty = true;
+        } else if (name == "current_ff_static_amp") {
+          staged.emplace_back([this, value]() { current_ff_static_amp_ = value; });
+          current_ff_dirty = true;
+        } else if (name == "current_ff_viscous_amp_per_rpm") {
+          staged.emplace_back([this, value]() { current_ff_viscous_amp_per_rpm_ = value; });
+          current_ff_dirty = true;
+        } else if (name == "current_guard_overspeed_margin_rpm") {
+          staged.emplace_back([this, value]() { current_guard_overspeed_margin_rpm_ = value; });
+          current_guard_dirty = true;
+        } else {  // current_guard_overspeed_time_sec
+          staged.emplace_back([this, value]() { current_guard_overspeed_time_sec_ = value; });
+          current_guard_dirty = true;
         }
-        staged.emplace_back([this, value]() { current_ki_ = value; });
-        current_pi_dirty = true;
-      } else if (name == "max_current_amp") {
-        const auto value = param.get_value<double>();
-        if (!std::isfinite(value) || value < 0.0) {
-          throw std::invalid_argument(name + " requires a finite nonnegative value");
-        }
-        staged.emplace_back([this, value]() { max_current_amp_ = value; });
-        current_pi_dirty = true;
-      } else if (name == "integral_limit_amp") {
-        const auto value = param.get_value<double>();
-        if (!std::isfinite(value) || value < 0.0) {
-          throw std::invalid_argument(name + " requires a finite nonnegative value");
-        }
-        staged.emplace_back([this, value]() { integral_limit_amp_ = value; });
-        current_pi_dirty = true;
       } else if (name == "current_zero_deadband_rpm") {
         const auto raw = param.get_value<int64_t>();
         if (raw < 0 || raw > std::numeric_limits<int>::max()) {
@@ -575,6 +656,13 @@ rcl_interfaces::msg::SetParametersResult DriveComponent::onParameterChange(
   if (current_pi_dirty && motor_lib_) {
     motor_lib_->setCurrentControlParams(current_kp_, current_ki_, max_current_amp_,
                                         integral_limit_amp_);
+  }
+  if (current_ff_dirty && motor_lib_) {
+    motor_lib_->setCurrentFeedforward(current_ff_static_amp_, current_ff_viscous_amp_per_rpm_);
+  }
+  if (current_guard_dirty && motor_lib_) {
+    motor_lib_->setCurrentGuardParams(current_guard_overspeed_margin_rpm_,
+                                      current_guard_overspeed_time_sec_);
   }
   if (control_core_dirty && control_core_) {
     control_core_->setConfig(makeControlCoreConfig());

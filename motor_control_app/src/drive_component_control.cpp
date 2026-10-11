@@ -89,6 +89,9 @@ bool DriveComponent::initializeMotorLib() {
                                           integral_limit_amp_);
       motor_lib_->setCurrentZeroDeadbandRpm(current_zero_deadband_rpm_);
       motor_lib_->setCurrentInvertMeasured(current_invert_measured_);
+      motor_lib_->setCurrentFeedforward(current_ff_static_amp_, current_ff_viscous_amp_per_rpm_);
+      motor_lib_->setCurrentGuardParams(current_guard_overspeed_margin_rpm_,
+                                        current_guard_overspeed_time_sec_);
     } else if (control_mode_ != "velocity") {
       RCLCPP_WARN(this->get_logger(), "未知の control_mode '%s' - velocity モードにフォールバック",
                   control_mode_.c_str());
@@ -153,7 +156,7 @@ void DriveComponent::resetOdometry() {
   odom_publisher_.reset();
   tf_broadcaster_.reset();
   odom_pose_ = {};
-  has_last_odom_time_ = false;
+  has_odom_sample_ = false;
 }
 
 void DriveComponent::twistCallback(const geometry_msgs::msg::Twist::SharedPtr msg) {
@@ -195,7 +198,42 @@ void DriveComponent::controlTimerCallback() {
   in_control_tick_ = true;
   runControlTick();
   in_control_tick_ = false;
+  integrateOdometry();
   publishControlSample(tick_stamp, tick_start);
+}
+
+void DriveComponent::integrateOdometry() {
+  if (!motor_lib_ || !motor_initialized_) {
+    return;
+  }
+  motor_control_lib::DdtMotorLib::MotorFeedbackData left_fb, right_fb;
+  motor_control_lib::DdtMotorLib::MotorTransactionStats left_tx, right_tx;
+  if (!motor_lib_->getMotorFeedbackData(left_motor_id_, left_fb) ||
+      !motor_lib_->getMotorFeedbackData(right_motor_id_, right_fb) || !left_fb.has_feedback ||
+      !right_fb.has_feedback) {
+    return;
+  }
+  motor_lib_->getMotorTransactionStats(left_motor_id_, left_tx);
+  motor_lib_->getMotorTransactionStats(right_motor_id_, right_tx);
+  if (has_odom_sample_ && left_tx.feedback_count == odom_left_feedback_count_ &&
+      right_tx.feedback_count == odom_right_feedback_count_) {
+    return;  // この tick に新しい実測は無い
+  }
+  odom_left_feedback_count_ = left_tx.feedback_count;
+  odom_right_feedback_count_ = right_tx.feedback_count;
+
+  const double now_sec =
+      std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+  const auto [linear, angular] = motor_control_lib::differential_kinematics::wheelRpmToTwist(
+      left_fb.velocity_rpm_raw, right_fb.velocity_rpm_raw, wheel_radius_, wheel_separation_);
+  const odometry::TwistSample sample{
+      now_sec - 0.5 * (left_fb.feedback_age_sec + right_fb.feedback_age_sec), linear, angular};
+  if (has_odom_sample_) {
+    odom_pose_ = odometry::integrateBetween(odom_pose_, odom_last_sample_, sample,
+                                            odometry::kMaxFeedbackAgeSec);
+  }
+  odom_last_sample_ = sample;
+  has_odom_sample_ = true;
 }
 
 void DriveComponent::publishControlSample(const rclcpp::Time& tick_stamp,
@@ -264,6 +302,9 @@ void DriveComponent::runControlTick() {
   const double elapsed = has_target_ ? (this->now() - last_cmd_time_).seconds() : 0.0;
   // isHealthy はキャッシュ済みフィードバックの fault コードを見るだけでシリアルには触らない
   const bool healthy = motor_ready && diff_drive_->isHealthy();
+  if (motor_ready) {
+    reportCurrentGuardTrips();  // 作動・解除の変化だけをログに出す
+  }
 
   using SampleMsg = questix_msgs::msg::DriveControlSample;
   switch (drive_control_tick::decideTickAction(has_target_, motor_ready,
@@ -295,6 +336,7 @@ void DriveComponent::runControlTick() {
     case drive_control_tick::TickAction::kFaultStop:
       tick_sample_.tick_action = SampleMsg::TICK_FAULT_STOP;
       // モータ異常中は最後の指令を保持せず、明示的に停止指令を送って武装解除する。
+      // current モードの暴走ガード（ホスト側の判定）もここに来る。
       safetyStop("motor fault");
       RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
                            "Motor not healthy: sending stop command");
@@ -362,6 +404,30 @@ void DriveComponent::runControlTick() {
     RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
                          "Control tick overrun: %.1f ms > budget %.1f ms (control_rate=%.1f)",
                          tick_ms, dt * 1000.0, control_rate_);
+  }
+}
+
+void DriveComponent::reportCurrentGuardTrips() {
+  using motor_control_lib::ddt_current_pi::GuardTrip;
+  if (!motor_lib_) {
+    return;
+  }
+  const struct {
+    const char* wheel;
+    int motor_id;
+    GuardTrip* reported;
+  } wheels[] = {{"left", left_motor_id_, &reported_guard_trip_left_},
+                {"right", right_motor_id_, &reported_guard_trip_right_}};
+  for (const auto& w : wheels) {
+    const GuardTrip trip = motor_lib_->currentGuardTrip(w.motor_id);
+    if (trip != *w.reported && trip != GuardTrip::kNone) {
+      // 書式は監視ツール（scripts/current_mode_sim）が読む: "Current guard tripped: <wheel> ..."
+      RCLCPP_ERROR(this->get_logger(),
+                   "Current guard tripped: %s wheel (motor %d), reason %s. The wheel gets 0 A "
+                   "until the node is reconfigured or a current-mode parameter is changed",
+                   w.wheel, w.motor_id, motor_control_lib::ddt_current_pi::guardTripName(trip));
+    }
+    *w.reported = trip;
   }
 }
 
@@ -518,6 +584,7 @@ void DriveComponent::statusTimerCallback() {
                                   odometry::kMaxFeedbackAgeSec) &&
         odometry::isFeedbackFresh(right_fb.has_feedback, right_fb.feedback_age_sec,
                                   odometry::kMaxFeedbackAgeSec);
+    // ポーズは制御 tick の integrateOdometry が積分済み。twist はローパス後を publish する。
     publishOdometry(status.current_linear_velocity, status.current_angular_velocity, feedback_fresh,
                     now);
 
@@ -530,37 +597,31 @@ void DriveComponent::statusTimerCallback() {
   }
 }
 
-void DriveComponent::publishOdometry(double linear, double angular, bool feedback_fresh,
+void DriveComponent::publishOdometry(double twist_linear, double twist_angular, bool feedback_fresh,
                                      const rclcpp::Time& now) {
   if (!odom_publisher_) {
     return;
   }
 
-  // 初回（activate 直後）は時刻アンカーのみ設定し、現在ポーズ・ゼロ twist で publish する。
-  if (has_last_odom_time_) {
-    const double dt = (now - last_odom_time_).seconds();
-    if (odometry::isValidDt(dt, odometry::kMaxOdomDtSec)) {
-      // stale なら twist ゼロ扱いで積分しない（stale RPM によるポーズドリフト防止）。
-      const double eff_linear = feedback_fresh ? linear : 0.0;
-      const double eff_angular = feedback_fresh ? angular : 0.0;
-      odom_pose_ = odometry::integrate(odom_pose_, eff_linear, eff_angular, dt);
-    }
-    // dt が無効（<=0 または kMaxOdomDtSec 超過）ならこのサンプルは積分せず再アンカーのみ。
-  }
-  last_odom_time_ = now;
-  has_last_odom_time_ = true;
-
   // publish に載せる twist は stale 時ゼロ（ポーズと整合させ、下流の誤積分を防ぐ）。
-  const double reported_linear = feedback_fresh ? linear : 0.0;
-  const double reported_angular = feedback_fresh ? angular : 0.0;
-  const odometry::YawQuaternion q = odometry::yawToQuaternion(odom_pose_.theta);
+  const double reported_linear = feedback_fresh ? twist_linear : 0.0;
+  const double reported_angular = feedback_fresh ? twist_angular : 0.0;
+  // ポーズは最後の実測の時刻まで積分済み。配信時刻（スタンプ）まで最後の実測の twist で延ばす
+  // （延ばした分は積分の状態に残さない）。stale なら延ばさない。
+  odometry::Pose2D pose = odom_pose_;
+  if (feedback_fresh && has_odom_sample_) {
+    const double now_steady_sec =
+        std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    pose = odometry::extrapolate(odom_pose_, odom_last_sample_, now_steady_sec);
+  }
+  const odometry::YawQuaternion q = odometry::yawToQuaternion(pose.theta);
 
   nav_msgs::msg::Odometry odom;
   odom.header.stamp = now;
   odom.header.frame_id = odom_frame_id_;
   odom.child_frame_id = base_frame_id_;
-  odom.pose.pose.position.x = odom_pose_.x;
-  odom.pose.pose.position.y = odom_pose_.y;
+  odom.pose.pose.position.x = pose.x;
+  odom.pose.pose.position.y = pose.y;
   odom.pose.pose.position.z = 0.0;
   odom.pose.pose.orientation.x = 0.0;
   odom.pose.pose.orientation.y = 0.0;
@@ -590,8 +651,8 @@ void DriveComponent::publishOdometry(double linear, double angular, bool feedbac
     tf.header.stamp = now;
     tf.header.frame_id = odom_frame_id_;
     tf.child_frame_id = base_frame_id_;
-    tf.transform.translation.x = odom_pose_.x;
-    tf.transform.translation.y = odom_pose_.y;
+    tf.transform.translation.x = pose.x;
+    tf.transform.translation.y = pose.y;
     tf.transform.translation.z = 0.0;
     tf.transform.rotation.x = 0.0;
     tf.transform.rotation.y = 0.0;
