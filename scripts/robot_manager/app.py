@@ -18,8 +18,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 
-from robot_manager import (actuation, control_runtime, controls, lab, logs, modes, recorder,
-                           ros_domain, wifi_ap)
+from robot_manager import (actuation, control_runtime, controls, estop_monitor, lab, logs, modes,
+                           recorder, ros_domain, wifi_ap)
 
 CONFIG_DIR = Path(os.environ.get("QUESTIX_CONFIG_DIR", "/etc/questix_robot"))
 MODE_FILE = CONFIG_DIR / "mode"
@@ -88,6 +88,7 @@ async def lifespan(_app: FastAPI):
         # robot stops, whatever happens to the rest of the shutdown.
         actuation.shutdown()
         lab.shutdown()
+        estop_monitor.shutdown()
         # A running recording is stopped with SIGINT (so rosbag2 finalizes the bag) and an
         # evidence trial's finalize gets a bounded wait (recorder.SHUTDOWN_FINALIZE_TIMEOUT_SEC).
         recorder.shutdown_recording()
@@ -444,6 +445,8 @@ def get_status():
         # The host name: also what the lab pages show as the robot's name (questix_lab_bridge's
         # robot_name defaults to it).
         "robot_name": _robot_name(),
+        # /emergency_stop as the robot sees it, in every mode (a display only: estop_monitor.py).
+        "emergency_stop": estop_monitor.observe(service),
         "stop_requested_at": _stop_requested_at,
         "server_time": time.time(),
     }
