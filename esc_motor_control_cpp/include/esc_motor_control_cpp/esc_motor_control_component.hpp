@@ -12,6 +12,7 @@
 
 #include "esc_motor_control_cpp/full_speed_logic.hpp"
 #include "esc_motor_control_cpp/pwm_backend.hpp"
+#include "esc_motor_control_cpp/pwm_command.hpp"
 #include "esc_motor_control_cpp/roller_gate.hpp"
 #include "esc_motor_control_cpp/roller_lab_logic.hpp"
 #include "questix_msgs/msg/actuation_authority.hpp"
@@ -34,10 +35,13 @@ class EscMotorControlComponent : public rclcpp::Node {
 public:
   explicit EscMotorControlComponent(const rclcpp::NodeOptions& options);
   ~EscMotorControlComponent() override;
+  void begin_shutdown();
 
 private:
+  friend struct EscLeaseTestAccess;
   // ---------- Initialisation ----------
   void initialize_esc();
+  void renew_pwm_lease();
 
   // ---------- Callbacks ----------
   void joy_callback(const sensor_msgs::msg::Joy::SharedPtr msg);
@@ -59,7 +63,8 @@ private:
   static double steady_now_sec();
 
   // ---------- Motor control ----------
-  void set_motor_speed(double speed);
+  bool set_motor_speed(double speed);
+  bool send_pulse(int pulse_us, double speed, bool initializing = false);
 
   /// Convert speed value [-1.0, 1.0] → pulse width in microseconds
   int speed_to_pulse_us(double speed) const;
@@ -79,7 +84,9 @@ private:
   int max_pulse_width_us_;
   int neutral_pulse_width_us_;
   std::string pwm_backend_name_;  // "auto", "pigpio", "lgpio", "simulation"
-  int gpio_chip_num_;             // lgpio chip number
+  std::string rp1_guard_socket_;
+  bool stopping_{false};
+  int gpio_chip_num_;  // lgpio chip number
   // QUESTiX LAB: accept /roller/lab (practice launches only; see roller_lab_logic.hpp)
   bool accept_lab_input_{false};
   std::string lab_topic_;
@@ -103,6 +110,7 @@ private:
 
   // ---------- PWM ----------
   std::unique_ptr<PwmBackend> pwm_;
+  PwmCommand pwm_command_;
 
   // ---------- ROS I/O ----------
   rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joy_sub_;
@@ -118,6 +126,7 @@ private:
   rclcpp::TimerBase::SharedPtr lab_timer_;
   rclcpp::TimerBase::SharedPtr status_timer_;
   rclcpp::TimerBase::SharedPtr safety_timer_;
+  rclcpp::TimerBase::SharedPtr pwm_lease_timer_;
 };
 
 }  // namespace esc_motor_control_cpp

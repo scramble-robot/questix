@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <launch>
   <!-- Launch Arguments -->
+  <arg name="esc_config_file" default="$(env QUESTIX_ESC_CONFIG_FILE $(find-pkg-share esc_motor_control_cpp)/config/esc_motor_control_cpp.yaml)" description="Reviewed ESC hardware YAML; default is the canonical package config"/>
   <arg name="use_sim_time" default="false" description="Use simulation time"/>
   <arg name="enable_lidar" default="$(env ENABLE_LIDAR false)" description="Enable YDLiDAR"/>
   <arg name="enable_shot" default="$(env ENABLE_SHOT true)" description="Enable Shot component"/>
@@ -48,6 +49,7 @@
     <include file="$(find-pkg-share questix_control_config)/launch/control_profile.launch.py" />
     <group if="$(var enable_shot)">
       <include file="$(find-pkg-share questix_launcher)/launch/shot_component.launch.xml">
+        <arg name="esc_config_file" value="$(var esc_config_file)"/>
         <arg name="enable_gpio_ref" value="$(var enable_gpio_ref)"/>
         <arg name="controller_type" value="$(var controller_type)"/>
         <arg name="accept_lab_input" value="$(and $(var enable_lab_shoot) $(not $(var enable_autoreferee)))"/>

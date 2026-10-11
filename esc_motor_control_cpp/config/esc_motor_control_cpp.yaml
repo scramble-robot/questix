@@ -73,5 +73,9 @@ esc_motor_control:
     # PWM backend: "auto" (try pigpio→lgpio→sim), "pigpio", "lgpio", "simulation"
     pwm_backend: "auto"
 
+    # Only used by explicit rp1_hw. GPIO13 / RP1 PWM0 channel 1; requires guard and manual arm.
+    # auto stays legacy for other boards; deploy an explicit reviewed override for ID13.
+    rp1_guard_socket: "/run/questix_pwm_guard/control.sock"
+
     # GPIO chip number for lgpio backend (0 = Pi4, 4 = Pi5)
     gpio_chip_num: 4

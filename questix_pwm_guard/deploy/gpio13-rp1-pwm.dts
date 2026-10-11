@@ -1,0 +1,24 @@
+/dts-v1/;
+/plugin/;
+/* GPIO13 only. PWM0 peripheral / channel 1, not RP1 PWM1 used by the fan. */
+/ {
+    compatible = "brcm,bcm2712";
+    fragment@0 {
+        target = <&rp1_gpio>;
+        __overlay__ {
+            questix_gpio13_pwm: questix_gpio13_pwm {
+                pins = "gpio13";
+                function = "pwm0";
+                bias-pull-down;
+            };
+        };
+    };
+    fragment@1 {
+        target = <&rp1_pwm0>;
+        __overlay__ {
+            status = "okay";
+            pinctrl-names = "default";
+            pinctrl-0 = <&questix_gpio13_pwm>;
+        };
+    };
+};

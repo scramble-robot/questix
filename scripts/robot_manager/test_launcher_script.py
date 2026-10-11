@@ -26,9 +26,11 @@ def robot(tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     calls = tmp_path / "ros2.calls"
+    request_now = int(time.time())
+    (bin_dir / "date").write_text(f'#!/bin/sh\n echo {request_now}\n')
     (bin_dir / "ros2").write_text(f'#!/bin/sh\necho "$*" >> "{calls}"\n')
     (bin_dir / "logger").write_text(f'#!/bin/sh\necho "$*" >> "{tmp_path / "logger.log"}"\n')
-    for tool in ("ros2", "logger"):
+    for tool in ("ros2", "logger", "date"):
         (bin_dir / tool).chmod(0o755)
     (tmp_path / "boot_id").write_text(BOOT_ID + "\n")
     (tmp_path / "setup.bash").write_text("")
@@ -37,13 +39,14 @@ def robot(tmp_path):
 
     class Robot:
         dir = config
+        launcher = LAUNCHER
 
         def mode(self, mode):
             (config / "mode").write_text(mode + "\n")
 
         def request(self, mode="practice", age=0, boot_id=BOOT_ID):
             (config / "start-request").write_text(
-                f"mode={mode}\nrequested_at={int(time.time()) - age}\nboot_id={boot_id}\n")
+                f"mode={mode}\nrequested_at={request_now - age}\nboot_id={boot_id}\n")
 
         def run(self):
             env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}",
@@ -51,7 +54,7 @@ def robot(tmp_path):
                        QUESTIX_BOOT_ID_FILE=str(tmp_path / "boot_id"),
                        QUESTIX_ROS_SETUP=str(tmp_path / "setup.bash"),
                        ROBOT_WS=str(tmp_path / "no_ws"))
-            result = subprocess.run(["bash", str(LAUNCHER)], env=env, capture_output=True,
+            result = subprocess.run(["bash", str(self.launcher)], env=env, capture_output=True,
                                     text=True, timeout=20, check=False)
             launched = calls.read_text().splitlines() if calls.exists() else []
             return result, launched
@@ -232,6 +235,7 @@ def test_competition_is_unchanged_and_drops_a_leftover_request(robot):
 
 def test_manager_writes_a_request_the_launcher_accepts(robot, monkeypatch):
     # The same format on both sides: app.py writes it, the script reads it.
+    monkeypatch.setattr(app, "CONFIG_DIR", robot.dir)
     monkeypatch.setattr(app, "START_REQUEST_FILE", robot.dir / "start-request")
     monkeypatch.setattr(app, "_boot_id", lambda: BOOT_ID)
     robot.mode("practice")
@@ -241,9 +245,45 @@ def test_manager_writes_a_request_the_launcher_accepts(robot, monkeypatch):
 
 
 def test_manager_writes_a_lesson_request_the_launcher_accepts(robot, monkeypatch):
+    monkeypatch.setattr(app, "CONFIG_DIR", robot.dir)
     monkeypatch.setattr(app, "START_REQUEST_FILE", robot.dir / "start-request")
     monkeypatch.setattr(app, "_boot_id", lambda: BOOT_ID)
     robot.mode("lesson")
     app._write_start_request("lesson")
     _, launched = robot.run()
     assert len(launched) == 1 and "require_teacher_permission:=true" in launched[0]
+
+
+def test_reviewed_rp1_prefix_and_yaml_override_editable_configuration(robot, tmp_path):
+    robot.mode("lesson")
+    robot.request("lesson")
+    guard_config = robot.dir.parent / "questix_pwm_guard"
+    guard_config.mkdir()
+    # Execute a temporary copy with only the fixed Jazzy underlay path relocated.
+    # Production keeps its pinned path; this CI fixture needs no ROS installation.
+    launcher_text = LAUNCHER.read_text()
+    fixed_setup = 'QUESTIX_ROS_SETUP=/opt/ros/jazzy/setup.bash'
+    assert launcher_text.count(fixed_setup) == 1
+    robot.launcher = tmp_path / "reviewed_launcher.sh"
+    robot.launcher.write_text(launcher_text.replace(
+        fixed_setup, f'QUESTIX_ROS_SETUP="{tmp_path / "setup.bash"}"'))
+    prefix = tmp_path / "reviewed_install"
+    prefix.mkdir()
+    # The reviewed local setup supplies a harmless fake ros2 after the isolated base setup.
+    (prefix / "local_setup.bash").write_text(
+        f'export PATH="{tmp_path / "bin"}:$PATH"\n'
+        f'printf "%s" "$QUESTIX_ESC_CONFIG_FILE" > "{tmp_path / "yaml_seen"}"\n')
+    (guard_config / "reviewed-launch.env").write_text(
+        f'RP1_REVIEW_PREFIX={prefix}\nRP1_REVIEW_CONFIG={guard_config / "esc.yaml"}\n')
+    (robot.dir / "launch.env").write_text(
+        'QUESTIX_ESC_CONFIG_FILE=/old/esc.yaml\nROBOT_WS=/old/workspace\n'
+        'QUESTIX_ROS_SETUP=/old/setup.bash\nAMENT_PREFIX_PATH=/old/install\n')
+    ros2 = tmp_path / 'bin/ros2'
+    ros2.write_text(ros2.read_text() +
+                    f'printf "%s" "$QUESTIX_ESC_CONFIG_FILE" > "{tmp_path / "yaml_effective"}"\n')
+    result, launched = robot.run()
+    assert result.returncode == 0, result.stderr
+    assert len(launched) == 1
+    assert (tmp_path / "yaml_effective").read_text() == str(guard_config / "esc.yaml")
+    # The effective value is pinned again after sourcing all setup files.
+    assert (tmp_path / "yaml_seen").read_text() == '/old/esc.yaml'
