@@ -6,8 +6,8 @@
 //
 // DdtMotorLib with serial write failures injected (no motor, no hardware): a pseudo terminal
 // stands in for /dev/ttyACM0 so the library opens a real descriptor, and a subclass decides
-// whether each write succeeds and records the frames that would have gone out. No feedback ever
-// arrives, so the idle feedback refresh always sees stale feedback.
+// whether each write succeeds and records the frames that would have gone out. No feedback arrives
+// (unless a test sets answer_fd), so the idle feedback refresh always sees stale feedback.
 #include <gtest/gtest.h>
 #include <pty.h>
 #include <unistd.h>
@@ -33,6 +33,8 @@ public:
 
   bool fail_writes{false};
   std::vector<std::vector<uint8_t>> writes;
+  // >= 0: answer each motion frame with a feedback frame (speed 0) written to this pty master.
+  int answer_fd{-1};
 
 protected:
   ssize_t writeSerial(const void* data, size_t size) override {
@@ -41,6 +43,13 @@ protected:
     }
     const auto* bytes = static_cast<const uint8_t*>(data);
     writes.emplace_back(bytes, bytes + size);
+    if (answer_fd >= 0 && size == 10 && bytes[1] == 0x64) {
+      std::vector<uint8_t> frame = {bytes[0], 0x01, 0, 0, 0, 0, 0, 0, 0};
+      frame.push_back(motor_control_lib::ddt_protocol::crc8Maxim(frame));
+      if (write(answer_fd, frame.data(), frame.size()) != static_cast<ssize_t>(frame.size())) {
+        return -1;
+      }
+    }
     return static_cast<ssize_t>(size);
   }
 };
@@ -58,6 +67,7 @@ public:
     if (master_ >= 0) close(master_);
   }
   const std::string& path() const { return path_; }
+  int master() const { return master_; }
 
 private:
   int master_{-1};
@@ -155,6 +165,7 @@ TEST(DdtFaultInjectionCurrent, FailedZeroNeverReplaysANonzeroCurrent) {
   PseudoTerminal pty;
   ASSERT_FALSE(pty.path().empty());
   FaultyDdtMotorLib lib(pty.path(), 115200);
+  lib.answer_fd = pty.master();  // current mode sends a nonzero current only with fresh feedback
   lib.setMaxRpm(475);
   lib.setStopResendIntervalMs(0);
   lib.setCurrentControlParams(0.001, 0.0, 1.0, 0.3);
@@ -162,17 +173,35 @@ TEST(DdtFaultInjectionCurrent, FailedZeroNeverReplaysANonzeroCurrent) {
   ASSERT_TRUE(lib.initializeMotor(kLeft, ControlMode::Current));
   ASSERT_TRUE(lib.setMotorVelocity(kLeft, 200));
   EXPECT_FALSE(lib.lastSentFrameIsZero(kLeft));  // a nonzero current went out
+  lib.answer_fd = -1;
   lib.fail_writes = true;
   EXPECT_FALSE(lib.stopMotorNow(kLeft));
   lib.fail_writes = false;
   lib.writes.clear();
-  lib.refreshMotorFeedback(kLeft, 0.2);
+  lib.refreshMotorFeedback(kLeft, 0.0);  // max age 0: the held feedback always counts as stale
   EXPECT_TRUE(lib.writes.empty());
   EXPECT_TRUE(lib.stopMotorNow(kLeft));
   lib.writes.clear();
-  lib.refreshMotorFeedback(kLeft, 0.2);
+  lib.refreshMotorFeedback(kLeft, 0.0);
   ASSERT_EQ(lib.writes.size(), 1u);
   EXPECT_TRUE(isZeroCommandFrame(lib.writes[0]));
+}
+
+// Current mode without any answer: the current loop cannot be confirmed, so current mode does not
+// start, and nothing but zeros went out.
+TEST(DdtFaultInjectionCurrent, NoAnswerRefusesCurrentMode) {
+  PseudoTerminal pty;
+  ASSERT_FALSE(pty.path().empty());
+  FaultyDdtMotorLib lib(pty.path(), 115200);
+  lib.setMaxRpm(475);
+  lib.setCurrentControlParams(0.01, 0.0, 1.0, 0.3);
+  ASSERT_TRUE(lib.initialize());
+  EXPECT_FALSE(lib.initializeMotor(kLeft, ControlMode::Current));
+  for (const auto& frame : lib.writes) {
+    if (frame[1] == 0x64) {
+      EXPECT_TRUE(isZeroCommandFrame(frame));
+    }
+  }
 }
 
 // The drive's safety stop reports a failure on either wheel and always tries both.

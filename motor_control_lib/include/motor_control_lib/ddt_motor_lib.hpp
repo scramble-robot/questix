@@ -51,6 +51,10 @@ public:
   /// 応答タイムアウトを [kMinResponseTimeoutMs, kMaxResponseTimeoutMs] に丸める（純関数）。
   static int clampResponseTimeoutMs(int timeout_ms);
 
+  // current モード: 有効な応答がこの回数続けて無ければ、PI の実測は古いとみなして電流 0 を送る
+  // （古い実測のまま電流を出し続けると、浮かせた車輪は回転が上がり続ける）。
+  static constexpr int kCurrentMaxConsecutiveTimeouts = 3;
+
   explicit DdtMotorLib(const std::string& serial_port = "/dev/ttyACM0", int baud_rate = 115200);
   virtual ~DdtMotorLib();
 
@@ -93,11 +97,16 @@ public:
    * @brief 指定モードでモータを初期化
    *  - Velocity: 既存挙動と同等
    *  - Current : 電流ループ用に setControlMode(Current) を送信し、PI状態を初期化
+   *  モード切替の後に停止フレームを 1 回送り、応答のモード値（DATA[1]）で切り替わったかを
+   *  確かめる。仕様書の形で切り替わらなければ、2026-10 までの独自レイアウト
+   *  （ddt_protocol::packModeFrameLegacy）も試す。Current で電流ループを確認できなければ false
+   *  （電流指令が速度目標として解釈されるのを防ぐ）。Velocity は従来どおり WARN だけで続ける。
    */
   bool initializeMotor(int motor_id, ControlMode mode);
 
   /**
-   * @brief モータ制御モードを切替（Protocol 3）
+   * @brief モータ制御モードを切替（Protocol 3、仕様書のフレーム）。切り替わったかは確かめない
+   *  （initializeMotor が応答で確かめる）。
    */
   bool setControlMode(int motor_id, ControlMode mode);
 
@@ -106,10 +115,34 @@ public:
    * @param kp                [A/rpm] 比例ゲイン
    * @param ki                [A/(rpm·s)] 積分ゲイン
    * @param max_current_amp   [A] 電流指令の絶対値上限（安全クランプ）
-   * @param integral_limit_amp [A] 積分項寄与の絶対値上限（アンチワインドアップ）
+   * @param integral_limit_amp [A] 積分項の絶対値上限（アンチワインドアップ）
+   *  ラッチ中の暴走ガードは解除する（current モードのパラメータ変更 = 運用者の対処とみなす）。
    */
   void setCurrentControlParams(double kp, double ki, double max_current_amp,
                                double integral_limit_amp);
+
+  /**
+   * @brief Current モードの摩擦補償（フィードフォワード）を設定（全モータ共通）。
+   *  目標 RPM だけから決まる電流を PI の出力に足す（ddt_current_pi::frictionFeedforwardAmp）。
+   *  負の値は 0 にする。ラッチ中の暴走ガードは解除する。
+   * @param static_amp          [A] 静止（クーロン）摩擦分。目標の向きに足す
+   * @param viscous_amp_per_rpm [A/rpm] 粘性摩擦分
+   */
+  void setCurrentFeedforward(double static_amp, double viscous_amp_per_rpm);
+
+  /**
+   * @brief Current モードの暴走ガード（目標超過の判定）を設定（全モータ共通）。
+   *  ガードそのものは無効にできない。0 以下・非有限の値は既定値にする。
+   *  ラッチ中の暴走ガードは解除する。詳細は ddt_current_pi::updateGuard。
+   */
+  void setCurrentGuardParams(double overspeed_margin_rpm, double overspeed_time_sec);
+
+  /**
+   * @brief Current モードの暴走ガードが作動してラッチしているか（理由）。kNone なら正常。
+   *  作動中は setMotorVelocity が電流 0 だけを送り、isHealthy() は false を返す。
+   *  解除は initializeMotor（再初期化）か、current モードのパラメータ設定。
+   */
+  ddt_current_pi::GuardTrip currentGuardTrip(int motor_id) const;
 
   /**
    * @brief Current モードのゼロ近傍デッドバンド設定
@@ -293,7 +326,8 @@ private:
   // Motor feedback structure
   struct MotorFeedback {
     uint8_t mode{0};
-    int16_t current{0};          // トルク電流生値（符号付き）: DATA[2..3]
+    int16_t current{0};  // トルク電流生値（符号付き）: DATA[2..3]
+    int consecutive_timeouts{0};  // 有効な応答が続けて無かった送受信の回数（current モードの鮮度）
     int16_t speed{0};            // 実測 RPM（符号付き, 生値）: DATA[4..5]
     double speed_filtered{0.0};  // 実測 RPM の一次ローパス出力（レポート用途）
     uint16_t position{0};        // ロータ位置: DATA[6..7]
@@ -306,6 +340,7 @@ private:
   // Current モード用 PI 状態（モータ毎）
   struct PiState {
     ddt_current_pi::State pi;
+    ddt_current_pi::GuardState guard;
     int16_t last_measured_rpm{0};
     std::chrono::steady_clock::time_point last_t{};
     bool has_last_t{false};
@@ -324,8 +359,11 @@ private:
   double current_ki_;
   double max_current_amp_;
   double integral_limit_amp_;
-  int current_zero_deadband_rpm_;         // 静止デッドバンド [RPM]
-  bool current_invert_measured_;          // measured RPM 符号反転（正帰還押さえ用）
+  int current_zero_deadband_rpm_;          // 静止デッドバンド [RPM]
+  bool current_invert_measured_;           // measured RPM 符号反転（正帰還押さえ用）
+  double current_ff_static_amp_;           // 摩擦補償: 静止摩擦分 [A]
+  double current_ff_viscous_amp_per_rpm_;  // 摩擦補償: 粘性摩擦分 [A/rpm]
+  ddt_current_pi::GuardParams current_guard_params_;
   double current_max_accel_rpm_per_sec_;  // 目標RPMスルーレート上限 [RPM/s]。0以下で無効
   bool brake_on_stop_;  // 停止時に電気ブレーキを使う（velocity モードのみ）
   int accel_time_0p1ms_per_rpm_;  // ファーム加速時間 DATA[6] [0.1ms/rpm]（velocity モードのみ）
@@ -351,6 +389,8 @@ private:
   std::map<int, MotorFeedback> motor_feedbacks_;  // motor_id -> feedback
   std::map<int, ControlMode> motor_modes_;        // motor_id -> control mode
   std::map<int, PiState> pi_states_;              // motor_id -> PI state
+  // motor_id -> 作動してラッチした暴走ガード（kNone 以外のときだけ要素がある）
+  std::map<int, ddt_current_pi::GuardTrip> current_guard_trips_;
   // motor_id -> 送受信の記録（診断用。initializeMotor では消さない累積値）
   std::map<int, MotorTransactionStats> transaction_stats_;
   // motor_id -> 最後に**送信に成功した**指令フレーム。送信に失敗したときは書き換えない
@@ -371,8 +411,17 @@ private:
   // 高頻度指令の共通送受信: 固定スリープなしで送信し、応答フィードバックを短い
   // タイムアウトで1回だけ待つ（タイムアウトしても送信成功として扱う）。
   bool sendFrameWithFeedback(int motor_id, const std::vector<uint8_t>& frame);
-  int16_t runCurrentLoopStep(int motor_id, int rpm_ref);  // PI 1ステップ
+  // current モードの 1 周期（鮮度・ガード・デッドバンド・PI・送信）。setMotorVelocity から呼ぶ。
+  bool commandCurrentMode(int motor_id, int rpm_ref_raw);
+  // 暴走ガードの作動: ラッチしてログを出し、電流 0 を送る（送信の成否を返す）。
+  bool tripCurrentGuard(int motor_id, ddt_current_pi::GuardTrip trip, int rpm_ref,
+                        int measured_prev, int measured_new, double applied_amp, double i_cmd_amp);
+  // PI 1ステップ。i_cmd_amp_out にクランプ後の電流指令 [A] を書く。
+  int16_t runCurrentLoopStep(int motor_id, int rpm_ref, double* i_cmd_amp_out);
   void resetCurrentPiStateForStop(int motor_id);
+  void clearCurrentGuardTrips(const char* why);
+  // 送受信 1 回の結果で、有効な応答が続けて無かった回数を更新する。
+  void countResponse(int motor_id, bool valid);
   void recordSerialRoundtrip(double roundtrip_ms);  // 往復レイテンシ統計の更新
   bool readFeedbackFrame(int expected_motor_id, std::vector<uint8_t>& out_frame, int timeout_ms);
   bool parseFeedback(int expected_motor_id, const std::vector<uint8_t>& frame);
@@ -390,6 +439,9 @@ protected:
   // production class uses write(2) / read(2) on serial_fd_.
   virtual ssize_t writeSerial(const void* data, size_t size);
   virtual ssize_t readSerial(void* data, size_t size);
+  // current モードの PI の dt と暴走ガードの時刻に使う単調時計。テストが模擬の時計に差し替える
+  // （本番は steady_clock::now()）。フィードバックの鮮度や統計には使わない。
+  virtual std::chrono::steady_clock::time_point controlNow() const;
 };
 
 }  // namespace motor_control_lib

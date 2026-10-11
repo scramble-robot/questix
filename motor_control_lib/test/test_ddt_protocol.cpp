@@ -126,19 +126,24 @@ TEST(PackCurrentFrame, MaxRawAndZeroTailBytes) {
   EXPECT_EQ(frame[9], ddt::crc8Maxim(payloadOf(frame)));
 }
 
-TEST(PackModeFrame, ModeValueLandsInByte8) {
-  // 既存実装互換の独自レイアウト: mode_value は DATA[8]
-  auto current_frame = ddt::packModeFrame(1, 0x01);
-  ASSERT_EQ(current_frame.size(), 10u);
-  EXPECT_EQ(current_frame[1], 0xA0);
-  EXPECT_EQ(current_frame[8], 0x01);
-  EXPECT_EQ(current_frame[9], ddt::crc8Maxim(payloadOf(current_frame)));
+TEST(PackModeFrame, FollowsTheSpecSheet) {
+  // 仕様書: {ID, 0xA0, 0,0,0,0,0,0, 0, mode}（DATA[9] がモード値、CRC 無し）
+  const std::vector<uint8_t> current_frame = {4, 0xA0, 0, 0, 0, 0, 0, 0, 0, 0x01};
+  EXPECT_EQ(ddt::packModeFrame(4, 0x01), current_frame);
+  const std::vector<uint8_t> velocity_frame = {5, 0xA0, 0, 0, 0, 0, 0, 0, 0, 0x02};
+  EXPECT_EQ(ddt::packModeFrame(5, 0x02), velocity_frame);
+}
 
-  auto velocity_frame = ddt::packModeFrame(1, 0x02);
-  ASSERT_EQ(velocity_frame.size(), 10u);
-  EXPECT_EQ(velocity_frame[1], 0xA0);
-  EXPECT_EQ(velocity_frame[8], 0x02);
-  EXPECT_EQ(velocity_frame[9], ddt::crc8Maxim(payloadOf(velocity_frame)));
+TEST(PackModeFrame, LegacyLayoutPutsTheModeInByte8AndACrcInByte9) {
+  // 2026-10 までの独自レイアウト。仕様書どおりのモータは DATA[9]（CRC）をモード値として読む:
+  // モータ 4 の電流モードなら 0xC6、モータ 5 なら 0x62 で、どちらも有効なモード値ではない。
+  auto frame = ddt::packModeFrameLegacy(4, 0x01);
+  ASSERT_EQ(frame.size(), 10u);
+  EXPECT_EQ(frame[1], 0xA0);
+  EXPECT_EQ(frame[8], 0x01);
+  EXPECT_EQ(frame[9], ddt::crc8Maxim(payloadOf(frame)));
+  EXPECT_EQ(frame[9], 0xC6);
+  EXPECT_EQ(ddt::packModeFrameLegacy(5, 0x01)[9], 0x62);
 }
 
 TEST(ParseFeedbackFrame, ValidFrame) {
