@@ -172,6 +172,18 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
     return CallbackReturn::FAILURE;
   }
 
+  // current モードのパラメータ（負のゲイン = 正帰還など）は、モータに触れる前に拒否する。
+  if (control_mode_ == "current") {
+    const auto error = currentModeParamsError();
+    if (!error.empty()) {
+      RCLCPP_ERROR_THROTTLE(this->get_logger(), *this->get_clock(), 30000,
+                            "Invalid current-mode parameters: %s (launcher/config/"
+                            "drive_component.yaml)",
+                            error.c_str());
+      return CallbackReturn::FAILURE;
+    }
+  }
+
   // 未通電（非常停止中）は USB CDC デバイス自体が存在しない。ライブラリを構築する前に
   // デバイスの有無を確認し、リトライ毎のライブラリ内 ERROR ログで journald を汚さない。
   if (!std::filesystem::exists(serial_port_)) {
@@ -218,7 +230,15 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
         this->get_logger(),
         "  current_kp: %.4f  current_ki: %.4f  max_current_amp: %.2f  integral_limit_amp: %.2f",
         current_kp_, current_ki_, max_current_amp_, integral_limit_amp_);
-    RCLCPP_INFO(this->get_logger(), "  current_zero_deadband_rpm: %d", current_zero_deadband_rpm_);
+    RCLCPP_INFO(this->get_logger(), "  current_zero_deadband_rpm: %d  current_invert_measured: %s",
+                current_zero_deadband_rpm_, current_invert_measured_ ? "true" : "false");
+    RCLCPP_INFO(this->get_logger(),
+                "  current_ff_static_amp: %.3f  current_ff_viscous_amp_per_rpm: %.5f",
+                current_ff_static_amp_, current_ff_viscous_amp_per_rpm_);
+    RCLCPP_INFO(
+        this->get_logger(),
+        "  current_guard_overspeed_margin_rpm: %.1f  current_guard_overspeed_time_sec: %.2f",
+        current_guard_overspeed_margin_rpm_, current_guard_overspeed_time_sec_);
   }
   RCLCPP_INFO(this->get_logger(), "  max_linear_accel: %.3f  max_angular_accel: %.3f",
               max_linear_accel_, max_angular_accel_);
@@ -299,7 +319,7 @@ DriveComponent::CallbackReturn DriveComponent::on_activate(const rclcpp_lifecycl
 
   // オドメトリの時刻アンカーをクリアする（ポーズは維持 = 一時停止でありテレポート
   // ではない）。deactivate 中のギャップを次サンプルで積分しないため。
-  has_last_odom_time_ = false;
+  has_odom_sample_ = false;
 
   // 制御 tick タイマー（固定周期）。スルーレート制限・タイムアウト判定・シリアル送信を
   // ここに集約する（twistCallback は目標保存のみ）。

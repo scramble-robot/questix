@@ -110,3 +110,57 @@ int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
+
+// 実測の受信時刻で台形積分する: 2 点の平均の twist で、2 つの受信時刻の差だけ進む。
+TEST(OdometryIntegrator, IntegrateBetweenUsesTheMeanTwistOverTheReceiptInterval) {
+  using motor_control_app::odometry::integrateBetween;
+  using motor_control_app::odometry::Pose2D;
+  using motor_control_app::odometry::TwistSample;
+  bool integrated = false;
+  // 0.0 → 0.4 m/s に 20 ms で加速: 平均 0.2 m/s × 0.02 s = 4 mm
+  const Pose2D p = integrateBetween(Pose2D{}, TwistSample{10.00, 0.0, 0.0},
+                                    TwistSample{10.02, 0.4, 0.0}, 0.5, &integrated);
+  EXPECT_TRUE(integrated);
+  EXPECT_NEAR(p.x, 0.004, 1e-12);
+  EXPECT_NEAR(p.y, 0.0, 1e-12);
+}
+
+TEST(OdometryIntegrator, IntegrateBetweenSkipsGapsAndNonIncreasingTimes) {
+  using motor_control_app::odometry::integrateBetween;
+  using motor_control_app::odometry::Pose2D;
+  using motor_control_app::odometry::TwistSample;
+  const Pose2D start{1.0, 2.0, 0.5};
+  bool integrated = true;
+  // 間隔が上限（例: kMaxFeedbackAgeSec 0.5 s）を超える = 途絶・未通電: 積分しない
+  Pose2D p = integrateBetween(start, TwistSample{0.0, 0.5, 0.0}, TwistSample{0.6, 0.5, 0.0}, 0.5,
+                              &integrated);
+  EXPECT_FALSE(integrated);
+  EXPECT_DOUBLE_EQ(p.x, start.x);
+  // 同じ時刻・時刻の逆転も積分しない
+  p = integrateBetween(start, TwistSample{1.0, 0.5, 0.0}, TwistSample{1.0, 0.5, 0.0}, 0.5,
+                       &integrated);
+  EXPECT_FALSE(integrated);
+  EXPECT_DOUBLE_EQ(p.y, start.y);
+}
+
+TEST(OdometryIntegrator, IntegrateBetweenFollowsAnArcWithTheMeanTurnRate) {
+  using motor_control_app::odometry::integrateBetween;
+  using motor_control_app::odometry::Pose2D;
+  using motor_control_app::odometry::TwistSample;
+  // 角速度 0 → 2 rad/s に 0.1 s: 平均 1 rad/s × 0.1 s = 0.1 rad
+  const Pose2D p =
+      integrateBetween(Pose2D{}, TwistSample{0.0, 0.0, 0.0}, TwistSample{0.1, 0.0, 2.0}, 0.5);
+  EXPECT_NEAR(p.theta, 0.1, 1e-12);
+}
+
+// 配信時刻まで最後の twist で延ばす（上限 kMaxExtrapolationSec）。過去の時刻には延ばさない。
+TEST(OdometryIntegrator, ExtrapolateToThePublishTimeIsBounded) {
+  using motor_control_app::odometry::extrapolate;
+  using motor_control_app::odometry::kMaxExtrapolationSec;
+  using motor_control_app::odometry::Pose2D;
+  using motor_control_app::odometry::TwistSample;
+  const TwistSample last{5.0, 0.5, 0.0};
+  EXPECT_NEAR(extrapolate(Pose2D{}, last, 5.02).x, 0.01, 1e-12);
+  EXPECT_NEAR(extrapolate(Pose2D{}, last, 9.0).x, 0.5 * kMaxExtrapolationSec, 1e-12);
+  EXPECT_DOUBLE_EQ(extrapolate(Pose2D{}, last, 4.9).x, 0.0);
+}

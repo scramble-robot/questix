@@ -40,7 +40,14 @@ struct DriveParamPolicyAccess {
             n.max_current_amp_,
             n.integral_limit_amp_,
             static_cast<double>(n.current_zero_deadband_rpm_),
-            static_cast<double>(n.current_invert_measured_)};
+            static_cast<double>(n.current_invert_measured_),
+            n.current_ff_static_amp_,
+            n.current_ff_viscous_amp_per_rpm_,
+            n.current_guard_overspeed_margin_rpm_,
+            n.current_guard_overspeed_time_sec_};
+  }
+  static std::string currentModeParamsError(const DriveComponent& n) {
+    return n.currentModeParamsError();
   }
   // 走行状態機械 / velocity RUN LQR+FF のメンバ（snapshot() の添字を変えないよう別関数）
   static std::vector<double> velocityRunSnapshot(const DriveComponent& n) {
@@ -98,6 +105,27 @@ TEST_F(DriveParamPolicyTest, CurrentPiGainsAreLiveTunable) {
   EXPECT_TRUE(node_->set_parameter(rclcpp::Parameter("integral_limit_amp", 0.4)).successful);
   EXPECT_TRUE(node_->set_parameter(rclcpp::Parameter("current_zero_deadband_rpm", 6)).successful);
   EXPECT_TRUE(node_->set_parameter(rclcpp::Parameter("current_invert_measured", false)).successful);
+  EXPECT_TRUE(node_->set_parameter(rclcpp::Parameter("current_ff_static_amp", 0.08)).successful);
+  EXPECT_TRUE(
+      node_->set_parameter(rclcpp::Parameter("current_ff_viscous_amp_per_rpm", 0.0004)).successful);
+  EXPECT_TRUE(node_->set_parameter(rclcpp::Parameter("current_guard_overspeed_margin_rpm", 80.0))
+                  .successful);
+  EXPECT_TRUE(
+      node_->set_parameter(rclcpp::Parameter("current_guard_overspeed_time_sec", 0.5)).successful);
+}
+
+TEST_F(DriveParamPolicyTest, CurrentModeDefaultsAreTheLiftedWheelStartingPoint) {
+  // launcher/config/drive_component.yaml と同じ値（浮かせた車輪で安定する出発点）。
+  EXPECT_DOUBLE_EQ(node_->get_parameter("current_kp").as_double(), 0.0015);
+  EXPECT_DOUBLE_EQ(node_->get_parameter("current_ki").as_double(), 0.004);
+  EXPECT_DOUBLE_EQ(node_->get_parameter("max_current_amp").as_double(), 1.0);
+  EXPECT_DOUBLE_EQ(node_->get_parameter("integral_limit_amp").as_double(), 0.3);
+  EXPECT_FALSE(node_->get_parameter("current_invert_measured").as_bool());
+  EXPECT_DOUBLE_EQ(node_->get_parameter("current_ff_static_amp").as_double(), 0.0);
+  EXPECT_DOUBLE_EQ(node_->get_parameter("current_ff_viscous_amp_per_rpm").as_double(), 0.0);
+  EXPECT_DOUBLE_EQ(node_->get_parameter("current_guard_overspeed_margin_rpm").as_double(), 50.0);
+  EXPECT_DOUBLE_EQ(node_->get_parameter("current_guard_overspeed_time_sec").as_double(), 0.3);
+  EXPECT_EQ(motor_control_app::DriveParamPolicyAccess::currentModeParamsError(*node_), "");
 }
 
 TEST_F(DriveParamPolicyTest, ReconfigureOnlyParametersAreRejected) {
@@ -132,7 +160,11 @@ TEST_F(DriveParamPolicyTest, MixedRequestsAreAtomicInBothOrders) {
       rclcpp::Parameter("max_current_amp", 3.0),
       rclcpp::Parameter("integral_limit_amp", 2.0),
       rclcpp::Parameter("current_zero_deadband_rpm", 17),
-      rclcpp::Parameter("current_invert_measured", false)};
+      rclcpp::Parameter("current_invert_measured", true),
+      rclcpp::Parameter("current_ff_static_amp", 0.12),
+      rclcpp::Parameter("current_ff_viscous_amp_per_rpm", 0.0005),
+      rclcpp::Parameter("current_guard_overspeed_margin_rpm", 70.0),
+      rclcpp::Parameter("current_guard_overspeed_time_sec", 0.4)};
   const auto members = motor_control_app::DriveParamPolicyAccess::snapshot(*node_);
   std::vector<rclcpp::Parameter> old;
   for (const auto& p : allowed) {
@@ -160,19 +192,32 @@ TEST_F(DriveParamPolicyTest, MixedRequestsAreAtomicInBothOrders) {
   EXPECT_DOUBLE_EQ(committed[11], 0.04);
   EXPECT_DOUBLE_EQ(committed[12], 3.0);
   EXPECT_DOUBLE_EQ(committed[13], 2.0);
+  EXPECT_DOUBLE_EQ(committed[16], 0.12);
+  EXPECT_DOUBLE_EQ(committed[17], 0.0005);
+  EXPECT_DOUBLE_EQ(committed[18], 70.0);
+  EXPECT_DOUBLE_EQ(committed[19], 0.4);
 }
 
 TEST_F(DriveParamPolicyTest, CurrentPiValidationRejectsWithoutSideEffects) {
   std::vector<rclcpp::Parameter> invalid;
-  for (const auto& name : {"current_kp", "current_ki", "max_current_amp", "integral_limit_amp"}) {
+  for (const auto& name :
+       {"current_kp", "current_ki", "max_current_amp", "integral_limit_amp",
+        "current_ff_static_amp", "current_ff_viscous_amp_per_rpm",
+        "current_guard_overspeed_margin_rpm", "current_guard_overspeed_time_sec"}) {
     for (double value :
          {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity(),
-          -std::numeric_limits<double>::infinity()}) {
+          -std::numeric_limits<double>::infinity(), -0.1}) {
       invalid.emplace_back(name, value);
     }
   }
-  invalid.emplace_back("max_current_amp", -0.1);
-  invalid.emplace_back("integral_limit_amp", -0.1);
+  // 負のゲインは正帰還（暴走）になるので受け付けない
+  invalid.emplace_back("current_kp", -1.0);
+  invalid.emplace_back("current_ki", -2.0);
+  // 上限は M0602C の相電流保護より下（kMaxCurrentLimitAmp）
+  invalid.emplace_back("max_current_amp", 4.01);
+  // 暴走ガードは無効にできない
+  invalid.emplace_back("current_guard_overspeed_margin_rpm", 0.0);
+  invalid.emplace_back("current_guard_overspeed_time_sec", 0.0);
   invalid.emplace_back("current_zero_deadband_rpm", -1);
   invalid.emplace_back("current_zero_deadband_rpm",
                        static_cast<int64_t>(std::numeric_limits<int>::max()) + 1);
@@ -191,13 +236,15 @@ TEST_F(DriveParamPolicyTest, CurrentPiBoundariesAndExistingDisableSemantics) {
   EXPECT_TRUE(
       node_
           ->set_parameters_atomically(
-              {rclcpp::Parameter("current_kp", -1.0), rclcpp::Parameter("current_ki", -2.0),
+              {rclcpp::Parameter("current_kp", 0.0), rclcpp::Parameter("current_ki", 0.0),
                rclcpp::Parameter("max_current_amp", 0.0),
                rclcpp::Parameter("integral_limit_amp", 0.0),
                rclcpp::Parameter("current_zero_deadband_rpm", std::numeric_limits<int>::max()),
                rclcpp::Parameter("current_invert_measured", true)})
           .successful);
   EXPECT_TRUE(node_->set_parameter(rclcpp::Parameter("current_zero_deadband_rpm", 0)).successful);
+  EXPECT_TRUE(node_->set_parameter(rclcpp::Parameter("max_current_amp", 4.0)).successful);
+  EXPECT_TRUE(node_->set_parameter(rclcpp::Parameter("current_ff_static_amp", 0.0)).successful);
   for (const auto& name : {"command_wait_ms", "stop_resend_interval_ms", "min_command_rpm"}) {
     EXPECT_TRUE(node_->set_parameter(rclcpp::Parameter(name, -1)).successful);
     EXPECT_FALSE(node_
