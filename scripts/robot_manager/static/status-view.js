@@ -190,9 +190,55 @@ const StatusView = (() => {
     return running === next ? `動作中: ${running}` : `動作中: ${running} / 次回: ${next}`;
   }
 
-  function estop(lab, service) {
+  // operation_manager's reason (gpio_safety_evaluator.cpp: "pin 5 is true, expected false; ",
+  // "pin 5 not received; ", "pin 5 timeout; ") in the teacher's words. GPIO5 is the physical
+  // E-stop (true when pressed; an input with nothing wired may read true as well), GPIO27 the
+  // AutoReferee input (competition).
+  function estopReasonText(reason) {
+    const parts = String(reason || '').split(';').map((part) => part.trim()).filter(Boolean);
+    return parts.map((part) => {
+      const match = part.match(/^pin (\d+) (.+)$/);
+      if (!match) return part;
+      const [, pin, what] = match;
+      const name = pin === '5' ? '非常停止ボタン（GPIO5）' : pin === '27' ? 'AutoReferee（GPIO27）' : `GPIO${pin}`;
+      if (what === 'not received') return `${name}の信号が届いていません`;
+      if (what === 'timeout') return `${name}の信号が途絶えています`;
+      if (/^is (true|false), expected (true|false)$/.test(what)) {
+        if (pin === '5') return '非常停止ボタンが押されているか、つながっていません';
+        if (pin === '27') return 'AutoReferee が停止を指示しています';
+      }
+      return `${name}: ${what}`;
+    }).join('・');
+  }
+
+  // Why the manager's own E-stop listener (estop_monitor.py) has no state, or null.
+  const MONITOR_UNKNOWN = {
+    starting: '確認しています',
+    not_heard: '分かりません（/emergency_stop が届いていません。operation_manager が動いているかと ROS_DOMAIN_ID を確かめてください）',
+    silent: '分かりません（/emergency_stop が途絶えています。届かない間ロボットは動きません）',
+  };
+  function monitorUnknownText(monitor) {
+    if (!monitor) return null;
+    if (monitor.note === 'unavailable') return `分かりません（${monitor.detail || '確認用のプロセスを起動できません'}）`;
+    return MONITOR_UNKNOWN[monitor.note] || null;
+  }
+
+  // ``monitor`` is /api/status emergency_stop (estop_monitor.py: every mode, with or without
+  // QUESTiX LAB); the bridge's report and blockers are the fallback for an older manager.
+  function estop(lab, service, monitor) {
     const bridge = lab && lab.bridge;
     if (service !== 'active') return { text: 'ロボット制御が停止中のため分かりません', tone: 'idle' };
+    if (monitor && monitor.state === 'pressed') {
+      const why = estopReasonText(monitor.reason);
+      return { text: why ? `押されています（${why}）` : '押されています', tone: 'danger' };
+    }
+    if (monitor && monitor.state === 'released') {
+      // Only a manual diagnostic launch (enable_gpio_ref:=false) releases without reading GPIO5.
+      if (/no GPIO safety path/.test(monitor.reason || '')) {
+        return { text: '解除されています（非常停止ボタンを読まない診断用の起動です）', tone: 'warn' };
+      }
+      return { text: '解除されています', tone: 'ok' };
+    }
     // Bridges since 2026-09-26 report it directly (always observed); older ones only as blockers.
     if (bridge && typeof bridge.emergency_stop === 'boolean') {
       return bridge.emergency_stop
@@ -206,6 +252,8 @@ const StatusView = (() => {
     if (bridge && bridge.read_only === false) sources.push(bridge.drive_state);
     if (bridge && bridge.shoot_state && bridge.shoot_state.allowed === true) sources.push(bridge.shoot_state);
     if (!sources.length) {
+      const why = monitorUnknownText(monitor);
+      if (why) return { text: why, tone: monitor.note === 'starting' ? 'idle' : 'warn' };
       return { text: '分かりません（教材の配信を始めると確認できます）', tone: 'idle' };
     }
     const pressed = sources.some((s) => (s && s.blockers || []).some((b) => b.code === 'emergency_stop'));
@@ -255,7 +303,7 @@ const StatusView = (() => {
     }
     rows.service = { text: SERVICE[service] || SERVICE.unknown,
       tone: service === 'active' ? 'ok' : service === 'failed' ? 'danger' : 'idle' };
-    rows.estop = estop(lab, service);
+    rows.estop = estop(lab, service, status && status.emergency_stop);
     if (!lab) rows.lab = { text: '確認中', tone: 'idle' };
     else if (labUnavailable(lab)) rows.lab = { text: `${labUnavailable(lab)}のため配信しません`, tone: 'idle' };
     else if (serving) {
@@ -317,7 +365,7 @@ const StatusView = (() => {
 
   return {
     MODE, labUnavailable, SERVICE, SETTLE_MS, createBlockerMemory, stableBlockers, blockerText, capability,
-    modeSummary, estop, headerEstop, overview, controllerUrl, labRestoredText,
+    modeSummary, estop, estopReasonText, headerEstop, overview, controllerUrl, labRestoredText,
   };
 })();
 if (typeof module !== 'undefined') module.exports = StatusView;

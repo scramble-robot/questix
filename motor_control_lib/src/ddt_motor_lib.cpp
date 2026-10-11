@@ -25,12 +25,17 @@ DdtMotorLib::DdtMotorLib(const std::string& serial_port, int baud_rate)
       serial_port_(serial_port),
       baud_rate_(baud_rate),
       max_motor_rpm_(330),
-      current_kp_(0.005),
-      current_ki_(0.02),
-      max_current_amp_(2.0),
-      integral_limit_amp_(1.5),
+      // current モードの既定は launcher/config/drive_component.yaml
+      // と同じ（浮かせた車輪で安定する値）。
+      current_kp_(0.0015),
+      current_ki_(0.004),
+      max_current_amp_(1.0),
+      integral_limit_amp_(0.3),
       current_zero_deadband_rpm_(5),
       current_invert_measured_(false),
+      current_ff_static_amp_(0.0),
+      current_ff_viscous_amp_per_rpm_(0.0),
+      current_guard_params_{},
       current_max_accel_rpm_per_sec_(0.0),
       brake_on_stop_(true),
       accel_time_0p1ms_per_rpm_(50),
@@ -71,6 +76,7 @@ void DdtMotorLib::shutdown() {
     motor_feedbacks_.clear();
     motor_modes_.clear();
     pi_states_.clear();
+    current_guard_trips_.clear();
     last_sent_frames_.clear();
     transaction_stats_.clear();
     initialized_ = false;
@@ -90,7 +96,8 @@ bool DdtMotorLib::isHealthy() const {
       return false;
     }
   }
-  return true;
+  // current モードの暴走ガードが作動していれば異常（ホスト側の判定。故障コードは偽装しない）
+  return current_guard_trips_.empty();
 }
 
 void DdtMotorLib::resetCurrentPiStateForStop(int motor_id) {
@@ -100,6 +107,24 @@ void DdtMotorLib::resetCurrentPiStateForStop(int motor_id) {
   pi_state.ref_rpm_filtered = 0.0;
   pi_state.last_ref_t = {};
   pi_state.has_last_ref_t = false;
+  pi_state.guard = {};
+}
+
+void DdtMotorLib::clearCurrentGuardTrips(const char* why) {
+  if (current_guard_trips_.empty()) {
+    return;
+  }
+  for (const auto& [motor_id, trip] : current_guard_trips_) {
+    RCLCPP_WARN(logger_, "モーター %d の電流モード暴走ガード（%s）を解除しました: %s", motor_id,
+                ddt_current_pi::guardTripName(trip), why);
+  }
+  current_guard_trips_.clear();
+}
+
+ddt_current_pi::GuardTrip DdtMotorLib::currentGuardTrip(int motor_id) const {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+  auto it = current_guard_trips_.find(motor_id);
+  return it == current_guard_trips_.end() ? ddt_current_pi::GuardTrip::kNone : it->second;
 }
 
 void DdtMotorLib::emergencyStop() {
@@ -143,64 +168,155 @@ bool DdtMotorLib::setMotorVelocity(int motor_id, int velocity_rpm) {
   motor_velocities_[motor_id] = rpm_ref_raw;
 
   if (mode == ControlMode::Current) {
-    // スルーレート制限（加速度制限）: 目標 RPM を 1ステップあたり max_accel * dt だけ変化させる。
-    // これにより起動ステップ時の電流飽和を抑え、急加速を抑制する。
-    int rpm_ref = rpm_ref_raw;
-    if (current_max_accel_rpm_per_sec_ > 0.0) {
-      auto& st = pi_states_[motor_id];
-      auto now = std::chrono::steady_clock::now();
-      double dt = 0.01;
-      if (st.has_last_ref_t) {
-        dt = std::chrono::duration<double>(now - st.last_ref_t).count();
-        if (dt <= 0.0 || dt > 0.2) {
-          dt = 0.01;
-        }
-      } else {
-        double initial_ref_rpm = 0.0;
-        auto fb_it = motor_feedbacks_.find(motor_id);
-        if (fb_it != motor_feedbacks_.end()) {
-          initial_ref_rpm = static_cast<double>(fb_it->second.speed);
-          if (current_invert_measured_) {
-            initial_ref_rpm = -initial_ref_rpm;
-          }
-        }
-        initial_ref_rpm = std::clamp(initial_ref_rpm, static_cast<double>(-max_motor_rpm_),
-                                     static_cast<double>(max_motor_rpm_));
-        st.ref_rpm_filtered = initial_ref_rpm;
-      }
-      st.last_ref_t = now;
-      st.has_last_ref_t = true;
-
-      double max_step = current_max_accel_rpm_per_sec_ * dt;
-      double delta = static_cast<double>(rpm_ref_raw) - st.ref_rpm_filtered;
-      if (delta > max_step) delta = max_step;
-      if (delta < -max_step) delta = -max_step;
-      st.ref_rpm_filtered += delta;
-      rpm_ref = static_cast<int>(std::lround(st.ref_rpm_filtered));
-    }
-
-    // 静止デッドバンド: ref=0 かつ実測がノイズ帯内なら、PI を走らず raw=0 を送る。
-    // これがないと measured の量子化ノイズを積分が拾い、静止時にトルクが出て微振動する。
-    if (rpm_ref == 0) {
-      int measured_rpm = 0;
-      auto fb_it = motor_feedbacks_.find(motor_id);
-      if (fb_it != motor_feedbacks_.end()) {
-        measured_rpm = static_cast<int>(fb_it->second.speed);
-      }
-      if (ddt_current_pi::inZeroDeadband(rpm_ref, measured_rpm, current_zero_deadband_rpm_)) {
-        auto pi_it = pi_states_.find(motor_id);
-        if (pi_it != pi_states_.end()) {
-          pi_it->second.pi.integral_amp = 0.0;
-          pi_it->second.has_last_t = false;
-        }
-        return sendMotorCurrentRaw(motor_id, 0);
-      }
-    }
-    int16_t current_raw = runCurrentLoopStep(motor_id, rpm_ref);
-    return sendMotorCurrentRaw(motor_id, current_raw);
+    return commandCurrentMode(motor_id, rpm_ref_raw);
   }
 
   return sendMotorVelocity(motor_id, rpm_ref_raw);
+}
+
+bool DdtMotorLib::commandCurrentMode(int motor_id, int rpm_ref_raw) {
+  // 暴走ガードがラッチしている間は電流 0 だけを送る（解除は再初期化かパラメータ変更）。
+  if (current_guard_trips_.count(motor_id) != 0) {
+    resetCurrentPiStateForStop(motor_id);
+    return sendMotorCurrentRaw(motor_id, 0);
+  }
+
+  // 実測の鮮度: 一度も応答が無い・有効な応答が続けて無いなら、古い実測で電流を出さない。
+  // 浮かせた車輪では、古い実測のまま電流を出し続けると回転が上がり続ける。
+  auto fb_it = motor_feedbacks_.find(motor_id);
+  if (fb_it == motor_feedbacks_.end() || !fb_it->second.has_feedback ||
+      fb_it->second.consecutive_timeouts >= kCurrentMaxConsecutiveTimeouts) {
+    RCLCPP_WARN_THROTTLE(logger_, throttle_clock_, 1000,
+                         "モーター %d: 実測が古い（応答が %d 回続けて無い）ため電流 0 を送ります",
+                         motor_id,
+                         fb_it == motor_feedbacks_.end() ? 0 : fb_it->second.consecutive_timeouts);
+    resetCurrentPiStateForStop(motor_id);
+    return sendMotorCurrentRaw(motor_id, 0);
+  }
+
+  // モータが電流ループを報告していなければ電流を出さない（電流指令が速度目標として解釈される）。
+  if (fb_it->second.mode != 0x01) {
+    return tripCurrentGuard(motor_id, ddt_current_pi::GuardTrip::kModeMismatch, rpm_ref_raw,
+                            fb_it->second.speed, fb_it->second.speed, 0.0, 0.0);
+  }
+
+  // スルーレート制限（加速度制限）: 目標 RPM を 1ステップあたり max_accel * dt だけ変化させる。
+  // drive_component は使わない（既定 0 = 無効。加速度はホストの ControlCore が制限する）。
+  int rpm_ref = rpm_ref_raw;
+  if (current_max_accel_rpm_per_sec_ > 0.0) {
+    auto& st = pi_states_[motor_id];
+    auto now = controlNow();
+    double dt = 0.01;
+    if (st.has_last_ref_t) {
+      dt = std::chrono::duration<double>(now - st.last_ref_t).count();
+      if (dt <= 0.0 || dt > 0.2) {
+        dt = 0.01;
+      }
+    } else {
+      double initial_ref_rpm = static_cast<double>(fb_it->second.speed);
+      if (current_invert_measured_) {
+        initial_ref_rpm = -initial_ref_rpm;
+      }
+      initial_ref_rpm = std::clamp(initial_ref_rpm, static_cast<double>(-max_motor_rpm_),
+                                   static_cast<double>(max_motor_rpm_));
+      st.ref_rpm_filtered = initial_ref_rpm;
+    }
+    st.last_ref_t = now;
+    st.has_last_ref_t = true;
+
+    double max_step = current_max_accel_rpm_per_sec_ * dt;
+    double delta = static_cast<double>(rpm_ref_raw) - st.ref_rpm_filtered;
+    if (delta > max_step) delta = max_step;
+    if (delta < -max_step) delta = -max_step;
+    st.ref_rpm_filtered += delta;
+    rpm_ref = static_cast<int>(std::lround(st.ref_rpm_filtered));
+  }
+
+  // 静止デッドバンド: ref=0 かつ実測がノイズ帯内なら、PI を走らず raw=0 を送る。
+  // これがないと measured の量子化ノイズを積分が拾い、静止時にトルクが出て微振動する。
+  if (ddt_current_pi::inZeroDeadband(rpm_ref, fb_it->second.speed, current_zero_deadband_rpm_)) {
+    auto& st = pi_states_[motor_id];
+    st.pi.integral_amp = 0.0;
+    st.has_last_t = false;
+    st.guard = {};
+    return sendMotorCurrentRaw(motor_id, 0);
+  }
+
+  // ガード用: 送信前の実測（PI の向き）と、その実測から今までに流れていた電流（前回の指令）。
+  const int measured_prev =
+      current_invert_measured_ ? -fb_it->second.speed : static_cast<int>(fb_it->second.speed);
+  auto& tx_before = transaction_stats_[motor_id];
+  const double applied_amp = ddt_current_pi::rawToAmp(tx_before.last_current_raw_sent);
+  const uint64_t feedback_count_before = tx_before.feedback_count;
+
+  double i_cmd_amp = 0.0;
+  const int16_t current_raw = runCurrentLoopStep(motor_id, rpm_ref, &i_cmd_amp);
+  if (!sendMotorCurrentRaw(motor_id, current_raw)) {
+    return false;
+  }
+  // 新しい応答が無ければガードは評価しない（同じ実測を二度使わない）。
+  if (transaction_stats_[motor_id].feedback_count == feedback_count_before) {
+    return true;
+  }
+  const auto& fb_new = motor_feedbacks_[motor_id];
+  const int measured_new =
+      current_invert_measured_ ? -fb_new.speed : static_cast<int>(fb_new.speed);
+  if (fb_new.mode != 0x01) {
+    return tripCurrentGuard(motor_id, ddt_current_pi::GuardTrip::kModeMismatch, rpm_ref,
+                            measured_prev, measured_new, applied_amp, i_cmd_amp);
+  }
+  const ddt_current_pi::GuardSample sample{
+      std::chrono::duration<double>(controlNow().time_since_epoch()).count(),
+      rpm_ref,
+      measured_prev,
+      measured_new,
+      applied_amp,
+      i_cmd_amp,
+      max_current_amp_};
+  const auto trip =
+      ddt_current_pi::updateGuard(pi_states_[motor_id].guard, current_guard_params_, sample);
+  if (trip == ddt_current_pi::GuardTrip::kNone) {
+    return true;
+  }
+  return tripCurrentGuard(motor_id, trip, rpm_ref, measured_prev, measured_new, applied_amp,
+                          i_cmd_amp);
+}
+
+bool DdtMotorLib::tripCurrentGuard(int motor_id, ddt_current_pi::GuardTrip trip, int rpm_ref,
+                                   int measured_prev, int measured_new, double applied_amp,
+                                   double i_cmd_amp) {
+  current_guard_trips_[motor_id] = trip;
+  const char* hint = "";
+  switch (trip) {
+    case ddt_current_pi::GuardTrip::kAccelAgainstCurrent:
+      hint =
+          "回転を止める向きの電流なのに速くなり続けた。current_invert_measured の符号が逆"
+          "（正帰還）の可能性が高い";
+      break;
+    case ddt_current_pi::GuardTrip::kOverspeed:
+      hint = "目標より速いまま減速しない。摩擦補償の過補償・外力・符号を確認";
+      break;
+    case ddt_current_pi::GuardTrip::kOscillation:
+      hint =
+          "電流が上限で正負に振れている。負荷に対してゲインが高すぎる（浮かせた車輪に床用の"
+          "ゲイン、走行中に持ち上げた等）";
+      break;
+    case ddt_current_pi::GuardTrip::kModeMismatch:
+      hint =
+          "モータが電流ループを報告していない。電流指令が速度目標として解釈されるため止めた"
+          "（モータの電源の入れ直し等でモードが戻った可能性）";
+      break;
+    case ddt_current_pi::GuardTrip::kNone:
+      break;
+  }
+  RCLCPP_ERROR(logger_,
+               "モーター %d: 電流モード暴走ガード作動（%s）: ref=%d meas %d->%d applied=%.3fA "
+               "cmd=%.3fA。電流 0 でラッチします（解除は再初期化か current モードのパラメータ"
+               "変更）。%s",
+               motor_id, ddt_current_pi::guardTripName(trip), rpm_ref, measured_prev, measured_new,
+               applied_amp, i_cmd_amp, hint);
+  resetCurrentPiStateForStop(motor_id);
+  return sendMotorCurrentRaw(motor_id, 0);
 }
 
 bool DdtMotorLib::getMotorStatus(int motor_id, int& velocity_rpm, uint8_t& temperature,
@@ -254,15 +370,58 @@ bool DdtMotorLib::initializeMotor(int motor_id, ControlMode mode) {
   motor_velocities_[motor_id] = 0;
   motor_feedbacks_[motor_id] = MotorFeedback{};
   pi_states_[motor_id] = PiState{};
+  if (current_guard_trips_.erase(motor_id) != 0) {
+    RCLCPP_WARN(logger_, "モーター %d の電流モード暴走ガードを解除しました: 再初期化", motor_id);
+  }
 
   // フィードバックをプライミング: ゼロ指令を 1 回通常経路で送り、last_sent_frames_ を
-  // 埋めつつ初回フィードバックを取得する（モータは動かない）。未通電時など失敗しても
-  // 致命ではないため WARN に留めて初期化は成功させる。
-  bool primed = (mode == ControlMode::Current) ? sendMotorCurrentRaw(motor_id, 0)
-                                               : sendMotorVelocity(motor_id, 0, brake_on_stop_);
+  // 埋めつつ初回フィードバックを取得する（モータは動かない。電流 0 も速度 0 も停止）。
+  // 応答のモード値で切り替わったかも確かめる。
+  const uint8_t wanted = (mode == ControlMode::Current) ? 0x01 : 0x02;
+  auto prime = [&]() {
+    return (mode == ControlMode::Current) ? sendMotorCurrentRaw(motor_id, 0)
+                                          : sendMotorVelocity(motor_id, 0, brake_on_stop_);
+  };
+  auto reported = [&]() -> int {
+    const auto& fb = motor_feedbacks_[motor_id];
+    return fb.has_feedback ? fb.mode : -1;
+  };
+  bool primed = prime();
+  if (primed && reported() >= 0 && reported() != wanted) {
+    RCLCPP_WARN(
+        logger_,
+        "モーター %d: 仕様書のモード切替フレームの後もモード %d を報告しています（期待 %d）。"
+        "2026-10 までの独自レイアウトでも試します",
+        motor_id, reported(), wanted);
+    if (sendCommand(ddt_protocol::packModeFrameLegacy(static_cast<uint8_t>(motor_id), wanted))) {
+      motor_feedbacks_[motor_id] = MotorFeedback{};
+      primed = prime();
+      if (reported() == wanted) {
+        RCLCPP_WARN(
+            logger_,
+            "モーター %d: 独自レイアウトのモード切替フレームで切り替わりました（仕様書と違う"
+            "ファームの可能性。記録してください）",
+            motor_id);
+      }
+    }
+  }
   if (!primed) {
     RCLCPP_WARN(logger_, "モーター %d のフィードバックプライミングに失敗しました（続行）",
                 motor_id);
+  }
+  if (mode == ControlMode::Current && reported() != wanted) {
+    // 電流ループを確認できないまま電流指令を送ると、raw 値（例 0.1 A = 410）が速度目標として
+    // 解釈され、浮かせた車輪が回り出す。current モードは起動しない。
+    RCLCPP_ERROR_THROTTLE(logger_, throttle_clock_, 10000,
+                          "モーター %d が電流ループに切り替わったことを確認できません（報告モード"
+                          "=%d、-1 は応答なし）。current モードでは起動しません",
+                          motor_id, reported());
+    motor_modes_.erase(motor_id);
+    return false;
+  }
+  if (mode == ControlMode::Velocity && reported() >= 0 && reported() != wanted) {
+    RCLCPP_WARN(logger_, "モーター %d が速度ループを報告しません（報告モード=%d）", motor_id,
+                reported());
   }
 
   RCLCPP_INFO(logger_, "モーター %d が初期化されました (mode=%s)", motor_id,
@@ -435,6 +594,32 @@ void DdtMotorLib::setCurrentControlParams(double kp, double ki, double max_curre
   RCLCPP_INFO(logger_,
               "電流制御パラメータ更新: Kp=%.4f, Ki=%.4f, max_current=%.2fA, integral_limit=%.2fA",
               current_kp_, current_ki_, max_current_amp_, integral_limit_amp_);
+  clearCurrentGuardTrips("PI パラメータの変更");
+}
+
+void DdtMotorLib::setCurrentFeedforward(double static_amp, double viscous_amp_per_rpm) {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+  current_ff_static_amp_ = std::isfinite(static_amp) ? std::max(0.0, static_amp) : 0.0;
+  current_ff_viscous_amp_per_rpm_ =
+      std::isfinite(viscous_amp_per_rpm) ? std::max(0.0, viscous_amp_per_rpm) : 0.0;
+  RCLCPP_INFO(logger_, "電流モード 摩擦補償: static=%.3fA viscous=%.5fA/rpm",
+              current_ff_static_amp_, current_ff_viscous_amp_per_rpm_);
+  clearCurrentGuardTrips("摩擦補償の変更");
+}
+
+void DdtMotorLib::setCurrentGuardParams(double overspeed_margin_rpm, double overspeed_time_sec) {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+  const ddt_current_pi::GuardParams defaults{};
+  current_guard_params_.overspeed_margin_rpm =
+      (std::isfinite(overspeed_margin_rpm) && overspeed_margin_rpm > 0.0)
+          ? overspeed_margin_rpm
+          : defaults.overspeed_margin_rpm;
+  current_guard_params_.overspeed_time_sec =
+      (std::isfinite(overspeed_time_sec) && overspeed_time_sec > 0.0) ? overspeed_time_sec
+                                                                      : defaults.overspeed_time_sec;
+  RCLCPP_INFO(logger_, "電流モード 暴走ガード: 目標超過 %.0f rpm が %.2f s 続いたら作動",
+              current_guard_params_.overspeed_margin_rpm, current_guard_params_.overspeed_time_sec);
+  clearCurrentGuardTrips("ガード設定の変更");
 }
 
 void DdtMotorLib::setCurrentZeroDeadbandRpm(int deadband_rpm) {
@@ -447,6 +632,7 @@ void DdtMotorLib::setCurrentInvertMeasured(bool invert) {
   std::lock_guard<std::recursive_mutex> lock(state_mutex_);
   current_invert_measured_ = invert;
   RCLCPP_INFO(logger_, "電流モード measured符号反転: %s", invert ? "ON" : "OFF");
+  clearCurrentGuardTrips("符号反転の変更");
 }
 
 void DdtMotorLib::setCurrentMaxAccelRpmPerSec(double rpm_per_sec) {
@@ -610,6 +796,7 @@ bool DdtMotorLib::sendFrameWithFeedback(int motor_id, const std::vector<uint8_t>
         ++tx.response_timeouts;
         ++serial_latency_stats_.timeouts;
       }
+      countResponse(motor_id, parsed);
     } else {
       RCLCPP_DEBUG(logger_, "モーター %d フィードバック未受信 (%dms timeout)", motor_id,
                    response_timeout_ms_);
@@ -617,6 +804,7 @@ bool DdtMotorLib::sendFrameWithFeedback(int motor_id, const std::vector<uint8_t>
       ++tx.response_timeouts;
       tx.last_response_timeout = true;
       tx.last_roundtrip_ms = std::nan("");
+      countResponse(motor_id, false);
     }
     // 実機の最小コマンド間隔要件が判明した場合の保険（既定 0 = 待機なし）。
     if (command_wait_ms_ > 0) {
@@ -627,9 +815,17 @@ bool DdtMotorLib::sendFrameWithFeedback(int motor_id, const std::vector<uint8_t>
   return false;
 }
 
-int16_t DdtMotorLib::runCurrentLoopStep(int motor_id, int rpm_ref) {
+void DdtMotorLib::countResponse(int motor_id, bool valid) {
+  auto it = motor_feedbacks_.find(motor_id);
+  if (it == motor_feedbacks_.end()) {
+    return;  // 未登録のモータ（モード設定前など）は数えない
+  }
+  it->second.consecutive_timeouts = valid ? 0 : it->second.consecutive_timeouts + 1;
+}
+
+int16_t DdtMotorLib::runCurrentLoopStep(int motor_id, int rpm_ref, double* i_cmd_amp_out) {
   auto& st = pi_states_[motor_id];
-  auto now = std::chrono::steady_clock::now();
+  auto now = controlNow();
 
   double dt = 0.01;  // 初回および異常時のフォールバック [s]
   if (st.has_last_t) {
@@ -639,7 +835,7 @@ int16_t DdtMotorLib::runCurrentLoopStep(int motor_id, int rpm_ref) {
   st.has_last_t = true;
   dt = ddt_current_pi::sanitizeDt(dt);
 
-  // 実測 RPM: フィードバック未取得なら前回保持値（受信失敗時は最新フィードバックがそのまま残る）。
+  // 実測 RPM（鮮度は呼び出し側 commandCurrentMode が確認済み）。
   // 符号反転は stepToRaw 内で行うため、ここでは生値を渡す。
   int measured_rpm = 0;
   auto fb_it = motor_feedbacks_.find(motor_id);
@@ -647,18 +843,28 @@ int16_t DdtMotorLib::runCurrentLoopStep(int motor_id, int rpm_ref) {
     measured_rpm = static_cast<int>(fb_it->second.speed);
   }
 
-  ddt_current_pi::Params params{current_kp_, current_ki_, max_current_amp_, integral_limit_amp_,
-                                current_invert_measured_};
+  ddt_current_pi::Params params{current_kp_,
+                                current_ki_,
+                                max_current_amp_,
+                                integral_limit_amp_,
+                                current_invert_measured_,
+                                current_ff_static_amp_,
+                                current_ff_viscous_amp_per_rpm_};
   double i_cmd_amp = 0.0;
   int16_t raw = ddt_current_pi::stepToRaw(st.pi, params, rpm_ref, measured_rpm, dt, &i_cmd_amp);
+  if (i_cmd_amp_out != nullptr) {
+    *i_cmd_amp_out = i_cmd_amp;
+  }
 
   // ログは従来通り符号反転後の実測値と、それに基づく error を表示する。
   int meas_logged = current_invert_measured_ ? -measured_rpm : measured_rpm;
   double error = static_cast<double>(rpm_ref - meas_logged);
   RCLCPP_INFO_THROTTLE(logger_, throttle_clock_, 200,
-                       "PI motor=%d ref=%d meas=%d err=%.1f integ=%.3fA i_cmd=%.3fA raw=%d dt=%.4f",
-                       motor_id, rpm_ref, meas_logged, error, st.pi.integral_amp, i_cmd_amp,
-                       static_cast<int>(raw), dt);
+                       "PI motor=%d ref=%d meas=%d err=%.1f ff=%.3fA integ=%.3fA i_cmd=%.3fA "
+                       "raw=%d dt=%.4f",
+                       motor_id, rpm_ref, meas_logged, error,
+                       ddt_current_pi::frictionFeedforwardAmp(rpm_ref, params), st.pi.integral_amp,
+                       i_cmd_amp, static_cast<int>(raw), dt);
   return raw;
 }
 
@@ -824,6 +1030,10 @@ ssize_t DdtMotorLib::writeSerial(const void* data, size_t size) {
     return -1;
   }
   return write(serial_fd_, data, size);
+}
+
+std::chrono::steady_clock::time_point DdtMotorLib::controlNow() const {
+  return std::chrono::steady_clock::now();
 }
 
 ssize_t DdtMotorLib::readSerial(void* data, size_t size) {

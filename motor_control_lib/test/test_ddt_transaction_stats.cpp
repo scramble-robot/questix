@@ -51,13 +51,21 @@ public:
   bool answer{true};
   bool corrupt_crc{false};  // answer with a full 10-byte frame whose CRC does not match
   int16_t speed{0};
+  uint8_t mode{0x02};  // the reported mode: the power-on velocity loop until a spec mode frame
 
 protected:
   ssize_t writeSerial(const void* data, size_t size) override {
     const auto* bytes = static_cast<const uint8_t*>(data);
-    // Answer motion commands (10-byte frames) only; the mode frame needs no response.
-    if (answer && master_fd >= 0 && size == 10 && bytes[1] != 0xA0) {
+    if (size == 10 && bytes[1] == 0xA0) {
+      mode = bytes[9];  // spec Protocol 3: the mode value is DATA[9]; no response
+      return static_cast<ssize_t>(size);
+    }
+    // Answer motion commands (10-byte frames) only.
+    if (answer && master_fd >= 0 && size == 10) {
       auto frame = feedbackFrame(bytes[0], speed, 1234);
+      frame[1] = mode;
+      frame.back() = motor_control_lib::ddt_protocol::crc8Maxim(
+          std::vector<uint8_t>(frame.begin(), frame.begin() + 9));
       if (corrupt_crc) {
         frame.back() ^= 0xFF;
       }

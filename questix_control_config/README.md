@@ -41,6 +41,10 @@ robot_manager の「調整」タブでコントローラーを選び、値を編
 各ノードのハードウェア YAML の後に操作設定を読み、その後に launch の `joy_topic`
 指定を適用します。GPIO ゲートの選択は操作設定で上書きされません。
 `config_file` はハードウェア側、`control_config_file` は操作側の変更に使用してください。
+`config_file`（`joy_config_file`、`drive_config_file` など、名前が `config_file` で終わる launch 引数）で
+渡したファイルに操作設定のキーがあると、後から読む操作設定の値が使われ、そのファイルの値は効きません。
+起動時に `[WARN] <ファイル> (<引数>) sets operator controls that the profile <操作設定> overrides ...` と、
+ノードとキーを一度だけ表示します（パッケージ同梱のファイルでは出ません）。
 
 通常の統合起動に加え、Joy / 射出 / ESC / 走行 / UART / Web の単体 launch も同じ設定を選びます。
 ROS ノードを `ros2 run` で直接起動する場合は、このファイルを `--params-file` で明示してください。
@@ -59,14 +63,21 @@ ROS ノードを `ros2 run` で直接起動する場合は、このファイル�
   軸操作時の `tilt_up_axis_sign` / `tilt_down_axis_sign` は +1 が正方向、-1 が負方向です。
   初期値は十字キー上／下。同一入力の重複割り当ては拒否し、上下同時押しでは動かしません。
   従来の `tilt_axis` 形式は管理画面で読み込む際に上下それぞれへ変換し、保存時に新形式になります。
-  ノードも旧形式を受け付けます（新しい軸パラメータが未指定、内部値 -2 の場合のみ継承）。
+  ノードが旧形式を引き継ぐのは新しい軸パラメータが未指定（内部値 -2）のときだけです。launch から
+  起動すると操作設定が `tilt_up_axis` / `tilt_down_axis` を必ず指定するため、`config_file` に書いた
+  `tilt_axis` は使われません（起動時に警告）。旧形式が効くのは操作設定を読まずにノードを起動した
+  場合（`ros2 run ... --params-file` で旧形式のファイルだけを渡すなど）に限られます。
   この変更を使うには `motor_control_app` を再ビルドし、robot_manager を更新してください。
 - `esc_motor_control`: ローラー回転ボタンと出力（0〜1）。出力は実測 RPM ではありません。
 - `joy_node` / `uart_joy_driver`: 入力ドライバのスティック不感帯（UART・DualShock 用ファイルのみ）。
 - `web_joy_driver`: ブラウザのスティックの不感帯（Web 用ファイルのみ）。ポート・認証・タイムアウト・カメラなどは
   `web_joy_driver/config/web_joy_driver_params.yaml` に残ります。
 - `joy_controller_dual_stick` / `joy_axis_drive`: それぞれの単体起動モード専用。
-  通常の統合起動には影響しません。dual-stick の速度スケールは 0.025 です（2026-10 に車輪半径を実寸 0.05 m に直したとき、車輪の回転数が変わらないよう 0.05 から半分にした。#179）。
+  通常の統合起動には影響しません。dual-stick の速度スケールは前後 1.0 m/s・旋回 6.0 で、
+  スティックを倒し切ったときの車輪の回転数は 3.2.0 と同じです（3.2.0 は 2.0・6.0 を車輪半径 0.1 m で読んでいた）。
+  旋回スケールは左右の速度差 [m/s] に掛ける係数 [1/m] なので、車輪半径の修正（#179）では変わりません。
+  0.025 などの小さな値では、倒し切っても車輪の指令が低速不感帯（`min_command_rpm` + 2 rpm）を
+  超えず、ロボットは動きません。
 
 軸・ボタン番号は 0 始まりです。管理画面の範囲は 0〜63（一部の無効指定は -1）ですが、
 実際の配列長はコントローラーごとに異なります。受信メッセージの範囲外ならノード側で
@@ -95,6 +106,7 @@ Web はブラウザの操作画面でボタンの役割が決まっているた�
 
 - 各パッケージのキー割り当て・速度項目を本パッケージに移しました。
   既存の独自 YAML に書いていた調整値は、共通プロファイルの対応項目へ移してください。
+  そのまま `config_file` で渡すと値は効かず、起動時の警告でキーが分かります（上の「編集・反映」）。
 - 重複していた `shot_config.uart.yaml` / `shot_config.dualshock.yaml` と
   `esc_motor_control_cpp.uart.yaml` / `esc_motor_control_cpp.dualshock.yaml` は廃止しました。
   ハードウェア設定はそれぞれ `shot_config.yaml` / `esc_motor_control_cpp.yaml` に統一しました。

@@ -80,6 +80,55 @@ inline Pose2D integrate(const Pose2D& pose, double linear, double angular, doubl
 }
 
 // yaw 角からクォータニオン（z, w）を計算する。
+/**
+ * @brief 実測 1 回分: 受信時刻（単調時計）と、その実測（ローパス前）から出した車体の twist。
+ */
+struct TwistSample {
+  double t_sec{0.0};    // [s] 両輪のフィードバック受信時刻の平均
+  double linear{0.0};   // [m/s]
+  double angular{0.0};  // [rad/s]
+};
+
+/**
+ * @brief 連続する 2 つの実測の間を台形で積分する（2 点の平均の twist で円弧積分）。
+ *
+ * dt は 2 つの受信時刻の差なので、積分の時刻が実測の時刻とそろう（別タイマーで「手元の最新の
+ * 実測 × 経過時間」を積分すると、タイマーの位相差のぶん遅れ、旋回中の向きの遅れが位置のずれに
+ * なる）。区間が無効（<= 0 または max_gap_sec 超。途絶・未通電）なら積分せず pose を返す。
+ * @param integrated 非 null なら、積分したかを書き込む
+ */
+inline Pose2D integrateBetween(const Pose2D& pose, const TwistSample& prev, const TwistSample& next,
+                               double max_gap_sec, bool* integrated = nullptr) {
+  const double dt = next.t_sec - prev.t_sec;
+  const bool ok = isValidDt(dt, max_gap_sec);
+  if (integrated != nullptr) {
+    *integrated = ok;
+  }
+  if (!ok) {
+    return pose;
+  }
+  return integrate(pose, 0.5 * (prev.linear + next.linear), 0.5 * (prev.angular + next.angular),
+                   dt);
+}
+
+/// 配信時刻へのポーズの延長の上限 [s]（実測の間隔が空いた停止中に、古い速度で延ばしすぎない）。
+inline constexpr double kMaxExtrapolationSec = 0.1;
+
+/**
+ * @brief 最後の実測の時刻で積分したポーズを、配信時刻 now_sec まで最後の twist で延ばす。
+ *
+ * 延ばした分は積分の状態に持ち越さない（次の実測で台形積分し直す）。スタンプ（配信時刻）と
+ * ポーズの時刻がそろい、TF の時刻も単調に進む。延ばす時間は 0..kMaxExtrapolationSec に丸める。
+ */
+inline Pose2D extrapolate(const Pose2D& pose, const TwistSample& last, double now_sec) {
+  const double dt = now_sec - last.t_sec;
+  if (!(dt > 0.0)) {
+    return pose;
+  }
+  return integrate(pose, last.linear, last.angular,
+                   dt < kMaxExtrapolationSec ? dt : kMaxExtrapolationSec);
+}
+
 inline YawQuaternion yawToQuaternion(double theta) {
   YawQuaternion q;
   q.z = std::sin(theta * 0.5);

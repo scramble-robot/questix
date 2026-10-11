@@ -4,9 +4,17 @@ Changelog for package questix_msgs
 
 Forthcoming
 -----------
+* feat!: add velocity_rpm_raw (the unfiltered wire value) to MotorFeedback,
+  after velocity_rpm. Not compatible with 3.2.0: the type hash of MotorFeedback
+  and of DriveStatus, which embeds it, changes, so nodes built from 3.2.0 and
+  from this version do not interoperate on /drive_status, and bags recorded
+  with 3.2.0 keep the old layout (read them with the 3.2.0 definitions).
+  velocity_rpm itself is unchanged (low-pass filtered when
+  measured_lpf_tau_sec > 0, as in 3.2.0)
 * feat: add DriveControlSample and DriveControlWheelSample for the diagnostic
-  per-control-tick topic /drive_control_sample (drive_component). MotorFeedback
-  and DriveStatus are unchanged (type hash and recorded-bag compatibility)
+  per-control-tick topic /drive_control_sample (drive_component). They leave
+  MotorFeedback and DriveStatus as they are (type hash and recorded-bag
+  compatibility with the velocity_rpm_raw layout above)
 * docs: /drive_status default rate is 50 Hz; note the 4096-step encoder behind
   position_raw
 * Contributors: Yuichiroh Kobayashi

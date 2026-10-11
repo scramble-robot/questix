@@ -34,6 +34,8 @@ def source_packages(monkeypatch, tmp_path):
                         lambda name: packages[name])
     monkeypatch.setattr(questix_control_config, 'get_package_share_directory',
                         lambda name: packages[name])
+    # Each test is its own launch process: node YAMLs are checked against the profile again.
+    monkeypatch.setattr(questix_control_config, '_checked', set())
     return root
 
 

@@ -23,15 +23,14 @@ uint8_t crc8Maxim(const std::vector<uint8_t>& data) {
 }
 
 std::vector<uint8_t> packModeFrame(uint8_t motor_id, uint8_t mode_value) {
-  // Protocol 3 (モード切替)
-  // 仕様書: {ID, 0xA0, 0,0,0,0,0,0, 0, mode_value} （DATA[9] が mode_value で CRC 無し）
-  // 既存実装互換: DATA[8] に mode_value を入れ DATA[9] を CRC8(data[0..8]) とする独自レイアウト。
-  //   既存 velocity 切替 (mode_value=0) はこの形で実機動作実績がある。
-  //   電流モードで意図通り切替できない場合は仕様書通りの形 (DATA[9]=mode_value, CRC無し) に
-  //   フォールバックすること。
+  // Protocol 3 (モード切替)。仕様書: {ID, 0xA0, 0,0,0,0,0,0, 0, mode_value}（CRC 無し）
+  return {motor_id, 0xA0, 0, 0, 0, 0, 0, 0, 0, mode_value};
+}
+
+std::vector<uint8_t> packModeFrameLegacy(uint8_t motor_id, uint8_t mode_value) {
+  // 2026-10 までの独自レイアウト: DATA[8] に mode_value、DATA[9] に CRC8(DATA[0..8])。
   std::vector<uint8_t> data_fields = {motor_id, 0xA0, 0, 0, 0, 0, 0, 0, mode_value};
-  uint8_t crc = crc8Maxim(data_fields);
-  data_fields.push_back(crc);
+  data_fields.push_back(crc8Maxim(data_fields));
   return data_fields;
 }
 

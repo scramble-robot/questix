@@ -27,19 +27,25 @@ namespace motor_control_lib::ddt_protocol {
 uint8_t crc8Maxim(const std::vector<uint8_t>& data);
 
 /**
- * @brief モード切替フレーム (Protocol 3) を組み立てる。
+ * @brief モード切替フレーム (Protocol 3) を仕様書どおりに組み立てる。
  *
- * 仕様書: {ID, 0xA0, 0,0,0,0,0,0, 0, mode_value} （DATA[9] が mode_value で CRC 無し）
- * 既存実装互換: DATA[8] に mode_value を入れ DATA[9] を CRC8(data[0..8]) とする独自レイアウト。
- *   既存 velocity 切替 (mode_value=0) はこの形で実機動作実績がある。
- *   電流モードで意図通り切替できない場合は仕様書通りの形 (DATA[9]=mode_value, CRC無し) に
- *   フォールバックすること。
+ * 仕様書: {ID, 0xA0, 0,0,0,0,0,0, 0, mode_value}（DATA[9] が mode_value、CRC 無し）。
+ * 切り替わったかは応答の DATA[1]（モード値）で確かめる（DdtMotorLib::initializeMotor）。
  *
  * @param motor_id   モータ ID (DATA[0])
- * @param mode_value モード値 (DATA[8] に格納する。0x01=電流ループ, 0x02=速度ループ)
+ * @param mode_value モード値 (DATA[9]。0x01=電流ループ, 0x02=速度ループ)
  * @return 全 10 バイトのフレーム
  */
 std::vector<uint8_t> packModeFrame(uint8_t motor_id, uint8_t mode_value);
+
+/**
+ * @brief 2026-10 までこのライブラリが送っていたモード切替フレーム（仕様書と違う独自レイアウト）。
+ *
+ * {ID, 0xA0, 0,0,0,0,0,0, mode_value, CRC8(DATA[0..8])}。仕様書どおりのモータは DATA[9]（CRC）を
+ * モード値として読むので、切り替わらない（電源投入時の速度ループのまま）。仕様書の形で切り替わら
+ * なかったときにだけ試す。
+ */
+std::vector<uint8_t> packModeFrameLegacy(uint8_t motor_id, uint8_t mode_value);
 
 /**
  * @brief 速度指令フレーム (Protocol 1, 0x64) を組み立てる。

@@ -22,8 +22,11 @@ joy_controller:
     angular_z_axis: 3
 joy_controller_dual_stick:
   ros__parameters:
-    longitudinal_input_ratio: 0.025
-    angular_input_ratio: 0.05
+    # Full stick = 1.0 m/s per wheel (~191 rpm), the same wheel speeds as 3.2.0 (2.0 at 0.1 m).
+    # angular_input_ratio [1/m] scales the wheel speed difference, so it does not change with
+    # wheel_radius. Values below about 0.04 m/s cannot leave the drive stop gate (min_command_rpm).
+    longitudinal_input_ratio: 1.0
+    angular_input_ratio: 6.0
     left_stick_vertical_axis: 1
     right_stick_vertical_axis: 4
 shot_component:

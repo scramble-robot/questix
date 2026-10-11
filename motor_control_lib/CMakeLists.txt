@@ -44,6 +44,9 @@ if(BUILD_TESTING)
   # DdtMotorLib's per-motor transaction record with feedback answered over a pseudo terminal.
   ament_auto_add_gtest(test_ddt_transaction_stats test/test_ddt_transaction_stats.cpp)
   target_link_libraries(test_ddt_transaction_stats util)
+
+  ament_auto_add_gtest(test_ddt_current_guard test/test_ddt_current_guard.cpp)
+  target_link_libraries(test_ddt_current_guard util)
 endif()
 
 ament_auto_package(INSTALL_TO_SHARE)

@@ -145,12 +145,24 @@ private:
    * ゼロ twist で publish する。dt が無効（<=0 または kMaxOdomDtSec 超過）なら積分を
    * スキップして再アンカー。フィードバックが stale なら twist をゼロ扱いで積分せず、
    * 現在ポーズで publish を継続する（RViz でフレームが消えないため）。
-   * @param linear 実測前進速度 [m/s]
-   * @param angular 実測角速度 [rad/s]
+   * ポーズは integrateOdometry（制御 tick）が積分したものを publish するだけ。publish する
+   * twist はローパス後の値。
+   * @param twist_linear / twist_angular publish する実測（ローパス後）[m/s]・[rad/s]
    * @param feedback_fresh 左右両輪のフィードバックが新鮮か
-   * @param now 積分・publish に使う共通タイムスタンプ
+   * @param now publish のタイムスタンプ
    */
-  void publishOdometry(double linear, double angular, bool feedback_fresh, const rclcpp::Time& now);
+  void publishOdometry(double twist_linear, double twist_angular, bool feedback_fresh,
+                       const rclcpp::Time& now);
+
+  /**
+   * @brief 新しいフィードバックを受け取った制御 tick で、オドメトリのポーズを積分する。
+   *
+   * 両輪の受信時刻（単調時計）とローパス前の実測（velocity_rpm_raw）を使い、前回の実測との間を
+   * 台形で積分する（odometry::integrateBetween）。ローパス後の実測や、別タイマーで「手元の最新の
+   * 実測 × 経過時間」を積分すると遅れが位置のずれになる（current_mode_sim の S 字 3.2 m で
+   * それぞれ約 0.5 m・約 0.08 m）。実測の間隔が kMaxFeedbackAgeSec を超えたら積分しない。
+   */
+  void integrateOdometry();
 
   /**
    * @brief /emergency_stop を受信したとき（estop_monitor_ から呼ばれる）
@@ -250,6 +262,11 @@ private:
   void warnIfLqrTicksAssumeAnotherRate();
   // current モードの評価前提（ゲイン・符号・指令途絶時の挙動）を起動時に WARN する。
   void warnCurrentModeAssumptions();
+  // current モードのパラメータの検証（configure 時と実行時変更で同じ規則）。
+  // 問題が無ければ空文字、あれば理由を返す。
+  std::string currentModeParamsError() const;
+  // 電流モードの暴走ガードの作動を、ノードのロガーで 1 回だけ報告する（/rosout に載る）。
+  void reportCurrentGuardTrips();
 
   /**
    * @brief 走行チューニング用パラメータの実行時変更コールバック。
@@ -326,14 +343,18 @@ private:
   bool publish_control_sample_{true};
   std::string control_sample_topic_{"/drive_control_sample"};
 
-  // 制御モード関連
-  std::string control_mode_;  // "velocity" | "current"
-  double current_kp_;
-  double current_ki_;
-  double max_current_amp_;
-  double integral_limit_amp_;
-  int current_zero_deadband_rpm_;
-  bool current_invert_measured_;
+  // 制御モード関連（current_* は control_mode "current" のときだけ使う）
+  std::string control_mode_{"velocity"};  // "velocity" | "current"
+  double current_kp_{0.0015};             // [A/rpm]
+  double current_ki_{0.004};              // [A/(rpm·s)]
+  double max_current_amp_{1.0};           // [A]
+  double integral_limit_amp_{0.3};        // [A]
+  int current_zero_deadband_rpm_{5};      // [RPM]
+  bool current_invert_measured_{false};
+  double current_ff_static_amp_{0.0};                // [A] 摩擦補償（静止摩擦分）
+  double current_ff_viscous_amp_per_rpm_{0.0};       // [A/rpm] 摩擦補償（粘性摩擦分）
+  double current_guard_overspeed_margin_rpm_{50.0};  // [RPM] 暴走ガード: 目標超過の幅
+  double current_guard_overspeed_time_sec_{0.3};  // [s] 暴走ガード: 目標超過の継続時間
 
   // 加速度制限（スルーレート）
   double max_linear_accel_;   // [m/s^2] 負値または0で制限無効
@@ -412,8 +433,12 @@ private:
   // 積分状態。deactivate->activate ではポーズ維持（時刻アンカーのみクリア）、
   // cleanup/shutdown/error ではゼロにリセットする（詳細は publishOdometry 参照）。
   odometry::Pose2D odom_pose_{};
-  rclcpp::Time last_odom_time_{0, 0, RCL_ROS_TIME};
-  bool has_last_odom_time_{false};
+  // integrateOdometry
+  // の前回の実測（受信時刻・twist）と、そのときの受信フレーム数（新しい実測の判定）
+  odometry::TwistSample odom_last_sample_{};
+  bool has_odom_sample_{false};
+  uint64_t odom_left_feedback_count_{0};
+  uint64_t odom_right_feedback_count_{0};
 
   // 状態フラグ
   bool motor_initialized_;
@@ -431,6 +456,11 @@ private:
   std::chrono::steady_clock::time_point last_stop_attempt_{};
   // 前回評価したゲートの理由（閉じる変化の検出とログ用）。コンストラクタで初期評価する
   actuation_gate::Block last_block_{actuation_gate::Block::kEstopUnknown};
+  // 報告済みの電流モード暴走ガード（同じ作動を繰り返しログに出さない）
+  motor_control_lib::ddt_current_pi::GuardTrip reported_guard_trip_left_{
+      motor_control_lib::ddt_current_pi::GuardTrip::kNone};
+  motor_control_lib::ddt_current_pi::GuardTrip reported_guard_trip_right_{
+      motor_control_lib::ddt_current_pi::GuardTrip::kNone};
 
   // 診断サンプル: 制御 tick の間だけ in_control_tick_ = true で、tick の中の処理（safetyStop を
   // 含む）が tick_sample_ に何をしたかを書き込む。コールバックはすべて同じ相互排他グループで

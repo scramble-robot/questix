@@ -207,3 +207,55 @@ test('an E-stop not heard yet shows as unknown in the header block', () => {
     drive_state: { allowed: true, blockers }, shoot_state: { allowed: true, blockers } } }, 'active');
   assert.deepEqual(StatusView.headerEstop(row), { state: 'unknown', label: '不明' });
 });
+
+test('the E-stop row reads the manager\'s own /emergency_stop report in every mode', () => {
+  const practice = { mode: 'practice', running_mode: 'practice', service: 'active', robot_name: 'host' };
+  // Practice and competition robots have no QUESTiX LAB bridge (lab.py: lesson mode only).
+  const noLab = { running: false, external: false, mode: 'practice', available: false, bridge: null };
+  const monitor = (state, reason, extra = {}) => ({ state, reason, note: null, ...extra });
+  const released = StatusView.overview({ ...practice, emergency_stop: monitor('released', 'released') }, noLab, 'UART');
+  assert.equal(released.estop.text, '解除されています');
+  assert.deepEqual(StatusView.headerEstop(released.estop), { state: 'released', label: '解除中' });
+  const pressed = StatusView.overview({ ...practice,
+    emergency_stop: monitor('pressed', 'pin 5 is true, expected false; ') }, noLab, 'UART');
+  assert.equal(pressed.estop.text, '押されています（非常停止ボタンが押されているか、つながっていません）');
+  assert.deepEqual(StatusView.headerEstop(pressed.estop), { state: 'pressed', label: '押されている' });
+  // The manager's report wins over a bridge that has not heard the topic yet.
+  const bridgeUnknown = { bridge: { read_only: true, emergency_stop: null } };
+  assert.equal(StatusView.estop(bridgeUnknown, 'active', monitor('pressed', '')).text, '押されています');
+  // A robot control that is not running says so, whatever the last report was.
+  assert.match(StatusView.estop(null, 'inactive', monitor('released', 'released')).text, /停止中/);
+});
+
+test('a diagnostic launch without the GPIO safety path is released but not "解除中"', () => {
+  const row = StatusView.estop(null, 'active',
+    { state: 'released', reason: 'released (no GPIO safety path)', note: null });
+  assert.equal(row.text, '解除されています（非常停止ボタンを読まない診断用の起動です）');
+  assert.equal(row.tone, 'warn');
+  assert.deepEqual(StatusView.headerEstop(row), { state: 'unknown', label: '不明' });
+});
+
+test('an unknown E-stop says why, and never reads as released', () => {
+  const unknown = (note, detail) => StatusView.estop(null, 'active', { state: 'unknown', note, detail });
+  assert.equal(unknown('starting').text, '確認しています');
+  assert.equal(unknown('starting').tone, 'idle');
+  assert.match(unknown('not_heard').text, /^分かりません（\/emergency_stop が届いていません/);
+  assert.match(unknown('silent').text, /途絶えています/);
+  assert.equal(unknown('unavailable', 'ROS 環境が見つかりません。').text, '分かりません（ROS 環境が見つかりません。）');
+  for (const note of ['starting', 'not_heard', 'silent', 'unavailable']) {
+    assert.deepEqual(StatusView.headerEstop(unknown(note)), { state: 'unknown', label: '不明' });
+  }
+  // A bridge that reports the E-stop still answers when the manager has nothing yet.
+  const bridge = { bridge: { read_only: true, emergency_stop: false } };
+  assert.equal(StatusView.estop(bridge, 'active', { state: 'unknown', note: 'starting' }).text, '解除されています');
+});
+
+test('operation_manager reasons in the teacher\'s words', () => {
+  assert.equal(StatusView.estopReasonText('pin 5 not received; '), '非常停止ボタン（GPIO5）の信号が届いていません');
+  assert.equal(StatusView.estopReasonText('pin 5 timeout; pin 27 is false, expected true; '),
+    '非常停止ボタン（GPIO5）の信号が途絶えています・AutoReferee が停止を指示しています');
+  assert.equal(StatusView.estopReasonText('pin 9 is true, expected false; '), 'GPIO9: is true, expected false');
+  assert.equal(StatusView.estopReasonText('something new'), 'something new');
+  assert.equal(StatusView.estopReasonText(''), '');
+  assert.equal(StatusView.estopReasonText(null), '');
+});

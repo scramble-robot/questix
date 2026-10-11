@@ -53,12 +53,12 @@ JoyControllerDualStickComponent::JoyControllerDualStickComponent(const rclcpp::N
 
 void JoyControllerDualStickComponent::loadParameters() {
   // Movement parameters
-  // デフォルト値は config/joy_controller_dual_stick_params.yaml
-  // と同値に保つこと（単一ソース原則）。
-  declare_parameter("longitudinal_input_ratio", 0.025);
+  // デフォルト値は questix_control_config/config/controls.*.yaml の
+  // joy_controller_dual_stick と同値に保つこと（単一ソース原則）。
+  declare_parameter("longitudinal_input_ratio", 1.0);
   get_parameter("longitudinal_input_ratio", longitudinal_input_ratio_);
 
-  declare_parameter("angular_input_ratio", 0.05);
+  declare_parameter("angular_input_ratio", 6.0);
   get_parameter("angular_input_ratio", angular_input_ratio_);
 
   // Differential drive stick mapping
