@@ -103,12 +103,10 @@ def test_unknown_controller_type_fails_before_nodes(expand):
 
 @pytest.mark.parametrize('controller', ['uart', 'dualshock', 'web'])
 def test_dual_stick_drives_like_3_2_0(expand, controller):
-    """A full dual-stick deflection leaves the stop gate at 3.2.0's wheel speed.
-
-    3.2.0 started the dual-stick node as /joy_controller with 2.0 m/s and 6.0 at wheel_radius
-    0.1 m (about 191 rpm). Its own scale (0.05, later 0.025) never reached the stop gate's exit
-    (min_command_rpm + kExitMarginRpm), so the robot did not move at all.
-    """
+    """A full dual-stick deflection leaves the stop gate at 3.2.0's wheel speed."""
+    # 3.2.0 started the dual-stick node as /joy_controller with 2.0 m/s and 6.0 at wheel_radius
+    # 0.1 m (about 191 rpm). Its own scale (0.05, later 0.025) never reached the stop gate's exit
+    # (min_command_rpm + kExitMarginRpm), so the robot did not move at all.
     nodes = expand('joy_controller/launch/joy_controller.launch.xml', dual_stick='true',
                    controller_type=controller)
     assert '/joy_controller' not in nodes
