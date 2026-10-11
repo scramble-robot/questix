@@ -112,11 +112,16 @@ QUESTiX LAB の教材ブリッジは `/target_twist/lab` に出し、`twist_arbi
 
 ### メインlaunchファイル
 
-- `launch/questix_core.launch.xml` - 全システムを起動するメインファイル
-- `launch/navigation_launch.xml` - ナビゲーション用システム（LiDAR + モータ + Joy）
-- `launch/test_launch.xml` - テスト・デバッグ用の最小構成
-- `launch/servo_system_launch.xml` - サーボ制御システム
-- `launch/ddt_motor_launch.xml` - DDTモータコントローラ単体
+- `launch/questix_core.launch.xml` - 全システムを起動するメインファイル（`/emergency_stop` の発行元 operation_manager も起動する）
+- `launch/drive_component.launch.xml` - 走行（joy_controller + drive_component）
+- `launch/shot_component.launch.xml` - 射出（shot_component + esc_motor_control）
+- `launch/lidar_driver.launch.xml` - LiDAR の座標変換（static TF。ドライバのノードは現在コメントアウト）
+- `launch/test.launch.xml` - テスト・デバッグ用の最小構成
+
+`questix_core.launch.xml` 以外は operation_manager を起動しません（`drive_component.launch.xml` は
+`enable_gpio_ref:=true` のときだけ起動し、そのときも gpio_reader は起動しない）。drive / shot / ESC は
+`/emergency_stop` が届かない間は動かないので、単体で動かすときは別の端末で発行元を起動してください
+（手順は [`questix_msgs/README.md`](../questix_msgs/README.md) の「単体起動では発行元も起動する」）。
 
 ### 各パッケージ用launchファイル
 
@@ -149,14 +154,11 @@ LiDARなど実機依存のパッケージは追加取得とJazzy互換性確認�
 # 全システムを起動
 ros2 launch questix_launcher questix_core.launch.xml
 
-# ナビゲーションシステムを起動
-ros2 launch questix_launcher navigation_launch.xml
+# 走行だけを起動（別の端末で /emergency_stop の発行元も起動する。上の「メインlaunchファイル」）
+ros2 launch questix_launcher drive_component.launch.xml
 
 # テスト構成を起動
-ros2 launch questix_launcher test_launch.xml
-
-# DDTモータのみ起動
-ros2 launch questix_launcher ddt_motor_launch.xml
+ros2 launch questix_launcher test.launch.xml
 ```
 
 ### 2. シェルスクリプトを使用（推奨）

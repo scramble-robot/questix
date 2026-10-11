@@ -10,6 +10,14 @@ QUESTiX のモータ制御 ROS 2 ノード群です。シリアル通信・制�
 | `single_ddt_motor` | DDT モータ 1 台のベンチテスト用 |
 | `joy_axis_drive` | 左右軸→左右輪の直結デバッグ用（運動学なし、レガシー） |
 
+`drive_component`・`shot_component`（と `esc_motor_control`）は `/emergency_stop` を一度も
+受信していない間、または途絶えている間は動きません（`require_emergency_stop: true`）。
+このパッケージの launch（`drive_component.launch.*`、`drive_component_container.launch.*`、
+`shot_component.launch.*`）や `ros2 run` は発行元の operation_manager を起動しないので、
+単体で動かすときは別の端末で発行元を起動してください。手順と診断用の opt-out は
+[`questix_msgs/README.md`](../questix_msgs/README.md) の「単体起動では発行元も起動する」にあります。
+`require_emergency_stop:=false` を `ros2 launch` の引数として渡しても無視されます。
+
 以下は走行系 `drive_component` について記述します。
 
 ## トピック

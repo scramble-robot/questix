@@ -34,6 +34,11 @@ DDT M0602C の Protocol 1 応答フレームをデコードした 1 モータ分
 | `temperature` | `uint8` | [deg C] **現状常に 0**。DDT Protocol 2 (0x74) 未実装。実装時にフィールドを変えずに済むよう定義だけ残している |
 | `fault_code` | `uint8` | DATA[8]。0 = 正常、非0 = ファーム故障ビット |
 
+**3.2.0 との互換**: `velocity_rpm_raw` は 3.2.0 の後で `velocity_rpm` の次に追加した。
+`MotorFeedback` と、それを含む `DriveStatus` の型ハッシュは 3.2.0 と違うため、3.2.0 でビルドした
+ノード(別 PC の購読側など)とは `/drive_status` でやりとりできず、3.2.0 で記録した bag は旧い
+並びのまま(3.2.0 の定義で読む)。`velocity_rpm` の中身は 3.2.0 と同じ(`CHANGELOG.rst`)。
+
 ### `DriveStatus.msg`
 
 差動二輪の状態。左右ホイールの `MotorFeedback` と車体速度をまとめる。
@@ -106,7 +111,8 @@ DDT M0602C の Protocol 1 応答フレームをデコードした 1 モータ分
   (`/drive_status` が状態の契約、`/emergency_stop` が安全の契約)。
 - **既存トピックを変えない理由**: `MotorFeedback` / `DriveStatus` にフィールドを足すと型ハッシュが
   変わり、既存の購読側・ブリッジ・記録済みの rosbag(旧型で書かれた bag の再生・変換)との互換が
-  崩れる。tick 単位の情報は新しい型・新しいトピックに分け、既存の 2 型は変更しない。
+  崩れる(3.2.0 の後の `velocity_rpm_raw` の追加で一度崩れている。上の「3.2.0 との互換」)。
+  tick 単位の情報は新しい型・新しいトピックに分け、既存の 2 型はこれ以上変更しない。
   旧 bag の解析は `/drive_status` の車輪ごとの `header.stamp`(受信時刻)で重複を除く
   (`scripts/identify/ripple_analysis.py`)。
 
@@ -136,8 +142,27 @@ DDT M0602C の Protocol 1 応答フレームをデコードした 1 モータ分
 - **staleness 検出**: 購読側は「一度以上受信した後に」`emergency_stop_timeout_sec`
   (既定 1.0 s、自分の単調時計による受信間隔)を超えて受信が途絶えたら、押下と同じく停止して
   動かさない。受信が戻っても、解除だけでは動き出さない(新しい指令が必要)。
-- **診断用の明示 opt-out**: 単体の診断起動に限り `require_emergency_stop:=false` で未受信を
-  許せる(押下を受信したときの停止はそのまま)。統合構成は opt-out しない。
+- **単体起動では発行元も起動する**: `questix_core` 以外の起動(パッケージ単体の launch や
+  `ros2 run`)は operation_manager を起動しないため、そのままでは `/emergency_stop` が届かず
+  drive_component / shot_component / esc_motor_control は動かない(3.2.0 までは未受信でも動いた)。
+  規則を保ったまま動かすには、別の端末で発行元を起動する:
+
+  ```bash
+  # Raspberry Pi で物理非常停止(GPIO5)を判定する
+  ros2 launch gpio_reader gpio_reader.launch.xml
+  ros2 launch operation_manager operation_manager.launch.xml
+  # GPIO のない PC やベンチの診断(押下は ROS に伝わらない。RLY1 の動力遮断は別に働く)
+  ros2 launch operation_manager operation_manager.launch.xml \
+    config_file:=$(ros2 pkg prefix operation_manager)/share/operation_manager/config/operation_manager.no_gpio.yaml
+  ```
+
+  `questix_launcher` の `drive_component.launch.xml enable_gpio_ref:=true` は operation_manager を
+  自分で起動する(gpio_reader は起動しない)ので、足すのは gpio_reader だけにする。発行元を二つにしない。
+- **診断用の明示 opt-out**: 発行元なしで動かす単体の診断に限り、ノードのパラメータ
+  `require_emergency_stop` を false にできる(押下を受信したときの停止はそのまま)。launch 引数では
+  ない(どの launch も宣言していない)ので、`ros2 launch ... require_emergency_stop:=false` は
+  警告なしに無視される。`ros2 run motor_control_app drive_component_node --ros-args -p
+  require_emergency_stop:=false` のように、ノードのパラメータとして渡す。統合構成は opt-out しない。
 
 ## 復帰挙動(active=false 受信時)
 
