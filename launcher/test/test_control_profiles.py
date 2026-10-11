@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 
+from launch.actions import LogInfo
 import pytest
 import questix_control_config
 import yaml
@@ -174,3 +175,75 @@ def test_composed_drive_receives_profile_and_serial_port(expand, extension):
     assert nodes['/drive_component']['max_motor_rpm'] == 475
     assert nodes['/drive_component']['max_linear_accel'] == 1.5
     assert nodes['/drive_component']['serial_port'] == '/dev/test-port'
+
+
+@pytest.fixture
+def warnings(monkeypatch):
+    """Collect the launch's [WARN] lines instead of logging them."""
+    logged = []
+
+    def execute(action, context):
+        text = ''.join(part.perform(context) for part in action.msg)
+        if text.startswith('[WARN]'):
+            logged.append(text)
+    monkeypatch.setattr(LogInfo, 'execute', execute)
+    return logged
+
+
+def test_operator_keys_in_a_node_yaml_are_reported_once(expand, warnings, tmp_path):
+    """A 3.2.0-style node YAML with speeds and buttons says why they have no effect."""
+    joy = tmp_path / 'my_joy.yaml'
+    joy.write_text(yaml.safe_dump({'joy_controller': {'ros__parameters': {
+        'longitudinal_input_ratio': 0.3, 'angular_z_axis': 2, 'debug_mode': True}}}))
+    # The standalone drive launch includes joy_controller.launch.xml and the drive launch, and
+    # each resolves the profile again: still one warning for the file.
+    nodes = expand('launcher/launch/drive_component.launch.xml', joy_config_file=str(joy),
+                   controller_type='dualshock')
+    assert nodes['/joy_controller']['longitudinal_input_ratio'] == 1.0  # the profile's value
+    assert nodes['/joy_controller']['debug_mode'] is True  # a node setting stays in effect
+    assert len(warnings) == 1
+    assert str(joy) in warnings[0]
+    assert 'joy_controller: angular_z_axis, longitudinal_input_ratio' in warnings[0]
+    assert 'debug_mode' not in warnings[0]
+
+
+def test_a_legacy_tilt_axis_is_reported_as_ignored(expand, warnings, tmp_path):
+    """The profile always sets tilt_up_axis/tilt_down_axis, so tilt_axis is never inherited."""
+    shot = tmp_path / 'my_shot.yaml'
+    hardware = yaml.safe_load((ROOT / 'motor_control_app/config/shot_config.yaml').read_text())
+    hardware['shot_component']['ros__parameters'].update({'tilt_axis': 6, 'fire_button': 2})
+    shot.write_text(yaml.safe_dump(hardware))
+    nodes = expand('motor_control_app/launch/shot_component.launch.xml', config_file=str(shot))
+    assert nodes['/shot_component']['fire_button'] == 5
+    assert nodes['/shot_component']['tilt_up_axis'] == 7
+    assert len(warnings) == 1
+    assert 'shot_component: fire_button, tilt_axis' in warnings[0]
+
+
+@pytest.mark.parametrize('relative_path,arguments', [
+    ('launcher/launch/questix_core.launch.xml',
+     {'enable_lidar': 'false', 'enable_rviz': 'false', 'controller_type': 'uart'}),
+    ('launcher/launch/questix_core.launch.xml',
+     {'enable_lidar': 'false', 'enable_rviz': 'false', 'controller_type': 'web'}),
+    ('joy_controller/launch/joy_controller.launch.xml', {'dual_stick': 'true'}),
+    ('joy_controller/launch/joy_controller_referee.launch.xml', {}),
+    ('motor_control_app/launch/drive_component_container.launch.py', {}),
+    ('motor_control_app/launch/joy_axis_drive.launch.xml', {}),
+    ('esc_motor_control_cpp/launch/esc_motor_control_cpp.launch.xml', {}),
+])
+def test_packaged_node_yamls_hold_no_operator_controls(expand, warnings, relative_path, arguments):
+    """Nothing to report with the packaged files: a warning always means a user's file."""
+    expand(relative_path, **arguments)
+    assert warnings == []
+
+
+def test_overridden_keys_cover_wildcard_sections():
+    """A /** section reaches every node, so any profile key in it is overridden too."""
+    profile = {'joy_node': {'ros__parameters': {'deadzone': 0.05}},
+               'shot_component': {'ros__parameters': {'tilt_up_axis': 7}}}
+    document = {'/**': {'ros__parameters': {'deadzone': 0.1, 'use_sim_time': False}},
+                '/shot_component': {'ros__parameters': {'tilt_axis': 6}},
+                'other': 'not a node section'}
+    assert questix_control_config.overridden_keys(document, profile) == {
+        '/**': ['deadzone'], 'shot_component': ['tilt_axis']}
+    assert questix_control_config.overridden_keys(None, profile) == {}
