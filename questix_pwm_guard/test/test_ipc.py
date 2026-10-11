@@ -79,6 +79,12 @@ with tempfile.TemporaryDirectory(prefix='questix-ipc-') as directory:
         c.close()
         time.sleep(.03)
         c, session = arm()
+        assert call(c, 'COMMAND', session, 2, 2000)[1] == '1'
+        r = call(c, 'COMMAND', session, 3, 2001)
+        assert r[1] == '0' and r[2] == 'FAULT_LOW' and r[3] == '0', r
+        c.close()
+        time.sleep(.03)
+        c, session = arm()
         assert call(c, 'COMMAND', session, 10, 1800)[1] == '1'
         assert call(c, 'STOP', 0, 0)[1] == '1'
         assert call(c, 'REPORT', session)[3] == '0'
@@ -153,7 +159,9 @@ print('REAL_DISTINCT_UID_ADMIN_SLOT_AND_ROLE_PASS')
             c.close()
         time.sleep(.03)
         p.kill()
-        p.wait(timeout=2)
+        killed_stdout, _ = p.communicate(timeout=2)
+        assert b'rearm previous_session=' in killed_stdout, killed_stdout
+        assert b'previous_fault=-110 session=' in killed_stdout, killed_stdout
         sock.unlink(missing_ok=True)
         p = launch()
         c = connect(sock)

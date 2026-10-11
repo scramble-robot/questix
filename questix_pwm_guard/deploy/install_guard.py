@@ -13,6 +13,7 @@ import grp
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 
 
@@ -107,10 +108,31 @@ def atomic_file(path, contents, mode):
             Path(temporary).unlink()
 
 
+def migration_preflight(filesystem_root=Path('/')):
+    """Refuse a coupled robot unit, report inert frozen assets without deleting evidence."""
+    dropin = filesystem_root / 'etc/systemd/system/questix_robot.service.d/50-rp1-pwm.conf'
+    if dropin.exists() or dropin.is_symlink():
+        raise ValueError('legacy reviewed robot drop-in remains; teacher migration required')
+    assets = ('etc/questix_pwm_guard/reviewed-launch.env',
+              'etc/questix_pwm_guard/reviewed-release.json',
+              'etc/questix_pwm_guard/approved-release.sha256',
+              'etc/questix_pwm_guard/runtime-approved.sha256',
+              'etc/questix_pwm_guard/deployment-state',
+              'opt/questix_pwm_guard/releases',
+              'var/lib/questix_pwm_guard/deployment-in-progress')
+    found = []
+    for relative in assets:
+        path = filesystem_root / relative
+        if path.exists() or path.is_symlink():
+            found.append(str(path))
+            print(f'WARNING: legacy frozen asset remains: {path}; teacher must back up and '
+                  'verify standard workspace launcher before starting services', file=sys.stderr)
+    return found
+
+
 def main():
     if os.geteuid() != 0:
         raise ValueError('teacher/root installation required')
-    import sys
     entry = Path(sys.argv[1])
     if not entry.is_absolute():
         raise ValueError("installer entry must be an absolute protected path")
@@ -128,9 +150,7 @@ def main():
     account = pwd.getpwnam(args.robot_user)
     if account.pw_uid == 0:
         raise ValueError('robot user must not be root')
-    legacy_dropin = Path('/etc/systemd/system/questix_robot.service.d/50-rp1-pwm.conf')
-    if legacy_dropin.exists() or legacy_dropin.is_symlink():
-        raise ValueError('legacy reviewed robot drop-in remains; teacher migration required')
+    migration_preflight()
     state = Path('/var/lib/questix_pwm_guard')
     protected(state.parent)
     state.mkdir(mode=0o700, exist_ok=True)

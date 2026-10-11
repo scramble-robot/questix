@@ -32,7 +32,7 @@ inline const char* state_name(State s) {
 }
 struct Config {
   int neutral_us{1000};
-  int max_us{2500};
+  int max_us{2000};
   int lease_ms{500};
   int arm_ms{3000};
   int drain_ms{500};

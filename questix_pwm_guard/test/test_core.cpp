@@ -145,14 +145,21 @@ TEST(GuardProtocol, StrictUnsignedVersionedFields) {
 TEST_F(GuardTest, PulseWidthBoundaryContract) {
   active();
   EXPECT_TRUE(core.command(42, 2, 500, 2100));
-  EXPECT_TRUE(core.command(42, 3, 2500, 2101));
-  EXPECT_FALSE(core.command(42, 4, 2501, 2102));
+  EXPECT_TRUE(core.command(42, 3, 2000, 2101));
+  EXPECT_FALSE(core.command(42, 4, 2001, 2102));
   EXPECT_EQ(core.state(), q::State::FaultLow);
   EXPECT_EQ(out.writes.back(), 0);
 }
 TEST_F(GuardTest, SubminimumPulseFaultsLow) {
   active();
   EXPECT_FALSE(core.command(42, 2, 499, 2100));
+  EXPECT_EQ(core.state(), q::State::FaultLow);
+  EXPECT_EQ(out.writes.back(), 0);
+}
+
+TEST_F(GuardTest, DefaultCalibrationRejectsAbsoluteHardwareLimit) {
+  active();
+  EXPECT_FALSE(core.command(42, 2, 2500, 2100));
   EXPECT_EQ(core.state(), q::State::FaultLow);
   EXPECT_EQ(out.writes.back(), 0);
 }

@@ -264,8 +264,14 @@ int run(int argc, char** argv) {
             ok = core.emergency_low();
           } else if (r.op == "ARM" && peer.uid == allowed && peer.uid != admin && owner < 0 &&
                      r.session == 0 && r.seq == 0 && r.pulse == 0) {
+            const auto previous_session = core.session();
+            const auto previous_fault = core.fault_error();
             ok = core.arm(generation(), t);
             if (ok) {
+              if (previous_fault)
+                std::cout << "rearm previous_session=" << previous_session
+                          << " previous_fault=" << previous_fault << " session=" << core.session()
+                          << std::endl;
               owner = fd;
               peer.owns = true;
             }

@@ -25,9 +25,13 @@ root serviceはcapabilityなし、NoNewPrivileges、ProtectSystem=strictで、�
 
 ## 故障時の契約
 
-- SO_PEERCREDによるrobot UID、所有接続1本、session、sequence、500〜2500 µsまたは0を検査。
+- SO_PEERCREDによるrobot UID、所有接続1本、session、sequence、既定500〜2000 µsまたは0を検査。
+  guardの既定上限2000 µsはESC YAML/adapterの上限と一致し、直接2001 µsもfault停止。
+  sysfsの絶対許容上限2500 µsまで運転許可を広げた意味ではありません。
 - ARMは明示要求。ticket不要ですが、現在ownerがいる間は別接続のARMを拒否。
   terminal/faultを同sessionの指令で解除しません。再試行はownerを閉じた新接続の新ARMです。
+  故障後の成功ARMは旧session/故障codeと新sessionを標準出力（unitではjournal）に記録し、
+  その後の新sessionのfault診断は初期化します。拒否されたARMは故障原因を消しません。
 - ARMINGはCOMPLETEまで固定3秒の締切。最短neutral時間の保証ではありません。
   ESC側は既存の2秒neutral準備を維持。
 - ACTIVE leaseは既定500 ms（daemon `--lease-ms`、100〜1000 ms）。ESCはROS executor上で
@@ -39,6 +43,8 @@ root serviceはcapabilityなし、NoNewPrivileges、ProtectSystem=strictで、�
 - 接続断・lease失効・faultは即Lowを試みます。normalならperiod/enable不明でもduty=0を
   best effortで書き、不明/逆極性ならenable=0を試みます。確認不能ならFAULT_UNKNOWN/applied=-1。
   FAULT_UNKNOWNでもtickごとに停止を再試行します。確認不能をLow成功と表示しません。
+  `enable=0` の電圧（特に逆極性/極性不明）は未確認で、disable成功を電気的Lowとしません。
+  次のESC非通電試験でnormal/inversedのdisable時の電圧・過渡・pinmuxをscopeで記録するまでNOT_RUN。
 - unknown所有者は変更しません。pending→export準備→Low検査後にCOMMITTED markerを確定。
   markerはroot0600、boot/controller/channel一致を要求。故障後も出力を監視。
 - イベントループ例外時もRAIIでemergency Lowを試み、unitのwatchdog/ExecStopPost recover-lowを維持。
@@ -118,7 +124,32 @@ guardが安定してLowを要求できることを確認した後、生徒worksp
 source更新だけではSD上の旧drop-in・launcherは消えません。**今回の再実装を旧配備にそのまま混ぜない**でください。
 ESC OFFで、先生が実効unitとbackupを記録し、旧drop-inを撤去し、標準launcherをbase版へ戻し、
 robotのROBOT_WS/installが新版ESCを使うことを確認します。旧凍結runtime/証跡は最初から削除しません。
-installerは旧robot drop-inを検出したら配置を拒否します。guardの停止/移行は具体的な別手順でレビューします。
+installerは旧robot drop-in（壊れたsymlinkも含む）を検出したら配置を拒否します。
+旧reviewed-launch.env、reviewed-release.json、approved-release.sha256、runtime-approved.sha256、
+deployment-state、releases/、deployment-in-progressは検出してwarningを出し、自動削除しません。
+これらは新版launcher/guardでは参照しませんが、warningは移行完了の保証ではありません。
+
+以下は**先生がESC OFF、サービス停止/無効化、Low/export保持条件を確認した後**の退避手順例で、
+実施記録ではありません。既存backupを使い回さず、root管理の新しいdirectoryへ移します。
+
+```bash
+# Teacher records effective units, installed launcher SHA, old assets and waveform conditions first.
+sudo /usr/bin/mkdir -m 0700 /var/lib/questix_pwm_guard/legacy-<timestamp>
+sudo /usr/bin/cp -p /opt/questix_robot/questix_robot_launcher.sh \
+  /var/lib/questix_pwm_guard/legacy-<timestamp>/questix_robot_launcher.sh
+# Move each existing path below into that new backup, retaining its contents and permissions:
+# /etc/systemd/system/questix_robot.service.d/50-rp1-pwm.conf
+# /etc/questix_pwm_guard/  (old YAML, launch env and approval metadata together)
+# /opt/questix_pwm_guard/releases/
+# /var/lib/questix_pwm_guard/deployment-in-progress
+sudo /usr/bin/mv -- <one-existing-path-above> /var/lib/questix_pwm_guard/legacy-<timestamp>/
+# Repeat mv for each existing path only; do not delete previous source/runtime evidence.
+```
+
+先生がレビュー済みの標準 `systemd/questix_robot_launcher.sh` をroot管理へ配置し、
+実効robot unitから古いdrop-in依存が消えたこと、ROBOT_WS/installが新版ESCを使うことを確認します。
+旧assetの退避だけでlauncher復旧とは扱いません。daemon-reload、guard更新/再起動と信号確認は
+別の具体的手順をレビューして実施します。installed.txt/source/以前のbackupは残します。
 
 ### 単純な撤去
 

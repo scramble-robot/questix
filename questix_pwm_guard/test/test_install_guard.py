@@ -1,5 +1,7 @@
 """Private source-copy and installer contract tests; no root install, systemd or GPIO."""
 import importlib.util
+import contextlib
+import io
 from pathlib import Path
 import os
 import tempfile
@@ -54,6 +56,58 @@ class SourceCopyTest(unittest.TestCase):
                 f.truncate(4*1024*1024+1)
             with self.assertRaises(ValueError):
                 installer.snapshot(root/'source', root/'target')
+
+    def test_clean_migration_has_no_warning(self):
+        with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stderr(io.StringIO()) as log:
+            self.assertEqual(installer.migration_preflight(Path(tmp)), [])
+            self.assertEqual(log.getvalue(), '')
+
+    def test_legacy_assets_warn_without_modification(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            relatives = ('etc/questix_pwm_guard/reviewed-launch.env',
+                         'etc/questix_pwm_guard/reviewed-release.json',
+                         'etc/questix_pwm_guard/approved-release.sha256',
+                         'etc/questix_pwm_guard/runtime-approved.sha256',
+                         'etc/questix_pwm_guard/deployment-state',
+                         'opt/questix_pwm_guard/releases',
+                         'var/lib/questix_pwm_guard/deployment-in-progress')
+            for relative in relatives:
+                target = root/relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                if relative.endswith('/releases'):
+                    target.mkdir()
+                    (target/'evidence').write_text('retained')
+                else:
+                    target.write_text('retained')
+            with contextlib.redirect_stderr(io.StringIO()) as log:
+                found = installer.migration_preflight(root)
+            self.assertEqual(set(found), {str(root/p) for p in relatives})
+            for relative in relatives:
+                self.assertIn(str(root/relative), log.getvalue())
+                target = root/relative
+                if target.is_dir():
+                    target = target/'evidence'
+                self.assertEqual(target.read_text(), 'retained')
+            link = root/'etc/questix_pwm_guard/reviewed-launch.env'
+            link.unlink()
+            link.symlink_to(root/'missing')
+            with contextlib.redirect_stderr(io.StringIO()):
+                self.assertIn(str(link), installer.migration_preflight(root))
+
+    def test_old_dropin_and_broken_link_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dropin = root/'etc/systemd/system/questix_robot.service.d/50-rp1-pwm.conf'
+            dropin.parent.mkdir(parents=True)
+            dropin.write_text('legacy')
+            with self.assertRaises(ValueError):
+                installer.migration_preflight(root)
+            self.assertEqual(dropin.read_text(), 'legacy')
+            dropin.unlink()
+            dropin.symlink_to(root/'missing')
+            with self.assertRaises(ValueError):
+                installer.migration_preflight(root)
 
     def test_unit_is_independent_and_sandboxed(self):
         template = (path.parents[1]/'systemd/questix_pwm_guard.service.in').read_text()
