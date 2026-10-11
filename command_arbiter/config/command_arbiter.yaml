@@ -27,3 +27,35 @@ drive_arbiter:
     lab_timeout_sec: 0.3
     tick_hz: 20.0
     status_hz: 5.0
+
+launcher_arbiter:
+  ros__parameters:
+    joy_topic: "/launcher_command/joy"   # joy_launcher's output, remapped by the lesson launch
+    lab_topic: "/launcher_command/lab"   # questix_lab_bridge launcher_command_topic
+    output_topic: "/launcher_command"    # esc_motor_control's and shot_component's input
+    status_topic: "/command_arbiter/status"
+    # The teacher's lesson permission (Robot Manager's heartbeat, launcher_allowed), a 1.0 s lease.
+    lab_permission_topic: "/lab_permission"
+    lab_permission_lease_sec: 1.0
+    # QUESTiX LAB's caps: the roller power and the tilt targets a page may command (shot_component
+    # clamps to the mechanism's own tilt range as well). The lab bridge shows them to the pages
+    # from /command_arbiter/status.
+    lab_max_power: 0.8        # 0..1
+    lab_tilt_min_deg: 0.0     # [deg]
+    lab_tilt_max_deg: 120.0   # [deg]
+    # A lab shot needs the lab's roller at min_fire_power or more for spin_up_sec without a break,
+    # and fire_interval_sec since the last shot of any source; otherwise it is refused (never
+    # queued). The controller's shots are only limited by shot_component's min_fire_interval_sec.
+    min_fire_power: 0.2
+    spin_up_sec: 1.0          # [s]
+    fire_interval_sec: 2.0    # [s]
+    # The controller (roller held, a shot, a tilt step) busy within this: the lab may not take over.
+    controller_quiet_sec: 1.0
+    # No controller command this long = no controller.
+    joy_timeout_sec: 0.5
+    # The lab input quiet this long = its run ended: the roller stops, then the controller again.
+    lab_timeout_sec: 1.0
+    # An input silent this long has its counters rebased (nothing from before is replayed).
+    input_timeout_sec: 1.0
+    tick_hz: 20.0
+    status_hz: 5.0

@@ -6,6 +6,7 @@
 # There is no D-pad on the page, so tilt uses buttons (tilt_*_axis: -1) instead of axis 7.
 # ROS node sections prevent unrelated parameters from leaking between nodes.
 # Signed input ratios reverse direction. Units: linear m/s, angular rad/s.
+# joy_launcher: the launcher's buttons (fire, tilt, roller) -> /launcher_command.
 # Each tilt direction selects its own axis (-1 uses its button index).
 # axis_sign: +1 = positive half-axis, -1 = negative half-axis; used only in axis mode.
 # Acceleration/taper: 0 disables shaping. max_motor_rpm must be <= 475.
@@ -29,7 +30,7 @@ joy_controller_dual_stick:
     angular_input_ratio: 6.0
     left_stick_vertical_axis: 1
     right_stick_vertical_axis: 4
-shot_component:
+joy_launcher:
   ros__parameters:
     fire_button: 5
     tilt_up_axis: -1
@@ -38,8 +39,6 @@ shot_component:
     tilt_down_axis_sign: -1
     tilt_up_button_index: 4
     tilt_down_button_index: 6
-esc_motor_control:
-  ros__parameters:
     full_speed_button: 7
     full_speed_value: 1.0
 drive_component:

@@ -7,10 +7,10 @@
 
 #include <limits>
 
-#include "motor_control_app/tilt_input.hpp"
+#include "joy_controller/tilt_input.hpp"
 
-using motor_control_app::TiltInputEdges;
-using motor_control_app::tiltInputPressed;
+using joy_controller::TiltInputEdges;
+using joy_controller::tiltInputPressed;
 
 TEST(TiltInput, MixedDirectionsStepOncePerPress) {
   TiltInputEdges edges;

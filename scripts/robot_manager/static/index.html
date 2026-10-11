@@ -589,9 +589,10 @@
         <summary>先生・技術者向けの詳しい情報</summary>
         <ul id="lab-shoot-tech" class="lab-tech-list"></ul>
         <p class="lab-note">
-          教材用の起動では、ローラー（esc_motor_control）と発射台（shot_component）が教材の入力
-          （/roller/lab・/shot/lab/*）を受け付けます。練習用・大会用の起動では受け付けません。
-          ローラーは最大 80%、発射はローラーが1秒回ってから・前の発射から2秒あけて1枚ずつ（questix_lab_bridge の設定）。
+          教材用の起動では切り替えノード command_arbiter が入り、コントローラーと教材の指令
+          （/launcher_command/lab）のどちらかをローラー（esc_motor_control）と発射台（shot_component）に渡します。
+          教材の指令を渡すのは、この許可（/lab_permission）が届いている間だけです。練習用・大会用の起動には入りません。
+          ローラーは最大 80%、発射はローラーが1秒回ってから・前の発射から2秒あけて1枚ずつ（command_arbiter の設定）。
           教材の画面が閉じたり通信が 0.5 秒途切れたり 30 秒たったりするとローラーは止まり、どの端末からでも止められます。
         </p>
       </details>

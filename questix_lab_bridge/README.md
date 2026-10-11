@@ -10,10 +10,10 @@ the disc launcher's roller and tilt/fire status, and (optionally) camera images.
 **Observation only unless the teacher allows more.** The bridge holds the pages' sessions only
 (`design/safety_permission_input_refactor.md`, 4.5); whether a page may move the robot is decided
 outside it. It publishes `/target_twist/lab` (see [Driving experiments](#driving-experiments)) and
-`/roller/lab`, `/shot/lab/tilt`, `/shot/lab/fire` (see [Launcher experiments](#launcher-experiments))
-and nothing else (no services or actions), and only for a page's session while the teacher's
-lesson permission (`/lab_permission`, Robot Manager's 教材 switches) and the robot's
-`/motion_permission` allow it. Everything else a browser sends over the socket is discarded except
+`/launcher_command/lab` (see [Launcher experiments](#launcher-experiments)), command_arbiter's lab
+inputs, and nothing else (no services or actions), and only for a page's session; command_arbiter
+passes them on only while the teacher's lesson permission (`/lab_permission`, Robot Manager's 教材
+switches) allows it, and the actuators move only while the robot's `/motion_permission` does. Everything else a browser sends over the socket is discarded except
 a recording to keep on the robot ([Records kept on the robot](#records-kept-on-the-robot); files
 only, nothing reaches ROS). No parameter of the bridge grants motion: a bridge started by hand
 moves nothing the teacher has not allowed.
@@ -56,21 +56,17 @@ it is a classroom tool that is switched on from the manager when a lesson needs 
 | `base_frame` | `base_link` | Each scan carries `mount` (`x`, `y`, `yaw` of the scan frame in this frame), looked up once per frame in TF — on QUESTiX the static transform of `launcher/launch/lidar_driver.launch.xml`. `null` (and a throttled warning) while TF does not know it; the lab then uses its default mount. |
 | `wheel_radius`, `wheel_separation` | `0.1`, `0.5` | Only reported to the page for wheel-odometry lessons. Keep identical to `launcher/config/drive_component.yaml`. |
 | `drive_topic` | `/target_twist/lab` | `geometry_msgs/Twist` published for the pages: command_arbiter's (DriveArbiter's) lab input. Empty = no driving. |
-| `arbiter_status_topic` | `/command_arbiter/status` | `questix_msgs/ArbiterStatus` (mechanism `drive`): whether the teacher allows driving, the speed caps, and when the arbiter gave the robot to the controller. Silent for 1.5 s = no arbiter (`no_drive_node`). |
-| `lab_permission_topic` | `/lab_permission` | `questix_msgs/ActuationAuthority` from Robot Manager: the teacher's lesson permission (a 1 s lease). The bridge reads `launcher_allowed` (the drive's comes from the arbiter's status). |
+| `arbiter_status_topic` | `/command_arbiter/status` | `questix_msgs/ArbiterStatus` of both mechanisms: whether the teacher allows driving / the launcher (`lab_permitted`), QUESTiX LAB's caps and shot rules, and when the arbiter gave the robot to the controller. Silent for 1.5 s = no arbiter (`no_drive_node` / `no_launcher`). |
 | `motion_permission_topic` | `/motion_permission` | `questix_msgs/MotionPermission` (a 0.5 s lease): shown to the pages as `no_motion_permission`; the actuators enforce it themselves. |
 | `emergency_stop_topic` | `/emergency_stop` | `questix_msgs/EmergencyStop` (reliable, transient local). The only source that makes the E-stop state known: until it has been heard, driving and the launcher are refused (`estop_unknown`) and `GET /api/state` reports `emergency_stop: null`. `/drive_status`'s `emergency_stop` (and the launcher statuses' `estop`) can add a pressed E-stop, never a released one. Empty = never known, so pages never move the robot. |
 | `drive_deadman_sec` | `0.5` | The driving page repeats its command every 0.1 s; silence this long stops the robot. |
 | `drive_max_run_sec` | `30.0` | Longest single run, from its first command to its stop. |
 | `drive_rate_hz` | `20.0` | Rate the held command is published at. |
 | `roller_status_topic`, `shot_status_topic` | `/roller/status`, `/shot/status` | `std_msgs/String` JSON status of `esc_motor_control` and `shot_component`, mirrored to every page (streams `roller`, `shot`). Empty = not mirrored, and no launcher experiments. |
-| `roller_lab_topic`, `tilt_lab_topic`, `fire_lab_topic` | `/roller/lab`, `/shot/lab/tilt`, `/shot/lab/fire` | `std_msgs/Float32` roller power 0..1, `std_msgs/Float32` tilt [deg], `std_msgs/Empty` fire one disc; the launcher nodes' lab inputs. |
-| `shoot_max_power` | `0.8` | Cap on the roller power a page may command; narrowed further by `esc_motor_control`'s `lab_max_speed` from `/roller/status`, never widened. |
-| `shoot_tilt_min`, `shoot_tilt_max` | `0.0`, `120.0` | Cap on the tilt range [deg]; narrowed further by `shot_component`'s `tilt_min_deg` / `tilt_max_deg` from `/shot/status` (its `tilt_min_angle` / `tilt_max_angle`, 0 / 120 in `shot_config*.yaml`). |
-| `shoot_fire_interval_sec` | `2.0` | Shortest time between two shots of any source. |
+| `launcher_command_topic` | `/launcher_command/lab` | `questix_msgs/LauncherCommand` published for the pages: command_arbiter's (LauncherArbiter's) lab input. Empty = no launcher experiments. |
 | `shoot_deadman_sec` | `0.5` | The page repeats `roller` every 0.1 s; silence this long stops the roller. |
 | `shoot_max_spin_sec` | `30.0` | Longest session, from its first command to its stop. |
-| `shoot_rate_hz` | `20.0` | Rate the roller command is published at during a session. |
+| `shoot_rate_hz` | `20.0` | Rate the command is published at during a session. |
 | `records_dir` | `~/.local/share/questix/lab-records` | Where records are kept ([Records kept on the robot](#records-kept-on-the-robot)); created with the bridge user's permissions. `""` = keep nothing (pages cannot save, the list is empty). |
 | `records_quota_mb`, `records_min_free_mb` | `500`, `200` | Space the records may take, and free space always left on the disk [MiB]. |
 | `auto_record` | `true` | Record driving that no page records (the controller) by itself. |
@@ -135,51 +131,54 @@ while any page drives.
 ## Launcher experiments
 
 Lessons can also spin the disc launcher's roller, tilt it and fire one disc. The bridge publishes
-the launcher nodes' lab inputs, and the nodes decide themselves whether to apply them
-(`accept_lab_input`, set only by lesson launches; E-stop; the controller's quiet time; their own
-clamps and fire interval) and report it in their status:
+one `questix_msgs/LauncherCommand` stream for the page's session (`roller_power`, a sticky
+`tilt_deg` target, `fire_seq` counting this bridge's shot requests, `source` `lab`) on
+`/launcher_command/lab`. command_arbiter's LauncherArbiter (lesson launches only) passes it on to
+`/launcher_command` only while the teacher's lesson permission (`/lab_permission`
+`launcher_allowed`) is on, clamps the power to `lab_max_power` (0.8) and the tilt to
+`lab_tilt_min_deg..lab_tilt_max_deg`, lets a shot through only after the roller ran at 0.2 or more
+for 1.0 s and 2.0 s after the last shot, and gives the launcher to the controller at once when it
+is used. esc_motor_control and shot_component obey `/launcher_command` only (and stop on
+`/emergency_stop` and `/motion_permission` themselves):
 
 | Topic | Type | From → to |
 | --- | --- | --- |
-| `/roller/lab` | `std_msgs/Float32` (0..1) | bridge → `esc_motor_control` |
-| `/shot/lab/tilt` | `std_msgs/Float32` [deg] | bridge → `shot_component` |
-| `/shot/lab/fire` | `std_msgs/Empty` | bridge → `shot_component` |
-| `/roller/status` | `std_msgs/String` JSON `{command, source: joy/lab/idle, lab_accepted, lab_locked, estop, authority, lab_max_speed}` | `esc_motor_control` → bridge, 5 Hz |
-| `/shot/status` | `std_msgs/String` JSON `{tilt_deg, shooting, fired_count, last_fire_source: joy/lab/null, lab_accepted, estop, authority, active, tilt_min_deg, tilt_max_deg, next_fire_in_sec, lab_refused}` | `shot_component` → bridge, 5 Hz and on change |
+| `/launcher_command/lab` | `questix_msgs/LauncherCommand` | bridge → command_arbiter |
+| `/command_arbiter/status` | `questix_msgs/ArbiterStatus` (mechanism `launcher`) | command_arbiter → bridge, 5 Hz and on change |
+| `/roller/status` | `std_msgs/String` JSON `{command, source: joy/lab/idle, estop, permission, max_power}` | `esc_motor_control` → bridge, 5 Hz |
+| `/shot/status` | `std_msgs/String` JSON `{tilt_deg, shooting, fired_count, last_fire_source: joy/lab/null, estop, permission, active, tilt_min_deg, tilt_max_deg, next_fire_in_sec}` | `shot_component` → bridge, 5 Hz and on change |
 
 Both statuses are mirrored to every page (streams `roller`, `shot`) whatever the permissions
 are. The controller always wins: pressing its roller button, or firing, takes the launcher over at
 once and ends the page's session.
 
-The bridge enforces its own rules on top (`questix_lab_bridge/shoot.py`, unit-tested), whatever a
-page sends:
+The bridge holds the session (`questix_lab_bridge/shoot.py`, unit-tested) and checks a request
+against what the arbiter and the nodes report first, so the page hears why at once:
 
 | Rule | Effect |
 | --- | --- |
-| The teacher's lesson permission for the launcher (`/lab_permission` `launcher_allowed`) off or silent for 1 s, or `/motion_permission` not allowing the launcher | Refused / session ended (`not_allowed`, `shoot_state.allowed` false), roller 0. |
-| Nobody subscribes to `/roller/lab` or `/shot/lab/fire`, a status is silent for 1 s, says `lab_accepted: false`, or `shot_component` is not `active` | Refused / session ended (`no_launcher`, with `parts`: `roller`, `shot`). Competition launches never accept lab input. |
-| Another node publishes one of the three lab topics | Refused / ended (`other_publisher`, with the node names). Checked every 0.5 s. |
+| The arbiter reports the teacher's permission off | Refused / session ended (`not_allowed`, `shoot_state.allowed` false), roller 0. |
+| No command_arbiter on `/launcher_command/lab` or its status silent for 1.5 s, a launcher status silent for 1 s, or `shot_component` not `active` | Refused / session ended (`no_launcher`, with `parts`: `arbiter`, `roller`, `shot`). Practice and competition launches have no arbiter. |
+| Another node publishes `/launcher_command/lab` | Refused / ended (`other_publisher`, with the node names). Checked every 0.5 s. |
 | `/emergency_stop` not heard yet | Refused (`estop_unknown`); `estop: false` in the statuses does not count. |
 | Emergency stop (`/emergency_stop`, `/drive_status`, or `estop` in either status) | Refused / ended (`emergency_stop`, `parts` naming the source). |
-| Controller in use: `/roller/status` `source: "joy"` now or within the last 1 s, `lab_locked` outside an E-stop, `/shot/status` `lab_locked` (if the node reports it), or a controller shot within the last 1 s | Refused / ended (`controller`). |
+| `/motion_permission` does not allow the launcher (or is silent for 0.5 s) | Refused / ended (`no_motion_permission`). |
+| The arbiter locked the lab out (the controller took over) | Refused / ended (`controller`); the lock goes when the lab's run ends (the bridge's stop). |
 | Another page owns the launcher | Refused (`busy`). Any page may stop the roller (`roller_stop`). |
 | No `roller` frame for `shoot_deadman_sec` | Session ended (`timeout`), roller 0. |
 | Owner disconnects / session longer than `shoot_max_spin_sec` | Ended (`disconnected` / `time_limit`), roller 0. |
-| Roller power above `shoot_max_power`, tilt outside `shoot_tilt_min..max`, non-finite values | Clamped / refused (`invalid`, which also ends the owner's session). |
+| Roller power above the arbiter's cap, tilt outside its range (narrowed by `shot_component`'s), non-finite values | Clamped / refused (`invalid`, which also ends the owner's session). |
 | `fire` without `"confirm": true` | Refused (`no_confirm`). The page sends it only while the pupil's safety tick 「発射する方向に人がいない・的の周りに人がいない」 is set. |
 | `fire` before the roller was commanded at ≥ 0.2 for 1.0 s without a break, or by a page that owns no session | Refused (`not_spinning`). |
-| `fire` while a shot is moving (`shooting`) / sooner than `shoot_fire_interval_sec` after the last shot of any source, or before `/shot/status` `next_fire_in_sec` has run out | Refused (`shooting` / `interval`). Never queued. |
+| `fire` while a shot is moving (`shooting`) / before the intervals the arbiter and `shot_component` report have run out | Refused (`shooting` / `interval`). Never queued. |
 
 A session starts with the owner's first accepted `roller` or `tilt` and lives only while the owner
 keeps sending `roller` (`"power": 0` while it only tilts); a tilt alone lapses after
-`shoot_deadman_sec`. While it lasts the bridge publishes the roller power at `shoot_rate_hz`; when
-it ends, and whenever a blocker appears (session or not), 0 for 0.3 s, then nothing. After a
-controller press or an E-stop `esc_motor_control` keeps the lab locked (`lab_locked`) until it
-hears a lab 0: once the controller and the E-stop have let go, the bridge sends that 0 itself (at
-most every 2 s while the lock stays), so the `controller` blocker clears without the page doing
-anything. Tilts are published on request, at most every 60 ms (latest wins; `shot_component`
-refuses closer than 50 ms). If the bridge dies mid-session, `esc_motor_control` drops the stale
-lab command (1 s) and stops the roller.
+`shoot_deadman_sec`. While it lasts the bridge publishes the command at `shoot_rate_hz`; when it
+ends, and whenever a blocker appears (session or not), roller 0 without a tilt target for 0.3 s,
+then nothing (the arbiter takes that as the end of the lab's run, which also clears its lock).
+Tilt targets are sent on request, at most every 60 ms (latest wins). If the bridge dies
+mid-session, command_arbiter ends the lab's run after 1.0 s of silence and stops the roller.
 
 ## Records kept on the robot
 
@@ -267,14 +266,12 @@ not report the teacher's permission.
 
 `roller` and `shot` are the status JSON exactly as the node sent it, plus `"type"` and `"stamp"`
 (receipt time [s]):
-`{"type": "roller", "stamp": 12.3, "command": 0.5, "source": "lab", "lab_accepted": true,
-"lab_locked": false, "estop": false, "permission": true}`,
+`{"type": "roller", "stamp": 12.3, "command": 0.5, "source": "lab", "estop": false,
+"permission": true, "max_power": 1.0}`,
 `{"type": "shot", "stamp": 12.3, "tilt_deg": 30.0, "shooting": false, "fired_count": 2,
-"last_fire_source": "lab", "lab_accepted": true, "estop": false, "permission": true,
-"active": true, "tilt_min_deg": 0.0, "tilt_max_deg": 120.0, "next_fire_in_sec": 0.0,
-"lab_refused": null}`
-(`lab_refused`: why shot_component refused the last lab request, e.g. `interval` or
-`permission`). `estop` is true while the node treats the E-stop as engaged (pressed, never heard
+"last_fire_source": "lab", "estop": false, "permission": true, "active": true,
+"tilt_min_deg": 0.0, "tilt_max_deg": 120.0, "next_fire_in_sec": 0.0}`
+(the mechanisms' state only: who may command them is command_arbiter's status). `estop` is true while the node treats the E-stop as engaged (pressed, never heard
 or silent); `permission` is false while the motion permission for the launcher
 (`/motion_permission` `launcher_allowed`: the teacher's vote in lesson mode) is off, silent or
 unknown, a separate reason from the E-stop. Both are informational for the bridge: the nodes

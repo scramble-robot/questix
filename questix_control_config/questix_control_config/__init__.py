@@ -5,6 +5,7 @@
 import os
 from pathlib import Path
 import re
+import tempfile
 
 from ament_index_python.packages import get_package_share_directory
 from launch.actions import (DeclareLaunchArgument, LogInfo, OpaqueFunction,
@@ -26,6 +27,77 @@ UNITS_GENERATION = '2'
 _UNITS_MARKER = re.compile(r'^# questix_controls_units: (\S+)', re.MULTILINE)
 
 
+# The launcher's controller buttons moved from the shot_component and esc_motor_control sections
+# to joy_launcher's (design/safety_permission_input_refactor.md, 4.1): those nodes no longer read
+# /joy. A profile saved in the old layout is read as the new one: the launch uses a converted copy
+# and never rewrites the saved file (Robot Manager saves the new layout). Robot Manager repeats
+# these names (scripts/robot_manager/controls.py, kept identical by test_controls.py).
+LAUNCHER_NODE = 'joy_launcher'
+LAUNCHER_LEGACY_SECTIONS = {
+    'shot_component': ('fire_button', 'tilt_axis', 'tilt_up_axis', 'tilt_up_axis_sign',
+                       'tilt_down_axis', 'tilt_down_axis_sign', 'tilt_up_button_index',
+                       'tilt_down_button_index'),
+    'esc_motor_control': ('full_speed_button', 'full_speed_value'),
+}
+
+
+def migrate_launcher_layout(document):
+    """Return ``(document, moved)``: the old launcher keys moved into the joy_launcher section.
+
+    A value already in joy_launcher wins over an old one; old sections left empty are dropped.
+    """
+    if not isinstance(document, dict):
+        return document, False
+    moved = {}
+    result = {}
+    for node, section in document.items():
+        keys = LAUNCHER_LEGACY_SECTIONS.get(node)
+        params = section.get('ros__parameters') if isinstance(section, dict) else None
+        if keys and isinstance(params, dict) and any(key in params for key in keys):
+            moved.update({key: value for key, value in params.items() if key in keys})
+            rest = {key: value for key, value in params.items() if key not in keys}
+            if rest:
+                result[node] = {**section, 'ros__parameters': rest}
+            continue
+        result[node] = section
+    if not moved:
+        return document, False
+    launcher = result.get(LAUNCHER_NODE)
+    if not isinstance(launcher, dict) or not isinstance(launcher.get('ros__parameters'), dict):
+        launcher = {'ros__parameters': {}}
+    launcher = {**launcher, 'ros__parameters': {**moved, **launcher['ros__parameters']}}
+    result[LAUNCHER_NODE] = launcher
+    return result, True
+
+
+# Converted copies made in this launch process, by the source file and its contents: nested
+# launches resolve the profile again and reuse the same copy (one file, one warning).
+_converted = {}
+
+
+def _launcher_layout_actions(path):
+    """Return ``(path, actions)``: a converted copy of a profile in the old launcher layout."""
+    try:
+        text = path.read_text(encoding='utf-8')
+        document = yaml.safe_load(text)
+    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        return path, []  # the nodes report a broken file themselves
+    key = (str(path), text)
+    if key in _converted and _converted[key].is_file():
+        return _converted[key], []
+    document, moved = migrate_launcher_layout(document)
+    if not moved:
+        return path, []
+    with tempfile.NamedTemporaryFile('w', encoding='utf-8', prefix='questix_controls_',
+                                     suffix='.yaml', delete=False) as copy:
+        yaml.safe_dump(document, copy, sort_keys=False)
+    _converted[key] = Path(copy.name)
+    return Path(copy.name), [LogInfo(msg=(
+        f'{path} keeps the launcher buttons under shot_component / esc_motor_control (older '
+        f'layout): using them for joy_launcher from {copy.name}. Saving the controls again in '
+        'Robot Manager writes the new layout.'))]
+
+
 def units_generation(text):
     """Return the unit generation a profile's text declares, or None without a marker."""
     match = _UNITS_MARKER.search(text)
@@ -34,8 +106,10 @@ def units_generation(text):
 
 # Every consuming launch reads a node's own YAML (config_file, drive_config_file, ...) and then
 # the profile, so an operator key in the former has no effect. A legacy key the node maps onto
-# profile keys only when those are unset (shot_component tilt_axis, -2) never takes effect either.
-_LEGACY_KEYS = {'shot_component': {'tilt_axis': ('tilt_up_axis', 'tilt_down_axis')}}
+# profile keys only when those are unset (joy_launcher tilt_axis, -2) never takes effect either,
+# nor do the launcher's buttons left in the sections they had before joy_launcher
+# (LAUNCHER_LEGACY_SECTIONS: those nodes read /launcher_command, not /joy).
+_LEGACY_KEYS = {LAUNCHER_NODE: {'tilt_axis': ('tilt_up_axis', 'tilt_down_axis')}}
 # (file, profile) pairs already checked in this launch process: nested launches resolve the
 # profile again and see their parent's arguments.
 _checked = set()
@@ -64,6 +138,9 @@ def overridden_keys(document, profile):
         for legacy, replacements in _LEGACY_KEYS.get(node, {}).items():
             if legacy in keys and profile_keys & set(replacements):
                 hits.append(legacy)
+        if LAUNCHER_NODE in controlled:
+            moved = keys & set(LAUNCHER_LEGACY_SECTIONS.get(node, ()))
+            hits += sorted(moved - set(hits))
         if hits:
             result[node] = hits
     return result
@@ -121,7 +198,8 @@ def _select_profile(context):
             Path(get_package_share_directory('questix_control_config')) / 'config' / filename)
     if not path.is_file():
         raise ValueError(f'Control profile not found: {path}')
-    actions += _override_warnings(context, path)
+    path, converted = _launcher_layout_actions(path)
+    actions += converted + _override_warnings(context, path)
     return actions + [SetLaunchConfiguration('control_config_file', str(path))]
 
 

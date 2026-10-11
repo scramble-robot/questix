@@ -14,11 +14,14 @@
 # esc_motor_control's command timeout. The events (a shot, a tilt step, a new tilt target) are
 # counters and targets, not pulses, so a dropped or repeated message never loses or repeats one.
 #
-# Event semantics, per source (a change of source, or silence longer than the receiver's command
-# timeout, only sets the baseline and moves nothing):
+# Event semantics: one counter space per publisher (command_arbiter's output keeps its own, so a
+# change of input never replays or loses an event; source is for display only). The first
+# message, one after silence longer than the receiver's command timeout, and one whose fire_seq
+# went backwards (the publisher restarted) only set the baseline and move nothing:
 #   fire_seq    each increase over the previous message fires one disc (one per message at most)
 #   tilt_steps  each change moves the tilt by that many tilt_step_angle (+ up, - down)
-#   tilt_deg    a new finite target moves the tilt there (clamped to the mechanism's range)
+#   tilt_deg    a finite value that differs from the previous message's (NaN before, also on the
+#               baseline: it is the current wish) moves the tilt there (clamped to the range)
 
 std_msgs/Header header  # stamp = publish time (information only)
 float32 roller_power    # 0..1 of the roller's full power; 0 = stop

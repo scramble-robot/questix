@@ -38,4 +38,30 @@ arbiter publishes one zero. The status tells the bridge which input has the driv
 permission is on, why the last lab command was refused, how many lab commands arrived
 (`lab_count`), and the caps.
 
+## launcher_arbiter
+
+Started by the same launch (`enable_launcher`, questix_core passes `enable_shot`):
+`launcher_arbiter` (`launcher_arbiter_node`, component `command_arbiter::LauncherArbiterComponent`;
+the rule on top of the selector is `include/command_arbiter/launcher_flow.hpp`, tested in
+`test/test_launcher_flow.cpp`):
+
+| Topic | Type | Direction |
+| --- | --- | --- |
+| `/launcher_command/joy` | `questix_msgs/LauncherCommand` | in: joy_launcher (remapped by the lesson launch) |
+| `/launcher_command/lab` | `questix_msgs/LauncherCommand` | in: questix_lab_bridge (a page's session) |
+| `/lab_permission` | `questix_msgs/ActuationAuthority` | in: Robot Manager's 教材からの発射 (`launcher_allowed`), a 1.0 s lease |
+| `/launcher_command` | `questix_msgs/LauncherCommand` | out: esc_motor_control, shot_component |
+| `/command_arbiter/status` | `questix_msgs/ArbiterStatus` | out: mechanism `launcher`, 5 Hz and on a change |
+
+The controller counts as busy while its roller button is held or it fired / stepped the tilt within
+`controller_quiet_sec` (1.0 s); a lab command is neutral when its roller is 0 and it asks for nothing
+new. The output keeps its own `fire_seq` / `tilt_steps` counters: a shot or tilt step of the input
+that has the launcher is added to them, so switching inputs never replays or loses one at
+shot_component. QUESTiX LAB's commands are clamped to `lab_max_power` (0.8) and
+`lab_tilt_min_deg..lab_tilt_max_deg`; a lab shot goes through only when the forwarded lab roller ran
+at `min_fire_power` (0.2) or more for `spin_up_sec` (1.0 s) without a break and `fire_interval_sec`
+(2.0 s) passed since the last forwarded shot of any source (otherwise `lab_refusal` is
+`not_spinning` / `interval`, the run goes on, nothing is queued). A lab run silent for
+`lab_timeout_sec` (1.0 s) or without the permission ends with roller 0.
+
 Design: `design/safety_permission_input_refactor.md`, section 4.

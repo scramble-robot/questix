@@ -8,13 +8,14 @@ shown here: command_arbiter's DriveArbiter (the teacher's lesson permission, QUE
 caps, the controller always wins; its status ``/command_arbiter/status`` ends a run it refused)
 and drive_component (``/emergency_stop``, ``/motion_permission``).
 
-The launcher: it publishes the launcher's lab inputs (``/roller/lab``, ``/shot/lab/tilt``,
-``/shot/lab/fire``) for the pages' launcher experiments, under shoot.ShootArbiter: the teacher's
-lesson permission (``/lab_permission`` ``launcher_allowed``), the launcher nodes listening and
-accepting lab input, nothing else publishing those topics, E-stop released, the controller not in
-use, one page at a time, a roller dead-man, a power limit and the fire rules. ``/roller/status``
-and ``/shot/status`` are mirrored to every page either way (streams ``roller`` and ``shot``).
-Nothing else is ever published.
+The launcher: it publishes a questix_msgs/LauncherCommand (``/launcher_command/lab``,
+command_arbiter's lab input) for the page that runs a launcher experiment, under
+shoot.ShootSession: one page at a time, a roller dead-man, a session time limit, the pupil's
+confirmation and the shot rules checked first. What reaches the launcher is decided further down
+and only shown here: command_arbiter's LauncherArbiter (the teacher's lesson permission, QUESTiX
+LAB's caps and shot preconditions, the controller always wins) and the launcher nodes
+(``/emergency_stop``, ``/motion_permission``). ``/roller/status`` and ``/shot/status`` are mirrored
+to every page either way (streams ``roller`` and ``shot``). Nothing else is ever published.
 
 Records kept on the robot (records.py, records_api.py, rosbags.py) need no ROS interface of
 their own: pages save and list them over the same port, the node records controller driving
@@ -30,7 +31,7 @@ import time
 
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
-from questix_msgs.msg import ActuationAuthority, ArbiterStatus, DriveStatus, EmergencyStop
+from questix_msgs.msg import ArbiterStatus, DriveStatus, EmergencyStop, LauncherCommand
 from questix_msgs.msg import MotionPermission
 import rclpy
 from rclpy.executors import ExternalShutdownException
@@ -39,13 +40,13 @@ from rclpy.qos import DurabilityPolicy, QoSProfile, qos_profile_sensor_data, Rel
 from rclpy.signals import SignalHandlerOptions
 from rclpy.time import Time
 from sensor_msgs.msg import CompressedImage, LaserScan
-from std_msgs.msg import Empty, Float32, String
+from std_msgs.msg import String
 from tf2_ros import Buffer, TransformException, TransformListener
 
 from . import messages, records, rosbags
 from .drive import arbiter_status, DriveSession
 from .records_api import RecordsApi
-from .shoot import ShootArbiter, TiltCoalescer
+from .shoot import ShootSession, TiltCoalescer
 from .static_site import find_lab_dir
 from .ws_server import LabWebSocketServer
 
@@ -57,20 +58,22 @@ _DRIVE_STATE_PERIOD_SEC = 1.0
 # questix_msgs/README.md: /emergency_stop is reliable + transient_local, keep-last 1.
 # command_arbiter's status comes at 5 Hz: one older than this means the arbiter is gone.
 _ARBITER_STATUS_TIMEOUT_SEC = 1.5
-# /motion_permission comes at 20 Hz and /lab_permission at 5 Hz; their leases (the actuators use
-# 0.5 s, the arbiters 1.0 s). Here they only decide what the pages are told and end a session.
+# /motion_permission comes at 20 Hz; its lease (the actuators use 0.5 s). Here it only decides what
+# the pages are told and ends a session.
 _MOTION_PERMISSION_LEASE_SEC = 0.5
-_LAB_PERMISSION_LEASE_SEC = 1.0
 _PERMISSION_QOS = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
                              durability=DurabilityPolicy.VOLATILE)
 _STATUS_QOS = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE,
                          durability=DurabilityPolicy.VOLATILE)
-# Browser requests handled by the ShootArbiter (messages.parse_request).
+# Browser requests handled by the ShootSession (messages.parse_request).
 _SHOOT_REQUESTS = ('roller', 'roller_stop', 'tilt', 'fire')
-# Least time between two tilt commands (shot_component refuses closer than 50 ms).
+# Least time between two tilt targets (shot_component's tilt rate limit is 50 ms).
 _TILT_GAP_SEC = 0.06
 _ESTOP_QOS = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
                         durability=DurabilityPolicy.TRANSIENT_LOCAL)
+# questix_msgs/msg/LauncherCommand.msg: reliable + volatile + keep-last(1).
+_COMMAND_QOS = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                          durability=DurabilityPolicy.VOLATILE)
 # Finished controller-driving records admitted to the writer thread at once (the one being written
 # included). More are dropped with a warning: the ROS callbacks never wait for the disk, and at
 # most this many recordings are held in memory for writing.
@@ -132,14 +135,11 @@ class LabBridgeNode(Node):
             'arbiter_status_topic', '/command_arbiter/status').value
         motion_topic = self.declare_parameter(
             'motion_permission_topic', '/motion_permission').value
-        lab_permission_topic = self.declare_parameter(
-            'lab_permission_topic', '/lab_permission').value
-        # Receive times (monotonic) of the latest arbiter status and permissions, and their values.
+        # Receive times (monotonic) of the latest drive status of the arbiter and of the motion
+        # permission, and its values. The teacher's lesson permission is the arbiter's report.
         self._arbiter_at = -math.inf
         self._motion = {'drive': False, 'launcher': False}
         self._motion_at = -math.inf
-        self._lab_permission = False  # the launcher's (the drive's comes from the arbiter)
-        self._lab_permission_at = -math.inf
         estop_topic = self.declare_parameter('emergency_stop_topic', '/emergency_stop').value
         # /emergency_stop is also a stream of its own (``estop``): the authoritative E-stop for
         # the pages and the recordings. Its own subscription (below) feeds it.
@@ -157,29 +157,21 @@ class LabBridgeNode(Node):
             max_run_sec=self.declare_parameter('drive_max_run_sec', 30.0).value)
         self._drive_sent_version = -1
         self._drive_sent_at = 0.0
-        # The launcher from the pages (see shoot.py for every rule; off while the teacher's lesson
-        # permission for the launcher is off).
-        self._shoot_topics = {
-            'roller': self.declare_parameter('roller_lab_topic', '/roller/lab').value,
-            'tilt': self.declare_parameter('tilt_lab_topic', '/shot/lab/tilt').value,
-            'fire': self.declare_parameter('fire_lab_topic', '/shot/lab/fire').value,
-        }
+        # The launcher from the pages (see shoot.py for every rule): command_arbiter's lab input.
+        # The arbiter decides what reaches the launcher; its status tells the pages why.
+        self._launcher_topic = self.declare_parameter(
+            'launcher_command_topic', '/launcher_command/lab').value
         shoot_rate = self.declare_parameter('shoot_rate_hz', 20.0).value
-        self._shoot_enabled = (all(self._shoot_topics.values())
+        self._shoot_enabled = (bool(self._launcher_topic) and bool(arbiter_topic)
                                and bool(topics['roller']) and bool(topics['shot']))
-        self._shoot = ShootArbiter(
-            allowed=False,
-            max_power=self.declare_parameter('shoot_max_power', 0.8).value,
-            tilt_min=self.declare_parameter('shoot_tilt_min', 0.0).value,
-            tilt_max=self.declare_parameter('shoot_tilt_max', 120.0).value,
-            fire_interval_sec=self.declare_parameter('shoot_fire_interval_sec', 2.0).value,
+        self._shoot = ShootSession(
             deadman_sec=self.declare_parameter('shoot_deadman_sec', 0.5).value,
             max_spin_sec=self.declare_parameter('shoot_max_spin_sec', 30.0).value)
         self._shoot_sent_version = -1
         self._shoot_sent_at = 0.0
-        # shot_component refuses tilts closer than 50 ms apart: faster requests are coalesced
-        # (latest wins) and sent at most every _TILT_GAP_SEC, only while the session that asked
-        # for them still runs (shoot.TiltCoalescer).
+        # Tilt targets faster than shot_component's rate limit (50 ms) are coalesced (latest
+        # wins) and sent at most every _TILT_GAP_SEC, only while the session that asked for them
+        # still runs (shoot.TiltCoalescer).
         self._tilt = TiltCoalescer(_TILT_GAP_SEC)
         self._closing = False  # destroy_node() has begun
         # Either source reports an emergency stop: operation_manager's topic, or drive_component
@@ -249,23 +241,16 @@ class LabBridgeNode(Node):
         if motion_topic:
             self._motion_subscription = self.create_subscription(
                 MotionPermission, motion_topic, self._on_motion_permission, _PERMISSION_QOS)
-        self._shoot_publishers = {}
+        self._launcher_publisher = None
         if self._shoot_enabled:
-            self._shoot_publishers = {
-                'roller': self.create_publisher(Float32, self._shoot_topics['roller'], 1),
-                'tilt': self.create_publisher(Float32, self._shoot_topics['tilt'], 1),
-                'fire': self.create_publisher(Empty, self._shoot_topics['fire'], 1),
-            }
-            if lab_permission_topic:
-                self._lab_permission_subscription = self.create_subscription(
-                    ActuationAuthority, lab_permission_topic, self._on_lab_permission,
-                    _PERMISSION_QOS)
+            self._launcher_publisher = self.create_publisher(
+                LauncherCommand, self._launcher_topic, _COMMAND_QOS)
             self._shoot_timer = self.create_timer(1.0 / max(1.0, shoot_rate), self._on_shoot_tick)
+        if (self._drive_topic or self._shoot_enabled) and arbiter_topic:
+            self._arbiter_subscription = self.create_subscription(
+                ArbiterStatus, arbiter_topic, self._on_arbiter, _STATUS_QOS)
         if self._drive_topic:
             self._drive_publisher = self.create_publisher(Twist, self._drive_topic, 1)
-            if arbiter_topic:
-                self._arbiter_subscription = self.create_subscription(
-                    ArbiterStatus, arbiter_topic, self._on_arbiter, _STATUS_QOS)
             self._drive_timer = self.create_timer(1.0 / max(1.0, drive_rate), self._on_drive_tick)
         if self._drive_topic or self._shoot_enabled:
             self._graph_timer = self.create_timer(_GRAPH_PERIOD_SEC, self._check_graph)
@@ -291,13 +276,14 @@ class LabBridgeNode(Node):
                 self.create_subscription(msg_type, topics[name], callback, qos))
         self._status_timer = self.create_timer(_STATUS_PERIOD_SEC, self._on_status)
         may = ([self._drive_topic] if self._drive_topic else []) + (
-            list(self._shoot_topics.values()) if self._shoot_enabled else [])
+            [self._launcher_topic] if self._shoot_enabled else [])
         self.get_logger().info(
             'QUESTiX LAB bridge (%s) on ws://%s:%d, streams: %s'
             % ('may publish %s' % ', '.join(may) if may else 'read-only',
                host, self._server.port, ', '.join(sorted(self._counts)) or 'none'))
         if not self._shoot_enabled:
-            self.get_logger().info('a launcher topic parameter is empty: no launcher experiments')
+            self.get_logger().info('a launcher or arbiter topic parameter is empty: no launcher '
+                                   'experiments')
         self.get_logger().info('records: %s (%s), rosbags: %s' % (
             self._store.directory or 'not kept',
             'controller driving recorded' if self._recorder else 'no auto recording',
@@ -481,31 +467,29 @@ class LabBridgeNode(Node):
                 self._send_drive_state(time.monotonic())
             if self._shoot.disconnect(client_id, time.monotonic()):
                 self._drop_pending_tilt()
-                self._publish_roller(0.0)
+                self._publish_launcher_stop()
                 self.get_logger().warning(
                     'page %d disconnected while using the launcher: roller stopped' % client_id)
                 self._send_shoot_state(time.monotonic())
 
     def _on_arbiter(self, msg):
-        if msg.mechanism != 'drive':
-            return  # the launcher's arbiter is not this bridge's business yet
         status = arbiter_status(msg)
         now = time.monotonic()
         with self._drive_lock:
-            self._arbiter_at = now
-            was_active = self._drive.active
-            self._drive.set_arbiter(status, now)
-            self._after_drive_change(was_active, now)
+            if msg.mechanism == 'drive' and self._drive_topic:
+                self._arbiter_at = now
+                was_active = self._drive.active
+                self._drive.set_arbiter(status, now)
+                self._after_drive_change(was_active, now)
+            elif msg.mechanism == 'launcher' and self._shoot_enabled:
+                was_active = self._shoot.active
+                self._shoot.set_arbiter(status, now)
+                self._after_shoot_change(was_active, now)
 
     def _on_motion_permission(self, msg):
         with self._drive_lock:
             self._motion = {'drive': bool(msg.drive_allowed), 'launcher': bool(msg.launcher_allowed)}
             self._motion_at = time.monotonic()
-
-    def _on_lab_permission(self, msg):
-        with self._drive_lock:
-            self._lab_permission = bool(msg.launcher_allowed)
-            self._lab_permission_at = time.monotonic()
 
     def _motion_allows(self, kind, now):
         """Whether a fresh /motion_permission allows ``kind`` ("drive" / "launcher")."""
@@ -550,15 +534,12 @@ class LabBridgeNode(Node):
                     self.get_logger().warning('drive stopped: another node publishes %s (%s)' % (
                         self._drive_topic, ', '.join(publishers)))
         if self._shoot_enabled:
-            publishers = []
-            for topic in self._shoot_topics.values():
-                publishers += others(self.get_publishers_info_by_topic(topic))
-            roller = others(self.get_subscriptions_info_by_topic(self._shoot_topics['roller']))
-            fire = others(self.get_subscriptions_info_by_topic(self._shoot_topics['fire']))
+            publishers = others(self.get_publishers_info_by_topic(self._launcher_topic))
+            arbiter = others(self.get_subscriptions_info_by_topic(self._launcher_topic))
             now = time.monotonic()
             with self._drive_lock:
                 was_active = self._shoot.active
-                self._shoot.set_graph(publishers, roller, fire, now)
+                self._shoot.set_graph(publishers, arbiter, now)
                 self._after_shoot_change(was_active, now)
 
     def _on_estop(self, msg):
@@ -606,7 +587,7 @@ class LabBridgeNode(Node):
         self._server.publish('drive_state', self._drive_state_text())
 
     # --- the launcher from the pages --------------------------------------------------------
-    # Same threading as driving: every access to the ShootArbiter holds _drive_lock, and a
+    # Same threading as driving: every access to the ShootSession holds _drive_lock, and a
     # session that ends publishes roller 0 at once, not at the next tick.
 
     def _shoot_state_text(self, now):
@@ -620,13 +601,13 @@ class LabBridgeNode(Node):
             was_owner = self._shoot.owner
             if kind == 'roller_stop':
                 if self._shoot.stop(client_id, now):
-                    self._publish_roller(0.0)
+                    self._publish_launcher_stop()
                     self.get_logger().info('roller stopped by page %d' % client_id)
             elif kind == 'roller':
                 before = self._shoot.power
                 refused = self._shoot.roller(client_id, request[1], now)
                 if refused is None and self._shoot.power != before:
-                    self._publish_roller(self._shoot.power)  # at once, not at the next tick
+                    self._publish_launcher(self._shoot.command())  # at once, not at the tick
             elif kind == 'tilt':
                 refused, deg = self._shoot.tilt_to(client_id, request[1], now)
                 if deg is not None:
@@ -634,11 +615,11 @@ class LabBridgeNode(Node):
             else:
                 refused = self._shoot.fire(client_id, request[1], now)
                 if refused is None:
-                    self._shoot_publish('fire', Empty())
-                    self.get_logger().info('page %d fires one disc (roller %.2f, tilt %s)' % (
+                    self._publish_launcher(self._shoot.command())
+                    self.get_logger().info('page %d asks for one disc (roller %.2f, tilt %s)' % (
                         client_id, self._shoot.power, self._shoot.tilt))
             if was_owner == client_id and not self._shoot.active and kind != 'roller_stop':
-                self._publish_roller(0.0)  # e.g. a non-finite value ended the session
+                self._publish_launcher_stop()  # e.g. a non-finite value ended the session
             if not self._shoot.active:
                 self._drop_pending_tilt()  # roller_stop, or a request that ended the session
             if self._shoot.owner == client_id and was_owner is None:
@@ -650,10 +631,10 @@ class LabBridgeNode(Node):
             self._send_shoot_state(now)
 
     def _on_roller_status(self, msg):
-        self._on_launcher_status('roller', msg, ShootArbiter.set_roller_status)
+        self._on_launcher_status('roller', msg, ShootSession.set_roller_status)
 
     def _on_shot_status(self, msg):
-        self._on_launcher_status('shot', msg, ShootArbiter.set_shot_status)
+        self._on_launcher_status('shot', msg, ShootSession.set_shot_status)
 
     def _on_launcher_status(self, name, msg, feed):
         stamp = self._now()
@@ -673,26 +654,24 @@ class LabBridgeNode(Node):
         now = time.monotonic()
         with self._drive_lock:
             was_active = self._shoot.active
-            # The teacher's lesson permission for the launcher, a lease (and the motion
-            # permission: without it the launcher refuses anyway, so the session ends).
-            self._shoot.set_allowed(
-                self._lab_permission
-                and now - self._lab_permission_at <= _LAB_PERMISSION_LEASE_SEC
-                and self._motion_allows('launcher', now), now)
-            power = self._shoot.tick(now)
+            # Shown to the pages; the launcher nodes enforce the motion permission themselves.
+            self._shoot.set_motion_permission(self._motion_allows('launcher', now), now)
+            command = self._shoot.tick(now, _ARBITER_STATUS_TIMEOUT_SEC)
             self._after_shoot_change(was_active, now)
-            if power is not None:
-                self._publish_roller(power)
             # A kept tilt only for the session that asked, still running and unblocked.
             deg = self._tilt.due(self._shoot.session_token(), bool(self._shoot.blockers()), now)
             if deg is not None:
-                self._shoot_publish('tilt', Float32(data=float(deg)))
+                self._shoot.set_tilt(deg)
+                command = self._shoot.command()
+            if command is not None:
+                self._publish_launcher(command)
 
     def _send_tilt(self, deg, now):
-        """Publish a tilt now, or keep it (with its session) for a tick if the last was too recent."""
+        """Send a tilt target now, or keep it (with its session) for a tick if the last was too recent."""
         deg = self._tilt.request(deg, self._shoot.session_token(), now)
         if deg is not None:
-            self._shoot_publish('tilt', Float32(data=float(deg)))
+            self._shoot.set_tilt(deg)
+            self._publish_launcher(self._shoot.command())
 
     def _drop_pending_tilt(self):
         """Forget a coalesced tilt: its session ended (every session-ending path calls this)."""
@@ -702,18 +681,28 @@ class LabBridgeNode(Node):
         """Stop the roller at once if the session just ended; tell the pages. Holds the lock."""
         if was_active and not self._shoot.active:
             self._drop_pending_tilt()
-            self._publish_roller(0.0)
+            self._publish_launcher_stop()
             self.get_logger().warning(
                 'launcher session ended: %s' % self._shoot.last_stop['reason'])
         self._send_shoot_state(now)
 
-    def _shoot_publish(self, name, msg):
-        publisher = self._shoot_publishers.get(name)
-        if publisher is not None:
-            publisher.publish(msg)
+    def _publish_launcher(self, command):
+        """Publish ``(power, tilt or None, fire_seq)`` as a LauncherCommand from the lab."""
+        if self._launcher_publisher is None:
+            return
+        power, tilt, fire_seq = command
+        msg = LauncherCommand()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.roller_power = float(power)
+        msg.tilt_deg = float(tilt) if tilt is not None else math.nan
+        msg.tilt_steps = 0  # QUESTiX LAB asks for a tilt target, never steps
+        msg.fire_seq = int(fire_seq) & 0xFFFFFFFF
+        msg.source = 'lab'
+        self._launcher_publisher.publish(msg)
 
-    def _publish_roller(self, power):
-        self._shoot_publish('roller', Float32(data=float(power)))
+    def _publish_launcher_stop(self):
+        """Roller 0, no tilt target, no new shot: the lab's stop."""
+        self._publish_launcher((0.0, None, self._shoot.fire_seq))
 
     def _send_shoot_state(self, now):
         """Broadcast shoot_state on a change, and at least every _DRIVE_STATE_PERIOD_SEC."""
@@ -740,7 +729,7 @@ class LabBridgeNode(Node):
             if stopped:
                 self._publish_twist(0.0, 0.0)
             if self._shoot.stop(None, time.monotonic()):
-                self._publish_roller(0.0)
+                self._publish_launcher_stop()
                 stopped = True
             self._drop_pending_tilt()
         return stopped

@@ -64,7 +64,7 @@ def test_core_launch_wires_each_mode(expand, source_packages, launch_arguments, 
     (no launch switches either). emergency_stop_manager (the E-stop's single owner) gets exactly
     the profile the switches select, gpio_reader runs only with the GPIO safety path, the motion
     permission runs for the mode with the referee in competition, and QUESTiX LAB's inputs
-    (command_arbiter's drive_arbiter, the launcher nodes' lab input) exist in lesson mode only.
+    (command_arbiter's drive_arbiter and launcher_arbiter) exist in lesson mode only.
     """
     arguments = {**RUNTIME_ARGUMENTS, **launch_arguments}
     mode = arguments['robot_mode']
@@ -79,8 +79,11 @@ def test_core_launch_wires_each_mode(expand, source_packages, launch_arguments, 
     assert nodes['/motion_permission_manager']['mode'] == mode
     assert ('/referee_monitor' in nodes) is (mode == 'competition')
     assert ('/drive_arbiter' in nodes) is (mode == 'lesson')
+    assert ('/launcher_arbiter' in nodes) is (mode == 'lesson')
     for node in ('/shot_component', '/esc_motor_control'):
-        assert nodes[node]['accept_lab_input'] is (mode == 'lesson'), node
+        assert nodes[node]['launcher_command_topic'] == '/launcher_command', node
+        assert 'accept_lab_input' not in nodes[node], node
+    assert '/joy_launcher' in nodes
 
 
 def test_safety_only_practice_launch_runs_the_same_gpio_safety_nodes(expand):

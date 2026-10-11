@@ -340,60 +340,52 @@ def test_command_arbiter_only_in_lesson_launches():
     assert ('/target_twist', None, '$(var use_command_arbiter)') in lets
 
 
-def test_lab_launcher_input_only_in_lesson_launches():
-    # Lesson runs let QUESTiX LAB operate the roller, tilt and fire through the ESC and shot
-    # nodes' accept_lab_input; practice and competition runs must never subscribe to those.
+def test_launcher_input_selection_only_in_lesson_launches():
+    # The launcher nodes obey /launcher_command only: joy_launcher drives it directly in practice
+    # and competition; a lesson remaps joy_launcher to command_arbiter's input and starts the
+    # launcher arbiter (QUESTiX LAB's /launcher_command/lab). No launch switches the nodes.
     core = load_xml('launcher/launch/questix_core.launch.xml')
-    shot_include = next(
-        include for include in core.findall('.//include')
-        if 'shot_component.launch.xml' in include.get('file', '')
+    arbiter_include = next(
+        include for include in core.iter('include')
+        if 'command_arbiter.launch.xml' in include.get('file', '')
     )
-    forwarded = next(
-        arg for arg in shot_include.findall('./arg') if arg.get('name') == 'accept_lab_input')
-    assert forwarded.get('value') == '$(var is_lesson)'
+    values = {arg.get('name'): arg.get('value') for arg in arbiter_include.findall('./arg')}
+    assert values == {'enable_drive': '$(var enable_drive)',
+                      'enable_launcher': '$(var enable_shot)'}
 
-    shot = load_xml('launcher/launch/shot_component.launch.xml')
-    assert find_arg(shot, 'accept_lab_input').get('default') == 'false'
-    node_includes = [
-        include for include in shot.findall('./include')
-        if 'find-pkg-share motor_control_app' in include.get('file', '')
-        or 'find-pkg-share esc_motor_control_cpp' in include.get('file', '')
-    ]
-    assert len(node_includes) == 2
-    for include in node_includes:
-        values = {arg.get('name'): arg.get('value') for arg in include.findall('./arg')}
-        assert values.get('accept_lab_input') == '$(var accept_lab_input)'
+    drive = load_xml('launcher/launch/drive_component.launch.xml')
+    lets = {(let.get('name'), let.get('value'), let.get('if'), let.get('unless'))
+            for let in drive.findall('./let')}
+    assert ('controller_launcher_topic', '/launcher_command/joy', '$(var use_command_arbiter)',
+            None) in lets
+    assert ('controller_launcher_topic', '/launcher_command', None,
+            '$(var use_command_arbiter)') in lets
+    remaps = {(remap.get('from'), remap.get('to')) for remap in drive.iter('set_remap')}
+    assert ('/launcher_command', '$(var controller_launcher_topic)') in remaps
 
-    # The node launch files only forward the override; the YAML default stays false.
-    esc = load_xml('esc_motor_control_cpp/launch/esc_motor_control_cpp.launch.xml')
-    assert find_arg(esc, 'accept_lab_input').get('default') == 'false'
-    esc_params = {
-        param.get('name'): param.get('value') for param in esc.findall('./node/param')
-    }
-    assert esc_params.get('accept_lab_input') == '$(var accept_lab_input)'
-    shot_py = (
-        SOURCE_ROOT / 'motor_control_app/launch/shot_component.launch.py'
-    ).read_text(encoding='utf-8')
-    assert "'accept_lab_input',\n        default_value='false'" in shot_py
+    joy = load_xml('joy_controller/launch/joy_controller.launch.xml')
+    launchers = [node for node in joy.iter('node') if node.get('exec') == 'joy_launcher_node']
+    assert len(launchers) == 1 and launchers[0].get('if') is None  # both stick modes
 
-    esc_defaults = {'accept_lab_input': False, 'lab_topic': '/roller/lab',
-                    'lab_max_speed': 0.8, 'lab_joy_quiet_sec': 1.0}
-    shot_defaults = {'accept_lab_input': False, 'lab_joy_quiet_sec': 1.0,
-                     'lab_min_fire_interval_sec': 2.0}
-    # One hardware YAML per node; operator mappings live in questix_control_config.
-    for variant in ('',):
-        esc_yaml = load_yaml(f'esc_motor_control_cpp/config/esc_motor_control_cpp{variant}.yaml')
-        esc_parameters = esc_yaml['esc_motor_control']['ros__parameters']
-        for name, value in esc_defaults.items():
-            assert esc_parameters[name] == value, (variant, name)
-        shot_yaml = load_yaml(f'motor_control_app/config/shot_config{variant}.yaml')
-        shot_parameters = shot_yaml['shot_component']['ros__parameters']
-        for name, value in shot_defaults.items():
-            assert shot_parameters[name] == value, (variant, name)
-
-    for relative_path in LAUNCHER_SCRIPTS:
+    removed = ('accept_lab_input', '/roller/lab', '/shot/lab', 'lab_joy_quiet_sec',
+               'lab_min_fire_interval_sec', 'full_speed_button', 'fire_button', 'joy_topic')
+    for relative_path in ('launcher/launch/questix_core.launch.xml',
+                          'launcher/launch/shot_component.launch.xml',
+                          'esc_motor_control_cpp/launch/esc_motor_control_cpp.launch.xml',
+                          'motor_control_app/launch/shot_component.launch.py',
+                          'esc_motor_control_cpp/config/esc_motor_control_cpp.yaml',
+                          'motor_control_app/config/shot_config.yaml', *LAUNCHER_SCRIPTS):
         text = (SOURCE_ROOT / relative_path).read_text(encoding='utf-8')
-        assert 'accept_lab_input' not in text
+        for name in removed:
+            assert name not in text, (relative_path, name)
+    esc_parameters = load_yaml(
+        'esc_motor_control_cpp/config/esc_motor_control_cpp.yaml')['esc_motor_control'][
+        'ros__parameters']
+    shot_parameters = load_yaml(
+        'motor_control_app/config/shot_config.yaml')['shot_component']['ros__parameters']
+    assert esc_parameters['launcher_command_topic'] == '/launcher_command'
+    assert shot_parameters['launcher_command_topic'] == '/launcher_command'
+    assert shot_parameters['min_fire_interval_sec'] == 0.0
 
 
 def test_actuators_obey_the_motion_permission_in_every_mode():

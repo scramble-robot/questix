@@ -20,8 +20,8 @@
 // * after the startup window the node falls back to the slow retry period;
 // * the motion permission (L2, /motion_permission launcher_allowed): without it the node does not
 //   start (activation moves the trigger home); losing it while ACTIVE refuses fire but keeps the
-//   servo bus (no teardown: power stays on, unlike the E-stop), and a press held through it does
-//   not fire when it comes back.
+//   servo bus (no teardown: power stays on, unlike the E-stop), and a shot asked for while it was
+//   lost is dropped, not fired when it comes back.
 #include <fcntl.h>
 #include <gtest/gtest.h>
 #include <pty.h>
@@ -34,12 +34,13 @@
 #include <cstdint>
 #include <functional>
 #include <lifecycle_msgs/msg/state.hpp>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <questix_msgs/msg/emergency_stop.hpp>
+#include <questix_msgs/msg/launcher_command.hpp>
 #include <questix_msgs/msg/motion_permission.hpp>
 #include <rclcpp/rclcpp.hpp>
-#include <sensor_msgs/msg/joy.hpp>
 #include <string>
 #include <thread>
 #include <vector>
@@ -160,7 +161,7 @@ protected:
         {"baudrate", 115200},
         {"tilt_servo_id", 11},
         {"trigger_servo_id", 10},
-        {"joy_topic", prefix_ + "/joy"},
+        {"launcher_command_topic", prefix_ + "/launcher_command"},
         {"auto_start", true},
         {"connect_retry_period_sec", 3.0},
         {"startup_retry_period_sec", 0.1},
@@ -178,7 +179,8 @@ protected:
         prefix_ + "/emergency_stop", rclcpp::QoS(1).reliable().transient_local());
     permission_pub_ = helper_->create_publisher<questix_msgs::msg::MotionPermission>(
         prefix_ + "/motion_permission", rclcpp::QoS(1).reliable().durability_volatile());
-    joy_pub_ = helper_->create_publisher<sensor_msgs::msg::Joy>(prefix_ + "/joy", 1);
+    command_pub_ = helper_->create_publisher<questix_msgs::msg::LauncherCommand>(
+        prefix_ + "/launcher_command", rclcpp::QoS(1).reliable().durability_volatile());
     executor_ = std::make_unique<rclcpp::executors::SingleThreadedExecutor>();
     executor_->add_node(shot_->get_node_base_interface());
     executor_->add_node(helper_);
@@ -202,12 +204,13 @@ protected:
         permission.launcher_allowed = permission_allowed_;
         permission.mode = "competition";
         permission_pub_->publish(permission);
-        if (fire_held_.has_value()) {
-          sensor_msgs::msg::Joy joy;
-          joy.axes.assign(8, 0.0f);
-          joy.buttons.assign(12, 0);
-          joy.buttons[5] = *fire_held_ ? 1 : 0;  // fire_button (Switch2 R)
-          joy_pub_->publish(joy);
+        if (fire_seq_.has_value()) {
+          // joy_launcher's stream: each increase of fire_seq is one press of the fire button.
+          questix_msgs::msg::LauncherCommand command;
+          command.tilt_deg = std::numeric_limits<float>::quiet_NaN();
+          command.fire_seq = *fire_seq_;
+          command.source = "joy";
+          command_pub_->publish(command);
         }
       }
       if (std::chrono::steady_clock::now() >= next_estop) {
@@ -244,10 +247,10 @@ protected:
   std::unique_ptr<rclcpp::executors::SingleThreadedExecutor> executor_;
   rclcpp::Publisher<questix_msgs::msg::EmergencyStop>::SharedPtr estop_pub_;
   rclcpp::Publisher<questix_msgs::msg::MotionPermission>::SharedPtr permission_pub_;
-  rclcpp::Publisher<sensor_msgs::msg::Joy>::SharedPtr joy_pub_;
+  rclcpp::Publisher<questix_msgs::msg::LauncherCommand>::SharedPtr command_pub_;
   bool estop_active_{true};
   bool permission_allowed_{true};
-  std::optional<bool> fire_held_;  // none: no /joy at all
+  std::optional<uint32_t> fire_seq_;  // none: no /launcher_command at all
   std::chrono::steady_clock::duration longest_spin_{};
 };
 
@@ -310,7 +313,8 @@ TEST_F(ShotComponentNode, AfterTheStartupWindowItFallsBackToTheSlowRetry) {
 }
 
 // The motion permission: no start without it (activation moves the trigger home), and losing it
-// while ACTIVE refuses fire but keeps the servo bus (not an E-stop: no teardown).
+// while ACTIVE refuses fire but keeps the servo bus (not an E-stop: no teardown). A shot asked for
+// meanwhile is dropped, never fired later.
 TEST_F(ShotComponentNode, ThePermissionGatesStartAndFireButLosingItKeepsTheBus) {
   permission_allowed_ = false;
   start(5.0);
@@ -323,20 +327,19 @@ TEST_F(ShotComponentNode, ThePermissionGatesStartAndFireButLosingItKeepsTheBus) 
   permission_allowed_ = true;
   ASSERT_TRUE(spinUntil([this]() { return isActive(); }, 2s));
 
+  fire_seq_ = 0u;               // the stream starts (its first message only sets the baseline)
   permission_allowed_ = false;  // defeated: refused, but the bus stays
   spinFor(500ms);
   EXPECT_TRUE(isActive()) << "losing the permission must not tear the servo bus down";
   const int before_press = bus_.requests();
-  fire_held_ = true;
+  fire_seq_ = 1u;  // a press
   spinFor(500ms);
   EXPECT_EQ(bus_.requests(), before_press) << "no shot without the permission";
 
-  permission_allowed_ = true;  // back, with the button still held: no shot
+  permission_allowed_ = true;  // back: the press made meanwhile is not replayed
   spinFor(500ms);
-  EXPECT_EQ(bus_.requests(), before_press) << "a press held through the loss must not fire";
-  fire_held_ = false;
-  spinFor(200ms);
-  fire_held_ = true;  // a fresh press fires
+  EXPECT_EQ(bus_.requests(), before_press) << "a press made during the loss must not fire";
+  fire_seq_ = 2u;  // a fresh press fires
   EXPECT_TRUE(spinUntil([this, before_press]() { return bus_.requests() > before_press; }, 2s));
   EXPECT_TRUE(isActive());
 }

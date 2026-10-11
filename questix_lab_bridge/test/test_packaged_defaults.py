@@ -24,12 +24,19 @@ def packaged(name):
 
 
 def test_no_parameter_grants_driving_or_the_launcher():
-    for name in ('allow_drive', 'allow_shoot', 'drive_max_linear', 'drive_max_angular'):
+    for name in ('allow_drive', 'allow_shoot', 'drive_max_linear', 'drive_max_angular',
+                 'shoot_max_power', 'shoot_tilt_min', 'shoot_tilt_max', 'shoot_fire_interval_sec'):
         assert values(name) == [], '%s was replaced by /lab_permission and the arbiter' % name
 
 
-def test_the_permissions_come_from_their_topics():
-    assert packaged('lab_permission_topic') == '/lab_permission'
+def test_the_pages_commands_go_to_command_arbiter():
+    assert packaged('drive_topic') == '/target_twist/lab'
+    assert packaged('launcher_command_topic') == '/launcher_command/lab'
+    for name in ('roller_lab_topic', 'tilt_lab_topic', 'fire_lab_topic', 'lab_permission_topic'):
+        assert values(name) == [], '%s: the launcher nodes no longer take lab topics' % name
+
+
+def test_the_decisions_come_from_their_topics():
     assert packaged('motion_permission_topic') == '/motion_permission'
     assert packaged('arbiter_status_topic') == '/command_arbiter/status'
     assert packaged('emergency_stop_topic') == '/emergency_stop'
