@@ -149,6 +149,8 @@ def verify_frozen(data, prefix):
             or prefix != RELEASE_ROOT / release):
         raise ValueError('runtime must use an approved frozen release path')
     protected_path(prefix)
+    if RELEASE_ROOT.stat().st_mode & 0o005 != 0o005:
+        raise ValueError('runtime release directory must be public-readable and searchable')
     for path in prefix.rglob('*'):
         protected_path(path)
     original_manifest = prefix / 'reviewed-release.json'
@@ -279,6 +281,9 @@ def publish(data):
     protected_path(RELEASE_ROOT.parent)
     RELEASE_ROOT.mkdir(mode=0o755, exist_ok=True)
     protected_path(RELEASE_ROOT)
+    # mkdir's mode is filtered by the caller's umask (root deployment may use 077).
+    # The protected registry contains public runtime code; approvals remain mode0600.
+    RELEASE_ROOT.chmod(0o755)
     target = RELEASE_ROOT / data['frozen_runtime']['approved_manifest_sha256']
     data = dict(data, prefix=str(target))
     if target.exists() or target.is_symlink():

@@ -51,8 +51,11 @@ class PrivilegedSourceTest(unittest.TestCase):
             if variant=='extra':(source/'questix_pwm_guard/deploy/unapproved.py').write_text('# extra')
             elif variant=='cache':
                 cache=source/'questix_pwm_guard/deploy/__pycache__';cache.mkdir()
+                cache.chmod(0o755)
                 (cache/'generated.pyc').write_bytes(b'cache')
                 (source/'questix_pwm_guard/deploy/generated.pyc').write_bytes(b'cache')
+                (cache/'generated.pyc').chmod(0o644)
+                (source/'questix_pwm_guard/deploy/generated.pyc').chmod(0o644)
             elif variant=='symlink_dir':(source/'questix_pwm_guard/alias').symlink_to(base,target_is_directory=True)
             elif variant=='fifo':os.mkfifo(source/'questix_pwm_guard/pipe')
             elif variant=='tamper':(source/'questix_pwm_guard/deploy/review_manifest.py').write_text('changed')

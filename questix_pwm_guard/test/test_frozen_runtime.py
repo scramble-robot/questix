@@ -207,6 +207,22 @@ class FrozenRuntimeTest(unittest.TestCase):
             seal.publish(frozen)
         self.assertEqual(file.read_text(), 'root-side corruption')
 
+    def test_restrictive_umask_keeps_public_release_traversable(self):
+        previous = os.umask(0o077)
+        try:
+            published = seal.publish(self.freeze())
+        finally:
+            os.umask(previous)
+        self.assertEqual(self.releases.stat().st_mode & 0o777, 0o755)
+        prefix = Path(published['prefix'])
+        self.assertEqual(seal.verify(published, require_frozen=True), prefix)
+        self.releases.chmod(0o700)
+        with self.assertRaisesRegex(ValueError, 'public-readable'):
+            seal.verify(published, require_frozen=True)
+        # Re-publication repairs only the protected registry mode, never version contents.
+        seal.publish(dict(published, prefix=str(self.base/'staged')))
+        self.assertEqual(self.releases.stat().st_mode & 0o777, 0o755)
+
     def test_actual_colcon_python_package_uses_relocated_release(self):
         # Build a harmless package with real colcon-generated setup/hooks. No ROS node,
         # daemon, GPIO or system service is executed; required ARM64 ELF records are fixtures.
@@ -285,7 +301,11 @@ class FrozenRuntimeTest(unittest.TestCase):
 
     @unittest.skipUnless(os.geteuid() == 0, 'real root-to-unprivileged DAC check requires root')
     def test_unprivileged_process_cannot_write_real_root_owned_release(self):
-        published = seal.publish(self.freeze())
+        previous = os.umask(0o077)
+        try:
+            published = seal.publish(self.freeze())
+        finally:
+            os.umask(previous)
         prefix = Path(published['prefix'])
         self.base.chmod(0o755)
 
