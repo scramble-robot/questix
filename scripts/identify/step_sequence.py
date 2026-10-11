@@ -38,7 +38,7 @@ wheel_radius から車体前進速度 [m/s] に換算して publish する（左
 最初の受信までの時間・受信件数・publisher の数を表示する。--no-estop-watch で無効
 （/emergency_stop の無い単体診断だけ）。
 
-他の送り手との競合: /target_twist には通常 twist_arbiter（練習）や joy_controller（競技）も
+他の送り手との競合: /target_twist には通常 drive_arbiter（教材）や joy_controller（練習・大会）も
 publish する（コントローラ接続中は /joy のたびに流れる）。混ざると同定データが汚れ、スティック
 優先の仕組みも素通りするため、開始前に --listen-before 秒聞いて何か流れていれば開始しない。
 実行中も、自分が送っていない値を受け取ったら（スティック操作など）中断して 0 を送り終了する。

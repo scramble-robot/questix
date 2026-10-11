@@ -228,7 +228,7 @@ function streamStates(tracker, streams, now) {
 }
 
 // Who makes the robot move, as far as the streams tell: a page's run (drive_state names its owner),
-// otherwise a fresh command on /target_twist (the controller through twist_arbiter, or another
+// otherwise a fresh command on /target_twist (the controller through command_arbiter, or another
 // node), otherwise wheels turning with no command at all (pushed by hand, or a stale command).
 function driverOf({ driveState, session, command, wheels }) {
   if (driveState?.active && driveState.owner !== null && driveState.owner !== undefined)

@@ -178,10 +178,10 @@ for t in "${REQ_ARR[@]}"; do
   echo "  topic $t: OK"
 done
 
-# /target_twist には通常 twist_arbiter（練習）/ joy_controller（競技）も publish する。
+# /target_twist には通常 drive_arbiter（教材）/ joy_controller（練習・大会）も publish する。
 # コントローラ接続中は /joy のたびに流れ、ステップ入力に混ざって同定データが汚れる
 # （スティック優先の仕組みも素通りする）。publisher の有無ではなく実際の流れで判定する
-# （twist_arbiter は publisher を常に持つが、入力が無ければ何も流さない）。
+# （drive_arbiter は publisher を常に持つが、入力が無ければ何も流さない）。
 # step_sequence.py も開始前と実行中に同じ検査をする。ここは対話の前に止めるための早期検査。
 set +e
 LISTEN_ERR="$(timeout "$LISTEN_SEC" ros2 topic echo --once /target_twist geometry_msgs/msg/Twist 2>&1 >/dev/null)"

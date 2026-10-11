@@ -4,9 +4,9 @@
 # Three modes (scripts/robot_manager/modes.py repeats them; test_launcher_script.py keeps them
 # identical):
 # competition: 本番. Always launches (also at power-on) with the competition safety profile.
-# practice:    練習. The controller drives freely; no QUESTiX LAB (no twist_arbiter, no lab
+# practice:    練習. The controller drives freely; no QUESTiX LAB (no command_arbiter, no lab
 #              launcher input) and no teacher permission.
-# lesson:      教材. QUESTiX LAB can drive and fire (twist_arbiter and the lab launcher input),
+# lesson:      教材. QUESTiX LAB can drive and fire (command_arbiter and the lab launcher input),
 #              and the drive and launcher move only while the teacher's permission
 #              (/actuation_authority, Robot Manager's 操作 tab) is on, controller included.
 # The launch gets the mode itself (robot_mode:=<mode>); questix_core decides what that wires up.

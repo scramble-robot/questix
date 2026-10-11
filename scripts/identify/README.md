@@ -37,7 +37,7 @@ cat results/summary.md results/sufficiency.md       # τ / d / R² / RUN 境界�
 
 - `/drive_component` ノードが存在する
 - `/drive_status` と `/target_twist` が見えている
-- `/target_twist` に他の送り手（`twist_arbiter` / `joy_controller` など）から指令が流れていない
+- `/target_twist` に他の送り手（command_arbiter の `drive_arbiter` / `joy_controller` など）から指令が流れていない
   （`IDENT_LISTEN_SEC` 秒、既定 2 秒聞く）
 - `/drive_component` の `control_mode` パラメータが取得できる
 - `/drive_component` の `wheel_radius` / `wheel_separation` が取得できる（車輪 RPM → twist の換算に使う）
@@ -54,9 +54,9 @@ cat results/summary.md results/sufficiency.md       # τ / d / R² / RUN 境界�
 LPF 後 RPM しか残らず、`fit_models.py` は（黙って切り替えずに）エラーで止まる。
 それなら記録する前に止めるほうがよい、という判断。
 
-`/target_twist` の検査は、コントローラ接続中の統合起動を想定したもの。`twist_arbiter`（練習）や
-`joy_controller`（競技）は `/joy` のたびに `/target_twist` へ流すため、ステップ入力に中立の 0 や
-スティック操作が混ざってデータが汚れ、スティック優先の仕組みも素通りする。`twist_arbiter` は
+`/target_twist` の検査は、コントローラ接続中の統合起動を想定したもの。command_arbiter の `drive_arbiter`（教材）や
+`joy_controller`（練習・大会）は `/joy` のたびに `/target_twist` へ流すため、ステップ入力に中立の 0 や
+スティック操作が混ざってデータが汚れ、スティック優先の仕組みも素通りする。`drive_arbiter` は
 publisher を常に持つが入力が無ければ何も流さないので、publisher の数ではなく実際の流れで判定する。
 `step_sequence.py` 自身も開始前に聞き、実行中に自分が送っていない値を受けたら中断して 0 を送り、
 終了コード 3 で終わる。また `/emergency_stop` を購読し、非常停止の押下を受けたら（または受信が 1 秒

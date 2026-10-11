@@ -17,7 +17,7 @@ QUESTiXシステムの各ノードを起動するためのlauncherファイル�
 | RefereeMonitor（GPIO27 → 審判の票） | 起動しない | 起動しない | 起動する |
 | 非常停止（`/emergency_stop`） | GPIO5 | GPIO5 | GPIO5 |
 | 走行許可に必要な票 | 先生（`/actuation_authority`） | なし（常に許可） | 審判（`/motion_vote/referee`） |
-| twist_arbiter / 発射機構の教材入力（`accept_lab_input`） | 起動する / true | 起動しない / false | 起動しない / false |
+| command_arbiter（入力の選択） / 発射機構の教材入力（`accept_lab_input`） | 起動する / true | 起動しない / false | 起動しない / false |
 
 `questix_robot_launcher.sh` は保存されたモードを `robot_mode:=<mode>` でそのまま渡し、
 どのモードでも `enable_gpio_ref:=true` を固定値で渡します。`competition` は電源投入時にも起動し、
@@ -112,22 +112,27 @@ ros2 launch questix_launcher questix_core.launch.xml \
   enable_gpio_ref:=true robot_mode:=practice enable_rviz:=false
 ```
 
-## コントローラーと QUESTiX LAB の走行実験（twist_arbiter）
+## コントローラーと QUESTiX LAB の走行実験（command_arbiter、L3）
 
-`questix_core.launch.xml` は教材用の起動（`robot_mode:=lesson`）だけ切り替えノード
-`twist_arbiter` を入れます。joy_controller の出力は `/target_twist/joy` に付け替えられ、
-QUESTiX LAB の教材ブリッジは `/target_twist/lab` に出し、`twist_arbiter` がどちらかを
-`/target_twist`（drive_component）へ渡します。起動し直す必要はありません。
+`questix_core.launch.xml` は教材用の起動（`robot_mode:=lesson`）だけ入力の選択
+command_arbiter（`command_arbiter/launch/command_arbiter.launch.xml`、ノード `drive_arbiter`）を
+入れます。joy_controller の出力は `/target_twist/joy` に付け替えられ、QUESTiX LAB の教材ブリッジは
+`/target_twist/lab` に出し、`drive_arbiter` がどちらかを `/target_twist`（drive_component）へ
+渡します。起動し直す必要はありません。
 
 - ふだんはコントローラーの指令が通ります。
+- 教材の指令を通すのは、先生の教材の許可（`/lab_permission`、Robot Manager の教材タブ）が
+  届いている間だけで、教材の速さの上限（`lab_max_linear` / `lab_max_angular`）で切り詰めます。
 - 教材が走り始めると、スティックが中立なら教材の指令に切り替わります。
 - 教材の走行中にスティックを倒すと、すぐにコントローラーへ戻り、教材の走行は止まります
   （その走行が終わるまで教材は割り込めません）。
 - 教材の指令が途切れると、コントローラーに戻ります。
 
 練習・大会では入れず、joy_controller が `/target_twist` を直接出します。規則は
-`twist_arbiter/include/twist_arbiter/arbiter_logic.hpp`、パラメータは
-`twist_arbiter/config/twist_arbiter.yaml` にあります。
+`command_arbiter/include/command_arbiter/source_selector.hpp`、パラメータは
+`command_arbiter/config/command_arbiter.yaml`、状態は `/command_arbiter/status`
+（`questix_msgs/ArbiterStatus`）にあります。非常停止と走行許可は command_arbiter ではなく
+drive_component 自身が判断します。
 
 ## ファイル構成
 

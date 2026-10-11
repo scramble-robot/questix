@@ -8,8 +8,16 @@ endif()
 find_package(ament_cmake_auto REQUIRED)
 ament_auto_find_build_dependencies()
 
-# The input-selection rule shared by the drive and the launcher: header-only,
-# include/command_arbiter/source_selector.hpp.
+# The rule shared by the drive and the launcher is header-only
+# (include/command_arbiter/source_selector.hpp); each mechanism is its own component with no
+# shared state, also run as its own process (the generated *_node executables).
+ament_auto_add_library(drive_arbiter_component SHARED
+  src/drive_arbiter_component.cpp
+)
+rclcpp_components_register_node(drive_arbiter_component
+  PLUGIN "command_arbiter::DriveArbiterComponent"
+  EXECUTABLE drive_arbiter_node
+)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
@@ -17,6 +25,8 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 
   ament_auto_add_gtest(test_source_selector test/test_source_selector.cpp)
+  ament_auto_add_gtest(test_drive_arbiter_node test/test_drive_arbiter_node.cpp)
+  target_link_libraries(test_drive_arbiter_node drive_arbiter_component)
 endif()
 
-ament_auto_package()
+ament_auto_package(INSTALL_TO_SHARE launch config)

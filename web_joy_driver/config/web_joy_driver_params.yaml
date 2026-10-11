@@ -93,10 +93,11 @@ web_joy_driver:
     # questix_lab_bridge's robot_name.
     robot_name: ""
 
-    # twist_arbiter's latched status (std_msgs/String JSON). Read only: the page
-    # shows 「教材から走らせています」 while a QUESTiX LAB driving experiment has
-    # the robot. "" disables it. Competition launches do not run twist_arbiter.
-    arbiter_status_topic: "/twist_arbiter/status"
+    # command_arbiter's status (questix_msgs/ArbiterStatus, the drive's). Read
+    # only: the page shows 「教材から走らせています」 while a QUESTiX LAB driving
+    # experiment has the robot. "" disables it. Only lesson launches run
+    # command_arbiter.
+    arbiter_status_topic: "/command_arbiter/status"
 
     # Port of questix_lab_bridge on the same host. The page's 止める also sends
     # {"type":"stop"} and {"type":"roller_stop"} there (browser -> bridge), so a

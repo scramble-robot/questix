@@ -47,8 +47,8 @@
     "robot": "ロボット",
     "domainUnset": "未設定（0と同じ）",
     "drive": "教材からの走行",
-    "driveAllowed": "教材から走らせられます",
-    "driveReadOnly": "値の受信だけ（先生が教材からの走行を止めています）",
+    "driveAllowed": "先生が許可している間、教材から走らせられます",
+    "driveReadOnly": "値の受信だけ（このロボットの配信は教材から走らせない設定です）",
     "teacher": "先生・技術者向けの詳しい情報",
     "domainLine": "このロボットの配信の ROS_DOMAIN_ID：{domain}。値が届かないときは、ロボットのROSと同じ番号か確かめます。"
   },

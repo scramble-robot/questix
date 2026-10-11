@@ -274,6 +274,36 @@ operation_manager の `MotionPermissionManager` だけが購読する(`operation
 条件を足すときは、票を出すノードを書き、`operation_manager.permission.yaml` の `votes` と `required` に
 1 行ずつ足す。
 
+## `/lab_permission` トピック契約(教材の許可、L3 の入力)
+
+先生が QUESTiX LAB に許した操作(Robot Manager の 教材 タブ「教材からの走行」「教材からの発射」)。
+走行許可(L2)の票ではない: アクチュエータも MotionPermissionManager も購読しない。教材の指令を
+通すかどうかだけを決める。
+
+- **型**: `questix_msgs/msg/ActuationAuthority`(`drive_allowed` = 教材からの走行、
+  `launcher_allowed` = 教材からの発射、`source` = `robot_manager`)
+- **QoS**: reliable + **volatile** + keep-last(1)。**transient_local にしない**(許可をラッチしない)。
+- **発行元**: Robot Manager の heartbeat(`actuation_heartbeat.py`)が `/actuation_authority` と同じ
+  周期(約 5 Hz)で並べて出す。先生の操作許可のどちらかが ON の間だけ出る。教材の許可は、同じ種類の
+  先生の操作許可が ON のときだけ true になり、先生の操作許可が OFF になると同じ行で false になる。
+  切り替えても教材のブリッジは再起動しない。起動のたびに OFF から始まる(`/actuation_authority` と同じ)。
+- **リース**: 購読側は自分の単調時計で 1.0 s 以内に受信したものだけを使う。未受信・途絶・false は不許可。
+- **購読側**: command_arbiter の `drive_arbiter`(`drive_allowed`: 教材の走行指令を `/target_twist` に
+  通すか)、QUESTiX LAB ブリッジ(`launcher_allowed`: 教材からの発射のセッション。LauncherArbiter が
+  できるまでの暫定)。
+
+## `/command_arbiter/status` トピック契約(入力の選択の状態、L3)
+
+- **型**: `questix_msgs/msg/ArbiterStatus`(機構ごとに 1 件。`mechanism` = `drive` / `launcher`)
+- **QoS**: reliable + **volatile** + keep-last(10)。ラッチしない。
+- **発行元**: command_arbiter(教材モードの起動だけ)。5 Hz と、変化したときはすぐに出す。
+- **意味**: どちらの入力がアクチュエータに届いているか(`active_source`: `joy` / `lab`)、その理由
+  (`switch_reason`)、教材の許可(`lab_permitted`)、教材の指令を断った理由(`lab_refusal`)、受け取った
+  教材の指令の数(`lab_count`。ブリッジは自分の走行が始まった後の状態だけを使う)、教材の上限。
+  非常停止と走行許可はここには出ない(アクチュエータが判断する)。
+- **購読側**: QUESTiX LAB ブリッジ(1.5 s 届かなければ command_arbiter なし = `no_drive_node`)、
+  web_joy_driver(「教材から走らせています」の表示、1.5 s で消す)。
+
 ## 型付きステータストピック契約
 
 `MotorFeedback` / `DriveStatus` は下記のトピックで publish される

@@ -67,9 +67,9 @@ async def lifespan(_app: FastAPI):
     """Start the lab bridge if lab.env asks for it; a bridge started here must not outlive us.
 
     The teacher's permissions for driving and launching from the lessons are not settings: they
-    live only in this process (lab._runtime_permissions) and start off, so a restart of the
-    manager or of the robot never brings them back (ALLOW_* left in lab.env by an older manager
-    are ignored). A practice or lesson start
+    live only in this process (actuation.py, next to the teacher's switches) and start off, so a
+    restart of the manager or of the robot never brings them back (ALLOW_* left in lab.env by an
+    older manager are ignored). A practice or lesson start
     request left behind (the manager stopped between writing it and the launcher reading it) is
     removed, so it can never start the robot later. The teacher's runtime authority for driving
     and the launcher (actuation.py) is the same kind of session state: off at every start, and
@@ -562,12 +562,11 @@ def stop_all():
 
     One request, no confirmation. The teacher's runtime authority goes off first (actuation.py:
     its heartbeat publishes an explicit off, so drive and launcher stop at once, controller
-    included, and the matching lesson permissions go off). The lessons get their stop next (it
-    takes well under a second
-    and also covers a robot whose ROS was started by hand), then driving and launching from the
-    lessons are switched off (a bridge of ours that had one on is restarted with both off, so the
-    pages reconnect after a few seconds and keep serving), then the robot service is stopped. The
-    teacher switches the permissions on again for the next run.
+    included, and the lesson permissions on /lab_permission go off with it). The lessons get their
+    stop next (it takes well under a second and also covers a robot whose ROS was started by
+    hand), then driving and launching from the lessons are switched off (already off; the bridge
+    keeps serving the pages), then the robot service is stopped. The teacher switches the
+    permissions on again for the next run.
     """
     authority = actuation.revoke_all("stop_all")
     lesson = lab.stop_lesson_motion()

@@ -1,18 +1,20 @@
 """ROS 2 node that mirrors robot telemetry to QUESTiX LAB pages over a WebSocket.
 
-Without ``allow_drive`` observation only: the node creates subscriptions and nothing else,
-and the WebSocket ignores everything a browser sends. With it, the node also publishes the
-drive topic (``/target_twist/lab``, twist_arbiter's lab input) for pages that run a driving
-experiment, under the rules of drive.DriveArbiter: nothing else may publish that topic, a node
-must listen, the emergency stop must be released, one page at a time, speed limits, and a
-dead-man timeout. twist_arbiter's status ends a run the controller takes over.
+It also holds the pages' sessions with the robot (design/safety_permission_input_refactor.md,
+4.5). Driving: it publishes the drive topic (``/target_twist/lab``, command_arbiter's lab input)
+for the page that runs a driving experiment, under drive.DriveSession: one page at a time, a
+dead-man timeout and a run time limit. What reaches the drive is decided further down and only
+shown here: command_arbiter's DriveArbiter (the teacher's lesson permission, QUESTiX LAB's speed
+caps, the controller always wins; its status ``/command_arbiter/status`` ends a run it refused)
+and drive_component (``/emergency_stop``, ``/motion_permission``).
 
-With ``allow_shoot`` it also publishes the launcher's lab inputs (``/roller/lab``,
-``/shot/lab/tilt``, ``/shot/lab/fire``) for the pages' launcher experiments, under the rules of
-shoot.ShootArbiter: the launcher nodes must listen and accept lab input, nothing else may publish
-those topics, E-stop released, the controller not in use, one page at a time, a roller dead-man,
-a power limit and the fire rules. ``/roller/status`` and ``/shot/status`` are mirrored to every
-page either way (streams ``roller`` and ``shot``). Nothing else is ever published.
+The launcher: it publishes the launcher's lab inputs (``/roller/lab``, ``/shot/lab/tilt``,
+``/shot/lab/fire``) for the pages' launcher experiments, under shoot.ShootArbiter: the teacher's
+lesson permission (``/lab_permission`` ``launcher_allowed``), the launcher nodes listening and
+accepting lab input, nothing else publishing those topics, E-stop released, the controller not in
+use, one page at a time, a roller dead-man, a power limit and the fire rules. ``/roller/status``
+and ``/shot/status`` are mirrored to every page either way (streams ``roller`` and ``shot``).
+Nothing else is ever published.
 
 Records kept on the robot (records.py, records_api.py, rosbags.py) need no ROS interface of
 their own: pages save and list them over the same port, the node records controller driving
@@ -28,7 +30,8 @@ import time
 
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
-from questix_msgs.msg import DriveStatus, EmergencyStop
+from questix_msgs.msg import ActuationAuthority, ArbiterStatus, DriveStatus, EmergencyStop
+from questix_msgs.msg import MotionPermission
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
@@ -40,7 +43,7 @@ from std_msgs.msg import Empty, Float32, String
 from tf2_ros import Buffer, TransformException, TransformListener
 
 from . import messages, records, rosbags
-from .drive import DriveArbiter
+from .drive import arbiter_status, DriveSession
 from .records_api import RecordsApi
 from .shoot import ShootArbiter, TiltCoalescer
 from .static_site import find_lab_dir
@@ -52,9 +55,16 @@ _GRAPH_PERIOD_SEC = 0.5
 # drive_state is repeated this often even without a change, so a page notices a dead bridge.
 _DRIVE_STATE_PERIOD_SEC = 1.0
 # questix_msgs/README.md: /emergency_stop is reliable + transient_local, keep-last 1.
-# How long a run may wait for twist_arbiter to hand it the robot before the controller is
-# considered to hold it (a stick not at rest when the run started).
-_ARBITER_GRACE_SEC = 0.5
+# command_arbiter's status comes at 5 Hz: one older than this means the arbiter is gone.
+_ARBITER_STATUS_TIMEOUT_SEC = 1.5
+# /motion_permission comes at 20 Hz and /lab_permission at 5 Hz; their leases (the actuators use
+# 0.5 s, the arbiters 1.0 s). Here they only decide what the pages are told and end a session.
+_MOTION_PERMISSION_LEASE_SEC = 0.5
+_LAB_PERMISSION_LEASE_SEC = 1.0
+_PERMISSION_QOS = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                             durability=DurabilityPolicy.VOLATILE)
+_STATUS_QOS = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE,
+                         durability=DurabilityPolicy.VOLATILE)
 # Browser requests handled by the ShootArbiter (messages.parse_request).
 _SHOOT_REQUESTS = ('roller', 'roller_stop', 'tilt', 'fire')
 # Least time between two tilt commands (shot_component refuses closer than 50 ms).
@@ -115,13 +125,21 @@ class LabBridgeNode(Node):
         wheel_radius = self.declare_parameter('wheel_radius', 0.05).value
         wheel_separation = self.declare_parameter('wheel_separation', 0.5).value
 
-        # Driving from the pages (off unless allow_drive; see drive.py for every rule).
-        allow_drive = bool(self.declare_parameter('allow_drive', False).value)
-        # twist_arbiter's lab input: the controller keeps its own, and the arbiter decides.
+        # Driving from the pages (see drive.py for every rule): command_arbiter's lab input. The
+        # arbiter decides what reaches the drive; its status tells the pages why.
         self._drive_topic = self.declare_parameter('drive_topic', '/target_twist/lab').value
         arbiter_topic = self.declare_parameter(
-            'arbiter_status_topic', '/twist_arbiter/status').value
-        self._arbiter_status = None
+            'arbiter_status_topic', '/command_arbiter/status').value
+        motion_topic = self.declare_parameter(
+            'motion_permission_topic', '/motion_permission').value
+        lab_permission_topic = self.declare_parameter(
+            'lab_permission_topic', '/lab_permission').value
+        # Receive times (monotonic) of the latest arbiter status and permissions, and their values.
+        self._arbiter_at = -math.inf
+        self._motion = {'drive': False, 'launcher': False}
+        self._motion_at = -math.inf
+        self._lab_permission = False  # the launcher's (the drive's comes from the arbiter)
+        self._lab_permission_at = -math.inf
         estop_topic = self.declare_parameter('emergency_stop_topic', '/emergency_stop').value
         # /emergency_stop is also a stream of its own (``estop``): the authoritative E-stop for
         # the pages and the recordings. Its own subscription (below) feeds it.
@@ -134,25 +152,23 @@ class LabBridgeNode(Node):
         self._latest_estop_at = -math.inf
         drive_rate = self.declare_parameter('drive_rate_hz', 20.0).value
         self._drive_lock = threading.Lock()
-        self._drive = DriveArbiter(
-            allowed=allow_drive and bool(self._drive_topic),
-            max_linear=self.declare_parameter('drive_max_linear', 0.15).value,
-            max_angular=self.declare_parameter('drive_max_angular', 0.5).value,
+        self._drive = DriveSession(
             deadman_sec=self.declare_parameter('drive_deadman_sec', 0.5).value,
             max_run_sec=self.declare_parameter('drive_max_run_sec', 30.0).value)
         self._drive_sent_version = -1
         self._drive_sent_at = 0.0
-        # The launcher from the pages (off unless allow_shoot; see shoot.py for every rule).
-        allow_shoot = bool(self.declare_parameter('allow_shoot', False).value)
+        # The launcher from the pages (see shoot.py for every rule; off while the teacher's lesson
+        # permission for the launcher is off).
         self._shoot_topics = {
             'roller': self.declare_parameter('roller_lab_topic', '/roller/lab').value,
             'tilt': self.declare_parameter('tilt_lab_topic', '/shot/lab/tilt').value,
             'fire': self.declare_parameter('fire_lab_topic', '/shot/lab/fire').value,
         }
         shoot_rate = self.declare_parameter('shoot_rate_hz', 20.0).value
+        self._shoot_enabled = (all(self._shoot_topics.values())
+                               and bool(topics['roller']) and bool(topics['shot']))
         self._shoot = ShootArbiter(
-            allowed=(allow_shoot and all(self._shoot_topics.values())
-                     and bool(topics['roller']) and bool(topics['shot'])),
+            allowed=False,
             max_power=self.declare_parameter('shoot_max_power', 0.8).value,
             tilt_min=self.declare_parameter('shoot_tilt_min', 0.0).value,
             tilt_max=self.declare_parameter('shoot_tilt_max', 120.0).value,
@@ -215,9 +231,9 @@ class LabBridgeNode(Node):
 
         streams = {name: (topic or None) for name, topic in topics.items()}
         hello = messages.encode(messages.hello_payload(
-            streams, wheel_radius, wheel_separation, self._drive.allowed, self._robot,
+            streams, wheel_radius, wheel_separation, bool(self._drive_topic), self._robot,
             self._records.hello(),
-            messages.shoot_hello(self._shoot.allowed, self._shoot.limits())))
+            messages.shoot_hello(self._shoot_enabled, self._shoot.limits())))
         self._server = LabWebSocketServer(
             host, port, hello, max_clients, self.get_logger(), site_dir,
             greeting=self._greeting, on_message=self._on_browser, on_disconnect=self._on_leave,
@@ -229,21 +245,29 @@ class LabBridgeNode(Node):
         if estop_topic:
             self._estop_subscription = self.create_subscription(
                 EmergencyStop, estop_topic, self._on_estop, _ESTOP_QOS)
+        # Shown to the pages (and a lost permission ends a session); enforced further down.
+        if motion_topic:
+            self._motion_subscription = self.create_subscription(
+                MotionPermission, motion_topic, self._on_motion_permission, _PERMISSION_QOS)
         self._shoot_publishers = {}
-        if self._shoot.allowed:
+        if self._shoot_enabled:
             self._shoot_publishers = {
                 'roller': self.create_publisher(Float32, self._shoot_topics['roller'], 1),
                 'tilt': self.create_publisher(Float32, self._shoot_topics['tilt'], 1),
                 'fire': self.create_publisher(Empty, self._shoot_topics['fire'], 1),
             }
+            if lab_permission_topic:
+                self._lab_permission_subscription = self.create_subscription(
+                    ActuationAuthority, lab_permission_topic, self._on_lab_permission,
+                    _PERMISSION_QOS)
             self._shoot_timer = self.create_timer(1.0 / max(1.0, shoot_rate), self._on_shoot_tick)
-        if self._drive.allowed:
+        if self._drive_topic:
             self._drive_publisher = self.create_publisher(Twist, self._drive_topic, 1)
             if arbiter_topic:
                 self._arbiter_subscription = self.create_subscription(
-                    String, arbiter_topic, self._on_arbiter, _ESTOP_QOS)
+                    ArbiterStatus, arbiter_topic, self._on_arbiter, _STATUS_QOS)
             self._drive_timer = self.create_timer(1.0 / max(1.0, drive_rate), self._on_drive_tick)
-        if self._drive.allowed or self._shoot.allowed:
+        if self._drive_topic or self._shoot_enabled:
             self._graph_timer = self.create_timer(_GRAPH_PERIOD_SEC, self._check_graph)
             self._check_graph()
         self._server.start()
@@ -266,15 +290,14 @@ class LabBridgeNode(Node):
             self._lab_subscriptions.append(
                 self.create_subscription(msg_type, topics[name], callback, qos))
         self._status_timer = self.create_timer(_STATUS_PERIOD_SEC, self._on_status)
-        may = ([self._drive_topic] if self._drive.allowed else []) + (
-            list(self._shoot_topics.values()) if self._shoot.allowed else [])
+        may = ([self._drive_topic] if self._drive_topic else []) + (
+            list(self._shoot_topics.values()) if self._shoot_enabled else [])
         self.get_logger().info(
             'QUESTiX LAB bridge (%s) on ws://%s:%d, streams: %s'
             % ('may publish %s' % ', '.join(may) if may else 'read-only',
                host, self._server.port, ', '.join(sorted(self._counts)) or 'none'))
-        if allow_shoot and not self._shoot.allowed:
-            self.get_logger().warning(
-                'allow_shoot is set, but a launcher topic parameter is empty: launcher off')
+        if not self._shoot_enabled:
+            self.get_logger().info('a launcher topic parameter is empty: no launcher experiments')
         self.get_logger().info('records: %s (%s), rosbags: %s' % (
             self._store.directory or 'not kept',
             'controller driving recorded' if self._recorder else 'no auto recording',
@@ -412,10 +435,10 @@ class LabBridgeNode(Node):
         if request is None or self._closing:
             return
         if request[0] in _SHOOT_REQUESTS:
-            if self._shoot.allowed:
-                self._on_shoot_request(client_id, request)
+            if self._shoot_enabled:
+                self._on_shoot_request(client_id, request)  # refused while not permitted
             return
-        if not self._drive.allowed:
+        if not self._drive_topic:
             return
         now = time.monotonic()
         with self._drive_lock:
@@ -464,34 +487,44 @@ class LabBridgeNode(Node):
                 self._send_shoot_state(time.monotonic())
 
     def _on_arbiter(self, msg):
-        try:
-            status = json.loads(msg.data)
-        except ValueError:
-            return
+        if msg.mechanism != 'drive':
+            return  # the launcher's arbiter is not this bridge's business yet
+        status = arbiter_status(msg)
+        now = time.monotonic()
         with self._drive_lock:
-            self._arbiter_status = status if isinstance(status, dict) else None
+            self._arbiter_at = now
+            was_active = self._drive.active
+            self._drive.set_arbiter(status, now)
+            self._after_drive_change(was_active, now)
 
-    def _controller_has_robot(self, now):
-        """Tell whether twist_arbiter has given the robot to the controller during our run.
+    def _on_motion_permission(self, msg):
+        with self._drive_lock:
+            self._motion = {'drive': bool(msg.drive_allowed), 'launcher': bool(msg.launcher_allowed)}
+            self._motion_at = time.monotonic()
 
-        The arbiter switches to the lab on our first command; a run it has not switched to
-        within _ARBITER_GRACE_SEC (the stick was held) or has switched away from (the stick
-        moved) is over. Without an arbiter status (no arbiter running) nothing is decided here.
-        """
-        status = self._arbiter_status
-        if status is None or not self._drive.active:
-            return False
-        if status.get('reason') == 'controller' and status.get('lab_locked'):
-            return True
-        return (status.get('active') != 'lab'
-                and self._drive.run_seconds(now) > _ARBITER_GRACE_SEC)
+    def _on_lab_permission(self, msg):
+        with self._drive_lock:
+            self._lab_permission = bool(msg.launcher_allowed)
+            self._lab_permission_at = time.monotonic()
+
+    def _motion_allows(self, kind, now):
+        """Whether a fresh /motion_permission allows ``kind`` ("drive" / "launcher")."""
+        return self._motion[kind] and now - self._motion_at <= _MOTION_PERMISSION_LEASE_SEC
+
+    def _after_drive_change(self, was_active, now):
+        """Stop at once if the run just ended; tell the pages. Holds the lock."""
+        if was_active and not self._drive.active:
+            self._publish_twist(0.0, 0.0)
+            self.get_logger().warning('drive run ended: %s' % self._drive.last_stop['reason'])
+        self._send_drive_state(now)
 
     def _on_drive_tick(self):
         now = time.monotonic()
         with self._drive_lock:
-            if self._controller_has_robot(now):
-                self._drive.controller_took_over(now)
             was_active = self._drive.active
+            if now - self._arbiter_at > _ARBITER_STATUS_TIMEOUT_SEC:
+                self._drive.set_arbiter(None, now)  # the arbiter is gone (or never ran)
+            self._drive.set_motion_permission(self._motion_allows('drive', now), now)
             command = self._drive.tick(now)
             if was_active and not self._drive.active:
                 self.get_logger().warning(
@@ -506,7 +539,7 @@ class LabBridgeNode(Node):
         def others(infos):
             return [info.node_namespace.rstrip('/') + '/' + info.node_name for info in infos
                     if (info.node_name, info.node_namespace) != me]
-        if self._drive.allowed:
+        if self._drive_topic:
             publishers = others(self.get_publishers_info_by_topic(self._drive_topic))
             subscribers = others(self.get_subscriptions_info_by_topic(self._drive_topic))
             with self._drive_lock:
@@ -516,7 +549,7 @@ class LabBridgeNode(Node):
                     self._publish_twist(0.0, 0.0)
                     self.get_logger().warning('drive stopped: another node publishes %s (%s)' % (
                         self._drive_topic, ', '.join(publishers)))
-        if self._shoot.allowed:
+        if self._shoot_enabled:
             publishers = []
             for topic in self._shoot_topics.values():
                 publishers += others(self.get_publishers_info_by_topic(topic))
@@ -624,7 +657,7 @@ class LabBridgeNode(Node):
 
     def _on_launcher_status(self, name, msg, feed):
         stamp = self._now()
-        if self._shoot.allowed:
+        if self._shoot_enabled:
             try:
                 status = json.loads(msg.data)
             except ValueError:
@@ -640,6 +673,12 @@ class LabBridgeNode(Node):
         now = time.monotonic()
         with self._drive_lock:
             was_active = self._shoot.active
+            # The teacher's lesson permission for the launcher, a lease (and the motion
+            # permission: without it the launcher refuses anyway, so the session ends).
+            self._shoot.set_allowed(
+                self._lab_permission
+                and now - self._lab_permission_at <= _LAB_PERMISSION_LEASE_SEC
+                and self._motion_allows('launcher', now), now)
             power = self._shoot.tick(now)
             self._after_shoot_change(was_active, now)
             if power is not None:

@@ -301,20 +301,29 @@ def test_installers_preserve_existing_environment_but_launcher_is_safe():
     assert 'force: false' in launch_env_tasks
 
 
-def test_twist_arbiter_only_in_lesson_launches():
+def test_command_arbiter_only_in_lesson_launches():
     # Lesson runs share /target_twist between the controller and QUESTiX LAB through
-    # twist_arbiter; practice and competition keep joy_controller -> /target_twist.
+    # command_arbiter; practice and competition keep joy_controller -> /target_twist.
     core = load_xml('launcher/launch/questix_core.launch.xml')
     drive_include = next(
         include for include in core.findall('.//include')
         if 'drive_component.launch.xml' in include.get('file', '')
     )
     forwarded = next(
-        arg for arg in drive_include.findall('./arg') if arg.get('name') == 'enable_twist_arbiter')
+        arg for arg in drive_include.findall('./arg') if arg.get('name') == 'use_command_arbiter')
     assert forwarded.get('value') == '$(var is_lesson)'
+    arbiter_groups = [
+        group for group in core.iter('group')
+        if any('command_arbiter.launch.xml' in include.get('file', '')
+               for include in group.findall('./include'))
+    ]
+    assert len(arbiter_groups) == 1
+    assert arbiter_groups[0].get('if') == '$(var is_lesson)'
 
     drive = load_xml('launcher/launch/drive_component.launch.xml')
-    assert find_arg(drive, 'enable_twist_arbiter').get('default') == 'false'
+    assert find_arg(drive, 'use_command_arbiter').get('default') == 'false'
+    drive_text = (SOURCE_ROOT / 'launcher/launch/drive_component.launch.xml').read_text()
+    assert 'twist_arbiter' not in drive_text
     controller_groups = [
         group for group in drive.findall('./group')
         if any('find-pkg-share joy_controller' in include.get('file', '')
@@ -327,8 +336,8 @@ def test_twist_arbiter_only_in_lesson_launches():
         assert remap.get('from') == '/target_twist'
         assert remap.get('to') == '$(var controller_twist_topic)'
     lets = {(let.get('value'), let.get('if'), let.get('unless')) for let in drive.findall('./let')}
-    assert ('/target_twist/joy', '$(var enable_twist_arbiter)', None) in lets
-    assert ('/target_twist', None, '$(var enable_twist_arbiter)') in lets
+    assert ('/target_twist/joy', '$(var use_command_arbiter)', None) in lets
+    assert ('/target_twist', None, '$(var use_command_arbiter)') in lets
 
 
 def test_lab_launcher_input_only_in_lesson_launches():

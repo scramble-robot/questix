@@ -799,6 +799,9 @@ def _authority_snapshot() -> dict:
         "available": True,
         "drive": bool(state.get("drive")),
         "launcher": bool(state.get("launcher")),
+        # QUESTiX LAB's lesson permissions (/lab_permission), held next to the switches.
+        "lab_drive": bool(state.get("lab_drive")),
+        "lab_launcher": bool(state.get("lab_launcher")),
         "heartbeat_running": bool(state.get("running")),
         "competition": bool(state.get("competition")),
         "mode": state.get("mode"),

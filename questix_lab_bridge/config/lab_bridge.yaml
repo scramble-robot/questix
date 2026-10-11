@@ -1,5 +1,6 @@
-# QUESTiX LAB live bridge: subscriptions -> WebSocket. Nothing is published unless allow_drive
-# or allow_shoot is true (see the drive and launcher sections below, drive.py and shoot.py).
+# QUESTiX LAB live bridge: subscriptions -> WebSocket, and the pages' sessions with the robot
+# (drive.py, shoot.py). What the pages may move is decided by the teacher's lesson permission
+# (/lab_permission, Robot Manager), command_arbiter and the actuators, never by this file.
 questix_lab_bridge:
   ros__parameters:
     host: "0.0.0.0"
@@ -50,52 +51,48 @@ questix_lab_bridge:
     wheel_radius: 0.05
     wheel_separation: 0.5
 
-    # Driving experiments from the pages (the only thing this node can publish).
-    # true = pages may drive, each run confirmed by the learner's safety tick on the page.
-    # false here, so a bridge started by hand never drives. robot_manager always passes its
-    # 教材からの走行 switch explicitly: off at every start of the manager, on only after the teacher
-    # switches it on for the session, always off in competition.
-    # The page's commands go to twist_arbiter's lab input; the arbiter (practice launches of
-    # questix_core) chooses between them and the controller, and a moved stick takes over.
-    # Even when allowed, a page can drive only while
+    # Driving experiments from the pages. The page's commands go to command_arbiter's lab input;
+    # the arbiter (lesson launches of questix_core) decides what reaches the drive: the teacher's
+    # lesson permission (/lab_permission, Robot Manager's 教材からの走行 switch: off at every
+    # start of the manager, on only after the teacher switches it on), QUESTiX LAB's speed caps
+    # (lab_max_linear / lab_max_angular in command_arbiter.yaml) and the controller, which always
+    # takes over. Its status ends a run it refused and gives the pages the caps. Even then a page
+    # can drive only while
     #   - no other node publishes drive_topic,
-    #   - twist_arbiter subscribes to it (the robot's ROS runs, same ROS_DOMAIN_ID), and
-    #   - the emergency stop is released (emergency_stop_topic or /drive_status).
-    allow_drive: false
+    #   - command_arbiter subscribes to it (the robot's ROS runs a lesson launch, same
+    #     ROS_DOMAIN_ID), and
+    #   - the emergency stop is released and /motion_permission allows the drive (shown to the
+    #     pages; drive_component enforces both itself).
     drive_topic: "/target_twist/lab"
-    # twist_arbiter's status: a run the controller takes over ends at once. Empty = not used.
-    arbiter_status_topic: "/twist_arbiter/status"
+    arbiter_status_topic: "/command_arbiter/status"
+    lab_permission_topic: "/lab_permission"
+    motion_permission_topic: "/motion_permission"
     emergency_stop_topic: "/emergency_stop"
-    # Upper bounds for what a page may command; faster requests are clamped. Keep them low:
-    # learners run these experiments next to the robot.
-    drive_max_linear: 0.15  # [m/s]
-    drive_max_angular: 0.5  # [rad/s]
     # The driving page repeats its command about 10 times a second. Silence for this long
     # (closed tab, sleeping laptop, lost Wi-Fi) stops the robot.
     drive_deadman_sec: 0.5
     # One run (from the first command to stop) may not last longer than this.
     drive_max_run_sec: 30.0
-    # Rate the held command is published at. drive_component's cmd_timeout_sec (1.0 s) is the
-    # last line of defence if this node dies while driving.
+    # Rate the held command is published at. command_arbiter stops the drive 0.3 s after the
+    # last command, and drive_component's cmd_timeout_sec (1.0 s) is the last line of defence.
     drive_rate_hz: 20.0
 
     # The disc launcher's status (std_msgs/String JSON), mirrored to every page as the streams
-    # "roller" and "shot" whether or not allow_shoot is set. Empty = not mirrored (and no
+    # "roller" and "shot" whatever the permissions are. Empty = not mirrored (and no
     # launcher experiments: the bridge needs both to decide).
     roller_status_topic: "/roller/status"   # esc_motor_control
     shot_status_topic: "/shot/status"       # shot_component
 
     # Launcher experiments from the pages: roller power, tilt and firing one disc
-    # (questix_lab_bridge/shoot.py). Default false in the node; robot_manager passes its
-    # 教材からの発射 switch (on in practice mode, off in competition), each firing session
-    # confirmed by the learner's safety tick on the page. Even when allowed, a page can operate
-    # the launcher only while
+    # (questix_lab_bridge/shoot.py), each firing session confirmed by the learner's safety tick
+    # on the page. A page can operate the launcher only while
+    #   - the teacher's lesson permission for the launcher is on (/lab_permission
+    #     launcher_allowed, Robot Manager's 教材からの発射 switch) and /motion_permission allows it,
     #   - esc_motor_control and shot_component subscribe to the lab topics and report
-    #     lab_accepted (their accept_lab_input; practice launches only) in their status,
+    #     lab_accepted (their accept_lab_input; lesson launches only) in their status,
     #   - no other node publishes the lab topics,
     #   - the emergency stop is released (emergency_stop_topic, /drive_status or either status),
     #   - the controller is not using the launcher (a pressed button takes over at once).
-    allow_shoot: false
     roller_lab_topic: "/roller/lab"         # std_msgs/Float32, 0..1
     tilt_lab_topic: "/shot/lab/tilt"        # std_msgs/Float32, degrees
     fire_lab_topic: "/shot/lab/fire"        # std_msgs/Empty, one disc
@@ -133,7 +130,7 @@ questix_lab_bridge:
     # automatically: saving from a page is refused until the teacher tidies the folder up.
     records_quota_mb: 500
     records_min_free_mb: 200
-    # Record driving nobody records from a page (the controller through twist_arbiter): from 1 s
+    # Record driving nobody records from a page (the controller through command_arbiter): from 1 s
     # before the robot moves until it has stood still for 3 s, split every 180 s, shown in the
     # lessons as 「コントローラーで走行」. Nothing is recorded while a lab driving run is active.
     auto_record: true

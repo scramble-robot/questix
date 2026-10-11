@@ -7,7 +7,8 @@ unit-tested. The node feeds it the pages' requests, the ROS graph, ``/roller/sta
 Rules, all enforced here and not in the page (the launcher nodes check again on their side:
 ``accept_lab_input``, E-stop, controller quiet time, clamps, fire interval):
 
-* Off unless the bridge was started with ``allow_shoot``.
+* Off unless the teacher's lesson permission for the launcher is on (``/lab_permission``
+  ``launcher_allowed``, a lease the node checks; :meth:`ShootArbiter.set_allowed`).
 * Blocked (``blockers``) while
   - ``no_launcher``: nobody subscribes to the roller or fire topic, a status topic is silent
     for ``status_timeout_sec``, a status says ``lab_accepted: false`` (the node runs without
@@ -129,6 +130,25 @@ class ShootArbiter:
     @property
     def active(self):
         return self.owner is not None
+
+    def set_allowed(self, allowed, now):
+        """Feed the teacher's lesson permission for the launcher (``/lab_permission``, a lease).
+
+        Losing it ends a session and publishes roller 0 briefly; getting it back starts nothing.
+        """
+        allowed = bool(allowed)
+        if allowed == self.allowed:
+            return
+        self.allowed = allowed
+        self.version += 1
+        if not allowed:
+            if self.active:
+                self._end(NOT_ALLOWED, None, now)
+            self._blockers = {NOT_ALLOWED: None}
+            self._hold_until = max(self._hold_until, now + self.stop_hold_sec)
+        else:
+            self._blockers = {}
+            self._update_blockers(now)
 
     # --- what the robot says -----------------------------------------------------------------
 
