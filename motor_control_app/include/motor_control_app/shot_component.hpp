@@ -82,6 +82,10 @@ private:
   void commandCallback(const questix_msgs::msg::LauncherCommand::SharedPtr msg);
   // Whether the launcher may move now: ACTIVE, servos connected, permission and E-stop open.
   bool readyToMove();
+  // More than one node on launcher_command_topic: their counters would mix (one publisher's
+  // fire_seq read as a restart of the other's, the next as a new shot), so nothing moves until
+  // only one is left.
+  void checkCommandPublishers();
   // A tilt target kept while the tilt servo was rate limited, tried again on the next command.
   void applyPendingTilt();
   void executeShotSequence(FireSource source);
@@ -173,10 +177,13 @@ private:
   LauncherEvents launcher_events_;
   bool pending_tilt_;
   double pending_tilt_deg_;
+  std::string command_topic_;
+  bool multiple_command_publishers_;
 
   // /launcher_command: subscribed for the node's whole life (events received while it may not
   // move only advance the counters and are dropped, never replayed).
   rclcpp::Subscription<questix_msgs::msg::LauncherCommand>::SharedPtr command_subscription_;
+  rclcpp::TimerBase::SharedPtr command_publisher_timer_;
   // All callbacks intentionally use the node's default MutuallyExclusive callback group:
   // auto-start, emergency-stop input/timeout, launcher commands, and the fire timer (issue #83). If
   // these entities are split across callback groups, synchronize lifecycle/emergency-stop

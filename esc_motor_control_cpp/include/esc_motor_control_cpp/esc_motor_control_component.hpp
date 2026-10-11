@@ -45,6 +45,9 @@ private:
   void command_callback(const questix_msgs::msg::LauncherCommand::SharedPtr msg);
   // A spinning roller whose commands stopped for safety_timeout is stopped.
   void command_tick();
+  // More than one node on launcher_command_topic: their counters and levels would mix (one
+  // publisher's 0 and the other's power in turn), so the roller stops until only one is left.
+  void check_publishers();
   // /emergency_stop を受信したとき（estop_monitor_ から呼ばれる）。
   void on_emergency_stop(const questix_msgs::msg::EmergencyStop& msg,
                          const questix_safety::EmergencyStopMonitor::Change& change);
@@ -87,6 +90,8 @@ private:
   RollerCommandLogic command_logic_;
   // The source of the last command (rollerSourceName), shown in /roller/status while spinning.
   const char* command_source_{"idle"};
+  // More than one publisher on launcher_command_topic (check_publishers).
+  bool multiple_publishers_{false};
   std::mutex lock_;
 
   // ---------- PWM ----------
@@ -105,6 +110,7 @@ private:
   rclcpp::TimerBase::SharedPtr roller_status_timer_;
   rclcpp::TimerBase::SharedPtr status_timer_;
   rclcpp::TimerBase::SharedPtr command_timer_;
+  rclcpp::TimerBase::SharedPtr publisher_timer_;
 };
 
 }  // namespace esc_motor_control_cpp

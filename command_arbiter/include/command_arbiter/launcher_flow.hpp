@@ -82,6 +82,10 @@ private:
 //   switch never replays or loses an event at shot_component.
 // - QUESTiX LAB's caps: roller power at most lab_max_power, tilt targets clamped to
 //   [lab_tilt_min_deg, lab_tilt_max_deg] (shot_component clamps to the mechanism's own range too).
+// - A lab run starts fresh: the command that hands the launcher to the lab carries roller 0 (the
+//   ESC spins only after a 0, see esc_motor_control's roller_command_logic.hpp, and a lesson
+//   without a controller stream would otherwise never send it) and no tilt target; the next
+//   command carries the lab's power. A run's own tilt target is never carried into another run.
 // - A lab shot needs the forwarded lab roller at min_fire_power or more for spin_up_sec without a
 //   break, and fire_interval_sec since the last forwarded shot of any source; otherwise it is
 //   refused (never queued) and the run goes on.
@@ -156,6 +160,7 @@ public:
     const auto events = lab_.onCommand(in.tilt_deg, in.tilt_steps, in.fire_seq, now_sec);
     const double roller = std::clamp(in.roller_power, 0.0, std::max(0.0, config_.lab_max_power));
     const bool neutral = roller <= 0.0 && !events.fire && !events.tilt_target;
+    const bool was_lab = selector_.source() == SourceSelector::Source::kLab;
     const auto decision = selector_.onLab(neutral, permitted, now_sec);
     if (decision.stop) {
       return stop();
@@ -163,8 +168,12 @@ public:
     if (!decision.forward) {
       return Output{};
     }
-    out_.roller_power = roller;
-    if (roller >= config_.min_fire_power) {
+    const bool starting = !was_lab && selector_.source() == SourceSelector::Source::kLab;
+    if (starting) {
+      out_.tilt_deg = kNaN;  // only this run's own targets
+    }
+    out_.roller_power = starting ? 0.0 : roller;
+    if (out_.roller_power >= config_.min_fire_power) {
       if (std::isnan(spin_since_sec_)) {
         spin_since_sec_ = now_sec;
       }
@@ -188,6 +197,7 @@ public:
     Output output = emit(SourceSelector::Source::kLab);
     if (selector_.source() != SourceSelector::Source::kLab) {
       spin_since_sec_ = kNaN;  // this was the run's own stop
+      out_.tilt_deg = kNaN;
     }
     return output;
   }
@@ -251,6 +261,7 @@ private:
   // The lab's run ended without its own stop: the roller goes to 0, nothing else moves.
   Output stop() {
     out_.roller_power = 0.0;
+    out_.tilt_deg = kNaN;  // the run is over: its target is not carried into the next one
     spin_since_sec_ = kNaN;
     return emit(SourceSelector::Source::kLab);
   }

@@ -22,6 +22,8 @@
 #   tilt_steps  each change moves the tilt by that many tilt_step_angle (+ up, - down)
 #   tilt_deg    a finite value that differs from the previous message's (NaN before, also on the
 #               baseline: it is the current wish) moves the tilt there (clamped to the range)
+# One publisher per topic: esc_motor_control and shot_component move nothing while more than one
+# node publishes /launcher_command (their counters and levels would mix).
 
 std_msgs/Header header  # stamp = publish time (information only)
 float32 roller_power    # 0..1 of the roller's full power; 0 = stop

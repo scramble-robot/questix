@@ -57,7 +57,10 @@ The controller counts as busy while its roller button is held or it fired / step
 `controller_quiet_sec` (1.0 s); a lab command is neutral when its roller is 0 and it asks for nothing
 new. The output keeps its own `fire_seq` / `tilt_steps` counters: a shot or tilt step of the input
 that has the launcher is added to them, so switching inputs never replays or loses one at
-shot_component. QUESTiX LAB's commands are clamped to `lab_max_power` (0.8) and
+shot_component. A lab run starts fresh: the command that hands the launcher to the lab carries roller 0 (the ESC
+spins only after a 0, and a lesson without a controller stream would never send one otherwise) and
+no tilt target, and no run carries an earlier run's target. QUESTiX LAB's commands are clamped to
+`lab_max_power` (0.8) and
 `lab_tilt_min_deg..lab_tilt_max_deg`; a lab shot goes through only when the forwarded lab roller ran
 at `min_fire_power` (0.2) or more for `spin_up_sec` (1.0 s) without a break and `fire_interval_sec`
 (2.0 s) passed since the last forwarded shot of any source (otherwise `lab_refusal` is

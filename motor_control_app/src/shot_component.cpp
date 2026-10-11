@@ -50,7 +50,8 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
       fired_count_(0),
       last_fire_source_(FireSource::kNone),
       pending_tilt_(false),
-      pending_tilt_deg_(0.0) {
+      pending_tilt_deg_(0.0),
+      multiple_command_publishers_(false) {
   // パラメーター宣言（取得は on_configure で行い、cleanup→configure で再読込できるようにする）
   this->declare_parameter("port", "/dev/servo");
   this->declare_parameter("baudrate", 115200);
@@ -164,12 +165,14 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
   // /launcher_command (reliable + volatile + keep-last(1), questix_msgs/msg/LauncherCommand.msg),
   // subscribed in every lifecycle state: what arrives while the launcher may not move advances
   // the counters and is dropped (launcher_events.hpp), so nothing is replayed on activation.
-  const std::string command_topic = this->get_parameter("launcher_command_topic").as_string();
+  command_topic_ = this->get_parameter("launcher_command_topic").as_string();
   command_subscription_ = this->create_subscription<questix_msgs::msg::LauncherCommand>(
-      command_topic, rclcpp::QoS(1).reliable().durability_volatile(),
+      command_topic_, rclcpp::QoS(1).reliable().durability_volatile(),
       std::bind(&ShotComponent::commandCallback, this, std::placeholders::_1));
+  command_publisher_timer_ = this->create_wall_timer(
+      std::chrono::milliseconds(500), std::bind(&ShotComponent::checkCommandPublishers, this));
   RCLCPP_INFO(this->get_logger(), "Launcher commands: %s (min fire interval %.1f s)",
-              command_topic.c_str(), min_fire_interval_sec_);
+              command_topic_.c_str(), min_fire_interval_sec_);
   // A lease runs out without a message: check it periodically too.
   permission_timer_ = this->create_wall_timer(std::chrono::milliseconds(100),
                                               std::bind(&ShotComponent::applyPermission, this));

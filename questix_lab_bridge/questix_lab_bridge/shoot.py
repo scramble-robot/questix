@@ -32,9 +32,14 @@ a session they refuse and checks a request against them first so the page hears 
   arbiter's caps narrowed by the shot node's range); a non-finite value is refused (``invalid``)
   and ends the owner's session.
 * ``fire`` needs ``confirm: true`` (the pupil's safety tick), the owner, the roller commanded at
-  ``min_fire_power`` or more for ``spin_up_sec`` without a break, no shot in progress, and the
-  intervals since the last shot (the arbiter's for the lab, the shot node's own). Refused requests
-  are answered, never queued.
+  ``min_fire_power`` or more for ``spin_up_sec`` without a break *and* ``/roller/status`` showing
+  it turning for the lab at that power (counted from the later of the two), no shot in progress,
+  and the intervals since the last shot (the arbiter's for the lab, the shot node's own). Refused
+  requests are answered, never queued.
+* A session the bridge ended (a blocker, the dead-man, the time limit, the arbiter, another page's
+  stop) is not restarted by its owner's commands for ``RESTART_GUARD_SEC``: those were already on
+  their way, and the page has given the session up. They are dropped without an answer
+  (``STALE``); a page that wants the launcher again asks after that.
 """
 
 import math
@@ -57,6 +62,9 @@ NO_CONFIRM = 'no_confirm'  # fire without the pupil's safety tick
 NOT_SPINNING = 'not_spinning'  # fire before the roller ran fast enough for long enough
 INTERVAL = 'interval'  # fire sooner than the interval after the last shot
 SHOOTING = 'shooting'  # a shot is still moving
+# A command of a session the bridge has just ended: dropped without an answer to the page.
+STALE = 'stale'
+RESTART_GUARD_SEC = 1.0
 
 # Why the last session ended (besides the blockers, which end it with their own code).
 STOPPED = 'stopped'
@@ -106,6 +114,8 @@ class ShootSession:
         self._started_at = 0.0
         self._count_at_start = 0
         self._spinning_since = None  # power >= min_fire_power continuously since
+        self._roller_confirmed_since = None  # /roller/status: turning for the lab since
+        self._guard = (None, -math.inf)  # (previous owner, until): see RESTART_GUARD_SEC
         self._hold_until = -math.inf
         self._last_fire_at = -math.inf  # this bridge's last shot
         self._fire_ready_at = -math.inf  # the arbiter's and the shot node's interval, as a time
@@ -182,7 +192,21 @@ class ShootSession:
             return
         self._status[ROLLER] = status
         self._status_at[ROLLER] = now
+        self._update_roller_confirmation(now)
         self._update_blockers(now)
+
+    def _update_roller_confirmation(self, now):
+        """Note when /roller/status starts showing the roller turning for the lab's session."""
+        status = self._status[ROLLER] or {}
+        command = _number(status.get('command'))
+        turning = (self.active and self._spinning_since is not None
+                   and status.get('source') == 'lab' and command is not None
+                   and command >= self._limits['min_fire_power'])
+        if not turning:
+            self._roller_confirmed_since = None
+        elif self._roller_confirmed_since is None:
+            self._roller_confirmed_since = now
+            self.version += 1
 
     def set_shot_status(self, status, now):
         """Feed one ``/shot/status`` JSON object (its range narrows the tilt, its interval waits)."""
@@ -266,6 +290,11 @@ class ShootSession:
 
     # --- what the pages ask for ---------------------------------------------------------------
 
+    def _guarded(self, client, now):
+        """Whether ``client``'s command belongs to a session the bridge has just ended."""
+        owner, until = self._guard
+        return client is not None and client == owner and now < until
+
     def _admit(self, client):
         """Return why ``client`` may not operate the launcher now, or None."""
         blockers = self.blockers()
@@ -291,6 +320,8 @@ class ShootSession:
         The node publishes whatever :meth:`tick` returns, so an accepted change reaches the
         roller within one tick.
         """
+        if self._guarded(client, now):
+            return STALE
         refused = self._admit(client)
         if refused is not None:
             return refused
@@ -311,10 +342,13 @@ class ShootSession:
                 self._spinning_since = now
         else:
             self._spinning_since = None
+            self._roller_confirmed_since = None
         self.power = power
 
     def tilt_to(self, client, deg, now):
         """Return ``(None, degrees to send)`` or ``(reason, None)``."""
+        if self._guarded(client, now):
+            return STALE, None
         refused = self._admit(client)
         if refused is not None:
             return refused, None
@@ -337,6 +371,8 @@ class ShootSession:
 
     def fire(self, client, confirm, now):
         """Return None when one disc is asked for now (the node publishes it), or why not."""
+        if self._guarded(client, now):
+            return STALE
         refused = self._admit(client)
         if refused is not None:
             return refused
@@ -383,10 +419,17 @@ class ShootSession:
                    self._fire_ready_at - now)
 
     def spin_ready_in(self, now):
-        """Seconds until the roller has run fast enough long enough (inf when it is not)."""
+        """Seconds until the roller has run fast enough long enough (inf when it is not asked to).
+
+        Counted from the later of the command and ``/roller/status`` showing the roller turning
+        for the lab; until the status shows it, the whole spin-up is still ahead.
+        """
         if self._spinning_since is None or not self.active:
             return math.inf
-        return max(0.0, self._spinning_since + self._limits['spin_up_sec'] - now)
+        if self._roller_confirmed_since is None:
+            return self._limits['spin_up_sec']
+        since = max(self._spinning_since, self._roller_confirmed_since)
+        return max(0.0, since + self._limits['spin_up_sec'] - now)
 
     def ready_to_fire(self, now):
         return (self.active and not self._blockers and self.spin_ready_in(now) == 0.0
@@ -423,10 +466,14 @@ class ShootSession:
         return (self.power, self.tilt, self.fire_seq)
 
     def _end(self, reason, by, now):
+        if self.owner is not None and by != self.owner:
+            # Not the owner's own stop: its commands still on their way must not restart it.
+            self._guard = (self.owner, now + RESTART_GUARD_SEC)
         self.owner = None
         self.power = 0.0
         self.tilt = None
         self._spinning_since = None
+        self._roller_confirmed_since = None
         self._hold_until = now + self.stop_hold_sec
         self.last_stop = {'reason': reason, 'by': by}
         self._ready = False

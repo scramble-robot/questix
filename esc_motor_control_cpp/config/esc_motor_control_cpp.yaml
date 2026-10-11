@@ -7,7 +7,8 @@ esc_motor_control:
 
     # questix_msgs/LauncherCommand roller_power (0..1, a level the publisher repeats while in use):
     # joy_launcher in practice and competition, command_arbiter (the controller or QUESTiX LAB) in
-    # a lesson. Who may command the roller is decided there, never here.
+    # a lesson. Who may command the roller is decided there, never here. While more than one node
+    # publishes it the roller stays at 0 (their levels would mix).
     launcher_command_topic: "/launcher_command"
 
     # PWM settings

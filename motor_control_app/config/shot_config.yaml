@@ -4,7 +4,8 @@ shot_component:
   ros__parameters:
     # questix_msgs/LauncherCommand (fire_seq, tilt_steps, tilt_deg): joy_launcher in practice and
     # competition, command_arbiter (the controller or QUESTiX LAB) in a lesson. Who may command
-    # the launcher is decided there, never here.
+    # the launcher is decided there, never here. While more than one node publishes it, fire and
+    # tilt are refused (their counters would mix).
     launcher_command_topic: "/launcher_command"
 
     # Lifecycle auto start / ライフサイクル自動起動

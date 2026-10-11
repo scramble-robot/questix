@@ -189,6 +189,10 @@ void ShotComponent::commandCallback(const questix_msgs::msg::LauncherCommand::Sh
     pending_tilt_ = true;
     pending_tilt_deg_ = events.tilt_deg;
   }
+  if (multiple_command_publishers_) {
+    pending_tilt_ = false;  // see checkCommandPublishers(): nothing moves
+    return;
+  }
   if (!readyToMove()) {
     pending_tilt_ = false;
     if (events.fire || events.tilt_steps != 0) {
@@ -213,6 +217,30 @@ void ShotComponent::commandCallback(const questix_msgs::msg::LauncherCommand::Sh
                events.tilt_steps > 0 ? "up" : "down");
   }
   applyPendingTilt();
+}
+
+void ShotComponent::checkCommandPublishers() {
+  const auto publishers = this->get_publishers_info_by_topic(command_topic_);
+  const bool multiple = publishers.size() > 1;
+  if (multiple == multiple_command_publishers_) {
+    return;
+  }
+  multiple_command_publishers_ = multiple;
+  if (!multiple) {
+    // The counters restart from the one publisher's next message (no replay).
+    launcher_events_.reset();
+    RCLCPP_INFO(this->get_logger(), "One publisher on %s again", command_topic_.c_str());
+    return;
+  }
+  pending_tilt_ = false;
+  std::string names;
+  for (const auto& info : publishers) {
+    const std::string& ns = info.node_namespace();
+    names += (names.empty() ? "" : ", ") + (ns == "/" ? "" : ns) + "/" + info.node_name();
+  }
+  RCLCPP_ERROR(this->get_logger(),
+               "%zu nodes publish %s (%s): fire and tilt refused until only one is left",
+               publishers.size(), command_topic_.c_str(), names.c_str());
 }
 
 void ShotComponent::applyPendingTilt() {

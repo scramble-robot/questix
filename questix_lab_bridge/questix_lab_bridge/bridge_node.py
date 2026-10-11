@@ -44,9 +44,9 @@ from std_msgs.msg import String
 from tf2_ros import Buffer, TransformException, TransformListener
 
 from . import messages, records, rosbags
-from .drive import arbiter_status, DriveSession
+from .drive import arbiter_status, DriveSession, STALE as DRIVE_STALE
 from .records_api import RecordsApi
-from .shoot import ShootSession, TiltCoalescer
+from .shoot import ShootSession, STALE as SHOOT_STALE, TiltCoalescer
 from .static_site import find_lab_dir
 from .ws_server import LabWebSocketServer
 
@@ -437,7 +437,7 @@ class LabBridgeNode(Node):
                 refused = self._drive.request(client_id, request[1], request[2], now)
                 if refused is not None and was_owner == client_id:
                     self._publish_twist(0.0, 0.0)
-                if refused is not None:
+                if refused is not None and refused != DRIVE_STALE:
                     # Only the asking page hears why, at once (the others see no change).
                     state = dict(self._drive.state(), refused=refused)
                     self._server.publish_to(client_id, 'drive_state', messages.encode(
@@ -624,8 +624,8 @@ class LabBridgeNode(Node):
                 self._drop_pending_tilt()  # roller_stop, or a request that ended the session
             if self._shoot.owner == client_id and was_owner is None:
                 self.get_logger().info('page %d operates the launcher' % client_id)
-            if refused is not None:
-                # Only the asking page hears why, at once.
+            if refused is not None and refused != SHOOT_STALE:
+                # Only the asking page hears why, at once (a stale command gets no answer).
                 self._server.publish_to(client_id, 'shoot_refused', messages.encode(
                     messages.shoot_refused_payload(refused, kind, self._shoot.state(now))))
             self._send_shoot_state(now)

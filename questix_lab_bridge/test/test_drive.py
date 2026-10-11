@@ -166,10 +166,10 @@ def test_blocker_during_a_run_stops_it():
     session.set_emergency_stop(True, 0.1)
     assert not session.active
     assert session.last_stop['reason'] == drive.EMERGENCY_STOP
-    assert session.request(1, 0.1, 0.0, 0.2) == drive.EMERGENCY_STOP
+    assert session.request(2, 0.1, 0.0, 0.2) == drive.EMERGENCY_STOP
     session.set_emergency_stop(False, 0.3)
-    session.request(1, 0.1, 0.0, 0.4)
-    session.set_graph(['/joy_controller'], [ARBITER], 0.5)
+    session.request(1, 0.1, 0.0, 1.2)
+    session.set_graph(['/joy_controller'], [ARBITER], 1.3)
     assert session.last_stop['reason'] == drive.OTHER_PUBLISHER
 
 
@@ -291,3 +291,28 @@ def test_not_allowed_is_not_also_no_drive_node():
     session.set_estop_known(True, 0.0)
     session.set_motion_permission(True, 0.0)
     assert codes(session) == [drive.NOT_ALLOWED]
+
+
+# --- a run the bridge ended is not restarted by commands still on their way ------------------
+
+def test_the_owners_commands_after_a_run_the_bridge_ended_are_stale():
+    session = ready_session()
+    session.request(1, 0.1, 0.0, 0.0)
+    session.set_emergency_stop(True, 0.1)
+    session.set_emergency_stop(False, 0.15)  # released at once
+    assert session.request(1, 0.1, 0.0, 0.2) == drive.STALE  # its heartbeat was on its way
+    assert not session.active
+    assert session.request(2, 0.1, 0.0, 0.3) is None  # another page may start
+    session.stop(2, 0.4)
+    assert session.request(1, 0.1, 0.0, 1.2) is None  # the page asks again later
+
+
+def test_another_pages_stop_guards_the_owner_but_its_own_stop_does_not():
+    session = ready_session()
+    session.request(1, 0.1, 0.0, 0.0)
+    session.stop(2, 0.1)  # the stop bar on another page
+    assert session.request(1, 0.1, 0.0, 0.2) == drive.STALE
+    session = ready_session()
+    session.request(1, 0.1, 0.0, 0.0)
+    session.stop(1, 0.1, only_own=True)  # the page ended its own run
+    assert session.request(1, 0.1, 0.0, 0.2) is None

@@ -70,9 +70,11 @@ TEST(LauncherFlow, TheLabTakesOverOnlyWhenPermittedAndTheControllerIsQuiet) {
   flow.onJoy(cmd(0.0, 1), 1.0);  // the controller fires: busy for controller_quiet_sec (1 s)
   EXPECT_FALSE(flow.onLab(cmd(0.5), true, 1.5).publish);
   EXPECT_STREQ(flow.labRefusal(), "controller");
-  const auto out = flow.onLab(cmd(0.5), true, 2.1);
+  auto out = flow.onLab(cmd(0.5), true, 2.1);
   ASSERT_TRUE(out.publish);
   EXPECT_EQ(out.source, Source::kLab);
+  EXPECT_DOUBLE_EQ(out.command.roller_power, 0.0);  // a run starts with a 0 (the ESC needs one)
+  out = flow.onLab(cmd(0.5), true, 2.15);
   EXPECT_DOUBLE_EQ(out.command.roller_power, 0.5);
   EXPECT_STREQ(flow.labRefusal(), "");
 }
@@ -80,8 +82,10 @@ TEST(LauncherFlow, TheLabTakesOverOnlyWhenPermittedAndTheControllerIsQuiet) {
 TEST(LauncherFlow, TheLabsPowerAndTiltAreCapped) {
   auto flow = ready();
   auto out = flow.onLab(cmd(1.0, 0, 0, 200.0), true, 0.1);
+  EXPECT_DOUBLE_EQ(out.command.roller_power, 0.0);  // the run's first command
+  EXPECT_DOUBLE_EQ(out.command.tilt_deg, 120.0);    // a target goes out at once
+  out = flow.onLab(cmd(1.0, 0, 0, 200.0), true, 0.12);
   EXPECT_DOUBLE_EQ(out.command.roller_power, 0.8);
-  EXPECT_DOUBLE_EQ(out.command.tilt_deg, 120.0);
   out = flow.onLab(cmd(1.0, 0, 0, -5.0), true, 0.15);
   EXPECT_DOUBLE_EQ(out.command.tilt_deg, 0.0);
   out = flow.onLab(cmd(1.0, 0, 0, -5.0), true, 0.2);  // the same target again: kept, not new
@@ -90,8 +94,8 @@ TEST(LauncherFlow, TheLabsPowerAndTiltAreCapped) {
 
 TEST(LauncherFlow, ALabShotNeedsTheRollerSpunUp) {
   auto flow = ready();
-  spin(flow, 0.5, 0.1, 0.5);
-  EXPECT_NEAR(flow.spinReadyInSec(0.5), 0.6, 1e-9);
+  spin(flow, 0.5, 0.1, 0.5);  // the 0.5 goes out from 0.15 (the run's first command is 0)
+  EXPECT_NEAR(flow.spinReadyInSec(0.5), 0.65, 1e-9);
   auto out = flow.onLab(cmd(0.5, 1), true, 0.55);  // too early
   EXPECT_EQ(out.command.fire_seq, 0u);
   EXPECT_STREQ(flow.labRefusal(), "not_spinning");
@@ -189,6 +193,32 @@ TEST(LauncherFlow, ABrokenLabCommandEndsTheRunWithAStop) {
   EXPECT_EQ(flow.selector().source(), Source::kJoy);
   EXPECT_FALSE(
       flow.onLab(cmd(0.5, 0, 0, std::numeric_limits<double>::infinity()), true, 0.4).publish);
+}
+
+TEST(LauncherFlow, ALabRunNeverCarriesAnEarlierRunsTiltTarget) {
+  auto flow = ready();
+  flow.onLab(cmd(0.5, 0, 0, 60.0), true, 0.1);
+  auto out = flow.onLab(cmd(0.5, 0, 0, 60.0), true, 0.15);
+  EXPECT_DOUBLE_EQ(out.command.tilt_deg, 60.0);  // the run's own target, sticky
+  out = flow.onTick(true, 1.5);                  // the page went silent: the run's stop
+  ASSERT_TRUE(out.publish);
+  EXPECT_TRUE(std::isnan(out.command.tilt_deg));
+  out = flow.onLab(cmd(0.5), true, 2.0);  // a new run that asks for no tilt
+  EXPECT_TRUE(std::isnan(out.command.tilt_deg));
+  out = flow.onLab(cmd(0.5), true, 2.05);
+  EXPECT_TRUE(std::isnan(out.command.tilt_deg));
+  EXPECT_DOUBLE_EQ(out.command.roller_power, 0.5);
+}
+
+TEST(LauncherFlow, EveryLabRunStartsWithAZero) {
+  auto flow = ready();
+  spin(flow, 0.5, 0.1, 0.3);
+  flow.onLab(cmd(0.0), true, 0.35);            // the run ends
+  auto out = flow.onLab(cmd(0.6), true, 0.4);  // the next run
+  EXPECT_DOUBLE_EQ(out.command.roller_power, 0.0);
+  EXPECT_TRUE(std::isnan(flow.spinReadyInSec(0.4)));  // no spin-up from a 0
+  out = flow.onLab(cmd(0.6), true, 0.45);
+  EXPECT_DOUBLE_EQ(out.command.roller_power, 0.6);
 }
 
 TEST(LauncherFlow, AnInputsOldCountersAreNotReplayed) {

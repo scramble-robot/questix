@@ -344,6 +344,28 @@ TEST_F(ShotComponentNode, ThePermissionGatesStartAndFireButLosingItKeepsTheBus) 
   EXPECT_TRUE(isActive());
 }
 
+// Two nodes publishing /launcher_command would mix their counters: nothing fires until one is left.
+TEST_F(ShotComponentNode, TwoCommandPublishersFireNothing) {
+  start(5.0);
+  bus_.setPowered(true);
+  estop_active_ = false;
+  ASSERT_TRUE(spinUntil([this]() { return isActive(); }, 2s));
+  fire_seq_ = 0u;
+  spinFor(200ms);
+  auto other = helper_->create_publisher<questix_msgs::msg::LauncherCommand>(
+      prefix_ + "/launcher_command", rclcpp::QoS(1).reliable().durability_volatile());
+  spinFor(1000ms);  // the node's graph check runs every 0.5 s
+  const int before_press = bus_.requests();
+  fire_seq_ = 1u;
+  spinFor(500ms);
+  EXPECT_EQ(bus_.requests(), before_press) << "no shot while two nodes publish the command";
+
+  other.reset();  // one publisher again: a fresh press fires
+  spinFor(1000ms);
+  fire_seq_ = 2u;
+  EXPECT_TRUE(spinUntil([this, before_press]() { return bus_.requests() > before_press; }, 2s));
+}
+
 // The E-stop still tears the bus down (RLY1 cuts the servo power) whatever the permission says.
 TEST_F(ShotComponentNode, ThePressedEstopStillTearsTheBusDown) {
   start(5.0);

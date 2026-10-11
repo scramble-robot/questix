@@ -169,7 +169,8 @@ against what the arbiter and the nodes report first, so the page hears why at on
 | Owner disconnects / session longer than `shoot_max_spin_sec` | Ended (`disconnected` / `time_limit`), roller 0. |
 | Roller power above the arbiter's cap, tilt outside its range (narrowed by `shot_component`'s), non-finite values | Clamped / refused (`invalid`, which also ends the owner's session). |
 | `fire` without `"confirm": true` | Refused (`no_confirm`). The page sends it only while the pupil's safety tick 「発射する方向に人がいない・的の周りに人がいない」 is set. |
-| `fire` before the roller was commanded at ≥ 0.2 for 1.0 s without a break, or by a page that owns no session | Refused (`not_spinning`). |
+| `fire` before the roller was commanded at ≥ 0.2 for 1.0 s without a break *and* `/roller/status` showed it turning for the lab (counted from the later of the two), or by a page that owns no session | Refused (`not_spinning`). |
+| A command of the owner of a session the bridge ended (a blocker, the dead-man, the time limit, the arbiter, another page's stop) within 1.0 s | Dropped without an answer: it was on its way before the page heard of the end, and must not start a new session. The page asks again after that. Driving does the same for its runs. |
 | `fire` while a shot is moving (`shooting`) / before the intervals the arbiter and `shot_component` report have run out | Refused (`shooting` / `interval`). Never queued. |
 
 A session starts with the owner's first accepted `roller` or `tilt` and lives only while the owner

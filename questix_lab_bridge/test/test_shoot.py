@@ -39,11 +39,11 @@ def ready_session(**options):
 
 
 def spin_up(session, client=1, power=0.5, start=0.0, until=1.2, shot=None):
-    """Heartbeat the roller every 0.1 s (statuses keep coming) and return the time reached."""
+    """Heartbeat the roller every 0.1 s (the statuses show it turning) and return the time reached."""
     now = start
     while now <= until + 1e-9:
         assert session.roller(client, power, now) is None
-        feed(session, now, shot=shot)
+        feed(session, now, shot=shot, roller={'command': power, 'source': 'lab'})
         session.tick(now)
         now = round(now + 0.1, 3)
     return round(now - 0.1, 3)
@@ -209,7 +209,7 @@ def test_fire_rules():
     assert session.fire_seq == 1 and session.lab_fired == 1
     assert session.tick(now) == (0.5, None, 1)  # the request goes with the command
     assert session.fire(1, True, now + 0.5) == shoot.INTERVAL  # 2 s since this bridge's shot
-    feed(session, now + 0.6, shot={'shooting': True})
+    feed(session, now + 0.6, shot={'shooting': True}, roller={'command': 0.5, 'source': 'lab'})
     session.roller(1, 0.5, now + 0.6)
     assert session.fire(1, True, now + 0.6) == shoot.SHOOTING
 
@@ -251,9 +251,10 @@ def test_a_locked_lab_is_the_controller_blocker():
     assert not session.active and session.last_stop['reason'] == shoot.CONTROLLER
     assert session.state(0.1)['blockers'] == [
         {'code': shoot.CONTROLLER, 'nodes': None, 'parts': ['arbiter']}]
-    assert session.roller(1, 0.5, 0.2) == shoot.CONTROLLER
+    assert session.roller(2, 0.5, 0.2) == shoot.CONTROLLER
     session.set_arbiter(status(lab_count=2, lab_locked=False), 0.5)  # the lab's run ended
-    assert session.roller(1, 0.5, 0.6) is None
+    feed(session, 1.2)
+    assert session.roller(1, 0.5, 1.2) is None
 
 
 def test_other_refusals_do_not_end_the_session():
@@ -297,6 +298,7 @@ def test_version_changes_only_on_news():
 def test_state_shape():
     session = ready_session()
     session.roller(1, 0.5, 0.0)
+    session.set_roller_status(dict(ROLLER_OK, command=0.5, source='lab'), 0.0)
     state = session.state(0.4)
     assert state['owner'] == 1 and state['active'] and state['allowed']
     assert state['roller'] == {'power': 0.5, 'since_sec': 0.4}
@@ -408,3 +410,56 @@ def test_an_ended_session_forgets_its_tilt_target():
     session.stop(1, 0.1)
     assert session.tilt is None
     assert session.tick(0.15) == (0.0, None, 0)  # the stop carries no target
+
+
+# --- the spin-up counts only while the roller is seen turning (review: a stopped roller) -------
+
+def test_the_spin_up_waits_for_the_roller_status():
+    session = ready_session()
+    now = 0.0
+    while now <= 1.5:  # commanded for 1.5 s, but /roller/status keeps saying it stands still
+        session.roller(1, 0.5, now)
+        feed(session, now)
+        now = round(now + 0.1, 3)
+    assert session.spin_ready_in(now) == 1.0  # the whole spin-up is still ahead
+    assert session.fire(1, True, now) == shoot.NOT_SPINNING
+    session.roller(1, 0.5, now)
+    feed(session, now, roller={'command': 0.5, 'source': 'lab'})  # now it turns for the lab
+    assert session.fire(1, True, now + 0.5) == shoot.NOT_SPINNING
+    session.roller(1, 0.5, now + 0.5)
+    feed(session, now + 0.5, roller={'command': 0.5, 'source': 'lab'})
+    session.roller(1, 0.5, now + 1.0)
+    feed(session, now + 1.0, roller={'command': 0.5, 'source': 'lab'})
+    assert session.fire(1, True, now + 1.0) is None
+
+
+def test_a_roller_turning_for_the_controller_does_not_count():
+    session = ready_session()
+    now = 0.0
+    while now <= 1.5:
+        session.roller(1, 0.5, now)
+        feed(session, now, roller={'command': 1.0, 'source': 'joy'})
+        now = round(now + 0.1, 3)
+    assert session.fire(1, True, now) == shoot.NOT_SPINNING
+
+
+# --- a session the bridge ended is not restarted by commands still on their way --------------
+
+def test_the_owners_commands_after_a_session_the_bridge_ended_are_stale():
+    session = ready_session()
+    session.roller(1, 0.5, 0.0)
+    feed(session, 0.1, roller={'estop': True})  # ended by the bridge
+    feed(session, 0.15)                          # and the E-stop is released at once
+    assert session.roller(1, 0.5, 0.2) == shoot.STALE  # its heartbeat was on its way
+    assert session.tilt_to(1, 30.0, 0.2) == (shoot.STALE, None)
+    assert session.fire(1, True, 0.2) == shoot.STALE
+    assert not session.active
+    feed(session, 1.2)
+    assert session.roller(1, 0.5, 1.2) is None  # the page asks again later
+
+
+def test_the_owners_own_stop_does_not_guard_it():
+    session = ready_session()
+    session.roller(1, 0.5, 0.0)
+    session.stop(1, 0.1)
+    assert session.roller(1, 0.5, 0.2) is None

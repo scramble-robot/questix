@@ -370,9 +370,35 @@ def test_a_shot_goes_out_with_the_command(node):
     for _ in range(12):  # 1.2 s at 0.5: the spin-up is over
         node._on_shoot_request(1, ('roller', 0.5))
         node._on_motion_permission(_permission(True, True))
-        node._shoot.set_roller_status(dict(ROLLER_OK), node.clock.now)
+        node._shoot.set_roller_status(dict(ROLLER_OK, command=0.5, source='lab'), node.clock.now)
         node._shoot.set_shot_status(dict(SHOT_OK), node.clock.now)
         node._on_arbiter(_arbiter_message(mechanism='launcher'))
         node.clock.now += 0.1
     node._on_shoot_request(1, ('fire', True))
     assert node.published[-1] == ('launcher', (0.5, None, 1))
+
+
+def test_a_heartbeat_of_a_session_the_bridge_ended_is_dropped_without_an_answer(node):
+    answers = []
+    node._server = types.SimpleNamespace(publish=lambda *a: None,
+                                         publish_to=lambda *a: answers.append(a))
+    node._on_estop(_estop_message(False))
+    node._on_shoot_request(1, ('roller', 0.5))
+    node._on_estop(_estop_message(True))   # the bridge ends the session
+    node._on_estop(_estop_message(False))  # released at once
+    node.published.clear()
+    node._on_shoot_request(1, ('roller', 0.5))  # the page's heartbeat, already on its way
+    assert not node._shoot.active
+    assert node.published == [] and answers == []  # nothing moves, the page hears nothing
+
+
+def test_a_drive_heartbeat_of_a_run_the_bridge_ended_is_dropped_without_an_answer(node):
+    answers = []
+    node._server = types.SimpleNamespace(publish=lambda *a: None,
+                                         publish_to=lambda *a: answers.append(a))
+    node._on_estop(_estop_message(False))
+    assert node._drive.request(1, 0.1, 0.0, node.clock.now) is None
+    node._on_estop(_estop_message(True))
+    node._on_estop(_estop_message(False))
+    assert node._drive.request(1, 0.1, 0.0, node.clock.now) == drive.STALE
+    assert not node._drive.active

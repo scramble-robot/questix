@@ -103,6 +103,8 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
 
   command_timer_ =
       this->create_wall_timer(100ms, std::bind(&EscMotorControlComponent::command_tick, this));
+  publisher_timer_ =
+      this->create_wall_timer(500ms, std::bind(&EscMotorControlComponent::check_publishers, this));
   roller_status_timer_ = this->create_wall_timer(
       200ms, std::bind(&EscMotorControlComponent::publish_roller_status, this));
   // The gate as it starts (nothing heard yet), so the first change is logged against it.
@@ -232,9 +234,10 @@ void EscMotorControlComponent::command_callback(
   bool source_changed = false;
   {
     std::lock_guard<std::mutex> guard(lock_);
-    // While the gate is closed (no motion permission, E-stop not released) the roller stays at 0
-    // and needs a 0 command before it spins again (roller_command_logic.hpp).
-    const bool inhibited = evaluate_gate_locked() != RollerBlock::kNone;
+    // While the gate is closed (no motion permission, E-stop not released), and while two nodes
+    // publish the command, the roller stays at 0 and needs a 0 command before it spins again
+    // (roller_command_logic.hpp).
+    const bool inhibited = evaluate_gate_locked() != RollerBlock::kNone || multiple_publishers_;
     result = command_logic_.onCommand(msg->roller_power, steady_now_sec(), inhibited);
     const char* source = command_logic_.speed() > 0.0 ? rollerSourceName(msg->source) : "idle";
     source_changed = source != command_source_;
@@ -355,6 +358,41 @@ void EscMotorControlComponent::apply_gate() {
       RCLCPP_WARN(this->get_logger(), "Roller blocked: %s (was %s); roller at 0",
                   rollerBlockName(now_block), rollerBlockName(previous));
     }
+    publish_roller_status();
+  }
+}
+
+void EscMotorControlComponent::check_publishers() {
+  const auto publishers = this->get_publishers_info_by_topic(launcher_command_topic_);
+  const bool multiple = publishers.size() > 1;
+  RollerCommandLogic::Result result;
+  bool changed = false;
+  {
+    std::lock_guard<std::mutex> guard(lock_);
+    changed = multiple != multiple_publishers_;
+    multiple_publishers_ = multiple;
+    if (multiple) {
+      result = command_logic_.inhibit();
+      if (result.set) {
+        command_source_ = "idle";
+      }
+    }
+  }
+  if (changed && multiple) {
+    std::string names;
+    for (const auto& info : publishers) {
+      const std::string& ns = info.node_namespace();
+      names += (names.empty() ? "" : ", ") + (ns == "/" ? "" : ns) + "/" + info.node_name();
+    }
+    RCLCPP_ERROR(this->get_logger(),
+                 "%zu nodes publish %s (%s): the roller stays at 0 until only one is left",
+                 publishers.size(), launcher_command_topic_.c_str(), names.c_str());
+  } else if (changed) {
+    RCLCPP_INFO(this->get_logger(), "One publisher on %s again (a 0 is needed before spinning)",
+                launcher_command_topic_.c_str());
+  }
+  if (result.set) {
+    set_motor_speed(result.speed);
     publish_roller_status();
   }
 }

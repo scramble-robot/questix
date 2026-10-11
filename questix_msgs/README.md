@@ -61,6 +61,8 @@ command_arbiter の出力は自分の累計を持つので、入力が切り替�
   回さない。起動直後と非常停止・許可のあとも同じ)、shot_component(`fire_seq`・`tilt_steps`・`tilt_deg`。
   ACTIVE・許可あり・非常停止解除のときだけ動かし、それ以外で届いたものは捨てる)。どちらも `/joy` と
   教材のトピックは読まない。
+- **発行元は 1 つだけ**: 2 つ以上のノードが出している間、esc_motor_control はローラーを 0 にし
+  (1 つに戻っても 0 を受けるまで回さない)、shot_component は射撃・チルトをしない(累計が混ざるため)。
 - **誰が操作してよいか**はここでは決めない(command_arbiter と joy_launcher)。止める判断は
   `/emergency_stop` と `/motion_permission` でアクチュエータが行う。
 

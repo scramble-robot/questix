@@ -129,7 +129,9 @@ TEST_F(LauncherArbiterNode, ALabRunSpinsUpFiresAndTheControllerTakesOver) {
 
   lab_ = command(1.0f, 0, "lab");  // beyond the cap; fire_seq 0 is the baseline
   ASSERT_TRUE(spinUntil([this]() { return status_.active_source == "lab"; }, 2s));
-  ASSERT_FALSE(out_.empty());
+  // The run's first command is a 0 (the ESC needs one), then the capped power.
+  ASSERT_TRUE(spinUntil([this]() { return !out_.empty() && out_.back().roller_power > 0.0f; }, 2s));
+  EXPECT_FLOAT_EQ(out_.front().roller_power, 0.0f);
   EXPECT_FLOAT_EQ(out_.back().roller_power, 0.8f);
   EXPECT_EQ(out_.back().source, "lab");
   ASSERT_TRUE(spinUntil([this]() { return status_.spin_ready_in_sec == 0.0f; }, 2s));
