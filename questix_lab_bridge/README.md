@@ -92,8 +92,8 @@ the controller's command on to `/target_twist`, so `drive_component`'s own limit
 
 To use it:
 
-1. Start the robot as usual for practice: `ros2 launch questix_launcher questix_core.launch.xml`
-   (competition launches, `enable_autoreferee:=true`, do not start `twist_arbiter`).
+1. Start the robot for a lesson: `ros2 launch questix_launcher questix_core.launch.xml
+   robot_mode:=lesson` (only lesson launches start `twist_arbiter`).
 2. The teacher switches 教材からの走行 on in Robot Manager's 教材 tab; Robot Manager then runs the
    bridge with `allow_drive:=true`. The switch holds for that session only: it is off at every
    start of Robot Manager (and of the robot), after 配信停止, 「すべて止める」 and a switch to
@@ -259,16 +259,17 @@ bridge's own caps; the effective limits, narrowed by the nodes' status, are in
 `roller` and `shot` are the status JSON exactly as the node sent it, plus `"type"` and `"stamp"`
 (receipt time [s]):
 `{"type": "roller", "stamp": 12.3, "command": 0.5, "source": "lab", "lab_accepted": true,
-"lab_locked": false, "estop": false, "authority": true}`,
+"lab_locked": false, "estop": false, "permission": true}`,
 `{"type": "shot", "stamp": 12.3, "tilt_deg": 30.0, "shooting": false, "fired_count": 2,
-"last_fire_source": "lab", "lab_accepted": true, "estop": false, "authority": true,
+"last_fire_source": "lab", "lab_accepted": true, "estop": false, "permission": true,
 "active": true, "tilt_min_deg": 0.0, "tilt_max_deg": 120.0, "next_fire_in_sec": 0.0,
 "lab_refused": null}`
 (`lab_refused`: why shot_component refused the last lab request, e.g. `interval` or
-`authority`). `estop` is true while the node treats the E-stop as engaged (pressed, never heard
-or silent); `authority` is false while the teacher's runtime authority for the launcher
-(`/actuation_authority`, practice launches) is off, silent or unknown, a separate reason from
-the E-stop. Both are informational for the bridge: the nodes themselves refuse to move.
+`permission`). `estop` is true while the node treats the E-stop as engaged (pressed, never heard
+or silent); `permission` is false while the motion permission for the launcher
+(`/motion_permission` `launcher_allowed`: the teacher's vote in lesson mode) is off, silent or
+unknown, a separate reason from the E-stop. Both are informational for the bridge: the nodes
+themselves refuse to move.
 
 `shoot_state` (on every change and once a second; its time fields are exact when sent, count them
 down locally in between):

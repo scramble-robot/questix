@@ -124,8 +124,8 @@
     </section>
 
     <!-- The teacher's permission (actuation.py): a permission, not an E-stop. Lesson mode only:
-         the lesson launch passes require_teacher_permission:=true, so the nodes move the drive
-         and the launcher only while it is on, controller included. -->
+         it is the lesson launch's vote for /motion_permission, so the drive and the launcher move
+         only while it is on, controller included. -->
     <section class="card" id="actuation-card" aria-labelledby="actuation-heading">
       <h2 id="actuation-heading">先生の操作許可（教材モード）</h2>
       <p id="actuation-state" class="section-help" role="status">確認しています。</p>
@@ -525,7 +525,7 @@
         </div>
         <ul id="lab-drive-tech" class="lab-tech-list"></ul>
         <p class="lab-note">
-          教材用の起動（questix_core、enable_twist_arbiter:=true）では切り替えノード twist_arbiter が入り、
+          教材用の起動（questix_core、robot_mode:=lesson）では切り替えノード twist_arbiter が入り、
           コントローラーと教材の指令（/target_twist/lab）のどちらかを /target_twist に渡します。
           練習用・大会用の起動には入らないため、教材からは走らせられません。
           上限は前後 0.3 m/s・回転 1.0 rad/s（questix_lab_bridge の設定）で、教材の画面が閉じたり通信が

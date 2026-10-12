@@ -44,15 +44,6 @@ def generate_launch_description():
                     'YAML; practice launches only)'
     )
 
-    # true のとき、教員の許可（/actuation_authority）がある間だけ発射機構を動かす。
-    # 練習での opt-in で、大会起動（enable_autoreferee）では使わない。YAML には置かない。
-    require_teacher_permission_arg = DeclareLaunchArgument(
-        'require_teacher_permission',
-        default_value='false',
-        description='Move the launcher only while the teacher permission is fresh '
-                    '(practice opt-in; competition launches pass false)'
-    )
-
     # shot componentノード
     shot_component_node = Node(
         package='motor_control_app',
@@ -65,8 +56,6 @@ def generate_launch_description():
                 'joy_topic': LaunchConfiguration('joy_topic'),
                 'accept_lab_input': ParameterValue(
                     LaunchConfiguration('accept_lab_input'), value_type=bool),
-                'require_teacher_permission': ParameterValue(
-                    LaunchConfiguration('require_teacher_permission'), value_type=bool),
             },
         ],
         output='screen'
@@ -77,6 +66,5 @@ def generate_launch_description():
         config_file_arg,
         joy_topic_arg,
         accept_lab_input_arg,
-        require_teacher_permission_arg,
         shot_component_node
     ])

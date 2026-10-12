@@ -4,7 +4,7 @@
 // license that can be found in the LICENSE file or at
 // https://opensource.org/licenses/MIT.
 //
-// ShotComponent: E-stop and teacher permission, controller input, QUESTiX LAB requests and
+// ShotComponent: motion permission and E-stop, controller input, QUESTiX LAB requests and
 // the shot sequence (see shot_component.cpp for how the class is split).
 #include <algorithm>
 #include <chrono>
@@ -112,76 +112,59 @@ bool ShotComponent::estopBlocks() const {
   return estop_timed_out_ || estop_monitor_->engaged();
 }
 
-actuation_gate::Block ShotComponent::teacherPermissionBlock() const {
-  // 教員の許可だけを見る（非常停止は estopBlocks() が別の概念として扱う）。無効なら何も見ない。
-  if (!require_teacher_permission_) {
-    return actuation_gate::Block::kNone;
-  }
-  actuation_gate::TeacherPermissionInputs in;
-  in.required = true;
-  in.known = have_teacher_permission_msg_;
-  in.allowed = teacher_permission_launcher_allowed_;
-  in.age_sec = have_teacher_permission_msg_
-                   ? std::chrono::duration<double>(std::chrono::steady_clock::now() -
-                                                   last_teacher_permission_rx_)
-                         .count()
-                   : 0.0;
-  in.timeout_sec = teacher_permission_timeout_sec_;
-  return actuation_gate::evaluateTeacherPermission(in);
+actuation_gate::Block ShotComponent::permissionBlock() const {
+  // 走行許可（L2）だけを見る（非常停止は estopBlocks() が別の概念として扱う）。
+  return actuation_gate::evaluatePermission(permission_monitor_->inputs());
 }
 
-void ShotComponent::teacherPermissionCallback(
-    const questix_msgs::msg::ActuationAuthority::SharedPtr msg) {
-  if (!msg) {
-    return;
+void ShotComponent::onMotionPermission(const questix_msgs::msg::MotionPermission& msg,
+                                       const questix_safety::PermissionMonitor::Change& change) {
+  if (change.first || change.was_allowed != msg.launcher_allowed) {
+    RCLCPP_INFO(this->get_logger(), "Motion permission (%s): launcher %s", msg.mode.c_str(),
+                msg.launcher_allowed ? "allowed" : "not allowed");
   }
-  have_teacher_permission_msg_ = true;
-  teacher_permission_launcher_allowed_ = msg->launcher_allowed;
-  last_teacher_permission_rx_ = std::chrono::steady_clock::now();
-  // OFF への変化はタイマーを待たずに処理する。
-  if (!msg->launcher_allowed && teacher_permission_was_allowed_) {
-    teacherPermissionTimerCallback();
-  }
+  applyPermission();  // a change is handled at once, not at the next 100 ms check
 }
 
-void ShotComponent::teacherPermissionTimerCallback() {
+void ShotComponent::applyPermission() {
   try {
-    const auto block = teacherPermissionBlock();
+    const auto block = permissionBlock();
     const bool allowed = block == actuation_gate::Block::kNone;
-    if (allowed == teacher_permission_was_allowed_) {
+    if (allowed == permission_was_allowed_) {
       return;
     }
-    teacher_permission_was_allowed_ = allowed;
+    permission_was_allowed_ = allowed;
     if (!allowed) {
       // 以後の射撃・チルトは断る。押しっぱなしの入力は、許可が戻っても離すまで無視する。
       last_button_state_ = true;
       tilt_edges_.requireRelease();
+      // 電源は入ったままなのでサーボバスは保持する（ACTIVE のまま。非常停止とは違い teardown
+      // しない）。 射撃中ならシーケンスを止めて home
+      // に戻す。起動途中なら試行期間を終える（許可で再開）。
+      cancelShotSequence();
       endStartup();
-      const uint8_t state_id = this->get_current_state().id();
-      RCLCPP_WARN(this->get_logger(),
-                  "Launcher teacher permission lost (%s): stopping the launcher (not an emergency "
-                  "stop)",
-                  actuation_gate::blockName(block));
-      if (auto_start_timer_ && (state_id == lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE ||
-                                (state_id == lifecycle_msgs::msg::State::PRIMARY_STATE_INACTIVE &&
-                                 !auto_start_timer_->is_canceled()))) {
-        // 非常停止と同じ安全 teardown（射撃中なら home に戻してサーボ接続を解放）。
-        transitionToUnconfiguredForAutoRecovery("teacher permission off");
-      } else if (state_id == lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE) {
-        cancelShotSequence();  // 手動運用: lifecycle は操作者に任せ、動作中の射撃だけ止める
+      const auto blockers = permission_monitor_->lastBlockers();
+      std::string reasons;
+      for (const auto& reason : blockers) {
+        reasons += (reasons.empty() ? "" : ", ") + reason;
       }
+      RCLCPP_WARN(this->get_logger(),
+                  "Launcher motion permission lost (%s%s%s): fire and tilt refused, servo bus "
+                  "kept (not an emergency stop)",
+                  actuation_gate::blockName(block), reasons.empty() ? "" : ": ", reasons.c_str());
       publishShotStatus();
       return;
     }
     RCLCPP_INFO(this->get_logger(),
-                "Launcher teacher permission granted: starting up (a new press or request is "
-                "needed to move)");
+                "Launcher motion permission granted (a new press or request is needed to move)");
     publishShotStatus();
-    requestStartup();  // 待たずに戻る（接続・応答確認は試行期間の短い周期で行う）
+    if (this->get_current_state().id() != lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE) {
+      requestStartup();  // 待たずに戻る（接続・応答確認は試行期間の短い周期で行う）
+    }
   } catch (const std::exception& error) {
-    RCLCPP_ERROR(this->get_logger(), "Teacher permission check failed: %s", error.what());
+    RCLCPP_ERROR(this->get_logger(), "Motion permission check failed: %s", error.what());
   } catch (...) {
-    RCLCPP_ERROR(this->get_logger(), "Teacher permission check failed with unknown exception");
+    RCLCPP_ERROR(this->get_logger(), "Motion permission check failed with unknown exception");
   }
 }
 
@@ -203,9 +186,9 @@ void ShotComponent::joyCallback(const sensor_msgs::msg::Joy::SharedPtr msg) {
   if (!msg || msg->buttons.empty()) {
     return;
   }
-  // 非常停止（押下・途絶・未受信）または実行時許可なし: 射撃もチルトもしない。押されている
+  // 走行許可なし、または非常停止（押下・途絶・未受信）: 射撃もチルトもしない。押されている
   // 入力は、動かせるようになってから一度離すまで使わない。
-  if (estopBlocks() || teacherPermissionBlock() != actuation_gate::Block::kNone) {
+  if (permissionBlock() != actuation_gate::Block::kNone || estopBlocks()) {
     last_button_state_ = true;
     tilt_edges_.requireRelease();
     return;
@@ -269,7 +252,7 @@ shot_lab::Conditions ShotComponent::labConditions() {
   conditions.accept = accept_lab_input_;
   // The latest /emergency_stop, its silence, and (require_emergency_stop) never having heard it.
   conditions.estop = estopBlocks();
-  conditions.authority = teacherPermissionBlock() == actuation_gate::Block::kNone;
+  conditions.permission = permissionBlock() == actuation_gate::Block::kNone;
   conditions.active =
       this->get_current_state().id() == lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE &&
       servo_controller_ && servo_controller_->isConnected();
@@ -333,7 +316,7 @@ void ShotComponent::publishShotStatus() {
   status.last_fire_source = last_fire_source_;
   status.lab_accepted = accept_lab_input_;
   status.estop = estopBlocks();
-  status.authority = teacherPermissionBlock() == actuation_gate::Block::kNone;
+  status.permission = permissionBlock() == actuation_gate::Block::kNone;
   status.active =
       this->get_current_state().id() == lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE;
   status.tilt_min_deg = tilt_min_angle_;

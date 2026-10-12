@@ -1367,7 +1367,7 @@ class EvidenceStackTests(TrialFixture):
             {"drive": False, "launcher": False, "running": False, "competition": False},
         ])
         with self.wired():
-            with patch.object(recorder.actuation, "status", lambda: next(states)):
+            with patch.object(recorder.actuation, "status", lambda **_: next(states)):
                 started = recorder._start_trial({"trial_id": "e003"})
                 bag_dir = self.output_dir / started["bag_name"]
                 bag_dir.mkdir()

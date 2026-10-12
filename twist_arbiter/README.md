@@ -17,9 +17,9 @@ Status: `/twist_arbiter/status` (`std_msgs/String`, latched) holds
 `{"active": "joy"|"lab", "reason": "start"|"lab"|"controller"|"lab_idle", "lab_locked": bool}`;
 `questix_lab_bridge` reads it to end a run the controller took over.
 
-Started by practice launches only: `questix_launcher/launch/questix_core.launch.xml` passes
-`enable_twist_arbiter` to `drive_component.launch.xml` unless `enable_autoreferee` is set, so a
-competition run keeps `joy_controller` → `/target_twist` exactly as before.
+Started by lesson launches only: `questix_launcher/launch/questix_core.launch.xml` passes
+`enable_twist_arbiter` to `drive_component.launch.xml` for `robot_mode:=lesson`, so practice and
+competition runs keep `joy_controller` → `/target_twist` exactly as before.
 
 - Rules: `include/twist_arbiter/arbiter_logic.hpp` (ROS-free, `test/test_arbiter_logic.cpp`).
 - Parameters: `config/twist_arbiter.yaml` (topics, what counts as a neutral stick, timeouts).

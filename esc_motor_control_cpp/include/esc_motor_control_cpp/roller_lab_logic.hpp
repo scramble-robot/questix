@@ -28,7 +28,7 @@ namespace esc_motor_control_cpp {
 // The node owns the actual ESC output; this class only says what to do.
 class RollerLabLogic {
 public:
-  enum class Refusal { kNone, kNotAccepted, kLocked, kEmergencyStop, kController, kAuthority };
+  enum class Refusal { kNone, kNotAccepted, kLocked, kEmergencyStop, kController, kPermission };
 
   struct Config {
     bool accept{false};
@@ -55,9 +55,9 @@ public:
 
   // A lab message. joy_active: the controller's full-speed latch is on (the roller is the
   // controller's right now). estop: the E-stop is engaged (pressed, unknown or silent).
-  // authority: the teacher's runtime authority allows the launcher (true when not required).
+  // permission: the motion permission (L2) allows the launcher.
   LabDecision onLab(double value, double now_sec, bool joy_active, bool estop,
-                    bool authority = true) {
+                    bool permission = true) {
     LabDecision decision;
     const double requested = clampLab(value);
     lab_at_sec_ = now_sec;
@@ -87,12 +87,12 @@ public:
       decision.refusal = Refusal::kEmergencyStop;
       return decision;
     }
-    if (!authority) {
+    if (!permission) {
       // Same lock as the E-stop: a heartbeat that keeps coming cannot restart the roller when
-      // the authority comes back; the lab must send 0 (or go quiet) first.
+      // the permission comes back; the lab must send 0 (or go quiet) first.
       lab_locked_ = true;
       lab_active_ = false;
-      decision.refusal = Refusal::kAuthority;
+      decision.refusal = Refusal::kPermission;
       return decision;
     }
     if (joy_active || now_sec - joy_at_sec_ <= config_.joy_quiet_sec) {
@@ -129,7 +129,7 @@ public:
     return onBlocked(now_sec);
   }
 
-  // The roller may no longer spin (E-stop, or the runtime authority went away). Returns true
+  // The roller may no longer spin (E-stop, or the motion permission went away). Returns true
   // when a lab-driven roller must stop; a lab that was asking to spin is locked until it sends 0.
   bool onBlocked(double now_sec) {
     const bool stopped = lab_active_;
@@ -175,8 +175,8 @@ public:
         return "emergency_stop";
       case Refusal::kController:
         return "controller";
-      case Refusal::kAuthority:
-        return "authority";
+      case Refusal::kPermission:
+        return "permission";
       case Refusal::kNone:
       default:
         return "none";
@@ -213,8 +213,8 @@ struct RollerStatus {
   bool lab_accepted{false};
   bool lab_locked{false};
   bool estop{false};
-  // The teacher's runtime authority for the launcher (true when not required). Not an E-stop.
-  bool authority{true};
+  // The motion permission (L2) for the launcher. Not an E-stop.
+  bool permission{true};
   double lab_max_speed{0.0};
 };
 
@@ -223,11 +223,11 @@ inline std::string rollerStatusJson(const RollerStatus& status) {
   char buffer[256];
   std::snprintf(buffer, sizeof(buffer),
                 "{\"command\": %.3f, \"source\": \"%s\", \"lab_accepted\": %s, "
-                "\"lab_locked\": %s, \"estop\": %s, \"authority\": %s, "
+                "\"lab_locked\": %s, \"estop\": %s, \"permission\": %s, "
                 "\"lab_max_speed\": %.3f}",
                 finite(status.command), status.source ? status.source : "idle",
                 status.lab_accepted ? "true" : "false", status.lab_locked ? "true" : "false",
-                status.estop ? "true" : "false", status.authority ? "true" : "false",
+                status.estop ? "true" : "false", status.permission ? "true" : "false",
                 finite(status.lab_max_speed));
   return std::string(buffer);
 }

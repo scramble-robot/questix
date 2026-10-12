@@ -91,7 +91,8 @@ QUESTiX Robot Manager の全タブとダイアログは、`static/style.css` の
   （押すと通常の再起動確認のあとで再起動します）。
 - **3 つのモード** (`modes.py`; `$QUESTIX_CONFIG_DIR/mode`):
   - **教材** (`lesson`): 授業。教材（QUESTiX LAB）から走行・発射でき、コントローラーも教材も、先生が
-    「操作」タブの許可を ON にしている間だけ動きます（`require_teacher_permission:=true`）。
+    「操作」タブの許可を ON にしている間だけ動きます（先生の許可は走行許可 `/motion_permission` の票。
+    教材モードで起動したロボットが動いている間だけ ON にできます）。
   - **練習** (`practice`, 既定): コントローラーで自由に練習。教材と先生の許可は使いません
     （twist_arbiter も教材の入力も起動しません）。モードファイルが無い・読めないときもこれです。
   - **大会** (`competition`): 電源を入れると大会用の構成（GPIO5 + GPIO27、AutoReferee）で自動起動。
@@ -127,13 +128,11 @@ mode (`modes.STARTED_ON_REQUEST`) only when Robot Manager asked for it a moment 
    `boot_id=<kernel boot id>`), then runs `systemctl start|restart questix_robot`.
 2. The launcher accepts the request only for the same boot, for the mode the mode file says, and
    when it is at most 120 s old; it deletes the request in any case, then runs
-   `ros2 launch questix_launcher questix_core.launch.xml enable_autoreferee:=false
+   `ros2 launch questix_launcher questix_core.launch.xml robot_mode:=<the mode>
    enable_gpio_ref:=true controller_type:=… enable_lidar/shot/drive/rviz:=…` (the same as
-   competition except AutoReferee) plus, by mode:
-   - practice: `enable_twist_arbiter:=false enable_lab_shoot:=false
-     require_teacher_permission:=false` (the controller alone);
-   - lesson: `enable_twist_arbiter:=true enable_lab_shoot:=true require_teacher_permission:=true`
-     (QUESTiX LAB can drive and fire; everything moves only with the teacher's permission).
+   competition). questix_core wires the mode: practice is the controller alone; lesson adds
+   QUESTiX LAB's inputs and needs the teacher's vote for the motion permission (everything moves
+   only with the teacher's permission).
 3. Without a usable request (power-on, `systemctl start` by hand, a stale request) it logs why and
    exits 0, as before.
 4. Every launch writes `$QUESTIX_CONFIG_DIR/last-launch` (`mode`, `started_at`, `boot_id`);
@@ -160,8 +159,8 @@ with a fake `ros2` and `logger`.
 
 GPIO5 ROS monitoring of the physical E-stop is not an operating setting (issue #168). The
 production launcher ignores `ENABLE_GPIO_REF` in `launch.env` and always passes
-`enable_gpio_ref:=true`: with `enable_autoreferee:=false` in practice and lesson, with
-`enable_autoreferee:=true` (GPIO5 and GPIO27 AutoReferee) in competition. An existing `launch.env`
+`enable_gpio_ref:=true`, with `robot_mode:=<the mode>` (competition: GPIO5 and GPIO27 AutoReferee;
+practice and lesson: GPIO5). An existing `launch.env`
 containing `ENABLE_GPIO_REF=false` therefore disables neither.
 
 Robot Manager has no switch or item for it in the 管理設定 card (the header's 非常停止ボタン
@@ -183,10 +182,10 @@ process-local and is not persisted (not in `launch.env`, `mode`, `start-request`
 power-cycled, the next plain/manual launch defaults to GPIO monitoring enabled.
 
 `enable_gpio_ref:=false` remains a capability of `questix_core.launch.xml` for explicit manual
-diagnostic `ros2 launch` runs only (with `enable_autoreferee:=false`): operation_manager then
+diagnostic `ros2 launch` runs only (not with `robot_mode:=competition`): operation_manager then
 reads no GPIO and publishes `/emergency_stop` released (`released (no GPIO safety path)`), so a
 press of the E-stop button reaches ROS no more (RLY1 still cuts the power). The production
-launcher never uses it. `enable_autoreferee:=true` with `enable_gpio_ref:=false` is not a valid
+launcher never uses it. `robot_mode:=competition` with `enable_gpio_ref:=false` is not a valid
 configuration and `questix_core.launch.xml` refuses it.
 
 ### E-stop display (`estop_monitor.py`)

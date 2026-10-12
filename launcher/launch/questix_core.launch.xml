@@ -9,57 +9,69 @@
        $(env ENABLE_GPIO_REF ...): no environment (a sourced launch.env, an export) selects the
        no-GPIO diagnostic; only an explicit enable_gpio_ref:=false on this one launch does. -->
   <arg name="enable_gpio_ref" default="true" description="Enable GPIO safety path (gpio_reader, operation_manager, and joy gating). false: explicit manual diagnostic only, for this launch process"/>
-  <arg name="enable_autoreferee" default="false" description="Use competition GPIO profile with AutoReferee GPIO27"/>
+  <!-- The robot's mode, the one argument that says how this launch is wired
+       (scripts/robot_manager/modes.py; the robot launcher passes the saved mode):
+       lesson      教材: QUESTiX LAB shares the drive (twist_arbiter) and the launcher (the nodes'
+                   lab input); the motion permission needs the teacher's vote.
+       practice    練習: the controller alone; the motion permission needs no vote.
+       competition 大会: the AutoReferee GPIO27 profile; the motion permission needs the referee's
+                   vote. Requires the GPIO safety path.
+       The actuators are the same in every mode: they obey /emergency_stop and /motion_permission.
+       Not read from the environment. -->
+  <arg name="robot_mode" default="practice" description="lesson, practice or competition"/>
   <arg name="controller_type" default="$(env CONTROLLER_TYPE dualshock)" description="Controller type: dualshock, uart, or web (smartphone browser)"/>
-  <!-- Practice runs route the controller through twist_arbiter so QUESTiX LAB driving experiments
-       can share the drive without relaunching; the stick always takes over. Not read from the
-       environment, and never on with AutoReferee (competition): see the drive include below. -->
-  <arg name="enable_twist_arbiter" default="true" description="Share /target_twist between the controller and QUESTiX LAB (practice only; ignored with enable_autoreferee)"/>
-  <!-- Practice runs let QUESTiX LAB operate the launcher (roller, tilt, fire) through the
-       shot/ESC nodes' accept_lab_input; the controller always takes over. Not read from the
-       environment, and never on with AutoReferee (competition): see the shot include below. -->
-  <arg name="enable_lab_shoot" default="true" description="Let QUESTiX LAB operate the roller, tilt and fire (practice only; ignored with enable_autoreferee)"/>
-  <!-- The teacher's permission (/actuation_authority from Robot Manager's 操作 tab) is a
-       permission, not an emergency stop: by default it only gates QUESTiX LAB's 教材 permissions
-       in Robot Manager, and the controller drives as soon as the robot is up. true makes the
-       drive and launcher nodes also stop without a fresh permission (opt-in for practice). Not
-       read from the environment, and never on with AutoReferee (competition). -->
-  <arg name="require_teacher_permission" default="false" description="Move the drive and launcher only while the teacher's permission is fresh (practice opt-in; ignored with enable_autoreferee)"/>
   <arg name="enable_rviz" default="$(env ENABLE_RVIZ false)" description="Enable RViz visualization"/>
-  <!-- AutoReferee operation without the GPIO safety path is an invalid configuration. -->
-  <group if="$(and $(var enable_autoreferee) $(not $(var enable_gpio_ref)))">
-    <log message="ERROR: enable_autoreferee=true requires enable_gpio_ref=true"/>
+  <!-- Replaced by robot_mode. Declared only so that a launch still passing one is refused below
+       instead of silently running another mode (e.g. enable_autoreferee:=true as practice). -->
+  <arg name="enable_autoreferee" default="removed" description="Removed: use robot_mode:=competition"/>
+  <arg name="require_teacher_permission" default="removed" description="Removed: use robot_mode:=lesson"/>
+  <arg name="enable_twist_arbiter" default="removed" description="Removed: robot_mode:=lesson starts twist_arbiter"/>
+  <arg name="enable_lab_shoot" default="removed" description="Removed: robot_mode:=lesson enables QUESTiX LAB's launcher input"/>
+
+  <!-- What robot_mode decides; nothing below reads robot_mode itself. -->
+  <let name="is_competition" value="$(equals '$(var robot_mode)' 'competition')"/>
+  <let name="is_lesson" value="$(equals '$(var robot_mode)' 'lesson')"/>
+  <let name="is_known_mode" value="$(or $(var is_competition) $(or $(var is_lesson) $(equals '$(var robot_mode)' 'practice')))"/>
+  <!-- "removed" (the default) marks an argument nobody passed; launch XML cannot compare with ''. -->
+  <let name="legacy_arguments" value="$(not $(and $(equals '$(var enable_autoreferee)' 'removed') $(and $(equals '$(var require_teacher_permission)' 'removed') $(and $(equals '$(var enable_twist_arbiter)' 'removed') $(equals '$(var enable_lab_shoot)' 'removed')))))"/>
+  <let name="competition_without_gpio" value="$(and $(var is_competition) $(not $(var enable_gpio_ref)))"/>
+  <let name="invalid_configuration" value="$(or $(not $(var is_known_mode)) $(or $(var competition_without_gpio) $(var legacy_arguments)))"/>
+
+  <!-- Invalid configurations are refused before any child process starts (one place for every
+       combination: design/safety_permission_input_refactor.md, section 6.6). -->
+  <group if="$(var invalid_configuration)">
+    <group unless="$(var is_known_mode)">
+      <log message="ERROR: robot_mode must be lesson, practice or competition (got '$(var robot_mode)')"/>
+    </group>
+    <group if="$(var competition_without_gpio)">
+      <log message="ERROR: robot_mode=competition requires enable_gpio_ref=true"/>
+    </group>
+    <group if="$(var legacy_arguments)">
+      <log message="ERROR: enable_autoreferee, require_teacher_permission, enable_twist_arbiter and enable_lab_shoot were replaced by robot_mode (lesson, practice or competition)"/>
+    </group>
     <!-- Defer shutdown briefly so the operator-facing error is emitted first. -->
     <timer period="0.01">
-      <shutdown reason="Invalid configuration: enable_autoreferee=true requires enable_gpio_ref=true"/>
+      <shutdown reason="Invalid configuration: see the ERROR above (robot_mode, enable_gpio_ref)"/>
     </timer>
   </group>
   <!-- Profile YAML files are the single source of truth for GPIO pins and polarity. -->
-  <let name="gpio_reader_config_file" value="$(find-pkg-share gpio_reader)/config/gpio_reader.practice.yaml" unless="$(var enable_autoreferee)"/>
-  <let name="gpio_reader_config_file" value="$(find-pkg-share gpio_reader)/config/gpio_reader.competition.yaml" if="$(var enable_autoreferee)"/>
+  <let name="gpio_reader_config_file" value="$(find-pkg-share gpio_reader)/config/gpio_reader.practice.yaml" unless="$(var is_competition)"/>
+  <let name="gpio_reader_config_file" value="$(find-pkg-share gpio_reader)/config/gpio_reader.competition.yaml" if="$(var is_competition)"/>
   <!-- operation_manager always runs and owns /emergency_stop; without the GPIO safety path it
        reads no GPIO and reports "released (no GPIO safety path)" (an explicit manual diagnostic
        run only; questix_robot_launcher.sh always passes enable_gpio_ref:=true). -->
-  <let name="operation_manager_config_file" value="$(find-pkg-share operation_manager)/config/operation_manager.practice.yaml" unless="$(var enable_autoreferee)"/>
-  <let name="operation_manager_config_file" value="$(find-pkg-share operation_manager)/config/operation_manager.competition.yaml" if="$(var enable_autoreferee)"/>
+  <let name="operation_manager_config_file" value="$(find-pkg-share operation_manager)/config/operation_manager.practice.yaml" unless="$(var is_competition)"/>
+  <let name="operation_manager_config_file" value="$(find-pkg-share operation_manager)/config/operation_manager.competition.yaml" if="$(var is_competition)"/>
   <let name="operation_manager_config_file" value="$(find-pkg-share operation_manager)/config/operation_manager.no_gpio.yaml" unless="$(var enable_gpio_ref)"/>
-  <!-- The running mode of the motion permission (L2, /motion_permission), from the arguments that
-       describe the configuration: competition with AutoReferee, lesson with the teacher's
-       permission, practice otherwise. The last let wins. -->
-  <let name="permission_mode" value="practice"/>
-  <let name="permission_mode" value="lesson" if="$(var require_teacher_permission)"/>
-  <let name="permission_mode" value="competition" if="$(var enable_autoreferee)"/>
   <!-- All child processes stay disabled while the invalid branch reports and exits. -->
-  <group unless="$(and $(var enable_autoreferee) $(not $(var enable_gpio_ref)))">
+  <group unless="$(var invalid_configuration)">
     <include file="$(find-pkg-share questix_control_config)/launch/control_profile.launch.py" />
     <group if="$(var enable_shot)">
       <include file="$(find-pkg-share questix_launcher)/launch/shot_component.launch.xml">
         <arg name="enable_gpio_ref" value="$(var enable_gpio_ref)"/>
         <arg name="controller_type" value="$(var controller_type)"/>
-        <arg name="accept_lab_input" value="$(and $(var enable_lab_shoot) $(not $(var enable_autoreferee)))"/>
-        <!-- The teacher's permission is opt-in (see the arg above); competition keeps
-             the AutoReferee / GPIO path and never depends on the classroom heartbeat. -->
-        <arg name="require_teacher_permission" value="$(and $(var require_teacher_permission) $(not $(var enable_autoreferee)))"/>
+        <!-- QUESTiX LAB may operate the launcher in lesson mode only. -->
+        <arg name="accept_lab_input" value="$(var is_lesson)"/>
       </include>
     </group>
     <group if="$(var enable_drive)">
@@ -68,9 +80,9 @@
         <!-- questix_core owns the single integrated operation_manager process. -->
         <arg name="enable_operation_manager" value="false"/>
         <arg name="controller_type" value="$(var controller_type)"/>
-        <arg name="enable_twist_arbiter" value="$(and $(var enable_twist_arbiter) $(not $(var enable_autoreferee)))"/>
-        <!-- The teacher's permission: see the shot include. -->
-        <arg name="require_teacher_permission" value="$(and $(var require_teacher_permission) $(not $(var enable_autoreferee)))"/>
+        <!-- QUESTiX LAB shares the drive in lesson mode only; otherwise joy_controller drives
+             /target_twist directly. -->
+        <arg name="enable_twist_arbiter" value="$(var is_lesson)"/>
       </include>
     </group>
     <group if="$(var enable_lidar)">
@@ -81,17 +93,17 @@
         <arg name="config_file" value="$(var gpio_reader_config_file)"/>
       </include>
     </group>
-    <!-- The single owner of /emergency_stop, with or without the GPIO safety path: every
+    <!-- The single owner of /emergency_stop (L1), with or without the GPIO safety path: every
          actuating node and QUESTiX LAB stop while it is unheard, silent or active. -->
     <include file="$(find-pkg-share operation_manager)/launch/operation_manager.launch.xml">
       <arg name="config_file" value="$(var operation_manager_config_file)"/>
     </include>
-    <!-- The motion permission (L2): MotionPermissionManager always (practice needs no vote but
-         still publishes), RefereeMonitor (GPIO27) in competition. Not read by any actuator yet:
-         the E-stop above still includes GPIO27 in competition. -->
+    <!-- The motion permission (L2, /motion_permission): MotionPermissionManager in every mode
+         (practice needs no vote but still publishes, so every actuator keeps one rule: no
+         /motion_permission, no motion), RefereeMonitor (GPIO27) in competition. -->
     <include file="$(find-pkg-share operation_manager)/launch/motion_permission.launch.xml">
-      <arg name="robot_mode" value="$(var permission_mode)"/>
-      <arg name="enable_referee" value="$(var enable_autoreferee)"/>
+      <arg name="robot_mode" value="$(var robot_mode)"/>
+      <arg name="enable_referee" value="$(var is_competition)"/>
     </include>
     <!-- RViz Visualization -->
     <node pkg="rviz2" exec="rviz2" name="rviz2" output="screen" if="$(var enable_rviz)" args="-d $(find-pkg-share ydlidar_ros2_driver)/config/ydlidar.rviz">

@@ -8,18 +8,17 @@
 // stands in for the motor's /dev/ttyACM0 and a fake motor on its other end records every command
 // frame and answers it like a M0602C (echoing the commanded speed, fault 0). The node is loaded
 // with the integrated hardware YAML (launcher/config/drive_component.yaml) and the DualShock
-// operator profile, as questix_core does, and then given the switch questix_core passes. The test
-// plays operation_manager: /emergency_stop at 10 Hz, "released (no GPIO safety path)" for a
-// manual diagnostic run without the GPIO safety path.
+// operator profile, as questix_core does. The test plays operation_manager: /emergency_stop at
+// 10 Hz ("released (no GPIO safety path)" for a manual diagnostic run without the GPIO safety
+// path) and /motion_permission at 20 Hz (MotionPermissionManager).
 //
 // What this pins down:
-// * a practice robot without the GPIO safety path and without the teacher's permission opt-in
-//   (the default) drives on /target_twist, as 3.2.0 did; it stops when /emergency_stop goes
-//   silent (operation_manager gone) and when a pressed E-stop is received;
-// * the disabled authority is really disabled: no /actuation_authority subscription, and an
-//   "off" heartbeat changes nothing;
+// * a practice robot (released E-stop, allowed permission) drives on /target_twist; it stops when
+//   /emergency_stop goes silent (operation_manager gone) and when a pressed E-stop is received;
 // * an unheard E-stop keeps the drive stopped until a release is heard;
-// * the opted-in teacher permission gates the drive, and it is never reported as an emergency stop.
+// * the motion permission (L2) gates the drive on its own: unheard, silent or "not allowed" (the
+//   referee, the teacher) stops it, it is never reported as an emergency stop, and it coming back
+//   does not restart the drive by itself.
 #include <fcntl.h>
 #include <gtest/gtest.h>
 #include <pty.h>
@@ -36,9 +35,9 @@
 #include <lifecycle_msgs/msg/state.hpp>
 #include <memory>
 #include <mutex>
-#include <questix_msgs/msg/actuation_authority.hpp>
 #include <questix_msgs/msg/drive_status.hpp>
 #include <questix_msgs/msg/emergency_stop.hpp>
+#include <questix_msgs/msg/motion_permission.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <string>
 #include <thread>
@@ -209,10 +208,10 @@ protected:
     std::remove(overrides_path_.c_str());
   }
 
-  // Starts the node as questix_core would (hardware YAML, operator profile, launch switch), on
-  // this test's own topics and the fake motor's serial line. The E-stop requirement comes from
+  // Starts the node as questix_core would (hardware YAML, operator profile), on this test's own
+  // topics and the fake motor's serial line. The E-stop and permission requirements come from
   // the integrated YAML (never overridden here).
-  void start(bool require_teacher_permission) {
+  void start() {
     ASSERT_FALSE(motor_.path().empty()) << "openpty failed";
     static int counter = 0;
     prefix_ = "/drive_node_test_" + std::to_string(getpid()) + "_" + std::to_string(counter++);
@@ -226,9 +225,7 @@ protected:
           << "    odom_topic: \"" << prefix_ << "/odom\"\n"
           << "    typed_status_topic: \"" << prefix_ << "/drive_status\"\n"
           << "    emergency_stop_topic: \"" << prefix_ << "/emergency_stop\"\n"
-          << "    teacher_permission_topic: \"" << prefix_ << "/actuation_authority\"\n"
-          << "    require_teacher_permission: " << (require_teacher_permission ? "true" : "false")
-          << "\n";
+          << "    motion_permission_topic: \"" << prefix_ << "/motion_permission\"\n";
     }
     rclcpp::NodeOptions options;
     // Later files win: hardware YAML, operator profile, then this test's overrides.
@@ -241,8 +238,8 @@ protected:
     twist_pub_ = helper_->create_publisher<geometry_msgs::msg::Twist>(prefix_ + "/target_twist", 1);
     estop_pub_ = helper_->create_publisher<questix_msgs::msg::EmergencyStop>(
         prefix_ + "/emergency_stop", rclcpp::QoS(1).reliable().transient_local());
-    teacher_permission_pub_ = helper_->create_publisher<questix_msgs::msg::ActuationAuthority>(
-        prefix_ + "/actuation_authority", rclcpp::QoS(1).reliable().durability_volatile());
+    permission_pub_ = helper_->create_publisher<questix_msgs::msg::MotionPermission>(
+        prefix_ + "/motion_permission", rclcpp::QoS(1).reliable().durability_volatile());
     status_sub_ = helper_->create_subscription<questix_msgs::msg::DriveStatus>(
         prefix_ + "/drive_status", 10, [this](questix_msgs::msg::DriveStatus::SharedPtr msg) {
           last_status_ = *msg;
@@ -265,7 +262,7 @@ protected:
     auto next_input = std::chrono::steady_clock::now();
     while (std::chrono::steady_clock::now() < deadline) {
       if (std::chrono::steady_clock::now() >= next_input) {
-        next_input += 50ms;  // a controller at 20 Hz, a heartbeat at 20 Hz
+        next_input += 50ms;  // a controller at 20 Hz, /motion_permission at 20 Hz
         // operation_manager evaluates every 100 ms and publishes each time.
         if (send_estop_ && (++estop_tick_ % 2 == 0)) {
           publishEstop(estop_active_,
@@ -276,12 +273,16 @@ protected:
           twist.linear.x = 0.5;
           twist_pub_->publish(twist);
         }
-        if (send_teacher_permission_) {
-          questix_msgs::msg::ActuationAuthority authority;
-          authority.drive_allowed = teacher_permission_allowed_;
-          authority.launcher_allowed = false;
-          authority.source = "test";
-          teacher_permission_pub_->publish(authority);
+        if (send_permission_) {
+          questix_msgs::msg::MotionPermission permission;
+          permission.drive_allowed = permission_allowed_;
+          permission.launcher_allowed = false;
+          permission.mode = "competition";
+          if (!permission_allowed_) {
+            permission.drive_blockers.push_back("referee:off");
+          }
+          permission.launcher_blockers.push_back("referee:off");
+          permission_pub_->publish(permission);
         }
       }
       executor_->spin_some(10ms);
@@ -307,10 +308,13 @@ protected:
     estop_pub_->publish(msg);
   }
 
-  // Plays operation_manager without the GPIO safety path: "released" at 10 Hz.
+  // Plays operation_manager without the GPIO safety path: "released" at 10 Hz, and
+  // MotionPermissionManager of a practice run: allowed at 20 Hz.
   void operationManagerWithoutGpio() {
     send_estop_ = true;
     estop_active_ = false;
+    send_permission_ = true;
+    permission_allowed_ = true;
   }
 
   bool lastCommandsAreZero() const {
@@ -325,7 +329,7 @@ protected:
   std::unique_ptr<rclcpp::executors::SingleThreadedExecutor> executor_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr twist_pub_;
   rclcpp::Publisher<questix_msgs::msg::EmergencyStop>::SharedPtr estop_pub_;
-  rclcpp::Publisher<questix_msgs::msg::ActuationAuthority>::SharedPtr teacher_permission_pub_;
+  rclcpp::Publisher<questix_msgs::msg::MotionPermission>::SharedPtr permission_pub_;
   rclcpp::Subscription<questix_msgs::msg::DriveStatus>::SharedPtr status_sub_;
   questix_msgs::msg::DriveStatus last_status_;
   bool have_status_{false};
@@ -333,26 +337,30 @@ protected:
   bool send_estop_{false};
   bool estop_active_{false};
   int estop_tick_{0};
-  bool send_teacher_permission_{false};
-  bool teacher_permission_allowed_{false};
+  bool send_permission_{false};
+  bool permission_allowed_{false};
 };
 
-// The node's own defaults: the E-stop is fail-closed, the teacher's permission is an opt-in.
-TEST_F(DriveComponentNode, NodeDefaultsRequireTheEstopButNotTheAuthority) {
+// The node's own defaults: the E-stop and the motion permission are both fail-closed.
+TEST_F(DriveComponentNode, NodeDefaultsRequireTheEstopAndThePermission) {
   rclcpp::NodeOptions options;
   options.parameter_overrides({{"auto_start", false}});
   auto node = std::make_shared<motor_control_app::DriveComponent>(options);
   EXPECT_TRUE(node->get_parameter("require_emergency_stop").as_bool());
-  EXPECT_FALSE(node->get_parameter("require_teacher_permission").as_bool());
+  EXPECT_TRUE(node->get_parameter("require_motion_permission").as_bool());
+  EXPECT_EQ(node->get_parameter("motion_permission_topic").as_string(), "/motion_permission");
+  EXPECT_DOUBLE_EQ(node->get_parameter("motion_permission_timeout_sec").as_double(), 0.5);
+  EXPECT_FALSE(node->has_parameter("require_teacher_permission"));
 }
 
 // A manual diagnostic run without the GPIO safety path (enable_gpio_ref:=false; production launches
-// always read GPIO5) and without the teacher permission opt-in: with operation_manager's
-// "released (no GPIO safety path)" /target_twist drives both
-// wheels, as in 3.2.0; when that /emergency_stop goes silent the drive stops.
+// always read GPIO5), in practice: with operation_manager's "released (no GPIO safety path)" and an
+// allowed /motion_permission, /target_twist drives both wheels; when that /emergency_stop goes
+// silent the drive stops.
 TEST_F(DriveComponentNode, PracticeWithoutGpioDrivesOnTargetTwist) {
-  start(false);
-  EXPECT_TRUE(drive_->get_parameter("require_emergency_stop").as_bool());  // integrated YAML
+  start();
+  EXPECT_TRUE(drive_->get_parameter("require_emergency_stop").as_bool());     // integrated YAML
+  EXPECT_TRUE(drive_->get_parameter("require_motion_permission").as_bool());  // integrated YAML
   operationManagerWithoutGpio();
   send_twist_ = true;
   EXPECT_TRUE(spinUntil([this]() { return droveBothWheels(); }, 3s))
@@ -368,27 +376,35 @@ TEST_F(DriveComponentNode, PracticeWithoutGpioDrivesOnTargetTwist) {
   EXPECT_FALSE(motor_.drove(kRightId));
 }
 
-// Disabled means disabled: no /actuation_authority subscription at all, and a heartbeat saying
-// "drive off" changes nothing.
-TEST_F(DriveComponentNode, DisabledAuthorityIsNotSubscribedAndChangesNothing) {
-  start(false);
+// The motion permission is a lease: MotionPermissionManager going silent stops the drive (not an
+// emergency stop), and its return does not restart it until the controller sends again.
+TEST_F(DriveComponentNode, SilentPermissionStopsTheDriveButIsNotAnEstop) {
+  start();
   operationManagerWithoutGpio();
-  spinFor(300ms);  // discovery
-  EXPECT_EQ(teacher_permission_pub_->get_subscription_count(), 0u);
-  send_teacher_permission_ = true;
-  teacher_permission_allowed_ = false;
+  send_twist_ = true;
+  ASSERT_TRUE(spinUntil([this]() { return droveBothWheels(); }, 3s));
+
+  send_permission_ = false;  // silent for longer than 0.5 s
+  ASSERT_TRUE(spinUntil([this]() { return lastCommandsAreZero(); }, 2s));
+  motor_.clear();
+  spinFor(500ms);  // twists keep coming
+  EXPECT_FALSE(motor_.drove(kLeftId));
+  have_status_ = false;
+  ASSERT_TRUE(spinUntil([this]() { return have_status_; }, 2s));
+  EXPECT_FALSE(last_status_.emergency_stop);
+
+  send_twist_ = false;
+  send_permission_ = true;  // back, but nothing new commanded
+  spinFor(500ms);
+  EXPECT_FALSE(motor_.drove(kLeftId));
   send_twist_ = true;
   EXPECT_TRUE(spinUntil([this]() { return droveBothWheels(); }, 3s));
-  motor_.clear();
-  spinFor(1500ms);  // longer than the 1.0 s lease: still nothing to expire
-  EXPECT_TRUE(droveBothWheels());
-  EXPECT_FALSE(motor_.lastCommandIsZero(kLeftId));
 }
 
 // A received pressed E-stop stops the drive, twists are ignored while it is pressed, and after
 // the release a new twist drives again.
 TEST_F(DriveComponentNode, PressedEstopStopsAndReleaseDrivesAgain) {
-  start(false);
+  start();
   operationManagerWithoutGpio();
   send_twist_ = true;
   ASSERT_TRUE(spinUntil([this]() { return droveBothWheels(); }, 3s));
@@ -408,7 +424,9 @@ TEST_F(DriveComponentNode, PressedEstopStopsAndReleaseDrivesAgain) {
 // An unheard E-stop (operation_manager not up yet) counts as pressed: no twist moves the drive
 // until a release has been heard.
 TEST_F(DriveComponentNode, UnheardEstopKeepsTheDriveStopped) {
-  start(false);
+  start();
+  send_permission_ = true;
+  permission_allowed_ = true;
   send_twist_ = true;
   spinFor(1000ms);
   EXPECT_FALSE(motor_.drove(kLeftId));
@@ -420,23 +438,23 @@ TEST_F(DriveComponentNode, UnheardEstopKeepsTheDriveStopped) {
   EXPECT_TRUE(spinUntil([this]() { return droveBothWheels(); }, 3s));
 }
 
-// The opted-in teacher permission gates the drive on its own, and is never an emergency stop.
-TEST_F(DriveComponentNode, OptedInAuthorityGatesTheDriveButIsNotAnEstop) {
-  start(true);
-  operationManagerWithoutGpio();
-  spinFor(300ms);  // discovery
-  EXPECT_EQ(teacher_permission_pub_->get_subscription_count(), 1u);
+// The motion permission gates the drive on its own (the referee says "not allowed"), and it is
+// never an emergency stop. Unheard counts as not allowed.
+TEST_F(DriveComponentNode, PermissionGatesTheDriveButIsNotAnEstop) {
+  start();
+  send_estop_ = true;  // released E-stop, no /motion_permission yet
+  estop_active_ = false;
   send_twist_ = true;
   spinFor(800ms);
   EXPECT_FALSE(motor_.drove(kLeftId));
   ASSERT_TRUE(spinUntil([this]() { return have_status_; }, 2s));
   EXPECT_FALSE(last_status_.emergency_stop);  // refused by the permission, not by an E-stop
 
-  send_teacher_permission_ = true;
-  teacher_permission_allowed_ = true;
+  send_permission_ = true;
+  permission_allowed_ = true;
   ASSERT_TRUE(spinUntil([this]() { return droveBothWheels(); }, 3s));
 
-  teacher_permission_allowed_ = false;
+  permission_allowed_ = false;  // defeated
   ASSERT_TRUE(spinUntil([this]() { return lastCommandsAreZero(); }, 2s));
   motor_.clear();
   spinFor(500ms);

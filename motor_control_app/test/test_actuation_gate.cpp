@@ -19,45 +19,45 @@ namespace {
 // Everything required, fresh and allowed: the gate is open.
 gate::Inputs open() {
   gate::Inputs in;
-  in.teacher_permission.required =
-      true;  // the opt-in, so the teacher permission rules are exercised
+  in.permission.known = true;
+  in.permission.allowed = true;
+  in.permission.age_sec = 0.1;
   in.estop.known = true;
   in.estop.active = false;
   in.estop.age_sec = 0.1;
-  in.teacher_permission.known = true;
-  in.teacher_permission.allowed = true;
-  in.teacher_permission.age_sec = 0.1;
   return in;
 }
 
 }  // namespace
 
-TEST(ActuationGate, OpenOnlyWithAFreshReleaseAndTheTeachersPermission) {
+TEST(ActuationGate, OpenOnlyWithAFreshPermissionAndAFreshRelease) {
   EXPECT_EQ(gate::evaluate(open()), Block::kNone);
 }
 
-// The defaults: the E-stop is required (fail-closed), the teacher's permission is not (opt-in).
-TEST(ActuationGate, DefaultsRequireTheEstopButNotTheTeacherPermission) {
+// The defaults: both the motion permission and the E-stop are required (fail-closed).
+TEST(ActuationGate, DefaultsRequireThePermissionAndTheEstop) {
   gate::Inputs in;
+  EXPECT_TRUE(in.permission.required);
   EXPECT_TRUE(in.estop.required);
-  EXPECT_FALSE(in.teacher_permission.required);
+  EXPECT_DOUBLE_EQ(in.permission.timeout_sec, 0.5);
   EXPECT_EQ(gate::evaluate(in), Block::kEstopUnknown);
   in.estop.known = true;
   in.estop.active = false;
-  EXPECT_EQ(gate::evaluate(in), Block::kNone);  // no heartbeat needed
+  EXPECT_EQ(gate::evaluate(in), Block::kPermissionUnknown);  // no /motion_permission yet
 }
 
-// A1 / A11: at boot nothing has been heard: closed, E-stop first.
-TEST(ActuationGate, BootWithNothingHeardIsClosed) {
-  gate::Inputs in;  // nothing known, both required
-  in.teacher_permission.required = true;
+// At boot nothing has been heard: closed, and the E-stop (the last gate) is the reason.
+TEST(ActuationGate, BootWithNothingHeardIsClosedEstopReported) {
+  gate::Inputs in;
+  EXPECT_EQ(gate::evaluate(in), Block::kEstopUnknown);
+  in.permission.known = true;
+  in.permission.allowed = true;
   EXPECT_EQ(gate::evaluate(in), Block::kEstopUnknown);
   in.estop.known = true;
   in.estop.active = false;
-  EXPECT_EQ(gate::evaluate(in), Block::kTeacherPermissionUnknown);
+  EXPECT_EQ(gate::evaluate(in), Block::kNone);
 }
 
-// A2: a pressed E-stop closes the gate.
 TEST(ActuationGate, PressedEstopCloses) {
   auto in = open();
   in.estop.active = true;
@@ -86,12 +86,12 @@ TEST(ActuationGate, DiagnosticOptOutStillStopsOnAPressedEstop) {
   EXPECT_EQ(gate::evaluate(in), Block::kEstopActive);
 }
 
-// The diagnostic opt-out without the teacher permission opt-in: nothing has to be heard first and a
-// silent /emergency_stop is not a stop, but a received pressed one still is.
-TEST(ActuationGate, DiagnosticOptOutWithoutTeacherPermissionMovesWithNothingHeard) {
+// A full diagnostic opt-out (neither required): nothing has to be heard first and silence is not a
+// stop, but a received pressed E-stop and an unconfirmed stop still are.
+TEST(ActuationGate, DiagnosticOptOutOfBothMovesWithNothingHeard) {
   gate::Inputs in;  // nothing heard
   in.estop.required = false;
-  in.teacher_permission.required = false;
+  in.permission.required = false;
   EXPECT_EQ(gate::evaluate(in), Block::kNone);
   in.estop.known = true;
   in.estop.active = false;
@@ -104,81 +104,79 @@ TEST(ActuationGate, DiagnosticOptOutWithoutTeacherPermissionMovesWithNothingHear
   EXPECT_EQ(gate::evaluate(in), Block::kStopFault);
 }
 
-// The teacher's permission is not an emergency stop: with the E-stop path off (no publisher) an
-// opted-in teacher permission still decides on its own, and its reasons never read as E-stop
-// reasons.
-TEST(ActuationGate, TeacherPermissionIsIndependentOfTheEstop) {
-  gate::Inputs in;  // nothing heard
-  in.estop.required = false;
-  in.teacher_permission.required = true;
-  EXPECT_EQ(gate::evaluate(in), Block::kTeacherPermissionUnknown);
-  EXPECT_FALSE(gate::isEstopBlock(gate::evaluate(in)));
-  in.teacher_permission.known = true;
-  in.teacher_permission.allowed = true;
-  in.teacher_permission.age_sec = 0.1;
-  EXPECT_EQ(gate::evaluate(in), Block::kNone);
-  in.teacher_permission.allowed = false;
-  EXPECT_EQ(gate::evaluate(in), Block::kTeacherPermissionOff);
-  EXPECT_FALSE(gate::isEstopBlock(gate::evaluate(in)));
-}
-
-// A11 / A12: the teacher's permission is a lease.
-TEST(ActuationGate, TeacherPermissionOffOrSilentCloses) {
+// The motion permission is not an emergency stop: its reasons never read as E-stop reasons.
+TEST(ActuationGate, PermissionReasonsAreNotEstopReasons) {
   auto in = open();
-  in.teacher_permission.allowed = false;
-  EXPECT_EQ(gate::evaluate(in), Block::kTeacherPermissionOff);
-  in = open();
-  in.teacher_permission.age_sec = 1.5;
-  EXPECT_EQ(gate::evaluate(in), Block::kTeacherPermissionStale);
-  // Even an invalid timeout cannot make the lease endless.
-  in.teacher_permission.timeout_sec = 0.0;
-  EXPECT_EQ(gate::evaluate(in), Block::kTeacherPermissionStale);
-  in.teacher_permission.timeout_sec = std::numeric_limits<double>::infinity();
-  EXPECT_EQ(gate::evaluate(in), Block::kTeacherPermissionStale);
+  in.permission.allowed = false;  // the referee or the teacher says no
+  EXPECT_EQ(gate::evaluate(in), Block::kPermissionOff);
+  EXPECT_TRUE(gate::isPermissionBlock(gate::evaluate(in)));
+  EXPECT_FALSE(gate::isEstopBlock(gate::evaluate(in)));
 }
 
-// A18: competition launches do not require the classroom heartbeat.
-TEST(ActuationGate, CompetitionDoesNotNeedTheClassroomHeartbeat) {
-  gate::Inputs in = open();
-  in.teacher_permission.required = false;
-  in.teacher_permission.known = false;
+// The permission is a lease: silence closes it, even with an invalid timeout.
+TEST(ActuationGate, PermissionOffOrSilentCloses) {
+  auto in = open();
+  in.permission.age_sec = 0.6;
+  EXPECT_EQ(gate::evaluate(in), Block::kPermissionStale);
+  in.permission.timeout_sec = 0.0;
+  EXPECT_EQ(gate::evaluate(in), Block::kPermissionStale);
+  in.permission.timeout_sec = std::numeric_limits<double>::infinity();
+  EXPECT_EQ(gate::evaluate(in), Block::kPermissionStale);
+  in.permission.timeout_sec = 1.0;
   EXPECT_EQ(gate::evaluate(in), Block::kNone);
-  in.estop.active = true;  // but the E-stop still applies
-  EXPECT_EQ(gate::evaluate(in), Block::kEstopActive);
 }
 
-// A14: an unconfirmed stop keeps the gate closed whatever else says.
+// The order of the gates: L2 (permission), then L1 (E-stop). Moving needs both; when both are
+// closed the E-stop, the last gate before the motors, is the reason.
+TEST(ActuationGate, TheEstopWinsWhenBothAreClosed) {
+  auto in = open();
+  in.permission.allowed = false;
+  in.estop.active = true;
+  EXPECT_EQ(gate::evaluate(in), Block::kEstopActive);
+  in.estop.active = false;
+  EXPECT_EQ(gate::evaluate(in), Block::kPermissionOff);
+  in.permission.allowed = true;
+  EXPECT_EQ(gate::evaluate(in), Block::kNone);
+}
+
+// An unconfirmed stop keeps the gate closed whatever else says.
 TEST(ActuationGate, StopFaultOverridesEverything) {
   auto in = open();
   in.stop_fault = true;
   EXPECT_EQ(gate::evaluate(in), Block::kStopFault);
+  in.estop.active = true;
+  EXPECT_EQ(gate::evaluate(in), Block::kStopFault);
 }
 
-TEST(ActuationGate, EstopReasonsAreNotTeacherPermissionReasons) {
+TEST(ActuationGate, BlockNames) {
   EXPECT_TRUE(gate::isEstopBlock(Block::kEstopUnknown));
   EXPECT_TRUE(gate::isEstopBlock(Block::kEstopStale));
-  EXPECT_FALSE(gate::isEstopBlock(Block::kTeacherPermissionOff));
-  EXPECT_FALSE(gate::isEstopBlock(Block::kTeacherPermissionStale));
-  EXPECT_STREQ(gate::blockName(Block::kTeacherPermissionStale), "teacher_permission_stale");
+  EXPECT_FALSE(gate::isEstopBlock(Block::kPermissionOff));
+  EXPECT_FALSE(gate::isEstopBlock(Block::kPermissionStale));
+  EXPECT_FALSE(gate::isPermissionBlock(Block::kEstopActive));
+  EXPECT_STREQ(gate::blockName(Block::kPermissionUnknown), "permission_unknown");
+  EXPECT_STREQ(gate::blockName(Block::kPermissionStale), "permission_stale");
+  EXPECT_STREQ(gate::blockName(Block::kPermissionOff), "permission_off");
+  EXPECT_STREQ(gate::blockName(Block::kEstopActive), "estop_active");
 }
 
-// A2 / A9 / A12: closing stops at once and disarms; A3 / A10 / A13: reopening never re-arms.
+// Closing stops at once and disarms; reopening never re-arms.
 TEST(ActuationGate, ClosingStopsOnceAndReopeningDoesNotRestart) {
   EXPECT_EQ(gate::decideGateAction(Block::kNone, Block::kEstopActive, true),
             GateAction::kSafetyStop);
-  EXPECT_EQ(gate::decideGateAction(Block::kNone, Block::kTeacherPermissionOff, false),
+  EXPECT_EQ(gate::decideGateAction(Block::kNone, Block::kPermissionOff, false),
             GateAction::kSafetyStop);  // the edge always sends a stop
   // Still closed, nothing armed: no stop spam (the idle path keeps only a zero alive).
   EXPECT_EQ(gate::decideGateAction(Block::kEstopActive, Block::kEstopActive, false),
             GateAction::kNone);
   // Still closed but something armed (a command raced the edge): stop again.
-  EXPECT_EQ(gate::decideGateAction(Block::kEstopActive, Block::kTeacherPermissionOff, true),
+  EXPECT_EQ(gate::decideGateAction(Block::kEstopActive, Block::kPermissionOff, true),
             GateAction::kSafetyStop);
   // Reopened: nothing to do; arming needs a fresh /target_twist.
-  EXPECT_EQ(gate::decideGateAction(Block::kEstopActive, Block::kNone, false), GateAction::kNone);
+  EXPECT_EQ(gate::decideGateAction(Block::kPermissionOff, Block::kNone, false), GateAction::kNone);
 }
 
-// A15: an unconfirmed stop is retried at a bounded rate.
+// An unconfirmed stop is retried at a bounded rate.
 TEST(ActuationGate, StopRetryIsBounded) {
   EXPECT_FALSE(gate::shouldRetryStop(false, 10.0, 0.5));
   EXPECT_FALSE(gate::shouldRetryStop(true, 0.2, 0.5));
@@ -187,9 +185,9 @@ TEST(ActuationGate, StopRetryIsBounded) {
   EXPECT_FALSE(gate::shouldRetryStop(true, std::numeric_limits<double>::quiet_NaN(), 0.5));
 }
 
-// The two concepts are judged by separate functions: the E-stop never looks at the teacher
-// permission and the teacher permission never looks at the E-stop.
-TEST(ActuationGate, EstopAndTeacherPermissionAreEvaluatedSeparately) {
+// The two concepts are judged by separate functions: the E-stop never looks at the permission
+// and the permission never looks at the E-stop.
+TEST(ActuationGate, EstopAndPermissionAreEvaluatedSeparately) {
   gate::EstopInputs estop;
   estop.known = true;
   estop.active = false;
@@ -197,41 +195,14 @@ TEST(ActuationGate, EstopAndTeacherPermissionAreEvaluatedSeparately) {
   estop.active = true;
   EXPECT_EQ(gate::evaluateEstop(estop), Block::kEstopActive);
 
-  gate::TeacherPermissionInputs teacher_permission;
-  teacher_permission.required = true;
-  EXPECT_EQ(gate::evaluateTeacherPermission(teacher_permission), Block::kTeacherPermissionUnknown);
-  teacher_permission.known = true;
-  teacher_permission.allowed = true;
-  EXPECT_EQ(gate::evaluateTeacherPermission(teacher_permission), Block::kNone);
-
-  // Combined: the E-stop reason wins, and a teacher permission reason is never an E-stop reason.
-  gate::Inputs in;
-  in.estop = estop;
-  in.teacher_permission = teacher_permission;
-  EXPECT_EQ(gate::evaluate(in), Block::kEstopActive);
-  in.estop.active = false;
-  in.teacher_permission.allowed = false;
-  EXPECT_EQ(gate::evaluate(in), Block::kTeacherPermissionOff);
-  EXPECT_TRUE(gate::isTeacherPermissionBlock(gate::evaluate(in)));
-  EXPECT_FALSE(gate::isEstopBlock(gate::evaluate(in)));
-}
-
-// Disabled means disabled: a teacher permission that is not required allows whatever its other
-// fields say (never heard, said off, silent for ages, invalid lease).
-TEST(ActuationGate, DisabledTeacherPermissionIsNeverLookedAt) {
-  gate::TeacherPermissionInputs teacher_permission;
-  teacher_permission.required = false;
-  for (const bool known : {false, true}) {
-    for (const bool allowed : {false, true}) {
-      for (const double age : {0.0, 5.0, std::numeric_limits<double>::quiet_NaN()}) {
-        teacher_permission.known = known;
-        teacher_permission.allowed = allowed;
-        teacher_permission.age_sec = age;
-        teacher_permission.timeout_sec = 0.0;
-        EXPECT_EQ(gate::evaluateTeacherPermission(teacher_permission), Block::kNone);
-      }
-    }
-  }
+  gate::PermissionInputs permission;
+  EXPECT_EQ(gate::evaluatePermission(permission), Block::kPermissionUnknown);
+  permission.known = true;
+  permission.allowed = true;
+  EXPECT_EQ(gate::evaluatePermission(permission), Block::kNone);
+  permission.required = false;
+  permission.allowed = false;
+  EXPECT_EQ(gate::evaluatePermission(permission), Block::kNone);  // disabled: not looked at
 }
 
 // An E-stop that is not required (diagnostic opt-out) only stops on a received pressed state:
@@ -250,16 +221,21 @@ TEST(ActuationGate, NotRequiredEstopOnlyStopsWhenPressed) {
   EXPECT_EQ(gate::evaluateEstop(estop), Block::kEstopActive);
 }
 
-// Practice without the GPIO safety path: operation_manager still publishes /emergency_stop as
-// released, so the required E-stop is known and released and the drive may move; when that
-// publisher goes silent the drive stops like with the GPIO path.
-TEST(ActuationGate, PracticeWithoutGpioMovesOnOperationManagersRelease) {
-  gate::Inputs in;  // the integrated defaults: E-stop required, teacher permission not
-  EXPECT_EQ(gate::evaluate(in), Block::kEstopUnknown);  // operation_manager not heard yet
+// Practice: operation_manager publishes /emergency_stop (released, also without the GPIO safety
+// path) and MotionPermissionManager publishes an allowed /motion_permission (no vote needed), so
+// the drive may move; when either publisher goes silent the drive stops.
+TEST(ActuationGate, PracticeMovesOnTheTwoPublishersAndStopsWhenEitherDies) {
+  gate::Inputs in;  // the integrated defaults
   in.estop.known = true;
   in.estop.active = false;  // "released (no GPIO safety path)"
   in.estop.age_sec = 0.1;
+  in.permission.known = true;
+  in.permission.allowed = true;  // practice: always allowed
+  in.permission.age_sec = 0.05;
   EXPECT_EQ(gate::evaluate(in), Block::kNone);
+  in.permission.age_sec = 0.8;  // MotionPermissionManager died
+  EXPECT_EQ(gate::evaluate(in), Block::kPermissionStale);
+  in.permission.age_sec = 0.05;
   in.estop.age_sec = 1.5;  // operation_manager died
   EXPECT_EQ(gate::evaluate(in), Block::kEstopStale);
 }

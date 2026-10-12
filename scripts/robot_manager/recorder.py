@@ -792,7 +792,7 @@ def _authority_snapshot() -> dict:
     known even when nothing is published on the authority topic.
     """
     try:
-        state = actuation.status()
+        state = actuation.status(with_running_mode=False)
     except Exception as exc:  # noqa: BLE001 - evidence must never fail a start or stop
         return {"available": False, "error": str(exc)}
     return {

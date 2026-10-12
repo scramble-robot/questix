@@ -105,8 +105,9 @@ as its own process; `launch/motion_permission.launch.xml`, started by `questix_c
   a required vote without a topic), `lease_sec`. A new condition is a vote node plus one line
   in that YAML. Rule: `questix_safety/motion_permission_rule.hpp`.
 
-While the actuators do not read `/motion_permission` yet, the E-stop above still includes GPIO27
-in competition (`config/operation_manager.competition.yaml`). Contract: `questix_msgs/README.md`.
+drive_component, shot_component and esc_motor_control obey `/motion_permission`. The E-stop above
+still includes GPIO27 in competition (`config/operation_manager.competition.yaml`) until it is
+taken out of the E-stop (a defeat is not a safety function). Contract: `questix_msgs/README.md`.
 
 Build:
 - colcon build --packages-select operation_manager

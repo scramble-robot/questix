@@ -1,6 +1,6 @@
 # Chooses which velocity command reaches drive_component (/target_twist): the controller's or a
-# QUESTiX LAB driving experiment's. Started by practice launches only (questix_core.launch.xml,
-# enable_twist_arbiter); competition launches keep joy_controller -> /target_twist direct.
+# QUESTiX LAB driving experiment's. Started by lesson launches only (questix_core.launch.xml,
+# robot_mode:=lesson); practice and competition keep joy_controller -> /target_twist direct.
 # Rules: include/twist_arbiter/arbiter_logic.hpp.
 twist_arbiter:
   ros__parameters:

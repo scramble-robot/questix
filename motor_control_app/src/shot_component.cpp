@@ -7,7 +7,7 @@
 // ShotComponent: construction (parameters, topics, timers).
 // Split into several files so the build compiles them in parallel:
 // shot_component_lifecycle.cpp (auto start, recovery and lifecycle transitions) and
-// shot_component_control.cpp (E-stop / teacher permission, controller, QUESTiX LAB and
+// shot_component_control.cpp (motion permission / E-stop, controller, QUESTiX LAB and
 // shot sequence).
 #include "motor_control_app/shot_component.hpp"
 
@@ -96,11 +96,11 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
   this->declare_parameter("emergency_stop_timeout_sec", 1.0);
   // 未受信の /emergency_stop を非常停止として扱う（false は単体診断の明示 opt-out のみ）
   this->declare_parameter("require_emergency_stop", true);
-  // 教員の許可（questix_msgs/ActuationAuthority の launcher_allowed）。非常停止とは別の
-  // 概念で、練習での opt-in（既定 false）。大会起動（enable_autoreferee）では常に false。
-  this->declare_parameter("require_teacher_permission", false);
-  this->declare_parameter("teacher_permission_topic", "/actuation_authority");
-  this->declare_parameter("teacher_permission_timeout_sec", 1.0);
+  // 走行許可（L2、questix_msgs/MotionPermission の launcher_allowed）。非常停止とは別の概念で、
+  // 未受信・途絶・false は射撃・チルト・自動起動をしない。false は単体診断の明示 opt-out だけ。
+  this->declare_parameter("motion_permission_topic", "/motion_permission");
+  this->declare_parameter("require_motion_permission", true);
+  this->declare_parameter("motion_permission_timeout_sec", 0.5);
   // QUESTiX LAB launcher input（練習用起動のみ true。条件は shot_lab_logic.hpp）
   this->declare_parameter("accept_lab_input", false);
   this->declare_parameter("lab_joy_quiet_sec", 1.0);
@@ -182,10 +182,13 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
              const questix_safety::EmergencyStopMonitor::Change& change) {
         onEmergencyStop(msg, change);
       });
-  require_teacher_permission_ = this->get_parameter("require_teacher_permission").as_bool();
-  teacher_permission_topic_ = this->get_parameter("teacher_permission_topic").as_string();
-  teacher_permission_timeout_sec_ = actuation_gate::teacherPermissionLease(
-      this->get_parameter("teacher_permission_timeout_sec").as_double());
+  permission_monitor_ = std::make_unique<questix_safety::PermissionMonitor>(
+      *this, questix_safety::PermissionMonitor::declareAndRead(*this),
+      questix_safety::PermissionMonitor::Flag::kLauncher, "launcher",
+      [this](const questix_msgs::msg::MotionPermission& msg,
+             const questix_safety::PermissionMonitor::Change& change) {
+        onMotionPermission(msg, change);
+      });
 
   if (auto_start_) {
     const auto period = std::chrono::duration<double>(std::max(0.5, connect_retry_period_sec_));
@@ -199,25 +202,9 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
                                 std::bind(&ShotComponent::startupTimerCallback, this));
     startup_timer_->cancel();
   }
-  if (require_teacher_permission_) {
-    if (teacher_permission_topic_.empty()) {
-      RCLCPP_ERROR(this->get_logger(),
-                   "teacher_permission_topic is empty but require_teacher_permission=true: "
-                   "the launcher will never start");
-    } else {
-      // volatile + keep-last(1): 許可をラッチせず、発行元が止まればリース切れで閉じる。
-      teacher_permission_sub_ = this->create_subscription<questix_msgs::msg::ActuationAuthority>(
-          teacher_permission_topic_, rclcpp::QoS(1).reliable().durability_volatile(),
-          std::bind(&ShotComponent::teacherPermissionCallback, this, std::placeholders::_1));
-    }
-    teacher_permission_timer_ =
-        this->create_wall_timer(std::chrono::milliseconds(100),
-                                std::bind(&ShotComponent::teacherPermissionTimerCallback, this));
-    RCLCPP_INFO(this->get_logger(),
-                "Teacher permission required on %s (lease %.2fs): the launcher waits "
-                "until the teacher switches it on",
-                teacher_permission_topic_.c_str(), teacher_permission_timeout_sec_);
-  }
+  // A lease runs out without a message: check it periodically too.
+  permission_timer_ = this->create_wall_timer(std::chrono::milliseconds(100),
+                                              std::bind(&ShotComponent::applyPermission, this));
 
   if (auto_start_) {
     if (!estop_monitor_->topic().empty()) {

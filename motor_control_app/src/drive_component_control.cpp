@@ -4,7 +4,7 @@
 // license that can be found in the LICENSE file or at
 // https://opensource.org/licenses/MIT.
 //
-// DriveComponent: motor library, control loop, E-stop / teacher permission gate, status
+// DriveComponent: motor library, control loop, motion permission / E-stop gate, status
 // and odometry (see drive_component.cpp for how the class is split).
 #include <algorithm>
 #include <chrono>
@@ -165,7 +165,7 @@ void DriveComponent::twistCallback(const geometry_msgs::msg::Twist::SharedPtr ms
     return;
   }
 
-  // 非常停止中・E-stop 不明/途絶・実行時許可なし・stop fault の間は目標を保存しない
+  // 走行許可なし・非常停止中・E-stop 不明/途絶・stop fault の間は目標を保存しない
   // （開いた後もモータは停止のまま、開いた後に届いた次の指令で再開）。
   const auto block = actuation_gate::evaluate(gateInputs());
   if (block != actuation_gate::Block::kNone) {
@@ -296,7 +296,7 @@ void DriveComponent::runControlTick() {
     }
   }
 
-  // E-stop・実行時許可・stop fault のゲート。閉じたら停止 + 武装解除（applyGate）。
+  // 走行許可（L2）・E-stop（L1）・stop fault のゲート。閉じたら停止 + 武装解除（applyGate）。
   const auto block = applyGate();
 
   const double elapsed = has_target_ ? (this->now() - last_cmd_time_).seconds() : 0.0;
@@ -466,42 +466,32 @@ void DriveComponent::onEmergencyStop(const questix_msgs::msg::EmergencyStop& msg
   applyGate(stopped_now);
 }
 
-void DriveComponent::teacherPermissionCallback(
-    const questix_msgs::msg::ActuationAuthority::SharedPtr msg) {
-  have_teacher_permission_msg_ = true;
-  teacher_permission_drive_allowed_ = msg->drive_allowed;
-  last_teacher_permission_rx_ = std::chrono::steady_clock::now();
+void DriveComponent::onMotionPermission(const questix_msgs::msg::MotionPermission& msg,
+                                        const questix_safety::PermissionMonitor::Change& change) {
+  if (change.first || change.was_allowed != msg.drive_allowed) {
+    RCLCPP_INFO(this->get_logger(), "Motion permission (%s): drive %s", msg.mode.c_str(),
+                msg.drive_allowed ? "allowed" : "not allowed");
+  }
   // OFF への変化は制御 tick を待たずに停止する（ON への変化は何も動かさない）。
   applyGate();
 }
 
 actuation_gate::EstopInputs DriveComponent::estopInputs() const { return estop_monitor_->inputs(); }
 
-actuation_gate::TeacherPermissionInputs DriveComponent::teacherPermissionInputs() const {
-  actuation_gate::TeacherPermissionInputs in;
-  in.required = require_teacher_permission_;
-  if (!require_teacher_permission_) {
-    return in;  // disabled: nothing else is looked at
-  }
-  in.known = have_teacher_permission_msg_;
-  in.allowed = teacher_permission_drive_allowed_;
-  in.age_sec = have_teacher_permission_msg_
-                   ? secondsSince(last_teacher_permission_rx_, std::chrono::steady_clock::now())
-                   : 0.0;
-  in.timeout_sec = teacher_permission_timeout_sec_;
-  return in;
+actuation_gate::PermissionInputs DriveComponent::permissionInputs() const {
+  return permission_monitor_->inputs();
 }
 
 actuation_gate::Inputs DriveComponent::gateInputs() const {
   actuation_gate::Inputs in;
+  in.permission = permissionInputs();
   in.estop = estopInputs();
-  in.teacher_permission = teacherPermissionInputs();
   in.stop_fault = stop_fault_;
   return in;
 }
 
 bool DriveComponent::estopEngaged() const {
-  // Only the E-stop: the teacher's permission is a permission and never reads as an E-stop.
+  // Only the E-stop: the motion permission is a permission and never reads as an E-stop.
   return estop_monitor_->engaged();
 }
 
@@ -573,7 +563,7 @@ void DriveComponent::statusTimerCallback() {
     typed_msg.right = toMotorFeedbackMsg(right_fb, now);
     typed_msg.linear_velocity = status.current_linear_velocity;
     typed_msg.angular_velocity = status.current_angular_velocity;
-    // 非常停止として扱っている間（押下・未受信・途絶）は true。実行時許可の有無とは別。
+    // 非常停止として扱っている間（押下・未受信・途絶）は true。走行許可の有無とは別。
     typed_msg.emergency_stop = estopEngaged();
     typed_status_publisher_->publish(typed_msg);
 

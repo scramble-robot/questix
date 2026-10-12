@@ -2,44 +2,60 @@
 
 QUESTiXシステムの各ノードを起動するためのlauncherファイル群です。XMLベースのROS 2 launchファイルを使用します。
 
-## GPIO安全系
+## モード（`robot_mode`）
 
-`questix_core.launch.xml` の `enable_gpio_ref:=true` は、drive/shot の有無に
-関係なく `gpio_reader` と `operation_manager` をそれぞれ1プロセス起動します。
-drive が使う `joy_controller_referee.launch.xml` 内の operation_manager は統合時に
-無効化されるため、同名ノードは重複しません。standalone referee launch は互換性の
-ため既定で operation_manager を起動します。
+`questix_core.launch.xml` の構成は `robot_mode`（`lesson` / `practice` / `competition`、既定
+`practice`、環境変数からは読まない）の一つで決まります（モードの定義は
+`scripts/robot_manager/modes.py`）。モードで変わるのは「どのノードを起動し、どうつなぐか」と
+走行許可（`/motion_permission`）に必要な票だけで、drive / shot / ESC はどのモードでも同じ設定で
+`/emergency_stop`（非常停止、L1）と `/motion_permission`（走行許可、L2）と指令だけを見ます
+（`design/safety_permission_input_refactor.md`）。
 
-`enable_autoreferee` の既定値は `false` です。
+| | 教材（`lesson`） | 練習（`practice`） | 大会（`competition`） |
+|---|---|---|---|
+| GPIO（gpio_reader / operation_manager） | GPIO5 | GPIO5 | GPIO5 + GPIO27（`*.competition.yaml`） |
+| RefereeMonitor（GPIO27 → 審判の票） | 起動しない | 起動しない | 起動する |
+| 走行許可に必要な票 | 先生（`/actuation_authority`） | なし（常に許可） | 審判（`/motion_vote/referee`） |
+| twist_arbiter / 発射機構の教材入力（`accept_lab_input`） | 起動する / true | 起動しない / false | 起動しない / false |
 
-- `false` (practice): GPIO5だけを読み、physical E-stopをsafe-lowとして判定
-- `true` (competition): GPIO5とGPIO27を読み、GPIO27 AutoRefereeを
-  safe-highとして追加判定
+`questix_robot_launcher.sh` は保存されたモードを `robot_mode:=<mode>` でそのまま渡し、
+どのモードでも `enable_gpio_ref:=true` を固定値で渡します。`competition` は電源投入時にも起動し、
+`practice` と `lesson` は Robot Manager の「起動」が置いた起動要求があるときだけ起動します。
 
-`questix_robot_launcher.sh` は、`/etc/questix_robot/mode` が `competition` のとき
-（電源投入時の自動起動を含む）、必ず `enable_gpio_ref:=true` と
-`enable_autoreferee:=true` を固定値で渡します。`practice`（練習）と `lesson`（教材）のときは
-電源投入時には起動せず、Robot Manager の「起動」が置いた起動要求があるときだけ、
-`enable_gpio_ref:=true` と `enable_autoreferee:=false` で起動します。
-練習は `enable_twist_arbiter:=false enable_lab_shoot:=false require_teacher_permission:=false`
-（コントローラーだけ）、教材は `enable_twist_arbiter:=true enable_lab_shoot:=true
-require_teacher_permission:=true`（教材から走行・発射でき、先生の許可がある間だけ動く）を渡します
-（モードの定義は `scripts/robot_manager/modes.py`）。
+起動のときに拒否する組み合わせ（判断は `questix_core.launch.xml` の 1 か所。子プロセスを
+一つも起動せずにエラーを出して終了します）:
+
+- `robot_mode` が `lesson` / `practice` / `competition` 以外
+- `robot_mode:=competition` で `enable_gpio_ref:=false`
+- `robot_mode` に置き換わった旧引数（`enable_autoreferee`、`require_teacher_permission`、
+  `enable_twist_arbiter`、`enable_lab_shoot`）が渡されたとき（黙って練習として起動しないため）
+
+## GPIO安全系（非常停止、L1）
+
+`enable_gpio_ref:=true` は、drive/shot の有無に関係なく `gpio_reader` と `operation_manager` を
+それぞれ1プロセス起動します。drive が使う `joy_controller_referee.launch.xml` 内の
+operation_manager は統合時に無効化されるため、同名ノードは重複しません。standalone referee
+launch は互換性のため既定で operation_manager を起動します。
+
+- `practice` / `lesson`: GPIO5だけを読み、physical E-stopをsafe-lowとして判定
+- `competition`: GPIO5とGPIO27を読み、GPIO27 AutoRefereeをsafe-highとして追加判定
+  （GPIO27 は走行許可の審判の票にもなっています。アクチュエータが走行許可を見るようになったので、
+  次の段階で非常停止からは外します）
+
 `launch.env` の `ENABLE_GPIO_REF` はどのモードでも読まないため、既存の `launch.env` に
 `ENABLE_GPIO_REF=false` が残っていても、教材・練習では GPIO5、competition では GPIO5 と
-GPIO27 の安全系が常時有効です（issue #168）。`enable_autoreferee:=true` と `enable_gpio_ref:=false` の組合せは
-通常運用上無効であり、`questix_core.launch.xml` はその組合せを検出して起動を
-中止します。
+GPIO27 の安全系が常時有効です（issue #168）。
 
 `/emergency_stop` の発行元は operation_manager だけで、`questix_core` は operation_manager を
 `enable_gpio_ref` に関係なく常に起動します。`enable_gpio_ref:=false` は `questix_core` を手で
-`ros2 launch` する明示的な診断用途だけに残る機能で（`enable_autoreferee:=false` のときのみ。
+`ros2 launch` する明示的な診断用途だけに残る機能で（`competition` 以外。
 production の `questix_robot_launcher.sh` は渡しません）、`operation_manager.no_gpio.yaml` で
 GPIO を読まず、`/emergency_stop` に `active=false`、reason `released (no GPIO safety path)` を
 出し続けます。drive / shot / ESC と QUESTiX LAB は構成によらず「未受信・途絶・押下なら止める」の
-一つの規則だけを持ち（`require_emergency_stop: true`）、この診断構成でもコントローラと教材から
-動かせます。物理非常停止回路（RLY1）の動力遮断はこの設定に関係なく働きますが、診断構成では
-押下が ROS に伝わらない（ソフトウェア停止・診断が働かない）ため、通常運用では使いません。
+一つの規則だけを持ち（`require_emergency_stop: true`）、この診断構成でも（走行許可があれば）
+コントローラと教材から動かせます。物理非常停止回路（RLY1）の動力遮断はこの設定に関係なく
+働きますが、診断構成では押下が ROS に伝わらない（ソフトウェア停止・診断が働かない）ため、
+通常運用では使いません。
 
 GPIO5 監視はすべての起動の既定です。`questix_core.launch.xml` の `enable_gpio_ref` の既定値は
 リテラルの `true` で、環境変数 `ENABLE_GPIO_REF`（export した値や、`launch.env` を `source` した
@@ -51,14 +67,24 @@ production 起動は GPIO 監視ありに戻ります。
 ```bash
 # 手動診断（その都度明示。drive / shot は安全に無効化した条件で）
 ros2 launch questix_launcher questix_core.launch.xml \
-  enable_gpio_ref:=false enable_autoreferee:=false
+  robot_mode:=practice enable_gpio_ref:=false
 ```
 
-先生の許可（`/actuation_authority`、Robot Manager の操作タブ）は非常停止とは別の
-概念です。`questix_core` の既定（`require_teacher_permission:=false`）ではコントローラは
-許可なしで動きます（手動の `ros2 launch` も同じ）。Robot Manager の教材モードの起動だけが
-`require_teacher_permission:=true` を渡し、許可がない間はコントローラでも教材からも動きません
-（大会起動では常に無効）。
+## 走行許可（L2、`/motion_permission`）
+
+走行許可は非常停止とは別の概念です。operation_manager の MotionPermissionManager が、実行中の
+モードが必要とする票（`operation_manager/config/operation_manager.permission.yaml`）をまとめて
+`/motion_permission` に出し、drive_component（`drive_allowed`）と shot_component /
+esc_motor_control（`launcher_allowed`）が `questix_safety::PermissionMonitor` で従います
+（未受信・0.5 s の途絶・false は止める。許可が戻っても新しい指令までは動かない）。
+
+- 教材: 先生の許可（Robot Manager の操作タブ、`/actuation_authority`）がある間だけ、
+  コントローラーでも教材からも動きます。
+- 練習: 票は要らず常に許可です（MotionPermissionManager が落ちれば止まる、という規則は同じ）。
+- 大会: AutoReferee の撃破（GPIO27 false）で止まります。shot は撃破ではサーボバスを解放せず
+  （電源は入ったまま）、射撃とチルトだけを断ります。
+
+両方が閉じているときは非常停止（L1）の理由と反応が優先します。
 
 GPIO5の物理非常停止回路はRLY1で左右DDT駆動モーター、ローラー用ESC、Shot用サーボ、
 Tilt用サーボの動力をハードウェア遮断します。Raspberry Pi、5 V I/O、3.3 V I/Oは
@@ -75,8 +101,8 @@ AutoReferee未接続、クライアント無通電、一次側断線も `true` �
 
 | Mode | GPIO5 physical E-stop | GPIO27 AutoReferee | Controllable |
 |---|---:|---:|---:|
-| practice | false | not monitored | true |
-| practice | true | not monitored | false |
+| practice / lesson | false | not monitored | true |
+| practice / lesson | true | not monitored | false |
 | competition | false | true | true |
 | competition | true | any | false |
 | competition | any | false | false |
@@ -87,13 +113,13 @@ AutoReferee未接続、クライアント無通電、一次側断線も `true` �
 ```bash
 ros2 launch questix_launcher questix_core.launch.xml \
   enable_lidar:=false enable_shot:=false enable_drive:=false \
-  enable_gpio_ref:=true enable_autoreferee:=false enable_rviz:=false
+  enable_gpio_ref:=true robot_mode:=practice enable_rviz:=false
 ```
 
 ## コントローラーと QUESTiX LAB の走行実験（twist_arbiter）
 
-`questix_core.launch.xml` は練習用の起動では切り替えノード `twist_arbiter` を入れます
-（`enable_twist_arbiter` 既定 `true`）。joy_controller の出力は `/target_twist/joy` に付け替えられ、
+`questix_core.launch.xml` は教材用の起動（`robot_mode:=lesson`）だけ切り替えノード
+`twist_arbiter` を入れます。joy_controller の出力は `/target_twist/joy` に付け替えられ、
 QUESTiX LAB の教材ブリッジは `/target_twist/lab` に出し、`twist_arbiter` がどちらかを
 `/target_twist`（drive_component）へ渡します。起動し直す必要はありません。
 
@@ -103,10 +129,9 @@ QUESTiX LAB の教材ブリッジは `/target_twist/lab` に出し、`twist_arbi
   （その走行が終わるまで教材は割り込めません）。
 - 教材の指令が途切れると、コントローラーに戻ります。
 
-`enable_autoreferee:=true`（大会用の起動、`questix_robot_launcher.sh`）では
-`enable_twist_arbiter` の値にかかわらず入れず、joy_controller が `/target_twist` を直接出す
-今までの経路のままです。規則は `twist_arbiter/include/twist_arbiter/arbiter_logic.hpp`、
-パラメータは `twist_arbiter/config/twist_arbiter.yaml` にあります。
+練習・大会では入れず、joy_controller が `/target_twist` を直接出します。規則は
+`twist_arbiter/include/twist_arbiter/arbiter_logic.hpp`、パラメータは
+`twist_arbiter/config/twist_arbiter.yaml` にあります。
 
 ## ファイル構成
 
@@ -119,8 +144,9 @@ QUESTiX LAB の教材ブリッジは `/target_twist/lab` に出し、`twist_arbi
 - `launch/test.launch.xml` - テスト・デバッグ用の最小構成
 
 `questix_core.launch.xml` 以外は operation_manager を起動しません（`drive_component.launch.xml` は
-`enable_gpio_ref:=true` のときだけ起動し、そのときも gpio_reader は起動しない）。drive / shot / ESC は
-`/emergency_stop` が届かない間は動かないので、単体で動かすときは別の端末で発行元を起動してください
+`enable_gpio_ref:=true` のときだけ非常停止を起動し、そのときも gpio_reader と走行許可は起動しない）。
+drive / shot / ESC は `/emergency_stop` と `/motion_permission` が届かない間は動かないので、単体で
+動かすときは別の端末で発行元を起動してください
 （手順は [`questix_msgs/README.md`](../questix_msgs/README.md) の「単体起動では発行元も起動する」）。
 
 ### 各パッケージ用launchファイル

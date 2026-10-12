@@ -36,11 +36,11 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
   this->declare_parameter<bool>("require_emergency_stop", true);
   // 一度受信した後、この秒数（steady clock の受信間隔）途絶えたら停止。<=0 で無効。
   this->declare_parameter<double>("emergency_stop_timeout_sec", 1.0);
-  // 教員の許可（questix_msgs/ActuationAuthority の launcher_allowed）。非常停止とは別の
-  // 概念で、練習での opt-in（既定 false）。大会起動（enable_autoreferee）では常に false。
-  this->declare_parameter<bool>("require_teacher_permission", false);
-  this->declare_parameter<std::string>("teacher_permission_topic", "/actuation_authority");
-  this->declare_parameter<double>("teacher_permission_timeout_sec", 1.0);
+  // 走行許可（L2、questix_msgs/MotionPermission の launcher_allowed）。非常停止とは別の概念で、
+  // 未受信・途絶・false はローラーを 0 にする。false は単体診断の明示 opt-out だけ。
+  this->declare_parameter<std::string>("motion_permission_topic", "/motion_permission");
+  this->declare_parameter<bool>("require_motion_permission", true);
+  this->declare_parameter<double>("motion_permission_timeout_sec", 0.5);
   this->declare_parameter<int>("min_pulse_width", 0);         // μs (speed=-1.0)
   this->declare_parameter<int>("max_pulse_width", 2000);      // μs (speed=1.0)
   this->declare_parameter<int>("neutral_pulse_width", 1000);  // μs (ESC arm/idle)
@@ -64,10 +64,6 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
   test_mode_ = this->get_parameter("test_mode").as_bool();
   joy_topic_ = this->get_parameter("joy_topic").as_string();
   status_topic_ = this->get_parameter("status_topic").as_string();
-  require_teacher_permission_ = this->get_parameter("require_teacher_permission").as_bool();
-  teacher_permission_topic_ = this->get_parameter("teacher_permission_topic").as_string();
-  teacher_permission_timeout_sec_ = rollerTeacherPermissionLease(
-      this->get_parameter("teacher_permission_timeout_sec").as_double());
   min_pulse_width_us_ = this->get_parameter("min_pulse_width").as_int();
   max_pulse_width_us_ = this->get_parameter("max_pulse_width").as_int();
   neutral_pulse_width_us_ = this->get_parameter("neutral_pulse_width").as_int();
@@ -106,22 +102,14 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
              const questix_safety::EmergencyStopMonitor::Change& change) {
         on_emergency_stop(msg, change);
       });
-  if (require_teacher_permission_) {
-    if (teacher_permission_topic_.empty()) {
-      RCLCPP_ERROR(this->get_logger(),
-                   "teacher_permission_topic is empty but require_teacher_permission=true: "
-                   "the roller will never spin");
-    } else {
-      teacher_permission_sub_ = this->create_subscription<questix_msgs::msg::ActuationAuthority>(
-          teacher_permission_topic_, rclcpp::QoS(1).reliable().durability_volatile(),
-          std::bind(&EscMotorControlComponent::teacher_permission_callback, this,
-                    std::placeholders::_1));
-    }
-    RCLCPP_INFO(this->get_logger(),
-                "Teacher permission required on %s (lease %.2fs): the roller stays at 0 "
-                "until the teacher switches the launcher on",
-                teacher_permission_topic_.c_str(), teacher_permission_timeout_sec_);
-  }
+  // 走行許可（L2）も共通の PermissionMonitor が購読・判定する（volatile、ラッチしない）。
+  permission_monitor_ = std::make_unique<questix_safety::PermissionMonitor>(
+      *this, questix_safety::PermissionMonitor::declareAndRead(*this),
+      questix_safety::PermissionMonitor::Flag::kLauncher, "roller",
+      [this](const questix_msgs::msg::MotionPermission& msg,
+             const questix_safety::PermissionMonitor::Change& change) {
+        on_motion_permission(msg, change);
+      });
 
   // QUESTiX LAB roller input: subscribed only when accept_lab_input (practice launches).
   if (roller_lab_logic_.config().accept) {
@@ -149,7 +137,8 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
     std::lock_guard<std::mutex> guard(lock_);
     gate_ = evaluate_gate_locked();
   }
-  // Leases (E-stop silence, teacher permission) expire without a message: check them periodically.
+  // Leases (E-stop silence, the motion permission) expire without a message: check them
+  // periodically.
   gate_timer_ =
       this->create_wall_timer(100ms, std::bind(&EscMotorControlComponent::apply_gate, this));
   if (lab_sub_) {
@@ -283,7 +272,7 @@ void EscMotorControlComponent::joy_callback(const sensor_msgs::msg::Joy::SharedP
     // The controller always wins: a press hands a lab-driven roller back to the controller
     // and locks the lab out until it sends 0 (roller_lab_logic.hpp).
     lab_preempted = roller_lab_logic_.onJoyButton(raw_pressed, steady_now_sec());
-    // 非常停止（押下・未受信・途絶）または実行時許可なしの間は、押されているボタンでラッチを
+    // 走行許可なし、または非常停止（押下・未受信・途絶）の間は、押されているボタンでラッチを
     // 解除して「離す」を要求する。解除・許可の復帰後も押しっぱなしでは再始動せず、離す→押すが
     // 必要（押下を「離した」扱いにすると、その時点で再アームされてしまうため使わない）。
     const bool inhibited = evaluate_gate_locked() != RollerBlock::kNone;
@@ -341,33 +330,20 @@ void EscMotorControlComponent::on_emergency_stop(
   apply_gate();
 }
 
-void EscMotorControlComponent::teacher_permission_callback(
-    const questix_msgs::msg::ActuationAuthority::SharedPtr msg) {
-  if (!msg) {
-    return;
-  }
-  {
-    std::lock_guard<std::mutex> guard(lock_);
-    have_teacher_permission_msg_ = true;
-    teacher_permission_allowed_ = msg->launcher_allowed;
-    last_teacher_permission_rx_sec_ = steady_now_sec();
+void EscMotorControlComponent::on_motion_permission(
+    const questix_msgs::msg::MotionPermission& msg,
+    const questix_safety::PermissionMonitor::Change& change) {
+  if (change.first || change.was_allowed != msg.launcher_allowed) {
+    RCLCPP_INFO(this->get_logger(), "Motion permission (%s): roller %s", msg.mode.c_str(),
+                msg.launcher_allowed ? "allowed" : "not allowed");
   }
   apply_gate();
 }
 
 RollerBlock EscMotorControlComponent::evaluate_gate_locked() const {
-  const double now = steady_now_sec();
   RollerGateInputs in;
+  in.permission = permission_monitor_->inputs();
   in.estop = estop_monitor_->inputs();
-  // The teacher's permission is a separate permission; disabled (the default) it is not looked at.
-  in.teacher_permission.required = require_teacher_permission_;
-  if (require_teacher_permission_) {
-    in.teacher_permission.known = have_teacher_permission_msg_;
-    in.teacher_permission.allowed = teacher_permission_allowed_;
-    in.teacher_permission.age_sec =
-        have_teacher_permission_msg_ ? now - last_teacher_permission_rx_sec_ : 0.0;
-    in.teacher_permission.timeout_sec = teacher_permission_timeout_sec_;
-  }
   return evaluateRollerGate(in);
 }
 
@@ -426,9 +402,8 @@ void EscMotorControlComponent::lab_callback(const std_msgs::msg::Float32::Shared
     std::lock_guard<std::mutex> guard(lock_);
     const bool was_active = roller_lab_logic_.labActive();
     const RollerBlock block = evaluate_gate_locked();
-    decision =
-        roller_lab_logic_.onLab(msg->data, steady_now_sec(), full_speed_logic_.isActive(),
-                                isRollerEstopBlock(block), !isRollerTeacherPermissionBlock(block));
+    decision = roller_lab_logic_.onLab(msg->data, steady_now_sec(), full_speed_logic_.isActive(),
+                                       isRollerEstopBlock(block), !isRollerPermissionBlock(block));
     source_changed = was_active != roller_lab_logic_.labActive();
   }
   // Lock released before set_motor_speed(), which takes lock_ itself.
@@ -470,7 +445,7 @@ void EscMotorControlComponent::publish_roller_status() {
     status.lab_locked = roller_lab_logic_.labLocked();
     const RollerBlock block = evaluate_gate_locked();
     status.estop = isRollerEstopBlock(block);
-    status.authority = !isRollerTeacherPermissionBlock(block);
+    status.permission = !isRollerPermissionBlock(block);
     status.lab_max_speed = roller_lab_logic_.config().max_speed;
   }
   std_msgs::msg::String msg;
