@@ -11,6 +11,8 @@
   become: false
   register: pwm_guard_source_files
   changed_when: false
+  # Read-only no-follow inventory: safe even in check mode; no snapshot/build/service action.
+  check_mode: false
 
 - name: Refuse aliased or empty controller source
   ansible.builtin.assert:
