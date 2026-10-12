@@ -47,6 +47,7 @@ struct EscLeaseTestAccess {
     node.pwm_ = std::move(backend);
     node.pwm_backend_name_ = "rp1_hw";
     ASSERT_TRUE(node.send_pulse(1800, 0.8));
+    node.current_speed_ = 0.8;
   }
   static bool fault(EscMotorControlComponent& node) { return node.pwm_command_.fault(); }
   static void report(EscMotorControlComponent& node) { node.publish_roller_status(); }
@@ -197,6 +198,7 @@ TEST(Rp1Lease, ExecutorSilenceGuardFaultIsPublishedAndGateDoesNotRepeatStop) {
     EXPECT_NE(report.find("FAULT_LOW"), std::string::npos);
     EXPECT_NE(report.find("\"pwm_fault\": true"), std::string::npos);
     EXPECT_NE(report.find("\"applied_pulse_us\": 0"), std::string::npos);
+    EXPECT_NE(report.find("\"command\": 0.000"), std::string::npos);
     node->begin_shutdown();
   }
   rclcpp::shutdown();
