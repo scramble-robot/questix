@@ -67,10 +67,10 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
 
   if (pwm_backend_name_ == "rp1_hw" && !test_mode_) {
     if (pwm_pin_ != 13 || min_pulse_width_us_ != 0 || max_pulse_width_us_ != 2000 ||
-        neutral_pulse_width_us_ != 1000 ||
-        !std::isfinite(safety_timeout_) || safety_timeout_ <= 0 || safety_timeout_ > 1.0 ||
-        !std::isfinite(min_speed_) || !std::isfinite(max_speed_) || min_speed_ < -1.0 ||
-        max_speed_ > 1.0 || min_speed_ > 0 || max_speed_ < 0) {
+        neutral_pulse_width_us_ != 1000 || !std::isfinite(safety_timeout_) ||
+        safety_timeout_ <= 0 || safety_timeout_ > 1.0 || !std::isfinite(min_speed_) ||
+        !std::isfinite(max_speed_) || min_speed_ < -1.0 || max_speed_ > 1.0 || min_speed_ > 0 ||
+        max_speed_ < 0) {
       throw std::invalid_argument(
           "rp1_hw requires GPIO13, 0/2000/1000 us and a safety timeout in (0,1]");
     }

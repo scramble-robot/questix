@@ -159,8 +159,7 @@ TEST(PwmStatusTest, AddsDiagnosticsWithoutRemovingExistingKeys) {
   EXPECT_NE(json.find("\"pwm_fault\": true"), std::string::npos);
   EXPECT_NE(json.find("\"applied_pulse_us\": 2000"), std::string::npos);
   EXPECT_NE(json.find("\"pwm_backend\": \"simulation\""), std::string::npos);
-  for (const auto* key :
-       {"command", "source", "estop", "permission", "max_power"}) {
+  for (const auto* key : {"command", "source", "estop", "permission", "max_power"}) {
     EXPECT_NE(json.find(std::string("\"") + key + "\""), std::string::npos);
   }
 }

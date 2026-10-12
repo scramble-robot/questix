@@ -89,7 +89,7 @@ private:
   std::string pwm_backend_name_;  // "auto", "pigpio", "lgpio", "simulation", "rp1_hw"
   std::string rp1_guard_socket_;
   bool stopping_{false};
-  int gpio_chip_num_;             // lgpio chip number
+  int gpio_chip_num_;  // lgpio chip number
 
   // ---------- State ----------
   double current_speed_{0.0};
