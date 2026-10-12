@@ -24,6 +24,7 @@ CLI call starts Python and DDS discovery again, which made this test slow on CI 
 import os
 import signal
 import subprocess
+import tempfile
 import time
 
 import pytest
@@ -36,7 +37,9 @@ from rclpy.executors import SingleThreadedExecutor
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 
 
-STARTUP_TIMEOUT_SECONDS = 15.0
+STARTUP_TIMEOUT_SECONDS = 30.0
+# Bound all sequential waits in each case so three cases plus cleanup fit CMake TIMEOUT 240.
+CASE_TIMEOUT_SECONDS = 60.0
 # Domains 1-101 only: from 102 on, the DDS discovery ports (7400 + 250 * domain) fall into the
 # Linux ephemeral range (32768-60999), where another process's socket can hold them and the
 # launch is never discovered (cf. scripts/robot_manager/ros_domain.py). 0 is the default of the
@@ -56,14 +59,25 @@ def isolated_ros_environment(offset):
 
 def start_process(command, environment):
     """Start a ROS process in its own group for scoped cleanup."""
-    return subprocess.Popen(
-        command,
-        env=environment,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        start_new_session=True,
-    )
+    # A file drains verbose startup logs without a full pipe blocking the launch process.
+    log_file = tempfile.TemporaryFile(mode='w+b')
+    try:
+        process = subprocess.Popen(
+            command, env=environment, stdout=log_file, stderr=subprocess.STDOUT,
+            text=True, start_new_session=True,
+        )
+    except BaseException:
+        log_file.close()
+        raise
+    process.launch_log = log_file
+    return process
+
+
+def launch_log_tail(process):
+    """Read the last 8 KiB without moving the launch process's shared file offset."""
+    fd = process.launch_log.fileno()
+    size = os.fstat(fd).st_size
+    return os.pread(fd, min(size, 8192), max(0, size - 8192)).decode(errors='replace')
 
 
 def stop_process(process):
@@ -71,14 +85,17 @@ def stop_process(process):
     if process.poll() is None:
         os.killpg(process.pid, signal.SIGINT)
     try:
-        output, _ = process.communicate(timeout=5.0)
+        process.wait(timeout=5.0)
     except subprocess.TimeoutExpired:
         os.killpg(process.pid, signal.SIGTERM)
         try:
-            output, _ = process.communicate(timeout=5.0)
+            process.wait(timeout=5.0)
         except subprocess.TimeoutExpired:
             os.killpg(process.pid, signal.SIGKILL)
-            output, _ = process.communicate(timeout=5.0)
+            process.wait(timeout=5.0)
+    fd = process.launch_log.fileno()
+    output = os.pread(fd, os.fstat(fd).st_size, 0).decode(errors='replace')
+    process.launch_log.close()
     return output
 
 
@@ -100,6 +117,10 @@ class GraphProbe:
         self.node = rclpy.create_node('gpio_safety_runtime_probe', context=self.context)
         self.executor = SingleThreadedExecutor(context=self.context)
         self.executor.add_node(self.node)
+        self.started_at = time.monotonic()
+        self.deadline = self.started_at + CASE_TIMEOUT_SECONDS
+        self.graph_history = []
+        self.last_graph_sample = 0.0
         self.estop = None
         self.permission = None
         self.node.create_subscription(
@@ -125,8 +146,10 @@ class GraphProbe:
 
     def spin_until(self, condition, timeout):
         """Spin until condition() holds or the timeout passes; return condition()."""
-        deadline = time.monotonic() + timeout
+        deadline = min(time.monotonic() + timeout, self.deadline)
         while time.monotonic() < deadline:
+            if time.monotonic() - self.last_graph_sample >= 1.0:
+                self.node_names()
             if condition():
                 return True
             self.executor.spin_once(timeout_sec=0.05)
@@ -134,10 +157,21 @@ class GraphProbe:
 
     def node_names(self):
         """Return the fully qualified node names the graph shows."""
-        return {
+        names = {
             (namespace.rstrip('/') + '/' + name)
             for name, namespace in self.node.get_node_names_and_namespaces()
         }
+        self.last_graph_sample = time.monotonic()
+        self.graph_history.append(
+            f'{self.last_graph_sample - self.started_at:.2f}s: {sorted(names)}')
+        return names
+
+    def diagnostics(self, process):
+        """Describe elapsed time, each graph observation and the launch log tail."""
+        self.node_names()
+        return (f'Elapsed: {time.monotonic() - self.started_at:.2f}s\n'
+                'Node graph observations (rclpy, no ros2 node list subprocess):\n' +
+                '\n'.join(self.graph_history) + '\nLaunch log tail:\n' + launch_log_tail(process))
 
     def wait_for_nodes(self, node_names, process):
         """Wait until the graph shows every node (discovery is not instant) while it runs."""
@@ -238,6 +272,7 @@ def test_core_launch_publishes_the_estop_and_the_motion_permission_for_each_mode
         environment,
     )
     try:
+        probe.wait_for_nodes(ACTUATING_NODES, process)
         for node in ACTUATING_NODES:
             assert probe.parameters(
                 node, ('require_emergency_stop', 'require_motion_permission')) == {
@@ -270,6 +305,9 @@ def test_core_launch_publishes_the_estop_and_the_motion_permission_for_each_mode
         # Nothing gates /joy any more.
         assert '/joy_gate' not in probe.node_names()
         assert process.poll() is None, 'questix_core exited during the checks'
+    except BaseException as error:
+        error.add_note(probe.diagnostics(process))
+        raise
     finally:
         output = stop_process(process)
         probe.close()

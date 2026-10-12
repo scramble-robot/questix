@@ -73,6 +73,8 @@ PYTHON
 # The robot control service (questix_robot) runs the launcher from INSTALL_DIR. Robot Manager's
 # 起動 in practice mode needs the version that honours its start request, so an update refreshes
 # it too; questix_robot itself is not restarted (the new launcher is used on its next start).
+# This launcher checks the installed questix_core robot_mode declaration before starting.
+# Copying it does not rebuild ROS: a stale workspace is refused with a colcon build message.
 LAUNCHER_SOURCE="$REPO_ROOT/systemd/questix_robot_launcher.sh"
 LAUNCHER_TARGET="$INSTALL_DIR/questix_robot_launcher.sh"
 

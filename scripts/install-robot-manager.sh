@@ -78,6 +78,8 @@ fi
 # ---------- 2. Launcher script ----------
 echo "[2/6] Installing launcher script to /opt/questix_robot/ ..."
 install -d -m 0755 /opt/questix_robot
+# This launcher checks the installed questix_core robot_mode declaration before starting.
+# Copying it does not rebuild ROS: a stale workspace is refused with a colcon build message.
 install -m 0755 "${REPO_DIR}/systemd/questix_robot_launcher.sh" /opt/questix_robot/
 # QUESTiX Local (Robot Manager 管理設定 → ネットワーク): the root-owned helper and its oneshot unit.
 # The unit has no [Install] section and is never enabled: the access point stays as it is.

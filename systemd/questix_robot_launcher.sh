@@ -159,6 +159,31 @@ if [ -f "${ROBOT_WS}/install/setup.bash" ]; then
 fi
 set -u
 
+# update-robot-manager replaces this script without rebuilding the ROS workspace. Never pass
+# robot_mode to an older launch file: Jazzy accepts undeclared arguments without an error.
+if ! LAUNCHER_PREFIX="$(ros2 pkg prefix questix_launcher)"; then
+  log "Cannot locate questix_launcher. ワークスペースのビルドが古いか未インストールです。colcon build が必要です。Skipping ROS2 launch."
+  exit 1
+fi
+CORE_LAUNCH="${LAUNCHER_PREFIX}/share/questix_launcher/launch/questix_core.launch.xml"
+# Parse XML rather than matching text, so a commented-out declaration never counts.
+if ! python3 - "${CORE_LAUNCH}" <<'PYXML'
+import sys
+import xml.etree.ElementTree as ET
+
+try:
+    root = ET.parse(sys.argv[1]).getroot()
+except (OSError, ET.ParseError) as error:
+    print(f"Cannot read installed launch: {error}", file=sys.stderr)
+    sys.exit(1)
+sys.exit(0 if root.tag == 'launch' and any(
+    arg.get('name') == 'robot_mode' for arg in root.findall('arg')) else 1)
+PYXML
+then
+  log "ワークスペースのビルドが古いです。colcon build が必要です (${CORE_LAUNCH} must declare robot_mode). Skipping ROS2 launch."
+  exit 1
+fi
+
 # Build launch arguments
 LAUNCH_ARGS=""
 # A value missing from launch.env falls back to the fresh-kit topology

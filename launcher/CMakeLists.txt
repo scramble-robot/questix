@@ -44,9 +44,10 @@ if(BUILD_TESTING)
     test/test_gpio_safety_launch_expansion.py
     ENV "QUESTIX_SOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/.."
   )
-  # Starts questix_core once per operation_manager profile: allow for it.
+  # Three modes: each case has a 60 s shared wait budget + at most 15 s cleanup.
+  # 3 * (60 + 15) = 225 s; allow 15 s for probe initialization and test overhead.
   ament_add_pytest_test(test_gpio_safety_runtime test/test_gpio_safety_runtime.py
-    TIMEOUT 180
+    TIMEOUT 240
   )
 endif()
 
