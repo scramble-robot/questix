@@ -48,7 +48,6 @@ namespace motor_control_app {
 // トピック未受信の環境では従来の周期リトライにフォールバック。
 // 連動は auto_start=true のときのみ有効で、手動 deactivate 済み（タイマー停止中）の
 // ノードは非常停止解除でも再 activate しない。
-// なお joy_gate は従来どおり /gpio/controllable（std_msgs/Bool）を購読する。
 // require_emergency_stop=true（既定。false は単体診断の明示 opt-out）では、/emergency_stop を
 // 一度も受信していない間・受信が途絶えた間も非常停止として扱い、自動起動もコマンドもしない
 // （operation_manager は questix_core で常に起動し、GPIO 安全系なしでも解除を出す）。

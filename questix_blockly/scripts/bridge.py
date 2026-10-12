@@ -128,7 +128,7 @@ class Bridge(Node):
                 self.publish(0., 0., False)
                 return
             if self.index == -1:
-                # Allow the operation_manager/joy_gate chain to release its stop gate.
+                # Give the simulated E-stop release time to reach the stop gates.
                 if now < self.deadline:
                     self.publish(0., 0., True)
                     return

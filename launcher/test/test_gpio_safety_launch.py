@@ -42,26 +42,20 @@ def test_profiles_select_the_expected_gpio_inputs_and_polarities():
     practice_reader = load_yaml('gpio_reader/config/gpio_reader.practice.yaml')
     competition_reader = load_yaml('gpio_reader/config/gpio_reader.competition.yaml')
     default_reader = load_yaml('gpio_reader/config/gpio_reader.yaml')
-    practice_manager = load_yaml(
-        'operation_manager/config/operation_manager.practice.yaml')
-    competition_manager = load_yaml(
-        'operation_manager/config/operation_manager.competition.yaml')
-    default_manager = load_yaml('operation_manager/config/operation_manager.yaml')
-
     assert practice_reader['gpio_reader_node']['ros__parameters']['gpio_pins'] == [5]
+    # GPIO27 is read in competition only, for the referee's vote (not for the E-stop).
     assert competition_reader['gpio_reader_node']['ros__parameters']['gpio_pins'] == [5, 27]
     assert default_reader == practice_reader
 
-    practice_parameters = practice_manager['operation_manager_node']['ros__parameters']
-    competition_parameters = competition_manager[
-        'operation_manager_node']['ros__parameters']
-    assert practice_parameters['safe_low_pins'] == [5]
-    assert 'safe_high_pins' not in practice_parameters
-    assert competition_parameters['safe_low_pins'] == [5]
-    assert competition_parameters['safe_high_pins'] == [27]
-    assert 'safe_high_pins' not in default_manager[
-        'operation_manager_node']['ros__parameters']
-    assert default_manager == practice_manager
+    # The emergency stop is the physical E-stop circuit alone, in every mode.
+    estop = load_yaml('operation_manager/config/emergency_stop_manager.yaml')[
+        'emergency_stop_manager']['ros__parameters']
+    assert estop['safe_low_pins'] == [5]
+    assert 'safe_high_pins' not in estop
+    assert estop.get('gpio_safety_enabled', True) is True
+    referee = load_yaml('operation_manager/config/referee_monitor.yaml')[
+        'referee_monitor']['ros__parameters']
+    assert referee['referee_pins'] == [27]
 
 
 def test_core_defaults_gpio_safety_on_without_environment_authority():
@@ -120,8 +114,7 @@ def test_core_selects_everything_from_robot_mode_and_refuses_invalid_ones():
         include.get('file') for include in valid_group.findall('.//include')
     }
     for name in ('shot_component.launch.xml', 'drive_component.launch.xml', 'ydlidar_launch.py',
-                 'gpio_reader.launch.xml', 'operation_manager.launch.xml',
-                 'motion_permission.launch.xml'):
+                 'gpio_reader.launch.xml', 'operation_manager.launch.xml'):
         assert any(name in path for path in guarded_files), name
     assert valid_group.find(".//node[@name='rviz2']") is not None
 
@@ -143,40 +136,23 @@ def test_core_selects_everything_from_robot_mode_and_refuses_invalid_ones():
         None,
         '$(find-pkg-share gpio_reader)/config/gpio_reader.competition.yaml',
     ) in lets
-    assert (
-        'operation_manager_config_file',
-        None,
-        '$(var is_competition)',
-        '$(find-pkg-share operation_manager)/config/operation_manager.practice.yaml',
-    ) in lets
-    assert (
-        'operation_manager_config_file',
-        '$(var is_competition)',
-        None,
-        '$(find-pkg-share operation_manager)/config/operation_manager.competition.yaml',
-    ) in lets
-    # Without the GPIO safety path (explicit manual diagnostic only; production launches always
-    # pass enable_gpio_ref:=true): no GPIO read, /emergency_stop still owned.
-    assert (
-        'operation_manager_config_file',
-        None,
-        '$(var enable_gpio_ref)',
-        '$(find-pkg-share operation_manager)/config/operation_manager.no_gpio.yaml',
-    ) in lets
-    manager_lets = [item for item in core.findall('./let')
-                    if item.get('name') == 'operation_manager_config_file']
-    assert manager_lets[-1].get('unless') == '$(var enable_gpio_ref)'  # the last let wins
 
 
 def test_core_always_owns_exactly_one_operation_manager():
-    # operation_manager is the single owner of /emergency_stop with or without the GPIO safety
-    # path; only gpio_reader depends on enable_gpio_ref.
+    # operation_manager (the E-stop, the motion permission, the referee) is started once, by
+    # questix_core, with or without the GPIO safety path; only gpio_reader depends on
+    # enable_gpio_ref. No other launch starts it (joy_controller_referee.launch.xml is gone).
     core = load_xml('launcher/launch/questix_core.launch.xml')
     manager_includes = [
         include for include in core.findall('.//include')
-        if 'operation_manager)/launch/operation_manager.launch.xml' in include.get('file', '')
+        if 'find-pkg-share operation_manager' in include.get('file', '')
     ]
     assert len(manager_includes) == 1
+    assert manager_includes[0].get('file').endswith('/launch/operation_manager.launch.xml')
+    values = {arg.get('name'): arg.get('value') for arg in manager_includes[0].findall('./arg')}
+    assert values == {'robot_mode': '$(var robot_mode)',
+                      'enable_gpio_safety': '$(var enable_gpio_ref)',
+                      'enable_referee': '$(var is_competition)'}
     manager_group = next(
         group for group in core.findall('.//group')
         if manager_includes[0] in list(group)
@@ -190,48 +166,29 @@ def test_core_always_owns_exactly_one_operation_manager():
         group for group in core.findall('.//group') if reader_include in list(group))
     assert reader_group.get('if') == '$(var enable_gpio_ref)'
 
-    drive_include = next(
-        include for include in core.findall('.//include')
-        if 'drive_component.launch.xml' in include.get('file', '')
-    )
-    manager_arg = next(
-        arg for arg in drive_include.findall('./arg')
-        if arg.get('name') == 'enable_operation_manager'
-    )
-    assert manager_arg.get('value') == 'false'
+    manager = load_xml('operation_manager/launch/operation_manager.launch.xml')
+    nodes = {node.get('exec'): node for node in manager.findall('.//node')}
+    assert set(nodes) == {'emergency_stop_manager_node', 'motion_permission_manager_node',
+                          'referee_monitor_node'}
+    assert nodes['emergency_stop_manager_node'].get('if') is None
+    assert nodes['motion_permission_manager_node'].get('if') is None
+    assert nodes['referee_monitor_node'].get('if') == '$(var enable_referee)'
+    lets = {(item.get('if'), item.get('unless'), item.get('value'))
+            for item in manager.findall('./let')}
+    assert ('$(var enable_gpio_safety)', None,
+            '$(find-pkg-share operation_manager)/config/emergency_stop_manager.yaml') in lets
+    no_gpio = '$(find-pkg-share operation_manager)/config/emergency_stop_manager.no_gpio.yaml'
+    assert (None, '$(var enable_gpio_safety)', no_gpio) in lets
 
-    drive = load_xml('launcher/launch/drive_component.launch.xml')
-    assert find_arg(drive, 'enable_operation_manager').get('default') == 'true'
-    referee_include = next(
-        include for include in drive.findall('.//include')
-        if 'joy_controller_referee.launch.xml' in include.get('file', '')
-    )
-    forwarded_arg = next(
-        arg for arg in referee_include.findall('./arg')
-        if arg.get('name') == 'enable_operation_manager'
-    )
-    assert forwarded_arg.get('value') == '$(var enable_operation_manager)'
-
-    referee = load_xml('joy_controller/launch/joy_controller_referee.launch.xml')
-    assert find_arg(referee, 'enable_operation_manager').get('default') == 'true'
-    nested_managers = [
-        node for node in referee.findall('.//node')
-        if node.get('pkg') == 'operation_manager'
-    ]
-    assert len(nested_managers) == 1
-    assert nested_managers[0].get('if') == '$(var enable_operation_manager)'
-
-    def integrated_manager_count(enable_drive, enable_shot, enable_gpio_ref):
-        del enable_shot  # operation_manager ownership is independent of shot.
-        core_manager_count = 1
-        nested_manager_enabled = manager_arg.get('value') != 'false'
-        nested_manager_count = int(
-            enable_drive and enable_gpio_ref and nested_manager_enabled)
-        return core_manager_count + nested_manager_count
-
-    assert integrated_manager_count(False, False, True) == 1
-    assert integrated_manager_count(True, True, True) == 1
-    assert integrated_manager_count(True, True, False) == 1
+    # Nothing gates /joy any more: no launch starts joy_gate or another operation_manager.
+    for relative_path in ('launcher/launch/drive_component.launch.xml',
+                          'launcher/launch/shot_component.launch.xml',
+                          'joy_controller/launch/joy_controller.launch.xml'):
+        text = (SOURCE_ROOT / relative_path).read_text(encoding='utf-8')
+        for removed in ('joy_gate', 'joy_gated', 'joy_controller_referee', 'operation_manager'):
+            assert removed not in text, (relative_path, removed)
+    assert not (SOURCE_ROOT / 'joy_gate').exists()
+    assert not (SOURCE_ROOT / 'joy_controller/launch/joy_controller_referee.launch.xml').exists()
 
 
 def test_production_service_launchers_always_enable_gpio_safety():
@@ -363,7 +320,7 @@ def test_twist_arbiter_only_in_lesson_launches():
         if any('find-pkg-share joy_controller' in include.get('file', '')
                for include in group.findall('./include'))
     ]
-    assert len(controller_groups) == 2
+    assert len(controller_groups) == 1  # one controller path: nothing gates /joy any more
     for group in controller_groups:
         remap = group.find('./set_remap')
         assert remap is not None
@@ -497,33 +454,21 @@ def test_emergency_stop_is_always_published_and_always_required():
         assert '"require_emergency_stop", true);' in text, relative_path
 
     # The profile without the GPIO safety path reads no GPIO but publishes the same topic.
-    no_gpio = load_yaml('operation_manager/config/operation_manager.no_gpio.yaml')
-    parameters = no_gpio['operation_manager_node']['ros__parameters']
+    no_gpio = load_yaml('operation_manager/config/emergency_stop_manager.no_gpio.yaml')
+    parameters = no_gpio['emergency_stop_manager']['ros__parameters']
     assert parameters['gpio_safety_enabled'] is False
     assert parameters['emergency_stop_topic'] == '/emergency_stop'
     assert 'safe_low_pins' not in parameters
-    for profile in ('operation_manager.practice.yaml', 'operation_manager.competition.yaml',
-                    'operation_manager.yaml'):
-        parameters = load_yaml(f'operation_manager/config/{profile}')[
-            'operation_manager_node']['ros__parameters']
-        assert parameters.get('gpio_safety_enabled', True) is True, profile
-        assert parameters['emergency_stop_topic'] == '/emergency_stop', profile
+    parameters = load_yaml('operation_manager/config/emergency_stop_manager.yaml')[
+        'emergency_stop_manager']['ros__parameters']
+    assert parameters.get('gpio_safety_enabled', True) is True
+    assert parameters['emergency_stop_topic'] == '/emergency_stop'
 
 
 def test_core_always_publishes_the_motion_permission_for_the_running_mode():
     # The motion permission (L2) runs in every configuration, with or without the GPIO safety
     # path; the referee votes only with AutoReferee. Its mode follows the arguments.
-    core = load_xml('launcher/launch/questix_core.launch.xml')
-    include = next(
-        include for include in core.findall('.//include')
-        if 'motion_permission.launch.xml' in include.get('file', ''))
-    group = next(group for group in core.findall('.//group') if include in list(group))
-    assert group.get('if') is None
-    assert group.get('unless') == '$(var invalid_configuration)'
-    values = {arg.get('name'): arg.get('value') for arg in include.findall('./arg')}
-    assert values == {'robot_mode': '$(var robot_mode)',
-                      'enable_referee': '$(var is_competition)'}
-
+    # (The include and its arguments: test_core_always_owns_exactly_one_operation_manager.)
     permission = load_yaml('operation_manager/config/operation_manager.permission.yaml')[
         'motion_permission_manager']['ros__parameters']
     # The modes Robot Manager and the robot launcher know (scripts/robot_manager/modes.py).

@@ -12,8 +12,8 @@ Pi 上で HTTP + WebSocket サーバを立て、ブラウザのバーチャル�
   画面には十字キーがないため、射出角度は TILT ▲ / ▼ ボタン（buttons[4] / buttons[6]）で操作します。
 - 教材（QUESTiX LAB）と同じく **操作できるのは 1 台だけ**、ほかの端末は断られて閲覧のみ、
   **「止める」はどの端末からでも押せます**（[操作権](#操作権)）。
-- 下流（`joy_gate` → `joy_controller` / `shot_component` / `esc_motor_control`）は無変更。
-  GPIO 非常停止によるゲートもそのまま効きます。
+- 下流（`joy_controller` / `shot_component` / `esc_motor_control`）は無変更。
+  非常停止（`/emergency_stop`）と走行許可（`/motion_permission`）でアクチュエータが止まるのもそのままです。
 - 無通信 `message_timeout_sec`（既定 0.5 s）でニュートラルを配信する watchdog 付き。
 - 教材の走行実験でロボットを動かしている間は「教材から走らせています」と表示し、「止める」は教材の走行と
   ローラーも止めます（[教材との関係](#教材との関係)）。

@@ -650,6 +650,10 @@ class PreflightTests(unittest.TestCase):
         self.assertIn("/emergency_stop", trial.REQUIRED_TOPICS)
         self.assertIn(trial.AUTHORITY_TOPIC, trial.OPTIONAL_TOPICS)
         self.assertIn(trial.AUTHORITY_TOPIC, trial.PROTECTED_TOPICS)
+        # The motion permission the actuators obeyed is kept the same way.
+        self.assertIn(trial.MOTION_PERMISSION_TOPIC, trial.OPTIONAL_TOPICS)
+        self.assertIn(trial.MOTION_PERMISSION_TOPIC, trial.PROTECTED_TOPICS)
+        self.assertNotIn("/joy_gated", trial.OPTIONAL_TOPICS)  # joy_gate was removed
         pre = trial.classify_preflight(
             ["/drive_component"], ["/target_twist", "/drive_status", "/emergency_stop"])
         self.assertEqual(pre["missing_required"], [])

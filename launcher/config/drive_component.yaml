@@ -131,7 +131,7 @@ drive_component:
 
     # /target_twist 受信タイムアウト（制御 tick 内で判定）。
     # 指令がこの秒数途絶えたら走行モータを停止する（velocity/current 両モードで有効）。
-    # 上流（uart_joy_driver/joy_gate/joy_controller）が停止しても暴走を防ぐ安全機能。
+    # 上流（uart_joy_driver/joy_controller/twist_arbiter）が停止しても暴走を防ぐ安全機能。
     # 0以下で無効（安全機能のため通常は無効化しないこと）。
     cmd_timeout_sec: 1.0
 

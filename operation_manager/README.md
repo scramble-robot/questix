@@ -1,116 +1,105 @@
 # operation_manager
 
-ROS 2 package that subscribes to raw GPIO topics from `gpio_reader` and
-produces the robot-wide fail-safe controllability state.
+The robot-wide stop and permission decisions of QUESTiX, as three components that share no state
+(`design/safety_permission_input_refactor.md`, section 3.3). Each runs as its own process
+(`*_node` executables) and can also be loaded into a container. `questix_core` starts them through
+`launch/operation_manager.launch.xml` (arguments: `robot_mode`, `enable_gpio_safety`,
+`enable_referee`).
 
-Publishers:
-- `/gpio/controllable` (std_msgs/Bool): true if controllable
-- `/diagnostics` (diagnostic_msgs/DiagnosticArray): standard diagnostic aggregation
-  topic. One `DiagnosticStatus` (name `operation_manager: gpio_controllability`,
-  hardware_id `gpio`) with `level` OK/ERROR and per-pin `KeyValue` entries
-  (`pin_<N>_state`, `pin_<N>_expected`, `pin_<N>_received`,
-  `pin_<N>_age_sec`). GPIO27 also includes `pin_27_signal_limit`, which
-  records that a high input cannot distinguish permission from disconnected,
-  client-unpowered, or primary-side-open states. Consumable by
-  `rqt_runtime_monitor`.
-- `/emergency_stop` (questix_msgs/EmergencyStop, reliable + transient_local, keep-last(1)):
-  unified emergency stop state, `active = !controllable`, published on every
-  controllability evaluation (each GPIO update plus the 100 ms watchdog timer).
-  See `questix_msgs/README.md` for the full topic contract and recovery semantics.
+| Component | Decides | Inputs | Publishes |
+|---|---|---|---|
+| `EmergencyStopManager` (`emergency_stop_manager`) | the emergency stop (L1), a safety function | GPIO5 (physical E-stop) | `/emergency_stop` |
+| `RefereeMonitor` (`referee_monitor`, competition only) | the referee's vote | GPIO27 (AutoReferee `AR_in`) | `/motion_vote/referee` |
+| `MotionPermissionManager` (`motion_permission_manager`) | the motion permission (L2) | the votes the running mode needs | `/motion_permission` |
 
-Parameters:
+The actuators (drive_component, shot_component, esc_motor_control) obey `/motion_permission` and
+`/emergency_stop` and nothing else; they know no mode, no referee and no teacher. Contracts:
+`questix_msgs/README.md`.
 
-- `safe_low_pins`: pins whose safe value is `false` (stop on `true`)
-- `safe_high_pins`: pins whose safe value is `true` (stop on `false`)
-- `timeout_seconds`: maximum allowed age of GPIO update before marking not controllable
-- `emergency_stop_topic`: topic name for the unified emergency stop state (default `/emergency_stop`)
-- `gpio_safety_enabled` (default `true`): `false` runs the node without the GPIO safety path
-  (`config/operation_manager.no_gpio.yaml`, used by `questix_core` with
+## EmergencyStopManager (L1)
+
+The physical E-stop circuit's GPIO5, and nothing that is not a safety function (keep other
+features out of this component). `config/emergency_stop_manager.yaml`:
+
+- `safe_low_pins` (`[5]`): pins whose safe value is `false` (stop on `true`). GPIO5 raw value:
+  released `false`, pressed `true`.
+- `timeout_seconds` (1.0): a GPIO update older than this counts as pressed.
+- `emergency_stop_topic` (`/emergency_stop`).
+- `gpio_safety_enabled` (default `true`): `false` runs without the GPIO safety path
+  (`config/emergency_stop_manager.no_gpio.yaml`, used by `questix_core` with
   `enable_gpio_ref:=false`, an explicit manual diagnostic launch only: the launch argument must be
   given on that launch, the `ENABLE_GPIO_REF` environment variable never selects it, and nothing
-  persists it; the production launcher always passes `enable_gpio_ref:=true`). It then reads no GPIO, publishes no
-  `/gpio/controllable` and no pin diagnostics (one WARN status instead), and still owns
-  `/emergency_stop`: `active=false`, reason `released (no GPIO safety path)`, every 100 ms.
-  Every actuating node and QUESTiX LAB therefore keep one rule (unheard, silent or active
-  means stop) with or without GPIO.
+  persists it; the production launcher always passes `enable_gpio_ref:=true`). It then reads no
+  GPIO, publishes no pin diagnostics (one WARN status instead), and still owns `/emergency_stop`:
+  `active=false`, reason `released (no GPIO safety path)`, every 100 ms. Every actuating node and
+  QUESTiX LAB therefore keep one rule (unheard, silent or active means stop) with or without GPIO.
 
-The two pin lists define the monitored pins; no separate parallel
-`monitored_pins` array exists. Startup fails for an empty configuration,
-duplicates, overlap between lists, BCM values outside 0--53, or a non-positive
-timeout.
+Publishers:
 
-Profiles:
+- `/emergency_stop` (questix_msgs/EmergencyStop, reliable + transient_local, keep-last(1)):
+  `active` while a monitored pin is pressed, not received, stale or has an invalid time; on every
+  GPIO update and every 100 ms. `source` is `operation_manager`; `reason` is `released` or the pin
+  reasons (`pin 5 not received; `, `pin 5 is true, expected false; `, `pin 5 timeout; `).
+- `/diagnostics` (diagnostic_msgs/DiagnosticArray): one status `operation_manager: emergency_stop`
+  (OK / ERROR) with per-pin `pin_<N>_state`, `_expected`, `_received`, `_age_sec`.
 
-- `config/operation_manager.practice.yaml`: `safe_low_pins: [5]`,
-  with `safe_high_pins` omitted so the node uses its typed empty integer-array
-  default. Do not write an untyped YAML `[]`: the ROS 2 parameter parser treats
-  it as `PARAMETER_NOT_SET` rather than an empty integer array.
-- `config/operation_manager.competition.yaml`: `safe_low_pins: [5]`,
-  `safe_high_pins: [27]`
-- `config/operation_manager.yaml`: backward-compatible safe practice default,
-  also omitting `safe_high_pins`
-- `config/operation_manager.no_gpio.yaml`: `gpio_safety_enabled: false` (no GPIO safety path)
+The circuit independently removes motor power through RLY1: both DDT drive motors, the roller ESC,
+the Shot servo and the Tilt servo, while the Raspberry Pi and the 5 V / 3.3 V I/O stay powered (so
+GPIO5 keeps reporting). The hardware cutoff and the ROS software stop are independent, redundant
+safety paths.
 
-GPIO5 is the raw indication from the physical emergency-stop circuit. The
-circuit independently removes motor power through RLY1; GPIO5 reports its state
-to ROS. RLY1 cuts power to both DDT drive motors, the roller ESC, Shot servo,
-and Tilt servo while Raspberry Pi, 5 V I/O, and 3.3 V I/O remain powered. The
-hardware cutoff and ROS software stop are independent, redundant safety paths.
+## RefereeMonitor (the referee's vote)
 
-GPIO27 is the competition-only AutoReferee `AR_in`. The client defeat output
-is 5 V when defeated and 0 V otherwise; the HAT optocoupler inverts it, so
-defeated is `false`/stop and R2 (10 kΩ) pulls the not-defeated state to
-3.3 V/`true`. Disconnected AutoReferee, unpowered client, and primary-side
-open circuit also read `true`. This hardware ambiguity cannot be detected by
-operation_manager and is reported in diagnostics as `pin_27_signal_limit`.
+The AutoReferee's GPIO27 as the referee's vote for the motion permission. A defeat is a state of
+the game, not a safety function: it never reaches `/emergency_stop`. Started by competition
+launches only. `config/referee_monitor.yaml`: `referee_pins` (`[27]`, safe-high),
+`timeout_seconds` (1.0), `vote_topic` (`/motion_vote/referee`).
 
-No pin is considered safe until its first message has arrived. Every required
-pin must be received, fresh, and equal to its configured safe value. Reasons
-distinguish `not received`, `timeout`, actual/expected value mismatch,
-non-finite time, and time moving backwards.
-`/emergency_stop.active` is always the inverse of `/gpio/controllable`.
+- `/motion_vote/referee` (questix_msgs/ActuationAuthority, reliable + volatile, keep-last(1); both
+  flags equal, `source` `referee`): true while GPIO27 is received, fresh and true; on every GPIO
+  update and every 100 ms.
+- `/diagnostics`: `operation_manager: referee` (OK; WARN while the referee stops the robot; ERROR
+  while the signal is missing) with the per-pin values and `pin_27_signal_limit`.
 
-GPIO freshness uses `std::chrono::steady_clock`, which is monotonic and is
-independent of ROS or system-clock adjustments. ROS time remains in the
-`/diagnostics` and `/emergency_stop` message header stamps. The evaluator also
-treats a backwards or NaN/infinite freshness timestamp as not controllable,
-with an infinite diagnostic age, so an invalid time source cannot extend the
-fresh period.
+GPIO27 is the AutoReferee `AR_in`. The client's defeat output (5 V when defeated, 0 V otherwise)
+is inverted by the HAT's optocoupler, so defeated reads `false` and not defeated is pulled to
+3.3 V / `true` by R2 (10 kΩ). A disconnected AutoReferee, an unpowered client and an open primary
+side also read `true`: current hardware cannot tell them from "not defeated", and the diagnostics
+say so (`pin_27_signal_limit`).
 
-| Mode | GPIO5 physical E-stop | GPIO27 AutoReferee | Controllable |
-|---|---:|---:|---:|
-| practice | false | not monitored | true |
-| practice | true | not monitored | false |
-| competition | false | true | true |
-| competition | true | any | false |
-| competition | any | false | false |
-| any | missing or stale required input | - | false |
+## MotionPermissionManager (L2)
 
-## Motion permission (L2)
+Combines the votes the running mode needs into `/motion_permission` (questix_msgs/MotionPermission,
+reliable + volatile, 20 Hz and at once on a change). It knows only votes
+(`config/operation_manager.permission.yaml`):
 
-Two more components, with no state shared with the node above or with each other (each also runs
-as its own process; `launch/motion_permission.launch.xml`, started by `questix_core`):
+- `votes.<name>: <topic>`: `referee: /motion_vote/referee`, `teacher: /actuation_authority`.
+- `required.<mode>: [<name>, ...]`: lesson `[teacher]`, competition `[referee]`; practice is left
+  out (no vote, always allowed, still published).
+- `modes`: the known modes; `mode` (questix_core's `robot_mode`): another one refuses to start, as
+  does a required vote without a topic.
+- `lease_sec` (1.0): a vote older than this is stale.
 
-- `RefereeMonitor` (`referee_monitor_node`, `config/referee_monitor.yaml`, competition only):
-  GPIO27 as the referee's vote `/motion_vote/referee` (questix_msgs/ActuationAuthority,
-  reliable + volatile; on every GPIO update and every 100 ms). true = may move; false, not
-  received or older than `timeout_seconds` = may not. Its pin diagnostics (with
-  `pin_27_signal_limit`) go to `/diagnostics` as `operation_manager: referee` (WARN when the
-  referee stops the robot, ERROR when the signal is missing).
-- `MotionPermissionManager` (`motion_permission_manager_node`,
-  `config/operation_manager.permission.yaml`): combines the votes the running `mode` needs into
-  `/motion_permission` (questix_msgs/MotionPermission, reliable + volatile, 20 Hz and at once on
-  a change). It knows only votes: `votes.<name>: <topic>`, `required.<mode>: [<name>, ...]`
-  (a mode left out needs none), `modes` (the known modes; another one refuses to start, as does
-  a required vote without a topic), `lease_sec`. A new condition is a vote node plus one line
-  in that YAML. Rule: `questix_safety/motion_permission_rule.hpp`.
+A required vote never heard → `<name>:unknown`, silent → `<name>:stale` (both flags), a received
+false → `<name>:off` (that flag). A new condition is a node that publishes a vote and one line in
+the YAML. Rule: `questix_safety/motion_permission_rule.hpp`.
 
-drive_component, shot_component and esc_motor_control obey `/motion_permission`. The E-stop above
-still includes GPIO27 in competition (`config/operation_manager.competition.yaml`) until it is
-taken out of the E-stop (a defeat is not a safety function). Contract: `questix_msgs/README.md`.
+## Modes
+
+| Mode | GPIO5 physical E-stop | GPIO27 AutoReferee | `/emergency_stop` | `/motion_permission` |
+|---|---:|---:|---|---|
+| practice / lesson | false | not read | released | practice: allowed; lesson: the teacher's vote |
+| any | true, missing or stale | - | active | (whatever the votes say) |
+| competition | false | true | released | allowed |
+| competition | false | false, missing or stale | released | not allowed (`referee:off`) |
+
+GPIO freshness uses `std::chrono::steady_clock` (monotonic, independent of ROS or system-clock
+adjustments); ROS time is only in the message stamps. A backwards or non-finite freshness time
+counts as stale, so an invalid time source cannot extend the fresh period. No pin is considered
+safe before its first message.
 
 Build:
 - colcon build --packages-select operation_manager
 
 Run (with config):
-- `ros2 launch operation_manager operation_manager.launch.xml`
+- `ros2 launch operation_manager operation_manager.launch.xml robot_mode:=practice`

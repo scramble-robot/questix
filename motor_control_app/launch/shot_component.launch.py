@@ -27,14 +27,6 @@ def generate_launch_description():
         description='Path to the shot component configuration YAML'
     )
 
-    # joy_topic は launcher が /joy <-> /joy_gated を切替えるための唯一の override。
-    # parameters リストで YAML の後に置くので launcher の指定が勝つ。
-    joy_topic_arg = DeclareLaunchArgument(
-        'joy_topic',
-        default_value='/joy',
-        description='Joy input topic (override-only, default matches YAML)'
-    )
-
     # accept_lab_input は練習用起動 (questix_launcher) だけが QUESTiX LAB の
     # チルト・射出を許可するための override。既定値は YAML と同じ false。
     accept_lab_input_arg = DeclareLaunchArgument(
@@ -53,7 +45,6 @@ def generate_launch_description():
             LaunchConfiguration('config_file'),
             LaunchConfiguration('control_config_file'),
             {
-                'joy_topic': LaunchConfiguration('joy_topic'),
                 'accept_lab_input': ParameterValue(
                     LaunchConfiguration('accept_lab_input'), value_type=bool),
             },
@@ -64,7 +55,6 @@ def generate_launch_description():
     return LaunchDescription([
         *control_actions(),
         config_file_arg,
-        joy_topic_arg,
         accept_lab_input_arg,
         shot_component_node
     ])

@@ -5,8 +5,8 @@ WebSocket (see ``ws_server`` / ``joy_frame``). The latest frame is re-published
 at ``publish_rate`` like ``uart_joy_driver``; when frames stop for longer than
 ``message_timeout_sec`` (Wi-Fi drop, backgrounded browser) a neutral Joy is
 published so downstream nodes stop. Emergency-stop state from
-``emergency_stop_topic`` is relayed to the page for display only; gating is
-still done by ``joy_gate`` and the per-component E-stop subscribers.
+``emergency_stop_topic`` is relayed to the page for display only; the actuators
+stop on ``/emergency_stop`` and ``/motion_permission`` themselves.
 
 Lessons: ``arbiter_status_topic`` (twist_arbiter's latched JSON status) is
 relayed so the page can say when a QUESTiX LAB driving experiment has the

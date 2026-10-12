@@ -89,8 +89,9 @@ test/                       制御テストと起動中の結合検証
 ```
 
 入力経路は `/blockly/controller_joy` またはBlockly → bridge → `/joy` →
-既存 `joy_gate` → `joy_controller` → `/target_twist` → simulator → `/odom`。
-操作許可は既存の `operation_manager` を通します。
+`joy_controller` → `/target_twist` → simulator → `/odom`。
+非常停止と走行許可は実機と同じ `operation_manager`（`emergency_stop_manager` がシミュレータの
+`/gpio_5` を、`motion_permission_manager` が練習モードの許可を出す）を通します。
 
 車輪の寸法は `questix_launcher/config/drive_component.yaml`、加速度・RPM上限・Joy倍率などの操作設定は
 `questix_control_config/config/controls.uart.yaml`（パッケージの初期値）、モデルは `description_launch` から取得します。

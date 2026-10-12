@@ -150,6 +150,22 @@
       <p class="section-help">ロボットは約 1 秒この許可を受け取れないと止まります（この PC の Robot Manager が止まった場合も同じです）。非常停止ボタンの代わりにはなりません。</p>
     </section>
 
+    <!-- Why the robot does not move (motion_state.py): /emergency_stop (L1) and /motion_permission
+         (L2) read once on request, in every mode. Reads only; changes nothing. -->
+    <section class="card" id="motion-state-card" aria-labelledby="motion-state-heading">
+      <h2 id="motion-state-heading">ロボットが動かないとき</h2>
+      <p class="section-help">ロボットから非常停止と走行許可（教材は先生の操作許可、大会は AutoReferee）を読み取り、いま何が止めているかを表示します。読み取りに数秒かかります。何も変更しません。</p>
+      <div class="button-group">
+        <button type="button" class="btn" id="motion-state-check">なぜ動かないか確認</button>
+      </div>
+      <dl class="readiness-grid" id="motion-state-result" hidden>
+        <div><dt>非常停止</dt><dd id="motion-state-estop">—</dd></div>
+        <div><dt>走行</dt><dd id="motion-state-drive">—</dd></div>
+        <div><dt>発射機構</dt><dd id="motion-state-launcher">—</dd></div>
+      </dl>
+      <p id="motion-state-summary" class="section-help" role="status"></p>
+    </section>
+
     <section class="card">
       <h2>起動前の確認</h2>
       <p class="section-help">次回の起動に使う設定を確認してから、ロボットを起動します。</p>
@@ -822,7 +838,8 @@
   <script src="/static/status-view.js?v=2"></script>
   <script src="/static/network-view.js?v=1"></script>
   <script src="/static/trial-view.js?v=1"></script>
-  <script src="/static/app.js?v=20"></script>
+  <script src="/static/motion-state-view.js?v=1"></script>
+  <script src="/static/app.js?v=21"></script>
   <script src="/static/controller-map.js?v=12"></script>
   <script src="/static/controls.js?v=22"></script>
 </body>

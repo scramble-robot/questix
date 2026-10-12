@@ -394,7 +394,7 @@ colcon test --packages-select questix_lab_bridge
 Validated so far on an AMD64 development machine with published test topics only (driving: a
 fake drive node obeying `/target_twist`, with the pages driven in headless Chrome). Raspberry Pi 5
 validation with the real LiDAR, drive, and a camera is still pending and is authoritative —
-in particular the driving experiments with the real motors, `joy_gate`-less startup and the
+in particular the driving experiments with the real motors, startup without the GPIO safety path and the
 physical E-stop. The launcher experiments were checked end to end against a fake launcher node
 (statuses per the contract above) only; the real roller ESC, servos, controller takeover and
 E-stop on a Raspberry Pi 5 are still to be validated.

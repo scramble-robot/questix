@@ -38,7 +38,7 @@ private:
   rclcpp::Clock steady_clock_{RCL_STEADY_TIME};
 
   // NOTE: single-threaded executor is assumed; no mutex guards logic_ because all callbacks run
-  // on one thread (as in joy_gate).
+  // on one thread.
   ArbiterLogic logic_;
   // Version of the status last published; the first publish always happens.
   std::optional<unsigned> sent_version_;

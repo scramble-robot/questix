@@ -3,8 +3,8 @@
 Joy Controller launch file
 YAML が Single Source of Truth。個別の use_sim_time / debug_mode / joy_device 等の
 launch 引数は廃止し、YAML を編集するか config_file:=... で切り替えること。
-例外: joy_topic は launcher が /joy <-> /joy_gated を切替えるために使う唯一のインライン override。
-YAML 読み込みより後に置くことで launcher からの指定が勝つようにする。
+joy_controller は /joy を読む（ノードの既定）。止める判断はアクチュエータが /emergency_stop と
+/motion_permission で行うので、/joy を間で止めるノードはない。
 -->
 <launch>
     <arg name="dual_stick" default="false" description="Use dual stick differential drive mode" />
@@ -24,7 +24,6 @@ YAML 読み込みより後に置くことで launcher からの指定が勝つ�
          default="$(find-pkg-share web_joy_driver)/config/web_joy_driver_params.yaml"
          description="Path to the web (smartphone/browser) joy driver configuration YAML" />
     <arg name="controller_type" default="uart" description="Controller type: dualshock, uart, or web" />
-    <arg name="joy_topic" default="/joy" description="Joy input topic (override only)" />
     <include file="$(find-pkg-share questix_control_config)/launch/control_profile.launch.py" />
 
     <!-- Joy node (from joy package) - DualShock mode (also the fallback for unknown types) -->
@@ -55,13 +54,11 @@ YAML 読み込みより後に置くことで launcher からの指定が勝つ�
     <node pkg="joy_controller" exec="joy_controller_node" name="joy_controller" output="screen" unless="$(var dual_stick)">
         <param from="$(var config_file)" />
         <param from="$(var control_config_file)" />
-        <param name="joy_topic" value="$(var joy_topic)" />
     </node>
 
     <!-- Joy controller dual stick node (dual stick mode) -->
     <node pkg="joy_controller" exec="joy_controller_dual_stick_node" name="joy_controller_dual_stick" output="screen" if="$(var dual_stick)">
         <param from="$(var dual_stick_config_file)" />
         <param from="$(var control_config_file)" />
-        <param name="joy_topic" value="$(var joy_topic)" />
     </node>
 </launch>

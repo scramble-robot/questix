@@ -13,8 +13,9 @@ QUESTiXシステムの各ノードを起動するためのlauncherファイル�
 
 | | 教材（`lesson`） | 練習（`practice`） | 大会（`competition`） |
 |---|---|---|---|
-| GPIO（gpio_reader / operation_manager） | GPIO5 | GPIO5 | GPIO5 + GPIO27（`*.competition.yaml`） |
+| gpio_reader が読む GPIO | GPIO5 | GPIO5 | GPIO5 + GPIO27（`gpio_reader.competition.yaml`） |
 | RefereeMonitor（GPIO27 → 審判の票） | 起動しない | 起動しない | 起動する |
+| 非常停止（`/emergency_stop`） | GPIO5 | GPIO5 | GPIO5 |
 | 走行許可に必要な票 | 先生（`/actuation_authority`） | なし（常に許可） | 審判（`/motion_vote/referee`） |
 | twist_arbiter / 発射機構の教材入力（`accept_lab_input`） | 起動する / true | 起動しない / false | 起動しない / false |
 
@@ -32,24 +33,21 @@ QUESTiXシステムの各ノードを起動するためのlauncherファイル�
 
 ## GPIO安全系（非常停止、L1）
 
-`enable_gpio_ref:=true` は、drive/shot の有無に関係なく `gpio_reader` と `operation_manager` を
-それぞれ1プロセス起動します。drive が使う `joy_controller_referee.launch.xml` 内の
-operation_manager は統合時に無効化されるため、同名ノードは重複しません。standalone referee
-launch は互換性のため既定で operation_manager を起動します。
-
-- `practice` / `lesson`: GPIO5だけを読み、physical E-stopをsafe-lowとして判定
-- `competition`: GPIO5とGPIO27を読み、GPIO27 AutoRefereeをsafe-highとして追加判定
-  （GPIO27 は走行許可の審判の票にもなっています。アクチュエータが走行許可を見るようになったので、
-  次の段階で非常停止からは外します）
+`enable_gpio_ref:=true` は、drive/shot の有無に関係なく `gpio_reader` を1プロセス起動し、
+operation_manager の `emergency_stop_manager` が GPIO5（物理非常停止、safe-low）を判定して
+`/emergency_stop` を出します。非常停止の入力はどのモードでも GPIO5 だけです（安全機能だけを扱う）。
+大会では gpio_reader が GPIO27 も読みますが、それは `referee_monitor` が審判の票
+（`/motion_vote/referee`）にするためで、撃破は非常停止ではなく走行許可で止まります。
+operation_manager（非常停止・走行許可・審判）は `questix_core` が 1 回だけ起動し、ほかの launch は
+起動しません（`/joy` を間で止める joy_gate はありません）。
 
 `launch.env` の `ENABLE_GPIO_REF` はどのモードでも読まないため、既存の `launch.env` に
-`ENABLE_GPIO_REF=false` が残っていても、教材・練習では GPIO5、competition では GPIO5 と
-GPIO27 の安全系が常時有効です（issue #168）。
+`ENABLE_GPIO_REF=false` が残っていても、GPIO5 の安全系は常時有効です（issue #168）。
 
 `/emergency_stop` の発行元は operation_manager だけで、`questix_core` は operation_manager を
 `enable_gpio_ref` に関係なく常に起動します。`enable_gpio_ref:=false` は `questix_core` を手で
 `ros2 launch` する明示的な診断用途だけに残る機能で（`competition` 以外。
-production の `questix_robot_launcher.sh` は渡しません）、`operation_manager.no_gpio.yaml` で
+production の `questix_robot_launcher.sh` は渡しません）、`emergency_stop_manager.no_gpio.yaml` で
 GPIO を読まず、`/emergency_stop` に `active=false`、reason `released (no GPIO safety path)` を
 出し続けます。drive / shot / ESC と QUESTiX LAB は構成によらず「未受信・途絶・押下なら止める」の
 一つの規則だけを持ち（`require_emergency_stop: true`）、この診断構成でも（走行許可があれば）
@@ -81,8 +79,8 @@ esc_motor_control（`launcher_allowed`）が `questix_safety::PermissionMonitor`
 - 教材: 先生の許可（Robot Manager の操作タブ、`/actuation_authority`）がある間だけ、
   コントローラーでも教材からも動きます。
 - 練習: 票は要らず常に許可です（MotionPermissionManager が落ちれば止まる、という規則は同じ）。
-- 大会: AutoReferee の撃破（GPIO27 false）で止まります。shot は撃破ではサーボバスを解放せず
-  （電源は入ったまま）、射撃とチルトだけを断ります。
+- 大会: AutoReferee の撃破（GPIO27 false）で止まります（非常停止ではないので、shot はサーボバスを
+  解放せず（電源は入ったまま）、射撃とチルトだけを断ります）。
 
 両方が閉じているときは非常停止（L1）の理由と反応が優先します。
 
@@ -99,14 +97,12 @@ AutoReferee未接続、クライアント無通電、一次側断線も `true` �
 ハードウェアでは非撃破と区別できません。この制約は `/diagnostics` の
 `pin_27_signal_limit` にも表示されます。
 
-| Mode | GPIO5 physical E-stop | GPIO27 AutoReferee | Controllable |
-|---|---:|---:|---:|
-| practice / lesson | false | not monitored | true |
-| practice / lesson | true | not monitored | false |
-| competition | false | true | true |
-| competition | true | any | false |
-| competition | any | false | false |
-| any | missing or stale required input | - | false |
+| Mode | GPIO5 physical E-stop | GPIO27 AutoReferee | `/emergency_stop` | `/motion_permission` |
+|---|---:|---:|---|---|
+| practice / lesson | false | not read | released | practice: allowed; lesson: the teacher's vote |
+| any | true, missing or stale | - | active | — |
+| competition | false | true | released | allowed |
+| competition | false | false, missing or stale | released | not allowed (`referee:off`) |
 
 安全系だけを非通電で起動するコマンド例:
 
@@ -143,8 +139,7 @@ QUESTiX LAB の教材ブリッジは `/target_twist/lab` に出し、`twist_arbi
 - `launch/lidar_driver.launch.xml` - LiDAR の座標変換（static TF。ドライバのノードは現在コメントアウト）
 - `launch/test.launch.xml` - テスト・デバッグ用の最小構成
 
-`questix_core.launch.xml` 以外は operation_manager を起動しません（`drive_component.launch.xml` は
-`enable_gpio_ref:=true` のときだけ非常停止を起動し、そのときも gpio_reader と走行許可は起動しない）。
+`questix_core.launch.xml` 以外は operation_manager を起動しません。
 drive / shot / ESC は `/emergency_stop` と `/motion_permission` が届かない間は動かないので、単体で
 動かすときは別の端末で発行元を起動してください
 （手順は [`questix_msgs/README.md`](../questix_msgs/README.md) の「単体起動では発行元も起動する」）。

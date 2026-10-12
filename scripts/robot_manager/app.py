@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 
 from robot_manager import (actuation, control_runtime, controls, estop_monitor, lab, logs, modes,
-                           recorder, ros_domain, wifi_ap)
+                           motion_state, recorder, ros_domain, wifi_ap)
 
 CONFIG_DIR = Path(os.environ.get("QUESTIX_CONFIG_DIR", "/etc/questix_robot"))
 MODE_FILE = CONFIG_DIR / "mode"
@@ -622,6 +622,12 @@ def _log_launch_config_changes(previous: dict[str, str], current: dict[str, str]
 def get_control_runtime():
     """Read running ROS parameters without applying any saved settings."""
     return control_runtime.read_snapshot(_read_env())
+
+
+@app.get("/api/motion-state")
+def get_motion_state():
+    """Read /emergency_stop and /motion_permission once: why the robot does not move."""
+    return motion_state.read_state(_read_env())
 
 
 @app.get("/api/control-config/{controller}")

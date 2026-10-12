@@ -11,7 +11,7 @@ These are the launch-logic halves of the runtime smoke tests: the launch argumen
 safety-only and environment variants and the invalid configurations are resolved by
 expanding (or, for the invalid one, running) the real launch description in-process, with every
 process execution intercepted. test_gpio_safety_runtime.py starts questix_core once per
-operation_manager profile and checks that the nodes really take these values and what they do
+mode and checks that the nodes really take these values and what they do
 with them (typed profile arrays, the E-stop, the /motion_permission subscriptions).
 """
 
@@ -25,7 +25,7 @@ import yaml
 
 CORE_LAUNCH = 'launcher/launch/questix_core.launch.xml'
 ACTUATING_NODES = ('/drive_component', '/shot_component', '/esc_motor_control')
-GPIO_SAFETY_NODES = ('/gpio_reader_node', '/operation_manager_node')
+GPIO_SAFETY_NODES = ('/gpio_reader_node', '/emergency_stop_manager')
 # The arguments test_gpio_safety_runtime.py starts questix_core with.
 RUNTIME_ARGUMENTS = {'enable_lidar': 'false', 'enable_shot': 'true', 'enable_drive': 'true',
                      'enable_rviz': 'false', 'controller_type': 'dualshock'}
@@ -33,11 +33,11 @@ SAFETY_ONLY_ARGUMENTS = {'enable_lidar': 'false', 'enable_shot': 'false', 'enabl
                          'robot_mode': 'practice', 'enable_rviz': 'false'}
 
 
-def operation_manager_profile(root, profile):
-    """Return the parameters of one installed operation_manager profile."""
+def emergency_stop_profile(root, profile):
+    """Return the parameters of one installed emergency_stop_manager profile."""
     document = yaml.safe_load(
         (root / 'operation_manager' / 'config' / profile).read_text(encoding='utf-8'))
-    return document['operation_manager_node']['ros__parameters']
+    return document['emergency_stop_manager']['ros__parameters']
 
 
 @pytest.mark.parametrize(
@@ -45,13 +45,15 @@ def operation_manager_profile(root, profile):
     [
         # Manual diagnostic run without the GPIO safety path (practice, and lesson: allowed as
         # in #170 until section 9 of the design decides it).
-        ({'robot_mode': 'practice', 'enable_gpio_ref': 'false'}, 'operation_manager.no_gpio.yaml'),
-        ({'robot_mode': 'lesson', 'enable_gpio_ref': 'false'}, 'operation_manager.no_gpio.yaml'),
+        ({'robot_mode': 'practice', 'enable_gpio_ref': 'false'},
+         'emergency_stop_manager.no_gpio.yaml'),
+        ({'robot_mode': 'lesson', 'enable_gpio_ref': 'false'},
+         'emergency_stop_manager.no_gpio.yaml'),
         # The three production modes, always with the GPIO safety path.
-        ({'robot_mode': 'practice', 'enable_gpio_ref': 'true'}, 'operation_manager.practice.yaml'),
-        ({'robot_mode': 'lesson', 'enable_gpio_ref': 'true'}, 'operation_manager.practice.yaml'),
-        ({'robot_mode': 'competition', 'enable_gpio_ref': 'true'},
-         'operation_manager.competition.yaml'),
+        # The E-stop is GPIO5 in every mode (GPIO27 is the referee's vote, not an E-stop input).
+        ({'robot_mode': 'practice', 'enable_gpio_ref': 'true'}, 'emergency_stop_manager.yaml'),
+        ({'robot_mode': 'lesson', 'enable_gpio_ref': 'true'}, 'emergency_stop_manager.yaml'),
+        ({'robot_mode': 'competition', 'enable_gpio_ref': 'true'}, 'emergency_stop_manager.yaml'),
     ],
 )
 def test_core_launch_wires_each_mode(expand, source_packages, launch_arguments, expect_profile):
@@ -59,8 +61,8 @@ def test_core_launch_wires_each_mode(expand, source_packages, launch_arguments, 
     The same actuators in every mode; the mode decides the inputs and the votes.
 
     Every actuating node requires /emergency_stop and /motion_permission whatever the mode
-    (no launch switches either). operation_manager (the E-stop's single owner) gets exactly the
-    profile the switches select, gpio_reader runs only with the GPIO safety path, the motion
+    (no launch switches either). emergency_stop_manager (the E-stop's single owner) gets exactly
+    the profile the switches select, gpio_reader runs only with the GPIO safety path, the motion
     permission runs for the mode with the referee in competition, and QUESTiX LAB's inputs
     (twist_arbiter, the launcher nodes' lab input) exist in lesson mode only.
     """
@@ -71,7 +73,7 @@ def test_core_launch_wires_each_mode(expand, source_packages, launch_arguments, 
         assert nodes[node]['require_emergency_stop'] is True, node
         assert nodes[node]['require_motion_permission'] is True, node
         assert not any('teacher_permission' in name for name in nodes[node]), node
-    assert nodes['/operation_manager_node'] == operation_manager_profile(
+    assert nodes['/emergency_stop_manager'] == emergency_stop_profile(
         source_packages, expect_profile)
     assert ('/gpio_reader_node' in nodes) is (arguments['enable_gpio_ref'] == 'true')
     assert nodes['/motion_permission_manager']['mode'] == mode
@@ -83,7 +85,7 @@ def test_core_launch_wires_each_mode(expand, source_packages, launch_arguments, 
 
 def test_safety_only_practice_launch_runs_the_same_gpio_safety_nodes(expand):
     """
-    Without drive and launcher, practice still runs gpio_reader and operation_manager.
+    Without drive and launcher, practice still runs gpio_reader and emergency_stop_manager.
 
     They get the parameters of the full practice launch, whose processes the runtime test
     keeps alive.
@@ -110,7 +112,7 @@ def test_gpio_ref_environment_does_not_select_the_no_gpio_diagnostic(expand, mon
     assert from_environment == explicit
     for node in GPIO_SAFETY_NODES:
         assert node in from_environment, node
-    assert 'gpio_safety_enabled' not in from_environment['/operation_manager_node']
+    assert 'gpio_safety_enabled' not in from_environment['/emergency_stop_manager']
 
 
 @pytest.mark.parametrize(
