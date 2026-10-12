@@ -13,6 +13,11 @@ if [ "$#" -ne 3 ]; then
     exit 1
 fi
 
+if [ "$ARCHITECTURE" != amd64 ]; then
+    echo "Use scripts/build-pi-image.sh for Raspberry Pi 5 Desktop (.img.xz)" >&2
+    exit 1
+fi
+
 echo "🔧 Preparing base system for $ARCHITECTURE architecture, Ubuntu $UBUNTU_VERSION"
 
 # Create working directories
