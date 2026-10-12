@@ -5,7 +5,7 @@
 QUESTiX publishes setup and image-generation scripts. Each user obtains an official Ubuntu
 Desktop image and generates their own Pi 5 SD image locally; this repository does not
 build, validate or distribute completed OS images through GitHub Actions.
-See [the Pi Desktop image guide](scripts/iso/README.md).
+See [Pi Desktop イメージ生成ガイド](scripts/iso/README.md).
 
 ## 🎯 Features
 
@@ -190,7 +190,7 @@ It retains the FAT boot + ext4 root partitions. Generic ARM64 ISO and Server
 images are not accepted. The output includes ROS 2 Jazzy and a built QUESTiX workspace.
 
 After obtaining the official base and installing the host tools described in the
-[image guide](scripts/iso/README.md):
+[イメージ生成ガイド](scripts/iso/README.md):
 
 ```bash
 make test-pi-image
@@ -276,7 +276,7 @@ rw  # Navigate to robot workspace
 
 - [Ansible Roles](ansible/roles/ros2/README.md)
 - [Playbook Usage](ansible/playbooks/README.md)
-- [Local Pi Desktop Image Guide](scripts/iso/README.md)
+- [Pi Desktop イメージ生成ガイド](scripts/iso/README.md)
 
 ## 🤝 Contributing
 
@@ -332,7 +332,7 @@ confirms that the repositories were fetched; it does not guarantee runtime behav
 
 **Pi image build fails:**
 
-See [the local build and recovery guide](scripts/iso/README.md). The script reports
+See [イメージ生成・復旧ガイド](scripts/iso/README.md). The script reports
 its private scratch directory and any loop device that could not be detached.
 Do not delete a directory while it still contains mounted filesystems.
 
@@ -359,10 +359,9 @@ make build-dev VERBOSE=1
 
 ## 📄 License
 
-QUESTiX code is licensed under the MIT License — see [LICENSE](LICENSE). The OS,
-ROS packages, firmware and third-party assets keep their own licenses. A locally
-generated image is not wholly MIT-licensed. Publishing a recipe does not authorize
-redistribution of the completed image; see [the image licensing notes](scripts/iso/README.md#licenses-and-distribution).
+QUESTiX のコードには [リポジトリのライセンス](LICENSE) が適用されます。
+同梱ソフトウェアにはそれぞれの利用条件があります。生成したイメージを外部へ提供する場合は、
+[生成ガイドの利用・配布について](scripts/iso/README.md#licenses-and-distribution) を確認してください。
 
 ## 🙏 Acknowledgments
 

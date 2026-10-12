@@ -1,38 +1,35 @@
-# QUESTiX: local Raspberry Pi 5 Desktop image
+# QUESTiX：Raspberry Pi 5 向け Desktop イメージ生成ガイド
 
-QUESTiX publishes the generation recipe. Each user downloads the official Ubuntu
-**Desktop** base and generates an image for their own use. There is no GitHub
-Actions image build, validation, artifact upload or release job. The `.img.xz`
-output is an SD/SSD disk image, not an installer ISO (issue #100).
+QUESTiX では生成スクリプトを公開し、利用者が公式 Ubuntu **Desktop** イメージを取得して、
+自分の環境でカスタムイメージを生成します。GitHub Actions によるイメージの生成・検証・配布は行いません。
+出力する `.img.xz` は、SD カードや SSD に書き込むディスクイメージです（issue #100）。
 
-The baseline is Ubuntu 24.04 + ROS 2 Jazzy. The exact base filename, URL and SHA-256
-are pinned together in [pi-desktop-base.env](pi-desktop-base.env), currently
-Ubuntu 24.04.5 `preinstalled-desktop-arm64+raspi.img.xz`. The digest was checked
-against [Ubuntu's official SHA256SUMS](https://cdimage.ubuntu.com/releases/24.04/release/SHA256SUMS).
-No Server image or generic ARM64 ISO is accepted, and no fallback download is used.
-When the base changes, review its partition layout, Desktop/OEM startup and boot
-files as well as its checksum, then repeat the hardware checks below.
+対象は Ubuntu 24.04 + ROS 2 Jazzy です。ベースのファイル名・URL・SHA-256 は
+[ベースイメージの設定](pi-desktop-base.env) に固定しています。
+現在は Ubuntu 24.04.5 の `preinstalled-desktop-arm64+raspi.img.xz` を使用し、
+[Ubuntu 公式のチェックサム](https://cdimage.ubuntu.com/releases/24.04/release/SHA256SUMS) と照合しています。
+Server イメージや汎用 ARM64 ISO には対応していません。指定したベースを取得できない場合も、別のイメージへ自動で切り替えません。
+ベースを更新するときは、チェックサムに加えてパーティション構成、Desktop の初回設定、起動ファイルを確認し、実機検証をやり直してください。
 
-## Build host
+## 生成に使う環境
 
-- Ubuntu 24.04 Linux, aarch64 or x86_64, with root access to loop devices and mount
-  namespaces. Prefer a native ARM64 host for build speed; a Pi 5 also works.
-- About 40 GiB of free disk space on the output filesystem, a network connection
-  for package downloads, and enough RAM for the ROS workspace build.
-- A committed QUESTiX checkout. The image contains **HEAD**, not local edits or
-  the host's `build/`, `install/`, `src/` or credentials. Commit recipe changes
-  before invoking a real build. The output records the commit identity.
-- WSL/containers may lack the required kernel support. Use a Linux VM or native
-  Linux if loop devices, binfmt or mount namespaces are unavailable. The old
-  experimental Docker recipe is not the Pi Desktop build environment.
+- Ubuntu 24.04 Linux（ARM64 または AMD64）。ループデバイスとマウント名前空間を利用でき、sudo 権限が必要です。
+  ビルド速度の面では ARM64 の実行環境を推奨します。Pi 5 上でも生成できます。
+- 出力先に約 40 GiB の空き容量、パッケージ取得用のネットワーク接続、ROS ワークスペースのビルドに必要なメモリを用意します。
+- コミット済みの QUESTiX のソースを使います。イメージに入るのは **HEAD の内容**です。
+  未コミットの編集や、ホストの `build/`・`install/`・`src/`・認証情報は取り込みません。
+  生成スクリプトを編集した場合は、実際の生成前にコミットしてください。使用したコミットは生成物に記録されます。
+- WSL やコンテナでは、必要なカーネル機能を利用できない場合があります。
+  ループデバイス・binfmt・マウント名前空間を使えない場合は Linux VM または通常の Linux 環境を使用してください。
+  既存の実験用 Docker 設定は、この Pi Desktop イメージ用の生成環境ではありません。
 
-Install host tools explicitly (this changes the host, not just an image):
+ホストに必要なツールをインストールします。このコマンドは生成用 PC の環境を変更します。
 
 ```bash
 make setup-pi-image-deps
 ```
 
-For an **x86_64** host, also install and enable ARM64 userspace emulation:
+**AMD64（x86_64）ホストの場合のみ**、ARM64 のプログラムを chroot 内で実行するための準備も行います。
 
 ```bash
 sudo apt-get install -y qemu-user-static binfmt-support
@@ -40,14 +37,13 @@ sudo update-binfmts --enable qemu-aarch64
 cat /proc/sys/fs/binfmt_misc/qemu-aarch64
 ```
 
-The registration must say `enabled` and contain `F` in its flags. The builder
-checks it and never changes the host's binfmt registration itself. This emulates
-userspace for chroot provisioning; it is not a Pi hardware/boot test.
+表示が `enabled` で、`flags` に `F` が含まれることを確認してください。
+生成スクリプトはこの状態を確認しますが、ホストの binfmt 登録自体は変更しません。
+このエミュレーションはイメージ内の設定処理用であり、Pi の起動やハードウェア動作を検証するものではありません。
 
-## Obtain the official base
+## 公式ベースイメージの取得
 
-Run from the repository root as your regular user. These commands download from
-Ubuntu, not from a QUESTiX image release:
+リポジトリのルートで、通常ユーザーとして実行してください。Ubuntu の公式配布元から取得します。
 
 ```bash
 bash -e <<'DOWNLOAD'
@@ -61,123 +57,115 @@ mv "$PI_BASE_FILE.part" "$PI_BASE_FILE"
 DOWNLOAD
 ```
 
-The builder independently checks the pinned digest **before decompression or
-mounting**. Do not replace the expected digest with the digest of an untrusted
-download. For independent signature verification, follow
-[Ubuntu's verification guide](https://ubuntu.com/tutorials/how-to-verify-ubuntu).
+生成スクリプトでも、**展開・マウントの前に** SHA-256 を照合します。
+照合に失敗した場合は、取得元やファイルを確認してください。期待するハッシュ値をダウンロードしたファイルに合わせて書き換えないでください。
+署名を含めて確認する場合は、[Ubuntu の検証手順（英語）](https://ubuntu.com/tutorials/how-to-verify-ubuntu) を参照してください。
 
-## Generate locally
+## ローカルで生成する
 
-Optional checks below are offline and unprivileged; they create small fixture
-files only, never mount filesystems or execute the image build:
+任意で、先にスクリプトの契約テストを実行できます。
+小さなテスト用ファイルだけを使うため、root 権限・ネットワーク・マウントは不要です。イメージ生成も実行しません。
 
 ```bash
 make test-pi-image
 ```
 
-Then build (root mounts a scratch image; package installation happens in chroot):
+続いて生成します。作業用イメージのマウントは root で行い、パッケージは chroot 内にインストールします。
 
 ```bash
 . scripts/iso/pi-desktop-base.env
 make build-kit BASE_IMAGE="$PWD/output/pi/base/$PI_BASE_FILE"
 ```
 
-Equivalent direct invocation:
+スクリプトを直接実行する場合は、上で読み込んだ変数を使って次のように指定できます。
 
 ```bash
 sudo bash scripts/build-pi-image.sh \
   "$PWD/output/pi/base/$PI_BASE_FILE" "$PWD/output/pi"
 ```
 
-No SD device argument is accepted. The original `.img.xz` remains unchanged.
-Each build expands it to a new private scratch file, verifies the two-partition
-layout (FAT `system-boot`, ext4 `writable`), expands the final root partition,
-and mounts both partitions in a private mount namespace. The shared Ansible
-image provisioner builds `/home/ubuntu/questix` as `ubuntu` and configures Robot
-Manager without starting robot services in the build host.
+元の `.img.xz` は変更せず、新しい作業用ファイルへ展開します。物理 SD デバイスを引数に指定することはできません。
+FAT の `system-boot` と ext4 の `writable` を確認し、最後の root パーティションを拡張してから、
+専用のマウント名前空間で設定を行います。
+既存の Ansible 処理が `/home/ubuntu/questix` を `ubuntu` ユーザーでビルドし、Robot Manager を設定します。
+生成用ホスト上でロボットのサービスを起動することはありません。
 
-The official firmware, kernel/initramfs settings and `root=` identity are
-preserved. The existing `hardware_interfaces` role enables I2C/SPI/UART and
-removes the serial-console argument so the controller can use UART. The builder
-does not replace `config.txt`/`cmdline.txt`, overclock the Pi or force GPIOs high.
+公式イメージのファームウェア、カーネル・initramfs の設定、`root=` の識別情報を保持します。
+I2C/SPI/UART は既存の `hardware_interfaces` ロールで設定し、コントローラーが UART を使えるようシリアルコンソールの指定を外します。
+`config.txt`・`cmdline.txt` の全置換、オーバークロック、GPIO の一括 High 出力は行いません。
 
-Ubuntu's OEM user creation is disabled, the temporary `oem` account is removed,
-and cloud-init is disabled so it cannot overwrite account/SSH settings at boot.
-GNOME and the Pi Desktop packages remain installed; the default target is
-`graphical.target`. QUESTiX's existing console password enrollment runs before
-the graphical login. Accounts have no baked-in password, autologin is off, and
-SSH is disabled until enrollment succeeds. Locale, keyboard, timezone and
-network preferences can subsequently be changed in GNOME Settings.
+Ubuntu の OEM ユーザー作成処理は無効にし、一時ユーザー `oem` を削除します。
+cloud-init も無効にして、起動時にユーザーや SSH の設定が書き換わらないようにします。
+GNOME と Pi Desktop のパッケージは保持し、既定の起動先は `graphical.target` にします。
+初回は QUESTiX のコンソール設定でパスワードを登録してから、Desktop のログイン画面に進みます。
+初期パスワードと自動ログインはなく、SSH は登録成功後に有効になります。
+言語・キーボード・タイムゾーン・ネットワークは、その後 GNOME の設定画面で変更できます。
 
-The default raw size is **24 GiB**; use an SD card/SSD of at least **32 GB**.
-For a larger local build, set `QUESTIX_PI_SIZE_GIB` on the direct sudo invocation
-(16–256 GiB is accepted, and the size must exceed the base image):
+展開後のイメージは既定で **24 GiB** です。書き込み先には **32 GB 以上**の SD カードまたは SSD を用意してください。
+容量を変更する場合は、直接実行時に `QUESTIX_PI_SIZE_GIB` を指定します。
+指定範囲は 16～256 GiB で、ベースイメージより大きな容量が必要です。
 
 ```bash
 sudo env QUESTIX_PI_SIZE_GIB=40 bash scripts/build-pi-image.sh \
   "$PWD/output/pi/base/$PI_BASE_FILE" "$PWD/output/pi"
 ```
 
-All mounts and the loop device must be released successfully before compression.
-The output directory is created only after packaging succeeds and contains:
+すべてのマウントとループデバイスを解放してから圧縮します。
+成功すると、結果ディレクトリに次のファイルが出力されます。
 
-- `questix-pi5-desktop-ubuntu<version>-ros2jazzy-<commit>.img.xz`
-- `SHA256SUMS` for the image and metadata
-- `build-info.txt`: official base URL/digest, QUESTiX commit, build time and size
-- `packages.tsv`: installed binary/source package versions and architectures
-- `package-copyrights.tar.gz`: copies of package copyright/license notices
-- Original and final `config.txt`/`cmdline.txt` for comparing boot configuration
+| ファイル | 内容 |
+| --- | --- |
+| `questix-pi5-desktop-ubuntu<version>-ros2jazzy-<commit>.img.xz` | SD カード／SSD に書き込むイメージ |
+| `SHA256SUMS` | イメージと付属ファイルのチェックサム |
+| `build-info.txt` | ベースの URL・ハッシュ、QUESTiX のコミット、生成日時、容量 |
+| `packages.tsv` | 導入したパッケージと対応するソースパッケージのバージョン・アーキテクチャ |
+| `package-copyrights.tar.gz` | 各パッケージの権利表示などのコピー |
+| `base-config.txt`・`base-cmdline.txt` | 変更前の起動設定 |
+| `config.txt`・`cmdline.txt` | 変更後の起動設定 |
 
-The base and QUESTiX commit are pinned; apt/pip packages and external workspace
-repositories can still change over time. This is not a bit-for-bit reproducible
-build. Check the recorded package versions when comparing builds. An existing
-result directory is never overwritten; choose another output directory to rebuild
-the same commit. `PI_OUTPUT_DIR=/path/to/output` overrides the Make target's output.
+ベースと QUESTiX のコミットは固定していますが、apt・pip のパッケージや外部リポジトリの内容は取得時期で変わる場合があります。
+毎回まったく同じバイナリになるとは限らないため、比較する際は記録されたバージョンを確認してください。
+既存の結果ディレクトリは上書きしません。同じコミットを再生成する場合は、別の出力先を指定します。
+Make の出力先は `PI_OUTPUT_DIR=/path/to/output` で変更できます。
 
-## Write and validate on Pi 5
+## SD カードへの書き込みと Pi 5 での確認
 
-1. In the result directory, run `sha256sum --check SHA256SUMS`.
-2. In Raspberry Pi Imager choose **Use custom**, select the generated `.img.xz`,
-   and select your SD/SSD carefully. Writing erases that selected device. Do not
-   apply Imager account/SSH customization; QUESTiX manages first enrollment.
-3. Boot a Pi 5 with a monitor and keyboard. At tty1, set the `ubuntu` password.
-   Then log into the Ubuntu Desktop. SSH becomes available only after enrollment.
-4. Confirm Desktop login, networking, Robot Manager, `/home/ubuntu/questix` and
-   ROS 2 Jazzy. Check the resulting root filesystem capacity and reboot once.
-5. With the robot in a safe test setup, validate GPIO5/GPIO27 E-stop, UART
-   controller input, I2C/SPI devices, mode selection and service startup. Confirm
-   that the robot does not move before the required permissions and safety inputs.
+1. 結果ディレクトリで `sha256sum --check SHA256SUMS` を実行します。
+2. Raspberry Pi Imager の **Use custom** で生成した `.img.xz` を選び、書き込み先の SD カード／SSD を指定します。
+   **選択したデバイスの内容は消去されます。** 書き込み先を確認してください。
+   初回設定は QUESTiX が行うため、Imager 側のユーザー・SSH カスタマイズは適用しません。
+3. Pi 5 に画面とキーボードを接続して起動し、tty1 で `ubuntu` のパスワードを登録します。
+   その後 Ubuntu Desktop にログインします。SSH は登録成功後に利用できます。
+4. Desktop、ネットワーク、Robot Manager、`/home/ubuntu/questix`、ROS 2 Jazzy を確認します。
+   root ファイルシステムの容量を確認し、一度再起動してください。
+5. 安全に動作確認できる状態で、GPIO5/GPIO27 の非常停止、UART のコントローラー入力、I2C/SPI 機器、モード選択、サービス起動を確認します。
+   必要な操作許可や安全入力が揃う前にロボットが動かないことも確認してください。
 
-The script and fixture tests cannot establish those hardware results. Until these
-checks have been performed on a Raspberry Pi 5, issue #100's hardware acceptance
-condition remains unverified. The legacy local AMD64 ISO scripts are separate
-and are not a Pi boot test or a validated Desktop installer path.
+スクリプトのテストだけでは、これらの実機動作は確認できません。
+Pi 5 で上記を確認するまでは、issue #100 の実機に関する受け入れ条件は未確認です。
+既存の AMD64 向け ISO 生成経路は別のもので、Pi の起動検証には使えません。
+その Desktop インストーラーとしての動作も、今回の変更では検証していません。
 
-## Failed builds
+## 生成に失敗した場合
 
-Errors and INT/TERM trigger cleanup in reverse mount order. There is no lazy or
-forced unmount. The failed scratch image is retained in the reported
-`.questix-pi-build.*` directory; a failed build never produces a finished result.
+エラーや INT/TERM を受けると、マウントした順序の逆順で解放を試みます。
+遅延アンマウントや強制アンマウントは行いません。
+失敗時の作業用イメージは、表示された `.questix-pi-build.*` ディレクトリに残します。
 
-If unmount/detach fails, the error reports the loop device. Investigate mounts
-and any process still using that scratch tree before cleanup; **do not delete a
-mounted directory**. The builder's namespace disappears on exit, but processes
-holding the filesystem may still require operator attention. Do not run the
-legacy `make clean` as a way to recover a mounted Pi image. Retry from the
-original verified base, not from the partially provisioned scratch image.
+アンマウントやループデバイスの解放に失敗した場合は、対象デバイスが表示されます。
+使用中のマウントとプロセスを調べてから片付けてください。**マウントされたままのディレクトリは削除しないでください。**
+生成処理の終了時に専用の名前空間はなくなりますが、ファイルシステムを使用するプロセスが残っている場合は確認が必要です。
+Pi イメージの復旧に、既存の `make clean` は使用しないでください。
+再実行するときは途中まで設定した作業用イメージではなく、検証済みの公式ベースからやり直します。
 
-## Licenses and distribution
+<a id="licenses-and-distribution"></a>
 
-The scripts and QUESTiX code use the repository's [MIT license](../../LICENSE).
-Ubuntu packages, ROS, firmware and third-party assets retain their own licenses;
-the image as a whole is not MIT. Copyright files are retained in the image, and
-the accompanying inventory/notices are for traceability, **not a complete source
-offer or a declaration of redistribution compliance**.
+## 利用・配布について
 
-This workflow distributes the recipe and asks each user to obtain Ubuntu from
-its official site and generate an image for personal/internal use. It does not
-upload the generated image. Passing the result to another organisation, posting
-it for download or shipping preloaded SD cards is a separate distribution decision:
-review the included licenses, corresponding-source obligations, firmware terms
-and [Canonical's intellectual property policy](https://canonical.com/legal/intellectual-property-policy).
-Generating from an official base does not remove those obligations.
+QUESTiX のコードには [リポジトリのライセンス](../../LICENSE) が適用されます。
+イメージに含まれる OS や各種ソフトウェアには、それぞれの利用条件が適用されます。
+
+このガイドは、公式ベースから自分の環境でイメージを生成する使い方を案内しています。
+生成したイメージを外部へ提供する場合は、同梱ソフトウェアと配布元の条件を別途確認してください。
+付属のパッケージ一覧や権利表示は、その確認に利用できます。
+詳細は [Ubuntu の公式方針（英語）](https://canonical.com/legal/intellectual-property-policy) を参照してください。
