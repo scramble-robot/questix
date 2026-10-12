@@ -33,7 +33,8 @@ GROUPS = {
         ('slew_taper_band_angular', '目標旋回速度付近の緩和幅 [rad/s]（0で無効）', 'float', 0, 20),
         ('min_command_rpm', '低速不感帯 [RPM]（0で無効）', 'int', 0, 474),
     ]),
-    'shot_component': ('射出・角度調整のキー割り当て', [
+    # The launcher's buttons (joy_launcher -> /launcher_command; the launcher nodes read no /joy).
+    'joy_launcher': ('射出・角度調整・ローラーのキー割り当て', [
         ('fire_button', '射出ボタン番号', 'int', 0, 63),
         ('tilt_up_axis', '上げる入力軸（-1でボタン）', 'int', -1, 63),
         ('tilt_up_axis_sign', '上げる軸の方向（+1 / -1）', 'int', -1, 1),
@@ -41,10 +42,8 @@ GROUPS = {
         ('tilt_down_axis_sign', '下げる軸の方向（+1 / -1）', 'int', -1, 1),
         ('tilt_up_button_index', '射出角度を上げるボタン番号（ボタン操作時のみ）', 'int', 0, 63),
         ('tilt_down_button_index', '射出角度を下げるボタン番号（ボタン操作時のみ）', 'int', 0, 63),
-    ]),
-    'esc_motor_control': ('ローラー', [
-        ('full_speed_button', '回転ボタン番号', 'int', 0, 63),
-        ('full_speed_value', '回転出力（0〜1）', 'float', 0, 1),
+        ('full_speed_button', 'ローラーの回転ボタン番号', 'int', 0, 63),
+        ('full_speed_value', 'ローラーの回転出力（0〜1）', 'float', 0, 1),
     ]),
     'joy_node': ('DualShock 入力', [('deadzone', 'スティック不感帯', 'float', 0, 0.99)]),
     'uart_joy_driver': ('UART 入力', [('deadzone', 'スティック不感帯', 'float', 0, 0.99)]),
@@ -86,6 +85,17 @@ _UNITS_MARKER = re.compile(r'^# questix_controls_units: (\S+)', re.MULTILINE)
 LEGACY_WARNING = ('保存されていた操作設定は、車輪半径の修正（#179）より前の単位のため使っていません。'
                   'そのまま使うと速度・加速度が2倍になります。標準の値を表示しています。'
                   '確認して保存し直してください。')
+# The launcher's controller buttons moved from the shot_component and esc_motor_control sections
+# to joy_launcher's: an older saved profile (and its undo entry) is read as the new layout, and
+# saving writes the new one. questix_control_config repeats these names for the robot launch
+# (LAUNCHER_NODE, LAUNCHER_LEGACY_SECTIONS; kept identical by test_controls.py).
+LAUNCHER_NODE = 'joy_launcher'
+LAUNCHER_LEGACY_SECTIONS = {
+    'shot_component': ('fire_button', 'tilt_axis', 'tilt_up_axis', 'tilt_up_axis_sign',
+                       'tilt_down_axis', 'tilt_down_axis_sign', 'tilt_up_button_index',
+                       'tilt_down_button_index'),
+    'esc_motor_control': ('full_speed_button', 'full_speed_value'),
+}
 _PROFILE_DRIVERS = {
     'uart': ('joy_node', 'uart_joy_driver'),
     'dualshock': ('joy_node', 'uart_joy_driver'),
@@ -143,7 +153,7 @@ def validate(values, controller):
     drive = clean['drive_component']
     if drive['min_command_rpm'] >= drive['max_motor_rpm']:
         raise ValueError('低速不感帯は車輪の最大回転数より小さくしてください。')
-    shot = clean['shot_component']
+    shot = clean[LAUNCHER_NODE]
     inputs = []
     for direction in ('up', 'down'):
         axis = shot[f'tilt_{direction}_axis']
@@ -175,6 +185,27 @@ def _default_file(controller, env):
                         'questix_control_config のビルド・インストールを確認してください。')
 
 
+def _migrate_launcher_layout(values):
+    """Move the launcher keys of an older profile into joy_launcher (a value there wins)."""
+    if not isinstance(values, dict):
+        return values
+    moved = {}
+    result = {}
+    for node, params in values.items():
+        keys = LAUNCHER_LEGACY_SECTIONS.get(node)
+        if keys and isinstance(params, dict) and any(key in params for key in keys):
+            moved.update({key: value for key, value in params.items() if key in keys})
+            rest = {key: value for key, value in params.items() if key not in keys}
+            if rest:
+                result[node] = rest  # left for validate() to refuse: not a field of ours
+            continue
+        result[node] = params
+    if moved:
+        current = result.get(LAUNCHER_NODE)
+        result[LAUNCHER_NODE] = {**moved, **(current if isinstance(current, dict) else {})}
+    return result
+
+
 def _decode(raw, controller):
     document = yaml.safe_load(raw)
     if not isinstance(document, dict):
@@ -184,10 +215,12 @@ def _decode(raw, controller):
         if not isinstance(section, dict) or set(section) != {'ros__parameters'}:
             raise ValueError(f'{node}: ros__parameters セクションが不正です。')
         values[node] = section['ros__parameters']
+    values = _migrate_launcher_layout(values)
     # Upgrade only the complete legacy shape; partial/unknown fields remain errors.
-    shot = values.get('shot_component')
+    shot = values.get(LAUNCHER_NODE)
     if isinstance(shot, dict) and set(shot) == {
-            'fire_button', 'tilt_axis', 'tilt_up_button_index', 'tilt_down_button_index'}:
+            'fire_button', 'tilt_axis', 'tilt_up_button_index', 'tilt_down_button_index',
+            'full_speed_button', 'full_speed_value'}:
         axis = shot.pop('tilt_axis')
         if type(axis) is not int or not -1 <= axis <= 63:
             raise ValueError('旧形式の角度調整の軸番号が不正です。')
@@ -229,7 +262,7 @@ def read_profile(config_dir, controller, env):
             history = json.loads(
                 (config_dir / f'controls.{controller}.history.json').read_text())
             if revision in history:
-                previous = validate(history[revision], controller)
+                previous = validate(_migrate_launcher_layout(history[revision]), controller)
     except FileNotFoundError:
         pass
     except (OSError, ValueError, TypeError):

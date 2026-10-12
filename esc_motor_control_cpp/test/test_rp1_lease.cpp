@@ -31,12 +31,13 @@ public:
 };
 // Access only from this uninstalled test; no runtime override in production.
 struct EscLeaseTestAccess {
-  static void stale_lab(EscMotorControlComponent& node, std::unique_ptr<LeaseOutput> output) {
+  static void stale_command(EscMotorControlComponent& node, std::unique_ptr<LeaseOutput> output) {
     node.pwm_ = std::move(output);
     node.pwm_backend_name_ = "rp1_hw";
-    auto decision = node.roller_lab_logic_.onLab(0.6, node.steady_now_sec() - 2.0, false, false);
-    ASSERT_TRUE(decision.apply);
-    node.current_speed_ = decision.command;
+    node.command_logic_.onCommand(0.0, node.steady_now_sec() - 2.1, false);
+    auto decision = node.command_logic_.onCommand(0.6, node.steady_now_sec() - 2.0, false);
+    ASSERT_TRUE(decision.set);
+    node.current_speed_ = decision.speed;
   }
   static void renew(EscMotorControlComponent& node) { node.renew_pwm_lease(); }
   static void attach(EscMotorControlComponent& node, const std::string& socket) {
@@ -51,18 +52,18 @@ struct EscLeaseTestAccess {
   static void report(EscMotorControlComponent& node) { node.publish_roller_status(); }
   static void gate(EscMotorControlComponent& node) { node.apply_gate(); }
 };
-TEST(Rp1Lease, RenewalExpiresLabWithoutRunningSeparateLabTimer) {
+TEST(Rp1Lease, RenewalExpiresCommandWithoutRunningSeparateCommandTimer) {
   rclcpp::init(0, nullptr, rclcpp::InitOptions(), rclcpp::SignalHandlerOptions::None);
   {
     rclcpp::NodeOptions options;
     options.append_parameter_override("test_mode", true);
     options.append_parameter_override("require_emergency_stop", false);
-    options.append_parameter_override("accept_lab_input", true);
+    options.append_parameter_override("require_motion_permission", false);
     EscMotorControlComponent node(options);
     auto output = std::make_unique<LeaseOutput>();
     auto* observed = output.get();
-    EscLeaseTestAccess::stale_lab(node, std::move(output));
-    // No executor spin: the unrelated lab timer cannot hide the renewal defect.
+    EscLeaseTestAccess::stale_command(node, std::move(output));
+    // No executor spin: the unrelated command timer cannot hide the renewal defect.
     EscLeaseTestAccess::renew(node);
     EXPECT_EQ(observed->applied, 1000);
   }
@@ -169,6 +170,7 @@ TEST(Rp1Lease, ExecutorSilenceGuardFaultIsPublishedAndGateDoesNotRepeatStop) {
     rclcpp::NodeOptions options;
     options.append_parameter_override("test_mode", true);
     options.append_parameter_override("require_emergency_stop", false);
+    options.append_parameter_override("require_motion_permission", false);
     auto node = std::make_shared<EscMotorControlComponent>(options);
     auto observer = std::make_shared<rclcpp::Node>("roller_status_test");
     std::string report;

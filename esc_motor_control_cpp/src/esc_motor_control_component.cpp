@@ -24,12 +24,12 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
   this->declare_parameter<int>("pwm_pin", 13);
   this->declare_parameter<double>("max_speed", 1.0);
   this->declare_parameter<double>("min_speed", -1.0);
-  this->declare_parameter<bool>("enable_safety_stop", true);
+  // /launcher_command older than this stops the roller (a level the publisher repeats while in
+  // use).
   this->declare_parameter<double>("safety_timeout", 1.0);
-  this->declare_parameter<int>("full_speed_button", 7);
-  this->declare_parameter<double>("full_speed_value", 1.0);
   this->declare_parameter<bool>("test_mode", false);
-  this->declare_parameter<std::string>("joy_topic", "/joy");
+  // questix_msgs/LauncherCommand: joy_launcher, or command_arbiter in a lesson launch.
+  this->declare_parameter<std::string>("launcher_command_topic", "/launcher_command");
   this->declare_parameter<std::string>("status_topic", "/roller_motor_status");
   // 統一緊急停止トピック（questix_msgs/EmergencyStop, 入力）。空文字で連動無効。
   this->declare_parameter<std::string>("emergency_stop_topic", "/emergency_stop");
@@ -37,11 +37,11 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
   this->declare_parameter<bool>("require_emergency_stop", true);
   // 一度受信した後、この秒数（steady clock の受信間隔）途絶えたら停止。<=0 で無効。
   this->declare_parameter<double>("emergency_stop_timeout_sec", 1.0);
-  // 教員の許可（questix_msgs/ActuationAuthority の launcher_allowed）。非常停止とは別の
-  // 概念で、練習での opt-in（既定 false）。大会起動（enable_autoreferee）では常に false。
-  this->declare_parameter<bool>("require_teacher_permission", false);
-  this->declare_parameter<std::string>("teacher_permission_topic", "/actuation_authority");
-  this->declare_parameter<double>("teacher_permission_timeout_sec", 1.0);
+  // 走行許可（L2、questix_msgs/MotionPermission の launcher_allowed）。非常停止とは別の概念で、
+  // 未受信・途絶・false はローラーを 0 にする。false は単体診断の明示 opt-out だけ。
+  this->declare_parameter<std::string>("motion_permission_topic", "/motion_permission");
+  this->declare_parameter<bool>("require_motion_permission", true);
+  this->declare_parameter<double>("motion_permission_timeout_sec", 0.5);
   this->declare_parameter<int>("min_pulse_width", 0);         // μs (speed=-1.0)
   this->declare_parameter<int>("max_pulse_width", 2000);      // μs (speed=1.0)
   this->declare_parameter<int>("neutral_pulse_width", 1000);  // μs (ESC arm/idle)
@@ -49,69 +49,46 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
                                        "auto");  // "auto","pigpio","lgpio","simulation"
   this->declare_parameter<std::string>("rp1_guard_socket", "/run/questix_pwm_guard/control.sock");
   this->declare_parameter<int>("gpio_chip_num", 4);  // 0=Pi4, 4=Pi5
-  // QUESTiX LAB roller input. Only practice launches set accept_lab_input=true.
-  this->declare_parameter<bool>("accept_lab_input", false);
-  this->declare_parameter<std::string>("lab_topic", "/roller/lab");
-  this->declare_parameter<double>("lab_max_speed", 0.8);
-  this->declare_parameter<double>("lab_joy_quiet_sec", 1.0);
 
   // ---- Read parameters ----
   pwm_pin_ = this->get_parameter("pwm_pin").as_int();
   max_speed_ = this->get_parameter("max_speed").as_double();
   min_speed_ = this->get_parameter("min_speed").as_double();
-  enable_safety_stop_ = this->get_parameter("enable_safety_stop").as_bool();
   safety_timeout_ = this->get_parameter("safety_timeout").as_double();
-  full_speed_button_ = this->get_parameter("full_speed_button").as_int();
-  full_speed_value_ = this->get_parameter("full_speed_value").as_double();
   test_mode_ = this->get_parameter("test_mode").as_bool();
-  joy_topic_ = this->get_parameter("joy_topic").as_string();
+  launcher_command_topic_ = this->get_parameter("launcher_command_topic").as_string();
   status_topic_ = this->get_parameter("status_topic").as_string();
-  require_teacher_permission_ = this->get_parameter("require_teacher_permission").as_bool();
-  teacher_permission_topic_ = this->get_parameter("teacher_permission_topic").as_string();
-  teacher_permission_timeout_sec_ = rollerTeacherPermissionLease(
-      this->get_parameter("teacher_permission_timeout_sec").as_double());
   min_pulse_width_us_ = this->get_parameter("min_pulse_width").as_int();
   max_pulse_width_us_ = this->get_parameter("max_pulse_width").as_int();
   neutral_pulse_width_us_ = this->get_parameter("neutral_pulse_width").as_int();
   pwm_backend_name_ = this->get_parameter("pwm_backend").as_string();
   rp1_guard_socket_ = this->get_parameter("rp1_guard_socket").as_string();
   gpio_chip_num_ = this->get_parameter("gpio_chip_num").as_int();
-  accept_lab_input_ = this->get_parameter("accept_lab_input").as_bool();
-  lab_topic_ = this->get_parameter("lab_topic").as_string();
-  lab_max_speed_ = this->get_parameter("lab_max_speed").as_double();
-  lab_joy_quiet_sec_ = this->get_parameter("lab_joy_quiet_sec").as_double();
 
   if (pwm_backend_name_ == "rp1_hw" && !test_mode_) {
     if (pwm_pin_ != 13 || min_pulse_width_us_ != 0 || max_pulse_width_us_ != 2000 ||
-        neutral_pulse_width_us_ != 1000 || !enable_safety_stop_ ||
+        neutral_pulse_width_us_ != 1000 ||
         !std::isfinite(safety_timeout_) || safety_timeout_ <= 0 || safety_timeout_ > 1.0 ||
         !std::isfinite(min_speed_) || !std::isfinite(max_speed_) || min_speed_ < -1.0 ||
-        max_speed_ > 1.0 || min_speed_ > 0 || max_speed_ < 0 || !std::isfinite(full_speed_value_) ||
-        full_speed_value_ < 0 || full_speed_value_ > 1) {
+        max_speed_ > 1.0 || min_speed_ > 0 || max_speed_ < 0) {
       throw std::invalid_argument(
           "rp1_hw requires GPIO13, 0/2000/1000 us and a safety timeout in (0,1]");
     }
   }
 
   // ---- Internal state ----
-  full_speed_logic_.configure(safety_timeout_);
-  RollerLabLogic::Config lab_config;
-  lab_config.accept = accept_lab_input_ && !lab_topic_.empty();
-  lab_config.max_speed = lab_max_speed_;
-  lab_config.joy_quiet_sec = lab_joy_quiet_sec_;
-  // Lab commands expire after safety_timeout even with enable_safety_stop=false.
-  lab_config.timeout_sec = safety_timeout_;
-  roller_lab_logic_.configure(lab_config);
-  if (lab_config.accept &&
-      (!std::isfinite(lab_max_speed_) || lab_max_speed_ < 0.0 || lab_max_speed_ > 1.0)) {
-    RCLCPP_WARN(this->get_logger(), "lab_max_speed=%g is outside [0, 1]; using %.2f",
-                lab_max_speed_, roller_lab_logic_.config().max_speed);
+  // The roller never reverses from a command: [0, max_speed].
+  command_logic_.configure(safety_timeout_, max_speed_);
+  if (command_logic_.timeoutSec() != safety_timeout_) {
+    RCLCPP_WARN(this->get_logger(), "safety_timeout=%g is not usable; using %.1f s",
+                safety_timeout_, command_logic_.timeoutSec());
   }
 
   // ---- Subscribers ----
-  joy_sub_ = this->create_subscription<sensor_msgs::msg::Joy>(
-      joy_topic_, 1,
-      std::bind(&EscMotorControlComponent::joy_callback, this, std::placeholders::_1));
+  // reliable + volatile + keep-last(1) (questix_msgs/msg/LauncherCommand.msg).
+  command_sub_ = this->create_subscription<questix_msgs::msg::LauncherCommand>(
+      launcher_command_topic_, rclcpp::QoS(1).reliable().durability_volatile(),
+      std::bind(&EscMotorControlComponent::command_callback, this, std::placeholders::_1));
 
   // 統一緊急停止トピックは共通の EmergencyStopMonitor（questix_safety）が購読・判定する
   // （transient_local なので起動時に最新のラッチ状態を受信する。契約: questix_msgs/README.md）。
@@ -121,29 +98,14 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
              const questix_safety::EmergencyStopMonitor::Change& change) {
         on_emergency_stop(msg, change);
       });
-  if (require_teacher_permission_) {
-    if (teacher_permission_topic_.empty()) {
-      RCLCPP_ERROR(this->get_logger(),
-                   "teacher_permission_topic is empty but require_teacher_permission=true: "
-                   "the roller will never spin");
-    } else {
-      teacher_permission_sub_ = this->create_subscription<questix_msgs::msg::ActuationAuthority>(
-          teacher_permission_topic_, rclcpp::QoS(1).reliable().durability_volatile(),
-          std::bind(&EscMotorControlComponent::teacher_permission_callback, this,
-                    std::placeholders::_1));
-    }
-    RCLCPP_INFO(this->get_logger(),
-                "Teacher permission required on %s (lease %.2fs): the roller stays at 0 "
-                "until the teacher switches the launcher on",
-                teacher_permission_topic_.c_str(), teacher_permission_timeout_sec_);
-  }
-
-  // QUESTiX LAB roller input: subscribed only when accept_lab_input (practice launches).
-  if (roller_lab_logic_.config().accept) {
-    lab_sub_ = this->create_subscription<std_msgs::msg::Float32>(
-        lab_topic_, 1,
-        std::bind(&EscMotorControlComponent::lab_callback, this, std::placeholders::_1));
-  }
+  // 走行許可（L2）も共通の PermissionMonitor が購読・判定する（volatile、ラッチしない）。
+  permission_monitor_ = std::make_unique<questix_safety::PermissionMonitor>(
+      *this, questix_safety::PermissionMonitor::declareAndRead(*this),
+      questix_safety::PermissionMonitor::Flag::kLauncher, "roller",
+      [this](const questix_msgs::msg::MotionPermission& msg,
+             const questix_safety::PermissionMonitor::Change& change) {
+        on_motion_permission(msg, change);
+      });
 
   // ---- Publishers ----
   status_pub_ = this->create_publisher<std_msgs::msg::Float32>(status_topic_, 10);
@@ -153,10 +115,10 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
   status_timer_ =
       this->create_wall_timer(100ms, std::bind(&EscMotorControlComponent::publish_status, this));
 
-  if (enable_safety_stop_) {
-    safety_timer_ =
-        this->create_wall_timer(100ms, std::bind(&EscMotorControlComponent::safety_check, this));
-  }
+  command_timer_ =
+      this->create_wall_timer(100ms, std::bind(&EscMotorControlComponent::command_tick, this));
+  publisher_timer_ =
+      this->create_wall_timer(500ms, std::bind(&EscMotorControlComponent::check_publishers, this));
   roller_status_timer_ = this->create_wall_timer(
       200ms, std::bind(&EscMotorControlComponent::publish_roller_status, this));
   // The gate as it starts (nothing heard yet), so the first change is logged against it.
@@ -164,13 +126,10 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
     std::lock_guard<std::mutex> guard(lock_);
     gate_ = evaluate_gate_locked();
   }
-  // Leases (E-stop silence, teacher permission) expire without a message: check them periodically.
+  // Leases (E-stop silence, the motion permission) expire without a message: check them
+  // periodically.
   gate_timer_ =
       this->create_wall_timer(100ms, std::bind(&EscMotorControlComponent::apply_gate, this));
-  if (lab_sub_) {
-    lab_timer_ =
-        this->create_wall_timer(100ms, std::bind(&EscMotorControlComponent::lab_tick, this));
-  }
 
   // Diagnostic only: do not rewrite pulse settings or their existing mapping.
   for (const auto& entry :
@@ -209,14 +168,9 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
   RCLCPP_INFO(this->get_logger(), "Status topic: %s", status_topic_.c_str());
   RCLCPP_INFO(this->get_logger(), "Pulse range: %d - %d μs  (neutral %d μs)", min_pulse_width_us_,
               max_pulse_width_us_, neutral_pulse_width_us_);
-  if (lab_sub_) {
-    RCLCPP_INFO(this->get_logger(),
-                "QUESTiX LAB roller input on %s (max %.2f, joy quiet %.1f s, timeout %.1f s)",
-                lab_topic_.c_str(), roller_lab_logic_.config().max_speed,
-                roller_lab_logic_.config().joy_quiet_sec, roller_lab_logic_.config().timeout_sec);
-  } else {
-    RCLCPP_INFO(this->get_logger(), "QUESTiX LAB roller input disabled (accept_lab_input=false)");
-  }
+  RCLCPP_INFO(this->get_logger(), "Roller command: %s (timeout %.1f s, max %.2f)",
+              launcher_command_topic_.c_str(), command_logic_.timeoutSec(),
+              command_logic_.maxPower());
 
   if (!test_mode_ && pwm_ && pwm_->name() != "simulation") {
     RCLCPP_WARN(this->get_logger(),
@@ -234,8 +188,8 @@ void EscMotorControlComponent::begin_shutdown() {
     current_speed_ = 0.0;
     if (pwm_lease_timer_) pwm_lease_timer_->cancel();
     if (gate_timer_) gate_timer_->cancel();
-    if (safety_timer_) safety_timer_->cancel();
-    if (lab_timer_) lab_timer_->cancel();
+    if (command_timer_) command_timer_->cancel();
+    if (publisher_timer_) publisher_timer_->cancel();
   }
   RCLCPP_INFO(this->get_logger(), "ESC shutdown_begin");
   // Serialize backend state/Client updates with status reads as well as command callbacks.
@@ -262,8 +216,8 @@ void EscMotorControlComponent::begin_shutdown() {
 
 void EscMotorControlComponent::renew_pwm_lease() {
   // These callbacks execute on the ROS executor, never an unconditional heartbeat thread.
-  safety_check();
-  lab_tick();
+  command_tick();
+  check_publishers();
   apply_gate();
   std::lock_guard<std::mutex> guard(lock_);
   if (stopping_ || !pwm_ || pwm_->terminal()) return;
@@ -376,45 +330,55 @@ bool EscMotorControlComponent::send_pulse(int pulse_us, double speed, bool initi
 }
 
 // --------------------------------------------------------------------------
-// Joy callback
+// Roller command (/launcher_command)
 // --------------------------------------------------------------------------
-void EscMotorControlComponent::joy_callback(const sensor_msgs::msg::Joy::SharedPtr msg) {
-  if (full_speed_button_ < 0 || static_cast<size_t>(full_speed_button_) >= msg->buttons.size()) {
+void EscMotorControlComponent::command_callback(
+    const questix_msgs::msg::LauncherCommand::SharedPtr msg) {
+  if (!msg) {
     return;
   }
-
-  FullSpeedLogic::Result r;
-  bool lab_preempted = false;
+  RollerCommandLogic::Result result;
+  bool source_changed = false;
   {
     std::lock_guard<std::mutex> guard(lock_);
-    const bool raw_pressed = msg->buttons[full_speed_button_] == 1;
-    // The controller always wins: a press hands a lab-driven roller back to the controller
-    // and locks the lab out until it sends 0 (roller_lab_logic.hpp).
-    lab_preempted = roller_lab_logic_.onJoyButton(raw_pressed, steady_now_sec());
-    // 非常停止（押下・未受信・途絶）または実行時許可なしの間は、押されているボタンでラッチを
-    // 解除して「離す」を要求する。解除・許可の復帰後も押しっぱなしでは再始動せず、離す→押すが
-    // 必要（押下を「離した」扱いにすると、その時点で再アームされてしまうため使わない）。
-    const bool inhibited = evaluate_gate_locked() != RollerBlock::kNone;
-    r = full_speed_logic_.onButton(
-        raw_pressed, pwm_backend_name_ == "rp1_hw" ? steady_now_sec() : this->now().seconds(),
-        inhibited);
+    // While the gate is closed (no motion permission, E-stop not released), and while two nodes
+    // publish the command, the roller stays at 0 and needs a 0 command before it spins again
+    // (roller_command_logic.hpp).
+    const bool inhibited = evaluate_gate_locked() != RollerBlock::kNone || multiple_publishers_;
+    result = command_logic_.onCommand(msg->roller_power, steady_now_sec(), inhibited);
+    const char* source = command_logic_.speed() > 0.0 ? rollerSourceName(msg->source) : "idle";
+    source_changed = source != command_source_;
+    command_source_ = source;
   }
   // Lock released before set_motor_speed(), which takes lock_ itself.
-
-  if (lab_preempted) {
-    RCLCPP_WARN(this->get_logger(), "Controller took over the roller from QUESTiX LAB");
-    set_motor_speed(0.0);
+  if (result.set) {
+    set_motor_speed(result.speed);
+  } else if (result.needs_zero) {
+    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
+                         "Roller command ignored until a 0 arrives (release the button, or end "
+                         "the lesson run, and start again)");
+  }
+  if (source_changed) {
     publish_roller_status();
   }
-  if (r.start_full_speed) {
-    RCLCPP_INFO(this->get_logger(), "Full-speed button PRESSED");
-    set_motor_speed(full_speed_value_);
-  } else if (r.stop) {
-    RCLCPP_INFO(this->get_logger(), "Full-speed button RELEASED");
-    set_motor_speed(0.0);
-  } else if (r.ignored_press) {
-    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
-                         "Full-speed press ignored after safety timeout: release and press again");
+}
+
+void EscMotorControlComponent::command_tick() {
+  RollerCommandLogic::Result result;
+  {
+    std::lock_guard<std::mutex> guard(lock_);
+    result = command_logic_.onTick(steady_now_sec());
+    if (result.set) {
+      command_source_ = "idle";
+    }
+  }
+  if (result.timed_out) {
+    RCLCPP_WARN(this->get_logger(), "Roller command timed out (%s silent): stopping the roller",
+                launcher_command_topic_.c_str());
+  }
+  if (result.set) {
+    set_motor_speed(result.speed);
+    publish_roller_status();
   }
 }
 
@@ -432,7 +396,8 @@ void EscMotorControlComponent::on_emergency_stop(
     // 初回受信の前は「解除」から見た変化として扱う（初回の押下で停止、初回の解除はログのみ）。
     transition = decideEstopTransition(change.first ? false : change.was_active, msg.active);
     if (transition.send_stop) {
-      roller_lab_logic_.onEmergencyStop(true, steady_now_sec());
+      command_logic_.inhibit();
+      command_source_ = "idle";
     }
   }
 
@@ -442,7 +407,7 @@ void EscMotorControlComponent::on_emergency_stop(
     set_motor_speed(0.0);
   } else if (transition.log_release) {
     RCLCPP_INFO(this->get_logger(),
-                "非常停止が解除されました (source=%s)。フルスピードボタンの再押下まで停止のまま",
+                "非常停止が解除されました (source=%s)。0 の指令を受けてから回転を再開します",
                 msg.source.c_str());
   }
   if (transition.send_stop || transition.log_release) {
@@ -451,33 +416,21 @@ void EscMotorControlComponent::on_emergency_stop(
   apply_gate();
 }
 
-void EscMotorControlComponent::teacher_permission_callback(
-    const questix_msgs::msg::ActuationAuthority::SharedPtr msg) {
-  if (!msg) {
-    return;
-  }
-  {
-    std::lock_guard<std::mutex> guard(lock_);
-    have_teacher_permission_msg_ = true;
-    teacher_permission_allowed_ = msg->launcher_allowed;
-    last_teacher_permission_rx_sec_ = steady_now_sec();
+void EscMotorControlComponent::on_motion_permission(
+    const questix_msgs::msg::MotionPermission& msg,
+    const questix_safety::PermissionMonitor::Change& change) {
+  if (change.first || change.was_allowed != msg.launcher_allowed) {
+    RCLCPP_INFO(this->get_logger(), "Motion permission (%s): roller %s", msg.mode.c_str(),
+                msg.launcher_allowed ? "allowed" : "not allowed");
   }
   apply_gate();
 }
 
 RollerBlock EscMotorControlComponent::evaluate_gate_locked() const {
-  const double now = steady_now_sec();
   RollerGateInputs in;
+  in.permission = permission_monitor_->inputs();
   in.estop = estop_monitor_->inputs();
-  // The teacher's permission is a separate permission; disabled (the default) it is not looked at.
-  in.teacher_permission.required = require_teacher_permission_;
-  if (require_teacher_permission_) {
-    in.teacher_permission.known = have_teacher_permission_msg_;
-    in.teacher_permission.allowed = teacher_permission_allowed_;
-    in.teacher_permission.age_sec =
-        have_teacher_permission_msg_ ? now - last_teacher_permission_rx_sec_ : 0.0;
-    in.teacher_permission.timeout_sec = teacher_permission_timeout_sec_;
-  }
+  in.pwm_fault = pwm_command_.fault();
   return evaluateRollerGate(in);
 }
 
@@ -490,15 +443,14 @@ void EscMotorControlComponent::apply_gate() {
     previous = gate_;
     now_block = evaluate_gate_locked();
     gate_ = now_block;
-    if (now_block != RollerBlock::kNone || pwm_command_.fault()) {
-      // Closing (or closed with something still spinning): stop, clear the latch so a held
-      // button needs a release, and lock a lab run until it sends 0.
+    if (now_block != RollerBlock::kNone) {
+      // Closing (or closed with something still spinning): stop, and require a 0 command
+      // before the roller spins again (a held button, a lesson heartbeat).
       const bool rp1_terminal = pwm_ && pwm_->name() == "rp1_hw" && pwm_->terminal();
-      if ((previous == RollerBlock::kNone && now_block != RollerBlock::kNone) ||
-          (!rp1_terminal && pwm_command_.needs_stop(speed_to_pulse_us(0.0))) ||
-          full_speed_logic_.isActive() || roller_lab_logic_.labActive()) {
-        full_speed_logic_.inhibit();
-        roller_lab_logic_.onBlocked(steady_now_sec());
+      if (previous == RollerBlock::kNone || current_speed_ != 0.0 || command_logic_.speed() > 0.0 ||
+          (!rp1_terminal && pwm_command_.needs_stop(speed_to_pulse_us(0.0)))) {
+        command_logic_.inhibit();
+        command_source_ = "idle";
         stop = !rp1_terminal;
       }
     }
@@ -510,8 +462,7 @@ void EscMotorControlComponent::apply_gate() {
   if (now_block != previous) {
     if (now_block == RollerBlock::kNone) {
       RCLCPP_INFO(this->get_logger(),
-                  "Roller allowed again (was %s): press the full-speed button again (or send a "
-                  "new lab run) to spin",
+                  "Roller allowed again (was %s): it spins after a 0 command and a new one",
                   rollerBlockName(previous));
     } else {
       RCLCPP_WARN(this->get_logger(), "Roller blocked: %s (was %s); stop requested",
@@ -521,55 +472,43 @@ void EscMotorControlComponent::apply_gate() {
   }
 }
 
-// --------------------------------------------------------------------------
-// QUESTiX LAB roller input
-// --------------------------------------------------------------------------
+void EscMotorControlComponent::check_publishers() {
+  const auto publishers = this->get_publishers_info_by_topic(launcher_command_topic_);
+  const bool multiple = publishers.size() > 1;
+  RollerCommandLogic::Result result;
+  bool changed = false;
+  {
+    std::lock_guard<std::mutex> guard(lock_);
+    changed = multiple != multiple_publishers_;
+    multiple_publishers_ = multiple;
+    if (multiple) {
+      result = command_logic_.inhibit();
+      if (result.set) {
+        command_source_ = "idle";
+      }
+    }
+  }
+  if (changed && multiple) {
+    std::string names;
+    for (const auto& info : publishers) {
+      const std::string& ns = info.node_namespace();
+      names += (names.empty() ? "" : ", ") + (ns == "/" ? "" : ns) + "/" + info.node_name();
+    }
+    RCLCPP_ERROR(this->get_logger(),
+                 "%zu nodes publish %s (%s): the roller stays at 0 until only one is left",
+                 publishers.size(), launcher_command_topic_.c_str(), names.c_str());
+  } else if (changed) {
+    RCLCPP_INFO(this->get_logger(), "One publisher on %s again (a 0 is needed before spinning)",
+                launcher_command_topic_.c_str());
+  }
+  if (result.set) {
+    set_motor_speed(result.speed);
+    publish_roller_status();
+  }
+}
+
 double EscMotorControlComponent::steady_now_sec() {
   return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
-}
-
-void EscMotorControlComponent::lab_callback(const std_msgs::msg::Float32::SharedPtr msg) {
-  if (!msg) {
-    return;
-  }
-  RollerLabLogic::LabDecision decision;
-  bool source_changed = false;
-  {
-    std::lock_guard<std::mutex> guard(lock_);
-    const bool was_active = roller_lab_logic_.labActive();
-    const RollerBlock block = evaluate_gate_locked();
-    decision =
-        roller_lab_logic_.onLab(msg->data, steady_now_sec(), full_speed_logic_.isActive(),
-                                isRollerEstopBlock(block), !isRollerTeacherPermissionBlock(block));
-    source_changed = was_active != roller_lab_logic_.labActive();
-  }
-  // Lock released before set_motor_speed(), which takes lock_ itself.
-
-  if (decision.apply) {
-    set_motor_speed(decision.command);
-  } else if (decision.refusal != RollerLabLogic::Refusal::kNone) {
-    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
-                         "QUESTiX LAB roller command refused: %s",
-                         RollerLabLogic::refusalName(decision.refusal));
-  }
-  if (source_changed) {
-    RCLCPP_INFO(this->get_logger(), "QUESTiX LAB roller %s",
-                decision.apply && decision.command > 0.0 ? "started" : "stopped");
-    publish_roller_status();
-  }
-}
-
-void EscMotorControlComponent::lab_tick() {
-  bool timed_out = false;
-  {
-    std::lock_guard<std::mutex> guard(lock_);
-    timed_out = roller_lab_logic_.onTick(steady_now_sec());
-  }
-  if (timed_out) {
-    RCLCPP_WARN(this->get_logger(), "QUESTiX LAB roller command timed out: stopping the roller");
-    set_motor_speed(0.0);
-    publish_roller_status();
-  }
 }
 
 void EscMotorControlComponent::publish_roller_status() {
@@ -584,39 +523,15 @@ void EscMotorControlComponent::publish_roller_status() {
     status.pwm_output_state = pwm_ ? pwm_->output_state() : "UNKNOWN";
     status.pwm_error = pwm_ ? pwm_->last_error() : 0;
     status.pwm_backend = pwm_ ? pwm_->name() : "none";
-    status.source = roller_lab_logic_.sourceName(full_speed_logic_.isActive());
-    status.lab_accepted = roller_lab_logic_.config().accept;
-    status.lab_locked = roller_lab_logic_.labLocked();
+    status.source = current_speed_ > 0.0 ? command_source_ : "idle";
     const RollerBlock block = evaluate_gate_locked();
     status.estop = isRollerEstopBlock(block);
-    status.authority = !isRollerTeacherPermissionBlock(block);
-    status.lab_max_speed = roller_lab_logic_.config().max_speed;
+    status.permission = !isRollerPermissionBlock(block);
+    status.max_power = command_logic_.maxPower();
   }
   std_msgs::msg::String msg;
   msg.data = rollerStatusJson(status);
   roller_status_pub_->publish(msg);
-}
-
-// --------------------------------------------------------------------------
-// Safety check
-// --------------------------------------------------------------------------
-void EscMotorControlComponent::safety_check() {
-  if (!enable_safety_stop_) return;
-
-  FullSpeedLogic::Result r;
-  {
-    std::lock_guard<std::mutex> guard(lock_);
-    r = full_speed_logic_.onTimerCheck(pwm_backend_name_ == "rp1_hw" ? steady_now_sec()
-                                                                     : this->now().seconds());
-  }
-  // Lock released before set_motor_speed(), which takes lock_ itself.
-
-  if (r.timed_out) {
-    RCLCPP_WARN(this->get_logger(), "Safety timeout: stopping motor");
-  }
-  if (r.stop) {
-    set_motor_speed(0.0);
-  }
 }
 
 // --------------------------------------------------------------------------

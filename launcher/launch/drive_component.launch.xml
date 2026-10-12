@@ -7,44 +7,30 @@ YAML を Single Source of Truth とし、個別パラメータの launch 引数�
 <launch>
   <arg name="joy_config_file" default="$(find-pkg-share joy_controller)/config/joy_controller_params.yaml" description="joy_controller configuration YAML" />
   <arg name="drive_config_file" default="$(find-pkg-share questix_launcher)/config/drive_component.yaml" description="drive_component configuration YAML" />
-  <arg name="enable_gpio_ref" default="false" description="Use the GPIO-gated controller path (joy_gate and optional operation_manager)" />
-  <arg name="enable_operation_manager" default="true" description="Start operation_manager in standalone referee launch" />
   <arg name="controller_type" default="uart" description="Controller type: dualshock, uart, or web" />
-  <arg name="enable_twist_arbiter" default="false" description="Route the controller through twist_arbiter so QUESTiX LAB driving experiments and the controller share /target_twist (practice only; the stick always takes over)" />
-  <arg name="require_teacher_permission" default="false" description="Drive only while the teacher's permission (/actuation_authority, Robot Manager) is fresh (practice opt-in; questix_core never sets it for competition)" />
+  <arg name="use_command_arbiter" default="false" description="The controller publishes to command_arbiter's inputs (/target_twist/joy, /launcher_command/joy) instead of /target_twist and /launcher_command (questix_core: lesson mode only, where it also starts command_arbiter)" />
 
-  <!-- With twist_arbiter the controller publishes to its own input and the arbiter owns
-       /target_twist; without it (competition) joy_controller drives /target_twist directly. -->
-  <let name="controller_twist_topic" value="/target_twist/joy" if="$(var enable_twist_arbiter)" />
-  <let name="controller_twist_topic" value="/target_twist" unless="$(var enable_twist_arbiter)" />
+  <!-- With command_arbiter the controller publishes to its own inputs and the arbiter owns
+       /target_twist and /launcher_command; without it (practice, competition) joy_controller and
+       joy_launcher drive them directly. -->
+  <let name="controller_twist_topic" value="/target_twist/joy" if="$(var use_command_arbiter)" />
+  <let name="controller_twist_topic" value="/target_twist" unless="$(var use_command_arbiter)" />
+  <let name="controller_launcher_topic" value="/launcher_command/joy" if="$(var use_command_arbiter)" />
+  <let name="controller_launcher_topic" value="/launcher_command" unless="$(var use_command_arbiter)" />
 
-  <!-- Joy Controller component launch (without GPIO gating) -->
-  <group unless="$(var enable_gpio_ref)">
+  <!-- Joy Controller (the controller's driver, joy_controller and joy_launcher). Nothing gates
+       /joy: the actuators stop on /emergency_stop and /motion_permission themselves. -->
+  <group>
     <set_remap from="/target_twist" to="$(var controller_twist_topic)" />
+    <set_remap from="/launcher_command" to="$(var controller_launcher_topic)" />
     <include file="$(find-pkg-share joy_controller)/launch/joy_controller.launch.xml">
       <arg name="config_file" value="$(var joy_config_file)" />
       <arg name="controller_type" value="$(var controller_type)" />
     </include>
   </group>
 
-  <!-- GPIO-gated Joy Controller path; gpio_reader is owned by the integrated parent. -->
-  <group if="$(var enable_gpio_ref)">
-    <set_remap from="/target_twist" to="$(var controller_twist_topic)" />
-    <include file="$(find-pkg-share joy_controller)/launch/joy_controller_referee.launch.xml">
-      <arg name="config_file" value="$(var joy_config_file)" />
-      <arg name="controller_type" value="$(var controller_type)" />
-      <arg name="enable_operation_manager" value="$(var enable_operation_manager)" />
-    </include>
-  </group>
-
-  <!-- Controller or QUESTiX LAB -> /target_twist (twist_arbiter/include/twist_arbiter/arbiter_logic.hpp). -->
-  <group if="$(var enable_twist_arbiter)">
-    <include file="$(find-pkg-share twist_arbiter)/launch/twist_arbiter.launch.xml" />
-  </group>
-
   <!-- Include drive Component Launch -->
   <include file="$(find-pkg-share motor_control_app)/launch/drive_component.launch.py">
     <arg name="config_file" value="$(var drive_config_file)" />
-    <arg name="require_teacher_permission" value="$(var require_teacher_permission)" />
   </include>
 </launch>

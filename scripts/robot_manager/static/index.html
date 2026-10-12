@@ -58,7 +58,7 @@
     <section id="stop-all-result" class="notice" role="status" aria-live="polite" hidden>
       <div class="notice-heading"><h2 id="stop-all-title">すべて止めました</h2><button type="button" class="btn btn-small" id="stop-all-dismiss">閉じる</button></div>
       <ul id="stop-all-parts" class="stop-all-parts"></ul>
-      <p class="section-help">教材の走行・発射の許可はそのままです（生徒の接続も切れていません）。ロボット制御は「操作」の「起動」で再開します。</p>
+      <p class="section-help">先生の操作許可と教材の走行・発射の許可は OFF にしました（教材の配信は続いていて、生徒の接続は切れていません）。ロボット制御は「操作」の「起動」で再開し、許可は先生が ON にし直します。</p>
     </section>
     <section id="apply-offer" class="notice warning" role="status" hidden>
       <p id="apply-offer-text"></p>
@@ -124,8 +124,8 @@
     </section>
 
     <!-- The teacher's permission (actuation.py): a permission, not an E-stop. Lesson mode only:
-         the lesson launch passes require_teacher_permission:=true, so the nodes move the drive
-         and the launcher only while it is on, controller included. -->
+         it is the lesson launch's vote for /motion_permission, so the drive and the launcher move
+         only while it is on, controller included. -->
     <section class="card" id="actuation-card" aria-labelledby="actuation-heading">
       <h2 id="actuation-heading">先生の操作許可（教材モード）</h2>
       <p id="actuation-state" class="section-help" role="status">確認しています。</p>
@@ -148,6 +148,22 @@
       <p id="actuation-error" class="lab-inline-error" role="alert" hidden></p>
       <p class="section-help">教材モードで使います。ここを ON にしている間だけ、ロボットはコントローラーでも教材からも動き、「教材」タブで教材からの走行／発射を許可できます（非常停止とは別のものです）。練習モードと大会モードでは使いません。はじめは OFF です。Robot Manager の再起動・ロボットの再起動・モードの切り替え・ロボット制御の起動／再起動／停止・「すべて止める」で OFF に戻ります。OFF にすると同じ動作の「教材からの走行／発射」の許可も OFF になります（ON にしても教材の許可は ON になりません）。</p>
       <p class="section-help">ロボットは約 1 秒この許可を受け取れないと止まります（この PC の Robot Manager が止まった場合も同じです）。非常停止ボタンの代わりにはなりません。</p>
+    </section>
+
+    <!-- Why the robot does not move (motion_state.py): /emergency_stop (L1) and /motion_permission
+         (L2) read once on request, in every mode. Reads only; changes nothing. -->
+    <section class="card" id="motion-state-card" aria-labelledby="motion-state-heading">
+      <h2 id="motion-state-heading">ロボットが動かないとき</h2>
+      <p class="section-help">ロボットから非常停止と走行許可（教材は先生の操作許可、大会は AutoReferee）を読み取り、いま何が止めているかを表示します。読み取りに数秒かかります。何も変更しません。</p>
+      <div class="button-group">
+        <button type="button" class="btn" id="motion-state-check">なぜ動かないか確認</button>
+      </div>
+      <dl class="readiness-grid" id="motion-state-result" hidden>
+        <div><dt>非常停止</dt><dd id="motion-state-estop">—</dd></div>
+        <div><dt>走行</dt><dd id="motion-state-drive">—</dd></div>
+        <div><dt>発射機構</dt><dd id="motion-state-launcher">—</dd></div>
+      </dl>
+      <p id="motion-state-summary" class="section-help" role="status"></p>
     </section>
 
     <section class="card">
@@ -513,7 +529,7 @@
         生徒が教材で安全確認のチェックを入れると、走行実験（ステップ応答・壁の前で止める・速さの往復・
         決めた距離の走行・動作確認）で、教材から低速でロボットを走らせられます。コントローラーはいつでも優先です：
         スティックを倒せば、すぐにコントローラーの操作に切り替わり、教材の走行は止まります。
-        切り替えると配信中のブリッジを起動し直すので、生徒の接続が数秒切れます。
+        切り替えても配信は続き、生徒の接続は切れません。
       </p>
       <details class="lab-tech">
         <summary>先生・技術者向けの詳しい情報</summary>
@@ -525,10 +541,11 @@
         </div>
         <ul id="lab-drive-tech" class="lab-tech-list"></ul>
         <p class="lab-note">
-          教材用の起動（questix_core、enable_twist_arbiter:=true）では切り替えノード twist_arbiter が入り、
+          教材用の起動（questix_core、robot_mode:=lesson）では切り替えノード command_arbiter が入り、
           コントローラーと教材の指令（/target_twist/lab）のどちらかを /target_twist に渡します。
+          教材の指令を渡すのは、この許可（/lab_permission）が届いている間だけです。
           練習用・大会用の起動には入らないため、教材からは走らせられません。
-          上限は前後 0.3 m/s・回転 1.0 rad/s（questix_lab_bridge の設定）で、教材の画面が閉じたり通信が
+          上限は前後 0.15 m/s・回転 0.5 rad/s（command_arbiter の設定）で、教材の画面が閉じたり通信が
           0.5 秒途切れたりすると止まり、どの端末の停止バーでも止められます。
         </p>
       </details>
@@ -566,15 +583,16 @@
         生徒が教材で「発射する方向に人がいない・的の周りに人がいない」のチェックを入れると、
         ローラーの回転・発射台の角度・ディスク1枚の発射を教材から操作できます。コントローラーが優先です：
         ローラーや発射のボタンを押すと、すぐにコントローラーの操作に切り替わり、教材の操作は止まります。
-        切り替えると配信中のブリッジを起動し直すので、生徒の接続が数秒切れます。
+        切り替えても配信は続き、生徒の接続は切れません。
       </p>
       <details class="lab-tech">
         <summary>先生・技術者向けの詳しい情報</summary>
         <ul id="lab-shoot-tech" class="lab-tech-list"></ul>
         <p class="lab-note">
-          教材用の起動では、ローラー（esc_motor_control）と発射台（shot_component）が教材の入力
-          （/roller/lab・/shot/lab/*）を受け付けます。練習用・大会用の起動では受け付けません。
-          ローラーは最大 80%、発射はローラーが1秒回ってから・前の発射から2秒あけて1枚ずつ（questix_lab_bridge の設定）。
+          教材用の起動では切り替えノード command_arbiter が入り、コントローラーと教材の指令
+          （/launcher_command/lab）のどちらかをローラー（esc_motor_control）と発射台（shot_component）に渡します。
+          教材の指令を渡すのは、この許可（/lab_permission）が届いている間だけです。練習用・大会用の起動には入りません。
+          ローラーは最大 80%、発射はローラーが1秒回ってから・前の発射から2秒あけて1枚ずつ（command_arbiter の設定）。
           教材の画面が閉じたり通信が 0.5 秒途切れたり 30 秒たったりするとローラーは止まり、どの端末からでも止められます。
         </p>
       </details>
@@ -822,7 +840,8 @@
   <script src="/static/status-view.js?v=2"></script>
   <script src="/static/network-view.js?v=1"></script>
   <script src="/static/trial-view.js?v=1"></script>
-  <script src="/static/app.js?v=20"></script>
+  <script src="/static/motion-state-view.js?v=1"></script>
+  <script src="/static/app.js?v=21"></script>
   <script src="/static/controller-map.js?v=12"></script>
   <script src="/static/controls.js?v=22"></script>
 </body>

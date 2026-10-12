@@ -50,6 +50,12 @@ class _FakeHeartbeat:
         self.returncode = -9
 
 
+def _line(drive, launcher, lab_drive=False, lab_launcher=False):
+    """One state line as the heartbeat reads it."""
+    return {"drive": drive, "launcher": launcher, "lab_drive": lab_drive,
+            "lab_launcher": lab_launcher}
+
+
 @pytest.fixture
 def actuation(tmp_path, monkeypatch):
     monkeypatch.setenv("QUESTIX_CONFIG_DIR", str(tmp_path))
@@ -74,6 +80,9 @@ def actuation(tmp_path, monkeypatch):
                                  TimeoutExpired=subprocess.TimeoutExpired)
     monkeypatch.setattr(module, "subprocess", fake)
     monkeypatch.setattr(module, "START_GRACE_SEC", 0.0)
+    # The robot runs a lesson launch (app.py's real source asks systemd and last-launch).
+    module.running = {"mode": "lesson"}
+    monkeypatch.setattr(module, "_running_mode_source", lambda: module.running["mode"])
     module.started = started
     return module
 
@@ -94,7 +103,7 @@ def test_switching_on_starts_the_heartbeat_in_the_robots_domain(actuation, tmp_p
     assert "export ROS_DOMAIN_ID=17; " in script and 'exec /usr/bin/python3 "$3"' in script
     assert proc.command[-1].endswith("actuation_heartbeat.py")  # a positional argument
     assert "ROS_DOMAIN_ID" not in proc.kwargs["env"]
-    assert proc.stdin.lines == [{"drive": True, "launcher": False}]
+    assert proc.stdin.lines == [_line(True, False)]
 
 
 def test_the_two_switches_share_one_heartbeat_and_off_is_sent_at_once(actuation):
@@ -102,9 +111,7 @@ def test_the_two_switches_share_one_heartbeat_and_off_is_sent_at_once(actuation)
     actuation.set_authority("launcher", True)
     actuation.set_authority("drive", False)
     (proc,) = actuation.started
-    assert proc.stdin.lines == [{"drive": True, "launcher": False},
-                                {"drive": True, "launcher": True},
-                                {"drive": False, "launcher": True}]
+    assert proc.stdin.lines == [_line(True, False), _line(True, True), _line(False, True)]
     assert not proc.stdin.closed_by_parent
     actuation.set_authority("launcher", False)
     assert proc.stdin.closed_by_parent  # the heartbeat publishes all off and exits
@@ -145,37 +152,80 @@ def test_a_heartbeat_that_exits_at_once_is_refused(actuation, monkeypatch):
     assert actuation.status()["drive"] is False
 
 
-def test_a_heartbeat_that_dies_switches_everything_off_and_tells_the_lessons(actuation):
-    told = []
-    actuation.add_revoke_listener(lambda kind, reason: told.append((kind, reason)))
+def test_a_heartbeat_that_dies_switches_everything_off(actuation):
     actuation.set_authority("drive", True)
     actuation.set_authority("launcher", True)
+    actuation.set_lab("drive", True)
     actuation.started[0].returncode = 1  # crashed; the robot already stopped when its lease ran out
     status = actuation.status()
     assert status["drive"] is False and status["launcher"] is False
+    assert status["lab_drive"] is False and status["lab_launcher"] is False
     assert status["last_off_reason"] == "heartbeat_exited" and status["error"]
-    assert ("drive", "heartbeat_exited") in told and ("launcher", "heartbeat_exited") in told
     # Nothing restarts it by itself.
     assert len(actuation.started) == 1
 
 
-def test_revoke_all_ends_the_heartbeat_and_tells_the_lessons(actuation):
-    told = []
-    actuation.add_revoke_listener(lambda kind, reason: told.append((kind, reason)))
+def test_revoke_all_ends_the_heartbeat_and_the_lesson_permissions(actuation):
     actuation.set_authority("drive", True)
+    actuation.set_lab("drive", True)
     result = actuation.revoke_all("stop_all")
     assert result["revoked"] == ["drive"] and result["drive"] is False
+    assert result["lab_drive"] is False
     assert actuation.started[0].stdin.closed_by_parent
-    assert told == [("drive", "stop_all"), ("launcher", "stop_all")]
 
 
-def test_a_failing_listener_never_keeps_the_revoke_from_finishing(actuation):
-    def broken(kind, reason):
-        raise RuntimeError("boom")
+# ---- QUESTiX LAB's lesson permissions (/lab_permission) ----
 
-    actuation.add_revoke_listener(broken)
+def test_a_lesson_permission_needs_the_switch_of_its_kind(actuation):
+    with pytest.raises(HTTPException) as error:
+        actuation.set_lab("drive", True)
+    assert error.value.status_code == 409 and "ロボットの走行制御" in error.value.detail
     actuation.set_authority("drive", True)
-    assert actuation.revoke_all("stop_all")["drive"] is False
+    with pytest.raises(HTTPException) as error:
+        actuation.set_lab("launcher", True)
+    assert "発射機構の操作" in error.value.detail
+    # Switching the switch on never switches a lesson permission on.
+    assert actuation.lab_permissions() == {"drive": False, "launcher": False}
+    assert actuation.set_lab("drive", True) == {"drive": True, "launcher": False}
+    (proc,) = actuation.started
+    assert proc.stdin.lines[-1] == _line(True, False, lab_drive=True)
+
+
+def test_the_switch_going_off_takes_its_lesson_permission_in_the_same_line(actuation):
+    actuation.set_authority("drive", True)
+    actuation.set_authority("launcher", True)
+    actuation.set_lab("drive", True)
+    actuation.set_lab("launcher", True)
+    actuation.set_authority("drive", False)
+    (proc,) = actuation.started
+    # One line: /lab_permission never says yes while the teacher's switch says no.
+    assert proc.stdin.lines[-1] == _line(False, True, lab_launcher=True)
+    assert actuation.lab_permissions() == {"drive": False, "launcher": True}
+    actuation.set_authority("drive", True)  # back on: the lesson permission stays off
+    assert actuation.lab_permissions() == {"drive": False, "launcher": True}
+
+
+def test_a_lesson_permission_off_and_revoke_lab_never_raise(actuation):
+    assert actuation.set_lab("drive", False) == {"drive": False, "launcher": False}
+    assert actuation.revoke_lab() is False
+    actuation.set_authority("launcher", True)
+    actuation.set_lab("launcher", True)
+    assert actuation.revoke_lab() is True
+    (proc,) = actuation.started
+    assert proc.stdin.lines[-1] == _line(False, True)
+    assert actuation.status()["launcher"] is True  # the teacher's switch stays
+
+
+def test_a_failed_write_for_a_lesson_permission_switches_everything_off(actuation):
+    actuation.set_authority("drive", True)
+    (proc,) = actuation.started
+    _break_heartbeat_stdin(proc)
+    with pytest.raises(HTTPException) as error:
+        actuation.set_lab("drive", True)
+    assert error.value.status_code == 503
+    status = actuation.status()
+    assert status["drive"] is False and status["lab_drive"] is False
+    assert status["running"] is False and status["last_off_reason"] == "heartbeat_write_failed"
 
 
 # ---- the heartbeat process (actuation_heartbeat.run, ROS-free) ----
@@ -205,27 +255,40 @@ def _heartbeat_run(lines, steps, parent_alive=lambda: True):
             return False
         return True
 
-    heartbeat.run(stdin, lambda d, l: published.append((d, l)), now=clock, wait=wait,
+    heartbeat.run(stdin, lambda *state: published.append(state), now=clock, wait=wait,
                   parent_alive=parent_alive)
     return heartbeat, published
 
 
+OFF = (False, False, False, False)
+
+
 def test_heartbeat_repeats_the_latest_state_and_ends_with_explicit_offs():
     heartbeat, published = _heartbeat_run(
-        ['{"drive": true, "launcher": false}\n'], ["read", "idle", "idle", "read"])
+        ['{"drive": true, "launcher": false, "lab_drive": true}\n'],
+        ["read", "idle", "idle", "read"])
     # Initial off, the change at once, two periods of the new state, then EOF: explicit offs.
-    assert published[0] == (False, False)
-    assert published[1] == (True, False)
-    assert published[2:4] == [(True, False), (True, False)]
-    assert published[-heartbeat.FINAL_OFF_COUNT:] == [(False, False)] * heartbeat.FINAL_OFF_COUNT
+    assert published[0] == OFF
+    assert published[1] == (True, False, True, False)
+    assert published[2:4] == [(True, False, True, False)] * 2
+    assert published[-heartbeat.FINAL_OFF_COUNT:] == [OFF] * heartbeat.FINAL_OFF_COUNT
 
 
 def test_heartbeat_treats_anything_unexpected_as_off():
     from robot_manager import actuation_heartbeat as heartbeat
-    assert heartbeat.parse_state('{"drive": true, "launcher": true}') == (True, True)
-    assert heartbeat.parse_state('{"drive": "true", "launcher": 1}') == (False, False)
-    assert heartbeat.parse_state("not json") == (False, False)
-    assert heartbeat.parse_state("[true, true]") == (False, False)
+    assert heartbeat.parse_state(
+        '{"drive": true, "launcher": true, "lab_drive": true, "lab_launcher": true}') == (
+        True, True, True, True)
+    assert heartbeat.parse_state('{"drive": "true", "launcher": 1, "lab_drive": true}') == OFF
+    assert heartbeat.parse_state("not json") == OFF
+    assert heartbeat.parse_state("[true, true]") == OFF
+
+
+def test_heartbeat_never_publishes_a_lesson_permission_without_its_switch():
+    from robot_manager import actuation_heartbeat as heartbeat
+    assert heartbeat.parse_state(
+        '{"drive": false, "launcher": true, "lab_drive": true, "lab_launcher": true}') == (
+        False, True, False, True)
 
 
 def test_heartbeat_stops_when_the_manager_is_gone():
@@ -233,8 +296,8 @@ def test_heartbeat_stops_when_the_manager_is_gone():
     heartbeat, published = _heartbeat_run(
         ['{"drive": true, "launcher": true}\n'], ["read", "idle", "idle", "idle"],
         parent_alive=lambda: next(alive, False))
-    assert (True, True) in published
-    assert published[-heartbeat.FINAL_OFF_COUNT:] == [(False, False)] * heartbeat.FINAL_OFF_COUNT
+    assert (True, True, False, False) in published
+    assert published[-heartbeat.FINAL_OFF_COUNT:] == [OFF] * heartbeat.FINAL_OFF_COUNT
 
 
 def test_heartbeat_uses_volatile_qos_never_transient_local():
@@ -243,6 +306,7 @@ def test_heartbeat_uses_volatile_qos_never_transient_local():
     assert "DurabilityPolicy.VOLATILE" in text
     assert "TRANSIENT_LOCAL" not in text
     assert 'TOPIC = "/actuation_authority"' in text
+    assert 'LAB_TOPIC = "/lab_permission"' in text
 
 
 # ---- how the rest of the manager uses it ----
@@ -255,7 +319,6 @@ def lab(actuation, tmp_path, monkeypatch):
     monkeypatch.setattr(module, "LOG_FILE", tmp_path / "cache" / "lab-bridge.log")
     monkeypatch.setattr(module.recorder, "ROSBAG_ENV_FILE", tmp_path / "rosbag.env")
     monkeypatch.setattr(module, "actuation", actuation)
-    actuation.add_revoke_listener(module._on_authority_revoked)
     return module
 
 
@@ -289,36 +352,26 @@ def test_the_authority_going_off_takes_the_lesson_permission_with_it(lab, actuat
 @pytest.mark.parametrize("switched_off", ["drive", "launcher"])
 def test_a_teacher_off_after_an_unnoticed_heartbeat_exit_revokes_both_lesson_permissions(
         lab, actuation, switched_off):
-    told = []
-    actuation.add_revoke_listener(lambda kind, reason: told.append((kind, reason)))
     actuation.set_authority("drive", True)
     actuation.set_authority("launcher", True)
     lab.set_drive(lab.DriveRequest(allow=True))
     lab.set_shoot(lab.DriveRequest(allow=True))
-    told.clear()
     actuation.started[0].returncode = 1  # the heartbeat died; no status() poll noticed it yet
     actuation.set_authority(switched_off, False)
     with actuation._lock:
         assert actuation._authority == {"drive": False, "launcher": False}
     status = lab.get_status()
     assert status["drive_allowed"] is False and status["shoot_allowed"] is False
-    # Both kinds reported once, as the reap they were; the teacher's kind is not repeated.
-    assert sorted(told) == [("drive", "heartbeat_exited"), ("launcher", "heartbeat_exited")]
 
 
-def test_revoke_all_after_an_unnoticed_heartbeat_exit_reports_each_kind_once(actuation):
-    told = []
-    actuation.add_revoke_listener(lambda kind, reason: told.append((kind, reason)))
+def test_revoke_all_after_an_unnoticed_heartbeat_exit_reports_what_was_on(actuation):
     actuation.set_authority("drive", True)
     actuation.started[0].returncode = 1
     result = actuation.revoke_all("stop_all")
     assert result["revoked"] == ["drive"]
-    assert told == [("drive", "heartbeat_exited"), ("launcher", "stop_all")]
 
 
-def test_a_failed_switch_on_still_reports_what_the_reap_switched_off(actuation, monkeypatch):
-    told = []
-    actuation.add_revoke_listener(lambda kind, reason: told.append((kind, reason)))
+def test_a_failed_switch_on_still_switches_off_what_the_reap_found(actuation, monkeypatch):
     actuation.set_authority("drive", True)
     actuation.started[0].returncode = 1
 
@@ -328,7 +381,6 @@ def test_a_failed_switch_on_still_reports_what_the_reap_switched_off(actuation, 
     monkeypatch.setattr(actuation.control_runtime, "_ros_paths", missing)
     with pytest.raises(HTTPException):
         actuation.set_authority("launcher", True)
-    assert told == [("drive", "heartbeat_exited")]
     assert actuation.status()["drive"] is False
 
 
@@ -351,11 +403,8 @@ def _assert_no_switch_without_heartbeat(actuation):
                          [("launcher", "drive", "set_shoot"), ("drive", "launcher", "set_drive")])
 def test_a_failed_write_while_the_other_switch_is_on_switches_both_off(
         lab, actuation, already_on, switched_on, lesson):
-    told = []
-    actuation.add_revoke_listener(lambda kind, reason: told.append((kind, reason)))
     actuation.set_authority(already_on, True)
     getattr(lab, lesson)(lab.DriveRequest(allow=True))
-    told.clear()
     (proc,) = actuation.started
     assert proc.poll() is None  # the heartbeat is still running; only the write fails
     _break_heartbeat_stdin(proc)
@@ -368,8 +417,6 @@ def test_a_failed_write_while_the_other_switch_is_on_switches_both_off(
     assert proc.stdin.closed_by_parent  # stopped, not left behind
     lab_status = lab.get_status()
     assert lab_status["drive_allowed"] is False and lab_status["shoot_allowed"] is False
-    # Each kind once, as the transport failure it was (never as the teacher's OFF).
-    assert told == [("drive", "heartbeat_write_failed"), ("launcher", "heartbeat_write_failed")]
 
 
 def test_a_failed_write_for_the_first_switch_leaves_nothing_on(lab, actuation, monkeypatch):
@@ -389,13 +436,10 @@ def test_a_failed_write_for_the_first_switch_leaves_nothing_on(lab, actuation, m
 
 
 def test_a_failed_write_on_a_teacher_off_takes_the_other_switch_with_it(lab, actuation):
-    told = []
-    actuation.add_revoke_listener(lambda kind, reason: told.append((kind, reason)))
     actuation.set_authority("drive", True)
     actuation.set_authority("launcher", True)
     lab.set_drive(lab.DriveRequest(allow=True))
     lab.set_shoot(lab.DriveRequest(allow=True))
-    told.clear()
     _break_heartbeat_stdin(actuation.started[0])
     status = actuation.set_authority("drive", False)
     assert status["drive"] is False and status["launcher"] is False and status["running"] is False
@@ -403,7 +447,6 @@ def test_a_failed_write_on_a_teacher_off_takes_the_other_switch_with_it(lab, act
     _assert_no_switch_without_heartbeat(actuation)
     lab_status = lab.get_status()
     assert lab_status["drive_allowed"] is False and lab_status["shoot_allowed"] is False
-    assert told == [("launcher", "heartbeat_write_failed"), ("drive", "teacher")]
 
 
 @pytest.fixture
@@ -412,6 +455,8 @@ def app_module(lab, actuation, monkeypatch):
     module = importlib.reload(module)
     monkeypatch.setattr(module, "actuation", actuation)
     monkeypatch.setattr(module, "lab", lab)
+    # Importing app installs its own running-mode source (systemd); keep the test's lesson launch.
+    monkeypatch.setattr(actuation, "_running_mode_source", lambda: actuation.running["mode"])
     return module
 
 
@@ -488,3 +533,25 @@ def test_manager_shutdown_ends_the_heartbeat(app_module, actuation, monkeypatch)
     asyncio.run(run())
     assert actuation.status()["launcher"] is False
     assert actuation.started[0].stdin.closed_by_parent
+
+
+@pytest.mark.parametrize("running", [None, "practice", "competition", "unknown"])
+def test_switching_on_needs_a_running_lesson_launch(actuation, running):
+    # Saved lesson mode, but the robot runs another launch (or none): refused, nothing started.
+    actuation.running["mode"] = running
+    with pytest.raises(HTTPException) as error:
+        actuation.set_authority("drive", True)
+    assert error.value.status_code == 409
+    assert "教材モードで起動" in error.value.detail
+    assert actuation.started == []
+    status = actuation.status()
+    assert status["available"] is False and status["running_mode"] == running
+    assert status["mode"] == "lesson"
+
+
+def test_a_running_lesson_launch_with_another_saved_mode_is_not_usable(actuation, tmp_path):
+    # The teacher saved practice for the next start: the switches stay off until then.
+    (tmp_path / "mode").write_text("practice\n")
+    with pytest.raises(HTTPException):
+        actuation.set_authority("launcher", True)
+    assert actuation.status()["available"] is False

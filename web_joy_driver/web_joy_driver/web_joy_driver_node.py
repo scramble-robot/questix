@@ -5,12 +5,12 @@ WebSocket (see ``ws_server`` / ``joy_frame``). The latest frame is re-published
 at ``publish_rate`` like ``uart_joy_driver``; when frames stop for longer than
 ``message_timeout_sec`` (Wi-Fi drop, backgrounded browser) a neutral Joy is
 published so downstream nodes stop. Emergency-stop state from
-``emergency_stop_topic`` is relayed to the page for display only; gating is
-still done by ``joy_gate`` and the per-component E-stop subscribers.
+``emergency_stop_topic`` is relayed to the page for display only; the actuators
+stop on ``/emergency_stop`` and ``/motion_permission`` themselves.
 
-Lessons: ``arbiter_status_topic`` (twist_arbiter's latched JSON status) is
-relayed so the page can say when a QUESTiX LAB driving experiment has the
-robot; this node only *reads* it. The page stops a lesson run itself, over
+Lessons: ``arbiter_status_topic`` (command_arbiter's ArbiterStatus, the drive's)
+is relayed so the page can say when a QUESTiX LAB driving experiment has the
+robot; this node only *reads* it (arbiter_view.py). The page stops a lesson run itself, over
 the lab bridge's own WebSocket (``lab_bridge_port``), because the only ROS way
 would be another publisher on the lab's topics, which the bridge refuses.
 
@@ -20,7 +20,6 @@ robot's view between the sticks. Frames are throttled to ``camera_max_fps``
 and dropped for clients that cannot keep up; nothing is ever queued.
 """
 
-import json
 import socket
 import time
 from pathlib import Path
@@ -37,8 +36,8 @@ from rclpy.qos import (
     qos_profile_sensor_data,
 )
 from sensor_msgs.msg import CompressedImage, Joy
-from std_msgs.msg import String
 
+from .arbiter_view import drive_view, fresh
 from .joy_frame import (
     DEFAULT_NUM_AXES,
     DEFAULT_NUM_BUTTONS,
@@ -50,9 +49,9 @@ from .joy_frame import (
 from .ws_server import JoyWebSocketServer
 
 try:
-    from questix_msgs.msg import EmergencyStop
-except ImportError:  # questix_msgs not built; E-stop display is optional
-    EmergencyStop = None  # type: ignore[assignment,misc]
+    from questix_msgs.msg import ArbiterStatus, EmergencyStop
+except ImportError:  # questix_msgs not built; the E-stop and lesson displays are optional
+    ArbiterStatus = EmergencyStop = None  # type: ignore[assignment,misc]
 
 # Camera relay states reported to the page in the status message.
 CAMERA_DISABLED = "disabled"  # camera_topic is ""
@@ -101,7 +100,7 @@ class WebJoyDriverNode(Node):
         self.declare_parameter("camera_max_fps", 15.0)
         self.declare_parameter("camera_timeout_sec", 2.0)
         self.declare_parameter("robot_name", "")
-        self.declare_parameter("arbiter_status_topic", "/twist_arbiter/status")
+        self.declare_parameter("arbiter_status_topic", "/command_arbiter/status")
         self.declare_parameter("lab_bridge_port", 8897)
 
         joy_topic = self.get_parameter("joy_topic").value
@@ -143,9 +142,8 @@ class WebJoyDriverNode(Node):
         self._camera_frames = 0
         self._camera_rejected = 0
         self._camera_encoding = ""
-        self._arbiter_topic = arbiter_topic
         self._arbiter: Optional[Dict[str, Any]] = None
-        self._arbiter_publishers = 0
+        self._arbiter_rx_time: Optional[float] = None
         self._arbiter_bad = 0
 
         self._publisher = self.create_publisher(Joy, joy_topic, 10)
@@ -169,18 +167,19 @@ class WebJoyDriverNode(Node):
             self._camera_sub = self.create_subscription(
                 CompressedImage, camera_topic, self._on_camera_image, qos_profile_sensor_data)
 
-        if arbiter_topic:
-            # twist_arbiter publishes its status reliable + transient_local (latched).
-            latched = QoSProfile(
+        if arbiter_topic and ArbiterStatus is not None:
+            # command_arbiter's contract: reliable + volatile, keep-last(10) (one per mechanism).
+            status_qos = QoSProfile(
                 history=HistoryPolicy.KEEP_LAST,
-                depth=1,
+                depth=10,
                 reliability=ReliabilityPolicy.RELIABLE,
-                durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                durability=DurabilityPolicy.VOLATILE,
             )
             self._arbiter_sub = self.create_subscription(
-                String, arbiter_topic, self._on_arbiter_status, latched)
-            # A latched sample outlives its publisher: forget it when twist_arbiter is gone.
-            self._arbiter_timer = self.create_timer(1.0, self._check_arbiter)
+                ArbiterStatus, arbiter_topic, self._on_arbiter_status, status_qos)
+        elif arbiter_topic:
+            self.get_logger().warning(
+                "questix_msgs is unavailable; lesson driving will not be shown")
 
         index_html = self._load_index_html(static_dir)
         self._server = JoyWebSocketServer(
@@ -267,11 +266,8 @@ class WebJoyDriverNode(Node):
         }
 
     def _arbiter_state(self) -> Optional[Dict[str, Any]]:
-        """Return twist_arbiter's last status, or ``None`` when it is not running."""
-        arbiter = self._arbiter
-        if arbiter is None or self._arbiter_publishers <= 0:
-            return None
-        return dict(arbiter)
+        """Return command_arbiter's drive status, or ``None`` when it is silent (not running)."""
+        return fresh(self._arbiter, self._arbiter_rx_time, time.monotonic())
 
     # Called from the rclpy executor -----------------------------------
     def _on_emergency_stop(self, msg: Any) -> None:
@@ -281,27 +277,17 @@ class WebJoyDriverNode(Node):
 
     def _on_arbiter_status(self, msg: Any) -> None:
         try:
-            data = json.loads(msg.data)
-            active = data["active"]
-            if active not in ("joy", "lab"):
-                raise ValueError("unknown source %r" % (active,))
-        except (ValueError, KeyError, TypeError) as exc:
+            view = drive_view(msg)
+        except ValueError as exc:
             self._arbiter_bad += 1
             if self._arbiter_bad <= 5 or self._arbiter_bad % 100 == 0:
                 self.get_logger().warning(
-                    "ignored twist_arbiter status %r (%s), total %d"
-                    % (msg.data[:120], exc, self._arbiter_bad))
+                    "ignored command_arbiter status (%s), total %d" % (exc, self._arbiter_bad))
             return
-        self._arbiter = {
-            "active": active,
-            "reason": str(data.get("reason", "")),
-            "lab_locked": bool(data.get("lab_locked", False)),
-        }
-        # Seeing a sample proves a publisher exists, even before the next graph check.
-        self._arbiter_publishers = max(1, self._arbiter_publishers)
-
-    def _check_arbiter(self) -> None:
-        self._arbiter_publishers = self.count_publishers(self._arbiter_topic)
+        if view is None:
+            return  # the launcher's status
+        self._arbiter = view
+        self._arbiter_rx_time = time.monotonic()
 
     def _on_camera_image(self, msg: Any) -> None:
         data = bytes(msg.data)

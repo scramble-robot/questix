@@ -25,20 +25,49 @@ test('headline follows permission and blockers, never "can fire" above a blocker
   assert.equal(drive.tone, 'driving');
 });
 
-test('a missing twist_arbiter right after a bridge restart is shown only once it lasts', () => {
+test('a missing command_arbiter right after a bridge restart is shown only once it lasts', () => {
   const memory = StatusView.createBlockerMemory();
   const data = lab({ bridge: bridge({ blockers: [{ code: 'no_drive_node' }] }) });
   let view = StatusView.capability('drive', data, 'active', memory, 1000);
   assert.equal(view.headline, '許可済み・ロボットの状態を確認しています…');
   assert.deepEqual(view.reasons, []);
   view = StatusView.capability('drive', data, 'active', memory, 1000 + StatusView.SETTLE_MS);
-  assert.match(view.headline, /^許可済み・いまは走行できません（ロボット制御が練習用の構成で動いていないか/);
-  assert.match(view.reasons[0].detail, /twist_arbiter.*ROS_DOMAIN_ID 7/);
-  assert.doesNotMatch(view.reasons[0].text, /twist_arbiter|ROS_DOMAIN_ID/); // jargon only in details
+  assert.match(view.headline, /^許可済み・いまは走行できません（ロボット制御が教材用の構成で動いていないか/);
+  assert.match(view.reasons[0].detail, /command_arbiter.*ROS_DOMAIN_ID 7/);
+  assert.doesNotMatch(view.reasons[0].text, /command_arbiter|ROS_DOMAIN_ID/); // jargon only in details
   // It went away and comes back: the wait starts again.
   StatusView.capability('drive', lab(), 'active', memory, 20000);
   view = StatusView.capability('drive', data, 'active', memory, 21000);
   assert.deepEqual(view.reasons, []);
+});
+
+test('a permission on its way to the robot is awaited, then named if it never arrives', () => {
+  const memory = StatusView.createBlockerMemory();
+  // Switched on; command_arbiter has not heard /lab_permission yet.
+  const data = lab({ bridge: bridge({ allowed: false, blockers: [{ code: 'not_allowed' }] }) });
+  let view = StatusView.capability('drive', data, 'active', memory, 0);
+  assert.equal(view.headline, '許可済み・ロボットの状態を確認しています…');
+  assert.equal(view.tone, 'warn');
+  view = StatusView.capability('drive', data, 'active', memory, StatusView.SETTLE_MS);
+  assert.match(view.headline, /^許可済み・いまは走行できません（教材の許可がロボットに届いていません/);
+  assert.match(view.reasons[0].detail, /\/lab_permission.*command_arbiter/);
+  // Forbidden while the robot still says yes: told, not hidden (another manager, or the lease).
+  const late = StatusView.capability('drive', lab({ drive_allowed: false }), 'active', memory, 0);
+  assert.match(late.headline, /^禁止に切り替えましたが、ロボットはまだ教材からの走行を受け付けています/);
+});
+
+test('no motion permission is named with the 操作 tab to look at', () => {
+  const data = lab({ bridge: bridge({ blockers: [{ code: 'no_motion_permission' }] }) });
+  const view = StatusView.capability('drive', data, 'active', StatusView.createBlockerMemory(), 0);
+  assert.match(view.headline, /ロボットの動作許可が出ていません（「操作」タブ/);
+  assert.match(view.reasons[0].detail, /\/motion_permission/);
+});
+
+test('a bridge started by hand follows the switches too (no note that they do not apply)', () => {
+  const view = StatusView.capability('drive', lab({ running: false, external: true }), 'active',
+    StatusView.createBlockerMemory(), 0);
+  assert.equal(view.toggleNote, '');
+  assert.equal(view.headline, '許可済み・生徒が教材から走らせられます');
 });
 
 test('a stopped robot service is named as the reason', () => {
@@ -258,4 +287,20 @@ test('operation_manager reasons in the teacher\'s words', () => {
   assert.equal(StatusView.estopReasonText('something new'), 'something new');
   assert.equal(StatusView.estopReasonText(''), '');
   assert.equal(StatusView.estopReasonText(null), '');
+});
+
+test('lesson permissions wait for a running lesson launch', () => {
+  // Saved lesson mode, but the robot runs a practice launch (or none): the switch is disabled and
+  // says what to do; a permission that is already on can still be switched off.
+  for (const [running, note] of [['practice', /練習用の構成で動いています。教材モードで「再起動」/],
+    [null, /止まっています。教材モードで「起動」/]]) {
+    const data = lab({ drive_allowed: false, switches_available: false, running_mode: running,
+      drive_authority: false });
+    const view = StatusView.capability('drive', data, 'active', StatusView.createBlockerMemory(), 0);
+    assert.equal(view.toggleDisabled, true);
+    assert.match(view.toggleNote, note);
+  }
+  const on = lab({ switches_available: false, running_mode: 'practice' });
+  assert.equal(StatusView.capability('drive', on, 'active', StatusView.createBlockerMemory(), 0)
+    .toggleDisabled, false);
 });

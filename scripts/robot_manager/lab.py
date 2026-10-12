@@ -6,26 +6,24 @@ node can: it serves the same teaching pages on the LAN and mirrors robot telemet
 This module starts and stops that node so nobody has to type ``ros2 launch``.
 
 Serving the pages is a setting (``AUTOSTART`` in lab.env, on by default). Moving the robot from
-the pages is not: the two actuator permissions (``ALLOW_DRIVE``: low-speed driving experiments,
-questix_lab_bridge/questix_lab_bridge/drive.py; ``ALLOW_SHOOT``: roller, tilt and firing one disc,
-questix_lab_bridge/questix_lab_bridge/shoot.py) live only in this process
-(``_runtime_permissions``), start off, and are switched on by the teacher for this session with
-``/api/lab/drive`` / ``/api/lab/shoot``. They are never read from lab.env (values an older manager
-left there are ignored, and dropped the next time lab.env is written), so a restart of the
-manager or of the robot always starts with both off. They also go off on 配信停止, on
-「すべて止める」 (``revoke_permissions``), when the robot leaves lesson mode (and stay off when it
-comes back to lesson mode), and when the bridge this manager started exits on its own. QUESTiX
-LAB exists only in lesson mode (教材, modes.uses_lab): in practice and competition mode the bridge
-does not run and nothing can be allowed. Restarting the bridge to apply a switch keeps them. They also need the teacher's runtime
-authority for the robot (actuation.py, 操作 tab: ロボットの走行制御 / 発射機構の操作), which the
-nodes themselves enforce for the controller and the lessons alike: a lesson permission cannot be
-switched on while its authority is off, and it goes off whenever that authority goes off
-(``_on_authority_revoked``); switching the authority on never switches a lesson permission on.
-Each run is still confirmed by the
-learner's safety tick on the page and bounded by the bridge's own checks, and the controller takes
-over at any time. Both permissions are always passed to the bridge explicitly
-(``-p allow_drive:=…`` / ``-p allow_shoot:=…``), so the defaults in its lab_bridge.yaml (both
-false) never decide.
+the pages is not: the two lesson permissions (``ALLOW_DRIVE``: low-speed driving experiments;
+``ALLOW_SHOOT``: roller, tilt and firing one disc) are held by actuation.py next to the teacher's
+switches and published by its heartbeat on ``/lab_permission``, which command_arbiter and the lab
+bridge read (design/safety_permission_input_refactor.md, 4.6). They start off and are switched
+on by the teacher for this session with ``/api/lab/drive`` / ``/api/lab/shoot``; switching them
+never restarts the bridge, and the bridge has no parameter that grants them. They are never read
+from lab.env (values an older manager left there are ignored, and dropped the next time lab.env
+is written), so a restart of the manager or of the robot always starts with both off. They also
+go off on 配信停止, on 「すべて止める」 (``revoke_permissions``), when the robot leaves lesson mode
+(and stay off when it comes back to lesson mode), and when the bridge this manager started exits
+on its own. QUESTiX LAB exists only in lesson mode (教材, modes.uses_lab): in practice and
+competition mode the bridge does not run and nothing can be allowed. They also need the teacher's
+switch of the same kind (actuation.py, 操作 tab: ロボットの走行制御 / 発射機構の操作), whose vote
+the robot's motion permission needs for the controller and the lessons alike: a lesson permission
+cannot be switched on while that switch is off, and it goes off with it; switching the switch on
+never switches a lesson permission on. Each run is still confirmed by the learner's safety tick on
+the page and bounded by the bridge's session rules and command_arbiter, and the controller takes
+over at any time.
 
 The status reports what the running bridge itself says (``GET /api/state`` on its port), so the
 tab shows whether pages can really drive now, also for a bridge started by hand, and how many
@@ -128,17 +126,9 @@ _lock = threading.Lock()
 _proc: Optional[subprocess.Popen] = None
 _started_at: Optional[float] = None
 _last_stop_reason: Optional[str] = None
-# The lessons' actuator permissions, each passed to the bridge as its parameter.
-_PERMISSIONS = {"ALLOW_DRIVE": "allow_drive", "ALLOW_SHOOT": "allow_shoot"}
-# The teacher's runtime authority each permission needs (actuation.py).
+# The lesson permissions and the kind of the teacher's switch each one needs (actuation.py holds
+# both; only this process does: they start off and are never read from or written to lab.env).
 _AUTHORITY = {"ALLOW_DRIVE": "drive", "ALLOW_SHOOT": "launcher"}
-# What the teacher allowed in this session (guarded by _lock). Only this process holds them: they
-# start off, are never read from or written to lab.env, and revoke_permissions switches both off.
-_runtime_permissions = {key: False for key in _PERMISSIONS}
-# Whether the running bridge was started with allow_drive / allow_shoot (the permissions may have
-# changed since).
-_started_allow_drive = False
-_started_allow_shoot = False
 # Why the last write of lab.env that did not fail its request failed (leaving lesson mode, shown in
 # the tab until a write succeeds).
 _config_error: Optional[str] = None
@@ -206,27 +196,25 @@ def _read_env_file(path: Path) -> dict[str, str]:
 
 
 def _read_config() -> dict[str, str]:
-    """Return the settings in lab.env (no actuator permissions: see _permissions)."""
+    """Return the settings in lab.env (no lesson permissions: see _permissions)."""
     config = dict(_DEFAULT_CONFIG)
     config.update({k: v for k, v in _read_env_file(LAB_ENV_FILE).items() if k in config})
     return config
 
 
 def _permissions() -> dict[str, bool]:
-    """Return the actuator permissions in effect now. Caller must hold _lock.
+    """Return the lesson permissions in effect now (actuation.py holds them).
 
     Outside lesson mode the robot never takes lab commands, whatever was allowed before.
     """
     available = _lab_available()
-    return {key: allowed and available for key, allowed in _runtime_permissions.items()}
+    allowed = actuation.lab_permissions()
+    return {key: allowed[kind] and available for key, kind in _AUTHORITY.items()}
 
 
 def _revoke_locked() -> bool:
-    """Switch both actuator permissions off; return whether one was on. Caller must hold _lock."""
-    was_on = any(_runtime_permissions.values())
-    for key in _runtime_permissions:
-        _runtime_permissions[key] = False
-    return was_on
+    """Switch both lesson permissions off; return whether one was on. Caller must hold _lock."""
+    return actuation.revoke_lab()
 
 
 def _read_practice_snapshot() -> dict[str, str]:
@@ -280,10 +268,11 @@ def _rosbag_dir() -> Optional[str]:
     return output_dir if _ABS_PATH_RE.match(output_dir) else None
 
 
-def _build_command(config: dict[str, str], permissions: dict[str, bool]) -> str:
+def _build_command(config: dict[str, str]) -> str:
     """Build the `bash -lc` script that sources ROS and runs the bridge node.
 
-    ``config`` is the lab.env settings, ``permissions`` the actuator permissions to start with.
+    ``config`` is the lab.env settings. No parameter grants motion: the lesson permissions reach
+    the robot on /lab_permission (actuation.py).
     """
     launch_env = _read_env_file(LAUNCH_ENV_FILE)
     robot_ws = launch_env.get("ROBOT_WS", "/home/ubuntu/robot_ws")
@@ -309,10 +298,6 @@ def _build_command(config: dict[str, str], permissions: dict[str, bool]) -> str:
     ]
     if camera_topic:  # an empty value would be an rcl parse error, and empty is the default
         args += ["-p", f"camera_topic:={camera_topic}"]
-    # Always explicit: lab_bridge.yaml has its own defaults (for a bridge started by hand), and the
-    # permissions of this session must never fall back to them. Anything but True is off.
-    for key, parameter in _PERMISSIONS.items():
-        args += ["-p", f"{parameter}:={'true' if permissions.get(key) is True else 'false'}"]
     records_dir = config.get("RECORDS_DIR", "")
     if records_dir:
         if not _ABS_PATH_RE.match(records_dir):
@@ -543,7 +528,7 @@ def _stop_locked(reason: str) -> None:
 def _reap_locked() -> bool:
     """Notice that our bridge exited on its own; return whether one runs. Caller must hold _lock.
 
-    An exit nobody asked for (crash, port taken, ROS missing) takes the actuator permissions with
+    An exit nobody asked for (crash, port taken, ROS missing) takes the lesson permissions with
     it, so starting the pages again never brings them back by itself. It is noticed here, i.e. at
     the next status poll, start or permission switch, not at the moment of the exit.
     """
@@ -563,6 +548,8 @@ def _reap_locked() -> bool:
 
 def _status_payload() -> dict:
     managed = _reap_locked()
+    # Like the bridge's own state below, this may wait briefly (systemd) while _lock is held.
+    running_mode = actuation.running_mode()
     # A bridge started by hand (ros2 launch) is reported, but not ours to stop.
     external = not managed and _port_in_use()
     config = _read_config()
@@ -581,19 +568,20 @@ def _status_payload() -> dict:
         "elapsed_sec": int(time.time() - _started_at) if managed and _started_at else 0,
         "last_stop_reason": _last_stop_reason,
         "config": config,
-        # What the teacher allowed in this session, and what the bridge started here was started
-        # with (null: none, or not ours). The truth for driving is bridge.read_only.
+        # What the teacher allowed in this session (published on /lab_permission). What the
+        # robot does with it: bridge.read_only (driving) and bridge.shoot_state.allowed.
         "drive_allowed": permissions["ALLOW_DRIVE"],
-        "drive_running": _started_allow_drive if managed else None,
-        # The same for the launcher; the truth is bridge.shoot_state.allowed.
         "shoot_allowed": permissions["ALLOW_SHOOT"],
-        "shoot_running": _started_allow_shoot if managed else None,
         # The permissions belong to this session of the manager: both start off after a restart
         # of the manager or the robot, 配信停止, 「すべて止める」 and leaving lesson mode.
         "permissions_transient": True,
-        # The teacher's runtime authority each permission needs (操作 tab, actuation.py).
-        "drive_authority": actuation.peek("drive"),
-        "shoot_authority": actuation.peek("launcher"),
+        # The teacher's switch each permission needs (操作 tab, actuation.py).
+        "drive_authority": actuation.is_allowed("drive"),
+        "shoot_authority": actuation.is_allowed("launcher"),
+        # The robot's running launch (None while stopped): the permissions can be switched on only
+        # while it is a lesson launch (actuation.switches_available).
+        "running_mode": running_mode,
+        "switches_available": actuation.switches_available(running_mode),
         # The running bridge's own GET /api/state (ours or started by hand); null when none
         # answers.
         "bridge": _bridge_state() if managed or external else None,
@@ -613,8 +601,8 @@ def get_status():
 
 @router.post("/start")
 def start_bridge():
-    """Start the bridge (teaching pages + telemetry on the LAN; driving only if allowed)."""
-    global _proc, _started_at, _last_stop_reason, _started_allow_drive, _started_allow_shoot
+    """Start the bridge (teaching pages + telemetry on the LAN; moving only if allowed)."""
+    global _proc, _started_at, _last_stop_reason
     with _lock:
         if _reap_locked():
             raise HTTPException(status_code=409, detail="教材はすでに配信中です")
@@ -628,9 +616,7 @@ def start_bridge():
             raise HTTPException(status_code=409, detail=_unavailable_detail("教材を配信しません"))
         if not (LAB_DIR / "index.html").is_file():
             raise HTTPException(status_code=500, detail="教材のファイルが見つかりません")
-        config = _read_config()
-        permissions = _permissions()
-        script = _build_command(config, permissions)
+        script = _build_command(_read_config())
         log = _open_log()
         try:
             proc = subprocess.Popen(
@@ -661,8 +647,6 @@ def start_bridge():
         _proc = proc
         _started_at = time.time()
         _last_stop_reason = None
-        _started_allow_drive = permissions["ALLOW_DRIVE"]
-        _started_allow_shoot = permissions["ALLOW_SHOOT"]
         return _status_payload()
 
 
@@ -682,7 +666,7 @@ def stop_bridge():
 def set_config(config: LabConfig):
     """Persist bridge settings; they take effect the next time the bridge starts.
 
-    The actuator permissions are not settings and are untouched (legacy ALLOW_* keys in lab.env
+    The lesson permissions are not settings and are untouched (legacy ALLOW_* keys in lab.env
     are dropped by the write).
     """
     values = {
@@ -695,111 +679,50 @@ def set_config(config: LabConfig):
 
 @router.post("/drive")
 def set_drive(request: DriveRequest):
-    """Allow or forbid the lessons' driving experiments, and restart our bridge to apply it.
+    """Allow or forbid the lessons' driving experiments (教材からの走行) for this session.
 
-    The permission holds for this session of the manager only (see _runtime_permissions); nothing
-    is written to lab.env. A bridge this manager runs is restarted at once, keeping the
-    permissions, so the switch never says one thing while the bridge does another (every connected
-    page drops for a few seconds and reconnects). A bridge started by hand keeps its own
-    parameters: the status reports drive_running = null for it, and its bridge.read_only tells
-    what it does.
+    Published on /lab_permission at once (actuation.py); nothing is written to lab.env and the
+    bridge keeps running (no page drops).
     """
-    return _set_permission("ALLOW_DRIVE", request.allow, "教材から走らせられません", "drive_setting",
-                           "先に「操作」タブで「ロボットの走行制御」をONにしてください")
+    return _set_permission("ALLOW_DRIVE", request.allow, "教材から走らせられません")
 
 
 @router.post("/shoot")
 def set_shoot(request: DriveRequest):
-    """Allow or forbid the lessons' launcher experiments (roller, tilt, fire), like set_drive.
-
-    For this session only; our bridge is restarted at once, so the switch never says one thing
-    while the bridge does another.
-    """
-    return _set_permission("ALLOW_SHOOT", request.allow, "教材から発射させられません", "shoot_setting",
-                           "先に「操作」タブで「発射機構の操作」をONにしてください")
+    """Allow or forbid the lessons' launcher experiments (roller, tilt, fire), like set_drive."""
+    return _set_permission("ALLOW_SHOOT", request.allow, "教材から発射させられません")
 
 
-def _set_permission(key: str, allow: bool, unavailable_what: str, stop_reason: str,
-                    authority_detail: str = "") -> dict:
-    """Set one runtime permission and restart a bridge of ours so it applies (set_drive/set_shoot).
+def _set_permission(key: str, allow: bool, unavailable_what: str) -> dict:
+    """Switch one lesson permission (set_drive / set_shoot); raises when it cannot go on.
 
-    The restart is ours, not a stop: the permissions are kept for the new bridge. If that bridge
-    does not come up, both permissions go off (a later 配信開始 starts with them off). Allowing
-    needs the teacher's runtime authority for the same actuator (actuation.py); it is checked
-    before taking _lock, since noticing a dead heartbeat calls back into this module.
+    Allowing needs lesson mode, a running lesson launch and the teacher's switch of the same kind
+    (actuation.set_lab refuses without it). Forbidding always works.
     """
     if allow and not _lab_available():
         raise HTTPException(status_code=409, detail=_unavailable_detail(unavailable_what))
-    if allow and not actuation.is_allowed(_AUTHORITY[key]):
-        raise HTTPException(status_code=409, detail=authority_detail)
+    if allow and not actuation.switches_available():
+        raise HTTPException(status_code=409, detail=(
+            "教材モードで起動（再起動）したロボットでだけ使えます（いま動いている構成が教材用では"
+            "ありません）"))
     with _lock:
         # First notice a bridge that died on its own (that revokes), then apply this switch, so
         # the teacher's choice made now is not taken back by an exit that happened before it.
-        running = _reap_locked()
-        _runtime_permissions[key] = bool(allow)
-        if running:
-            _stop_locked(stop_reason)
-    if running and _lab_available():  # outside lesson mode the bridge does not run at all
-        try:
-            start_bridge()
-        except HTTPException:
-            with _lock:
-                _revoke_locked()
-            raise
-    with _lock:
+        _reap_locked()
+        actuation.set_lab(_AUTHORITY[key], bool(allow))
         return _status_payload()
 
 
 def revoke_permissions(reason: str) -> dict:
     """Switch driving and launching from the lessons off, e.g. for 「すべて止める」 (app.py).
 
-    Never raises. A bridge this manager runs with a permission on is restarted with both off, so
-    it cannot take lab commands any more (pages drop for a few seconds and reconnect); a bridge
-    started by hand keeps its own parameters. Returns ``{"ok", "revoked", "restarted",
-    "message"}``.
+    Never raises; the bridge keeps running and the pages stay connected. Returns ``{"ok",
+    "revoked", "message"}``.
     """
     with _lock:
         revoked = _revoke_locked()
-        running = _reap_locked()
-        restart = running and (_started_allow_drive or _started_allow_shoot)
-        if restart:
-            _stop_locked(reason)
-    if restart and _lab_available():
-        try:
-            start_bridge()
-        except HTTPException as error:
-            logger.warning("QUESTiX LAB bridge not restarted after %s: %s", reason, error.detail)
-            return {"ok": True, "revoked": revoked, "restarted": False,
-                    "message": ("教材からの走行・発射をOFFにしました（教材の配信は止まりました。"
-                                f"「配信開始」で再開できます: {error.detail}）")}
-    return {"ok": True, "revoked": revoked, "restarted": bool(restart),
-            "message": "教材からの走行・発射をOFFにしました"}
-
-
-def _on_authority_revoked(kind: str, reason: str) -> None:
-    """Switch the lesson permission off after the teacher's runtime authority for ``kind`` did.
-
-    Registered with actuation.add_revoke_listener. Never raises; a bridge of ours that was started
-    with the permission on is restarted with it off (as set_drive / set_shoot would).
-    """
-    key = next((key for key, value in _AUTHORITY.items() if value == kind), None)
-    if key is None:
-        return
-    with _lock:
-        started = _started_allow_drive if key == "ALLOW_DRIVE" else _started_allow_shoot
-        needed = _runtime_permissions[key] or (started and _proc is not None)
-    if not needed:
-        return
-    try:
-        _set_permission(key, False, "", f"authority_{reason}")
-    except HTTPException as error:
-        logger.warning("QUESTiX LAB: lesson permission off after the %s authority went off (%s), "
-                       "but the bridge did not come back: %s", kind, reason, error.detail)
-        with _lock:
-            _runtime_permissions[key] = False
-
-
-actuation.add_revoke_listener(_on_authority_revoked)
+    logger.info("QUESTiX LAB lesson permissions off (%s)", reason)
+    return {"ok": True, "revoked": revoked, "message": "教材からの走行・発射をOFFにしました"}
 
 
 def disable_outside_lessons() -> None:

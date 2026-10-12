@@ -2,6 +2,14 @@
 Changelog for package operation_manager
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+* feat: add RefereeMonitor (GPIO27 as the referee's vote) and MotionPermissionManager (votes ->
+  /motion_permission for the running mode), separate components launched by questix_core
+* refactor!: the E-stop component is EmergencyStopManager (node emergency_stop_manager, GPIO5 only;
+  config emergency_stop_manager[.no_gpio].yaml); GPIO27 is no longer an E-stop input and
+  /gpio/controllable is gone. operation_manager.launch.xml starts all three components
+
 3.2.0 (2026-09-07)
 ------------------
 * fix: integrate physical e-stop and competition auto-referee input (`#140 <https://github.com/scramble-robot/questix/issues/140>`_)

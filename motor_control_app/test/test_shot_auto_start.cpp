@@ -24,7 +24,7 @@ using motor_control_app::shot_auto_start::shouldHoldManualLifecycle;
 using motor_control_app::shot_auto_start::StartupEpisode;
 using motor_control_app::shot_auto_start::StartupStep;
 
-// /gpio/controllable 未受信（enable_gpio_ref=false 等）は周期リトライにフォールバック
+// /emergency_stop を使わない構成（emergency_stop_topic が空）は周期リトライにフォールバック
 TEST(ShotAutoStart, UnconfiguredWithoutControllableFallsBackToConfigure) {
   EXPECT_EQ(decideAutoStartAction(State::PRIMARY_STATE_UNCONFIGURED, false, false),
             AutoStartAction::kConfigure);

@@ -1342,11 +1342,11 @@ function showLabCapability(kind, data) {
   if (data.config_error) setLabError(`lab-${kind}-error`, data.config_error);
 }
 
-// The teacher's switch: restarts a bridge of ours (every page drops for a few seconds).
+// The teacher's switch: published on /lab_permission at once (the pages stay connected).
 async function setLabPermission(kind, allow) {
   const toggle = document.getElementById(`lab-${kind}-toggle`);
   const name = kind === "drive" ? "走行" : "発射";
-  if (!confirm(`教材からの${name}を${allow ? "許可" : "禁止"}しますか？ 配信中のブリッジを起動し直すため、生徒全員の接続が数秒切れます。`)) {
+  if (allow && !confirm(`教材からの${name}を許可しますか？ 生徒が教材からロボットを動かせるようになります。`)) {
     toggle.checked = !allow;
     return;
   }
@@ -1622,9 +1622,15 @@ function renderActuation(data) {
       !data ? '（確認できません）' : data.available === false && !data[kind] ? '（教材モードで使います）'
         : data[kind] ? 'ON：動かせます' : 'OFF：動きません';
   }
+  const running = { lesson: '教材', practice: '練習', competition: '大会' }[data?.running_mode];
   const state = document.getElementById('actuation-state');
   if (!data) {
     state.textContent = '許可の状態を確認できません。許可がない間は教材からは動かせません。';
+  } else if (data.available === false && data.mode === 'lesson') {
+    // Saved for lessons, but the running launch is not one: what runs decides what the robot does.
+    state.textContent = data.running_mode
+      ? `いまは${running || '別'}用の構成で動いています。教材モードで「再起動」すると使えます。`
+      : 'ロボット制御が止まっています。教材モードで「起動」すると使えます。';
   } else if (data.available === false) {
     state.textContent = data.competition
       ? '大会モードでは使いません（大会用の起動は非常停止と AutoReferee で動きます）。'
@@ -1664,7 +1670,34 @@ async function setActuation(kind, allow) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Why the robot does not move (/api/motion-state, read once on request)
+// ---------------------------------------------------------------------------
+
+async function checkMotionState() {
+  const button = document.getElementById('motion-state-check');
+  const summary = document.getElementById('motion-state-summary');
+  button.disabled = true;
+  summary.textContent = 'ロボットから読み取っています…';
+  try {
+    const view = MotionStateView.describe(await api('/api/motion-state'));
+    for (const key of ['estop', 'drive', 'launcher']) {
+      const cell = document.getElementById(`motion-state-${key}`);
+      cell.textContent = view[key].text;
+      cell.dataset.tone = view[key].tone;
+    }
+    document.getElementById('motion-state-result').hidden = false;
+    summary.textContent = view.summary;
+  } catch {
+    // api() already said why.
+    summary.textContent = '読み取れませんでした。';
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function setupActuationEvents() {
+  document.getElementById('motion-state-check').addEventListener('click', checkMotionState);
   for (const kind of ['drive', 'launcher']) {
     document.getElementById(`actuation-${kind}-toggle`).addEventListener('change', (event) => {
       setActuation(kind, event.target.checked);

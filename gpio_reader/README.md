@@ -40,7 +40,7 @@ The launch profiles are the single source of truth for monitored pins:
   the practice profile
 
 `questix_core.launch.xml` selects the practice profile by default and the
-competition profile only when `enable_autoreferee:=true`.
+competition profile only when `robot_mode:=competition`.
 
 GPIO values are published as raw electrical Bool values; this package does not
 invert either input:

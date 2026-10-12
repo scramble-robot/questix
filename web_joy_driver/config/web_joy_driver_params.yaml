@@ -8,8 +8,7 @@
 
 web_joy_driver:
   ros__parameters:
-    # Joy output topic. The launcher overrides this to /joy_gated-compatible
-    # pipelines through joy_gate, so leave it at /joy here.
+    # Joy output topic (joy_controller, shot_component and esc_motor_control read /joy).
     joy_topic: "/joy"
 
     # HTTP/WebSocket bind address and port.
@@ -66,8 +65,8 @@ web_joy_driver:
     static_dir: ""
 
     # Unified emergency stop topic (questix_msgs/EmergencyStop, reliable +
-    # transient_local) relayed to the page for DISPLAY ONLY; gating stays in
-    # joy_gate and the per-component subscribers. "" disables the display.
+    # transient_local) relayed to the page for DISPLAY ONLY; the actuators stop on
+    # /emergency_stop and /motion_permission themselves. "" disables the display.
     emergency_stop_topic: "/emergency_stop"
 
     # Camera view shown between the sticks on the page. Off by default like
@@ -94,10 +93,11 @@ web_joy_driver:
     # questix_lab_bridge's robot_name.
     robot_name: ""
 
-    # twist_arbiter's latched status (std_msgs/String JSON). Read only: the page
-    # shows 「教材から走らせています」 while a QUESTiX LAB driving experiment has
-    # the robot. "" disables it. Competition launches do not run twist_arbiter.
-    arbiter_status_topic: "/twist_arbiter/status"
+    # command_arbiter's status (questix_msgs/ArbiterStatus, the drive's). Read
+    # only: the page shows 「教材から走らせています」 while a QUESTiX LAB driving
+    # experiment has the robot. "" disables it. Only lesson launches run
+    # command_arbiter.
+    arbiter_status_topic: "/command_arbiter/status"
 
     # Port of questix_lab_bridge on the same host. The page's 止める also sends
     # {"type":"stop"} and {"type":"roller_stop"} there (browser -> bridge), so a

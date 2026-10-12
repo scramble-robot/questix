@@ -7,12 +7,13 @@
 """
 ROS 2 runtime smoke tests for installed GPIO safety parameter profiles.
 
-questix_core is started once per operation_manager profile (no GPIO, practice, competition) to
-check what the running nodes really do: the installed profiles load with typed integer arrays,
-the nodes stay up, every actuating node requires /emergency_stop, operation_manager publishes it,
-and /actuation_authority is subscribed only on the teacher's opt-in. Which arguments select
-which profile and switches (the whole matrix, the safety-only and environment variants and the
-invalid AutoReferee configuration) is resolved without ROS in
+questix_core is started once per mode (lesson without GPIO, practice, competition) to check what
+the running nodes really do: the installed profiles load with typed integer arrays, the nodes stay
+up, every actuating node requires /emergency_stop and
+/motion_permission, operation_manager publishes both for the mode, and /actuation_authority (the
+teacher's vote) is subscribed by MotionPermissionManager in lesson mode only, never by an
+actuator. Which arguments select which profile and switches (the whole matrix, the safety-only
+and environment variants and the invalid configurations) is resolved without ROS in
 test_gpio_safety_launch_expansion.py.
 
 The graph is read by an rclpy node inside this test process (parameter services, the node and
@@ -26,7 +27,7 @@ import subprocess
 import time
 
 import pytest
-from questix_msgs.msg import EmergencyStop
+from questix_msgs.msg import EmergencyStop, MotionPermission
 from rcl_interfaces.msg import ParameterType
 from rcl_interfaces.srv import GetParameters
 import rclpy
@@ -100,14 +101,27 @@ class GraphProbe:
         self.executor = SingleThreadedExecutor(context=self.context)
         self.executor.add_node(self.node)
         self.estop = None
+        self.permission = None
         self.node.create_subscription(
             EmergencyStop, '/emergency_stop', self._receive_estop,
             QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
                        durability=DurabilityPolicy.TRANSIENT_LOCAL))
+        self.node.create_subscription(
+            MotionPermission, '/motion_permission', self._receive_permission,
+            QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                       durability=DurabilityPolicy.VOLATILE))
 
     def _receive_estop(self, message):
         if self.estop is None:  # the first (latched) one, as ros2 topic echo --once read it
             self.estop = (message.active, message.reason)
+
+    def _receive_permission(self, message):
+        self.permission = (message.mode, message.drive_allowed, list(message.drive_blockers))
+
+    def read_motion_permission(self):
+        """Return (mode, drive_allowed, drive_blockers) of /motion_permission, or None."""
+        self.spin_until(lambda: self.permission is not None, STARTUP_TIMEOUT_SECONDS)
+        return self.permission
 
     def spin_until(self, condition, timeout):
         """Spin until condition() holds or the timeout passes; return condition()."""
@@ -176,48 +190,47 @@ class GraphProbe:
 
 
 ACTUATING_NODES = ('/drive_component', '/shot_component', '/esc_motor_control')
-GPIO_SAFETY_NODES = ('/gpio_reader_node', '/operation_manager_node')
+GPIO_SAFETY_NODES = ('/gpio_reader_node', '/emergency_stop_manager')
 NO_GPIO_REASON = 'released (no GPIO safety path)'
 BOOL = ParameterType.PARAMETER_BOOL
 INTEGER_ARRAY = ParameterType.PARAMETER_INTEGER_ARRAY
 
 
 @pytest.mark.parametrize(
-    ('launch_arguments', 'expect_estop', 'expect_teacher_permission_required',
-     'expect_safe_pins'),
+    ('launch_arguments', 'expect_estop', 'expect_permission', 'expect_gpio'),
     [
         # Manual diagnostic run without the GPIO safety path (enable_gpio_ref:=false, never passed
-        # by the production launcher), opted in to the teacher's permission (a permission, not an
-        # E-stop): operation_manager still owns /emergency_stop and reports released, so the
-        # robot (and QUESTiX LAB) can move.
-        (['enable_gpio_ref:=false', 'require_teacher_permission:=true'],
-         (False, NO_GPIO_REASON), True, None),
+        # by the production launcher) in lesson mode: operation_manager still owns /emergency_stop
+        # and reports released, and /motion_permission waits for the teacher's vote.
+        (['robot_mode:=lesson', 'enable_gpio_ref:=false'], (False, NO_GPIO_REASON),
+         ('lesson', False, ['teacher:unknown']), False),
         # Practice with the GPIO safety path but no GPIO hardware here: GPIO5 is never received,
-        # so operation_manager reports the E-stop as active.
-        (['enable_gpio_ref:=true'], (True, 'pin 5 not received; '), False, ([5], [])),
-        # Competition never depends on the classroom heartbeat, even when asked to.
-        (['enable_gpio_ref:=true', 'enable_autoreferee:=true',
-          'require_teacher_permission:=true'],
-         (True, 'pin 5 not received; pin 27 not received; '), False, ([5], [27])),
+        # so operation_manager reports the E-stop as active; the permission needs no vote.
+        (['robot_mode:=practice', 'enable_gpio_ref:=true'], (True, 'pin 5 not received; '),
+         ('practice', True, []), True),
+        # Competition: the referee votes "not allowed" without GPIO27; the E-stop is GPIO5 alone
+        # (a defeat is not an emergency stop).
+        (['robot_mode:=competition', 'enable_gpio_ref:=true'], (True, 'pin 5 not received; '),
+         ('competition', False, ['referee:off']), True),
     ],
 )
-def test_core_launch_publishes_the_estop_and_passes_the_teacher_permission_switch(
-        launch_arguments, expect_estop, expect_teacher_permission_required, expect_safe_pins):
+def test_core_launch_publishes_the_estop_and_the_motion_permission_for_each_mode(
+        launch_arguments, expect_estop, expect_permission, expect_gpio):
     """
     Start questix_core with drive and launcher and read what every node got and does.
 
-    /emergency_stop always comes from operation_manager and is always required. The teacher's
-    permission is an opt-in, and disabled must mean disabled: no node subscribes to
-    /actuation_authority without it. With the GPIO safety path, the installed profile's pin
-    arrays load as typed integer arrays and gpio_reader and operation_manager stay up.
+    /emergency_stop always comes from operation_manager and /motion_permission from
+    MotionPermissionManager; every actuator requires and subscribes to both. The teacher's
+    heartbeat is a vote: in lesson mode MotionPermissionManager listens to it, no actuator ever
+    does. With the GPIO safety path, the installed profile's pin array loads as a typed integer
+    array and gpio_reader and emergency_stop_manager stay up.
     """
-    environment = isolated_ros_environment(10 + len(launch_arguments) * 3 +
-                                           int(expect_estop[0]) +
-                                           2 * int(expect_teacher_permission_required))
+    lesson = 'robot_mode:=lesson' in launch_arguments
+    environment = isolated_ros_environment(
+        10 + 3 * len(expect_permission[2]) + int(expect_estop[0]) + 2 * int(lesson) +
+        5 * int(expect_permission[0] == 'competition'))
     arguments = ['enable_lidar:=false', 'enable_shot:=true', 'enable_drive:=true',
                  'enable_rviz:=false', 'controller_type:=dualshock']
-    if not any(argument.startswith('enable_autoreferee:=') for argument in launch_arguments):
-        arguments.append('enable_autoreferee:=false')
     probe = GraphProbe(environment)
     process = start_process(
         ['ros2', 'launch', 'questix_launcher', 'questix_core.launch.xml',
@@ -227,30 +240,35 @@ def test_core_launch_publishes_the_estop_and_passes_the_teacher_permission_switc
     try:
         for node in ACTUATING_NODES:
             assert probe.parameters(
-                node, ('require_emergency_stop', 'require_teacher_permission')) == {
+                node, ('require_emergency_stop', 'require_motion_permission')) == {
                 'require_emergency_stop': (BOOL, True),
-                'require_teacher_permission': (BOOL, expect_teacher_permission_required),
+                'require_motion_permission': (BOOL, True),
             }, node
-        if expect_safe_pins is not None:
+        if expect_gpio:
             assert probe.parameters(
-                '/operation_manager_node',
-                ('safe_low_pins', 'safe_high_pins', 'gpio_safety_enabled')) == {
-                'safe_low_pins': (INTEGER_ARRAY, expect_safe_pins[0]),
-                'safe_high_pins': (INTEGER_ARRAY, expect_safe_pins[1]),
+                '/emergency_stop_manager', ('safe_low_pins', 'gpio_safety_enabled')) == {
+                'safe_low_pins': (INTEGER_ARRAY, [5]),
                 'gpio_safety_enabled': (BOOL, True),
             }
             probe.wait_for_nodes(GPIO_SAFETY_NODES, process)
         assert probe.read_emergency_stop() == expect_estop
-        # Graph discovery is not instant: wait for the expected count (the opt-in), or watch for
-        # a while that none appears (disabled).
-        expected_subscriptions = len(ACTUATING_NODES) if expect_teacher_permission_required else 0
-        if expect_teacher_permission_required:
+        assert probe.read_motion_permission() == expect_permission
+        probe.spin_until(
+            lambda: probe.subscription_count('/motion_permission') == len(ACTUATING_NODES) + 1,
+            15.0)
+        # The three actuators and this probe.
+        assert probe.subscription_count('/motion_permission') == len(ACTUATING_NODES) + 1
+        # Graph discovery is not instant: wait for the expected count (lesson), or watch for a
+        # while that none appears (the other modes).
+        expected_subscriptions = 1 if lesson else 0
+        if lesson:
             probe.spin_until(
-                lambda: probe.subscription_count('/actuation_authority') == (
-                    expected_subscriptions), 15.0)
+                lambda: probe.subscription_count('/actuation_authority') == 1, 15.0)
         else:
-            probe.spin_until(lambda: probe.subscription_count('/actuation_authority') != 0, 15.0)
+            probe.spin_until(lambda: probe.subscription_count('/actuation_authority') != 0, 5.0)
         assert probe.subscription_count('/actuation_authority') == expected_subscriptions
+        # Nothing gates /joy any more.
+        assert '/joy_gate' not in probe.node_names()
         assert process.poll() is None, 'questix_core exited during the checks'
     finally:
         output = stop_process(process)

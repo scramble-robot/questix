@@ -62,27 +62,15 @@ DriveComponent::DriveComponent(const rclcpp::NodeOptions& options)
         onEmergencyStop(msg, change);
       });
 
-  // 教員の許可（練習時）。volatile + keep-last(1): 許可をラッチせず、発行元が止まれば
-  // リース（teacher_permission_timeout_sec）切れで閉じる。
-  require_teacher_permission_ = this->get_parameter("require_teacher_permission").as_bool();
-  teacher_permission_topic_ = this->get_parameter("teacher_permission_topic").as_string();
-  teacher_permission_timeout_sec_ = actuation_gate::teacherPermissionLease(
-      this->get_parameter("teacher_permission_timeout_sec").as_double());
-  if (require_teacher_permission_) {
-    if (teacher_permission_topic_.empty()) {
-      RCLCPP_ERROR(this->get_logger(),
-                   "teacher_permission_topic is empty but require_teacher_permission=true: "
-                   "the drive will never move");
-    } else {
-      teacher_permission_sub_ = this->create_subscription<questix_msgs::msg::ActuationAuthority>(
-          teacher_permission_topic_, rclcpp::QoS(1).reliable().durability_volatile(),
-          std::bind(&DriveComponent::teacherPermissionCallback, this, std::placeholders::_1));
-    }
-    RCLCPP_INFO(this->get_logger(),
-                "Teacher permission required on %s (lease %.2fs): the drive stays "
-                "stopped until the teacher switches driving on",
-                teacher_permission_topic_.c_str(), teacher_permission_timeout_sec_);
-  }
+  // 走行許可（L2、/motion_permission の drive_allowed）も共通の PermissionMonitor が購読・判定する
+  // （volatile + keep-last(1): 許可をラッチせず、発行元が止まればリース切れで閉じる）。
+  permission_monitor_ = std::make_unique<questix_safety::PermissionMonitor>(
+      *this, questix_safety::PermissionMonitor::declareAndRead(*this),
+      questix_safety::PermissionMonitor::Flag::kDrive, "drive",
+      [this](const questix_msgs::msg::MotionPermission& msg,
+             const questix_safety::PermissionMonitor::Change& change) {
+        onMotionPermission(msg, change);
+      });
 
   // 起動時のゲート状態（何も受信していない状態）。ログの初期値で、何も送らない。
   last_block_ = actuation_gate::evaluate(gateInputs());

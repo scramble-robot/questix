@@ -6,16 +6,19 @@ without a ROS installation.
 
 Server to browser, text frames are JSON objects tagged by ``type``:
 
-* ``hello``  - protocol version, ``read_only``, ``robot`` (``name``: the robot_name parameter
+* ``hello``  - protocol version, ``read_only`` (false: the bridge offers driving; whether a page
+  may drive now is ``drive_state``), ``robot`` (``name``: the robot_name parameter
   or the host name; ``domain``: ROS_DOMAIN_ID as an int, ``null`` when unset), robot
   geometry, the topic behind each stream, and ``records`` (``save``: pages may save
   recordings on the robot; ``list``: ``GET /api/records`` answers; ``rosbags``: ``GET
   /api/rosbags`` can convert Robot Manager's rosbags), and ``shoot`` (``allowed``: the bridge
-  runs with ``allow_shoot``; ``max_power``, ``tilt_min`` / ``tilt_max`` [deg],
+  offers the launcher; whether a page may use it now is ``shoot_state``; ``max_power``,
+  ``tilt_min`` / ``tilt_max`` [deg],
   ``fire_interval_sec``, ``min_fire_power``, ``spin_up_sec``, ``deadman_sec``, ``max_spin_sec``).
 * ``session`` - the id this connection has on the bridge (``drive_state.owner`` uses it).
 * ``drive_state`` - whether a page may drive the robot now and why not, who drives it,
-  the limits, and why the last run ended (drive.DriveArbiter.state). A page whose request
+  the limits (command_arbiter's), and why the last run ended (drive.DriveSession.state). A
+  page whose request
   was refused gets one more, to itself only, with ``refused`` set to the reason.
 * ``scan``   - ``angle_min``, ``angle_increment``, ``range_max``, ``ranges``
   (unmeasured beams are ``null``), and ``mount`` - the scan frame's pose ``x``, ``y``
@@ -41,13 +44,13 @@ Server to browser, text frames are JSON objects tagged by ``type``:
   Pages show pressed / released only from this stream (unknown until it arrives, stale when it
   stops); ``drive.emergency_stop`` may add a pressed E-stop but never makes it released.
 * ``roller`` - ``/roller/status`` as the roller ESC node sends it (``command`` 0..1, ``source``
-  ``joy``/``lab``/``idle``, ``lab_accepted``, ``lab_locked``, ``estop``) plus ``stamp`` (receipt
+  ``joy``/``lab``/``idle``, ``estop``, ``permission``, ``max_power``) plus ``stamp`` (receipt
   time [s]).
 * ``shot``   - ``/shot/status`` (``tilt_deg``, ``shooting``, ``fired_count``,
-  ``last_fire_source`` ``joy``/``lab``/null, ``lab_accepted``, ``estop``, ``active``) plus
-  ``stamp``.
+  ``last_fire_source`` ``joy``/``lab``/null, ``estop``, ``permission``, ``active``, the tilt
+  range, ``next_fire_in_sec``) plus ``stamp``.
 * ``shoot_state`` - whether a page may operate the launcher now and why not, who does, the
-  roller power, fire readiness and limits (shoot.ShootArbiter.state); on every change and once
+  roller power, fire readiness and limits (shoot.ShootSession.state); on every change and once
   a second.
 * ``shoot_refused`` - to the asking page only: ``reason`` (a key, see shoot.py), ``request``
   (``roller``/``tilt``/``fire``), and ``next_fire_in_sec`` / ``spin_ready_in_sec``.
@@ -63,7 +66,7 @@ Browser to server, always accepted:
   (records.py; up to 8 MiB). The bridge checks format, version and geometry, makes the id
   itself and answers ``record_saved`` or ``record_error``.
 
-Browser to server (only when the bridge runs with ``allow_drive``; otherwise ignored):
+Browser to server (refused with the blockers while driving is not possible):
 
 * ``{"type": "drive", "linear": v, "angular": w}`` - drive at v [m/s], w [rad/s]. Also the
   heartbeat: the owner repeats it, and silence stops the robot (drive.py).
@@ -72,7 +75,7 @@ Browser to server (only when the bridge runs with ``allow_drive``; otherwise ign
   ending its own experiment sends this so it cannot end another pupil's run. Any other
   ``scope`` value is treated as a plain stop.
 
-Browser to server (only when the bridge runs with ``allow_shoot``; otherwise ignored):
+Browser to server (refused with the blockers while the launcher is not possible):
 
 * ``{"type": "roller", "power": p}`` - spin the roller at p (0..1, clamped to max_power). Also
   the session heartbeat: the owner repeats it at least every 0.1 s, ``power`` 0 included;
@@ -129,7 +132,7 @@ def robot_identity(name='', environ=None):
 
 
 def shoot_hello(allowed, limits):
-    """``hello.shoot``: ``limits`` is shoot.ShootArbiter.limits()."""
+    """``hello.shoot``: ``limits`` is shoot.ShootSession.limits()."""
     return {
         'allowed': bool(allowed),
         'max_power': limits['max_power'],
@@ -304,12 +307,12 @@ def session_payload(client_id):
 
 
 def drive_state_payload(state):
-    """Wrap drive.DriveArbiter.state() for the browsers."""
+    """Wrap drive.DriveSession.state() for the browsers."""
     return {'type': 'drive_state', **state}
 
 
 def shoot_state_payload(state):
-    """Wrap shoot.ShootArbiter.state() for the browsers."""
+    """Wrap shoot.ShootSession.state() for the browsers."""
     return {'type': 'shoot_state', **state}
 
 
@@ -328,10 +331,10 @@ def state_payload(drive_state, robot, rates, drive_allowed, clients, max_clients
                   records=None, shoot_state=None, emergency_stop=None):
     """Body of ``GET /api/state``: the bridge as robot_manager and teachers need to see it.
 
-    ``drive_state`` is DriveArbiter.state(), ``rates`` the last status report [Hz],
+    ``drive_state`` is DriveSession.state(), ``rates`` the last status report [Hz],
     ``records`` records_api.RecordsApi.summary() (``dir``, ``count``, ``used_bytes``,
     ``limit_bytes``, ``save``, ``auto_record``, ``rosbag_dir``) or None, ``shoot_state``
-    ShootArbiter.state() (``allowed`` false when the bridge runs without ``allow_shoot``),
+    ShootSession.state() (``allowed`` false while the arbiter reports the teacher's permission off),
     ``emergency_stop`` True/False from /emergency_stop and /drive_status, None before any report.
     """
     return {
@@ -358,7 +361,7 @@ def parse_request(text):
     a JSON ``true`` (not ``1`` or ``"true"``).
 
     Anything else (binary frames, other types, broken JSON) is None and ignored. Values are
-    passed on unchecked; DriveArbiter.request refuses what is not a finite number.
+    passed on unchecked; DriveSession.request refuses what is not a finite number.
     """
     if not isinstance(text, str):
         return None

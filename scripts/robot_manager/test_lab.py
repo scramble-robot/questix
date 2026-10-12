@@ -2,6 +2,7 @@
 
 import getpass
 import importlib
+import json
 import os
 
 import pytest
@@ -21,15 +22,64 @@ def lab(tmp_path, monkeypatch):
     # The recorder's rosbag.env (OUTPUT_DIR is passed to the bridge): never the machine's own.
     monkeypatch.setattr(module.recorder, "ROSBAG_ENV_FILE", tmp_path / "rosbag.env")
     # The teacher has switched the robot's runtime authority on (操作 tab, actuation.py), which a
-    # lesson permission needs; tests of that rule switch it off themselves.
+    # lesson permission needs; its heartbeat runs and takes the lesson permissions too.
     monkeypatch.setattr(module.actuation, "_authority", {"drive": True, "launcher": True})
-    monkeypatch.setattr(module.actuation, "_proc", None)
+    monkeypatch.setattr(module.actuation, "_lab", {"drive": False, "launcher": False})
+    module.heartbeat = _Heartbeat()
+    monkeypatch.setattr(module.actuation, "_proc", module.heartbeat)
+    # The robot runs a lesson launch (app.py's real source asks systemd and last-launch), and
+    # actuation reads this test's saved mode (it is not reloaded here).
+    monkeypatch.setattr(module.actuation, "_running_mode_source", lambda: "lesson")
+    monkeypatch.setattr(module.actuation, "MODE_FILE", tmp_path / "mode")
     return module
+
+
+class _Heartbeat:
+    """actuation.py's heartbeat process: takes every state line until its stdin is closed."""
+
+    pid = 4343
+
+    def __init__(self):
+        self.lines = []
+        self.stdin = self
+        self.closed = False
+        self.broken = False
+
+    def write(self, text):
+        if self.broken:
+            raise OSError(32, "Broken pipe")
+        self.lines.append(json.loads(text))
+        return len(text)
+
+    def flush(self):
+        pass
+
+    def close(self):
+        self.closed = True
+
+    @property
+    def returncode(self):
+        return 0 if self.closed else None
+
+    def poll(self):
+        return self.returncode
+
+    def wait(self, timeout=None):
+        return 0
+
+    def kill(self):
+        self.closed = True
+
+
+def _published(lab):
+    """What /lab_permission says now: the heartbeat's last line (drive, launcher)."""
+    line = lab.heartbeat.lines[-1] if lab.heartbeat.lines else {}
+    return (line.get("lab_drive", False), line.get("lab_launcher", False))
 
 
 def test_command_sources_ros_and_serves_the_managers_lab_dir(lab, tmp_path):
     (tmp_path / "launch.env").write_text('ROBOT_WS="/home/ubuntu/robot_ws"\nROS_DOMAIN_ID=42\n')
-    script = lab._build_command({"CAMERA_TOPIC": ""}, {})
+    script = lab._build_command({"CAMERA_TOPIC": ""})
     assert 'source "/home/ubuntu/robot_ws/install/setup.bash"' in script
     assert "export ROS_DOMAIN_ID=42; exec ros2 run questix_lab_bridge lab_bridge_node" in script
     assert f'lab_dir:="{lab.LAB_DIR}"' in script and f"port:={lab.LAB_BRIDGE_PORT}" in script
@@ -38,18 +88,18 @@ def test_command_sources_ros_and_serves_the_managers_lab_dir(lab, tmp_path):
 
 
 def test_camera_topic_is_passed_only_when_valid(lab, tmp_path):
-    script = lab._build_command({"CAMERA_TOPIC": "/image_raw/compressed"}, {})
+    script = lab._build_command({"CAMERA_TOPIC": "/image_raw/compressed"})
     assert "-p camera_topic:=/image_raw/compressed" in script
     # Nothing configured: the domain the robot launcher then uses (${ROS_DOMAIN_ID:-42}).
     assert "export ROS_DOMAIN_ID=42; " in script
     with pytest.raises(HTTPException):
-        lab._build_command({"CAMERA_TOPIC": "/cam; rm -rf /"}, {})
+        lab._build_command({"CAMERA_TOPIC": "/cam; rm -rf /"})
 
 
 def test_invalid_workspace_is_rejected(lab, tmp_path):
     (tmp_path / "launch.env").write_text('ROBOT_WS="/home/x; reboot"\n')
     with pytest.raises(HTTPException):
-        lab._build_command({"CAMERA_TOPIC": ""}, {})
+        lab._build_command({"CAMERA_TOPIC": ""})
 
 
 def test_config_round_trip_and_validation(lab):
@@ -105,7 +155,8 @@ def test_competition_mode_turns_autostart_off_and_stops_the_bridge(lab, monkeypa
     assert lab._read_config() == {
         "CAMERA_TOPIC": "/cam/compressed", "AUTOSTART": "false", "RECORDS_DIR": ""}
     # Driving and launching from the lessons are switched off with the stream.
-    assert lab._runtime_permissions == {"ALLOW_DRIVE": False, "ALLOW_SHOOT": False}
+    assert lab.actuation.lab_permissions() == {"drive": False, "launcher": False}
+    assert _published(lab) == (False, False)
     status = lab.get_status()
     assert status["running"] is False and status["last_stop_reason"] == "competition_mode"
     assert status["drive_allowed"] is False and status["shoot_allowed"] is False
@@ -239,12 +290,10 @@ def test_drive_is_off_at_start_and_only_the_teacher_switches_it_on(lab):
     status = lab.get_status()
     assert status["drive_allowed"] is False and status["shoot_allowed"] is False
     assert status["permissions_transient"] is True
-    assert "-p allow_drive:=false -p allow_shoot:=false" in lab._build_command(
-        lab._read_config(), lab._permissions())
     status = lab.set_drive(lab.DriveRequest(allow=True))
     assert status["drive_allowed"] is True and status["shoot_allowed"] is False
-    assert "-p allow_drive:=true -p allow_shoot:=false" in lab._build_command(
-        lab._read_config(), lab._permissions())
+    assert _published(lab) == (True, False)  # on /lab_permission, never a bridge parameter
+    assert "allow_" not in lab._build_command(lab._read_config())
     # The settings form does not touch it, and nothing about it is written to lab.env.
     lab.set_config(lab.LabConfig(CAMERA_TOPIC="/cam/compressed"))
     assert lab.get_status()["drive_allowed"] is True
@@ -253,30 +302,20 @@ def test_drive_is_off_at_start_and_only_the_teacher_switches_it_on(lab):
     assert lab.get_status()["drive_allowed"] is False
 
 
-def test_drive_switch_restarts_our_bridge_and_keeps_the_permission(lab, monkeypatch):
+@pytest.mark.parametrize("setter, published", [("set_drive", (True, False)),
+                                               ("set_shoot", (False, True))])
+def test_a_switch_is_published_and_never_restarts_the_bridge(lab, monkeypatch, setter, published):
     signals = []
     monkeypatch.setattr(lab.os, "getpgid", lambda pid: pid)
     monkeypatch.setattr(lab.os, "killpg", lambda pgid, sig: signals.append((pgid, sig)))
-    started = []
-
-    def fake_start():
-        # What start_bridge would pass to the new bridge.
-        permissions = lab._permissions()
-        started.append(permissions["ALLOW_DRIVE"])
-        lab._proc = _FakeProcess()
-        lab._started_allow_drive = permissions["ALLOW_DRIVE"]
-        lab._started_allow_shoot = permissions["ALLOW_SHOOT"]
-    monkeypatch.setattr(lab, "start_bridge", fake_start)
+    monkeypatch.setattr(lab, "start_bridge", lambda: pytest.fail("the bridge was restarted"))
     lab._proc = _FakeProcess()
-    # The restart that applies the switch is ours: it must not take the permission back.
-    status = lab.set_drive(lab.DriveRequest(allow=True))
-    assert signals == [(_FakeProcess.pid, lab.signal.SIGINT)]
-    assert started == [True]
-    assert status["drive_allowed"] is True and status["drive_running"] is True
-    assert status["shoot_allowed"] is False
-    status = lab.set_drive(lab.DriveRequest(allow=False))
-    assert started == [True, False]
-    assert status["drive_allowed"] is False and status["drive_running"] is False
+    status = getattr(lab, setter)(lab.DriveRequest(allow=True))
+    assert _published(lab) == published
+    assert status["running"] is True and signals == []  # the pages stay connected
+    assert "drive_running" not in status and "shoot_running" not in status
+    getattr(lab, setter)(lab.DriveRequest(allow=False))
+    assert _published(lab) == (False, False) and signals == []
 
 
 def test_drive_cannot_be_allowed_in_competition_mode(lab, tmp_path):
@@ -291,7 +330,7 @@ def test_drive_cannot_be_allowed_in_competition_mode(lab, tmp_path):
 def test_invalid_workspace_is_explained_in_japanese(lab, tmp_path):
     (tmp_path / "launch.env").write_text('ROBOT_WS="relative/ws"\n')
     with pytest.raises(HTTPException) as error:
-        lab._build_command({"CAMERA_TOPIC": ""}, {})
+        lab._build_command({"CAMERA_TOPIC": ""})
     assert "ROBOT_WS が不正です" in error.value.detail
 
 
@@ -360,7 +399,6 @@ def test_status_carries_the_bridges_own_state(lab, monkeypatch):
     monkeypatch.setattr(lab, "_port_in_use", lambda: True)  # started by hand
     status = lab.get_status()
     assert status["external"] is True and status["bridge"] == state
-    assert status["drive_running"] is None
     monkeypatch.setattr(lab, "_port_in_use", lambda: False)
     assert lab.get_status()["bridge"] is None  # nothing to ask
     lab._proc = _FakeProcess()
@@ -461,8 +499,7 @@ def test_competition_stops_the_bridge_even_if_lab_env_cannot_be_written(
     assert status["running"] is False and status["last_stop_reason"] == "competition_mode"
     # AUTOSTART could not be written, but the permissions are off whatever lab.env says.
     assert status["drive_allowed"] is False and "sudo chown" in status["config_error"]
-    assert "-p allow_drive:=false -p allow_shoot:=false" in lab._build_command(
-        lab._read_config(), lab._permissions())
+    assert _published(lab) == (False, False)
 
 
 def test_a_new_manager_never_restores_permissions_from_a_legacy_lab_env(lab, monkeypatch, tmp_path):
@@ -473,11 +510,10 @@ def test_a_new_manager_never_restores_permissions_from_a_legacy_lab_env(lab, mon
     fresh = importlib.reload(lab)  # a new robot_manager process (boot or restart)
     seen = []
     monkeypatch.setattr(fresh, "start_bridge",
-                        lambda: seen.append(fresh._build_command(fresh._read_config(),
-                                                                 fresh._permissions())))
+                        lambda: seen.append(fresh._build_command(fresh._read_config())))
     monkeypatch.setattr(fresh.threading, "Thread", _run_now)
     fresh.autostart()  # the pages are still served automatically
-    assert len(seen) == 1 and "-p allow_drive:=false -p allow_shoot:=false" in seen[0]
+    assert len(seen) == 1 and "allow_" not in seen[0]
     status = fresh.get_status()
     assert status["drive_allowed"] is False and status["shoot_allowed"] is False
     assert "ALLOW_DRIVE" not in fresh._read_config()
@@ -490,46 +526,38 @@ def test_allowing_never_writes_lab_env(lab, tmp_path, read_only_lab_env):
     assert (tmp_path / "lab.env").read_text() == 'AUTOSTART="true"\n'
 
 
-def test_forbidding_restarts_the_bridge_even_if_lab_env_cannot_be_written(
-        lab, monkeypatch, tmp_path, read_only_lab_env):
-    monkeypatch.setattr(lab.os, "getpgid", lambda pid: pid)
-    monkeypatch.setattr(lab.os, "killpg", lambda pgid, sig: None)
-    started = []
-
-    def fake_start():
-        started.append(lab._build_command(lab._read_config(), lab._permissions()))
-        lab._proc = _FakeProcess()
-    monkeypatch.setattr(lab, "start_bridge", fake_start)
-    read_only_lab_env('ALLOW_DRIVE="true"\n')
+def test_forbidding_works_even_if_lab_env_cannot_be_written(lab, read_only_lab_env):
+    read_only_lab_env('ALLOW_DRIVE="true"\nALLOW_SHOOT="true"\n')
     lab.set_drive(lab.DriveRequest(allow=True))
-    lab._proc = _FakeProcess()
-    status = lab.set_drive(lab.DriveRequest(allow=False))
-    assert len(started) == 1 and "-p allow_drive:=false" in started[0]
-    assert status["drive_allowed"] is False and status["config_error"] is None
+    lab.set_shoot(lab.DriveRequest(allow=True))
+    status = lab.set_shoot(lab.DriveRequest(allow=False))
+    assert status["shoot_allowed"] is False and status["drive_allowed"] is True
+    assert _published(lab) == (True, False)
+    assert status["config_error"] is None
 
 
 def test_bridge_lists_the_recorders_rosbags(lab, tmp_path):
     # Without rosbag.env: the recorder's default folder.
-    script = lab._build_command({"CAMERA_TOPIC": ""}, {})
+    script = lab._build_command({"CAMERA_TOPIC": ""})
     assert '-p rosbag_dir:="/var/lib/questix/rosbags"' in script
     (tmp_path / "rosbag.env").write_text("OUTPUT_DIR=/data/bags\n")
-    assert '-p rosbag_dir:="/data/bags"' in lab._build_command({"CAMERA_TOPIC": ""}, {})
+    assert '-p rosbag_dir:="/data/bags"' in lab._build_command({"CAMERA_TOPIC": ""})
     # A path the shell could misread is not passed on (the bridge keeps its default).
     (tmp_path / "rosbag.env").write_text("OUTPUT_DIR=/data/$(reboot)\n")
-    assert "rosbag_dir" not in lab._build_command({"CAMERA_TOPIC": ""}, {})
+    assert "rosbag_dir" not in lab._build_command({"CAMERA_TOPIC": ""})
 
 
 def test_records_dir_is_the_bridges_default_unless_set(lab, tmp_path):
-    assert "records_dir" not in lab._build_command(lab._read_config(), {})
+    assert "records_dir" not in lab._build_command(lab._read_config())
     (tmp_path / "lab.env").write_text('RECORDS_DIR="/srv/questix/lab-records"\n')
     config = lab._read_config()
     assert config["RECORDS_DIR"] == "/srv/questix/lab-records"
-    assert '-p records_dir:="/srv/questix/lab-records"' in lab._build_command(config, {})
+    assert '-p records_dir:="/srv/questix/lab-records"' in lab._build_command(config)
     # The settings form keeps it.
     lab.set_config(lab.LabConfig(CAMERA_TOPIC="", AUTOSTART=True))
     assert lab._read_config()["RECORDS_DIR"] == "/srv/questix/lab-records"
     with pytest.raises(HTTPException) as error:
-        lab._build_command({"RECORDS_DIR": "relative; reboot"}, {})
+        lab._build_command({"RECORDS_DIR": "relative; reboot"})
     assert "RECORDS_DIR" in error.value.detail
 
 
@@ -543,53 +571,22 @@ def test_status_passes_the_bridges_records_summary_on(lab, monkeypatch):
     assert lab.get_status()["bridge"]["records"] == records
 
 
-def test_both_permissions_are_always_passed_explicitly(lab):
-    # A permission of this session must never fall back to lab_bridge.yaml's defaults.
-    script = lab._build_command({}, {"ALLOW_DRIVE": True, "ALLOW_SHOOT": True})
-    assert "-p allow_drive:=true -p allow_shoot:=true" in script
-    # Only True is on: strings from a file or anything else never are.
-    script = lab._build_command({}, {"ALLOW_DRIVE": "true", "ALLOW_SHOOT": 1})
-    assert "-p allow_drive:=false -p allow_shoot:=false" in script
-    assert "-p allow_drive:=false -p allow_shoot:=false" in lab._build_command({}, {})
-    # lab.env settings named like the permissions do not reach the bridge either.
-    script = lab._build_command({"ALLOW_DRIVE": "true", "ALLOW_SHOOT": "true"}, {})
-    assert "-p allow_drive:=false -p allow_shoot:=false" in script
+def test_no_bridge_parameter_grants_motion(lab):
+    # The lesson permissions reach the robot on /lab_permission only; lab.env settings named
+    # like the old parameters do not reach the bridge either.
+    script = lab._build_command({"ALLOW_DRIVE": "true", "ALLOW_SHOOT": "true"})
+    assert "allow_" not in script
 
 
 def test_shoot_is_off_at_start_and_only_the_teacher_switches_it_on(lab):
     status = lab.get_status()
-    assert status["shoot_allowed"] is False and status["shoot_running"] is None
+    assert status["shoot_allowed"] is False
     status = lab.set_shoot(lab.DriveRequest(allow=True))
     assert status["shoot_allowed"] is True and status["drive_allowed"] is False
-    assert "-p allow_drive:=false -p allow_shoot:=true" in lab._build_command(
-        lab._read_config(), lab._permissions())
+    assert _published(lab) == (False, True)
     lab.set_config(lab.LabConfig(CAMERA_TOPIC="/cam/compressed"))  # the form keeps it
     assert lab.get_status()["shoot_allowed"] is True
     assert "ALLOW" not in lab.LAB_ENV_FILE.read_text()
-
-
-def test_shoot_switch_restarts_our_bridge_and_keeps_the_permission(lab, monkeypatch):
-    signals = []
-    monkeypatch.setattr(lab.os, "getpgid", lambda pid: pid)
-    monkeypatch.setattr(lab.os, "killpg", lambda pgid, sig: signals.append((pgid, sig)))
-    started = []
-
-    def fake_start():
-        permissions = lab._permissions()
-        started.append(permissions["ALLOW_SHOOT"])
-        lab._proc = _FakeProcess()
-        lab._started_allow_drive = permissions["ALLOW_DRIVE"]
-        lab._started_allow_shoot = permissions["ALLOW_SHOOT"]
-    monkeypatch.setattr(lab, "start_bridge", fake_start)
-    lab._proc = _FakeProcess()
-    status = lab.set_shoot(lab.DriveRequest(allow=True))
-    assert signals == [(_FakeProcess.pid, lab.signal.SIGINT)]
-    assert started == [True]
-    assert status["shoot_allowed"] is True and status["shoot_running"] is True
-    assert status["drive_allowed"] is False  # the other switch is untouched
-    status = lab.set_shoot(lab.DriveRequest(allow=False))
-    assert started == [True, False]
-    assert status["shoot_allowed"] is False and status["shoot_running"] is False
 
 
 def test_shoot_cannot_be_allowed_in_competition_mode(lab, tmp_path):
@@ -621,26 +618,6 @@ def test_competition_round_trip_drops_legacy_keys_and_keeps_the_settings(lab, mo
     assert status["drive_allowed"] is False and status["shoot_allowed"] is False
 
 
-def test_forbidding_shoot_works_even_if_lab_env_cannot_be_written(
-        lab, monkeypatch, read_only_lab_env):
-    monkeypatch.setattr(lab.os, "getpgid", lambda pid: pid)
-    monkeypatch.setattr(lab.os, "killpg", lambda pgid, sig: None)
-    started = []
-
-    def fake_start():
-        started.append(lab._build_command(lab._read_config(), lab._permissions()))
-        lab._proc = _FakeProcess()
-    monkeypatch.setattr(lab, "start_bridge", fake_start)
-    read_only_lab_env('ALLOW_DRIVE="true"\nALLOW_SHOOT="true"\n')
-    lab.set_drive(lab.DriveRequest(allow=True))
-    lab.set_shoot(lab.DriveRequest(allow=True))
-    lab._proc = _FakeProcess()
-    status = lab.set_shoot(lab.DriveRequest(allow=False))
-    assert len(started) == 1 and "-p allow_drive:=true -p allow_shoot:=false" in started[0]
-    assert status["shoot_allowed"] is False and status["drive_allowed"] is True
-    assert status["config_error"] is None
-
-
 # --- the teacher's choices across leaving lesson mode ------------------------------------------------
 
 def test_an_allow_never_survives_a_competition_round_trip(lab, monkeypatch, tmp_path):
@@ -653,7 +630,7 @@ def test_an_allow_never_survives_a_competition_round_trip(lab, monkeypatch, tmp_
     (tmp_path / "mode").write_text("competition\n")
     lab.disable_outside_lessons()
     lab.disable_outside_lessons()  # competition -> competition keeps the lesson AUTOSTART
-    assert lab._runtime_permissions == {"ALLOW_DRIVE": False, "ALLOW_SHOOT": False}
+    assert lab.actuation.lab_permissions() == {"drive": False, "launcher": False}
     (tmp_path / "mode").write_text("lesson\n")
     now = lab.enable_for_lessons()
     assert now == {"restored": True, "autostart": True, "drive": False, "shoot": False}
@@ -811,9 +788,7 @@ def test_explicit_stop_switches_both_permissions_off(lab, monkeypatch):
     status = lab.stop_bridge()
     assert status["last_stop_reason"] == "stopped"
     assert status["drive_allowed"] is False and status["shoot_allowed"] is False
-    # The next 配信開始 starts without them.
-    assert "-p allow_drive:=false -p allow_shoot:=false" in lab._build_command(
-        lab._read_config(), lab._permissions())
+    assert _published(lab) == (False, False)
     # 配信停止 with nothing running still ends the permissions.
     lab.set_drive(lab.DriveRequest(allow=True))
     with pytest.raises(HTTPException):
@@ -821,35 +796,25 @@ def test_explicit_stop_switches_both_permissions_off(lab, monkeypatch):
     assert lab.get_status()["drive_allowed"] is False
 
 
-def test_revoke_restarts_a_bridge_that_had_a_permission_on(lab, monkeypatch):
+def test_revoke_switches_both_off_and_keeps_the_bridge(lab, monkeypatch):
     signals = []
     monkeypatch.setattr(lab.os, "getpgid", lambda pid: pid)
     monkeypatch.setattr(lab.os, "killpg", lambda pgid, sig: signals.append((pgid, sig)))
-    started = []
-
-    def fake_start():
-        started.append(lab._build_command(lab._read_config(), lab._permissions()))
-        lab._proc = _FakeProcess()
-        lab._started_allow_drive = lab._started_allow_shoot = False
-    monkeypatch.setattr(lab, "start_bridge", fake_start)
     lab.set_drive(lab.DriveRequest(allow=True))
     lab._proc = _FakeProcess()
-    lab._started_allow_drive = True
     answer = lab.revoke_permissions("stop_all")
-    assert answer["ok"] is True and answer["revoked"] is True and answer["restarted"] is True
-    assert signals == [(_FakeProcess.pid, lab.signal.SIGINT)]
-    assert len(started) == 1 and "-p allow_drive:=false -p allow_shoot:=false" in started[0]
+    assert answer == {"ok": True, "revoked": True, "message": "教材からの走行・発射をOFFにしました"}
+    assert signals == [] and _published(lab) == (False, False)
     status = lab.get_status()
-    assert status["drive_allowed"] is False and status["drive_running"] is False
-    # A bridge already without permissions is left alone (the pages stay connected).
-    answer = lab.revoke_permissions("stop_all")
-    assert answer["revoked"] is False and answer["restarted"] is False
-    assert len(started) == 1
+    assert status["running"] is True and status["drive_allowed"] is False
+    assert lab.revoke_permissions("stop_all")["revoked"] is False
 
 
 def test_stop_all_switches_both_permissions_off(lab, monkeypatch):
     from robot_manager import app as app_module
     app_module = importlib.reload(app_module)
+    # Importing app installs its own running-mode source (systemd): a lesson launch runs here.
+    monkeypatch.setattr(app_module.actuation, "_running_mode_source", lambda: "lesson")
     calls = []
     monkeypatch.setattr(app_module.lab, "stop_lesson_motion",
                         lambda: calls.append("lesson") or {"ok": True, "message": "止めました"})
@@ -895,8 +860,8 @@ def test_a_start_after_an_unnoticed_exit_starts_without_permissions(lab, monkeyp
     lab.set_drive(lab.DriveRequest(allow=True))
     lab._proc = _ExitedProcess()  # exited, and no status poll has noticed yet
     status = lab.start_bridge()
-    assert len(seen) == 1 and "-p allow_drive:=false -p allow_shoot:=false" in seen[0]
-    assert status["drive_allowed"] is False and status["drive_running"] is False
+    assert len(seen) == 1 and "allow_" not in seen[0]
+    assert status["drive_allowed"] is False and _published(lab) == (False, False)
 
 
 def test_a_switch_after_an_unnoticed_exit_keeps_the_teachers_new_choice(lab):
@@ -908,17 +873,21 @@ def test_a_switch_after_an_unnoticed_exit_keeps_the_teachers_new_choice(lab):
     assert status["drive_allowed"] is True and status["shoot_allowed"] is False
 
 
-def test_a_failed_restart_for_a_switch_takes_the_permissions_back(lab, monkeypatch):
-    monkeypatch.setattr(lab.os, "getpgid", lambda pid: pid)
-    monkeypatch.setattr(lab.os, "killpg", lambda pgid, sig: None)
-
-    def fail():
-        raise HTTPException(status_code=500, detail="ROS missing")
-    monkeypatch.setattr(lab, "start_bridge", fail)
-    lab._proc = _FakeProcess()
-    with pytest.raises(HTTPException):
+def test_a_switch_the_heartbeat_cannot_take_stays_off(lab):
+    lab.heartbeat.broken = True  # the heartbeat's stdin is gone (a broken pipe)
+    with pytest.raises(HTTPException) as error:
         lab.set_drive(lab.DriveRequest(allow=True))
-    assert lab.get_status()["drive_allowed"] is False
+    assert error.value.status_code == 503
+    status = lab.get_status()
+    assert status["drive_allowed"] is False and status["drive_authority"] is False
+
+
+def test_a_switch_needs_the_teachers_switch_of_its_kind(lab, monkeypatch):
+    monkeypatch.setattr(lab.actuation, "_authority", {"drive": False, "launcher": True})
+    with pytest.raises(HTTPException) as error:
+        lab.set_drive(lab.DriveRequest(allow=True))
+    assert error.value.status_code == 409 and "ロボットの走行制御" in error.value.detail
+    assert lab.set_shoot(lab.DriveRequest(allow=True))["shoot_allowed"] is True
 
 
 def test_a_config_write_drops_legacy_keys_and_keeps_the_settings(lab, tmp_path):
@@ -941,4 +910,19 @@ def test_a_config_write_drops_legacy_keys_and_keeps_the_settings(lab, tmp_path):
 def test_manager_shutdown_ends_the_permissions(lab):
     lab.set_drive(lab.DriveRequest(allow=True))
     lab.shutdown()
-    assert lab._runtime_permissions == {"ALLOW_DRIVE": False, "ALLOW_SHOOT": False}
+    assert lab.actuation.lab_permissions() == {"drive": False, "launcher": False}
+
+
+@pytest.mark.parametrize("running", [None, "practice", "competition", "unknown"])
+def test_lesson_permissions_need_a_running_lesson_launch(lab, monkeypatch, running):
+    # Saved lesson mode, but the robot runs something else (or nothing): the running launch decides
+    # what the robot does, so the lesson permissions stay off until it is restarted as a lesson.
+    monkeypatch.setattr(lab.actuation, "_running_mode_source", lambda: running)
+    for setter in (lab.set_drive, lab.set_shoot):
+        with pytest.raises(HTTPException) as error:
+            setter(lab.DriveRequest(allow=True))
+        assert error.value.status_code == 409
+        assert "教材モードで起動" in error.value.detail
+    status = lab.get_status()
+    assert status["drive_allowed"] is False and status["shoot_allowed"] is False
+    assert status["running_mode"] == running and status["switches_available"] is False

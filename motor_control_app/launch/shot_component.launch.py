@@ -10,8 +10,6 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-from launch_ros.parameter_descriptions import ParameterValue
-from questix_control_config import control_actions
 
 
 def generate_launch_description():
@@ -27,56 +25,17 @@ def generate_launch_description():
         description='Path to the shot component configuration YAML'
     )
 
-    # joy_topic は launcher が /joy <-> /joy_gated を切替えるための唯一の override。
-    # parameters リストで YAML の後に置くので launcher の指定が勝つ。
-    joy_topic_arg = DeclareLaunchArgument(
-        'joy_topic',
-        default_value='/joy',
-        description='Joy input topic (override-only, default matches YAML)'
-    )
-
-    # accept_lab_input は練習用起動 (questix_launcher) だけが QUESTiX LAB の
-    # チルト・射出を許可するための override。既定値は YAML と同じ false。
-    accept_lab_input_arg = DeclareLaunchArgument(
-        'accept_lab_input',
-        default_value='false',
-        description='Accept QUESTiX LAB tilt/fire requests (override-only, default matches '
-                    'YAML; practice launches only)'
-    )
-
-    # true のとき、教員の許可（/actuation_authority）がある間だけ発射機構を動かす。
-    # 練習での opt-in で、大会起動（enable_autoreferee）では使わない。YAML には置かない。
-    require_teacher_permission_arg = DeclareLaunchArgument(
-        'require_teacher_permission',
-        default_value='false',
-        description='Move the launcher only while the teacher permission is fresh '
-                    '(practice opt-in; competition launches pass false)'
-    )
-
-    # shot componentノード
+    # shot componentノード。指令は /launcher_command（joy_launcher、教材の起動では command_arbiter）
+    # だけから受け取る。ボタンの割り当ては joy_launcher の操作設定。
     shot_component_node = Node(
         package='motor_control_app',
         executable='shot_component_node',
         name='shot_component',
-        parameters=[
-            LaunchConfiguration('config_file'),
-            LaunchConfiguration('control_config_file'),
-            {
-                'joy_topic': LaunchConfiguration('joy_topic'),
-                'accept_lab_input': ParameterValue(
-                    LaunchConfiguration('accept_lab_input'), value_type=bool),
-                'require_teacher_permission': ParameterValue(
-                    LaunchConfiguration('require_teacher_permission'), value_type=bool),
-            },
-        ],
+        parameters=[LaunchConfiguration('config_file')],
         output='screen'
     )
 
     return LaunchDescription([
-        *control_actions(),
         config_file_arg,
-        joy_topic_arg,
-        accept_lab_input_arg,
-        require_teacher_permission_arg,
         shot_component_node
     ])

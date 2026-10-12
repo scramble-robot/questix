@@ -12,7 +12,70 @@ QUESTiX 共通メッセージ定義パッケージ。統一緊急停止インタ
 | `header` | `std_msgs/Header` | `stamp` = 判定時刻。`frame_id` は未使用(`""`) |
 | `active` | `bool` | `true` = 緊急停止発動 |
 | `source` | `string` | 発行元識別子(例: `"operation_manager"`) |
-| `reason` | `string` | 原因(例: `"pin 5 not received; "`、`"pin 27 is false, expected true; "`、`"pin 27 timeout; "`)。解除時は `"released"` |
+| `reason` | `string` | 原因(例: `"pin 5 not received; "`、`"pin 5 is true, expected false; "`、`"pin 5 timeout; "`)。解除時は `"released"` |
+
+### `MotionPermission.msg`
+
+走行許可(L2)。非常停止(L1)とは別の概念で、`/motion_permission` で配信する。契約は下の
+「`/motion_permission` トピック契約」。
+
+| フィールド | 型 | 意味 |
+|---|---|---|
+| `header` | `std_msgs/Header` | `stamp` = 判定時刻(情報のみ。鮮度の判定には使わない) |
+| `drive_allowed` | `bool` | 車輪を動かしてよいか(drive_component が見る) |
+| `launcher_allowed` | `bool` | ローラー・チルト・射撃を動かしてよいか(shot_component / esc_motor_control が見る) |
+| `mode` | `string` | 実行中のモード(`lesson` / `practice` / `competition`、表示用) |
+| `drive_blockers` / `launcher_blockers` | `string[]` | 許可しない理由(例: `referee:off`、`teacher:stale`、`teacher:unknown`)。許可なら空(表示用。アクチュエータは bool だけを見る) |
+
+### `LauncherCommand.msg`
+
+発射機構(ローラー・チルト・射撃)への指令。走行の `geometry_msgs/Twist`(`/target_twist`)に対応する
+発射側の型(入力の選択、L3)。`/launcher_command`(機構が従う)と、入力ごとの `/launcher_command/joy`・
+`/launcher_command/lab`。esc_motor_control は `roller_power`、shot_component は `tilt_deg`・`tilt_steps`・
+`fire_seq` だけを使い、どちらも `/emergency_stop` と `/motion_permission` には従ったまま。
+
+| フィールド | 型 | 意味 |
+|---|---|---|
+| `header` | `std_msgs/Header` | `stamp` = 送信時刻(情報のみ) |
+| `roller_power` | `float32` | ローラー出力 0..1(0 = 止める)。送られている間だけ回る(途切れたら止まる) |
+| `tilt_deg` | `float32` | チルトの目標角 [deg](教材)。NaN = 目標なし |
+| `tilt_steps` | `int32` | チルトの段数の累計(コントローラー: 上 +1・下 -1)。変化した分だけ動かす |
+| `fire_seq` | `uint32` | 射撃要求の累計。増えたら 1 発(1 メッセージで最大 1 発) |
+| `source` | `string` | `"joy"` / `"lab"`(表示用。受信側は値で区別しない) |
+
+射撃・チルトは「パルス」ではなく累計と目標なので、keep-last(1) で落ちても重複しても数が変わらない。
+累計は**送信元(publisher)ごとの 1 つの数え方**で、受信側は最初のメッセージ・指令が途切れた後の最初の
+メッセージ・`fire_seq` が戻ったメッセージ(送信元の再起動)を基準にするだけで、何も動かさない。
+`tilt_deg` は前のメッセージと違う有限の値(前が NaN を含む)が新しい目標(基準のときも今の目標として扱う)。
+command_arbiter の出力は自分の累計を持つので、入力が切り替わっても数え直しや取りこぼしはない。
+受信側の実装: `motor_control_app/launcher_events.hpp`、`command_arbiter/launcher_flow.hpp`(`InputEvents`)。
+
+## `/launcher_command` トピック契約(発射機構の指令、L3)
+
+- **型**: `questix_msgs/msg/LauncherCommand`
+- **QoS**: reliable + **volatile** + keep-last(1)
+- **発行元**: 練習・大会は joy_controller パッケージの `joy_launcher`(`/joy` 1 件ごと。ボタンの割り当ては
+  操作設定の `joy_launcher` セクション)。教材は command_arbiter の `launcher_arbiter` が
+  `/launcher_command/joy`(joy_launcher)と `/launcher_command/lab`(QUESTiX LAB ブリッジ)から選ぶ。
+- **購読側**: esc_motor_control(`roller_power`。`safety_timeout` 1.0 s 途切れたら止め、0 を受けるまで
+  回さない。起動直後と非常停止・許可のあとも同じ)、shot_component(`fire_seq`・`tilt_steps`・`tilt_deg`。
+  ACTIVE・許可あり・非常停止解除のときだけ動かし、それ以外で届いたものは捨てる)。どちらも `/joy` と
+  教材のトピックは読まない。
+- **発行元は 1 つだけ**: 2 つ以上のノードが出している間、esc_motor_control はローラーを 0 にし
+  (1 つに戻っても 0 を受けるまで回さない)、shot_component は射撃・チルトをしない(累計が混ざるため)。
+- **誰が操作してよいか**はここでは決めない(command_arbiter と joy_launcher)。止める判断は
+  `/emergency_stop` と `/motion_permission` でアクチュエータが行う。
+
+### `ArbiterStatus.msg`
+
+command_arbiter(教材モードのみ)が機構ごとに出す選択の結果(`/command_arbiter/status`、5 Hz と変化時)。
+`mechanism`(`drive` / `launcher`)、`active_source`(`joy` / `lab`)、`switch_reason`、`lab_permitted`
+(先生の教材の許可 `/lab_permission`)、`lab_locked`(コントローラーが割り込んだ)、`lab_refusal`(教材の
+指令を断った理由。空なら受付中)、`lab_count`(受け取った教材の指令の数。ブリッジが自分の走行と
+対応付けるため)と、適用中の教材の制限(走行: `max_linear`・`max_angular`、発射: `max_power`・
+`tilt_min_deg`・`tilt_max_deg`・射撃の前提 `min_fire_power`/`spin_up_sec` と間隔 `fire_interval_sec`、
+残り時間 `next_fire_in_sec`・`spin_ready_in_sec`)。発射の `lab_refusal` には `not_spinning`・`interval`
+も入る。非常停止と走行許可は見ない(アクチュエータの仕事)。
 
 ### `MotorFeedback.msg`
 
@@ -122,18 +185,16 @@ DDT M0602C の Protocol 1 応答フレームをデコードした 1 モータ分
 - **QoS**: reliable + transient_local + keep-last(1)
   (`rclcpp::QoS(1).reliable().transient_local()`)。
   購読側も同一 QoS を使うこと。late-join した購読者は最新のラッチ状態を即時受信する。
-- **発行元**: `operation_manager`。GPIO controllability 判定
-  (`evaluate_controllability()`)の毎回実行時に発行する。
-  すなわち GPIO 更新毎(公称 ~20 Hz)+ 100 ms watchdog timer。
-  `active = !controllable`。
-- **発行元は常に起動する**: operation_manager は drive/shot の有無にも `enable_gpio_ref` にも
-  依存せず `questix_core.launch.xml` から常に起動する(standalone
-  `joy_controller_referee.launch.xml` も互換性のため起動できる)。
-  - `enable_gpio_ref=true`(production の practice / competition 起動は常にこれ): GPIO を判定し `active = !controllable`。
-    reason は `pin 5 ...`(物理 E-stop)/ `pin 27 ...`(AutoReferee)で入力を区別する。
+- **発行元**: operation_manager の `EmergencyStopManager`(ノード `emergency_stop_manager`、
+  `source` は `operation_manager`)。入力は物理非常停止回路の GPIO5 だけ(安全機能だけを扱う。
+  AutoReferee の撃破(GPIO27)は試合の状態で、走行許可 `/motion_permission` の審判の票)。
+  GPIO 更新毎(公称 ~20 Hz)+ 100 ms タイマーで発行する。
+- **発行元は常に起動する**: drive/shot の有無にも `enable_gpio_ref` にもモードにも依存せず
+  `questix_core.launch.xml` から常に起動する。
+  - `enable_gpio_ref=true`(production の起動は常にこれ): GPIO5 を判定する。reason は `pin 5 ...`。
   - `enable_gpio_ref=false`(手動の明示的な診断起動のみ。launch 引数 `enable_gpio_ref:=false` をその都度明示したときだけで、
-    環境変数 `ENABLE_GPIO_REF` では選ばれず(既定はリテラルの `true`)、保存もされない。production ランチャーは使わない。`operation_manager.no_gpio.yaml`、
-    `gpio_safety_enabled: false`): GPIO を読まず `/gpio/controllable` も出さない。
+    環境変数 `ENABLE_GPIO_REF` では選ばれず(既定はリテラルの `true`)、保存もされない。production ランチャーは使わない。
+    `emergency_stop_manager.no_gpio.yaml`、`gpio_safety_enabled: false`): GPIO を読まず、
     `active=false`、reason `released (no GPIO safety path)` を 100 ms 毎に出す。
 - **未受信はフェイルクローズ**: 購読側(drive_component / shot_component / esc_motor_control は
   共通の `questix_safety::EmergencyStopMonitor`、QUESTiX LAB ブリッジ)は構成によらず、**一度も受信していない間は「非常停止の状態が不明」
@@ -143,23 +204,23 @@ DDT M0602C の Protocol 1 応答フレームをデコードした 1 モータ分
   (既定 1.0 s、自分の単調時計による受信間隔)を超えて受信が途絶えたら、押下と同じく停止して
   動かさない。受信が戻っても、解除だけでは動き出さない(新しい指令が必要)。
 - **単体起動では発行元も起動する**: `questix_core` 以外の起動(パッケージ単体の launch や
-  `ros2 run`)は operation_manager を起動しないため、そのままでは `/emergency_stop` が届かず
-  drive_component / shot_component / esc_motor_control は動かない(3.2.0 までは未受信でも動いた)。
-  規則を保ったまま動かすには、別の端末で発行元を起動する:
+  `ros2 run`)は operation_manager を起動しないため、そのままでは `/emergency_stop` も
+  `/motion_permission` も届かず drive_component / shot_component / esc_motor_control は動かない
+  (3.2.0 までは未受信でも動いた)。規則を保ったまま動かすには、別の端末で発行元を起動する:
 
   ```bash
-  # Raspberry Pi で物理非常停止(GPIO5)を判定する
+  # Raspberry Pi で物理非常停止(GPIO5)を判定する。走行許可は練習(票なしで常に許可)
   ros2 launch gpio_reader gpio_reader.launch.xml
-  ros2 launch operation_manager operation_manager.launch.xml
+  ros2 launch operation_manager operation_manager.launch.xml robot_mode:=practice
   # GPIO のない PC やベンチの診断(押下は ROS に伝わらない。RLY1 の動力遮断は別に働く)
-  ros2 launch operation_manager operation_manager.launch.xml \
-    config_file:=$(ros2 pkg prefix operation_manager)/share/operation_manager/config/operation_manager.no_gpio.yaml
+  ros2 launch operation_manager operation_manager.launch.xml robot_mode:=practice \
+    enable_gpio_safety:=false
   ```
 
-  `questix_launcher` の `drive_component.launch.xml enable_gpio_ref:=true` は operation_manager を
-  自分で起動する(gpio_reader は起動しない)ので、足すのは gpio_reader だけにする。発行元を二つにしない。
+  どちらも非常停止と走行許可の発行元を一度に起動する。発行元を二つにしない。
 - **診断用の明示 opt-out**: 発行元なしで動かす単体の診断に限り、ノードのパラメータ
-  `require_emergency_stop` を false にできる(押下を受信したときの停止はそのまま)。launch 引数では
+  `require_emergency_stop` を false にできる(押下を受信したときの停止はそのまま。走行許可は
+  `require_motion_permission`、下の「`/motion_permission` トピック契約」)。launch 引数では
   ない(どの launch も宣言していない)ので、`ros2 launch ... require_emergency_stop:=false` は
   警告なしに無視される。`ros2 run motor_control_app drive_component_node --ros-args -p
   require_emergency_stop:=false` のように、ノードのパラメータとして渡す。統合構成は opt-out しない。
@@ -171,33 +232,99 @@ DDT M0602C の Protocol 1 応答フレームをデコードした 1 モータ分
 | 購読者 | 停止時(active=true) | 解除時(active=false) |
 |---|---|---|
 | `drive_component` | 停止指令をスロットル無しで即時送信 + 目標を破棄。以後の `/target_twist` は無視。停止指令を送れなかったら stop fault(送信に成功するまで動かさない) | `/target_twist` 受付再開。モータは解除**後**に届いた次の twist コマンドまで停止のまま |
-| `shot_component` | deactivate→cleanup でサーボバス解放(unconfigured へ) | auto-start 再アーム。configure→activate を自動リトライ(実行時許可が必要な構成では許可も必要) |
-| `esc_motor_control` | `set_motor_speed(0.0)` 即時実行。停止中はボタン入力を無視 | フルスピードボタンの**離す→押す**まで 0 のまま(押しっぱなしでは再始動しない)。教材入力は 0 を受けるまでロック |
+| `shot_component` | deactivate→cleanup でサーボバス解放(unconfigured へ) | auto-start 再アーム。configure→activate を自動リトライ(走行許可も必要) |
+| `esc_motor_control` | `set_motor_speed(0.0)` 即時実行。停止中は `/launcher_command` を無視 | `roller_power` 0 の指令を受けるまで 0 のまま(押しっぱなし・教材の指令の繰り返しでは再始動しない。ボタンなら**離す→押す**) |
 
-## `/actuation_authority` トピック契約(練習時の実行時許可)
+## `/actuation_authority` トピック契約(教材モードの先生の許可 = 走行許可の票)
 
-教員の許可(teacher permission)。ノードのパラメータとコードは `teacher_permission`
-(`require_teacher_permission`、`teacher_permission_topic`、`teacher_permission_timeout_sec`)で
-呼ぶ。トピック名 `/actuation_authority` と型 `ActuationAuthority` は、記録済みの rosbag と
-Robot Manager との互換のためそのまま。
+教員の許可(teacher permission)。教材モード(`lesson`)の走行許可(L2)の票で、
+operation_manager の `MotionPermissionManager` だけが購読する(`operation_manager.permission.yaml` の
+`votes.teacher`)。drive_component / shot_component / esc_motor_control はこれを直接見ず、
+`/motion_permission` だけに従う。トピック名 `/actuation_authority` と型 `ActuationAuthority` は、
+記録済みの rosbag と Robot Manager との互換のためそのまま。
 
 - **型**: `questix_msgs/msg/ActuationAuthority`(`drive_allowed`, `launcher_allowed`)
 - **QoS**: reliable + **volatile** + keep-last(1)。**transient_local にしない**(許可をラッチしない)。
 - **発行元**: Robot Manager(教員が「ロボットの走行制御」「発射機構の操作」を ON にしている間だけ、
-  約 5 Hz)。Robot Manager の起動・Pi の再起動・練習モードへの切替・大会モードへの切替・
+  約 5 Hz)。ON にできるのは、教材モードで起動したロボットが動いていて、保存されたモードも教材の
+  ときだけ。Robot Manager の起動・Pi の再起動・モードの切り替え・ロボット制御の起動/再起動/停止・
   「すべて止める」・Robot Manager の終了ではすべて OFF から始まる/OFF になる。
-- **非常停止とは別の概念**: 教員の許可は「動かしてよいか」の許可で、非常停止ではない。既定では
-  Robot Manager の中で QUESTiX LAB(教材)の走行・発射の許可の前提として使うだけで、
-  drive_component / shot_component / esc_motor_control はこれを見ずにコントローラで動く(3.2.0 と同じ)。
-- **購読側(opt-in)**: `questix_core` の `require_teacher_permission:=true`(練習のみ、既定 false、
-  環境変数からは読まない)を明示したときだけ、
-  drive_component / shot_component / esc_motor_control は、自分の単調時計で
-  `teacher_permission_timeout_sec`(既定 1.0 s)以内に受信した `*_allowed=true` がある間だけ動かす。
-  未受信・false・途絶はすべて OFF。OFF になったら停止(drive: 即時停止 + 目標破棄、
-  shot: 安全 teardown、ESC: 0 + ラッチ解除)。許可が戻っても、それだけでは動き出さない。
-- **大会起動**(`enable_autoreferee:=true`)は opt-in しても常に `require_teacher_permission:=false`。
-  AutoReferee と GPIO 安全系は従来どおりで、教室用の heartbeat が無くても止まらない。
-- 非常停止とは別の理由として扱う(許可の喪失を非常停止に見せかけない)。
+- **非常停止とは別の概念**: 教員の許可は「動かしてよいか」の票で、非常停止ではない。
+- **リース**: MotionPermissionManager は自分の単調時計で `lease_sec`(1.0 s)以内に受信した票だけを
+  使う。未受信・false・途絶はすべて OFF(`teacher:unknown` / `teacher:off` / `teacher:stale`)で、
+  `/motion_permission` の該当フラグが false になる。アクチュエータは許可を失うと止まり
+  (drive: 即時停止 + 目標破棄、shot: 射撃・チルトを断る(バスは保持)、ESC: 0 + ラッチ解除)、
+  許可が戻っても、それだけでは動き出さない。
+- **練習・大会**: 先生の票は使わない(練習は票なし、大会は審判の票 `/motion_vote/referee`)。
+
+## `/motion_permission` トピック契約(走行許可、L2)
+
+- **型**: `questix_msgs/msg/MotionPermission`
+- **QoS**: reliable + **volatile** + keep-last(1)。**transient_local にしない**(許可をラッチしない)。
+- **発行元**: operation_manager の `MotionPermissionManager`(`questix_core` で常に起動)。20 Hz と、
+  判定が変わったときはすぐに出す。練習(票なし)でも出し続ける。
+- **判定**: 実行中のモードが必要とする票(`operation_manager/config/operation_manager.permission.yaml`
+  の `required`)をすべて満たすときだけ許可。票ごとに、未受信 → `<name>:unknown`、
+  リース(`lease_sec`、1.0 s)切れ → `<name>:stale`(両方のフラグ)、受信した false → `<name>:off`
+  (そのフラグ)。規則は `questix_safety/motion_permission_rule.hpp`。
+
+  | モード | 必要な票 |
+  |---|---|
+  | `lesson`(教材) | `teacher`(`/actuation_authority`、Robot Manager の 操作 タブ) |
+  | `practice`(練習) | なし(常に許可) |
+  | `competition`(大会) | `referee`(`/motion_vote/referee`、RefereeMonitor が GPIO27 から) |
+
+  知らないモード、または一覧にない票を必要とするモードでは起動しない(不明なモードを「許可」に倒さない)。
+- **購読側**: `questix_safety::PermissionMonitor`(`motion_permission_topic`、
+  `require_motion_permission`、`motion_permission_timeout_sec`、既定 0.5 s)。自分の単調時計で
+  リースを判定し、未受信・途絶・false はすべて「許可なし」。許可が戻っても、それだけでは動き出さない
+  (新しい指令が必要)。`require_motion_permission:=false` は単体診断の明示 opt-out だけ。
+- **非常停止との関係**: 両方が閉じているときは非常停止(L1)が優先する(反応も理由も非常停止のもの)。
+  非常停止はモータへの出口の直前の最後のゲート。
+
+## 票(`/motion_vote/*`、`/actuation_authority`)
+
+走行許可の入力。型はすべて `questix_msgs/msg/ActuationAuthority`(`drive_allowed`、
+`launcher_allowed`、`source`)で、QoS とリースは `/actuation_authority` と同じ
+(reliable + volatile + keep-last(1)、5 Hz 以上、1.0 s のリース)。
+
+| トピック | 発行元 | 中身 |
+|---|---|---|
+| `/motion_vote/referee` | operation_manager の `RefereeMonitor`(大会のみ) | GPIO27(AutoReferee AR_in、safe-high)。true = 動いてよい。未受信・`timeout_seconds` 途絶・false は不可。GPIO 更新ごと + 100 ms。撃破は試合の状態で、非常停止ではない |
+| `/actuation_authority` | Robot Manager(教材のみ) | 先生の許可(下の契約) |
+
+条件を足すときは、票を出すノードを書き、`operation_manager.permission.yaml` の `votes` と `required` に
+1 行ずつ足す。
+
+## `/lab_permission` トピック契約(教材の許可、L3 の入力)
+
+先生が QUESTiX LAB に許した操作(Robot Manager の 教材 タブ「教材からの走行」「教材からの発射」)。
+走行許可(L2)の票ではない: アクチュエータも MotionPermissionManager も購読しない。教材の指令を
+通すかどうかだけを決める。
+
+- **型**: `questix_msgs/msg/ActuationAuthority`(`drive_allowed` = 教材からの走行、
+  `launcher_allowed` = 教材からの発射、`source` = `robot_manager`)
+- **QoS**: reliable + **volatile** + keep-last(1)。**transient_local にしない**(許可をラッチしない)。
+- **発行元**: Robot Manager の heartbeat(`actuation_heartbeat.py`)が `/actuation_authority` と同じ
+  周期(約 5 Hz)で並べて出す。先生の操作許可のどちらかが ON の間だけ出る。教材の許可は、同じ種類の
+  先生の操作許可が ON のときだけ true になり、先生の操作許可が OFF になると同じ行で false になる。
+  切り替えても教材のブリッジは再起動しない。起動のたびに OFF から始まる(`/actuation_authority` と同じ)。
+- **リース**: 購読側は自分の単調時計で 1.0 s 以内に受信したものだけを使う。未受信・途絶・false は不許可。
+- **購読側**: command_arbiter の `drive_arbiter`(`drive_allowed`: 教材の走行指令を `/target_twist` に
+  通すか)と `launcher_arbiter`(`launcher_allowed`: 教材の発射の指令を `/launcher_command` に通すか)。
+  QUESTiX LAB ブリッジは読まず、arbiter の `/command_arbiter/status`(`lab_permitted`)を表示に使う。
+
+## `/command_arbiter/status` トピック契約(入力の選択の状態、L3)
+
+- **型**: `questix_msgs/msg/ArbiterStatus`(機構ごとに 1 件。`mechanism` = `drive` / `launcher`)
+- **QoS**: reliable + **volatile** + keep-last(10)。ラッチしない。
+- **発行元**: command_arbiter(教材モードの起動だけ)。5 Hz と、変化したときはすぐに出す。
+- **意味**: どちらの入力がアクチュエータに届いているか(`active_source`: `joy` / `lab`)、その理由
+  (`switch_reason`)、教材の許可(`lab_permitted`)、教材の指令を断った理由(`lab_refusal`)、受け取った
+  教材の指令の数(`lab_count`。ブリッジは自分の走行が始まった後の状態だけを使う)、教材の上限。
+  非常停止と走行許可はここには出ない(アクチュエータが判断する)。
+- **購読側**: QUESTiX LAB ブリッジ(両方の機構。1.5 s 届かなければ command_arbiter なし =
+  `no_drive_node` / `no_launcher`)、web_joy_driver(走行だけ。「教材から走らせています」の表示、1.5 s で消す)。
 
 ## 型付きステータストピック契約
 
@@ -212,7 +339,7 @@ Robot Manager との互換のためそのまま。
 | `joy_axis_drive_status` | `DriveStatus` | `joy_axis_drive` | 相対名。`linear/angular_velocity = 0.0` |
 | `/diagnostics` | `diagnostic_msgs/DiagnosticArray` | `operation_manager` | 標準集約トピック。rqt_runtime_monitor が設定なしで表示 |
 
-`operation_manager` の GPIO27 診断には `pin_27_signal_limit` が含まれる。
+`operation_manager` の GPIO27 診断(`RefereeMonitor`、`operation_manager: referee`)には `pin_27_signal_limit` が含まれる。
 GPIO27=`true` は許可だけでなく、AutoReferee未接続、クライアント無通電、
 一次側断線でも発生し、現行ハードウェアでは区別できないことを示す。
 
@@ -253,7 +380,10 @@ QUESTiX Launcher / `drive_component` 起動中でも、`/dev/ttyACM0` を別プ�
   | `motor_status` | `std_msgs/String`(JSON) | `joy_axis_drive` | `joy_axis_drive_status` |
   | `/gpio/controllable_diagnostic` | `std_msgs/String`(自由文) | `operation_manager` | `/diagnostics` |
   | `/roller_emergency_status` | `std_msgs/Bool`(transient_local) | `esc_motor_control` | `/emergency_stop`(`active`) |
-- `joy_gate` は従来どおり `/gpio/controllable` を購読する(スコープ外)。
+- `/gpio/controllable`(`std_msgs/Bool`)と `joy_gate`(`/joy_gated`)は削除済み。入力を間で 0 にする
+  代わりに、アクチュエータが `/emergency_stop` と `/motion_permission` で止まる。
+- 大会の撃破(GPIO27)は `/emergency_stop` から外し、走行許可(`/motion_permission`、`referee:off`)に
+  移した。撃破では shot_component はサーボバスを解放しない(電源は入ったまま)。
 - drive_component の受信 staleness タイムアウトは未実装
   (既存のコマンド watchdog と物理電源断がフェイルセーフを担う)。
   ハートビートを利用したタイムアウト追加はフォローアップ候補。

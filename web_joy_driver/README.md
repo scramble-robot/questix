@@ -12,8 +12,8 @@ Pi 上で HTTP + WebSocket サーバを立て、ブラウザのバーチャル�
   画面には十字キーがないため、射出角度は TILT ▲ / ▼ ボタン（buttons[4] / buttons[6]）で操作します。
 - 教材（QUESTiX LAB）と同じく **操作できるのは 1 台だけ**、ほかの端末は断られて閲覧のみ、
   **「止める」はどの端末からでも押せます**（[操作権](#操作権)）。
-- 下流（`joy_gate` → `joy_controller` / `shot_component` / `esc_motor_control`）は無変更。
-  GPIO 非常停止によるゲートもそのまま効きます。
+- 下流（`joy_controller` / `shot_component` / `esc_motor_control`）は無変更。
+  非常停止（`/emergency_stop`）と走行許可（`/motion_permission`）でアクチュエータが止まるのもそのままです。
 - 無通信 `message_timeout_sec`（既定 0.5 s）でニュートラルを配信する watchdog 付き。
 - 教材の走行実験でロボットを動かしている間は「教材から走らせています」と表示し、「止める」は教材の走行と
   ローラーも止めます（[教材との関係](#教材との関係)）。
@@ -135,7 +135,7 @@ Space の押し直しだけでは以前の操作は再開しません。操作�
    操作者の画面には「〇〇 で「止める」が押されました」と出て、指を離して触れ直すと再び操作できます。
 2. 教材の中継 `questix_lab_bridge`（同じホストの `lab_bridge_port`、既定 8897）へ `{"type":"stop"}` と
    `{"type":"roller_stop"}`: どのページの走行実験・ローラーでも止めます（教材の止めるバーと同じ要求。
-   中継側で `allow_drive` / `allow_shoot` が偽なら無視されます）。
+   動いている走行・発射がなければ何も起きません）。
    中継が動いていないときは「教材の中継は動いていません」と控えめに知らせ、教材から走らせている最中に
    届かなかったときだけ「教材の走行を止められませんでした」と非常停止ボタンの使用を促します。
 
@@ -144,12 +144,13 @@ Esc（キーボード）はこの端末の入力を離すだけで、ほかの�
 
 ## 教材との関係
 
-- 練習用の起動（`questix_core.launch.xml`、`enable_autoreferee` なし）では `twist_arbiter` が
+- 教材用の起動（`questix_core.launch.xml`、`robot_mode:=lesson`）では command_arbiter が
   コントローラー（この画面を含む）と教材の走行実験のどちらを `/target_twist` に通すかを選びます。
-  スティックを動かせば、今までどおりすぐにコントローラーの操作に切り替わります（`twist_arbiter` の動き）。
-- このノードは `arbiter_status_topic`（`/twist_arbiter/status`、`std_msgs/String` の JSON、latched）を
-  **購読するだけ**で、`active` が `lab` の間、全端末に「教材から走らせています」を表示します。
-  `twist_arbiter` がいない（大会用の起動）ときは何も出しません。
+  スティックを動かせば、今までどおりすぐにコントローラーの操作に切り替わります（command_arbiter の動き）。
+- このノードは `arbiter_status_topic`（`/command_arbiter/status`、`questix_msgs/ArbiterStatus`、
+  reliable + volatile、5 Hz）の走行（`mechanism` が `drive`）を**購読するだけ**で、`active_source` が
+  `lab` の間、全端末に「教材から走らせています」を表示します。1.5 秒届かない（command_arbiter が
+  いない練習用・大会用の起動）ときは何も出しません（`web_joy_driver/arbiter_view.py`）。
 - 教材の走行を止める ROS の手段は `/target_twist/lab` などへの publish しかなく、それは
   `questix_lab_bridge` が「ほかの publisher」として拒否する（安全のための仕様）ため、
   ページがブラウザから中継の WebSocket に止める要求を送ります。このノードは publisher を増やしません。
@@ -221,7 +222,7 @@ Esc（キーボード）はこの端末の入力を離すだけで、ほかの�
 | `static_dir` | `""` | `index.html` の場所（空 = share ディレクトリ） |
 | `emergency_stop_topic` | `/emergency_stop` | 表示用 E-stop 購読。`""` で無効 |
 | `robot_name` | `""` | ヘッダーとタブ名に出すロボット名。空 = ホスト名（`questix_lab_bridge` の `robot_name` と同じ） |
-| `arbiter_status_topic` | `/twist_arbiter/status` | 「教材から走らせています」の表示用に購読（読むだけ）。`""` で無効 |
+| `arbiter_status_topic` | `/command_arbiter/status` | 「教材から走らせています」の表示用に購読（読むだけ）。`""` で無効 |
 | `lab_bridge_port` | `8897` | 「止める」で教材の中継（同じホスト）に停止を送るポート。`questix_lab_bridge` の `port` と同じにする。`0` で送らない |
 | `camera_topic` | `""`（なし） | 画面中央に表示する `sensor_msgs/CompressedImage`（JPEG/PNG）。例 `/camera/image_raw/compressed` |
 | `camera_max_fps` | `15.0` | ブラウザへ送るフレームレートの上限。0 以下で間引きなし |
@@ -266,7 +267,7 @@ node --test web_joy_driver/test/test_browser_controller.cjs
 譲る・再接続・4401 を含む）。
 
 AMD64 の開発機で、ヘッドレス Chrome の 2 つのブラウザコンテキスト（操作者と断られる端末）と
-`twist_arbiter` で確認済みです。Raspberry Pi 5 の実機（スマホ 2 台、Wi-Fi 断、実際のモーター、
+`twist_arbiter`（command_arbiter の前身）で確認済みです。Raspberry Pi 5 の実機（スマホ 2 台、Wi-Fi 断、実際のモーター、
 教材の走行実験中の「止める」）ではまだ確認しておらず、実機での結果を正とします。
 
 ## 接続用 QR

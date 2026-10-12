@@ -10,67 +10,55 @@
 #include <cmath>
 
 #include "questix_safety/estop_check.hpp"
+#include "questix_safety/permission_check.hpp"
 
-// Whether the drive may actuate at all right now. Two separate concepts are judged separately
-// and only then combined:
+// Whether the drive may actuate at all right now. Two separate concepts, two gates in a fixed
+// order (design/safety_permission_input_refactor.md, section 2.1):
 //
-// * the emergency stop (a safety function, /emergency_stop): evaluateEstop. With
-//   EstopInputs::required (the default; operation_manager always publishes it in questix_core,
-//   also without the GPIO safety path) an unheard or silent E-stop counts as pressed; the
-//   diagnostic opt-out only stops on a received pressed E-stop.
-// * the teacher's permission (a permission, not an emergency stop, /actuation_authority):
-//   evaluateTeacherPermission. It is a practice opt-in; when not required it is never looked at and
-//   always allows.
+// 1. the motion permission (L2, /motion_permission, drive_allowed): evaluatePermission. A
+//    permission, not an emergency stop: the referee in competition, the teacher in a lesson,
+//    always allowed in practice; MotionPermissionManager decides, this node only obeys. Never
+//    heard, silent for its lease or a received false close it; only an explicit diagnostic run
+//    drops it (PermissionInputs::required).
+// 2. the emergency stop (L1, a safety function, /emergency_stop): evaluateEstop. The last gate
+//    before the motors: when both are closed its reason wins. With EstopInputs::required (the
+//    default) an unheard or silent E-stop counts as pressed; the diagnostic opt-out only stops on
+//    a received pressed E-stop.
 //
 // plus a stop that could not be confirmed. ROS-free and clock-injected (ages in seconds of the
-// node's steady clock) so every rule is unit-tested.
+// node's steady clock) so every rule is unit-tested; the rules themselves are questix_safety's.
 //
 // Separate from the lifecycle: an ACTIVE node keeps polling feedback (passive telemetry, only a
 // successfully sent zero frame is ever re-sent) while this gate is closed; it only decides
 // whether a /target_twist may arm the drive and whether an armed drive must stop.
 namespace motor_control_app::actuation_gate {
 
-// Why actuation is refused, in the order they are checked (the first applies).
+// Why actuation is refused. When several apply, the one reported is the strongest: a stop fault,
+// then the E-stop (L1, the last gate), then the motion permission (L2).
 enum class Block {
-  kNone,                      // may actuate (a fresh command is still needed)
-  kStopFault,                 // a safety stop could not be sent: stays closed until a zero succeeds
-  kEstopUnknown,              // /emergency_stop never received (only when the E-stop is required)
-  kEstopActive,               // E-stop pressed
-  kEstopStale,                // /emergency_stop received once, then silent (only when required)
-  kTeacherPermissionUnknown,  // no teacher permission heartbeat received (only when opted in)
-  kTeacherPermissionOff,      // the teacher's permission says drive off (only when opted in)
-  kTeacherPermissionStale,    // heartbeat silent for longer than its lease (only when opted in)
+  kNone,               // may actuate (a fresh command is still needed)
+  kStopFault,          // a safety stop could not be sent: stays closed until a zero succeeds
+  kEstopUnknown,       // /emergency_stop never received (only when the E-stop is required)
+  kEstopActive,        // E-stop pressed
+  kEstopStale,         // /emergency_stop received once, then silent (only when required)
+  kPermissionUnknown,  // /motion_permission never received (only when required)
+  kPermissionStale,    // /motion_permission silent for longer than its lease (only when required)
+  kPermissionOff,      // /motion_permission says the drive may not move (referee, teacher, ...)
 };
 
-// The emergency stop: /emergency_stop (questix_msgs/EmergencyStop). The rule and its inputs are
-// the shared questix_safety one (estop_check.hpp; the node gets them from EmergencyStopMonitor).
+// The emergency stop (L1) and the motion permission (L2): the inputs and rules are the shared
+// questix_safety ones (estop_check.hpp, permission_check.hpp; the node gets them from
+// EmergencyStopMonitor and PermissionMonitor).
 using EstopInputs = questix_safety::EstopInputs;
-
-// The teacher's permission: questix_msgs/ActuationAuthority (one flag of it). A
-// permission, not an emergency stop; the default is "not required" (practice opt-in).
-struct TeacherPermissionInputs {
-  bool required{false};
-  bool known{false};
-  bool allowed{false};
-  double age_sec{0.0};
-  double timeout_sec{1.0};  // <= 0 or non-finite: treated as 1.0 (a lease must expire)
-};
+using PermissionInputs = questix_safety::PermissionInputs;
 
 struct Inputs {
+  PermissionInputs permission;
   EstopInputs estop;
-  TeacherPermissionInputs teacher_permission;
   bool stop_fault{false};
 };
 
-inline constexpr double kDefaultLeaseSec = 1.0;
-
 using questix_safety::isStale;
-
-// The teacher permission is a lease: it always expires. An invalid timeout falls back to the
-// default.
-inline double teacherPermissionLease(double timeout_sec) {
-  return std::isfinite(timeout_sec) && timeout_sec > 0.0 ? timeout_sec : kDefaultLeaseSec;
-}
 
 // The shared E-stop state as this gate's reason.
 inline Block toBlock(questix_safety::EstopState state) {
@@ -87,40 +75,44 @@ inline Block toBlock(questix_safety::EstopState state) {
   return Block::kEstopUnknown;  // fail closed on anything unexpected
 }
 
+// The shared permission state as this gate's reason.
+inline Block toBlock(questix_safety::PermissionState state) {
+  switch (state) {
+    case questix_safety::PermissionState::kAllowed:
+      return Block::kNone;
+    case questix_safety::PermissionState::kUnknown:
+      return Block::kPermissionUnknown;
+    case questix_safety::PermissionState::kStale:
+      return Block::kPermissionStale;
+    case questix_safety::PermissionState::kOff:
+      return Block::kPermissionOff;
+  }
+  return Block::kPermissionUnknown;  // fail closed on anything unexpected
+}
+
 // The E-stop alone: kNone (released, or not required and not heard), or an E-stop reason.
 inline Block evaluateEstop(const EstopInputs& in) {
   return toBlock(questix_safety::evaluateEstop(in));
 }
 
-// The teacher's permission alone: kNone (allowed, or not required), or a teacher permission reason.
-// Not required means disabled: none of the other fields is looked at.
-inline Block evaluateTeacherPermission(const TeacherPermissionInputs& in) {
-  if (!in.required) {
-    return Block::kNone;
-  }
-  if (!in.known) {
-    return Block::kTeacherPermissionUnknown;
-  }
-  // A lease: silence always closes it, even when the last heartbeat said "allowed".
-  if (!(in.age_sec <= teacherPermissionLease(in.timeout_sec))) {
-    return Block::kTeacherPermissionStale;
-  }
-  if (!in.allowed) {
-    return Block::kTeacherPermissionOff;
-  }
-  return Block::kNone;
+// The motion permission alone: kNone (allowed, or not required), or a permission reason.
+inline Block evaluatePermission(const PermissionInputs& in) {
+  return toBlock(questix_safety::evaluatePermission(in));
 }
 
-// Both, plus the stop fault: the first reason in Block order.
+// Both gates in their order (L2, then L1), plus the stop fault. Moving needs both open; when both
+// are closed the later gate (the E-stop) is the reason.
 inline Block evaluate(const Inputs& in) {
   if (in.stop_fault) {
     return Block::kStopFault;
   }
-  const Block estop = toBlock(questix_safety::evaluateEstop(in.estop));
+  // Qualified: the questix_safety functions of the same name would also be found (ADL).
+  Block block = actuation_gate::evaluatePermission(in.permission);  // L2
+  const Block estop = actuation_gate::evaluateEstop(in.estop);      // L1: the last gate wins
   if (estop != Block::kNone) {
-    return estop;
+    block = estop;
   }
-  return evaluateTeacherPermission(in.teacher_permission);
+  return block;
 }
 
 inline bool isEstopBlock(Block block) {
@@ -128,9 +120,9 @@ inline bool isEstopBlock(Block block) {
          block == Block::kEstopStale;
 }
 
-inline bool isTeacherPermissionBlock(Block block) {
-  return block == Block::kTeacherPermissionUnknown || block == Block::kTeacherPermissionOff ||
-         block == Block::kTeacherPermissionStale;
+inline bool isPermissionBlock(Block block) {
+  return block == Block::kPermissionUnknown || block == Block::kPermissionStale ||
+         block == Block::kPermissionOff;
 }
 
 inline const char* blockName(Block block) {
@@ -145,12 +137,12 @@ inline const char* blockName(Block block) {
       return "estop_active";
     case Block::kEstopStale:
       return "estop_stale";
-    case Block::kTeacherPermissionUnknown:
-      return "teacher_permission_unknown";
-    case Block::kTeacherPermissionOff:
-      return "teacher_permission_off";
-    case Block::kTeacherPermissionStale:
-      return "teacher_permission_stale";
+    case Block::kPermissionUnknown:
+      return "permission_unknown";
+    case Block::kPermissionStale:
+      return "permission_stale";
+    case Block::kPermissionOff:
+      return "permission_off";
   }
   return "unknown";
 }

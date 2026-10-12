@@ -60,9 +60,12 @@ robot UIDに管理者LOW/STATUSの権限を付与しません。robotの状態�
 切れるとは扱いません。Linux全体hangやguard SIGSTOPでは、最後のPWMが残り得ます。
 手動非常停止とは別の、自動独立動力遮断は実装していません。watchdogとuserspaceは代替ではありません。
 
-新版のPi配備、DT apply、GPIO電気波形、ESC無信号/Low/neutralへの反応、起動/停止過渡、
-lease・異常終了・回復の波形は未確認です。10/14の授業版releaseへ本PRを入れません。
-ESC非通電でguardのLowから検証し、非常停止解除・ESC通電・非zero指令・射出は別判断です。
+授業版 `844b381`（main `3178475` + #185）では、2026-10-12にID13でS1〜S6が合格したとの
+作業責任者の報告があります。guardのLow・neutral、45分の長いHigh監視で捕捉0回、
+5つの停止経路でLow、ESCの無信号への反応、射出を確認した記録です。
+この結果は最新mainへの移植後の実機合格を意味しません。検証用SDで新しい
+`/launcher_command`・`/motion_permission` 経路のS2/S4/S5/S6と、15分のS3を再確認します。
+Linux全体停止や逆極性・極性不明時の電圧を証明した結果でもありません。
 
 ## 先生によるインストール（ここにあるコマンドは手順例、実施記録ではありません）
 
@@ -116,7 +119,8 @@ sudo systemctl stop questix_pwm_guard.service
 
 guardが安定してLowを要求できることを確認した後、生徒workspaceのESC YAMLで
 `pwm_backend: rp1_hw`、GPIO13、neutral1000、min0/max2000 µs、default socketを設定してbuildします。
-生徒の変更は通常workspaceのinstallから起動します。既存E-stop/teacher permission/LAB/timeoutを維持。
+生徒の変更は通常workspaceのinstallから起動します。既存E-stop・`/motion_permission`・
+command_arbiterの入力選択と、起動・停止・timeout・複数publisherの後に0を要求する規則を維持します。
 
 ### 旧凍結版c7c8b62からの移行
 

@@ -10,7 +10,8 @@
 #include <vector>
 
 #include "esc_motor_control_cpp/pwm_command.hpp"
-#include "esc_motor_control_cpp/roller_lab_logic.hpp"
+#include "esc_motor_control_cpp/roller_command_logic.hpp"
+#include "esc_motor_control_cpp/roller_gate.hpp"
 
 namespace {
 class FakeBackend : public esc_motor_control_cpp::PwmBackend {
@@ -159,9 +160,31 @@ TEST(PwmStatusTest, AddsDiagnosticsWithoutRemovingExistingKeys) {
   EXPECT_NE(json.find("\"applied_pulse_us\": 2000"), std::string::npos);
   EXPECT_NE(json.find("\"pwm_backend\": \"simulation\""), std::string::npos);
   for (const auto* key :
-       {"command", "source", "lab_accepted", "lab_locked", "estop", "authority", "lab_max_speed"}) {
+       {"command", "source", "estop", "permission", "max_power"}) {
     EXPECT_NE(json.find(std::string("\"") + key + "\""), std::string::npos);
   }
+}
+
+TEST_F(PwmCommandTest, FaultGateInhibitsTheNewCommandStreamEvenAfterAZero) {
+  esc_motor_control_cpp::RollerCommandLogic logic;
+  logic.configure(1.0, 1.0);
+  esc_motor_control_cpp::RollerGateInputs gates;
+  gates.permission.required = false;
+  gates.estop.required = false;
+  logic.onCommand(0.0, 0.0, false);
+  ASSERT_TRUE(send(1800, logic.onCommand(0.8, 0.1, false).speed));
+  backend.results = {false};
+  ASSERT_FALSE(send(2000, logic.onCommand(1.0, 0.2, false).speed));
+  gates.pwm_fault = command.fault();
+  ASSERT_EQ(esc_motor_control_cpp::evaluateRollerGate(gates),
+            esc_motor_control_cpp::RollerBlock::kPwmFault);
+  logic.onCommand(0.0, 0.3, true);
+  EXPECT_TRUE(logic.requiresZero());
+  EXPECT_FALSE(logic.onCommand(1.0, 0.4, true).set);
+  EXPECT_DOUBLE_EQ(logic.speed(), 0.0);
+  const auto writes = backend.pulses.size();
+  EXPECT_FALSE(send(2000, 1.0));
+  EXPECT_EQ(backend.pulses.size(), writes);
 }
 
 TEST_F(PwmCommandTest, LowFallbackRejectsLaterNeutralEvenForLegacyBackend) {

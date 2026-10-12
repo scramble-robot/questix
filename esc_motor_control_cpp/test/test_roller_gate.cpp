@@ -17,39 +17,29 @@ namespace {
 
 RollerGateInputs open() {
   RollerGateInputs in;
-  in.teacher_permission.required =
-      true;  // the opt-in, so the teacher permission rules are exercised
+  in.permission.known = true;
+  in.permission.allowed = true;
+  in.permission.age_sec = 0.1;
   in.estop.known = true;
   in.estop.active = false;
   in.estop.age_sec = 0.1;
-  in.teacher_permission.known = true;
-  in.teacher_permission.allowed = true;
-  in.teacher_permission.age_sec = 0.1;
   return in;
 }
 
 }  // namespace
 
-TEST(RollerGate, OpenOnlyWithAFreshReleaseAndTheTeachersPermission) {
+TEST(RollerGate, OpenOnlyWithAFreshPermissionAndAFreshRelease) {
   EXPECT_EQ(evaluateRollerGate(open()), RollerBlock::kNone);
 }
 
-TEST(RollerGate, DefaultsRequireTheEstopButNotTheTeacherPermission) {
+TEST(RollerGate, DefaultsRequireThePermissionAndTheEstop) {
   RollerGateInputs in;
   EXPECT_TRUE(in.estop.required);
-  EXPECT_FALSE(in.teacher_permission.required);
-  in.estop.known = true;
-  in.estop.active = false;
-  EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kNone);
-}
-
-TEST(RollerGate, NothingHeardIsClosedEstopFirst) {
-  RollerGateInputs in;
-  in.teacher_permission.required = true;
+  EXPECT_TRUE(in.permission.required);
   EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kEstopUnknown);
   in.estop.known = true;
   in.estop.active = false;
-  EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kTeacherPermissionUnknown);
+  EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kPermissionUnknown);
 }
 
 TEST(RollerGate, PressedOrSilentEstopCloses) {
@@ -73,12 +63,12 @@ TEST(RollerGate, DiagnosticOptOutStillStopsOnAPressedEstop) {
   EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kEstopActive);
 }
 
-// The diagnostic opt-out without the teacher permission opt-in: the roller may spin with nothing
-// heard, a silent E-stop is not a stop, a pressed one still is.
-TEST(RollerGate, DiagnosticOptOutWithoutTeacherPermissionSpinsWithNothingHeard) {
+// A full diagnostic opt-out: the roller may spin with nothing heard, a silent E-stop is not a
+// stop, a pressed one still is.
+TEST(RollerGate, DiagnosticOptOutOfBothSpinsWithNothingHeard) {
   RollerGateInputs in;  // nothing heard
   in.estop.required = false;
-  in.teacher_permission.required = false;
+  in.permission.required = false;
   EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kNone);
   in.estop.known = true;
   in.estop.active = false;
@@ -88,60 +78,62 @@ TEST(RollerGate, DiagnosticOptOutWithoutTeacherPermissionSpinsWithNothingHeard) 
   EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kEstopActive);
 }
 
-// The teacher's permission is not an emergency stop: it decides on its own when opted in.
-TEST(RollerGate, TeacherPermissionIsIndependentOfTheEstop) {
+// The motion permission is not an emergency stop: its reasons never read as E-stop reasons.
+TEST(RollerGate, PermissionIsIndependentOfTheEstop) {
   RollerGateInputs in;  // nothing heard
   in.estop.required = false;
-  in.teacher_permission.required = true;
-  EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kTeacherPermissionUnknown);
+  EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kPermissionUnknown);
   EXPECT_FALSE(esc_motor_control_cpp::isRollerEstopBlock(evaluateRollerGate(in)));
-  in.teacher_permission.known = true;
-  in.teacher_permission.allowed = false;
-  in.teacher_permission.age_sec = 0.1;
-  EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kTeacherPermissionOff);
+  in.permission.known = true;
+  in.permission.allowed = false;
+  in.permission.age_sec = 0.1;
+  EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kPermissionOff);
   EXPECT_FALSE(esc_motor_control_cpp::isRollerEstopBlock(evaluateRollerGate(in)));
 }
 
-TEST(RollerGate, TeacherPermissionIsALease) {
+TEST(RollerGate, PermissionIsALease) {
   auto in = open();
-  in.teacher_permission.allowed = false;
-  EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kTeacherPermissionOff);
+  in.permission.allowed = false;
+  EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kPermissionOff);
   in = open();
-  in.teacher_permission.age_sec = 1.2;
-  EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kTeacherPermissionStale);
-  in.teacher_permission.timeout_sec = 0.0;  // invalid: falls back to 1.0, never endless
-  EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kTeacherPermissionStale);
+  in.permission.age_sec = 0.6;
+  EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kPermissionStale);
+  in.permission.timeout_sec = 0.0;  // invalid: falls back to 0.5, never endless
+  EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kPermissionStale);
 }
 
-TEST(RollerGate, CompetitionDoesNotNeedTheClassroomHeartbeat) {
+// L2 then L1: when both are closed, the E-stop (the last gate) is the reason.
+TEST(RollerGate, TheEstopWinsWhenBothAreClosed) {
   auto in = open();
-  in.teacher_permission.required = false;
-  in.teacher_permission.known = false;
-  EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kNone);
+  in.permission.allowed = false;
+  in.estop.active = true;
+  EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kEstopActive);
+  in.estop.active = false;
+  EXPECT_EQ(evaluateRollerGate(in), RollerBlock::kPermissionOff);
 }
 
 TEST(RollerGate, ReasonsAreSeparate) {
   EXPECT_TRUE(esc_motor_control_cpp::isRollerEstopBlock(RollerBlock::kEstopStale));
-  EXPECT_FALSE(esc_motor_control_cpp::isRollerEstopBlock(RollerBlock::kTeacherPermissionOff));
-  EXPECT_TRUE(
-      esc_motor_control_cpp::isRollerTeacherPermissionBlock(RollerBlock::kTeacherPermissionStale));
-  EXPECT_FALSE(esc_motor_control_cpp::isRollerTeacherPermissionBlock(RollerBlock::kEstopActive));
-  EXPECT_STREQ(esc_motor_control_cpp::rollerBlockName(RollerBlock::kTeacherPermissionOff),
-               "teacher_permission_off");
+  EXPECT_FALSE(esc_motor_control_cpp::isRollerEstopBlock(RollerBlock::kPermissionOff));
+  EXPECT_TRUE(esc_motor_control_cpp::isRollerPermissionBlock(RollerBlock::kPermissionStale));
+  EXPECT_FALSE(esc_motor_control_cpp::isRollerPermissionBlock(RollerBlock::kEstopActive));
+  EXPECT_STREQ(esc_motor_control_cpp::rollerBlockName(RollerBlock::kPermissionOff),
+               "permission_off");
+  EXPECT_STREQ(esc_motor_control_cpp::rollerBlockName(RollerBlock::kPermissionUnknown),
+               "permission_unknown");
 }
 
-// Disabled means disabled: a teacher permission that is not required is never looked at.
-TEST(RollerGate, DisabledTeacherPermissionIsNeverLookedAt) {
-  esc_motor_control_cpp::RollerTeacherPermissionInputs teacher_permission;
-  teacher_permission.required = false;
+// A not-required permission (diagnostic opt-out) is never looked at.
+TEST(RollerGate, DisabledPermissionIsNeverLookedAt) {
+  esc_motor_control_cpp::RollerPermissionInputs permission;
+  permission.required = false;
   for (const bool known : {false, true}) {
     for (const bool allowed : {false, true}) {
       for (const double age : {0.0, 5.0, std::numeric_limits<double>::quiet_NaN()}) {
-        teacher_permission.known = known;
-        teacher_permission.allowed = allowed;
-        teacher_permission.age_sec = age;
-        EXPECT_EQ(esc_motor_control_cpp::evaluateRollerTeacherPermission(teacher_permission),
-                  RollerBlock::kNone);
+        permission.known = known;
+        permission.allowed = allowed;
+        permission.age_sec = age;
+        EXPECT_EQ(esc_motor_control_cpp::evaluateRollerPermission(permission), RollerBlock::kNone);
       }
     }
   }
@@ -158,4 +150,17 @@ TEST(RollerGate, NotRequiredEstopOnlyStopsWhenPressed) {
   EXPECT_EQ(esc_motor_control_cpp::evaluateRollerEstop(estop), RollerBlock::kNone);
   estop.active = true;
   EXPECT_EQ(esc_motor_control_cpp::evaluateRollerEstop(estop), RollerBlock::kEstopActive);
+}
+
+TEST(RollerGate, PwmFaultNeverOpensAGateAndDoesNotHideEstopOrPermission) {
+  esc_motor_control_cpp::RollerGateInputs inputs;
+  inputs.pwm_fault = true;
+  inputs.permission.required = false;
+  inputs.estop.required = false;
+  EXPECT_EQ(esc_motor_control_cpp::evaluateRollerGate(inputs), RollerBlock::kPwmFault);
+  inputs.permission.required = true;
+  EXPECT_EQ(esc_motor_control_cpp::evaluateRollerGate(inputs), RollerBlock::kPermissionUnknown);
+  inputs.estop.required = true;
+  EXPECT_EQ(esc_motor_control_cpp::evaluateRollerGate(inputs), RollerBlock::kEstopUnknown);
+  EXPECT_STREQ(esc_motor_control_cpp::rollerBlockName(RollerBlock::kPwmFault), "pwm_fault");
 }

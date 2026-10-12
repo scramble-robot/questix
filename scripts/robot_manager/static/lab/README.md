@@ -100,11 +100,12 @@ lesson block shows the report of its last run; the 実機 dialog lists every run
 Reports stay in `localStorage` across a reload; the full recording (JSON / CSV) can be saved only
 until the page is closed.
 
-Driving needs the robot started for practice (`ros2 launch questix_launcher questix_core.launch.xml`,
-which includes `twist_arbiter`: the controller keeps working and moving its stick takes over from a
-lesson), 教材からの走行 not switched off in Robot Manager's 教材 tab (on by default in practice
-mode), the E-stop released, and the learner's safety tick on the page. The bridge checks all of them and every other
-safety rule itself (`questix_lab_bridge/README.md`, "Driving experiments"); the page only shows them.
+Driving needs the robot started for a lesson (`ros2 launch questix_launcher questix_core.launch.xml
+robot_mode:=lesson`, which includes command_arbiter: the controller keeps working and moving its stick
+takes over from a lesson), the teacher's ロボットの走行制御 (操作 tab) and 教材からの走行 (教材 tab) in
+Robot Manager switched on (off at every start), the E-stop released, and the learner's safety tick on
+the page. The bridge and command_arbiter check all of them and every other safety rule
+(`questix_lab_bridge/README.md`, "Driving experiments"); the page only shows them.
 `js/live/drive-core.js` (readiness, programs, odometry goals) and `js/control/live-drive.js` (step,
 wall PID) are DOM-free and tested (`test/drive-core.test.mjs`, `test/control-live-drive.test.mjs`);
 `js/live/drive-link.js` is the only module that sends drive frames to the robot.
@@ -117,10 +118,11 @@ spin-up bar is full, 「1枚発射」. Each disc adds a row with power, tilt and
 with its distance field focused for the measured range, and the session (the `roller` / `shot`
 statuses) is kept on the robot as a record. The roller stops by itself after each shot, and on the
 learner's stop, Esc, a hidden page, a stalled page, a lost link, the stop bar (any page), and
-whatever the bridge ends it for (controller, E-stop, dead-man, 30 s). It needs the bridge's
-`allow_shoot` (Robot Manager's 教材からの発射) and the launcher nodes started with
-`accept_lab_input`; otherwise the topic works with typed data as before and says why in one line.
-The bridge enforces every rule itself (`questix_lab_bridge/README.md`, "Launcher experiments");
+whatever the bridge ends it for (controller, E-stop, dead-man, 30 s). It needs the teacher's
+発射機構の操作 and 教材からの発射 in Robot Manager (published on `/lab_permission`) and the robot
+started for a lesson (command_arbiter passes the page's commands on); otherwise the topic works
+with typed data as before and says why in one line. The bridge and command_arbiter enforce every
+rule (`questix_lab_bridge/README.md`, "Launcher experiments");
 `js/live/shoot-core.js` mirrors them for the page and is tested (`test/shoot-core.test.mjs`), and
 `js/live/shoot-link.js` is the only module that sends launcher frames.
 

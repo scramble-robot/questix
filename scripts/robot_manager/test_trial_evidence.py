@@ -650,6 +650,14 @@ class PreflightTests(unittest.TestCase):
         self.assertIn("/emergency_stop", trial.REQUIRED_TOPICS)
         self.assertIn(trial.AUTHORITY_TOPIC, trial.OPTIONAL_TOPICS)
         self.assertIn(trial.AUTHORITY_TOPIC, trial.PROTECTED_TOPICS)
+        # The motion permission the actuators obeyed is kept the same way.
+        self.assertIn(trial.MOTION_PERMISSION_TOPIC, trial.OPTIONAL_TOPICS)
+        self.assertIn(trial.MOTION_PERMISSION_TOPIC, trial.PROTECTED_TOPICS)
+        self.assertNotIn("/joy_gated", trial.OPTIONAL_TOPICS)  # joy_gate was removed
+        # Who drove in a lesson: the lesson permission and command_arbiter's choice.
+        for topic in ("/lab_permission", "/command_arbiter/status"):
+            self.assertIn(topic, trial.OPTIONAL_TOPICS)
+            self.assertIn(topic, trial.PROTECTED_TOPICS)
         pre = trial.classify_preflight(
             ["/drive_component"], ["/target_twist", "/drive_status", "/emergency_stop"])
         self.assertEqual(pre["missing_required"], [])
@@ -1367,7 +1375,7 @@ class EvidenceStackTests(TrialFixture):
             {"drive": False, "launcher": False, "running": False, "competition": False},
         ])
         with self.wired():
-            with patch.object(recorder.actuation, "status", lambda: next(states)):
+            with patch.object(recorder.actuation, "status", lambda **_: next(states)):
                 started = recorder._start_trial({"trial_id": "e003"})
                 bag_dir = self.output_dir / started["bag_name"]
                 bag_dir.mkdir()

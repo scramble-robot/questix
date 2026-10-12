@@ -2,12 +2,12 @@
 // and no WebSocket, so every rule is a Node test (test/shoot-core.test.mjs). shoot-link.js sends
 // what these functions allow; shoot-view.js shows the reasons they name.
 //
-// The bridge (questix_lab_bridge/questix_lab_bridge/shoot.py) enforces the safety rules itself:
-// allow_shoot, the launcher nodes accepting lab input, no other publisher, E-stop released, the
-// controller not in use, one page at a time, the power and tilt limits, a roller dead-man, the
-// longest session, the spin-up before a shot and the fire interval. This module only mirrors them
-// so the page can say *why* a button is off before the learner presses it, and counts down the
-// bridge's times between its shoot_state frames.
+// The bridge (questix_lab_bridge/questix_lab_bridge/shoot.py) holds the session (one page at a
+// time, a roller dead-man, the longest session) and reports what the robot decided: command_arbiter
+// (the teacher's lesson permission, the power and tilt limits, the spin-up before a shot and the
+// fire interval, the controller first), no other publisher, the E-stop and the motion permission.
+// This module only mirrors them so the page can say *why* a button is off before the learner
+// presses it, and counts down the bridge's times between its shoot_state frames.
 //
 // Units: roller power is a fraction 0..1 on the wire and a whole percent on the page; tilt in
 // degrees; times in seconds (arrival times given to this module in milliseconds of one clock).
@@ -18,11 +18,12 @@ import { fillSentence as fill } from '../core/content.js';
 const SHOOT_BLOCKERS = [
   'no_link', // not connected to a robot
   'old_bridge', // the bridge predates the launcher (no hello.shoot)
-  'not_allowed', // robot_manager has not allowed firing from the lessons
-  'no_launcher', // esc_motor_control / shot_component missing or not accepting lab input
-  'other_publisher', // something else publishes the launcher's lab topics
+  'not_allowed', // the teacher has not allowed the launcher (/lab_permission)
+  'no_launcher', // command_arbiter, esc_motor_control or shot_component missing or silent
+  'other_publisher', // something else publishes the launcher's lab topic
   'estop_unknown', // the bridge has not heard /emergency_stop yet (fail closed)
   'emergency_stop',
+  'no_motion_permission', // /motion_permission does not allow the launcher
   'controller', // the controller uses the launcher (it always wins)
   'busy', // another page operates the launcher
   'unconfirmed', // the learner has not ticked the safety check
@@ -224,7 +225,8 @@ function dropPendingFire(tracker) {
  *   waited for its disc: `row` is `{percent, tilt}` (the measured tilt when the status has one);
  * - `{kind: 'other_fired', source}` when it went up otherwise (the controller, another page);
  * - `{kind: 'not_fired', reason}` when this page's fire was not confirmed within FIRE_CONFIRM_MS
- *   (`reason`: shot_component's `lab_refused`, or null).
+ *   (`reason`: `lab_refused` of an older shot_component, or null: the robot now refuses a lab
+ *   shot in command_arbiter, and the page names no reason).
  */
 function ingestShot(tracker, shot, at) {
   const count = shot?.fired_count;

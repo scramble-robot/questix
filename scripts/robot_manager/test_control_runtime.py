@@ -44,7 +44,7 @@ def test_read_only_command_uses_fixed_fields_domain_and_quoted_paths(runtime):
     with patch.object(control_runtime.subprocess, 'run', side_effect=run):
         snapshot = control_runtime.read_snapshot(runtime)
     assert snapshot['nodes']['joy_controller']['values']['angular_input_ratio'] == -3.0
-    assert snapshot['nodes']['shot_component'] == {'status': 'unavailable', 'values': {}}
+    assert snapshot['nodes']['joy_launcher'] == {'status': 'unavailable', 'values': {}}
     assert snapshot['domain_id'] == 71
     assert snapshot['captured_at']
 

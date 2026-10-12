@@ -792,13 +792,16 @@ def _authority_snapshot() -> dict:
     known even when nothing is published on the authority topic.
     """
     try:
-        state = actuation.status()
+        state = actuation.status(with_running_mode=False)
     except Exception as exc:  # noqa: BLE001 - evidence must never fail a start or stop
         return {"available": False, "error": str(exc)}
     return {
         "available": True,
         "drive": bool(state.get("drive")),
         "launcher": bool(state.get("launcher")),
+        # QUESTiX LAB's lesson permissions (/lab_permission), held next to the switches.
+        "lab_drive": bool(state.get("lab_drive")),
+        "lab_launcher": bool(state.get("lab_launcher")),
         "heartbeat_running": bool(state.get("running")),
         "competition": bool(state.get("competition")),
         "mode": state.get("mode"),

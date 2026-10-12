@@ -78,8 +78,8 @@ QUESTiX Robot Manager の全タブとダイアログは、`static/style.css` の
   「すべて止める」は確認なしの1タップで、`POST /api/stop-all` がまず教材の走行・発射を止め
   （教材のブリッジに WebSocket で `{"type":"stop"}` と `{"type":"roller_stop"}` を送る。どのページも
   送れる停止で、ブリッジは再起動せず生徒の接続も切れません）、次にロボット制御（`questix_robot`）を
-  停止します。結果は画面上部に項目ごとに表示します。教材からの走行・発射の**許可**は変えません
-  （許可・禁止は「教材」タブのスイッチで、先生が意図して切り替えます）。
+  停止します。結果は画面上部に項目ごとに表示します。先生の操作許可と教材からの走行・発射の**許可**も
+  OFF にします（次の授業では先生が ON にし直します）。
 - 「操作」の最初のカード「いまのロボット」に、ロボット名、モード（動作中／次回）、ロボット制御、
   非常停止ボタン、教材の配信、教材からの走行・発射の許可、いま動かしているのは誰かをまとめて表示します。
   ロボット名は**ホスト名**です（教材のブリッジの `robot_name` の既定値で、生徒の教材画面に出る名前と同じ。
@@ -91,14 +91,22 @@ QUESTiX Robot Manager の全タブとダイアログは、`static/style.css` の
   （押すと通常の再起動確認のあとで再起動します）。
 - **3 つのモード** (`modes.py`; `$QUESTIX_CONFIG_DIR/mode`):
   - **教材** (`lesson`): 授業。教材（QUESTiX LAB）から走行・発射でき、コントローラーも教材も、先生が
-    「操作」タブの許可を ON にしている間だけ動きます（`require_teacher_permission:=true`）。
+    「操作」タブの許可を ON にしている間だけ動きます（先生の許可は走行許可 `/motion_permission` の票。
+    教材モードで起動したロボットが動いている間だけ ON にできます）。
   - **練習** (`practice`, 既定): コントローラーで自由に練習。教材と先生の許可は使いません
-    （twist_arbiter も教材の入力も起動しません）。モードファイルが無い・読めないときもこれです。
-  - **大会** (`competition`): 電源を入れると大会用の構成（GPIO5 + GPIO27、AutoReferee）で自動起動。
+    （command_arbiter も教材の入力も起動しません）。モードファイルが無い・読めないときもこれです。
+  - **大会** (`competition`): 電源を入れると大会用の構成（非常停止は GPIO5、AutoReferee の GPIO27 は
+    走行許可の審判の票）で自動起動。
 - **教材・練習モードの起動**: 電源投入時にはロボット制御を起動しません。「起動」「再起動」を押すと
   保存したモードの構成で起動します（下の「練習モードの起動要求」）。大会モードの起動は今までどおりで、
   電源投入時にも起動します。起動の結果は、実際に起動したかどうかで表示します（「練習用の構成で起動
   しました」「起動できませんでした：…」）。ロボット制御が動いている間は「起動」を押せません。
+- **ロボットが動かないとき**（「操作」タブ）: 「なぜ動かないか確認」を押すと、ロボットから非常停止
+  （`/emergency_stop`、L1）と走行許可（`/motion_permission`、L2）を一度だけ読み取り（`GET
+  /api/motion-state`、`motion_state.py` と `read_motion_state.py`。ROS とロボットの ROS_DOMAIN_ID で
+  数秒だけ動く読み取り専用のプロセス）、走行と発射機構それぞれを止めている理由（先生の操作許可が OFF、
+  AutoReferee が止めている、非常停止が押されている など）を表示します。何も変更しません。どのモードでも
+  使えます。
 - 起動前の確認では保存プロファイルとROS・ワークスペースの起動ファイルを確認します。
   コントローラーの物理接続や安全状態の自動判定は行いません。
   旧サービスで `/api/readiness` がない場合は既存APIで保存設定を確認し、起動環境は未確認と表示します。
@@ -127,13 +135,11 @@ mode (`modes.STARTED_ON_REQUEST`) only when Robot Manager asked for it a moment 
    `boot_id=<kernel boot id>`), then runs `systemctl start|restart questix_robot`.
 2. The launcher accepts the request only for the same boot, for the mode the mode file says, and
    when it is at most 120 s old; it deletes the request in any case, then runs
-   `ros2 launch questix_launcher questix_core.launch.xml enable_autoreferee:=false
+   `ros2 launch questix_launcher questix_core.launch.xml robot_mode:=<the mode>
    enable_gpio_ref:=true controller_type:=… enable_lidar/shot/drive/rviz:=…` (the same as
-   competition except AutoReferee) plus, by mode:
-   - practice: `enable_twist_arbiter:=false enable_lab_shoot:=false
-     require_teacher_permission:=false` (the controller alone);
-   - lesson: `enable_twist_arbiter:=true enable_lab_shoot:=true require_teacher_permission:=true`
-     (QUESTiX LAB can drive and fire; everything moves only with the teacher's permission).
+   competition). questix_core wires the mode: practice is the controller alone; lesson adds
+   QUESTiX LAB's inputs and needs the teacher's vote for the motion permission (everything moves
+   only with the teacher's permission).
 3. Without a usable request (power-on, `systemctl start` by hand, a stale request) it logs why and
    exits 0, as before.
 4. Every launch writes `$QUESTIX_CONFIG_DIR/last-launch` (`mode`, `started_at`, `boot_id`);
@@ -160,8 +166,8 @@ with a fake `ros2` and `logger`.
 
 GPIO5 ROS monitoring of the physical E-stop is not an operating setting (issue #168). The
 production launcher ignores `ENABLE_GPIO_REF` in `launch.env` and always passes
-`enable_gpio_ref:=true`: with `enable_autoreferee:=false` in practice and lesson, with
-`enable_autoreferee:=true` (GPIO5 and GPIO27 AutoReferee) in competition. An existing `launch.env`
+`enable_gpio_ref:=true`, with `robot_mode:=<the mode>` (competition: GPIO5 and GPIO27 AutoReferee;
+practice and lesson: GPIO5). An existing `launch.env`
 containing `ENABLE_GPIO_REF=false` therefore disables neither.
 
 Robot Manager has no switch or item for it in the 管理設定 card (the header's 非常停止ボタン
@@ -183,10 +189,10 @@ process-local and is not persisted (not in `launch.env`, `mode`, `start-request`
 power-cycled, the next plain/manual launch defaults to GPIO monitoring enabled.
 
 `enable_gpio_ref:=false` remains a capability of `questix_core.launch.xml` for explicit manual
-diagnostic `ros2 launch` runs only (with `enable_autoreferee:=false`): operation_manager then
+diagnostic `ros2 launch` runs only (not with `robot_mode:=competition`): operation_manager then
 reads no GPIO and publishes `/emergency_stop` released (`released (no GPIO safety path)`), so a
 press of the E-stop button reaches ROS no more (RLY1 still cuts the power). The production
-launcher never uses it. `enable_autoreferee:=true` with `enable_gpio_ref:=false` is not a valid
+launcher never uses it. `robot_mode:=competition` with `enable_gpio_ref:=false` is not a valid
 configuration and `questix_core.launch.xml` refuses it.
 
 ### E-stop display (`estop_monitor.py`)
@@ -266,9 +272,14 @@ The **教材** tab starts and stops that bridge, so nobody has to run `ros2 laun
   the tab shows them under **ブリッジのログ**.
 - `/api/lab/status` also carries `bridge`: the running bridge's own `GET /api/state` (ours or one
   started by hand; `null` when none answers within 0.5 s). The tab takes the driving state from
-  it (`bridge.read_only`), not from `lab.env`.
+  it (`bridge.read_only`: false while command_arbiter reports the permission), not from `lab.env`.
 - **教材からの走行・発射 are session permissions, not settings.** They live only in the
-  robot_manager process and are never read from or written to `lab.env`, so every start of the
+  robot_manager process (`actuation.py`, next to the teacher's switches of the 操作 tab) and reach
+  the robot on `/lab_permission` (`questix_msgs/ActuationAuthority`, published by the same
+  heartbeat at 5 Hz while a teacher's switch is on, reliable + volatile; command_arbiter and the
+  bridge treat it as off 1 s after the last message). A lesson permission needs the teacher's
+  switch of the same kind and goes off with it in the same heartbeat line. They are never read
+  from or written to `lab.env`, so every start of the
   manager (and every boot of the robot) begins with both **off**, even while the pages are served
   automatically. The teacher switches them on for the session; they go off again on 配信停止,
   「すべて止める」, leaving 教材モード (and stay off when going back to it), and when the
@@ -278,32 +289,30 @@ The **教材** tab starts and stops that bridge, so nobody has to run `ros2 laun
   `/api/lab/status` says `permissions_transient: true`.
 - **教材からの走行** (`POST /api/lab/drive`) lets the lessons' driving experiments move the robot
   (`questix_lab_bridge/README.md`, "Driving experiments"); each run is confirmed by the learner's
-  safety tick, and `twist_arbiter` lets the controller take over at any time. Off at every start;
+  safety tick, and command_arbiter lets the controller take over at any time. Off at every start;
   the card's switch 「教材からの走行を許可する」 (one switch, its state ON/OFF next to it) is the
-  teacher's on and off switch. 大会モード turns it off (and it always reads as off in that mode).
-  Switching restarts a bridge started here, keeping the permissions of the session (every
-  connected page drops for a few seconds); if that bridge does not come up, both permissions go
-  off. A bridge started by hand keeps its own `allow_drive`. The card's headline combines the
-  permission with what blocks it now (「許可済み・いまは走行できません（非常停止ボタンが押されています）」);
-  a missing `twist_arbiter` / launcher node is shown only after it lasted 6 s, because a restarted
-  bridge reports it for a few seconds while it discovers the ROS graph. The plain reason is on the
-  card; the technical cause (`twist_arbiter`, `ROS_DOMAIN_ID`, topics, limits) is under
-  「先生・技術者向けの詳しい情報」.
+  teacher's on and off switch. 大会モード and 練習モード turn it off (it always reads as off there).
+  Switching never restarts the bridge: no page drops, and a bridge started by hand follows the
+  switch too. The card's headline combines the permission with what blocks it now
+  (「許可済み・いまは走行できません（非常停止ボタンが押されています）」); a missing command_arbiter /
+  launcher node, and a permission that has not reached the robot yet, are shown only after they
+  lasted 6 s, because a restarted bridge reports them for a few seconds while it discovers the ROS
+  graph. The plain reason is on the card; the technical cause (command_arbiter, `ROS_DOMAIN_ID`,
+  topics, limits) is under 「先生・技術者向けの詳しい情報」.
 - **教材からの発射** (`POST /api/lab/shoot`) does the same for the disc launcher: the lessons may
   spin the roller, tilt and fire one disc at a time (`questix_lab_bridge/README.md`, "Launcher
   experiments"); the learner ticks 「発射する方向に人がいない・的の周りに人がいない」 on the page,
   and the controller's launcher buttons take over at any time. Same policy as driving: off at every
   start, the card's switch 「教材からの発射を許可する」 is the teacher's on and off switch,
   大会モード turns it off. The card shows `bridge.shoot_state` (who operates it, what blocks it:
-  launcher nodes not accepting lab input, another publisher, emergency stop, controller in use).
-  `/api/lab/status` carries `shoot_allowed` / `shoot_running` like `drive_allowed` /
-  `drive_running`.
-- **すべて止める** (`POST /api/stop-all`) stops the lessons' runs, then switches both permissions
-  off (a bridge of ours that had one on is restarted with both off; the pages reconnect and keep
-  serving), then stops the robot service.
-- Both permissions are always passed to the bridge explicitly (`-p allow_drive:=true|false
-  -p allow_shoot:=true|false`), so the defaults in `lab_bridge.yaml` (both false, for a bridge
-  started by hand) never decide for a bridge started here.
+  command_arbiter or a launcher node missing, another publisher, emergency stop, no motion
+  permission, controller in use).
+  `/api/lab/status` carries `shoot_allowed` like `drive_allowed`.
+- **すべて止める** (`POST /api/stop-all`) switches the teacher's switches off (and the lesson
+  permissions with them), stops the lessons' runs, then stops the robot service; the bridge keeps
+  serving the pages.
+- The bridge has no parameter that grants motion (`allow_drive` / `allow_shoot` are gone): a bridge
+  started by hand moves nothing the teacher has not allowed on `/lab_permission`.
 - A permission error on `mode`, `launch.env` or `lab.env` names the service user, the owner and
   the fix (`sudo chown <user>:<user> /etc/questix_robot …`). `scripts/check-robot-manager.sh`
   checks the same, plus that `wifi_ap.env` is readable.
@@ -323,8 +332,9 @@ The **教材** tab starts and stops that bridge, so nobody has to run `ros2 laun
 
 Prerequisite: `questix_lab_bridge` is built in `ROBOT_WS` (`colcon build`; rosdep key
 `python3-websockets`). If the node exits immediately, starting fails with an error (and the log
-above). The bridge only subscribes unless 教材からの走行 is on; then it may publish
-`/target_twist/lab` (twist_arbiter's lab input) and nothing else.
+above). The bridge publishes only for a page's session: `/target_twist/lab` (command_arbiter's lab
+input) and the launcher's lab topics, which the robot takes only while the lesson permissions
+allow it.
 
 ## Running (dev)
 
@@ -426,13 +436,15 @@ warning として記録します（別のドメインへ移ることはありま
 開始前に次がそろっていなければ recorder を起動しません（HTTP 409）。
 
 - 必須: ノード `/drive_component`、トピック `/target_twist`、`/drive_status`、`/emergency_stop`
-- 任意: `/actuation_authority`（先生の実行時許可。許可を ON にしている間だけ出て、大会用の
-  起動には無いため任意）、`/joy`、`/joy_gated`、`/odom`、`/diagnostics`、`/parameter_events`
+- 任意: `/actuation_authority`（先生の実行時許可。教材モードで許可を ON にしている間だけ出て、
+  練習・大会の起動には無いため任意）、`/motion_permission`（アクチュエータが従った走行許可）、
+  `/lab_permission`（教材の許可）と `/command_arbiter/status`（コントローラーと教材のどちらの指令を
+  通したか。どちらも教材モードの起動だけ）、`/joy`、`/odom`、`/diagnostics`、`/parameter_events`
 
-記録は `-a`（全トピック）で、`EXCLUDE_TOPICS` が必須トピックや `/actuation_authority` に
-当たるパターンは、この記録に限って外します（warning に残します）。先生の実行時許可の状態は、
-Robot Manager 自身の値を開始時と停止直後に `questix_trial.yaml` の `runtime_authority` に
-記録します。
+記録は `-a`（全トピック）で、`EXCLUDE_TOPICS` が必須トピックや `/actuation_authority`、`/motion_permission`、
+`/lab_permission`、`/command_arbiter/status` に当たるパターンは、この記録に限って外します（warning に
+残します）。先生の実行時許可と教材の許可（`lab_drive` / `lab_launcher`）の状態は、Robot Manager 自身の値を
+開始時と停止直後に `questix_trial.yaml` の `runtime_authority` に記録します。
 
 ### メタデータ（個人情報なし）
 

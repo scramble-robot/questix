@@ -4,15 +4,14 @@ systemd による ROS 2 ノードの自動起動を設定するロール。
 
 ## 動作概要
 
-- `/etc/questix_robot/mode` が `competition` の時のみ、ブート時に `ros2 launch questix_launcher questix_core.launch.xml` を `enable_gpio_ref:=true`、`enable_autoreferee:=true` 付きで自動実行
+- `/etc/questix_robot/mode` が `competition` の時のみ、ブート時に `ros2 launch questix_launcher questix_core.launch.xml` を `enable_gpio_ref:=true`、`robot_mode:=competition` 付きで自動実行
 - `practice`（デフォルト、練習）と `lesson`（教材）の時、ブート時や手動の `systemctl start` ではサービスは即正常終了し、
   ノードは起動しない。Robot Manager の「起動」「再起動」だけが、直前に起動要求（`/etc/questix_robot/start-request`、
   保存したモードと同じ `mode=`）を書いてからサービスを起動し、ランチャーはそれを消費して `enable_gpio_ref:=true`、
-  `enable_autoreferee:=false` で起動する（`launch.env` の `ENABLE_GPIO_REF` は読まない）。
-  - `practice`: コントローラーだけ（`enable_twist_arbiter:=false enable_lab_shoot:=false require_teacher_permission:=false`）。
-    教材（QUESTiX LAB）と先生の許可は使わない。
-  - `lesson`: 教材から走行・発射でき（`enable_twist_arbiter:=true enable_lab_shoot:=true`）、コントローラーも教材も
-    先生の許可がある間だけ動く（`require_teacher_permission:=true`）。
+  `robot_mode:=<mode>` で起動する（`launch.env` の `ENABLE_GPIO_REF` は読まない）。モードで何が変わるかは
+  `questix_core` が決める（`launcher/README.md` の「モード」）。
+  - `practice`: コントローラーだけ。教材（QUESTiX LAB）と先生の許可は使わない。
+  - `lesson`: 教材から走行・発射でき、コントローラーも教材も先生の許可（走行許可の票）がある間だけ動く。
   要求は同じブート・120 秒以内のものだけ有効で、消費されるため異常終了しても `Restart=on-failure` では起動し直さない
   （詳細は `scripts/robot_manager/README.md` の「練習モードの起動要求」）
 - その他の Launch 引数は `/etc/questix_robot/launch.env` で制御
@@ -83,7 +82,7 @@ Ansible は `launch.env` を `force: false` で配置するため、既存ファ
 GPIO 安全系なし（no-GPIO）は、手動の診断起動でその都度 launch 引数 `enable_gpio_ref:=false` を
 明示したときだけです。この指定はその launch プロセスだけのもので、どこにも保存されないため、
 プロセスの終了後や電源の入れ直し後の次の起動は GPIO 監視ありに戻ります。
-`enable_autoreferee:=true` かつ `enable_gpio_ref:=false` は無効な組合せで、launch が拒否します。
+`robot_mode:=competition` かつ `enable_gpio_ref:=false` は無効な組合せで、launch が拒否します。
 
 ## 手動デプロイ
 

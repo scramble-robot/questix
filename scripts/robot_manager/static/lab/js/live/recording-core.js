@@ -270,7 +270,7 @@ const COMMAND_MOVING = 1e-3; // |command| above this asks the robot to move (m/s
 /**
  * The robot-clock stamp every chart and table of a run counts time from: the first command that
  * asked the robot to move (the moment the page — or the controller — started it). The command
- * stream also carries zeros before that (twist_arbiter republishes), which must not count. Without
+ * stream also carries zeros before that (command_arbiter republishes), which must not count. Without
  * a moving command: the first command, else the first message of any stream, else 0.
  */
 function commandZero(recording) {

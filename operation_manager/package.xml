@@ -2,12 +2,13 @@
 <package format="3">
   <name>operation_manager</name>
   <version>3.2.0</version>
-  <description>Determine whether GPIO IO is controllable by subscribing to GPIO topics.</description>
+  <description>The robot-wide stop and permission decisions of QUESTiX: the emergency stop (/emergency_stop, L1) from the GPIO safety inputs, and the motion permission (/motion_permission, L2) combined from votes (the AutoReferee referee, the teacher).</description>
   <maintainer email="aki.grade2580@outlook.jp">asa-naki</maintainer>
   <license>MIT</license>
 
   <buildtool_depend>ament_cmake_auto</buildtool_depend>
   <depend>questix_msgs</depend>
+  <depend>questix_safety</depend>
   <depend>rclcpp</depend>
   <depend>rclcpp_components</depend>
   <depend>std_msgs</depend>

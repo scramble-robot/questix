@@ -131,7 +131,7 @@ drive_component:
 
     # /target_twist 受信タイムアウト（制御 tick 内で判定）。
     # 指令がこの秒数途絶えたら走行モータを停止する（velocity/current 両モードで有効）。
-    # 上流（uart_joy_driver/joy_gate/joy_controller）が停止しても暴走を防ぐ安全機能。
+    # 上流（uart_joy_driver/joy_controller/command_arbiter）が停止しても暴走を防ぐ安全機能。
     # 0以下で無効（安全機能のため通常は無効化しないこと）。
     cmd_timeout_sec: 1.0
 
@@ -232,7 +232,12 @@ drive_component:
     emergency_stop_topic: "/emergency_stop"
     require_emergency_stop: true
     emergency_stop_timeout_sec: 1.0
-    # 教員の許可（/actuation_authority、questix_msgs/ActuationAuthority）は非常停止とは
-    # 別の概念で、require_teacher_permission（練習での opt-in、既定 false、大会では
-    # 使わない）が true のときだけ走行を止める。値は launch が渡すためこの YAML には置かない。
-    # リースは teacher_permission_timeout_sec（既定 1.0 s）。
+    # 走行許可（L2、/motion_permission の drive_allowed、questix_msgs/MotionPermission,
+    # reliable + volatile）は非常停止とは別の概念で、operation_manager の
+    # MotionPermissionManager がモードごとの票（大会: 審判 GPIO27、教材: 先生の許可、練習: なし）を
+    # まとめたもの。未受信・motion_permission_timeout_sec の途絶・false の間は走行しない
+    # （許可が戻っても次の指令まで停止のまま）。両方閉じているときは非常停止が理由になる。
+    # require_motion_permission: false は単体診断の明示 opt-out のみ（統合起動では使わない）。
+    motion_permission_topic: "/motion_permission"
+    require_motion_permission: true
+    motion_permission_timeout_sec: 0.5

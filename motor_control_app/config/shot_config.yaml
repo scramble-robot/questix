@@ -1,8 +1,12 @@
-# Operator mappings/tuning moved to questix_control_config/config/controls.*.yaml.
+# The controller's fire and tilt buttons are joy_launcher's (questix_control_config/config/
+# controls.*.yaml, joy_launcher section): this node reads /launcher_command only.
 shot_component:
   ros__parameters:
-    # Joy input topic
-    joy_topic: "/joy"
+    # questix_msgs/LauncherCommand (fire_seq, tilt_steps, tilt_deg): joy_launcher in practice and
+    # competition, command_arbiter (the controller or QUESTiX LAB) in a lesson. Who may command
+    # the launcher is decided there, never here. While more than one node publishes it, fire and
+    # tilt are refused (their counters would mix).
+    launcher_command_topic: "/launcher_command"
 
     # Lifecycle auto start / ライフサイクル自動起動
     # 非常停止中はサーボが通電されず接続できないため、unconfigured で待機し
@@ -31,33 +35,26 @@ shot_component:
     # チルトをしない（operation_manager は questix_core で常に起動し、GPIO 安全系なしでも
     # "released (no GPIO safety path)" を出す）。false は単体診断の明示 opt-out のみで、
     # そのときだけ未受信の環境で connect_retry_period_sec の周期リトライにフォールバックする。
-    # ※ joy_gate は従来どおり /gpio/controllable を購読する。
     emergency_stop_topic: "/emergency_stop"
     emergency_stop_timeout_sec: 1.0  # 受信途絶でfail-safe teardownするまでの秒数（0以下で無効）
     require_emergency_stop: true
-    # 教員の許可（/actuation_authority の launcher_allowed）は非常停止とは別の概念で、
-    # require_teacher_permission（練習での opt-in、既定 false、大会では使わない）が
-    # true のときだけ効く。値は launch が渡すためこの YAML には置かない。有効時は許可がない間は
-    # 自動起動を保留し、ACTIVE 中に切れたら停止する（理由は /shot/status の authority で区別）。
+    # 走行許可（L2、/motion_permission の launcher_allowed、reliable + volatile）は非常停止とは
+    # 別の概念で、operation_manager の MotionPermissionManager がモードごとの票（大会: 審判 GPIO27、
+    # 教材: 先生の許可、練習: なし）をまとめたもの。許可がない間は自動起動（ホーム移動）を保留し、
+    # 射撃・チルトを断る。ACTIVE 中に切れたら射撃中のシーケンスだけ止めて home に戻し、サーボバスは
+    # 保持する（電源は入ったまま。理由は /shot/status の permission で非常停止と区別）。
+    # require_motion_permission: false は単体診断の明示 opt-out のみ（統合起動では使わない）。
+    motion_permission_topic: "/motion_permission"
+    require_motion_permission: true
+    motion_permission_timeout_sec: 0.5
 
-    # QUESTiX LAB launcher input / QUESTiX LAB からのチルト・射出
-    # accept_lab_input: true のときだけ /shot/lab/tilt (std_msgs/Float32, 目標チルト角 [deg],
-    #   tilt_min_angle..tilt_max_angle に制限) と /shot/lab/fire (std_msgs/Empty, 1発射出) を
-    #   購読する。練習用の起動 (questix_core.launch.xml, enable_autoreferee=false) だけが launch
-    #   引数で true にする。競技 (AutoReferee) では常に false。既定値はこの YAML の false。
-    #   Subscribed only when true; only practice launches set it (never competition).
-    #   lab の要求は ACTIVE・非常停止解除・射撃中でないときだけ適用し、断った要求は溜めない。
-    #   Lab requests apply only while ACTIVE, E-stop released and not shooting; never queued.
-    # lab_joy_quiet_sec: コントローラの射出ボタン・チルト入力が最後に使われてからこの秒数は
-    #   lab の要求を受け付けない (コントローラ優先)。
-    #   The controller's fire button and tilt input must be idle this long.
-    # lab_min_fire_interval_sec: lab の射出は直前の射出 (コントローラ含む) からこの秒数以上あける。
-    #   Minimum time between the last shot (any source) and a lab shot.
+    # min_fire_interval_sec: 射出は直前の射出からこの秒数以上あける (機構の制限、0 で制限なし)。
+    #   QUESTiX LAB の射出間隔 (2 s) は command_arbiter の fire_interval_sec。
+    #   The mechanism's shortest time between two shots; QUESTiX LAB's interval is command_arbiter's.
+    #   射撃・チルトは ACTIVE・走行許可あり・非常停止解除のときだけ動き、それ以外で届いた指令は溜めない。
     # 状態は /shot/status (std_msgs/String, JSON, 5 Hz と変化時) に常に出る。
-    # Status: /shot/status (JSON, 5 Hz and on change), published regardless of this setting.
-    accept_lab_input: false
-    lab_joy_quiet_sec: 1.0
-    lab_min_fire_interval_sec: 2.0
+    # Status: /shot/status (JSON, 5 Hz and on change), published in every state.
+    min_fire_interval_sec: 0.0
 
     port: "/dev/servo"
     baudrate: 115200

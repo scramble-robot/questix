@@ -4,11 +4,12 @@
 # Three modes (scripts/robot_manager/modes.py repeats them; test_launcher_script.py keeps them
 # identical):
 # competition: 本番. Always launches (also at power-on) with the competition safety profile.
-# practice:    練習. The controller drives freely; no QUESTiX LAB (no twist_arbiter, no lab
+# practice:    練習. The controller drives freely; no QUESTiX LAB (no command_arbiter, no lab
 #              launcher input) and no teacher permission.
-# lesson:      教材. QUESTiX LAB can drive and fire (twist_arbiter and the lab launcher input),
+# lesson:      教材. QUESTiX LAB can drive and fire (command_arbiter and the lab launcher input),
 #              and the drive and launcher move only while the teacher's permission
 #              (/actuation_authority, Robot Manager's 操作 tab) is on, controller included.
+# The launch gets the mode itself (robot_mode:=<mode>); questix_core decides what that wires up.
 # practice and lesson launch only when someone pressed 起動 / 再起動 in Robot Manager just now.
 # Robot Manager writes a start request (${CONFIG_DIR}/start-request) right before
 # `systemctl start|restart`; this script consumes it (deletes it) and runs the launch. Without a
@@ -170,27 +171,12 @@ LAUNCH_ARGS=""
 LAUNCH_ARGS="${LAUNCH_ARGS} enable_lidar:=${ENABLE_LIDAR:-false}"
 LAUNCH_ARGS="${LAUNCH_ARGS} enable_shot:=${ENABLE_SHOT:-false}"
 LAUNCH_ARGS="${LAUNCH_ARGS} enable_drive:=${ENABLE_DRIVE:-false}"
-if [ "${MODE}" = "competition" ]; then
-  # Competition always requires both physical E-stop and AutoReferee GPIO safety inputs.
-  LAUNCH_ARGS="${LAUNCH_ARGS} enable_gpio_ref:=true"
-  LAUNCH_ARGS="${LAUNCH_ARGS} enable_autoreferee:=true"
-else
-  # Practice and lesson (Robot Manager's 起動 only): GPIO5 physical E-stop always on, no
-  # AutoReferee. ENABLE_GPIO_REF in launch.env is a legacy field and is never read.
-  LAUNCH_ARGS="${LAUNCH_ARGS} enable_gpio_ref:=true"
-  LAUNCH_ARGS="${LAUNCH_ARGS} enable_autoreferee:=false"
-  if [ "${MODE}" = "lesson" ]; then
-    # Lesson: QUESTiX LAB shares /target_twist through twist_arbiter (the stick always wins) and
-    # may operate the launcher; drive and launcher move only with the teacher's permission.
-    LAUNCH_ARGS="${LAUNCH_ARGS} enable_twist_arbiter:=true enable_lab_shoot:=true"
-    LAUNCH_ARGS="${LAUNCH_ARGS} require_teacher_permission:=true"
-  else
-    # Practice: the controller alone (joy_controller -> /target_twist), no lab input, no
-    # teacher permission.
-    LAUNCH_ARGS="${LAUNCH_ARGS} enable_twist_arbiter:=false enable_lab_shoot:=false"
-    LAUNCH_ARGS="${LAUNCH_ARGS} require_teacher_permission:=false"
-  fi
-fi
+# The mode (lesson, practice or competition; checked above) decides the rest of the wiring in
+# questix_core: QUESTiX LAB's inputs in lesson mode, the AutoReferee GPIO27 profile in competition,
+# and which votes the motion permission (/motion_permission) needs. GPIO5 physical E-stop always on
+# in every mode; ENABLE_GPIO_REF in launch.env is a legacy field and is never read.
+LAUNCH_ARGS="${LAUNCH_ARGS} enable_gpio_ref:=true"
+LAUNCH_ARGS="${LAUNCH_ARGS} robot_mode:=${MODE}"
 LAUNCH_ARGS="${LAUNCH_ARGS} enable_rviz:=${ENABLE_RVIZ:-false}"
 LAUNCH_ARGS="${LAUNCH_ARGS} controller_type:=${CONTROLLER_TYPE:-dualshock}"
 

@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 
 from robot_manager import (actuation, control_runtime, controls, estop_monitor, lab, logs, modes,
-                           recorder, ros_domain, wifi_ap)
+                           motion_state, recorder, ros_domain, wifi_ap)
 
 CONFIG_DIR = Path(os.environ.get("QUESTIX_CONFIG_DIR", "/etc/questix_robot"))
 MODE_FILE = CONFIG_DIR / "mode"
@@ -67,9 +67,9 @@ async def lifespan(_app: FastAPI):
     """Start the lab bridge if lab.env asks for it; a bridge started here must not outlive us.
 
     The teacher's permissions for driving and launching from the lessons are not settings: they
-    live only in this process (lab._runtime_permissions) and start off, so a restart of the
-    manager or of the robot never brings them back (ALLOW_* left in lab.env by an older manager
-    are ignored). A practice or lesson start
+    live only in this process (actuation.py, next to the teacher's switches) and start off, so a
+    restart of the manager or of the robot never brings them back (ALLOW_* left in lab.env by an
+    older manager are ignored). A practice or lesson start
     request left behind (the manager stopped between writing it and the launcher reading it) is
     removed, so it can never start the robot later. The teacher's runtime authority for driving
     and the launcher (actuation.py) is the same kind of session state: off at every start, and
@@ -349,6 +349,11 @@ def _running_mode(service: str) -> str | None:
     return mode if mode in modes.MODES else "unknown"
 
 
+# The teacher's switches (and the lesson permissions that need them) follow the running launch's
+# mode, not only the saved one (actuation.switches_available).
+actuation.set_running_mode_source(lambda: _running_mode(_service_status()))
+
+
 def _wait_for(predicate, seconds: float) -> bool:
     deadline = time.monotonic() + seconds
     while True:
@@ -557,12 +562,11 @@ def stop_all():
 
     One request, no confirmation. The teacher's runtime authority goes off first (actuation.py:
     its heartbeat publishes an explicit off, so drive and launcher stop at once, controller
-    included, and the matching lesson permissions go off). The lessons get their stop next (it
-    takes well under a second
-    and also covers a robot whose ROS was started by hand), then driving and launching from the
-    lessons are switched off (a bridge of ours that had one on is restarted with both off, so the
-    pages reconnect after a few seconds and keep serving), then the robot service is stopped. The
-    teacher switches the permissions on again for the next run.
+    included, and the lesson permissions on /lab_permission go off with it). The lessons get their
+    stop next (it takes well under a second and also covers a robot whose ROS was started by
+    hand), then driving and launching from the lessons are switched off (already off; the bridge
+    keeps serving the pages), then the robot service is stopped. The teacher switches the
+    permissions on again for the next run.
     """
     authority = actuation.revoke_all("stop_all")
     lesson = lab.stop_lesson_motion()
@@ -617,6 +621,12 @@ def _log_launch_config_changes(previous: dict[str, str], current: dict[str, str]
 def get_control_runtime():
     """Read running ROS parameters without applying any saved settings."""
     return control_runtime.read_snapshot(_read_env())
+
+
+@app.get("/api/motion-state")
+def get_motion_state():
+    """Read /emergency_stop and /motion_permission once: why the robot does not move."""
+    return motion_state.read_state(_read_env())
 
 
 @app.get("/api/control-config/{controller}")

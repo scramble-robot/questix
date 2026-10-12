@@ -6,12 +6,12 @@ const ControllerMap = (() => {
     ["joy_controller", "linear_x_axis", "前進・後退"],
     ["joy_controller", "angular_z_axis", "旋回"],
     ["joy_controller", "linear_y_axis", "左右移動（全方向のみ）"],
-    ["shot_component", "fire_button", "ディスク射出"],
-    ["esc_motor_control", "full_speed_button", "ローラー回転"],
+    ["joy_launcher", "fire_button", "ディスク射出"],
+    ["joy_launcher", "full_speed_button", "ローラー回転"],
   ];
   const tiltFields = [
-    ["shot_component", "tilt_up_button_index", "射出角度を上げる"],
-    ["shot_component", "tilt_down_button_index", "射出角度を下げる"],
+    ["joy_launcher", "tilt_up_button_index", "射出角度を上げる"],
+    ["joy_launcher", "tilt_down_button_index", "射出角度を下げる"],
   ];
   // Numbers identify functions and remain stable when their inputs move.
   const numbers = { linear_x_axis: 1, angular_z_axis: 2, fire_button: 3,
@@ -53,7 +53,7 @@ const ControllerMap = (() => {
 
   function directionInput(controller, values, key) {
     const prefix = key.replace("_button_index", "");
-    const shot = values.shot_component || {};
+    const shot = values.joy_launcher || {};
     const axis = shot[`${prefix}_axis`];
     return axis >= 0 ? inputOption(controller, "direction", axis, shot[`${prefix}_axis_sign`])
       : inputOption(controller, "button", shot[key]);
@@ -138,7 +138,7 @@ const ControllerMap = (() => {
     const prefix = key.replace("_button_index", "");
     return [{ key: `${prefix}_axis`, value: kind === "button" ? -1 : value },
       kind === "button" ? { key, value } : { key: `${prefix}_axis_sign`, value: sign }]
-      .map((change) => ({ node: "shot_component", ...change }));
+      .map((change) => ({ node: "joy_launcher", ...change }));
   }
 
   function planAssignment(controller, values, spot, inputId, actionId) {

@@ -169,6 +169,24 @@ jobs:
           restore-keys: |
             build-v1-${{ matrix.ros_distro }}-${{ runner.os }}-${{ matrix.architecture }}-
 
+      # A cache restored through restore-keys can hold packages this tree no longer has
+      # (removed or renamed). Their --symlink-install entries point at missing sources, and
+      # rosdep, which crawls the whole checkout, fails on them; drop every cached package
+      # directory that colcon does not list.
+      - name: Drop cached packages missing from the source tree
+        run: |
+          docker exec -i ros_build bash << 'EOF'
+          packages=$(colcon list --names-only)
+          for dir in build/*/ install/*/; do
+            [ -d "$dir" ] || continue
+            name=$(basename "$dir")
+            if ! grep -qxF "$name" <<< "$packages"; then
+              echo "Dropping cached $dir"
+              rm -rf -- "$dir"
+            fi
+          done
+          EOF
+
       - name: Install package dependencies
         run: |
           docker exec -i ros_build bash << 'EOF'
