@@ -314,8 +314,11 @@ Robot Manager の更新はランチャーを差し替えるが、ROSワークス
 `share/questix_launcher/launch/questix_core.launch.xml` をXMLとして読み、直下に
 `<arg name="robot_mode" .../>` があることを確認する。宣言がない、ファイルが読めない、
 XMLが壊れている、またはパッケージが見つからない場合は、`colcon build` が必要とログに
-記録して終了コード1で起動を拒否する。`last-launch` は書かず、起動要求は消費する。
-Robot Managerやsystemdでの失敗の扱いは既存の非ゼロ終了と同じで、専用の終了コードは増やさない。
+記録して終了コード78（`EX_CONFIG`）で起動を拒否する。`last-launch` は書かず、起動要求は消費する。
+unitの `RestartPreventExitStatus=78` により、この設定不整合では自動再起動せずfailedを維持する。
+Robot Managerはfailedを「起動失敗」と表示する。通常のROSプロセスの異常終了は従来の
+`Restart=on-failure` の対象のまま。既存機では更新スクリプトが同じ設定のdrop-inを追加し、
+unitを再読み込みしてからランチャーを更新する（ロボット制御サービスの再起動は行わない）。
 
 2026-10-13、Ubuntu 24.04 / ROS 2 Jazzyで次の非ハードウェアlaunchを一時ディレクトリに
 作り、`ros2 launch /tmp/.../minimal.launch.xml robot_mode:=lesson` を実行した。

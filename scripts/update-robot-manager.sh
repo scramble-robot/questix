@@ -77,15 +77,25 @@ PYTHON
 # Copying it does not rebuild ROS: a stale workspace is refused with a colcon build message.
 LAUNCHER_SOURCE="$REPO_ROOT/systemd/questix_robot_launcher.sh"
 LAUNCHER_TARGET="$INSTALL_DIR/questix_robot_launcher.sh"
+LAUNCHER_POLICY_SOURCE="$REPO_ROOT/systemd/questix_robot.service.d/launcher-config.conf"
+LAUNCHER_POLICY_DIR=/etc/systemd/system/questix_robot.service.d
+LAUNCHER_POLICY_TARGET="$LAUNCHER_POLICY_DIR/launcher-config.conf"
 
-# 0 when the installed launcher matches the repository or no robot service is installed.
+# 0 when the launcher and its refusal policy match, or no launcher is installed.
 launcher_current() {
     [ -f "$LAUNCHER_TARGET" ] || return 0
-    cmp -s "$LAUNCHER_SOURCE" "$LAUNCHER_TARGET"
+    cmp -s "$LAUNCHER_SOURCE" "$LAUNCHER_TARGET" && \
+        cmp -s "$LAUNCHER_POLICY_SOURCE" "$LAUNCHER_POLICY_TARGET"
 }
 
 install_launcher() {
     echo "🔄 ロボット制御の起動スクリプトを更新します（次のロボット制御の起動から使われます）..."
+    # Older installed units restart on every nonzero exit. Add only the refusal policy;
+    # keep their configured user/workspace, and reload it before copying the new launcher.
+    # daemon-reload does not start or restart questix_robot.
+    install -d -m 0755 "$LAUNCHER_POLICY_DIR"
+    install -m 0644 "$LAUNCHER_POLICY_SOURCE" "$LAUNCHER_POLICY_TARGET"
+    systemctl daemon-reload
     install -m 0755 "$LAUNCHER_SOURCE" "$LAUNCHER_TARGET"
 }
 

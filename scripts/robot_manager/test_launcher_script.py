@@ -48,6 +48,7 @@ def robot(tmp_path):
     class Robot:
         dir = config
         launch_file = core_launch
+        ros2_tool = bin_dir / "ros2"
 
         def mode(self, mode):
             (config / "mode").write_text(mode + "\n")
@@ -275,7 +276,7 @@ def test_stale_or_unreadable_launch_refuses_every_mode(robot, mode, contents):
     else:
         robot.launch_file.write_text(contents)
     result, launched = robot.run()
-    assert result.returncode == 1 and launched == []
+    assert result.returncode == 78 and launched == []
     assert "colcon build が必要" in result.stdout
     assert not (robot.dir / "last-launch").exists()
     assert not (robot.dir / "start-request").exists()
@@ -288,3 +289,16 @@ def test_installed_launch_with_mode_declaration_starts(robot, mode):
     result, launched = robot.run()
     assert result.returncode == 0, result.stderr
     assert len(launched) == 1 and f"robot_mode:={mode}" in launched[0]
+
+
+@pytest.mark.parametrize("mode", ["lesson", "practice", "competition"])
+def test_missing_installed_package_is_a_config_failure(robot, mode):
+    robot.mode(mode)
+    robot.request(mode)
+    robot.ros2_tool.write_text('#!/bin/sh\nexit 2\n')
+    result, launched = robot.run()
+    assert result.returncode == 78 and launched == []
+    assert "Cannot locate questix_launcher" in result.stdout
+    assert "colcon build が必要" in result.stdout
+    assert not (robot.dir / "last-launch").exists()
+    assert not (robot.dir / "start-request").exists()

@@ -90,6 +90,8 @@ install -o root -g root -m 0644 "${REPO_DIR}/systemd/questix_network_admin.servi
 
 # ---------- 3. systemd service (ROS2) ----------
 echo "[3/6] Installing questix_robot.service ..."
+# Preserve RestartPreventExitStatus=78 from the source unit: config refusals stay failed.
+# The updater supplies the same policy as a drop-in for older installed units.
 sed \
   -e "s|^User=.*|User=${TARGET_USER}|" \
   -e "s|^Group=.*|Group=${TARGET_USER}|" \
