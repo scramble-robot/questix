@@ -77,17 +77,29 @@ make test-pi-image
 make build-kit BASE_IMAGE="$PWD/output/pi/base/$PI_BASE_FILE"
 ```
 
-スクリプトを直接実行する場合は、上で読み込んだ変数を使って次のように指定できます。
+ユーザー名は既定で `ubuntu` です。変更する場合は `IMAGE_USER` を指定します。
+
+```bash
+make build-kit BASE_IMAGE="$PWD/output/pi/base/$PI_BASE_FILE" IMAGE_USER=robot
+```
+
+指定できる名前は、小文字の英字で始まる 1～32 文字の英小文字・数字・`_`・`-` です。
+`root`・`oem` や、ベース内に存在する別のユーザー／グループの名前は使えません。
+ホームディレクトリ、ワークスペース、ロボットのサービス実行ユーザー、初回パスワード登録先に同じ名前を使います。
+**パスワードは生成時に指定しません。初回起動時に、利用者が本体の画面とキーボードで登録します。**
+パスワードを生成コマンドやスクリプトに書く必要はありません。
+
+スクリプトを直接実行する場合は、第 3 引数でユーザー名を指定できます（省略すると `ubuntu`）。
 
 ```bash
 sudo bash scripts/build-pi-image.sh \
-  "$PWD/output/pi/base/$PI_BASE_FILE" "$PWD/output/pi"
+  "$PWD/output/pi/base/$PI_BASE_FILE" "$PWD/output/pi" robot
 ```
 
 元の `.img.xz` は変更せず、新しい作業用ファイルへ展開します。物理 SD デバイスを引数に指定することはできません。
 FAT の `system-boot` と ext4 の `writable` を確認し、最後の root パーティションを拡張してから、
 専用のマウント名前空間で設定を行います。
-既存の Ansible 処理が `/home/ubuntu/questix` を `ubuntu` ユーザーでビルドし、Robot Manager を設定します。
+既存の Ansible 処理が `/home/<ユーザー名>/questix` を指定したユーザーでビルドし、Robot Manager を設定します。
 生成用ホスト上でロボットのサービスを起動することはありません。
 
 公式イメージのファームウェア、カーネル・initramfs の設定、`root=` の識別情報を保持します。
@@ -115,9 +127,9 @@ sudo env QUESTIX_PI_SIZE_GIB=40 bash scripts/build-pi-image.sh \
 
 | ファイル | 内容 |
 | --- | --- |
-| `questix-pi5-desktop-ubuntu<version>-ros2jazzy-<commit>.img.xz` | SD カード／SSD に書き込むイメージ |
+| `questix-pi5-desktop-ubuntu<version>-ros2jazzy-<user>-<commit>.img.xz` | SD カード／SSD に書き込むイメージ |
 | `SHA256SUMS` | イメージと付属ファイルのチェックサム |
-| `build-info.txt` | ベースの URL・ハッシュ、QUESTiX のコミット、生成日時、容量 |
+| `build-info.txt` | ベースの URL・ハッシュ、QUESTiX のコミット、生成日時、容量、ユーザー名、ワークスペース |
 | `packages.tsv` | 導入したパッケージと対応するソースパッケージのバージョン・アーキテクチャ |
 | `package-copyrights.tar.gz` | 各パッケージの権利表示などのコピー |
 | `base-config.txt`・`base-cmdline.txt` | 変更前の起動設定 |
@@ -125,7 +137,7 @@ sudo env QUESTIX_PI_SIZE_GIB=40 bash scripts/build-pi-image.sh \
 
 ベースと QUESTiX のコミットは固定していますが、apt・pip のパッケージや外部リポジトリの内容は取得時期で変わる場合があります。
 毎回まったく同じバイナリになるとは限らないため、比較する際は記録されたバージョンを確認してください。
-既存の結果ディレクトリは上書きしません。同じコミットを再生成する場合は、別の出力先を指定します。
+既存の結果ディレクトリは上書きしません。同じコミット・ユーザー名で再生成する場合は、別の出力先を指定します。
 Make の出力先は `PI_OUTPUT_DIR=/path/to/output` で変更できます。
 
 ## SD カードへの書き込みと Pi 5 での確認
@@ -134,9 +146,9 @@ Make の出力先は `PI_OUTPUT_DIR=/path/to/output` で変更できます。
 2. Raspberry Pi Imager の **Use custom** で生成した `.img.xz` を選び、書き込み先の SD カード／SSD を指定します。
    **選択したデバイスの内容は消去されます。** 書き込み先を確認してください。
    初回設定は QUESTiX が行うため、Imager 側のユーザー・SSH カスタマイズは適用しません。
-3. Pi 5 に画面とキーボードを接続して起動し、tty1 で `ubuntu` のパスワードを登録します。
+3. Pi 5 に画面とキーボードを接続して起動し、tty1 で指定したユーザー（既定は `ubuntu`）のパスワードを 2 回入力して登録します。
    その後 Ubuntu Desktop にログインします。SSH は登録成功後に利用できます。
-4. Desktop、ネットワーク、Robot Manager、`/home/ubuntu/questix`、ROS 2 Jazzy を確認します。
+4. Desktop、ネットワーク、Robot Manager、`/home/<ユーザー名>/questix`、ROS 2 Jazzy を確認します。
    root ファイルシステムの容量を確認し、一度再起動してください。
 5. 安全に動作確認できる状態で、GPIO5/GPIO27 の非常停止、UART のコントローラー入力、I2C/SPI 機器、モード選択、サービス起動を確認します。
    必要な操作許可や安全入力が揃う前にロボットが動かないことも確認してください。

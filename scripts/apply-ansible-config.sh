@@ -4,7 +4,7 @@
 # scripts/prepare-base-system.sh, or from scripts/build-pi-image.sh).
 #
 # The image is built from the checkout this script is in (not from the current directory):
-# that commit is cloned to /home/ubuntu/questix in the
+# that commit is cloned to /home/IMAGE_USER/questix in the
 # image and the playbook runs from there, so the workspace is built in the image (a first boot
 # needs no download) and Robot Manager, its QUESTiX Local helper and the legacy cleanup are the
 # same revision. The playbook runs as root in the chroot with questix_image_build=true: the kit
@@ -14,8 +14,8 @@
 
 set -e
 
-if [ "$#" -lt 2 ] || [ "$#" -gt 3 ]; then
-    echo "Usage: $0 <architecture> <ros2_distro> [chroot_directory]"
+if [ "$#" -lt 2 ] || [ "$#" -gt 4 ]; then
+    echo "Usage: $0 <architecture> <ros2_distro> [chroot_directory] [image_user]"
     exit 1
 fi
 ARCHITECTURE="$1"
@@ -28,7 +28,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ISO_FILES_DIR="$SCRIPT_DIR/iso"
 WORK_DIR="/tmp/iso-work"
 CHROOT_DIR="${3:-$WORK_DIR/chroot}"
-IMAGE_USER=ubuntu
+IMAGE_USER="${4-ubuntu}"
 IMAGE_SOURCE="/home/$IMAGE_USER/questix"
 # Ansible for the build only, in a venv removed afterwards (Ubuntu 24.04's pip refuses the system
 # Python, PEP 668). The same version as .github/workflows/ansible-check.yaml.
@@ -37,6 +37,7 @@ IMAGE_ANSIBLE_VERSION=14.2.0
 
 # shellcheck source=iso/image-build-lib.sh
 . "$ISO_FILES_DIR/image-build-lib.sh"
+questix_image_validate_user "$IMAGE_USER"
 
 echo "📋 Installing the QUESTiX source into the image..."
 questix_image_install_source "$REPO_ROOT" "$CHROOT_DIR" "$IMAGE_USER"
@@ -107,9 +108,10 @@ CHROOT_EOF
 
 # Final system configuration
 echo "🔧 Applying final system configuration..."
-questix_image_install_first_boot "$ISO_FILES_DIR" "$CHROOT_DIR"
-chroot "$CHROOT_DIR" /bin/bash << 'CHROOT_EOF'
+questix_image_install_first_boot "$ISO_FILES_DIR" "$CHROOT_DIR" "$IMAGE_USER"
+chroot "$CHROOT_DIR" /bin/bash -s -- "$IMAGE_USER" << 'CHROOT_EOF'
 set -e
+IMAGE_USER="$1"
 export HOME=/root
 export LC_ALL=C
 export DEBIAN_FRONTEND=noninteractive
@@ -119,8 +121,8 @@ systemctl enable NetworkManager
 # First-enrollment policy, whatever the roles above did: no known password (the account is
 # locked), no NOPASSWD rule, no console autologin, SSH installed but not enabled. The console
 # enrollment unit sets the password, then enables SSH and disables itself.
-passwd -l ubuntu
-rm -f /etc/sudoers.d/ubuntu
+passwd -l "$IMAGE_USER"
+rm -f "/etc/sudoers.d/$IMAGE_USER"
 rm -f /etc/systemd/system/getty@tty1.service.d/autologin.conf
 for unit in ssh.socket ssh.service; do
     if [ -e "/usr/lib/systemd/system/$unit" ]; then
@@ -136,8 +138,8 @@ if grep -rqs 'NOPASSWD' /etc/sudoers /etc/sudoers.d; then
     echo "❌ A NOPASSWD sudo rule is in the image" >&2
     exit 1
 fi
-if [ "$(passwd -S ubuntu | awk '{print $2}')" != L ]; then
-    echo "❌ The ubuntu account is not locked" >&2
+if [ "$(passwd -S "$IMAGE_USER" | awk '{print $2}')" != L ]; then
+    echo "❌ The $IMAGE_USER account is not locked" >&2
     exit 1
 fi
 if grep -qsE '^[[:space:]]*AutomaticLoginEnable[[:space:]]*=[[:space:]]*[Tt]rue' /etc/gdm3/custom.conf; then
@@ -162,7 +164,7 @@ rm -rf /var/tmp/*
 # Clear bash history
 history -c
 rm -f /root/.bash_history
-rm -f /home/ubuntu/.bash_history
+rm -f "/home/$IMAGE_USER/.bash_history"
 
 exit 0
 CHROOT_EOF

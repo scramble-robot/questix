@@ -7,6 +7,11 @@ set -euo pipefail
     echo "Run scripts/build-pi-image.sh; this helper is only for its chroot" >&2
     exit 1
 }
+# Installed in the private /run by the outer builder; shared validation is also
+# repeated inside the image so no existing system identity can be repurposed.
+. /run/questix-image-build-lib.sh
+IMAGE_USER="${2-ubuntu}"
+questix_image_check_user_available / "$IMAGE_USER"
 export DEBIAN_FRONTEND=noninteractive
 export LC_ALL=C.UTF-8
 
@@ -41,11 +46,16 @@ groupadd -f gpio
 # Write configuration only: never load host modules while building the image.
 mkdir -p /etc/modules-load.d
 printf 'i2c-dev\n' > /etc/modules-load.d/questix-i2c.conf
-if ! getent passwd ubuntu > /dev/null; then
-    useradd -m -s /bin/bash ubuntu
+questix_image_check_user_available / "$IMAGE_USER"
+if ! getent passwd "$IMAGE_USER" > /dev/null; then
+    useradd -m -U -d "/home/$IMAGE_USER" -s /bin/bash "$IMAGE_USER"
 fi
-usermod -aG sudo,adm,dialout,audio,video,plugdev,netdev,gpio ubuntu
-passwd -l ubuntu
+usermod -aG sudo,adm,dialout,audio,video,plugdev,netdev,gpio "$IMAGE_USER"
+passwd -l "$IMAGE_USER"
+# If the official base ever includes ubuntu as well, keep that unused account locked.
+if [[ "$IMAGE_USER" != ubuntu ]] && getent passwd ubuntu > /dev/null; then
+    passwd -l ubuntu
+fi
 passwd -l root
 # Known provisioning rules only. Unexpected NOPASSWD grants fail final checks.
 rm -f /etc/sudoers.d/90-cloud-init-users /etc/sudoers.d/ubuntu

@@ -197,6 +197,9 @@ make test-pi-image
 make build-kit BASE_IMAGE=/absolute/path/to/official-desktop.img.xz
 ```
 
+Add `IMAGE_USER=robot` to choose the login/service account (default: `ubuntu`).
+The password is set by the user at first boot; there is no build-time password option.
+
 The second command is a privileged, networked local build: it mounts a scratch
 image and installs packages inside it. It does not write to an SD card. Results
 are under `output/pi/`; select the generated `.img.xz` with Raspberry Pi Imager's
@@ -211,16 +214,16 @@ The Pi image's actual boot, desktop and hardware still require Pi 5 validation.
 
 A QUESTiX custom image has **no initial password** and no passwordless sudo rule:
 
-1. The `ubuntu` account is locked and SSH is disabled.
-2. On the first boot, the console (tty1, a screen and keyboard) asks for a new password for `ubuntu`
+1. The selected account (default: `ubuntu`) is locked and SSH is disabled.
+2. On the first boot, the console (tty1, a screen and keyboard) asks for a new password for that account
    (`questix-first-boot.service`, `scripts/iso/questix-first-boot-enroll.sh`).
 3. Once it is set, SSH is enabled and the normal login starts. `sudo` asks for that password.
 4. If the enrollment fails or is interrupted, the account stays locked, SSH stays disabled,
    and the next boot asks again.
 
 The image is built from the checkout that runs `scripts/apply-ansible-config.sh`:
-- That commit is cloned to `/home/ubuntu/questix` (tracked files only, owned by `ubuntu`).
-- The workspace is built there by `ubuntu` (`questix_image_build=true`), so the first boot needs no download.
+- That commit is cloned to `/home/<user>/questix` (tracked files only, owned by the selected user).
+- The workspace is built there by that user (`questix_image_build=true`), so the first boot needs no download.
 - The build fails if the finished tree breaks the first-enrollment policy (`scripts/iso/image-build-lib.sh`).
 
 Robots set up from an older image or installer: `scripts/update-robot-manager.sh`,

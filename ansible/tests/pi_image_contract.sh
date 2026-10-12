@@ -4,6 +4,7 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 . scripts/iso/pi-image-lib.sh
+. scripts/iso/image-build-lib.sh
 . scripts/iso/pi-desktop-base.env
 TEST_DIR="$(mktemp -d)"
 trap 'python3 -c "import shutil,sys; shutil.rmtree(sys.argv[1])" "$TEST_DIR"' EXIT
@@ -18,6 +19,27 @@ expect_fail() {
     fi
     PASS=$((PASS + 1))
 }
+
+for user in ubuntu robot robot_team robot-01 a a1234567890123456789012345678901; do
+    expect_ok questix_image_validate_user "$user"
+done
+for user in '' root oem Root 'robot team' 'robot/team' '../robot' '-robot' 'robot:1000' \
+    'robot;touch /tmp/unwanted' 'robot$(id)' 'robot%u' $'robot\nroot' 'ロボット' \
+    a12345678901234567890123456789012; do
+    expect_fail questix_image_validate_user "$user"
+done
+accounts="$TEST_DIR/accounts"
+mkdir -p "$accounts/etc"
+printf 'root:x:0:0::/root:/bin/bash\ndaemon:x:1:1::/usr/sbin:/usr/sbin/nologin\n' > "$accounts/etc/passwd"
+printf 'root:x:0:\ndaemon:x:1:\nadm:x:4:\n' > "$accounts/etc/group"
+expect_ok questix_image_check_user_available "$accounts" robot
+expect_fail questix_image_check_user_available "$accounts" daemon
+expect_fail questix_image_check_user_available "$accounts" adm
+printf 'ubuntu:x:1000:1000::/home/ubuntu:/bin/bash\n' >> "$accounts/etc/passwd"
+printf 'ubuntu:x:1000:\n' >> "$accounts/etc/group"
+expect_ok questix_image_check_user_available "$accounts" ubuntu
+sed -i 's|/home/ubuntu|/root|' "$accounts/etc/passwd"
+expect_fail questix_image_check_user_available "$accounts" ubuntu
 
 base="$TEST_DIR/base.img.xz"
 printf 'fixture base\n' > "$base"
@@ -134,6 +156,8 @@ expect_ok questix_pi_unmount
 unset -f umount losetup
 
 expect_ok bash scripts/build-pi-image.sh --help
+expect_fail bash scripts/build-pi-image.sh "$base" "$TEST_DIR/output" root
+expect_fail bash scripts/build-pi-image.sh "$base" "$TEST_DIR/output" ''
 expect_fail bash scripts/build-pi-image.sh "$base" "$TEST_DIR/output"
 expect_fail test -e "$TEST_DIR/output"
 # The obsolete ARM64 ISO entry points reject before writing any work directories.

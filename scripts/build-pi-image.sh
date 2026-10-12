@@ -15,7 +15,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 usage() {
     cat <<EOF
-Usage: sudo bash $0 BASE.img.xz OUTPUT_DIRECTORY
+Usage: sudo bash $0 BASE.img.xz OUTPUT_DIRECTORY [IMAGE_USER]
 
 Local Pi 5 Desktop image build (Ubuntu 24.04, ROS 2 Jazzy).
 Download the official base yourself:
@@ -23,6 +23,7 @@ Download the official base yourself:
 SHA-256: $PI_BASE_SHA256
 
 The input is read-only. Output is a new .img.xz plus manifest and SHA-256.
+IMAGE_USER: login/service account, default ubuntu; password is set on first boot.
 Requires a committed checkout, root, loop mounts, chroot, network access,
 and ~40 GiB free disk space. See scripts/iso/README.md for dependencies.
 QUESTIX_PI_SIZE_GIB: raw image size, default 24 (use a 32 GB or larger SD).
@@ -34,7 +35,9 @@ if [[ "${1:-}" = --help || "${1:-}" = -h ]]; then
     usage
     exit 0
 fi
-[[ $# = 2 ]] || { usage >&2; exit 2; }
+[[ $# = 2 || $# = 3 ]] || { usage >&2; exit 2; }
+IMAGE_USER="${3-ubuntu}"
+questix_image_validate_user "$IMAGE_USER"
 questix_pi_verify_base "$1" "$PI_BASE_SHA256"
 BASE_IMAGE="$(realpath "$1")"
 [[ "$(id -u)" = 0 ]] || { echo "Root is required for loop mounts/chroot" >&2; exit 1; }
@@ -65,13 +68,13 @@ SOURCE_COMMIT="$(git -c safe.directory="$REPO_ROOT" -C "$REPO_ROOT" rev-parse HE
 
 if [[ "${QUESTIX_PI_MOUNT_NAMESPACE:-}" != 1 ]]; then
     exec unshare --mount --propagation private env QUESTIX_PI_MOUNT_NAMESPACE=1 \
-        bash "$0" "$BASE_IMAGE" "$2"
+        bash "$0" "$BASE_IMAGE" "$2" "$IMAGE_USER"
 fi
 
 mkdir -p "$2"
 OUTPUT_DIR="$(realpath "$2")"
 [[ -d "$OUTPUT_DIR" && ! -L "$2" ]] || exit 1
-IMAGE_NAME="questix-pi5-desktop-ubuntu${PI_BASE_VERSION}-ros2jazzy-${SOURCE_COMMIT:0:12}"
+IMAGE_NAME="questix-pi5-desktop-ubuntu${PI_BASE_VERSION}-ros2jazzy-${IMAGE_USER}-${SOURCE_COMMIT:0:12}"
 # A distinct result directory avoids overwriting previous images or accepting
 # symlink destinations. It is renamed into place only after successful packaging.
 [[ ! -e "$OUTPUT_DIR/$IMAGE_NAME" && ! -L "$OUTPUT_DIR/$IMAGE_NAME" ]] || {
@@ -136,6 +139,7 @@ mount --make-rslave "$CHROOT_DIR/dev"
 mount -t tmpfs tmpfs "$CHROOT_DIR/run"
 PI_MOUNTS+=("$CHROOT_DIR/run")
 touch "$CHROOT_DIR/run/questix-pi-image-build"
+cp "$SCRIPT_DIR/iso/image-build-lib.sh" "$CHROOT_DIR/run/questix-image-build-lib.sh"
 
 # Do not follow the image's absolute resolv.conf symlink into the host. Save it
 # verbatim, then supply a regular file for chroot DNS, restoring it before packing.
@@ -149,10 +153,10 @@ fi
 printf '#!/bin/sh\nexit 101\n' > "$CHROOT_DIR/usr/sbin/policy-rc.d"
 chmod 0755 "$CHROOT_DIR/usr/sbin/policy-rc.d"
 export SYSTEMD_OFFLINE=1
-chroot "$CHROOT_DIR" /bin/bash -s -- --inside-questix-image < "$SCRIPT_DIR/iso/prepare-pi-desktop.sh"
-bash "$SCRIPT_DIR/apply-ansible-config.sh" arm64 jazzy "$CHROOT_DIR"
+chroot "$CHROOT_DIR" /bin/bash -s -- --inside-questix-image "$IMAGE_USER" < "$SCRIPT_DIR/iso/prepare-pi-desktop.sh"
+bash "$SCRIPT_DIR/apply-ansible-config.sh" arm64 jazzy "$CHROOT_DIR" "$IMAGE_USER"
 
-questix_image_verify_security "$CHROOT_DIR" ubuntu
+questix_image_verify_security "$CHROOT_DIR" "$IMAGE_USER"
 questix_pi_check_desktop "$CHROOT_DIR"
 questix_pi_check_boot "$CHROOT_DIR" "$ROOT_ARGUMENT"
 # Final desktop/firmware package checks run even after Ansible autoremove.
@@ -171,6 +175,8 @@ QUESTiX local Pi 5 Desktop image
 base_url=$PI_BASE_URL
 base_sha256=$PI_BASE_SHA256
 source_commit=$SOURCE_COMMIT
+image_user=$IMAGE_USER
+workspace=/home/$IMAGE_USER/questix
 ros_distro=jazzy
 raw_size_gib=$SIZE_GIB
 built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)

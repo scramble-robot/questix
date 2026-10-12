@@ -13,6 +13,7 @@ UBUNTU_VERSION_AMD64 ?= 24.04
 ROS2_DISTRO_AMD64 ?= jazzy
 BASE_IMAGE ?=
 PI_OUTPUT_DIR ?= $(CURDIR)/output/pi
+export IMAGE_USER ?= ubuntu
 export ANSIBLE_ROLES_PATH ?= $(CURDIR)/ansible/roles
 
 help: ## Show this help message
@@ -69,9 +70,9 @@ setup-pi-image-deps: ## Install host tools for the local Pi Desktop image builde
 
 # On AMD64, also install qemu-user-static and binfmt-support and register qemu-aarch64.
 # See scripts/iso/README.md; the builder never changes host binfmt registration itself.
-build-kit: ## Build a local Pi 5 Desktop .img.xz (BASE_IMAGE=/path/to/official.img.xz)
+build-kit: ## Build a Pi Desktop .img.xz (BASE_IMAGE=/path/to/base.img.xz IMAGE_USER=robot)
 	@test -n "$(BASE_IMAGE)" || { echo "Set BASE_IMAGE to the official Pi Desktop .img.xz; see scripts/iso/README.md"; exit 2; }
-	sudo bash "$(CURDIR)/scripts/build-pi-image.sh" "$(BASE_IMAGE)" "$(PI_OUTPUT_DIR)"
+	sudo bash "$(CURDIR)/scripts/build-pi-image.sh" "$(BASE_IMAGE)" "$(PI_OUTPUT_DIR)" "$$IMAGE_USER"
 
 build-both: test-ansible ## Build the local AMD64 ISO and Pi Desktop image
 	@$(MAKE) build-dev
@@ -156,7 +157,7 @@ release-notes: ## Generate release notes template
 	@echo "## 🔧 Installation" >> /tmp/release-notes.md
 	@echo "1. Obtain the official base and generate your own image (scripts/iso/README.md)" >> /tmp/release-notes.md
 	@echo "2. Pi: write the generated Desktop .img.xz with Raspberry Pi Imager" >> /tmp/release-notes.md
-	@echo "3. Pi: set the ubuntu password at the console, then log in to Desktop" >> /tmp/release-notes.md
+	@echo "3. Pi: set the selected user's password at the console, then log in to Desktop" >> /tmp/release-notes.md
 	@echo "4. System ready for ROS2 development" >> /tmp/release-notes.md
 	@echo "" >> /tmp/release-notes.md
 	@echo "## ✅ Checksums" >> /tmp/release-notes.md
