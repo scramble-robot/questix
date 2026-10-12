@@ -40,7 +40,7 @@
     },
     "no_launcher": {
       "student": "ロボットの発射の準備ができていません。先生に伝えてください。",
-      "teacher": "{parts}が見つからないか、状態が届いていません。ロボットのROSを教材用（ros2 launch questix_launcher questix_core.launch.xml robot_mode:=lesson、Robot Manager では教材モード）で起動しているか、shot_component が active か、ROS_DOMAIN_ID が教材の配信と同じかを確かめてください。練習用・大会用の起動では教材から発射できません。"
+      "teacher": "{parts}が見つからないか、状態が届いていません。ロボットのROSを教材用（ros2 launch questix_launcher questix_core.launch.xml robot_mode:=lesson、Robot Manager では教材モード）で起動しているか、shot_component が active か、ROS_DOMAIN_ID が教材の配信と同じかを確かめてください。非常停止を押している間は発射台が止まるため、この表示も出ることがあります（非常停止が原因なら、解除すると消えます）。練習用・大会用の起動では教材から発射できません。"
     },
     "other_publisher": {
       "student": "ロボットの発射の準備ができていません。先生に伝えてください。",
@@ -68,6 +68,7 @@
     }
   },
   "why": {
+    "tilt_unknown": "ロボットの角度が届くまで待ってください。",
     "not_spinning": "先に「ローラーを回す」を押します。",
     "starting": "ロボットの返事を待っています…",
     "fire_pending": "発射したかどうかを確かめています…",

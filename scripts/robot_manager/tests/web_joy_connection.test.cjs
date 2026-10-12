@@ -85,3 +85,30 @@ test("the 操作 tab shows the same join QR codes as the 教材 tab, side by sid
   assert.match(app, /function suggestWebJoyUrl\(\) \{[^}]*mirrorJoinQr\(\);/);
   assert.match(app, /function renderWebJoyType\(\) \{[\s\S]*?renderJoinQr\(\);\n  mirrorJoinQr\(\);\n\}/);
 });
+
+test("the operation QR action and browser link share a wrapping row and consistent words", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const html = fs.readFileSync(path.join(__dirname, "../static/index.html"), "utf8");
+  const row = html.match(/<div class="web-joy-actions">([\s\S]*?)<\/div>/)[1];
+  assert.match(row, /id="web-joy-browser"/);
+  assert.match(row, /<button[^>]*type="submit"[^>]*>操作ページの QR を表示<\/button>/);
+  assert.match(html, /aria-label="操作ページの接続用 QR コード"/);
+  const css = fs.readFileSync(path.join(__dirname, "../static/style.css"), "utf8");
+  assert.match(css, /\.web-joy-actions\s*\{[^}]*display:\s*flex;[^}]*flex-wrap:\s*wrap;/);
+  const vm = require("node:vm");
+  const elements = new Map();
+  const document = { getElementById(id) {
+    if (!elements.has(id)) elements.set(id, {
+      value: "", listeners: {}, addEventListener(type, callback) { this.listeners[type] = callback; },
+      removeAttribute(name) { delete this[name]; }, replaceChildren() {},
+    });
+    return elements.get(id);
+  } };
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../static/web-joy-connection.js"), "utf8"), {
+    document, URL, location: { href: "http://robot.local:8888/" }, qrcode,
+  });
+  elements.get("web-joy-qr-form").listeners.submit({ preventDefault() {} });
+  assert.equal(elements.get("web-joy-qr-status").textContent, "操作ページの QR を表示しました。");
+  assert.equal(elements.get("web-joy-qr-result").hidden, false);
+});
