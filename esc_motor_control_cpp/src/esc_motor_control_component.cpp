@@ -45,8 +45,8 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
   this->declare_parameter<int>("min_pulse_width", 0);         // μs (speed=-1.0)
   this->declare_parameter<int>("max_pulse_width", 2000);      // μs (speed=1.0)
   this->declare_parameter<int>("neutral_pulse_width", 1000);  // μs (ESC arm/idle)
-  this->declare_parameter<std::string>("pwm_backend",
-                                       "auto");  // "auto","pigpio","lgpio","simulation"
+  // Pi 5 shipping backend; PC/Pi 4 override explicitly.
+  this->declare_parameter<std::string>("pwm_backend", "rp1_hw");
   this->declare_parameter<std::string>("rp1_guard_socket", "/run/questix_pwm_guard/control.sock");
   this->declare_parameter<int>("gpio_chip_num", 4);  // 0=Pi4, 4=Pi5
 

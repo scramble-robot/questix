@@ -1,19 +1,21 @@
 # QUESTiX RP1 PWM guard
 
 GPIO13のESC信号をRP1 PWM0 channel1（20 ms、normal）で生成し、ROSとは別の
-プロセスでlease・切断・出力故障を監視します。明示的な `pwm_backend: rp1_hw` の
-opt-inです。`auto`は選びません。目的は、プロセス障害時に信号のLowを試みることです。
+プロセスでlease・切断・出力故障を監視します。Pi 5の射出の標準構成で、出荷YAMLと
+ノードの既定は `pwm_backend: rp1_hw` です。Pi 5の配備ではguardを自動起動に設定します。
+目的は、プロセス障害時に信号のLowを試みることです。
 API/sysfs成功は波形やESCの停止を証明しません。
 
 ## 教育用途の構成と信頼範囲
 
 ロボットは従来どおり生徒の `ROBOT_WS/install` を使います。全workspaceの凍結コピー、
-承認manifest、robotサービスのdrop-in、root起動validator、ARM ticketはありません。
-`questix_robot.service` はguardに依存しません。guardがなくても走行側の起動条件は変わらず、
-rp1_hwを明示したESCノードは初期化例外で失敗し、simulationへ自動fallbackしません。
+承認manifest、root起動validator、ARM ticketはありません。
+`questix_robot.service` と既存unit用の `pwm-guard-order.conf` は `After=` の順序だけを指定し、
+`Requires=` / `Wants=` は追加しません。guardがなくても走行側の起動条件は変わらず、
+rp1_hwのESCノードだけが初期化例外で失敗し、lgpio/simulationへ自動fallbackしません。
 走行と射撃の別containerという既存launch構成を維持します。
 
-scrambleの自動ログインと生徒の編集/build/操作を維持します。同じrobot UIDのコードを
+生徒の編集/build/操作を維持します。初期パスワード・自動ログイン・sudoersは追加しません。同じrobot UIDのコードを
 個別認証・隔離しません（N-01受容）。同UIDはARMや指令を送れ、ROS safety topicや
 launch.envも信頼範囲です。授業の運転条件と非常停止は教員・作業責任者が管理します。
 この信頼契約を、root権限を生徒へ渡す理由にはしません。
@@ -67,7 +69,58 @@ robot UIDに管理者LOW/STATUSの権限を付与しません。robotの状態�
 `/launcher_command`・`/motion_permission` 経路のS2/S4/S5/S6と、15分のS3を再確認します。
 Linux全体停止や逆極性・極性不明時の電圧を証明した結果でもありません。
 
-## 先生によるインストール（ここにあるコマンドは手順例、実施記録ではありません）
+## 標準の配備と出荷時の受入
+
+管理者がレビューしたAnsibleコントローラーのソースから、Pi 5用の `setup_kit.yaml` が
+`hardware_interfaces` と `pwm_guard` を実行します。イメージ生成でも同じroleを使います。
+controllerのソースは内容のSHA-256ごとに別のroot管理ディレクトリへ転送し、その後
+installerのno-follow snapshot・clean environment・固定コンパイラでguardだけをビルドします。
+studentの `ROBOT_WS/install` は使いません。source identityは運用上の記録で、
+rootがGitの設定・hookを読むことはありません。
+
+roleはunitを配置してenableにし、配備中にstart/restartしません（次のbootで起動）。
+image buildのchrootではdaemon-reloadせず、offline enableします。既設unitには
+別名の `pwm-guard-order.conf` だけを追加し、`launcher-config.conf` など他のdrop-inを保ちます。
+`--if-changed` はsource inventory、両binaryのSHA/実行権限、UID/GIDを反映したunitを
+確認して同一ならbuildを省略します。sourceの削除は新しいstaging directoryに反映され、
+古いファイルが紛れ込みません。旧c7c8b62のmigration_preflightは毎回実行し、PARTIALの
+設置記録なら管理者の復旧を要求します。ID13〜16の手作業の設置は撤去せず更新できます。
+既存機体の更新はESCを無通電にし、管理者のmaintenance windowで行ってください。
+
+どの機体も、出荷時にESC駆動電源を外してLowとneutralの波形を最低1回ずつ記録します。
+起動・停止過渡とfault時の停止を含め、機体ごとの受入記録を残します。過去のID13の
+合格だけで別機体の波形や新しいmainの経路を受入済みとは扱いません。
+
+| 経路 | PWM backend / guard |
+| --- | --- |
+| Pi 5の標準kit / Pi 5 image、通常のESC YAML launch | `rp1_hw`、guardをbootで自動起動 |
+| `ros2 run esc_motor_control_cpp esc_motor_control_node`（YAMLなし） | ノード既定も `rp1_hw`。PCでは下の明示設定が必要 |
+| PCの開発・単体診断・シミュレータ | 明示した `pwm_backend: simulation` または `test_mode: true`。guardを使わない |
+| Pi 4 / 旧backendの明示診断 | 明示した `pwm_backend: auto` / `lgpio` 等、対応するGPIO chipを設定。RP1の標準kit配備対象外 |
+| `rp1_hw` でguard/socket/overlayが使えない | 射出の初期化失敗。auto/lgpio/simulationへの切替なし |
+
+自動判別でPCへfallbackする設計ではありません。PC/Pi 4はworkspaceのESC設定を明示して
+通常の `colcon build --symlink-install` を使います。標準launchでは `config_file` が設定の入口で、
+launchに別の既定値を重ねません。走行許可・非常停止の診断opt-outは既存の明示手順のみです。
+
+### DT overlayとflash-kernel
+
+GPIO13専用の `gpio13-rp1-pwm.dts` をhardware_interfacesへ同じ内容で配置し、
+dtcで `questix-gpio13-rp1-pwm.dtbo` を作ります。masterは
+`/etc/flash-kernel/dtbs/overlays/`、起動用コピーは `/boot/firmware/overlays/` に保持します。
+`config.txt` の末尾に専用markerと `[all]`・`dtoverlay=questix-gpio13-rp1-pwm` を追加するため、
+元の `[pi4]` / `[cm4]` の末尾に依存せず、他のboot設定を上書きしません。
+
+Ubuntu公式 `flash-kernel_3.107ubuntu13~24.04.7` のsource archiveとdscのSHA-256を照合して
+`functions` を調査しました。`find_all_overlays` は `/etc/flash-kernel/dtbs` を先に探索し、
+同じfilenameは先に見つけたものを選び、firmwareの `overlays/` へコピーします。
+このためmasterをそこに保持すれば、kernel側が同名を持っても管理者版が優先され、
+firmware側のコピーが失われても次のflash-kernelで再配備されます。公式関数だけを
+一時directoryへ向けて2回実行し、優先選択とコピーの復旧を確認しました。
+実機のkernel更新・pinmux・波形は未確認です。別versionのflash-kernelはこの契約を再確認します。
+参照: https://archive.ubuntu.com/ubuntu/pool/main/f/flash-kernel/flash-kernel_3.107ubuntu13~24.04.7.dsc
+
+## 保守用の単体installer（コマンドは手順例、実施記録ではありません）
 
 installerを含むsourceの内容を固定commitでレビューしてください。**rootで生徒のリポジトリの
 Git設定/hookを読みません**。commit引数は通常ユーザーが確認した文字列の記録だけで、認証ではありません。
@@ -100,9 +153,9 @@ SHA記録は `/var/lib/questix_pwm_guard/`。`installed.txt` はPARTIALから最
 失敗時は自動再開せず、記録とbackupを確認します。稼働中の更新はしません。先生が先に
 ESC OFFでguard停止を確認してから更新します。
 
-**installerはenable/start/stop、daemon-reload、reboot、GPIO操作、overlay applyを行いません。**
-新規機体は先生がESC OFFでGPIO13 overlay `deploy/gpio13-rp1-pwm.dts` と対象Ubuntuの
-DT symbol/functionを確認し、dtc/boot設定/正常再起動を別手順で実施します。他PWM/fanの影響も確認。
+**単体installerはenable/start/stop、daemon-reload、reboot、GPIO操作、overlay applyを行いません。**
+標準のenableとoverlay配置は上記Ansible roleが担当します。先生がESC OFFでGPIO13の
+DT symbol/functionを確認し、正常再起動とLow/neutralの受入を実施します。他PWM/fanの影響も確認。
 unitのReadWritePathsはレビューしたUbuntu24/Pi5 PWM0のdevice pathであり、違う機体は照合が必要です。
 
 ```bash
@@ -110,15 +163,14 @@ unitのReadWritePathsはレビューしたUbuntu24/Pi5 PWM0のdevice pathであ�
 sudo systemctl daemon-reload
 sudo systemctl start questix_pwm_guard.service
 sudo /opt/questix_pwm_guard/questix_pwm_ctl status
-# Enable at boot only after successful validation (not part of installation):
-sudo systemctl enable questix_pwm_guard.service
+# Standard Ansible deployment already enables this unit for boot.
 # Disable/stop are separate deliberate operations; keep ESC OFF and observe the signal:
 sudo systemctl disable questix_pwm_guard.service
 sudo systemctl stop questix_pwm_guard.service
 ```
 
-guardが安定してLowを要求できることを確認した後、生徒workspaceのESC YAMLで
-`pwm_backend: rp1_hw`、GPIO13、neutral1000、min0/max2000 µs、default socketを設定してbuildします。
+guardが安定してLowを要求できることを確認した後、出荷既定の `rp1_hw`、GPIO13、
+neutral1000、min0/max2000 µs、default socketを使って生徒workspaceをbuildします。
 生徒の変更は通常workspaceのinstallから起動します。既存E-stop・`/motion_permission`・
 command_arbiterの入力選択と、起動・停止・timeout・複数publisherの後に0を要求する規則を維持します。
 

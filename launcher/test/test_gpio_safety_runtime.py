@@ -25,8 +25,11 @@ import os
 import signal
 import subprocess
 import time
+from pathlib import Path
 
 import pytest
+import yaml
+from ament_index_python.packages import get_package_share_directory
 from questix_msgs.msg import EmergencyStop, MotionPermission
 from rcl_interfaces.msg import ParameterType
 from rcl_interfaces.srv import GetParameters
@@ -215,7 +218,7 @@ INTEGER_ARRAY = ParameterType.PARAMETER_INTEGER_ARRAY
     ],
 )
 def test_core_launch_publishes_the_estop_and_the_motion_permission_for_each_mode(
-        launch_arguments, expect_estop, expect_permission, expect_gpio):
+        launch_arguments, expect_estop, expect_permission, expect_gpio, tmp_path):
     """
     Start questix_core with drive and launcher and read what every node got and does.
 
@@ -231,6 +234,16 @@ def test_core_launch_publishes_the_estop_and_the_motion_permission_for_each_mode
         5 * int(expect_permission[0] == 'competition'))
     arguments = ['enable_lidar:=false', 'enable_shot:=true', 'enable_drive:=true',
                  'enable_rviz:=false', 'controller_type:=dualshock']
+    # The production default requires Pi 5 + guard. This graph test explicitly simulates PWM;
+    # preserve every permission/E-stop setting rather than weakening the gates for CI.
+    config = yaml.safe_load((Path(get_package_share_directory('esc_motor_control_cpp')) /
+                             'config/esc_motor_control_cpp.yaml').read_text())
+    params = config['esc_motor_control']['ros__parameters']
+    params['pwm_backend'] = 'simulation'
+    params['test_mode'] = True
+    esc_config = tmp_path / 'esc-simulation.yaml'
+    esc_config.write_text(yaml.safe_dump(config))
+    arguments.append(f'esc_config_file:={esc_config}')
     probe = GraphProbe(environment)
     process = start_process(
         ['ros2', 'launch', 'questix_launcher', 'questix_core.launch.xml',

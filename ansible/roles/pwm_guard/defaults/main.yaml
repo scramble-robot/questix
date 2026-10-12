@@ -1,0 +1,5 @@
+---
+# Controller-side, administrator-reviewed source; never ROBOT_WS/install or a robot-side build.
+pwm_guard_reviewed_source: "{{ (playbook_dir ~ '/../../questix_pwm_guard') | realpath }}"
+pwm_guard_staging_dir: /var/lib/questix_pwm_guard/reviewed-source
+pwm_guard_source_identity: administrator-reviewed-controller-source

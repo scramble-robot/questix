@@ -589,6 +589,14 @@ unset FAKE_CLEANUP_LOG FAKE_CLEANUP_PENDING
 # --- 13. Custom image build (scripts/iso/image-build-lib.sh, apply-ansible-config.sh) ---
 . ansible/tests/image_build_contract.sh
 
+# Safe PWM configuration contract: only a run-local config.txt, never systemd or GPIO.
+if run_playbook ansible/tests/test_rp1_pwm_config.yaml \
+    -e "boot_config_path=$TMP_ROOT/pwm-config.txt"; then
+    pass "RP1 PWM: explicit all section and idempotent second application"
+else
+    fail "RP1 PWM: boot configuration contract failed"
+fi
+
 REAL_BASHRC_AFTER="$(real_bashrc_fingerprint)"
 if [ "$REAL_BASHRC_BEFORE" = "$REAL_BASHRC_AFTER" ]; then
     pass "isolation: real user ~/.bashrc remained byte-identical"
