@@ -22,14 +22,13 @@ CLI call starts Python and DDS discovery again, which made this test slow on CI 
 """
 
 import os
+from pathlib import Path
 import signal
 import subprocess
 import time
-from pathlib import Path
 
-import pytest
-import yaml
 from ament_index_python.packages import get_package_share_directory
+import pytest
 from questix_msgs.msg import EmergencyStop, MotionPermission
 from rcl_interfaces.msg import ParameterType
 from rcl_interfaces.srv import GetParameters
@@ -37,6 +36,7 @@ import rclpy
 from rclpy.context import Context
 from rclpy.executors import SingleThreadedExecutor
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+import yaml
 
 
 STARTUP_TIMEOUT_SECONDS = 15.0
