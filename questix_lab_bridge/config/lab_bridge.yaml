@@ -64,8 +64,9 @@ questix_lab_bridge:
     #   - the emergency stop is released and /motion_permission allows the drive (shown to the
     #     pages; drive_component enforces both itself).
     drive_topic: "/target_twist/lab"
+    # command_arbiter's status (questix_msgs/ArbiterStatus, both mechanisms): the teacher's
+    # lesson permission as the arbiter applies it, the caps, and which input has the robot.
     arbiter_status_topic: "/command_arbiter/status"
-    lab_permission_topic: "/lab_permission"
     motion_permission_topic: "/motion_permission"
     emergency_stop_topic: "/emergency_stop"
     # The driving page repeats its command about 10 times a second. Silence for this long
@@ -85,38 +86,27 @@ questix_lab_bridge:
 
     # Launcher experiments from the pages: roller power, tilt and firing one disc
     # (questix_lab_bridge/shoot.py), each firing session confirmed by the learner's safety tick
-    # on the page. A page can operate the launcher only while
-    #   - the teacher's lesson permission for the launcher is on (/lab_permission
-    #     launcher_allowed, Robot Manager's 教材からの発射 switch) and /motion_permission allows it,
-    #   - esc_motor_control and shot_component subscribe to the lab topics and report
-    #     lab_accepted (their accept_lab_input; lesson launches only) in their status,
-    #   - no other node publishes the lab topics,
-    #   - the emergency stop is released (emergency_stop_topic, /drive_status or either status),
-    #   - the controller is not using the launcher (a pressed button takes over at once).
-    roller_lab_topic: "/roller/lab"         # std_msgs/Float32, 0..1
-    tilt_lab_topic: "/shot/lab/tilt"        # std_msgs/Float32, degrees
-    fire_lab_topic: "/shot/lab/fire"        # std_msgs/Empty, one disc
-    # Caps for what a page may command. The effective limits are these narrowed by what the
-    # nodes report in their status (never wider): the roller power by esc_motor_control's
-    # lab_max_speed, the tilt range by shot_component's tilt_min_angle / tilt_max_angle
-    # (motor_control_app/config/shot_config*.yaml: 0 / 120). Pages get the effective ones in
-    # shoot_state.limits.
-    shoot_max_power: 0.8    # fraction 0..1
-    shoot_tilt_min: 0.0     # [deg]
-    shoot_tilt_max: 120.0   # [deg]
-    # Shortest time between two shots of any source [s]; shot_component enforces its own
-    # lab_min_fire_interval_sec as well (and its status next_fire_in_sec counts here: the later
-    # wins). A page fires only after the roller has been commanded at 0.2 or more for 1.0 s
-    # without a break (fixed in shoot.py).
-    shoot_fire_interval_sec: 2.0
+    # on the page. The page's commands go to command_arbiter's lab input
+    # (questix_msgs/LauncherCommand); the arbiter decides what reaches the launcher: the teacher's
+    # lesson permission (/lab_permission, Robot Manager's 教材からの発射 switch), QUESTiX LAB's
+    # caps (lab_max_power, lab_tilt_min_deg / lab_tilt_max_deg in command_arbiter.yaml, narrowed
+    # by shot_component's tilt range), a shot only after the roller ran at 0.2 or more for 1.0 s
+    # and 2.0 s after the last shot, and the controller, which always takes over. Pages get the
+    # limits in shoot_state.limits. Even then a page can operate the launcher only while
+    #   - command_arbiter subscribes to launcher_command_topic and reports its status, and
+    #     esc_motor_control and shot_component report theirs (shot_component active),
+    #   - no other node publishes launcher_command_topic,
+    #   - the emergency stop is released (emergency_stop_topic, /drive_status or either status)
+    #     and /motion_permission allows the launcher (the nodes enforce both themselves).
+    launcher_command_topic: "/launcher_command/lab"
     # The page repeats the roller command about 10 times a second; silence for this long (closed
     # tab, lost Wi-Fi) stops the roller.
     shoot_deadman_sec: 0.5
     # One session (from the first command to the stop) may not last longer than this [s].
     shoot_max_spin_sec: 30.0
-    # Rate the roller command is published at during a session (esc_motor_control drops lab
-    # commands older than 1.0 s, and stops the roller if this node dies). Tilts are sent on
-    # request, at most every 60 ms (shot_component refuses closer than 50 ms).
+    # Rate the command is published at during a session (command_arbiter ends a lab run silent
+    # for 1.0 s, and esc_motor_control stops the roller when /launcher_command goes silent). Tilt
+    # targets are sent on request, at most every 60 ms (shot_component's rate limit is 50 ms).
     shoot_rate_hz: 20.0
 
     # Records kept on the robot (questix_lab_bridge/records.py), so every device connected to

@@ -18,6 +18,13 @@ rclcpp_components_register_node(drive_arbiter_component
   PLUGIN "command_arbiter::DriveArbiterComponent"
   EXECUTABLE drive_arbiter_node
 )
+ament_auto_add_library(launcher_arbiter_component SHARED
+  src/launcher_arbiter_component.cpp
+)
+rclcpp_components_register_node(launcher_arbiter_component
+  PLUGIN "command_arbiter::LauncherArbiterComponent"
+  EXECUTABLE launcher_arbiter_node
+)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
@@ -27,6 +34,9 @@ if(BUILD_TESTING)
   ament_auto_add_gtest(test_source_selector test/test_source_selector.cpp)
   ament_auto_add_gtest(test_drive_arbiter_node test/test_drive_arbiter_node.cpp)
   target_link_libraries(test_drive_arbiter_node drive_arbiter_component)
+  ament_auto_add_gtest(test_launcher_flow test/test_launcher_flow.cpp)
+  ament_auto_add_gtest(test_launcher_arbiter_node test/test_launcher_arbiter_node.cpp)
+  target_link_libraries(test_launcher_arbiter_node launcher_arbiter_component)
 endif()
 
 ament_auto_package(INSTALL_TO_SHARE launch config)

@@ -8,9 +8,14 @@ The YAML (config/command_arbiter.yaml) is the single source of truth.
        default="$(find-pkg-share command_arbiter)/config/command_arbiter.yaml"
        description="Path to the command_arbiter configuration YAML" />
   <arg name="enable_drive" default="true" description="Start the drive's arbiter (/target_twist)" />
+  <arg name="enable_launcher" default="true" description="Start the launcher's arbiter (/launcher_command)" />
 
   <node pkg="command_arbiter" exec="drive_arbiter_node" name="drive_arbiter" output="screen"
         if="$(var enable_drive)">
+    <param from="$(var config_file)" />
+  </node>
+  <node pkg="command_arbiter" exec="launcher_arbiter_node" name="launcher_arbiter" output="screen"
+        if="$(var enable_launcher)">
     <param from="$(var config_file)" />
   </node>
 </launch>

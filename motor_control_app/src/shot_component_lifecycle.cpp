@@ -269,31 +269,6 @@ ShotComponent::CallbackReturn ShotComponent::on_configure(const rclcpp_lifecycle
   int baudrate = this->get_parameter("baudrate").as_int();
   tilt_servo_id_ = this->get_parameter("tilt_servo_id").as_int();
   trigger_servo_id_ = this->get_parameter("trigger_servo_id").as_int();
-  fire_button_ = this->get_parameter("fire_button").as_int();
-  const int legacy_tilt_axis = this->get_parameter("tilt_axis").as_int();
-  tilt_up_axis_ = this->get_parameter("tilt_up_axis").as_int();
-  tilt_down_axis_ = this->get_parameter("tilt_down_axis").as_int();
-  if (tilt_up_axis_ == -2) tilt_up_axis_ = legacy_tilt_axis;
-  if (tilt_down_axis_ == -2) tilt_down_axis_ = legacy_tilt_axis;
-  tilt_up_axis_sign_ = this->get_parameter("tilt_up_axis_sign").as_int();
-  tilt_down_axis_sign_ = this->get_parameter("tilt_down_axis_sign").as_int();
-  tilt_up_button_index_ = this->get_parameter("tilt_up_button_index").as_int();
-  tilt_down_button_index_ = this->get_parameter("tilt_down_button_index").as_int();
-  if (tilt_up_axis_ < -1 || tilt_down_axis_ < -1 ||
-      (tilt_up_axis_sign_ != 1 && tilt_up_axis_sign_ != -1) ||
-      (tilt_down_axis_sign_ != 1 && tilt_down_axis_sign_ != -1) || tilt_up_button_index_ < 0 ||
-      tilt_down_button_index_ < 0 ||
-      (tilt_up_axis_ == tilt_down_axis_ &&
-       (tilt_up_axis_ == -1 ? tilt_up_button_index_ == tilt_down_button_index_
-                            : tilt_up_axis_sign_ == tilt_down_axis_sign_))) {
-    RCLCPP_ERROR(this->get_logger(), "Invalid or duplicate tilt direction inputs");
-    return CallbackReturn::FAILURE;
-  }
-  for (const auto& direction : {std::string("up"), std::string("down")}) {
-    const int axis = direction == "up" ? tilt_up_axis_ : tilt_down_axis_;
-    RCLCPP_INFO(this->get_logger(), "Tilt %s: %s ignored in %s mode", direction.c_str(),
-                axis == -1 ? "axis_sign" : "button_index", axis == -1 ? "button" : "axis");
-  }
   tilt_step_angle_ = this->get_parameter("tilt_step_angle").as_double();
   tilt_min_angle_ = this->get_parameter("tilt_min_angle").as_double();
   tilt_max_angle_ = this->get_parameter("tilt_max_angle").as_double();
@@ -301,7 +276,6 @@ ShotComponent::CallbackReturn ShotComponent::on_configure(const rclcpp_lifecycle
   home_angle_ = this->get_parameter("home_angle").as_double();
   fire_duration_ms_ = this->get_parameter("fire_duration_ms").as_int();
   command_rate_limit_ms_ = this->get_parameter("command_rate_limit_ms").as_int();
-  std::string joy_topic = this->get_parameter("joy_topic").as_string();
 
   // サーボコントローラー接続（非常停止中はポートが無い / 開けない場合がある）
   servo_controller_ = std::make_shared<motor_control_lib::FeetechServoController>(port, baudrate);
@@ -332,10 +306,6 @@ ShotComponent::CallbackReturn ShotComponent::on_configure(const rclcpp_lifecycle
   current_tilt_position_ = current_pos;
   current_tilt_angle_ = clampAngle(servoPositionToAngle(current_pos));
 
-  // joyサブスクライバー作成（コールバックは ACTIVE のときのみ処理する）
-  joy_subscription_ = this->create_subscription<sensor_msgs::msg::Joy>(
-      joy_topic, 1, std::bind(&ShotComponent::joyCallback, this, std::placeholders::_1));
-
   RCLCPP_INFO(this->get_logger(), "Shot component configured (current tilt: %.1f deg)",
               current_tilt_angle_);
   return CallbackReturn::SUCCESS;
@@ -361,17 +331,12 @@ ShotComponent::CallbackReturn ShotComponent::on_activate(const rclcpp_lifecycle:
     fire_timer_.reset();
   }
   is_shooting_ = false;
-  // 押しっぱなしのボタン・チルト入力は、一度離すまで射撃にもチルトにも使わない
-  // （inactive 中や非常停止・許可なしの間から押され続けている入力で動かさないため）。
-  last_button_state_ = true;
-  tilt_edges_.requireRelease();
+  // 射撃・チルトは指令の増加（launcher_events.hpp）でだけ動く。inactive の間に届いたものは
+  // 捨ててあり、押しっぱなしの入力で動き出すことはない。
+  pending_tilt_ = false;
   last_command_time_ = this->now();
 
   RCLCPP_INFO(this->get_logger(), "Shot component activated");
-  RCLCPP_INFO(this->get_logger(),
-              "Tilt up: axis=%d sign=%d button=%d; down: axis=%d sign=%d button=%d", tilt_up_axis_,
-              tilt_up_axis_sign_, tilt_up_button_index_, tilt_down_axis_, tilt_down_axis_sign_,
-              tilt_down_button_index_);
   RCLCPP_INFO(this->get_logger(), "Tilt range: %.1f - %.1f degrees", tilt_min_angle_,
               tilt_max_angle_);
   RCLCPP_INFO(this->get_logger(),
@@ -386,7 +351,7 @@ ShotComponent::CallbackReturn ShotComponent::on_activate(const rclcpp_lifecycle:
 }
 
 ShotComponent::CallbackReturn ShotComponent::on_deactivate(const rclcpp_lifecycle::State&) {
-  tilt_edges_.reset();
+  pending_tilt_ = false;
   // 射撃シーケンス中なら止めて best-effort で home に戻す（タイマーを残さない）
   cancelShotSequence();
   // 手動 deactivate を含め、deactivate では自動再遷移を必ず止める。故障検出から
@@ -398,22 +363,21 @@ ShotComponent::CallbackReturn ShotComponent::on_deactivate(const rclcpp_lifecycl
     auto_start_timer_->cancel();
   }
   endStartup();
-  RCLCPP_INFO(this->get_logger(), "Shot component deactivated (joy input ignored)");
+  RCLCPP_INFO(this->get_logger(), "Shot component deactivated (launcher commands ignored)");
   return CallbackReturn::SUCCESS;
 }
 
 ShotComponent::CallbackReturn ShotComponent::on_cleanup(const rclcpp_lifecycle::State&) {
-  tilt_edges_.reset();
+  pending_tilt_ = false;
   fire_timer_.reset();
   teardown_pending_ = false;
-  joy_subscription_.reset();
   disconnectServo();
   RCLCPP_INFO(this->get_logger(), "Shot component cleaned up");
   return CallbackReturn::SUCCESS;
 }
 
 ShotComponent::CallbackReturn ShotComponent::on_shutdown(const rclcpp_lifecycle::State&) {
-  tilt_edges_.reset();
+  pending_tilt_ = false;
   fire_timer_.reset();
   runtime_fault_ = false;
   teardown_pending_ = false;
@@ -424,21 +388,18 @@ ShotComponent::CallbackReturn ShotComponent::on_shutdown(const rclcpp_lifecycle:
   }
   permission_monitor_->unsubscribe();
   estop_monitor_->unsubscribe();
-  joy_subscription_.reset();
-  lab_tilt_sub_.reset();
-  lab_fire_sub_.reset();
+  command_subscription_.reset();
   disconnectServo();
   RCLCPP_INFO(this->get_logger(), "Shot component shut down");
   return CallbackReturn::SUCCESS;
 }
 
 ShotComponent::CallbackReturn ShotComponent::on_error(const rclcpp_lifecycle::State&) {
-  tilt_edges_.reset();
+  pending_tilt_ = false;
   // 遷移中に ERROR / 例外が発生したときの後始末。リソースを解放して unconfigured
   // に戻し、auto_start 有効時はタイマーを再開して自動復帰に委ねる。
   fire_timer_.reset();
   is_shooting_ = false;
-  joy_subscription_.reset();
   disconnectServo();
   runtime_fault_ = false;
   teardown_pending_ = false;

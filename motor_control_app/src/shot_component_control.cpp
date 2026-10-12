@@ -4,8 +4,8 @@
 // license that can be found in the LICENSE file or at
 // https://opensource.org/licenses/MIT.
 //
-// ShotComponent: motion permission and E-stop, controller input, QUESTiX LAB requests and
-// the shot sequence (see shot_component.cpp for how the class is split).
+// ShotComponent: motion permission and E-stop, launcher commands (/launcher_command) and the
+// shot sequence (see shot_component.cpp for how the class is split).
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -135,9 +135,8 @@ void ShotComponent::applyPermission() {
     }
     permission_was_allowed_ = allowed;
     if (!allowed) {
-      // 以後の射撃・チルトは断る。押しっぱなしの入力は、許可が戻っても離すまで無視する。
-      last_button_state_ = true;
-      tilt_edges_.requireRelease();
+      // 以後の射撃・チルトは断る（その間に届いた指令は捨て、許可が戻っても後から動かさない）。
+      pending_tilt_ = false;
       // 電源は入ったままなのでサーボバスは保持する（ACTIVE のまま。非常停止とは違い teardown
       // しない）。 射撃中ならシーケンスを止めて home
       // に戻す。起動途中なら試行期間を終える（許可で再開）。
@@ -168,56 +167,88 @@ void ShotComponent::applyPermission() {
   }
 }
 
-void ShotComponent::joyCallback(const sensor_msgs::msg::Joy::SharedPtr msg) {
-  // Record controller use of the launcher (fire button, tilt input) for the QUESTiX LAB quiet
-  // rule before any early return: a held button blocks lab requests in every state.
-  if (msg &&
-      shot_lab::joyUsesLauncher(msg->buttons, msg->axes, fire_button_,
-                                {tilt_up_axis_, tilt_up_axis_sign_, tilt_up_button_index_},
-                                {tilt_down_axis_, tilt_down_axis_sign_, tilt_down_button_index_})) {
-    joy_launcher_active_at_sec_ = steadyNowSec();
-  }
-  if (this->get_current_state().id() != lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE) {
-    return;
-  }
-  if (!servo_controller_ || !servo_controller_->isConnected()) {
-    return;
-  }
-  if (!msg || msg->buttons.empty()) {
-    return;
-  }
-  // 走行許可なし、または非常停止（押下・途絶・未受信）: 射撃もチルトもしない。押されている
-  // 入力は、動かせるようになってから一度離すまで使わない。
-  if (permissionBlock() != actuation_gate::Block::kNone || estopBlocks()) {
-    last_button_state_ = true;
-    tilt_edges_.requireRelease();
-    return;
-  }
+bool ShotComponent::readyToMove() {
+  // 走行許可なし、または非常停止（押下・途絶・未受信）: 射撃もチルトもしない。
+  return this->get_current_state().id() == lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE &&
+         servo_controller_ && servo_controller_->isConnected() &&
+         permissionBlock() == actuation_gate::Block::kNone && !estopBlocks();
+}
 
-  // 射撃ボタンの処理
-  if (!is_shooting_ && fire_button_ >= 0 && fire_button_ < static_cast<int>(msg->buttons.size())) {
-    bool current_button_state = msg->buttons[fire_button_] == 1;
-
-    // ボタンが押された瞬間を検出（立ち上がりエッジ）
-    if (current_button_state && !last_button_state_) {
-      executeShotSequence(shot_lab::FireSource::kJoy);
+void ShotComponent::commandCallback(const questix_msgs::msg::LauncherCommand::SharedPtr msg) {
+  if (!msg) {
+    return;
+  }
+  LauncherEvents::Command command;
+  command.tilt_deg = msg->tilt_deg;
+  command.tilt_steps = msg->tilt_steps;
+  command.fire_seq = msg->fire_seq;
+  // Every message advances the counters, also while the launcher may not move: what arrives then
+  // is dropped here and never replayed later.
+  const auto events = launcher_events_.onCommand(command, steadyNowSec());
+  if (events.tilt_target) {
+    pending_tilt_ = true;
+    pending_tilt_deg_ = events.tilt_deg;
+  }
+  if (multiple_command_publishers_) {
+    pending_tilt_ = false;  // see checkCommandPublishers(): nothing moves
+    return;
+  }
+  if (!readyToMove()) {
+    pending_tilt_ = false;
+    if (events.fire || events.tilt_steps != 0) {
+      RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+                           "Launcher command ignored: not active, no motion permission or "
+                           "emergency stop");
     }
-
-    last_button_state_ = current_button_state;
+    return;
   }
-
-  const auto step_tilt = [this](double delta_deg, const char* direction) {
-    moveTiltTo(current_tilt_angle_ + delta_deg, direction);
-  };
-
-  const bool up = tiltInputPressed(msg->axes, msg->buttons, tilt_up_axis_, tilt_up_axis_sign_,
-                                   tilt_up_button_index_);
-  const bool down = tiltInputPressed(msg->axes, msg->buttons, tilt_down_axis_, tilt_down_axis_sign_,
-                                     tilt_down_button_index_);
-  const int direction = tilt_edges_.update(up, down);
-  if (direction != 0) {
-    step_tilt(direction * tilt_step_angle_, direction > 0 ? "up" : "down");
+  if (events.fire) {
+    const double wait = nextFireInSec(steadyNowSec(), last_fire_sec_, min_fire_interval_sec_);
+    if (is_shooting_) {
+      RCLCPP_INFO(this->get_logger(), "Fire refused: a shot is still moving");
+    } else if (wait > 0.0) {
+      RCLCPP_INFO(this->get_logger(), "Fire refused: %.1f s until the next shot", wait);
+    } else {
+      executeShotSequence(fireSourceOf(msg->source));
+    }
   }
+  if (events.tilt_steps != 0) {
+    moveTiltTo(current_tilt_angle_ + events.tilt_steps * tilt_step_angle_,
+               events.tilt_steps > 0 ? "up" : "down");
+  }
+  applyPendingTilt();
+}
+
+void ShotComponent::checkCommandPublishers() {
+  const auto publishers = this->get_publishers_info_by_topic(command_topic_);
+  const bool multiple = publishers.size() > 1;
+  if (multiple == multiple_command_publishers_) {
+    return;
+  }
+  multiple_command_publishers_ = multiple;
+  if (!multiple) {
+    // The counters restart from the one publisher's next message (no replay).
+    launcher_events_.reset();
+    RCLCPP_INFO(this->get_logger(), "One publisher on %s again", command_topic_.c_str());
+    return;
+  }
+  pending_tilt_ = false;
+  std::string names;
+  for (const auto& info : publishers) {
+    const std::string& ns = info.node_namespace();
+    names += (names.empty() ? "" : ", ") + (ns == "/" ? "" : ns) + "/" + info.node_name();
+  }
+  RCLCPP_ERROR(this->get_logger(),
+               "%zu nodes publish %s (%s): fire and tilt refused until only one is left",
+               publishers.size(), command_topic_.c_str(), names.c_str());
+}
+
+void ShotComponent::applyPendingTilt() {
+  if (!pending_tilt_ || !canSendCommand()) {
+    return;  // kept for the next command (the publishers repeat them while in use)
+  }
+  pending_tilt_ = false;
+  moveTiltTo(pending_tilt_deg_, "to target");
 }
 
 bool ShotComponent::moveTiltTo(double angle_deg, const char* label) {
@@ -247,89 +278,28 @@ double ShotComponent::steadyNowSec() {
   return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
-shot_lab::Conditions ShotComponent::labConditions() {
-  shot_lab::Conditions conditions;
-  conditions.accept = accept_lab_input_;
-  // The latest /emergency_stop, its silence, and (require_emergency_stop) never having heard it.
-  conditions.estop = estopBlocks();
-  conditions.permission = permissionBlock() == actuation_gate::Block::kNone;
-  conditions.active =
-      this->get_current_state().id() == lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE &&
-      servo_controller_ && servo_controller_->isConnected();
-  conditions.shooting = is_shooting_;
-  conditions.now_sec = steadyNowSec();
-  conditions.joy_active_at_sec = joy_launcher_active_at_sec_;
-  conditions.joy_quiet_sec = lab_joy_quiet_sec_;
-  return conditions;
-}
-
-void ShotComponent::recordLabRefusal(shot_lab::Refusal refusal, const char* request) {
-  RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 2000, "QUESTiX LAB %s refused: %s",
-                       request, shot_lab::refusalName(refusal));
-  if (last_lab_refusal_ != refusal) {
-    last_lab_refusal_ = refusal;
-    publishShotStatus();
-  }
-}
-
-void ShotComponent::labTiltCallback(const std_msgs::msg::Float32::SharedPtr msg) {
-  if (!msg) {
-    return;
-  }
-  const auto decision =
-      shot_lab::decideTilt(labConditions(), msg->data, tilt_min_angle_, tilt_max_angle_);
-  if (decision.refusal != shot_lab::Refusal::kNone) {
-    recordLabRefusal(decision.refusal, "tilt");
-    return;
-  }
-  if (!canSendCommand()) {
-    recordLabRefusal(shot_lab::Refusal::kRateLimited, "tilt");
-    return;
-  }
-  last_lab_refusal_ = shot_lab::Refusal::kNone;
-  moveTiltTo(decision.target_deg, "lab");
-}
-
-void ShotComponent::labFireCallback(const std_msgs::msg::Empty::SharedPtr msg) {
-  if (!msg) {
-    return;
-  }
-  const auto refusal =
-      shot_lab::decideFire(labConditions(), last_fire_sec_, lab_min_fire_interval_sec_);
-  if (refusal != shot_lab::Refusal::kNone) {
-    recordLabRefusal(refusal, "fire");
-    return;
-  }
-  last_lab_refusal_ = shot_lab::Refusal::kNone;
-  RCLCPP_INFO(this->get_logger(), "QUESTiX LAB fire request accepted");
-  executeShotSequence(shot_lab::FireSource::kLab);
-}
-
 void ShotComponent::publishShotStatus() {
   if (!shot_status_pub_) {
     return;
   }
-  shot_lab::Status status;
+  ShotStatus status;
   status.tilt_deg = current_tilt_angle_;
   status.shooting = is_shooting_;
   status.fired_count = fired_count_;
   status.last_fire_source = last_fire_source_;
-  status.lab_accepted = accept_lab_input_;
   status.estop = estopBlocks();
   status.permission = permissionBlock() == actuation_gate::Block::kNone;
   status.active =
       this->get_current_state().id() == lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE;
   status.tilt_min_deg = tilt_min_angle_;
   status.tilt_max_deg = tilt_max_angle_;
-  status.next_fire_in_sec =
-      shot_lab::nextFireInSec(steadyNowSec(), last_fire_sec_, lab_min_fire_interval_sec_);
-  status.lab_refused = last_lab_refusal_;
+  status.next_fire_in_sec = nextFireInSec(steadyNowSec(), last_fire_sec_, min_fire_interval_sec_);
   std_msgs::msg::String msg;
-  msg.data = shot_lab::statusJson(status);
+  msg.data = shotStatusJson(status);
   shot_status_pub_->publish(msg);
 }
 
-void ShotComponent::executeShotSequence(shot_lab::FireSource source) {
+void ShotComponent::executeShotSequence(FireSource source) {
   if (is_shooting_) {
     return;  // 既に射撃中の場合は無視
   }

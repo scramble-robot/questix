@@ -237,11 +237,11 @@ def test_hello_describes_the_launcher():
 
 
 def test_launcher_status_is_passed_on_with_a_stamp():
-    text = json.dumps({'command': 0.4, 'source': 'lab', 'lab_accepted': True,
-                       'lab_locked': False, 'estop': False, 'type': 'spoofed'})
+    text = json.dumps({'command': 0.4, 'source': 'lab', 'estop': False, 'permission': True,
+                       'max_power': 1.0, 'type': 'spoofed'})
     payload = messages.launcher_status_payload('roller', text, 12.5)
     assert payload == {'type': 'roller', 'stamp': 12.5, 'command': 0.4, 'source': 'lab',
-                       'lab_accepted': True, 'lab_locked': False, 'estop': False}
+                       'estop': False, 'permission': True, 'max_power': 1.0}
     for broken in ('not json', '[1]', '"x"'):
         with pytest.raises(ValueError):
             messages.launcher_status_payload('shot', broken, 0.0)

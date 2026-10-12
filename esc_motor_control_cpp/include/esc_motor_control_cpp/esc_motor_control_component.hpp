@@ -10,26 +10,28 @@
 #include <mutex>
 #include <string>
 
-#include "esc_motor_control_cpp/full_speed_logic.hpp"
 #include "esc_motor_control_cpp/pwm_backend.hpp"
+#include "esc_motor_control_cpp/roller_command_logic.hpp"
 #include "esc_motor_control_cpp/roller_gate.hpp"
-#include "esc_motor_control_cpp/roller_lab_logic.hpp"
 #include "questix_msgs/msg/emergency_stop.hpp"
+#include "questix_msgs/msg/launcher_command.hpp"
 #include "questix_msgs/msg/motion_permission.hpp"
 #include "questix_safety/emergency_stop_monitor.hpp"
 #include "questix_safety/permission_monitor.hpp"
 #include "rclcpp/rclcpp.hpp"
-#include "sensor_msgs/msg/joy.hpp"
 #include "std_msgs/msg/float32.hpp"
 #include "std_msgs/msg/string.hpp"
 
 namespace esc_motor_control_cpp {
 
-// The roller spins only while roller_gate.hpp says so: the motion permission (L2,
-// /motion_permission launcher_allowed: the referee, the teacher, or always in practice) is fresh
-// and allows it, and the E-stop (L1) is known and released (require_emergency_stop; unknown and
-// silent count as pressed, and operation_manager always publishes it in questix_core). When it
-// closes the roller goes to 0 and the full-speed latch needs a release; nothing restarts by itself.
+// The roller follows /launcher_command roller_power (questix_msgs/LauncherCommand: joy_launcher in
+// practice and competition, command_arbiter's choice of the controller or QUESTiX LAB in a lesson;
+// roller_command_logic.hpp) and spins only while roller_gate.hpp says so: the motion permission
+// (L2, /motion_permission launcher_allowed: the referee, the teacher, or always in practice) is
+// fresh and allows it, and the E-stop (L1) is known and released (require_emergency_stop; unknown
+// and silent count as pressed, and operation_manager always publishes it in questix_core). When it
+// closes the roller goes to 0 and needs a 0 command before it spins again; nothing restarts by
+// itself. The node reads no /joy and no QUESTiX LAB topic.
 class EscMotorControlComponent : public rclcpp::Node {
 public:
   explicit EscMotorControlComponent(const rclcpp::NodeOptions& options);
@@ -40,7 +42,12 @@ private:
   void initialize_esc();
 
   // ---------- Callbacks ----------
-  void joy_callback(const sensor_msgs::msg::Joy::SharedPtr msg);
+  void command_callback(const questix_msgs::msg::LauncherCommand::SharedPtr msg);
+  // A spinning roller whose commands stopped for safety_timeout is stopped.
+  void command_tick();
+  // More than one node on launcher_command_topic: their counters and levels would mix (one
+  // publisher's 0 and the other's power in turn), so the roller stops until only one is left.
+  void check_publishers();
   // /emergency_stop を受信したとき（estop_monitor_ から呼ばれる）。
   void on_emergency_stop(const questix_msgs::msg::EmergencyStop& msg,
                          const questix_safety::EmergencyStopMonitor::Change& change);
@@ -48,15 +55,12 @@ private:
   void on_motion_permission(const questix_msgs::msg::MotionPermission& msg,
                             const questix_safety::PermissionMonitor::Change& change);
   // Re-evaluates the gate (100 ms timer and every E-stop / permission message); on closing it stops
-  // the roller, clears the latch and locks the lab.
+  // the roller and requires a 0 command before it spins again.
   void apply_gate();
   // The current gate (lock_ held).
   RollerBlock evaluate_gate_locked() const;
-  void safety_check();
   void publish_status();
-  // QUESTiX LAB roller input (/roller/lab) and its status (/roller/status)
-  void lab_callback(const std_msgs::msg::Float32::SharedPtr msg);
-  void lab_tick();
+  // The mechanism's state on /roller/status.
   void publish_roller_status();
   static double steady_now_sec();
 
@@ -70,36 +74,31 @@ private:
   int pwm_pin_;
   double max_speed_;
   double min_speed_;
-  bool enable_safety_stop_;
   double safety_timeout_;
-  int full_speed_button_;
-  double full_speed_value_;
   bool test_mode_;
-  std::string joy_topic_;
+  std::string launcher_command_topic_;
   std::string status_topic_;
   int min_pulse_width_us_;
   int max_pulse_width_us_;
   int neutral_pulse_width_us_;
   std::string pwm_backend_name_;  // "auto", "pigpio", "lgpio", "simulation"
   int gpio_chip_num_;             // lgpio chip number
-  // QUESTiX LAB: accept /roller/lab (practice launches only; see roller_lab_logic.hpp)
-  bool accept_lab_input_{false};
-  std::string lab_topic_;
-  double lab_max_speed_{0.8};
-  double lab_joy_quiet_sec_{1.0};
 
   // ---------- State ----------
   double current_speed_{0.0};
   RollerBlock gate_{RollerBlock::kEstopUnknown};
-  FullSpeedLogic full_speed_logic_;
-  RollerLabLogic roller_lab_logic_;
+  RollerCommandLogic command_logic_;
+  // The source of the last command (rollerSourceName), shown in /roller/status while spinning.
+  const char* command_source_{"idle"};
+  // More than one publisher on launcher_command_topic (check_publishers).
+  bool multiple_publishers_{false};
   std::mutex lock_;
 
   // ---------- PWM ----------
   std::unique_ptr<PwmBackend> pwm_;
 
   // ---------- ROS I/O ----------
-  rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joy_sub_;
+  rclcpp::Subscription<questix_msgs::msg::LauncherCommand>::SharedPtr command_sub_;
   // /emergency_stop: subscription and state (the shared questix_safety check)
   std::unique_ptr<questix_safety::EmergencyStopMonitor> estop_monitor_;
   // /motion_permission (launcher_allowed): subscription and state (the shared questix_safety
@@ -107,12 +106,11 @@ private:
   std::unique_ptr<questix_safety::PermissionMonitor> permission_monitor_;
   rclcpp::TimerBase::SharedPtr gate_timer_;
   rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr status_pub_;
-  rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr lab_sub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr roller_status_pub_;
   rclcpp::TimerBase::SharedPtr roller_status_timer_;
-  rclcpp::TimerBase::SharedPtr lab_timer_;
   rclcpp::TimerBase::SharedPtr status_timer_;
-  rclcpp::TimerBase::SharedPtr safety_timer_;
+  rclcpp::TimerBase::SharedPtr command_timer_;
+  rclcpp::TimerBase::SharedPtr publisher_timer_;
 };
 
 }  // namespace esc_motor_control_cpp

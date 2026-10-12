@@ -79,18 +79,17 @@ const StatusView = (() => {
           detail: '/motion_permission（operation_manager）が走行を許可していません。',
         };
       case 'no_launcher': {
-        const parts = (blocker.parts || [])
-          .map((p) => (p === 'roller' ? 'ローラー' : p === 'shot' ? '発射台' : null))
-          .filter(Boolean).join('・') || '発射装置';
-        const technical = (blocker.parts || [])
-          .map((p) => (p === 'roller' ? 'esc_motor_control' : p === 'shot' ? 'shot_component' : null))
-          .filter(Boolean).join('・') || 'esc_motor_control・shot_component';
+        const names = { arbiter: '切り替え', roller: 'ローラー', shot: '発射台' };
+        const nodes = { arbiter: 'command_arbiter', roller: 'esc_motor_control', shot: 'shot_component' };
+        const parts = (blocker.parts || []).map((p) => names[p]).filter(Boolean).join('・') || '発射装置';
+        const technical = (blocker.parts || []).map((p) => nodes[p]).filter(Boolean).join('・')
+          || 'command_arbiter・esc_motor_control・shot_component';
         return {
           text: stopped
             ? 'ロボット制御が止まっています（「操作」の「起動」で教材用の構成で起動します）'
             : `${parts}が教材の指令を受け付けていません（教材用の構成で動いていないか、別のロボットの設定です）`,
-          detail: `${technical} が教材の入力（accept_lab_input）を受け付けていません（ROS_DOMAIN_ID ${domainOf(bridge)}）。` +
-            '大会用の起動では受け付けません。',
+          detail: `${technical} が見つからないか、状態が届いていません（ROS_DOMAIN_ID ${domainOf(bridge)}）。` +
+            '練習用・大会用の起動には command_arbiter が入りません。',
         };
       }
       case 'other_publisher':
@@ -98,7 +97,7 @@ const StatusView = (() => {
           text: kind === 'drive'
             ? 'ほかのプログラムが教材用の走行指令を出しています'
             : 'ほかのプログラムが教材用の発射指令を出しています',
-          detail: `${nodes} が ${kind === 'drive' ? '/target_twist/lab' : '/roller/lab・/shot/lab/*'} に出しています。`,
+          detail: `${nodes} が ${kind === 'drive' ? '/target_twist/lab' : '/launcher_command/lab'} に出しています。`,
         };
       case 'estop_unknown':
         return {

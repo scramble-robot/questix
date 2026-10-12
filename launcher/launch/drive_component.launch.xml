@@ -8,18 +8,21 @@ YAML を Single Source of Truth とし、個別パラメータの launch 引数�
   <arg name="joy_config_file" default="$(find-pkg-share joy_controller)/config/joy_controller_params.yaml" description="joy_controller configuration YAML" />
   <arg name="drive_config_file" default="$(find-pkg-share questix_launcher)/config/drive_component.yaml" description="drive_component configuration YAML" />
   <arg name="controller_type" default="uart" description="Controller type: dualshock, uart, or web" />
-  <arg name="use_command_arbiter" default="false" description="The controller publishes to command_arbiter's input (/target_twist/joy) instead of /target_twist (questix_core: lesson mode only, where it also starts command_arbiter)" />
+  <arg name="use_command_arbiter" default="false" description="The controller publishes to command_arbiter's inputs (/target_twist/joy, /launcher_command/joy) instead of /target_twist and /launcher_command (questix_core: lesson mode only, where it also starts command_arbiter)" />
 
-  <!-- With command_arbiter the controller publishes to its own input and the arbiter owns
-       /target_twist; without it (practice, competition) joy_controller drives /target_twist
-       directly. -->
+  <!-- With command_arbiter the controller publishes to its own inputs and the arbiter owns
+       /target_twist and /launcher_command; without it (practice, competition) joy_controller and
+       joy_launcher drive them directly. -->
   <let name="controller_twist_topic" value="/target_twist/joy" if="$(var use_command_arbiter)" />
   <let name="controller_twist_topic" value="/target_twist" unless="$(var use_command_arbiter)" />
+  <let name="controller_launcher_topic" value="/launcher_command/joy" if="$(var use_command_arbiter)" />
+  <let name="controller_launcher_topic" value="/launcher_command" unless="$(var use_command_arbiter)" />
 
-  <!-- Joy Controller (the controller's driver and joy_controller). Nothing gates /joy: the
-       actuators stop on /emergency_stop and /motion_permission themselves. -->
+  <!-- Joy Controller (the controller's driver, joy_controller and joy_launcher). Nothing gates
+       /joy: the actuators stop on /emergency_stop and /motion_permission themselves. -->
   <group>
     <set_remap from="/target_twist" to="$(var controller_twist_topic)" />
+    <set_remap from="/launcher_command" to="$(var controller_launcher_topic)" />
     <include file="$(find-pkg-share joy_controller)/launch/joy_controller.launch.xml">
       <arg name="config_file" value="$(var joy_config_file)" />
       <arg name="controller_type" value="$(var controller_type)" />

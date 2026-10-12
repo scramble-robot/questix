@@ -17,7 +17,8 @@ QUESTiXシステムの各ノードを起動するためのlauncherファイル�
 | RefereeMonitor（GPIO27 → 審判の票） | 起動しない | 起動しない | 起動する |
 | 非常停止（`/emergency_stop`） | GPIO5 | GPIO5 | GPIO5 |
 | 走行許可に必要な票 | 先生（`/actuation_authority`） | なし（常に許可） | 審判（`/motion_vote/referee`） |
-| command_arbiter（入力の選択） / 発射機構の教材入力（`accept_lab_input`） | 起動する / true | 起動しない / false | 起動しない / false |
+| command_arbiter（走行・発射の入力の選択） | 起動する | 起動しない | 起動しない |
+| `/target_twist`・`/launcher_command` を出すもの | command_arbiter（コントローラーか教材） | joy_controller・joy_launcher | joy_controller・joy_launcher |
 
 `questix_robot_launcher.sh` は保存されたモードを `robot_mode:=<mode>` でそのまま渡し、
 どのモードでも `enable_gpio_ref:=true` を固定値で渡します。`competition` は電源投入時にも起動し、
@@ -112,11 +113,11 @@ ros2 launch questix_launcher questix_core.launch.xml \
   enable_gpio_ref:=true robot_mode:=practice enable_rviz:=false
 ```
 
-## コントローラーと QUESTiX LAB の走行実験（command_arbiter、L3）
+## コントローラーと QUESTiX LAB の走行・発射実験（command_arbiter、L3）
 
 `questix_core.launch.xml` は教材用の起動（`robot_mode:=lesson`）だけ入力の選択
-command_arbiter（`command_arbiter/launch/command_arbiter.launch.xml`、ノード `drive_arbiter`）を
-入れます。joy_controller の出力は `/target_twist/joy` に付け替えられ、QUESTiX LAB の教材ブリッジは
+command_arbiter（`command_arbiter/launch/command_arbiter.launch.xml`、ノード `drive_arbiter` と
+`launcher_arbiter`）を入れます。joy_controller の出力は `/target_twist/joy` に付け替えられ、QUESTiX LAB の教材ブリッジは
 `/target_twist/lab` に出し、`drive_arbiter` がどちらかを `/target_twist`（drive_component）へ
 渡します。起動し直す必要はありません。
 
@@ -128,11 +129,19 @@ command_arbiter（`command_arbiter/launch/command_arbiter.launch.xml`、ノー�
   （その走行が終わるまで教材は割り込めません）。
 - 教材の指令が途切れると、コントローラーに戻ります。
 
-練習・大会では入れず、joy_controller が `/target_twist` を直接出します。規則は
-`command_arbiter/include/command_arbiter/source_selector.hpp`、パラメータは
-`command_arbiter/config/command_arbiter.yaml`、状態は `/command_arbiter/status`
-（`questix_msgs/ArbiterStatus`）にあります。非常停止と走行許可は command_arbiter ではなく
-drive_component 自身が判断します。
+発射機構（ローラー・角度・射出）も同じ規則です。コントローラーのボタンは joy_controller パッケージの
+`joy_launcher` が `questix_msgs/LauncherCommand` にして出し（教材用の起動では `/launcher_command/joy`）、
+教材ブリッジは `/launcher_command/lab` に出し、`launcher_arbiter` がどちらかを `/launcher_command`
+（esc_motor_control・shot_component）へ渡します。教材の指令はローラー出力 80% まで、角度は
+`lab_tilt_min_deg`〜`lab_tilt_max_deg`、射出はローラーが 0.2 以上で 1.0 秒回ってから・前の 1 枚から
+2.0 秒あけてだけ通します。ボタンを押せばすぐにコントローラーに戻ります。esc_motor_control と
+shot_component は `/joy` も教材のトピックも読みません。
+
+練習・大会では入れず、joy_controller と joy_launcher が `/target_twist` と `/launcher_command` を
+直接出します。規則は `command_arbiter/include/command_arbiter/source_selector.hpp`（発射機構は
+`launcher_flow.hpp`）、パラメータは `command_arbiter/config/command_arbiter.yaml`、状態は
+`/command_arbiter/status`（`questix_msgs/ArbiterStatus`）にあります。非常停止と走行許可は
+command_arbiter ではなく drive_component・shot_component・esc_motor_control 自身が判断します。
 
 ## ファイル構成
 

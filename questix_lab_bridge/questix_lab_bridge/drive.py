@@ -27,6 +27,9 @@ decisions to the pages and ends a run they refuse, never guesses them:
   (``lab_count``), so an earlier status never ends a new run.
 * After a stop, zero is published for ``stop_hold_sec`` (the arbiter forwards it as the run's
   stop, and it ends the run there), then nothing: an idle bridge does not compete.
+* A run the bridge ended (a blocker, the dead-man, the time limit, the arbiter, another page's
+  stop) is not restarted by its owner's commands for ``RESTART_GUARD_SEC``: those were already on
+  their way, and the page has given the run up. They are dropped without an answer (``STALE``).
 """
 
 import math
@@ -44,6 +47,9 @@ BLOCKER_ORDER = (NOT_ALLOWED, NO_DRIVE_NODE, OTHER_PUBLISHER, ESTOP_UNKNOWN, EME
 # Refusals of a single request (besides the blockers).
 BUSY = 'busy'
 INVALID = 'invalid'
+# A command of a run the bridge has just ended: dropped without an answer to the page.
+STALE = 'stale'
+RESTART_GUARD_SEC = 1.0
 
 # Why the last run ended.
 STOPPED = 'stopped'
@@ -74,6 +80,7 @@ class DriveSession:
         self._heard_at = 0.0
         self._started_at = 0.0
         self._hold_until = -math.inf
+        self._guard = (None, -math.inf)  # (previous owner, until): see RESTART_GUARD_SEC
         self.last_stop = None  # {'reason', 'by'} of the run that ended last
         self.version = 0  # bumped on every change the pages should hear about
 
@@ -159,6 +166,9 @@ class DriveSession:
 
     def request(self, client, linear, angular, now):
         """Let ``client`` drive at (linear, angular); return None, or why it was refused."""
+        owner, until = self._guard
+        if client is not None and client == owner and now < until:
+            return STALE
         blockers = self.blockers()
         if blockers:
             return blockers[0][0]
@@ -219,6 +229,9 @@ class DriveSession:
         return None
 
     def _end(self, reason, by, now):
+        if self.owner is not None and by != self.owner:
+            # Not the owner's own stop: its commands still on their way must not restart it.
+            self._guard = (self.owner, now + RESTART_GUARD_SEC)
         self.owner = None
         self.linear = self.angular = 0.0
         self._hold_until = now + self.stop_hold_sec

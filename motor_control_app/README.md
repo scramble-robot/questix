@@ -6,7 +6,7 @@ QUESTiX のモータ制御 ROS 2 ノード群です。シリアル通信・制�
 | ノード | 用途 |
 |---|---|
 | `drive_component` | 走行（差動二輪、DDT M0602C ×2）。LifecycleNode |
-| `shot_component` | 射出（ESC ローラー + サーボ角度） |
+| `shot_component` | 射出（トリガーと角度のサーボ）。指令は `/launcher_command`（`questix_msgs/LauncherCommand`）だけから受け取る。ボタンの割り当ては joy_controller の `joy_launcher`、教材との選択は command_arbiter |
 | `single_ddt_motor` | DDT モータ 1 台のベンチテスト用 |
 | `joy_axis_drive` | 左右軸→左右輪の直結デバッグ用（運動学なし、レガシー） |
 

@@ -109,7 +109,7 @@ def test_save_reload_and_profile_isolation(client, tmp_path):
     before = profile(client)
     values = deepcopy(before['values'])
     values['joy_controller']['angular_input_ratio'] = -3  # normalized to ROS double
-    values['shot_component']['fire_button'] = 2
+    values['joy_launcher']['fire_button'] = 2
     values['drive_component']['max_motor_rpm'] = 120
     response = client.put('/api/control-config/uart', json={
         'revision': before['revision'], 'values': values})
@@ -131,12 +131,12 @@ def test_save_reload_and_profile_isolation(client, tmp_path):
     ('drive_component', 'max_motor_rpm', 476),
     ('drive_component', 'max_motor_rpm', 5),  # deadband would swallow all motion
     ('joy_axis_drive', 'invert_left_axis', 1),
-    ('shot_component', 'tilt_up_axis', -2),
-    ('shot_component', 'tilt_down_axis', 64),
-    ('shot_component', 'tilt_up_axis_sign', 0),
-    ('esc_motor_control', 'full_speed_value', 1.1),
+    ('joy_launcher', 'tilt_up_axis', -2),
+    ('joy_launcher', 'tilt_down_axis', 64),
+    ('joy_launcher', 'tilt_up_axis_sign', 0),
+    ('joy_launcher', 'full_speed_value', 1.1),
     ('uart_joy_driver', 'deadzone', 1.0),
-    ('shot_component', 'port', '/dev/other'),
+    ('joy_launcher', 'port', '/dev/other'),
 ])
 def test_invalid_values_do_not_write(client, tmp_path, node, key, value):
     """Reject malformed or hardware-only values before creating a saved profile."""
@@ -164,9 +164,9 @@ def test_conflict_preserves_first_writer(client):
     before = profile(client)
     payload = {'revision': before['revision'], 'values': before['values']}
     assert client.put('/api/control-config/uart', json=payload).status_code == 200
-    payload['values']['shot_component']['fire_button'] = 1
+    payload['values']['joy_launcher']['fire_button'] = 1
     assert client.put('/api/control-config/uart', json=payload).status_code == 409
-    assert profile(client)['values']['shot_component']['fire_button'] == 5
+    assert profile(client)['values']['joy_launcher']['fire_button'] == 5
 
 
 def test_failed_atomic_replace_preserves_existing_profile(client, tmp_path):
@@ -233,23 +233,65 @@ def test_legacy_tilt_profile_migrates_without_writing_on_read(client, tmp_path, 
     """Read legacy axis/button profiles and preserve both directions on the next save."""
     before = profile(client)
     legacy = deepcopy(before['values'])
+    # The oldest layout: the buttons under shot_component / esc_motor_control, one tilt axis.
+    del legacy['joy_launcher']
     legacy['shot_component'] = {'fire_button': 2, 'tilt_axis': axis,
                                 'tilt_up_button_index': 3, 'tilt_down_button_index': 1}
+    legacy['esc_motor_control'] = {'full_speed_button': 9, 'full_speed_value': 0.5}
     path = tmp_path / 'controls.uart.yaml'
     raw = controls.UNITS_MARKER + '\n' + yaml.safe_dump(
         {node: {'ros__parameters': params} for node, params in legacy.items()})
     path.write_text(raw)
     current = profile(client)
     assert path.read_text() == raw
-    assert current['values']['shot_component'] == {
+    assert current['values']['joy_launcher'] == {
         'fire_button': 2, 'tilt_up_axis': axis, 'tilt_down_axis': axis,
         'tilt_up_axis_sign': 1, 'tilt_down_axis_sign': -1,
-        'tilt_up_button_index': 3, 'tilt_down_button_index': 1}
+        'tilt_up_button_index': 3, 'tilt_down_button_index': 1,
+        'full_speed_button': 9, 'full_speed_value': 0.5}
     response = client.put('/api/control-config/uart', json={
         'revision': current['revision'], 'values': current['values']})
     assert response.status_code == 200, response.text
     assert profile(client)['values'] == current['values']
-    assert 'tilt_axis' not in yaml.safe_load(path.read_text())['shot_component']['ros__parameters']
+    saved = yaml.safe_load(path.read_text())
+    assert 'tilt_axis' not in saved['joy_launcher']['ros__parameters']
+    assert 'shot_component' not in saved and 'esc_motor_control' not in saved
+
+
+def test_a_profile_saved_before_joy_launcher_moves_its_buttons(client, tmp_path):
+    """The launcher buttons of an older saved profile (and its undo entry) read as joy_launcher."""
+    before = profile(client)
+    values = deepcopy(before['values'])
+    buttons = values.pop('joy_launcher')
+    buttons['fire_button'] = 2
+    old = {**values,
+           'shot_component': {key: value for key, value in buttons.items()
+                              if not key.startswith('full_speed')},
+           'esc_motor_control': {'full_speed_button': buttons['full_speed_button'],
+                                 'full_speed_value': buttons['full_speed_value']}}
+    path = tmp_path / 'controls.uart.yaml'
+    path.write_text(controls.UNITS_MARKER + '\n' + yaml.safe_dump(
+        {node: {'ros__parameters': params} for node, params in old.items()}))
+    current = profile(client)
+    assert current['values']['joy_launcher'] == buttons
+    assert set(current['values']) == set(before['values'])
+    revision = current['revision']
+    (tmp_path / 'controls.uart.history.json').write_text(json.dumps({revision: old}))
+    assert profile(client)['previous_values']['joy_launcher'] == buttons
+
+
+def test_the_launcher_layout_matches_the_launch_resolver():
+    """questix_control_config migrates the same sections and keys for the robot launch."""
+    root = Path(__file__).resolve().parents[2]
+    launch_source = (root / 'questix_control_config/questix_control_config/__init__.py').read_text()
+    assert f"LAUNCHER_NODE = '{controls.LAUNCHER_NODE}'" in launch_source
+    namespace = {}
+    start = launch_source.index('LAUNCHER_LEGACY_SECTIONS = {')
+    end = launch_source.index('}', start) + 1
+    exec(launch_source[start:end], namespace)  # noqa: S102 - our own source, a literal dict
+    assert namespace['LAUNCHER_LEGACY_SECTIONS'] == controls.LAUNCHER_LEGACY_SECTIONS
+    assert set(controls.GROUPS) >= {controls.LAUNCHER_NODE}
+    assert not set(controls.GROUPS) & set(controls.LAUNCHER_LEGACY_SECTIONS)
 
 
 def test_profile_saved_before_the_wheel_radius_fix_is_not_used(client, tmp_path, monkeypatch):
@@ -306,18 +348,18 @@ def test_units_generation_matches_the_launch_resolver_and_packaged_profiles():
 def test_independent_tilt_save_reload_and_duplicate_validation(client):
     """Mixed inputs survive persistence; identical directions are rejected."""
     current = profile(client)
-    shot = current['values']['shot_component']
+    shot = current['values']['joy_launcher']
     shot['tilt_down_axis'] = -1
     shot['tilt_down_button_index'] = 1
     response = client.put('/api/control-config/uart', json={
         'revision': current['revision'], 'values': current['values']})
     assert response.status_code == 200, response.text
     current = profile(client)
-    assert current['values']['shot_component'] == shot
+    assert current['values']['joy_launcher'] == shot
     for changes in [{'tilt_down_axis': 7, 'tilt_down_axis_sign': 1},
                     {'tilt_up_axis': -1, 'tilt_up_button_index': 1}]:
         bad = deepcopy(current['values'])
-        bad['shot_component'].update(changes)
+        bad['joy_launcher'].update(changes)
         response = client.put('/api/control-config/uart', json={
             'revision': current['revision'], 'values': bad})
         assert response.status_code == 422
@@ -337,7 +379,7 @@ def test_integer_looking_speed_is_saved_as_ros_double(client, tmp_path, controll
     saved = yaml.safe_load((tmp_path / f'controls.{controller}.yaml').read_text())
     speed = saved['joy_controller']['ros__parameters']['longitudinal_input_ratio']
     assert speed == 2.0 and type(speed) is float
-    assert type(saved['shot_component']['ros__parameters']['fire_button']) is int
+    assert type(saved['joy_launcher']['ros__parameters']['fire_button']) is int
 
 
 def test_previous_settings_survive_reload_and_restore_uses_normal_save(client):
@@ -424,11 +466,11 @@ def test_web_profile_is_fixed_and_read_only(client, tmp_path):
     assert web['editable'] is False and uart['editable'] is True
     assert web['source'].endswith('controls.web.yaml')
     # The web page has no D-pad: TILT ▲ / ▼ are buttons 4 / 6, FIRE 5, ROLLER 7.
-    assert web['values']['shot_component'] == {
+    assert web['values']['joy_launcher'] == {
         'fire_button': 5, 'tilt_up_axis': -1, 'tilt_up_axis_sign': 1,
         'tilt_down_axis': -1, 'tilt_down_axis_sign': -1,
-        'tilt_up_button_index': 4, 'tilt_down_button_index': 6}
-    assert web['values']['esc_motor_control']['full_speed_button'] == 7
+        'tilt_up_button_index': 4, 'tilt_down_button_index': 6,
+        'full_speed_button': 7, 'full_speed_value': 1.0}
     assert web['values']['web_joy_driver'] == {'deadzone': 0.05}
     assert 'uart_joy_driver' not in web['values'] and 'joy_node' not in web['values']
     # Speeds and acceleration are the UART values.

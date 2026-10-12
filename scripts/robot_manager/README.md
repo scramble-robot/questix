@@ -305,7 +305,8 @@ The **教材** tab starts and stops that bridge, so nobody has to run `ros2 laun
   and the controller's launcher buttons take over at any time. Same policy as driving: off at every
   start, the card's switch 「教材からの発射を許可する」 is the teacher's on and off switch,
   大会モード turns it off. The card shows `bridge.shoot_state` (who operates it, what blocks it:
-  launcher nodes not accepting lab input, another publisher, emergency stop, controller in use).
+  command_arbiter or a launcher node missing, another publisher, emergency stop, no motion
+  permission, controller in use).
   `/api/lab/status` carries `shoot_allowed` like `drive_allowed`.
 - **すべて止める** (`POST /api/stop-all`) switches the teacher's switches off (and the lesson
   permissions with them), stops the lessons' runs, then stops the robot service; the bridge keeps

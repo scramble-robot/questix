@@ -2,8 +2,8 @@
 
 Joy のキー割り当てと速度調整は、コントローラーごとに `config/controls.uart.yaml`（UART / Switch）、
 `config/controls.dualshock.yaml`（DualShock）、`config/controls.web.yaml`（Web：ブラウザ・スマホ、
-`web_joy_driver`）にまとめています。走行、射出、ローラーが同じファイルを
-読み、ROS のノード名ごとのセクションを使用します。シリアルポート、GPIO、非常停止、
+`web_joy_driver`）にまとめています。走行（joy_controller・drive_component）と、射出・角度・
+ローラーのボタン（joy_launcher）が同じファイルを読み、ROS のノード名ごとのセクションを使用します。シリアルポート、GPIO、非常停止、
 ライフサイクル、モータ制御ループの設定は各パッケージの YAML に残ります。
 
 ## 編集・反映
@@ -56,19 +56,25 @@ ROS ノードを `ros2 run` で直接起動する場合は、このファイル�
   左右速度は全方向移動用で、標準の差動駆動では使用しません。
 - `drive_component`: 車輪の最大 RPM、加速度、目標付近の緩和幅、低速不感帯。
   `max_motor_rpm` は M0602C の指令上限 475 以下、`min_command_rpm` はその値未満です。
-- `shot_component`: 射出ボタン、射出角度を上げる入力・下げる入力。
-  図の「上げる」「下げる」から別々に選べます（例：上げる＝十字キー上、下げる＝B）。
+- `joy_launcher`: 射出ボタン、射出角度を上げる入力・下げる入力、ローラーの回転ボタンと出力（0〜1。
+  実測 RPM ではありません）。joy_launcher が `/launcher_command` にして出し、射出（shot_component）と
+  ローラー（esc_motor_control）は `/joy` を読みません。
+  角度は図の「上げる」「下げる」から別々に選べます（例：上げる＝十字キー上、下げる＝B）。
   `tilt_up_axis` / `tilt_down_axis` は方向ごとの軸番号で、-1 の場合だけ対応する
   `tilt_up_button_index` / `tilt_down_button_index` を使います。
   軸操作時の `tilt_up_axis_sign` / `tilt_down_axis_sign` は +1 が正方向、-1 が負方向です。
   初期値は十字キー上／下。同一入力の重複割り当ては拒否し、上下同時押しでは動かしません。
   従来の `tilt_axis` 形式は管理画面で読み込む際に上下それぞれへ変換し、保存時に新形式になります。
   ノードが旧形式を引き継ぐのは新しい軸パラメータが未指定（内部値 -2）のときだけです。launch から
-  起動すると操作設定が `tilt_up_axis` / `tilt_down_axis` を必ず指定するため、`config_file` に書いた
-  `tilt_axis` は使われません（起動時に警告）。旧形式が効くのは操作設定を読まずにノードを起動した
-  場合（`ros2 run ... --params-file` で旧形式のファイルだけを渡すなど）に限られます。
-  この変更を使うには `motor_control_app` を再ビルドし、robot_manager を更新してください。
-- `esc_motor_control`: ローラー回転ボタンと出力（0〜1）。出力は実測 RPM ではありません。
+  起動すると操作設定が `tilt_up_axis` / `tilt_down_axis` を必ず指定するため、ノードの YAML に書いた
+  `tilt_axis` は使われません（起動時に警告）。旧形式が効くのは操作設定を読まずに joy_launcher を
+  起動した場合（`ros2 run ... --params-file` で旧形式のファイルだけを渡すなど）に限られます。
+  **以前の配置**: これらのボタンは `shot_component`（射出・角度）と `esc_motor_control`（ローラー）の
+  セクションにありました。その配置で保存されたファイルは、起動時に joy_launcher のセクションへ移した
+  一時ファイルを使い（保存されたファイルは書き換えません。`LAUNCHER_LEGACY_SECTIONS`）、管理画面も
+  新しい配置で読み込み、保存すると新しい配置で書きます。両者の名前の一致は
+  `scripts/robot_manager/test_controls.py` が確かめます。ノードの YAML（`config_file`）の
+  `shot_component` / `esc_motor_control` に残したボタンの設定は使われないため、起動時に警告します。
 - `joy_node` / `uart_joy_driver`: 入力ドライバのスティック不感帯（UART・DualShock 用ファイルのみ）。
 - `web_joy_driver`: ブラウザのスティックの不感帯（Web 用ファイルのみ）。ポート・認証・タイムアウト・カメラなどは
   `web_joy_driver/config/web_joy_driver_params.yaml` に残ります。

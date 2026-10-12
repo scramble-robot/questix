@@ -29,13 +29,6 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
     : rclcpp_lifecycle::LifecycleNode("shot_component", options),
       tilt_servo_id_(1),
       trigger_servo_id_(3),
-      fire_button_(5),
-      tilt_up_axis_(-2),
-      tilt_down_axis_(-2),
-      tilt_up_axis_sign_(1),
-      tilt_down_axis_sign_(-1),
-      tilt_up_button_index_(4),
-      tilt_down_button_index_(6),
       tilt_step_angle_(5.0),
       tilt_min_angle_(0.0),
       tilt_max_angle_(70.0),
@@ -49,32 +42,21 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
       runtime_fault_(false),
       teardown_pending_(false),
       is_shooting_(false),
-      last_button_state_(false),
       current_tilt_position_(2048),
       current_tilt_angle_(0.0),
       last_command_time_(0, 0, RCL_ROS_TIME),
-      accept_lab_input_(false),
-      lab_joy_quiet_sec_(1.0),
-      lab_min_fire_interval_sec_(2.0),
-      joy_launcher_active_at_sec_(-std::numeric_limits<double>::infinity()),
+      min_fire_interval_sec_(0.0),
       last_fire_sec_(-std::numeric_limits<double>::infinity()),
       fired_count_(0),
-      last_fire_source_(shot_lab::FireSource::kNone),
-      last_lab_refusal_(shot_lab::Refusal::kNone) {
+      last_fire_source_(FireSource::kNone),
+      pending_tilt_(false),
+      pending_tilt_deg_(0.0),
+      multiple_command_publishers_(false) {
   // パラメーター宣言（取得は on_configure で行い、cleanup→configure で再読込できるようにする）
   this->declare_parameter("port", "/dev/servo");
   this->declare_parameter("baudrate", 115200);
   this->declare_parameter("tilt_servo_id", 1);
   this->declare_parameter("trigger_servo_id", 3);
-  this->declare_parameter("fire_button", 5);  // R button (Switch2 native index)
-  // Legacy profiles still work. Explicit per-direction axes override tilt_axis.
-  this->declare_parameter("tilt_axis", -1);
-  this->declare_parameter("tilt_up_axis", -2);
-  this->declare_parameter("tilt_down_axis", -2);
-  this->declare_parameter("tilt_up_axis_sign", 1);
-  this->declare_parameter("tilt_down_axis_sign", -1);
-  this->declare_parameter("tilt_up_button_index", 4);    // L button (Switch2 native index)
-  this->declare_parameter("tilt_down_button_index", 6);  // ZL button (Switch2 native index)
   this->declare_parameter("tilt_step_angle", 5.0);       // チルトステップサイズ（度）
   this->declare_parameter("tilt_min_angle", 0.0);        // チルト最小角度（度）
   this->declare_parameter("tilt_max_angle", 70.0);       // チルト最大角度（度）
@@ -82,7 +64,8 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
   this->declare_parameter("home_angle", 100.0);          // ホーム角度（度）
   this->declare_parameter("fire_duration_ms", 300);      // 射撃持続時間（ミリ秒）
   this->declare_parameter("command_rate_limit_ms", 50);  // コマンド間隔制限（ミリ秒）
-  this->declare_parameter("joy_topic", "/joy");          // joyトピック名
+  // questix_msgs/LauncherCommand: joy_launcher, or command_arbiter in a lesson launch.
+  this->declare_parameter("launcher_command_topic", "/launcher_command");
   // Lifecycle 自動遷移。非常停止解除でサーボが通電するまで configure を再試行する。
   this->declare_parameter("auto_start", true);
   this->declare_parameter("connect_retry_period_sec", 3.0);
@@ -101,27 +84,19 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
   this->declare_parameter("motion_permission_topic", "/motion_permission");
   this->declare_parameter("require_motion_permission", true);
   this->declare_parameter("motion_permission_timeout_sec", 0.5);
-  // QUESTiX LAB launcher input（練習用起動のみ true。条件は shot_lab_logic.hpp）
-  this->declare_parameter("accept_lab_input", false);
-  this->declare_parameter("lab_joy_quiet_sec", 1.0);
-  this->declare_parameter("lab_min_fire_interval_sec", 2.0);
+  // The shortest time between two shots, from any source (the mechanism's limit; 0 = none).
+  this->declare_parameter("min_fire_interval_sec", 0.0);
 
-  accept_lab_input_ = this->get_parameter("accept_lab_input").as_bool();
   // on_configure re-reads the tilt range; reading it here too lets /shot/status report the
   // configured range while the node still waits for the servos.
   tilt_min_angle_ = this->get_parameter("tilt_min_angle").as_double();
   tilt_max_angle_ = this->get_parameter("tilt_max_angle").as_double();
-  const double requested_quiet = this->get_parameter("lab_joy_quiet_sec").as_double();
-  lab_joy_quiet_sec_ =
-      std::isfinite(requested_quiet) && requested_quiet >= 0.0 ? requested_quiet : 1.0;
-  const double requested_interval = this->get_parameter("lab_min_fire_interval_sec").as_double();
-  lab_min_fire_interval_sec_ =
-      std::isfinite(requested_interval) && requested_interval >= 0.0 ? requested_interval : 2.0;
-  if (lab_joy_quiet_sec_ != requested_quiet || lab_min_fire_interval_sec_ != requested_interval) {
-    RCLCPP_WARN(this->get_logger(),
-                "Invalid lab_joy_quiet_sec=%g or lab_min_fire_interval_sec=%g; using %.1f / %.1f",
-                requested_quiet, requested_interval, lab_joy_quiet_sec_,
-                lab_min_fire_interval_sec_);
+  const double requested_interval = this->get_parameter("min_fire_interval_sec").as_double();
+  min_fire_interval_sec_ =
+      std::isfinite(requested_interval) && requested_interval >= 0.0 ? requested_interval : 0.0;
+  if (min_fire_interval_sec_ != requested_interval) {
+    RCLCPP_WARN(this->get_logger(), "Invalid min_fire_interval_sec=%g; using %.1f",
+                requested_interval, min_fire_interval_sec_);
   }
 
   // /shot/status is observation only and reports in every lifecycle state.
@@ -129,21 +104,6 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
       rclcpp::create_publisher<std_msgs::msg::String>(*this, "/shot/status", rclcpp::QoS(10));
   shot_status_timer_ = this->create_wall_timer(std::chrono::milliseconds(200),
                                                std::bind(&ShotComponent::publishShotStatus, this));
-  if (accept_lab_input_) {
-    // Requests are checked in the callbacks (ACTIVE, E-stop, controller, interval), never queued.
-    lab_tilt_sub_ = this->create_subscription<std_msgs::msg::Float32>(
-        "/shot/lab/tilt", 1,
-        std::bind(&ShotComponent::labTiltCallback, this, std::placeholders::_1));
-    lab_fire_sub_ = this->create_subscription<std_msgs::msg::Empty>(
-        "/shot/lab/fire", 1,
-        std::bind(&ShotComponent::labFireCallback, this, std::placeholders::_1));
-    RCLCPP_INFO(this->get_logger(),
-                "QUESTiX LAB launcher input on /shot/lab/tilt and /shot/lab/fire "
-                "(controller quiet %.1f s, fire interval %.1f s)",
-                lab_joy_quiet_sec_, lab_min_fire_interval_sec_);
-  } else {
-    RCLCPP_INFO(this->get_logger(), "QUESTiX LAB launcher input disabled (accept_lab_input=false)");
-  }
 
   auto_start_ = this->get_parameter("auto_start").as_bool();
   const double requested_retry_period = this->get_parameter("connect_retry_period_sec").as_double();
@@ -202,6 +162,17 @@ ShotComponent::ShotComponent(const rclcpp::NodeOptions& options)
                                 std::bind(&ShotComponent::startupTimerCallback, this));
     startup_timer_->cancel();
   }
+  // /launcher_command (reliable + volatile + keep-last(1), questix_msgs/msg/LauncherCommand.msg),
+  // subscribed in every lifecycle state: what arrives while the launcher may not move advances
+  // the counters and is dropped (launcher_events.hpp), so nothing is replayed on activation.
+  command_topic_ = this->get_parameter("launcher_command_topic").as_string();
+  command_subscription_ = this->create_subscription<questix_msgs::msg::LauncherCommand>(
+      command_topic_, rclcpp::QoS(1).reliable().durability_volatile(),
+      std::bind(&ShotComponent::commandCallback, this, std::placeholders::_1));
+  command_publisher_timer_ = this->create_wall_timer(
+      std::chrono::milliseconds(500), std::bind(&ShotComponent::checkCommandPublishers, this));
+  RCLCPP_INFO(this->get_logger(), "Launcher commands: %s (min fire interval %.1f s)",
+              command_topic_.c_str(), min_fire_interval_sec_);
   // A lease runs out without a message: check it periodically too.
   permission_timer_ = this->create_wall_timer(std::chrono::milliseconds(100),
                                               std::bind(&ShotComponent::applyPermission, this));

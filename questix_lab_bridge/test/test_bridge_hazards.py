@@ -3,7 +3,7 @@
 The node's methods run for real on a stand-in object (no ROS graph, no WebSocket) with a clock
 the test moves; they need rclpy and questix_msgs, so this file runs where the node can be built
 (colcon test) and is skipped elsewhere. The rules themselves are unit-tested ROS-free in
-test_shoot.py (TiltCoalescer, ShootArbiter) and test_drive.py (DriveSession).
+test_shoot.py (TiltCoalescer, ShootSession) and test_drive.py (DriveSession).
 """
 
 import threading
@@ -16,15 +16,16 @@ bridge_node = pytest.importorskip(
 
 from questix_lab_bridge import drive, shoot  # noqa: E402
 
-ROLLER_OK = {'command': 0.0, 'source': 'idle', 'lab_accepted': True, 'lab_locked': False,
-             'estop': False}
+ROLLER_OK = {'command': 0.0, 'source': 'idle', 'estop': False, 'permission': True,
+             'max_power': 1.0}
 SHOT_OK = {'tilt_deg': 30.0, 'shooting': False, 'fired_count': 0, 'last_fire_source': None,
-           'lab_accepted': True, 'estop': False, 'active': True}
+           'estop': False, 'permission': True, 'active': True, 'tilt_min_deg': 0.0,
+           'tilt_max_deg': 120.0, 'next_fire_in_sec': 0.0}
 _METHODS = ('_after_shoot_change', '_send_tilt', '_drop_pending_tilt', '_on_shoot_request',
             '_on_shoot_tick', '_on_leave', '_stop_all', '_set_estop', '_on_drive', '_on_estop',
             '_state', '_send_drive_state', '_send_shoot_state', '_greeting', '_on_arbiter',
-            '_on_motion_permission', '_on_lab_permission', '_motion_allows',
-            '_after_drive_change', '_on_drive_tick')
+            '_on_motion_permission', '_motion_allows', '_after_drive_change', '_on_drive_tick',
+            '_publish_launcher_stop')
 
 
 class _Clock:
@@ -59,13 +60,14 @@ def node(monkeypatch):
     # Fresh permissions (the tests that move the clock far renew them with _renew_permissions).
     stub._motion = {'drive': True, 'launcher': True}
     stub._motion_at = clock.now
-    stub._lab_permission = True
-    stub._lab_permission_at = clock.now
-    stub._shoot = shoot.ShootArbiter(allowed=False)
-    stub._shoot.set_allowed(True, clock.now)
-    stub._shoot.set_graph([], ['/esc_motor_control'], ['/shot_component'], clock.now)
+    stub._shoot = shoot.ShootSession()
+    stub._shoot.set_graph([], ['/launcher_arbiter'], clock.now)
     stub._shoot.set_roller_status(dict(ROLLER_OK), clock.now)
     stub._shoot.set_shot_status(dict(SHOT_OK), clock.now)
+    stub._shoot.set_arbiter(_arbiter_status(mechanism='launcher'), clock.now)
+    stub._shoot.set_motion_permission(True, clock.now)
+    stub._shoot_enabled = True
+    stub._drive_topic = '/target_twist/lab'
     stub._tilt = shoot.TiltCoalescer(bridge_node._TILT_GAP_SEC)
     stub._estop = {'topic': False, 'drive': False}
     stub._estop_known = False
@@ -83,8 +85,7 @@ def node(monkeypatch):
     stub._relay = lambda *a: None
     stub._drive_state_text = lambda: '{}'
     stub._shoot_state_text = lambda now: '{}'
-    stub._shoot_publish = lambda name, msg: stub.published.append((name, msg.data))
-    stub._publish_roller = lambda power: stub.published.append(('roller', power))
+    stub._publish_launcher = lambda command: stub.published.append(('launcher', command))
     stub._publish_twist = lambda linear, angular: stub.published.append(
         ('twist', (linear, angular)))
     for name in _METHODS:
@@ -93,20 +94,26 @@ def node(monkeypatch):
 
 
 def _arbiter_status(**fields):
+    """A status of command_arbiter as drive.arbiter_status returns it (drive by default)."""
+    launcher = fields.get('mechanism') == 'launcher'
     base = {'mechanism': 'drive', 'active_source': 'joy', 'switch_reason': 'start',
             'lab_permitted': True, 'lab_locked': False, 'lab_refusal': '', 'lab_count': 0,
-            'max_linear': 0.15, 'max_angular': 0.5}
+            'max_linear': None if launcher else 0.15, 'max_angular': None if launcher else 0.5,
+            'max_power': 0.8 if launcher else None, 'tilt_min_deg': 0.0 if launcher else None,
+            'tilt_max_deg': 120.0 if launcher else None,
+            'min_fire_power': 0.2 if launcher else None,
+            'spin_up_sec': 1.0 if launcher else None,
+            'fire_interval_sec': 2.0 if launcher else None,
+            'next_fire_in_sec': 0.0 if launcher else None, 'spin_ready_in_sec': None}
     base.update(fields)
     return base
 
 
 def _arbiter_message(**fields):
     nan = float('nan')
-    base = dict(_arbiter_status(), max_power=nan, tilt_min_deg=nan, tilt_max_deg=nan,
-                min_fire_power=nan, spin_up_sec=nan, fire_interval_sec=nan,
-                next_fire_in_sec=nan, spin_ready_in_sec=nan)
-    base.update(fields)
-    return types.SimpleNamespace(**base)
+    status = _arbiter_status(**fields)
+    return types.SimpleNamespace(**{key: nan if value is None else value
+                                    for key, value in status.items()})
 
 
 def _permission(drive_allowed, launcher_allowed):
@@ -115,8 +122,8 @@ def _permission(drive_allowed, launcher_allowed):
 
 def _renew_permissions(node):
     node._on_motion_permission(_permission(True, True))
-    node._on_lab_permission(_permission(True, True))
     node._on_arbiter(_arbiter_message())
+    node._on_arbiter(_arbiter_message(mechanism='launcher'))
 
 
 def _estop_message(active):
@@ -131,7 +138,17 @@ def _drive_status(pressed):
 
 
 def _tilts(node):
-    return [value for name, value in node.published if name == 'tilt']
+    """The tilt targets the commands carried, each once (they repeat it until it changes)."""
+    targets = []
+    for name, command in node.published:
+        if name == 'launcher' and command[1] is not None and (
+                not targets or targets[-1] != command[1]):
+            targets.append(command[1])
+    return targets
+
+
+def _rollers(node):
+    return [command[0] for name, command in node.published if name == 'launcher']
 
 
 def _keep_a_tilt(node):
@@ -215,7 +232,8 @@ def test_a_heard_pressed_estop_ends_driving_and_the_launcher(node):
     node._on_shoot_request(2, ('roller', 0.5))
     node._on_estop(_estop_message(True))
     assert not node._drive.active and not node._shoot.active
-    assert ('twist', (0.0, 0.0)) in node.published and ('roller', 0.0) in node.published
+    assert ('twist', (0.0, 0.0)) in node.published
+    assert ('launcher', (0.0, None, 0)) in node.published  # the lab's stop
     assert node._state([], 24)['emergency_stop'] is True
 
 
@@ -303,7 +321,8 @@ def test_a_silent_motion_permission_ends_the_run(node):
 
 
 @pytest.mark.parametrize('withdraw', [
-    lambda node: node._on_lab_permission(_permission(True, False)),  # the teacher: no launcher
+    # The teacher switched the lesson permission off: the arbiter reports it.
+    lambda node: node._on_arbiter(_arbiter_message(mechanism='launcher', lab_permitted=False)),
     lambda node: node._on_motion_permission(_permission(True, False)),  # no motion permission
 ], ids=['lab-permission', 'motion-permission'])
 def test_a_withdrawn_permission_ends_the_launcher_session(node, withdraw):
@@ -313,24 +332,73 @@ def test_a_withdrawn_permission_ends_the_launcher_session(node, withdraw):
     withdraw(node)
     node._on_shoot_tick()
     assert not node._shoot.active
-    assert node._shoot.last_stop['reason'] == shoot.NOT_ALLOWED
-    assert node.published[-1] == ('roller', 0.0)
+    assert node._shoot.last_stop['reason'] in (shoot.NOT_ALLOWED, shoot.NO_MOTION_PERMISSION)
+    assert node.published[-1] == ('launcher', (0.0, None, 0))
     node._on_shoot_request(1, ('roller', 0.5))
     assert not node._shoot.active  # refused while it stays off
 
 
-def test_a_silent_lab_permission_ends_the_launcher_session(node):
+def test_a_silent_launcher_arbiter_ends_the_launcher_session(node):
     node._on_estop(_estop_message(False))
-    node._on_shoot_request(1, ('roller', 0.5))
-    node.clock.now += 0.4
-    node._on_shoot_request(1, ('roller', 0.5))
-    node._on_motion_permission(_permission(True, True))
-    node.clock.now += 0.4
-    node._on_shoot_request(1, ('roller', 0.5))
-    node._on_motion_permission(_permission(True, True))
-    node.clock.now += 0.3  # 1.1 s since /lab_permission: older than its 1.0 s lease
+    for _ in range(4):
+        node._on_shoot_request(1, ('roller', 0.5))
+        node._on_motion_permission(_permission(True, True))
+        node._shoot.set_roller_status(dict(ROLLER_OK), node.clock.now)
+        node._shoot.set_shot_status(dict(SHOT_OK), node.clock.now)
+        node._on_shoot_tick()
+        node.clock.now += 0.4
+    # 1.6 s since the launcher arbiter's last status: it is gone
     node._on_shoot_request(1, ('roller', 0.5))
     node._on_motion_permission(_permission(True, True))
     node._on_shoot_tick()
     assert not node._shoot.active
-    assert node._shoot.last_stop['reason'] == shoot.NOT_ALLOWED
+    assert node._shoot.last_stop['reason'] == shoot.NO_LAUNCHER
+
+
+def test_the_launcher_arbiter_locking_the_lab_out_ends_the_session(node):
+    node._on_estop(_estop_message(False))
+    node._on_shoot_request(1, ('roller', 0.5))
+    node.published.clear()
+    node._on_arbiter(_arbiter_message(mechanism='launcher', lab_count=1, lab_locked=True))
+    assert not node._shoot.active
+    assert node._shoot.last_stop['reason'] == shoot.CONTROLLER
+    assert node.published == [('launcher', (0.0, None, 0))]
+
+
+def test_a_shot_goes_out_with_the_command(node):
+    node._on_estop(_estop_message(False))
+    for _ in range(12):  # 1.2 s at 0.5: the spin-up is over
+        node._on_shoot_request(1, ('roller', 0.5))
+        node._on_motion_permission(_permission(True, True))
+        node._shoot.set_roller_status(dict(ROLLER_OK, command=0.5, source='lab'), node.clock.now)
+        node._shoot.set_shot_status(dict(SHOT_OK), node.clock.now)
+        node._on_arbiter(_arbiter_message(mechanism='launcher'))
+        node.clock.now += 0.1
+    node._on_shoot_request(1, ('fire', True))
+    assert node.published[-1] == ('launcher', (0.5, None, 1))
+
+
+def test_a_heartbeat_of_a_session_the_bridge_ended_is_dropped_without_an_answer(node):
+    answers = []
+    node._server = types.SimpleNamespace(publish=lambda *a: None,
+                                         publish_to=lambda *a: answers.append(a))
+    node._on_estop(_estop_message(False))
+    node._on_shoot_request(1, ('roller', 0.5))
+    node._on_estop(_estop_message(True))   # the bridge ends the session
+    node._on_estop(_estop_message(False))  # released at once
+    node.published.clear()
+    node._on_shoot_request(1, ('roller', 0.5))  # the page's heartbeat, already on its way
+    assert not node._shoot.active
+    assert node.published == [] and answers == []  # nothing moves, the page hears nothing
+
+
+def test_a_drive_heartbeat_of_a_run_the_bridge_ended_is_dropped_without_an_answer(node):
+    answers = []
+    node._server = types.SimpleNamespace(publish=lambda *a: None,
+                                         publish_to=lambda *a: answers.append(a))
+    node._on_estop(_estop_message(False))
+    assert node._drive.request(1, 0.1, 0.0, node.clock.now) is None
+    node._on_estop(_estop_message(True))
+    node._on_estop(_estop_message(False))
+    assert node._drive.request(1, 0.1, 0.0, node.clock.now) == drive.STALE
+    assert not node._drive.active

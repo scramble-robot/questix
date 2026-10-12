@@ -41,10 +41,30 @@ QUESTiX 共通メッセージ定義パッケージ。統一緊急停止インタ
 | `tilt_deg` | `float32` | チルトの目標角 [deg](教材)。NaN = 目標なし |
 | `tilt_steps` | `int32` | チルトの段数の累計(コントローラー: 上 +1・下 -1)。変化した分だけ動かす |
 | `fire_seq` | `uint32` | 射撃要求の累計。増えたら 1 発(1 メッセージで最大 1 発) |
-| `source` | `string` | `"joy"` / `"lab"` |
+| `source` | `string` | `"joy"` / `"lab"`(表示用。受信側は値で区別しない) |
 
 射撃・チルトは「パルス」ではなく累計と目標なので、keep-last(1) で落ちても重複しても数が変わらない。
-送信元が変わったとき・指令が途切れた後の最初のメッセージは基準になるだけで、何も動かさない。
+累計は**送信元(publisher)ごとの 1 つの数え方**で、受信側は最初のメッセージ・指令が途切れた後の最初の
+メッセージ・`fire_seq` が戻ったメッセージ(送信元の再起動)を基準にするだけで、何も動かさない。
+`tilt_deg` は前のメッセージと違う有限の値(前が NaN を含む)が新しい目標(基準のときも今の目標として扱う)。
+command_arbiter の出力は自分の累計を持つので、入力が切り替わっても数え直しや取りこぼしはない。
+受信側の実装: `motor_control_app/launcher_events.hpp`、`command_arbiter/launcher_flow.hpp`(`InputEvents`)。
+
+## `/launcher_command` トピック契約(発射機構の指令、L3)
+
+- **型**: `questix_msgs/msg/LauncherCommand`
+- **QoS**: reliable + **volatile** + keep-last(1)
+- **発行元**: 練習・大会は joy_controller パッケージの `joy_launcher`(`/joy` 1 件ごと。ボタンの割り当ては
+  操作設定の `joy_launcher` セクション)。教材は command_arbiter の `launcher_arbiter` が
+  `/launcher_command/joy`(joy_launcher)と `/launcher_command/lab`(QUESTiX LAB ブリッジ)から選ぶ。
+- **購読側**: esc_motor_control(`roller_power`。`safety_timeout` 1.0 s 途切れたら止め、0 を受けるまで
+  回さない。起動直後と非常停止・許可のあとも同じ)、shot_component(`fire_seq`・`tilt_steps`・`tilt_deg`。
+  ACTIVE・許可あり・非常停止解除のときだけ動かし、それ以外で届いたものは捨てる)。どちらも `/joy` と
+  教材のトピックは読まない。
+- **発行元は 1 つだけ**: 2 つ以上のノードが出している間、esc_motor_control はローラーを 0 にし
+  (1 つに戻っても 0 を受けるまで回さない)、shot_component は射撃・チルトをしない(累計が混ざるため)。
+- **誰が操作してよいか**はここでは決めない(command_arbiter と joy_launcher)。止める判断は
+  `/emergency_stop` と `/motion_permission` でアクチュエータが行う。
 
 ### `ArbiterStatus.msg`
 
@@ -53,7 +73,9 @@ command_arbiter(教材モードのみ)が機構ごとに出す選択の結果(`/
 (先生の教材の許可 `/lab_permission`)、`lab_locked`(コントローラーが割り込んだ)、`lab_refusal`(教材の
 指令を断った理由。空なら受付中)、`lab_count`(受け取った教材の指令の数。ブリッジが自分の走行と
 対応付けるため)と、適用中の教材の制限(走行: `max_linear`・`max_angular`、発射: `max_power`・
-`tilt_min_deg`・`tilt_max_deg`・射撃の前提と間隔)。非常停止と走行許可は見ない(アクチュエータの仕事)。
+`tilt_min_deg`・`tilt_max_deg`・射撃の前提 `min_fire_power`/`spin_up_sec` と間隔 `fire_interval_sec`、
+残り時間 `next_fire_in_sec`・`spin_ready_in_sec`)。発射の `lab_refusal` には `not_spinning`・`interval`
+も入る。非常停止と走行許可は見ない(アクチュエータの仕事)。
 
 ### `MotorFeedback.msg`
 
@@ -211,7 +233,7 @@ DDT M0602C の Protocol 1 応答フレームをデコードした 1 モータ分
 |---|---|---|
 | `drive_component` | 停止指令をスロットル無しで即時送信 + 目標を破棄。以後の `/target_twist` は無視。停止指令を送れなかったら stop fault(送信に成功するまで動かさない) | `/target_twist` 受付再開。モータは解除**後**に届いた次の twist コマンドまで停止のまま |
 | `shot_component` | deactivate→cleanup でサーボバス解放(unconfigured へ) | auto-start 再アーム。configure→activate を自動リトライ(走行許可も必要) |
-| `esc_motor_control` | `set_motor_speed(0.0)` 即時実行。停止中はボタン入力を無視 | フルスピードボタンの**離す→押す**まで 0 のまま(押しっぱなしでは再始動しない)。教材入力は 0 を受けるまでロック |
+| `esc_motor_control` | `set_motor_speed(0.0)` 即時実行。停止中は `/launcher_command` を無視 | `roller_power` 0 の指令を受けるまで 0 のまま(押しっぱなし・教材の指令の繰り返しでは再始動しない。ボタンなら**離す→押す**) |
 
 ## `/actuation_authority` トピック契約(教材モードの先生の許可 = 走行許可の票)
 
@@ -289,8 +311,8 @@ operation_manager の `MotionPermissionManager` だけが購読する(`operation
   切り替えても教材のブリッジは再起動しない。起動のたびに OFF から始まる(`/actuation_authority` と同じ)。
 - **リース**: 購読側は自分の単調時計で 1.0 s 以内に受信したものだけを使う。未受信・途絶・false は不許可。
 - **購読側**: command_arbiter の `drive_arbiter`(`drive_allowed`: 教材の走行指令を `/target_twist` に
-  通すか)、QUESTiX LAB ブリッジ(`launcher_allowed`: 教材からの発射のセッション。LauncherArbiter が
-  できるまでの暫定)。
+  通すか)と `launcher_arbiter`(`launcher_allowed`: 教材の発射の指令を `/launcher_command` に通すか)。
+  QUESTiX LAB ブリッジは読まず、arbiter の `/command_arbiter/status`(`lab_permitted`)を表示に使う。
 
 ## `/command_arbiter/status` トピック契約(入力の選択の状態、L3)
 
@@ -301,8 +323,8 @@ operation_manager の `MotionPermissionManager` だけが購読する(`operation
   (`switch_reason`)、教材の許可(`lab_permitted`)、教材の指令を断った理由(`lab_refusal`)、受け取った
   教材の指令の数(`lab_count`。ブリッジは自分の走行が始まった後の状態だけを使う)、教材の上限。
   非常停止と走行許可はここには出ない(アクチュエータが判断する)。
-- **購読側**: QUESTiX LAB ブリッジ(1.5 s 届かなければ command_arbiter なし = `no_drive_node`)、
-  web_joy_driver(「教材から走らせています」の表示、1.5 s で消す)。
+- **購読側**: QUESTiX LAB ブリッジ(両方の機構。1.5 s 届かなければ command_arbiter なし =
+  `no_drive_node` / `no_launcher`)、web_joy_driver(走行だけ。「教材から走らせています」の表示、1.5 s で消す)。
 
 ## 型付きステータストピック契約
 

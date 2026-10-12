@@ -119,9 +119,10 @@ with its distance field focused for the measured range, and the session (the `ro
 statuses) is kept on the robot as a record. The roller stops by itself after each shot, and on the
 learner's stop, Esc, a hidden page, a stalled page, a lost link, the stop bar (any page), and
 whatever the bridge ends it for (controller, E-stop, dead-man, 30 s). It needs the teacher's
-発射機構の操作 and 教材からの発射 in Robot Manager (published on `/lab_permission`) and the launcher
-nodes started with `accept_lab_input` (lesson launches); otherwise the topic works with typed data as before and says why in one line.
-The bridge enforces every rule itself (`questix_lab_bridge/README.md`, "Launcher experiments");
+発射機構の操作 and 教材からの発射 in Robot Manager (published on `/lab_permission`) and the robot
+started for a lesson (command_arbiter passes the page's commands on); otherwise the topic works
+with typed data as before and says why in one line. The bridge and command_arbiter enforce every
+rule (`questix_lab_bridge/README.md`, "Launcher experiments");
 `js/live/shoot-core.js` mirrors them for the page and is tested (`test/shoot-core.test.mjs`), and
 `js/live/shoot-link.js` is the only module that sends launcher frames.
 

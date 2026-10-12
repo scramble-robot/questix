@@ -5,6 +5,8 @@ YAML が Single Source of Truth。個別の use_sim_time / debug_mode / joy_devi
 launch 引数は廃止し、YAML を編集するか config_file:=... で切り替えること。
 joy_controller は /joy を読む（ノードの既定）。止める判断はアクチュエータが /emergency_stop と
 /motion_permission で行うので、/joy を間で止めるノードはない。
+joy_launcher は発射機構のボタン（射出・角度・ローラー）を /launcher_command に出す（どちらの
+スティックモードでも起動する）。射出・ローラーのノードは /joy を読まない。
 -->
 <launch>
     <arg name="dual_stick" default="false" description="Use dual stick differential drive mode" />
@@ -53,6 +55,13 @@ joy_controller は /joy を読む（ノードの既定）。止める判断は�
     <!-- Joy controller node (single stick mode) -->
     <node pkg="joy_controller" exec="joy_controller_node" name="joy_controller" output="screen" unless="$(var dual_stick)">
         <param from="$(var config_file)" />
+        <param from="$(var control_config_file)" />
+    </node>
+
+    <!-- The launcher's buttons (fire, tilt, roller) as questix_msgs/LauncherCommand on
+         /launcher_command (a lesson launch remaps it to command_arbiter's input), in both stick
+         modes. Its mapping is the joy_launcher section of the controls profile. -->
+    <node pkg="joy_controller" exec="joy_launcher_node" name="joy_launcher" output="screen">
         <param from="$(var control_config_file)" />
     </node>
 

@@ -55,10 +55,20 @@ def generate_launch_description():
         emulate_tty=True
     )
 
+    # joy_launcher: the launcher's buttons (fire, tilt, roller) -> /launcher_command
+    joy_launcher_node = Node(
+        package='joy_controller',
+        executable='joy_launcher_node',
+        name='joy_launcher',
+        parameters=[LaunchConfiguration('control_config_file')],
+        output='screen'
+    )
+
     return LaunchDescription([
         *control_actions(),
         config_file_arg,
         joy_node_config_arg,
         joy_node,
-        joy_controller_node
+        joy_controller_node,
+        joy_launcher_node
     ])

@@ -44,13 +44,13 @@ Server to browser, text frames are JSON objects tagged by ``type``:
   Pages show pressed / released only from this stream (unknown until it arrives, stale when it
   stops); ``drive.emergency_stop`` may add a pressed E-stop but never makes it released.
 * ``roller`` - ``/roller/status`` as the roller ESC node sends it (``command`` 0..1, ``source``
-  ``joy``/``lab``/``idle``, ``lab_accepted``, ``lab_locked``, ``estop``) plus ``stamp`` (receipt
+  ``joy``/``lab``/``idle``, ``estop``, ``permission``, ``max_power``) plus ``stamp`` (receipt
   time [s]).
 * ``shot``   - ``/shot/status`` (``tilt_deg``, ``shooting``, ``fired_count``,
-  ``last_fire_source`` ``joy``/``lab``/null, ``lab_accepted``, ``estop``, ``active``) plus
-  ``stamp``.
+  ``last_fire_source`` ``joy``/``lab``/null, ``estop``, ``permission``, ``active``, the tilt
+  range, ``next_fire_in_sec``) plus ``stamp``.
 * ``shoot_state`` - whether a page may operate the launcher now and why not, who does, the
-  roller power, fire readiness and limits (shoot.ShootArbiter.state); on every change and once
+  roller power, fire readiness and limits (shoot.ShootSession.state); on every change and once
   a second.
 * ``shoot_refused`` - to the asking page only: ``reason`` (a key, see shoot.py), ``request``
   (``roller``/``tilt``/``fire``), and ``next_fire_in_sec`` / ``spin_ready_in_sec``.
@@ -132,7 +132,7 @@ def robot_identity(name='', environ=None):
 
 
 def shoot_hello(allowed, limits):
-    """``hello.shoot``: ``limits`` is shoot.ShootArbiter.limits()."""
+    """``hello.shoot``: ``limits`` is shoot.ShootSession.limits()."""
     return {
         'allowed': bool(allowed),
         'max_power': limits['max_power'],
@@ -312,7 +312,7 @@ def drive_state_payload(state):
 
 
 def shoot_state_payload(state):
-    """Wrap shoot.ShootArbiter.state() for the browsers."""
+    """Wrap shoot.ShootSession.state() for the browsers."""
     return {'type': 'shoot_state', **state}
 
 
@@ -334,7 +334,7 @@ def state_payload(drive_state, robot, rates, drive_allowed, clients, max_clients
     ``drive_state`` is DriveSession.state(), ``rates`` the last status report [Hz],
     ``records`` records_api.RecordsApi.summary() (``dir``, ``count``, ``used_bytes``,
     ``limit_bytes``, ``save``, ``auto_record``, ``rosbag_dir``) or None, ``shoot_state``
-    ShootArbiter.state() (``allowed`` false while the teacher's lesson permission is off),
+    ShootSession.state() (``allowed`` false while the arbiter reports the teacher's permission off),
     ``emergency_stop`` True/False from /emergency_stop and /drive_status, None before any report.
     """
     return {

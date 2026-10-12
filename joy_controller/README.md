@@ -1,13 +1,15 @@
 # Joy Controller
 
-ジョイスティック入力 (`sensor_msgs/Joy`) を速度指令 (`geometry_msgs/Twist`) に変換する QUESTiX のパッケージです。
+ジョイスティック入力 (`sensor_msgs/Joy`) を速度指令 (`geometry_msgs/Twist`) と発射機構の指令
+(`questix_msgs/LauncherCommand`) に変換する QUESTiX のパッケージです。
 
-2 つのノード（コンポーネント）を提供します:
+3 つのノード（コンポーネント）を提供します:
 
 | ノード | 実装 | 用途 |
 |---|---|---|
 | `joy_controller_node` | `src/joy_controller_component.cpp` | 通常モード: 左スティックで前後、右スティックで旋回 |
 | `joy_controller_dual_stick_node` | `src/joy_controller_dual_stick_component.cpp` | デュアルスティック（戦車）モード: 左右スティック縦軸 = 左右車輪 |
+| `joy_launcher_node` | `src/joy_launcher_component.cpp` | 発射機構のボタン（射出・角度・ローラー）→ `/launcher_command`。どちらのスティックモードでも起動 |
 
 ## トピック
 
@@ -15,6 +17,7 @@
 |---|---|---|---|
 | Sub | `joy_topic` パラメータで指定（既定 `/joy`） | `sensor_msgs/Joy` | |
 | Pub | `/target_twist` | `geometry_msgs/Twist` | depth 1。`drive_component` が購読 |
+| Pub（joy_launcher） | `launcher_command_topic`（既定 `/launcher_command`） | `questix_msgs/LauncherCommand` | `/joy` 1 件ごとに 1 件。`esc_motor_control`・`shot_component` が購読（教材用の起動では `/launcher_command/joy` に付け替え、command_arbiter が選ぶ） |
 
 軸→速度は**純粋な線形写像**です。デッドゾーン処理は入力ドライバ側
 （`uart_joy_driver` / `web_joy_driver` / joy パッケージの `deadzone`）で行われ、
@@ -47,6 +50,23 @@ ros2 launch joy_controller joy_controller.launch.xml dual_stick:=true
 [`questix_control_config`](../questix_control_config/README.md) のコントローラー別プロファイルです。
 robot_manager の「操作・速度」タブで編集できます。
 このパッケージの YAML にはデバッグ等のノード設定を残しています。
+
+### joy_launcher_node
+
+発射機構のボタンです（`include/joy_controller/launcher_mapping.hpp`、テスト `test/test_launcher_mapping.cpp`）。
+射出・ローラーのノードは `/joy` を読みません。
+
+| パラメータ | 既定値 | 意味 |
+|---|---|---|
+| `fire_button` | 5 | 射出ボタン。押すたびに `fire_seq` が 1 増える（押しっぱなしは 1 発） |
+| `tilt_up_axis` / `tilt_down_axis` | -2（`tilt_axis` を継承） | 角度を上げる・下げる入力の軸。-1 でボタン（`tilt_*_button_index`）、軸のときは `tilt_*_axis_sign`（+1 / -1）の向きに 0.5 を超えたら 1 回。押すたびに `tilt_steps` が ±1 |
+| `tilt_up_button_index` / `tilt_down_button_index` | 4 / 6 | ボタン操作時の角度の上げ・下げ |
+| `full_speed_button` | 7 | ローラーの回転ボタン。押している間 `roller_power` が `full_speed_value`、離すと 0 |
+| `full_speed_value` | 1.0 | ローラーの出力（0〜1） |
+| `launcher_command_topic` | `/launcher_command` | 出力先 |
+
+起動したときに押されていた入力は、一度離すまで射出にも角度にも使いません。同じ入力を上げ・下げの両方に
+割り当てた設定は角度を無効にしてエラーを出します（ほかの入力に読み替えません）。
 
 ### joy_controller_node
 

@@ -10,22 +10,19 @@
 #include <chrono>
 #include <memory>
 #include <questix_msgs/msg/emergency_stop.hpp>
+#include <questix_msgs/msg/launcher_command.hpp>
 #include <questix_msgs/msg/motion_permission.hpp>
 #include <questix_safety/emergency_stop_monitor.hpp>
 #include <questix_safety/permission_monitor.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_components/register_node_macro.hpp>
 #include <rclcpp_lifecycle/lifecycle_node.hpp>
-#include <sensor_msgs/msg/joy.hpp>
-#include <std_msgs/msg/empty.hpp>
-#include <std_msgs/msg/float32.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <string>
 
 #include "motor_control_app/actuation_gate.hpp"
+#include "motor_control_app/launcher_events.hpp"
 #include "motor_control_app/shot_auto_start.hpp"
-#include "motor_control_app/shot_lab_logic.hpp"
-#include "motor_control_app/tilt_input.hpp"
 #include "motor_control_lib/servo_control.hpp"
 
 namespace motor_control_app {
@@ -34,7 +31,7 @@ namespace motor_control_app {
 //
 // 非常停止中はサーボバスが通電されず、シリアル接続やサーボ応答が得られない。
 // そのため起動時は unconfigured で待機し、通電後に configure（接続 + サーボ応答確認）
-// → activate（ホーム移動 + joy 受付開始）で運用状態に遷移する。
+// → activate（ホーム移動 + 指令の受付開始）で運用状態に遷移する。
 // auto_start=true（既定）の場合、内蔵タイマーが configure/activate を成功するまで
 // 再試行するので、外部の lifecycle manager なしで systemd 起動に耐える。
 //
@@ -55,17 +52,17 @@ namespace motor_control_app {
 // 走行許可（L2、/motion_permission の launcher_allowed、questix_msgs/MotionPermission、volatile、
 // motion_permission_timeout_sec のリース）は非常停止とは別の概念で、大会の審判・教材の先生の許可を
 // MotionPermissionManager がまとめたもの。許可がない間は自動起動（configure/activate とホーム移動）
-// を保留し、コントローラ・QUESTiX LAB の射撃とチルトを断る。ACTIVE 中に許可がなくなったら、射撃中の
-// シーケンスだけ止めて home に戻し、サーボバスは解放しない（電源は入ったまま。復帰で再接続と
-// ホーム移動を待たない）。非常停止（電源が切れる）は従来どおり deactivate→cleanup。両方が閉じて
-// いるときは非常停止の反応と理由が優先する。許可が戻っても、押しっぱなしの入力では動かない。
+// を保留し、射撃とチルトを断る。ACTIVE 中に許可がなくなったら、射撃中のシーケンスだけ止めて home
+// に戻し、サーボバスは解放しない（電源は入ったまま。復帰で再接続とホーム移動を待たない）。非常停止
+// （電源が切れる）は従来どおり deactivate→cleanup。両方が閉じているときは非常停止の反応と理由が
+// 優先する。止まっている間に届いた射撃・チルトは捨てる（後から動かない）。
 //
-// QUESTiX LAB: accept_lab_input=true（練習用起動のみ）のとき /shot/lab/tilt（std_msgs/Float32,
-// 目標チルト角 [deg]）と /shot/lab/fire（std_msgs/Empty, 1発射出）を購読する。適用条件は
-// shot_lab_logic.hpp（ACTIVE・非常停止解除・射撃中でない・コントローラの射撃/チルト入力が
-// lab_joy_quiet_sec 静止、射出は lab_min_fire_interval_sec 間隔）。コントローラと同じ
-// moveTiltTo / executeShotSequence を使う。状態は /shot/status（std_msgs/String, JSON）に
-// 5 Hz と変化時に出す（accept_lab_input に関係なく常に出す観測用）。
+// 指令は launcher_command_topic（既定 /launcher_command、questix_msgs/LauncherCommand）だけから
+// 受け取る。練習・大会は joy_launcher、教材は command_arbiter（コントローラーか QUESTiX LAB）が
+// 出す。誰が操作してよいかはそちらで決まり、このノードは /joy も教材のトピックも読まない。
+// fire_seq の増加で 1 発、tilt_steps の変化で tilt_step_angle ずつ、tilt_deg の新しい値でその角度
+// （範囲に切り詰め）へ動かす（launcher_events.hpp）。射撃の間隔は min_fire_interval_sec（機構の
+// 制限、既定 0）。状態は /shot/status（std_msgs/String, JSON）に 5 Hz と変化時に出す。
 class ShotComponent : public rclcpp_lifecycle::LifecycleNode {
 public:
   using CallbackReturn = rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
@@ -81,15 +78,20 @@ public:
   CallbackReturn on_error(const rclcpp_lifecycle::State& state) override;
 
 private:
-  void joyCallback(const sensor_msgs::msg::Joy::SharedPtr msg);
-  void executeShotSequence(shot_lab::FireSource source);
-  // Moves the tilt servo to angle_deg (clamped to the tilt range); shared by the controller and
-  // QUESTiX LAB. Returns false when rate limited or the servo write failed.
+  // /launcher_command: shots, tilt steps and tilt targets (launcher_events.hpp).
+  void commandCallback(const questix_msgs::msg::LauncherCommand::SharedPtr msg);
+  // Whether the launcher may move now: ACTIVE, servos connected, permission and E-stop open.
+  bool readyToMove();
+  // More than one node on launcher_command_topic: their counters would mix (one publisher's
+  // fire_seq read as a restart of the other's, the next as a new shot), so nothing moves until
+  // only one is left.
+  void checkCommandPublishers();
+  // A tilt target kept while the tilt servo was rate limited, tried again on the next command.
+  void applyPendingTilt();
+  void executeShotSequence(FireSource source);
+  // Moves the tilt servo to angle_deg (clamped to the tilt range). Returns false when rate limited
+  // or the servo write failed.
   bool moveTiltTo(double angle_deg, const char* label);
-  void labTiltCallback(const std_msgs::msg::Float32::SharedPtr msg);
-  void labFireCallback(const std_msgs::msg::Empty::SharedPtr msg);
-  shot_lab::Conditions labConditions();
-  void recordLabRefusal(shot_lab::Refusal refusal, const char* request);
   void publishShotStatus();
   static double steadyNowSec();
   void fireTimerCallback();
@@ -133,15 +135,6 @@ private:
 
   int tilt_servo_id_;
   int trigger_servo_id_;
-  int fire_button_;
-  // Per-direction axis: -1 uses the button; -2 inherits legacy tilt_axis.
-  // axis_sign is +1/-1 and applies only when that direction uses an axis.
-  int tilt_up_axis_;
-  int tilt_down_axis_;
-  int tilt_up_axis_sign_;
-  int tilt_down_axis_sign_;
-  int tilt_up_button_index_;
-  int tilt_down_button_index_;
   double tilt_step_angle_;
   double tilt_min_angle_;
   double tilt_max_angle_;
@@ -169,28 +162,30 @@ private:
   std::atomic<bool> teardown_pending_;
 
   bool is_shooting_;
-  bool last_button_state_;
-  TiltInputEdges tilt_edges_;
   int current_tilt_position_;
   double current_tilt_angle_;
   rclcpp::Time last_command_time_;
 
-  // QUESTiX LAB launcher input (see shot_lab_logic.hpp). Timing uses steady_clock seconds.
-  bool accept_lab_input_;
-  double lab_joy_quiet_sec_;
-  double lab_min_fire_interval_sec_;
-  // Last /joy message that used the fire button or the tilt input (-inf = never).
-  double joy_launcher_active_at_sec_;
-  // Last shot from any source (-inf = none yet), shots since start, and who fired last.
+  // The shortest time between two shots (the mechanism's limit; QUESTiX LAB's own interval is
+  // command_arbiter's). Timing uses steady_clock seconds.
+  double min_fire_interval_sec_;
+  // Last shot (-inf = none yet), shots since start, and the source of the command that fired last.
   double last_fire_sec_;
   long fired_count_;
-  shot_lab::FireSource last_fire_source_;
-  // Last refused lab request (kNone after an applied one), shown in /shot/status.
-  shot_lab::Refusal last_lab_refusal_;
+  FireSource last_fire_source_;
+  // The /launcher_command stream's events, and a tilt target waiting for the rate limit.
+  LauncherEvents launcher_events_;
+  bool pending_tilt_;
+  double pending_tilt_deg_;
+  std::string command_topic_;
+  bool multiple_command_publishers_;
 
-  rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joy_subscription_;
+  // /launcher_command: subscribed for the node's whole life (events received while it may not
+  // move only advance the counters and are dropped, never replayed).
+  rclcpp::Subscription<questix_msgs::msg::LauncherCommand>::SharedPtr command_subscription_;
+  rclcpp::TimerBase::SharedPtr command_publisher_timer_;
   // All callbacks intentionally use the node's default MutuallyExclusive callback group:
-  // auto-start, emergency-stop input/timeout, joy input, and the fire timer (issue #83). If
+  // auto-start, emergency-stop input/timeout, launcher commands, and the fire timer (issue #83). If
   // these entities are split across callback groups, synchronize lifecycle/emergency-stop
   // state, timer pointers, runtime_fault_, teardown_pending_, is_shooting_, servo_controller_,
   // and servo serial I/O.
@@ -208,10 +203,7 @@ private:
   // 射撃シーケンス用ワンショットタイマー。fire 位置到達後 fire_duration_ms で
   // 発火し home 復帰する。executor をブロックしないための置き換え（issue #83）。
   rclcpp::TimerBase::SharedPtr fire_timer_;
-  // QUESTiX LAB input (only when accept_lab_input) and status (always). The status publisher is
-  // a plain rclcpp publisher so it also reports while the node is not ACTIVE.
-  rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr lab_tilt_sub_;
-  rclcpp::Subscription<std_msgs::msg::Empty>::SharedPtr lab_fire_sub_;
+  // /shot/status: a plain rclcpp publisher so it also reports while the node is not ACTIVE.
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr shot_status_pub_;
   rclcpp::TimerBase::SharedPtr shot_status_timer_;
 };

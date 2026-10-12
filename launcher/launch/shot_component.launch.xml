@@ -2,12 +2,9 @@
   <!-- Launch Arguments -->
   <arg name="controller_type" default="dualshock" description="Controller type: dualshock, uart, or web" />
   <arg name="use_sim_time" default="false" description="Use simulation time" />
-  <!-- QUESTiX LAB may operate the launcher (roller /roller/lab, tilt /shot/lab/tilt, fire
-       /shot/lab/fire) only when this is true. questix_core sets it in lesson mode only. The node
-       YAMLs keep false as default. -->
-  <arg name="accept_lab_input" default="false" description="Let QUESTiX LAB operate the roller, tilt and fire (questix_core: lesson mode only)" />
 
-  <!-- Hardware configuration; operator mappings are in questix_control_config. -->
+  <!-- Hardware configuration. Both nodes obey /launcher_command only (joy_launcher, or
+       command_arbiter in a lesson): the controller's buttons are joy_launcher's. -->
   <arg name="shot_config_file"
        default="$(find-pkg-share motor_control_app)/config/shot_config.yaml"
        description="Shot component YAML (hardware settings)" />
@@ -18,12 +15,10 @@
   <!-- shot component launch -->
   <include file="$(find-pkg-share motor_control_app)/launch/shot_component.launch.py">
     <arg name="config_file" value="$(var shot_config_file)"/>
-    <arg name="accept_lab_input" value="$(var accept_lab_input)"/>
   </include>
 
   <!-- ESC Motor Control (C++) -->
   <include file="$(find-pkg-share esc_motor_control_cpp)/launch/esc_motor_control_cpp.launch.xml">
     <arg name="config_file" value="$(var esc_config_file)"/>
-    <arg name="accept_lab_input" value="$(var accept_lab_input)"/>
   </include>
 </launch>

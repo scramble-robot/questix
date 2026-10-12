@@ -26,7 +26,7 @@ const tuningFields = {
     max_angular_accel: { title: "旋回のきびきび感", acceleration: true,
       help: "曲がり始め・曲がり終わりの反応を調整します。小さくするとおだやかに、大きくするとすばやく旋回速度が変わります。旋回の最高速度は変わりません。" },
   },
-  esc_motor_control: {
+  joy_launcher: {
     full_speed_value: { title: "ローラー出力", unit: "%", scale: 100,
       help: "回転ボタンを押したときの出力。0% で停止、100% で最大出力です。" },
   },
@@ -83,7 +83,7 @@ function tuningValue(spec, value) {
 
 function tiltDirectionKey() {
   return ["tilt_up_button_index", "tilt_down_button_index"]
-    .find((key) => mapSelection?.actionId === `shot_component.${key}`);
+    .find((key) => mapSelection?.actionId === `joy_launcher.${key}`);
 }
 
 function planMapAssignment(values) {
@@ -431,7 +431,7 @@ function renderControls() {
     const legend = document.createElement("legend");
     legend.textContent = group.node === "joy_controller" ? "走行"
       : group.node === "drive_component" ? "加速・減速の調整"
-        : group.node === "esc_motor_control" ? "射出ローラー" : "スティック";
+        : group.node === "joy_launcher" ? "射出ローラー" : "スティック";
     section.appendChild(legend);
     for (const field of fields) {
       const spec = tuningSpec(group.node, field.key);
@@ -572,7 +572,7 @@ async function loadControls(controller) {
   try {
     const profile = await api(`/api/control-config/${controller}`);
     if (!['tilt_up_axis', 'tilt_down_axis', 'tilt_up_axis_sign', 'tilt_down_axis_sign']
-      .every((key) => Object.hasOwn(profile.values.shot_component || {}, key))) {
+      .every((key) => Object.hasOwn(profile.values.joy_launcher || {}, key))) {
       throw new Error("射出角度を上下別に設定する機能がまだ使えません。担当者に管理画面のプログラムを更新・再起動してもらってください。");
     }
     controlProfile = profile;
