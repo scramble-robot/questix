@@ -2,7 +2,8 @@
 // The page listens to the robot's streams. The only frames it ever sends are the drive/stop
 // requests of js/live/drive-link.js and the launcher requests (roller / roller_stop / tilt / fire)
 // of js/live/shoot-link.js (sendRobot below is for those two modules alone), which the bridge
-// accepts only when it was started with allow_drive / allow_shoot and its own checks pass, and
+// accepts only while the teacher's lesson permission (/lab_permission) allows them and its own
+// checks pass, and
 // `record_save` (saveRecordOnRobot below): a finished recording handed to the bridge to keep on the
 // robot, which moves nothing.
 // Units follow REP-103: metres, radians, seconds; x forward, y left, theta counter-clockwise.

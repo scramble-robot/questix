@@ -1,10 +1,11 @@
 // Driving the real robot from a lesson: the arithmetic, with no DOM and no WebSocket, so every
 // rule is a Node test (test/drive-core.test.mjs). drive-link.js sends what these functions decide.
 //
-// The bridge (questix_lab_bridge/questix_lab_bridge/drive.py) enforces the safety rules itself:
-// allow_drive, no other /target_twist publisher, a drive node listening, emergency stop released,
-// one page at a time, speed limits, a dead-man timeout. This module only mirrors them so the page
-// can say *why* it cannot drive before the learner presses anything.
+// The bridge (questix_lab_bridge/questix_lab_bridge/drive.py) holds the run (one page at a time,
+// a dead-man timeout, a time limit) and reports what the robot decided: command_arbiter (the
+// teacher's lesson permission, the speed limits, the controller first), no other /target_twist/lab
+// publisher, the emergency stop and the motion permission. This module only mirrors them so the
+// page can say *why* it cannot drive before the learner presses anything.
 //
 // Units follow REP-103: metres, radians, seconds; linear > 0 forward, angular > 0 turns left.
 
@@ -12,11 +13,12 @@
 const DRIVE_BLOCKERS = [
   'no_link', // not connected to a robot
   'old_bridge', // the bridge predates driving (no drive_state)
-  'not_allowed', // robot_manager has not allowed driving
-  'no_drive_node', // nothing subscribes to /target_twist
+  'not_allowed', // the teacher has not allowed driving (/lab_permission, as command_arbiter says)
+  'no_drive_node', // no command_arbiter on /target_twist/lab, or its status is missing
   'other_publisher', // the controller (or anything else) publishes /target_twist
   'estop_unknown', // the bridge has not heard /emergency_stop yet (fail closed)
   'emergency_stop',
+  'no_motion_permission', // /motion_permission does not allow the drive
   'busy', // another page drives the robot
   'running_here', // this page already runs something (another block, the bench test)
   'missing_streams', // the lesson needs a stream the robot does not send (added by live-session)

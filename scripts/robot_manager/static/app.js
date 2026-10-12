@@ -1342,11 +1342,11 @@ function showLabCapability(kind, data) {
   if (data.config_error) setLabError(`lab-${kind}-error`, data.config_error);
 }
 
-// The teacher's switch: restarts a bridge of ours (every page drops for a few seconds).
+// The teacher's switch: published on /lab_permission at once (the pages stay connected).
 async function setLabPermission(kind, allow) {
   const toggle = document.getElementById(`lab-${kind}-toggle`);
   const name = kind === "drive" ? "走行" : "発射";
-  if (!confirm(`教材からの${name}を${allow ? "許可" : "禁止"}しますか？ 配信中のブリッジを起動し直すため、生徒全員の接続が数秒切れます。`)) {
+  if (allow && !confirm(`教材からの${name}を許可しますか？ 生徒が教材からロボットを動かせるようになります。`)) {
     toggle.checked = !allow;
     return;
   }

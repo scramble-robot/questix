@@ -3,7 +3,7 @@
 // what these functions allow; shoot-view.js shows the reasons they name.
 //
 // The bridge (questix_lab_bridge/questix_lab_bridge/shoot.py) enforces the safety rules itself:
-// allow_shoot, the launcher nodes accepting lab input, no other publisher, E-stop released, the
+// the teacher's lesson permission (/lab_permission), the launcher nodes accepting lab input, no other publisher, E-stop released, the
 // controller not in use, one page at a time, the power and tilt limits, a roller dead-man, the
 // longest session, the spin-up before a shot and the fire interval. This module only mirrors them
 // so the page can say *why* a button is off before the learner presses it, and counts down the
@@ -18,7 +18,7 @@ import { fillSentence as fill } from '../core/content.js';
 const SHOOT_BLOCKERS = [
   'no_link', // not connected to a robot
   'old_bridge', // the bridge predates the launcher (no hello.shoot)
-  'not_allowed', // robot_manager has not allowed firing from the lessons
+  'not_allowed', // the teacher has not allowed the launcher (/lab_permission)
   'no_launcher', // esc_motor_control / shot_component missing or not accepting lab input
   'other_publisher', // something else publishes the launcher's lab topics
   'estop_unknown', // the bridge has not heard /emergency_stop yet (fail closed)

@@ -654,6 +654,10 @@ class PreflightTests(unittest.TestCase):
         self.assertIn(trial.MOTION_PERMISSION_TOPIC, trial.OPTIONAL_TOPICS)
         self.assertIn(trial.MOTION_PERMISSION_TOPIC, trial.PROTECTED_TOPICS)
         self.assertNotIn("/joy_gated", trial.OPTIONAL_TOPICS)  # joy_gate was removed
+        # Who drove in a lesson: the lesson permission and command_arbiter's choice.
+        for topic in ("/lab_permission", "/command_arbiter/status"):
+            self.assertIn(topic, trial.OPTIONAL_TOPICS)
+            self.assertIn(topic, trial.PROTECTED_TOPICS)
         pre = trial.classify_preflight(
             ["/drive_component"], ["/target_twist", "/drive_status", "/emergency_stop"])
         self.assertEqual(pre["missing_required"], [])

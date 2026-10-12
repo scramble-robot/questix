@@ -80,17 +80,24 @@ AUTHORITY_TOPIC = "/actuation_authority"
 # Like the authority: recorded whenever it exists and never excluded, optional for launches of
 # older versions.
 MOTION_PERMISSION_TOPIC = "/motion_permission"
+# QUESTiX LAB's lesson permission and which input command_arbiter let through (lesson launches
+# only): kept the same way, so a run shows whether the controller or a page drove.
+LAB_PERMISSION_TOPIC = "/lab_permission"
+ARBITER_STATUS_TOPIC = "/command_arbiter/status"
 # Recorded when present; their absence is normal (no joystick, no LiDAR, ...).
 OPTIONAL_TOPICS = (
     AUTHORITY_TOPIC,
     MOTION_PERMISSION_TOPIC,
+    LAB_PERMISSION_TOPIC,
+    ARBITER_STATUS_TOPIC,
     "/joy",
     "/odom",
     "/diagnostics",
     "/parameter_events",
 )
 # Topics an evidence recording must never drop through EXCLUDE_TOPICS.
-PROTECTED_TOPICS = REQUIRED_TOPICS + (AUTHORITY_TOPIC, MOTION_PERMISSION_TOPIC)
+PROTECTED_TOPICS = REQUIRED_TOPICS + (AUTHORITY_TOPIC, MOTION_PERMISSION_TOPIC,
+                                       LAB_PERMISSION_TOPIC, ARBITER_STATUS_TOPIC)
 
 ROS_SETUP = "/opt/ros/jazzy/setup.bash"
 

@@ -15,9 +15,10 @@ const StatusView = (() => {
     failed: '起動失敗', unknown: '状態未確認',
   };
   // A bridge that (re)starts takes a few seconds to discover the ROS graph: meanwhile it reports
-  // the robot's lab inputs as missing. Such blockers are shown only once they last this long.
+  // the robot's lab inputs as missing. A permission switched on takes up to a second to reach the
+  // robot (/lab_permission). Such blockers are shown only once they last this long.
   const SETTLE_MS = 6000;
-  const TRANSIENT = new Set(['no_drive_node', 'no_launcher']);
+  const TRANSIENT = new Set(['no_drive_node', 'no_launcher', 'not_allowed']);
   const WEB_JOY_PORT = '8899';
 
   const WORDS = {
@@ -35,7 +36,7 @@ const StatusView = (() => {
     const shown = [];
     let pending = false;
     for (const blocker of blockers || []) {
-      if (!blocker || blocker.code === 'not_allowed') continue;
+      if (!blocker) continue;
       const key = `${kind}:${blocker.code}`;
       seen.add(key);
       if (!memory.has(key)) memory.set(key, now);
@@ -53,7 +54,7 @@ const StatusView = (() => {
     return robot && robot.domain != null ? robot.domain : '未設定（0）';
   }
 
-  // { text: plain words for the teacher, detail: the technical cause (twist_arbiter, topics...) }
+  // { text: plain words for the teacher, detail: the technical cause (command_arbiter, topics...) }
   function blockerText(kind, blocker, bridge, service) {
     const stopped = service !== 'active';
     const nodes = (blocker.nodes || []).join(', ') || '不明なノード';
@@ -63,8 +64,19 @@ const StatusView = (() => {
           text: stopped
             ? 'ロボット制御が止まっています（「操作」の「起動」で教材用の構成で起動します）'
             : 'ロボット制御が教材用の構成で動いていないか、別のロボットの設定です',
-          detail: `切り替えノード twist_arbiter が見つかりません（ROS_DOMAIN_ID ${domainOf(bridge)}）。` +
+          detail: `切り替えノード command_arbiter が見つかりません（ROS_DOMAIN_ID ${domainOf(bridge)}）。` +
             '練習用・大会用の起動には入りません。',
+        };
+      case 'not_allowed':
+        return {
+          text: '教材の許可がロボットに届いていません（ロボット制御が教材用の構成で動いているか確かめてください）',
+          detail: `/lab_permission（Robot Manager）を${kind === 'drive' ? ' command_arbiter が' : ''}受け取れていません` +
+            `（ROS_DOMAIN_ID ${domainOf(bridge)}）。`,
+        };
+      case 'no_motion_permission':
+        return {
+          text: 'ロボットの動作許可が出ていません（「操作」タブの先生の操作許可を確かめてください）',
+          detail: '/motion_permission（operation_manager）が走行を許可していません。',
         };
       case 'no_launcher': {
         const parts = (blocker.parts || [])
@@ -117,7 +129,7 @@ const StatusView = (() => {
       reasons: [], active: Boolean(state.active), owner: state.active ? state.owner : null,
     };
     // With the robot service stopped the missing nodes are no surprise: no need to wait.
-    const { shown, pending } = stableBlockers(kind, bridgeAllows ? state.blockers : [], memory, now,
+    const { shown, pending } = stableBlockers(kind, setting ? state.blockers : [], memory, now,
       service === 'active');
     if (!lab) {
       view.headline = '状態を確認しています';
@@ -148,9 +160,6 @@ const StatusView = (() => {
         ? '先に「操作」タブの「先生の操作許可」で「ロボットの走行制御」を ON にしてください。'
         : '先に「操作」タブの「先生の操作許可」で「発射機構の操作」を ON にしてください。';
     }
-    if (lab.external && bridge) {
-      view.toggleNote = '手動で起動したブリッジです。ここでの切り替えは反映されません（端末で Ctrl+C して「配信開始」を押してください）。';
-    }
     if (!serving) {
       view.headline = setting ? `許可済み・教材の配信が止まっています` : '禁止しています';
       return view;
@@ -159,23 +168,22 @@ const StatusView = (() => {
       view.headline = 'ブリッジの状態が分かりません（起動中か、状態を返さない古いブリッジです）';
       return view;
     }
-    if (!setting && bridgeAllows && !lab.external) {
+    // The robot follows /lab_permission within a second; a yes that lasts longer comes from
+    // somewhere else (another manager on the same ROS_DOMAIN_ID).
+    if (!setting && bridgeAllows) {
       view.tone = 'driving';
-      view.headline = `禁止に切り替えましたが、配信中のブリッジはまだ${words.name}を受け付けます（「配信停止」→「配信開始」を押してください）`;
+      view.headline = `禁止に切り替えましたが、ロボットはまだ教材からの${words.name}を受け付けています（数秒たっても変わらないときは「すべて止める」を押してください）`;
       return view;
     }
-    if (!bridgeAllows) {
-      view.headline = setting
-        ? `許可済み・いまのブリッジは${words.name}を受け付けていません（配信を開始し直すと有効になります）`
-        : `禁止しています（教材からは${words.verb}られません）`;
-      view.tone = setting ? 'warn' : 'idle';
+    if (!setting) {
+      view.headline = `禁止しています（教材からは${words.verb}られません）`;
       return view;
     }
     view.reasons = shown.map((b) => blockerText(kind, b, bridge, service));
     if (view.reasons.length) {
       view.tone = 'warn';
       view.headline = `許可済み・いまは${words.name}できません（${view.reasons[0].text}）`;
-    } else if (pending) {
+    } else if (pending || !bridgeAllows) {
       view.tone = 'warn';
       view.headline = '許可済み・ロボットの状態を確認しています…';
     } else if (state.active) {

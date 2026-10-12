@@ -11,7 +11,7 @@
   <arg name="enable_gpio_ref" default="true" description="Enable the GPIO safety path (gpio_reader; the emergency stop reads GPIO5). false: explicit manual diagnostic only, for this launch process"/>
   <!-- The robot's mode, the one argument that says how this launch is wired
        (scripts/robot_manager/modes.py; the robot launcher passes the saved mode):
-       lesson      教材: QUESTiX LAB shares the drive (twist_arbiter) and the launcher (the nodes'
+       lesson      教材: QUESTiX LAB shares the drive (command_arbiter) and the launcher (the nodes'
                    lab input); the motion permission needs the teacher's vote.
        practice    練習: the controller alone; the motion permission needs no vote.
        competition 大会: gpio_reader also reads GPIO27 (AutoReferee) for the referee's vote, which
@@ -26,7 +26,7 @@
        instead of silently running another mode (e.g. enable_autoreferee:=true as practice). -->
   <arg name="enable_autoreferee" default="removed" description="Removed: use robot_mode:=competition"/>
   <arg name="require_teacher_permission" default="removed" description="Removed: use robot_mode:=lesson"/>
-  <arg name="enable_twist_arbiter" default="removed" description="Removed: robot_mode:=lesson starts twist_arbiter"/>
+  <arg name="enable_twist_arbiter" default="removed" description="Removed: robot_mode:=lesson starts command_arbiter"/>
   <arg name="enable_lab_shoot" default="removed" description="Removed: robot_mode:=lesson enables QUESTiX LAB's launcher input"/>
 
   <!-- What robot_mode decides; nothing below reads robot_mode itself. -->
@@ -71,9 +71,16 @@
     <group if="$(var enable_drive)">
       <include file="$(find-pkg-share questix_launcher)/launch/drive_component.launch.xml">
         <arg name="controller_type" value="$(var controller_type)"/>
-        <!-- QUESTiX LAB shares the drive in lesson mode only; otherwise joy_controller drives
-             /target_twist directly. -->
-        <arg name="enable_twist_arbiter" value="$(var is_lesson)"/>
+        <!-- QUESTiX LAB shares the drive in lesson mode only (command_arbiter below); otherwise
+             joy_controller drives /target_twist directly. -->
+        <arg name="use_command_arbiter" value="$(var is_lesson)"/>
+      </include>
+    </group>
+    <!-- The input selection (L3) of a lesson: the controller or QUESTiX LAB, the controller always
+         wins. Practice and competition have no arbiter. -->
+    <group if="$(var is_lesson)">
+      <include file="$(find-pkg-share command_arbiter)/launch/command_arbiter.launch.xml">
+        <arg name="enable_drive" value="$(var enable_drive)"/>
       </include>
     </group>
     <group if="$(var enable_lidar)">

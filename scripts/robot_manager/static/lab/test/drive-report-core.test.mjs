@@ -219,7 +219,7 @@ test('the bench check says which way the wheels turned while the button was held
 });
 
 // A press forward for 1.5 s, released (a zero command at once), and during the recorded tail the
-// controller's stick drives the robot backward through twist_arbiter onto /target_twist.
+// controller's stick drives the robot backward through command_arbiter onto /target_twist.
 function benchRunThenStick() {
   const run = benchRun(0.1, 0, { seconds: 1.5 });
   for (const message of run.streams.twist) if (message.stamp >= 2.7) message.linear = -0.2;

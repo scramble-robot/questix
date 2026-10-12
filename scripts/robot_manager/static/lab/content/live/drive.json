@@ -11,15 +11,19 @@
     },
     "not_allowed": {
       "student": "いまは先生が教材からの走行を止めています。",
-      "teacher": "Robot Manager（ロボットの画面で http://localhost:8888）の教材タブで「教材からの走行を再開する」を押します。"
+      "teacher": "Robot Manager（ロボットの画面で http://localhost:8888）の「操作」タブで「ロボットの走行制御」を ON にしてから、教材タブで「教材からの走行を許可する」を ON にします。"
     },
     "no_drive_node": {
       "student": "ロボットの走る準備ができていません。先生に伝えてください。",
-      "teacher": "教材の指令を受け取る切り替えノード twist_arbiter が見つかりません。ロボットのROSを ros2 launch questix_launcher questix_core.launch.xml（練習用）で起動しているか、ROS_DOMAIN_ID が教材の配信と同じかを確かめてください。大会用の起動（enable_autoreferee:=true）では教材から走らせられません。"
+      "teacher": "教材の指令を受け取る切り替えノード command_arbiter が見つからないか、その状態（/command_arbiter/status）が届いていません。ロボットのROSを教材用（ros2 launch questix_launcher questix_core.launch.xml robot_mode:=lesson、Robot Manager では教材モード）で起動しているか、ROS_DOMAIN_ID が教材の配信と同じかを確かめてください。練習用・大会用の起動では教材から走らせられません。"
     },
     "other_publisher": {
       "student": "ロボットの走る準備ができていません。先生に伝えてください。",
       "teacher": "{nodes} も教材用の指令（/target_twist/lab）を出しています。教材ブリッジが2つ動いていないか確かめてください。"
+    },
+    "no_motion_permission": {
+      "student": "いまはロボットが動いてよい状態ではありません。先生に伝えてください。",
+      "teacher": "走行許可（/motion_permission）が走行を許していません。Robot Manager の「操作」タブで先生の操作許可（ロボットの走行制御）が ON か、ロボット制御が教材モードで動いているかを確かめてください。"
     },
     "estop_unknown": {
       "student": "非常停止の状態をまだ確認できません。先生に伝えてください。",
@@ -65,6 +69,7 @@
     "invalid": "指令の値が正しくなかったため、止まりました。",
     "not_allowed": "先生が「教材からの走行」を禁止したため、止まりました。",
     "no_drive_node": "ロボットの走る仕組みが止まったため、止まりました。先生に伝えてください。",
+    "no_motion_permission": "ロボットが動いてよい状態でなくなったため、止まりました。先生に伝えてください。",
     "other_publisher": "コントローラーが指令を出し始めたため、止まりました。先生に伝えてください。",
     "emergency_stop": "非常停止ボタンが押されたため、止まりました。",
     "hidden": "画面が隠れた（別のタブ・スリープ）ため止めました。走行中は画面を開いたままにしてください。",

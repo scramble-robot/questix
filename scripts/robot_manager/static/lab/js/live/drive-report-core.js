@@ -212,6 +212,7 @@ const RUN_STATUS = {
   emergency_stop: 'problem',
   other_publisher: 'problem',
   no_drive_node: 'problem',
+  no_motion_permission: 'problem',
   not_allowed: 'problem',
   invalid: 'problem',
   failed: 'problem',
@@ -238,7 +239,7 @@ const BENCH_EVEN = 0.25; // wheels within this share of each other count as equa
 /**
  * The stamp of the lab's last moving command: the end of the first unbroken run of commands that
  * ask for motion (releasing the button sends a stop at once). Commands after it may be the
- * controller's: twist_arbiter forwards the stick onto /target_twist once the page has let go.
+ * controller's: command_arbiter forwards the stick onto /target_twist once the page has let go.
  */
 function labCommandEnd(commands) {
   const isMoving = (message) =>
