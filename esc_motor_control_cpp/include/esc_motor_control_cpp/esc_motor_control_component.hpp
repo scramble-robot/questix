@@ -86,7 +86,7 @@ private:
   int min_pulse_width_us_;
   int max_pulse_width_us_;
   int neutral_pulse_width_us_;
-  std::string pwm_backend_name_;  // "auto", "pigpio", "lgpio", "simulation"
+  std::string pwm_backend_name_;  // "auto", "pigpio", "lgpio", "simulation", "rp1_hw"
   std::string rp1_guard_socket_;
   bool stopping_{false};
   int gpio_chip_num_;             // lgpio chip number
