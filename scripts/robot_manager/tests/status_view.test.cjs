@@ -32,13 +32,29 @@ test('a missing twist_arbiter right after a bridge restart is shown only once it
   assert.equal(view.headline, '許可済み・ロボットの状態を確認しています…');
   assert.deepEqual(view.reasons, []);
   view = StatusView.capability('drive', data, 'active', memory, 1000 + StatusView.SETTLE_MS);
-  assert.match(view.headline, /^許可済み・いまは走行できません（ロボット制御が練習用の構成で動いていないか/);
+  assert.match(view.headline, /^許可済み・いまは走行できません（ロボット制御が教材用の構成で動いていないか/);
   assert.match(view.reasons[0].detail, /twist_arbiter.*ROS_DOMAIN_ID 7/);
   assert.doesNotMatch(view.reasons[0].text, /twist_arbiter|ROS_DOMAIN_ID/); // jargon only in details
   // It went away and comes back: the wait starts again.
   StatusView.capability('drive', lab(), 'active', memory, 20000);
   view = StatusView.capability('drive', data, 'active', memory, 21000);
   assert.deepEqual(view.reasons, []);
+});
+
+test('under an E-stop the shot node is inactive: only the E-stop is named', () => {
+  const memory = StatusView.createBlockerMemory();
+  const data = lab({ bridge: bridge({}, { blockers: [
+    { code: 'no_launcher', parts: ['shot'] },
+    { code: 'emergency_stop', parts: ['topic', 'roller'] },
+  ] }) });
+  const view = StatusView.capability('shoot', data, 'active', memory, 0);
+  assert.equal(view.headline, '許可済み・いまは発射できません（非常停止ボタンが押されています）');
+  assert.deepEqual(view.reasons.map((r) => r.text), ['非常停止ボタンが押されています']);
+  assert.doesNotMatch(JSON.stringify(view.reasons), /練習用|別のロボット/);
+  // Released but still missing: the launcher reason comes back, worded for lesson mode.
+  const still = lab({ bridge: bridge({}, { blockers: [{ code: 'no_launcher', parts: ['shot'] }] }) });
+  const after = StatusView.capability('shoot', still, 'active', memory, StatusView.SETTLE_MS + 1);
+  assert.match(after.headline, /発射台が教材の指令を受け付けていません（教材用の構成で動いていないか/);
 });
 
 test('a stopped robot service is named as the reason', () => {

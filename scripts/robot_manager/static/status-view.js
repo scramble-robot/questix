@@ -61,8 +61,8 @@ const StatusView = (() => {
       case 'no_drive_node':
         return {
           text: stopped
-            ? 'ロボット制御が止まっています（「操作」の「起動」で練習用の構成で起動します）'
-            : 'ロボット制御が練習用の構成で動いていないか、別のロボットの設定です',
+            ? 'ロボット制御が止まっています（教材モードで「操作」の「起動」を押すと、教材用の構成で起動します）'
+            : 'ロボット制御が教材用の構成で動いていないか、別のロボットの設定です',
           detail: `切り替えノード twist_arbiter が見つかりません（ROS_DOMAIN_ID ${domainOf(bridge)}）。` +
             '大会用の起動（enable_autoreferee:=true）には入りません。',
         };
@@ -75,8 +75,8 @@ const StatusView = (() => {
           .filter(Boolean).join('・') || 'esc_motor_control・shot_component';
         return {
           text: stopped
-            ? 'ロボット制御が止まっています（「操作」の「起動」で練習用の構成で起動します）'
-            : `${parts}が教材の指令を受け付けていません（練習用の構成で動いていないか、別のロボットの設定です）`,
+            ? 'ロボット制御が止まっています（教材モードで「操作」の「起動」を押すと、教材用の構成で起動します）'
+            : `${parts}が教材の指令を受け付けていません（教材用の構成で動いていないか、別のロボットの設定です）`,
           detail: `${technical} が教材の入力（accept_lab_input）を受け付けていません（ROS_DOMAIN_ID ${domainOf(bridge)}）。` +
             '大会用の起動では受け付けません。',
         };
@@ -163,7 +163,13 @@ const StatusView = (() => {
       view.tone = setting ? 'warn' : 'idle';
       return view;
     }
-    view.reasons = shown.map((b) => blockerText(kind, b, bridge, service));
+    // Under an E-stop the shot node releases its servo bus and goes inactive, so the bridge also
+    // reports no_launcher: the E-stop alone explains it (a no_launcher that outlasts the release
+    // is shown then).
+    const estopped = shown.some((b) => b.code === 'emergency_stop');
+    view.reasons = shown
+      .filter((b) => !(estopped && b.code === 'no_launcher'))
+      .map((b) => blockerText(kind, b, bridge, service));
     if (view.reasons.length) {
       view.tone = 'warn';
       view.headline = `許可済み・いまは${words.name}できません（${view.reasons[0].text}）`;

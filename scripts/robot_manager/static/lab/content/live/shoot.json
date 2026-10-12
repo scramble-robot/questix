@@ -40,7 +40,7 @@
     },
     "no_launcher": {
       "student": "ロボットの発射の準備ができていません。先生に伝えてください。",
-      "teacher": "{parts}が教材の指令を受け付けていません。ロボットのROSを ros2 launch questix_launcher questix_core.launch.xml（練習用、accept_lab_input が true）で起動しているか、shot_component が active か、ROS_DOMAIN_ID が教材の配信と同じかを確かめてください。大会用の起動では教材から発射できません。"
+      "teacher": "{parts}が教材の指令を受け付けていません。非常停止を押している間は発射台（shot_component）が止まるので、この表示も出ます（解除すると消えます）。解除しても消えないときは、Robot Manager の教材モードで「操作」の「起動」を押してロボット制御を教材用の構成で起動しているか、shot_component が active か、ROS_DOMAIN_ID が教材の配信と同じかを確かめてください。練習・大会モードでは教材から発射できません。"
     },
     "other_publisher": {
       "student": "ロボットの発射の準備ができていません。先生に伝えてください。",
