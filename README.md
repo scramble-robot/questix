@@ -1,8 +1,11 @@
-# ROS2 Robotics Kit - Automated ISO Builder
+# QUESTiX — Robot Setup and Local Image Builder
 
-🤖 **Automated Ubuntu ISO builder with pre-configured ROS2 environment for robotics development**
+🤖 **ROS 2 robot setup and local Ubuntu Desktop image generation for Raspberry Pi 5**
 
-This project provides a complete automation pipeline using Ansible and GitHub Actions to create custom Ubuntu ISO images with ROS2 and robotics development tools pre-installed.
+QUESTiX publishes setup and image-generation scripts. Each user obtains an official Ubuntu
+Desktop image and generates their own Pi 5 SD image locally; this repository does not
+build, validate or distribute completed OS images through GitHub Actions.
+See [the Pi Desktop image guide](scripts/iso/README.md).
 
 ## 🎯 Features
 
@@ -89,7 +92,7 @@ the kit playbook against `localhost`.
 
 1. **Prepare the Raspberry Pi 5**
 
-   - Use Raspberry Pi Imager (or similar) to flash Ubuntu 24.04 Server (arm64)
+   - Use Raspberry Pi Imager (or similar) to flash Ubuntu 24.04 Desktop for Raspberry Pi (arm64)
      to the microSD card / SSD.
    - On first boot, create a user and connect to the network.
 
@@ -135,11 +138,13 @@ the kit playbook against `localhost`.
 ```
 questix_core/
 ├── .github/workflows/     # GitHub Actions CI/CD
-│   └── build-iso.yml     # Automated ISO building
+│   └── ansible-check.yaml # Setup-script checks (no OS image build)
 ├── ansible/              # Ansible automation
 │   ├── roles/ros2/       # ROS2 installation role
 │   └── playbooks/        # Environment setup playbooks
-├── scripts/              # ISO building scripts
+├── scripts/              # Local image recipes and robot management
+│   ├── build-pi-image.sh  # Pi Desktop .img.xz
+│   ├── iso/README.md      # Local generation and validation
 │   ├── prepare-base-system.sh
 │   ├── apply-ansible-config.sh
 │   └── build-iso.sh
@@ -177,25 +182,30 @@ ros2_additional_packages:
   - ros-jazzy-moveit
 ```
 
-## 🐙 GitHub Actions
+## 🍓 Generate a Pi Desktop image locally
 
-### Automated Builds
+The base is the official Ubuntu 24.04 **preinstalled Desktop for Raspberry Pi**
+`.img.xz`, pinned by filename and SHA-256 in `scripts/iso/pi-desktop-base.env`.
+It retains the FAT boot + ext4 root partitions. Generic ARM64 ISO and Server
+images are not accepted. The output includes ROS 2 Jazzy and a built QUESTiX workspace.
 
-The ISO build workflow is manual-only and runs when manually dispatched via GitHub Actions.
-When started, it:
+After obtaining the official base and installing the host tools described in the
+[image guide](scripts/iso/README.md):
 
-1. 🏗️ Builds Ubuntu 24.04 + ROS 2 Jazzy ISOs for AMD64 and ARM64
-2. 🧪 Tests the AMD64 ISO boot path in QEMU
-3. 📦 Uploads ISO artifacts
-4. 🔐 Generates checksums
+```bash
+make test-pi-image
+make build-kit BASE_IMAGE=/absolute/path/to/official-desktop.img.xz
+```
 
-Baseline upgrade note: the current workflow builds Ubuntu 24.04 + ROS 2 Jazzy
-for both AMD64 and ARM64. A future move to Ubuntu 26.04 + ROS 2 Lyrical should
-update the workflow matrix, ISO artifact names, release notes, dependency
-compatibility notes, and this README together. This PR does not change the
-baseline to Lyrical.
+The second command is a privileged, networked local build: it mounts a scratch
+image and installs packages inside it. It does not write to an SD card. Results
+are under `output/pi/`; select the generated `.img.xz` with Raspberry Pi Imager's
+**Use custom** option. First boot needs a monitor and keyboard.
 
-The release job is present but disabled; manual dispatch does not publish GitHub releases.
+There is no image build/validation/upload/release workflow on GitHub Actions.
+The existing AMD64 ISO scripts remain a separate legacy local path; they do not
+produce Pi images, and their installer path is not validated by this change.
+The Pi image's actual boot, desktop and hardware still require Pi 5 validation.
 
 ### First boot of a custom image
 
@@ -222,17 +232,6 @@ Robots set up from an older image or installer: `scripts/update-robot-manager.sh
   `sudo passwd ubuntu`. The update, the installer and the setup stop there too.
 - It exits 0 when clean, 1 when a real run would remove something, and 2 when an operator has to act.
 
-### Triggers
-
-- **Manual dispatch**: Build and test ISO artifacts
-
-### Manual Trigger
-
-```bash
-# Trigger manual build via GitHub CLI
-gh workflow run build-iso.yml
-```
-
 ## 🧪 Testing
 
 ### Local Testing
@@ -241,7 +240,10 @@ gh workflow run build-iso.yml
 # Validate Ansible
 make test-ansible
 
-# Test ISO boot (requires QEMU)
+# Check the local Pi image recipe (no root or image build)
+make test-pi-image
+
+# Legacy AMD64 ISO only (requires QEMU; does not validate Pi boot)
 make test-iso-amd64
 
 # Test GitHub Actions locally (requires act)
@@ -274,7 +276,7 @@ rw  # Navigate to robot workspace
 
 - [Ansible Roles](ansible/roles/ros2/README.md)
 - [Playbook Usage](ansible/playbooks/README.md)
-- [GitHub Actions Workflow](.github/workflows/build-iso.yml)
+- [Local Pi Desktop Image Guide](scripts/iso/README.md)
 
 ## 🤝 Contributing
 
@@ -290,7 +292,7 @@ rw  # Navigate to robot workspace
 ### Build Environment
 
 - Ubuntu 24.04 with ROS 2 Jazzy
-- 20GB+ free disk space
+- About 40 GiB free disk space for the Pi Desktop image build
 - Internet connection for package downloads
 - sudo privileges
 
@@ -318,21 +320,21 @@ For Jazzy operation, confirm that each selected branch or tag in `dependency.rep
 is compatible with ROS 2 Jazzy before using it. A successful `vcs import` only
 confirms that the repositories were fetched; it does not guarantee runtime behavior.
 
-### Runtime (Generated ISOs)
+### Runtime (Locally Generated Images)
 
 - **AMD64**: Any x86_64 PC with 4GB+ RAM
 - **ARM64**: Raspberry Pi 5 with 4GB+ RAM
-- 16GB+ storage (SD card/USB/SSD)
+- Pi Desktop image: 32 GB+ SD card / SSD (default raw image: 24 GiB)
 
 ## 🐛 Troubleshooting
 
 ### Common Issues
 
-**Build fails with permission errors:**
+**Pi image build fails:**
 
-```bash
-sudo chmod 777 /tmp/iso-build /tmp/iso-output
-```
+See [the local build and recovery guide](scripts/iso/README.md). The script reports
+its private scratch directory and any loop device that could not be detached.
+Do not delete a directory while it still contains mounted filesystems.
 
 **QEMU emulation issues:**
 
@@ -357,7 +359,10 @@ make build-dev VERBOSE=1
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+QUESTiX code is licensed under the MIT License — see [LICENSE](LICENSE). The OS,
+ROS packages, firmware and third-party assets keep their own licenses. A locally
+generated image is not wholly MIT-licensed. Publishing a recipe does not authorize
+redistribution of the completed image; see [the image licensing notes](scripts/iso/README.md#licenses-and-distribution).
 
 ## 🙏 Acknowledgments
 

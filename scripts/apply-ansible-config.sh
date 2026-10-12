@@ -1,10 +1,10 @@
 #!/bin/bash
 # apply-ansible-config.sh
 # Apply the QUESTiX Ansible configuration to the custom image's chroot (after
-# scripts/prepare-base-system.sh, before scripts/build-iso.sh).
+# scripts/prepare-base-system.sh, or from scripts/build-pi-image.sh).
 #
-# The image is built from the checkout this script is in (not from the current directory: the
-# workflow runs it from /tmp/iso-build): that commit is cloned to /home/ubuntu/questix in the
+# The image is built from the checkout this script is in (not from the current directory):
+# that commit is cloned to /home/ubuntu/questix in the
 # image and the playbook runs from there, so the workspace is built in the image (a first boot
 # needs no download) and Robot Manager, its QUESTiX Local helper and the legacy cleanup are the
 # same revision. The playbook runs as root in the chroot with questix_image_build=true: the kit
@@ -14,13 +14,12 @@
 
 set -e
 
-ARCHITECTURE="$1"
-ROS2_DISTRO="$2"
-
-if [ "$#" -ne 2 ]; then
-    echo "Usage: $0 <architecture> <ros2_distro>"
+if [ "$#" -lt 2 ] || [ "$#" -gt 3 ]; then
+    echo "Usage: $0 <architecture> <ros2_distro> [chroot_directory]"
     exit 1
 fi
+ARCHITECTURE="$1"
+ROS2_DISTRO="$2"
 
 echo "🤖 Applying Ansible configuration for $ARCHITECTURE with ROS2 $ROS2_DISTRO"
 
@@ -28,7 +27,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ISO_FILES_DIR="$SCRIPT_DIR/iso"
 WORK_DIR="/tmp/iso-work"
-CHROOT_DIR="$WORK_DIR/chroot"
+CHROOT_DIR="${3:-$WORK_DIR/chroot}"
 IMAGE_USER=ubuntu
 IMAGE_SOURCE="/home/$IMAGE_USER/questix"
 # Ansible for the build only, in a venv removed afterwards (Ubuntu 24.04's pip refuses the system
@@ -102,48 +101,9 @@ apt-get clean
 rm -rf /var/lib/apt/lists/*
 CHROOT_EOF
 
-# Post-configuration for robotics kit
-if [ "$ARCHITECTURE" = "arm64" ]; then
-    echo "🔧 Applying Raspberry Pi 5 specific configurations..."
-
-    # Configure boot settings for Raspberry Pi
-    chroot "$CHROOT_DIR" /bin/bash << 'CHROOT_EOF'
-# Enable necessary modules
-echo "i2c-dev" >> /etc/modules
-echo "spi-dev" >> /etc/modules
-
-# Create firmware config for Raspberry Pi
-mkdir -p /boot/firmware
-cat > /boot/firmware/config.txt << 'CONFIG_EOF'
-# ROS2 Robotics Kit Configuration for Raspberry Pi 5
-
-# Enable hardware interfaces
-dtparam=i2c_arm=on
-dtparam=spi=on
-dtparam=audio=on
-
-# GPIO configuration
-gpio=2-27=op,dh
-
-# Camera support
-start_x=1
-gpu_mem=128
-
-# Performance optimizations
-arm_boost=1
-over_voltage=2
-arm_freq=2400
-
-# USB configuration
-max_usb_current=1
-CONFIG_EOF
-
-# Create cmdline.txt
-echo "console=serial0,115200 console=tty1 root=PARTUUID=XXXXXXXX-02 rootfstype=ext4 elevator=deadline fsck.repair=yes rootwait cgroup_enable=cpuset cgroup_enable=memory cgroup_memory=1" > /boot/firmware/cmdline.txt
-CHROOT_EOF
-
-    echo "🍓 Raspberry Pi 5 configuration completed"
-fi
+# Pi firmware, kernel/initramfs settings and root identity belong to the official
+# preinstalled image. hardware_interfaces makes the I2C/SPI/UART edits in place;
+# never replace config.txt/cmdline.txt or drive every GPIO high here.
 
 # Final system configuration
 echo "🔧 Applying final system configuration..."
