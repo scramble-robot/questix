@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>QUESTiX Robot Manager</title>
-  <link rel="stylesheet" href="/static/style.css?v=36">
+  <link rel="stylesheet" href="/static/style.css?v=37">
 </head>
 
 <body>
@@ -204,8 +204,10 @@
         <input id="web-joy-url" type="url" inputmode="url" autocomplete="off" spellcheck="false"
           placeholder="http://192.168.1.100:8899/" aria-describedby="web-joy-help" maxlength="2048">
         <p id="web-joy-help">ロボットの Wi-Fi（アクセスポイント）がオンならそのアドレス、それ以外はロボットの LAN アドレスを自動で入れます。操作する端末をロボットと同じネットワークに接続してください。ポートや認証トークンを変更した場合は URL に反映してください。</p>
-        <a id="web-joy-browser" class="btn btn-save" target="_blank" rel="noopener noreferrer" hidden>ブラウザで操作 ↗</a>
-        <button type="submit" class="btn btn-save">この URL の QR を表示</button>
+        <div class="web-joy-actions">
+          <a id="web-joy-browser" class="btn btn-save" target="_blank" rel="noopener noreferrer" hidden>ブラウザで操作 ↗</a>
+          <button type="submit" class="btn btn-save">操作ページの QR を表示</button>
+        </div>
       </form>
       <p id="web-joy-qr-status" role="status" aria-live="polite"></p>
       <div id="web-joy-qr-result" hidden>
@@ -834,10 +836,10 @@
 
   <script src="/static/vendor/qrcode.js"></script>
   <script src="/static/qr-svg.js?v=1"></script>
-  <script src="/static/web-joy-connection.js?v=3"></script>
+  <script src="/static/web-joy-connection.js?v=4"></script>
   <script src="/static/operator-guide.js?v=4"></script>
   <script src="/static/control-labels.js?v=4"></script>
-  <script src="/static/status-view.js?v=2"></script>
+  <script src="/static/status-view.js?v=3"></script>
   <script src="/static/network-view.js?v=1"></script>
   <script src="/static/trial-view.js?v=1"></script>
   <script src="/static/motion-state-view.js?v=1"></script>

@@ -55,9 +55,9 @@ def codes(session):
 
 def test_nothing_heard_yet_means_no_launcher():
     session = ShootSession()
-    assert codes(session) == [shoot.NO_LAUNCHER, shoot.ESTOP_UNKNOWN, shoot.NO_MOTION_PERMISSION]
-    assert session.roller(1, 0.5, 0.0) == shoot.NO_LAUNCHER
-    assert session.state(0.0)['blockers'][0]['parts'] == ['arbiter', 'roller', 'shot']
+    assert codes(session) == [shoot.ESTOP_UNKNOWN, shoot.NO_LAUNCHER, shoot.NO_MOTION_PERMISSION]
+    assert session.roller(1, 0.5, 0.0) == shoot.ESTOP_UNKNOWN
+    assert session.state(0.0)['blockers'][1]['parts'] == ['arbiter', 'roller', 'shot']
     assert not session.allowed
 
 
@@ -91,6 +91,48 @@ def test_no_launcher_without_the_arbiter_or_a_status():
     assert codes(session) == [shoot.NO_LAUNCHER]
     feed(session, 0.3, shot={'active': False})  # shot_component not active (E-stop teardown)
     assert session.state(0.3)['blockers'][0]['parts'] == ['shot']
+
+
+def test_estop_teardown_is_not_a_missing_shot_node_and_still_refuses_every_command():
+    for source in ('topic', 'shot', 'roller'):
+        session = ready_session()
+        assert session.roller(1, 0.5, 0.0) is None
+        if source == 'topic':
+            session.set_emergency_stop(True, 0.1)
+        feed(session, 0.1, shot={'active': False, 'estop': source == 'shot'},
+             roller={'estop': source == 'roller'})
+        assert codes(session) == [shoot.EMERGENCY_STOP]
+        assert not session.active and session.last_stop['reason'] == shoot.EMERGENCY_STOP
+        assert session.roller(2, 0.5, 0.1) == shoot.EMERGENCY_STOP
+        assert session.tilt_to(2, 30.0, 0.1) == (shoot.EMERGENCY_STOP, None)
+        assert session.fire(2, True, 0.1) == shoot.EMERGENCY_STOP
+        assert session.tick(0.15) == (0.0, None, 0)
+        session.set_emergency_stop(False, 0.2)
+        feed(session, 0.2, shot={'active': False})
+        assert codes(session) == [shoot.NO_LAUNCHER], 'still inactive after release'
+        feed(session, 0.3)
+        assert codes(session) == []
+
+
+def test_estop_does_not_hide_a_stale_shot_or_missing_arbiter_and_roller():
+    session = ready_session()
+    session.set_emergency_stop(True, 0.1)
+    session.set_roller_status(ROLLER_OK, 1.1)
+    session.set_arbiter(status(), 1.1)
+    session.tick(1.1)
+    assert session.state(1.1)['blockers'] == [
+        {'code': shoot.EMERGENCY_STOP, 'nodes': None, 'parts': ['topic']},
+        {'code': shoot.NO_LAUNCHER, 'nodes': None, 'parts': ['shot']}]
+    session.set_graph([], [], 1.2)
+    session.set_shot_status(dict(SHOT_OK, active=False), 2.2)
+    session.tick(2.2)
+    assert session.state(2.2)['blockers'][1]['parts'] == ['arbiter', 'roller']
+
+
+def test_unknown_estop_precedes_missing_launcher_and_confirmed_estop():
+    session = ShootSession()
+    session.set_emergency_stop(True, 0.0)
+    assert codes(session)[:3] == [shoot.ESTOP_UNKNOWN, shoot.EMERGENCY_STOP, shoot.NO_LAUNCHER]
 
 
 def test_a_silent_status_means_no_launcher_and_ends_the_session():

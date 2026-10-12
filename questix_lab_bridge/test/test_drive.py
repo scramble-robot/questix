@@ -31,9 +31,19 @@ def codes(session):
 
 def test_nothing_is_known_at_start():
     session = DriveSession()
-    assert codes(session) == [drive.NO_DRIVE_NODE, drive.ESTOP_UNKNOWN]
+    assert codes(session) == [drive.ESTOP_UNKNOWN, drive.NO_DRIVE_NODE]
     assert not session.allowed
     assert session.state()['limits']['linear'] is None
+
+
+def test_estop_precedes_a_missing_drive_node_without_allowing_motion():
+    session = ready_session()
+    session.set_graph([], [], 0.1)
+    session.set_emergency_stop(True, 0.1)
+    assert codes(session) == [drive.EMERGENCY_STOP, drive.NO_DRIVE_NODE]
+    assert session.request(1, 0.1, 0.0, 0.1) == drive.EMERGENCY_STOP
+    session.set_estop_known(False, 0.2)
+    assert codes(session) == [drive.ESTOP_UNKNOWN, drive.EMERGENCY_STOP, drive.NO_DRIVE_NODE]
 
 
 def test_the_arbiter_must_be_on_the_topic_and_reporting():
