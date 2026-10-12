@@ -451,6 +451,7 @@ void EscMotorControlComponent::apply_gate() {
           (!rp1_terminal && pwm_command_.needs_stop(speed_to_pulse_us(0.0)))) {
         command_logic_.inhibit();
         command_source_ = "idle";
+        if (rp1_terminal) current_speed_ = 0.0;  // Clear the request without re-emitting neutral.
         stop = !rp1_terminal;
       }
     }
