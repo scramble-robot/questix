@@ -4,6 +4,13 @@ QUESTiX の足回りの current モード（ホスト側 PI＋摩擦補償＋暴
 drive_component** と擬似モータで動かし、ブラウザでリアルタイムに見るための開発ツールです。
 ロボットもモータも要りません。
 
+停止後の中立待ちに対応し、シミュレーションのidle中は20msごとにゼロを送ります。
+profile・manualの新しい操作でも、最初の0.1秒（5 tick）はゼロを先行させます。
+profileの時間はこの準備後から数えるので、最初のstepを短縮しません。これはdepth 1での
+配送保証ではありません。driveの再activateやfaultの復帰後も、操作をいったん止めて始め直します。
+このPC専用診断経路は非常停止・motion permissionを明示的にopt-outします。
+`--robot` は読取り専用で、ゼロを含め指令をpublishしません。
+
 ```
 ブラウザ ──WebSocket── sim_server.py ──/target_twist・パラメータ──▶ drive_component（このワークスペースのビルド）
  http://127.0.0.1:8765/      │    ◀──/drive_control_sample──────────┘        │ serial_port
