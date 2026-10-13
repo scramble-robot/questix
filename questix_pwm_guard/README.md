@@ -121,6 +121,10 @@ dtcで `questix-gpio13-rp1-pwm.dtbo` を作ります。masterは
 `config.txt` の末尾に専用markerと `[all]`・`dtoverlay=questix-gpio13-rp1-pwm` を追加するため、
 元の `[pi4]` / `[cm4]` の末尾に依存せず、他のboot設定を上書きしません。
 
+`--check` ではdtcが出力を生成しないため、コンパイル済みoverlayの2つのコピーを省略します。
+masterが既に存在しても、firmware側のコピー欠落はコピーの変更予定として報告されません。
+check modeの結果だけではoverlayの配備完了を確認できません。
+
 手作業の設置済み機体では、配備前と再起動前に `config.txt` の全セクションと
 include先を確認し、GPIO13のPWMを設定する有効なdtoverlay行が**1つだけ**になるようにします。
 marker外の `questix-gpio13-rp1-pwm`、旧名 `gpio13-rp1-pwm`、別名の同内容のoverlayや

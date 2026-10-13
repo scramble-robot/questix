@@ -23,6 +23,10 @@ compiled master under `/etc/flash-kernel/dtbs/overlays`, copies it to firmware, 
 appends an explicit `[all]` block. A reboot is needed for its application. Guard
 readiness/waveform acceptance must be checked on every shipped robot.
 
+Check mode skips both compiled-overlay copies because dtc produces no output in
+that mode. Even with an existing master, a missing firmware copy is not reported
+as a required copy change; check mode alone does not verify overlay deployment.
+
 For existing Pi 5 robots, deploy `hardware_interfaces` and `pwm_guard` with ESC power
 off, reboot, verify the guard is active and accept its Low/neutral waveforms, then
 update/build the user's workspace (including Robot Manager updates). Building the
