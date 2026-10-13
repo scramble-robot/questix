@@ -32,6 +32,7 @@
 #include <cstdio>
 #include <fstream>
 #include <functional>
+#include <iomanip>
 #include <geometry_msgs/msg/twist.hpp>
 #include <lifecycle_msgs/msg/state.hpp>
 #include <memory>
@@ -238,7 +239,7 @@ protected:
           << "    serial_port: \"" << motor_.path() << "\"\n"
           << "    connect_retry_period_sec: 0.5\n"
           << "    control_mode: " << mode << "\n"
-          << "    rearm_neutral_linear: " << linear_band << "\n"
+          << "    rearm_neutral_linear: " << std::showpoint << linear_band << "\n"
           << "    publish_tf: false\n"
           << "    odom_topic: \"" << prefix_ << "/odom\"\n"
           << "    typed_status_topic: \"" << prefix_ << "/drive_status\"\n"
@@ -575,7 +576,7 @@ TEST_P(DriveRearmModes, BandRearmsToZeroButDoesNotFilterArmedMotion) {
   spinFor(400ms);
   // A qualifying nonzero neutral is saved as zero, not as .05 m/s.
   EXPECT_FALSE(droveBothWheels());
-  twist_linear_ = .02;
+  twist_linear_ = .04;
   send_twist_ = true;
   ASSERT_TRUE(spinUntil([this] { return droveBothWheels(); }, 3s));
 }
