@@ -142,6 +142,8 @@ void DriveComponent::shutdownMotorLib() {
 }
 
 void DriveComponent::resetCommandState() {
+  rearm_.reset();
+  pending_cmd_timeout_stop_ = false;
   // 武装解除（制御 tick は次の /target_twist まで駆動指令を送らない）+
   // 制御コアのリセット（次の駆動は 0 からのランプ、停止モードから再開）。
   has_target_ = false;
@@ -166,21 +168,46 @@ void DriveComponent::twistCallback(const geometry_msgs::msg::Twist::SharedPtr ms
   }
 
   // 走行許可なし・非常停止中・E-stop 不明/途絶・stop fault の間は目標を保存しない
-  // （開いた後もモータは停止のまま、開いた後に届いた次の指令で再開）。
+  // （開いた後も中立を受けるまでは走行を再開しない）。
   const auto block = actuation_gate::evaluate(gateInputs());
   if (block != actuation_gate::Block::kNone) {
+    rearm_.reset();  // also latch a closed gate observed before its control tick
     RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
                          "Actuation blocked (%s), ignoring twist command",
                          actuation_gate::blockName(block));
     return;
   }
 
+  if (pending_cmd_timeout_stop_) return;  // cannot cancel a stop owed by a late callback
+  const bool motor_healthy = motor_initialized_ && diff_drive_ && diff_drive_->isHealthy();
+  const auto decision = rearm_.command(msg->linear.x, msg->angular.z, this->now().seconds(),
+                                       cmd_timeout_sec_, !motor_healthy,
+                                       rearm_neutral_linear_, rearm_neutral_angular_);
+  using Decision = drive_rearm::Rearm::Decision;
+  if (decision == Decision::kTimeout) {
+    pending_cmd_timeout_stop_ = true;  // I/O remains in the control tick
+    return;
+  }
+  if (decision == Decision::kNeedsNeutral) {
+    RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                         "Drive needs neutral: linear=%g angular=%g; bands linear=%g angular=%g",
+                         msg->linear.x, msg->angular.z,
+                         rearm_neutral_linear_, rearm_neutral_angular_);
+    return;
+  }
+  if (decision == Decision::kInvalid) {
+    RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                         "Ignoring non-finite drive command");
+    return;
+  }
+  if (decision == Decision::kInhibited) return;
+
   // 制御実行は controlTimerCallback（固定周期の制御 tick）に集約されている。ここでは
   // 最新目標の保存のみを行い、シリアル I/O もスルーレート計算もしない。これにより
   // 制御周期（= スルーレートの dt）が上流の publish レートやメッセージ取りこぼしから
   // 独立する（従来は /target_twist の到着間隔が dt だった）。
-  target_linear_ = msg->linear.x;
-  target_angular_ = msg->angular.z;
+  target_linear_ = decision == Decision::kNeutral ? 0.0 : msg->linear.x;
+  target_angular_ = decision == Decision::kNeutral ? 0.0 : msg->angular.z;
   last_cmd_time_ = this->now();
   has_target_ = true;
 }
@@ -287,7 +314,7 @@ void DriveComponent::runControlTick() {
         stop_fault_ = false;
         RCLCPP_INFO(this->get_logger(),
                     "Stop fault cleared: zero sent to both wheels (still stopped until the next "
-                    "command)");
+                    "neutral command)");
       } else {
         RCLCPP_ERROR_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
                               "Stop fault: zero could not be sent yet, retrying every %.1fs",
@@ -299,9 +326,16 @@ void DriveComponent::runControlTick() {
   // 走行許可（L2）・E-stop（L1）・stop fault のゲート。閉じたら停止 + 武装解除（applyGate）。
   const auto block = applyGate();
 
+  if (pending_cmd_timeout_stop_) {
+    tick_sample_.tick_action = questix_msgs::msg::DriveControlSample::TICK_TIMEOUT_STOP;
+    safetyStop("command timeout observed by input callback");
+    return;
+  }
+
   const double elapsed = has_target_ ? (this->now() - last_cmd_time_).seconds() : 0.0;
   // isHealthy はキャッシュ済みフィードバックの fault コードを見るだけでシリアルには触らない
   const bool healthy = motor_ready && diff_drive_->isHealthy();
+  if (!healthy) rearm_.reset();  // a zero received while faulty cannot arm its recovery
   if (motor_ready) {
     reportCurrentGuardTrips();  // 作動・解除の変化だけをログに出す
   }
@@ -329,7 +363,7 @@ void DriveComponent::runControlTick() {
                   "Command timeout: no /target_twist for %.2fs (limit %.2fs), stopping motors",
                   elapsed, cmd_timeout_sec_);
       // safetyStop は各ホイールへスロットル無しでゼロを送り（電流PI積分状態もリセット）、
-      // 武装解除する（WARN はイベント毎に1回）。次の /target_twist で自動的に再武装し、
+      // 武装解除する（WARN はイベント毎に1回）。中立の /target_twist を受けるまで再武装せず、
       // スルーレートクランプもゼロから再スタートする。送れなければ stop fault。
       safetyStop("command timeout");
       return;
@@ -451,7 +485,7 @@ void DriveComponent::onEmergencyStop(const questix_msgs::msg::EmergencyStop& msg
     case drive_watchdog::EstopAction::kClear:
       RCLCPP_INFO(this->get_logger(),
                   "非常停止が解除されました (source=%s)。twist 受付を再開します"
-                  "（モータは次の指令まで停止のまま）",
+                  "（モータは中立を受けるまで停止のまま）",
                   msg.source.c_str());
       break;
     case drive_watchdog::EstopAction::kNone:
@@ -501,7 +535,7 @@ actuation_gate::Block DriveComponent::applyGate(bool stopped_now) {
   if (block != last_block_) {
     if (block == actuation_gate::Block::kNone) {
       RCLCPP_INFO(this->get_logger(),
-                  "Actuation allowed again (was %s); the drive stays stopped until a new command",
+                  "Actuation allowed again (was %s); the drive needs neutral before moving",
                   actuation_gate::blockName(last_block_));
     } else {
       RCLCPP_WARN(this->get_logger(), "Actuation blocked: %s (was %s)",

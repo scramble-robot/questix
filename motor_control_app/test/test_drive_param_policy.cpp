@@ -24,6 +24,9 @@ namespace motor_control_app {
 struct DriveParamPolicyAccess {
   static void initialize(DriveComponent& node) { node.readParameters(); }
   static int responseTimeoutMs(const DriveComponent& n) { return n.serial_response_timeout_ms_; }
+  static std::vector<double> rearmBands(const DriveComponent& n) {
+    return {n.rearm_neutral_linear_, n.rearm_neutral_angular_};
+  }
   static std::vector<double> snapshot(const DriveComponent& n) {
     return {n.max_linear_accel_,
             n.max_angular_accel_,
@@ -86,6 +89,22 @@ protected:
 
   std::shared_ptr<motor_control_app::DriveComponent> node_;
 };
+
+TEST_F(DriveParamPolicyTest, RearmBandsValidateOnStartupAndRequireRestart) {
+  for (double value : {-0.01, 0.11, std::numeric_limits<double>::quiet_NaN(),
+                        std::numeric_limits<double>::infinity()}) {
+    rclcpp::NodeOptions options;
+    options.append_parameter_override("auto_start", false);
+    options.append_parameter_override("rearm_neutral_linear", value);
+    options.append_parameter_override("rearm_neutral_angular", value);
+    motor_control_app::DriveComponent node(options);
+    motor_control_app::DriveParamPolicyAccess::initialize(node);
+    EXPECT_EQ(motor_control_app::DriveParamPolicyAccess::rearmBands(node),
+              (std::vector<double>{0.0, 0.0}));
+  }
+  EXPECT_FALSE(node_->set_parameter(rclcpp::Parameter("rearm_neutral_linear", .01)).successful);
+  EXPECT_FALSE(node_->set_parameter(rclcpp::Parameter("rearm_neutral_angular", .02)).successful);
+}
 
 TEST_F(DriveParamPolicyTest, LiveTuningParametersAreAccepted) {
   EXPECT_TRUE(node_->set_parameter(rclcpp::Parameter("max_linear_accel", 2.5)).successful);

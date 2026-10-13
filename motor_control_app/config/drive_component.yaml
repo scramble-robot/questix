@@ -1,0 +1,250 @@
+# Mirror: launcher/config/drive_component.yaml and motor_control_app/config/drive_component.yaml.
+# Keep these identical; integrated launch uses the launcher copy.
+# QUESTiX drive hardware/control-loop configuration (single source).
+# Operator tuning (RPM limits, acceleration, taper, deadband) is in
+# questix_control_config/config/controls.*.yaml, shared with robot_manager.
+# Integrated launch loads this file, then the operator profile.
+# Standalone launch accepts this file via config_file; without it hardware
+# parameters retain node defaults. Shared operator controls still apply.
+drive_component:
+  ros__parameters:
+    # シリアル通信設定
+    serial_port: "/dev/ttyACM0"
+    baud_rate: 57600
+
+    # Lifecycle auto start / ライフサイクル自動起動
+    # 非常停止中はモータが通電されず接続できないため、unconfigured で待機し
+    # connect_retry_period_sec 間隔で接続を再試行、成功したら自動で activate する。
+    # false にすると ros2 lifecycle set で手動遷移する運用になる。
+    auto_start: true
+    connect_retry_period_sec: 1.0
+
+    # ロボット物理パラメータ
+    wheel_radius: 0.05 # ホイール半径 [m]（直径 100 mm。2026-10 まで 0.1 の誤り、#179）
+    wheel_separation: 0.5 # ホイール間隔 [m]
+
+    # モータ設定
+    left_motor_id: 4 # 左モータID
+    right_motor_id: 5 # 右モータID
+    # 制御モード設定
+    # "velocity": M0602Cファーム内蔵の速度ループを使用（従来挙動）
+    # "current" : ソフトウェアPI制御で目標RPM→電流指令に変換（実験的。実機で未調整）
+    # 手順と注意は motor_control_app/README.md「current モード」。
+    control_mode: "velocity"
+
+    # ---- current モード（control_mode "current" のときだけ使う。velocity モードでは無視）----
+    # 電流指令 = 摩擦補償(目標) + current_kp*誤差 + 積分項。誤差 = 目標RPM - 実測RPM。
+    # ゲインは負荷慣性で決まる: 床の上は車輪を浮かせたときの約 20 倍（6 kg の推定）。
+    # 既定値は「浮かせた車輪で安定する出発点」で、床の上では遅い（安全側）。床用のゲイン
+    # （目安 current_kp 0.02 / current_ki 0.05）で車輪を浮かせると発振する。どちらの誤りも
+    # 下の暴走ガードが電流 0 で止める。D 項は持たない（50 Hz・1 tick のむだ時間・1 rpm の量子化
+    # では微分がノイズを増やし、浮かせた軽い車輪を不安定にする。README）。
+    current_kp: 0.0015          # [A/rpm]       比例ゲイン（0 以上）
+    current_ki: 0.004           # [A/(rpm·s)]   積分ゲイン（0 以上）。積分項は電流で持つ（変更しても跳ねない）
+    max_current_amp: 1.0        # [A] 電流指令の絶対値上限（0..4。定格 1.2 A、相電流保護 4.6 A×5 s）
+    integral_limit_amp: 0.3     # [A] 積分項の絶対値上限。出力が上限に張り付く間は積分しない
+    current_zero_deadband_rpm: 5  # [RPM] 目標0かつ実測がこの範囲内ならPIを停止して積分リセット（静止時の微振動防止）
+    # 実測の符号反転。正しい符号は false の見込み（velocity モードでは指令と実測が同符号で、
+    # ファームの速度ループも同じ電流指令の上に組まれているため）。実機で未確認。誤ると正帰還に
+    # なり、暴走ガードが「against」で止める（2026-10 まで true だった）。
+    current_invert_measured: false
+    # 摩擦補償（フィードフォワード）。目標 RPM だけから決まる電流を足す（実測は使わないので
+    # 補償そのものは発振・暴走の原因にならない）。0 = なし。測り方は README（一定速度で回したときの
+    # 定常電流 = 摩擦。2 つの速度で測って static と viscous に分ける）。浮かせたときと床の上で違う。
+    current_ff_static_amp: 0.0            # [A] 静止（クーロン）摩擦分。|目標| < 10 rpm では比例で立ち上げる
+    current_ff_viscous_amp_per_rpm: 0.0   # [A/rpm] 粘性摩擦分
+    # 暴走ガード（無効にはできない）。作動したらその車輪は電流 0 でラッチし、走行はフォールト停止。
+    # 解除は lifecycle の再構成（ノード再起動）か current モードのパラメータ変更。
+    #   against    : 回転を止める向きの電流なのに 30 rpm 以上速くなった（符号の誤り = 正帰還）
+    #   overspeed  : |実測| > |目標| + margin が time 続き、減速していない（過補償・外力）
+    #   oscillation: 上限に張り付いた電流の向きが 0.5 s に 4 回入れ替わった（ゲインが負荷に対して高い）
+    # 有効な応答が 3 回続けて無いときは、ラッチせずに電流 0 を送る（古い実測で電流を出さない）。
+    current_guard_overspeed_margin_rpm: 50.0  # [RPM] > 0
+    current_guard_overspeed_time_sec: 0.3     # [s] > 0
+
+    # 停止時の電気ブレーキ（velocity モードのみ有効）。
+    # true: スティック中立/停止時に目標0＋ブレーキ指令を送り、しっかり停止・保持する。
+    # false: 目標0のみを送る。
+    #
+    # 実機評価の結果 false が最良（brake_on_stop: false + stop_resend_interval_ms: 300）。
+    # 「2段階停止」の解決に効いたのはブレーキの有効化ではなく、停止フレームの再送を
+    # スロットルすること（stop_resend_interval_ms、下記参照）だった。true にすると
+    # 停止・保持は強くなるが、実機の体感では false のほうが良い。
+    #
+    # 注意: false では停止時に電気ブレーキが掛からない（ウォッチドッグ停止・非常停止も
+    # 同じ経路なので同様）。傾斜面で保持が必要な運用に変える場合は true を再検討する。
+    # その場合も stop_resend_interval_ms > 0 は必須（制御 tick ごとにブレーキを
+    # 新規の制動として掛け続けると収束しない振動になる）。
+    brake_on_stop: false
+
+    # 注: ファーム側加速時間 accel_time_0p1ms_per_rpm はパラメータとしては廃止し、
+    # コード内で 1（実質ファーム平滑化なし）に固定した。実機検証で 1 より大きくすると
+    # 高RPMの直進が乱れることが確定しており、左右共通・前後/旋回分離不可の単一ファーム値は
+    # チューニングレバーとして機能しない。加速プロファイルの整形はホスト側
+    # （max_*_accel + slew_taper_band_*）に一本化する。
+
+    # ---- velocity モードの走行状態機械（design/model_based_drive_control.md Phase B）----
+    # 車輪 RPM（左右の大きい方）で 停止(STOP) / 低速(CREEP) / 走行(RUN) を判定する。
+    # STOP<->CREEP は従来の min_command_rpm + ヒステリシス（drive_stop_gate）そのまま
+    # （min_command_rpm は questix_control_config/config/controls.*.yaml 側）。
+    # CREEP<->RUN は run_enter（入り）/ run_exit（抜け）の 2 閾値でヒステリシスを作る。
+    # 両方 0 なら RUN 判定は無効 = CREEP が存在しない従来の 2 状態（停止/走行）。
+    # RUN は「ファーム速度ループが一次遅れで近似できる領域」で、下の velocity_run_* の
+    # LQR+FF はこの状態でだけ動く。閾値は同定（Phase A）の「一次で当てはまる rpm 域」から決める。
+    drive_fsm_run_enter_rpm: 0   # [RPM] 0 で無効
+    drive_fsm_run_exit_rpm: 0    # [RPM] 0 で無効（enter だけ指定なら同値を使う）
+
+    # ---- velocity モード RUN 域の外側 LQR+FF（Phase E、velocity モードのみ有効）----
+    # ファーム速度ループを一次遅れ τ + むだ時間 d[tick] で近似し、実測 RPM（生値）からの
+    # 推定値で目標 RPM を補正する。current モードでは無視される（起動ログに WARN）。
+    #   指令 = 目標 + lead_gain*(目標の変化)/(1-a) - disturbance_gain*d̂/(1-a) - K*(x̂ - 目標)
+    #   a = exp(-dt/τ)、K は q/r から離散リカッチで計算、補正量は ±max_correction_rpm に制限。
+    # 既定は無効。有効化の前提: Phase A の同定で RUN 域が一次遅れで R² >= 0.9、かつ実測で
+    # 追従誤差が運用上問題になっていること。q=0, lead=0, disturbance=0 なら有効でも出力は
+    # 従来と同一（目標をそのまま送る）。
+    # RUN 閾値（drive_fsm_run_*）が両方 0 の間は、有効にしても適用されない（起動ログに WARN）。
+    # 補正で指令の符号が目標と逆になることはない（その場合は 0 を送る）。
+    # 補正は輪ごとに掛ける。補正していない輪は |目標| が run_enter 以上で入り、補正中の輪は
+    # run_exit 以上の間とどまる（車体の CREEP<->RUN と同じヒステリシス。目標 0 は常に対象外）。
+    # 車体が RUN でも、旋回の遅い側・0・逆向きの輪は FF のみ（目標そのまま）で、その輪の
+    # 推定状態は捨てる。目標の符号が変わった（前後反転）ときもその輪の状態を捨て直す。
+    # 注意: 外側ループは内側（ファーム）より十分遅くすること（q を小さく、r を大きく）。
+    #   ゲイン K が 0.3 を超えるなら強すぎる目安（K は ControlCore::lqrGains() で確認できる）。
+    # 注意: 振動対策ではない。モデルは一次遅れ + むだ時間で、床の上で報告されている約 1.5〜1.75 Hz の
+    #   速度変動（2026-10 の実機試験。原因は未確定：共振、回転の次数の脈動、摩擦・接触、制御・推定の
+    #   どれかは識別できていない）を再現・抑制できるかは未検証。補正は追従の定常偏差を減らすためのもの。
+    #   外乱補償（disturbance_gain > 0）が共振付近（~100 rpm）の揺れを補正上限まで励起し得ることは、
+    #   仮定値の 2 次モデル（test_control_core）の上のリスクで（約 8 倍）、実機の周波数・増幅率ではない。
+    #   原因の同定と安全の確認が済むまで有効にしないこと。
+    # 注意: tick 単位の値（model_delay_ticks、オブザーバの l_x / l_d、q / r）は control_rate に
+    #   依存する（既定・同定は 50 Hz 前提）。control_rate を変えたら同定し直す（起動時に WARN）。
+    velocity_run_lqr_enabled: false
+    velocity_run_model_tau_sec: 0.1        # [s] 同定値（一次遅れ時定数）
+    velocity_run_model_delay_ticks: 1      # [tick = 1/control_rate 秒] 同定値（RS-485 1 問 1 答で最低 1）
+    velocity_run_q: 0.0                    # 追従誤差の重み（0 で FB なし）
+    velocity_run_r: 1.0                    # 入力の重み
+    velocity_run_lead_gain: 0.0            # 0..1 参照変化の先回り（大きいと指令がギザギザに）
+    velocity_run_disturbance_gain: 0.0     # 0..1 外乱推定 d̂ による定常偏差補償（observer_l_d>0 が必要）
+    velocity_run_observer_l_x: 0.3         # 0..1 状態推定のイノベーションゲイン（1 で実測そのまま）
+    velocity_run_observer_l_d: 0.0         # 外乱推定ゲイン（0 で外乱推定なし。0.01〜0.05 から）
+    velocity_run_max_correction_rpm: 20.0  # [RPM] 補正量の上限（安全装置。正帰還・干渉の被害を有界に）
+    velocity_run_invert_measured: false    # 実測 RPM の符号を反転（正帰還になる場合のみ true）
+    velocity_run_feedback_max_age_sec: 0.1 # [s] 両輪のフィードバックがこれより古ければ FF のみ
+
+    # /target_twist 受信タイムアウト（制御 tick 内で判定）。
+    # 指令がこの秒数途絶えたら走行モータを停止する（velocity/current 両モードで有効）。
+    # 上流（uart_joy_driver/joy_controller/command_arbiter）が停止しても暴走を防ぐ安全機能。
+    # 0以下で無効（安全機能のため通常は無効化しないこと）。
+    cmd_timeout_sec: 1.0
+    # Rearm only, velocity/current both; strict zero defaults. Restart to change.
+    # Finite [0, 0.05] m/s / [0, 0.1] rad/s; invalid values log ERROR and use 0.0.
+    # Separate from arbiter takeover thresholds; armed commands are not filtered.
+    rearm_neutral_linear: 0.0
+    rearm_neutral_angular: 0.0
+
+    # 制御ループ（制御 tick）の周期 [Hz]。twist の受信（保存のみ）と制御実行は分離されて
+    # おり、スルーレート制限の dt は 1/control_rate の定数になる。これにより加速度
+    # プロファイルが上流の publish レート（DualShock 20Hz / UART 50Hz）に依存しない。
+    # シリアル送信もこの tick のみが行う（指令+フィードバック往復: 2モータで正常 ≈ 7ms、
+    # フィードバック落ち時は最悪 ≈ 20ms）。往復時間が周期予算 1/control_rate を超えると
+    # "Control tick overrun" 警告が出る。その場合は control_rate を下げる（警告は駆動指令を送る
+    # tick だけで判定し、待機中の tick の超過は出ない。全 tick は /drive_control_sample の
+    # tick_duration_sec で見る。motor_control_app/README.md「周期と時間の扱い」）。
+    control_rate: 50.0
+
+    # 指令送信後の追加待機 [ms]。0で待機なし（既定）。
+    # 応答待ち（最大10ms）が自然なコマンド間隔になるため通常は不要。
+    # DDT M0602C の最小コマンド間隔が実機検証で必要と判明した場合のみ >0 を設定する。
+    # 注意: >0 にするとその分コールバックがブロックされる。
+    command_wait_ms: 0
+
+    # 指令送信後にフィードバック応答を待つ上限 [ms]（両モータ共通）。既定 10 は従来の固定値。
+    # 範囲 [2, 50]、外れた値はクランプして起動時に WARN。実行時変更不可（再起動で反映）。
+    # 応答が来れば待ちはその時点で終わるので、効くのは応答が無い・遅いときだけ（そのとき
+    # 1 モータあたりこの時間、2 モータ直列で 2 倍が制御 tick に乗る）。
+    # 下限の目安 = 応答フレームの伝送 1.74 ms（10 byte @57600 baud）+ ファーム処理の実測値 + 余裕。
+    # 実測は bag の /drive_control_sample の roundtrip_ms / response_timeout で確認する（INFO
+    # 「シリアル往復レイテンシ統計」は lifecycle の deactivate のときだけ出て、サービスの停止では出ない）。
+    # 往復の max より短くすると、遅れた応答を取りこぼし、次の送受信の前の入力クリアで捨てる。
+    serial_response_timeout_ms: 10
+
+    # 停止継続中のブレーキ再送間隔 [ms]。停止指令（目標0+ブレーキ）が既に送信済みの状態が
+    # 続く間、この間隔未満での再呼び出しは実際のシリアル送信をスキップする。
+    # 高頻度（~20Hz）でブレーキを再送し続けると、残留回転がある間は毎回新規の制動として
+    # 作用し、収束せず持続的な振動（リミットサイクル）を起こすことがある
+    # （cf. 停止直後の足回り振動の rosbag 解析）。0で無効（従来通り毎回送信）。
+    # 停止直後の最初の1回、および緊急停止には適用されない（常に即座に送信する）。
+    #
+    # 実機評価で 300 が最良（brake_on_stop: false との組み合わせ）。「2段階停止」
+    # （減速したあと最後だけ挙動が変わる）の主因はここだった。0（無効）だと停止中も
+    # 制御 tick ごと（control_rate、既定 50 Hz）に停止フレームを送り続ける。停止フレームは
+    # 毎回ファーム速度ループへの新しい目標指令として作用するため、高頻度で送ると
+    # ファーム側が自身の減速を完了できず、最後の収束が乱れると考えられる
+    # （ファーム内部の挙動は観測できないため機序は推定。ファームが受信フレームごとに
+    # 内部状態（ランプや積分）を更新している可能性があり、定速走行中の送信頻度でも同じことが
+    # 起きているかは未確認。確かめる試験手順は scripts/identify/README.md）。
+    # 停止の最後: 目標が min_command_rpm を下回ると停止フレームに切り替わり、そこからの
+    # 減速はファーム（加速度バイト 1 = 最速）が引き継ぐ。ホストのランプはそこで終わる。
+    #
+    # 上限の目安: アイドル時のフィードバック鮮度維持もこの再送に乗る。300 なら実測の
+    # 最大 age は約 0.32s で odometry の stale 判定（0.5s）に余裕があるが、400ms を
+    # 超えると掛かりはじめる。
+    stop_resend_interval_ms: 300
+
+    # 実測RPMのローパスフィルタ時定数 [s]。M0602Cのフィードバック速度は量子化・振動で
+    # ノイズが大きい（床の上では目標一定でも約1.5〜1.75Hzで往復すると報告されている。2026-10 の
+    # 実機試験、原因は未確定。以前の「実機ログ: 約1.8Hz」は元のログが無い）。この値を >0 にすると
+    # レポート／オドメトリ経路で使う実測RPMを一次ローパスで平滑化する。
+    # 一次ローパス: filtered += dt/(tau+dt) * (raw - filtered)（可変サンプル間隔対応）。
+    # 遮断周波数の目安 fc ≒ 1/(2π·tau) [Hz]。例: 0.1 -> 約1.6Hz、0.2 -> 約0.8Hz。
+    # tau を大きくするほどノイズは減るが位相遅れ（応答遅れ）が増え、オドメトリの
+    # 積分タイミングも遅れる。実機で 0.05〜0.2 を目安に調整する。0以下で無効（生値）。
+    # 注意: このフィルタは制御ループには掛からない。current モードの PI 制御は生の実測RPMを
+    # 使い続けるため、制御の位相余裕は変わらない（平滑化はレポート／オドメトリ側のみ）。
+    # /drive_status の velocity_rpm と /odom の twist に反映される。/odom の位置・向きは 2026-10 から
+    # 生値を実測の受信時刻で台形積分し、配信時刻まで最後の実測の速度で延ばして出す（ローパスの
+    # 遅れや積分タイマーの位相差が、旋回しながら進む間の向きの遅れ = 位置のずれとして残るため）。
+    measured_lpf_tau_sec: 0.15
+
+    # パブリッシュ設定
+    status_publish_rate: 50.0 # ステータスパブリッシュ頻度 [Hz]
+    # 型付きステータス出力先（questix_msgs/DriveStatus）。契約は questix_msgs/README.md。
+    # 左右モータの電流/速度/位置/fault を型付きで確認したいときはこちらを echo してください。
+    typed_status_topic: "/drive_status"
+    # 制御 tick ごとの診断サンプル（questix_msgs/DriveControlSample、control_rate で publish、
+    # reliable + volatile + keep_last(100)、lifecycle ACTIVE の間だけ）。tick の連番 seq、
+    # 両輪の補正前目標・送った指令・この tick で新しいフィードバックを受けたか・往復時間・
+    # ワイヤ値（速度・位置・電流の生値）を 1 メッセージにまとめる。rosbag で記録して解析する
+    # 診断専用で、制御・安全判断には使わない（契約: questix_msgs/README.md）。
+    # 実行時変更は不可（publisher は configure で作る）。止めるときは false にして再起動。
+    publish_control_sample: true
+    control_sample_topic: "/drive_control_sample"
+
+    # オドメトリ出力（実測RPM由来の twist を積分し status_publish_rate 周期で publish）。
+    # フィードバックが 0.5 秒以上更新されない間（非常停止・未通電を含む）は積分を止め、
+    # ポーズ固定・twist ゼロで publish を継続する。
+    # publish_tf: 外部 localization が odom->base_link を出す場合は false にする
+    publish_tf: true
+    odom_topic: "/odom"
+    odom_frame_id: "odom"
+    base_frame_id: "base_link"
+
+    # 統一緊急停止トピック（questix_msgs/EmergencyStop, reliable + transient_local）。
+    # active=true 受信で即時停止＋twist 無視、active=false で twist 受付を再開する
+    # （モータは次の指令まで停止のまま）。発行元は operation_manager（契約: questix_msgs/README.md）。
+    # 一度も受信していない間と、受信後に emergency_stop_timeout_sec 途絶えた間も動かさない
+    # （フィードバックの取得は続ける）。operation_manager は questix_core で常に起動し、
+    # GPIO 安全系なし（enable_gpio_ref:=false）でも "released (no GPIO safety path)" を出す。
+    # require_emergency_stop: false は単体診断の明示 opt-out のみ（統合起動では使わない）。
+    emergency_stop_topic: "/emergency_stop"
+    require_emergency_stop: true
+    emergency_stop_timeout_sec: 1.0
+    # 走行許可（L2、/motion_permission の drive_allowed、questix_msgs/MotionPermission,
+    # reliable + volatile）は非常停止とは別の概念で、operation_manager の
+    # MotionPermissionManager がモードごとの票（大会: 審判 GPIO27、教材: 先生の許可、練習: なし）を
+    # まとめたもの。未受信・motion_permission_timeout_sec の途絶・false の間は走行しない
+    # （許可が戻っても次の指令まで停止のまま）。両方閉じているときは非常停止が理由になる。
+    # require_motion_permission: false は単体診断の明示 opt-out のみ（統合起動では使わない）。
+    motion_permission_topic: "/motion_permission"
+    require_motion_permission: true
+    motion_permission_timeout_sec: 0.5
