@@ -439,6 +439,10 @@ private:
   odometry::Pose2D odom_pose_{};
   // Paired position endpoints and feedback_count gating (pure ROS-free tracker).
   wheel_position::Integrator odom_position_integrator_{};
+  // Logging state only; never influences integration or actuation decisions.
+  enum class OdomMotorState { kUnknown, kReady, kUnavailable, kStopFault };
+  OdomMotorState odom_motor_state_{OdomMotorState::kUnknown};
+  bool odom_last_pair_stationary_{false};
 
   // 状態フラグ
   bool motor_initialized_;

@@ -419,8 +419,21 @@ is stationary at/below the cap. This is an explicit limitation, not a recovery g
 Configure, activate, motor reinitialization, missing/invalid feedback, motor/stop
 faults, age beyond `odometry::kMaxFeedbackAgeSec` (0.5 s), a missing wheel or pair
 interval beyond the above cap, and ambiguous unwrapping reset the position anchors.
-All these resets preserve pose; the first valid pair only anchors. WARN output is
-throttled. The normal 300 ms idle polling interval can intentionally discard an
+All these resets preserve pose; the first valid pair only anchors. Unexpected
+feedback-reset WARNs are throttled; routine lifecycle and expected idle resets
+are DEBUG, with availability/stop-fault warnings once per state transition. The normal 300 ms idle polling interval can intentionally discard an
 idle interval at the 200 ms pairing cap; no idle polling or safety behavior changes.
 A new node instance starts from zero pose; cleanup/reconfigure of the same instance
 retains pose. Old odometry-integrator tests remain enabled.
+
+Expected zero-command idle gaps (both the last accepted pair and current native RPM
+are zero) reset silently at normal log levels and are available at DEBUG. Routine
+lifecycle/init retries are DEBUG too. Motor unavailable/stop fault are reported once
+per state transition. Moving gaps, stale/fault/invalid feedback and ambiguous unwraps
+retain throttled WARNs. These log decisions never change pose integration or safety.
+
+For ID13 lifted hand-turn observations, keep drive permission OFF and do not assume
+that odometry tracks manual rotation: if the feedback interval exceeds the effective
+pairing cap, that interval is discarded and pose is held (expected behavior). Short
+valid intervals may still contribute increments; manual rotation is outside the
+acceleration contract, so this is not a physical angle-calibration acceptance test.

@@ -25,6 +25,7 @@
 #include <termios.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -39,6 +40,7 @@
 #include <questix_msgs/msg/drive_status.hpp>
 #include <questix_msgs/msg/emergency_stop.hpp>
 #include <questix_msgs/msg/motion_permission.hpp>
+#include <rcl_interfaces/msg/log.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <string>
 #include <thread>
@@ -96,6 +98,14 @@ public:
   }
   void answerRight(bool enabled) { answer_right_ = enabled; }
   void fault(uint8_t code) { fault_ = code; }
+
+  // Close only the fake PTY peer: subsequent writes fail, like a lost serial line.
+  void disconnect() {
+    running_ = false;
+    if (reader_.joinable()) reader_.join();
+    if (master_ >= 0) close(master_);
+    master_ = -1;
+  }
 
   // Command frames (0x64) received so far, oldest first.
   std::vector<std::vector<uint8_t>> commands() const {
@@ -225,7 +235,7 @@ protected:
   // Starts the node as questix_core would (hardware YAML, operator profile), on this test's own
   // topics and the fake motor's serial line. The E-stop and permission requirements come from
   // the integrated YAML (never overridden here).
-  void start() {
+  void start(bool expect_active = true, bool missing_motor = false) {
     ASSERT_FALSE(motor_.path().empty()) << "openpty failed";
     static int counter = 0;
     prefix_ = "/drive_node_test_" + std::to_string(getpid()) + "_" + std::to_string(counter++);
@@ -233,7 +243,8 @@ protected:
     {
       std::ofstream out(overrides_path_);
       out << "drive_component:\n  ros__parameters:\n"
-          << "    serial_port: \"" << motor_.path() << "\"\n"
+          << "    serial_port: \"" << (missing_motor ? overrides_path_ + ".absent" : motor_.path())
+          << "\"\n"
           << "    connect_retry_period_sec: 0.5\n"
           << "    publish_tf: false\n"
           << "    odom_topic: \"" << prefix_ << "/odom\"\n"
@@ -264,11 +275,23 @@ protected:
           last_odom_ = *msg;
           have_odom_ = true;
         });
+    rosout_sub_ = helper_->create_subscription<rcl_interfaces::msg::Log>(
+        "/rosout", rclcpp::QoS(1000).reliable().durability_volatile(),
+        [this](rcl_interfaces::msg::Log::SharedPtr msg) {
+          if (msg->name == "drive_component" && msg->level >= rcl_interfaces::msg::Log::WARN &&
+              msg->msg.find("Wheel position odometry anchor reset:") != std::string::npos) {
+            odom_warnings_.push_back(msg->msg);
+          }
+        });
     executor_ = std::make_unique<rclcpp::executors::SingleThreadedExecutor>();
     executor_->add_node(drive_->get_node_base_interface());
     executor_->add_node(helper_);
-    ASSERT_TRUE(spinUntil([this]() { return isActive(); }, 10s))
-        << "drive_component did not reach ACTIVE on the fake motor";
+    if (expect_active) {
+      ASSERT_TRUE(spinUntil([this]() { return isActive(); }, 10s))
+          << "drive_component did not reach ACTIVE on the fake motor";
+    } else {
+      spinFor(200ms);
+    }
   }
 
   bool isActive() const {
@@ -354,6 +377,8 @@ protected:
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
   nav_msgs::msg::Odometry last_odom_;
   bool have_odom_{false};
+  rclcpp::Subscription<rcl_interfaces::msg::Log>::SharedPtr rosout_sub_;
+  std::vector<std::string> odom_warnings_;
   bool have_status_{false};
   bool send_twist_{false};
   bool send_estop_{false};
@@ -362,6 +387,61 @@ protected:
   bool send_permission_{false};
   bool permission_allowed_{false};
 };
+
+TEST_F(DriveComponentNode, StationaryIdlePollingDoesNotEmitOdomWarnings) {
+  start();
+  operationManagerWithoutGpio();
+  spinFor(1700ms);  // several normal 300ms feedback gaps, > one WARN throttle period
+  ASSERT_TRUE(have_status_ && have_odom_);
+  EXPECT_EQ(last_status_.left.velocity_rpm_raw, 0);
+  EXPECT_EQ(last_status_.right.velocity_rpm_raw, 0);
+  EXPECT_TRUE(odom_warnings_.empty());
+  EXPECT_NEAR(last_odom_.pose.pose.position.x, 0, 1e-9);
+}
+
+TEST_F(DriveComponentNode, UnpoweredInitializationRetriesDoNotEmitOdomWarnings) {
+  start(false, true);
+  operationManagerWithoutGpio();
+  spinFor(1700ms);
+  EXPECT_FALSE(isActive());
+  EXPECT_TRUE(odom_warnings_.empty());
+}
+
+TEST_F(DriveComponentNode, MovingFeedbackGapStillEmitsOdomWarning) {
+  start();
+  operationManagerWithoutGpio();
+  send_twist_ = true;
+  ASSERT_TRUE(spinUntil([this]() { return droveBothWheels() && have_odom_; }, 5s));
+  spinFor(100ms);
+  odom_warnings_.clear();
+  motor_.answerRight(false);
+  ASSERT_TRUE(spinUntil(
+      [this]() {
+        return std::any_of(odom_warnings_.begin(), odom_warnings_.end(), [](const auto& message) {
+          return message.find("reset: feedback pairing time limit") != std::string::npos;
+        });
+      },
+      2s));
+}
+
+TEST_F(DriveComponentNode, PersistentStopFaultWarnsOnlyOnStateTransition) {
+  start();
+  operationManagerWithoutGpio();
+  send_twist_ = true;
+  ASSERT_TRUE(spinUntil([this]() { return droveBothWheels() && have_odom_; }, 5s));
+  odom_warnings_.clear();
+  motor_.disconnect();
+  permission_allowed_ = false;  // force a real failed zero write, not an injected fault flag
+  const auto stop_fault_warnings = [this]() {
+    return std::count_if(odom_warnings_.begin(), odom_warnings_.end(), [](const auto& message) {
+      return message.find("reset: stop fault (pose retained)") != std::string::npos;
+    });
+  };
+  // A genuine moving-gap WARN can precede the failed stop; keep that warning.
+  ASSERT_TRUE(spinUntil([&]() { return stop_fault_warnings() > 0; }, 2s));
+  spinFor(1500ms);  // persistent fault for longer than the previous throttle period
+  EXPECT_EQ(stop_fault_warnings(), 1);
+}
 
 TEST_F(DriveComponentNode, PositionMovesPoseAndFrozenPositionDoesNotExtrapolateRpm) {
   start();

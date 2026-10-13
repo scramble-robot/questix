@@ -161,8 +161,10 @@ void DriveComponent::resetOdometry() {
 
 void DriveComponent::resetOdometryAnchor(const char* reason) {
   odom_position_integrator_.reset();
-  RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
-                       "Wheel position odometry anchor reset: %s (pose retained)", reason);
+  odom_last_pair_stationary_ = false;
+  // Routine lifecycle/init retries are expected, including with no motor power.
+  RCLCPP_DEBUG_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                        "Wheel position odometry anchor reset: %s (pose retained)", reason);
 }
 
 void DriveComponent::twistCallback(const geometry_msgs::msg::Twist::SharedPtr msg) {
@@ -210,9 +212,17 @@ void DriveComponent::controlTimerCallback() {
 
 void DriveComponent::integrateOdometry() {
   if (!motor_lib_ || !motor_initialized_ || stop_fault_) {
-    resetOdometryAnchor("motor unavailable or stop fault");
+    const auto state = !motor_lib_ || !motor_initialized_ ? OdomMotorState::kUnavailable
+                                                          : OdomMotorState::kStopFault;
+    resetOdometryAnchor(state == OdomMotorState::kUnavailable ? "motor unavailable" : "stop fault");
+    if (state != odom_motor_state_) {
+      RCLCPP_WARN(this->get_logger(), "Wheel position odometry anchor reset: %s (pose retained)",
+                  state == OdomMotorState::kUnavailable ? "motor unavailable" : "stop fault");
+    }
+    odom_motor_state_ = state;
     return;
   }
+  odom_motor_state_ = OdomMotorState::kReady;
   const auto steadySeconds = []() {
     return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch())
         .count();
@@ -244,10 +254,27 @@ void DriveComponent::integrateOdometry() {
   // endpoints. It also checks the pairing deadline on ticks with no new data.
   const auto result = odom_position_integrator_.update(left, right, steadySeconds(), limits);
   odom_pose_ = wheel_position::integrate(odom_pose_, result);
+  const bool stationary = left.native_rpm == 0.0 && right.native_rpm == 0.0;
+  if (result.state == wheel_position::State::kAnchored ||
+      result.state == wheel_position::State::kIntegrated) {
+    odom_last_pair_stationary_ = stationary;
+  }
   if (result.state == wheel_position::State::kReset) {
-    RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
-                         "Wheel position odometry anchor reset: %s (pose retained)",
-                         wheel_position::reasonName(result.reason));
+    // Only the expected gap of healthy, zero-command idle polling is quiet.
+    // A last moving pair, nonzero command/RPM, stale/fault or ambiguous result
+    // remains a WARN. Logging never changes the reset/integration decision.
+    const bool idle_gap = result.reason == wheel_position::Reason::kGap &&
+                          odom_last_pair_stationary_ && stationary && left_fb.target_rpm == 0 &&
+                          right_fb.target_rpm == 0;
+    if (idle_gap) {
+      RCLCPP_DEBUG_THROTTLE(
+          this->get_logger(), *this->get_clock(), 1000,
+          "Wheel position odometry anchor reset: idle polling gap (pose retained)");
+    } else {
+      RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                           "Wheel position odometry anchor reset: %s (pose retained)",
+                           wheel_position::reasonName(result.reason));
+    }
   }
 }
 
