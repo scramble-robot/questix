@@ -43,6 +43,7 @@ double secondsSince(std::chrono::steady_clock::time_point then,
 }  // namespace
 
 bool DriveComponent::initializeMotorLib() {
+  resetOdometryAnchor("motor initialization");
   try {
     // DDTモータライブラリのインスタンスを作成
     motor_lib_ = std::make_shared<motor_control_lib::DdtMotorLib>(serial_port_, baud_rate_);
@@ -155,8 +156,13 @@ void DriveComponent::resetCommandState() {
 void DriveComponent::resetOdometry() {
   odom_publisher_.reset();
   tf_broadcaster_.reset();
-  odom_pose_ = {};
-  has_odom_sample_ = false;
+  resetOdometryAnchor("lifecycle resources reset");
+}
+
+void DriveComponent::resetOdometryAnchor(const char* reason) {
+  odom_position_integrator_.reset();
+  RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                       "Wheel position odometry anchor reset: %s (pose retained)", reason);
 }
 
 void DriveComponent::twistCallback(const geometry_msgs::msg::Twist::SharedPtr msg) {
@@ -203,37 +209,46 @@ void DriveComponent::controlTimerCallback() {
 }
 
 void DriveComponent::integrateOdometry() {
-  if (!motor_lib_ || !motor_initialized_) {
+  if (!motor_lib_ || !motor_initialized_ || stop_fault_) {
+    resetOdometryAnchor("motor unavailable or stop fault");
     return;
   }
+  const auto steadySeconds = []() {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+  };
   motor_control_lib::DdtMotorLib::MotorFeedbackData left_fb, right_fb;
   motor_control_lib::DdtMotorLib::MotorTransactionStats left_tx, right_tx;
-  if (!motor_lib_->getMotorFeedbackData(left_motor_id_, left_fb) ||
-      !motor_lib_->getMotorFeedbackData(right_motor_id_, right_fb) || !left_fb.has_feedback ||
-      !right_fb.has_feedback) {
-    return;
+  const bool left_ok = motor_lib_->getMotorFeedbackData(left_motor_id_, left_fb);
+  const double left_now = steadySeconds();
+  const bool right_ok = motor_lib_->getMotorFeedbackData(right_motor_id_, right_fb);
+  const double right_now = steadySeconds();
+  const bool left_stats = motor_lib_->getMotorTransactionStats(left_motor_id_, left_tx);
+  const bool right_stats = motor_lib_->getMotorTransactionStats(right_motor_id_, right_tx);
+  const wheel_position::Sample left{left_fb.position_raw,
+                                    static_cast<double>(left_fb.velocity_rpm_raw),
+                                    left_now - left_fb.feedback_age_sec,
+                                    left_tx.feedback_count,
+                                    left_ok && left_stats && left_fb.has_feedback,
+                                    left_fb.fault_code};
+  const wheel_position::Sample right{right_fb.position_raw,
+                                     static_cast<double>(right_fb.velocity_rpm_raw),
+                                     right_now - right_fb.feedback_age_sec,
+                                     right_tx.feedback_count,
+                                     right_ok && right_stats && right_fb.has_feedback,
+                                     right_fb.fault_code};
+  const wheel_position::Limits limits{wheel_radius_, wheel_separation_,
+                                      static_cast<double>(max_motor_rpm_), max_linear_accel_,
+                                      max_angular_accel_};
+  // The pure tracker retains feedback_count gating and waits for BOTH new
+  // endpoints. It also checks the pairing deadline on ticks with no new data.
+  const auto result = odom_position_integrator_.update(left, right, steadySeconds(), limits);
+  odom_pose_ = wheel_position::integrate(odom_pose_, result);
+  if (result.state == wheel_position::State::kReset) {
+    RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                         "Wheel position odometry anchor reset: %s (pose retained)",
+                         wheel_position::reasonName(result.reason));
   }
-  motor_lib_->getMotorTransactionStats(left_motor_id_, left_tx);
-  motor_lib_->getMotorTransactionStats(right_motor_id_, right_tx);
-  if (has_odom_sample_ && left_tx.feedback_count == odom_left_feedback_count_ &&
-      right_tx.feedback_count == odom_right_feedback_count_) {
-    return;  // この tick に新しい実測は無い
-  }
-  odom_left_feedback_count_ = left_tx.feedback_count;
-  odom_right_feedback_count_ = right_tx.feedback_count;
-
-  const double now_sec =
-      std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
-  const auto [linear, angular] = motor_control_lib::differential_kinematics::wheelRpmToTwist(
-      left_fb.velocity_rpm_raw, right_fb.velocity_rpm_raw, wheel_radius_, wheel_separation_);
-  const odometry::TwistSample sample{
-      now_sec - 0.5 * (left_fb.feedback_age_sec + right_fb.feedback_age_sec), linear, angular};
-  if (has_odom_sample_) {
-    odom_pose_ = odometry::integrateBetween(odom_pose_, odom_last_sample_, sample,
-                                            odometry::kMaxFeedbackAgeSec);
-  }
-  odom_last_sample_ = sample;
-  has_odom_sample_ = true;
 }
 
 void DriveComponent::publishControlSample(const rclcpp::Time& tick_stamp,
@@ -596,14 +611,10 @@ void DriveComponent::publishOdometry(double twist_linear, double twist_angular, 
   // publish に載せる twist は stale 時ゼロ（ポーズと整合させ、下流の誤積分を防ぐ）。
   const double reported_linear = feedback_fresh ? twist_linear : 0.0;
   const double reported_angular = feedback_fresh ? twist_angular : 0.0;
-  // ポーズは最後の実測の時刻まで積分済み。配信時刻（スタンプ）まで最後の実測の twist で延ばす
-  // （延ばした分は積分の状態に残さない）。stale なら延ばさない。
-  odometry::Pose2D pose = odom_pose_;
-  if (feedback_fresh && has_odom_sample_) {
-    const double now_steady_sec =
-        std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
-    pose = odometry::extrapolate(odom_pose_, odom_last_sample_, now_steady_sec);
-  }
+  // Hold the pose at the last paired position endpoints. Extrapolating with
+  // integer RPM would reintroduce its directional bias and a reset-time jump.
+  // The published twist intentionally keeps the existing LPF velocity contract.
+  const odometry::Pose2D pose = odom_pose_;
   const odometry::YawQuaternion q = odometry::yawToQuaternion(pose.theta);
 
   nav_msgs::msg::Odometry odom;

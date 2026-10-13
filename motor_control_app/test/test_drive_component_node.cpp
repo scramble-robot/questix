@@ -35,6 +35,7 @@
 #include <lifecycle_msgs/msg/state.hpp>
 #include <memory>
 #include <mutex>
+#include <nav_msgs/msg/odometry.hpp>
 #include <questix_msgs/msg/drive_status.hpp>
 #include <questix_msgs/msg/emergency_stop.hpp>
 #include <questix_msgs/msg/motion_permission.hpp>
@@ -88,6 +89,13 @@ public:
   }
 
   const std::string& path() const { return path_; }
+
+  void positions(uint16_t left, uint16_t right) {
+    left_position_ = left;
+    right_position_ = right;
+  }
+  void answerRight(bool enabled) { answer_right_ = enabled; }
+  void fault(uint8_t code) { fault_ = code; }
 
   // Command frames (0x64) received so far, oldest first.
   std::vector<std::vector<uint8_t>> commands() const {
@@ -162,15 +170,17 @@ private:
 
   // A M0602C feedback frame: {ID, mode, current(2), speed(2), position(2), fault, CRC8}.
   void reply(uint8_t motor_id, int16_t speed_rpm) {
+    if (motor_id == kRightId && !answer_right_) return;
+    const uint16_t position = motor_id == kLeftId ? left_position_.load() : right_position_.load();
     std::vector<uint8_t> frame = {motor_id,
                                   0x02,
                                   0x00,
                                   0x00,
                                   static_cast<uint8_t>((speed_rpm >> 8) & 0xFF),
                                   static_cast<uint8_t>(speed_rpm & 0xFF),
-                                  0x00,
-                                  0x00,
-                                  0x00};
+                                  static_cast<uint8_t>((position >> 8) & 0xFF),
+                                  static_cast<uint8_t>(position & 0xFF),
+                                  fault_.load()};
     frame.push_back(ddt::crc8Maxim(frame));
     const ssize_t written = write(master_, frame.data(), frame.size());
     (void)written;
@@ -183,6 +193,10 @@ private:
   std::thread reader_;
   mutable std::mutex mutex_;
   std::vector<std::vector<uint8_t>> commands_;
+  std::atomic<uint16_t> left_position_{0};
+  std::atomic<uint16_t> right_position_{0};
+  std::atomic<bool> answer_right_{true};
+  std::atomic<uint8_t> fault_{0};
 };
 
 // operation_manager's /emergency_stop reason without the GPIO safety path.
@@ -244,6 +258,11 @@ protected:
         prefix_ + "/drive_status", 10, [this](questix_msgs::msg::DriveStatus::SharedPtr msg) {
           last_status_ = *msg;
           have_status_ = true;
+        });
+    odom_sub_ = helper_->create_subscription<nav_msgs::msg::Odometry>(
+        prefix_ + "/odom", 10, [this](nav_msgs::msg::Odometry::SharedPtr msg) {
+          last_odom_ = *msg;
+          have_odom_ = true;
         });
     executor_ = std::make_unique<rclcpp::executors::SingleThreadedExecutor>();
     executor_->add_node(drive_->get_node_base_interface());
@@ -332,6 +351,9 @@ protected:
   rclcpp::Publisher<questix_msgs::msg::MotionPermission>::SharedPtr permission_pub_;
   rclcpp::Subscription<questix_msgs::msg::DriveStatus>::SharedPtr status_sub_;
   questix_msgs::msg::DriveStatus last_status_;
+  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
+  nav_msgs::msg::Odometry last_odom_;
+  bool have_odom_{false};
   bool have_status_{false};
   bool send_twist_{false};
   bool send_estop_{false};
@@ -340,6 +362,88 @@ protected:
   bool send_permission_{false};
   bool permission_allowed_{false};
 };
+
+TEST_F(DriveComponentNode, PositionMovesPoseAndFrozenPositionDoesNotExtrapolateRpm) {
+  start();
+  operationManagerWithoutGpio();
+  send_twist_ = true;
+  ASSERT_TRUE(spinUntil([this]() { return droveBothWheels() && have_odom_; }, 5s));
+  spinFor(200ms);
+  EXPECT_NEAR(last_odom_.pose.pose.position.x, 0, 1e-9);
+  EXPECT_GT(last_odom_.twist.twist.linear.x, 0);  // existing velocity field unchanged
+  motor_.positions(1000, ddt::kPositionRawPerTurn - 1000);
+  ASSERT_TRUE(spinUntil([this]() { return last_odom_.pose.pose.position.x > .005; }, 2s));
+  const double x = last_odom_.pose.pose.position.x;
+  EXPECT_NEAR(x, .05 * 6.283185307179586 * 1000 / ddt::kPositionRawPerTurn, 1e-6);
+  spinFor(300ms);
+  EXPECT_NEAR(last_odom_.pose.pose.position.x, x, 1e-9);
+  EXPECT_NEAR(last_odom_.pose.pose.orientation.z, 0, 1e-6);
+}
+
+TEST_F(DriveComponentNode, MissingWheelDoesNotIntegrateUnpairedMotionOrRecoveryJump) {
+  start();
+  operationManagerWithoutGpio();
+  send_twist_ = true;
+  ASSERT_TRUE(spinUntil([this]() { return droveBothWheels() && have_odom_; }, 5s));
+  spinFor(100ms);
+  motor_.answerRight(false);
+  motor_.positions(2000, 0);
+  spinFor(300ms);  // pairing deadline, before the 0.5s stale boundary
+  EXPECT_NEAR(last_odom_.pose.pose.position.x, 0, 1e-9);
+  motor_.positions(8000, ddt::kPositionRawPerTurn - 8000);
+  motor_.answerRight(true);
+  spinFor(700ms);
+  EXPECT_NEAR(last_odom_.pose.pose.position.x, 0, 1e-9);
+  motor_.positions(8500, ddt::kPositionRawPerTurn - 8500);
+  ASSERT_TRUE(spinUntil([this]() { return last_odom_.pose.pose.position.x > .002; }, 2s));
+  EXPECT_NEAR(last_odom_.pose.pose.position.x,
+              .05 * 6.283185307179586 * 500 / ddt::kPositionRawPerTurn, 1e-6);
+}
+
+TEST_F(DriveComponentNode, FaultDiscardsPositionIntervalAndPreservesPose) {
+  start();
+  operationManagerWithoutGpio();
+  send_twist_ = true;
+  ASSERT_TRUE(spinUntil([this]() { return droveBothWheels() && have_odom_; }, 5s));
+  spinFor(100ms);
+  motor_.positions(1000, ddt::kPositionRawPerTurn - 1000);
+  ASSERT_TRUE(spinUntil([this]() { return last_odom_.pose.pose.position.x > .005; }, 2s));
+  const auto pose = last_odom_.pose.pose;
+  motor_.fault(1);
+  motor_.positions(3000, ddt::kPositionRawPerTurn - 3000);
+  ASSERT_TRUE(
+      spinUntil([this]() { return have_status_ && last_status_.left.fault_code != 0; }, 2s));
+  spinFor(150ms);
+  EXPECT_NEAR(last_odom_.pose.pose.position.x, pose.position.x, 1e-9);
+  motor_.positions(6000, ddt::kPositionRawPerTurn - 6000);
+  motor_.fault(0);
+  ASSERT_TRUE(spinUntil(
+      [this]() { return last_status_.left.fault_code == 0 && last_status_.right.fault_code == 0; },
+      2s));
+  spinFor(100ms);
+  EXPECT_NEAR(last_odom_.pose.pose.position.x, pose.position.x, 1e-9);
+}
+
+TEST_F(DriveComponentNode, CleanupReconfigureAndActivateReanchorWithoutTeleporting) {
+  start();
+  operationManagerWithoutGpio();
+  send_twist_ = true;
+  ASSERT_TRUE(spinUntil([this]() { return droveBothWheels() && have_odom_; }, 5s));
+  spinFor(100ms);
+  motor_.positions(1000, ddt::kPositionRawPerTurn - 1000);
+  ASSERT_TRUE(spinUntil([this]() { return last_odom_.pose.pose.position.x > .005; }, 2s));
+  const double x = last_odom_.pose.pose.position.x;
+  drive_->deactivate();
+  drive_->cleanup();
+  motor_.positions(7000, ddt::kPositionRawPerTurn - 7000);
+  drive_->configure();
+  drive_->activate();
+  ASSERT_TRUE(isActive());
+  spinFor(300ms);
+  EXPECT_NEAR(last_odom_.pose.pose.position.x, x, 1e-9);
+  motor_.positions(7500, ddt::kPositionRawPerTurn - 7500);
+  ASSERT_TRUE(spinUntil([this, x]() { return last_odom_.pose.pose.position.x > x + .002; }, 2s));
+}
 
 // The node's own defaults: the E-stop and the motion permission are both fail-closed.
 TEST_F(DriveComponentNode, NodeDefaultsRequireTheEstopAndThePermission) {
