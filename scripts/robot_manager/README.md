@@ -376,6 +376,62 @@ recording time.
 
 Recorder settings are persisted to `${QUESTIX_CONFIG_DIR:-/etc/questix_robot}/rosbag.env`.
 
+### 記録開始前の条件表示
+
+記録タブは、開始できない理由を開始ボタンのそばに表示します。通常記録・証拠付き記録の
+どちらも、ロボット制御がactiveで、記録枠・保存先・空き容量の条件を満たす必要があります。
+**通常記録も、ロボット制御のサービスが停止中なら開始APIが409で拒否します。**
+サービス状態を取得できない場合は503です。サービス外で手動起動したROSだけを記録する
+使い方は、この管理画面では対応しません。停止ボタンは開始条件に関係なく使えます。
+
+`GET /api/rosbag/readiness` は書込み・保存先作成・証拠保存を行わない案内用APIです。
+`common_checks` は安定した `code`、表示用 `message`、`pass / fail / unknown` の `state` を持ちます。
+通常記録は `normal.ready`、証拠付き記録は `trial.ready` で開始可否を示します。
+不明・通信失敗も開始不可です。権限・容量の確認は開始成功を保証せず、開始APIが再検証します。
+
+```json
+{
+  "generation": 1,
+  "common_checks": [
+    {"code": "robot_service", "state": "fail", "message": "ロボット制御が起動していません"}
+  ],
+  "normal": {"ready": false, "blocker_codes": ["robot_service"]},
+  "trial": {
+    "ready": false,
+    "blocker_codes": ["robot_service", "trial_preflight"],
+    "preflight": {
+      "state": "not_checked",
+      "message": "証拠付き記録の開始条件を再確認してください",
+      "checked_at": null,
+      "expires_at": null,
+      "missing_required": [],
+      "warnings": []
+    }
+  }
+}
+```
+
+例は応答の一部です。完全な応答には `schema_version`、確認時刻、サービス状態、保存先と容量も含みます。
+証拠付き記録のROS環境・ソース・必須ノード/トピックの確認は
+`GET /api/rosbag/readiness?scope=trial&refresh=true` で要求し、確認中の応答をすぐ返します。
+画面はタブを開く、証拠付きスイッチをONにする、サービス状態が変わる、再確認ボタンを押す
+ときだけ要求します。普通の2秒ポーリングではROS問い合わせを起動しません。
+軽い条件が満たせない場合も重い確認は実行しません。
+
+重い確認はManager全体で同時に1件、実行中の追加要求は最新1件だけ保持し、開始間隔は5秒以上です。
+各コマンドは15秒以内、一連の確認は60秒の予算で実行します。結果は完了から60秒間だけ有効です。
+期限切れは証拠付き開始を無効にし、自動で問い合わせを繰り返しません。
+`trial.preflight.state` は `not_checked / checking / pass / fail / stale / error` です。
+サービス状態の観測変化、記録設定の保存、期限切れで結果を失効させ、`generation` を1増やします。
+サービス状態は1秒cache、開始APIはcacheを使いません。観測間隔内で完結した再起動や
+launch設定の変更は即時検出しないため、TTLと開始APIのruntime・ソース・graph再検証で補います。
+記録は非常停止や先生の許可OFFも証拠として残すので、それらを開始不可の条件にはしません。
+
+ID13の受入では、ロボット制御停止時の理由と無効化、起動後の再確認による有効化、必須graph欠落、
+容量不足、書けない保存先、通信失敗、ON/OFF切替、60秒の期限切れを確認してください。
+容量・権限の試験は検証用設定で行い、確認後に元へ戻します。開始直前に状態が変わったときも
+開始APIが拒否することを確認します。既定保存先の配備修正（α）は別PRです。
+
 ## 実験の証拠記録 (experiment evidence backend)
 
 走行実験の rosbag を、あとから「どのソース・どの設定・どの環境で・非常停止と先生の許可が

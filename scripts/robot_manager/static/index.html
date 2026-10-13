@@ -389,8 +389,14 @@
       </div>
 
       <!-- Start / stop -->
+      <div class="rec-readiness" aria-live="polite">
+        <p class="section-help" id="rec-readiness-state">開始条件を確認しています</p>
+        <ul class="trial-warnings" id="rec-readiness-reasons"></ul>
+        <p class="section-help" id="rec-preflight-time" hidden></p>
+        <button class="btn" id="rec-readiness-refresh" type="button">開始条件を再確認</button>
+      </div>
       <div class="btn-group rec-controls">
-        <button class="btn btn-start" id="rec-start">記録開始</button>
+        <button class="btn btn-start" id="rec-start" disabled>記録開始</button>
         <button class="btn btn-stop" id="rec-stop" disabled>記録停止</button>
       </div>
     </section>
@@ -839,9 +845,9 @@
   <script src="/static/control-labels.js?v=4"></script>
   <script src="/static/status-view.js?v=2"></script>
   <script src="/static/network-view.js?v=1"></script>
-  <script src="/static/trial-view.js?v=1"></script>
+  <script src="/static/trial-view.js?v=2"></script>
   <script src="/static/motion-state-view.js?v=1"></script>
-  <script src="/static/app.js?v=21"></script>
+  <script src="/static/app.js?v=22"></script>
   <script src="/static/controller-map.js?v=12"></script>
   <script src="/static/controls.js?v=22"></script>
 </body>

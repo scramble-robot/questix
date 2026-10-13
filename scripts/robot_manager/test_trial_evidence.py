@@ -190,6 +190,7 @@ class TrialFixture(unittest.TestCase):
         }
 
         with contextlib.ExitStack() as stack:
+            stack.enter_context(patch.object(recorder.readiness, "service", return_value="active"))
             stack.enter_context(patch.object(recorder, "_read_config",
                                              return_value=config or self.config()))
             stack.enter_context(patch.object(recorder, "_read_env_file",
