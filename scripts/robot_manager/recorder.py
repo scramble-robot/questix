@@ -9,7 +9,7 @@ the display name.
 
 Two recording flavours share that single process, lock and state:
 
-* **generic** — ``POST /start``: unchanged behaviour, no metadata, no sidecars.
+* **generic** — ``POST /start``: shared start conditions, no metadata, no sidecars.
 * **classroom trial** — ``POST /start-trial``: the same recorder plus the
   evidence described in :mod:`robot_manager.trial` (metadata, exact source
   identity, effective parameters before/after, topic list, bag integrity).
@@ -767,7 +767,8 @@ def _query_readiness_trial(timeout) -> dict:
     missing = graph["missing_required"]
     return {**recorder_readiness.Readiness.empty(),
             "state": "fail" if missing else "pass",
-            "message": "必須のノード・トピックがありません：" + ", ".join(missing)
+            "message": "必須のノード・トピックがありません：" + ", ".join(missing) +
+            "。起動の直後は準備に数秒かかることがあります。「開始条件を再確認」を押してください。"
             if missing else "証拠付き記録の開始条件がそろっています",
             "missing_required": missing, "warnings": list(runtime.warnings) +
             (["任意トピックがありません：" + ", ".join(graph["optional_missing"])]

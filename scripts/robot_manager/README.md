@@ -417,6 +417,9 @@ Recorder settings are persisted to `${QUESTIX_CONFIG_DIR:-/etc/questix_robot}/ro
 画面はタブを開く、証拠付きスイッチをONにする、サービス状態が変わる、再確認ボタンを押す
 ときだけ要求します。普通の2秒ポーリングではROS問い合わせを起動しません。
 軽い条件が満たせない場合も重い確認は実行しません。
+起動直後はROSのノード・トピックが揃うまで数秒かかる場合があります。
+必須項目がない場合は画面の案内に従って「開始条件を再確認」を押してください。
+失敗後の時間経過だけでは自動再確認しません。
 
 重い確認はManager全体で同時に1件、実行中の追加要求は最新1件だけ保持し、開始間隔は5秒以上です。
 各コマンドは15秒以内、一連の確認は60秒の予算で実行します。結果は完了から60秒間だけ有効です。
@@ -440,14 +443,14 @@ generic recorder と同じ 1 本の `ros2 bag record` プロセス・ロック�
 ディレクトリに証拠（sidecar）を置きます。
 
 画面: 記録タブの「証拠付きで記録する」を ON にすると、試行ID・班ID（匿名）・号機ID・条件・床面・
-積載・バッテリー・メモの欄が出て、「証拠付きで記録開始」が `start-trial` を呼びます（OFF なら従来の
+積載・バッテリー・メモの欄が出て、「証拠付きで記録開始」が `start-trial` を呼びます（OFF なら通常記録の
 `start`）。欄は下の「メタデータ」の項目だけで、空欄は送りません（試行IDは日時から自動）。送る前に
 `trial.py` と同じ規則で確かめ（`static/trial-view.js`、`tests/trial_view.test.cjs` が同じ値に
 保ちます）、最終的な判定はサーバーの `validate_metadata` です。記録中は試行ID / 班 / 条件と開始時の
 注意を、止めたあとは前回の結果（確定中… / OK / 要確認 / 失敗、記録名、止まった理由、証拠の場所、
 注意）を表示します。
 
-- generic 録画: `POST /api/rosbag/start` — 従来どおり。メタデータも sidecar もなし。
+- 通常記録: `POST /api/rosbag/start` — ロボット制御の起動など共通の開始条件を確認する。メタデータも sidecar もなし。
 - 証拠付き記録: `POST /api/rosbag/start-trial` — 同じ recorder + 証拠。応答と
   `GET /api/rosbag/status` の `trial` / `last_trial` に `trial_id` と `bag_name` を出すので、
   QUESTiX LAB の JSON 記録（学習者向けの派生データ）と将来ひも付けられます。証拠の本体は

@@ -259,6 +259,7 @@ def test_graph_missing_reason_reuses_required_contract(wired, monkeypatch, missi
     monkeypatch.setattr(trial, "run_ros", run)
     result = recorder._query_readiness_trial(lambda: 15)
     assert result["state"] == "fail" and result["missing_required"] == [missing]
+    assert "起動の直後" in result["message"] and "開始条件を再確認" in result["message"]
 
 
 def test_start_still_runs_original_trial_preflight(wired, monkeypatch):
