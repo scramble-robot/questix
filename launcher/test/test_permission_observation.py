@@ -85,3 +85,55 @@ def test_received_blocker_lists_are_snapshots():
     blockers[:] = ['referee:off']
     assert observation.history == [UNKNOWN]
     assert not observation.matches()
+
+
+@pytest.mark.parametrize('value', [
+    ('competition', False, ['referee:stale']),
+    UNKNOWN,
+    ('competition', False, ['teacher:unknown']),
+    ('competition', False, []),
+])
+def test_after_expected_fail_closed_samples_are_recorded(value):
+    """Keep startup confirmed when later graph waits receive another safe refusal."""
+    observation = PermissionObservation(COMPETITION)
+    observation.receive(COMPETITION)
+    observation.receive(value)
+    assert observation.history == [COMPETITION, value]
+    assert observation.current == value
+    assert observation.matches()
+    assert observation.require_match() == COMPETITION
+
+
+@pytest.mark.parametrize('value', [
+    ('competition', True, []),
+    ('competition', True, ['referee:stale']),
+    ('lesson', False, ['teacher:unknown']),
+])
+def test_after_expected_unsafe_samples_still_fail_immediately(value):
+    """Never ignore an allowed pulse or a changed mode after confirming startup."""
+    observation = PermissionObservation(COMPETITION)
+    observation.receive(COMPETITION)
+    observation.receive(('competition', False, ['referee:stale']))
+    with pytest.raises(AssertionError, match='permission history'):
+        observation.receive(value)
+    assert observation.history[-1] == value
+
+
+def test_lesson_cannot_become_allowed_after_expected_unknown():
+    """Apply the continuing fail-closed safety check to the teacher's mode too."""
+    expected = ('lesson', False, ['teacher:unknown'])
+    observation = PermissionObservation(expected)
+    observation.receive(expected)
+    with pytest.raises(AssertionError):
+        observation.receive(('lesson', True, []))
+
+
+def test_practice_records_later_refusal_without_changing_startup_expectation():
+    """Once practice's exact allowed startup is confirmed, a refusal is safe to record."""
+    expected = ('practice', True, [])
+    observation = PermissionObservation(expected)
+    observation.receive(expected)
+    refusal = ('practice', False, ['teacher:unknown'])
+    observation.receive(refusal)
+    assert observation.history == [expected, refusal]
+    assert observation.require_match() == expected
