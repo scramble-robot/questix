@@ -3,6 +3,27 @@
 QUESTiX のモータ制御 ROS 2 ノード群です。シリアル通信・制御ロジックの実体は
 `motor_control_lib` にあり、本パッケージはその ROS インターフェース層です。
 
+## 走行の停止後の中立待ち（全モード）
+
+drive_componentはactivate直後と、安全停止（許可OFF/途絶、非常停止/途絶、command timeout、
+motor fault、stop fault）の後、gateが開きモータが正常な状態で中立を受けるまで非ゼロを拒否します。
+大会でも審判許可ON後にスティックを一度離し、倒し直してください。gate閉やfault中のゼロは
+再武装に使いません。停止送信・再送・許可と非常停止の優先順は従来どおりです。
+
+`rearm_neutral_linear`（m/s、上限0.05）と `rearm_neutral_angular`（rad/s、上限0.1）は、
+有限な入力の絶対値が両方とも設定値以下なら再武装する不感帯です。既定は0.0（厳密な0、-0含む）。
+負・NaN/Inf・上限超えは起動時にERRORを出して0.0へ戻します。設定変更はYAMLを編集して再起動します。
+速度・電流モードの両方で有効ですが、再武装する指令の目標は0として保存し、以降の指令は加工しません。
+上限はLABの速度上限0.15m/s・0.5rad/sより小さく抑える運用上の制限で、実機校正値ではありません。
+WARNには拒否した指令と不感帯を出します。実機で離したときの値を記録してから必要最小限を設定してください。
+
+これはcommand_arbiterのcontroller takeover閾値 `neutral_linear` / `neutral_angular` とは別です。
+LABの開始/終了用中立は厳密なゼロを維持します。設定はlauncher/config/drive_component.yamlと
+motor_control_app/config/drive_component.yamlを同じに保ち、launchで値を重ねません。
+
+保証の範囲は**driveが受け取る指令の中立復帰**です。UART・web joyは途絶時にゼロを生成するため、
+倒したまま再接続するときの物理入力の中立確認は後続PR 4bで扱います。4aの合格とは混同しません。
+
 | ノード | 用途 |
 |---|---|
 | `drive_component` | 走行（差動二輪、DDT M0602C ×2）。LifecycleNode |
