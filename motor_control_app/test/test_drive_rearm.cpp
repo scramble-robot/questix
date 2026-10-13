@@ -4,7 +4,9 @@
 // license that can be found in the LICENSE file or at
 // https://opensource.org/licenses/MIT.
 #include <gtest/gtest.h>
+
 #include <limits>
+
 #include "motor_control_app/drive_rearm.hpp"
 
 using motor_control_app::drive_rearm::Rearm;
@@ -45,8 +47,8 @@ TEST(DriveRearm, ZeroBandRejectsArbitrarilySmallNonzero) {
   EXPECT_TRUE(rearm::neutral(-0.0, 0, 0, 0));
 }
 TEST(DriveRearm, InvalidInputNeverRearmsOrRefreshesDeadline) {
-  for (const double value : {std::numeric_limits<double>::quiet_NaN(),
-                             std::numeric_limits<double>::infinity()}) {
+  for (const double value :
+       {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity()}) {
     Rearm r;
     EXPECT_EQ(r.command(value, 0, 0, 1, false, 0, 0), D::kInvalid);
     EXPECT_TRUE(r.needsNeutral());

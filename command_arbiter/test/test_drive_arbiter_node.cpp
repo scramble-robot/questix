@@ -187,8 +187,8 @@ TEST_F(DriveArbiterNode, StartupLabNeutralPassesOnlyWithPermissionAndIdleControl
 }
 
 TEST_F(DriveArbiterNode, InvalidControllerInputIsNeverForwardedAsNeutral) {
-  for (double value : {std::numeric_limits<double>::quiet_NaN(),
-                        std::numeric_limits<double>::infinity()}) {
+  for (double value :
+       {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity()}) {
     joy_pub_->publish(twist(value, 0));
     spinFor(100ms);
     joy_pub_->publish(twist(0, value));

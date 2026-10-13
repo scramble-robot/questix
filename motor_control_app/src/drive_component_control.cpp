@@ -180,9 +180,9 @@ void DriveComponent::twistCallback(const geometry_msgs::msg::Twist::SharedPtr ms
 
   if (pending_cmd_timeout_stop_) return;  // cannot cancel a stop owed by a late callback
   const bool motor_healthy = motor_initialized_ && diff_drive_ && diff_drive_->isHealthy();
-  const auto decision = rearm_.command(msg->linear.x, msg->angular.z, this->now().seconds(),
-                                       cmd_timeout_sec_, !motor_healthy,
-                                       rearm_neutral_linear_, rearm_neutral_angular_);
+  const auto decision =
+      rearm_.command(msg->linear.x, msg->angular.z, this->now().seconds(), cmd_timeout_sec_,
+                     !motor_healthy, rearm_neutral_linear_, rearm_neutral_angular_);
   using Decision = drive_rearm::Rearm::Decision;
   if (decision == Decision::kTimeout) {
     pending_cmd_timeout_stop_ = true;  // I/O remains in the control tick
@@ -191,8 +191,8 @@ void DriveComponent::twistCallback(const geometry_msgs::msg::Twist::SharedPtr ms
   if (decision == Decision::kNeedsNeutral) {
     RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
                          "Drive needs neutral: linear=%g angular=%g; bands linear=%g angular=%g",
-                         msg->linear.x, msg->angular.z,
-                         rearm_neutral_linear_, rearm_neutral_angular_);
+                         msg->linear.x, msg->angular.z, rearm_neutral_linear_,
+                         rearm_neutral_angular_);
     return;
   }
   if (decision == Decision::kInvalid) {

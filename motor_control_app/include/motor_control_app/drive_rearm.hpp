@@ -25,8 +25,8 @@ inline double bandOrZero(double value, double maximum) {
 // Unlike drive_arbiter_component.cpp's LAB run-ending neutral (strict zero),
 // this configurable band is used only to rearm the actuator, never to filter motion.
 inline bool neutral(double linear, double angular, double linear_band, double angular_band) {
-  return std::isfinite(linear) && std::isfinite(angular) &&
-         std::abs(linear) <= linear_band && std::abs(angular) <= angular_band;
+  return std::isfinite(linear) && std::isfinite(angular) && std::abs(linear) <= linear_band &&
+         std::abs(angular) <= angular_band;
 }
 
 class Rearm {
@@ -42,8 +42,8 @@ public:
   }
   // Clock injected. A late callback must not overwrite the old command's deadline
   // before the control tick sends its timeout stop. Only accepted commands refresh it.
-  Decision command(double linear, double angular, double now, double timeout,
-                   bool inhibited, double linear_band, double angular_band) {
+  Decision command(double linear, double angular, double now, double timeout, bool inhibited,
+                   double linear_band, double angular_band) {
     if (inhibited) {
       reset();
       return Decision::kInhibited;

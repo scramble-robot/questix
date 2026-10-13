@@ -32,16 +32,16 @@
 #include <cstdio>
 #include <fstream>
 #include <functional>
-#include <iomanip>
 #include <geometry_msgs/msg/twist.hpp>
+#include <iomanip>
 #include <lifecycle_msgs/msg/state.hpp>
 #include <memory>
 #include <mutex>
 #include <questix_msgs/msg/drive_status.hpp>
 #include <questix_msgs/msg/emergency_stop.hpp>
 #include <questix_msgs/msg/motion_permission.hpp>
-#include <rclcpp/rclcpp.hpp>
 #include <rcl_interfaces/msg/log.hpp>
+#include <rclcpp/rclcpp.hpp>
 #include <string>
 #include <thread>
 #include <vector>
@@ -58,7 +58,7 @@ struct DriveRearmNodeAccess {
     node.stop_fault_ = true;  // inject failure state; actual zero retry still uses the PTY
   }
 };
-}
+}  // namespace motor_control_app
 
 namespace {
 
@@ -582,6 +582,6 @@ TEST_P(DriveRearmModes, BandRearmsToZeroButDoesNotFilterArmedMotion) {
 }
 
 INSTANTIATE_TEST_SUITE_P(VelocityAndCurrent, DriveRearmModes,
-                        ::testing::Values("velocity", "current"));
+                         ::testing::Values("velocity", "current"));
 
 }  // namespace

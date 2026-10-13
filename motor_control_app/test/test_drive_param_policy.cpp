@@ -92,7 +92,7 @@ protected:
 
 TEST_F(DriveParamPolicyTest, RearmBandsValidateOnStartupAndRequireRestart) {
   for (double value : {-0.01, 0.11, std::numeric_limits<double>::quiet_NaN(),
-                        std::numeric_limits<double>::infinity()}) {
+                       std::numeric_limits<double>::infinity()}) {
     rclcpp::NodeOptions options;
     options.append_parameter_override("auto_start", false);
     options.append_parameter_override("rearm_neutral_linear", value);

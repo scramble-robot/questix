@@ -214,8 +214,8 @@ void DriveComponent::readParameters() {
   const auto read_band = [this](const char* name, double maximum) {
     const double value = this->get_parameter(name).as_double();
     if (!drive_rearm::validBand(value, maximum)) {
-      RCLCPP_ERROR(this->get_logger(), "%s=%g is outside finite [0, %g]; using 0.0",
-                   name, value, maximum);
+      RCLCPP_ERROR(this->get_logger(), "%s=%g is outside finite [0, %g]; using 0.0", name, value,
+                   maximum);
     }
     return drive_rearm::bandOrZero(value, maximum);
   };
