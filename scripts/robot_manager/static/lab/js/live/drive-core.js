@@ -35,7 +35,11 @@ class DriveCommandWatch {
   }
   observe(drive, now) {
     if (this.firstRequestedAt === null || now <= this.firstRequestedAt) return;
-    if ([drive?.left?.target_rpm, drive?.right?.target_rpm].some((rpm) => Number.isFinite(rpm) && rpm !== 0))
+    if (
+      [drive?.left?.target_rpm, drive?.right?.target_rpm].some(
+        (rpm) => Number.isFinite(rpm) && rpm !== 0,
+      )
+    )
       this.seen = true;
   }
   expired(now) {

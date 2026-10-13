@@ -186,7 +186,7 @@ function benchButton(model, move) {
       }
     }}
     @keyup=${(event) => {
-      if (event.key === " " || event.key === "Enter") release();
+      if (event.key === ' ' || event.key === 'Enter') release();
     }}
     @blur=${release}
     @contextmenu=${(event) => event.preventDefault()}

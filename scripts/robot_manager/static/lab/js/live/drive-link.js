@@ -144,8 +144,7 @@ function runDrive({ controller, seconds, signal }) {
       if (!command) return finish('done');
       const limited = limitCommand(command, driveModel().limits);
       commandWatch.request(limited.linear, limited.angular, now);
-      if (commandWatch.expired(now))
-        return finish('refused', { refused: 'drive_not_responding' });
+      if (commandWatch.expired(now)) return finish('refused', { refused: 'drive_not_responding' });
       if (!sendRobot({ type: 'drive', linear: limited.linear, angular: limited.angular }))
         return finish('lost', { kind: 'lost' });
       // No confirmation yet: the robot may be moving (a busy Wi-Fi), so this is not a refusal.
@@ -158,8 +157,7 @@ function runDrive({ controller, seconds, signal }) {
         if (state.active && state.owner === session) {
           run.started = true;
           acceptedAt ??= elapsed();
-        }
-        else if (!run.started && state.refused)
+        } else if (!run.started && state.refused)
           finish('refused', { blockers: driveModel().blockers, refused: state.refused });
         else if (run.started) {
           // The bridge ended the run: say why, and who pressed stop if it was another page.
