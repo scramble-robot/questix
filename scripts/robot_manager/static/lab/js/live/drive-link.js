@@ -1,5 +1,5 @@
 import { onRobot, robotState, latestRobot, sendRobot } from './robot-link.js';
-import { driveReadiness, limitCommand } from './drive-core.js';
+import { driveReadiness, limitCommand, DriveCommandWatch } from './drive-core.js';
 
 // The one module that may send commands to the robot. Lessons describe what to do as a
 // `controller(elapsed, robot)` function and hand it to `runDrive`; this module repeats the command
@@ -13,6 +13,7 @@ import { driveReadiness, limitCommand } from './drive-core.js';
 const HEARTBEAT_MS = 100;
 // The bridge answers the first command with a drive_state naming this page as the owner.
 const START_TIMEOUT_MS = 1500;
+const STARTUP_NEUTRAL_SECONDS = 0.3; // repeated zero frames, not an actuator acknowledgement
 const SENSOR_STREAMS = ['scan', 'odom', 'drive'];
 
 let confirmed = false;
@@ -82,6 +83,8 @@ function runDrive({ controller, seconds, signal }) {
     const unsubscribe = [];
     let timer = 0;
     const run = { started: false };
+    let acceptedAt = null;
+    const commandWatch = new DriveCommandWatch();
     const finish = (reason, extra = {}) => {
       if (current !== run) return;
       current = null;
@@ -122,24 +125,40 @@ function runDrive({ controller, seconds, signal }) {
     };
     const tick = () => {
       const now = elapsed();
-      if (now > seconds) return finish('done');
+      // Until the bridge names us as owner, repeat explicit neutral. This also
+      // survives its 1 s stale-frame guard instead of switching to nonzero too early.
+      if (acceptedAt === null || now - acceptedAt < STARTUP_NEUTRAL_SECONDS) {
+        if (!sendRobot({ type: 'drive', linear: 0, angular: 0 }))
+          return finish('lost', { kind: 'lost' });
+        if (!run.started && now * 1000 > START_TIMEOUT_MS) finish('no_answer');
+        return;
+      }
+      const runningSeconds = now - acceptedAt - STARTUP_NEUTRAL_SECONDS;
+      if (runningSeconds > seconds) return finish('done');
       let command;
       try {
-        command = controller(now, robot);
+        command = controller(runningSeconds, robot);
       } catch (error) {
         return finish('failed', { message: error.message });
       }
       if (!command) return finish('done');
       const limited = limitCommand(command, driveModel().limits);
+      commandWatch.request(limited.linear, limited.angular, now);
+      if (commandWatch.expired(now))
+        return finish('refused', { refused: 'drive_not_responding' });
       if (!sendRobot({ type: 'drive', linear: limited.linear, angular: limited.angular }))
         return finish('lost', { kind: 'lost' });
       // No confirmation yet: the robot may be moving (a busy Wi-Fi), so this is not a refusal.
       if (!run.started && now * 1000 > START_TIMEOUT_MS) finish('no_answer');
     };
     unsubscribe.push(
+      onRobot('drive', (drive) => commandWatch.observe(drive, elapsed())),
       onRobot('drive_state', (state) => {
         const session = robotState().session;
-        if (state.active && state.owner === session) run.started = true;
+        if (state.active && state.owner === session) {
+          run.started = true;
+          acceptedAt ??= elapsed();
+        }
         else if (!run.started && state.refused)
           finish('refused', { blockers: driveModel().blockers, refused: state.refused });
         else if (run.started) {

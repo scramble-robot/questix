@@ -1,6 +1,7 @@
 import { html, nothing, render, unsafeHTML } from '../vendor/lit-html.js';
 import { fillSentence as fill } from '../core/content.js';
 import { driveModel, onDrive, confirmDriveSafety, stopDrive, runDrive } from './drive-link.js';
+import { DrivePressLatch } from './drive-core.js';
 import {
   driveCopy,
   driveChecklist,
@@ -68,8 +69,10 @@ function limitOf(model, key) {
   return model.limits ? model.limits[key] : BENCH_DEFAULTS[key];
 }
 
+const benchPress = new DrivePressLatch();
+
 async function hold(move) {
-  if (bench.held) return;
+  if (bench.held || !benchPress.press()) return;
   const abort = new AbortController();
   Object.assign(bench, { held: move.id, abort, note: '' });
   update();
@@ -157,6 +160,7 @@ function benchNote(result) {
 }
 
 function release() {
+  benchPress.release();
   bench.abort?.abort();
 }
 
@@ -181,7 +185,9 @@ function benchButton(model, move) {
         hold(move);
       }
     }}
-    @keyup=${release}
+    @keyup=${(event) => {
+      if (event.key === " " || event.key === "Enter") release();
+    }}
     @blur=${release}
     @contextmenu=${(event) => event.preventDefault()}
   >
