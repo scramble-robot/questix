@@ -375,15 +375,6 @@ protected:
 };
 
 // The node's own defaults: the E-stop and the motion permission are both fail-closed.
-TEST_F(DriveComponentNode, ShippingDriveConfigCopiesAreIdentical) {
-  std::ifstream integrated(QUESTIX_DRIVE_HARDWARE_YAML);
-  std::ifstream standalone(QUESTIX_DRIVE_MIRROR_YAML);
-  ASSERT_TRUE(integrated.is_open());
-  ASSERT_TRUE(standalone.is_open());
-  EXPECT_EQ(std::string(std::istreambuf_iterator<char>(integrated), {}),
-            std::string(std::istreambuf_iterator<char>(standalone), {}));
-}
-
 TEST_F(DriveComponentNode, NodeDefaultsRequireTheEstopAndThePermission) {
   rclcpp::NodeOptions options;
   options.parameter_overrides({{"auto_start", false}});

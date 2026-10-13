@@ -18,8 +18,9 @@ motor fault、stop fault）の後、gateが開きモータが正常な状態で�
 WARNには拒否した指令と不感帯を出します。実機で離したときの値を記録してから必要最小限を設定してください。
 
 これはcommand_arbiterのcontroller takeover閾値 `neutral_linear` / `neutral_angular` とは別です。
-LABの開始/終了用中立は厳密なゼロを維持します。設定はlauncher/config/drive_component.yamlと
-motor_control_app/config/drive_component.yamlを同じに保ち、launchで値を重ねません。
+LABの開始/終了用中立は厳密なゼロを維持します。drive設定の正本は
+launcher/config/drive_component.yamlです。不感帯はこのYAMLとノードの既定値0.0だけに置き、
+launchで値を重ねません。
 
 保証の範囲は**driveが受け取る指令の中立復帰**です。UART・web joyは途絶時にゼロを生成するため、
 倒したまま再接続するときの物理入力の中立確認は後続PR 4bで扱います。4aの合格とは混同しません。

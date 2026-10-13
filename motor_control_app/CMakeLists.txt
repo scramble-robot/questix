@@ -144,7 +144,6 @@ if(BUILD_TESTING)
   target_link_libraries(test_drive_component_node drive_component util)
   ament_target_dependencies(test_drive_component_node motor_control_lib)
   target_compile_definitions(test_drive_component_node PRIVATE
-    QUESTIX_DRIVE_MIRROR_YAML="${CMAKE_CURRENT_SOURCE_DIR}/config/drive_component.yaml"
     QUESTIX_DRIVE_HARDWARE_YAML="${CMAKE_CURRENT_SOURCE_DIR}/../launcher/config/drive_component.yaml"
     QUESTIX_DRIVE_CONTROL_YAML="${CMAKE_CURRENT_SOURCE_DIR}/../questix_control_config/config/controls.dualshock.yaml")
 

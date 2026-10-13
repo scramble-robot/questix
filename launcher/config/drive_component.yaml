@@ -1,5 +1,3 @@
-# Mirror: launcher/config/drive_component.yaml and motor_control_app/config/drive_component.yaml.
-# Keep these identical; integrated launch uses the launcher copy.
 # QUESTiX drive hardware/control-loop configuration (single source).
 # Operator tuning (RPM limits, acceleration, taper, deadband) is in
 # questix_control_config/config/controls.*.yaml, shared with robot_manager.
