@@ -79,6 +79,7 @@ TEST_F(PwmDiagnosticsTest, MissingGuardThrowsWithoutSimulationFallback) {
   options.append_parameter_override("pwm_backend", std::string("rp1_hw"));
   options.append_parameter_override("rp1_guard_socket", std::string("/nonexistent/questix-guard"));
   EXPECT_THROW(esc_motor_control_cpp::EscMotorControlComponent node(options), std::runtime_error);
+  EXPECT_TRUE(has_error("questix_pwm_guard.service"));
   for (const auto& log : logs) EXPECT_NE(log.second, "PWM backend: simulation");
 }
 

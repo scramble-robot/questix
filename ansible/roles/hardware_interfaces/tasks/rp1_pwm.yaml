@@ -49,7 +49,9 @@
     owner: root
     group: root
     mode: "0644"
-  when: rp1_pwm_source.changed or not rp1_pwm_compiled.stat.exists
+  when:
+    - not ansible_check_mode
+    - rp1_pwm_source.changed or not rp1_pwm_compiled.stat.exists
 
 - name: Copy the persistent overlay to the firmware partition
   ansible.builtin.copy:
@@ -58,6 +60,8 @@
     remote_src: true
     mode: "0644"
   notify: reboot_required
+  # In check mode dtc creates no output, including on the first deployment.
+  when: not ansible_check_mode
 
 - name: Enable the GPIO13 overlay in the all section
   ansible.builtin.include_tasks: rp1_pwm_config.yaml

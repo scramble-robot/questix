@@ -22,3 +22,19 @@ The separate hardware_interfaces role compiles the GPIO13-only overlay, keeps th
 compiled master under `/etc/flash-kernel/dtbs/overlays`, copies it to firmware, and
 appends an explicit `[all]` block. A reboot is needed for its application. Guard
 readiness/waveform acceptance must be checked on every shipped robot.
+
+For existing Pi 5 robots, deploy `hardware_interfaces` and `pwm_guard` with ESC power
+off, reboot, verify the guard is active and accept its Low/neutral waveforms, then
+update/build the user's workspace (including Robot Manager updates). Building the
+new `rp1_hw` default before provisioning a missing guard leaves the ESC unavailable.
+Before rebooting, check all config.txt sections and included files for manually
+installed GPIO13 PWM overlays, including aliases. Record and retire the old entry
+so exactly one active GPIO13 PWM overlay remains in the managed block.
+
+Content-specific staging directories are deliberately retained for deployment
+failure investigation and comparison with installed snapshot records. They are not
+runtime inputs after installation. Documentation/test changes also create a version;
+they count toward disk usage. During maintenance, administrators may archive/remove
+old versions after checking installed.txt, pending/failed deployments and backup
+records; do not remove the current version or installer snapshots automatically.
+No automatic retention limit or garbage collection is implemented.

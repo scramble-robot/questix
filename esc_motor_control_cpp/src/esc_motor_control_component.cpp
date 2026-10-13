@@ -216,6 +216,9 @@ void EscMotorControlComponent::begin_shutdown() {
 
 void EscMotorControlComponent::renew_pwm_lease() {
   // These callbacks execute on the ROS executor, never an unconditional heartbeat thread.
+  // Recheck here even though each also has a timer: timer ordering is not guaranteed.
+  // A ready lease callback must observe stale commands, multiple publishers and expired
+  // permission before sending. The repeated checks preserve the same require-zero latch.
   command_tick();
   check_publishers();
   apply_gate();
@@ -247,6 +250,9 @@ void EscMotorControlComponent::initialize_esc() {
     RCLCPP_FATAL(this->get_logger(), "Failed to initialise PWM backend '%s' on pin %d",
                  actual_name.c_str(), pwm_pin_);
     if (pwm_backend_name_ == "rp1_hw") {
+      RCLCPP_ERROR(this->get_logger(),
+                   "Check questix_pwm_guard.service: the guard may be undeployed or stopped; "
+                   "verify its socket and GPIO13 overlay before starting the ESC");
       pwm_->cleanup();
       throw std::runtime_error("rp1_hw initialization failed; no simulation fallback");
     }

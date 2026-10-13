@@ -87,6 +87,16 @@ image buildのchrootではdaemon-reloadせず、offline enableします。既設
 設置記録なら管理者の復旧を要求します。ID13〜16の手作業の設置は撤去せず更新できます。
 既存機体の更新はESCを無通電にし、管理者のmaintenance windowで行ってください。
 
+既設Pi 5の更新は、次の順序で行います。guard未配備の機体でworkspaceのpull/buildや
+Robot Manager経由の更新だけを先に行うと、新しい既定 `rp1_hw` で射出が初期化失敗します。
+
+1. ESC駆動電源を外し、管理者レビュー済みcontrollerからAnsibleの
+   `hardware_interfaces` と `pwm_guard` を配備します。
+2. 再起動し、`questix_pwm_guard.service` がactiveであること、socketとLow/neutralの
+   波形を確認します。失敗した場合は、射出を使わず配備・overlay・serviceの原因を解消します。
+3. その後に通常ユーザーのworkspaceを更新し、`colcon build --symlink-install` を実行します。
+   Robot Managerの更新もこの確認後に行います。走行が起動するだけではguardの受入になりません。
+
 どの機体も、出荷時にESC駆動電源を外してLowとneutralの波形を最低1回ずつ記録します。
 起動・停止過渡とfault時の停止を含め、機体ごとの受入記録を残します。過去のID13の
 合格だけで別機体の波形や新しいmainの経路を受入済みとは扱いません。
@@ -110,6 +120,13 @@ dtcで `questix-gpio13-rp1-pwm.dtbo` を作ります。masterは
 `/etc/flash-kernel/dtbs/overlays/`、起動用コピーは `/boot/firmware/overlays/` に保持します。
 `config.txt` の末尾に専用markerと `[all]`・`dtoverlay=questix-gpio13-rp1-pwm` を追加するため、
 元の `[pi4]` / `[cm4]` の末尾に依存せず、他のboot設定を上書きしません。
+
+手作業の設置済み機体では、配備前と再起動前に `config.txt` の全セクションと
+include先を確認し、GPIO13のPWMを設定する有効なdtoverlay行が**1つだけ**になるようにします。
+marker外の `questix-gpio13-rp1-pwm`、旧名 `gpio13-rp1-pwm`、別名の同内容のoverlayや
+GPIO13を選ぶ汎用PWM overlayも確認対象です。既存行は管理者が記録・退避してから標準の
+markerブロックへ一本化します。roleは別名の内容を判別したり既存行を自動撤去したりしません。
+同じGPIO13 overlayの二重適用で衝突するかは実機未確認です。
 
 Ubuntu公式 `flash-kernel_3.107ubuntu13~24.04.7` のsource archiveとdscのSHA-256を照合して
 `functions` を調査しました。`find_all_overlays` は `/etc/flash-kernel/dtbs` を先に探索し、
