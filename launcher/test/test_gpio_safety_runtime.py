@@ -26,7 +26,9 @@ import signal
 import subprocess
 import tempfile
 import time
+from types import SimpleNamespace
 
+from permission_observation import PermissionObservation
 import pytest
 from questix_msgs.msg import EmergencyStop, MotionPermission
 from rcl_interfaces.msg import ParameterType
@@ -102,7 +104,7 @@ def stop_process(process):
 class GraphProbe:
     """An rclpy node in the test's ROS domain that reads what the launched nodes expose."""
 
-    def __init__(self, environment):
+    def __init__(self, environment, expect_permission):
         # The discovery range is read from the process environment when the context starts.
         previous_range = os.environ.get('ROS_AUTOMATIC_DISCOVERY_RANGE')
         os.environ['ROS_AUTOMATIC_DISCOVERY_RANGE'] = environment['ROS_AUTOMATIC_DISCOVERY_RANGE']
@@ -122,7 +124,7 @@ class GraphProbe:
         self.graph_history = []
         self.last_graph_sample = 0.0
         self.estop = None
-        self.permission = None
+        self.permission = PermissionObservation(expect_permission)
         self.node.create_subscription(
             EmergencyStop, '/emergency_stop', self._receive_estop,
             QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
@@ -137,12 +139,13 @@ class GraphProbe:
             self.estop = (message.active, message.reason)
 
     def _receive_permission(self, message):
-        self.permission = (message.mode, message.drive_allowed, list(message.drive_blockers))
+        self.permission.receive(
+            (message.mode, message.drive_allowed, list(message.drive_blockers)))
 
     def read_motion_permission(self):
-        """Return (mode, drive_allowed, drive_blockers) of /motion_permission, or None."""
-        self.spin_until(lambda: self.permission is not None, STARTUP_TIMEOUT_SECONDS)
-        return self.permission
+        """Wait for the exact permission while rejecting unsafe intermediate samples."""
+        self.spin_until(self.permission.matches, STARTUP_TIMEOUT_SECONDS)
+        return self.permission.require_match()
 
     def spin_until(self, condition, timeout):
         """Spin until condition() holds or the timeout passes; return condition()."""
@@ -167,11 +170,13 @@ class GraphProbe:
         return names
 
     def diagnostics(self, process):
-        """Describe elapsed time, each graph observation and the launch log tail."""
+        """Describe time, graph history, all permissions and the launch log tail."""
         self.node_names()
         return (f'Elapsed: {time.monotonic() - self.started_at:.2f}s\n'
                 'Node graph observations (rclpy, no ros2 node list subprocess):\n' +
-                '\n'.join(self.graph_history) + '\nLaunch log tail:\n' + launch_log_tail(process))
+                '\n'.join(self.graph_history) +
+                f'\nPermission observations: {self.permission.history!r}\nLaunch log tail:\n' +
+                launch_log_tail(process))
 
     def wait_for_nodes(self, node_names, process):
         """Wait until the graph shows every node (discovery is not instant) while it runs."""
@@ -208,6 +213,9 @@ class GraphProbe:
 
     def read_emergency_stop(self):
         """Return (active, reason) of the latched /emergency_stop, or None if it never came."""
+        # Both profiles publish this test's expectation from construction: no-GPIO reports
+        # released; without GPIO hardware, GPIO5 remains unheard and reports active. Unlike
+        # permission, there is no upstream vote whose discovery changes the initial value.
         self.spin_until(lambda: self.estop is not None, STARTUP_TIMEOUT_SECONDS)
         return self.estop
 
@@ -228,6 +236,84 @@ GPIO_SAFETY_NODES = ('/gpio_reader_node', '/emergency_stop_manager')
 NO_GPIO_REASON = 'released (no GPIO safety path)'
 BOOL = ParameterType.PARAMETER_BOOL
 INTEGER_ARRAY = ParameterType.PARAMETER_INTEGER_ARRAY
+
+
+@pytest.fixture
+def permission_probe(monkeypatch):
+    """Use the real probe's receive/wait methods with a fake executor and monotonic clock."""
+    clock = SimpleNamespace(now=0.0)
+    monkeypatch.setattr(time, 'monotonic', lambda: clock.now)
+
+    def create(samples, deadline=CASE_TIMEOUT_SECONDS):
+        probe = GraphProbe.__new__(GraphProbe)
+        probe.started_at = 0.0
+        probe.deadline = deadline
+        probe.graph_history = []
+        probe.last_graph_sample = 0.0
+        probe.permission = PermissionObservation(('competition', False, ['referee:off']))
+        probe.node = SimpleNamespace(get_node_names_and_namespaces=lambda: [])
+        pending = iter(samples)
+
+        def spin_once(timeout_sec):
+            value = next(pending, None)
+            if value is not None:
+                probe._receive_permission(SimpleNamespace(
+                    mode=value[0], drive_allowed=value[1], drive_blockers=value[2]))
+            clock.now += timeout_sec
+
+        probe.executor = SimpleNamespace(spin_once=spin_once)
+        return probe, clock
+
+    return create
+
+
+def test_permission_wait_reads_past_unknown(permission_probe):
+    """Exercise the actual probe wait, not just the standalone sample validator."""
+    unknown = ('competition', False, ['referee:unknown'])
+    expected = ('competition', False, ['referee:off'])
+    probe, _ = permission_probe([unknown, expected])
+    assert probe.read_motion_permission() == expected
+    assert probe.permission.history == [unknown, expected]
+
+
+def test_permission_wait_rejects_allowed_before_later_off(permission_probe):
+    """Fail in the callback immediately, without consuming the later expected decision."""
+    unknown = ('competition', False, ['referee:unknown'])
+    allowed = ('competition', True, [])
+    expected = ('competition', False, ['referee:off'])
+    probe, clock = permission_probe([unknown, allowed, expected])
+    with pytest.raises(AssertionError, match='permission history'):
+        probe.read_motion_permission()
+    assert probe.permission.history == [unknown, allowed]
+    assert clock.now < STARTUP_TIMEOUT_SECONDS
+
+
+@pytest.mark.parametrize('deadline', [CASE_TIMEOUT_SECONDS, 0.1])
+def test_permission_wait_times_out_with_history_and_case_budget(permission_probe, deadline):
+    """Keep the 30 s receive wait within the shared case deadline, retaining every sample."""
+    unknown = ('competition', False, ['referee:unknown'])
+    probe, clock = permission_probe([unknown, unknown], deadline=deadline)
+    with pytest.raises(AssertionError, match='Timed out') as failure:
+        probe.read_motion_permission()
+    assert repr([unknown, unknown]) in str(failure.value)
+    assert min(STARTUP_TIMEOUT_SECONDS, deadline) <= clock.now
+    assert clock.now < min(STARTUP_TIMEOUT_SECONDS, deadline) + 0.051
+
+
+def test_permission_diagnostics_preserves_graph_and_launch_log(permission_probe):
+    """Include every permission along with the existing elapsed, graph and log evidence."""
+    unknown = ('competition', False, ['referee:unknown'])
+    probe, _ = permission_probe([])
+    probe.permission.receive(unknown)
+    probe.permission.receive(unknown)
+    with tempfile.TemporaryFile(mode='w+b') as log_file:
+        log_file.write(b'launch diagnostic marker')
+        log_file.flush()
+        text = probe.diagnostics(SimpleNamespace(launch_log=log_file))
+    assert 'Elapsed:' in text
+    assert 'Node graph observations' in text
+    assert repr([unknown, unknown]) in text
+    assert 'launch diagnostic marker' in text
 
 
 @pytest.mark.parametrize(
@@ -265,7 +351,7 @@ def test_core_launch_publishes_the_estop_and_the_motion_permission_for_each_mode
         5 * int(expect_permission[0] == 'competition'))
     arguments = ['enable_lidar:=false', 'enable_shot:=true', 'enable_drive:=true',
                  'enable_rviz:=false', 'controller_type:=dualshock']
-    probe = GraphProbe(environment)
+    probe = GraphProbe(environment, expect_permission)
     process = start_process(
         ['ros2', 'launch', 'questix_launcher', 'questix_core.launch.xml',
          *arguments, *launch_arguments],
