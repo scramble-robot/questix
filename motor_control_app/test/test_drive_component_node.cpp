@@ -560,6 +560,9 @@ TEST_F(DriveComponentNode, CleanupReconfigureAndActivateReanchorWithoutTeleporti
   spinFor(300ms);
   EXPECT_NEAR(last_odom_.pose.pose.position.x, x, 1e-9);
   neutral();  // rearm after lifecycle activation under #208
+  motor_.clear();
+  ASSERT_TRUE(spinUntil([this]() { return droveBothWheels(); }, 2s));
+  spinFor(100ms);  // fresh moving feedback pairs before the test's next position increment
   motor_.positions(7500, ddt::kPositionRawPerTurn - 7500);
   ASSERT_TRUE(spinUntil([this, x]() { return last_odom_.pose.pose.position.x > x + .002; }, 2s));
 }
