@@ -125,11 +125,24 @@ def test_an_oversized_unterminated_line_revokes_and_discards_until_its_newline()
 
 
 def test_an_oversized_complete_line_revokes_before_processing_the_next_line():
+    # Reads can split the oversized line or receive its newline together with the tail;
+    # either path must revoke before applying the following, separate permission line.
     with _pipe_run() as (running, writer):
         writer.write(_line(BOTH))
         assert running.next_change(OFF) == BOTH
         writer.write(b' ' * (heartbeat.MAX_LINE_BYTES + 1) + _line(BOTH) + _line(DRIVE))
         assert running.next_change(BOTH) == OFF
+        assert running.next_change(OFF) == DRIVE
+
+
+def test_an_empty_line_revokes_until_a_separate_valid_line_arrives():
+    with _pipe_run() as (running, writer):
+        writer.write(_line(BOTH))
+        assert running.next_change(OFF) == BOTH
+        writer.write(b'\n')
+        assert running.next_change(BOTH) == OFF
+        assert running.next_state() == OFF
+        writer.write(_line(DRIVE))
         assert running.next_change(OFF) == DRIVE
 
 

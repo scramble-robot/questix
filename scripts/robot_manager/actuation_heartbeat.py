@@ -40,7 +40,8 @@ MAX_LINE_BYTES = 4096
 def parse_state(line):
     """Return ``(drive, launcher, lab_drive, lab_launcher)`` from one stdin line.
 
-    Anything unexpected is all off, and a lesson permission is off while its switch is.
+    Anything unexpected, including an empty line, is all off. A lesson permission is off while
+    its switch is.
     """
     try:
         data = json.loads(line)
