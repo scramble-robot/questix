@@ -70,6 +70,8 @@ class StandardDeploymentTest(unittest.TestCase):
                 units.mkdir()
                 other = units / 'launcher-config.conf'
                 other.write_text('[Service]\nRestartPreventExitStatus=78\n')
+                unrelated = units / '99-local.conf'
+                unrelated.write_text('[Service]\nTimeoutStartSec=60\n')
                 launcher = root / 'launcher'
                 launcher.write_text('previous launcher')
                 log = root / 'calls'
@@ -90,11 +92,16 @@ systemctl() {
 '''
                 env = dict(os.environ, REPO_ROOT=str(ROOT), LAUNCHER_SOURCE=str(ROOT/'systemd/questix_robot_launcher.sh'),
                            LAUNCHER_TARGET=str(launcher), QA_LOG=str(log),
+                           LAUNCHER_POLICY_DIR=str(units),
+                           LAUNCHER_POLICY_SOURCE=str(ROOT/'systemd/questix_robot.service.d/launcher-config.conf'),
+                           LAUNCHER_POLICY_TARGET=str(other),
                            QA_RELOAD_CODE='1' if fail_reload else '0')
                 result = subprocess.run(['bash', '-e', '-c', stubs + command_function + '\ninstall_launcher'],
                                         env=env, capture_output=True, text=True)
                 self.assertEqual(result.returncode == 0, not fail_reload)
-                self.assertEqual(other.read_text(), '[Service]\nRestartPreventExitStatus=78\n')
+                self.assertEqual(other.read_text(),
+                                 read('systemd/questix_robot.service.d/launcher-config.conf'))
+                self.assertEqual(unrelated.read_text(), '[Service]\nTimeoutStartSec=60\n')
                 self.assertEqual((units/'pwm-guard-order.conf').read_text(),
                                  read('systemd/questix_robot.service.d/pwm-guard-order.conf'))
                 self.assertEqual(launcher.read_text(), 'previous launcher' if fail_reload
