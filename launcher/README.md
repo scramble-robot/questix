@@ -306,3 +306,27 @@ Joy のキー割り当て、射出・ローラー操作、走行速度・加速�
 robot_manager の「操作・速度」タブでコントローラー別に編集・保存し、
 ロボットの次回起動／再起動で反映します。保存による自動再起動は行いません。
 管理画面には未保存表示・初期値への復元・入力検証・同時編集の競合検出があります。
+
+## インストール済みlaunchとランチャーの版の確認
+
+Robot Manager の更新はランチャーを差し替えるが、ROSワークスペースを再ビルドしない。
+ランチャーは起動前に `ros2 pkg prefix questix_launcher` が返すprefixの
+`share/questix_launcher/launch/questix_core.launch.xml` をXMLとして読み、直下に
+`<arg name="robot_mode" .../>` があることを確認する。宣言がない、ファイルが読めない、
+XMLが壊れている、またはパッケージが見つからない場合は、`colcon build` が必要とログに
+記録して終了コード78（`EX_CONFIG`）で起動を拒否する。`last-launch` は書かず、起動要求は消費する。
+unitの `RestartPreventExitStatus=78` により、この設定不整合では自動再起動せずfailedを維持する。
+Robot Managerはfailedを「起動失敗」と表示する。通常のROSプロセスの異常終了は従来の
+`Restart=on-failure` の対象のまま。既存機では更新スクリプトが同じ設定のdrop-inを追加し、
+unitを再読み込みしてからランチャーを更新する（ロボット制御サービスの再起動は行わない）。
+
+2026-10-13、Ubuntu 24.04 / ROS 2 Jazzyで次の非ハードウェアlaunchを一時ディレクトリに
+作り、`ros2 launch /tmp/.../minimal.launch.xml robot_mode:=lesson` を実行した。
+
+```xml
+<launch><log message="scratch launch reached"/></launch>
+```
+
+`robot_mode` を宣言していなくても警告なく `scratch launch reached` が表示され、
+終了コード0だった。このため、引数を渡すだけでは古いビルドを検出できない。
+この版の確認はインストール済みlaunchの構造の確認であり、実機の安全動作の検証は別途必要。

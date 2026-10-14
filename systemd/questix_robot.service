@@ -18,6 +18,8 @@ Environment=HOME=/home/ubuntu
 WorkingDirectory=/home/ubuntu
 ExecStart=/opt/questix_robot/questix_robot_launcher.sh
 Restart=on-failure
+# EX_CONFIG: an incompatible launch build needs operator action, never an automatic retry.
+RestartPreventExitStatus=78
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
