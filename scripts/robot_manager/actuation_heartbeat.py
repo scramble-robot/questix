@@ -34,6 +34,7 @@ HEARTBEAT_HZ = 5.0
 FINAL_OFF_COUNT = 3
 SOURCE = "robot_manager"
 ALL_OFF = (False, False, False, False)
+MAX_LINE_BYTES = 4096
 
 
 def parse_state(line):
@@ -56,15 +57,17 @@ def parse_state(line):
 def run(stdin, publish, now=time.monotonic, wait=None, parent_alive=None):
     """Publish the latest state every period until stdin closes; then publish all off.
 
-    ``stdin`` is a text stream (one JSON line per change), ``publish(drive, launcher, lab_drive,
-    lab_launcher)`` sends one message on each topic, ``wait(timeout)`` returns True when a line can be read without blocking (default:
-    select on stdin), ``parent_alive()`` returns False once the manager is gone. Returns the
-    number of messages published.
+    ``stdin`` is a file descriptor or a stream with ``fileno()`` (one JSON line per change).
+    ``publish(drive, launcher, lab_drive, lab_launcher)`` sends one message on each topic.
+    ``wait(timeout)`` returns True when the descriptor is readable (default: select on the fd).
+    ``parent_alive()`` returns False once the manager is gone. Returns the number of messages
+    published. Read raw bytes: a buffered readline can strand queued changes behind select.
     """
     period = 1.0 / HEARTBEAT_HZ
+    fd = stdin if isinstance(stdin, int) else stdin.fileno()
     if wait is None:
         def wait(timeout):
-            ready, _, _ = select.select([stdin], [], [], max(0.0, timeout))
+            ready, _, _ = select.select([fd], [], [], max(0.0, timeout))
             return bool(ready)
     if parent_alive is None:
         parent = os.getppid()
@@ -72,6 +75,8 @@ def run(stdin, publish, now=time.monotonic, wait=None, parent_alive=None):
         def parent_alive():
             return os.getppid() == parent
     state = ALL_OFF
+    pending = b""
+    discarding = False
     sent = 0
     next_at = now()
     while True:
@@ -86,13 +91,28 @@ def run(stdin, publish, now=time.monotonic, wait=None, parent_alive=None):
                 next_at = now() + period
             continue
         if wait(remaining):
-            line = stdin.readline()
-            if not line:
+            chunk = os.read(fd, MAX_LINE_BYTES)
+            if not chunk:
                 break  # EOF: the manager closed our stdin (all off) or went away
-            state = parse_state(line)
-            publish(*state)  # a change goes out at once, OFF above all
-            sent += 1
-            next_at = now() + period
+            lines = (pending + chunk).split(b"\n")
+            pending = lines.pop()
+            for line in lines:
+                if discarding:
+                    discarding = False  # ignore the remainder of an oversized line
+                    continue
+                state = parse_state(line) if len(line) <= MAX_LINE_BYTES else ALL_OFF
+                publish(*state)  # every complete change goes out at once, OFF above all
+                sent += 1
+                next_at = now() + period
+            if discarding or len(pending) > MAX_LINE_BYTES:
+                if not discarding:
+                    state = ALL_OFF
+                    publish(*state)
+                    sent += 1
+                    next_at = now() + period
+                # Do not mistake a later JSON-looking suffix for a fresh permission line.
+                pending = b""
+                discarding = True
     for _ in range(FINAL_OFF_COUNT):
         publish(*ALL_OFF)
         sent += 1
@@ -134,7 +154,7 @@ def main():
 
     signal.signal(signal.SIGTERM, closing)
     try:
-        run(sys.stdin, publish)
+        run(sys.stdin.fileno(), publish)
     except KeyboardInterrupt:
         for _ in range(FINAL_OFF_COUNT):
             publish(*ALL_OFF)
