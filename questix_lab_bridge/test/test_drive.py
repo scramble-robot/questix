@@ -54,6 +54,8 @@ def test_the_arbiter_must_be_on_the_topic_and_reporting():
     session.set_graph([], [], 0.2)  # nothing subscribes to the drive topic
     assert session.request(1, 0.1, 0.0, 0.2) == drive.NO_DRIVE_NODE
     session.set_graph([], [ARBITER], 0.3)
+    assert session.request(1, 0.1, 0.0, 0.3) == drive.NEEDS_NEUTRAL
+    assert session.request(1, 0.0, 0.0, 0.3) is None
     assert session.request(1, 0.1, 0.0, 0.3) is None
 
 
@@ -79,6 +81,7 @@ def test_no_motion_permission_blocks_and_ends_the_run():
     session.set_motion_permission(False, 0.0)
     assert session.request(1, 0.1, 0.0, 0.0) == drive.NO_MOTION_PERMISSION
     session.set_motion_permission(True, 0.1)
+    assert session.request(1, 0.0, 0.0, 0.1) is None
     assert session.request(1, 0.1, 0.0, 0.1) is None
     session.set_motion_permission(False, 0.2)
     assert not session.active and session.last_stop['reason'] == drive.NO_MOTION_PERMISSION
@@ -99,8 +102,9 @@ def test_the_arbiter_caps_are_shown_and_the_command_is_repeated_as_asked():
     # The arbiter clamps; the bridge passes the page's command on unchanged.
     assert session.request(1, 2.0, -5.0, 0.0) is None
     assert session.owner == 1
-    assert session.tick(0.05) == (2.0, -5.0)
-    assert session.tick(0.10) == (2.0, -5.0)
+    assert session.tick(0.05) == (0.0, 0.0)
+    session.request(1, 2.0, -5.0, 0.3)
+    assert session.tick(0.31) == (2.0, -5.0)
 
 
 def test_non_finite_values_stop_the_owner():
@@ -130,7 +134,7 @@ def test_stop_only_own_ends_only_the_senders_run():
     assert session.request(2, 0.1, 0.0, 0.1) == drive.BUSY
     assert not session.stop(2, 0.2, only_own=True)
     assert session.active and session.owner == 1
-    assert session.tick(0.25) == (0.1, 0.0)
+    assert session.tick(0.25) == (0.0, 0.0)  # startup still publishes neutral
     # The owner itself may end it that way.
     assert session.stop(1, 0.3, only_own=True)
     assert session.last_stop == {'reason': drive.STOPPED, 'by': 1}
@@ -178,6 +182,8 @@ def test_blocker_during_a_run_stops_it():
     assert session.last_stop['reason'] == drive.EMERGENCY_STOP
     assert session.request(2, 0.1, 0.0, 0.2) == drive.EMERGENCY_STOP
     session.set_emergency_stop(False, 0.3)
+    assert session.request(1, 0.1, 0.0, 1.2) == drive.NEEDS_NEUTRAL
+    session.request(1, 0.0, 0.0, 1.2)
     session.request(1, 0.1, 0.0, 1.2)
     session.set_graph(['/joy_controller'], [ARBITER], 1.3)
     assert session.last_stop['reason'] == drive.OTHER_PUBLISHER
@@ -275,6 +281,7 @@ def test_driving_is_refused_until_the_estop_topic_is_heard():
     session.set_emergency_stop(False, 0.1)  # a derived "released" (/drive_status): no change
     assert session.request(1, 0.1, 0.0, 0.1) == drive.ESTOP_UNKNOWN
     session.set_estop_known(True, 0.2)
+    assert session.request(1, 0.0, 0.0, 0.2) is None
     assert session.request(1, 0.1, 0.0, 0.2) is None
 
 
@@ -288,6 +295,7 @@ def test_a_heard_pressed_estop_blocks_and_a_derived_one_blocks_before_it():
     session.set_estop_known(True, 0.1)
     assert session.request(1, 0.1, 0.0, 0.1) == drive.EMERGENCY_STOP
     session.set_emergency_stop(False, 0.2)
+    assert session.request(1, 0.0, 0.0, 0.2) is None
     assert session.request(1, 0.1, 0.0, 0.2) is None
     session.set_emergency_stop(True, 0.3)  # pressed during the run: it ends at once
     assert not session.active and session.last_stop['reason'] == drive.EMERGENCY_STOP
@@ -314,7 +322,9 @@ def test_the_owners_commands_after_a_run_the_bridge_ended_are_stale():
     assert not session.active
     assert session.request(2, 0.1, 0.0, 0.3) is None  # another page may start
     session.stop(2, 0.4)
-    assert session.request(1, 0.1, 0.0, 1.2) is None  # the page asks again later
+    assert session.request(1, 0.1, 0.0, 1.2) == drive.NEEDS_NEUTRAL
+    assert session.request(1, 0.0, 0.0, 1.2) is None
+    assert session.request(1, 0.1, 0.0, 1.2) is None
 
 
 def test_another_pages_stop_guards_the_owner_but_its_own_stop_does_not():
@@ -325,4 +335,30 @@ def test_another_pages_stop_guards_the_owner_but_its_own_stop_does_not():
     session = ready_session()
     session.request(1, 0.1, 0.0, 0.0)
     session.stop(1, 0.1, only_own=True)  # the page ended its own run
+    assert session.request(1, 0.1, 0.0, 0.2) == drive.NEEDS_NEUTRAL
+    assert session.request(1, 0.0, 0.0, 0.2) is None
     assert session.request(1, 0.1, 0.0, 0.2) is None
+
+
+def test_prepare_repeats_zero_and_requires_live_heartbeat():
+    session = ready_session()
+    session.request(1, .1, .2, 0)
+    for now in (0, .05, .1, .2, .299):
+        assert session.tick(now) == (0, 0)
+    assert session.tick(.3) == (.1, .2)
+    assert session.tick(.6) == (0, 0)  # no relaxation of deadman during startup
+
+
+def test_blocked_zero_and_generated_stop_never_release_client():
+    session = ready_session()
+    session.request(1, .1, 0, 0)
+    session.set_motion_permission(False, .1)
+    assert session.request(1, 0, 0, .2) == drive.STALE
+    session.set_motion_permission(True, .3)
+    assert session.tick(.35) == (0, 0)
+    assert session.request(1, .1, 0, 5) == drive.NEEDS_NEUTRAL
+    assert session.request(1, .1, 0, 100) == drive.NEEDS_NEUTRAL
+    assert session.request(1, 0, 0, 100.1) is None
+    session.request(1, .1, 0, 100.2)
+    assert session.tick(100.2) == (0, 0)
+    assert session.tick(100.41) == (.1, 0)

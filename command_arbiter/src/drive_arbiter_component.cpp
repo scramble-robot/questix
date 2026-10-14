@@ -17,8 +17,6 @@ namespace command_arbiter {
 
 namespace {
 
-double finiteOrZero(double value) { return std::isfinite(value) ? value : 0.0; }
-
 std::chrono::nanoseconds periodOf(double hz) {
   return std::chrono::duration_cast<std::chrono::nanoseconds>(
       std::chrono::duration<double>(1.0 / std::clamp(std::isfinite(hz) ? hz : 20.0, 1.0, 100.0)));
@@ -83,8 +81,14 @@ void DriveArbiterComponent::publishTwist(double linear, double angular) {
 }
 
 void DriveArbiterComponent::joyCallback(const geometry_msgs::msg::Twist& msg) {
-  const double linear = finiteOrZero(msg.linear.x);
-  const double angular = finiteOrZero(msg.angular.z);
+  // Invalid input must not become a neutral that rearms drive_component.
+  if (!std::isfinite(msg.linear.x) || !std::isfinite(msg.angular.z)) {
+    RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                         "Ignoring non-finite controller twist");
+    return;
+  }
+  const double linear = msg.linear.x;
+  const double angular = msg.angular.z;
   const bool active = std::abs(linear) >= neutral_linear_ || std::abs(angular) >= neutral_angular_;
   const auto before = selector_.labLocked();
   if (selector_.onJoy(active, nowSec())) {
@@ -111,11 +115,18 @@ void DriveArbiterComponent::labCallback(const geometry_msgs::msg::Twist& msg) {
   }
   const double linear = std::clamp(msg.linear.x, -lab_max_linear_, lab_max_linear_);
   const double angular = std::clamp(msg.angular.z, -lab_max_angular_, lab_max_angular_);
+  // LAB run boundaries stay strict zero. drive_rearm.hpp's configurable band is
+  // only for actuator rearming, distinct from the controller takeover thresholds.
   const bool neutral = linear == 0.0 && angular == 0.0;
+  const bool was_joy = selector_.source() == SourceSelector::Source::kJoy;
   const auto decision = selector_.onLab(neutral, permitted, now);
   if (decision.forward) {
     publishTwist(linear, angular);
   } else if (decision.stop) {
+    publishTwist(0.0, 0.0);
+  } else if (was_joy && neutral && permitted && !selector_.joyBusy(now)) {
+    // A bridge startup neutral can reach a drive waiting for neutral with no
+    // controller connected. Never interrupt a busy controller, or claim LAB source.
     publishTwist(0.0, 0.0);
   }
   publishStatus(false);
