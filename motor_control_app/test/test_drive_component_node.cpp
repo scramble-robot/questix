@@ -220,7 +220,6 @@ private:
   std::atomic<uint16_t> left_position_{0};
   std::atomic<uint16_t> right_position_{0};
   std::atomic<bool> answer_right_{true};
-  std::atomic<uint8_t> fault_{0};
 };
 
 // operation_manager's /emergency_stop reason without the GPIO safety path.
