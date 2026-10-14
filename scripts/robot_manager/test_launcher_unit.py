@@ -70,6 +70,18 @@ def test_updater_installs_refusal_policy_before_launcher_without_restart(tmp_pat
     harness.write_text('set -euo pipefail\n' + functions + '''
 LAUNCHER_POLICY_DIR="$TEST_DROPIN_DIR"
 LAUNCHER_POLICY_TARGET="$LAUNCHER_POLICY_DIR/launcher-config.conf"
+# Production updater assigns root ownership. A non-root contract harness checks those
+# arguments, then performs only the copies/modes inside its temporary test directory.
+install() {
+    local args=()
+    while (( $# )); do
+        case "$1" in
+            -o|-g) [[ "$2" == root ]] || return 43; shift 2 ;;
+            *) args+=("$1"); shift ;;
+        esac
+    done
+    command install "${args[@]}"
+}
 systemctl() {
     printf '%s\\n' "$*" >> "$TEST_SYSTEMCTL_CALLS"
     return "$TEST_RELOAD_CODE"
@@ -90,6 +102,8 @@ if launcher_current; then exit 42; fi
                             capture_output=True, timeout=10, check=False)
     assert result.returncode == reload_code, result.stderr
     assert calls.read_text().splitlines() == ['daemon-reload']
+    assert (dropin / 'pwm-guard-order.conf').read_bytes() == (
+        REPO / 'systemd/questix_robot.service.d/pwm-guard-order.conf').read_bytes()
     if reload_code:
         assert launcher.read_text() == 'old launcher\n'
         assert (dropin / 'launcher-config.conf').read_bytes() == POLICY.read_bytes()
