@@ -8,3 +8,6 @@ enable_i2c: true
 enable_spi: true
 enable_uart: true
 configure_udev_rules: true
+enable_rp1_pwm: "{{ questix_rp1_pwm | default(false) | bool }}"
+rp1_pwm_source_dir: /etc/flash-kernel/dtbs/overlays
+rp1_pwm_boot_overlay_dir: /boot/firmware/overlays

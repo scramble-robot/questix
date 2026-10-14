@@ -1,0 +1,92 @@
+---
+- name: Inventory the administrator source on the controller without following links
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - -I
+      - "{{ pwm_guard_reviewed_source }}/deploy/install_guard.py"
+      - --inventory
+      - "{{ pwm_guard_reviewed_source }}"
+  delegate_to: localhost
+  become: false
+  register: pwm_guard_source_files
+  changed_when: false
+  # Read-only no-follow inventory: safe even in check mode; no snapshot/build/service action.
+  check_mode: false
+
+- name: Refuse aliased or empty controller source
+  ansible.builtin.assert:
+    that:
+      - pwm_guard_source_files.stdout | from_json | length > 0
+    quiet: true
+
+- name: Select an immutable content-specific staging path
+  ansible.builtin.set_fact:
+    pwm_guard_source_stage: >-
+      {{ pwm_guard_staging_dir }}/{{
+      (pwm_guard_source_files.stdout | from_json | to_json) | hash('sha256') }}
+
+- name: Install the guard build prerequisites
+  ansible.builtin.apt:
+    name: [cmake, g++]
+    state: present
+
+- name: Create a root-managed source staging directory
+  ansible.builtin.file:
+    path: "{{ pwm_guard_source_stage }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Stage administrator-reviewed source from the Ansible controller
+  ansible.builtin.copy:
+    src: "{{ pwm_guard_reviewed_source }}/"
+    dest: "{{ pwm_guard_source_stage }}/"
+    owner: root
+    group: root
+    mode: "u=rwX,go=rX"
+    local_follow: false
+
+- name: Snapshot and build only the guard with the protected installer
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/env
+      - -i
+      - PATH=/usr/bin:/bin
+      - LANG=C
+      - /bin/bash
+      - --noprofile
+      - --norc
+      - "{{ pwm_guard_source_stage }}/deploy/install_guard.sh"
+      - "{{ pwm_guard_source_stage }}"
+      - "{{ target_user }}"
+      - "{{ pwm_guard_source_identity }}"
+      - --yes
+      - --if-changed
+  register: pwm_guard_install
+  changed_when: "'INSTALLED_NOT_STARTED;' in pwm_guard_install.stdout"
+  when: not ansible_check_mode
+
+- name: Install independent robot ordering for existing units
+  ansible.builtin.file:
+    path: /etc/systemd/system/questix_robot.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy the guard ordering drop-in without startup dependencies
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../systemd/questix_robot.service.d/pwm-guard-order.conf"
+    dest: /etc/systemd/system/questix_robot.service.d/pwm-guard-order.conf
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Enable the standard guard at boot without starting it during provisioning
+  ansible.builtin.systemd:
+    name: questix_pwm_guard.service
+    enabled: true
+    daemon_reload: "{{ not (questix_image_build | default(false) | bool) }}"
+  when: not ansible_check_mode

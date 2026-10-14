@@ -85,16 +85,20 @@ LAUNCHER_POLICY_TARGET="$LAUNCHER_POLICY_DIR/launcher-config.conf"
 launcher_current() {
     [ -f "$LAUNCHER_TARGET" ] || return 0
     cmp -s "$LAUNCHER_SOURCE" "$LAUNCHER_TARGET" && \
-        cmp -s "$LAUNCHER_POLICY_SOURCE" "$LAUNCHER_POLICY_TARGET"
+        cmp -s "$LAUNCHER_POLICY_SOURCE" "$LAUNCHER_POLICY_TARGET" && \
+        cmp -s "$REPO_ROOT/systemd/questix_robot.service.d/pwm-guard-order.conf" \
+            "$LAUNCHER_POLICY_DIR/pwm-guard-order.conf"
 }
 
 install_launcher() {
     echo "🔄 ロボット制御の起動スクリプトを更新します（次のロボット制御の起動から使われます）..."
-    # Older installed units restart on every nonzero exit. Add only the refusal policy;
-    # keep their configured user/workspace, and reload it before copying the new launcher.
+    # Preserve the old-build refusal policy and PWM guard ordering together.
+    # Keep other drop-ins and the configured user/workspace; reload before copying the launcher.
     # daemon-reload does not start or restart questix_robot.
-    install -d -m 0755 "$LAUNCHER_POLICY_DIR"
-    install -m 0644 "$LAUNCHER_POLICY_SOURCE" "$LAUNCHER_POLICY_TARGET"
+    install -d -o root -g root -m 0755 "$LAUNCHER_POLICY_DIR"
+    install -o root -g root -m 0644 "$LAUNCHER_POLICY_SOURCE" "$LAUNCHER_POLICY_TARGET"
+    install -o root -g root -m 0644 "$REPO_ROOT/systemd/questix_robot.service.d/pwm-guard-order.conf" \
+        "$LAUNCHER_POLICY_DIR/pwm-guard-order.conf"
     systemctl daemon-reload
     install -m 0755 "$LAUNCHER_SOURCE" "$LAUNCHER_TARGET"
 }

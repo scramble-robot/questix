@@ -1,0 +1,11 @@
+---
+- name: Keep the standard GPIO13 overlay in an explicit all section
+  ansible.builtin.blockinfile:
+    path: "{{ boot_config_path }}"
+    marker: "# {mark} QUESTiX RP1 PWM"
+    insertafter: EOF
+    block: |
+      [all]
+      dtoverlay=questix-gpio13-rp1-pwm
+  register: rp1_pwm_config
+  notify: reboot_required

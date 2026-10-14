@@ -589,6 +589,39 @@ unset FAKE_CLEANUP_LOG FAKE_CLEANUP_PENDING
 # --- 13. Custom image build (scripts/iso/image-build-lib.sh, apply-ansible-config.sh) ---
 . ansible/tests/image_build_contract.sh
 
+# Safe PWM configuration contract: only a run-local config.txt, never systemd or GPIO.
+if run_playbook ansible/tests/test_rp1_pwm_config.yaml \
+    -e "boot_config_path=$TMP_ROOT/pwm-config.txt"; then
+    pass "RP1 PWM: explicit all section and idempotent second application"
+else
+    fail "RP1 PWM: boot configuration contract failed"
+fi
+
+# Extract the actual copies, with test-only result registers. Inputs intentionally
+# do not exist: check mode must not read dtc outputs that were never generated.
+PWM_PUBLICATION_FIXTURE="$TMP_ROOT/pwm-publication.yaml"
+python3 - "$PWM_PUBLICATION_FIXTURE" <<'PY'
+from pathlib import Path
+import sys
+import yaml
+
+tasks = yaml.safe_load(Path('ansible/roles/hardware_interfaces/tasks/rp1_pwm.yaml').read_text())
+names = ('Publish the persistent compiled overlay',
+         'Copy the persistent overlay to the firmware partition')
+selected = [next(t for t in tasks if t['name'] == name) for name in names]
+for task, register in zip(selected, ('pwm_publish_result', 'pwm_firmware_result')):
+    task['register'] = register
+Path(sys.argv[1]).write_text(yaml.safe_dump(selected, sort_keys=False))
+PY
+if run_playbook ansible/tests/test_rp1_pwm_check.yaml --check \
+    -e "pwm_publication_fixture=$PWM_PUBLICATION_FIXTURE" \
+    -e "rp1_pwm_source_dir=$TMP_ROOT/absent-pwm-source" \
+    -e "rp1_pwm_boot_overlay_dir=$TMP_ROOT/absent-pwm-boot"; then
+    pass "RP1 PWM: first check mode skips both ungenerated overlay copies"
+else
+    fail "RP1 PWM: first check mode publication contract failed"
+fi
+
 REAL_BASHRC_AFTER="$(real_bashrc_fingerprint)"
 if [ "$REAL_BASHRC_BEFORE" = "$REAL_BASHRC_AFTER" ]; then
     pass "isolation: real user ~/.bashrc remained byte-identical"
