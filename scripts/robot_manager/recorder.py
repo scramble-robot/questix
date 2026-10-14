@@ -9,7 +9,7 @@ the display name.
 
 Two recording flavours share that single process, lock and state:
 
-* **generic** — ``POST /start``: unchanged behaviour, no metadata, no sidecars.
+* **generic** — ``POST /start``: shared start conditions, no metadata, no sidecars.
 * **classroom trial** — ``POST /start-trial``: the same recorder plus the
   evidence described in :mod:`robot_manager.trial` (metadata, exact source
   identity, effective parameters before/after, topic list, bag integrity).
@@ -30,10 +30,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, field_validator
 
-from robot_manager import actuation, ros_domain, trial
+from robot_manager import actuation, recorder_readiness, ros_domain, trial
 
 CONFIG_DIR = Path(os.environ.get("QUESTIX_CONFIG_DIR", "/etc/questix_robot"))
 LAUNCH_ENV_FILE = CONFIG_DIR / "launch.env"
@@ -749,6 +749,45 @@ def _classroom_preflight(runtime) -> dict:
     return preflight
 
 
+def _query_readiness_trial(timeout) -> dict:
+    """Inspect only runtime, source and graph, with no evidence or parameter snapshots."""
+    try:
+        runtime = trial.resolve_runtime_env(_read_env_file(LAUNCH_ENV_FILE))
+        recorder_readiness.source_check(runtime, timeout)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    lists = []
+    for argv in (["ros2", "topic", "list"], ["ros2", "node", "list"]):
+        code, out, err = trial.run_ros(runtime, argv, timeout=timeout())
+        if code != 0:
+            raise HTTPException(503, "ROS環境を解決できません：" +
+                                trial.explain_prelude_exit(code, err))
+        lists.append(trial.parse_name_list(out))
+    graph = trial.classify_preflight(lists[1], lists[0])
+    missing = graph["missing_required"]
+    return {**recorder_readiness.Readiness.empty(),
+            "state": "fail" if missing else "pass",
+            "message": "必須のノード・トピックがありません：" + ", ".join(missing) +
+            "。起動の直後は準備に数秒かかることがあります。「開始条件を再確認」を押してください。"
+            if missing else "証拠付き記録の開始条件がそろっています",
+            "missing_required": missing, "warnings": list(runtime.warnings) +
+            (["任意トピックがありません：" + ", ".join(graph["optional_missing"])]
+             if graph["optional_missing"] else [])}
+
+
+readiness = recorder_readiness.Readiness(_query_readiness_trial)
+
+
+def _require_robot_service():
+    """Refuse both start paths before creating a folder or spawning a recorder."""
+    state = readiness.service(fresh=True)
+    if state == "active":
+        return
+    if state not in ("inactive", "failed", "activating", "deactivating", "reloading"):
+        raise HTTPException(503, "ロボット制御の状態を確認できません")
+    raise HTTPException(409, "ロボット制御が起動していません")
+
+
 def _resolve_source_identity(runtime) -> dict:
     """Resolve the exact source identity of the QUESTiX checkout in use.
 
@@ -844,6 +883,7 @@ def _start_trial(raw: dict) -> dict:
     with _lock:
         _reserve_start()
     try:
+        _require_robot_service()
         config = _read_config_for_api()
         vehicle, output_dir = _prepare_output(config)
 
@@ -1034,6 +1074,61 @@ def _recorder_log_tail(path: Path, limit: int = 300) -> str:
 # Endpoints
 # ---------------------------------------------------------------------------
 
+@router.get("/readiness")
+def get_readiness(response: Response, scope: str = "normal", refresh: bool = False):
+    """Return read-only guidance; only explicit trial events schedule a ROS query."""
+    if scope not in ("normal", "trial"):
+        raise HTTPException(422, "scope は normal または trial にしてください")
+    response.headers["Cache-Control"] = "no-store"
+    checks = []
+    if not _lock.acquire(blocking=False):
+        checks.append(recorder_readiness.check(
+            "recorder_idle", "unknown", "記録処理の状態を確認しています"))
+    else:
+        try:
+            if _capturing:
+                message = "停止処理・停止後の証拠を保存しています"
+            elif _starting:
+                message = "記録を開始しています"
+            elif _proc is not None and _proc.poll() is None:
+                message = "記録中です"
+            else:
+                message = "記録していません"
+            checks.append(recorder_readiness.check(
+                "recorder_idle", "pass" if message == "記録していません" else "fail", message))
+        finally:
+            _lock.release()
+    service = readiness.service()
+    checks.append(recorder_readiness.check(
+        "robot_service", "pass" if service == "active" else
+        ("unknown" if service == "unknown" else "fail"),
+        "ロボット制御が起動しています" if service == "active" else
+        ("ロボット制御の状態を確認できません" if service == "unknown"
+         else "ロボット制御が起動していません")))
+    output = None
+    try:
+        config = _read_config_for_api()
+        output, storage = recorder_readiness.storage_checks(config, _ABS_PATH_RE)
+        checks.extend(storage)
+        if not _VEHICLE_RE.fullmatch(config.get("VEHICLE_NAME", "")):
+            checks.append(recorder_readiness.check("config_invalid", "fail", "VEHICLE_NAME が不正です"))
+    except HTTPException:
+        checks.append(recorder_readiness.check("config_unreadable", "unknown", "記録設定を読み込めません"))
+    generation, preflight = readiness.snapshot()
+    blockers = [item["code"] for item in checks if item["state"] != "pass"]
+    if refresh and scope == "trial" and not blockers:
+        readiness.request()
+        generation, preflight = readiness.snapshot()
+    return {"schema_version": 1, "checked_at": recorder_readiness.timestamp(),
+            "generation": generation, "service": {"state": service}, "output": output,
+            "common_checks": checks,
+            "normal": {"ready": not blockers, "blocker_codes": blockers},
+            "trial": {"ready": not blockers and preflight["state"] == "pass",
+                      "blocker_codes": blockers + ([] if preflight["state"] == "pass"
+                                                    else ["trial_preflight"]),
+                      "preflight": preflight}}
+
+
 def _status_payload() -> dict:
     config = _read_config_for_api()
     output_dir = Path(config["OUTPUT_DIR"])
@@ -1112,6 +1207,7 @@ def start_recording():
     with _lock:
         _reserve_start()
     try:
+        _require_robot_service()
         config = _read_config_for_api()
         vehicle, output_dir = _prepare_output(config)
         min_free = _min_free_bytes(config)
@@ -1226,6 +1322,7 @@ def set_config(config: RecorderConfig):
         _write_config(current)
     except PermissionError:
         raise HTTPException(status_code=403, detail="rosbag.env への書き込み権限がありません")
+    readiness.invalidate()
     return current
 
 

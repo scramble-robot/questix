@@ -1633,3 +1633,7 @@ input[type="checkbox"] { accent-color: var(--accent); }
 #motion-state-result dd[data-tone="error"] { color: var(--red); font-weight: 600; }
 #motion-state-result dd[data-tone="warn"] { color: var(--orange); }
 #motion-state-result dd[data-tone="ok"] { color: var(--green); }
+
+.rec-readiness { margin: 1rem 0; }
+.rec-readiness .trial-warnings { overflow-wrap: anywhere; }
+.rec-readiness .btn { margin-top: .35rem; }

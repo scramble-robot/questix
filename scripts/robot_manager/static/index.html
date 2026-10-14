@@ -322,6 +322,7 @@
       </h2>
 
       <p class="section-help">操作やセンサーのデータを保存します。あとで動きを調べるための記録です。</p>
+      <p class="section-help">通常の記録・証拠付き記録とも、ロボット制御の起動が必要です。開始できない理由は下に表示します。</p>
       <!-- Live recording status -->
       <div id="rec-status" class="rec-status">
         <div class="rec-status-row">
@@ -391,8 +392,14 @@
       </div>
 
       <!-- Start / stop -->
+      <div class="rec-readiness" aria-live="polite">
+        <p class="section-help" id="rec-readiness-state">開始条件を確認しています</p>
+        <ul class="trial-warnings" id="rec-readiness-reasons"></ul>
+        <p class="section-help" id="rec-preflight-time" hidden></p>
+        <button class="btn" id="rec-readiness-refresh" type="button">開始条件を再確認</button>
+      </div>
       <div class="btn-group rec-controls">
-        <button class="btn btn-start" id="rec-start">記録開始</button>
+        <button class="btn btn-start" id="rec-start" disabled>記録開始</button>
         <button class="btn btn-stop" id="rec-stop" disabled>記録停止</button>
       </div>
     </section>
@@ -836,14 +843,14 @@
 
   <script src="/static/vendor/qrcode.js"></script>
   <script src="/static/qr-svg.js?v=1"></script>
-  <script src="/static/web-joy-connection.js?v=4"></script>
-  <script src="/static/operator-guide.js?v=4"></script>
+  <script src="/static/web-joy-connection.js?v=5"></script>
+  <script src="/static/operator-guide.js?v=6"></script>
   <script src="/static/control-labels.js?v=4"></script>
   <script src="/static/status-view.js?v=3"></script>
   <script src="/static/network-view.js?v=1"></script>
-  <script src="/static/trial-view.js?v=1"></script>
+  <script src="/static/trial-view.js?v=2"></script>
   <script src="/static/motion-state-view.js?v=1"></script>
-  <script src="/static/app.js?v=21"></script>
+  <script src="/static/app.js?v=22"></script>
   <script src="/static/controller-map.js?v=12"></script>
   <script src="/static/controls.js?v=22"></script>
 </body>
