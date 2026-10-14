@@ -3,6 +3,7 @@
 import importlib
 import io
 import json
+import os
 import subprocess
 import types
 
@@ -242,10 +243,8 @@ def _heartbeat_run(lines, steps, parent_alive=lambda: True):
     """Run the loop over scripted stdin lines; each step either waits for a period or reads."""
     from robot_manager import actuation_heartbeat as heartbeat
     heartbeat = importlib.reload(heartbeat)
-    heartbeat.time.sleep = lambda _seconds: None
     clock = _Clock()
     published = []
-    stdin = io.StringIO("".join(lines))
     plan = list(steps)
 
     def wait(timeout):
@@ -255,8 +254,14 @@ def _heartbeat_run(lines, steps, parent_alive=lambda: True):
             return False
         return True
 
-    heartbeat.run(stdin, lambda *state: published.append(state), now=clock, wait=wait,
-                  parent_alive=parent_alive)
+    read_fd, write_fd = os.pipe()
+    with os.fdopen(read_fd, 'rb') as stdin, os.fdopen(write_fd, 'wb', buffering=0) as writer:
+        writer.write("".join(lines).encode())
+        writer.close()
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(heartbeat.time, 'sleep', lambda _seconds: None)
+            heartbeat.run(stdin.fileno(), lambda *state: published.append(state),
+                          now=clock, wait=wait, parent_alive=parent_alive)
     return heartbeat, published
 
 
