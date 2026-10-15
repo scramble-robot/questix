@@ -109,6 +109,7 @@ public:
     left_position_ = left;
     right_position_ = right;
   }
+  void answerLeft(bool enabled) { answer_left_ = enabled; }
   void answerRight(bool enabled) { answer_right_ = enabled; }
   void answerBoth(bool enabled) {
     answer_left_ = enabled;
@@ -330,6 +331,60 @@ protected:
     }
   }
 
+  void startRepressedEstop() {
+    operationManagerWithoutGpio();
+    estop_active_ = true;
+    motor_.answerBoth(false);
+    start();
+    ASSERT_TRUE(spinUntil([this]() { return odom_estop_infos_.size() == 1; }, 2s));
+    estop_active_ = false;
+    motor_.answerBoth(true);
+    ASSERT_TRUE(spinUntil(
+        [this]() {
+          return last_sample_.left.feedback_count > 0 && last_sample_.right.feedback_count > 0;
+        },
+        2s));
+    spinFor(400ms);
+    estop_active_ = true;
+    ASSERT_TRUE(spinUntil([this]() { return odom_estop_infos_.size() == 2; }, 2s));
+    spinFor(800ms);  // the retained pair is stale (>0.5 s), polling deliberately suspended
+    ASSERT_EQ(drive_->get_parameter("stop_resend_interval_ms").as_int(), 300);
+  }
+
+  void expectStaggeredRelease(bool left_first) {
+    ASSERT_NO_FATAL_FAILURE(startRepressedEstop());
+    const auto left_count = last_sample_.left.feedback_count;
+    const auto right_count = last_sample_.right.feedback_count;
+    motor_.answerLeft(left_first);
+    motor_.answerRight(!left_first);
+    odom_warnings_.clear();  // only this release through the new pair, not previous stages
+    estop_active_ = false;
+    publishEstop(false, kNoGpioReason);
+    ASSERT_TRUE(spinUntil(
+        [this, left_first, left_count, right_count]() {
+          return left_first ? last_sample_.left.feedback_count > left_count
+                            : last_sample_.right.feedback_count > right_count;
+        },
+        400ms));
+    spinFor(200ms);  // one fresh wheel; the other still has its pre-release stale frame
+    EXPECT_EQ(left_first ? last_sample_.right.feedback_count : last_sample_.left.feedback_count,
+              left_first ? right_count : left_count);
+    EXPECT_TRUE(odom_warnings_.empty());
+    motor_.answerBoth(true);
+    ASSERT_TRUE(spinUntil(
+        [this, left_count, right_count]() {
+          return last_sample_.left.feedback_count > left_count &&
+                 last_sample_.right.feedback_count > right_count;
+        },
+        400ms));
+    spinFor(100ms);  // include re-anchoring and rosout delivery
+    EXPECT_TRUE(odom_warnings_.empty());
+    EXPECT_EQ(odom_estop_infos_.size(), 2u);
+    EXPECT_TRUE(lastCommandsAreZero());
+    EXPECT_NEAR(last_odom_.pose.pose.position.x, 0, 1e-9);
+    EXPECT_NEAR(last_odom_.pose.pose.position.y, 0, 1e-9);
+  }
+
   bool isActive() const {
     return drive_->get_current_state().id() == lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE;
   }
@@ -487,7 +542,7 @@ TEST_F(DriveComponentNode, RepeatedEstopReleaseWaitsQuietlyForFreshPair) {
   estop_active_ = true;
   motor_.answerBoth(false);
   start();
-  const auto resend_interval = drive_->get_parameter("stop_resend_interval_ms").as_int();
+  ASSERT_EQ(drive_->get_parameter("stop_resend_interval_ms").as_int(), 300);
   for (size_t press = 1; press <= 3; ++press) {
     SCOPED_TRACE(press);
     ASSERT_TRUE(spinUntil([this, press]() { return odom_estop_infos_.size() == press; }, 2s));
@@ -504,9 +559,6 @@ TEST_F(DriveComponentNode, RepeatedEstopReleaseWaitsQuietlyForFreshPair) {
     publishEstop(false, kNoGpioReason);
     spinFor(1050ms);  // delay replies within the 1.64 s grace, as on ID13
     EXPECT_TRUE(odom_warnings_.empty());
-    // Recover BOTH wheels in one tick: staggered polling can legitimately warn after
-    // only one count advances. The separate one-wheel test keeps the production interval.
-    ASSERT_TRUE(drive_->set_parameter(rclcpp::Parameter("stop_resend_interval_ms", 0)).successful);
     motor_.answerBoth(true);
     ASSERT_TRUE(spinUntil(
         [this, left_count, right_count]() {
@@ -515,8 +567,6 @@ TEST_F(DriveComponentNode, RepeatedEstopReleaseWaitsQuietlyForFreshPair) {
         },
         400ms));
     spinFor(100ms);
-    ASSERT_TRUE(drive_->set_parameter(rclcpp::Parameter("stop_resend_interval_ms", resend_interval))
-                    .successful);
     EXPECT_TRUE(odom_warnings_.empty());
     EXPECT_EQ(odom_estop_infos_.size(), press);
     EXPECT_TRUE(lastCommandsAreZero());
@@ -555,34 +605,54 @@ TEST_F(DriveComponentNode, SecondEstopReleaseWithoutRepliesEventuallyWarns) {
   EXPECT_NE(odom_warnings_.back().find("stale feedback"), std::string::npos);
 }
 
-TEST_F(DriveComponentNode, SecondEstopReleaseWithOneUpdatedWheelStillWarns) {
-  operationManagerWithoutGpio();
-  estop_active_ = true;
-  start();
-  ASSERT_TRUE(spinUntil([this]() { return odom_estop_infos_.size() == 1; }, 2s));
-  estop_active_ = false;
-  ASSERT_TRUE(spinUntil(
-      [this]() {
-        return last_status_.left.header.stamp.sec != 0 && last_status_.right.header.stamp.sec != 0;
-      },
-      2s));
-  spinFor(400ms);
-  estop_active_ = true;
-  ASSERT_TRUE(spinUntil([this]() { return odom_estop_infos_.size() == 2; }, 2s));
-  spinFor(800ms);
+TEST_F(DriveComponentNode, SecondEstopReleaseLeftFirstWaitsQuietlyForRetainedRight) {
+  expectStaggeredRelease(true);
+}
+
+TEST_F(DriveComponentNode, SecondEstopReleaseRightFirstWaitsQuietlyForRetainedLeft) {
+  expectStaggeredRelease(false);
+}
+
+TEST_F(DriveComponentNode, SecondEstopReleaseWithUpdatedWheelBecomingStaleStillWarns) {
+  ASSERT_NO_FATAL_FAILURE(startRepressedEstop());
   const auto left_count = last_sample_.left.feedback_count;
   const auto right_count = last_sample_.right.feedback_count;
-  motor_.answerRight(false);  // only the left feedback count advances after release
+  motor_.answerRight(false);
+  odom_warnings_.clear();
+  estop_active_ = false;
+  publishEstop(false, kNoGpioReason);
+  const auto released_at = std::chrono::steady_clock::now();
+  ASSERT_TRUE(spinUntil(
+      [this, left_count]() { return last_sample_.left.feedback_count > left_count; }, 400ms));
+  motor_.answerBoth(false);
+  spinFor(200ms);  // the updated left frame is still fresh
+  EXPECT_TRUE(odom_warnings_.empty());
+  EXPECT_EQ(last_sample_.right.feedback_count, right_count);
+  odom_warnings_.clear();  // now count only the updated-left-becomes-stale interval
+  ASSERT_TRUE(spinUntil([this]() { return !odom_warnings_.empty(); }, 850ms));
+  EXPECT_NE(odom_warnings_.back().find("stale feedback"), std::string::npos);
+  EXPECT_LT(std::chrono::duration<double>(std::chrono::steady_clock::now() - released_at).count(),
+            1.5);  // WARN precedes expiry of the 1.64 s release grace
+}
+
+TEST_F(DriveComponentNode, SecondEstopReleaseWithOneFreshWheelEventuallyWarns) {
+  ASSERT_NO_FATAL_FAILURE(startRepressedEstop());
+  const auto left_count = last_sample_.left.feedback_count;
+  const auto right_count = last_sample_.right.feedback_count;
+  motor_.answerRight(false);  // left keeps answering, right never updates
   odom_warnings_.clear();
   estop_active_ = false;
   publishEstop(false, kNoGpioReason);
   ASSERT_TRUE(spinUntil(
       [this, left_count]() { return last_sample_.left.feedback_count > left_count; }, 400ms));
-  motor_.answerBoth(false);
-  EXPECT_EQ(last_sample_.right.feedback_count, right_count);
-  // Even inside grace, a post-release update must not hide stale feedback.
-  ASSERT_TRUE(spinUntil([this]() { return !odom_warnings_.empty(); }, 900ms));
+  spinFor(700ms);
+  EXPECT_TRUE(odom_warnings_.empty());
+  const auto first_left_count = last_sample_.left.feedback_count;
+  odom_warnings_.clear();  // grace expiry, not the initial staggered recovery
+  ASSERT_TRUE(spinUntil([this]() { return !odom_warnings_.empty(); }, 1800ms));
   EXPECT_NE(odom_warnings_.back().find("stale feedback"), std::string::npos);
+  EXPECT_GT(last_sample_.left.feedback_count, first_left_count);
+  EXPECT_EQ(last_sample_.right.feedback_count, right_count);
 }
 
 TEST_F(DriveComponentNode, EstopReleaseWithoutRepliesEventuallyWarns) {
