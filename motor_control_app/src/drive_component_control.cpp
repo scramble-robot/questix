@@ -348,8 +348,14 @@ void DriveComponent::integrateOdometry() {
     const bool expected_missing = result.reason == wheel_position::Reason::kInvalid && unheard;
     const bool estop_reset = harmless_inputs && odom_estop_poll_skipped_ &&
                              (expected_missing || result.reason == wheel_position::Reason::kStale);
-    const bool release_reset = harmless_inputs && odom_estop_release_pending_ &&
-                               (expected_missing || result.reason == wheel_position::Reason::kGap);
+    // Stale data retained from before the press is expected only until fresh replies arrive.
+    // An update from either wheel ends this exception; the existing release grace still applies.
+    const bool retained_stale = result.reason == wheel_position::Reason::kStale &&
+                                left.count == odom_estop_left_count_ &&
+                                right.count == odom_estop_right_count_;
+    const bool release_reset =
+        harmless_inputs && odom_estop_release_pending_ &&
+        (expected_missing || result.reason == wheel_position::Reason::kGap || retained_stale);
     // Only the expected gap of healthy, zero-command idle polling is quiet.
     // A last moving pair, nonzero command/RPM, stale/fault or ambiguous result
     // remains a WARN. Logging never changes the reset/integration decision.
