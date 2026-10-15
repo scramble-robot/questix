@@ -456,6 +456,7 @@ TEST_F(DriveComponentNode, RepeatedEstopReleaseWaitsQuietlyForFreshPair) {
   estop_active_ = true;
   motor_.answerBoth(false);
   start();
+  const auto resend_interval = drive_->get_parameter("stop_resend_interval_ms").as_int();
   for (size_t press = 1; press <= 3; ++press) {
     SCOPED_TRACE(press);
     ASSERT_TRUE(spinUntil([this, press]() { return odom_estop_infos_.size() == press; }, 2s));
@@ -472,6 +473,9 @@ TEST_F(DriveComponentNode, RepeatedEstopReleaseWaitsQuietlyForFreshPair) {
     publishEstop(false, kNoGpioReason);
     spinFor(1050ms);  // delay replies within the 1.64 s grace, as on ID13
     EXPECT_TRUE(odom_warnings_.empty());
+    // Recover BOTH wheels in one tick: staggered polling can legitimately warn after
+    // only one count advances. The separate one-wheel test keeps the production interval.
+    ASSERT_TRUE(drive_->set_parameter(rclcpp::Parameter("stop_resend_interval_ms", 0)).successful);
     motor_.answerBoth(true);
     ASSERT_TRUE(spinUntil(
         [this, left_count, right_count]() {
@@ -480,6 +484,8 @@ TEST_F(DriveComponentNode, RepeatedEstopReleaseWaitsQuietlyForFreshPair) {
         },
         400ms));
     spinFor(100ms);
+    ASSERT_TRUE(drive_->set_parameter(rclcpp::Parameter("stop_resend_interval_ms", resend_interval))
+                    .successful);
     EXPECT_TRUE(odom_warnings_.empty());
     EXPECT_EQ(odom_estop_infos_.size(), press);
     EXPECT_TRUE(lastCommandsAreZero());
