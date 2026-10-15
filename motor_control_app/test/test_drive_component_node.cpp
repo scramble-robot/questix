@@ -37,6 +37,7 @@
 #include <memory>
 #include <mutex>
 #include <nav_msgs/msg/odometry.hpp>
+#include <questix_msgs/msg/drive_control_sample.hpp>
 #include <questix_msgs/msg/drive_status.hpp>
 #include <questix_msgs/msg/emergency_stop.hpp>
 #include <questix_msgs/msg/motion_permission.hpp>
@@ -261,7 +262,8 @@ protected:
     // Later files win: hardware YAML, operator profile, then this test's overrides.
     options.arguments({"--ros-args", "--params-file", QUESTIX_DRIVE_HARDWARE_YAML, "--params-file",
                        QUESTIX_DRIVE_CONTROL_YAML, "--params-file", overrides_path_, "-r",
-                       "/target_twist:=" + prefix_ + "/target_twist"});
+                       "/target_twist:=" + prefix_ + "/target_twist", "-r",
+                       "/drive_control_sample:=" + prefix_ + "/drive_control_sample"});
     drive_ = std::make_shared<motor_control_app::DriveComponent>(options);
     helper_ = std::make_shared<rclcpp::Node>("drive_node_test_helper_" + std::to_string(getpid()) +
                                              "_" + std::to_string(counter));
@@ -275,6 +277,9 @@ protected:
           last_status_ = *msg;
           have_status_ = true;
         });
+    sample_sub_ = helper_->create_subscription<questix_msgs::msg::DriveControlSample>(
+        prefix_ + "/drive_control_sample", 10,
+        [this](questix_msgs::msg::DriveControlSample::SharedPtr msg) { last_sample_ = *msg; });
     odom_sub_ = helper_->create_subscription<nav_msgs::msg::Odometry>(
         prefix_ + "/odom", 10, [this](nav_msgs::msg::Odometry::SharedPtr msg) {
           last_odom_ = *msg;
@@ -384,6 +389,8 @@ protected:
   rclcpp::Publisher<questix_msgs::msg::MotionPermission>::SharedPtr permission_pub_;
   rclcpp::Subscription<questix_msgs::msg::DriveStatus>::SharedPtr status_sub_;
   questix_msgs::msg::DriveStatus last_status_;
+  rclcpp::Subscription<questix_msgs::msg::DriveControlSample>::SharedPtr sample_sub_;
+  questix_msgs::msg::DriveControlSample last_sample_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
   nav_msgs::msg::Odometry last_odom_;
   bool have_odom_{false};
@@ -441,6 +448,104 @@ TEST_F(DriveComponentNode, EstopStartupAndRepressDeferOnlyExpectedOdomLogs) {
   EXPECT_NEAR(last_odom_.pose.pose.position.x, 0, 1e-9);
   EXPECT_NEAR(last_odom_.pose.pose.position.y, 0, 1e-9);
   EXPECT_NEAR(last_odom_.pose.pose.orientation.z, 0, 1e-9);
+}
+
+// Retained feedback must stay quiet through each release, not just the unheard first one.
+TEST_F(DriveComponentNode, RepeatedEstopReleaseWaitsQuietlyForFreshPair) {
+  operationManagerWithoutGpio();
+  estop_active_ = true;
+  motor_.answerBoth(false);
+  start();
+  for (size_t press = 1; press <= 3; ++press) {
+    SCOPED_TRACE(press);
+    ASSERT_TRUE(spinUntil([this, press]() { return odom_estop_infos_.size() == press; }, 2s));
+    spinFor(100ms);  // drain logs from the preceding stage
+    odom_warnings_.clear();
+    spinFor(700ms);  // retained feedback, when present, becomes stale while pressed
+    EXPECT_TRUE(odom_warnings_.empty());
+    const auto left_count = last_sample_.left.feedback_count;
+    const auto right_count = last_sample_.right.feedback_count;
+
+    motor_.answerBoth(false);
+    odom_warnings_.clear();  // count only this release through the fresh-pair anchor
+    estop_active_ = false;
+    publishEstop(false, kNoGpioReason);
+    spinFor(1050ms);  // delay replies within the 1.64 s grace, as on ID13
+    EXPECT_TRUE(odom_warnings_.empty());
+    motor_.answerBoth(true);
+    ASSERT_TRUE(spinUntil(
+        [this, left_count, right_count]() {
+          return last_sample_.left.feedback_count > left_count &&
+                 last_sample_.right.feedback_count > right_count;
+        },
+        400ms));
+    spinFor(100ms);
+    EXPECT_TRUE(odom_warnings_.empty());
+    EXPECT_EQ(odom_estop_infos_.size(), press);
+    EXPECT_TRUE(lastCommandsAreZero());
+    EXPECT_NEAR(last_odom_.pose.pose.position.x, 0, 1e-9);
+    EXPECT_NEAR(last_odom_.pose.pose.position.y, 0, 1e-9);
+    if (press < 3) {
+      estop_active_ = true;
+      publishEstop(true, "test repress");
+    }
+  }
+}
+
+TEST_F(DriveComponentNode, SecondEstopReleaseWithoutRepliesEventuallyWarns) {
+  operationManagerWithoutGpio();
+  estop_active_ = true;
+  start();
+  ASSERT_TRUE(spinUntil([this]() { return odom_estop_infos_.size() == 1; }, 2s));
+  estop_active_ = false;
+  ASSERT_TRUE(spinUntil(
+      [this]() {
+        return last_status_.left.header.stamp.sec != 0 && last_status_.right.header.stamp.sec != 0;
+      },
+      2s));
+  spinFor(400ms);
+  estop_active_ = true;
+  ASSERT_TRUE(spinUntil([this]() { return odom_estop_infos_.size() == 2; }, 2s));
+  spinFor(800ms);
+  motor_.answerBoth(false);
+  odom_warnings_.clear();
+  estop_active_ = false;
+  publishEstop(false, kNoGpioReason);
+  spinFor(1050ms);
+  EXPECT_TRUE(odom_warnings_.empty());
+  odom_warnings_.clear();  // expiry interval is distinct from the quiet grace
+  ASSERT_TRUE(spinUntil([this]() { return !odom_warnings_.empty(); }, 2200ms));
+  EXPECT_NE(odom_warnings_.back().find("stale feedback"), std::string::npos);
+}
+
+TEST_F(DriveComponentNode, SecondEstopReleaseWithOneUpdatedWheelStillWarns) {
+  operationManagerWithoutGpio();
+  estop_active_ = true;
+  start();
+  ASSERT_TRUE(spinUntil([this]() { return odom_estop_infos_.size() == 1; }, 2s));
+  estop_active_ = false;
+  ASSERT_TRUE(spinUntil(
+      [this]() {
+        return last_status_.left.header.stamp.sec != 0 && last_status_.right.header.stamp.sec != 0;
+      },
+      2s));
+  spinFor(400ms);
+  estop_active_ = true;
+  ASSERT_TRUE(spinUntil([this]() { return odom_estop_infos_.size() == 2; }, 2s));
+  spinFor(800ms);
+  const auto left_count = last_sample_.left.feedback_count;
+  const auto right_count = last_sample_.right.feedback_count;
+  motor_.answerRight(false);  // only the left feedback count advances after release
+  odom_warnings_.clear();
+  estop_active_ = false;
+  publishEstop(false, kNoGpioReason);
+  ASSERT_TRUE(spinUntil(
+      [this, left_count]() { return last_sample_.left.feedback_count > left_count; }, 400ms));
+  motor_.answerBoth(false);
+  EXPECT_EQ(last_sample_.right.feedback_count, right_count);
+  // Even inside grace, a post-release update must not hide stale feedback.
+  ASSERT_TRUE(spinUntil([this]() { return !odom_warnings_.empty(); }, 900ms));
+  EXPECT_NE(odom_warnings_.back().find("stale feedback"), std::string::npos);
 }
 
 TEST_F(DriveComponentNode, EstopReleaseWithoutRepliesEventuallyWarns) {
