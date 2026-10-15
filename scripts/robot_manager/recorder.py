@@ -19,6 +19,7 @@ any control authority: it publishes nothing, sets no parameter and touches no
 device.
 """
 
+import copy
 import os
 import re
 import shutil
@@ -42,6 +43,9 @@ ROSBAG_ENV_FILE = CONFIG_DIR / "rosbag.env"
 # ros2 bag record needs SIGINT to finalize metadata.yaml + the MCAP summary.
 STOP_TIMEOUT_SEC = 20
 WATCH_INTERVAL_SEC = 5
+# Status snapshots only copy in-memory state. Allow a short overlap (one tenth of the
+# UI's 2 s polling period), but never wait through a real start/stop operation.
+READINESS_LOCK_TIMEOUT_SEC = 0.2
 # Bounded wait for the classroom evidence thread when the service shuts down.
 SHUTDOWN_FINALIZE_TIMEOUT_SEC = 90
 
@@ -1081,7 +1085,7 @@ def get_readiness(response: Response, scope: str = "normal", refresh: bool = Fal
         raise HTTPException(422, "scope は normal または trial にしてください")
     response.headers["Cache-Control"] = "no-store"
     checks = []
-    if not _lock.acquire(blocking=False):
+    if not _lock.acquire(timeout=READINESS_LOCK_TIMEOUT_SEC):
         checks.append(recorder_readiness.check(
             "recorder_idle", "unknown", "記録処理の状態を確認しています"))
     else:
@@ -1129,28 +1133,40 @@ def get_readiness(response: Response, scope: str = "normal", refresh: bool = Fal
                       "preflight": preflight}}
 
 
-def _status_payload() -> dict:
-    config = _read_config_for_api()
-    output_dir = Path(config["OUTPUT_DIR"])
-    free, total = _disk_usage(output_dir)
+def _status_snapshot_locked() -> dict:
+    """Copy recording state only. Caller must hold _lock; perform no filesystem I/O."""
     recording = _proc is not None and _proc.poll() is None
-    size = _tree_size(_bag_path) if (recording and _bag_path) else 0
-    elapsed = int(time.time() - _started_at) if (recording and _started_at) else 0
     return {
         "recording": recording,
         "bag_name": _bag_name if recording else None,
+        "bag_path": _bag_path if recording else None,
         "started_at": _started_at if recording else None,
-        "elapsed_sec": elapsed,
-        "size_bytes": size,
-        "disk_free_bytes": free,
-        "disk_total_bytes": total,
-        "min_free_bytes": _min_free_bytes(config),
         "last_stop_reason": _last_stop_reason,
         "last_finalize_reason": _last_finalize_reason,
         "mode": _mode if recording else None,
         "starting": _starting or _capturing,
         "trial": _active_trial_view() if recording else None,
-        "last_trial": _last_trial,
+        "last_trial": copy.deepcopy(_last_trial),
+    }
+
+
+def _status_payload() -> dict:
+    """Enrich a consistent state snapshot with storage information outside _lock."""
+    with _lock:
+        snapshot = _status_snapshot_locked()
+    config = _read_config_for_api()
+    output_dir = Path(config["OUTPUT_DIR"])
+    free, total = _disk_usage(output_dir)
+    bag_path = snapshot.pop("bag_path")
+    size = _tree_size(bag_path) if bag_path else 0
+    started_at = snapshot["started_at"]
+    return {
+        **snapshot,
+        "elapsed_sec": int(time.time() - started_at) if started_at else 0,
+        "size_bytes": size,
+        "disk_free_bytes": free,
+        "disk_total_bytes": total,
+        "min_free_bytes": _min_free_bytes(config),
     }
 
 
@@ -1180,8 +1196,7 @@ def get_status():
     # The stop only becomes observable once the after-run snapshot is taken, so
     # the auto-exit path attributes its parameters exactly like a user stop.
     _after_stop(pending)
-    with _lock:
-        return _status_payload()
+    return _status_payload()
 
 
 def _exit_reason_locked() -> str:
