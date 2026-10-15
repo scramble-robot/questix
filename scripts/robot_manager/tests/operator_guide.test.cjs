@@ -46,6 +46,22 @@ test('404 details identify the endpoint and do not blame missing files on a vers
   assert.equal(file.panel, 'rec');
 });
 
+for (const endpoint of ['/api/rosbag/start', '/api/rosbag/start-trial']) {
+  test(`${endpoint}: stopped, busy and missing graph all point to recording conditions`, () => {
+    for (const detail of ['ロボット制御が起動していません', '記録中です', '必須のノード/トピックがありません']) {
+      const view = guide.failure(endpoint, 409, detail);
+      assert.equal(view.panel, 'rec');
+      assert.match(view.next, /停止している場合/);
+      assert.match(view.next, /開始条件を再確認/);
+      assert.ok(view.detail.includes(detail));
+    }
+  });
+  test(`${endpoint}: service-query failure and ROS-environment failure have distinct recovery`, () => {
+    assert.equal(guide.failure(endpoint, 503, 'ロボット制御の状態を確認できません').panel, 'control');
+    assert.equal(guide.failure(endpoint, 503, 'ROS環境を解決できません').panel, 'admin');
+  });
+}
+
 test('the fixed web profile does not raise the "other controller" warning', () => {
   const profile = { controller: 'uart', values: { joy_controller: { a: 1 } } };
   const draft = { joy_controller: { a: 1 } };
