@@ -1,6 +1,9 @@
 """Readiness contracts using temporary paths and mocked service/ROS/permissions."""
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import threading
+import time
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -63,10 +66,12 @@ def test_busy_states_block_start(wired, monkeypatch, name):
     assert "recorder_idle" in payload()["normal"]["blocker_codes"]
 
 
-def test_stopping_lock_is_never_waited_for(wired):
+def test_stopping_lock_timeout_fails_closed(wired):
+    started = time.monotonic()
     with recorder._lock:
         data = payload()
-    assert not data["normal"]["ready"]
+    assert 0.15 <= time.monotonic() - started < 1.0
+    assert not data["normal"]["ready"] and not data["trial"]["ready"]
     assert data["common_checks"][0]["state"] == "unknown"
 
 
@@ -317,3 +322,90 @@ def test_ros_failure_and_success_remain_read_only(wired, monkeypatch):
     with pytest.raises(HTTPException) as error:
         recorder._query_readiness_trial(lambda: 15)
     assert error.value.status_code == 503
+
+
+@pytest.mark.parametrize("slow_helper", ["_read_config_for_api", "_disk_usage", "_tree_size"])
+def test_slow_status_io_does_not_make_readiness_unknown(wired, monkeypatch, slow_helper):
+    """Periodic status I/O must not block either readiness scope's state snapshot."""
+    recording = slow_helper == "_tree_size"
+    if recording:
+        monkeypatch.setattr(recorder, "_proc", SimpleNamespace(poll=lambda: None))
+        monkeypatch.setattr(recorder, "_bag_path", Path(wired[0]["OUTPUT_DIR"]) / "active")
+    wired[1].result = module.Readiness.empty("pass", "確認済み")
+    entered = threading.Event()
+    original = getattr(recorder, slow_helper)
+    def slow(*args):
+        entered.set()
+        time.sleep(0.5)
+        return original(*args)
+    monkeypatch.setattr(recorder, slow_helper, slow)
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        for _ in range(5):
+            entered.clear()
+            status = pool.submit(recorder.get_status)
+            assert entered.wait(2), "status never reached the slow I/O"
+            checks = [pool.submit(recorder.get_readiness, Response(), scope)
+                      for scope in ("normal", "trial")]
+            for check in checks:
+                data = check.result(timeout=3)
+                assert data["common_checks"][0]["state"] == ("fail" if recording else "pass")
+                assert data["normal"]["ready"] is not recording
+                assert data["trial"]["ready"] is not recording
+            assert status.result(timeout=3)["recording"] is recording
+
+
+def test_short_state_lock_contention_is_waited_for(wired):
+    """A short snapshot overlap should settle without an unknown response."""
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with recorder._lock:
+            answer = pool.submit(payload)
+            time.sleep(0.05)
+        assert answer.result(timeout=2)["common_checks"][0]["state"] == "pass"
+
+
+@pytest.mark.parametrize("name,message", [
+    ("_starting", "記録を開始しています"),
+    ("_capturing", "停止処理・停止後の証拠を保存しています"),
+    ("_proc", "記録中です"),
+])
+def test_busy_state_reasons_survive_snapshot_changes(wired, monkeypatch, name, message):
+    monkeypatch.setattr(recorder, name, SimpleNamespace(poll=lambda: None) if name == "_proc" else True)
+    data = payload()
+    assert data["common_checks"][0] == {"code": "recorder_idle", "state": "fail", "message": message}
+    assert not data["normal"]["ready"] and not data["trial"]["ready"]
+
+
+def test_status_keeps_one_snapshot_while_storage_io_runs(wired, monkeypatch):
+    """A state change during slow storage I/O must not mix two recordings' display fields."""
+    entered, release = threading.Event(), threading.Event()
+    bag = Path(wired[0]["OUTPUT_DIR"]) / "first"
+    for name, value in {"_proc": SimpleNamespace(poll=lambda: None), "_bag_name": "first",
+                        "_bag_path": bag, "_started_at": time.time() - 3,
+                        "_mode": "generic", "_last_stop_reason": None,
+                        "_last_trial": {"warnings": ["original"]}}.items():
+        monkeypatch.setattr(recorder, name, value)
+    tree_size = Mock(return_value=42)
+    monkeypatch.setattr(recorder, "_tree_size", tree_size)
+    def disk(_path):
+        entered.set()
+        assert release.wait(3)
+        return 10, 20
+    monkeypatch.setattr(recorder, "_disk_usage", disk)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        answer = pool.submit(recorder.get_status)
+        try:
+            assert entered.wait(2)
+            with recorder._lock:
+                recorder._proc = None
+                recorder._bag_path = None
+                recorder._bag_name = "second"
+                recorder._started_at = None
+                recorder._last_stop_reason = "stopped"
+                recorder._last_trial["warnings"].append("later")
+        finally:
+            release.set()
+        data = answer.result(timeout=3)
+    assert data["recording"] and data["bag_name"] == "first" and data["mode"] == "generic"
+    assert data["elapsed_sec"] >= 3 and data["size_bytes"] == 42
+    assert data["last_stop_reason"] is None and data["last_trial"]["warnings"] == ["original"]
+    tree_size.assert_called_once_with(bag)
