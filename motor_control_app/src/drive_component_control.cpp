@@ -259,7 +259,8 @@ void DriveComponent::integrateOdometry() {
                                       max_angular_accel_};
   // The pure tracker retains feedback_count gating and waits for BOTH new
   // endpoints. It also checks the pairing deadline on ticks with no new data.
-  const auto result = odom_position_integrator_.update(left, right, steadySeconds(), limits);
+  const double odom_now = steadySeconds();
+  const auto result = odom_position_integrator_.update(left, right, odom_now, limits);
   odom_pose_ = wheel_position::integrate(odom_pose_, result);
   const bool stationary = left.native_rpm == 0.0 && right.native_rpm == 0.0;
   if (result.state == wheel_position::State::kAnchored ||
@@ -321,11 +322,13 @@ void DriveComponent::integrateOdometry() {
     const bool expected_missing = result.reason == wheel_position::Reason::kInvalid && unheard;
     const bool estop_reset = harmless_inputs && odom_estop_poll_skipped_ &&
                              (expected_missing || result.reason == wheel_position::Reason::kStale);
-    // Stale data retained from before the press is expected only until fresh replies arrive.
-    // An update from either wheel ends this exception; the existing release grace still applies.
+    // Use the same samples, time and age limit as Integrator::update to identify stale wheels.
+    // Only stale wheels must retain their suspension counts; a fresh wheel may have advanced.
+    const bool left_stale = odom_now - left.time_sec > odometry::kMaxFeedbackAgeSec;
+    const bool right_stale = odom_now - right.time_sec > odometry::kMaxFeedbackAgeSec;
     const bool retained_stale = result.reason == wheel_position::Reason::kStale &&
-                                left.count == odom_estop_left_count_ &&
-                                right.count == odom_estop_right_count_;
+                                (!left_stale || left.count == odom_estop_left_count_) &&
+                                (!right_stale || right.count == odom_estop_right_count_);
     const bool release_reset =
         harmless_inputs && odom_estop_release_pending_ &&
         (expected_missing || result.reason == wheel_position::Reason::kGap || retained_stale);
