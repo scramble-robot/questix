@@ -7,6 +7,7 @@
 #define MOTOR_CONTROL_APP__DRIVE_COMPONENT_HPP_
 
 #include <chrono>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -443,6 +444,13 @@ private:
   enum class OdomMotorState { kUnknown, kReady, kUnavailable, kStopFault };
   OdomMotorState odom_motor_state_{OdomMotorState::kUnknown};
   bool odom_last_pair_stationary_{false};
+  // Log-only evidence from the actual tick's decision to skip polling for a pressed E-stop.
+  bool odom_estop_poll_skipped_{false};
+  bool odom_estop_suspended_{false};
+  bool odom_estop_release_pending_{false};
+  std::chrono::steady_clock::time_point odom_estop_released_at_{};
+  uint64_t odom_estop_left_count_{0};
+  uint64_t odom_estop_right_count_{0};
 
   // 状態フラグ
   bool motor_initialized_;

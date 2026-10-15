@@ -97,6 +97,10 @@ public:
     right_position_ = right;
   }
   void answerRight(bool enabled) { answer_right_ = enabled; }
+  void answerBoth(bool enabled) {
+    answer_left_ = enabled;
+    answer_right_ = enabled;
+  }
   void fault(uint8_t code) { fault_ = code; }
 
   // Close only the fake PTY peer: subsequent writes fail, like a lost serial line.
@@ -180,7 +184,7 @@ private:
 
   // A M0602C feedback frame: {ID, mode, current(2), speed(2), position(2), fault, CRC8}.
   void reply(uint8_t motor_id, int16_t speed_rpm) {
-    if (motor_id == kRightId && !answer_right_) return;
+    if ((motor_id == kLeftId && !answer_left_) || (motor_id == kRightId && !answer_right_)) return;
     const uint16_t position = motor_id == kLeftId ? left_position_.load() : right_position_.load();
     std::vector<uint8_t> frame = {motor_id,
                                   0x02,
@@ -205,6 +209,7 @@ private:
   std::vector<std::vector<uint8_t>> commands_;
   std::atomic<uint16_t> left_position_{0};
   std::atomic<uint16_t> right_position_{0};
+  std::atomic<bool> answer_left_{true};
   std::atomic<bool> answer_right_{true};
   std::atomic<uint8_t> fault_{0};
 };
@@ -281,6 +286,11 @@ protected:
           if (msg->name == "drive_component" && msg->level >= rcl_interfaces::msg::Log::WARN &&
               msg->msg.find("Wheel position odometry anchor reset:") != std::string::npos) {
             odom_warnings_.push_back(msg->msg);
+          }
+          if (msg->name == "drive_component" && msg->level == rcl_interfaces::msg::Log::INFO &&
+              msg->msg.find("Wheel position odometry deferred: E-stop polling suspended") !=
+                  std::string::npos) {
+            odom_estop_infos_.push_back(msg->msg);
           }
         });
     executor_ = std::make_unique<rclcpp::executors::SingleThreadedExecutor>();
@@ -379,6 +389,7 @@ protected:
   bool have_odom_{false};
   rclcpp::Subscription<rcl_interfaces::msg::Log>::SharedPtr rosout_sub_;
   std::vector<std::string> odom_warnings_;
+  std::vector<std::string> odom_estop_infos_;
   bool have_status_{false};
   bool send_twist_{false};
   bool send_estop_{false};
@@ -387,6 +398,105 @@ protected:
   bool send_permission_{false};
   bool permission_allowed_{false};
 };
+
+TEST_F(DriveComponentNode, EstopStartupAndRepressDeferOnlyExpectedOdomLogs) {
+  operationManagerWithoutGpio();
+  estop_active_ = true;
+  motor_.answerBoth(false);
+  start();
+  ASSERT_TRUE(spinUntil([this]() { return odom_estop_infos_.size() == 1; }, 2s));
+  spinFor(100ms);  // drain any initial unknown-state log before the confirmed pressed interval
+  odom_warnings_.clear();
+  motor_.clear();
+  spinFor(1400ms);
+  ASSERT_TRUE(have_odom_ && have_status_);
+  EXPECT_EQ(last_status_.left.header.stamp.sec, 0);
+  EXPECT_EQ(last_status_.right.header.stamp.sec, 0);
+  EXPECT_TRUE(odom_warnings_.empty());
+  EXPECT_EQ(odom_estop_infos_.size(), 1u);
+  EXPECT_TRUE(motor_.commands().empty());  // logging must not resume polling
+
+  // Release with replies: the first new pair re-anchors, including the expected idle gap.
+  odom_warnings_.clear();
+  motor_.answerBoth(true);
+  estop_active_ = false;
+  ASSERT_TRUE(spinUntil(
+      [this]() {
+        return last_status_.left.header.stamp.sec != 0 && last_status_.right.header.stamp.sec != 0;
+      },
+      2s));
+  spinFor(400ms);
+  EXPECT_TRUE(odom_warnings_.empty());
+  EXPECT_EQ(odom_estop_infos_.size(), 1u);
+
+  estop_active_ = true;
+  ASSERT_TRUE(spinUntil([this]() { return odom_estop_infos_.size() == 2; }, 2s));
+  spinFor(100ms);
+  odom_warnings_.clear();
+  motor_.clear();
+  spinFor(1400ms);  // cached feedback is now stale, but polling was intentionally suspended
+  EXPECT_TRUE(odom_warnings_.empty());
+  EXPECT_EQ(odom_estop_infos_.size(), 2u);
+  EXPECT_TRUE(motor_.commands().empty());
+  EXPECT_NEAR(last_odom_.pose.pose.position.x, 0, 1e-9);
+  EXPECT_NEAR(last_odom_.pose.pose.position.y, 0, 1e-9);
+  EXPECT_NEAR(last_odom_.pose.pose.orientation.z, 0, 1e-9);
+}
+
+TEST_F(DriveComponentNode, EstopReleaseWithoutRepliesEventuallyWarns) {
+  operationManagerWithoutGpio();
+  estop_active_ = true;
+  motor_.answerBoth(false);
+  start();
+  ASSERT_TRUE(spinUntil([this]() { return !odom_estop_infos_.empty(); }, 2s));
+  spinFor(100ms);
+  odom_warnings_.clear();
+  estop_active_ = false;
+  spinFor(1100ms);  // inside 1.64 s release grace at the integrated YAML's 50 Hz
+  EXPECT_TRUE(odom_warnings_.empty());
+  odom_warnings_.clear();
+  ASSERT_TRUE(spinUntil([this]() { return !odom_warnings_.empty(); }, 2200ms));
+  EXPECT_NE(odom_warnings_.back().find("invalid feedback or geometry"), std::string::npos);
+}
+
+TEST_F(DriveComponentNode, UnheardEstopKeepsOdomWarnings) {
+  motor_.answerBoth(false);
+  send_permission_ = true;
+  permission_allowed_ = true;
+  start();  // never publish an E-stop message
+  spinFor(100ms);
+  odom_warnings_.clear();
+  ASSERT_TRUE(spinUntil([this]() { return !odom_warnings_.empty(); }, 1500ms));
+  EXPECT_TRUE(odom_estop_infos_.empty());
+}
+
+TEST_F(DriveComponentNode, SilentEstopKeepsOdomWarnings) {
+  operationManagerWithoutGpio();
+  start();
+  spinFor(500ms);
+  send_estop_ = false;
+  motor_.answerBoth(false);
+  spinFor(1200ms);  // past the E-stop's 1.0 s lease; start a separate log-count interval
+  odom_warnings_.clear();
+  ASSERT_TRUE(spinUntil([this]() { return !odom_warnings_.empty(); }, 1500ms));
+  EXPECT_TRUE(odom_estop_infos_.empty());
+}
+
+TEST_F(DriveComponentNode, PermissionOffStillPollsFeedbackForOdometry) {
+  operationManagerWithoutGpio();
+  permission_allowed_ = false;  // the same L2 vote result as the teacher's permission OFF
+  start();
+  spinFor(500ms);
+  ASSERT_TRUE(have_status_);
+  const auto stamp = rclcpp::Time(last_status_.left.header.stamp);
+  odom_warnings_.clear();
+  motor_.clear();
+  spinFor(1400ms);
+  EXPECT_GT(rclcpp::Time(last_status_.left.header.stamp).nanoseconds(), stamp.nanoseconds());
+  EXPECT_FALSE(motor_.commands().empty());
+  EXPECT_TRUE(odom_estop_infos_.empty());
+  EXPECT_TRUE(odom_warnings_.empty());
+}
 
 TEST_F(DriveComponentNode, StationaryIdlePollingDoesNotEmitOdomWarnings) {
   start();
@@ -419,6 +529,15 @@ TEST_F(DriveComponentNode, MovingFeedbackGapStillEmitsOdomWarning) {
       [this]() {
         return std::any_of(odom_warnings_.begin(), odom_warnings_.end(), [](const auto& message) {
           return message.find("reset: feedback pairing time limit") != std::string::npos;
+        });
+      },
+      2s));
+  // Count a separate, later interval: the pairing gap must not hide the stale-feedback WARN.
+  odom_warnings_.clear();
+  ASSERT_TRUE(spinUntil(
+      [this]() {
+        return std::any_of(odom_warnings_.begin(), odom_warnings_.end(), [](const auto& message) {
+          return message.find("reset: stale feedback") != std::string::npos;
         });
       },
       2s));
