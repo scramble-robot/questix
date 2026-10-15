@@ -156,6 +156,12 @@ void DriveComponent::resetCommandState() {
 }
 
 void DriveComponent::resetOdometry() {
+  odom_estop_poll_skipped_ = false;
+  odom_estop_suspended_ = false;
+  odom_estop_release_pending_ = false;
+  odom_estop_released_at_ = {};
+  odom_estop_left_count_ = 0;
+  odom_estop_right_count_ = 0;
   odom_publisher_.reset();
   tf_broadcaster_.reset();
   resetOdometryAnchor("lifecycle resources reset");
@@ -230,6 +236,7 @@ void DriveComponent::controlTimerCallback() {
     motor_lib_->getMotorTransactionStats(left_motor_id_, tick_sample_.left.stats_before);
     motor_lib_->getMotorTransactionStats(right_motor_id_, tick_sample_.right.stats_before);
   }
+  odom_estop_poll_skipped_ = false;  // only kIdle below can record an intentional skip
   in_control_tick_ = true;
   runControlTick();
   in_control_tick_ = false;
@@ -286,14 +293,76 @@ void DriveComponent::integrateOdometry() {
       result.state == wheel_position::State::kIntegrated) {
     odom_last_pair_stationary_ = stationary;
   }
+  const auto log_now = std::chrono::steady_clock::now();
+  if (odom_estop_poll_skipped_) {
+    if (!odom_estop_suspended_) {
+      RCLCPP_INFO(this->get_logger(),
+                  "Wheel position odometry deferred: E-stop polling suspended (pose retained)");
+    }
+    odom_estop_suspended_ = true;
+    odom_estop_release_pending_ = false;
+    odom_estop_left_count_ = left.count;
+    odom_estop_right_count_ = right.count;
+  } else if (odom_estop_suspended_) {
+    odom_estop_suspended_ = false;
+    odom_estop_release_pending_ = true;
+    odom_estop_released_at_ = log_now;
+  }
+  // Require BOTH new endpoints, not a re-anchor on feedback retained from before the E-stop.
+  if (odom_estop_release_pending_ &&
+      (result.state == wheel_position::State::kAnchored ||
+       result.state == wheel_position::State::kIntegrated) &&
+      left.count > odom_estop_left_count_ && right.count > odom_estop_right_count_) {
+    odom_estop_release_pending_ = false;
+  }
+  const bool estop_known = last_block_ != actuation_gate::Block::kEstopUnknown &&
+                           last_block_ != actuation_gate::Block::kEstopStale;
+  const bool zero_command =
+      tick_sample_.tick_action == questix_msgs::msg::DriveControlSample::TICK_IDLE &&
+      left_fb.target_rpm == 0 && right_fb.target_rpm == 0;
+  // ID13 needed about 1.3 s for its first reply. Eight existing idle polling intervals plus
+  // two ticks give 1.64 s at 50 Hz, allowing that observed delay with scheduling margin.
+  // This bounds LOG suppression only: no polling, safety, anchor or pose decision reads it.
+  const double release_grace =
+      8.0 * kIdleFeedbackMaxAgeSec + 2.0 * drive_control_tick::tickDtSec(control_rate_);
+  if (!estop_known || !zero_command ||
+      (odom_estop_release_pending_ &&
+       secondsSince(odom_estop_released_at_, log_now) >= release_grace)) {
+    odom_estop_release_pending_ = false;
+  }
   if (result.state == wheel_position::State::kReset) {
+    // kInvalid also covers bad dimensions or malformed/counter-rollback feedback: keep those
+    // WARNs even if the other wheel has never answered. These checks classify logs only.
+    const bool geometry_valid = std::isfinite(limits.radius) && limits.radius > 0.0 &&
+                                std::isfinite(limits.separation) && limits.separation > 0.0 &&
+                                std::isfinite(limits.max_rpm) && limits.max_rpm > 0.0;
+    const auto valid_if_received = [](const wheel_position::Sample& sample, double now) {
+      return !sample.received ||
+             (std::isfinite(sample.time_sec) && sample.time_sec <= now &&
+              std::isfinite(sample.native_rpm) &&
+              sample.position <= motor_control_lib::ddt_protocol::kPositionRawPerTurn);
+    };
+    const bool unheard = (!left.received || !right.received) && valid_if_received(left, left_now) &&
+                         valid_if_received(right, right_now);
+    const bool harmless_inputs = geometry_valid && left.fault == 0 && right.fault == 0;
+    const bool expected_missing = result.reason == wheel_position::Reason::kInvalid && unheard;
+    const bool estop_reset = harmless_inputs && odom_estop_poll_skipped_ &&
+                             (expected_missing || result.reason == wheel_position::Reason::kStale);
+    const bool release_reset = harmless_inputs && odom_estop_release_pending_ &&
+                               (expected_missing || result.reason == wheel_position::Reason::kGap);
     // Only the expected gap of healthy, zero-command idle polling is quiet.
     // A last moving pair, nonzero command/RPM, stale/fault or ambiguous result
     // remains a WARN. Logging never changes the reset/integration decision.
-    const bool idle_gap = result.reason == wheel_position::Reason::kGap &&
+    const bool idle_gap = estop_known && result.reason == wheel_position::Reason::kGap &&
                           odom_last_pair_stationary_ && stationary && left_fb.target_rpm == 0 &&
                           right_fb.target_rpm == 0;
-    if (idle_gap) {
+    if (estop_reset || release_reset) {
+      RCLCPP_DEBUG_THROTTLE(
+          this->get_logger(), *this->get_clock(), 1000,
+          "Wheel position odometry deferred: %s; %s (pose retained)",
+          estop_reset ? "E-stop polling suspended" : "E-stop release awaiting fresh pair",
+          wheel_position::reasonName(result.reason));
+    } else if (idle_gap) {
       RCLCPP_DEBUG_THROTTLE(
           this->get_logger(), *this->get_clock(), 1000,
           "Wheel position odometry anchor reset: idle polling gap (pose retained)");
@@ -393,6 +462,9 @@ void DriveComponent::runControlTick() {
       // 場合の観測と /drive_status の鮮度のため）。再取得が送るのは送信に成功したゼロだけで、
       // 非ゼロの再送はしない（DdtMotorLib::refreshMotorFeedback）。押下を受信している間と
       // stop fault の間（再送は上で行う）は送らない。
+      // Log evidence only: do not infer a deliberate suspension from old feedback or permission.
+      odom_estop_poll_skipped_ =
+          motor_ready && motor_lib_ && block == actuation_gate::Block::kEstopActive;
       if (motor_ready && motor_lib_ && block != actuation_gate::Block::kEstopActive &&
           block != actuation_gate::Block::kStopFault) {
         motor_lib_->refreshMotorFeedback(left_motor_id_, kIdleFeedbackMaxAgeSec);
