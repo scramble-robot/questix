@@ -96,6 +96,21 @@ TEST(RollerStatus, JsonHasOnlyTheMechanismsState) {
   const std::string json = esc_motor_control_cpp::rollerStatusJson(status);
   EXPECT_EQ(json,
             "{\"command\": 0.500, \"source\": \"lab\", \"estop\": false, \"permission\": true, "
-            "\"max_power\": 1.000}");
+            "\"max_power\": 1.000, \"pwm_fault\": false, \"applied_pulse_us\": -1, "
+            "\"pwm_backend\": \"none\", \"pwm_output_state\": \"UNKNOWN\", \"pwm_error\": 0}");
   EXPECT_STREQ(esc_motor_control_cpp::rollerSourceName("\"evil"), "other");
+}
+
+TEST(RollerStatus, ReportsPwmFailureWithoutRemovingMechanismFields) {
+  esc_motor_control_cpp::RollerStatus status;
+  status.pwm_fault = true;
+  status.applied_pulse_us = 0;
+  status.pwm_backend = "rp1_hw";
+  status.pwm_output_state = "FAULT_LOW";
+  status.pwm_error = -EIO;
+  const auto json = esc_motor_control_cpp::rollerStatusJson(status);
+  EXPECT_NE(json.find("\"pwm_fault\": true"), std::string::npos);
+  EXPECT_NE(json.find("\"applied_pulse_us\": 0"), std::string::npos);
+  EXPECT_NE(json.find("\"pwm_output_state\": \"FAULT_LOW\""), std::string::npos);
+  EXPECT_NE(json.find("\"permission\": true"), std::string::npos);
 }

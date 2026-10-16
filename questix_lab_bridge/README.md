@@ -130,6 +130,14 @@ while any page drives.
 
 ## Launcher experiments
 
+The roller PWM diagnostics report requested/API-accepted values, not measured voltage,
+physical pulse width or motor rotation. `pwm_fault=false` in simulation means that no hardware
+has been accessed; it is not hardware health confirmation. `applied_pulse_us=-1` means unknown.
+Legacy backends report `pwm_output_state="LEGACY"`. For `rp1_hw`, `applied_pulse_us` is the guard's
+reported value, not the local PwmCommand cache. `pwm_error` is the last backend/guard error code.
+A terminal Low or fault requires a new owner connection/session; it cannot resume the old session.
+These fields do not grant launcher permission.
+
 Lessons can also spin the disc launcher's roller, tilt it and fire one disc. The bridge publishes
 one `questix_msgs/LauncherCommand` stream for the page's session (`roller_power`, a sticky
 `tilt_deg` target, `fire_seq` counting this bridge's shot requests, `source` `lab`) on
@@ -145,7 +153,7 @@ is used. esc_motor_control and shot_component obey `/launcher_command` only (and
 | --- | --- | --- |
 | `/launcher_command/lab` | `questix_msgs/LauncherCommand` | bridge → command_arbiter |
 | `/command_arbiter/status` | `questix_msgs/ArbiterStatus` (mechanism `launcher`) | command_arbiter → bridge, 5 Hz and on change |
-| `/roller/status` | `std_msgs/String` JSON `{command, source: joy/lab/idle, estop, permission, max_power}` | `esc_motor_control` → bridge, 5 Hz |
+| `/roller/status` | `std_msgs/String` JSON `{command, source: joy/lab/idle, estop, permission, max_power, pwm_fault, applied_pulse_us, pwm_backend, pwm_output_state, pwm_error}` | `esc_motor_control` → bridge, 5 Hz |
 | `/shot/status` | `std_msgs/String` JSON `{tilt_deg, shooting, fired_count, last_fire_source: joy/lab/null, estop, permission, active, tilt_min_deg, tilt_max_deg, next_fire_in_sec}` | `shot_component` → bridge, 5 Hz and on change |
 
 Both statuses are mirrored to every page (streams `roller`, `shot`) whatever the permissions
