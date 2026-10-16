@@ -320,12 +320,11 @@ private:
         continue;
       }
       const auto& frame = it->second.second;
-      // Feedback speed/position fields are big-endian, independent of command bytes.
-      const int16_t rpm = static_cast<int16_t>((uint16_t(frame[4]) << 8) | frame[5]);
-      const uint16_t position = (uint16_t(frame[6]) << 8) | frame[7];
-      {
+      // Use the shared big-endian protocol decoder for diagnostic evidence too.
+      ddt::Feedback decoded{};
+      if (ddt::parseFeedbackFrame(frame[0], frame, decoded) == ddt::ParseResult::kOk) {
         std::lock_guard<std::mutex> lock(mutex_);
-        responses_.push_back({frame[0], rpm, position, now});
+        responses_.push_back({frame[0], decoded.speed, decoded.position, now});
       }
       const ssize_t written = write(master_, frame.data(), frame.size());
       (void)written;
@@ -350,8 +349,8 @@ private:
   std::atomic<uint8_t> feedback_mode_{2};
   std::atomic<int64_t> left_reply_at_{0}, right_reply_at_{0};
   std::map<uint8_t, std::pair<std::chrono::steady_clock::time_point, std::vector<uint8_t>>>
-      pending_replies_;
-  std::vector<Response> responses_;
+      pending_replies_{};
+  std::vector<Response> responses_{};
 };
 
 // operation_manager's /emergency_stop reason without the GPIO safety path.
@@ -595,8 +594,16 @@ protected:
                 << " steady=" << std::chrono::duration<double>(r.time.time_since_epoch()).count()
                 << std::endl;
   }
-  void delayedNeutralRelease(bool neutral, bool nonzero_first = false) {
-    ASSERT_NO_FATAL_FAILURE(startRepressedEstop());
+  void delayedNeutralRelease(bool neutral, bool nonzero_first = false, bool unheard = false) {
+    if (unheard) {
+      operationManagerWithoutGpio();
+      estop_active_ = true;
+      motor_.answerBoth(false);
+      start();
+      ASSERT_TRUE(spinUntil([&]() { return odom_estop_infos_.size() == 1; }, 2s));
+    } else {
+      ASSERT_NO_FATAL_FAILURE(startRepressedEstop());
+    }
     twist_linear_ = 0;
     send_twist_ = neutral;
     motor_.feedbackRpm(0, nonzero_first ? 6 : 0);
@@ -604,6 +611,7 @@ protected:
     odom_warnings_.clear();
     motor_.clear();
     motor_.repliesAfter(1300ms, 1300ms);
+    motor_.answerBoth(true);
     const auto released = std::chrono::steady_clock::now();
     estop_active_ = false;
     publishEstop(false, kNoGpioReason);
@@ -629,7 +637,7 @@ protected:
     EXPECT_LT(elapsed, 1.64);
     EXPECT_GE(elapsed, 1.25);
     EXPECT_TRUE(odom_warnings_.empty());
-    EXPECT_EQ(odom_estop_infos_.size(), 2u);
+    EXPECT_EQ(odom_estop_infos_.size(), unheard ? 1u : 2u);
     EXPECT_FALSE(motor_.drove(kLeftId));
     EXPECT_FALSE(motor_.drove(kRightId));
     EXPECT_NEAR(last_odom_.pose.pose.position.x, 0, 1e-9);
@@ -682,6 +690,12 @@ protected:
 
 TEST_F(DriveComponentNode, M1NeutralStreamWaitsForDelayedFreshPair) { delayedNeutralRelease(true); }
 TEST_F(DriveComponentNode, M1NoInputHasSameDelayedReleaseAndPose) { delayedNeutralRelease(false); }
+TEST_F(DriveComponentNode, M1NeutralUnheardStartupWaitsForDelayedPair) {
+  delayedNeutralRelease(true, false, true);
+}
+TEST_F(DriveComponentNode, M1NoInputUnheardStartupHasSameDelayedPair) {
+  delayedNeutralRelease(false, false, true);
+}
 TEST_F(DriveComponentNode, M1FirstRightSixRpmKeepsOneGapWarning) {
   delayedNeutralRelease(false, true);
 }
