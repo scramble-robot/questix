@@ -622,6 +622,13 @@ else
     fail "RP1 PWM: first check mode publication contract failed"
 fi
 
+# Source-only migration fixtures use temporary files and fake commands only.
+if python3 -m unittest discover -s ansible/tests -p 'test_*.py' -v; then
+    pass "setup migration contracts"
+else
+    fail "setup migration contracts"
+fi
+
 REAL_BASHRC_AFTER="$(real_bashrc_fingerprint)"
 if [ "$REAL_BASHRC_BEFORE" = "$REAL_BASHRC_AFTER" ]; then
     pass "isolation: real user ~/.bashrc remained byte-identical"

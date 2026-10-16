@@ -141,7 +141,9 @@ systemctl() {
         self.assertIn('rp1_pwm_source.changed', compiler['when'])
         copies = [t['ansible.builtin.copy'] for t in tasks if 'ansible.builtin.copy' in t]
         self.assertTrue(any('rp1_pwm_boot_overlay_dir' in c['dest'] and c['remote_src'] for c in copies))
-        config = yaml.safe_load(read('ansible/roles/hardware_interfaces/tasks/rp1_pwm_config.yaml'))[0]
+        config = next(t for t in yaml.safe_load(
+            read('ansible/roles/hardware_interfaces/tasks/rp1_pwm_config.yaml'))
+            if 'ansible.builtin.blockinfile' in t)
         self.assertEqual(config['ansible.builtin.blockinfile']['insertafter'], 'EOF')
         self.assertEqual(config['ansible.builtin.blockinfile']['block'],
                          '[all]\ndtoverlay=questix-gpio13-rp1-pwm\n')

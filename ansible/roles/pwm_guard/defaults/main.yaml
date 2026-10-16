@@ -3,3 +3,6 @@
 pwm_guard_reviewed_source: "{{ (playbook_dir ~ '/../../questix_pwm_guard') | realpath }}"
 pwm_guard_staging_dir: /var/lib/questix_pwm_guard/reviewed-source
 pwm_guard_source_identity: administrator-reviewed-controller-source
+
+# Only this exact legacy drop-in is eligible for content-verified migration.
+pwm_guard_robot_dropin_dir: /etc/systemd/system/questix_robot.service.d
