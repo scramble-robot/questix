@@ -47,7 +47,7 @@ On an x86_64 machine running Ubuntu 24.04, run Ansible against `localhost`.
 3. **Run the setup script (AMD64)**
 
    ```bash
-   bash setup_dev.sh
+   ./setup_dev.sh
    ```
 
    This installs ROS 2 Jazzy Desktop, colcon, developer tooling, and configures
@@ -110,7 +110,7 @@ the kit playbook against `localhost`.
 4. **Run the setup script**
 
    ```bash
-   bash setup.sh
+   ./setup.sh
    ```
 
    This runs `ansible-playbook ansible/playbooks/setup_kit.yaml` locally and
@@ -118,6 +118,20 @@ the kit playbook against `localhost`.
    builds the QUESTiX workspace (the checkout, e.g. `~/questix`: `dependency.repos`
    imported into `src/`, rosdep, `colcon build --symlink-install`).
    It reports the setup as completed only after the QUESTiX packages resolve.
+
+   For an existing teaching SD, keep the existing OS/kernel/ROS package versions from
+   being upgraded together during migration:
+
+   ```bash
+   ./setup.sh -e questix_os_upgrade=false
+   # A checkout from before the executable-mode fix can use:
+   # bash ./setup.sh -e questix_os_upgrade=false
+   ```
+
+   `questix_os_upgrade` defaults to `true` (the previous behavior). `false` disables
+   only the role's `apt upgrade: dist`; apt cache refresh and required package
+   installation still occur. This is not a package-version pin or a rollback.
+   Both setup entry scripts forward extra Ansible arguments.
 
 5. **Reboot and verify**
 
