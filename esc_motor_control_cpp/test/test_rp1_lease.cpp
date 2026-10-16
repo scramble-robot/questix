@@ -147,8 +147,9 @@ public:
       auto reply = std::string("1 ") + (ok ? "1 " : "0 ") + q::state_name(core.state()) + " " +
                    std::to_string(core.applied()) + " " + std::to_string(core.session()) + " " +
                    std::to_string(core.fault_error() ? core.fault_error() : core.error());
-      send(fd, reply.data(), reply.size(), MSG_NOSIGNAL);
+      // Count before replying: the client may read requests as soon as it receives the reply.
       requests++;
+      send(fd, reply.data(), reply.size(), MSG_NOSIGNAL);
     }
     if (fd >= 0) close(fd);
   }
