@@ -29,7 +29,14 @@ def robot(tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     calls = tmp_path / "ros2.calls"
-    (bin_dir / "ros2").write_text(f'#!/bin/sh\necho "$*" >> "{calls}"\n')
+    prefix = tmp_path / "install"
+    share = prefix / "share" / "questix_launcher" / "launch"
+    share.mkdir(parents=True)
+    core_launch = share / "questix_core.launch.xml"
+    core_launch.write_text('<launch><arg name="robot_mode" default="practice"/></launch>')
+    (bin_dir / "ros2").write_text(
+        f'#!/bin/sh\nif [ "$*" = "pkg prefix questix_launcher" ]; then\n'
+        f'  echo "{prefix}"\nelse\n  echo "$*" >> "{calls}"\nfi\n')
     (bin_dir / "logger").write_text(f'#!/bin/sh\necho "$*" >> "{tmp_path / "logger.log"}"\n')
     for tool in ("ros2", "logger"):
         (bin_dir / tool).chmod(0o755)
@@ -40,6 +47,8 @@ def robot(tmp_path):
 
     class Robot:
         dir = config
+        launch_file = core_launch
+        ros2_tool = bin_dir / "ros2"
 
         def mode(self, mode):
             (config / "mode").write_text(mode + "\n")
@@ -201,7 +210,7 @@ def test_launcher_knows_exactly_the_modes_of_modes_py():
 
 
 @pytest.mark.parametrize("request_kwargs, reason", [
-    ({"age": 600}, "600 s old"),
+    ({"age": 600}, "s old (limit 120 s)"),
     ({"boot_id": "another-boot"}, "earlier boot"),
     ({"mode": "competition"}, "asks for mode 'competition'"),
 ])
@@ -232,6 +241,7 @@ def test_competition_is_unchanged_and_drops_a_leftover_request(robot):
 
 def test_manager_writes_a_request_the_launcher_accepts(robot, monkeypatch):
     # The same format on both sides: app.py writes it, the script reads it.
+    monkeypatch.setattr(app, "CONFIG_DIR", robot.dir)
     monkeypatch.setattr(app, "START_REQUEST_FILE", robot.dir / "start-request")
     monkeypatch.setattr(app, "_boot_id", lambda: BOOT_ID)
     robot.mode("practice")
@@ -241,9 +251,54 @@ def test_manager_writes_a_request_the_launcher_accepts(robot, monkeypatch):
 
 
 def test_manager_writes_a_lesson_request_the_launcher_accepts(robot, monkeypatch):
+    monkeypatch.setattr(app, "CONFIG_DIR", robot.dir)
     monkeypatch.setattr(app, "START_REQUEST_FILE", robot.dir / "start-request")
     monkeypatch.setattr(app, "_boot_id", lambda: BOOT_ID)
     robot.mode("lesson")
     app._write_start_request("lesson")
     _, launched = robot.run()
     assert len(launched) == 1 and "robot_mode:=lesson" in launched[0].split()
+
+
+@pytest.mark.parametrize("mode", ["lesson", "practice", "competition"])
+@pytest.mark.parametrize("contents", [
+    '<launch/>',
+    '<launch><!-- <arg name="robot_mode" default="practice"/> --></launch>',
+    '<launch><arg name="other"/></launch>',
+    '<launch>',
+    None,
+])
+def test_stale_or_unreadable_launch_refuses_every_mode(robot, mode, contents):
+    robot.mode(mode)
+    robot.request(mode)
+    if contents is None:
+        robot.launch_file.unlink()
+    else:
+        robot.launch_file.write_text(contents)
+    result, launched = robot.run()
+    assert result.returncode == 78 and launched == []
+    assert "colcon build が必要" in result.stdout
+    assert not (robot.dir / "last-launch").exists()
+    assert not (robot.dir / "start-request").exists()
+
+
+@pytest.mark.parametrize("mode", ["lesson", "practice", "competition"])
+def test_installed_launch_with_mode_declaration_starts(robot, mode):
+    robot.mode(mode)
+    robot.request(mode)
+    result, launched = robot.run()
+    assert result.returncode == 0, result.stderr
+    assert len(launched) == 1 and f"robot_mode:={mode}" in launched[0]
+
+
+@pytest.mark.parametrize("mode", ["lesson", "practice", "competition"])
+def test_missing_installed_package_is_a_config_failure(robot, mode):
+    robot.mode(mode)
+    robot.request(mode)
+    robot.ros2_tool.write_text('#!/bin/sh\nexit 2\n')
+    result, launched = robot.run()
+    assert result.returncode == 78 and launched == []
+    assert "Cannot locate questix_launcher" in result.stdout
+    assert "colcon build が必要" in result.stdout
+    assert not (robot.dir / "last-launch").exists()
+    assert not (robot.dir / "start-request").exists()

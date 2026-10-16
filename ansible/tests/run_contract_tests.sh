@@ -589,6 +589,13 @@ unset FAKE_CLEANUP_LOG FAKE_CLEANUP_PENDING
 # --- 13. Custom image build (scripts/iso/image-build-lib.sh, apply-ansible-config.sh) ---
 . ansible/tests/image_build_contract.sh
 
+# Launcher deployment must satisfy the updater's real acceptance function.
+if python3 -m unittest discover -s ansible/tests -p 'test_launcher_deployment.py' -v; then
+    pass "launcher deployment parity and acceptance"
+else
+    fail "launcher deployment parity and acceptance"
+fi
+
 REAL_BASHRC_AFTER="$(real_bashrc_fingerprint)"
 if [ "$REAL_BASHRC_BEFORE" = "$REAL_BASHRC_AFTER" ]; then
     pass "isolation: real user ~/.bashrc remained byte-identical"
