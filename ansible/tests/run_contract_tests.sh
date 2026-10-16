@@ -218,7 +218,7 @@ if run_build; then
     else
         fail "workspace build: src/ydlidar_ros2 was not imported"
     fi
-    assert_contains "$FAKE_ROS_LOG" "rosdep install --from-paths $BUILD_WS --ignore-src --rosdistro jazzy -r -y" \
+    assert_contains "$FAKE_ROS_LOG" "rosdep install --from-paths $BUILD_WS/core $BUILD_WS/src/ydlidar_ros2 $BUILD_WS/src/ydlidar_sdk_vendor --ignore-src --rosdistro jazzy -r -y" \
         "workspace build: rosdep installs the workspace's keys"
     assert_contains "$FAKE_ROS_LOG" "ROS_HOME=/home/$USER/.ros" "workspace build: rosdep reads the kit user's index"
     assert_contains "$FAKE_ROS_LOG" "colcon build --symlink-install" "workspace build: colcon build --symlink-install"
@@ -243,7 +243,7 @@ if run_build; then
     else
         fail "workspace build idempotency: vcs ran $(count_calls vcs) times over two runs"
     fi
-    if [ "$(count_calls colcon)" = "2" ]; then
+    if [ "$(grep -c '^colcon build ' "$FAKE_ROS_LOG")" = "2" ]; then
         pass "workspace build idempotency: second run rebuilds"
     else
         fail "workspace build idempotency: colcon ran $(count_calls colcon) times over two runs"
@@ -259,6 +259,10 @@ mkdir -p "$BROKEN_TOOLS"
 cat >"$BROKEN_TOOLS/colcon" <<'EOF_COLCON'
 #!/usr/bin/env bash
 echo "colcon $*" >>"$FAKE_ROS_LOG"
+if [ "${1:-}" = list ]; then
+    printf '%s\n' "$PWD/core" "$PWD/src/ydlidar_ros2" "$PWD/src/ydlidar_sdk_vendor"
+    exit 0
+fi
 rm -rf install && mkdir -p build log install
 : >install/setup.bash
 EOF_COLCON
