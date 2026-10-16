@@ -251,3 +251,39 @@ colconはguard/ESC/launcherと依存を別build/installへbuildし、gtest、IPC
 ROS componentの故障status、installerのno-follow copy、launcher/Managerの既存回帰を実行します。
 本番daemonにfake I/O/admin UID override/例外注入を含めません。test serverはuninstalled executableだけです。
 root専用の実UID分離テストはisolated root runnerで実行し、非root環境では明示skipとして記録します。
+
+## Migrating the old reviewed installer with Ansible
+
+`install_reviewed.sh` existed in six revisions (`b72e2a1`, `52c29e9`, `cd9807c`,
+`a142990`, `d1f3512`, `be91748`), then was removed in `1a7e2d3`. All six appended exactly
+`[all]`, `# QUESTiX reviewed GPIO13 PWM0 channel 1`, and
+`dtoverlay=questix-gpio13-pwm` (LF lines). Classroom SDs also have machine-specific
+`# QUESTiX GPIO13 ...` notes from a separate/manual deployment. The hardware role removes
+an exact old overlay line (allowing leading/trailing whitespace) in any section, and its
+immediately preceding note only when that note starts with `# QUESTiX` and contains
+`GPIO13`. It retains every `[all]` and all unrelated notes, UART/overlay/operator lines.
+Overlay near-matches, including argument-bearing forms, fail before config editing and
+show the offending lines: a custom pin/parameter choice cannot safely be inferred.
+Contracts cover both note styles and a partial deployment with both old and new blocks;
+all three leave one standard overlay and report no changes on a second application.
+The unreferenced old `/boot/firmware/overlays/questix-gpio13-pwm.dtbo` is retained as evidence;
+firmware does not load an overlay merely because the file exists. The SD investigation
+reported identical old/new overlay bytes; the boot result of loading both is unverified.
+
+| Old installed asset | Standard migration |
+|---|---|
+| `/opt/questix_pwm_guard/questix_pwm_guard`, `questix_pwm_ctl` | `pwm_guard` uses the protected standalone installer to overwrite both binaries; previous assets are backed up by that installer. |
+| `/etc/systemd/system/questix_pwm_guard.service` | Replaced by the independent standard unit; enabled for boot, never started by this role. |
+| `questix_robot.service.d/50-rp1-pwm.conf` | Only the two exact historical contents (stored under `ansible/roles/pwm_guard/files/`) are removed before invoking the installer. Unknown content, nonregular files and links fail unchanged. |
+| `questix_robot.service.d/pwm-guard-order.conf` | Standard ordering-only drop-in installed by `pwm_guard`; unrelated drop-ins are retained. |
+| `/opt/questix_robot/questix_robot_launcher.sh` | `robot_autostart` overwrites it with the standard launcher, consistently with the source unit/installers. |
+| `/opt/questix_pwm_guard/validate_manual_start.py`, `review_manifest.py` | Retained as inert audit files. The new unit/launcher never calls them after the old drop-in is removed. |
+| `/etc/questix_pwm_guard/esc.yaml`, `reviewed-launch.env`, `reviewed-release.json`, `deployment-state`, `recovery-backup` | Retained as evidence; standard launcher/unit do not load them. The installer reports the frozen migration markers it detects. |
+| `approved-release.sha256` (operator supplied), `runtime-approved.sha256` (installer created), frozen `/opt/questix_pwm_guard/releases/`, `/var/backups/questix-rp1-*`, old deployment-in-progress marker | Retained, not used as authority by the standard runtime. The source/build approval was an operator prerequisite; later installers recorded the approved frozen runtime separately. Review any partial-deployment warning before starting services. |
+| polkit / sudoers | None of the six installers wrote these. `robot_autostart` installs the narrow named-unit rule; `legacy_privilege_cleanup` separately removes the exact historical broad grants. Unsafe password/sudo state still requires operator action (exit 2), never an automatic bypass. |
+
+Run the complete kit setup on the target SD with the robot stopped; do not resume/start or
+reboot into a partially completed migration. Back up the SD first. A failed custom-line or
+custom-drop-in check requires an operator review, not automatic deletion. Reboot and actual
+GPIO13/Low validation remain target-hardware work; the WSL contracts modify temporary files
+only and do not operate systemd, GPIO or UART.

@@ -1,4 +1,43 @@
 ---
+# Classroom SDs can have machine-specific notes as well as historical installer notes.
+# Unknown overlay near-matches may be administrator settings: fail before editing.
+- name: Read the boot configuration before migrating reviewed PWM settings
+  ansible.builtin.slurp:
+    src: "{{ boot_config_path }}"
+  register: rp1_pwm_existing_config
+
+- name: Refuse unrecognized GPIO13 PWM configuration lines
+  ansible.builtin.assert:
+    that:
+      - rp1_pwm_unknown_lines | length == 0
+    fail_msg: >-
+      Unrecognized GPIO13 PWM setting; config.txt was not changed.
+      Review these lines before retrying: {{ rp1_pwm_unknown_lines | to_json }}
+    quiet: true
+  vars:
+    rp1_pwm_unknown_lines: >-
+      {{ (rp1_pwm_existing_config.content | b64decode).splitlines()
+         | select('search', '(?i)^[ \t]*#?[ \t]*dtoverlay[ \t]*=.*questix-gpio13-(?:rp1-)?pwm')
+         | reject('match', '^[ \t]*dtoverlay=questix-gpio13-pwm[ \t]*$')
+         | reject('equalto', 'dtoverlay=questix-gpio13-rp1-pwm') | list }}
+
+- name: Remove a QUESTiX GPIO13 note immediately before its legacy overlay
+  ansible.builtin.replace:
+    path: "{{ boot_config_path }}"
+    regexp: '(?m)^# QUESTiX[^\r\n]*GPIO13[^\r\n]*\r?\n(?=[ \t]*dtoverlay=questix-gpio13-pwm[ \t]*\r?$)'
+    replace: ''
+    backup: true
+  notify: reboot_required
+
+- name: Remove only exact legacy GPIO13 overlay lines
+  ansible.builtin.lineinfile:
+    path: "{{ boot_config_path }}"
+    regexp: '^[ \t]*dtoverlay=questix-gpio13-pwm[ \t\r]*$'
+    state: absent
+    backup: true
+  notify: reboot_required
+
+# Retain every [all] and the unreferenced old .dtbo as migration evidence.
 - name: Keep the standard GPIO13 overlay in an explicit all section
   ansible.builtin.blockinfile:
     path: "{{ boot_config_path }}"

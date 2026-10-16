@@ -1,4 +1,7 @@
 ---
+- name: Migrate known legacy reviewed startup coupling
+  ansible.builtin.include_tasks: migrate_reviewed.yaml
+
 - name: Inventory the administrator source on the controller without following links
   ansible.builtin.command:
     argv:
