@@ -7,6 +7,7 @@
 #define MOTOR_CONTROL_APP__DRIVE_COMPONENT_HPP_
 
 #include <chrono>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -19,6 +20,7 @@
 #include "motor_control_app/drive_control_tick.hpp"
 #include "motor_control_app/drive_watchdog.hpp"
 #include "motor_control_app/odometry_integrator.hpp"
+#include "motor_control_app/wheel_position_odometry.hpp"
 #include "motor_control_lib/ddt_motor_lib.hpp"
 #include "motor_control_lib/differential_drive.hpp"
 #include "nav_msgs/msg/odometry.hpp"
@@ -96,6 +98,7 @@ public:
 
 private:
   friend struct DriveParamPolicyAccess;
+  friend struct DriveOdomTestAccess;  // Uninstalled PTY tests; no runtime override.
   /**
    * @brief Twistメッセージのコールバック関数
    *
@@ -292,6 +295,7 @@ private:
    * ゼロにリセットする（cleanup / shutdown / error のフル解体時に呼ぶ）。
    */
   void resetOdometry();
+  void resetOdometryAnchor(const char* reason);
 
   // ROS 2 通信
   // Twist/control/status/auto-start callbacks intentionally share the node's default
@@ -428,20 +432,26 @@ private:
   bool auto_start_{true};
   double connect_retry_period_sec_{1.0};
 
-  // オドメトリ（実測 twist を積分）。パラメータは on_configure で読む。
+  // オドメトリ（両輪の位置差分を積分）。パラメータは on_configure で読む。
   bool publish_tf_{true};      // odom->base_link TF を broadcast するか
   std::string odom_topic_;     // Odometry publish 先
   std::string odom_frame_id_;  // Odometry header / TF 親フレーム
   std::string base_frame_id_;  // child_frame_id（URDF ルートと一致）
-  // 積分状態。deactivate->activate ではポーズ維持（時刻アンカーのみクリア）、
-  // cleanup/shutdown/error ではゼロにリセットする（詳細は publishOdometry 参照）。
+  // Pose is retained across lifecycle/library resets; only position anchors reset.
   odometry::Pose2D odom_pose_{};
-  // integrateOdometry
-  // の前回の実測（受信時刻・twist）と、そのときの受信フレーム数（新しい実測の判定）
-  odometry::TwistSample odom_last_sample_{};
-  bool has_odom_sample_{false};
-  uint64_t odom_left_feedback_count_{0};
-  uint64_t odom_right_feedback_count_{0};
+  // Paired position endpoints and feedback_count gating (pure ROS-free tracker).
+  wheel_position::Integrator odom_position_integrator_{};
+  // Logging state only; never influences integration or actuation decisions.
+  enum class OdomMotorState { kUnknown, kReady, kUnavailable, kStopFault };
+  OdomMotorState odom_motor_state_{OdomMotorState::kUnknown};
+  bool odom_last_pair_stationary_{false};
+  // Log-only evidence from the actual tick's decision to skip polling for a pressed E-stop.
+  bool odom_estop_poll_skipped_{false};
+  bool odom_estop_suspended_{false};
+  bool odom_estop_release_pending_{false};
+  std::chrono::steady_clock::time_point odom_estop_released_at_{};
+  uint64_t odom_estop_left_count_{0};
+  uint64_t odom_estop_right_count_{0};
 
   // 状態フラグ
   bool motor_initialized_;
