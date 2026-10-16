@@ -257,12 +257,18 @@ root専用の実UID分離テストはisolated root runnerで実行し、非root�
 `install_reviewed.sh` existed in six revisions (`b72e2a1`, `52c29e9`, `cd9807c`,
 `a142990`, `d1f3512`, `be91748`), then was removed in `1a7e2d3`. All six appended exactly
 `[all]`, `# QUESTiX reviewed GPIO13 PWM0 channel 1`, and
-`dtoverlay=questix-gpio13-pwm` (LF lines). The Ansible hardware role removes only the exact
-old overlay line and its immediately preceding exact annotation, retaining every `[all]`
-and all unrelated UART/overlay/operator lines. Near-matches fail before config editing:
-a custom pin/parameter choice cannot safely be inferred. The standard managed block remains
-idempotent. The unreferenced old `/boot/firmware/overlays/questix-gpio13-pwm.dtbo` is retained
-as evidence; firmware does not load an overlay merely because the file exists.
+`dtoverlay=questix-gpio13-pwm` (LF lines). Classroom SDs also have machine-specific
+`# QUESTiX GPIO13 ...` notes from a separate/manual deployment. The hardware role removes
+an exact old overlay line (allowing leading/trailing whitespace) in any section, and its
+immediately preceding note only when that note starts with `# QUESTiX` and contains
+`GPIO13`. It retains every `[all]` and all unrelated notes, UART/overlay/operator lines.
+Overlay near-matches, including argument-bearing forms, fail before config editing and
+show the offending lines: a custom pin/parameter choice cannot safely be inferred.
+Contracts cover both note styles and a partial deployment with both old and new blocks;
+all three leave one standard overlay and report no changes on a second application.
+The unreferenced old `/boot/firmware/overlays/questix-gpio13-pwm.dtbo` is retained as evidence;
+firmware does not load an overlay merely because the file exists. The SD investigation
+reported identical old/new overlay bytes; the boot result of loading both is unverified.
 
 | Old installed asset | Standard migration |
 |---|---|
