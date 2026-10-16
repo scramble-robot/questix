@@ -100,6 +100,7 @@ public:
 private:
   friend struct DriveParamPolicyAccess;
   friend struct DriveRearmNodeAccess;
+  friend struct DriveOdomTestAccess;  // Uninstalled PTY tests; no runtime override.
   /**
    * @brief Twistメッセージのコールバック関数
    *

@@ -28,13 +28,17 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <fstream>
 #include <functional>
 #include <geometry_msgs/msg/twist.hpp>
 #include <iomanip>
+#include <iostream>
 #include <lifecycle_msgs/msg/state.hpp>
+#include <limits>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <nav_msgs/msg/odometry.hpp>
@@ -58,6 +62,79 @@ struct DriveRearmNodeAccess {
   static void failedStop(DriveComponent& node) {
     node.resetCommandState();
     node.stop_fault_ = true;  // inject failure state; actual zero retry still uses the PTY
+  }
+};
+// Observe the log-only state, and isolate internal negative cases after cancelling the tick.
+struct DriveOdomTestAccess {
+  static bool pending(const DriveComponent& n) { return n.odom_estop_release_pending_; }
+  static void pause(DriveComponent& n) { n.control_timer_->cancel(); }
+  static void update(DriveComponent& n) { n.integrateOdometry(); }
+  static void window(DriveComponent& n) {
+    motor_control_lib::DdtMotorLib::MotorTransactionStats l, r;
+    n.motor_lib_->getMotorTransactionStats(n.left_motor_id_, l);
+    n.motor_lib_->getMotorTransactionStats(n.right_motor_id_, r);
+    n.odom_estop_left_count_ = l.feedback_count;
+    n.odom_estop_right_count_ = r.feedback_count;
+    n.odom_estop_release_pending_ = true;
+    n.odom_estop_suspended_ = false;
+    n.odom_estop_poll_skipped_ = false;
+    n.odom_estop_released_at_ = std::chrono::steady_clock::now();
+    n.tick_sample_.tick_action = questix_msgs::msg::DriveControlSample::TICK_IDLE;
+  }
+  static void target(DriveComponent& n, double linear, double angular) {
+    n.has_target_ = true;
+    n.target_linear_ = linear;
+    n.target_angular_ = angular;
+  }
+  static void shaped(DriveComponent& n) { n.control_core_->step(.5, .2, .02); }
+  static void badGeometry(DriveComponent& n) { n.wheel_radius_ = 0; }
+  static void stopFault(DriveComponent& n) { n.stop_fault_ = true; }
+  static bool refresh(DriveComponent& n) { return n.diff_drive_->stopNow(); }
+  static bool currentHistory(DriveComponent& n) {
+    using motor_control_lib::ControlMode;
+    bool ok = true;
+    for (int id : {n.left_motor_id_, n.right_motor_id_}) {
+      ok &= n.motor_lib_->initializeMotor(id, ControlMode::Current);
+      ok &= n.motor_lib_->stopMotorNow(id);         // obtain a fresh mode=1 feedback sample
+      ok &= n.motor_lib_->setMotorVelocity(id, 0);  // measured 6 rpm: nonzero PI current
+    }
+    return ok;
+  }
+  static bool rpmZeroButFrameNonzero(const DriveComponent& n) {
+    motor_control_lib::DdtMotorLib::MotorFeedbackData l, r;
+    return n.motor_lib_->getMotorFeedbackData(n.left_motor_id_, l) &&
+           n.motor_lib_->getMotorFeedbackData(n.right_motor_id_, r) && l.target_rpm == 0 &&
+           r.target_rpm == 0 && !n.diff_drive_->lastSentIsZero();
+  }
+  static void estopUnknown(DriveComponent& n, bool stale) {
+    n.last_block_ =
+        stale ? actuation_gate::Block::kEstopStale : actuation_gate::Block::kEstopUnknown;
+  }
+  static bool nonzeroRpm(DriveComponent& n) {
+    return n.motor_lib_->setMotorVelocity(n.left_motor_id_, 1);
+  }
+  static bool unknownHistory(DriveComponent& n) {
+    n.motor_lib_->shutdown();
+    return n.motor_lib_->initialize();
+  }
+  static void rollbackAnchor(DriveComponent& n) {
+    const double now =
+        std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    motor_control_lib::DdtMotorLib::MotorFeedbackData l, r;
+    motor_control_lib::DdtMotorLib::MotorTransactionStats lt, rt;
+    n.motor_lib_->getMotorFeedbackData(n.left_motor_id_, l);
+    n.motor_lib_->getMotorFeedbackData(n.right_motor_id_, r);
+    n.motor_lib_->getMotorTransactionStats(n.left_motor_id_, lt);
+    n.motor_lib_->getMotorTransactionStats(n.right_motor_id_, rt);
+    n.odom_position_integrator_.reset();
+    n.odom_position_integrator_.update(
+        {l.position_raw, double(l.velocity_rpm_raw), now - l.feedback_age_sec,
+         lt.feedback_count + 100, true, 0},
+        {r.position_raw, double(r.velocity_rpm_raw), now - r.feedback_age_sec,
+         rt.feedback_count + 100, true, 0},
+        now,
+        {n.wheel_radius_, n.wheel_separation_, double(n.max_motor_rpm_), n.max_linear_accel_,
+         n.max_angular_accel_});
   }
 };
 }  // namespace motor_control_app
@@ -116,6 +193,33 @@ public:
     answer_right_ = enabled;
   }
   void fault(uint8_t code) { fault_ = code; }
+  // Optional feedback independent of the command; defaults still echo the command RPM.
+  void feedbackRpm(int16_t left, int16_t right) {
+    left_rpm_ = left;
+    right_rpm_ = right;
+    override_rpm_ = true;
+  }
+  // Both setters select the same feedback mode byte; keep a single source of truth.
+  void feedbackMode(uint8_t mode) { setMode(mode); }
+  void repliesAfter(std::chrono::milliseconds left, std::chrono::milliseconds right) {
+    const auto now = std::chrono::steady_clock::now();
+    left_reply_at_ =
+        std::chrono::duration_cast<std::chrono::nanoseconds>((now + left).time_since_epoch())
+            .count();
+    right_reply_at_ =
+        std::chrono::duration_cast<std::chrono::nanoseconds>((now + right).time_since_epoch())
+            .count();
+  }
+  struct Response {
+    uint8_t id{0};
+    int16_t rpm{0};
+    uint16_t position{0};
+    std::chrono::steady_clock::time_point time{};
+  };
+  std::vector<Response> responses() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return responses_;
+  }
 
   // Close only the fake PTY peer: subsequent writes fail, like a lost serial line.
   void disconnect() {
@@ -162,6 +266,7 @@ private:
     std::vector<uint8_t> pending;
     uint8_t buf[256];
     while (running_) {
+      flushReplies();
       const ssize_t n = read(master_, buf, sizeof(buf));
       if (n > 0) {
         pending.insert(pending.end(), buf, buf + n);
@@ -199,19 +304,44 @@ private:
   // A M0602C feedback frame: {ID, mode, current(2), speed(2), position(2), fault, CRC8}.
   void reply(uint8_t motor_id, int16_t speed_rpm) {
     if ((motor_id == kLeftId && !answer_left_) || (motor_id == kRightId && !answer_right_)) return;
+    // Current commands are not RPM: retain #208's stationary default. M1 can explicitly
+    // override feedback RPM even in current mode to test nonzero-current/zero-target cases.
+    if (mode_ == 1) speed_rpm = 0;
+    if (override_rpm_) speed_rpm = motor_id == kLeftId ? left_rpm_.load() : right_rpm_.load();
     const uint16_t position = motor_id == kLeftId ? left_position_.load() : right_position_.load();
     std::vector<uint8_t> frame = {motor_id,
                                   mode_.load(),
                                   0x00,
                                   0x00,
-                                  static_cast<uint8_t>(mode_ == 1 ? 0 : (speed_rpm >> 8) & 0xFF),
-                                  static_cast<uint8_t>(mode_ == 1 ? 0 : speed_rpm & 0xFF),
+                                  static_cast<uint8_t>((speed_rpm >> 8) & 0xFF),
+                                  static_cast<uint8_t>(speed_rpm & 0xFF),
                                   static_cast<uint8_t>((position >> 8) & 0xFF),
                                   static_cast<uint8_t>(position & 0xFF),
                                   fault_.load()};
     frame.push_back(ddt::crc8Maxim(frame));
-    const ssize_t written = write(master_, frame.data(), frame.size());
-    (void)written;
+    const auto deadline = std::chrono::steady_clock::time_point(std::chrono::nanoseconds(
+        motor_id == kLeftId ? left_reply_at_.load() : right_reply_at_.load()));
+    pending_replies_[motor_id] = {deadline, frame};
+    flushReplies();
+  }
+  void flushReplies() {
+    const auto now = std::chrono::steady_clock::now();
+    for (auto it = pending_replies_.begin(); it != pending_replies_.end();) {
+      if (it->second.first > now) {
+        ++it;
+        continue;
+      }
+      const auto& frame = it->second.second;
+      // Use the shared big-endian protocol decoder for diagnostic evidence too.
+      ddt::Feedback decoded{};
+      if (ddt::parseFeedbackFrame(frame[0], frame, decoded) == ddt::ParseResult::kOk) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        responses_.push_back({frame[0], decoded.speed, decoded.position, now});
+      }
+      const ssize_t written = write(master_, frame.data(), frame.size());
+      (void)written;
+      it = pending_replies_.erase(it);
+    }
   }
 
   int master_{-1};
@@ -227,6 +357,12 @@ private:
   std::atomic<uint16_t> right_position_{0};
   std::atomic<bool> answer_left_{true};
   std::atomic<bool> answer_right_{true};
+  std::atomic<bool> override_rpm_{false};
+  std::atomic<int16_t> left_rpm_{0}, right_rpm_{0};
+  std::atomic<int64_t> left_reply_at_{0}, right_reply_at_{0};
+  std::map<uint8_t, std::pair<std::chrono::steady_clock::time_point, std::vector<uint8_t>>>
+      pending_replies_{};
+  std::vector<Response> responses_{};
 };
 
 // operation_manager's /emergency_stop reason without the GPIO safety path.
@@ -351,8 +487,10 @@ protected:
     ASSERT_EQ(drive_->get_parameter("stop_resend_interval_ms").as_int(), 300);
   }
 
-  void expectStaggeredRelease(bool left_first) {
+  void expectStaggeredRelease(bool left_first, bool neutral = false) {
     ASSERT_NO_FATAL_FAILURE(startRepressedEstop());
+    send_twist_ = neutral;
+    twist_linear_ = 0;
     const auto left_count = last_sample_.left.feedback_count;
     const auto right_count = last_sample_.right.feedback_count;
     motor_.answerLeft(left_first);
@@ -461,6 +599,93 @@ protected:
     return motor_.lastCommandIsZero(kLeftId) && motor_.lastCommandIsZero(kRightId);
   }
 
+  using Access = motor_control_app::DriveOdomTestAccess;
+  bool pending() const { return Access::pending(*drive_); }
+  void evidence(const char* stage) const {
+    const auto frames = motor_.commands();
+    const auto replies = motor_.responses();
+    std::cout << std::setprecision(12) << "M1 evidence " << stage << " frames=" << frames.size()
+              << " responses=" << replies.size() << " counts=" << last_sample_.left.feedback_count
+              << "," << last_sample_.right.feedback_count << " pending=" << pending()
+              << " warnings=" << odom_warnings_.size() << " infos=" << odom_estop_infos_.size()
+              << " pose=" << last_odom_.pose.pose.position.x << ","
+              << last_odom_.pose.pose.position.y << "," << last_odom_.pose.pose.orientation.z
+              << std::endl;
+    for (const auto& frame : frames)
+      std::cout << "M1 command " << stage << " id=" << int(frame[0])
+                << " value=" << commandValue(frame) << " zero=" << ddt::isZeroCommandFrame(frame)
+                << std::endl;
+    for (const auto& r : replies)
+      std::cout << "M1 response " << stage << " id=" << int(r.id) << " rpm=" << r.rpm
+                << " position=" << r.position
+                << " steady=" << std::chrono::duration<double>(r.time.time_since_epoch()).count()
+                << std::endl;
+  }
+  void delayedNeutralRelease(bool neutral, bool nonzero_first = false, bool unheard = false) {
+    if (unheard) {
+      operationManagerWithoutGpio();
+      estop_active_ = true;
+      motor_.answerBoth(false);
+      start();
+      ASSERT_TRUE(spinUntil([&]() { return odom_estop_infos_.size() == 1; }, 2s));
+    } else {
+      ASSERT_NO_FATAL_FAILURE(startRepressedEstop());
+    }
+    twist_linear_ = 0;
+    send_twist_ = neutral;
+    motor_.feedbackRpm(0, nonzero_first ? 6 : 0);
+    const auto lc = last_sample_.left.feedback_count, rc = last_sample_.right.feedback_count;
+    odom_warnings_.clear();
+    motor_.clear();
+    motor_.repliesAfter(1300ms, 1300ms);
+    motor_.answerBoth(true);
+    const auto released = std::chrono::steady_clock::now();
+    estop_active_ = false;
+    publishEstop(false, kNoGpioReason);
+    spinFor(1150ms);
+    EXPECT_TRUE(pending());
+    EXPECT_TRUE(odom_warnings_.empty());
+    EXPECT_EQ(last_sample_.left.feedback_count, lc);
+    EXPECT_EQ(last_sample_.right.feedback_count, rc);
+    if (neutral) {
+      EXPECT_EQ(last_sample_.tick_action, questix_msgs::msg::DriveControlSample::TICK_DRIVE);
+    }
+    EXPECT_TRUE(lastCommandsAreZero());
+    evidence("before-first-pair");
+    ASSERT_TRUE(spinUntil(
+        [&]() {
+          return last_sample_.left.feedback_count > lc && last_sample_.right.feedback_count > rc &&
+                 !pending();
+        },
+        450ms));
+    const double elapsed =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - released).count();
+    std::cout << "M1 release-to-pair seconds=" << std::setprecision(12) << elapsed << std::endl;
+    EXPECT_LT(elapsed, 1.64);
+    EXPECT_GE(elapsed, 1.25);
+    EXPECT_TRUE(odom_warnings_.empty());
+    EXPECT_EQ(odom_estop_infos_.size(), unheard ? 1u : 2u);
+    EXPECT_FALSE(motor_.drove(kLeftId));
+    EXPECT_FALSE(motor_.drove(kRightId));
+    EXPECT_NEAR(last_odom_.pose.pose.position.x, 0, 1e-9);
+    EXPECT_NEAR(last_odom_.pose.pose.orientation.z, 0, 1e-9);
+    evidence("first-pair");
+    if (nonzero_first) {
+      const auto response_count = motor_.responses().size();
+      motor_.feedbackRpm(0, 0);
+      motor_.repliesAfter(320ms, 320ms);
+      spinFor(620ms);  // > first pair + .5 s and release + 1.64 s
+      EXPECT_GT(std::chrono::duration<double>(std::chrono::steady_clock::now() - released).count(),
+                1.64);
+      EXPECT_GT(motor_.responses().size(), response_count);
+      ASSERT_EQ(odom_warnings_.size(), 1u);
+      EXPECT_NE(odom_warnings_[0].find("feedback pairing time limit"), std::string::npos);
+      EXPECT_NEAR(last_odom_.pose.pose.position.x, 0, 1e-9);
+      EXPECT_NEAR(last_odom_.pose.pose.orientation.z, 0, 1e-9);
+      evidence("R3-gap-retained-not-a-quiet-success");
+    }
+  }
+
   FakeMotor motor_;
   std::string prefix_;
   std::string overrides_path_;
@@ -491,6 +716,150 @@ protected:
   bool send_permission_{false};
   bool permission_allowed_{false};
 };
+
+TEST_F(DriveComponentNode, M1NeutralStreamWaitsForDelayedFreshPair) { delayedNeutralRelease(true); }
+TEST_F(DriveComponentNode, M1NoInputHasSameDelayedReleaseAndPose) { delayedNeutralRelease(false); }
+TEST_F(DriveComponentNode, M1NeutralUnheardStartupWaitsForDelayedPair) {
+  delayedNeutralRelease(true, false, true);
+}
+TEST_F(DriveComponentNode, M1NoInputUnheardStartupHasSameDelayedPair) {
+  delayedNeutralRelease(false, false, true);
+}
+TEST_F(DriveComponentNode, M1FirstRightSixRpmKeepsOneGapWarning) {
+  delayedNeutralRelease(false, true);
+}
+
+// No executor ticks run during these isolated log decisions; feedback is still real PTY data.
+class DriveOdomM1Negative : public DriveComponentNode, public ::testing::WithParamInterface<int> {};
+TEST_P(DriveOdomM1Negative, KeepsWarningForUnsafeOrUncertainInputs) {
+  ASSERT_NO_FATAL_FAILURE(startRepressedEstop());
+  motor_.answerBoth(false);
+  estop_active_ = false;
+  publishEstop(false, kNoGpioReason);
+  ASSERT_TRUE(spinUntil([&]() { return pending(); }, 400ms));
+  Access::pause(*drive_);
+  spinFor(1100ms);  // isolate WARN throttle from the previous stage
+  odom_warnings_.clear();
+  const int kind = GetParam();
+  if (kind == 5 || kind == 6 || kind == 7 || kind == 10) {
+    motor_.answerBoth(true);
+    if (kind == 5) {
+      motor_.feedbackMode(1);
+      motor_.feedbackRpm(6, 6);
+      ASSERT_TRUE(Access::currentHistory(*drive_));
+      ASSERT_TRUE(Access::rpmZeroButFrameNonzero(*drive_));
+      EXPECT_TRUE(motor_.drove(kLeftId));
+      EXPECT_TRUE(motor_.drove(kRightId));
+    } else {
+      if (kind == 6) motor_.positions(32768, 0);
+      if (kind == 7) motor_.fault(1);
+      ASSERT_TRUE(Access::refresh(*drive_));
+    }
+  }
+  // Stale, retained feedback is the otherwise quiet release condition.
+  if (kind == 5) spinFor(550ms);
+  Access::window(*drive_);
+  switch (kind) {
+    case 0:
+      Access::target(*drive_, .1, 0);
+      break;
+    case 1:
+      Access::target(*drive_, std::numeric_limits<double>::quiet_NaN(), 0);
+      break;
+    case 2:
+      Access::shaped(*drive_);
+      break;  // finite zero input, residual shaped output
+    case 3:
+      Access::badGeometry(*drive_);
+      break;
+    case 4:
+      Access::stopFault(*drive_);
+      break;
+    case 8:
+      Access::estopUnknown(*drive_, false);
+      break;
+    case 9:
+      Access::estopUnknown(*drive_, true);
+      break;
+    case 10:
+      Access::rollbackAnchor(*drive_);
+      break;
+    case 11:
+      ASSERT_TRUE(Access::nonzeroRpm(*drive_));
+      break;
+    case 12:
+      ASSERT_TRUE(Access::unknownHistory(*drive_));
+      break;
+  }
+  Access::update(*drive_);
+  const bool pending_after_decision = pending();
+  spinFor(100ms);  // deliver rosout without running another control tick
+  evidence("negative-log-only");
+  ASSERT_EQ(odom_warnings_.size(), 1u);
+  if (kind == 3 || kind == 6 || kind == 10 || kind == 12) {
+    EXPECT_NE(odom_warnings_[0].find("invalid feedback or geometry"), std::string::npos);
+  } else if (kind == 4) {
+    EXPECT_NE(odom_warnings_[0].find("stop fault"), std::string::npos);
+  } else if (kind == 7) {
+    EXPECT_NE(odom_warnings_[0].find("motor fault"), std::string::npos);
+  } else {
+    EXPECT_NE(odom_warnings_[0].find("stale feedback"), std::string::npos);
+  }
+  if (kind == 0 || kind == 1 || kind == 2 || kind == 5 || kind == 8 || kind == 9 || kind == 11 ||
+      kind == 12) {
+    EXPECT_FALSE(pending_after_decision);
+  }
+  EXPECT_NEAR(last_odom_.pose.pose.position.x, 0, 1e-9);
+}
+INSTANTIATE_TEST_SUITE_P(M1, DriveOdomM1Negative, ::testing::Range(0, 13));
+
+TEST_F(DriveComponentNode, M1NeutralWithoutRepliesExpiresAtOriginalDeadline) {
+  ASSERT_NO_FATAL_FAILURE(startRepressedEstop());
+  motor_.answerBoth(false);
+  send_twist_ = true;
+  twist_linear_ = 0;
+  odom_warnings_.clear();
+  estop_active_ = false;
+  publishEstop(false, kNoGpioReason);
+  spinFor(1200ms);
+  EXPECT_TRUE(pending());
+  EXPECT_TRUE(odom_warnings_.empty());
+  evidence("neutral-before-deadline");
+  odom_warnings_.clear();
+  ASSERT_TRUE(spinUntil([&]() { return !odom_warnings_.empty(); }, 1000ms));
+  EXPECT_FALSE(pending());
+  EXPECT_TRUE(lastCommandsAreZero());
+  EXPECT_NE(odom_warnings_[0].find("stale feedback"), std::string::npos);
+  evidence("neutral-after-deadline");
+}
+
+TEST_F(DriveComponentNode, M1PressedStopReplyStillIntegratesTwoRightCounts) {
+  operationManagerWithoutGpio();
+  start();
+  ASSERT_TRUE(spinUntil([&]() { return have_odom_ && last_sample_.right.feedback_count > 0; }, 2s));
+  const auto previous = last_sample_.right.feedback_count;
+  ASSERT_TRUE(spinUntil([&]() { return last_sample_.right.feedback_count > previous; }, 1s));
+  const auto lcount = last_sample_.left.feedback_count, rcount = last_sample_.right.feedback_count;
+  const double before = last_odom_.pose.pose.orientation.z;
+  spinFor(95ms);  // callback/serial overhead puts the next endpoint near .115 s (< .2 s cap)
+  motor_.positions(0, 2);
+  estop_active_ = true;
+  publishEstop(true, "M1 +2 response on stop");
+  ASSERT_TRUE(spinUntil(
+      [&]() {
+        return last_sample_.left.feedback_count == lcount + 1 &&
+               last_sample_.right.feedback_count == rcount + 1;
+      },
+      180ms));
+  spinFor(70ms);
+  const double radius = drive_->get_parameter("wheel_radius").as_double();
+  const double separation = drive_->get_parameter("wheel_separation").as_double();
+  const double expected = -radius * 6.283185307179586 * 2 / ddt::kPositionRawPerTurn / separation;
+  EXPECT_NEAR(last_odom_.pose.pose.orientation.z - before, std::sin(expected / 2), 1e-8);
+  EXPECT_NE(last_odom_.pose.pose.orientation.z, before);
+  EXPECT_TRUE(lastCommandsAreZero());
+  evidence("T6-two-counts-not-frozen");
+}
 
 TEST_F(DriveComponentNode, EstopStartupAndRepressDeferOnlyExpectedOdomLogs) {
   operationManagerWithoutGpio();
@@ -579,6 +948,54 @@ TEST_F(DriveComponentNode, RepeatedEstopReleaseWaitsQuietlyForFreshPair) {
   }
 }
 
+TEST_F(DriveComponentNode, M1NeutralRepeatedThreeReleases) {
+  send_twist_ = true;
+  twist_linear_ = 0;
+  operationManagerWithoutGpio();
+  estop_active_ = true;
+  motor_.answerBoth(false);
+  start();
+  ASSERT_EQ(drive_->get_parameter("stop_resend_interval_ms").as_int(), 300);
+  for (size_t press = 1; press <= 3; ++press) {
+    SCOPED_TRACE(press);
+    ASSERT_TRUE(spinUntil([this, press]() { return odom_estop_infos_.size() == press; }, 2s));
+    spinFor(100ms);  // drain logs from the preceding stage
+    odom_warnings_.clear();
+    spinFor(700ms);  // retained feedback, when present, becomes stale while pressed
+    EXPECT_TRUE(odom_warnings_.empty());
+    const auto left_count = last_sample_.left.feedback_count;
+    const auto right_count = last_sample_.right.feedback_count;
+
+    motor_.answerBoth(false);
+    odom_warnings_.clear();  // count only this release through the fresh-pair anchor
+    estop_active_ = false;
+    publishEstop(false, kNoGpioReason);
+    spinFor(1050ms);  // delay replies within the 1.64 s grace, as on ID13
+    EXPECT_TRUE(odom_warnings_.empty());
+    motor_.answerBoth(true);
+    ASSERT_TRUE(spinUntil(
+        [this, left_count, right_count]() {
+          return last_sample_.left.feedback_count > left_count &&
+                 last_sample_.right.feedback_count > right_count;
+        },
+        400ms));
+    spinFor(100ms);
+    EXPECT_TRUE(odom_warnings_.empty());
+    EXPECT_EQ(odom_estop_infos_.size(), press);
+    EXPECT_TRUE(lastCommandsAreZero());
+    EXPECT_NEAR(last_odom_.pose.pose.position.x, 0, 1e-9);
+    EXPECT_NEAR(last_odom_.pose.pose.position.y, 0, 1e-9);
+    evidence("T5-neutral-repeat");
+    if (press < 3) {
+      estop_active_ = true;
+      publishEstop(true, "test repress");
+    }
+  }
+}
+
+TEST_F(DriveComponentNode, M1NeutralReleaseLeftFirst) { expectStaggeredRelease(true, true); }
+TEST_F(DriveComponentNode, M1NeutralReleaseRightFirst) { expectStaggeredRelease(false, true); }
+
 TEST_F(DriveComponentNode, SecondEstopReleaseWithoutRepliesEventuallyWarns) {
   operationManagerWithoutGpio();
   estop_active_ = true;
@@ -633,6 +1050,31 @@ TEST_F(DriveComponentNode, SecondEstopReleaseWithUpdatedWheelBecomingStaleStillW
   EXPECT_NE(odom_warnings_.back().find("stale feedback"), std::string::npos);
   EXPECT_LT(std::chrono::duration<double>(std::chrono::steady_clock::now() - released_at).count(),
             1.5);  // WARN precedes expiry of the 1.64 s release grace
+}
+
+TEST_F(DriveComponentNode, M1NeutralUpdatedWheelStaleStillWarns) {
+  ASSERT_NO_FATAL_FAILURE(startRepressedEstop());
+  send_twist_ = true;
+  twist_linear_ = 0;
+  const auto left_count = last_sample_.left.feedback_count;
+  const auto right_count = last_sample_.right.feedback_count;
+  motor_.answerRight(false);
+  odom_warnings_.clear();
+  estop_active_ = false;
+  publishEstop(false, kNoGpioReason);
+  const auto released_at = std::chrono::steady_clock::now();
+  ASSERT_TRUE(spinUntil(
+      [this, left_count]() { return last_sample_.left.feedback_count > left_count; }, 400ms));
+  motor_.answerBoth(false);
+  spinFor(200ms);  // the updated left frame is still fresh
+  EXPECT_TRUE(odom_warnings_.empty());
+  EXPECT_EQ(last_sample_.right.feedback_count, right_count);
+  odom_warnings_.clear();  // now count only the updated-left-becomes-stale interval
+  ASSERT_TRUE(spinUntil([this]() { return !odom_warnings_.empty(); }, 850ms));
+  EXPECT_NE(odom_warnings_.back().find("stale feedback"), std::string::npos);
+  EXPECT_LT(std::chrono::duration<double>(std::chrono::steady_clock::now() - released_at).count(),
+            1.5);  // WARN precedes expiry of the 1.64 s release grace
+  evidence("T4-neutral-updated-wheel-stale");
 }
 
 TEST_F(DriveComponentNode, SecondEstopReleaseWithOneFreshWheelEventuallyWarns) {

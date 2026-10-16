@@ -318,9 +318,15 @@ void DriveComponent::integrateOdometry() {
   }
   const bool estop_known = last_block_ != actuation_gate::Block::kEstopUnknown &&
                            last_block_ != actuation_gate::Block::kEstopStale;
+  const auto finite_zero = [](double value) { return std::isfinite(value) && value == 0.0; };
+  // Log evidence only: a re-armed neutral controller uses TICK_DRIVE too. Require both
+  // the accepted/shaped commands and the last SUCCESSFUL wheel frames to be zero.
+  // RPM targets alone cannot prove this in current mode (nonzero PI current at zero RPM).
   const bool zero_command =
-      tick_sample_.tick_action == questix_msgs::msg::DriveControlSample::TICK_IDLE &&
-      left_fb.target_rpm == 0 && right_fb.target_rpm == 0;
+      motor_initialized_ && !stop_fault_ && diff_drive_ && control_core_ &&
+      (!has_target_ || (finite_zero(target_linear_) && finite_zero(target_angular_))) &&
+      finite_zero(control_core_->lastLinear()) && finite_zero(control_core_->lastAngular()) &&
+      left_fb.target_rpm == 0 && right_fb.target_rpm == 0 && diff_drive_->lastSentIsZero();
   // ID13 needed about 1.3 s for its first reply. Eight existing idle polling intervals plus
   // two ticks give 1.64 s at 50 Hz, allowing that observed delay with scheduling margin.
   // This bounds LOG suppression only: no polling, safety, anchor or pose decision reads it.
