@@ -92,7 +92,7 @@ install -o root -g root -m 0644 "${REPO_DIR}/systemd/questix_network_admin.servi
 # The static unit carries After=questix_pwm_guard.service; sed preserves it (no Requires/Wants).
 echo "[3/6] Installing questix_robot.service ..."
 # Preserve RestartPreventExitStatus=78 from the source unit: config refusals stay failed.
-# The updater supplies the same policy as a drop-in for older installed units.
+# Every install path deploys the same refusal-policy drop-in, including older units.
 sed \
   -e "s|^User=.*|User=${TARGET_USER}|" \
   -e "s|^Group=.*|Group=${TARGET_USER}|" \
@@ -104,6 +104,9 @@ sed \
 install -d -o root -g root -m 0755 /etc/systemd/system/questix_robot.service.d
 install -o root -g root -m 0644 "${REPO_DIR}/systemd/questix_robot.service.d/pwm-guard-order.conf" \
   /etc/systemd/system/questix_robot.service.d/pwm-guard-order.conf
+
+install -o root -g root -m 0644 "${REPO_DIR}/systemd/questix_robot.service.d/launcher-config.conf" \
+  /etc/systemd/system/questix_robot.service.d/launcher-config.conf
 
 systemctl daemon-reload
 systemctl enable questix_robot

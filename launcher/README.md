@@ -330,3 +330,5 @@ unitを再読み込みしてからランチャーを更新する（ロボット�
 `robot_mode` を宣言していなくても警告なく `scratch launch reached` が表示され、
 終了コード0だった。このため、引数を渡すだけでは古いビルドを検出できない。
 この版の確認はインストール済みlaunchの構造の確認であり、実機の安全動作の検証は別途必要。
+
+Ansible (`robot_autostart`)、`install-robot-manager.sh`、`update-robot-manager.sh` の3経路は、同じ `systemd/questix_robot.service.d/launcher-config.conf` を配備します。
