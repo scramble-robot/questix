@@ -142,7 +142,8 @@ if(BUILD_TESTING)
 
   # The real DriveComponent on a fake motor (pseudo terminal), loaded with the integrated
   # hardware YAML and an operator profile from this source tree, as questix_core does.
-  ament_auto_add_gtest(test_drive_component_node test/test_drive_component_node.cpp TIMEOUT 120)
+  # PTY regressions include delayed replies, throttle-separated negatives and repeated releases.
+  ament_auto_add_gtest(test_drive_component_node test/test_drive_component_node.cpp TIMEOUT 240)
   target_link_libraries(test_drive_component_node drive_component util)
   ament_target_dependencies(test_drive_component_node motor_control_lib)
   target_compile_definitions(test_drive_component_node PRIVATE
