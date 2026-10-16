@@ -51,9 +51,12 @@ class SetupMigration(unittest.TestCase):
                         p = ws / relative
                         p.mkdir(parents=True)
                         (p / 'package.xml').write_text(manifest.format(name=p.name))
-                    old = ws / 'install/joy_gate/share/joy_gate'
-                    old.mkdir(parents=True)
-                    (old / 'package.xml').symlink_to(ws / 'removed/joy_gate/package.xml')
+                    old_manifests = []
+                    for name in ('joy_gate', 'twist_arbiter'):
+                        old = ws / f'install/{name}/share/{name}'
+                        old.mkdir(parents=True)
+                        (old / 'package.xml').symlink_to(ws / f'removed/{name}/package.xml')
+                        old_manifests.append(old / 'package.xml')
                     if ignores:
                         for name in ('build', 'install', 'log'):
                             (ws / name / 'COLCON_IGNORE').touch()
@@ -89,7 +92,9 @@ open(os.environ['TEST_ROSDEP_ARGS'],'w').write(json.dumps(sys.argv[1:]))
                     args = json.loads(capture.read_text())
                     sources = args[args.index('--from-paths') + 1:args.index('--ignore-src')]
                     self.assertEqual(set(sources), {str(ws / 'core'), str(ws / 'src/external')})
-                    self.assertTrue((old / 'package.xml').is_symlink())
+                    for old_manifest in old_manifests:
+                        self.assertTrue(old_manifest.is_symlink())
+                        self.assertFalse(old_manifest.exists())
 
     def verify(self, setup, timeout_status):
         temp = tempfile.TemporaryDirectory()
