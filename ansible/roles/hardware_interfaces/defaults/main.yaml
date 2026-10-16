@@ -11,3 +11,8 @@ configure_udev_rules: true
 enable_rp1_pwm: "{{ questix_rp1_pwm | default(false) | bool }}"
 rp1_pwm_source_dir: /etc/flash-kernel/dtbs/overlays
 rp1_pwm_boot_overlay_dir: /boot/firmware/overlays
+
+# Root filesystem, outside the VFAT boot partition; fixtures override paths/identity only.
+rp1_pwm_backup_dir: /var/backups/questix
+rp1_pwm_backup_owner: root
+rp1_pwm_backup_group: root
