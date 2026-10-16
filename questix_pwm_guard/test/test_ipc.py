@@ -44,7 +44,18 @@ with tempfile.TemporaryDirectory(prefix='questix-ipc-') as directory:
                               '--fake-log', str(ledger), '--allowed-uid', str(os.getuid()),
                               '--admin-uid', str(os.getuid()+1), '--socket-gid', str(os.getgid()),
                               *extra], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        waitfor(lambda: sock.exists() or p.poll() is not None)
+
+        # bind() creates the socket file before listen(): wait until it accepts a connection.
+        def ready():
+            if p.poll() is not None:
+                return True
+            try:
+                connect(sock).close()
+            except (FileNotFoundError, ConnectionRefusedError):
+                return False
+            return True
+
+        waitfor(ready)
         assert p.poll() is None, p.communicate()
         return p
 
