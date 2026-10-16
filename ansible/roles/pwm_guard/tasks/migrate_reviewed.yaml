@@ -1,0 +1,40 @@
+---
+# Only the two byte-for-byte historical drop-ins are ours to remove. The standard
+# installer refuses any remaining legacy drop-in, including a broken symbolic link.
+- name: Inspect the old reviewed robot drop-in without following links
+  ansible.builtin.stat:
+    path: "{{ pwm_guard_robot_dropin_dir }}/50-rp1-pwm.conf"
+    follow: false
+  register: pwm_guard_legacy_dropin
+
+- name: Migrate a known reviewed robot drop-in
+  when: pwm_guard_legacy_dropin.stat.exists or pwm_guard_legacy_dropin.stat.islnk | default(false)
+  block:
+    - name: Refuse a linked or nonregular reviewed drop-in
+      ansible.builtin.assert:
+        that:
+          - pwm_guard_legacy_dropin.stat.isreg | default(false)
+          - not pwm_guard_legacy_dropin.stat.islnk | default(false)
+        quiet: true
+
+    - name: Read the reviewed robot drop-in
+      ansible.builtin.slurp:
+        src: "{{ pwm_guard_robot_dropin_dir }}/50-rp1-pwm.conf"
+      register: pwm_guard_legacy_dropin_content
+
+    - name: Require an exact historical reviewed drop-in
+      ansible.builtin.assert:
+        that:
+          - (pwm_guard_legacy_dropin_content.content | b64decode | hash('sha256')) in pwm_guard_known_dropin_hashes
+        fail_msg: >-
+          Custom 50-rp1-pwm.conf left unchanged. Review it before migrating to the independent guard.
+        quiet: true
+      vars:
+        pwm_guard_known_dropin_hashes:
+          - 0d281b29a935695eeb2dc2fbcd222eba0c0b1d1b68a8bc85bd0f9b4ef7077137
+          - bd4f6990191b1f65f179d41c6d421721ee4df4868f794568ef48214ff2d6a0cc
+
+    - name: Remove only the recognized legacy reviewed drop-in
+      ansible.builtin.file:
+        path: "{{ pwm_guard_robot_dropin_dir }}/50-rp1-pwm.conf"
+        state: absent

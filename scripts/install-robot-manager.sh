@@ -87,6 +87,7 @@ install -o root -g root -m 0644 "${REPO_DIR}/systemd/questix_network_admin.servi
   /etc/systemd/system/questix_network_admin.service
 
 # ---------- 3. systemd service (ROS2) ----------
+# The static unit carries After=questix_pwm_guard.service; sed preserves it (no Requires/Wants).
 echo "[3/6] Installing questix_robot.service ..."
 sed \
   -e "s|^User=.*|User=${TARGET_USER}|" \
@@ -96,6 +97,9 @@ sed \
   -e "s|Environment=HOME=.*|Environment=HOME=/home/${TARGET_USER}|" \
   -e "s|^WorkingDirectory=.*|WorkingDirectory=/home/${TARGET_USER}|" \
   "${REPO_DIR}/systemd/questix_robot.service" > /etc/systemd/system/questix_robot.service
+install -d -o root -g root -m 0755 /etc/systemd/system/questix_robot.service.d
+install -o root -g root -m 0644 "${REPO_DIR}/systemd/questix_robot.service.d/pwm-guard-order.conf" \
+  /etc/systemd/system/questix_robot.service.d/pwm-guard-order.conf
 
 systemctl daemon-reload
 systemctl enable questix_robot

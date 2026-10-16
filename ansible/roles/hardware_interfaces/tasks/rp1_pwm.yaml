@@ -1,0 +1,67 @@
+---
+- name: Install the Device Tree compiler for the standard PWM overlay
+  ansible.builtin.apt:
+    name: device-tree-compiler
+    state: present
+
+- name: Create the persistent flash-kernel overlay source directory
+  ansible.builtin.file:
+    path: "{{ rp1_pwm_source_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy the GPIO13-only RP1 PWM source
+  ansible.builtin.copy:
+    src: gpio13-rp1-pwm.dts
+    dest: "{{ rp1_pwm_source_dir }}/gpio13-rp1-pwm.dts"
+    owner: root
+    group: root
+    mode: "0644"
+  register: rp1_pwm_source
+
+- name: Inspect the compiled persistent overlay
+  ansible.builtin.stat:
+    path: "{{ rp1_pwm_source_dir }}/questix-gpio13-rp1-pwm.dtbo"
+  register: rp1_pwm_compiled
+
+- name: Compile the GPIO13 overlay before publishing it
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/dtc
+      - -@
+      - -I
+      - dts
+      - -O
+      - dtb
+      - -o
+      - "{{ rp1_pwm_source_dir }}/questix-gpio13-rp1-pwm.dtbo.new"
+      - "{{ rp1_pwm_source_dir }}/gpio13-rp1-pwm.dts"
+  when: rp1_pwm_source.changed or not rp1_pwm_compiled.stat.exists
+  changed_when: true
+
+- name: Publish the persistent compiled overlay
+  ansible.builtin.copy:
+    src: "{{ rp1_pwm_source_dir }}/questix-gpio13-rp1-pwm.dtbo.new"
+    dest: "{{ rp1_pwm_source_dir }}/questix-gpio13-rp1-pwm.dtbo"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - not ansible_check_mode
+    - rp1_pwm_source.changed or not rp1_pwm_compiled.stat.exists
+
+- name: Copy the persistent overlay to the firmware partition
+  ansible.builtin.copy:
+    src: "{{ rp1_pwm_source_dir }}/questix-gpio13-rp1-pwm.dtbo"
+    dest: "{{ rp1_pwm_boot_overlay_dir }}/questix-gpio13-rp1-pwm.dtbo"
+    remote_src: true
+    mode: "0644"
+  notify: reboot_required
+  # In check mode dtc creates no output, including on the first deployment.
+  when: not ansible_check_mode
+
+- name: Enable the GPIO13 overlay in the all section
+  ansible.builtin.include_tasks: rp1_pwm_config.yaml

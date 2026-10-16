@@ -6,10 +6,11 @@ cannot start the roller at startup or after a stop, timeout or multiple publishe
 a zero command is needed first. Input selection and the lesson permission remain in
 command_arbiter; this node has no `/joy` or separate LAB input.
 
-## PWM diagnostics and the opt-in RP1 backend
+## PWM diagnostics and the standard Pi 5 backend
 
-The default `pwm_backend: auto` remains the legacy backend selection. Explicit
-`rp1_hw` uses the independent `questix_pwm_guard` on GPIO13. Missing guard, invalid
+The shipping YAML and node default are `pwm_backend: rp1_hw`, using the independent
+`questix_pwm_guard` on GPIO13. PC/Pi 4 development explicitly selects `simulation`
+or the legacy `auto`; `test_mode: true` explicitly selects simulation. Missing guard, invalid
 settings or failed ARM cause initialization failure, with no simulation fallback.
 Its lease is renewed by the ROS executor every 100 ms after rechecking command
 timeout, publishers, motion permission, E-stop and the PWM fault. Shutdown has an
