@@ -21,12 +21,74 @@
          | reject('match', '^[ \t]*dtoverlay=questix-gpio13-pwm[ \t]*$')
          | reject('equalto', 'dtoverlay=questix-gpio13-rp1-pwm') | list }}
 
+# Preview the actual blockinfile operation; it must not write or notify a reboot.
+- name: Preview the standard GPIO13 overlay block without writing
+  ansible.builtin.blockinfile:
+    path: "{{ boot_config_path }}"
+    marker: "# {mark} QUESTiX RP1 PWM"
+    insertafter: EOF
+    block: |
+      [all]
+      dtoverlay=questix-gpio13-rp1-pwm
+  check_mode: true
+  register: rp1_pwm_block_preview
+
+# VFAT rejects ':' in Ansible's adjacent timestamp backups. Keep one verified
+# content-addressed preimage on the root filesystem, before either edit runs.
+- name: Back up the boot configuration only before a real PWM change
+  when:
+    - not ansible_check_mode
+    - >-
+      rp1_pwm_block_preview.changed or
+      (rp1_pwm_existing_config.content | b64decode) is
+      search('(?m)^[ \t]*dtoverlay=questix-gpio13-pwm[ \t\r]*$')
+  vars:
+    rp1_pwm_original_sha256: "{{ rp1_pwm_existing_config.content | b64decode | hash('sha256') }}"
+    rp1_pwm_backup_file: "{{ rp1_pwm_backup_dir }}/config.txt.{{ rp1_pwm_original_sha256 }}"
+  block:
+    - name: Create the private PWM configuration backup directory off the boot partition
+      ansible.builtin.file:
+        path: "{{ rp1_pwm_backup_dir }}"
+        state: directory
+        owner: "{{ rp1_pwm_backup_owner }}"
+        group: "{{ rp1_pwm_backup_group }}"
+        mode: "0700"
+
+    - name: Preserve the original PWM configuration without replacing an existing preimage
+      ansible.builtin.copy:
+        src: "{{ boot_config_path }}"
+        dest: "{{ rp1_pwm_backup_file }}"
+        remote_src: true
+        force: false
+        owner: "{{ rp1_pwm_backup_owner }}"
+        group: "{{ rp1_pwm_backup_group }}"
+        mode: "0600"
+
+    - name: Check the preserved PWM configuration checksum
+      ansible.builtin.stat:
+        path: "{{ rp1_pwm_backup_file }}"
+        follow: false
+        checksum_algorithm: sha256
+      register: rp1_pwm_backup_stat
+
+    - name: Require the backup to match the original boot configuration before editing
+      ansible.builtin.assert:
+        that:
+          - rp1_pwm_backup_stat.stat.isreg | default(false)
+          - not rp1_pwm_backup_stat.stat.islnk | default(false)
+          - rp1_pwm_backup_stat.stat.checksum | default('') == rp1_pwm_original_sha256
+        fail_msg: "PWM config backup SHA-256 mismatch; config.txt was not changed: {{ rp1_pwm_backup_file }}"
+        quiet: true
+
+    - name: Show the verified boot configuration backup for recovery
+      ansible.builtin.debug:
+        msg: "PWM config backup: {{ rp1_pwm_backup_file }} (SHA-256 {{ rp1_pwm_original_sha256 }})"
+
 - name: Remove a QUESTiX GPIO13 note immediately before its legacy overlay
   ansible.builtin.replace:
     path: "{{ boot_config_path }}"
     regexp: '(?m)^# QUESTiX[^\r\n]*GPIO13[^\r\n]*\r?\n(?=[ \t]*dtoverlay=questix-gpio13-pwm[ \t]*\r?$)'
     replace: ''
-    backup: true
   notify: reboot_required
 
 - name: Remove only exact legacy GPIO13 overlay lines
@@ -34,7 +96,6 @@
     path: "{{ boot_config_path }}"
     regexp: '^[ \t]*dtoverlay=questix-gpio13-pwm[ \t\r]*$'
     state: absent
-    backup: true
   notify: reboot_required
 
 # Retain every [all] and the unreferenced old .dtbo as migration evidence.

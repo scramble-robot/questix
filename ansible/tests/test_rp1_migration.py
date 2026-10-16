@@ -1,11 +1,15 @@
 """Exercise real migration tasks only, under temporary paths without become or devices."""
+import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+
+import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -31,7 +35,25 @@ class ReviewedMigration(unittest.TestCase):
 
     def config(self, path, check=False):
         return self.apply('ansible/roles/hardware_interfaces/tasks/rp1_pwm_config.yaml',
-                          {'boot_config_path': str(path)}, check)
+                          {'boot_config_path': str(path),
+                           'rp1_pwm_backup_dir': str(path.parent / 'backups'),
+                           'rp1_pwm_backup_owner': str(os.getuid()),
+                           'rp1_pwm_backup_group': str(os.getgid())}, check)
+
+    def backup_file(self, path, content):
+        digest = hashlib.sha256(content.encode()).hexdigest()
+        return path.parent / 'backups' / ('config.txt.' + digest)
+
+    def assert_one_backup(self, path, original):
+        backup = self.backup_file(path, original)
+        self.assertEqual(list(backup.parent.iterdir()), [backup])
+        self.assertNotIn(':', backup.name)
+        self.assertEqual(backup.read_bytes(), original.encode())
+        self.assertEqual(backup.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(backup.parent.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(backup.stat().st_uid, os.getuid())
+        return backup
+
 
     def assert_config_migration(self, legacy, managed=False):
         with tempfile.TemporaryDirectory() as temp:
@@ -45,6 +67,8 @@ class ReviewedMigration(unittest.TestCase):
             result = self.config(path)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             after = path.read_text()
+            backup = self.assert_one_backup(path, original)
+            self.assertIn(str(backup), result.stdout)
             overlays = [line.strip() for line in after.splitlines()
                         if line.strip().startswith('dtoverlay=questix-gpio13-')]
             self.assertEqual(overlays, ['dtoverlay=questix-gpio13-rp1-pwm'])
@@ -59,6 +83,7 @@ class ReviewedMigration(unittest.TestCase):
             self.assertEqual(again.returncode, 0, again.stdout + again.stderr)
             self.assertEqual(path.read_text(), after)
             self.assertRegex(again.stdout, r'changed=0\s')
+            self.assert_one_backup(path, original)
 
     def test_machine_specific_note_migrates_idempotently_in_any_section(self):
         self.assert_config_migration('# QUESTiX GPIO13 RP1 PWM0 (ID<fixture>, fixed844b381)\n'
@@ -87,6 +112,7 @@ class ReviewedMigration(unittest.TestCase):
                 self.assertIn('Unrecognized GPIO13 PWM', result.stdout)
                 self.assertIn(line, result.stdout)
                 self.assertEqual(path.read_text(), original)
+                self.assertFalse((path.parent / 'backups').exists())
 
     def test_unpaired_identical_annotation_is_preserved(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -108,6 +134,88 @@ class ReviewedMigration(unittest.TestCase):
             result = self.config(path, check=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertEqual(path.read_text(), original)
+            self.assertFalse((path.parent / 'backups').exists())
+
+    def test_new_or_changed_managed_block_is_backed_up_once(self):
+        for initial in ('[pi5]\ndtoverlay=uart0-pi5\n',
+                        '# BEGIN QUESTiX RP1 PWM\n[all]\n# stale block\n'
+                        '# END QUESTiX RP1 PWM\n'):
+            with self.subTest(initial=initial), tempfile.TemporaryDirectory() as temp:
+                path = Path(temp) / 'config.txt'
+                path.write_text(initial)
+                result = self.config(path)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assert_one_backup(path, initial)
+                again = self.config(path)
+                self.assertEqual(again.returncode, 0, again.stdout + again.stderr)
+                self.assertRegex(again.stdout, r'changed=0\s')
+                self.assert_one_backup(path, initial)
+
+    def test_matching_managed_block_alone_creates_no_backup(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'config.txt'
+            original = ('# BEGIN QUESTiX RP1 PWM\n[all]\n'
+                        'dtoverlay=questix-gpio13-rp1-pwm\n# END QUESTiX RP1 PWM\n')
+            path.write_text(original)
+            result = self.config(path)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertRegex(result.stdout, r'changed=0\s')
+            self.assertEqual(path.read_text(), original)
+            self.assertFalse((path.parent / 'backups').exists())
+
+    def test_wrong_backup_checksum_stops_before_any_config_edit(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'config.txt'
+            original = ('[all]\n# QUESTiX GPIO13 RP1 PWM0\n'
+                        'dtoverlay=questix-gpio13-pwm\n')
+            path.write_text(original)
+            backup = self.backup_file(path, original)
+            backup.parent.mkdir()
+            backup.write_text('deliberately corrupted preimage\n')
+            result = self.config(path)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('backup SHA-256 mismatch', result.stdout)
+            self.assertEqual(path.read_text(), original)
+            self.assertEqual(backup.read_text(), 'deliberately corrupted preimage\n')
+
+    def test_boot_partition_writers_never_use_adjacent_backups(self):
+        # Track boot-valued defaults (including aliases), then inspect nested role tasks.
+        # This covers literal paths and destinations such as {{ boot_config_path }}.
+        roles = ROOT / 'ansible/roles'
+        defaults = {}
+        for path in roles.glob('*/defaults/*.y*ml'):
+            defaults.update(yaml.safe_load(path.read_text()) or {})
+        boot_vars = set()
+        for _ in range(len(defaults) + 1):
+            for key, value in defaults.items():
+                text = str(value)
+                if '/boot/' in text or boot_vars.intersection(re.findall(r'\b\w+\b', text)):
+                    boot_vars.add(key)
+        checked = []
+
+        def inspect(tasks, path):
+            for task in tasks:
+                if not isinstance(task, dict):
+                    continue
+                for section in ('block', 'rescue', 'always'):
+                    inspect(task.get(section, []), path)
+                for action, args in task.items():
+                    if action.split('.')[-1] not in ('copy', 'template', 'replace', 'lineinfile', 'blockinfile'):
+                        continue
+                    if not isinstance(args, dict):
+                        continue
+                    dest = str(args.get('dest', args.get('path', '')))
+                    if '/boot/' in dest or boot_vars.intersection(re.findall(r'\b\w+\b', dest)):
+                        checked.append(str(path))
+                        self.assertIn(args.get('backup', False), (False, 'false', 'no'),
+                                      f'Adjacent backup on a boot partition: {path}: {task.get("name")}')
+        for path in roles.glob('*/tasks/*.y*ml'):
+            inspect(yaml.safe_load(path.read_text()) or [], path)
+        self.assertIn(str(roles / 'hardware_interfaces/tasks/rp1_pwm_config.yaml'), checked)
+        self.assertGreaterEqual(len(checked), 8)
+        self.assertEqual(defaults['rp1_pwm_backup_dir'], '/var/backups/questix')
+        self.assertEqual(defaults['rp1_pwm_backup_owner'], 'root')
+        self.assertEqual(defaults['rp1_pwm_backup_group'], 'root')
 
     def dropin(self, directory, check=False):
         return self.apply('ansible/roles/pwm_guard/tasks/migrate_reviewed.yaml',

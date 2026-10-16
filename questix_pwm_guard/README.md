@@ -270,6 +270,10 @@ The unreferenced old `/boot/firmware/overlays/questix-gpio13-pwm.dtbo` is retain
 firmware does not load an overlay merely because the file exists. The SD investigation
 reported identical old/new overlay bytes; the boot result of loading both is unverified.
 
+Before a real config change, Ansible saves and verifies `/var/backups/questix/config.txt.<SHA-256>` (root:root, directory 0700, file 0600).
+The debug output shows the path; unchanged reapplications create no backup, and adjacent timestamp backups are disabled for VFAT.
+To restore, the operator verifies the selected preimage with `sha256sum` against its filename, then copies it back to `/boot/firmware/config.txt` with administrator privileges.
+
 | Old installed asset | Standard migration |
 |---|---|
 | `/opt/questix_pwm_guard/questix_pwm_guard`, `questix_pwm_ctl` | `pwm_guard` uses the protected standalone installer to overwrite both binaries; previous assets are backed up by that installer. |
