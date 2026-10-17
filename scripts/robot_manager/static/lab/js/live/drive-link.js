@@ -193,9 +193,15 @@ function initDriveLink() {
   });
   // Esc stops this page's own run from anywhere on the page. It never stops another pupil's run:
   // Esc also closes dialogs, and closing one must not end someone else's experiment.
-  document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && current) current.finish('stopped');
-  });
+  // Listen in the capture phase: a dialog that stops key propagation (the supplement dialog keeps
+  // reading keys away from the robot) must still let Esc stop the run before it closes (S-2).
+  document.addEventListener(
+    'keydown',
+    (event) => {
+      if (event.key === 'Escape' && current) current.finish('stopped');
+    },
+    { capture: true },
+  );
 }
 
 initDriveLink();
