@@ -52,6 +52,7 @@ function topicNav(model, copy, actions) {
         html`<button
           data-motor-topic=${id}
           aria-pressed=${String(id === model.topic)}
+          aria-current=${String(id === model.topic)}
           @click=${() => actions.openTopic(id)}
         >
           ${copy.topics[id].label}

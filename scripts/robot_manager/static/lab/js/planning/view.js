@@ -23,6 +23,7 @@ function topicNav(model, actions) {
         html`<button
           data-planning-topic=${topic.id}
           aria-pressed=${String(topic.id === model.topic)}
+          aria-current=${String(topic.id === model.topic)}
           @click=${() => actions.openTopic(topic.id)}
         >
           <span>${index + 1}</span>${topic.label}
