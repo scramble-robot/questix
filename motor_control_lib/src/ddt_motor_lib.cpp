@@ -77,6 +77,8 @@ void DdtMotorLib::shutdown() {
     motor_modes_.clear();
     pi_states_.clear();
     current_guard_trips_.clear();
+    current_link_latched_ = false;
+    current_link_recovery_.clear();
     last_sent_frames_.clear();
     transaction_stats_.clear();
     initialized_ = false;
@@ -96,8 +98,9 @@ bool DdtMotorLib::isHealthy() const {
       return false;
     }
   }
-  // current モードの暴走ガードが作動していれば異常（ホスト側の判定。故障コードは偽装しない）
-  return current_guard_trips_.empty();
+  // current モードの暴走ガード・応答の途切れのラッチが立っていれば異常（ホスト側の判定。故障
+  // コードは偽装しない）
+  return current_guard_trips_.empty() && !current_link_latched_;
 }
 
 void DdtMotorLib::resetCurrentPiStateForStop(int motor_id) {
@@ -119,6 +122,78 @@ void DdtMotorLib::clearCurrentGuardTrips(const char* why) {
                 ddt_current_pi::guardTripName(trip), why);
   }
   current_guard_trips_.clear();
+}
+
+bool DdtMotorLib::currentLinkLatched() const {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+  return current_link_latched_;
+}
+
+bool DdtMotorLib::isCurrentModeMotor(int motor_id) const {
+  auto it = motor_modes_.find(motor_id);
+  return it != motor_modes_.end() && it->second == ControlMode::Current;
+}
+
+double DdtMotorLib::currentFeedbackAgeSec(const MotorFeedback& fb) const {
+  return std::chrono::duration<double>(controlNow() - fb.last_feedback_control_time).count();
+}
+
+void DdtMotorLib::latchCurrentLink(int motor_id, const char* why) {
+  for (auto& [id, count] : current_link_recovery_) {
+    count = 0;
+  }
+  if (current_link_latched_) {
+    return;  // WARN は状態の変化のときだけ
+  }
+  current_link_latched_ = true;
+  for (const auto& [id, mode] : motor_modes_) {
+    if (mode == ControlMode::Current) {
+      resetCurrentPiStateForStop(id);
+      current_link_recovery_[id] = 0;
+    }
+  }
+  RCLCPP_WARN(logger_,
+              "モーター %d: %s。応答の途切れのラッチを立て、すべての current モードのモータに電流 "
+              "0 を送ります（解除: 停止の指令だけの間に、すべてのモータから有効な応答が %d 回"
+              "続けて届いたとき）",
+              motor_id, why, kCurrentLinkRecoveryResponses);
+}
+
+void DdtMotorLib::stopOtherCurrentMotors(int motor_id) {
+  for (const auto& [id, mode] : motor_modes_) {
+    if (id != motor_id && mode == ControlMode::Current) {
+      resetCurrentPiStateForStop(id);
+      sendMotorCurrentRaw(id, 0);
+    }
+  }
+}
+
+bool DdtMotorLib::latchCurrentLinkAndStop(int motor_id, const char* why) {
+  latchCurrentLink(motor_id, why);
+  resetCurrentPiStateForStop(motor_id);
+  const bool sent = sendMotorCurrentRaw(motor_id, 0);
+  stopOtherCurrentMotors(motor_id);
+  return sent;
+}
+
+void DdtMotorLib::noteCurrentLinkResponse(int motor_id, bool valid) {
+  int& count = current_link_recovery_[motor_id];
+  count = valid ? count + 1 : 0;
+  for (const auto& [id, mode] : motor_modes_) {
+    if (mode != ControlMode::Current) {
+      continue;
+    }
+    auto it = current_link_recovery_.find(id);
+    if (it == current_link_recovery_.end() || it->second < kCurrentLinkRecoveryResponses) {
+      return;
+    }
+  }
+  current_link_latched_ = false;
+  current_link_recovery_.clear();
+  RCLCPP_INFO(logger_,
+              "応答の途切れのラッチを解除しました（停止の指令だけの間に、すべての current モードの"
+              "モータから有効な応答が %d 回続けて届いた）",
+              kCurrentLinkRecoveryResponses);
 }
 
 ddt_current_pi::GuardTrip DdtMotorLib::currentGuardTrip(int motor_id) const {
@@ -175,29 +250,69 @@ bool DdtMotorLib::setMotorVelocity(int motor_id, int velocity_rpm) {
 }
 
 bool DdtMotorLib::commandCurrentMode(int motor_id, int rpm_ref_raw) {
+  // 応答の途切れのラッチの間は電流 0 だけを送る。0 でない目標を受けたら、解除の数えを 0 に戻す
+  // （停止の指令だけの間に、すべてのモータから有効な応答がそろったときだけ解除する）。
+  // その送受信の応答も数えない（数え直しは送受信の後）。
+  if (current_link_latched_) {
+    resetCurrentPiStateForStop(motor_id);
+    const bool sent = sendMotorCurrentRaw(motor_id, 0);
+    if (rpm_ref_raw != 0) {
+      for (auto& [id, count] : current_link_recovery_) {
+        count = 0;
+      }
+    }
+    return sent;
+  }
+
   // 暴走ガードがラッチしている間は電流 0 だけを送る（解除は再初期化かパラメータ変更）。
   if (current_guard_trips_.count(motor_id) != 0) {
     resetCurrentPiStateForStop(motor_id);
     return sendMotorCurrentRaw(motor_id, 0);
   }
 
-  // 実測の鮮度: 一度も応答が無い・有効な応答が続けて無いなら、古い実測で電流を出さない。
-  // 浮かせた車輪では、古い実測のまま電流を出し続けると回転が上がり続ける。
+  // 応答の新しさの門（P0-2・P0-3 の軽減）: 0 でない電流は、そのモータの新しい応答（経過時間
+  // kCurrentFeedbackMaxAgeSec 以下、mode=1）があるときだけ送る。古い実測で電流を出すと、浮かせた
+  // 車輪は回転が上がり続け、モータだけが再起動して速度ループに戻っていれば電流の raw 値が速度目標
+  // として読まれる。
+  // 確認と送信は一度に行えないので、確認の直後（送信までの間）にモータだけが再起動する競合は、
+  // ソフトだけでは無くせない（送信後の応答のモード値でラッチするまで、最大で 1 回の電流指令が
+  // 速度目標として読まれうる。Issue #222 の P0-3）。
   auto fb_it = motor_feedbacks_.find(motor_id);
-  if (fb_it == motor_feedbacks_.end() || !fb_it->second.has_feedback ||
-      fb_it->second.consecutive_timeouts >= kCurrentMaxConsecutiveTimeouts) {
-    RCLCPP_WARN_THROTTLE(logger_, throttle_clock_, 1000,
-                         "モーター %d: 実測が古い（応答が %d 回続けて無い）ため電流 0 を送ります",
-                         motor_id,
-                         fb_it == motor_feedbacks_.end() ? 0 : fb_it->second.consecutive_timeouts);
+  if (fb_it == motor_feedbacks_.end() || !fb_it->second.has_feedback) {
     resetCurrentPiStateForStop(motor_id);
+    if (rpm_ref_raw != 0) {
+      return latchCurrentLinkAndStop(motor_id, "応答が一度も無いのに 0 でない目標が来た");
+    }
+    return sendMotorCurrentRaw(motor_id, 0);
+  }
+  if (fb_it->second.consecutive_timeouts >= kCurrentMaxConsecutiveTimeouts) {
+    // countResponse がラッチを立てているはずだが、念のためここでも止める。
+    return latchCurrentLinkAndStop(motor_id, "有効な応答が続けて無い");
+  }
+  const double feedback_age_sec = currentFeedbackAgeSec(fb_it->second);
+  if (feedback_age_sec > kCurrentFeedbackMaxAgeSec) {
+    resetCurrentPiStateForStop(motor_id);
+    if (rpm_ref_raw != 0 && transaction_stats_[motor_id].last_current_raw_sent != 0) {
+      // 電流を出している最中に応答が古くなった: 途切れとみなして止める。
+      return latchCurrentLinkAndStop(motor_id, "電流を出している間に最新の応答が古くなった");
+    }
+    // 電流 0 で止まっている間の古さ（待機中の応答の取り直しは stop_resend_interval_ms ごと）は
+    // 途切れではない。この周期は電流 0 を送って新しい応答を取り直し、次の周期から PI を回す
+    // （0 で準備し直す → 新しい mode=1 を確かめる）。
+    RCLCPP_DEBUG(logger_, "モーター %d: 最新の応答が %.3f s 前のため、電流 0 で応答を取り直します",
+                 motor_id, feedback_age_sec);
     return sendMotorCurrentRaw(motor_id, 0);
   }
 
   // モータが電流ループを報告していなければ電流を出さない（電流指令が速度目標として解釈される）。
+  // 暴走ガード（kModeMismatch、このモータ）と応答の途切れのラッチ（すべてのモータ）の両方を立てる。
   if (fb_it->second.mode != 0x01) {
-    return tripCurrentGuard(motor_id, ddt_current_pi::GuardTrip::kModeMismatch, rpm_ref_raw,
-                            fb_it->second.speed, fb_it->second.speed, 0.0, 0.0);
+    latchCurrentLink(motor_id, "モータが電流ループを報告していない");
+    const bool sent =
+        tripCurrentGuard(motor_id, ddt_current_pi::GuardTrip::kModeMismatch, rpm_ref_raw,
+                         fb_it->second.speed, fb_it->second.speed, 0.0, 0.0);
+    stopOtherCurrentMotors(motor_id);
+    return sent;
   }
 
   // スルーレート制限（加速度制限）: 目標 RPM を 1ステップあたり max_accel * dt だけ変化させる。
@@ -254,6 +369,14 @@ bool DdtMotorLib::commandCurrentMode(int motor_id, int rpm_ref_raw) {
   if (!sendMotorCurrentRaw(motor_id, current_raw)) {
     return false;
   }
+  // この送受信で応答の途切れのラッチが立った（countResponse）: 送ったばかりの電流を 0 で上書きし、
+  // ほかのモータも止める。
+  if (current_link_latched_) {
+    resetCurrentPiStateForStop(motor_id);
+    const bool sent = sendMotorCurrentRaw(motor_id, 0);
+    stopOtherCurrentMotors(motor_id);
+    return sent;
+  }
   // 新しい応答が無ければガードは評価しない（同じ実測を二度使わない）。
   if (transaction_stats_[motor_id].feedback_count == feedback_count_before) {
     return true;
@@ -262,8 +385,11 @@ bool DdtMotorLib::commandCurrentMode(int motor_id, int rpm_ref_raw) {
   const int measured_new =
       current_invert_measured_ ? -fb_new.speed : static_cast<int>(fb_new.speed);
   if (fb_new.mode != 0x01) {
-    return tripCurrentGuard(motor_id, ddt_current_pi::GuardTrip::kModeMismatch, rpm_ref,
-                            measured_prev, measured_new, applied_amp, i_cmd_amp);
+    latchCurrentLink(motor_id, "モータが電流ループを報告していない");
+    const bool sent = tripCurrentGuard(motor_id, ddt_current_pi::GuardTrip::kModeMismatch, rpm_ref,
+                                       measured_prev, measured_new, applied_amp, i_cmd_amp);
+    stopOtherCurrentMotors(motor_id);
+    return sent;
   }
   const ddt_current_pi::GuardSample sample{
       std::chrono::duration<double>(controlNow().time_since_epoch()).count(),
@@ -751,6 +877,9 @@ bool DdtMotorLib::sendMotorCurrentRaw(int motor_id, int16_t current_raw) {
   return success;
 }
 
+// 戻り値は「書けたか」だけで、応答が来たかは表さない（応答が時間切れでも true。Issue #222 の
+// R4）。応答の有無は countResponse と transaction_stats_ が数える。current モードの安全の判断
+// （応答の途切れのラッチ・応答の新しさの門）は戻り値ではなく、そちらの「応答が来たか」で行う。
 bool DdtMotorLib::sendFrameWithFeedback(int motor_id, const std::vector<uint8_t>& frame) {
   std::lock_guard<std::recursive_mutex> lock(state_mutex_);
   if (serial_fd_ < 0) {
@@ -820,7 +949,21 @@ void DdtMotorLib::countResponse(int motor_id, bool valid) {
   if (it == motor_feedbacks_.end()) {
     return;  // 未登録のモータ（モード設定前など）は数えない
   }
-  it->second.consecutive_timeouts = valid ? 0 : it->second.consecutive_timeouts + 1;
+  MotorFeedback& fb = it->second;
+  fb.consecutive_timeouts = valid ? 0 : fb.consecutive_timeouts + 1;
+  if (!isCurrentModeMotor(motor_id)) {
+    return;  // velocity モードは従来どおり
+  }
+  if (current_link_latched_) {
+    // 解除に数えるのは、新しい有効な応答（parse に成功 = feedback_count が進んだ）で、電流ループ
+    // を報告し、fault が無いものだけ。
+    noteCurrentLinkResponse(motor_id, valid && fb.mode == 0x01 && fb.fault_code == 0);
+    return;
+  }
+  if (fb.consecutive_timeouts >= kCurrentMaxConsecutiveTimeouts) {
+    // フレームはここでは送らない（送受信の途中のため）。電流 0 は呼び出し側か次の指令が送る。
+    latchCurrentLink(motor_id, "有効な応答が続けて無い");
+  }
 }
 
 int16_t DdtMotorLib::runCurrentLoopStep(int motor_id, int rpm_ref, double* i_cmd_amp_out) {
@@ -970,6 +1113,7 @@ bool DdtMotorLib::parseFeedback(int expected_motor_id, const std::vector<uint8_t
   fb.fault_code = decoded.fault_code;
   fb.has_feedback = true;
   fb.last_feedback_time = feedback_now;
+  fb.last_feedback_control_time = controlNow();
   ++transaction_stats_[expected_motor_id].feedback_count;
 
   // PI 状態側にも保存（受信失敗時のフォールバック用）

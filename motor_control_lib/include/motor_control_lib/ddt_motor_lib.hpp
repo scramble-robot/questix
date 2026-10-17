@@ -51,9 +51,19 @@ public:
   /// 応答タイムアウトを [kMinResponseTimeoutMs, kMaxResponseTimeoutMs] に丸める（純関数）。
   static int clampResponseTimeoutMs(int timeout_ms);
 
-  // current モード: 有効な応答がこの回数続けて無ければ、PI の実測は古いとみなして電流 0 を送る
+  // current モード: 有効な応答がこの回数続けて無ければ、応答の途切れのラッチを立てる
   // （古い実測のまま電流を出し続けると、浮かせた車輪は回転が上がり続ける）。
   static constexpr int kCurrentMaxConsecutiveTimeouts = 3;
+
+  // current モード: 0 でない電流を送ってよい、最新の応答の経過時間の上限 [s]（応答の新しさの門）。
+  // 応答の間隔は走行中の中央値 20 ms・p99 21〜26 ms（ID13/ID14 の記録、Issue #222）。応答が
+  // 1 回欠けた（≈40 ms）までは通し、2 回続けて欠けたら（≈60 ms）止める。経過時間は controlNow()
+  // で測る（受信時刻も controlNow() で記録する）。
+  static constexpr double kCurrentFeedbackMaxAgeSec = 0.05;
+
+  // current モード: 応答の途切れのラッチを解除するのに要る、ラッチの後の新しい有効な応答
+  // （mode=1・fault=0）の連続回数（すべての current モードのモータそれぞれに）。
+  static constexpr int kCurrentLinkRecoveryResponses = 3;
 
   explicit DdtMotorLib(const std::string& serial_port = "/dev/ttyACM0", int baud_rate = 115200);
   virtual ~DdtMotorLib();
@@ -143,6 +153,25 @@ public:
    *  解除は initializeMotor（再初期化）か、current モードのパラメータ設定。
    */
   ddt_current_pi::GuardTrip currentGuardTrip(int motor_id) const;
+
+  /**
+   * @brief Current モードの応答の途切れのラッチ（ライブラリ全体で 1 つ）が立っているか。
+   *
+   *  立てる条件（current モードのどれかのモータで）:
+   *   - 有効な応答が kCurrentMaxConsecutiveTimeouts 回続けて無い。
+   *   - 応答が一度も無いのに、0 でない目標が来た。
+   *   - 電流を出している（最後に送った電流が 0 でない）間に、最新の応答の経過時間が
+   *     kCurrentFeedbackMaxAgeSec を超えたまま 0 でない目標が来た。
+   *   - 応答のモード値が電流ループでない（暴走ガードの kModeMismatch も同時に立つ）。
+   *  ラッチの間は、すべての current モードのモータに電流 0 だけを送り、PI の状態を消し、
+   *  isHealthy() は false を返す（drive_component は "Motor not healthy" でフォールト停止する）。
+   *  解除はライブラリの中だけで行う: ラッチの後に 0 でない目標を受けず（停止の指令だけ）、
+   *  すべての current モードのモータから新しい有効な応答（mode=1・fault=0）が
+   *  kCurrentLinkRecoveryResponses 回続けて届いたとき。0 でない目標を受けると数え直す。
+   *  応答が戻っただけでは解除しない。再初期化・パラメータ変更でも解除しない（shutdown で消える）。
+   *  velocity モードのモータには関係しない。
+   */
+  bool currentLinkLatched() const;
 
   /**
    * @brief Current モードのゼロ近傍デッドバンド設定
@@ -335,6 +364,8 @@ private:
     uint8_t fault_code{0};
     bool has_feedback{false};  // 一度でも有効フィードバックを parse したか
     std::chrono::steady_clock::time_point last_feedback_time{};  // 最終受信時刻
+    // 最終受信時刻（controlNow()）。current モードの応答の新しさの門が使う。
+    std::chrono::steady_clock::time_point last_feedback_control_time{};
   };
 
   // Current モード用 PI 状態（モータ毎）
@@ -391,6 +422,10 @@ private:
   std::map<int, PiState> pi_states_;              // motor_id -> PI state
   // motor_id -> 作動してラッチした暴走ガード（kNone 以外のときだけ要素がある）
   std::map<int, ddt_current_pi::GuardTrip> current_guard_trips_;
+  // current モードの応答の途切れのラッチ（ライブラリ全体で 1 つ。currentLinkLatched を参照）
+  bool current_link_latched_{false};
+  // motor_id -> ラッチの後に続けて届いた新しい有効な応答（mode=1・fault=0）の数
+  std::map<int, int> current_link_recovery_;
   // motor_id -> 送受信の記録（診断用。initializeMotor では消さない累積値）
   std::map<int, MotorTransactionStats> transaction_stats_;
   // motor_id -> 最後に**送信に成功した**指令フレーム。送信に失敗したときは書き換えない
@@ -409,7 +444,9 @@ private:
                          bool brake = false);                   // velocity モード送信
   bool sendMotorCurrentRaw(int motor_id, int16_t current_raw);  // current モード送信＋応答受信
   // 高頻度指令の共通送受信: 固定スリープなしで送信し、応答フィードバックを短い
-  // タイムアウトで1回だけ待つ（タイムアウトしても送信成功として扱う）。
+  // タイムアウトで1回だけ待つ（タイムアウトしても送信成功として扱う。true は「書けた」
+  // だけを意味し、応答が来たことは意味しない）。応答が来たかは countResponse /
+  // transaction_stats_ が数え、current モードの判断（応答の途切れのラッチ）はそちらを使う。
   bool sendFrameWithFeedback(int motor_id, const std::vector<uint8_t>& frame);
   // current モードの 1 周期（鮮度・ガード・デッドバンド・PI・送信）。setMotorVelocity から呼ぶ。
   bool commandCurrentMode(int motor_id, int rpm_ref_raw);
@@ -420,7 +457,20 @@ private:
   int16_t runCurrentLoopStep(int motor_id, int rpm_ref, double* i_cmd_amp_out);
   void resetCurrentPiStateForStop(int motor_id);
   void clearCurrentGuardTrips(const char* why);
-  // 送受信 1 回の結果で、有効な応答が続けて無かった回数を更新する。
+  bool isCurrentModeMotor(int motor_id) const;
+  // 応答の途切れのラッチを立てる（状態・WARN・PI の消去だけ。フレームは送らない。立っていれば
+  // 解除の数えを 0 に戻すだけ）。送受信の途中（countResponse）からも呼ぶため、送信はしない。
+  void latchCurrentLink(int motor_id, const char* why);
+  // ラッチを立て、motor_id に電流 0 を送り、ほかの current モードのモータにも電流 0 を送る。
+  // motor_id への送信の成否を返す。
+  bool latchCurrentLinkAndStop(int motor_id, const char* why);
+  void stopOtherCurrentMotors(int motor_id);
+  // ラッチ中の応答 1 回を数え、解除の条件がそろえば解除する。
+  void noteCurrentLinkResponse(int motor_id, bool valid);
+  // 最新の応答の経過時間 [s]（controlNow() 基準）。
+  double currentFeedbackAgeSec(const MotorFeedback& fb) const;
+  // 送受信 1 回の結果で、有効な応答が続けて無かった回数を更新する（current モードでは、
+  // 応答の途切れのラッチの立ち上げと解除の数えもここで行う）。
   void countResponse(int motor_id, bool valid);
   void recordSerialRoundtrip(double roundtrip_ms);  // 往復レイテンシ統計の更新
   bool readFeedbackFrame(int expected_motor_id, std::vector<uint8_t>& out_frame, int timeout_ms);
@@ -439,8 +489,9 @@ protected:
   // production class uses write(2) / read(2) on serial_fd_.
   virtual ssize_t writeSerial(const void* data, size_t size);
   virtual ssize_t readSerial(void* data, size_t size);
-  // current モードの PI の dt と暴走ガードの時刻に使う単調時計。テストが模擬の時計に差し替える
-  // （本番は steady_clock::now()）。フィードバックの鮮度や統計には使わない。
+  // current モードの PI の dt・暴走ガードの時刻・応答の新しさの門（受信時刻
+  // last_feedback_control_time）に使う単調時計。テストが模擬の時計に差し替える
+  // （本番は steady_clock::now()）。レポート用の鮮度（feedback_age_sec）や統計には使わない。
   virtual std::chrono::steady_clock::time_point controlNow() const;
 };
 

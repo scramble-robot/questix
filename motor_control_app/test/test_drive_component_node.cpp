@@ -18,7 +18,9 @@
 // * an unheard E-stop keeps the drive stopped until a release is heard;
 // * the motion permission (L2) gates the drive on its own: unheard, silent or "not allowed" (the
 //   referee, the teacher) stops it, it is never reported as an emergency stop, and it coming back
-//   does not restart the drive by itself.
+//   does not restart the drive by itself;
+// * in current mode (experimental), one wheel's answers stopping latches the library, and the
+//   node fault-stops both wheels through its "Motor not healthy" path (Issue #222, P0-2).
 #include <fcntl.h>
 #include <gtest/gtest.h>
 #include <pty.h>
@@ -33,8 +35,10 @@
 #include <functional>
 #include <geometry_msgs/msg/twist.hpp>
 #include <lifecycle_msgs/msg/state.hpp>
+#include <map>
 #include <memory>
 #include <mutex>
+#include <questix_msgs/msg/drive_control_sample.hpp>
 #include <questix_msgs/msg/drive_status.hpp>
 #include <questix_msgs/msg/emergency_stop.hpp>
 #include <questix_msgs/msg/motion_permission.hpp>
@@ -54,13 +58,16 @@ namespace ddt = motor_control_lib::ddt_protocol;
 
 constexpr uint8_t kLeftId = 4;  // launcher/config/drive_component.yaml
 constexpr uint8_t kRightId = 5;
-constexpr uint8_t kCommand = 0x64;  // Protocol 1 (velocity / current command)
+constexpr uint8_t kCommand = 0x64;     // Protocol 1 (velocity / current command)
+constexpr uint8_t kModeSwitch = 0xA0;  // Protocol 3 (spec sheet layout: the mode in DATA[9])
 
 int16_t commandValue(const std::vector<uint8_t>& frame) {
   return static_cast<int16_t>((static_cast<uint16_t>(frame[2]) << 8) | frame[3]);  // big-endian
 }
 
-// The motor side of the serial line: reads every frame the node writes and answers commands.
+// The motor side of the serial line: reads every frame the node writes and answers commands. It
+// takes the spec sheet's mode frames and reports its mode; in the current loop it reports speed 0
+// (a held wheel), so the node's current PI and its guard see no motion.
 class FakeMotor {
 public:
   FakeMotor() {
@@ -98,6 +105,16 @@ public:
   void clear() {
     std::lock_guard<std::mutex> lock(mutex_);
     commands_.clear();
+  }
+
+  // Stops (or resumes) answering this wheel's frames, as a broken link or a dead driver would.
+  void setSilent(uint8_t motor_id, bool silent) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (silent) {
+      silent_[motor_id] = true;
+    } else {
+      silent_.erase(motor_id);
+    }
   }
 
   // A nonzero command reached this wheel since the last clear().
@@ -143,27 +160,43 @@ private:
     while (pending.size() - pos >= 10) {
       std::vector<uint8_t> frame(pending.begin() + pos, pending.begin() + pos + 10);
       const std::vector<uint8_t> payload(frame.begin(), frame.begin() + 9);
-      if (ddt::crc8Maxim(payload) != frame[9] || (frame[0] != kLeftId && frame[0] != kRightId)) {
+      const bool mode_frame = frame[1] == kModeSwitch;  // the spec sheet's mode frame has no CRC
+      if ((!mode_frame && ddt::crc8Maxim(payload) != frame[9]) ||
+          (frame[0] != kLeftId && frame[0] != kRightId)) {
         ++pos;
         continue;
       }
       pos += 10;
-      if (frame[1] != kCommand) {
-        continue;  // mode switch etc.
+      if (frame[1] == kModeSwitch) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (frame[9] == 0x01 || frame[9] == 0x02) {
+          modes_[frame[0]] = frame[9];
+        }
+        continue;
       }
+      if (frame[1] != kCommand) {
+        continue;
+      }
+      uint8_t mode = 0x02;
+      bool silent = false;
       {
         std::lock_guard<std::mutex> lock(mutex_);
         commands_.push_back(frame);
+        auto it = modes_.find(frame[0]);
+        mode = it == modes_.end() ? 0x02 : it->second;
+        silent = silent_.count(frame[0]) != 0;
       }
-      reply(frame[0], commandValue(frame));
+      if (!silent) {
+        reply(frame[0], mode, mode == 0x01 ? 0 : commandValue(frame));
+      }
     }
     pending.erase(pending.begin(), pending.begin() + pos);
   }
 
   // A M0602C feedback frame: {ID, mode, current(2), speed(2), position(2), fault, CRC8}.
-  void reply(uint8_t motor_id, int16_t speed_rpm) {
+  void reply(uint8_t motor_id, uint8_t mode, int16_t speed_rpm) {
     std::vector<uint8_t> frame = {motor_id,
-                                  0x02,
+                                  mode,
                                   0x00,
                                   0x00,
                                   static_cast<uint8_t>((speed_rpm >> 8) & 0xFF),
@@ -183,6 +216,8 @@ private:
   std::thread reader_;
   mutable std::mutex mutex_;
   std::vector<std::vector<uint8_t>> commands_;
+  std::map<uint8_t, uint8_t> modes_;  // motor id -> the loop it runs (power-on: velocity)
+  std::map<uint8_t, bool> silent_;
 };
 
 // operation_manager's /emergency_stop reason without the GPIO safety path.
@@ -211,7 +246,7 @@ protected:
   // Starts the node as questix_core would (hardware YAML, operator profile), on this test's own
   // topics and the fake motor's serial line. The E-stop and permission requirements come from
   // the integrated YAML (never overridden here).
-  void start() {
+  void start(const std::string& extra_overrides = "") {
     ASSERT_FALSE(motor_.path().empty()) << "openpty failed";
     static int counter = 0;
     prefix_ = "/drive_node_test_" + std::to_string(getpid()) + "_" + std::to_string(counter++);
@@ -225,7 +260,9 @@ protected:
           << "    odom_topic: \"" << prefix_ << "/odom\"\n"
           << "    typed_status_topic: \"" << prefix_ << "/drive_status\"\n"
           << "    emergency_stop_topic: \"" << prefix_ << "/emergency_stop\"\n"
-          << "    motion_permission_topic: \"" << prefix_ << "/motion_permission\"\n";
+          << "    motion_permission_topic: \"" << prefix_ << "/motion_permission\"\n"
+          << "    control_sample_topic: \"" << prefix_ << "/drive_control_sample\"\n"
+          << extra_overrides;
     }
     rclcpp::NodeOptions options;
     // Later files win: hardware YAML, operator profile, then this test's overrides.
@@ -244,6 +281,13 @@ protected:
         prefix_ + "/drive_status", 10, [this](questix_msgs::msg::DriveStatus::SharedPtr msg) {
           last_status_ = *msg;
           have_status_ = true;
+        });
+    sample_sub_ = helper_->create_subscription<questix_msgs::msg::DriveControlSample>(
+        prefix_ + "/drive_control_sample", 50,
+        [this](questix_msgs::msg::DriveControlSample::SharedPtr msg) {
+          if (msg->tick_action == questix_msgs::msg::DriveControlSample::TICK_FAULT_STOP) {
+            ++fault_stop_ticks_;
+          }
         });
     executor_ = std::make_unique<rclcpp::executors::SingleThreadedExecutor>();
     executor_->add_node(drive_->get_node_base_interface());
@@ -331,6 +375,8 @@ protected:
   rclcpp::Publisher<questix_msgs::msg::EmergencyStop>::SharedPtr estop_pub_;
   rclcpp::Publisher<questix_msgs::msg::MotionPermission>::SharedPtr permission_pub_;
   rclcpp::Subscription<questix_msgs::msg::DriveStatus>::SharedPtr status_sub_;
+  rclcpp::Subscription<questix_msgs::msg::DriveControlSample>::SharedPtr sample_sub_;
+  int fault_stop_ticks_{0};
   questix_msgs::msg::DriveStatus last_status_;
   bool have_status_{false};
   bool send_twist_{false};
@@ -462,6 +508,30 @@ TEST_F(DriveComponentNode, PermissionGatesTheDriveButIsNotAnEstop) {
   have_status_ = false;
   ASSERT_TRUE(spinUntil([this]() { return have_status_; }, 2s));
   EXPECT_FALSE(last_status_.emergency_stop);
+}
+
+// Current mode (experimental, Issue #222 P0-2): one wheel's answers stop while driving. The
+// library latches, the node takes its "Motor not healthy" path (a fault-stop tick, safetyStop),
+// and while the wheel stays silent no nonzero current reaches either wheel although twists keep
+// coming. The combination with the neutral wait of #208 is added once #208 is on main.
+TEST_F(DriveComponentNode, CurrentModeOneWheelGoingSilentFaultStopsBothWheels) {
+  start("    control_mode: \"current\"\n");
+  operationManagerWithoutGpio();
+  send_twist_ = true;
+  ASSERT_TRUE(spinUntil([this]() { return droveBothWheels(); }, 5s))
+      << "no nonzero current reached the wheels";
+
+  fault_stop_ticks_ = 0;
+  motor_.setSilent(kRightId, true);
+  ASSERT_TRUE(spinUntil([this]() { return fault_stop_ticks_ > 0 && lastCommandsAreZero(); }, 3s))
+      << "the node did not fault-stop on the silent wheel";
+  motor_.clear();
+  spinFor(1000ms);  // twists keep coming, the right wheel stays silent
+  EXPECT_FALSE(motor_.drove(kLeftId));
+  EXPECT_FALSE(motor_.drove(kRightId));
+  have_status_ = false;
+  ASSERT_TRUE(spinUntil([this]() { return have_status_; }, 2s));
+  EXPECT_FALSE(last_status_.emergency_stop);  // a fault, not an emergency stop
 }
 
 }  // namespace

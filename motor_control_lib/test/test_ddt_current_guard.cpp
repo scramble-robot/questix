@@ -11,6 +11,11 @@
 // applies. The library's control clock (PI dt, guard time) is the same simulated clock. The model
 // values are estimates (Kt 0.44 Nm/A from the spec sheet, a lifted wheel of about 4.7e-4 kg·m², a 6
 // kg robot on the floor); they check that the guard acts, not the tuning.
+//
+// Each motor id has its own wheel. The clock advances one tick on each frame to the first motor
+// (kLeft), so a test that drives two wheels commands kLeft then kRight once per tick, like
+// drive_component. A motor can be silenced (no answers) or rebooted (it answers in the velocity
+// loop again), and the clock can be moved on without any frame (a stalled host).
 #include <gtest/gtest.h>
 #include <pty.h>
 #include <unistd.h>
@@ -19,7 +24,9 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -47,6 +54,17 @@ struct WheelModel {
 constexpr WheelModel kLifted{4.7e-4, 0.08, 3.6e-4};
 constexpr WheelModel kFloor6kg{3.0 * 0.05 * 0.05 + 4.7e-4, 0.15, 3.6e-4};
 
+constexpr int kLeft = 4;
+constexpr int kRight = 5;
+
+struct Wheel {
+  double speed_rpm{0.0};  // physical speed, positive = the direction of a positive current
+  double peak_abs_rpm{0.0};
+  double applied_amp{0.0};
+  std::vector<int16_t> currents;  // every current command value this motor received, in order
+  int nonzero_in_velocity_mode{0};
+};
+
 class SimulatedWheelLib : public DdtMotorLib {
 public:
   using DdtMotorLib::DdtMotorLib;
@@ -56,12 +74,25 @@ public:
 
   int master_fd{-1};
   bool answer{true};
+  std::set<int> silent;    // motors that do not answer
+  std::set<int> rebooted;  // motors that went back to the velocity loop on their own
   ModeFrames mode_frames{ModeFrames::kSpec};
   uint8_t mode{0x02};  // the reported mode: the power-on velocity loop until switched
   WheelModel model{kLifted};
-  double speed_rpm{0.0};  // physical speed, positive = the direction of a positive current
-  double peak_abs_rpm{0.0};
-  int nonzero_in_velocity_mode{0};
+  std::map<int, Wheel> wheels;
+  // The left wheel (the one the single-wheel tests drive).
+  Wheel& left() { return wheels[kLeft]; }
+  int nonzeroInVelocityMode() {
+    int n = 0;
+    for (const auto& [id, w] : wheels) n += w.nonzero_in_velocity_mode;
+    return n;
+  }
+  // Moves the clock (and the wheels) on without any frame: the host stalled.
+  void stall(std::chrono::milliseconds duration) {
+    for (auto& [id, w] : wheels)
+      advance(w, w.applied_amp, std::chrono::duration<double>(duration).count());
+    sim_time_ += duration;
+  }
 
 protected:
   ssize_t writeSerial(const void* data, size_t size) override {
@@ -71,28 +102,35 @@ protected:
       const bool legacy = bytes[9] == motor_control_lib::ddt_protocol::crc8Maxim(payload);
       if (mode_frames == ModeFrames::kSpec && (bytes[9] == 0x01 || bytes[9] == 0x02)) {
         mode = bytes[9];
+        rebooted.erase(bytes[0]);
       } else if (mode_frames == ModeFrames::kLegacy && legacy &&
                  (bytes[8] == 0x01 || bytes[8] == 0x02)) {
         mode = bytes[8];
+        rebooted.erase(bytes[0]);
       }
       return static_cast<ssize_t>(size);
     }
     if (size == 10 && bytes[1] == 0x64) {
-      if (mode != 0x01) {
+      Wheel& w = wheels[bytes[0]];
+      const uint8_t reported_mode = rebooted.count(bytes[0]) != 0 ? 0x02 : mode;
+      const auto raw = static_cast<int16_t>((static_cast<uint16_t>(bytes[2]) << 8) | bytes[3]);
+      if (reported_mode != 0x01) {
         // A velocity-loop motor takes the value as a speed target: this is what a current
         // command does to a motor that did not switch. Count every nonzero one.
-        const auto value = static_cast<int16_t>((static_cast<uint16_t>(bytes[2]) << 8) | bytes[3]);
-        nonzero_in_velocity_mode += value != 0 ? 1 : 0;
+        w.nonzero_in_velocity_mode += raw != 0 ? 1 : 0;
+      } else {
+        w.currents.push_back(raw);
       }
       // The previous current acts for one tick, then the motor answers with the speed.
-      advance(applied_amp_, kTickSec);
-      sim_time_ += std::chrono::milliseconds(20);
-      const auto raw = static_cast<int16_t>((static_cast<uint16_t>(bytes[2]) << 8) | bytes[3]);
-      applied_amp_ = pi::rawToAmp(raw);
-      if (answer && master_fd >= 0) {
-        const auto speed = static_cast<int16_t>(std::lround(speed_rpm));
+      advance(w, w.applied_amp, kTickSec);
+      if (bytes[0] == kLeft) {
+        sim_time_ += std::chrono::milliseconds(20);
+      }
+      w.applied_amp = reported_mode == 0x01 ? pi::rawToAmp(raw) : 0.0;
+      if (answer && silent.count(bytes[0]) == 0 && master_fd >= 0) {
+        const auto speed = static_cast<int16_t>(std::lround(w.speed_rpm));
         std::vector<uint8_t> frame = {bytes[0],
-                                      mode,
+                                      reported_mode,
                                       bytes[2],
                                       bytes[3],
                                       static_cast<uint8_t>((static_cast<uint16_t>(speed) >> 8)),
@@ -112,27 +150,24 @@ protected:
   std::chrono::steady_clock::time_point controlNow() const override { return sim_time_; }
 
 private:
-  void advance(double amp, double seconds) {
+  void advance(Wheel& w, double amp, double seconds) {
     const double gain = kKt / model.inertia * kRpmPerRadPerSec;  // [rpm/s per A]
     constexpr int kSub = 20;
     const double h = seconds / kSub;
     for (int i = 0; i < kSub; ++i) {
-      double friction = model.viscous_amp_per_rpm * speed_rpm;
-      if (std::abs(speed_rpm) > 0.5) {
-        friction += std::copysign(model.coulomb_amp, speed_rpm);
+      double friction = model.viscous_amp_per_rpm * w.speed_rpm;
+      if (std::abs(w.speed_rpm) > 0.5) {
+        friction += std::copysign(model.coulomb_amp, w.speed_rpm);
       } else {
         friction += std::clamp(amp, -model.coulomb_amp, model.coulomb_amp);  // stiction
       }
-      speed_rpm += h * gain * (amp - friction);
+      w.speed_rpm += h * gain * (amp - friction);
     }
-    peak_abs_rpm = std::max(peak_abs_rpm, std::abs(speed_rpm));
+    w.peak_abs_rpm = std::max(w.peak_abs_rpm, std::abs(w.speed_rpm));
   }
 
-  double applied_amp_{0.0};
   std::chrono::steady_clock::time_point sim_time_{std::chrono::seconds(1000)};
 };
-
-constexpr int kLeft = 4;
 
 class DdtCurrentGuard : public ::testing::Test {
 protected:
@@ -171,11 +206,32 @@ protected:
     return -1;
   }
 
-  int16_t lastCurrentRaw() {
+  int16_t lastCurrentRaw(int motor_id = kLeft) {
     DdtMotorLib::MotorTransactionStats stats;
-    EXPECT_TRUE(lib_->getMotorTransactionStats(kLeft, stats));
+    EXPECT_TRUE(lib_->getMotorTransactionStats(motor_id, stats));
     return stats.last_current_raw_sent;
   }
+
+  // Both wheels in current mode with the default gains, lifted.
+  void startBoth() {
+    start(0.0015, 0.004, /*invert=*/false, kLifted);
+    ASSERT_TRUE(lib_->initializeMotor(kRight, ControlMode::Current));
+  }
+
+  // One control tick: the same reference to the left then the right wheel, as drive_component.
+  void tick(int rpm_ref) {
+    lib_->setMotorVelocity(kLeft, rpm_ref);
+    lib_->setMotorVelocity(kRight, rpm_ref);
+  }
+
+  // Number of nonzero current commands a wheel received from index `from` on.
+  int nonzeroCurrentsSince(int motor_id, size_t from) {
+    const auto& currents = lib_->wheels[motor_id].currents;
+    int n = 0;
+    for (size_t i = from; i < currents.size(); ++i) n += currents[i] != 0 ? 1 : 0;
+    return n;
+  }
+  size_t currentCount(int motor_id) { return lib_->wheels[motor_id].currents.size(); }
 
   int master_{-1};
   int slave_{-1};
@@ -186,7 +242,7 @@ protected:
 TEST_F(DdtCurrentGuard, LiftedWheelWithTheDefaultGainsFollowsWithoutTripping) {
   start(0.0015, 0.004, /*invert=*/false, kLifted);
   EXPECT_EQ(run(100, 150), -1);  // 3 s
-  EXPECT_NEAR(lib_->speed_rpm, 100.0, 10.0);
+  EXPECT_NEAR(lib_->left().speed_rpm, 100.0, 10.0);
   EXPECT_TRUE(lib_->isHealthy());
 }
 
@@ -198,7 +254,7 @@ TEST_F(DdtCurrentGuard, WrongSignOnALiftedWheelTripsAndLatchesAtZero) {
   ASSERT_GE(tripped_at, 0);
   EXPECT_LT(tripped_at, 25);  // within 0.5 s
   EXPECT_EQ(lib_->currentGuardTrip(kLeft), GuardTrip::kAccelAgainstCurrent);
-  EXPECT_LT(lib_->peak_abs_rpm, 100.0);
+  EXPECT_LT(lib_->left().peak_abs_rpm, 100.0);
   EXPECT_EQ(lastCurrentRaw(), 0);
   EXPECT_FALSE(lib_->isHealthy());
 
@@ -211,7 +267,7 @@ TEST_F(DdtCurrentGuard, WrongSignOnALiftedWheelTripsAndLatchesAtZero) {
   EXPECT_EQ(lib_->currentGuardTrip(kLeft), GuardTrip::kNone);
   EXPECT_TRUE(lib_->isHealthy());
   EXPECT_EQ(run(100, 150), -1);
-  EXPECT_NEAR(lib_->speed_rpm, 100.0, 10.0);
+  EXPECT_NEAR(lib_->left().speed_rpm, 100.0, 10.0);
 }
 
 // Floor-sized gains on a lifted wheel (or a robot picked up while driving): stopped.
@@ -226,7 +282,7 @@ TEST_F(DdtCurrentGuard, FloorGainsOnALiftedWheelTrip) {
 TEST_F(DdtCurrentGuard, PickedUpWhileDrivingWithFloorGainsTrips) {
   start(0.02, 0.05, /*invert=*/false, kFloor6kg);
   EXPECT_EQ(run(100, 100), -1);  // on the floor these gains are fine
-  EXPECT_NEAR(lib_->speed_rpm, 100.0, 10.0);
+  EXPECT_NEAR(lib_->left().speed_rpm, 100.0, 10.0);
   lib_->model = kLifted;  // picked up
   const int tripped_at = run(100, 100);
   ASSERT_GE(tripped_at, 0);
@@ -240,23 +296,189 @@ TEST_F(DdtCurrentGuard, WrongSignOnTheFloorTrips) {
   EXPECT_EQ(lib_->currentGuardTrip(kLeft), GuardTrip::kAccelAgainstCurrent);
 }
 
-// Lost answers: after kCurrentMaxConsecutiveTimeouts silent exchanges only 0 A goes out, and the
-// loop resumes when answers come back (no latch: this is not the controller's fault).
-TEST_F(DdtCurrentGuard, LostFeedbackSendsZeroUntilAnswersReturn) {
-  start(0.0015, 0.004, /*invert=*/false, kLifted);
-  ASSERT_EQ(run(100, 50), -1);
-  ASSERT_NE(lastCurrentRaw(), 0);
+// P0-2 (Issue #222): one wheel's answers stop while driving. The library latches: both wheels get
+// 0 A (not only the silent one), and the library reports itself unhealthy, which is what sends
+// drive_component down its "Motor not healthy" fault stop.
+TEST_F(DdtCurrentGuard, OneWheelLosingItsAnswersStopsBothWheels) {
+  startBoth();
+  for (int i = 0; i < 25; ++i) tick(100);
+  ASSERT_NE(lastCurrentRaw(kLeft), 0);
+  ASSERT_NE(lastCurrentRaw(kRight), 0);
+  ASSERT_TRUE(lib_->isHealthy());
+
+  lib_->silent.insert(kRight);
+  for (int i = 0; i < 3; ++i) tick(100);  // at most two more exchanges go out on stale answers
+  EXPECT_FALSE(lib_->isHealthy());
+  EXPECT_EQ(lastCurrentRaw(kLeft), 0);
+  EXPECT_EQ(lastCurrentRaw(kRight), 0);
+  motor_control_lib::DifferentialDrive drive(lib_, kLeft, kRight, 0.05, 0.5);
+  EXPECT_FALSE(drive.isHealthy());
+
+  // The command stays nonzero while the wheel is silent: nothing but 0 A to either wheel.
+  const size_t left_from = currentCount(kLeft);
+  const size_t right_from = currentCount(kRight);
+  for (int i = 0; i < 25; ++i) tick(100);
+  EXPECT_EQ(nonzeroCurrentsSince(kLeft, left_from), 0);
+  EXPECT_EQ(nonzeroCurrentsSince(kRight, right_from), 0);
+  EXPECT_FALSE(lib_->isHealthy());
+}
+
+// P0-2: the answers come back while the command is still nonzero (the operator still holds the
+// stick). The latch stays: answers returning is not a reason to resume.
+TEST_F(DdtCurrentGuard, AnswersReturningUnderANonzeroCommandDoNotClear) {
+  startBoth();
+  for (int i = 0; i < 25; ++i) tick(100);
+  lib_->silent.insert(kRight);
+  for (int i = 0; i < 5; ++i) tick(100);
+  ASSERT_FALSE(lib_->isHealthy());
+
+  lib_->silent.clear();
+  const size_t left_from = currentCount(kLeft);
+  const size_t right_from = currentCount(kRight);
+  for (int i = 0; i < 50; ++i) tick(100);  // 1 s of fresh, valid answers under a nonzero command
+  EXPECT_FALSE(lib_->isHealthy());
+  EXPECT_EQ(nonzeroCurrentsSince(kLeft, left_from), 0);
+  EXPECT_EQ(nonzeroCurrentsSince(kRight, right_from), 0);
+}
+
+// P0-2: only stop commands, and three fresh valid answers from each wheel after them, clear the
+// latch. After that a nonzero command drives again.
+TEST_F(DdtCurrentGuard, StopFramesWithThreeValidAnswersFromBothWheelsClear) {
+  startBoth();
+  for (int i = 0; i < 25; ++i) tick(100);
+  lib_->silent.insert(kRight);
+  for (int i = 0; i < 5; ++i) tick(100);
+  ASSERT_FALSE(lib_->isHealthy());
+  lib_->silent.clear();
+
+  tick(0);
+  tick(0);
+  EXPECT_FALSE(lib_->isHealthy());  // two answers each are not enough
+  tick(100);                        // a nonzero command restarts the count (and sends 0 A)
+  EXPECT_EQ(lastCurrentRaw(kLeft), 0);
+  EXPECT_EQ(lastCurrentRaw(kRight), 0);
+  tick(0);
+  tick(0);
+  EXPECT_FALSE(lib_->isHealthy());
+  tick(0);
+  EXPECT_TRUE(lib_->isHealthy());
+  EXPECT_FALSE(lib_->currentLinkLatched());
+
+  tick(100);
+  EXPECT_NE(lastCurrentRaw(kLeft), 0);
+  EXPECT_NE(lastCurrentRaw(kRight), 0);
+}
+
+// P0-2: a wheel whose answers keep failing while the drive is stopped still latches (three silent
+// exchanges), and a wheel that answers with a fault does not count towards clearing.
+TEST_F(DdtCurrentGuard, SilentStopFramesLatchToo) {
+  startBoth();
+  lib_->silent.insert(kLeft);
+  for (int i = 0; i < DdtMotorLib::kCurrentMaxConsecutiveTimeouts; ++i) tick(0);
+  EXPECT_FALSE(lib_->isHealthy());
+  const size_t from = currentCount(kRight);
+  tick(100);
+  EXPECT_EQ(nonzeroCurrentsSince(kRight, from), 0);
+}
+
+// The freshness gate: the host stalls for longer than 50 ms while current flows (e.g. a scheduling
+// hiccup, or both answers lost). The next nonzero command sends 0 A and latches.
+TEST_F(DdtCurrentGuard, StaleAnswerWhileDrivingLatchesAtZero) {
+  startBoth();
+  for (int i = 0; i < 25; ++i) tick(100);
+  ASSERT_NE(lastCurrentRaw(kLeft), 0);
+  lib_->stall(std::chrono::milliseconds(60));
+  const size_t from = currentCount(kLeft);
+  ASSERT_TRUE(lib_->setMotorVelocity(kLeft, 100));
+  EXPECT_EQ(nonzeroCurrentsSince(kLeft, from), 0);
+  EXPECT_EQ(lastCurrentRaw(kLeft), 0);
+  EXPECT_EQ(lastCurrentRaw(kRight), 0);  // the other wheel too
+  EXPECT_FALSE(lib_->isHealthy());
+}
+
+// A stall shorter than the limit (one lost answer's worth) does not latch.
+TEST_F(DdtCurrentGuard, OneLostAnswerDoesNotLatch) {
+  startBoth();
+  for (int i = 0; i < 25; ++i) tick(100);
+  // One lost answer's worth: the right wheel's answer is 40 ms old at its next command.
+  lib_->stall(std::chrono::milliseconds(20));
+  tick(100);
+  EXPECT_TRUE(lib_->isHealthy());
+  EXPECT_NE(lastCurrentRaw(kLeft), 0);
+}
+
+// At rest (0 A) the answers are refreshed only every stop_resend_interval_ms, so they are old when
+// the drive starts. That is not a lost link: the first command sends 0 A to get a fresh answer
+// (re-prime), and the next one drives. Nothing latches.
+TEST_F(DdtCurrentGuard, OldAnswerAtRestIsRefreshedWithZeroFirst) {
+  startBoth();
+  tick(0);
+  lib_->stall(std::chrono::milliseconds(300));
+  const size_t from = currentCount(kLeft);
+  ASSERT_TRUE(lib_->setMotorVelocity(kLeft, 100));
+  EXPECT_EQ(nonzeroCurrentsSince(kLeft, from), 0);
+  EXPECT_TRUE(lib_->isHealthy());
+  ASSERT_TRUE(lib_->setMotorVelocity(kLeft, 100));
+  EXPECT_NE(lastCurrentRaw(kLeft), 0);
+  EXPECT_TRUE(lib_->isHealthy());
+}
+
+// A motor that never answered: current mode does not start, and no nonzero current ever reaches it.
+TEST_F(DdtCurrentGuard, NeverAnsweredMotorGetsNoCurrent) {
   lib_->answer = false;
-  for (int i = 0; i < DdtMotorLib::kCurrentMaxConsecutiveTimeouts; ++i) {
-    ASSERT_TRUE(lib_->setMotorVelocity(kLeft, 100));
-  }
-  ASSERT_TRUE(lib_->setMotorVelocity(kLeft, 100));
-  EXPECT_EQ(lastCurrentRaw(), 0);
-  lib_->answer = true;
-  ASSERT_TRUE(lib_->setMotorVelocity(kLeft, 100));  // this exchange is answered again
-  ASSERT_TRUE(lib_->setMotorVelocity(kLeft, 100));
-  EXPECT_NE(lastCurrentRaw(), 0);
-  EXPECT_EQ(lib_->currentGuardTrip(kLeft), GuardTrip::kNone);
+  lib_->setCurrentControlParams(0.0015, 0.004, 1.0, 0.3);
+  EXPECT_FALSE(lib_->initializeMotor(kLeft, ControlMode::Current));
+  EXPECT_EQ(nonzeroCurrentsSince(kLeft, 0), 0);
+  EXPECT_EQ(lib_->nonzeroInVelocityMode(), 0);
+}
+
+// P0-3: one motor reboots on its own (back in the velocity loop) while driving. If the stop frame
+// before the next command already brought the new mode, nothing nonzero reaches it; both wheels
+// latch at 0 A and the mode guard trips on that wheel.
+TEST_F(DdtCurrentGuard, RebootSeenBeforeTheSendNeverSendsACurrentAsASpeed) {
+  startBoth();
+  for (int i = 0; i < 25; ++i) tick(100);
+  lib_->rebooted.insert(kRight);
+  // Stop frames (0 A) whose answers report the velocity loop.
+  ASSERT_TRUE(lib_->stopMotorNow(kLeft));
+  ASSERT_TRUE(lib_->stopMotorNow(kRight));
+  ASSERT_TRUE(lib_->isHealthy());  // a zero frame alone does not judge the mode
+  tick(100);
+  EXPECT_EQ(lib_->wheels[kRight].nonzero_in_velocity_mode, 0);
+  EXPECT_EQ(lib_->currentGuardTrip(kRight), GuardTrip::kModeMismatch);
+  EXPECT_FALSE(lib_->isHealthy());
+  const size_t from = currentCount(kLeft);
+  for (int i = 0; i < 10; ++i) tick(100);
+  EXPECT_EQ(nonzeroCurrentsSince(kLeft, from), 0);
+  EXPECT_EQ(lib_->wheels[kRight].nonzero_in_velocity_mode, 0);
+}
+
+// P0-3: the reboot happens between the last answer and the send (the race software cannot close):
+// one current command is read as a speed target, its answer reports the velocity loop, and from
+// the next command on both wheels get 0 A.
+TEST_F(DdtCurrentGuard, RebootJustBeforeTheSendLatchesBothWheelsOnTheNextCommand) {
+  startBoth();
+  for (int i = 0; i < 25; ++i) tick(100);
+  lib_->rebooted.insert(kRight);
+  tick(100);
+  EXPECT_LE(lib_->wheels[kRight].nonzero_in_velocity_mode, 1);  // the race, at most one frame
+  EXPECT_EQ(lib_->currentGuardTrip(kRight), GuardTrip::kModeMismatch);
+  EXPECT_EQ(lastCurrentRaw(kLeft), 0);
+  EXPECT_FALSE(lib_->isHealthy());
+  const int before = lib_->wheels[kRight].nonzero_in_velocity_mode;
+  const size_t from = currentCount(kLeft);
+  for (int i = 0; i < 10; ++i) tick(100);
+  EXPECT_EQ(lib_->wheels[kRight].nonzero_in_velocity_mode, before);
+  EXPECT_EQ(nonzeroCurrentsSince(kLeft, from), 0);
+}
+
+// Velocity mode is unchanged: lost answers neither latch nor stop the velocity frames.
+TEST_F(DdtCurrentGuard, VelocityModeIsNotLatchedByLostAnswers) {
+  ASSERT_TRUE(lib_->initializeMotor(kLeft, ControlMode::Velocity));
+  lib_->answer = false;
+  for (int i = 0; i < 10; ++i) EXPECT_TRUE(lib_->setMotorVelocity(kLeft, 100));
+  EXPECT_FALSE(lib_->currentLinkLatched());
+  EXPECT_TRUE(lib_->isHealthy());
 }
 
 // Friction feedforward: with the model's own friction, the steady error is smaller than with the
@@ -264,12 +486,12 @@ TEST_F(DdtCurrentGuard, LostFeedbackSendsZeroUntilAnswersReturn) {
 TEST_F(DdtCurrentGuard, FrictionFeedforwardShortensTheApproach) {
   start(0.0015, 0.004, /*invert=*/false, kLifted);
   run(100, 15);  // 0.3 s
-  const double without_ff = std::abs(100.0 - lib_->speed_rpm);
-  lib_->speed_rpm = 0.0;
+  const double without_ff = std::abs(100.0 - lib_->left().speed_rpm);
+  lib_->left().speed_rpm = 0.0;
   lib_->setCurrentFeedforward(kLifted.coulomb_amp, kLifted.viscous_amp_per_rpm);
   ASSERT_TRUE(lib_->initializeMotor(kLeft, ControlMode::Current));
   EXPECT_EQ(run(100, 15), -1);
-  const double with_ff = std::abs(100.0 - lib_->speed_rpm);
+  const double with_ff = std::abs(100.0 - lib_->left().speed_rpm);
   EXPECT_LT(with_ff, without_ff);
 }
 
@@ -280,7 +502,7 @@ TEST_F(DdtCurrentGuard, LegacyModeFrameIsTriedWhenTheSpecFrameDoesNotSwitch) {
   start(0.0015, 0.004, /*invert=*/false, kLifted);
   EXPECT_EQ(lib_->mode, 0x01);
   EXPECT_EQ(run(100, 50), -1);
-  EXPECT_EQ(lib_->nonzero_in_velocity_mode, 0);
+  EXPECT_EQ(lib_->nonzeroInVelocityMode(), 0);
 }
 
 // A motor that never reports the current loop: current mode does not start, and no current
@@ -289,7 +511,7 @@ TEST_F(DdtCurrentGuard, MotorThatStaysInTheVelocityLoopIsRefused) {
   lib_->mode_frames = SimulatedWheelLib::ModeFrames::kNever;
   lib_->setCurrentControlParams(0.0015, 0.004, 1.0, 0.3);
   EXPECT_FALSE(lib_->initializeMotor(kLeft, ControlMode::Current));
-  EXPECT_EQ(lib_->nonzero_in_velocity_mode, 0);
+  EXPECT_EQ(lib_->nonzeroInVelocityMode(), 0);
 }
 
 // The motor falls back to the velocity loop while driving (e.g. its power was cycled): latched at
@@ -301,9 +523,9 @@ TEST_F(DdtCurrentGuard, ModeChangeWhileDrivingTripsAtZero) {
   ASSERT_TRUE(lib_->setMotorVelocity(kLeft, 100));  // this answer reports the velocity loop
   EXPECT_EQ(lib_->currentGuardTrip(kLeft), GuardTrip::kModeMismatch);
   EXPECT_EQ(lastCurrentRaw(), 0);
-  const int before = lib_->nonzero_in_velocity_mode;
+  const int before = lib_->nonzeroInVelocityMode();
   ASSERT_TRUE(lib_->setMotorVelocity(kLeft, 100));
-  EXPECT_EQ(lib_->nonzero_in_velocity_mode, before);
+  EXPECT_EQ(lib_->nonzeroInVelocityMode(), before);
 }
 
 // The drive treats a tripped wheel as unhealthy, so drive_component stops both wheels.
