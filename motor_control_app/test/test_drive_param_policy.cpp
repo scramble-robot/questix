@@ -136,6 +136,8 @@ TEST_F(DriveParamPolicyTest, ReconfigureOnlyParametersAreRejected) {
 
   EXPECT_FALSE(node_->set_parameter(rclcpp::Parameter("max_motor_rpm", 400)).successful);
   EXPECT_FALSE(node_->set_parameter(rclcpp::Parameter("control_mode", "current")).successful);
+  EXPECT_FALSE(
+      node_->set_parameter(rclcpp::Parameter("current_measured_source", "reported")).successful);
   EXPECT_FALSE(node_->set_parameter(rclcpp::Parameter("wheel_radius", 0.2)).successful);
   EXPECT_FALSE(node_->set_parameter(rclcpp::Parameter("serial_port", "/dev/null")).successful);
   EXPECT_FALSE(node_->set_parameter(rclcpp::Parameter("auto_start", true)).successful);

@@ -87,6 +87,7 @@ control_rate Hz の固定 tick:
 | `integral_limit_amp` | 0.3 | ○ | 積分項の上限 [A]。出力が上限に張り付く間は積分しない（条件付き積分） |
 | `current_zero_deadband_rpm` | 5 | ○ | 静止時の微振動防止 |
 | `current_invert_measured` | false | ○ | 実測符号反転。誤ると正帰還（暴走ガードの `against` で止まる）。2026-10 まで true |
+| `current_measured_source` | `position` | × | PI と暴走ガードの帰還（current モードだけ。velocity モードでは無視し、起動のログに出す）。`position` は車輪の角度の直前 2 区間から求めた速さ（遅れ 約 20 ms、無効なら電流を出さない）、`reported` はモーターの報告回転数（遅れ 100〜120 ms、比較用） |
 | `current_ff_static_amp` | 0.0 | ○ | 摩擦補償: 静止（クーロン）摩擦分 [A]。\|目標\| < 10 rpm では比例で立ち上げる |
 | `current_ff_viscous_amp_per_rpm` | 0.0 | ○ | 摩擦補償: 粘性摩擦分 [A/rpm] |
 | `current_guard_overspeed_margin_rpm` / `current_guard_overspeed_time_sec` | 50 / 0.3 | ○ | 暴走ガードの目標超過の判定（> 0。ガードは無効にできない） |
@@ -257,6 +258,16 @@ drive_component + ブラウザのモニタ）で同じ条件を手元で再現�
   （0.02 s × その値 × `current_kp`）が 0.25 を超えると振動的、1 で不安定。既定の
   0.0015 / 0.004 は浮かせた車輪で安定（床の上では遅いが安全側）。床の上の目安は 0.02 / 0.05 で、
   これを浮かせた車輪で使うと発振する（ガードが `oscillation` で止める）。
+- **帰還（`current_measured_source`、Issue #222 の G1）**: 既定の `position` は、車輪の角度（応答の
+  position）の直前 2 区間（3 つの応答）から求めた速さ（`motor_control_lib/wheel_speed_estimator.hpp`）。
+  記録での評価は、遅れ 約 20 ms・浮上 191 rpm のばらつき 3.0〜5.2 rpm で、報告回転数（遅れ
+  100〜120 ms・ばらつき 0.5〜1.2 rpm）より遅れが小さい。応答の間隔が 10〜40 ms の外・fault・mode≠1・
+  1 区間の速さが 570 rpm 超・最新の応答が 50 ms より古い、のどれかで無効になり、無効なら電流を
+  出さない（0 rpm で代用しない）。電流を出している最中に無効になれば応答の途切れのラッチを立て、
+  止まっている状態からは、有効な区間が 2 つそろうまで（3 つの応答、約 40 ms）電流 0 で応答を集める。
+  `reported`（報告回転数）は比べるためだけに残す。擬似的な車輪で報告回転数を 100 ms 遅らせると、
+  既定のゲインの浮かせた車輪は `position` で 100 rpm に収まり、`reported` では 210 rpm まで
+  行き過ぎて揺れ続ける（推定モデル。実機では未確認。`test_ddt_current_guard`）。
 - **D 項は使わない**: 50 Hz では実測 1 rpm の変化が 50 rpm/s の微分になり、1 tick のむだ時間と
   合わせると浮かせた軽い車輪を不安定にする（推定モデルの数値実験で、Kd = 5e-5 A/(rpm/s) から
   発散）。応答の改善は摩擦補償で行う。

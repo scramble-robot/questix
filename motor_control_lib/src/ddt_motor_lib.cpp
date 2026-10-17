@@ -37,6 +37,7 @@ DdtMotorLib::DdtMotorLib(const std::string& serial_port, int baud_rate)
       current_ff_viscous_amp_per_rpm_(0.0),
       current_guard_params_{},
       current_max_accel_rpm_per_sec_(0.0),
+      current_measured_source_(CurrentMeasuredSource::Position),
       brake_on_stop_(true),
       accel_time_0p1ms_per_rpm_(50),
       command_wait_ms_(0),
@@ -79,6 +80,7 @@ void DdtMotorLib::shutdown() {
     current_guard_trips_.clear();
     current_link_latched_ = false;
     current_link_recovery_.clear();
+    speed_estimators_.clear();
     last_sent_frames_.clear();
     transaction_stats_.clear();
     initialized_ = false;
@@ -315,6 +317,24 @@ bool DdtMotorLib::commandCurrentMode(int motor_id, int rpm_ref_raw) {
     return sent;
   }
 
+  // PI と暴走ガードの帰還（current_measured_source。モーターの向き・符号反転前）。角度から求めた
+  // 速さが無効なら電流を出さない（0 rpm で代用しない）。電流を出している最中なら途切れとみなして
+  // ラッチし、電流 0 で止まっている間（起動・待機の後）なら、電流 0 を送って応答を集める
+  // （有効な区間が 2 つそろうまで。走り出しが 2 周期ほど遅れる）。
+  double measured_rpm = 0.0;
+  wheel_speed_estimator::Estimate estimate;
+  if (!currentMeasuredRpm(motor_id, &measured_rpm, &estimate)) {
+    resetCurrentPiStateForStop(motor_id);
+    if (rpm_ref_raw != 0 && transaction_stats_[motor_id].last_current_raw_sent != 0) {
+      RCLCPP_WARN(logger_, "モーター %d: 角度から求めた速さが無効（%s、最新の応答 %.3f s 前）",
+                  motor_id, wheel_speed_estimator::invalidName(estimate.reason), estimate.age_sec);
+      return latchCurrentLinkAndStop(motor_id, "電流を出している間に角度から求めた速さが無効");
+    }
+    RCLCPP_DEBUG(logger_, "モーター %d: 角度から求めた速さが無効（%s）のため電流 0 を送ります",
+                 motor_id, wheel_speed_estimator::invalidName(estimate.reason));
+    return sendMotorCurrentRaw(motor_id, 0);
+  }
+
   // スルーレート制限（加速度制限）: 目標 RPM を 1ステップあたり max_accel * dt だけ変化させる。
   // drive_component は使わない（既定 0 = 無効。加速度はホストの ControlCore が制限する）。
   int rpm_ref = rpm_ref_raw;
@@ -328,7 +348,7 @@ bool DdtMotorLib::commandCurrentMode(int motor_id, int rpm_ref_raw) {
         dt = 0.01;
       }
     } else {
-      double initial_ref_rpm = static_cast<double>(fb_it->second.speed);
+      double initial_ref_rpm = measured_rpm;
       if (current_invert_measured_) {
         initial_ref_rpm = -initial_ref_rpm;
       }
@@ -349,7 +369,8 @@ bool DdtMotorLib::commandCurrentMode(int motor_id, int rpm_ref_raw) {
 
   // 静止デッドバンド: ref=0 かつ実測がノイズ帯内なら、PI を走らず raw=0 を送る。
   // これがないと measured の量子化ノイズを積分が拾い、静止時にトルクが出て微振動する。
-  if (ddt_current_pi::inZeroDeadband(rpm_ref, fb_it->second.speed, current_zero_deadband_rpm_)) {
+  if (ddt_current_pi::inZeroDeadband(rpm_ref, static_cast<int>(std::lround(measured_rpm)),
+                                     current_zero_deadband_rpm_)) {
     auto& st = pi_states_[motor_id];
     st.pi.integral_amp = 0.0;
     st.has_last_t = false;
@@ -358,14 +379,13 @@ bool DdtMotorLib::commandCurrentMode(int motor_id, int rpm_ref_raw) {
   }
 
   // ガード用: 送信前の実測（PI の向き）と、その実測から今までに流れていた電流（前回の指令）。
-  const int measured_prev =
-      current_invert_measured_ ? -fb_it->second.speed : static_cast<int>(fb_it->second.speed);
+  const double measured_prev = current_invert_measured_ ? -measured_rpm : measured_rpm;
   auto& tx_before = transaction_stats_[motor_id];
   const double applied_amp = ddt_current_pi::rawToAmp(tx_before.last_current_raw_sent);
   const uint64_t feedback_count_before = tx_before.feedback_count;
 
   double i_cmd_amp = 0.0;
-  const int16_t current_raw = runCurrentLoopStep(motor_id, rpm_ref, &i_cmd_amp);
+  const int16_t current_raw = runCurrentLoopStep(motor_id, rpm_ref, measured_rpm, &i_cmd_amp);
   if (!sendMotorCurrentRaw(motor_id, current_raw)) {
     return false;
   }
@@ -382,14 +402,25 @@ bool DdtMotorLib::commandCurrentMode(int motor_id, int rpm_ref_raw) {
     return true;
   }
   const auto& fb_new = motor_feedbacks_[motor_id];
-  const int measured_new =
-      current_invert_measured_ ? -fb_new.speed : static_cast<int>(fb_new.speed);
+  double measured_new_raw = static_cast<double>(fb_new.speed);
+  const bool measured_new_valid = currentMeasuredRpm(motor_id, &measured_new_raw, &estimate);
+  const double measured_new = current_invert_measured_ ? -measured_new_raw : measured_new_raw;
   if (fb_new.mode != 0x01) {
     latchCurrentLink(motor_id, "モータが電流ループを報告していない");
     const bool sent = tripCurrentGuard(motor_id, ddt_current_pi::GuardTrip::kModeMismatch, rpm_ref,
                                        measured_prev, measured_new, applied_amp, i_cmd_amp);
     stopOtherCurrentMotors(motor_id);
     return sent;
+  }
+  if (!measured_new_valid) {
+    // 送った後の応答で角度から求めた速さが無効（区間の間隔・fault 等）: ガードは評価できない。
+    // 0 でない電流を送ったばかりなら、途切れとみなして止める。
+    if (current_raw != 0) {
+      RCLCPP_WARN(logger_, "モーター %d: 角度から求めた速さが無効（%s、最新の応答 %.3f s 前）",
+                  motor_id, wheel_speed_estimator::invalidName(estimate.reason), estimate.age_sec);
+      return latchCurrentLinkAndStop(motor_id, "電流を送った後の角度から求めた速さが無効");
+    }
+    return true;
   }
   const ddt_current_pi::GuardSample sample{
       std::chrono::duration<double>(controlNow().time_since_epoch()).count(),
@@ -409,7 +440,7 @@ bool DdtMotorLib::commandCurrentMode(int motor_id, int rpm_ref_raw) {
 }
 
 bool DdtMotorLib::tripCurrentGuard(int motor_id, ddt_current_pi::GuardTrip trip, int rpm_ref,
-                                   int measured_prev, int measured_new, double applied_amp,
+                                   double measured_prev, double measured_new, double applied_amp,
                                    double i_cmd_amp) {
   current_guard_trips_[motor_id] = trip;
   const char* hint = "";
@@ -436,7 +467,7 @@ bool DdtMotorLib::tripCurrentGuard(int motor_id, ddt_current_pi::GuardTrip trip,
       break;
   }
   RCLCPP_ERROR(logger_,
-               "モーター %d: 電流モード暴走ガード作動（%s）: ref=%d meas %d->%d applied=%.3fA "
+               "モーター %d: 電流モード暴走ガード作動（%s）: ref=%d meas %.1f->%.1f applied=%.3fA "
                "cmd=%.3fA。電流 0 でラッチします（解除は再初期化か current モードのパラメータ"
                "変更）。%s",
                motor_id, ddt_current_pi::guardTripName(trip), rpm_ref, measured_prev, measured_new,
@@ -495,6 +526,7 @@ bool DdtMotorLib::initializeMotor(int motor_id, ControlMode mode) {
   motor_modes_[motor_id] = mode;
   motor_velocities_[motor_id] = 0;
   motor_feedbacks_[motor_id] = MotorFeedback{};
+  speed_estimators_[motor_id].reset();
   pi_states_[motor_id] = PiState{};
   if (current_guard_trips_.erase(motor_id) != 0) {
     RCLCPP_WARN(logger_, "モーター %d の電流モード暴走ガードを解除しました: 再初期化", motor_id);
@@ -748,6 +780,46 @@ void DdtMotorLib::setCurrentGuardParams(double overspeed_margin_rpm, double over
   clearCurrentGuardTrips("ガード設定の変更");
 }
 
+void DdtMotorLib::setCurrentMeasuredSource(CurrentMeasuredSource source) {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+  current_measured_source_ = source;
+  RCLCPP_INFO(logger_, "電流モード PI の帰還: %s",
+              source == CurrentMeasuredSource::Position ? "position（角度から求めた速さ）"
+                                                        : "reported（報告回転数）");
+  clearCurrentGuardTrips("帰還の変更");
+}
+
+CurrentMeasuredSource DdtMotorLib::getCurrentMeasuredSource() const {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+  return current_measured_source_;
+}
+
+double DdtMotorLib::controlNowSec() const {
+  return std::chrono::duration<double>(controlNow().time_since_epoch()).count();
+}
+
+bool DdtMotorLib::currentMeasuredRpm(int motor_id, double* rpm_out,
+                                     wheel_speed_estimator::Estimate* est_out) const {
+  if (current_measured_source_ == CurrentMeasuredSource::Reported) {
+    auto fb_it = motor_feedbacks_.find(motor_id);
+    *rpm_out = fb_it == motor_feedbacks_.end() ? 0.0 : static_cast<double>(fb_it->second.speed);
+    return true;
+  }
+  wheel_speed_estimator::Estimate est;
+  auto it = speed_estimators_.find(motor_id);
+  if (it != speed_estimators_.end()) {
+    est = it->second.estimate(controlNowSec());
+  }
+  if (est_out != nullptr) {
+    *est_out = est;
+  }
+  if (!est.valid) {
+    return false;
+  }
+  *rpm_out = est.rpm;
+  return true;
+}
+
 void DdtMotorLib::setCurrentZeroDeadbandRpm(int deadband_rpm) {
   std::lock_guard<std::recursive_mutex> lock(state_mutex_);
   current_zero_deadband_rpm_ = std::max(0, deadband_rpm);
@@ -966,7 +1038,8 @@ void DdtMotorLib::countResponse(int motor_id, bool valid) {
   }
 }
 
-int16_t DdtMotorLib::runCurrentLoopStep(int motor_id, int rpm_ref, double* i_cmd_amp_out) {
+int16_t DdtMotorLib::runCurrentLoopStep(int motor_id, int rpm_ref, double measured_rpm,
+                                        double* i_cmd_amp_out) {
   auto& st = pi_states_[motor_id];
   auto now = controlNow();
 
@@ -978,13 +1051,8 @@ int16_t DdtMotorLib::runCurrentLoopStep(int motor_id, int rpm_ref, double* i_cmd
   st.has_last_t = true;
   dt = ddt_current_pi::sanitizeDt(dt);
 
-  // 実測 RPM（鮮度は呼び出し側 commandCurrentMode が確認済み）。
-  // 符号反転は stepToRaw 内で行うため、ここでは生値を渡す。
-  int measured_rpm = 0;
-  auto fb_it = motor_feedbacks_.find(motor_id);
-  if (fb_it != motor_feedbacks_.end()) {
-    measured_rpm = static_cast<int>(fb_it->second.speed);
-  }
+  // 実測 RPM（current_measured_source。鮮度・有効性は呼び出し側 commandCurrentMode が確認済み）。
+  // 符号反転は stepToRaw 内で行うため、ここではモーターの向きの値を渡す。
 
   ddt_current_pi::Params params{current_kp_,
                                 current_ki_,
@@ -1000,10 +1068,10 @@ int16_t DdtMotorLib::runCurrentLoopStep(int motor_id, int rpm_ref, double* i_cmd
   }
 
   // ログは従来通り符号反転後の実測値と、それに基づく error を表示する。
-  int meas_logged = current_invert_measured_ ? -measured_rpm : measured_rpm;
-  double error = static_cast<double>(rpm_ref - meas_logged);
+  const double meas_logged = current_invert_measured_ ? -measured_rpm : measured_rpm;
+  const double error = static_cast<double>(rpm_ref) - meas_logged;
   RCLCPP_INFO_THROTTLE(logger_, throttle_clock_, 200,
-                       "PI motor=%d ref=%d meas=%d err=%.1f ff=%.3fA integ=%.3fA i_cmd=%.3fA "
+                       "PI motor=%d ref=%d meas=%.1f err=%.1f ff=%.3fA integ=%.3fA i_cmd=%.3fA "
                        "raw=%d dt=%.4f",
                        motor_id, rpm_ref, meas_logged, error,
                        ddt_current_pi::frictionFeedforwardAmp(rpm_ref, params), st.pi.integral_amp,
@@ -1115,6 +1183,10 @@ bool DdtMotorLib::parseFeedback(int expected_motor_id, const std::vector<uint8_t
   fb.last_feedback_time = feedback_now;
   fb.last_feedback_control_time = controlNow();
   ++transaction_stats_[expected_motor_id].feedback_count;
+  speed_estimators_[expected_motor_id].update(wheel_speed_estimator::Sample{
+      fb.position,
+      std::chrono::duration<double>(fb.last_feedback_control_time.time_since_epoch()).count(),
+      transaction_stats_[expected_motor_id].feedback_count, fb.mode, fb.fault_code});
 
   // PI 状態側にも保存（受信失敗時のフォールバック用）
   auto pi_it = pi_states_.find(expected_motor_id);
@@ -1241,6 +1313,12 @@ bool DdtMotorLib::getMotorFeedbackData(int motor_id, MotorFeedbackData& out) con
     out.feedback_age_sec =
         std::chrono::duration<double>(std::chrono::steady_clock::now() - fb.last_feedback_time)
             .count();
+    auto est_it = speed_estimators_.find(motor_id);
+    if (est_it != speed_estimators_.end()) {
+      const auto est = est_it->second.estimate(controlNowSec());
+      out.position_rpm = est.valid ? est.rpm : 0.0;
+      out.position_rpm_valid = est.valid;
+    }
   }
   return true;
 }

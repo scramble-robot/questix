@@ -19,6 +19,7 @@
 
 #include "motor_control_lib/base_motor_controller.hpp"
 #include "motor_control_lib/ddt_current_pi.hpp"
+#include "motor_control_lib/wheel_speed_estimator.hpp"
 
 namespace motor_control_lib {
 
@@ -30,6 +31,18 @@ namespace motor_control_lib {
 enum class ControlMode {
   Velocity,
   Current,
+};
+
+/**
+ * @brief Current モードの PI と暴走ガードが帰還に使う速さ（current モードだけで効く）。
+ *  - Position: 車輪の角度（応答の position）から求めた速さ（wheel_speed_estimator、遅れ 約 20
+ * ms）。 推定が無効なら電流を出さない（0 rpm で代用しない）。既定。
+ *  - Reported: モーターが報告する整数の回転数（応答の speed、遅れ 100〜120 ms）。比べるためだけに
+ *    残す。
+ */
+enum class CurrentMeasuredSource {
+  Position,
+  Reported,
 };
 
 /**
@@ -174,6 +187,13 @@ public:
   bool currentLinkLatched() const;
 
   /**
+   * @brief Current モードの PI と暴走ガードの帰還を選ぶ（current モードだけで効く）。
+   *  ラッチ中の暴走ガードは解除する（current モードのパラメータ変更 = 運用者の対処とみなす）。
+   */
+  void setCurrentMeasuredSource(CurrentMeasuredSource source);
+  CurrentMeasuredSource getCurrentMeasuredSource() const;
+
+  /**
    * @brief Current モードのゼロ近傍デッドバンド設定
    *  - 目標 RPM が 0 かつ実測 RPM の絶対値が deadband_rpm 以下のとき、PI を停止し
    *    電流指令を 0、積分項をリセットする（静止時の微振動防止）。
@@ -254,8 +274,9 @@ public:
    *  - 一次ローパス（可変サンプル間隔対応）: filtered += dt/(tau+dt) * (raw - filtered)。
    *    遮断周波数の目安 fc ≒ 1 / (2π·tau) [Hz]（例: tau=0.1s → fc≒1.6Hz）。
    *  - tau <= 0 で無効（生値をそのまま返す = 従来挙動）。
-   *  - フィルタは制御ループには掛からない: current モードの PI は生の実測 RPM を使い続けるため
-   *    制御の位相遅れは増えない。平滑化はあくまでレポート／オドメトリ側にのみ効く。
+   *  - フィルタは制御ループには掛からない: current モードの PI は角度から求めた速さか報告回転数の
+   *    生値（current_measured_source）を使うため、制御の位相遅れは増えない。平滑化はあくまで
+   *    レポート／オドメトリ側にのみ効く。
    */
   void setMeasuredLowpassTau(double tau_sec);
 
@@ -287,6 +308,10 @@ public:
     uint8_t fault_code{0};
     bool has_feedback{false};      // 一度でも有効フィードバックを受信したか
     double feedback_age_sec{0.0};  // has_feedback のときのみ有効な受信経過秒
+    // 角度から求めた速さ（wheel_speed_estimator、モーターの向き）と、その有効性。診断用
+    // （current_measured_source が position のとき、current モードの PI が使う値）。
+    double position_rpm{0.0};
+    bool position_rpm_valid{false};
   };
 
   /**
@@ -396,6 +421,7 @@ private:
   double current_ff_viscous_amp_per_rpm_;  // 摩擦補償: 粘性摩擦分 [A/rpm]
   ddt_current_pi::GuardParams current_guard_params_;
   double current_max_accel_rpm_per_sec_;  // 目標RPMスルーレート上限 [RPM/s]。0以下で無効
+  CurrentMeasuredSource current_measured_source_;  // PI とガードの帰還（current モードのみ）
   bool brake_on_stop_;  // 停止時に電気ブレーキを使う（velocity モードのみ）
   int accel_time_0p1ms_per_rpm_;  // ファーム加速時間 DATA[6] [0.1ms/rpm]（velocity モードのみ）
   int command_wait_ms_;  // 指令送信後の追加待機 [ms]。0で無効（実機の間隔要件用の保険）
@@ -426,6 +452,8 @@ private:
   bool current_link_latched_{false};
   // motor_id -> ラッチの後に続けて届いた新しい有効な応答（mode=1・fault=0）の数
   std::map<int, int> current_link_recovery_;
+  // motor_id -> 角度から求める速さ（応答を受け取るたびに更新。時刻は controlNow()）
+  std::map<int, wheel_speed_estimator::WheelSpeedEstimator> speed_estimators_;
   // motor_id -> 送受信の記録（診断用。initializeMotor では消さない累積値）
   std::map<int, MotorTransactionStats> transaction_stats_;
   // motor_id -> 最後に**送信に成功した**指令フレーム。送信に失敗したときは書き換えない
@@ -452,9 +480,16 @@ private:
   bool commandCurrentMode(int motor_id, int rpm_ref_raw);
   // 暴走ガードの作動: ラッチしてログを出し、電流 0 を送る（送信の成否を返す）。
   bool tripCurrentGuard(int motor_id, ddt_current_pi::GuardTrip trip, int rpm_ref,
-                        int measured_prev, int measured_new, double applied_amp, double i_cmd_amp);
-  // PI 1ステップ。i_cmd_amp_out にクランプ後の電流指令 [A] を書く。
-  int16_t runCurrentLoopStep(int motor_id, int rpm_ref, double* i_cmd_amp_out);
+                        double measured_prev, double measured_new, double applied_amp,
+                        double i_cmd_amp);
+  // PI 1ステップ。measured_rpm はモーターの向き（符号反転前）。i_cmd_amp_out にクランプ後の
+  // 電流指令 [A] を書く。
+  int16_t runCurrentLoopStep(int motor_id, int rpm_ref, double measured_rpm, double* i_cmd_amp_out);
+  // current_measured_source に従った実測 [rpm]（モーターの向き・符号反転前）。position で推定が
+  // 無効なら false（est_out に理由）。reported は常に true。
+  bool currentMeasuredRpm(int motor_id, double* rpm_out,
+                          wheel_speed_estimator::Estimate* est_out = nullptr) const;
+  double controlNowSec() const;
   void resetCurrentPiStateForStop(int motor_id);
   void clearCurrentGuardTrips(const char* why);
   bool isCurrentModeMotor(int motor_id) const;
