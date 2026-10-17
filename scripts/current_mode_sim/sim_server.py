@@ -8,7 +8,8 @@
 
 Simulation (default): fake M0602C motors on a pseudo terminal (fake_ddt_motor.py), the real
 drive_component node from this workspace in current mode, and a monitor that publishes
-/target_twist from the page and streams /drive_control_sample plus the fake wheels' true speed
+/target_twist from the page (and /motion_permission "drive allowed", as MotionPermissionManager of
+a practice run would) and streams /drive_control_sample plus the fake wheels' true speed
 to http://127.0.0.1:8765/. The ROS graph is kept on this machine (ROS_AUTOMATIC_DISCOVERY_RANGE
 LOCALHOST and its own ROS_DOMAIN_ID), so the simulated /target_twist never reaches a robot.
 
@@ -124,10 +125,10 @@ class Monitor:
         from geometry_msgs.msg import Twist
         from lifecycle_msgs.srv import ChangeState, GetState
         from nav_msgs.msg import Odometry
-        from questix_msgs.msg import DriveControlSample
+        from questix_msgs.msg import DriveControlSample, MotionPermission
         from rcl_interfaces.msg import Log
         from rcl_interfaces.srv import GetParameters, SetParametersAtomically
-        from rclpy.qos import QoSProfile, ReliabilityPolicy
+        from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 
         self.rclpy = rclpy
         self.hub = hub
@@ -157,6 +158,16 @@ class Monitor:
         if not robot_mode:
             self._twist_pub = self.node.create_publisher(Twist, '/target_twist', 1)
             self.node.create_timer(0.02, self._publish_twist)
+            # The drive obeys /motion_permission (require_motion_permission: true in the hardware
+            # YAML). The simulation plays MotionPermissionManager of a practice run: drive allowed
+            # at 20 Hz, with the contract's QoS (reliable + volatile + keep-last(1); its 0.5 s
+            # lease stays in force, so the drive stops if this monitor stops).
+            self.MotionPermission = MotionPermission
+            self._permission_pub = self.node.create_publisher(
+                MotionPermission, '/motion_permission',
+                QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                           durability=DurabilityPolicy.VOLATILE))
+            self.node.create_timer(0.05, self._publish_permission)
         self._get_params = self.node.create_client(GetParameters, '/drive_component/get_parameters')
         self._set_params = self.node.create_client(
             SetParametersAtomically, '/drive_component/set_parameters_atomically')
@@ -267,6 +278,14 @@ class Monitor:
         # turn_rpm on each wheel in opposite directions -> angular = 2 v / separation
         angular = 2.0 * (turn_rpm * meters_per_rev / 60.0) / self.wheel_separation
         return linear, angular
+
+    def _publish_permission(self):
+        msg = self.MotionPermission()
+        msg.drive_allowed = True
+        msg.launcher_allowed = False
+        msg.mode = 'practice'
+        msg.launcher_blockers = ['simulation:drive only']
+        self._permission_pub.publish(msg)
 
     def _publish_twist(self):
         now = time.monotonic()
@@ -585,6 +604,10 @@ def main():
     parser.add_argument('--robot', action='store_true',
                         help='read-only view of a running robot in the current ROS environment')
     parser.add_argument('--noise-rpm', type=float, default=1.0)
+    parser.add_argument('--report-dead-time-ms', type=float, default=0.0,
+                        help='delay the reported speed by this dead time (Issue #222: about 40)')
+    parser.add_argument('--report-tau-ms', type=float, default=0.0,
+                        help='and by a first-order lag of this time constant (about 100)')
     parser.add_argument('--params-file', default=str(DRIVE_YAML),
                         help='drive_component.yaml to load (default: launcher/config/ of this '
                         'checkout)')
@@ -617,7 +640,9 @@ def main():
         bus = FakeDdtBus(motor_ids, plant=args.plant, noise_rpm=args.noise_rpm,
                          link_path=str(link), mode_frames=args.mode_frames,
                          wheel_radius=float(params['wheel_radius']),
-                         wheel_separation=float(params['wheel_separation']))
+                         wheel_separation=float(params['wheel_separation']),
+                         report_dead_time=args.report_dead_time_ms / 1000.0,
+                         report_tau=args.report_tau_ms / 1000.0)
         bus.start()
         print(f'[sim] fake M0602C bus: {bus.port} (ROS_DOMAIN_ID={args.domain_id}, localhost)',
               flush=True)
