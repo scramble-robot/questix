@@ -12,4 +12,10 @@ function downloadFile(name, text, type = 'text/plain;charset=utf-8') {
 
 const formatNumber = (value, digits = 1) => Number(value).toFixed(digits);
 
-export { downloadFile, formatNumber };
+// 'smooth' unless the reader asked the system for less motion (DESIGN.md U-8). The CSS rule in
+// base.css cannot stop a scroll that a script asks to be smooth, so every script scroll asks here.
+function scrollBehavior() {
+  return globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+}
+
+export { downloadFile, formatNumber, scrollBehavior };
