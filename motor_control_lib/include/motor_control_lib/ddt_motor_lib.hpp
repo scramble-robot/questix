@@ -450,6 +450,8 @@ private:
   std::map<int, ddt_current_pi::GuardTrip> current_guard_trips_;
   // current モードの応答の途切れのラッチ（ライブラリ全体で 1 つ。currentLinkLatched を参照）
   bool current_link_latched_{false};
+  bool suppress_current_link_recovery_;
+  std::map<int, bool> current_previous_nonzero_target_;
   // motor_id -> ラッチの後に続けて届いた新しい有効な応答（mode=1・fault=0）の数
   std::map<int, int> current_link_recovery_;
   // motor_id -> 角度から求める速さ（応答を受け取るたびに更新。時刻は controlNow()）
@@ -499,7 +501,7 @@ private:
   // ラッチを立て、motor_id に電流 0 を送り、ほかの current モードのモータにも電流 0 を送る。
   // motor_id への送信の成否を返す。
   bool latchCurrentLinkAndStop(int motor_id, const char* why);
-  void stopOtherCurrentMotors(int motor_id);
+  bool stopOtherCurrentMotors(int motor_id);
   // ラッチ中の応答 1 回を数え、解除の条件がそろえば解除する。
   void noteCurrentLinkResponse(int motor_id, bool valid);
   // 最新の応答の経過時間 [s]（controlNow() 基準）。
@@ -515,13 +517,13 @@ private:
   int measuredRpmForReport(const MotorFeedback& fb) const;
 
   // Utility methods
-  bool drainSerialOutput();
   bool sendCommand(const std::vector<uint8_t>& command, int retry_count = 3);
 
 protected:
   // The only calls that touch the serial device's bytes. Virtual so a test can inject write
   // failures and record what would have been sent (test/test_ddt_fault_injection.cpp); the
   // production class uses write(2) / read(2) on serial_fd_.
+  virtual bool drainSerialOutput();
   virtual ssize_t writeSerial(const void* data, size_t size);
   virtual ssize_t readSerial(void* data, size_t size);
   // current モードの PI の dt・暴走ガードの時刻・応答の新しさの門（受信時刻

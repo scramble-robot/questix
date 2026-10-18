@@ -85,6 +85,10 @@ public:
   bool answer{true};
   std::set<int> silent;    // motors that do not answer
   std::set<int> rebooted;  // motors that went back to the velocity loop on their own
+  int fail_write_motor{-1};
+  int fail_drain_motor{-1};
+  int last_write_motor{-1};
+  std::map<int, int> zero_attempts;
   ModeFrames mode_frames{ModeFrames::kSpec};
   int report_delay_ticks{0};  // the reported speed lags the physical one by this many answers
   uint8_t mode{0x02};         // the reported mode: the power-on velocity loop until switched
@@ -121,6 +125,9 @@ protected:
       return static_cast<ssize_t>(size);
     }
     if (size == 10 && bytes[1] == 0x64) {
+      last_write_motor = bytes[0];
+      if (bytes[2] == 0 && bytes[3] == 0) ++zero_attempts[bytes[0]];
+      if (fail_write_motor == bytes[0]) return -1;
       Wheel& w = wheels[bytes[0]];
       const uint8_t reported_mode = rebooted.count(bytes[0]) != 0 ? 0x02 : mode;
       const auto raw = static_cast<int16_t>((static_cast<uint16_t>(bytes[2]) << 8) | bytes[3]);
@@ -165,6 +172,11 @@ protected:
       }
     }
     return static_cast<ssize_t>(size);
+  }
+
+  bool drainSerialOutput() override {
+    return (fail_drain_motor < 0 || last_write_motor != fail_drain_motor) &&
+           DdtMotorLib::drainSerialOutput();
   }
 
   std::chrono::steady_clock::time_point controlNow() const override { return sim_time_; }
@@ -681,6 +693,104 @@ TEST_F(DdtCurrentGuard, DifferentialDriveReportsATrippedWheelAsUnhealthy) {
   EXPECT_TRUE(drive.isHealthy());
   ASSERT_GE(run(100, 100), 0);
   EXPECT_FALSE(drive.isHealthy());
+}
+
+// M1: a nonzero target must reset every count before its response can clear the latch.
+TEST_F(DdtCurrentGuard, NonzeroTargetCannotCompleteAsymmetricRecovery) {
+  startBoth();
+  for (int scenario = 0; scenario < 3; ++scenario) {
+    const int first = scenario == 1 ? kRight : kLeft;
+    const int second = scenario == 1 ? kLeft : kRight;
+    const int command_first = scenario == 2 ? second : first;
+    const int command_second = scenario == 2 ? first : second;
+    lib_->silent.insert(first);
+    for (int i = 0; i < 5; ++i) tick(100);
+    ASSERT_TRUE(lib_->currentLinkLatched());
+    lib_->silent.clear();
+    for (int i = 0; i < 2; ++i) {
+      ASSERT_TRUE(lib_->setMotorVelocity(command_first, 0));
+      ASSERT_TRUE(lib_->setMotorVelocity(command_second, 0));
+    }
+    ASSERT_TRUE(lib_->setMotorVelocity(second, 0));
+    ASSERT_TRUE(lib_->currentLinkLatched());
+    ASSERT_TRUE(lib_->setMotorVelocity(first, 100));
+    EXPECT_TRUE(lib_->currentLinkLatched());
+    for (int i = 0; i < 2; ++i) {
+      ASSERT_TRUE(lib_->setMotorVelocity(command_first, 0));
+      ASSERT_TRUE(lib_->setMotorVelocity(command_second, 0));
+      EXPECT_TRUE(lib_->currentLinkLatched());
+    }
+    ASSERT_TRUE(lib_->setMotorVelocity(first, 0));
+    EXPECT_TRUE(lib_->currentLinkLatched());
+    ASSERT_TRUE(lib_->setMotorVelocity(second, 0));
+    EXPECT_FALSE(lib_->currentLinkLatched());
+  }
+}
+
+TEST_F(DdtCurrentGuard, FailedNonzeroWriteLatchesAndAttemptsBothZeros) {
+  startBoth();
+  tick(100);
+  lib_->zero_attempts.clear();
+  lib_->fail_write_motor = kLeft;
+  EXPECT_FALSE(lib_->setMotorVelocity(kLeft, 100));
+  EXPECT_TRUE(lib_->currentLinkLatched());
+  EXPECT_FALSE(lib_->isHealthy());
+  EXPECT_GT(lib_->zero_attempts[kLeft], 0);
+  EXPECT_GT(lib_->zero_attempts[kRight], 0);
+}
+
+TEST_F(DdtCurrentGuard, FailedNonzeroDrainLatchesAndAttemptsBothZeros) {
+  startBoth();
+  tick(100);
+  lib_->zero_attempts.clear();
+  lib_->fail_drain_motor = kLeft;
+  EXPECT_FALSE(lib_->setMotorVelocity(kLeft, 100));
+  EXPECT_TRUE(lib_->currentLinkLatched());
+  EXPECT_FALSE(lib_->isHealthy());
+  EXPECT_GT(lib_->zero_attempts[kLeft], 0);
+  EXPECT_GT(lib_->zero_attempts[kRight], 0);
+}
+
+TEST_F(DdtCurrentGuard, FailureStoppingTheOtherWheelIsReported) {
+  startBoth();
+  tick(100);
+  lib_->stall(std::chrono::milliseconds(60));
+  lib_->fail_write_motor = kRight;
+  EXPECT_FALSE(lib_->setMotorVelocity(kLeft, 100));
+  EXPECT_TRUE(lib_->currentLinkLatched());
+  EXPECT_FALSE(lib_->isHealthy());
+  EXPECT_GT(lib_->zero_attempts[kRight], 0);
+}
+
+TEST_F(DdtCurrentGuard, ZeroPiOutputUnderNonzeroTargetDoesNotMeanRest) {
+  startBoth();
+  tick(100);
+  // Cancel the output for one tick without sending a stop target.
+  lib_->setCurrentControlParams(0.0, 0.0, 1.0, 0.3);
+  ASSERT_TRUE(lib_->setMotorVelocity(kLeft, 100));
+  ASSERT_EQ(lastCurrentRaw(), 0);
+  lib_->stall(std::chrono::milliseconds(60));
+  ASSERT_TRUE(lib_->setMotorVelocity(kLeft, 100));
+  EXPECT_TRUE(lib_->currentLinkLatched());
+  EXPECT_FALSE(lib_->isHealthy());
+}
+
+TEST_F(DdtCurrentGuard, RebootWithFirstAnswerLostSendsTwoSpeedTargetsThenLatches) {
+  startBoth();
+  for (int i = 0; i < 25; ++i) tick(100);
+  lib_->rebooted.insert(kRight);
+  lib_->silent.insert(kRight);
+  tick(100);
+  EXPECT_EQ(lib_->wheels[kRight].nonzero_in_velocity_mode, 1);
+  EXPECT_FALSE(lib_->currentLinkLatched());
+  lib_->silent.clear();
+  tick(100);
+  EXPECT_EQ(lib_->wheels[kRight].nonzero_in_velocity_mode, 2);
+  EXPECT_TRUE(lib_->currentLinkLatched());
+  EXPECT_EQ(lastCurrentRaw(kLeft), 0);
+  EXPECT_EQ(lastCurrentRaw(kRight), 0);
+  for (int i = 0; i < 10; ++i) tick(100);
+  EXPECT_EQ(lib_->wheels[kRight].nonzero_in_velocity_mode, 2);
 }
 
 }  // namespace
