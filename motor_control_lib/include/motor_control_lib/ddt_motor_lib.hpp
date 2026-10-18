@@ -55,7 +55,7 @@ public:
   // （古い実測のまま電流を出し続けると、浮かせた車輪は回転が上がり続ける）。
   static constexpr int kCurrentMaxConsecutiveTimeouts = 3;
 
-  explicit DdtMotorLib(const std::string& serial_port = "/dev/ttyACM0", int baud_rate = 115200);
+  explicit DdtMotorLib(const std::string& serial_port = "/dev/ttyACM0", int baud_rate = 57600);
   virtual ~DdtMotorLib();
 
   // BaseMotorController implementation
