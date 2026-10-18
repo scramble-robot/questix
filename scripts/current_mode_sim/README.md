@@ -128,5 +128,10 @@ python3 scripts/current_mode_sim/sim_server.py --robot
 ## テスト
 
 ```bash
-python3 -m pytest scripts/current_mode_sim   # 擬似モータ単体（ROS 不要）
+python3 -m pytest scripts/current_mode_sim   # 擬似モータと Monitor の publisher 分岐（ROS 不要）
 ```
+
+
+`--robot` では `/target_twist`・`/motion_permission` を含む publisher を作らず、
+シミュレーション時だけこの2つを作る分岐を、ROSモジュールをスタブにした試験で確認する。
+実際のROS通信とWebSocketの画面は、この試験では未確認。
