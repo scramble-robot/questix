@@ -41,7 +41,8 @@ python3 scripts/current_mode_sim/sim_server.py
 
 **安全のため**、シミュレーションは `ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST` と専用の
 `ROS_DOMAIN_ID` で動き、`/target_twist` が同じネットワークのロボットに届かないようにしています。
-drive_component は `require_emergency_stop:=false`（単体診断の明示 opt-out）で起動します。
+drive_component は `require_emergency_stop:=false` と `require_motion_permission:=false`
+（operation_manager のいない単体診断の明示 opt-out）で起動します。
 Ctrl-C（または SIGTERM）で、ゼロ指令 → ノード停止 → 疑似端末の後片付けをして終わります。
 
 ## ページでできること
