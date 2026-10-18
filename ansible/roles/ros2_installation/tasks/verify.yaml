@@ -1,0 +1,44 @@
+---
+- name: Source ROS2 environment for verification
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      # Jazzy setup.bash reads unset AMENT variables; keep errexit, relax nounset only here.
+      set +u
+      source {{ ros2_verification_setup | quote }}
+      set -u
+      test "${ROS_DISTRO:-}" = {{ ros2_distro_to_use | quote }}
+      test "${ROS_VERSION:-}" = 2
+      printf 'ROS_DISTRO: %s\nROS_VERSION: %s\n' "$ROS_DISTRO" "$ROS_VERSION"
+    executable: /bin/bash
+  register: ros2_env_check
+  changed_when: false
+
+- name: Display ROS2 environment information
+  ansible.builtin.debug:
+    msg: "ROS2 environment: {{ ros2_env_check.stdout }}"
+
+- name: Test ROS2 installation with demo talker
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      set +u
+      source {{ ros2_verification_setup | quote }}
+      set -u
+      # Only timeout's 124 proves the demo stayed running for the observation interval.
+      if timeout 5 ros2 run demo_nodes_cpp talker; then
+        demo_rc=0
+      else
+        demo_rc=$?
+      fi
+      if [ "$demo_rc" -ne 124 ]; then
+        printf 'ROS demo failed: expected timeout status 124, got %s\n' "$demo_rc" >&2
+        exit 1
+      fi
+    executable: /bin/bash
+  register: ros2_demo_test
+  changed_when: false
+
+- name: Display demo test result
+  ansible.builtin.debug:
+    msg: "Demo test result: {{ ros2_demo_test.stdout }}"

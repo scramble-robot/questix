@@ -153,6 +153,7 @@ class Monitor:
         self._lock = threading.Lock()
         self._profile = None  # (steps, start time)
         self._manual = None  # (linear, angular, last time)
+        self._neutral_until = 0.0
         self._twist_pub = None
         if not robot_mode:
             self._twist_pub = self.node.create_publisher(Twist, '/target_twist', 1)
@@ -269,10 +270,16 @@ class Monitor:
         return linear, angular
 
     def _publish_twist(self):
+        if self._twist_pub is None:
+            return  # --robot is strictly read-only
         now = time.monotonic()
         with self._lock:
-            twist = None
-            if self._profile is not None:
+            # An idle simulator continuously supplies neutral. A fresh operation
+            # also prepares zero for five 20 ms ticks; depth 1 is not an ack.
+            twist = (0.0, 0.0)
+            if now < self._neutral_until:
+                pass
+            elif self._profile is not None:
                 (_, unit, steps), start = self._profile
                 elapsed = now - start
                 for a, b, hold in steps:
@@ -298,11 +305,14 @@ class Monitor:
         """Start a twist profile from PROFILES."""
         with self._lock:
             self._manual = None
-            self._profile = (PROFILES[name], time.monotonic())
+            self._neutral_until = time.monotonic() + 0.1
+            self._profile = (PROFILES[name], self._neutral_until)
 
     def manual(self, linear, angular):
         """Keep publishing this twist while the page keeps sending it."""
         with self._lock:
+            if self._manual is None:
+                self._neutral_until = time.monotonic() + 0.1
             self._profile = None
             self._manual = (float(linear), float(angular), time.monotonic())
 
@@ -410,8 +420,10 @@ class NodeProcess:
                '--params-file', str(params_file),
                '-p', f'serial_port:={port}',
                '-p', f'control_mode:={control_mode}',
-               # diagnostic run without operation_manager: the documented explicit opt-out
-               '-p', 'require_emergency_stop:=false']
+               # Standalone diagnostic without operation_manager: explicitly opt out of both
+               # safety inputs only in this isolated simulator domain.
+               '-p', 'require_emergency_stop:=false',
+               '-p', 'require_motion_permission:=false']
         print('[sim] starting:', ' '.join(cmd), flush=True)
         self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                      text=True, bufsize=1, start_new_session=True)

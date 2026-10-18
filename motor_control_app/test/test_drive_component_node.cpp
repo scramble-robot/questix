@@ -131,6 +131,13 @@ struct DriveOdomTestAccess {
          n.max_angular_accel_});
   }
 };
+
+struct DriveRearmNodeAccess {
+  static void failedStop(DriveComponent& node) {
+    node.resetCommandState();
+    node.stop_fault_ = true;  // inject failure state; actual zero retry still uses the PTY
+  }
+};
 }  // namespace motor_control_app
 
 namespace {
@@ -148,6 +155,8 @@ int16_t commandValue(const std::vector<uint8_t>& frame) {
 // The motor side of the serial line: reads every frame the node writes and answers commands.
 class FakeMotor {
 public:
+  void setMode(uint8_t mode) { feedbackMode(mode); }
+  void setFault(uint8_t fault) { fault_ = fault; }
   FakeMotor() {
     char name[256] = {};
     if (openpty(&master_, &slave_, name, nullptr, nullptr) != 0) {
@@ -295,7 +304,12 @@ private:
   // A M0602C feedback frame: {ID, mode, current(2), speed(2), position(2), fault, CRC8}.
   void reply(uint8_t motor_id, int16_t speed_rpm) {
     if ((motor_id == kLeftId && !answer_left_) || (motor_id == kRightId && !answer_right_)) return;
-    if (override_rpm_) speed_rpm = motor_id == kLeftId ? left_rpm_.load() : right_rpm_.load();
+    if (override_rpm_) {
+      speed_rpm = motor_id == kLeftId ? left_rpm_.load() : right_rpm_.load();
+    } else if (feedback_mode_ == 1) {
+      // A current command is not an RPM; position tests can still override feedback explicitly.
+      speed_rpm = 0;
+    }
     const uint16_t position = motor_id == kLeftId ? left_position_.load() : right_position_.load();
     std::vector<uint8_t> frame = {motor_id,
                                   feedback_mode_.load(),
@@ -379,7 +393,9 @@ protected:
   // Starts the node as questix_core would (hardware YAML, operator profile), on this test's own
   // topics and the fake motor's serial line. The E-stop and permission requirements come from
   // the integrated YAML (never overridden here).
-  void start(bool expect_active = true, bool missing_motor = false) {
+  void start(bool expect_active = true, bool missing_motor = false,
+             const std::string& mode = "velocity", double linear_band = 0.0) {
+    motor_.setMode(mode == "current" ? 1 : 2);
     ASSERT_FALSE(motor_.path().empty()) << "openpty failed";
     static int counter = 0;
     prefix_ = "/drive_node_test_" + std::to_string(getpid()) + "_" + std::to_string(counter++);
@@ -390,6 +406,8 @@ protected:
           << "    serial_port: \"" << (missing_motor ? overrides_path_ + ".absent" : motor_.path())
           << "\"\n"
           << "    connect_retry_period_sec: 0.5\n"
+          << "    control_mode: " << mode << "\n"
+          << "    rearm_neutral_linear: " << std::showpoint << linear_band << "\n"
           << "    publish_tf: false\n"
           << "    odom_topic: \"" << prefix_ << "/odom\"\n"
           << "    typed_status_topic: \"" << prefix_ << "/drive_status\"\n"
@@ -436,6 +454,10 @@ protected:
             odom_estop_infos_.push_back(msg->msg);
           }
         });
+    log_sub_ = helper_->create_subscription<rcl_interfaces::msg::Log>(
+        "/rosout", 100, [this](rcl_interfaces::msg::Log::SharedPtr msg) {
+          if (msg->name == "drive_component") logs_.push_back(msg->msg);
+        });
     executor_ = std::make_unique<rclcpp::executors::SingleThreadedExecutor>();
     executor_->add_node(drive_->get_node_base_interface());
     executor_->add_node(helper_);
@@ -445,6 +467,10 @@ protected:
     } else {
       spinFor(200ms);
     }
+  }
+
+  void start(const std::string& mode, double linear_band = 0.0) {
+    start(true, false, mode, linear_band);
   }
 
   void startRepressedEstop() {
@@ -547,6 +573,13 @@ protected:
   // Spins for a fixed time (used to show that something does NOT happen).
   void spinFor(std::chrono::milliseconds duration) {
     spinUntil([]() { return false; }, duration);
+  }
+
+  void neutral() {
+    twist_linear_ = 0.0;
+    send_twist_ = true;
+    spinFor(400ms);  // gates must be heard before a neutral can rearm
+    twist_linear_ = 0.5;
   }
 
   bool droveBothWheels() const { return motor_.drove(kLeftId) && motor_.drove(kRightId); }
@@ -679,6 +712,8 @@ protected:
   std::vector<std::string> odom_warnings_;
   std::vector<std::string> odom_estop_infos_;
   bool have_status_{false};
+  rclcpp::Subscription<rcl_interfaces::msg::Log>::SharedPtr log_sub_;
+  std::vector<std::string> logs_;
   bool send_twist_{false};
   double twist_linear_{0.5};
   bool send_estop_{false};
@@ -1146,6 +1181,7 @@ TEST_F(DriveComponentNode, MovingFeedbackGapStillEmitsOdomWarning) {
   start();
   operationManagerWithoutGpio();
   send_twist_ = true;
+  neutral();  // The merged startup contract requires a healthy neutral before motion.
   ASSERT_TRUE(spinUntil([this]() { return droveBothWheels() && have_odom_; }, 5s));
   spinFor(100ms);
   odom_warnings_.clear();
@@ -1172,6 +1208,7 @@ TEST_F(DriveComponentNode, PersistentStopFaultWarnsOnlyOnStateTransition) {
   start();
   operationManagerWithoutGpio();
   send_twist_ = true;
+  neutral();  // The merged startup contract requires a healthy neutral before motion.
   ASSERT_TRUE(spinUntil([this]() { return droveBothWheels() && have_odom_; }, 5s));
   odom_warnings_.clear();
   motor_.disconnect();
@@ -1191,6 +1228,7 @@ TEST_F(DriveComponentNode, PositionMovesPoseAndFrozenPositionDoesNotExtrapolateR
   start();
   operationManagerWithoutGpio();
   send_twist_ = true;
+  neutral();  // The merged startup contract requires a healthy neutral before motion.
   ASSERT_TRUE(spinUntil([this]() { return droveBothWheels() && have_odom_; }, 5s));
   spinFor(200ms);
   EXPECT_NEAR(last_odom_.pose.pose.position.x, 0, 1e-9);
@@ -1208,6 +1246,7 @@ TEST_F(DriveComponentNode, MissingWheelDoesNotIntegrateUnpairedMotionOrRecoveryJ
   start();
   operationManagerWithoutGpio();
   send_twist_ = true;
+  neutral();  // The merged startup contract requires a healthy neutral before motion.
   ASSERT_TRUE(spinUntil([this]() { return droveBothWheels() && have_odom_; }, 5s));
   spinFor(100ms);
   motor_.answerRight(false);
@@ -1228,6 +1267,7 @@ TEST_F(DriveComponentNode, FaultDiscardsPositionIntervalAndPreservesPose) {
   start();
   operationManagerWithoutGpio();
   send_twist_ = true;
+  neutral();  // The merged startup contract requires a healthy neutral before motion.
   ASSERT_TRUE(spinUntil([this]() { return droveBothWheels() && have_odom_; }, 5s));
   spinFor(100ms);
   motor_.positions(1000, ddt::kPositionRawPerTurn - 1000);
@@ -1252,6 +1292,7 @@ TEST_F(DriveComponentNode, CleanupReconfigureAndActivateReanchorWithoutTeleporti
   start();
   operationManagerWithoutGpio();
   send_twist_ = true;
+  neutral();  // The merged startup contract requires a healthy neutral before motion.
   ASSERT_TRUE(spinUntil([this]() { return droveBothWheels() && have_odom_; }, 5s));
   spinFor(100ms);
   motor_.positions(1000, ddt::kPositionRawPerTurn - 1000);
@@ -1264,6 +1305,11 @@ TEST_F(DriveComponentNode, CleanupReconfigureAndActivateReanchorWithoutTeleporti
   drive_->activate();
   ASSERT_TRUE(isActive());
   spinFor(300ms);
+  EXPECT_NEAR(last_odom_.pose.pose.position.x, x, 1e-9);
+  motor_.clear();
+  neutral();  // Reactivation also requires a fresh neutral before the next moving interval.
+  ASSERT_TRUE(spinUntil([this]() { return droveBothWheels(); }, 3s));
+  spinFor(300ms);  // Restore the original moving-feedback window after the new neutral phase.
   EXPECT_NEAR(last_odom_.pose.pose.position.x, x, 1e-9);
   motor_.positions(7500, ddt::kPositionRawPerTurn - 7500);
   ASSERT_TRUE(spinUntil([this, x]() { return last_odom_.pose.pose.position.x > x + .002; }, 2s));
@@ -1290,6 +1336,7 @@ TEST_F(DriveComponentNode, PracticeWithoutGpioDrivesOnTargetTwist) {
   EXPECT_TRUE(drive_->get_parameter("require_emergency_stop").as_bool());     // integrated YAML
   EXPECT_TRUE(drive_->get_parameter("require_motion_permission").as_bool());  // integrated YAML
   operationManagerWithoutGpio();
+  neutral();
   send_twist_ = true;
   EXPECT_TRUE(spinUntil([this]() { return droveBothWheels(); }, 3s))
       << "no nonzero command reached the wheels";
@@ -1309,6 +1356,7 @@ TEST_F(DriveComponentNode, PracticeWithoutGpioDrivesOnTargetTwist) {
 TEST_F(DriveComponentNode, SilentPermissionStopsTheDriveButIsNotAnEstop) {
   start();
   operationManagerWithoutGpio();
+  neutral();
   send_twist_ = true;
   ASSERT_TRUE(spinUntil([this]() { return droveBothWheels(); }, 3s));
 
@@ -1326,6 +1374,9 @@ TEST_F(DriveComponentNode, SilentPermissionStopsTheDriveButIsNotAnEstop) {
   spinFor(500ms);
   EXPECT_FALSE(motor_.drove(kLeftId));
   send_twist_ = true;
+  spinFor(400ms);
+  EXPECT_FALSE(droveBothWheels());
+  neutral();
   EXPECT_TRUE(spinUntil([this]() { return droveBothWheels(); }, 3s));
 }
 
@@ -1334,6 +1385,7 @@ TEST_F(DriveComponentNode, SilentPermissionStopsTheDriveButIsNotAnEstop) {
 TEST_F(DriveComponentNode, PressedEstopStopsAndReleaseDrivesAgain) {
   start();
   operationManagerWithoutGpio();
+  neutral();
   send_twist_ = true;
   ASSERT_TRUE(spinUntil([this]() { return droveBothWheels(); }, 3s));
 
@@ -1346,6 +1398,9 @@ TEST_F(DriveComponentNode, PressedEstopStopsAndReleaseDrivesAgain) {
   ASSERT_TRUE(spinUntil([this]() { return have_status_ && last_status_.emergency_stop; }, 2s));
 
   estop_active_ = false;
+  spinFor(400ms);
+  EXPECT_FALSE(droveBothWheels());
+  neutral();
   EXPECT_TRUE(spinUntil([this]() { return droveBothWheels(); }, 3s));
 }
 
@@ -1363,6 +1418,9 @@ TEST_F(DriveComponentNode, UnheardEstopKeepsTheDriveStopped) {
   EXPECT_TRUE(last_status_.emergency_stop);
 
   operationManagerWithoutGpio();
+  spinFor(400ms);
+  EXPECT_FALSE(droveBothWheels());
+  neutral();
   EXPECT_TRUE(spinUntil([this]() { return droveBothWheels(); }, 3s));
 }
 
@@ -1380,6 +1438,9 @@ TEST_F(DriveComponentNode, PermissionGatesTheDriveButIsNotAnEstop) {
 
   send_permission_ = true;
   permission_allowed_ = true;
+  spinFor(400ms);
+  EXPECT_FALSE(droveBothWheels());
+  neutral();
   ASSERT_TRUE(spinUntil([this]() { return droveBothWheels(); }, 3s));
 
   permission_allowed_ = false;  // defeated
@@ -1391,5 +1452,68 @@ TEST_F(DriveComponentNode, PermissionGatesTheDriveButIsNotAnEstop) {
   ASSERT_TRUE(spinUntil([this]() { return have_status_; }, 2s));
   EXPECT_FALSE(last_status_.emergency_stop);
 }
+
+class DriveRearmModes : public DriveComponentNode,
+                        public ::testing::WithParamInterface<std::string> {};
+
+TEST_P(DriveRearmModes, HeldInputAcrossEveryStopNeedsNeutral) {
+  start(GetParam());
+  operationManagerWithoutGpio();
+  send_twist_ = true;
+  spinFor(500ms);
+  EXPECT_FALSE(droveBothWheels());
+  EXPECT_TRUE(std::any_of(logs_.begin(), logs_.end(), [](const std::string& text) {
+    return text.find("linear=0.5 angular=0; bands linear=0 angular=0") != std::string::npos;
+  }));
+  neutral();
+  ASSERT_TRUE(spinUntil([this] { return droveBothWheels(); }, 3s));
+  for (int cause = 0; cause < 5; ++cause) {
+    SCOPED_TRACE(cause);
+    if (cause == 0) permission_allowed_ = false;
+    if (cause == 1) estop_active_ = true;
+    if (cause == 2) send_twist_ = false;
+    if (cause == 3) motor_.setFault(1);
+    if (cause == 4) motor_control_app::DriveRearmNodeAccess::failedStop(*drive_);
+    ASSERT_TRUE(spinUntil([this] { return lastCommandsAreZero(); }, 3s));
+    // A neutral while inhibited is not a release for the later recovery.
+    if (cause == 0 || cause == 1 || cause == 3) {
+      twist_linear_ = 0;
+      spinFor(200ms);
+      twist_linear_ = .5;
+    }
+    permission_allowed_ = true;
+    estop_active_ = false;
+    send_twist_ = true;
+    motor_.setFault(0);
+    motor_.clear();
+    spinFor(600ms);
+    EXPECT_FALSE(droveBothWheels());
+    neutral();
+    ASSERT_TRUE(spinUntil([this] { return droveBothWheels(); }, 3s));
+    motor_.clear();
+  }
+}
+
+TEST_P(DriveRearmModes, BandRearmsToZeroButDoesNotFilterArmedMotion) {
+  start(GetParam(), .05);
+  operationManagerWithoutGpio();
+  send_twist_ = true;
+  twist_linear_ = .05001;
+  spinFor(400ms);
+  EXPECT_FALSE(droveBothWheels());
+  send_twist_ = false;
+  geometry_msgs::msg::Twist release;
+  release.linear.x = .05;
+  twist_pub_->publish(release);
+  spinFor(400ms);
+  // A qualifying nonzero neutral is saved as zero, not as .05 m/s.
+  EXPECT_FALSE(droveBothWheels());
+  twist_linear_ = .04;
+  send_twist_ = true;
+  ASSERT_TRUE(spinUntil([this] { return droveBothWheels(); }, 3s));
+}
+
+INSTANTIATE_TEST_SUITE_P(VelocityAndCurrent, DriveRearmModes,
+                         ::testing::Values("velocity", "current"));
 
 }  // namespace

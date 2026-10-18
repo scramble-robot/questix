@@ -3,6 +3,28 @@
 QUESTiX のモータ制御 ROS 2 ノード群です。シリアル通信・制御ロジックの実体は
 `motor_control_lib` にあり、本パッケージはその ROS インターフェース層です。
 
+## 走行の停止後の中立待ち（全モード）
+
+drive_componentはactivate直後と、安全停止（許可OFF/途絶、非常停止/途絶、command timeout、
+motor fault、stop fault）の後、gateが開きモータが正常な状態で中立を受けるまで非ゼロを拒否します。
+大会でも審判許可ON後にスティックを一度離し、倒し直してください。gate閉やfault中のゼロは
+再武装に使いません。停止送信・再送・許可と非常停止の優先順は従来どおりです。
+
+`rearm_neutral_linear`（m/s、上限0.05）と `rearm_neutral_angular`（rad/s、上限0.1）は、
+有限な入力の絶対値が両方とも設定値以下なら再武装する不感帯です。既定は0.0（厳密な0、-0含む）。
+負・NaN/Inf・上限超えは起動時にERRORを出して0.0へ戻します。設定変更はYAMLを編集して再起動します。
+速度・電流モードの両方で有効ですが、再武装する指令の目標は0として保存し、以降の指令は加工しません。
+上限はLABの速度上限0.15m/s・0.5rad/sより小さく抑える運用上の制限で、実機校正値ではありません。
+WARNには拒否した指令と不感帯を出します。実機で離したときの値を記録してから必要最小限を設定してください。
+
+これはcommand_arbiterのcontroller takeover閾値 `neutral_linear` / `neutral_angular` とは別です。
+LABの開始/終了用中立は厳密なゼロを維持します。drive設定の正本は
+launcher/config/drive_component.yamlです。不感帯はこのYAMLとノードの既定値0.0だけに置き、
+launchで値を重ねません。
+
+保証の範囲は**driveが受け取る指令の中立復帰**です。UART・web joyは途絶時にゼロを生成するため、
+倒したまま再接続するときの物理入力の中立確認は後続PR 4bで扱います。4aの合格とは混同しません。
+
 | ノード | 用途 |
 |---|---|
 | `drive_component` | 走行（差動二輪、DDT M0602C ×2）。LifecycleNode |
@@ -149,9 +171,9 @@ ON/OFF しても、変更前のモデル由来の推定値が新しい設定へ�
 
 | パラメータ | 既定値 |
 |---|---|
-| `serial_port` / `baud_rate` | `/dev/ttyACM0` / 57600（実機で使っている値。データシートとの食い違いは下の「未確認の食い違い」） |
+| `serial_port` / `baud_rate` | `/dev/ttyACM0` / 57600（中国語版 M0602C 規格書 V1.0 と一致） |
 | `left_motor_id` / `right_motor_id` | 4 / 5 |
-| `max_motor_rpm` | 475（`DdtMotorLib::kSpecVelocityMaxRpm` にクランプ。データシートは ±330 rpm と記載、下記） |
+| `max_motor_rpm` | 475（`DdtMotorLib::kSpecVelocityMaxRpm` にクランプ。中国語版 M0602C 規格書 V1.0 の ±475 rpm と一致） |
 | `control_mode` | `"velocity"`（`"current"` で電流モード） |
 | `control_rate` | 50.0 Hz（シリアル往復 2 モータ直列が周期予算に収まる必要あり） |
 | `serial_response_timeout_ms` | 10（従来の固定値）。フィードバック応答待ちの上限 [ms]、範囲 [2, 50]（外はクランプ + WARN）。下限の目安は応答フレーム伝送 1.74 ms + ファーム処理の実測値 + 余裕。実測は bag の `/drive_control_sample` の `roundtrip_ms` / `response_timeout`（周期ごと・左右ごと）。INFO「シリアル往復レイテンシ統計」は lifecycle の deactivate のときだけ出る（サービスの停止や launch の Ctrl+C では出ない） |
@@ -292,12 +314,17 @@ drive_component + ブラウザのモニタ）で同じ条件を手元で再現�
    遅ければ `current_kp` / `current_ki` を段階的に上げる（目安 0.02 / 0.05）。床の上の摩擦を手順 2
    と同じ方法で測り直す。床用のゲインのまま持ち上げると `oscillation` で止まることも確認する。
 
-### 未確認の食い違い（データシートとリポジトリ）
+### 規格書とリポジトリの通信・速度設定
 
-M6 規格書 V1.0 は通信 115200 baud・最大 500 Hz・速度 ±330 rpm と記載しているが、リポジトリは
-`baud_rate: 57600`、`max_motor_rpm: 475`（`kSpecVelocityMaxRpm`）を使っている。実機での確認待ちの
-ため、**今回コードは変更していない**。往復時間・`serial_response_timeout_ms` の下限の見積もり
-（10 byte で 1.74 ms）は 57600 baud を前提にしている。
+以前のREADMEには115200 baud・±330 rpmという記載があったが、出典の版・言語は未確認で、
+別資料にその値があるかも未確認。ここでは中国語版 M0602C 規格書 V1.0 の値を採用する。
+
+中国語版 M0602C 規格書 V1.0 の通信速度は 57600 bps、速度範囲は ±475 rpm で、
+リポジトリの `baud_rate: 57600`、`max_motor_rpm: 475`（`kSpecVelocityMaxRpm`）と一致する。
+`DdtMotorLib` のコンストラクタの既定引数も 57600 bps に揃えている。drive_component は
+パラメータの 57600 を明示的に渡すため、この既定引数の修正で走行の挙動は変わらない。
+往復時間・`serial_response_timeout_ms` の下限の見積もり（10 byte で 1.74 ms）も
+57600 bps を前提にしている。
 
 ## ビルド時間
 

@@ -218,7 +218,7 @@ if run_build; then
     else
         fail "workspace build: src/ydlidar_ros2 was not imported"
     fi
-    assert_contains "$FAKE_ROS_LOG" "rosdep install --from-paths $BUILD_WS --ignore-src --rosdistro jazzy -r -y" \
+    assert_contains "$FAKE_ROS_LOG" "rosdep install --from-paths $BUILD_WS/core $BUILD_WS/src/ydlidar_ros2 $BUILD_WS/src/ydlidar_sdk_vendor --ignore-src --rosdistro jazzy -r -y" \
         "workspace build: rosdep installs the workspace's keys"
     assert_contains "$FAKE_ROS_LOG" "ROS_HOME=/home/$USER/.ros" "workspace build: rosdep reads the kit user's index"
     assert_contains "$FAKE_ROS_LOG" "colcon build --symlink-install" "workspace build: colcon build --symlink-install"
@@ -243,7 +243,7 @@ if run_build; then
     else
         fail "workspace build idempotency: vcs ran $(count_calls vcs) times over two runs"
     fi
-    if [ "$(count_calls colcon)" = "2" ]; then
+    if [ "$(grep -c '^colcon build ' "$FAKE_ROS_LOG")" = "2" ]; then
         pass "workspace build idempotency: second run rebuilds"
     else
         fail "workspace build idempotency: colcon ran $(count_calls colcon) times over two runs"
@@ -259,6 +259,10 @@ mkdir -p "$BROKEN_TOOLS"
 cat >"$BROKEN_TOOLS/colcon" <<'EOF_COLCON'
 #!/usr/bin/env bash
 echo "colcon $*" >>"$FAKE_ROS_LOG"
+if [ "${1:-}" = list ]; then
+    printf '%s\n' "$PWD/core" "$PWD/src/ydlidar_ros2" "$PWD/src/ydlidar_sdk_vendor"
+    exit 0
+fi
 rm -rf install && mkdir -p build log install
 : >install/setup.bash
 EOF_COLCON
@@ -588,6 +592,13 @@ unset FAKE_CLEANUP_LOG FAKE_CLEANUP_PENDING
 
 # --- 13. Custom image build (scripts/iso/image-build-lib.sh, apply-ansible-config.sh) ---
 . ansible/tests/image_build_contract.sh
+
+# Source-only migration fixtures use temporary files and fake commands only.
+if python3 -m unittest discover -s ansible/tests -p 'test_*.py' -v; then
+    pass "setup migration contracts"
+else
+    fail "setup migration contracts"
+fi
 
 REAL_BASHRC_AFTER="$(real_bashrc_fingerprint)"
 if [ "$REAL_BASHRC_BEFORE" = "$REAL_BASHRC_AFTER" ]; then
