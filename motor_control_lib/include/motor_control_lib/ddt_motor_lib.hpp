@@ -450,7 +450,9 @@ private:
   std::map<int, ddt_current_pi::GuardTrip> current_guard_trips_;
   // current モードの応答の途切れのラッチ（ライブラリ全体で 1 つ。currentLinkLatched を参照）
   bool current_link_latched_{false};
-  bool suppress_current_link_recovery_;
+  // 非ゼロ目標の送受信中は、その応答をラッチ解除の回復カウントに入れない。
+  bool suppress_current_link_recovery_{false};
+  // motor_id -> 前周期の目標が非ゼロか（PI 出力が偶然 0 でも走行継続と判断する）。
   std::map<int, bool> current_previous_nonzero_target_;
   // motor_id -> ラッチの後に続けて届いた新しい有効な応答（mode=1・fault=0）の数
   std::map<int, int> current_link_recovery_;
