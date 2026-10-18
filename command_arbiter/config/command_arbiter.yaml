@@ -18,6 +18,8 @@ drive_arbiter:
     # A stick command below these counts as neutral: the lab may take over, and small noise on a
     # resting stick does not take the robot back. Anything above hands it to the controller.
     neutral_linear: 0.01    # [m/s]
+    # Controller takeover only; NOT drive_component's rearm_neutral_* bands.
+    # LAB start/end commands remain exact zero; actuator rearming is configured in drive YAML.
     neutral_angular: 0.025  # [rad/s]
     # The drive needs no quiet time: the lab may take over as soon as the stick is neutral.
     controller_quiet_sec: 0.0
