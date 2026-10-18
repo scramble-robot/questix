@@ -17,6 +17,7 @@
 #include "motor_control_app/control_core.hpp"
 #include "motor_control_app/drive_control_sample_msg.hpp"
 #include "motor_control_app/drive_control_tick.hpp"
+#include "motor_control_app/drive_rearm.hpp"
 #include "motor_control_app/drive_watchdog.hpp"
 #include "motor_control_app/odometry_integrator.hpp"
 #include "motor_control_lib/ddt_motor_lib.hpp"
@@ -96,6 +97,7 @@ public:
 
 private:
   friend struct DriveParamPolicyAccess;
+  friend struct DriveRearmNodeAccess;
   /**
    * @brief Twistメッセージのコールバック関数
    *
@@ -373,11 +375,16 @@ private:
 
   // 最新の目標 twist（twistCallback が保存、controlTimerCallback が消費）。
   // has_target_ = false は未武装（起動直後・タイムアウト/非常停止/フォールト停止後）で、
-  // 制御 tick は駆動指令を送らない。次の /target_twist 受信で再武装される。
+  // 制御 tick は駆動指令を送らない。ゲートが開いて正常なモータへ中立が届いてから再武装される。
   double target_linear_{0.0};
   double target_angular_{0.0};
   rclcpp::Time last_cmd_time_;
   bool has_target_{false};
+  drive_rearm::Rearm rearm_{};
+  bool pending_cmd_timeout_stop_{false};
+  // Rearm only; velocity/current both. Restart to change; never filters armed commands.
+  double rearm_neutral_linear_{0.0};
+  double rearm_neutral_angular_{0.0};
 
   // スルーレート制限と停止判定の状態は control_core_ が保持する。
 

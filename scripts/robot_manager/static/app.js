@@ -11,6 +11,12 @@ let latestLab = null;
 // When each transient lab blocker was first seen (StatusView.stableBlockers).
 const blockerMemory = StatusView.createBlockerMemory();
 let stopAllPending = false;
+let recReadiness = null;
+let recReadinessRequest = 0;
+let recReadinessExpires = 0;
+let recBusy = true;
+let recSending = false;
+let activePanel = 'control';
 
 // A persistent notice with our own words (no HTTP error behind it).
 function showIssueText(title, next, panel = 'control', detail = '') {
@@ -49,6 +55,10 @@ function showIssue(path, status, detail) {
 }
 
 function activatePanel(name) {
+  activePanel = name;
+  // Invalidate responses from a previously visible tab or evidence setting.
+  recReadinessRequest++;
+  if (name === 'rec') refreshRecReadiness(true);
   document.querySelectorAll('.tab').forEach((tab) => {
     const active = tab.dataset.tab === name;
     tab.classList.toggle('active', active);
@@ -153,6 +163,11 @@ async function refreshStatus() {
     const data = await apiSilent("/api/status");
     const old = latestStatus;
     latestStatus = data;
+    if (old && old.service !== data.service && activePanel === 'rec') {
+      recReadiness = null;
+      renderRecReadiness();
+      refreshRecReadiness(true);
+    }
     document.getElementById('connection-warning').hidden = true;
     if (typeof invalidateControlRuntime === 'function' && old &&
         (old.service !== data.service || JSON.stringify(old.launch_config) !== JSON.stringify(data.launch_config))) {
@@ -408,12 +423,68 @@ async function apiSilent(path) {
   return data;
 }
 
+function renderRecReadiness() {
+  const evidence = document.getElementById('rec-trial-mode').checked;
+  const view = TrialView.readiness(recReadiness, evidence, trialValues(),
+    evidence && recReadinessExpires > 0 && Date.now() >= recReadinessExpires);
+  document.getElementById('rec-start').disabled = recBusy || recSending || !view.ready;
+  const heading = view.ready ? '開始条件がそろっています' : '今は記録を開始できません';
+  const state = document.getElementById('rec-readiness-state');
+  if (state.textContent !== heading) state.textContent = heading;
+  const list = document.getElementById('rec-readiness-reasons');
+  const text = JSON.stringify(view.reasons);
+  if (list.dataset.reasons !== text) {
+    list.replaceChildren(...view.reasons.map((reason) => {
+      const item = document.createElement('li');
+      item.textContent = reason;
+      return item;
+    }));
+    list.dataset.reasons = text;
+  }
+  list.hidden = !view.reasons.length;
+  const time = document.getElementById('rec-preflight-time');
+  time.hidden = !view.checkedAt;
+  time.textContent = view.checkedAt ? `証拠付き記録の確認：${new Date(view.checkedAt).toLocaleTimeString()}（有効期間60秒）` : '';
+  document.getElementById('rec-readiness-refresh').disabled = recSending || view.checking;
+}
+
+async function refreshRecReadiness(event = false, force = false) {
+  const request = ++recReadinessRequest;
+  const evidence = Boolean(document.getElementById('rec-trial-mode').checked);
+  if (event) {
+    recReadiness = null;
+    renderRecReadiness();
+  }
+  try {
+    let data = await apiSilent('/api/rosbag/readiness');
+    if (request !== recReadinessRequest) return;
+    const fresh = data.trial?.preflight?.state === 'pass' &&
+      Date.parse(data.trial.preflight.expires_at) > Date.parse(data.checked_at);
+    if (event && evidence && data.normal?.ready && (force || !fresh) &&
+        data.trial?.preflight?.state !== 'checking') {
+      data = await apiSilent('/api/rosbag/readiness?scope=trial&refresh=true');
+      if (request !== recReadinessRequest) return;
+    }
+    recReadiness = data;
+    // Use the server's remaining lifetime, avoiding differences between browser/robot clocks.
+    const remaining = Date.parse(data.trial?.preflight?.expires_at) - Date.parse(data.checked_at);
+    recReadinessExpires = Number.isFinite(remaining) ? Date.now() + Math.max(0, remaining) : 0;
+  } catch {
+    if (request !== recReadinessRequest) return;
+    recReadiness = null;
+    recReadinessExpires = 0;
+  }
+  renderRecReadiness();
+}
+
 async function refreshRecStatus() {
   let data;
   try {
     data = await apiSilent("/api/rosbag/status");
   } catch {
-    return; // recorder unavailable; leave UI as-is
+    recBusy = true;
+    renderRecReadiness();
+    return;
   }
   const recording = data.recording;
 
@@ -444,7 +515,8 @@ async function refreshRecStatus() {
   // Buttons
   // `starting` also covers the after-run parameter capture of the last evidence recording.
   const busy = recording || Boolean(data.starting);
-  document.getElementById("rec-start").disabled = busy || low;
+  recBusy = busy;
+  renderRecReadiness();
   document.getElementById("rec-stop").disabled = !recording;
   document.getElementById("rec-trial-mode").disabled = busy;
   for (const input of document.querySelectorAll("[data-trial]")) input.disabled = busy;
@@ -501,6 +573,7 @@ function buildTrialFields() {
     input.id = `trial-${field.key}`;
     input.dataset.trial = field.key;
     input.autocomplete = "off";
+    input.addEventListener('input', renderRecReadiness);
     if (field.kind === "number") {
       input.type = "number";
       input.inputMode = "decimal";
@@ -749,6 +822,9 @@ async function pickFolder() {
     document.getElementById("rec-output").value = folderSelectedPath;
     toast(`記録の保存先フォルダを設定しました: ${folderSelectedPath}`, "success");
     closeFolderPicker();
+    recReadiness = null;
+    renderRecReadiness();
+    await refreshRecReadiness(true);
     await refreshRecStatus();
     await refreshBagList();
   } catch {
@@ -820,17 +896,27 @@ function setupRecorderEvents() {
   buildTrialFields();
   const trialMode = document.getElementById("rec-trial-mode");
   trialMode.addEventListener("change", () => {
+    recReadinessRequest++;
     document.getElementById("trial-form").hidden = !trialMode.checked;
     document.getElementById("rec-start").textContent = TrialView.startLabel(trialMode.checked);
+    renderRecReadiness();
+    refreshRecReadiness(true);
   });
+  document.getElementById('rec-readiness-refresh').addEventListener('click', () => refreshRecReadiness(true, true));
 
   document.getElementById("rec-start").addEventListener("click", async () => {
+    renderRecReadiness();
+    if (document.getElementById('rec-start').disabled) return;
+    recSending = true;
+    renderRecReadiness();
     let request = { method: "POST" };
     let path = "/api/rosbag/start";
     if (trialMode.checked) {
       const { body, errors } = TrialView.metadata(trialValues());
       if (errors.length) {
         toast(errors[0], "error");
+        recSending = false;
+        renderRecReadiness();
         return;
       }
       path = "/api/rosbag/start-trial";
@@ -844,7 +930,11 @@ function setupRecorderEvents() {
       if (warnings) toast(`証拠付き記録の注意が ${warnings} 件あります（記録カードに表示）`, "error");
       await refreshRecStatus();
     } catch {
-      // already toasted
+      recReadiness = null;
+    } finally {
+      recSending = false;
+      renderRecReadiness();
+      await refreshRecReadiness();
     }
   });
 
@@ -867,6 +957,9 @@ function setupRecorderEvents() {
     try {
       await api("/api/rosbag/config", { method: "PUT", body: JSON.stringify(config) });
       toast("記録設定を保存しました", "success");
+      recReadiness = null;
+      renderRecReadiness();
+      await refreshRecReadiness(true);
       await refreshRecStatus();
       await refreshBagList();
     } catch {
@@ -1721,6 +1814,9 @@ document.addEventListener("DOMContentLoaded", () => {
   }, 5000);
   // Poll recorder status more frequently for a live elapsed/size readout
   setInterval(refreshRecStatus, 2000);
+  setInterval(() => {
+    if (activePanel === 'rec') refreshRecReadiness();
+  }, 2000);
   setupLabEvents();
   setupNetworkEvents();
   refreshLabStatus();
