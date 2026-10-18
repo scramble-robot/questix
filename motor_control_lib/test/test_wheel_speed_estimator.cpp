@@ -135,8 +135,8 @@ TEST(WheelSpeedEstimator, RepeatedAnswerIsInvalidAndNotUsed) {
   EXPECT_EQ(est.estimate(f.t()).reason, wse::Invalid::kRepeated);
 }
 
-TEST(WheelSpeedEstimator, IntervalOutsideTenToFortyMsIsInvalid) {
-  for (const double gap : {0.041, 0.060, 0.009, 0.002}) {
+TEST(WheelSpeedEstimator, IntervalOutsideTenToFiftyMsIsInvalid) {
+  for (const double gap : {0.051, 0.060, 0.009, 0.002}) {
     wse::WheelSpeedEstimator est;
     Feeder f(100.0);
     est.update(f.sampleNow());
@@ -148,7 +148,7 @@ TEST(WheelSpeedEstimator, IntervalOutsideTenToFortyMsIsInvalid) {
     EXPECT_FALSE(e.valid) << gap;
     EXPECT_EQ(e.reason, wse::Invalid::kInterval) << gap;
   }
-  // 40 ms (one lost answer) and 10 ms are still used.
+  // One lost answer with jitter, and the 10 ms lower boundary, are still used.
   wse::WheelSpeedEstimator est;
   Feeder f(100.0);
   est.update(f.sampleNow());
@@ -260,6 +260,77 @@ TEST(WheelSpeedEstimator, InvalidNamesAreDistinct) {
   EXPECT_STREQ(wse::invalidName(wse::Invalid::kNone), "none");
   EXPECT_STREQ(wse::invalidName(wse::Invalid::kStale), "stale");
   EXPECT_STREQ(wse::invalidName(wse::Invalid::kSegmentSpeed), "segment_speed");
+}
+
+TEST(WheelSpeedEstimator, OneMissingAnswerWithJitterRemainsValid) {
+  for (double interval : {0.041, 0.045, 0.049}) {
+    wse::WheelSpeedEstimator est;
+    Feeder f(100.0);
+    est.update(f.sampleNow());
+    est.update(f.next(interval));
+    est.update(f.next(interval));
+    const auto e = est.estimate(f.t());
+    ASSERT_TRUE(e.valid) << interval;
+    EXPECT_NEAR(e.rpm, 100.0, kTolRpm);
+  }
+}
+
+TEST(WheelSpeedEstimator, InvalidPositionsRejectBothEndpoints) {
+  for (uint16_t raw : {32768, 40000, 65535}) {
+    wse::WheelSpeedEstimator est;
+    est.update({raw, 100.00, 1, 1, 0});
+    EXPECT_STREQ(wse::invalidName(est.estimate(100.00).reason), "position");
+    est.update({raw, 100.02, 2, 1, 0});
+    est.update({raw, 100.04, 3, 1, 0});
+    EXPECT_FALSE(est.estimate(100.04).valid);  // never an apparently valid stationary wheel
+    est.update({0, 100.06, 4, 1, 0});
+    EXPECT_FALSE(est.estimate(100.06).valid);
+    EXPECT_STREQ(wse::invalidName(est.estimate(100.06).reason), "position");
+    est.update({0, 100.08, 5, 1, 0});
+    EXPECT_FALSE(est.estimate(100.08).valid);
+    est.update({0, 100.10, 6, 1, 0});
+    EXPECT_TRUE(est.estimate(100.10).valid);
+  }
+}
+
+TEST(WheelSpeedEstimator, NegativeOrNonfiniteAgeIsInvalid) {
+  wse::WheelSpeedEstimator est;
+  est.update({0, 100.00, 1, 1, 0});
+  est.update({0, 100.02, 2, 1, 0});
+  est.update({0, 100.04, 3, 1, 0});
+  ASSERT_TRUE(est.estimate(100.04).valid);
+  EXPECT_FALSE(est.estimate(100.03).valid);
+  EXPECT_FALSE(est.estimate(NAN).valid);
+  EXPECT_FALSE(est.estimate(INFINITY).valid);
+  EXPECT_FALSE(est.estimate(-INFINITY).valid);
+}
+
+TEST(WheelSpeedEstimator, NonfiniteSampleTimeIsInvalid) {
+  for (double t : {NAN, INFINITY, -INFINITY}) {
+    wse::WheelSpeedEstimator est;
+    est.update({0, t, 1, 1, 0});
+    EXPECT_FALSE(est.estimate(100.0).valid);
+    est.update({0, 100.00, 2, 1, 0});
+    EXPECT_FALSE(est.estimate(100.00).valid);
+    est.update({0, 100.02, 3, 1, 0});
+    EXPECT_FALSE(est.estimate(100.02).valid);
+    est.update({0, 100.04, 4, 1, 0});
+    EXPECT_TRUE(est.estimate(100.04).valid);
+  }
+}
+
+TEST(WheelSpeedEstimator, CounterRollbackInvalidatesAndReprimes) {
+  wse::WheelSpeedEstimator est;
+  est.update({0, 100.00, 10, 1, 0});
+  est.update({0, 100.02, 11, 1, 0});
+  est.update({0, 100.04, 12, 1, 0});
+  ASSERT_TRUE(est.estimate(100.04).valid);
+  est.update({0, 100.06, 1, 1, 0});
+  EXPECT_FALSE(est.estimate(100.06).valid);
+  est.update({0, 100.08, 2, 1, 0});
+  EXPECT_FALSE(est.estimate(100.08).valid);
+  est.update({0, 100.10, 3, 1, 0});
+  EXPECT_TRUE(est.estimate(100.10).valid);
 }
 
 }  // namespace

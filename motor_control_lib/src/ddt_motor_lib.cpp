@@ -335,12 +335,13 @@ bool DdtMotorLib::commandCurrentMode(int motor_id, int rpm_ref_raw) {
   double measured_rpm = 0.0;
   wheel_speed_estimator::Estimate estimate;
   if (!currentMeasuredRpm(motor_id, &measured_rpm, &estimate)) {
-    resetCurrentPiStateForStop(motor_id);
-    if (rpm_ref_raw != 0 && transaction_stats_[motor_id].last_current_raw_sent != 0) {
+    if (rpm_ref_raw != 0 &&
+        (transaction_stats_[motor_id].last_current_raw_sent != 0 || previous_nonzero_target)) {
       RCLCPP_WARN(logger_, "モーター %d: 角度から求めた速さが無効（%s、最新の応答 %.3f s 前）",
                   motor_id, wheel_speed_estimator::invalidName(estimate.reason), estimate.age_sec);
       return latchCurrentLinkAndStop(motor_id, "電流を出している間に角度から求めた速さが無効");
     }
+    resetCurrentPiStateForStop(motor_id);
     RCLCPP_DEBUG(logger_, "モーター %d: 角度から求めた速さが無効（%s）のため電流 0 を送ります",
                  motor_id, wheel_speed_estimator::invalidName(estimate.reason));
     return sendMotorCurrentRaw(motor_id, 0);
