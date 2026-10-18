@@ -151,3 +151,16 @@ TEST(RollerGate, NotRequiredEstopOnlyStopsWhenPressed) {
   estop.active = true;
   EXPECT_EQ(esc_motor_control_cpp::evaluateRollerEstop(estop), RollerBlock::kEstopActive);
 }
+
+TEST(RollerGate, PwmFaultNeverOpensAGateAndDoesNotHideEstopOrPermission) {
+  esc_motor_control_cpp::RollerGateInputs inputs;
+  inputs.pwm_fault = true;
+  inputs.permission.required = false;
+  inputs.estop.required = false;
+  EXPECT_EQ(esc_motor_control_cpp::evaluateRollerGate(inputs), RollerBlock::kPwmFault);
+  inputs.permission.required = true;
+  EXPECT_EQ(esc_motor_control_cpp::evaluateRollerGate(inputs), RollerBlock::kPermissionUnknown);
+  inputs.estop.required = true;
+  EXPECT_EQ(esc_motor_control_cpp::evaluateRollerGate(inputs), RollerBlock::kEstopUnknown);
+  EXPECT_STREQ(esc_motor_control_cpp::rollerBlockName(RollerBlock::kPwmFault), "pwm_fault");
+}

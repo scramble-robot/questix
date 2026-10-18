@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cmath>
 #include <functional>
+#include <stdexcept>
 #include <thread>
 
 #include "esc_motor_control_cpp/estop_logic.hpp"
@@ -45,7 +46,8 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
   this->declare_parameter<int>("max_pulse_width", 2000);      // μs (speed=1.0)
   this->declare_parameter<int>("neutral_pulse_width", 1000);  // μs (ESC arm/idle)
   this->declare_parameter<std::string>("pwm_backend",
-                                       "auto");      // "auto","pigpio","lgpio","simulation"
+                                       "auto");  // "auto","pigpio","lgpio","simulation"
+  this->declare_parameter<std::string>("rp1_guard_socket", "/run/questix_pwm_guard/control.sock");
   this->declare_parameter<int>("gpio_chip_num", 4);  // 0=Pi4, 4=Pi5
 
   // ---- Read parameters ----
@@ -60,7 +62,19 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
   max_pulse_width_us_ = this->get_parameter("max_pulse_width").as_int();
   neutral_pulse_width_us_ = this->get_parameter("neutral_pulse_width").as_int();
   pwm_backend_name_ = this->get_parameter("pwm_backend").as_string();
+  rp1_guard_socket_ = this->get_parameter("rp1_guard_socket").as_string();
   gpio_chip_num_ = this->get_parameter("gpio_chip_num").as_int();
+
+  if (pwm_backend_name_ == "rp1_hw" && !test_mode_) {
+    if (pwm_pin_ != 13 || min_pulse_width_us_ != 0 || max_pulse_width_us_ != 2000 ||
+        neutral_pulse_width_us_ != 1000 || !std::isfinite(safety_timeout_) ||
+        safety_timeout_ <= 0 || safety_timeout_ > 1.0 || !std::isfinite(min_speed_) ||
+        !std::isfinite(max_speed_) || min_speed_ < -1.0 || max_speed_ > 1.0 || min_speed_ > 0 ||
+        max_speed_ < 0) {
+      throw std::invalid_argument(
+          "rp1_hw requires GPIO13, 0/2000/1000 us and a safety timeout in (0,1]");
+    }
+  }
 
   // ---- Internal state ----
   // The roller never reverses from a command: [0, max_speed].
@@ -117,8 +131,36 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
   gate_timer_ =
       this->create_wall_timer(100ms, std::bind(&EscMotorControlComponent::apply_gate, this));
 
+  // Diagnostic only: do not rewrite pulse settings or their existing mapping.
+  for (const auto& entry :
+       {std::make_pair("minimum reachable speed", speed_to_pulse_us(std::max(min_speed_, 0.0))),
+        std::make_pair("max_speed", speed_to_pulse_us(max_speed_)),
+        std::make_pair("speed=0", speed_to_pulse_us(0.0)),
+        std::make_pair("neutral", neutral_pulse_width_us_ > 0
+                                      ? neutral_pulse_width_us_
+                                      : (min_pulse_width_us_ + max_pulse_width_us_) / 2)}) {
+    if (!PwmCommand::valid_pulse(entry.second)) {
+      RCLCPP_ERROR(this->get_logger(),
+                   "ESC pulse configuration: %s maps to %d us; lgpio accepts 0 or 500-2500 us",
+                   entry.first, entry.second);
+    }
+  }
+
+  const int range_min =
+      std::min(speed_to_pulse_us(std::max(min_speed_, 0.0)), speed_to_pulse_us(max_speed_));
+  const int range_max =
+      std::max(speed_to_pulse_us(std::max(min_speed_, 0.0)), speed_to_pulse_us(max_speed_));
+  if (range_min < 500 && range_max > 0) {
+    RCLCPP_ERROR(this->get_logger(),
+                 "ESC pulse configuration: continuous speed interval intersects 1-499 us; "
+                 "such requests fail closed without changing the legacy mapping");
+  }
+
   // ---- ESC initialisation ----
   initialize_esc();
+  if (pwm_ && pwm_->name() == "rp1_hw") {
+    pwm_lease_timer_ = this->create_wall_timer(100ms, [this] { renew_pwm_lease(); });
+  }
 
   RCLCPP_INFO(this->get_logger(), "ESC Motor Control Node (C++) initialized on pin %d", pwm_pin_);
   RCLCPP_INFO(this->get_logger(), "PWM backend: %s", pwm_ ? pwm_->name().c_str() : "none");
@@ -136,17 +178,52 @@ EscMotorControlComponent::EscMotorControlComponent(const rclcpp::NodeOptions& op
   }
 }
 
-EscMotorControlComponent::~EscMotorControlComponent() {
-  RCLCPP_INFO(this->get_logger(), "Shutting down ESC Motor Control Node...");
-  // Stop motor
-  set_motor_speed(0.0);
-  std::this_thread::sleep_for(500ms);
+EscMotorControlComponent::~EscMotorControlComponent() { begin_shutdown(); }
 
-  // Release PWM
-  if (pwm_) {
-    pwm_->cleanup();
+void EscMotorControlComponent::begin_shutdown() {
+  {
+    std::lock_guard<std::mutex> guard(lock_);
+    if (stopping_) return;
+    stopping_ = true;
+    current_speed_ = 0.0;
+    if (pwm_lease_timer_) pwm_lease_timer_->cancel();
+    if (gate_timer_) gate_timer_->cancel();
+    if (command_timer_) command_timer_->cancel();
+    if (publisher_timer_) publisher_timer_->cancel();
   }
-  RCLCPP_INFO(this->get_logger(), "ESC resources released.");
+  RCLCPP_INFO(this->get_logger(), "ESC shutdown_begin");
+  // Serialize backend state/Client updates with status reads as well as command callbacks.
+  // The guard drains independently while this lock is held; no ROS heartbeat is required.
+  std::lock_guard<std::mutex> guard(lock_);
+  if (pwm_ && pwm_->name() == "rp1_hw") {
+    const bool stopped = pwm_->graceful_shutdown();
+    const bool low =
+        stopped || (pwm_->applied_hint() == 0 && (pwm_->output_state() == "FAULT_LOW" ||
+                                                  pwm_->output_state() == "TERMINAL_LOW"));
+    if (low)
+      RCLCPP_INFO(this->get_logger(), "ESC low_api_accepted (not a physical measurement)");
+    else
+      RCLCPP_ERROR(this->get_logger(), "ESC Low request failed; guard output state UNKNOWN");
+    pwm_->cleanup();
+  } else {
+    if (pwm_) {
+      // Use the same latched/terminal policy; a destructor must not re-emit neutral after Low.
+      if (send_pulse(speed_to_pulse_us(0.0), 0.0)) std::this_thread::sleep_for(500ms);
+      pwm_->cleanup();
+    }
+  }
+}
+
+void EscMotorControlComponent::renew_pwm_lease() {
+  // These callbacks execute on the ROS executor, never an unconditional heartbeat thread.
+  command_tick();
+  check_publishers();
+  apply_gate();
+  std::lock_guard<std::mutex> guard(lock_);
+  if (stopping_ || !pwm_ || pwm_->terminal()) return;
+  double speed =
+      evaluate_gate_locked() == RollerBlock::kNone && !pwm_command_.fault() ? current_speed_ : 0.0;
+  send_pulse(speed_to_pulse_us(speed), speed);
 }
 
 // --------------------------------------------------------------------------
@@ -156,21 +233,28 @@ void EscMotorControlComponent::initialize_esc() {
   if (test_mode_) {
     RCLCPP_INFO(this->get_logger(), "Simulation mode (test_mode=true)");
     pwm_ = std::make_unique<SimulationBackend>();
+    pwm_->initialize(pwm_pin_);
+    send_pulse(speed_to_pulse_us(0.0), 0.0, true);
     return;
   }
 
   // Create PWM backend via factory
   std::string actual_name;
-  pwm_ = make_pwm_backend(pwm_backend_name_, gpio_chip_num_, actual_name);
+  pwm_ = make_pwm_backend(pwm_backend_name_, gpio_chip_num_, actual_name, rp1_guard_socket_);
 
   // Try to initialise hardware
   if (!pwm_->initialize(pwm_pin_)) {
     RCLCPP_FATAL(this->get_logger(), "Failed to initialise PWM backend '%s' on pin %d",
                  actual_name.c_str(), pwm_pin_);
+    if (pwm_backend_name_ == "rp1_hw") {
+      pwm_->cleanup();
+      throw std::runtime_error("rp1_hw initialization failed; no simulation fallback");
+    }
     RCLCPP_FATAL(this->get_logger(),
                  "Falling back to simulation. Check: HOME env, gpio group, device permissions.");
     pwm_ = std::make_unique<SimulationBackend>();
     pwm_->initialize(pwm_pin_);
+    send_pulse(speed_to_pulse_us(0.0), 0.0, true);
     return;
   }
 
@@ -182,9 +266,21 @@ void EscMotorControlComponent::initialize_esc() {
   if (neutral_us <= 0) {
     neutral_us = (min_pulse_width_us_ + max_pulse_width_us_) / 2;
   }
-  pwm_->set_servo_pulse(pwm_pin_, neutral_us);
+  if (!send_pulse(neutral_us, 0.0, true)) {
+    RCLCPP_ERROR(this->get_logger(), "ESC initialization failed; PWM fault latched");
+    if (pwm_backend_name_ == "rp1_hw") {
+      pwm_->cleanup();
+      throw std::runtime_error("rp1_hw arm request failed");
+    }
+    return;
+  }
   std::this_thread::sleep_for(2s);  // ESC arm wait
 
+  if (!pwm_->complete_arm()) {
+    pwm_command_.latch_fault();
+    pwm_->cleanup();
+    throw std::runtime_error("rp1_hw arm deadline/lease transition failed");
+  }
   RCLCPP_INFO(this->get_logger(), "ESC initialized. Standing by in neutral.");
 }
 
@@ -200,26 +296,37 @@ int EscMotorControlComponent::speed_to_pulse_us(double speed) const {
   return pulse;
 }
 
-void EscMotorControlComponent::set_motor_speed(double speed) {
+bool EscMotorControlComponent::set_motor_speed(double speed) {
   std::lock_guard<std::mutex> guard(lock_);
+
+  if (stopping_ || !std::isfinite(speed)) return false;
 
   // Evaluated now, not from the last timer tick: nothing nonzero leaves while the gate is closed.
   if (evaluate_gate_locked() != RollerBlock::kNone) {
     speed = 0.0;
   }
 
-  // Clamp
-  speed = std::max(min_speed_, std::min(max_speed_, speed));
+  // Clamp nonzero requests only: a stop must remain zero even with unusual speed limits.
+  if (speed != 0.0) speed = std::max(min_speed_, std::min(max_speed_, speed));
+  if (pwm_command_.fault()) speed = 0.0;
 
   current_speed_ = speed;
 
-  if (pwm_ && pwm_->name() != "simulation") {
-    int pulse_us = speed_to_pulse_us(speed);
-    pwm_->set_servo_pulse(pwm_pin_, pulse_us);
-    RCLCPP_DEBUG(this->get_logger(), "ESC speed: %.3f  pulse: %d μs", speed, pulse_us);
-  } else {
-    RCLCPP_DEBUG(this->get_logger(), "Simulation speed: %.3f", speed);
-  }
+  return send_pulse(speed_to_pulse_us(speed), speed);
+}
+
+bool EscMotorControlComponent::send_pulse(int pulse_us, double speed, bool initializing) {
+  if (!pwm_) return false;
+  const auto changed = [this](int before, int after, double value) {
+    RCLCPP_INFO(this->get_logger(), "ESC pulse: %d -> %d us (speed=%.3f)", before, after, value);
+  };
+  const auto error = [this](int code) {
+    RCLCPP_ERROR_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
+                          "ESC PWM operation failed (backend=%s, error=%d); PWM fault latched",
+                          pwm_->name().c_str(), code);
+  };
+  return initializing ? pwm_command_.initialize(*pwm_, pwm_pin_, pulse_us, changed, error)
+                      : pwm_command_.send(*pwm_, pwm_pin_, pulse_us, speed, changed, error);
 }
 
 // --------------------------------------------------------------------------
@@ -323,6 +430,7 @@ RollerBlock EscMotorControlComponent::evaluate_gate_locked() const {
   RollerGateInputs in;
   in.permission = permission_monitor_->inputs();
   in.estop = estop_monitor_->inputs();
+  in.pwm_fault = pwm_command_.fault();
   return evaluateRollerGate(in);
 }
 
@@ -338,10 +446,13 @@ void EscMotorControlComponent::apply_gate() {
     if (now_block != RollerBlock::kNone) {
       // Closing (or closed with something still spinning): stop, and require a 0 command
       // before the roller spins again (a held button, a lesson heartbeat).
-      if (previous == RollerBlock::kNone || current_speed_ != 0.0 || command_logic_.speed() > 0.0) {
+      const bool rp1_terminal = pwm_ && pwm_->name() == "rp1_hw" && pwm_->terminal();
+      if (previous == RollerBlock::kNone || current_speed_ != 0.0 || command_logic_.speed() > 0.0 ||
+          (!rp1_terminal && pwm_command_.needs_stop(speed_to_pulse_us(0.0)))) {
         command_logic_.inhibit();
         command_source_ = "idle";
-        stop = true;
+        if (rp1_terminal) current_speed_ = 0.0;  // Clear the request without re-emitting neutral.
+        stop = !rp1_terminal;
       }
     }
   }
@@ -355,7 +466,7 @@ void EscMotorControlComponent::apply_gate() {
                   "Roller allowed again (was %s): it spins after a 0 command and a new one",
                   rollerBlockName(previous));
     } else {
-      RCLCPP_WARN(this->get_logger(), "Roller blocked: %s (was %s); roller at 0",
+      RCLCPP_WARN(this->get_logger(), "Roller blocked: %s (was %s); stop requested",
                   rollerBlockName(now_block), rollerBlockName(previous));
     }
     publish_roller_status();
@@ -405,7 +516,14 @@ void EscMotorControlComponent::publish_roller_status() {
   RollerStatus status;
   {
     std::lock_guard<std::mutex> guard(lock_);
+    if (stopping_) return;
     status.command = current_speed_;
+    status.pwm_fault = pwm_command_.fault();
+    status.applied_pulse_us =
+        pwm_ && pwm_->name() == "rp1_hw" ? pwm_->applied_hint() : pwm_command_.applied_pulse_us();
+    status.pwm_output_state = pwm_ ? pwm_->output_state() : "UNKNOWN";
+    status.pwm_error = pwm_ ? pwm_->last_error() : 0;
+    status.pwm_backend = pwm_ ? pwm_->name() : "none";
     status.source = current_speed_ > 0.0 ? command_source_ : "idle";
     const RollerBlock block = evaluate_gate_locked();
     status.estop = isRollerEstopBlock(block);
@@ -422,7 +540,10 @@ void EscMotorControlComponent::publish_roller_status() {
 // --------------------------------------------------------------------------
 void EscMotorControlComponent::publish_status() {
   auto status_msg = std_msgs::msg::Float32();
-  status_msg.data = static_cast<float>(current_speed_);
+  {
+    std::lock_guard<std::mutex> guard(lock_);
+    status_msg.data = static_cast<float>(current_speed_);
+  }
   status_pub_->publish(status_msg);
 }
 
