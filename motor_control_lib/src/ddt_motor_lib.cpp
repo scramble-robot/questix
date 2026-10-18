@@ -398,7 +398,7 @@ bool DdtMotorLib::commandCurrentMode(int motor_id, int rpm_ref_raw) {
   double i_cmd_amp = 0.0;
   const int16_t current_raw = runCurrentLoopStep(motor_id, rpm_ref, measured_rpm, &i_cmd_amp);
   if (!sendMotorCurrentRaw(motor_id, current_raw)) {
-    // Even a failed 0 A PI command may leave the previous nonzero current applied.
+    // 0 A の指令の送信の失敗でも、前の周期の 0 でない電流がモーターに残っている可能性がある。
     latchCurrentLinkAndStop(motor_id, "PI 電流指令の送信に失敗した");
     return false;
   }
