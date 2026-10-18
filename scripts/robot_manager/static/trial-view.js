@@ -135,9 +135,27 @@ const TrialView = (() => {
     return `記録を開始しました: ${result ? result.bag_name : ''}`;
   }
 
+  function readiness(data, evidence, values = {}, expired = false) {
+    const checks = data?.common_checks || [];
+    const reasons = checks.filter((item) => item.state !== 'pass').map((item) => item.message);
+    const preflight = data?.trial?.preflight;
+    if (!data) reasons.push('開始条件を確認できません。再確認してください');
+    if (evidence) {
+      if (expired) reasons.push('確認結果が古くなりました。再確認してください');
+      else if (preflight?.state !== 'pass') {
+        reasons.push(preflight?.message || '証拠付き記録の開始条件を再確認してください');
+      }
+      reasons.push(...metadata(values).errors);
+    }
+    const ready = evidence ? data?.trial?.ready : data?.normal?.ready;
+    return { ready: Boolean(ready) && reasons.length === 0, reasons,
+      checkedAt: evidence ? preflight?.checked_at : null,
+      checking: evidence && preflight?.state === 'checking' };
+  }
+
   return {
     ID_PATTERN, SHORT_ID_PATTERN, LABEL_MAX, FLOOR_MAX, MEMO_MAX, PAYLOAD_MAX_KG, BATTERY_MAX_V,
-    FIELDS, STOP_REASON, fieldError, metadata, status, startLabel, startedText,
+    FIELDS, STOP_REASON, fieldError, metadata, status, startLabel, startedText, readiness,
   };
 })();
 if (typeof module !== 'undefined') module.exports = TrialView;
