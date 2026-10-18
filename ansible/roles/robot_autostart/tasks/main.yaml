@@ -55,25 +55,6 @@
     mode: "0644"
   notify: reload_systemd
 
-# Keep the updater's launcher acceptance policy on every install path.
-- name: Create questix_robot drop-in directory
-  ansible.builtin.file:
-    path: /etc/systemd/system/questix_robot.service.d
-    state: directory
-    owner: root
-    group: root
-    mode: "0755"
-  notify: reload_systemd
-
-- name: Deploy launcher config refusal policy
-  ansible.builtin.copy:
-    src: "{{ playbook_dir }}/../../systemd/questix_robot.service.d/launcher-config.conf"
-    dest: /etc/systemd/system/questix_robot.service.d/launcher-config.conf
-    owner: root
-    group: root
-    mode: "0644"
-  notify: reload_systemd
-
 - name: Enable questix_robot service
   ansible.builtin.systemd:
     name: questix_robot
