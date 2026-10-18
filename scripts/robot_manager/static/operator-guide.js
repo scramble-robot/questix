@@ -2,6 +2,7 @@
 const OperatorGuide = (() => {
   function failure(path, status, detail = '') {
     const service = path.startsWith('/api/service/');
+    const recordingStart = /^\/api\/rosbag\/start(?:-trial)?$/.test(path);
     const title = service ? 'ロボットの操作を完了できませんでした'
       : path.includes('/control-runtime') ? '実行中の設定を確認できませんでした'
       : path.includes('/rosbag/start') ? '記録を開始できませんでした'
@@ -15,10 +16,12 @@ const OperatorGuide = (() => {
       next = '書き込み・操作の権限が不足しています。キッティング担当者に設定や保存先の権限を確認してもらってください。';
       panel = 'admin';
     } else if (status === 409) {
-      next = path.includes('/control-config/')
+      next = recordingStart
+        ? '「記録」の開始条件と下の詳細を確認してください。ロボット制御が停止している場合は「操作」で起動し、その後「開始条件を再確認」を押してください。'
+        : path.includes('/control-config/')
         ? '別の画面で設定が更新されました。変更内容を控え、「保存した設定を読み直す」を押してから編集し直してください。'
         : '別の処理が進行中か、現在の状態では実行できません。状態を確認してから再試行してください。';
-      panel = path.includes('/control-config/') ? 'tuning' : 'control';
+      panel = recordingStart ? 'rec' : path.includes('/control-config/') ? 'tuning' : 'control';
     } else if (status === 422 || status === 400) {
       next = '入力値や選択内容を確認してください。詳しい内容は下の「詳細」に表示しています。';
       panel = path.includes('/control-config/') ? 'tuning' : path.includes('/logs/') ? 'log' : 'admin';
@@ -36,6 +39,9 @@ const OperatorGuide = (() => {
         ? 'この機能はまだ使えません。担当者に管理画面のプログラムの更新・再起動を確認してもらってください。'
         : '対象が見つかりません。画面を再読み込みして、対象のデータや保存先が存在するか確認してください。';
       panel = missingFeature ? 'admin' : path.includes('/rosbag/') ? 'rec' : 'log';
+    } else if (recordingStart && status === 503 && detail.includes('ロボット制御の状態を確認できません')) {
+      next = '「操作」でロボット制御の状態を確認してください。確認できない状態が続く場合は、診断ログを保存して担当者に相談してください。';
+      panel = 'control';
     } else if (/ROS|ROBOT_WS|共通設定/.test(detail)) {
       next = '機体の準備が完了していない可能性があります。担当者にワークスペースとROS環境を確認してもらってください。';
       panel = 'admin';

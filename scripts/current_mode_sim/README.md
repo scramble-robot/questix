@@ -4,6 +4,13 @@ QUESTiX の足回りの current モード（ホスト側 PI＋摩擦補償＋暴
 drive_component** と擬似モータで動かし、ブラウザでリアルタイムに見るための開発ツールです。
 ロボットもモータも要りません。
 
+停止後の中立待ちに対応し、シミュレーションのidle中は20msごとにゼロを送ります。
+profile・manualの新しい操作でも、最初の0.1秒（5 tick）はゼロを先行させます。
+profileの時間はこの準備後から数えるので、最初のstepを短縮しません。これはdepth 1での
+配送保証ではありません。driveの再activateやfaultの復帰後も、操作をいったん止めて始め直します。
+このPC専用診断経路は非常停止・motion permissionを明示的にopt-outします。
+`--robot` は読取り専用で、ゼロを含め指令をpublishしません。
+
 ```
 ブラウザ ──WebSocket── sim_server.py ──/target_twist・パラメータ──▶ drive_component（このワークスペースのビルド）
  http://127.0.0.1:8765/      │    ◀──/drive_control_sample──────────┘        │ serial_port
@@ -42,9 +49,8 @@ python3 scripts/current_mode_sim/sim_server.py
 
 **安全のため**、シミュレーションは `ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST` と専用の
 `ROS_DOMAIN_ID` で動き、`/target_twist` が同じネットワークのロボットに届かないようにしています。
-drive_component は `require_emergency_stop:=false`（単体診断の明示 opt-out）で起動します。
-走行許可（`/motion_permission`）は外さず、シミュレーションが練習モードの MotionPermissionManager
-の代わりに「走行可」を 20 Hz で出します（止めるとリース切れで止まります）。
+drive_component は `require_emergency_stop:=false` と `require_motion_permission:=false`
+（operation_manager のいない単体診断の明示 opt-out）で起動します。
 Ctrl-C（または SIGTERM）で、ゼロ指令 → ノード停止 → 疑似端末の後片付けをして終わります。
 
 ## ページでできること
@@ -132,6 +138,6 @@ python3 -m pytest scripts/current_mode_sim   # 擬似モータと Monitor の pu
 ```
 
 
-`--robot` では `/target_twist`・`/motion_permission` を含む publisher を作らず、
+`--robot` では `/target_twist` を含む publisher を作らず、
 シミュレーション時だけこの2つを作る分岐を、ROSモジュールをスタブにした試験で確認する。
 実際のROS通信とWebSocketの画面は、この試験では未確認。

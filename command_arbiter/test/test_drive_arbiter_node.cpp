@@ -11,6 +11,7 @@
 #include <chrono>
 #include <functional>
 #include <geometry_msgs/msg/twist.hpp>
+#include <limits>
 #include <memory>
 #include <questix_msgs/msg/actuation_authority.hpp>
 #include <questix_msgs/msg/arbiter_status.hpp>
@@ -163,6 +164,37 @@ TEST_F(DriveArbiterNode, LosingThePermissionStopsTheLabRun) {
   EXPECT_EQ(status_.active_source, "joy");
   EXPECT_EQ(status_.switch_reason, "not_permitted");
   EXPECT_DOUBLE_EQ(out_.back().linear.x, 0.0);
+}
+
+TEST_F(DriveArbiterNode, StartupLabNeutralPassesOnlyWithPermissionAndIdleController) {
+  ASSERT_TRUE(spinUntil([this] { return status_.lab_permitted; }, 2s));
+  lab_pub_->publish(twist(0, 0));
+  ASSERT_TRUE(spinUntil([this] { return !out_.empty(); }, 2s));
+  EXPECT_EQ(out_.back().linear.x, 0);
+  EXPECT_EQ(status_.active_source, "joy");
+  joy_pub_->publish(twist(.3, 0));
+  ASSERT_TRUE(spinUntil([this] { return out_.back().linear.x == .3; }, 2s));
+  out_.clear();
+  lab_pub_->publish(twist(0, 0));
+  spinFor(150ms);
+  EXPECT_TRUE(out_.empty());
+  spinFor(500ms);  // controller timeout; a neutral does not steal its fresh input
+  permitted_ = false;
+  ASSERT_TRUE(spinUntil([this] { return !status_.lab_permitted; }, 2s));
+  lab_pub_->publish(twist(0, 0));
+  spinFor(150ms);
+  EXPECT_TRUE(out_.empty());
+}
+
+TEST_F(DriveArbiterNode, InvalidControllerInputIsNeverForwardedAsNeutral) {
+  for (double value :
+       {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity()}) {
+    joy_pub_->publish(twist(value, 0));
+    spinFor(100ms);
+    joy_pub_->publish(twist(0, value));
+    spinFor(100ms);
+    EXPECT_TRUE(out_.empty());
+  }
 }
 
 }  // namespace

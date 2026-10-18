@@ -23,16 +23,16 @@ def load_server():
 
 
 @pytest.mark.parametrize('robot_mode', [True, False])
-def test_robot_has_no_publishers_and_simulation_has_only_twist_and_permission(monkeypatch, robot_mode):
+def test_robot_has_no_publishers_and_simulation_has_only_twist(monkeypatch, robot_mode):
     modules = {
         'rclpy': (),
         'geometry_msgs.msg': ('Twist',),
         'lifecycle_msgs.srv': ('ChangeState', 'GetState'),
         'nav_msgs.msg': ('Odometry',),
-        'questix_msgs.msg': ('DriveControlSample', 'MotionPermission'),
+        'questix_msgs.msg': ('DriveControlSample',),
         'rcl_interfaces.msg': ('Log',),
         'rcl_interfaces.srv': ('GetParameters', 'SetParametersAtomically'),
-        'rclpy.qos': ('DurabilityPolicy', 'QoSProfile', 'ReliabilityPolicy'),
+        'rclpy.qos': ('QoSProfile', 'ReliabilityPolicy'),
         'rclpy.executors': ('SingleThreadedExecutor',),
     }
     stubs = {}
@@ -50,12 +50,12 @@ def test_robot_has_no_publishers_and_simulation_has_only_twist_and_permission(mo
     monitor = server.Monitor(Mock(), None, robot_mode, 0.05, 0.5, (4, 5))
     try:
         topics = [call.args[1] for call in node.create_publisher.call_args_list]
-        assert topics == ([] if robot_mode else ['/target_twist', '/motion_permission'])
+        assert topics == ([] if robot_mode else ['/target_twist'])
         if robot_mode:
             node.create_timer.assert_not_called()
             assert monitor._twist_pub is None
         else:
             periods = [call.args[0] for call in node.create_timer.call_args_list]
-            assert periods == [0.02, 0.05]
+            assert periods == [0.02]
     finally:
         monitor.close()

@@ -29,6 +29,7 @@ enum class RollerBlock {
   kPermissionUnknown,  // /motion_permission never received (only when required)
   kPermissionStale,    // /motion_permission silent for longer than its lease (only when required)
   kPermissionOff,      // /motion_permission says the launcher may not move
+  kPwmFault,           // backend fault latched until node restart
 };
 
 using RollerEstopInputs = questix_safety::EstopInputs;
@@ -37,6 +38,7 @@ using RollerPermissionInputs = questix_safety::PermissionInputs;
 struct RollerGateInputs {
   RollerPermissionInputs permission;
   RollerEstopInputs estop;
+  bool pwm_fault{false};
 };
 
 // The shared E-stop state as this gate's reason.
@@ -87,6 +89,9 @@ inline RollerBlock evaluateRollerGate(const RollerGateInputs& in) {
   if (estop != RollerBlock::kNone) {
     block = estop;
   }
+  if (block == RollerBlock::kNone && in.pwm_fault) {
+    block = RollerBlock::kPwmFault;
+  }
   return block;
 }
 
@@ -116,6 +121,8 @@ inline const char* rollerBlockName(RollerBlock block) {
       return "permission_stale";
     case RollerBlock::kPermissionOff:
       return "permission_off";
+    case RollerBlock::kPwmFault:
+      return "pwm_fault";
   }
   return "unknown";
 }

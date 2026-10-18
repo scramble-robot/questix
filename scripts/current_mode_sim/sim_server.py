@@ -8,8 +8,7 @@
 
 Simulation (default): fake M0602C motors on a pseudo terminal (fake_ddt_motor.py), the real
 drive_component node from this workspace in current mode, and a monitor that publishes
-/target_twist from the page (and /motion_permission "drive allowed", as MotionPermissionManager of
-a practice run would) and streams /drive_control_sample plus the fake wheels' true speed
+/target_twist from the page and streams /drive_control_sample plus the fake wheels' true speed
 to http://127.0.0.1:8765/. The ROS graph is kept on this machine (ROS_AUTOMATIC_DISCOVERY_RANGE
 LOCALHOST and its own ROS_DOMAIN_ID), so the simulated /target_twist never reaches a robot.
 
@@ -125,10 +124,10 @@ class Monitor:
         from geometry_msgs.msg import Twist
         from lifecycle_msgs.srv import ChangeState, GetState
         from nav_msgs.msg import Odometry
-        from questix_msgs.msg import DriveControlSample, MotionPermission
+        from questix_msgs.msg import DriveControlSample
         from rcl_interfaces.msg import Log
         from rcl_interfaces.srv import GetParameters, SetParametersAtomically
-        from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+        from rclpy.qos import QoSProfile, ReliabilityPolicy
 
         self.rclpy = rclpy
         self.hub = hub
@@ -154,20 +153,11 @@ class Monitor:
         self._lock = threading.Lock()
         self._profile = None  # (steps, start time)
         self._manual = None  # (linear, angular, last time)
+        self._neutral_until = 0.0
         self._twist_pub = None
         if not robot_mode:
             self._twist_pub = self.node.create_publisher(Twist, '/target_twist', 1)
             self.node.create_timer(0.02, self._publish_twist)
-            # The drive obeys /motion_permission (require_motion_permission: true in the hardware
-            # YAML). The simulation plays MotionPermissionManager of a practice run: drive allowed
-            # at 20 Hz, with the contract's QoS (reliable + volatile + keep-last(1); its 0.5 s
-            # lease stays in force, so the drive stops if this monitor stops).
-            self.MotionPermission = MotionPermission
-            self._permission_pub = self.node.create_publisher(
-                MotionPermission, '/motion_permission',
-                QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
-                           durability=DurabilityPolicy.VOLATILE))
-            self.node.create_timer(0.05, self._publish_permission)
         self._get_params = self.node.create_client(GetParameters, '/drive_component/get_parameters')
         self._set_params = self.node.create_client(
             SetParametersAtomically, '/drive_component/set_parameters_atomically')
@@ -279,19 +269,17 @@ class Monitor:
         angular = 2.0 * (turn_rpm * meters_per_rev / 60.0) / self.wheel_separation
         return linear, angular
 
-    def _publish_permission(self):
-        msg = self.MotionPermission()
-        msg.drive_allowed = True
-        msg.launcher_allowed = False
-        msg.mode = 'practice'
-        msg.launcher_blockers = ['simulation:drive only']
-        self._permission_pub.publish(msg)
-
     def _publish_twist(self):
+        if self._twist_pub is None:
+            return  # --robot is strictly read-only
         now = time.monotonic()
         with self._lock:
-            twist = None
-            if self._profile is not None:
+            # An idle simulator continuously supplies neutral. A fresh operation
+            # also prepares zero for five 20 ms ticks; depth 1 is not an ack.
+            twist = (0.0, 0.0)
+            if now < self._neutral_until:
+                pass
+            elif self._profile is not None:
                 (_, unit, steps), start = self._profile
                 elapsed = now - start
                 for a, b, hold in steps:
@@ -317,11 +305,14 @@ class Monitor:
         """Start a twist profile from PROFILES."""
         with self._lock:
             self._manual = None
-            self._profile = (PROFILES[name], time.monotonic())
+            self._neutral_until = time.monotonic() + 0.1
+            self._profile = (PROFILES[name], self._neutral_until)
 
     def manual(self, linear, angular):
         """Keep publishing this twist while the page keeps sending it."""
         with self._lock:
+            if self._manual is None:
+                self._neutral_until = time.monotonic() + 0.1
             self._profile = None
             self._manual = (float(linear), float(angular), time.monotonic())
 
@@ -429,8 +420,10 @@ class NodeProcess:
                '--params-file', str(params_file),
                '-p', f'serial_port:={port}',
                '-p', f'control_mode:={control_mode}',
-               # diagnostic run without operation_manager: the documented explicit opt-out
-               '-p', 'require_emergency_stop:=false']
+               # Standalone diagnostic without operation_manager: explicitly opt out of both
+               # safety inputs only in this isolated simulator domain.
+               '-p', 'require_emergency_stop:=false',
+               '-p', 'require_motion_permission:=false']
         print('[sim] starting:', ' '.join(cmd), flush=True)
         self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                      text=True, bufsize=1, start_new_session=True)
