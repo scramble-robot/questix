@@ -1,6 +1,15 @@
-"""Command contracts with fake publisher/clock/process, no ROS or motors."""
+# Copyright 2026 scramble-robot
+#
+# Use of this source code is governed by an MIT-style
+# license that can be found in the LICENSE file or at
+# https://opensource.org/licenses/MIT.
+"""Command contracts and the diagnostic node invocation, with fakes: no ROS or motors."""
+
+import importlib.util
 import threading
 import types
+from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -81,3 +90,20 @@ def test_simulated_node_opts_out_of_both_safety_inputs(monkeypatch):
     sim.NodeProcess(types.SimpleNamespace(), '/fake/pty', 'current', 4, 5, '/fake/config.yaml')
     assert 'require_emergency_stop:=false' in commands[0]
     assert 'require_motion_permission:=false' in commands[0]
+
+
+def test_node_process_explicitly_opts_out_of_both_safety_inputs(monkeypatch):
+    """The isolated diagnostic domain has neither operation_manager safety publisher."""
+    spec = importlib.util.spec_from_file_location(
+        'current_mode_sim_server', Path(__file__).with_name('sim_server.py'))
+    server = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(server)
+    popen = Mock()
+    monkeypatch.setattr(server.subprocess, 'Popen', popen)
+    monkeypatch.setattr(server.threading, 'Thread', Mock())
+    server.NodeProcess(Mock(), '/fake-port', 'current', 4, 5, Path('/fake-params.yaml'))
+    command = popen.call_args.args[0]
+    assert command[:4] == ['ros2', 'run', 'motor_control_app', 'drive_component_node']
+    for setting in ('require_emergency_stop:=false', 'require_motion_permission:=false'):
+        index = command.index(setting)
+        assert command[index - 1] == '-p'
