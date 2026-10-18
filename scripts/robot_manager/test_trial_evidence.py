@@ -190,6 +190,7 @@ class TrialFixture(unittest.TestCase):
         }
 
         with contextlib.ExitStack() as stack:
+            stack.enter_context(patch.object(recorder.readiness, "service", return_value="active"))
             stack.enter_context(patch.object(recorder, "_read_config",
                                              return_value=config or self.config()))
             stack.enter_context(patch.object(recorder, "_read_env_file",
@@ -359,8 +360,11 @@ class WorkspaceSourceGateTests(unittest.TestCase):
             self.assertIn(f"exit {code}", prelude)
 
     def test_missing_ros_setup_exits_90(self):
-        rt = trial.resolve_runtime_env({"ROBOT_WS": "/ws"}, {})
-        code, _out, err = trial.run_shell(rt, "echo should_not_run")
+        # Exercise an actually absent setup even on ROS-equipped development hosts.
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(trial, "ROS_SETUP", str(Path(tmp) / "missing_setup.bash")):
+                rt = trial.resolve_runtime_env({"ROBOT_WS": "/ws"}, {})
+                code, _out, err = trial.run_shell(rt, "echo should_not_run")
         self.assertEqual(code, 90)
         self.assertIn("ROS setup not found", err)
 
