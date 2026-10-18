@@ -410,8 +410,10 @@ class NodeProcess:
                '--params-file', str(params_file),
                '-p', f'serial_port:={port}',
                '-p', f'control_mode:={control_mode}',
-               # diagnostic run without operation_manager: the documented explicit opt-out
-               '-p', 'require_emergency_stop:=false']
+               # Standalone diagnostic without operation_manager: explicitly opt out of both
+               # safety inputs only in this isolated simulator domain.
+               '-p', 'require_emergency_stop:=false',
+               '-p', 'require_motion_permission:=false']
         print('[sim] starting:', ' '.join(cmd), flush=True)
         self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                      text=True, bufsize=1, start_new_session=True)

@@ -149,9 +149,9 @@ ON/OFF しても、変更前のモデル由来の推定値が新しい設定へ�
 
 | パラメータ | 既定値 |
 |---|---|
-| `serial_port` / `baud_rate` | `/dev/ttyACM0` / 57600（実機で使っている値。データシートとの食い違いは下の「未確認の食い違い」） |
+| `serial_port` / `baud_rate` | `/dev/ttyACM0` / 57600（中国語版 M0602C 規格書 V1.0 と一致） |
 | `left_motor_id` / `right_motor_id` | 4 / 5 |
-| `max_motor_rpm` | 475（`DdtMotorLib::kSpecVelocityMaxRpm` にクランプ。データシートは ±330 rpm と記載、下記） |
+| `max_motor_rpm` | 475（`DdtMotorLib::kSpecVelocityMaxRpm` にクランプ。中国語版 M0602C 規格書 V1.0 の ±475 rpm と一致） |
 | `control_mode` | `"velocity"`（`"current"` で電流モード） |
 | `control_rate` | 50.0 Hz（シリアル往復 2 モータ直列が周期予算に収まる必要あり） |
 | `serial_response_timeout_ms` | 10（従来の固定値）。フィードバック応答待ちの上限 [ms]、範囲 [2, 50]（外はクランプ + WARN）。下限の目安は応答フレーム伝送 1.74 ms + ファーム処理の実測値 + 余裕。実測は bag の `/drive_control_sample` の `roundtrip_ms` / `response_timeout`（周期ごと・左右ごと）。INFO「シリアル往復レイテンシ統計」は lifecycle の deactivate のときだけ出る（サービスの停止や launch の Ctrl+C では出ない） |
@@ -292,12 +292,17 @@ drive_component + ブラウザのモニタ）で同じ条件を手元で再現�
    遅ければ `current_kp` / `current_ki` を段階的に上げる（目安 0.02 / 0.05）。床の上の摩擦を手順 2
    と同じ方法で測り直す。床用のゲインのまま持ち上げると `oscillation` で止まることも確認する。
 
-### 未確認の食い違い（データシートとリポジトリ）
+### 規格書とリポジトリの通信・速度設定
 
-M6 規格書 V1.0 は通信 115200 baud・最大 500 Hz・速度 ±330 rpm と記載しているが、リポジトリは
-`baud_rate: 57600`、`max_motor_rpm: 475`（`kSpecVelocityMaxRpm`）を使っている。実機での確認待ちの
-ため、**今回コードは変更していない**。往復時間・`serial_response_timeout_ms` の下限の見積もり
-（10 byte で 1.74 ms）は 57600 baud を前提にしている。
+以前のREADMEには115200 baud・±330 rpmという記載があったが、出典の版・言語は未確認で、
+別資料にその値があるかも未確認。ここでは中国語版 M0602C 規格書 V1.0 の値を採用する。
+
+中国語版 M0602C 規格書 V1.0 の通信速度は 57600 bps、速度範囲は ±475 rpm で、
+リポジトリの `baud_rate: 57600`、`max_motor_rpm: 475`（`kSpecVelocityMaxRpm`）と一致する。
+`DdtMotorLib` のコンストラクタの既定引数も 57600 bps に揃えている。drive_component は
+パラメータの 57600 を明示的に渡すため、この既定引数の修正で走行の挙動は変わらない。
+往復時間・`serial_response_timeout_ms` の下限の見積もり（10 byte で 1.74 ms）も
+57600 bps を前提にしている。
 
 ## ビルド時間
 
