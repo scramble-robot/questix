@@ -43,8 +43,7 @@ DdtMotorLib::DdtMotorLib(const std::string& serial_port, int baud_rate)
       response_timeout_ms_(kDefaultResponseTimeoutMs),
       measured_lpf_tau_sec_(0.0),
       stop_resend_interval_ms_(200),
-      serial_fd_(-1),
-      suppress_current_link_recovery_(false) {
+      serial_fd_(-1) {
   logger_ = rclcpp::get_logger("DdtMotorLib");
 }
 
@@ -378,9 +377,8 @@ bool DdtMotorLib::commandCurrentMode(int motor_id, int rpm_ref_raw) {
   double i_cmd_amp = 0.0;
   const int16_t current_raw = runCurrentLoopStep(motor_id, rpm_ref, &i_cmd_amp);
   if (!sendMotorCurrentRaw(motor_id, current_raw)) {
-    if (current_raw != 0) {
-      latchCurrentLinkAndStop(motor_id, "0 でない電流の送信に失敗した");
-    }
+    // Even a failed 0 A PI command may leave the previous nonzero current applied.
+    latchCurrentLinkAndStop(motor_id, "PI 電流指令の送信に失敗した");
     return false;
   }
   // この送受信で応答の途切れのラッチが立った（countResponse）: 送ったばかりの電流を 0 で上書きし、

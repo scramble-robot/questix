@@ -80,6 +80,7 @@ public:
   int fail_drain_motor{-1};
   int last_write_motor{-1};
   std::map<int, int> zero_attempts;
+  std::map<int, std::vector<int16_t>> current_attempts;
   ModeFrames mode_frames{ModeFrames::kSpec};
   uint8_t mode{0x02};  // the reported mode: the power-on velocity loop until switched
   WheelModel model{kLifted};
@@ -115,12 +116,14 @@ protected:
       return static_cast<ssize_t>(size);
     }
     if (size == 10 && bytes[1] == 0x64) {
+      // Current command values are big-endian, as packCurrentFrame specifies.
+      const auto raw = static_cast<int16_t>((static_cast<uint16_t>(bytes[2]) << 8) | bytes[3]);
+      current_attempts[bytes[0]].push_back(raw);
       last_write_motor = bytes[0];
       if (bytes[2] == 0 && bytes[3] == 0) ++zero_attempts[bytes[0]];
       if (fail_write_motor == bytes[0]) return -1;
       Wheel& w = wheels[bytes[0]];
       const uint8_t reported_mode = rebooted.count(bytes[0]) != 0 ? 0x02 : mode;
-      const auto raw = static_cast<int16_t>((static_cast<uint16_t>(bytes[2]) << 8) | bytes[3]);
       if (reported_mode != 0x01) {
         // A velocity-loop motor takes the value as a speed target: this is what a current
         // command does to a motor that did not switch. Count every nonzero one.
@@ -244,6 +247,28 @@ protected:
     return n;
   }
   size_t currentCount(int motor_id) { return lib_->wheels[motor_id].currents.size(); }
+
+  void zeroPiSendFailureStopsBoth(bool fail_drain) {
+    startBoth();
+    lib_->setCurrentControlParams(0.0015, 0.0, 1.0, 0.0);
+    tick(100);
+    ASSERT_NE(lastCurrentRaw(kLeft), 0);
+    ASSERT_NE(lastCurrentRaw(kRight), 0);
+    // A nonzero target with zero gains and no integral produces exactly 0 A in the PI path.
+    lib_->setCurrentControlParams(0.0, 0.0, 1.0, 0.0);
+    lib_->current_attempts.clear();
+    if (fail_drain)
+      lib_->fail_drain_motor = kLeft;
+    else
+      lib_->fail_write_motor = kLeft;
+    EXPECT_FALSE(lib_->setMotorVelocity(kLeft, 100));
+    ASSERT_FALSE(lib_->current_attempts[kLeft].empty());
+    EXPECT_EQ(lib_->current_attempts[kLeft].front(), 0);
+    EXPECT_TRUE(lib_->currentLinkLatched());
+    EXPECT_FALSE(lib_->isHealthy());
+    ASSERT_FALSE(lib_->current_attempts[kRight].empty());
+    EXPECT_EQ(lib_->current_attempts[kRight].back(), 0);
+  }
 
   int master_{-1};
   int slave_{-1};
@@ -646,6 +671,14 @@ TEST_F(DdtCurrentGuard, RebootWithFirstAnswerLostSendsTwoSpeedTargetsThenLatches
   EXPECT_EQ(lastCurrentRaw(kRight), 0);
   for (int i = 0; i < 10; ++i) tick(100);
   EXPECT_EQ(lib_->wheels[kRight].nonzero_in_velocity_mode, 2);
+}
+
+TEST_F(DdtCurrentGuard, FailedZeroPiWriteAfterNonzeroCurrentStopsBothWheels) {
+  zeroPiSendFailureStopsBoth(false);
+}
+
+TEST_F(DdtCurrentGuard, FailedZeroPiDrainAfterNonzeroCurrentStopsBothWheels) {
+  zeroPiSendFailureStopsBoth(true);
 }
 
 }  // namespace
