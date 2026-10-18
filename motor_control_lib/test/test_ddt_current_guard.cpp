@@ -66,7 +66,8 @@ constexpr int kRight = 5;
 struct Wheel {
   double speed_rpm{0.0};  // physical speed, positive = the direction of a positive current
   double position_turns{0.0};
-  std::deque<double> reported_history;     // speeds at past answers (for report_delay_ticks)
+  double externally_driven_rpm{NAN};    // finite: ideal external source holds this physical speed
+  std::deque<double> reported_history;  // speeds at past answers (for report_delay_ticks)
   std::vector<double> true_rpm_at_answer;  // the physical speed at each answer
   double peak_abs_rpm{0.0};
   double applied_amp{0.0};
@@ -90,6 +91,8 @@ public:
   int last_write_motor{-1};
   std::map<int, int> zero_attempts;
   std::map<int, std::vector<int16_t>> current_attempts;
+  std::map<int, std::vector<double>> current_attempt_times;
+  std::chrono::microseconds exchange_interval{20000};
   ModeFrames mode_frames{ModeFrames::kSpec};
   int injected_position{-1};  // a CRC-valid but semantically invalid feedback position
   int report_delay_ticks{0};  // the reported speed lags the physical one by this many answers
@@ -98,6 +101,9 @@ public:
   std::map<int, Wheel> wheels;
   // The left wheel (the one the single-wheel tests drive).
   Wheel& left() { return wheels[kLeft]; }
+  double nowSec() const {
+    return std::chrono::duration<double>(controlNow().time_since_epoch()).count();
+  }
   int nonzeroInVelocityMode() {
     int n = 0;
     for (const auto& [id, w] : wheels) n += w.nonzero_in_velocity_mode;
@@ -130,6 +136,7 @@ protected:
       // Current command values are big-endian, as packCurrentFrame specifies.
       const auto raw = static_cast<int16_t>((static_cast<uint16_t>(bytes[2]) << 8) | bytes[3]);
       current_attempts[bytes[0]].push_back(raw);
+      current_attempt_times[bytes[0]].push_back(nowSec());
       last_write_motor = bytes[0];
       if (bytes[2] == 0 && bytes[3] == 0) ++zero_attempts[bytes[0]];
       if (fail_write_motor == bytes[0]) return -1;
@@ -143,9 +150,9 @@ protected:
         w.currents.push_back(raw);
       }
       // The previous current acts for one tick, then the motor answers with the speed.
-      advance(w, w.applied_amp, kTickSec);
+      advance(w, w.applied_amp, std::chrono::duration<double>(exchange_interval).count());
       if (bytes[0] == kLeft) {
-        sim_time_ += std::chrono::milliseconds(20);
+        sim_time_ += exchange_interval;
       }
       w.applied_amp = reported_mode == 0x01 ? pi::rawToAmp(raw) : 0.0;
       if (answer && silent.count(bytes[0]) == 0 && master_fd >= 0) {
@@ -190,6 +197,14 @@ protected:
 
 private:
   void advance(Wheel& w, double amp, double seconds) {
+    if (std::isfinite(w.externally_driven_rpm)) {
+      // An external source turns the wheel regardless of motor torque; position is unwrapped
+      // physical travel until the response encodes it modulo one turn.
+      w.speed_rpm = w.externally_driven_rpm;
+      w.position_turns += w.speed_rpm / 60.0 * seconds;
+      w.peak_abs_rpm = std::max(w.peak_abs_rpm, std::abs(w.speed_rpm));
+      return;
+    }
     const double gain = kKt / model.inertia * kRpmPerRadPerSec;  // [rpm/s per A]
     constexpr int kSub = 20;
     const double h = seconds / kSub;
@@ -904,6 +919,57 @@ TEST_F(DdtCurrentGuard, FailedZeroPiWriteAfterNonzeroCurrentStopsBothWheels) {
 
 TEST_F(DdtCurrentGuard, FailedZeroPiDrainAfterNonzeroCurrentStopsBothWheels) {
   zeroPiSendFailureStopsBoth(true);
+}
+
+// Beyond the estimator's applicability: external rotation aliases into the opposite direction.
+// This test bounds current commands under these model conditions, not physical stopping time.
+TEST_F(DdtCurrentGuard, AliasedExternalRotationTripsOverspeedAndLatchesZeroCurrent) {
+  start(0.0015, 0.004, false, kLifted);
+  for (const int interval_us : {49600, 49900}) {
+    for (const double physical_rpm : {640.0, -640.0}) {
+      SCOPED_TRACE(interval_us);
+      SCOPED_TRACE(physical_rpm);
+      ASSERT_TRUE(lib_->initializeMotor(kLeft, ControlMode::Current));
+      lib_->exchange_interval = std::chrono::microseconds(interval_us);
+      lib_->left().externally_driven_rpm = physical_rpm;
+      // Prime two full, long intervals with zero commands. The externally driven wheel keeps
+      // turning at 640 rpm even at 0 A; no guard state carries across the priming stop frames.
+      for (int i = 0; i < 3; ++i) ASSERT_TRUE(lib_->stopMotorNow(kLeft));
+      DdtMotorLib::MotorFeedbackData feedback;
+      ASSERT_TRUE(lib_->getMotorFeedbackData(kLeft, feedback));
+      ASSERT_TRUE(feedback.position_rpm_valid);
+      ASSERT_LT(feedback.position_rpm * physical_rpm, 0.0);
+      EXPECT_LT(std::abs(feedback.position_rpm), 570.0);
+      EXPECT_DOUBLE_EQ(lib_->left().speed_rpm, physical_rpm);
+      const size_t from = currentCount(kLeft);
+      const size_t attempts_from = lib_->current_attempts[kLeft].size();
+      const double started = lib_->nowSec();
+      const int reference = physical_rpm > 0.0 ? 100 : -100;
+      for (int i = 0; i < 12 && lib_->currentGuardTrip(kLeft) == GuardTrip::kNone; ++i) {
+        ASSERT_TRUE(lib_->setMotorVelocity(kLeft, reference));
+      }
+      ASSERT_EQ(lib_->currentGuardTrip(kLeft), GuardTrip::kOverspeed);
+      EXPECT_FALSE(lib_->isHealthy());
+      EXPECT_EQ(lastCurrentRaw(kLeft), 0);
+      const int nonzero = nonzeroCurrentsSince(kLeft, from);
+      const auto& attempts = lib_->current_attempts[kLeft];
+      size_t stop_index = attempts_from;
+      while (stop_index < attempts.size() && attempts[stop_index] != 0) ++stop_index;
+      ASSERT_LT(stop_index, attempts.size());
+      const double stop_ms = (lib_->current_attempt_times[kLeft][stop_index] - started) * 1000.0;
+      const std::string key =
+          std::string(physical_rpm > 0.0 ? "positive_" : "negative_") + std::to_string(interval_us);
+      RecordProperty(key + "_estimated_rpm", feedback.position_rpm);
+      RecordProperty(key + "_stop_ms", stop_ms);
+      RecordProperty(key + "_nonzero_commands", nonzero);
+      EXPECT_EQ(nonzero, 8);
+      EXPECT_NEAR(stop_ms, 8.0 * interval_us / 1000.0, 1e-6);
+      const size_t after = currentCount(kLeft);
+      for (int i = 0; i < 10; ++i) ASSERT_TRUE(lib_->setMotorVelocity(kLeft, reference));
+      EXPECT_EQ(nonzeroCurrentsSince(kLeft, after), 0);
+      EXPECT_EQ(lib_->currentGuardTrip(kLeft), GuardTrip::kOverspeed);
+    }
+  }
 }
 
 }  // namespace
