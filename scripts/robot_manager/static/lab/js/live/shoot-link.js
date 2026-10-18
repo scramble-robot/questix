@@ -358,10 +358,15 @@ function initShootLink() {
     if (document.hidden) current?.finish('hidden');
   });
   window.addEventListener('pagehide', () => current?.finish('hidden'));
-  // Esc stops this page's own session only (it also closes dialogs; see drive-link.js).
-  document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && current) current.finish('stopped');
-  });
+  // Esc stops this page's own session only (it also closes dialogs; see drive-link.js). Capture
+  // phase, as in drive-link.js, so a dialog that stops key propagation cannot swallow it.
+  document.addEventListener(
+    'keydown',
+    (event) => {
+      if (event.key === 'Escape' && current) current.finish('stopped');
+    },
+    { capture: true },
+  );
 }
 
 initShootLink();
