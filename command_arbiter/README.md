@@ -4,6 +4,13 @@ Chooses which input reaches the drive and the launcher in a lesson (L3, input se
 controller (`joy_controller`) or a QUESTiX LAB run (`questix_lab_bridge`). One rule for both
 mechanisms (`include/command_arbiter/source_selector.hpp`, ROS-free, `test/test_source_selector.cpp`):
 
+The drive additionally forwards a LAB startup zero while the teacher's LAB permission is fresh
+and on and the controller is not busy. It does not claim LAB source or interrupt a busy controller.
+LAB run boundaries remain strict zero, unlike the actuator's configurable `rearm_neutral_*`
+bands in motor_control_app/drive_rearm.hpp. Controller takeover uses the existing
+`neutral_linear` / `neutral_angular` thresholds; those never configure actuator rearming.
+NaN/Inf controller inputs are discarded, not converted into a zero that could rearm the drive.
+
 | Situation | What reaches the actuator |
 | --- | --- |
 | No lab run | The controller's commands. |

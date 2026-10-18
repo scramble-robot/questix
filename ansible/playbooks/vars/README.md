@@ -198,3 +198,22 @@ ansible-playbook ansible/playbooks/setup_kit.yaml \
 # 復号化
 ansible-vault decrypt ansible/playbooks/vars/production.yaml
 ```
+
+## 既存の授業機 SD の移行と OS 更新
+
+`ros2_installation` role の `questix_os_upgrade` は既定 **true**（従来どおり）です。
+移行時に kernel・ROS 等の一括 dist-upgrade を抑止する場合は、ロボット上で
+`./setup.sh -e questix_os_upgrade=false`（旧 checkout は
+`bash ./setup.sh -e questix_os_upgrade=false`）を使います。
+`setup_dev.sh` も追加引数を Ansible に渡します。
+false が止めるのは `apt upgrade: dist` だけです。必要なパッケージの導入や
+apt cache の更新は行うため、すべてのパッケージを固定する設定ではありません。
+
+rosdep の探索は colcon が列挙したソースパッケージだけを対象にします。
+直下の core と `src/` の外部パッケージを含め、直下の `build/`・`install/`・`log/` は
+`COLCON_IGNORE` の有無によらず探索の入口から除外します。check mode は従来どおり
+workspace build block 全体を省略し、この discovery に `check_mode: false` は付けません。
+
+ROS 確認は Bash の strict mode で行います。ただし Jazzy の setup.bash が未設定変数を
+読むため、source の間だけ nounset を外し、直後に戻します。ROS_DISTRO / ROS_VERSION
+が期待値でなければ失敗し、demo は timeout の終了コード124だけを成功にします。
