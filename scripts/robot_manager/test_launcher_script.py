@@ -201,7 +201,7 @@ def test_launcher_knows_exactly_the_modes_of_modes_py():
 
 
 @pytest.mark.parametrize("request_kwargs, reason", [
-    ({"age": 600}, "600 s old"),
+    ({"age": 600}, "s old (limit 120 s)"),
     ({"boot_id": "another-boot"}, "earlier boot"),
     ({"mode": "competition"}, "asks for mode 'competition'"),
 ])
@@ -232,6 +232,7 @@ def test_competition_is_unchanged_and_drops_a_leftover_request(robot):
 
 def test_manager_writes_a_request_the_launcher_accepts(robot, monkeypatch):
     # The same format on both sides: app.py writes it, the script reads it.
+    monkeypatch.setattr(app, "CONFIG_DIR", robot.dir)
     monkeypatch.setattr(app, "START_REQUEST_FILE", robot.dir / "start-request")
     monkeypatch.setattr(app, "_boot_id", lambda: BOOT_ID)
     robot.mode("practice")
@@ -241,6 +242,7 @@ def test_manager_writes_a_request_the_launcher_accepts(robot, monkeypatch):
 
 
 def test_manager_writes_a_lesson_request_the_launcher_accepts(robot, monkeypatch):
+    monkeypatch.setattr(app, "CONFIG_DIR", robot.dir)
     monkeypatch.setattr(app, "START_REQUEST_FILE", robot.dir / "start-request")
     monkeypatch.setattr(app, "_boot_id", lambda: BOOT_ID)
     robot.mode("lesson")

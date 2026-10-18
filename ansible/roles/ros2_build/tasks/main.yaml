@@ -123,20 +123,48 @@
       changed_when: true
       when: workspace_repos_missing | length > 0
 
-    # rosdep reads the index `rosdep update` (ros2_installation role, as the user) wrote to the
-    # user's ~/.ros; only its apt-get needs root.
+    # Explicit base paths are essential: colcon's recursive crawler does NOT inherently skip
+    # build/install/log if their COLCON_IGNORE files are absent on an old SD.
+    - name: Find source roots without generated workspace directories
+      ansible.builtin.find:
+        paths: "{{ workspace_path }}"
+        file_type: directory
+        recurse: false
+        excludes: [build, install, log]
+      register: workspace_source_roots
+
+    - name: Require source roots before package discovery
+      ansible.builtin.assert:
+        that:
+          - workspace_source_roots.files | length > 0
+        quiet: true
+
+    - name: Discover only source packages with colcon
+      ansible.builtin.command:
+        argv: >-
+          {{ ['colcon', 'list', '--paths-only', '--base-paths'] +
+             (workspace_source_roots.files | map(attribute='path') | sort | list) }}
+        chdir: "{{ workspace_path }}"
+      become: "{{ questix_image_build | default(false) | bool }}"
+      become_user: "{{ target_user }}"
+      register: workspace_source_packages
+      changed_when: false
+      # Read-only, but not forced in check mode: this entire build block is skipped there.
+
+    - name: Require discovered source packages
+      ansible.builtin.assert:
+        that:
+          - workspace_source_packages.stdout_lines | length > 0
+        fail_msg: "No source packages discovered in {{ workspace_path }}"
+        quiet: true
+
+    # rosdep reads the user's index; only its apt-get needs root. Never scan the whole
+    # workspace: an obsolete install/ can contain dangling package.xml symlinks.
     - name: Install the workspace's rosdep dependencies
       ansible.builtin.command:
-        argv:
-          - rosdep
-          - install
-          - --from-paths
-          - "{{ workspace_path }}"
-          - --ignore-src
-          - --rosdistro
-          - "{{ ros2_distro }}"
-          - -r
-          - -y
+        argv: >-
+          {{ ['rosdep', 'install', '--from-paths'] + workspace_source_packages.stdout_lines +
+             ['--ignore-src', '--rosdistro', ros2_distro, '-r', '-y'] }}
       become: "{{ workspace_rosdep_become }}"
       environment:
         ROS_HOME: "{{ workspace_user_ros_home }}"

@@ -176,6 +176,7 @@ jobs:
       - name: Drop cached packages missing from the source tree
         run: |
           docker exec -i ros_build bash << 'EOF'
+          set -euo pipefail
           packages=$(colcon list --names-only)
           for dir in build/*/ install/*/; do
             [ -d "$dir" ] || continue

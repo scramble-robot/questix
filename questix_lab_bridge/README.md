@@ -1,5 +1,20 @@
 # questix_lab_bridge
 
+Driving startup includes 0.3 seconds of repeated neutral commands under the same owner,
+deadman, permission, E-stop, speed-cap and controller-priority checks. This is not a delivery
+guarantee: drive_component still refuses nonzero until it actually receives neutral while allowed.
+An ended client's nonzero commands cannot restart it just because the one-second stale guard
+elapsed. A fresh explicit zero after blockers clear is required; generated stop zeros do not count.
+The page repeats zero until the bridge accepts ownership, then prepares neutral before the program.
+After an interrupted held operation, it requires release and a new press; a blocker clearing does
+not restart the heartbeat. No new ROS topic or service is added.
+
+If nonzero is requested for two seconds without a new nonzero wheel target in the existing
+DriveStatus stream, the page ends the run with `drive_not_responding` using the existing refusal
+display and sends its scoped stop. This is UI confirmation, not proof of physical movement or a
+motion permission. A command below the motor minimum can also trigger it. Release/retry and ask
+the teacher to check neutral, communication and motor readiness if it persists.
+
 WebSocket bridge between a real QUESTiX robot and the **QUESTiX LAB** web teaching material
 (`scripts/robot_manager/static/lab/`, served by `robot_manager` at `/lab/`).
 
