@@ -136,8 +136,33 @@ break_and_verify "console autologin" \
 break_and_verify "desktop autologin" \
     "mkdir -p etc/gdm3 && printf '[daemon]\nAutomaticLoginEnable=true\n' > etc/gdm3/custom.conf"
 break_and_verify "first boot not enabled" "rm etc/systemd/system/multi-user.target.wants/questix-first-boot.service"
+break_and_verify "first boot targets a different user" \
+    "sed -i 's/QUESTIX_ENROLL_USER=ubuntu/QUESTIX_ENROLL_USER=robot/' etc/systemd/system/questix-first-boot.service"
 break_and_verify "enrollment helper writable" "chmod 0775 usr/local/sbin/questix-first-boot-enroll"
 break_and_verify "no QUESTiX source" "rm -rf home/ubuntu/questix"
+
+# A non-default account must own the source and be the first-boot target, while
+# retaining exactly the same locked-account/SSH-off checks as the default.
+CUSTOM_TREE="$IMAGE_TEST/custom-user"
+new_image_tree "$CUSTOM_TREE"
+sed -i 's/ubuntu/robot_team/g' "$CUSTOM_TREE/etc/passwd" "$CUSTOM_TREE/etc/shadow"
+if questix_image_install_source "$FIXTURE_REPO" "$CUSTOM_TREE" robot_team > /dev/null 2>&1 \
+    && questix_image_install_first_boot scripts/iso "$CUSTOM_TREE" robot_team; then
+    ln -s /etc/systemd/system/questix-first-boot.service \
+        "$CUSTOM_TREE/etc/systemd/system/multi-user.target.wants/questix-first-boot.service"
+    if questix_image_verify_security "$CUSTOM_TREE" robot_team > "$IMAGE_TEST/custom-verify.log" 2>&1; then
+        pass "image custom user: source ownership, locked account and first boot all match robot_team"
+    else
+        fail "image custom user: $(cat "$IMAGE_TEST/custom-verify.log")"
+    fi
+else
+    fail "image custom user: source or first-boot install failed"
+fi
+if questix_image_install_first_boot scripts/iso "$IMAGE_TEST/invalid-user" root > /dev/null 2>&1; then
+    fail "image custom user: first boot accepted root"
+else
+    pass "image custom user: invalid first-boot user refused before file writes"
+fi
 
 # The build script itself: where it looks, what it runs, what it checks.
 APPLY=scripts/apply-ansible-config.sh
@@ -197,4 +222,36 @@ then
     pass "image build: kit user tasks become the user (13), no start/reload in the chroot"
 else
     fail "image build: roles are not ready for the image build"
+fi
+
+# Render the production templates with the custom account; this does not run
+# systemd, polkit, Ansible roles or any robot service.
+if python3 - <<'PYTHON'
+import os
+import re
+from pathlib import Path
+from jinja2 import Environment, StrictUndefined
+env = Environment(undefined=StrictUndefined)
+env.filters['dirname'] = os.path.dirname
+env.filters['regex_replace'] = lambda value, pattern, replacement: re.sub(pattern, replacement, value)
+context = dict(target_user='robot_team', workspace_path='/home/robot_team/questix',
+               ros2_distro='jazzy', robot_manager_src='/home/robot_team/questix/scripts/robot_manager',
+               robot_manager_port=8888)
+directory = Path('ansible/roles/robot_autostart/templates')
+render = lambda name: env.from_string((directory / name).read_text()).render(**context)
+robot = render('questix_robot.service.j2')
+manager = render('questix_robot_manager.service.j2')
+policy = render('50-questix-robot.rules.j2')
+for unit in (robot, manager):
+    assert 'User=robot_team\n' in unit and 'Group=robot_team\n' in unit
+    assert '/home/ubuntu' not in unit
+assert 'Environment=HOME=/home/robot_team' in robot
+assert 'Environment=ROBOT_WS=/home/robot_team/questix' in robot
+assert 'QUESTIX_SOURCE_DIR=/home/robot_team/questix' in manager
+assert policy.count('subject.user === "robot_team"') == 2
+PYTHON
+then
+    pass "image custom user: production services, workspace and narrow polkit grants use robot_team"
+else
+    fail "image custom user: production template user/path mismatch"
 fi

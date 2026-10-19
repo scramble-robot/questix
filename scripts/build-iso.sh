@@ -13,6 +13,12 @@ if [ "$#" -ne 3 ]; then
     exit 1
 fi
 
+# Pi 5 uses a preinstalled Desktop disk image, never this UEFI ISO path.
+if [ "$ARCHITECTURE" != amd64 ]; then
+    echo "Use scripts/build-pi-image.sh for Raspberry Pi 5 Desktop (.img.xz)" >&2
+    exit 1
+fi
+
 echo "🏗️  Building ISO for $ARCHITECTURE, Ubuntu $UBUNTU_VERSION, ROS2 $ROS2_DISTRO"
 
 WORK_DIR="/tmp/iso-work"
@@ -131,27 +137,6 @@ if [ "$ARCHITECTURE" = "amd64" ]; then
         -isohybrid-gpt-basdat \
         -isohybrid-apm-hfsplus \
         "$NEW_ISO_DIR"
-
-elif [ "$ARCHITECTURE" = "arm64" ]; then
-    echo "🍓 Configuring UEFI boot for ARM64..."
-    
-    # Update GRUB configuration for ARM64
-    if [ -f "$NEW_ISO_DIR/boot/grub/grub.cfg" ]; then
-        sed -i "s/Ubuntu/ROS2 Robotics Kit for Raspberry Pi/g" "$NEW_ISO_DIR/boot/grub/grub.cfg"
-    fi
-    
-    # Build ISO for ARM64 (UEFI only)
-    echo "🔥 Building ISO with UEFI support for ARM64..."
-    xorriso -as mkisofs \
-        -V "$VOLUME_ID" \
-        -J -joliet-long \
-        -r \
-        -iso-level 3 \
-        -o "$OUTPUT_DIR/${ISO_NAME}.iso" \
-        -eltorito-alt-boot \
-        -e boot/grub/efi.img \
-        -no-emul-boot \
-        "$NEW_ISO_DIR"
 fi
 
 # Make ISO bootable and verify
@@ -183,12 +168,6 @@ echo "📁 Output: $OUTPUT_DIR/${ISO_NAME}.iso"
 echo "💾 Size: $ISO_SIZE"
 echo ""
 echo "🚀 Usage instructions:"
-if [ "$ARCHITECTURE" = "arm64" ]; then
-    echo "  - Flash to SD card for Raspberry Pi 5"
-    echo "  - Use tools like Raspberry Pi Imager or dd"
-    echo "  - First boot will auto-configure hardware interfaces"
-else
-    echo "  - Flash to USB drive or burn to DVD"
-    echo "  - Boot from USB/DVD and follow installation"
-    echo "  - Supports both BIOS and UEFI systems"
-fi
+echo "  - Flash to USB drive or burn to DVD"
+echo "  - Boot from USB/DVD and follow installation"
+echo "  - Supports both BIOS and UEFI systems"

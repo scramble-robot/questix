@@ -520,9 +520,9 @@ ISO_APPLY=scripts/apply-ansible-config.sh
 assert_contains "$ISO_APPLY" '-e "enable_autologin=false"' "image: Ansible adds no autologin"
 assert_contains "$ISO_APPLY" "systemctl enable questix-first-boot.service" "image: first-boot enrollment enabled"
 assert_contains "$ISO_APPLY" 'systemctl disable "$unit"' "image: SSH units disabled before the image is built"
-assert_contains "$ISO_APPLY" "rm -f /etc/sudoers.d/ubuntu" "image: no legacy sudoers file"
+assert_contains "$ISO_APPLY" 'rm -f "/etc/sudoers.d/$IMAGE_USER"' "image: no user-specific sudoers file"
 assert_contains "$ISO_APPLY" "A NOPASSWD sudo rule is in the image" "image: build fails on a NOPASSWD rule"
-assert_contains "$ISO_APPLY" "The ubuntu account is not locked" "image: build fails on an unlocked account"
+assert_contains "$ISO_APPLY" 'The $IMAGE_USER account is not locked' "image: build fails on an unlocked account"
 assert_contains "$ISO_APPLY" "SSH is enabled before the first-boot enrollment" "image: build fails on enabled SSH"
 assert_not_contains "$ISO_APPLY" "first-boot-setup.sh" "image: no .bashrc first-boot script"
 assert_contains scripts/iso/image-build-lib.sh 'install -D -m 0755 "$iso_dir/questix-first-boot-enroll.sh"' \
