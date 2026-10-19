@@ -43,6 +43,7 @@ double secondsSince(std::chrono::steady_clock::time_point then,
 }  // namespace
 
 bool DriveComponent::initializeMotorLib() {
+  resetOdometryAnchor("motor initialization");
   try {
     // DDTモータライブラリのインスタンスを作成
     motor_lib_ = std::make_shared<motor_control_lib::DdtMotorLib>(serial_port_, baud_rate_);
@@ -155,10 +156,23 @@ void DriveComponent::resetCommandState() {
 }
 
 void DriveComponent::resetOdometry() {
+  odom_estop_poll_skipped_ = false;
+  odom_estop_suspended_ = false;
+  odom_estop_release_pending_ = false;
+  odom_estop_released_at_ = {};
+  odom_estop_left_count_ = 0;
+  odom_estop_right_count_ = 0;
   odom_publisher_.reset();
   tf_broadcaster_.reset();
-  odom_pose_ = {};
-  has_odom_sample_ = false;
+  resetOdometryAnchor("lifecycle resources reset");
+}
+
+void DriveComponent::resetOdometryAnchor(const char* reason) {
+  odom_position_integrator_.reset();
+  odom_last_pair_stationary_ = false;
+  // Routine lifecycle/init retries are expected, including with no motor power.
+  RCLCPP_DEBUG_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                        "Wheel position odometry anchor reset: %s (pose retained)", reason);
 }
 
 void DriveComponent::twistCallback(const geometry_msgs::msg::Twist::SharedPtr msg) {
@@ -222,6 +236,7 @@ void DriveComponent::controlTimerCallback() {
     motor_lib_->getMotorTransactionStats(left_motor_id_, tick_sample_.left.stats_before);
     motor_lib_->getMotorTransactionStats(right_motor_id_, tick_sample_.right.stats_before);
   }
+  odom_estop_poll_skipped_ = false;  // only kIdle below can record an intentional skip
   in_control_tick_ = true;
   runControlTick();
   in_control_tick_ = false;
@@ -230,37 +245,148 @@ void DriveComponent::controlTimerCallback() {
 }
 
 void DriveComponent::integrateOdometry() {
-  if (!motor_lib_ || !motor_initialized_) {
+  if (!motor_lib_ || !motor_initialized_ || stop_fault_) {
+    const auto state = !motor_lib_ || !motor_initialized_ ? OdomMotorState::kUnavailable
+                                                          : OdomMotorState::kStopFault;
+    resetOdometryAnchor(state == OdomMotorState::kUnavailable ? "motor unavailable" : "stop fault");
+    if (state != odom_motor_state_) {
+      RCLCPP_WARN(this->get_logger(), "Wheel position odometry anchor reset: %s (pose retained)",
+                  state == OdomMotorState::kUnavailable ? "motor unavailable" : "stop fault");
+    }
+    odom_motor_state_ = state;
     return;
   }
+  odom_motor_state_ = OdomMotorState::kReady;
+  const auto steadySeconds = []() {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+  };
   motor_control_lib::DdtMotorLib::MotorFeedbackData left_fb, right_fb;
   motor_control_lib::DdtMotorLib::MotorTransactionStats left_tx, right_tx;
-  if (!motor_lib_->getMotorFeedbackData(left_motor_id_, left_fb) ||
-      !motor_lib_->getMotorFeedbackData(right_motor_id_, right_fb) || !left_fb.has_feedback ||
-      !right_fb.has_feedback) {
-    return;
+  const bool left_ok = motor_lib_->getMotorFeedbackData(left_motor_id_, left_fb);
+  const double left_now = steadySeconds();
+  const bool right_ok = motor_lib_->getMotorFeedbackData(right_motor_id_, right_fb);
+  const double right_now = steadySeconds();
+  const bool left_stats = motor_lib_->getMotorTransactionStats(left_motor_id_, left_tx);
+  const bool right_stats = motor_lib_->getMotorTransactionStats(right_motor_id_, right_tx);
+  const wheel_position::Sample left{left_fb.position_raw,
+                                    static_cast<double>(left_fb.velocity_rpm_raw),
+                                    left_now - left_fb.feedback_age_sec,
+                                    left_tx.feedback_count,
+                                    left_ok && left_stats && left_fb.has_feedback,
+                                    left_fb.fault_code};
+  const wheel_position::Sample right{right_fb.position_raw,
+                                     static_cast<double>(right_fb.velocity_rpm_raw),
+                                     right_now - right_fb.feedback_age_sec,
+                                     right_tx.feedback_count,
+                                     right_ok && right_stats && right_fb.has_feedback,
+                                     right_fb.fault_code};
+  const wheel_position::Limits limits{wheel_radius_, wheel_separation_,
+                                      static_cast<double>(max_motor_rpm_), max_linear_accel_,
+                                      max_angular_accel_};
+  // The pure tracker retains feedback_count gating and waits for BOTH new
+  // endpoints. It also checks the pairing deadline on ticks with no new data.
+  const double odom_now = steadySeconds();
+  const auto result = odom_position_integrator_.update(left, right, odom_now, limits);
+  odom_pose_ = wheel_position::integrate(odom_pose_, result);
+  const bool stationary = left.native_rpm == 0.0 && right.native_rpm == 0.0;
+  if (result.state == wheel_position::State::kAnchored ||
+      result.state == wheel_position::State::kIntegrated) {
+    odom_last_pair_stationary_ = stationary;
   }
-  motor_lib_->getMotorTransactionStats(left_motor_id_, left_tx);
-  motor_lib_->getMotorTransactionStats(right_motor_id_, right_tx);
-  if (has_odom_sample_ && left_tx.feedback_count == odom_left_feedback_count_ &&
-      right_tx.feedback_count == odom_right_feedback_count_) {
-    return;  // この tick に新しい実測は無い
+  const auto log_now = std::chrono::steady_clock::now();
+  if (odom_estop_poll_skipped_) {
+    if (!odom_estop_suspended_) {
+      RCLCPP_INFO(this->get_logger(),
+                  "Wheel position odometry deferred: E-stop polling suspended (pose retained)");
+    }
+    odom_estop_suspended_ = true;
+    odom_estop_release_pending_ = false;
+    odom_estop_left_count_ = left.count;
+    odom_estop_right_count_ = right.count;
+  } else if (odom_estop_suspended_) {
+    odom_estop_suspended_ = false;
+    odom_estop_release_pending_ = true;
+    odom_estop_released_at_ = log_now;
   }
-  odom_left_feedback_count_ = left_tx.feedback_count;
-  odom_right_feedback_count_ = right_tx.feedback_count;
-
-  const double now_sec =
-      std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
-  const auto [linear, angular] = motor_control_lib::differential_kinematics::wheelRpmToTwist(
-      left_fb.velocity_rpm_raw, right_fb.velocity_rpm_raw, wheel_radius_, wheel_separation_);
-  const odometry::TwistSample sample{
-      now_sec - 0.5 * (left_fb.feedback_age_sec + right_fb.feedback_age_sec), linear, angular};
-  if (has_odom_sample_) {
-    odom_pose_ = odometry::integrateBetween(odom_pose_, odom_last_sample_, sample,
-                                            odometry::kMaxFeedbackAgeSec);
+  // Require BOTH new endpoints, not a re-anchor on feedback retained from before the E-stop.
+  if (odom_estop_release_pending_ &&
+      (result.state == wheel_position::State::kAnchored ||
+       result.state == wheel_position::State::kIntegrated) &&
+      left.count > odom_estop_left_count_ && right.count > odom_estop_right_count_) {
+    odom_estop_release_pending_ = false;
   }
-  odom_last_sample_ = sample;
-  has_odom_sample_ = true;
+  const bool estop_known = last_block_ != actuation_gate::Block::kEstopUnknown &&
+                           last_block_ != actuation_gate::Block::kEstopStale;
+  const auto finite_zero = [](double value) { return std::isfinite(value) && value == 0.0; };
+  // Log evidence only: a re-armed neutral controller uses TICK_DRIVE too. Require both
+  // the accepted/shaped commands and the last SUCCESSFUL wheel frames to be zero.
+  // RPM targets alone cannot prove this in current mode (nonzero PI current at zero RPM).
+  const bool zero_command =
+      motor_initialized_ && !stop_fault_ && diff_drive_ && control_core_ &&
+      (!has_target_ || (finite_zero(target_linear_) && finite_zero(target_angular_))) &&
+      finite_zero(control_core_->lastLinear()) && finite_zero(control_core_->lastAngular()) &&
+      left_fb.target_rpm == 0 && right_fb.target_rpm == 0 && diff_drive_->lastSentIsZero();
+  // ID13 needed about 1.3 s for its first reply. Eight existing idle polling intervals plus
+  // two ticks give 1.64 s at 50 Hz, allowing that observed delay with scheduling margin.
+  // This bounds LOG suppression only: no polling, safety, anchor or pose decision reads it.
+  const double release_grace =
+      8.0 * kIdleFeedbackMaxAgeSec + 2.0 * drive_control_tick::tickDtSec(control_rate_);
+  if (!estop_known || !zero_command ||
+      (odom_estop_release_pending_ &&
+       secondsSince(odom_estop_released_at_, log_now) >= release_grace)) {
+    odom_estop_release_pending_ = false;
+  }
+  if (result.state == wheel_position::State::kReset) {
+    // kInvalid also covers bad dimensions or malformed/counter-rollback feedback: keep those
+    // WARNs even if the other wheel has never answered. These checks classify logs only.
+    const bool geometry_valid = std::isfinite(limits.radius) && limits.radius > 0.0 &&
+                                std::isfinite(limits.separation) && limits.separation > 0.0 &&
+                                std::isfinite(limits.max_rpm) && limits.max_rpm > 0.0;
+    const auto valid_if_received = [](const wheel_position::Sample& sample, double now) {
+      return !sample.received ||
+             (std::isfinite(sample.time_sec) && sample.time_sec <= now &&
+              std::isfinite(sample.native_rpm) &&
+              sample.position <= motor_control_lib::ddt_protocol::kPositionRawPerTurn);
+    };
+    const bool unheard = (!left.received || !right.received) && valid_if_received(left, left_now) &&
+                         valid_if_received(right, right_now);
+    const bool harmless_inputs = geometry_valid && left.fault == 0 && right.fault == 0;
+    const bool expected_missing = result.reason == wheel_position::Reason::kInvalid && unheard;
+    const bool estop_reset = harmless_inputs && odom_estop_poll_skipped_ &&
+                             (expected_missing || result.reason == wheel_position::Reason::kStale);
+    // Use the same samples, time and age limit as Integrator::update to identify stale wheels.
+    // Only stale wheels must retain their suspension counts; a fresh wheel may have advanced.
+    const bool left_stale = odom_now - left.time_sec > odometry::kMaxFeedbackAgeSec;
+    const bool right_stale = odom_now - right.time_sec > odometry::kMaxFeedbackAgeSec;
+    const bool retained_stale = result.reason == wheel_position::Reason::kStale &&
+                                (!left_stale || left.count == odom_estop_left_count_) &&
+                                (!right_stale || right.count == odom_estop_right_count_);
+    const bool release_reset =
+        harmless_inputs && odom_estop_release_pending_ &&
+        (expected_missing || result.reason == wheel_position::Reason::kGap || retained_stale);
+    // Only the expected gap of healthy, zero-command idle polling is quiet.
+    // A last moving pair, nonzero command/RPM, stale/fault or ambiguous result
+    // remains a WARN. Logging never changes the reset/integration decision.
+    const bool idle_gap = estop_known && result.reason == wheel_position::Reason::kGap &&
+                          odom_last_pair_stationary_ && stationary && left_fb.target_rpm == 0 &&
+                          right_fb.target_rpm == 0;
+    if (estop_reset || release_reset) {
+      RCLCPP_DEBUG_THROTTLE(
+          this->get_logger(), *this->get_clock(), 1000,
+          "Wheel position odometry deferred: %s; %s (pose retained)",
+          estop_reset ? "E-stop polling suspended" : "E-stop release awaiting fresh pair",
+          wheel_position::reasonName(result.reason));
+    } else if (idle_gap) {
+      RCLCPP_DEBUG_THROTTLE(
+          this->get_logger(), *this->get_clock(), 1000,
+          "Wheel position odometry anchor reset: idle polling gap (pose retained)");
+    } else {
+      RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                           "Wheel position odometry anchor reset: %s (pose retained)",
+                           wheel_position::reasonName(result.reason));
+    }
+  }
 }
 
 void DriveComponent::publishControlSample(const rclcpp::Time& tick_stamp,
@@ -351,6 +477,9 @@ void DriveComponent::runControlTick() {
       // 場合の観測と /drive_status の鮮度のため）。再取得が送るのは送信に成功したゼロだけで、
       // 非ゼロの再送はしない（DdtMotorLib::refreshMotorFeedback）。押下を受信している間と
       // stop fault の間（再送は上で行う）は送らない。
+      // Log evidence only: do not infer a deliberate suspension from old feedback or permission.
+      odom_estop_poll_skipped_ =
+          motor_ready && motor_lib_ && block == actuation_gate::Block::kEstopActive;
       if (motor_ready && motor_lib_ && block != actuation_gate::Block::kEstopActive &&
           block != actuation_gate::Block::kStopFault) {
         motor_lib_->refreshMotorFeedback(left_motor_id_, kIdleFeedbackMaxAgeSec);
@@ -630,14 +759,10 @@ void DriveComponent::publishOdometry(double twist_linear, double twist_angular, 
   // publish に載せる twist は stale 時ゼロ（ポーズと整合させ、下流の誤積分を防ぐ）。
   const double reported_linear = feedback_fresh ? twist_linear : 0.0;
   const double reported_angular = feedback_fresh ? twist_angular : 0.0;
-  // ポーズは最後の実測の時刻まで積分済み。配信時刻（スタンプ）まで最後の実測の twist で延ばす
-  // （延ばした分は積分の状態に残さない）。stale なら延ばさない。
-  odometry::Pose2D pose = odom_pose_;
-  if (feedback_fresh && has_odom_sample_) {
-    const double now_steady_sec =
-        std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
-    pose = odometry::extrapolate(odom_pose_, odom_last_sample_, now_steady_sec);
-  }
+  // Hold the pose at the last paired position endpoints. Extrapolating with
+  // integer RPM would reintroduce its directional bias and a reset-time jump.
+  // The published twist intentionally keeps the existing LPF velocity contract.
+  const odometry::Pose2D pose = odom_pose_;
   const odometry::YawQuaternion q = odometry::yawToQuaternion(pose.theta);
 
   nav_msgs::msg::Odometry odom;

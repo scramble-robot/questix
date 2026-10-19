@@ -27,7 +27,7 @@ FAKE = textwrap.dedent('''\
     printf '%s\\n' "$(printf '%q ' "$name" "$@")" >> "$state/calls"
     if [ "$name" = chpasswd ]; then cat > "$state/chpasswd.stdin"; fi
     if [ -e "$state/fail-$name" ] || [ -e "$state/fail-$name-$1" ]; then exit 1; fi
-    if [ "$name" = id ] && [ "$1" != ubuntu ]; then exit 1; fi
+    if [ "$name" = id ] && [ "$1" != "$QUESTIX_ENROLL_USER" ]; then exit 1; fi
     exit 0
     ''')
 
@@ -35,7 +35,8 @@ FAKE = textwrap.dedent('''\
 class Box:
     """Fake tools and state directories for one enrollment run."""
 
-    def __init__(self, base: Path):
+    def __init__(self, base: Path, user: str):
+        self.user = user
         self.base = base
         self.state = base / "state"
         self.bin = base / "bin"
@@ -51,6 +52,7 @@ class Box:
 
     def run(self, stdin, state_dir=None):
         env = {"PATH": f"{self.bin}:/usr/bin:/bin",
+               "QUESTIX_ENROLL_USER": self.user,
                "QUESTIX_ENROLL_STATE_DIR": str(state_dir or self.var),
                "QUESTIX_SYSTEMD_UNIT_DIR": str(self.units), "LC_ALL": "C.UTF-8"}
         return subprocess.run(["bash", str(ENROLL)], input=stdin, capture_output=True,
@@ -70,9 +72,9 @@ class Box:
         return self.var / "first-boot-enrolled"
 
 
-@pytest.fixture
-def box(tmp_path):
-    return Box(tmp_path)
+@pytest.fixture(params=["ubuntu", "robot_team"])
+def box(tmp_path, request):
+    return Box(tmp_path, request.param)
 
 
 def good(box):
@@ -92,12 +94,12 @@ def test_success_order_password_then_ssh_active_then_marker(box):
     date_call = next(i for i, c in enumerate(calls) if c.startswith("date "))
     assert order[4] < date_call < order[5]
     assert box.marker.exists()
-    assert "passwd -l ubuntu " not in calls[calls.index("chpasswd "):]
+    assert f"passwd -l {box.user} " not in calls[calls.index("chpasswd "):]
 
 
 def test_password_only_reaches_chpasswd_stdin(box):
     result = good(box)
-    assert (box.state / "chpasswd.stdin").read_text() == f"ubuntu:{SECRET}\n"
+    assert (box.state / "chpasswd.stdin").read_text() == f"{box.user}:{SECRET}\n"
     assert all(SECRET not in call for call in box.calls())  # never an argument
     assert SECRET not in result.stdout + result.stderr  # never shown or logged
     assert not any(SECRET in p.read_text(errors="ignore") for p in box.var.rglob("*") if p.is_file())
@@ -112,7 +114,7 @@ def test_ssh_service_is_used_without_socket_activation(box):
 def assert_fail_closed(box, result):
     assert result.returncode == 1
     calls = box.calls()
-    assert "passwd -l ubuntu " in calls
+    assert f"passwd -l {box.user} " in calls
     assert "systemctl disable ssh.socket ssh.service " in calls
     assert "systemctl stop ssh.socket ssh.service " in calls
     assert not box.marker.exists()
@@ -128,7 +130,7 @@ def test_ssh_step_failure_fails_closed(box, failing):
     assert_fail_closed(box, result)
     calls = box.calls()
     # The account is locked again after the password had been set.
-    assert "passwd -l ubuntu " in calls[calls.index("chpasswd "):]
+    assert f"passwd -l {box.user} " in calls[calls.index("chpasswd "):]
 
 
 def test_marker_write_failure_fails_closed(box):
@@ -137,7 +139,7 @@ def test_marker_write_failure_fails_closed(box):
     result = box.run(f"{SECRET}\n{SECRET}\n", state_dir=blocker / "state")
     assert result.returncode == 1
     calls = box.calls()
-    assert "passwd -l ubuntu " in calls[calls.index("chpasswd "):]
+    assert f"passwd -l {box.user} " in calls[calls.index("chpasswd "):]
     assert "systemctl stop ssh.socket ssh.service " in calls
     assert "systemctl disable questix-first-boot.service " not in calls
 
@@ -167,13 +169,19 @@ def test_mismatch_and_short_passwords_are_asked_again(box):
     result = box.run(f"short\nshort\n{SECRET}\nother-pass-1\n{SECRET}\n{SECRET}\n")
     assert result.returncode == 0
     assert "8 文字以上" in result.stdout and "一致しません" in result.stdout
-    assert (box.state / "chpasswd.stdin").read_text() == f"ubuntu:{SECRET}\n"
+    assert (box.state / "chpasswd.stdin").read_text() == f"{box.user}:{SECRET}\n"
 
 
 @pytest.mark.parametrize("weak", ["ubuntu", "questix"])
 def test_default_like_passwords_are_refused(box, weak):
     result = box.run(f"{weak}\n{weak}\n")  # then the input ends
     assert result.returncode == 1
+    assert not (box.state / "chpasswd.stdin").exists()
+
+
+def test_custom_username_is_not_accepted_as_password(box):
+    result = box.run(f"{box.user}\n{box.user}\n")
+    assert_fail_closed(box, result)
     assert not (box.state / "chpasswd.stdin").exists()
 
 

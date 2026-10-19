@@ -19,6 +19,8 @@ const StatusView = (() => {
   // robot (/lab_permission). Such blockers are shown only once they last this long.
   const SETTLE_MS = 6000;
   const TRANSIENT = new Set(['no_drive_node', 'no_launcher', 'not_allowed']);
+  const BLOCKER_ORDER = ['not_allowed', 'estop_unknown', 'emergency_stop', 'no_drive_node',
+    'no_launcher', 'other_publisher', 'no_motion_permission', 'controller'];
   const WEB_JOY_PORT = '8899';
 
   const WORDS = {
@@ -32,6 +34,16 @@ const StatusView = (() => {
 
   // Blockers worth showing now: the transient ones only after SETTLE_MS without a break.
   function stableBlockers(kind, blockers, memory, now, settle = true) {
+    const estop = (blockers || []).some((b) => b && b.code === 'emergency_stop');
+    // Older bridges also report the shot node's E-stop teardown as a missing launcher. Keep
+    // genuinely missing arbiter/roller parts, and never mutate the bridge's status object.
+    blockers = (blockers || []).flatMap((blocker) => {
+      if (estop && blocker && blocker.code === 'no_launcher' && Array.isArray(blocker.parts)) {
+        const parts = blocker.parts.filter((part) => part !== 'shot');
+        return parts.length ? [{ ...blocker, parts }] : [];
+      }
+      return [blocker];
+    });
     const seen = new Set();
     const shown = [];
     let pending = false;
@@ -46,6 +58,11 @@ const StatusView = (() => {
     for (const key of [...memory.keys()]) {
       if (key.startsWith(`${kind}:`) && !seen.has(key)) memory.delete(key);
     }
+    const rank = (b) => {
+      const index = BLOCKER_ORDER.indexOf(b.code);
+      return index < 0 ? BLOCKER_ORDER.length : index;
+    };
+    shown.sort((a, b) => rank(a) - rank(b));
     return { shown, pending };
   }
 

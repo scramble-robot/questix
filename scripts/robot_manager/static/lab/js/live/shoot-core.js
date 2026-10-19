@@ -19,10 +19,10 @@ const SHOOT_BLOCKERS = [
   'no_link', // not connected to a robot
   'old_bridge', // the bridge predates the launcher (no hello.shoot)
   'not_allowed', // the teacher has not allowed the launcher (/lab_permission)
-  'no_launcher', // command_arbiter, esc_motor_control or shot_component missing or silent
-  'other_publisher', // something else publishes the launcher's lab topic
   'estop_unknown', // the bridge has not heard /emergency_stop yet (fail closed)
   'emergency_stop',
+  'no_launcher', // command_arbiter, esc_motor_control or shot_component missing or silent
+  'other_publisher', // something else publishes the launcher's lab topic
   'no_motion_permission', // /motion_permission does not allow the launcher
   'controller', // the controller uses the launcher (it always wins)
   'busy', // another page operates the launcher
@@ -144,9 +144,9 @@ const shootOffered = (readiness) =>
 /**
  * Which controls are enabled and, for each disabled one, the key of the reason (content
  * shoot.json `why`, or a blocker code) and its values. `readiness` from shootReadiness, `local`
- * the page's own side: `{spinning, session, firePending, shooting}` (`spinning`: this page asked
- * for the roller; `session`: this page has a session at all, tilt only included; `shooting`:
- * /shot/status says a shot is moving).
+ * the page's own side: `{spinning, session, firePending, shooting, tiltKnown}` (`spinning`: this
+ * page asked for the roller; `session`: a session at all, tilt only included; `shooting`:
+ * /shot/status says a shot is moving; `tiltKnown`: its fresh status has a finite tilt).
  */
 function shootControls(readiness, local = {}) {
   const firstBlocker = (codes) => readiness.blockers.find((b) => codes.includes(b.code)) ?? null;
@@ -160,6 +160,8 @@ function shootControls(readiness, local = {}) {
   let tilt = { enabled: !blocked, reason: blocked ? { key: blocked.code } : null };
   if (!blocked && (local.firePending || local.shooting))
     tilt = { enabled: false, reason: { key: 'shooting' } };
+  else if (!blocked && local.tiltKnown !== true)
+    tilt = { enabled: false, reason: { key: 'tilt_unknown' } };
   return { spin, tilt, fire: fireControl(readiness, local, blocked) };
 }
 

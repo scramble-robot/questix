@@ -41,7 +41,7 @@ OTHER_PUBLISHER = 'other_publisher'
 ESTOP_UNKNOWN = 'estop_unknown'  # /emergency_stop not observed yet
 EMERGENCY_STOP = 'emergency_stop'
 NO_MOTION_PERMISSION = 'no_motion_permission'  # /motion_permission does not allow the drive
-BLOCKER_ORDER = (NOT_ALLOWED, NO_DRIVE_NODE, OTHER_PUBLISHER, ESTOP_UNKNOWN, EMERGENCY_STOP,
+BLOCKER_ORDER = (NOT_ALLOWED, ESTOP_UNKNOWN, EMERGENCY_STOP, NO_DRIVE_NODE, OTHER_PUBLISHER,
                  NO_MOTION_PERMISSION)
 
 # Refusals of a single request (besides the blockers).

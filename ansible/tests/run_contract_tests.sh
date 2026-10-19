@@ -520,9 +520,9 @@ ISO_APPLY=scripts/apply-ansible-config.sh
 assert_contains "$ISO_APPLY" '-e "enable_autologin=false"' "image: Ansible adds no autologin"
 assert_contains "$ISO_APPLY" "systemctl enable questix-first-boot.service" "image: first-boot enrollment enabled"
 assert_contains "$ISO_APPLY" 'systemctl disable "$unit"' "image: SSH units disabled before the image is built"
-assert_contains "$ISO_APPLY" "rm -f /etc/sudoers.d/ubuntu" "image: no legacy sudoers file"
+assert_contains "$ISO_APPLY" 'rm -f "/etc/sudoers.d/$IMAGE_USER"' "image: no user-specific sudoers file"
 assert_contains "$ISO_APPLY" "A NOPASSWD sudo rule is in the image" "image: build fails on a NOPASSWD rule"
-assert_contains "$ISO_APPLY" "The ubuntu account is not locked" "image: build fails on an unlocked account"
+assert_contains "$ISO_APPLY" 'The $IMAGE_USER account is not locked' "image: build fails on an unlocked account"
 assert_contains "$ISO_APPLY" "SSH is enabled before the first-boot enrollment" "image: build fails on enabled SSH"
 assert_not_contains "$ISO_APPLY" "first-boot-setup.sh" "image: no .bashrc first-boot script"
 assert_contains scripts/iso/image-build-lib.sh 'install -D -m 0755 "$iso_dir/questix-first-boot-enroll.sh"' \
@@ -592,6 +592,39 @@ unset FAKE_CLEANUP_LOG FAKE_CLEANUP_PENDING
 
 # --- 13. Custom image build (scripts/iso/image-build-lib.sh, apply-ansible-config.sh) ---
 . ansible/tests/image_build_contract.sh
+
+# Safe PWM configuration contract: only a run-local config.txt, never systemd or GPIO.
+if run_playbook ansible/tests/test_rp1_pwm_config.yaml \
+    -e "boot_config_path=$TMP_ROOT/pwm-config.txt"; then
+    pass "RP1 PWM: explicit all section and idempotent second application"
+else
+    fail "RP1 PWM: boot configuration contract failed"
+fi
+
+# Extract the actual copies, with test-only result registers. Inputs intentionally
+# do not exist: check mode must not read dtc outputs that were never generated.
+PWM_PUBLICATION_FIXTURE="$TMP_ROOT/pwm-publication.yaml"
+python3 - "$PWM_PUBLICATION_FIXTURE" <<'PY'
+from pathlib import Path
+import sys
+import yaml
+
+tasks = yaml.safe_load(Path('ansible/roles/hardware_interfaces/tasks/rp1_pwm.yaml').read_text())
+names = ('Publish the persistent compiled overlay',
+         'Copy the persistent overlay to the firmware partition')
+selected = [next(t for t in tasks if t['name'] == name) for name in names]
+for task, register in zip(selected, ('pwm_publish_result', 'pwm_firmware_result')):
+    task['register'] = register
+Path(sys.argv[1]).write_text(yaml.safe_dump(selected, sort_keys=False))
+PY
+if run_playbook ansible/tests/test_rp1_pwm_check.yaml --check \
+    -e "pwm_publication_fixture=$PWM_PUBLICATION_FIXTURE" \
+    -e "rp1_pwm_source_dir=$TMP_ROOT/absent-pwm-source" \
+    -e "rp1_pwm_boot_overlay_dir=$TMP_ROOT/absent-pwm-boot"; then
+    pass "RP1 PWM: first check mode skips both ungenerated overlay copies"
+else
+    fail "RP1 PWM: first check mode publication contract failed"
+fi
 
 # Source-only migration fixtures use temporary files and fake commands only.
 if python3 -m unittest discover -s ansible/tests -p 'test_*.py' -v; then
