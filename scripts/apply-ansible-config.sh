@@ -1,10 +1,10 @@
 #!/bin/bash
 # apply-ansible-config.sh
 # Apply the QUESTiX Ansible configuration to the custom image's chroot (after
-# scripts/prepare-base-system.sh, before scripts/build-iso.sh).
+# scripts/prepare-base-system.sh, or from scripts/build-pi-image.sh).
 #
-# The image is built from the checkout this script is in (not from the current directory: the
-# workflow runs it from /tmp/iso-build): that commit is cloned to /home/ubuntu/questix in the
+# The image is built from the checkout this script is in (not from the current directory):
+# that commit is cloned to /home/IMAGE_USER/questix in the
 # image and the playbook runs from there, so the workspace is built in the image (a first boot
 # needs no download) and Robot Manager, its QUESTiX Local helper and the legacy cleanup are the
 # same revision. The playbook runs as root in the chroot with questix_image_build=true: the kit
@@ -14,13 +14,12 @@
 
 set -e
 
-ARCHITECTURE="$1"
-ROS2_DISTRO="$2"
-
-if [ "$#" -ne 2 ]; then
-    echo "Usage: $0 <architecture> <ros2_distro>"
+if [ "$#" -lt 2 ] || [ "$#" -gt 4 ]; then
+    echo "Usage: $0 <architecture> <ros2_distro> [chroot_directory] [image_user]"
     exit 1
 fi
+ARCHITECTURE="$1"
+ROS2_DISTRO="$2"
 
 echo "🤖 Applying Ansible configuration for $ARCHITECTURE with ROS2 $ROS2_DISTRO"
 
@@ -28,8 +27,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ISO_FILES_DIR="$SCRIPT_DIR/iso"
 WORK_DIR="/tmp/iso-work"
-CHROOT_DIR="$WORK_DIR/chroot"
-IMAGE_USER=ubuntu
+CHROOT_DIR="${3:-$WORK_DIR/chroot}"
+IMAGE_USER="${4-ubuntu}"
 IMAGE_SOURCE="/home/$IMAGE_USER/questix"
 # Ansible for the build only, in a venv removed afterwards (Ubuntu 24.04's pip refuses the system
 # Python, PEP 668). The same version as .github/workflows/ansible-check.yaml.
@@ -38,6 +37,7 @@ IMAGE_ANSIBLE_VERSION=14.2.0
 
 # shellcheck source=iso/image-build-lib.sh
 . "$ISO_FILES_DIR/image-build-lib.sh"
+questix_image_validate_user "$IMAGE_USER"
 
 echo "📋 Installing the QUESTiX source into the image..."
 questix_image_install_source "$REPO_ROOT" "$CHROOT_DIR" "$IMAGE_USER"
@@ -102,54 +102,16 @@ apt-get clean
 rm -rf /var/lib/apt/lists/*
 CHROOT_EOF
 
-# Post-configuration for robotics kit
-if [ "$ARCHITECTURE" = "arm64" ]; then
-    echo "🔧 Applying Raspberry Pi 5 specific configurations..."
-
-    # Configure boot settings for Raspberry Pi
-    chroot "$CHROOT_DIR" /bin/bash << 'CHROOT_EOF'
-# Enable necessary modules
-echo "i2c-dev" >> /etc/modules
-echo "spi-dev" >> /etc/modules
-
-# Create firmware config for Raspberry Pi
-mkdir -p /boot/firmware
-cat > /boot/firmware/config.txt << 'CONFIG_EOF'
-# ROS2 Robotics Kit Configuration for Raspberry Pi 5
-
-# Enable hardware interfaces
-dtparam=i2c_arm=on
-dtparam=spi=on
-dtparam=audio=on
-
-# GPIO configuration
-gpio=2-27=op,dh
-
-# Camera support
-start_x=1
-gpu_mem=128
-
-# Performance optimizations
-arm_boost=1
-over_voltage=2
-arm_freq=2400
-
-# USB configuration
-max_usb_current=1
-CONFIG_EOF
-
-# Create cmdline.txt
-echo "console=serial0,115200 console=tty1 root=PARTUUID=XXXXXXXX-02 rootfstype=ext4 elevator=deadline fsck.repair=yes rootwait cgroup_enable=cpuset cgroup_enable=memory cgroup_memory=1" > /boot/firmware/cmdline.txt
-CHROOT_EOF
-
-    echo "🍓 Raspberry Pi 5 configuration completed"
-fi
+# Pi firmware, kernel/initramfs settings and root identity belong to the official
+# preinstalled image. hardware_interfaces makes the I2C/SPI/UART edits in place;
+# never replace config.txt/cmdline.txt or drive every GPIO high here.
 
 # Final system configuration
 echo "🔧 Applying final system configuration..."
-questix_image_install_first_boot "$ISO_FILES_DIR" "$CHROOT_DIR"
-chroot "$CHROOT_DIR" /bin/bash << 'CHROOT_EOF'
+questix_image_install_first_boot "$ISO_FILES_DIR" "$CHROOT_DIR" "$IMAGE_USER"
+chroot "$CHROOT_DIR" /bin/bash -s -- "$IMAGE_USER" << 'CHROOT_EOF'
 set -e
+IMAGE_USER="$1"
 export HOME=/root
 export LC_ALL=C
 export DEBIAN_FRONTEND=noninteractive
@@ -159,8 +121,8 @@ systemctl enable NetworkManager
 # First-enrollment policy, whatever the roles above did: no known password (the account is
 # locked), no NOPASSWD rule, no console autologin, SSH installed but not enabled. The console
 # enrollment unit sets the password, then enables SSH and disables itself.
-passwd -l ubuntu
-rm -f /etc/sudoers.d/ubuntu
+passwd -l "$IMAGE_USER"
+rm -f "/etc/sudoers.d/$IMAGE_USER"
 rm -f /etc/systemd/system/getty@tty1.service.d/autologin.conf
 for unit in ssh.socket ssh.service; do
     if [ -e "/usr/lib/systemd/system/$unit" ]; then
@@ -176,8 +138,8 @@ if grep -rqs 'NOPASSWD' /etc/sudoers /etc/sudoers.d; then
     echo "❌ A NOPASSWD sudo rule is in the image" >&2
     exit 1
 fi
-if [ "$(passwd -S ubuntu | awk '{print $2}')" != L ]; then
-    echo "❌ The ubuntu account is not locked" >&2
+if [ "$(passwd -S "$IMAGE_USER" | awk '{print $2}')" != L ]; then
+    echo "❌ The $IMAGE_USER account is not locked" >&2
     exit 1
 fi
 if grep -qsE '^[[:space:]]*AutomaticLoginEnable[[:space:]]*=[[:space:]]*[Tt]rue' /etc/gdm3/custom.conf; then
@@ -202,7 +164,7 @@ rm -rf /var/tmp/*
 # Clear bash history
 history -c
 rm -f /root/.bash_history
-rm -f /home/ubuntu/.bash_history
+rm -f "/home/$IMAGE_USER/.bash_history"
 
 exit 0
 CHROOT_EOF

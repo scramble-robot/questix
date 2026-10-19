@@ -7,6 +7,9 @@
 
 import math
 import os
+from pathlib import Path
+import random
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -24,6 +27,27 @@ def frame(motor_id, kind, value=0):
 def test_crc_matches_the_spec_sheet_examples():
     assert f.crc8_maxim(bytes([4, 0x94, 0, 0, 0, 0, 0, 0, 0])) == 0x71
     assert f.crc8_maxim(bytes([5, 0x94, 0, 0, 0, 0, 0, 0, 0])) == 0xD5
+
+
+def test_position_feedback_matches_shared_cpp_scale_and_native_direction():
+    header = (Path(__file__).resolve().parents[2] / 'motor_control_lib' / 'include' /
+              'motor_control_lib' / 'ddt_protocol.hpp').read_text()
+    scale = int(re.search(r'kPositionRawPerTurn\s*=\s*(\d+)', header).group(1))
+    motor = f.FakeMotor(4, f.PLANTS['lifted'])
+    for turns in [0.0, 0.25, 0.999, 1.0, -0.25]:
+        motor.position_turns = turns
+        answer = motor.answer(0, random.Random(0))
+        position = (answer[6] << 8) | answer[7]
+        assert position == int((turns % 1.0) * scale)
+        assert f.crc8_maxim(answer[:9]) == answer[9]
+    for direction in [1, -1]:
+        motor.position_turns = 0.0
+        motor.speed_rpm = 0.0
+        motor.velocity_target_rpm = direction * 10.0
+        for _ in range(100):
+            motor.step(0.001)
+        assert motor.position_turns * direction > 0
+        assert motor.speed_rpm * direction > 0
 
 
 def test_lifted_wheel_settles_where_the_current_balances_friction():
