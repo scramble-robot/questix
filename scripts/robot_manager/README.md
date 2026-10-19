@@ -365,6 +365,26 @@ value takes precedence, including `MAX_SPLIT_MB=0` (no splitting). One bag direc
 several MCAP files; the Manager lists, sizes and deletes that directory as one recording, and
 QUESTiX LAB reads and converts all its segments.
 
+### Existing robots: restore recording defaults
+
+On an existing robot, `OUTPUT_DIR` and `MAX_SPLIT_MB` in `rosbag.env` take precedence over
+the new defaults. Saving recording settings from the screen writes **all default keys** with
+their current values, including values the operator did not change. A robot whose settings
+were saved under the earlier defaults therefore keeps `MAX_SPLIT_MB=0` and its saved output
+folder after this update; it does not automatically gain 200 MB splitting or the default path.
+
+Before changing anything, record the current output folder and split size. They can be checked
+read-only (an absent file means no persisted overrides):
+
+```bash
+grep -E '^(OUTPUT_DIR|MAX_SPLIT_MB)=' /etc/questix_robot/rosbag.env
+```
+
+After deployment, open the screen's recording settings, set the split size to **200 MB** and
+the output folder to **`/var/lib/questix/rosbags`**, then save. Use the screen to restore the
+previously recorded values if needed. This update keeps the existing save-all-keys behaviour;
+a different persistence model would be a separate change.
+
 ### Storage and orderly shutdown
 
 The single policy source is `systemd/questix_robot_manager.service.d/recording.conf`.
