@@ -10,12 +10,14 @@
     <buildtool_depend>ament_cmake_auto</buildtool_depend>
 
     <depend>questix_msgs</depend>
+    <depend>questix_pwm_guard</depend>
     <depend>questix_safety</depend>
     <depend>rclcpp</depend>
     <depend>rclcpp_components</depend>
     <depend>std_msgs</depend>
 
     <test_depend>ament_cmake_gtest</test_depend>
+    <test_depend>rcutils</test_depend>
     <test_depend>ament_lint_auto</test_depend>
     <test_depend>ament_lint_common</test_depend>
 

@@ -18,3 +18,8 @@ ros2_apt_source_repo: "https://github.com/ros-infrastructure/ros-apt-source"
 
 # Development tools flag
 ros2_install_dev_tools: true
+
+# Preserve the existing default. Existing-kit migrations may opt out of dist-upgrade only;
+# required package installation and apt cache refresh still run.
+questix_os_upgrade: true
+ros2_verification_setup: "/opt/ros/{{ ros2_distro_to_use }}/setup.bash"
