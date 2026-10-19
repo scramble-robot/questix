@@ -108,6 +108,11 @@ struct RollerStatus {
   // The motion permission (L2) for the launcher. Not an E-stop.
   bool permission{true};
   double max_power{0.0};
+  bool pwm_fault{false};
+  int applied_pulse_us{-1};
+  std::string pwm_backend{"none"};
+  std::string pwm_output_state{"UNKNOWN"};
+  int pwm_error{0};
 };
 
 inline const char* rollerSourceName(const std::string& source) {
@@ -119,13 +124,16 @@ inline const char* rollerSourceName(const std::string& source) {
 
 inline std::string rollerStatusJson(const RollerStatus& status) {
   const auto finite = [](double value) { return std::isfinite(value) ? value : 0.0; };
-  char buffer[192];
+  char buffer[512];
   std::snprintf(buffer, sizeof(buffer),
                 "{\"command\": %.3f, \"source\": \"%s\", \"estop\": %s, \"permission\": %s, "
-                "\"max_power\": %.3f}",
+                "\"max_power\": %.3f, \"pwm_fault\": %s, \"applied_pulse_us\": %d, "
+                "\"pwm_backend\": \"%s\", \"pwm_output_state\": \"%s\", \"pwm_error\": %d}",
                 finite(status.command), status.source ? status.source : "idle",
                 status.estop ? "true" : "false", status.permission ? "true" : "false",
-                finite(status.max_power));
+                finite(status.max_power), status.pwm_fault ? "true" : "false",
+                status.applied_pulse_us, status.pwm_backend.c_str(),
+                status.pwm_output_state.c_str(), status.pwm_error);
   return std::string(buffer);
 }
 

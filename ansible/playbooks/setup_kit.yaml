@@ -68,12 +68,13 @@
   roles:
     - { role: ros2_installation }
     - { role: raspberry_pi_setup }
-    - { role: hardware_interfaces }
+    - { role: hardware_interfaces, tags: [hardware_interfaces] }
     - { role: robotics_workspace }
     # Imports dependency.repos, runs rosdep and colcon build, and checks the packages resolve:
     # the kit is not usable (Robot Manager's lesson bridge, the robot service) until it is built.
     # Tagged so an existing kit can rebuild alone: ./setup.sh --tags ros2_build
     - { role: ros2_build, tags: [ros2_build] }
+    - { role: pwm_guard, when: questix_rp1_pwm | bool, tags: [pwm_guard] }
     - { role: robot_autostart }
     - { role: display_settings }
     # Off unless wifi_ap_enabled: switching the Wi-Fi to AP mode drops a Wi-Fi client connection.

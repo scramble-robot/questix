@@ -313,7 +313,7 @@ DriveComponent::CallbackReturn DriveComponent::on_activate(const rclcpp_lifecycl
 
   // オドメトリの時刻アンカーをクリアする（ポーズは維持 = 一時停止でありテレポート
   // ではない）。deactivate 中のギャップを次サンプルで積分しないため。
-  has_odom_sample_ = false;
+  resetOdometryAnchor("activate");
 
   // 制御 tick タイマー（固定周期）。スルーレート制限・タイムアウト判定・シリアル送信を
   // ここに集約する（twistCallback は目標保存のみ）。

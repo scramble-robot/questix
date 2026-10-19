@@ -79,11 +79,17 @@ LAUNCHER_TARGET="$INSTALL_DIR/questix_robot_launcher.sh"
 # 0 when the installed launcher matches the repository or no robot service is installed.
 launcher_current() {
     [ -f "$LAUNCHER_TARGET" ] || return 0
-    cmp -s "$LAUNCHER_SOURCE" "$LAUNCHER_TARGET"
+    cmp -s "$LAUNCHER_SOURCE" "$LAUNCHER_TARGET" &&
+        cmp -s "$REPO_ROOT/systemd/questix_robot.service.d/pwm-guard-order.conf" \
+            /etc/systemd/system/questix_robot.service.d/pwm-guard-order.conf
 }
 
 install_launcher() {
     echo "🔄 ロボット制御の起動スクリプトを更新します（次のロボット制御の起動から使われます）..."
+    install -d -o root -g root -m 0755 /etc/systemd/system/questix_robot.service.d
+    install -o root -g root -m 0644 "$REPO_ROOT/systemd/questix_robot.service.d/pwm-guard-order.conf" \
+        /etc/systemd/system/questix_robot.service.d/pwm-guard-order.conf
+    systemctl daemon-reload
     install -m 0755 "$LAUNCHER_SOURCE" "$LAUNCHER_TARGET"
 }
 

@@ -1,6 +1,10 @@
 ---
 # Hardware Interfaces Configuration Tasks
 
+- name: Configure the Pi 5 standard ESC PWM overlay
+  ansible.builtin.include_tasks: rp1_pwm.yaml
+  when: enable_rp1_pwm | bool
+
 - name: Enable I2C interface
   ansible.builtin.lineinfile:
     path: "{{ boot_config_path }}"

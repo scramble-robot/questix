@@ -117,6 +117,7 @@ if(BUILD_TESTING)
   ament_auto_add_gtest(test_shot_auto_start test/test_shot_auto_start.cpp)
   ament_auto_add_gtest(test_launcher_events test/test_launcher_events.cpp)
   ament_auto_add_gtest(test_drive_watchdog test/test_drive_watchdog.cpp)
+  ament_auto_add_gtest(test_drive_rearm test/test_drive_rearm.cpp)
   ament_auto_add_gtest(test_drive_control_tick test/test_drive_control_tick.cpp)
   ament_auto_add_gtest(test_actuation_gate test/test_actuation_gate.cpp)
   ament_auto_add_gtest(test_control_core test/test_control_core.cpp)
@@ -129,6 +130,8 @@ if(BUILD_TESTING)
   endif()
   ament_auto_add_gtest(test_drive_slew test/test_drive_slew.cpp)
   ament_auto_add_gtest(test_odometry_integrator test/test_odometry_integrator.cpp)
+  ament_auto_add_gtest(test_wheel_position_odometry test/test_wheel_position_odometry.cpp)
+  ament_target_dependencies(test_wheel_position_odometry motor_control_lib)
   ament_auto_add_gtest(test_lifecycle_auto_start test/test_lifecycle_auto_start.cpp)
   ament_auto_add_gtest(test_motor_status_msg test/test_motor_status_msg.cpp)
   ament_target_dependencies(test_motor_status_msg motor_control_lib)
@@ -136,10 +139,12 @@ if(BUILD_TESTING)
   ament_target_dependencies(test_drive_control_sample_msg motor_control_lib)
 
   ament_auto_add_gtest(test_ddt_feedback_format test/test_ddt_feedback_format.cpp)
+  ament_target_dependencies(test_ddt_feedback_format motor_control_lib)
 
   # The real DriveComponent on a fake motor (pseudo terminal), loaded with the integrated
   # hardware YAML and an operator profile from this source tree, as questix_core does.
-  ament_auto_add_gtest(test_drive_component_node test/test_drive_component_node.cpp TIMEOUT 120)
+  # PTY regressions include delayed replies, throttle-separated negatives and repeated releases.
+  ament_auto_add_gtest(test_drive_component_node test/test_drive_component_node.cpp TIMEOUT 240)
   target_link_libraries(test_drive_component_node drive_component util)
   ament_target_dependencies(test_drive_component_node motor_control_lib)
   target_compile_definitions(test_drive_component_node PRIVATE

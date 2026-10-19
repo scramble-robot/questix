@@ -78,7 +78,7 @@ public:
   // （mode=1・fault=0）の連続回数（すべての current モードのモータそれぞれに）。
   static constexpr int kCurrentLinkRecoveryResponses = 3;
 
-  explicit DdtMotorLib(const std::string& serial_port = "/dev/ttyACM0", int baud_rate = 115200);
+  explicit DdtMotorLib(const std::string& serial_port = "/dev/ttyACM0", int baud_rate = 57600);
   virtual ~DdtMotorLib();
 
   // BaseMotorController implementation

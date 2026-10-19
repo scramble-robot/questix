@@ -352,6 +352,7 @@ def _running_mode(service: str) -> str | None:
 # The teacher's switches (and the lesson permissions that need them) follow the running launch's
 # mode, not only the saved one (actuation.switches_available).
 actuation.set_running_mode_source(lambda: _running_mode(_service_status()))
+recorder.readiness.set_service_source(lambda: _service_status())
 
 
 def _wait_for(predicate, seconds: float) -> bool:

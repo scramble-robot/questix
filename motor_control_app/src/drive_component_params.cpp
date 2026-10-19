@@ -107,6 +107,8 @@ void DriveComponent::declareParameters() {
 
   // コマンド受信タイムアウト [s]（velocity/current 両モードで有効。制御 tick 内で判定）
   this->declare_parameter("cmd_timeout_sec", 1.0);
+  this->declare_parameter("rearm_neutral_linear", 0.0);
+  this->declare_parameter("rearm_neutral_angular", 0.0);
 
   // 制御 tick の周期 [Hz]。スルーレート制限の dt = 1/control_rate（固定）になり、
   // 加速度プロファイルが上流の publish レート（DualShock 20Hz / UART 50Hz）に依存しない。
@@ -211,6 +213,18 @@ void DriveComponent::readParameters() {
   velocity_run_feedback_max_age_sec_ =
       this->get_parameter("velocity_run_feedback_max_age_sec").as_double();
   cmd_timeout_sec_ = this->get_parameter("cmd_timeout_sec").as_double();
+  const auto read_band = [this](const char* name, double maximum) {
+    const double value = this->get_parameter(name).as_double();
+    if (!drive_rearm::validBand(value, maximum)) {
+      RCLCPP_ERROR(this->get_logger(), "%s=%g is outside finite [0, %g]; using 0.0", name, value,
+                   maximum);
+    }
+    return drive_rearm::bandOrZero(value, maximum);
+  };
+  rearm_neutral_linear_ = read_band("rearm_neutral_linear", drive_rearm::kMaxLinear);
+  rearm_neutral_angular_ = read_band("rearm_neutral_angular", drive_rearm::kMaxAngular);
+  RCLCPP_INFO(this->get_logger(), "Drive rearm neutral: linear <= %g m/s, angular <= %g rad/s",
+              rearm_neutral_linear_, rearm_neutral_angular_);
   control_rate_ = this->get_parameter("control_rate").as_double();
   command_wait_ms_ = static_cast<int>(this->get_parameter("command_wait_ms").as_int());
   {
@@ -378,6 +392,8 @@ rcl_interfaces::msg::SetParametersResult DriveComponent::onParameterChange(
   // `ros2 param set` が成功を報告してしまい、変わっていないことに気付けない）。
   // 変更するには YAML（launcher/config/drive_component.yaml）を編集してノードを再起動する。
   static const std::vector<std::string> kRequiresReconfigure = {"serial_port",
+                                                                "rearm_neutral_linear",
+                                                                "rearm_neutral_angular",
                                                                 "baud_rate",
                                                                 "left_motor_id",
                                                                 "right_motor_id",
