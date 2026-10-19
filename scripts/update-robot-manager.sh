@@ -93,6 +93,23 @@ install_launcher() {
     install -m 0755 "$LAUNCHER_SOURCE" "$LAUNCHER_TARGET"
 }
 
+# Recording policy is a single source shared with the installer and Ansible. Do not
+# replace the configured main unit or any of its other drop-ins on existing kits.
+RECORDING_SOURCE="$REPO_ROOT/systemd/questix_robot_manager.service.d/recording.conf"
+RECORDING_TARGET=/etc/systemd/system/questix_robot_manager.service.d/recording.conf
+
+recording_current() {
+    cmp -s "$RECORDING_SOURCE" "$RECORDING_TARGET"
+}
+
+install_recording_config() {
+    echo "🔄 記録の保存先と終了処理の設定を更新します（この後Managerを再起動し、記録中なら正常終了を待ちます）..."
+    install -d -o root -g root -m 0755 /etc/systemd/system/questix_robot_manager.service.d
+    install -o root -g root -m 0644 "$RECORDING_SOURCE" "$RECORDING_TARGET"
+    # Load KillMode=mixed before the existing restart flow asks the manager to stop.
+    systemctl daemon-reload
+}
+
 # QUESTiX Local (管理設定 → ネットワーク): Robot Manager, which runs as the robot user, applies
 # access point changes only through this root-owned helper and its oneshot unit, and polkit lets
 # that user start only that unit. Installing them never starts or changes the access point.
@@ -287,6 +304,8 @@ main() {
     launcher_current && launcher_ok=1
     local network_ok=0
     network_admin_current && network_ok=1
+    local recording_ok=0
+    recording_current && recording_ok=1
     local legacy_ok=0
     check_legacy
     [ "$LEGACY_STATE" = 0 ] && legacy_ok=1
@@ -297,7 +316,7 @@ main() {
         die "古い版の権限の状態を安全に整理できません（上のメッセージの操作をしてから再実行してください）。"
     fi
     if [ "$files_ok" = 1 ] && [ "$deps_ok" = 1 ] && [ "$launcher_ok" = 1 ] \
-        && [ "$network_ok" = 1 ] && [ "$legacy_ok" = 1 ]; then
+        && [ "$network_ok" = 1 ] && [ "$legacy_ok" = 1 ] && [ "$recording_ok" = 1 ]; then
         [ "$mode" = --check ] && exit 0
         echo "✅ Robot Manager は最新です。"
         exit 0
@@ -308,6 +327,7 @@ main() {
     [ "$deps_ok" = 1 ] || install_requirements
     [ "$launcher_ok" = 1 ] || install_launcher
     [ "$network_ok" = 1 ] || install_network_admin
+    [ "$recording_ok" = 1 ] || install_recording_config
     [ "$legacy_ok" = 1 ] || cleanup_legacy
     if [ "$files_ok" = 0 ]; then
         echo "🔄 Robot Manager をこのリポジトリの版に更新します ..."
