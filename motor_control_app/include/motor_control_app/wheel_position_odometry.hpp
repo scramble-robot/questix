@@ -93,10 +93,7 @@ struct Result {
 
 // Both 32767 and 0 represent the same endpoint. Signed modulo also handles
 // reverse wraps. No claim is made that the physical period was measured.
-inline double shortestTurns(uint16_t previous, uint16_t current) {
-  const double period = motor_control_lib::ddt_protocol::kPositionRawPerTurn;
-  return std::remainder(static_cast<double>(current) - previous, period) / period;
-}
+using motor_control_lib::ddt_protocol::shortestTurns;
 
 inline bool wheelIncrement(const Sample& previous, const Sample& current, const Limits& limits,
                            double* turns) {

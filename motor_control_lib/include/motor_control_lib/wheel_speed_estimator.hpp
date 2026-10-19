@@ -121,11 +121,7 @@ struct Estimate {
 };
 
 /// 32767 を 1 回転とする、最短の角度の差 [回転]（#210 と同じ。32767 と 0 は同じ点）。
-inline double shortestTurns(uint16_t previous, uint16_t current) {
-  const double period = ddt_protocol::kPositionRawPerTurn;
-  return std::remainder(static_cast<double>(current) - static_cast<double>(previous), period) /
-         period;
-}
+using ddt_protocol::shortestTurns;
 
 class WheelSpeedEstimator {
 public:
