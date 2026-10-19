@@ -9,15 +9,53 @@
 //
 // Units follow REP-103: metres, radians, seconds; linear > 0 forward, angular > 0 turns left.
 
+// Physical press outlives a run stopped by the bridge. Only an actual release
+// enables another press; an automatic run finish never does.
+class DrivePressLatch {
+  held = false;
+  press() {
+    if (this.held) return false;
+    this.held = true;
+    return true;
+  }
+  release() {
+    this.held = false;
+  }
+}
+
+// UI acknowledgement only, never a motion permission. Use existing DriveStatus
+// generated wheel targets, not measured movement or DriveControlSample diagnostics.
+// A very small command below the motor's minimum can also have zero targets.
+class DriveCommandWatch {
+  firstRequestedAt = null;
+  seen = false;
+  request(linear, angular, now) {
+    if (this.firstRequestedAt === null && (linear !== 0 || angular !== 0))
+      this.firstRequestedAt = now;
+  }
+  observe(drive, now) {
+    if (this.firstRequestedAt === null || now <= this.firstRequestedAt) return;
+    if (
+      [drive?.left?.target_rpm, drive?.right?.target_rpm].some(
+        (rpm) => Number.isFinite(rpm) && rpm !== 0,
+      )
+    )
+      this.seen = true;
+  }
+  expired(now) {
+    return this.firstRequestedAt !== null && !this.seen && now - this.firstRequestedAt > 2;
+  }
+}
+
 // Why this page cannot drive now, in the order they are shown and have to be fixed.
 const DRIVE_BLOCKERS = [
   'no_link', // not connected to a robot
   'old_bridge', // the bridge predates driving (no drive_state)
   'not_allowed', // the teacher has not allowed driving (/lab_permission, as command_arbiter says)
-  'no_drive_node', // no command_arbiter on /target_twist/lab, or its status is missing
-  'other_publisher', // the controller (or anything else) publishes /target_twist
   'estop_unknown', // the bridge has not heard /emergency_stop yet (fail closed)
   'emergency_stop',
+  'no_drive_node', // no command_arbiter on /target_twist/lab, or its status is missing
+  'other_publisher', // the controller (or anything else) publishes /target_twist
   'no_motion_permission', // /motion_permission does not allow the drive
   'busy', // another page drives the robot
   'running_here', // this page already runs something (another block, the bench test)
@@ -181,4 +219,6 @@ export {
   createOdomGoal,
   MIN_LINEAR,
   MIN_ANGULAR,
+  DrivePressLatch,
+  DriveCommandWatch,
 };

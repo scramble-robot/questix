@@ -60,8 +60,13 @@ esc_motor_control:
     # Test mode (disables actual GPIO – pure simulation)
     test_mode: false
 
-    # PWM backend: "auto" (try pigpio→lgpio→sim), "pigpio", "lgpio", "simulation"
-    pwm_backend: "auto"
+    # Pi 5 shipping default: "rp1_hw" (requires questix_pwm_guard.service; no fallback).
+    # PC/Pi 4 explicitly select "simulation"/"auto"; legacy "pigpio"/"lgpio" remain available.
+    pwm_backend: "rp1_hw"
+
+    # rp1_hw uses GPIO13 / RP1 PWM0 channel 1; the ESC node requests ARM from the guard.
+    # Deploy hardware_interfaces + pwm_guard and reboot before building an existing Pi 5 workspace.
+    rp1_guard_socket: "/run/questix_pwm_guard/control.sock"
 
     # GPIO chip number for lgpio backend (0 = Pi4, 4 = Pi5)
     gpio_chip_num: 4

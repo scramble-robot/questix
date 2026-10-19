@@ -2,6 +2,10 @@
 # Fake colcon for ansible/tests (ros2_build): logs the call and leaves what a build leaves.
 set -euo pipefail
 echo "colcon $*" >>"$FAKE_ROS_LOG"
+if [ "${1:-}" = list ]; then
+    printf '%s\n' "$PWD/core" "$PWD/src/ydlidar_ros2" "$PWD/src/ydlidar_sdk_vendor"
+    exit 0
+fi
 mkdir -p build log install/questix_lab_bridge install/questix_launcher install/questix_msgs
 : >install/setup.bash
 echo "Summary: 3 packages finished"

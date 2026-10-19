@@ -46,7 +46,7 @@ from http import HTTPStatus
 from typing import Any, Callable, Dict, Optional, Set
 from urllib.parse import parse_qs, urlsplit
 
-from .joy_frame import FrameError, is_neutral_frame
+from .joy_frame import AcceptResult, FrameError
 
 try:  # websockets >= 13
     from websockets.asyncio.server import serve as _serve
@@ -71,8 +71,8 @@ REQUEST_INTERVAL_SEC = 5.0  # a viewer may ask the operator to hand over this of
 REQUEST_VALID_SEC = 60.0  # a hand-over to a viewer is honoured this long after it asked
 _CID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
-FrameCallback = Callable[[Dict[str, Any]], None]
-ReleaseCallback = Callable[[], None]
+FrameCallback = Callable[[Dict[str, Any]], AcceptResult]
+ReleaseCallback = Callable[[str], None]
 StatusProvider = Callable[[], Dict[str, Any]]
 
 
@@ -167,8 +167,6 @@ class JoyWebSocketServer:
         self._next_id = 1
         self._owner: Optional[Any] = None
         self._owner_since = 0.0
-        # Set by a stop: the operator's frames are ignored until an all-zero frame.
-        self._stop_latched = False
         self._rejected_frames = 0
         # Latest camera frame, replaced (never queued) so a slow link shows the
         # newest image instead of a growing backlog. Only touched on the loop.
@@ -408,8 +406,7 @@ class JoyWebSocketServer:
         previous = self._owner
         self._owner = ws
         self._owner_since = time.monotonic()
-        self._stop_latched = False
-        self._on_release()  # never carry one operator's command over to the next
+        self._on_release("owner_change")  # JoyHold owns the neutral latch
         client = self._clients.get(ws) if ws is not None else None
         if client is not None:
             self._log.info("operator: %s %s (#%d) [%s]", client.label, client.address,
@@ -491,12 +488,10 @@ class JoyWebSocketServer:
         if kind == "joy":
             if ws is not self._owner:
                 return  # viewers' frames never reach the robot
-            if self._stop_latched:
-                if not is_neutral_frame(payload):
-                    return  # stopped: wait until the page lets go of everything
-                self._stop_latched = False
             try:
-                self._on_frame(payload)
+                result = self._on_frame(payload)
+                if result.changed:
+                    self._status_soon()
             except FrameError as exc:
                 self._reject_frame(str(exc))
         elif kind == "stop":
@@ -518,10 +513,8 @@ class JoyWebSocketServer:
 
     def _stop(self, ws: Any, client: _Client) -> None:
         """Honour a stop from any page: neutral now, the operator must let go first."""
-        self._on_release()
+        self._on_release("stop")
         by_operator = ws is self._owner
-        if self._owner is not None:
-            self._stop_latched = True
         self._log.warning("stop pressed on %s %s (#%d)%s", client.label, client.address,
                           client.id, "" if by_operator else " (not the operator)")
         notice = {"type": "stopped", "by": client.public(), "by_operator": by_operator}
@@ -580,7 +573,6 @@ class JoyWebSocketServer:
         status["type"] = "status"
         status["clients"] = len(self._clients)
         status["owner"] = self._owner_info()
-        status["stopped"] = self._stop_latched
         sends = []
         for ws in list(self._clients):
             payload = dict(status)

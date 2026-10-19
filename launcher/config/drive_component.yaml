@@ -137,6 +137,11 @@ drive_component:
     # 上流（uart_joy_driver/joy_controller/command_arbiter）が停止しても暴走を防ぐ安全機能。
     # 0以下で無効（安全機能のため通常は無効化しないこと）。
     cmd_timeout_sec: 1.0
+    # Rearm only, velocity/current both; strict zero defaults. Restart to change.
+    # Finite [0, 0.05] m/s / [0, 0.1] rad/s; invalid values log ERROR and use 0.0.
+    # Separate from arbiter takeover thresholds; armed commands are not filtered.
+    rearm_neutral_linear: 0.0
+    rearm_neutral_angular: 0.0
 
     # 制御ループ（制御 tick）の周期 [Hz]。twist の受信（保存のみ）と制御実行は分離されて
     # おり、スルーレート制限の dt は 1/control_rate の定数になる。これにより加速度

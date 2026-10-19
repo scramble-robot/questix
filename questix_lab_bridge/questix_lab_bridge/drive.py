@@ -41,7 +41,7 @@ OTHER_PUBLISHER = 'other_publisher'
 ESTOP_UNKNOWN = 'estop_unknown'  # /emergency_stop not observed yet
 EMERGENCY_STOP = 'emergency_stop'
 NO_MOTION_PERMISSION = 'no_motion_permission'  # /motion_permission does not allow the drive
-BLOCKER_ORDER = (NOT_ALLOWED, NO_DRIVE_NODE, OTHER_PUBLISHER, ESTOP_UNKNOWN, EMERGENCY_STOP,
+BLOCKER_ORDER = (NOT_ALLOWED, ESTOP_UNKNOWN, EMERGENCY_STOP, NO_DRIVE_NODE, OTHER_PUBLISHER,
                  NO_MOTION_PERMISSION)
 
 # Refusals of a single request (besides the blockers).
@@ -49,7 +49,9 @@ BUSY = 'busy'
 INVALID = 'invalid'
 # A command of a run the bridge has just ended: dropped without an answer to the page.
 STALE = 'stale'
+NEEDS_NEUTRAL = 'needs_neutral'
 RESTART_GUARD_SEC = 1.0
+STARTUP_NEUTRAL_SEC = 0.3  # repeated zeros, not a delivery guarantee or actuator acknowledgement
 
 # Why the last run ended.
 STOPPED = 'stopped'
@@ -81,6 +83,7 @@ class DriveSession:
         self._started_at = 0.0
         self._hold_until = -math.inf
         self._guard = (None, -math.inf)  # (previous owner, until): see RESTART_GUARD_SEC
+        self._needs_neutral = set()  # generated stop zeros and time passing cannot release clients
         self.last_stop = None  # {'reason', 'by'} of the run that ended last
         self.version = 0  # bumped on every change the pages should hear about
 
@@ -171,6 +174,7 @@ class DriveSession:
             return STALE
         blockers = self.blockers()
         if blockers:
+            self._needs_neutral.add(client)
             return blockers[0][0]
         if self.owner is not None and self.owner != client:
             return BUSY
@@ -180,6 +184,10 @@ class DriveSession:
             if self.owner == client:
                 self._end(INVALID, client, now)
             return INVALID
+        if client in self._needs_neutral:
+            if (linear, angular) != (0.0, 0.0):
+                return NEEDS_NEUTRAL
+            self._needs_neutral.discard(client)
         if self.owner is None:
             self.owner = client
             self._started_at = now
@@ -214,6 +222,7 @@ class DriveSession:
     def disconnect(self, client, now):
         if self.owner == client:
             self._end(DISCONNECTED, client, now)
+        self._needs_neutral.discard(client)  # no unbounded retention of disconnected sessions
 
     def tick(self, now):
         """Return ``(linear, angular)`` to publish now, or None to publish nothing."""
@@ -223,12 +232,16 @@ class DriveSession:
             elif now - self._started_at > self.max_run_sec:
                 self._end(TIME_LIMIT, None, now)
             else:
+                if now - self._started_at < STARTUP_NEUTRAL_SEC:
+                    return (0.0, 0.0)
                 return (self.linear, self.angular)
         if now < self._hold_until:
             return (0.0, 0.0)
         return None
 
     def _end(self, reason, by, now):
+        if self.owner is not None:
+            self._needs_neutral.add(self.owner)
         if self.owner is not None and by != self.owner:
             # Not the owner's own stop: its commands still on their way must not restart it.
             self._guard = (self.owner, now + RESTART_GUARD_SEC)

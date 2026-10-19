@@ -43,8 +43,8 @@ from .joy_frame import (
     DEFAULT_NUM_BUTTONS,
     HOLD_ACTIVE,
     HOLD_TIMEOUT,
+    AcceptResult,
     JoyHold,
-    parse_frame,
 )
 from .ws_server import JoyWebSocketServer
 
@@ -131,7 +131,7 @@ class WebJoyDriverNode(Node):
             self.get_logger().warning(
                 "message_timeout_sec <= 0: neutral fallback on lost frames is DISABLED")
 
-        self._hold = JoyHold(self._num_axes, self._num_buttons, timeout_sec)
+        self._hold = JoyHold(self._num_axes, self._num_buttons, timeout_sec, self._deadzone)
         self._last_state: Optional[str] = None
         self._frame_count = 0
         self._estop_active: Optional[bool] = None
@@ -226,13 +226,14 @@ class WebJoyDriverNode(Node):
             raise RuntimeError(f"cannot read controller page {path}: {exc}") from exc
 
     # Called from the WebSocket thread ---------------------------------
-    def _on_frame(self, payload: Dict[str, Any]) -> None:
-        axes, buttons = parse_frame(payload, self._num_axes, self._num_buttons, self._deadzone)
-        self._hold.update(axes, buttons, time.monotonic())
-        self._frame_count += 1
+    def _on_frame(self, payload: Dict[str, Any]) -> AcceptResult:
+        result = self._hold.accept(payload)
+        if result.accepted:
+            self._frame_count += 1
+        return result
 
-    def _on_release(self) -> None:
-        self._hold.release()
+    def _on_release(self, reason: str) -> None:
+        self._hold.release(reason)
 
     def _camera_state(self, now: float) -> Tuple[str, Optional[int]]:
         if not self._camera_enabled:
@@ -245,14 +246,16 @@ class WebJoyDriverNode(Node):
 
     def _status(self) -> Dict[str, Any]:
         now = time.monotonic()
-        age = self._hold.age_sec(now)
-        axes, _buttons, state = self._hold.snapshot(now)
+        held = self._hold.snapshot()
+        age = held.age_sec
         camera, camera_age_ms = self._camera_state(now)
         return {
             "camera": camera,
             "camera_age_ms": camera_age_ms,
             "camera_frames": self._camera_frames,
-            "hold": state,
+            "hold": held.state,
+            "stopped": held.stopped,
+            "stop_reason": held.stop_reason,
             "rx_age_ms": None if age is None else int(age * 1000.0),
             "timeout_ms": int(self._hold.timeout_sec * 1000.0),
             "frames": self._frame_count,
@@ -262,7 +265,7 @@ class WebJoyDriverNode(Node):
                              else int((now - self._estop_rx_time) * 1000.0)),
             "arbiter": self._arbiter_state(),
             # What the robot is being sent now (viewers show the operator's input).
-            "axes": [round(float(v), 2) for v in axes],
+            "axes": [round(float(v), 2) for v in held.axes],
         }
 
     def _arbiter_state(self) -> Optional[Dict[str, Any]]:
@@ -313,7 +316,8 @@ class WebJoyDriverNode(Node):
         self._server.push_camera_frame(data)
 
     def _publish(self) -> None:
-        axes, buttons, state = self._hold.snapshot(time.monotonic())
+        held = self._hold.snapshot()
+        state = held.state
         if state != self._last_state:
             if state == HOLD_TIMEOUT:
                 self.get_logger().warning(
@@ -326,8 +330,8 @@ class WebJoyDriverNode(Node):
         msg = Joy()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = "web_joy"
-        msg.axes = [float(v) for v in axes]
-        msg.buttons = [int(v) for v in buttons]
+        msg.axes = [float(v) for v in held.axes]
+        msg.buttons = [int(v) for v in held.buttons]
         self._publisher.publish(msg)
 
     def destroy_node(self) -> bool:

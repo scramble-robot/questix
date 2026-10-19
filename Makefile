@@ -1,22 +1,23 @@
-# Makefile for ROS2 Robotics Kit ISO Builder
+# Makefile for QUESTiX local image recipes
 # Local testing and development commands
 
-.PHONY: help test-ansible build-dev build-kit clean setup-deps
+.PHONY: help test-ansible test-pi-image build-dev build-kit build-both _build clean setup-deps setup-pi-image-deps
 
 # Variables
 ROS2_DISTRO ?= jazzy
 UBUNTU_VERSION ?= 24.04
 ARCHITECTURE ?= amd64
 
-# Architecture-specific configurations
+# Legacy AMD64 ISO configuration. The Pi Desktop base is pinned in pi-desktop-base.env.
 UBUNTU_VERSION_AMD64 ?= 24.04
-UBUNTU_VERSION_ARM64 ?= 24.04
 ROS2_DISTRO_AMD64 ?= jazzy
-ROS2_DISTRO_ARM64 ?= jazzy
+BASE_IMAGE ?=
+PI_OUTPUT_DIR ?= $(CURDIR)/output/pi
+export IMAGE_USER ?= ubuntu
 export ANSIBLE_ROLES_PATH ?= $(CURDIR)/ansible/roles
 
 help: ## Show this help message
-	@echo "ROS2 Robotics Kit ISO Builder"
+	@echo "QUESTiX Local Image Builder"
 	@echo ""
 	@echo "Available commands:"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -60,16 +61,27 @@ build-dev: test-ansible ## Build development ISO (AMD64)
 	@echo "🏗️  Building development ISO for AMD64..."
 	@$(MAKE) _build ARCHITECTURE=amd64 UBUNTU_VERSION=$(UBUNTU_VERSION_AMD64) ROS2_DISTRO=$(ROS2_DISTRO_AMD64)
 
-build-kit: test-ansible ## Build robotics kit ISO (ARM64)
-	@echo "🏗️  Building robotics kit ISO for ARM64..."
-	@$(MAKE) _build ARCHITECTURE=arm64 UBUNTU_VERSION=$(UBUNTU_VERSION_ARM64) ROS2_DISTRO=$(ROS2_DISTRO_ARM64)
+test-pi-image: ## Check the Pi Desktop recipe without root, mounts or network
+	bash ansible/tests/pi_image_contract.sh
 
-build-both: test-ansible ## Build both development and kit ISOs
-	@echo "🏗️  Building both ISO variants..."
+setup-pi-image-deps: ## Install host tools for the local Pi Desktop image builder
+	sudo apt-get update
+	sudo apt-get install -y util-linux fdisk parted cloud-guest-utils e2fsprogs dosfstools xz-utils git curl python3 udev
+
+# On AMD64, also install qemu-user-static and binfmt-support and register qemu-aarch64.
+# See scripts/iso/README.md; the builder never changes host binfmt registration itself.
+build-kit: ## Build a Pi Desktop .img.xz (BASE_IMAGE=/path/to/base.img.xz IMAGE_USER=robot)
+	@test -n "$(BASE_IMAGE)" || { echo "Set BASE_IMAGE to the official Pi Desktop .img.xz; see scripts/iso/README.md"; exit 2; }
+	sudo bash "$(CURDIR)/scripts/build-pi-image.sh" "$(BASE_IMAGE)" "$(PI_OUTPUT_DIR)" "$$IMAGE_USER"
+
+build-both: test-ansible ## Build the local AMD64 ISO and Pi Desktop image
 	@$(MAKE) build-dev
 	@$(MAKE) build-kit
 
-_build: ## Internal build target
+_build: ## Internal architecture dispatch (legacy AMD64 ISO or Pi Desktop image)
+ifeq ($(ARCHITECTURE),arm64)
+	@$(MAKE) build-kit
+else
 	@echo "📋 Building ISO with parameters:"
 	@echo "  Architecture: $(ARCHITECTURE)"
 	@echo "  Ubuntu Version: $(UBUNTU_VERSION)"
@@ -83,13 +95,7 @@ _build: ## Internal build target
 	# Download base ISO
 	@echo "📥 Downloading Ubuntu base ISO..."
 	cd /tmp/iso-build && \
-	if [ "$(ARCHITECTURE)" = "arm64" ]; then \
-		wget -O ubuntu-base.iso "https://cdimage.ubuntu.com/releases/$(UBUNTU_VERSION)/release/ubuntu-$(UBUNTU_VERSION)-live-server-arm64.iso" || \
-		wget -O ubuntu-base.iso "https://cdimage.ubuntu.com/ubuntu-server/releases/$(UBUNTU_VERSION)/release/ubuntu-$(UBUNTU_VERSION)-live-server-arm64.iso"; \
-	else \
-		wget -O ubuntu-base.iso "https://cdimage.ubuntu.com/releases/$(UBUNTU_VERSION)/release/ubuntu-$(UBUNTU_VERSION)-live-server-amd64.iso" || \
-		wget -O ubuntu-base.iso "https://cdimage.ubuntu.com/ubuntu-server/releases/$(UBUNTU_VERSION)/release/ubuntu-$(UBUNTU_VERSION)-live-server-amd64.iso"; \
-	fi
+	wget -O ubuntu-base.iso "https://cdimage.ubuntu.com/releases/$(UBUNTU_VERSION)/release/ubuntu-$(UBUNTU_VERSION)-live-server-amd64.iso"
 	
 	# Build ISO
 	cd /tmp/iso-build && \
@@ -98,6 +104,7 @@ _build: ## Internal build target
 	sudo bash $(PWD)/scripts/build-iso.sh $(ARCHITECTURE) $(UBUNTU_VERSION) $(ROS2_DISTRO)
 	
 	@echo "🎉 Build completed! Check /tmp/iso-output/ for results."
+endif
 
 test-iso-amd64: ## Test AMD64 ISO with QEMU
 	@echo "🧪 Testing AMD64 ISO with QEMU..."
@@ -145,12 +152,12 @@ release-notes: ## Generate release notes template
 	@echo "" >> /tmp/release-notes.md
 	@echo "## 📦 Images" >> /tmp/release-notes.md
 	@echo "- AMD64: Ubuntu 24.04 + ROS2 Jazzy (Development)" >> /tmp/release-notes.md
-	@echo "- ARM64: Ubuntu 24.04 + ROS2 Jazzy (Raspberry Pi 5)" >> /tmp/release-notes.md
+	@echo "- ARM64: Ubuntu 24.04 Desktop .img.xz + ROS2 Jazzy (Raspberry Pi 5)" >> /tmp/release-notes.md
 	@echo "" >> /tmp/release-notes.md
 	@echo "## 🔧 Installation" >> /tmp/release-notes.md
-	@echo "1. Download appropriate ISO for your hardware" >> /tmp/release-notes.md
-	@echo "2. Flash to USB/SD card using standard tools" >> /tmp/release-notes.md
-	@echo "3. Boot and follow installation wizard" >> /tmp/release-notes.md
+	@echo "1. Obtain the official base and generate your own image (scripts/iso/README.md)" >> /tmp/release-notes.md
+	@echo "2. Pi: write the generated Desktop .img.xz with Raspberry Pi Imager" >> /tmp/release-notes.md
+	@echo "3. Pi: set the selected user's password at the console, then log in to Desktop" >> /tmp/release-notes.md
 	@echo "4. System ready for ROS2 development" >> /tmp/release-notes.md
 	@echo "" >> /tmp/release-notes.md
 	@echo "## ✅ Checksums" >> /tmp/release-notes.md

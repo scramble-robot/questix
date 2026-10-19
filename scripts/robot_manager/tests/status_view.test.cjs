@@ -41,6 +41,54 @@ test('a missing command_arbiter right after a bridge restart is shown only once 
   assert.deepEqual(view.reasons, []);
 });
 
+test('E-stop teardown hides only shot, with normal settling after release', () => {
+  const memory = StatusView.createBlockerMemory();
+  const blockers = [
+    { code: 'no_launcher', parts: ['shot'] },
+    { code: 'emergency_stop', parts: ['topic'] },
+  ];
+  const data = lab({ bridge: bridge({}, { blockers }) });
+  for (const at of [0, StatusView.SETTLE_MS, StatusView.SETTLE_MS * 2]) {
+    const view = StatusView.capability('shoot', data, 'active', memory, at);
+    assert.equal(view.reasons.length, 1);
+    assert.equal(view.reasons[0].text, '非常停止ボタンが押されています');
+  }
+  assert.deepEqual(blockers[0].parts, ['shot'], 'the bridge data is unchanged');
+  const released = lab({ bridge: bridge({}, { blockers: [blockers[0]] }) });
+  const at = StatusView.SETTLE_MS * 3;
+  assert.equal(StatusView.capability('shoot', released, 'active', memory, at).reasons.length, 0);
+  const stillInactive = StatusView.capability('shoot', released, 'active', memory,
+    at + StatusView.SETTLE_MS);
+  assert.match(stillInactive.reasons[0].text, /^発射台が教材の指令を受け付けていません/);
+  assert.equal(StatusView.capability('shoot', lab(), 'active', memory, at + 7000).headline,
+    '許可済み・生徒が教材から発射させられます');
+});
+
+test('E-stop reasons precede missing nodes while arbiter and roller stay visible', () => {
+  for (const safety of ['estop_unknown', 'emergency_stop']) {
+    for (const kind of ['drive', 'shoot']) {
+      const memory = StatusView.createBlockerMemory();
+      const blockers = [
+        kind === 'drive' ? { code: 'no_drive_node' }
+          : { code: 'no_launcher', parts: ['arbiter', 'roller', 'shot'] },
+        { code: 'other_publisher', nodes: ['/other'] },
+        { code: safety },
+      ];
+      const data = lab({ bridge: bridge(kind === 'drive' ? { blockers } : {},
+        kind === 'shoot' ? { blockers } : {}) });
+      StatusView.capability(kind, data, 'active', memory, 0);
+      const view = StatusView.capability(kind, data, 'active', memory, StatusView.SETTLE_MS);
+      assert.equal(view.reasons[0].text, safety === 'emergency_stop'
+        ? '非常停止ボタンが押されています' : '非常停止の状態をまだ確認できません');
+      assert.equal(view.reasons.length, 3);
+      if (kind === 'shoot') {
+        assert.match(view.reasons[1].detail, /command_arbiter・esc_motor_control/);
+        assert.equal(view.reasons[1].detail.includes('shot_component'), safety !== 'emergency_stop');
+      }
+    }
+  }
+});
+
 test('a permission on its way to the robot is awaited, then named if it never arrives', () => {
   const memory = StatusView.createBlockerMemory();
   // Switched on; command_arbiter has not heard /lab_permission yet.

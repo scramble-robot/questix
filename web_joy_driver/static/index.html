@@ -650,6 +650,7 @@
     estop: null, estopReason: "",
     arbiter: null,         // command_arbiter drive status {active, reason, lab_locked} or null
     lagging: false,
+    stopped: false,
     wantControl: true,     // (re)connect asking for the operator role
     reclaim: false,        // the role was given up only because the page was hidden
     notice: null,          // {cls, text, sub, until, actions}
@@ -714,7 +715,7 @@
       ws = null;
       resetAll();
       camera.disconnected();
-      state.controller = false; state.lagging = false;
+      state.controller = false; state.lagging = false; state.stopped = false;
       if (ev.code === CLOSE_AUTH_FAILED || ev.code === 1008) {
         state.phase = "auth"; render(); return;
       }
@@ -732,7 +733,7 @@
   function setRole(controller) {
     const was = state.controller;
     state.controller = !!controller;
-    if (was && !state.controller) resetAll();  // lost the role: never keep a held input
+    if (was && !state.controller) { state.stopped = false; resetAll(); }  // lost the role: never keep a held input
     if (!state.reclaim && !document.hidden) state.wantControl = state.controller;
   }
   function onMessage(msg) {
@@ -784,6 +785,10 @@
     state.owner = s.owner || null;
     state.clients = s.clients || 0;
     setRole(s.controller);
+    const stopped = s.stopped === true && state.controller;
+    const enteredStop = stopped && !state.stopped;
+    state.stopped = stopped;
+    if (enteredStop) resetAll();
     state.lagging = s.hold === "timeout" && !!s.controller;
     camera.status(s);
     const hold = { active: "送信中", timeout: "タイムアウト→ニュートラル", released: "フレーム未受信" }[s.hold] || s.hold;
@@ -824,6 +829,10 @@
   }
   function banner() {
     if (state.estop === true) return { cls: "bad", text: "非常停止中", sub: state.estopReason };
+    if (state.phase === "open" && state.controller && state.stopped) {
+      return { cls: "warn", text: "スティックとボタンから手を離してください",
+        sub: "入力を中立に戻してから、もう一度操作してください。教材を止めるときは「止める」" };
+    }
     const n = state.notice;
     if (n && Date.now() < n.until) return n;
     if (state.phase === "open" && state.arbiter && state.arbiter.active === "lab") {
@@ -838,7 +847,7 @@
   function overlay() {
     switch (state.phase) {
       case "connecting": return { cls: "", title: "接続中…", sub: `${location.host} のロボットに接続しています` };
-      case "closed": return { cls: "bad", title: "切断 / 再接続待ち", sub: "ロボット側は自動でニュートラルに戻ります。接続が回復すると自動で再開します" };
+      case "closed": return { cls: "bad", title: "切断 / 再接続待ち", sub: "ロボット側は自動でニュートラルに戻ります。接続が回復したら、指を離してから操作し直してください" };
       case "auth": return { cls: "bad", title: "認証エラー", sub: "URL のトークンが違うか、含まれていません。管理画面の QR または URL から開き直してください", reconnect: true };
       default: break;
     }

@@ -107,7 +107,7 @@ const WebJoyConnection = (() => {
       input.value = url;
       link.href = url;
       result.hidden = false;
-      status.textContent = "接続用 QR を表示しました。";
+      status.textContent = "操作ページの QR を表示しました。";
     });
   }
   return { parseUrl, defaultUrl, qrSvg, init, suggest };

@@ -3,6 +3,28 @@
 QUESTiX のモータ制御 ROS 2 ノード群です。シリアル通信・制御ロジックの実体は
 `motor_control_lib` にあり、本パッケージはその ROS インターフェース層です。
 
+## 走行の停止後の中立待ち（全モード）
+
+drive_componentはactivate直後と、安全停止（許可OFF/途絶、非常停止/途絶、command timeout、
+motor fault、stop fault）の後、gateが開きモータが正常な状態で中立を受けるまで非ゼロを拒否します。
+大会でも審判許可ON後にスティックを一度離し、倒し直してください。gate閉やfault中のゼロは
+再武装に使いません。停止送信・再送・許可と非常停止の優先順は従来どおりです。
+
+`rearm_neutral_linear`（m/s、上限0.05）と `rearm_neutral_angular`（rad/s、上限0.1）は、
+有限な入力の絶対値が両方とも設定値以下なら再武装する不感帯です。既定は0.0（厳密な0、-0含む）。
+負・NaN/Inf・上限超えは起動時にERRORを出して0.0へ戻します。設定変更はYAMLを編集して再起動します。
+速度・電流モードの両方で有効ですが、再武装する指令の目標は0として保存し、以降の指令は加工しません。
+上限はLABの速度上限0.15m/s・0.5rad/sより小さく抑える運用上の制限で、実機校正値ではありません。
+WARNには拒否した指令と不感帯を出します。実機で離したときの値を記録してから必要最小限を設定してください。
+
+これはcommand_arbiterのcontroller takeover閾値 `neutral_linear` / `neutral_angular` とは別です。
+LABの開始/終了用中立は厳密なゼロを維持します。drive設定の正本は
+launcher/config/drive_component.yamlです。不感帯はこのYAMLとノードの既定値0.0だけに置き、
+launchで値を重ねません。
+
+保証の範囲は**driveが受け取る指令の中立復帰**です。UART・web joyは途絶時にゼロを生成するため、
+倒したまま再接続するときの物理入力の中立確認は後続PR 4bで扱います。4aの合格とは混同しません。
+
 | ノード | 用途 |
 |---|---|
 | `drive_component` | 走行（差動二輪、DDT M0602C ×2）。LifecycleNode |
@@ -30,7 +52,7 @@ QUESTiX のモータ制御 ROS 2 ノード群です。シリアル通信・制�
 | Sub | `/motion_permission` | `questix_msgs/MotionPermission` | reliable + volatile。`drive_allowed` |
 | Pub | `/drive_status` | `questix_msgs/DriveStatus` | `status_publish_rate` Hz |
 | Pub | `/drive_control_sample` | `questix_msgs/DriveControlSample` | 制御 tick ごと（`control_rate` Hz）。**診断専用**。`publish_control_sample: false` で止まる |
-| Pub | `/odom` + TF `odom→base_link` | `nav_msgs/Odometry` | 実測 RPM の積分 |
+| Pub | `/odom` + TF `odom→base_link` | `nav_msgs/Odometry` | 両輪の position_raw 増分による姿勢、速度は従来の実測RPM |
 
 ## 制御構造
 
@@ -132,7 +154,7 @@ ON/OFF しても、変更前のモデル由来の推定値が新しい設定へ�
 
 | パラメータ | 既定値 | 実行時変更 | 効き |
 |---|---|---|---|
-| `measured_lpf_tau_sec` | 0.15 | ○ | 実測RPMローパス（**レポートと /odom の twist のみ**、制御と /odom の位置の積分は生値）。`velocity_rpm_raw` に生値が併記される。2026-10 まで /odom の位置はローパス後の実測を状態タイマーで「最新の実測 × 経過時間」で積分しており、旋回しながら進むと向きの遅れが位置のずれになった（擬似モータの S 字 3.2 m で約 0.5 m）。いまは制御 tick で、生値を実測の受信時刻で台形積分し（`integrateOdometry`）、配信時刻（スタンプ）まで最後の実測の速度で延ばして publish する（延ばした分は積分に残さない、上限 0.1 s）。同じ条件で約 0.017 m |
+| `measured_lpf_tau_sec` | 0.15 | ○ | 実測RPMローパス（**レポートと /odom の twist のみ**、制御には生値、/odom の姿勢には position_raw）。`velocity_rpm_raw` に生値が併記される。2026-10 まで /odom の位置はローパス後の実測を状態タイマーで「最新の実測 × 経過時間」で積分しており、旋回しながら進むと向きの遅れが位置のずれになった（擬似モータの S 字 3.2 m で約 0.5 m）。その後、生値を受信時刻で台形積分する方式では同じ条件で約 0.017 m となった。現在は角度増分の直接積分（下記）に置き換え、rpm による姿勢外挿は行わない |
 | `status_publish_rate` | 50.0 | × | `/drive_status` の publish レート |
 | `publish_control_sample` | true | × | 制御 tick ごとの診断サンプル `/drive_control_sample` を出すか |
 | `control_sample_topic` | `/drive_control_sample` | × | 診断サンプルの出力先 |
@@ -149,9 +171,9 @@ ON/OFF しても、変更前のモデル由来の推定値が新しい設定へ�
 
 | パラメータ | 既定値 |
 |---|---|
-| `serial_port` / `baud_rate` | `/dev/ttyACM0` / 57600（実機で使っている値。データシートとの食い違いは下の「未確認の食い違い」） |
+| `serial_port` / `baud_rate` | `/dev/ttyACM0` / 57600（中国語版 M0602C 規格書 V1.0 と一致） |
 | `left_motor_id` / `right_motor_id` | 4 / 5 |
-| `max_motor_rpm` | 475（`DdtMotorLib::kSpecVelocityMaxRpm` にクランプ。データシートは ±330 rpm と記載、下記） |
+| `max_motor_rpm` | 475（`DdtMotorLib::kSpecVelocityMaxRpm` にクランプ。中国語版 M0602C 規格書 V1.0 の ±475 rpm と一致） |
 | `control_mode` | `"velocity"`（`"current"` で電流モード） |
 | `control_rate` | 50.0 Hz（シリアル往復 2 モータ直列が周期予算に収まる必要あり） |
 | `serial_response_timeout_ms` | 10（従来の固定値）。フィードバック応答待ちの上限 [ms]、範囲 [2, 50]（外はクランプ + WARN）。下限の目安は応答フレーム伝送 1.74 ms + ファーム処理の実測値 + 余裕。実測は bag の `/drive_control_sample` の `roundtrip_ms` / `response_timeout`（周期ごと・左右ごと）。INFO「シリアル往復レイテンシ統計」は lifecycle の deactivate のときだけ出る（サービスの停止や launch の Ctrl+C では出ない） |
@@ -301,12 +323,17 @@ drive_component + ブラウザのモニタ）で同じ条件を手元で再現�
    遅ければ `current_kp` / `current_ki` を段階的に上げる（目安 0.02 / 0.05）。床の上の摩擦を手順 2
    と同じ方法で測り直す。床用のゲインのまま持ち上げると `oscillation` で止まることも確認する。
 
-### 未確認の食い違い（データシートとリポジトリ）
+### 規格書とリポジトリの通信・速度設定
 
-M6 規格書 V1.0 は通信 115200 baud・最大 500 Hz・速度 ±330 rpm と記載しているが、リポジトリは
-`baud_rate: 57600`、`max_motor_rpm: 475`（`kSpecVelocityMaxRpm`）を使っている。実機での確認待ちの
-ため、**今回コードは変更していない**。往復時間・`serial_response_timeout_ms` の下限の見積もり
-（10 byte で 1.74 ms）は 57600 baud を前提にしている。
+以前のREADMEには115200 baud・±330 rpmという記載があったが、出典の版・言語は未確認で、
+別資料にその値があるかも未確認。ここでは中国語版 M0602C 規格書 V1.0 の値を採用する。
+
+中国語版 M0602C 規格書 V1.0 の通信速度は 57600 bps、速度範囲は ±475 rpm で、
+リポジトリの `baud_rate: 57600`、`max_motor_rpm: 475`（`kSpecVelocityMaxRpm`）と一致する。
+`DdtMotorLib` のコンストラクタの既定引数も 57600 bps に揃えている。drive_component は
+パラメータの 57600 を明示的に渡すため、この既定引数の修正で走行の挙動は変わらない。
+往復時間・`serial_response_timeout_ms` の下限の見積もり（10 byte で 1.74 ms）も
+57600 bps を前提にしている。
 
 ## ビルド時間
 
@@ -366,3 +393,84 @@ current モードでは configure 時にも同じ規則で検証し、外れて�
 
 レイテンシの `ema_ms` / `ema=` は指数移動平均（alpha=0.05）です。
 応答が0件でもtimeoutがあればdeactivate時にsummaryを出力します。
+
+### Wheel-position odometry pose
+
+The `/odom` pose and its TF now integrate paired `position_raw` increments directly;
+`velocity_rpm`/`velocity_rpm_raw`, `/odom.twist`, `DriveStatus` velocity, and all message
+schemas keep their previous meanings. Pose and published velocity intentionally have
+different sources. No RPM-based pose extrapolation is published: pose is held at the
+last paired wheel endpoints, even though the publication stamp continues to advance.
+
+The 2026-10-13 ID13 lifted 6/8/10 rpm measurements showed a native integer-RPM bias
+of about -0.49 rpm. Integrating it gives a left heading drift in both directions.
+The position reanalysis gives -0.81 to +0.94 degrees per 20-second segment instead
+of the recorded +10.8 to +12.9 degrees. On the two floor traces, position yaw is
++17.430/+17.101 degrees versus recorded +26.228/+24.277 degrees. The floor differences
+are not attributed solely to 0.6 degrees/s times the command duration; slip and the
+physical rightward heading remain unconfirmed. No strict +/-1 degree acceptance is
+claimed for a complete out-and-back run.
+
+`ddt_protocol::kPositionRawPerTurn` is the shared C++ scale (32767), matching the
+existing `360/32767` conversion and spec V1.0's endpoint mapping. The 32767 endpoint
+normalizes to zero for unwrapping. The exact physical period is not independently
+calibrated; the simulator already uses this scale and native direction, pinned by
+its regression test. Rotor-to-wheel 1:1 and equal tire diameters are operator-confirmed
+premises, not independent calibration results.
+
+For each wheel, take the signed shortest position difference. Negate the right native
+increment once; with wheel radius R and separation B, integrate
+`ds = R*(dphi_left + dphi_right_forward)/2` and
+`dtheta = R*(dphi_right_forward - dphi_left)/B` as an exact circular arc.
+The position error at endpoints remains an endpoint error instead of a cumulative
+short-window velocity bias. Both `feedback_count`s must advance before a pair is
+consumed; one-sided updates wait, retaining the latest endpoints.
+
+At max_motor_rpm=475, half a turn takes 63.158 ms. Beyond that, a nearest whole-turn
+candidate is selected using the trapezoid of the two native RPM endpoints, **only
+under a conditional acceleration contract**. Its strict residual threshold is
+`kMaxPredictionErrorTurns = 0.25` turn. Whole-turn estimates at or beyond that residual
+are ambiguous and discarded. They must also satisfy the configured maximum speed,
+allowing two degrees for endpoint angle error.
+
+The assisted/pairing interval is at most `kMaxAssistedGapSec = 0.2 s` and becomes
+shorter for larger configured accelerations or smaller radii. Include turning in
+both wheel bounds:
+`a_turns = (max_linear_accel + B/2 * max_angular_accel)/(R*2*pi)`.
+For defaults 1.5 m/s^2, 1.5 rad/s^2, R=0.05 m and B=0.5 m, this is 5.968 turns/s^2.
+For a wheel actually satisfying that bound, endpoint-RPM trapezoid error is at most
+`a_turns*T^2/4`. The theoretical 0.25-turn limit is about 0.409 s. We use half that
+limit, capped at 0.2 s, budgeting at most 0.0625 turn for acceleration and leaving
+margin for integer-RPM bias and angle noise. Limits are recomputed from the effective
+configuration each tick. Disabled acceleration limits prohibit assisted multi-turn
+recovery; only intervals provably shorter than a half-turn at max_motor_rpm can then
+use shortest-wrap. Pairing still has a 0.2 s cap.
+
+These are **command acceleration limits, not measured physical acceleration limits**.
+Tracking overshoot, emergency braking and external forces (hand-turning or pushing)
+are outside the acceleration contract. Equal zero-RPM/position endpoints within the
+time cap are treated as stationary, even though an externally forced hidden whole
+turn is unobservable. The recorded 200 ms counterexample is reset above the cap and
+is stationary at/below the cap. This is an explicit limitation, not a recovery guarantee.
+
+Configure, activate, motor reinitialization, missing/invalid feedback, motor/stop
+faults, age beyond `odometry::kMaxFeedbackAgeSec` (0.5 s), a missing wheel or pair
+interval beyond the above cap, and ambiguous unwrapping reset the position anchors.
+All these resets preserve pose; the first valid pair only anchors. Unexpected
+feedback-reset WARNs are throttled; routine lifecycle and expected idle resets
+are DEBUG, with availability/stop-fault warnings once per state transition. The normal 300 ms idle polling interval can intentionally discard an
+idle interval at the 200 ms pairing cap; no idle polling or safety behavior changes.
+A new node instance starts from zero pose; cleanup/reconfigure of the same instance
+retains pose. Old odometry-integrator tests remain enabled.
+
+Expected zero-command idle gaps (both the last accepted pair and current native RPM
+are zero) reset silently at normal log levels and are available at DEBUG. Routine
+lifecycle/init retries are DEBUG too. Motor unavailable/stop fault are reported once
+per state transition. Moving gaps, stale/fault/invalid feedback and ambiguous unwraps
+retain throttled WARNs. These log decisions never change pose integration or safety.
+
+For ID13 lifted hand-turn observations, keep drive permission OFF and do not assume
+that odometry tracks manual rotation: if the feedback interval exceeds the effective
+pairing cap, that interval is discarded and pose is held (expected behavior). Short
+valid intervals may still contribute increments; manual rotation is outside the
+acceleration contract, so this is not a physical angle-calibration acceptance test.

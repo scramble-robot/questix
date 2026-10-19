@@ -11,6 +11,7 @@
 #include <string>
 
 #include "esc_motor_control_cpp/pwm_backend.hpp"
+#include "esc_motor_control_cpp/pwm_command.hpp"
 #include "esc_motor_control_cpp/roller_command_logic.hpp"
 #include "esc_motor_control_cpp/roller_gate.hpp"
 #include "questix_msgs/msg/emergency_stop.hpp"
@@ -36,10 +37,13 @@ class EscMotorControlComponent : public rclcpp::Node {
 public:
   explicit EscMotorControlComponent(const rclcpp::NodeOptions& options);
   ~EscMotorControlComponent() override;
+  void begin_shutdown();
 
 private:
+  friend struct EscLeaseTestAccess;
   // ---------- Initialisation ----------
   void initialize_esc();
+  void renew_pwm_lease();
 
   // ---------- Callbacks ----------
   void command_callback(const questix_msgs::msg::LauncherCommand::SharedPtr msg);
@@ -65,7 +69,8 @@ private:
   static double steady_now_sec();
 
   // ---------- Motor control ----------
-  void set_motor_speed(double speed);
+  bool set_motor_speed(double speed);
+  bool send_pulse(int pulse_us, double speed, bool initializing = false);
 
   /// Convert speed value [-1.0, 1.0] → pulse width in microseconds
   int speed_to_pulse_us(double speed) const;
@@ -81,8 +86,10 @@ private:
   int min_pulse_width_us_;
   int max_pulse_width_us_;
   int neutral_pulse_width_us_;
-  std::string pwm_backend_name_;  // "auto", "pigpio", "lgpio", "simulation"
-  int gpio_chip_num_;             // lgpio chip number
+  std::string pwm_backend_name_;  // "auto", "pigpio", "lgpio", "simulation", "rp1_hw"
+  std::string rp1_guard_socket_;
+  bool stopping_{false};
+  int gpio_chip_num_;  // lgpio chip number
 
   // ---------- State ----------
   double current_speed_{0.0};
@@ -96,6 +103,7 @@ private:
 
   // ---------- PWM ----------
   std::unique_ptr<PwmBackend> pwm_;
+  PwmCommand pwm_command_;
 
   // ---------- ROS I/O ----------
   rclcpp::Subscription<questix_msgs::msg::LauncherCommand>::SharedPtr command_sub_;
@@ -109,6 +117,7 @@ private:
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr roller_status_pub_;
   rclcpp::TimerBase::SharedPtr roller_status_timer_;
   rclcpp::TimerBase::SharedPtr status_timer_;
+  rclcpp::TimerBase::SharedPtr pwm_lease_timer_;
   rclcpp::TimerBase::SharedPtr command_timer_;
   rclcpp::TimerBase::SharedPtr publisher_timer_;
 };

@@ -1,6 +1,6 @@
 [Unit]
 Description=Questix Robot ROS2 Launch Service
-After=network.target
+After=network.target questix_pwm_guard.service
 StartLimitIntervalSec=60
 StartLimitBurst=3
 

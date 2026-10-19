@@ -4,6 +4,13 @@ QUESTiX の足回りの current モード（ホスト側 PI＋摩擦補償＋暴
 drive_component** と擬似モータで動かし、ブラウザでリアルタイムに見るための開発ツールです。
 ロボットもモータも要りません。
 
+停止後の中立待ちに対応し、シミュレーションのidle中は20msごとにゼロを送ります。
+profile・manualの新しい操作でも、最初の0.1秒（5 tick）はゼロを先行させます。
+profileの時間はこの準備後から数えるので、最初のstepを短縮しません。これはdepth 1での
+配送保証ではありません。driveの再activateやfaultの復帰後も、操作をいったん止めて始め直します。
+このPC専用診断経路は非常停止・motion permissionを明示的にopt-outします。
+`--robot` は読取り専用で、ゼロを含め指令をpublishしません。
+
 ```
 ブラウザ ──WebSocket── sim_server.py ──/target_twist・パラメータ──▶ drive_component（このワークスペースのビルド）
  http://127.0.0.1:8765/      │    ◀──/drive_control_sample──────────┘        │ serial_port
@@ -38,10 +45,12 @@ python3 scripts/current_mode_sim/sim_server.py
 | `--domain-id` | 87 | シミュレーションの `ROS_DOMAIN_ID` |
 | `--no-spawn` | — | drive_component を起動しない（表示された疑似端末を `serial_port` に指定して自分で起動する） |
 | `--robot` | — | 実機の `/drive_control_sample` を読むだけの表示（下） |
+| `--report-dead-time-ms` / `--report-tau-ms` | 0 / 0 | 擬似モータが報告する回転数を、むだ時間＋一次遅れだけ遅らせる（実機の記録に合う値は 約 40 / 100。Issue #222）。角度は遅らせない |
 
 **安全のため**、シミュレーションは `ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST` と専用の
 `ROS_DOMAIN_ID` で動き、`/target_twist` が同じネットワークのロボットに届かないようにしています。
-drive_component は `require_emergency_stop:=false`（単体診断の明示 opt-out）で起動します。
+drive_component は `require_emergency_stop:=false` と `require_motion_permission:=false`
+（operation_manager のいない単体診断の明示 opt-out）で起動します。
 Ctrl-C（または SIGTERM）で、ゼロ指令 → ノード停止 → 疑似端末の後片付けをして終わります。
 
 ## ページでできること
@@ -86,6 +95,8 @@ python3 scripts/current_mode_sim/sim_server.py --robot
   推定（車輪とロータ 約 4.7e-4 kg·m²、転がり抵抗は車輪 1 つあたり 0.15〜0.2 A 相当）で、実機では
   測っていない。車輪の滑り・キャスタ・床の凹凸は入っていない。
 - 応答は指令を受け取った時点の状態（実測は 1 周期遅れ）、速度は 1 rpm 単位＋ノイズ（`--noise-rpm`）。
+  既定では報告回転数に遅れは無い（実機は 約 100〜120 ms 遅い。`--report-dead-time-ms 40
+  --report-tau-ms 100` で近づく）。
 - 物理は約 1 kHz のスレッドで進み、フレームの間も車輪は回る（惰性も出る）。
 - 指令が途絶えると最後の電流を保持する（実機の挙動は仕様書に無いので最悪の場合を想定）。
 - モード切替を受けていない（速度ループの）モータは、電流指令の値を速度目標として読む。
@@ -104,8 +115,29 @@ python3 scripts/current_mode_sim/sim_server.py --robot
 車輪の滑り・車輪径と車輪間隔の誤差が大きく効く。
 手順は `motor_control_app/README.md` の「current モード（実験的）の評価前提と安全注意」。
 
+## 故障の注入（Python から。ページには出していない）
+
+`fake_ddt_motor.FakeDdtBus` は、どれも既定では働かない次の設定を持つ（Issue #222 の G2）:
+
+- `report_dead_time` / `report_tau`: 報告回転数（DATA[4..5]）のむだ時間と一次遅れ [s]。角度
+  （DATA[6..7]）は遅らせない。
+- `silence(motor_id, seconds, deaf=False)`: 片輪だけ、指定した時間、応答しない（指令は受け取る）。
+  `deaf=True` は指令も受け取らず、最後の電流を出し続ける（通信が切れたときの最悪の場合。実機の
+  ふるまいは仕様書に無い）。
+- `reboot(motor_id, boot_silence=0.0)`: モータだけが再起動する（速度ループに戻り、電流 0。以後の
+  電流指令は速度目標として読まれる）。`boot_silence` の間は応答も指令の受け取りもしない。
+- `at(delay, action, *args)`: バスの時計で `delay` 秒後に実行する（例: `bus.at(2.0, bus.set_plant,
+  'floor6')` で負荷を急に変える、`bus.at(2.0, bus.reboot, 5)`）。
+- `on_frame(motor_id, mode, value, answered)`: 指令フレームごとに呼ぶ観測用のフック（モータがその
+  とき受け取ったモード、`deaf` の間は None）。
+
 ## テスト
 
 ```bash
-python3 -m pytest scripts/current_mode_sim   # 擬似モータ単体（ROS 不要）
+python3 -m pytest scripts/current_mode_sim   # 擬似モータと Monitor の publisher 分岐（ROS 不要）
 ```
+
+
+`--robot` では `/target_twist` を含む publisher を作らず、
+シミュレーション時だけこの2つを作る分岐を、ROSモジュールをスタブにした試験で確認する。
+実際のROS通信とWebSocketの画面は、この試験では未確認。

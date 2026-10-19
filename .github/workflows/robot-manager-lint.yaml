@@ -9,6 +9,7 @@ name: Robot Manager Checks
 # suite, and the QUESTiX LAB teaching site's Node tests and Prettier check.
 # None of them needs ROS, hardware or systemd.
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
@@ -97,6 +98,10 @@ jobs:
         env:
           PYTHONPATH: scripts
         run: python -m pytest -q scripts/robot_manager
+
+      # Fake motors and monitor publisher wiring are tested with stubbed ROS modules.
+      - name: Run current-mode simulator pytest (no ROS)
+        run: python -m pytest -q scripts/current_mode_sim
 
       - name: Test controller names, diagrams, saved versus edited values, and web joy URLs
         run: node --test scripts/robot_manager/tests/*.test.cjs

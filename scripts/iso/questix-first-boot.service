@@ -14,6 +14,8 @@ Before=getty@tty1.service display-manager.service
 Type=oneshot
 ExecStart=/usr/local/sbin/questix-first-boot-enroll
 Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin
+# The image builder substitutes the selected account, never a password.
+Environment=QUESTIX_ENROLL_USER=ubuntu
 StandardInput=tty
 StandardOutput=tty
 StandardError=tty
