@@ -597,6 +597,10 @@ def main():
     parser.add_argument('--robot', action='store_true',
                         help='read-only view of a running robot in the current ROS environment')
     parser.add_argument('--noise-rpm', type=float, default=1.0)
+    parser.add_argument('--report-dead-time-ms', type=float, default=0.0,
+                        help='delay the reported speed by this dead time (Issue #222: about 40)')
+    parser.add_argument('--report-tau-ms', type=float, default=0.0,
+                        help='and by a first-order lag of this time constant (about 100)')
     parser.add_argument('--params-file', default=str(DRIVE_YAML),
                         help='drive_component.yaml to load (default: launcher/config/ of this '
                         'checkout)')
@@ -629,7 +633,9 @@ def main():
         bus = FakeDdtBus(motor_ids, plant=args.plant, noise_rpm=args.noise_rpm,
                          link_path=str(link), mode_frames=args.mode_frames,
                          wheel_radius=float(params['wheel_radius']),
-                         wheel_separation=float(params['wheel_separation']))
+                         wheel_separation=float(params['wheel_separation']),
+                         report_dead_time=args.report_dead_time_ms / 1000.0,
+                         report_tau=args.report_tau_ms / 1000.0)
         bus.start()
         print(f'[sim] fake M0602C bus: {bus.port} (ROS_DOMAIN_ID={args.domain_id}, localhost)',
               flush=True)
