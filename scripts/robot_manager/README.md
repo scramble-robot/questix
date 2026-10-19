@@ -359,8 +359,66 @@ fixed to `-s mcap`.
 Disk protection: recording refuses to start when free space is below `確保する空き容量（GB）`
 (`MIN_FREE_GB`, HTTP 507) and auto-stops (via SIGINT, so the bag is finalized) if
 free space drops below that threshold mid-recording. Optional `ファイルの分割サイズ（MB）`
-(`MAX_SPLIT_MB`) and `記録する時間（秒 / 0=無制限）` (`MAX_DURATION_SEC`) cap per-file size and total
-recording time.
+(`MAX_SPLIT_MB`, **200 MB by default**, decimal MB) and `記録する時間（秒 / 0=無制限）`
+(`MAX_DURATION_SEC`) cap per-file size and total recording time. An existing `rosbag.env`
+value takes precedence, including `MAX_SPLIT_MB=0` (no splitting). One bag directory may hold
+several MCAP files; the Manager lists, sizes and deletes that directory as one recording, and
+QUESTiX LAB reads and converts all its segments.
+
+### Storage and orderly shutdown
+
+The single policy source is `systemd/questix_robot_manager.service.d/recording.conf`.
+The installer, updater and Ansible copy it to
+`/etc/systemd/system/questix_robot_manager.service.d/recording.conf`, leaving other drop-ins
+intact. `StateDirectory=questix/rosbags` makes systemd create the default
+`/var/lib/questix/rosbags` at service start, owned by the service's `User=`/`Group=` with mode
+0750. Existing `/var/lib/questix` and its enrollment marker keep their ownership and mode.
+If the bag directory's owner/group differs, systemd corrects it and its contents recursively;
+if that directory already has the right owner/group, it leaves its contents' ownership alone.
+Custom `OUTPUT_DIR` paths still need to be writable by the Manager's user.
+See [systemd.exec: StateDirectory](https://www.freedesktop.org/software/systemd/man/255/systemd.exec.html#RuntimeDirectory=).
+
+On a Manager stop or orderly OS shutdown, `KillMode=mixed` sends SIGTERM only to the main
+Manager process. Its lifespan revokes the teacher's permission, stops its bridge and E-stop
+listener, and calls `recorder.shutdown_recording()`. The recorder sends SIGINT to its process
+group and waits for rosbag2 to write `metadata.yaml` and the MCAP ending (including Footer),
+then waits for trial evidence. `TimeoutStopSec=150` allows up to 150 seconds before systemd's
+forced cleanup; the recorder's stop/escalation and evidence budgets are 20 + 5 + 90 seconds.
+A timeout or escalation is never clean evidence. If the Manager exits with children left over,
+systemd kills the remaining cgroup processes under
+[KillMode=mixed](https://www.freedesktop.org/software/systemd/man/255/systemd.kill.html#KillMode=).
+
+`After=questix_robot.service` orders the Manager's shutdown before the robot's, so the
+post-run parameter snapshot can finish while ROS nodes are up. There is no `Wants=` or
+`Requires=` that starts the robot. In lesson/practice it still starts only on request; in
+competition the robot's `Type=simple` start does not wait for motor/ROS readiness before
+releasing the Manager's ordering dependency. See
+[systemd.unit: ordering](https://www.freedesktop.org/software/systemd/man/255/systemd.unit.html#Before=).
+
+The updater's `--check` reports an absent/different recording drop-in as outdated. An update
+loads the policy with daemon-reload **before** its existing Manager restart. That restart ends
+a running recording via the shutdown path above; recording does not continue across the
+restart and is not automatically restarted. Prefer stopping a recording before updating.
+Ansible reloads and restarts the Manager when the drop-in changes (neither handler runs inside
+the custom image build's chroot).
+
+### Recovering after a direct power cut
+
+A direct power cut cannot run shutdown or write the bag ending. The 200 MB splitting default
+limits the size of the last active segment, reducing exposure; it does not make data durable
+or guarantee that only that file is affected. Buffered data in the last chunk cannot be restored.
+Keep the original bag and work on a copy, with ROS 2 Jazzy and the MCAP storage plugin available:
+
+```bash
+cp -a /path/to/bag /path/to/bag-recovery
+ros2 bag reindex -s mcap /path/to/bag-recovery
+ros2 bag info /path/to/bag-recovery
+```
+
+Reindex reconstructs metadata from readable storage; it does not recreate missing messages or
+a missing MCAP Footer, and a truncated file may remain unreadable. Check the recovered duration
+and topics before using it. Recovery does not turn an interrupted trial's integrity into clean
+evidence. For normal use: stop recording, shut down from the screen, then cut power.
 
 ### Prerequisites
 
