@@ -52,10 +52,10 @@ const DRIVE_BLOCKERS = [
   'no_link', // not connected to a robot
   'old_bridge', // the bridge predates driving (no drive_state)
   'not_allowed', // the teacher has not allowed driving (/lab_permission, as command_arbiter says)
-  'no_drive_node', // no command_arbiter on /target_twist/lab, or its status is missing
-  'other_publisher', // the controller (or anything else) publishes /target_twist
   'estop_unknown', // the bridge has not heard /emergency_stop yet (fail closed)
   'emergency_stop',
+  'no_drive_node', // no command_arbiter on /target_twist/lab, or its status is missing
+  'other_publisher', // the controller (or anything else) publishes /target_twist
   'no_motion_permission', // /motion_permission does not allow the drive
   'busy', // another page drives the robot
   'running_here', // this page already runs something (another block, the bench test)

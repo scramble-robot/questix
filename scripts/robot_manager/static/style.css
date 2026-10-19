@@ -1419,7 +1419,8 @@ input[type="checkbox"] { accent-color: var(--accent); }
 #web-joy-qr { max-width: 320px; }
 #web-joy-qr svg { display: block; width: 100%; height: auto; }
 #web-joy-link { color: #85b5ff; overflow-wrap: anywhere; }
-#web-joy-browser { text-decoration: none; margin-right: 0.5rem; }
+.web-joy-actions { display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap; }
+#web-joy-browser { text-decoration: none; }
 #web-joy-browser[hidden] { display: none; }
 
 [aria-labelledby="web-joy-heading"] p { margin: 0.75rem 0; line-height: 1.6; }
