@@ -14,6 +14,7 @@
 #include <string>
 
 #include "builtin_interfaces/msg/time.hpp"
+#include "motor_control_lib/ddt_protocol.hpp"
 #include "questix_msgs/msg/motor_feedback.hpp"
 
 namespace motor_control_app {
@@ -37,7 +38,8 @@ inline std::string modeToStr(uint8_t mode) {
 
 /// Convert raw rotor position (0..32767) to degrees (0..360).
 inline double positionRawToDeg(uint16_t position_raw) {
-  return static_cast<double>(position_raw) * 360.0 / 32767.0;
+  return static_cast<double>(position_raw) * 360.0 /
+         motor_control_lib::ddt_protocol::kPositionRawPerTurn;
 }
 
 /// builtin_interfaces/Time stamp as float seconds.
