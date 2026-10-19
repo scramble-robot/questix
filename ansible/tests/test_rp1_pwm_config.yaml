@@ -1,0 +1,47 @@
+---
+# Safe contract: config and preimage inside temporary paths, no become/DT/GPIO.
+- name: Verify the PWM overlay section and repeatability
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    rp1_pwm_backup_dir: "{{ boot_config_path }}.backups"
+    rp1_pwm_backup_owner: "{{ lookup('pipe', 'id -u') }}"
+    rp1_pwm_backup_group: "{{ lookup('pipe', 'id -g') }}"
+  tasks:
+    - name: Start with another Pi section
+      ansible.builtin.copy:
+        content: "[all]\ndtparam=audio=on\n[pi4]\ndtoverlay=vc4-kms-v3d\n"
+        dest: "{{ boot_config_path }}"
+        mode: "0600"
+
+    - name: Add the real hardware role configuration block
+      ansible.builtin.include_role:
+        name: hardware_interfaces
+        tasks_from: rp1_pwm_config.yaml
+
+    - name: Save the first result
+      ansible.builtin.set_fact:
+        first_changed: "{{ rp1_pwm_config.changed }}"
+
+    - name: Apply the same real task again
+      ansible.builtin.include_role:
+        name: hardware_interfaces
+        tasks_from: rp1_pwm_config.yaml
+
+    - name: Read the fixture
+      ansible.builtin.slurp:
+        src: "{{ boot_config_path }}"
+      register: rp1_pwm_fixture
+
+    - name: Assert the all section and the unchanged second application
+      ansible.builtin.assert:
+        that:
+          - first_changed | bool
+          - not rp1_pwm_config.changed
+          - "'[all]\ndtoverlay=questix-gpio13-rp1-pwm' in (rp1_pwm_fixture.content | b64decode)"
+          - "'[pi4]\ndtoverlay=vc4-kms-v3d' in (rp1_pwm_fixture.content | b64decode)"
+  handlers:
+    - name: reboot_required
+      ansible.builtin.debug:
+        msg: Fixture only; no reboot

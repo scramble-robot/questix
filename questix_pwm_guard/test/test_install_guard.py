@@ -6,6 +6,10 @@ from pathlib import Path
 import os
 import tempfile
 import unittest
+from unittest import mock
+import hashlib
+import json
+import types
 
 path = Path(__file__).resolve().parents[1]/'deploy/install_guard.py'
 spec = importlib.util.spec_from_file_location('guard_install', path)
@@ -14,6 +18,18 @@ spec.loader.exec_module(installer)
 
 
 class SourceCopyTest(unittest.TestCase):
+    def test_read_only_inventory_matches_the_bounded_snapshot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source, target = root/'source', root/'target'
+            source.mkdir()
+            target.mkdir()
+            (source/'file').write_bytes(b'reviewed source')
+            before = list(root.rglob('*'))
+            inventory = installer.snapshot(source)
+            self.assertEqual(list(root.rglob('*')), before)
+            self.assertEqual(inventory, installer.snapshot(source, target))
+
     def test_snapshot_independent_from_source(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -126,6 +142,80 @@ class SourceCopyTest(unittest.TestCase):
         self.assertIn('-DQUESTIX_STANDALONE=ON', text)
         self.assertIn("account.pw_uid == 0", text)
         self.assertIn('teacher approval not given', text)
+
+
+class InstalledCurrentTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.destination = self.root / 'opt'
+        self.destination.mkdir()
+        self.unit = self.root / 'guard.service'
+        self.record = self.root / 'installed.txt'
+        self.inventory = {'CMakeLists.txt': 'reviewed-sha'}
+        self.template = 'User=root\nGroup=@ROBOT_GROUP@\nExecStart=guard --allowed-uid @ROBOT_UID@\n'
+        self.account = types.SimpleNamespace(pw_uid=1234, pw_gid=os.getgid())
+        self.unit.write_text(installer.unit_text(self.template, self.account))
+        checksums = {}
+        for name in ('questix_pwm_guard', 'questix_pwm_ctl'):
+            target = self.destination / name
+            target.write_bytes(name.encode())
+            target.chmod(0o755)
+            checksums[str(target)] = hashlib.sha256(target.read_bytes()).hexdigest()
+        self.record.write_text(json.dumps({'status': 'INSTALLED_NOT_STARTED',
+                                          'source_files': self.inventory,
+                                          'binary_sha256': checksums}))
+        # Ownership is checked in production; these temporary fixtures belong to the test user.
+        self.protection = mock.patch.object(installer, 'protected', self.no_links)
+        self.protection.start()
+        self.addCleanup(self.protection.stop)
+
+    def no_links(self, target):
+        if target.is_symlink():
+            raise ValueError('test refuses destination link')
+
+    def current(self):
+        return installer.installed_current(self.record, self.inventory, self.template,
+                                           self.account, self.destination, self.unit)
+
+    def test_unchanged_install_does_not_need_a_rebuild(self):
+        self.assertTrue(self.current())
+        self.assertTrue(self.current(), 'repeatability')
+
+    def test_changed_source_binary_unit_or_identity_needs_rebuild(self):
+        for change in ('source', 'binary', 'unit', 'identity'):
+            with self.subTest(change=change):
+                with mock.patch.object(self, 'inventory', dict(self.inventory)):
+                    original = self.unit.read_text()
+                    if change == 'source':
+                        self.inventory['new.cpp'] = 'new-sha'
+                    elif change == 'binary':
+                        (self.destination / 'questix_pwm_ctl').write_bytes(b'changed')
+                    elif change == 'unit':
+                        self.unit.write_text('wrong unit')
+                    else:
+                        self.account.pw_uid = 5678
+                    self.assertFalse(self.current())
+                    self.unit.write_text(original)
+                    self.account.pw_uid = 1234
+                    (self.destination / 'questix_pwm_ctl').write_bytes(b'questix_pwm_ctl')
+
+    def test_missing_binary_or_execute_permission_is_not_current(self):
+        target = self.destination / 'questix_pwm_ctl'
+        target.chmod(0o644)
+        self.assertFalse(self.current())
+        target.unlink()
+        self.assertFalse(self.current())
+
+    def test_partial_install_and_links_require_operator_action(self):
+        self.record.write_text('PARTIAL\n')
+        with self.assertRaises(ValueError):
+            self.current()
+        self.record.unlink()
+        self.record.symlink_to(self.unit)
+        with self.assertRaises(ValueError):
+            self.current()
 
 
 if __name__ == '__main__':

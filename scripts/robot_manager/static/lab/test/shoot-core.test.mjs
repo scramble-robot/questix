@@ -121,8 +121,8 @@ test('blockers are listed in the order they have to be fixed', () => {
     }),
   });
   assert.deepEqual(codes(blocked), [
-    'no_launcher',
     'emergency_stop',
+    'no_launcher',
     'controller',
     'busy',
     'unconfirmed',
@@ -226,7 +226,44 @@ test('the tick and every blocker keep the buttons off, but a spinning roller can
   });
   const ready = shootReadiness({ link: link(), shootState: state(), confirmed: true });
   assert.equal(shootControls(ready, { firePending: true }).tilt.reason.key, 'shooting');
-  assert.equal(shootControls(ready, {}).tilt.enabled, true);
+  assert.equal(shootControls(ready, { tiltKnown: true }).tilt.enabled, true);
+});
+
+test('tilt waits for a fresh finite robot angle without blocking the roller', () => {
+  const ready = shootReadiness({ link: link(), shootState: state(), confirmed: true });
+  for (const local of [{}, { tiltKnown: false }]) {
+    const controls = shootControls(ready, local);
+    assert.equal(controls.tilt.enabled, false);
+    assert.equal(controls.tilt.reason.key, 'tilt_unknown');
+    assert.equal(
+      reasonSentence(controls.tilt.reason.key, copy),
+      'ロボットの角度が届くまで待ってください。',
+    );
+    assert.equal(controls.spin.enabled, true);
+  }
+  assert.equal(shootControls(ready, { tiltKnown: true }).tilt.enabled, true);
+});
+
+test('the student hears the E-stop before a missing launcher or another publisher', () => {
+  for (const safety of ['emergency_stop', 'estop_unknown']) {
+    const ready = shootReadiness({
+      link: link(),
+      shootState: state({
+        blockers: [
+          { code: 'no_launcher', parts: ['shot'] },
+          { code: 'other_publisher', nodes: ['/other'] },
+          { code: safety },
+        ],
+      }),
+      confirmed: true,
+    });
+    assert.equal(ready.blockers[0].code, safety);
+    assert.equal(ready.ready, false);
+    assert.equal(
+      reasonSentence(shootControls(ready, { tiltKnown: true }).tilt.reason.key, copy),
+      copy.blockers[safety].student,
+    );
+  }
 });
 
 test('the sliders stay within the limits, and the roller never below what can fire', () => {

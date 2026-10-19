@@ -9,6 +9,7 @@ name: Robot Manager Checks
 # suite, and the QUESTiX LAB teaching site's Node tests and Prettier check.
 # None of them needs ROS, hardware or systemd.
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths:

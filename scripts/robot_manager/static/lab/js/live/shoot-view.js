@@ -101,7 +101,13 @@ function tiltSlider(model, view, actions) {
       />
       <output data-shoot-tilt-value>${shown}°</output>
     </label>
-    <p class="drive-note">${shootCopy.tiltNote}</p>`;
+    <p class="drive-note" data-shoot-tilt-note>
+      ${
+        control.reason?.key === 'tilt_unknown'
+          ? reasonSentence('tilt_unknown', shootCopy)
+          : shootCopy.tiltNote
+      }
+    </p>`;
 }
 
 function buttons(model, actions) {

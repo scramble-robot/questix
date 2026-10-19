@@ -25,8 +25,8 @@ def protected(path):
             raise ValueError(f'unprotected installation path: {p}')
 
 
-def snapshot(source, destination):
-    """Bounded no-follow directory-FD copy; never inspect repository .git settings/hooks."""
+def snapshot(source, destination=None):
+    """Bounded no-follow directory-FD inventory/copy; never read Git settings/hooks."""
     source = Path(source)
     if not source.is_absolute() or '..' in source.parts:
         raise ValueError('source must be absolute with no parent traversal')
@@ -51,11 +51,12 @@ def snapshot(source, destination):
                     raise ValueError('Git metadata is not guard source')
                 s = os.stat(name, dir_fd=parent, follow_symlinks=False)
                 path = relative / name
-                target = destination / path
+                target = destination / path if destination is not None else None
                 if stat.S_ISDIR(s.st_mode):
                     child = os.open(name, flags | os.O_DIRECTORY, dir_fd=parent)
                     try:
-                        target.mkdir(mode=0o700)
+                        if target is not None:
+                            target.mkdir(mode=0o700)
                         copy(child, path)
                     finally:
                         os.close(child)
@@ -69,9 +70,10 @@ def snapshot(source, destination):
                     total += len(data)
                     if len(data) > 4 * 1024 * 1024 or total > 32 * 1024 * 1024:
                         raise ValueError('guard source snapshot limit exceeded')
-                    with target.open('xb') as output:
-                        output.write(data)
-                    target.chmod(0o600 | (info.st_mode & 0o111))
+                    if target is not None:
+                        with target.open('xb') as output:
+                            output.write(data)
+                        target.chmod(0o600 | (info.st_mode & 0o111))
                     inventory[str(path)] = hashlib.sha256(data).hexdigest()
                 else:
                     raise ValueError(f'link/special source refused: {path}')
@@ -130,6 +132,36 @@ def migration_preflight(filesystem_root=Path('/')):
     return found
 
 
+def installed_current(record_path, inventory, template, account, destination, unit):
+    """Check root-owned recorded inputs, both binaries and the rendered unit before a rebuild."""
+    if not record_path.exists() and not record_path.is_symlink():
+        return False
+    protected(record_path)
+    text = record_path.read_text()
+    if text.startswith('PARTIAL'):
+        raise ValueError('previous installation is PARTIAL; administrator recovery required')
+    try:
+        record = json.loads(text)
+    except ValueError:
+        return False
+    if record.get('status') != 'INSTALLED_NOT_STARTED' or record.get('source_files') != inventory:
+        return False
+    expected = record.get('binary_sha256', {})
+    for name in ('questix_pwm_guard', 'questix_pwm_ctl'):
+        path = destination / name
+        if not path.exists() and not path.is_symlink():
+            return False
+        protected(path)
+        if not stat.S_ISREG(path.lstat().st_mode) or path.stat().st_mode & 0o111 != 0o111:
+            return False
+        if hashlib.sha256(path.read_bytes()).hexdigest() != expected.get(str(path)):
+            return False
+    if not unit.exists() and not unit.is_symlink():
+        return False
+    protected(unit)
+    return stat.S_ISREG(unit.lstat().st_mode) and unit.read_text() == unit_text(template, account)
+
+
 def main():
     if os.geteuid() != 0:
         raise ValueError('teacher/root installation required')
@@ -143,6 +175,8 @@ def main():
     parser.add_argument('robot_user')
     parser.add_argument('source_commit', help='operator-supplied identity, recorded but not certified')
     parser.add_argument('--yes', action='store_true', help='teacher approval of the displayed snapshot')
+    parser.add_argument('--if-changed', action='store_true',
+                        help='skip a verified matching installation; never skip migration checks')
     args = parser.parse_args(sys.argv[2:])
     if not args.source_commit or len(args.source_commit) > 128 or any(
             ord(c) < 32 for c in args.source_commit):
@@ -165,6 +199,13 @@ def main():
     print('source_commit (operator supplied, not authenticated):', args.source_commit, flush=True)
     if not args.yes and input('Teacher reviewed this snapshot? Type INSTALL: ') != 'INSTALL':
         raise ValueError('teacher approval not given; no build/install performed')
+    destination = Path('/opt/questix_pwm_guard')
+    unit = Path('/etc/systemd/system/questix_pwm_guard.service')
+    template = (source / 'systemd/questix_pwm_guard.service.in').read_text()
+    if args.if_changed and installed_current(state / 'installed.txt', records, template,
+                                            account, destination, unit):
+        print('CURRENT; binaries and unit match the reviewed source; no rebuild or service action')
+        return
     # Root executes only the approved immutable snapshot, with no user cache/config/env.
     home = stage / 'home'
     home.mkdir(mode=0o700)
@@ -175,12 +216,10 @@ def main():
                     '-DCMAKE_BUILD_TYPE=Release', '-DCMAKE_CXX_COMPILER=/usr/bin/c++'],
                    env=env, check=True)
     subprocess.run(['/usr/bin/cmake', '--build', str(build), '--parallel', '2'], env=env, check=True)
-    destination = Path('/opt/questix_pwm_guard')
     protected(destination.parent)
     destination.mkdir(mode=0o755, exist_ok=True)
     protected(destination)
     destination.chmod(0o755)
-    unit = Path('/etc/systemd/system/questix_pwm_guard.service')
     protected(unit.parent)
     backup = stage / 'previous'
     backup.mkdir(mode=0o700)
@@ -213,4 +252,8 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    if len(sys.argv) == 3 and sys.argv[1] == '--inventory':
+        # Read-only controller operation as the administrator, with no become or root build.
+        print(json.dumps(snapshot(Path(sys.argv[2])), sort_keys=True))
+    else:
+        main()

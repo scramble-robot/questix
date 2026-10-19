@@ -16,8 +16,8 @@ a session they refuse and checks a request against them first so the page hears 
 * Blockers (shown to the pages; one that appears ends the session and publishes roller 0 for
   ``stop_hold_sec``): ``not_allowed`` (the arbiter reports the teacher's permission off),
   ``no_launcher`` (no arbiter on the topic or its status missing, a launcher status silent for
-  ``status_timeout_sec``, or the shot node not ``active``), ``other_publisher``, ``estop_unknown``
-  (``/emergency_stop`` not heard yet; a status's ``estop: false`` never makes it known),
+  ``status_timeout_sec``, or the shot node not ``active`` outside an E-stop), ``other_publisher``,
+  ``estop_unknown`` (``/emergency_stop`` not heard yet; a status's ``estop: false`` never makes it known),
   ``emergency_stop`` (``/emergency_stop``, ``/drive_status`` or either status), ``no_motion_permission``
   (``/motion_permission`` does not allow the launcher), ``controller`` (the arbiter has locked the
   lab out: the controller took over).
@@ -52,7 +52,7 @@ ESTOP_UNKNOWN = 'estop_unknown'  # /emergency_stop not observed yet
 EMERGENCY_STOP = 'emergency_stop'
 NO_MOTION_PERMISSION = 'no_motion_permission'  # /motion_permission does not allow the launcher
 CONTROLLER = 'controller'
-BLOCKER_ORDER = (NOT_ALLOWED, NO_LAUNCHER, OTHER_PUBLISHER, ESTOP_UNKNOWN, EMERGENCY_STOP,
+BLOCKER_ORDER = (NOT_ALLOWED, ESTOP_UNKNOWN, EMERGENCY_STOP, NO_LAUNCHER, OTHER_PUBLISHER,
                  NO_MOTION_PERMISSION, CONTROLLER)
 
 # Refusals of a single request (besides the blockers).
@@ -251,22 +251,25 @@ class ShootSession:
                 and now - self._status_at[part] <= self.status_timeout_sec)
 
     def _update_blockers(self, now):
-        missing = [part for part in (ROLLER, SHOT) if not self._fresh(part, now)]
-        if self._fresh(SHOT, now) and self._status[SHOT].get('active') is False:
-            missing.append(SHOT)
-        if not self._subscribed or self._arbiter is None:
-            missing.insert(0, ARBITER)
         estop = (['topic'] if self._estop_topic else []) + [
             part for part in (ROLLER, SHOT)
             if self._fresh(part, now) and self._status[part].get('estop') is True]
+        missing = [part for part in (ROLLER, SHOT) if not self._fresh(part, now)]
+        # The E-stop releases the shot node's servo bus. A fresh inactive status then describes
+        # the stop, not a missing launcher; stale statuses and missing ROS nodes still count.
+        if (not estop and self._fresh(SHOT, now)
+                and self._status[SHOT].get('active') is False):
+            missing.append(SHOT)
+        if not self._subscribed or self._arbiter is None:
+            missing.insert(0, ARBITER)
         arbiter = self._arbiter
         locked = arbiter is not None and arbiter.get('lab_locked') is True
         self._set_blocker(NOT_ALLOWED, True if arbiter is not None and not self.allowed
                           else None, now)
-        self._set_blocker(NO_LAUNCHER, missing or None, now)
-        self._set_blocker(OTHER_PUBLISHER, self._others or None, now)
         self._set_blocker(ESTOP_UNKNOWN, None if self._estop_known else True, now)
         self._set_blocker(EMERGENCY_STOP, estop or None, now)
+        self._set_blocker(NO_LAUNCHER, missing or None, now)
+        self._set_blocker(OTHER_PUBLISHER, self._others or None, now)
         self._set_blocker(NO_MOTION_PERMISSION, None if self._motion else True, now)
         self._set_blocker(CONTROLLER, [ARBITER] if locked else None, now)
 

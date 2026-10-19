@@ -44,6 +44,10 @@ const TILT_HOLD_MS = 3000;
 const AFTER_SHOT_MS = 800;
 // Tilt frames while the slider moves: at most one per this many ms, the last one always sent.
 const TILT_GAP_MS = 120;
+// Allow the robot's 5 Hz status to catch up with a target this page just sent. Once the target
+// is acknowledged (or this grace expires), a change of 3 degrees follows the robot instead.
+const TILT_FEEDBACK_GRACE_MS = 1000;
+const TILT_FOLLOW_DEG = 3;
 const DEFAULT_PERCENT = 50;
 
 let confirmed = false;
@@ -59,6 +63,7 @@ const arrived = { shoot_state: 0, roller: 0, shot: 0 }; // performance.now() of 
 let shotsThisPage = 0;
 let tiltTimer = 0;
 let tiltSentAt = -Infinity;
+let tiltAwaiting = null; // { deg, at } until /shot/status acknowledges this page's target
 
 const now = () => performance.now();
 
@@ -87,6 +92,7 @@ function shootModel() {
     session: Boolean(current),
     firePending: Boolean(firePending),
     shooting: Boolean(launcher.shot?.shooting),
+    tiltKnown: Number.isFinite(launcher.shot?.tilt),
   };
   const percent = clampPercent(desired.percent, ready.limits);
   const tilt = clampTilt(
@@ -218,6 +224,8 @@ function finishSession(session, reason) {
   clearInterval(session.timer);
   clearTimeout(tiltTimer);
   tiltTimer = 0;
+  desired.tilt = null;
+  tiltAwaiting = null;
   // A fire already sent stays in the tracker: its disc may still fly and becomes a row then.
   firePending = null;
   const local = reason;
@@ -258,17 +266,18 @@ function sendTilt() {
   if (!current) return;
   tiltSentAt = now();
   current.lastTiltAt = now();
-  sendRobot({ type: 'tilt', deg: desired.tilt });
+  if (sendRobot({ type: 'tilt', deg: desired.tilt }))
+    tiltAwaiting = { deg: desired.tilt, at: tiltSentAt };
 }
 
 /** Tilt the launcher to `deg` (the slider); starts a tilt-only session when none runs. */
 function setTilt(deg) {
   const model = shootModel();
-  desired.tilt = clampTilt(deg, model.limits);
   if (!model.controls.tilt.enabled) {
     notify();
     return;
   }
+  desired.tilt = clampTilt(deg, model.limits);
   startSession('tilt');
   if (!current) {
     notify(); // the link went away while starting
@@ -328,6 +337,24 @@ function onRefused(refused) {
 
 function onShot(shot) {
   arrived.shot = now();
+  if (typeof shot.tilt_deg === 'number' && Number.isFinite(shot.tilt_deg)) {
+    if (
+      tiltAwaiting &&
+      (Math.abs(shot.tilt_deg - tiltAwaiting.deg) < TILT_FOLLOW_DEG ||
+        now() - tiltAwaiting.at >= TILT_FEEDBACK_GRACE_MS)
+    )
+      tiltAwaiting = null;
+    // No new target is queued or awaiting feedback: a different angle came from elsewhere.
+    // Follow it without sending another tilt frame or starting a session.
+    if (
+      current &&
+      desired.tilt !== null &&
+      !tiltTimer &&
+      !tiltAwaiting &&
+      Math.abs(shot.tilt_deg - desired.tilt) >= TILT_FOLLOW_DEG
+    )
+      desired.tilt = null;
+  }
   const result = ingestShot(tracker, shot, now());
   if (result?.kind === 'fired') {
     firePending = null;
