@@ -1113,7 +1113,7 @@ class TrialStopOrderingTests(TrialFixture):
 class TrialFinalizeTests(TrialFixture):
     """Stopping a trial produces the after-run evidence next to the bag."""
 
-    def _run_trial(self, run_ros=None, create_bag=True):
+    def _run_trial(self, run_ros=None, create_bag=True, split=False):
         with self.wired(run_ros=run_ros) as w:
             started = recorder._start_trial({"trial_id": "t100", "condition_label": "baseline"})
             bag_dir = self.output_dir / started["bag_name"]
@@ -1121,6 +1121,8 @@ class TrialFinalizeTests(TrialFixture):
                 bag_dir.mkdir(exist_ok=True)
                 (bag_dir / "metadata.yaml").write_text("rosbag2: owned\n")
                 (bag_dir / "robot1_0.mcap").write_bytes(b"\x89MCAP")
+                if split:
+                    (bag_dir / "robot1_1.mcap").write_bytes(b"\x89MCAP")
             recorder.stop_recording()
             CapturedThread.run_pending(recorder._finalize_trial)
         return started, bag_dir, w
@@ -1150,6 +1152,17 @@ class TrialFinalizeTests(TrialFixture):
         self.assertFalse(summary["finalizing"])
         self.assertEqual(recorder._last_stop_reason, "user_stopped")
         self.assertEqual(recorder._last_finalize_reason, "clean")
+
+    def test_split_bag_integrity_uses_the_whole_directory(self):
+        info = BAG_INFO_OK.replace("robot1_0.mcap\n", "robot1_0.mcap\n                   robot1_1.mcap\n")
+        queries = fake_run_ros(bag_info=info)
+        _started, bag_dir, _wired = self._run_trial(run_ros=queries, split=True)
+        self.assertEqual(len(list(bag_dir.glob("*.mcap"))), 2)
+        self.assertEqual([c for c in queries.calls if c[:3] == ["ros2", "bag", "info"]],
+                         [["ros2", "bag", "info", str(bag_dir)]])
+        self.assertEqual(recorder._last_trial["integrity_status"], "ok")
+        self.assertEqual(recorder._last_finalize_reason, "clean")
+        self.assertIn("robot1_1.mcap", (bag_dir / trial.BAG_INFO_FILE).read_text())
 
     def test_unreadable_bag_is_reported_as_failed(self):
         _started, bag_dir, _w = self._run_trial(

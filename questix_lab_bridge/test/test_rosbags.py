@@ -64,8 +64,8 @@ def _messages(t):
         yield '/scan', scan
 
 
-@pytest.fixture(scope='module')
-def bag(tmp_path_factory):
+@pytest.fixture(scope='module', params=[False, True], ids=['single', 'split'])
+def bag(tmp_path_factory, request):
     path = tmp_path_factory.mktemp('bags') / 'robot_20250916_052000'
     writer = rosbag2_py.SequentialWriter()
     writer.open(rosbag2_py.StorageOptions(uri=str(path), storage_id='mcap'),
@@ -85,10 +85,13 @@ def bag(tmp_path_factory):
     mount.transform.rotation.w = 1.0
     writer.write('/tf_static', serialize_message(TFMessage(transforms=[mount])), START_NS)
     for step in range(81):  # 4 s at 20 Hz
+        if request.param and step == 40:
+            writer.split_bagfile()
         t = step * 0.05
         for topic, msg in _messages(t):
             writer.write(topic, serialize_message(msg), START_NS + round(t * 1e9))
     del writer
+    assert len(list(path.glob('*.mcap'))) == (2 if request.param else 1)
     return path
 
 
