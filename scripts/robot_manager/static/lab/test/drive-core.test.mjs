@@ -51,10 +51,22 @@ test("the bridge's blockers come first, in the order they have to be fixed", () 
   };
   const readiness = driveReadiness({ link: OPEN, driveState, confirmed: false });
   assert.deepEqual(readiness.blockers, [
-    { code: 'other_publisher', nodes: ['/joy_controller'] },
     { code: 'emergency_stop', nodes: null },
+    { code: 'other_publisher', nodes: ['/joy_controller'] },
     { code: 'unconfirmed', nodes: null },
   ]);
+});
+
+test('unknown or pressed E-stop precedes a missing drive arbiter', () => {
+  for (const safety of ['estop_unknown', 'emergency_stop']) {
+    const readiness = driveReadiness({
+      link: OPEN,
+      driveState: { ...readyState, blockers: [{ code: 'no_drive_node' }, { code: safety }] },
+      confirmed: true,
+    });
+    assert.equal(readiness.blockers[0].code, safety);
+    assert.equal(readiness.ready, false);
+  }
 });
 
 test('another page driving blocks this one; driving ourselves does not', () => {

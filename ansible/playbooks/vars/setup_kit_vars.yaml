@@ -7,6 +7,12 @@ ros2_distro: jazzy
 target_architecture: arm64
 install_dev_tools: true
 
+# Pi 5 kits and the Pi 5 image use the standard RP1 guard. Other machines need an explicit
+# simulation/auto ESC configuration; no implicit hardware fallback is added.
+questix_rp1_pwm: >-
+  {{ (questix_image_build | default(false) | bool) or
+     ('Raspberry Pi 5' in (pi_model.stdout | default(''))) }}
+
 # Target System Configuration
 target_ubuntu_version: "24.04"
 

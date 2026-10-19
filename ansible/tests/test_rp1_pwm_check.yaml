@@ -1,0 +1,22 @@
+---
+# The caller extracts only the real publication tasks; no apt, dtc, root or GPIO.
+- name: Verify first deployment check mode with absent compiled overlays
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    rp1_pwm_source:
+      changed: true
+    rp1_pwm_compiled:
+      stat:
+        exists: false
+  tasks:
+    - name: Exercise the real overlay publication tasks in check mode
+      ansible.builtin.include_tasks: "{{ pwm_publication_fixture }}"
+
+    - name: Require both copies to skip without compiled inputs
+      ansible.builtin.assert:
+        that:
+          - ansible_check_mode
+          - pwm_publish_result.skipped | default(false)
+          - pwm_firmware_result.skipped | default(false)

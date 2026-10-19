@@ -29,8 +29,23 @@ Mode frames (Protocol 3) follow the spec sheet by default: the mode value is DAT
 `mode_frames='legacy'` takes the layout drive_component sent until 2026-10 instead (mode in DATA[8],
 CRC in DATA[9]); `'never'` ignores both, as a motor that stays in its power-on velocity loop.
 A motor that did not switch reads a current command as a speed target, as the real one would.
+
+Optional, all off by default (Issue #222, G2):
+
+- `report_dead_time` / `report_tau`: the reported speed (DATA[4..5]) is the wheel speed delayed by a
+  dead time and a first-order lag, as the recorded M0602C answers fit (about 40 ms + 100 ms). The
+  position (DATA[6..7]) is never delayed.
+- `silence(motor_id, seconds)`: one wheel stops answering (it still applies commands); with
+  `deaf=True` it also ignores them and keeps its last current (the worst case of a lost link).
+- `reboot(motor_id)`: one motor restarts on its own: back in its power-on velocity loop, current
+  0, so later current commands are read as speed targets (optionally silent while it boots).
+- `at(delay, action, *args)`: run an action (e.g. `set_plant('floor6')`, a sudden load change, or
+  `reboot`) after a delay on the bus clock.
+- `on_frame`: an observer called for every command frame (motor id, the mode it met, the value,
+  whether it was answered).
 """
 
+import collections
 import math
 import os
 import pty
@@ -119,7 +134,7 @@ class RobotBody:
 class FakeMotor:
     """State of one motor: firmware mode, command and the physics of its wheel."""
 
-    def __init__(self, motor_id, model):
+    def __init__(self, motor_id, model, report_dead_time=0.0, report_tau=0.0):
         self.motor_id = motor_id
         self.model = model
         self.mode = MODE_VELOCITY  # the driver's power-on default
@@ -128,9 +143,48 @@ class FakeMotor:
         self.speed_rpm = 0.0  # physical speed, positive = the direction of a positive current
         self.position_turns = 0.0
         self.frames = 0
+        # The reported speed: dead time + first-order lag of the physical speed (0 = none).
+        self.report_dead_time = max(0.0, report_dead_time)
+        self.report_tau = max(0.0, report_tau)
+        self.reported_rpm = 0.0
+        self._report_t = 0.0
+        self._report_history = collections.deque()  # (time, speed) within the dead time
+        # Faults: no answers until this bus-clock time (None = answering); deaf ignores commands.
+        self.silent_until = None
+        self.deaf = False
+        self.reboots = 0
+
+    def reboot(self):
+        """Restart on its own: the power-on velocity loop, no current, no speed target."""
+        self.mode = MODE_VELOCITY
+        self.current_amp = 0.0
+        self.velocity_target_rpm = 0.0
+        self.reboots += 1
+
+    def advance_report(self, seconds):
+        """Advance the reported speed's dead time and lag by the given time."""
+        self._report_t += seconds
+        if self.report_dead_time <= 0.0 and self.report_tau <= 0.0:
+            self.reported_rpm = self.speed_rpm
+            return
+        history = self._report_history
+        history.append((self._report_t, self.speed_rpm))
+        cutoff = self._report_t - self.report_dead_time
+        # Keep the newest sample at or before the cutoff (before any, the oldest one known).
+        while len(history) > 1 and history[1][0] <= cutoff:
+            history.popleft()
+        delayed = history[0][1]
+        if self.report_tau > 0.0:
+            self.reported_rpm += (delayed - self.reported_rpm) * min(1.0, seconds / self.report_tau)
+        else:
+            self.reported_rpm = delayed
 
     def step(self, seconds):
         """Advance the wheel by the given time with the current command."""
+        self._step_physics(seconds)
+        self.advance_report(seconds)
+
+    def _step_physics(self, seconds):
         model = self.model
         if self.mode == MODE_VELOCITY:
             # Approximate firmware loop: first order towards the target.
@@ -165,7 +219,9 @@ class FakeMotor:
 
     def answer(self, noise_rpm, rng):
         """Return the Protocol 1 answer frame with the present state."""
-        speed = round(self.speed_rpm + rng.uniform(-noise_rpm, noise_rpm))
+        lagged = self.report_dead_time > 0.0 or self.report_tau > 0.0
+        reported = self.reported_rpm if lagged else self.speed_rpm
+        speed = round(reported + rng.uniform(-noise_rpm, noise_rpm))
         position = int((self.position_turns % 1.0) * 32767) & 0xFFFF
         current = self.current_amp / AMP_PER_RAW
         frame = [self.motor_id, self.mode, *int16_bytes(current), *int16_bytes(speed),
@@ -178,8 +234,12 @@ class FakeDdtBus:
     """Two (or more) fake motors on one pseudo terminal, like the RS-485 bus of the robot."""
 
     def __init__(self, motor_ids=(4, 5), plant='lifted', noise_rpm=1.0, link_path=None, seed=1,
-                 mode_frames='spec', wheel_radius=0.05, wheel_separation=0.5):
-        self._lock = threading.Lock()
+                 mode_frames='spec', wheel_radius=0.05, wheel_separation=0.5,
+                 report_dead_time=0.0, report_tau=0.0, clock=time.monotonic):
+        self._lock = threading.RLock()
+        self.clock = clock
+        self._events = []  # [(bus-clock time, action, args)], run by _run_due_events
+        self.on_frame = None  # observer: on_frame(motor_id, mode, value, answered)
         self.mode_frames = mode_frames
         self.left_id, self.right_id = motor_ids[0], motor_ids[1]
         self.wheel_radius = wheel_radius
@@ -189,7 +249,8 @@ class FakeDdtBus:
         self.noise_rpm = noise_rpm
         self.drop_answers = False
         self.plant = plant
-        self.motors = {motor_id: FakeMotor(motor_id, PLANTS[plant]) for motor_id in motor_ids}
+        self.motors = {motor_id: FakeMotor(motor_id, PLANTS[plant], report_dead_time, report_tau)
+                       for motor_id in motor_ids}
         self._master, self._slave = pty.openpty()
         tty.setraw(self._master)
         self.device = os.ttyname(self._slave)
@@ -242,6 +303,49 @@ class FakeDdtBus:
                 v_left, v_right = self._wheel_speeds_mps()
                 self.body.v = (v_left + v_right) / 2.0
                 self.body.w = (v_right - v_left) / self.wheel_separation
+
+    def silence(self, motor_id, seconds=None, deaf=False):
+        """Stop answering one wheel for `seconds` (None = until unsilence).
+
+        The wheel still applies the commands it gets, unless `deaf`: then it ignores them too and
+        keeps its last current (the worst case of a lost link: the driver's behaviour is unknown).
+        """
+        with self._lock:
+            motor = self.motors[motor_id]
+            motor.silent_until = math.inf if seconds is None else self.clock() + seconds
+            motor.deaf = deaf
+
+    def unsilence(self, motor_id):
+        """Make one wheel answer (and listen) again."""
+        with self._lock:
+            self.motors[motor_id].silent_until = None
+            self.motors[motor_id].deaf = False
+
+    def reboot(self, motor_id, boot_silence=0.0):
+        """Restart one motor on its own (velocity loop again), silent for `boot_silence` seconds."""
+        with self._lock:
+            motor = self.motors[motor_id]
+            motor.reboot()
+            if boot_silence > 0.0:
+                motor.silent_until = self.clock() + boot_silence
+                motor.deaf = True
+
+    def at(self, delay, action, *args):
+        """Run `action(*args)` once the bus clock is `delay` seconds later (e.g. set_plant)."""
+        with self._lock:
+            self._events.append((self.clock() + delay, action, args))
+            self._events.sort(key=lambda event: event[0])
+
+    def _run_due_events(self):
+        """Run the scheduled actions that are due and lift expired silences (lock held)."""
+        now = self.clock()
+        while self._events and self._events[0][0] <= now:
+            _, action, args = self._events.pop(0)
+            action(*args)
+        for motor in self.motors.values():
+            if motor.silent_until is not None and now >= motor.silent_until:
+                motor.silent_until = None
+                motor.deaf = False
 
     def reset_pose(self):
         """Put the robot back at the origin, facing +x (keeps its speed)."""
@@ -308,13 +412,20 @@ class FakeDdtBus:
         body.distance += abs(body.v) * seconds
         for motor in (left, right):
             motor.position_turns += motor.speed_rpm / 60.0 * seconds
+            motor.advance_report(seconds)
 
     def handle_frame(self, frame):
         """Apply one 10-byte frame and return the answer bytes (b'' when there is none)."""
         with self._lock:
+            self._run_due_events()
             motor = self.motors.get(frame[0])
             if motor is None:
                 return b''
+            silent = motor.silent_until is not None
+            if silent and motor.deaf:
+                if frame[1] == 0x64 and crc8_maxim(frame[:9]) == frame[9] and self.on_frame:
+                    self.on_frame(motor.motor_id, None, to_int16(frame[2], frame[3]), False)
+                return b''  # the motor hears nothing: the last command stays
             if frame[1] == 0xA0:  # Protocol 3: mode switch (no answer)
                 mode = None
                 if self.mode_frames == 'spec' and frame[9] in (MODE_CURRENT, MODE_VELOCITY):
@@ -330,8 +441,11 @@ class FakeDdtBus:
             if frame[1] != 0x64 or crc8_maxim(frame[:9]) != frame[9]:
                 return b''
             # The answer reports the state when the frame arrives, then the command applies.
-            answer = b'' if self.drop_answers else motor.answer(self.noise_rpm, self._rng)
+            quiet = self.drop_answers or silent
+            answer = b'' if quiet else motor.answer(self.noise_rpm, self._rng)
             value = to_int16(frame[2], frame[3])
+            if self.on_frame is not None:
+                self.on_frame(motor.motor_id, motor.mode, value, not quiet)
             if motor.mode == MODE_CURRENT:
                 motor.current_amp = value * AMP_PER_RAW
             else:
@@ -369,6 +483,7 @@ class FakeDdtBus:
             last = now
             steps = max(1, int(math.ceil(elapsed / 0.0005)))
             with self._lock:
+                self._run_due_events()
                 if PLANTS[self.plant].lifted:
                     for motor in self.motors.values():
                         for _ in range(steps):

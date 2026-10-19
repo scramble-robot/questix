@@ -153,6 +153,7 @@ class Monitor:
         self._lock = threading.Lock()
         self._profile = None  # (steps, start time)
         self._manual = None  # (linear, angular, last time)
+        self._neutral_until = 0.0
         self._twist_pub = None
         if not robot_mode:
             self._twist_pub = self.node.create_publisher(Twist, '/target_twist', 1)
@@ -269,10 +270,16 @@ class Monitor:
         return linear, angular
 
     def _publish_twist(self):
+        if self._twist_pub is None:
+            return  # --robot is strictly read-only
         now = time.monotonic()
         with self._lock:
-            twist = None
-            if self._profile is not None:
+            # An idle simulator continuously supplies neutral. A fresh operation
+            # also prepares zero for five 20 ms ticks; depth 1 is not an ack.
+            twist = (0.0, 0.0)
+            if now < self._neutral_until:
+                pass
+            elif self._profile is not None:
                 (_, unit, steps), start = self._profile
                 elapsed = now - start
                 for a, b, hold in steps:
@@ -298,11 +305,14 @@ class Monitor:
         """Start a twist profile from PROFILES."""
         with self._lock:
             self._manual = None
-            self._profile = (PROFILES[name], time.monotonic())
+            self._neutral_until = time.monotonic() + 0.1
+            self._profile = (PROFILES[name], self._neutral_until)
 
     def manual(self, linear, angular):
         """Keep publishing this twist while the page keeps sending it."""
         with self._lock:
+            if self._manual is None:
+                self._neutral_until = time.monotonic() + 0.1
             self._profile = None
             self._manual = (float(linear), float(angular), time.monotonic())
 
@@ -410,8 +420,10 @@ class NodeProcess:
                '--params-file', str(params_file),
                '-p', f'serial_port:={port}',
                '-p', f'control_mode:={control_mode}',
-               # diagnostic run without operation_manager: the documented explicit opt-out
-               '-p', 'require_emergency_stop:=false']
+               # Standalone diagnostic without operation_manager: explicitly opt out of both
+               # safety inputs only in this isolated simulator domain.
+               '-p', 'require_emergency_stop:=false',
+               '-p', 'require_motion_permission:=false']
         print('[sim] starting:', ' '.join(cmd), flush=True)
         self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                      text=True, bufsize=1, start_new_session=True)
@@ -585,6 +597,10 @@ def main():
     parser.add_argument('--robot', action='store_true',
                         help='read-only view of a running robot in the current ROS environment')
     parser.add_argument('--noise-rpm', type=float, default=1.0)
+    parser.add_argument('--report-dead-time-ms', type=float, default=0.0,
+                        help='delay the reported speed by this dead time (Issue #222: about 40)')
+    parser.add_argument('--report-tau-ms', type=float, default=0.0,
+                        help='and by a first-order lag of this time constant (about 100)')
     parser.add_argument('--params-file', default=str(DRIVE_YAML),
                         help='drive_component.yaml to load (default: launcher/config/ of this '
                         'checkout)')
@@ -617,7 +633,9 @@ def main():
         bus = FakeDdtBus(motor_ids, plant=args.plant, noise_rpm=args.noise_rpm,
                          link_path=str(link), mode_frames=args.mode_frames,
                          wheel_radius=float(params['wheel_radius']),
-                         wheel_separation=float(params['wheel_separation']))
+                         wheel_separation=float(params['wheel_separation']),
+                         report_dead_time=args.report_dead_time_ms / 1000.0,
+                         report_tau=args.report_tau_ms / 1000.0)
         bus.start()
         print(f'[sim] fake M0602C bus: {bus.port} (ROS_DOMAIN_ID={args.domain_id}, localhost)',
               flush=True)

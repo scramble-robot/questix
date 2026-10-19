@@ -94,10 +94,11 @@
     update_cache: true
   become: true
 
-- name: Upgrade system packages (recommended)
+- name: Upgrade system packages when explicitly enabled by configuration
   ansible.builtin.apt:
     upgrade: dist
   become: true
+  when: questix_os_upgrade | bool
 
 - name: Install ROS2 Desktop (Recommended) - ROS, RViz, demos, tutorials
   ansible.builtin.apt:
@@ -123,30 +124,9 @@
   become: "{{ questix_image_build | default(false) | bool }}"
   become_user: "{{ ansible_user | default(ansible_env.SUDO_USER) }}"
 
-- name: Source ROS2 environment for verification
-  ansible.builtin.shell: |
-    source /opt/ros/{{ ros2_distro_to_use }}/setup.bash
-    echo "ROS_DISTRO: $ROS_DISTRO"
-    echo "ROS_VERSION: $ROS_VERSION"
-  register: ros2_env_check
-  changed_when: false
-
-- name: Display ROS2 environment information
-  ansible.builtin.debug:
-    msg: "ROS2 environment: {{ ros2_env_check.stdout }}"
-
-# Try some examples (verification)
-- name: Test ROS2 installation with demo talker
-  ansible.builtin.shell: |
-    source /opt/ros/{{ ros2_distro_to_use }}/setup.bash
-    timeout 5 ros2 run demo_nodes_cpp talker || echo "Demo test completed"
-  register: ros2_demo_test
-  changed_when: false
-  ignore_errors: true
-
-- name: Display demo test result
-  ansible.builtin.debug:
-    msg: "Demo test result: {{ ros2_demo_test.stdout }}"
+# Both probes fail closed. Check mode skips their shell commands naturally.
+- name: Verify the installed ROS environment and demo
+  ansible.builtin.include_tasks: verify.yaml
 
 # Install additional ROS2 packages if specified
 - name: Install additional ROS2 packages

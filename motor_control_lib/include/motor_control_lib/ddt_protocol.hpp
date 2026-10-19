@@ -11,6 +11,10 @@
 
 namespace motor_control_lib::ddt_protocol {
 
+// Spec V1.0 endpoint mapping: 0..32767 <-> 0..360 degrees. Share the existing
+// conversion scale; the physical encoder's exact wrap period is not calibrated.
+inline constexpr uint16_t kPositionRawPerTurn = 32767;
+
 /**
  * @brief DDT モータ (M0602C) の通信フレーム pack/parse を提供する純粋関数群。
  *
