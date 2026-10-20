@@ -67,14 +67,6 @@
 .shoot-fire:disabled {
   color: var(--muted);
 }
-.shoot-actions .drive-stop {
-  word-break: keep-all;
-}
-.shoot-actions .drive-stop:disabled {
-  background: white;
-  border-color: var(--line);
-  color: var(--muted);
-}
 /* Side by side on a phone too: the stop and the fire button are one glance apart. */
 @media (max-width: 420px) {
   .shoot-actions button {

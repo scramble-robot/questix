@@ -172,7 +172,7 @@
     "driveDistanceLabel": "走らせる距離",
     "driveDistanceOption": "{cm} cm",
     "driveDistanceProgram": "まっすぐ{speed} m/sで走り、車輪から求めた距離（/odom）で{cm} cm進んだら、手前で減速して止まります。止まったら、床の印からの距離をメジャーで測り、走り終えると上に出る表の「床で測った距離」に入れてください。何回か繰り返すと、車輪から求めた距離のくせが見えてきます。",
-    "driveDistanceStart": "{cm} cm走らせて記録する",
+    "driveDistanceStart": "{cm} cm​走らせて​記録する",
     "driveHoldsPlacement": "ロボットの前後に{space} m以上の空きを作ってください。",
     "driveDistancePlacement": "床に印を付けてロボットを置き、前に{space} m以上の空きを作ってください。",
     "driveDistanceShort": "時間内に目標の距離まで届きませんでした（車輪から求めた距離 {cm} cm）。",

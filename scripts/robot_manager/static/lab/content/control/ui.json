@@ -341,7 +341,7 @@
     "driveSpeedOption": "{speed} m/s（車輪 約{rpm} rpm）",
     "driveSpeedProgram": "止まった状態から{speed} m/sへ一気に上げ、{hold}秒保ってから止めます。",
     "driveWallProgram": "シミュレーションと同じPID（{gains}）で、実機を壁の前0.50 mに止めます。出力100 %は{top} m/sで、LiDARの値が届くたび（1秒に5回ほど）に計算し直します。壁まで{gap} mより近づいたら、その場で止めます。",
-    "driveWallStart": "設定したPIDで壁の前に止める",
+    "driveWallStart": "設定した​PIDで​壁の前に​止める",
     "driveWallTooClose": "壁が近すぎます。壁から{start} m以上離して置き直してください。",
     "driveWallNoWall": "正面に壁が見つかりません（LiDARの正面±5°に測れた点がありません）。正面を壁に向けて置き直してください。",
     "driveWallLost": "LiDAR（/scan）が届かないため止めました。",
