@@ -3,6 +3,8 @@ import { formatValue, runSummary, isSimpleTopic, settledSpeed, speedGap } from '
 import { lessonLabel } from '../shell/lesson-ui.js';
 import { schoolTips } from '../shell/school-tips.js';
 import { liveCaptureControls } from '../live/live-view.js';
+import { hardBlocked } from '../live/control-status.js';
+import { freshInteraction } from '../live/press-guard.js';
 import { lessonBrief } from '../shell/lesson-brief.js';
 import { runModeBadgeHtml } from '../shell/run-mode.js';
 import { CONTROL_GROUPS, CONTROL_TOPICS, LAST_SAMPLE, STOP_DISTANCE, controlLoad } from './core.js';
@@ -377,7 +379,7 @@ function controlPanel(model, copy, actions) {
     </button>
     ${model.topicId === 'challenge' ? badges(model, copy) : nothing}
     <button class="text-button control-live-jump" data-control-live-jump @click=${actions.showLive}>
-      ${liveOnTop(model) ? copy.live.jumpToLiveUp : copy.live.jumpToLive}
+      ${copy.live.jumpToLive}
     </button>
   </aside>`;
 }
@@ -571,7 +573,7 @@ function backToLive(model, copy, actions) {
     data-control-back-to-live
     @click=${actions.showLive}
   >
-    ${liveOnTop(model) ? copy.live.backToLiveUp : copy.live.backToLive}
+    ${copy.live.backToLive}
   </button>`;
 }
 
@@ -728,11 +730,6 @@ function calibrationCard(model, copy) {
   </section>`;
 }
 
-// With a robot connected, the real-robot card comes right after the brief, above the simulation:
-// the start button is then within two screens of the topic's top on a phone. Without one it stays
-// at the end, one line, for a class working from files.
-const liveOnTop = (model) => Boolean(model.live.capture.link.connected);
-
 // What the card does and how: folded while the page can drive the robot (the drive block right
 // under it says what the run does), open when learners drive with the controller themselves (the
 // safety sentence is there).
@@ -760,8 +757,15 @@ function liveCard(model, copy, actions) {
     <h2>
       ${unsafeHTML(runModeBadgeHtml('live'))}${unsafeHTML(runModeBadgeHtml('drive'))} ${text.title}
     </h2>
-    ${liveHowto(model, text)} ${model.distance ? nothing : stepSpeedSelect(model, text, actions)}
+    ${model.distance ? nothing : stepSpeedSelect(model, text, actions)}
     ${liveCaptureControls(model.live.capture, actions)}
+    ${
+      model.live.capture.recording && !model.distance
+        ? html`<p class="drive-note">${text.driveSpeedBusy}</p>`
+        : nothing
+    }
+    ${model.distance ? html`<p class="drive-note" data-control-wall-limit>${model.live.wallSpeedNote}</p>` : nothing}
+    ${liveHowto(model, text)}
     ${
       shown
         ? html`<div class="live-capture-actions control-live-after">
@@ -770,7 +774,7 @@ function liveCard(model, copy, actions) {
               data-control-show-charts
               @click=${actions.showCharts}
             >
-              ${liveOnTop(model) ? text.showChartsBelow : text.showCharts}
+              ${text.showCharts}
             </button>
             ${
               model.live.run
@@ -783,16 +787,16 @@ function liveCard(model, copy, actions) {
   </section>`;
 }
 
-// The speed of the real step input; only offered while the card can drive the robot.
+// The speed stays in place while unavailable. Changing a setting never sends a command.
 function stepSpeedSelect(model, text, actions) {
   const capture = model.live.capture;
-  if (!capture.drive?.allowed || !capture.link.connected) return nothing;
   return html`<label class="control-live-speed"
     >${text.driveSpeedLabel}
     <select
       data-live-step-speed
-      ?disabled=${capture.recording}
-      @change=${(event) => actions.setLiveStepSpeed(Number(event.target.value))}
+      data-live-command-input
+      ?disabled=${!capture.link.connected || !capture.drive?.allowed || hardBlocked(capture.drive) || capture.recording}
+      @change=${(event) => freshInteraction(event, () => actions.setLiveStepSpeed(Number(event.target.value)))}
     >
       ${model.live.stepSpeeds.map(
         (option) =>
@@ -1209,7 +1213,7 @@ function controlPage(model, copy, hardwareHtml, actions) {
     </div>
     ${groupNav(model, actions)}${topicNav(model, copy, actions)}
     ${unsafeHTML(lessonBrief(lessonKey, model.topic, { start: quickStart(model) }) + schoolTips(lessonKey))}
-    ${liveOnTop(model) ? liveCard(model, copy, actions) : nothing}
+    ${liveCard(model, copy, actions)}
     <div class="control-layout">
       <div class="control-workspace">
         ${calibrationCard(model, copy)}${visualCard(model, copy, actions)}${graphsCard(
@@ -1221,8 +1225,7 @@ function controlPage(model, copy, hardwareHtml, actions) {
       ${controlPanel(model, copy, actions)}
     </div>
     ${resultsCard(model, copy, actions)}${explanationCard(model, copy, actions)}
-    ${questionCard(model, copy, actions)}${historyCard(model, copy)}
-    ${liveOnTop(model) ? nothing : liveCard(model, copy, actions)}${hardwareCard(hardwareHtml)}`;
+    ${questionCard(model, copy, actions)}${historyCard(model, copy)} ${hardwareCard(hardwareHtml)}`;
 }
 
 export { controlPage, gainText, COMMAND_OPEN_TOPICS };
