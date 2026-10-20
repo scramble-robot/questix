@@ -647,7 +647,7 @@ function wallSpeedInfo() {
   return wallSpeedDisplay(
     {
       maximum: WALL_MAX_SPEED,
-      limit: driveModel().limits.linear,
+      limit: driveModel().limits?.linear,
       connected: liveLink().connected,
     },
     copy.live,
