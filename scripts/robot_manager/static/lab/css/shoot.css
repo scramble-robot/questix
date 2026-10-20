@@ -223,3 +223,11 @@ body.driving.shooting dialog[open] {
   border-top: 0;
   padding-top: 0;
 }
+
+.shoot-actions.live-fixed-actions {
+  display: grid;
+  gap: 8px;
+}
+.shoot-actions.live-fixed-actions > button {
+  min-width: 0;
+}
