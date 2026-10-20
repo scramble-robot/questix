@@ -158,3 +158,42 @@ test('unknown and silent launcher E-stop text follows the supplied shared displa
     assert(!markup.includes('非常停止：解除されています'));
   }
 });
+test("the launcher's own stop names its visible text and is neutral while disabled", () => {
+  const copy = JSON.parse(fs.readFileSync(new URL('../content/live/shoot.json', import.meta.url)));
+  // Label in Name (WCAG 2.5.3): the spoken name must contain the visible text.
+  assert(copy.spinStopLabel.includes(copy.spinStop));
+  const ready = {
+    blockers: [],
+    allowed: true,
+    limits: {
+      max_power: 0.8,
+      min_fire_power: 0.2,
+      tilt_min: 0,
+      tilt_max: 120,
+      fire_interval_sec: 2,
+    },
+  };
+  const markup = shoot.shootBlock(
+    {
+      ...ready,
+      controls: shootControls(ready),
+      spinning: false,
+      percent: 50,
+      tilt: 40,
+      launcher: { roller: null, shot: null, heard: {} },
+      estopState: 'released',
+    },
+    {},
+    actions,
+  );
+  assert.match(
+    markup,
+    new RegExp(`data-shoot-own-stop[^>]*aria-label=${copy.spinStopLabel}[^>]*\\?disabled=true`),
+  );
+  // Red is for a stop that can be pressed; a disabled own stop looks like the other disabled buttons.
+  const css = fs.readFileSync(new URL('../css/shoot.css', import.meta.url), 'utf8');
+  const rule = css.match(/\.shoot-actions \.drive-stop:disabled \{([^}]*)\}/);
+  assert(rule, 'disabled own-stop rule');
+  assert.match(rule[1], /background: white;/);
+  assert.match(rule[1], /color: var\(--muted\);/);
+});
