@@ -190,10 +190,47 @@ test("the launcher's own stop names its visible text and is neutral while disabl
     markup,
     new RegExp(`data-shoot-own-stop[^>]*aria-label=${copy.spinStopLabel}[^>]*\\?disabled=true`),
   );
-  // Red is for a stop that can be pressed; a disabled own stop looks like the other disabled buttons.
-  const css = fs.readFileSync(new URL('../css/shoot.css', import.meta.url), 'utf8');
-  const rule = css.match(/\.shoot-actions \.drive-stop:disabled \{([^}]*)\}/);
-  assert(rule, 'disabled own-stop rule');
+  // Red is for a stop that can be pressed; a disabled stop looks like the other disabled buttons.
+  // The rule is shared by the drive panel's stop, the launcher's own stop and the stop bar.
+  const css = fs.readFileSync(new URL('../css/live.css', import.meta.url), 'utf8');
+  const rule = css.match(/\.drive-stop:disabled,\s*\.drive-bar-stop:disabled \{([^}]*)\}/);
+  assert(rule, 'disabled stop rule');
   assert.match(rule[1], /background: white;/);
   assert.match(rule[1], /color: var\(--muted\);/);
+});
+test('the drive panel stop shows one stop mark, drawn by the stylesheet', () => {
+  const css = fs.readFileSync(new URL('../css/live.css', import.meta.url), 'utf8');
+  assert.match(css, /\.drive-stop::before,\s*\.drive-bar-stop::before \{\s*content: '■';/);
+  const model = {
+    slot: 'test',
+    link: { connected: true, phase: 'open', missing: [] },
+    recording: false,
+    running: false,
+    tail: false,
+    seconds: 5,
+    file: null,
+    drive: { blockers: [], ready: true, allowed: true, confirmed: true, program: '', report: null },
+  };
+  const markup = live.liveCaptureControls(model, actions);
+  const stop = markup.match(/data-drive-stop[^>]*>([^<]*)<\/button>/);
+  assert(stop, 'drive stop button');
+  assert(!stop[1].includes('■'), stop[1]);
+  assert(stop[1].includes(drive.driveCopy.stop));
+});
+test('drive start labels wrap only between phrases', () => {
+  // `.drive-start` uses `word-break: keep-all`: a line may break only at a space or a zero-width
+  // space, so a label longer than five characters needs one between its phrases.
+  const read = (file) =>
+    JSON.parse(fs.readFileSync(new URL(`../content/${file}`, import.meta.url)));
+  const labels = [
+    read('live/drive.json').start,
+    read('control/ui.json').live.driveWallStart,
+    read('motor.json').bench.start,
+    read('systems/measurement-lab.json').messages.driveDistanceStart,
+  ];
+  for (const label of labels) {
+    const visible = label.replace(/\u200b/g, '');
+    if (visible.length > 5) assert.match(label, /[ \u200b]/, label);
+    assert.doesNotMatch(label, /\u200b\u200b|^\u200b|\u200b$/, label);
+  }
 });

@@ -687,6 +687,18 @@
   content: '■';
   margin-right: 0.4em;
 }
+/* Red is for a stop that can be pressed; a disabled stop looks like the other disabled buttons. */
+.drive-stop:disabled,
+.drive-bar-stop:disabled {
+  background: white;
+  border-color: var(--line);
+  color: var(--muted);
+}
+/* Break only between phrases (spaces or zero-width spaces in the labels), never inside a word. */
+.drive-start,
+.drive-stop {
+  word-break: keep-all;
+}
 
 :root {
   --live-stop-height: calc(80px + env(safe-area-inset-bottom));

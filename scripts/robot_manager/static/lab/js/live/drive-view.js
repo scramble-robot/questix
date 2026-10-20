@@ -134,7 +134,7 @@ function runControls(model, drive, actions) {
       ?disabled=${!model.running}
       @click=${actions.stopCapture}
     >
-      ■ ${driveCopy.stop}
+      ${driveCopy.stop}
     </button>`;
 }
 
