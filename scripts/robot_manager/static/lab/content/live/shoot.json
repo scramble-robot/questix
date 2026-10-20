@@ -14,7 +14,7 @@
   "tiltNote": "角度はつまみを離したときに送ります。",
   "spin": "ローラーを回す",
   "spinStop": "回転を止める",
-  "spinStopLabel": "この画面のローラーを止める",
+  "spinStopLabel": "この画面の回転を止める",
   "fire": "1枚発射",
   "starting": "ローラーを回し始めています…",
   "spinUp": "回転が安定するまで、あと{seconds}秒",
