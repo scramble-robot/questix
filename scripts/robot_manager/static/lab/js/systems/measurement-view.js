@@ -3,6 +3,8 @@ import { fillSentence as fill } from '../core/content.js';
 import { formatTick } from '../core/chart-scale.js';
 import { measurementPlotAxes } from './measurement-core.js';
 import { liveCaptureControls } from '../live/live-view.js';
+import { hardBlocked } from '../live/control-status.js';
+import { freshInteraction } from '../live/press-guard.js';
 import { runModeBadgeHtml } from '../shell/run-mode.js';
 
 // Templates of the measurement lab, the panel that opens under the control, launch and SLAM
@@ -382,16 +384,17 @@ function pendingDrives(model, copy, actions) {
   </div>`;
 }
 
-// How far "N cm走らせて記録する" drives; only offered while the panel can drive the robot.
+// How far "N cm走らせて記録する" drives. Keep its value and place while unavailable.
 function driveDistanceSelect(model, copy, actions) {
   const live = model.live;
-  if (!live.driveDistances.length || !live.drive?.allowed || !live.link.connected) return nothing;
+  if (!live.driveDistances.length) return nothing;
   return html`<label class="control-live-speed"
     >${copy.messages.driveDistanceLabel}
     <select
       data-drive-distance
-      ?disabled=${live.recording}
-      @change=${(event) => actions.setDriveDistance(Number(event.target.value))}
+      data-live-command-input
+      ?disabled=${!live.link.connected || !live.drive?.allowed || hardBlocked(live.drive) || live.recording}
+      @change=${(event) => freshInteraction(event, () => actions.setDriveDistance(Number(event.target.value)))}
     >
       ${live.driveDistances.map(
         (distance) =>
@@ -428,10 +431,15 @@ function liveCapture(model, copy, actions) {
     </h3>
     ${
       model.live
-        ? html`<p>${model.live.text}</p>
-            ${driveDistanceSelect(model, copy, actions)} ${pendingDrives(model, copy, actions)}
+        ? html`${driveDistanceSelect(model, copy, actions)}
             ${liveCaptureControls({ ...model.live, message: '' }, actions)}
-            ${liveNote(model, copy, actions)}
+            ${
+              model.live.recording && model.live.driveDistances.length
+                ? html`<p class="drive-note">${copy.messages.driveDistanceBusy}</p>`
+                : nothing
+            }
+            <p>${model.live.text}</p>
+            ${pendingDrives(model, copy, actions)} ${liveNote(model, copy, actions)}
             <p>${model.live.referenceNote ?? panel.liveReferenceNote}</p>`
         : html`<p data-measure-live-elsewhere>
             ${model.scenario.liveNote ?? panel.liveUnavailable}
