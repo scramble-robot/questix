@@ -5,7 +5,6 @@ import { loadJson, fillSentence as fill } from '../core/content.js';
 import { runModeBadgeHtml } from '../shell/run-mode.js';
 import {
   LEARNER_BLOCKERS,
-  shootOffered,
   powerRange,
   reasonSentence,
   blockerValues,
@@ -278,23 +277,6 @@ function limitsNote(model) {
 
 // Nothing to operate (no robot, the teacher has not allowed it, an older bridge): one line, the
 // launcher's values when the robot sends them, and the lesson's typed data carries on.
-function offLine(model, after) {
-  const code = model.blockers[0]?.code;
-  let text = shootCopy.notAllowed;
-  if (code === 'no_link') text = shootCopy.offline;
-  else if (code === 'old_bridge') text = shootCopy.oldBridge;
-  const heard = model.launcher.heard.roller || model.launcher.heard.shot;
-  return html`<div
-    class="drive-block drive-block-off shoot-block"
-    data-shoot-block
-    data-shoot-off=${code}
-  >
-    <p>${text}</p>
-    ${teacherDetails(model)} ${code !== 'no_link' && heard ? launcherState(model) : nothing}
-    ${after}
-  </div>`;
-}
-
 /**
  * The launcher block: `model` from shootModel(), `view` the panel's state (`tiltPreview`,
  * `recordNote`, `rowAdded`), `actions`: confirm, setPercent, previewTilt, setTilt, startRoller,
@@ -320,22 +302,6 @@ function shootBlock(model, view, actions, after = nothing) {
     </div>`;
 }
 
-/** The bar fixed at the bottom of every page while a roller turns on a page's command. */
-function shootStopBar(model, stop) {
-  const turning = model.spinning || (model.active && model.power > 0);
-  if (!turning) return nothing;
-  const mine = model.spinning || model.owner === 'me';
-  return html`<div class="drive-bar shoot-bar" role="alert" data-shoot-bar>
-    <span class="drive-bar-dot" aria-hidden="true"></span>
-    <strong>${mine ? shootCopy.bar.mine : shootCopy.bar.other}</strong>
-    <button class="drive-bar-stop" data-shoot-bar-stop @click=${stop}>
-      ${shootCopy.bar.stop}${
-        mine ? html`<span class="drive-bar-esc">${shootCopy.bar.esc}</span>` : nothing
-      }
-    </button>
-  </div>`;
-}
-
 /** A recorded launcher session in 記録の一覧 (`summary` from launcherRecordSummary). */
 function launcherRecordView(summary) {
   const words = shootCopy.summary;
@@ -353,4 +319,4 @@ function launcherRecordView(summary) {
   </div>`;
 }
 
-export { shootCopy, shootBlock, shootStopBar, launcherRecordView };
+export { shootCopy, shootBlock, launcherRecordView };
