@@ -434,11 +434,6 @@
     display: none;
   }
 }
-/* While the bar is up, the page and open dialogs keep room below their last buttons. */
-body.driving,
-body.driving dialog[open] {
-  padding-bottom: 96px;
-}
 @media (max-width: 560px) {
   .drive-bar {
     justify-content: space-between;
@@ -691,4 +686,40 @@ body.driving dialog[open] {
 .drive-bar-stop::before {
   content: '■';
   margin-right: 0.4em;
+}
+
+:root {
+  --live-stop-height: calc(80px + env(safe-area-inset-bottom));
+}
+body.live-stop-reserved,
+body.live-stop-reserved dialog[open] {
+  padding-bottom: var(--live-stop-height);
+}
+.live-stop-bar {
+  pointer-events: auto;
+  display: grid;
+  grid-template-rows: 16px 44px;
+  gap: 4px;
+  height: var(--live-stop-height);
+  padding: 6px 8px calc(7px + env(safe-area-inset-bottom));
+  background: #fff4e5;
+  border-top: 3px solid #c62828;
+}
+.live-stop-state {
+  margin: 0;
+  text-align: center;
+  font-size: 12px;
+  line-height: 16px;
+}
+.live-stop-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.live-stop-actions .drive-bar-stop {
+  min-width: 0;
+  min-height: 44px;
+  height: 44px;
+  padding: 4px 8px;
+  font-size: 14px;
 }

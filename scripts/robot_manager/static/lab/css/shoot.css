@@ -193,19 +193,6 @@
   }
 }
 
-/* The launcher's stop bar sits above the driving one when both are up. */
-body.driving .shoot-bar-host {
-  bottom: 76px;
-}
-body.shooting,
-body.shooting dialog[open] {
-  padding-bottom: 96px;
-}
-body.driving.shooting,
-body.driving.shooting dialog[open] {
-  padding-bottom: 176px;
-}
-
 /* The launcher's live values right under its buttons, like the drive strip (css/robot-state.css). */
 .shoot-strip {
   display: grid;
