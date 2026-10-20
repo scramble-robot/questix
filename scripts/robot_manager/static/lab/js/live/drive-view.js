@@ -148,7 +148,7 @@ function runControls(model, drive, actions) {
 function driveControls(model, drive, actions, parts = {}) {
   return html`<div class="drive-block" data-drive-block>
     <h4>${driveCopy.title}</h4>
-    ${controlStatus(drive.blockers, model.running ? 'driving' : model.tail ? 'tail' : '')}
+    ${controlStatus(drive.blockers, model.running ? 'driving' : model.tail ? 'tail' : '', 'drive', drive.reconfirm)}
     ${confirmBox(drive, actions, model.running, drive.confirmLabel ?? driveCopy.confirm)}
     <div class="live-run" data-live-run>
       <div class="live-capture-actions drive-actions live-fixed-actions">
@@ -156,6 +156,13 @@ function driveControls(model, drive, actions, parts = {}) {
       </div>
       ${progressLine(model)} ${parts.strip ?? nothing}
     </div>
+    ${
+      drive.reconfirm
+        ? html`<p class="drive-result" role="status" data-drive-reconfirm>
+            ${driveCopy.reconfirm[drive.reconfirm]}
+          </p>`
+        : nothing
+    }
     ${drive.program ? html`<p>${drive.program}</p>` : nothing} ${placementLine(drive)}
     ${checklist(drive)} ${teacherDetails(drive)} ${parts.result ?? nothing}
     ${drive.report && !model.running && !model.tail ? driveReportView(drive.report, { compact: true, metrics: drive.metrics }) : nothing}
