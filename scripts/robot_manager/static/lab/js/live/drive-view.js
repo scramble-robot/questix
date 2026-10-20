@@ -1,3 +1,5 @@
+import { controlStatus, hardBlocked } from './control-status.js';
+import { freshInteraction } from './press-guard.js';
 import { html, nothing } from '../vendor/lit-html.js';
 import { loadJson, fillSentence as fill } from '../core/content.js';
 import { driveReportView } from './drive-report-view.js';
@@ -68,7 +70,7 @@ function confirmBox(drive, actions, running = false, sentence = driveCopy.confir
       type="checkbox"
       data-drive-confirm
       .checked=${drive.confirmed}
-      ?disabled=${running}
+      ?disabled=${running || hardBlocked(drive)}
       @change=${(event) => actions.confirmDrive(event.target.checked)}
     />
     ${sentence}
@@ -118,23 +120,22 @@ function progressLine(model) {
 }
 
 function runControls(model, drive, actions) {
-  if (model.running)
-    return html`<button class="drive-stop" data-drive-stop @click=${actions.stopCapture}>
-      ${driveCopy.stop}
-    </button>`;
-  if (model.tail) return nothing;
-  const reason = firstReason(drive);
   return html`<button
       class="drive-start"
       data-drive-start
-      ?disabled=${!drive.ready || model.recording}
-      @click=${actions.startDriveCapture}
+      data-live-start-action
+      ?disabled=${!drive.ready || model.recording || model.tail}
+      @click=${(event) => freshInteraction(event, actions.startDriveCapture)}
     >
-      ${drive.startLabel ?? driveCopy.start}
-    </button>
-    ${
-      reason && !model.recording ? html`<p class="drive-why" data-drive-why>${reason}</p>` : nothing
-    }`;
+      ${drive.startLabel ?? driveCopy.start}</button
+    ><button
+      class="drive-stop"
+      data-drive-stop
+      ?disabled=${!model.running}
+      @click=${actions.stopCapture}
+    >
+      ■ ${driveCopy.stop}
+    </button>`;
 }
 
 // Before the teacher allows driving there is nothing to operate: one line instead of the block.
@@ -156,22 +157,19 @@ function notAllowedLine(drive) {
  * start button (the live strip), `parts.result` under that (how the last run went).
  */
 function driveControls(model, drive, actions, parts = {}) {
-  if (!drive.allowed && !model.running) return notAllowedLine(drive);
   return html`<div class="drive-block" data-drive-block>
     <h4>${driveCopy.title}</h4>
-    ${drive.program ? html`<p>${drive.program}</p>` : nothing} ${placementLine(drive)}
-    ${checklist(drive)} ${teacherDetails(drive)}
+    ${controlStatus(drive.blockers, model.running ? 'driving' : model.tail ? 'tail' : '')}
     ${confirmBox(drive, actions, model.running, drive.confirmLabel ?? driveCopy.confirm)}
     <div class="live-run" data-live-run>
-      <div class="live-capture-actions drive-actions">${runControls(model, drive, actions)}</div>
+      <div class="live-capture-actions drive-actions live-fixed-actions">
+        ${runControls(model, drive, actions)}
+      </div>
       ${progressLine(model)} ${parts.strip ?? nothing}
     </div>
-    ${parts.result ?? nothing}
-    ${
-      drive.report && !model.running && !model.tail
-        ? driveReportView(drive.report, { compact: true, metrics: drive.metrics })
-        : nothing
-    }
+    ${drive.program ? html`<p>${drive.program}</p>` : nothing} ${placementLine(drive)}
+    ${checklist(drive)} ${teacherDetails(drive)} ${parts.result ?? nothing}
+    ${drive.report && !model.running && !model.tail ? driveReportView(drive.report, { compact: true, metrics: drive.metrics }) : nothing}
     ${limitsNote(drive)}
   </div>`;
 }

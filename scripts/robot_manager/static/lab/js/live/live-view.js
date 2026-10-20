@@ -1,3 +1,5 @@
+import { controlStatus } from './control-status.js';
+import { freshInteraction } from './press-guard.js';
 import { html, nothing } from '../vendor/lit-html.js';
 import { loadJson, fillSentence as fill } from '../core/content.js';
 import { revealElement } from '../core/reveal.js';
@@ -44,19 +46,22 @@ function recordLabel(model) {
 }
 
 function recordButton(model, actions) {
-  if (driveBusy(model)) return nothing;
-  if (model.recording)
-    return html`<button class="live-capture-stop" @click=${actions.stopCapture}>
+  return html`<button
+      class="live-capture-record"
+      data-live-record-start
+      data-live-start-action
+      ?disabled=${model.recording || driveBusy(model) || !model.link.connected || model.link.missing.length > 0}
+      @click=${(event) => freshInteraction(event, actions.startCapture)}
+    >
+      ${fill(model.recordLabel ?? captureCopy.record, { seconds: model.seconds })}</button
+    ><button
+      class="live-capture-stop"
+      data-live-record-stop
+      ?disabled=${!model.recording || driveBusy(model)}
+      @click=${actions.stopCapture}
+    >
       ${model.stopLabel ?? captureCopy.stop}
     </button>`;
-  // With driving allowed this is the secondary way: recording a run someone else drives.
-  return html`<button
-    class=${drivingAllowed(model) ? 'live-capture-record quiet' : 'live-capture-record'}
-    ?disabled=${!model.link.connected || model.link.missing.length > 0}
-    @click=${actions.startCapture}
-  >
-    ${recordLabel(model)}
-  </button>`;
 }
 
 const progressLine = (model) =>
@@ -228,16 +233,6 @@ function saveButtons(model, actions) {
   </div>`;
 }
 
-// 記録だけする, inside the files while the page may drive (its stop and progress stay with it).
-function recordOnlyPart(model, actions) {
-  if (!drivingAllowed(model) || driveBusy(model)) return nothing;
-  return html`<div class="live-record-only">
-    <div class="live-capture-actions">${recordButton(model, actions)}</div>
-    ${progressLine(model)}
-    <p class="live-capture-note">${captureCopy.recordOtherNote}</p>
-  </div>`;
-}
-
 function filesSection(model, actions) {
   if (!model.file) return nothing;
   const text = captureCopy.file;
@@ -248,7 +243,6 @@ function filesSection(model, actions) {
       >
     </summary>
     <div class="live-files-body">
-      ${recordOnlyPart(model, actions)}
       <div class="live-capture-actions">
         ${openFileControl(model, actions)} ${pickControl(model, actions)}
       </div>
@@ -281,11 +275,9 @@ function linkLine(model) {
 // The record button as the block's main action (no driving here, or the teacher stopped it).
 function recordPart(model, actions) {
   return html`<div class="live-capture" data-live-capture>
-    <div class="live-run" data-live-run>
-      <div class="live-capture-actions">${recordButton(model, actions)}</div>
-      ${progressLine(model)} ${stripFor(model)}
-    </div>
-    ${resultBox(model)}
+    ${!model.drive ? controlStatus(!model.link.connected ? [{ code: 'no_link' }] : model.link.missing.length ? [{ code: 'missing_streams' }] : [], model.recording ? 'recording' : '') : nothing}
+    <div class="live-capture-actions live-fixed-actions">${recordButton(model, actions)}</div>
+    <div class="live-record-progress">${progressLine(model)}</div>
     <p class="live-capture-note">${captureNote(model)}</p>
   </div>`;
 }
@@ -329,19 +321,13 @@ function offlineBlock(model, actions) {
  * `startDriveCapture` and `confirmDrive` in `actions`.
  */
 function liveCaptureControls(model, actions) {
-  const busy = model.recording || driveBusy(model);
-  if (!model.link.connected && !busy) return offlineBlock(model, actions);
-  const driving = drivingAllowed(model) || driveBusy(model);
-  let main;
-  if (driving)
-    main = driveControls(model, model.drive, actions, {
-      strip: stripFor(model),
-      result: resultBox(model),
-    });
-  else
-    main = html`${model.drive ? notAllowedLine(model.drive) : nothing}${recordPart(model, actions)}`;
   return html`<div class="live-block" data-live-block=${model.slot ?? ''}>
-    ${linkLine(model)} ${main} ${statePart(model)} ${filesSection(model, actions)}
+    <div class="live-connection-entry">
+      ${actions.openLink ? html`<button class="small" data-live-connect @click=${actions.openLink}>${captureCopy.connect}</button>` : nothing}
+    </div>
+    ${recordPart(model, actions)}
+    ${model.drive ? driveControls(model, model.drive, actions, { strip: stripFor(model) }) : stripFor(model)}
+    ${resultBox(model)} ${statePart(model)} ${filesSection(model, actions)}
   </div>`;
 }
 

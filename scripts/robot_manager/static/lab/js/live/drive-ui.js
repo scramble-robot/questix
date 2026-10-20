@@ -1,3 +1,4 @@
+import { controlStatus, hardBlocked } from './control-status.js';
 import { html, nothing, render, unsafeHTML } from '../vendor/lit-html.js';
 import { fillSentence as fill } from '../core/content.js';
 import { driveModel, onDrive, confirmDriveSafety, stopDrive, runDrive } from './drive-link.js';
@@ -206,6 +207,7 @@ function speedSlider(model, key, label) {
       max=${max}
       step=${BENCH_STEP[key]}
       .value=${String(Math.min(bench[key], max))}
+      ?disabled=${hardBlocked(model) || bench.held !== null}
       @input=${(event) => {
         bench[key] = Number(event.target.value);
         update();
@@ -217,14 +219,10 @@ function speedSlider(model, key, label) {
 
 function benchPanel(model) {
   const heading = html`<h3>${unsafeHTML(runModeBadgeHtml('drive'))} ${driveCopy.bench.title}</h3>`;
-  if (!model.allowed)
-    return html`${heading}
-      <p>${driveCopy.notAllowed}</p>
-      ${driveTeacherDetails(model)}`;
   const reason = bench.held === null ? driveFirstReason(model) : '';
   return html`${heading}
     <p>${fill(driveCopy.bench.lead, { seconds: BENCH_MAX_SECONDS })}</p>
-    ${driveChecklist(model)} ${driveTeacherDetails(model)}
+    ${controlStatus(model.blockers, bench.held !== null ? 'driving' : '')}
     ${confirmBox(
       model,
       { confirmDrive: confirmDriveSafety },
@@ -239,6 +237,7 @@ function benchPanel(model) {
       <div class="drive-bench-pad">${BENCH_MOVES.map((move) => benchButton(model, move))}</div>
       ${reason ? html`<p class="drive-why">${reason}</p>` : nothing} ${liveStateStrip('bench')}
     </div>
+    ${driveChecklist(model)} ${driveTeacherDetails(model)}
     ${bench.note ? html`<p class="drive-result" role="status">${bench.note}</p>` : nothing}`;
 }
 
@@ -283,7 +282,7 @@ function update() {
   render(historyPanel(), document.getElementById('robotDriveLog'));
   const panel = document.getElementById('robotDrive');
   // Driving needs a connection; before that the dialog is about connecting.
-  panel.hidden = model.blockers.some((blocker) => blocker.code === 'no_link');
+  panel.hidden = false;
   render(panel.hidden ? nothing : benchPanel(model), panel);
 }
 

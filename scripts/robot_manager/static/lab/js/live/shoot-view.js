@@ -1,3 +1,5 @@
+import { controlStatus, hardBlocked } from './control-status.js';
+import { freshInteraction } from './press-guard.js';
 import { html, nothing, unsafeHTML } from '../vendor/lit-html.js';
 import { loadJson, fillSentence as fill } from '../core/content.js';
 import { runModeBadgeHtml } from '../shell/run-mode.js';
@@ -57,7 +59,7 @@ function confirmBox(model, actions) {
         type="checkbox"
         data-shoot-confirm
         .checked=${model.confirmed}
-        ?disabled=${model.spinning}
+        ?disabled=${model.spinning || hardBlocked(model)}
         @change=${(event) => actions.confirm(event.target.checked)}
       />
       ${shootCopy.confirm}
@@ -76,7 +78,7 @@ function powerSlider(model, actions) {
       max=${range.max}
       step="1"
       .value=${String(model.percent)}
-      ?disabled=${!model.allowed}
+      ?disabled=${!model.allowed || hardBlocked(model)}
       @input=${(event) => actions.setPercent(Number(event.target.value))}
     />
     <output data-shoot-power-value>${model.percent}%</output>
@@ -87,47 +89,49 @@ function tiltSlider(model, view, actions) {
   const shown = view.tiltPreview ?? model.tilt;
   const control = model.controls.tilt;
   return html`<label class="shoot-slider">
-      <span>${shootCopy.tilt}</span>
-      <input
-        type="range"
-        data-shoot-tilt
-        min=${Math.ceil(model.limits.tilt_min)}
-        max=${Math.floor(model.limits.tilt_max)}
-        step="1"
-        .value=${String(shown)}
-        ?disabled=${!control.enabled}
-        @input=${(event) => actions.previewTilt(Number(event.target.value))}
-        @change=${(event) => actions.setTilt(Number(event.target.value))}
-      />
-      <output data-shoot-tilt-value>${shown}°</output>
-    </label>
-    <p class="drive-note" data-shoot-tilt-note>
-      ${
-        control.reason?.key === 'tilt_unknown'
-          ? reasonSentence('tilt_unknown', shootCopy)
-          : shootCopy.tiltNote
-      }
-    </p>`;
+    <span>${shootCopy.tilt}</span>
+    <input
+      type="range"
+      data-shoot-tilt
+      data-live-command-input
+      min=${Math.ceil(model.limits.tilt_min)}
+      max=${Math.floor(model.limits.tilt_max)}
+      step="1"
+      .value=${String(shown)}
+      ?disabled=${!control.enabled}
+      @input=${(event) => freshInteraction(event, () => actions.previewTilt(Number(event.target.value)))}
+      @change=${(event) => freshInteraction(event, () => actions.setTilt(Number(event.target.value)))}
+    />
+    <output data-shoot-tilt-value>${shown}°</output>
+  </label> `;
 }
 
 function buttons(model, actions) {
-  const spin = model.controls.spin;
-  const fire = model.controls.fire;
-  const spinButton = spin.stop
-    ? html`<button class="drive-stop" data-shoot-spin="stop" @click=${actions.stopOwn}>
-        ${shootCopy.spinStop}
-      </button>`
-    : html`<button
-        class="drive-start"
-        data-shoot-spin="start"
-        ?disabled=${!spin.enabled}
-        @click=${actions.startRoller}
-      >
-        ${shootCopy.spin}
-      </button>`;
-  return html`<div class="live-capture-actions shoot-actions">
-    ${spinButton}
-    <button class="shoot-fire" data-shoot-fire ?disabled=${!fire.enabled} @click=${actions.fire}>
+  return html`<div class="live-capture-actions shoot-actions live-fixed-actions">
+    <button
+      class="drive-start"
+      data-shoot-spin="start"
+      data-live-start-action
+      ?disabled=${!model.controls.spin.enabled || model.controls.spin.stop}
+      @click=${(event) => freshInteraction(event, actions.startRoller)}
+    >
+      ${shootCopy.spin}
+    </button>
+    <button
+      class="drive-stop"
+      data-shoot-own-stop
+      ?disabled=${!model.spinning}
+      @click=${actions.stopOwn}
+    >
+      ${shootCopy.spinStop}
+    </button>
+    <button
+      class="shoot-fire"
+      data-shoot-fire
+      data-live-start-action
+      ?disabled=${!model.controls.fire.enabled}
+      @click=${(event) => freshInteraction(event, actions.fire)}
+    >
       ${shootCopy.fire}
     </button>
   </div>`;
@@ -299,21 +303,22 @@ function offLine(model, after) {
  * stopOwn, fire. `after`: the lesson's part right under the buttons (launcherPanel's `after`).
  */
 function shootBlock(model, view, actions, after = nothing) {
-  const heading = html`<h2>${unsafeHTML(runModeBadgeHtml('drive'))} ${shootCopy.title}</h2>`;
-  if (!shootOffered(model)) return html`${heading}${offLine(model, after)}`;
-  return html`${heading}
+  return html`<h2>${unsafeHTML(runModeBadgeHtml('drive'))} ${shootCopy.title}</h2>
     <div class="drive-block shoot-block" data-shoot-block>
-      <p>${shootCopy.lead}</p>
-      ${checklist(model)} ${teacherDetails(model)} ${confirmBox(model, actions)}
+      ${controlStatus(model.blockers, model.spinning ? 'spinning' : '', 'shoot')}
+      ${confirmBox(model, actions)}
       <div class="shoot-sliders">
         ${powerSlider(model, actions)}${tiltSlider(model, view, actions)}
       </div>
       <div class="shoot-run" data-shoot-run>
-        ${buttons(model, actions)} ${spinLine(model)} ${whyLine(model)} ${after}
+        ${buttons(model, actions)}
+        <p class="drive-note" data-shoot-tilt-note>${shootCopy.tiltNote}</p>
+        ${spinLine(model)} ${whyLine(model)} ${after}
         <div class="shoot-strip" data-live-strip>${estopLine(model)} ${launcherState(model)}</div>
         ${noteLines(model, view)}
       </div>
-      ${limitsNote(model)}
+      <p>${shootCopy.lead}</p>
+      ${checklist(model)} ${teacherDetails(model)} ${limitsNote(model)}
     </div>`;
 }
 
