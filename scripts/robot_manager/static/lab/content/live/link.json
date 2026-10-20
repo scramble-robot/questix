@@ -82,5 +82,27 @@
     "tooBig": "記録が大きすぎます（{limit} MBまで）",
     "timeout": "ロボットから返事がありませんでした",
     "lost": "保存の途中でロボットとの接続が切れました"
+  },
+  "header": {
+    "estop": {
+      "pressed": "非常停止：押されています",
+      "released": "非常停止：解除",
+      "unknown": "非常停止：不明",
+      "stale": "非常停止：不明"
+    },
+    "estopDescription": {
+      "pressed": "非常停止：押されています",
+      "released": "非常停止：解除されています",
+      "unknown": "非常停止の状態は不明です。信号がまだ届いていません。",
+      "stale": "非常停止の状態は不明です。信号が途絶えています。"
+    },
+    "permission": "許可：走行{drive} 発射{shoot}",
+    "permissionDescription": "教材からの走行の許可：{drive}。教材からの発射の許可：{shoot}。",
+    "allowed": {
+      "on": "あり",
+      "off": "なし",
+      "unknown": "不明"
+    },
+    "connection": "接続："
   }
 }
