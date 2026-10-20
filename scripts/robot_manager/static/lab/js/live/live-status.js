@@ -1,0 +1,75 @@
+import { render } from '../vendor/lit-html.js';
+import { loadJson } from '../core/content.js';
+import { onRobot, robotState, linkStage } from './robot-link.js';
+import { liveStatusModel } from './live-status-core.js';
+import { liveStatusLine } from './live-status-view.js';
+const copy = await loadJson('content/live/link.json');
+const received = {};
+const listeners = new Set();
+const dialogOrder = [];
+const dialogHosts = new Map();
+let lastModel = '';
+function liveStatus() {
+  const link = robotState();
+  return { ...liveStatusModel(link, received, performance.now()), stage: linkStage(link) };
+}
+function activeLiveDialog() {
+  for (const dialog of document.querySelectorAll('dialog[open]'))
+    if (!dialogOrder.includes(dialog)) dialogOrder.push(dialog);
+  for (let i = dialogOrder.length - 1; i >= 0; i--)
+    if (!dialogOrder[i].open || !dialogOrder[i].isConnected) dialogOrder.splice(i, 1);
+  return dialogOrder.at(-1) ?? null;
+}
+function drawStatuses() {
+  const model = liveStatus();
+  const active = activeLiveDialog();
+  const header = document.getElementById('liveHeaderStatus');
+  if (header) {
+    header.setAttribute('aria-live', active ? 'off' : 'polite');
+    render(liveStatusLine(model, copy), header);
+  }
+  for (const dialog of document.querySelectorAll('dialog')) {
+    let host = dialogHosts.get(dialog);
+    if (dialog.open && (!host || host.parentElement !== dialog)) {
+      host = document.createElement('div');
+      host.className = 'live-status-line live-dialog-status';
+      host.setAttribute('role', 'status');
+      dialog.prepend(host);
+      dialogHosts.set(dialog, host);
+    }
+    if (host) {
+      host.setAttribute('aria-live', dialog === active ? 'polite' : 'off');
+      render(liveStatusLine(model, copy), host);
+    }
+  }
+  const key = JSON.stringify(model);
+  if (key !== lastModel) {
+    lastModel = key;
+    for (const listener of listeners) listener(model);
+  }
+}
+function onLiveStatus(listener) {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+for (const type of ['estop', 'drive_state', 'shoot_state'])
+  onRobot(type, (message) => {
+    received[type] = { message, at: performance.now() };
+    drawStatuses();
+  });
+onRobot('state', (link) => {
+  if (link.phase !== 'open') for (const key of Object.keys(received)) delete received[key];
+  drawStatuses();
+});
+new MutationObserver((records) => {
+  for (const { target } of records) {
+    if (!target.matches('dialog')) continue;
+    const index = dialogOrder.indexOf(target);
+    if (index >= 0) dialogOrder.splice(index, 1);
+    if (target.open) dialogOrder.push(target);
+  }
+  drawStatuses();
+}).observe(document.body, { subtree: true, attributeFilter: ['open'] });
+setInterval(drawStatuses, 100);
+drawStatuses();
+export { liveStatus, onLiveStatus, activeLiveDialog };

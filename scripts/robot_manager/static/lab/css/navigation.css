@@ -101,24 +101,100 @@
   }
 }
 
-/* Phones: the header stays reachable. series.js tucks it away while the learner scrolls down and
-   brings it back on the first scroll up. */
-@media (max-width: 600px) {
-  .site-header {
-    position: sticky;
-    top: 0;
-    transition: transform 0.2s ease;
-  }
-  .site-header.is-tucked {
-    transform: translateY(-100%);
-  }
-  .course-switcher .series-nav {
-    padding: 10px;
-    max-height: calc(100dvh - 190px);
+/* Two rows at every required width. State words never collapse or scroll away. */
+body .site-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  transform: none;
+  transition: none;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: 44px 28px;
+  align-items: center;
+  gap: 0 8px;
+  height: 88px;
+  min-height: 88px;
+  max-width: none;
+  padding: 8px;
+  background: #f3f7f6;
+}
+body .site-header .brand-logo {
+  width: 96px;
+}
+body .site-header .brand-lab {
+  font-size: 13px;
+}
+body .site-header .header-actions {
+  grid-column: 2;
+  grid-row: 1;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+body .header-actions > button,
+body .header-actions > .course-switcher > summary {
+  min-height: 44px;
+  padding: 6px 10px;
+  font-size: 14px;
+}
+body .header-actions > .course-switcher {
+  min-width: 0;
+  flex: 0 0 auto;
+}
+body .course-switcher .switcher-label,
+body .course-switcher #currentCourseTitle,
+body .header-actions .header-long {
+  display: none;
+}
+body .course-switcher .switcher-short {
+  display: inline;
+}
+body .course-switcher > summary {
+  flex-direction: row;
+  padding-right: 28px;
+}
+body .course-switcher > summary::after {
+  position: absolute;
+  right: 8px;
+}
+.live-status-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-height: 28px;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+  color: #243c41;
+  background: #f3f7f6;
+}
+#liveHeaderStatus {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+.live-status-line [data-live-status-estop='pressed'] {
+  color: #a51d21;
+  font-weight: 700;
+}
+.live-dialog-status {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  margin: 0 0 12px;
+  padding: 4px 0;
+}
+@media (max-width: 700px) {
+  body dialog[open] {
+    max-width: none;
+    width: 100%;
+    margin: 0;
+    padding: 8px;
+    height: 100dvh;
+    max-height: 100dvh;
   }
 }
-@media (prefers-reduced-motion: reduce) {
-  .site-header {
-    transition: none;
-  }
+html {
+  scroll-padding-top: 96px;
 }
