@@ -119,6 +119,7 @@ function buttons(model, actions) {
     <button
       class="drive-stop"
       data-shoot-own-stop
+      aria-label=${shootCopy.spinStopLabel}
       ?disabled=${!model.spinning}
       @click=${actions.stopOwn}
     >
