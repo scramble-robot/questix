@@ -216,14 +216,12 @@ function stateValue(value, fresh, heard) {
 // The emergency stop as the drive strip says it (「非常停止：押されています／解除されています」),
 // from the bridge's own check: the launcher cannot run while it is pressed.
 function estopLine(model) {
-  const pressed = model.blockers.some((blocker) => blocker.code === 'emergency_stop');
+  const state = model.estopState ?? 'unknown';
   return html`<p
-    class=${pressed ? 'rs-strip-estop is-pressed' : 'rs-strip-estop is-released'}
-    data-shoot-estop=${pressed ? 'pressed' : 'released'}
+    class="rs-strip-estop ${state === 'pressed' ? 'is-pressed' : state === 'released' ? 'is-released' : 'is-unknown'}"
+    data-shoot-estop=${state}
   >
-    ${pressed ? html`<span aria-hidden="true">⛔</span>` : nothing}${
-      pressed ? shootCopy.estop.pressed : shootCopy.estop.released
-    }
+    ${shootCopy.estop[state]}
   </p>`;
 }
 

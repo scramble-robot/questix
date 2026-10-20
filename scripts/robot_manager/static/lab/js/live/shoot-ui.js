@@ -1,3 +1,4 @@
+import { liveStatus, onLiveStatus } from './live-status.js';
 import { html, render, ref, nothing } from '../vendor/lit-html.js';
 import { fillSentence as fill } from '../core/content.js';
 import { revealElement } from '../core/reveal.js';
@@ -76,7 +77,12 @@ function actionsOf(entry) {
 function draw(entry, model) {
   if (!entry.element?.isConnected) return;
   render(
-    shootBlock(model, entry.view, entry.actions, entry.options.after?.() ?? nothing),
+    shootBlock(
+      { ...model, estopState: liveStatus().estop },
+      entry.view,
+      entry.actions,
+      entry.options.after?.() ?? nothing,
+    ),
     entry.element,
   );
 }
@@ -221,6 +227,7 @@ function launcherPanel(place, options = {}) {
 }
 
 function initShootUi() {
+  onLiveStatus(redraw);
   onShoot(() => {
     startTimer();
     redraw();
