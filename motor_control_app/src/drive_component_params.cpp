@@ -155,12 +155,18 @@ void DriveComponent::declareParameters() {
 
   // オドメトリ出力（実測 twist を積分して /odom を publish）。
   this->declare_parameter("publish_tf", true);
+  this->declare_parameter("odom_stop_gap_recovery", odom_stop_gap_.enabled);
+  this->declare_parameter("odom_stop_gap_speed_margin", odom_stop_gap_.speed_margin);
+  this->declare_parameter("odom_stop_gap_noise_counts", odom_stop_gap_.noise_counts);
   this->declare_parameter("odom_topic", "/odom");
   this->declare_parameter("odom_frame_id", "odom");
   this->declare_parameter("base_frame_id", "base_link");
 }
 
 void DriveComponent::readParameters() {
+  odom_stop_gap_.enabled = this->get_parameter("odom_stop_gap_recovery").as_bool();
+  odom_stop_gap_.speed_margin = this->get_parameter("odom_stop_gap_speed_margin").as_double();
+  odom_stop_gap_.noise_counts = this->get_parameter("odom_stop_gap_noise_counts").as_int();
   serial_port_ = this->get_parameter("serial_port").as_string();
   baud_rate_ = this->get_parameter("baud_rate").as_int();
   wheel_radius_ = this->get_parameter("wheel_radius").as_double();
@@ -400,6 +406,9 @@ rcl_interfaces::msg::SetParametersResult DriveComponent::onParameterChange(
                                                                 "max_motor_rpm",
                                                                 "control_mode",
                                                                 "current_measured_source",
+                                                                "odom_stop_gap_recovery",
+                                                                "odom_stop_gap_speed_margin",
+                                                                "odom_stop_gap_noise_counts",
                                                                 "control_rate",
                                                                 "serial_response_timeout_ms",
                                                                 "status_publish_rate",
