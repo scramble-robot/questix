@@ -3,7 +3,7 @@ import { freshInteraction } from './press-guard.js';
 import { html, nothing } from '../vendor/lit-html.js';
 import { loadJson, fillSentence as fill } from '../core/content.js';
 import { revealElement } from '../core/reveal.js';
-import { driveControls, notAllowedLine } from './drive-view.js';
+import { driveControls } from './drive-view.js';
 import { setGroupName } from './capture.js';
 import { recordsCopy } from './records-core.js';
 import { liveStateStrip, robotStatePanel } from './robot-state.js';
@@ -23,28 +23,9 @@ import { liveStateStrip, robotStatePanel } from './robot-state.js';
 const captureCopy = await loadJson('content/live/capture.json');
 
 const streamLabel = (name) => captureCopy.streamNames[name] ?? name;
-// Room kept above the stop bar (css/live.css .drive-bar) when a run area is brought on screen.
-const STOP_BAR_ROOM = 96; // px
 
-// While the page may drive the robot, the controller is off, so /target_twist only flows while
-// someone drives: not receiving it then is normal, not a fault worth a warning.
-function missingNow(model) {
-  if (!drivingAllowed(model)) return model.link.missing;
-  return model.link.missing.filter((name) => name !== 'twist');
-}
-
-const drivingAllowed = (model) => Boolean(model.drive?.allowed && model.link.connected);
 // A driving run (or its tail) owns the block's buttons until it is over.
 const driveBusy = (model) => model.running || model.tail;
-// The record button is the block's main action unless the page may drive (then 記録だけする is
-// folded with the files) — or while a recording it started runs, so its stop stays in view.
-const recordIsMain = (model) => !drivingAllowed(model) && !driveBusy(model);
-
-function recordLabel(model) {
-  if (drivingAllowed(model)) return fill(captureCopy.recordOther, { seconds: model.seconds });
-  return fill(model.recordLabel ?? captureCopy.record, { seconds: model.seconds });
-}
-
 function recordButton(model, actions) {
   return html`<button
       class="live-capture-record"
@@ -260,18 +241,6 @@ function captureNote(model) {
   return captureCopy.recordOnly;
 }
 
-function linkLine(model) {
-  const missing = missingNow(model);
-  if (missing.length)
-    return html`<p class="live-capture-state warn" data-live-state>
-      ${fill(captureCopy.missing, { streams: missing.map(streamLabel).join('と') })}
-    </p>`;
-  if (!recordIsMain(model)) return nothing;
-  return html`<p class="live-capture-state" data-live-state>
-    ${captureCopy.state[model.link.phase] ?? captureCopy.state.idle}
-  </p>`;
-}
-
 // The record button as the block's main action (no driving here, or the teacher stopped it).
 function recordPart(model, actions) {
   return html`<div class="live-capture" data-live-capture>
@@ -292,23 +261,6 @@ function statePart(model) {
     hideOffline: true,
     folded: true,
   });
-}
-
-// Without a robot: one line with the way to connect, the result of what was opened, the files.
-function offlineBlock(model, actions) {
-  return html`<div class="live-block live-block-off" data-live-block=${model.slot ?? ''}>
-    <p class="live-offline-line" data-live-offline>
-      <span>${captureCopy.offlineLine}</span>
-      ${
-        actions.openLink
-          ? html`<button class="small" data-live-connect @click=${actions.openLink}>
-              ${captureCopy.connect}
-            </button>`
-          : nothing
-      }
-    </p>
-    ${resultBox(model)} ${filesSection(model, actions)}
-  </div>`;
 }
 
 /**
@@ -344,7 +296,9 @@ function revealLiveRun(slot) {
     const box = run.getBoundingClientRect();
     const header = document.querySelector('.site-header');
     const headerBottom = header ? Math.max(0, header.getBoundingClientRect().bottom) : 0;
-    if (box.top >= headerBottom && box.bottom <= window.innerHeight - STOP_BAR_ROOM) return;
+    const bar = document.getElementById('liveStopBar');
+    const bottom = bar && !bar.hidden ? bar.getBoundingClientRect().top : window.innerHeight;
+    if (box.top >= headerBottom && box.bottom <= bottom) return;
     revealElement(run);
   });
 }

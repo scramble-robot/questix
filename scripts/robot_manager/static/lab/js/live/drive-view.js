@@ -138,17 +138,6 @@ function runControls(model, drive, actions) {
     </button>`;
 }
 
-// Before the teacher allows driving there is nothing to operate: one line instead of the block.
-function notAllowedLine(drive) {
-  const code = drive.blockers.find((blocker) =>
-    ['old_bridge', 'not_allowed'].includes(blocker.code),
-  )?.code;
-  return html`<div class="drive-block drive-block-off" data-drive-block data-drive-off=${code}>
-    <p>${code === 'old_bridge' ? studentText({ code }) : driveCopy.notAllowed}</p>
-    ${teacherDetails(drive)}
-  </div>`;
-}
-
 /**
  * `model` is the session model (`recording`, `running`, `tail`, `elapsed`, `total`), `drive` the
  * lesson's drive part: driveModel() plus `program`, `placement`, `confirmLabel`, `startLabel`,
@@ -176,7 +165,6 @@ function driveControls(model, drive, actions, parts = {}) {
 
 export {
   driveControls,
-  notAllowedLine,
   driveEndedText,
   driveCopy,
   checklist as driveChecklist,
