@@ -286,7 +286,7 @@ function limitsNote(model) {
 function shootBlock(model, view, actions, after = nothing) {
   return html`<h2>${unsafeHTML(runModeBadgeHtml('drive'))} ${shootCopy.title}</h2>
     <div class="drive-block shoot-block" data-shoot-block>
-      ${controlStatus(model.blockers, model.spinning ? 'spinning' : '', 'shoot')}
+      ${controlStatus(model.blockers, model.spinning ? 'spinning' : '', 'shoot', model.reconfirm)}
       ${confirmBox(model, actions)}
       <div class="shoot-sliders">
         ${powerSlider(model, actions)}${tiltSlider(model, view, actions)}
@@ -296,6 +296,13 @@ function shootBlock(model, view, actions, after = nothing) {
         <p class="drive-note" data-shoot-tilt-note>${shootCopy.tiltNote}</p>
         ${spinLine(model)} ${whyLine(model)} ${after}
         <div class="shoot-strip" data-live-strip>${estopLine(model)} ${launcherState(model)}</div>
+        ${
+          model.reconfirm
+            ? html`<p class="drive-result" role="status" data-shoot-reconfirm>
+                ${shootCopy.reconfirm[model.reconfirm]}
+              </p>`
+            : nothing
+        }
         ${noteLines(model, view)}
       </div>
       <p>${shootCopy.lead}</p>
