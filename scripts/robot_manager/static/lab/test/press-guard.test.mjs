@@ -40,7 +40,7 @@ function fixture() {
       context.act({ currentTarget: button, detail, preventDefault() {} }, () => calls++);
     },
     press(type = 'pointerdown', extra = {}) {
-      events[type]({ target: button, ...extra });
+      events[type]({ type, target: button, ...extra });
     },
     disable() {
       button.disabled = true;
@@ -89,6 +89,17 @@ test('a command input changing after a disabled press cannot send even when deta
   f.button.disabled = true;
   f.press();
   f.button.disabled = false;
+  f.act(0);
+  assert.equal(f.calls(), 0);
+});
+
+test('an unrelated key release cannot make a held disabled command input valid', () => {
+  const f = fixture();
+  f.button.disabled = true;
+  f.press();
+  f.button.disabled = false;
+  f.press('keyup', { key: 'Shift' });
+  f.finish();
   f.act(0);
   assert.equal(f.calls(), 0);
 });

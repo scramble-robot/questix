@@ -1,6 +1,7 @@
 // UI press provenance only. Sender readiness and all ROS/bridge decisions remain authoritative.
 const presses = new Map();
-let pointerInProgress = false;
+let physicalPending = false;
+const heldInputs = new Set();
 const targetOf = (event) =>
   event.target.closest?.('[data-live-start-action], [data-live-command-input]');
 function begin(event) {
@@ -10,17 +11,32 @@ function begin(event) {
 document.addEventListener(
   'pointerdown',
   (event) => {
-    pointerInProgress = true;
+    heldInputs.add(`pointer:${event.pointerId ?? 0}`);
+    physicalPending = true;
     begin(event);
   },
   true,
 );
-document.addEventListener('keydown', begin, true);
-function end() {
-  // click/change follows pointerup/keyup in the same task. Keep invalid presses through it.
+document.addEventListener(
+  'keydown',
+  (event) => {
+    heldInputs.add(`key:${event.code ?? event.key ?? ''}`);
+    physicalPending = true;
+    begin(event);
+  },
+  true,
+);
+function end(event) {
+  const id =
+    event.type === 'keyup'
+      ? `key:${event.code ?? event.key ?? ''}`
+      : `pointer:${event.pointerId ?? 0}`;
+  heldInputs.delete(id);
+  // click/change follows release in the same task. An unrelated keyup must not end a pointer press.
   setTimeout(() => {
+    if (heldInputs.size) return;
     presses.clear();
-    pointerInProgress = false;
+    physicalPending = false;
   }, 0);
 }
 for (const type of ['pointerup', 'pointercancel', 'keyup'])
@@ -31,7 +47,7 @@ new MutationObserver((records) => {
 function freshInteraction(event, action) {
   const target = event.currentTarget;
   const known = presses.get(target);
-  const explicit = known === true || (known === undefined && !pointerInProgress && !event.detail);
+  const explicit = known === true || (known === undefined && !physicalPending && !event.detail);
   if (target.disabled || !explicit) {
     event.preventDefault();
     return;
