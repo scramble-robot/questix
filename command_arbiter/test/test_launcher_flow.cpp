@@ -114,6 +114,63 @@ TEST(LauncherFlow, ASlowRollerNeverSpinsUp) {
   EXPECT_STREQ(flow.labRefusal(), "not_spinning");
 }
 
+TEST(LauncherFlow, Float32ThresholdCommandsSpinUpEvenAtTheCap) {
+  for (const double minimum : {0.2, 0.21, 0.7, 0.8, 0.20001}) {
+    LauncherFlow flow;
+    LauncherFlow::Config config;
+    config.min_fire_power = minimum;
+    config.lab_max_power = minimum;
+    flow.configure(config);
+    flow.onJoy(cmd(0.0), 0.0);
+    flow.onLab(cmd(0.0), true, 0.0);
+    const double power = static_cast<double>(static_cast<float>(minimum));
+    const auto out = spin(flow, power, 0.1, 1.5);
+    EXPECT_LE(out.command.roller_power, minimum);
+    EXPECT_DOUBLE_EQ(flow.spinReadyInSec(1.5), 0.0);
+    EXPECT_EQ(flow.onLab(cmd(power, 1), true, 1.55).command.fire_seq, 1u);
+  }
+}
+
+TEST(LauncherFlow, Float32ComparisonDoesNotRoundFractionalThresholdsToWholePercent) {
+  for (const double power : {0.0, 0.19, 0.2}) {
+    LauncherFlow flow;
+    LauncherFlow::Config config;
+    config.min_fire_power = 0.20001;
+    flow.configure(config);
+    flow.onJoy(cmd(0.0), 0.0);
+    flow.onLab(cmd(0.0), true, 0.0);
+    const double wire_power = static_cast<double>(static_cast<float>(power));
+    spin(flow, wire_power, 0.1, 1.5);
+    EXPECT_TRUE(std::isnan(flow.spinReadyInSec(1.5)));
+    EXPECT_EQ(flow.onLab(cmd(wire_power, 1), true, 1.55).command.fire_seq, 0u);
+  }
+}
+
+TEST(LauncherFlow, ACapBelowTheMinimumCannotQualifyThroughFloat32Rounding) {
+  LauncherFlow flow;
+  LauncherFlow::Config config;
+  config.min_fire_power = 0.21;
+  config.lab_max_power = 0.21 - 1e-10;  // both settings have the same float32 representation
+  flow.configure(config);
+  flow.onJoy(cmd(0.0), 0.0);
+  flow.onLab(cmd(0.0), true, 0.0);
+  spin(flow, 0.5, 0.1, 1.5);
+  EXPECT_TRUE(std::isnan(flow.spinReadyInSec(1.5)));
+  EXPECT_EQ(flow.onLab(cmd(0.5, 1), true, 1.55).command.fire_seq, 0u);
+}
+
+TEST(LauncherFlow, NonFiniteMinimumNeverStartsSpinUp) {
+  for (const double minimum : {kNaN, std::numeric_limits<double>::infinity(),
+                               -std::numeric_limits<double>::infinity()}) {
+    auto flow = ready();
+    auto config = flow.config();
+    config.min_fire_power = minimum;
+    flow.configure(config);
+    spin(flow, 0.5, 0.1, 1.5);
+    EXPECT_TRUE(std::isnan(flow.spinReadyInSec(1.5)));
+  }
+}
+
 TEST(LauncherFlow, LabShotsKeepTheIntervalFromAnyShot) {
   auto flow = ready();
   spin(flow, 0.5, 0.1, 1.2);
