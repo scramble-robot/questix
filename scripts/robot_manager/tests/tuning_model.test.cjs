@@ -16,6 +16,8 @@ test('defaults and ID15 keep ROS units and derived stopping quantities', () => {
   assert.equal(id15.time, 2);
   assert.equal(Math.round(id15.stop * 180 / Math.PI), 258);
   assert.equal(m.speedText(-4.5, 'angular'), '4.5 rad/s（258°/s）（方向反転）');
+  assert.match(m.summary(id15, 'angular'), /加速時間 2 s。全速から.*約 258°/);
+  assert.match(m.summary(m.motion(values(), geometry, 'linear'), 'linear'), /約 0.33 m/);
 });
 
 test('ID15 10 m/s uses the 475 rpm wheel ceiling for time and distance', () => {
@@ -26,6 +28,7 @@ test('ID15 10 m/s uses the 475 rpm wheel ceiling for time and distance', () => {
   assert.equal(linear.limited, true);
   close(linear.time, linear.speed / 1.5);
   close(linear.stop, linear.speed ** 2 / 3);
+  assert.match(m.summary(linear, 'linear'), /2.49 m\/s.*1.66 s.*約 2.06 m/);
   const turn = m.motion(values(10, 20), geometry, 'angular');
   close(turn.speed, 2 * linear.speed / 0.5);
   close(turn.time, turn.speed / 1.5);

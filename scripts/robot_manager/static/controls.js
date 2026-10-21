@@ -143,6 +143,34 @@ function refreshTuningFields(activeInput) {
   }
 }
 
+function createTuningPreviews(container) {
+  for (const [kind, title] of [["angular", "旋回の変化の目安"], ["linear", "走行の変化の目安"]]) {
+    const section = document.createElement("section");
+    section.className = "tuning-preview";
+    const heading = document.createElement("h3");
+    heading.textContent = title;
+    heading.id = `tuning-${kind}-heading`;
+    section.setAttribute("aria-labelledby", heading.id);
+    const summary = document.createElement("p");
+    summary.id = `tuning-${kind}-summary`;
+    summary.className = "tuning-motion-summary";
+    summary.setAttribute("aria-live", "polite");
+    const note = document.createElement("p");
+    note.className = "control-help";
+    note.textContent = "単独で倒したときの目安です。前進と旋回を同時に入れたときの切り詰めは含みません。"
+      + "標準起動の車輪寸法で一定加速度として計算し、最後の減速をなめらかにする帯を省いているため、時間と停止量は約の値です。実測値ではありません。";
+    section.append(heading, summary, note);
+    container.appendChild(section);
+  }
+}
+
+function renderTuningPreviews() {
+  for (const kind of ["angular", "linear"]) {
+    const summary = document.getElementById(`tuning-${kind}-summary`);
+    summary.textContent = TuningModel.summary(TuningModel.motion(controlDraft, controlProfile.geometry, kind), kind);
+  }
+}
+
 function tiltDirectionKey() {
   return ["tilt_up_button_index", "tilt_down_button_index"]
     .find((key) => mapSelection?.actionId === `joy_launcher.${key}`);
@@ -381,6 +409,7 @@ function refreshControlChanges(activeInput) {
   const count = ControlLabels.changedCount(controlProfile.values, controlDraft);
   controlsDirty = count > 0;
   refreshTuningFields(activeInput);
+  renderTuningPreviews();
   renderControllerMap();
   for (const row of document.querySelectorAll(".control-field")) {
     const { node, key } = row.dataset;
@@ -644,6 +673,7 @@ function renderControls() {
     }
     container.appendChild(section);
   }
+  createTuningPreviews(container);
   renderControlSummary();
   refreshControlChanges();
   renderRuntimeValues();

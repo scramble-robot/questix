@@ -1276,6 +1276,9 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .control-range, .control-estimate { grid-column: 1 / -1; color: var(--text-dim);
   font-size: var(--font-small); line-height: 1.65; overflow-wrap: anywhere; }
 .control-estimate { min-height: 5.2rem; }
+.tuning-preview { border-top: 1px solid var(--border-input); margin-top: 1rem; padding-top: 1rem; }
+.tuning-preview h3 { font-size: 1rem; margin-bottom: 0.75rem; }
+.tuning-motion-summary { height: 5.5rem; overflow: auto; line-height: 1.65; }
 .control-help { color: var(--text-dim); line-height: 1.6; margin: 0.8rem 0; }
 .control-toolbar { display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap; }
 .control-section { border: 1px solid var(--border-input); border-radius: var(--radius-control);

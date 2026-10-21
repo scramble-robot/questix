@@ -913,6 +913,8 @@ test('ID15 wheel limit is shown, preserves time on edits and does not reject sav
   assert.equal(getPayload().values.joy_controller.longitudinal_input_ratio, 10);
   assert.equal(getPayload().values.drive_component.max_linear_accel, 1.5);
   assert.equal(document.getElementById('control-drive_component-max_angular_accel').value, 2);
+  assert.match(document.getElementById('tuning-angular-summary').textContent, /約 258°/);
+  assert.match(document.getElementById('tuning-linear-summary').textContent, /約 2.06 m/);
 });
 
 test('all visible fields state API ranges and time conversion rejects out-of-range acceleration', async () => {

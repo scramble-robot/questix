@@ -60,7 +60,17 @@ const TuningModel = (() => {
       + (value < 0 ? "（方向反転）" : "");
   }
 
-  return { axes, finite, wheelLimit, motion, acceleration, retime, presetTime, number, speedText };
+  function summary(state, kind) {
+    if (!state) return "車輪寸法・速度・加速度が未確認または入力中のため、目安は算出できません。";
+    if (state.speed === 0) return `${kind === "angular" ? "旋回" : "走行"}なし。速さが0のため加速時間は算出できません。`;
+    if (state.unlimited) return "加速度の制限なし。加速時間と止まるまでの量は算出しません。";
+    const quantity = kind === "angular" ? `${Math.round(state.stop * 180 / Math.PI)}°回ります`
+      : `${number(state.stop)} m進みます`;
+    return `最高速度の目安 ${speedText(state.speed, kind)}、加速時間 ${number(state.time)} s。`
+      + `全速からスティックを戻すと、止まるまでに約 ${quantity}。`;
+  }
+
+  return { axes, finite, wheelLimit, motion, acceleration, retime, presetTime, number, speedText, summary };
 })();
 
 if (typeof module !== "undefined") module.exports = TuningModel;
