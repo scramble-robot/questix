@@ -50,6 +50,22 @@ class DifferentialTests(unittest.TestCase):
         self.assertLessEqual(abs(left), 475)
         self.assertLessEqual(abs(right), 475)
 
+    def test_combined_target_uses_the_simulator_rpm_limit(self):
+        radius = self.drive.config['wheel_radius']
+        track = self.drive.config['wheel_separation']
+        # Exercise both the initial limit and changes on an already-running core.
+        for limit in (475, 100, 475):
+            with self.subTest(limit=limit):
+                self.drive.limit = limit
+                left, right, v, w = self.settle(2., 6.)
+                scale = (limit * 2 * math.pi * radius / 60) / (2 + 6 * track / 2)
+                self.assertEqual(right, -limit)
+                self.assertAlmostEqual(left, limit * (2 - 6 * track / 2)
+                                       / (2 + 6 * track / 2), delta=0.5)
+                # Returned twist is reconstructed from integer wheel RPMs.
+                self.assertAlmostEqual(v, 2 * scale, delta=0.006)
+                self.assertAlmostEqual(w, 6 * scale, delta=0.03)
+
 
 if __name__ == '__main__':
     unittest.main()
