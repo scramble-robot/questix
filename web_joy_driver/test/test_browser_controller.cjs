@@ -475,7 +475,9 @@ test("e-stop display distinguishes unknown causes, exact age boundary and discon
   assert.match(c.$("estop").getAttribute("aria-label"), /まだ届いていません/);
   for (const [estop, age, label] of [
     [false, 0, "解除"], [true, 0, "押されています"],
-    [false, 1500, "解除"], [true, 1500, "押されています"],
+    // estop_age_ms is truncated: 1499 means under 1.5 s, 1500 may already be over it.
+    [false, 1499, "解除"], [true, 1499, "押されています"],
+    [false, 1500, "不明"], [true, 1500, "不明"],
     [false, 1501, "不明"], [true, 1501, "不明"],
     [false, null, "不明"], [false, -1, "不明"], [false, "0", "不明"],
   ]) {
@@ -483,7 +485,7 @@ test("e-stop display distinguishes unknown causes, exact age boundary and discon
     assert.equal(c.$("estop").textContent, "非常停止：" + label);
   }
   c.sockets[0].message(status({ estop_age_ms: 1400 }));
-  c.advance(100); assert.equal(c.$("estop").textContent, "非常停止：解除");
+  c.advance(99); assert.equal(c.$("estop").textContent, "非常停止：解除");
   c.advance(1); assert.equal(c.$("estop").textContent, "非常停止：不明");
   assert.match(c.$("estop").getAttribute("aria-label"), /途絶えています/);
   assert.match(c.$("statusDetail").textContent, /途絶えています/);

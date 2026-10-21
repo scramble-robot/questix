@@ -711,6 +711,9 @@
   // Display freshness matches Robot Manager (1.5 s). This is a page input guard,
   // independent of the actuators' emergency_stop_timeout_sec and #220's node latch.
   const ESTOP_FRESH_MS = 1500;
+  // The node truncates estop_age_ms to whole milliseconds, so the true age is up to 1 ms
+  // more than reported. Add that 1 ms so the guard errs towards "unknown", never towards fresh.
+  const ESTOP_AGE_RESOLUTION_MS = 1;
   const now = () => performance.now();
 
   const axes = new Array(NUM_AXES).fill(0);
@@ -774,7 +777,7 @@
     if (state.estop === null || state.estopAge === null || state.estopAt === null) {
       return { value: null, reason: "非常停止の信号がまだ届いていません" };
     }
-    if (state.estopAge + Math.max(0, now() - state.estopAt) > ESTOP_FRESH_MS) {
+    if (state.estopAge + ESTOP_AGE_RESOLUTION_MS + Math.max(0, now() - state.estopAt) > ESTOP_FRESH_MS) {
       return { value: null, reason: "非常停止の信号が途絶えています" };
     }
     return { value: state.estop, reason: state.estopReason };
