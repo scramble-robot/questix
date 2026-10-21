@@ -575,7 +575,7 @@ def stop_all():
     service = _stop_service()
     return {"ok": lesson["ok"] and permissions["ok"] and service["ok"], "lab": lesson,
             "lab_permissions": permissions,
-            "actuation": {key: authority[key] for key in ("drive", "launcher", "revoked")},
+            "actuation": authority,
             "service": {key: service[key] for key in ("ok", "state", "message")}}
 
 

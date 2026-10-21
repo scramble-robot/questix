@@ -128,26 +128,27 @@
          only while it is on, controller included. -->
     <section class="card" id="actuation-card" aria-labelledby="actuation-heading">
       <h2 id="actuation-heading">先生の操作許可（教材モード）</h2>
-      <p id="actuation-state" class="section-help" role="status">確認しています。</p>
-      <div class="lab-permission-row">
-        <label class="toggle-switch" for="actuation-drive-toggle">
-          <input type="checkbox" id="actuation-drive-toggle" aria-describedby="actuation-drive-state">
-          <span class="slider"></span>
-        </label>
-        <label for="actuation-drive-toggle" class="lab-permission-label">ロボットの走行制御
-          <span id="actuation-drive-state" class="lab-permission-state">—</span></label>
+      <p class="permission-neutral">スティック・ボタンから手を離してください</p>
+      <div class="permission-estop"><strong>非常停止ボタン</strong><span id="permission-estop-state">不明</span></div>
+      <fieldset class="permission-choice" aria-describedby="actuation-state">
+        <legend>走行の許可</legend>
+        <label><input type="radio" name="permission-drive" value="none" disabled><span>許可しない</span></label>
+        <label><input type="radio" name="permission-drive" value="controller" disabled><span>コントローラーのみ</span></label>
+        <label><input type="radio" name="permission-drive" value="controller_and_lab" disabled><span>コントローラーと教材</span></label>
+      </fieldset>
+      <fieldset class="permission-choice" aria-describedby="actuation-state">
+        <legend>発射の許可</legend>
+        <label><input type="radio" name="permission-launcher" value="none" disabled><span>許可しない</span></label>
+        <label><input type="radio" name="permission-launcher" value="controller" disabled><span>コントローラーのみ</span></label>
+        <label><input type="radio" name="permission-launcher" value="controller_and_lab" disabled><span>コントローラーと教材</span></label>
+      </fieldset>
+      <div id="permission-feedback" role="status" aria-live="polite">
+        <p id="actuation-drive-state">確認しています</p>
+        <p id="actuation-launcher-state">確認しています</p>
+        <p id="actuation-state" class="section-help">確認しています</p>
+        <p id="actuation-error" class="lab-inline-error"></p>
       </div>
-      <div class="lab-permission-row">
-        <label class="toggle-switch" for="actuation-launcher-toggle">
-          <input type="checkbox" id="actuation-launcher-toggle" aria-describedby="actuation-launcher-state">
-          <span class="slider"></span>
-        </label>
-        <label for="actuation-launcher-toggle" class="lab-permission-label">発射機構の操作（ローラー・チルト・発射）
-          <span id="actuation-launcher-state" class="lab-permission-state">—</span></label>
-      </div>
-      <p id="actuation-error" class="lab-inline-error" role="alert" hidden></p>
-      <p class="section-help">教材モードで使います。ここを ON にしている間だけ、ロボットはコントローラーでも教材からも動き、「教材」タブで教材からの走行／発射を許可できます（非常停止とは別のものです）。練習モードと大会モードでは使いません。はじめは OFF です。Robot Manager の再起動・ロボットの再起動・モードの切り替え・ロボット制御の起動／再起動／停止・「すべて止める」で OFF に戻ります。OFF にすると同じ動作の「教材からの走行／発射」の許可も OFF になります（ON にしても教材の許可は ON になりません）。</p>
-      <p class="section-help">ロボットは約 1 秒この許可を受け取れないと止まります（この PC の Robot Manager が止まった場合も同じです）。非常停止ボタンの代わりにはなりません。</p>
+      <p class="section-help">ここで選ぶのは先生の許可です。非常停止の状態や、ロボットが動けるかどうかの判断とは別です。許可は保存されず、Manager の起動・終了、モード切替、ロボット制御の起動・再起動・停止、「すべて止める」で解除されます。配信停止では教材の許可だけが解除されます。</p>
     </section>
 
     <!-- Why the robot does not move (motion_state.py): /emergency_stop (L1) and /motion_permission
@@ -515,15 +516,7 @@
         <span class="rec-dot"></span>
         <span id="lab-drive-state">配信が止まっています</span>
       </p>
-      <div class="lab-permission-row">
-        <label class="toggle-switch" for="lab-drive-toggle">
-          <input type="checkbox" id="lab-drive-toggle" aria-describedby="lab-drive-toggle-state">
-          <span class="slider"></span>
-        </label>
-        <label for="lab-drive-toggle" class="lab-permission-label">教材からの走行を許可する
-          <span id="lab-drive-toggle-state" class="lab-permission-state">—</span></label>
-      </div>
-      <p id="lab-drive-toggle-note" class="lab-drive-warning" hidden></p>
+      <p class="section-help"><a href="#actuation-card" class="permission-guide">許可は操作タブで設定します</a></p>
       <div class="rec-status lab-drive-facts" id="lab-drive-facts" hidden>
         <div class="rec-status-row" id="lab-drive-owner-row" hidden>
           <span class="rec-status-label">いま走っているのは</span>
@@ -569,15 +562,7 @@
         <span class="rec-dot"></span>
         <span id="lab-shoot-state">配信が止まっています</span>
       </p>
-      <div class="lab-permission-row">
-        <label class="toggle-switch" for="lab-shoot-toggle">
-          <input type="checkbox" id="lab-shoot-toggle" aria-describedby="lab-shoot-toggle-state">
-          <span class="slider"></span>
-        </label>
-        <label for="lab-shoot-toggle" class="lab-permission-label">教材からの発射を許可する
-          <span id="lab-shoot-toggle-state" class="lab-permission-state">—</span></label>
-      </div>
-      <p id="lab-shoot-toggle-note" class="lab-drive-warning" hidden></p>
+      <p class="section-help"><a href="#actuation-card" class="permission-guide">許可は操作タブで設定します</a></p>
       <div class="rec-status lab-drive-facts" id="lab-shoot-facts" hidden>
         <div class="rec-status-row" id="lab-shoot-owner-row" hidden>
           <span class="rec-status-label">いま操作しているのは</span>
@@ -846,11 +831,12 @@
   <script src="/static/web-joy-connection.js?v=4"></script>
   <script src="/static/operator-guide.js?v=5"></script>
   <script src="/static/control-labels.js?v=4"></script>
-  <script src="/static/status-view.js?v=3"></script>
+  <script src="/static/status-view.js?v=4"></script>
   <script src="/static/network-view.js?v=1"></script>
   <script src="/static/trial-view.js?v=2"></script>
   <script src="/static/motion-state-view.js?v=1"></script>
-  <script src="/static/app.js?v=22"></script>
+  <script src="/static/permission-view.js?v=1"></script>
+  <script src="/static/app.js?v=23"></script>
   <script src="/static/controller-map.js?v=12"></script>
   <script src="/static/controls.js?v=22"></script>
 </body>

@@ -41,11 +41,12 @@ import os
 import subprocess
 import threading
 import time
+import uuid
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Literal, Optional
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, ConfigDict, Field
 
 from robot_manager import control_runtime, modes, ros_domain
 
@@ -71,6 +72,8 @@ logger = logging.getLogger(__name__)
 
 # Guarded by _lock. lab.py calls in while holding its own lock, never the other way round.
 _lock = threading.Lock()
+_instance = uuid.uuid4().hex  # Opaque process generation; contains no operator identity.
+_revision = 0
 _authority = {kind: False for kind in KINDS}
 # QUESTiX LAB's lesson permission per kind (on /lab_permission); never on while _authority is off.
 _lab = {kind: False for kind in KINDS}
@@ -93,6 +96,34 @@ class AuthorityRequest(BaseModel):
     """Switch one runtime authority on or off."""
 
     allow: bool
+
+
+class ChoiceRequest(BaseModel):
+    """One complete permission choice, conditional only when it would raise permission."""
+
+    model_config = ConfigDict(extra="forbid")
+    choice: Literal["none", "controller", "controller_and_lab"]
+    instance: str = Field(min_length=1, max_length=64)
+    revision: int = Field(ge=0, strict=True)
+
+
+def browser_guard(request: Request) -> None:
+    """Use the existing loopback, JSON and same-origin guard for all permission HTTP writes."""
+    # Local import: wifi_ap imports lab, which imports this module.
+    from robot_manager.wifi_ap import _browser_mutation_guard
+    _browser_mutation_guard(request)
+
+
+def _advance_locked() -> None:
+    """Invalidate older snapshots and outstanding grants, including no-op revocations."""
+    global _revision
+    _revision += 1
+
+
+def _choice_locked(kind: str) -> str:
+    if not _authority[kind]:
+        return "none"
+    return "controller_and_lab" if _lab[kind] else "controller"
 
 
 def set_running_mode_source(source: Callable[[], Optional[str]]) -> None:
@@ -206,6 +237,7 @@ def _write_failed_locked() -> None:
     the tabs must not keep showing it on.
     """
     global _last_off_reason, _last_error
+    _advance_locked()
     _authority.update({kind: False for kind in KINDS})
     _lab.update({kind: False for kind in KINDS})
     _stop_heartbeat_locked()
@@ -221,6 +253,7 @@ def _off_locked(kinds, reason: str) -> list[str]:
     (heartbeat_write_failed).
     """
     global _last_off_reason
+    _advance_locked()
     was_on = [kind for kind in kinds if _authority[kind]]
     lab_was_on = any(_lab[kind] for kind in kinds)
     for kind in kinds:
@@ -250,6 +283,9 @@ def _reap_locked() -> list[str]:
 def _status_locked(running: Optional[str], known: bool = True) -> dict:
     """Return the status; ``known=False``: the running mode was not looked up (both None)."""
     return {
+        "instance": _instance,
+        "revision": _revision,
+        "choices": {kind: _choice_locked(kind) for kind in KINDS},
         "drive": _authority["drive"],
         "launcher": _authority["launcher"],
         # QUESTiX LAB's lesson permissions (教材 tab), published on /lab_permission.
@@ -300,6 +336,7 @@ def set_lab(kind: str, allow: bool) -> dict[str, bool]:
             raise HTTPException(status_code=409, detail=(
                 f"先に「操作」タブで「{_NAMES[kind]}」をONにしてください"))
         if _lab[kind] != bool(allow):
+            _advance_locked()
             _lab[kind] = bool(allow)
             if not _send_locked():
                 _write_failed_locked()
@@ -314,6 +351,7 @@ def revoke_lab() -> bool:
     lab.py: 配信停止, 「すべて止める」, leaving lesson mode, a bridge that exited on its own.
     """
     with _lock:
+        _advance_locked()
         was_on = any(_lab.values())
         _lab.update({kind: False for kind in KINDS})
         if was_on and not _send_locked():
@@ -359,8 +397,8 @@ def set_authority(kind: str, allow: bool) -> dict:
         return _switch_on_locked(kind, running)
 
 
-def _switch_on_locked(kind: str, running: Optional[str]) -> dict:
-    """Start the heartbeat if needed and switch ``kind`` on. Caller holds _lock; may raise."""
+def _start_heartbeat_locked() -> None:
+    """Start the existing heartbeat if needed. Caller holds _lock; may raise."""
     global _proc, _last_error
     if _proc is None:
         config = _read_env_file(LAUNCH_ENV_FILE)
@@ -386,6 +424,13 @@ def _switch_on_locked(kind: str, running: Optional[str]) -> dict:
                            "ビルドを確認してください）")
             raise HTTPException(status_code=503, detail=_last_error)
         _proc = proc
+
+
+def _switch_on_locked(kind: str, running: Optional[str]) -> dict:
+    """Compatibility setter: authority on never turns the lesson permission on."""
+    global _last_error
+    _start_heartbeat_locked()
+    _advance_locked()
     _authority[kind] = True
     if not _send_locked():
         # Not only this kind: a heartbeat that cannot be told leaves no switch on.
@@ -393,6 +438,59 @@ def _switch_on_locked(kind: str, running: Optional[str]) -> dict:
         raise _HeartbeatWriteFailed(_last_error)
     _last_error = None
     return _status_locked(running)
+
+
+def set_choice(kind: str, request: ChoiceRequest) -> dict:
+    """Apply both bits together; stale requests can lower, but never raise permission.
+
+    Reuse the heartbeat's unchanged four-bit line. The ROS topics are delivered separately;
+    this transaction does not claim atomic delivery to ROS subscribers.
+    """
+    global _last_error
+    if kind not in KINDS:
+        raise HTTPException(404, "unknown permission")
+    running = running_mode()  # never invoke the systemd source while holding _lock
+    ranks = {"none": 0, "controller": 1, "controller_and_lab": 2}
+    with _lock:
+        _reap_locked()
+
+        def refuse(code, reason, message):
+            raise HTTPException(code, {"reason": reason, "message": message,
+                                       "state": _status_locked(running)})
+
+        raising = ranks[request.choice] > ranks[_choice_locked(kind)]
+        if raising:
+            if request.instance != _instance or request.revision != _revision:
+                refuse(409, "stale_revision", "ほかの画面で許可が変わりました。いまの状態を確かめて、もう一度選んでください")
+            if not switches_available(running):
+                refuse(409, "unavailable", "保存モードと実行中のモードがともに教材のときだけ選べます")
+        if request.choice == "none":
+            _off_locked([kind], "teacher")
+            return _status_locked(running)
+        # A no-op or a reduction never starts a new heartbeat. Raising has passed mode/version
+        # checks; start before changing either bit, so a startup failure leaves both unchanged.
+        if raising:
+            try:
+                _start_heartbeat_locked()
+            except HTTPException as error:
+                refuse(error.status_code, "heartbeat_start_failed", str(error.detail))
+        _advance_locked()
+        _authority[kind] = True
+        _lab[kind] = request.choice == "controller_and_lab"
+        if not _send_locked():
+            _write_failed_locked()
+            refuse(503, WRITE_FAILED, _last_error)
+        _last_error = None
+        return _status_locked(running)
+
+
+@router.post("/choice/{kind}", dependencies=[Depends(browser_guard)])
+def choose_permission(kind: str, request: ChoiceRequest):
+    """Change one choice after noticing a bridge exit, using the existing lab -> authority lock order."""
+    from robot_manager import lab
+    with lab._lock:
+        lab._reap_locked()
+        return set_choice(kind, request)
 
 
 def revoke_all(reason: str) -> dict:
@@ -418,13 +516,14 @@ def get_status():
     return status()
 
 
-@router.post("/drive")
+# Compatibility HTTP APIs only; the Manager UI uses /choice/{kind}.
+@router.post("/drive", dependencies=[Depends(browser_guard)])
 def set_drive(request: AuthorityRequest):
     """Vote for or against moving the wheels (controller and QUESTiX LAB) in this session."""
     return set_authority("drive", request.allow)
 
 
-@router.post("/launcher")
+@router.post("/launcher", dependencies=[Depends(browser_guard)])
 def set_launcher(request: AuthorityRequest):
     """Vote for or against the roller, tilt and fire (controller and QUESTiX LAB) in this session."""
     return set_authority("launcher", request.allow)

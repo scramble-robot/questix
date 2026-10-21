@@ -59,7 +59,7 @@ import urllib.request
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 
 from robot_manager import actuation, modes, recorder, ros_domain
@@ -677,7 +677,8 @@ def set_config(config: LabConfig):
     return values
 
 
-@router.post("/drive")
+# Compatibility HTTP APIs only; the Manager UI uses /api/actuation/choice/{kind}.
+@router.post("/drive", dependencies=[Depends(actuation.browser_guard)])
 def set_drive(request: DriveRequest):
     """Allow or forbid the lessons' driving experiments (教材からの走行) for this session.
 
@@ -687,7 +688,7 @@ def set_drive(request: DriveRequest):
     return _set_permission("ALLOW_DRIVE", request.allow, "教材から走らせられません")
 
 
-@router.post("/shoot")
+@router.post("/shoot", dependencies=[Depends(actuation.browser_guard)])
 def set_shoot(request: DriveRequest):
     """Allow or forbid the lessons' launcher experiments (roller, tilt, fire), like set_drive."""
     return _set_permission("ALLOW_SHOOT", request.allow, "教材から発射させられません")
