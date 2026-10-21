@@ -10,7 +10,7 @@ the pages is not: the two lesson permissions (``ALLOW_DRIVE``: low-speed driving
 ``ALLOW_SHOOT``: roller, tilt and firing one disc) are held by actuation.py next to the teacher's
 switches and published by its heartbeat on ``/lab_permission``, which command_arbiter and the lab
 bridge read (design/safety_permission_input_refactor.md, 4.6). They start off and are switched
-on by the teacher for this session with ``/api/lab/drive`` / ``/api/lab/shoot``; switching them
+on for this session by the 操作 tab choices (``/api/actuation/choice/{kind}``); changing them
 never restarts the bridge, and the bridge has no parameter that grants them. They are never read
 from lab.env (values an older manager left there are ignored, and dropped the next time lab.env
 is written), so a restart of the manager or of the robot always starts with both off. They also
@@ -18,10 +18,11 @@ go off on 配信停止, on 「すべて止める」 (``revoke_permissions``), wh
 (and stay off when it comes back to lesson mode), and when the bridge this manager started exits
 on its own. QUESTiX LAB exists only in lesson mode (教材, modes.uses_lab): in practice and
 competition mode the bridge does not run and nothing can be allowed. They also need the teacher's
-switch of the same kind (actuation.py, 操作 tab: ロボットの走行制御 / 発射機構の操作), whose vote
+authority of the same kind (actuation.py, 操作 tab: 走行の許可 / 発射の許可), whose vote
 the robot's motion permission needs for the controller and the lessons alike: a lesson permission
 cannot be switched on while that switch is off, and it goes off with it; switching the switch on
-never switches a lesson permission on. Each run is still confirmed by the learner's safety tick on
+never switches a lesson permission on through the compatibility setter. The 教材 tab only links
+to the 操作 tab; its guarded legacy HTTP permission routes remain for compatibility. Each run is still confirmed by the learner's safety tick on
 the page and bounded by the bridge's session rules and command_arbiter, and the controller takes
 over at any time.
 

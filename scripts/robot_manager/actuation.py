@@ -16,7 +16,7 @@ that differs is what the next start will run. The running mode comes from app.py
 (``set_running_mode_source``: the robot service and the launcher's last-launch record).
 
 This module holds the two switches (``_authority``), QUESTiX LAB's two lesson permissions
-(``_lab``: 教材からの走行 / 教材からの発射, switched by lab.py with ``set_lab``) and a heartbeat
+(``_lab``: lesson permissions, paired with authority by ``set_choice``) and a heartbeat
 child process (actuation_heartbeat.py, sourced like the lab bridge: ROS, then ROBOT_WS from
 launch.env, and the robot's ROS_DOMAIN_ID) that publishes them at 5 Hz while any switch is on: the
 switches on ``/actuation_authority``, the lesson permissions on ``/lab_permission`` (command_arbiter
@@ -32,7 +32,11 @@ stopped (``heartbeat_write_failed``): nothing stays on without a heartbeat.
 
 A lesson permission needs the switch of the same kind: it cannot be switched on while that switch
 is off, and it goes off with it, in the same step (so ``/lab_permission`` never says yes while the
-teacher's switch says no); switching a switch on never switches a lesson permission on.
+teacher's switch says no). The 操作 tab has independent drive/launcher choices: 許可しない
+(OFF/OFF), コントローラーのみ (ON/OFF), コントローラーと教材 (ON/ON). Its atomic
+Manager transaction returns instance/revision; only grants require a current version. Reductions
+accept stale versions. The authority-only and lab-only setters remain for compatibility; their
+HTTP routes share the same browser guard and version. They are no longer used by the UI.
 """
 
 import json
@@ -322,7 +326,7 @@ def lab_permissions() -> dict[str, bool]:
 
 
 def set_lab(kind: str, allow: bool) -> dict[str, bool]:
-    """Switch QUESTiX LAB's lesson permission for ``kind`` (lab.py's 教材 switches).
+    """Compatibility setter for one lesson permission (lab.py's legacy HTTP routes).
 
     Switching on needs the teacher's switch of the same kind (409) and a heartbeat that can be
     told (503: then everything is off, as after any failed write). Switching off never raises.
