@@ -19,7 +19,8 @@ recent command and falls back to neutral when frames stop arriving.
 
 import math
 import threading
-from typing import Any, List, Optional, Sequence, Tuple
+import time
+from typing import Any, Callable, List, NamedTuple, Optional, Sequence, Tuple
 
 # Switch2-native array sizes (see uart_joy_driver/config/uart_joy_driver_params.yaml).
 DEFAULT_NUM_AXES = 8
@@ -45,7 +46,10 @@ def apply_deadzone(value: float, deadzone: float) -> float:
 def _as_axis(raw: Any, index: int, deadzone: float) -> float:
     if isinstance(raw, bool) or not isinstance(raw, (int, float)):
         raise FrameError(f"axes[{index}] is not a number")
-    value = float(raw)
+    try:
+        value = float(raw)
+    except OverflowError as exc:
+        raise FrameError(f"axes[{index}] is not finite") from exc
     if not math.isfinite(value):
         raise FrameError(f"axes[{index}] is not finite")
     return apply_deadzone(value, deadzone)
@@ -115,13 +119,31 @@ def is_neutral_frame(payload: Any) -> bool:
     return True
 
 
-class JoyHold:
-    """Thread-safe holder for the latest joy command with a staleness watchdog.
+class AcceptResult(NamedTuple):
+    """Report acceptance and whether a status refresh is needed."""
 
-    ``update`` stores a fresh command, ``release`` drops back to neutral
-    immediately (client disconnected) and ``snapshot`` returns what should be
-    published *now*: the held command while it is younger than ``timeout_sec``,
-    otherwise neutral. A non-positive ``timeout_sec`` disables the watchdog.
+    accepted: bool
+    changed: bool
+
+
+class JoySnapshot(NamedTuple):
+    """Copy one consistent input/output state while holding the input lock."""
+
+    axes: List[float]
+    buttons: List[int]
+    state: str
+    stopped: bool
+    stop_reason: str
+    age_sec: Optional[float]
+
+
+class JoyHold:
+    """Hold input until a gap, stop or release requires a valid neutral frame.
+
+    The only latch lives here, under the same lock as validation and updates.
+    A non-positive timeout disables only the watchdog, not explicit latches.
+    Publishers use copied snapshots outside the lock; an already acquired
+    snapshot cannot be recalled by a later stop.
     """
 
     def __init__(
@@ -129,54 +151,86 @@ class JoyHold:
         num_axes: int = DEFAULT_NUM_AXES,
         num_buttons: int = DEFAULT_NUM_BUTTONS,
         timeout_sec: float = 0.5,
+        deadzone: float = 0.0,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
-        """Create a neutral hold for the given array sizes."""
+        """Create a neutral holder; clock injection supports deterministic tests."""
         self._num_axes = num_axes
         self._num_buttons = num_buttons
         self._timeout_sec = timeout_sec
+        self._deadzone = deadzone
+        self._clock = clock
         self._lock = threading.Lock()
         self._axes: List[float] = [0.0] * num_axes
         self._buttons: List[int] = [0] * num_buttons
         self._last_update: Optional[float] = None
+        self._stop_latched = False
+        self._stop_reason = ""
 
     @property
     def timeout_sec(self) -> float:
-        """Return the watchdog timeout in seconds (``<= 0`` disables it)."""
+        """Return the watchdog timeout (<= 0 disables only timeout detection)."""
         return self._timeout_sec
 
     def neutral(self) -> Tuple[List[float], List[int]]:
-        """Return an all-zero ``(axes, buttons)`` pair."""
+        """Return a new all-zero axes/buttons pair."""
         return [0.0] * self._num_axes, [0] * self._num_buttons
 
-    def update(self, axes: Sequence[float], buttons: Sequence[int], now: float) -> None:
-        """Store a validated command received at monotonic time ``now``."""
+    def _expire_locked(self, now: float) -> bool:
+        if (not self._stop_latched and self._last_update is not None
+                and self._timeout_sec > 0.0
+                and now - self._last_update > self._timeout_sec):
+            self._stop_latched = True
+            self._stop_reason = "timeout"
+            self._axes, self._buttons = self.neutral()
+            return True
+        return False
+
+    def accept(self, payload: Any, now: Optional[float] = None) -> AcceptResult:
+        """Validate and accept input atomically, checking expiry before updating.
+
+        Neutral means exact zero in the received frame, before deadzone.
+        A parse failure preserves the latch, including expiry detected here.
+        Explicit timestamps are for deterministic tests; production reads the
+        monotonic clock after taking the lock.
+        """
+        with self._lock:
+            now = self._clock() if now is None else now
+            expired = self._expire_locked(now)
+            axes, buttons = parse_frame(
+                payload, self._num_axes, self._num_buttons, self._deadzone)
+            if self._stop_latched and not is_neutral_frame(payload):
+                return AcceptResult(False, expired)
+            changed = expired or self._stop_latched
+            self._axes, self._buttons = axes, buttons
+            self._last_update = now
+            self._stop_latched = False
+            self._stop_reason = ""
+            return AcceptResult(True, changed)
+
+    def update(self, axes: Sequence[float], buttons: Sequence[int],
+               now: Optional[float] = None) -> AcceptResult:
+        """Accept an exactly sized frame through the same validation and latch."""
         if len(axes) != self._num_axes or len(buttons) != self._num_buttons:
             raise FrameError("array size mismatch")
-        with self._lock:
-            self._axes = list(axes)
-            self._buttons = list(buttons)
-            self._last_update = now
+        return self.accept({"type": "joy", "axes": list(axes), "buttons": list(buttons)}, now)
 
-    def release(self) -> None:
-        """Drop the held command; ``snapshot`` returns neutral from now on."""
+    def release(self, reason: str = "released") -> None:
+        """Clear input and latch after disconnect, owner change or an explicit stop."""
         with self._lock:
             self._axes, self._buttons = self.neutral()
             self._last_update = None
+            self._stop_latched = True
+            self._stop_reason = reason
 
-    def age_sec(self, now: float) -> Optional[float]:
-        """Return seconds since the last ``update`` or ``None`` when released."""
+    def snapshot(self, now: Optional[float] = None) -> JoySnapshot:
+        """Return a consistent copy, latching expiry before returning any values."""
         with self._lock:
-            if self._last_update is None:
-                return None
-            return max(0.0, now - self._last_update)
-
-    def snapshot(self, now: float) -> Tuple[List[float], List[int], str]:
-        """Return ``(axes, buttons, state)`` to publish at monotonic time ``now``."""
-        with self._lock:
-            if self._last_update is None:
-                axes, buttons = self.neutral()
-                return axes, buttons, HOLD_RELEASED
-            if self._timeout_sec > 0.0 and now - self._last_update > self._timeout_sec:
-                axes, buttons = self.neutral()
-                return axes, buttons, HOLD_TIMEOUT
-            return list(self._axes), list(self._buttons), HOLD_ACTIVE
+            now = self._clock() if now is None else now
+            self._expire_locked(now)
+            age = None if self._last_update is None else max(0.0, now - self._last_update)
+            state = HOLD_RELEASED if age is None else (
+                HOLD_TIMEOUT if self._stop_latched else HOLD_ACTIVE)
+            axes, buttons = self.neutral() if self._stop_latched else (
+                list(self._axes), list(self._buttons))
+            return JoySnapshot(axes, buttons, state, self._stop_latched, self._stop_reason, age)
