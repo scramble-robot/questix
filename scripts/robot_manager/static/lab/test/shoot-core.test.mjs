@@ -302,6 +302,10 @@ test('fractional-percent limits retain their directed rounding', () => {
       max: 69,
     });
   }
+  assert.deepEqual(powerRange({ min_fire_power: 0.200000000001, max_power: 0.699999999999 }), {
+    min: 21,
+    max: 69,
+  });
 });
 
 test('non-finite power limits offer only zero', () => {
@@ -311,6 +315,14 @@ test('non-finite power limits offer only zero', () => {
   }
   assert.deepEqual(powerRange({ min_fire_power: 0, max_power: 0 }), { min: 0, max: 0 });
   assert.deepEqual(powerRange({ min_fire_power: 0.2, max_power: -0.1 }), { min: 0, max: 0 });
+});
+
+test('full precision roller status is displayed as whole percent without changing the record', () => {
+  const roller = { stamp: 1, command: Math.fround(0.21), max_power: Math.fround(0.8), source: 'lab' };
+  assert.equal(launcherState({ roller, rollerAt: 0, now: 0 }).roller.percent, 21);
+  assert.equal(launcherRecordSummary({ streams: { roller: [roller] } }).maxPercent, 21);
+  assert.equal(roller.command, Math.fround(0.21));
+  assert.equal(roller.max_power, Math.fround(0.8));
 });
 
 test("a fired_count increase from the lab while this page waits is this page's disc", () => {

@@ -349,6 +349,22 @@ test('the robot keeps exactly the streams a page records (records.py RECORDING_S
   assert.ok(RECORDING_STREAMS.includes('estop') && RECORDING_STREAMS.includes('roller'));
 });
 
+test('roller status keeps full command and cap precision in JSON and command CSV', () => {
+  const roller = {
+    type: 'roller',
+    stamp: 10,
+    command: Math.fround(0.20051),
+    max_power: Math.fround(0.8),
+    source: 'lab',
+  };
+  const recording = makeRecording({ ...sample(), streams: { roller: [roller] } });
+  const back = parseRecording(serializeRecording(recording));
+  assert.equal(back.streams.roller[0].command, roller.command);
+  assert.equal(back.streams.roller[0].max_power, roller.max_power);
+  const [header, row] = recordingCSV(recording).replace(/^\uFEFF/, '').trim().split('\n');
+  assert.equal(Number(row.split(',')[header.split(',').indexOf('roller_command')]), roller.command);
+});
+
 test('a new recording with the E-stop stream and wheel fields saves and opens again', () => {
   const recording = makeRecording({
     ...sample(),
