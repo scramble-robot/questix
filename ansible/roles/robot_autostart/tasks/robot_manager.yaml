@@ -65,6 +65,26 @@
     mode: "0644"
   notify: reload_systemd
 
+# One recording policy, also deployed by the install/update scripts. Leave other drop-ins alone.
+- name: Create Robot Manager drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/questix_robot_manager.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy Robot Manager recording policy
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../systemd/questix_robot_manager.service.d/recording.conf"
+    dest: /etc/systemd/system/questix_robot_manager.service.d/recording.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - reload_systemd
+    - restart_robot_manager
+
 # QUESTiX Local (Robot Manager 管理設定 → ネットワーク). Robot Manager runs as target_user and applies
 # access point changes only by starting questix_network_admin.service (polkit: start of that unit
 # only, 50-questix-robot.rules), which runs this root-owned helper. Same files as

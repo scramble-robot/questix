@@ -137,6 +137,21 @@ def test_large_bodies_are_gzipped_when_accepted(setup):
     assert 'Content-Encoding' not in dict(headers) and json.loads(body)
 
 
+def test_split_rosbag_listing_counts_all_segments(setup):
+    api, _, _, tmp_path = setup
+    bag = _bag(tmp_path / 'bags', 'robot_split',
+               [('/drive_status', 'questix_msgs/msg/DriveStatus', 80)])
+    (bag / 'bag_1.mcap').write_bytes(b'y' * 150)
+    metadata = (bag / 'metadata.yaml').read_text() + '    - bag_1.mcap\n'
+    (bag / 'metadata.yaml').write_text(metadata)
+    assert len(rosbags._bag_files(bag)) == 2
+    status, _, listing = _json(api.http('/api/rosbags'))
+    assert status == 200
+    [entry] = listing['bags']
+    assert entry['usable'] and entry['name'] == 'robot_split'
+    assert entry['bytes'] == 250 + len(metadata.encode())
+
+
 def test_rosbag_listing(setup):
     api, _, _, tmp_path = setup
     status, _, body = _json(api.http('/api/rosbags'))
