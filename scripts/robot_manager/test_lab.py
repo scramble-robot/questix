@@ -18,6 +18,8 @@ def lab(tmp_path, monkeypatch):
     module = importlib.reload(module)
     # Never ask a bridge that happens to run on this machine, never write to the real ~/.cache.
     monkeypatch.setattr(module, "_bridge_state", lambda: None)
+    monkeypatch.setattr(module, "_port_in_use", lambda: False)
+    monkeypatch.setattr(module, "_lan_addresses", lambda: [])
     monkeypatch.setattr(module, "LOG_FILE", tmp_path / "cache" / "lab-bridge.log")
     # The recorder's rosbag.env (OUTPUT_DIR is passed to the bridge): never the machine's own.
     monkeypatch.setattr(module.recorder, "ROSBAG_ENV_FILE", tmp_path / "rosbag.env")
