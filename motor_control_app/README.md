@@ -405,7 +405,34 @@ current モードでは configure 時にも同じ規則で検証し、外れて�
 レイテンシの `ema_ms` / `ema=` は指数移動平均（alpha=0.05）です。
 応答が0件でもtimeoutがあればdeactivate時にsummaryを出力します。
 
-### Wheel-position odometry pose
+### 停止中の位置増分の回収（Issue #229 B′、既定 OFF）
+
+`odom_stop_gap_recovery: false` のときは #210 の積分処理をそのまま使います。
+ON は **odom の位置・向きだけ**に効き、velocity/current 両モードで利用できます。
+停止の再送 300 ms、ブレーキ、制御の帰還、安全判定、メッセージは変えません。
+設定は `launcher/config/drive_component.yaml` に置き、実行時の変更は拒否します。
+
+- `odom_stop_gap_speed_margin: 1.25`（有限、>0）：倍率 k。床で 1.0 と 1.25 を比較して決めます。
+- `odom_stop_gap_noise_counts: 8`（整数、>=0）：雑音の T_noise。
+- 固定値は履歴 0.5 s、実時間の保持上限 0.5 s、ゼロ速度 K=2 / T_zero=8 count。
+  T_noise と T_zero は別の量で、ゼロ速度でも判定を免除しません。
+
+従来の時間上限で捨てる区間だけを対象とし、各輪の終了 tick の ref がゼロで、
+開始 stamp の直前 0.5 s の ref/raw RPM 履歴があるとき、`d=shortestTurns(old,new)` と
+`U=max(abs(ref),abs(raw))/60 * dt * k + T_noise/32767` を求めます。
+`abs(d) <= U < 1-abs(d)` のときだけ d を積分します。等号に epsilon は加えません。
+受信と消費のカウントを区別し、速い輪は最新の端点を保持して両輪の新応答を待ちます。
+片輪だけ受け入れるときは他輪を 0 とし、両端点を消費して二重回収を防ぎます。
+無効値、巻き戻り、fault、mode 不整合、0.5 s 超の鮮度/保持には回収を使いません。
+明示 reset・fault・巻き戻り・再走行で履歴を消します。pose 全体は reset しません。
+ログは左右別の上限外・曖昧・hard gate を区別し、1 秒の抑制を維持します。
+
+U は過去からの推定で、外力に対する物理的上限ではありません。U の過小評価では
+半回転超の逆回転を誤って受け入れ、隠れた全回転も見逃します。小さな位置のずれは
+そのまま積分します。単体試験と PTY FakeMotor は実機ファームや床での精度を保証しません。
+実機の採用判断は独立した床の位置・向きとの比較後に行います。
+
+### Wheel-position odometry pose (default OFF path)
 
 The `/odom` pose and its TF now integrate paired `position_raw` increments directly;
 `velocity_rpm`/`velocity_rpm_raw`, `/odom.twist`, `DriveStatus` velocity, and all message

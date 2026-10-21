@@ -52,6 +52,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 #include "motor_control_app/drive_component.hpp"
@@ -190,6 +191,15 @@ public:
 
   const std::string& path() const { return path_; }
 
+  struct Command {
+    std::vector<uint8_t> frame{};
+    std::chrono::steady_clock::time_point time{};
+  };
+  std::vector<Command> timedCommands() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return timed_commands_;
+  }
+
   void positions(uint16_t left, uint16_t right) {
     left_position_ = left;
     right_position_ = right;
@@ -323,6 +333,7 @@ private:
       {
         std::lock_guard<std::mutex> lock(mutex_);
         commands_.push_back(frame);
+        timed_commands_.push_back({frame, std::chrono::steady_clock::now()});
         auto it = modes_.find(frame[0]);
         mode = it == modes_.end() ? 0x02 : it->second;
         silent = silent_.count(frame[0]) != 0;
@@ -387,6 +398,7 @@ private:
   std::thread reader_;
   mutable std::mutex mutex_;
   std::vector<std::vector<uint8_t>> commands_;
+  std::vector<Command> timed_commands_{};
   std::map<uint8_t, uint8_t> modes_;  // motor id -> the loop it runs (power-on: velocity)
   std::map<uint8_t, bool> silent_;
   std::atomic<uint16_t> left_position_{0};
@@ -430,7 +442,8 @@ protected:
   // topics and the fake motor's serial line. The E-stop and permission requirements come from
   // the integrated YAML (never overridden here).
   void start(bool expect_active = true, bool missing_motor = false,
-             const std::string& mode = "velocity", double linear_band = 0.0) {
+             const std::string& mode = "velocity", double linear_band = 0.0,
+             bool stop_gap = false) {
     ASSERT_FALSE(motor_.path().empty()) << "openpty failed";
     static int counter = 0;
     prefix_ = "/drive_node_test_" + std::to_string(getpid()) + "_" + std::to_string(counter++);
@@ -442,6 +455,7 @@ protected:
           << "\"\n"
           << "    connect_retry_period_sec: 0.5\n"
           << "    control_mode: " << mode << "\n"
+          << "    odom_stop_gap_recovery: " << (stop_gap ? "true" : "false") << "\n"
           << "    rearm_neutral_linear: " << std::showpoint << linear_band << "\n"
           << "    publish_tf: false\n"
           << "    odom_topic: \"" << prefix_ << "/odom\"\n"
@@ -1343,6 +1357,168 @@ TEST_F(DriveComponentNode, PersistentStopFaultWarnsOnlyOnStateTransition) {
   ASSERT_TRUE(spinUntil([&]() { return stop_fault_warnings() > 0; }, 2s));
   spinFor(1500ms);  // persistent fault for longer than the previous throttle period
   EXPECT_EQ(stop_fault_warnings(), 1);
+}
+
+// Synthetic endpoint patterns inspired by S1/S3/S4, NOT a replay of the
+// unavailable original command traces or a guarantee about motor firmware.
+class DriveStopGap : public DriveComponentNode,
+                     public ::testing::WithParamInterface<std::tuple<bool, int>> {};
+
+TEST_P(DriveStopGap, StopRepliesRecoverOnlyWhenEnabledAndKeepFrameBytesAndCadence) {
+  const bool recovery = std::get<0>(GetParam());
+  const int scenario = std::get<1>(GetParam());
+  start(true, false, "velocity", 0.0, recovery);
+  operationManagerWithoutGpio();
+  motor_.feedbackRpm(-60, 60);  // includes S1-like motion opposite the last RPM
+  neutral();
+  ASSERT_TRUE(spinUntil([this]() { return droveBothWheels(); }, 4s));
+  spinFor(800ms);  // full pre-anchor .5 s ref/raw history
+  twist_linear_ = 0;
+  ASSERT_TRUE(spinUntil([this]() { return last_sample_.stop_frame && lastCommandsAreZero(); }, 2s));
+  // Wait for the first stop's reply pair, then change only its next endpoint.
+  const auto count = last_sample_.left.feedback_count;
+  ASSERT_TRUE(spinUntil([&]() { return last_sample_.left.feedback_count > count; }, 1s));
+  const double before_x = last_odom_.pose.pose.position.x;
+  motor_.feedbackRpm(0, 0);
+  const int lc[] = {3377, 2550, -3929};
+  const int rc[] = {-1900, -1000, 3822};
+  const auto position = [](int counts) {
+    return static_cast<uint16_t>(counts < 0 ? ddt::kPositionRawPerTurn + counts : counts);
+  };
+  const auto commands_before = motor_.timedCommands().size();
+  const auto next = last_sample_.left.feedback_count;
+  odom_warnings_.clear();
+  motor_.positions(position(lc[scenario]), position(rc[scenario]));
+  ASSERT_TRUE(spinUntil(
+      [&]() {
+        return last_sample_.left.feedback_count > next && last_sample_.right.feedback_count > next;
+      },
+      1s));
+  spinFor(60ms);  // status publish follows integration
+  const double distance =
+      .05 * 6.283185307179586 * (lc[scenario] - rc[scenario]) / ddt::kPositionRawPerTurn / 2;
+  const double heading =
+      .05 * 6.283185307179586 * (-rc[scenario] - lc[scenario]) / ddt::kPositionRawPerTurn / .5;
+  const double expected_x = heading == 0 ? distance : distance * std::sin(heading) / heading;
+  EXPECT_NEAR(last_odom_.pose.pose.position.x - before_x, recovery ? expected_x : 0.0, 1e-6);
+  EXPECT_NEAR(last_odom_.pose.pose.orientation.z, recovery ? std::sin(heading / 2) : 0.0, 1e-6);
+  if (recovery) {
+    EXPECT_TRUE(odom_warnings_.empty());
+  }
+  spinFor(700ms);
+  const auto frames = motor_.timedCommands();
+  std::map<uint8_t, std::chrono::steady_clock::time_point> previous;
+  size_t compared = 0;
+  for (size_t i = commands_before; i < frames.size(); ++i) {
+    const auto& command = frames[i];
+    // The complete ten-byte frame is fixed by the predecessor's zero command.
+    std::vector<uint8_t> expected{command.frame[0], 0x64, 0, 0, 0, 0, 1, 0, 0};
+    expected.push_back(ddt::crc8Maxim(expected));
+    EXPECT_EQ(command.frame, expected);
+    if (previous.count(command.frame[0])) {
+      const double interval =
+          std::chrono::duration<double>(command.time - previous[command.frame[0]]).count();
+      EXPECT_GE(interval, .295);
+      EXPECT_LE(interval, .38);  // 300 ms resend plus the 50 Hz tick scheduling
+      ++compared;
+    }
+    previous[command.frame[0]] = command.time;
+  }
+  EXPECT_GE(compared, 2u);
+}
+INSTANTIATE_TEST_SUITE_P(Bprime, DriveStopGap,
+                         ::testing::Combine(::testing::Bool(), ::testing::Range(0, 3)));
+
+class DriveStopGapIdle : public DriveComponentNode,
+                         public ::testing::WithParamInterface<std::string> {};
+TEST_P(DriveStopGapIdle, StopGapRpmOnlyAndSmallDriftDoNotManufactureMotion) {
+  start(true, false, GetParam(), 0.0, true);
+  operationManagerWithoutGpio();
+  spinFor(1800ms);           // initial history warm-up; idle polling is .2 s
+  motor_.feedbackRpm(0, 8);  // R3: only the reported RPM changes
+  odom_warnings_.clear();
+  spinFor(800ms);
+  EXPECT_NEAR(last_odom_.pose.pose.position.x, 0, 1e-9);
+  EXPECT_NEAR(last_odom_.pose.pose.orientation.z, 0, 1e-9);
+  EXPECT_TRUE(odom_warnings_.empty());
+  motor_.feedbackRpm(0, 0);
+  for (int i = 1; i <= 4; ++i) {
+    motor_.positions(ddt::kPositionRawPerTurn - i * 4, 0);
+    spinFor(350ms);
+  }
+  EXPECT_NEAR(last_odom_.pose.pose.orientation.z,
+              std::sin(.05 * 6.283185307179586 * 16 / ddt::kPositionRawPerTurn / .5 / 2), 1e-7);
+}
+
+INSTANTIATE_TEST_SUITE_P(Bprime, DriveStopGapIdle, ::testing::Values("velocity", "current"));
+
+TEST_F(DriveComponentNode, StopGapAmbiguousBoundsAreLoggedAndSmallDriftThenIntegrates) {
+  start(true, false, "velocity", 0.0, true);
+  operationManagerWithoutGpio();
+  motor_.feedbackRpm(180, -180);  // FL1-like high historical bound
+  neutral();
+  ASSERT_TRUE(spinUntil([this]() { return droveBothWheels(); }, 4s));
+  spinFor(700ms);
+  twist_linear_ = 0;
+  ASSERT_TRUE(spinUntil([this]() { return last_sample_.stop_frame; }, 2s));
+  const auto count = last_sample_.left.feedback_count;
+  ASSERT_TRUE(spinUntil([&]() { return last_sample_.left.feedback_count > count; }, 1s));
+  spinFor(1100ms);
+  const auto before = last_odom_.pose.pose;
+  odom_warnings_.clear();
+  motor_.positions(3000, ddt::kPositionRawPerTurn - 3000);
+  motor_.feedbackRpm(0, 0);
+  ASSERT_TRUE(spinUntil(
+      [&]() {
+        return std::any_of(odom_warnings_.begin(), odom_warnings_.end(), [](const auto& warning) {
+          return warning.find("left=ambiguous") != std::string::npos &&
+                 warning.find("right=ambiguous") != std::string::npos;
+        });
+      },
+      1s));
+  EXPECT_NEAR(last_odom_.pose.pose.position.x, before.position.x, 1e-9);
+  spinFor(200ms);
+  EXPECT_LE(odom_warnings_.size(), 1u);  // existing one-second throttle
+  spinFor(1300ms);                       // the large historical bound has left the .5 s window
+  odom_warnings_.clear();
+  motor_.positions(3007, ddt::kPositionRawPerTurn - 3007);
+  ASSERT_TRUE(spinUntil(
+      [&]() { return last_odom_.pose.pose.position.x > before.position.x + .00005; }, 1s));
+  EXPECT_NEAR(last_odom_.pose.pose.position.x - before.position.x,
+              .05 * 6.283185307179586 * 7 / ddt::kPositionRawPerTurn, 1e-7);
+  EXPECT_TRUE(odom_warnings_.empty());
+}
+
+TEST_F(DriveComponentNode, StopGapDelayedWheelExpiresAndEstopTimeoutStillStop) {
+  start(true, false, "velocity", 0.0, true);
+  operationManagerWithoutGpio();
+  neutral();
+  ASSERT_TRUE(spinUntil([this]() { return droveBothWheels(); }, 4s));
+  spinFor(700ms);
+  twist_linear_ = 0;
+  ASSERT_TRUE(spinUntil([this]() { return last_sample_.stop_frame; }, 2s));
+  motor_.answerRight(false);
+  motor_.positions(800, ddt::kPositionRawPerTurn - 800);
+  spinFor(650ms);  // hold must end by .5 s, not recover when right finally arrives
+  const auto pose = last_odom_.pose.pose;
+  motor_.answerRight(true);
+  spinFor(700ms);
+  EXPECT_NEAR(last_odom_.pose.pose.position.x, pose.position.x, 1e-9);
+  motor_.clear();
+  neutral();
+  ASSERT_TRUE(spinUntil([this]() { return droveBothWheels(); }, 3s));
+  send_twist_ = false;
+  spinFor(1300ms);  // actual command-timeout path
+  EXPECT_TRUE(lastCommandsAreZero());
+  EXPECT_NE(last_sample_.tick_action, questix_msgs::msg::DriveControlSample::TICK_DRIVE);
+  neutral();
+  motor_.clear();
+  ASSERT_TRUE(spinUntil([this]() { return droveBothWheels(); }, 3s));
+  estop_active_ = true;
+  ASSERT_TRUE(spinUntil([this]() { return lastCommandsAreZero(); }, 1s));
+  motor_.clear();
+  spinFor(400ms);
+  EXPECT_FALSE(droveBothWheels());
 }
 
 TEST_F(DriveComponentNode, PositionMovesPoseAndFrozenPositionDoesNotExtrapolateRpm) {
