@@ -359,11 +359,34 @@ fixed to `-s mcap`.
 Disk protection: recording refuses to start when free space is below `確保する空き容量（GB）`
 (`MIN_FREE_GB`, HTTP 507) and auto-stops (via SIGINT, so the bag is finalized) if
 free space drops below that threshold mid-recording. Optional `ファイルの分割サイズ（MB）`
-(`MAX_SPLIT_MB`, **200 MB by default**, decimal MB) and `記録する時間（秒 / 0=無制限）`
-(`MAX_DURATION_SEC`) cap per-file size and total recording time. An existing `rosbag.env`
+(`MAX_SPLIT_MB`, **200 MB by default**, decimal MB) and `ファイルを時間で分ける間隔（秒）`
+(`MAX_DURATION_SEC`, `--max-bag-duration`) split files by size and elapsed time.
+The time setting does **not** stop the whole recording; stop it explicitly. An existing `rosbag.env`
 value takes precedence, including `MAX_SPLIT_MB=0` (no splitting). One bag directory may hold
 several MCAP files; the Manager lists, sizes and deletes that directory as one recording, and
 QUESTiX LAB reads and converts all its segments.
+
+Recording numeric settings accept half-width decimal digits only (no sign, decimal point,
+exponent or whitespace). The screen validates before saving and the server validates again:
+
+| Setting | Accepted integers | Meaning of 0 |
+| --- | --- | --- |
+| `MIN_FREE_GB` | 1–16 GB; default 5 | Not allowed |
+| `MAX_SPLIT_MB` | 0–8192 MB; default 200 | No size-based splitting |
+| `MAX_DURATION_SEC` | 0–14400 seconds | No time-based splitting |
+
+Units retain their existing conversions: 1 GB＝1024³ バイト; 1 MB＝1000² バイト.
+On save, the minimum must also be strictly less than the output filesystem's total
+capacity. For a missing output directory, its nearest existing directory ancestor is
+queried without creating it; an unusable target or unavailable capacity refuses the save.
+This also applies to the folder picker's partial save. If a saved numeric value is invalid,
+repair the named numeric field and save the settings before changing only the folder.
+
+Invalid persisted `MIN_FREE_GB` uses 5 GB for disk protection and reports a persistent
+warning in the settings/status screen and API (`config_warnings`, with
+`effective_numeric_settings` in config/status). Invalid split/time settings refuse both
+normal and evidence recording starts. Files are never automatically rewritten to repair
+invalid settings. Settings changed during a recording apply to the next recording.
 
 ### Existing robots: restore recording defaults
 
