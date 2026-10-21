@@ -199,7 +199,7 @@ TEST(Rp1Lease, ExecutorSilenceGuardFaultIsPublishedAndGateDoesNotRepeatStop) {
     EXPECT_NE(report.find("FAULT_LOW"), std::string::npos);
     EXPECT_NE(report.find("\"pwm_fault\": true"), std::string::npos);
     EXPECT_NE(report.find("\"applied_pulse_us\": 0"), std::string::npos);
-    EXPECT_NE(report.find("\"command\": 0.000"), std::string::npos);
+    EXPECT_NE(report.find("\"command\": 0,"), std::string::npos);
     node->begin_shutdown();
   }
   rclcpp::shutdown();
