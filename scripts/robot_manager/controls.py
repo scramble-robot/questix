@@ -15,15 +15,16 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict
 
 # Defaults live exclusively in questix_control_config/config/controls.*.yaml.
-# Limits here describe the editable operator interface, not hardware configuration.
+# Speed limits are the teaching policy: twice the lesson ceiling (packaged defaults),
+# below the standard kit's wheel limits. They do not change the nodes' hardware configuration.
 GROUPS = {
     'joy_controller': ('走行の操作・速度', [
         ('linear_x_axis', '前後の軸番号', 'int', 0, 63),
         ('linear_y_axis', '左右の軸番号（全方向移動用）', 'int', -1, 63),
         ('angular_z_axis', '旋回の軸番号', 'int', 0, 63),
-        ('longitudinal_input_ratio', '前後速度 [m/s]（負値で反転）', 'float', -10, 10),
-        ('lateral_input_ratio', '左右速度 [m/s]（全方向移動用）', 'float', -10, 10),
-        ('angular_input_ratio', '旋回速度 [rad/s]（負値で反転）', 'float', -20, 20),
+        ('longitudinal_input_ratio', '前後速度 [m/s]（負値で反転）', 'float', -2.0, 2.0),
+        ('lateral_input_ratio', '左右速度 [m/s]（全方向移動用）', 'float', -2.0, 2.0),
+        ('angular_input_ratio', '旋回速度 [rad/s]（負値で反転）', 'float', -6.0, 6.0),
     ]),
     'drive_component': ('走行モータ・加速度', [
         ('max_motor_rpm', '車輪の最大回転数 [RPM]', 'int', 1, 475),
@@ -63,6 +64,33 @@ GROUPS = {
         ('max_motor_rpm', '最大回転数 [RPM]', 'int', 1, 475),
     ]),
 }
+
+
+SPEED_FIELDS = {
+    'longitudinal_input_ratio': ('走行速度', 'm/s'),
+    'lateral_input_ratio': ('左右の速さ', 'm/s'),
+    'angular_input_ratio': ('旋回の速さ', 'rad/s'),
+}
+
+
+def speed_range_message(key, value, maximum):
+    """Describe magnitude and retained inversion without asking users to flip direction."""
+    label, unit = SPEED_FIELDS[key]
+    magnitude = str(float(abs(value)))
+    inversion = '（方向の反転あり）' if value < 0 else ''
+    return (f'{label} {magnitude} {unit}{inversion}は、保存できる範囲の外です。'
+            f'大きさを {maximum:.1f} {unit} 以下にしてください'
+            '（方向の反転は保存済みのまま）。')
+
+
+def speed_out_of_range(values):
+    """List teaching-range violations without changing finite saved or history values."""
+    if values is None:
+        return []
+    return [{'node': 'joy_controller', 'key': key, 'value': values['joy_controller'][key],
+             'min': low, 'max': high}
+            for key, _, _, low, high in GROUPS['joy_controller'][1]
+            if key in SPEED_FIELDS and not low <= values['joy_controller'][key] <= high]
 
 
 # Controller profiles: questix_control_config/config/controls.<controller>.yaml.
@@ -127,8 +155,8 @@ def schema(controller):
     ]
 
 
-def validate(values, controller):
-    """Reject unknown fields, wrong types, nonfinite numbers and unusable bounds."""
+def validate(values, controller, *, allow_saved_speeds=False):
+    """Validate strictly on writes; allow finite old speeds only on profile/history reads."""
     groups = profile_groups(controller)
     if not isinstance(values, dict) or set(values) != set(groups):
         raise ValueError('設定のノード一覧が一致しません。再読み込みしてください。')
@@ -145,8 +173,15 @@ def validate(values, controller):
             elif kind == 'int':
                 valid = type(value) is int and low <= value <= high
             else:
-                valid = (type(value) in (int, float) and low <= value <= high
-                         and math.isfinite(value))
+                try:
+                    finite = type(value) in (int, float) and math.isfinite(value)
+                except OverflowError:
+                    finite = False
+                speed = node == 'joy_controller' and key in SPEED_FIELDS
+                in_range = finite and low <= value <= high
+                if finite and speed and not in_range and not allow_saved_speeds:
+                    raise ValueError(speed_range_message(key, value, high))
+                valid = finite and (in_range or allow_saved_speeds and speed)
             if not valid:
                 raise ValueError(f'{label}: {kind} 型、範囲 {low}〜{high} で入力してください。')
             clean[node][key] = float(value) if kind == 'float' else value
@@ -185,6 +220,34 @@ def _default_file(controller, env):
                         'questix_control_config のビルド・インストールを確認してください。')
 
 
+def read_geometry(env):
+    """Read standard-launch wheel geometry for UI estimates, without editing the profile.
+
+    questix_core uses questix_launcher's drive_component.yaml. A missing or invalid installed
+    file is unknown, never replaced by source-checkout or hard-coded dimensions. Runtime
+    comparisons obtain the actual dimensions independently through GetParameters.
+    """
+    workspace = env.get('ROBOT_WS') or os.environ.get('ROBOT_WS')
+    if workspace:
+        install = Path(workspace).expanduser() / 'install'
+        candidates = [install / 'questix_launcher/share/questix_launcher/config/drive_component.yaml',
+                      install / 'share/questix_launcher/config/drive_component.yaml']
+    else:
+        candidates = [Path(__file__).resolve().parents[2] / 'launcher/config/drive_component.yaml']
+    try:
+        path = next((path for path in candidates if path.is_file()), None)
+        if path is None:
+            return None
+        params = yaml.safe_load(path.read_text())['drive_component']['ros__parameters']
+        geometry = {key: params[key] for key in ('wheel_radius', 'wheel_separation')}
+        if all(type(value) in (int, float) and math.isfinite(value) and value > 0
+               for value in geometry.values()):
+            return geometry
+    except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError):
+        pass
+    return None
+
+
 def _migrate_launcher_layout(values):
     """Move the launcher keys of an older profile into joy_launcher (a value there wins)."""
     if not isinstance(values, dict):
@@ -206,7 +269,7 @@ def _migrate_launcher_layout(values):
     return result
 
 
-def _decode(raw, controller):
+def _decode(raw, controller, *, allow_saved_speeds=False):
     document = yaml.safe_load(raw)
     if not isinstance(document, dict):
         raise ValueError('設定ファイルが ROS パラメータの YAML 形式ではありません。')
@@ -227,7 +290,7 @@ def _decode(raw, controller):
         for direction, sign in (('up', 1), ('down', -1)):
             shot[f'tilt_{direction}_axis'] = axis
             shot[f'tilt_{direction}_axis_sign'] = sign
-    return validate(values, controller)
+    return validate(values, controller, allow_saved_speeds=allow_saved_speeds)
 
 
 def _units_generation(raw):
@@ -243,9 +306,10 @@ def read_profile(config_dir, controller, env):
     try:
         default_raw = default_file.read_bytes()
         saved_raw = saved_file.read_bytes() if saved_file.exists() and not fixed else None
-        defaults = _decode(default_raw, controller)
+        defaults = _decode(default_raw, controller, allow_saved_speeds=True)
         # A broken saved file stays an error even when it is also legacy.
-        values = _decode(saved_raw, controller) if saved_raw is not None else defaults
+        values = (_decode(saved_raw, controller, allow_saved_speeds=True)
+                  if saved_raw is not None else defaults)
         legacy = saved_raw is not None and _units_generation(saved_raw) != UNITS_GENERATION
         if legacy:
             values = defaults
@@ -262,15 +326,19 @@ def read_profile(config_dir, controller, env):
             history = json.loads(
                 (config_dir / f'controls.{controller}.history.json').read_text())
             if revision in history:
-                previous = validate(_migrate_launcher_layout(history[revision]), controller)
+                previous = validate(_migrate_launcher_layout(history[revision]), controller,
+                                    allow_saved_speeds=True)
     except FileNotFoundError:
         pass
     except (OSError, ValueError, TypeError):
         history_warning = '前の設定を読み込めません。現在の設定は使用できます。'
     return {'controller': controller, 'revision': revision, 'values': values,
+            'out_of_range': speed_out_of_range(values),
+            'previous_out_of_range': speed_out_of_range(previous),
             'previous_values': previous, 'history_warning': history_warning,
             'legacy_warning': LEGACY_WARNING if legacy else None,
             'defaults': defaults, 'groups': schema(controller), 'apply_on_restart': True,
+            'geometry': read_geometry(env),
             'editable': not fixed,
             'source': str(saved_file if saved_raw is not None and not legacy
                           else default_file)}
