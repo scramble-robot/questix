@@ -133,6 +133,7 @@ function editorFixture(extraValues = {}, controller = 'uart') {
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../static/controller-map.js'), 'utf8'), context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../static/operator-guide.js'), 'utf8'), context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../static/tuning-model.js'), 'utf8'), context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../static/tuning-chart.js'), 'utf8'), context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../static/controls.js'), 'utf8'), context);
   document.events.DOMContentLoaded();
   return { document, context, getPayload: () => savedPayload };
@@ -924,6 +925,13 @@ test('all visible fields state API ranges and time conversion rejects out-of-ran
     assert.match(row.querySelector('.control-range').textContent, /APIの範囲/);
   }
   const input = document.getElementById('control-drive_component-max_angular_accel');
+  const curves = () => document.getElementById('tuning-angular-chart').all()
+    .filter((el) => el.attributes['data-series']).map((el) => el.attributes.points);
+  const before = curves();
+  input.value = '3'; input.events.input();
+  assert.notEqual(curves()[0], before[0]);
+  // The common axis may grow but the packaged defaults themselves are unchanged.
+  assert.equal(vm.runInContext('controlProfile.defaults.drive_component.max_angular_accel', context), 3);
   input.value = '0.001'; input.events.input();
   assert.equal(input.disabled, false);
   assert.match(input.validationMessage, /範囲外/);

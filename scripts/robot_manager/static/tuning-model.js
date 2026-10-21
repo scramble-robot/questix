@@ -13,7 +13,8 @@ const TuningModel = (() => {
         || !positive(geometry?.wheel_separation)) return null;
     const wheel = rpm * 2 * Math.PI * geometry.wheel_radius / 60;
     // A pure turn has equal and opposite wheel speeds: w = (v_right - v_left) / track.
-    return kind === "angular" ? 2 * wheel / geometry.wheel_separation : wheel;
+    const limit = kind === "angular" ? 2 * wheel / geometry.wheel_separation : wheel;
+    return positive(limit) ? limit : null;
   }
 
   function motion(values, geometry, kind) {
@@ -24,14 +25,17 @@ const TuningModel = (() => {
     if (!finite(raw) || !finite(accel) || accel < 0 || limit === null) return null;
     const configured = Math.abs(raw);
     const speed = Math.min(configured, limit);
-    const time = speed > 0 && accel > 0 ? speed / accel : null;
+    const duration = speed > 0 && accel > 0 ? speed / accel : null;
+    const time = finite(duration) ? duration : null;
+    const stop = time === null ? null : speed * time / 2;
     return { configured, speed, limit, accel, time, inverted: raw < 0,
       limited: configured > limit, unlimited: accel === 0,
-      stop: time === null ? null : speed * time / 2 };
+      stop: finite(stop) ? stop : null };
   }
 
   function acceleration(speed, time) {
-    return positive(speed) && positive(time) ? speed / time : null;
+    const value = positive(speed) && positive(time) ? speed / time : null;
+    return positive(value) ? value : null;
   }
 
   function retime(previous, next) {
@@ -64,6 +68,7 @@ const TuningModel = (() => {
     if (!state) return "車輪寸法・速度・加速度が未確認または入力中のため、目安は算出できません。";
     if (state.speed === 0) return `${kind === "angular" ? "旋回" : "走行"}なし。速さが0のため加速時間は算出できません。`;
     if (state.unlimited) return "加速度の制限なし。加速時間と止まるまでの量は算出しません。";
+    if (state.time === null || state.stop === null) return "加速時間・停止量が大きすぎるため、目安は表示できません。";
     const quantity = kind === "angular" ? `${Math.round(state.stop * 180 / Math.PI)}°回ります`
       : `${number(state.stop)} m進みます`;
     return `最高速度の目安 ${speedText(state.speed, kind)}、加速時間 ${number(state.time)} s。`

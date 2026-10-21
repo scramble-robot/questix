@@ -111,7 +111,7 @@ function refreshTuningFields(activeInput) {
       const speed = controlDraft.joy_controller[TuningModel.axes[kind].speed];
       const limit = TuningModel.wheelLimit(controlDraft, controlProfile.geometry, kind);
       input.disabled = controlsBusy || limit === null || !TuningModel.finite(speed) || speed === 0;
-      input.required = controlDraft[node][key] !== 0 && !input.disabled;
+      input.required = controlDraft[node][key] !== 0 && !input.disabled && state?.time !== null;
       if (input !== activeInput) input.value = state?.time === null || !state ? "" : TuningModel.number(state.time);
       input.placeholder = state?.unlimited ? "制限なし（未変更）" : "算出できません";
       const raw = controlDraft[node][key];
@@ -129,6 +129,7 @@ function refreshTuningFields(activeInput) {
       note.textContent = TuningModel.finite(raw)
         ? `${TuningModel.speedText(raw, kind)}${reference > 0 ? `・配布元の${TuningModel.number(Math.abs(raw) / reference * 100)}%` : "・配布元が0のため割合は算出できません"}。` : "速さを入力してください。";
       if (state?.limited) note.textContent += ` 設定は ${TuningModel.speedText(state.configured, kind)} ですが、車輪の上限で実際は約 ${TuningModel.speedText(state.speed, kind)} までです。`;
+      if (state?.limited) note.textContent += " 上限を超える設定では、内部目標の減速により、戻してから速さが下がり始めるまで遅れる場合があります。";
       if (!state) note.textContent += " 車輪上限・加速時間は未確認です。";
       note.textContent += " 単独で倒したときの目安です。";
     }
@@ -154,12 +155,15 @@ function createTuningPreviews(container) {
     const summary = document.createElement("p");
     summary.id = `tuning-${kind}-summary`;
     summary.className = "tuning-motion-summary";
+    summary.tabIndex = 0;
     summary.setAttribute("aria-live", "polite");
     const note = document.createElement("p");
     note.className = "control-help";
     note.textContent = "単独で倒したときの目安です。前進と旋回を同時に入れたときの切り詰めは含みません。"
       + "標準起動の車輪寸法で一定加速度として計算し、最後の減速をなめらかにする帯を省いているため、時間と停止量は約の値です。実測値ではありません。";
-    section.append(heading, summary, note);
+    const chart = document.createElement("div");
+    chart.id = `tuning-${kind}-chart`;
+    section.append(heading, summary, chart, note);
     container.appendChild(section);
   }
 }
@@ -168,6 +172,9 @@ function renderTuningPreviews() {
   for (const kind of ["angular", "linear"]) {
     const summary = document.getElementById(`tuning-${kind}-summary`);
     summary.textContent = TuningModel.summary(TuningModel.motion(controlDraft, controlProfile.geometry, kind), kind);
+    TuningChart.render(document.getElementById(`tuning-${kind}-chart`),
+      TuningModel.motion(controlDraft, controlProfile.geometry, kind),
+      TuningModel.motion(controlProfile.defaults, controlProfile.geometry, kind), kind);
   }
 }
 
@@ -415,7 +422,8 @@ function refreshControlChanges(activeInput) {
     const { node, key } = row.dataset;
     const changed = controlDraft[node][key] !== controlProfile.values[node][key];
     row.classList.toggle("changed", changed);
-    row.querySelector(".control-change-state").textContent = changed ? "変更あり" : "";
+    row.querySelector(".control-change-state").textContent = changed
+      ? tuningSpec(node, key).acceleration ? "加速度に変更あり" : "変更あり" : "";
     row.querySelector(".control-change-state").hidden = !changed;
     const saved = row.querySelector(".control-saved");
     saved.hidden = !changed;
@@ -478,8 +486,9 @@ function renderRuntimeValues() {
       value.textContent = tuningValue(tuningSpec(node, key), actual, values, values.drive_component);
       status.textContent = actual === controlProfile.values[node][key]
         ? "保存済みと一致" : "保存済みと異なる";
-      if (tuningSpec(node, key).acceleration && actual !== controlProfile.values[node][key]) {
-        status.textContent = "加速度が保存済みと異なる";
+      if (tuningSpec(node, key).acceleration) {
+        status.textContent = actual === controlProfile.values[node][key]
+          ? "加速度が保存済みと一致" : "加速度が保存済みと異なる";
       }
     }
   }
@@ -668,6 +677,7 @@ function renderControls() {
       const estimate = document.createElement("p");
       estimate.className = "control-estimate";
       estimate.id = `${input.id}-estimate`;
+      estimate.tabIndex = 0;
       row.append(range, estimate);
       section.appendChild(row);
     }

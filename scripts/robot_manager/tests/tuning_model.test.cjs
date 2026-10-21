@@ -67,6 +67,10 @@ test('zero, missing, negative and nonfinite inputs never manufacture a finite ra
   assert.equal(m.motion(values(), { ...geometry, wheel_radius: 0 }, 'linear'), null);
   assert.equal(m.motion(values(), geometry, 'linear').speed, 1);
   assert.equal(m.presetTime(values(0), geometry, 'linear', 1), null);
+  const tiny = m.motion(values(1, 3, Number.MIN_VALUE), geometry, 'linear');
+  assert.equal(tiny.time, null);
+  assert.match(m.summary(tiny, 'linear'), /大きすぎる/);
+  assert.equal(m.acceleration(1, Number.MIN_VALUE), null);
 });
 
 test('display rounding never alters inputs or erases a nonzero small value', () => {

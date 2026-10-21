@@ -1275,10 +1275,35 @@ input[type="checkbox"] { accent-color: var(--accent); }
 /* Operator tuning form */
 .control-range, .control-estimate { grid-column: 1 / -1; color: var(--text-dim);
   font-size: var(--font-small); line-height: 1.65; overflow-wrap: anywhere; }
-.control-estimate { min-height: 5.2rem; }
+.control-estimate { height: 9rem; overflow: auto; }
+.control-estimate:empty { display: none; }
+/* Editing updates this notice and saved-value rows; reserve their space above later inputs. */
+#controls-application { height: 12rem; overflow: auto; }
+.control-field .control-saved[hidden] { display: flex !important; visibility: hidden; }
+.control-field .control-change-state[hidden] { display: block !important; visibility: hidden; }
+.control-change-state { min-height: 1.4rem; }
 .tuning-preview { border-top: 1px solid var(--border-input); margin-top: 1rem; padding-top: 1rem; }
 .tuning-preview h3 { font-size: 1rem; margin-bottom: 0.75rem; }
 .tuning-motion-summary { height: 5.5rem; overflow: auto; line-height: 1.65; }
+.tuning-chart { margin: 0; padding: 1rem 0.5rem; background: #fff; color: #253c45;
+  border: 1px solid var(--border-input); border-radius: var(--radius-control); font-size: 0.875rem; }
+.tuning-chart-legend { display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; min-height: 3rem; }
+.tuning-chart-legend span::before { content: ""; display: inline-block; vertical-align: middle;
+  width: 1.5rem; margin-right: 0.4rem; border-top: 3px solid #167452; }
+.tuning-chart-legend .tuning-line-standard::before { border-top: 2px dashed #8a5b08; }
+.tuning-chart-y-title { margin: 0.5rem 0 0.75rem; }
+.tuning-chart-body { display: grid; grid-template-columns: 3.5rem minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr); height: 12rem; }
+.tuning-chart-plot { position: relative; min-width: 0; min-height: 0;
+  border-left: 1px solid #4d6469; border-bottom: 1px solid #4d6469; }
+.tuning-chart-plot svg { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+.tuning-chart-y-ticks { position: relative; margin-right: 0.5rem; }
+.tuning-chart-y-ticks span { position: absolute; right: 0; transform: translateY(-50%); }
+.tuning-chart-x-ticks { position: relative; height: 1.75rem; margin: 0.5rem 0 0 3.5rem; }
+.tuning-chart-x-ticks span { position: absolute; }
+.tuning-chart-x-title { text-align: center; }
+.tuning-chart-caption, .tuning-chart-status { line-height: 1.65; margin-top: 0.75rem; }
+.tuning-chart-status { min-height: 3rem; }
 .control-help { color: var(--text-dim); line-height: 1.6; margin: 0.8rem 0; }
 .control-toolbar { display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap; }
 .control-section { border: 1px solid var(--border-input); border-radius: var(--radius-control);
