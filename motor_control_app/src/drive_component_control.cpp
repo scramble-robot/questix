@@ -143,6 +143,7 @@ void DriveComponent::shutdownMotorLib() {
 }
 
 void DriveComponent::resetCommandState() {
+  needs_neutral_warned_ = false;
   rearm_.reset();
   pending_cmd_timeout_stop_ = false;
   // 武装解除（制御 tick は次の /target_twist まで駆動指令を送らない）+
@@ -175,6 +176,15 @@ void DriveComponent::resetOdometryAnchor(const char* reason) {
                         "Wheel position odometry anchor reset: %s (pose retained)", reason);
 }
 
+// Observe both callbacks and ticks so a reason change without a twist still ends the episode.
+void DriveComponent::observeTwistLogBlock(actuation_gate::Block block) {
+  if (block != twist_log_block_) {
+    blocked_twist_warned_ = false;
+    needs_neutral_warned_ = false;
+    twist_log_block_ = block;
+  }
+}
+
 void DriveComponent::twistCallback(const geometry_msgs::msg::Twist::SharedPtr msg) {
   // inactive 中の twist は無視する（lifecycle activate 後にのみ駆動する）
   if (this->get_current_state().id() != lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE) {
@@ -184,11 +194,23 @@ void DriveComponent::twistCallback(const geometry_msgs::msg::Twist::SharedPtr ms
   // 走行許可なし・非常停止中・E-stop 不明/途絶・stop fault の間は目標を保存しない
   // （開いた後も中立を受けるまでは走行を再開しない）。
   const auto block = actuation_gate::evaluate(gateInputs());
+  observeTwistLogBlock(block);
+  const bool strict_neutral = msg->linear.x == 0.0 && msg->angular.z == 0.0;
+  if (strict_neutral) {
+    blocked_twist_warned_ = false;
+    needs_neutral_warned_ = false;
+  }
   if (block != actuation_gate::Block::kNone) {
     rearm_.reset();  // also latch a closed gate observed before its control tick
-    RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
-                         "Actuation blocked (%s), ignoring twist command",
-                         actuation_gate::blockName(block));
+    if (strict_neutral) {
+      RCLCPP_DEBUG(this->get_logger(), "Actuation blocked (%s), ignoring neutral twist command",
+                   actuation_gate::blockName(block));
+    } else if (!blocked_twist_warned_) {
+      RCLCPP_WARN(this->get_logger(),
+                  "Actuation blocked (%s), ignoring twist command: linear=%g angular=%g",
+                  actuation_gate::blockName(block), msg->linear.x, msg->angular.z);
+      blocked_twist_warned_ = true;
+    }
     return;
   }
 
@@ -203,10 +225,12 @@ void DriveComponent::twistCallback(const geometry_msgs::msg::Twist::SharedPtr ms
     return;
   }
   if (decision == Decision::kNeedsNeutral) {
-    RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
-                         "Drive needs neutral: linear=%g angular=%g; bands linear=%g angular=%g",
-                         msg->linear.x, msg->angular.z, rearm_neutral_linear_,
-                         rearm_neutral_angular_);
+    if (!needs_neutral_warned_) {
+      RCLCPP_WARN(this->get_logger(),
+                  "Drive needs neutral: linear=%g angular=%g; bands linear=%g angular=%g",
+                  msg->linear.x, msg->angular.z, rearm_neutral_linear_, rearm_neutral_angular_);
+      needs_neutral_warned_ = true;
+    }
     return;
   }
   if (decision == Decision::kInvalid) {
@@ -215,6 +239,7 @@ void DriveComponent::twistCallback(const geometry_msgs::msg::Twist::SharedPtr ms
     return;
   }
   if (decision == Decision::kInhibited) return;
+  needs_neutral_warned_ = false;
 
   // 制御実行は controlTimerCallback（固定周期の制御 tick）に集約されている。ここでは
   // 最新目標の保存のみを行い、シリアル I/O もスルーレート計算もしない。これにより
@@ -660,6 +685,7 @@ bool DriveComponent::estopEngaged() const {
 
 actuation_gate::Block DriveComponent::applyGate(bool stopped_now) {
   const auto block = actuation_gate::evaluate(gateInputs());
+  observeTwistLogBlock(block);
   const auto action = actuation_gate::decideGateAction(last_block_, block, has_target_);
   if (block != last_block_) {
     if (block == actuation_gate::Block::kNone) {
