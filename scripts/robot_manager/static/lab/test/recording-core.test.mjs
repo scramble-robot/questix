@@ -361,8 +361,12 @@ test('roller status keeps full command and cap precision in JSON and command CSV
   const back = parseRecording(serializeRecording(recording));
   assert.equal(back.streams.roller[0].command, roller.command);
   assert.equal(back.streams.roller[0].max_power, roller.max_power);
-  const [header, row] = recordingCSV(recording).replace(/^\uFEFF/, '').trim().split('\n');
-  assert.equal(Number(row.split(',')[header.split(',').indexOf('roller_command')]), roller.command);
+  const [header, row] = recordingCSV(recording)
+    .replace(/^\uFEFF/, '')
+    .trim()
+    .split('\n');
+  const commandColumn = header.split(',').indexOf('roller_command');
+  assert.equal(Number(row.split(',')[commandColumn]), roller.command);
 });
 
 test('a new recording with the E-stop stream and wheel fields saves and opens again', () => {

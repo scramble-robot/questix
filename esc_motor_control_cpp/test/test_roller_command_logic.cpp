@@ -116,9 +116,9 @@ TEST(RollerStatus, ReportsPwmFailureWithoutRemovingMechanismFields) {
 }
 
 TEST(RollerStatus, JsonPreservesPowerForThresholdComparisons) {
-  for (const double power : {static_cast<double>(0.2f), static_cast<double>(0.21f),
-                             static_cast<double>(0.7f), static_cast<double>(0.20049f),
-                             static_cast<double>(0.20051f), 0.20051}) {
+  for (const double power :
+       {static_cast<double>(0.2f), static_cast<double>(0.21f), static_cast<double>(0.7f),
+        static_cast<double>(0.20049f), static_cast<double>(0.20051f), 0.20051}) {
     esc_motor_control_cpp::RollerStatus status;
     status.command = power;
     status.max_power = power;
@@ -133,9 +133,9 @@ TEST(RollerStatus, JsonPreservesPowerForThresholdComparisons) {
 }
 
 TEST(RollerStatus, NonFinitePowerStillProducesFiniteJson) {
-  for (const double power : {std::numeric_limits<double>::quiet_NaN(),
-                             std::numeric_limits<double>::infinity(),
-                             -std::numeric_limits<double>::infinity()}) {
+  for (const double power :
+       {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity(),
+        -std::numeric_limits<double>::infinity()}) {
     esc_motor_control_cpp::RollerStatus status;
     status.command = power;
     status.max_power = power;

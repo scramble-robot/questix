@@ -160,8 +160,8 @@ TEST(LauncherFlow, ACapBelowTheMinimumCannotQualifyThroughFloat32Rounding) {
 }
 
 TEST(LauncherFlow, NonFiniteMinimumNeverStartsSpinUp) {
-  for (const double minimum : {kNaN, std::numeric_limits<double>::infinity(),
-                               -std::numeric_limits<double>::infinity()}) {
+  for (const double minimum :
+       {kNaN, std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity()}) {
     auto flow = ready();
     auto config = flow.config();
     config.min_fire_power = minimum;

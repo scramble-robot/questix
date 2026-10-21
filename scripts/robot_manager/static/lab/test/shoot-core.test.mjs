@@ -318,7 +318,12 @@ test('non-finite power limits offer only zero', () => {
 });
 
 test('full precision roller status is displayed as whole percent without changing the record', () => {
-  const roller = { stamp: 1, command: Math.fround(0.21), max_power: Math.fround(0.8), source: 'lab' };
+  const roller = {
+    stamp: 1,
+    command: Math.fround(0.21),
+    max_power: Math.fround(0.8),
+    source: 'lab',
+  };
   assert.equal(launcherState({ roller, rollerAt: 0, now: 0 }).roller.percent, 21);
   assert.equal(launcherRecordSummary({ streams: { roller: [roller] } }).maxPercent, 21);
   assert.equal(roller.command, Math.fround(0.21));
