@@ -95,6 +95,7 @@ struct WheelFeedback {
 struct Output {
   bool invalid_input{false};         // unusable command, geometry or RPM bound; stopped and reset
   double target_scale{1.0};          // common target scaling before slew (diagnostics only)
+  double output_scale{1.0};          // common wheel protection after slew; never fed back
   bool stop{true};                   // 停止指令を送るべきか。mode == kStop と同値
   DriveMode mode{DriveMode::kStop};  // 走行状態（Phase B）
   int left_rpm{0};      // 左車輪の指令 RPM（RUN で LQR 有効なら補正後）
@@ -113,7 +114,7 @@ struct Output {
  *
  * 1 ステップの流れ:
  *   目標 twist -> 車輪上限に合わせて共通縮小 -> スルーレート制限（テーパー付き）
- *   -> 運動学変換（左右車輪 RPM）
+ *   -> 運動学変換（左右車輪 RPM）-> 出力上限の共通縮小（スルー状態へ戻さない）
  *   -> 最近接整数へ丸め -> 走行状態機械（停止/低速/走行。ヒステリシス付き）
  *   -> [RUN かつ LQR 有効かつ FB あり] その輪が RUN 域にあればオブザーバ + LQR+FF で補正
  *
@@ -182,8 +183,12 @@ public:
     // ゼロ方向への切り捨ては左右で量子化が非対称になるため最近接整数へ丸める
     Output out;
     out.target_scale = target_scale;
-    out.left_ref_rpm = static_cast<int>(std::lround(left_rpm));
-    out.right_ref_rpm = static_cast<int>(std::lround(right_rpm));
+    const double peak = std::max(std::abs(left_rpm), std::abs(right_rpm));
+    out.output_scale = peak > config_.max_motor_rpm ? config_.max_motor_rpm / peak : 1.0;
+    // Different axis rates can temporarily leave the feasible wheel envelope during a turn.
+    // Protect this output only. Feeding it back would distort the settled target curvature.
+    out.left_ref_rpm = roundReference(left_rpm * out.output_scale);
+    out.right_ref_rpm = roundReference(right_rpm * out.output_scale);
     out.left_rpm = out.left_ref_rpm;
     out.right_rpm = out.right_ref_rpm;
     out.linear = last_linear_;
@@ -319,6 +324,13 @@ public:
   double rightDisturbanceHat() const { return right_.observer.d_hat; }
 
 private:
+  int roundReference(double rpm) const {
+    const double limit = config_.max_motor_rpm;
+    const double bounded = std::clamp(rpm, -limit, limit);
+    return std::clamp(static_cast<int>(std::lround(bounded)), -config_.max_motor_rpm,
+                      config_.max_motor_rpm);
+  }
+
   struct VelocityCaps {
     double linear{0.0};
     double angular{0.0};

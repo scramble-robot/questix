@@ -227,6 +227,98 @@ TEST(ControlCoreWheelLimit, LowerRpmLimitIsUsedBeforeSlew) {
   EXPECT_EQ(std::max(std::abs(out.left_ref_rpm), std::abs(out.right_ref_rpm)), 100);
 }
 
+TEST(ControlCoreWheelLimit, AddingForwardDuringTurnProtectsOnlyTheTransientOutput) {
+  const auto config = wheelLimitConfig();
+  core::ControlCore control(config);
+  for (int tick = 0; tick < 1000; ++tick) {
+    control.step(0, 6.0, kControlDt);
+  }
+  int protected_ticks = 0;
+  double expected_linear = control.lastLinear();
+  double expected_angular = control.lastAngular();
+  for (int tick = 0; tick < 1000; ++tick) {
+    expected_linear = motor_control_app::drive_slew::clampRateTapered(
+        1.421196676623954, expected_linear, config.max_linear_accel, kControlDt,
+        config.slew_taper_band_linear);
+    expected_angular = motor_control_app::drive_slew::clampRateTapered(
+        4.263590029871862, expected_angular, config.max_angular_accel, kControlDt,
+        config.slew_taper_band_angular);
+    const auto out = control.step(2.0, 6.0, kControlDt);
+    EXPECT_NEAR(control.lastLinear(), expected_linear, 1e-12);
+    EXPECT_NEAR(control.lastAngular(), expected_angular, 1e-12);
+    EXPECT_DOUBLE_EQ(out.linear, control.lastLinear());
+    EXPECT_DOUBLE_EQ(out.angular, control.lastAngular());
+    const auto [left, right] = motor_control_lib::differential_kinematics::twistToWheelRpm(
+        out.linear, out.angular, config.wheel_radius, config.wheel_separation);
+    if (out.output_scale < 1.0) {
+      ++protected_ticks;
+      EXPECT_EQ(std::max(std::abs(out.left_ref_rpm), std::abs(out.right_ref_rpm)), 475);
+      EXPECT_NEAR(std::max(std::abs(left), std::abs(right)) * out.output_scale, 475, 1e-10);
+    }
+    // Each wheel differs from a common-scaled double reference by at most half an rpm.
+    EXPECT_NEAR(out.left_ref_rpm, left * out.output_scale, 0.5 + 1e-10);
+    EXPECT_NEAR(out.right_ref_rpm, right * out.output_scale, 0.5 + 1e-10);
+    EXPECT_LE(std::abs(out.left_ref_rpm), 475);
+    EXPECT_LE(std::abs(out.right_ref_rpm), 475);
+    if (tick >= 100) {
+      EXPECT_DOUBLE_EQ(out.output_scale, 1.0);
+    }
+  }
+  EXPECT_GT(protected_ticks, 0);
+  EXPECT_LT(protected_ticks * kControlDt, 1.0);
+  EXPECT_NEAR(control.lastAngular() / control.lastLinear(), 3.0, 1e-12);
+}
+
+TEST(ControlCoreWheelLimit, BoundaryAndAlternatingTargetsNeverExceedIntegerLimit) {
+  for (int limit : {1, 100, 475}) {
+    auto config = wheelLimitConfig();
+    config.max_motor_rpm = limit;
+    // Different rates exercise paths outside the wheel envelope, including sign changes.
+    config.max_angular_accel = 0.3;
+    const double cap = kLinearCap * limit / 475.0;
+    core::ControlCore control(config);
+    for (int tick = 0; tick < 10000; ++tick) {
+      const double sign = (tick / 80) % 2 ? -1.0 : 1.0;
+      const double edge = tick % 2 ? std::nextafter(cap, 0.0)
+                                   : std::nextafter(cap, std::numeric_limits<double>::infinity());
+      const auto out = control.step(sign * edge, sign * (tick % 160 < 80 ? 0.0 : 6.0), kControlDt);
+      ASSERT_FALSE(out.invalid_input);
+      ASSERT_LE(std::abs(out.left_ref_rpm), limit);
+      ASSERT_LE(std::abs(out.right_ref_rpm), limit);
+      ASSERT_LE(std::abs(out.left_rpm), limit);
+      ASSERT_LE(std::abs(out.right_rpm), limit);
+    }
+  }
+}
+
+TEST(ControlCoreWheelLimit, UnsaturatedCommandsMatchTheOriginalIntegerSequenceExactly) {
+  for (double taper : {0.0, 0.1}) {
+    auto config = wheelLimitConfig();
+    config.slew_taper_band_linear = taper;
+    config.slew_taper_band_angular = taper;
+    core::ControlCore control(config);
+    double linear = 0;
+    double angular = 0;
+    for (int tick = 0; tick < 3000; ++tick) {
+      const double v = 0.9 * std::sin(tick * 0.013);
+      const double w = 2.0 * std::cos(tick * 0.021);
+      linear = motor_control_app::drive_slew::clampRateTapered(v, linear, config.max_linear_accel,
+                                                               kControlDt, taper);
+      angular = motor_control_app::drive_slew::clampRateTapered(
+          w, angular, config.max_angular_accel, kControlDt, taper);
+      const auto [left, right] = motor_control_lib::differential_kinematics::twistToWheelRpm(
+          linear, angular, config.wheel_radius, config.wheel_separation);
+      const auto out = control.step(v, w, kControlDt);
+      EXPECT_DOUBLE_EQ(out.target_scale, 1.0);
+      EXPECT_DOUBLE_EQ(out.output_scale, 1.0);
+      EXPECT_DOUBLE_EQ(out.linear, linear);
+      EXPECT_DOUBLE_EQ(out.angular, angular);
+      EXPECT_EQ(out.left_ref_rpm, std::lround(left));
+      EXPECT_EQ(out.right_ref_rpm, std::lround(right));
+    }
+  }
+}
+
 TEST(ControlCoreWheelLimit, InvalidDimensionsOrRpmStopResetAndRecover) {
   const auto valid = wheelLimitConfig();
   for (auto field : {&core::Config::wheel_radius, &core::Config::wheel_separation}) {
