@@ -259,7 +259,8 @@ const StatusView = (() => {
   // QUESTiX LAB); the bridge's report and blockers are the fallback for an older manager.
   function estop(lab, service, monitor) {
     const bridge = lab && lab.bridge;
-    if (service !== 'active') return { text: 'ロボット制御が停止中のため分かりません', tone: 'idle' };
+    if (!service || service === 'unknown') return { text: '確認不能', tone: 'warn' };
+    if (service !== 'active') return { text: '不明（ロボット制御が停止中）', tone: 'idle' };
     if (monitor && monitor.state === 'pressed') {
       const why = estopReasonText(monitor.reason);
       return { text: why ? `押されています（${why}）` : '押されています', tone: 'danger' };
@@ -269,12 +270,13 @@ const StatusView = (() => {
       if (/no GPIO safety path/.test(monitor.reason || '')) {
         return { text: '解除されています（非常停止ボタンを読まない診断用の起動です）', tone: 'warn' };
       }
-      return { text: '解除されています', tone: 'ok' };
+      return { text: '解除', tone: 'ok' };
     }
+    if (monitor) return { text: '不明', tone: 'warn' };
     // Bridges since 2026-09-26 report it directly (always observed); older ones only as blockers.
     if (bridge && typeof bridge.emergency_stop === 'boolean') {
       return bridge.emergency_stop
-        ? { text: '押されています', tone: 'danger' } : { text: '解除されています', tone: 'ok' };
+        ? { text: '押されています', tone: 'danger' } : { text: '解除', tone: 'ok' };
     }
     // A bridge that reports it but has not heard /emergency_stop yet: unknown, never "released".
     if (bridge && 'emergency_stop' in bridge) {
@@ -289,14 +291,14 @@ const StatusView = (() => {
       return { text: '分かりません（教材の配信を始めると確認できます）', tone: 'idle' };
     }
     const pressed = sources.some((s) => (s && s.blockers || []).some((b) => b.code === 'emergency_stop'));
-    return pressed ? { text: '押されています', tone: 'danger' } : { text: '解除されています', tone: 'ok' };
+    return pressed ? { text: '押されています', tone: 'danger' } : { text: '解除', tone: 'ok' };
   }
 
   // The header's E-stop block: always shown, one of three words. Only reads the row estop() made
   // (its tone), so the 操作 tab and the header can never disagree.
   const HEADER_ESTOP = {
-    pressed: '押されている',
-    released: '解除中',
+    pressed: '押されています',
+    released: '解除',
     unknown: '不明',
   };
   function headerEstop(row) {
@@ -356,7 +358,8 @@ const StatusView = (() => {
     const doing = [];
     if (drive.active) doing.push(`生徒の端末 #${drive.owner}（教材から走行中）`);
     if (shoot.active) doing.push(`生徒の端末 #${shoot.owner}（教材から発射台を操作中）`);
-    if (service !== 'active') rows.driver = { text: 'だれも動かせません（ロボット制御が停止中）', tone: 'idle' };
+    if (service === 'unknown') rows.driver = { text: '確認不能', tone: 'warn' };
+    else if (service !== 'active') rows.driver = { text: 'だれも動かせません（ロボット制御が停止中）', tone: 'idle' };
     else if (doing.length) rows.driver = { text: doing.join('・'), tone: 'warn' };
     else {
       const controllerBusy = (shoot.blockers || []).some((b) => b.code === 'controller');

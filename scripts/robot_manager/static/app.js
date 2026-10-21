@@ -1558,6 +1558,8 @@ async function stopAll() {
   if (typeof invalidateControlRuntime === 'function') invalidateControlRuntime();
   try {
     const answer = await api('/api/stop-all', { method: 'POST' });
+    actuationRead++;
+    renderActuation(answer.actuation ? { ...latestActuation, ...answer.actuation } : null);
     const parts = document.getElementById('stop-all-parts');
     parts.replaceChildren();
     for (const part of [answer.service, answer.lab, answer.lab_permissions].filter(Boolean)) {
@@ -1574,6 +1576,8 @@ async function stopAll() {
     toast(answer.ok ? 'すべて止めました' : '止められなかったものがあります。画面上部を確認してください。',
       answer.ok ? 'success' : 'error');
   } catch {
+    actuationRead++;
+    renderActuation(null);
     // api() shows the failure at the top of the page.
   } finally {
     stopAllPending = false;
@@ -1704,8 +1708,11 @@ function setupEvents() {
 // ---------------------------------------------------------------------------
 
 let actuationPending = false;
+let latestActuation = null;
+let actuationRead = 0;
 
 function renderActuation(data) {
+  latestActuation = data;
   const names = { drive: 'ロボットの走行制御', launcher: '発射機構の操作' };
   for (const kind of ['drive', 'launcher']) {
     const toggle = document.getElementById(`actuation-${kind}-toggle`);
@@ -1713,7 +1720,7 @@ function renderActuation(data) {
     toggle.disabled = actuationPending || !data || (data.available === false && !data[kind]);
     document.getElementById(`actuation-${kind}-state`).textContent =
       !data ? '（確認できません）' : data.available === false && !data[kind] ? '（教材モードで使います）'
-        : data[kind] ? 'ON：動かせます' : 'OFF：動きません';
+        : actuationPending ? '要求中' : data[kind] ? '許可しています' : '許可していません';
   }
   const running = { lesson: '教材', practice: '練習', competition: '大会' }[data?.running_mode];
   const state = document.getElementById('actuation-state');
@@ -1740,15 +1747,20 @@ function renderActuation(data) {
 }
 
 async function refreshActuation() {
+  const read = ++actuationRead;
   try {
-    renderActuation(await apiSilent('/api/actuation/status'));
+    const data = await apiSilent('/api/actuation/status');
+    if (read === actuationRead && !actuationPending) renderActuation(data);
   } catch {
-    renderActuation(null);
+    if (read === actuationRead && !actuationPending) renderActuation(null);
   }
 }
 
 async function setActuation(kind, allow) {
+  if (actuationPending) return;
   actuationPending = true;
+  actuationRead++;
+  renderActuation(latestActuation);
   try {
     renderActuation(await api(`/api/actuation/${kind}`, {
       method: 'POST', body: JSON.stringify({ allow }),
