@@ -1637,3 +1637,52 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .rec-readiness { margin: 1rem 0; }
 .rec-readiness .trial-warnings { overflow-wrap: anywhere; }
 .rec-readiness .btn { margin-top: .35rem; }
+
+
+/* Permission choices stay in place. Notifications keep their original, early position;
+   their own scroll region keeps long messages readable without moving the controls. */
+.notification-region {
+  height: 9rem;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  margin-bottom: 1rem;
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-control);
+  padding: 0.75rem;
+}
+.notification-region .notice { margin: 0 0 0.6rem; }
+.notification-empty { color: var(--text-dim); font-size: var(--font-small); }
+.notification-region:has(> :not([hidden]):not(.notification-empty)) .notification-empty { display: none; }
+.notification-region:focus-visible, .permission-choice label:has(input:focus-visible) {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
+.permission-neutral { font-weight: 600; margin-bottom: 0.75rem; }
+.permission-estop { display: flex; gap: 1rem; align-items: center; min-height: 3rem; }
+.permission-estop [data-tone="danger"] { color: var(--red); font-weight: 700; }
+.permission-estop [data-tone="warn"] { color: var(--yellow); }
+.permission-estop [data-tone="ok"] { color: var(--text); }
+.permission-choice {
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-control);
+  padding: 0.75rem;
+  margin: 1rem 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.permission-choice legend { padding: 0 0.3rem; font-weight: 600; }
+.permission-choice label {
+  display: flex; align-items: center; gap: 0.75rem; min-height: 44px;
+  padding: 0.5rem; border: 1px solid var(--border-input);
+  border-radius: var(--radius-control); color: var(--text);
+}
+.permission-choice label:has(input:checked) { background: var(--accent-soft); border-color: var(--accent); }
+.permission-choice label:has(input:disabled) { color: var(--text-dim); cursor: default; }
+.permission-choice input { width: 1.25rem; height: 1.25rem; flex: none; accent-color: var(--accent); }
+#permission-feedback p { overflow-wrap: anywhere; }
+.permission-guide { color: var(--accent-hover); }
+@media (min-width: 900px) {
+  .permission-choice { grid-template-columns: 1fr 1.1fr 1.5fr; }
+}

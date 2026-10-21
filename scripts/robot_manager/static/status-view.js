@@ -263,7 +263,7 @@ const StatusView = (() => {
     if (service !== 'active') return { text: '不明（ロボット制御が停止中）', tone: 'idle' };
     if (monitor && monitor.state === 'pressed') {
       const why = estopReasonText(monitor.reason);
-      return { text: why ? `押されています（${why}）` : '押されています', tone: 'danger' };
+      return { text: '押されています', tone: 'danger', detail: why || '' };
     }
     if (monitor && monitor.state === 'released') {
       // Only a manual diagnostic launch (enable_gpio_ref:=false) releases without reading GPIO5.
@@ -304,7 +304,7 @@ const StatusView = (() => {
   function headerEstop(row) {
     const tone = row && row.tone;
     const state = tone === 'danger' ? 'pressed' : tone === 'ok' ? 'released' : 'unknown';
-    return { state, label: HEADER_ESTOP[state] };
+    return { state, label: row?.text === '確認不能' ? '確認不能' : HEADER_ESTOP[state] };
   }
 
   // Rows of the 操作 tab's status strip.
@@ -395,7 +395,7 @@ const StatusView = (() => {
     if (lab.error) return `教材の設定を戻せませんでした（${lab.error}）`;
     const word = (on) => (on ? 'オン' : 'オフ');
     const head = lab.restored ? '教材の配信は大会モードの前の設定に戻しました' : '教材の配信の自動開始をオンにしました';
-    return `${head}（配信の自動開始: ${word(lab.autostart)}・教材からの走行: ${lab.drive ? 'ON' : 'OFF'}・発射: ${lab.shoot ? 'ON' : 'OFF'}。走行・発射は先生が教材タブで ON にしてください）`;
+    return `${head}（配信の自動開始: ${word(lab.autostart)}・教材からの走行: ${lab.drive ? 'ON' : 'OFF'}・発射: ${lab.shoot ? 'ON' : 'OFF'}。走行・発射の許可は先生が操作タブで選んでください）`;
   }
 
   return {
