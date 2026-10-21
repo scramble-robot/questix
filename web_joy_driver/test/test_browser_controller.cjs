@@ -416,3 +416,35 @@ test("emergency stop outranks the lesson banner", () => {
   c.sockets[0].message(status({ estop: false, arbiter: { active: "joy" } }));
   assert.equal(c.$("banner").className, "");
 });
+
+
+test("neutral latch status resets held input once and shows then clears its prompt", () => {
+  const c = controller(); c.sockets[0].open(); c.mode("keyboard");
+  c.key("keydown", "Space"); c.key("keydown", "KeyW"); c.key("keydown", "KeyF");
+  c.sockets[0].message(status({ stopped: true, stop_reason: "timeout", hold: "timeout",
+    arbiter: { active: "lab" } }));
+  neutral(c.last());
+  assert.equal(c.$("banner").textContent, "スティックとボタンから手を離してください");
+  c.key("keydown", "KeyF", { repeat: true }); c.heartbeat(); neutral(c.last());
+  // A repeated status must not keep resetting a new operation indefinitely.
+  c.key("keydown", "Space"); c.key("keydown", "KeyW");
+  c.sockets[0].message(status({ stopped: true, stop_reason: "timeout" }));
+  assert.equal(c.last().axes[1], 1);
+  c.sockets[0].message(status({ stopped: false }));
+  assert.notEqual(c.$("banner").textContent, "スティックとボタンから手を離してください");
+  c.sockets[0].message(status({ stopped: true, stop_reason: "stop" }));
+  neutral(c.last());
+  c.sockets[0].message(status({ stopped: true, estop: true }));
+  assert.equal(c.$("banner").textContent, "非常停止中");
+});
+
+test("latch reset discards pointer tracking and viewers do not clear their owner's latch", () => {
+  const c = controller(); c.sockets[0].open();
+  const fire = c.$("buttons").children[1];
+  c.pointer("leftZone", "pointerdown"); c.pointer("leftZone", "pointermove", 1, 60, 0);
+  c.pointer(fire, "pointerdown", 2);
+  c.sockets[0].message(status({ stopped: true, stop_reason: "owner_change" }));
+  c.pointer("leftZone", "pointermove", 1, -60, 0); c.heartbeat(); neutral(c.last());
+  c.sockets[0].message(status({ controller: false, stopped: true }));
+  assert.notEqual(c.$("banner").textContent, "スティックとボタンから手を離してください");
+});

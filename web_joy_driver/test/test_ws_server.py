@@ -13,7 +13,7 @@ import urllib.request
 import pytest
 import websockets
 
-from web_joy_driver.joy_frame import FrameError
+from web_joy_driver.joy_frame import JoyHold
 from web_joy_driver.ws_server import (
     CLOSE_AUTH_FAILED,
     CLOSE_REPLACED,
@@ -27,22 +27,30 @@ MAC = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15"
 
 
 class _Sink:
+    """Use the node's real JoyHold boundary without importing ROS."""
+
     def __init__(self):
         self.frames = []
         self.releases = 0
         self.event = threading.Event()
+        self.now = 0.0
+        self.hold = JoyHold(clock=lambda: self.now)
 
     def on_frame(self, payload):
-        if payload.get("bad"):
-            raise FrameError("bad frame")
-        self.frames.append(payload)
-        self.event.set()
+        result = self.hold.accept(payload)
+        if result.accepted:
+            self.frames.append(payload)
+            self.event.set()
+        return result
 
-    def on_release(self):
+    def on_release(self, reason):
+        self.hold.release(reason)
         self.releases += 1
 
     def status(self):
-        return {"hold": "active", "estop": False}
+        held = self.hold.snapshot()
+        return {"hold": held.state, "estop": False, "stopped": held.stopped,
+                "stop_reason": held.stop_reason, "axes": held.axes, "buttons": held.buttons}
 
 
 @pytest.fixture
@@ -169,16 +177,18 @@ def test_ws_frames_reach_callback_and_release_on_close(server):
             assert welcome["you"]["label"] == "iPhone"
             assert welcome["you"]["address"] == "127.0.0.1"
             assert welcome["owner"]["id"] == welcome["you"]["id"]
+            await ws.send(_joy(0.0))
             await ws.send(json.dumps({"type": "joy", "axes": [1.0], "buttons": [0, 1]}))
             await ws.send("not json")
-            await ws.send(json.dumps({"type": "joy", "bad": True}))
+            await ws.send(json.dumps({"type": "joy", "axes": [0] * 9}))
             msg = await _recv_type(ws, "status")
             assert msg["controller"] is True and msg["estop"] is False
             assert msg["owner"]["label"] == "iPhone" and msg["clients"] == 1
 
     _run(go())
     assert sink.event.wait(2.0)
-    assert sink.frames == [{"type": "joy", "axes": [1.0], "buttons": [0, 1]}]
+    assert sink.frames == [{"type": "joy", "axes": [0.0], "buttons": []},
+                           {"type": "joy", "axes": [1.0], "buttons": [0, 1]}]
     releases = sink.releases
     for _ in range(50):
         if sink.releases > releases or sink.releases >= 2:
@@ -206,6 +216,7 @@ def test_second_device_is_refused_not_a_takeover(server):
         await second.send(json.dumps({"type": "claim"}))
         refused = await _recv_type(second, "refused")
         assert refused["reason"] == "busy" and refused["owner"]["id"] == me["id"]
+        await first.send(_joy(0.0))
         await first.send(_joy(0.25))
         assert await _wait(lambda: sink.frames and sink.frames[-1]["axes"] == [0.25])
         # The first page keeps operating: it was not closed or told it lost control.
@@ -227,6 +238,7 @@ def test_stop_from_a_viewer_is_honoured(server):
         await op.recv()
         viewer = await _connect(_url(srv, "token=secret&cid=viewer"))
         viewer_me = json.loads(await viewer.recv())["you"]
+        await op.send(_joy(0.0))
         await op.send(_joy(1.0))
         assert await _wait(lambda: sink.frames and sink.frames[-1]["axes"] == [1.0])
         before = sink.releases
@@ -271,6 +283,7 @@ def test_release_request_and_handover(server):
         # 譲る: the operator releases to the asking viewer.
         await op.send(json.dumps({"type": "release", "to": viewer_me["id"]}))
         await _recv_type(viewer, "status", where=lambda m: m["controller"])
+        await viewer.send(_joy(0.0))
         await viewer.send(_joy(0.7))
         assert await _wait(lambda: sink.frames and sink.frames[-1]["axes"] == [0.7])
         await op.send(_joy(0.1))  # the former operator is a viewer now
@@ -320,6 +333,7 @@ def test_same_page_reconnect_replaces_its_stale_connection_fast(server):
         t0 = time.monotonic()
         again = await websockets.connect(_url(srv, "token=secret&cid=phone"))
         assert json.loads(await again.recv())["controller"] is True
+        await again.send(_joy(0.0))
         await again.send(_joy(0.25))
         assert await _wait(lambda: sink.frames and sink.frames[-1]["axes"] == [0.25])
         elapsed = time.monotonic() - t0
@@ -382,3 +396,92 @@ def test_camera_frames_are_relayed_as_binary_and_only_the_latest_survives(server
     _run(go())
     assert srv.camera_stats["sent"] >= 2
     assert srv.camera_stats["dropped"] > 0
+
+
+@pytest.mark.parametrize("payload", [
+    {"type": "joy", "axes": [1.0], "buttons": []},
+    {"type": "joy", "axes": [], "buttons": [0] * 5 + [True]},
+])
+def test_same_socket_timeout_blocks_held_stick_and_fire(server, payload):
+    srv, sink = server
+
+    async def go():
+        async with _connect(_url(srv)) as op:
+            await op.recv()
+            await op.send(_joy(0))
+            await op.send(json.dumps(payload))
+            assert await _wait(lambda: sink.frames and sink.frames[-1] == payload)
+            sink.now = 0.6  # deterministic gap; keep the WebSocket alive
+            status = await _recv_type(op, "status",
+                                      where=lambda m: m.get("stop_reason") == "timeout")
+            assert status["stopped"]
+            count = len(sink.frames)
+            await op.send(json.dumps(payload))
+            await _recv_type(op, "status", where=lambda m: m["hold"] == "timeout")
+            assert len(sink.frames) == count
+            snap = sink.hold.snapshot()
+            assert not any(snap.axes) and not any(snap.buttons)
+            await op.send(_joy(0))
+            await op.send(json.dumps(payload))
+            assert await _wait(lambda: len(sink.frames) == count + 2)
+            assert sink.frames[-1] == payload
+
+    _run(go())
+
+
+def test_invalid_neutral_and_viewer_neutral_do_not_clear_latch(server):
+    srv, sink = server
+
+    async def go():
+        async with _connect(_url(srv, "token=secret&cid=owner")) as op:
+            await op.recv()
+            async with _connect(_url(srv, "token=secret&claim=0")) as viewer:
+                await viewer.recv()
+                for payload in [{"type": "joy", "axes": [0] * 9},
+                                {"type": "joy", "buttons": [0] * 15}]:
+                    await op.send(json.dumps(payload))
+                await viewer.send(_joy(0))
+                await op.send(_joy(1))
+                status = await _recv_type(op, "status", where=lambda m: m["stopped"])
+                assert status["stop_reason"] == "owner_change"
+                assert not sink.frames
+                await op.send(_joy(0))
+                await op.send(_joy(1))
+                assert await _wait(lambda: len(sink.frames) == 2)
+
+    _run(go())
+
+
+def test_handover_and_same_page_replacement_require_new_owner_neutral(server):
+    srv, sink = server
+
+    async def go():
+        async with _connect(_url(srv, "token=secret&cid=page")) as old:
+            await old.recv()
+            await old.send(_joy(0))
+            await old.send(_joy(1))
+            assert await _wait(lambda: sink.frames and sink.frames[-1]["axes"] == [1])
+            async with _connect(_url(srv, "token=secret&cid=page")) as new:
+                await new.recv()
+                count = len(sink.frames)
+                await new.send(_joy(0.7))
+                await _recv_type(new, "status", where=lambda m: m["stopped"])
+                assert len(sink.frames) == count
+                async with _connect(_url(srv, "token=secret&cid=other")) as viewer:
+                    me = json.loads(await viewer.recv())["you"]
+                    await new.send(_joy(0))
+                    await new.send(_joy(0.7))
+                    assert await _wait(lambda: len(sink.frames) == count + 2)
+                    await viewer.send(json.dumps({"type": "request"}))
+                    await _recv_type(new, "handover_request")
+                    await new.send(json.dumps({"type": "release", "to": me["id"]}))
+                    await _recv_type(viewer, "status", where=lambda m: m["controller"])
+                    count = len(sink.frames)
+                    await viewer.send(_joy(0.8))
+                    await _recv_type(viewer, "status", where=lambda m: m["stopped"])
+                    assert len(sink.frames) == count
+                    await viewer.send(_joy(0))
+                    await viewer.send(_joy(0.8))
+                    assert await _wait(lambda: len(sink.frames) == count + 2)
+
+    _run(go())

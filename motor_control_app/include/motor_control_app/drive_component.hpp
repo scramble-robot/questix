@@ -109,6 +109,7 @@ private:
    * @param msg 受信したTwistメッセージ
    */
   void twistCallback(const geometry_msgs::msg::Twist::SharedPtr msg);
+  void observeTwistLogBlock(actuation_gate::Block block);
 
   /**
    * @brief 制御 tick（固定周期 control_rate）のタイマーコールバック
@@ -385,6 +386,10 @@ private:
   rclcpp::Time last_cmd_time_;
   bool has_target_{false};
   drive_rearm::Rearm rearm_{};
+  // Diagnostic episodes only. Never read by the command, rearm or safety decisions.
+  actuation_gate::Block twist_log_block_{actuation_gate::Block::kNone};
+  bool blocked_twist_warned_{false};
+  bool needs_neutral_warned_{false};
   bool pending_cmd_timeout_stop_{false};
   // Rearm only; velocity/current both. Restart to change; never filters armed commands.
   double rearm_neutral_linear_{0.0};
