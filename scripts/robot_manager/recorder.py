@@ -319,7 +319,7 @@ class RecorderConfig(BaseModel):
                 raise ValueError(f"Invalid exclude topic pattern: {token}")
         return v
 
-    @field_validator("MIN_FREE_GB", "MAX_SPLIT_MB", "MAX_DURATION_SEC")
+    @field_validator("MIN_FREE_GB", "MAX_SPLIT_MB", "MAX_DURATION_SEC", mode="before")
     @classmethod
     def _validate_nonneg_int(cls, v: str | None, info: ValidationInfo) -> str | None:
         if v is not None:

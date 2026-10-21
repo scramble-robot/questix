@@ -40,8 +40,10 @@ class RecorderNumericTests(unittest.TestCase):
 
     def test_non_string_numbers_are_rejected(self):
         for value in (1, 1.0, True):
-            with self.assertRaises(ValidationError):
+            with self.assertRaises(ValidationError) as error:
                 recorder.RecorderConfig(MIN_FREE_GB=value)
+            self.assertIn('半角の数字', str(error.exception))
+            self.assertIn('1〜16 GB', str(error.exception))
 
     def test_boundaries(self):
         for key, good, bad in (
