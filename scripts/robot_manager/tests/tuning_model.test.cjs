@@ -21,20 +21,53 @@ test('defaults and ID15 keep ROS units and derived stopping quantities', () => {
 });
 
 test('ID15 10 m/s uses the 475 rpm wheel ceiling for time and distance', () => {
-  const linear = m.motion(values(10), geometry, 'linear');
+  const linear = m.motion(values(10, 3, 2.25), geometry, 'linear');
   close(linear.speed, 475 * 2 * Math.PI * 0.05 / 60);
   assert.equal(m.number(linear.speed), 2.49);
   assert.equal(linear.configured, 10);
   assert.equal(linear.limited, true);
-  close(linear.time, linear.speed / 1.5);
-  close(linear.stop, linear.speed ** 2 / 3);
-  assert.match(m.summary(linear, 'linear'), /2.49 m\/s.*1.66 s.*約 2.06 m/);
+  close(linear.time, linear.speed / 2.25);
+  close(linear.internalTime, 10 / 2.25);
+  close(linear.coastTime, (10 - linear.speed) / 2.25);
+  close(linear.stopTime, 10 / 2.25);
+  close(linear.stop, linear.speed * (10 - linear.speed) / 2.25 + linear.speed ** 2 / 4.5);
+  assert.equal(m.number(linear.coastTime), 3.34);
+  assert.equal(m.number(linear.stopTime), 4.44);
+  assert.equal(m.number(linear.stop), 9.68);
+  assert.match(m.summary(linear, 'linear'), /内部の値が設定の速さに届いた場合.*3.34 s.*4.44 s.*9.68 m.*短く倒した/);
   const turn = m.motion(values(10, 20), geometry, 'angular');
   close(turn.speed, 2 * linear.speed / 0.5);
   close(turn.time, turn.speed / 1.5);
   assert.equal(turn.limited, true);
   close(m.wheelLimit(values(1, 3, 1.5, 1.5, 200), geometry, 'linear'),
     200 * 2 * Math.PI * 0.05 / 60);
+});
+
+test('lowered rpm can saturate within policy, while ordinary ramps keep their old results', () => {
+  const limited = m.motion(values(2, 3, 1.5, 1.5, 200), geometry, 'linear');
+  assert.equal(limited.limited, true);
+  assert.ok(limited.coastTime > 0);
+  close(limited.stopTime, 2 / 1.5);
+  const ordinary = m.motion(values(), geometry, 'linear');
+  assert.equal(ordinary.coastTime, 0);
+  close(ordinary.stopTime, ordinary.time);
+  close(ordinary.stop, ordinary.speed ** 2 / (2 * ordinary.accel));
+});
+
+test('displayed minimum times round upward and convert to allowed acceleration', () => {
+  for (const speed of [0.00012345, 0.05, 0.3, 1, 2, 2.48709418409192, 4.5, 6]) {
+    for (const maximum of [50, 100]) {
+      const shown = m.minimumTime(speed, maximum);
+      assert.ok(shown >= speed / maximum);
+      assert.ok(m.acceleration(speed, Number(String(shown))) <= maximum);
+    }
+  }
+  assert.equal(m.minimumTime(4.5, 100), 0.05);
+  assert.equal(m.minimumTime(2.48709418409192, 50), 0.05);
+  assert.equal(m.minimumTime(0, 50), null);
+  assert.equal(m.minimumTime(1, 0), null);
+  assert.match(m.speedWarning('longitudinal_input_ratio', -10, 2), /10.0 m\/s（方向の反転あり）.*2.0 m\/s 以下/);
+  assert.doesNotMatch(m.speedWarning('longitudinal_input_ratio', 10, 2), /（方向の反転あり）/);
 });
 
 test('plan A preserves effective acceleration time across both sides of the wheel ceiling', () => {

@@ -7,11 +7,15 @@ const TuningChart = (() => {
   function curve(state) {
     if (!state) return null;
     if (state.speed === 0) return { points: [[0, 0], [HOLD_SECONDS, 0]], shade: [], release: 0 };
-    if (!(state.time > 0) || !Number.isFinite(2 * state.time + HOLD_SECONDS)
+    if (!(state.time > 0) || !Number.isFinite(2 * state.internalTime + HOLD_SECONDS)
         || !Number.isFinite(state.stop)) return null;
-    const release = state.time + HOLD_SECONDS;
+    const release = state.internalTime + HOLD_SECONDS;
+    const end = release + state.stopTime;
+    const coastEnd = release + state.coastTime;
     return { points: [[0, 0], [state.time, state.speed], [release, state.speed],
-      [release + state.time, 0]], shade: [[release, 0], [release, state.speed], [release + state.time, 0]],
+      ...(state.coastTime > 0 ? [[coastEnd, state.speed]] : []), [end, 0]],
+    shade: [[release, 0], [release, state.speed],
+      ...(state.coastTime > 0 ? [[coastEnd, state.speed]] : []), [end, 0]],
     release };
   }
 
@@ -88,7 +92,7 @@ const TuningChart = (() => {
     }
     const xTitle = element("div", "tuning-chart-x-title", "時間（s）");
     const caption = element("figcaption", "tuning-chart-caption",
-      "全倒し → 最高速度で1 s保つ → 戻す。塗りは戻した後の角度・距離を表します。同じ値では線が重なります。");
+      "最大まで倒し続け、内部の値が設定の速さに届いてから1 s保って戻す場合です。上限を超えると戻した後も全速の区間が続きます。塗りは戻した後の角度・距離です。短く倒した場合は、ここまで続きません。同じ値では線が重なります。");
     const status = element("p", "tuning-chart-status",
       spec.editing ? (spec.standard ? "" : "配布元の時間を算出できないため、破線は表示していません。")
         : "編集中の時間を算出できないため、実線と塗りは表示していません。");

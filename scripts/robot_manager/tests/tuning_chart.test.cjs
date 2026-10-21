@@ -9,17 +9,27 @@ const state = (speed, accel, kind = 'angular') => model.motion({
 }, geometry, kind);
 
 test('up, one-second hold and down agree with time and stopping-area formula', () => {
-  for (const motion of [state(3, 1.5), state(4.5, 2.25), state(10, 1.5, 'linear')]) {
+  for (const motion of [state(3, 1.5), state(4.5, 2.25), state(10, 2.25, 'linear')]) {
     const curve = chart.curve(motion);
-    const [[start, zero], [peak, speed], [release, held], [stop, stopped]] = curve.points;
+    const [[start, zero], [peak, speed], [release, held]] = curve.points;
+    const [stop, stopped] = curve.points.at(-1);
     assert.equal(start, 0); assert.equal(zero, 0);
     assert.equal(peak, motion.time);
     assert.equal(speed, motion.speed);
     assert.equal(held, speed);
-    assert.ok(Math.abs(release - peak - 1) < 1e-12);
-    assert.ok(Math.abs(stop - release - motion.time) < 1e-12);
+    assert.ok(Math.abs(release - motion.internalTime - 1) < 1e-12);
+    assert.ok(Math.abs(stop - release - motion.stopTime) < 1e-12);
     assert.equal(stopped, 0);
-    assert.ok(Math.abs((stop - release) * speed / 2 - motion.stop) < 1e-12);
+    const afterRelease = curve.points.slice(2);
+    const area = afterRelease.slice(1).reduce((sum, [t, v], i) =>
+      sum + (t - afterRelease[i][0]) * (v + afterRelease[i][1]) / 2, 0);
+    assert.ok(Math.abs(area - motion.stop) < 1e-12);
+    if (motion.limited) {
+      assert.equal(curve.points.length, 5);
+      assert.ok(Math.abs(curve.points[3][0] - release - motion.coastTime) < 1e-12);
+      assert.equal(curve.points[3][1], motion.speed);
+      assert.equal(model.number(area), 9.68);
+    }
     assert.equal(curve.shade[0][0], curve.release);
   }
 });

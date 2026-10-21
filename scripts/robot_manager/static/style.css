@@ -1273,6 +1273,13 @@ input[type="checkbox"] { accent-color: var(--accent); }
 }
 
 /* Operator tuning form */
+.control-range-warning { height: 12rem; overflow: auto; border-color: var(--orange); }
+.control-range-warning.has-lateral-repair { height: 22rem; }
+.control-range-warning label { display: block; margin-top: 0.75rem; font-weight: 600; }
+.control-range-warning input { display: block; width: 100%; }
+.control-field.out-of-range { border-color: var(--orange); }
+.control-field input[aria-invalid="true"], #control-lateral-repair[aria-invalid="true"] {
+  outline: 2px solid var(--orange); outline-offset: 2px; }
 .control-range, .control-estimate { grid-column: 1 / -1; color: var(--text-dim);
   font-size: var(--font-small); line-height: 1.65; overflow-wrap: anywhere; }
 .control-estimate { height: 9rem; overflow: auto; }

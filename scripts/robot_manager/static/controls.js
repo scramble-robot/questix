@@ -13,6 +13,80 @@ let runtimeGeneration = 0;
 let mapSelection = null;
 let mapReturnTarget = null;
 let tuningTimes = {};
+let rangeWarningActive = false;
+let rangeRepairLateral = false;
+
+function tuningRangeIssues(values) {
+  const speeds = ["longitudinal_input_ratio", "lateral_input_ratio", "angular_input_ratio"];
+  return controlProfile.groups.filter((group) => group.node === "joy_controller")
+    .flatMap((group) => group.fields.filter((field) => speeds.includes(field.key)
+      && (!TuningModel.finite(values[group.node][field.key])
+        || values[group.node][field.key] < field.min || values[group.node][field.key] > field.max))
+      .map((field) => ({ node: group.node, key: field.key,
+        value: values[group.node][field.key], min: field.min, max: field.max })));
+}
+
+function createRangeWarning() {
+  const host = document.getElementById("controls-range-warning");
+  const issues = [...tuningRangeIssues(controlProfile.values), ...tuningRangeIssues(controlDraft)];
+  const unique = [...new Map(issues.map((issue) => [issue.key, issue])).values()];
+  rangeWarningActive = unique.length > 0;
+  rangeRepairLateral = unique.some((issue) => issue.key === "lateral_input_ratio");
+  host.hidden = !rangeWarningActive;
+  host.classList.toggle("has-lateral-repair", rangeRepairLateral);
+  host.replaceChildren();
+  for (const issue of unique) {
+    const warning = document.createElement("p");
+    warning.textContent = TuningModel.finite(issue.value)
+      ? TuningModel.speedWarning(issue.key, issue.value, issue.max, true)
+      : "読み込んだ速さを確認してください。";
+    host.appendChild(warning);
+  }
+  const status = document.createElement("p");
+  status.id = "controls-range-state";
+  status.setAttribute("aria-live", "polite");
+  host.appendChild(status);
+  if (!rangeRepairLateral) return;
+  const label = document.createElement("label");
+  label.htmlFor = "control-lateral-repair";
+  label.textContent = "左右の速さ（保存値の修正、m/s）";
+  const input = document.createElement("input");
+  input.id = label.htmlFor;
+  input.type = "number";
+  input.min = 0;
+  input.max = unique.find((issue) => issue.key === "lateral_input_ratio").max;
+  input.step = "any";
+  input.required = true;
+  input.value = Math.abs(controlDraft.joy_controller.lateral_input_ratio);
+  const help = document.createElement("p");
+  help.id = "control-lateral-repair-help";
+  help.textContent = "この機体（左右 2 輪）では使われませんが、保存するには範囲内にしてください。"
+    + `入力できる範囲：0〜${Number(input.max).toFixed(1)} m/s（方向の反転は保存済みのまま）。値は自動で変更しません。`;
+  input.setAttribute("aria-describedby", help.id);
+  input.addEventListener("input", () => {
+    if (controlsBusy) return;
+    const direction = tuningDirection(controlDraft.joy_controller.lateral_input_ratio,
+      controlProfile.values.joy_controller.lateral_input_ratio);
+    controlDraft.joy_controller.lateral_input_ratio = input.value === "" ? null : Number(input.value) * direction;
+    refreshControlChanges(input);
+  });
+  host.append(label, input, help);
+}
+
+function refreshRangeWarning() {
+  if (!rangeWarningActive) return;
+  const issues = tuningRangeIssues(controlDraft);
+  document.getElementById("controls-range-state").textContent = issues.length
+    ? "範囲の外の値が残っています。編集していない項目も含め、範囲内にしてから保存してください。"
+    : "速さは範囲内に修正されました。まだ保存されていません。「操作設定を保存」で確定します。";
+  if (rangeRepairLateral) {
+    const input = document.getElementById("control-lateral-repair");
+    input.disabled = controlsBusy;
+    const issue = issues.find((item) => item.key === "lateral_input_ratio");
+    input.setCustomValidity(issue ? "左右の速さを入力できる範囲内にしてください。" : "");
+    input.setAttribute("aria-invalid", String(Boolean(issue)));
+  }
+}
 
 // UI choices and units only. Defaults and validation limits come from the profile API.
 const tuningFields = {
@@ -52,7 +126,7 @@ function tuningSpec(node, key) {
   }
   if (spec?.acceleration) {
     return { ...spec,
-      help: "停止から車輪の上限を考慮した最高速度までの時間の目安です。短いほどきびきび変化します。スティックを戻したときの減速も、同じ時間が目安です（非常停止は別で、すぐに止まります）。",
+      help: "停止から車輪の上限を考慮した最高速度までの時間の目安です。短いほどきびきび変化します。上限を超えない設定では、スティックを戻したときの減速も、同じ時間が目安です（非常停止は別で、すぐに止まります）。",
       presets: [[0.5, "おだやか 50%"], [1, "標準 100%"], [1.5, "きびきび 150%"]]
         .map(([factor, title]) => [TuningModel.presetTime(controlProfile.defaults,
           controlProfile.geometry, spec.kind, factor), title]) };
@@ -116,22 +190,29 @@ function refreshTuningFields(activeInput) {
       input.placeholder = state?.unlimited ? "制限なし（未変更）" : "算出できません";
       const raw = controlDraft[node][key];
       input.setCustomValidity(!TuningModel.finite(raw) || raw < field.min || raw > field.max
-        ? `計算した加速度はAPIの範囲外です。加速時間を長くするか、プリセットを選んでください（${field.min}〜${field.max} ${kind === "linear" ? "m/s²" : "rad/s²"}）。` : "");
-      note.textContent = !state ? "車輪寸法・速度・加速度を確認できないため、加速時間は算出できません。"
+        ? "計算した加速度が保存できる範囲の外です。加速時間を長くするか、プリセットを選んでください。" : "");
+      const shortest = TuningModel.minimumTime(state?.speed, field.max);
+      row.querySelector(".control-range").textContent = shortest === null
+        ? "入力できる最短時間は算出できません。加速度0は制限なしのまま保持します。"
+        : `入力できる範囲：${shortest} s 以上（短すぎると保存できません）。加速度0は制限なしのまま保持し、正の時間を入力すると制限を有効にします。`;
+      note.textContent = limit === null ? "車輪の寸法を確認できないため、加速時間から加速度を計算できず、この欄は編集できません。"
+        : !state ? "速度・加速度を確認できないため、加速時間は算出できません。"
         : state.speed === 0 ? "速さが0のため時間は算出できません。加速度は保持します。"
           : state.unlimited ? "加速度の制限なし。正の加速時間を入力すると制限を有効にします。"
             : `保存する加速度: ${TuningModel.number(state.accel)} ${kind === "linear" ? "m/s²" : "rad/s²"}。`;
     } else if (spec.signed) {
       const raw = controlDraft[node][key];
       input.setCustomValidity(TuningModel.finite(raw) && raw >= field.min && raw <= field.max
-        ? "" : `APIの範囲内の速さを入力してください（${field.min}〜${field.max} ${spec.unit}）。`);
+        ? "" : TuningModel.finite(raw) ? TuningModel.speedWarning(key, raw, field.max)
+          : "速さを入力してください。");
       const reference = Math.abs(controlProfile.defaults[node][key]);
       note.textContent = TuningModel.finite(raw)
         ? `${TuningModel.speedText(raw, kind)}${reference > 0 ? `・配布元の${TuningModel.number(Math.abs(raw) / reference * 100)}%` : "・配布元が0のため割合は算出できません"}。` : "速さを入力してください。";
       if (state?.limited) note.textContent += ` 設定は ${TuningModel.speedText(state.configured, kind)} ですが、車輪の上限で実際は約 ${TuningModel.speedText(state.speed, kind)} までです。`;
-      if (state?.limited) note.textContent += " 上限を超える設定では、内部目標の減速により、戻してから速さが下がり始めるまで遅れる場合があります。";
+      if (state?.limited) note.textContent += ` ${TuningModel.limitedText(state, kind)}`;
       if (!state) note.textContent += " 車輪上限・加速時間は未確認です。";
       note.textContent += " 単独で倒したときの目安です。";
+      if (kind === "linear") note.textContent += " 前進が速いときは、旋回が弱くなります。";
     }
     for (const button of row.querySelector(".control-presets")?.children || []) {
       const amount = button.tuningAmount;
@@ -141,6 +222,8 @@ function refreshTuningFields(activeInput) {
     }
     row.querySelector(".control-saved").children[1].textContent =
       tuningValue(spec, controlProfile.values[node][key], controlProfile.values);
+    input.setAttribute("aria-invalid", String(Boolean(input.validationMessage)));
+    row.classList.toggle("out-of-range", Boolean(input.validationMessage));
   }
 }
 
@@ -416,6 +499,7 @@ function refreshControlChanges(activeInput) {
   const count = ControlLabels.changedCount(controlProfile.values, controlDraft);
   controlsDirty = count > 0;
   refreshTuningFields(activeInput);
+  refreshRangeWarning();
   renderTuningPreviews();
   renderControllerMap();
   for (const row of document.querySelectorAll(".control-field")) {
@@ -528,6 +612,7 @@ async function loadRuntimeValues() {
 function renderControls() {
   const container = document.getElementById("controls-fields");
   container.replaceChildren();
+  createRangeWarning();
   tuningTimes = Object.fromEntries(["linear", "angular"].map((kind) =>
     [kind, TuningModel.motion(controlDraft, controlProfile.geometry, kind)?.time ?? null]));
   for (const group of controlProfile.groups) {
@@ -674,9 +759,9 @@ function renderControls() {
       range.className = "control-range";
       range.id = `${input.id}-range`;
       range.textContent = spec.acceleration
-        ? `APIの範囲（保存する加速度）: ${field.min}〜${field.max} ${spec.kind === "linear" ? "m/s²" : "rad/s²"}（0は制限なし）。入力は0より大きい加速時間です。`
-        : spec.scale !== 1 ? `APIの範囲: ${field.min}〜${field.max}（比率）。入力: ${field.min * spec.scale}〜${field.max * spec.scale} ${spec.unit}。`
-          : `APIの範囲: ${field.min}〜${field.max} ${spec.unit}${spec.signed ? "（保存値。入力は絶対値、方向反転は保持）" : ""}。`;
+        ? "入力できる最短時間を確認しています。"
+        : spec.signed ? `入力できる範囲：0〜${Number(field.max).toFixed(1)} ${spec.unit}（方向の反転は保存済みのまま）。`
+          : `入力できる範囲：${field.min * spec.scale}〜${field.max * spec.scale} ${spec.unit}。`;
       const estimate = document.createElement("p");
       estimate.className = "control-estimate";
       estimate.id = `${input.id}-estimate`;
@@ -706,6 +791,7 @@ function controlsSetBusy(busy) {
     input.disabled = busy;
   }
   if (controlProfile) refreshTuningFields();
+  if (controlProfile) refreshRangeWarning();
 
 }
 
@@ -757,6 +843,13 @@ function confirmControlDiscard() {
 async function saveControls(event) {
   event.preventDefault();
   if (controlsBusy || !controlProfile) return;
+  const rangeIssue = tuningRangeIssues(controlDraft)[0];
+  if (rangeIssue) {
+    controlMessage(TuningModel.finite(rangeIssue.value)
+      ? TuningModel.speedWarning(rangeIssue.key, rangeIssue.value, rangeIssue.max)
+      : "速さを入力してください。");
+    return;
+  }
   // Check constraints without the browser scrolling to a field below the diagram.
   const invalidRow = [...document.querySelectorAll(".control-field")].find((row) => {
     const { node, key } = row.dataset;

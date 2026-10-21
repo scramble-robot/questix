@@ -27,8 +27,14 @@ const TuningModel = (() => {
     const speed = Math.min(configured, limit);
     const duration = speed > 0 && accel > 0 ? speed / accel : null;
     const time = finite(duration) ? duration : null;
-    const stop = time === null ? null : speed * time / 2;
+    const internalTime = accel > 0 ? configured / accel : null;
+    const coastTime = accel > 0 ? (configured - speed) / accel : null;
+    const stopTime = time === null || !finite(coastTime) ? null : coastTime + time;
+    const stop = stopTime === null ? null : speed * coastTime + speed * time / 2;
     return { configured, speed, limit, accel, time, inverted: raw < 0,
+      internalTime: finite(internalTime) ? internalTime : null,
+      coastTime: finite(coastTime) ? coastTime : null,
+      stopTime: finite(stopTime) ? stopTime : null,
       limited: configured > limit, unlimited: accel === 0,
       stop: finite(stop) ? stop : null };
   }
@@ -56,6 +62,40 @@ const TuningModel = (() => {
     return value !== 0 && rounded === 0 ? Number(value.toPrecision(3)) : rounded;
   }
 
+  function minimumTime(speed, maximumAccel) {
+    if (!positive(speed) || !positive(maximumAccel)) return null;
+    const minimum = speed / maximumAccel;
+    if (!positive(minimum)) return null;
+    const unit = minimum >= 0.01 ? 0.01 : 10 ** (Math.floor(Math.log10(minimum)) - 2);
+    if (!positive(unit)) return null;
+    let result = Number((Math.ceil(minimum / unit) * unit).toPrecision(15));
+    // Round upward at the displayed precision, including binary division's boundary error.
+    if (result < minimum || speed / result > maximumAccel) result = Number((result + unit).toPrecision(15));
+    return result;
+  }
+
+  function magnitude(value) {
+    const displayed = number(Math.abs(value));
+    return Number.isInteger(displayed) ? displayed.toFixed(1) : String(displayed);
+  }
+
+  function speedWarning(key, value, maximum, saved = false) {
+    const [label, unit] = key === "angular_input_ratio" ? ["旋回の速さ", "rad/s"]
+      : key === "lateral_input_ratio" ? ["左右の速さ", "m/s"] : ["走行速度", "m/s"];
+    return `${saved ? "保存済みの" : ""}${label} ${magnitude(value)} ${unit}${value < 0 ? "（方向の反転あり）" : ""}は、保存できる範囲の外です。`
+      + `大きさを ${maximum.toFixed(1)} ${unit} 以下にしてください（方向の反転は保存済みのまま）。`;
+  }
+
+  function limitedText(state, kind) {
+    if (!state?.limited || state.stop === null || state.stopTime === null || state.coastTime === null) return "";
+    const movement = kind === "angular" ? "回り" : "進み";
+    const quantity = kind === "angular" ? `${Math.round(state.stop * 180 / Math.PI)}°回ります`
+      : `${number(state.stop)} m進みます`;
+    return "最大まで倒し続けて、内部の値が設定の速さに届いた場合、"
+      + `スティックを戻しても約 ${number(state.coastTime)} s は全速のまま${movement}、`
+      + `止まるまでに約 ${number(state.stopTime)} s、約 ${quantity}。短く倒した場合は、ここまで続きません。`;
+  }
+
   function speedText(value, kind) {
     if (!finite(value)) return "未確認";
     const magnitude = Math.abs(value);
@@ -72,10 +112,11 @@ const TuningModel = (() => {
     const quantity = kind === "angular" ? `${Math.round(state.stop * 180 / Math.PI)}°回ります`
       : `${number(state.stop)} m進みます`;
     return `最高速度の目安 ${speedText(state.speed, kind)}、加速時間 ${number(state.time)} s。`
-      + `全速からスティックを戻すと、止まるまでに約 ${quantity}。`;
+      + (state.limited ? limitedText(state, kind) : `全速からスティックを戻すと、止まるまでに約 ${quantity}。`);
   }
 
-  return { axes, finite, wheelLimit, motion, acceleration, retime, presetTime, number, speedText, summary };
+  return { axes, finite, wheelLimit, motion, acceleration, retime, presetTime, number,
+    minimumTime, speedWarning, speedText, summary, limitedText };
 })();
 
 if (typeof module !== "undefined") module.exports = TuningModel;
