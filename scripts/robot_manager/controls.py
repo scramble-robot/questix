@@ -185,6 +185,34 @@ def _default_file(controller, env):
                         'questix_control_config のビルド・インストールを確認してください。')
 
 
+def read_geometry(env):
+    """Read standard-launch wheel geometry for UI estimates, without editing the profile.
+
+    questix_core uses questix_launcher's drive_component.yaml. A missing or invalid installed
+    file is unknown, never replaced by source-checkout or hard-coded dimensions. Runtime
+    comparisons obtain the actual dimensions independently through GetParameters.
+    """
+    workspace = env.get('ROBOT_WS') or os.environ.get('ROBOT_WS')
+    if workspace:
+        install = Path(workspace).expanduser() / 'install'
+        candidates = [install / 'questix_launcher/share/questix_launcher/config/drive_component.yaml',
+                      install / 'share/questix_launcher/config/drive_component.yaml']
+    else:
+        candidates = [Path(__file__).resolve().parents[2] / 'launcher/config/drive_component.yaml']
+    try:
+        path = next((path for path in candidates if path.is_file()), None)
+        if path is None:
+            return None
+        params = yaml.safe_load(path.read_text())['drive_component']['ros__parameters']
+        geometry = {key: params[key] for key in ('wheel_radius', 'wheel_separation')}
+        if all(type(value) in (int, float) and math.isfinite(value) and value > 0
+               for value in geometry.values()):
+            return geometry
+    except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError):
+        pass
+    return None
+
+
 def _migrate_launcher_layout(values):
     """Move the launcher keys of an older profile into joy_launcher (a value there wins)."""
     if not isinstance(values, dict):
@@ -271,6 +299,7 @@ def read_profile(config_dir, controller, env):
             'previous_values': previous, 'history_warning': history_warning,
             'legacy_warning': LEGACY_WARNING if legacy else None,
             'defaults': defaults, 'groups': schema(controller), 'apply_on_restart': True,
+            'geometry': read_geometry(env),
             'editable': not fixed,
             'source': str(saved_file if saved_raw is not None and not legacy
                           else default_file)}

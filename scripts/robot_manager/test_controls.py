@@ -104,6 +104,35 @@ def profile(client, controller='uart'):
     return response.json()
 
 
+def test_geometry_is_read_only_metadata_and_never_a_saved_field(client):
+    """Use the standard launcher's geometry without changing the profile contract."""
+    current = profile(client)
+    assert current['geometry'] == {'wheel_radius': 0.05, 'wheel_separation': 0.5}
+    assert 'wheel_radius' not in current['values']['drive_component']
+    fields = next(group['fields'] for group in current['groups']
+                  if group['node'] == 'drive_component')
+    assert not {'wheel_radius', 'wheel_separation'} & {field['key'] for field in fields}
+    assert next(field for field in fields if field['key'] == 'max_linear_accel')['max'] == 50
+    assert next(field for field in fields if field['key'] == 'max_angular_accel')['max'] == 100
+
+
+@pytest.mark.parametrize('layout', ['questix_launcher/share/questix_launcher',
+                                  'share/questix_launcher'])
+def test_geometry_uses_the_installed_launcher_and_never_falls_back(tmp_path, layout):
+    """Support isolated/merged installs and leave missing or broken dimensions unknown."""
+    env = {'ROBOT_WS': str(tmp_path)}
+    assert controls.read_geometry(env) is None
+    path = tmp_path / 'install' / layout / 'config/drive_component.yaml'
+    path.parent.mkdir(parents=True)
+    for radius in [0.06, 0, -0.05, True, None, float('nan'), float('inf'), '0.05']:
+        path.write_text(yaml.safe_dump({'drive_component': {'ros__parameters': {
+            'wheel_radius': radius, 'wheel_separation': 0.6}}}))
+        expected = {'wheel_radius': 0.06, 'wheel_separation': 0.6} if radius == 0.06 else None
+        assert controls.read_geometry(env) == expected
+    path.write_text('drive_component: broken')
+    assert controls.read_geometry(env) is None
+
+
 def test_save_reload_and_profile_isolation(client, tmp_path):
     """Persist keys and speed together without touching the other controller."""
     before = profile(client)
