@@ -62,6 +62,7 @@ struct Config {
   // 車体諸元
   double wheel_radius{0.0};      // [m]
   double wheel_separation{0.0};  // [m]
+  int max_motor_rpm{0};          // [RPM] effective limit from DdtMotorLib; <= 0 fails closed
 
   // 指令を許す最低車輪 RPM（低速不感帯）。0 で不感帯なし
   int min_command_rpm{0};
@@ -92,6 +93,8 @@ struct WheelFeedback {
  * 参照しない（判定に使われた値がそのまま入っている）。
  */
 struct Output {
+  bool invalid_input{false};         // unusable command, geometry or RPM bound; stopped and reset
+  double target_scale{1.0};          // common target scaling before slew (diagnostics only)
   bool stop{true};                   // 停止指令を送るべきか。mode == kStop と同値
   DriveMode mode{DriveMode::kStop};  // 走行状態（Phase B）
   int left_rpm{0};      // 左車輪の指令 RPM（RUN で LQR 有効なら補正後）
@@ -109,7 +112,8 @@ struct Output {
  * @brief ホスト側走行制御のコア。ROS にもシリアルにも依存しない。
  *
  * 1 ステップの流れ:
- *   目標 twist -> スルーレート制限（テーパー付き）-> 運動学変換（左右車輪 RPM）
+ *   目標 twist -> 車輪上限に合わせて共通縮小 -> スルーレート制限（テーパー付き）
+ *   -> 運動学変換（左右車輪 RPM）
  *   -> 最近接整数へ丸め -> 走行状態機械（停止/低速/走行。ヒステリシス付き）
  *   -> [RUN かつ LQR 有効かつ FB あり] その輪が RUN 域にあればオブザーバ + LQR+FF で補正
  *
@@ -146,6 +150,21 @@ public:
    */
   Output step(double target_linear, double target_angular, double dt_sec,
               const WheelFeedback& feedback) {
+    const auto caps = velocityCaps();
+    if (!caps || !std::isfinite(target_linear) || !std::isfinite(target_angular)) {
+      return invalidOutput();
+    }
+    // max(|v_left|, |v_right|) = |v| + |omega| * separation / 2.
+    // Bound the target, not the slew state: a held impossible target must not accumulate.
+    const double demand =
+        std::abs(target_linear) + std::abs(target_angular) * (config_.wheel_separation / 2.0);
+    if (!std::isfinite(demand)) {
+      return invalidOutput();
+    }
+    const double target_scale = demand > caps->linear ? caps->linear / demand : 1.0;
+    target_linear *= target_scale;
+    target_angular *= target_scale;
+
     // 加速度クランプ。目標接近時はテーパーで絞る（実効ジャーク制限）。詳細は drive_slew.hpp。
     last_linear_ =
         drive_slew::clampRateTapered(target_linear, last_linear_, config_.max_linear_accel, dt_sec,
@@ -156,9 +175,13 @@ public:
 
     const auto [left_rpm, right_rpm] = motor_control_lib::differential_kinematics::twistToWheelRpm(
         last_linear_, last_angular_, config_.wheel_radius, config_.wheel_separation);
+    if (!std::isfinite(left_rpm) || !std::isfinite(right_rpm)) {
+      return invalidOutput();
+    }
 
     // ゼロ方向への切り捨ては左右で量子化が非対称になるため最近接整数へ丸める
     Output out;
+    out.target_scale = target_scale;
     out.left_ref_rpm = static_cast<int>(std::lround(left_rpm));
     out.right_ref_rpm = static_cast<int>(std::lround(right_rpm));
     out.left_rpm = out.left_ref_rpm;
@@ -296,6 +319,33 @@ public:
   double rightDisturbanceHat() const { return right_.observer.d_hat; }
 
 private:
+  struct VelocityCaps {
+    double linear{0.0};
+    double angular{0.0};
+  };
+
+  std::optional<VelocityCaps> velocityCaps() const {
+    if (!std::isfinite(config_.wheel_radius) || config_.wheel_radius <= 0.0 ||
+        !std::isfinite(config_.wheel_separation) || config_.wheel_separation <= 0.0 ||
+        config_.max_motor_rpm <= 0) {
+      return std::nullopt;
+    }
+    const double circumference = 2.0 * M_PI * config_.wheel_radius;
+    const double linear = (config_.max_motor_rpm / 60.0) * circumference;
+    const double angular = linear / (config_.wheel_separation / 2.0);
+    if (!std::isfinite(linear) || linear <= 0.0 || !std::isfinite(angular) || angular <= 0.0) {
+      return std::nullopt;
+    }
+    return VelocityCaps{linear, angular};
+  }
+
+  Output invalidOutput() {
+    reset();
+    Output out;
+    out.invalid_input = true;
+    return out;
+  }
+
   struct WheelState {
     motor_control_lib::wheel_observer::State observer;
     motor_control_lib::wheel_velocity_lqr::State lqr;

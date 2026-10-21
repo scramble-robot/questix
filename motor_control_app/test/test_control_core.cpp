@@ -32,6 +32,7 @@
 #include <array>
 #include <cmath>
 #include <functional>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -60,6 +61,7 @@ core::Config yamlConfig() {
   config.slew_taper_band_angular = 0.2;
   config.wheel_radius = 0.1;
   config.wheel_separation = 0.5;
+  config.max_motor_rpm = 475;
   config.min_command_rpm = 5;
   return config;
 }
@@ -129,6 +131,151 @@ double settlingTime(core::ControlCore& control, double target_linear, double tar
 }
 
 }  // namespace
+
+namespace {
+
+core::Config wheelLimitConfig() {
+  auto config = yamlConfig();
+  config.wheel_radius = 0.05;
+  config.max_linear_accel = 1.5;
+  config.max_angular_accel = 1.5;
+  config.slew_taper_band_linear = 0.1;
+  config.slew_taper_band_angular = 0.1;
+  return config;
+}
+
+constexpr double kLinearCap = 475.0 * 2.0 * M_PI * 0.05 / 60.0;
+
+}  // namespace
+
+TEST(ControlCoreWheelLimit, BoundsTargetsWithOneCommonScale) {
+  auto config = wheelLimitConfig();
+  config.max_linear_accel = 0;
+  config.max_angular_accel = 0;
+  for (double sign : {-1.0, 1.0}) {
+    core::ControlCore forward(config);
+    const auto f = forward.step(sign * 10.0, 0, kControlDt);
+    EXPECT_NEAR(f.linear, sign * kLinearCap, 1e-12);
+    EXPECT_DOUBLE_EQ(f.angular, 0);
+    EXPECT_NEAR(f.target_scale, kLinearCap / 10.0, 1e-12);
+    EXPECT_EQ(f.left_ref_rpm, sign * 475);
+    EXPECT_EQ(f.right_ref_rpm, -sign * 475);
+
+    core::ControlCore turn(config);
+    const auto t = turn.step(0, sign * 20.0, kControlDt);
+    EXPECT_NEAR(t.angular, sign * 4.0 * kLinearCap, 1e-12);
+    EXPECT_EQ(t.left_ref_rpm, -sign * 475);
+    EXPECT_EQ(t.right_ref_rpm, -sign * 475);
+
+    for (double turn_sign : {-1.0, 1.0}) {
+      core::ControlCore combined(config);
+      const auto c = combined.step(sign * 2.0, turn_sign * 6.0, kControlDt);
+      EXPECT_NEAR(c.linear, sign * 1.421196676623954, 1e-12);
+      EXPECT_NEAR(c.angular, turn_sign * 4.263590029871862, 1e-12);
+      EXPECT_NEAR(c.angular / c.linear, sign * turn_sign * 3.0, 1e-12);
+      EXPECT_EQ(std::max(std::abs(c.left_ref_rpm), std::abs(c.right_ref_rpm)), 475);
+    }
+  }
+}
+
+TEST(ControlCoreWheelLimit, HeldCombinedTargetSettlesWithRequestedCurvature) {
+  core::ControlCore control(wheelLimitConfig());
+  core::Output out;
+  for (int tick = 0; tick < 1000; ++tick) {
+    out = control.step(2.0, 6.0, kControlDt);
+  }
+  EXPECT_NEAR(out.linear, 1.421196676623954, 1e-12);
+  EXPECT_NEAR(out.angular, 4.263590029871862, 1e-12);
+  EXPECT_NEAR(out.angular / out.linear, 3.0, 1e-12);
+  EXPECT_EQ(out.left_ref_rpm, 68);
+  EXPECT_EQ(out.right_ref_rpm, -475);
+  EXPECT_DOUBLE_EQ(control.lastLinear(), out.linear);
+  EXPECT_DOUBLE_EQ(control.lastAngular(), out.angular);
+}
+
+TEST(ControlCoreWheelLimit, LongOverlimitHoldDoesNotLeaveAPlateauOnRelease) {
+  for (const auto& target :
+       {std::pair{10.0, 0.0}, std::pair{0.0, 20.0}, std::pair{2.0, 6.0}, std::pair{-2.0, -6.0}}) {
+    core::ControlCore control(wheelLimitConfig());
+    core::Output held;
+    for (int tick = 0; tick < 3000; ++tick) {
+      held = control.step(target.first, target.second, kControlDt);
+    }
+    const auto released = control.step(0, 0, kControlDt);
+    EXPECT_LT(std::max(std::abs(released.left_ref_rpm), std::abs(released.right_ref_rpm)), 475);
+    EXPECT_LE(std::abs(released.linear), std::abs(held.linear));
+    EXPECT_LE(std::abs(released.angular), std::abs(held.angular));
+    for (int tick = 0; tick < 1000; ++tick) {
+      const auto out = control.step(0, 0, kControlDt);
+      EXPECT_LT(std::max(std::abs(out.left_ref_rpm), std::abs(out.right_ref_rpm)), 475);
+    }
+    EXPECT_TRUE(control.stopMode());
+    EXPECT_DOUBLE_EQ(control.lastLinear(), 0);
+    EXPECT_DOUBLE_EQ(control.lastAngular(), 0);
+  }
+}
+
+TEST(ControlCoreWheelLimit, LowerRpmLimitIsUsedBeforeSlew) {
+  auto config = wheelLimitConfig();
+  config.max_motor_rpm = 100;
+  core::ControlCore control(config);
+  core::Output out;
+  for (int tick = 0; tick < 1000; ++tick) {
+    out = control.step(2.0, 6.0, kControlDt);
+  }
+  EXPECT_NEAR(out.angular / out.linear, 3.0, 1e-12);
+  EXPECT_EQ(std::max(std::abs(out.left_ref_rpm), std::abs(out.right_ref_rpm)), 100);
+}
+
+TEST(ControlCoreWheelLimit, InvalidDimensionsOrRpmStopResetAndRecover) {
+  const auto valid = wheelLimitConfig();
+  for (auto field : {&core::Config::wheel_radius, &core::Config::wheel_separation}) {
+    for (double value :
+         {0.0, -0.1, std::numeric_limits<double>::infinity(),
+          std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::max(),
+          std::numeric_limits<double>::denorm_min()}) {
+      core::ControlCore control(valid);
+      control.step(1, 1, kControlDt);
+      auto invalid = valid;
+      invalid.*field = value;
+      control.setConfig(invalid);
+      const auto out = control.step(1, 1, kControlDt);
+      EXPECT_TRUE(out.invalid_input) << value;
+      EXPECT_TRUE(out.stop);
+      EXPECT_EQ(out.left_ref_rpm, 0);
+      EXPECT_EQ(out.right_ref_rpm, 0);
+      EXPECT_DOUBLE_EQ(control.lastLinear(), 0);
+      EXPECT_DOUBLE_EQ(control.lastAngular(), 0);
+      control.setConfig(valid);
+      core::ControlCore fresh(valid);
+      EXPECT_EQ(control.step(1, 1, kControlDt).left_ref_rpm,
+                fresh.step(1, 1, kControlDt).left_ref_rpm);
+    }
+  }
+  for (int rpm : {0, -1}) {
+    auto invalid = valid;
+    invalid.max_motor_rpm = rpm;
+    core::ControlCore control(invalid);
+    const auto out = control.step(1, 1, kControlDt);
+    EXPECT_TRUE(out.invalid_input);
+    EXPECT_TRUE(out.stop);
+    EXPECT_EQ(out.left_rpm, 0);
+    EXPECT_EQ(out.right_rpm, 0);
+  }
+}
+
+TEST(ControlCoreWheelLimit, NonfiniteOrOverflowingCommandsStopWithoutRounding) {
+  for (double value :
+       {std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN(),
+        std::numeric_limits<double>::max()}) {
+    core::ControlCore control(wheelLimitConfig());
+    const auto out = control.step(value, value, kControlDt);
+    EXPECT_TRUE(out.invalid_input);
+    EXPECT_TRUE(out.stop);
+    EXPECT_EQ(out.left_rpm, 0);
+    EXPECT_EQ(out.right_rpm, 0);
+  }
+}
 
 // --- Phase 1 の不変条件: 制御周期が上流の publish レートから独立していること -------------
 
