@@ -1,5 +1,7 @@
 """Bounded recorder settings without ROS, hardware or real configuration writes."""
 
+import asyncio
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -7,7 +9,6 @@ import unittest
 from unittest.mock import patch
 
 from fastapi import FastAPI, HTTPException, Response
-from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from robot_manager import recorder
@@ -163,17 +164,33 @@ class RecorderNumericTests(unittest.TestCase):
     def test_api_rejections_serialize_and_keep_reasons(self):
         app = FastAPI()
         app.include_router(recorder.router)
-        client = TestClient(app)
-        response = client.put('/api/rosbag/config', json={'MIN_FREE_GB': '²'})
-        self.assertEqual(response.status_code, 422)
-        self.assertIn('半角の数字', response.json()['detail'][0]['msg'])
+        async def request(payload):
+            messages = []
+
+            async def receive():
+                return {'type': 'http.request', 'body': json.dumps(payload).encode()}
+
+            async def send(message):
+                messages.append(message)
+
+            await app({'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.4'},
+                       'method': 'PUT', 'scheme': 'http', 'path': '/api/rosbag/config',
+                       'query_string': b'', 'headers': [(b'content-type', b'application/json')]},
+                      receive, send)
+            status = next(m['status'] for m in messages if m['type'] == 'http.response.start')
+            body = b''.join(m.get('body', b'') for m in messages if m['type'] == 'http.response.body')
+            return status, json.loads(body)
+
+        status, body = asyncio.run(request({'MIN_FREE_GB': '²'}))
+        self.assertEqual(status, 422)
+        self.assertIn('半角の数字', body['detail'][0]['msg'])
         self.config['MAX_DURATION_SEC'] = '14401'
-        response = client.put('/api/rosbag/config', json={'OUTPUT_DIR': self.temp.name})
-        self.assertEqual(response.status_code, 422)
-        self.assertIn('MAX_DURATION_SEC', response.json()['detail'])
-        self.assertIn('0〜14400', response.json()['detail'])
-        response = client.put('/api/rosbag/config', json={'MAX_DURATION_SEC': '10'})
-        self.assertEqual(response.status_code, 200)
+        status, body = asyncio.run(request({'OUTPUT_DIR': self.temp.name}))
+        self.assertEqual(status, 422)
+        self.assertIn('MAX_DURATION_SEC', body['detail'])
+        self.assertIn('0〜14400', body['detail'])
+        status, _body = asyncio.run(request({'MAX_DURATION_SEC': '10'}))
+        self.assertEqual(status, 200)
         self.write.assert_called_once()
 
     def test_command_arguments_stay_identical(self):
