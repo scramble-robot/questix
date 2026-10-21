@@ -173,7 +173,7 @@ public:
       out_.tilt_deg = kNaN;  // only this run's own targets
     }
     out_.roller_power = starting ? 0.0 : roller;
-    if (out_.roller_power >= config_.min_fire_power) {
+    if (atFirePower(out_.roller_power)) {
       if (std::isnan(spin_since_sec_)) {
         spin_since_sec_ = now_sec;
       }
@@ -249,6 +249,14 @@ public:
 
 private:
   static constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
+
+  bool atFirePower(double power) const {
+    // The command and advertised minimum cross float32 fields. Compare at that precision,
+    // including after a double cap clamps the command; never make an impossible range qualify.
+    return 0.0 <= config_.min_fire_power && config_.min_fire_power <= config_.lab_max_power &&
+           config_.lab_max_power <= 1.0 && 0.0 <= power && power <= 1.0 &&
+           static_cast<float>(power) >= static_cast<float>(config_.min_fire_power);
+  }
 
   Output emit(SourceSelector::Source source) const {
     Output output;

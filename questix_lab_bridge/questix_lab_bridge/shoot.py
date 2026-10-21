@@ -43,6 +43,7 @@ a session they refuse and checks a request against them first so the page hears 
 """
 
 import math
+import struct
 
 # Why the launcher cannot be operated right now, in the order the page shows them.
 NOT_ALLOWED = 'not_allowed'
@@ -201,7 +202,7 @@ class ShootSession:
         command = _number(status.get('command'))
         turning = (self.active and self._spinning_since is not None
                    and status.get('source') == 'lab' and command is not None
-                   and command >= self._limits['min_fire_power'])
+                   and self._fire_power(command))
         if not turning:
             self._roller_confirmed_since = None
         elif self._roller_confirmed_since is None:
@@ -230,7 +231,8 @@ class ShootSession:
                            ('fire_interval_sec', 'fire_interval_sec')):
             value = _number(status.get(field))
             if value is not None:
-                limits[key] = value
+                limits[key] = (_whole_percent_power(value)
+                               if key in ('max_power', 'min_fire_power') else value)
         shot = self._status[SHOT] or {}
         node_low = _number(shot.get('tilt_min_deg'))
         node_high = _number(shot.get('tilt_max_deg'))
@@ -340,13 +342,21 @@ class ShootSession:
     def _set_power(self, power, now):
         if power != self.power:
             self.version += 1
-        if power >= self._limits['min_fire_power']:
+        if self._fire_power(power):
             if self._spinning_since is None:
                 self._spinning_since = now
         else:
             self._spinning_since = None
             self._roller_confirmed_since = None
         self.power = power
+
+    def _fire_power(self, power):
+        """Compare at LauncherCommand precision, after clamping, without widening the caps."""
+        minimum = self._limits['min_fire_power']
+        maximum = self._limits['max_power']
+        if not (0.0 <= minimum <= maximum <= 1.0 and 0.0 <= power <= 1.0):
+            return False
+        return _float32(power) >= _float32(minimum)
 
     def tilt_to(self, client, deg, now):
         """Return ``(None, degrees to send)`` or ``(reason, None)``."""
@@ -584,3 +594,16 @@ def _number(value):
 
 def _round(value):
     return round(value, 2)
+
+
+def _float32(value):
+    """Return a bounded power at the ROS message's precision, without importing ROS."""
+    return struct.unpack('!f', struct.pack('!f', value))[0]
+
+
+def _whole_percent_power(value):
+    """Restore only exact whole-percent wire representations; retain fractional settings."""
+    if not 0.0 <= value <= 1.0:
+        return value
+    nominal = round(value * 100) / 100
+    return nominal if value == _float32(nominal) else value
