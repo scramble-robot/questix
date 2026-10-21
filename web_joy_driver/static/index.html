@@ -622,7 +622,7 @@
 </div>
 
 <div id="help" hidden>
-  <div class="sheet" id="helpSheet" role="dialog" aria-modal="true" aria-owns="stop" aria-labelledby="helpTitle" tabindex="-1">
+  <div class="sheet" id="helpSheet" role="dialog" aria-modal="true" aria-labelledby="helpTitle" tabindex="-1">
     <div class="top"><h2 id="helpTitle">操作ガイド</h2><button class="icon" id="helpClose">閉じる</button></div>
     <section aria-labelledby="statusTitle"><h3 id="statusTitle">今の状態</h3><p id="statusDetail"></p><div id="statusActions"></div></section>
     <div class="grid">
@@ -1357,11 +1357,14 @@
   function openHelp(opener) {
     helpOpener = opener;
     resetAll(); positionHelp(); $("help").hidden = false;
+    // Own the header's stop only while the sheet is shown: a static aria-owns would move
+    // the stop under the hidden sheet and drop it from the accessibility tree.
+    $("helpSheet").setAttribute("aria-owns", "stop");
     render(); $("helpSheet").focus();
   }
   function closeHelp() {
     if ($("help").hidden) return;
-    $("help").hidden = true; render();
+    $("help").hidden = true; $("helpSheet").removeAttribute("aria-owns"); render();
     if (helpOpener) helpOpener.focus();
   }
   $("helpBtn").addEventListener("click", () => openHelp($("helpBtn")));

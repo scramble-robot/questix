@@ -40,6 +40,7 @@ class Element {
   querySelector() { return this.knob ??= new Element(); }
   closest() { return ["input", "select", "textarea", "button", "a"].includes(this.tagName) ? this : null; }
   setAttribute(name, value) { this.attributes.set(name, value); }
+  removeAttribute(name) { this.attributes.delete(name); }
   getAttribute(name) { return this.attributes.get(name) ?? null; }
   querySelectorAll() { return this.children.filter((el) => el.tagName === "button"); }
   focus() { if (this.document) this.document.activeElement = this; }
@@ -586,13 +587,17 @@ test("banner priority puts e-stop before owner, node neutral wait, notices and l
 test("help moves and restores focus, supports Escape and leaves stop available", () => {
   const c = controller(); c.sockets[0].open();
   c.pointer("leftZone", "pointerdown"); c.pointer("leftZone", "pointermove", 1, 60, 0);
+  // The stop belongs to the sheet only while it is open, never under the hidden sheet.
+  assert.equal(c.$("helpSheet").getAttribute("aria-owns"), null);
   c.$("helpBtn").dispatch("click"); neutral(c.last());
   assert.equal(c.$("help").hidden, false); assert.equal(c.document.activeElement, c.$("helpSheet"));
+  assert.equal(c.$("helpSheet").getAttribute("aria-owns"), "stop");
   c.pointer("leftZone", "pointerdown", 2); c.pointer("leftZone", "pointermove", 2, 60, 0); c.heartbeat(); neutral(c.last());
   c.key("keydown", "Tab"); assert.equal(c.document.activeElement, c.$("stop"));
   c.$("stop").dispatch("click"); assert.deepEqual(c.joySent().at(-1), { type: "stop" });
   c.key("keydown", "Escape"); assert.equal(c.$("help").hidden, true);
   assert.equal(c.document.activeElement, c.$("helpBtn"));
+  assert.equal(c.$("helpSheet").getAttribute("aria-owns"), null);
   c.$("bannerDetails").dispatch("click"); c.$("helpClose").dispatch("click");
   assert.equal(c.document.activeElement, c.$("bannerDetails"));
 });
@@ -602,6 +607,7 @@ test("initial mode aria-pressed, modal semantics, age wording and 12px font floo
   assert.match(html, /id="modePointer"[^>]*aria-pressed="true"/);
   assert.match(html, /id="modeKeyboard"[^>]*aria-pressed="false"/);
   assert.match(html, /role="dialog"[^>]*aria-modal="true"/);
+  assert.doesNotMatch(html, /aria-owns=/);  // set only while the help sheet is open
   assert.doesNotMatch(html, /font(?:-size)?\s*:[^;{}]*?\b(?:9|10|11)px/);
   assert.match(html, /user-scalable=no/);
   const c = controller(); c.sockets[0].open(); c.sockets[0].message(status({ rx_age_ms: 47 }));
