@@ -93,13 +93,14 @@ double frictionFeedforwardAmp(int rpm_ref, const Params& params);
  * @param state           PI 積分器の状態（更新される）。
  * @param params          PI パラメータ。
  * @param rpm_ref         目標 RPM。
- * @param measured_rpm    実測 RPM（符号反転前の生値）。
+ * @param measured_rpm    実測 RPM（符号反転前、モーターの向き）。角度から求めた速さ（小数）も、
+ *                        報告回転数（整数）もそのまま渡せる（int は暗黙に double になる）。
  * @param dt              サニタイズ済み dt [s]。
  * @param i_cmd_amp_out   非 null なら、クランプ後の電流指令 [A] を書き込む（ログ・ガード用）。
  * @param saturated_out   非 null なら、出力が ±max_current_amp でクランプされたかを書き込む。
  * @return 電流指令 raw 値（±32767）。
  */
-int16_t stepToRaw(State& state, const Params& params, int rpm_ref, int measured_rpm, double dt,
+int16_t stepToRaw(State& state, const Params& params, int rpm_ref, double measured_rpm, double dt,
                   double* i_cmd_amp_out = nullptr, bool* saturated_out = nullptr);
 
 /// 電流 [A] → raw（±32767 にクランプ）。
@@ -165,10 +166,10 @@ struct GuardState {
  * @brief ガード 1 回分の入力（新しいフィードバックを受け取った周期だけ評価する）。
  */
 struct GuardSample {
-  double now_sec;         // 単調時計 [s]
-  int rpm_ref;            // この周期の目標 RPM
-  int measured_prev_rpm;  // 前回の実測（PI の向き）
-  int measured_new_rpm;   // 今回の応答の実測（PI の向き）
+  double now_sec;            // 単調時計 [s]
+  int rpm_ref;               // この周期の目標 RPM
+  double measured_prev_rpm;  // 前回の実測（PI の向き）。電流を送る前に PI が使った値
+  double measured_new_rpm;  // 今回の応答の実測（PI の向き）
   double applied_amp;  // 2 つの実測の間に流れていた電流（前の周期に送った指令）[A]
   double commanded_amp;    // この周期に送る電流指令 [A]
   double max_current_amp;  // 電流指令の上限 [A]

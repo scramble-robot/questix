@@ -6,6 +6,7 @@
 #ifndef MOTOR_CONTROL_LIB__DDT_PROTOCOL_HPP_
 #define MOTOR_CONTROL_LIB__DDT_PROTOCOL_HPP_
 
+#include <cmath>
 #include <cstdint>
 #include <vector>
 
@@ -14,6 +15,14 @@ namespace motor_control_lib::ddt_protocol {
 // Spec V1.0 endpoint mapping: 0..32767 <-> 0..360 degrees. Share the existing
 // conversion scale; the physical encoder's exact wrap period is not calibrated.
 inline constexpr uint16_t kPositionRawPerTurn = 32767;
+
+// Shared by position odometry and current-mode speed estimation. Both 32767 and 0
+// represent the same endpoint; signed remainder handles forward and reverse wraps.
+// Callers validate the position range and whether a shortest-wrap interval is usable.
+inline double shortestTurns(uint16_t previous, uint16_t current) {
+  const double period = kPositionRawPerTurn;
+  return std::remainder(static_cast<double>(current) - previous, period) / period;
+}
 
 /**
  * @brief DDT モータ (M0602C) の通信フレーム pack/parse を提供する純粋関数群。

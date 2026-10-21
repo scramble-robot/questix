@@ -90,6 +90,10 @@ bool DriveComponent::initializeMotorLib() {
                                           integral_limit_amp_);
       motor_lib_->setCurrentZeroDeadbandRpm(current_zero_deadband_rpm_);
       motor_lib_->setCurrentInvertMeasured(current_invert_measured_);
+      motor_lib_->setCurrentMeasuredSource(
+          current_measured_source_ == "reported"
+              ? motor_control_lib::CurrentMeasuredSource::Reported
+              : motor_control_lib::CurrentMeasuredSource::Position);
       motor_lib_->setCurrentFeedforward(current_ff_static_amp_, current_ff_viscous_amp_per_rpm_);
       motor_lib_->setCurrentGuardParams(current_guard_overspeed_margin_rpm_,
                                         current_guard_overspeed_time_sec_);
