@@ -32,6 +32,7 @@ function groupNav(model, actions) {
         html`<button
           data-vision-group=${index}
           aria-pressed=${String(index === model.group)}
+          aria-current=${String(index === model.group)}
           @click=${() => actions.openGroup(index)}
         >
           ${label}
@@ -47,6 +48,7 @@ function chapterNav(model, actions) {
         html`<button
           data-vision-chapter=${chapter.id}
           aria-pressed=${String(chapter.id === model.chapter)}
+          aria-current=${String(chapter.id === model.chapter)}
           @click=${() => actions.openChapter(chapter.id)}
         >
           ${chapter.label}
