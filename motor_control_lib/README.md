@@ -31,11 +31,14 @@ DDT M0602C 1 台との UART 通信を担当します。
 
 - **velocity モード（既定）**: 目標 RPM を Protocol 1 (0x64) で送信。
   速度閉ループは**モータファームウェア内**にあり、ホストは開ループ。
-- **current モード（実験的）**: ホスト側で `ddt_current_pi` の RPM→電流 PI を回す。
+- **current モード（実験的）**: ホスト側で `ddt_current_pi` の RPM→電流 PI を回す。帰還は
+  既定で車輪の角度から求めた速さ（`wheel_speed_estimator.hpp`。直前 2 区間、遅れ 約 20 ms、
+  無効なら電流を出さない）。報告回転数（遅れ 100〜120 ms）は `CurrentMeasuredSource::Reported`
+  で比較用に選べる。
 - フィードバック（実測RPM・電流・fault code）は指令フレームへの応答としてのみ届く
   ため、観測レートは指令レートに拘束される。
 - 実測 RPM の一次 LPF (`measured_lpf_tau_sec`) は**レポート/オドメトリ経路専用**。
-  制御（電流PI）は生値を読む。
+  制御（電流PI）はこのフィルタを通らない（角度から求めた速さか、報告回転数の生値を読む）。
 - 上限は M0602C 仕様の ±475 RPM にクランプ（`kSpecVelocityMaxRpm`）。
 
 バイトオーダー等のプロトコル詳細は `ddt_protocol.hpp` と

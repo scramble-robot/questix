@@ -109,6 +109,7 @@ control_rate Hz の固定 tick:
 | `integral_limit_amp` | 0.3 | ○ | 積分項の上限 [A]。出力が上限に張り付く間は積分しない（条件付き積分） |
 | `current_zero_deadband_rpm` | 5 | ○ | 静止時の微振動防止 |
 | `current_invert_measured` | false | ○ | 実測符号反転。誤ると正帰還（暴走ガードの `against` で止まる）。2026-10 まで true |
+| `current_measured_source` | `position` | × | PI と暴走ガードの帰還（current モードだけ。velocity モードでは無視し、起動のログに出す）。`position` は車輪の角度の直前 2 区間から求めた速さ（遅れ 約 20 ms、無効なら電流を出さない）、`reported` はモーターの報告回転数（遅れ 100〜120 ms、比較用） |
 | `current_ff_static_amp` | 0.0 | ○ | 摩擦補償: 静止（クーロン）摩擦分 [A]。\|目標\| < 10 rpm では比例で立ち上げる |
 | `current_ff_viscous_amp_per_rpm` | 0.0 | ○ | 摩擦補償: 粘性摩擦分 [A/rpm] |
 | `current_guard_overspeed_margin_rpm` / `current_guard_overspeed_time_sec` | 50 / 0.3 | ○ | 暴走ガードの目標超過の判定（> 0。ガードは無効にできない） |
@@ -227,7 +228,7 @@ ros2 param dump /drive_component
 | C1 current モード既定ゲイン（純 P 0.001 A/rpm、±1 A） | **2026-10 に変更**: 純 P は摩擦に負けて目標 100 rpm に対し浮かせて約 15 rpm、床の上ではほぼ動かない（推定モデル）。既定を浮かせた車輪で安定する PI（0.0015 / 0.004）にし、摩擦補償を追加。床用の値は下の手順で決める | current モードのみ |
 | C2 current モードのランプ二重（ホストの加速度制限 + ライブラリの `current_max_accel_rpm_per_sec`） | 確認の結果、**二重になっていない**: ライブラリ側は既定 0（無効）で、設定する呼び出しがリポジトリに無い。ホストの加速度制限だけが効く | なし |
 | C3 `current_invert_measured: true` が既定、実機での符号確認の記録なし | **2026-10 に false へ変更**（velocity モードで指令と実測が同符号、ファームの速度ループも同じ電流指令の上にあるため）。実機は未確認なので、誤っていても暴走ガードが止める | current モードのみ |
-| C7 浮かせた車輪の暴走（正帰還・床用ゲインの発振・古い実測での電流） | **追加**: 暴走ガード（`against` / `overspeed` / `oscillation`、電流 0 でラッチ → フォールト停止）と、有効な応答が 3 回続けて無いときの電流 0。`test_ddt_current_guard`（擬似的な車輪）で確認 | current モードのみ |
+| C7 浮かせた車輪の暴走（正帰還・床用ゲインの発振・古い実測での電流） | **追加**: 暴走ガード（`against` / `overspeed` / `oscillation`、電流 0 でラッチ → フォールト停止）と、応答の途切れのラッチ（下の「current モード」。2026-10 に、応答が戻っただけで電流を出し直す挙動を直した。Issue #222 の P0-2）。`test_ddt_current_guard`（擬似的な車輪）で確認 | current モードのみ |
 | C8 負の `current_kp` / `current_ki` を受け付けていた（正帰還）。積分を `rpm·s` で持ち、`current_ki` の変更で電流が跳ねた | **修正**: 負のゲインは configure・実行時とも拒否。積分項は電流 [A] で持つ | current モードのみ |
 | C4/C5 ホスト速度ループは 1 rpm 分解能・50 Hz で、ゲイン上限が負荷慣性で大きく変わる | 文書化（浮かせた状態は慣性が小さく、床上と同じゲインでは発振しやすい） | なし |
 | C6 指令途絶時のドライバの挙動がデータシートに無い | current モード起動時 WARN と下の安全注意 | なし |
@@ -279,6 +280,16 @@ drive_component + ブラウザのモニタ）で同じ条件を手元で再現�
   （0.02 s × その値 × `current_kp`）が 0.25 を超えると振動的、1 で不安定。既定の
   0.0015 / 0.004 は浮かせた車輪で安定（床の上では遅いが安全側）。床の上の目安は 0.02 / 0.05 で、
   これを浮かせた車輪で使うと発振する（ガードが `oscillation` で止める）。
+- **帰還（`current_measured_source`、Issue #222 の G1）**: 既定の `position` は、車輪の角度（応答の
+  position）の直前 2 区間（3 つの応答）から求めた速さ（`motor_control_lib/wheel_speed_estimator.hpp`）。
+  記録での評価は、遅れ 約 20 ms・浮上 191 rpm のばらつき 3.0〜5.2 rpm で、報告回転数（遅れ
+  100〜120 ms・ばらつき 0.5〜1.2 rpm）より遅れが小さい。応答の間隔が 10〜50 ms の外・fault・mode≠1・
+  1 区間の速さが 570 rpm 超・最新の応答が 50 ms より古い、のどれかで無効になり、無効なら電流を
+  出さない（0 rpm で代用しない）。電流を出している最中に無効になれば応答の途切れのラッチを立て、
+  止まっている状態からは、有効な区間が 2 つそろうまで（3 つの応答、約 40 ms）電流 0 で応答を集める。
+  `reported`（報告回転数）は比べるためだけに残す。擬似的な車輪で報告回転数を 100 ms 遅らせると、
+  既定のゲインの浮かせた車輪は `position` で 100 rpm に収まり、`reported` では 210 rpm まで
+  行き過ぎて揺れ続ける（推定モデル。実機では未確認。`test_ddt_current_guard`）。
 - **D 項は使わない**: 50 Hz では実測 1 rpm の変化が 50 rpm/s の微分になり、1 tick のむだ時間と
   合わせると浮かせた軽い車輪を不安定にする（推定モデルの数値実験で、Kd = 5e-5 A/(rpm/s) から
   発散）。応答の改善は摩擦補償で行う。
@@ -290,8 +301,17 @@ drive_component + ブラウザのモニタ）で同じ条件を手元で再現�
 - **暴走ガード**: 作動するとその車輪は電流 0 でラッチし、`isHealthy()` が false になって走行は
   フォールト停止する（ノードのログ `Current guard tripped: <wheel> wheel ..., reason <理由>`）。
   解除は lifecycle の再構成か、current モードのパラメータ（ゲイン・上限・符号・摩擦補償・ガード）
-  の変更。有効な応答が 3 回続けて無いときは、ラッチせずに電流 0 を送る（古い実測のまま電流を
-  出し続けない）。ガードはホストが動いている間だけ働く。
+  の変更。ガードはホストが動いている間だけ働く。
+- **応答の途切れのラッチ（Issue #222 の P0-2・P0-3 の軽減）**: どちらかの車輪で、有効な応答が 3 回
+  続けて無い・電流を出している間に最新の応答が 50 ms より古くなった・応答が電流ループを報告しない、
+  のどれかが起きると、ライブラリ全体で 1 つのラッチを立て、**両輪**に電流 0 を送り、`isHealthy()`
+  を false にする（走行は "Motor not healthy" でフォールト停止し、目標を捨てる）。応答が戻った
+  だけでは解除しない。解除は、停止の指令だけの間に、両輪から新しい有効な応答（mode=1・fault=0）が
+  3 回ずつ続けて届いたとき（0 でない目標を受けると数え直す）。電流 0 で止まっている間は応答を
+  `stop_resend_interval_ms` ごとにしか取り直さないので、走り出しの最初の周期は電流 0 で応答を
+  取り直し、次の周期から電流を出す（ラッチしない）。応答の確認と送信は一度に行えないので、確認の
+  直後にモータだけが再起動する競合はソフトだけでは無くせない（最大 1 回の電流指令が速度目標として
+  読まれうる。その応答でラッチする）。
 - **指令の途絶（C6）**: ホストからの指令が途絶えたときにドライバが何をするか（電流を 0 にするか、
   最後の電流を保持するか）はデータシートに無い。保持する場合、ホストが止まると current モードは
   速度の上限なく加速し得る（特に浮かせた車輪）。ガードもホストの中なので効かない。
@@ -368,7 +388,8 @@ colcon test --packages-select motor_control_app
 - `test_drive_param_policy`: 実行時パラメータ変更ポリシー（live 反映 / 拒否）の回帰
 - `motor_control_lib` の `test_ddt_current_guard`: current モードを擬似的な車輪（疑似端末上の
   M0602C 応答 + 1 輪の運動モデル）で動かし、浮かせた車輪の符号誤り・床用ゲイン・走行中の
-  持ち上げ・応答の途絶で止まること、正常なゲインでは止まらないことを確かめる
+  持ち上げ・応答の途絶・モータだけの再起動で止まること（片輪の途絶で両輪が止まり、応答が戻った
+  だけでは解除しないこと）、正常なゲインでは止まらないことを確かめる
 
 ### Runtime parameter transaction
 
@@ -384,7 +405,34 @@ current モードでは configure 時にも同じ規則で検証し、外れて�
 レイテンシの `ema_ms` / `ema=` は指数移動平均（alpha=0.05）です。
 応答が0件でもtimeoutがあればdeactivate時にsummaryを出力します。
 
-### Wheel-position odometry pose
+### 停止中の位置増分の回収（Issue #229 B′、既定 OFF）
+
+`odom_stop_gap_recovery: false` のときは #210 の積分処理をそのまま使います。
+ON は **odom の位置・向きだけ**に効き、velocity/current 両モードで利用できます。
+停止の再送 300 ms、ブレーキ、制御の帰還、安全判定、メッセージは変えません。
+設定は `launcher/config/drive_component.yaml` に置き、実行時の変更は拒否します。
+
+- `odom_stop_gap_speed_margin: 1.25`（有限、>0）：倍率 k。床で 1.0 と 1.25 を比較して決めます。
+- `odom_stop_gap_noise_counts: 8`（整数、>=0）：雑音の T_noise。
+- 固定値は履歴 0.5 s、実時間の保持上限 0.5 s、ゼロ速度 K=2 / T_zero=8 count。
+  T_noise と T_zero は別の量で、ゼロ速度でも判定を免除しません。
+
+従来の時間上限で捨てる区間だけを対象とし、各輪の終了 tick の ref がゼロで、
+開始 stamp の直前 0.5 s の ref/raw RPM 履歴があるとき、`d=shortestTurns(old,new)` と
+`U=max(abs(ref),abs(raw))/60 * dt * k + T_noise/32767` を求めます。
+`abs(d) <= U < 1-abs(d)` のときだけ d を積分します。等号に epsilon は加えません。
+受信と消費のカウントを区別し、速い輪は最新の端点を保持して両輪の新応答を待ちます。
+片輪だけ受け入れるときは他輪を 0 とし、両端点を消費して二重回収を防ぎます。
+無効値、巻き戻り、fault、mode 不整合、0.5 s 超の鮮度/保持には回収を使いません。
+明示 reset・fault・巻き戻り・再走行で履歴を消します。pose 全体は reset しません。
+ログは左右別の上限外・曖昧・hard gate を区別し、1 秒の抑制を維持します。
+
+U は過去からの推定で、外力に対する物理的上限ではありません。U の過小評価では
+半回転超の逆回転を誤って受け入れ、隠れた全回転も見逃します。小さな位置のずれは
+そのまま積分します。単体試験と PTY FakeMotor は実機ファームや床での精度を保証しません。
+実機の採用判断は独立した床の位置・向きとの比較後に行います。
+
+### Wheel-position odometry pose (default OFF path)
 
 The `/odom` pose and its TF now integrate paired `position_raw` increments directly;
 `velocity_rpm`/`velocity_rpm_raw`, `/odom.twist`, `DriveStatus` velocity, and all message

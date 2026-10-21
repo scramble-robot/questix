@@ -242,7 +242,7 @@ namespace {
 
 constexpr double kTick = 0.02;
 
-pi::GuardSample sample(double t, int ref, int prev, int now, double applied, double commanded,
+pi::GuardSample sample(double t, int ref, double prev, double now, double applied, double commanded,
                        double max_amp = 1.0) {
   return pi::GuardSample{t, ref, prev, now, applied, commanded, max_amp};
 }

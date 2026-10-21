@@ -90,6 +90,10 @@ bool DriveComponent::initializeMotorLib() {
                                           integral_limit_amp_);
       motor_lib_->setCurrentZeroDeadbandRpm(current_zero_deadband_rpm_);
       motor_lib_->setCurrentInvertMeasured(current_invert_measured_);
+      motor_lib_->setCurrentMeasuredSource(
+          current_measured_source_ == "reported"
+              ? motor_control_lib::CurrentMeasuredSource::Reported
+              : motor_control_lib::CurrentMeasuredSource::Position);
       motor_lib_->setCurrentFeedforward(current_ff_static_amp_, current_ff_viscous_amp_per_rpm_);
       motor_lib_->setCurrentGuardParams(current_guard_overspeed_margin_rpm_,
                                         current_guard_overspeed_time_sec_);
@@ -143,6 +147,8 @@ void DriveComponent::shutdownMotorLib() {
 }
 
 void DriveComponent::resetCommandState() {
+  odom_left_ref_rpm_ = 0.0;
+  odom_right_ref_rpm_ = 0.0;
   needs_neutral_warned_ = false;
   rearm_.reset();
   pending_cmd_timeout_stop_ = false;
@@ -170,6 +176,8 @@ void DriveComponent::resetOdometry() {
 
 void DriveComponent::resetOdometryAnchor(const char* reason) {
   odom_position_integrator_.reset();
+  odom_left_ref_rpm_ = 0.0;
+  odom_right_ref_rpm_ = 0.0;
   odom_last_pair_stationary_ = false;
   // Routine lifecycle/init retries are expected, including with no motor power.
   RCLCPP_DEBUG_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
@@ -254,6 +262,7 @@ void DriveComponent::twistCallback(const geometry_msgs::msg::Twist::SharedPtr ms
 void DriveComponent::controlTimerCallback() {
   const auto tick_start = std::chrono::steady_clock::now();
   const rclcpp::Time tick_stamp = this->now();
+  odom_tick_time_sec_ = std::chrono::duration<double>(tick_start.time_since_epoch()).count();
 
   // この tick の診断サンプル。送受信の前のカウンタを取っておき、tick の後と比べる。
   tick_sample_ = drive_control_sample::TickInput{};
@@ -261,6 +270,10 @@ void DriveComponent::controlTimerCallback() {
     motor_lib_->getMotorTransactionStats(left_motor_id_, tick_sample_.left.stats_before);
     motor_lib_->getMotorTransactionStats(right_motor_id_, tick_sample_.right.stats_before);
   }
+  // Odometry inputs are separate from diagnostics and start neutral every tick:
+  // idle/stop/fault/timeout never inherit a previous driving reference.
+  odom_left_ref_rpm_ = 0.0;
+  odom_right_ref_rpm_ = 0.0;
   odom_estop_poll_skipped_ = false;  // only kIdle below can record an intentional skip
   in_control_tick_ = true;
   runControlTick();
@@ -299,20 +312,27 @@ void DriveComponent::integrateOdometry() {
                                     left_now - left_fb.feedback_age_sec,
                                     left_tx.feedback_count,
                                     left_ok && left_stats && left_fb.has_feedback,
-                                    left_fb.fault_code};
+                                    left_fb.fault_code,
+                                    odom_left_ref_rpm_,
+                                    left_fb.mode == (control_mode_ == "current" ? 1 : 2)};
   const wheel_position::Sample right{right_fb.position_raw,
                                      static_cast<double>(right_fb.velocity_rpm_raw),
                                      right_now - right_fb.feedback_age_sec,
                                      right_tx.feedback_count,
                                      right_ok && right_stats && right_fb.has_feedback,
-                                     right_fb.fault_code};
+                                     right_fb.fault_code,
+                                     odom_right_ref_rpm_,
+                                     right_fb.mode == (control_mode_ == "current" ? 1 : 2)};
   const wheel_position::Limits limits{wheel_radius_, wheel_separation_,
                                       static_cast<double>(max_motor_rpm_), max_linear_accel_,
                                       max_angular_accel_};
   // The pure tracker retains feedback_count gating and waits for BOTH new
   // endpoints. It also checks the pairing deadline on ticks with no new data.
   const double odom_now = steadySeconds();
-  const auto result = odom_position_integrator_.update(left, right, odom_now, limits);
+  // ref belongs to tick START, before serial replies. Using the end-of-tick
+  // now would wrongly exclude this tick's ref from a new anchor's history.
+  const auto result =
+      odom_position_integrator_.update(left, right, odom_now, limits, odom_tick_time_sec_);
   odom_pose_ = wheel_position::integrate(odom_pose_, result);
   const bool stationary = left.native_rpm == 0.0 && right.native_rpm == 0.0;
   if (result.state == wheel_position::State::kAnchored ||
@@ -362,7 +382,29 @@ void DriveComponent::integrateOdometry() {
        secondsSince(odom_estop_released_at_, log_now) >= release_grace)) {
     odom_estop_release_pending_ = false;
   }
-  if (result.state == wheel_position::State::kReset) {
+  if (result.stop_gap && result.reason != wheel_position::Reason::kNone) {
+    const auto decisionName = [](wheel_position::StopDecision decision) {
+      switch (decision) {
+        case wheel_position::StopDecision::kAccepted:
+          return "accepted";
+        case wheel_position::StopDecision::kOutside:
+          return "outside bound";
+        case wheel_position::StopDecision::kAmbiguous:
+          return "ambiguous";
+        case wheel_position::StopDecision::kHardGate:
+          return "hard gate";
+      }
+      return "unknown";
+    };
+    RCLCPP_WARN_THROTTLE(
+        this->get_logger(), *this->get_clock(), 1000,
+        "Wheel position odometry anchor reset: stop gap %s; "
+        "left=%s (%s) d=%.9g U=%.9g right=%s (%s) d=%.9g U=%.9g (pose retained)",
+        wheel_position::reasonName(result.reason), decisionName(result.left.decision),
+        wheel_position::reasonName(result.left.reason), result.left.turns, result.left.upper,
+        decisionName(result.right.decision), wheel_position::reasonName(result.right.reason),
+        result.right.turns, result.right.upper);
+  } else if (result.state == wheel_position::State::kReset) {
     // kInvalid also covers bad dimensions or malformed/counter-rollback feedback: keep those
     // WARNs even if the other wheel has never answered. These checks classify logs only.
     const bool geometry_valid = std::isfinite(limits.radius) && limits.radius > 0.0 &&
@@ -555,6 +597,8 @@ void DriveComponent::runControlTick() {
     }
   }
   const auto out = control_core_->step(target_linear_, target_angular_, dt, feedback);
+  odom_left_ref_rpm_ = out.left_ref_rpm;
+  odom_right_ref_rpm_ = out.right_ref_rpm;
 
   // 指令送信（応答フレームでフィードバック快照も更新される）。停止判定は制御コアが
   // 済ませているため、送信先は停止指令か生の車輪 RPM のどちらかになる。

@@ -42,10 +42,10 @@ int16_t ampToRaw(double amp) {
 
 double rawToAmp(int16_t raw) { return static_cast<double>(raw) * kAmpPerRaw; }
 
-int16_t stepToRaw(State& state, const Params& params, int rpm_ref, int measured_rpm, double dt,
+int16_t stepToRaw(State& state, const Params& params, int rpm_ref, double measured_rpm, double dt,
                   double* i_cmd_amp_out, bool* saturated_out) {
-  const int measured = params.invert_measured ? -measured_rpm : measured_rpm;
-  const double error = static_cast<double>(rpm_ref - measured);
+  const double measured = params.invert_measured ? -measured_rpm : measured_rpm;
+  const double error = static_cast<double>(rpm_ref) - measured;
 
   // 積分項は電流 [A] で持つ（Ki を掛けてから積算する）。±integral_limit_amp でクランプ。
   double integral_candidate = 0.0;
@@ -100,8 +100,8 @@ int signOf(double v) { return (v > 0.0) - (v < 0.0); }
 }  // namespace
 
 GuardTrip updateGuard(GuardState& state, const GuardParams& params, const GuardSample& sample) {
-  const double prev_abs = std::abs(static_cast<double>(sample.measured_prev_rpm));
-  const double new_abs = std::abs(static_cast<double>(sample.measured_new_rpm));
+  const double prev_abs = std::abs(sample.measured_prev_rpm);
+  const double new_abs = std::abs(sample.measured_new_rpm);
 
   // 1) 回転を止める向きの電流の下で速くなり続けた（正帰還・外力）。
   //    2 つの実測の間に流れていたのは前の周期の指令（applied_amp）なので、それと比べる。

@@ -10,6 +10,7 @@
 //    `ros2 param set` が成功を報告してしまい、変わっていないことに気付けない）
 #include <gtest/gtest.h>
 
+#include <lifecycle_msgs/msg/state.hpp>
 #include <limits>
 #include <memory>
 #include <rclcpp/rclcpp.hpp>
@@ -23,6 +24,7 @@ namespace motor_control_app {
 // Initialize parameter members without lifecycle configure or hardware access.
 struct DriveParamPolicyAccess {
   static void initialize(DriveComponent& node) { node.readParameters(); }
+  static bool stopGapValid(const DriveComponent& n) { return n.odom_stop_gap_.valid(); }
   static int responseTimeoutMs(const DriveComponent& n) { return n.serial_response_timeout_ms_; }
   static std::vector<double> rearmBands(const DriveComponent& n) {
     return {n.rearm_neutral_linear_, n.rearm_neutral_angular_};
@@ -106,6 +108,41 @@ TEST_F(DriveParamPolicyTest, RearmBandsValidateOnStartupAndRequireRestart) {
   EXPECT_FALSE(node_->set_parameter(rclcpp::Parameter("rearm_neutral_angular", .02)).successful);
 }
 
+TEST_F(DriveParamPolicyTest, StopGapDefaultsAndRuntimeChangesRequireRestart) {
+  EXPECT_FALSE(node_->get_parameter("odom_stop_gap_recovery").as_bool());
+  EXPECT_EQ(node_->get_parameter("odom_stop_gap_speed_margin").as_double(), 1.25);
+  EXPECT_EQ(node_->get_parameter("odom_stop_gap_noise_counts").as_int(), 8);
+  for (const auto& p : {rclcpp::Parameter("odom_stop_gap_recovery", true),
+                        rclcpp::Parameter("odom_stop_gap_speed_margin", 1.0),
+                        rclcpp::Parameter("odom_stop_gap_noise_counts", 16)}) {
+    const auto result = node_->set_parameter(p);
+    EXPECT_FALSE(result.successful);
+    EXPECT_NE(result.reason.find("restart"), std::string::npos);
+  }
+}
+
+TEST_F(DriveParamPolicyTest, StopGapInvalidStartupFailsConfigureInBothModesEvenWhenOff) {
+  for (const auto& mode : {"velocity", "current"}) {
+    for (const auto& bad :
+         {rclcpp::Parameter("odom_stop_gap_speed_margin", 0.0),
+          rclcpp::Parameter("odom_stop_gap_speed_margin", -1.0),
+          rclcpp::Parameter("odom_stop_gap_speed_margin", std::numeric_limits<double>::infinity()),
+          rclcpp::Parameter("odom_stop_gap_speed_margin", std::numeric_limits<double>::quiet_NaN()),
+          rclcpp::Parameter("odom_stop_gap_noise_counts", -1)}) {
+      rclcpp::NodeOptions options;
+      options.parameter_overrides({{"auto_start", false},
+                                   {"control_mode", mode},
+                                   {"serial_port", "/path/that/does/not/exist"},
+                                   bad});
+      motor_control_app::DriveComponent n(options);
+      motor_control_app::DriveParamPolicyAccess::initialize(n);
+      EXPECT_FALSE(motor_control_app::DriveParamPolicyAccess::stopGapValid(n));
+      n.configure();
+      EXPECT_EQ(n.get_current_state().id(), lifecycle_msgs::msg::State::PRIMARY_STATE_UNCONFIGURED);
+    }
+  }
+}
+
 TEST_F(DriveParamPolicyTest, LiveTuningParametersAreAccepted) {
   EXPECT_TRUE(node_->set_parameter(rclcpp::Parameter("max_linear_accel", 2.5)).successful);
   EXPECT_TRUE(node_->set_parameter(rclcpp::Parameter("max_angular_accel", 2.5)).successful);
@@ -155,6 +192,8 @@ TEST_F(DriveParamPolicyTest, ReconfigureOnlyParametersAreRejected) {
 
   EXPECT_FALSE(node_->set_parameter(rclcpp::Parameter("max_motor_rpm", 400)).successful);
   EXPECT_FALSE(node_->set_parameter(rclcpp::Parameter("control_mode", "current")).successful);
+  EXPECT_FALSE(
+      node_->set_parameter(rclcpp::Parameter("current_measured_source", "reported")).successful);
   EXPECT_FALSE(node_->set_parameter(rclcpp::Parameter("wheel_radius", 0.2)).successful);
   EXPECT_FALSE(node_->set_parameter(rclcpp::Parameter("serial_port", "/dev/null")).successful);
   EXPECT_FALSE(node_->set_parameter(rclcpp::Parameter("auto_start", true)).successful);
