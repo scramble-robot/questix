@@ -559,7 +559,7 @@ function scaleNote(model, copy) {
   const rpm = formatValue(current.command, 0);
   const speed = current.conditions?.speed;
   const step = Number.isFinite(speed)
-    ? fill(copy.live.scaleStep, { speed: speed.toFixed(1) + ' m/s', rpm })
+    ? fill(copy.live.scaleStep, { speed: speed.toFixed(2) + ' m/s', rpm })
     : fill(copy.live.scaleStepUnknown, { rpm });
   const target = model.result ? model.result.target : model.config.targetRPM;
   return html`<p class="control-live-scale">${fill(copy.live.scaleNote, { target, step })}</p>`;
