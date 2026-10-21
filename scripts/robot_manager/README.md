@@ -362,7 +362,7 @@ free space drops below that threshold mid-recording. Optional `ファイルの�
 (`MAX_SPLIT_MB`, **200 MB by default**, decimal MB) and `ファイルを時間で分ける間隔（秒）`
 (`MAX_DURATION_SEC`, `--max-bag-duration`) split files by size and elapsed time.
 The time setting does **not** stop the whole recording; stop it explicitly. An existing `rosbag.env`
-value takes precedence, including `MAX_SPLIT_MB=0` (no splitting). One bag directory may hold
+value takes precedence, including `MAX_SPLIT_MB=0` (no size-based splitting). One bag directory may hold
 several MCAP files; the Manager lists, sizes and deletes that directory as one recording, and
 QUESTiX LAB reads and converts all its segments.
 
