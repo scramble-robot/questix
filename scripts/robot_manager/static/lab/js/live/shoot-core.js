@@ -186,9 +186,18 @@ function fireControl(readiness, local, blocked) {
 
 /** The roller slider's range in whole percent: from the least power that can fire to the cap. */
 function powerRange(limits) {
-  const max = Math.floor(limits.max_power * PERCENT + 1e-9);
-  const min = Math.min(max, Math.ceil(limits.min_fire_power * PERCENT - 1e-9));
+  if (!finite(limits.max_power) || !finite(limits.min_fire_power)) return { min: 0, max: 0 };
+  const max = Math.floor(powerPercent(limits.max_power));
+  const min = Math.min(max, Math.ceil(powerPercent(limits.min_fire_power)));
   return { min: Math.max(0, min), max: Math.max(0, max) };
+}
+
+// Restore only the wire representation of a whole percent, not arbitrary fractional settings.
+// The bridge normalizes its limits too; older bridges and recordings can still carry raw f32.
+function powerPercent(power) {
+  const percent = Math.round(power * PERCENT);
+  const nominal = percent / PERCENT;
+  return power === nominal || power === Math.fround(nominal) ? percent : power * PERCENT;
 }
 
 /** A power in percent kept within the slider's range. */
