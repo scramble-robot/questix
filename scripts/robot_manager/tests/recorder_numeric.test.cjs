@@ -4,12 +4,27 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const source = fs.readFileSync(path.join(__dirname, '../static/app.js'), 'utf8');
 const html = fs.readFileSync(path.join(__dirname, '../static/index.html'), 'utf8');
+// Follow the page's dependency order, including future Manager scripts before app.js.
+const scripts = [];
+for (const match of html.matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["'][^>]*>/g)) {
+  const src = match[1].split(/[?#]/)[0];
+  if (!src.startsWith('/static/')) continue;
+  const file = src.slice('/static/'.length);
+  scripts.push({ file, source: fs.readFileSync(path.join(__dirname, '../static', file), 'utf8') });
+  if (file === 'app.js') break;
+}
+assert.equal(scripts.at(-1)?.file, 'app.js', 'index.html must load the Manager app');
 
 function fixture() {
   const elements = new Map();
   const inputs = [];
+  const element = () => ({ textContent: '', hidden: false, value: '', dataset: {},
+    events: {}, children: [],
+    append(...items) { this.children.push(...items); },
+    replaceChildren(...items) { this.children = items; },
+    setAttribute() {}, removeAttribute() {},
+    addEventListener(name, fn) { this.events[name] = fn; } });
   for (const key of ['MIN_FREE_GB', 'MAX_SPLIT_MB', 'MAX_DURATION_SEC']) {
     const tag = html.match(new RegExp(`<input[^>]*data-rec-config="${key}"[^>]*>`))[0];
     const attrs = Object.fromEntries([...tag.matchAll(/([\w-]+)="([^"]*)"/g)].map((m) => [m[1], m[2]]));
@@ -24,18 +39,17 @@ function fixture() {
     elements.set(attrs.id, input);
   }
   const get = (id) => {
-    if (!elements.has(id)) elements.set(id, { textContent: '', hidden: false, events: {},
-      replaceChildren() {}, addEventListener(name, fn) { this.events[name] = fn; } });
+    if (!elements.has(id)) elements.set(id, element());
     return elements.get(id);
   };
-  const document = { getElementById: get, addEventListener() {},
+  const document = { getElementById: get, createElement: element, addEventListener() {},
     querySelectorAll(selector) { return selector === '[data-rec-config][type="number"]' ||
       selector === '[data-rec-config]' ? inputs : []; } };
   const calls = [];
-  const context = vm.createContext({ document, TrialView: { FIELDS: [] }, StatusView: { createBlockerMemory() {} },
+  const context = vm.createContext({ document, URL, location: { href: 'http://127.0.0.1:8888/' },
     fetch: async (url) => { calls.push(url); return { ok: false, status: 422,
       json: async () => ({ detail: 'サーバーの拒否理由：1〜16 GB。0は使用できません。' }) }; } });
-  vm.runInContext(source, context);
+  for (const { file, source } of scripts) vm.runInContext(source, context, { filename: file });
   const run = (code) => vm.runInContext(code, context);
   run('setupRecorderEvents()');
   return { inputs, get, calls, run, context };
