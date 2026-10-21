@@ -4,6 +4,7 @@ Changelog for package web_joy_driver
 
 Forthcoming
 -----------
+* fix: latch all web joy input after timeout, ownership change or stop until a valid neutral frame arrives
 * feat: browser/smartphone virtual controller publishing sensor_msgs/Joy over WebSocket
 * feat: relay a sensor_msgs/CompressedImage camera topic to the page and show it between the sticks
 * feat: one operator at a time (later devices are refused and view read-only, may ask for a hand-over);

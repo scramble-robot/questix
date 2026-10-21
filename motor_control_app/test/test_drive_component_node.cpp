@@ -444,6 +444,9 @@ protected:
     rosout_sub_ = helper_->create_subscription<rcl_interfaces::msg::Log>(
         "/rosout", rclcpp::QoS(1000).reliable().durability_volatile(),
         [this](rcl_interfaces::msg::Log::SharedPtr msg) {
+          if (msg->name == "drive_component" && msg->level == rcl_interfaces::msg::Log::WARN) {
+            command_warnings_.push_back(msg->msg);
+          }
           if (msg->name == "drive_component" && msg->level >= rcl_interfaces::msg::Log::WARN &&
               msg->msg.find("Wheel position odometry anchor reset:") != std::string::npos) {
             odom_warnings_.push_back(msg->msg);
@@ -714,6 +717,11 @@ protected:
   bool have_status_{false};
   rclcpp::Subscription<rcl_interfaces::msg::Log>::SharedPtr log_sub_;
   std::vector<std::string> logs_;
+  std::vector<std::string> command_warnings_;
+  size_t warningCount(const std::string& prefix) const {
+    return std::count_if(command_warnings_.begin(), command_warnings_.end(),
+                         [&](const std::string& text) { return text.find(prefix) == 0; });
+  }
   bool send_twist_{false};
   double twist_linear_{0.5};
   bool send_estop_{false};
@@ -722,6 +730,78 @@ protected:
   bool send_permission_{false};
   bool permission_allowed_{false};
 };
+
+// Hold longer than the former 1 s throttle: silence must persist, not just be delayed.
+TEST_F(DriveComponentNode, BlockedNeutralTwistHasNoCommandWarnings) {
+  operationManagerWithoutGpio();
+  start();
+  spinFor(300ms);
+  command_warnings_.clear();
+  estop_active_ = true;
+  twist_linear_ = 0;
+  send_twist_ = true;
+  spinFor(2300ms);
+  EXPECT_EQ(warningCount("Actuation blocked: estop_active"), 1u);
+  EXPECT_EQ(warningCount("Actuation blocked ("), 0u);
+  EXPECT_EQ(warningCount("Drive needs neutral:"), 0u);
+  EXPECT_FALSE(droveBothWheels());
+}
+
+TEST_F(DriveComponentNode, BlockedNonzeroTwistWarnsOncePerEpisode) {
+  operationManagerWithoutGpio();
+  start();
+  spinFor(300ms);
+  command_warnings_.clear();
+  estop_active_ = true;
+  send_twist_ = true;
+  twist_linear_ = .5;
+  spinFor(2300ms);
+  EXPECT_EQ(warningCount("Actuation blocked: estop_active"), 1u);
+  EXPECT_EQ(warningCount("Actuation blocked (estop_active)"), 1u);
+  EXPECT_EQ(warningCount(
+                "Actuation blocked (estop_active), ignoring twist command: linear=0.5 angular=0"),
+            1u);
+  twist_linear_ = 0;
+  spinFor(200ms);
+  twist_linear_ = .5;
+  spinFor(200ms);  // a new episode even within the former throttle period
+  EXPECT_EQ(warningCount("Actuation blocked (estop_active)"), 2u);
+  permission_allowed_ = false;
+  spinFor(200ms);
+  estop_active_ = false;
+  spinFor(2300ms);
+  EXPECT_EQ(warningCount("Actuation blocked: permission_off"), 1u);
+  EXPECT_EQ(warningCount("Actuation blocked (permission_off)"), 1u);
+  // A reason change with no intervening command must also start a new episode.
+  send_twist_ = false;
+  estop_active_ = true;
+  spinFor(200ms);
+  estop_active_ = false;
+  spinFor(200ms);
+  send_twist_ = true;
+  spinFor(200ms);
+  EXPECT_EQ(warningCount("Actuation blocked (permission_off)"), 2u);
+  EXPECT_FALSE(droveBothWheels());
+}
+
+TEST_F(DriveComponentNode, NeedsNeutralTwistWarnsOnceAndStillRequiresNeutral) {
+  operationManagerWithoutGpio();
+  start();
+  spinFor(300ms);
+  command_warnings_.clear();
+  send_twist_ = true;
+  spinFor(2300ms);
+  EXPECT_EQ(warningCount("Drive needs neutral: linear=0.5 angular=0"), 1u);
+  EXPECT_FALSE(droveBothWheels());
+  estop_active_ = true;
+  spinFor(300ms);
+  estop_active_ = false;
+  spinFor(2300ms);
+  EXPECT_EQ(warningCount("Drive needs neutral: linear=0.5 angular=0"), 2u);
+  EXPECT_FALSE(droveBothWheels());
+  neutral();
+  ASSERT_TRUE(spinUntil([this]() { return droveBothWheels(); }, 2s));
+}
 
 TEST_F(DriveComponentNode, M1NeutralStreamWaitsForDelayedFreshPair) { delayedNeutralRelease(true); }
 TEST_F(DriveComponentNode, M1NoInputHasSameDelayedReleaseAndPose) { delayedNeutralRelease(false); }
