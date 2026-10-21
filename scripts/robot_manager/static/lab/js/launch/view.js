@@ -571,8 +571,8 @@ function measurementPanel(measurement, copy, actions) {
   </aside>`;
 }
 
-// The distance of the disc just fired, typed right under 「1枚発射」 (the launcher block draws it
-// with its own redraws, launcherPanel `after`). Its row in the table says so.
+// The distance of the disc just fired. It follows the whole shared launcher block so its
+// appearance cannot push the launcher's state or controls down. Its table row says so too.
 function quickEntry(quick, copy, actions) {
   if (!quick) return nothing;
   const text = copy.measurement;
@@ -604,14 +604,20 @@ function quickEntry(quick, copy, actions) {
 
 // Firing from the lesson (js/live/shoot-ui.js draws the block itself, with the emergency stop and
 // the launcher's state): each disc fired here adds a row to the table right under the block, and
-// its distance field comes right under the fire button.
+// its distance field follows the shared block.
 function shootCard(measurement, copy, actions) {
   return html`<section class="card launch-shoot">
     ${launcherPanel('launch-measure', {
       onShot: actions.addShot,
       lesson: 'launch-measure',
-      after: () => quickEntry(measurement.quick, copy, actions),
     })}
+    ${
+      measurement.quick
+        ? quickEntry(measurement.quick, copy, actions)
+        : html`<p class="drive-note" data-launch-quick-hint>
+            ${measurement.source === 'measured' ? copy.measurement.quickEmpty : copy.measurement.quickExample}
+          </p>`
+    }
   </section>`;
 }
 

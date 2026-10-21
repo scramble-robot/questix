@@ -352,27 +352,6 @@ document.addEventListener('keydown', (event) => {
   switcher.querySelector('summary').focus();
 });
 
-// On a phone the header scrolls away with the page and slides back in as soon as the learner
-// scrolls up, so the catalogue button and the switcher are one small swipe away from anywhere.
-const HEADER_TUCK_QUERY = window.matchMedia('(max-width: 600px)');
-const HEADER_SCROLL_THRESHOLD = 6; // px of scrolling in one direction before the header reacts
-let lastScrollY = window.scrollY;
-
-function tuckHeaderOnScroll() {
-  const scrollY = window.scrollY;
-  const delta = scrollY - lastScrollY;
-  if (Math.abs(delta) < HEADER_SCROLL_THRESHOLD) return;
-  const tucked =
-    HEADER_TUCK_QUERY.matches &&
-    delta > 0 &&
-    scrollY > siteHeader.offsetHeight &&
-    !$('courseSwitcher').open;
-  siteHeader.classList.toggle('is-tucked', tucked);
-  lastScrollY = scrollY;
-}
-window.addEventListener('scroll', tuckHeaderOnScroll, { passive: true });
-siteHeader.addEventListener('focusin', () => siteHeader.classList.remove('is-tucked'));
-
 // --- Hash routes: #<course>, #quiz-<course>, #mastery-<course>, #records; anything else is the
 // catalogue.
 

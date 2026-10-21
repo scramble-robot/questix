@@ -34,6 +34,8 @@ import { reportLessonProgress } from '../shell/lesson-progress.js';
 import { revealElement } from '../core/reveal.js';
 import { driveRows, wallRows } from '../live/recording-core.js';
 import { createLiveSession } from '../live/live-session.js';
+import { driveModel } from '../live/drive-link.js';
+import { wallSpeedDisplay } from './live-limits.js';
 import { captureNotes } from '../live/live-view.js';
 import { openRobotDialog } from '../live/live-ui.js';
 import { registerRecordTarget } from '../live/record-targets.js';
@@ -216,6 +218,7 @@ function liveModel() {
     capture: { ...liveSession().model(), message: liveSession().note },
     stepSpeed: liveStepSpeed,
     stepSpeeds: stepSpeedOptions(),
+    wallSpeedNote: wallSpeedInfo().note,
     compared: comparedRuns[kind],
     table,
     conclusion: comparisonConclusion(table, { distance: kind === 'distance', text: copy.live }),
@@ -640,12 +643,23 @@ function wallOutcome(result) {
   return fill(copy.live.driveWallNotSettled, { distance: result.distance.toFixed(2) });
 }
 
+function wallSpeedInfo() {
+  return wallSpeedDisplay(
+    {
+      maximum: WALL_MAX_SPEED,
+      limit: driveModel().limits?.linear,
+      connected: liveLink().connected,
+    },
+    copy.live,
+  );
+}
+
 const wallDrive = {
   startLabel: copy.live.driveWallStart,
   program: () =>
     fill(copy.live.driveWallProgram, {
       gains: gainsText(experiment().config),
-      top: WALL_MAX_SPEED.toFixed(2),
+      top: wallSpeedInfo().top.toFixed(2),
       gap: WALL_MIN_GAP.toFixed(2),
     }),
   placement: () => fill(copy.live.driveWallPlacement, { start: WALL_START_MIN.toFixed(1) }),

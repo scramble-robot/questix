@@ -1,3 +1,4 @@
+import { liveStatus, onLiveStatus } from './live-status.js';
 import { html, render, ref, nothing } from '../vendor/lit-html.js';
 import { fillSentence as fill } from '../core/content.js';
 import { revealElement } from '../core/reveal.js';
@@ -11,10 +12,9 @@ import {
   setTilt,
   startRoller,
   stopOwn,
-  stopLauncher,
   fireOne,
 } from './shoot-link.js';
-import { shootCopy, shootBlock, shootStopBar } from './shoot-view.js';
+import { shootCopy, shootBlock } from './shoot-view.js';
 import { recordRobot, liveLink, groupName } from './capture.js';
 import { withRunInfo, serializeRecording } from './recording-core.js';
 import { robotRecordsInfo } from './robot-records.js';
@@ -44,6 +44,8 @@ let timer = 0;
 let leftSince = null; // performance.now() since when no launcher block has been on screen
 const LEFT_GRACE_MS = 1000; // a redraw or a topic being rebuilt is not leaving
 let recording = null; // { finish: AbortController, done: Promise, lesson, start: {percent, tilt} }
+let lastConfirmed = shootModel().confirmed;
+let reconfirm = ''; // display only; shoot-link remains the confirmation authority
 
 const visible = (element) =>
   element.isConnected &&
@@ -77,34 +79,20 @@ function actionsOf(entry) {
 function draw(entry, model) {
   if (!entry.element?.isConnected) return;
   render(
-    shootBlock(model, entry.view, entry.actions, entry.options.after?.() ?? nothing),
+    shootBlock(
+      { ...model, estopState: liveStatus().estop, reconfirm },
+      entry.view,
+      entry.actions,
+      entry.options.after?.() ?? nothing,
+    ),
     entry.element,
   );
-}
-
-// --- the stop bar --------------------------------------------------------------------------------
-
-// Like the drive bar (drive-ui.js): moved into an open modal dialog, which sits above any z-index.
-function placeBar(host) {
-  const dialogs = [...document.querySelectorAll('dialog[open]')];
-  const parent = dialogs.at(-1) ?? document.body;
-  if (host.parentElement !== parent) parent.append(host);
-}
-
-function drawBar(model) {
-  const host = document.getElementById('shootBar');
-  if (!host) return;
-  placeBar(host);
-  render(shootStopBar(model, stopLauncher), host);
-  const turning = model.spinning || (model.active && model.power > 0);
-  document.body.classList.toggle('shooting', turning);
 }
 
 // --- redrawing -----------------------------------------------------------------------------------
 
 function redraw() {
   const model = shootModel();
-  drawBar(model);
   for (const entry of panels.values())
     if (entry.element && visible(entry.element)) draw(entry, model);
 }
@@ -127,7 +115,6 @@ function tick() {
   if (document.hidden) return;
   const attached = [...panels.values()].some((entry) => entry.element?.isConnected);
   const model = shootModel();
-  drawBar(model);
   const shown = [...panels.values()].filter((entry) => entry.element && visible(entry.element));
   stopIfLeft(model, shown.length > 0);
   if (!attached && !model.spinning && !model.active) {
@@ -242,7 +229,10 @@ function launcherPanel(place, options = {}) {
 }
 
 function initShootUi() {
-  onShoot(() => {
+  onLiveStatus(redraw);
+  onShoot((model) => {
+    if (model.confirmed || model.session) reconfirm = '';
+    lastConfirmed = model.confirmed;
     startTimer();
     redraw();
   });
@@ -255,14 +245,15 @@ function initShootUi() {
   });
   onShootSession((event) => {
     if (event.type === 'start') {
+      reconfirm = '';
       for (const entry of panels.values()) entry.view.recordNote = '';
       startRecording();
-    } else endRecording(event);
+    } else {
+      if (lastConfirmed && !shootModel().confirmed)
+        reconfirm = event.shots > 0 ? 'fired' : 'stopped';
+      endRecording(event);
+    }
   });
-  new MutationObserver(() => {
-    const host = document.getElementById('shootBar');
-    if (host) placeBar(host);
-  }).observe(document.body, { subtree: true, attributeFilter: ['open'] });
   redraw();
 }
 

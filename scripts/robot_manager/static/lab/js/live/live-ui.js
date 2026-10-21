@@ -13,6 +13,8 @@ import { scanMount, wheelAuthority } from './capture-core.js';
 import { loadJson, fillSentence } from '../core/content.js';
 import { html, render, nothing } from '../vendor/lit-html.js';
 
+import { liveStatus } from './live-status.js';
+
 const copy = await loadJson('content/live/link.json');
 
 // Header button and "実機" dialog. Drawing only happens while the dialog is open.
@@ -46,12 +48,6 @@ const COLORS = {
 };
 
 let history = [];
-// Shown next to the header's dot: /emergency_stop itself pressed, or the derived flag of the
-// latest /drive_status pressed (that flag may add a press but never says "released").
-let estopPressed = false;
-let latestEstop = null; // the last /emergency_stop (the estop stream) and when it arrived [ms]
-let latestEstopAt = -Infinity;
-const ESTOP_STALE_MS = 1000; // operation_manager sends it 10 times a second
 let cameraUrl = '';
 let frameRequested = false;
 let addressProblem = ''; // the sentence normalizeRobotUrl threw for the typed address
@@ -215,25 +211,17 @@ function wheelCaption() {
 }
 
 // Pressed / released only from /emergency_stop itself; never heard or silent is "unknown".
-function estopText(drive) {
-  const fresh = latestEstop && performance.now() - latestEstopAt <= ESTOP_STALE_MS;
-  if ((fresh && latestEstop.active === true) || drive?.emergency_stop === true)
-    return copy.monitor.estopPressed;
-  if (fresh) return copy.monitor.estopReleased;
-  return latestEstop ? copy.monitor.estopStale : copy.monitor.estopUnknown;
-}
-
-function showEstopPressed(pressed) {
-  if (pressed === estopPressed) return;
-  estopPressed = pressed;
-  const state = robotState();
-  showHeader(state, linkStage(state));
+function estopText() {
+  const words = {
+    pressed: 'estopPressed',
+    released: 'estopReleased',
+    unknown: 'estopUnknown',
+    stale: 'estopStale',
+  };
+  return copy.monitor[words[liveStatus().estop]];
 }
 
 function recordEstop(message) {
-  latestEstop = message;
-  latestEstopAt = performance.now();
-  showEstopPressed(message.active === true || latestRobot('drive')?.emergency_stop === true);
   requestRedraw();
 }
 function readings() {
@@ -344,15 +332,6 @@ function showHeader(state, stage) {
   const button = $('robotLinkOpen');
   button.dataset.phase = state.phase;
   button.dataset.stage = stage;
-  const open = state.phase === 'open';
-  const name = open ? robotName(state.hello) : '';
-  $('robotLinkName').textContent = name;
-  $('robotLinkName').hidden = !name;
-  const estop = open && estopPressed;
-  button.dataset.estop = String(estop);
-  $('robotLinkState').textContent = copy.stage[stage] + (estop ? copy.estop.long : '');
-  // A phone shows only this short word next to the dot (css/hs-shell.css).
-  $('robotLinkState').dataset.short = estop ? copy.estop.short : copy.stageShort[stage];
 }
 // Until a link has worked, the address stays editable so a typo can be fixed while it retries.
 function showForm(state, stage) {
@@ -385,9 +364,6 @@ function showState(state) {
   render(open ? streamRows(state) : nothing, $('robotStreams'));
   if (!open) {
     resetMonitor();
-    estopPressed = false;
-    latestEstop = null;
-    latestEstopAt = -Infinity;
   }
   requestRedraw();
 }
@@ -447,9 +423,6 @@ function clearAddressProblem() {
 }
 
 function recordWheels(drive) {
-  const topicPressed =
-    latestEstop?.active === true && performance.now() - latestEstopAt <= ESTOP_STALE_MS;
-  showEstopPressed(topicPressed || drive.emergency_stop === true);
   const config = robotState().hello?.config;
   const none = { left: NaN, right: NaN };
   // Each wheel's own values when the bridge sends them (filtered measurement and the generated

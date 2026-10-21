@@ -1,3 +1,4 @@
+import { controlStatus, hardBlocked } from './control-status.js';
 import { html, nothing, render, unsafeHTML } from '../vendor/lit-html.js';
 import { fillSentence as fill } from '../core/content.js';
 import { driveModel, onDrive, confirmDriveSafety, stopDrive, runDrive } from './drive-link.js';
@@ -44,24 +45,6 @@ const BENCH_MOVES = [
 ];
 
 const bench = { ...BENCH_DEFAULTS, held: null, abort: null, note: '' };
-
-// --- stop bar --------------------------------------------------------------------------------
-
-function stopBar(model) {
-  if (!model.active && !model.running) return nothing;
-  const mine = model.running || model.owner === 'me';
-  // Esc only stops this page's own run (drive-link.js), so the key is only named for that one;
-  // CSS hides the hint on touch screens, which have no Esc key.
-  return html`<div class="drive-bar" role="alert" data-drive-bar>
-    <span class="drive-bar-dot" aria-hidden="true"></span>
-    <strong>${mine ? driveCopy.bar.mine : driveCopy.bar.other}</strong>
-    <button class="drive-bar-stop" data-drive-bar-stop @click=${stopDrive}>
-      ${driveCopy.bar.stop}${
-        mine ? html`<span class="drive-bar-esc">${driveCopy.bar.esc}</span>` : nothing
-      }
-    </button>
-  </div>`;
-}
 
 // --- bench test --------------------------------------------------------------------------------
 
@@ -206,6 +189,7 @@ function speedSlider(model, key, label) {
       max=${max}
       step=${BENCH_STEP[key]}
       .value=${String(Math.min(bench[key], max))}
+      ?disabled=${hardBlocked(model) || bench.held !== null}
       @input=${(event) => {
         bench[key] = Number(event.target.value);
         update();
@@ -217,14 +201,10 @@ function speedSlider(model, key, label) {
 
 function benchPanel(model) {
   const heading = html`<h3>${unsafeHTML(runModeBadgeHtml('drive'))} ${driveCopy.bench.title}</h3>`;
-  if (!model.allowed)
-    return html`${heading}
-      <p>${driveCopy.notAllowed}</p>
-      ${driveTeacherDetails(model)}`;
   const reason = bench.held === null ? driveFirstReason(model) : '';
   return html`${heading}
     <p>${fill(driveCopy.bench.lead, { seconds: BENCH_MAX_SECONDS })}</p>
-    ${driveChecklist(model)} ${driveTeacherDetails(model)}
+    ${controlStatus(model.blockers, bench.held !== null ? 'driving' : '')}
     ${confirmBox(
       model,
       { confirmDrive: confirmDriveSafety },
@@ -239,16 +219,8 @@ function benchPanel(model) {
       <div class="drive-bench-pad">${BENCH_MOVES.map((move) => benchButton(model, move))}</div>
       ${reason ? html`<p class="drive-why">${reason}</p>` : nothing} ${liveStateStrip('bench')}
     </div>
+    ${driveChecklist(model)} ${driveTeacherDetails(model)}
     ${bench.note ? html`<p class="drive-result" role="status">${bench.note}</p>` : nothing}`;
-}
-
-// A modal dialog sits in the browser's top layer, above any z-index, so the bar moves into the open
-// dialog (where position: fixed still means the viewport) and back to the page when it closes.
-function placeStopBar() {
-  const host = document.getElementById('driveBar');
-  const dialogs = [...document.querySelectorAll('dialog[open]')];
-  const parent = dialogs.at(-1) ?? document.body;
-  if (host.parentElement !== parent) parent.append(host);
 }
 
 // --- the way to 記録の一覧 -------------------------------------------------------------------
@@ -276,24 +248,16 @@ function historyPanel() {
 
 function update() {
   const model = driveModel();
-  placeStopBar();
-  render(stopBar(model), document.getElementById('driveBar'));
-  // Room at the bottom of the page, so the bar never hides its last buttons.
-  document.body.classList.toggle('driving', model.active || model.running);
   render(historyPanel(), document.getElementById('robotDriveLog'));
   const panel = document.getElementById('robotDrive');
   // Driving needs a connection; before that the dialog is about connecting.
-  panel.hidden = model.blockers.some((blocker) => blocker.code === 'no_link');
+  panel.hidden = false;
   render(panel.hidden ? nothing : benchPanel(model), panel);
 }
 
 function initDriveUi() {
   onDrive(update);
   onDriveRuns(update);
-  new MutationObserver(placeStopBar).observe(document.body, {
-    subtree: true,
-    attributeFilter: ['open'],
-  });
   update();
 }
 
