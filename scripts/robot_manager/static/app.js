@@ -1717,8 +1717,9 @@ function renderActuation({ state, known, pending, error, blocked }) {
       radio.disabled = Boolean(pending || blocked || !known || PermissionView.unavailable(state));
     }
     const confirmed = known ? `確定した許可：${PermissionView.LABELS[state.choices[kind]]}` : '確認不能';
-    document.getElementById(`actuation-${kind}-state`).textContent = requested
-      ? `変更を要求しています：${PermissionView.LABELS[requested]}（${confirmed}）` : confirmed;
+    const name = kind === 'drive' ? '走行' : '発射';
+    document.getElementById(`actuation-${kind}-state`).textContent = `${name}：` + (requested
+      ? `変更を要求しています：${PermissionView.LABELS[requested]}（${confirmed}）` : confirmed);
   }
   document.getElementById('actuation-state').textContent = known
     ? PermissionView.unavailable(state) : '確認不能：許可の状態を取得できません';
@@ -1728,7 +1729,16 @@ function renderActuation({ state, known, pending, error, blocked }) {
 
 async function refreshActuation() { await permissions.refresh(); }
 
-async function setActuation(kind, choice) { await permissions.choose(kind, choice); }
+async function setActuation(kind, choice) {
+  const focused = document.activeElement;
+  await permissions.choose(kind, choice);
+  // Disabling a native radio temporarily removes focus. Restore it only if the user has not
+  // moved to another control, so arrows can continue within this group after confirmation.
+  if (focused?.matches('input[name^="permission-"]') && !focused.disabled &&
+      document.activeElement === document.body && activePanel === 'control') {
+    focused.focus({ preventScroll: true });
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Why the robot does not move (/api/motion-state, read once on request)
@@ -1757,8 +1767,25 @@ async function checkMotionState() {
 }
 
 function setupActuationEvents() {
+  const chrome = document.querySelector('.app-chrome');
+  if (chrome && typeof ResizeObserver !== 'undefined') {
+    const observer = new ResizeObserver(() => document.documentElement.style.setProperty(
+      '--manager-chrome-height', `${chrome.getBoundingClientRect().height + 8}px`));
+    observer.observe(chrome);
+  }
   document.getElementById('motion-state-check').addEventListener('click', checkMotionState);
   for (const radio of document.querySelectorAll('input[name^="permission-"]')) {
+    radio.addEventListener('focus', () => {
+      // Pointer focus must not scroll between pointerdown and click. Keyboard focus may
+      // reveal its whole group below the sticky header.
+      if (!chrome || !radio.matches(':focus-visible')) return;
+      const top = chrome.getBoundingClientRect().bottom + 8;
+      const group = radio.closest('fieldset');
+      const target = group.getBoundingClientRect().height <= innerHeight - top - 8
+        ? group : radio.closest('label');
+      const rect = target.getBoundingClientRect();
+      if (rect.top < top || rect.bottom > innerHeight) window.scrollBy(0, rect.top - top);
+    });
     radio.addEventListener('change', () => {
       if (radio.checked) setActuation(radio.name.slice('permission-'.length), radio.value);
     });

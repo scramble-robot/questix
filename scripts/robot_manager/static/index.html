@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>QUESTiX Robot Manager</title>
-  <link rel="stylesheet" href="/static/style.css?v=37">
+  <link rel="stylesheet" href="/static/style.css?v=38">
 </head>
 
 <body>
@@ -79,6 +79,34 @@
     </div>
     <!-- ===== Control tab ===== -->
     <div class="tab-panel active" data-panel="control" id="panel-control" role="tabpanel" aria-labelledby="tab-control">
+    <!-- The teacher's permission (actuation.py): a permission, not an E-stop. Lesson mode only:
+         it is the lesson launch's vote for /motion_permission, so the drive and the launcher move
+         only while it is on, controller included. -->
+    <section class="card" id="actuation-card" aria-labelledby="actuation-heading">
+      <h2 id="actuation-heading">先生の操作許可（教材モード）</h2>
+      <p class="permission-neutral">スティック・ボタンから手を離してください</p>
+      <div class="permission-estop"><strong>非常停止ボタン</strong><span id="permission-estop-state">不明</span></div>
+      <fieldset class="permission-choice" aria-describedby="actuation-state">
+        <legend>走行の許可</legend>
+        <label><input type="radio" name="permission-drive" value="none" disabled><span>許可しない</span></label>
+        <label><input type="radio" name="permission-drive" value="controller" disabled><span>コントローラーのみ</span></label>
+        <label><input type="radio" name="permission-drive" value="controller_and_lab" disabled><span>コントローラーと教材</span></label>
+      </fieldset>
+      <fieldset class="permission-choice" aria-describedby="actuation-state">
+        <legend>発射の許可</legend>
+        <label><input type="radio" name="permission-launcher" value="none" disabled><span>許可しない</span></label>
+        <label><input type="radio" name="permission-launcher" value="controller" disabled><span>コントローラーのみ</span></label>
+        <label><input type="radio" name="permission-launcher" value="controller_and_lab" disabled><span>コントローラーと教材</span></label>
+      </fieldset>
+      <div id="permission-feedback" role="status" aria-live="polite">
+        <p id="actuation-drive-state">確認しています</p>
+        <p id="actuation-launcher-state">確認しています</p>
+        <p id="actuation-state" class="section-help">確認しています</p>
+        <p id="actuation-error" class="permission-error"></p>
+      </div>
+      <p class="section-help">ここで選ぶのは先生の許可です。非常停止の状態や、ロボットが動けるかどうかの判断とは別です。許可は保存されず、Manager の起動・終了、モード切替、ロボット制御の起動・再起動・停止、「すべて止める」で解除されます。配信停止では教材の許可だけが解除されます。</p>
+    </section>
+
     <!-- Status strip: one place that says what the robot does now. -->
     <section class="card status-card" aria-labelledby="status-heading">
       <h2 id="status-heading">いまのロボット</h2>
@@ -124,34 +152,6 @@
       </div>
       <p id="restart-help" class="section-help">再起動すると、動作をいったん止め、保存したモードと設定でロボット制御を起動し直します。</p>
       <p id="practice-start-help" class="section-help">教材モードと練習モードでは、電源を入れても自動では起動しません。「起動」を押すと保存したモードの構成で起動します。異常終了しても自動では起動し直さないので、もう一度「起動」を押してください。</p>
-    </section>
-
-    <!-- The teacher's permission (actuation.py): a permission, not an E-stop. Lesson mode only:
-         it is the lesson launch's vote for /motion_permission, so the drive and the launcher move
-         only while it is on, controller included. -->
-    <section class="card" id="actuation-card" aria-labelledby="actuation-heading">
-      <h2 id="actuation-heading">先生の操作許可（教材モード）</h2>
-      <p class="permission-neutral">スティック・ボタンから手を離してください</p>
-      <div class="permission-estop"><strong>非常停止ボタン</strong><span id="permission-estop-state">不明</span></div>
-      <fieldset class="permission-choice" aria-describedby="actuation-state">
-        <legend>走行の許可</legend>
-        <label><input type="radio" name="permission-drive" value="none" disabled><span>許可しない</span></label>
-        <label><input type="radio" name="permission-drive" value="controller" disabled><span>コントローラーのみ</span></label>
-        <label><input type="radio" name="permission-drive" value="controller_and_lab" disabled><span>コントローラーと教材</span></label>
-      </fieldset>
-      <fieldset class="permission-choice" aria-describedby="actuation-state">
-        <legend>発射の許可</legend>
-        <label><input type="radio" name="permission-launcher" value="none" disabled><span>許可しない</span></label>
-        <label><input type="radio" name="permission-launcher" value="controller" disabled><span>コントローラーのみ</span></label>
-        <label><input type="radio" name="permission-launcher" value="controller_and_lab" disabled><span>コントローラーと教材</span></label>
-      </fieldset>
-      <div id="permission-feedback" role="status" aria-live="polite">
-        <p id="actuation-drive-state">確認しています</p>
-        <p id="actuation-launcher-state">確認しています</p>
-        <p id="actuation-state" class="section-help">確認しています</p>
-        <p id="actuation-error" class="lab-inline-error"></p>
-      </div>
-      <p class="section-help">ここで選ぶのは先生の許可です。非常停止の状態や、ロボットが動けるかどうかの判断とは別です。許可は保存されず、Manager の起動・終了、モード切替、ロボット制御の起動・再起動・停止、「すべて止める」で解除されます。配信停止では教材の許可だけが解除されます。</p>
     </section>
 
     <!-- Why the robot does not move (motion_state.py): /emergency_stop (L1) and /motion_permission

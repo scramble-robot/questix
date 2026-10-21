@@ -6,6 +6,7 @@ const path = require('node:path');
 const OperatorGuide = require('../static/operator-guide.js');
 const ControlLabels = require('../static/control-labels.js');
 const StatusView = require('../static/status-view.js');
+const PermissionView = require('../static/permission-view.js');
 
 function fixture(fetch, extra = {}) {
   const elements = new Map();
@@ -31,7 +32,7 @@ function fixture(fetch, extra = {}) {
     addEventListener() {},
   };
   const toasts = [];
-  const context = vm.createContext({ document, OperatorGuide, ControlLabels, StatusView, fetch,
+  const context = vm.createContext({ document, OperatorGuide, ControlLabels, StatusView, PermissionView, fetch,
     confirm: () => true, setTimeout() {}, setInterval() {}, location: { href: 'http://127.0.0.1:8888/' },
     WebJoyConnection: { defaultUrl: () => '', suggest() {} }, qrSvg: () => ({}), wifiQrText: () => '',
     ...extra });

@@ -292,7 +292,7 @@ def _status_locked(running: Optional[str], known: bool = True) -> dict:
         "choices": {kind: _choice_locked(kind) for kind in KINDS},
         "drive": _authority["drive"],
         "launcher": _authority["launcher"],
-        # QUESTiX LAB's lesson permissions (教材 tab), published on /lab_permission.
+        # The lesson bits of the 操作 tab choices, published on /lab_permission.
         "lab_drive": _lab["drive"],
         "lab_launcher": _lab["launcher"],
         "running": _proc is not None,

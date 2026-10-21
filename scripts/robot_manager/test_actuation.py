@@ -321,6 +321,8 @@ def lab(actuation, tmp_path, monkeypatch):
     from robot_manager import lab as module
     module = importlib.reload(module)
     monkeypatch.setattr(module, "_bridge_state", lambda: None)
+    monkeypatch.setattr(module, "_port_in_use", lambda: False)
+    monkeypatch.setattr(module, "_lan_addresses", lambda: [])
     monkeypatch.setattr(module, "LOG_FILE", tmp_path / "cache" / "lab-bridge.log")
     monkeypatch.setattr(module.recorder, "ROSBAG_ENV_FILE", tmp_path / "rosbag.env")
     monkeypatch.setattr(module, "actuation", actuation)
@@ -560,3 +562,257 @@ def test_a_running_lesson_launch_with_another_saved_mode_is_not_usable(actuation
     with pytest.raises(HTTPException):
         actuation.set_authority("launcher", True)
     assert actuation.status()["available"] is False
+
+
+# ---- Three choices: no real systemd, heartbeat, listener or bridge process ----
+
+def _choice(module, kind, choice, snapshot=None):
+    state = snapshot or module.status()
+    return module.set_choice(kind, module.ChoiceRequest(
+        choice=choice, instance=state["instance"], revision=state["revision"]))
+
+
+@pytest.mark.parametrize("kind", ["drive", "launcher"])
+def test_choices_send_the_complete_pair_without_an_intermediate_lab_only_state(actuation, kind):
+    from robot_manager.actuation_heartbeat import parse_state
+    assert _choice(actuation, kind, "none")["choices"][kind] == "none"
+    other = "launcher" if kind == "drive" else "drive"
+    _choice(actuation, other, "controller")  # keep heartbeat alive when this kind goes off
+    for choice, bits in [("controller", (True, False)), ("controller_and_lab", (True, True)),
+                         ("controller", (True, False)), ("none", (False, False))]:
+        before = actuation.status()["revision"]
+        state = _choice(actuation, kind, choice)
+        assert state["revision"] > before
+        assert state["choices"][kind] == choice
+        line = actuation.started[0].stdin.lines[-1]
+        assert (line[kind], line[f"lab_{kind}"]) == bits
+        for authority, lab_bit in zip(parse_state(json.dumps(line))[:2],
+                                      parse_state(json.dumps(line))[2:]):
+            assert not lab_bit or authority
+    # No intermediate writes for OFF -> both ON; authority -> lab happens in the unchanged
+    # heartbeat publish function, not through two competing HTTP requests.
+    lines = actuation.started[0].stdin.lines
+    assert len(lines) == 5
+
+
+@pytest.mark.parametrize("kind", ["drive", "launcher"])
+def test_stale_reductions_succeed_but_stale_grants_never_change_state(actuation, kind):
+    stale = actuation.status()
+    _choice(actuation, kind, "controller_and_lab")
+    assert _choice(actuation, kind, "controller", stale)["choices"][kind] == "controller"
+    current = actuation.status()
+    with pytest.raises(HTTPException) as error:
+        _choice(actuation, kind, "controller_and_lab", stale)
+    assert error.value.status_code == 409
+    assert error.value.detail["reason"] == "stale_revision"
+    assert error.value.detail["state"] == current
+    # Even a different Manager instance may lower permission.
+    stale = {"instance": "previous-manager", "revision": 99999}
+    assert _choice(actuation, kind, "none", stale)["choices"][kind] == "none"
+    assert actuation.started[0].stdin.closed_by_parent  # unchanged final all-off protocol
+    assert _choice(actuation, kind, "none", stale)["choices"][kind] == "none"
+    with pytest.raises(HTTPException) as error:
+        _choice(actuation, kind, "controller", stale)
+    assert error.value.status_code == 409
+    assert actuation.status()[kind] is False
+
+
+@pytest.mark.parametrize("running", [None, "unknown", "practice", "competition"])
+def test_new_choices_cannot_grant_outside_a_running_lesson(actuation, running):
+    actuation.running["mode"] = running
+    with pytest.raises(HTTPException) as error:
+        _choice(actuation, "drive", "controller_and_lab")
+    assert error.value.status_code == 409
+    assert error.value.detail["reason"] == "unavailable"
+    assert actuation.started == []
+    assert _choice(actuation, "drive", "none")["drive"] is False
+
+
+def test_new_choices_keep_revocations_and_never_restore_after_failure(actuation, lab):
+    _choice(actuation, "drive", "controller_and_lab")
+    _choice(actuation, "launcher", "controller_and_lab")
+    before = actuation.status()
+    actuation.revoke_lab()
+    assert actuation.status()["choices"] == {"drive": "controller", "launcher": "controller"}
+    assert actuation.status()["revision"] > before["revision"]
+    for reason in ["mode_practice", "service_start", "service_restart", "service_stop", "stop_all",
+                   "manager_shutdown"]:
+        before = actuation.status()
+        state = actuation.revoke_all(reason)
+        assert state["revision"] > before["revision"]
+        assert state["choices"] == {"drive": "none", "launcher": "none"}
+        with pytest.raises(HTTPException):
+            _choice(actuation, "drive", "controller", before)
+    _choice(actuation, "drive", "controller_and_lab")
+    actuation.started[-1].returncode = 1
+    state = actuation.status()
+    assert state["choices"] == {"drive": "none", "launcher": "none"}
+    count = len(actuation.started)
+    assert actuation.status()["choices"] == state["choices"]
+    assert len(actuation.started) == count
+
+
+def test_choice_write_failure_returns_confirmed_all_off(actuation, monkeypatch):
+    _choice(actuation, "drive", "controller")
+    monkeypatch.setattr(actuation, "_send_locked", lambda: False)
+    with pytest.raises(HTTPException) as error:
+        _choice(actuation, "launcher", "controller_and_lab")
+    assert error.value.status_code == 503
+    assert error.value.detail["state"]["choices"] == {"drive": "none", "launcher": "none"}
+    assert actuation.status()["last_off_reason"] == actuation.WRITE_FAILED
+
+
+def test_old_and_new_setters_share_one_version_and_preserve_both_kinds(actuation):
+    from concurrent.futures import ThreadPoolExecutor
+    _choice(actuation, "drive", "controller_and_lab")
+    _choice(actuation, "launcher", "controller_and_lab")
+    previous = actuation.status()["revision"]
+    # Deterministic interleaving and concurrent old/new reductions (no live child processes).
+    for _ in range(10):
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futures = [pool.submit(fn) for fn in (
+                lambda: _choice(actuation, "drive", "none", {"instance": "old", "revision": 0}),
+                lambda: actuation.set_authority("launcher", False),
+                lambda: actuation.set_lab("drive", False),
+                lambda: actuation.revoke_lab())]
+            for future in futures:
+                future.result()
+        state = actuation.status()
+        assert state["revision"] > previous
+        previous = state["revision"]
+        _choice(actuation, "drive", "controller_and_lab")
+        actuation.set_authority("launcher", True)
+        actuation.set_lab("launcher", True)
+    for proc in actuation.started:
+        for line in proc.stdin.lines:
+            assert all(not line[f"lab_{kind}"] or line[kind] for kind in actuation.KINDS)
+
+
+@pytest.fixture
+def permission_client(actuation, lab, monkeypatch):
+    """Exercise the real routes with startup functions replaced before any request."""
+    from robot_manager.test_wifi_ap import asgi
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("a permission HTTP test attempted a real process or robot action")
+
+    # These are not the actuation module's local fake Popen. The real entry points are forbidden.
+    monkeypatch.setattr(subprocess, "Popen", forbidden)
+    monkeypatch.setattr(subprocess, "run", forbidden)
+    from robot_manager import app, estop_monitor
+    monkeypatch.setattr(app, "_systemctl", forbidden)
+    monkeypatch.setattr(actuation, "_running_mode_source", lambda: "lesson")
+    monkeypatch.setattr(lab, "autostart", forbidden)
+    monkeypatch.setattr(lab, "start_bridge", forbidden)
+    monkeypatch.setattr(estop_monitor, "_start_locked", forbidden)
+    encode, decode = json.dumps, json.loads
+
+    class Client:
+        def request(self, method, path, json=None, content=None, headers=None):
+            hdr = {"host": "127.0.0.1:8888", "content-type": "application/json"}
+            hdr.update({key.lower(): value for key, value in (headers or {}).items()})
+            body = content.encode() if content is not None else encode(json).encode()
+            code, raw = asgi(app.app, method, path, hdr, body if method == "POST" else b"")
+            return types.SimpleNamespace(status_code=code, json=lambda: decode(raw))
+
+        def get(self, path):
+            return self.request("GET", path)
+
+        def post(self, path, **kwargs):
+            return self.request("POST", path, **kwargs)
+
+    # Existing ASGI helper exercises the full app/middleware without httpx or lifespan startup.
+    return Client()
+
+
+def test_all_permission_http_routes_share_the_browser_guard(permission_client, actuation):
+    client = permission_client
+    choice = {"choice": "controller_and_lab", **{key: actuation.status()[key]
+                                               for key in ("instance", "revision")}}
+    for route, body in [("/api/actuation/choice/drive", choice),
+                        ("/api/actuation/drive", {"allow": True}),
+                        ("/api/actuation/launcher", {"allow": True}),
+                        ("/api/lab/drive", {"allow": True}), ("/api/lab/shoot", {"allow": True})]:
+        for headers, code in [({"Origin": "https://outside.invalid"}, 403),
+                              ({"Sec-Fetch-Site": "cross-site"}, 403),
+                              ({"Content-Type": "text/plain"}, 415)]:
+            assert client.post(route, json=body, headers=headers).status_code == code
+    assert client.post("/api/actuation/choice/drive", json=choice,
+                       headers={"Host": "outside.invalid"}).status_code == 400
+    assert actuation.started == []
+    assert client.post("/api/actuation/choice/drive", json={**choice, "unknown": 1}).status_code == 422
+    assert client.post("/api/actuation/choice/drive", content="{", headers={
+        "Content-Type": "application/json"}).status_code == 422
+
+
+def test_new_and_compatibility_http_routes_return_monotonic_versions(permission_client, actuation):
+    client = permission_client
+    state = client.get("/api/actuation/status").json()
+    old = state
+    for route, body in [
+        ("/api/actuation/drive", {"allow": True}),
+        ("/api/lab/drive", {"allow": True}),
+        ("/api/actuation/choice/drive", {"choice": "controller", "instance": "old", "revision": 0}),
+        ("/api/actuation/launcher", {"allow": True}),
+        ("/api/lab/shoot", {"allow": True}),
+    ]:
+        assert client.post(route, json=body).status_code == 200
+        after = client.get("/api/actuation/status").json()
+        assert after["revision"] > state["revision"]
+        assert all(not after[f"lab_{kind}"] or after[kind] for kind in actuation.KINDS)
+        state = after
+    denied = client.post("/api/actuation/choice/drive", json={
+        "choice": "controller_and_lab", "instance": old["instance"], "revision": old["revision"]})
+    assert denied.status_code == 409
+    assert denied.json()["detail"]["state"]["revision"] == state["revision"]
+
+
+def test_concurrent_new_and_legacy_http_writes_cannot_create_lab_only(permission_client, actuation):
+    from concurrent.futures import ThreadPoolExecutor
+    client = permission_client
+    for _ in range(8):
+        before = actuation.status()
+        grant = {"choice": "controller_and_lab", "instance": before["instance"],
+                 "revision": before["revision"]}
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            futures = [pool.submit(client.post, route, json=body) for route, body in (
+                ("/api/actuation/choice/drive", grant),
+                ("/api/actuation/drive", {"allow": False}),
+                ("/api/lab/drive", {"allow": True}))]
+            assert all(future.result().status_code in (200, 409) for future in futures)
+        after = actuation.status()
+        assert after["revision"] > before["revision"]
+        assert not after["lab_drive"] or after["drive"]
+    for proc in actuation.started:
+        assert all(not line["lab_drive"] or line["drive"] for line in proc.stdin.lines)
+
+
+def test_stop_all_http_response_includes_the_confirmed_pair_and_version(
+        permission_client, actuation, lab, monkeypatch):
+    from robot_manager import app
+    _choice(actuation, "drive", "controller_and_lab")
+    _choice(actuation, "launcher", "controller_and_lab")
+    before = actuation.status()
+    monkeypatch.setattr(lab, "stop_lesson_motion", lambda: {"ok": True})
+    monkeypatch.setattr(app, "_stop_service", lambda: {"ok": True, "state": "inactive",
+                                                     "message": "DEMO"})
+    response = permission_client.post("/api/stop-all")
+    assert response.status_code == 200
+    confirmed = response.json()["actuation"]
+    assert confirmed["instance"] == before["instance"]
+    assert confirmed["revision"] > before["revision"]
+    assert confirmed["choices"] == {"drive": "none", "launcher": "none"}
+    assert confirmed["lab_drive"] is False and confirmed["lab_launcher"] is False
+
+
+def test_new_choice_start_failure_reports_unchanged_confirmed_state(actuation, monkeypatch):
+    def failed():
+        raise HTTPException(503, "DEMO heartbeat unavailable")
+    monkeypatch.setattr(actuation, "_start_heartbeat_locked", failed)
+    before = actuation.status()
+    with pytest.raises(HTTPException) as error:
+        _choice(actuation, "drive", "controller_and_lab")
+    assert error.value.status_code == 503
+    assert error.value.detail["reason"] == "heartbeat_start_failed"
+    assert error.value.detail["state"] == before
+    assert actuation.started == []

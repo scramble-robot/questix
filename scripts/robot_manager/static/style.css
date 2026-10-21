@@ -1686,3 +1686,7 @@ input[type="checkbox"] { accent-color: var(--accent); }
 @media (min-width: 900px) {
   .permission-choice { grid-template-columns: 1fr 1.1fr 1.5fr; }
 }
+
+#actuation-card, .permission-choice input { scroll-margin-top: var(--manager-chrome-height, 14rem); }
+.permission-error { color: var(--yellow); padding-top: 0.5rem; }
+.permission-error:empty { display: none; }
