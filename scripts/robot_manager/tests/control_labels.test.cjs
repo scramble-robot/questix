@@ -774,6 +774,8 @@ test('acceleration presets persist independent limits and keep the standard fixe
   const row = (key) => document.querySelectorAll('.control-field').find((item) => item.dataset.key === key);
   row('max_linear_accel').querySelector('.control-presets').children[0].events.click();
   row('max_angular_accel').querySelector('.control-presets').children[2].events.click();
+  // A rounded preset display must not change its exact acceleration on a repeated input event.
+  document.getElementById('control-drive_component-max_angular_accel').events.input();
   await vm.runInContext('saveControls({preventDefault() {}})', context);
   assert.equal(getPayload().values.drive_component.max_linear_accel, 1.5);
   assert.equal(getPayload().values.drive_component.max_angular_accel, 4.5);

@@ -18,7 +18,7 @@ let tuningTimes = {};
 const tuningFields = {
   joy_controller: {
     longitudinal_input_ratio: { title: "走行速度", unit: "m/s", scale: 1, signed: true,
-      help: "スティックを最大まで倒したときの前進・後退の速さ。大きくすると速くなります。" },
+      help: "スティックを最大まで倒したときの前進・後退の速さ。速さを変えると、加速時間を保つよう加速度を計算し直します。" },
     angular_input_ratio: { title: "旋回の速さ", unit: "rad/s", scale: 1, signed: true },
   },
   drive_component: {
@@ -606,8 +606,10 @@ function renderControls() {
           const state = TuningModel.motion({ ...controlDraft, drive_component: {
             ...controlDraft.drive_component, [field.key]: 0 } }, controlProfile.geometry, spec.kind);
           const savedState = TuningModel.motion(controlProfile.values, controlProfile.geometry, spec.kind);
-          const exactTime = typeof exactAmount !== "number" && entered === TuningModel.number(savedState?.time)
-            ? savedState?.time : entered;
+          const currentTime = tuningTimes[spec.kind];
+          const exactTime = typeof exactAmount === "number" ? entered
+            : currentTime !== null && entered === TuningModel.number(currentTime) ? currentTime
+              : entered === TuningModel.number(savedState?.time) ? savedState?.time : entered;
           tuningTimes[spec.kind] = input.value === "" ? null : exactTime;
           const raw = input.value === "" ? null : TuningModel.acceleration(state?.speed, exactTime);
           controlDraft[group.node][field.key] = raw !== null && state?.speed === savedState?.speed
@@ -673,7 +675,8 @@ function renderControls() {
       range.id = `${input.id}-range`;
       range.textContent = spec.acceleration
         ? `APIの範囲（保存する加速度）: ${field.min}〜${field.max} ${spec.kind === "linear" ? "m/s²" : "rad/s²"}（0は制限なし）。入力は0より大きい加速時間です。`
-        : `APIの範囲: ${field.min * spec.scale}〜${field.max * spec.scale} ${spec.unit}${spec.signed ? "（保存値。入力は絶対値、方向反転は保持）" : ""}。`;
+        : spec.scale !== 1 ? `APIの範囲: ${field.min}〜${field.max}（比率）。入力: ${field.min * spec.scale}〜${field.max * spec.scale} ${spec.unit}。`
+          : `APIの範囲: ${field.min}〜${field.max} ${spec.unit}${spec.signed ? "（保存値。入力は絶対値、方向反転は保持）" : ""}。`;
       const estimate = document.createElement("p");
       estimate.className = "control-estimate";
       estimate.id = `${input.id}-estimate`;
