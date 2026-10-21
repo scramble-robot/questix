@@ -142,11 +142,44 @@ Space の押し直しだけでは以前の操作は再開しません。操作�
 「止める」はこのページと教材からの指令を止めるもので、GPIO 非常停止の代わりではありません。
 Esc（キーボード）はこの端末の入力を離すだけで、ほかの端末や教材には送りません。
 
+### 途絶・操作権の交代後の中立待ち（4b）
+
+JoyHold内の一つのラッチが、走行・チルト・発射・ローラーをまとめて待機させます。
+次の場合に全軸・全ボタンをゼロにし、入力を受け付けなくなります。
+
+- 最後の有効な入力から `message_timeout_sec` を超えたとき。ちょうど同じ時間なら未超過です。
+- 操作権の取得・交代・解放・切断。同じページIDで古い接続を置き換えた場合も含みます。
+- どの端末からでも「止める」を押したとき。
+
+解除するのは、**操作者から届いた、検証に成功した全軸・全ボタンが厳密にゼロのframe**だけです。
+不正な配列・非有限値・閲覧端末の中立では解除しません。短い配列のゼロ補完は従来どおりです。
+デッドゾーンでゼロになる微小な非ゼロも、解除の中立には数えません。
+解除frame自体はゼロで、その次の新しい非ゼロ入力から動かせます。
+一つでも非ゼロのボタンや軸が残っていれば、ほかの機能も待ちます。
+
+画面には「スティックとボタンから手を離してください」と表示します。
+待ち開始のstatusでページの入力を一度リセットし、押したままのpointer移動・キーrepeatでは戻しません。
+ページが生成した中立frameでも解除できます。物理releaseの認証ではなく、
+配布ページの新しい押下操作を前提とした入力復帰の規則です。
+`message_timeout_sec <= 0` は従来どおり途絶監視を無効にしますが、
+「止める」・操作権交代・切断後の中立待ちは無効にしません。
+
+**待ちの間は、スティックを動かしてもLABから操作を奪えません（takeover不可）。**
+LABが走行・ローラー操作を続けているとき、web入力の中立だけではLABは止まりません。
+画面の「止める」、先生の許可OFF、非常停止を使ってください。
+LABの通信が正常なら、そのdeadmanを停止の代わりに頼ることはできません。
+
+期限確認・parse・受入・ラッチ解除はJoyHold内部の単一Lockで行い、ROS publishはLock外です。
+そのため、標準の直列配信callbackでは、ラッチ前に取得済みの非ゼロsnapshotが最大一つ、
+ラッチ後にpublishされ得ます。20 ms以内という時間上限や、ROSへ配送済みのcommandの取消は保証しません。
+遅れて届く有効な中立→非ゼロ列も受け入れます。自作clientの偽の中立や入力の鮮度まで認証する仕組みではありません。
+実機の下流指令・counter確認は#208を含む版で、最初に車輪を浮かせ、射出・ローラーの駆動電源を外して行ってください。
+
 ## 教材との関係
 
 - 教材用の起動（`questix_core.launch.xml`、`robot_mode:=lesson`）では command_arbiter が
   コントローラー（この画面を含む）と教材の走行実験のどちらを `/target_twist` に通すかを選びます。
-  スティックを動かせば、今までどおりすぐにコントローラーの操作に切り替わります（command_arbiter の動き）。
+  中立待ちの解除後は、スティックを動かせばコントローラーの操作に切り替わります（command_arbiter の動き）。
 - このノードは `arbiter_status_topic`（`/command_arbiter/status`、`questix_msgs/ArbiterStatus`、
   reliable + volatile、5 Hz）の走行（`mechanism` が `drive`）を**購読するだけ**で、`active_source` が
   `lab` の間、全端末に「教材から走らせています」を表示します。1.5 秒届かない（command_arbiter が
@@ -179,7 +212,7 @@ Esc（キーボード）はこの端末の入力を離すだけで、ほかの�
 | フレーム | 意味 |
 | --- | --- |
 | `{"type":"welcome","controller":bool,"you":{id,label,address},"owner":{...}\|null,"robot":{"name"},"lab_bridge_port":8897}` | 接続直後に 1 回。 |
-| `{"type":"status","controller":bool,"owner":{id,label,address,since_sec}\|null,"stopped":bool,"clients":n,"hold":"active\|timeout\|released","rx_age_ms","timeout_ms","frames","axes":[...],"estop","estop_reason","estop_age_ms","arbiter":{active,reason,lab_locked}\|null,"camera","camera_age_ms","camera_frames"}` | `status_period_sec` ごと、および操作者が変わったとき。`axes` はいまロボットへ送っている値、`stopped` は止めたあと操作者が離すのを待っている間 true。`estop` は `/emergency_stop`（`questix_msgs/EmergencyStop`）の表示用リレーで、ゲートには使いません。`camera` は `disabled \| waiting \| live \| stale`。 |
+| `{"type":"status","controller":bool,"owner":{id,label,address,since_sec}\|null,"stopped":bool,"stop_reason":"","clients":n,"hold":"active\|timeout\|released","rx_age_ms","timeout_ms","frames","axes":[...],"estop","estop_reason","estop_age_ms","arbiter":{active,reason,lab_locked}\|null,"camera","camera_age_ms","camera_frames"}` | `status_period_sec` ごと、および操作者が変わったとき。`axes` はいまロボットへ送っている値、`stopped` はJoyHoldの中立待ちの間 true。`stop_reason` は `stop / timeout / owner_change / released`（解除時は空文字）。`estop` は `/emergency_stop`（`questix_msgs/EmergencyStop`）の表示用リレーで、ゲートには使いません。`camera` は `disabled \| waiting \| live \| stale`。 |
 | `{"type":"stopped","by":{id,label,address},"by_operator":bool}` | 誰かが「止める」を押した（全端末へ）。 |
 | `{"type":"refused","reason":"busy","owner":{...}}` | `claim` が断られた。 |
 | `{"type":"handover_request","from":{...}}` | 操作者へ: 閲覧のみの端末が操作したい。 |
@@ -191,12 +224,12 @@ Esc（キーボード）はこの端末の入力を離すだけで、ほかの�
 
 | 事象 | ノード側 | ブラウザ側 |
 | --- | --- | --- |
-| フレーム途絶（Wi-Fi 断・バックグラウンド） | `message_timeout_sec` 後にニュートラル配信、警告ログ | 自動再接続（0.5〜5 s バックオフ） |
+| フレーム途絶（Wi-Fi 断・バックグラウンド） | `message_timeout_sec` 後にニュートラル配信と中立待ち、警告ログ | 自動再接続（0.5〜5 s バックオフ） |
 | WebSocket 切断 | 操作者なら即ニュートラル、keepalive で検出後に操作者の席を空ける | 全入力を解除して再接続。以前の入力を復元しない |
 | ページが非表示 / pagehide | 操作者の席を空ける（ページが `release` を送る） | 全入力を離してニュートラルを送信。戻ったとき席が空いていれば取り直す |
 | blur | ― | 全入力を離してニュートラルを送信 |
 | 「止める」（どの端末でも） | 即ニュートラル、操作者が全入力を離すまでそのフレームを無視 | 全入力を解除。教材の中継にも停止を送る |
-| 操作者が変わる（譲る・やめる・切断） | 即ニュートラル（前の操作者の指令を次に持ち越さない） | 操作者でなくなった端末は全入力を解除 |
+| 操作者が変わる（譲る・やめる・切断） | 即ニュートラルと中立待ち（前の操作者の指令を次に持ち越さない） | 操作者でなくなった端末は全入力を解除 |
 | token 違い | close 4401 | 「認証エラー」。自動再接続しない（「再接続」ボタン） |
 
 接続前・切断中・閲覧のみ・非表示・フォーカスがない間の操作は受け付けません。
@@ -262,6 +295,9 @@ cd web_joy_driver && python3 -m pytest test
 # リポジトリルートからブラウザ入力・操作権・止める・再接続のテスト（Node.js）
 node --test web_joy_driver/test/test_browser_controller.cjs
 ```
+
+追加の回帰試験では、JoyHoldの期限境界・不正中立・並行update/snapshot、serverと本物のJoyHoldでの
+途絶・fire保持・交代・viewer入力、画面の待ち表示と入力破棄を確認します。ROS nodeや実機の動作は別途確認が必要です。
 
 `test_ws_server.py` はインストールされている `websockets` に対する結合テストです（操作権・断り・誰でも止める・
 譲る・再接続・4401 を含む）。
