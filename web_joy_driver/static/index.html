@@ -440,6 +440,7 @@
      The document can scroll; the stop header stays visible. Stick zones alone
      consume drags, leaving the surrounding page available for vertical scroll. */
   html, body { overflow: auto; touch-action: pan-y; }
+  body { height: auto; min-height: 100%; overflow: visible; }
   html { scroll-padding-top: calc(var(--header-bottom, 112px) + 8px); }
   #app { height: auto; min-height: 100dvh; grid-template-rows: auto 96px auto 1fr auto; }
   header {
@@ -1383,7 +1384,7 @@
     positionHelp();
   }
   window.addEventListener("resize", onViewportChange);
-  window.addEventListener("scroll", onViewportChange, { passive: true });
+  window.addEventListener("scroll", onViewportChange, { capture: true, passive: true });
   if (typeof ResizeObserver !== "undefined") new ResizeObserver(positionHelp).observe(document.querySelector("header"));
 
   // ---------------------------------------------------------------- safety
