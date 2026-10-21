@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import json
+import math
 import socket
 import threading
 import time
@@ -537,3 +538,116 @@ def test_service_command_missing_returns_actionable_error(client):
         response = client.request('POST', '/api/service/start')
     assert response.status_code == 503
     assert '担当者' in response.json()['detail']
+
+
+def test_teaching_ranges_are_below_wheels_and_include_every_packaged_profile():
+    """Policy is twice the lesson ceiling, not the wheel ceiling or dual-stick units."""
+    root = Path(__file__).resolve().parents[2]
+    drive = yaml.safe_load((root / 'launcher/config/drive_component.yaml').read_text())
+    geometry = drive['drive_component']['ros__parameters']
+    rpm_limit = next(field[4] for field in controls.GROUPS['drive_component'][1]
+                     if field[0] == 'max_motor_rpm')
+    wheel = rpm_limit * 2 * math.pi * geometry['wheel_radius'] / 60
+    limits = {field[0]: (field[3], field[4]) for field in controls.GROUPS['joy_controller'][1]}
+    assert limits['longitudinal_input_ratio'] == (-2.0, 2.0)
+    assert limits['lateral_input_ratio'] == (-2.0, 2.0)
+    assert limits['angular_input_ratio'] == (-6.0, 6.0)
+    assert 2.0 < wheel and 6.0 < 2 * wheel / geometry['wheel_separation']
+    for path in (root / 'questix_control_config/config').glob('controls.*.yaml'):
+        controller = path.stem.split('.')[-1]
+        values = controls._decode(path.read_bytes(), controller)  # strict validation
+        assert controls.speed_out_of_range(values) == []
+        assert limits['longitudinal_input_ratio'][1] == 2 * abs(
+            values['joy_controller']['longitudinal_input_ratio'])
+        assert limits['angular_input_ratio'][1] == 2 * abs(
+            values['joy_controller']['angular_input_ratio'])
+    assert next(f[3:] for f in controls.GROUPS['drive_component'][1]
+                if f[0] == 'max_linear_accel') == (0, 50)
+    assert next(f[3:] for f in controls.GROUPS['drive_component'][1]
+                if f[0] == 'max_angular_accel') == (0, 100)
+    assert next(f[3:] for f in controls.GROUPS['joy_controller_dual_stick'][1]
+                if f[0] == 'longitudinal_input_ratio') == (-10, 10)
+    assert next(f[3:] for f in controls.GROUPS['joy_axis_drive'][1]
+                if f[0] == 'max_motor_rpm') == (1, 475)
+
+
+@pytest.mark.parametrize('key,value', [(key, value) for key in controls.SPEED_FIELDS
+                                      for value in (10.0, -10.0, 100.0)])
+def test_saved_outside_teaching_range_reads_without_writes_but_cannot_be_carried(
+        client, tmp_path, key, value):
+    """Finite legacy speeds load unchanged; unrelated edits cannot carry them past PUT."""
+    before = profile(client)
+    before['values']['joy_controller'][key] = value
+    path = tmp_path / 'controls.uart.yaml'
+    raw = controls.UNITS_MARKER + '\n' + yaml.safe_dump({
+        node: {'ros__parameters': params} for node, params in before['values'].items()})
+    path.write_text(raw)
+    loaded = profile(client)
+    maximum = 6.0 if key == 'angular_input_ratio' else 2.0
+    assert loaded['values']['joy_controller'][key] == value
+    assert loaded['out_of_range'] == [{'node': 'joy_controller', 'key': key, 'value': value,
+                                      'min': -maximum, 'max': maximum}]
+    assert loaded['previous_out_of_range'] == []
+    assert path.read_text() == raw
+    assert not (tmp_path / 'controls.uart.history.json').exists()
+    for unrelated in (False, True):
+        values = deepcopy(loaded['values'])
+        if unrelated:
+            values['joy_launcher']['full_speed_value'] = 0.8
+        response = client.put('/api/control-config/uart', json={
+            'revision': loaded['revision'], 'values': values})
+        assert response.status_code == 422
+        message = response.json()['detail']
+        assert f'{abs(value)}' in message and f'{maximum:.1f}' in message
+        assert ('（方向の反転あり）' in message) == (value < 0)
+        assert path.read_text() == raw
+    values['joy_controller'][key] = -maximum if value < 0 else maximum
+    response = client.put('/api/control-config/uart', json={
+        'revision': loaded['revision'], 'values': values})
+    assert response.status_code == 200
+    fixed = response.json()
+    assert fixed['out_of_range'] == []
+    assert fixed['previous_out_of_range'] == loaded['out_of_range']
+    snapshot = {p.name: p.read_bytes() for p in tmp_path.glob('controls.*')}
+    response = client.put('/api/control-config/uart', json={
+        'revision': fixed['revision'], 'values': fixed['previous_values']})
+    assert response.status_code == 422
+    assert snapshot == {p.name: p.read_bytes() for p in tmp_path.glob('controls.*')}
+
+
+@pytest.mark.parametrize('key,maximum', [('longitudinal_input_ratio', 2.0),
+                                       ('lateral_input_ratio', 2.0),
+                                       ('angular_input_ratio', 6.0)])
+def test_teaching_range_edges_and_first_outside_value(client, key, maximum):
+    """Accept both signed boundaries and reject either side without rounding or clipping."""
+    for value in (-maximum, maximum, -maximum - 0.00001, maximum + 0.00001):
+        current = profile(client)
+        current['values']['joy_controller'][key] = value
+        response = client.put('/api/control-config/uart', json={
+            'revision': current['revision'], 'values': current['values']})
+        assert response.status_code == (200 if abs(value) <= maximum else 422)
+
+
+@pytest.mark.parametrize('value', [float('nan'), float('inf'), -float('inf'), True, '10', 10**400])
+def test_relaxed_reads_still_reject_bad_speed_types_and_nonfinite_values(value):
+    """Relax only the range; malformed or unrepresentable values remain invalid."""
+    root = Path(__file__).resolve().parents[2]
+    values = controls._decode((root / 'questix_control_config/config/controls.uart.yaml').read_bytes(),
+                              'uart')
+    values['joy_controller']['longitudinal_input_ratio'] = value
+    with pytest.raises(ValueError):
+        controls.validate(values, 'uart', allow_saved_speeds=True)
+
+
+def test_readiness_warns_about_legacy_speed_without_preventing_start(client, tmp_path, monkeypatch):
+    """Reading an old speed must not turn into a launch gate or a claim it passed new bounds."""
+    values = profile(client)['values']
+    values['joy_controller']['longitudinal_input_ratio'] = 10.0
+    (tmp_path / 'controls.uart.yaml').write_text(controls.UNITS_MARKER + '\n' + yaml.safe_dump({
+        node: {'ros__parameters': params} for node, params in values.items()}))
+    monkeypatch.setattr(backend, '_read_env', lambda: {'CONTROLLER_TYPE': 'uart'})
+    monkeypatch.setattr(backend.control_runtime, '_ros_paths', lambda config: ('ros', 'workspace'))
+    response = client.get('/api/readiness').json()['profile']
+    assert response['ok'] is True
+    assert '範囲の外' in response['message']
+    assert '入力値の確認済み' not in response['message']
