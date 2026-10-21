@@ -279,6 +279,40 @@ test('the sliders stay within the limits, and the roller never below what can fi
   assert.equal(clampTilt(null, tilt), 11);
 });
 
+test('whole-percent limits agree for doubles and float32 round trips', () => {
+  for (const wire of [(value) => value, Math.fround]) {
+    assert.deepEqual(
+      powerRange({ ...DEFAULT_LIMITS, min_fire_power: wire(0.2), max_power: wire(0.8) }),
+      { min: 20, max: 80 },
+    );
+    for (const percent of [19, 20, 21, 70, 80]) {
+      const power = wire(percent / 100);
+      assert.deepEqual(powerRange({ min_fire_power: power, max_power: power }), {
+        min: percent,
+        max: percent,
+      });
+    }
+  }
+});
+
+test('fractional-percent limits retain their directed rounding', () => {
+  for (const wire of [(value) => value, Math.fround]) {
+    assert.deepEqual(powerRange({ min_fire_power: wire(0.20001), max_power: wire(0.69999) }), {
+      min: 21,
+      max: 69,
+    });
+  }
+});
+
+test('non-finite power limits offer only zero', () => {
+  for (const invalid of [Number.NaN, Infinity, -Infinity]) {
+    assert.deepEqual(powerRange({ min_fire_power: invalid, max_power: 0.8 }), { min: 0, max: 0 });
+    assert.deepEqual(powerRange({ min_fire_power: 0.2, max_power: invalid }), { min: 0, max: 0 });
+  }
+  assert.deepEqual(powerRange({ min_fire_power: 0, max_power: 0 }), { min: 0, max: 0 });
+  assert.deepEqual(powerRange({ min_fire_power: 0.2, max_power: -0.1 }), { min: 0, max: 0 });
+});
+
 test("a fired_count increase from the lab while this page waits is this page's disc", () => {
   const tracker = createShotTracker();
   assert.equal(ingestShot(tracker, { fired_count: 3 }, 0), null, 'the first status only counts');
