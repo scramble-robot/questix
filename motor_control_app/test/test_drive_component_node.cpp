@@ -18,7 +18,9 @@
 // * an unheard E-stop keeps the drive stopped until a release is heard;
 // * the motion permission (L2) gates the drive on its own: unheard, silent or "not allowed" (the
 //   referee, the teacher) stops it, it is never reported as an emergency stop, and it coming back
-//   does not restart the drive by itself.
+//   does not restart the drive by itself;
+// * in current mode (experimental), one wheel's answers stopping latches the library, and the
+//   node fault-stops both wheels through its "Motor not healthy" path (Issue #222, P0-2).
 #include <fcntl.h>
 #include <gtest/gtest.h>
 #include <pty.h>
@@ -146,16 +148,18 @@ namespace ddt = motor_control_lib::ddt_protocol;
 
 constexpr uint8_t kLeftId = 4;  // launcher/config/drive_component.yaml
 constexpr uint8_t kRightId = 5;
-constexpr uint8_t kCommand = 0x64;  // Protocol 1 (velocity / current command)
+constexpr uint8_t kCommand = 0x64;     // Protocol 1 (velocity / current command)
+constexpr uint8_t kModeSwitch = 0xA0;  // Protocol 3 (spec sheet layout: the mode in DATA[9])
 
 int16_t commandValue(const std::vector<uint8_t>& frame) {
   return static_cast<int16_t>((static_cast<uint16_t>(frame[2]) << 8) | frame[3]);  // big-endian
 }
 
-// The motor side of the serial line: reads every frame the node writes and answers commands.
+// The motor side of the serial line: reads every frame the node writes and answers commands. It
+// takes the spec sheet's mode frames and reports its mode; in the current loop it reports speed 0
+// (a held wheel), so the node's current PI and its guard see no motion.
 class FakeMotor {
 public:
-  void setMode(uint8_t mode) { feedbackMode(mode); }
   void setFault(uint8_t fault) { fault_ = fault; }
   FakeMotor() {
     char name[256] = {};
@@ -240,6 +244,16 @@ public:
     commands_.clear();
   }
 
+  // Stops (or resumes) answering this wheel's frames, as a broken link or a dead driver would.
+  void setSilent(uint8_t motor_id, bool silent) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (silent) {
+      silent_[motor_id] = true;
+    } else {
+      silent_.erase(motor_id);
+    }
+  }
+
   // A nonzero command reached this wheel since the last clear().
   bool drove(uint8_t motor_id) const {
     for (const auto& frame : commands()) {
@@ -284,35 +298,52 @@ private:
     while (pending.size() - pos >= 10) {
       std::vector<uint8_t> frame(pending.begin() + pos, pending.begin() + pos + 10);
       const std::vector<uint8_t> payload(frame.begin(), frame.begin() + 9);
-      if (ddt::crc8Maxim(payload) != frame[9] || (frame[0] != kLeftId && frame[0] != kRightId)) {
+      const bool mode_frame = frame[1] == kModeSwitch;  // the spec sheet's mode frame has no CRC
+      if ((!mode_frame && ddt::crc8Maxim(payload) != frame[9]) ||
+          (frame[0] != kLeftId && frame[0] != kRightId)) {
         ++pos;
         continue;
       }
       pos += 10;
-      if (frame[1] != kCommand) {
-        continue;  // mode switch etc.
+      if (frame[1] == kModeSwitch) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (frame[9] == 0x01 || frame[9] == 0x02) {
+          modes_[frame[0]] = frame[9];
+        }
+        continue;
       }
+      if (frame[1] != kCommand) {
+        continue;
+      }
+      uint8_t mode = 0x02;
+      bool silent = false;
       {
         std::lock_guard<std::mutex> lock(mutex_);
         commands_.push_back(frame);
+        auto it = modes_.find(frame[0]);
+        mode = it == modes_.end() ? 0x02 : it->second;
+        silent = silent_.count(frame[0]) != 0;
       }
-      reply(frame[0], commandValue(frame));
+      if (!silent) {
+        reply(frame[0], mode, mode == 0x01 ? 0 : commandValue(frame));
+      }
     }
     pending.erase(pending.begin(), pending.begin() + pos);
   }
 
   // A M0602C feedback frame: {ID, mode, current(2), speed(2), position(2), fault, CRC8}.
-  void reply(uint8_t motor_id, int16_t speed_rpm) {
+  void reply(uint8_t motor_id, uint8_t mode, int16_t speed_rpm) {
     if ((motor_id == kLeftId && !answer_left_) || (motor_id == kRightId && !answer_right_)) return;
+    if (feedback_mode_ != 0) mode = feedback_mode_.load();
     if (override_rpm_) {
       speed_rpm = motor_id == kLeftId ? left_rpm_.load() : right_rpm_.load();
-    } else if (feedback_mode_ == 1) {
+    } else if (mode == 1) {
       // A current command is not an RPM; position tests can still override feedback explicitly.
       speed_rpm = 0;
     }
     const uint16_t position = motor_id == kLeftId ? left_position_.load() : right_position_.load();
     std::vector<uint8_t> frame = {motor_id,
-                                  feedback_mode_.load(),
+                                  mode,
                                   0x00,
                                   0x00,
                                   static_cast<uint8_t>((speed_rpm >> 8) & 0xFF),
@@ -353,6 +384,8 @@ private:
   std::thread reader_;
   mutable std::mutex mutex_;
   std::vector<std::vector<uint8_t>> commands_;
+  std::map<uint8_t, uint8_t> modes_;  // motor id -> the loop it runs (power-on: velocity)
+  std::map<uint8_t, bool> silent_;
   std::atomic<uint16_t> left_position_{0};
   std::atomic<uint16_t> right_position_{0};
   std::atomic<bool> answer_left_{true};
@@ -360,7 +393,7 @@ private:
   std::atomic<uint8_t> fault_{0};
   std::atomic<bool> override_rpm_{false};
   std::atomic<int16_t> left_rpm_{0}, right_rpm_{0};
-  std::atomic<uint8_t> feedback_mode_{2};
+  std::atomic<uint8_t> feedback_mode_{0};  // 0 follows the spec-sheet mode frames
   std::atomic<int64_t> left_reply_at_{0}, right_reply_at_{0};
   std::map<uint8_t, std::pair<std::chrono::steady_clock::time_point, std::vector<uint8_t>>>
       pending_replies_{};
@@ -395,7 +428,6 @@ protected:
   // the integrated YAML (never overridden here).
   void start(bool expect_active = true, bool missing_motor = false,
              const std::string& mode = "velocity", double linear_band = 0.0) {
-    motor_.setMode(mode == "current" ? 1 : 2);
     ASSERT_FALSE(motor_.path().empty()) << "openpty failed";
     static int counter = 0;
     prefix_ = "/drive_node_test_" + std::to_string(getpid()) + "_" + std::to_string(counter++);
@@ -434,8 +466,13 @@ protected:
           have_status_ = true;
         });
     sample_sub_ = helper_->create_subscription<questix_msgs::msg::DriveControlSample>(
-        prefix_ + "/drive_control_sample", 10,
-        [this](questix_msgs::msg::DriveControlSample::SharedPtr msg) { last_sample_ = *msg; });
+        prefix_ + "/drive_control_sample", 50,
+        [this](questix_msgs::msg::DriveControlSample::SharedPtr msg) {
+          last_sample_ = *msg;
+          if (msg->tick_action == questix_msgs::msg::DriveControlSample::TICK_FAULT_STOP) {
+            ++fault_stop_ticks_;
+          }
+        });
     odom_sub_ = helper_->create_subscription<nav_msgs::msg::Odometry>(
         prefix_ + "/odom", 10, [this](nav_msgs::msg::Odometry::SharedPtr msg) {
           last_odom_ = *msg;
@@ -705,8 +742,9 @@ protected:
   rclcpp::Publisher<questix_msgs::msg::EmergencyStop>::SharedPtr estop_pub_;
   rclcpp::Publisher<questix_msgs::msg::MotionPermission>::SharedPtr permission_pub_;
   rclcpp::Subscription<questix_msgs::msg::DriveStatus>::SharedPtr status_sub_;
-  questix_msgs::msg::DriveStatus last_status_;
   rclcpp::Subscription<questix_msgs::msg::DriveControlSample>::SharedPtr sample_sub_;
+  int fault_stop_ticks_{0};
+  questix_msgs::msg::DriveStatus last_status_;
   questix_msgs::msg::DriveControlSample last_sample_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
   nav_msgs::msg::Odometry last_odom_;
@@ -1531,6 +1569,37 @@ TEST_F(DriveComponentNode, PermissionGatesTheDriveButIsNotAnEstop) {
   have_status_ = false;
   ASSERT_TRUE(spinUntil([this]() { return have_status_; }, 2s));
   EXPECT_FALSE(last_status_.emergency_stop);
+}
+
+// Current mode (experimental, Issue #222 P0-2): one wheel's answers stop while driving. The
+// library latches, the node takes its "Motor not healthy" path (a fault-stop tick, safetyStop),
+// and while the wheel stays silent no nonzero current reaches either wheel although twists keep
+// coming. Recovery still requires a new healthy neutral command (#208).
+TEST_F(DriveComponentNode, CurrentModeOneWheelGoingSilentFaultStopsBothWheels) {
+  start(std::string("current"));
+  operationManagerWithoutGpio();
+  neutral();
+  send_twist_ = true;
+  ASSERT_TRUE(spinUntil([this]() { return droveBothWheels(); }, 5s))
+      << "no nonzero current reached the wheels";
+
+  fault_stop_ticks_ = 0;
+  motor_.setSilent(kRightId, true);
+  ASSERT_TRUE(spinUntil([this]() { return fault_stop_ticks_ > 0 && lastCommandsAreZero(); }, 3s))
+      << "the node did not fault-stop on the silent wheel";
+  motor_.clear();
+  spinFor(1000ms);  // twists keep coming, the right wheel stays silent
+  EXPECT_FALSE(motor_.drove(kLeftId));
+  EXPECT_FALSE(motor_.drove(kRightId));
+  have_status_ = false;
+  ASSERT_TRUE(spinUntil([this]() { return have_status_; }, 2s));
+  EXPECT_FALSE(last_status_.emergency_stop);  // a fault, not an emergency stop
+  motor_.setSilent(kRightId, false);
+  spinFor(1500ms);  // stop polling can clear the latch; held input still cannot rearm
+  EXPECT_FALSE(motor_.drove(kLeftId));
+  EXPECT_FALSE(motor_.drove(kRightId));
+  neutral();
+  EXPECT_TRUE(spinUntil([this]() { return droveBothWheels(); }, 3s));
 }
 
 class DriveRearmModes : public DriveComponentNode,
