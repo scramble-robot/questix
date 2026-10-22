@@ -152,7 +152,7 @@ body .header-actions .header-long {
 body .course-switcher .switcher-short {
   display: inline;
 }
-body .course-switcher > summary {
+body .header-actions > .course-switcher > summary {
   height: 44px;
   border: 1px solid #ccdcd8;
   border-radius: inherit;
