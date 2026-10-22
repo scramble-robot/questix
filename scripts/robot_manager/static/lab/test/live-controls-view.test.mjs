@@ -54,6 +54,73 @@ const shoot = await moduleView('shoot-view.js', {
   LEARNER_BLOCKERS,
 });
 const actions = new Proxy({}, { get: () => () => {} });
+for (const limits of [
+  null,
+  { linear: null, angular: null },
+  { linear: null, angular: 0.5 },
+  { linear: 0.2, angular: null },
+  { linear: '0.2', angular: 0.5 },
+  { linear: NaN, angular: Infinity },
+  { linear: 0.2, angular: 0.5 },
+  { linear: 0, angular: 0 },
+]) {
+  test(`drive limits render missing values without inventing zero: ${JSON.stringify(limits)}`, () => {
+    const state = { blockers: [{ code: 'no_drive_node' }], confirmed: false, limits };
+    const markup = drive.driveControls({ slot: 'limits', running: false }, state, actions);
+    const text = markup.match(/class="drive-limits-value">([^]*?)<\/span>/)[1];
+    if (Number.isFinite(limits?.linear) && Number.isFinite(limits?.angular)) {
+      assert(text.includes(limits.linear.toFixed(2)));
+      assert(text.includes(limits.angular.toFixed(2)));
+      assert(!text.includes('未受信'));
+    } else assert.match(text, /上限：未受信/);
+    assert.match(markup, /class="drive-limits-reserve" aria-hidden="true"/);
+    assert.match(markup, /data-drive-start[^>]*\?disabled=true/);
+  });
+}
+
+test('bench slider leaves an unreceived wheel limit unknown', () => {
+  const source = fs.readFileSync(new URL('../js/live/drive-ui.js', import.meta.url), 'utf8');
+  const body = source.slice(
+    source.indexOf('function speedSlider('),
+    source.indexOf('\nfunction benchPanel('),
+  );
+  const slider = vm.runInNewContext(`(${body})`, {
+    html,
+    bench: { linear: 0.1, angular: 0.5, held: null },
+    BENCH_MIN: { linear: 0.06, angular: 0.3 },
+    BENCH_STEP: { linear: 0.02, angular: 0.1 },
+    limitOf: (model, key) => model.limits[key],
+    hardBlocked: () => true,
+  });
+  for (const value of [null, undefined, NaN, Infinity, '0.2', 0.2]) {
+    const markup = slider({ limits: { linear: value } }, 'linear', '速さ');
+    assert.match(
+      markup,
+      Number.isFinite(value) ? /<output\s*>\s*0\.10\s*m\/s/ : /<output\s*>\s*—\s*m\/s/,
+    );
+    assert.match(markup, /\?disabled=true/);
+  }
+});
+
+test('motor program uses the unknown-limit copy until a finite speed arrives', () => {
+  const source = fs.readFileSync(new URL('../js/motor/ui.js', import.meta.url), 'utf8');
+  const body = source
+    .slice(source.indexOf('const benchDrive ='))
+    .match(/program\(\) \{([^]*?)\n  \},\n  placement:/)[1];
+  for (const linear of [null, undefined, NaN, Infinity, '0.2', 0.2]) {
+    const program = vm.runInNewContext(`(function(){${body}})`, {
+      benchLimits: () => ({ linear }),
+      copy: { bench: { programUnknown: '上限：未受信', program: '{linear}' } },
+      stepsText: () => '',
+      BENCH_HOLD: 1,
+      benchSteps: () => [],
+      programSeconds: () => 3,
+      rpmOf: () => '',
+      fill,
+    });
+    assert.equal(program(), Number.isFinite(linear) ? '0.20' : '上限：未受信');
+  }
+});
 for (const code of [
   'no_link',
   'not_allowed',
