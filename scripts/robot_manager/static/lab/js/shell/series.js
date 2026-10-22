@@ -113,7 +113,14 @@ function documentTitle() {
 function update() {
   const current = model();
   render(courseNavigation(current, actions), $('lessonNav'));
-  render(headerCaption(), $('currentCourseTitle'));
+  const caption = headerCaption();
+  render(caption, $('currentCourseTitle'));
+  $('currentCourseTitle').title = caption;
+  const summary = $('courseSwitcher').querySelector('summary');
+  summary.setAttribute(
+    'aria-label',
+    `${summary.querySelector('.switcher-label').textContent}：${caption}`,
+  );
   render(seriesPage(current, actions), $(CATALOGUE_PAGE));
   $('seriesHome').hidden = course === CATALOGUE;
   $('courseSwitcher').open = false;
