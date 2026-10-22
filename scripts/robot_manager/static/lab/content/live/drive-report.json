@@ -39,7 +39,12 @@
   "turnRateValue": "{rate} rad/s（約{degrees}°/秒）",
   "stop": "速さ0の指令から止まるまで",
   "stopValue": "{delay}秒・{distance} cm",
-  "stopUnknown": "記録の終わりまでに止まりきっていません",
+  "stopUnknown": "記録からは求められません",
+  "stopReasons": {
+    "noMotion": "動かす指令はありませんでした",
+    "noZero": "速さ0の指令の前に記録が終わりました",
+    "notStill": "記録の終わりまでに止まりきっていません"
+  },
   "stopMarker": "停止の指令",
   "smoothing": "実測の速さはロボットの中で約{tau}秒ぶんなめらかにしてから送られてくるため、グラフの実測は少し遅れて見えます。実際に止まるのは、表の「速さ0の指令から止まるまで」より少し早めです。",
   "closest": "壁との最短距離",
