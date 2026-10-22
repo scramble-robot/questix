@@ -7,6 +7,8 @@ for (const [file, selectors] of [
   ['hs-shell.css', ['.lesson-quickstart p']],
   ['experiment.css', ['.lesson-brief p', '.lesson-brief .lesson-brief-scene p']],
   ['base.css', ['.page-footnote']],
+  ['curriculum.css', ['.basics-footer p']],
+  ['quiz.css', ['.quiz-feedback > p']],
 ]) {
   test(`${file}: introductory and footnote paragraphs have no fixed text-only width cap`, async () => {
     const source = (await readFile(new URL(`../css/${file}`, import.meta.url), 'utf8')).replace(
