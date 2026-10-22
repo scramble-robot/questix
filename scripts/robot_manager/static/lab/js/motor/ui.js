@@ -251,7 +251,11 @@ function benchStatus() {
 function benchModel() {
   const capture = benchSession.model();
   return {
-    capture: { ...capture, message: benchSession.note },
+    capture: {
+      ...capture,
+      message: benchSession.note,
+      resultLink: { label: copy.bench.showResults, enabled: bench.rows.length > 0 },
+    },
     rows: bench.rows,
     summary: bench.summary,
     sample: bench.sample,
@@ -305,12 +309,8 @@ function useSampleBench() {
 const benchActions = {
   ...benchSession.actions,
   openLink: openRobotDialog,
-  // The shared block brings the button and its live strip on screen when the run starts
-  // (live-session revealLiveRun); once the run is over, its result is the table.
-  async startDriveCapture() {
-    await benchSession.actions.startDriveCapture();
-    if (bench.rows.length) revealIfHidden(document.getElementById('motorBenchTable'));
-  },
+  // Explicit learner navigation; starts and received results never reveal the table.
+  showResults: () => revealIfHidden(document.getElementById('motorBenchTable')),
   analyse: analyseBench,
   useSample: useSampleBench,
 };

@@ -18,7 +18,7 @@ import {
   withRunInfo,
   cleanConditions,
 } from './recording-core.js';
-import { captureCopy, revealLiveRun } from './live-view.js';
+import { captureCopy } from './live-view.js';
 import { driveModel, onDrive, confirmDriveSafety, runDrive } from './drive-link.js';
 import { driveEndedText, driveCopy } from './drive-view.js';
 import { runStatusText } from './drive-report-view.js';
@@ -43,8 +43,7 @@ import { chooseRobotRecord } from './record-picker.js';
 // (「ロボットの記録から選ぶ」, record-picker.js), through the same path as a file — or, for a
 // lesson that passes `compare`, drawn over the one on screen (the picker offers both).
 //
-// Press → see: starting a run or a recording brings the block's button and the live strip under
-// it on screen (live-view revealLiveRun), the same in every course.
+// Robot commands and received results keep the page in place; navigation is a learner action.
 
 const DRIVE_PROGRESS_MS = 250;
 const DEFAULT_TAIL_SECONDS = 1.5;
@@ -197,7 +196,6 @@ function createLiveSession(options) {
     const controllers = { abort: new AbortController(), finish: new AbortController() };
     Object.assign(session, { busy: true, progress: 0, controllers, note: '', robotSave: null });
     options.update();
-    revealLiveRun(options.slot);
     try {
       const raw = await recordRobot({
         seconds: options.seconds,
@@ -276,7 +274,6 @@ function createLiveSession(options) {
       driveTotal: plan.seconds,
     });
     options.update();
-    revealLiveRun(options.slot);
     const recorded = recordRobot({
       // An upper bound only: the recording is finished below, right after the tail.
       seconds: plan.seconds + tail + 5,

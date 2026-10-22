@@ -463,7 +463,6 @@ function applyRecording(kind, recording) {
   if (!run) return { ok: false, note };
   keepPrevious(kind);
   liveRuns[kind] = realEntry(kind, run, recording);
-  if (!restoring && kind === liveKind()) revealPending = true;
   return { ok: true, note };
 }
 
