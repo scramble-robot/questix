@@ -1,20 +1,17 @@
-"""The robot's E-stop state for the header and the 操作 tab, in every mode (read-only).
+"""Read-only robot status for QUESTiX Robot Manager.
 
-Practice and competition robots have no QUESTiX LAB bridge (lab.py serves lesson mode only) and
-Robot Manager has no GPIO switch any more (issue #168), so without this the pages could only say
-「不明」 there, even when a pressed or unwired GPIO5 is why nothing moves. While the robot service is
-active, a listener child (estop_listener.py, sourced like the actuation heartbeat: ROS, then
-ROBOT_WS from launch.env, and the robot's ROS_DOMAIN_ID) reports ``/emergency_stop``; ``observe``
-starts it, follows a changed domain or workspace, and stops it when the service is not active.
-
-This is a display only. It publishes nothing, and drive_component, shot_component,
-esc_motor_control and the lab bridge keep judging ``/emergency_stop`` themselves: nothing here
-ever lets anything move. A listener that cannot start or exits is retried after RETRY_SEC; until
-then, and while nothing was heard, the state is ``unknown`` (never ``released``).
+One child subscribes to /emergency_stop (reliable, transient_local, keep-last(1)) and
+/motion_permission (reliable, volatile, keep-last(1)). The ROS setup, ROBOT_WS and launch.env
+ROS_DOMAIN_ID are shared. Each real message can produce a timestamped JSON line, immediately
+on change or every 0.5 s otherwise. No timer repeats a cached value without a message.
+The parent uses each topic's independent monotonic receive time and expires it after 1.5 s.
+Stopping the robot, changing domain/workspace or losing the child clears both snapshots.
+It publishes nothing and offers no services. Actuators retain all safety decisions.
 """
 
 import json
 import logging
+import math
 import os
 import subprocess
 import threading
@@ -47,6 +44,8 @@ _command_used: Optional[list] = None
 _started_at = 0.0
 _latest: Optional[dict] = None
 _received_at = 0.0
+_permission: Optional[dict] = None
+_permission_received_at = 0.0
 _error: Optional[str] = None
 _retry_at = 0.0
 _now = time.monotonic
@@ -84,17 +83,36 @@ def parse_line(line: str) -> Optional[dict]:
         data = json.loads(line)
     except (TypeError, ValueError):
         return None
-    if not isinstance(data, dict) or type(data.get("active")) is not bool:
+    if not isinstance(data, dict):
+        return None
+    received = data.get("received_at")
+    if received is not None and (type(received) not in (int, float) or not math.isfinite(received)):
+        return None
+    if data.get("topic") == "/motion_permission":
+        if (received is None or not isinstance(data.get("mode"), str)
+                or type(data.get("drive_allowed")) is not bool
+                or type(data.get("launcher_allowed")) is not bool):
+            return None
+        for key in ("drive_blockers", "launcher_blockers"):
+            if not isinstance(data.get(key), list) or not all(isinstance(x, str) for x in data[key]):
+                return None
+        return {key: data[key] for key in ("topic", "received_at", "mode", "drive_allowed",
+                                          "launcher_allowed", "drive_blockers",
+                                          "launcher_blockers")}
+    if type(data.get("active")) is not bool:
         return None
     source, reason = data.get("source", ""), data.get("reason", "")
     if not isinstance(source, str) or not isinstance(reason, str):
         return None
-    return {"active": data["active"], "source": source[:MAX_TEXT], "reason": reason[:MAX_TEXT]}
+    result = {"active": data["active"], "source": source[:MAX_TEXT], "reason": reason[:MAX_TEXT]}
+    if received is not None:
+        result["received_at"] = received
+    return result
 
 
 def _read_lines(proc) -> None:
     """Keep the latest report of ``proc`` (a reader thread; ends at the listener's EOF)."""
-    global _latest, _received_at
+    global _latest, _received_at, _permission, _permission_received_at
     try:
         for line in proc.stdout:
             report = parse_line(line)
@@ -102,8 +120,16 @@ def _read_lines(proc) -> None:
                 continue
             with _lock:
                 if proc is _proc:
-                    _latest = report
-                    _received_at = _now()
+                    received = report.pop("received_at", _now())
+                    # Both processes use this host's monotonic clock. Buffered old lines must
+                    # not become fresh just because the parent finally reads stdout.
+                    if received > _now():
+                        continue
+                    if report.pop("topic", None) == "/motion_permission":
+                        if received >= _permission_received_at:
+                            _permission, _permission_received_at = report, received
+                    elif received >= _received_at:
+                        _latest, _received_at = report, received
     except (OSError, ValueError):
         pass
 
@@ -111,6 +137,7 @@ def _read_lines(proc) -> None:
 def _start_locked(command: list) -> None:
     """Start the listener. Caller holds _lock."""
     global _proc, _command_used, _started_at, _latest, _error, _retry_at
+    global _permission, _permission_received_at, _received_at
     environment = os.environ.copy()
     environment.pop("ROS_DOMAIN_ID", None)  # the command exports the robot's domain
     try:
@@ -122,13 +149,15 @@ def _start_locked(command: list) -> None:
         _retry_at = _now() + RETRY_SEC
         return
     _proc, _command_used, _started_at, _latest, _error = proc, command, _now(), None, None
+    _permission, _permission_received_at, _received_at = None, 0.0, 0.0
     threading.Thread(target=_read_lines, args=(proc,), name="estop-monitor", daemon=True).start()
 
 
 def _stop_locked() -> None:
     """Close the listener's stdin (it exits) and wait. Caller holds _lock."""
-    global _proc, _latest
+    global _proc, _latest, _permission
     proc, _proc, _latest = _proc, None, None
+    _permission = None
     if proc is None:
         return
     try:
@@ -148,11 +177,12 @@ def _stop_locked() -> None:
 
 def _reap_locked() -> None:
     """Notice a listener that exited on its own. Caller holds _lock."""
-    global _proc, _latest, _error, _retry_at
+    global _proc, _latest, _error, _retry_at, _permission
     if _proc is None or _proc.poll() is None:
         return
     code = _proc.returncode
     _proc, _latest = None, None
+    _permission = None
     _error = (f"非常停止の確認用プロセスが終了しました（終了コード {code}）。"
               "ROS 環境と questix_msgs のビルドを確認してください")
     _retry_at = _now() + RETRY_SEC
@@ -179,7 +209,37 @@ def _snapshot_locked() -> dict:
                    source=_latest["source"], age_sec=age)
 
 
+def _permission_snapshot_locked(estop: dict) -> dict:
+    """Return this topic's own freshness; an E-stop line cannot refresh it."""
+    result = {"state": "unknown", "note": estop.get("note"), "mode": None,
+              "drive_allowed": None, "launcher_allowed": None, "drive_blockers": [],
+              "launcher_blockers": [], "age_sec": None, "stale_after_sec": STALE_SEC}
+    if _proc is None:
+        return result
+    if _permission is None:
+        result["note"] = "starting" if _now() - _started_at < STARTUP_SEC else "not_heard"
+        return result
+    age = _now() - _permission_received_at
+    result["age_sec"] = age
+    if age < 0 or age > STALE_SEC:
+        result["note"] = "silent"
+        return result
+    return dict(result, **_permission, state="known", note=None)
+
+
+def observe_all(service: str) -> dict:
+    """Take one locked snapshot of the two read-only subscriptions."""
+    with _lock:
+        estop = _observe_locked(service)
+        return {"emergency_stop": estop, "motion_permission": _permission_snapshot_locked(estop)}
+
+
 def observe(service: str) -> dict:
+    """Keep the existing E-stop-only interface for callers."""
+    return observe_all(service)["emergency_stop"]
+
+
+def _observe_locked(service: str) -> dict:
     """Return the E-stop state for ``/api/status``; keeps the listener running while active.
 
     ``state`` is ``pressed``, ``released`` or ``unknown``; ``note`` says why it is unknown
@@ -187,23 +247,22 @@ def observe(service: str) -> dict:
     ``reason`` is operation_manager's text (e.g. ``pin 5 is true, expected false; ``).
     """
     global _error, _retry_at
-    with _lock:
-        if service != "active":
-            _stop_locked()
-            _error, _retry_at = None, 0.0
-            return _report("unknown", "robot_stopped")
-        _reap_locked()
-        try:
-            command = _command(_read_env_file(LAUNCH_ENV_FILE))
-        except HTTPException as error:
-            _stop_locked()
-            _error = str(error.detail)
-            return _snapshot_locked()
-        if _proc is not None and command != _command_used:
-            _stop_locked()  # the domain or the workspace changed: listen where the robot runs now
-        if _proc is None and _now() >= _retry_at:
-            _start_locked(command)
+    if service != "active":
+        _stop_locked()
+        _error, _retry_at = None, 0.0
+        return _report("unknown", "robot_stopped")
+    _reap_locked()
+    try:
+        command = _command(_read_env_file(LAUNCH_ENV_FILE))
+    except HTTPException as error:
+        _stop_locked()
+        _error = str(error.detail)
         return _snapshot_locked()
+    if _proc is not None and command != _command_used:
+        _stop_locked()
+    if _proc is None and _now() >= _retry_at:
+        _start_locked(command)
+    return _snapshot_locked()
 
 
 def shutdown() -> None:

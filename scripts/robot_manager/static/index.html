@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>QUESTiX Robot Manager</title>
-  <link rel="stylesheet" href="/static/style.css?v=37">
+  <link rel="stylesheet" href="/static/style.css?v=41">
 </head>
 
 <body>
@@ -55,10 +55,12 @@
   </div>
 
   <main>
+    <div class="notification-region" role="region" aria-label="お知らせ" tabindex="0">
+    <p class="notification-empty">現在お知らせはありません</p>
     <section id="stop-all-result" class="notice" role="status" aria-live="polite" hidden>
       <div class="notice-heading"><h2 id="stop-all-title">すべて止めました</h2><button type="button" class="btn btn-small" id="stop-all-dismiss">閉じる</button></div>
       <ul id="stop-all-parts" class="stop-all-parts"></ul>
-      <p class="section-help">先生の操作許可と教材の走行・発射の許可は OFF にしました（教材の配信は続いていて、生徒の接続は切れていません）。ロボット制御は「操作」の「起動」で再開し、許可は先生が ON にし直します。</p>
+      <p class="section-help">許可の確定状態と各処理の結果を確認してください。再開するときは「操作」でロボット制御を起動し、先生が許可を選び直します。</p>
     </section>
     <section id="apply-offer" class="notice warning" role="status" hidden>
       <p id="apply-offer-text"></p>
@@ -74,11 +76,11 @@
       <details><summary>詳細</summary><pre id="issue-detail"></pre></details>
       <button type="button" class="btn btn-small" id="issue-open-panel">確認する画面へ</button>
     </section>
+    </div>
     <!-- ===== Control tab ===== -->
     <div class="tab-panel active" data-panel="control" id="panel-control" role="tabpanel" aria-labelledby="tab-control">
-    <!-- Status strip: one place that says what the robot does now. -->
     <section class="card status-card" aria-labelledby="status-heading">
-      <h2 id="status-heading">いまのロボット</h2>
+      <h2 id="status-heading">ロボットの状態</h2>
       <dl class="status-strip">
         <div><dt>ロボット名</dt><dd id="st-robot" data-tone="plain">—</dd></div>
         <div><dt>モード</dt><dd id="st-mode">—</dd></div>
@@ -87,11 +89,24 @@
         <div><dt>教材の配信</dt><dd id="st-lab">—</dd></div>
         <div><dt>教材からの走行・発射</dt><dd id="st-permissions">—</dd></div>
         <div><dt>いま動かしているのは</dt><dd id="st-driver">—</dd></div>
+        <div><dt>走行の許可（ロボット側）</dt><dd id="st-drive-permission" data-tone="warn">不明（受信していません）</dd></div>
+        <div><dt>発射機構の許可（ロボット側）</dt><dd id="st-launcher-permission" data-tone="warn">不明（受信していません）</dd></div>
       </dl>
-      <p class="section-help">ロボット名はロボットのホスト名で、教材の画面に出る名前と同じです。非常停止ボタンの状態は、教材のブリッジが確認できるときだけ表示します。</p>
+      <p class="section-help">ロボット名はロボットのホスト名で、教材の画面に出る名前と同じです。非常停止ボタンはロボットから受信した状態を表示します。未受信・途絶は「不明」、取得失敗は「確認不能」です。</p>
     </section>
 
-    <!-- Mode Card -->
+    <section class="card">
+      <h2>起動前の確認</h2>
+      <p class="section-help">次回の起動に使う設定を確認してから、ロボットを起動します。</p>
+      <dl class="readiness-grid">
+        <div><dt>コントローラー設定</dt><dd id="ready-controller">未取得</dd></div>
+        <div><dt>保存済みの操作設定</dt><dd id="ready-profile">未確認</dd></div>
+        <div><dt>起動環境</dt><dd id="ready-workspace">未確認</dd></div>
+      </dl>
+      <button type="button" class="btn btn-small" id="readiness-refresh">準備状態を確認</button>
+      <p class="section-help">コントローラーの電源・接続、周囲の安全、実機の停止手段は起動前に確認してください。接続や安全状態はこの画面では自動判定していません。</p>
+    </section>
+
     <section class="card mode-card">
       <h2>次回起動のモード</h2>
       <div class="mode-display">
@@ -110,7 +125,6 @@
       <p id="mode-apply-note" class="section-help">モードは保存後、次回のロボット起動・再起動で反映されます。</p>
     </section>
 
-    <!-- Service Control -->
     <section class="card">
       <h2>ロボット制御の起動・停止</h2>
       <p id="robot-state-help" class="section-help" role="status">ロボット制御の状態を確認しています。</p>
@@ -123,59 +137,30 @@
       <p id="practice-start-help" class="section-help">教材モードと練習モードでは、電源を入れても自動では起動しません。「起動」を押すと保存したモードの構成で起動します。異常終了しても自動では起動し直さないので、もう一度「起動」を押してください。</p>
     </section>
 
-    <!-- The teacher's permission (actuation.py): a permission, not an E-stop. Lesson mode only:
-         it is the lesson launch's vote for /motion_permission, so the drive and the launcher move
-         only while it is on, controller included. -->
+    <!-- Teacher permissions stay separate from motion permission and the E-stop. -->
     <section class="card" id="actuation-card" aria-labelledby="actuation-heading">
       <h2 id="actuation-heading">先生の操作許可（教材モード）</h2>
-      <p id="actuation-state" class="section-help" role="status">確認しています。</p>
-      <div class="lab-permission-row">
-        <label class="toggle-switch" for="actuation-drive-toggle">
-          <input type="checkbox" id="actuation-drive-toggle" aria-describedby="actuation-drive-state">
-          <span class="slider"></span>
-        </label>
-        <label for="actuation-drive-toggle" class="lab-permission-label">ロボットの走行制御
-          <span id="actuation-drive-state" class="lab-permission-state">—</span></label>
+      <p class="permission-neutral">コントローラーから手を離してください</p>
+      <div class="permission-estop"><strong>非常停止ボタン</strong><span id="permission-estop-state">不明</span></div>
+      <fieldset class="permission-choice" aria-describedby="actuation-state">
+        <legend>走行の許可</legend>
+        <label><input type="radio" name="permission-drive" value="none" disabled><span>許可しない</span></label>
+        <label><input type="radio" name="permission-drive" value="controller" disabled><span>コントローラーのみ</span></label>
+        <label><input type="radio" name="permission-drive" value="controller_and_lab" disabled><span>コントローラーと教材</span></label>
+      </fieldset>
+      <fieldset class="permission-choice" aria-describedby="actuation-state">
+        <legend>発射の許可</legend>
+        <label><input type="radio" name="permission-launcher" value="none" disabled><span>許可しない</span></label>
+        <label><input type="radio" name="permission-launcher" value="controller" disabled><span>コントローラーのみ</span></label>
+        <label><input type="radio" name="permission-launcher" value="controller_and_lab" disabled><span>コントローラーと教材</span></label>
+      </fieldset>
+      <div id="permission-feedback" role="status" aria-live="polite">
+        <p id="actuation-drive-state">確認しています</p>
+        <p id="actuation-launcher-state">確認しています</p>
+        <p id="actuation-state" class="section-help">確認しています</p>
+        <p id="actuation-error" class="permission-error"></p>
       </div>
-      <div class="lab-permission-row">
-        <label class="toggle-switch" for="actuation-launcher-toggle">
-          <input type="checkbox" id="actuation-launcher-toggle" aria-describedby="actuation-launcher-state">
-          <span class="slider"></span>
-        </label>
-        <label for="actuation-launcher-toggle" class="lab-permission-label">発射機構の操作（ローラー・チルト・発射）
-          <span id="actuation-launcher-state" class="lab-permission-state">—</span></label>
-      </div>
-      <p id="actuation-error" class="lab-inline-error" role="alert" hidden></p>
-      <p class="section-help">教材モードで使います。ここを ON にしている間だけ、ロボットはコントローラーでも教材からも動き、「教材」タブで教材からの走行／発射を許可できます（非常停止とは別のものです）。練習モードと大会モードでは使いません。はじめは OFF です。Robot Manager の再起動・ロボットの再起動・モードの切り替え・ロボット制御の起動／再起動／停止・「すべて止める」で OFF に戻ります。OFF にすると同じ動作の「教材からの走行／発射」の許可も OFF になります（ON にしても教材の許可は ON になりません）。</p>
-      <p class="section-help">ロボットは約 1 秒この許可を受け取れないと止まります（この PC の Robot Manager が止まった場合も同じです）。非常停止ボタンの代わりにはなりません。</p>
-    </section>
-
-    <!-- Why the robot does not move (motion_state.py): /emergency_stop (L1) and /motion_permission
-         (L2) read once on request, in every mode. Reads only; changes nothing. -->
-    <section class="card" id="motion-state-card" aria-labelledby="motion-state-heading">
-      <h2 id="motion-state-heading">ロボットが動かないとき</h2>
-      <p class="section-help">ロボットから非常停止と走行許可（教材は先生の操作許可、大会は AutoReferee）を読み取り、いま何が止めているかを表示します。読み取りに数秒かかります。何も変更しません。</p>
-      <div class="button-group">
-        <button type="button" class="btn" id="motion-state-check">なぜ動かないか確認</button>
-      </div>
-      <dl class="readiness-grid" id="motion-state-result" hidden>
-        <div><dt>非常停止</dt><dd id="motion-state-estop">—</dd></div>
-        <div><dt>走行</dt><dd id="motion-state-drive">—</dd></div>
-        <div><dt>発射機構</dt><dd id="motion-state-launcher">—</dd></div>
-      </dl>
-      <p id="motion-state-summary" class="section-help" role="status"></p>
-    </section>
-
-    <section class="card">
-      <h2>起動前の確認</h2>
-      <p class="section-help">次回の起動に使う設定を確認してから、ロボットを起動します。</p>
-      <dl class="readiness-grid">
-        <div><dt>コントローラー設定</dt><dd id="ready-controller">未取得</dd></div>
-        <div><dt>保存済みの操作設定</dt><dd id="ready-profile">未確認</dd></div>
-        <div><dt>起動環境</dt><dd id="ready-workspace">未確認</dd></div>
-      </dl>
-      <button type="button" class="btn btn-small" id="readiness-refresh">準備状態を確認</button>
-      <p class="section-help">コントローラーの電源・接続、周囲の安全、実機の停止手段は起動前に確認してください。接続や安全状態はこの画面では自動判定していません。</p>
+      <p class="section-help">ここで選ぶのは先生の許可です。非常停止の状態や、ロボットが動けるかどうかの判断とは別です。許可は保存されず、Manager の起動・終了、モード切替、ロボット制御の起動・再起動・停止、「すべて止める」で解除されます。配信停止では教材の許可だけが解除されます。</p>
     </section>
 
     <section class="card" aria-labelledby="web-joy-heading">
@@ -515,15 +500,7 @@
         <span class="rec-dot"></span>
         <span id="lab-drive-state">配信が止まっています</span>
       </p>
-      <div class="lab-permission-row">
-        <label class="toggle-switch" for="lab-drive-toggle">
-          <input type="checkbox" id="lab-drive-toggle" aria-describedby="lab-drive-toggle-state">
-          <span class="slider"></span>
-        </label>
-        <label for="lab-drive-toggle" class="lab-permission-label">教材からの走行を許可する
-          <span id="lab-drive-toggle-state" class="lab-permission-state">—</span></label>
-      </div>
-      <p id="lab-drive-toggle-note" class="lab-drive-warning" hidden></p>
+      <p class="section-help"><a href="#actuation-card" class="permission-guide">許可は操作タブで設定します</a></p>
       <div class="rec-status lab-drive-facts" id="lab-drive-facts" hidden>
         <div class="rec-status-row" id="lab-drive-owner-row" hidden>
           <span class="rec-status-label">いま走っているのは</span>
@@ -552,7 +529,7 @@
         <p class="lab-note">
           教材用の起動（questix_core、robot_mode:=lesson）では切り替えノード command_arbiter が入り、
           コントローラーと教材の指令（/target_twist/lab）のどちらかを /target_twist に渡します。
-          教材の指令を渡すのは、この許可（/lab_permission）が届いている間だけです。
+          教材の指令を渡すのは、操作タブで選んだ教材の許可（/lab_permission）が届いている間だけです。
           練習用・大会用の起動には入らないため、教材からは走らせられません。
           上限は前後 0.15 m/s・回転 0.5 rad/s（command_arbiter の設定）で、教材の画面が閉じたり通信が
           0.5 秒途切れたりすると止まり、どの端末の停止バーでも止められます。
@@ -569,15 +546,7 @@
         <span class="rec-dot"></span>
         <span id="lab-shoot-state">配信が止まっています</span>
       </p>
-      <div class="lab-permission-row">
-        <label class="toggle-switch" for="lab-shoot-toggle">
-          <input type="checkbox" id="lab-shoot-toggle" aria-describedby="lab-shoot-toggle-state">
-          <span class="slider"></span>
-        </label>
-        <label for="lab-shoot-toggle" class="lab-permission-label">教材からの発射を許可する
-          <span id="lab-shoot-toggle-state" class="lab-permission-state">—</span></label>
-      </div>
-      <p id="lab-shoot-toggle-note" class="lab-drive-warning" hidden></p>
+      <p class="section-help"><a href="#actuation-card" class="permission-guide">許可は操作タブで設定します</a></p>
       <div class="rec-status lab-drive-facts" id="lab-shoot-facts" hidden>
         <div class="rec-status-row" id="lab-shoot-owner-row" hidden>
           <span class="rec-status-label">いま操作しているのは</span>
@@ -600,7 +569,7 @@
         <p class="lab-note">
           教材用の起動では切り替えノード command_arbiter が入り、コントローラーと教材の指令
           （/launcher_command/lab）のどちらかをローラー（esc_motor_control）と発射台（shot_component）に渡します。
-          教材の指令を渡すのは、この許可（/lab_permission）が届いている間だけです。練習用・大会用の起動には入りません。
+          教材の指令を渡すのは、操作タブで選んだ教材の許可（/lab_permission）が届いている間だけです。練習用・大会用の起動には入りません。
           ローラーは最大 80%、発射はローラーが1秒回ってから・前の発射から2秒あけて1枚ずつ（command_arbiter の設定）。
           教材の画面が閉じたり通信が 0.5 秒途切れたり 30 秒たったりするとローラーは止まり、どの端末からでも止められます。
         </p>
@@ -846,11 +815,11 @@
   <script src="/static/web-joy-connection.js?v=4"></script>
   <script src="/static/operator-guide.js?v=5"></script>
   <script src="/static/control-labels.js?v=4"></script>
-  <script src="/static/status-view.js?v=3"></script>
+  <script src="/static/status-view.js?v=5"></script>
   <script src="/static/network-view.js?v=1"></script>
   <script src="/static/trial-view.js?v=2"></script>
-  <script src="/static/motion-state-view.js?v=1"></script>
-  <script src="/static/app.js?v=22"></script>
+  <script src="/static/permission-view.js?v=1"></script>
+  <script src="/static/app.js?v=25"></script>
   <script src="/static/controller-map.js?v=12"></script>
   <script src="/static/controls.js?v=22"></script>
 </body>

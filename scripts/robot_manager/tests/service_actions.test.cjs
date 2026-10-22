@@ -6,6 +6,7 @@ const path = require('node:path');
 const OperatorGuide = require('../static/operator-guide.js');
 const ControlLabels = require('../static/control-labels.js');
 const StatusView = require('../static/status-view.js');
+const PermissionView = require('../static/permission-view.js');
 
 function fixture(fetch, extra = {}) {
   const elements = new Map();
@@ -31,7 +32,8 @@ function fixture(fetch, extra = {}) {
     addEventListener() {},
   };
   const toasts = [];
-  const context = vm.createContext({ document, OperatorGuide, ControlLabels, StatusView, fetch,
+  const context = vm.createContext({ document, OperatorGuide, ControlLabels, StatusView, PermissionView, fetch,
+    performance, AbortSignal,
     confirm: () => true, setTimeout() {}, setInterval() {}, location: { href: 'http://127.0.0.1:8888/' },
     WebJoyConnection: { defaultUrl: () => '', suggest() {} }, qrSvg: () => ({}), wifiQrText: () => '',
     ...extra });
@@ -238,4 +240,23 @@ test('after a mode switch to a running robot, a restart is offered', async () =>
   })()`, f.context);
   assert.equal(f.document.getElementById('apply-offer').hidden, false);
   assert.match(f.document.getElementById('apply-offer-text').textContent, /再起動するまで前の設定のまま/);
+});
+
+test('status requests do not overlap and delayed permission responses cannot renew their lease', async () => {
+  let now = 1000, finish, calls = 0;
+  const permission = { state: 'known', age_sec: 0, stale_after_sec: 1.5,
+    drive_allowed: true, launcher_allowed: true, drive_blockers: [], launcher_blockers: [] };
+  const status = { service: 'inactive', mode: 'practice', launch_config: {}, motion_permission: permission };
+  const f = fixture(() => { calls++; return new Promise(resolve => { finish = () => resolve(response(200, status)); }); },
+    { performance: { now: () => now } });
+  const pending = vm.runInContext('refreshStatus()', f.context);
+  await vm.runInContext('refreshStatus()', f.context);
+  assert.equal(calls, 1);
+  now = 3000; finish(); await pending;
+  assert.match(f.document.getElementById('st-drive-permission').textContent, /^不明/);
+  now = 4000;
+  const fresh = vm.runInContext('refreshStatus()', f.context); finish(); await fresh;
+  assert.equal(f.document.getElementById('st-drive-permission').textContent, '許可');
+  now = 5600; vm.runInContext('renderOverview()', f.context);
+  assert.match(f.document.getElementById('st-drive-permission').textContent, /^不明/);
 });

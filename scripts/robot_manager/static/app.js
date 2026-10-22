@@ -4,6 +4,8 @@ const API = "";
 let pollTimer = null;
 let configDirty = false;
 let latestStatus = null;
+let statusPending = false;
+let permissionExpiresAt = 0;
 let serviceRequestCount = 0;
 let issuePanel = 'control';
 // The last /api/lab/status, for the status strip on 操作 and the header.
@@ -158,9 +160,13 @@ async function api(path, opts = {}) {
 // ---------------------------------------------------------------------------
 
 async function refreshStatus() {
+  if (statusPending) return;
+  statusPending = true;
+  const startedAt = performance.now();
   if (typeof renderControlApplication === 'function') renderControlApplication();
   try {
-    const data = await apiSilent("/api/status");
+    const data = await apiSilent("/api/status", { signal: AbortSignal.timeout(4000) });
+    permissionExpiresAt = StatusView.permissionDeadline(data.motion_permission, startedAt);
     const old = latestStatus;
     latestStatus = data;
     if (old && old.service !== data.service && activePanel === 'rec') {
@@ -201,6 +207,8 @@ async function refreshStatus() {
     renderOverview();
     document.getElementById('connection-warning').hidden = false;
     if (typeof invalidateControlRuntime === 'function') invalidateControlRuntime();
+  } finally {
+    statusPending = false;
   }
 }
 
@@ -262,7 +270,11 @@ function updateServiceButtons() {
 // The 操作 tab's status strip and the header's compact status.
 function renderOverview() {
   const controller = latestStatus?.launch_config?.CONTROLLER_TYPE;
-  const rows = StatusView.overview(latestStatus, latestLab,
+  const status = latestStatus && { ...latestStatus };
+  if (status?.motion_permission?.state === 'known' && performance.now() >= permissionExpiresAt) {
+    status.motion_permission = { state: 'unknown', note: 'silent' };
+  }
+  const rows = StatusView.overview(status, latestLab,
     controller ? ControlLabels.controllerName(controller) : null);
   for (const [key, row] of Object.entries(rows)) {
     const el = document.getElementById(`st-${key}`);
@@ -270,6 +282,8 @@ function renderOverview() {
     el.textContent = row.text;
     el.dataset.tone = row.tone;
   }
+  document.getElementById('permission-estop-state').textContent = rows.estop.text;
+  document.getElementById('permission-estop-state').dataset.tone = rows.estop.tone;
   document.getElementById('header-robot').textContent = rows.robot.text;
   const headerEstop = StatusView.headerEstop(rows.estop);
   document.getElementById('header-estop').dataset.state = headerEstop.state;
@@ -406,8 +420,8 @@ function fmtDuration(sec) {
   return `${h}:${m}:${s}`;
 }
 
-async function apiSilent(path) {
-  const res = await fetch(API + path, { headers: { "Content-Type": "application/json" } });
+async function apiSilent(path, options = {}) {
+  const res = await fetch(API + path, { headers: { "Content-Type": "application/json" }, ...options });
   let data;
   try { data = await res.json(); }
   catch {
@@ -1389,15 +1403,6 @@ function showLabCapability(kind, data) {
     `rec-indicator ${view.tone} lab-drive-status`;
   document.getElementById(`lab-${kind}-state`).textContent = view.headline;
 
-  const toggle = document.getElementById(`lab-${kind}-toggle`);
-  const unavailable = StatusView.labUnavailable(data);
-  if (!toggle.dataset.busy) toggle.checked = view.allowed && !unavailable;
-  toggle.disabled = view.toggleDisabled || Boolean(toggle.dataset.busy);
-  document.getElementById(`lab-${kind}-toggle-state`).textContent = unavailable
-    ? `（${unavailable}のため OFF）` : view.allowed ? '（ON：許可しています）' : '（OFF：禁止しています）';
-  const note = document.getElementById(`lab-${kind}-toggle-note`);
-  note.textContent = view.toggleNote;
-  note.hidden = !view.toggleNote;
 
   const owner = document.getElementById(`lab-${kind}-owner-row`);
   owner.hidden = !view.active;
@@ -1435,32 +1440,11 @@ function showLabCapability(kind, data) {
   if (data.config_error) setLabError(`lab-${kind}-error`, data.config_error);
 }
 
-// The teacher's switch: published on /lab_permission at once (the pages stay connected).
-async function setLabPermission(kind, allow) {
-  const toggle = document.getElementById(`lab-${kind}-toggle`);
-  const name = kind === "drive" ? "走行" : "発射";
-  if (allow && !confirm(`教材からの${name}を許可しますか？ 生徒が教材からロボットを動かせるようになります。`)) {
-    toggle.checked = !allow;
-    return;
-  }
-  toggle.dataset.busy = "1";
-  toggle.disabled = true;
-  try {
-    await api(`/api/lab/${kind}`, { method: "POST", body: JSON.stringify({ allow }) });
-    toast(`教材からの${name}を${allow ? "許可しました" : "禁止しました"}`, "success");
-    setLabError(`lab-${kind}-error`, null);
-  } catch (e) {
-    setLabError(`lab-${kind}-error`, e.message); // also toasted
-  } finally {
-    delete toggle.dataset.busy;
-  }
-  await refreshLabStatus();
-}
-
 // Start/stop of the bridge: success toasts, failure stays in the card too.
 async function labServeAction(path, done) {
   try {
     await api(path, { method: "POST" });
+    await refreshActuation();
     toast(done, "success");
     setLabError("lab-serve-error", null);
   } catch (e) {
@@ -1470,9 +1454,14 @@ async function labServeAction(path, done) {
 }
 
 function setupLabEvents() {
-  for (const kind of ["drive", "shoot"]) {
-    const toggle = document.getElementById(`lab-${kind}-toggle`);
-    toggle.addEventListener("change", () => setLabPermission(kind, toggle.checked));
+  for (const link of document.querySelectorAll('.permission-guide')) {
+    link.addEventListener('click', (event) => {
+      event.preventDefault();
+      activatePanel('control');
+      const card = document.getElementById('actuation-card');
+      card.tabIndex = -1;
+      card.focus();
+    });
   }
   document
     .getElementById("lab-start")
@@ -1527,6 +1516,7 @@ async function serviceAction(action) {
   if (action !== 'stop' && serviceRequestCount) return;
   if (action === 'restart' && !confirm('ロボット制御を再起動しますか？ 動作をいったん止め、保存した設定で起動し直します。ロボットを安全な状態にしてから実行してください。')) return;
   serviceRequestCount++;
+  permissions.block();
   updateServiceButtons();
   if (typeof invalidateControlRuntime === 'function') invalidateControlRuntime();
   try {
@@ -1544,6 +1534,7 @@ async function serviceAction(action) {
     // Persistent guidance is rendered by api(); avoid an unhandled rejection.
   } finally {
     serviceRequestCount--;
+    await permissions.settle(null);
     updateServiceButtons();
     await refreshStatus();
   }
@@ -1553,11 +1544,13 @@ async function serviceAction(action) {
 async function stopAll() {
   if (stopAllPending) return;
   stopAllPending = true;
+  permissions.block();
   const button = document.getElementById('stop-all');
   button.textContent = '止めています…';
   if (typeof invalidateControlRuntime === 'function') invalidateControlRuntime();
   try {
     const answer = await api('/api/stop-all', { method: 'POST' });
+    await permissions.settle(answer.actuation);
     const parts = document.getElementById('stop-all-parts');
     parts.replaceChildren();
     for (const part of [answer.service, answer.lab, answer.lab_permissions].filter(Boolean)) {
@@ -1574,6 +1567,7 @@ async function stopAll() {
     toast(answer.ok ? 'すべて止めました' : '止められなかったものがあります。画面上部を確認してください。',
       answer.ok ? 'success' : 'error');
   } catch {
+    await permissions.settle(null);
     // api() shows the failure at the top of the page.
   } finally {
     stopAllPending = false;
@@ -1591,6 +1585,7 @@ async function saveMode(newMode) {
     return;
   }
   modePending = true;
+  permissions.block();
   const radios = document.querySelectorAll('#mode-choice input[name="mode"]');
   for (const radio of radios) radio.disabled = true;
   try {
@@ -1620,6 +1615,7 @@ async function saveMode(newMode) {
     if (latestStatus) updateMode(latestStatus);
   } finally {
     modePending = false;
+    await permissions.settle(null);
     for (const radio of radios) radio.disabled = false;
   }
 }
@@ -1703,97 +1699,80 @@ function setupEvents() {
 // The teacher's runtime authority (操作 tab, /api/actuation)
 // ---------------------------------------------------------------------------
 
-let actuationPending = false;
+const permissions = PermissionView.createController({
+  read: signal => permissionApi('/api/actuation/status', { signal }),
+  write: (kind, body, signal) => permissionApi(`/api/actuation/choice/${kind}`, {
+    method: 'POST', body: JSON.stringify(body), signal,
+  }),
+  render: renderActuation,
+});
 
-function renderActuation(data) {
-  const names = { drive: 'ロボットの走行制御', launcher: '発射機構の操作' };
+async function permissionApi(path, options) {
+  const response = await fetch(path, { ...options, headers: { 'Content-Type': 'application/json' } });
+  const data = await response.json();
+  if (!response.ok) {
+    const detail = data.detail;
+    const error = new Error(typeof detail === 'object' && !Array.isArray(detail)
+      ? detail.message : typeof detail === 'string' ? detail : '要求の形式を確認してください');
+    error.reason = detail?.reason;
+    error.state = detail?.state;
+    throw error;
+  }
+  return data;
+}
+
+function renderActuation({ state, known, pending, error, blocked }) {
   for (const kind of ['drive', 'launcher']) {
-    const toggle = document.getElementById(`actuation-${kind}-toggle`);
-    toggle.checked = Boolean(data && data[kind]);
-    toggle.disabled = actuationPending || !data || (data.available === false && !data[kind]);
-    document.getElementById(`actuation-${kind}-state`).textContent =
-      !data ? '（確認できません）' : data.available === false && !data[kind] ? '（教材モードで使います）'
-        : data[kind] ? 'ON：動かせます' : 'OFF：動きません';
-  }
-  const running = { lesson: '教材', practice: '練習', competition: '大会' }[data?.running_mode];
-  const state = document.getElementById('actuation-state');
-  if (!data) {
-    state.textContent = '許可の状態を確認できません。許可がない間は教材からは動かせません。';
-  } else if (data.available === false && data.mode === 'lesson') {
-    // Saved for lessons, but the running launch is not one: what runs decides what the robot does.
-    state.textContent = data.running_mode
-      ? `いまは${running || '別'}用の構成で動いています。教材モードで「再起動」すると使えます。`
-      : 'ロボット制御が止まっています。教材モードで「起動」すると使えます。';
-  } else if (data.available === false) {
-    state.textContent = data.competition
-      ? '大会モードでは使いません（大会用の起動は非常停止と AutoReferee で動きます）。'
-      : '練習モードでは使いません（コントローラーは許可なしで動きます）。先生の許可は教材モードで使います。';
-  } else if (data.drive || data.launcher) {
-    const on = ['drive', 'launcher'].filter((kind) => data[kind]).map((kind) => names[kind]);
-    state.textContent = `${on.join('・')}を許可しています（約 ${data.heartbeat_hz} 回/秒 送信中）。`;
-  } else {
-    state.textContent = '走行も発射も許可していません。教材モードでは、ON にするまでコントローラーでも教材からも動きません。';
-  }
-  const error = document.getElementById('actuation-error');
-  error.textContent = data?.error || '';
-  error.hidden = !data?.error;
-}
-
-async function refreshActuation() {
-  try {
-    renderActuation(await apiSilent('/api/actuation/status'));
-  } catch {
-    renderActuation(null);
-  }
-}
-
-async function setActuation(kind, allow) {
-  actuationPending = true;
-  try {
-    renderActuation(await api(`/api/actuation/${kind}`, {
-      method: 'POST', body: JSON.stringify({ allow }),
-    }));
-    toast(allow ? 'ON にしました' : 'OFF にしました（教材からの同じ操作も OFF です）', 'success');
-  } catch {
-    // api() already said why; show what really holds now.
-  } finally {
-    actuationPending = false;
-    await refreshActuation();
-    refreshLabStatus();
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Why the robot does not move (/api/motion-state, read once on request)
-// ---------------------------------------------------------------------------
-
-async function checkMotionState() {
-  const button = document.getElementById('motion-state-check');
-  const summary = document.getElementById('motion-state-summary');
-  button.disabled = true;
-  summary.textContent = 'ロボットから読み取っています…';
-  try {
-    const view = MotionStateView.describe(await api('/api/motion-state'));
-    for (const key of ['estop', 'drive', 'launcher']) {
-      const cell = document.getElementById(`motion-state-${key}`);
-      cell.textContent = view[key].text;
-      cell.dataset.tone = view[key].tone;
+    const requested = pending?.kind === kind ? pending.choice : null;
+    for (const radio of document.querySelectorAll(`input[name="permission-${kind}"]`)) {
+      radio.checked = known && radio.value === (requested || state.choices[kind]);
+      radio.disabled = Boolean(pending || blocked || !known || PermissionView.unavailable(state));
     }
-    document.getElementById('motion-state-result').hidden = false;
-    summary.textContent = view.summary;
-  } catch {
-    // api() already said why.
-    summary.textContent = '読み取れませんでした。';
-  } finally {
-    button.disabled = false;
+    const confirmed = known ? `確定した許可：${PermissionView.LABELS[state.choices[kind]]}` : '確認不能';
+    const name = kind === 'drive' ? '走行' : '発射';
+    document.getElementById(`actuation-${kind}-state`).textContent = `${name}：` + (requested
+      ? `変更を要求しています：${PermissionView.LABELS[requested]}（${confirmed}）` : confirmed);
+  }
+  document.getElementById('actuation-state').textContent = known
+    ? PermissionView.unavailable(state) : '確認不能：許可の状態を取得できません';
+  document.getElementById('actuation-error').textContent = error || state?.error || '';
+  document.getElementById('actuation-card').setAttribute('aria-busy', String(Boolean(pending || blocked)));
+}
+
+async function refreshActuation() { await permissions.refresh(); }
+
+async function setActuation(kind, choice) {
+  const focused = document.activeElement;
+  await permissions.choose(kind, choice);
+  // Disabling a native radio temporarily removes focus. Restore it only if the user has not
+  // moved to another control, so arrows can continue within this group after confirmation.
+  if (focused?.matches('input[name^="permission-"]') && !focused.disabled &&
+      document.activeElement === document.body && activePanel === 'control') {
+    focused.focus({ preventScroll: true });
   }
 }
 
 function setupActuationEvents() {
-  document.getElementById('motion-state-check').addEventListener('click', checkMotionState);
-  for (const kind of ['drive', 'launcher']) {
-    document.getElementById(`actuation-${kind}-toggle`).addEventListener('change', (event) => {
-      setActuation(kind, event.target.checked);
+  const chrome = document.querySelector('.app-chrome');
+  if (chrome && typeof ResizeObserver !== 'undefined') {
+    const observer = new ResizeObserver(() => document.documentElement.style.setProperty(
+      '--manager-chrome-height', `${chrome.getBoundingClientRect().height + 8}px`));
+    observer.observe(chrome);
+  }
+  for (const radio of document.querySelectorAll('input[name^="permission-"]')) {
+    radio.addEventListener('focus', () => {
+      // Pointer focus must not scroll between pointerdown and click. Keyboard focus may
+      // reveal its whole group below the sticky header.
+      if (!chrome || !radio.matches(':focus-visible')) return;
+      const top = chrome.getBoundingClientRect().bottom + 8;
+      const group = radio.closest('fieldset');
+      const target = group.getBoundingClientRect().height <= innerHeight - top - 8
+        ? group : radio.closest('label');
+      const rect = target.getBoundingClientRect();
+      if (rect.top < top || rect.bottom > innerHeight) window.scrollBy(0, rect.top - top);
+    });
+    radio.addEventListener('change', () => {
+      if (radio.checked) setActuation(radio.name.slice('permission-'.length), radio.value);
     });
   }
 }
@@ -1808,10 +1787,22 @@ document.addEventListener("DOMContentLoaded", () => {
   refreshRecConfig();
   refreshRecStatus();
   refreshBagList();
-  // Poll service status every 5 seconds
+  // One read-only status request at a time; expire permission even while HTTP is pending.
   pollTimer = setInterval(() => {
     refreshStatus();
-  }, 5000);
+  }, 1000);
+  setInterval(() => {
+    if (latestStatus?.motion_permission?.state === 'known' && performance.now() >= permissionExpiresAt) {
+      renderOverview();
+    }
+  }, 100);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      permissionExpiresAt = 0;
+      renderOverview();
+      refreshStatus();
+    }
+  });
   // Poll recorder status more frequently for a live elapsed/size readout
   setInterval(refreshRecStatus, 2000);
   setInterval(() => {
