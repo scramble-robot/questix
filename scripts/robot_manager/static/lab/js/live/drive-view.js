@@ -78,13 +78,19 @@ function confirmBox(drive, actions, running = false, sentence = driveCopy.confir
 }
 
 function limitsNote(drive) {
-  if (!drive.limits) return nothing;
-  return html`<p class="drive-note">
-    ${fill(driveCopy.limits, {
-      linear: drive.limits.linear.toFixed(2),
-      angular: drive.limits.angular.toFixed(2),
-      degrees: Math.round(drive.limits.angular * DEGREES_PER_RADIAN),
-    })}
+  const known = Number.isFinite(drive.limits?.linear) && Number.isFinite(drive.limits?.angular);
+  const text = known
+    ? fill(driveCopy.limits, {
+        linear: drive.limits.linear.toFixed(2),
+        angular: drive.limits.angular.toFixed(2),
+        degrees: Math.round(drive.limits.angular * DEGREES_PER_RADIAN),
+      })
+    : driveCopy.limitsUnknown;
+  return html`<p class="drive-note drive-limits-note">
+    <span class="drive-limits-reserve" aria-hidden="true">
+      ${fill(driveCopy.limits, { linear: '000.00', angular: '000.00', degrees: '00000' })}
+    </span>
+    <span class="drive-limits-value">${text}</span>
   </p>`;
 }
 
