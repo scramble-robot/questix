@@ -23,7 +23,7 @@ import { registerRecordTarget, revealAfterRender } from '../live/record-targets.
 // Disc-launcher course: state and behaviour. view.js turns the model into markup, render.js draws
 // the flight and the charts, core.js simulates and estimates. Texts live in content/launch.json.
 // The real-robot topic keeps one table of discs (fired from the lesson's launcher block, typed in
-// by hand or read from a CSV); a fired disc's row waits right under the launcher block for the
+// by hand or read from a CSV); a fired disc's row waits right under the firing button for the
 // distance measured with a tape, and a launcher record on the robot opens back into it.
 
 const copy = await loadJson('content/launch.json');

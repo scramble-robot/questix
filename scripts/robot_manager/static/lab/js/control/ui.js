@@ -99,8 +99,8 @@ const calibration = controlCalibration();
 // experiment is on screen, so switching between topics of one kind keeps the recording.
 // Each entry: `{run, parts, conditions, recordedAt, point, command}` (see realEntry).
 const liveRuns = { speed: null, distance: null };
-// Press → see: a real run that finished, or a file that was opened, brings the chart on screen
-// once it is drawn — but not the recording that comes back after a reload.
+// Only an explicit comparison/file choice brings the chart on screen once it is drawn.
+// A real run finishing, or a recording restored after reload, never requests navigation.
 let restoring = false;
 let revealPending = false;
 
