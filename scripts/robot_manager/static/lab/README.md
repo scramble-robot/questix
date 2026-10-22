@@ -82,7 +82,8 @@ one sentence, a checklist of what still prevents driving (each with what to do),
 safety tick, the limits, a start button and, while running, a large **止める**. After the first
 connection, each page keeps a shared stop control in the header (also inside open dialogs); it
 remains disabled after disconnection. Esc
-stops only this page's own drive. The shared stop always stops both LAB drive and roller sessions,
+stops this page's own drive and roller, never another page's; it is not a global stop key.
+The shared stop always stops both LAB drive and roller sessions,
 whichever page owns them; it leaves tilt unchanged, cannot cancel a shot already started, and
 does not stop controller commands or replace the physical E-stop. The 実機 dialog adds a hold-to-move bench test (前進 / 後退 / 左 / 右 while pressed).
 
