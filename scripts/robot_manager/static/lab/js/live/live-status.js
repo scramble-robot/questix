@@ -27,7 +27,7 @@ function drawStatuses() {
   const header = document.getElementById('liveHeaderStatus');
   if (header) {
     header.setAttribute('aria-live', active ? 'off' : 'polite');
-    render(liveStatusLine(model, copy), header);
+    render(liveStatusLine(model, copy, true), header);
   }
   for (const dialog of document.querySelectorAll('dialog')) {
     let host = dialogHosts.get(dialog);

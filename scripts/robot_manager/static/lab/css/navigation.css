@@ -88,7 +88,7 @@
 }
 /* Tablets in portrait and narrow windows: the actions take the row under the logo, right-aligned
    so the course list still opens under its switcher, and wrap rather than overlap. */
-@media (min-width: 601px) and (max-width: 900px) {
+@media (min-width: 601px) and (max-width: 915px) {
   .site-header {
     grid-template-columns: minmax(0, 1fr);
     row-gap: 8px;
@@ -260,4 +260,133 @@ body .lab-stop {
 }
 html {
   scroll-padding-top: 96px;
+}
+
+/* Reserve every possible status value before the first connection, too. */
+.header-text-slot {
+  display: inline-grid;
+}
+.header-text-slot > span {
+  grid-area: 1 / 1;
+}
+.header-text-reserve {
+  visibility: hidden;
+  pointer-events: none;
+}
+.header-status-tile,
+.header-connection {
+  display: inline-flex;
+}
+#liveHeaderStatus {
+  font-size: 11px;
+  gap: 8px;
+}
+#labHeaderStop .lab-stop[hidden] {
+  display: block !important;
+  visibility: hidden;
+}
+body .header-actions > .robot-link {
+  flex: none;
+  display: inline-flex;
+}
+body .header-actions .robot-link-name,
+body .header-actions #robotLinkState {
+  display: none;
+}
+
+/* At 915px the full row fits; below it the two-row tablet layout stays. */
+@media (min-width: 915px) {
+  body .site-header {
+    height: 109px;
+    min-height: 109px;
+    grid-template-rows: 93px;
+    grid-template-columns: 140px 96px 132px 176px 82px 70px minmax(140px, 1fr);
+    column-gap: 8px;
+  }
+  body .site-header .header-actions,
+  #liveHeaderStatus {
+    display: contents;
+  }
+  body .site-header .brand {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  #liveHeaderStatus > [data-live-status-estop] {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  #liveHeaderStatus > [data-live-status-permission] {
+    grid-column: 3;
+    grid-row: 1;
+  }
+  #liveHeaderStatus > .header-connection {
+    display: none;
+  }
+  .header-status-tile {
+    display: flex;
+    flex-direction: column;
+    font-size: 12px;
+    line-height: 20px;
+  }
+  .header-status-colon {
+    display: none;
+  }
+  body .header-actions > .robot-link {
+    grid-column: 4;
+    grid-row: 1;
+    width: 176px;
+    height: 54px;
+    display: grid;
+    grid-template-columns: 8px minmax(0, 1fr);
+    grid-template-areas: 'dot where' '. state';
+    gap: 2px 6px;
+    text-align: left;
+    line-height: 1.25;
+  }
+  body .robot-link > .robot-link-dot {
+    grid-area: dot;
+  }
+  body .robot-link > .robot-link-where {
+    grid-area: where;
+  }
+  body .robot-link > #robotLinkState {
+    grid-area: state;
+  }
+  body .header-actions .robot-link-where {
+    display: flex;
+    gap: 6px;
+    min-width: 0;
+  }
+  body .header-actions .robot-link-name {
+    display: block;
+    min-width: 0;
+  }
+  body .header-actions #robotLinkState {
+    display: inline-grid;
+    font-size: 12px;
+  }
+  body .header-actions > .lab-stop {
+    grid-column: 5;
+    grid-row: 1;
+  }
+  #labHeaderStop .lab-stop {
+    grid-column: 5;
+    grid-row: 1;
+  }
+  body .header-actions > .series-home {
+    grid-column: 6;
+    grid-row: 1;
+  }
+  body .header-actions > .course-switcher {
+    grid-column: 7;
+    grid-row: 1;
+    width: auto;
+    min-width: 0;
+  }
+  body .header-actions > .course-switcher > summary {
+    width: 100%;
+  }
+  html {
+    scroll-padding-top: 117px;
+  }
 }
