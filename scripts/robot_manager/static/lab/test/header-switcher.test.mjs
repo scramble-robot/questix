@@ -90,6 +90,15 @@ test(
                 ellipsis: getComputedStyle(title).textOverflow,
                 nowrap: getComputedStyle(title).whiteSpace,
                 arrowTop: parseFloat(getComputedStyle(summary, '::after').top),
+                arrowLeft:
+                  summary.getBoundingClientRect().right -
+                  parseFloat(getComputedStyle(summary).borderRightWidth) -
+                  parseFloat(getComputedStyle(summary, '::after').right) -
+                  parseFloat(getComputedStyle(summary, '::after').width),
+                textRight: (getComputedStyle(title).display === 'none'
+                  ? short
+                  : title
+                ).getBoundingClientRect().right,
                 clipped: title.scrollWidth > title.clientWidth,
               };
             });
@@ -103,6 +112,7 @@ test(
             assert(actual.accessible.includes(actual.caption));
             assert(actual.accessible.includes('教材を切り替える'));
             assert(Math.abs(actual.arrowTop - 22) <= 1);
+            assert(actual.textRight + 3 <= actual.arrowLeft, 'text must leave space for the arrow');
             if (width > 820) {
               assert.equal(actual.ellipsis, 'ellipsis');
               assert.equal(actual.nowrap, 'nowrap');
