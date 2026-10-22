@@ -1,4 +1,4 @@
-import { renderLive } from '../live/live-layout.js';
+import { renderLive, resetLiveLayout } from '../live/live-layout.js';
 import { render } from '../vendor/lit-html.js';
 import { loadJson, loadText, fillSentence as fill } from '../core/content.js';
 import { downloadFile } from '../core/dom.js';
@@ -201,8 +201,9 @@ const benchSession = createLiveSession({
   stopLabel: copy.bench.stopLabel,
   failed: copy.bench.failed,
   apply: applyBench,
-  update: () => {
-    if (topicId === 'real') update();
+  resetLayout: () => resetLiveLayout(document),
+  update: (preserve = true) => {
+    if (topicId === 'real') update(preserve);
   },
   drive: benchDrive,
   reportMetrics: ['driveTime', 'maxSpeed', 'stop'], // the wheels turn in the air: no distance
@@ -344,8 +345,8 @@ function buildModel() {
   };
 }
 
-function update() {
-  renderLive(motorPage(buildModel(), copy, fragments, actions), page());
+function update(preserve = false) {
+  renderLive(motorPage(buildModel(), copy, fragments, actions), page(), { preserve });
   reportLessonProgress('motor', {
     topics: MOTOR_TOPICS.map((topic) => ({ id: topic.id, title: copy.topics[topic.id].label })),
     current: topicId,

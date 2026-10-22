@@ -111,7 +111,8 @@ function originNote(recording, origin, assumedConfig) {
  * - `apply(recording)`: returns `{ok, note}`; `ok: false` keeps the recording already on screen
  * - `applyOnRestore`: false when the lesson keeps its own results across a reload (the recording
  *   then only comes back so it can still be saved)
- * - `update()`: redraws the lesson
+ * - `update(preserve = true)`: redraws a received/run state; false for learner file replacement
+ * - `resetLayout()` (optional): starts a fresh reservation for a retry or clear
  * - `reportMetrics` (optional): the numbers the run report under the block shows, as keys of
  *   drive-report-view's REPORT_METRICS (e.g. `['driveTime', 'distance', 'maxSpeed', 'stop']`);
  *   all of them when left out. `report: false` shows no run report under the block (a lesson
@@ -193,6 +194,7 @@ function createLiveSession(options) {
 
   async function startCapture() {
     if (session.busy) return;
+    options.resetLayout?.();
     const controllers = { abort: new AbortController(), finish: new AbortController() };
     Object.assign(session, { busy: true, progress: 0, controllers, note: '', robotSave: null });
     options.update();
@@ -233,6 +235,7 @@ function createLiveSession(options) {
 
   async function startDriveCapture() {
     if (session.busy || !options.drive) return;
+    options.resetLayout?.();
     let plan;
     try {
       plan = options.drive.plan();
@@ -367,7 +370,7 @@ function createLiveSession(options) {
     } catch (error) {
       session.note = fill(captureCopy.file.failed, { reason: error.message });
     }
-    options.update();
+    options.update(false);
   }
 
   /**
@@ -378,7 +381,7 @@ function createLiveSession(options) {
   function useRecording(recording, origin = 'robot') {
     if (session.busy) return false;
     openParsed(recording, origin);
-    options.update();
+    options.update(false);
     return session.recording === recording;
   }
 
@@ -410,7 +413,7 @@ function createLiveSession(options) {
 
   function setGroup(text) {
     setGroupName(text);
-    options.update();
+    options.update(false);
   }
 
   // The last recording of this block, if the browser kept one and it still has what is needed.
@@ -426,6 +429,7 @@ function createLiveSession(options) {
   }
 
   function clear() {
+    options.resetLayout?.();
     session.recording = null;
     session.note = '';
     keepRecording(options.slot, null);
@@ -505,7 +509,11 @@ function createLiveSession(options) {
       saveRecording,
       setGroup,
       startDriveCapture,
-      confirmDrive: confirmDriveSafety,
+      confirmDrive(value) {
+        options.resetLayout?.();
+        confirmDriveSafety(value);
+        options.update(false);
+      },
       saveRun: saveDriveRun,
       ...(options.compare
         ? {

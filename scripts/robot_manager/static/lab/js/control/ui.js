@@ -1,4 +1,4 @@
-import { renderLive } from '../live/live-layout.js';
+import { renderLive, resetLiveLayout } from '../live/live-layout.js';
 import { render } from '../vendor/lit-html.js';
 import { loadJson, loadText } from '../core/content.js';
 import { downloadFile } from '../core/dom.js';
@@ -241,8 +241,8 @@ function drawStage() {
   });
 }
 
-function update() {
-  renderLive(controlPage(buildModel(), copy, hardwareHtml, actions), page());
+function update(preserve = false) {
+  renderLive(controlPage(buildModel(), copy, hardwareHtml, actions), page(), { preserve });
   reportLessonProgress('control', {
     topics: CONTROL_TOPICS.map((topic) => ({ id: topic.id, title: topic.name })),
     current: topicId,
@@ -696,7 +696,8 @@ const liveSessions = {
     countStream: 'drive',
     failed: copy.live.failed,
     apply: (recording) => applyRecording('speed', recording),
-    update: () => update(),
+    resetLayout: () => resetLiveLayout(document),
+    update: (preserve = true) => update(preserve),
     drive: speedDrive,
     // The chart and the comparison table above are this block's result; the run's own report
     // stays in 記録の一覧.
@@ -712,7 +713,8 @@ const liveSessions = {
     countStream: 'scan',
     failed: copy.live.failed,
     apply: (recording) => applyRecording('distance', recording),
-    update: () => update(),
+    resetLayout: () => resetLiveLayout(document),
+    update: (preserve = true) => update(preserve),
     drive: wallDrive,
     report: false,
     state: { place: 'control-live', name: copy.live.memoName },
@@ -860,7 +862,7 @@ function initControl() {
   });
   // Connecting or losing the robot changes what the recording card offers.
   onLiveLink(() => {
-    if (!page().hidden) update();
+    if (!page().hidden) update(true);
   });
   registerRecordTarget('control-speed', (recording, { compare }) =>
     openFromRecords('speed', recording, compare),

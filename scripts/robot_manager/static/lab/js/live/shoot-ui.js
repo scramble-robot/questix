@@ -81,6 +81,7 @@ function draw(entry, model) {
       entry.options.after?.() ?? nothing,
     ),
     entry.element,
+    { preserve: true },
   );
 }
 

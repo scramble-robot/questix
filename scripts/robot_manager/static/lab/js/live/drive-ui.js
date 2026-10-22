@@ -256,7 +256,7 @@ function update() {
   const panel = document.getElementById('robotDrive');
   // Driving needs a connection; before that the dialog is about connecting.
   panel.hidden = false;
-  renderLive(panel.hidden ? nothing : benchPanel(model), panel);
+  renderLive(panel.hidden ? nothing : benchPanel(model), panel, { preserve: true });
 }
 
 function initDriveUi() {

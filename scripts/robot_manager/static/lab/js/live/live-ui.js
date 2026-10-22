@@ -14,7 +14,7 @@ import { loadJson, fillSentence } from '../core/content.js';
 import { html, render, nothing } from '../vendor/lit-html.js';
 
 import { liveStatus } from './live-status.js';
-import { renderLive } from './live-layout.js';
+import { renderLive, resetLiveLayout } from './live-layout.js';
 
 const copy = await loadJson('content/live/link.json');
 
@@ -52,6 +52,7 @@ let history = [];
 let cameraUrl = '';
 let frameRequested = false;
 let addressProblem = ''; // the sentence normalizeRobotUrl threw for the typed address
+let previousPhase = 'idle';
 let monitorHello = null; // keep the monitor's occupied area after its first connection
 
 function prepare(canvas) {
@@ -375,12 +376,15 @@ function resetMonitor() {
 }
 
 function showState(state) {
+  const restarting = state.phase === 'connecting' && previousPhase !== 'connecting';
+  if (restarting) resetLiveLayout(document);
+  previousPhase = state.phase;
   const stage = linkStage(state);
   const open = state.phase === 'open';
   showHeader(state, stage);
   showForm(state, stage);
   $('robotStatus').dataset.stage = stage;
-  renderLive(statusView(state, stage), $('robotStatus'));
+  renderLive(statusView(state, stage), $('robotStatus'), { preserve: !restarting });
   if (open && state.hello) monitorHello = state.hello;
   $('robotMonitor').hidden = !monitorHello;
   $('robotMonitor').dataset.connected = String(open);
@@ -390,6 +394,7 @@ function showState(state) {
   renderLive(
     monitorHello ? streamRows({ ...state, hello: monitorHello }, open) : nothing,
     $('robotStreams'),
+    { preserve: !restarting },
   );
   if (!open) {
     resetMonitor();

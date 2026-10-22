@@ -1,39 +1,69 @@
 import { render } from '../vendor/lit-html.js';
 
-// A live result may grow, but removing a status must not shorten the page at its bottom and
-// clamp scrollTop. Remember occupied space before a synchronous redraw, including portalled
-// measurement controls. A width change starts a fresh reservation; text is never clipped.
+// Reservations belong to a page/dialog and one sequence of received-state redraws.
+// Learner redraws render at their natural height, including nested launcher renders.
 const layouts = new WeakMap();
 const regions =
   '[data-live-block], .shoot-host, #robotDrive, #robotMonitor, #robotStatus, #motorBench, #motorBenchTable, #controlLive, #controlGraphs, #launchShots, #launchMeasureLayout, [data-measure-live]';
-function keyOf(element) {
-  return (
-    element.id ||
-    element.getAttribute('data-live-block') ||
-    element.getAttribute('data-shoot-place') ||
-    'measurement-live'
-  );
+
+function layoutOf(doc) {
+  let layout = layouts.get(doc);
+  if (!layout) {
+    layout = { scopes: new WeakMap(), width: doc.documentElement.clientWidth, learnerRender: 0 };
+    layouts.set(doc, layout);
+    doc.addEventListener?.('series-leave', () => resetLiveLayout(doc));
+  }
+  return layout;
 }
-function renderLive(value, container) {
+
+function resetLiveLayout(doc = document) {
+  for (const element of doc.querySelectorAll(regions)) element.style.minHeight = '';
+  const layout = layoutOf(doc);
+  layout.scopes = new WeakMap();
+  layout.width = doc.documentElement.clientWidth;
+}
+
+// A DOM path distinguishes unnamed fields as well as repeated data attributes. Scope identity
+// prevents an identical path/name in another page or dialog from borrowing its height.
+function regionKey(element, scope) {
+  const path = [];
+  for (let node = element; node && node !== scope; node = node.parentElement) {
+    path.unshift(
+      node.id
+        ? `#${node.id}`
+        : `${node.localName}:${Array.from(node.parentElement.children).indexOf(node)}`,
+    );
+  }
+  return path.join('/');
+}
+
+function renderLive(value, container, { preserve = false } = {}) {
   const doc = container?.ownerDocument;
   if (!doc?.querySelectorAll) return render(value, container);
-  const width = doc.documentElement.clientWidth;
-  let layout = layouts.get(doc);
-  if (!layout || layout.width !== width) {
-    for (const element of doc.querySelectorAll(regions)) element.style.minHeight = '';
-    layout = { width, heights: new Map() };
-    layouts.set(doc, layout);
+  const layout = layoutOf(doc);
+  if (layout.width !== doc.documentElement.clientWidth) resetLiveLayout(doc);
+  if (layout.learnerRender) return render(value, container);
+  if (!preserve) {
+    resetLiveLayout(doc);
+    layout.learnerRender++;
+    try {
+      return render(value, container);
+    } finally {
+      layout.learnerRender--;
+    }
   }
   const reserve = () => {
     for (const element of doc.querySelectorAll(regions)) {
-      const key = keyOf(element);
-      // Apply the remembered value before reading geometry: a new lit instance must not cause
-      // a transient shrink while replacing an old one with the same logical slot.
-      const previous = layout.heights.get(key) ?? 0;
-      if (previous) element.style.minHeight = `${previous}px`;
       if (!element.getClientRects().length) continue;
+      const scope = element.closest('.page, dialog') ?? doc.body;
+      let heights = layout.scopes.get(scope);
+      if (!heights) layout.scopes.set(scope, (heights = new Map()));
+      const key = regionKey(element, scope);
+      const previous = heights.get(key) ?? 0;
+      // Set a replacement node's minimum before reading geometry, to avoid scrollTop clamping.
+      if (previous) element.style.minHeight = `${previous}px`;
       const height = Math.max(previous, element.getBoundingClientRect().height);
-      layout.heights.set(key, height);
+      heights.set(key, height);
       element.style.minHeight = `${height}px`;
     }
   };
@@ -42,4 +72,4 @@ function renderLive(value, container) {
   reserve();
 }
 
-export { renderLive };
+export { renderLive, resetLiveLayout };

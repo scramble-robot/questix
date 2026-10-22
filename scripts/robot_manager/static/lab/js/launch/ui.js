@@ -256,8 +256,8 @@ function drawCanvases() {
   drawMechanismRobot();
 }
 
-function update() {
-  renderLive(launchPage(buildModel(), copy, fragments, actions), page());
+function update(preserve = false) {
+  renderLive(launchPage(buildModel(), copy, fragments, actions), page(), { preserve });
   reportLessonProgress('launch', {
     topics: LAUNCH_TOPICS.map((topic) => ({ id: topic.id, title: topic.title })),
     current: topicId,
@@ -519,7 +519,7 @@ function addShot({ percent, tilt, at }) {
     const number = measurements.measured.length;
     measurements.importStatus =
       fillSentence(copy.measurement.shotAdded, { count: String(number) }) + switched;
-    update();
+    update(true);
     focusWaitingShot();
   }
   return true;
