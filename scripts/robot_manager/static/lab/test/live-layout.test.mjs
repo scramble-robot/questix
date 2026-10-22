@@ -46,6 +46,7 @@ function fixture() {
     render: (draw, preserve = true) => context.api.renderLive(draw, element, { preserve }),
     reset: () => context.api.resetLiveLayout(doc),
     leave: () => events.get('series-leave')(),
+    disclose: () => events.get('click')({ target: { closest: () => ({}) } }),
     height: () => element.getBoundingClientRect().height,
     shrink: (height) => (element.naturalHeight = height),
     replace: (height) => {
@@ -133,6 +134,13 @@ test('retry/reconnection reset drops minima before another state sequence', () =
   f.reset();
   assert.equal(f.height(), 30);
   f.render(() => f.shrink(20));
+  assert.equal(f.height(), 30);
+});
+
+test('a learner collapsing a native details section releases its occupied height', () => {
+  const f = fixture();
+  f.render(() => f.shrink(30));
+  f.disclose();
   assert.equal(f.height(), 30);
 });
 

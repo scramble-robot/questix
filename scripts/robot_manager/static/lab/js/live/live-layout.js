@@ -12,6 +12,11 @@ function layoutOf(doc) {
     layout = { scopes: new WeakMap(), width: doc.documentElement.clientWidth, learnerRender: 0 };
     layouts.set(doc, layout);
     doc.addEventListener?.('series-leave', () => resetLiveLayout(doc));
+    // Native disclosures do not call a lesson's update(). Release before the learner's toggle,
+    // rather than treating a later received status as the cause of the content shrinking.
+    doc.addEventListener?.('click', (event) => {
+      if (event.target?.closest?.('summary')) resetLiveLayout(doc);
+    });
   }
   return layout;
 }
