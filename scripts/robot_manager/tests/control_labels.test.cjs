@@ -37,7 +37,7 @@ class Element {
     this.dataset = {};
     this.events = {};
     this.attributes = {};
-    this.style = {};
+    this.style = { setProperty(name, value) { this[name] = value; } };
     this.className = '';
     this.classList = { toggle: (name, on) => { this[name] = on; },
       add: (name) => { this[name] = true; } };
