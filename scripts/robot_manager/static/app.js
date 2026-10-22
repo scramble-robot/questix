@@ -4,6 +4,8 @@ const API = "";
 let pollTimer = null;
 let configDirty = false;
 let latestStatus = null;
+let statusPending = false;
+let permissionExpiresAt = 0;
 let serviceRequestCount = 0;
 let issuePanel = 'control';
 // The last /api/lab/status, for the status strip on 操作 and the header.
@@ -158,9 +160,13 @@ async function api(path, opts = {}) {
 // ---------------------------------------------------------------------------
 
 async function refreshStatus() {
+  if (statusPending) return;
+  statusPending = true;
+  const startedAt = performance.now();
   if (typeof renderControlApplication === 'function') renderControlApplication();
   try {
-    const data = await apiSilent("/api/status");
+    const data = await apiSilent("/api/status", { signal: AbortSignal.timeout(4000) });
+    permissionExpiresAt = StatusView.permissionDeadline(data.motion_permission, startedAt);
     const old = latestStatus;
     latestStatus = data;
     if (old && old.service !== data.service && activePanel === 'rec') {
@@ -201,6 +207,8 @@ async function refreshStatus() {
     renderOverview();
     document.getElementById('connection-warning').hidden = false;
     if (typeof invalidateControlRuntime === 'function') invalidateControlRuntime();
+  } finally {
+    statusPending = false;
   }
 }
 
@@ -262,7 +270,11 @@ function updateServiceButtons() {
 // The 操作 tab's status strip and the header's compact status.
 function renderOverview() {
   const controller = latestStatus?.launch_config?.CONTROLLER_TYPE;
-  const rows = StatusView.overview(latestStatus, latestLab,
+  const status = latestStatus && { ...latestStatus };
+  if (status?.motion_permission?.state === 'known' && performance.now() >= permissionExpiresAt) {
+    status.motion_permission = { state: 'unknown', note: 'silent' };
+  }
+  const rows = StatusView.overview(status, latestLab,
     controller ? ControlLabels.controllerName(controller) : null);
   for (const [key, row] of Object.entries(rows)) {
     const el = document.getElementById(`st-${key}`);
@@ -408,8 +420,8 @@ function fmtDuration(sec) {
   return `${h}:${m}:${s}`;
 }
 
-async function apiSilent(path) {
-  const res = await fetch(API + path, { headers: { "Content-Type": "application/json" } });
+async function apiSilent(path, options = {}) {
+  const res = await fetch(API + path, { headers: { "Content-Type": "application/json" }, ...options });
   let data;
   try { data = await res.json(); }
   catch {
@@ -1740,32 +1752,6 @@ async function setActuation(kind, choice) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Why the robot does not move (/api/motion-state, read once on request)
-// ---------------------------------------------------------------------------
-
-async function checkMotionState() {
-  const button = document.getElementById('motion-state-check');
-  const summary = document.getElementById('motion-state-summary');
-  button.disabled = true;
-  summary.textContent = 'ロボットから読み取っています…';
-  try {
-    const view = MotionStateView.describe(await api('/api/motion-state'));
-    for (const key of ['estop', 'drive', 'launcher']) {
-      const cell = document.getElementById(`motion-state-${key}`);
-      cell.textContent = view[key].text;
-      cell.dataset.tone = view[key].tone;
-    }
-    document.getElementById('motion-state-result').hidden = false;
-    summary.textContent = view.summary;
-  } catch {
-    // api() already said why.
-    summary.textContent = '読み取れませんでした。';
-  } finally {
-    button.disabled = false;
-  }
-}
-
 function setupActuationEvents() {
   const chrome = document.querySelector('.app-chrome');
   if (chrome && typeof ResizeObserver !== 'undefined') {
@@ -1773,7 +1759,6 @@ function setupActuationEvents() {
       '--manager-chrome-height', `${chrome.getBoundingClientRect().height + 8}px`));
     observer.observe(chrome);
   }
-  document.getElementById('motion-state-check').addEventListener('click', checkMotionState);
   for (const radio of document.querySelectorAll('input[name^="permission-"]')) {
     radio.addEventListener('focus', () => {
       // Pointer focus must not scroll between pointerdown and click. Keyboard focus may
@@ -1802,10 +1787,22 @@ document.addEventListener("DOMContentLoaded", () => {
   refreshRecConfig();
   refreshRecStatus();
   refreshBagList();
-  // Poll service status every 5 seconds
+  // One read-only status request at a time; expire permission even while HTTP is pending.
   pollTimer = setInterval(() => {
     refreshStatus();
-  }, 5000);
+  }, 1000);
+  setInterval(() => {
+    if (latestStatus?.motion_permission?.state === 'known' && performance.now() >= permissionExpiresAt) {
+      renderOverview();
+    }
+  }, 100);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      permissionExpiresAt = 0;
+      renderOverview();
+      refreshStatus();
+    }
+  });
   // Poll recorder status more frequently for a live elapsed/size readout
   setInterval(refreshRecStatus, 2000);
   setInterval(() => {

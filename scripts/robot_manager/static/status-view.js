@@ -307,6 +307,34 @@ const StatusView = (() => {
     return { state, label: row?.text === '確認不能' ? '確認不能' : HEADER_ESTOP[state] };
   }
 
+  const PERMISSION_BLOCKERS = {
+    'teacher:off': '先生の許可OFF',
+    'teacher:unknown': '先生の許可を未受信',
+    'teacher:stale': '先生の許可信号が途絶',
+    'referee:off': '審判の許可なし',
+    'referee:unknown': '審判の信号を未受信',
+    'referee:stale': '審判の信号が途絶',
+  };
+  function permissionDeadline(report, startedAt) {
+    if (report?.state !== 'known' || !Number.isFinite(report.age_sec) || report.age_sec < 0 ||
+        report.stale_after_sec !== 1.5) return 0;
+    // Count the whole HTTP round trip against freshness, conservatively. A delayed response
+    // cannot restart a full lease when it reaches the browser.
+    return startedAt + Math.max(0, report.stale_after_sec - report.age_sec) * 1000;
+  }
+  function motionPermission(report, kind) {
+    if (report?.state !== 'known' || typeof report[`${kind}_allowed`] !== 'boolean') {
+      const note = report?.note;
+      return { text: note === 'robot_stopped' ? '不明（ロボット制御停止中）'
+        : note === 'silent' ? '不明（信号が途絶）'
+          : note === 'unavailable' ? '不明（確認できません）' : '不明（受信していません）', tone: 'warn' };
+    }
+    if (report[`${kind}_allowed`]) return { text: '許可', tone: 'ok' };
+    const blockers = report[`${kind}_blockers`];
+    const reasons = Array.isArray(blockers) ? blockers.map(b => PERMISSION_BLOCKERS[b] || `理由：${b}`) : [];
+    return { text: reasons.length ? `許可なし（${reasons.join('／')}）` : '許可なし', tone: 'warn' };
+  }
+
   // Rows of the 操作 tab's status strip.
   function overview(status, lab, controllerName) {
     const service = status ? status.service : 'unknown';
@@ -369,6 +397,8 @@ const StatusView = (() => {
         tone: 'plain',
       };
     }
+    rows['drive-permission'] = motionPermission(status?.motion_permission, 'drive');
+    rows['launcher-permission'] = motionPermission(status?.motion_permission, 'launcher');
     return rows;
   }
 
@@ -401,6 +431,7 @@ const StatusView = (() => {
   return {
     MODE, labUnavailable, SERVICE, SETTLE_MS, createBlockerMemory, stableBlockers, blockerText, capability,
     modeSummary, estop, estopReasonText, headerEstop, overview, controllerUrl, labRestoredText,
+    motionPermission, permissionDeadline,
   };
 })();
 if (typeof module !== 'undefined') module.exports = StatusView;

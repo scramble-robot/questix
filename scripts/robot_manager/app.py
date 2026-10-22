@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 
 from robot_manager import (actuation, control_runtime, controls, estop_monitor, lab, logs, modes,
-                           motion_state, recorder, ros_domain, wifi_ap)
+                           recorder, ros_domain, wifi_ap)
 
 CONFIG_DIR = Path(os.environ.get("QUESTIX_CONFIG_DIR", "/etc/questix_robot"))
 MODE_FILE = CONFIG_DIR / "mode"
@@ -441,6 +441,7 @@ def _robot_name() -> str:
 def get_status():
     """Return saved mode, the running mode, launch settings and current service state."""
     service = _service_status()
+    observed = estop_monitor.observe_all(service)
     return {
         "mode": _read_mode(),
         "service": service,
@@ -452,7 +453,8 @@ def get_status():
         # robot_name defaults to it).
         "robot_name": _robot_name(),
         # /emergency_stop as the robot sees it, in every mode (a display only: estop_monitor.py).
-        "emergency_stop": estop_monitor.observe(service),
+        "emergency_stop": observed["emergency_stop"],
+        "motion_permission": observed["motion_permission"],
         "stop_requested_at": _stop_requested_at,
         "server_time": time.time(),
     }
@@ -622,12 +624,6 @@ def _log_launch_config_changes(previous: dict[str, str], current: dict[str, str]
 def get_control_runtime():
     """Read running ROS parameters without applying any saved settings."""
     return control_runtime.read_snapshot(_read_env())
-
-
-@app.get("/api/motion-state")
-def get_motion_state():
-    """Read /emergency_stop and /motion_permission once: why the robot does not move."""
-    return motion_state.read_state(_read_env())
 
 
 @app.get("/api/control-config/{controller}")

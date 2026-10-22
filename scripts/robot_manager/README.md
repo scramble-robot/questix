@@ -80,12 +80,13 @@ QUESTiX Robot Manager の全タブとダイアログは、`static/style.css` の
   送れる停止で、ブリッジは再起動せず生徒の接続も切れません）、次にロボット制御（`questix_robot`）を
   停止します。結果は画面上部に項目ごとに表示します。先生の操作許可と教材からの走行・発射の**許可**も
   OFF にします（次の授業では先生が ON にし直します）。
-- 「操作」の最初のカード「いまのロボット」に、ロボット名、モード（動作中／次回）、ロボット制御、
-  非常停止ボタン、教材の配信、教材からの走行・発射の許可、いま動かしているのは誰かをまとめて表示します。
+- 「操作」の最初のカード「ロボットの状態」に、ロボット名、モード（動作中／次回）、ロボット制御、
+  非常停止ボタン、教材の配信、教材からの走行・発射の許可、いま動かしているのは誰か、
+  ロボット側の走行・発射機構の許可の9欄を表示します。
   ロボット名は**ホスト名**です（教材のブリッジの `robot_name` の既定値で、生徒の教材画面に出る名前と同じ。
   ブリッジが動いていればブリッジが名乗る名前を表示します）。Wi-Fi の SSID は接続用 QR に、
-  `VEHICLE_NAME` は記録名にだけ使い、ここでは使いません。非常停止ボタンの状態は、教材のブリッジが
-  走行か発射を許可されて配信しているときだけ分かります（それ以外は「分かりません」）。
+  `VEHICLE_NAME` は記録名にだけ使い、ここでは使いません。非常停止ボタンとロボット側の許可は、教材の配信に依存せず、
+  ロボット制御の動作中に専用の購読プロセスで読み取ります。
 - モードの保存値は**次回起動用**です。変更しても実行中のモードは変わりません。ロボット制御が
   動いているときにモードや操作設定を保存すると、画面上部に「今すぐ再起動して反映」を出します
   （押すと通常の再起動確認のあとで再起動します）。
@@ -101,12 +102,10 @@ QUESTiX Robot Manager の全タブとダイアログは、`static/style.css` の
   保存したモードの構成で起動します（下の「練習モードの起動要求」）。大会モードの起動は今までどおりで、
   電源投入時にも起動します。起動の結果は、実際に起動したかどうかで表示します（「練習用の構成で起動
   しました」「起動できませんでした：…」）。ロボット制御が動いている間は「起動」を押せません。
-- **ロボットが動かないとき**（「操作」タブ）: 「なぜ動かないか確認」を押すと、ロボットから非常停止
-  （`/emergency_stop`、L1）と走行許可（`/motion_permission`、L2）を一度だけ読み取り（`GET
-  /api/motion-state`、`motion_state.py` と `read_motion_state.py`。ROS とロボットの ROS_DOMAIN_ID で
-  数秒だけ動く読み取り専用のプロセス）、走行と発射機構それぞれを止めている理由（先生の操作許可が OFF、
-  AutoReferee が止めている、非常停止が押されている など）を表示します。何も変更しません。どのモードでも
-  使えます。
+- 「ロボットの状態」の走行・発射機構の許可（ロボット側）は `/motion_permission` の
+  受信値です。先生の選択と教材への許可とは別で、非常停止中も受信値をそのまま示します。
+  「許可」は動作可能の断定ではありません。未受信・1.5秒の途絶・制御停止は「不明」です。
+  取得は `/api/status`（1秒ごと）、通信停止時はブラウザ側でも失効します。
 - 起動前の確認では保存プロファイルとROS・ワークスペースの起動ファイルを確認します。
   コントローラーの物理接続や安全状態の自動判定は行いません。
   旧サービスで `/api/readiness` がない場合は既存APIで保存設定を確認し、起動環境は未確認と表示します。
@@ -195,7 +194,7 @@ press of the E-stop button reaches ROS no more (RLY1 still cuts the power). The 
 launcher never uses it. `robot_mode:=competition` with `enable_gpio_ref:=false` is not a valid
 configuration and `questix_core.launch.xml` refuses it.
 
-### E-stop display (`estop_monitor.py`)
+### Robot status display (`estop_monitor.py`)
 
 The header's 非常停止ボタン and the 操作 tab's E-stop row come from `/api/status`
 `emergency_stop`, in lesson, practice and competition mode alike (the QUESTiX LAB bridge, which
@@ -203,7 +202,12 @@ used to be their only source, runs in lesson mode only). While the robot service
 `estop_monitor.py` keeps one listener child, `estop_listener.py`, subscribed to
 `/emergency_stop` (questix_msgs/EmergencyStop, reliable + transient_local + keep-last(1)), sourced
 like the actuation heartbeat: ROS, then `ROBOT_WS` from `launch.env`, in the robot's
-`ROS_DOMAIN_ID`. It publishes nothing and offers no services; it stops when the service is not
+`ROS_DOMAIN_ID`. The same child also subscribes to `/motion_permission`
+(questix_msgs/MotionPermission, reliable + volatile + keep-last(1), never latched).
+Each topic has its own monotonic receive time; silence on either topic expires only that topic
+after 1.5 s. Permission flags become null with state `unknown`, never an inferred grant.
+`/api/status` includes both snapshots, and its one-second browser polling has a conservative
+local expiry that counts HTTP delay against the remaining lease. It publishes nothing and offers no services; it stops when the service is not
 active, follows a changed domain or workspace, and is retried after 10 s when it cannot start or
 exits.
 

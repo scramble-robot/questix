@@ -349,3 +349,28 @@ test('lesson permissions wait for a running lesson launch', () => {
   assert.equal(StatusView.capability('drive', on, 'active', StatusView.createBlockerMemory(), 0)
     .toggleDisabled, false);
 });
+
+test('robot-side permission distinguishes unknown, grant and all translated blockers', () => {
+  const report = { state: 'known', drive_allowed: false, launcher_allowed: true, drive_blockers: [], age_sec: 0.2, stale_after_sec: 1.5 };
+  const translations = {
+    'teacher:off': '先生の許可OFF', 'teacher:unknown': '先生の許可を未受信', 'teacher:stale': '先生の許可信号が途絶',
+    'referee:off': '審判の許可なし', 'referee:unknown': '審判の信号を未受信', 'referee:stale': '審判の信号が途絶',
+  };
+  for (const [blocker, words] of Object.entries(translations)) {
+    assert.equal(StatusView.motionPermission({ ...report, drive_blockers: [blocker] }, 'drive').text, `許可なし（${words}）`);
+  }
+  assert.equal(StatusView.motionPermission({ ...report, drive_blockers: ['future:<unknown>'] }, 'drive').text, '許可なし（理由：future:<unknown>）');
+  for (const mode of ['lesson', 'practice', 'competition']) {
+    const status = { service: 'active', mode, running_mode: mode, motion_permission: { ...report, mode }, emergency_stop: { state: 'pressed' } };
+    const view = StatusView.overview(status, null);
+    assert.equal(view['launcher-permission'].text, '許可');
+    assert.equal(view['drive-permission'].text, '許可なし');
+    assert.equal(view.estop.tone, 'danger');
+  }
+  for (const note of ['starting', 'not_heard', 'silent', 'unavailable', 'robot_stopped']) {
+    assert.match(StatusView.motionPermission({ state: 'unknown', note, drive_allowed: true }, 'drive').text, /^不明/);
+  }
+  assert.equal(StatusView.permissionDeadline(report, 1000), 2300);
+  assert.equal(StatusView.permissionDeadline({ ...report, age_sec: 2 }, 1000), 1000);
+  for (const age_sec of [null, -1, NaN, Infinity]) assert.equal(StatusView.permissionDeadline({ ...report, age_sec }, 1000), 0);
+});

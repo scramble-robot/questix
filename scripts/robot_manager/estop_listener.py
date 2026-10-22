@@ -1,16 +1,12 @@
-"""Report /emergency_stop to Robot Manager (QUESTiX), read-only.
+"""Read-only robot status for QUESTiX Robot Manager.
 
-Started by robot_manager/estop_monitor.py under ``bash`` after sourcing ROS and the robot workspace
-(the domain from launch.env), never by hand. It subscribes to questix_msgs/EmergencyStop on
-``/emergency_stop`` with the publisher's QoS (reliable + transient_local + keep-last(1), see
-questix_msgs/msg/EmergencyStop.msg) and writes one JSON line ``{"active": bool, "source": str,
-"reason": str}`` to stdout when the state changes, and again at least every REPORT_PERIOD_SEC
-while messages keep arriving, so the manager can tell a silent topic from a quiet one. It publishes
-nothing and offers no services. It exits when stdin closes (the manager stops it) or the manager
-is gone.
-
-``Reporter`` and ``stdin_closed`` are ROS-free (tested in test_estop_monitor.py); ``main`` wires
-them to rclpy.
+One child subscribes to /emergency_stop (reliable, transient_local, keep-last(1)) and
+/motion_permission (reliable, volatile, keep-last(1)). The ROS setup, ROBOT_WS and launch.env
+ROS_DOMAIN_ID are shared. Each real message can produce a timestamped JSON line, immediately
+on change or every 0.5 s otherwise. No timer repeats a cached value without a message.
+The parent uses each topic's independent monotonic receive time and expires it after 1.5 s.
+Stopping the robot, changing domain/workspace or losing the child clears both snapshots.
+It publishes nothing and offers no services. Actuators retain all safety decisions.
 """
 
 import json
@@ -43,7 +39,30 @@ class Reporter:
             return None
         self._last = state
         self._last_at = now
-        return json.dumps({"active": state[0], "source": state[1], "reason": state[2]})
+        return json.dumps({"active": state[0], "source": state[1], "reason": state[2],
+                           "received_at": now})
+
+
+class PermissionReporter:
+    """Report permission changes immediately and unchanged, received samples every 0.5 s."""
+
+    def __init__(self, period=REPORT_PERIOD_SEC):
+        """Keep independent throttling state for this topic only."""
+        self.period = period
+        self._last = None
+        self._last_at = None
+
+    def update(self, msg, now):
+        """Return a report only in response to a real subscription callback."""
+        state = {"mode": msg.mode, "drive_allowed": msg.drive_allowed,
+                 "launcher_allowed": msg.launcher_allowed,
+                 "drive_blockers": list(msg.drive_blockers),
+                 "launcher_blockers": list(msg.launcher_blockers)}
+        if state == self._last and now - self._last_at < self.period:
+            return None
+        self._last, self._last_at = state, now
+        return json.dumps(dict(state, topic="/motion_permission", received_at=now),
+                          allow_nan=False)
 
 
 def stdin_closed(stdin):
@@ -58,12 +77,13 @@ def main():
 
     import rclpy
     from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
-    from questix_msgs.msg import EmergencyStop
+    from questix_msgs.msg import EmergencyStop, MotionPermission
 
     rclpy.init(args=[])
     node = rclpy.create_node(f"robot_manager_estop_monitor_{os.getpid()}",
                              enable_rosout=False, start_parameter_services=False)
     reporter = Reporter()
+    permission_reporter = PermissionReporter()
     parent = os.getppid()
 
     def on_message(msg):
@@ -76,6 +96,17 @@ def main():
                      reliability=ReliabilityPolicy.RELIABLE,
                      durability=DurabilityPolicy.TRANSIENT_LOCAL)
     node.create_subscription(EmergencyStop, TOPIC, on_message, qos)
+
+    def on_permission(msg):
+        line = permission_reporter.update(msg, time.monotonic())
+        if line is not None:
+            sys.stdout.write(line + "\n")
+            sys.stdout.flush()
+
+    permission_qos = QoSProfile(depth=1, history=HistoryPolicy.KEEP_LAST,
+                                reliability=ReliabilityPolicy.RELIABLE,
+                                durability=DurabilityPolicy.VOLATILE)
+    node.create_subscription(MotionPermission, "/motion_permission", on_permission, permission_qos)
 
     def closing(_signum, _frame):
         raise KeyboardInterrupt

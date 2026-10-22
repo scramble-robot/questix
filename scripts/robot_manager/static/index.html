@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>QUESTiX Robot Manager</title>
-  <link rel="stylesheet" href="/static/style.css?v=40">
+  <link rel="stylesheet" href="/static/style.css?v=41">
 </head>
 
 <body>
@@ -80,7 +80,7 @@
     <!-- ===== Control tab ===== -->
     <div class="tab-panel active" data-panel="control" id="panel-control" role="tabpanel" aria-labelledby="tab-control">
     <section class="card status-card" aria-labelledby="status-heading">
-      <h2 id="status-heading">いまのロボット</h2>
+      <h2 id="status-heading">ロボットの状態</h2>
       <dl class="status-strip">
         <div><dt>ロボット名</dt><dd id="st-robot" data-tone="plain">—</dd></div>
         <div><dt>モード</dt><dd id="st-mode">—</dd></div>
@@ -89,23 +89,10 @@
         <div><dt>教材の配信</dt><dd id="st-lab">—</dd></div>
         <div><dt>教材からの走行・発射</dt><dd id="st-permissions">—</dd></div>
         <div><dt>いま動かしているのは</dt><dd id="st-driver">—</dd></div>
+        <div><dt>走行の許可（ロボット側）</dt><dd id="st-drive-permission" data-tone="warn">不明（受信していません）</dd></div>
+        <div><dt>発射機構の許可（ロボット側）</dt><dd id="st-launcher-permission" data-tone="warn">不明（受信していません）</dd></div>
       </dl>
       <p class="section-help">ロボット名はロボットのホスト名で、教材の画面に出る名前と同じです。非常停止ボタンはロボットから受信した状態を表示します。未受信・途絶は「不明」、取得失敗は「確認不能」です。</p>
-      <section class="motion-state-section" id="motion-state-card" aria-labelledby="motion-state-heading">
-        <h3 id="motion-state-heading">ロボットが動かないとき</h3>
-        <p class="section-help">ロボットから非常停止と走行許可（教材は先生の操作許可、大会は AutoReferee）を読み取り、いま何が止めているかを表示します。読み取りに数秒かかります。何も変更しません。</p>
-        <div class="button-group">
-          <button type="button" class="btn" id="motion-state-check">なぜ動かないか確認</button>
-        </div>
-        <div class="motion-state-response" role="region" aria-label="診断結果" tabindex="0">
-          <dl class="readiness-grid" id="motion-state-result">
-            <div><dt>非常停止</dt><dd id="motion-state-estop">—</dd></div>
-            <div><dt>走行</dt><dd id="motion-state-drive">—</dd></div>
-            <div><dt>発射機構</dt><dd id="motion-state-launcher">—</dd></div>
-          </dl>
-          <p id="motion-state-summary" class="section-help" role="status">まだ確認していません。</p>
-        </div>
-      </section>
     </section>
 
     <section class="card">
@@ -153,7 +140,7 @@
     <!-- Teacher permissions stay separate from motion permission and the E-stop. -->
     <section class="card" id="actuation-card" aria-labelledby="actuation-heading">
       <h2 id="actuation-heading">先生の操作許可（教材モード）</h2>
-      <p class="permission-neutral">スティック・ボタンから手を離してください</p>
+      <p class="permission-neutral">コントローラーから手を離してください</p>
       <div class="permission-estop"><strong>非常停止ボタン</strong><span id="permission-estop-state">不明</span></div>
       <fieldset class="permission-choice" aria-describedby="actuation-state">
         <legend>走行の許可</legend>
@@ -828,12 +815,11 @@
   <script src="/static/web-joy-connection.js?v=4"></script>
   <script src="/static/operator-guide.js?v=5"></script>
   <script src="/static/control-labels.js?v=4"></script>
-  <script src="/static/status-view.js?v=4"></script>
+  <script src="/static/status-view.js?v=5"></script>
   <script src="/static/network-view.js?v=1"></script>
   <script src="/static/trial-view.js?v=2"></script>
-  <script src="/static/motion-state-view.js?v=1"></script>
   <script src="/static/permission-view.js?v=1"></script>
-  <script src="/static/app.js?v=24"></script>
+  <script src="/static/app.js?v=25"></script>
   <script src="/static/controller-map.js?v=12"></script>
   <script src="/static/controls.js?v=22"></script>
 </body>
