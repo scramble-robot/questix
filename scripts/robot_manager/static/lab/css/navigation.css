@@ -141,9 +141,11 @@ body .header-actions > .course-switcher > summary {
 body .header-actions > .course-switcher {
   min-width: 0;
   flex: 0 0 auto;
+  height: 44px;
+  padding: 0;
+  border: 0;
 }
 body .course-switcher .switcher-label,
-body .course-switcher #currentCourseTitle,
 body .header-actions .header-long {
   display: none;
 }
@@ -151,12 +153,36 @@ body .course-switcher .switcher-short {
   display: inline;
 }
 body .course-switcher > summary {
+  height: 44px;
+  border: 1px solid #ccdcd8;
+  border-radius: inherit;
   flex-direction: row;
+  align-items: center;
   padding-right: 28px;
+}
+body .course-switcher #currentCourseTitle {
+  display: block;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 body .course-switcher > summary::after {
   position: absolute;
   right: 8px;
+  top: 50%;
+  line-height: 1;
+  transform: translateY(-70%);
+}
+body .course-switcher[open] > summary::after {
+  transform: translateY(-30%) rotate(180deg);
+}
+@media (max-width: 820px) {
+  body .course-switcher #currentCourseTitle {
+    display: none;
+  }
 }
 .live-status-line {
   display: flex;
