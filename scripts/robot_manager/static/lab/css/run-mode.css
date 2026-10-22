@@ -137,8 +137,8 @@ h3 > .run-mode {
   flex: 1 0 100%;
   order: 1;
   min-width: 0;
-  /* Plain-text examples such as local URLs may wrap too, including at 200% zoom. */
-  word-break: break-all;
+  /* Keep words intact; only an example wider than the whole line needs to split. */
+  overflow-wrap: anywhere;
   margin: 0;
   font-size: 14px;
   line-height: 1.7;

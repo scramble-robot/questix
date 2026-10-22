@@ -1,7 +1,17 @@
 // These source checks run in CI without a browser. Rendered line-end measurements are separate.
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import test from 'node:test';
+
+test('LAB styles never force a break inside ordinary words, identifiers or URLs', async () => {
+  const root = new URL('../', import.meta.url);
+  const styles = (await readdir(root, { recursive: true })).filter((file) => file.endsWith('.css'));
+  assert(styles.length > 0, 'the stylesheet scan must cover the site');
+  for (const file of styles) {
+    const source = (await readFile(new URL(file, root), 'utf8')).replace(/\/\*[\s\S]*?\*\//g, '');
+    assert.doesNotMatch(source, /\bword-break\s*:\s*break-all\b/i, file);
+  }
+});
 
 for (const [file, selectors] of [
   ['hs-shell.css', ['.lesson-quickstart p', '.lesson-brief .run-mode-strip p']],
