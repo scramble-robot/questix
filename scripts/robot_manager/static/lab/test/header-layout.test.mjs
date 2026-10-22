@@ -37,7 +37,7 @@ test('header tiles reserve every E-stop and permission value, independent of rec
 test('connection has one visible location per layout and dialogs retain their status line', () => {
   const css = read('css/navigation.css');
   assert.match(css, /body \.header-actions #robotLinkState\s*\{\s*display: none/);
-  const wide = css.slice(css.indexOf('@media (min-width: 915px)'));
+  const wide = css.slice(css.indexOf('@media (min-width: 943px)'));
   assert.match(wide, /#liveHeaderStatus > \.header-connection\s*\{\s*display: none/);
   assert.match(wide, /body \.header-actions #robotLinkState\s*\{\s*display: inline-grid/);
   assert.match(read('js/live/live-status.js'), /liveStatusLine\(model, copy, true\), header/);
@@ -47,12 +47,12 @@ test('connection has one visible location per layout and dialogs retain their st
 
 test('wide header is one fixed 109px row with stable reserved columns', () => {
   const css = read('css/navigation.css');
-  const wide = css.slice(css.indexOf('@media (min-width: 915px)'));
+  const wide = css.slice(css.indexOf('@media (min-width: 943px)'));
   assert.match(wide, /height: 109px;\s*min-height: 109px/);
   assert.match(wide, /grid-template-rows: 93px/);
   assert.match(
     wide,
-    /grid-template-columns: 140px 96px 132px 176px 82px 70px minmax\(140px, 1fr\)/,
+    /grid-template-columns: 140px 96px 132px 176px 82px 98px minmax\(140px, 1fr\)/,
   );
   assert.match(css, /\.header-text-slot > span\s*\{\s*grid-area: 1 \/ 1/);
   assert.match(css, /\.header-text-reserve\s*\{\s*visibility: hidden/);
