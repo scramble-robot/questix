@@ -676,6 +676,23 @@ input[type="checkbox"] { accent-color: var(--accent); }
   grid-column: 1 / -1;
 }
 
+/* Recorder numeric settings: keep each input beside its label and help below. */
+.rec-config .rec-numeric-setting {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 128px;
+}
+
+.rec-config .rec-numeric-setting input[type="number"] {
+  flex: none;
+  width: 128px;
+  min-width: 128px;
+}
+
+.rec-config .rec-numeric-setting .section-help {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
 /* Controller type row — label + select */
 .controller-type-row {
   justify-content: space-between;
