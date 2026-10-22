@@ -472,15 +472,11 @@
   line-height: 1.9;
   color: #304651;
   font-size: 16px;
-  max-width: 68ch;
 }
 .lesson-brief .lesson-brief-scene {
   grid-column: 1/-1;
   padding-bottom: 18px;
   border-bottom: 1px solid #dce5e3;
-}
-.lesson-brief .lesson-brief-scene p {
-  max-width: 100ch;
 }
 .lesson-brief p + p {
   margin-top: 10px;

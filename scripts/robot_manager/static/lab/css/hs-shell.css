@@ -21,7 +21,6 @@
   font-size: 15px;
   line-height: 1.8;
   color: #304651;
-  max-width: 72ch;
 }
 .lesson-quickstart p + p {
   margin-top: 8px;
