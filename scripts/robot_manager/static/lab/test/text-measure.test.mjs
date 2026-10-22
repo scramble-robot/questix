@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 for (const [file, selectors] of [
-  ['hs-shell.css', ['.lesson-quickstart p']],
+  ['hs-shell.css', ['.lesson-quickstart p', '.lesson-brief .run-mode-strip p']],
   ['experiment.css', ['.lesson-brief p', '.lesson-brief .lesson-brief-scene p']],
   ['base.css', ['.page-footnote']],
   ['curriculum.css', ['.basics-footer p']],
@@ -19,6 +19,11 @@ for (const [file, selectors] of [
     const rules = [...source.matchAll(/([^{}]+)\{([^{}]*)\}/g)];
     for (const [_, names, declarations] of rules) {
       if (!names.split(',').some((name) => selectors.includes(name.trim()))) continue;
+      assert.doesNotMatch(
+        declarations,
+        /\bdisplay\s*:\s*none\b/,
+        `${names}: text must remain visible`,
+      );
       const caps = [...declarations.matchAll(/(?:^|;)\s*max-width\s*:\s*([^;]+)/g)];
       for (const [, cap] of caps)
         assert.doesNotMatch(cap, /\d(?:\.\d+)?(?:ch|px|em|rem)\b/, `${names}: ${cap}`);
