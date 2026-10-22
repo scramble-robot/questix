@@ -67,4 +67,4 @@ import './live/live-ui.js';
 import './live/drive-ui.js';
 import './live/shoot-ui.js';
 
-import './live/stop-bar.js';
+import './live/stop-control.js';

@@ -22,8 +22,8 @@ import { reportCopy, runStatusText } from './drive-report-view.js';
 import { liveStateStrip } from './robot-state.js';
 
 // The pieces of the driving experiments that belong to no lesson:
-// - the stop bar, fixed at the bottom of every page while the robot drives on a lesson's command —
-//   this page's or another one's — so a stop is always one tap (or Esc) away;
+// - the shared header/dialog stop control, fixed in the header after a connection, stopping a lesson's drive —
+//   from this page or another one; Esc still stops only this page's own run;
 // - the bench test in the 実機 dialog: hold a button and the robot moves slowly, release and it stops,
 //   for checking wheel directions and left/right after assembly. Each press is recorded, and the
 //   live strip under the buttons shows the wheels while it is held;

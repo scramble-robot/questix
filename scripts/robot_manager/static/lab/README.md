@@ -79,9 +79,12 @@ and name real topics.
 
 Where a lesson can drive the robot, its record block gets a **実機を走らせる** part: the program in
 one sentence, a checklist of what still prevents driving (each with what to do), the learner's
-safety tick, the limits, a start button and, while running, a large **止める**. While any page
-drives, every connected page shows a stop bar at the bottom (also inside open dialogs), and Esc
-stops the robot. The 実機 dialog adds a hold-to-move bench test (前進 / 後退 / 左 / 右 while pressed).
+safety tick, the limits, a start button and, while running, a large **止める**. After the first
+connection, each page keeps a shared stop control in the header (also inside open dialogs); it
+remains disabled after disconnection. Esc
+stops only this page's own drive. The shared stop always stops both LAB drive and roller sessions,
+whichever page owns them; it leaves tilt unchanged, cannot cancel a shot already started, and
+does not stop controller commands or replace the physical E-stop. The 実機 dialog adds a hold-to-move bench test (前進 / 後退 / 左 / 右 while pressed).
 
 | Lesson                            | What the page drives                                                                                                                                                 |
 | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -117,7 +120,7 @@ The launch course's 実機の測定で確かめる can also **fire discs** from 
 spin-up bar is full, 「1枚発射」. Each disc adds a row with power, tilt and time to the topic's table,
 with its distance field focused for the measured range, and the session (the `roller` / `shot`
 statuses) is kept on the robot as a record. The roller stops by itself after each shot, and on the
-learner's stop, Esc, a hidden page, a stalled page, a lost link, the stop bar (any page), and
+learner's stop, Esc, a hidden page, a stalled page, a lost link, the shared header/dialog stop control (any page), and
 whatever the bridge ends it for (controller, E-stop, dead-man, 30 s). It needs the teacher's
 発射機構の操作 and 教材からの発射 in Robot Manager (published on `/lab_permission`) and the robot
 started for a lesson (command_arbiter passes the page's commands on); otherwise the topic works

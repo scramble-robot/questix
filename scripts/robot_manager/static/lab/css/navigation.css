@@ -204,12 +204,49 @@ body .course-switcher[open] > summary::after {
   color: #a51d21;
   font-weight: 700;
 }
-.live-dialog-status {
+.live-dialog-header {
   position: sticky;
   top: 0;
   z-index: 5;
+  display: grid;
+  grid-template-rows: 44px 28px;
+  gap: 4px;
   margin: 0 0 12px;
   padding: 4px 0;
+  background: #f3f7f6;
+}
+.live-dialog-stop-row {
+  display: flex;
+  justify-content: flex-end;
+}
+.robot-dialog-nav {
+  top: 84px;
+}
+#labHeaderStop {
+  display: contents;
+}
+body .lab-stop {
+  flex: none;
+  min-width: 0;
+  min-height: 44px;
+  height: 44px;
+  padding: 6px 10px;
+  font-size: 14px;
+  word-break: keep-all;
+}
+@media (max-width: 700px) {
+  .series-home > span:last-child {
+    display: none;
+  }
+  body .header-actions > .series-home {
+    min-width: 44px;
+    justify-content: center;
+  }
+}
+@media (max-width: 460px) {
+  body .site-header .brand-lab {
+    display: none;
+  }
 }
 @media (max-width: 700px) {
   body dialog[open] {

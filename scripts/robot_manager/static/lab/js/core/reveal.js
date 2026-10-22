@@ -20,8 +20,7 @@ function revealIfHidden(element) {
   const box = element.getBoundingClientRect();
   const header = document.querySelector('.site-header');
   const headerBottom = header ? Math.max(0, header.getBoundingClientRect().bottom) : 0;
-  const bar = document.getElementById('liveStopBar');
-  const bottom = bar && !bar.hidden ? bar.getBoundingClientRect().top : window.innerHeight;
+  const bottom = window.innerHeight;
   const fits = box.height <= bottom - headerBottom;
   const shown = box.top >= headerBottom && box.bottom <= bottom;
   if (fits && shown) return;
