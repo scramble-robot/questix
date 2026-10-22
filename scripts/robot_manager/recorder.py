@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Response
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ValidationInfo, field_validator
 
 from robot_manager import actuation, recorder_readiness, ros_domain, trial
 
@@ -57,6 +57,87 @@ _DEFAULT_CONFIG = {
     "MAX_SPLIT_MB": "200",
     "MAX_DURATION_SEC": "0",
 }
+
+# Bounds and display metadata shared by save, start and status validation.
+_NUMERIC_SETTINGS = {
+    "MIN_FREE_GB": (1, 16, "空き容量の下限", "GB", "0は使用できません"),
+    "MAX_SPLIT_MB": (0, 8192, "ファイルの分割サイズ", "MB", "0はサイズで分けません"),
+    "MAX_DURATION_SEC": (0, 14400, "ファイルを時間で分ける間隔", "秒", "0は時間で分けません"),
+}
+
+
+def _numeric_error(key: str, value) -> str:
+    """Describe the rejected value and the complete operator-facing constraint."""
+    low, high, label, unit, zero = _NUMERIC_SETTINGS[key]
+    raw = str(value)
+    shown = raw if len(raw) <= 80 else raw[:80] + f"…（{len(raw)}文字）"
+    return (f"{label}（{key}）『{shown}』{unit}は設定できません。"
+            f"半角の数字で{low}〜{high} {unit}の整数を入力してください。{zero}。")
+
+
+def _parse_numeric(key: str, value) -> int:
+    """Accept only bounded ASCII decimal integer strings, never a coerced number."""
+    try:
+        if not isinstance(value, str) or re.fullmatch(r"[0-9]+", value) is None:
+            raise ValueError
+        parsed = int(value)
+        low, high, *_rest = _NUMERIC_SETTINGS[key]
+        if not low <= parsed <= high:
+            raise ValueError
+        return parsed
+    except ValueError as exc:
+        raise ValueError(_numeric_error(key, value)) from exc
+
+
+def _numeric_state(config: dict[str, str]) -> dict:
+    """Report raw-setting problems separately from effective recording limits."""
+    effective = {}
+    warnings = []
+    for key in _NUMERIC_SETTINGS:
+        try:
+            effective[key] = _parse_numeric(key, config.get(key))
+        except ValueError as exc:
+            effective[key] = None
+            message = str(exc)
+            if key == "MIN_FREE_GB":
+                effective[key] = int(_DEFAULT_CONFIG[key])
+                message += f" 既定の{effective[key]} GBで容量を保護します。"
+            else:
+                message += " 修正して保存するまで記録を開始できません。"
+            warnings.append(message)
+    return {"effective_numeric_settings": effective, "config_warnings": warnings}
+
+
+def _effective_config(config: dict[str, str]) -> dict[str, str]:
+    """Replace only an invalid minimum in a transient copy; never write it back."""
+    state = _numeric_state(config)
+    return {**config, "MIN_FREE_GB": str(state["effective_numeric_settings"]["MIN_FREE_GB"])}
+
+
+def _validate_save_capacity(config: dict[str, str]) -> None:
+    """Check the current filesystem total, without creating the output directory."""
+    try:
+        ancestor = Path(config["OUTPUT_DIR"])
+        while True:
+            try:
+                ancestor.lstat()
+                break
+            except FileNotFoundError:
+                if ancestor == ancestor.parent:
+                    raise
+                ancestor = ancestor.parent
+        if not ancestor.is_dir():
+            raise NotADirectoryError
+        total = shutil.disk_usage(ancestor).total
+        if total <= 0:
+            raise OSError("全容量を取得できません")
+    except OSError as exc:
+        raise HTTPException(503, "保存先のディスク全容量を確認できません。保存先を確認してください。") from exc
+    if _min_free_bytes(config) >= total:
+        raise HTTPException(422, _numeric_error("MIN_FREE_GB", config["MIN_FREE_GB"]) +
+                            f" 保存先の全容量{total / 1024**3:.2f} GBより小さくしてください。"
+                            "（1 GB＝1024³ バイト）")
+
 
 # ---------------------------------------------------------------------------
 # Input validation (all values below are interpolated into a `bash -lc` string,
@@ -196,10 +277,8 @@ def _tree_size(path: Path) -> int:
 
 
 def _min_free_bytes(config: dict[str, str]) -> int:
-    try:
-        return max(0, int(config["MIN_FREE_GB"])) * 1024 ** 3
-    except (ValueError, KeyError):
-        return 0
+    """Keep the disk guard active even when a persisted minimum is malformed."""
+    return _numeric_state(config)["effective_numeric_settings"]["MIN_FREE_GB"] * 1024**3
 
 
 # ---------------------------------------------------------------------------
@@ -240,11 +319,11 @@ class RecorderConfig(BaseModel):
                 raise ValueError(f"Invalid exclude topic pattern: {token}")
         return v
 
-    @field_validator("MIN_FREE_GB", "MAX_SPLIT_MB", "MAX_DURATION_SEC")
+    @field_validator("MIN_FREE_GB", "MAX_SPLIT_MB", "MAX_DURATION_SEC", mode="before")
     @classmethod
-    def _validate_nonneg_int(cls, v: str | None) -> str | None:
-        if v is not None and (not v.isdigit()):
-            raise ValueError("Value must be a non-negative integer")
+    def _validate_nonneg_int(cls, v: str | None, info: ValidationInfo) -> str | None:
+        if v is not None:
+            _parse_numeric(info.field_name, v)
         return v
 
 
@@ -700,6 +779,11 @@ def _release_start() -> None:
 
 def _prepare_output(config: dict[str, str]) -> tuple[str, Path]:
     """Validate vehicle/output settings, enforce the disk guard, ensure the folder."""
+    for key in ("MAX_SPLIT_MB", "MAX_DURATION_SEC"):
+        try:
+            _parse_numeric(key, config.get(key))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
     vehicle = config["VEHICLE_NAME"]
     if not _VEHICLE_RE.match(vehicle):
         raise HTTPException(status_code=400, detail="VEHICLE_NAME が不正です")
@@ -1110,9 +1194,16 @@ def get_readiness(response: Response, scope: str = "normal", refresh: bool = Fal
         ("ロボット制御の状態を確認できません" if service == "unknown"
          else "ロボット制御が起動していません")))
     output = None
+    config_warnings = []
     try:
         config = _read_config_for_api()
-        output, storage = recorder_readiness.storage_checks(config, _ABS_PATH_RE)
+        config_warnings = _numeric_state(config)["config_warnings"]
+        output, storage = recorder_readiness.storage_checks(_effective_config(config), _ABS_PATH_RE)
+        for key in ("MAX_SPLIT_MB", "MAX_DURATION_SEC"):
+            try:
+                _parse_numeric(key, config.get(key))
+            except ValueError as exc:
+                checks.append(recorder_readiness.check(key, "fail", str(exc)))
         checks.extend(storage)
         if not _VEHICLE_RE.fullmatch(config.get("VEHICLE_NAME", "")):
             checks.append(recorder_readiness.check("config_invalid", "fail", "VEHICLE_NAME が不正です"))
@@ -1125,6 +1216,7 @@ def get_readiness(response: Response, scope: str = "normal", refresh: bool = Fal
         generation, preflight = readiness.snapshot()
     return {"schema_version": 1, "checked_at": recorder_readiness.timestamp(),
             "generation": generation, "service": {"state": service}, "output": output,
+            "config_warnings": config_warnings,
             "common_checks": checks,
             "normal": {"ready": not blockers, "blocker_codes": blockers},
             "trial": {"ready": not blockers and preflight["state"] == "pass",
@@ -1167,6 +1259,7 @@ def _status_payload() -> dict:
         "disk_free_bytes": free,
         "disk_total_bytes": total,
         "min_free_bytes": _min_free_bytes(config),
+        **_numeric_state(config),
     }
 
 
@@ -1189,7 +1282,7 @@ def get_status():
     """Return current recording state and disk usage."""
     pending = None
     with _lock:
-        # Reap a process that exited on its own (e.g. --max-bag-duration).
+        # Reap a process that exited on its own.
         global _proc
         if _proc is not None and _proc.poll() is not None:
             pending = _stop_locked(_last_stop_reason or _exit_reason_locked())
@@ -1324,7 +1417,8 @@ def shutdown_recording() -> None:
 @router.get("/config")
 def get_config():
     """Return the recorder configuration."""
-    return _read_config_for_api()
+    config = _read_config_for_api()
+    return {**config, **_numeric_state(config)}
 
 
 @router.put("/config")
@@ -1333,6 +1427,12 @@ def set_config(config: RecorderConfig):
     current = _read_config_for_api()
     update = {k: v for k, v in config.model_dump().items() if v is not None}
     current.update(update)
+    for key in _NUMERIC_SETTINGS:
+        try:
+            _parse_numeric(key, current.get(key))
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+    _validate_save_capacity(current)
     try:
         _write_config(current)
     except PermissionError:

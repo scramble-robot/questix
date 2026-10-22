@@ -479,6 +479,32 @@ async function refreshRecReadiness(event = false, force = false) {
   renderRecReadiness();
 }
 
+function renderRecConfigWarnings(data) {
+  const warnings = data.config_warnings || [];
+  for (const id of ['rec-config-warnings', 'rec-status-warnings']) {
+    const box = document.getElementById(id);
+    box.textContent = warnings.join('\n');
+    box.hidden = warnings.length === 0;
+  }
+}
+
+function validateRecNumericInputs() {
+  for (const input of document.querySelectorAll('[data-rec-config][type="number"]')) {
+    input.setCustomValidity('');
+    const valid = input.checkValidity();
+    if (!valid || !/^[0-9]+$/.test(input.value)) {
+      const label = input.labels?.[0]?.textContent || input.dataset.recConfig;
+      const raw = input.value.length > 80 ? input.value.slice(0, 80) + '…' : input.value;
+      input.setCustomValidity(`${label}『${raw}』${input.dataset.unit}は保存できません。` +
+        `半角の数字で${input.min}〜${input.max} ${input.dataset.unit}の整数を入力してください。` +
+        `${input.dataset.zeroMeaning}。`);
+      input.reportValidity();
+      return false;
+    }
+  }
+  return true;
+}
+
 async function refreshRecStatus() {
   let data;
   try {
@@ -488,6 +514,7 @@ async function refreshRecStatus() {
     renderRecReadiness();
     return;
   }
+  renderRecConfigWarnings(data);
   const recording = data.recording;
 
   const indicator = document.getElementById("rec-indicator");
@@ -603,6 +630,7 @@ function trialValues() {
 async function refreshRecConfig() {
   try {
     const data = await api("/api/rosbag/config");
+    renderRecConfigWarnings(data);
     for (const input of document.querySelectorAll("[data-rec-config]")) {
       const key = input.dataset.recConfig;
       if (data[key] !== undefined) input.value = data[key];
@@ -952,9 +980,10 @@ function setupRecorderEvents() {
   });
 
   document.getElementById("rec-save-config").addEventListener("click", async () => {
+    if (!validateRecNumericInputs()) return;
     const config = {};
     for (const input of document.querySelectorAll("[data-rec-config]")) {
-      config[input.dataset.recConfig] = input.value.trim();
+      config[input.dataset.recConfig] = input.type === "number" ? input.value : input.value.trim();
     }
     try {
       await api("/api/rosbag/config", { method: "PUT", body: JSON.stringify(config) });

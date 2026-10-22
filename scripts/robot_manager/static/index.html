@@ -400,6 +400,7 @@
       <div class="rec-readiness" aria-live="polite">
         <p class="section-help" id="rec-readiness-state">開始条件を確認しています</p>
         <ul class="trial-warnings" id="rec-readiness-reasons"></ul>
+        <p id="rec-status-warnings" class="section-help" role="status" hidden></p>
         <p class="section-help" id="rec-preflight-time" hidden></p>
         <button class="btn" id="rec-readiness-refresh" type="button">開始条件を再確認</button>
       </div>
@@ -762,6 +763,7 @@
     <!-- Recorder settings -->
     <section class="card">
       <h2>記録の詳細設定</h2>
+      <p id="rec-config-warnings" class="section-help" role="status" hidden></p>
       <p class="section-help">保存先や容量制限は担当者が準備します。変更は次回の記録開始時に使われます。</p>
       <div class="config-grid rec-config">
         <div class="config-item wide">
@@ -784,16 +786,24 @@
         </div>
         <div class="config-item">
           <label for="rec-min-free">確保する空き容量（GB）</label>
-          <input type="number" id="rec-min-free" data-rec-config="MIN_FREE_GB" min="0" value="5">
+          <input type="number" id="rec-min-free" data-rec-config="MIN_FREE_GB" min="1"
+            max="16" step="1" required value="5" aria-describedby="rec-min-free-help"
+            data-unit="GB" data-zero-meaning="0は使用できません">
+          <p id="rec-min-free-help" class="section-help">1〜16 GBの整数を半角の数字で入力（0は使用できません）。1 GB＝1024³ バイト。</p>
         </div>
         <div class="config-item">
           <label for="rec-max-split">ファイルの分割サイズ（MB）</label>
-          <input type="number" id="rec-max-split" data-rec-config="MAX_SPLIT_MB" min="0" value="200">
+          <input type="number" id="rec-max-split" data-rec-config="MAX_SPLIT_MB" min="0"
+            max="8192" step="1" required value="200" aria-describedby="rec-max-split-help"
+            data-unit="MB" data-zero-meaning="0はサイズで分けません">
+          <p id="rec-max-split-help" class="section-help">0〜8192 MBの整数を半角の数字で入力（0はサイズで分けません）。1 MB＝1000² バイト。</p>
         </div>
         <div class="config-item wide">
-          <label for="rec-max-duration">記録する時間（秒 / 0=無制限）</label>
+          <label for="rec-max-duration">ファイルを時間で分ける間隔（秒）</label>
           <input type="number" id="rec-max-duration" data-rec-config="MAX_DURATION_SEC" min="0"
-            value="0">
+            max="14400" step="1" required value="0" aria-describedby="rec-max-duration-help"
+            data-unit="秒" data-zero-meaning="0は時間で分けません">
+          <p id="rec-max-duration-help" class="section-help">0〜14400 秒の整数を半角の数字で入力（0は時間で分けません）。</p>
         </div>
       </div>
       <button class="btn btn-save" id="rec-save-config">記録設定を保存</button>
@@ -840,7 +850,7 @@
   <script src="/static/trial-view.js?v=2"></script>
   <script src="/static/motion-state-view.js?v=1"></script>
   <script src="/static/permission-view.js?v=1"></script>
-  <script src="/static/app.js?v=23"></script>
+  <script src="/static/app.js?v=24"></script>
   <script src="/static/controller-map.js?v=12"></script>
   <script src="/static/tuning-model.js?v=2"></script>
   <script src="/static/tuning-chart.js?v=2"></script>
