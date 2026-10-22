@@ -12,19 +12,94 @@ let runtimeAvailable = false;
 let runtimeGeneration = 0;
 let mapSelection = null;
 let mapReturnTarget = null;
+let tuningTimes = {};
+let rangeWarningActive = false;
+let rangeRepairLateral = false;
+
+function tuningRangeIssues(values) {
+  const speeds = ["longitudinal_input_ratio", "lateral_input_ratio", "angular_input_ratio"];
+  return controlProfile.groups.filter((group) => group.node === "joy_controller")
+    .flatMap((group) => group.fields.filter((field) => speeds.includes(field.key)
+      && (!TuningModel.finite(values[group.node][field.key])
+        || values[group.node][field.key] < field.min || values[group.node][field.key] > field.max))
+      .map((field) => ({ node: group.node, key: field.key,
+        value: values[group.node][field.key], min: field.min, max: field.max })));
+}
+
+function createRangeWarning() {
+  const host = document.getElementById("controls-range-warning");
+  const issues = [...tuningRangeIssues(controlProfile.values), ...tuningRangeIssues(controlDraft)];
+  const unique = [...new Map(issues.map((issue) => [issue.key, issue])).values()];
+  rangeWarningActive = unique.length > 0;
+  rangeRepairLateral = unique.some((issue) => issue.key === "lateral_input_ratio");
+  host.hidden = !rangeWarningActive;
+  host.classList.toggle("has-lateral-repair", rangeRepairLateral);
+  host.replaceChildren();
+  for (const issue of unique) {
+    const warning = document.createElement("p");
+    warning.textContent = TuningModel.finite(issue.value)
+      ? TuningModel.speedWarning(issue.key, issue.value, issue.max, true)
+      : "読み込んだ速さを確認してください。";
+    host.appendChild(warning);
+  }
+  const status = document.createElement("p");
+  status.id = "controls-range-state";
+  status.setAttribute("aria-live", "polite");
+  host.appendChild(status);
+  if (!rangeRepairLateral) return;
+  const label = document.createElement("label");
+  label.htmlFor = "control-lateral-repair";
+  label.textContent = "左右の速さ（保存値の修正、m/s）";
+  const input = document.createElement("input");
+  input.id = label.htmlFor;
+  input.type = "number";
+  input.min = 0;
+  input.max = unique.find((issue) => issue.key === "lateral_input_ratio").max;
+  input.step = "any";
+  input.required = true;
+  input.value = Math.abs(controlDraft.joy_controller.lateral_input_ratio);
+  const help = document.createElement("p");
+  help.id = "control-lateral-repair-help";
+  help.textContent = "この機体（左右 2 輪）では使われませんが、保存するには範囲内にしてください。"
+    + `入力できる範囲：0〜${Number(input.max).toFixed(1)} m/s（方向の反転は保存済みのまま）。値は自動で変更しません。`;
+  input.setAttribute("aria-describedby", help.id);
+  input.addEventListener("input", () => {
+    if (controlsBusy) return;
+    const direction = tuningDirection(controlDraft.joy_controller.lateral_input_ratio,
+      controlProfile.values.joy_controller.lateral_input_ratio);
+    controlDraft.joy_controller.lateral_input_ratio = input.value === "" ? null : Number(input.value) * direction;
+    refreshControlChanges(input);
+  });
+  host.append(label, input, help);
+}
+
+function refreshRangeWarning() {
+  if (!rangeWarningActive) return;
+  const issues = tuningRangeIssues(controlDraft);
+  document.getElementById("controls-range-state").textContent = issues.length
+    ? "範囲の外の値が残っています。編集していない項目も含め、範囲内にしてから保存してください。"
+    : "速さは範囲内に修正されました。まだ保存されていません。「操作設定を保存」で確定します。";
+  if (rangeRepairLateral) {
+    const input = document.getElementById("control-lateral-repair");
+    input.disabled = controlsBusy;
+    const issue = issues.find((item) => item.key === "lateral_input_ratio");
+    input.setCustomValidity(issue ? "左右の速さを入力できる範囲内にしてください。" : "");
+    input.setAttribute("aria-invalid", String(Boolean(issue)));
+  }
+}
 
 // UI choices and units only. Defaults and validation limits come from the profile API.
 const tuningFields = {
   joy_controller: {
     longitudinal_input_ratio: { title: "走行速度", unit: "m/s", scale: 1, signed: true,
-      help: "スティックを最大まで倒したときの前進・後退の速さ。大きくすると速くなります。" },
-    angular_input_ratio: { title: "旋回の速さ", signed: true },
+      help: "スティックを最大まで倒したときの前進・後退の速さ。速さを変えると、加速時間を保つよう加速度を計算し直します。" },
+    angular_input_ratio: { title: "旋回の速さ", unit: "rad/s", scale: 1, signed: true },
   },
   drive_component: {
-    max_linear_accel: { title: "走り出し・停止のきびきび感", acceleration: true,
-      help: "小さくするとおだやかに、大きくするとすばやく加速・減速します。おだやかにすると、スティックを戻して止まるまでの時間も長くなります。" },
-    max_angular_accel: { title: "旋回のきびきび感", acceleration: true,
-      help: "曲がり始め・曲がり終わりの反応を調整します。小さくするとおだやかに、大きくするとすばやく旋回速度が変わります。旋回の最高速度は変わりません。" },
+    max_linear_accel: { title: "走り出し・停止のきびきび感（加速時間）", acceleration: true,
+      kind: "linear", unit: "s", scale: 1 },
+    max_angular_accel: { title: "旋回のきびきび感（加速時間）", acceleration: true,
+      kind: "angular", unit: "s", scale: 1 },
   },
   joy_launcher: {
     full_speed_value: { title: "ローラー出力", unit: "%", scale: 100,
@@ -45,28 +120,27 @@ function tuningSpec(node, key) {
   const spec = tuningFields[node]?.[key];
   if (node === "joy_controller" && key === "angular_input_ratio") {
     const reference = Math.abs(controlProfile.defaults[node][key]);
-    if (reference > 0) return { ...spec, unit: "%", scale: 100 / reference,
-      help: "100% が標準の速さです。50% で半分、150% で1.5倍。0% では旋回しません。",
-      presets: [[50, "ゆっくり 50%"], [100, "標準 100%"], [150, "速め 150%"]] };
-    // A custom profile can define a zero default; a relative percentage is then undefined.
-    return { ...spec, unit: "回転/秒", scale: 1 / (2 * Math.PI),
-      help: "1 で1秒に1回転、0.5 で2秒に1回転の指令です。0 では旋回しません。" };
+    return { ...spec, help: "スティックを最大まで倒したときの旋回の速さ。速さを変えると、加速時間を保つよう加速度を計算し直します。0では旋回しません。",
+      presets: [[reference * 0.5, "ゆっくり 50%"], [reference, "標準 100%"], [reference * 1.5, "速め 150%"]],
+      baseline: reference };
   }
   if (spec?.acceleration) {
-    const reference = controlProfile.defaults[node][key];
-    if (reference > 0) return { ...spec, unit: "%", scale: 100 / reference,
-      help: `100% が標準です。${spec.help}`,
-      presets: [[50, "おだやか 50%"], [100, "標準 100%"], [150, "きびきび 150%"]] };
-    // Zero disables the underlying limiter and cannot define a percentage baseline.
-    return { ...spec, unit: key === "max_linear_accel" ? "m/s²" : "回転/秒²",
-      scale: key === "max_linear_accel" ? 1 : 1 / (2 * Math.PI),
-      help: `${spec.help} 初期設定は制限なしのため、加速度の数値を直接入力します。` };
+    return { ...spec,
+      help: "停止から車輪の上限を考慮した最高速度までの時間の目安です。短いほどきびきび変化します。上限を超えない設定では、スティックを戻したときの減速も、同じ時間が目安です（非常停止は別で、すぐに止まります）。",
+      presets: [[0.5, "おだやか 50%"], [1, "標準 100%"], [1.5, "きびきび 150%"]]
+        .map(([factor, title]) => [TuningModel.presetTime(controlProfile.defaults,
+          controlProfile.geometry, spec.kind, factor), title]) };
   }
   return spec;
 }
 
-function tuningNumber(spec, value) {
+function tuningNumber(spec, value, values = controlDraft) {
   if (value === null) return "";
+  if (spec.acceleration) {
+    const snapshot = { ...values, drive_component: { ...values.drive_component,
+      [TuningModel.axes[spec.kind].accel]: value } };
+    return TuningModel.number(TuningModel.motion(snapshot, controlProfile.geometry, spec.kind)?.time);
+  }
   const displayed = (spec.signed ? Math.abs(value) : value) * spec.scale;
   const rounded = Number(displayed.toFixed(2));
   return displayed !== 0 && rounded === 0 ? Number(displayed.toPrecision(3)) : rounded;
@@ -76,9 +150,115 @@ function tuningDirection(current, saved) {
   return current < 0 || (current === 0 || current === null) && saved < 0 ? -1 : 1;
 }
 
-function tuningValue(spec, value) {
+function tuningValue(spec, value, values = controlDraft, geometry = controlProfile.geometry) {
   if (spec.acceleration && value === 0) return "制限なし";
+  if (spec.acceleration) {
+    const state = TuningModel.motion(values, geometry, spec.kind);
+    if (!state) return "加速時間は未確認";
+    if (state.speed === 0) return spec.kind === "angular" ? "旋回なし（時間は算出できません）" : "走行なし（時間は算出できません）";
+    return `${TuningModel.number(state.time)} s`;
+  }
+  if (spec.signed) return TuningModel.speedText(value,
+    spec.unit === "rad/s" ? "angular" : "linear");
   return `${tuningNumber(spec, value)} ${spec.unit}${spec.signed && value < 0 ? "（方向反転）" : ""}`;
+}
+
+function runtimeTuningValues() {
+  const values = {};
+  for (const [node, report] of Object.entries(controlRuntime?.nodes || {})) {
+    if (report.status === "ok") values[node] = report.values;
+  }
+  return values;
+}
+
+function refreshTuningFields(activeInput) {
+  for (const row of document.querySelectorAll(".control-field")) {
+    const { node, key } = row.dataset;
+    const spec = tuningSpec(node, key);
+    const input = document.getElementById(`control-${node}-${key}`);
+    const field = controlProfile.groups.find((group) => group.node === node).fields.find((f) => f.key === key);
+    const kind = spec.kind || (key === "angular_input_ratio" ? "angular" : "linear");
+    const state = spec.signed || spec.acceleration
+      ? TuningModel.motion(controlDraft, controlProfile.geometry, kind) : null;
+    const note = row.querySelector(".control-estimate");
+    if (spec.acceleration) {
+      const speed = controlDraft.joy_controller[TuningModel.axes[kind].speed];
+      const limit = TuningModel.wheelLimit(controlDraft, controlProfile.geometry, kind);
+      input.disabled = controlsBusy || limit === null || !TuningModel.finite(speed) || speed === 0;
+      input.required = controlDraft[node][key] !== 0 && !input.disabled && state?.time !== null;
+      if (input !== activeInput) input.value = state?.time === null || !state ? "" : TuningModel.number(state.time);
+      input.placeholder = state?.unlimited ? "制限なし（未変更）" : "算出できません";
+      const raw = controlDraft[node][key];
+      input.setCustomValidity(!TuningModel.finite(raw) || raw < field.min || raw > field.max
+        ? "計算した加速度が保存できる範囲の外です。加速時間を長くするか、プリセットを選んでください。" : "");
+      const shortest = TuningModel.minimumTime(state?.speed, field.max);
+      row.querySelector(".control-range").textContent = shortest === null
+        ? "入力できる最短時間は算出できません。加速度0は制限なしのまま保持します。"
+        : `入力できる範囲：${shortest} s 以上（短すぎると保存できません）。加速度0は制限なしのまま保持し、正の時間を入力すると制限を有効にします。`;
+      note.textContent = limit === null ? "車輪の寸法を確認できないため、加速時間から加速度を計算できず、この欄は編集できません。"
+        : !state ? "速度・加速度を確認できないため、加速時間は算出できません。"
+        : state.speed === 0 ? "速さが0のため時間は算出できません。加速度は保持します。"
+          : state.unlimited ? "加速度の制限なし。正の加速時間を入力すると制限を有効にします。"
+            : `保存する加速度: ${TuningModel.number(state.accel)} ${kind === "linear" ? "m/s²" : "rad/s²"}。`;
+    } else if (spec.signed) {
+      const raw = controlDraft[node][key];
+      input.setCustomValidity(TuningModel.finite(raw) && raw >= field.min && raw <= field.max
+        ? "" : TuningModel.finite(raw) ? TuningModel.speedWarning(key, raw, field.max)
+          : "速さを入力してください。");
+      const reference = Math.abs(controlProfile.defaults[node][key]);
+      note.textContent = TuningModel.finite(raw)
+        ? `${TuningModel.speedText(raw, kind)}${reference > 0 ? `・配布元の${TuningModel.number(Math.abs(raw) / reference * 100)}%` : "・配布元が0のため割合は算出できません"}。` : "速さを入力してください。";
+      if (state?.limited) note.textContent += ` 設定は ${TuningModel.speedText(state.configured, kind)} ですが、車輪の上限で実際は約 ${TuningModel.speedText(state.speed, kind)} までです。`;
+      if (state?.limited) note.textContent += ` ${TuningModel.limitedText(state, kind)}`;
+      if (!state) note.textContent += " 車輪上限・加速時間は未確認です。";
+      note.textContent += " 単独で倒したときの目安です。";
+      if (kind === "linear") note.textContent += " 前進が速いときは、旋回が弱くなります。";
+    }
+    for (const button of row.querySelector(".control-presets")?.children || []) {
+      const amount = button.tuningAmount;
+      button.disabled = controlsBusy || amount === null || spec.baseline === 0
+        || spec.acceleration && input.disabled;
+      if (button.disabled && !controlsBusy) button.title = "速さ・車輪寸法・配布元の加速時間を確認できません。";
+    }
+    row.querySelector(".control-saved").children[1].textContent =
+      tuningValue(spec, controlProfile.values[node][key], controlProfile.values);
+    input.setAttribute("aria-invalid", String(Boolean(input.validationMessage)));
+    row.classList.toggle("out-of-range", Boolean(input.validationMessage));
+  }
+}
+
+function createTuningPreviews(container) {
+  for (const [kind, title] of [["angular", "旋回の変化の目安"], ["linear", "走行の変化の目安"]]) {
+    const section = document.createElement("section");
+    section.className = "tuning-preview";
+    const heading = document.createElement("h3");
+    heading.textContent = title;
+    heading.id = `tuning-${kind}-heading`;
+    section.setAttribute("aria-labelledby", heading.id);
+    const summary = document.createElement("p");
+    summary.id = `tuning-${kind}-summary`;
+    summary.className = "tuning-motion-summary";
+    summary.tabIndex = 0;
+    summary.setAttribute("aria-live", "polite");
+    const note = document.createElement("p");
+    note.className = "control-help";
+    note.textContent = "単独で倒したときの目安です。前進と旋回を同時に入れたときの切り詰めは含みません。"
+      + "標準起動の車輪寸法で一定加速度として計算し、最後の減速をなめらかにする帯を省いているため、時間と停止量は約の値です。実測値ではありません。";
+    const chart = document.createElement("div");
+    chart.id = `tuning-${kind}-chart`;
+    section.append(heading, summary, chart, note);
+    container.appendChild(section);
+  }
+}
+
+function renderTuningPreviews() {
+  for (const kind of ["angular", "linear"]) {
+    const summary = document.getElementById(`tuning-${kind}-summary`);
+    summary.textContent = TuningModel.summary(TuningModel.motion(controlDraft, controlProfile.geometry, kind), kind);
+    TuningChart.render(document.getElementById(`tuning-${kind}-chart`),
+      TuningModel.motion(controlDraft, controlProfile.geometry, kind),
+      TuningModel.motion(controlProfile.defaults, controlProfile.geometry, kind), kind);
+  }
 }
 
 function tiltDirectionKey() {
@@ -315,20 +495,24 @@ function renderSavebar() {
     !controlProfile || !(controlsDirty || controlsBusy || !message.hidden);
 }
 
-function refreshControlChanges() {
+function refreshControlChanges(activeInput) {
   const count = ControlLabels.changedCount(controlProfile.values, controlDraft);
   controlsDirty = count > 0;
+  refreshTuningFields(activeInput);
+  refreshRangeWarning();
+  renderTuningPreviews();
   renderControllerMap();
   for (const row of document.querySelectorAll(".control-field")) {
     const { node, key } = row.dataset;
     const changed = controlDraft[node][key] !== controlProfile.values[node][key];
     row.classList.toggle("changed", changed);
-    row.querySelector(".control-change-state").textContent = changed ? "変更あり" : "";
+    row.querySelector(".control-change-state").textContent = changed
+      ? tuningSpec(node, key).acceleration ? "加速度に変更あり" : "変更あり" : "";
     row.querySelector(".control-change-state").hidden = !changed;
     const saved = row.querySelector(".control-saved");
     saved.hidden = !changed;
     const input = document.getElementById(`control-${node}-${key}`);
-    input.setAttribute("aria-describedby", `${input.id}-help${changed ? ` ${saved.id}` : ""}`);
+    input.setAttribute("aria-describedby", `${input.id}-help ${input.id}-range ${input.id}-estimate${changed ? ` ${saved.id}` : ""}`);
   }
   document.getElementById("controls-change-count").textContent = `未保存の変更: ${count} 項目`;
   document.getElementById("controls-save").disabled = controlsBusy || !count;
@@ -382,9 +566,14 @@ function renderRuntimeValues() {
       status.textContent = "";
     } else {
       const actual = report.values[key];
-      value.textContent = tuningValue(tuningSpec(node, key), actual);
+      const values = runtimeTuningValues();
+      value.textContent = tuningValue(tuningSpec(node, key), actual, values, values.drive_component);
       status.textContent = actual === controlProfile.values[node][key]
         ? "保存済みと一致" : "保存済みと異なる";
+      if (tuningSpec(node, key).acceleration) {
+        status.textContent = actual === controlProfile.values[node][key]
+          ? "加速度が保存済みと一致" : "加速度が保存済みと異なる";
+      }
     }
   }
 }
@@ -423,6 +612,9 @@ async function loadRuntimeValues() {
 function renderControls() {
   const container = document.getElementById("controls-fields");
   container.replaceChildren();
+  createRangeWarning();
+  tuningTimes = Object.fromEntries(["linear", "angular"].map((kind) =>
+    [kind, TuningModel.motion(controlDraft, controlProfile.geometry, kind)?.time ?? null]));
   for (const group of controlProfile.groups) {
     const fields = group.fields.filter((field) => tuningSpec(group.node, field.key));
     if (!fields.length) continue;
@@ -471,8 +663,8 @@ function renderControls() {
       const direction = spec.signed ? tuningDirection(value, controlProfile.values[group.node][field.key]) : 1;
       input.type = "number";
       input.required = true;
-      input.min = spec.signed ? 0 : field.min * spec.scale;
-      input.max = tuningNumber(spec, field.max);
+      input.min = spec.signed || spec.acceleration ? 0 : field.min * spec.scale;
+      if (!spec.acceleration) input.max = tuningNumber(spec, field.max);
       input.step = "any";
       input.value = spec.acceleration && value === 0 ? "" : tuningNumber(spec, value);
       if (spec.acceleration && value === 0) {
@@ -487,35 +679,58 @@ function renderControls() {
       savedCaption.className = "control-value-caption";
       savedCaption.textContent = "保存済み";
       const savedValue = document.createElement("strong");
-      savedValue.textContent = tuningValue(spec, controlProfile.values[group.node][field.key]);
+      savedValue.textContent = tuningValue(spec, controlProfile.values[group.node][field.key], controlProfile.values);
       saved.append(savedCaption, savedValue);
       input.setAttribute("aria-describedby", `${help.id} ${saved.id}`);
-      const updateValue = () => {
+      const updateValue = (exactAmount) => {
         if (controlsBusy) return;
         input.required = true;
-        const entered = Number(input.value);
+        const entered = typeof exactAmount === "number" ? exactAmount : Number(input.value);
         // Returning to a rounded display value restores its exact original ROS value.
-        const raw = entered === tuningNumber(spec, value) ? value
-          : entered === tuningNumber(spec, field.max) ? field.max * direction
-            : entered / spec.scale * direction;
-        controlDraft[group.node][field.key] = input.value === "" ? null : raw;
-        if (spec.acceleration) input.setCustomValidity(input.value !== "" && raw <= 0
-          ? "0より大きい値を入力するか、プリセットを選んでください。" : "");
-        refreshControlChanges();
+        if (spec.acceleration) {
+          const state = TuningModel.motion({ ...controlDraft, drive_component: {
+            ...controlDraft.drive_component, [field.key]: 0 } }, controlProfile.geometry, spec.kind);
+          const savedState = TuningModel.motion(controlProfile.values, controlProfile.geometry, spec.kind);
+          const currentTime = tuningTimes[spec.kind];
+          const exactTime = typeof exactAmount === "number" ? entered
+            : currentTime !== null && entered === TuningModel.number(currentTime) ? currentTime
+              : entered === TuningModel.number(savedState?.time) ? savedState?.time : entered;
+          tuningTimes[spec.kind] = input.value === "" ? null : exactTime;
+          const raw = input.value === "" ? null : TuningModel.acceleration(state?.speed, exactTime);
+          controlDraft[group.node][field.key] = raw !== null && state?.speed === savedState?.speed
+            && exactTime === savedState?.time ? controlProfile.values[group.node][field.key] : raw;
+        } else {
+          const raw = entered === tuningNumber(spec, value) ? value
+            : entered === tuningNumber(spec, field.max) ? field.max * direction
+              : entered / spec.scale * direction;
+          controlDraft[group.node][field.key] = input.value === "" ? null : raw;
+          if (spec.signed && TuningModel.finite(controlDraft[group.node][field.key])) {
+            const kind = field.key === "angular_input_ratio" ? "angular" : "linear";
+            const state = TuningModel.motion(controlDraft, controlProfile.geometry, kind);
+            const savedState = TuningModel.motion(controlProfile.values, controlProfile.geometry, kind);
+            if (state?.speed === 0) tuningTimes[kind] = null;
+            else if (state && tuningTimes[kind] !== null) {
+              controlDraft.drive_component[TuningModel.axes[kind].accel] = state.speed === savedState?.speed
+                && tuningTimes[kind] === savedState?.time ? savedState.accel
+                  : TuningModel.acceleration(state.speed, tuningTimes[kind]);
+            } else if (state) tuningTimes[kind] = state.time;
+          }
+        }
+        refreshControlChanges(input);
       };
       input.addEventListener("input", updateValue);
       const presets = document.createElement("div");
       presets.className = "control-presets";
       for (const [amount, title] of spec.presets || []) {
-        if (amount > input.max) continue;
         const button = document.createElement("button");
         button.type = "button";
         button.className = "btn btn-small";
         button.textContent = title;
+        button.tuningAmount = amount;
         button.addEventListener("click", () => {
-          if (controlsBusy) return;
-          input.value = String(amount);
-          updateValue();
+          if (controlsBusy || button.disabled) return;
+          input.value = String(TuningModel.number(amount));
+          updateValue(amount);
         });
         presets.appendChild(button);
       }
@@ -540,10 +755,23 @@ function renderControls() {
       row.append(heading, help);
       if (spec.presets) row.append(presets);
       row.append(editor, runtime, saved);
+      const range = document.createElement("p");
+      range.className = "control-range";
+      range.id = `${input.id}-range`;
+      range.textContent = spec.acceleration
+        ? "入力できる最短時間を確認しています。"
+        : spec.signed ? `入力できる範囲：0〜${Number(field.max).toFixed(1)} ${spec.unit}（方向の反転は保存済みのまま）。`
+          : `入力できる範囲：${field.min * spec.scale}〜${field.max * spec.scale} ${spec.unit}。`;
+      const estimate = document.createElement("p");
+      estimate.className = "control-estimate";
+      estimate.id = `${input.id}-estimate`;
+      estimate.tabIndex = 0;
+      row.append(range, estimate);
       section.appendChild(row);
     }
     container.appendChild(section);
   }
+  createTuningPreviews(container);
   renderControlSummary();
   refreshControlChanges();
   renderRuntimeValues();
@@ -562,6 +790,8 @@ function controlsSetBusy(busy) {
   for (const input of document.querySelectorAll("#controls-fields input, #controls-fields select, #controls-fields button")) {
     input.disabled = busy;
   }
+  if (controlProfile) refreshTuningFields();
+  if (controlProfile) refreshRangeWarning();
 
 }
 
@@ -613,9 +843,25 @@ function confirmControlDiscard() {
 async function saveControls(event) {
   event.preventDefault();
   if (controlsBusy || !controlProfile) return;
+  const rangeIssue = tuningRangeIssues(controlDraft)[0];
+  if (rangeIssue) {
+    controlMessage(TuningModel.finite(rangeIssue.value)
+      ? TuningModel.speedWarning(rangeIssue.key, rangeIssue.value, rangeIssue.max)
+      : "速さを入力してください。");
+    return;
+  }
   // Check constraints without the browser scrolling to a field below the diagram.
-  if (!document.getElementById("controls-form").checkValidity()) {
-    const invalid = document.getElementById("controls-fields").querySelector("input:invalid");
+  const invalidRow = [...document.querySelectorAll(".control-field")].find((row) => {
+    const { node, key } = row.dataset;
+    const field = controlProfile.groups.find((group) => group.node === node).fields.find((f) => f.key === key);
+    const raw = controlDraft[node][key];
+    return !TuningModel.finite(raw) || raw < field.min || raw > field.max
+      || !document.getElementById(`control-${node}-${key}`).checkValidity();
+  });
+  const invalidInput = invalidRow
+    && document.getElementById(`control-${invalidRow.dataset.node}-${invalidRow.dataset.key}`);
+  if (invalidInput || !document.getElementById("controls-form").checkValidity()) {
+    const invalid = invalidInput || document.getElementById("controls-fields").querySelector("input:invalid");
     const group = controlProfile.groups.find((item) => item.node === invalid?.dataset.node);
     const field = group?.fields.find((item) => item.key === invalid.dataset.key);
     const spec = tuningSpec(group?.node, field?.key);
