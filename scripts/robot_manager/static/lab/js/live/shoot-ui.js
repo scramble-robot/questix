@@ -1,7 +1,6 @@
 import { liveStatus, onLiveStatus } from './live-status.js';
 import { html, render, ref, nothing } from '../vendor/lit-html.js';
 import { fillSentence as fill } from '../core/content.js';
-import { revealElement } from '../core/reveal.js';
 import {
   shootModel,
   onShoot,
@@ -65,12 +64,7 @@ function actionsOf(entry) {
       entry.view.tiltPreview = null;
       setTilt(deg);
     },
-    // Press → see: the fire button and the spin-up bar go to the top of the screen, clear of the
-    // stop control in the header.
-    startRoller() {
-      startRoller();
-      revealElement(entry.element?.querySelector('[data-shoot-run]'));
-    },
+    startRoller,
     stopOwn,
     fire: fireOne,
   };

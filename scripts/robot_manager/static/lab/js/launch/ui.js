@@ -17,7 +17,6 @@ import { drawLaunch, drawLaunchRobot } from './render.js';
 import { launchPage } from './view.js';
 import { reportLessonProgress } from '../shell/lesson-progress.js';
 import { fillSentence } from '../core/content.js';
-import { revealIfHidden } from '../core/reveal.js';
 import { registerRecordTarget, revealAfterRender } from '../live/record-targets.js';
 
 // Disc-launcher course: state and behaviour. view.js turns the model into markup, render.js draws
@@ -484,8 +483,17 @@ function focusRow(id) {
     document.querySelector(`[data-launch-shot-power="${id}"]`) ??
     document.querySelector(`[data-launch-shot-range="${id}"]`);
   if (!field) return;
+  const box = field.getBoundingClientRect();
+  const header = document.querySelector('.site-header')?.getBoundingClientRect();
+  if (
+    !field.getClientRects().length ||
+    box.top < (header?.bottom ?? 0) ||
+    box.bottom > window.innerHeight ||
+    box.left < 0 ||
+    box.right > window.innerWidth
+  )
+    return;
   field.focus({ preventScroll: true });
-  revealIfHidden(field.closest('tr, form') ?? field);
 }
 
 /**
