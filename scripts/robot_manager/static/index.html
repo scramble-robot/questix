@@ -79,9 +79,78 @@
     </div>
     <!-- ===== Control tab ===== -->
     <div class="tab-panel active" data-panel="control" id="panel-control" role="tabpanel" aria-labelledby="tab-control">
-    <!-- The teacher's permission (actuation.py): a permission, not an E-stop. Lesson mode only:
-         it is the lesson launch's vote for /motion_permission, so the drive and the launcher move
-         only while it is on, controller included. -->
+    <section class="card status-card" aria-labelledby="status-heading">
+      <h2 id="status-heading">いまのロボット</h2>
+      <dl class="status-strip">
+        <div><dt>ロボット名</dt><dd id="st-robot" data-tone="plain">—</dd></div>
+        <div><dt>モード</dt><dd id="st-mode">—</dd></div>
+        <div><dt>ロボット制御</dt><dd id="st-service">—</dd></div>
+        <div><dt>非常停止ボタン</dt><dd id="st-estop">—</dd></div>
+        <div><dt>教材の配信</dt><dd id="st-lab">—</dd></div>
+        <div><dt>教材からの走行・発射</dt><dd id="st-permissions">—</dd></div>
+        <div><dt>いま動かしているのは</dt><dd id="st-driver">—</dd></div>
+      </dl>
+      <p class="section-help">ロボット名はロボットのホスト名で、教材の画面に出る名前と同じです。非常停止ボタンはロボットから受信した状態を表示します。未受信・途絶は「不明」、取得失敗は「確認不能」です。</p>
+      <section class="motion-state-section" id="motion-state-card" aria-labelledby="motion-state-heading">
+        <h3 id="motion-state-heading">ロボットが動かないとき</h3>
+        <p class="section-help">ロボットから非常停止と走行許可（教材は先生の操作許可、大会は AutoReferee）を読み取り、いま何が止めているかを表示します。読み取りに数秒かかります。何も変更しません。</p>
+        <div class="button-group">
+          <button type="button" class="btn" id="motion-state-check">なぜ動かないか確認</button>
+        </div>
+        <div class="motion-state-response" role="region" aria-label="診断結果" tabindex="0">
+          <dl class="readiness-grid" id="motion-state-result" hidden>
+            <div><dt>非常停止</dt><dd id="motion-state-estop">—</dd></div>
+            <div><dt>走行</dt><dd id="motion-state-drive">—</dd></div>
+            <div><dt>発射機構</dt><dd id="motion-state-launcher">—</dd></div>
+          </dl>
+          <p id="motion-state-summary" class="section-help" role="status"></p>
+        </div>
+      </section>
+    </section>
+
+    <section class="card">
+      <h2>起動前の確認</h2>
+      <p class="section-help">次回の起動に使う設定を確認してから、ロボットを起動します。</p>
+      <dl class="readiness-grid">
+        <div><dt>コントローラー設定</dt><dd id="ready-controller">未取得</dd></div>
+        <div><dt>保存済みの操作設定</dt><dd id="ready-profile">未確認</dd></div>
+        <div><dt>起動環境</dt><dd id="ready-workspace">未確認</dd></div>
+      </dl>
+      <button type="button" class="btn btn-small" id="readiness-refresh">準備状態を確認</button>
+      <p class="section-help">コントローラーの電源・接続、周囲の安全、実機の停止手段は起動前に確認してください。接続や安全状態はこの画面では自動判定していません。</p>
+    </section>
+
+    <section class="card mode-card">
+      <h2>次回起動のモード</h2>
+      <div class="mode-display">
+        <span id="mode-label" class="mode-badge">未確認</span>
+      </div>
+      <!-- modes.py: lesson (教材) / practice (練習) / competition (大会). -->
+      <fieldset class="mode-choice" id="mode-choice">
+        <legend class="visually-hidden">次回起動のモード</legend>
+        <label class="mode-option"><input type="radio" name="mode" value="lesson">
+          <span>教材</span><small>授業。教材から動かせます。走行・発射は先生の許可がある間だけ</small></label>
+        <label class="mode-option"><input type="radio" name="mode" value="practice">
+          <span>練習</span><small>コントローラーで自由に練習。教材・先生の許可は使いません</small></label>
+        <label class="mode-option"><input type="radio" name="mode" value="competition">
+          <span>大会</span><small>電源を入れると大会用の構成で自動起動</small></label>
+      </fieldset>
+      <p id="mode-apply-note" class="section-help">モードは保存後、次回のロボット起動・再起動で反映されます。</p>
+    </section>
+
+    <section class="card">
+      <h2>ロボット制御の起動・停止</h2>
+      <p id="robot-state-help" class="section-help" role="status">ロボット制御の状態を確認しています。</p>
+      <div class="btn-group service-controls">
+        <button class="btn btn-start" data-service-action="start" id="service-start">起動</button>
+        <button class="btn btn-restart" data-service-action="restart" aria-describedby="restart-help">制御を再起動</button>
+        <button class="btn btn-stop" data-service-action="stop">停止</button>
+      </div>
+      <p id="restart-help" class="section-help">再起動すると、動作をいったん止め、保存したモードと設定でロボット制御を起動し直します。</p>
+      <p id="practice-start-help" class="section-help">教材モードと練習モードでは、電源を入れても自動では起動しません。「起動」を押すと保存したモードの構成で起動します。異常終了しても自動では起動し直さないので、もう一度「起動」を押してください。</p>
+    </section>
+
+    <!-- Teacher permissions stay separate from motion permission and the E-stop. -->
     <section class="card" id="actuation-card" aria-labelledby="actuation-heading">
       <h2 id="actuation-heading">先生の操作許可（教材モード）</h2>
       <p class="permission-neutral">スティック・ボタンから手を離してください</p>
@@ -105,81 +174,6 @@
         <p id="actuation-error" class="permission-error"></p>
       </div>
       <p class="section-help">ここで選ぶのは先生の許可です。非常停止の状態や、ロボットが動けるかどうかの判断とは別です。許可は保存されず、Manager の起動・終了、モード切替、ロボット制御の起動・再起動・停止、「すべて止める」で解除されます。配信停止では教材の許可だけが解除されます。</p>
-    </section>
-
-    <!-- Status strip: one place that says what the robot does now. -->
-    <section class="card status-card" aria-labelledby="status-heading">
-      <h2 id="status-heading">いまのロボット</h2>
-      <dl class="status-strip">
-        <div><dt>ロボット名</dt><dd id="st-robot" data-tone="plain">—</dd></div>
-        <div><dt>モード</dt><dd id="st-mode">—</dd></div>
-        <div><dt>ロボット制御</dt><dd id="st-service">—</dd></div>
-        <div><dt>非常停止ボタン</dt><dd id="st-estop">—</dd></div>
-        <div><dt>教材の配信</dt><dd id="st-lab">—</dd></div>
-        <div><dt>教材からの走行・発射</dt><dd id="st-permissions">—</dd></div>
-        <div><dt>いま動かしているのは</dt><dd id="st-driver">—</dd></div>
-      </dl>
-      <p class="section-help">ロボット名はロボットのホスト名で、教材の画面に出る名前と同じです。非常停止ボタンはロボットから受信した状態を表示します。未受信・途絶は「不明」、取得失敗は「確認不能」です。</p>
-    </section>
-
-    <!-- Mode Card -->
-    <section class="card mode-card">
-      <h2>次回起動のモード</h2>
-      <div class="mode-display">
-        <span id="mode-label" class="mode-badge">未確認</span>
-      </div>
-      <!-- modes.py: lesson (教材) / practice (練習) / competition (大会). -->
-      <fieldset class="mode-choice" id="mode-choice">
-        <legend class="visually-hidden">次回起動のモード</legend>
-        <label class="mode-option"><input type="radio" name="mode" value="lesson">
-          <span>教材</span><small>授業。教材から動かせます。走行・発射は先生の許可がある間だけ</small></label>
-        <label class="mode-option"><input type="radio" name="mode" value="practice">
-          <span>練習</span><small>コントローラーで自由に練習。教材・先生の許可は使いません</small></label>
-        <label class="mode-option"><input type="radio" name="mode" value="competition">
-          <span>大会</span><small>電源を入れると大会用の構成で自動起動</small></label>
-      </fieldset>
-      <p id="mode-apply-note" class="section-help">モードは保存後、次回のロボット起動・再起動で反映されます。</p>
-    </section>
-
-    <!-- Service Control -->
-    <section class="card">
-      <h2>ロボット制御の起動・停止</h2>
-      <p id="robot-state-help" class="section-help" role="status">ロボット制御の状態を確認しています。</p>
-      <div class="btn-group service-controls">
-        <button class="btn btn-start" data-service-action="start" id="service-start">起動</button>
-        <button class="btn btn-restart" data-service-action="restart" aria-describedby="restart-help">制御を再起動</button>
-        <button class="btn btn-stop" data-service-action="stop">停止</button>
-      </div>
-      <p id="restart-help" class="section-help">再起動すると、動作をいったん止め、保存したモードと設定でロボット制御を起動し直します。</p>
-      <p id="practice-start-help" class="section-help">教材モードと練習モードでは、電源を入れても自動では起動しません。「起動」を押すと保存したモードの構成で起動します。異常終了しても自動では起動し直さないので、もう一度「起動」を押してください。</p>
-    </section>
-
-    <!-- Why the robot does not move (motion_state.py): /emergency_stop (L1) and /motion_permission
-         (L2) read once on request, in every mode. Reads only; changes nothing. -->
-    <section class="card" id="motion-state-card" aria-labelledby="motion-state-heading">
-      <h2 id="motion-state-heading">ロボットが動かないとき</h2>
-      <p class="section-help">ロボットから非常停止と走行許可（教材は先生の操作許可、大会は AutoReferee）を読み取り、いま何が止めているかを表示します。読み取りに数秒かかります。何も変更しません。</p>
-      <div class="button-group">
-        <button type="button" class="btn" id="motion-state-check">なぜ動かないか確認</button>
-      </div>
-      <dl class="readiness-grid" id="motion-state-result" hidden>
-        <div><dt>非常停止</dt><dd id="motion-state-estop">—</dd></div>
-        <div><dt>走行</dt><dd id="motion-state-drive">—</dd></div>
-        <div><dt>発射機構</dt><dd id="motion-state-launcher">—</dd></div>
-      </dl>
-      <p id="motion-state-summary" class="section-help" role="status"></p>
-    </section>
-
-    <section class="card">
-      <h2>起動前の確認</h2>
-      <p class="section-help">次回の起動に使う設定を確認してから、ロボットを起動します。</p>
-      <dl class="readiness-grid">
-        <div><dt>コントローラー設定</dt><dd id="ready-controller">未取得</dd></div>
-        <div><dt>保存済みの操作設定</dt><dd id="ready-profile">未確認</dd></div>
-        <div><dt>起動環境</dt><dd id="ready-workspace">未確認</dd></div>
-      </dl>
-      <button type="button" class="btn btn-small" id="readiness-refresh">準備状態を確認</button>
-      <p class="section-help">コントローラーの電源・接続、周囲の安全、実機の停止手段は起動前に確認してください。接続や安全状態はこの画面では自動判定していません。</p>
     </section>
 
     <section class="card" aria-labelledby="web-joy-heading">

@@ -1728,3 +1728,11 @@ input[type="checkbox"] { accent-color: var(--accent); }
 #actuation-card, .permission-choice input { scroll-margin-top: var(--manager-chrome-height, 14rem); }
 .permission-error { color: var(--yellow); padding-top: 0.5rem; }
 .permission-error:empty { display: none; }
+
+/* Diagnostic text wraps inside a fixed region, so no later card moves on a result.
+   Long answers remain readable by keyboard or pointer scrolling at every zoom level. */
+.motion-state-section { border-top: 1px solid var(--border); margin-top: 1.25rem; padding-top: 1.25rem; }
+.motion-state-section h3 { font-size: 1.1rem; }
+.motion-state-response { block-size: 24rem; overflow: auto; scrollbar-gutter: stable;
+  overflow-wrap: anywhere; margin-top: 1rem; }
+.motion-state-response:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
