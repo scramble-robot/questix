@@ -29,8 +29,9 @@ def app(tmp_path, monkeypatch):
 
     def observe(service):
         module.estop_seen.append(service)
-        return {"state": "unknown", "note": "robot_stopped"}
-    monkeypatch.setattr(module.estop_monitor, "observe", observe)
+        return {"emergency_stop": {"state": "unknown", "note": "robot_stopped"},
+                "motion_permission": {"state": "unknown", "drive_allowed": None}}
+    monkeypatch.setattr(module.estop_monitor, "observe_all", observe)
     return module
 
 

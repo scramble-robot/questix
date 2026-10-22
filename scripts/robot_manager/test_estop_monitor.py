@@ -227,3 +227,122 @@ def test_the_listener_notices_its_stdin_closing():
         assert estop_listener.stdin_closed(stdin) is False
         writer.close()
         assert estop_listener.stdin_closed(stdin) is True
+
+
+def permission_line(now, drive=True, launcher=False, blockers=None):
+    import json
+    return json.dumps({"topic": "/motion_permission", "received_at": now, "mode": "lesson",
+                       "drive_allowed": drive, "launcher_allowed": launcher,
+                       "drive_blockers": blockers or [], "launcher_blockers": ["teacher:off"]})
+
+
+def test_permission_freshness_is_independent_and_cannot_replay_buffered_grants(monitor):
+    import json
+    initial = monitor.observe_all("active")["motion_permission"]
+    assert initial["state"] == "unknown" and initial["drive_allowed"] is None
+    proc = monitor.started[0]
+    proc.stdout.push(permission_line(100))
+    assert monitor.observe_all("active")["motion_permission"]["drive_allowed"] is True
+    monitor.clock[0] = 101.6
+    proc.stdout.push(line(False))  # E-stop remains fresh, permission does not.
+    report = monitor.observe_all("active")
+    assert report["emergency_stop"]["state"] == "released"
+    assert report["motion_permission"]["note"] == "silent"
+    assert report["motion_permission"]["drive_allowed"] is None
+    proc.stdout.push(permission_line(100.05))  # delayed stdout is still stale
+    assert monitor.observe_all("active")["motion_permission"]["state"] == "unknown"
+    proc.stdout.push(permission_line(101.6, False, blockers=["teacher:off"]))
+    known = monitor.observe_all("active")["motion_permission"]
+    assert known["state"] == "known" and known["drive_allowed"] is False
+    assert known["drive_blockers"] == ["teacher:off"]
+    proc.stdout.push(permission_line(101.5, True))  # out of order cannot replace the refusal
+    assert monitor.observe_all("active")["motion_permission"]["drive_allowed"] is False
+    for bad in [permission_line(999), permission_line(float('nan')),
+                json.dumps({"topic": "/motion_permission", "active": False})]:
+        proc.stdout.push(bad)
+    assert monitor.observe_all("active")["motion_permission"]["drive_allowed"] is False
+
+
+def test_permission_is_cleared_on_stop_domain_change_child_exit_and_shutdown(monitor, tmp_path):
+    for action in ("stop", "domain", "exit", "shutdown"):
+        monitor.clock[0] += 20
+        monitor.observe_all("active")
+        proc = monitor.started[-1]
+        proc.stdout.push(permission_line(monitor.clock[0]))
+        assert monitor.observe_all("active")["motion_permission"]["state"] == "known"
+        if action == "stop":
+            result = monitor.observe_all("inactive")
+        elif action == "domain":
+            (tmp_path / "launch.env").write_text("ROS_DOMAIN_ID=8\n")
+            result = monitor.observe_all("active")
+        elif action == "exit":
+            proc.exit(1)
+            result = monitor.observe_all("active")
+        else:
+            monitor.shutdown()
+            result = monitor.observe_all("inactive")
+        assert result["motion_permission"]["state"] == "unknown"
+        assert result["motion_permission"]["drive_allowed"] is None
+
+
+def test_listener_subscribes_to_both_qos_and_never_creates_publishers(monkeypatch, capsys):
+    import json
+    import sys
+    from types import SimpleNamespace
+    subscriptions = []
+
+    class Node:
+        def create_subscription(self, msg_type, topic, callback, qos):
+            subscriptions.append((topic, callback, qos))
+
+        def destroy_node(self):
+            pass
+
+        def create_publisher(self, *args, **kwargs):
+            pytest.fail("display listener must never create a publisher")
+
+        create_service = create_publisher
+        create_client = create_publisher
+
+    spins = []
+
+    def spin(node, timeout_sec):
+        spins.append(True)
+        subscriptions[0][1](SimpleNamespace(active=False, source='operation_manager', reason='released'))
+        subscriptions[1][1](SimpleNamespace(mode='practice', drive_allowed=True,
+                                           launcher_allowed=True, drive_blockers=[], launcher_blockers=[]))
+
+    qos = SimpleNamespace(DurabilityPolicy=SimpleNamespace(TRANSIENT_LOCAL='latched', VOLATILE='volatile'),
+                          HistoryPolicy=SimpleNamespace(KEEP_LAST='last'),
+                          ReliabilityPolicy=SimpleNamespace(RELIABLE='reliable'),
+                          QoSProfile=lambda **kwargs: kwargs)
+    ros = SimpleNamespace(init=lambda **kwargs: None, create_node=lambda *a, **k: Node(),
+                          ok=lambda: not spins, spin_once=spin, try_shutdown=lambda: None)
+    monkeypatch.setitem(sys.modules, 'rclpy', ros)
+    monkeypatch.setitem(sys.modules, 'rclpy.qos', qos)
+    monkeypatch.setitem(sys.modules, 'questix_msgs.msg', SimpleNamespace(EmergencyStop=object,
+                                                                      MotionPermission=object))
+    monkeypatch.setattr(estop_listener, 'stdin_closed', lambda stream: False)
+    import signal
+    monkeypatch.setattr(signal, 'signal', lambda *args: None)
+    estop_listener.main()
+    assert [s[0] for s in subscriptions] == ['/emergency_stop', '/motion_permission']
+    assert [s[2]['durability'] for s in subscriptions] == ['latched', 'volatile']
+    assert all(s[2]['depth'] == 1 and s[2]['reliability'] == 'reliable' for s in subscriptions)
+    reports = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert reports[1]['drive_allowed'] is True and reports[1]['topic'] == '/motion_permission'
+    assert reports[1]['received_at'] > 0
+
+
+def test_status_api_includes_both_snapshots_and_removes_one_shot_route(monkeypatch):
+    from robot_manager import app
+    monkeypatch.setattr(app, '_service_status', lambda: 'inactive')
+    monkeypatch.setattr(app, '_robot_name', lambda: 'test')
+    monkeypatch.setattr(app, '_read_env', lambda: {})
+    snapshot = {'emergency_stop': {'state': 'unknown'},
+                'motion_permission': {'state': 'unknown', 'drive_allowed': None}}
+    monkeypatch.setattr(app.estop_monitor, 'observe_all', lambda service: snapshot)
+    result = app.get_status()
+    assert result['emergency_stop'] == snapshot['emergency_stop']
+    assert result['motion_permission'] == snapshot['motion_permission']
+    assert '/api/motion-state' not in {r.path for r in app.app.routes}
