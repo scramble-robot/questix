@@ -62,6 +62,16 @@ test('disconnect keeps the robot monitor and its stream rows with an explicit of
   assert.doesNotMatch(source, /\$\('robotMonitor'\)\.hidden = !open/);
   assert.match(source, /\$\('robotMonitor'\)\.hidden = !monitorHello/);
   assert.match(source, /streamRows\(\{ \.\.\.state, hello: monitorHello \}, open\)/);
+  // A different rate label must not change table-column widths and wrap a topic above the pad.
+  assert.match(
+    source,
+    /live-text-reserve" aria-hidden="true"\s*>\$\{copy\.monitor\.streamMissing\}/,
+  );
+  assert.match(
+    source,
+    /live-text-reserve" aria-hidden="true"\s*>\s*\$\{copy\.monitor\.disconnectedRate\}/,
+  );
+  assert.match(source, /\['estopPressed', 'estopReleased', 'estopUnknown', 'estopStale'\]\.map/);
   const copy = JSON.parse(fs.readFileSync(new URL('../content/live/link.json', import.meta.url)));
   assert.match(copy.monitor.disconnected, /未接続/);
 });

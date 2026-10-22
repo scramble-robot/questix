@@ -238,7 +238,16 @@ function readings() {
   $('robotCommand').textContent = twist
     ? `前後 ${f(twist.linear)} m/s · 回転 ${f(twist.angular)} rad/s`
     : '—';
-  $('robotEstop').textContent = estopText(drive);
+  render(
+    html`<span class="live-text-slot">
+      ${['estopPressed', 'estopReleased', 'estopUnknown', 'estopStale'].map(
+        (key) =>
+          html`<span class="live-text-reserve" aria-hidden="true">${copy.monitor[key]}</span>`,
+      )}
+      <span>${estopText()}</span>
+    </span>`,
+    $('robotEstop'),
+  );
 }
 
 // The canvases have no size while the monitor section is hidden, so there is nothing to draw on yet.
@@ -325,7 +334,17 @@ function streamRows(state, connected = true) {
       html`<tr>
         <th>${STREAM_LABEL[name] || name}</th>
         <td>${topic ? html`<code>${topic}</code>` : copy.monitor.streamUnused}</td>
-        <td>${connected ? rateText(topic, state.rates[name]) : copy.monitor.disconnectedRate}</td>
+        <td>
+          <span class="live-text-slot">
+            <span class="live-text-reserve" aria-hidden="true">${copy.monitor.streamMissing}</span>
+            <span class="live-text-reserve" aria-hidden="true"
+              >${copy.monitor.disconnectedRate}</span
+            >
+            <span
+              >${connected ? rateText(topic, state.rates[name]) : copy.monitor.disconnectedRate}</span
+            >
+          </span>
+        </td>
       </tr>`,
   );
 }
