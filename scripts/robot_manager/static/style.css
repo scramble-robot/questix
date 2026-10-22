@@ -29,6 +29,7 @@
   --radius: 12px;
   --radius-control: 8px;
   --shadow: 0 8px 28px #0003;
+  --status-region-height: 9rem;
 }
 
 * {
@@ -1679,15 +1680,14 @@ input[type="checkbox"] { accent-color: var(--accent); }
 
 /* Permission choices stay in place. Notifications keep their original, early position;
    their own scroll region keeps long messages readable without moving the controls. */
-.notification-region {
-  height: 9rem;
+.notification-region, .motion-state-response {
   overflow: auto;
   scrollbar-gutter: stable;
-  margin-bottom: 1rem;
   border: 1px solid var(--border-input);
   border-radius: var(--radius-control);
   padding: 0.75rem;
 }
+.notification-region { height: var(--status-region-height); margin-bottom: 1rem; }
 .notification-region .notice { margin: 0 0 0.6rem; }
 .notification-empty { color: var(--text-dim); font-size: var(--font-small); }
 .notification-region:has(> :not([hidden]):not(.notification-empty)) .notification-empty { display: none; }
@@ -1733,6 +1733,6 @@ input[type="checkbox"] { accent-color: var(--accent); }
    Long answers remain readable by keyboard or pointer scrolling at every zoom level. */
 .motion-state-section { border-top: 1px solid var(--border); margin-top: 1.25rem; padding-top: 1.25rem; }
 .motion-state-section h3 { font-size: 1.1rem; }
-.motion-state-response { block-size: 24rem; overflow: auto; scrollbar-gutter: stable;
+.motion-state-response { block-size: var(--status-region-height);
   overflow-wrap: anywhere; margin-top: 1rem; }
 .motion-state-response:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
