@@ -133,11 +133,17 @@ h3 > .run-mode {
   color: #4d6469;
 }
 .lesson-brief .run-mode-strip p {
-  flex: 1 1 24em;
+  /* The badges and jump keep their row; the explanation uses the whole next row. */
+  flex: 1 0 100%;
+  order: 1;
+  min-width: 0;
   margin: 0;
   font-size: 14px;
   line-height: 1.7;
   color: #3d545b;
+}
+.run-mode-strip .run-mode-jump {
+  margin-left: auto;
 }
 .run-mode-jump {
   min-height: 0;
