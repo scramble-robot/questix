@@ -101,7 +101,7 @@
   }
 }
 
-/* Two rows at every required width. State words never collapse or scroll away. */
+/* Two rows below the wide breakpoint. State words never collapse or scroll away. */
 body .site-header {
   position: sticky;
   top: 0;
@@ -187,8 +187,8 @@ body .course-switcher[open] > summary::after {
 .live-status-line {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 6px;
+  justify-content: flex-start;
+  gap: 8px;
   min-height: 28px;
   font-size: 12px;
   line-height: 18px;
@@ -241,11 +241,6 @@ body .lab-stop {
   body .header-actions > .series-home {
     min-width: 44px;
     justify-content: center;
-  }
-}
-@media (max-width: 460px) {
-  body .site-header .brand-lab {
-    display: none;
   }
 }
 @media (max-width: 700px) {
@@ -388,5 +383,19 @@ body .header-actions #robotLinkState {
   }
   html {
     scroll-padding-top: 117px;
+  }
+}
+
+/* Tablets at 200% still keep the full QUESTiX LAB brand and 44px controls. */
+@media (max-width: 700px) {
+  body .site-header .brand-logo {
+    width: 80px;
+  }
+  body .header-actions > button,
+  body .header-actions > .course-switcher > summary {
+    padding-inline: 6px;
+  }
+  body .header-actions > .course-switcher > summary {
+    padding-right: 24px;
   }
 }

@@ -107,3 +107,11 @@ test('robot accessible name and title retain the entire long name and connection
     /\.robot-link-name\s*\{[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap/s,
   );
 });
+
+test('narrow header packs the second row left and keeps LAB at tablet zoom widths', () => {
+  const css = read('css/navigation.css');
+  assert.match(css, /\.live-status-line\s*\{[^}]*justify-content: flex-start;[^}]*gap: 8px/s);
+  assert.doesNotMatch(css, /max-width: 460px/);
+  assert.doesNotMatch(read('css/hs-shell.css'), /body \.site-header|body \.header-actions/);
+  assert.match(css, /body \.site-header \.brand-logo\s*\{\s*width: 80px/);
+});
