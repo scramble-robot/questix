@@ -258,16 +258,16 @@ test("the launcher's own stop names its visible text and is neutral while disabl
     new RegExp(`data-shoot-own-stop[^>]*aria-label=${copy.spinStopLabel}[^>]*\\?disabled=true`),
   );
   // Red is for a stop that can be pressed; a disabled stop looks like the other disabled buttons.
-  // The rule is shared by the drive panel's stop, the launcher's own stop and the stop bar.
+  // The rule is shared by the drive panel's stop, the launcher's own stop and the shared header/dialog stop control.
   const css = fs.readFileSync(new URL('../css/live.css', import.meta.url), 'utf8');
-  const rule = css.match(/\.drive-stop:disabled,\s*\.drive-bar-stop:disabled \{([^}]*)\}/);
+  const rule = css.match(/\.drive-stop:disabled,\s*\.lab-stop:disabled \{([^}]*)\}/);
   assert(rule, 'disabled stop rule');
   assert.match(rule[1], /background: white;/);
   assert.match(rule[1], /color: var\(--muted\);/);
 });
 test('the drive panel stop shows one stop mark, drawn by the stylesheet', () => {
   const css = fs.readFileSync(new URL('../css/live.css', import.meta.url), 'utf8');
-  assert.match(css, /\.drive-stop::before,\s*\.drive-bar-stop::before \{\s*content: '■';/);
+  assert.match(css, /\.drive-stop::before,\s*\.lab-stop::before \{\s*content: '■';/);
   const model = {
     slot: 'test',
     link: { connected: true, phase: 'open', missing: [] },

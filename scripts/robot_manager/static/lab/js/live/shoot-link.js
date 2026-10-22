@@ -27,7 +27,7 @@ import {
 // - when the bridge ends it (a blocker such as the controller or the E-stop, the dead-man, the
 //   time limit, another page's stop).
 // A session that ends on this page sends `roller_stop` only when this page owns the launcher (the
-// bridge lets any page stop any session, so a refused page must not); the stop bar (`stopLauncher`)
+// bridge lets any page stop any session, so a refused page must not); the shared header/dialog stop control (`stopLauncher`)
 // is the one deliberate way to stop another page's session. `fire` carries `confirm: true` only
 // while the learner's safety tick is set, and the tick is cleared after every session that fired
 // or was stopped: one tick per firing.
@@ -163,7 +163,7 @@ function mayStopOwn() {
   return !(state?.active && state.owner !== null && state.owner !== robotState().session);
 }
 
-/** Stop the roller, whichever page operates it (the stop bar). Always allowed. */
+/** Stop the roller, whichever page operates it (the shared header/dialog stop control). Always allowed. */
 function stopLauncher() {
   sendRobot({ type: 'roller_stop' });
   current?.finish('stopped');

@@ -1,6 +1,6 @@
-/* Firing discs from a lesson (js/live/shoot-view.js): the launcher block, and the stop bar that
-   every page shows while a roller turns. The block reuses the driving block's parts (css/live.css:
-   .drive-block, .drive-confirm, .drive-stop, .drive-bar …); only what differs is here. */
+/* Firing discs from a lesson (js/live/shoot-view.js): the launcher block, and the shared header/dialog stop control that
+   every page keeps after a connection. The block reuses the driving block's parts (css/live.css:
+   .drive-block, .drive-confirm, .drive-stop, .lab-stop …); only what differs is here. */
 
 .launch-shoot {
   margin-top: 24px;
