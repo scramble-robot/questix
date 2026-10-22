@@ -354,6 +354,16 @@ function showHeader(state, stage) {
   const button = $('robotLinkOpen');
   button.dataset.phase = state.phase;
   button.dataset.stage = stage;
+  const name = state.phase === 'open' ? robotName(state.hello) : '';
+  $('robotLinkName').textContent = name;
+  $('robotLinkName').title = name;
+  button.setAttribute('aria-label', ['実機', name, copy.stage[stage]].filter(Boolean).join('、'));
+  render(
+    html`<span>${copy.stage[stage]}</span>${Object.values(copy.stage).map(
+        (value) => html`<span class="header-text-reserve" aria-hidden="true">${value}</span>`,
+      )}`,
+    $('robotLinkState'),
+  );
 }
 // Until a link has worked, the address stays editable so a typo can be fixed while it retries.
 function showForm(state, stage) {

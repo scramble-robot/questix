@@ -89,83 +89,8 @@
   padding: 4px 10px;
 }
 
-/* Phone header: one row (logo · 実機 · 一覧 · 教材 ▾) instead of ~150 px. The robot's state stays
-   visible as the dot's colour; its name and state text are in the 実機 dialog. navigation.css is
-   loaded after this file, hence the body prefix. */
 .switcher-short {
   display: none;
-}
-@media (max-width: 600px) {
-  body .site-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    padding: 6px 12px;
-    min-height: 0;
-  }
-  body .site-header .brand-logo {
-    width: 96px;
-  }
-  body .site-header .brand-lab {
-    font-size: 13px;
-  }
-  body .header-actions {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-wrap: nowrap;
-  }
-  body .header-actions > button,
-  body .course-switcher > summary {
-    min-height: 40px;
-    padding: 6px 10px;
-    font-size: 14px;
-  }
-  /* The connection keeps one short word next to the dot (live-ui.js data-short: 接続済み / 未接続 /
-     非常停止); the full sentence stays in the text for screen readers. */
-  body .header-actions > .robot-link {
-    gap: 4px;
-    padding: 6px 8px;
-  }
-  body .robot-link #robotLinkState {
-    font-size: 0;
-  }
-  body .robot-link #robotLinkState::after {
-    content: attr(data-short);
-    font-size: 12px;
-    font-weight: 600;
-  }
-  body .robot-link .robot-link-name,
-  body .header-actions .header-long,
-  body .course-switcher .switcher-label,
-  body .course-switcher #currentCourseTitle {
-    display: none;
-  }
-  body .course-switcher .switcher-short {
-    display: inline;
-    font-weight: 700;
-    color: #1e5350;
-  }
-  /* 「教材 ⌄」 on one line, the same height as the buttons beside it (base.css pads every details). */
-  body .course-switcher {
-    padding: 0;
-  }
-  body .course-switcher > summary {
-    flex-direction: row;
-    align-items: center;
-    padding-right: 30px;
-  }
-  body .course-switcher > summary::after {
-    position: absolute;
-    right: 10px;
-    top: 50%;
-    line-height: 1;
-    transform: translateY(-70%); /* ⌄ sits low in its line box */
-  }
-  body .course-switcher[open] > summary::after {
-    transform: translateY(-30%) rotate(180deg);
-  }
 }
 @media (max-width: 600px) {
   /* The badges replace the label; keep the explanation readable on its own row. */
