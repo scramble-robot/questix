@@ -280,14 +280,14 @@ exits.
 
 | `state` | shown | when |
 |---|---|---|
-| `pressed` | 押されています（operation_manager's reason in words, e.g. 非常停止ボタンが押されているか、つながっていません） | `active: true` |
-| `released` | 解除されています (header 解除中) | `active: false` |
+| `pressed` | 押されています（生の `reason` は状態欄に表示しません） | `active: true` |
+| `released` | 解除 (headerも解除) | `active: false` |
 | `released`, reason `released (no GPIO safety path)` | 解除されています（…診断用の起動です） (header 不明) | manual `enable_gpio_ref:=false` |
-| `unknown` (`note`) | 確認しています / 届いていません / 途絶えています / the error | `starting`, `not_heard` (5 s), `silent` (no report for 1.5 s), `unavailable` |
+| `unknown` (`note`) | 不明（制御停止時は「ロボット制御が停止中」を併記） | `starting`, `not_heard` (5 s), `silent` (no report for 1.5 s), `unavailable`, `robot_stopped` |
 
 It is a display only: drive_component, shot_component, esc_motor_control and the lab bridge keep
-judging `/emergency_stop` themselves, and nothing here lets anything move. Unknown is never shown
-as released.
+judging `/emergency_stop` and `/motion_permission` themselves, and nothing here lets anything move.
+Unknown is never shown as released or allowed.
 
 ## QUESTiX LAB (`/lab/`)
 
