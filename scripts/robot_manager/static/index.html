@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>QUESTiX Robot Manager</title>
-  <link rel="stylesheet" href="/static/style.css?v=37">
+  <link rel="stylesheet" href="/static/style.css?v=38">
 </head>
 
 <body>
@@ -795,21 +795,21 @@
           <input type="text" id="rec-exclude" data-rec-config="EXCLUDE_TOPICS"
             placeholder="/camera/image_raw /scan">
         </div>
-        <div class="config-item">
+        <div class="config-item wide rec-numeric-setting">
           <label for="rec-min-free">確保する空き容量（GB）</label>
           <input type="number" id="rec-min-free" data-rec-config="MIN_FREE_GB" min="1"
             max="16" step="1" required value="5" aria-describedby="rec-min-free-help"
             data-unit="GB" data-zero-meaning="0は使用できません">
           <p id="rec-min-free-help" class="section-help">1〜16 GBの整数を半角の数字で入力（0は使用できません）。1 GB＝1024³ バイト。</p>
         </div>
-        <div class="config-item">
+        <div class="config-item wide rec-numeric-setting">
           <label for="rec-max-split">ファイルの分割サイズ（MB）</label>
           <input type="number" id="rec-max-split" data-rec-config="MAX_SPLIT_MB" min="0"
             max="8192" step="1" required value="200" aria-describedby="rec-max-split-help"
             data-unit="MB" data-zero-meaning="0はサイズで分けません">
           <p id="rec-max-split-help" class="section-help">0〜8192 MBの整数を半角の数字で入力（0はサイズで分けません）。1 MB＝1000² バイト。</p>
         </div>
-        <div class="config-item wide">
+        <div class="config-item wide rec-numeric-setting">
           <label for="rec-max-duration">ファイルを時間で分ける間隔（秒）</label>
           <input type="number" id="rec-max-duration" data-rec-config="MAX_DURATION_SEC" min="0"
             max="14400" step="1" required value="0" aria-describedby="rec-max-duration-help"
