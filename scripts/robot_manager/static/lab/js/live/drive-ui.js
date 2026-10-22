@@ -1,3 +1,4 @@
+import { renderLive } from './live-layout.js';
 import { controlStatus, hardBlocked } from './control-status.js';
 import { html, nothing, render, unsafeHTML } from '../vendor/lit-html.js';
 import { fillSentence as fill } from '../core/content.js';
@@ -255,7 +256,7 @@ function update() {
   const panel = document.getElementById('robotDrive');
   // Driving needs a connection; before that the dialog is about connecting.
   panel.hidden = false;
-  render(panel.hidden ? nothing : benchPanel(model), panel);
+  renderLive(panel.hidden ? nothing : benchPanel(model), panel);
 }
 
 function initDriveUi() {

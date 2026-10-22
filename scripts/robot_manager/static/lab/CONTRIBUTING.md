@@ -95,7 +95,10 @@ exact but unreadable teaches nothing. Every new or reworked figure follows these
 - **Events are marked where they happen.** Anything the text asks the learner to look for (a
   load change, contact, a state change, a stop) is a labelled vertical line on the chart and an
   entry in 起きたこと; repeated events are grouped (「見直し 12回（0.3秒ごと）」).
-- **Press → see, on one screen.** After a button starts or changes something, the part to watch
+- **Press → see, on one screen (simulators only).** Real-robot commands and received status must
+  never scroll the page or any dialog/container. Put results under the controls and provide a
+  learner-operated results button. The 1px pressed-button decoration is allowed. In simulators,
+  after a button starts or changes something, the part to watch
   is on screen: scroll to it (as the systems courses do with `scrollToScene`) or show the result
   right under the button. On a phone the chart the text refers to is next to the scene, not two
   screens below.

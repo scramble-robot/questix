@@ -1,3 +1,4 @@
+import { renderLive } from '../live/live-layout.js';
 import { render } from '../vendor/lit-html.js';
 import { loadJson, loadText, fillSentence as fill } from '../core/content.js';
 import { downloadFile } from '../core/dom.js';
@@ -344,7 +345,7 @@ function buildModel() {
 }
 
 function update() {
-  render(motorPage(buildModel(), copy, fragments, actions), page());
+  renderLive(motorPage(buildModel(), copy, fragments, actions), page());
   reportLessonProgress('motor', {
     topics: MOTOR_TOPICS.map((topic) => ({ id: topic.id, title: copy.topics[topic.id].label })),
     current: topicId,

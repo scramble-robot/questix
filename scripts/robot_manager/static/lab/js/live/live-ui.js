@@ -14,6 +14,7 @@ import { loadJson, fillSentence } from '../core/content.js';
 import { html, render, nothing } from '../vendor/lit-html.js';
 
 import { liveStatus } from './live-status.js';
+import { renderLive } from './live-layout.js';
 
 const copy = await loadJson('content/live/link.json');
 
@@ -51,6 +52,7 @@ let history = [];
 let cameraUrl = '';
 let frameRequested = false;
 let addressProblem = ''; // the sentence normalizeRobotUrl threw for the typed address
+let monitorHello = null; // keep the monitor's occupied area after its first connection
 
 function prepare(canvas) {
   const ratio = window.devicePixelRatio || 1;
@@ -317,13 +319,13 @@ function rateText(topic, hz) {
   if (!(hz > 0)) return copy.monitor.streamMissing;
   return fillSentence(copy.monitor.streamRate, { hz: hz.toFixed(1) });
 }
-function streamRows(state) {
+function streamRows(state, connected = true) {
   return Object.entries(state.hello.streams).map(
     ([name, topic]) =>
       html`<tr>
         <th>${STREAM_LABEL[name] || name}</th>
         <td>${topic ? html`<code>${topic}</code>` : copy.monitor.streamUnused}</td>
-        <td>${rateText(topic, state.rates[name])}</td>
+        <td>${connected ? rateText(topic, state.rates[name]) : copy.monitor.disconnectedRate}</td>
       </tr>`,
   );
 }
@@ -359,9 +361,17 @@ function showState(state) {
   showHeader(state, stage);
   showForm(state, stage);
   $('robotStatus').dataset.stage = stage;
-  render(statusView(state, stage), $('robotStatus'));
-  $('robotMonitor').hidden = !open;
-  render(open ? streamRows(state) : nothing, $('robotStreams'));
+  renderLive(statusView(state, stage), $('robotStatus'));
+  if (open && state.hello) monitorHello = state.hello;
+  $('robotMonitor').hidden = !monitorHello;
+  $('robotMonitor').dataset.connected = String(open);
+  $('robotMonitorConnection').textContent = open
+    ? copy.monitor.connected
+    : copy.monitor.disconnected;
+  renderLive(
+    monitorHello ? streamRows({ ...state, hello: monitorHello }, open) : nothing,
+    $('robotStreams'),
+  );
   if (!open) {
     resetMonitor();
   }

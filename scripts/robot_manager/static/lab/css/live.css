@@ -651,3 +651,46 @@
 .drive-stop {
   word-break: keep-all;
 }
+
+/* Live updates reserve their occupied height; they must not become scroll anchors either. */
+body:has(.page:not([hidden]) [data-live-block]),
+body:has(.page:not([hidden]) .shoot-host),
+body:has(dialog[open] [data-live-block]),
+body:has(#robotDialog[open]) {
+  overflow-anchor: none;
+}
+#robotDialog,
+dialog:has([data-live-block]),
+dialog:has([data-live-block]) .supplement-body {
+  overflow-anchor: none;
+}
+[data-live-block],
+.shoot-host,
+.robot-monitor,
+.robot-drive,
+.motor-bench-table,
+#launchMeasureLayout,
+[data-measure-live] {
+  overflow-anchor: none;
+  align-content: start;
+}
+.live-dialog-header {
+  flex: none;
+}
+#robotMonitorConnection {
+  min-height: 1.5em;
+  font-size: 14px;
+}
+.robot-monitor[data-connected='false'] {
+  color: var(--muted);
+}
+.live-text-slot {
+  display: grid;
+}
+.live-text-slot > span {
+  grid-area: 1 / 1;
+}
+.live-text-reserve {
+  visibility: hidden;
+  pointer-events: none;
+}

@@ -1,3 +1,4 @@
+import { renderLive } from './live-layout.js';
 import { liveStatus, onLiveStatus } from './live-status.js';
 import { html, render, ref, nothing } from '../vendor/lit-html.js';
 import { fillSentence as fill } from '../core/content.js';
@@ -72,7 +73,7 @@ function actionsOf(entry) {
 
 function draw(entry, model) {
   if (!entry.element?.isConnected) return;
-  render(
+  renderLive(
     shootBlock(
       { ...model, estopState: liveStatus().estop, reconfirm },
       entry.view,

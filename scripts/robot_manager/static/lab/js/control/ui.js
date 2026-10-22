@@ -1,3 +1,4 @@
+import { renderLive } from '../live/live-layout.js';
 import { render } from '../vendor/lit-html.js';
 import { loadJson, loadText } from '../core/content.js';
 import { downloadFile } from '../core/dom.js';
@@ -241,7 +242,7 @@ function drawStage() {
 }
 
 function update() {
-  render(controlPage(buildModel(), copy, hardwareHtml, actions), page());
+  renderLive(controlPage(buildModel(), copy, hardwareHtml, actions), page());
   reportLessonProgress('control', {
     topics: CONTROL_TOPICS.map((topic) => ({ id: topic.id, title: topic.name })),
     current: topicId,

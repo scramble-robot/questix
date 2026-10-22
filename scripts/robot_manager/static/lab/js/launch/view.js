@@ -622,7 +622,7 @@ function shootCard(measurement, copy, actions) {
 function measurementBody(model, copy, fragments, actions) {
   return html`${shootCard(model.measurement, copy, actions)}
     ${shotsTable(model.measurement, copy, actions)}
-    <div class="launch-layout">
+    <div class="launch-layout" id="launchMeasureLayout">
       ${measurementCard(model.measurement, model.chartWidth, copy)}${measurementPanel(
         model.measurement,
         copy,

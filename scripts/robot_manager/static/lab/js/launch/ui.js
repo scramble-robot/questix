@@ -1,3 +1,4 @@
+import { renderLive } from '../live/live-layout.js';
 import { render } from '../vendor/lit-html.js';
 import { loadJson, loadText } from '../core/content.js';
 import { downloadFile, formatNumber } from '../core/dom.js';
@@ -256,7 +257,7 @@ function drawCanvases() {
 }
 
 function update() {
-  render(launchPage(buildModel(), copy, fragments, actions), page());
+  renderLive(launchPage(buildModel(), copy, fragments, actions), page());
   reportLessonProgress('launch', {
     topics: LAUNCH_TOPICS.map((topic) => ({ id: topic.id, title: topic.title })),
     current: topicId,

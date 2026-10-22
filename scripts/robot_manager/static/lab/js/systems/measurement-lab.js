@@ -1,3 +1,4 @@
+import { renderLive } from '../live/live-layout.js';
 import { render } from '../vendor/lit-html.js';
 import { loadJson, fillSentence as fill } from '../core/content.js';
 import { downloadFile } from '../core/dom.js';
@@ -501,7 +502,7 @@ function watchPlot(element) {
 function update() {
   if (!shown) return;
   keepTable(shown);
-  render(measurementPanel(buildModel(shown), copy, actions), host());
+  renderLive(measurementPanel(buildModel(shown), copy, actions), host());
 }
 
 // Press → see inside the dialog: the jump links scroll the part they name into view.
