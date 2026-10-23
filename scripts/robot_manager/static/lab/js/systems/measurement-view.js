@@ -461,6 +461,7 @@ function measurementPanel(model, copy, actions) {
   >
     <summary>${panel.summary}</summary>
     <div class="measurement-lab">
+      ${liveCapture(model, copy, actions)}
       ${
         model.live
           ? html`<button
@@ -488,7 +489,7 @@ function measurementPanel(model, copy, actions) {
       <p data-measure-source>${fill(panel.inUse, { source: model.source })}</p>
       ${measurementTable(model, copy, actions)}
       <button data-measure-add @click=${actions.addRow}>${copy.labels.addRow}</button>
-      ${importExport(model, copy, actions)}${liveCapture(model, copy, actions)}
+      ${importExport(model, copy, actions)}
     </div>
   </details>`;
 }

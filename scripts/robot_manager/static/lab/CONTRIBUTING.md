@@ -95,7 +95,10 @@ exact but unreadable teaches nothing. Every new or reworked figure follows these
 - **Events are marked where they happen.** Anything the text asks the learner to look for (a
   load change, contact, a state change, a stop) is a labelled vertical line on the chart and an
   entry in 起きたこと; repeated events are grouped (「見直し 12回（0.3秒ごと）」).
-- **Press → see, on one screen.** After a button starts or changes something, the part to watch
+- **Press → see, on one screen (simulators only).** Real-robot commands and received status must
+  never scroll the page or any dialog/container. Put results under the controls and provide a
+  learner-operated results button. The 1px pressed-button decoration is allowed. In simulators,
+  after a button starts or changes something, the part to watch
   is on screen: scroll to it (as the systems courses do with `scrollToScene`) or show the result
   right under the button. On a phone the chart the text refers to is next to the scene, not two
   screens below.
@@ -153,7 +156,7 @@ tilt, at})` gets each of this page's discs and returns whether the lesson kept a
   to put the robot), `conditions()` a few words for the run history, and `confirmLabel` replaces
   the safety tick's sentence when the robot is not on the floor (the motor bench: wheels lifted). The shared block shows one
   learner reason at a time, folds the teacher's details, and puts the result under the button.
-  A run's own stop is scoped to the page (`scope: 'mine'`); only the stop bar stops any run. Never bypass the bridge's checks from the
+  A run's own stop is scoped to the page (`scope: 'mine'`); only the shared header/dialog stop control stops any run. Never bypass the bridge's checks from the
   page, and give a closed-loop controller its own guards (stale sensor → stand still, minimum
   distance → throw an Error with the learner's sentence). Declare the topic's `drive` run mode in
   `content/shell/run-modes.json` and put `runModeBadgeHtml('drive')` in the block's heading.

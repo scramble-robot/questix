@@ -2,7 +2,6 @@ import { controlStatus } from './control-status.js';
 import { freshInteraction } from './press-guard.js';
 import { html, nothing } from '../vendor/lit-html.js';
 import { loadJson, fillSentence as fill } from '../core/content.js';
-import { revealElement } from '../core/reveal.js';
 import { driveControls } from './drive-view.js';
 import { setGroupName } from './capture.js';
 import { recordsCopy } from './records-core.js';
@@ -90,9 +89,9 @@ function robotSaveLine(model) {
  * How the last run ended (`driveNote`), what the lesson made of it (`message`) and whether the
  * robot kept it, as one box under the button: each fact once.
  */
-function resultBox(model) {
+function resultBox(model, actions) {
   const ended = model.driveNote && !driveBusy(model) ? model.driveNote : '';
-  if (!ended && !model.message && !model.robotSave?.message) return nothing;
+  if (!ended && !model.message && !model.robotSave?.message && !model.resultLink) return nothing;
   return html`<div class="live-result" data-live-result>
     ${ended ? html`<p class="drive-result" role="status" data-drive-result>${ended}</p>` : nothing}
     ${
@@ -101,6 +100,7 @@ function resultBox(model) {
         : nothing
     }
     ${robotSaveLine(model)}
+    ${model.resultLink ? html`<button class="text-button" data-live-results ?disabled=${!model.resultLink.enabled} @click=${actions.showResults}>${model.resultLink.label}</button>` : nothing}
   </div>`;
 }
 
@@ -279,28 +279,8 @@ function liveCaptureControls(model, actions) {
     </div>
     ${recordPart(model, actions)}
     ${model.drive ? driveControls(model, model.drive, actions, { strip: stripFor(model) }) : stripFor(model)}
-    ${resultBox(model)} ${statePart(model)} ${filesSection(model, actions)}
+    ${resultBox(model, actions)} ${statePart(model)} ${filesSection(model, actions)}
   </div>`;
-}
-
-/**
- * Press → see, the same in every course: once a run or a recording starts, the block's button and
- * the live strip under it (`[data-live-run]` of the block of `slot`) are brought on screen, clear
- * of the header and of the stop bar at the bottom. Nothing moves when they are already in view.
- */
-function revealLiveRun(slot) {
-  requestAnimationFrame(() => {
-    const block = document.querySelector(`[data-live-block="${CSS.escape(slot)}"]`);
-    const run = block?.querySelector('[data-live-run]');
-    if (!run) return;
-    const box = run.getBoundingClientRect();
-    const header = document.querySelector('.site-header');
-    const headerBottom = header ? Math.max(0, header.getBoundingClientRect().bottom) : 0;
-    const bar = document.getElementById('liveStopBar');
-    const bottom = bar && !bar.hidden ? bar.getBoundingClientRect().top : window.innerHeight;
-    if (box.top >= headerBottom && box.bottom <= bottom) return;
-    revealElement(run);
-  });
 }
 
 // The sentences a lesson adds after a recording, so every course reports the same conditions.
@@ -317,4 +297,4 @@ function captureNotes(summary) {
   return notes.join(' ');
 }
 
-export { liveCaptureControls, captureNotes, captureCopy, revealLiveRun };
+export { liveCaptureControls, captureNotes, captureCopy };

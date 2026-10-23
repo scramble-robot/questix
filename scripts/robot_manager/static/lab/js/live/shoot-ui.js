@@ -1,7 +1,7 @@
+import { renderLive } from './live-layout.js';
 import { liveStatus, onLiveStatus } from './live-status.js';
 import { html, render, ref, nothing } from '../vendor/lit-html.js';
 import { fillSentence as fill } from '../core/content.js';
-import { revealElement } from '../core/reveal.js';
 import {
   shootModel,
   onShoot,
@@ -21,7 +21,7 @@ import { robotRecordsInfo } from './robot-records.js';
 import { saveRecordOnRobot } from './robot-link.js';
 
 // The launcher block a lesson puts where learners fire discs (`launcherPanel(place, options)` in
-// its view), and the stop bar every page shows while a roller turns on a page's command.
+// its view), and the shared header/dialog stop control every page keeps after a connection.
 // - The block draws itself into its element (at most every REDRAW_MS while it is on screen), so
 //   the lesson's page is not redrawn ten times a second for a countdown.
 // - Each of this page's shots is handed to the lesson (`options.onShot`), which adds the row the
@@ -65,12 +65,7 @@ function actionsOf(entry) {
       entry.view.tiltPreview = null;
       setTilt(deg);
     },
-    // Press → see: the fire button and the spin-up bar go to the top of the screen, clear of the
-    // stop bar that comes up at the bottom.
-    startRoller() {
-      startRoller();
-      revealElement(entry.element?.querySelector('[data-shoot-run]'));
-    },
+    startRoller,
     stopOwn,
     fire: fireOne,
   };
@@ -78,7 +73,7 @@ function actionsOf(entry) {
 
 function draw(entry, model) {
   if (!entry.element?.isConnected) return;
-  render(
+  renderLive(
     shootBlock(
       { ...model, estopState: liveStatus().estop, reconfirm },
       entry.view,
@@ -86,6 +81,7 @@ function draw(entry, model) {
       entry.options.after?.() ?? nothing,
     ),
     entry.element,
+    { preserve: true },
   );
 }
 

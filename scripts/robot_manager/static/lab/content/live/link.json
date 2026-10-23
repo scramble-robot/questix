@@ -71,6 +71,9 @@
     "estopUnknown": "わかりません（非常停止の信号がまだ届いていません）",
     "estopStale": "わかりません（非常停止の信号が途絶えています）",
     "streamUnused": "使いません",
+    "connected": "接続中：ロボットから受信しています",
+    "disconnected": "未接続：最後に受信した表示です",
+    "disconnectedRate": "未接続",
     "streamMissing": "届いていません",
     "streamRate": "{hz} 回/秒",
     "wheelLeft": "左",
@@ -103,6 +106,8 @@
       "off": "なし",
       "unknown": "不明"
     },
-    "connection": "接続："
+    "connection": "接続：",
+    "estopLabel": "非常停止",
+    "permissionLabel": "許可"
   }
 }

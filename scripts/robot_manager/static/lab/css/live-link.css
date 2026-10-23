@@ -33,6 +33,14 @@
   color: var(--green);
   font-size: 13px;
 }
+@media (max-width: 700px) {
+  /* Match the full-screen dialog's 8px padding in navigation.css. */
+  .robot-dialog-nav {
+    top: -8px;
+    margin-inline: -8px;
+    padding-inline: 8px;
+  }
+}
 .robot-dialog > section {
   scroll-margin-top: 64px;
 }

@@ -964,7 +964,11 @@ function benchCard(model, copy, actions) {
     <h2>
       ${unsafeHTML(runModeBadgeHtml('live'))}${unsafeHTML(runModeBadgeHtml('drive'))} ${text.title}
     </h2>
-    <p>${capture.link.connected ? text.intro : text.introOffline}</p>
+    <p class="live-text-slot">
+      <span class="live-text-reserve" aria-hidden="true">${text.intro}</span>
+      <span class="live-text-reserve" aria-hidden="true">${text.introOffline}</span>
+      <span>${capture.link.connected ? text.intro : text.introOffline}</span>
+    </p>
     <div class="motor-bench-layout">
       <div class="motor-bench-controls">
         ${liveCaptureControls(capture, actions.bench)} ${benchNote(capture, text)}
