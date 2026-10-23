@@ -88,7 +88,7 @@
 }
 /* Tablets in portrait and narrow windows: the actions take the row under the logo, right-aligned
    so the course list still opens under its switcher, and wrap rather than overlap. */
-@media (min-width: 601px) and (max-width: 943px) {
+@media (min-width: 601px) and (max-width: 942.98px) {
   .site-header {
     grid-template-columns: minmax(0, 1fr);
     row-gap: 8px;
@@ -360,10 +360,6 @@ body .header-actions #robotLinkState {
     display: inline-grid;
     font-size: 12px;
   }
-  body .header-actions > .lab-stop {
-    grid-column: 5;
-    grid-row: 1;
-  }
   #labHeaderStop .lab-stop {
     grid-column: 5;
     grid-row: 1;
@@ -400,5 +396,8 @@ body .header-actions #robotLinkState {
   }
   body .header-actions > .course-switcher > summary {
     padding-right: 24px;
+  }
+  body .course-switcher > summary::after {
+    font-size: 14px;
   }
 }
