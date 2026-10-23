@@ -113,6 +113,15 @@ function stopping(command, measured, path) {
   return { at: zero.t, delay: still.t - zero.t, distance: pathLength(path, zero.t, still.t) };
 }
 
+// Explain a missing stopping time without changing the measurement above. This is derived report
+// data only; the recording and its streams keep their existing format.
+function stoppingReason(command, stop) {
+  if (stop) return null;
+  const span = movingSpan(command);
+  if (!span) return 'noMotion';
+  return command[span.last + 1] ? 'notStill' : 'noZero';
+}
+
 // False when the robot practically stood still: under MOVED_DISTANCE of path, under MOVED_TURN
 // of heading change, and no command ever asked it to move.
 function hasMoved(distance, turn, command) {
@@ -152,8 +161,9 @@ function thinPath(path) {
  * for display and storage. `summary` has `seconds` (length of the recording, including the tail
  * recorded after the stop), `driveSeconds` (driveTime(), or null), `distance` (path length, m),
  * `forward` / `left` (where it ended, m), `turn` (rad, + = left), `maxSpeed`, `maxTurnRate`,
- * `maxCommand`, `stop` (stopping(), or null), `emergencyStop`, `closest` (nearest wall ahead, m,
- * or null) and `moved` (hasMoved()).
+ * `maxCommand`, `stop` (stopping(), or null), `stopReason` ('noMotion', 'noZero', 'notStill', or
+ * null when stop is known), `emergencyStop`, `closest` (nearest wall ahead, m, or null) and
+ * `moved` (hasMoved()).
  */
 function driveReport(recording) {
   const t0 = startTime(recording);
@@ -166,6 +176,7 @@ function driveReport(recording) {
   );
   const end = path[path.length - 1];
   const distance = pathLength(path);
+  const stop = stopping(command, measured, path);
   return {
     series: {
       command: thin(command, REPORT_PERIOD / 2),
@@ -183,7 +194,8 @@ function driveReport(recording) {
       maxSpeed: peak(measured, 'v'),
       maxTurnRate: peak(measured, 'w'),
       maxCommand: peak(command, 'v'),
-      stop: stopping(command, measured, path),
+      stop,
+      stopReason: stoppingReason(command, stop),
       emergencyStop: measured.some((sample) => sample.estop),
       closest: front.length ? Math.min(...front.map((sample) => sample.d)) : null,
       moved: hasMoved(distance, end?.turn, command),
