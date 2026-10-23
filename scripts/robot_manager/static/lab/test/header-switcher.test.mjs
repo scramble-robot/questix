@@ -55,15 +55,89 @@ test(
         headless: true,
       });
       const page = await browser.newPage();
+      await page.addInitScript(() => {
+        // A loopback-only transport fixture; no robot or running bridge is needed.
+        window.WebSocket = class {
+          static OPEN = 1;
+          constructor(url) {
+            if (new URL(url).hostname !== '127.0.0.1') throw Error('loopback only');
+            this.readyState = 0;
+            setTimeout(() => {
+              this.readyState = 1;
+              this.onopen?.({});
+              this.onmessage?.({
+                data: JSON.stringify({
+                  type: 'hello',
+                  protocol: 1,
+                  robot: { name: 'fixture' },
+                  streams: {},
+                  read_only: false,
+                }),
+              });
+            }, 0);
+          }
+          send() {}
+          close() {
+            this.readyState = 3;
+          }
+        };
+      });
       const errors = [];
       page.on('pageerror', (error) => errors.push(error.message));
-      for (const width of [1280, 1180, 821, 820, 640, 410]) {
+      for (const width of [1280, 1180, 943, 942, 821, 820, 640, 590, 410]) {
         await page.setViewportSize({ width, height: 900 });
         for (const course of ['series', 'rl', 'keymap'])
           await t.test(`${width}px #${course}`, async () => {
             await page.goto(`http://127.0.0.1:${server.address().port}/#${course}`);
             await page.waitForFunction(() =>
               document.querySelector('#courseSwitcher summary').getAttribute('aria-label'),
+            );
+            await page.evaluate(async () => {
+              const link = await import('/js/live/robot-link.js');
+              link.connectRobot('ws://127.0.0.1:8897');
+            });
+            await page.waitForFunction(
+              () => !document.querySelector('#labHeaderStop button')?.disabled,
+            );
+            const expectedOrder = [
+              'robotLinkOpen',
+              'labHeaderStop',
+              ...(course === 'series' ? [] : ['seriesHome']),
+              'courseSwitcher',
+            ];
+            await page.locator('.brand').focus();
+            const focused = [];
+            for (const _ of expectedOrder) {
+              await page.keyboard.press('Tab');
+              focused.push(
+                await page.evaluate(() => {
+                  const e = document.activeElement;
+                  return e.closest('#labHeaderStop')?.id || e.id || e.closest('details')?.id;
+                }),
+              );
+            }
+            assert.deepEqual(focused, expectedOrder, 'Tab order must follow the visible controls');
+            const positions = await page.evaluate(
+              (ids) =>
+                ids.map((id) => {
+                  const e =
+                    id === 'courseSwitcher'
+                      ? document.querySelector('#courseSwitcher summary')
+                      : id === 'labHeaderStop'
+                        ? document.querySelector('#labHeaderStop button')
+                        : document.getElementById(id);
+                  return e.getBoundingClientRect().x;
+                }),
+              expectedOrder,
+            );
+            assert(positions.every((x, i) => !i || x > positions[i - 1]));
+            assert.equal(
+              await page.evaluate(
+                () =>
+                  matchMedia('(min-width: 601px) and (max-width: 942.98px)').matches &&
+                  matchMedia('(min-width: 943px)').matches,
+              ),
+              false,
             );
             const actual = await page.evaluate(() => {
               const header = document.querySelector('.site-header'),
@@ -102,10 +176,10 @@ test(
                 clipped: title.scrollWidth > title.clientWidth,
               };
             });
-            assert.equal(actual.header.height, 88);
+            assert.equal(actual.header.height, width >= 943 ? 109 : 88);
             assert.equal(actual.box.height, 44);
             assert.equal(actual.summary.height, 44);
-            assert(actual.box.bottom <= actual.state.top + 0.01);
+            if (width < 943) assert(actual.box.bottom <= actual.state.top + 0.01);
             assert(actual.shortVisible && !actual.labelVisible);
             assert.equal(actual.titleVisible, width > 820);
             assert.equal(actual.title, actual.caption);
@@ -123,7 +197,7 @@ test(
             assert(await page.locator('#lessonNav').isVisible());
             assert.equal(
               await page.locator('.site-header').evaluate((e) => e.getBoundingClientRect().height),
-              88,
+              width >= 943 ? 109 : 88,
             );
             assert.equal(
               await page

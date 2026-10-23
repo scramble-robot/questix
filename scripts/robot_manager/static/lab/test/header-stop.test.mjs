@@ -70,7 +70,7 @@ test('all modal headings reuse the same stop control and keep status in a separa
   assert.match(status, /dialog\.prepend\(host\)/);
   assert.match(status, /live-dialog-stop-row.*\$\{labStopButton\(\)\}/);
   assert.match(status, /class="live-status-line"\s+role="status"/);
-  assert.match(read('index.html'), /class="header-actions"><span id="labHeaderStop"/);
+  assert.match(read('index.html'), /id="labHeaderStop"/);
   const copy = JSON.parse(read('content/live/stop-control.json'));
   for (const word of ['走行', 'ローラー', 'コントローラー', '非常停止', '仰角', '取り消せません'])
     assert(copy.description.includes(word));
