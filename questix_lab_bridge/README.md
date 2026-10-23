@@ -129,7 +129,7 @@ the arbiter and the robot decided, whatever a page sends:
 | `/emergency_stop` not heard yet | Refused (`estop_unknown`). A released `/drive_status` does not count. |
 | Emergency stop active | Refused / stopped (`emergency_stop`). |
 | `/motion_permission` does not allow the drive (or is silent for 0.5 s) | Refused / stopped (`no_motion_permission`). |
-| Another page drives | Refused (`busy`). Any page may **stop** any run (`{"type":"stop"}`, the stop bar); a page ending its own experiment sends `"scope":"mine"` and cannot end someone else's. |
+| Another page drives | Refused (`busy`). Any page may **stop** any run (`{"type":"stop"}`, the header stop control); a page ending its own experiment sends `"scope":"mine"` and cannot end someone else's. |
 | No command for `drive_deadman_sec` | Stopped (`timeout`): closed tab, sleeping laptop, lost Wi-Fi. |
 | Owner disconnects | Stopped at once (`disconnected`). |
 | Run longer than `drive_max_run_sec` | Stopped (`time_limit`). |
@@ -140,8 +140,9 @@ nothing, so the arbiter soon hands the robot back to the controller. If the brid
 mid-run, `drive_component`'s `cmd_timeout_sec` (1 s) stops the motors.
 
 The page side (`static/lab/js/live/drive-link.js`) adds its own stops: the learner's 止める
-button, Esc, the page being hidden or closed, and a fixed stop bar shown on every connected page
-while any page drives.
+button, Esc, and the page being hidden or closed. After a page connects, one header stop
+control appears in its LAB header and another in the real-robot dialog. Both stop the LAB
+drive and roller regardless of which page owns them; after disconnection they remain disabled.
 
 ## Launcher experiments
 
@@ -343,7 +344,7 @@ Browsers send (refused unless the teacher's permission and the robot allow drivi
 | Frame | Meaning |
 | --- | --- |
 | `{"type": "drive", "linear": v, "angular": w}` | Drive at v [m/s], w [rad/s]. Also the heartbeat the owner repeats. |
-| `{"type": "stop"}` | Stop the run, whichever page owns it (the stop bar on every page). |
+| `{"type": "stop"}` | Stop the run, whichever page owns it (the header stop control on every page). |
 | `{"type": "stop", "scope": "mine"}` | Stop the run only if this page owns it. A page ending its own experiment (止める, Esc, leaving the page) sends this, so a page whose request was refused never ends another pupil's run. An unknown `scope` counts as a plain stop. |
 
 Browsers send (refused unless the teacher's permission and the robot allow the launcher; on the page only
