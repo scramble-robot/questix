@@ -115,3 +115,33 @@ test('narrow header packs the second row left and keeps LAB at tablet zoom width
   assert.doesNotMatch(read('css/hs-shell.css'), /body \.site-header|body \.header-actions/);
   assert.match(css, /body \.site-header \.brand-logo\s*\{\s*width: 80px/);
 });
+
+test('header DOM and grid follow the same natural keyboard order at every width', () => {
+  const actions = read('index.html')
+    .split('class="header-actions">')[1]
+    .split('<div id="liveHeaderStatus"')[0];
+  const ids = ['robotLinkOpen', 'labHeaderStop', 'seriesHome', 'courseSwitcher'];
+  const positions = ids.map((id) => actions.indexOf(`id="${id}"`));
+  assert(positions.every((position, i) => position >= 0 && (!i || position > positions[i - 1])));
+  assert.doesNotMatch(actions, /tabindex=/);
+  const css = read('css/navigation.css');
+  const wide = css.slice(css.indexOf('@media (min-width: 943px)'));
+  for (const [selector, column] of [
+    ['body .header-actions > .robot-link', 4],
+    ['#labHeaderStop .lab-stop', 5],
+    ['body .header-actions > .series-home', 6],
+    ['body .header-actions > .course-switcher', 7],
+  ])
+    assert(wide.includes(`${selector} {\n    grid-column: ${column};`));
+  assert.doesNotMatch(
+    css,
+    /(?:^|[;{])\s*order\s*:|row-reverse|column-reverse|grid-auto-flow:.*dense/m,
+  );
+});
+
+test('the narrow and wide header media queries do not overlap at 943px', () => {
+  const css = read('css/navigation.css');
+  assert.match(css, /@media \(min-width: 601px\) and \(max-width: 942\.98px\)/);
+  assert.match(css, /@media \(min-width: 943px\)/);
+  assert.doesNotMatch(css, /max-width: 943px/);
+});
