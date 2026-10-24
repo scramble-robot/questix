@@ -1315,7 +1315,8 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .control-feedback .control-saved strong { white-space: normal; overflow-wrap: anywhere; }
 .tuning-preview { border-top: 1px solid var(--border-input); margin-top: 1rem; padding-top: 1rem; }
 .tuning-preview h3 { font-size: 1rem; margin-bottom: 0.75rem; }
-.tuning-motion-summary { min-height: 3.3rem; overflow: visible; line-height: 1.65; }
+.tuning-motion-summary { min-height: 3.3rem; margin-top: 0.75rem; overflow: visible;
+  line-height: 1.65; white-space: pre-line; overflow-wrap: anywhere; }
 .tuning-chart { margin: 0; padding: 1rem 0.5rem; background: #fff; color: #253c45;
   border: 1px solid var(--border-input); border-radius: var(--radius-control); font-size: 0.875rem; }
 .tuning-chart-legend { display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; min-height: 3rem; }

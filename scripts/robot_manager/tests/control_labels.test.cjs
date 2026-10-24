@@ -1169,3 +1169,50 @@ test('paired tuning fields use one preview divider and a wide-only vertical sepa
   assert.match(css, /\.tuning-motion-group > \.control-field \+ \.control-field::before \{[^}]*width: 1px;/);
   assert.match(css, /@media \(max-width: 760px\) \{[^}]*\}[\s]*\.tuning-motion-group > \.control-field \+ \.control-field::before \{ display: none;/);
 });
+
+test('motion explanations put the chart first and show both ramp equations with superscript units', async () => {
+  const { document, context } = editorFixture({
+    joy_controller: { longitudinal_input_ratio: 1.2, angular_input_ratio: -3 },
+    drive_component: { max_linear_accel: 0.6, max_angular_accel: 1.5 },
+  });
+  await vm.runInContext('loadControls("uart")', context);
+  for (const group of document.getElementById('controls-fields').children.filter(e => e.dataset.kind)) {
+    const preview = group.children.at(-1);
+    assert.equal(preview.children[1].id, `tuning-${group.dataset.kind}-chart`);
+    assert.equal(preview.children[2].id, `tuning-${group.dataset.kind}-summary`);
+  }
+  assert.equal(document.getElementById('tuning-linear-summary').textContent,
+    '最高速度 1.20 m/s 、加速時間 2.0 s 。\n'
+    + '加速度 ＝ 1.20 m/s ÷ 2.0 s ＝ 0.6 m/s²\n'
+    + '加速・減速までの距離 ＝ 1.20 m/s × 2.0 s ＝ 2.4 m');
+  assert.equal(document.getElementById('tuning-angular-summary').textContent,
+    '最高速度 3.00 rad/s 、加速時間 2.0 s 。\n'
+    + '角加速度 ＝ 3.00 rad/s ÷ 2.0 s ＝ 1.5 rad/s²\n'
+    + '加速・減速までの角度 ＝ 3.00 rad/s × 2.0 s ＝ 6.0 rad');
+  const speed = document.getElementById('control-joy_controller-longitudinal_input_ratio');
+  speed.value = '1.5'; speed.events.input();
+  assert.match(document.getElementById('tuning-linear-summary').textContent,
+    /1.50 m\/s ÷ 2.0 s ＝ 0.8 m\/s²\n.*1.50 m\/s × 2.0 s ＝ 3.0 m$/);
+  assert.equal(vm.runInContext('controlDraft.drive_component.max_linear_accel', context), 0.75);
+});
+
+test('formula presentation preserves unknown and unlimited states, small times and full-precision values', async () => {
+  const { context } = editorFixture();
+  await vm.runInContext('loadControls("uart")', context);
+  for (const setup of [
+    'controlDraft.joy_controller.longitudinal_input_ratio = 0',
+    'controlDraft.joy_controller.longitudinal_input_ratio = 1; controlDraft.drive_component.max_linear_accel = 0',
+    'controlDraft.drive_component.max_linear_accel = null',
+  ]) {
+    vm.runInContext(setup, context);
+    const text = vm.runInContext('tuningFormulaSummary(TuningModel.motion(controlDraft, controlProfile.geometry, "linear"), "linear")', context);
+    assert.doesNotMatch(text, /NaN|Infinity|÷|＝/);
+    assert.match(text, /算出/);
+  }
+  vm.runInContext('controlDraft.joy_controller.longitudinal_input_ratio = 0.00012345; controlDraft.drive_component.max_linear_accel = 50', context);
+  const before = vm.runInContext('JSON.stringify(controlDraft)', context);
+  const text = vm.runInContext('tuningFormulaSummary(TuningModel.motion(controlDraft, controlProfile.geometry, "linear"), "linear")', context);
+  assert.doesNotMatch(text, /÷ 0\.0 s|NaN|Infinity/);
+  assert.match(text, /0\.000123/);
+  assert.equal(vm.runInContext('JSON.stringify(controlDraft)', context), before);
+});
