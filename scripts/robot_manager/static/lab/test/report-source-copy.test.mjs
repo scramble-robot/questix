@@ -22,3 +22,10 @@ test('smoothing describes a configurable default, never an observed setting', ()
   assert.match(rendered, /既定の設定では約0\.15秒/);
   assert.doesNotMatch(rendered, /中で約0\.15秒ぶん/);
 });
+
+test('the live wheel chart names browser receive time separately from report message time', () => {
+  const live = JSON.parse(read('content/live/robot-state.json'));
+  const report = JSON.parse(read('content/live/drive-report.json'));
+  assert.ok(JSON.stringify(live).includes('受信時刻（秒、0がいま）'));
+  assert.notEqual(report.timeAxis, '受信時刻（秒、0がいま）');
+});
