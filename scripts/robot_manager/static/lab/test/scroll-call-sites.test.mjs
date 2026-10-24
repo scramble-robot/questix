@@ -29,3 +29,41 @@ for (const [file, start, count] of sites) {
     for (const call of calls) assert.equal(call[1].trim(), 'scrollBehavior()');
   });
 }
+
+function labSources() {
+  const root = new URL('../js/', import.meta.url);
+  return fs
+    .readdirSync(root, { recursive: true })
+    .filter((file) => file.endsWith('.js') && !file.startsWith('vendor/'))
+    .map((file) => [file, fs.readFileSync(new URL(file, root), 'utf8')]);
+}
+
+test('the whole LAB has one scroll preference definition, in core/dom.js', () => {
+  const definitions = labSources().flatMap(([file, source]) =>
+    [
+      ...source.matchAll(/\bfunction\s+scrollBehavior\b|\b(?:const|let|var)\s+scrollBehavior\s*=/g),
+    ].map(() => file),
+  );
+  assert.deepEqual(definitions, ['core/dom.js']);
+});
+
+test('no LAB script requests smooth scrolling without the preference helper', () => {
+  for (const [file, source] of labSources()) {
+    assert.doesNotMatch(source, /\bbehavior:\s*['"]smooth['"]/, file);
+  }
+});
+
+test('a LAB module never imports the scroll preference under the same name twice', () => {
+  for (const [file, source] of labSources()) {
+    const bindings = [...source.matchAll(/\bimport\s*\{([^}]+)\}\s*from\s*['"][^'"]+['"]/g)]
+      .flatMap((match) => match[1].split(','))
+      .map((name) =>
+        name
+          .trim()
+          .split(/\s+as\s+/)
+          .at(-1),
+      )
+      .filter((name) => name === 'scrollBehavior');
+    assert(bindings.length <= 1, `${file}: duplicate scrollBehavior import`);
+  }
+});
