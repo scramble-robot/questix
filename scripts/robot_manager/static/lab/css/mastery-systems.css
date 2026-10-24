@@ -876,7 +876,7 @@
   font-size: 14px;
   line-height: 1.9;
 }
-.measurement-lab svg {
+.measurement-lab .measurement-plot {
   width: 100%;
   height: auto;
   margin-top: 16px;

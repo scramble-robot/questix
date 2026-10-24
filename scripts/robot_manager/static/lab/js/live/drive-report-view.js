@@ -553,7 +553,7 @@ function reportHeader(run) {
     <h4>${fill(copy.title, { time: formatTime(run.at), lesson: run.lesson })}</h4>
     <p class="drive-report-status">${statusBadge(run)}</p>
     <p class="drive-report-meta">${meta.join('　')}</p>
-    ${run.ended ? html`<p>${run.ended}</p>` : nothing}
+    ${run.ended ? html`<p class="drive-report-ended">${run.ended}</p>` : nothing}
     ${run.cut ? html`<p class="drive-report-cut">${copy.cut}</p>` : nothing}
   </header>`;
 }
