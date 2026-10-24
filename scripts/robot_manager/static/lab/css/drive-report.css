@@ -381,7 +381,8 @@
   stroke: var(--report-ink);
   stroke-width: 2;
 }
-.drive-report .drive-report-spin {
+.drive-report .drive-report-path > .drive-report-spin {
+  font-size: 12px;
   display: grid;
   place-items: center;
   min-height: 96px;
@@ -514,11 +515,15 @@
   line-height: 1.3;
 }
 .drive-report .drive-report-ended,
-.drive-report .drive-report-cut,
-.drive-report .drive-report-spin {
+.drive-report .drive-report-cut {
   font-size: 14px;
 }
 .drive-report .drive-note,
 .drive-report .drive-report-topics p {
+  font-size: 13px;
+}
+
+/* Compact reports keep their turn explanation inside the report's own details. */
+.drive-report .drive-report-more .drive-report-spin {
   font-size: 13px;
 }
