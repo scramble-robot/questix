@@ -1113,6 +1113,10 @@ test('paired motion fields precede their matching preview and keep accessible la
   for (const group of groups) {
     const preview = group.children.at(-1);
     assert.equal(preview.children[0].id, `tuning-${group.dataset.kind}-heading`);
+    for (const row of group.children.filter(row => row.className === 'control-field')) {
+      const classes = row.children.map(child => child.className);
+      assert.ok(classes.indexOf('control-presets') < classes.indexOf('control-editor'));
+    }
   }
   const rows = document.querySelectorAll('.control-field');
   for (const [key, label] of [['angular_input_ratio', '旋回速度（rad/s）'],
