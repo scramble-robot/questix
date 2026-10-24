@@ -484,3 +484,15 @@
 .robot-monitor[data-connected='false'] button:disabled {
   color: var(--disabled-ink-muted);
 }
+
+/* Reserved in both the card and strip, including when the independent drive report is absent. */
+.robot-state .rs-drive-estop-notice,
+.rs-strip .rs-drive-estop-notice {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.85;
+  color: var(--muted);
+}
+.rs-drive-estop-notice[aria-hidden='true'] {
+  visibility: hidden;
+}
