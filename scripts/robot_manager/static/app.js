@@ -420,6 +420,44 @@ function fmtDuration(sec) {
   return `${h}:${m}:${s}`;
 }
 
+// The API retains its existing 2 s / 3 s cadence; these two clocks only paint text.
+const elapsedClocks = { rec: ElapsedView.create(4000), lab: ElapsedView.create(6000) };
+const elapsedRequests = { rec: 0, lab: 0 };
+let elapsedVisibility = 0;
+function elapsedTicket(kind) {
+  return { request: ++elapsedRequests[kind], visibility: elapsedVisibility };
+}
+function elapsedCurrent(kind, ticket) {
+  return ticket.request === elapsedRequests[kind] && ticket.visibility === elapsedVisibility;
+}
+function drawElapsed() {
+  const now = performance.now();
+  for (const kind of ['rec', 'lab']) {
+    const value = document.hidden ? null : ElapsedView.seconds(elapsedClocks[kind], now);
+    const text = value === null ? '—' : fmtDuration(value);
+    const element = document.getElementById(`${kind}-elapsed`);
+    if (element.textContent !== text) element.textContent = text;
+  }
+}
+function receiveElapsed(kind, data, running, ticket) {
+  if (!elapsedCurrent(kind, ticket)) return;
+  if (document.hidden) ElapsedView.clear(elapsedClocks[kind]);
+  else ElapsedView.receive(elapsedClocks[kind], data, running, performance.now());
+  drawElapsed();
+}
+function failElapsed(kind, ticket) {
+  if (!elapsedCurrent(kind, ticket)) return;
+  ElapsedView.clear(elapsedClocks[kind]);
+  drawElapsed();
+}
+function elapsedVisibilityChanged() {
+  elapsedVisibility++;
+  for (const clock of Object.values(elapsedClocks)) ElapsedView.clear(clock);
+  drawElapsed();
+  // An answer requested before the visibility change cannot revive a suspended clock.
+  if (!document.hidden) { refreshRecStatus(); refreshLabStatus(); }
+}
+
 async function apiSilent(path, options = {}) {
   const res = await fetch(API + path, { headers: { "Content-Type": "application/json" }, ...options });
   let data;
@@ -518,10 +556,12 @@ function validateRecNumericInputs() {
 }
 
 async function refreshRecStatus() {
+  const ticket = elapsedTicket('rec');
   let data;
   try {
     data = await apiSilent("/api/rosbag/status");
   } catch {
+    failElapsed('rec', ticket);
     recBusy = true;
     renderRecReadiness();
     return;
@@ -538,7 +578,7 @@ async function refreshRecStatus() {
   document.getElementById("rec-mode").textContent = trialView.mode;
   document.getElementById("rec-bag-name").textContent = recording ? data.bag_name : "—";
   renderTrialEvidence(trialView);
-  document.getElementById("rec-elapsed").textContent = recording ? fmtDuration(data.elapsed_sec) : "—";
+  receiveElapsed('rec', data, recording, ticket);
   document.getElementById("rec-size").textContent = recording ? fmtBytes(data.size_bytes) : "—";
 
   // Disk gauge
@@ -1042,11 +1082,13 @@ let labConfigLoaded = false;
 const joinQr = { accessPoint: null, labUrls: [], serving: false, drawn: "" };
 
 async function refreshLabStatus() {
+  const ticket = elapsedTicket('lab');
   let data;
   try {
     data = await apiSilent("/api/lab/status");
   } catch {
-    return; // lab console unavailable; leave UI as-is
+    failElapsed('lab', ticket);
+    return; // Other lab information retains its previous display.
   }
   latestLab = data;
   const serving = data.running || data.external;
@@ -1064,9 +1106,7 @@ async function refreshLabStatus() {
           : data.last_stop_reason === "start_failed" || data.last_stop_reason === "exited"
             ? "停止中（ブリッジが終了しました。「ブリッジのログ」を確認してください）"
             : "停止中";
-  document.getElementById("lab-elapsed").textContent = data.running
-    ? fmtDuration(data.elapsed_sec)
-    : "—";
+  receiveElapsed('lab', data, data.running, ticket);
 
   const urls = document.getElementById("lab-urls");
   urls.replaceChildren();
@@ -1816,6 +1856,8 @@ document.addEventListener("DOMContentLoaded", () => {
   refreshRecConfig();
   refreshRecStatus();
   refreshBagList();
+  setInterval(drawElapsed, 100);
+  document.addEventListener('visibilitychange', elapsedVisibilityChanged);
   // One read-only status request at a time; expire permission even while HTTP is pending.
   pollTimer = setInterval(() => {
     refreshStatus();

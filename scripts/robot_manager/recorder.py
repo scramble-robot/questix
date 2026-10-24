@@ -1252,9 +1252,11 @@ def _status_payload() -> dict:
     bag_path = snapshot.pop("bag_path")
     size = _tree_size(bag_path) if bag_path else 0
     started_at = snapshot["started_at"]
+    elapsed = time.time() - started_at if started_at else 0
     return {
         **snapshot,
-        "elapsed_sec": int(time.time() - started_at) if started_at else 0,
+        "elapsed_sec": int(elapsed),
+        "elapsed_ms": elapsed * 1000,
         "size_bytes": size,
         "disk_free_bytes": free,
         "disk_total_bytes": total,
