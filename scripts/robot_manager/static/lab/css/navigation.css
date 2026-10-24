@@ -39,7 +39,8 @@
   padding: 8px;
   border: 1px solid #dfe8e6;
 }
-.course-switcher .series-nav a[aria-current='page'] {
+.course-switcher .series-nav a[aria-current='page'],
+body .course-switcher .series-nav a.course-nav-records[aria-current='page'] {
   border-color: #226f67;
 }
 .course-switcher .series-nav .course-nav-cover {
@@ -433,4 +434,29 @@ body .course-switcher .series-nav a > strong {
 }
 .series-course > .series-course-body {
   flex: 1;
+}
+
+/* A compact records destination follows the course cards without entering their grid. */
+body .course-switcher .series-nav a.course-nav-records {
+  flex-direction: row;
+  align-items: baseline;
+  justify-content: flex-start;
+  gap: 12px;
+  min-height: 44px;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+body .course-switcher .series-nav a.course-nav-records:not([aria-current='page']) {
+  background: #f3f7f6;
+}
+body .course-switcher .series-nav a.course-nav-records > strong {
+  flex: none;
+  padding: 0;
+}
+body .course-switcher .series-nav a.course-nav-records > span.course-nav-records-description {
+  display: block;
+  margin: 0;
+  font-size: 12px;
 }

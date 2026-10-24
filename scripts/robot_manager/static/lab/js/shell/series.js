@@ -218,7 +218,7 @@ function showAssessment(kind, name, updateHash) {
   window.scrollTo({ top: 0 });
 }
 
-// 記録の一覧: reached from the catalogue's robot section, the 実機 dialog and a lesson's note that a
+// 記録の一覧: reached from the header switcher, catalogue, 実機 dialog and a lesson's note that a
 // run was kept on the robot; it opens recordings in the courses (`series-experiment` below).
 function showRecords(updateHash = true) {
   if (course === RECORDS) return;
@@ -285,6 +285,12 @@ const actions = {
     if (modified(event)) return; // let the browser open a new tab/window
     event.preventDefault();
     show(id);
+  },
+  followRecordsLink(event) {
+    if (modified(event)) return; // preserve the native new-tab/window action
+    event.preventDefault();
+    $('courseSwitcher').open = false; // also when showRecords is already on this route
+    showRecords();
   },
   selectGrade(id) {
     selectedGrade = id;
