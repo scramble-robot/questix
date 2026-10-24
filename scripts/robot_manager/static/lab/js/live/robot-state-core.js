@@ -358,6 +358,9 @@ function robotStateModel(
     // true pressed, false released, null unknown or stale (estopState tells which).
     estop: estopState === 'pressed' ? true : estopState === 'released' ? false : null,
     estopState,
+    // Display only: the drive node's own report, never a motion gate or the E-stop badge.
+    driveEstopNotice:
+      driveFresh && tracker.latest.drive?.emergency_stop === true && estopState !== 'pressed',
     estopSource: estopState === 'unknown' ? null : 'estop',
     driver: driverOf({
       driveState,
@@ -425,6 +428,7 @@ function stripModel(model) {
   return {
     connected: true,
     estop,
+    driveEstopNotice: Boolean(model.driveEstopNotice),
     driver: model.driver,
     left: wheels ? wheels.left : null,
     right: wheels ? wheels.right : null,
