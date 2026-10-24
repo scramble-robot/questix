@@ -88,7 +88,7 @@
 }
 /* Tablets in portrait and narrow windows: the actions take the row under the logo, right-aligned
    so the course list still opens under its switcher, and wrap rather than overlap. */
-@media (min-width: 601px) and (max-width: 942.98px) {
+@media (min-width: 601px) and (max-width: 1090.98px) {
   .site-header {
     grid-template-columns: minmax(0, 1fr);
     row-gap: 8px;
@@ -289,13 +289,13 @@ body .header-actions #robotLinkState {
   display: none;
 }
 
-/* At 943px the full row fits; below it the two-row tablet layout stays. */
-@media (min-width: 943px) {
+/* At 1091px the full row fits; below it the two-row tablet layout stays. */
+@media (min-width: 1091px) {
   body .site-header {
     height: 109px;
     min-height: 109px;
     grid-template-rows: 93px;
-    grid-template-columns: 140px 96px 132px 176px 82px 98px minmax(140px, 1fr);
+    grid-template-columns: 140px 96px 132px 176px 82px 98px 288px;
     column-gap: 8px;
   }
   body .site-header .header-actions,
@@ -374,7 +374,7 @@ body .header-actions #robotLinkState {
   body .header-actions > .course-switcher {
     grid-column: 7;
     grid-row: 1;
-    width: auto;
+    width: 288px;
     min-width: 0;
   }
   body .header-actions > .course-switcher > summary {
