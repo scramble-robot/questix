@@ -159,7 +159,7 @@
 .rs-card.is-stale .rs-number,
 .rs-card.is-stale .rs-unit,
 .rs-card.is-stale .rs-clear {
-  color: #9aa5ae;
+  color: var(--muted);
 }
 .rs-card.is-stale svg,
 .rs-card.is-stale .html-chart-area {
@@ -473,10 +473,14 @@
   color: var(--muted);
 }
 .rs-spark-key.is-measured {
-  color: var(--role-measured);
+  color: var(--role-measured-text);
   font-weight: 650;
 }
 .rs-spark-key.is-target {
-  color: var(--role-target);
+  color: var(--role-target-text);
   font-weight: 650;
+}
+
+.robot-monitor[data-connected='false'] button:disabled {
+  color: var(--disabled-ink-muted);
 }

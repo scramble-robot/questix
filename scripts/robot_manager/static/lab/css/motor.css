@@ -107,7 +107,7 @@
 }
 .motor-setting select:disabled {
   background: #eef2f3;
-  color: #71838a;
+  color: var(--muted);
 }
 .motor-setting-note {
   font-size: 13px;
@@ -285,7 +285,7 @@
   margin-left: 4px;
 }
 .motor-goal-met {
-  color: var(--role-actual);
+  color: var(--role-actual-text);
 }
 .motor-goal-missed {
   color: #8a5a00;

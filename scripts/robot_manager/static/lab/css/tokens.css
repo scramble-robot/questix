@@ -12,7 +12,13 @@
   --green: #1c756b;
   --green-soft: #e8f2ee;
   --line: #dde5e1;
-  --muted: #667975;
+  --muted: #53685e;
+  --disabled-ink-muted: #667975;
+  /* Text needs stronger contrast than the unchanged chart strokes. */
+  --role-actual-text: #1b7557;
+  --role-measured-text: #2269b8;
+  --role-target-text: #805a00;
+  --role-previous-text: var(--muted);
   --dark: #102832;
   --orange: #a65a32;
   --radius: 18px;
