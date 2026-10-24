@@ -571,8 +571,7 @@ function measurementPanel(measurement, copy, actions) {
   </aside>`;
 }
 
-// The distance of the disc just fired. It follows the whole shared launcher block so its
-// appearance cannot push the launcher's state or controls down. Its table row says so too.
+// The distance of the disc just fired, immediately below the shared firing buttons.
 function quickEntry(quick, copy, actions) {
   if (!quick) return nothing;
   const text = copy.measurement;
@@ -604,27 +603,26 @@ function quickEntry(quick, copy, actions) {
 
 // Firing from the lesson (js/live/shoot-ui.js draws the block itself, with the emergency stop and
 // the launcher's state): each disc fired here adds a row to the table right under the block, and
-// its distance field follows the shared block.
+// its distance field is drawn by the shared block's after() slot.
 function shootCard(measurement, copy, actions) {
   return html`<section class="card launch-shoot">
     ${launcherPanel('launch-measure', {
       onShot: actions.addShot,
       lesson: 'launch-measure',
+      after: () =>
+        measurement.quick
+          ? quickEntry(measurement.quick, copy, actions)
+          : html`<p class="drive-note" data-launch-quick-hint>
+              ${measurement.source === 'measured' ? copy.measurement.quickEmpty : copy.measurement.quickExample}
+            </p>`,
     })}
-    ${
-      measurement.quick
-        ? quickEntry(measurement.quick, copy, actions)
-        : html`<p class="drive-note" data-launch-quick-hint>
-            ${measurement.source === 'measured' ? copy.measurement.quickEmpty : copy.measurement.quickExample}
-          </p>`
-    }
   </section>`;
 }
 
 function measurementBody(model, copy, fragments, actions) {
   return html`${shootCard(model.measurement, copy, actions)}
     ${shotsTable(model.measurement, copy, actions)}
-    <div class="launch-layout">
+    <div class="launch-layout" id="launchMeasureLayout">
       ${measurementCard(model.measurement, model.chartWidth, copy)}${measurementPanel(
         model.measurement,
         copy,

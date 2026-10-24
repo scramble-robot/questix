@@ -1,4 +1,5 @@
-// Press → see (CONTRIBUTING.md, "Figures and charts"): brings the part of the page a learner should
+// Simulator Press → see, or explicit learner navigation (CONTRIBUTING.md, "Figures and charts").
+// Never call these from real-robot commands or received-status handlers. Brings the part a learner should
 // watch — the figure a run changed, a training board — to the top of the screen. Shared by the
 // courses that scroll on their own (rl, arm, vision).
 //

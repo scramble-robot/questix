@@ -292,9 +292,9 @@ function shootBlock(model, view, actions, after = nothing) {
         ${powerSlider(model, actions)}${tiltSlider(model, view, actions)}
       </div>
       <div class="shoot-run" data-shoot-run>
-        ${buttons(model, actions)}
+        ${buttons(model, actions)} ${after}
         <p class="drive-note" data-shoot-tilt-note>${shootCopy.tiltNote}</p>
-        ${spinLine(model)} ${whyLine(model)} ${after}
+        ${spinLine(model)} ${whyLine(model)}
         <div class="shoot-strip" data-live-strip>${estopLine(model)} ${launcherState(model)}</div>
         ${
           model.reconfirm
