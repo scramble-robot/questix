@@ -5,7 +5,8 @@
     "catalogueTitle": "ロボットの技術を学ぶ実験室",
     "quizTitle": "小テスト",
     "masteryTitle": "実力テスト",
-    "recordsTitle": "記録の一覧"
+    "recordsTitle": "記録の一覧",
+    "recordsDescription": "実機と教材で取った記録"
   },
   "heading": {
     "eyebrow": "QUESTiX LAB · 移動ロボットの実験室",
