@@ -32,9 +32,9 @@ const HEADING_ARROW = 22; // user units: length of the arrow showing the heading
 const ARROW_HEAD = 7; // user units
 const MARKER_FLIP = 70; // %: a marker label right of this is written on the left of its line
 const MOTION_SHOWN = 1e-3; // m/s or rad/s: a series that never exceeds this has nothing to show
-// drive_component smooths the measured speed with a first-order low-pass filter of this time
-// constant (measured_lpf_tau_sec in launcher/config/drive_component.yaml), in seconds.
-const MEASURED_SMOOTHING = 0.15;
+// The shipped default (measured_lpf_tau_sec in launcher/config/drive_component.yaml), in seconds.
+// The recording does not establish the robot's effective setting; the copy says it can differ.
+const DEFAULT_MEASURED_SMOOTHING = 0.15;
 const COMPARE_LIMIT = 3; // runs that can be overlaid on the report of another
 const COMPARE_NAMES = ['A', 'B', 'C'];
 const STATUS_ICONS = { ok: '✓', stopped: '■', problem: '⚠︎', recorded: '●', unknown: '?' };
@@ -560,7 +560,7 @@ function reportHeader(run) {
 
 function reportNotes(summary) {
   const copy = text();
-  const smoothing = summary.stop ? fill(copy.smoothing, { tau: MEASURED_SMOOTHING }) : '';
+  const smoothing = summary.stop ? fill(copy.smoothing, { tau: DEFAULT_MEASURED_SMOOTHING }) : '';
   return smoothing ? html`<p class="drive-note">${smoothing}</p>` : nothing;
 }
 
