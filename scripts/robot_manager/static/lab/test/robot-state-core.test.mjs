@@ -5,6 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { DISPLAY_STALE_MS, liveStatusModel } from '../js/live/live-status-core.js';
 import {
   HISTORY_SECONDS,
   WHEEL_GAP_SECONDS,
@@ -290,12 +291,30 @@ test('only /emergency_stop itself says released; never heard is unknown, silent 
   assert.equal(robotStateModel(tracker, { link, now: 400 }).estop, false);
   ingest(tracker, 'estop', estop(true), 500, config);
   assert.equal(robotStateModel(tracker, { link, now: 600 }).estopState, 'pressed');
-  // Silent for more than a second: stale, never the last word "released".
+  // Silent beyond the shared display limit: never the last word "released".
   ingest(tracker, 'estop', estop(false), 700, config);
-  const later = robotStateModel(tracker, { link, now: 1800 });
+  const later = robotStateModel(tracker, { link, now: 700 + DISPLAY_STALE_MS + 1 });
   assert.equal(later.estopState, 'stale');
   assert.equal(later.estop, null);
   assert.equal(stripModel(later).estop, 'unknown');
+});
+
+test('header and strip share the E-stop display lease, including delivery jitter', () => {
+  const tracker = createStateTracker();
+  const message = estop(false);
+  ingest(tracker, 'estop', message, 0, config);
+  for (const now of [1000, 1001, 1200, DISPLAY_STALE_MS, DISPLAY_STALE_MS + 1]) {
+    const header = liveStatusModel({ phase: 'open' }, { estop: { message, at: 0 } }, now);
+    const model = robotStateModel(tracker, { link, now });
+    assert.equal(model.estopState, header.estop);
+    assert.equal(stripModel(model).estop, now <= DISPLAY_STALE_MS ? 'released' : 'unknown');
+  }
+  const source = fs.readFileSync(
+    new URL('../js/live/robot-state-core.js', import.meta.url),
+    'utf8',
+  );
+  assert.match(source, /import \{ DISPLAY_STALE_MS \} from '\.\/live-status-core\.js'/);
+  assert.match(source, /estop: DISPLAY_STALE_MS \/ 1000/);
 });
 
 // --- each wheel's own values (bridges with the wheel-level telemetry authority) ---------------
