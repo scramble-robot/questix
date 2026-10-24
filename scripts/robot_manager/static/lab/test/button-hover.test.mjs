@@ -61,6 +61,12 @@ test('inverting actions never fade the background separately from the text', () 
   }
 });
 
+test('SVG controller button numbers are readable on the controller body', () => {
+  const index = rule('keymap', '.keymap-pad-button .keymap-pad-index');
+  const body = rule('keymap', '.keymap-pad-body');
+  assert.ok(contrast(index.fill, body.fill) >= 4.5);
+});
+
 test('the neutral hover rule excludes filled actions and selected controls', () => {
   const generic = css('base').slice(
     css('base').indexOf('button:hover'),
