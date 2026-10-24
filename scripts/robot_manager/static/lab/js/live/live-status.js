@@ -1,17 +1,19 @@
-import { render } from '../vendor/lit-html.js';
+import { html, render } from '../vendor/lit-html.js';
 import { loadJson } from '../core/content.js';
 import { onRobot, robotState, linkStage } from './robot-link.js';
 import { liveStatusModel } from './live-status-core.js';
 import { liveStatusLine } from './live-status-view.js';
+import { labStopButton } from './stop-control.js';
 const copy = await loadJson('content/live/link.json');
 const received = {};
 const listeners = new Set();
 const dialogOrder = [];
 const dialogHosts = new Map();
 let lastModel = '';
+// Display consumers read this exact snapshot; only drawStatuses evaluates receive-time expiry.
+let currentModel;
 function liveStatus() {
-  const link = robotState();
-  return { ...liveStatusModel(link, received, performance.now()), stage: linkStage(link) };
+  return currentModel;
 }
 function activeLiveDialog() {
   for (const dialog of document.querySelectorAll('dialog[open]'))
@@ -21,25 +23,37 @@ function activeLiveDialog() {
   return dialogOrder.at(-1) ?? null;
 }
 function drawStatuses() {
-  const model = liveStatus();
+  const link = robotState();
+  const model = (currentModel = {
+    ...liveStatusModel(link, received, performance.now()),
+    stage: linkStage(link),
+  });
   const active = activeLiveDialog();
   const header = document.getElementById('liveHeaderStatus');
   if (header) {
     header.setAttribute('aria-live', active ? 'off' : 'polite');
-    render(liveStatusLine(model, copy), header);
+    render(liveStatusLine(model, copy, true), header);
   }
   for (const dialog of document.querySelectorAll('dialog')) {
     let host = dialogHosts.get(dialog);
     if (dialog.open && (!host || host.parentElement !== dialog)) {
       host = document.createElement('div');
-      host.className = 'live-status-line live-dialog-status';
-      host.setAttribute('role', 'status');
+      host.className = 'live-dialog-header';
       dialog.prepend(host);
       dialogHosts.set(dialog, host);
     }
     if (host) {
-      host.setAttribute('aria-live', dialog === active ? 'polite' : 'off');
-      render(liveStatusLine(model, copy), host);
+      render(
+        html`<div class="live-dialog-stop-row">${labStopButton()}</div>
+          <div
+            class="live-status-line"
+            role="status"
+            aria-live=${dialog === active ? 'polite' : 'off'}
+          >
+            ${liveStatusLine(model, copy)}
+          </div>`,
+        host,
+      );
     }
   }
   const key = JSON.stringify(model);

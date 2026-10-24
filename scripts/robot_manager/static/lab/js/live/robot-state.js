@@ -4,6 +4,7 @@ import { downloadFile } from '../core/dom.js';
 import { onRobot, robotState, latestRobot } from './robot-link.js';
 import { liveLink } from './capture.js';
 import { openRobotDialog } from './live-ui.js';
+import { liveStatus, onLiveStatus } from './live-status.js';
 import {
   createStateTracker,
   ingest,
@@ -32,7 +33,7 @@ const text = await loadJson('content/live/robot-state.json');
 const REDRAW_MS = 100; // about 10 redraws a second
 const MEMO_PREFIX = 'questix-lab-state-memo:';
 const MEMO_MAX_CHARS = 20000;
-const STREAMS = ['drive', 'odom', 'scan', 'twist', 'estop', 'drive_state'];
+const STREAMS = ['drive', 'odom', 'scan', 'twist', 'drive_state'];
 
 const tracker = createStateTracker();
 const panels = new Map(); // place -> entry (see entryOf)
@@ -68,6 +69,7 @@ function currentModel() {
     driveState: latestRobot('drive_state'),
     session: state.session,
     now: performance.now(),
+    estopState: liveStatus().estop,
   });
 }
 
@@ -261,6 +263,7 @@ function liveStateStrip(place, options = {}) {
 const stateMemo = (place) => entryOf(place).memo;
 
 function listen() {
+  onLiveStatus(tick);
   for (const type of STREAMS)
     onRobot(type, (message) =>
       ingest(tracker, type, message, performance.now(), robotState().hello?.config),

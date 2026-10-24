@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { benchSentence, SMALL_WHEEL_GAP_RPM } from '../js/motor/bench-copy.js';
 // Run with: node --test scripts/robot_manager/static/lab/test/*.test.mjs
 //
 // The motor course's bench measurement (js/motor/bench-core.js): the staircase the page commands
@@ -230,4 +232,22 @@ test('the sample table for a class without a robot reads like the staircase at 5
   }
   assert.ok(benchSummary(BENCH_SAMPLE_ROWS).meanGap < 0, 'a little slower than asked');
   assert.equal(benchMeasurementRows(BENCH_SAMPLE_ROWS).rows.length, 10);
+});
+
+const benchCopy = JSON.parse(
+  readFileSync(new URL('../content/motor.json', import.meta.url), 'utf8'),
+).bench;
+test('bench copy distinguishes quantisation-sized gaps from larger measured gaps', () => {
+  assert.equal(SMALL_WHEEL_GAP_RPM, 1.5);
+  for (const wheelGap of [1.3, 1.5, 1.6, 3]) {
+    const rows = [{ command: 20, left: 20, right: 20 + wheelGap }];
+    const summary = benchSummary(rows);
+    assert.equal(summary.wheelGap, wheelGap);
+    const sentence = benchSentence({ summary }, benchCopy);
+    if (wheelGap <= 1.5) assert.ok(sentence.includes(benchCopy.wheelGapSmall));
+    else assert.ok(sentence.includes(`左右の差は最大 ${wheelGap.toFixed(1)} rpmです。`));
+    assert.equal(rows[0].right, 20 + wheelGap);
+  }
+  assert.match(benchCopy.tableCaption, /1 rpm刻み/);
+  assert.match(benchCopy.tableCaption, /差が出ることがあります/);
 });

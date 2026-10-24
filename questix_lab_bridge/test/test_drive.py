@@ -330,7 +330,7 @@ def test_the_owners_commands_after_a_run_the_bridge_ended_are_stale():
 def test_another_pages_stop_guards_the_owner_but_its_own_stop_does_not():
     session = ready_session()
     session.request(1, 0.1, 0.0, 0.0)
-    session.stop(2, 0.1)  # the stop bar on another page
+    session.stop(2, 0.1)  # the header stop control on another page
     assert session.request(1, 0.1, 0.0, 0.2) == drive.STALE
     session = ready_session()
     session.request(1, 0.1, 0.0, 0.0)

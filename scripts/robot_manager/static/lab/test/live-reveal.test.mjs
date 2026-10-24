@@ -5,9 +5,8 @@ import vm from 'node:vm';
 function fixture() {
   const scrolls = [];
   const header = { getBoundingClientRect: () => ({ height: 88, bottom: 88 }) };
-  const bar = { hidden: false, getBoundingClientRect: () => ({ top: 370 }) };
   const context = {
-    document: { querySelector: () => header, getElementById: () => bar },
+    document: { querySelector: () => header },
     window: {
       innerHeight: 450,
       matchMedia: () => ({ matches: true }),
@@ -32,12 +31,12 @@ test('a narrow screen reveal still clears the always-visible header', () => {
   f.revealElement(f.element(300, 40));
   assert.equal(f.scrolls[0].top, 200);
 });
-test('a control under the reserved stop bar is brought above it', () => {
+test('a control below the viewport is brought above the header', () => {
   const f = fixture();
-  f.revealIfHidden(f.element(360, 40));
+  f.revealIfHidden(f.element(430, 40));
   assert.equal(f.scrolls.length, 1);
 });
-test('a visible control between header and stop bar does not move', () => {
+test('a visible control between header and viewport bottom does not move', () => {
   const f = fixture();
   f.revealIfHidden(f.element(120, 40));
   assert.equal(f.scrolls.length, 0);

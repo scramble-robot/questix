@@ -70,7 +70,7 @@ Browser to server (refused with the blockers while driving is not possible):
 
 * ``{"type": "drive", "linear": v, "angular": w}`` - drive at v [m/s], w [rad/s]. Also the
   heartbeat: the owner repeats it, and silence stops the robot (drive.py).
-* ``{"type": "stop"}`` - stop the robot, whichever page drives it (the stop bar).
+* ``{"type": "stop"}`` - stop the robot, whichever page drives it (the header stop control).
 * ``{"type": "stop", "scope": "mine"}`` - stop the run only if this page owns it; a page
   ending its own experiment sends this so it cannot end another pupil's run. Any other
   ``scope`` value is treated as a plain stop.

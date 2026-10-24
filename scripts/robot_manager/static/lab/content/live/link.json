@@ -103,6 +103,8 @@
       "off": "なし",
       "unknown": "不明"
     },
-    "connection": "接続："
+    "connection": "接続：",
+    "estopLabel": "非常停止",
+    "permissionLabel": "許可"
   }
 }

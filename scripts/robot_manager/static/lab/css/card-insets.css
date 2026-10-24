@@ -1,0 +1,124 @@
+/* Body cards cluster at 22–26px; 24px is the measured mode at 1280px.
+   Each enclosure owns its inset once. Unframed table/plot wrappers inherit the parent's room. */
+.motor-bench,
+.planning-room,
+.keymap-layout .card,
+.keymap-reflection {
+  padding: var(--card-inset);
+}
+
+.live-capture,
+.live-result,
+.drive-block,
+.drive-report,
+.robot-state,
+.rs-card,
+.robot-status,
+.sys-quickstart,
+.motor-choice-grid section,
+.motor-measure-pointer,
+.vision-region-controls,
+.rl-learning-result,
+.school-tip-example {
+  padding-inline: var(--card-inset);
+}
+
+/* These full-width disclosures keep the inset on their content, not on both parent and child. */
+.live-files > summary,
+.live-files-body {
+  padding-inline: var(--card-inset);
+}
+
+/* Figures keep their drawing area; only the reading around it needs the card's gutter. */
+.arm-legend,
+.pose-comparison h3,
+.pose-comparison figcaption,
+.vision-histogram-figure > figcaption,
+.vision-histogram-key,
+.robot-wheels > figcaption,
+.robot-wheels .robot-wheels-note {
+  padding-inline: var(--card-inset);
+}
+
+/* Preserve the controller drawing's previous size and centre when its prose gains padding.
+   Its labels must not become smaller just because the surrounding card gains a gutter. */
+.keymap-source .keymap-pad {
+  width: calc(100% + 2 * var(--card-inset));
+  max-width: 420px;
+  margin-inline: calc((100% - min(420px, 100% + 2 * var(--card-inset))) / 2);
+}
+
+/* Responsive card rules formerly reduced these reading gutters to 12–16px.
+   Keep the same content inset at desktop, tablet and browser zoom widths. */
+.series-robot.card,
+.lesson-quickstart,
+.lesson-brief,
+.reference-item,
+.records-section.card,
+#controlVisual,
+#controlGraphs,
+#launchShots {
+  padding-inline: var(--card-inset);
+}
+
+/* The drawing remains edge-to-edge; its own reading/control rows own the inset. */
+.sys-observation .sys-data,
+.planning-playbar,
+.launch-playbar,
+.arm-playbar,
+.arm-readings,
+.rl-destination-board,
+.rl-future-board,
+.planning-workspace > .card > .planning-status,
+.arm-view-head,
+.arm-result-card .arm-status,
+.vision-image-pair figcaption,
+.launch-workspace > .card > .section-top,
+.intro-visual > .section-top,
+.intro-layout .comparison figcaption,
+.intro-layout .comparison figure > p,
+#robotMonitor .robot-panels > figure > figcaption,
+#robotMonitor .robot-panels > figure > p,
+.supplement-body .school-tip-example {
+  padding-inline: var(--card-inset);
+}
+
+/* A full-width disclosure is itself the hit target; inset its copy, not its border. */
+.learning-resources > .supplement-trigger,
+.sensor-disclosure {
+  padding-inline: var(--card-inset);
+}
+@media (max-width: 600px) {
+  .learning-resources .reference-caption {
+    padding-inline: var(--card-inset);
+  }
+}
+
+@media (max-width: 700px) {
+  #lessonFooter {
+    padding-inline: var(--card-inset);
+  }
+}
+
+/* Smaller reading panels also own a complete gutter; status chips inside them stay compact. */
+.lesson-brief .run-mode-strip,
+.lesson-brief .run-mode-strip[data-run-mode~='live'],
+.lesson-brief .run-mode-strip[data-run-mode~='data'],
+.motor-kv,
+.sys-drive,
+.sys-readouts,
+.sys-scene-key,
+.sys-timeband,
+.rl-long-job,
+.rl-curve-wrap,
+.rl-curve-empty,
+.lab-bridge,
+.rs-strip,
+.shoot-strip {
+  padding-inline: var(--card-inset);
+}
+
+/* This figure has the same white surface as its wrapper: the wrapper owns the gutter once. */
+.rl-curve-wrap > .rl-curve > figcaption {
+  padding-inline: 0;
+}
