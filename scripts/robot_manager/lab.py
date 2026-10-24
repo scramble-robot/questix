@@ -555,6 +555,7 @@ def _status_payload() -> dict:
     config = _read_config()
     permissions = _permissions()
     failed = _last_stop_reason in _FAILURE_REASONS
+    elapsed = time.time() - _started_at if managed and _started_at else 0
     return {
         "running": managed,
         "external": external,
@@ -565,7 +566,9 @@ def _status_payload() -> dict:
         "available": _lab_available(),
         "competition": _competition_mode(),
         "urls": [f"http://{a}:{LAB_BRIDGE_PORT}/" for a in _lan_addresses()],
-        "elapsed_sec": int(time.time() - _started_at) if managed and _started_at else 0,
+        "started_at": _started_at if managed else None,
+        "elapsed_sec": int(elapsed),
+        "elapsed_ms": elapsed * 1000,
         "last_stop_reason": _last_stop_reason,
         "config": config,
         # What the teacher allowed in this session (published on /lab_permission). What the
