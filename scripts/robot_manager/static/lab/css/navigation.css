@@ -295,7 +295,7 @@ body .header-actions #robotLinkState {
     height: 109px;
     min-height: 109px;
     grid-template-rows: 93px;
-    grid-template-columns: 140px 96px 132px 176px 82px 98px 288px;
+    grid-template-columns: 140px 96px 132px 82px minmax(176px, 1fr) 98px 288px;
     column-gap: 8px;
   }
   body .site-header .header-actions,
@@ -327,9 +327,9 @@ body .header-actions #robotLinkState {
     display: none;
   }
   body .header-actions > .robot-link {
-    grid-column: 4;
+    grid-column: 5;
     grid-row: 1;
-    width: 176px;
+    width: 100%;
     height: 54px;
     display: grid;
     grid-template-columns: 8px minmax(0, 1fr);
@@ -348,11 +348,14 @@ body .header-actions #robotLinkState {
     grid-area: state;
   }
   body .header-actions .robot-link-where {
+    width: 100%;
     display: flex;
     gap: 6px;
     min-width: 0;
   }
   body .header-actions .robot-link-name {
+    flex: 1;
+    max-width: none;
     display: block;
     min-width: 0;
   }
@@ -361,7 +364,7 @@ body .header-actions #robotLinkState {
     font-size: 12px;
   }
   #labHeaderStop .lab-stop {
-    grid-column: 5;
+    grid-column: 4;
     grid-row: 1;
   }
   body .header-actions .header-long {
