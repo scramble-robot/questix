@@ -52,9 +52,17 @@ test('the app rejects pre-hide and out-of-order responses, and clears both label
   const document = { hidden: false, addEventListener() {}, getElementById(id) {
     if (!els.has(id)) els.set(id, {textContent: ''}); return els.get(id);
   } };
-  const context = vm.createContext({ document, ElapsedView: Elapsed, performance: { now: () => now },
-    StatusView: { createBlockerMemory: () => ({}) } });
-  vm.runInContext(fs.readFileSync(path.join(__dirname, '../static/app.js'), 'utf8'), context);
+  const context = vm.createContext({ document, performance: { now: () => now }, URL,
+    location: { href: 'http://127.0.0.1:8888/' }, AbortController, AbortSignal });
+  // Use the page's real dependency order, including modules introduced by independent PRs.
+  const index = fs.readFileSync(path.join(__dirname, '../static/index.html'), 'utf8');
+  for (const match of index.matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["'][^>]*>/g)) {
+    const src = match[1].split(/[?#]/)[0];
+    if (!src.startsWith('/static/')) continue;
+    const file = src.slice('/static/'.length);
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '../static', file), 'utf8'), context, {filename: file});
+    if (file === 'app.js') break;
+  }
   vm.runInContext(`const first=elapsedTicket('rec');receiveElapsed('rec',{elapsed_ms:100,started_at:1},true,first);`, context);
   assert.equal(els.get('rec-elapsed').textContent, '00:00:00');
   now=1100;vm.runInContext('drawElapsed()',context);
