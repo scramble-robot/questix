@@ -577,3 +577,8 @@
     font-size: 12px;
   }
 }
+
+/* Body copy darkens independently of the existing disabled controls. */
+.vision-sourcebar button:disabled {
+  color: var(--disabled-ink-muted);
+}
