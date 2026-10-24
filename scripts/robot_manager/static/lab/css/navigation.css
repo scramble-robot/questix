@@ -274,7 +274,7 @@ html {
   display: inline-flex;
 }
 #liveHeaderStatus {
-  font-size: 11px;
+  font-size: 12px;
   gap: 8px;
 }
 #labHeaderStop .lab-stop[hidden] {
