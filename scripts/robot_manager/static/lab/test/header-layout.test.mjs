@@ -63,6 +63,13 @@ test('wide header is one fixed 109px row with stable reserved columns', () => {
   assert.match(css, /grid-template-rows: 44px 28px/);
 });
 
+test('the narrow header status keeps readable 12px text and reserved longest values', () => {
+  const css = read('css/navigation.css');
+  assert.match(css, /#liveHeaderStatus\s*\{\s*font-size: 12px;\s*gap: 8px/);
+  assert.doesNotMatch(css, /font-size:\s*11px/);
+  assert.match(css, /\.header-text-reserve\s*\{\s*visibility: hidden/);
+});
+
 test('robot accessible name and title retain the entire long name and connection stage', () => {
   const elements = Object.fromEntries(
     ['robotLinkOpen', 'robotLinkName', 'robotLinkState'].map((id) => [
