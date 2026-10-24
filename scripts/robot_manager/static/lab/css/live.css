@@ -353,6 +353,16 @@
   font-size: 13px;
   color: #4d6469;
 }
+/* Keep the full note's wrapping space while limits have not arrived. */
+.drive-limits-note {
+  display: grid;
+}
+.drive-limits-note > span {
+  grid-area: 1 / 1;
+}
+.drive-limits-reserve {
+  visibility: hidden;
+}
 .drive-actions {
   align-items: center;
 }

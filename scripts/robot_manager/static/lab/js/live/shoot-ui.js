@@ -44,6 +44,8 @@ let timer = 0;
 let leftSince = null; // performance.now() since when no launcher block has been on screen
 const LEFT_GRACE_MS = 1000; // a redraw or a topic being rebuilt is not leaving
 let recording = null; // { finish: AbortController, done: Promise, lesson, start: {percent, tilt} }
+let lastConfirmed = shootModel().confirmed;
+let reconfirm = ''; // display only; shoot-link remains the confirmation authority
 
 const visible = (element) =>
   element.isConnected &&
@@ -78,7 +80,7 @@ function draw(entry, model) {
   if (!entry.element?.isConnected) return;
   render(
     shootBlock(
-      { ...model, estopState: liveStatus().estop },
+      { ...model, estopState: liveStatus().estop, reconfirm },
       entry.view,
       entry.actions,
       entry.options.after?.() ?? nothing,
@@ -228,7 +230,9 @@ function launcherPanel(place, options = {}) {
 
 function initShootUi() {
   onLiveStatus(redraw);
-  onShoot(() => {
+  onShoot((model) => {
+    if (model.confirmed || model.session) reconfirm = '';
+    lastConfirmed = model.confirmed;
     startTimer();
     redraw();
   });
@@ -241,9 +245,14 @@ function initShootUi() {
   });
   onShootSession((event) => {
     if (event.type === 'start') {
+      reconfirm = '';
       for (const entry of panels.values()) entry.view.recordNote = '';
       startRecording();
-    } else endRecording(event);
+    } else {
+      if (lastConfirmed && !shootModel().confirmed)
+        reconfirm = event.shots > 0 ? 'fired' : 'stopped';
+      endRecording(event);
+    }
   });
   redraw();
 }
