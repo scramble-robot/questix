@@ -864,6 +864,7 @@ function renderControls() {
       runtimeState.className = "control-runtime-state";
       runtime.append(runtimeCaption, runtimeValue, runtimeState);
       row.append(heading, help);
+      if (spec.presets) row.append(presets);
       row.append(editor, runtime);
       const range = document.createElement("p");
       range.className = "control-range";
@@ -877,7 +878,6 @@ function renderControls() {
       estimate.id = `${input.id}-estimate`;
       estimate.tabIndex = 0;
       row.append(range, feedback);
-      if (spec.presets) row.append(presets);
       row.append(estimate);
       section.appendChild(row);
     }
