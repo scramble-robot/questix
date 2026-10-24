@@ -45,6 +45,18 @@ function estopBlock(model, text) {
   </p>`;
 }
 
+// Keep the wrapped line's space even while hidden; a received status must not move the page.
+function driveEstopNotice(model, text) {
+  return html`<p
+    class="rs-drive-estop-notice"
+    data-rs-drive-estop=${Boolean(model.driveEstopNotice)}
+    aria-hidden=${!model.driveEstopNotice}
+    role="status"
+  >
+    ${text.estop.driveReport}
+  </p>`;
+}
+
 function driverBlock(model, text) {
   const words = text.driver;
   const motion = model.motion;
@@ -342,7 +354,7 @@ function robotStateView(model, text, actions, status = '') {
       ${linkLine(model, text)}
     </div>
     ${status ? html`<p class="rs-status" role="status" data-rs-status>${status}</p>` : nothing}
-    ${estopBlock(model, text)} ${driverBlock(model, text)}
+    ${estopBlock(model, text)} ${driveEstopNotice(model, text)} ${driverBlock(model, text)}
     <div class="rs-grid-cards">
       ${wheelCard(model, 'left', text)} ${wheelCard(model, 'right', text)}
       ${motionCard(model, text)} ${poseCard(model, text, actions)} ${frontCard(model, text)}
@@ -423,6 +435,7 @@ function stripView(strip, text, status = '') {
         <span>${text.driver.title}</span> <strong>${text.driver[strip.driver]}</strong>
       </p>
     </div>
+    ${driveEstopNotice(strip, text)}
     <div class="rs-strip-row">
       <dl class="rs-strip-values">
         <div>
