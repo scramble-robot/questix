@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const TrialView = require('../static/trial-view.js');
 const StatusView = require('../static/status-view.js');
+const ElapsedView = require('../static/elapsed-view.js');
 
 function ready(state = 'pass', blockers = []) {
   const now = new Date();
@@ -31,7 +32,7 @@ function fixture(fetch) {
     querySelectorAll(selector) { return selector === '[data-trial]' ? created.filter((el) => el.dataset.trial) : []; },
     querySelector() { return null; }, addEventListener() {},
   };
-  const context = vm.createContext({ document, TrialView, StatusView, fetch, setTimeout() {}, setInterval() {},
+  const context = vm.createContext({ document, ElapsedView, performance, TrialView, StatusView, fetch, setTimeout() {}, setInterval() {},
     location: { href: 'http://127.0.0.1:8888/' } });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../static/app.js'), 'utf8'), context);
   vm.runInContext('setupRecorderEvents(); recBusy = false;', context);
