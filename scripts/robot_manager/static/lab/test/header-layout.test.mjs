@@ -157,3 +157,20 @@ test('course switcher reserves a fixed wide column and uses the catalogue wordin
   );
   assert.match(wide, /grid-column: 7;[\s\S]*?width: 288px/);
 });
+
+test('course cards align pictures and names above optional badges at every width', () => {
+  const css = read('css/navigation.css');
+  assert.match(
+    css,
+    /body \.course-switcher \.series-nav a\s*\{[^}]*flex-direction: column;[^}]*align-items: stretch;[^}]*justify-content: flex-start/s,
+  );
+  assert.match(
+    css,
+    /body \.course-switcher \.series-nav \.course-nav-cover\s*\{[^}]*display: block;[^}]*flex: none;[^}]*aspect-ratio: 600 \/ 280/s,
+  );
+  assert.match(
+    css,
+    /\.series-course\s*\{[^}]*flex-direction: column;[^}]*justify-content: flex-start/s,
+  );
+  assert.match(css, /\.series-nav a\[aria-current='page'\]/);
+});

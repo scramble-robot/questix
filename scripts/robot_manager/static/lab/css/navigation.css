@@ -404,3 +404,33 @@ body .header-actions #robotLinkState {
     font-size: 14px;
   }
 }
+
+/* Keep each row's pictures and course names at the top, regardless of badges below. */
+body .course-switcher .series-nav a {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  flex-wrap: nowrap;
+}
+body .course-switcher .series-nav .course-nav-cover {
+  display: block;
+  flex: none;
+  width: 100%;
+  aspect-ratio: 600 / 280;
+}
+body .course-switcher .series-nav a > strong {
+  flex: none;
+  margin: 0;
+}
+.series-course {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+.series-course > .series-cover {
+  flex: none;
+}
+.series-course > .series-course-body {
+  flex: 1;
+}
