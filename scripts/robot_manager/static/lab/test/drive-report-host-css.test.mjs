@@ -122,3 +122,14 @@ test('the ended sentence names its component typography', () => {
   assert.equal(declaration('.drive-report .drive-report-ended', 'line-height'), '1.85');
   assert.equal(declaration('.drive-report .drive-report-ended', 'margin'), '0');
 });
+
+test('the turn explanation keeps its inset and full/compact font sizes', () => {
+  const selector = '.drive-report .drive-report-path > .drive-report-spin';
+  assert.equal(declaration(selector, 'padding'), '12px');
+  assert.equal(declaration(selector, 'font-size'), '12px');
+  assert.equal(
+    declaration('.drive-report .drive-report-more .drive-report-spin', 'font-size'),
+    '13px',
+  );
+  assert(stronger(selector, '.drive-report .drive-report-path > p'));
+});
