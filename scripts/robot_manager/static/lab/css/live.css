@@ -376,6 +376,20 @@
 .drive-start:disabled {
   color: var(--muted);
 }
+@media (hover: hover) {
+  .drive-start:hover:not(:disabled),
+  .drive-bench-move.held:hover:not(:disabled) {
+    background: #fff4e7;
+    color: var(--orange);
+    border-color: var(--orange);
+  }
+  .drive-stop:hover:not(:disabled),
+  .lab-stop:hover:not(:disabled) {
+    background: #a51d21;
+    border-color: #a51d21;
+    color: white;
+  }
+}
 .drive-why {
   flex-basis: 100%;
   font-size: 14px;
@@ -569,7 +583,7 @@
   margin-left: 6px;
   font-size: 13px;
   font-weight: 400;
-  color: var(--muted);
+  color: #5d706a;
 }
 .live-files-body {
   display: grid;
