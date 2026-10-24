@@ -775,14 +775,14 @@ QUESTiX Robot Manager の「調整」タブでコントローラー別に編集�
 
 操作割り当てはコントローラー別のボタン名・軸名から選べます。名前の隣に
 ROS の配列番号も表示し、標準配置以外の番号も選択できます。
-コントローラーは UART / Switch・DualShock・Web（ブラウザ・スマホ、`web_joy_driver`）の 3 種類で、
-管理設定の「機体・接続の設定」（`CONTROLLER_TYPE`）で選べます。「調整」で編集できるのは UART / Switch と
-DualShock で、設定ファイルはそれぞれ別（`controls.uart.yaml` / `controls.dualshock.yaml`）です。
+コントローラーは 大会用コントローラー・ゲームパッド・Web（ブラウザ・スマホ、`web_joy_driver`）の 3 種類で、
+管理設定の「機体・接続の設定」（`CONTROLLER_TYPE`）で選べます。「調整」で編集できるのは 大会用コントローラー と
+ゲームパッド で、設定ファイルはそれぞれ別（`controls.uart.yaml` / `controls.dualshock.yaml`）です。
 Web はブラウザの操作画面でボタンの役割が決まっているため、同梱の `controls.web.yaml` を固定で使い、
 「調整」では編集しません（次回起動が Web のときは「調整」にその旨を表示し、「別のコントローラー用の設定です」
 という警告は出しません。保存 API も 409 で断ります）。「操作設定を保存」のバーは未保存の変更があるときだけ
 表示し、保存後にロボット制御が動いていれば画面上部に「今すぐ再起動して反映」を出します。
-UART の名前は `uart_joy_driver` のプロトコルに合わせています。DualShock は
+大会用コントローラーの名前は `uart_joy_driver` のプロトコルに合わせています。ゲームパッド は
 Linux の標準配置を表示するもので、接続機器の自動判別ではありません。
 [joy_node の配列順は機器依存](https://github.com/ros-drivers/joystick_drivers/blob/ros2/joy/README.md)
 のため、独自の接続環境では実際の番号に合わせてください。

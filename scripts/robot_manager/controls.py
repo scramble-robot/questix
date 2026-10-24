@@ -46,7 +46,7 @@ GROUPS = {
         ('full_speed_button', 'ローラーの回転ボタン番号', 'int', 0, 63),
         ('full_speed_value', 'ローラーの回転出力（0〜1）', 'float', 0, 1),
     ]),
-    'joy_node': ('DualShock 入力', [('deadzone', 'スティック不感帯', 'float', 0, 0.99)]),
+    'joy_node': ('ゲームパッドの入力', [('deadzone', 'スティック不感帯', 'float', 0, 0.99)]),
     'uart_joy_driver': ('UART 入力', [('deadzone', 'スティック不感帯', 'float', 0, 0.99)]),
     'web_joy_driver': ('Web（ブラウザ・スマホ）入力', [
         ('deadzone', 'スティック不感帯', 'float', 0, 0.99)]),
