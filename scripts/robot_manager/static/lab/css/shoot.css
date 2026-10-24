@@ -67,6 +67,13 @@
 .shoot-fire:disabled {
   color: var(--muted);
 }
+@media (hover: hover) {
+  .shoot-fire:hover:not(:disabled) {
+    background: var(--green-soft);
+    color: var(--green);
+    border-color: var(--green);
+  }
+}
 /* Side by side on a phone too: the stop and the fire button are one glance apart. */
 @media (max-width: 420px) {
   .shoot-actions button {

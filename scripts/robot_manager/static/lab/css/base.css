@@ -54,6 +54,13 @@ button.primary {
   border-color: var(--green);
   color: white;
   box-shadow: 0 2px 1px #103e2610;
+  transition: transform 0.15s;
+}
+/* Inversion must be immediate on entry AND exit: fading only the background briefly hides text. */
+button.drive-start,
+button.shoot-fire,
+button.drive-bench-move {
+  transition: transform 0.15s;
 }
 button.quiet,
 button.text-button {
@@ -380,11 +387,31 @@ dialog::backdrop {
   padding: 0;
 }
 @media (hover: hover) {
-  button:hover:not(:disabled) {
-    background: #edf3ef;
+  /* Filled actions and selected controls own both their foreground and background. */
+  button:hover:not(:disabled):not(
+      :where(
+        .primary,
+        .drive-start,
+        .drive-stop,
+        .lab-stop,
+        .shoot-fire,
+        .sys-stop-link,
+        .drive-bench-move.held,
+        .emergency,
+        .pressed,
+        [aria-pressed='true'],
+        [aria-selected='true'],
+        [aria-current]
+      )
+    ) {
+    background: #f1f6f3;
+    color: var(--dark);
+    --muted: #5d706a;
   }
   button.primary:hover:not(:disabled) {
-    background: #155e57;
+    background: var(--green-soft);
+    color: var(--green);
+    border-color: var(--green);
   }
   .choice:hover {
     border-color: #9cbcaf;
