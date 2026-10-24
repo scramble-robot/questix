@@ -294,10 +294,10 @@
 .drive-plot-end {
   transform: translate(4px, -50%);
   font-weight: 700;
-  color: var(--report-measured);
+  color: var(--role-measured-text);
 }
 .drive-plot-end.command {
-  color: var(--report-command);
+  color: var(--role-target-text);
 }
 .drive-plot-end.compare-1,
 .drive-plot-end.compare-2,

@@ -90,7 +90,7 @@
   border-color: var(--role-plan);
 }
 .control-chart-legend .fb-line:before {
-  border-color: var(--role-measured);
+  border-color: var(--role-measured-text);
   border-top-style: solid;
 }
 .control-previous-note {
@@ -228,7 +228,7 @@
   margin: 16px auto 0;
 }
 .control-time {
-  color: #687c83;
+  color: var(--muted);
   font-size: 14px;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
@@ -565,7 +565,7 @@
 .control-question label span {
   font-weight: 400;
   font-size: 13px;
-  color: #6a7c81;
+  color: var(--muted);
 }
 .control-question textarea {
   display: block;
@@ -850,11 +850,11 @@
 }
 .control-compare-table small {
   display: block;
-  color: #6a7c81;
+  color: var(--muted);
   font-size: 12px;
 }
 .control-compare-table .stale {
-  color: #6a7c81;
+  color: var(--muted);
 }
 .control-compare-table small.control-compare-stale {
   color: #8a5a00;

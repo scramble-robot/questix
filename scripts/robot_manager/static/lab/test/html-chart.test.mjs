@@ -75,3 +75,26 @@ test('the direct label sits on the last finite point', () => {
   assert.deepEqual(polylines(empty), []);
   assert.deepEqual(labelStyles(empty), []);
 });
+
+test('direct label text uses stronger ink without changing the line stroke', () => {
+  const chart = htmlChart({
+    label: 'test',
+    xTitle: 'x',
+    yTitle: 'y',
+    x: axis,
+    y: axis,
+    series: [
+      {
+        points: [
+          [0, 0],
+          [10, 10],
+        ],
+        color: '#2a78d6',
+        label: 'measured',
+      },
+    ],
+  });
+  assert.match(labelStyles(chart)[0], /color:var\(--role-measured-text, #2a78d6\)/);
+  const line = templates(chart, '<polyline points=')[0];
+  assert.ok(line.values.includes('#2a78d6'));
+});

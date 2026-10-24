@@ -82,7 +82,7 @@
 
 .control-compare small {
   font-size: 13px;
-  color: #6a7c81;
+  color: var(--muted);
 }
 
 /* One sentence under the result numbers that says what the run shows, with its numbers. */
@@ -138,7 +138,7 @@
   color: white;
 }
 .control-topic-done {
-  color: var(--role-actual);
+  color: var(--role-actual-text);
   font-weight: 700;
 }
 @media (max-width: 620px) {
@@ -240,7 +240,7 @@
   border: 0;
   width: auto;
   height: auto;
-  color: var(--role-actual);
+  color: var(--role-actual-text);
   font-weight: 700;
 }
 .launch-key-mean:before {
@@ -249,13 +249,13 @@
   border-top: 3px solid #0f6b4a;
 }
 .launch-chart-measured .launch-key-point:before {
-  border-color: var(--role-measured);
+  border-color: var(--role-measured-text);
 }
 .launch-chart-measured .launch-key-mean:before {
   border-top-color: #1c5aa6;
 }
 .launch-chart-legend .launch-key-target:before {
-  border-color: var(--role-target);
+  border-color: var(--role-target-text);
   background: rgb(168 118 10 / 16%);
 }
 .launch-chart {
