@@ -18,8 +18,7 @@
 .motor-measure-pointer,
 .vision-region-controls,
 .rl-learning-result,
-.school-tip-example,
-.planning-workspace > .card > .planning-edit {
+.school-tip-example {
   padding-inline: var(--card-inset);
 }
 
@@ -53,7 +52,6 @@
 .series-robot.card,
 .lesson-quickstart,
 .lesson-brief,
-.lesson-footer,
 .reference-item,
 .records-section.card,
 #controlVisual,
@@ -65,16 +63,19 @@
 /* The drawing remains edge-to-edge; its own reading/control rows own the inset. */
 .sys-observation .sys-data,
 .planning-playbar,
+.launch-playbar,
+.arm-playbar,
+.arm-readings,
+.rl-destination-board,
+.rl-future-board,
 .planning-workspace > .card > .planning-status,
 .arm-view-head,
 .arm-result-card .arm-status,
 .vision-image-pair figcaption,
 .launch-workspace > .card > .section-top,
-.launch-workspace > .card > .launch-timeline,
 .intro-visual > .section-top,
 .intro-layout .comparison figcaption,
 .intro-layout .comparison figure > p,
-.rl-curve > figcaption,
 #robotMonitor .robot-panels > figure > figcaption,
 #robotMonitor .robot-panels > figure > p,
 .supplement-body .school-tip-example {
@@ -91,8 +92,32 @@
     padding-inline: var(--card-inset);
   }
 }
-@media (max-width: 900px) {
-  .basics-visual .section-top {
+
+@media (max-width: 700px) {
+  #lessonFooter {
     padding-inline: var(--card-inset);
   }
+}
+
+/* Smaller reading panels also own a complete gutter; status chips inside them stay compact. */
+.lesson-brief .run-mode-strip,
+.lesson-brief .run-mode-strip[data-run-mode~='live'],
+.lesson-brief .run-mode-strip[data-run-mode~='data'],
+.motor-kv,
+.sys-drive,
+.sys-readouts,
+.sys-scene-key,
+.sys-timeband,
+.rl-long-job,
+.rl-curve-wrap,
+.rl-curve-empty,
+.lab-bridge,
+.rs-strip,
+.shoot-strip {
+  padding-inline: var(--card-inset);
+}
+
+/* This figure has the same white surface as its wrapper: the wrapper owns the gutter once. */
+.rl-curve-wrap > .rl-curve > figcaption {
+  padding-inline: 0;
 }
