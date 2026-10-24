@@ -98,6 +98,7 @@ test('report paragraph typography is owned by the component, beyond generic host
     'drive-report-status',
     'drive-report-meta',
     'drive-report-cut',
+    'drive-report-ended',
     'drive-note',
     'drive-plot-axis',
     'drive-report-spin',
@@ -109,4 +110,15 @@ test('report paragraph typography is owned by the component, beyond generic host
   assert.equal(declaration('.drive-report .drive-plot-axis', 'font-size'), '12px');
   assert.equal(declaration('.drive-report .drive-report-meta', 'font-size'), '13px');
   assert.equal(declaration('.drive-report .drive-report-status', 'line-height'), '1.3');
+});
+
+test('the ended sentence names its component typography', () => {
+  const source = fs.readFileSync(
+    new URL('../js/live/drive-report-view.js', import.meta.url),
+    'utf8',
+  );
+  assert.match(source, /run\.ended \? html`<p class="drive-report-ended">/);
+  assert.equal(declaration('.drive-report .drive-report-ended', 'font-size'), '14px');
+  assert.equal(declaration('.drive-report .drive-report-ended', 'line-height'), '1.85');
+  assert.equal(declaration('.drive-report .drive-report-ended', 'margin'), '0');
 });

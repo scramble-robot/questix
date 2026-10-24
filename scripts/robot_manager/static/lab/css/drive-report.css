@@ -500,6 +500,7 @@
    report's existing typography even inside the measurement lab or a supplement dialog. */
 .drive-report .drive-report-status,
 .drive-report .drive-report-meta,
+.drive-report .drive-report-ended,
 .drive-report .drive-report-cut,
 .drive-report .drive-note,
 .drive-report .drive-plot-axis,
@@ -512,6 +513,7 @@
   font-size: 14px;
   line-height: 1.3;
 }
+.drive-report .drive-report-ended,
 .drive-report .drive-report-cut,
 .drive-report .drive-report-spin {
   font-size: 14px;
