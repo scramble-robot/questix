@@ -236,6 +236,25 @@ function refreshTuningFields(activeInput) {
   }
 }
 
+// Supplementary details use the top layer so they never expand the input grid.
+let tuningHelpOpener;
+function openTuningHelp(row, opener, title) {
+  const dialog = document.getElementById("tuning-help-dialog");
+  document.getElementById("tuning-help-title").textContent = `${title}の説明`;
+  document.getElementById("tuning-help-text").textContent = row.querySelector(".control-field-help").textContent;
+  document.getElementById("tuning-help-estimate").textContent = row.querySelector(".control-estimate").textContent;
+  tuningHelpOpener = opener;
+  opener.setAttribute("aria-expanded", "true");
+  dialog.showModal();
+}
+
+function finishTuningHelp() {
+  if (!tuningHelpOpener) return;
+  tuningHelpOpener.setAttribute("aria-expanded", "false");
+  tuningHelpOpener.focus({ preventScroll: true });
+  tuningHelpOpener = null;
+}
+
 function createTuningPreviews(container, kinds = ["linear", "angular"]) {
   for (const kind of kinds) {
     const title = kind === "linear" ? "走行の変化の目安" : "旋回の変化の目安";
@@ -307,17 +326,6 @@ function reserveTuningLayout() {
     reserveTuningText(range, [range.textContent, spec.acceleration
       ? "入力できる範囲：0.000001 s 以上（短すぎると保存できません）。加速度0は制限なしのまま保持し、正の時間を入力すると制限を有効にします。"
       : range.textContent]);
-    const estimate = row.querySelector(".control-estimate");
-    if (spec.signed) {
-      const kind = key === "angular_input_ratio" ? "angular" : "linear";
-      const unit = kind === "linear" ? "m/s" : "rad/s（999999°/s）";
-      reserveTuningText(estimate, [estimate.textContent,
-        `9999.99 ${unit}（方向反転）・配布元の9999.99%。 設定は 9999.99 ${unit} ですが、車輪の上限で実際は約 9999.99 ${unit} までです。 `
-        + "最大まで倒し続けて、内部の値が設定の速さに届いた場合、スティックを戻しても約 9999.99 s は全速のまま進み、止まるまでに約 9999.99 s、約 9999.99 m進みます。短く倒した場合は、ここまで続きません。 単独で倒したときの目安です。 前進が速いときは、旋回が弱くなります。"]);
-    } else if (spec.acceleration) {
-      reserveTuningText(estimate, [estimate.textContent,
-        "車輪の寸法を確認できないため、加速時間から加速度を計算できず、この欄は編集できません。"]);
-    }
     reserveTuningText(row.querySelector(".control-feedback"), [copy => {
       const state = copy.querySelector(".control-change-state");
       state.hidden = false;
@@ -752,11 +760,11 @@ function renderControls() {
       info.className = "control-info";
       info.textContent = "ⓘ";
       info.setAttribute("aria-label", `${spec.title}の説明`);
-      info.setAttribute("aria-controls", help.id);
+      info.setAttribute("aria-controls", "tuning-help-dialog");
+      info.setAttribute("aria-haspopup", "dialog");
       info.setAttribute("aria-expanded", "false");
       info.addEventListener("click", () => {
-        help.hidden = !help.hidden;
-        info.setAttribute("aria-expanded", String(!help.hidden));
+        openTuningHelp(row, info, spec.title);
       });
       const heading = document.createElement("div");
       heading.className = "control-field-heading";
@@ -874,9 +882,8 @@ function renderControls() {
         : spec.signed ? `入力できる範囲：0〜${Number(field.max).toFixed(1)} ${spec.unit}（方向の反転は保存済みのまま）。`
           : `入力できる範囲：${field.min * spec.scale}〜${field.max * spec.scale} ${spec.unit}。`;
       const estimate = document.createElement("p");
-      estimate.className = "control-estimate";
+      estimate.className = "control-estimate tuning-sr-only";
       estimate.id = `${input.id}-estimate`;
-      estimate.tabIndex = 0;
       row.append(range, feedback);
       row.append(estimate);
       section.appendChild(row);
@@ -1013,6 +1020,15 @@ async function saveControls(event) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  const helpDialog = document.getElementById("tuning-help-dialog");
+  document.getElementById("tuning-help-close").addEventListener("click", () => helpDialog.close());
+  helpDialog.addEventListener("close", finishTuningHelp);
+  helpDialog.addEventListener("click", (event) => {
+    if (event.target !== helpDialog) return;
+    const rect = helpDialog.getBoundingClientRect();
+    if (event.clientX < rect.left || event.clientX > rect.right
+        || event.clientY < rect.top || event.clientY > rect.bottom) helpDialog.close();
+  });
   let compactMap = window.innerWidth < 640;
   window.addEventListener("resize", () => {
     const compact = window.innerWidth < 640;
