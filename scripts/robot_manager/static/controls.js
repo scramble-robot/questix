@@ -255,6 +255,31 @@ function finishTuningHelp() {
   tuningHelpOpener = null;
 }
 
+function tuningFormulaNumber(value, digits) {
+  // Do not turn a small nonzero time into a displayed division by zero.
+  const rounded = value.toFixed(digits);
+  return value !== 0 && Number(rounded) === 0 ? String(TuningModel.number(value)) : rounded;
+}
+
+function tuningFormulaSummary(state, kind) {
+  if (!state || state.speed === 0 || state.unlimited || state.time === null || state.stop === null) {
+    return TuningModel.summary(state, kind);
+  }
+  const distance = state.speed * state.time; // Both triangular ramps; no cruise interval.
+  if (!TuningModel.finite(distance)) return "加速・減速の合計が大きすぎるため、目安は表示できません。";
+  const angular = kind === "angular";
+  const unit = angular ? "rad/s" : "m/s";
+  const speed = `${tuningFormulaNumber(state.speed, 2)} ${unit}`;
+  const time = `${tuningFormulaNumber(state.time, 1)} s`;
+  const lines = [
+    `最高速度 ${speed} 、加速時間 ${time} 。`,
+    `${angular ? "角加速度" : "加速度"} ＝ ${speed} ÷ ${time} ＝ ${tuningFormulaNumber(state.accel, 1)} ${unit}²`,
+    `加速・減速までの${angular ? "角度" : "距離"} ＝ ${speed} × ${time} ＝ ${tuningFormulaNumber(distance, 1)} ${angular ? "rad" : "m"}`,
+  ];
+  if (state.limited) lines.push(`車輪の上限で速度が制限されています。${TuningModel.limitedText(state, kind)}`);
+  return lines.join("\n");
+}
+
 function createTuningPreviews(container, kinds = ["linear", "angular"]) {
   for (const kind of kinds) {
     const title = kind === "linear" ? "走行の変化の目安" : "旋回の変化の目安";
@@ -271,11 +296,13 @@ function createTuningPreviews(container, kinds = ["linear", "angular"]) {
     summary.setAttribute("aria-live", "polite");
     const note = document.createElement("p");
     note.className = "control-help";
-    note.textContent = "単独で倒したときの目安です。前進と旋回を同時に入れたときの切り詰めは含みません。"
+    note.textContent = "式の距離・角度は加速と減速の区間の合計で、全速を保つ区間は含みません。"
+      + "数値は丸めて表示し、計算には丸める前の値を使っています。"
+      + "単独で倒したときの目安です。前進と旋回を同時に入れたときの切り詰めは含みません。"
       + "標準起動の車輪寸法で一定加速度として計算し、最後の減速をなめらかにする帯を省いているため、時間と停止量は約の値です。実測値ではありません。";
     const chart = document.createElement("div");
     chart.id = `tuning-${kind}-chart`;
-    section.append(heading, summary, chart, note);
+    section.append(heading, chart, summary, note);
     container.appendChild(section);
   }
 }
@@ -283,7 +310,7 @@ function createTuningPreviews(container, kinds = ["linear", "angular"]) {
 function renderTuningPreviews() {
   for (const kind of ["angular", "linear"]) {
     const summary = document.getElementById(`tuning-${kind}-summary`);
-    summary.textContent = TuningModel.summary(TuningModel.motion(controlDraft, controlProfile.geometry, kind), kind);
+    summary.textContent = tuningFormulaSummary(TuningModel.motion(controlDraft, controlProfile.geometry, kind), kind);
     TuningChart.render(document.getElementById(`tuning-${kind}-chart`),
       TuningModel.motion(controlDraft, controlProfile.geometry, kind),
       TuningModel.motion(controlProfile.defaults, controlProfile.geometry, kind), kind);
@@ -336,8 +363,10 @@ function reserveTuningLayout() {
   }
   for (const kind of ["linear", "angular"]) {
     const summary = document.getElementById(`tuning-${kind}-summary`);
-    reserveTuningText(summary, [summary.textContent,
-      "最高速度の目安 9999.99 rad/s（999999°/s）、加速時間 9999.99 s。最大まで倒し続けて、内部の値が設定の速さに届いた場合、スティックを戻しても約 9999.99 s は全速のまま回り、止まるまでに約 9999.99 s、約 999999°回ります。短く倒した場合は、ここまで続きません。"]);
+    reserveTuningText(summary, [summary.textContent, tuningFormulaSummary({
+      speed: 9999.99, time: 9999.99, accel: 9999.99, stop: 999999,
+      stopTime: 9999.99, coastTime: 9999.99, limited: true,
+    }, kind)]);
   }
   const box = document.getElementById("controls-application");
   const runtime = { captured_at: new Date().toISOString(), nodes: Object.fromEntries(
