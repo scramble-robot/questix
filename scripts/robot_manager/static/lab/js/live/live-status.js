@@ -10,9 +10,10 @@ const listeners = new Set();
 const dialogOrder = [];
 const dialogHosts = new Map();
 let lastModel = '';
+// Display consumers read this exact snapshot; only drawStatuses evaluates receive-time expiry.
+let currentModel;
 function liveStatus() {
-  const link = robotState();
-  return { ...liveStatusModel(link, received, performance.now()), stage: linkStage(link) };
+  return currentModel;
 }
 function activeLiveDialog() {
   for (const dialog of document.querySelectorAll('dialog[open]'))
@@ -22,7 +23,11 @@ function activeLiveDialog() {
   return dialogOrder.at(-1) ?? null;
 }
 function drawStatuses() {
-  const model = liveStatus();
+  const link = robotState();
+  const model = (currentModel = {
+    ...liveStatusModel(link, received, performance.now()),
+    stage: linkStage(link),
+  });
   const active = activeLiveDialog();
   const header = document.getElementById('liveHeaderStatus');
   if (header) {
