@@ -14,7 +14,7 @@ import { loadJson, fillSentence } from '../core/content.js';
 import { scrollBehavior } from '../core/dom.js';
 import { html, render, nothing } from '../vendor/lit-html.js';
 
-import { liveStatus } from './live-status.js';
+import { liveStatus, onLiveStatus } from './live-status.js';
 import { renderLive, resetLiveLayout } from './live-layout.js';
 
 const copy = await loadJson('content/live/link.json');
@@ -225,8 +225,17 @@ function estopText() {
   return copy.monitor[words[liveStatus().estop]];
 }
 
-function recordEstop(message) {
-  requestRedraw();
+function drawEstop() {
+  render(
+    html`<span class="live-text-slot">
+      ${['estopPressed', 'estopReleased', 'estopUnknown', 'estopStale'].map(
+        (key) =>
+          html`<span class="live-text-reserve" aria-hidden="true">${copy.monitor[key]}</span>`,
+      )}
+      <span>${estopText()}</span>
+    </span>`,
+    $('robotEstop'),
+  );
 }
 function readings() {
   const odom = latestRobot('odom');
@@ -240,16 +249,7 @@ function readings() {
   $('robotCommand').textContent = twist
     ? `前後 ${f(twist.linear)} m/s · 回転 ${f(twist.angular)} rad/s`
     : '—';
-  render(
-    html`<span class="live-text-slot">
-      ${['estopPressed', 'estopReleased', 'estopUnknown', 'estopStale'].map(
-        (key) =>
-          html`<span class="live-text-reserve" aria-hidden="true">${copy.monitor[key]}</span>`,
-      )}
-      <span>${estopText()}</span>
-    </span>`,
-    $('robotEstop'),
-  );
+  drawEstop();
 }
 
 // The canvases have no size while the monitor section is hidden, so there is nothing to draw on yet.
@@ -535,7 +535,7 @@ function initLive() {
   onRobot('odom', requestRedraw);
   onRobot('twist', requestRedraw);
   onRobot('drive', recordWheels);
-  onRobot('estop', recordEstop);
+  onLiveStatus(drawEstop);
   onRobot('camera', showCamera);
   showState(robotState());
   showDialogNav();
