@@ -21,7 +21,6 @@
   font-size: 15px;
   line-height: 1.8;
   color: #304651;
-  max-width: 72ch;
 }
 .lesson-quickstart p + p {
   margin-top: 8px;
@@ -169,9 +168,8 @@
   }
 }
 @media (max-width: 600px) {
-  /* The labels say it; the sentence behind them is on wider screens and in each label's title. */
-  .lesson-brief .run-mode-strip-label,
-  .lesson-brief .run-mode-strip p {
+  /* The badges replace the label; keep the explanation readable on its own row. */
+  .lesson-brief .run-mode-strip-label {
     display: none;
   }
   .lesson-brief .run-mode-strip {
