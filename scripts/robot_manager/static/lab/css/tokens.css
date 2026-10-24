@@ -22,6 +22,7 @@
   --dark: #102832;
   --orange: #a65a32;
   --radius: 18px;
+  --card-inset: 24px;
   /* What a colour means (js/core/palette.js holds the same values and the rules). */
   --role-actual: #1a9e6e;
   --role-measured: #2a78d6;
