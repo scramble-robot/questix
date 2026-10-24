@@ -121,7 +121,7 @@ function tuningSpec(node, key) {
   if (node === "joy_controller" && ["longitudinal_input_ratio", "angular_input_ratio"].includes(key)) {
     const reference = Math.abs(controlProfile.defaults[node][key]);
     return { ...spec, help: key === "angular_input_ratio"
-      ? "スティックを最大まで倒したときの旋回の速さ。速さを変えると、加速時間を保つよう加速度を計算し直します。0では旋回しません。" : spec.help,
+      ? "スティックを最大まで倒したときの旋回速度。速さを変えると、加速時間を保つよう加速度を計算し直します。0では旋回しません。" : spec.help,
       presets: [[reference * 0.5, "ゆっくり 50%"], [reference, "標準 100%"], [reference * 1.5, "速め 150%"]],
       baseline: reference };
   }
@@ -269,6 +269,87 @@ function renderTuningPreviews() {
       TuningModel.motion(controlDraft, controlProfile.geometry, kind),
       TuningModel.motion(controlProfile.defaults, controlProfile.geometry, kind), kind);
   }
+}
+
+// Reserve the longest display states at the current width, before editing. These are
+// invisible measuring copies, never inputs to the draft, model, runtime report or API.
+const tuningSpaceWidths = new WeakMap();
+let tuningLayoutObserver;
+function reserveTuningText(element, variants) {
+  if (!element?.cloneNode || !element.clientWidth) return;
+  const width = element.getBoundingClientRect().width;
+  if (tuningSpaceWidths.get(element) === width) return;
+  const copy = element.cloneNode(true);
+  Object.assign(copy.style, { position: "fixed", left: "-10000px", top: "0",
+    width: `${width}px`, height: "auto", minHeight: "0", visibility: "hidden",
+    pointerEvents: "none" });
+  copy.setAttribute("aria-hidden", "true");
+  copy.inert = true;
+  element.after(copy);
+  let height = 0;
+  try {
+    for (const variant of variants) {
+      if (typeof variant === "string") copy.textContent = variant;
+      else variant(copy);
+      height = Math.max(height, copy.getBoundingClientRect().height);
+    }
+  } finally { copy.remove(); }
+  element.style.minHeight = `${Math.ceil(height) + 1}px`;
+  tuningSpaceWidths.set(element, width);
+}
+
+function reserveTuningLayout() {
+  if (!controlProfile) return;
+  for (const row of document.querySelectorAll(".control-field")) {
+    const { node, key } = row.dataset;
+    const spec = tuningSpec(node, key);
+    const range = row.querySelector(".control-range");
+    reserveTuningText(range, [range.textContent, spec.acceleration
+      ? "入力できる範囲：0.000001 s 以上（短すぎると保存できません）。加速度0は制限なしのまま保持し、正の時間を入力すると制限を有効にします。"
+      : range.textContent]);
+    const estimate = row.querySelector(".control-estimate");
+    if (spec.signed) {
+      const kind = key === "angular_input_ratio" ? "angular" : "linear";
+      const unit = kind === "linear" ? "m/s" : "rad/s（999999°/s）";
+      reserveTuningText(estimate, [estimate.textContent,
+        `9999.99 ${unit}（方向反転）・配布元の9999.99%。 設定は 9999.99 ${unit} ですが、車輪の上限で実際は約 9999.99 ${unit} までです。 `
+        + "最大まで倒し続けて、内部の値が設定の速さに届いた場合、スティックを戻しても約 9999.99 s は全速のまま進み、止まるまでに約 9999.99 s、約 9999.99 m進みます。短く倒した場合は、ここまで続きません。 単独で倒したときの目安です。 前進が速いときは、旋回が弱くなります。"]);
+    } else if (spec.acceleration) {
+      reserveTuningText(estimate, [estimate.textContent,
+        "車輪の寸法を確認できないため、加速時間から加速度を計算できず、この欄は編集できません。"]);
+    }
+    reserveTuningText(row.querySelector(".control-feedback"), [copy => {
+      const state = copy.querySelector(".control-change-state");
+      state.hidden = false;
+      state.style.fontWeight = "600";
+      state.textContent = spec.acceleration ? "加速度に変更あり" : "変更あり";
+      copy.querySelector(".control-saved").hidden = false;
+    }]);
+  }
+  for (const kind of ["linear", "angular"]) {
+    const summary = document.getElementById(`tuning-${kind}-summary`);
+    reserveTuningText(summary, [summary.textContent,
+      "最高速度の目安 9999.99 rad/s（999999°/s）、加速時間 9999.99 s。最大まで倒し続けて、内部の値が設定の速さに届いた場合、スティックを戻しても約 9999.99 s は全速のまま回り、止まるまでに約 9999.99 s、約 999999°回ります。短く倒した場合は、ここまで続きません。"]);
+  }
+  const box = document.getElementById("controls-application");
+  const runtime = { captured_at: new Date().toISOString(), nodes: Object.fromEntries(
+    Object.entries(controlProfile.values).map(([node, values]) => [node, { status: "ok", values: { ...values } }])) };
+  const changed = structuredClone(controlProfile.values);
+  const node = Object.keys(changed)[0], key = Object.keys(changed[node])[0];
+  changed[node][key] = null;
+  const mismatch = structuredClone(runtime);
+  mismatch.nodes[node].values[key] = null;
+  const partial = structuredClone(runtime);
+  delete partial.nodes[node].values[key];
+  const states = [null, runtime, mismatch, partial].map(snapshot =>
+    OperatorGuide.application(controlProfile, controlProfile.values, snapshot, controlProfile.controller));
+  states.push(OperatorGuide.application(controlProfile, changed, null, controlProfile.controller),
+    OperatorGuide.application(controlProfile, controlProfile.values, null,
+      controlProfile.controller === "uart" ? "dualshock" : "uart"));
+  reserveTuningText(box, states.map(state => copy => {
+    copy.querySelector("#controls-application-title").textContent = state.title;
+    copy.querySelector("#controls-application-note").textContent = state.note;
+  }));
 }
 
 function tiltDirectionKey() {
@@ -806,6 +887,12 @@ function renderControls() {
   renderControlSummary();
   refreshControlChanges();
   renderRuntimeValues();
+  reserveTuningLayout();
+  if (typeof ResizeObserver !== "undefined" && !tuningLayoutObserver) {
+    tuningLayoutObserver = new ResizeObserver(reserveTuningLayout);
+    tuningLayoutObserver.observe(container);
+    tuningLayoutObserver.observe(document.getElementById("controls-application"));
+  }
 }
 
 function controlsSetBusy(busy) {

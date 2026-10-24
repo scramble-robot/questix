@@ -1100,3 +1100,41 @@ test('forward-speed presets use fixed defaults and preserve acceleration time th
   assert.equal(input().value, '2.00');
   assert.equal(time().value, before);
 });
+
+test('paired motion fields precede their matching preview and keep accessible labels', async () => {
+  const { document, context } = editorFixture();
+  await vm.runInContext('loadControls("uart")', context);
+  const groups = document.getElementById('controls-fields').children.filter(group => group.dataset.kind);
+  assert.deepEqual(groups.map(group => group.dataset.kind), ['linear', 'angular']);
+  assert.deepEqual(groups.map(group => group.children.filter(row => row.className === 'control-field')
+    .map(row => row.dataset.key)), [
+    ['longitudinal_input_ratio', 'max_linear_accel'], ['angular_input_ratio', 'max_angular_accel'],
+  ]);
+  for (const group of groups) {
+    const preview = group.children.at(-1);
+    assert.equal(preview.children[0].id, `tuning-${group.dataset.kind}-heading`);
+  }
+  const rows = document.querySelectorAll('.control-field');
+  for (const [key, label] of [['angular_input_ratio', '旋回速度（rad/s）'],
+    ['max_linear_accel', '走行の加速時間（s）'], ['max_angular_accel', '旋回の加速時間（s）']]) {
+    const row = rows.find(row => row.dataset.key === key);
+    const input = document.getElementById(`control-${row.dataset.node}-${key}`);
+    assert.equal(row.children[0].children[0].textContent, label);
+    assert.equal(row.children[0].children[0].htmlFor, input.id);
+  }
+});
+
+test('two-decimal display and blur never round exact values in an unrelated save', async () => {
+  const exact = 1.23456789, accel = 3.123456789;
+  const { document, context, getPayload } = editorFixture({
+    joy_controller: { longitudinal_input_ratio: exact }, drive_component: { max_linear_accel: accel },
+  });
+  await vm.runInContext('loadControls("uart")', context);
+  const speed = document.getElementById('control-joy_controller-longitudinal_input_ratio');
+  assert.equal(speed.value, '1.23');
+  speed.events.blur();
+  vm.runInContext('controlDraft.joy_launcher.fire_button = 0; refreshControlChanges()', context);
+  await vm.runInContext('saveControls({preventDefault() {}})', context);
+  assert.equal(getPayload().values.joy_controller.longitudinal_input_ratio, exact);
+  assert.equal(getPayload().values.drive_component.max_linear_accel, accel);
+});

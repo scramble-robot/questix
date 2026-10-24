@@ -57,7 +57,7 @@ const TuningChart = (() => {
     legend.append(element("span", "tuning-line-current", "実線：編集中（計算）"),
       element("span", "tuning-line-standard", "破線：配布元100%（計算）"));
     const yTitle = element("div", "tuning-chart-y-title", kind === "angular"
-      ? "旋回の速さ（rad/s）" : "速さ（m/s）");
+      ? "旋回速度（rad/s）" : "速さ（m/s）");
     const body = element("div", "tuning-chart-body");
     const yTicks = element("div", "tuning-chart-y-ticks");
     const plot = element("div", "tuning-chart-plot");

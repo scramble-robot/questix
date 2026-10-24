@@ -80,7 +80,7 @@ const TuningModel = (() => {
   }
 
   function speedWarning(key, value, maximum, saved = false) {
-    const [label, unit] = key === "angular_input_ratio" ? ["旋回の速さ", "rad/s"]
+    const [label, unit] = key === "angular_input_ratio" ? ["旋回速度", "rad/s"]
       : key === "lateral_input_ratio" ? ["左右の速さ", "m/s"] : ["走行速度", "m/s"];
     return `${saved ? "保存済みの" : ""}${label} ${magnitude(value)} ${unit}${value < 0 ? "（方向の反転あり）" : ""}は、保存できる範囲の外です。`
       + `大きさを ${maximum.toFixed(1)} ${unit} 以下にしてください（方向の反転は保存済みのまま）。`;
