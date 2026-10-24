@@ -1,5 +1,6 @@
 import { wheelRpm, wheelAuthority, forwardRpm, frontDistance, scanMount } from './capture-core.js';
 import { fillSentence as fill } from '../core/content.js';
+import { DISPLAY_STALE_MS } from './live-status-core.js';
 
 // The 「実機の状態」 panel's arithmetic, with no DOM and no WebSocket (test/robot-state-core.test.mjs):
 // what the robot's streams say right now — who drives it, the emergency stop, both wheels with the
@@ -23,8 +24,8 @@ const HISTORY_SECONDS = 10; // the wheel charts show this much
 const WHEEL_GAP_SECONDS = 0.5;
 // Older than this, a value no longer describes the robot now: it is shown grey and left out of a
 // memo line. The LiDAR sends 5 scans a second at most (lab_bridge.yaml scan_max_hz), the rest 20.
-// /emergency_stop comes at 10 Hz from operation_manager: silent for a second, its state is stale.
-const STALE_SECONDS = { drive: 1, odom: 1, scan: 2, twist: 1, estop: 1 };
+// The E-stop display shares the header's receive-time limit. Display only: never a motion gate.
+const STALE_SECONDS = { drive: 1, odom: 1, scan: 2, twist: 1, estop: DISPLAY_STALE_MS / 1000 };
 const STREAMS = ['drive', 'odom', 'scan', 'twist'];
 const MOVING_RPM = 1; // a wheel below this counts as standing still
 const COMMAND_MOVING = 1e-3; // |command| above this asks the robot to move (m/s or rad/s)
