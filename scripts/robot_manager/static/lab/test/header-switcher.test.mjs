@@ -69,7 +69,7 @@ test(
                 data: JSON.stringify({
                   type: 'hello',
                   protocol: 1,
-                  robot: { name: 'fixture' },
+                  robot: { name: 'lab-robot-0123456789' },
                   streams: {},
                   read_only: false,
                 }),
@@ -100,8 +100,8 @@ test(
               () => !document.querySelector('#labHeaderStop button')?.disabled,
             );
             const expectedOrder = [
-              'robotLinkOpen',
               'labHeaderStop',
+              'robotLinkOpen',
               ...(course === 'series' ? [] : ['seriesHome']),
               'courseSwitcher',
             ];
@@ -139,6 +139,13 @@ test(
               ),
               false,
             );
+            if (width >= 1180) {
+              assert(
+                await page
+                  .locator('#robotLinkName')
+                  .evaluate((e) => e.clientWidth >= e.scrollWidth),
+              );
+            }
             const actual = await page.evaluate(() => {
               const header = document.querySelector('.site-header'),
                 box = document.querySelector('#courseSwitcher');

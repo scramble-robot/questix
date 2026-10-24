@@ -50,7 +50,10 @@ test('wide header is one fixed 109px row with stable reserved columns', () => {
   const wide = css.slice(css.indexOf('@media (min-width: 1091px)'));
   assert.match(wide, /height: 109px;\s*min-height: 109px/);
   assert.match(wide, /grid-template-rows: 93px/);
-  assert.match(wide, /grid-template-columns: 140px 96px 132px 176px 82px 98px 288px/);
+  assert.match(
+    wide,
+    /grid-template-columns: 140px 96px 132px 82px minmax\(176px, 1fr\) 98px 288px/,
+  );
   assert.match(css, /\.header-text-slot > span\s*\{\s*grid-area: 1 \/ 1/);
   assert.match(css, /\.header-text-reserve\s*\{\s*visibility: hidden/);
   assert.match(
@@ -117,15 +120,15 @@ test('header DOM and grid follow the same natural keyboard order at every width'
   const actions = read('index.html')
     .split('class="header-actions">')[1]
     .split('<div id="liveHeaderStatus"')[0];
-  const ids = ['robotLinkOpen', 'labHeaderStop', 'seriesHome', 'courseSwitcher'];
+  const ids = ['labHeaderStop', 'robotLinkOpen', 'seriesHome', 'courseSwitcher'];
   const positions = ids.map((id) => actions.indexOf(`id="${id}"`));
   assert(positions.every((position, i) => position >= 0 && (!i || position > positions[i - 1])));
   assert.doesNotMatch(actions, /tabindex=/);
   const css = read('css/navigation.css');
   const wide = css.slice(css.indexOf('@media (min-width: 1091px)'));
   for (const [selector, column] of [
-    ['body .header-actions > .robot-link', 4],
-    ['#labHeaderStop .lab-stop', 5],
+    ['body .header-actions > .robot-link', 5],
+    ['#labHeaderStop .lab-stop', 4],
     ['body .header-actions > .series-home', 6],
     ['body .header-actions > .course-switcher', 7],
   ])
@@ -148,6 +151,9 @@ test('course switcher reserves a fixed wide column and uses the catalogue wordin
   assert.equal(copy.header.chooseCourse, '15の教材から選ぶ');
   assert.match(read('index.html'), /id="currentCourseTitle">15の教材から選ぶ</);
   const wide = read('css/navigation.css').split('@media (min-width: 1091px)')[1];
-  assert.match(wide, /grid-template-columns: 140px 96px 132px 176px 82px 98px 288px/);
+  assert.match(
+    wide,
+    /grid-template-columns: 140px 96px 132px 82px minmax\(176px, 1fr\) 98px 288px/,
+  );
   assert.match(wide, /grid-column: 7;[\s\S]*?width: 288px/);
 });
