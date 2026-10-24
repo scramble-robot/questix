@@ -1280,18 +1280,23 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .control-field.out-of-range { border-color: var(--orange); }
 .control-field input[aria-invalid="true"], #control-lateral-repair[aria-invalid="true"] {
   outline: 2px solid var(--orange); outline-offset: 2px; }
-.control-range, .control-estimate { grid-column: 1 / -1; color: var(--text-dim);
+.control-range, .control-estimate { grid-column: 1 / -1; margin: 0; color: var(--text-dim);
   font-size: var(--font-small); line-height: 1.65; overflow-wrap: anywhere; }
-.control-estimate { height: 9rem; overflow: auto; }
+.control-estimate { height: 3.3rem; overflow: auto; }
 .control-estimate:empty { display: none; }
 /* Editing updates this notice and saved-value rows; reserve their space above later inputs. */
-#controls-application { height: 12rem; overflow: auto; }
+#controls-application { height: 4.8rem; overflow: auto; }
 .control-field .control-saved[hidden] { display: flex !important; visibility: hidden; }
 .control-field .control-change-state[hidden] { display: block !important; visibility: hidden; }
 .control-change-state { min-height: 1.4rem; }
+/* Keep one compact status line without moving later fields while editing. */
+.control-feedback { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 0.6rem; height: 1.5rem; min-width: 0; }
+.control-feedback .control-change-state { flex: 0 0 auto; white-space: nowrap; }
+.control-feedback .control-saved { flex-wrap: nowrap; gap: 0.3rem; overflow: hidden; }
+.control-feedback .control-saved strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tuning-preview { border-top: 1px solid var(--border-input); margin-top: 1rem; padding-top: 1rem; }
 .tuning-preview h3 { font-size: 1rem; margin-bottom: 0.75rem; }
-.tuning-motion-summary { height: 5.5rem; overflow: auto; line-height: 1.65; }
+.tuning-motion-summary { height: 3.3rem; overflow: auto; line-height: 1.65; }
 .tuning-chart { margin: 0; padding: 1rem 0.5rem; background: #fff; color: #253c45;
   border: 1px solid var(--border-input); border-radius: var(--radius-control); font-size: 0.875rem; }
 .tuning-chart-legend { display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; min-height: 3rem; }
@@ -1316,6 +1321,12 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .control-section { border: 1px solid var(--border-input); border-radius: var(--radius-control);
   padding: 0.6rem 0.8rem; margin: 0.9rem 0; }
 .control-section legend { padding: 0 0.4rem; font-weight: 600; }
+.tuning-motion-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 1rem; align-items: start; }
+.tuning-motion-group > .tuning-preview { grid-column: 1 / -1; }
+@media (max-width: 760px) {
+  .tuning-motion-group { grid-template-columns: minmax(0, 1fr); }
+}
 .control-summary { padding: 0.8rem; margin-top: 1rem; background: var(--bg-input);
   border-radius: var(--radius-control); line-height: 1.6; }
 .control-field { display: grid; grid-template-columns: minmax(0, 1fr);
@@ -1331,6 +1342,11 @@ input[type="checkbox"] { accent-color: var(--accent); }
   line-height: 1.65; margin: 0 0 0.6rem; }
 .control-field input:disabled { opacity: 0.65; }
 .control-presets { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.6rem; }
+.tuning-motion-group .control-presets { display: grid;
+  grid-template-columns: repeat(3, minmax(max-content, 1fr)); gap: 0.35rem;
+  min-width: 0; overflow-x: auto; }
+.tuning-motion-group .control-presets .btn { min-width: 0; min-height: 44px;
+  padding-inline: 0.3rem; white-space: nowrap; font-size: 0.875rem; }
 .control-field.runtime-visible { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .control-runtime[hidden], .control-saved[hidden], .control-field-help[hidden],
 .control-change-state[hidden], .tuning-savebar[hidden], #controls-message[hidden] { display: none; }

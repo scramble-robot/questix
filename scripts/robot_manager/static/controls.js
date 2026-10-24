@@ -93,12 +93,12 @@ const tuningFields = {
   joy_controller: {
     longitudinal_input_ratio: { title: "走行速度", unit: "m/s", scale: 1, signed: true,
       help: "スティックを最大まで倒したときの前進・後退の速さ。速さを変えると、加速時間を保つよう加速度を計算し直します。" },
-    angular_input_ratio: { title: "旋回の速さ", unit: "rad/s", scale: 1, signed: true },
+    angular_input_ratio: { title: "旋回速度", unit: "rad/s", scale: 1, signed: true },
   },
   drive_component: {
-    max_linear_accel: { title: "走り出し・停止のきびきび感（加速時間）", acceleration: true,
+    max_linear_accel: { title: "走行の加速時間", acceleration: true,
       kind: "linear", unit: "s", scale: 1 },
-    max_angular_accel: { title: "旋回のきびきび感（加速時間）", acceleration: true,
+    max_angular_accel: { title: "旋回の加速時間", acceleration: true,
       kind: "angular", unit: "s", scale: 1 },
   },
   joy_launcher: {
@@ -118,9 +118,10 @@ function tuningSpec(node, key) {
   if (Object.values(controllerDrivers).includes(node)
       && controllerDrivers[controlProfile.controller] !== node) return null;
   const spec = tuningFields[node]?.[key];
-  if (node === "joy_controller" && key === "angular_input_ratio") {
+  if (node === "joy_controller" && ["longitudinal_input_ratio", "angular_input_ratio"].includes(key)) {
     const reference = Math.abs(controlProfile.defaults[node][key]);
-    return { ...spec, help: "スティックを最大まで倒したときの旋回の速さ。速さを変えると、加速時間を保つよう加速度を計算し直します。0では旋回しません。",
+    return { ...spec, help: key === "angular_input_ratio"
+      ? "スティックを最大まで倒したときの旋回の速さ。速さを変えると、加速時間を保つよう加速度を計算し直します。0では旋回しません。" : spec.help,
       presets: [[reference * 0.5, "ゆっくり 50%"], [reference, "標準 100%"], [reference * 1.5, "速め 150%"]],
       baseline: reference };
   }
@@ -144,6 +145,14 @@ function tuningNumber(spec, value, values = controlDraft) {
   const displayed = (spec.signed ? Math.abs(value) : value) * spec.scale;
   const rounded = Number(displayed.toFixed(2));
   return displayed !== 0 && rounded === 0 ? Number(displayed.toPrecision(3)) : rounded;
+}
+
+function tuningInputText(spec, amount) {
+  if (!(spec.signed || spec.acceleration)) return amount;
+  if (!TuningModel.finite(amount)) return "";
+  const fixed = amount.toFixed(2);
+  // Do not turn a valid sub-cent value into an apparent zero.
+  return amount !== 0 && Number(fixed) === 0 ? String(amount) : fixed;
 }
 
 function tuningDirection(current, saved) {
@@ -186,7 +195,7 @@ function refreshTuningFields(activeInput) {
       const limit = TuningModel.wheelLimit(controlDraft, controlProfile.geometry, kind);
       input.disabled = controlsBusy || limit === null || !TuningModel.finite(speed) || speed === 0;
       input.required = controlDraft[node][key] !== 0 && !input.disabled && state?.time !== null;
-      if (input !== activeInput) input.value = state?.time === null || !state ? "" : TuningModel.number(state.time);
+      if (input !== activeInput) input.value = state?.time === null || !state ? "" : tuningInputText(spec, TuningModel.number(state.time));
       input.placeholder = state?.unlimited ? "制限なし（未変更）" : "算出できません";
       const raw = controlDraft[node][key];
       input.setCustomValidity(!TuningModel.finite(raw) || raw < field.min || raw > field.max
@@ -227,8 +236,9 @@ function refreshTuningFields(activeInput) {
   }
 }
 
-function createTuningPreviews(container) {
-  for (const [kind, title] of [["angular", "旋回の変化の目安"], ["linear", "走行の変化の目安"]]) {
+function createTuningPreviews(container, kinds = ["linear", "angular"]) {
+  for (const kind of kinds) {
+    const title = kind === "linear" ? "走行の変化の目安" : "旋回の変化の目安";
     const section = document.createElement("section");
     section.className = "tuning-preview";
     const heading = document.createElement("h3");
@@ -615,26 +625,38 @@ function renderControls() {
   createRangeWarning();
   tuningTimes = Object.fromEntries(["linear", "angular"].map((kind) =>
     [kind, TuningModel.motion(controlDraft, controlProfile.geometry, kind)?.time ?? null]));
-  for (const group of controlProfile.groups) {
-    const fields = group.fields.filter((field) => tuningSpec(group.node, field.key));
+  const motionFields = new Set(["joy_controller.longitudinal_input_ratio", "joy_controller.angular_input_ratio",
+    "drive_component.max_linear_accel", "drive_component.max_angular_accel"]);
+  const motionGroups = [["linear", "走行", "longitudinal_input_ratio", "max_linear_accel"],
+    ["angular", "旋回", "angular_input_ratio", "max_angular_accel"]].map(([kind, title, speed, accel]) => ({
+      kind, title, fields: [["joy_controller", speed], ["drive_component", accel]].flatMap(([node, key]) => {
+        const field = controlProfile.groups.find((group) => group.node === node)?.fields.find((field) => field.key === key);
+        return field ? [{ ...field, node }] : [];
+      }),
+    }));
+  const otherGroups = controlProfile.groups.map((group) => ({ ...group,
+    fields: group.fields.filter((field) => !motionFields.has(`${group.node}.${field.key}`)),
+  }));
+  for (const group of [...motionGroups, ...otherGroups]) {
+    const fields = group.fields.filter((field) => tuningSpec(field.node || group.node, field.key));
     if (!fields.length) continue;
     const section = document.createElement("fieldset");
-    section.className = "control-section";
+    section.className = group.kind ? "control-section tuning-motion-group" : "control-section";
+    if (group.kind) section.dataset.kind = group.kind;
     const legend = document.createElement("legend");
-    legend.textContent = group.node === "joy_controller" ? "走行"
-      : group.node === "drive_component" ? "加速・減速の調整"
-        : group.node === "joy_launcher" ? "射出ローラー" : "スティック";
+    legend.textContent = group.title || (group.node === "joy_launcher" ? "射出ローラー" : "スティック");
     section.appendChild(legend);
     for (const field of fields) {
-      const spec = tuningSpec(group.node, field.key);
+      const node = field.node || group.node;
+      const spec = tuningSpec(node, field.key);
       const row = document.createElement("div");
       row.className = "control-field";
-      row.dataset.node = group.node;
+      row.dataset.node = node;
       row.dataset.key = field.key;
       const label = document.createElement("label");
       const input = document.createElement("input");
-      input.id = `control-${group.node}-${field.key}`;
-      input.dataset.node = group.node;
+      input.id = `control-${node}-${field.key}`;
+      input.dataset.node = node;
       input.dataset.key = field.key;
       label.htmlFor = input.id;
       label.textContent = `${spec.title}（${spec.unit}）`;
@@ -658,15 +680,15 @@ function renderControls() {
       const heading = document.createElement("div");
       heading.className = "control-field-heading";
       heading.append(label, info);
-      const value = controlDraft[group.node][field.key];
+      const value = controlDraft[node][field.key];
       // Preserve any existing axis inversion when editing the speed magnitude.
-      const direction = spec.signed ? tuningDirection(value, controlProfile.values[group.node][field.key]) : 1;
+      const direction = spec.signed ? tuningDirection(value, controlProfile.values[node][field.key]) : 1;
       input.type = "number";
       input.required = true;
       input.min = spec.signed || spec.acceleration ? 0 : field.min * spec.scale;
       if (!spec.acceleration) input.max = tuningNumber(spec, field.max);
       input.step = "any";
-      input.value = spec.acceleration && value === 0 ? "" : tuningNumber(spec, value);
+      input.value = spec.acceleration && value === 0 ? "" : tuningInputText(spec, tuningNumber(spec, value));
       if (spec.acceleration && value === 0) {
         // Preserve a legacy disabled limit until the user explicitly edits this field.
         input.required = false;
@@ -679,7 +701,7 @@ function renderControls() {
       savedCaption.className = "control-value-caption";
       savedCaption.textContent = "保存済み";
       const savedValue = document.createElement("strong");
-      savedValue.textContent = tuningValue(spec, controlProfile.values[group.node][field.key], controlProfile.values);
+      savedValue.textContent = tuningValue(spec, controlProfile.values[node][field.key], controlProfile.values);
       saved.append(savedCaption, savedValue);
       input.setAttribute("aria-describedby", `${help.id} ${saved.id}`);
       const updateValue = (exactAmount) => {
@@ -697,14 +719,14 @@ function renderControls() {
               : entered === TuningModel.number(savedState?.time) ? savedState?.time : entered;
           tuningTimes[spec.kind] = input.value === "" ? null : exactTime;
           const raw = input.value === "" ? null : TuningModel.acceleration(state?.speed, exactTime);
-          controlDraft[group.node][field.key] = raw !== null && state?.speed === savedState?.speed
-            && exactTime === savedState?.time ? controlProfile.values[group.node][field.key] : raw;
+          controlDraft[node][field.key] = raw !== null && state?.speed === savedState?.speed
+            && exactTime === savedState?.time ? controlProfile.values[node][field.key] : raw;
         } else {
           const raw = entered === tuningNumber(spec, value) ? value
             : entered === tuningNumber(spec, field.max) ? field.max * direction
               : entered / spec.scale * direction;
-          controlDraft[group.node][field.key] = input.value === "" ? null : raw;
-          if (spec.signed && TuningModel.finite(controlDraft[group.node][field.key])) {
+          controlDraft[node][field.key] = input.value === "" ? null : raw;
+          if (spec.signed && TuningModel.finite(controlDraft[node][field.key])) {
             const kind = field.key === "angular_input_ratio" ? "angular" : "linear";
             const state = TuningModel.motion(controlDraft, controlProfile.geometry, kind);
             const savedState = TuningModel.motion(controlProfile.values, controlProfile.geometry, kind);
@@ -719,6 +741,11 @@ function renderControls() {
         refreshControlChanges(input);
       };
       input.addEventListener("input", updateValue);
+      input.addEventListener("blur", () => {
+        if ((spec.signed || spec.acceleration) && input.value !== "" && input.checkValidity()) {
+          input.value = tuningInputText(spec, Number(input.value));
+        }
+      });
       const presets = document.createElement("div");
       presets.className = "control-presets";
       for (const [amount, title] of spec.presets || []) {
@@ -729,7 +756,7 @@ function renderControls() {
         button.tuningAmount = amount;
         button.addEventListener("click", () => {
           if (controlsBusy || button.disabled) return;
-          input.value = String(TuningModel.number(amount));
+          input.value = String(tuningInputText(spec, TuningModel.number(amount)));
           updateValue(amount);
         });
         presets.appendChild(button);
@@ -741,7 +768,10 @@ function renderControls() {
       caption.textContent = "設定値";
       const state = document.createElement("span");
       state.className = "control-change-state";
-      editor.append(caption, input, state);
+      const feedback = document.createElement("div");
+      feedback.className = "control-feedback";
+      feedback.append(state, saved);
+      editor.append(caption, input);
       const runtime = document.createElement("div");
       runtime.className = "control-runtime";
       const runtimeCaption = document.createElement("span");
@@ -753,8 +783,7 @@ function renderControls() {
       runtimeState.className = "control-runtime-state";
       runtime.append(runtimeCaption, runtimeValue, runtimeState);
       row.append(heading, help);
-      if (spec.presets) row.append(presets);
-      row.append(editor, runtime, saved);
+      row.append(editor, runtime);
       const range = document.createElement("p");
       range.className = "control-range";
       range.id = `${input.id}-range`;
@@ -766,12 +795,14 @@ function renderControls() {
       estimate.className = "control-estimate";
       estimate.id = `${input.id}-estimate`;
       estimate.tabIndex = 0;
-      row.append(range, estimate);
+      row.append(range, feedback);
+      if (spec.presets) row.append(presets);
+      row.append(estimate);
       section.appendChild(row);
     }
+    if (group.kind) createTuningPreviews(section, [group.kind]);
     container.appendChild(section);
   }
-  createTuningPreviews(container);
   renderControlSummary();
   refreshControlChanges();
   renderRuntimeValues();
