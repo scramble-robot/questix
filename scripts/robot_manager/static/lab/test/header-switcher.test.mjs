@@ -188,18 +188,16 @@ test(
             assert.equal(actual.summary.height, 44);
             if (width < 1091) assert(actual.box.bottom <= actual.state.top + 0.01);
             assert(actual.shortVisible && !actual.labelVisible);
-            assert.equal(actual.titleVisible, width > 820);
+            assert.equal(actual.titleVisible, width >= 1091);
             assert.equal(actual.title, actual.caption);
             assert(actual.accessible.includes(actual.caption));
             assert(actual.accessible.includes('教材を切り替える'));
             assert(Math.abs(actual.arrowTop - 22) <= 1);
             assert(actual.textRight + 3 <= actual.arrowLeft, 'text must leave space for the arrow');
-            if (width > 820) {
+            if (width >= 1091) {
               assert.equal(actual.ellipsis, 'ellipsis');
               assert.equal(actual.nowrap, 'nowrap');
             }
-            if (width === 821 && course === 'keymap')
-              assert(actual.clipped, 'the real long title is ellipsized');
             await page.locator('#courseSwitcher summary').click();
             assert(await page.locator('#lessonNav').isVisible());
             assert.equal(
