@@ -409,17 +409,19 @@ function fmtDuration(sec) {
 // The API retains its existing 2 s / 3 s cadence; these two clocks only paint text.
 const elapsedClocks = { rec: ElapsedView.create(4000), lab: ElapsedView.create(6000) };
 const elapsedRequests = { rec: 0, lab: 0 };
+const elapsedApplied = { rec: 0, lab: 0 };
 let elapsedVisibility = 0;
 function elapsedTicket(kind) {
   return { request: ++elapsedRequests[kind], visibility: elapsedVisibility };
 }
 function elapsedCurrent(kind, ticket) {
-  return ticket.request === elapsedRequests[kind] && ticket.visibility === elapsedVisibility;
+  return ticket.request > elapsedApplied[kind] && ticket.visibility === elapsedVisibility;
 }
 function drawElapsed() {
   const now = performance.now();
   for (const kind of ['rec', 'lab']) {
-    const value = document.hidden ? null : ElapsedView.seconds(elapsedClocks[kind], now);
+    if (document.hidden) ElapsedView.clear(elapsedClocks[kind]);
+    const value = ElapsedView.seconds(elapsedClocks[kind], now);
     const text = value === null ? '—' : fmtDuration(value);
     const element = document.getElementById(`${kind}-elapsed`);
     if (element.textContent !== text) element.textContent = text;
@@ -427,12 +429,14 @@ function drawElapsed() {
 }
 function receiveElapsed(kind, data, running, ticket) {
   if (!elapsedCurrent(kind, ticket)) return;
-  if (document.hidden) ElapsedView.clear(elapsedClocks[kind]);
+  elapsedApplied[kind] = ticket.request;
+  if (document.hidden && running) ElapsedView.clear(elapsedClocks[kind]);
   else ElapsedView.receive(elapsedClocks[kind], data, running, performance.now());
   drawElapsed();
 }
 function failElapsed(kind, ticket) {
   if (!elapsedCurrent(kind, ticket)) return;
+  elapsedApplied[kind] = ticket.request;
   ElapsedView.clear(elapsedClocks[kind]);
   drawElapsed();
 }
