@@ -830,24 +830,43 @@ test('legacy zero acceleration survives unrelated saves and accepts direct posit
 });
 
 
-test('field help opens on demand without changing or saving values', async () => {
+test('field help opens supplementary details in a dialog without changing or saving values', async () => {
   const { document, context, getPayload } = editorFixture();
   await vm.runInContext('loadControls("uart")', context);
+  const dialog = document.getElementById('tuning-help-dialog');
+  const draft = vm.runInContext('JSON.stringify(controlDraft)', context);
   for (const row of document.querySelectorAll('.control-field')) {
     const help = row.querySelector('.control-field-help');
     const info = row.querySelector('.control-info');
-    assert.equal(help.hidden, true);
-    assert.equal(info.type, 'button');
-    assert.equal(info.attributes['aria-controls'], help.id);
-    assert.equal(info.attributes['aria-expanded'], 'false');
+    assert.equal(info.attributes['aria-controls'], 'tuning-help-dialog');
+    assert.equal(info.attributes['aria-haspopup'], 'dialog');
     info.events.click();
-    assert.equal(help.hidden, false);
+    assert.equal(dialog.open, true);
+    assert.equal(help.hidden, true);
+    assert.equal(document.getElementById('tuning-help-text').textContent, help.textContent);
+    assert.equal(document.getElementById('tuning-help-estimate').textContent,
+      row.querySelector('.control-estimate').textContent);
     assert.equal(info.attributes['aria-expanded'], 'true');
-    info.events.click();
-    assert.equal(help.hidden, true);
+    document.getElementById('tuning-help-close').events.click();
+    assert.equal(dialog.open, false);
     assert.equal(info.attributes['aria-expanded'], 'false');
+    assert.equal(info.focusOptions.preventScroll, true);
   }
-  assert.equal(document.getElementById('controls-save').disabled, true);
+  const row = document.querySelectorAll('.control-field')[0];
+  const input = row.querySelector('.control-editor').children[1];
+  input.value = '1.5'; input.events.input();
+  row.querySelector('.control-info').events.click();
+  assert.equal(document.getElementById('tuning-help-estimate').textContent,
+    row.querySelector('.control-estimate').textContent);
+  dialog.events.click({ target: dialog, clientX: 200, clientY: 200 });
+  assert.equal(dialog.open, true);
+  dialog.events.click({ target: dialog, clientX: 20, clientY: 20 });
+  assert.equal(dialog.open, false);
+  const changed = vm.runInContext('JSON.stringify(controlDraft)', context);
+  assert.notEqual(changed, draft);
+  row.querySelector('.control-info').events.click();
+  dialog.close(); // Native Escape uses this same close cleanup path.
+  assert.equal(vm.runInContext('JSON.stringify(controlDraft)', context), changed);
   assert.equal(getPayload(), undefined);
 });
 
@@ -1141,4 +1160,12 @@ test('two-decimal display and blur never round exact values in an unrelated save
   await vm.runInContext('saveControls({preventDefault() {}})', context);
   assert.equal(getPayload().values.joy_controller.longitudinal_input_ratio, exact);
   assert.equal(getPayload().values.drive_component.max_linear_accel, accel);
+});
+
+
+test('paired tuning fields use one preview divider and a wide-only vertical separator', () => {
+  const css = fs.readFileSync(path.join(__dirname, '../static/style.css'), 'utf8');
+  assert.match(css, /\.tuning-motion-group > \.control-field \{[^}]*border-bottom-width: 0;/);
+  assert.match(css, /\.tuning-motion-group > \.control-field \+ \.control-field::before \{[^}]*width: 1px;/);
+  assert.match(css, /@media \(max-width: 760px\) \{[^}]*\}[\s]*\.tuning-motion-group > \.control-field \+ \.control-field::before \{ display: none;/);
 });

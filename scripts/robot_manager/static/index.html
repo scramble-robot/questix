@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>QUESTiX Robot Manager</title>
-  <link rel="stylesheet" href="/static/style.css?v=44">
+  <link rel="stylesheet" href="/static/style.css?v=45">
 </head>
 
 <body>
@@ -256,6 +256,14 @@
             <p id="map-feedback" class="map-help" role="status"></p>
           </dialog>
         </section>
+        <dialog id="tuning-help-dialog" class="tuning-help-dialog" aria-labelledby="tuning-help-title">
+          <div class="map-editor-header">
+            <h3 id="tuning-help-title">設定の説明</h3>
+            <button type="button" id="tuning-help-close" class="btn btn-small" autofocus>閉じる</button>
+          </div>
+          <p id="tuning-help-text"></p>
+          <p id="tuning-help-estimate"></p>
+        </dialog>
         <details class="tuning-details" id="controls-details">
           <summary><span>速度・操作感</span><span class="tuning-detail-hint">速さ、加速・減速、ローラー出力、スティックの遊び</span></summary>
         <form id="controls-form" novalidate>
@@ -835,7 +843,7 @@
   <script src="/static/controller-map.js?v=15"></script>
   <script src="/static/tuning-model.js?v=3"></script>
   <script src="/static/tuning-chart.js?v=3"></script>
-  <script src="/static/controls.js?v=27"></script>
+  <script src="/static/controls.js?v=28"></script>
 </body>
 
 </html>
