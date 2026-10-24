@@ -69,7 +69,7 @@ test(
                 data: JSON.stringify({
                   type: 'hello',
                   protocol: 1,
-                  robot: { name: 'fixture' },
+                  robot: { name: 'lab-robot-0123456789' },
                   streams: {},
                   read_only: false,
                 }),
@@ -84,7 +84,7 @@ test(
       });
       const errors = [];
       page.on('pageerror', (error) => errors.push(error.message));
-      for (const width of [1280, 1180, 943, 942, 821, 820, 640, 590, 410]) {
+      for (const width of [1280, 1180, 1091, 1090, 821, 820, 640, 590, 410]) {
         await page.setViewportSize({ width, height: 900 });
         for (const course of ['series', 'rl', 'keymap'])
           await t.test(`${width}px #${course}`, async () => {
@@ -100,8 +100,8 @@ test(
               () => !document.querySelector('#labHeaderStop button')?.disabled,
             );
             const expectedOrder = [
-              'robotLinkOpen',
               'labHeaderStop',
+              'robotLinkOpen',
               ...(course === 'series' ? [] : ['seriesHome']),
               'courseSwitcher',
             ];
@@ -134,11 +134,18 @@ test(
             assert.equal(
               await page.evaluate(
                 () =>
-                  matchMedia('(min-width: 601px) and (max-width: 942.98px)').matches &&
-                  matchMedia('(min-width: 943px)').matches,
+                  matchMedia('(min-width: 601px) and (max-width: 1090.98px)').matches &&
+                  matchMedia('(min-width: 1091px)').matches,
               ),
               false,
             );
+            if (width >= 1180) {
+              assert(
+                await page
+                  .locator('#robotLinkName')
+                  .evaluate((e) => e.clientWidth >= e.scrollWidth),
+              );
+            }
             const actual = await page.evaluate(() => {
               const header = document.querySelector('.site-header'),
                 box = document.querySelector('#courseSwitcher');
@@ -176,28 +183,26 @@ test(
                 clipped: title.scrollWidth > title.clientWidth,
               };
             });
-            assert.equal(actual.header.height, width >= 943 ? 109 : 88);
+            assert.equal(actual.header.height, width >= 1091 ? 109 : 88);
             assert.equal(actual.box.height, 44);
             assert.equal(actual.summary.height, 44);
-            if (width < 943) assert(actual.box.bottom <= actual.state.top + 0.01);
+            if (width < 1091) assert(actual.box.bottom <= actual.state.top + 0.01);
             assert(actual.shortVisible && !actual.labelVisible);
-            assert.equal(actual.titleVisible, width > 820);
+            assert.equal(actual.titleVisible, width >= 1091);
             assert.equal(actual.title, actual.caption);
             assert(actual.accessible.includes(actual.caption));
             assert(actual.accessible.includes('教材を切り替える'));
             assert(Math.abs(actual.arrowTop - 22) <= 1);
             assert(actual.textRight + 3 <= actual.arrowLeft, 'text must leave space for the arrow');
-            if (width > 820) {
+            if (width >= 1091) {
               assert.equal(actual.ellipsis, 'ellipsis');
               assert.equal(actual.nowrap, 'nowrap');
             }
-            if (width === 821 && course === 'keymap')
-              assert(actual.clipped, 'the real long title is ellipsized');
             await page.locator('#courseSwitcher summary').click();
             assert(await page.locator('#lessonNav').isVisible());
             assert.equal(
               await page.locator('.site-header').evaluate((e) => e.getBoundingClientRect().height),
-              width >= 943 ? 109 : 88,
+              width >= 1091 ? 109 : 88,
             );
             assert.equal(
               await page
