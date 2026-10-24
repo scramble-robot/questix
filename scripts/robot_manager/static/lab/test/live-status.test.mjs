@@ -35,7 +35,7 @@ test('drive and launcher permissions are independent, unknown and fail-closed as
     drive: 'on',
     shoot: 'off',
   });
-  assert.equal(liveStatusModel(open, received, 1101).drive, 'unknown');
+  assert.equal(liveStatusModel(open, received, 100 + DISPLAY_STALE_MS + 1).drive, 'unknown');
   assert.equal(liveStatusModel(open, { drive_state: frame({}) }, 100).drive, 'unknown');
 });
 test('header has three E-stop words and separate accessible explanations for silence', () => {
@@ -57,4 +57,32 @@ test('teacher permission and lesson permission have separate reasons and imperat
     for (const pair of Array.isArray(value) ? [value] : Object.values(value))
       assert(pair[1].endsWith('ください'), pair[1]);
   }
+});
+
+test('display freshness allows jitter beyond the bridge period but expires after 1.5 seconds', () => {
+  const bridge = fs.readFileSync(
+    new URL('../../../../../questix_lab_bridge/questix_lab_bridge/bridge_node.py', import.meta.url),
+    'utf8',
+  );
+  const period = Number(bridge.match(/_DRIVE_STATE_PERIOD_SEC\s*=\s*([\d.]+)/)[1]);
+  assert.equal(DISPLAY_STALE_MS, 1500);
+  assert(DISPLAY_STALE_MS > period * 1000);
+  let at = 100;
+  const received = {
+    drive_state: frame({ allowed: false }, at),
+    shoot_state: frame({ allowed: false }, at),
+    estop: frame({ active: false }, at),
+  };
+  for (const interval of [1050, 1200, 1400, 1050]) {
+    assert.equal(liveStatusModel(open, received, at + interval - 1).drive, 'off');
+    assert.equal(liveStatusModel(open, received, at + interval - 1).estop, 'released');
+    at += interval;
+    for (const name of Object.keys(received)) received[name].at = at;
+    assert.equal(liveStatusModel(open, received, at).drive, 'off');
+  }
+  assert.equal(liveStatusModel(open, received, at + 1500).drive, 'off');
+  assert.equal(liveStatusModel(open, received, at + 1501).drive, 'unknown');
+  assert.equal(liveStatusModel(open, received, at + 1501).estop, 'stale');
+  received.drive_state = frame({ allowed: true }, at);
+  assert.equal(liveStatusModel(open, received, at).drive, 'on');
 });
