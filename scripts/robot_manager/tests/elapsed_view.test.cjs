@@ -49,8 +49,8 @@ test('stopped, failed, hidden/suspended and overdue clocks do not keep advancing
 test('the app rejects pre-hide and out-of-order responses, and clears both labels on hide', () => {
   let now = 0;
   const els = new Map();
-  const document = { hidden: false, addEventListener() {}, getElementById(id) {
-    if (!els.has(id)) els.set(id, {textContent: ''}); return els.get(id);
+  const document = { hidden: false, readyState: 'loading', addEventListener() {}, getElementById(id) {
+    if (!els.has(id)) els.set(id, {textContent: '', value: '', hidden: false, addEventListener() {}, removeAttribute() {}, setAttribute() {}, replaceChildren() {}}); return els.get(id);
   } };
   const context = vm.createContext({ document, performance: { now: () => now }, URL,
     location: { href: 'http://127.0.0.1:8888/' }, AbortController, AbortSignal });
