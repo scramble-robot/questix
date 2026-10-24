@@ -255,7 +255,7 @@ figure > p {
   flex-shrink: 0;
 }
 .flow-arrow {
-  color: #97a7a1;
+  color: var(--muted);
   margin: 0 6px;
 }
 .choice-list {
