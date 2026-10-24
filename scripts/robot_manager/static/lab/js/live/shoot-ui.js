@@ -1,3 +1,4 @@
+import { liveStatus, onLiveStatus } from './live-status.js';
 import { html, render, ref, nothing } from '../vendor/lit-html.js';
 import { fillSentence as fill } from '../core/content.js';
 import { revealElement } from '../core/reveal.js';
@@ -11,10 +12,9 @@ import {
   setTilt,
   startRoller,
   stopOwn,
-  stopLauncher,
   fireOne,
 } from './shoot-link.js';
-import { shootCopy, shootBlock, shootStopBar } from './shoot-view.js';
+import { shootCopy, shootBlock } from './shoot-view.js';
 import { recordRobot, liveLink, groupName } from './capture.js';
 import { withRunInfo, serializeRecording } from './recording-core.js';
 import { robotRecordsInfo } from './robot-records.js';
@@ -77,34 +77,20 @@ function actionsOf(entry) {
 function draw(entry, model) {
   if (!entry.element?.isConnected) return;
   render(
-    shootBlock(model, entry.view, entry.actions, entry.options.after?.() ?? nothing),
+    shootBlock(
+      { ...model, estopState: liveStatus().estop },
+      entry.view,
+      entry.actions,
+      entry.options.after?.() ?? nothing,
+    ),
     entry.element,
   );
-}
-
-// --- the stop bar --------------------------------------------------------------------------------
-
-// Like the drive bar (drive-ui.js): moved into an open modal dialog, which sits above any z-index.
-function placeBar(host) {
-  const dialogs = [...document.querySelectorAll('dialog[open]')];
-  const parent = dialogs.at(-1) ?? document.body;
-  if (host.parentElement !== parent) parent.append(host);
-}
-
-function drawBar(model) {
-  const host = document.getElementById('shootBar');
-  if (!host) return;
-  placeBar(host);
-  render(shootStopBar(model, stopLauncher), host);
-  const turning = model.spinning || (model.active && model.power > 0);
-  document.body.classList.toggle('shooting', turning);
 }
 
 // --- redrawing -----------------------------------------------------------------------------------
 
 function redraw() {
   const model = shootModel();
-  drawBar(model);
   for (const entry of panels.values())
     if (entry.element && visible(entry.element)) draw(entry, model);
 }
@@ -127,7 +113,6 @@ function tick() {
   if (document.hidden) return;
   const attached = [...panels.values()].some((entry) => entry.element?.isConnected);
   const model = shootModel();
-  drawBar(model);
   const shown = [...panels.values()].filter((entry) => entry.element && visible(entry.element));
   stopIfLeft(model, shown.length > 0);
   if (!attached && !model.spinning && !model.active) {
@@ -242,6 +227,7 @@ function launcherPanel(place, options = {}) {
 }
 
 function initShootUi() {
+  onLiveStatus(redraw);
   onShoot(() => {
     startTimer();
     redraw();
@@ -259,10 +245,6 @@ function initShootUi() {
       startRecording();
     } else endRecording(event);
   });
-  new MutationObserver(() => {
-    const host = document.getElementById('shootBar');
-    if (host) placeBar(host);
-  }).observe(document.body, { subtree: true, attributeFilter: ['open'] });
   redraw();
 }
 
