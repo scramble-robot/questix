@@ -1,3 +1,4 @@
+import { scrollBehavior } from '../core/scroll.js';
 import { loadJson } from '../core/content.js';
 import { escapeHtml } from './html-escape.js';
 
@@ -66,7 +67,7 @@ function scrollToRunModeTarget(event) {
   const top = target.getBoundingClientRect().top + window.scrollY;
   window.scrollTo({
     top: top - (header?.offsetHeight ?? 0) - GAP_BELOW_HEADER,
-    behavior: 'smooth',
+    behavior: scrollBehavior(),
   });
   if (target.matches('button, input, [tabindex]')) target.focus({ preventScroll: true });
 }

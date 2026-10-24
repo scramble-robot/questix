@@ -1,3 +1,4 @@
+import { scrollBehavior } from '../core/scroll.js';
 import {
   DEFAULT_PORT,
   onRobot,
@@ -381,8 +382,7 @@ function showState(state) {
 // Buttons, not links: the location hash belongs to the lesson router.
 function jumpTo(id) {
   const section = $(id);
-  const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  section.scrollIntoView({ block: 'start', behavior: smooth ? 'smooth' : 'auto' });
+  section.scrollIntoView({ block: 'start', behavior: scrollBehavior() });
   section.focus({ preventScroll: true });
 }
 // 記録の一覧 is a page of its own (route #records): the dialog closes on the way there.

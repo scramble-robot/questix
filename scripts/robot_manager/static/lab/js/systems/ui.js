@@ -1,3 +1,4 @@
+import { scrollBehavior } from '../core/scroll.js';
 import { render } from '../vendor/lit-html.js';
 import { loadJson } from '../core/content.js';
 import { downloadFile } from '../core/dom.js';
@@ -393,7 +394,9 @@ function release(state) {
 
 function showRestart(course) {
   const root = pageElement(course);
-  root.querySelector('[data-sys-restart]').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  root
+    .querySelector('[data-sys-restart]')
+    .scrollIntoView({ behavior: scrollBehavior(), block: 'center' });
   root.querySelector('[data-sys-cause]').focus({ preventScroll: true });
 }
 
@@ -463,7 +466,7 @@ function createActions(course) {
       event.preventDefault();
       pageElement(course)
         .querySelector('.sys-settings')
-        .scrollIntoView({ behavior: 'smooth', block: 'start' });
+        .scrollIntoView({ behavior: scrollBehavior(), block: 'start' });
     },
     release() {
       release(state());
@@ -513,7 +516,7 @@ function reviewSystem(course, id) {
   selectedTopic.set(course, id);
   rebuild(course);
   active = current(course);
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  window.scrollTo({ top: 0, behavior: scrollBehavior() });
   return true;
 }
 
