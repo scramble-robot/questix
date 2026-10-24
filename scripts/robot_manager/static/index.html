@@ -227,13 +227,13 @@
         <div class="control-toolbar tuning-profile">
           <label for="controls-profile" class="tuning-sr-only">編集するコントローラー</label>
           <select id="controls-profile">
-            <option value="uart">UART / Switch</option>
-            <option value="dualshock">DualShock</option>
+            <option value="uart">大会用コントローラー</option>
+            <option value="dualshock">ゲームパッド</option>
           </select>
           <button type="button" class="btn btn-small" id="controls-reload">保存した設定を読み直す</button>
         </div>
         </div>
-        <p id="controls-web-note" class="notice" role="note" hidden>次回の起動は Web（ブラウザ・スマホ）です。Web はブラウザの操作画面でボタンの役割が決まっているため、ここで変える設定はありません。下で編集できるのは UART・DualShock の設定です。</p>
+        <p id="controls-web-note" class="notice" role="note" hidden>次回の起動は Web（ブラウザ・スマホ）です。Web はブラウザの操作画面でボタンの役割が決まっているため、ここで変える設定はありません。下で編集できるのは 大会用コントローラー・ゲームパッドの設定です。</p>
         <div id="controls-application" class="notice" role="status">
           <div class="notice-heading">
             <strong id="controls-application-title">保存済み・実行中は未確認</strong>
@@ -723,8 +723,8 @@
         <div class="config-item wide controller-type-row">
           <label for="controller-type">コントローラー</label>
           <select id="controller-type" data-config="CONTROLLER_TYPE">
-            <option value="uart">UART / Switch</option>
-            <option value="dualshock">DualShock</option>
+            <option value="uart">大会用コントローラー</option>
+            <option value="dualshock">ゲームパッド</option>
             <option value="web">Web（ブラウザ・スマホ）</option>
           </select>
         </div>
@@ -845,14 +845,14 @@
   <script src="/static/qr-svg.js?v=1"></script>
   <script src="/static/web-joy-connection.js?v=4"></script>
   <script src="/static/operator-guide.js?v=5"></script>
-  <script src="/static/control-labels.js?v=4"></script>
+  <script src="/static/control-labels.js?v=5"></script>
   <script src="/static/status-view.js?v=3"></script>
   <script src="/static/network-view.js?v=1"></script>
   <script src="/static/trial-view.js?v=2"></script>
   <script src="/static/motion-state-view.js?v=1"></script>
   <script src="/static/app.js?v=22"></script>
-  <script src="/static/controller-map.js?v=12"></script>
-  <script src="/static/controls.js?v=22"></script>
+  <script src="/static/controller-map.js?v=14"></script>
+  <script src="/static/controls.js?v=25"></script>
 </body>
 
 </html>
