@@ -8,7 +8,7 @@ const ElapsedView = (() => {
     if (reset) { clock.lastSecond = null; clock.session = null; }
   }
   function receive(clock, data, running, now) {
-    if (!running) { clear(clock, true); return; }
+    if (running !== true) { clear(clock, running === false); return; }
     // Fractional milliseconds avoid repeatedly rounding a received integer second down.
     const elapsed = Number.isFinite(data.elapsed_ms) ? data.elapsed_ms : data.elapsed_sec * 1000;
     if (!Number.isFinite(elapsed) || elapsed < 0) { clear(clock); return; }
@@ -18,7 +18,9 @@ const ElapsedView = (() => {
     clock.at = now;
   }
   function seconds(clock, now) {
-    if (clock.elapsedMs === null || now - clock.at > clock.maxSilenceMs) return null;
+    // Failure/silence freezes the last value that was actually painted, never an inferred one.
+    if (clock.elapsedMs !== null && now - clock.at > clock.maxSilenceMs) clear(clock);
+    if (clock.elapsedMs === null) return clock.lastSecond;
     const estimated = Math.floor((clock.elapsedMs + Math.max(0, now - clock.at)) / 1000);
     // A delayed sample may adjust phase, but must never turn the displayed clock backwards.
     clock.lastSecond = Math.max(clock.lastSecond ?? 0, estimated);
