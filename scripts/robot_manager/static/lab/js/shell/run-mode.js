@@ -1,3 +1,4 @@
+import { scrollBehavior } from '../core/scroll.js';
 import { loadJson } from '../core/content.js';
 import { escapeHtml } from './html-escape.js';
 import { scrollBehavior } from '../core/dom.js';

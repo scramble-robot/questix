@@ -1,3 +1,4 @@
+import { scrollBehavior } from '../core/scroll.js';
 import { render } from '../vendor/lit-html.js';
 import { loadJson, fillSentence as fill } from '../core/content.js';
 import { downloadFile, scrollBehavior } from '../core/dom.js';

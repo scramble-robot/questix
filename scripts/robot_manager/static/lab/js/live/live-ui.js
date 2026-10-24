@@ -1,3 +1,4 @@
+import { scrollBehavior } from '../core/scroll.js';
 import {
   DEFAULT_PORT,
   onRobot,
