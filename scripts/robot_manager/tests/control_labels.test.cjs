@@ -1184,15 +1184,15 @@ test('motion explanations put the chart first and show both ramp equations with 
   assert.equal(document.getElementById('tuning-linear-summary').textContent,
     '最高速度 1.20 m/s 、加速時間 2.0 s 。\n'
     + '加速度 ＝ 1.20 m/s ÷ 2.0 s ＝ 0.6 m/s²\n'
-    + '加速・減速までの距離 ＝ 1.20 m/s × 2.0 s ＝ 2.4 m');
+    + '減速して止まるまでの距離 ＝ 1.20 m/s × 2.0 s ÷ 2 ＝ 1.2 m');
   assert.equal(document.getElementById('tuning-angular-summary').textContent,
     '最高速度 3.00 rad/s 、加速時間 2.0 s 。\n'
     + '角加速度 ＝ 3.00 rad/s ÷ 2.0 s ＝ 1.5 rad/s²\n'
-    + '加速・減速までの角度 ＝ 3.00 rad/s × 2.0 s ＝ 6.0 rad');
+    + '減速して止まるまでの角度 ＝ 3.00 rad/s × 2.0 s ÷ 2 ＝ 3.0 rad');
   const speed = document.getElementById('control-joy_controller-longitudinal_input_ratio');
   speed.value = '1.5'; speed.events.input();
   assert.match(document.getElementById('tuning-linear-summary').textContent,
-    /1.50 m\/s ÷ 2.0 s ＝ 0.8 m\/s²\n.*1.50 m\/s × 2.0 s ＝ 3.0 m$/);
+    /1.50 m\/s ÷ 2.0 s ＝ 0.8 m\/s²\n.*1.50 m\/s × 2.0 s ÷ 2 ＝ 1.5 m$/);
   assert.equal(vm.runInContext('controlDraft.drive_component.max_linear_accel', context), 0.75);
 });
 

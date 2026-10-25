@@ -265,8 +265,9 @@ function tuningFormulaSummary(state, kind) {
   if (!state || state.speed === 0 || state.unlimited || state.time === null || state.stop === null) {
     return TuningModel.summary(state, kind);
   }
-  const distance = state.speed * state.time; // Both triangular ramps; no cruise interval.
-  if (!TuningModel.finite(distance)) return "加速・減速の合計が大きすぎるため、目安は表示できません。";
+  // The deceleration ramp only (a triangle: speed × time ÷ 2); no full-speed interval.
+  const distance = state.speed * state.time / 2;
+  if (!TuningModel.finite(distance)) return "止まるまでの量が大きすぎるため、目安は表示できません。";
   const angular = kind === "angular";
   const unit = angular ? "rad/s" : "m/s";
   const speed = `${tuningFormulaNumber(state.speed, 2)} ${unit}`;
@@ -274,7 +275,7 @@ function tuningFormulaSummary(state, kind) {
   const lines = [
     `最高速度 ${speed} 、加速時間 ${time} 。`,
     `${angular ? "角加速度" : "加速度"} ＝ ${speed} ÷ ${time} ＝ ${tuningFormulaNumber(state.accel, 1)} ${unit}²`,
-    `加速・減速までの${angular ? "角度" : "距離"} ＝ ${speed} × ${time} ＝ ${tuningFormulaNumber(distance, 1)} ${angular ? "rad" : "m"}`,
+    `減速して止まるまでの${angular ? "角度" : "距離"} ＝ ${speed} × ${time} ÷ 2 ＝ ${tuningFormulaNumber(distance, 1)} ${angular ? "rad" : "m"}`,
   ];
   if (state.limited) lines.push(`車輪の上限で速度が制限されています。${TuningModel.limitedText(state, kind)}`);
   return lines.join("\n");
@@ -296,7 +297,7 @@ function createTuningPreviews(container, kinds = ["linear", "angular"]) {
     summary.setAttribute("aria-live", "polite");
     const note = document.createElement("p");
     note.className = "control-help";
-    note.textContent = "式の距離・角度は加速と減速の区間の合計で、全速を保つ区間は含みません。"
+    note.textContent = "式の距離・角度は、全速から一定の割合で減速して止まるまでの量です（グラフの三角形の面積）。全速を保つ区間は含みません。"
       + "数値は丸めて表示し、計算には丸める前の値を使っています。"
       + "単独で倒したときの目安です。前進と旋回を同時に入れたときの切り詰めは含みません。"
       + "標準起動の車輪寸法で一定加速度として計算し、最後の減速をなめらかにする帯を省いているため、時間と停止量は約の値です。実測値ではありません。";
