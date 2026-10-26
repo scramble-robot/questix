@@ -1,18 +1,30 @@
 // Display only. Never use this estimate to send, confirm, grant or reject a command.
 // Compare clock increments only: neither clock's absolute time is trusted.
-const DISPLAY_STALE_MS = 1500;
+// Temporary classroom display lease: a 1 s state stream may miss one update.
+// This never changes a sender, bridge dead-man or node safety timeout.
+const DISPLAY_STALE_MS = 2500;
 const TIMING_WINDOW_MS = 30000;
 const TIMING_CONFIRM_MS = 1000;
 const CLOCK_STEP_MARGIN_MS = 250;
 const TIMING_CONFIRM_SAMPLES = 3;
+// 2 ms/s: headroom over either clock's tested +/-1000 ppm relative drift.
+const BASELINE_RISE_PPM = 2000;
 
 function createDisplayTiming() {
-  return { mode: 'checking', samples: [], last: null, candidate: null, readyAt: Infinity };
+  return {
+    mode: 'checking',
+    samples: [],
+    last: null,
+    heardAt: null,
+    candidate: null,
+    readyAt: Infinity,
+  };
 }
 function begin(timing, stamp, now) {
   Object.assign(timing, createDisplayTiming(), {
     origin: { stamp, at: now },
     last: { stamp, at: now },
+    heardAt: now,
     samples: [{ at: now, offset: 0 }],
     baseline: 0,
     baselineAt: now,
@@ -23,9 +35,10 @@ function begin(timing, stamp, now) {
 function observeDisplayTiming(timing, message, now) {
   const stamp = message?.bridge_stamp;
   if (typeof stamp !== 'number' || !Number.isFinite(stamp)) {
-    Object.assign(timing, createDisplayTiming());
+    Object.assign(timing, createDisplayTiming(), { heardAt: now });
     return;
   }
+  timing.heardAt = now;
   if (!timing.last) {
     begin(timing, stamp, now);
     return;
@@ -42,7 +55,8 @@ function observeDisplayTiming(timing, message, now) {
   const offset = now - timing.origin.at - (stamp - timing.origin.stamp) * 1000;
   timing.delay = Math.max(0, offset - timing.baseline);
   if (elapsed > DISPLAY_STALE_MS || timing.delay > DISPLAY_STALE_MS) {
-    timing.mode = 'delayed';
+    if (timing.delay > DISPLAY_STALE_MS) timing.mode = 'delayed';
+    else if (timing.mode !== 'delayed') timing.mode = 'checking';
     timing.candidate = null;
     timing.readyAt = Infinity;
   }
@@ -58,7 +72,12 @@ function observeDisplayTiming(timing, message, now) {
     timing.samples = timing.samples.filter((sample) => now - sample.at <= TIMING_WINDOW_MS);
     timing.samples.push({ at: now, offset });
     const minimum = timing.samples.reduce((a, b) => (a.offset <= b.offset ? a : b));
-    timing.baseline = minimum.offset;
+    // The window rejects short jitter; its expiry may not raise the baseline by
+    // a whole delayed step. No rise budget is saved across a gap or confirmation.
+    timing.baseline = Math.min(
+      minimum.offset,
+      timing.baseline + (elapsed * BASELINE_RISE_PPM) / 1e6,
+    );
     timing.baselineAt = minimum.at;
   } else {
     const limit = timing.mode === 'delayed' ? DISPLAY_STALE_MS / 2 : DISPLAY_STALE_MS;
@@ -87,9 +106,8 @@ function observeDisplayTiming(timing, message, now) {
   }
 }
 function displayTimingModel(timing, now) {
-  if (!timing.last || now - timing.last.at > DISPLAY_STALE_MS) {
-    return { mode: 'checking', readyAt: Infinity };
-  }
+  if (timing.heardAt === null) return { mode: 'unheard', readyAt: Infinity };
+  if (now - timing.heardAt > DISPLAY_STALE_MS) return { mode: 'silent', readyAt: Infinity };
   return { mode: timing.mode, readyAt: timing.readyAt };
 }
 export {
@@ -97,6 +115,7 @@ export {
   TIMING_WINDOW_MS,
   TIMING_CONFIRM_MS,
   CLOCK_STEP_MARGIN_MS,
+  BASELINE_RISE_PPM,
   createDisplayTiming,
   observeDisplayTiming,
   displayTimingModel,
