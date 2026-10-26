@@ -28,7 +28,7 @@ function linkLine(model, text) {
 
 // The emergency stop is the first thing to see: a wide red block while it is pressed.
 function estopBlock(model, text) {
-  if (model.estop === true)
+  if (model.estopState === 'pressed')
     return html`<div class="rs-estop is-pressed" role="alert" data-rs-estop="pressed">
       <span class="rs-estop-icon" aria-hidden="true">⛔</span>
       <div>
@@ -36,12 +36,13 @@ function estopBlock(model, text) {
         <p>${text.estop.pressedNote}</p>
       </div>
     </div>`;
-  const released = model.estop === false;
+  const state = model.estopState ?? 'unknown';
+  const released = state === 'released';
   return html`<p
     class=${released ? 'rs-estop is-released' : 'rs-estop is-unknown'}
-    data-rs-estop=${released ? 'released' : 'unknown'}
+    data-rs-estop=${state}
   >
-    ${released ? text.estop.released : text.estop.unknown}
+    ${text.estop[state]}
   </p>`;
 }
 
@@ -372,7 +373,10 @@ function stripEstop(strip, text) {
     return html`<p class="rs-strip-estop is-pressed" role="alert" data-rs-strip-estop="pressed">
       <span aria-hidden="true">⛔</span>${words.pressed}
     </p>`;
-  return html`<p class="rs-strip-estop is-${strip.estop}" data-rs-strip-estop=${strip.estop}>
+  return html`<p
+    class="rs-strip-estop is-${strip.estop === 'released' ? 'released' : 'unknown'}"
+    data-rs-strip-estop=${strip.estop}
+  >
     ${words[strip.estop]}
   </p>`;
 }

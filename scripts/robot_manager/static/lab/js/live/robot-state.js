@@ -20,7 +20,8 @@ import { robotStateView, memoView, stripView } from './robot-state-view.js';
 // draws itself into that element, so the lesson page is not redrawn ten times a second:
 // - every message of the robot's streams goes into one tracker (robot-state-core.js) as it arrives;
 // - while a panel is on screen, it is redrawn at most every REDRAW_MS (nothing is drawn for a panel
-//   in a closed dialog, a hidden page or a background tab);
+//   in a closed dialog, a hidden page or a background tab); shared status changes refresh
+//   attached hidden views too, so their first visible paint cannot retain an old E-stop;
 // - the memo is redrawn only when it changes from outside the typing (a snapshot line) or the link
 //   comes or goes, never while the learner types.
 // Listening only: nothing here sends anything to the robot.
@@ -220,7 +221,10 @@ function robotStatePanel(place, options = {}) {
   const entry = entryOf(place);
   entry.options = options;
   // A panel moved back on screen (a dialog's content returned to the page) redraws again.
-  if (entry.element?.isConnected) startTimer();
+  if (entry.element?.isConnected) {
+    drawLive(entry, currentModel());
+    startTimer();
+  }
   const host = html`<div
     class="robot-state-host"
     data-robot-state-place=${place}
@@ -255,15 +259,30 @@ function stripOf(place) {
 function liveStateStrip(place, options = {}) {
   const entry = stripOf(place);
   entry.options = options;
-  if (entry.element?.isConnected) startTimer();
+  if (entry.element?.isConnected) {
+    drawStrip(entry, currentModel());
+    startTimer();
+  }
   return html`<div class="rs-strip-host" data-rs-strip-place=${place} ${ref(entry.mount)}></div>`;
 }
 
 /** The memo of `place` as typed so far (e.g. for a lesson's own saved file). */
 const stateMemo = (place) => entryOf(place).memo;
 
+function refreshSharedStatus() {
+  // A shared display transition is rare. Refresh even hidden attached consumers:
+  // exposing an existing element must not wait for the next visible-only 100 ms tick.
+  const model = currentModel();
+  for (const entry of panels.values()) {
+    if (!entry.element?.isConnected) continue;
+    drawLive(entry, model);
+    if (entry.memoConnected !== model.connected) drawMemo(entry, model.connected);
+  }
+  for (const entry of strips.values()) if (entry.element?.isConnected) drawStrip(entry, model);
+}
+
 function listen() {
-  onLiveStatus(tick);
+  onLiveStatus(refreshSharedStatus);
   for (const type of STREAMS)
     onRobot(type, (message) =>
       ingest(tracker, type, message, performance.now(), robotState().hello?.config),
