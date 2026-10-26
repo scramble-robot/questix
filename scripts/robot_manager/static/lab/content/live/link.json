@@ -14,8 +14,8 @@
     "open": "接続済み",
     "failed": "失敗",
     "reconnecting": "再接続中",
-    "checking": "受信の遅れを確認中",
-    "delayed": "受信が遅れています"
+    "checking": "遅れ確認",
+    "delayed": "受信遅れ"
   },
   "estop": {
     "long": "・非常停止：押されています",

@@ -181,3 +181,13 @@ test('course cards align pictures and names above optional badges at every width
   );
   assert.match(css, /\.series-nav a\[aria-current='page'\]/);
 });
+
+test('receive-delay short labels stay within the existing narrow connection slot', () => {
+  const existing = Math.max(
+    ...['idle', 'connecting', 'open', 'failed', 'reconnecting'].map(
+      (key) => Array.from(copy.stageShort[key]).length,
+    ),
+  );
+  for (const key of ['checking', 'delayed'])
+    assert(Array.from(copy.stageShort[key]).length <= existing);
+});
