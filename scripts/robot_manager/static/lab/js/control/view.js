@@ -3,6 +3,7 @@ import {
   RPM_TO_RADIANS,
   angularSpeedText,
   rpmToRadians,
+  perRadianGain,
   rpmToSpeed,
   formatSpeed,
   formatTime,
@@ -63,7 +64,7 @@ function baseGainText(config, topicId, copy) {
   if (topicId === 'feedforward')
     return (
       'FF ' +
-      formatValue(config.ffGain / RPM_TO_RADIANS, 2) +
+      formatValue(perRadianGain(config.ffGain), 2) +
       ' %/(rad/s)（' +
       formatValue(config.ffGain, 2) +
       ' %/rpm）・目標 ' +
@@ -74,7 +75,7 @@ function baseGainText(config, topicId, copy) {
       config.strategy === 'feedback'
         ? ''
         : '・FF ' +
-          formatValue(config.ffGain / RPM_TO_RADIANS, 2) +
+          formatValue(perRadianGain(config.ffGain), 2) +
           ' %/(rad/s)（' +
           formatValue(config.ffGain, 2) +
           ' %/rpm）';
@@ -460,7 +461,9 @@ function contributions(model, copy) {
   if (model.topicId === 'feedforward')
     return html`<span>目標 <strong>${angularSpeedText(frame.target)}</strong></span
       ><b>×</b
-      ><span>1 rpmあたり <strong>${formatValue(result.config.ffGain, 2) + '%'}</strong></span
+      ><span
+        >1 rad/sあたり
+        <strong>${formatValue(perRadianGain(result.config.ffGain), 2) + '%'}</strong></span
       ><b>→</b><span>出力 <strong>${formatValue(frame.command) + '%'}</strong></span
       >${frame.ff > 100 ? html`<small>${copy.visual.feedforwardCapped}</small>` : nothing}`;
   return html`<span>見積もり FF <strong>${formatValue(frame.ff) + '%'}</strong></span
