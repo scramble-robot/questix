@@ -30,7 +30,10 @@ function drawStatuses() {
   const transport = displayTimingModel(timing, now);
   const model = (currentModel = {
     ...liveStatusModel(link, received, now, transport),
-    stage: link.phase === 'open' && transport.mode !== 'ready' ? transport.mode : linkStage(link),
+    stage:
+      link.phase === 'open' && ['checking', 'delayed'].includes(transport.mode)
+        ? transport.mode
+        : linkStage(link),
   });
   const active = activeLiveDialog();
   const header = document.getElementById('liveHeaderStatus');

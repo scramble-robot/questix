@@ -57,31 +57,31 @@ test('neither absolute robot time nor page wall time is used', () => {
   for (const offset of [-31536000, -3 * 86400, 0, 3 * 3600, 1720000000]) {
     const f = fixture(offset);
     assert.equal(f.normal().estop, 'released');
-    assert.equal(f.feed(4500, 2020).estop, 'delayed');
-    assert.notEqual(f.permissions(4501).drive, 'on');
+    assert.equal(f.feed(5500, 2020).estop, 'delayed');
+    assert.notEqual(f.permissions(5501).drive, 'on');
   }
   const source = fs.readFileSync(new URL('../js/live/display-timing.js', import.meta.url), 'utf8');
   assert(!source.includes('Date.now'));
 });
-test('delay of exactly 1.5 s is allowed; a larger known delay never displays released or permission', () => {
+test('delay of exactly 2.5 s is allowed; a larger known delay never displays released or permission', () => {
   const f = fixture();
   f.normal();
-  // Continuous arrival: the local gap itself stays at or below 1.5 s.
+  // Continuous arrival: the local gap itself stays at or below 2.5 s.
   f.feed(3000, 2000.001); // positive source progress, delay ~1000 ms
   assert.equal(f.feed(3500, 2000.001).estop, 'checking', 'repeated stamp invalidates the clock');
   const g = fixture();
   g.normal();
-  for (let at = 2020; at <= 3500; at += 20) g.feed(at, 2000 + (at - 2000) / 100);
-  assert.equal(g.feed(3520, 2020).estop, 'released');
-  assert.equal(g.feed(3540, 2039).estop, 'delayed');
-  assert.equal(g.permissions(3541).drive, 'delayed');
+  for (let at = 2020; at <= 4500; at += 20) g.feed(at, 2000 + (at - 2000) / 250);
+  assert.equal(g.feed(4520, 2020).estop, 'released');
+  assert.equal(g.feed(4540, 2039).estop, 'delayed');
+  assert.equal(g.permissions(4541).drive, 'delayed');
 });
 test('receive-time expiry remains independent of timing estimate', () => {
   const f = fixture();
   f.normal();
-  assert.equal(f.model(3500).estop, 'released');
-  assert.equal(f.model(3501).estop, 'stale');
-  assert.notEqual(f.model(3501).drive, 'on');
+  assert.equal(f.model(4500).estop, 'released');
+  assert.equal(f.model(4501).estop, 'stale');
+  assert.notEqual(f.model(4501).drive, 'on');
 });
 test('last good baseline survives a 60 s outage and queued old released values', () => {
   const f = fixture();
@@ -92,13 +92,13 @@ test('last good baseline survives a 60 s outage and queued old released values',
   }
   assert.equal(f.timing.baseline, 0);
 });
-test('delay recovery needs <=750 ms for a second and three progressing values', () => {
+test('delay recovery needs <=1250 ms for a second and three progressing values', () => {
   const f = fixture();
   f.normal();
-  f.feed(4500, 2020);
-  let at = 4500,
+  f.feed(5500, 2020);
+  let at = 5500,
     source = 2020;
-  while (at - source > 1000) {
+  while (at - source > 2000) {
     at += 20;
     source += 40;
     assert.equal(f.feed(at, source).estop, 'delayed');
@@ -123,10 +123,10 @@ test('delay recovery needs <=750 ms for a second and three progressing values', 
 test('alternating good and delayed input cannot repeatedly clear the delayed state', () => {
   const f = fixture();
   f.normal();
-  f.feed(4500, 2020);
+  f.feed(5500, 2020);
   let normal = 0;
   for (let n = 0; n < 40; n++) {
-    const at = 4520 + n * 100,
+    const at = 5520 + n * 100,
       source = at - (n % 2 ? 3000 : 500);
     if (f.feed(at, source).estop === 'released') normal++;
   }
@@ -206,7 +206,45 @@ test('all texts cover delay/checking and the estimate remains in display adapter
     const source = fs.readFileSync(new URL('../js/live/' + name + '.js', import.meta.url), 'utf8');
     assert(!source.includes('display-timing') && !source.includes('liveStatus('), name);
   }
-  assert.equal(DISPLAY_STALE_MS, 1500);
+  assert.equal(DISPLAY_STALE_MS, 2500);
   assert.equal(TIMING_CONFIRM_MS, 1000);
   assert.equal(CLOCK_STEP_MARGIN_MS, 250);
+});
+
+test('successive +2 s steps cannot be absorbed when the 30 s window expires', () => {
+  const f = fixture();
+  let at = 0;
+  for (let source = 0; source <= 120000; source += 50) {
+    const delay = source >= 80000 ? 4000 : source >= 40000 ? 2000 : 0;
+    at = source + delay;
+    const result = f.feed(at, source);
+    if (source >= 80000) assert.equal(result.estop, 'delayed');
+  }
+  assert(f.timing.baseline < 100, 'rise budget is not accumulated from the old minimum timestamp');
+});
+
+test('unheard/silent estop differs from a flowing clock being checked', () => {
+  const f = fixture();
+  assert.equal(displayTimingModel(f.timing, 0).mode, 'unheard');
+  let result = f.permissions(1);
+  assert.equal(result.estop, 'unknown');
+  assert.equal(result.drive, 'unknown');
+  assert.equal(result.permissionReason, 'estop_unknown');
+  f.normal();
+  result = f.model(4501);
+  assert.equal(displayTimingModel(f.timing, 4501).mode, 'silent');
+  assert.equal(result.estop, 'stale');
+  assert.equal(result.drive, 'unknown');
+  assert.equal(result.permissionReason, 'estop_stale');
+  assert.equal(f.feed(5000).estop, 'checking');
+  for (let at = 5020; at <= 6040; at += 20) f.feed(at);
+  assert.equal(f.model(6040).estop, 'released');
+  assert.equal(f.permissions(6041).drive, 'on');
+});
+
+test('the baseline can immediately move down without using the rise budget', () => {
+  const f = fixture();
+  f.normal();
+  assert.equal(f.feed(2020, 2220).estop, 'released');
+  assert(f.timing.baseline < -199.9);
 });
