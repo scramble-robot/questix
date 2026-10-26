@@ -1,3 +1,4 @@
+import { PLAN_SPEEDS, speedToRPM, minimumTime } from './simulation-plan.js';
 import { loadJson } from '../core/content.js';
 
 // Feedback-control course: maths and simulation. No DOM, importable from Node.
@@ -72,6 +73,23 @@ function normalizeControlConfig(id, input = {}) {
     config[key] = Number(config[key]);
     if (!Number.isFinite(config[key])) throw new Error('設定値は数値にしてください');
     config[key] = clamp(config[key], min, max);
+  }
+  // Optional demonstration reference; legacy configs keep exactly their old targets/profiles.
+  if (config.targetSpeed !== undefined && findTopic(id).mode === 'speed' && id !== 'output') {
+    config.targetSpeed = Number(config.targetSpeed);
+    if (!PLAN_SPEEDS.includes(config.targetSpeed)) throw new Error('Select a simulation speed');
+    config.targetRPM = speedToRPM(config.targetSpeed);
+  }
+  if (config.accelerationSeconds !== undefined) {
+    config.accelerationSeconds = Number(config.accelerationSeconds);
+    if (
+      findTopic(id).mode !== 'speed' ||
+      id === 'output' ||
+      !PLAN_SPEEDS.includes(config.targetSpeed) ||
+      !Number.isFinite(config.accelerationSeconds) ||
+      config.accelerationSeconds < minimumTime(config.targetSpeed)
+    )
+      throw new Error('Invalid simulation acceleration time');
   }
   config.feedback = !!config.feedback;
   config.antiWindup = !!config.antiWindup;
@@ -176,9 +194,11 @@ function simulateControl(id, input = {}) {
   for (let n = 0; n <= steps; n++) {
     const time = n * dt;
     const reference =
-      id === 'reference' && config.profile === 'ramp'
-        ? target * Math.min(1, time / RAMP_SECONDS)
-        : target;
+      !distance && id !== 'output' && config.accelerationSeconds !== undefined
+        ? target * Math.min(1, time / config.accelerationSeconds)
+        : id === 'reference' && config.profile === 'ramp'
+          ? target * Math.min(1, time / RAMP_SECONDS)
+          : target;
     const blocked = id === 'limits' && time >= BLOCK_WINDOW.from && time < BLOCK_WINDOW.to;
     if (n % 5 === 0) {
       measurement = delayed + (noisy ? noiseAt(time) * (distance ? 0.012 : 1.2) : 0);
@@ -374,7 +394,9 @@ function controlCSV(result) {
     config.ffGain,
     result.loadCase,
     result.method,
-    config.profile,
+    config.accelerationSeconds === undefined
+      ? config.profile
+      : `ramp:${config.accelerationSeconds}s`,
   ].join(',');
   const rows = result.samples.map(
     (sample) => CSV_SAMPLE_KEYS.map((key) => sample[key].toFixed(4)).join(',') + ',' + metadata,

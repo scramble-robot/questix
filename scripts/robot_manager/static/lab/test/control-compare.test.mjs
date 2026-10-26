@@ -179,7 +179,7 @@ test('one changed gain: the sentence names it and how the numbers moved', () => 
   );
   assert.equal(
     conclusionSentence(before, after, { distance: true, text }),
-    'Dを0→0.6にすると、止まるまで7.9→8.3秒、行き過ぎは0 cmのままでした。',
+    'Dを0→0.6にすると、止まるまで7.9→8.3 s、行き過ぎは0 cmのままでした。',
   );
 });
 
@@ -188,7 +188,7 @@ test('the speed sentence uses m/s, rpm and says when a run did not settle', () =
   const after = row('B', { speed: 0.2, label: '0.2 m/s' }, { settling: 0.8, overshoot: 1.26 });
   assert.equal(
     conclusionSentence(before, after, { distance: false, text }),
-    '速さを0.1→0.2 m/sにすると、落ち着くまで：落ち着かず→0.8秒、行き過ぎ0.4→1.3 rpmでした。',
+    '速さを0.10→0.20 m/sにすると、落ち着くまで：落ち着かず→0.8 s、行き過ぎ0.04 rad/s（約 0.4 rpm）→0.13 rad/s（約 1.3 rpm）でした。',
   );
   const neither = row('C', { speed: 0.2 }, { settling: null, overshoot: 1.26 });
   assert.equal(
@@ -196,7 +196,7 @@ test('the speed sentence uses m/s, rpm and says when a run did not settle', () =
       distance: false,
       text,
     }),
-    '速さを0.1→0.2 m/sにすると、どちらも時間内には落ち着かず、行き過ぎは1.3 rpmのままでした。',
+    '速さを0.10→0.20 m/sにすると、どちらも時間内には落ち着かず、行き過ぎは0.13 rad/s（約 1.3 rpm）のままでした。',
   );
 });
 
@@ -207,7 +207,7 @@ test('several changes, the same settings and unknown settings each get their own
   const options = { distance: true, text };
   assert.match(
     conclusionSentence(row('A', p2, metrics), row('B', p3, metrics), options),
-    /^設定を「P 2・I 0・D 0」から「P 3・I 0・D 0.5」に変えると、止まるまでは5\.0秒のまま、行き過ぎは2 cmのままでした。$/,
+    /^設定を「P 2・I 0・D 0」から「P 3・I 0・D 0.5」に変えると、止まるまでは5\.0 sのまま、行き過ぎは2 cmのままでした。$/,
   );
   assert.match(
     conclusionSentence(row('A', p2, metrics), row('B', { ...p2 }, metrics), options),

@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import { STEP_SPEEDS, STEP_HOLD, speedStep } from '../js/control/live-drive.js';
 import { forwardRpm } from '../js/live/capture-core.js';
+import { rpmToRadians } from '../js/control/simulation-plan.js';
 import { fillSentence as fill } from '../js/core/content.js';
 
 const copy = JSON.parse(fs.readFileSync(new URL('../content/control/ui.json', import.meta.url)));
@@ -12,7 +13,16 @@ const source = fs.readFileSync(new URL('../js/control/ui.js', import.meta.url), 
 const start = source.indexOf('let liveStepSpeed =');
 const end = source.indexOf('const wallMessages =', start);
 assert(start >= 0 && end > start);
-const context = { STEP_SPEEDS, STEP_HOLD, speedStep, forwardRpm, fill, copy, liveLink: () => ({}) };
+const context = {
+  STEP_SPEEDS,
+  STEP_HOLD,
+  speedStep,
+  forwardRpm,
+  rpmToRadians,
+  fill,
+  copy,
+  liveLink: () => ({}),
+};
 vm.runInNewContext(
   source.slice(start, end) +
     '\nglobalThis.labels = { speedText, stepSpeedOptions, speedDrive, select: (speed) => { liveStepSpeed = speed; } };',
@@ -37,6 +47,7 @@ test('the actual option template shows the speed and keeps its numeric value', (
       fill(copy.live.driveSpeedOption, {
         speed,
         rpm: forwardRpm(STEP_SPEEDS[index], { wheel_radius: 0.05 }).toFixed(0),
+        angular: rpmToRadians(forwardRpm(STEP_SPEEDS[index], { wheel_radius: 0.05 })).toFixed(2),
       }),
     ),
   );

@@ -1,3 +1,12 @@
+import { planFields, planCard } from './plan-view.js';
+import {
+  RPM_TO_RADIANS,
+  angularSpeedText,
+  rpmToRadians,
+  rpmToSpeed,
+  formatSpeed,
+  formatTime,
+} from './simulation-plan.js';
 import { html, live, nothing, unsafeHTML } from '../vendor/lit-html.js';
 import { formatValue, runSummary, isSimpleTopic, settledSpeed, speedGap } from './summary.js';
 import { lessonLabel } from '../shell/lesson-ui.js';
@@ -49,23 +58,50 @@ const configKey = (config) => JSON.stringify({ ...config, scenario: 'standard' }
 // --- short, reusable pieces of text -------------------------------------------------------
 
 // One line naming the settings of a run, for the result heading and the history table.
-function gainText(config, topicId, copy) {
+function baseGainText(config, topicId, copy) {
   if (topicId === 'output') return '一定出力 ' + config.power + '%';
   if (topicId === 'feedforward')
-    return 'FF ' + formatValue(config.ffGain, 2) + ' %/rpm・目標 ' + config.targetRPM + ' rpm';
+    return (
+      'FF ' +
+      formatValue(config.ffGain / RPM_TO_RADIANS, 2) +
+      ' %/(rad/s)（' +
+      formatValue(config.ffGain, 2) +
+      ' %/rpm）・目標 ' +
+      angularSpeedText(config.targetRPM)
+    );
   if (topicId === 'combined') {
     const estimate =
-      config.strategy === 'feedback' ? '' : '・FF ' + formatValue(config.ffGain, 2) + ' %/rpm';
-    return copy.labels.method[config.strategy] + estimate + '・目標 ' + config.targetRPM + ' rpm';
+      config.strategy === 'feedback'
+        ? ''
+        : '・FF ' +
+          formatValue(config.ffGain / RPM_TO_RADIANS, 2) +
+          ' %/(rad/s)（' +
+          formatValue(config.ffGain, 2) +
+          ' %/rpm）';
+    return (
+      copy.labels.method[config.strategy] +
+      estimate +
+      '・目標 ' +
+      angularSpeedText(config.targetRPM)
+    );
   }
   if (topicId === 'reference')
-    return config.profile === 'ramp' ? '目標を3秒かけて変える' : '目標を一度に変える';
+    return config.accelerationSeconds !== undefined
+      ? `${formatSpeed(config.targetSpeed)} m/s・加速 ${formatTime(config.accelerationSeconds)} s`
+      : '従来の目標設定';
   if (topicId === 'feedback')
     return config.feedback ? '測って調整' : '一定出力 ' + config.power + '%';
   if (topicId === 'limits') return 'Iの抑制 ' + (config.antiWindup ? 'あり' : 'なし');
-  if (topicId === 'noise') return 'フィルター ' + formatValue(config.filter, 2) + '秒';
+  if (topicId === 'noise') return 'フィルター ' + formatValue(config.filter, 2) + ' s';
   const { kp, ki, kd } = config;
   return `P ${formatValue(kp)} / I ${formatValue(ki)} / D ${formatValue(kd)}`;
+}
+
+function gainText(config, topicId, copy) {
+  const text = baseGainText(config, topicId, copy);
+  if (topicId === 'reference' || config.targetSpeed === undefined) return text;
+  const time = config.accelerationSeconds;
+  return `${formatSpeed(config.targetSpeed)} m/s・加速 ${time === undefined ? '—' : formatTime(time)} s・${text}`;
 }
 
 // The load a run met, named only where the learner can choose it.
@@ -83,7 +119,10 @@ function conditionText(run, topicId, copy, separator) {
 // The first stage's history columns: the speed the wheel settled at and how far that is from the
 // target.
 function simpleMetricText(run, copy) {
-  return [formatValue(settledSpeed(run), 0) + ' rpm', speedGap(run, copy.summary)];
+  return [
+    angularSpeedText(settledSpeed(run)),
+    run.id === 'output' ? copy.demo.outputResult : speedGap(run, copy.summary),
+  ];
 }
 
 // The three headline numbers of a run: remaining error, overshoot, time to settle.
@@ -91,12 +130,16 @@ function metricText(run, copy) {
   const metrics = run.metrics;
   const distance = run.mode === 'distance';
   const scale = distance ? CENTIMETRES : 1;
-  const unit = distance ? ' cm' : ' rpm';
+  const unit = distance ? ' cm' : '';
   const digits = distance ? 0 : 1; // whole centimetres, as on the chart and in the summary
   return [
-    formatValue(metrics.finalError * scale, digits) + unit,
-    formatValue(metrics.overshoot * scale, digits) + unit,
-    metrics.settling === null ? copy.results.notSettled : formatValue(metrics.settling) + ' 秒',
+    distance
+      ? formatValue(metrics.finalError * scale, digits) + unit
+      : angularSpeedText(metrics.finalError),
+    distance
+      ? formatValue(metrics.overshoot * scale, digits) + unit
+      : angularSpeedText(metrics.overshoot),
+    metrics.settling === null ? copy.results.notSettled : formatValue(metrics.settling) + ' s',
   ];
 }
 
@@ -105,8 +148,7 @@ function hintText(run, topicId, copy) {
   const hints = copy.hints;
   const metrics = run.metrics;
   if (topicId === 'output') {
-    if (metrics.finalError < SETTLED_RPM) return hints.outputClose;
-    return run.samples.at(-1).actual < run.target ? hints.outputSlow : hints.outputFast;
+    return copy.demo.outputResult;
   }
   if (topicId === 'feedforward')
     return metrics.finalError < SETTLED_RPM ? hints.feedforwardMatched : hints.feedforwardMissed;
@@ -116,8 +158,7 @@ function hintText(run, topicId, copy) {
     if (run.method === 'feedforward') return hints.combinedFeedforward;
     return run.method === 'feedback' ? hints.combinedFeedback : hints.combinedBoth;
   }
-  if (topicId === 'reference')
-    return run.config.profile === 'step' ? hints.referenceStep : hints.referenceRamp;
+  if (topicId === 'reference') return copy.demo.referenceNote;
   if (run.collision) return hints.collision;
   if (topicId === 'feedback') return run.config.feedback ? hints.feedbackOn : hints.feedbackOff;
   if (topicId === 'p') return metrics.finalError > SETTLED_RPM ? hints.pSlow : hints.pClose;
@@ -137,7 +178,7 @@ function hintText(run, topicId, copy) {
 function timeLabel(model, copy) {
   if (!model.result) return copy.time.idle;
   const phase = playbackPhase(model, copy);
-  return phase + ' · ' + formatValue(model.frame.time) + ' / 16.0 秒';
+  return phase + ' · ' + formatValue(model.frame.time) + ' / 16.0 s';
 }
 
 function playbackPhase(model, copy) {
@@ -219,28 +260,8 @@ function choice(name, value, checked, title, note, onSelect) {
   >`;
 }
 
-function referenceFields(model, copy, actions) {
-  const text = copy.controls.profile;
-  const select = (value) => actions.setChoice('profile', value);
-  return html`<fieldset class="choice-list">
-      <legend>${text.legend}</legend>
-      ${choice(
-        'controlProfile',
-        'step',
-        model.config.profile === 'step',
-        text.step.title,
-        text.step.note,
-        select,
-      )}${choice(
-        'controlProfile',
-        'ramp',
-        model.config.profile === 'ramp',
-        text.ramp.title,
-        text.ramp.note,
-        select,
-      )}
-    </fieldset>
-    <p class="helper">${text.note}</p>`;
+function referenceFields(model, copy) {
+  return html`<p class="helper">${copy.demo.referenceNote}</p>`;
 }
 
 function feedbackFields(model, copy, actions) {
@@ -308,13 +329,13 @@ function scenarioField(model, copy, actions) {
   >`;
 }
 
-function settingFields(model, copy, actions) {
+function legacySettingFields(model, copy, actions) {
   const { topicId } = model;
   if (topicId === 'output')
     return html`${settingSlider('power', copy.settings.power, model, actions)}
       <p class="helper">${copy.controls.outputNote}</p>`;
   if (isFeedforwardTopic(topicId))
-    return html`${settingSlider('targetRPM', copy.settings.targetRPM, model, actions)}${loadCaseField(
+    return html`${loadCaseField(
         model,
         copy,
         actions,
@@ -332,6 +353,10 @@ function settingFields(model, copy, actions) {
   if (topicId === 'challenge')
     return html`${scenarioField(model, copy, actions)}${gainFields(model, copy, actions)}`;
   return gainFields(model, copy, actions);
+}
+
+function settingFields(model, copy, actions) {
+  return html`${!model.distance && model.topicId !== 'output' ? planFields(model, copy, actions) : nothing}${legacySettingFields(model, copy, actions)}`;
 }
 
 // Which of the three challenge scenarios the current settings have already passed.
@@ -367,12 +392,24 @@ function badges(model, copy) {
 function controlPanel(model, copy, actions) {
   const goal = model.distance
     ? copy.goal.distance
-    : fill(copy.goal.speed, { rpm: model.config.targetRPM });
+    : model.topicId === 'output'
+      ? copy.demo.outputGoal
+      : model.config.targetSpeed === undefined
+        ? copy.demo.chooseSpeed
+        : fill(copy.demo.speedGoal, { speed: formatSpeed(model.config.targetSpeed) });
   return html`<aside class="guide card control-guide">
     <p class="eyebrow">条件を決める</p>
     <h2 id="controlGoal">${goal}</h2>
     ${settingFields(model, copy, actions)}
-    <button id="controlRun" class="primary full" @click=${actions.run}>${runLabel(model)}</button>
+    <p class="helper">${copy.demo.modelNote}</p>
+    <button
+      id="controlRun"
+      class="primary full"
+      ?disabled=${!model.simulationReady}
+      @click=${actions.run}
+    >
+      ${runLabel(model)}
+    </button>
     <p id="controlRunStatus" class="helper" role="status">${model.status}</p>
     <button id="controlReset" class="text-button" @click=${actions.reset}>
       設定を初期値に戻す
@@ -390,22 +427,29 @@ function readings(model, copy) {
   const { distance, frame, result } = model;
   const targetValue = distance
     ? formatValue(STOP_DISTANCE * CENTIMETRES, 0) + ' cm'
-    : formatValue(result ? frame.target : model.config.targetRPM, 0) + ' rpm';
+    : model.topicId === 'output'
+      ? model.config.power + ' %'
+      : !result && model.config.targetSpeed === undefined
+        ? '—'
+        : angularSpeedText(result ? frame.target : model.config.targetRPM);
   const measured = () => {
     if (!result) return '—';
-    return distance ? formatValue(frame.measured * CENTIMETRES, 0) : formatValue(frame.measured, 1);
+    return distance
+      ? formatValue(frame.measured * CENTIMETRES, 0)
+      : angularSpeedText(frame.measured);
   };
   const output = result ? formatValue(distance ? frame.rpm : frame.command) : '—';
   return html`<div>
-      <span>${model.topicId === 'reference' ? 'いまの目標' : '目標'}</span
+      <span
+        >${model.topicId === 'output' ? '指定した出力' : model.topicId === 'reference' ? 'いまの目標' : '目標'}</span
       ><strong>${targetValue}</strong>
     </div>
     <div>
-      <span>${model.topic.sensor}</span><strong>${measured() + (distance ? ' cm' : ' rpm')}</strong>
+      <span>${model.topic.sensor}</span><strong>${measured() + (distance ? ' cm' : '')}</strong>
     </div>
     <div>
-      <span>${distance ? '左右の車輪の回転数' : 'モーターへの出力'}</span
-      ><strong>${output + (distance ? ' rpm' : ' %')}</strong>
+      <span>${distance ? '左右の車輪の角速度' : 'モーターへの出力'}</span
+      ><strong>${distance ? (result ? angularSpeedText(frame.rpm) : '—') : output + ' %'}</strong>
     </div>`;
 }
 
@@ -414,7 +458,7 @@ function contributions(model, copy) {
   const { frame, result } = model;
   if (!result) return copy.visual.contributionsIdle;
   if (model.topicId === 'feedforward')
-    return html`<span>目標 <strong>${formatValue(frame.target, 0) + ' rpm'}</strong></span
+    return html`<span>目標 <strong>${angularSpeedText(frame.target)}</strong></span
       ><b>×</b
       ><span>1 rpmあたり <strong>${formatValue(result.config.ffGain, 2) + '%'}</strong></span
       ><b>→</b><span>出力 <strong>${formatValue(frame.command) + '%'}</strong></span
@@ -498,7 +542,10 @@ function chartLayers(model) {
   const hasRun = Boolean(model.result);
   const real = Boolean(model.live.chart) || model.live.compared.length > 0;
   return {
-    target: hasRun || !real || model.distance,
+    target:
+      model.topicId !== 'output' &&
+      (hasRun || !real || model.distance) &&
+      (model.simulationReady || model.distance || hasRun),
     marker: hasRun || !real ? chartMarker(model) : null,
   };
 }
@@ -554,14 +601,17 @@ function chartLegend(model, copy, layers) {
 
 // The simulated 60 rpm and the real 0.2 m/s step are of different size: say so next to the chart.
 function scaleNote(model, copy) {
+  if (model.topicId === 'output' || (!model.simulationReady && !model.result)) return nothing;
   const current = model.live.current;
   if (model.distance || !current || !Number.isFinite(current.command)) return nothing;
-  const rpm = formatValue(current.command, 0);
+  const rpm = angularSpeedText(current.command);
   const speed = current.conditions?.speed;
   const step = Number.isFinite(speed)
     ? fill(copy.live.scaleStep, { speed: speed.toFixed(2) + ' m/s', rpm })
     : fill(copy.live.scaleStepUnknown, { rpm });
-  const target = model.result ? model.result.target : model.config.targetRPM;
+  const targetRPM = model.result ? model.result.target : model.config.targetRPM;
+  if (Math.abs(targetRPM - current.command) < 1e-6) return nothing;
+  const target = `${formatSpeed(rpmToSpeed(targetRPM))} m/s（${angularSpeedText(targetRPM)}）`;
   return html`<p class="control-live-scale">${fill(copy.live.scaleNote, { target, step })}</p>`;
 }
 
@@ -593,20 +643,20 @@ function charts(model, copy, actions) {
   };
   const targetValue = distance
     ? formatValue(STOP_DISTANCE * CENTIMETRES, 0) + ' cm'
-    : (result ? result.target : fallback) + ' rpm';
+    : angularSpeedText(result ? result.target : fallback);
   const command = model.live.current?.command;
   const measured = controlChart({
     ...shared,
     live: model.live.chart,
     compared: model.live.compared,
     key: 'measured',
-    title: distance ? '壁までの距離' : '車輪の回転数',
-    unit: distance ? 'cm' : 'rpm',
-    factor: distance ? CENTIMETRES : 1,
+    title: distance ? '壁までの距離' : '車輪の角速度',
+    unit: distance ? 'cm' : 'rad/s',
+    factor: distance ? CENTIMETRES : RPM_TO_RADIANS,
     target: layers.target,
     targetCaption: (model.topicId === 'reference' ? '最終目標' : '目標') + ' ' + targetValue,
     commandCaption: Number.isFinite(command)
-      ? fill(copy.charts.liveCommandCaption, { rpm: formatValue(command, 0) })
+      ? fill(copy.charts.liveCommandCaption, { rpm: angularSpeedText(command) })
       : '',
   });
   // Only the load is named here, even in the challenge topic, so the caption stays short.
@@ -696,7 +746,8 @@ function graphsCard(model, copy, actions) {
     </div>
     <div id="controlCharts">${charts(model, copy, actions)}</div>
     <p class="control-chart-note">
-      ${model.distance ? copy.charts.noteDistance : copy.charts.noteSpeed}<span id="controlLoadNote"
+      ${model.distance ? copy.charts.noteDistance : model.topicId === 'output' ? copy.demo.outputChartNote : copy.charts.noteSpeed}<span
+        id="controlLoadNote"
         >${model.loadNote}</span
       >
       ${liveChartNote(model, copy)}
@@ -721,8 +772,8 @@ function calibrationCard(model, copy) {
       </thead>
       <tbody>
         <tr>
-          <th>車輪の回転数</th>
-          ${model.calibration.map((point) => html`<td>${formatValue(point.rpm, 0) + ' rpm'}</td>`)}
+          <th>車輪の角速度</th>
+          ${model.calibration.map((point) => html`<td>${angularSpeedText(point.rpm)}</td>`)}
         </tr>
       </tbody>
     </table>
@@ -808,12 +859,12 @@ function stepSpeedSelect(model, text, actions) {
   >`;
 }
 
-const secondsText = (value) => (value === null ? '—' : formatValue(value) + ' 秒');
+const secondsText = (value) => (value === null ? '—' : formatValue(value) + ' s');
 
 // The numbers of one row, in the order of the columns after the name and 設定.
 function metricCells(metrics, distance, text) {
   const value = (number) =>
-    distance ? formatValue(number * CENTIMETRES, 0) + ' cm' : formatValue(number, 1) + ' rpm';
+    distance ? formatValue(number * CENTIMETRES, 0) + ' cm' : angularSpeedText(number);
   const settling =
     metrics.settling === null ? text.compareNotSettled : secondsText(metrics.settling);
   const cells = [
@@ -912,15 +963,15 @@ function methodComparison(model, run, copy) {
   const cells = (method) => {
     const match = [...model.runs].reverse().find((x) => x.method === method && sameConditions(x));
     if (!match) return html`<td colspan="3">${copy.results.notTried}</td>`;
-    return html`<td>${formatValue(match.samples[20].actual) + ' rpm'}</td>
-      <td>${formatValue(match.metrics.finalError) + ' rpm'}</td>
-      <td>${formatValue(match.metrics.overshoot) + ' rpm'}</td>`;
+    return html`<td>${angularSpeedText(match.samples[20].actual)}</td>
+      <td>${angularSpeedText(match.metrics.finalError)}</td>
+      <td>${angularSpeedText(match.metrics.overshoot)}</td>`;
   };
   return html`<div class="control-method-comparison">
     <h3>${copy.results.methodComparisonTitle}</h3>
     <p>
       ${fill(copy.results.methodComparisonIntro, {
-        target: run.target,
+        target: angularSpeedText(run.target),
         load: copy.labels.load[run.loadCase],
       })}
     </p>
@@ -929,7 +980,7 @@ function methodComparison(model, run, copy) {
         <thead>
           <tr>
             <th>指令の決め方</th>
-            <th>1秒後の回転数</th>
+            <th>1 s後の角速度</th>
             <th>最後のずれ</th>
             <th>最大の行き過ぎ</th>
           </tr>
@@ -966,17 +1017,20 @@ function resultMetrics(model, run, copy) {
   const distance = model.distance;
   const overshootNote = distance
     ? copy.results.overshootDistance
-    : fill(copy.results.overshootSpeed, { target: run.target });
+    : fill(copy.results.overshootSpeed, { target: angularSpeedText(run.target) });
   const settlingLabel = () => {
     if (distance) return copy.results.settlingDistance;
     return metrics.after ? copy.results.settlingAfterLoad : copy.results.settlingToTarget;
   };
   const settlingNote = distance
     ? copy.results.settlingDistanceNote
-    : fill(copy.results.settlingSpeedNote, { after: metrics.after, target: run.target });
+    : fill(copy.results.settlingSpeedNote, {
+        after: metrics.after,
+        target: angularSpeedText(run.target),
+      });
   return html`<div class="control-metrics">
     <div>
-      <span>最後の2秒のずれ</span><strong>${finalError}</strong
+      <span>最後の2 sのずれ</span><strong>${finalError}</strong
       ><small>${copy.results.finalErrorNote}</small>
     </div>
     <div>
@@ -1009,7 +1063,7 @@ function resultsBody(model, run, copy, actions) {
     ${
       topicId === 'reference'
         ? html`<p class="control-result-note">
-            ${copy.results.peakAccelerationLabel}<strong>${formatValue(metrics.peakAcceleration) + ' rpm/秒'}</strong>${copy.results.peakAccelerationNote}
+            ${copy.results.peakAccelerationLabel}<strong>${formatValue(rpmToRadians(metrics.peakAcceleration), 2) + ' rad/s²（約 ' + formatValue(metrics.peakAcceleration) + ' rpm/s）'}</strong>${copy.results.peakAccelerationNote}
           </p>`
         : nothing
     }
@@ -1041,7 +1095,11 @@ function resultsCard(model, copy, actions) {
 function historyCard(model, copy) {
   const { runs, topicId } = model;
   const simple = isSimpleTopic(topicId);
-  const columns = simple ? copy.history.simpleColumns : ['最後のずれ', '行き過ぎ', '落ち着くまで'];
+  const columns = simple
+    ? topicId === 'output'
+      ? [copy.history.simpleColumns[0], copy.demo.outputHistoryColumn]
+      : copy.history.simpleColumns
+    : ['最後のずれ', '行き過ぎ', '落ち着くまで'];
   const rows = runs.map(
     (run, index) =>
       html`<tr>
@@ -1203,7 +1261,10 @@ function topicNav(model, copy, actions) {
 const runLabel = (model) => (model.result ? 'この設定でもう一度試す' : 'この設定で実験する');
 
 // The button of the 「最初に試すこと」 card (shell/lesson-brief.js): the simulated run starts.
-const quickStart = (model) => ({ label: runLabel(model), target: '#controlRun', press: true });
+const quickStart = (model, copy) =>
+  model.simulationReady
+    ? { label: runLabel(model), target: '#controlRun', press: true }
+    : { label: copy.demo.chooseBoth, target: '#controlSimulationSpeed', press: false };
 
 function controlPage(model, copy, hardwareHtml, actions) {
   const lessonKey = 'control-' + model.topicId;
@@ -1213,12 +1274,13 @@ function controlPage(model, copy, hardwareHtml, actions) {
         <h1>${model.topic.title}</h1>
       </div>
     </div>
+    <p class="helper" data-control-units>${copy.demo.angularUnit} ${copy.demo.radNote}</p>
     ${groupNav(model, actions)}${topicNav(model, copy, actions)}
-    ${unsafeHTML(lessonBrief(lessonKey, model.topic, { start: quickStart(model) }) + schoolTips(lessonKey))}
+    ${unsafeHTML(lessonBrief(lessonKey, model.topic, { start: quickStart(model, copy) }) + schoolTips(lessonKey))}
     ${liveCard(model, copy, actions)}
     <div class="control-layout">
       <div class="control-workspace">
-        ${calibrationCard(model, copy)}${visualCard(model, copy, actions)}${graphsCard(
+        ${planCard(model, copy)}${calibrationCard(model, copy)}${visualCard(model, copy, actions)}${graphsCard(
           model,
           copy,
           actions,
