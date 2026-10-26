@@ -79,10 +79,7 @@ test('state card and compact strip retain the supplied display state at every dr
         model.estop,
         estopState === 'pressed' ? true : estopState === 'released' ? false : null,
       );
-      assert.equal(
-        stripModel(model).estop,
-        ['unknown', 'stale'].includes(estopState) ? 'unknown' : estopState,
-      );
+      assert.equal(stripModel(model).estop, estopState);
     }
 });
 
@@ -97,4 +94,98 @@ test('all current E-stop display adapters subscribe to the shared model', () => 
   assert.match(read('live-ui'), /words\[liveStatus\(\)\.estop\]/);
   assert(!read('robot-state').match(/const STREAMS = [^;]*'estop'/));
   assert(!read('robot-state-core').includes('drive.emergency_stop'));
+});
+
+test('attached hidden panels and strips use the shared snapshot before their first visible paint', async () => {
+  let estop = 'unknown';
+  let transition;
+  const element = () => ({
+    isConnected: true,
+    value: null,
+    checkVisibility: () => false,
+    replaceChildren(...children) {
+      this.children = children;
+    },
+  });
+  const deps = {
+    createStateTracker,
+    robotStateModel,
+    stripModel,
+    liveStatus: () => ({ estop }),
+    onLiveStatus: (fn) => {
+      transition = fn;
+    },
+    robotState: () => ({ silent: false, session: 1 }),
+    liveLink: () => ({ connected: true, streams: {} }),
+    latestRobot: () => null,
+    onRobot() {},
+    openRobotDialog() {},
+    loadJson: async () => ({}),
+    localStorage: { getItem: () => null },
+    document: { hidden: false, createElement: element },
+    performance: { now: () => 100 },
+    render: (value, host) => {
+      host.value = value;
+    },
+    robotStateView: (model) => model,
+    stripView: (model) => model,
+    memoView: () => null,
+    setInterval: () => 1,
+    clearInterval() {},
+    html: () => null,
+    ref: (fn) => fn,
+    nothing: null,
+  };
+  const source = read('robot-state')
+    .replace(/^import[\s\S]*?from '[^']+';\n/gm, '')
+    .replace(/export \{[^}]+\};/, 'return { entryOf, stripOf, robotStatePanel, liveStateStrip };');
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  const api = await new AsyncFunction('deps', `const {${Object.keys(deps)}}=deps;\n${source}`)(
+    deps,
+  );
+  const card = api.entryOf('card'),
+    strip = api.stripOf('strip');
+  card.mount(element());
+  strip.mount(element());
+  assert.equal(card.live.value.estopState, 'unknown');
+  for (const state of ['pressed', 'released', 'unknown', 'stale']) {
+    estop = state;
+    transition({ estop });
+    assert.equal(card.live.value.estopState, state, 'hidden card is ready before reveal');
+    assert.equal(strip.element.value.estop, state, 'hidden strip is ready before reveal');
+  }
+  estop = 'pressed';
+  const fresh = api.entryOf('fresh-card');
+  fresh.mount(element());
+  assert.equal(
+    fresh.live.value.estopState,
+    'pressed',
+    'initial mount reads the existing shared snapshot',
+  );
+  api.robotStatePanel('card');
+  api.liveStateStrip('strip');
+  assert.equal(card.live.value.estopState, 'pressed', 'reused card reads snapshot synchronously');
+  assert.equal(strip.element.value.estop, 'pressed', 'reused strip reads snapshot synchronously');
+});
+
+test('card and strip have distinct unheard and stale text for all four shared display states', async () => {
+  const text = JSON.parse(
+    fs.readFileSync(new URL('../content/live/robot-state.json', import.meta.url), 'utf8'),
+  );
+  const html = (strings, ...values) =>
+    strings.reduce((out, part, index) => out + part + (values[index] ?? ''), '');
+  const source = read('robot-state-view')
+    .replace(/^import[\s\S]*?from '[^']+';\n/gm, '')
+    .replace(/export \{[\s\S]*?\};/, 'return { estopBlock, stripEstop };');
+  const api = new Function('html', 'roleStyle', `${source}`)(html, () => ({}));
+  for (const state of ['pressed', 'released', 'unknown', 'stale']) {
+    assert.equal(typeof text.estop[state], 'string');
+    assert.equal(text.estop[state], text.strip.estop[state]);
+    assert(api.estopBlock({ estopState: state }, text).includes(text.estop[state]));
+    assert(api.stripEstop({ estop: state }, text).includes(text.strip.estop[state]));
+  }
+  assert(api.stripEstop({ estop: 'stale' }, text).includes('is-unknown'));
+  assert.match(text.estop.unknown, /まだ届いていません/);
+  assert.match(text.estop.stale, /途絶えています/);
+  assert(!text.estop.unknown.includes('車輪') && !text.estop.stale.includes('車輪'));
 });
