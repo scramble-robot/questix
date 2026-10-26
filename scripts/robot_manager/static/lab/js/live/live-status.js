@@ -1,11 +1,13 @@
 import { html, render } from '../vendor/lit-html.js';
 import { loadJson } from '../core/content.js';
 import { onRobot, robotState, linkStage } from './robot-link.js';
+import { createDisplayTiming, observeDisplayTiming, displayTimingModel } from './display-timing.js';
 import { liveStatusModel } from './live-status-core.js';
 import { liveStatusLine } from './live-status-view.js';
 import { labStopButton } from './stop-control.js';
 const copy = await loadJson('content/live/link.json');
 const received = {};
+let timing = createDisplayTiming();
 const listeners = new Set();
 const dialogOrder = [];
 const dialogHosts = new Map();
@@ -24,9 +26,11 @@ function activeLiveDialog() {
 }
 function drawStatuses() {
   const link = robotState();
+  const now = performance.now();
+  const transport = displayTimingModel(timing, now);
   const model = (currentModel = {
-    ...liveStatusModel(link, received, performance.now()),
-    stage: linkStage(link),
+    ...liveStatusModel(link, received, now, transport),
+    stage: link.phase === 'open' && transport.mode !== 'ready' ? transport.mode : linkStage(link),
   });
   const active = activeLiveDialog();
   const header = document.getElementById('liveHeaderStatus');
@@ -68,11 +72,16 @@ function onLiveStatus(listener) {
 }
 for (const type of ['estop', 'drive_state', 'shoot_state'])
   onRobot(type, (message) => {
-    received[type] = { message, at: performance.now() };
+    const now = performance.now();
+    if (type === 'estop') observeDisplayTiming(timing, message, now);
+    received[type] = { message, at: now };
     drawStatuses();
   });
 onRobot('state', (link) => {
-  if (link.phase !== 'open') for (const key of Object.keys(received)) delete received[key];
+  if (link.phase !== 'open') {
+    timing = createDisplayTiming();
+    for (const key of Object.keys(received)) delete received[key];
+  }
   drawStatuses();
 });
 new MutationObserver((records) => {
