@@ -308,7 +308,7 @@ test('only /emergency_stop itself says released; never heard is unknown, silent 
   const later = robotStateModel(tracker, { link, now: 700 + DISPLAY_STALE_MS + 1 });
   assert.equal(later.estopState, 'stale');
   assert.equal(later.estop, null);
-  assert.equal(stripModel(later).estop, 'unknown');
+  assert.equal(stripModel(later).estop, 'stale');
 });
 
 test('header and strip share the E-stop display lease, including delivery jitter', () => {
@@ -319,7 +319,7 @@ test('header and strip share the E-stop display lease, including delivery jitter
     const header = liveStatusModel({ phase: 'open' }, { estop: { message, at: 0 } }, now);
     const model = robotStateModel(tracker, { link, now });
     assert.equal(model.estopState, header.estop);
-    assert.equal(stripModel(model).estop, now <= DISPLAY_STALE_MS ? 'released' : 'unknown');
+    assert.equal(stripModel(model).estop, now <= DISPLAY_STALE_MS ? 'released' : 'stale');
   }
   const source = fs.readFileSync(
     new URL('../js/live/robot-state-core.js', import.meta.url),
