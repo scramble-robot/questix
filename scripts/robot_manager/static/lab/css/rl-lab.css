@@ -48,6 +48,9 @@ select {
   min-height: 46px;
   color: #61756c;
 }
+.step-nav button:not(:disabled) {
+  color: #53685e;
+}
 .step-nav button span {
   width: 21px;
   height: 21px;
@@ -771,6 +774,14 @@ textarea {
   background: #b64b34;
   border-color: #b64b34;
   color: white;
+}
+@media (hover: hover) {
+  .emergency:hover:not(:disabled),
+  .emergency.latched:hover:not(:disabled) {
+    background: #9c3928;
+    border-color: #9c3928;
+    color: white;
+  }
 }
 .safety-controls p {
   font-size: 12px;

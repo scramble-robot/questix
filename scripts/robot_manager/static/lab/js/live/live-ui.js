@@ -13,7 +13,7 @@ import { scanMount, wheelAuthority } from './capture-core.js';
 import { loadJson, fillSentence } from '../core/content.js';
 import { html, render, nothing } from '../vendor/lit-html.js';
 
-import { liveStatus } from './live-status.js';
+import { liveStatus, onLiveStatus } from './live-status.js';
 
 const copy = await loadJson('content/live/link.json');
 
@@ -217,12 +217,14 @@ function estopText() {
     released: 'estopReleased',
     unknown: 'estopUnknown',
     stale: 'estopStale',
+    checking: 'estopChecking',
+    delayed: 'estopDelayed',
   };
   return copy.monitor[words[liveStatus().estop]];
 }
 
-function recordEstop(message) {
-  requestRedraw();
+function drawEstop() {
+  $('robotEstop').textContent = estopText();
 }
 function readings() {
   const odom = latestRobot('odom');
@@ -236,7 +238,7 @@ function readings() {
   $('robotCommand').textContent = twist
     ? `前後 ${f(twist.linear)} m/s · 回転 ${f(twist.angular)} rad/s`
     : '—';
-  $('robotEstop').textContent = estopText(drive);
+  drawEstop();
 }
 
 // The canvases have no size while the monitor section is hidden, so there is nothing to draw on yet.
@@ -332,6 +334,16 @@ function showHeader(state, stage) {
   const button = $('robotLinkOpen');
   button.dataset.phase = state.phase;
   button.dataset.stage = stage;
+  const name = state.phase === 'open' ? robotName(state.hello) : '';
+  $('robotLinkName').textContent = name;
+  $('robotLinkName').title = name;
+  button.setAttribute('aria-label', ['実機', name, copy.stage[stage]].filter(Boolean).join('、'));
+  render(
+    html`<span>${copy.stage[stage]}</span>${Object.values(copy.stage).map(
+        (value) => html`<span class="header-text-reserve" aria-hidden="true">${value}</span>`,
+      )}`,
+    $('robotLinkState'),
+  );
 }
 // Until a link has worked, the address stays editable so a typo can be fixed while it retries.
 function showForm(state, stage) {
@@ -356,7 +368,7 @@ function resetMonitor() {
 function showState(state) {
   const stage = linkStage(state);
   const open = state.phase === 'open';
-  showHeader(state, stage);
+  showHeader(state, liveStatus().stage);
   showForm(state, stage);
   $('robotStatus').dataset.stage = stage;
   render(statusView(state, stage), $('robotStatus'));
@@ -491,7 +503,10 @@ function initLive() {
   onRobot('odom', requestRedraw);
   onRobot('twist', requestRedraw);
   onRobot('drive', recordWheels);
-  onRobot('estop', recordEstop);
+  onLiveStatus((model) => {
+    drawEstop();
+    showHeader(robotState(), model.stage);
+  });
   onRobot('camera', showCamera);
   showState(robotState());
   showDialogNav();

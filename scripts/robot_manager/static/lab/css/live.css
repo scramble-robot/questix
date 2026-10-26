@@ -376,6 +376,20 @@
 .drive-start:disabled {
   color: var(--muted);
 }
+@media (hover: hover) {
+  .drive-start:hover:not(:disabled),
+  .drive-bench-move.held:hover:not(:disabled) {
+    background: #fff4e7;
+    color: var(--orange);
+    border-color: var(--orange);
+  }
+  .drive-stop:hover:not(:disabled),
+  .lab-stop:hover:not(:disabled) {
+    background: #a51d21;
+    border-color: #a51d21;
+    color: white;
+  }
+}
 .drive-why {
   flex-basis: 100%;
   font-size: 14px;
@@ -386,7 +400,7 @@
   color: var(--dark);
 }
 .drive-stop,
-.drive-bar-stop {
+.lab-stop {
   font-weight: 700;
   background: #c62828;
   border-color: #c62828;
@@ -398,64 +412,6 @@
   font-variant-numeric: tabular-nums;
   color: var(--orange);
   font-weight: 600;
-}
-
-/* The stop bar: above everything, moved into an open modal dialog while one is open. */
-.drive-bar-host {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 2147483000;
-  pointer-events: none;
-}
-.drive-bar {
-  pointer-events: auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
-  background: #fff4e5;
-  border-top: 3px solid #c62828;
-  box-shadow: 0 -6px 18px rgba(16, 40, 50, 0.18);
-}
-.drive-bar-dot {
-  flex: none;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: #c62828;
-  animation: drive-bar-blink 1s steps(2, start) infinite;
-}
-@keyframes drive-bar-blink {
-  to {
-    visibility: hidden;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .drive-bar-dot {
-    animation: none;
-  }
-}
-/* No Esc key on a touch screen. */
-@media (hover: none) {
-  .drive-bar-esc {
-    display: none;
-  }
-}
-@media (max-width: 560px) {
-  .drive-bar {
-    justify-content: space-between;
-    padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
-  }
-  .drive-bar strong {
-    font-size: 14px;
-    line-height: 1.4;
-  }
-  .drive-bar-stop {
-    min-width: 96px;
-  }
 }
 
 /* Bench test in the 実機 dialog. */
@@ -627,7 +583,7 @@
   margin-left: 6px;
   font-size: 13px;
   font-weight: 400;
-  color: var(--muted);
+  color: #5d706a;
 }
 .live-files-body {
   display: grid;
@@ -693,13 +649,13 @@
   opacity: 1;
 }
 .drive-stop::before,
-.drive-bar-stop::before {
+.lab-stop::before {
   content: '■';
   margin-right: 0.4em;
 }
 /* Red is for a stop that can be pressed; a disabled stop looks like the other disabled buttons. */
 .drive-stop:disabled,
-.drive-bar-stop:disabled {
+.lab-stop:disabled {
   background: white;
   border-color: var(--line);
   color: var(--muted);
@@ -707,42 +663,5 @@
 /* Break only between phrases (spaces or zero-width spaces in the labels), never inside a word. */
 .drive-start,
 .drive-stop {
-  word-break: keep-all;
-}
-
-:root {
-  --live-stop-height: calc(80px + env(safe-area-inset-bottom));
-}
-body.live-stop-reserved,
-body.live-stop-reserved dialog[open] {
-  padding-bottom: var(--live-stop-height);
-}
-.live-stop-bar {
-  pointer-events: auto;
-  display: grid;
-  grid-template-rows: 16px 44px;
-  gap: 4px;
-  height: var(--live-stop-height);
-  padding: 6px 8px calc(7px + env(safe-area-inset-bottom));
-  background: #fff4e5;
-  border-top: 3px solid #c62828;
-}
-.live-stop-state {
-  margin: 0;
-  text-align: center;
-  font-size: 12px;
-  line-height: 16px;
-}
-.live-stop-actions {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-.live-stop-actions .drive-bar-stop {
-  min-width: 0;
-  min-height: 44px;
-  height: 44px;
-  padding: 4px 8px;
-  font-size: 14px;
   word-break: keep-all;
 }

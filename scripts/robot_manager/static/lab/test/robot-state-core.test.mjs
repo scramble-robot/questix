@@ -6,6 +6,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {
+  DISPLAY_STALE_MS,
+  liveStatusModel as timingStatusModel,
+} from '../js/live/live-status-core.js';
+import {
   HISTORY_SECONDS,
   WHEEL_GAP_SECONDS,
   createStateTracker,
@@ -13,22 +17,36 @@ import {
   ingest,
   wheelAxis,
   driverOf,
-  robotStateModel,
+  robotStateModel as buildRobotStateModel,
   snapshotLine,
   freshnessText,
   signed,
   speedTop,
   sparkLines,
   stripModel,
-  estopModel,
 } from '../js/live/robot-state-core.js';
 
+// Legacy receive-expiry cases below assume an already verified connection.
+const liveStatusModel = (...args) =>
+  timingStatusModel(...args, { mode: 'ready', readyAt: -Infinity });
 const text = JSON.parse(
   fs.readFileSync(new URL('../content/live/robot-state.json', import.meta.url), 'utf8'),
 );
 const config = { wheel_radius: 0.1, wheel_separation: 0.5 };
 const streams = { drive: '/drive_status', odom: '/odom', scan: '/scan', twist: '/target_twist' };
 const link = { connected: true, phase: 'open', streams, config, robot: { name: 'questix-01' } };
+// Supply the display snapshot that the browser adapter receives from live-status.js.
+const robotStateModel = (tracker, options) =>
+  buildRobotStateModel(tracker, {
+    ...options,
+    estopState: liveStatusModel(
+      { phase: options.link?.connected ? 'open' : 'idle' },
+      tracker.latest.estop
+        ? { estop: { message: tracker.latest.estop, at: tracker.received.estop } }
+        : {},
+      options.now,
+    ).estop,
+  });
 const RPM_PER_MPS = 60 / (2 * Math.PI * config.wheel_radius);
 
 const drive = (v, w = 0, emergency = false) => ({ type: 'drive', v, w, emergency_stop: emergency });
@@ -112,11 +130,11 @@ test('who drives: a page run, the controller, nobody, or wheels turning without 
   assert.equal(driverOf({ driveState: null, command: null, wheels: null }), 'none');
 });
 
-test('the emergency stop is read from a fresh /drive_status only', () => {
+test('a derived drive flag cannot replace the shared E-stop display', () => {
   const tracker = createStateTracker();
   assert.equal(robotStateModel(tracker, { link, now: 0 }).estop, null);
   ingest(tracker, 'drive', drive(0, 0, true), 0, config);
-  assert.equal(robotStateModel(tracker, { link, now: 500 }).estop, true);
+  assert.equal(robotStateModel(tracker, { link, now: 500 }).estop, null);
   // Nothing for two seconds: the last value no longer says what the button is now.
   assert.equal(robotStateModel(tracker, { link, now: 2000 }).estop, null);
 });
@@ -217,6 +235,7 @@ test('the strip: emergency stop, who drives, both wheels and the speed of the la
   assert.equal(strip.commanded.length, 1);
   // Pressed: the strip says so, whatever else it shows.
   ingest(tracker, 'drive', drive(0, 0, true), 2150, config);
+  ingest(tracker, 'estop', estop(true), 2150, config);
   const pressed = stripModel(robotStateModel(tracker, { link, now: 2200 }));
   assert.equal(pressed.estop, 'pressed');
   assert.deepEqual(stripModel(robotStateModel(tracker, { link: { connected: false }, now: 0 })), {
@@ -278,24 +297,43 @@ test('only /emergency_stop itself says released; never heard is unknown, silent 
   const tracker = createStateTracker();
   // An older bridge (no estop stream) and a released derived flag: not released, unknown.
   ingest(tracker, 'drive', drive(0), 0, config);
-  assert.deepEqual(estopModel(tracker, 100), { state: 'unknown', source: null });
+  assert.equal(robotStateModel(tracker, { link, now: 100 }).estopState, 'unknown');
   assert.equal(robotStateModel(tracker, { link, now: 100 }).estop, null);
-  // The derived flag may still add a pressed E-stop.
+  // A derived flag cannot add a different current E-stop display.
   ingest(tracker, 'drive', drive(0, 0, true), 150, config);
-  assert.deepEqual(estopModel(tracker, 200), { state: 'pressed', source: 'drive' });
+  assert.equal(robotStateModel(tracker, { link, now: 200 }).estopState, 'unknown');
   ingest(tracker, 'drive', drive(0), 250, config);
   // The topic itself: released, then pressed.
   ingest(tracker, 'estop', estop(false), 300, config);
-  assert.deepEqual(estopModel(tracker, 400), { state: 'released', source: 'estop' });
+  assert.equal(robotStateModel(tracker, { link, now: 400 }).estopState, 'released');
   assert.equal(robotStateModel(tracker, { link, now: 400 }).estop, false);
   ingest(tracker, 'estop', estop(true), 500, config);
   assert.equal(robotStateModel(tracker, { link, now: 600 }).estopState, 'pressed');
-  // Silent for more than a second: stale, never the last word "released".
+  // Silent beyond the shared display limit: never the last word "released".
   ingest(tracker, 'estop', estop(false), 700, config);
-  const later = robotStateModel(tracker, { link, now: 1800 });
+  const later = robotStateModel(tracker, { link, now: 700 + DISPLAY_STALE_MS + 1 });
   assert.equal(later.estopState, 'stale');
   assert.equal(later.estop, null);
-  assert.equal(stripModel(later).estop, 'unknown');
+  assert.equal(stripModel(later).estop, 'stale');
+});
+
+test('header and strip share the E-stop display lease, including delivery jitter', () => {
+  const tracker = createStateTracker();
+  const message = estop(false);
+  ingest(tracker, 'estop', message, 0, config);
+  for (const now of [1000, 1001, 1200, DISPLAY_STALE_MS, DISPLAY_STALE_MS + 1]) {
+    const header = liveStatusModel({ phase: 'open' }, { estop: { message, at: 0 } }, now);
+    const model = robotStateModel(tracker, { link, now });
+    assert.equal(model.estopState, header.estop);
+    assert.equal(stripModel(model).estop, now <= DISPLAY_STALE_MS ? 'released' : 'stale');
+  }
+  const source = fs.readFileSync(
+    new URL('../js/live/robot-state-core.js', import.meta.url),
+    'utf8',
+  );
+  assert(!source.includes('DISPLAY_STALE_MS'));
+  assert(!source.includes('function estopModel'));
+  assert(source.includes("estopState = 'unknown'"));
 });
 
 // --- each wheel's own values (bridges with the wheel-level telemetry authority) ---------------

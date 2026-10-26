@@ -28,7 +28,7 @@ function linkLine(model, text) {
 
 // The emergency stop is the first thing to see: a wide red block while it is pressed.
 function estopBlock(model, text) {
-  if (model.estop === true)
+  if (model.estopState === 'pressed')
     return html`<div class="rs-estop is-pressed" role="alert" data-rs-estop="pressed">
       <span class="rs-estop-icon" aria-hidden="true">⛔</span>
       <div>
@@ -36,12 +36,25 @@ function estopBlock(model, text) {
         <p>${text.estop.pressedNote}</p>
       </div>
     </div>`;
-  const released = model.estop === false;
+  const state = model.estopState ?? 'unknown';
+  const released = state === 'released';
   return html`<p
     class=${released ? 'rs-estop is-released' : 'rs-estop is-unknown'}
-    data-rs-estop=${released ? 'released' : 'unknown'}
+    data-rs-estop=${state}
   >
-    ${released ? text.estop.released : text.estop.unknown}
+    ${text.estop[state]}
+  </p>`;
+}
+
+// Keep the wrapped line's space even while hidden; a received status must not move the page.
+function driveEstopNotice(model, text) {
+  return html`<p
+    class="rs-drive-estop-notice"
+    data-rs-drive-estop=${Boolean(model.driveEstopNotice)}
+    aria-hidden=${!model.driveEstopNotice}
+    role="status"
+  >
+    ${text.estop.driveReport}
   </p>`;
 }
 
@@ -342,7 +355,7 @@ function robotStateView(model, text, actions, status = '') {
       ${linkLine(model, text)}
     </div>
     ${status ? html`<p class="rs-status" role="status" data-rs-status>${status}</p>` : nothing}
-    ${estopBlock(model, text)} ${driverBlock(model, text)}
+    ${estopBlock(model, text)} ${driveEstopNotice(model, text)} ${driverBlock(model, text)}
     <div class="rs-grid-cards">
       ${wheelCard(model, 'left', text)} ${wheelCard(model, 'right', text)}
       ${motionCard(model, text)} ${poseCard(model, text, actions)} ${frontCard(model, text)}
@@ -360,7 +373,10 @@ function stripEstop(strip, text) {
     return html`<p class="rs-strip-estop is-pressed" role="alert" data-rs-strip-estop="pressed">
       <span aria-hidden="true">⛔</span>${words.pressed}
     </p>`;
-  return html`<p class="rs-strip-estop is-${strip.estop}" data-rs-strip-estop=${strip.estop}>
+  return html`<p
+    class="rs-strip-estop is-${strip.estop === 'released' ? 'released' : 'unknown'}"
+    data-rs-strip-estop=${strip.estop}
+  >
     ${words[strip.estop]}
   </p>`;
 }
@@ -423,6 +439,7 @@ function stripView(strip, text, status = '') {
         <span>${text.driver.title}</span> <strong>${text.driver[strip.driver]}</strong>
       </p>
     </div>
+    ${driveEstopNotice(strip, text)}
     <div class="rs-strip-row">
       <dl class="rs-strip-values">
         <div>
