@@ -1,3 +1,4 @@
+import { rpmToRadians } from './simulation-plan.js';
 import { html, svg, nothing } from '../vendor/lit-html.js';
 import { drawRobot } from '../core/renderer.js';
 import { drawQuestixSide, questixSideLayout } from '../core/questix-views.js';
@@ -178,12 +179,14 @@ function drawControlBench(ctx, { compact, angle, measured, started, blocked, des
   ctx.fillText('横から見た図', x, 30);
   ctx.fillStyle = '#c9dce3';
   ctx.font = '18px system-ui';
-  ctx.fillText('左右の車輪の回転数', x, 68);
+  ctx.fillText('左右の車輪の角速度', x, 60);
   ctx.font = '38px system-ui';
-  ctx.fillText((started ? formatValue(measured, 1) : '—') + ' rpm', x, 114);
+  ctx.fillText((started ? formatValue(rpmToRadians(measured), 2) : '—') + ' rad/s', x, 105);
+  ctx.font = '16px system-ui';
+  ctx.fillText(started ? '（約 ' + formatValue(measured, 1) + ' rpm）' : '', x, 129);
   ctx.font = '16px system-ui';
   ctx.fillStyle = '#a8bec6';
-  ctx.fillText('奥の車輪も同じ速さで回ります', x, 144);
+  ctx.fillText('奥の車輪も同じ速さで回ります', x, 153);
   ctx.fillStyle = descriptionColour;
   ctx.font = '18px system-ui';
   ctx.fillText(description, x, 182);
@@ -747,7 +750,7 @@ function controlChart({
       ${eventMarker(marker, { x, top, height: plotHeight, right, copy })}
       ${time.ticks.map(
         (seconds) =>
-          svg`<text x=${x(seconds)} y=${H - 10} text-anchor="middle">${seconds + '秒'}</text>`,
+          svg`<text x=${x(seconds)} y=${H - 10} text-anchor="middle">${seconds + ' s'}</text>`,
       )}
       ${
         target

@@ -1,3 +1,4 @@
+import { RPM_TO_RADIANS, rpmToRadians, angularSpeedText } from './simulation-plan.js';
 import { html, nothing } from '../vendor/lit-html.js';
 import { loadJson, fillSentence as fill } from '../core/content.js';
 import { controlConceptStep } from './core.js';
@@ -30,12 +31,12 @@ const signed = (value, digits = 1) => signPrefix(value) + num(Math.abs(value), d
 const row = (label, value) => html`<div><span>${label}</span><strong>${value}</strong></div>`;
 
 const speedError = (outcome) =>
-  `${outcome.target} − ${num(outcome.measured)} = ${signed(outcome.error)} rpm`;
+  `${num(rpmToRadians(outcome.target), 2)} − ${num(rpmToRadians(outcome.measured), 2)} ≈ ${signed(rpmToRadians(outcome.error), 2)} rad/s（${outcome.target} − ${num(outcome.measured)} = ${signed(outcome.error)} rpm）`;
 
 function proportionalResult(outcome) {
   return html`${row(copy.rows.pError, speedError(outcome))}${row(
       copy.rows.pOutput,
-      `${signed(outcome.error)} × 1.2 = ${signed(outcome.correction)}%`,
+      `${signed(rpmToRadians(outcome.error), 2)} rad/s ÷ (2π/60) × 1.2 ≈ ${signed(outcome.correction)}%`,
     )}
     <p>${copy.p[outcome.note] + copy.p.notCumulative}</p>`;
 }
@@ -52,6 +53,7 @@ function integralResult(outcome) {
           ? fill(copy.i.lastStep, {
               before: signed(last.before),
               error: signed(last.error),
+              angularError: angularSpeedText(last.error),
               total: signed(outcome.total),
             })
           : copy.i.noStep
@@ -66,7 +68,7 @@ function derivativeResult(outcome) {
   return html`${row(
       copy.rows.dChange,
       `${num(outcome.measured, 2)} − ${num(outcome.previousDistance, 2)} = ${change} m`,
-    )}${row(copy.rows.dRate, `${change} ÷ 1秒 = ${change} m/秒`)}${row(
+    )}${row(copy.rows.dRate, `${change} ÷ 1 s = ${change} m/s`)}${row(
       copy.rows.dOutput,
       `${signed(outcome.correction)}%`,
     )}
@@ -76,7 +78,11 @@ function derivativeResult(outcome) {
 function conceptResult(concept) {
   const outcome = conceptOutcome(concept);
   const field = CONCEPT_INPUTS[concept.kind];
-  if (!outcome) return fill(copy.outOfRange, { min: field.min, max: field.max });
+  if (!outcome)
+    return fill(copy.outOfRange, {
+      min: concept.kind === 'd' ? field.min : num(rpmToRadians(Number(field.min)), 2),
+      max: concept.kind === 'd' ? field.max : num(rpmToRadians(Number(field.max)), 2),
+    });
   if (outcome.kind === 'p') return proportionalResult(outcome);
   if (outcome.kind === 'i') return integralResult(outcome);
   return derivativeResult(outcome);
@@ -91,7 +97,7 @@ function integralButtons(concept, actions) {
       ?disabled=${conceptReading(concept) === null}
       @click=${actions.advanceConcept}
     >
-      この測定値のまま1秒進める
+      この測定値のまま1 s進める
     </button>
     <button id="conceptReset" @click=${actions.resetConcept}>積み重ねを0に戻す</button>
   </div>`;
@@ -104,6 +110,7 @@ function integralButtons(concept, actions) {
 function conceptLesson(concept, actions) {
   if (!concept) return nothing;
   const field = CONCEPT_INPUTS[concept.kind];
+  const speed = concept.kind !== 'd';
   return html`<details data-help-dialog class="control-concept">
     <summary>${concept.kind.toUpperCase() + 'の計算を、数値を変えて確かめる'}</summary>
     <div class="control-concept-body">
@@ -115,12 +122,12 @@ function conceptLesson(concept, actions) {
             id="conceptMeasured"
             type="number"
             min=${field.min}
-            max=${field.max}
-            step=${field.step}
-            .value=${concept.value}
-            @input=${(event) => actions.setConceptValue(event.target.value)}
+            max=${speed ? rpmToRadians(Number(field.max)) : field.max}
+            step=${speed ? 0.1 : field.step}
+            .value=${concept.value === '' ? '' : speed ? num(rpmToRadians(Number(concept.value)), 2) : concept.value}
+            @input=${(event) => actions.setConceptValue(speed && event.target.value !== '' ? String(Number(event.target.value) / RPM_TO_RADIANS) : event.target.value)}
           />
-          ${field.unit}</span
+          ${speed ? 'rad/s（ラジアン毎秒）' : field.unit}</span
         ></label
       >
       ${integralButtons(concept, actions)}

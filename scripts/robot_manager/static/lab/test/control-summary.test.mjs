@@ -30,13 +30,19 @@ test('formatValue never shows a negative zero', () => {
 test('the first topic says the settled speed and how far it is from the target', () => {
   const slow = run('output', { power: 30 });
   assert.equal(Math.round(settledSpeed(slow)), 30);
-  assert.equal(speedGap(slow, text), '目標60 rpmまであと30 rpm');
+  assert.equal(
+    speedGap(slow, text),
+    '目標6.28 rad/s（約 60.0 rpm）まであと3.14 rad/s（約 30.0 rpm）',
+  );
   assert.equal(
     runSummary(slow, 'output', text),
-    '車輪は30 rpmで落ち着きました（目標60 rpmまであと30 rpm）。',
+    '車輪の角速度は3.14 rad/s（約 30.0 rpm）で落ち着きました。',
   );
   const fast = run('output', { power: 80 });
-  assert.equal(speedGap(fast, text), '目標60 rpmより20 rpm速い');
+  assert.equal(
+    speedGap(fast, text),
+    '目標6.28 rad/s（約 60.0 rpm）より2.09 rad/s（約 20.0 rpm）速い',
+  );
   assert.equal(speedGap(run('output', { power: 60 }), text), '目標どおり');
 });
 
@@ -44,13 +50,16 @@ test('from the P topic on, the sentence names the overshoot and the settling tim
   const p = run('p');
   assert.equal(isSimpleTopic('p'), false);
   const sentence = runSummary(p, 'p', text);
-  assert.match(sentence, /^最後の2秒の平均は26 rpmで、目標60 rpmまであと34 rpmです。/);
+  assert.match(
+    sentence,
+    /^最後の2 sの平均は2\.71 rad\/s（約 25\.9 rpm）で、目標6\.28 rad\/s（約 60\.0 rpm）まであと3\.57 rad\/s（約 34\.1 rpm）です。/,
+  );
   assert.match(sentence, /目標を超えることはなく/);
   assert.match(sentence, /落ち着きませんでした。$/);
   const i = run('i', { ki: 3 });
   assert.match(
     runSummary(i, 'i', text),
-    /負荷が変わった5秒から[\d.]+秒で目標±3 rpmに戻りました。$/,
+    /負荷が変わった5 sから[\d.]+ sで目標±0\.31 rad\/s（±3 rpm）に戻りました。$/,
   );
   assert.doesNotMatch(runSummary(i, 'i', text), /\{|undefined|-0/);
 });

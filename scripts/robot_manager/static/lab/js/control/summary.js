@@ -1,3 +1,4 @@
+import { angularSpeedText } from './simulation-plan.js';
 import { fillSentence as fill } from '../core/content.js';
 
 // What a finished run of the feedback-control course means, in words and numbers the learner can
@@ -37,8 +38,8 @@ function settledSpeed(run) {
 function speedGap(run, text) {
   const gap = run.target - settledSpeed(run);
   if (Math.abs(gap) < SAME_SPEED) return text.onTarget;
-  const rpm = formatValue(Math.abs(gap), 0);
-  return fill(gap > 0 ? text.slower : text.faster, { rpm, target: run.target });
+  const rpm = angularSpeedText(Math.abs(gap));
+  return fill(gap > 0 ? text.slower : text.faster, { rpm, target: angularSpeedText(run.target) });
 }
 
 // The closest the robot came to the wall during a distance run (metres).
@@ -47,9 +48,9 @@ const closestDistance = (run) => Math.min(...run.samples.map((sample) => sample.
 function speedSentence(run, text) {
   const { overshoot, settling, after } = run.metrics;
   const values = {
-    speed: formatValue(settledSpeed(run), 0),
+    speed: angularSpeedText(settledSpeed(run)),
     gap: speedGap(run, text),
-    overshoot: formatValue(overshoot, 1),
+    overshoot: angularSpeedText(overshoot),
     settling: settling === null ? '' : formatValue(settling, 1),
     after,
   };
@@ -81,9 +82,11 @@ function distanceSentence(run, text) {
  */
 function runSummary(run, topicId, text) {
   if (run.mode === 'distance') return distanceSentence(run, text);
+  if (topicId === 'output')
+    return fill(text.output, { speed: angularSpeedText(settledSpeed(run)) });
   if (isSimpleTopic(topicId))
     return fill(text.simple, {
-      speed: formatValue(settledSpeed(run), 0),
+      speed: angularSpeedText(settledSpeed(run)),
       gap: speedGap(run, text),
     });
   return speedSentence(run, text);

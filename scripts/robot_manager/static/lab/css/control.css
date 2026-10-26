@@ -929,3 +929,31 @@
     margin: 8px 16px 0;
   }
 }
+
+/* Prospective simulation reference. Plot text lives outside the coloured area. */
+.control-plan {
+  padding: 24px;
+  min-width: 0;
+}
+.control-plan h2 {
+  font-size: 20px;
+}
+.control-plan-chart {
+  display: block;
+  width: 100%;
+  max-width: 900px;
+  height: auto;
+  font-size: 13px;
+  fill: #243c41;
+}
+.control-plan-formulas {
+  font-size: 16px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+.control-plan-formulas p {
+  margin: 8px 0;
+}
+.control-plan .helper {
+  line-height: 1.8;
+}

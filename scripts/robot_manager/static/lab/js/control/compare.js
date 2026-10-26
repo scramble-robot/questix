@@ -1,3 +1,4 @@
+import { angularSpeedText } from './simulation-plan.js';
 import { fillSentence as fill } from '../core/content.js';
 import { firstHold, stepMetrics } from '../live/capture-core.js';
 import { formatValue } from './summary.js';
@@ -192,8 +193,8 @@ function leadText(before, after, words) {
   const key = changed[0];
   return fill(words.leadOne, {
     name: SETTING_NAMES[key].name,
-    from: plain(from[key]),
-    to: plain(to[key]),
+    from: key === 'speed' ? Number(from[key]).toFixed(2) : plain(from[key]),
+    to: key === 'speed' ? Number(to[key]).toFixed(2) : plain(to[key]),
     unit: SETTING_NAMES[key].unit,
   });
 }
@@ -217,7 +218,7 @@ const settlingText = (metrics) =>
 
 function overshootText(metrics, distance) {
   if (distance) return formatValue(metrics.overshoot * CENTIMETRES, 0);
-  return formatValue(metrics.overshoot, 1);
+  return angularSpeedText(metrics.overshoot);
 }
 
 /**
@@ -236,7 +237,7 @@ function conclusionSentence(before, after, { distance, text }) {
   const overshoot = metricChange(
     words.overshoot,
     [overshootText(before.metrics, distance), overshootText(after.metrics, distance)],
-    distance ? ' cm' : ' rpm',
+    distance ? ' cm' : '',
     words,
     '',
   );

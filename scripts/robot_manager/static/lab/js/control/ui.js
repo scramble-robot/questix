@@ -18,6 +18,7 @@ import {
   controlLoad,
   controlCalibration,
 } from './core.js';
+import { needsPlan, accelerationTime, rpmToRadians, speedToRPM } from './simulation-plan.js';
 import { controlWheelAngle, drawControlStage } from './render.js';
 import { controlPage, gainText, COMMAND_OPEN_TOPICS } from './view.js';
 import { conceptState, advanceConcept, resetConcept } from './concepts.js';
@@ -78,6 +79,7 @@ const experiments = new Map(
       observedMax: 0, // furthest sample watched; the scrubber stays within it
       complete: false,
       note: '',
+      accelerationChoice: '',
     },
   ]),
 );
@@ -180,6 +182,11 @@ function buildModel() {
     distance: isDistance(),
     withFeedforward: ['feedforward', 'combined', 'reference'].includes(topicId),
     config: current.config,
+    accelerationChoice: current.accelerationChoice,
+    simulationReady:
+      !needsPlan(topic()) ||
+      (current.config.targetSpeed !== undefined &&
+        current.config.accelerationSeconds !== undefined),
     result: current.result,
     previous: current.previous,
     comparison: compare ? current.previous : null,
@@ -366,6 +373,7 @@ function previousRun(current) {
 }
 
 function startRun() {
+  if (!buildModel().simulationReady) return;
   stop();
   const current = experiment();
   current.config = normalizeControlConfig(topicId, current.config);
@@ -595,7 +603,8 @@ function stepSpeedOptions() {
   return STEP_SPEEDS.map((speed) => ({
     speed,
     label: fill(copy.live.driveSpeedOption, {
-      speed: speed.toFixed(1),
+      speed: speed.toFixed(2),
+      angular: rpmToRadians(forwardRpm(speed, config)).toFixed(2),
       rpm: forwardRpm(speed, config).toFixed(0),
     }),
   }));
@@ -616,14 +625,14 @@ const speedDrive = {
   startLabel: undefined,
   program: () =>
     fill(copy.live.driveSpeedProgram, {
-      speed: liveStepSpeed.toFixed(1),
+      speed: liveStepSpeed.toFixed(2),
       hold: STEP_HOLD,
     }),
   placement: () =>
     fill(copy.live.driveSpeedPlacement, {
       distance: (speedStep(liveStepSpeed).distance + 0.5).toFixed(1),
     }),
-  conditions: () => runConditions({ speed: liveStepSpeed }, `${liveStepSpeed.toFixed(1)} m/s`),
+  conditions: () => runConditions({ speed: liveStepSpeed }, `${liveStepSpeed.toFixed(2)} m/s`),
   plan: () => {
     const step = speedStep(liveStepSpeed);
     return { controller: step.controller, seconds: step.seconds, tail: 1 };
@@ -726,6 +735,32 @@ const liveKind = () => (isDistance() ? 'distance' : 'speed');
 const liveSession = () => liveSessions[liveKind()];
 
 const actions = {
+  setSimulationSpeed(value) {
+    if (!needsPlan(topic())) return;
+    const current = experiment();
+    if (value === '') {
+      delete current.config.targetSpeed;
+      delete current.config.accelerationSeconds;
+      current.accelerationChoice = '';
+    } else {
+      current.config.targetSpeed = Number(value);
+      current.config.targetRPM = speedToRPM(current.config.targetSpeed);
+      if (current.accelerationChoice)
+        current.config.accelerationSeconds = accelerationTime(
+          current.config.targetSpeed,
+          current.accelerationChoice,
+        );
+    }
+    changed();
+  },
+  setAcceleration(value) {
+    if (!needsPlan(topic())) return;
+    const current = experiment();
+    current.accelerationChoice = value;
+    if (value === '') delete current.config.accelerationSeconds;
+    else current.config.accelerationSeconds = accelerationTime(current.config.targetSpeed, value);
+    changed();
+  },
   openGroup(index) {
     selectTopic(CONTROL_TOPICS.find((entry) => entry.group === index).id);
   },
@@ -745,6 +780,7 @@ const actions = {
   run: startRun,
   reset() {
     experiment().config = controlDefaults(topicId);
+    experiment().accelerationChoice = '';
     rebuild();
     changed();
   },
