@@ -1297,9 +1297,12 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .control-feedback .control-saved strong { white-space: normal; overflow-wrap: anywhere; }
 .tuning-preview { border-top: 1px solid var(--border-input); margin-top: 1rem; padding-top: 1rem; }
 .tuning-preview h3 { font-size: 1rem; margin-bottom: 0.75rem; }
-.tuning-motion-summary { min-height: 3.3rem; margin-top: 0.75rem; overflow: visible;
+.tuning-explanation { display: flow-root; margin-top: 0.75rem; }
+.tuning-motion-summary { min-height: 0; margin: 0; overflow: visible;
   line-height: 1.65; white-space: pre-line; overflow-wrap: anywhere; }
-.tuning-chart { margin: 0; padding: 1rem 0.5rem; background: #fff; color: #253c45;
+.tuning-explanation .control-help { margin: 0.5rem 0 0; }
+.tuning-explanation .tuning-chart-status { margin: 0.5rem 0 0; }
+.tuning-chart { margin: 0; padding: 1rem 0.5rem 0.5rem; background: #fff; color: #253c45;
   border: 1px solid var(--border-input); border-radius: var(--radius-control); font-size: 0.875rem; }
 .tuning-chart-legend { display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; min-height: 3rem; }
 .tuning-chart-legend span::before { content: ""; display: inline-block; vertical-align: middle;
@@ -1316,8 +1319,9 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .tuning-chart-x-ticks { position: relative; height: 1.75rem; margin: 0.5rem 0 0 3.5rem; }
 .tuning-chart-x-ticks span { position: absolute; }
 .tuning-chart-x-title { text-align: center; }
-.tuning-chart-caption, .tuning-chart-status { line-height: 1.65; margin-top: 0.75rem; }
-.tuning-chart-status { min-height: 3rem; }
+.tuning-chart-caption, .tuning-chart-status { line-height: 1.65; margin-top: 0.5rem; }
+.tuning-chart-status { min-height: 0; overflow-wrap: anywhere; }
+.tuning-chart-status:empty { display: none; margin: 0; }
 .control-help { color: var(--text-dim); line-height: 1.6; margin: 0.8rem 0; }
 .control-toolbar { display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap; }
 .control-section { border: 1px solid var(--border-input); border-radius: var(--radius-control);
