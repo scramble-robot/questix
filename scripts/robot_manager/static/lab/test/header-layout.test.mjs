@@ -191,3 +191,20 @@ test('receive-delay short labels stay within the existing narrow connection slot
   for (const key of ['checking', 'delayed'])
     assert(Array.from(copy.stageShort[key]).length <= existing);
 });
+
+test('missing estop permission reasons keep the actual connection stage in header and dialog', () => {
+  for (const [estop, permissionReason] of [
+    ['unknown', 'estop_unknown'],
+    ['stale', 'estop_stale'],
+  ])
+    for (const header of [true, false]) {
+      const result = context.view(
+        { estop, drive: 'unknown', shoot: 'unknown', stage: 'open', permissionReason },
+        copy,
+        header,
+      );
+      assert(result.includes(copy.header.timingReason[permissionReason]));
+      assert(result.includes('data-live-status-connection=open'));
+      assert(result.includes('data-permission-timing=' + permissionReason));
+    }
+});

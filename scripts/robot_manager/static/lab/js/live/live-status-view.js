@@ -15,7 +15,7 @@ function headerStatusTile(label, value, values, description, attributes) {
 }
 function liveStatusLine(model, copy, header = false) {
   const text = copy.header;
-  const reason = text.timingReason[model.stage] ?? '';
+  const reason = text.timingReason[model.permissionReason || model.stage] ?? '';
   const permissionDescription =
     fill(text.permissionDescription, {
       drive: text.allowed[model.drive],
@@ -35,7 +35,7 @@ function liveStatusLine(model, copy, header = false) {
       >
       <span
         data-live-status-permission
-        data-permission-timing=${reason ? model.stage : 'ready'}
+        data-permission-timing=${model.permissionReason || (reason ? model.stage : 'ready')}
         title=${permissionDescription}
         >${headerStatusTile(
           text.permissionLabel,
@@ -69,7 +69,7 @@ function liveStatusLine(model, copy, header = false) {
     </span>
     <span
       data-live-status-permission
-      data-permission-timing=${reason ? model.stage : 'ready'}
+      data-permission-timing=${model.permissionReason || (reason ? model.stage : 'ready')}
       title=${permissionDescription}
     >
       <span aria-hidden="true"
