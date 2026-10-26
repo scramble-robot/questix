@@ -7,6 +7,7 @@ import {
   PLAN_RADIUS,
   PLAN_ACCELERATION,
   RPM_TO_RADIANS,
+  perRadianGain,
   speedToRPM,
   rpmToSpeed,
   minimumTime,
@@ -120,4 +121,13 @@ test('simulation choices do not enter the real speed program or senders', () => 
     '../js/live/robot-link.js',
   ])
     assert(!fs.readFileSync(new URL(path, import.meta.url), 'utf8').includes('simulation-plan'));
+});
+
+test('the displayed FF product converts both wheel speed and coefficient together', () => {
+  for (const speed of PLAN_SPEEDS)
+    for (const gain of [0, 0.5, 1, 2])
+      close((speed / PLAN_RADIUS) * perRadianGain(gain), speedToRPM(speed) * gain);
+  const view = fs.readFileSync(new URL('../js/control/view.js', import.meta.url), 'utf8');
+  assert(!view.includes('1 rpmあたり'));
+  assert.match(view, /1 rad\/sあたり[\s\S]*?perRadianGain\(result.config.ffGain\)/);
 });

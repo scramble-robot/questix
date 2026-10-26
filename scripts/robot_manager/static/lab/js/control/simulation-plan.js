@@ -7,6 +7,7 @@ const PLAN_TIMES = [0.5, 1, 2, 3];
 const PLAN_HOLD = 5; // s: area shown covers acceleration + this constant-speed interval
 const RPM_TO_RADIANS = (2 * Math.PI) / 60;
 const rpmToRadians = (rpm) => rpm * RPM_TO_RADIANS;
+const perRadianGain = (perRPM) => perRPM / RPM_TO_RADIANS;
 const speedToRPM = (speed) => speed / PLAN_RADIUS / RPM_TO_RADIANS;
 const rpmToSpeed = (rpm) => rpmToRadians(rpm) * PLAN_RADIUS;
 const minimumTime = (speed) => speed / PLAN_ACCELERATION;
@@ -54,6 +55,7 @@ export {
   PLAN_HOLD,
   RPM_TO_RADIANS,
   rpmToRadians,
+  perRadianGain,
   speedToRPM,
   rpmToSpeed,
   minimumTime,
