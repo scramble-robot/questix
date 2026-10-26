@@ -1,3 +1,4 @@
+import { renderLive } from '../live/live-layout.js';
 import { render } from '../vendor/lit-html.js';
 import { loadJson, loadText } from '../core/content.js';
 import { downloadFile, formatNumber } from '../core/dom.js';
@@ -17,13 +18,12 @@ import { drawLaunch, drawLaunchRobot } from './render.js';
 import { launchPage } from './view.js';
 import { reportLessonProgress } from '../shell/lesson-progress.js';
 import { fillSentence } from '../core/content.js';
-import { revealIfHidden } from '../core/reveal.js';
 import { registerRecordTarget, revealAfterRender } from '../live/record-targets.js';
 
 // Disc-launcher course: state and behaviour. view.js turns the model into markup, render.js draws
 // the flight and the charts, core.js simulates and estimates. Texts live in content/launch.json.
 // The real-robot topic keeps one table of discs (fired from the lesson's launcher block, typed in
-// by hand or read from a CSV); a fired disc's row waits right under the launcher block for the
+// by hand or read from a CSV); a fired disc's row waits right under the firing button for the
 // distance measured with a tape, and a launcher record on the robot opens back into it.
 
 const copy = await loadJson('content/launch.json');
@@ -256,8 +256,8 @@ function drawCanvases() {
   drawMechanismRobot();
 }
 
-function update() {
-  render(launchPage(buildModel(), copy, fragments, actions), page());
+function update(preserve = false) {
+  renderLive(launchPage(buildModel(), copy, fragments, actions), page(), { preserve });
   reportLessonProgress('launch', {
     topics: LAUNCH_TOPICS.map((topic) => ({ id: topic.id, title: topic.title })),
     current: topicId,
@@ -484,8 +484,17 @@ function focusRow(id) {
     document.querySelector(`[data-launch-shot-power="${id}"]`) ??
     document.querySelector(`[data-launch-shot-range="${id}"]`);
   if (!field) return;
+  const box = field.getBoundingClientRect();
+  const header = document.querySelector('.site-header')?.getBoundingClientRect();
+  if (
+    !field.getClientRects().length ||
+    box.top < (header?.bottom ?? 0) ||
+    box.bottom > window.innerHeight ||
+    box.left < 0 ||
+    box.right > window.innerWidth
+  )
+    return;
   field.focus({ preventScroll: true });
-  revealIfHidden(field.closest('tr, form') ?? field);
 }
 
 /**
@@ -510,7 +519,7 @@ function addShot({ percent, tilt, at }) {
     const number = measurements.measured.length;
     measurements.importStatus =
       fillSentence(copy.measurement.shotAdded, { count: String(number) }) + switched;
-    update();
+    update(true);
     focusWaitingShot();
   }
   return true;
