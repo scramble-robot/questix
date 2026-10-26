@@ -261,6 +261,12 @@ function tuningFormulaNumber(value, digits) {
   return value !== 0 && Number(rounded) === 0 ? String(TuningModel.number(value)) : rounded;
 }
 
+// Degrees only annotate the rad results; the formula itself stays in rad.
+function tuningFormulaDegrees(value) {
+  const degrees = value * 180 / Math.PI;
+  return Math.abs(degrees) < 10 ? degrees.toFixed(1) : String(Math.round(degrees));
+}
+
 function tuningFormulaSummary(state, kind) {
   if (!state || state.speed === 0 || state.unlimited || state.time === null || state.stop === null) {
     return TuningModel.summary(state, kind);
@@ -272,10 +278,11 @@ function tuningFormulaSummary(state, kind) {
   const unit = angular ? "rad/s" : "m/s";
   const speed = `${tuningFormulaNumber(state.speed, 2)} ${unit}`;
   const time = `${tuningFormulaNumber(state.time, 1)} s`;
+  const degrees = (value, suffix) => (angular ? `（約 ${tuningFormulaDegrees(value)}${suffix}）` : "");
   const lines = [
-    `最高速度 ${speed} 、加速時間 ${time} 。`,
-    `${angular ? "角加速度" : "加速度"} ＝ ${speed} ÷ ${time} ＝ ${tuningFormulaNumber(state.accel, 1)} ${unit}²`,
-    `減速して止まるまでの${angular ? "角度" : "距離"} ＝ ${speed} × ${time} ÷ 2 ＝ ${tuningFormulaNumber(distance, 1)} ${angular ? "rad" : "m"}`,
+    `最高速度 ${speed}${degrees(state.speed, "°/s")} 、加速時間 ${time} 。`,
+    `${angular ? "角加速度" : "加速度"} ＝ ${speed} ÷ ${time} ＝ ${tuningFormulaNumber(state.accel, 1)} ${unit}²${degrees(state.accel, "°/s²")}`,
+    `減速して止まるまでの${angular ? "角度" : "距離"} ＝ ${speed} × ${time} ÷ 2 ＝ ${tuningFormulaNumber(distance, 1)} ${angular ? "rad" : "m"}${degrees(distance, "°")}`,
   ];
   if (state.limited) lines.push(`車輪の上限で速度が制限されています。${TuningModel.limitedText(state, kind)}`);
   return lines.join("\n");

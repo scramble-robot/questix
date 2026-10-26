@@ -1187,9 +1187,9 @@ test('motion explanations put the chart first and show both ramp equations with 
     + '加速度 ＝ 1.20 m/s ÷ 2.0 s ＝ 0.6 m/s²\n'
     + '減速して止まるまでの距離 ＝ 1.20 m/s × 2.0 s ÷ 2 ＝ 1.2 m');
   assert.equal(document.getElementById('tuning-angular-summary').textContent,
-    '最高速度 3.00 rad/s 、加速時間 2.0 s 。\n'
-    + '角加速度 ＝ 3.00 rad/s ÷ 2.0 s ＝ 1.5 rad/s²\n'
-    + '減速して止まるまでの角度 ＝ 3.00 rad/s × 2.0 s ÷ 2 ＝ 3.0 rad');
+    '最高速度 3.00 rad/s（約 172°/s） 、加速時間 2.0 s 。\n'
+    + '角加速度 ＝ 3.00 rad/s ÷ 2.0 s ＝ 1.5 rad/s²（約 86°/s²）\n'
+    + '減速して止まるまでの角度 ＝ 3.00 rad/s × 2.0 s ÷ 2 ＝ 3.0 rad（約 172°）');
   const speed = document.getElementById('control-joy_controller-longitudinal_input_ratio');
   speed.value = '1.5'; speed.events.input();
   assert.match(document.getElementById('tuning-linear-summary').textContent,
@@ -1216,6 +1216,11 @@ test('formula presentation preserves unknown and unlimited states, small times a
   assert.doesNotMatch(text, /÷ 0\.0 s|NaN|Infinity/);
   assert.match(text, /0\.000123/);
   assert.equal(vm.runInContext('JSON.stringify(controlDraft)', context), before);
+  // Degrees annotate only the angular results: whole degrees from 10°, one decimal below.
+  assert.equal(vm.runInContext('tuningFormulaDegrees(Math.PI)', context), '180');
+  assert.equal(vm.runInContext('tuningFormulaDegrees(0.1)', context), '5.7');
+  vm.runInContext('controlDraft.joy_controller.longitudinal_input_ratio = 1.2; controlDraft.drive_component.max_linear_accel = 0.6', context);
+  assert.doesNotMatch(vm.runInContext('tuningFormulaSummary(TuningModel.motion(controlDraft, controlProfile.geometry, "linear"), "linear")', context), /°/);
 });
 
 
