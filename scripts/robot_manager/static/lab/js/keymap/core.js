@@ -23,19 +23,21 @@ const KEYMAP_FUNCTIONS = [
   { id: 'tiltDown', kind: 'button', node: 'shot_component', param: 'tilt_down_button_index' },
 ];
 // Speeds for a full tilt of the stick; a negative value reverses the direction.
+// Bounds repeat scripts/robot_manager/controls.py GROUPS['joy_controller'];
+// test/keymap-tuning.test.mjs reads that source to keep them in step.
 const KEYMAP_SCALES = {
   forwardScale: {
     node: 'joy_controller',
     param: 'longitudinal_input_ratio',
-    min: -10,
-    max: 10,
+    min: -2.0,
+    max: 2.0,
     unit: 'm/s',
   },
   turnScale: {
     node: 'joy_controller',
     param: 'angular_input_ratio',
-    min: -20,
-    max: 20,
+    min: -6.0,
+    max: 6.0,
     unit: 'rad/s',
   },
 };
@@ -55,12 +57,16 @@ const KEYMAP_TOPICS = [
 const STANDARD_BUTTONS = 17;
 const STANDARD_AXES = 4;
 
-// The simulated robot and launcher (a model for the lesson, not QUESTiX's measured limits).
+// The simulated robot and launcher (a model for the lesson, not measured dynamics).
+// accel / turnAccel: questix_control_config/config/controls.*.yaml, drive_component defaults.
+// maxSpeed / maxTurn: controls.py's joy_controller saving bounds above, not wheel saturation.
+// This model uses a constant rate of change only; real drive_component also tapers near a stop
+// and scales both wheels together at saturation (#248). Shared DEFAULT_PHYSICS is independent.
 const SIM = {
-  maxSpeed: 1.2, // m/s the model moves at most
-  maxTurn: 3.0, // rad/s
-  accel: 3.0, // m/s² towards the command (drive_component limits the rate of change too)
-  turnAccel: 12.0, // rad/s²
+  maxSpeed: 2.0, // m/s
+  maxTurn: 6.0, // rad/s
+  accel: 1.5, // m/s² towards the command
+  turnAccel: 1.5, // rad/s²
   tiltRate: 30, // degrees per second while a tilt button is held
   spinUp: 0.8, // s the roller needs after it starts before a disc flies
   tiltMin: 0,

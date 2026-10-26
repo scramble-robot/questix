@@ -39,6 +39,10 @@ def test_read_only_command_uses_fixed_fields_domain_and_quoted_paths(runtime):
         assert kwargs['env']['ROS_DOMAIN_ID'] == '71'
         assert 'serial_port' not in kwargs['input']
         assert 'full_speed_button' in kwargs['input']
+        requested = json.loads(kwargs['input'])
+        assert requested['drive_component'][-2:] == ['wheel_radius', 'wheel_separation']
+        assert 'wheel_radius' not in {field[0] for _, fields in control_runtime.GROUPS.values()
+                                      for field in fields}
         return result_for_request(kwargs)
 
     with patch.object(control_runtime.subprocess, 'run', side_effect=run):
