@@ -604,15 +604,11 @@ function scaleNote(model, copy) {
   if (model.topicId === 'output' || (!model.simulationReady && !model.result)) return nothing;
   const current = model.live.current;
   if (model.distance || !current || !Number.isFinite(current.command)) return nothing;
-  const rpm = formatValue(current.command, 0);
+  const rpm = angularSpeedText(current.command);
   const speed = current.conditions?.speed;
   const step = Number.isFinite(speed)
-    ? fill(copy.live.scaleStep, {
-        speed: speed.toFixed(2) + ' m/s',
-        rpm,
-        angular: rpmToRadians(current.command).toFixed(2),
-      })
-    : fill(copy.live.scaleStepUnknown, { rpm, angular: rpmToRadians(current.command).toFixed(2) });
+    ? fill(copy.live.scaleStep, { speed: speed.toFixed(2) + ' m/s', rpm })
+    : fill(copy.live.scaleStepUnknown, { rpm });
   const targetRPM = model.result ? model.result.target : model.config.targetRPM;
   if (Math.abs(targetRPM - current.command) < 1e-6) return nothing;
   const target = `${formatSpeed(rpmToSpeed(targetRPM))} m/s（${angularSpeedText(targetRPM)}）`;

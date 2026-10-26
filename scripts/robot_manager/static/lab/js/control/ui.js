@@ -598,14 +598,18 @@ function comparisonRows() {
 let liveStepSpeed = STEP_SPEEDS[1];
 const REAL_WHEEL_RADIUS = 0.05; // m, until the robot has told us (launcher/config/drive_component.yaml)
 
+// The offered speeds differ in the second decimal (0.05 / 0.10 / 0.15): one decimal would show
+// all three as 0.1 (DESIGN.md V-2).
+const speedText = (speed) => speed.toFixed(2);
+
 function stepSpeedOptions() {
   const config = { wheel_radius: liveLink().config?.wheel_radius ?? REAL_WHEEL_RADIUS };
   return STEP_SPEEDS.map((speed) => ({
     speed,
     label: fill(copy.live.driveSpeedOption, {
-      speed: speed.toFixed(2),
-      angular: rpmToRadians(forwardRpm(speed, config)).toFixed(2),
+      speed: speedText(speed),
       rpm: forwardRpm(speed, config).toFixed(0),
+      angular: rpmToRadians(forwardRpm(speed, config)).toFixed(2),
     }),
   }));
 }
@@ -625,14 +629,14 @@ const speedDrive = {
   startLabel: undefined,
   program: () =>
     fill(copy.live.driveSpeedProgram, {
-      speed: liveStepSpeed.toFixed(2),
+      speed: speedText(liveStepSpeed),
       hold: STEP_HOLD,
     }),
   placement: () =>
     fill(copy.live.driveSpeedPlacement, {
       distance: (speedStep(liveStepSpeed).distance + 0.5).toFixed(1),
     }),
-  conditions: () => runConditions({ speed: liveStepSpeed }, `${liveStepSpeed.toFixed(2)} m/s`),
+  conditions: () => runConditions({ speed: liveStepSpeed }, `${speedText(liveStepSpeed)} m/s`),
   plan: () => {
     const step = speedStep(liveStepSpeed);
     return { controller: step.controller, seconds: step.seconds, tail: 1 };

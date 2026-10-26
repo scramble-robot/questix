@@ -364,8 +364,8 @@
     "jumpToLive": "実機や記録ファイルでも試せます",
     "backToLive": "実機の操作・記録ファイルに戻る",
     "scaleNote": "シミュレーションの目標（{target}）と実機のステップ（{step}）は大きさが違います。別々の選択なので、立ち上がりの形・行き過ぎ・落ち着くまでを比べてください。",
-    "scaleStep": "{speed}・{angular} rad/s（約 {rpm} rpm）",
-    "scaleStepUnknown": "{angular} rad/s（約 {rpm} rpm）",
+    "scaleStep": "{speed}・{rpm}",
+    "scaleStepUnknown": "{rpm}",
     "conclusion": {
       "leadOne": "{name}を{from}→{to}{unit}にすると、",
       "leadMany": "設定を「{from}」から「{to}」に変えると、",
