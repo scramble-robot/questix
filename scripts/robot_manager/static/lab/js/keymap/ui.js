@@ -16,7 +16,8 @@ import {
   KEYMAP_SCALES,
   KEYMAP_DEADZONE,
 } from './core.js';
-import { keymapPage, fixed } from './view.js';
+import { keymapPage } from './view.js';
+import { tableText } from './format.js';
 
 // Controller key-mapping course: state and behaviour. view.js turns the model into markup,
 // core.js holds the rules the robot's nodes follow. Texts live in content/keymap.json.
@@ -321,16 +322,8 @@ const actions = {
   },
   async copyTable() {
     const rows = robotManagerRows(mapping());
-    const header = copy.apply.columns.join('\t');
-    const body = rows
-      .map((row) =>
-        [row.node, row.param, Number.isInteger(row.value) ? row.value : fixed(row.value)].join(
-          '\t',
-        ),
-      )
-      .join('\n');
     try {
-      await navigator.clipboard.writeText(`${header}\n${body}\n`);
+      await navigator.clipboard.writeText(tableText(rows, copy));
       copyNotice = copy.apply.copied;
     } catch {
       copyNotice = copy.apply.copyFailed;

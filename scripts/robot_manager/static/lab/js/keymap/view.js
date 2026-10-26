@@ -1,3 +1,4 @@
+import { fixed, signed, degreesText, angularParts, rowValue } from './format.js';
 import { html, nothing, svg, unsafeHTML } from '../vendor/lit-html.js';
 import { fillSentence as fill } from '../core/content.js';
 import { lessonLabel } from '../shell/lesson-ui.js';
@@ -42,13 +43,6 @@ const PAD_STICKS = [
   { id: 'left', x: 130, y: 172, axes: [0, 1], label: '左スティック' },
   { id: 'right', x: 230, y: 172, axes: [2, 3], label: '右スティック' },
 ];
-
-const fixed = (value, digits = 2) => {
-  const number = Number(value);
-  const rounded = Math.abs(number) < 0.5 * 10 ** -digits ? 0 : number;
-  return rounded.toFixed(digits);
-};
-const signed = (value, digits = 2) => (Number(value) > 0 ? '+' : '') + fixed(value, digits);
 
 function topicNav(model, actions) {
   return html`<nav class="keymap-topics" aria-label="コントローラーの割り当ての学習順序">
@@ -252,10 +246,19 @@ function mappingPanel(model, copy, actions) {
         ([id, scale]) =>
           html`<label class="keymap-field" data-flagged=${flagged.has(id) ? 'true' : 'false'}>
             <span
-              >${copy.scales[id].label}<small>${scale.unit}・${copy.scales[id].hint}</small></span
+              >${copy.scales[id].label}<small>${scale.unit}・${copy.scales[id].hint}</small
+              ><small
+                >${fill(copy.scales[id].range, {
+                  min: scale.min.toFixed(1),
+                  max: scale.max.toFixed(1),
+                  minDegrees: degreesText(scale.min),
+                  maxDegrees: degreesText(scale.max),
+                })}</small
+              ></span
             >
             <input
               type="number"
+              data-keymap-scale=${id}
               step="0.1"
               min=${scale.min}
               max=${scale.max}
@@ -359,7 +362,7 @@ function simPanel(model, copy, actions) {
           ${
             command.drive
               ? html`${fill(text.linear, { value: signed(command.drive.linear) })} ·
-                ${fill(text.angular, { value: signed(command.drive.angular) })}`
+                ${fill(text.angular, angularParts(command.drive.angular, true))}`
               : text.noDrive
           }
         </dd>
@@ -376,7 +379,9 @@ function simPanel(model, copy, actions) {
         <dd>${fill(text.shots, { shots: model.robot.shots, weak: model.robot.weakShots })}</dd>
       </div>
     </dl>
-    <p class="helper">${fill(text.limit, { speed: SIM.maxSpeed, turn: SIM.maxTurn })}</p>
+    <p class="helper">
+      ${fill(text.limit, { speed: SIM.maxSpeed.toFixed(1), turn: SIM.maxTurn.toFixed(1), degrees: degreesText(SIM.maxTurn) })}
+    </p>
   </section>`;
 }
 
@@ -447,9 +452,7 @@ function applyTable(model, copy, actions) {
               html`<tr>
                 <td><code>${row.node}</code></td>
                 <td><code>${row.param}</code></td>
-                <td>
-                  ${typeof row.value === 'number' && !Number.isInteger(row.value) ? fixed(row.value) : row.value}
-                </td>
+                <td>${rowValue(row, copy)}</td>
               </tr>`,
           )}
         </tbody>
