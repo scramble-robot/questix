@@ -218,6 +218,8 @@ function estopText() {
     released: 'estopReleased',
     unknown: 'estopUnknown',
     stale: 'estopStale',
+    checking: 'estopChecking',
+    delayed: 'estopDelayed',
   };
   return copy.monitor[words[liveStatus().estop]];
 }
@@ -367,7 +369,7 @@ function resetMonitor() {
 function showState(state) {
   const stage = linkStage(state);
   const open = state.phase === 'open';
-  showHeader(state, stage);
+  showHeader(state, liveStatus().stage);
   showForm(state, stage);
   $('robotStatus').dataset.stage = stage;
   render(statusView(state, stage), $('robotStatus'));
@@ -502,7 +504,10 @@ function initLive() {
   onRobot('odom', requestRedraw);
   onRobot('twist', requestRedraw);
   onRobot('drive', recordWheels);
-  onLiveStatus(drawEstop);
+  onLiveStatus((model) => {
+    drawEstop();
+    showHeader(robotState(), model.stage);
+  });
   onRobot('camera', showCamera);
   showState(robotState());
   showDialogNav();

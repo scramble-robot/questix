@@ -15,8 +15,16 @@ function headerStatusTile(label, value, values, description, attributes) {
 }
 function liveStatusLine(model, copy, header = false) {
   const text = copy.header;
+  const reason = text.timingReason[model.stage] ?? '';
+  const permissionDescription =
+    fill(text.permissionDescription, {
+      drive: text.allowed[model.drive],
+      shoot: text.allowed[model.shoot],
+    }) + (reason ? ` ${reason}。` : '');
   if (header)
-    return html` <span data-live-status-estop=${model.estop}
+    return html` <span
+        data-live-status-estop=${model.estop}
+        title=${text.estopDescription[model.estop]}
         >${headerStatusTile(
           text.estopLabel,
           text.estop[model.estop].split('：')[1],
@@ -25,7 +33,10 @@ function liveStatusLine(model, copy, header = false) {
           'estop',
         )}</span
       >
-      <span data-live-status-permission
+      <span
+        data-live-status-permission
+        data-permission-timing=${reason ? model.stage : 'ready'}
+        title=${permissionDescription}
         >${headerStatusTile(
           text.permissionLabel,
           fill(text.permission, {
@@ -37,10 +48,7 @@ function liveStatusLine(model, copy, header = false) {
               (shoot) => fill(text.permission, { drive, shoot }).split('：')[1],
             ),
           ),
-          fill(text.permissionDescription, {
-            drive: text.allowed[model.drive],
-            shoot: text.allowed[model.shoot],
-          }),
+          permissionDescription,
           'permission',
         )}</span
       >
@@ -52,17 +60,22 @@ function liveStatusLine(model, copy, header = false) {
           )}</span
         ></span
       >`;
-  return html`<span data-live-status-estop=${model.estop}>
+  return html`<span
+      data-live-status-estop=${model.estop}
+      title=${text.estopDescription[model.estop]}
+    >
       <span aria-hidden="true">${text.estop[model.estop]}</span>
       <span class="sr-only">${text.estopDescription[model.estop]}</span>
     </span>
-    <span data-live-status-permission>
+    <span
+      data-live-status-permission
+      data-permission-timing=${reason ? model.stage : 'ready'}
+      title=${permissionDescription}
+    >
       <span aria-hidden="true"
         >${fill(text.permission, { drive: text.allowed[model.drive], shoot: text.allowed[model.shoot] })}</span
       >
-      <span class="sr-only"
-        >${fill(text.permissionDescription, { drive: text.allowed[model.drive], shoot: text.allowed[model.shoot] })}</span
-      >
+      <span class="sr-only">${permissionDescription}</span>
     </span>
     <span data-live-status-connection=${model.stage}
       >${text.connection}${copy.stageShort[model.stage]}</span
