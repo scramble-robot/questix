@@ -5,7 +5,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { DISPLAY_STALE_MS, liveStatusModel } from '../js/live/live-status-core.js';
+import {
+  DISPLAY_STALE_MS,
+  liveStatusModel as timingStatusModel,
+} from '../js/live/live-status-core.js';
 import {
   HISTORY_SECONDS,
   WHEEL_GAP_SECONDS,
@@ -23,6 +26,9 @@ import {
   stripModel,
 } from '../js/live/robot-state-core.js';
 
+// Legacy receive-expiry cases below assume an already verified connection.
+const liveStatusModel = (...args) =>
+  timingStatusModel(...args, { mode: 'ready', readyAt: -Infinity });
 const text = JSON.parse(
   fs.readFileSync(new URL('../content/live/robot-state.json', import.meta.url), 'utf8'),
 );

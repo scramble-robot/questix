@@ -355,7 +355,7 @@ function robotStateModel(
     connected: true,
     robot: link.robot?.name ?? '',
     silent,
-    // true pressed, false released, null unknown or stale (estopState tells which).
+    // true pressed, false released, null for unheard, stale or unverified timing.
     estop: estopState === 'pressed' ? true : estopState === 'released' ? false : null,
     estopState,
     // Display only: the drive node's own report, never a motion gate or the E-stop badge.
@@ -411,7 +411,7 @@ function sparkLines(points, top) {
 
 /**
  * The strip's model from robotStateModel(): the emergency stop ('pressed' | 'released' |
- * 'unknown' | 'stale'), who drives, both wheels (rpm, forward positive) and the chassis speed (m/s) — null
+ * 'unknown' | 'stale' | 'checking' | 'delayed'), who drives, both wheels (rpm, forward positive) and the chassis speed (m/s) — null
  * where nothing fresh arrived — and the last HISTORY_SECONDS of the measured speed and of the
  * command as sparkline polylines (`measured`, `command`: lists of `points` strings) on ±`top`.
  * The measured line is the chassis speed from the raw wheel feedback (unsmoothed), the node's

@@ -4,14 +4,18 @@
     "connecting": "接続しています…",
     "open": "つながっています",
     "failed": "接続できません",
-    "reconnecting": "つながり直しています…"
+    "reconnecting": "つながり直しています…",
+    "checking": "受信の遅れを確認中",
+    "delayed": "受信が遅れています"
   },
   "stageShort": {
     "idle": "未接続",
     "connecting": "接続中",
     "open": "接続済み",
     "failed": "失敗",
-    "reconnecting": "再接続中"
+    "reconnecting": "再接続中",
+    "checking": "受信の遅れを確認中",
+    "delayed": "受信が遅れています"
   },
   "estop": {
     "long": "・非常停止：押されています",
@@ -74,7 +78,9 @@
     "streamMissing": "届いていません",
     "streamRate": "{hz} 回/秒",
     "wheelLeft": "左",
-    "wheelRight": "右"
+    "wheelRight": "右",
+    "estopChecking": "わかりません（受信の遅れを確かめています）",
+    "estopDelayed": "わかりません（受信が遅れています）"
   },
   "save": {
     "notConnected": "ロボットとの接続が切れていました",
@@ -88,23 +94,33 @@
       "pressed": "非常停止：押されています",
       "released": "非常停止：解除",
       "unknown": "非常停止：不明",
-      "stale": "非常停止：不明"
+      "stale": "非常停止：不明",
+      "checking": "非常停止：不明",
+      "delayed": "非常停止：不明"
     },
     "estopDescription": {
       "pressed": "非常停止：押されています",
       "released": "非常停止：解除されています",
       "unknown": "非常停止の状態は不明です。信号がまだ届いていません。",
-      "stale": "非常停止の状態は不明です。信号が途絶えています。"
+      "stale": "非常停止の状態は不明です。信号が途絶えています。",
+      "checking": "非常停止の状態は不明です。受信の遅れを確かめています。",
+      "delayed": "非常停止の状態は不明です。受信が遅れています。"
     },
     "permission": "許可：走行{drive} 発射{shoot}",
     "permissionDescription": "教材からの走行の許可：{drive}。教材からの発射の許可：{shoot}。",
     "allowed": {
       "on": "あり",
       "off": "なし",
-      "unknown": "不明"
+      "unknown": "不明",
+      "checking": "不明",
+      "delayed": "不明"
     },
     "connection": "接続：",
     "estopLabel": "非常停止",
-    "permissionLabel": "許可"
+    "permissionLabel": "許可",
+    "timingReason": {
+      "checking": "受信の遅れを確かめています",
+      "delayed": "受信が遅れています"
+    }
   }
 }

@@ -21,6 +21,9 @@ test('all display consumers read the header snapshot without another receive-tim
     .replace("const copy = await loadJson('content/live/link.json');", 'const copy = {};')
     .replace(/export \{[^}]+\};/, 'return { liveStatus, onLiveStatus, drawStatuses };');
   const deps = {
+    createDisplayTiming: () => ({}),
+    observeDisplayTiming() {},
+    displayTimingModel: () => ({ mode: 'ready', readyAt: -Infinity }),
     robotState: () => ({ phase: 'open' }),
     linkStage: () => 'open',
     liveStatusModel: (...args) => {
@@ -71,7 +74,7 @@ test('state card and compact strip retain the supplied display state at every dr
   const tracker = createStateTracker();
   ingest(tracker, 'drive', { v: 0, w: 0, emergency_stop: true }, 0, null);
   ingest(tracker, 'estop', { active: true }, 0, null);
-  for (const estopState of ['pressed', 'released', 'unknown', 'stale'])
+  for (const estopState of ['pressed', 'released', 'unknown', 'stale', 'checking', 'delayed'])
     for (const now of [0, 1499, 1501, 100000]) {
       const model = robotStateModel(tracker, { link: { connected: true }, now, estopState });
       assert.equal(model.estopState, estopState);
@@ -148,7 +151,7 @@ test('attached hidden panels and strips use the shared snapshot before their fir
   card.mount(element());
   strip.mount(element());
   assert.equal(card.live.value.estopState, 'unknown');
-  for (const state of ['pressed', 'released', 'unknown', 'stale']) {
+  for (const state of ['pressed', 'released', 'unknown', 'stale', 'checking', 'delayed']) {
     estop = state;
     transition({ estop });
     assert.equal(card.live.value.estopState, state, 'hidden card is ready before reveal');
@@ -168,7 +171,7 @@ test('attached hidden panels and strips use the shared snapshot before their fir
   assert.equal(strip.element.value.estop, 'pressed', 'reused strip reads snapshot synchronously');
 });
 
-test('card and strip have distinct unheard and stale text for all four shared display states', async () => {
+test('card and strip have distinct unheard and stale text for all shared display states', async () => {
   const text = JSON.parse(
     fs.readFileSync(new URL('../content/live/robot-state.json', import.meta.url), 'utf8'),
   );
@@ -178,7 +181,7 @@ test('card and strip have distinct unheard and stale text for all four shared di
     .replace(/^import[\s\S]*?from '[^']+';\n/gm, '')
     .replace(/export \{[\s\S]*?\};/, 'return { estopBlock, stripEstop };');
   const api = new Function('html', 'roleStyle', `${source}`)(html, () => ({}));
-  for (const state of ['pressed', 'released', 'unknown', 'stale']) {
+  for (const state of ['pressed', 'released', 'unknown', 'stale', 'checking', 'delayed']) {
     assert.equal(typeof text.estop[state], 'string');
     assert.equal(text.estop[state], text.strip.estop[state]);
     assert(api.estopBlock({ estopState: state }, text).includes(text.estop[state]));
