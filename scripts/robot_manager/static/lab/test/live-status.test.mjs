@@ -1,8 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { liveStatusModel, DISPLAY_STALE_MS } from '../js/live/live-status-core.js';
+import {
+  liveStatusModel as timingStatusModel,
+  DISPLAY_STALE_MS,
+} from '../js/live/live-status-core.js';
 
+// Legacy receive-expiry cases below assume an already verified connection.
+const liveStatusModel = (...args) =>
+  timingStatusModel(...args, { mode: 'ready', readyAt: -Infinity });
 const open = { phase: 'open' };
 const frame = (message, at = 100) => ({ message, at });
 test('an unheard E-stop never becomes released from another stream', () => {
