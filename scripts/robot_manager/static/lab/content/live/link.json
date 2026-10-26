@@ -120,7 +120,9 @@
     "permissionLabel": "許可",
     "timingReason": {
       "checking": "受信の遅れを確かめています",
-      "delayed": "受信が遅れています"
+      "delayed": "受信が遅れています",
+      "estop_unknown": "非常停止の信号がまだ届いていないため、受信の遅れを確かめられません",
+      "estop_stale": "非常停止の信号が途絶えたため、受信の遅れを確かめられません"
     }
   }
 }
