@@ -1320,7 +1320,7 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .tuning-chart-x-ticks span { position: absolute; }
 .tuning-chart-x-title { text-align: center; }
 .tuning-chart-caption, .tuning-chart-status { line-height: 1.65; margin-top: 0.5rem; }
-.tuning-chart-status { min-height: 0; overflow-wrap: anywhere; }
+.tuning-chart-status { min-height: 0; font-size: 0.875rem; overflow-wrap: anywhere; }
 .tuning-chart-status:empty { display: none; margin: 0; }
 .control-help { color: var(--text-dim); line-height: 1.6; margin: 0.8rem 0; }
 .control-toolbar { display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap; }

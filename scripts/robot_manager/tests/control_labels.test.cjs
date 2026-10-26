@@ -1238,7 +1238,7 @@ test('chart availability shares the reserved explanation while an empty message 
   assert.ok(unavailable.some(v => v.status === '配布元の時間を算出できないため、破線は表示していません。'));
   const css = fs.readFileSync(path.join(__dirname, '../static/style.css'), 'utf8');
   assert.match(css, /\.tuning-chart-status:empty \{[^}]*display: none;[^}]*margin: 0;/);
-  assert.match(css, /\.tuning-chart-status \{[^}]*min-height: 0;/);
+  assert.match(css, /\.tuning-chart-status \{[^}]*min-height: 0;[^}]*font-size: 0\.875rem;/);
   assert.match(css, /\.tuning-motion-summary \{[^}]*min-height: 0;/);
 });
 
