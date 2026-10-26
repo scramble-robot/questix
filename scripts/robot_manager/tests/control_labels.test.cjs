@@ -1179,7 +1179,8 @@ test('motion explanations put the chart first and show both ramp equations with 
   for (const group of document.getElementById('controls-fields').children.filter(e => e.dataset.kind)) {
     const preview = group.children.at(-1);
     assert.equal(preview.children[1].id, `tuning-${group.dataset.kind}-chart`);
-    assert.equal(preview.children[2].id, `tuning-${group.dataset.kind}-summary`);
+    assert.equal(preview.children[2].className, "tuning-explanation");
+    assert.equal(preview.children[2].children[0].id, `tuning-${group.dataset.kind}-summary`);
   }
   assert.equal(document.getElementById('tuning-linear-summary').textContent,
     '最高速度 1.20 m/s 、加速時間 2.0 s 。\n'
@@ -1215,4 +1216,58 @@ test('formula presentation preserves unknown and unlimited states, small times a
   assert.doesNotMatch(text, /÷ 0\.0 s|NaN|Infinity/);
   assert.match(text, /0\.000123/);
   assert.equal(vm.runInContext('JSON.stringify(controlDraft)', context), before);
+});
+
+
+test('chart availability shares the reserved explanation while an empty message takes no extra row', async () => {
+  const { document, context } = editorFixture();
+  await vm.runInContext('loadControls("uart")', context);
+  const slot = document.getElementById('tuning-linear-chart-status');
+  assert.equal(slot.children[0].textContent, '');
+  const time = document.getElementById('control-drive_component-max_linear_accel');
+  time.value = ''; time.events.input();
+  const message = slot.children[0].textContent;
+  assert.equal(message, '編集中の時間を算出できないため、実線と塗りは表示していません。');
+  const variants = vm.runInContext('tuningExplanationReservations("linear")', context);
+  assert.ok(variants.some(v => v.status === message));
+  assert.ok(variants.some(v => v.summary.includes('全速のまま')));
+  assert.ok(variants.some(v => v.summary.startsWith('最高速度 2.49 m/s')));
+  assert.ok(!variants.some(v => v.summary.startsWith('最高速度 9999.99 m/s')));
+  vm.runInContext('controlProfile.defaults.drive_component.max_linear_accel = 0', context);
+  const unavailable = vm.runInContext('tuningExplanationReservations("linear")', context);
+  assert.ok(unavailable.some(v => v.status === '配布元の時間を算出できないため、破線は表示していません。'));
+  const css = fs.readFileSync(path.join(__dirname, '../static/style.css'), 'utf8');
+  assert.match(css, /\.tuning-chart-status:empty \{[^}]*display: none;[^}]*margin: 0;/);
+  assert.match(css, /\.tuning-chart-status \{[^}]*min-height: 0;/);
+  assert.match(css, /\.tuning-motion-summary \{[^}]*min-height: 0;/);
+});
+
+test('text reservation covers the tallest variant and remeasures when the available width changes', () => {
+  const { context } = editorFixture();
+  let width = 300, clones = 0, removed = 0, attached = false;
+  const target = { clientWidth: 300, style: {},
+    getBoundingClientRect: () => ({ width }),
+    after() { attached = true; },
+    cloneNode() {
+      clones++;
+      const copy = { style: {}, textContent: '', setAttribute() {},
+        getBoundingClientRect() {
+          assert.equal(attached, true);
+          return { height: ({ short: 28, longest: 128, middle: 64 })[copy.textContent] * 300 / width };
+        },
+        remove() { removed++; attached = false; },
+      };
+      return copy;
+    },
+  };
+  context.reservationTarget = target;
+  const reserve = () => vm.runInContext('reserveTuningText(reservationTarget, ["short", "longest", "middle"])', context);
+  reserve();
+  assert.equal(target.style.minHeight, '129px');
+  assert.equal(removed, 1);
+  reserve(); assert.equal(clones, 1);
+  width = 150; reserve();
+  assert.equal(target.style.minHeight, '257px');
+  assert.equal(removed, 2);
+  assert.equal(attached, false);
 });

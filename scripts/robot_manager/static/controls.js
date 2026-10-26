@@ -303,7 +303,14 @@ function createTuningPreviews(container, kinds = ["linear", "angular"]) {
       + "標準起動の車輪寸法で一定加速度として計算し、最後の減速をなめらかにする帯を省いているため、時間と停止量は約の値です。実測値ではありません。";
     const chart = document.createElement("div");
     chart.id = `tuning-${kind}-chart`;
-    section.append(heading, chart, summary, note);
+    const explanation = document.createElement("div");
+    explanation.id = `tuning-${kind}-explanation`;
+    explanation.className = "tuning-explanation";
+    const status = document.createElement("div");
+    status.id = `tuning-${kind}-chart-status`;
+    status.className = "tuning-chart-status-slot";
+    explanation.append(summary, status, note);
+    section.append(heading, chart, explanation);
     container.appendChild(section);
   }
 }
@@ -315,6 +322,10 @@ function renderTuningPreviews() {
     TuningChart.render(document.getElementById(`tuning-${kind}-chart`),
       TuningModel.motion(controlDraft, controlProfile.geometry, kind),
       TuningModel.motion(controlProfile.defaults, controlProfile.geometry, kind), kind);
+    // Chart availability is explanatory text. Keep it outside the white plot, in
+    // the same reserved group as the equations and their unchanged help text.
+    document.getElementById(`tuning-${kind}-chart-status`).replaceChildren(
+      document.getElementById(`tuning-${kind}-chart`).querySelector(".tuning-chart-status"));
   }
 }
 
@@ -345,6 +356,31 @@ function reserveTuningText(element, variants) {
   tuningSpaceWidths.set(element, width);
 }
 
+function tuningExplanationReservations(kind) {
+  const missing = "編集中の時間を算出できないため、実線と塗りは表示していません。";
+  const current = TuningModel.motion(controlDraft, controlProfile.geometry, kind);
+  const baseline = TuningModel.motion(controlProfile.defaults, controlProfile.geometry, kind);
+  const baselineStatus = TuningChart.curve(baseline) ? ""
+    : "配布元の時間を算出できないため、破線は表示していません。";
+  const variants = [
+    { summary: tuningFormulaSummary(current, kind), status: TuningChart.curve(current) ? baselineStatus : missing },
+    { summary: tuningFormulaSummary(null, kind), status: missing },
+    { summary: tuningFormulaSummary({ speed: 1, unlimited: true }, kind), status: missing },
+    { summary: tuningFormulaSummary({ speed: 1, time: null, stop: null }, kind), status: missing },
+    { summary: tuningFormulaSummary({ speed: 0 }, kind), status: baselineStatus },
+  ];
+  const limit = TuningModel.wheelLimit(controlDraft, controlProfile.geometry, kind);
+  if (limit !== null) {
+    // The shown speed cannot exceed this profile's wheel ceiling. Reserve long
+    // numeric results and the full ceiling warning, without an impossible speed.
+    variants.push({ summary: tuningFormulaSummary({
+      speed: limit, time: 9999.99, accel: 9999.99, stop: 999999,
+      stopTime: 9999.99, coastTime: 9999.99, limited: true,
+    }, kind), status: baselineStatus });
+  }
+  return variants;
+}
+
 function reserveTuningLayout() {
   if (!controlProfile) return;
   for (const row of document.querySelectorAll(".control-field")) {
@@ -363,11 +399,12 @@ function reserveTuningLayout() {
     }]);
   }
   for (const kind of ["linear", "angular"]) {
-    const summary = document.getElementById(`tuning-${kind}-summary`);
-    reserveTuningText(summary, [summary.textContent, tuningFormulaSummary({
-      speed: 9999.99, time: 9999.99, accel: 9999.99, stop: 999999,
-      stopTime: 9999.99, coastTime: 9999.99, limited: true,
-    }, kind)]);
+    const explanation = document.getElementById(`tuning-${kind}-explanation`);
+    const variants = tuningExplanationReservations(kind);
+    reserveTuningText(explanation, variants.map(variant => copy => {
+      copy.querySelector(".tuning-motion-summary").textContent = variant.summary;
+      copy.querySelector(".tuning-chart-status").textContent = variant.status;
+    }));
   }
   const box = document.getElementById("controls-application");
   const runtime = { captured_at: new Date().toISOString(), nodes: Object.fromEntries(
