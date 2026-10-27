@@ -371,3 +371,14 @@
   font-size: 0.875rem;
   color: var(--muted);
 }
+
+.keymap-row-note {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+.keymap-export-warning {
+  padding: 0.5rem;
+  border-left: 3px solid var(--line);
+}

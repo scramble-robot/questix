@@ -314,34 +314,96 @@ function strongestInput(input, threshold = 0.5) {
   return { button, axis, axisValue: axis >= 0 ? input.axes[axis] : 0 };
 }
 
-/** Rows for Robot Manager's 調整 tab: [{ node, param, value }] in its form order. */
+// W3C standard -> the distributed DualShock/UART layouts. This is an EXPORT translation
+// only; the model keeps browser numbers. Sources: controls.dualshock/uart.yaml,
+// static/control-labels.js and uart_joy_driver/src/joy_line_parser.cpp. Not autodetection.
+// Browser sticks 0/1, 2/3 -> robot sticks 0/1, 3/4 (2/5 are DualShock trigger axes).
+const ROBOT_STICK_AXES = [0, 1, 3, 4];
+// Browser D-pad buttons -> robot half-axes: up/down 7 +/-; left/right 6 +/-.
+const ROBOT_DPAD_INPUTS = {
+  12: { axis: 7, sign: 1 },
+  13: { axis: 7, sign: -1 },
+  14: { axis: 6, sign: 1 },
+  15: { axis: 6, sign: -1 },
+};
+// Face left/top, shoulders, triggers, menu and home agree in these two shipped layouts.
+// Triggers stay BUTTONS (thresholded like the model), not continuous axes 2/5.
+const ROBOT_COMMON_BUTTONS = { 2: 3, 3: 2, 4: 4, 5: 5, 6: 6, 7: 7, 8: 8, 9: 9, 16: 10 };
+// Bottom/right face and stick presses differ by profile; never guess one persisted number.
+const ROBOT_PROFILE_BUTTONS = {
+  0: { dualshock: 0, uart: 1 },
+  1: { dualshock: 1, uart: 0 },
+  10: { dualshock: 11, uart: 12 },
+  11: { dualshock: 12, uart: 13 },
+};
+function robotButton(index) {
+  if (Object.hasOwn(ROBOT_COMMON_BUTTONS, index))
+    return {
+      value: ROBOT_COMMON_BUTTONS[index],
+      note: [6, 7].includes(index) ? 'trigger' : 'button',
+      source: index,
+    };
+  const choices = ROBOT_PROFILE_BUTTONS[index];
+  return { value: null, note: choices ? 'profileButton' : 'verify', source: index, ...choices };
+}
+
+/** Rows for Robot Manager. A null value requires checking on the robot, never a guessed index. */
 function robotManagerRows(mapping) {
+  const row = (node, param, value, extra = {}) => ({ node, param, value, ...extra });
+  const tilt = (direction, index) => {
+    const prefix = `tilt_${direction}`;
+    const input = ROBOT_DPAD_INPUTS[index];
+    if (input)
+      return [
+        row('joy_launcher', `${prefix}_axis`, input.axis, {
+          note: 'dpad',
+          source: index,
+          sign: input.sign,
+        }),
+        row('joy_launcher', `${prefix}_axis_sign`, input.sign),
+      ];
+    // Each direction selects its own mode. A custom button must not turn off the OTHER
+    // direction's D-pad axis, nor pretend its browser number is always the robot number.
+    return [
+      row('joy_launcher', `${prefix}_axis`, -1, { note: 'tiltButton' }),
+      row('joy_launcher', `${prefix}_button_index`, null, robotButton(index)),
+    ];
+  };
   return [
-    ...KEYMAP_FUNCTIONS.filter((fn) => fn.kind === 'axis').map((fn) => ({
-      node: fn.node,
-      param: fn.param,
-      value: mapping[fn.id],
-    })),
-    ...Object.entries(KEYMAP_SCALES).map(([id, scale]) => ({
-      node: scale.node,
-      param: scale.param,
-      value: mapping[id],
-    })),
-    // The lesson assigns tilt BUTTONS. Select button mode explicitly: the distributed
-    // profiles may currently select a trigger axis, which would ignore these button numbers.
-    { node: 'joy_launcher', param: 'tilt_up_axis', value: -1 },
-    { node: 'joy_launcher', param: 'tilt_down_axis', value: -1 },
-    ...KEYMAP_FUNCTIONS.filter((fn) => fn.kind === 'button').map((fn) => ({
-      node: fn.node,
-      param: fn.param,
-      value: mapping[fn.id],
-    })),
-    { node: KEYMAP_DEADZONE.node, param: KEYMAP_DEADZONE.param, value: mapping.deadzone },
+    ...KEYMAP_FUNCTIONS.filter((fn) => fn.kind === 'axis').map((fn) =>
+      row(fn.node, fn.param, ROBOT_STICK_AXES[mapping[fn.id]] ?? null, {
+        note: ROBOT_STICK_AXES[mapping[fn.id]] === undefined ? 'verify' : 'axis',
+        source: mapping[fn.id],
+      }),
+    ),
+    ...Object.entries(KEYMAP_SCALES).map(([id, scale]) =>
+      row(scale.node, scale.param, mapping[id]),
+    ),
+    ...KEYMAP_FUNCTIONS.filter((fn) => ['roller', 'fire'].includes(fn.id)).map((fn) =>
+      row(fn.node, fn.param, null, robotButton(mapping[fn.id])),
+    ),
+    ...tilt('up', mapping.tiltUp),
+    ...tilt('down', mapping.tiltDown),
+    row(KEYMAP_DEADZONE.node, KEYMAP_DEADZONE.param, mapping.deadzone, { note: 'deadzone' }),
+  ];
+}
+
+function robotManagerWarnings(mapping) {
+  return [
+    ...(['tiltUp', 'tiltDown'].some((id) => !ROBOT_DPAD_INPUTS[mapping[id]])
+      ? ['tiltButtons']
+      : []),
+    ...(robotManagerRows(mapping).some((r) => r.value === null) ? ['unresolved'] : []),
   ];
 }
 
 export {
   KEYMAP_FUNCTIONS,
+  ROBOT_STICK_AXES,
+  ROBOT_DPAD_INPUTS,
+  ROBOT_COMMON_BUTTONS,
+  ROBOT_PROFILE_BUTTONS,
+  robotManagerWarnings,
   KEYMAP_DEFAULT_MAPPING,
   KEYMAP_TOPIC_MAPPINGS,
   ROBOT_AXIS_SIGNS,
