@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import {
   STANDARD_AXES,
   ROBOT_AXIS_SIGNS,
+  ROBOT_STICK_AXES,
   KEYMAP_DEFAULT_MAPPING as defaults,
   KEYMAP_TOPIC_MAPPINGS,
   robotOrientedInput,
@@ -57,12 +58,16 @@ test('positive distributed defaults and exported signs drive forward and turn le
   const settings = Object.fromEntries(
     rows.filter((r) => r.node === 'joy_controller').map((r) => [r.param, r.value]),
   );
+  const robotAxes = Array(8).fill(0);
+  ROBOT_STICK_AXES.forEach((robot, browser) => {
+    robotAxes[robot] = input.axes[browser];
+  });
   assert.equal(
-    input.axes[settings.linear_x_axis] * settings.longitudinal_input_ratio,
+    robotAxes[settings.linear_x_axis] * settings.longitudinal_input_ratio,
     command.drive.linear,
   );
   assert.equal(
-    input.axes[settings.angular_z_axis] * settings.angular_input_ratio,
+    robotAxes[settings.angular_z_axis] * settings.angular_input_ratio,
     command.drive.angular,
   );
   assert(tableText(rows, copy).includes('longitudinal_input_ratio\t1'));
@@ -114,19 +119,14 @@ test('every table row names a field in its actual Robot Manager form group', () 
   }
   const launcher = rows.filter((r) => r.node === 'joy_launcher');
   assert.deepEqual(
-    launcher.filter((r) => r.param.endsWith('_axis')).map((r) => [r.param, r.value]),
-    [
-      ['tilt_up_axis', -1],
-      ['tilt_down_axis', -1],
-    ],
-  );
-  assert.deepEqual(
-    launcher.filter((r) => !r.param.endsWith('_axis')).map((r) => [r.param, r.value]),
+    launcher.map((r) => [r.param, r.value]),
     [
       ['full_speed_button', 7],
       ['fire_button', 5],
-      ['tilt_up_button_index', 12],
-      ['tilt_down_button_index', 13],
+      ['tilt_up_axis', 7],
+      ['tilt_up_axis_sign', 1],
+      ['tilt_down_axis', 7],
+      ['tilt_down_axis_sign', -1],
     ],
   );
 });

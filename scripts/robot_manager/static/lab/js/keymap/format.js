@@ -20,17 +20,21 @@ const angularParts = (value, sign = false) => ({
   degrees: degreesText(value),
 });
 function rowValue(row, copy) {
+  if (row.value === null) return copy.apply.verify;
   if (row.node === 'joy_controller' && row.param === 'angular_input_ratio')
     return fill(copy.sim.angular, angularParts(row.value));
   return typeof row.value === 'number' && !Number.isInteger(row.value)
     ? fixed(row.value)
     : String(row.value);
 }
+function rowNote(row, copy) {
+  return row.note ? fill(copy.apply.notes[row.note], row) : '';
+}
 function tableText(rows, copy) {
   const lines = [
-    copy.apply.columns.join('\t'),
-    ...rows.map((row) => [row.node, row.param, rowValue(row, copy)].join('\t')),
+    [...copy.apply.columns, copy.apply.noteColumn].join('\t'),
+    ...rows.map((row) => [row.node, row.param, rowValue(row, copy), rowNote(row, copy)].join('\t')),
   ];
   return lines.join('\n') + '\n';
 }
-export { fixed, signed, degreesText, angularParts, rowValue, tableText };
+export { fixed, signed, degreesText, angularParts, rowValue, rowNote, tableText };
