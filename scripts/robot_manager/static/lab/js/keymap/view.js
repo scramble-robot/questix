@@ -1,3 +1,4 @@
+import { questixTopSvg } from '../core/questix-art.js';
 import { fixed, signed, degreesText, angularParts, rowValue } from './format.js';
 import { html, nothing, svg, unsafeHTML } from '../vendor/lit-html.js';
 import { fillSentence as fill } from '../core/content.js';
@@ -6,6 +7,7 @@ import { schoolTips } from '../shell/school-tips.js';
 import { lessonBrief } from '../shell/lesson-brief.js';
 import {
   KEYMAP_FUNCTIONS,
+  discPosition,
   KEYMAP_SCALES,
   KEYMAP_DEADZONE,
   KEYMAP_TOPICS,
@@ -17,6 +19,7 @@ import {
 // built by ui.js into markup. Learner-facing sentences come from content/keymap.json (`copy`).
 
 const PX_PER_M = 150; // scale of the top-down field
+const ROBOT_SIZE = SIM.robotSize * PX_PER_M; // 0.5 m × 150 px/m = 75 px
 const FIELD_W = SIM.field.width * PX_PER_M;
 const FIELD_H = SIM.field.height * PX_PER_M;
 const STICK_RADIUS = 26; // px of the virtual controller's stick circles
@@ -88,14 +91,14 @@ function padButton([index, x, y, label], model, actions) {
 
 function padStick(stick, model, actions) {
   const [ax, ay] = stick.axes;
-  const dx = (model.input.axes[ax] || 0) * STICK_RADIUS;
-  const dy = (model.input.axes[ay] || 0) * STICK_RADIUS;
+  const dx = (model.rawInput.axes[ax] || 0) * STICK_RADIUS;
+  const dy = (model.rawInput.axes[ay] || 0) * STICK_RADIUS;
   return svg`<g
     class="keymap-pad-stick"
     role="slider"
     tabindex="0"
     aria-label=${`${stick.label}（軸${ax}・軸${ay}）。矢印キーで倒す`}
-    aria-valuetext=${`軸${ax} ${fixed(model.input.axes[ax] || 0)}、軸${ay} ${fixed(model.input.axes[ay] || 0)}`}
+    aria-valuetext=${`ロボットと同じ向き：軸${ax} ${fixed(model.input.axes[ax] || 0)}、軸${ay} ${fixed(model.input.axes[ay] || 0)}`}
     @pointerdown=${(event) => actions.grabStick(event, stick)}
     @pointermove=${(event) => actions.moveStick(event, stick)}
     @pointerup=${(event) => actions.dropStick(event, stick)}
@@ -183,6 +186,7 @@ function readoutPanel(model, copy) {
       )}
     </ol>
     <h3>${text.axes}</h3>
+    <p class="helper">${text.orientation}</p>
     <ul class="keymap-axes">
       ${model.input.axes.map(
         (value, index) =>
@@ -193,7 +197,12 @@ function readoutPanel(model, copy) {
                 style=${`left:${50 + Math.min(0, value) * 50}%;width:${Math.abs(value) * 50}%`}
               ></i>
             </span>
-            <strong>${signed(value)}</strong>
+            <span class="keymap-axis-values"
+              ><strong>${signed(value)}</strong>
+              <small
+                >${fill(text.rawAxis, { value: signed(model.rawInput.axes[index]) })}</small
+              ></span
+            >
           </li>`,
       )}
     </ul>
@@ -325,21 +334,25 @@ function simField(model) {
     <g class="keymap-grid">${grid}</g>
     ${trail ? svg`<polyline class="keymap-trail" points=${trail}></polyline>` : nothing}
     ${robot.discs.map((disc) => {
-      const [dx, dy] = toScreen(
-        disc.x + Math.cos(disc.heading) * (0.18 + disc.flown),
-        disc.y + Math.sin(disc.heading) * (0.18 + disc.flown),
-      );
+      const position = discPosition(disc);
+      const [dx, dy] = toScreen(position.x, position.y);
       return svg`<circle class="keymap-disc" data-weak=${disc.weak ? 'true' : 'false'} cx=${dx} cy=${dy} r="7"></circle>`;
     })}
-    <g transform=${`translate(${rx} ${ry}) rotate(${degrees})`}>
-      <rect class="keymap-robot-body" x="-27" y="-24" width="54" height="48" rx="8"></rect>
-      <path class="keymap-robot-nose" d="M8 -14 L28 0 L8 14 Z"></path>
+    <g class="keymap-model" transform=${`translate(${rx} ${ry}) rotate(${degrees})`}>
+      <rect
+        class="keymap-footprint"
+        x=${-ROBOT_SIZE / 2}
+        y=${-ROBOT_SIZE / 2}
+        width=${ROBOT_SIZE}
+        height=${ROBOT_SIZE}
+      ></rect>
+      ${questixTopSvg(0, 0, 0, ROBOT_SIZE)}
       <circle
         class="keymap-roller"
         data-on=${robot.roller ? 'true' : 'false'}
-        cx="-10"
-        cy="0"
-        r="8"
+        cx=${ROBOT_SIZE * 0.25}
+        cy=${-ROBOT_SIZE * 0.25}
+        r="5"
       ></circle>
     </g>
   </svg>`;
@@ -354,7 +367,7 @@ function simPanel(model, copy, actions) {
       <button class="small" @click=${actions.resetRobot}>${text.reset}</button>
     </div>
     ${simField(model)}
-    <p class="helper">${fill(text.caption, { spinUp: SIM.spinUp })}</p>
+    <p class="helper">${fill(text.caption, { spinUp: SIM.spinUp, size: SIM.robotSize })}</p>
     <dl class="keymap-command">
       <div>
         <dt>${text.command}</dt>

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {
   KEYMAP_SCALES,
+  KEYMAP_DEFAULT_MAPPING,
   SIM,
   mappingProblems,
   refusedByRobotManager,
@@ -65,13 +66,21 @@ test('lesson speed bounds match the actual Robot Manager joy_controller fields',
 });
 
 test('acceleration and the stated default speed match every distributed controls profile', () => {
-  const stated = Number(
-    copy.topics.direction.reflection.question.match(/既定の前後速度（([\d.]+) m\/s）/)[1],
-  );
   for (const { name, text } of profiles) {
     assert.equal(SIM.accel, nodeValue(text, 'drive_component', 'max_linear_accel'), name);
     assert.equal(SIM.turnAccel, nodeValue(text, 'drive_component', 'max_angular_accel'), name);
-    assert.equal(stated, nodeValue(text, 'joy_controller', 'longitudinal_input_ratio'), name);
+    assert.equal(
+      KEYMAP_DEFAULT_MAPPING.forwardScale,
+      nodeValue(text, 'joy_controller', 'longitudinal_input_ratio'),
+      name,
+    );
+    assert.equal(
+      KEYMAP_DEFAULT_MAPPING.turnScale,
+      nodeValue(text, 'joy_controller', 'angular_input_ratio'),
+      name,
+    );
+    assert(copy.topics.direction.brief.first[0].includes('1.0 m/s'));
+    assert(copy.topics.direction.brief.first[0].includes('3.0 rad/s'));
     const geometry = read('../../../../../launcher/config/drive_component.yaml');
     const radius = nodeValue(geometry, 'drive_component', 'wheel_radius');
     const separation = nodeValue(geometry, 'drive_component', 'wheel_separation');
