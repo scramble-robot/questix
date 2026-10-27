@@ -3,6 +3,8 @@ import { loadJson } from '../core/content.js';
 import { reportLessonProgress } from '../shell/lesson-progress.js';
 import {
   KEYMAP_TOPICS,
+  KEYMAP_TOPIC_MAPPINGS as TOPIC_MAPPINGS,
+  robotOrientedInput,
   STANDARD_AXES,
   STANDARD_BUTTONS,
   commandFromInput,
@@ -28,28 +30,7 @@ import { tableText } from './format.js';
 
 const copy = await loadJson('content/keymap.json');
 
-// A mapping the robot would accept, in the browser's standard layout: left stick up/down drives,
-// right stick left/right turns (both negative: the browser reports up and left as −1), R2 turns
-// the roller, R1 fires, the d-pad raises and lowers the launcher.
-const BASE_MAPPING = {
-  forward: 1,
-  turn: 2,
-  roller: 7,
-  fire: 5,
-  tiltUp: 12,
-  tiltDown: 13,
-  forwardScale: -0.5,
-  turnScale: -2.0,
-  deadzone: 0.1,
-};
-// Each experiment starts from the problem it is about.
-const TOPIC_MAPPINGS = {
-  read: BASE_MAPPING,
-  assign: { ...BASE_MAPPING, fire: 7 }, // roller and fire on one button
-  direction: { ...BASE_MAPPING, forwardScale: 0.5, turnScale: 2.0 }, // reversed for this input
-  deadzone: { ...BASE_MAPPING, deadzone: 0 },
-  apply: BASE_MAPPING,
-};
+// Topic mappings use the robot-oriented drive defaults; copies below remain per experiment.
 // Where the on-screen sticks come to rest in the dead-zone experiment (a worn stick).
 const DRIFT = { left: [0.03, -0.08], right: [0.06, 0.0] };
 const KEY_TILT = 1; // an arrow key tilts the on-screen stick all the way
@@ -125,19 +106,21 @@ function currentInput(pad) {
 function buildModel() {
   const pad = connectedPad();
   if (!pad && source === 'gamepad') source = 'virtual';
-  const input = currentInput(pad);
+  const rawInput = currentInput(pad);
+  const input = robotOrientedInput(rawInput);
   const current = mapping();
   const sizes = { axes: input.axes.length, buttons: input.buttons.length };
   const problems = mappingProblems(current, sizes);
   return {
     topic: topicId,
     input,
+    rawInput,
     strongest: strongestInput(input),
     gamepad: pad,
     gamepadSupported: gamepadSupported(),
     secure: typeof window === 'undefined' || window.isSecureContext !== false,
     source,
-    drift: drift()?.left || null,
+    drift: drift() ? robotOrientedInput({ axes: drift().left }).axes : null,
     mapping: current,
     problems,
     refused: refusedByRobotManager(problems),
