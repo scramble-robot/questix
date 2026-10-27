@@ -24,7 +24,7 @@
     "controller": "コントローラー（または別のノード）",
     "unknown": "指令なし（車輪が手などで回されています）",
     "none": "だれも走らせていません",
-    "commandVsMeasured": "指令 {command} m/秒 → 測定 {measured} m/秒",
+    "commandVsMeasured": "指令 {command} m/s → 測定 {measured} m/s",
     "noCommand": "速度の指令は出ていません"
   },
   "wheels": {
@@ -43,7 +43,7 @@
   "motion": {
     "speed": "前後の速さ",
     "turn": "回転の速さ",
-    "turnDegrees": "約{degrees}°/秒・左回りが＋"
+    "turnDegrees": "約{degrees}°/s・左回りが＋"
   },
   "pose": {
     "title": "表示を始めてからの動き",
@@ -89,7 +89,7 @@
     "kept": "メモはこの端末のブラウザに残ります。大事なメモは保存してください。",
     "fileName": "QUESTiX-LAB-測定メモ-{place}.txt",
     "fileHeading": "QUESTiX LAB 測定メモ（{place}）",
-    "line": "{time} 左 {left} rpm・右 {right} rpm／前後 {speed} m/秒・回転 {turn} rad/秒／向き {heading}°／前 {front} m／非常停止：{estop}",
+    "line": "{time} 左 {left} rpm・右 {right} rpm／前後 {speed} m/s・回転 {turn} rad/s／向き {heading}°／前 {front} m／非常停止：{estop}",
     "estopPressed": "押されています",
     "estopReleased": "解除されています",
     "unknown": "—"
@@ -110,7 +110,7 @@
     "speed": "前後の速さ",
     "measured": "実測・生の値（実線）",
     "command": "指令（破線）",
-    "span": "最近{seconds}秒・上下±{top} m/秒",
-    "sparkLabel": "前後の速さの最近10秒。実線が車輪の生の値から求めた実測、破線が指令、上下の端が±{top} m/秒。"
+    "span": "最近{seconds}秒・上下±{top} m/s",
+    "sparkLabel": "前後の速さの最近10秒。実線が車輪の生の値から求めた実測、破線が指令、上下の端が±{top} m/s。"
   }
 }

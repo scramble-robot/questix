@@ -200,12 +200,12 @@ test('a memo line carries the state of that moment, and dashes for stale values'
   const rpm = (0.2 * RPM_PER_MPS).toFixed(1);
   assert.equal(
     snapshotLine(model, date, text.memo),
-    `14:03:07 左 ${rpm} rpm・右 ${rpm} rpm／前後 +0.20 m/秒・回転 0.00 rad/秒／向き +3°／前 1.20 m／非常停止：解除されています`,
+    `14:03:07 左 ${rpm} rpm・右 ${rpm} rpm／前後 +0.20 m/s・回転 0.00 rad/s／向き +3°／前 1.20 m／非常停止：解除されています`,
   );
   const later = robotStateModel(tracker, { link, now: 5000 });
   assert.equal(
     snapshotLine(later, date, text.memo),
-    '14:03:07 左 — rpm・右 — rpm／前後 — m/秒・回転 — rad/秒／向き —°／前 — m／非常停止：—',
+    '14:03:07 左 — rpm・右 — rpm／前後 — m/s・回転 — rad/s／向き —°／前 — m／非常停止：—',
   );
 });
 

@@ -579,13 +579,13 @@ function mechanicsReadouts(run, sample, started) {
     started ? `${num(value, digits)} ${unit}` : copy.scene.readoutBefore;
   return readoutBand(
     [
-      { label: text.speed, value: shown(sample.v, 2, 'm/秒'), role: 'actual' },
+      { label: text.speed, value: shown(sample.v, 2, 'm/s'), role: 'actual' },
       // Only the traction topic lets the wheels slip; elsewhere both speeds are the same number.
       run.topic === 'traction'
-        ? { label: text.wheelSpeed, value: shown(sample.wheelSpeed, 2, 'm/秒'), role: 'measured' }
+        ? { label: text.wheelSpeed, value: shown(sample.wheelSpeed, 2, 'm/s'), role: 'measured' }
         : null,
       { label: text.force, value: shown(sample.force, 1, 'N') },
-      { label: text.accel, value: shown(sample.accel, 2, 'm/秒²') },
+      { label: text.accel, value: shown(sample.accel, 2, 'm/s²') },
     ].filter(Boolean),
   );
 }

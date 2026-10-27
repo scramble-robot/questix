@@ -60,14 +60,14 @@
       "brakingSuccess": "線の{short} cm手前に止まりました（目標は20 cm以内）。ブレーキ後に{after} m進みました。次は初速を変え、同じブレーキ位置で止まれるか確かめましょう。",
       "brakingOver": "線を{over} cm越えました。ブレーキ後に{after} m進むので、ブレーキを線の約{advice} m手前で始めれば止まれます。",
       "brakingShort": "線の{short} cm手前で止まりました（目標は20 cm以内）。ブレーキ後に{after} m進むので、ブレーキを線の約{advice} m手前で始めると線の近くに止まれます。",
-      "force": "質量{mass} kg・出力{power} %で、動き始めの加速度は{accel} m/秒²、3秒時点の速さは{speed} m/秒でした。次は質量か出力のどちらか一つだけを変え、前回と比べましょう。",
+      "force": "質量{mass} kg・出力{power} %で、動き始めの加速度は{accel} m/s²、3秒時点の速さは{speed} m/sでした。次は質量か出力のどちらか一つだけを変え、前回と比べましょう。",
       "tractionSlip": "車輪が空回りし、車輪から求めた移動距離は実際より{error} m長くなりました。出力だけを下げて、空回り（青い線と緑の線の差）が減るか比べましょう。",
       "tractionGrip": "車輪はほとんど空回りせず、車輪から求めた移動距離と実際の差は{error} mでした。前回の空回りした走行と、青い線と緑の線の差を比べましょう。"
     },
     "compare": {
-      "mass": "質量を{from}→{to} kgにすると、動き始めの加速度は{before}→{now} m/秒²（{ratio}倍）になりました。",
-      "power": "出力を{from}→{to} %にすると、動き始めの加速度は{before}→{now} m/秒²（{ratio}倍）になりました。",
-      "speed": "初速を{from}→{to} m/秒（{speedRatio}倍）にすると、ブレーキ後に進んだ距離は{before}→{now} m（{ratio}倍）になりました。"
+      "mass": "質量を{from}→{to} kgにすると、動き始めの加速度は{before}→{now} m/s²（{ratio}倍）になりました。",
+      "power": "出力を{from}→{to} %にすると、動き始めの加速度は{before}→{now} m/s²（{ratio}倍）になりました。",
+      "speed": "初速を{from}→{to} m/s（{speedRatio}倍）にすると、ブレーキ後に進んだ距離は{before}→{now} m（{ratio}倍）になりました。"
     }
   },
   "behavior": {
@@ -218,7 +218,7 @@
       "distanceStopped": "カメラが測った棚までの距離で停止を判断し、接触する前に止まりました。壁までの距離だけで走った結果と比べてください。"
     },
     "causes": {
-      "imu": "{time}秒に加速度の大きさ {value} m/秒² を検知（しきい値 {limit} m/秒² 以上）して停止しました。",
+      "imu": "{time}秒に加速度の大きさ {value} m/s² を検知（しきい値 {limit} m/s² 以上）して停止しました。",
       "stale": "{time}秒に、最後の距離データから {value}秒たっても新しい値が届かず（待てる時間 {limit}秒）停止しました。",
       "near": "{time}秒に、判断に使った距離が {value} m になり（{limit} m以下）停止しました。"
     }

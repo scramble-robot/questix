@@ -11,7 +11,7 @@
     "helpSummary": "位置を計算するには？",
     "calculation": {
       "perTurn": "1回転で進む距離",
-      "perTurnValue": "13 cm × π ≈ 40.8 cm",
+      "perTurnValue": "13 cm × π ≒ 40.8 cm",
       "travel": "2秒間に回った量 → 移動量（前進＋・後退−）",
       "travelLeft": "左 {turns} 回 → {centimetres} cm",
       "travelRight": "右 {turns} 回 → {centimetres} cm",
@@ -60,7 +60,7 @@
     },
     "calculation": {
       "heading": "① 向きの変化",
-      "headingValue": "{rate}°/秒 × {seconds} 秒 = {degrees}°",
+      "headingValue": "{rate}°/s × {seconds} 秒 = {degrees}°",
       "distance": "② その向きに進む距離",
       "distanceValue": "車輪で {distance} m を計測",
       "pose": "出発時の向きを基準にした位置",

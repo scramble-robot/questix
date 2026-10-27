@@ -645,7 +645,7 @@ function gearGoals(model, copy) {
   const text = copy.gear;
   const values = model.gear.values;
   const force = formatNumber(values.force, 1) + ' N';
-  const speed = formatNumber(values.speed, 2) + ' m/秒';
+  const speed = formatNumber(values.speed, 2) + ' m/s';
   return html`<div class="motor-metrics">
       <div><span>${text.wheelRpm}</span><strong>${formatNumber(values.rpm, 0)} rpm</strong></div>
       <div>

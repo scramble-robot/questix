@@ -320,7 +320,7 @@ function describeOffset(forward, left, copy) {
   ].join('・');
 }
 
-/** 「0.50 rad/s（約29°/秒）」 */
+/** 「0.50 rad/s（約29°/s）」 */
 function describeTurnRate(radiansPerSecond, copy) {
   if (!Number.isFinite(radiansPerSecond)) return copy.none;
   return fill(copy.turnRateValue, {
