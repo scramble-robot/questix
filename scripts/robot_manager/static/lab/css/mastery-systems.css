@@ -672,6 +672,10 @@
   font-size: 12px;
   line-height: 1.8;
 }
+/* Only this tracking explanation overrides rl-lab.css's shared nowrap label rule. */
+#trackingPage .sys-forecast-check > p.muted {
+  white-space: normal;
+}
 .sys-events {
   padding: 0 24px 22px;
 }
