@@ -36,7 +36,7 @@
   "maxSpeed": "最高速度（実測）",
   "maxSpeedValue": "{speed} m/s（指令 {command} m/s）",
   "maxTurnRate": "最高の回転の速さ（実測）",
-  "turnRateValue": "{rate} rad/s（約{degrees}°/秒）",
+  "turnRateValue": "{rate} rad/s（約{degrees}°/s）",
   "stop": "速さ0の指令から止まるまで",
   "stopValue": "{delay}秒・{distance} cm",
   "stopUnknown": "記録の終わりまでに止まりきっていません",

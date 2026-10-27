@@ -245,13 +245,13 @@
     "timingStop": "停止指令を出す距離 {value} m",
     "stopDistance": "停止の境目 {value} m",
     "staleLimit": "待てる時間 {value}秒",
-    "impactBand": "±{value} m/秒²の帯の外に出たら停止"
+    "impactBand": "±{value} m/s²の帯の外に出たら停止"
   },
   "charts": {
     "mechanics": [
       {
         "title": "速さ",
-        "unit": "m/秒",
+        "unit": "m/s",
         "lines": [
           {
             "key": "v",
@@ -288,7 +288,7 @@
       },
       {
         "title": "加速度",
-        "unit": "m/秒²",
+        "unit": "m/s²",
         "lines": [
           {
             "key": "accel",
@@ -368,7 +368,7 @@
       {
         "title": "走行の速さ",
         "axis": "速さ",
-        "unit": "m/秒",
+        "unit": "m/s",
         "lines": [
           {
             "key": "v",
@@ -383,7 +383,7 @@
       {
         "title": "相手のロボットの速度",
         "axis": "速度",
-        "unit": "m/秒",
+        "unit": "m/s",
         "lines": [
           {
             "key": "actualVelocity",
@@ -566,7 +566,7 @@
       {
         "title": "IMUの加速度",
         "axis": "加速度",
-        "unit": "m/秒²",
+        "unit": "m/s²",
         "lines": [
           {
             "key": "accel",

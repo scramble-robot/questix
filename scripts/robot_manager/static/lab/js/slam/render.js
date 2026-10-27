@@ -320,7 +320,7 @@ const CHART_TIME_LABEL_Y = 287;
 const DEGREES_PER_RADIAN = 180 / Math.PI;
 const SERIES = {
   wheels: { keys: ['leftRpm', 'rightRpm'], scale: 1, floor: 50, axisLabel: '縦軸：rpm' },
-  imu: { keys: ['gyroZ'], scale: DEGREES_PER_RADIAN, floor: 5, axisLabel: '縦軸：°/秒' },
+  imu: { keys: ['gyroZ'], scale: DEGREES_PER_RADIAN, floor: 5, axisLabel: '縦軸：°/s' },
 };
 
 // The axis maximum stays fixed while replaying so the curve does not rescale under the learner.
@@ -342,7 +342,7 @@ function chartLabelSize(canvas) {
 function currentReading(frame, kind) {
   if (kind === 'wheels')
     return '左 ' + frame.leftRpm.toFixed(1) + ' rpm / 右 ' + frame.rightRpm.toFixed(1) + ' rpm';
-  return '回転の速さ ' + (frame.gyroZ * DEGREES_PER_RADIAN).toFixed(2) + ' °/秒';
+  return '回転の速さ ' + (frame.gyroZ * DEGREES_PER_RADIAN).toFixed(2) + ' °/s';
 }
 
 function drawTimeSeries(context, canvas, log, cursor, kind) {

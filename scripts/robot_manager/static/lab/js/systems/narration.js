@@ -161,8 +161,8 @@ function impactReading(config, sample, started) {
     mode: sample.latched ? 'brake' : 'ready',
     text: explanation(),
     fields: [
-      { label: text.accelField, value: started ? num(sample.accel, 1) + ' m/秒²' : copy.unknown },
-      { label: text.limitField, value: '±' + num(config.impactLimit, 1) + ' m/秒²' },
+      { label: text.accelField, value: started ? num(sample.accel, 1) + ' m/s²' : copy.unknown },
+      { label: text.limitField, value: '±' + num(config.impactLimit, 1) + ' m/s²' },
     ],
   };
 }

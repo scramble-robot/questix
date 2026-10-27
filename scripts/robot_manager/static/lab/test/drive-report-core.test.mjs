@@ -170,7 +170,7 @@ test('turns and end positions are worded by their sign', () => {
   assert.equal(describeOffset(-0.283, 0.087, copy), '後ろへ 28.3 cm・左へ 8.7 cm');
   assert.equal(describeOffset(0, 0.0001, copy), '前後 0 cm・左右 0 cm');
   assert.equal(describeOffset(null, null, copy), '—');
-  assert.equal(describeTurnRate(0.5, copy), '0.50 rad/s（約29°/秒）');
+  assert.equal(describeTurnRate(0.5, copy), '0.50 rad/s（約29°/s）');
 });
 
 test('run endings sort into ok, stopped and problem', () => {

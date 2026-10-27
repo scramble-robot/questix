@@ -51,7 +51,7 @@ test('compareRuns states F = ma and v² relations with the measured numbers', ()
   const heavy = simulateSystem('mechanics', 'force', { mass: 8 });
   assert.equal(
     compareRuns(heavy, light),
-    '質量を4→8 kgにすると、動き始めの加速度は2.00→1.00 m/秒²（0.50倍）になりました。',
+    '質量を4→8 kgにすると、動き始めの加速度は2.00→1.00 m/s²（0.50倍）になりました。',
   );
   const fast = simulateSystem('mechanics', 'braking', { initialSpeed: 1.2 });
   const slow = simulateSystem('mechanics', 'braking', { initialSpeed: 0.6 });
@@ -133,7 +133,7 @@ test('behaviour sentences are per topic', () => {
 test('stopCause names the kind of cause and the recorded numbers', () => {
   const bump = simulateSystem('diagnostics', 'impact', { eventType: 'bump', impactLimit: 4 });
   assert.equal(stopCause(bump).id, 'bump');
-  assert.match(stopCause(bump).sentence, /5\.2 m\/秒².*4\.0 m\/秒²/);
+  assert.match(stopCause(bump).sentence, /5\.2 m\/s².*4\.0 m\/s²/);
   const impact = simulateSystem('diagnostics', 'impact', { eventType: 'impact', impactLimit: 8 });
   assert.equal(stopCause(impact).id, 'impact');
   const passed = simulateSystem('diagnostics', 'impact', { eventType: 'bump', impactLimit: 8 });
