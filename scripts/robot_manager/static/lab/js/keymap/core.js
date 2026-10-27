@@ -5,9 +5,8 @@
 // - joy_controller: linear.x = axes[linear_x_axis] × longitudinal_input_ratio, angular.z =
 //   axes[angular_z_axis] × angular_input_ratio; an axis number the message does not have means no
 //   drive command at all (joy_controller skips the twist).
-// - esc_motor_control: the roller turns while full_speed_button is held.
-// - shot_component: fire_button fires once when it is pressed; the tilt buttons move the angle
-//   while held.
+// - joy_launcher: full_speed_button controls the roller, fire_button acts on the press, and
+//   the tilt buttons select the angle while held. The nodes read its /launcher_command.
 // - Robot Manager's 調整 tab (scripts/robot_manager/controls.py) checks the same number ranges and
 //   refuses the same raise / lower button.
 // The dead zone is the input driver's setting (joy_node / uart_joy_driver `deadzone`).
@@ -17,25 +16,27 @@
 const KEYMAP_FUNCTIONS = [
   { id: 'forward', kind: 'axis', node: 'joy_controller', param: 'linear_x_axis' },
   { id: 'turn', kind: 'axis', node: 'joy_controller', param: 'angular_z_axis' },
-  { id: 'roller', kind: 'button', node: 'esc_motor_control', param: 'full_speed_button' },
-  { id: 'fire', kind: 'button', node: 'shot_component', param: 'fire_button' },
-  { id: 'tiltUp', kind: 'button', node: 'shot_component', param: 'tilt_up_button_index' },
-  { id: 'tiltDown', kind: 'button', node: 'shot_component', param: 'tilt_down_button_index' },
+  { id: 'roller', kind: 'button', node: 'joy_launcher', param: 'full_speed_button' },
+  { id: 'fire', kind: 'button', node: 'joy_launcher', param: 'fire_button' },
+  { id: 'tiltUp', kind: 'button', node: 'joy_launcher', param: 'tilt_up_button_index' },
+  { id: 'tiltDown', kind: 'button', node: 'joy_launcher', param: 'tilt_down_button_index' },
 ];
 // Speeds for a full tilt of the stick; a negative value reverses the direction.
+// Bounds repeat scripts/robot_manager/controls.py GROUPS['joy_controller'];
+// test/keymap-tuning.test.mjs reads that source to keep them in step.
 const KEYMAP_SCALES = {
   forwardScale: {
     node: 'joy_controller',
     param: 'longitudinal_input_ratio',
-    min: -10,
-    max: 10,
+    min: -2.0,
+    max: 2.0,
     unit: 'm/s',
   },
   turnScale: {
     node: 'joy_controller',
     param: 'angular_input_ratio',
-    min: -20,
-    max: 20,
+    min: -6.0,
+    max: 6.0,
     unit: 'rad/s',
   },
 };
@@ -55,12 +56,59 @@ const KEYMAP_TOPICS = [
 const STANDARD_BUTTONS = 17;
 const STANDARD_AXES = 4;
 
-// The simulated robot and launcher (a model for the lesson, not QUESTiX's measured limits).
+// W3C standard axes 0/2: horizontal, right positive; axes 1/3: vertical, down positive.
+// The lesson uses joy_node's direction convention: left/up positive for BOTH sticks.
+// Apply this once at the raw-input boundary, never again in commands or the exported table.
+// Extra axes keep their sign: their numbering/orientation needs checking on the actual device.
+const ROBOT_AXIS_SIGNS = [-1, -1, -1, -1]; // left x/y, right x/y
+function robotOrientedInput(input) {
+  return {
+    ...input,
+    axes: (input.axes || []).map((raw, index) => {
+      const value =
+        typeof raw === 'number' && Number.isFinite(raw) ? Math.max(-1, Math.min(1, raw)) : 0;
+      return value === 0 ? 0 : value * (ROBOT_AXIS_SIGNS[index] ?? 1);
+    }),
+  };
+}
+
+// Speed defaults repeat the distributed controls.*.yaml joy_controller values; contract-tested.
+// Button numbers remain this lesson's browser layout, not the robot driver's input numbers.
+const KEYMAP_DEFAULT_MAPPING = {
+  forward: 1,
+  turn: 2,
+  roller: 7,
+  fire: 5,
+  tiltUp: 12,
+  tiltDown: 13,
+  forwardScale: 1.0,
+  turnScale: 3.0,
+  deadzone: 0.1,
+};
+
+// Every stage starts with the correct drive direction and separate roller/fire buttons.
+// Only the dead-zone experiment starts with its deliberately unfiltered drift input.
+const KEYMAP_TOPIC_MAPPINGS = Object.fromEntries(
+  KEYMAP_TOPICS.map(({ id }) => [
+    id,
+    {
+      ...KEYMAP_DEFAULT_MAPPING,
+      ...(id === 'deadzone' ? { deadzone: 0 } : {}),
+    },
+  ]),
+);
+
+// The simulated robot and launcher (a model for the lesson, not measured dynamics).
+// accel / turnAccel: questix_control_config/config/controls.*.yaml, drive_component defaults.
+// maxSpeed / maxTurn: controls.py's joy_controller saving bounds above, not wheel saturation.
+// This model uses a constant rate of change only; real drive_component also tapers near a stop
+// and scales both wheels together at saturation (#248). Shared DEFAULT_PHYSICS is independent.
 const SIM = {
-  maxSpeed: 1.2, // m/s the model moves at most
-  maxTurn: 3.0, // rad/s
-  accel: 3.0, // m/s² towards the command (drive_component limits the rate of change too)
-  turnAccel: 12.0, // rad/s²
+  maxSpeed: 2.0, // m/s
+  maxTurn: 6.0, // rad/s
+  accel: 1.5, // m/s² towards the command
+  turnAccel: 1.5, // rad/s²
+  robotSize: 0.5, // m: description_launch/urdf/questix.xacro collision box; visual footprint only
   tiltRate: 30, // degrees per second while a tilt button is held
   spinUp: 0.8, // s the roller needs after it starts before a disc flies
   tiltMin: 0,
@@ -84,7 +132,8 @@ function applyDeadzone(value, deadzone) {
 }
 
 /**
- * What the robot's nodes would do with one input `{ axes: number[], buttons: boolean[] }`.
+ * What the robot's nodes would do with robot-oriented `{ axes: number[], buttons: boolean[] }`.
+ * Browser input must pass robotOrientedInput once before this function; table values stay signed.
  * `drive` is null when an assigned axis is not in the input: joy_controller then sends nothing.
  */
 function commandFromInput(input, mapping) {
@@ -164,12 +213,12 @@ function mappingProblems(mapping, sizes = { axes: STANDARD_AXES, buttons: STANDA
 const REFUSED = new Set(['range', 'tilt_same']);
 const refusedByRobotManager = (problems) => problems.filter((problem) => REFUSED.has(problem.code));
 
-/** A fresh simulated robot: in the middle of the field, facing right, roller stopped. */
+/** A fresh simulated robot: in the middle of the field, facing screen-up, roller stopped. */
 function newRobot() {
   return {
     x: SIM.field.width / 2,
     y: SIM.field.height / 2,
-    heading: 0, // rad, 0 = +x, counter-clockwise positive
+    heading: Math.PI / 2, // rad, +y is screen-up; counter-clockwise positive
     speed: 0,
     turnRate: 0,
     tilt: 20, // degrees
@@ -229,8 +278,14 @@ function stepRobot(state, command, dt) {
   return next;
 }
 
+/** World position of a disc: its centre starts at the robot's front edge. */
+function discPosition(disc) {
+  const ahead = SIM.robotSize / 2 + disc.flown;
+  return { x: disc.x + Math.cos(disc.heading) * ahead, y: disc.y + Math.sin(disc.heading) * ahead };
+}
+
 /**
- * Reads a browser Gamepad (navigator.getGamepads()) into `{ axes, buttons }`; null for none.
+ * Reads the raw browser Gamepad (caller then applies robotOrientedInput once) into `{ axes, buttons }`; null for none.
  * A trigger counts as pressed like the robot's button messages (pressed flag, or value ≥ 0.5).
  */
 function readGamepad(pad) {
@@ -259,30 +314,101 @@ function strongestInput(input, threshold = 0.5) {
   return { button, axis, axisValue: axis >= 0 ? input.axes[axis] : 0 };
 }
 
-/** Rows for Robot Manager's 調整 tab: [{ node, param, value }] in its form order. */
+// W3C standard -> the distributed DualShock/UART layouts. This is an EXPORT translation
+// only; the model keeps browser numbers. Sources: controls.dualshock/uart.yaml,
+// static/control-labels.js and uart_joy_driver/src/joy_line_parser.cpp. Not autodetection.
+// Browser sticks 0/1, 2/3 -> robot sticks 0/1, 3/4 (2/5 are DualShock trigger axes).
+const ROBOT_STICK_AXES = [0, 1, 3, 4];
+// Browser D-pad buttons -> robot half-axes: up/down 7 +/-; left/right 6 +/-.
+const ROBOT_DPAD_INPUTS = {
+  12: { axis: 7, sign: 1 },
+  13: { axis: 7, sign: -1 },
+  14: { axis: 6, sign: 1 },
+  15: { axis: 6, sign: -1 },
+};
+// Face left/top, shoulders, triggers, menu and home agree in these two shipped layouts.
+// Triggers stay BUTTONS (thresholded like the model), not continuous axes 2/5.
+const ROBOT_COMMON_BUTTONS = { 2: 3, 3: 2, 4: 4, 5: 5, 6: 6, 7: 7, 8: 8, 9: 9, 16: 10 };
+// Bottom/right face and stick presses differ by profile; never guess one persisted number.
+const ROBOT_PROFILE_BUTTONS = {
+  0: { dualshock: 0, uart: 1 },
+  1: { dualshock: 1, uart: 0 },
+  10: { dualshock: 11, uart: 12 },
+  11: { dualshock: 12, uart: 13 },
+};
+function robotButton(index) {
+  if (Object.hasOwn(ROBOT_COMMON_BUTTONS, index))
+    return {
+      value: ROBOT_COMMON_BUTTONS[index],
+      note: [6, 7].includes(index) ? 'trigger' : 'button',
+      source: index,
+    };
+  const choices = ROBOT_PROFILE_BUTTONS[index];
+  return { value: null, note: choices ? 'profileButton' : 'verify', source: index, ...choices };
+}
+
+/** Rows for Robot Manager. A null value requires checking on the robot, never a guessed index. */
 function robotManagerRows(mapping) {
+  const row = (node, param, value, extra = {}) => ({ node, param, value, ...extra });
+  const tilt = (direction, index) => {
+    const prefix = `tilt_${direction}`;
+    const input = ROBOT_DPAD_INPUTS[index];
+    if (input)
+      return [
+        row('joy_launcher', `${prefix}_axis`, input.axis, {
+          note: 'dpad',
+          source: index,
+          sign: input.sign,
+        }),
+        row('joy_launcher', `${prefix}_axis_sign`, input.sign),
+      ];
+    // Each direction selects its own mode. A custom button must not turn off the OTHER
+    // direction's D-pad axis, nor pretend its browser number is always the robot number.
+    return [
+      row('joy_launcher', `${prefix}_axis`, -1, { note: 'tiltButton' }),
+      row('joy_launcher', `${prefix}_button_index`, null, robotButton(index)),
+    ];
+  };
   return [
-    ...KEYMAP_FUNCTIONS.filter((fn) => fn.kind === 'axis').map((fn) => ({
-      node: fn.node,
-      param: fn.param,
-      value: mapping[fn.id],
-    })),
-    ...Object.entries(KEYMAP_SCALES).map(([id, scale]) => ({
-      node: scale.node,
-      param: scale.param,
-      value: mapping[id],
-    })),
-    ...KEYMAP_FUNCTIONS.filter((fn) => fn.kind === 'button').map((fn) => ({
-      node: fn.node,
-      param: fn.param,
-      value: mapping[fn.id],
-    })),
-    { node: KEYMAP_DEADZONE.node, param: KEYMAP_DEADZONE.param, value: mapping.deadzone },
+    ...KEYMAP_FUNCTIONS.filter((fn) => fn.kind === 'axis').map((fn) =>
+      row(fn.node, fn.param, ROBOT_STICK_AXES[mapping[fn.id]] ?? null, {
+        note: ROBOT_STICK_AXES[mapping[fn.id]] === undefined ? 'verify' : 'axis',
+        source: mapping[fn.id],
+      }),
+    ),
+    ...Object.entries(KEYMAP_SCALES).map(([id, scale]) =>
+      row(scale.node, scale.param, mapping[id]),
+    ),
+    ...KEYMAP_FUNCTIONS.filter((fn) => ['roller', 'fire'].includes(fn.id)).map((fn) =>
+      row(fn.node, fn.param, null, robotButton(mapping[fn.id])),
+    ),
+    ...tilt('up', mapping.tiltUp),
+    ...tilt('down', mapping.tiltDown),
+    row(KEYMAP_DEADZONE.node, KEYMAP_DEADZONE.param, mapping.deadzone, { note: 'deadzone' }),
+  ];
+}
+
+function robotManagerWarnings(mapping) {
+  return [
+    ...(['tiltUp', 'tiltDown'].some((id) => !ROBOT_DPAD_INPUTS[mapping[id]])
+      ? ['tiltButtons']
+      : []),
+    ...(robotManagerRows(mapping).some((r) => r.value === null) ? ['unresolved'] : []),
   ];
 }
 
 export {
   KEYMAP_FUNCTIONS,
+  ROBOT_STICK_AXES,
+  ROBOT_DPAD_INPUTS,
+  ROBOT_COMMON_BUTTONS,
+  ROBOT_PROFILE_BUTTONS,
+  robotManagerWarnings,
+  KEYMAP_DEFAULT_MAPPING,
+  KEYMAP_TOPIC_MAPPINGS,
+  ROBOT_AXIS_SIGNS,
+  robotOrientedInput,
+  discPosition,
   KEYMAP_SCALES,
   KEYMAP_DEADZONE,
   KEYMAP_TOPICS,
