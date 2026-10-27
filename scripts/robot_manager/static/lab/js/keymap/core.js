@@ -5,9 +5,8 @@
 // - joy_controller: linear.x = axes[linear_x_axis] × longitudinal_input_ratio, angular.z =
 //   axes[angular_z_axis] × angular_input_ratio; an axis number the message does not have means no
 //   drive command at all (joy_controller skips the twist).
-// - esc_motor_control: the roller turns while full_speed_button is held.
-// - shot_component: fire_button fires once when it is pressed; the tilt buttons move the angle
-//   while held.
+// - joy_launcher: full_speed_button controls the roller, fire_button acts on the press, and
+//   the tilt buttons select the angle while held. The nodes read its /launcher_command.
 // - Robot Manager's 調整 tab (scripts/robot_manager/controls.py) checks the same number ranges and
 //   refuses the same raise / lower button.
 // The dead zone is the input driver's setting (joy_node / uart_joy_driver `deadzone`).
@@ -17,10 +16,10 @@
 const KEYMAP_FUNCTIONS = [
   { id: 'forward', kind: 'axis', node: 'joy_controller', param: 'linear_x_axis' },
   { id: 'turn', kind: 'axis', node: 'joy_controller', param: 'angular_z_axis' },
-  { id: 'roller', kind: 'button', node: 'esc_motor_control', param: 'full_speed_button' },
-  { id: 'fire', kind: 'button', node: 'shot_component', param: 'fire_button' },
-  { id: 'tiltUp', kind: 'button', node: 'shot_component', param: 'tilt_up_button_index' },
-  { id: 'tiltDown', kind: 'button', node: 'shot_component', param: 'tilt_down_button_index' },
+  { id: 'roller', kind: 'button', node: 'joy_launcher', param: 'full_speed_button' },
+  { id: 'fire', kind: 'button', node: 'joy_launcher', param: 'fire_button' },
+  { id: 'tiltUp', kind: 'button', node: 'joy_launcher', param: 'tilt_up_button_index' },
+  { id: 'tiltDown', kind: 'button', node: 'joy_launcher', param: 'tilt_down_button_index' },
 ];
 // Speeds for a full tilt of the stick; a negative value reverses the direction.
 // Bounds repeat scripts/robot_manager/controls.py GROUPS['joy_controller'];
@@ -57,6 +56,48 @@ const KEYMAP_TOPICS = [
 const STANDARD_BUTTONS = 17;
 const STANDARD_AXES = 4;
 
+// W3C standard axes 0/2: horizontal, right positive; axes 1/3: vertical, down positive.
+// The lesson uses joy_node's direction convention: left/up positive for BOTH sticks.
+// Apply this once at the raw-input boundary, never again in commands or the exported table.
+// Extra axes keep their sign: their numbering/orientation needs checking on the actual device.
+const ROBOT_AXIS_SIGNS = [-1, -1, -1, -1]; // left x/y, right x/y
+function robotOrientedInput(input) {
+  return {
+    ...input,
+    axes: (input.axes || []).map((raw, index) => {
+      const value =
+        typeof raw === 'number' && Number.isFinite(raw) ? Math.max(-1, Math.min(1, raw)) : 0;
+      return value === 0 ? 0 : value * (ROBOT_AXIS_SIGNS[index] ?? 1);
+    }),
+  };
+}
+
+// Speed defaults repeat the distributed controls.*.yaml joy_controller values; contract-tested.
+// Button numbers remain this lesson's browser layout, not the robot driver's input numbers.
+const KEYMAP_DEFAULT_MAPPING = {
+  forward: 1,
+  turn: 2,
+  roller: 7,
+  fire: 5,
+  tiltUp: 12,
+  tiltDown: 13,
+  forwardScale: 1.0,
+  turnScale: 3.0,
+  deadzone: 0.1,
+};
+
+// Every stage starts with the correct drive direction and separate roller/fire buttons.
+// Only the dead-zone experiment starts with its deliberately unfiltered drift input.
+const KEYMAP_TOPIC_MAPPINGS = Object.fromEntries(
+  KEYMAP_TOPICS.map(({ id }) => [
+    id,
+    {
+      ...KEYMAP_DEFAULT_MAPPING,
+      ...(id === 'deadzone' ? { deadzone: 0 } : {}),
+    },
+  ]),
+);
+
 // The simulated robot and launcher (a model for the lesson, not measured dynamics).
 // accel / turnAccel: questix_control_config/config/controls.*.yaml, drive_component defaults.
 // maxSpeed / maxTurn: controls.py's joy_controller saving bounds above, not wheel saturation.
@@ -67,6 +108,7 @@ const SIM = {
   maxTurn: 6.0, // rad/s
   accel: 1.5, // m/s² towards the command
   turnAccel: 1.5, // rad/s²
+  robotSize: 0.5, // m: description_launch/urdf/questix.xacro collision box; visual footprint only
   tiltRate: 30, // degrees per second while a tilt button is held
   spinUp: 0.8, // s the roller needs after it starts before a disc flies
   tiltMin: 0,
@@ -90,7 +132,8 @@ function applyDeadzone(value, deadzone) {
 }
 
 /**
- * What the robot's nodes would do with one input `{ axes: number[], buttons: boolean[] }`.
+ * What the robot's nodes would do with robot-oriented `{ axes: number[], buttons: boolean[] }`.
+ * Browser input must pass robotOrientedInput once before this function; table values stay signed.
  * `drive` is null when an assigned axis is not in the input: joy_controller then sends nothing.
  */
 function commandFromInput(input, mapping) {
@@ -235,8 +278,14 @@ function stepRobot(state, command, dt) {
   return next;
 }
 
+/** World position of a disc: its centre starts at the robot's front edge. */
+function discPosition(disc) {
+  const ahead = SIM.robotSize / 2 + disc.flown;
+  return { x: disc.x + Math.cos(disc.heading) * ahead, y: disc.y + Math.sin(disc.heading) * ahead };
+}
+
 /**
- * Reads a browser Gamepad (navigator.getGamepads()) into `{ axes, buttons }`; null for none.
+ * Reads the raw browser Gamepad (caller then applies robotOrientedInput once) into `{ axes, buttons }`; null for none.
  * A trigger counts as pressed like the robot's button messages (pressed flag, or value ≥ 0.5).
  */
 function readGamepad(pad) {
@@ -278,6 +327,10 @@ function robotManagerRows(mapping) {
       param: scale.param,
       value: mapping[id],
     })),
+    // The lesson assigns tilt BUTTONS. Select button mode explicitly: the distributed
+    // profiles may currently select a trigger axis, which would ignore these button numbers.
+    { node: 'joy_launcher', param: 'tilt_up_axis', value: -1 },
+    { node: 'joy_launcher', param: 'tilt_down_axis', value: -1 },
     ...KEYMAP_FUNCTIONS.filter((fn) => fn.kind === 'button').map((fn) => ({
       node: fn.node,
       param: fn.param,
@@ -289,6 +342,11 @@ function robotManagerRows(mapping) {
 
 export {
   KEYMAP_FUNCTIONS,
+  KEYMAP_DEFAULT_MAPPING,
+  KEYMAP_TOPIC_MAPPINGS,
+  ROBOT_AXIS_SIGNS,
+  robotOrientedInput,
+  discPosition,
   KEYMAP_SCALES,
   KEYMAP_DEADZONE,
   KEYMAP_TOPICS,

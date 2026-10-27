@@ -166,7 +166,7 @@
 }
 .keymap-axes li {
   display: grid;
-  grid-template-columns: 3.2em minmax(0, 1fr) 4em;
+  grid-template-columns: 3.2em minmax(0, 1fr) 10em;
   align-items: center;
   gap: 8px;
   font-variant-numeric: tabular-nums;
@@ -258,14 +258,17 @@
   stroke-width: 3;
   opacity: 0.6;
 }
-.keymap-robot-body {
-  fill: #d9eaee;
-}
-.keymap-robot-nose {
-  fill: #e56b2d;
+/* A size outline remains with the front cue if the existing CAD image cannot load. */
+.keymap-footprint {
+  fill: none;
+  stroke: #789eaf;
+  stroke-width: 1;
+  opacity: 0.65;
 }
 .keymap-roller {
   fill: #7f9097;
+  stroke: #eef6f8;
+  stroke-width: 2;
 }
 .keymap-roller[data-on='true'] {
   fill: var(--scene-role-target);
@@ -347,7 +350,7 @@
     padding: 14px;
   }
   .keymap-axes li {
-    grid-template-columns: 2.8em minmax(0, 1fr) 3.4em;
+    grid-template-columns: 2.8em minmax(0, 1fr) 10em;
     font-size: 13px;
   }
   .keymap-field {
@@ -357,4 +360,14 @@
     grid-template-columns: minmax(0, 1fr);
     gap: 0;
   }
+}
+
+.keymap-axis-values {
+  display: grid;
+  gap: 2px;
+  justify-items: end;
+}
+.keymap-axis-values small {
+  font-size: 0.875rem;
+  color: var(--muted);
 }
