@@ -256,13 +256,13 @@ function mechanicsMetrics(topic, figures) {
     ];
   if (topic === 'force')
     return [
-      metric(text.startingAcceleration, figures.startingAcceleration, 'm/秒²'),
-      metric(text.speedAtPowerOff, figures.speedAtPowerOff, 'm/秒'),
+      metric(text.startingAcceleration, figures.startingAcceleration, 'm/s²'),
+      metric(text.speedAtPowerOff, figures.speedAtPowerOff, 'm/s'),
     ];
   return [
-    metric(text.speedAtPowerOff, figures.speedAtPowerOff, 'm/秒'),
+    metric(text.speedAtPowerOff, figures.speedAtPowerOff, 'm/s'),
     metric(text.odometryError, figures.odometryError, 'm'),
-    metric(text.startingAcceleration, figures.startingAcceleration, 'm/秒²'),
+    metric(text.startingAcceleration, figures.startingAcceleration, 'm/s²'),
   ];
 }
 
@@ -578,7 +578,7 @@ function trackingMetrics(topic, samples, errors, minDistance, end, contact) {
             .filter((sample) => sample.velocity !== null)
             .map((sample) => Math.abs(sample.velocity - sample.actualVelocity)),
         ),
-        'm/秒',
+        'm/s',
       ),
     ];
   return [
@@ -1025,7 +1025,7 @@ function diagnosticsMetrics(topic, config, samples, end, latched, contact) {
       metric(
         text.maxAcceleration,
         Math.max(...samples.map((sample) => Math.abs(sample.accel))),
-        'm/秒²',
+        'm/s²',
       ),
     ];
   const third =
