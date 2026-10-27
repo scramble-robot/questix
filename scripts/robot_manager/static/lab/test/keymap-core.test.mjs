@@ -111,7 +111,8 @@ test('the model accelerates towards the command and fires on the press only', ()
   input.axes[1] = -1;
   for (let i = 0; i < 20; i += 1) robot = stepRobot(robot, commandFromInput(input, MAPPING), 0.02);
   assert.ok(robot.speed > 0 && robot.speed <= 0.5, `speed ${robot.speed}`);
-  assert.ok(robot.x > newRobot().x, 'it moved forwards (+x at heading 0)');
+  assert.ok(robot.y > newRobot().y, 'forward moves towards screen-up (+y)');
+  assert.ok(Math.abs(robot.x - newRobot().x) < 1e-9, 'forward keeps its horizontal position');
   const fire = idle();
   fire.buttons[5] = true;
   robot = stepRobot(robot, commandFromInput(fire, MAPPING), 0.02);

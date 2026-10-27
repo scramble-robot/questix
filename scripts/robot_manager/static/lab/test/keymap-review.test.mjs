@@ -86,9 +86,9 @@ test('positive distributed defaults and exported signs drive forward and turn le
       0.02,
     );
   }
-  assert(forward.x > newRobot().x);
-  close(forward.y, newRobot().y);
-  assert(left.heading > 0);
+  assert(forward.y > newRobot().y);
+  close(forward.x, newRobot().x);
+  assert(left.heading > newRobot().heading);
   close(left.x, newRobot().x);
   close(left.y, newRobot().y);
   const reversed = { ...defaults, forwardScale: -1, turnScale: -3 };
@@ -185,13 +185,17 @@ test('existing top artwork, front cue and fallback outline render in Node withou
   assert(zero.includes('data-questix-view="top"'));
   assert(zero.includes('assets/questix/top.webp'));
   assert(zero.includes('keymap-footprint'));
+  assert.match(zero, /class="keymap-roller"[^>]*cx="0"[^>]*cy="0"/);
   assert.match(zero, /width=75\s+height=75/);
   assert(!zero.includes('keymap-robot-body'));
   assert(!zero.includes('keymap-robot-nose'));
-  assert(zero.includes('translate(300 180) rotate(0)'));
+  assert(zero.includes('translate(300 180) rotate(-90)'));
   const left = flatten(
-    keymapPage({ ...model, robot: { ...model.robot, heading: Math.PI / 2 } }, copy, {}),
+    keymapPage({ ...model, robot: { ...model.robot, heading: Math.PI } }, copy, {}),
   );
-  assert(left.includes('translate(300 180) rotate(-90)'));
+  assert(left.includes('translate(300 180) rotate(-180)'));
   assert(left.includes('上から見たロボットの模型'));
+  assert(zero.indexOf('class="card keymap-source"') < zero.indexOf('class="card keymap-sim"'));
+  assert(zero.indexOf('class="card keymap-sim"') < zero.indexOf('class="card keymap-readout"'));
+  assert.match(read('../css/keymap.css'), /@media \(max-width: 900px\), \(orientation: portrait\)/);
 });

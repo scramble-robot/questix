@@ -213,12 +213,12 @@ function mappingProblems(mapping, sizes = { axes: STANDARD_AXES, buttons: STANDA
 const REFUSED = new Set(['range', 'tilt_same']);
 const refusedByRobotManager = (problems) => problems.filter((problem) => REFUSED.has(problem.code));
 
-/** A fresh simulated robot: in the middle of the field, facing right, roller stopped. */
+/** A fresh simulated robot: in the middle of the field, facing screen-up, roller stopped. */
 function newRobot() {
   return {
     x: SIM.field.width / 2,
     y: SIM.field.height / 2,
-    heading: 0, // rad, 0 = +x, counter-clockwise positive
+    heading: Math.PI / 2, // rad, +y is screen-up; counter-clockwise positive
     speed: 0,
     turnRate: 0,
     tilt: 20, // degrees

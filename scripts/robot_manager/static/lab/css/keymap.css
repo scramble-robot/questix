@@ -333,7 +333,7 @@
   margin-top: 20px;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 900px), (orientation: portrait) {
   .keymap-layout {
     grid-template-columns: minmax(0, 1fr);
   }

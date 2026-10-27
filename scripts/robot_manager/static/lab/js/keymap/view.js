@@ -351,8 +351,8 @@ function simField(model) {
       <circle
         class="keymap-roller"
         data-on=${robot.roller ? 'true' : 'false'}
-        cx=${ROBOT_SIZE * 0.25}
-        cy=${-ROBOT_SIZE * 0.25}
+        cx="0"
+        cy="0"
         r="5"
       ></circle>
     </g>
@@ -514,14 +514,12 @@ function keymapPage(model, copy, actions) {
     ${topicNav(model, actions)}
     ${unsafeHTML(lessonBrief(lessonKey, topicCopy.brief) + schoolTips(lessonKey))}
     <div class="keymap-layout">
-      <div class="keymap-column">
-        ${sourcePanel(model, copy, actions)} ${readoutPanel(model, copy)}
-      </div>
+      ${sourcePanel(model, copy, actions)} ${simPanel(model, copy, actions)}
+      ${readoutPanel(model, copy)}
       <div class="keymap-column">
         ${model.topic === 'read' ? findTable(model, copy, actions) : nothing}
         ${model.topic === 'apply' ? applyTable(model, copy, actions) : nothing}
         ${model.topic === 'read' ? nothing : mappingPanel(model, copy, actions)}
-        ${simPanel(model, copy, actions)}
       </div>
     </div>
     ${reflection(topicCopy, copy)}
