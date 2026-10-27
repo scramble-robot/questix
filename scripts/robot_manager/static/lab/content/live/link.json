@@ -79,7 +79,7 @@
     "disconnected": "未接続：最後に受信した表示です",
     "disconnectedRate": "未接続",
     "streamMissing": "届いていません",
-    "streamRate": "{hz} 回/s",
+    "streamRate": "{hz} 回/秒",
     "wheelLeft": "左",
     "wheelRight": "右",
     "estopChecking": "わかりません（受信の遅れを確かめています）",
