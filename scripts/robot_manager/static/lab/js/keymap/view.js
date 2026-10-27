@@ -1,5 +1,5 @@
 import { questixTopSvg } from '../core/questix-art.js';
-import { fixed, signed, degreesText, angularParts, rowValue } from './format.js';
+import { fixed, signed, degreesText, angularParts, rowValue, rowNote } from './format.js';
 import { html, nothing, svg, unsafeHTML } from '../vendor/lit-html.js';
 import { fillSentence as fill } from '../core/content.js';
 import { lessonLabel } from '../shell/lesson-ui.js';
@@ -13,6 +13,7 @@ import {
   KEYMAP_TOPICS,
   SIM,
   robotManagerRows,
+  robotManagerWarnings,
 } from './core.js';
 
 // Templates of the controller key-mapping course. Every function is pure: it turns the model
@@ -450,8 +451,9 @@ function applyTable(model, copy, actions) {
       <button class="small" @click=${actions.copyTable}>${text.copy}</button>
     </div>
     <p class=${model.refused.length ? 'keymap-refused' : 'helper'} role="status">
-      ${model.refused.length ? text.refused : text.ready}
+      ${model.refused.length ? text.refused : rows.some((r) => r.value === null) ? text.unresolved : text.ready}
     </p>
+    ${robotManagerWarnings(model.mapping).map((key) => html`<p class="keymap-export-warning" role="status">${text[key]}</p>`)}
     <div class="keymap-table-scroll" tabindex="0" role="region" aria-label=${text.heading}>
       <table>
         <thead>
@@ -465,7 +467,9 @@ function applyTable(model, copy, actions) {
               html`<tr>
                 <td><code>${row.node}</code></td>
                 <td><code>${row.param}</code></td>
-                <td>${rowValue(row, copy)}</td>
+                <td>
+                  ${rowValue(row, copy)}${row.note ? html`<small class="keymap-row-note">${rowNote(row, copy)}</small>` : nothing}
+                </td>
               </tr>`,
           )}
         </tbody>
@@ -473,6 +477,12 @@ function applyTable(model, copy, actions) {
     </div>
     ${model.copyNotice ? html`<p class="helper" role="status">${model.copyNotice}</p>` : nothing}
     <p class="helper">${text.numbersNote}</p>
+    <details class="keymap-input-differences">
+      <summary>${text.differencesHeading}</summary>
+      <ul>
+        ${text.differences.map((item) => html`<li>${item}</li>`)}
+      </ul>
+    </details>
     <h3>${text.stepsHeading}</h3>
     <ol class="keymap-steps">
       ${text.steps.map((step) => html`<li>${step}</li>`)}
