@@ -224,7 +224,7 @@
     "inspectSuffix": " の走りを調べる",
     "hintSummary": "考えるヒント",
     "hintClearancePrefix": "今は、障害物に近づくと最大",
-    "hintClearanceSuffix": "点/sを減点しています。減点の強さや開始位置での経験を変えると、走りはどう変わるでしょうか？",
+    "hintClearanceSuffix": "点/秒を減点しています。減点の強さや開始位置での経験を変えると、走りはどう変わるでしょうか？",
     "hintNoClearance": "LiDARは、ぶつかる前の距離も測っています。接触したときだけ減点する設定では、接触せずに近づく動きには、どんな点数が付くでしょうか？",
     "hintNear": "同じ場所の近くだけで学習しました。向きや開始位置が違う場面での経験は、十分にあったでしょうか？",
     "hintMetrics": "到着した回数が同じでも、所要時間や車輪への指令の変化は違います。改善したい指標を一つ決めてみましょう。",
@@ -261,9 +261,9 @@
     "changes": {
       "starts": "学習の開始位置を広げる",
       "clearancePrefix": "近づきすぎると減点：",
-      "clearanceSuffix": "点/s（最大）",
+      "clearanceSuffix": "点/秒（最大）",
       "timePrefix": "時間の減点：",
-      "timeSuffix": "点/s",
+      "timeSuffix": "点/秒",
       "custom": "報酬を自分で調整"
     }
   },

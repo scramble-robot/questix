@@ -31,10 +31,27 @@ test('current content and JS use symbolic compound units and the chosen approxim
     const text = fs.readFileSync(path, 'utf8');
     assert(!text.includes('≈'), path.pathname);
     if (text.includes('/秒')) remaining.push(path.pathname.split('/lab/')[1]);
+    assert(!/(?:回|点|画素|回転)\/s/.test(text), path.pathname);
     assert(!/rpm[・·]秒/.test(text), path.pathname);
   }
   // The existing exported table's four Japanese column names are a compatibility contract.
-  assert.deepEqual(remaining, ['js/live/recording-core.js']);
+  assert.deepEqual(remaining, [
+    'content/live/link.json',
+    'content/rl/lab.json',
+    'content/school-tips.json',
+    'js/live/recording-core.js',
+  ]);
+  // Count units retain their original Japanese wording; physical SI symbols stay symbolic.
+  const countUnits = {
+    'content/live/link.json': ['回/秒'],
+    'content/rl/lab.json': ['点/秒', '点/秒', '点/秒'],
+    'content/school-tips.json': ['画素/秒', '回転/秒'],
+  };
+  for (const [path, expected] of Object.entries(countUnits)) {
+    const text = fs.readFileSync(new URL(path, root), 'utf8');
+    assert.deepEqual(text.match(/(?:回転|画素|回|点)\/秒/g), expected);
+    assert(!/(?<![A-Za-z])(?:m|rad|°|rpm)\/秒/.test(text), path);
+  }
   const csvSource = fs.readFileSync(new URL('js/live/recording-core.js', root), 'utf8');
   assert.equal(csvSource.split('/秒').length - 1, 4);
 });
