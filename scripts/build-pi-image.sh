@@ -121,6 +121,12 @@ resize2fs "${PI_LOOP}p2"
 
 mount "${PI_LOOP}p2" "$CHROOT_DIR"
 PI_MOUNTS+=("$CHROOT_DIR")
+# The official rootfs omits /boot/firmware (systemd creates it from fstab at boot).
+# Refuse symlinks so mkdir cannot follow an absolute link into the host.
+[[ ! -L "$CHROOT_DIR/boot" && ! -L "$CHROOT_DIR/boot/firmware" ]] || {
+    echo "Unsupported symlinked /boot or /boot/firmware in base image" >&2; exit 1;
+}
+mkdir -p "$CHROOT_DIR/boot/firmware"
 mount "${PI_LOOP}p1" "$CHROOT_DIR/boot/firmware"
 PI_MOUNTS+=("$CHROOT_DIR/boot/firmware")
 ROOT_ARGUMENT="$(questix_pi_root_argument "$CHROOT_DIR/boot/firmware/cmdline.txt")"
