@@ -52,10 +52,11 @@ printf '%s\n' '[localhost]' \
     > "$CHROOT_DIR/tmp/questix-image-inventory.ini"
 
 echo "📦 Installing ansible-core $IMAGE_ANSIBLE_CORE_VERSION in the chroot (build only)..."
+# C.UTF-8, not C: Ansible refuses to start without a UTF-8 locale encoding (the chroots below too).
 chroot "$CHROOT_DIR" /bin/bash << CHROOT_EOF
 set -e
 export HOME=/root
-export LC_ALL=C
+export LC_ALL=C.UTF-8
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y python3-venv sudo git
@@ -89,7 +90,7 @@ set -o pipefail
 chroot "$CHROOT_DIR" /bin/bash << CHROOT_EOF 2>&1 | timestamp_lines
 set -e
 export HOME=/root
-export LC_ALL=C
+export LC_ALL=C.UTF-8
 export DEBIAN_FRONTEND=noninteractive
 export PYTHONUNBUFFERED=1
 cd "$IMAGE_SOURCE/ansible"
@@ -128,7 +129,7 @@ chroot "$CHROOT_DIR" /bin/bash -s -- "$IMAGE_USER" << 'CHROOT_EOF'
 set -e
 IMAGE_USER="$1"
 export HOME=/root
-export LC_ALL=C
+export LC_ALL=C.UTF-8
 export DEBIAN_FRONTEND=noninteractive
 
 systemctl enable NetworkManager

@@ -181,6 +181,11 @@ assert_contains "$APPLY" 'IMAGE_ANSIBLE_CORE_VERSION=2.21.5' "image build: ansib
 assert_contains "$APPLY" '"ansible-core==$IMAGE_ANSIBLE_CORE_VERSION"' "image build: ansible-core alone, no collections"
 assert_contains .github/workflows/ansible-check.yaml '"ansible==14.2.0"' "image build: the CI pin it follows"
 assert_contains "$APPLY" 'set -o pipefail' "image build: the timestamped playbook keeps its exit status"
+if grep -qx 'export LC_ALL=C' "$APPLY"; then
+    fail "image build: a chroot runs with LC_ALL=C (Ansible requires a UTF-8 locale)"
+else
+    pass "image build: chroots run with a UTF-8 locale"
+fi
 assert_contains "$APPLY" 'rm -rf "$IMAGE_ANSIBLE_VENV"' "image build: the build's Ansible is not left in the image"
 assert_contains "$APPLY" 'questix_image_verify_security "$CHROOT_DIR" "$IMAGE_USER"' \
     "image build: offline security postconditions before the image is made"
