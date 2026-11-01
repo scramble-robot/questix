@@ -101,9 +101,11 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 mkdir "$CHROOT_DIR" "$WORK_DIR/result"
+# Each stage starts with the host's clock time, so a saved log shows where the build spends it.
+stage() { printf '[%(%H:%M:%S)T] %s\n' -1 "$*"; }
 
-echo "Expanding verified Ubuntu Desktop base into $RAW_IMAGE"
-xz -dc -- "$BASE_IMAGE" | dd of="$RAW_IMAGE" bs=4M conv=sparse status=progress
+stage "Expanding verified Ubuntu Desktop base into $RAW_IMAGE"
+xz -T0 -dc -- "$BASE_IMAGE" | dd of="$RAW_IMAGE" bs=4M conv=sparse status=progress
 [[ "$(stat -c %s "$RAW_IMAGE")" -lt $((SIZE_GIB * 1024 * 1024 * 1024)) ]] || {
     echo "Requested image size must exceed the base image size" >&2; exit 1;
 }
@@ -159,7 +161,9 @@ fi
 printf '#!/bin/sh\nexit 101\n' > "$CHROOT_DIR/usr/sbin/policy-rc.d"
 chmod 0755 "$CHROOT_DIR/usr/sbin/policy-rc.d"
 export SYSTEMD_OFFLINE=1
+stage "Preparing the desktop in the chroot"
 chroot "$CHROOT_DIR" /bin/bash -s -- --inside-questix-image "$IMAGE_USER" < "$SCRIPT_DIR/iso/prepare-pi-desktop.sh"
+stage "Applying the QUESTiX Ansible configuration"
 bash "$SCRIPT_DIR/apply-ansible-config.sh" arm64 jazzy "$CHROOT_DIR" "$IMAGE_USER"
 
 questix_image_verify_security "$CHROOT_DIR" "$IMAGE_USER"
@@ -211,7 +215,9 @@ ln -s /etc/machine-id "$CHROOT_DIR/var/lib/dbus/machine-id"
 sync
 questix_pi_unmount
 # Compression starts only when every mount and the loop are successfully released.
-xz -T2 -3 -c "$RAW_IMAGE" > "$WORK_DIR/result/$IMAGE_NAME.img.xz"
+# -T0: one thread per core; multithreaded xz writes the same file as with -T2, only faster.
+stage "Compressing the image"
+xz -T0 -3 -c "$RAW_IMAGE" > "$WORK_DIR/result/$IMAGE_NAME.img.xz"
 (cd "$WORK_DIR/result" && sha256sum "$IMAGE_NAME.img.xz" packages.tsv \
     build-info.txt package-copyrights.tar.gz config.txt cmdline.txt \
     base-config.txt base-cmdline.txt > SHA256SUMS)
@@ -219,6 +225,6 @@ mv -T "$WORK_DIR/result" "$OUTPUT_DIR/$IMAGE_NAME"
 rm "$RAW_IMAGE"
 rmdir "$CHROOT_DIR" "$WORK_DIR"
 trap - EXIT INT TERM
-echo "Created $OUTPUT_DIR/$IMAGE_NAME"
+stage "Created $OUTPUT_DIR/$IMAGE_NAME"
 echo "Verify SHA256SUMS, then use Raspberry Pi Imager 'Use custom' on your own 32 GB+ SD."
 echo "Pi 5 hardware validation is still required; this builder does not redistribute images."

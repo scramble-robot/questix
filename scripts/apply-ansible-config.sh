@@ -31,9 +31,12 @@ CHROOT_DIR="${3:-$WORK_DIR/chroot}"
 IMAGE_USER="${4-ubuntu}"
 IMAGE_SOURCE="/home/$IMAGE_USER/questix"
 # Ansible for the build only, in a venv removed afterwards (Ubuntu 24.04's pip refuses the system
-# Python, PEP 668). The same version as .github/workflows/ansible-check.yaml.
+# Python, PEP 668). ansible-core alone: the playbooks use ansible.builtin only (FQCN, ansible-lint
+# production profile), and the full `ansible` package (~50 MB of collections) takes the emulated
+# chroot a long time to install. The core that .github/workflows/ansible-check.yaml's
+# ansible==14.2.0 resolves to (ansible-core~=2.21.2); review both pins together.
 IMAGE_ANSIBLE_VENV=/opt/questix-image-ansible
-IMAGE_ANSIBLE_VERSION=14.2.0
+IMAGE_ANSIBLE_CORE_VERSION=2.21.5
 
 # shellcheck source=iso/image-build-lib.sh
 . "$ISO_FILES_DIR/image-build-lib.sh"
@@ -48,7 +51,7 @@ printf '%s\n' '[localhost]' \
     '127.0.0.1 ansible_connection=local ansible_python_interpreter=/usr/bin/python3' \
     > "$CHROOT_DIR/tmp/questix-image-inventory.ini"
 
-echo "📦 Installing Ansible $IMAGE_ANSIBLE_VERSION in the chroot (build only)..."
+echo "📦 Installing ansible-core $IMAGE_ANSIBLE_CORE_VERSION in the chroot (build only)..."
 chroot "$CHROOT_DIR" /bin/bash << CHROOT_EOF
 set -e
 export HOME=/root
@@ -57,7 +60,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y python3-venv sudo git
 python3 -m venv "$IMAGE_ANSIBLE_VENV"
-"$IMAGE_ANSIBLE_VENV/bin/pip" install --quiet "ansible==$IMAGE_ANSIBLE_VERSION"
+"$IMAGE_ANSIBLE_VENV/bin/pip" install --quiet "ansible-core==$IMAGE_ANSIBLE_CORE_VERSION"
 "$IMAGE_ANSIBLE_VENV/bin/ansible" --version
 CHROOT_EOF
 
@@ -70,13 +73,25 @@ else
     echo "💻 Applying development environment configuration..."
 fi
 
+# Each line of the playbook's output gets the host's clock time, so a saved log shows how long
+# each task took (ansible-core has no profile_tasks callback).
+timestamp_lines() {
+    local line
+    while IFS= read -r line || [ -n "$line" ]; do
+        printf '[%(%H:%M:%S)T] %s\n' -1 "$line"
+    done
+}
+
 # Run Ansible playbook
 echo "🚀 Running Ansible playbook: $PLAYBOOK"
-chroot "$CHROOT_DIR" /bin/bash << CHROOT_EOF
+# pipefail: the playbook's status decides, not the timestamper's.
+set -o pipefail
+chroot "$CHROOT_DIR" /bin/bash << CHROOT_EOF 2>&1 | timestamp_lines
 set -e
 export HOME=/root
 export LC_ALL=C
 export DEBIAN_FRONTEND=noninteractive
+export PYTHONUNBUFFERED=1
 cd "$IMAGE_SOURCE/ansible"
 
 # SSH: the playbooks do not manage it (prepare-base-system.sh installs openssh-server; the units

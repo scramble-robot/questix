@@ -177,8 +177,10 @@ for extra in '-e "questix_image_build=true"' '-e "enable_autologin=false"' \
 done
 assert_not_contains "$APPLY" "ansible_become=false" "image build: no inventory ansible_become (would override become)"
 assert_not_contains "$APPLY" "workspace_build_refuse_root" "image build: never switches off the root refusal"
-assert_contains "$APPLY" 'IMAGE_ANSIBLE_VERSION=14.2.0' "image build: Ansible pinned like the CI"
+assert_contains "$APPLY" 'IMAGE_ANSIBLE_CORE_VERSION=2.21.5' "image build: ansible-core pinned to the CI's core"
+assert_contains "$APPLY" '"ansible-core==$IMAGE_ANSIBLE_CORE_VERSION"' "image build: ansible-core alone, no collections"
 assert_contains .github/workflows/ansible-check.yaml '"ansible==14.2.0"' "image build: the CI pin it follows"
+assert_contains "$APPLY" 'set -o pipefail' "image build: the timestamped playbook keeps its exit status"
 assert_contains "$APPLY" 'rm -rf "$IMAGE_ANSIBLE_VENV"' "image build: the build's Ansible is not left in the image"
 assert_contains "$APPLY" 'questix_image_verify_security "$CHROOT_DIR" "$IMAGE_USER"' \
     "image build: offline security postconditions before the image is made"
