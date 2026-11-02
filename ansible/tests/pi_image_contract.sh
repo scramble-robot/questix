@@ -155,6 +155,26 @@ unset BUSY_MOUNT
 expect_ok questix_pi_unmount
 unset -f umount losetup
 
+# noble-updates: the official base's sources (noble + noble-security) gain it, once.
+sources_root="$TEST_DIR/sources"
+mkdir -p "$sources_root/etc/apt/sources.list.d"
+sources="$sources_root/etc/apt/sources.list.d/ubuntu.sources"
+printf '%s\n' 'Types: deb' 'URIs: http://ports.ubuntu.com/ubuntu-ports/' 'Suites: noble' \
+    'Components: main restricted universe multiverse' '' 'Types: deb' \
+    'URIs: http://ports.ubuntu.com/ubuntu-ports/' 'Suites: noble-security' \
+    'Components: main restricted universe multiverse' > "$sources"
+expect_ok questix_image_enable_updates_suite "$sources_root"
+expect_ok grep -qx 'Suites: noble noble-updates' "$sources"
+expect_ok grep -qx 'Suites: noble-security' "$sources"
+expect_ok questix_image_enable_updates_suite "$sources_root"
+expect_ok test "$(grep -c 'noble-updates' "$sources")" = 1
+printf '%s\n' 'Types: deb' 'Suites: jammy' > "$sources"
+expect_fail questix_image_enable_updates_suite "$sources_root"
+expect_ok grep -qx 'Suites: jammy' "$sources"
+rm "$sources"
+expect_fail questix_image_enable_updates_suite "$sources_root"
+expect_ok grep -q 'questix_image_enable_updates_suite /' scripts/iso/prepare-pi-desktop.sh
+
 expect_ok bash scripts/build-pi-image.sh --help
 expect_fail bash scripts/build-pi-image.sh "$base" "$TEST_DIR/output" root
 expect_fail bash scripts/build-pi-image.sh "$base" "$TEST_DIR/output" ''

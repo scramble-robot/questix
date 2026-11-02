@@ -18,6 +18,13 @@
 #       locked, no NOPASSWD rule, no legacy .pkla, SSH not enabled, no console or desktop
 #       autologin, the first-boot unit enabled and root-owned when checked as root, the source
 #       checkout present and owned by USER. Prints every failure; returns 1 if any.
+#   questix_image_enable_updates_suite CHROOT
+#       Adds noble-updates to the official Pi Desktop base's ubuntu.sources, which lists only
+#       noble and noble-security (on a normal first boot cloud-init writes the full list; the
+#       custom image disables cloud-init). Without it the -dev packages ROS needs do not match
+#       the updated libraries the base already has (apt: "held broken packages"). Changes only
+#       the one known `Suites: noble` stanza, accepts a list that already has noble-updates and
+#       refuses any other form.
 
 questix_image_validate_user() {
     # This value is also used in paths, Ansible vars and a systemd Environment=.
@@ -27,6 +34,22 @@ questix_image_validate_user() {
         echo "Invalid image user: use 1-32 lowercase ASCII letters/digits/_/-, starting with a letter; root/oem are reserved" >&2
         return 1
     fi
+}
+
+questix_image_enable_updates_suite() {
+    local sources="$1/etc/apt/sources.list.d/ubuntu.sources"
+    [[ -f "$sources" && ! -L "$sources" ]] || {
+        echo "Missing or symlinked $sources" >&2
+        return 1
+    }
+    if grep -qE '^Suites:.*[[:space:]]noble-updates([[:space:]]|$)' "$sources"; then
+        return 0
+    fi
+    [[ "$(grep -cx 'Suites: noble' "$sources")" = 1 ]] || {
+        echo "Unexpected $sources: expected one 'Suites: noble' stanza; add noble-updates by hand" >&2
+        return 1
+    }
+    sed -i 's/^Suites: noble$/Suites: noble noble-updates/' "$sources"
 }
 
 questix_image_check_user_available() {

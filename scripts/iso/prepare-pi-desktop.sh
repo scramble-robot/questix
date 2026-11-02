@@ -37,6 +37,8 @@ rm -f /etc/sudoers.d/oem /etc/sudoers.d/99_oem /var/lib/oem-config/run
 # Desktop's growroot-almost (ubuntu-raspi-settings-desktop) remains installed.
 mkdir -p /etc/cloud
 touch /etc/cloud/cloud-init.disabled
+# cloud-init would have added noble-updates on a normal first boot; ROS's -dev packages need it.
+questix_image_enable_updates_suite /
 
 apt-get update
 apt-get install -y software-properties-common curl wget gnupg lsb-release \
