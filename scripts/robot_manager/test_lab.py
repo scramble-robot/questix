@@ -4,6 +4,11 @@ import getpass
 import importlib
 import json
 import os
+import signal
+import subprocess
+import sys
+import threading
+import time
 
 import pytest
 from fastapi import HTTPException
@@ -141,14 +146,10 @@ def test_autostart_is_skipped_in_competition_mode(lab, monkeypatch, tmp_path):
 
 
 def test_competition_mode_turns_autostart_off_and_stops_the_bridge(lab, monkeypatch, tmp_path):
-    signals = []
-    # Never signal a real process group from a test.
-    monkeypatch.setattr(lab.os, "getpgid", lambda pid: pid)
-    monkeypatch.setattr(lab.os, "killpg", lambda pgid, sig: signals.append((pgid, sig)))
+    signals = _managed_fake(lab, monkeypatch)
     lab.set_config(lab.LabConfig(CAMERA_TOPIC="/cam/compressed", AUTOSTART=True))
     lab.set_drive(lab.DriveRequest(allow=True))
     lab.set_shoot(lab.DriveRequest(allow=True))
-    lab._proc = _FakeProcess()
     (tmp_path / "mode").write_text("competition\n")  # app.py writes the mode, then calls this
     lab.disable_outside_lessons()
     assert signals == [(_FakeProcess.pid, lab.signal.SIGINT)]
@@ -193,6 +194,23 @@ class _FakeProcess:
 
     def wait(self, timeout=None):
         return 0
+
+
+def _managed_fake(lab, monkeypatch):
+    """A managed group that disappears on SIGINT; never signal the host's processes."""
+    sent = []
+    lab._proc = _FakeProcess()
+    lab._pgid = lab._proc.pid
+    monkeypatch.setattr(lab, "_port_in_use", lambda: False)
+
+    def killpg(pgid, sig):
+        if sent:
+            raise ProcessLookupError
+        if sig:
+            sent.append((pgid, sig))
+
+    monkeypatch.setattr(lab.os, "killpg", killpg)
+    return sent
 
 
 def test_practice_mode_turns_autostart_back_on_and_starts_the_bridge(lab, monkeypatch):
@@ -259,9 +277,7 @@ def test_nothing_of_questix_lab_works_outside_lesson_mode(lab, tmp_path, monkeyp
 
 
 def test_practice_mode_stops_the_bridge_with_its_own_reason(lab, monkeypatch, tmp_path):
-    monkeypatch.setattr(lab.os, "getpgid", lambda pid: pid)
-    monkeypatch.setattr(lab.os, "killpg", lambda pgid, sig: None)
-    lab._proc = _FakeProcess()
+    _managed_fake(lab, monkeypatch)
     (tmp_path / "mode").write_text("practice\n")
     lab.disable_outside_lessons()
     assert lab.get_status()["last_stop_reason"] == "not_lesson_mode"
@@ -306,7 +322,6 @@ def test_drive_is_off_at_start_and_only_the_teacher_switches_it_on(lab):
                                                ("set_shoot", (False, True))])
 def test_a_switch_is_published_and_never_restarts_the_bridge(lab, monkeypatch, setter, published):
     signals = []
-    monkeypatch.setattr(lab.os, "getpgid", lambda pid: pid)
     monkeypatch.setattr(lab.os, "killpg", lambda pgid, sig: signals.append((pgid, sig)))
     monkeypatch.setattr(lab, "start_bridge", lambda: pytest.fail("the bridge was restarted"))
     lab._proc = _FakeProcess()
@@ -486,12 +501,9 @@ def test_permission_error_includes_an_existing_lab_env(lab, tmp_path, read_only_
 
 def test_competition_stops_the_bridge_even_if_lab_env_cannot_be_written(
         lab, monkeypatch, tmp_path, read_only_lab_env):
-    signals = []
-    monkeypatch.setattr(lab.os, "getpgid", lambda pid: pid)
-    monkeypatch.setattr(lab.os, "killpg", lambda pgid, sig: signals.append((pgid, sig)))
+    signals = _managed_fake(lab, monkeypatch)
     read_only_lab_env('AUTOSTART="true"\nALLOW_DRIVE="true"\n')
     lab.set_drive(lab.DriveRequest(allow=True))  # the session's permission, not in lab.env
-    lab._proc = _FakeProcess()
     (tmp_path / "mode").write_text("competition\n")  # app.py writes the mode, then calls this
     lab.disable_outside_lessons()  # logged, not raised
     assert signals == [(_FakeProcess.pid, lab.signal.SIGINT)]
@@ -780,11 +792,9 @@ class _ExitedProcess(_FakeProcess):
 
 
 def test_explicit_stop_switches_both_permissions_off(lab, monkeypatch):
-    monkeypatch.setattr(lab.os, "getpgid", lambda pid: pid)
-    monkeypatch.setattr(lab.os, "killpg", lambda pgid, sig: None)
+    _managed_fake(lab, monkeypatch)
     lab.set_drive(lab.DriveRequest(allow=True))
     lab.set_shoot(lab.DriveRequest(allow=True))
-    lab._proc = _FakeProcess()
     status = lab.stop_bridge()
     assert status["last_stop_reason"] == "stopped"
     assert status["drive_allowed"] is False and status["shoot_allowed"] is False
@@ -798,7 +808,6 @@ def test_explicit_stop_switches_both_permissions_off(lab, monkeypatch):
 
 def test_revoke_switches_both_off_and_keeps_the_bridge(lab, monkeypatch):
     signals = []
-    monkeypatch.setattr(lab.os, "getpgid", lambda pid: pid)
     monkeypatch.setattr(lab.os, "killpg", lambda pgid, sig: signals.append((pgid, sig)))
     lab.set_drive(lab.DriveRequest(allow=True))
     lab._proc = _FakeProcess()
@@ -861,6 +870,7 @@ def test_a_start_after_an_unnoticed_exit_starts_without_permissions(lab, monkeyp
     lab._proc = _ExitedProcess()  # exited, and no status poll has noticed yet
     status = lab.start_bridge()
     assert len(seen) == 1 and "allow_" not in seen[0]
+    assert lab._pgid == lab._proc.pid == 777
     assert status["drive_allowed"] is False and _published(lab) == (False, False)
 
 
@@ -911,6 +921,246 @@ def test_manager_shutdown_ends_the_permissions(lab):
     lab.set_drive(lab.DriveRequest(allow=True))
     lab.shutdown()
     assert lab.actuation.lab_permissions() == {"drive": False, "launcher": False}
+
+
+@pytest.fixture
+def bridge_group(lab, monkeypatch, tmp_path):
+    """Run a ros2-run-like parent and a port-owning child, with orphan reaping on Linux.
+
+    A test subreaper collects only the known fake child after its parent exits. This avoids
+    depending on PID 1 to reap promptly (notably in containers), without hiding a live child.
+    """
+    import ctypes
+    if sys.platform != "linux":
+        pytest.skip("process-group regression needs Linux subreaper support")
+    libc = ctypes.CDLL(None, use_errno=True)
+    previous = ctypes.c_int()
+    assert libc.prctl(37, ctypes.byref(previous), 0, 0, 0) == 0  # PR_GET_CHILD_SUBREAPER
+    assert libc.prctl(36, 1, 0, 0, 0) == 0  # PR_SET_CHILD_SUBREAPER
+    script = tmp_path / "fake_bridge.py"
+    ready = tmp_path / "ready.json"
+    script.write_text('''import json
+import os
+from pathlib import Path
+import signal
+import socket
+import subprocess
+import sys
+
+if sys.argv[1] == "parent":
+    signal.signal(signal.SIGINT, lambda *_: None)
+    child = subprocess.Popen([sys.executable, __file__, "child", *sys.argv[2:]])
+    sys.exit(child.wait())
+
+signal.signal(signal.SIGINT, signal.SIG_IGN if sys.argv[2] == "stubborn" else
+              lambda *_: sys.exit(0))
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+with socket.socket() as server:
+    server.bind(("127.0.0.1", 0))
+    server.listen()
+    Path(sys.argv[3]).write_text(json.dumps({"pid": os.getpid(),
+                                           "port": server.getsockname()[1]}))
+    while True:
+        conn, _ = server.accept()
+        conn.close()
+''')
+    processes = []
+    reapers = []
+    real_killpg = os.killpg
+    monkeypatch.setattr(lab, "STOP_TIMEOUT_SEC", 0.2)
+    # raising=False lets the regression run against the original implementation too.
+    monkeypatch.setattr(lab, "TERM_TIMEOUT_SEC", 0.2, raising=False)
+    monkeypatch.setattr(lab, "KILL_TIMEOUT_SEC", 0.5, raising=False)
+    monkeypatch.setattr(lab, "_lan_addresses", lambda: [])
+
+    def start(kind="stubborn"):
+        proc = subprocess.Popen([sys.executable, str(script), "parent", kind, str(ready)],
+                                start_new_session=True)
+        processes.append(proc)
+        deadline = time.monotonic() + 5
+        while not ready.exists():
+            assert proc.poll() is None, "fake parent exited before opening the port"
+            assert time.monotonic() < deadline, "fake bridge did not become ready"
+            time.sleep(0.01)
+        child = json.loads(ready.read_text())
+        monkeypatch.setattr(lab, "LAB_BRIDGE_PORT", child["port"])
+        lab._proc = proc
+        lab._pgid = proc.pid  # start_new_session=True: saved at launch, not rediscovered
+        lab._started_at = time.time()
+
+        def reap_orphan():
+            while True:
+                try:
+                    if os.waitpid(child["pid"], os.WNOHANG)[0]:
+                        return
+                except ChildProcessError:
+                    if proc.returncode is not None and kind != "stubborn":
+                        return  # a cooperative child was reaped by its own parent
+                time.sleep(0.01)
+
+        reaper = threading.Thread(target=reap_orphan, daemon=True)
+        reaper.start()
+        reapers.append(reaper)
+        assert lab._port_in_use()
+        return proc, child["pid"]
+
+    try:
+        yield start
+    finally:
+        # Always clean up the regression's leftover child, including against unfixed code.
+        for proc in processes:
+            try:
+                real_killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            proc.wait(timeout=3)
+        for reaper in reapers:
+            reaper.join(3)
+            assert not reaper.is_alive(), "fake child was not reaped"
+        assert libc.prctl(36, previous.value, 0, 0, 0) == 0
+
+
+@pytest.mark.parametrize("entry", ["stop", "mode", "shutdown"])
+def test_stopping_waits_for_the_whole_bridge_group(lab, bridge_group, tmp_path, entry):
+    proc, child_pid = bridge_group()
+    lab.set_drive(lab.DriveRequest(allow=True))
+    lab.set_shoot(lab.DriveRequest(allow=True))
+    if entry == "stop":
+        lab.stop_bridge()
+        reason = "stopped"
+    elif entry == "mode":
+        (tmp_path / "mode").write_text("practice\n")
+        lab.disable_outside_lessons()
+        reason = "not_lesson_mode"
+    else:
+        lab.shutdown()
+        reason = "manager_shutdown"
+    assert not lab._port_in_use(), "orphan bridge still owns its port after parent exit"
+    with pytest.raises(ProcessLookupError):
+        os.killpg(proc.pid, 0)
+    with pytest.raises(ProcessLookupError):
+        os.kill(child_pid, 0)
+    assert proc.returncode == -signal.SIGTERM
+    status = lab.get_status()
+    assert status["last_stop_reason"] == reason
+    assert status["running"] is False and status["external"] is False
+    assert _published(lab) == (False, False)
+
+
+def test_cooperative_bridge_gets_only_sigint(lab, bridge_group, monkeypatch):
+    proc, _ = bridge_group("cooperative")
+    sent = []
+    real_killpg = os.killpg
+
+    def killpg(pgid, sig):
+        if sig:
+            sent.append((pgid, sig))
+        return real_killpg(pgid, sig)
+
+    monkeypatch.setattr(lab.os, "killpg", killpg)
+    status = lab.stop_bridge()
+    assert sent == [(proc.pid, signal.SIGINT)]
+    assert proc.returncode == 0
+    assert status["last_stop_reason"] == "stopped"
+    assert status["external"] is False and not lab._port_in_use()
+
+
+def test_failed_group_stop_returns_error_revokes_and_can_retry(lab, bridge_group, monkeypatch):
+    import asyncio
+    from fastapi import FastAPI
+    proc, _ = bridge_group()
+    real_killpg = os.killpg
+
+    def ignore_kill(pgid, sig):
+        if sig != signal.SIGKILL:
+            return real_killpg(pgid, sig)
+
+    monkeypatch.setattr(lab.os, "killpg", ignore_kill)
+    lab.set_drive(lab.DriveRequest(allow=True))
+    lab.set_shoot(lab.DriveRequest(allow=True))
+    app = FastAPI()
+    app.include_router(lab.router)
+    sent = []
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1",
+             "method": "POST", "scheme": "http", "path": "/api/lab/stop",
+             "raw_path": b"/api/lab/stop", "query_string": b"", "root_path": "",
+             "server": ("127.0.0.1", 8888), "client": ("127.0.0.1", 50000), "headers": []}
+    asyncio.run(app(scope, receive, send))
+    response = next(m for m in sent if m["type"] == "http.response.start")
+    assert response["status"] == 500
+    body = b"".join(m.get("body", b"") for m in sent if m["type"] == "http.response.body")
+    assert "停止できませんでした" in json.loads(body)["detail"]
+    status = lab.get_status()
+    assert status["last_stop_reason"] == "stop_failed"
+    assert status["running"] is True and status["external"] is False
+    assert lab._pgid == proc.pid and proc.returncode == -signal.SIGTERM
+    assert lab._port_in_use() and _published(lab) == (False, False)
+    # The leader is already reaped, but the saved PGID still reaches the remaining child.
+    monkeypatch.setattr(lab.os, "killpg", real_killpg)
+    assert lab.stop_bridge()["last_stop_reason"] == "stopped"
+    assert not lab._port_in_use()
+
+
+def test_reaping_a_dead_leader_keeps_ownership_of_its_children(lab, bridge_group):
+    proc, _ = bridge_group()
+    lab.set_drive(lab.DriveRequest(allow=True))
+    os.kill(proc.pid, signal.SIGTERM)
+    proc.wait(timeout=3)
+    status = lab.get_status()  # polling before stop must not turn our child into "external"
+    assert status["running"] is True and status["external"] is False
+    assert status["last_stop_reason"] == "exited" and _published(lab) == (False, False)
+    assert lab.stop_bridge()["last_stop_reason"] == "stopped"
+    assert not lab._port_in_use()
+
+
+def test_empty_group_with_busy_port_is_a_failed_stop_without_more_signals(lab, monkeypatch):
+    sent = _managed_fake(lab, monkeypatch)
+    monkeypatch.setattr(lab, "_port_in_use", lambda: True)
+    monkeypatch.setattr(lab, "PORT_RELEASE_TIMEOUT_SEC", 0)
+    lab.set_drive(lab.DriveRequest(allow=True))
+    with pytest.raises(HTTPException) as error:
+        lab.stop_bridge()
+    assert error.value.status_code == 500
+    assert lab._pgid is None and _published(lab) == (False, False)
+    # Even with a reaped leader and an occupied port, retry never signals the old PGID.
+    lab._proc = _ExitedProcess()
+    status = lab.get_status()
+    assert status["last_stop_reason"] == "stop_failed" and status["running"] is True
+    with pytest.raises(HTTPException) as retry:
+        lab.stop_bridge()
+    assert retry.value.status_code == 500
+    monkeypatch.setattr(lab, "_port_in_use", lambda: False)
+    status = lab.get_status()
+    assert status["last_stop_reason"] == "stop_failed" and status["running"] is False
+    assert sent == [(_FakeProcess.pid, signal.SIGINT)]
+
+
+def test_stop_waits_briefly_for_port_release(lab, monkeypatch):
+    _managed_fake(lab, monkeypatch)
+    busy = iter([True, False])
+    monkeypatch.setattr(lab, "_port_in_use", lambda: next(busy, False))
+    assert lab.stop_bridge()["last_stop_reason"] == "stopped"
+
+
+def test_stop_never_signals_an_external_bridge(lab, monkeypatch):
+    sent = []
+    monkeypatch.setattr(lab.os, "killpg", lambda *args: sent.append(args))
+    monkeypatch.setattr(lab, "_port_in_use", lambda: True)
+    lab.set_drive(lab.DriveRequest(allow=True))
+    with pytest.raises(HTTPException) as error:
+        lab.stop_bridge()
+    assert error.value.status_code == 409
+    lab.disable_outside_lessons()
+    lab.shutdown()
+    assert lab.get_status()["external"] is True and sent == []
+    assert _published(lab) == (False, False)
 
 
 @pytest.mark.parametrize("running", [None, "practice", "competition", "unknown"])
