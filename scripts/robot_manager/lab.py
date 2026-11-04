@@ -611,7 +611,10 @@ def _reap_locked() -> bool:
         return True  # retain the failed stop for retry; the empty PGID has been forgotten
     _proc = None
     _started_at = None
-    if _last_stop_reason not in _FAILURE_REASONS:
+    if _last_stop_reason == "stop_failed":
+        # A later status poll has now confirmed both the group and its port are gone.
+        _last_stop_reason = "stopped"
+    elif _last_stop_reason not in _FAILURE_REASONS:
         _last_stop_reason = "exited"
     if _revoke_locked():
         logger.warning("QUESTiX LAB bridge exited on its own: driving and launching from the "

@@ -1120,6 +1120,33 @@ def test_reaping_a_dead_leader_keeps_ownership_of_its_children(lab, bridge_group
     assert not lab._port_in_use()
 
 
+def test_failed_stop_recovers_when_group_and_port_disappear(lab, bridge_group, monkeypatch):
+    proc, _ = bridge_group()
+    real_killpg = os.killpg
+
+    def ignore_kill(pgid, sig):
+        if sig != signal.SIGKILL:
+            return real_killpg(pgid, sig)
+
+    monkeypatch.setattr(lab.os, "killpg", ignore_kill)
+    with pytest.raises(HTTPException):
+        lab.stop_bridge()
+    assert lab.get_status()["last_stop_reason"] == "stop_failed"
+    # The remaining child goes away independently: no second stop request is made.
+    real_killpg(proc.pid, signal.SIGKILL)
+    deadline = time.monotonic() + 3
+    while True:
+        status = lab.get_status()
+        if not status["running"]:
+            break
+        assert time.monotonic() < deadline, "exited group was not noticed"
+        time.sleep(0.01)
+    assert not lab._port_in_use() and status["external"] is False
+    assert status["last_stop_reason"] == "stopped"
+    assert lab._proc is None and lab._pgid is None and lab._started_at is None
+    assert _published(lab) == (False, False)
+
+
 def test_empty_group_with_busy_port_is_a_failed_stop_without_more_signals(lab, monkeypatch):
     sent = _managed_fake(lab, monkeypatch)
     monkeypatch.setattr(lab, "_port_in_use", lambda: True)
@@ -1138,7 +1165,7 @@ def test_empty_group_with_busy_port_is_a_failed_stop_without_more_signals(lab, m
     assert retry.value.status_code == 500
     monkeypatch.setattr(lab, "_port_in_use", lambda: False)
     status = lab.get_status()
-    assert status["last_stop_reason"] == "stop_failed" and status["running"] is False
+    assert status["last_stop_reason"] == "stopped" and status["running"] is False
     assert sent == [(_FakeProcess.pid, signal.SIGINT)]
 
 
