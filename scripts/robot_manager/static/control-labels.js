@@ -17,7 +17,7 @@ const ControlLabels = (() => {
       3: "右スティック 左右", 4: "右スティック 上下", 5: "R2 トリガー",
       6: "十字キー 左右", 7: "十字キー 上下" },
   };
-  const controllerNames = { uart: "UART / Switch", dualshock: "DualShock", web: "Web（ブラウザ・スマホ）" };
+  const controllerNames = { uart: "大会用コントローラー", dualshock: "ゲームパッド", web: "Web（ブラウザ・スマホ）" };
   const buttonKeys = new Set([
     "fire_button", "tilt_up_button_index", "tilt_down_button_index", "full_speed_button",
   ]);

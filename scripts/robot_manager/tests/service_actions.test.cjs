@@ -79,7 +79,7 @@ test('older services without readiness still show saved settings without a globa
   });
   await vm.runInContext('refreshReadiness()', f.context);
   assert.equal(f.document.getElementById('operation-issue').hidden, true);
-  assert.equal(f.document.getElementById('ready-controller').textContent, 'UART / Switch');
+  assert.equal(f.document.getElementById('ready-controller').textContent, '大会用コントローラー');
   assert.match(f.document.getElementById('ready-profile').textContent, /読み込みました/);
   assert.match(f.document.getElementById('ready-workspace').textContent, /更新・再起動が必要/);
   assert.equal(f.document.getElementById('readiness-refresh').disabled, false);
