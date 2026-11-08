@@ -159,7 +159,7 @@ const ControllerMap = (() => {
   function draw(controller, compact, usedSpots) {
     const dual = controller === "dualshock";
     const svg = element("svg", { viewBox: compact ? "130 10 460 350" : "-95 -15 910 405", role: "group",
-      "aria-label": `${dual ? "DualShock" : "Switch"} コントローラーの操作図` });
+      "aria-label": `${dual ? "ゲームパッド" : "大会用コントローラー"}の操作図` });
     svg.append(element("title", {}, "ボタンやスティックを選ぶと、機能の割り当てを編集できます。"));
     const defs = element("defs");
     const gradient = element("linearGradient", { id: "controller-shell", x2: "0", y2: "1" });
@@ -176,7 +176,7 @@ const ControllerMap = (() => {
     svg.append(element("path", { d: "M211 251 L181 311 Q178 321 190 320 L266 255 M509 251 L539 311 Q542 321 530 320 L454 255",
       fill: "none", stroke: "#8493a0", "stroke-width": 2, opacity: ".2" }));
     svg.append(element("text", { x: 360, y: 325, "text-anchor": "middle", fill: "#a9b8ca",
-      "font-size": 10, "letter-spacing": 3 }, dual ? "DUALSHOCK" : "SWITCH / UART"));
+      "font-size": 10, "letter-spacing": 3 }, dual ? "GAMEPAD" : "大会用"));
     const spots = new Map();
     function spot(id, x, y, name, radius = 24, shape = "circle") {
       const group = element("g", { class: "map-control", "data-spot": id });
