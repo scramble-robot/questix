@@ -455,6 +455,12 @@ private:
   odometry::Pose2D odom_pose_{};
   // Paired position endpoints and feedback_count gating (pure ROS-free tracker).
   wheel_position::Integrator odom_position_integrator_{};
+  // Odometry only, in BOTH velocity/current modes. Defaults live in StopGapOptions;
+  // runtime changes require a restart because they change the history contract.
+  wheel_position::StopGapOptions odom_stop_gap_{};
+  double odom_tick_time_sec_{0.0};
+  double odom_left_ref_rpm_{0.0};
+  double odom_right_ref_rpm_{0.0};
   // Logging state only; never influences integration or actuation decisions.
   enum class OdomMotorState { kUnknown, kReady, kUnavailable, kStopFault };
   OdomMotorState odom_motor_state_{OdomMotorState::kUnknown};

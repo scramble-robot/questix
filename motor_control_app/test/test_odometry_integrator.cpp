@@ -164,3 +164,20 @@ TEST(OdometryIntegrator, ExtrapolateToThePublishTimeIsBounded) {
   EXPECT_NEAR(extrapolate(Pose2D{}, last, 9.0).x, 0.5 * kMaxExtrapolationSec, 1e-12);
   EXPECT_DOUBLE_EQ(extrapolate(Pose2D{}, last, 4.9).x, 0.0);
 }
+
+// A recovered left-only increment must preserve the existing exact arc and
+// retained-pose contract; the rejected right endpoint contributes zero.
+TEST(OdometryIntegrator, StopGapPartialWheelArcAndRetainedPose) {
+  const double dl = .03;
+  const double distance = dl / 2;
+  const double heading = -dl / .5;
+  const Pose2D start{1, 2, .4};
+  const auto result = integrate(start, distance, heading, 1.0);
+  EXPECT_NEAR(result.theta, .4 + heading, 1e-12);
+  EXPECT_NEAR(result.x, 1 + distance / heading * (std::sin(.4 + heading) - std::sin(.4)), 1e-12);
+  EXPECT_NEAR(result.y, 2 - distance / heading * (std::cos(.4 + heading) - std::cos(.4)), 1e-12);
+  const auto unchanged = integrate(result, 0, 0, 1.0);
+  EXPECT_EQ(unchanged.x, result.x);
+  EXPECT_EQ(unchanged.y, result.y);
+  EXPECT_EQ(unchanged.theta, result.theta);
+}

@@ -160,6 +160,14 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
     return CallbackReturn::FAILURE;
   }
 
+  if (!odom_stop_gap_.valid()) {
+    RCLCPP_ERROR(this->get_logger(),
+                 "Invalid odom stop gap parameters: speed_margin must be finite and >0, "
+                 "noise_counts must be >=0 (restart after editing YAML)");
+    return CallbackReturn::FAILURE;
+  }
+  odom_position_integrator_.configure(odom_stop_gap_);
+
   // current モードのパラメータ（負のゲイン = 正帰還など）は、モータに触れる前に拒否する。
   if (control_mode_ == "current") {
     const auto error = currentModeParamsError();
@@ -206,6 +214,11 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
   RCLCPP_INFO(this->get_logger(), "  publish_control_sample: %s  control_sample_topic: %s",
               publish_control_sample_ ? "true" : "false", control_sample_topic_.c_str());
   RCLCPP_INFO(this->get_logger(), "  publish_tf: %s", publish_tf_ ? "true" : "false");
+  RCLCPP_INFO(this->get_logger(),
+              "  odom_stop_gap_recovery: %s  odom_stop_gap_speed_margin: %g  "
+              "odom_stop_gap_noise_counts: %ld (odometry only, both modes)",
+              odom_stop_gap_.enabled ? "true" : "false", odom_stop_gap_.speed_margin,
+              static_cast<long>(odom_stop_gap_.noise_counts));
   RCLCPP_INFO(this->get_logger(), "  odom_topic: %s", odom_topic_.c_str());
   RCLCPP_INFO(this->get_logger(), "  odom_frame_id: %s", odom_frame_id_.c_str());
   RCLCPP_INFO(this->get_logger(), "  base_frame_id: %s", base_frame_id_.c_str());

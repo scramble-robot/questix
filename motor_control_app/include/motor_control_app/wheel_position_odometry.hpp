@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <deque>
 
 #include "motor_control_app/odometry_integrator.hpp"
 #include "motor_control_lib/ddt_protocol.hpp"
@@ -54,6 +55,49 @@ inline double assistedGapLimit(const Limits& limits) {
                   0.5 * std::sqrt(4.0 * kMaxPredictionErrorTurns / acceleration));
 }
 
+// Issue #229 B′ offline evaluation (2026-10-20): two fresh zero-speed
+// replies and <=8 counts identify quiet wheels; this never bypasses a gate.
+inline constexpr unsigned kZeroReplies = 2;
+inline constexpr int kZeroCounts = 8;
+inline constexpr double kStopHistorySec = 0.5;
+inline constexpr double kStopHoldSec = 0.5;
+
+struct StopGapOptions {
+  bool enabled{false};
+  double speed_margin{1.25};
+  int64_t noise_counts{8};
+
+  bool valid() const {
+    return std::isfinite(speed_margin) && speed_margin > 0.0 && noise_counts >= 0;
+  }
+};
+
+enum class State { kAnchored, kWaiting, kIntegrated, kReset };
+enum class Reason { kNone, kInvalid, kStale, kFault, kGap, kAmbiguous, kMode, kRef, kHistory };
+
+enum class StopDecision { kAccepted, kOutside, kAmbiguous, kHardGate };
+
+struct StopIncrement {
+  double turns{0.0};
+  double upper{0.0};
+  StopDecision decision{StopDecision::kHardGate};
+  Reason reason{Reason::kNone};
+};
+
+// The bound is symmetric: a non-shortest candidate can never be the ONLY
+// candidate. Equality belongs inside the bound, without an epsilon. A small U
+// is an estimate from history, NOT a physical bound against external forces or
+// hidden whole turns (see the explicitly named limitation tests).
+inline StopIncrement uniqueStopIncrement(double d, double upper) {
+  if (!std::isfinite(d) || !std::isfinite(upper) || std::fabs(d) > 0.5 || upper < 0.0) {
+    return {d, upper, StopDecision::kHardGate};
+  }
+  return {d, upper,
+          std::fabs(d) > upper          ? StopDecision::kOutside
+          : upper >= 1.0 - std::fabs(d) ? StopDecision::kAmbiguous
+                                        : StopDecision::kAccepted};
+}
+
 struct Sample {
   uint16_t position{0};
   double native_rpm{0.0};
@@ -61,13 +105,18 @@ struct Sample {
   uint64_t count{0};     // valid feedback_count, not a diagnostic topic
   bool received{false};
   uint8_t fault{0};
+  double ref_rpm{0.0};  // this tick, before velocity correction; never a topic input
+  bool mode_matches{true};
 };
-
-enum class State { kAnchored, kWaiting, kIntegrated, kReset };
-enum class Reason { kNone, kInvalid, kStale, kFault, kGap, kAmbiguous };
 
 inline const char* reasonName(Reason reason) {
   switch (reason) {
+    case Reason::kMode:
+      return "hard gate: mode mismatch";
+    case Reason::kRef:
+      return "hard gate: nonzero ref";
+    case Reason::kHistory:
+      return "hard gate: insufficient 0.5 s history";
     case Reason::kNone:
       return "none";
     case Reason::kInvalid:
@@ -89,6 +138,10 @@ struct Result {
   Reason reason{Reason::kNone};
   double distance{0.0};
   double heading{0.0};
+  bool stop_gap{false};
+  StopIncrement left{};
+  StopIncrement right{};
+  bool both_zero{false};
 };
 
 // Both 32767 and 0 represent the same endpoint. Signed modulo also handles
@@ -125,9 +178,28 @@ inline bool wheelIncrement(const Sample& previous, const Sample& current, const 
 // endpoint is held until the slow wheel arrives; neither count is consumed early.
 class Integrator {
 public:
-  void reset() { anchored_ = false; }
+  void configure(const StopGapOptions& options) {
+    options_ = options;
+    reset();
+  }
+  void reset() {
+    anchored_ = false;
+    clearHistory();
+  }
 
   Result update(const Sample& left, const Sample& right, double now, const Limits& limits) {
+    return update(left, right, now, limits, now);
+  }
+  Result update(const Sample& left, const Sample& right, double now, const Limits& limits,
+                double ref_time) {
+    return options_.enabled ? updateStopGap(left, right, now, limits, ref_time)
+                            : updateLegacy(left, right, now, limits);
+  }
+
+private:
+  // Keep the default-OFF algorithm unchanged, including its gate order and
+  // floating-point arithmetic. ON changes only intervals rejected for a gap.
+  Result updateLegacy(const Sample& left, const Sample& right, double now, const Limits& limits) {
     if (!valid(left, now) || !valid(right, now) || !std::isfinite(limits.radius) ||
         !std::isfinite(limits.separation) || !std::isfinite(limits.max_rpm) ||
         !(limits.radius > 0.0) || !(limits.separation > 0.0) || !(limits.max_rpm > 0.0)) {
@@ -186,6 +258,186 @@ private:
     reset();
     return {State::kReset, reason};
   }
+  struct HistoryPoint {
+    double time{0.0};
+    double rpm{0.0};
+  };
+  struct WheelHistory {
+    std::deque<HistoryPoint> raw{};
+    std::deque<HistoryPoint> ref{};
+    Sample received{};  // distinct from the pair's CONSUMED endpoint
+    bool seen{false};
+    unsigned zeros{0};
+    double anchor_max{0.0};
+    bool anchor_history{false};
+
+    void observe(const Sample& s, double now, double ref_time) {
+      ref.push_back({ref_time, std::fabs(s.ref_rpm)});
+      if (!seen || s.count != received.count) {
+        const int counts = std::abs(static_cast<int>(received.position) - s.position);
+        const int wrapped =
+            std::min(counts, motor_control_lib::ddt_protocol::kPositionRawPerTurn - counts);
+        const bool close = !seen || wrapped <= kZeroCounts;
+        zeros = s.native_rpm == 0.0 && close ? std::min(zeros + 1, kZeroReplies) : 0;
+        raw.push_back({s.time_sec, std::fabs(s.native_rpm)});
+        received = s;
+        seen = true;
+      }
+      // A pending endpoint can be .5 s old and needs the preceding .5 s.
+      for (auto* series : {&raw, &ref}) {
+        while (!series->empty() && series->front().time < now - kStopHoldSec - kStopHistorySec) {
+          series->pop_front();
+        }
+      }
+    }
+    bool regressed(const Sample& s) const {
+      return seen && (s.count < received.count ||
+                      (s.count > received.count && s.time_sec <= received.time_sec));
+    }
+    void snapshot(double stamp, double since) {
+      anchor_history = since <= stamp - kStopHistorySec;
+      anchor_max = 0.0;
+      for (const auto* series : {&raw, &ref}) {
+        for (const auto& point : *series) {
+          if (point.time >= stamp - kStopHistorySec && point.time <= stamp) {
+            anchor_max = std::max(anchor_max, point.rpm);
+          }
+        }
+      }
+    }
+  };
+
+  void clearHistory() {
+    lh_ = WheelHistory{};
+    rh_ = WheelHistory{};
+    history_started_ = false;
+    history_since_ = 0.0;
+    last_now_ = 0.0;
+    was_stopped_ = false;
+  }
+  void stopAnchor(const Sample& l, const Sample& r) {
+    anchor(l, r);
+    lh_.snapshot(l.time_sec, history_since_);
+    rh_.snapshot(r.time_sec, history_since_);
+  }
+  Result gapDiscard(Reason reason) {
+    anchored_ = false;
+    Result result{State::kReset, reason};
+    result.stop_gap = true;
+    result.left.reason = result.right.reason = reason;
+    return result;
+  }
+  Result hardGate(Reason reason) {
+    auto result = discard(reason);
+    result.stop_gap = true;
+    result.left.reason = result.right.reason = reason;
+    return result;
+  }
+  StopIncrement recover(const Sample& old, const Sample& s, const WheelHistory& history) const {
+    const double dt = s.time_sec - old.time_sec;
+    if (s.ref_rpm != 0.0) return {0, 0, StopDecision::kHardGate, Reason::kRef};
+    if (!history.anchor_history) return {0, 0, StopDecision::kHardGate, Reason::kHistory};
+    if (!(dt > 0.0) || dt > kStopHoldSec) return {0, 0, StopDecision::kHardGate, Reason::kStale};
+    return uniqueStopIncrement(shortestTurns(old.position, s.position),
+                               history.anchor_max / 60.0 * dt * options_.speed_margin +
+                                   static_cast<double>(options_.noise_counts) /
+                                       motor_control_lib::ddt_protocol::kPositionRawPerTurn);
+  }
+  Result updateStopGap(const Sample& left, const Sample& right, double now, const Limits& limits,
+                       double ref_time) {
+    if (!std::isfinite(ref_time) || ref_time > now || !options_.valid() || !valid(left, now) ||
+        !valid(right, now) || !std::isfinite(left.ref_rpm) || !std::isfinite(right.ref_rpm) ||
+        !std::isfinite(limits.radius) || !(limits.radius > 0.0) ||
+        !std::isfinite(limits.separation) || !(limits.separation > 0.0) ||
+        !std::isfinite(limits.max_rpm) || !(limits.max_rpm > 0.0) ||
+        (history_started_ && now < last_now_) || lh_.regressed(left) || rh_.regressed(right)) {
+      return hardGate(Reason::kInvalid);
+    }
+    if (left.fault != 0 || right.fault != 0) return hardGate(Reason::kFault);
+    if (!left.mode_matches || !right.mode_matches) return hardGate(Reason::kMode);
+    if (now - left.time_sec > kStopHoldSec || now - right.time_sec > kStopHoldSec) {
+      return hardGate(Reason::kStale);
+    }
+    const double assisted = assistedGapLimit(limits);
+    const double cap = assisted > 0.0 ? assisted : kMaxAssistedGapSec;
+    const bool stopped = left.ref_rpm == 0.0 && right.ref_rpm == 0.0;
+    const bool gap = now - left.time_sec > cap || now - right.time_sec > cap ||
+                     (anchored_ && (now - left_.time_sec > cap || now - right_.time_sec > cap));
+    const bool expired =
+        anchored_ && (now - left_.time_sec > kStopHoldSec || now - right_.time_sec > kStopHoldSec);
+    // A restart invalidates the pending stop interval and its speed history.
+    // Ordinary short running intervals still follow the legacy integrator.
+    if (history_started_ && was_stopped_ && !stopped) {
+      clearHistory();
+      if (gap && !expired) return hardGate(Reason::kRef);
+    }
+    if (!history_started_ || now - last_now_ > kStopHistorySec) {
+      history_since_ = now;
+      history_started_ = true;
+    }
+    last_now_ = now;
+    was_stopped_ = stopped;
+    lh_.observe(left, now, ref_time);
+    rh_.observe(right, now, ref_time);
+    if (!anchored_) {
+      stopAnchor(left, right);
+      return {State::kAnchored};
+    }
+    // Real time, not the arriving sample's timestamp, bounds retention. Once
+    // expired, these endpoints are consumed without integrating; never resurrect.
+    if (expired) {
+      stopAnchor(left, right);
+      Result result{State::kReset, Reason::kStale};
+      result.stop_gap = true;
+      result.left.reason = result.right.reason = Reason::kStale;
+      return result;
+    }
+    // A wheel may hold only with a zero closing-tick reference and complete
+    // pre-anchor history. The other wheel can still be rejected independently.
+    const bool left_can_hold = left.ref_rpm == 0.0 && lh_.anchor_history;
+    const bool right_can_hold = right.ref_rpm == 0.0 && rh_.anchor_history;
+    if (gap && !left_can_hold && !right_can_hold) {
+      return gapDiscard(!stopped ? Reason::kRef : Reason::kHistory);
+    }
+    if (left.count == left_.count || right.count == right_.count) return {State::kWaiting};
+    // Multiple replies from the fast wheel use its latest endpoint. No partial
+    // endpoint is consumed, and no raw sample is counted twice in the history.
+    auto l = lh_.received, r = rh_.received;
+    // ref=0 is judged at the closing tick, as in the offline definition.
+    l.ref_rpm = left.ref_rpm;
+    r.ref_rpm = right.ref_rpm;
+    if (!gap) {
+      double dl = 0.0, dr = 0.0;
+      const bool ok =
+          wheelIncrement(left_, l, limits, &dl) && wheelIncrement(right_, r, limits, &dr);
+      stopAnchor(l, r);
+      if (!ok) return {State::kReset, Reason::kAmbiguous};
+      return {State::kIntegrated, Reason::kNone, limits.radius * kTwoPi * (dl - dr) / 2.0,
+              limits.radius * kTwoPi * (-dr - dl) / limits.separation};
+    }
+    Result result;
+    result.stop_gap = true;
+    result.left = recover(left_, l, lh_);
+    result.right = recover(right_, r, rh_);
+    result.both_zero = lh_.zeros >= kZeroReplies && rh_.zeros >= kZeroReplies;
+    const bool lok = result.left.decision == StopDecision::kAccepted;
+    const bool rok = result.right.decision == StopDecision::kAccepted;
+    const double dl = lok ? result.left.turns : 0.0;
+    const double dr = rok ? -result.right.turns : 0.0;
+    result.state = lok || rok ? State::kIntegrated : State::kReset;
+    result.reason = lok && rok ? Reason::kNone : Reason::kGap;
+    result.distance = limits.radius * kTwoPi * (dl + dr) / 2.0;
+    result.heading = limits.radius * kTwoPi * (dr - dl) / limits.separation;
+    stopAnchor(l, r);  // rejected wheel also consumed: no later double recovery
+    return result;
+  }
+
+  StopGapOptions options_{};
+  WheelHistory lh_{}, rh_{};
+  bool history_started_{false};
+  double history_since_{0.0};
+  double last_now_{0.0};
+  bool was_stopped_{false};
   Sample left_{};
   Sample right_{};
   bool anchored_{false};

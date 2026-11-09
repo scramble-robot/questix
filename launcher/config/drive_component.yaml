@@ -238,6 +238,13 @@ drive_component:
     # ポーズ固定・twist ゼロで publish を継続する。
     # publish_tf: 外部 localization が odom->base_link を出す場合は false にする
     publish_tf: true
+    # Issue #229 B′: odom pose only, velocity/current 共通。既定 OFF。
+    # 停止送信・帰還・安全判定には使わない。変更にはノード再起動が必要。
+    odom_stop_gap_recovery: false
+    # k は床で 1.0 と 1.25 を比較してから決める。過去の速度は物理的上限ではない。
+    odom_stop_gap_speed_margin: 1.25
+    # T_noise。ゼロ判定の T_zero=8 / K_zero=2 とは別。保持上限は実時間 0.5 s。
+    odom_stop_gap_noise_counts: 8
     odom_topic: "/odom"
     odom_frame_id: "odom"
     base_frame_id: "base_link"
