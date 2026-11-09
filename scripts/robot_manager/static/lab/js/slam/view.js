@@ -56,11 +56,17 @@ function pageHeading(model, copy, actions) {
       <h1 id="slamHeading">${heading(model, copy)}</h1>
     </div>
     <nav class="slam-mode" aria-label="実験の進め方">
-      <button id="slamBasicsTab" aria-pressed=${String(basics)} @click=${actions.showBasics}>
+      <button
+        id="slamBasicsTab"
+        aria-pressed=${String(basics)}
+        aria-current=${String(basics)}
+        @click=${actions.showBasics}
+      >
         ① 仕組み（7実験）</button
       ><button
         id="slamSimTab"
         aria-pressed=${String(model.view === 'experiment' && !model.real)}
+        aria-current=${String(model.view === 'experiment' && !model.real)}
         @click=${() => actions.setReal(false)}
       >
         ② 総合実験：センサーを比べる</button
@@ -68,6 +74,7 @@ function pageHeading(model, copy, actions) {
         id="slamRealTab"
         class="run-mode-live-button"
         aria-pressed=${String(model.view === 'experiment' && model.real)}
+        aria-current=${String(model.view === 'experiment' && model.real)}
         @click=${() => actions.setReal(true)}
       >
         ③ 実機で確かめる（ROS 2）
@@ -75,6 +82,7 @@ function pageHeading(model, copy, actions) {
       <button
         id="slamUsbTab"
         aria-pressed=${String(model.view === 'usb')}
+        aria-current=${String(model.view === 'usb')}
         @click=${actions.showUsb}
       >
         ${copy.usbTab}

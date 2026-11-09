@@ -29,7 +29,8 @@ def test_the_mode_api_accepts_exactly_the_modes():
 
 def test_the_ui_offers_exactly_the_modes():
     html = (STATIC / "index.html").read_text()
-    choice = html[html.index('id="mode-choice"'):html.index("</fieldset>")]
+    start = html.index('id="mode-choice"')
+    choice = html[start:html.index("</fieldset>", start)]
     assert re.findall(r'name="mode" value="([a-z]+)"', choice) == list(modes.MODES)
     status_view = (STATIC / "status-view.js").read_text()
     names = dict(re.findall(r"(\w+): '([^']+)'",

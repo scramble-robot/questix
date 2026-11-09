@@ -27,11 +27,11 @@
   margin: 0;
 }
 /* Explicit, or it inherits the orange of .drive-block h4 (css/live.css) inside a lesson. */
-.drive-block .drive-report h4,
-.drive-report h4 {
+.drive-report .drive-report-head h4 {
   margin: 0;
   color: var(--report-ink);
   font-size: 15px;
+  line-height: normal;
   display: flex;
   align-items: baseline;
   gap: 6px;
@@ -40,7 +40,7 @@
   display: grid;
   gap: 4px;
 }
-.drive-report-meta {
+.drive-report .drive-report-meta {
   font-size: 13px;
   color: var(--muted);
 }
@@ -158,7 +158,8 @@
   gap: 4px 14px;
   padding: 0;
 }
-.drive-report figure > p {
+.drive-report .drive-report-chart > p,
+.drive-report .drive-report-path > p {
   padding: 0;
   min-height: 0;
 }
@@ -224,7 +225,7 @@
   /* Right: room for the names written at the lines' ends. */
   padding: 20px 44px 22px 42px;
 }
-.drive-plot-axis {
+.drive-report .drive-plot-axis {
   margin: 0;
   padding-left: 42px;
   font-size: 12px;
@@ -235,12 +236,14 @@
   position: relative;
   height: 100%;
 }
-.drive-plot-lines {
+.drive-report .drive-plot-lines {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   overflow: visible;
+  margin: 0;
+  padding: 0;
 }
 .drive-plot-unit,
 .drive-plot-y,
@@ -353,8 +356,11 @@
 }
 
 /* The path from above: a square that never grows past 300 px. */
-.drive-report-path svg {
+.drive-report .drive-report-path svg {
   display: block;
+  position: static;
+  margin: 0;
+  padding: 0;
   width: min(100%, 300px);
   height: auto;
   border: 1px solid var(--line);
@@ -375,7 +381,8 @@
   stroke: var(--report-ink);
   stroke-width: 2;
 }
-.drive-report .drive-report-spin {
+.drive-report .drive-report-path > .drive-report-spin {
+  font-size: 12px;
   display: grid;
   place-items: center;
   min-height: 96px;
@@ -486,9 +493,37 @@
   gap: 4px;
   margin: 10px 0;
 }
-.drive-report-status {
+.drive-report-topics {
+  font-size: 13px;
+}
+
+/* A host's paragraph rules must not resize report axes, metadata or notes. Keep the
+   report's existing typography even inside the measurement lab or a supplement dialog. */
+.drive-report .drive-report-status,
+.drive-report .drive-report-meta,
+.drive-report .drive-report-ended,
+.drive-report .drive-report-cut,
+.drive-report .drive-note,
+.drive-report .drive-plot-axis,
+.drive-report .drive-report-spin,
+.drive-report .drive-report-topics p {
+  margin: 0;
+  line-height: 1.85;
+}
+.drive-report .drive-report-status {
+  font-size: 14px;
   line-height: 1.3;
 }
-.drive-report-topics {
+.drive-report .drive-report-ended,
+.drive-report .drive-report-cut {
+  font-size: 14px;
+}
+.drive-report .drive-note,
+.drive-report .drive-report-topics p {
+  font-size: 13px;
+}
+
+/* Compact reports keep their turn explanation inside the report's own details. */
+.drive-report .drive-report-more .drive-report-spin {
   font-size: 13px;
 }
