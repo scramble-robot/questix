@@ -1,3 +1,4 @@
+import { renderLive, resetLiveLayout } from '../live/live-layout.js';
 import { render } from '../vendor/lit-html.js';
 import { loadJson, fillSentence as fill } from '../core/content.js';
 import { downloadFile, scrollBehavior } from '../core/dom.js';
@@ -367,8 +368,9 @@ function sessionOf(course) {
       stopLabel: live.stopLabel,
       failed: copy.messages.liveFailed,
       apply: (recording) => APPLY[live.kind](course, recording),
-      update: () => {
-        if (shown === course) update();
+      resetLayout: () => resetLiveLayout(document),
+      update: (preserve = true) => {
+        if (shown === course) update(preserve);
       },
       drive: DRIVES[live.kind],
       reportMetrics: REPORT_METRICS_OF[live.kind],
@@ -498,10 +500,10 @@ function watchPlot(element) {
   plotObserver?.observe(element);
 }
 
-function update() {
+function update(preserve = false) {
   if (!shown) return;
   keepTable(shown);
-  render(measurementPanel(buildModel(shown), copy, actions), host());
+  renderLive(measurementPanel(buildModel(shown), copy, actions), host(), { preserve });
 }
 
 // Press → see inside the dialog: the jump links scroll the part they name into view.
@@ -763,7 +765,7 @@ const actions = {
 
 // Connecting or losing the robot changes what the panel offers, so it is redrawn from here rather
 // than leaving a stale "実機とつながっていません" on screen.
-onLiveLink(() => update());
+onLiveLink(() => update(true));
 
 for (const course of Object.keys(copy.scenarios).filter((key) => copy.scenarios[key].live))
   registerRecordTarget(`measurement-${course}`, (recording) => openFromRecords(course, recording));

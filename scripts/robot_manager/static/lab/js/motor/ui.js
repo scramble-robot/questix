@@ -1,3 +1,4 @@
+import { renderLive, resetLiveLayout } from '../live/live-layout.js';
 import { render } from '../vendor/lit-html.js';
 import { loadJson, loadText, fillSentence as fill } from '../core/content.js';
 import { downloadFile } from '../core/dom.js';
@@ -200,8 +201,9 @@ const benchSession = createLiveSession({
   stopLabel: copy.bench.stopLabel,
   failed: copy.bench.failed,
   apply: applyBench,
-  update: () => {
-    if (topicId === 'real') update();
+  resetLayout: () => resetLiveLayout(document),
+  update: (preserve = true) => {
+    if (topicId === 'real') update(preserve);
   },
   drive: benchDrive,
   reportMetrics: ['driveTime', 'maxSpeed', 'stop'], // the wheels turn in the air: no distance
@@ -251,7 +253,11 @@ function benchStatus() {
 function benchModel() {
   const capture = benchSession.model();
   return {
-    capture: { ...capture, message: benchSession.note },
+    capture: {
+      ...capture,
+      message: benchSession.note,
+      resultLink: { label: copy.bench.showResults, enabled: bench.rows.length > 0 },
+    },
     rows: bench.rows,
     summary: bench.summary,
     sample: bench.sample,
@@ -305,12 +311,8 @@ function useSampleBench() {
 const benchActions = {
   ...benchSession.actions,
   openLink: openRobotDialog,
-  // The shared block brings the button and its live strip on screen when the run starts
-  // (live-session revealLiveRun); once the run is over, its result is the table.
-  async startDriveCapture() {
-    await benchSession.actions.startDriveCapture();
-    if (bench.rows.length) revealIfHidden(document.getElementById('motorBenchTable'));
-  },
+  // Explicit learner navigation; starts and received results never reveal the table.
+  showResults: () => revealIfHidden(document.getElementById('motorBenchTable')),
   analyse: analyseBench,
   useSample: useSampleBench,
 };
@@ -343,8 +345,8 @@ function buildModel() {
   };
 }
 
-function update() {
-  render(motorPage(buildModel(), copy, fragments, actions), page());
+function update(preserve = false) {
+  renderLive(motorPage(buildModel(), copy, fragments, actions), page(), { preserve });
   reportLessonProgress('motor', {
     topics: MOTOR_TOPICS.map((topic) => ({ id: topic.id, title: copy.topics[topic.id].label })),
     current: topicId,
