@@ -23,6 +23,8 @@ def lab(tmp_path, monkeypatch):
     module = importlib.reload(module)
     # Never ask a bridge that happens to run on this machine, never write to the real ~/.cache.
     monkeypatch.setattr(module, "_bridge_state", lambda: None)
+    # Keep the real port probe for the process-group tests (bridge_group), which own a real port.
+    monkeypatch.setattr(module, "_real_port_in_use", module._port_in_use, raising=False)
     monkeypatch.setattr(module, "_port_in_use", lambda: False)
     monkeypatch.setattr(module, "_lan_addresses", lambda: [])
     monkeypatch.setattr(module, "LOG_FILE", tmp_path / "cache" / "lab-bridge.log")
@@ -935,6 +937,8 @@ def bridge_group(lab, monkeypatch, tmp_path):
     import ctypes
     if sys.platform != "linux":
         pytest.skip("process-group regression needs Linux subreaper support")
+    # The lab fixture stubs the port probe; these tests start a real port owner.
+    monkeypatch.setattr(lab, "_port_in_use", lab._real_port_in_use)
     libc = ctypes.CDLL(None, use_errno=True)
     previous = ctypes.c_int()
     assert libc.prctl(37, ctypes.byref(previous), 0, 0, 0) == 0  # PR_GET_CHILD_SUBREAPER
