@@ -1,5 +1,6 @@
 import { loadJson } from '../core/content.js';
 import { escapeHtml } from './html-escape.js';
+import { scrollBehavior } from '../core/dom.js';
 
 // What an experiment runs on: the in-browser simulation ('sim'), the connected robot ('live'), the
 // robot driven by the page itself where a robot allows it ('drive'), or values measured on the robot
@@ -66,7 +67,7 @@ function scrollToRunModeTarget(event) {
   const top = target.getBoundingClientRect().top + window.scrollY;
   window.scrollTo({
     top: top - (header?.offsetHeight ?? 0) - GAP_BELOW_HEADER,
-    behavior: 'smooth',
+    behavior: scrollBehavior(),
   });
   if (target.matches('button, input, [tabindex]')) target.focus({ preventScroll: true });
 }

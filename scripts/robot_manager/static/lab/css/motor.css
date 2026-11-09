@@ -601,6 +601,8 @@
 .motor-bench {
   margin-top: 18px;
 }
+/* One column at every width: the drive report's time charts get the full width and the table goes
+   under them, as in the other courses (DESIGN.md L-4). */
 .motor-bench-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -666,11 +668,6 @@
 }
 .motor-bench-analyse .helper {
   margin: 6px 0 0;
-}
-@media (min-width: 900px) {
-  .motor-bench-layout {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  }
 }
 @media (max-width: 420px) {
   .motor-bench-table th,

@@ -134,7 +134,7 @@ DDT M0602C の Protocol 1 応答フレームをデコードした 1 モータ分
 | `drive_mode` | `uint8` | tick 後の走行状態。`DRIVE_MODE_STOP=0` / `CREEP=1` / `RUN=2` |
 | `tick_action` | `uint8` | tick の動作。`TICK_IDLE=0`(未武装・ゲートが閉) / `TICK_DRIVE=1` / `TICK_TIMEOUT_STOP=2` / `TICK_FAULT_STOP=3` |
 | `lqr_active` | `bool` | velocity RUN 域 LQR+FF の補正をこの tick に適用したか |
-| `shaped_linear` / `shaped_angular` | `float64` | 加速度制限・テーパー後の車体指令 [m/s] / [rad/s](REP-103) |
+| `shaped_linear` / `shaped_angular` | `float64` | 目標の共通縮小・加速度制限・テーパー後、車輪出力保護前の車体指令 [m/s] / [rad/s](REP-103) |
 | `command_sent` | `bool` | tick の指令(駆動・停止・安全停止)を両輪について、書き込みの失敗なく処理できたか。**実際にフレームを送ったことの証拠ではない**: 停止が続く間は `stop_resend_interval_ms`(既定 300 ms)のあいだ停止フレームの再送を省き、それでも true になる(その輪の `feedback_new` は false、`roundtrip_ms` は NaN)。送受信の有無は `feedback_new` で見る。idle tick は安全停止をしたときだけ true(フィードバック取得のための停止フレーム再送は指令に含めない) |
 | `stop_frame` | `bool` | tick の指令が停止フレーム(目標 0)だったか |
 | `left` / `right` | `DriveControlWheelSample` | 車輪ごと(下表) |
@@ -143,7 +143,7 @@ DDT M0602C の Protocol 1 応答フレームをデコードした 1 モータ分
 
 | フィールド | 型 | 意味 |
 |---|---|---|
-| `ref_rpm` | `int32` | 補正前の車輪目標 [rpm](整形 → 運動学 → 整数化) |
+| `ref_rpm` | `int32` | LQR補正前の車輪目標 [rpm](整形 → 運動学 → 車輪出力の共通縮小 → 整数化、丸め後も車輪上限内) |
 | `command_rpm` | `int32` | ライブラリへ渡した速度指令 [rpm](LQR 補正後、停止フレームは 0。送信時に `max_motor_rpm` でクランプ)。current モードではホスト PI の参照(参考値) |
 | `command_current_raw` | `int16` | current モード: 最後に送信成功した電流指令 raw(この tick に送っていなければドライバが保持しているはずの値)。velocity モードは 0 |
 | `feedback_new` | `bool` | **この tick の送受信で**新しい有効フィードバックを受信したか。false ならワイヤ値は前のフレームの繰り返し |
@@ -154,6 +154,11 @@ DDT M0602C の Protocol 1 応答フレームをデコードした 1 モータ分
 | `mode` / `velocity_rpm_raw` / `position_raw` / `current_raw` / `fault_code` | — | 最後の有効フレームのワイヤ値そのまま(意味は `MotorFeedback` と同じ。`velocity_rpm_raw` はフィルタ前の整数値) |
 
 ## `/drive_control_sample` トピック契約(診断専用)
+
+車輪上限の共通縮小によるメッセージ定義・型hashの変更はない。`shaped_*` は出力保護前、
+`ref_rpm` は保護後なので、過渡では単純な運動学変換の結果と異なる。
+出力保護率・目標縮小率の計算、必要な同時記録と旧bagの扱いは
+[`motor_control_app/README.md`](../motor_control_app/README.md#メッセージを変えずに縮小を調べる) を参照。
 
 - **型**: `questix_msgs/msg/DriveControlSample`
 - **発行元**: `drive_component`。制御 tick の最後(送信の後)に 1 回。レートは `control_rate`(既定 50 Hz)。

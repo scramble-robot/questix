@@ -29,6 +29,7 @@
   --radius: 12px;
   --radius-control: 8px;
   --shadow: 0 8px 28px #0003;
+  --status-region-height: 9rem;
 }
 
 * {
@@ -1510,7 +1511,7 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .status-strip > div { display: grid; gap: 0.1rem; align-content: start; padding: 0.45rem 0.7rem; border-left: 4px solid var(--border-input);
   background: var(--bg-input); border-radius: 6px; min-width: 0; }
 .status-strip dt { font-size: var(--font-small); color: var(--text-dim); }
-.status-strip dd { font-weight: 600; overflow-wrap: anywhere; }
+.status-strip dd { font-weight: 600; overflow-wrap: anywhere; min-block-size: 3.2em; }
 .status-strip > div:has(dd[data-tone="ok"]) { border-left-color: var(--green); }
 .status-strip > div:has(dd[data-tone="warn"]) { border-left-color: var(--orange); }
 .status-strip > div:has(dd[data-tone="danger"]) { border-left-color: var(--red); }
@@ -1629,11 +1630,53 @@ input[type="checkbox"] { accent-color: var(--accent); }
   white-space: nowrap;
 }
 
-/* Why the robot does not move (motion-state-view.js): the tone of each row. */
-#motion-state-result dd[data-tone="error"] { color: var(--red); font-weight: 600; }
-#motion-state-result dd[data-tone="warn"] { color: var(--orange); }
-#motion-state-result dd[data-tone="ok"] { color: var(--green); }
+/* Permission choices stay in place. Notifications keep their original, early position;
+   their own scroll region keeps long messages readable without moving the controls. */
+.notification-region {
+  overflow: auto;
+  scrollbar-gutter: stable;
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-control);
+  padding: 0.75rem;
+}
+.notification-region { height: var(--status-region-height); margin-bottom: 1rem; }
+.notification-region .notice { margin: 0 0 0.6rem; }
+.notification-empty { color: var(--text-dim); font-size: var(--font-small); }
+.notification-region:has(> :not([hidden]):not(.notification-empty)) .notification-empty { display: none; }
+.notification-region:focus-visible, .permission-choice label:has(input:focus-visible) {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
+.permission-neutral { font-weight: 600; margin-bottom: 0.75rem; }
+.permission-estop { display: flex; gap: 1rem; align-items: center; min-height: 3rem; }
+.permission-estop [data-tone="danger"] { color: var(--red); font-weight: 700; }
+.permission-estop [data-tone="warn"] { color: var(--yellow); }
+.permission-estop [data-tone="ok"] { color: var(--text); }
+.permission-choice {
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-control);
+  padding: 0.75rem;
+  margin: 1rem 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.permission-choice legend { padding: 0 0.3rem; font-weight: 600; }
+.permission-choice label {
+  display: flex; align-items: center; gap: 0.75rem; min-height: 44px;
+  padding: 0.5rem; border: 1px solid var(--border-input);
+  border-radius: var(--radius-control); color: var(--text);
+}
+.permission-choice label:has(input:checked) { background: var(--accent-soft); border-color: var(--accent); }
+.permission-choice label:has(input:disabled) { color: var(--text-dim); cursor: default; }
+.permission-choice input { width: 1.25rem; height: 1.25rem; flex: none; accent-color: var(--accent); }
+#permission-feedback p { overflow-wrap: anywhere; }
+.permission-guide { color: var(--accent-hover); }
+@media (min-width: 900px) {
+  .permission-choice { grid-template-columns: 1fr 1.1fr 1.5fr; }
+}
 
-.rec-readiness { margin: 1rem 0; }
-.rec-readiness .trial-warnings { overflow-wrap: anywhere; }
-.rec-readiness .btn { margin-top: .35rem; }
+#actuation-card, .permission-choice input { scroll-margin-top: var(--manager-chrome-height, 14rem); }
+.permission-error { color: var(--yellow); padding-top: 0.5rem; }
+.permission-error:empty { display: none; }

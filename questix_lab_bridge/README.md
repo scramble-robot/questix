@@ -111,7 +111,7 @@ To use it:
 
 1. Start the robot for a lesson: `ros2 launch questix_launcher questix_core.launch.xml
    robot_mode:=lesson` (only lesson launches start command_arbiter).
-2. The teacher switches 教材からの走行 on in Robot Manager's 教材 tab; Robot Manager then
+2. The teacher chooses コントローラーと教材 for 走行の許可 in Robot Manager's 操作 tab; Robot Manager then
    publishes it on `/lab_permission` (5 Hz, a lease: nothing latched). The switch holds for that
    session only: it is off at every start of Robot Manager (and of the robot), after 配信停止,
    「すべて止める」 and every mode switch.
@@ -428,3 +428,26 @@ in particular the driving experiments with the real motors, startup without the 
 physical E-stop. The launcher experiments were checked end to end against a fake launcher node
 (statuses per the contract above) only; the real roller ESC, servos, controller takeover and
 E-stop on a Raspberry Pi 5 are still to be validated.
+
+
+Robot Manager holds the session permissions in one 操作 tab card, with independent 走行の許可
+and 発射の許可 choices: 許可しない (authority/lab OFF/OFF), コントローラーのみ (ON/OFF),
+and コントローラーと教材 (ON/ON). The 教材 tab links there and sends no permission writes.
+Stopping the stream removes only the lab permission (ON/ON becomes ON/OFF); changing mode,
+starting/restarting/stopping robot control, 「すべて止める」 and Manager startup/shutdown revoke both.
+Reconnection never restores permissions. The choice is a teacher's permission, not a claim that
+motion is possible; E-stop, motion permission, neutral rearming and all bridge session rules
+remain authoritative and unchanged.
+
+`GET /api/actuation/status` includes `choices`, `instance` (an opaque Manager process generation)
+and `revision`. `POST /api/actuation/choice/{kind}` (`drive` or `launcher`) takes
+`{"choice":"controller_and_lab","instance":"<generation>","revision":12}`;
+choices are `none`, `controller`, `controller_and_lab`. Under one lock it updates both bits
+and returns the complete confirmed state and version. A grant needs the current generation
+and revision (409 otherwise); a reduction is accepted even with stale ones. Errors in applying
+the choice include a reason, message and confirmed state. The UI has a 5 s request timeout,
+shows unknown state separately from confirmed OFF, and only re-reads after failures: it never
+retries grants automatically. Legacy authority and lab HTTP routes remain for compatibility,
+share the lock/version and the same loopback/JSON/same-origin mutation guard, and are unused by
+the UI. No new ROS interface or delivery guarantee is introduced; the two ROS topics need not
+arrive simultaneously. Type, QoS, 5 Hz frequency, heartbeat and receiving leases are unchanged.
