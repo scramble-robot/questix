@@ -1070,17 +1070,19 @@ async function refreshLabStatus() {
   document.getElementById("lab-indicator").className =
     "rec-indicator " + (serving ? "serving" : "idle");
   document.getElementById("tab-lab-dot").classList.toggle("serving", serving);
-  document.getElementById("lab-state-text").textContent = data.running
-    ? "配信中"
-    : data.external
-      ? "配信中（手動で起動）"
-      : data.last_stop_reason === "autostart_failed"
-        ? "停止中（自動開始に失敗しました。ROS 環境とビルドを確認してください）"
-        : StatusView.labUnavailable(data)
-          ? `停止中（${StatusView.labUnavailable(data)}では配信しません。教材モードで配信できます）`
-          : data.last_stop_reason === "start_failed" || data.last_stop_reason === "exited"
-            ? "停止中（ブリッジが終了しました。「ブリッジのログ」を確認してください）"
-            : "停止中";
+  document.getElementById("lab-state-text").textContent = data.last_stop_reason === "stop_failed"
+    ? "停止に失敗しました（stop_failed）。プロセスまたはポートが残っています。ログを確認し、停止を再試行してください"
+    : data.running
+      ? "配信中"
+      : data.external
+        ? "配信中（手動で起動）"
+        : data.last_stop_reason === "autostart_failed"
+          ? "停止中（自動開始に失敗しました。ROS 環境とビルドを確認してください）"
+          : StatusView.labUnavailable(data)
+            ? `停止中（${StatusView.labUnavailable(data)}では配信しません。教材モードで配信できます）`
+            : data.last_stop_reason === "start_failed" || data.last_stop_reason === "exited"
+              ? "停止中（ブリッジが終了しました。「ブリッジのログ」を確認してください）"
+              : "停止中";
   receiveElapsed('lab', data, data.running, ticket);
 
   const urls = document.getElementById("lab-urls");
@@ -1403,13 +1405,13 @@ function setLabError(id, message) {
 // "ブリッジのログ": the end of the bridge's output, while it is stopped or has failed.
 function showLabLog(data, serving) {
   const details = document.getElementById("lab-log");
-  const show = !serving && Boolean(data.log_tail);
+  const show = (!serving || data.last_stop_reason === "stop_failed") && Boolean(data.log_tail);
   details.hidden = !show;
   if (!show) return;
   const text = document.getElementById("lab-log-text");
   if (text.textContent !== data.log_tail) text.textContent = data.log_tail;
   document.getElementById("lab-log-file").textContent = `全体: ${data.log_file}`;
-  if (data.last_stop_reason === "start_failed" || data.last_stop_reason === "exited") {
+  if (["start_failed", "exited", "stop_failed"].includes(data.last_stop_reason)) {
     details.open = true;
   }
 }

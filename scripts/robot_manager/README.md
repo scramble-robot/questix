@@ -246,8 +246,15 @@ The **教材** tab starts and stops that bridge, so nobody has to run `ros2 laun
   `lab_dir:=` this manager's `static/lab/` — learners get exactly the pages served at `/lab/`.
 - The tab shows the URL(s) to open on learners' devices (`http://<robot-ip>:8897/`; container
   and VPN interfaces are left out). A page opened there connects to the robot automatically.
-- **配信停止** interrupts the process group (SIGINT, then SIGTERM/SIGKILL). The bridge is also
-  stopped when robot_manager exits. A bridge that was started by hand is shown as
+- **配信停止** signals the saved process group (SIGINT for up to 5 s, then SIGTERM for 3 s,
+  then SIGKILL for 3 s), reaping the tracked parent while waiting for the entire group to
+  disappear. It reports a stop only after the group is empty and the port is free, even if
+  `ros2 run` exited first. A short port-release wait uses the same total 11 s wait budget.
+  If the group or port remains, the status and log show `stop_failed`, `POST /api/lab/stop`
+  returns HTTP 500 with a Japanese explanation, and the lesson permissions go OFF. The manager
+  retains ownership so 配信停止 can be retried; a confirmed-empty group is never signalled again.
+  The same stopping procedure runs when leaving lesson mode and when robot_manager exits.
+  A bridge that was started by hand is shown as
   "配信中（手動で起動）" and is not stopped from here.
 - `カメラのトピック` (`sensor_msgs/CompressedImage`, empty = no camera) is stored in
   `$QUESTIX_CONFIG_DIR/lab.env` and applies from the next start.
