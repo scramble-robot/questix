@@ -29,6 +29,7 @@
   --radius: 12px;
   --radius-control: 8px;
   --shadow: 0 8px 28px #0003;
+  --status-region-height: 9rem;
 }
 
 * {
@@ -1290,6 +1291,44 @@ input[type="checkbox"] { accent-color: var(--accent); }
 }
 
 /* Operator tuning form */
+.control-range-warning { height: 12rem; overflow: auto; border-color: var(--orange); }
+.control-range-warning.has-lateral-repair { height: 22rem; }
+.control-range-warning label { display: block; margin-top: 0.75rem; font-weight: 600; }
+.control-range-warning input { display: block; width: 100%; }
+.control-field.out-of-range { border-color: var(--orange); }
+.control-field input[aria-invalid="true"], #control-lateral-repair[aria-invalid="true"] {
+  outline: 2px solid var(--orange); outline-offset: 2px; }
+.control-range, .control-estimate { grid-column: 1 / -1; color: var(--text-dim);
+  font-size: var(--font-small); line-height: 1.65; overflow-wrap: anywhere; }
+.control-estimate { height: 9rem; overflow: auto; }
+.control-estimate:empty { display: none; }
+/* Editing updates this notice and saved-value rows; reserve their space above later inputs. */
+#controls-application { height: 12rem; overflow: auto; }
+.control-field .control-saved[hidden] { display: flex !important; visibility: hidden; }
+.control-field .control-change-state[hidden] { display: block !important; visibility: hidden; }
+.control-change-state { min-height: 1.4rem; }
+.tuning-preview { border-top: 1px solid var(--border-input); margin-top: 1rem; padding-top: 1rem; }
+.tuning-preview h3 { font-size: 1rem; margin-bottom: 0.75rem; }
+.tuning-motion-summary { height: 5.5rem; overflow: auto; line-height: 1.65; }
+.tuning-chart { margin: 0; padding: 1rem 0.5rem; background: #fff; color: #253c45;
+  border: 1px solid var(--border-input); border-radius: var(--radius-control); font-size: 0.875rem; }
+.tuning-chart-legend { display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; min-height: 3rem; }
+.tuning-chart-legend span::before { content: ""; display: inline-block; vertical-align: middle;
+  width: 1.5rem; margin-right: 0.4rem; border-top: 3px solid #167452; }
+.tuning-chart-legend .tuning-line-standard::before { border-top: 2px dashed #8a5b08; }
+.tuning-chart-y-title { margin: 0.5rem 0 0.75rem; }
+.tuning-chart-body { display: grid; grid-template-columns: 3.5rem minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr); height: 12rem; }
+.tuning-chart-plot { position: relative; min-width: 0; min-height: 0;
+  border-left: 1px solid #4d6469; border-bottom: 1px solid #4d6469; }
+.tuning-chart-plot svg { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+.tuning-chart-y-ticks { position: relative; margin-right: 0.5rem; }
+.tuning-chart-y-ticks span { position: absolute; right: 0; transform: translateY(-50%); }
+.tuning-chart-x-ticks { position: relative; height: 1.75rem; margin: 0.5rem 0 0 3.5rem; }
+.tuning-chart-x-ticks span { position: absolute; }
+.tuning-chart-x-title { text-align: center; }
+.tuning-chart-caption, .tuning-chart-status { line-height: 1.65; margin-top: 0.75rem; }
+.tuning-chart-status { min-height: 3rem; }
 .control-help { color: var(--text-dim); line-height: 1.6; margin: 0.8rem 0; }
 .control-toolbar { display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap; }
 .control-section { border: 1px solid var(--border-input); border-radius: var(--radius-control);
@@ -1527,7 +1566,7 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .status-strip > div { display: grid; gap: 0.1rem; align-content: start; padding: 0.45rem 0.7rem; border-left: 4px solid var(--border-input);
   background: var(--bg-input); border-radius: 6px; min-width: 0; }
 .status-strip dt { font-size: var(--font-small); color: var(--text-dim); }
-.status-strip dd { font-weight: 600; overflow-wrap: anywhere; }
+.status-strip dd { font-weight: 600; overflow-wrap: anywhere; min-block-size: 3.2em; }
 .status-strip > div:has(dd[data-tone="ok"]) { border-left-color: var(--green); }
 .status-strip > div:has(dd[data-tone="warn"]) { border-left-color: var(--orange); }
 .status-strip > div:has(dd[data-tone="danger"]) { border-left-color: var(--red); }
@@ -1646,11 +1685,53 @@ input[type="checkbox"] { accent-color: var(--accent); }
   white-space: nowrap;
 }
 
-/* Why the robot does not move (motion-state-view.js): the tone of each row. */
-#motion-state-result dd[data-tone="error"] { color: var(--red); font-weight: 600; }
-#motion-state-result dd[data-tone="warn"] { color: var(--orange); }
-#motion-state-result dd[data-tone="ok"] { color: var(--green); }
+/* Permission choices stay in place. Notifications keep their original, early position;
+   their own scroll region keeps long messages readable without moving the controls. */
+.notification-region {
+  overflow: auto;
+  scrollbar-gutter: stable;
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-control);
+  padding: 0.75rem;
+}
+.notification-region { height: var(--status-region-height); margin-bottom: 1rem; }
+.notification-region .notice { margin: 0 0 0.6rem; }
+.notification-empty { color: var(--text-dim); font-size: var(--font-small); }
+.notification-region:has(> :not([hidden]):not(.notification-empty)) .notification-empty { display: none; }
+.notification-region:focus-visible, .permission-choice label:has(input:focus-visible) {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
+.permission-neutral { font-weight: 600; margin-bottom: 0.75rem; }
+.permission-estop { display: flex; gap: 1rem; align-items: center; min-height: 3rem; }
+.permission-estop [data-tone="danger"] { color: var(--red); font-weight: 700; }
+.permission-estop [data-tone="warn"] { color: var(--yellow); }
+.permission-estop [data-tone="ok"] { color: var(--text); }
+.permission-choice {
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-control);
+  padding: 0.75rem;
+  margin: 1rem 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.permission-choice legend { padding: 0 0.3rem; font-weight: 600; }
+.permission-choice label {
+  display: flex; align-items: center; gap: 0.75rem; min-height: 44px;
+  padding: 0.5rem; border: 1px solid var(--border-input);
+  border-radius: var(--radius-control); color: var(--text);
+}
+.permission-choice label:has(input:checked) { background: var(--accent-soft); border-color: var(--accent); }
+.permission-choice label:has(input:disabled) { color: var(--text-dim); cursor: default; }
+.permission-choice input { width: 1.25rem; height: 1.25rem; flex: none; accent-color: var(--accent); }
+#permission-feedback p { overflow-wrap: anywhere; }
+.permission-guide { color: var(--accent-hover); }
+@media (min-width: 900px) {
+  .permission-choice { grid-template-columns: 1fr 1.1fr 1.5fr; }
+}
 
-.rec-readiness { margin: 1rem 0; }
-.rec-readiness .trial-warnings { overflow-wrap: anywhere; }
-.rec-readiness .btn { margin-top: .35rem; }
+#actuation-card, .permission-choice input { scroll-margin-top: var(--manager-chrome-height, 14rem); }
+.permission-error { color: var(--yellow); padding-top: 0.5rem; }
+.permission-error:empty { display: none; }

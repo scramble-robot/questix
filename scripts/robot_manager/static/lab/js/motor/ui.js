@@ -142,7 +142,7 @@ const benchDrive = {
   confirmLabel: copy.bench.confirm,
   program() {
     const limits = benchLimits();
-    if (!(limits?.linear > 0))
+    if (!Number.isFinite(limits?.linear) || limits.linear <= 0)
       return fill(copy.bench.programUnknown, { steps: stepsText(), hold: BENCH_HOLD });
     return fill(copy.bench.program, {
       steps: stepsText(),

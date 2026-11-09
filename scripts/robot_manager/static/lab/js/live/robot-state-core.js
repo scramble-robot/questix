@@ -23,8 +23,8 @@ const HISTORY_SECONDS = 10; // the wheel charts show this much
 const WHEEL_GAP_SECONDS = 0.5;
 // Older than this, a value no longer describes the robot now: it is shown grey and left out of a
 // memo line. The LiDAR sends 5 scans a second at most (lab_bridge.yaml scan_max_hz), the rest 20.
-// /emergency_stop comes at 10 Hz from operation_manager: silent for a second, its state is stale.
-const STALE_SECONDS = { drive: 1, odom: 1, scan: 2, twist: 1, estop: 1 };
+// E-stop state comes from live-status.js's shared display snapshot, never this tracker.
+const STALE_SECONDS = { drive: 1, odom: 1, scan: 2, twist: 1 };
 const STREAMS = ['drive', 'odom', 'scan', 'twist'];
 const MOVING_RPM = 1; // a wheel below this counts as standing still
 const COMMAND_MOVING = 1e-3; // |command| above this asks the robot to move (m/s or rad/s)
@@ -336,49 +336,32 @@ function poseModel(tracker, now) {
 }
 
 /**
- * The emergency stop as the panel shows it: `{state, source}`, `state` one of 'pressed',
- * 'released', 'stale' (heard, then silent for STALE_SECONDS.estop) or 'unknown' (never heard),
- * `source` 'estop' (/emergency_stop itself) or 'drive' (the derived flag of /drive_status).
- * Only /emergency_stop itself can say "released"; the derived flag may add a pressed E-stop but
- * its false never counts as released (an older bridge without the estop stream stays unknown).
- */
-function estopModel(tracker, now) {
-  const drive = tracker.latest.drive;
-  const derivedPressed = Boolean(
-    drive && !isStale(tracker, 'drive', now) && drive.emergency_stop === true,
-  );
-  const message = tracker.latest.estop;
-  if (message && !isStale(tracker, 'estop', now) && message.active === true)
-    return { state: 'pressed', source: 'estop' };
-  if (derivedPressed) return { state: 'pressed', source: 'drive' };
-  if (!message) return { state: 'unknown', source: null };
-  if (isStale(tracker, 'estop', now)) return { state: 'stale', source: 'estop' };
-  return { state: 'released', source: 'estop' };
-}
-
-/**
  * Everything the panel shows. `link` is capture.js liveLink() (connected, streams, config, robot),
  * `silent` robot-link's "no stream delivers", `driveState` the bridge's latest drive_state (or
  * null), `session` this page's id on the bridge, `now` [ms].
+ * `estopState` is the shared display snapshot, not a second receive-time decision.
  */
 function robotStateModel(
   tracker,
-  { link, silent = false, driveState = null, session = null, now },
+  { link, silent = false, driveState = null, session = null, now, estopState = 'unknown' },
 ) {
   if (!link?.connected) return { connected: false, phase: link?.phase ?? 'idle' };
   const driveFresh = !isStale(tracker, 'drive', now);
   const command = freshCommand(tracker, now);
   const wheels = wheelsModel(tracker, now);
   const motion = motionModel(tracker, now);
-  const estop = estopModel(tracker, now);
+
   return {
     connected: true,
     robot: link.robot?.name ?? '',
     silent,
-    // true pressed, false released, null unknown or stale (estopState tells which).
-    estop: estop.state === 'pressed' ? true : estop.state === 'released' ? false : null,
-    estopState: estop.state,
-    estopSource: estop.source,
+    // true pressed, false released, null for unheard, stale or unverified timing.
+    estop: estopState === 'pressed' ? true : estopState === 'released' ? false : null,
+    estopState,
+    // Display only: the drive node's own report, never a motion gate or the E-stop badge.
+    driveEstopNotice:
+      driveFresh && tracker.latest.drive?.emergency_stop === true && estopState !== 'pressed',
+    estopSource: estopState === 'unknown' ? null : 'estop',
     driver: driverOf({
       driveState,
       session,
@@ -428,7 +411,7 @@ function sparkLines(points, top) {
 
 /**
  * The strip's model from robotStateModel(): the emergency stop ('pressed' | 'released' |
- * 'unknown'), who drives, both wheels (rpm, forward positive) and the chassis speed (m/s) — null
+ * 'unknown' | 'stale' | 'checking' | 'delayed'), who drives, both wheels (rpm, forward positive) and the chassis speed (m/s) — null
  * where nothing fresh arrived — and the last HISTORY_SECONDS of the measured speed and of the
  * command as sparkline polylines (`measured`, `command`: lists of `points` strings) on ±`top`.
  * The measured line is the chassis speed from the raw wheel feedback (unsmoothed), the node's
@@ -440,11 +423,11 @@ function stripModel(model) {
   const motion = model.motion && !model.motion.stale ? model.motion : null;
   const top = model.speedTop ?? DEFAULT_SPEED_TOP;
   const series = model.wheels?.series;
-  let estop = 'unknown';
-  if (model.estop !== null) estop = model.estop ? 'pressed' : 'released';
+  const estop = model.estopState ?? 'unknown';
   return {
     connected: true,
     estop,
+    driveEstopNotice: Boolean(model.driveEstopNotice),
     driver: model.driver,
     left: wheels ? wheels.left : null,
     right: wheels ? wheels.right : null,
@@ -509,7 +492,6 @@ export {
   HISTORY_SECONDS,
   WHEEL_GAP_SECONDS,
   STALE_SECONDS,
-  estopModel,
   FRONT_RANGE,
   DEGREES_PER_RADIAN,
   createStateTracker,

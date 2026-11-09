@@ -10,7 +10,7 @@ the pages is not: the two lesson permissions (``ALLOW_DRIVE``: low-speed driving
 ``ALLOW_SHOOT``: roller, tilt and firing one disc) are held by actuation.py next to the teacher's
 switches and published by its heartbeat on ``/lab_permission``, which command_arbiter and the lab
 bridge read (design/safety_permission_input_refactor.md, 4.6). They start off and are switched
-on by the teacher for this session with ``/api/lab/drive`` / ``/api/lab/shoot``; switching them
+on for this session by the 操作 tab choices (``/api/actuation/choice/{kind}``); changing them
 never restarts the bridge, and the bridge has no parameter that grants them. They are never read
 from lab.env (values an older manager left there are ignored, and dropped the next time lab.env
 is written), so a restart of the manager or of the robot always starts with both off. They also
@@ -18,10 +18,11 @@ go off on 配信停止, on 「すべて止める」 (``revoke_permissions``), wh
 (and stay off when it comes back to lesson mode), and when the bridge this manager started exits
 on its own. QUESTiX LAB exists only in lesson mode (教材, modes.uses_lab): in practice and
 competition mode the bridge does not run and nothing can be allowed. They also need the teacher's
-switch of the same kind (actuation.py, 操作 tab: ロボットの走行制御 / 発射機構の操作), whose vote
+authority of the same kind (actuation.py, 操作 tab: 走行の許可 / 発射の許可), whose vote
 the robot's motion permission needs for the controller and the lessons alike: a lesson permission
 cannot be switched on while that switch is off, and it goes off with it; switching the switch on
-never switches a lesson permission on. Each run is still confirmed by the learner's safety tick on
+never switches a lesson permission on through the compatibility setter. The 教材 tab only links
+to the 操作 tab; its guarded legacy HTTP permission routes remain for compatibility. Each run is still confirmed by the learner's safety tick on
 the page and bounded by the bridge's session rules and command_arbiter, and the controller takes
 over at any time.
 
@@ -59,7 +60,7 @@ import urllib.request
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 
 from robot_manager import actuation, modes, recorder, ros_domain
@@ -81,13 +82,17 @@ BRIDGE_STATE_URL = f"http://127.0.0.1:{LAB_BRIDGE_PORT}/api/state"
 BRIDGE_STATE_TIMEOUT_SEC = 0.5
 
 STOP_TIMEOUT_SEC = 5
+TERM_TIMEOUT_SEC = 3
+KILL_TIMEOUT_SEC = 3
+PORT_RELEASE_TIMEOUT_SEC = 0.3
+STOP_POLL_SEC = 0.05
 START_GRACE_SEC = 1.5
 
 # stdout/stderr of the bridge started here; truncated on every start.
 LOG_FILE = Path.home() / ".cache" / "questix" / "lab-bridge.log"
 LOG_TAIL_LINES = 15
 # last_stop_reason values after which the log tells what went wrong.
-_FAILURE_REASONS = ("exited", "start_failed", "autostart_failed")
+_FAILURE_REASONS = ("exited", "start_failed", "autostart_failed", "stop_failed")
 
 _DEFAULT_CONFIG = {
     # sensor_msgs/CompressedImage topic; empty = no camera stream (no camera driver ships
@@ -124,6 +129,9 @@ logger = logging.getLogger(__name__)
 # Bridge process state (guarded by _lock)
 _lock = threading.Lock()
 _proc: Optional[subprocess.Popen] = None
+# start_new_session=True makes the child's PID its PGID. Keep it after the leader exits;
+# rediscovering it with getpgid(proc.pid) would lose orphaned bridge children.
+_pgid: Optional[int] = None
 _started_at: Optional[float] = None
 _last_stop_reason: Optional[str] = None
 # The lesson permissions and the kind of the teacher's switch each one needs (actuation.py holds
@@ -505,24 +513,81 @@ def _log_tail() -> Optional[str]:
     return "\n".join(lines) if lines else None
 
 
-def _stop_locked(reason: str) -> None:
-    """Interrupt the bridge's process group and wait. Caller must hold _lock."""
+def _group_alive_locked() -> bool:
+    """Probe only our saved process group, forgetting it once empty. Caller must hold _lock."""
+    global _pgid
+    if _pgid is None:
+        return False
+    try:
+        os.killpg(_pgid, 0)
+    except ProcessLookupError:
+        _pgid = None
+        return False
+    except PermissionError:
+        # A group we cannot inspect is not confirmed empty.
+        return True
+    return True
+
+
+def _wait_group_locked(proc: subprocess.Popen, timeout: float) -> bool:
+    """Reap the leader while waiting for the whole group to vanish; caller holds _lock."""
+    deadline = time.monotonic() + timeout
+    while True:
+        proc.poll()
+        if not _group_alive_locked():
+            return True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(STOP_POLL_SEC, remaining))
+
+
+def _stop_locked(reason: str) -> bool:
+    """Stop our group and confirm its port is free; caller holds _lock.
+
+    The 5/3/3 second stages wait for the group, not just ros2 run. A short port check uses
+    the same overall wait budget. A failure retains ownership for retry, even after the
+    leader is reaped; a confirmed-empty PGID is never signalled again. Permissions always go off.
+    """
     global _proc, _started_at, _last_stop_reason
     proc = _proc
-    if proc is None:
-        return
-    for sig, timeout in ((signal.SIGINT, STOP_TIMEOUT_SEC), (signal.SIGTERM, 3), (signal.SIGKILL, 3)):
-        try:
-            os.killpg(os.getpgid(proc.pid), sig)
-            proc.wait(timeout=timeout)
-            break
-        except ProcessLookupError:
-            break
-        except subprocess.TimeoutExpired:
-            continue
-    _proc = None
-    _started_at = None
-    _last_stop_reason = reason
+    try:
+        if proc is None:
+            return True  # no saved group: a manually started bridge is not ours to stop
+        deadline = time.monotonic() + STOP_TIMEOUT_SEC + TERM_TIMEOUT_SEC + KILL_TIMEOUT_SEC
+        for sig, timeout in ((signal.SIGINT, STOP_TIMEOUT_SEC),
+                             (signal.SIGTERM, TERM_TIMEOUT_SEC),
+                             (signal.SIGKILL, KILL_TIMEOUT_SEC)):
+            proc.poll()
+            if not _group_alive_locked():
+                break
+            try:
+                os.killpg(_pgid, sig)
+            except ProcessLookupError:
+                pass  # it may have exited between the probe and the signal
+            except OSError as error:
+                logger.warning("QUESTiX LAB: cannot send %s to group %s: %s", sig, _pgid, error)
+            if _wait_group_locked(proc, min(timeout, max(0, deadline - time.monotonic()))):
+                break
+        proc.poll()
+        group_alive = _group_alive_locked()
+        port_busy = _port_in_use()
+        if not group_alive:
+            port_deadline = min(deadline, time.monotonic() + PORT_RELEASE_TIMEOUT_SEC)
+            while port_busy and time.monotonic() < port_deadline:
+                time.sleep(min(STOP_POLL_SEC, max(0, port_deadline - time.monotonic())))
+                port_busy = _port_in_use()
+        if group_alive or port_busy:
+            _last_stop_reason = "stop_failed"
+            logger.error("QUESTiX LAB stop_failed: process group remaining=%s, port %s busy=%s",
+                         group_alive, LAB_BRIDGE_PORT, port_busy)
+            return False
+        _proc = None
+        _started_at = None
+        _last_stop_reason = reason
+        return True
+    finally:
+        _revoke_locked()
 
 
 def _reap_locked() -> bool:
@@ -537,9 +602,21 @@ def _reap_locked() -> bool:
         return False
     if _proc.poll() is None:
         return True
+    if _group_alive_locked():
+        # ros2 run exited, but the bridge child is still ours, including after a failed stop.
+        if _last_stop_reason != "stop_failed":
+            _last_stop_reason = "exited"
+        _revoke_locked()
+        return True
+    if _last_stop_reason == "stop_failed" and _port_in_use():
+        return True  # retain the failed stop for retry; the empty PGID has been forgotten
     _proc = None
     _started_at = None
-    _last_stop_reason = "exited"
+    if _last_stop_reason == "stop_failed":
+        # A later status poll has now confirmed both the group and its port are gone.
+        _last_stop_reason = "stopped"
+    elif _last_stop_reason not in _FAILURE_REASONS:
+        _last_stop_reason = "exited"
     if _revoke_locked():
         logger.warning("QUESTiX LAB bridge exited on its own: driving and launching from the "
                        "lessons switched off")
@@ -555,6 +632,7 @@ def _status_payload() -> dict:
     config = _read_config()
     permissions = _permissions()
     failed = _last_stop_reason in _FAILURE_REASONS
+    elapsed = time.time() - _started_at if managed and _started_at else 0
     return {
         "running": managed,
         "external": external,
@@ -565,7 +643,9 @@ def _status_payload() -> dict:
         "available": _lab_available(),
         "competition": _competition_mode(),
         "urls": [f"http://{a}:{LAB_BRIDGE_PORT}/" for a in _lan_addresses()],
-        "elapsed_sec": int(time.time() - _started_at) if managed and _started_at else 0,
+        "started_at": _started_at if managed else None,
+        "elapsed_sec": int(elapsed),
+        "elapsed_ms": elapsed * 1000,
         "last_stop_reason": _last_stop_reason,
         "config": config,
         # What the teacher allowed in this session (published on /lab_permission). What the
@@ -602,7 +682,7 @@ def get_status():
 @router.post("/start")
 def start_bridge():
     """Start the bridge (teaching pages + telemetry on the LAN; moving only if allowed)."""
-    global _proc, _started_at, _last_stop_reason
+    global _proc, _pgid, _started_at, _last_stop_reason
     with _lock:
         if _reap_locked():
             raise HTTPException(status_code=409, detail="教材はすでに配信中です")
@@ -631,6 +711,10 @@ def start_bridge():
             if log is not None:
                 log.close()  # the child keeps its own descriptor
 
+        _proc = proc
+        _pgid = proc.pid
+        _started_at = time.time()
+        _last_stop_reason = None
         # Fast-fail: a missing ROS environment or package makes the process exit at once.
         deadline = time.time() + START_GRACE_SEC
         while time.time() < deadline and proc.poll() is None and not _port_in_use():
@@ -644,9 +728,6 @@ def start_bridge():
                     f"「ブリッジのログ」または {LOG_FILE} に理由が出ています"
                 ),
             )
-        _proc = proc
-        _started_at = time.time()
-        _last_stop_reason = None
         return _status_payload()
 
 
@@ -657,8 +738,12 @@ def stop_bridge():
         if not _reap_locked():
             _revoke_locked()  # also when nothing ran: 配信停止 always ends the permissions
             raise HTTPException(status_code=409, detail="教材は配信していません")
-        _stop_locked("stopped")
-        _revoke_locked()
+        if not _stop_locked("stopped"):
+            raise HTTPException(
+                status_code=500,
+                detail="教材の配信を停止できませんでした（stop_failed）。"
+                       "プロセスまたはポートが残っています。「ブリッジのログ」を確認し、停止を再試行してください",
+            )
         return _status_payload()
 
 
@@ -677,7 +762,8 @@ def set_config(config: LabConfig):
     return values
 
 
-@router.post("/drive")
+# Compatibility HTTP APIs only; the Manager UI uses /api/actuation/choice/{kind}.
+@router.post("/drive", dependencies=[Depends(actuation.browser_guard)])
 def set_drive(request: DriveRequest):
     """Allow or forbid the lessons' driving experiments (教材からの走行) for this session.
 
@@ -687,7 +773,7 @@ def set_drive(request: DriveRequest):
     return _set_permission("ALLOW_DRIVE", request.allow, "教材から走らせられません")
 
 
-@router.post("/shoot")
+@router.post("/shoot", dependencies=[Depends(actuation.browser_guard)])
 def set_shoot(request: DriveRequest):
     """Allow or forbid the lessons' launcher experiments (roller, tilt, fire), like set_drive."""
     return _set_permission("ALLOW_SHOOT", request.allow, "教材から発射させられません")
@@ -821,4 +907,3 @@ def shutdown() -> None:
     """Stop a bridge this manager started; called when robot_manager exits."""
     with _lock:
         _stop_locked("manager_shutdown")
-        _revoke_locked()

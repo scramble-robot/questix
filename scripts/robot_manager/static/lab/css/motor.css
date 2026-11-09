@@ -107,7 +107,7 @@
 }
 .motor-setting select:disabled {
   background: #eef2f3;
-  color: #71838a;
+  color: var(--muted);
 }
 .motor-setting-note {
   font-size: 13px;
@@ -285,7 +285,7 @@
   margin-left: 4px;
 }
 .motor-goal-met {
-  color: var(--role-actual);
+  color: var(--role-actual-text);
 }
 .motor-goal-missed {
   color: #8a5a00;
@@ -601,6 +601,8 @@
 .motor-bench {
   margin-top: 18px;
 }
+/* One column at every width: the drive report's time charts get the full width and the table goes
+   under them, as in the other courses (DESIGN.md L-4). */
 .motor-bench-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -666,11 +668,6 @@
 }
 .motor-bench-analyse .helper {
   margin: 6px 0 0;
-}
-@media (min-width: 900px) {
-  .motor-bench-layout {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  }
 }
 @media (max-width: 420px) {
   .motor-bench-table th,

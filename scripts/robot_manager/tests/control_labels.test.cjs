@@ -37,7 +37,7 @@ class Element {
     this.dataset = {};
     this.events = {};
     this.attributes = {};
-    this.style = {};
+    this.style = { setProperty(name, value) { this[name] = value; } };
     this.className = '';
     this.classList = { toggle: (name, on) => { this[name] = on; },
       add: (name) => { this[name] = true; } };
@@ -66,7 +66,7 @@ function editorFixture(extraValues = {}, controller = 'uart') {
   const document = {
     events: {},
     getElementById(id) {
-      const found = elements.get('controls-fields')?.all().find((element) => element.id === id);
+      const found = ['controls-fields', 'controls-range-warning'].flatMap((host) => elements.get(host)?.all() || []).find((element) => element.id === id);
       if (found) return found;
       if (!elements.has(id)) elements.set(id, new Element());
       return elements.get(id);
@@ -90,6 +90,7 @@ function editorFixture(extraValues = {}, controller = 'uart') {
   };
   const profile = {
     controller, revision: 'initial',
+    geometry: { wheel_radius: 0.05, wheel_separation: 0.5 },
     values: { joy_launcher: { fire_button: 5 } },
     defaults: { joy_launcher: { fire_button: 4 } },
     groups: [{ node: 'joy_launcher', label: '射出', fields: [
@@ -98,7 +99,7 @@ function editorFixture(extraValues = {}, controller = 'uart') {
   };
   extraValues = { ...extraValues,
     joy_controller: { longitudinal_input_ratio: 2, angular_input_ratio: 6, ...extraValues.joy_controller },
-    drive_component: { max_linear_accel: 3, max_angular_accel: 3, ...extraValues.drive_component },
+    drive_component: { max_motor_rpm: 475, max_linear_accel: 3, max_angular_accel: 3, ...extraValues.drive_component },
     uart_joy_driver: { deadzone: 0.05, ...extraValues.uart_joy_driver },
     joy_node: { deadzone: 0.1, ...extraValues.joy_node },
     joy_launcher: { tilt_up_axis: 7, tilt_down_axis: 7,
@@ -111,7 +112,8 @@ function editorFixture(extraValues = {}, controller = 'uart') {
     if (!group) { group = { node, label: node, fields: [] }; profile.groups.push(group); }
     for (const key of Object.keys(values)) {
       if (!group.fields.some((field) => field.key === key)) {
-        group.fields.push({ key, label: key, type: 'float', min: key.includes('ratio') ? -20 : 0, max: key === 'deadzone' ? 0.99 : key === 'full_speed_value' ? 1 : 20 });
+        const speedMax = node === 'joy_controller' && key.includes('input_ratio') ? (key === 'angular_input_ratio' ? 6 : 2) : null;
+        group.fields.push({ key, label: key, type: 'float', min: speedMax === null ? 0 : -speedMax, max: speedMax ?? (key === 'deadzone' ? 0.99 : key === 'full_speed_value' ? 1 : key === 'max_linear_accel' ? 50 : key === 'max_angular_accel' ? 100 : 475) });
       }
     }
   }
@@ -131,6 +133,8 @@ function editorFixture(extraValues = {}, controller = 'uart') {
   document.getElementById('controls-profile').value = controller;
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../static/controller-map.js'), 'utf8'), context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../static/operator-guide.js'), 'utf8'), context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../static/tuning-model.js'), 'utf8'), context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../static/tuning-chart.js'), 'utf8'), context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../static/controls.js'), 'utf8'), context);
   document.events.DOMContentLoaded();
   return { document, context, getPayload: () => savedPayload };
@@ -149,7 +153,7 @@ test('speed editing keeps saved values stable and persists numeric values', asyn
   assert.equal(saved.hidden, false);
   assert.equal(document.getElementById('control-joy_controller-angular_input_ratio-saved').hidden, true);
   assert.equal(saved.children[1].textContent, '2 m/s');
-  assert.equal(document.getElementById('controls-change-count').textContent, '未保存の変更: 1 項目');
+  assert.equal(document.getElementById('controls-change-count').textContent, '未保存の変更: 2 項目');
   input.value = '2'; input.events.input();
   assert.equal(saved.hidden, true);
   assert.equal(document.getElementById('controls-change-count').textContent, '未保存の変更: 0 項目');
@@ -663,10 +667,10 @@ test('friendly units preserve precision, inversion and every hidden value when s
   await vm.runInContext('loadControls("uart")', context);
   const before = JSON.parse(vm.runInContext('JSON.stringify(controlDraft)', context));
   const turn = document.getElementById('control-joy_controller-angular_input_ratio');
-  assert.equal(turn.value, 100);
+  assert.equal(turn.value, 6);
   turn.events.input();
   assert.equal(vm.runInContext('controlDraft.joy_controller.angular_input_ratio', context), -6);
-  turn.value = '50'; turn.events.input();
+  turn.value = '3'; turn.events.input();
   assert.equal(vm.runInContext('controlDraft.joy_controller.angular_input_ratio', context), -3);
   const speed = document.getElementById('control-joy_controller-longitudinal_input_ratio');
   speed.value = '0'; speed.events.input();
@@ -679,21 +683,22 @@ test('friendly units preserve precision, inversion and every hidden value when s
   const expected = structuredClone(before);
   expected.joy_controller.longitudinal_input_ratio = -1.5;
   expected.joy_controller.angular_input_ratio = -3;
+  expected.drive_component.max_angular_accel = 1.5;
   expected.joy_launcher.full_speed_value = 0.65;
   expected.uart_joy_driver.deadzone = 0.12;
   assert.deepEqual(getPayload().values, expected);
 });
 
 test('rounded upper bounds remain valid and reset retains direction after clearing a value', async () => {
-  const { document, context } = editorFixture({ joy_controller: { angular_input_ratio: -20 } });
+  const { document, context } = editorFixture({ joy_controller: { angular_input_ratio: -6 } });
   await vm.runInContext('loadControls("uart")', context);
   const turn = document.getElementById('control-joy_controller-angular_input_ratio');
   assert.equal(turn.value, turn.max);
   turn.events.input();
-  assert.equal(vm.runInContext('controlDraft.joy_controller.angular_input_ratio', context), -20);
+  assert.equal(vm.runInContext('controlDraft.joy_controller.angular_input_ratio', context), -6);
   turn.value = ''; turn.events.input();
   document.getElementById('controls-reset').events.click();
-  assert.equal(vm.runInContext('controlDraft.joy_controller.angular_input_ratio', context), -20);
+  assert.equal(vm.runInContext('controlDraft.joy_controller.angular_input_ratio', context), -6);
 });
 
 for (const entered of ['2', '2.0']) {
@@ -714,11 +719,11 @@ for (const entered of ['2', '2.0']) {
     await vm.runInContext('saveControls({preventDefault() {}})', context);
     const values = getPayload().values;
     assert.equal(values.joy_controller.longitudinal_input_ratio, 2);
-    assert.equal(values.joy_controller.angular_input_ratio, 2 / (100 / 6));
+    assert.equal(values.joy_controller.angular_input_ratio, 2);
     assert.equal(values.joy_launcher.full_speed_value, 0.02);
     assert.equal(values.uart_joy_driver.deadzone, 0.02);
-    assert.equal(values.drive_component.max_linear_accel, 2 / (100 / 3));
-    assert.equal(values.drive_component.max_angular_accel, 2 / (100 / 3));
+    assert.equal(values.drive_component.max_linear_accel, 1);
+    assert.equal(values.drive_component.max_angular_accel, 1);
   });
 }
 
@@ -728,16 +733,16 @@ test('turn presets keep a fixed standard across save, runtime comparison and res
   const turnRow = () => document.querySelectorAll('.control-field').find((row) => row.dataset.key === 'angular_input_ratio');
   const presets = () => turnRow().querySelector('.control-presets').children;
   const turnInput = () => document.getElementById('control-joy_controller-angular_input_ratio');
-  assert.equal(turnInput().value, 100);
+  assert.equal(turnInput().value, 6);
   assert.deepEqual(presets().map((button) => button.textContent), ['ゆっくり 50%', '標準 100%', '速め 150%']);
   presets()[0].events.click();
-  assert.equal(turnInput().value, '50');
+  assert.equal(turnInput().value, '3');
   await vm.runInContext('saveControls({preventDefault() {}})', context);
   assert.equal(getPayload().values.joy_controller.angular_input_ratio, 3);
-  assert.equal(turnInput().value, 50);
+  assert.equal(turnInput().value, 3);
   vm.runInContext(`controlRuntime = { nodes: { joy_controller: {status: 'ok', values: {angular_input_ratio: 6}} } };
     renderRuntimeValues();`, context);
-  assert.equal(turnRow().querySelector('.control-runtime-value').textContent, '100 %');
+  assert.equal(turnRow().querySelector('.control-runtime-value').textContent, '6 rad/s（344°/s）');
   assert.equal(turnRow().querySelector('.control-runtime-state').textContent, '保存済みと異なる');
   presets()[2].events.click();
   assert.equal(vm.runInContext('controlDraft.joy_controller.angular_input_ratio', context), 9);
@@ -747,7 +752,7 @@ test('turn presets keep a fixed standard across save, runtime comparison and res
   assert.equal(vm.runInContext('controlDraft.joy_controller.angular_input_ratio', context), 9);
   vm.runInContext('controlsSetBusy(false)', context);
   document.getElementById('controls-reset').events.click();
-  assert.equal(turnInput().value, 100);
+  assert.equal(turnInput().value, 6);
   assert.equal(vm.runInContext('controlDraft.joy_controller.angular_input_ratio', context), 6);
 });
 
@@ -758,10 +763,10 @@ test('a custom zero turn default stays editable without division by zero', async
   assert.equal(input.value, 0);
   assert.ok(Number.isFinite(input.max));
   const row = document.querySelectorAll('.control-field').find((item) => item.dataset.key === 'angular_input_ratio');
-  assert.match(row.children[0].children[0].textContent, /回転\/秒/);
+  assert.match(row.children[0].children[0].textContent, /rad\/s/);
   input.value = '0.5'; input.events.input();
   await vm.runInContext('saveControls({preventDefault() {}})', context);
-  assert.equal(getPayload().values.joy_controller.angular_input_ratio, Math.PI);
+  assert.equal(getPayload().values.joy_controller.angular_input_ratio, 0.5);
 });
 
 test('acceleration presets persist independent limits and keep the standard fixed', async () => {
@@ -770,16 +775,18 @@ test('acceleration presets persist independent limits and keep the standard fixe
   const row = (key) => document.querySelectorAll('.control-field').find((item) => item.dataset.key === key);
   row('max_linear_accel').querySelector('.control-presets').children[0].events.click();
   row('max_angular_accel').querySelector('.control-presets').children[2].events.click();
+  // A rounded preset display must not change its exact acceleration on a repeated input event.
+  document.getElementById('control-drive_component-max_angular_accel').events.input();
   await vm.runInContext('saveControls({preventDefault() {}})', context);
   assert.equal(getPayload().values.drive_component.max_linear_accel, 1.5);
   assert.equal(getPayload().values.drive_component.max_angular_accel, 4.5);
   assert.equal(getPayload().values.drive_component.min_command_rpm, 7);
   assert.equal(getPayload().values.joy_controller.longitudinal_input_ratio, 2);
   assert.equal(getPayload().values.joy_controller.angular_input_ratio, 6);
-  assert.equal(document.getElementById('control-drive_component-max_linear_accel').value, 50);
+  assert.equal(document.getElementById('control-drive_component-max_linear_accel').value, 1.33);
   vm.runInContext(`controlRuntime = { nodes: { drive_component: {status: 'ok', values: {
     max_linear_accel: 3, max_angular_accel: 0}} } }; renderRuntimeValues();`, context);
-  assert.equal(row('max_linear_accel').querySelector('.control-runtime-value').textContent, '100 %');
+  assert.equal(row('max_linear_accel').querySelector('.control-runtime-value').textContent, '加速時間は未確認');
   assert.equal(row('max_angular_accel').querySelector('.control-runtime-value').textContent, '制限なし');
   document.getElementById('controls-reset').events.click();
   assert.equal(vm.runInContext('controlDraft.drive_component.max_linear_accel', context), 3);
@@ -815,7 +822,7 @@ test('legacy zero acceleration survives unrelated saves and accepts direct posit
   input = document.getElementById('control-drive_component-max_linear_accel');
   input.value = '2'; input.events.input();
   assert.equal(input.required, true);
-  assert.equal(vm.runInContext('controlDraft.drive_component.max_linear_accel', context), 2);
+  assert.equal(vm.runInContext('controlDraft.drive_component.max_linear_accel', context), 0.5);
   input.value = ''; input.events.input();
   assert.equal(vm.runInContext('controlDraft.drive_component.max_linear_accel', context), null);
   assert.equal(input.required, true);
@@ -850,7 +857,7 @@ test('shared save includes both diagram and tuning changes while details are clo
   vm.runInContext('controlDraft.joy_launcher.fire_button = 0', context);
   const input = document.getElementById('control-joy_controller-longitudinal_input_ratio');
   input.value = '1'; input.events.input();
-  assert.equal(document.getElementById('controls-change-count').textContent, '未保存の変更: 2 項目');
+  assert.equal(document.getElementById('controls-change-count').textContent, '未保存の変更: 3 項目');
   assert.equal(document.getElementById('controls-savebar').hidden, false);
   await document.getElementById('controls-save').events.click({ preventDefault() {} });
   assert.equal(getPayload().values.joy_launcher.fire_button, 0);
@@ -888,4 +895,173 @@ test('a runtime response arriving after a service change cannot revive a stale c
   assert.equal(vm.runInContext('controlRuntime', context), null);
   assert.match(document.getElementById('controls-runtime-message').textContent, /状態が変わりました/);
   assert.equal(document.getElementById('controls-verify').disabled, false);
+});
+
+test('ID15 legacy speed warns, models saturated stopping, and needs repair before save', async () => {
+  const { document, context, getPayload } = editorFixture({
+    joy_controller: { longitudinal_input_ratio: 10, angular_input_ratio: 4.5 },
+    drive_component: { max_linear_accel: 2.25, max_angular_accel: 2.25 },
+  });
+  await vm.runInContext('loadControls("uart")', context);
+  const speed = document.getElementById('control-joy_controller-longitudinal_input_ratio');
+  assert.equal(speed.value, 10);
+  assert.equal(document.getElementById('controls-range-warning').hidden, false);
+  assert.match(speed.validationMessage, /10.0 m\/s.*2.0 m\/s/);
+  assert.doesNotMatch(speed.validationMessage, /方向の反転あり/);
+  assert.match(document.getElementById(`${speed.id}-estimate`).textContent, /約 2.49 m\/s.*倒し続けて.*3.34 s.*9.68 m.*単独/);
+  assert.match(document.getElementById('tuning-linear-summary').textContent, /4.44 s.*9.68 m/);
+  assert.equal(document.getElementById('control-drive_component-max_linear_accel').value, 1.11);
+  vm.runInContext('controlDraft.joy_launcher.fire_button = 0; refreshControlChanges()', context);
+  await vm.runInContext('saveControls({preventDefault() {}})', context);
+  assert.equal(getPayload(), undefined);
+  speed.value = '2'; speed.events.input();
+  const accel = vm.runInContext('controlDraft.drive_component.max_linear_accel', context);
+  assert.ok(Math.abs(2 / accel - 475 * 2 * Math.PI * 0.05 / 60 / 2.25) < 1e-12);
+  await vm.runInContext('saveControls({preventDefault() {}})', context);
+  assert.equal(getPayload().values.joy_controller.longitudinal_input_ratio, 2);
+  assert.equal(getPayload().values.drive_component.max_linear_accel, accel);
+  assert.equal(document.getElementById('controls-range-warning').hidden, true);
+});
+
+test('negative saved speeds and hidden lateral repair retain direction until saved', async () => {
+  const { document, context, getPayload } = editorFixture({
+    joy_controller: { longitudinal_input_ratio: -10, lateral_input_ratio: -10 },
+  });
+  await vm.runInContext('loadControls("uart")', context);
+  const host = document.getElementById('controls-range-warning');
+  assert.match(host.children[0].textContent, /10.0 m\/s（方向の反転あり）/);
+  const repair = document.getElementById('control-lateral-repair');
+  assert.equal(repair.value, 10);
+  assert.match(document.getElementById('control-lateral-repair-help').textContent,
+    /この機体（左右 2 輪）では使われませんが、保存するには範囲内にしてください/);
+  const speed = document.getElementById('control-joy_controller-longitudinal_input_ratio');
+  speed.value = '2'; speed.events.input();
+  await vm.runInContext('saveControls({preventDefault() {}})', context);
+  assert.equal(getPayload(), undefined);
+  assert.equal(vm.runInContext('controlDraft.joy_controller.lateral_input_ratio', context), -10);
+  repair.value = '2'; repair.events.input();
+  assert.equal(host.hidden, false);
+  assert.equal(document.getElementById('control-lateral-repair'), repair);
+  assert.match(document.getElementById('controls-range-state').textContent, /まだ保存されていません/);
+  await vm.runInContext('saveControls({preventDefault() {}})', context);
+  assert.equal(getPayload().values.joy_controller.longitudinal_input_ratio, -2);
+  assert.equal(getPayload().values.joy_controller.lateral_input_ratio, -2);
+  assert.equal(host.hidden, true);
+});
+
+test('restoring out-of-range history cannot save until explicitly repaired', async () => {
+  const { document, context, getPayload } = editorFixture();
+  await vm.runInContext('loadControls("uart")', context);
+  vm.runInContext(`controlProfile.previous_values = structuredClone(controlProfile.values);
+    controlProfile.previous_values.joy_controller.longitudinal_input_ratio = -10;
+    controlsSetBusy(false);`, context);
+  document.getElementById('controls-undo').events.click();
+  assert.equal(document.getElementById('controls-range-warning').hidden, false);
+  await vm.runInContext('saveControls({preventDefault() {}})', context);
+  assert.equal(getPayload(), undefined);
+  assert.match(document.getElementById('controls-message').textContent, /方向の反転あり/);
+});
+
+test('the displayed rounded-up minimum time can be entered and saved', async () => {
+  const { document, context, getPayload } = editorFixture({
+    joy_controller: { longitudinal_input_ratio: 1.234567 },
+  });
+  await vm.runInContext('loadControls("uart")', context);
+  const row = document.querySelectorAll('.control-field').find((r) => r.dataset.key === 'max_linear_accel');
+  const displayed = row.querySelector('.control-range').textContent.match(/範囲：(\S+) s/)[1];
+  assert.ok(Number(displayed) >= 1.234567 / 50);
+  const time = document.getElementById('control-drive_component-max_linear_accel');
+  time.value = displayed; time.events.input();
+  assert.equal(time.validationMessage, '');
+  await vm.runInContext('saveControls({preventDefault() {}})', context);
+  assert.ok(getPayload().values.drive_component.max_linear_accel <= 50);
+});
+
+test('missing installed geometry explains why the time field cannot be edited', async () => {
+  const { document, context } = editorFixture();
+  await vm.runInContext('loadControls("uart")', context);
+  vm.runInContext('controlProfile.geometry = null; renderControls()', context);
+  assert.equal(document.getElementById('control-drive_component-max_linear_accel').disabled, true);
+  assert.match(document.getElementById('control-drive_component-max_linear_accel-estimate').textContent,
+    /車輪の寸法.*加速度を計算できず.*編集できません/);
+});
+
+for (const carried of [false, true]) {
+  test(`server 422 message survives a stale UI schema (carried hidden value: ${carried})`, async () => {
+    const { document, context } = editorFixture({ joy_controller: { lateral_input_ratio: 0 } });
+    await vm.runInContext('loadControls("uart")', context);
+    vm.runInContext(`controlProfile.groups.find(g => g.node === 'joy_controller').fields
+      .filter(f => f.key.includes('input_ratio')).forEach(f => {f.min = -20; f.max = 20;});
+      controlDraft.joy_controller.${carried ? 'lateral_input_ratio' : 'longitudinal_input_ratio'} = -10;
+      renderControls();`, context);
+    const message = `${carried ? '左右の速さ' : '走行速度'} 10.0 m/s（方向の反転あり）は、保存できる範囲の外です。大きさを 2.0 m/s 以下にしてください（方向の反転は保存済みのまま）。`;
+    let called = false;
+    context.api = async () => { called = true; throw new Error(message); };
+    await vm.runInContext('saveControls({preventDefault() {}})', context);
+    assert.equal(called, true);
+    assert.equal(document.getElementById('controls-message').textContent, message);
+    assert.equal(vm.runInContext('controlProfile.revision', context), 'initial');
+  });
+}
+
+test('all visible fields state input ranges and time conversion rejects out-of-range acceleration', async () => {
+  const { document, context, getPayload } = editorFixture();
+  await vm.runInContext('loadControls("uart")', context);
+  for (const row of document.querySelectorAll('.control-field')) {
+    assert.match(row.querySelector('.control-range').textContent, /入力できる範囲/);
+  }
+  const input = document.getElementById('control-drive_component-max_angular_accel');
+  const curves = () => document.getElementById('tuning-angular-chart').all()
+    .filter((el) => el.attributes['data-series']).map((el) => el.attributes.points);
+  const before = curves();
+  input.value = '3'; input.events.input();
+  assert.notEqual(curves()[0], before[0]);
+  // The common axis may grow but the packaged defaults themselves are unchanged.
+  assert.equal(vm.runInContext('controlProfile.defaults.drive_component.max_angular_accel', context), 3);
+  input.value = '0.001'; input.events.input();
+  assert.equal(input.disabled, false);
+  assert.match(input.validationMessage, /範囲の外/);
+  await vm.runInContext('saveControls({preventDefault() {}})', context);
+  assert.equal(getPayload(), undefined);
+  assert.match(document.getElementById('controls-message').textContent, /範囲の外/);
+  input.value = '2'; input.events.input();
+  assert.equal(input.validationMessage, '');
+  await vm.runInContext('saveControls({preventDefault() {}})', context);
+  assert.equal(getPayload().values.drive_component.max_angular_accel, 3);
+});
+
+test('runtime time uses actual geometry, rpm and speed, and missing speed stays unconfirmed', async () => {
+  const { document, context } = editorFixture();
+  await vm.runInContext('loadControls("uart")', context);
+  vm.runInContext(`controlRuntime = { nodes: {
+    joy_controller: {status: 'ok', values: {longitudinal_input_ratio: 10, angular_input_ratio: 4.5}},
+    drive_component: {status: 'ok', values: {max_motor_rpm: 475, wheel_radius: 0.05,
+      wheel_separation: 0.5, max_linear_accel: 1.5, max_angular_accel: 2.25}}
+  } }; renderRuntimeValues();`, context);
+  const row = (key) => document.querySelectorAll('.control-field').find((r) => r.dataset.key === key);
+  assert.equal(row('max_linear_accel').querySelector('.control-runtime-value').textContent, '1.66 s');
+  assert.equal(row('max_angular_accel').querySelector('.control-runtime-value').textContent, '2 s');
+  assert.match(row('max_angular_accel').querySelector('.control-runtime-state').textContent, /加速度/);
+  vm.runInContext(`delete controlRuntime.nodes.joy_controller.values.angular_input_ratio;
+    renderRuntimeValues();`, context);
+  assert.equal(row('max_angular_accel').querySelector('.control-runtime-value').textContent, '加速時間は未確認');
+});
+
+test('display-only rounding and zero speed preserve exact raw limits through save', async () => {
+  const { document, context, getPayload } = editorFixture({
+    drive_component: { max_linear_accel: 3.123456789 },
+  });
+  await vm.runInContext('loadControls("uart")', context);
+  const time = document.getElementById('control-drive_component-max_linear_accel');
+  time.events.input();
+  assert.equal(vm.runInContext('controlDraft.drive_component.max_linear_accel', context), 3.123456789);
+  const speed = document.getElementById('control-joy_controller-longitudinal_input_ratio');
+  speed.value = '0'; speed.events.input();
+  assert.equal(time.disabled, true);
+  await vm.runInContext('saveControls({preventDefault() {}})', context);
+  assert.equal(getPayload().values.drive_component.max_linear_accel, 3.123456789);
+  const reloadedSpeed = document.getElementById('control-joy_controller-longitudinal_input_ratio');
+  reloadedSpeed.value = '1'; reloadedSpeed.events.input();
+  assert.equal(document.getElementById('control-drive_component-max_linear_accel').disabled, false);
+  assert.equal(vm.runInContext('controlDraft.drive_component.max_linear_accel', context), 3.123456789);
 });
