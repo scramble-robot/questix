@@ -1,4 +1,5 @@
 import math
+import struct
 
 from questix_lab_bridge import shoot
 from questix_lab_bridge.shoot import ShootSession
@@ -51,6 +52,75 @@ def spin_up(session, client=1, power=0.5, start=0.0, until=1.2, shot=None):
 
 def codes(session):
     return [code for code, _ in session.blockers()]
+
+
+def f32(value):
+    """Round-trip a message field without ROS."""
+    return struct.unpack('!f', struct.pack('!f', value))[0]
+
+
+def wire_spin(session, requested, minimum, maximum=0.8, reported=None):
+    """Keep every status fresh while exercising the command and confirmation comparisons."""
+    for step in range(16):
+        now = step / 10
+        session.set_arbiter(status(min_fire_power=f32(minimum), max_power=f32(maximum)), now)
+        assert session.roller(1, requested, now) is None
+        feed(session, now,
+             arbiter={'min_fire_power': f32(minimum), 'max_power': f32(maximum)},
+             roller={'command': f32(requested) if reported is None else reported,
+                     'source': 'lab'})
+        session.tick(now)
+
+
+def test_float32_nominal_thresholds_start_and_confirm_the_roller():
+    for percent in (20, 21, 70, 80):
+        for reported in (percent / 100, f32(percent / 100)):
+            session = ready_session()
+            wire_spin(session, percent / 100, percent / 100, reported=reported)
+            assert session.spin_ready_in(1.5) == 0.0
+            assert session.fire(1, True, 1.5) is None
+
+
+def test_float32_limits_sent_to_pages_restore_only_whole_percent():
+    session = ready_session()
+    session.set_arbiter(status(min_fire_power=f32(0.2), max_power=f32(0.8)), 0.0)
+    assert session.limits()['min_fire_power'] == 0.2
+    assert session.limits()['max_power'] == 0.8
+    session.set_arbiter(status(min_fire_power=f32(0.20001), max_power=f32(0.69999)), 0.0)
+    assert session.limits()['min_fire_power'] == f32(0.20001)
+    assert session.limits()['max_power'] == f32(0.69999)
+
+
+def test_float32_caps_still_clamp_and_below_threshold_still_refuses():
+    session = ready_session()
+    wire_spin(session, 0.19, 0.2)
+    assert session.fire(1, True, 1.5) == shoot.NOT_SPINNING
+    session = ready_session()
+    wire_spin(session, 0.8, 0.2, maximum=0.7, reported=f32(0.7))
+    assert session.power == 0.7
+    assert session.command()[0] == 0.7
+    session = ready_session()
+    wire_spin(session, 0.8, 0.7, maximum=0.69, reported=f32(0.69))
+    assert session.fire(1, True, 1.5) == shoot.NOT_SPINNING
+
+
+def test_fractional_thresholds_keep_their_wire_precision():
+    for requested, minimum, reported, accepted in (
+            (0.2, 0.20001, f32(0.2), False),
+            (0.20001, 0.20001, f32(0.20001), True),
+            (0.21, 0.2004, f32(0.20049), True),
+            (0.21, 0.2006, f32(0.20051), False)):
+        session = ready_session()
+        wire_spin(session, requested, minimum, reported=reported)
+        result = session.fire(1, True, 1.5)
+        assert result == (None if accepted else shoot.NOT_SPINNING)
+
+
+def test_non_finite_reported_power_does_not_confirm_the_roller():
+    for reported in (0.0, math.nan, math.inf, -math.inf):
+        session = ready_session()
+        wire_spin(session, 0.2, 0.2, reported=reported)
+        assert session.fire(1, True, 1.5) == shoot.NOT_SPINNING
 
 
 def test_nothing_heard_yet_means_no_launcher():

@@ -155,11 +155,16 @@ function createLiveSession(options) {
     driveAbort: null,
     tail: false, // recording the stop after the robot was told to stop
     driveNote: '', // how the last run ended, shown under the start button
+    reconfirm: '', // display only: why this session cleared the safety tick
     driveRunId: null, // the history entry (drive-history.js) of this block's last run
     origin: '', // where session.recording came from: 'live', 'file', 'robot' or 'restored'
     robotSave: null, // how keeping the last run on the robot went: {state, message}, or null
   };
-  if (options.drive) onDrive(() => options.update());
+  if (options.drive)
+    onDrive((model) => {
+      if (model.confirmed) session.reconfirm = '';
+      options.update();
+    });
 
   function show(recording, origin, assumedConfig = false) {
     const result = options.apply(recording);
@@ -240,7 +245,7 @@ function createLiveSession(options) {
       options.update();
       return;
     }
-    Object.assign(session, { busy: true, driveNote: '', robotSave: null });
+    Object.assign(session, { busy: true, driveNote: '', reconfirm: '', robotSave: null });
     try {
       await driveAndRecord(plan);
     } finally {
@@ -302,12 +307,26 @@ function createLiveSession(options) {
 
   function finishRun(result, raw, plan) {
     const ended = driveEndedText(result);
-    if (!result.started || raw instanceof Error || isEmptyRun(raw)) {
-      session.driveNote = ended;
+    const failed = raw instanceof Error;
+    const failure = failed ? fill(driveCopy.recordFailed, { reason: raw.message }) : '';
+    if (!result.started || (!failed && isEmptyRun(raw))) {
+      session.driveNote = [ended, failure].filter(Boolean).join(' ');
       return;
     }
-    // The next run is a new situation (the robot has moved): the learner confirms again.
+    // A started run with a failed recording also needs a fresh look around. Never invent a
+    // successful recording or a history entry; sender readiness and limits are unchanged.
+    session.reconfirm = driveModel().confirmed
+      ? result.reason === 'done'
+        ? 'done'
+        : result.reason === 'stopped'
+          ? 'stopped'
+          : 'problem'
+      : '';
     confirmDriveSafety(false);
+    if (failed) {
+      session.driveNote = [ended, failure].filter(Boolean).join(' ');
+      return;
+    }
     const status = runStatusText(result.reason);
     const recording = stamp(raw, {
       conditions: plan.conditions,
@@ -451,6 +470,7 @@ function createLiveSession(options) {
       : drive.blockers;
     return {
       ...drive,
+      reconfirm: session.reconfirm,
       blockers,
       ready: drive.ready && missing.length === 0,
       program: options.drive.program(),

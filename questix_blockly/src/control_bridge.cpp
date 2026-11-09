@@ -26,6 +26,13 @@ void questix_reset(void* ptr) { static_cast<ControlCore*>(ptr)->reset(); }
 
 void questix_step(void* ptr, double v, double w, double dt, int limit, double* result) {
   auto* core = static_cast<ControlCore*>(ptr);
+  // The simulator already supplies its effective RPM limit on every step. Pass it to
+  // the core before shaping, too: its fail-closed default (0) must not remain in use.
+  if (core->config().max_motor_rpm != limit) {
+    auto config = core->config();
+    config.max_motor_rpm = limit;
+    core->setConfig(config);
+  }
   auto out = core->step(v, w, dt);
   int left = out.stop ? 0 : std::clamp(out.left_rpm, -limit, limit);
   int right = out.stop ? 0 : std::clamp(out.right_rpm, -limit, limit);

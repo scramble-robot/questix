@@ -73,6 +73,20 @@ test('a recorded launcher session gives back its discs with power, tilt and time
 
 const FLOOR = LAUNCH_SPEC.thickness / 2; // the disc's lower face touches down, not its centre
 
+test('full precision recorded roller power becomes an integer percent in the shot table', () => {
+  const recording = {
+    streams: {
+      roller: [{ stamp: 1, command: Math.fround(0.21), max_power: Math.fround(0.8) }],
+      shot: [
+        { stamp: 0, fired_count: 0 },
+        { stamp: 2, fired_count: 1, last_fire_source: 'lab' },
+      ],
+    },
+  };
+  assert.equal(launcherShots(recording)[0].percent, 21);
+  assert.equal(recording.streams.roller[0].command, Math.fround(0.21));
+});
+
 test('the course constants stay in the order the lessons follow', () => {
   assert.deepEqual(
     LAUNCH_TOPICS.map((topic) => topic.id),

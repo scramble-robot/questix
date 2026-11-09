@@ -44,6 +44,8 @@ def read_snapshot(config):
         raise HTTPException(409, '実行中の設定を取得しています。少し待ってから再試行してください。')
     try:
         requested = {node: [field[0] for field in fields] for node, (_, fields) in GROUPS.items()}
+        # Read-only geometry for time/distance estimates; never added to the saved profile schema.
+        requested['drive_component'] += ['wheel_radius', 'wheel_separation']
         # Paths are positional arguments, never shell source code. ROS setup output
         # is suppressed so stdout contains only the worker's JSON response.
         command = [

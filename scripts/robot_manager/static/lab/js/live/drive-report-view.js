@@ -32,9 +32,9 @@ const HEADING_ARROW = 22; // user units: length of the arrow showing the heading
 const ARROW_HEAD = 7; // user units
 const MARKER_FLIP = 70; // %: a marker label right of this is written on the left of its line
 const MOTION_SHOWN = 1e-3; // m/s or rad/s: a series that never exceeds this has nothing to show
-// drive_component smooths the measured speed with a first-order low-pass filter of this time
-// constant (measured_lpf_tau_sec in launcher/config/drive_component.yaml), in seconds.
-const MEASURED_SMOOTHING = 0.15;
+// The shipped default (measured_lpf_tau_sec in launcher/config/drive_component.yaml), in seconds.
+// The recording does not establish the robot's effective setting; the copy says it can differ.
+const DEFAULT_MEASURED_SMOOTHING = 0.15;
 const COMPARE_LIMIT = 3; // runs that can be overlaid on the report of another
 const COMPARE_NAMES = ['A', 'B', 'C'];
 const STATUS_ICONS = { ok: '✓', stopped: '■', problem: '⚠︎', recorded: '●', unknown: '?' };
@@ -447,9 +447,15 @@ function pathPart(summary, path) {
 
 // --- summary, header, notes ---------------------------------------------------------------------
 
-function stopText(stop) {
+function stopText(summary) {
   const copy = text();
-  if (!stop) return copy.stopUnknown;
+  const { stop } = summary;
+  if (!stop) {
+    // Older stored summaries lack stopReason. Only a null driveSeconds proves no command asked
+    // for motion; otherwise there is no evidence for saying the robot failed to stop.
+    const reason = summary.stopReason ?? (summary.driveSeconds === null ? 'noMotion' : null);
+    return copy.stopReasons[reason] ?? copy.stopUnknown;
+  }
   return fill(copy.stopValue, {
     delay: fixed(stop.delay, 2),
     distance: fixed(stop.distance * 100, 1),
@@ -476,7 +482,7 @@ function allSummaryItems(summary, cut) {
     }),
   ]);
   items.push(['maxTurnRate', copy.maxTurnRate, describeTurnRate(summary.maxTurnRate, copy)]);
-  items.push(['stop', copy.stop, stopText(summary.stop)]);
+  items.push(['stop', copy.stop, stopText(summary)]);
   if (Number.isFinite(summary.closest))
     items.push(['closest', copy.closest, `${fixed(summary.closest, 2)} m`]);
   return items;
@@ -553,14 +559,14 @@ function reportHeader(run) {
     <h4>${fill(copy.title, { time: formatTime(run.at), lesson: run.lesson })}</h4>
     <p class="drive-report-status">${statusBadge(run)}</p>
     <p class="drive-report-meta">${meta.join('　')}</p>
-    ${run.ended ? html`<p>${run.ended}</p>` : nothing}
+    ${run.ended ? html`<p class="drive-report-ended">${run.ended}</p>` : nothing}
     ${run.cut ? html`<p class="drive-report-cut">${copy.cut}</p>` : nothing}
   </header>`;
 }
 
 function reportNotes(summary) {
   const copy = text();
-  const smoothing = summary.stop ? fill(copy.smoothing, { tau: MEASURED_SMOOTHING }) : '';
+  const smoothing = summary.stop ? fill(copy.smoothing, { tau: DEFAULT_MEASURED_SMOOTHING }) : '';
   return smoothing ? html`<p class="drive-note">${smoothing}</p>` : nothing;
 }
 
