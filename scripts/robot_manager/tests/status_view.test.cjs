@@ -173,7 +173,7 @@ test('status strip: running vs next mode, E-stop, who drives', () => {
   assert.equal(rows.robot.text, 'questix-3'); // what the lab pages show
   assert.equal(rows.mode.text, '練習の構成で動作中・次回の起動は大会');
   assert.equal(rows.mode.tone, 'warn');
-  assert.equal(rows.estop.text, '解除されています');
+  assert.equal(rows.estop.text, '解除');
   assert.equal(rows.lab.text, '配信中・接続中の端末 4 台');
   assert.equal(rows.permissions.text, '教材からの走行: ON・教材からの発射: ON');
   assert.equal(rows.driver.text, '生徒の端末 #5（教材から走行中）');
@@ -184,7 +184,7 @@ test('status strip: running vs next mode, E-stop, who drives', () => {
   assert.equal(stopped.robot.text, 'host');
   assert.match(stopped.mode.text, /「起動」を押したときだけ/);
   assert.match(stopped.driver.text, /だれも動かせません/);
-  assert.match(stopped.estop.text, /分かりません/);
+  assert.match(stopped.estop.text, /不明/);
   const forbidden = StatusView.overview({ mode: 'practice', service: 'active', running_mode: 'practice' },
     lab({ drive_allowed: false, shoot_allowed: false, bridge: bridge({ allowed: false }, { allowed: false }) }), 'Web');
   assert.match(forbidden.estop.text, /^分かりません/);
@@ -209,7 +209,7 @@ test('browser controller URL: access point, then LAN, then the page', () => {
 test('going back to practice says what the lessons are set to (driving and launching stay off)', () => {
   assert.equal(StatusView.labRestoredText({ restored: true, autostart: true, drive: false, shoot: false }),
     '教材の配信は大会モードの前の設定に戻しました（配信の自動開始: オン・教材からの走行: OFF・発射: OFF。' +
-    '走行・発射は先生が教材タブで ON にしてください）');
+    '走行・発射の許可は先生が操作タブで選んでください）');
   assert.match(StatusView.labRestoredText({ restored: false, autostart: true, drive: false, shoot: false }),
     /^教材の配信の自動開始をオンにしました/);
   assert.equal(StatusView.labRestoredText(null), '');
@@ -219,7 +219,7 @@ test('the E-stop row uses the bridge report even when pages may not move the rob
   const lab = (emergencyStop) => ({ bridge: { read_only: true, shoot_state: { allowed: false },
     drive_state: { allowed: false, blockers: [] }, emergency_stop: emergencyStop } });
   assert.equal(StatusView.estop(lab(true), 'active').text, '押されています');
-  assert.equal(StatusView.estop(lab(false), 'active').text, '解除されています');
+  assert.equal(StatusView.estop(lab(false), 'active').text, '解除');
   // No report yet (or an older bridge): unknown rather than a guess.
   assert.match(StatusView.estop(lab(null), 'active').text, /^分かりません/);
 });
@@ -228,8 +228,8 @@ test('the header E-stop block always has one of three states, taken from the E-s
   const lab = (emergencyStop) => ({ bridge: { read_only: true, shoot_state: { allowed: false },
     drive_state: { allowed: false, blockers: [] }, emergency_stop: emergencyStop } });
   const header = (labState, service) => StatusView.headerEstop(StatusView.estop(labState, service));
-  assert.deepEqual(header(lab(true), 'active'), { state: 'pressed', label: '押されている' });
-  assert.deepEqual(header(lab(false), 'active'), { state: 'released', label: '解除中' });
+  assert.deepEqual(header(lab(true), 'active'), { state: 'pressed', label: '押されています' });
+  assert.deepEqual(header(lab(false), 'active'), { state: 'released', label: '解除' });
   // Not reported, no bridge, robot control stopped, no row at all: unknown, never hidden.
   assert.deepEqual(header(lab(null), 'active'), { state: 'unknown', label: '不明' });
   assert.deepEqual(header(null, 'active'), { state: 'unknown', label: '不明' });
@@ -259,7 +259,7 @@ test('an E-stop not heard yet is unknown, never released, even while pages may m
     '非常停止の状態をまだ確認できません');
   // An older bridge without the field still falls back to its blockers.
   assert.equal(StatusView.estop({ bridge: { read_only: false,
-    drive_state: { allowed: true, blockers: [] } } }, 'active').text, '解除されています');
+    drive_state: { allowed: true, blockers: [] } } }, 'active').text, '解除');
 });
 
 test('a lesson permission cannot be switched on while the teacher runtime authority is off', () => {
@@ -291,12 +291,13 @@ test('the E-stop row reads the manager\'s own /emergency_stop report in every mo
   const noLab = { running: false, external: false, mode: 'practice', available: false, bridge: null };
   const monitor = (state, reason, extra = {}) => ({ state, reason, note: null, ...extra });
   const released = StatusView.overview({ ...practice, emergency_stop: monitor('released', 'released') }, noLab, 'UART');
-  assert.equal(released.estop.text, '解除されています');
-  assert.deepEqual(StatusView.headerEstop(released.estop), { state: 'released', label: '解除中' });
+  assert.equal(released.estop.text, '解除');
+  assert.deepEqual(StatusView.headerEstop(released.estop), { state: 'released', label: '解除' });
   const pressed = StatusView.overview({ ...practice,
     emergency_stop: monitor('pressed', 'pin 5 is true, expected false; ') }, noLab, 'UART');
-  assert.equal(pressed.estop.text, '押されています（非常停止ボタンが押されているか、つながっていません）');
-  assert.deepEqual(StatusView.headerEstop(pressed.estop), { state: 'pressed', label: '押されている' });
+  assert.equal(pressed.estop.text, '押されています');
+  assert.equal(pressed.estop.detail, '非常停止ボタンが押されているか、つながっていません');
+  assert.deepEqual(StatusView.headerEstop(pressed.estop), { state: 'pressed', label: '押されています' });
   // The manager's report wins over a bridge that has not heard the topic yet.
   const bridgeUnknown = { bridge: { read_only: true, emergency_stop: null } };
   assert.equal(StatusView.estop(bridgeUnknown, 'active', monitor('pressed', '')).text, '押されています');
@@ -314,17 +315,13 @@ test('a diagnostic launch without the GPIO safety path is released but not "解�
 
 test('an unknown E-stop says why, and never reads as released', () => {
   const unknown = (note, detail) => StatusView.estop(null, 'active', { state: 'unknown', note, detail });
-  assert.equal(unknown('starting').text, '確認しています');
-  assert.equal(unknown('starting').tone, 'idle');
-  assert.match(unknown('not_heard').text, /^分かりません（\/emergency_stop が届いていません/);
-  assert.match(unknown('silent').text, /途絶えています/);
-  assert.equal(unknown('unavailable', 'ROS 環境が見つかりません。').text, '分かりません（ROS 環境が見つかりません。）');
   for (const note of ['starting', 'not_heard', 'silent', 'unavailable']) {
+    assert.equal(unknown(note).text, '不明');
     assert.deepEqual(StatusView.headerEstop(unknown(note)), { state: 'unknown', label: '不明' });
   }
-  // A bridge that reports the E-stop still answers when the manager has nothing yet.
+  // A missing manager report is never overridden by an older bridge release.
   const bridge = { bridge: { read_only: true, emergency_stop: false } };
-  assert.equal(StatusView.estop(bridge, 'active', { state: 'unknown', note: 'starting' }).text, '解除されています');
+  assert.equal(StatusView.estop(bridge, 'active', { state: 'unknown', note: 'starting' }).text, '不明');
 });
 
 test('operation_manager reasons in the teacher\'s words', () => {
@@ -351,4 +348,29 @@ test('lesson permissions wait for a running lesson launch', () => {
   const on = lab({ switches_available: false, running_mode: 'practice' });
   assert.equal(StatusView.capability('drive', on, 'active', StatusView.createBlockerMemory(), 0)
     .toggleDisabled, false);
+});
+
+test('robot-side permission distinguishes unknown, grant and all translated blockers', () => {
+  const report = { state: 'known', drive_allowed: false, launcher_allowed: true, drive_blockers: [], age_sec: 0.2, stale_after_sec: 1.5 };
+  const translations = {
+    'teacher:off': '先生の許可OFF', 'teacher:unknown': '先生の許可を未受信', 'teacher:stale': '先生の許可信号が途絶',
+    'referee:off': '審判の許可なし', 'referee:unknown': '審判の信号を未受信', 'referee:stale': '審判の信号が途絶',
+  };
+  for (const [blocker, words] of Object.entries(translations)) {
+    assert.equal(StatusView.motionPermission({ ...report, drive_blockers: [blocker] }, 'drive').text, `許可なし（${words}）`);
+  }
+  assert.equal(StatusView.motionPermission({ ...report, drive_blockers: ['future:<unknown>'] }, 'drive').text, '許可なし（理由：future:<unknown>）');
+  for (const mode of ['lesson', 'practice', 'competition']) {
+    const status = { service: 'active', mode, running_mode: mode, motion_permission: { ...report, mode }, emergency_stop: { state: 'pressed' } };
+    const view = StatusView.overview(status, null);
+    assert.equal(view['launcher-permission'].text, '許可');
+    assert.equal(view['drive-permission'].text, '許可なし');
+    assert.equal(view.estop.tone, 'danger');
+  }
+  for (const note of ['starting', 'not_heard', 'silent', 'unavailable', 'robot_stopped']) {
+    assert.match(StatusView.motionPermission({ state: 'unknown', note, drive_allowed: true }, 'drive').text, /^不明/);
+  }
+  assert.equal(StatusView.permissionDeadline(report, 1000), 2300);
+  assert.equal(StatusView.permissionDeadline({ ...report, age_sec: 2 }, 1000), 1000);
+  for (const age_sec of [null, -1, NaN, Infinity]) assert.equal(StatusView.permissionDeadline({ ...report, age_sec }, 1000), 0);
 });
