@@ -1,9 +1,10 @@
+import { controlStatus, hardBlocked } from './control-status.js';
+import { freshInteraction } from './press-guard.js';
 import { html, nothing, unsafeHTML } from '../vendor/lit-html.js';
 import { loadJson, fillSentence as fill } from '../core/content.js';
 import { runModeBadgeHtml } from '../shell/run-mode.js';
 import {
   LEARNER_BLOCKERS,
-  shootOffered,
   powerRange,
   reasonSentence,
   blockerValues,
@@ -57,7 +58,7 @@ function confirmBox(model, actions) {
         type="checkbox"
         data-shoot-confirm
         .checked=${model.confirmed}
-        ?disabled=${model.spinning}
+        ?disabled=${model.spinning || hardBlocked(model)}
         @change=${(event) => actions.confirm(event.target.checked)}
       />
       ${shootCopy.confirm}
@@ -76,7 +77,7 @@ function powerSlider(model, actions) {
       max=${range.max}
       step="1"
       .value=${String(model.percent)}
-      ?disabled=${!model.allowed}
+      ?disabled=${!model.allowed || hardBlocked(model)}
       @input=${(event) => actions.setPercent(Number(event.target.value))}
     />
     <output data-shoot-power-value>${model.percent}%</output>
@@ -87,47 +88,50 @@ function tiltSlider(model, view, actions) {
   const shown = view.tiltPreview ?? model.tilt;
   const control = model.controls.tilt;
   return html`<label class="shoot-slider">
-      <span>${shootCopy.tilt}</span>
-      <input
-        type="range"
-        data-shoot-tilt
-        min=${Math.ceil(model.limits.tilt_min)}
-        max=${Math.floor(model.limits.tilt_max)}
-        step="1"
-        .value=${String(shown)}
-        ?disabled=${!control.enabled}
-        @input=${(event) => actions.previewTilt(Number(event.target.value))}
-        @change=${(event) => actions.setTilt(Number(event.target.value))}
-      />
-      <output data-shoot-tilt-value>${shown}°</output>
-    </label>
-    <p class="drive-note" data-shoot-tilt-note>
-      ${
-        control.reason?.key === 'tilt_unknown'
-          ? reasonSentence('tilt_unknown', shootCopy)
-          : shootCopy.tiltNote
-      }
-    </p>`;
+    <span>${shootCopy.tilt}</span>
+    <input
+      type="range"
+      data-shoot-tilt
+      data-live-command-input
+      min=${Math.ceil(model.limits.tilt_min)}
+      max=${Math.floor(model.limits.tilt_max)}
+      step="1"
+      .value=${String(shown)}
+      ?disabled=${!control.enabled}
+      @input=${(event) => freshInteraction(event, () => actions.previewTilt(Number(event.target.value)))}
+      @change=${(event) => freshInteraction(event, () => actions.setTilt(Number(event.target.value)))}
+    />
+    <output data-shoot-tilt-value>${shown}°</output>
+  </label> `;
 }
 
 function buttons(model, actions) {
-  const spin = model.controls.spin;
-  const fire = model.controls.fire;
-  const spinButton = spin.stop
-    ? html`<button class="drive-stop" data-shoot-spin="stop" @click=${actions.stopOwn}>
-        ${shootCopy.spinStop}
-      </button>`
-    : html`<button
-        class="drive-start"
-        data-shoot-spin="start"
-        ?disabled=${!spin.enabled}
-        @click=${actions.startRoller}
-      >
-        ${shootCopy.spin}
-      </button>`;
-  return html`<div class="live-capture-actions shoot-actions">
-    ${spinButton}
-    <button class="shoot-fire" data-shoot-fire ?disabled=${!fire.enabled} @click=${actions.fire}>
+  return html`<div class="live-capture-actions shoot-actions live-fixed-actions">
+    <button
+      class="drive-start"
+      data-shoot-spin="start"
+      data-live-start-action
+      ?disabled=${!model.controls.spin.enabled || model.controls.spin.stop}
+      @click=${(event) => freshInteraction(event, actions.startRoller)}
+    >
+      ${shootCopy.spin}
+    </button>
+    <button
+      class="drive-stop"
+      data-shoot-own-stop
+      aria-label=${shootCopy.spinStopLabel}
+      ?disabled=${!model.spinning}
+      @click=${actions.stopOwn}
+    >
+      ${shootCopy.spinStop}
+    </button>
+    <button
+      class="shoot-fire"
+      data-shoot-fire
+      data-live-start-action
+      ?disabled=${!model.controls.fire.enabled}
+      @click=${(event) => freshInteraction(event, actions.fire)}
+    >
       ${shootCopy.fire}
     </button>
   </div>`;
@@ -212,14 +216,12 @@ function stateValue(value, fresh, heard) {
 // The emergency stop as the drive strip says it (「非常停止：押されています／解除されています」),
 // from the bridge's own check: the launcher cannot run while it is pressed.
 function estopLine(model) {
-  const pressed = model.blockers.some((blocker) => blocker.code === 'emergency_stop');
+  const state = model.estopState ?? 'unknown';
   return html`<p
-    class=${pressed ? 'rs-strip-estop is-pressed' : 'rs-strip-estop is-released'}
-    data-shoot-estop=${pressed ? 'pressed' : 'released'}
+    class="rs-strip-estop ${state === 'pressed' ? 'is-pressed' : state === 'released' ? 'is-released' : 'is-unknown'}"
+    data-shoot-estop=${state}
   >
-    ${pressed ? html`<span aria-hidden="true">⛔</span>` : nothing}${
-      pressed ? shootCopy.estop.pressed : shootCopy.estop.released
-    }
+    ${shootCopy.estop[state]}
   </p>`;
 }
 
@@ -276,61 +278,29 @@ function limitsNote(model) {
 
 // Nothing to operate (no robot, the teacher has not allowed it, an older bridge): one line, the
 // launcher's values when the robot sends them, and the lesson's typed data carries on.
-function offLine(model, after) {
-  const code = model.blockers[0]?.code;
-  let text = shootCopy.notAllowed;
-  if (code === 'no_link') text = shootCopy.offline;
-  else if (code === 'old_bridge') text = shootCopy.oldBridge;
-  const heard = model.launcher.heard.roller || model.launcher.heard.shot;
-  return html`<div
-    class="drive-block drive-block-off shoot-block"
-    data-shoot-block
-    data-shoot-off=${code}
-  >
-    <p>${text}</p>
-    ${teacherDetails(model)} ${code !== 'no_link' && heard ? launcherState(model) : nothing}
-    ${after}
-  </div>`;
-}
-
 /**
  * The launcher block: `model` from shootModel(), `view` the panel's state (`tiltPreview`,
  * `recordNote`, `rowAdded`), `actions`: confirm, setPercent, previewTilt, setTilt, startRoller,
  * stopOwn, fire. `after`: the lesson's part right under the buttons (launcherPanel's `after`).
  */
 function shootBlock(model, view, actions, after = nothing) {
-  const heading = html`<h2>${unsafeHTML(runModeBadgeHtml('drive'))} ${shootCopy.title}</h2>`;
-  if (!shootOffered(model)) return html`${heading}${offLine(model, after)}`;
-  return html`${heading}
+  return html`<h2>${unsafeHTML(runModeBadgeHtml('drive'))} ${shootCopy.title}</h2>
     <div class="drive-block shoot-block" data-shoot-block>
-      <p>${shootCopy.lead}</p>
-      ${checklist(model)} ${teacherDetails(model)} ${confirmBox(model, actions)}
+      ${controlStatus(model.blockers, model.spinning ? 'spinning' : '', 'shoot')}
+      ${confirmBox(model, actions)}
       <div class="shoot-sliders">
         ${powerSlider(model, actions)}${tiltSlider(model, view, actions)}
       </div>
       <div class="shoot-run" data-shoot-run>
-        ${buttons(model, actions)} ${spinLine(model)} ${whyLine(model)} ${after}
+        ${buttons(model, actions)}
+        <p class="drive-note" data-shoot-tilt-note>${shootCopy.tiltNote}</p>
+        ${spinLine(model)} ${whyLine(model)} ${after}
         <div class="shoot-strip" data-live-strip>${estopLine(model)} ${launcherState(model)}</div>
         ${noteLines(model, view)}
       </div>
-      ${limitsNote(model)}
+      <p>${shootCopy.lead}</p>
+      ${checklist(model)} ${teacherDetails(model)} ${limitsNote(model)}
     </div>`;
-}
-
-/** The bar fixed at the bottom of every page while a roller turns on a page's command. */
-function shootStopBar(model, stop) {
-  const turning = model.spinning || (model.active && model.power > 0);
-  if (!turning) return nothing;
-  const mine = model.spinning || model.owner === 'me';
-  return html`<div class="drive-bar shoot-bar" role="alert" data-shoot-bar>
-    <span class="drive-bar-dot" aria-hidden="true"></span>
-    <strong>${mine ? shootCopy.bar.mine : shootCopy.bar.other}</strong>
-    <button class="drive-bar-stop" data-shoot-bar-stop @click=${stop}>
-      ${shootCopy.bar.stop}${
-        mine ? html`<span class="drive-bar-esc">${shootCopy.bar.esc}</span>` : nothing
-      }
-    </button>
-  </div>`;
 }
 
 /** A recorded launcher session in 記録の一覧 (`summary` from launcherRecordSummary). */
@@ -350,4 +320,4 @@ function launcherRecordView(summary) {
   </div>`;
 }
 
-export { shootCopy, shootBlock, shootStopBar, launcherRecordView };
+export { shootCopy, shootBlock, launcherRecordView };
