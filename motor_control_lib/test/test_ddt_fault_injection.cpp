@@ -166,6 +166,9 @@ TEST(DdtFaultInjectionCurrent, FailedZeroNeverReplaysANonzeroCurrent) {
   ASSERT_FALSE(pty.path().empty());
   FaultyDdtMotorLib lib(pty.path(), 115200);
   lib.answer_fd = pty.master();  // current mode sends a nonzero current only with fresh feedback
+  // Back-to-back answers on the real clock give no 10-40 ms intervals for the speed from the
+  // position; this test is about the replayed frame, so the PI runs on the reported speed.
+  lib.setCurrentMeasuredSource(motor_control_lib::CurrentMeasuredSource::Reported);
   lib.setMaxRpm(475);
   lib.setStopResendIntervalMs(0);
   lib.setCurrentControlParams(0.001, 0.0, 1.0, 0.3);

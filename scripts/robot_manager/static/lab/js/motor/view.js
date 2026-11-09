@@ -1,3 +1,4 @@
+import { benchSentence } from './bench-copy.js';
 import { html, nothing, unsafeHTML } from '../vendor/lit-html.js';
 import { formatNumber } from '../core/dom.js';
 import { fillSentence } from '../core/content.js';
@@ -52,6 +53,7 @@ function topicNav(model, copy, actions) {
         html`<button
           data-motor-topic=${id}
           aria-pressed=${String(id === model.topic)}
+          aria-current=${String(id === model.topic)}
           @click=${() => actions.openTopic(id)}
         >
           ${copy.topics[id].label}
@@ -644,7 +646,7 @@ function gearGoals(model, copy) {
   const text = copy.gear;
   const values = model.gear.values;
   const force = formatNumber(values.force, 1) + ' N';
-  const speed = formatNumber(values.speed, 2) + ' m/秒';
+  const speed = formatNumber(values.speed, 2) + ' m/s';
   return html`<div class="motor-metrics">
       <div><span>${text.wheelRpm}</span><strong>${formatNumber(values.rpm, 0)} rpm</strong></div>
       <div>
@@ -868,18 +870,6 @@ function measuredRows(rows, text) {
   );
 }
 
-function benchSentence(bench, text) {
-  if (!bench.summary) return text.summaryStill;
-  const { fastest, meanGap, wheelGap } = bench.summary;
-  return fillSentence(text.summary, {
-    command: formatNumber(fastest.command, 1),
-    left: formatNumber(fastest.left, 1),
-    right: formatNumber(fastest.right, 1),
-    gap: formatNumber(meanGap, 1),
-    wheelGap: formatNumber(wheelGap, 1),
-  });
-}
-
 // Under an empty table: what fills it. Without a robot the start button is not on the page, so the
 // sentence does not point to it; an example table can be analysed instead.
 function emptyBench(bench, copy, actions) {
@@ -963,7 +953,11 @@ function benchCard(model, copy, actions) {
     <h2>
       ${unsafeHTML(runModeBadgeHtml('live'))}${unsafeHTML(runModeBadgeHtml('drive'))} ${text.title}
     </h2>
-    <p>${capture.link.connected ? text.intro : text.introOffline}</p>
+    <p class="live-text-slot">
+      <span class="live-text-reserve" aria-hidden="true">${text.intro}</span>
+      <span class="live-text-reserve" aria-hidden="true">${text.introOffline}</span>
+      <span>${capture.link.connected ? text.intro : text.introOffline}</span>
+    </p>
     <div class="motor-bench-layout">
       <div class="motor-bench-controls">
         ${liveCaptureControls(capture, actions.bench)} ${benchNote(capture, text)}

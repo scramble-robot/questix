@@ -172,7 +172,7 @@
     "driveDistanceLabel": "走らせる距離",
     "driveDistanceOption": "{cm} cm",
     "driveDistanceProgram": "まっすぐ{speed} m/sで走り、車輪から求めた距離（/odom）で{cm} cm進んだら、手前で減速して止まります。止まったら、床の印からの距離をメジャーで測り、走り終えると上に出る表の「床で測った距離」に入れてください。何回か繰り返すと、車輪から求めた距離のくせが見えてきます。",
-    "driveDistanceStart": "{cm} cm走らせて記録する",
+    "driveDistanceStart": "{cm} cm​走らせて​記録する",
     "driveHoldsPlacement": "ロボットの前後に{space} m以上の空きを作ってください。",
     "driveDistancePlacement": "床に印を付けてロボットを置き、前に{space} m以上の空きを作ってください。",
     "driveDistanceShort": "時間内に目標の距離まで届きませんでした（車輪から求めた距離 {cm} cm）。",
@@ -185,7 +185,8 @@
     "choiceAdded": "{count}行を表に追加しました（全部で{total}行）。表の「どこから：…」の行で、どの記録の測定か分かります。",
     "choiceDrivesReplaced": "前の測定を消し、このファイルの{count}回の走行を上の表に入れました。床で測った距離を入れてください。",
     "choiceDrivesAdded": "{count}回の走行を上の表に追加しました。床で測った距離を入れてください。",
-    "handedOver": "{count}行を「測定の表」に入れました。"
+    "handedOver": "{count}行を「測定の表」に入れました。",
+    "driveDistanceBusy": "記録中は距離を変えられません。記録が終わってから選んでください。"
   },
   "drives": {
     "intro": "記録から、止まるまでの走行を見つけました。床の印の間をメジャーで測り、1回ごとに入れてから「測った走行を表に加える」を押してください。",

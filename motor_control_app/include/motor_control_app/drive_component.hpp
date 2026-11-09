@@ -361,6 +361,8 @@ private:
   double integral_limit_amp_{0.3};        // [A]
   int current_zero_deadband_rpm_{5};      // [RPM]
   bool current_invert_measured_{false};
+  // PI と暴走ガードの帰還: "position"（角度から求めた速さ）| "reported"（報告回転数、比較用）
+  std::string current_measured_source_{"position"};
   double current_ff_static_amp_{0.0};                // [A] 摩擦補償（静止摩擦分）
   double current_ff_viscous_amp_per_rpm_{0.0};       // [A/rpm] 摩擦補償（粘性摩擦分）
   double current_guard_overspeed_margin_rpm_{50.0};  // [RPM] 暴走ガード: 目標超過の幅
@@ -453,6 +455,12 @@ private:
   odometry::Pose2D odom_pose_{};
   // Paired position endpoints and feedback_count gating (pure ROS-free tracker).
   wheel_position::Integrator odom_position_integrator_{};
+  // Odometry only, in BOTH velocity/current modes. Defaults live in StopGapOptions;
+  // runtime changes require a restart because they change the history contract.
+  wheel_position::StopGapOptions odom_stop_gap_{};
+  double odom_tick_time_sec_{0.0};
+  double odom_left_ref_rpm_{0.0};
+  double odom_right_ref_rpm_{0.0};
   // Logging state only; never influences integration or actuation decisions.
   enum class OdomMotorState { kUnknown, kReady, kUnavailable, kStopFault };
   OdomMotorState odom_motor_state_{OdomMotorState::kUnknown};

@@ -101,6 +101,9 @@
   font-size: 10px;
   fill: var(--muted);
 }
+.keymap-pad-button .keymap-pad-index {
+  fill: #53685e;
+}
 .keymap-pad-button:focus-visible rect,
 .keymap-pad-stick:focus-visible .keymap-pad-well {
   stroke: #2a78d6;

@@ -15,7 +15,9 @@ from robot_manager import recorder, recorder_readiness as module, trial
 
 @pytest.fixture
 def wired(tmp_path, monkeypatch):
-    config = dict(recorder._DEFAULT_CONFIG, OUTPUT_DIR=str(tmp_path / "bags"), MIN_FREE_GB="0")
+    config = dict(recorder._DEFAULT_CONFIG, OUTPUT_DIR=str(tmp_path / "bags"), MIN_FREE_GB="1")
+    monkeypatch.setattr(module.shutil, "disk_usage",
+                        lambda _p: SimpleNamespace(free=24 * 1024**3, total=32 * 1024**3))
     manager = module.Readiness(Mock(return_value=module.Readiness.empty("pass", "確認済み")))
     manager.set_service_source(lambda: "active")
     monkeypatch.setattr(recorder, "readiness", manager)
@@ -110,7 +112,7 @@ def test_unusable_storage_is_not_ready(wired, monkeypatch, case):
     assert not payload()["normal"]["ready"]
 
 
-@pytest.mark.parametrize("key,value", [("MIN_FREE_GB", "bad"), ("MIN_FREE_GB", "-1"),
+@pytest.mark.parametrize("key,value", [("MAX_SPLIT_MB", "bad"), ("MAX_DURATION_SEC", "-1"),
                                       ("OUTPUT_DIR", "relative"), ("VEHICLE_NAME", "bad name")])
 def test_invalid_settings_fail_closed(wired, key, value):
     wired[0][key] = value

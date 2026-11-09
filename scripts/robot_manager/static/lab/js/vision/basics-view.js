@@ -460,7 +460,7 @@ function geometryEvidence(model, copy) {
     </div>
     <p>
       ${text.formula}<br />${geometry.focal} px × ${formatNumber(geometry.knownWidth, 2)} m ÷
-      ${target.w} px ≈ ${formatNumber(depth, 2)} m
+      ${target.w} px ≒ ${formatNumber(depth, 2)} m
     </p>
     <p>${text.coordinates}</p>`;
 }

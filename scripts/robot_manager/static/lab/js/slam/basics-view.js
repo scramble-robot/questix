@@ -252,7 +252,7 @@ function imuControls(imu, copy, actions) {
       max: 45,
       step: 15,
       value: imu.rate,
-      text: `${imu.rate} °/秒`,
+      text: `${imu.rate} °/s`,
       onInput: onInput(actions.setTurnRate),
     })}${slider({
       id: 'basicsSeconds',
@@ -426,6 +426,7 @@ function groupNav(model, actions) {
         html`<button
           data-slam-basics-group=${index}
           aria-pressed=${String(index === model.group)}
+          aria-current=${String(index === model.group)}
           @click=${() => actions.openGroup(index)}
         >
           ${title}
@@ -441,6 +442,7 @@ function topicNav(model, actions) {
         html`<button
           data-basics-topic=${topic.id}
           aria-pressed=${String(topic.id === model.topic)}
+          aria-current=${String(topic.id === model.topic)}
           @click=${() => actions.openTopic(topic.id)}
         >
           ${topic.title}

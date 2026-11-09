@@ -176,6 +176,9 @@ TEST_F(DdtTransactionStats, InvalidFrameCountsAsNoValidResponseEverywhere) {
 }
 
 TEST_F(DdtTransactionStats, CurrentModeKeepsTheLastCurrentSent) {
+  // The answers come back to back on the real clock (no 10-40 ms intervals for the speed from the
+  // position), and this test is about the record: the PI runs on the reported speed here.
+  lib_->setCurrentMeasuredSource(motor_control_lib::CurrentMeasuredSource::Reported);
   lib_->setCurrentControlParams(0.01, 0.0, 1.0, 0.3);
   lib_->setCurrentZeroDeadbandRpm(0);
   ASSERT_TRUE(lib_->initializeMotor(kLeft, ControlMode::Current));

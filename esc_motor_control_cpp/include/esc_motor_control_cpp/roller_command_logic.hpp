@@ -126,8 +126,8 @@ inline std::string rollerStatusJson(const RollerStatus& status) {
   const auto finite = [](double value) { return std::isfinite(value) ? value : 0.0; };
   char buffer[512];
   std::snprintf(buffer, sizeof(buffer),
-                "{\"command\": %.3f, \"source\": \"%s\", \"estop\": %s, \"permission\": %s, "
-                "\"max_power\": %.3f, \"pwm_fault\": %s, \"applied_pulse_us\": %d, "
+                "{\"command\": %.17g, \"source\": \"%s\", \"estop\": %s, \"permission\": %s, "
+                "\"max_power\": %.17g, \"pwm_fault\": %s, \"applied_pulse_us\": %d, "
                 "\"pwm_backend\": \"%s\", \"pwm_output_state\": \"%s\", \"pwm_error\": %d}",
                 finite(status.command), status.source ? status.source : "idle",
                 status.estop ? "true" : "false", status.permission ? "true" : "false",
