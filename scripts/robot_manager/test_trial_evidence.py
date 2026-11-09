@@ -160,12 +160,11 @@ class TrialFixture(unittest.TestCase):
 
     def config(self, **overrides):
         config = {
+            **recorder._DEFAULT_CONFIG,
             "VEHICLE_NAME": "robot1",
             "OUTPUT_DIR": str(self.output_dir),
             "EXCLUDE_TOPICS": "/camera/image_raw",
-            "MIN_FREE_GB": "0",
-            "MAX_SPLIT_MB": "0",
-            "MAX_DURATION_SEC": "0",
+            "MIN_FREE_GB": "1",
         }
         config.update(overrides)
         return config
@@ -191,6 +190,8 @@ class TrialFixture(unittest.TestCase):
 
         with contextlib.ExitStack() as stack:
             stack.enter_context(patch.object(recorder.readiness, "service", return_value="active"))
+            stack.enter_context(patch.object(recorder, "_disk_usage",
+                                             return_value=(24 * 1024**3, 32 * 1024**3)))
             stack.enter_context(patch.object(recorder, "_read_config",
                                              return_value=config or self.config()))
             stack.enter_context(patch.object(recorder, "_read_env_file",
@@ -885,7 +886,8 @@ class TrialStartTests(TrialFixture):
         self.assertEqual(raised.exception.status_code, 409)
 
     def test_low_disk_refuses_the_trial(self):
-        with self.wired(config=self.config(MIN_FREE_GB="999999")) as w:
+        with self.wired(config=self.config(MIN_FREE_GB="16")) as w, \
+                patch.object(recorder, "_disk_usage", return_value=(0, 32 * 1024**3)):
             with self.assertRaises(HTTPException) as raised:
                 recorder._start_trial({"trial_id": "t006"})
         self.assertEqual(raised.exception.status_code, 507)
