@@ -6,6 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  STEP_SPEEDS,
   speedStep,
   wallApproach,
   WALL_MIN_GAP,
@@ -114,4 +115,10 @@ test('the wall run ends by itself once the robot holds the stop distance', () =>
   assert.equal(controller.result.settled, true);
   assert.ok(Math.abs(controller.result.distance - STOP_DISTANCE) < 0.05);
   assert.ok(time < WALL_SECONDS, `settled after ${time.toFixed(1)} s`);
+});
+
+test('the offered step speeds stay distinct with the two decimals the card shows (V-2)', () => {
+  const labels = STEP_SPEEDS.map((speed) => speed.toFixed(2));
+  assert.equal(new Set(labels).size, STEP_SPEEDS.length);
+  for (const [i, label] of labels.entries()) assert.equal(Number(label), STEP_SPEEDS[i]);
 });

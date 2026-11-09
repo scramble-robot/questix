@@ -160,6 +160,14 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
     return CallbackReturn::FAILURE;
   }
 
+  if (!odom_stop_gap_.valid()) {
+    RCLCPP_ERROR(this->get_logger(),
+                 "Invalid odom stop gap parameters: speed_margin must be finite and >0, "
+                 "noise_counts must be >=0 (restart after editing YAML)");
+    return CallbackReturn::FAILURE;
+  }
+  odom_position_integrator_.configure(odom_stop_gap_);
+
   // current モードのパラメータ（負のゲイン = 正帰還など）は、モータに触れる前に拒否する。
   if (control_mode_ == "current") {
     const auto error = currentModeParamsError();
@@ -206,6 +214,11 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
   RCLCPP_INFO(this->get_logger(), "  publish_control_sample: %s  control_sample_topic: %s",
               publish_control_sample_ ? "true" : "false", control_sample_topic_.c_str());
   RCLCPP_INFO(this->get_logger(), "  publish_tf: %s", publish_tf_ ? "true" : "false");
+  RCLCPP_INFO(this->get_logger(),
+              "  odom_stop_gap_recovery: %s  odom_stop_gap_speed_margin: %g  "
+              "odom_stop_gap_noise_counts: %ld (odometry only, both modes)",
+              odom_stop_gap_.enabled ? "true" : "false", odom_stop_gap_.speed_margin,
+              static_cast<long>(odom_stop_gap_.noise_counts));
   RCLCPP_INFO(this->get_logger(), "  odom_topic: %s", odom_topic_.c_str());
   RCLCPP_INFO(this->get_logger(), "  odom_frame_id: %s", odom_frame_id_.c_str());
   RCLCPP_INFO(this->get_logger(), "  base_frame_id: %s", base_frame_id_.c_str());
@@ -220,6 +233,8 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
         current_kp_, current_ki_, max_current_amp_, integral_limit_amp_);
     RCLCPP_INFO(this->get_logger(), "  current_zero_deadband_rpm: %d  current_invert_measured: %s",
                 current_zero_deadband_rpm_, current_invert_measured_ ? "true" : "false");
+    RCLCPP_INFO(this->get_logger(), "  current_measured_source: %s",
+                current_measured_source_.c_str());
     RCLCPP_INFO(this->get_logger(),
                 "  current_ff_static_amp: %.3f  current_ff_viscous_amp_per_rpm: %.5f",
                 current_ff_static_amp_, current_ff_viscous_amp_per_rpm_);
@@ -227,6 +242,10 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
         this->get_logger(),
         "  current_guard_overspeed_margin_rpm: %.1f  current_guard_overspeed_time_sec: %.2f",
         current_guard_overspeed_margin_rpm_, current_guard_overspeed_time_sec_);
+  } else {
+    RCLCPP_INFO(this->get_logger(),
+                "  current_measured_source: %s (ignored: current mode only, control_mode is %s)",
+                current_measured_source_.c_str(), control_mode_.c_str());
   }
   RCLCPP_INFO(this->get_logger(), "  max_linear_accel: %.3f  max_angular_accel: %.3f",
               max_linear_accel_, max_angular_accel_);

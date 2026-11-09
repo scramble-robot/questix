@@ -80,12 +80,13 @@ QUESTiX Robot Manager の全タブとダイアログは、`static/style.css` の
   送れる停止で、ブリッジは再起動せず生徒の接続も切れません）、次にロボット制御（`questix_robot`）を
   停止します。結果は画面上部に項目ごとに表示します。先生の操作許可と教材からの走行・発射の**許可**も
   OFF にします（次の授業では先生が ON にし直します）。
-- 「操作」の最初のカード「いまのロボット」に、ロボット名、モード（動作中／次回）、ロボット制御、
-  非常停止ボタン、教材の配信、教材からの走行・発射の許可、いま動かしているのは誰かをまとめて表示します。
+- 「操作」の最初のカード「ロボットの状態」に、ロボット名、モード（動作中／次回）、ロボット制御、
+  非常停止ボタン、教材の配信、教材からの走行・発射の許可、いま動かしているのは誰か、
+  ロボット側の走行・発射機構の許可の9欄を表示します。
   ロボット名は**ホスト名**です（教材のブリッジの `robot_name` の既定値で、生徒の教材画面に出る名前と同じ。
   ブリッジが動いていればブリッジが名乗る名前を表示します）。Wi-Fi の SSID は接続用 QR に、
-  `VEHICLE_NAME` は記録名にだけ使い、ここでは使いません。非常停止ボタンの状態は、教材のブリッジが
-  走行か発射を許可されて配信しているときだけ分かります（それ以外は「分かりません」）。
+  `VEHICLE_NAME` は記録名にだけ使い、ここでは使いません。非常停止ボタンとロボット側の許可は、教材の配信に依存せず、
+  ロボット制御の動作中に専用の購読プロセスで読み取ります。
 - モードの保存値は**次回起動用**です。変更しても実行中のモードは変わりません。ロボット制御が
   動いているときにモードや操作設定を保存すると、画面上部に「今すぐ再起動して反映」を出します
   （押すと通常の再起動確認のあとで再起動します）。
@@ -101,12 +102,10 @@ QUESTiX Robot Manager の全タブとダイアログは、`static/style.css` の
   保存したモードの構成で起動します（下の「練習モードの起動要求」）。大会モードの起動は今までどおりで、
   電源投入時にも起動します。起動の結果は、実際に起動したかどうかで表示します（「練習用の構成で起動
   しました」「起動できませんでした：…」）。ロボット制御が動いている間は「起動」を押せません。
-- **ロボットが動かないとき**（「操作」タブ）: 「なぜ動かないか確認」を押すと、ロボットから非常停止
-  （`/emergency_stop`、L1）と走行許可（`/motion_permission`、L2）を一度だけ読み取り（`GET
-  /api/motion-state`、`motion_state.py` と `read_motion_state.py`。ROS とロボットの ROS_DOMAIN_ID で
-  数秒だけ動く読み取り専用のプロセス）、走行と発射機構それぞれを止めている理由（先生の操作許可が OFF、
-  AutoReferee が止めている、非常停止が押されている など）を表示します。何も変更しません。どのモードでも
-  使えます。
+- 「ロボットの状態」の走行・発射機構の許可（ロボット側）は `/motion_permission` の
+  受信値です。先生の選択と教材への許可とは別で、非常停止中も受信値をそのまま示します。
+  「許可」は動作可能の断定ではありません。未受信・1.5秒の途絶・制御停止は「不明」です。
+  取得は `/api/status`（1秒ごと）、通信停止時はブラウザ側でも失効します。
 - 起動前の確認では保存プロファイルとROS・ワークスペースの起動ファイルを確認します。
   コントローラーの物理接続や安全状態の自動判定は行いません。
   旧サービスで `/api/readiness` がない場合は既存APIで保存設定を確認し、起動環境は未確認と表示します。
@@ -262,7 +261,7 @@ press of the E-stop button reaches ROS no more (RLY1 still cuts the power). The 
 launcher never uses it. `robot_mode:=competition` with `enable_gpio_ref:=false` is not a valid
 configuration and `questix_core.launch.xml` refuses it.
 
-### E-stop display (`estop_monitor.py`)
+### Robot status display (`estop_monitor.py`)
 
 The header's 非常停止ボタン and the 操作 tab's E-stop row come from `/api/status`
 `emergency_stop`, in lesson, practice and competition mode alike (the QUESTiX LAB bridge, which
@@ -270,20 +269,25 @@ used to be their only source, runs in lesson mode only). While the robot service
 `estop_monitor.py` keeps one listener child, `estop_listener.py`, subscribed to
 `/emergency_stop` (questix_msgs/EmergencyStop, reliable + transient_local + keep-last(1)), sourced
 like the actuation heartbeat: ROS, then `ROBOT_WS` from `launch.env`, in the robot's
-`ROS_DOMAIN_ID`. It publishes nothing and offers no services; it stops when the service is not
+`ROS_DOMAIN_ID`. The same child also subscribes to `/motion_permission`
+(questix_msgs/MotionPermission, reliable + volatile + keep-last(1), never latched).
+Each topic has its own monotonic receive time; silence on either topic expires only that topic
+after 1.5 s. Permission flags become null with state `unknown`, never an inferred grant.
+`/api/status` includes both snapshots, and its one-second browser polling has a conservative
+local expiry that counts HTTP delay against the remaining lease. It publishes nothing and offers no services; it stops when the service is not
 active, follows a changed domain or workspace, and is retried after 10 s when it cannot start or
 exits.
 
 | `state` | shown | when |
 |---|---|---|
-| `pressed` | 押されています（operation_manager's reason in words, e.g. 非常停止ボタンが押されているか、つながっていません） | `active: true` |
-| `released` | 解除されています (header 解除中) | `active: false` |
+| `pressed` | 押されています（生の `reason` は状態欄に表示しません） | `active: true` |
+| `released` | 解除 (headerも解除) | `active: false` |
 | `released`, reason `released (no GPIO safety path)` | 解除されています（…診断用の起動です） (header 不明) | manual `enable_gpio_ref:=false` |
-| `unknown` (`note`) | 確認しています / 届いていません / 途絶えています / the error | `starting`, `not_heard` (5 s), `silent` (no report for 1.5 s), `unavailable` |
+| `unknown` (`note`) | 不明（制御停止時は「ロボット制御が停止中」を併記） | `starting`, `not_heard` (5 s), `silent` (no report for 1.5 s), `unavailable`, `robot_stopped` |
 
 It is a display only: drive_component, shot_component, esc_motor_control and the lab bridge keep
-judging `/emergency_stop` themselves, and nothing here lets anything move. Unknown is never shown
-as released.
+judging `/emergency_stop` and `/motion_permission` themselves, and nothing here lets anything move.
+Unknown is never shown as released or allowed.
 
 ## QUESTiX LAB (`/lab/`)
 
@@ -309,8 +313,15 @@ The **教材** tab starts and stops that bridge, so nobody has to run `ros2 laun
   `lab_dir:=` this manager's `static/lab/` — learners get exactly the pages served at `/lab/`.
 - The tab shows the URL(s) to open on learners' devices (`http://<robot-ip>:8897/`; container
   and VPN interfaces are left out). A page opened there connects to the robot automatically.
-- **配信停止** interrupts the process group (SIGINT, then SIGTERM/SIGKILL). The bridge is also
-  stopped when robot_manager exits. A bridge that was started by hand is shown as
+- **配信停止** signals the saved process group (SIGINT for up to 5 s, then SIGTERM for 3 s,
+  then SIGKILL for 3 s), reaping the tracked parent while waiting for the entire group to
+  disappear. It reports a stop only after the group is empty and the port is free, even if
+  `ros2 run` exited first. A short port-release wait uses the same total 11 s wait budget.
+  If the group or port remains, the status and log show `stop_failed`, `POST /api/lab/stop`
+  returns HTTP 500 with a Japanese explanation, and the lesson permissions go OFF. The manager
+  retains ownership so 配信停止 can be retried; a confirmed-empty group is never signalled again.
+  The same stopping procedure runs when leaving lesson mode and when robot_manager exits.
+  A bridge that was started by hand is shown as
   "配信中（手動で起動）" and is not stopped from here.
 - `カメラのトピック` (`sensor_msgs/CompressedImage`, empty = no camera) is stored in
   `$QUESTIX_CONFIG_DIR/lab.env` and applies from the next start.
@@ -426,8 +437,109 @@ fixed to `-s mcap`.
 Disk protection: recording refuses to start when free space is below `確保する空き容量（GB）`
 (`MIN_FREE_GB`, HTTP 507) and auto-stops (via SIGINT, so the bag is finalized) if
 free space drops below that threshold mid-recording. Optional `ファイルの分割サイズ（MB）`
-(`MAX_SPLIT_MB`) and `記録する時間（秒 / 0=無制限）` (`MAX_DURATION_SEC`) cap per-file size and total
-recording time.
+(`MAX_SPLIT_MB`, **200 MB by default**, decimal MB) and `ファイルを時間で分ける間隔（秒）`
+(`MAX_DURATION_SEC`, `--max-bag-duration`) split files by size and elapsed time.
+The time setting does **not** stop the whole recording; stop it explicitly. An existing `rosbag.env`
+value takes precedence, including `MAX_SPLIT_MB=0` (no size-based splitting). One bag directory may hold
+several MCAP files; the Manager lists, sizes and deletes that directory as one recording, and
+QUESTiX LAB reads and converts all its segments.
+
+Recording numeric settings accept half-width decimal digits only (no sign, decimal point,
+exponent or whitespace). The screen validates before saving and the server validates again:
+
+| Setting | Accepted integers | Meaning of 0 |
+| --- | --- | --- |
+| `MIN_FREE_GB` | 1–16 GB; default 5 | Not allowed |
+| `MAX_SPLIT_MB` | 0–8192 MB; default 200 | No size-based splitting |
+| `MAX_DURATION_SEC` | 0–14400 seconds | No time-based splitting |
+
+Units retain their existing conversions: 1 GB＝1024³ バイト; 1 MB＝1000² バイト.
+On save, the minimum must also be strictly less than the output filesystem's total
+capacity. For a missing output directory, its nearest existing directory ancestor is
+queried without creating it; an unusable target or unavailable capacity refuses the save.
+This also applies to the folder picker's partial save. If a saved numeric value is invalid,
+repair the named numeric field and save the settings before changing only the folder.
+
+Invalid persisted `MIN_FREE_GB` uses 5 GB for disk protection and reports a persistent
+warning in the settings/status screen and API (`config_warnings`, with
+`effective_numeric_settings` in config/status). Invalid split/time settings refuse both
+normal and evidence recording starts. Files are never automatically rewritten to repair
+invalid settings. Settings changed during a recording apply to the next recording.
+
+### Existing robots: restore recording defaults
+
+On an existing robot, `OUTPUT_DIR` and `MAX_SPLIT_MB` in `rosbag.env` take precedence over
+the new defaults. Saving recording settings from the screen writes **all default keys** with
+their current values, including values the operator did not change. A robot whose settings
+were saved under the earlier defaults therefore keeps `MAX_SPLIT_MB=0` and its saved output
+folder after this update; it does not automatically gain 200 MB splitting or the default path.
+
+Before changing anything, record the current output folder and split size. They can be checked
+read-only (an absent file means no persisted overrides):
+
+```bash
+grep -E '^(OUTPUT_DIR|MAX_SPLIT_MB)=' /etc/questix_robot/rosbag.env
+```
+
+After deployment, open the screen's recording settings, set the split size to **200 MB** and
+the output folder to **`/var/lib/questix/rosbags`**, then save. Use the screen to restore the
+previously recorded values if needed. This update keeps the existing save-all-keys behaviour;
+a different persistence model would be a separate change.
+
+### Storage and orderly shutdown
+
+The single policy source is `systemd/questix_robot_manager.service.d/recording.conf`.
+The installer, updater and Ansible copy it to
+`/etc/systemd/system/questix_robot_manager.service.d/recording.conf`, leaving other drop-ins
+intact. `StateDirectory=questix/rosbags` makes systemd create the default
+`/var/lib/questix/rosbags` at service start, owned by the service's `User=`/`Group=` with mode
+0750. Existing `/var/lib/questix` and its enrollment marker keep their ownership and mode.
+If the bag directory's owner/group differs, systemd corrects it and its contents recursively;
+if that directory already has the right owner/group, it leaves its contents' ownership alone.
+Custom `OUTPUT_DIR` paths still need to be writable by the Manager's user.
+See [systemd.exec: StateDirectory](https://www.freedesktop.org/software/systemd/man/255/systemd.exec.html#RuntimeDirectory=).
+
+On a Manager stop or orderly OS shutdown, `KillMode=mixed` sends SIGTERM only to the main
+Manager process. Its lifespan revokes the teacher's permission, stops its bridge and E-stop
+listener, and calls `recorder.shutdown_recording()`. The recorder sends SIGINT to its process
+group and waits for rosbag2 to write `metadata.yaml` and the MCAP ending (including Footer),
+then waits for trial evidence. `TimeoutStopSec=150` allows up to 150 seconds before systemd's
+forced cleanup; the recorder's stop/escalation and evidence budgets are 20 + 5 + 90 seconds.
+A timeout or escalation is never clean evidence. If the Manager exits with children left over,
+systemd kills the remaining cgroup processes under
+[KillMode=mixed](https://www.freedesktop.org/software/systemd/man/255/systemd.kill.html#KillMode=).
+
+`After=questix_robot.service` orders the Manager's shutdown before the robot's, so the
+post-run parameter snapshot can finish while ROS nodes are up. There is no `Wants=` or
+`Requires=` that starts the robot. In lesson/practice it still starts only on request; in
+competition the robot's `Type=simple` start does not wait for motor/ROS readiness before
+releasing the Manager's ordering dependency. See
+[systemd.unit: ordering](https://www.freedesktop.org/software/systemd/man/255/systemd.unit.html#Before=).
+
+The updater's `--check` reports an absent/different recording drop-in as outdated. An update
+loads the policy with daemon-reload **before** its existing Manager restart. That restart ends
+a running recording via the shutdown path above; recording does not continue across the
+restart and is not automatically restarted. Prefer stopping a recording before updating.
+Ansible reloads and restarts the Manager when the drop-in changes (neither handler runs inside
+the custom image build's chroot).
+
+### Recovering after a direct power cut
+
+A direct power cut cannot run shutdown or write the bag ending. The 200 MB splitting default
+limits the size of the last active segment, reducing exposure; it does not make data durable
+or guarantee that only that file is affected. Buffered data in the last chunk cannot be restored.
+Keep the original bag and work on a copy, with ROS 2 Jazzy and the MCAP storage plugin available:
+
+```bash
+cp -a /path/to/bag /path/to/bag-recovery
+ros2 bag reindex -s mcap /path/to/bag-recovery
+ros2 bag info /path/to/bag-recovery
+```
+
+Reindex reconstructs metadata from readable storage; it does not recreate missing messages or
+a missing MCAP Footer, and a truncated file may remain unreadable. Check the recovered duration
+and topics before using it. Recovery does not turn an interrupted trial's integrity into clean
+evidence. For normal use: stop recording, shut down from the screen, then cut power.
 
 ### Prerequisites
 
@@ -670,14 +782,14 @@ QUESTiX Robot Manager の「調整」タブでコントローラー別に編集�
 
 操作割り当てはコントローラー別のボタン名・軸名から選べます。名前の隣に
 ROS の配列番号も表示し、標準配置以外の番号も選択できます。
-コントローラーは UART / Switch・DualShock・Web（ブラウザ・スマホ、`web_joy_driver`）の 3 種類で、
-管理設定の「機体・接続の設定」（`CONTROLLER_TYPE`）で選べます。「調整」で編集できるのは UART / Switch と
-DualShock で、設定ファイルはそれぞれ別（`controls.uart.yaml` / `controls.dualshock.yaml`）です。
+コントローラーは 大会用コントローラー・ゲームパッド・Web（ブラウザ・スマホ、`web_joy_driver`）の 3 種類で、
+管理設定の「機体・接続の設定」（`CONTROLLER_TYPE`）で選べます。「調整」で編集できるのは 大会用コントローラー と
+ゲームパッド で、設定ファイルはそれぞれ別（`controls.uart.yaml` / `controls.dualshock.yaml`）です。
 Web はブラウザの操作画面でボタンの役割が決まっているため、同梱の `controls.web.yaml` を固定で使い、
 「調整」では編集しません（次回起動が Web のときは「調整」にその旨を表示し、「別のコントローラー用の設定です」
 という警告は出しません。保存 API も 409 で断ります）。「操作設定を保存」のバーは未保存の変更があるときだけ
 表示し、保存後にロボット制御が動いていれば画面上部に「今すぐ再起動して反映」を出します。
-UART の名前は `uart_joy_driver` のプロトコルに合わせています。DualShock は
+大会用コントローラーの名前は `uart_joy_driver` のプロトコルに合わせています。ゲームパッド は
 Linux の標準配置を表示するもので、接続機器の自動判別ではありません。
 [joy_node の配列順は機器依存](https://github.com/ros-drivers/joystick_drivers/blob/ros2/joy/README.md)
 のため、独自の接続環境では実際の番号に合わせてください。

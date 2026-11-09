@@ -1,3 +1,4 @@
+import { renderLive, resetLiveLayout } from '../live/live-layout.js';
 import { render } from '../vendor/lit-html.js';
 import { loadJson, loadText } from '../core/content.js';
 import { downloadFile } from '../core/dom.js';
@@ -34,6 +35,8 @@ import { reportLessonProgress } from '../shell/lesson-progress.js';
 import { revealElement } from '../core/reveal.js';
 import { driveRows, wallRows } from '../live/recording-core.js';
 import { createLiveSession } from '../live/live-session.js';
+import { driveModel } from '../live/drive-link.js';
+import { wallSpeedDisplay } from './live-limits.js';
 import { captureNotes } from '../live/live-view.js';
 import { openRobotDialog } from '../live/live-ui.js';
 import { registerRecordTarget } from '../live/record-targets.js';
@@ -96,8 +99,8 @@ const calibration = controlCalibration();
 // experiment is on screen, so switching between topics of one kind keeps the recording.
 // Each entry: `{run, parts, conditions, recordedAt, point, command}` (see realEntry).
 const liveRuns = { speed: null, distance: null };
-// Press → see: a real run that finished, or a file that was opened, brings the chart on screen
-// once it is drawn — but not the recording that comes back after a reload.
+// Only an explicit comparison/file choice brings the chart on screen once it is drawn.
+// A real run finishing, or a recording restored after reload, never requests navigation.
 let restoring = false;
 let revealPending = false;
 
@@ -216,6 +219,7 @@ function liveModel() {
     capture: { ...liveSession().model(), message: liveSession().note },
     stepSpeed: liveStepSpeed,
     stepSpeeds: stepSpeedOptions(),
+    wallSpeedNote: wallSpeedInfo().note,
     compared: comparedRuns[kind],
     table,
     conclusion: comparisonConclusion(table, { distance: kind === 'distance', text: copy.live }),
@@ -237,8 +241,8 @@ function drawStage() {
   });
 }
 
-function update() {
-  render(controlPage(buildModel(), copy, hardwareHtml, actions), page());
+function update(preserve = false) {
+  renderLive(controlPage(buildModel(), copy, hardwareHtml, actions), page(), { preserve });
   reportLessonProgress('control', {
     topics: CONTROL_TOPICS.map((topic) => ({ id: topic.id, title: topic.name })),
     current: topicId,
@@ -460,7 +464,6 @@ function applyRecording(kind, recording) {
   if (!run) return { ok: false, note };
   keepPrevious(kind);
   liveRuns[kind] = realEntry(kind, run, recording);
-  if (!restoring && kind === liveKind()) revealPending = true;
   return { ok: true, note };
 }
 
@@ -587,12 +590,16 @@ function comparisonRows() {
 let liveStepSpeed = STEP_SPEEDS[1];
 const REAL_WHEEL_RADIUS = 0.05; // m, until the robot has told us (launcher/config/drive_component.yaml)
 
+// The offered speeds differ in the second decimal (0.05 / 0.10 / 0.15): one decimal would show
+// all three as 0.1 (DESIGN.md V-2).
+const speedText = (speed) => speed.toFixed(2);
+
 function stepSpeedOptions() {
   const config = { wheel_radius: liveLink().config?.wheel_radius ?? REAL_WHEEL_RADIUS };
   return STEP_SPEEDS.map((speed) => ({
     speed,
     label: fill(copy.live.driveSpeedOption, {
-      speed: speed.toFixed(1),
+      speed: speedText(speed),
       rpm: forwardRpm(speed, config).toFixed(0),
     }),
   }));
@@ -613,14 +620,14 @@ const speedDrive = {
   startLabel: undefined,
   program: () =>
     fill(copy.live.driveSpeedProgram, {
-      speed: liveStepSpeed.toFixed(1),
+      speed: speedText(liveStepSpeed),
       hold: STEP_HOLD,
     }),
   placement: () =>
     fill(copy.live.driveSpeedPlacement, {
       distance: (speedStep(liveStepSpeed).distance + 0.5).toFixed(1),
     }),
-  conditions: () => runConditions({ speed: liveStepSpeed }, `${liveStepSpeed.toFixed(1)} m/s`),
+  conditions: () => runConditions({ speed: liveStepSpeed }, `${speedText(liveStepSpeed)} m/s`),
   plan: () => {
     const step = speedStep(liveStepSpeed);
     return { controller: step.controller, seconds: step.seconds, tail: 1 };
@@ -640,12 +647,23 @@ function wallOutcome(result) {
   return fill(copy.live.driveWallNotSettled, { distance: result.distance.toFixed(2) });
 }
 
+function wallSpeedInfo() {
+  return wallSpeedDisplay(
+    {
+      maximum: WALL_MAX_SPEED,
+      limit: driveModel().limits?.linear,
+      connected: liveLink().connected,
+    },
+    copy.live,
+  );
+}
+
 const wallDrive = {
   startLabel: copy.live.driveWallStart,
   program: () =>
     fill(copy.live.driveWallProgram, {
       gains: gainsText(experiment().config),
-      top: WALL_MAX_SPEED.toFixed(2),
+      top: wallSpeedInfo().top.toFixed(2),
       gap: WALL_MIN_GAP.toFixed(2),
     }),
   placement: () => fill(copy.live.driveWallPlacement, { start: WALL_START_MIN.toFixed(1) }),
@@ -682,7 +700,8 @@ const liveSessions = {
     countStream: 'drive',
     failed: copy.live.failed,
     apply: (recording) => applyRecording('speed', recording),
-    update: () => update(),
+    resetLayout: () => resetLiveLayout(document),
+    update: (preserve = true) => update(preserve),
     drive: speedDrive,
     // The chart and the comparison table above are this block's result; the run's own report
     // stays in 記録の一覧.
@@ -698,7 +717,8 @@ const liveSessions = {
     countStream: 'scan',
     failed: copy.live.failed,
     apply: (recording) => applyRecording('distance', recording),
-    update: () => update(),
+    resetLayout: () => resetLiveLayout(document),
+    update: (preserve = true) => update(preserve),
     drive: wallDrive,
     report: false,
     state: { place: 'control-live', name: copy.live.memoName },
@@ -846,7 +866,7 @@ function initControl() {
   });
   // Connecting or losing the robot changes what the recording card offers.
   onLiveLink(() => {
-    if (!page().hidden) update();
+    if (!page().hidden) update(true);
   });
   registerRecordTarget('control-speed', (recording, { compare }) =>
     openFromRecords('speed', recording, compare),

@@ -113,7 +113,14 @@ function documentTitle() {
 function update() {
   const current = model();
   render(courseNavigation(current, actions), $('lessonNav'));
-  render(headerCaption(), $('currentCourseTitle'));
+  const caption = headerCaption();
+  render(caption, $('currentCourseTitle'));
+  $('currentCourseTitle').title = caption;
+  const summary = $('courseSwitcher').querySelector('summary');
+  summary.setAttribute(
+    'aria-label',
+    `${summary.querySelector('.switcher-label').textContent}：${caption}`,
+  );
   render(seriesPage(current, actions), $(CATALOGUE_PAGE));
   $('seriesHome').hidden = course === CATALOGUE;
   $('courseSwitcher').open = false;
@@ -211,7 +218,7 @@ function showAssessment(kind, name, updateHash) {
   window.scrollTo({ top: 0 });
 }
 
-// 記録の一覧: reached from the catalogue's robot section, the 実機 dialog and a lesson's note that a
+// 記録の一覧: reached from the header switcher, catalogue, 実機 dialog and a lesson's note that a
 // run was kept on the robot; it opens recordings in the courses (`series-experiment` below).
 function showRecords(updateHash = true) {
   if (course === RECORDS) return;
@@ -278,6 +285,12 @@ const actions = {
     if (modified(event)) return; // let the browser open a new tab/window
     event.preventDefault();
     show(id);
+  },
+  followRecordsLink(event) {
+    if (modified(event)) return; // preserve the native new-tab/window action
+    event.preventDefault();
+    $('courseSwitcher').open = false; // also when showRecords is already on this route
+    showRecords();
   },
   selectGrade(id) {
     selectedGrade = id;
@@ -351,27 +364,6 @@ document.addEventListener('keydown', (event) => {
   switcher.open = false;
   switcher.querySelector('summary').focus();
 });
-
-// On a phone the header scrolls away with the page and slides back in as soon as the learner
-// scrolls up, so the catalogue button and the switcher are one small swipe away from anywhere.
-const HEADER_TUCK_QUERY = window.matchMedia('(max-width: 600px)');
-const HEADER_SCROLL_THRESHOLD = 6; // px of scrolling in one direction before the header reacts
-let lastScrollY = window.scrollY;
-
-function tuckHeaderOnScroll() {
-  const scrollY = window.scrollY;
-  const delta = scrollY - lastScrollY;
-  if (Math.abs(delta) < HEADER_SCROLL_THRESHOLD) return;
-  const tucked =
-    HEADER_TUCK_QUERY.matches &&
-    delta > 0 &&
-    scrollY > siteHeader.offsetHeight &&
-    !$('courseSwitcher').open;
-  siteHeader.classList.toggle('is-tucked', tucked);
-  lastScrollY = scrollY;
-}
-window.addEventListener('scroll', tuckHeaderOnScroll, { passive: true });
-siteHeader.addEventListener('focusin', () => siteHeader.classList.remove('is-tucked'));
 
 // --- Hash routes: #<course>, #quiz-<course>, #mastery-<course>, #records; anything else is the
 // catalogue.

@@ -9,9 +9,13 @@
   "silent": "つながっていますが、ロボットから値が届いていません。",
   "estop": {
     "pressed": "非常停止：押されています",
+    "driveReport": "走行の制御は、非常停止として止まっています（ロボットの走行の状態から）。",
     "pressedNote": "車輪は回りません。先生と一緒に周りを確かめてから解除してください。",
     "released": "非常停止：解除されています",
-    "unknown": "非常停止：車輪の状態が届いていないため、わかりません"
+    "unknown": "非常停止：わかりません（非常停止の信号がまだ届いていません）",
+    "stale": "非常停止：わかりません（非常停止の信号が途絶えています）",
+    "checking": "非常停止：わかりません（受信の遅れを確かめています）",
+    "delayed": "非常停止：わかりません（受信が遅れています）"
   },
   "driver": {
     "title": "いま走らせているのは",
@@ -20,7 +24,7 @@
     "controller": "コントローラー（または別のノード）",
     "unknown": "指令なし（車輪が手などで回されています）",
     "none": "だれも走らせていません",
-    "commandVsMeasured": "指令 {command} m/秒 → 測定 {measured} m/秒",
+    "commandVsMeasured": "指令 {command} m/s → 測定 {measured} m/s",
     "noCommand": "速度の指令は出ていません"
   },
   "wheels": {
@@ -30,7 +34,7 @@
     "noCommand": "送った指令なし",
     "chartLabel": "{side}の回転数の、最近{seconds}秒の変化。太い実線がモータから届いた生の値、細く薄い線がなめらかにした値、破線がモータに送った指令。値が届かなかった間は線を切っています。",
     "yTitle": "回転数（rpm）",
-    "xTitle": "時間（秒、0がいま）",
+    "xTitle": "受信時刻（秒、0がいま）",
     "raw": "生の値",
     "filtered": "なめらか",
     "filteredValue": "なめらかにした値 {rpm} rpm",
@@ -39,7 +43,7 @@
   "motion": {
     "speed": "前後の速さ",
     "turn": "回転の速さ",
-    "turnDegrees": "約{degrees}°/秒・左回りが＋"
+    "turnDegrees": "約{degrees}°/s・左回りが＋"
   },
   "pose": {
     "title": "表示を始めてからの動き",
@@ -85,7 +89,7 @@
     "kept": "メモはこの端末のブラウザに残ります。大事なメモは保存してください。",
     "fileName": "QUESTiX-LAB-測定メモ-{place}.txt",
     "fileHeading": "QUESTiX LAB 測定メモ（{place}）",
-    "line": "{time} 左 {left} rpm・右 {right} rpm／前後 {speed} m/秒・回転 {turn} rad/秒／向き {heading}°／前 {front} m／非常停止：{estop}",
+    "line": "{time} 左 {left} rpm・右 {right} rpm／前後 {speed} m/s・回転 {turn} rad/s／向き {heading}°／前 {front} m／非常停止：{estop}",
     "estopPressed": "押されています",
     "estopReleased": "解除されています",
     "unknown": "—"
@@ -96,14 +100,17 @@
     "estop": {
       "pressed": "非常停止：押されています",
       "released": "非常停止：解除されています",
-      "unknown": "非常停止：わかりません（車輪の状態が届いていません）"
+      "unknown": "非常停止：わかりません（非常停止の信号がまだ届いていません）",
+      "stale": "非常停止：わかりません（非常停止の信号が途絶えています）",
+      "checking": "非常停止：わかりません（受信の遅れを確かめています）",
+      "delayed": "非常停止：わかりません（受信が遅れています）"
     },
     "left": "左の車輪",
     "right": "右の車輪",
     "speed": "前後の速さ",
     "measured": "実測・生の値（実線）",
     "command": "指令（破線）",
-    "span": "最近{seconds}秒・上下±{top} m/秒",
-    "sparkLabel": "前後の速さの最近10秒。実線が車輪の生の値から求めた実測、破線が指令、上下の端が±{top} m/秒。"
+    "span": "最近{seconds}秒・上下±{top} m/s",
+    "sparkLabel": "前後の速さの最近10秒。実線が車輪の生の値から求めた実測、破線が指令、上下の端が±{top} m/s。"
   }
 }

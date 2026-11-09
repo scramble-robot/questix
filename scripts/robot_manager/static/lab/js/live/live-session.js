@@ -18,7 +18,7 @@ import {
   withRunInfo,
   cleanConditions,
 } from './recording-core.js';
-import { captureCopy, revealLiveRun } from './live-view.js';
+import { captureCopy } from './live-view.js';
 import { driveModel, onDrive, confirmDriveSafety, runDrive } from './drive-link.js';
 import { driveEndedText, driveCopy } from './drive-view.js';
 import { runStatusText } from './drive-report-view.js';
@@ -43,8 +43,7 @@ import { chooseRobotRecord } from './record-picker.js';
 // (「ロボットの記録から選ぶ」, record-picker.js), through the same path as a file — or, for a
 // lesson that passes `compare`, drawn over the one on screen (the picker offers both).
 //
-// Press → see: starting a run or a recording brings the block's button and the live strip under
-// it on screen (live-view revealLiveRun), the same in every course.
+// Robot commands and received results keep the page in place; navigation is a learner action.
 
 const DRIVE_PROGRESS_MS = 250;
 const DEFAULT_TAIL_SECONDS = 1.5;
@@ -112,7 +111,8 @@ function originNote(recording, origin, assumedConfig) {
  * - `apply(recording)`: returns `{ok, note}`; `ok: false` keeps the recording already on screen
  * - `applyOnRestore`: false when the lesson keeps its own results across a reload (the recording
  *   then only comes back so it can still be saved)
- * - `update()`: redraws the lesson
+ * - `update(preserve = true)`: redraws a received/run state; false for learner file replacement
+ * - `resetLayout()` (optional): starts a fresh reservation for a retry or clear
  * - `reportMetrics` (optional): the numbers the run report under the block shows, as keys of
  *   drive-report-view's REPORT_METRICS (e.g. `['driveTime', 'distance', 'maxSpeed', 'stop']`);
  *   all of them when left out. `report: false` shows no run report under the block (a lesson
@@ -155,11 +155,16 @@ function createLiveSession(options) {
     driveAbort: null,
     tail: false, // recording the stop after the robot was told to stop
     driveNote: '', // how the last run ended, shown under the start button
+    reconfirm: '', // display only: why this session cleared the safety tick
     driveRunId: null, // the history entry (drive-history.js) of this block's last run
     origin: '', // where session.recording came from: 'live', 'file', 'robot' or 'restored'
     robotSave: null, // how keeping the last run on the robot went: {state, message}, or null
   };
-  if (options.drive) onDrive(() => options.update());
+  if (options.drive)
+    onDrive((model) => {
+      if (model.confirmed) session.reconfirm = '';
+      options.update();
+    });
 
   function show(recording, origin, assumedConfig = false) {
     const result = options.apply(recording);
@@ -189,10 +194,10 @@ function createLiveSession(options) {
 
   async function startCapture() {
     if (session.busy) return;
+    options.resetLayout?.();
     const controllers = { abort: new AbortController(), finish: new AbortController() };
     Object.assign(session, { busy: true, progress: 0, controllers, note: '', robotSave: null });
     options.update();
-    revealLiveRun(options.slot);
     try {
       const raw = await recordRobot({
         seconds: options.seconds,
@@ -230,6 +235,7 @@ function createLiveSession(options) {
 
   async function startDriveCapture() {
     if (session.busy || !options.drive) return;
+    options.resetLayout?.();
     let plan;
     try {
       plan = options.drive.plan();
@@ -240,7 +246,7 @@ function createLiveSession(options) {
       options.update();
       return;
     }
-    Object.assign(session, { busy: true, driveNote: '', robotSave: null });
+    Object.assign(session, { busy: true, driveNote: '', reconfirm: '', robotSave: null });
     try {
       await driveAndRecord(plan);
     } finally {
@@ -271,7 +277,6 @@ function createLiveSession(options) {
       driveTotal: plan.seconds,
     });
     options.update();
-    revealLiveRun(options.slot);
     const recorded = recordRobot({
       // An upper bound only: the recording is finished below, right after the tail.
       seconds: plan.seconds + tail + 5,
@@ -302,12 +307,26 @@ function createLiveSession(options) {
 
   function finishRun(result, raw, plan) {
     const ended = driveEndedText(result);
-    if (!result.started || raw instanceof Error || isEmptyRun(raw)) {
-      session.driveNote = ended;
+    const failed = raw instanceof Error;
+    const failure = failed ? fill(driveCopy.recordFailed, { reason: raw.message }) : '';
+    if (!result.started || (!failed && isEmptyRun(raw))) {
+      session.driveNote = [ended, failure].filter(Boolean).join(' ');
       return;
     }
-    // The next run is a new situation (the robot has moved): the learner confirms again.
+    // A started run with a failed recording also needs a fresh look around. Never invent a
+    // successful recording or a history entry; sender readiness and limits are unchanged.
+    session.reconfirm = driveModel().confirmed
+      ? result.reason === 'done'
+        ? 'done'
+        : result.reason === 'stopped'
+          ? 'stopped'
+          : 'problem'
+      : '';
     confirmDriveSafety(false);
+    if (failed) {
+      session.driveNote = [ended, failure].filter(Boolean).join(' ');
+      return;
+    }
     const status = runStatusText(result.reason);
     const recording = stamp(raw, {
       conditions: plan.conditions,
@@ -351,7 +370,7 @@ function createLiveSession(options) {
     } catch (error) {
       session.note = fill(captureCopy.file.failed, { reason: error.message });
     }
-    options.update();
+    options.update(false);
   }
 
   /**
@@ -362,7 +381,7 @@ function createLiveSession(options) {
   function useRecording(recording, origin = 'robot') {
     if (session.busy) return false;
     openParsed(recording, origin);
-    options.update();
+    options.update(false);
     return session.recording === recording;
   }
 
@@ -394,7 +413,7 @@ function createLiveSession(options) {
 
   function setGroup(text) {
     setGroupName(text);
-    options.update();
+    options.update(false);
   }
 
   // The last recording of this block, if the browser kept one and it still has what is needed.
@@ -410,6 +429,7 @@ function createLiveSession(options) {
   }
 
   function clear() {
+    options.resetLayout?.();
     session.recording = null;
     session.note = '';
     keepRecording(options.slot, null);
@@ -451,6 +471,7 @@ function createLiveSession(options) {
       : drive.blockers;
     return {
       ...drive,
+      reconfirm: session.reconfirm,
       blockers,
       ready: drive.ready && missing.length === 0,
       program: options.drive.program(),
@@ -488,7 +509,11 @@ function createLiveSession(options) {
       saveRecording,
       setGroup,
       startDriveCapture,
-      confirmDrive: confirmDriveSafety,
+      confirmDrive(value) {
+        options.resetLayout?.();
+        confirmDriveSafety(value);
+        options.update(false);
+      },
       saveRun: saveDriveRun,
       ...(options.compare
         ? {

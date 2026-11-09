@@ -24,6 +24,7 @@ function topicNav(model, actions) {
         html`<button
           data-launch-topic=${topic.id}
           aria-pressed=${String(topic.id === model.topic)}
+          aria-current=${String(topic.id === model.topic)}
           @click=${() => actions.openTopic(topic.id)}
         >
           <span>${index + 1}</span>${topic.title}
@@ -571,8 +572,7 @@ function measurementPanel(measurement, copy, actions) {
   </aside>`;
 }
 
-// The distance of the disc just fired, typed right under 「1枚発射」 (the launcher block draws it
-// with its own redraws, launcherPanel `after`). Its row in the table says so.
+// The distance of the disc just fired, immediately below the shared firing buttons.
 function quickEntry(quick, copy, actions) {
   if (!quick) return nothing;
   const text = copy.measurement;
@@ -604,13 +604,18 @@ function quickEntry(quick, copy, actions) {
 
 // Firing from the lesson (js/live/shoot-ui.js draws the block itself, with the emergency stop and
 // the launcher's state): each disc fired here adds a row to the table right under the block, and
-// its distance field comes right under the fire button.
+// its distance field is drawn by the shared block's after() slot.
 function shootCard(measurement, copy, actions) {
   return html`<section class="card launch-shoot">
     ${launcherPanel('launch-measure', {
       onShot: actions.addShot,
       lesson: 'launch-measure',
-      after: () => quickEntry(measurement.quick, copy, actions),
+      after: () =>
+        measurement.quick
+          ? quickEntry(measurement.quick, copy, actions)
+          : html`<p class="drive-note" data-launch-quick-hint>
+              ${measurement.source === 'measured' ? copy.measurement.quickEmpty : copy.measurement.quickExample}
+            </p>`,
     })}
   </section>`;
 }
@@ -618,7 +623,7 @@ function shootCard(measurement, copy, actions) {
 function measurementBody(model, copy, fragments, actions) {
   return html`${shootCard(model.measurement, copy, actions)}
     ${shotsTable(model.measurement, copy, actions)}
-    <div class="launch-layout">
+    <div class="launch-layout" id="launchMeasureLayout">
       ${measurementCard(model.measurement, model.chartWidth, copy)}${measurementPanel(
         model.measurement,
         copy,

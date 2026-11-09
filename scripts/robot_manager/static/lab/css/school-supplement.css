@@ -85,7 +85,7 @@
 .school-tip-body .school-tip-note {
   font-size: 12px;
   line-height: 1.8;
-  color: #667b75;
+  color: var(--muted);
   margin: 18px 0 0;
 }
 @media (max-width: 760px) {
@@ -305,7 +305,7 @@ body.supplement-is-open {
 .supplement-body .helper,
 .supplement-body .school-tip-note {
   font-size: 13px;
-  color: #667b75;
+  color: var(--muted);
 }
 .supplement-body .school-tip-body {
   padding: 0;

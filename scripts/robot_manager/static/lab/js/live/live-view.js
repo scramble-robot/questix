@@ -1,7 +1,8 @@
+import { controlStatus } from './control-status.js';
+import { freshInteraction } from './press-guard.js';
 import { html, nothing } from '../vendor/lit-html.js';
 import { loadJson, fillSentence as fill } from '../core/content.js';
-import { revealElement } from '../core/reveal.js';
-import { driveControls, notAllowedLine } from './drive-view.js';
+import { driveControls } from './drive-view.js';
 import { setGroupName } from './capture.js';
 import { recordsCopy } from './records-core.js';
 import { liveStateStrip, robotStatePanel } from './robot-state.js';
@@ -21,42 +22,26 @@ import { liveStateStrip, robotStatePanel } from './robot-state.js';
 const captureCopy = await loadJson('content/live/capture.json');
 
 const streamLabel = (name) => captureCopy.streamNames[name] ?? name;
-// Room kept above the stop bar (css/live.css .drive-bar) when a run area is brought on screen.
-const STOP_BAR_ROOM = 96; // px
 
-// While the page may drive the robot, the controller is off, so /target_twist only flows while
-// someone drives: not receiving it then is normal, not a fault worth a warning.
-function missingNow(model) {
-  if (!drivingAllowed(model)) return model.link.missing;
-  return model.link.missing.filter((name) => name !== 'twist');
-}
-
-const drivingAllowed = (model) => Boolean(model.drive?.allowed && model.link.connected);
 // A driving run (or its tail) owns the block's buttons until it is over.
 const driveBusy = (model) => model.running || model.tail;
-// The record button is the block's main action unless the page may drive (then 記録だけする is
-// folded with the files) — or while a recording it started runs, so its stop stays in view.
-const recordIsMain = (model) => !drivingAllowed(model) && !driveBusy(model);
-
-function recordLabel(model) {
-  if (drivingAllowed(model)) return fill(captureCopy.recordOther, { seconds: model.seconds });
-  return fill(model.recordLabel ?? captureCopy.record, { seconds: model.seconds });
-}
-
 function recordButton(model, actions) {
-  if (driveBusy(model)) return nothing;
-  if (model.recording)
-    return html`<button class="live-capture-stop" @click=${actions.stopCapture}>
+  return html`<button
+      class="live-capture-record"
+      data-live-record-start
+      data-live-start-action
+      ?disabled=${model.recording || driveBusy(model) || !model.link.connected || model.link.missing.length > 0}
+      @click=${(event) => freshInteraction(event, actions.startCapture)}
+    >
+      ${fill(model.recordLabel ?? captureCopy.record, { seconds: model.seconds })}</button
+    ><button
+      class="live-capture-stop"
+      data-live-record-stop
+      ?disabled=${!model.recording || driveBusy(model)}
+      @click=${actions.stopCapture}
+    >
       ${model.stopLabel ?? captureCopy.stop}
     </button>`;
-  // With driving allowed this is the secondary way: recording a run someone else drives.
-  return html`<button
-    class=${drivingAllowed(model) ? 'live-capture-record quiet' : 'live-capture-record'}
-    ?disabled=${!model.link.connected || model.link.missing.length > 0}
-    @click=${actions.startCapture}
-  >
-    ${recordLabel(model)}
-  </button>`;
 }
 
 const progressLine = (model) =>
@@ -104,9 +89,9 @@ function robotSaveLine(model) {
  * How the last run ended (`driveNote`), what the lesson made of it (`message`) and whether the
  * robot kept it, as one box under the button: each fact once.
  */
-function resultBox(model) {
+function resultBox(model, actions) {
   const ended = model.driveNote && !driveBusy(model) ? model.driveNote : '';
-  if (!ended && !model.message && !model.robotSave?.message) return nothing;
+  if (!ended && !model.message && !model.robotSave?.message && !model.resultLink) return nothing;
   return html`<div class="live-result" data-live-result>
     ${ended ? html`<p class="drive-result" role="status" data-drive-result>${ended}</p>` : nothing}
     ${
@@ -115,6 +100,7 @@ function resultBox(model) {
         : nothing
     }
     ${robotSaveLine(model)}
+    ${model.resultLink ? html`<button class="text-button" data-live-results ?disabled=${!model.resultLink.enabled} @click=${actions.showResults}>${model.resultLink.label}</button>` : nothing}
   </div>`;
 }
 
@@ -228,16 +214,6 @@ function saveButtons(model, actions) {
   </div>`;
 }
 
-// 記録だけする, inside the files while the page may drive (its stop and progress stay with it).
-function recordOnlyPart(model, actions) {
-  if (!drivingAllowed(model) || driveBusy(model)) return nothing;
-  return html`<div class="live-record-only">
-    <div class="live-capture-actions">${recordButton(model, actions)}</div>
-    ${progressLine(model)}
-    <p class="live-capture-note">${captureCopy.recordOtherNote}</p>
-  </div>`;
-}
-
 function filesSection(model, actions) {
   if (!model.file) return nothing;
   const text = captureCopy.file;
@@ -248,7 +224,6 @@ function filesSection(model, actions) {
       >
     </summary>
     <div class="live-files-body">
-      ${recordOnlyPart(model, actions)}
       <div class="live-capture-actions">
         ${openFileControl(model, actions)} ${pickControl(model, actions)}
       </div>
@@ -266,26 +241,12 @@ function captureNote(model) {
   return captureCopy.recordOnly;
 }
 
-function linkLine(model) {
-  const missing = missingNow(model);
-  if (missing.length)
-    return html`<p class="live-capture-state warn" data-live-state>
-      ${fill(captureCopy.missing, { streams: missing.map(streamLabel).join('と') })}
-    </p>`;
-  if (!recordIsMain(model)) return nothing;
-  return html`<p class="live-capture-state" data-live-state>
-    ${captureCopy.state[model.link.phase] ?? captureCopy.state.idle}
-  </p>`;
-}
-
 // The record button as the block's main action (no driving here, or the teacher stopped it).
 function recordPart(model, actions) {
   return html`<div class="live-capture" data-live-capture>
-    <div class="live-run" data-live-run>
-      <div class="live-capture-actions">${recordButton(model, actions)}</div>
-      ${progressLine(model)} ${stripFor(model)}
-    </div>
-    ${resultBox(model)}
+    ${!model.drive ? controlStatus(!model.link.connected ? [{ code: 'no_link' }] : model.link.missing.length ? [{ code: 'missing_streams' }] : [], model.recording ? 'recording' : '') : nothing}
+    <div class="live-capture-actions live-fixed-actions">${recordButton(model, actions)}</div>
+    <div class="live-record-progress">${progressLine(model)}</div>
     <p class="live-capture-note">${captureNote(model)}</p>
   </div>`;
 }
@@ -302,23 +263,6 @@ function statePart(model) {
   });
 }
 
-// Without a robot: one line with the way to connect, the result of what was opened, the files.
-function offlineBlock(model, actions) {
-  return html`<div class="live-block live-block-off" data-live-block=${model.slot ?? ''}>
-    <p class="live-offline-line" data-live-offline>
-      <span>${captureCopy.offlineLine}</span>
-      ${
-        actions.openLink
-          ? html`<button class="small" data-live-connect @click=${actions.openLink}>
-              ${captureCopy.connect}
-            </button>`
-          : nothing
-      }
-    </p>
-    ${resultBox(model)} ${filesSection(model, actions)}
-  </div>`;
-}
-
 /**
  * `model` is live-session's `model()`: `{ link: {connected, phase, missing}, recording, progress,
  * seconds, message, slot, state, compare, file: {canSave, group}, drive, … }`. `actions` needs
@@ -329,38 +273,14 @@ function offlineBlock(model, actions) {
  * `startDriveCapture` and `confirmDrive` in `actions`.
  */
 function liveCaptureControls(model, actions) {
-  const busy = model.recording || driveBusy(model);
-  if (!model.link.connected && !busy) return offlineBlock(model, actions);
-  const driving = drivingAllowed(model) || driveBusy(model);
-  let main;
-  if (driving)
-    main = driveControls(model, model.drive, actions, {
-      strip: stripFor(model),
-      result: resultBox(model),
-    });
-  else
-    main = html`${model.drive ? notAllowedLine(model.drive) : nothing}${recordPart(model, actions)}`;
   return html`<div class="live-block" data-live-block=${model.slot ?? ''}>
-    ${linkLine(model)} ${main} ${statePart(model)} ${filesSection(model, actions)}
+    <div class="live-connection-entry">
+      ${actions.openLink ? html`<button class="small" data-live-connect @click=${actions.openLink}>${captureCopy.connect}</button>` : nothing}
+    </div>
+    ${recordPart(model, actions)}
+    ${model.drive ? driveControls(model, model.drive, actions, { strip: stripFor(model) }) : stripFor(model)}
+    ${resultBox(model, actions)} ${statePart(model)} ${filesSection(model, actions)}
   </div>`;
-}
-
-/**
- * Press → see, the same in every course: once a run or a recording starts, the block's button and
- * the live strip under it (`[data-live-run]` of the block of `slot`) are brought on screen, clear
- * of the header and of the stop bar at the bottom. Nothing moves when they are already in view.
- */
-function revealLiveRun(slot) {
-  requestAnimationFrame(() => {
-    const block = document.querySelector(`[data-live-block="${CSS.escape(slot)}"]`);
-    const run = block?.querySelector('[data-live-run]');
-    if (!run) return;
-    const box = run.getBoundingClientRect();
-    const header = document.querySelector('.site-header');
-    const headerBottom = header ? Math.max(0, header.getBoundingClientRect().bottom) : 0;
-    if (box.top >= headerBottom && box.bottom <= window.innerHeight - STOP_BAR_ROOM) return;
-    revealElement(run);
-  });
 }
 
 // The sentences a lesson adds after a recording, so every course reports the same conditions.
@@ -377,4 +297,4 @@ function captureNotes(summary) {
   return notes.join(' ');
 }
 
-export { liveCaptureControls, captureNotes, captureCopy, revealLiveRun };
+export { liveCaptureControls, captureNotes, captureCopy };

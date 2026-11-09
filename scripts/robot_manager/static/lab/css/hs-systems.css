@@ -420,7 +420,7 @@ ul.sys-chart-legend li {
 }
 .sys-state[data-unused] {
   border-style: dashed;
-  color: #7a8b91;
+  color: var(--muted);
 }
 .sys-edges {
   display: grid;
@@ -443,7 +443,7 @@ ul.sys-chart-legend li {
   font-weight: 700;
 }
 .sys-edge[data-unused] {
-  color: #8a9aa0;
+  color: var(--muted);
 }
 .sys-edge small {
   display: block;
@@ -479,7 +479,7 @@ ul.sys-chart-legend li {
 }
 .sys-field[data-off] > span:first-child,
 .sys-field[data-off] output {
-  color: #8a9aa0;
+  color: var(--muted);
 }
 .sys-off-reason {
   color: #8a5a12 !important;
