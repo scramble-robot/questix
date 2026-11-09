@@ -54,7 +54,7 @@ _DEFAULT_CONFIG = {
     "OUTPUT_DIR": "/var/lib/questix/rosbags",
     "EXCLUDE_TOPICS": "",
     "MIN_FREE_GB": "5",
-    "MAX_SPLIT_MB": "0",
+    "MAX_SPLIT_MB": "200",
     "MAX_DURATION_SEC": "0",
 }
 
