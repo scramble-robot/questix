@@ -1,7 +1,7 @@
 import { renderLive, resetLiveLayout } from '../live/live-layout.js';
 import { render } from '../vendor/lit-html.js';
 import { loadJson, fillSentence as fill } from '../core/content.js';
-import { downloadFile } from '../core/dom.js';
+import { downloadFile, scrollBehavior } from '../core/dom.js';
 import {
   measurementStats,
   fitMeasurement,
@@ -509,7 +509,7 @@ function update(preserve = false) {
 // Press → see inside the dialog: the jump links scroll the part they name into view.
 function scrollToPart(selector) {
   const part = plotElement?.closest('.measurement-lab')?.querySelector(selector);
-  part?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  part?.scrollIntoView({ block: 'start', behavior: scrollBehavior() });
   return part;
 }
 

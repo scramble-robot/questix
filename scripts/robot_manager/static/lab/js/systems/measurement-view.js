@@ -60,6 +60,7 @@ function plotGrid(axes) {
 function measurementPlot(model, fit, correction, copy) {
   const axes = measurementPlotAxes(model.rows, correction, model.plotWidth);
   return html`<svg
+    class="measurement-plot"
     viewBox="0 0 ${axes.width} ${axes.height}"
     role="img"
     aria-label=${copy.panel.plotAria}

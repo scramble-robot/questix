@@ -144,6 +144,10 @@ if [ "${INSTALL_GUI}" = true ]; then
     -e "s|^Environment=\"QUESTIX_SOURCE_DIR=.*\"|Environment=\"QUESTIX_SOURCE_DIR=${REPO_DIR}\"|" \
     "${REPO_DIR}/systemd/questix_robot_manager.service" > /etc/systemd/system/questix_robot_manager.service
 
+  # Same recording policy as update-robot-manager.sh and the robot_autostart role.
+  install -d -o root -g root -m 0755 /etc/systemd/system/questix_robot_manager.service.d
+  install -o root -g root -m 0644 "${REPO_DIR}/systemd/questix_robot_manager.service.d/recording.conf" \
+    /etc/systemd/system/questix_robot_manager.service.d/recording.conf
   systemctl daemon-reload
   systemctl enable --now questix_robot_manager
   echo "  -> Web UI running at http://localhost:${MANAGER_PORT}"

@@ -447,9 +447,15 @@ function pathPart(summary, path) {
 
 // --- summary, header, notes ---------------------------------------------------------------------
 
-function stopText(stop) {
+function stopText(summary) {
   const copy = text();
-  if (!stop) return copy.stopUnknown;
+  const { stop } = summary;
+  if (!stop) {
+    // Older stored summaries lack stopReason. Only a null driveSeconds proves no command asked
+    // for motion; otherwise there is no evidence for saying the robot failed to stop.
+    const reason = summary.stopReason ?? (summary.driveSeconds === null ? 'noMotion' : null);
+    return copy.stopReasons[reason] ?? copy.stopUnknown;
+  }
   return fill(copy.stopValue, {
     delay: fixed(stop.delay, 2),
     distance: fixed(stop.distance * 100, 1),
@@ -476,7 +482,7 @@ function allSummaryItems(summary, cut) {
     }),
   ]);
   items.push(['maxTurnRate', copy.maxTurnRate, describeTurnRate(summary.maxTurnRate, copy)]);
-  items.push(['stop', copy.stop, stopText(summary.stop)]);
+  items.push(['stop', copy.stop, stopText(summary)]);
   if (Number.isFinite(summary.closest))
     items.push(['closest', copy.closest, `${fixed(summary.closest, 2)} m`]);
   return items;
@@ -553,7 +559,7 @@ function reportHeader(run) {
     <h4>${fill(copy.title, { time: formatTime(run.at), lesson: run.lesson })}</h4>
     <p class="drive-report-status">${statusBadge(run)}</p>
     <p class="drive-report-meta">${meta.join('　')}</p>
-    ${run.ended ? html`<p>${run.ended}</p>` : nothing}
+    ${run.ended ? html`<p class="drive-report-ended">${run.ended}</p>` : nothing}
     ${run.cut ? html`<p class="drive-report-cut">${copy.cut}</p>` : nothing}
   </header>`;
 }
