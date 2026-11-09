@@ -557,7 +557,7 @@ function scaleNote(model, copy) {
   const rpm = formatValue(current.command, 0);
   const speed = current.conditions?.speed;
   const step = Number.isFinite(speed)
-    ? fill(copy.live.scaleStep, { speed: speed.toFixed(1) + ' m/s', rpm })
+    ? fill(copy.live.scaleStep, { speed: speed.toFixed(2) + ' m/s', rpm })
     : fill(copy.live.scaleStepUnknown, { rpm });
   const target = model.result ? model.result.target : model.config.targetRPM;
   return html`<p class="control-live-scale">${fill(copy.live.scaleNote, { target, step })}</p>`;
@@ -1163,6 +1163,7 @@ function groupNav(model, actions) {
         html`<button
           data-control-group=${index}
           aria-pressed=${String(model.topic.group === index)}
+          aria-current=${String(model.topic.group === index)}
           @click=${() => actions.openGroup(index)}
         >
           ${group}
@@ -1181,6 +1182,7 @@ function topicNav(model, copy, actions) {
       return html`<button
         data-control-topic=${topic.id}
         aria-pressed=${String(model.topicId === topic.id)}
+        aria-current=${String(model.topicId === topic.id)}
         @click=${() => actions.openTopic(topic.id)}
       >
         <span class="control-topic-number">${CONTROL_TOPICS.indexOf(topic) + 1}</span

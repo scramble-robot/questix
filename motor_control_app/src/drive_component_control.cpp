@@ -534,7 +534,7 @@ void DriveComponent::runControlTick() {
       break;
   }
 
-  // ホスト側の制御コアで 1 ステップ進める（スルーレート制限 -> 運動学 -> 停止判定）。
+  // ホスト側の制御コアで 1 ステップ進める（目標縮小 -> スルー -> 車輪出力保護 -> 停止判定）。
   // dt は固定周期の定数なので、実効加速度プロファイルが上流の publish レートに依存しない。
   // 制御則の詳細は control_core.hpp / drive_slew.hpp を参照。
   const double dt = drive_control_tick::tickDtSec(control_rate_);
@@ -555,6 +555,17 @@ void DriveComponent::runControlTick() {
     }
   }
   const auto out = control_core_->step(target_linear_, target_angular_, dt, feedback);
+  if (out.invalid_input) {
+    RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                         "Invalid drive command, geometry or RPM limit: sending stop output");
+  }
+  if (out.target_scale < 1.0 || out.output_scale < 1.0) {
+    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                         "Drive wheel saturation: target_scale=%.9g output_scale=%.9g; "
+                         "target=(%.9g, %.9g) shaped=(%.9g, %.9g) ref=(%d, %d) rpm",
+                         out.target_scale, out.output_scale, target_linear_, target_angular_,
+                         out.linear, out.angular, out.left_ref_rpm, out.right_ref_rpm);
+  }
 
   // 指令送信（応答フレームでフィードバック快照も更新される）。停止判定は制御コアが
   // 済ませているため、送信先は停止指令か生の車輪 RPM のどちらかになる。
@@ -563,6 +574,7 @@ void DriveComponent::runControlTick() {
   tick_sample_.command_sent = sent;
   tick_sample_.stop_frame = out.stop;
   tick_sample_.lqr_active = out.lqr_active;
+  // Keep the message unchanged: shaped_* is before output protection, ref_rpm is after.
   tick_sample_.shaped_linear = out.linear;
   tick_sample_.shaped_angular = out.angular;
   tick_sample_.left.ref_rpm = out.left_ref_rpm;

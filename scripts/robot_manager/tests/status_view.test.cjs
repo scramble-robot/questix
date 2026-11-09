@@ -169,7 +169,7 @@ test('forbidden, stale and running states', () => {
 test('status strip: running vs next mode, E-stop, who drives', () => {
   const status = { mode: 'competition', running_mode: 'practice', service: 'active', robot_name: 'host' };
   const rows = StatusView.overview(status,
-    lab({ bridge: bridge({ active: true, owner: 5, blockers: [] }, {}) }), 'UART / Switch');
+    lab({ bridge: bridge({ active: true, owner: 5, blockers: [] }, {}) }), '大会用コントローラー');
   assert.equal(rows.robot.text, 'questix-3'); // what the lab pages show
   assert.equal(rows.mode.text, '練習の構成で動作中・次回の起動は大会');
   assert.equal(rows.mode.tone, 'warn');
@@ -178,7 +178,7 @@ test('status strip: running vs next mode, E-stop, who drives', () => {
   assert.equal(rows.permissions.text, '教材からの走行: ON・教材からの発射: ON');
   assert.equal(rows.driver.text, '生徒の端末 #5（教材から走行中）');
   const pressed = StatusView.overview(status,
-    lab({ bridge: bridge({ blockers: [{ code: 'emergency_stop' }] }) }), 'UART / Switch');
+    lab({ bridge: bridge({ blockers: [{ code: 'emergency_stop' }] }) }), '大会用コントローラー');
   assert.equal(pressed.estop.text, '押されています');
   const stopped = StatusView.overview({ mode: 'practice', service: 'inactive', robot_name: 'host' }, null, null);
   assert.equal(stopped.robot.text, 'host');

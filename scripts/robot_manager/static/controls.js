@@ -271,8 +271,8 @@ function renderControlSummary() {
   summary.textContent = `編集中: ${controllerName(controlProfile.controller)} ｜ `
     + `次回起動で使うコントローラー: ${controllerName(launchController)} ｜ 読み込み: ${controlsLoadedAt}`;
   const notes = {
-    uart: "Switch のボタン名・スティック名で選択できます。番号は UART ドライバの配列に対応しています。",
-    dualshock: "DualShock の標準配置の名前を表示しています。接続方式やドライバで番号が異なる場合は、"
+    uart: "大会用コントローラーのボタン名・スティック名で選択できます。番号は UART ドライバの配列に対応しています。",
+    dualshock: "ゲームパッドの標準配置の名前を表示しています。接続方式やドライバで番号が異なる場合は、"
       + "実際の Joy の番号に合わせて選んでください（接続機器の自動判別ではありません）。",
   };
   document.getElementById("controls-layout-note").textContent = notes[controlProfile.controller] || notes.dualshock;

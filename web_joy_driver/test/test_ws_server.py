@@ -184,6 +184,9 @@ def test_ws_frames_reach_callback_and_release_on_close(server):
             msg = await _recv_type(ws, "status")
             assert msg["controller"] is True and msg["estop"] is False
             assert msg["owner"]["label"] == "iPhone" and msg["clients"] == 1
+            # A periodic status may already be queued before the frames are processed.
+            # Keep the socket open for both callbacks before testing disconnect release.
+            assert await _wait(lambda: len(sink.frames) == 2)
 
     _run(go())
     assert sink.event.wait(2.0)
