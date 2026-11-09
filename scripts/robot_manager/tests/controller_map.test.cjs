@@ -2,6 +2,39 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const map = require('../static/controller-map.js');
 
+test('render sets every function color through CSSOM without a CSP-blocked style attribute', () => {
+  const elements = [];
+  const element = () => {
+    const properties = new Map();
+    const node = { children: [], attributes: new Map(),
+      style: { setProperty: (key, value) => properties.set(key, value),
+        getPropertyValue: key => properties.get(key) },
+      classList: { add() {}, toggle() {} }, addEventListener() {},
+      append(...children) { this.children.push(...children); },
+      replaceChildren(...children) { this.children = children; },
+      setAttribute(key, value) {
+        assert.notEqual(key, 'style', 'string style attributes violate Manager CSP');
+        this.attributes.set(key, value);
+      },
+    };
+    elements.push(node);
+    return node;
+  };
+  const previous = global.document;
+  global.document = { createElement: element, createElementNS: element };
+  try {
+    const values = { joy_controller: { linear_x_axis: 1, angular_z_axis: 3, linear_y_axis: 0 },
+      joy_launcher: { ...defaults().joy_launcher, full_speed_button: 0 } };
+    map.render(element(), 'dualshock', values, values, () => {});
+    const numbers = elements.filter(node => node.className === 'map-number');
+    assert.equal(numbers.length, 7);
+    for (const number of numbers) assert.match(number.style.getPropertyValue('--function-color'), /^#[0-9a-f]{6}$/);
+  } finally {
+    if (previous === undefined) delete global.document;
+    else global.document = previous;
+  }
+});
+
 test('Switch and DualShock face buttons map to the correct physical positions', () => {
   assert.equal(map.location('uart', 'fire_button', 0), 'face-right');
   assert.equal(map.location('uart', 'fire_button', 1), 'face-bottom');

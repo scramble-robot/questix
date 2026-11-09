@@ -257,7 +257,7 @@ const ControllerMap = (() => {
       button.append(number, description);
       button.setAttribute("data-action", `${assignment.node}.${assignment.key}`);
       button.setAttribute("data-on-map", String(Boolean(assignment.spot)));
-      number.setAttribute("style", `--function-color: ${colors[assignment.number]}`);
+      number.style.setProperty("--function-color", colors[assignment.number]);
       button.setAttribute("aria-haspopup", "dialog");
       button.setAttribute("aria-label", `${actionLabel(assignment.key, assignment.action)}: ${assignment.label}。割り当てを編集`);
       button.addEventListener("click", () => onAction(assignment));
