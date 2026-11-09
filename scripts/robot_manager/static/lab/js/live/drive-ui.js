@@ -180,6 +180,7 @@ function benchButton(model, move) {
 
 function speedSlider(model, key, label) {
   const max = limitOf(model, key);
+  const shown = Number.isFinite(max) ? Math.min(bench[key], max) : null;
   return html`<label class="drive-bench-speed">
     ${label}
     <input
@@ -188,14 +189,16 @@ function speedSlider(model, key, label) {
       min=${BENCH_MIN[key]}
       max=${max}
       step=${BENCH_STEP[key]}
-      .value=${String(Math.min(bench[key], max))}
+      .value=${shown === null ? '' : String(shown)}
       ?disabled=${hardBlocked(model) || bench.held !== null}
       @input=${(event) => {
         bench[key] = Number(event.target.value);
         update();
       }}
     />
-    <output>${Math.min(bench[key], max).toFixed(2)} ${key === 'linear' ? 'm/s' : 'rad/s'}</output>
+    <output
+      >${shown === null ? '—' : shown.toFixed(2)} ${key === 'linear' ? 'm/s' : 'rad/s'}</output
+    >
   </label>`;
 }
 
