@@ -9,7 +9,8 @@ class Element {
   constructor(tagName = "div") {
     this.tagName = tagName;
     this.listeners = {};
-    this.style = {};
+    this.style = { setProperty(name, value) { this[name] = value; } };
+    this.attributes = new Map();
     this.children = [];
     this.value = "";
     this.className = "";
@@ -38,6 +39,11 @@ class Element {
   set innerHTML(_) { this.firstChild = new Element(); this.lastChild = new Element(); }
   querySelector() { return this.knob ??= new Element(); }
   closest() { return ["input", "select", "textarea", "button", "a"].includes(this.tagName) ? this : null; }
+  setAttribute(name, value) { this.attributes.set(name, value); }
+  removeAttribute(name) { this.attributes.delete(name); }
+  getAttribute(name) { return this.attributes.get(name) ?? null; }
+  querySelectorAll() { return this.children.filter((el) => el.tagName === "button"); }
+  focus() { if (this.document) this.document.activeElement = this; }
   setPointerCapture() {}
   getBoundingClientRect() { return { left: 0, top: 0 }; }
   blur() {}
@@ -46,23 +52,26 @@ class Element {
 const OPERATOR = { id: 1, label: "iPhone", address: "10.42.0.23" };
 const OTHER = { id: 2, label: "iPad", address: "10.42.0.31" };
 
-function controller({ matchMedia } = {}) {
+function controller({ matchMedia, initialStatus = true } = {}) {
   const elements = new Map();
   const document = new Element();
   document.hidden = false;
   document.hasFocus = () => true;
   document.documentElement = new Element();
-  document.createElement = (tag) => new Element(tag);
+  document.createElement = (tag) => { const e = new Element(tag); e.document = document; return e; };
   document.getElementById = (id) => {
-    if (!elements.has(id)) elements.set(id, new Element());
+    if (!elements.has(id)) { const e = new Element(); e.document = document; elements.set(id, e); }
     return elements.get(id);
   };
   const $ = document.getElementById;
+  $("help").hidden = true;
+  document.querySelector = () => $("header");
+  document.activeElement = null;
   $("inputMode").value = "pointer";
   const window = new Element();
   if (matchMedia) window.matchMedia = matchMedia;
   const sockets = [], timeouts = new Map(), intervals = [], frames = [];
-  let timerId = 0;
+  let timerId = 0, clock = 0;
   class Socket {
     static OPEN = 1;
     constructor(url) { this.url = url; this.readyState = 0; this.sent = []; this.closed = false; sockets.push(this); }
@@ -73,6 +82,7 @@ function controller({ matchMedia } = {}) {
       this.readyState = 1; this.onopen();
       if (welcome && this.url.includes("/ws")) {
         this.message({ type: "welcome", robot: { name: "questix-3" }, lab_bridge_port: 8897, ...welcome });
+        if (initialStatus) this.message(status({ controller: welcome.controller, owner: welcome.owner }));
       }
     }
     end(code = 1006) { this.readyState = 3; this.onclose({ code }); }
@@ -90,6 +100,7 @@ function controller({ matchMedia } = {}) {
     .match(/<script>([\s\S]*?)<\/script>/)[1];
   vm.runInNewContext(source, {
     document, window, navigator: {}, WebSocket: Socket, URLSearchParams, Blob, URL, Uint8Array,
+    performance: { now: () => clock },
     location: { host: "robot.local:8899", hostname: "robot.local", protocol: "http:", search: "?token=a%2Bb%26c" },
     setInterval: (callback) => intervals.push(callback),
     setTimeout: (callback) => { timeouts.set(++timerId, callback); return timerId; },
@@ -112,6 +123,8 @@ function controller({ matchMedia } = {}) {
   const joySent = () => joySockets().at(-1).sent;
   return { $, document, window, sockets, timeouts, blobs, revoked, mode, key, pointer, flush, heartbeat, retry,
     joySockets, labSockets, joySent,
+    elapse: (ms) => { clock += ms; },
+    advance: (ms) => { clock += ms; heartbeat(); },
     last: () => joySent().filter((m) => m.type === "joy").at(-1) };
 }
 
@@ -120,8 +133,8 @@ function neutral(frame) {
   assert.deepEqual(frame.axes, Array(8).fill(0));
   assert.deepEqual(frame.buttons, Array(14).fill(0));
 }
-const status = (extra = {}) => ({ type: "status", hold: "active", clients: 1, controller: true, owner: OPERATOR, ...extra });
-const bannerButtons = (c) => c.$("banner").children.find((el) => el.className === "acts")?.children || [];
+const status = (extra = {}) => ({ type: "status", hold: "active", clients: 1, controller: true, owner: OPERATOR, estop: false, estop_age_ms: 0, stopped: false, ...extra });
+const bannerButtons = (c) => c.$("statusActions").children;
 
 test("connection forwards encoded auth token, asks for control and starts neutral", () => {
   const c = controller();
@@ -141,8 +154,9 @@ test("keyboard requires mode and Space first, maps simultaneous movement/actions
   const c = controller(); c.sockets[0].open();
   c.key("keydown", "Space"); c.key("keydown", "KeyW"); neutral(c.last());
   c.mode("keyboard");
+  c.key("keyup", "KeyW"); c.key("keyup", "Space");
   c.key("keydown", "KeyW"); neutral(c.last());
-  c.key("keydown", "Space");
+  c.key("keyup", "KeyW"); c.key("keydown", "Space");
   for (const key of ["KeyW", "KeyA", "KeyQ", "KeyI", "KeyF", "KeyK", "KeyR"]) c.key("keydown", key);
   assert.deepEqual(c.last().axes, [0.707, 0.707, 0, 1, 0, 0, 0, 0]);
   assert.deepEqual(c.last().buttons, [0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0]);
@@ -175,6 +189,7 @@ test("opposite directions cancel, aliases remain active until both are released"
 test("form controls and browser shortcuts cannot start keyboard actions", () => {
   const c = controller(); c.sockets[0].open(); c.mode("keyboard");
   c.key("keydown", "Space", { target: new Element("select") }); c.key("keydown", "KeyF"); neutral(c.last());
+  c.key("keyup", "Space"); c.key("keyup", "KeyW");
   c.key("keydown", "Space"); c.key("keydown", "KeyW"); assert.equal(c.last().axes[1], 1);
   c.key("keydown", "KeyR", { ctrlKey: true }); neutral(c.last());
 });
@@ -249,7 +264,8 @@ test("a second device is refused: read-only view naming the operator, input igno
   c.$("requestBtn").dispatch("click");
   assert.deepEqual(c.joySent().at(-1), { type: "request" });
   c.sockets[0].message({ type: "request_sent", owner: OPERATOR });
-  assert.equal(c.$("banner").textContent, "操作中の端末に伝えました");
+  assert.equal(c.$("bannerTitle").textContent, "ほかの端末が操作中です");
+  assert.match(c.$("statusDetail").textContent, /譲る/);
   // A viewer shows what the operator is sending on its meters.
   c.sockets[0].message(status({ controller: false, owner: OPERATOR, axes: [0, 0.5, 0, -1, 0, 0, 0, 0] }));
   assert.equal(c.$("vFwd").textContent, "+0.50"); assert.equal(c.$("vTurn").textContent, "+1.00");
@@ -317,23 +333,23 @@ test("止める from any page stops the node input and the lesson (drive and rol
   lab.open();
   assert.deepEqual(lab.sent, [{ type: "stop" }, { type: "roller_stop" }]);
   assert.equal(lab.closed, true);
-  assert.equal(c.$("banner").className, "ok");
-  assert.equal(c.$("banner").textContent, "止めました");
-  assert.match(c.$("banner").children[0].textContent, /教材の走行・ローラーを止めました/);
+  assert.equal(c.$("banner").className, "info");
+  assert.equal(c.$("bannerTitle").textContent, "ほかの端末が操作中です");
+  assert.match(c.$("statusDetail").textContent, /教材の走行・ローラーを止めました/);
 });
 
 test("a failed lesson stop is reported only while a lesson drives", () => {
   const c = controller(); c.sockets[0].open();
   c.sockets[0].message(status({ arbiter: { active: "lab", reason: "lab", lab_locked: false } }));
-  assert.equal(c.$("banner").textContent, "教材から走らせています");
+  assert.equal(c.$("bannerTitle").textContent, "教材から走らせています");
   c.$("stop").dispatch("click");
   c.labSockets()[0].end();
   assert.equal(c.$("banner").className, "warn");
-  assert.equal(c.$("banner").textContent, "教材の走行を止められませんでした");
+  assert.equal(c.$("bannerTitle").textContent, "教材の走行を止められませんでした");
   const d = controller(); d.sockets[0].open();
   d.$("stop").dispatch("click"); d.labSockets()[0].end();
   assert.equal(d.$("banner").className, "ok");
-  assert.match(d.$("banner").children[0].textContent, /教材の中継は動いていません/);
+  assert.match(d.$("statusDetail").textContent, /教材の中継は動いていません/);
 });
 
 test("the operator stopped by another page lets go of everything", () => {
@@ -341,14 +357,16 @@ test("the operator stopped by another page lets go of everything", () => {
   c.pointer("leftZone", "pointerdown"); c.pointer("leftZone", "pointermove", 1, 60, 0);
   c.sockets[0].message({ type: "stopped", by: OTHER, by_operator: false });
   neutral(c.last());
-  assert.equal(c.$("banner").textContent, "iPad・10.42.0.31 で「止める」が押されました");
+  assert.equal(c.$("bannerTitle").textContent, "ほかの端末で止められました");
+  assert.match(c.$("statusDetail").textContent, /iPad・10.42.0.31/);
   c.pointer("leftZone", "pointermove", 1, 60, 0); c.heartbeat(); neutral(c.last());
 });
 
 test("a hand-over request offers 譲る, which releases to the asking page", () => {
   const c = controller(); c.sockets[0].open();
   c.sockets[0].message({ type: "handover_request", from: OTHER });
-  assert.equal(c.$("banner").textContent, "iPad・10.42.0.31 が操作したいと言っています");
+  assert.equal(c.$("bannerTitle").textContent, "操作を代わりたい端末があります");
+  assert.match(c.$("statusDetail").textContent, /iPad・10.42.0.31/);
   const [give] = bannerButtons(c);
   assert.equal(give.textContent, "譲る");
   give.dispatch("click");
@@ -411,10 +429,10 @@ test("camera panel appears only after a frame; newest image wins; joy input inta
 test("emergency stop outranks the lesson banner", () => {
   const c = controller(); c.sockets[0].open();
   c.sockets[0].message(status({ estop: true, estop_reason: "GPIO", arbiter: { active: "lab" } }));
-  assert.equal(c.$("banner").className, "bad"); assert.equal(c.$("banner").textContent, "非常停止中");
+  assert.equal(c.$("banner").className, "bad"); assert.equal(c.$("bannerTitle").textContent, "非常停止：押されています");
   assert.equal(c.$("estop").textContent, "非常停止：押されています");
   c.sockets[0].message(status({ estop: false, arbiter: { active: "joy" } }));
-  assert.equal(c.$("banner").className, "");
+  assert.equal(c.$("banner").className, "ok");
 });
 
 
@@ -424,18 +442,19 @@ test("neutral latch status resets held input once and shows then clears its prom
   c.sockets[0].message(status({ stopped: true, stop_reason: "timeout", hold: "timeout",
     arbiter: { active: "lab" } }));
   neutral(c.last());
-  assert.equal(c.$("banner").textContent, "スティックとボタンから手を離してください");
+  assert.equal(c.$("bannerTitle").textContent, "スティックとボタンから手を離してください");
   c.key("keydown", "KeyF", { repeat: true }); c.heartbeat(); neutral(c.last());
   // A repeated status must not keep resetting a new operation indefinitely.
+  c.key("keyup", "Space"); c.key("keyup", "KeyW");
   c.key("keydown", "Space"); c.key("keydown", "KeyW");
   c.sockets[0].message(status({ stopped: true, stop_reason: "timeout" }));
   assert.equal(c.last().axes[1], 1);
   c.sockets[0].message(status({ stopped: false }));
-  assert.notEqual(c.$("banner").textContent, "スティックとボタンから手を離してください");
+  assert.notEqual(c.$("bannerTitle").textContent, "スティックとボタンから手を離してください");
   c.sockets[0].message(status({ stopped: true, stop_reason: "stop" }));
   neutral(c.last());
   c.sockets[0].message(status({ stopped: true, estop: true }));
-  assert.equal(c.$("banner").textContent, "非常停止中");
+  assert.equal(c.$("bannerTitle").textContent, "非常停止：押されています");
 });
 
 test("latch reset discards pointer tracking and viewers do not clear their owner's latch", () => {
@@ -446,5 +465,201 @@ test("latch reset discards pointer tracking and viewers do not clear their owner
   c.sockets[0].message(status({ stopped: true, stop_reason: "owner_change" }));
   c.pointer("leftZone", "pointermove", 1, -60, 0); c.heartbeat(); neutral(c.last());
   c.sockets[0].message(status({ controller: false, stopped: true }));
-  assert.notEqual(c.$("banner").textContent, "スティックとボタンから手を離してください");
+  assert.notEqual(c.$("bannerTitle").textContent, "スティックとボタンから手を離してください");
+});
+
+
+test("e-stop display distinguishes unknown causes, exact age boundary and disconnect", () => {
+  const c = controller({ initialStatus: false }); c.sockets[0].open();
+  assert.equal(c.$("estop").textContent, "非常停止：不明");
+  assert.match(c.$("estop").getAttribute("aria-label"), /まだ届いていません/);
+  for (const [estop, age, label] of [
+    [false, 0, "解除"], [true, 0, "押されています"],
+    // estop_age_ms is truncated: 1499 means under 1.5 s, 1500 may already be over it.
+    [false, 1499, "解除"], [true, 1499, "押されています"],
+    [false, 1500, "不明"], [true, 1500, "不明"],
+    [false, 1501, "不明"], [true, 1501, "不明"],
+    [false, null, "不明"], [false, -1, "不明"], [false, "0", "不明"],
+  ]) {
+    c.sockets[0].message(status({ estop, estop_age_ms: age }));
+    assert.equal(c.$("estop").textContent, "非常停止：" + label);
+  }
+  c.sockets[0].message(status({ estop_age_ms: 1400 }));
+  c.advance(99); assert.equal(c.$("estop").textContent, "非常停止：解除");
+  c.advance(1); assert.equal(c.$("estop").textContent, "非常停止：不明");
+  assert.match(c.$("estop").getAttribute("aria-label"), /途絶えています/);
+  assert.match(c.$("statusDetail").textContent, /途絶えています/);
+  assert.equal(c.$("bannerNext").textContent, "先生と周りを確かめてください");
+  c.sockets[0].message(status()); c.sockets[0].end();
+  assert.equal(c.$("estop").textContent, "非常停止：不明");
+  assert.match(c.$("estop").getAttribute("aria-label"), /接続が切れて/);
+  c.retry(); c.sockets[1].open();
+  assert.match(c.$("estop").getAttribute("aria-label"), /まだ届いていません/);
+});
+
+test("pressed or unknown e-stop clears every pointer input and requires fresh presses", () => {
+  for (const blocker of [{ estop: true }, { estop: null, estop_age_ms: null }, { estop_age_ms: 1501 }]) {
+    const c = controller(); c.sockets[0].open();
+    c.pointer("leftZone", "pointerdown", 1); c.pointer("leftZone", "pointermove", 1, 40, -40);
+    c.pointer("rightZone", "pointerdown", 2); c.pointer("rightZone", "pointermove", 2, 40, -40);
+    c.$("buttons").children.forEach((el, i) => c.pointer(el, "pointerdown", i + 3));
+    assert.ok(c.last().axes.some((v) => v !== 0));
+    assert.equal(c.last().buttons.filter(Boolean).length, 4);
+    let start = c.joySent().length;
+    c.sockets[0].message(status(blocker)); c.heartbeat();
+    for (const frame of c.joySent().slice(start).filter(m => m.type === "joy")) neutral(frame);
+    for (const el of [c.$("leftZone"), c.$("rightZone"), ...c.$("buttons").children]) {
+      assert.equal(el.getAttribute("aria-disabled"), "true");
+      assert.equal(el.classList.contains("active"), false);
+    }
+    c.sockets[0].message(status()); start = c.joySent().length;
+    c.pointer("leftZone", "pointermove", 1, -60, -60);
+    c.pointer("rightZone", "pointermove", 2, -60, -60); c.heartbeat();
+    for (const frame of c.joySent().slice(start).filter(m => m.type === "joy")) neutral(frame);
+    // A press that starts while disabled cannot become valid on recovery either.
+    c.sockets[0].message(status(blocker));
+    c.pointer("leftZone", "pointerdown", 10);
+    c.$("buttons").children.forEach((el, i) => c.pointer(el, "pointerdown", i + 20));
+    c.sockets[0].message(status()); c.pointer("leftZone", "pointermove", 10, 60, 0); c.heartbeat(); neutral(c.last());
+    c.pointer("leftZone", "pointerup", 10); c.pointer("leftZone", "pointerdown", 11);
+    c.pointer("leftZone", "pointermove", 11, 60, 0); assert.equal(c.last().axes[0], -1);
+    c.pointer("leftZone", "pointerup", 11);
+    c.$("buttons").children.forEach((el, i) => {
+      c.pointer(el, "pointerup", i + 20); c.pointer(el, "pointerdown", i + 30);
+      assert.equal(c.last().buttons[[4, 5, 6, 7][i]], 1); c.pointer(el, "pointerup", i + 30);
+    });
+    neutral(c.last());
+  }
+});
+
+test("unknown or pressed e-stop discards keyboard holds and invalid key starts", () => {
+  for (const blocker of [{ estop: true }, { estop_age_ms: 1501 }, { estop: null }]) {
+    const c = controller(); c.sockets[0].open(); c.mode("keyboard");
+    c.key("keydown", "Space");
+    for (const code of ["KeyW", "KeyQ", "KeyI", "KeyF", "KeyK", "KeyR"]) c.key("keydown", code);
+    c.sockets[0].message(status(blocker)); c.heartbeat(); neutral(c.last());
+    c.sockets[0].message(status());
+    for (const code of ["Space", "KeyW", "KeyF", "KeyR"]) c.key("keydown", code, { repeat: true });
+    c.heartbeat(); neutral(c.last());
+    c.key("keyup", "Space"); c.key("keydown", "Space");
+    c.key("keydown", "KeyW"); neutral(c.last()); // Held action needs its own release too.
+    c.key("keyup", "KeyW"); c.key("keydown", "KeyW"); assert.equal(c.last().axes[1], 1);
+    c.key("keyup", "Space");
+    c.sockets[0].message(status(blocker));
+    c.key("keydown", "Space"); c.key("keydown", "KeyA");
+    c.sockets[0].message(status());
+    c.key("keydown", "Space"); c.key("keydown", "KeyA"); c.heartbeat(); neutral(c.last());
+    c.key("keyup", "Space"); c.key("keyup", "KeyA");
+    c.key("keydown", "Space"); c.key("keydown", "KeyA"); assert.equal(c.last().axes[0], 1);
+  }
+});
+
+test("local expiry clears input before heartbeat, despite the WS staying open", () => {
+  const c = controller(); c.sockets[0].open();
+  c.pointer("leftZone", "pointerdown"); c.pointer("leftZone", "pointermove", 1, 60, 0);
+  const start = c.joySent().length; c.advance(1501);
+  for (const frame of c.joySent().slice(start).filter(m => m.type === "joy")) neutral(frame);
+  assert.equal(c.$("leftZone").getAttribute("aria-disabled"), "true");
+  c.sockets[0].message(status()); c.pointer("leftZone", "pointermove", 1, -60, 0); c.heartbeat(); neutral(c.last());
+});
+
+test("unreceived motion permission does not block page input or invent a neutral wait", () => {
+  const c = controller(); c.sockets[0].open(); c.sockets[0].message(status());
+  c.pointer("leftZone", "pointerdown"); c.pointer("leftZone", "pointermove", 1, 60, 0);
+  assert.equal(c.last().axes[0], -1);
+  assert.equal(c.$("leftZone").getAttribute("aria-disabled"), "false");
+  assert.equal(c.$("bannerTitle").textContent, "この端末から入力できます");
+});
+
+test("banner priority puts e-stop before owner, node neutral wait, notices and lesson", () => {
+  const c = controller(); c.sockets[0].open();
+  c.sockets[0].message({ type: "handover_request", from: OTHER });
+  c.sockets[0].message(status({ estop: true, stopped: true, arbiter: { active: "lab" } }));
+  assert.equal(c.$("bannerTitle").textContent, "非常停止：押されています");
+  c.sockets[0].message(status({ estop: null, stopped: true }));
+  assert.equal(c.$("bannerTitle").textContent, "非常停止：不明");
+  c.sockets[0].message(status({ controller: false, owner: OTHER, stopped: true }));
+  assert.equal(c.$("bannerTitle").textContent, "ほかの端末が操作中です");
+  c.sockets[0].message(status({ stopped: true }));
+  assert.equal(c.$("bannerTitle").textContent, "スティックとボタンから手を離してください");
+  c.sockets[0].message(status({ stopped: false }));
+  assert.equal(c.$("bannerTitle").textContent, "操作を代わりたい端末があります");
+});
+
+test("help moves and restores focus, supports Escape and leaves stop available", () => {
+  const c = controller(); c.sockets[0].open();
+  c.pointer("leftZone", "pointerdown"); c.pointer("leftZone", "pointermove", 1, 60, 0);
+  // The stop belongs to the sheet only while it is open, never under the hidden sheet.
+  assert.equal(c.$("helpSheet").getAttribute("aria-owns"), null);
+  c.$("helpBtn").dispatch("click"); neutral(c.last());
+  assert.equal(c.$("help").hidden, false); assert.equal(c.document.activeElement, c.$("helpSheet"));
+  assert.equal(c.$("helpSheet").getAttribute("aria-owns"), "stop");
+  c.pointer("leftZone", "pointerdown", 2); c.pointer("leftZone", "pointermove", 2, 60, 0); c.heartbeat(); neutral(c.last());
+  c.key("keydown", "Tab"); assert.equal(c.document.activeElement, c.$("stop"));
+  c.$("stop").dispatch("click"); assert.deepEqual(c.joySent().at(-1), { type: "stop" });
+  c.key("keydown", "Escape"); assert.equal(c.$("help").hidden, true);
+  assert.equal(c.document.activeElement, c.$("helpBtn"));
+  assert.equal(c.$("helpSheet").getAttribute("aria-owns"), null);
+  c.$("bannerDetails").dispatch("click"); c.$("helpClose").dispatch("click");
+  assert.equal(c.document.activeElement, c.$("bannerDetails"));
+});
+
+test("initial mode aria-pressed, modal semantics, age wording and 12px font floor", () => {
+  const html = fs.readFileSync(path.join(__dirname, "../static/index.html"), "utf8");
+  assert.match(html, /id="modePointer"[^>]*aria-pressed="true"/);
+  assert.match(html, /id="modeKeyboard"[^>]*aria-pressed="false"/);
+  assert.match(html, /role="dialog"[^>]*aria-modal="true"/);
+  assert.doesNotMatch(html, /aria-owns=/);  // set only while the help sheet is open
+  assert.doesNotMatch(html, /font(?:-size)?\s*:[^;{}]*?\b(?:9|10|11)px/);
+  assert.match(html, /user-scalable=no/);
+  const c = controller(); c.sockets[0].open(); c.sockets[0].message(status({ rx_age_ms: 47 }));
+  assert.match(c.$("dbgStat").textContent, /受信からの経過時間 47ms/);
+  assert.doesNotMatch(c.$("dbgStat").textContent, /遅延/);
+  c.mode("keyboard"); assert.equal(c.$("modeKeyboard").getAttribute("aria-pressed"), "true");
+});
+
+
+test("a queued animation frame cannot send held input after age expires", () => {
+  const c = controller(); c.sockets[0].open();
+  c.pointer("leftZone", "pointerdown"); c.pointer("leftZone", "pointermove", 1, 60, 0);
+  c.elapse(1501);
+  const start = c.joySent().length;
+  c.pointer("rightZone", "pointerdown", 2); // Disabled start, even before the timer runs.
+  c.pointer("leftZone", "pointermove", 1, 40, 0); c.flush();
+  const sent = c.joySent().slice(start).filter(m => m.type === "joy");
+  assert.ok(sent.length > 0);
+  sent.forEach(neutral);
+});
+
+test("neutral-wait fallback lasts only until discarded presses end when peer omits latch", () => {
+  const c = controller(); c.sockets[0].open();
+  const legacy = (extra = {}) => status({ stopped: undefined, ...extra });
+  c.sockets[0].message(legacy());
+  c.pointer("leftZone", "pointerdown"); c.pointer("leftZone", "pointermove", 1, 60, 0);
+  c.sockets[0].message(legacy({ estop: true })); c.sockets[0].message(legacy());
+  assert.equal(c.$("bannerTitle").textContent, "スティックとボタンから手を離してください");
+  c.pointer("leftZone", "pointerup");
+  assert.equal(c.$("bannerTitle").textContent, "この端末から入力できます");
+  c.mode("keyboard"); c.key("keydown", "Space"); c.key("keydown", "KeyW");
+  c.sockets[0].message(legacy({ estop: null })); c.sockets[0].message(legacy());
+  c.key("keyup", "Space");
+  assert.equal(c.$("bannerTitle").textContent, "スティックとボタンから手を離してください");
+  c.key("keyup", "KeyW");
+  assert.equal(c.$("bannerTitle").textContent, "この端末から入力できます");
+  c.sockets[0].message(legacy({ estop: true }));
+  c.pointer("leftZone", "pointerdown", 3); c.sockets[0].message(legacy());
+  assert.equal(c.$("bannerTitle").textContent, "スティックとボタンから手を離してください");
+  c.document.dispatch("pointerup", { pointerId: 3 });
+  assert.equal(c.$("bannerTitle").textContent, "この端末から入力できます");
+});
+
+
+test("scroll or resize discards held input before its reference rectangle changes", () => {
+  for (const type of ["scroll", "resize"]) {
+    const c = controller(); c.sockets[0].open();
+    c.pointer("leftZone", "pointerdown"); c.pointer("leftZone", "pointermove", 1, 60, 0);
+    c.pointer(c.$("buttons").children[1], "pointerdown", 2);
+    c.window.dispatch(type); neutral(c.last());
+    c.pointer("leftZone", "pointermove", 1, -60, 0); c.heartbeat(); neutral(c.last());
+  }
 });

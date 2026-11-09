@@ -33,14 +33,14 @@
   }
   button { font: inherit; cursor: pointer; }
   kbd {
-    font: 600 11px/1 var(--mono); padding: 3px 6px; border-radius: 5px;
+    font: 600 12px/1 var(--mono); padding: 3px 6px; border-radius: 5px;
     border: 1px solid var(--line2); border-bottom-width: 2px; background: var(--panel2); color: var(--fg);
   }
   #app {
     height: 100%; height: 100dvh; display: grid; grid-template-rows: auto auto auto 1fr auto;
     padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
   }
-  /* Explicit rows: #banner is display:none when empty and must not shift main/footer. */
+  /* The status band always occupies row 2, including normal operation. */
   header { grid-row: 1; }
   #banner { grid-row: 2; }
   #controls { grid-row: 3; }
@@ -57,7 +57,7 @@
   .brand svg { width: 24px; height: 24px; filter: drop-shadow(0 0 6px rgba(34, 211, 238, .55)); }
   .brand h1 { font-size: 15px; margin: 0; font-weight: 700; letter-spacing: .04em; }
   .brand .tag {
-    font: 700 10px/1 var(--mono); letter-spacing: .12em; padding: 4px 6px; border-radius: 4px;
+    font: 700 12px/1 var(--mono); letter-spacing: .12em; padding: 4px 6px; border-radius: 4px;
     color: var(--cyan); border: 1px solid rgba(34, 211, 238, .45); background: var(--cyan-dim);
   }
   header .host { color: var(--mute); font: 12px var(--mono); }
@@ -102,12 +102,6 @@
   #banner.info { display: block; background: var(--accent); color: #041014; }
   #banner.ok { display: block; background: var(--ok); color: #03140d; }
   #banner .sub { display: block; font-weight: 400; font-size: 12px; opacity: .92; }
-  #banner .acts { display: flex; justify-content: center; gap: 8px; margin-top: 6px; }
-  #banner .acts button {
-    min-height: 44px; padding: 6px 16px; border-radius: 10px; font-weight: 700; touch-action: manipulation;
-    border: 1px solid rgba(0, 0, 0, .35); background: rgba(255, 255, 255, .85); color: #111;
-  }
-  #banner .acts button.quiet { background: transparent; color: inherit; }
   @keyframes pulse-bg { 50% { filter: brightness(.8); } }
 
   /* ------------------------------------------------------------ controls */
@@ -158,7 +152,7 @@
   }
   .cam img:not([src]) { visibility: hidden; }
   .cam .group-label { text-shadow: 0 1px 3px rgba(0, 0, 0, .8); }
-  .cam .group-label .hint { font: 10px var(--mono); }
+  .cam .group-label .hint { font: 12px var(--mono); }
   /* Keyboard mode keeps the camera visible: the key map takes the cards' place. */
   .cam-badge {
     position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -175,9 +169,9 @@
   }
   .group-label {
     position: absolute; left: 10px; top: 8px; z-index: 1; display: inline-flex; align-items: center; gap: 6px;
-    font-size: 11px; font-weight: 700; letter-spacing: .08em; color: var(--dim); pointer-events: none;
+    font-size: 12px; font-weight: 700; letter-spacing: .08em; color: var(--dim); pointer-events: none;
   }
-  .group-label b { font: 700 10px/1 var(--mono); color: var(--cyan); padding: 3px 5px; border-radius: 4px; background: var(--cyan-dim); }
+  .group-label b { font: 700 12px/1 var(--mono); color: var(--cyan); padding: 3px 5px; border-radius: 4px; background: var(--cyan-dim); }
   .group-label .hint { font-weight: 400; letter-spacing: 0; color: var(--mute); }
   .group.move { display: flex; gap: 8px; }
   .zone {
@@ -186,11 +180,11 @@
   }
   .zone-label {
     position: absolute; left: 0; right: 0; top: 8px; z-index: 1; text-align: center; pointer-events: none;
-    font-size: 11px; font-weight: 700; letter-spacing: .06em; color: var(--dim);
+    font-size: 12px; font-weight: 700; letter-spacing: .06em; color: var(--dim);
   }
   .rest {
     position: absolute; left: 0; right: 0; bottom: 8px; text-align: center; pointer-events: none; transition: opacity .18s;
-    color: var(--mute); font-size: 10px; line-height: 1.3;
+    color: var(--mute); font-size: 12px; line-height: 1.3;
   }
   .zone.active .rest { opacity: 0; }
   .group.shot { display: flex; flex-direction: column; }
@@ -213,8 +207,8 @@
     transition: transform .06s, background .1s, box-shadow .1s;
   }
   .btn .ico { font-size: 22px; line-height: 1; font-weight: 800; color: var(--c); }
-  .btn .label { font-size: 11px; font-weight: 800; letter-spacing: .06em; line-height: 1.1; white-space: nowrap; }
-  .btn .sub { font-size: 10px; color: var(--dim); line-height: 1.1; white-space: nowrap; }
+  .btn .label { font-size: 12px; font-weight: 800; letter-spacing: .06em; line-height: 1.1; white-space: nowrap; }
+  .btn .sub { font-size: 12px; color: var(--dim); line-height: 1.1; white-space: nowrap; }
   .btn kbd { position: absolute; right: 6px; top: 6px; display: none; }
   .keyboard .btn kbd { display: inline-block; }
   .btn.up { grid-area: up; }
@@ -244,7 +238,7 @@
     transition: border-color .15s, box-shadow .15s;
   }
   .zone .stick { top: 50%; }
-  .stick .arr { position: absolute; font-size: 10px; color: var(--mute); font-weight: 700; z-index: 1; }
+  .stick .arr { position: absolute; font-size: 12px; color: var(--mute); font-weight: 700; z-index: 1; }
   .stick .arr.n { top: 7px; left: 50%; transform: translateX(-50%); }
   .stick .arr.s { bottom: 7px; left: 50%; transform: translateX(-50%); }
   .stick .arr.w { left: 10px; top: 50%; transform: translateY(-50%); }
@@ -278,7 +272,7 @@
   .keyboard.has-cam #keymap { position: static; grid-column: 1; background: none; padding: 4px 0 0; }
   .kgroup { display: grid; gap: 6px; justify-items: center; }
   .kgroup .krow { display: flex; gap: 6px; }
-  .kgroup .kname { font-size: 11px; font-weight: 700; letter-spacing: .08em; color: var(--dim); }
+  .kgroup .kname { font-size: 12px; font-weight: 700; letter-spacing: .08em; color: var(--dim); }
   .kgroup .kname b { color: var(--fg); }
   .key {
     --c: var(--cyan);
@@ -290,7 +284,7 @@
   .key.fire { --c: var(--red); }
   .key.roller { --c: var(--amber); }
   .key.tilt { --c: var(--blue); }
-  .key small { font: 500 10px/1 var(--font); color: var(--dim); margin-left: 6px; }
+  .key small { font: 500 12px/1 var(--font); color: var(--dim); margin-left: 6px; }
   .key.down {
     background: color-mix(in srgb, var(--c) 30%, var(--panel)); border-color: var(--c); transform: translateY(2px); border-bottom-width: 1px;
     box-shadow: 0 0 16px color-mix(in srgb, var(--c) 50%, transparent);
@@ -330,7 +324,7 @@
   /* ------------------------------------------------------------ footer */
   footer {
     display: flex; align-items: center; gap: 14px; padding: 6px 12px; border-top: 1px solid var(--line);
-    background: var(--panel); color: var(--dim); font-size: 11px; white-space: nowrap; overflow: hidden;
+    background: var(--panel); color: var(--dim); font-size: 12px; white-space: nowrap; overflow: hidden;
   }
   .meter { display: inline-flex; align-items: center; gap: 6px; }
   .meter .ml { font-weight: 700; letter-spacing: .06em; width: 26px; }
@@ -338,9 +332,9 @@
   .meter .bar::before { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--line2); }
   .meter .fill { position: absolute; top: 0; bottom: 0; left: 50%; width: 0; background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
   .meter.turn .fill { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
-  .meter .mv { font: 11px var(--mono); width: 40px; color: var(--fg); text-align: right; }
-  footer .stat { font: 11px var(--mono); overflow: hidden; text-overflow: ellipsis; }
-  footer .raw { font: 10px var(--mono); color: var(--mute); overflow: hidden; text-overflow: ellipsis; }
+  .meter .mv { font: 12px var(--mono); width: 40px; color: var(--fg); text-align: right; }
+  footer .stat { font: 12px var(--mono); overflow: hidden; text-overflow: ellipsis; }
+  footer .raw { font: 12px var(--mono); color: var(--mute); overflow: hidden; text-overflow: ellipsis; }
   #reconnect[hidden] { display: none; }
 
   /* ------------------------------------------------------------ help */
@@ -375,7 +369,7 @@
     .zone { width: clamp(170px, 24vw, 220px); height: min(52vh, 210px); border-radius: 10px; }
     .buttons { --bs: 54px; --bf: 80px; gap: 7px; padding: 4px 6px 2px; }
     .stick { --s: 120px; }
-    .stick .arr { font-size: 9px; }
+    .stick .arr { font-size: 12px; }
     .stick .arr.n { top: 4px; } .stick .arr.s { bottom: 4px; } .stick .arr.w { left: 7px; } .stick .arr.e { right: 7px; }
     .knob { width: 52px; height: 52px; margin: -26px 0 0 -26px; }
     .key { height: 32px; min-width: 32px; font-size: 12px; }
@@ -404,7 +398,7 @@
        操作をやめる / 止める (on a row of their own when they do not fit). */
     .chips { order: 5; flex: 1 1 auto; }
     .acts-row { order: 6; margin-left: auto; }
-    .chip { padding: 3px 8px; font-size: 11px; }
+    .chip { padding: 3px 8px; font-size: 12px; }
     .robot { max-width: none; flex: 0 1 auto; }
     /* No hint line: the zones carry their own hints and the help sheet the rest,
        so a notice banner never pushes the cards under the header. */
@@ -430,7 +424,6 @@
     .brand h1 { display: none; }
     #banner { padding: 4px 10px; }
     #banner .sub { display: inline; margin-left: 10px; }
-    #banner .acts { display: inline-flex; margin: 0 0 0 12px; vertical-align: middle; }
     #overlay { padding: 8px; }
     .ov { max-width: 560px; padding: 10px 14px; }
     .ov .spin { width: 28px; height: 28px; margin-bottom: 6px; border-width: 2px; }
@@ -442,6 +435,105 @@
   }
   @media (prefers-reduced-motion: reduce) {
     .chip.warn::before, #banner.bad, .ov .spin { animation: none; }
+  }
+  /* Stable status and readable controls at page zoom, including short screens.
+     The document can scroll; the stop header stays visible. Stick zones alone
+     consume drags, leaving the surrounding page available for vertical scroll. */
+  html, body { overflow: auto; touch-action: pan-y; }
+  body { height: auto; min-height: 100%; overflow: visible; }
+  html { scroll-padding-top: calc(var(--header-bottom, 112px) + 8px); }
+  #app { height: auto; min-height: 100dvh; grid-template-rows: auto 96px auto 1fr auto; }
+  header {
+    position: sticky; top: 0; z-index: 25; display: grid;
+    grid-template-columns: auto minmax(80px, 1fr) auto 44px 44px;
+    grid-template-rows: 44px 44px; gap: 6px 8px;
+  }
+  header .brand { grid-column: 1; grid-row: 1; }
+  header .robot { grid-column: 2; grid-row: 1; width: 112px; max-width: 100%; }
+  header .robot[hidden] { display: inline-flex; visibility: hidden; }
+  header .host, header > .spacer { display: none; }
+  header .acts-row { grid-column: 3; grid-row: 1; }
+  #releaseBtn[hidden] { display: inline-block; visibility: hidden; }
+  header .chips { grid-column: 1 / 4; grid-row: 2; flex-wrap: nowrap; }
+  #estop { width: 204px; flex: none; }
+  #conn { width: 132px; flex: none; }
+  #reconnect { grid-column: 4 / 6; grid-row: 2; }
+  #reconnect[hidden] { display: inline-block; visibility: hidden; }
+  #helpBtn { grid-column: 4; grid-row: 1; }
+  #fullscreen { grid-column: 5; grid-row: 1; }
+  #banner, #banner.bad, #banner.warn, #banner.info, #banner.ok {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center;
+    gap: 12px; height: 96px; padding: 8px 12px; text-align: left; letter-spacing: 0;
+  }
+  #bannerText { min-width: 0; }
+  #bannerTitle { display: block; font-size: 14px; line-height: 20px; }
+  #banner .sub { display: block; margin: 2px 0 0; font-size: 12px; line-height: 18px; }
+  #bannerDetails { min-width: 64px; min-height: 44px; border-radius: 10px; border: 1px solid currentColor; background: transparent; color: inherit; }
+  #statusDetail { overflow-wrap: anywhere; }
+  #statusActions { display: flex; flex-wrap: wrap; gap: 8px; }
+  #statusActions button { min-height: 44px; }
+  main { min-height: min-content; align-content: center; }
+  .zone, .btn { touch-action: none; border-width: 2px; }
+  .zone { border: 2px solid transparent; }
+  .zone[aria-disabled="true"], .btn[aria-disabled="true"] {
+    cursor: not-allowed; border: 2px dashed var(--dim); background: var(--bg);
+  }
+  .zone[aria-disabled="true"] .knob { background: var(--panel2); box-shadow: none; }
+  .zone[aria-disabled="true"] .stick { border-color: var(--dim); }
+  .btn[aria-disabled="true"] .ico { color: var(--dim); }
+  .btn[aria-disabled="true"] .label, .btn[aria-disabled="true"] .sub { color: var(--dim); }
+  .group-label, .zone-label, .rest { color: var(--dim); }
+  .group { padding-top: 34px; }
+  .zone-label { top: 6px; }
+  .rest { left: 6px; right: 6px; bottom: 4px; }
+  .zone .stick { top: 46%; }
+  .buttons { --bs: 72px; --bf: 108px; }
+  footer {
+    display: grid; grid-template-columns: repeat(3, max-content) minmax(0, 1fr);
+    grid-template-rows: 18px 36px 18px; align-content: start; gap: 0 14px;
+    overflow: visible; font-size: 12px; white-space: normal;
+  }
+  footer .stat { grid-column: 1 / -1; grid-row: 2; }
+  #dbgAxes { grid-column: 1 / 4; grid-row: 3; }
+  #dbgButtons { grid-column: 4; grid-row: 3; }
+  footer .spacer { display: none; }
+  .meter { flex: 0 0 auto; min-width: 0; }
+  .meter .ml { width: auto; flex: none; }
+  .meter .mv { width: 44px; flex: none; }
+  footer .stat, footer .raw { overflow: visible; overflow-wrap: anywhere; }
+  #help { top: var(--header-bottom, 112px); align-items: stretch; }
+  .sheet { max-height: 100%; border-radius: 0; }
+  .sheet .grid { grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); }
+  @media (max-width: 760px) {
+    header { grid-template-columns: minmax(0, 1fr) 44px 44px; grid-template-rows: 44px 44px 28px; }
+    header .brand { display: none; }
+    header .robot { grid-column: 1; }
+    header .acts-row { grid-column: 1 / 4; grid-row: 2; justify-self: end; }
+    header .chips { grid-column: 1 / 4; grid-row: 3; gap: 6px; }
+    #estop { width: 196px; }
+    #conn { width: 128px; }
+    #helpBtn { grid-column: 2; }
+    #fullscreen { grid-column: 3; }
+    #reconnect, #reconnect[hidden] { display: none; } /* Also available in the connection overlay. */
+    main, .has-cam main { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; gap: 10px; }
+    .cam { min-height: 180px; order: -2; }
+    .group.shot { justify-self: end; order: -1; }
+    .group.move { justify-content: space-between; }
+    .zone { width: calc(50% - 4px); height: 220px; }
+    .buttons { margin: 0; }
+    #keymap { position: static; grid-column: 1; background: none; }
+    .keyboard .group { display: none; }
+    footer { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 8px; }
+    .meter .bar { width: 56px; min-width: 16px; flex: 1 1 auto; }
+    .meter { gap: 4px; }
+  }
+  @media (max-width: 520px), (max-height: 480px) {
+    footer { grid-template-rows: 18px; }
+  }
+  @media (max-height: 480px) and (orientation: landscape) {
+    .zone { min-height: 200px; }
+    .stick .arr { font-size: 12px; }
+    .buttons { --bs: 72px; --bf: 108px; }
   }
 </style>
 </head>
@@ -456,7 +548,7 @@
     <span class="host" id="host"></span>
     <div class="spacer"></div>
     <div class="chips">
-      <span class="chip" id="estop">非常停止：--</span>
+      <span class="chip" id="estop" role="status" aria-live="polite" aria-atomic="true">非常停止：不明</span>
       <span class="chip" id="conn">未接続</span>
     </div>
     <div class="acts-row">
@@ -467,15 +559,18 @@
     <button class="icon square" id="helpBtn" title="操作ガイド" aria-label="操作ガイド">?</button>
     <button class="icon square" id="fullscreen" title="全画面" aria-label="全画面">⛶</button>
   </header>
-  <div id="banner" role="status"></div>
+  <div id="banner">
+    <div id="bannerText" role="status" aria-live="polite" aria-atomic="true"><b id="bannerTitle"></b><span class="sub" id="bannerNext"></span></div>
+    <button id="bannerDetails" type="button" aria-haspopup="dialog">詳しく</button>
+  </div>
   <div id="controls">
     <select id="inputMode" aria-hidden="true" tabindex="-1">
       <option value="pointer">タッチ・マウス</option>
       <option value="keyboard">キーボード</option>
     </select>
     <div class="seg" role="group" aria-label="操作方法">
-      <button type="button" id="modePointer" class="on">タッチ・マウス</button>
-      <button type="button" id="modeKeyboard">キーボード</button>
+      <button type="button" id="modePointer" class="on" aria-pressed="true">タッチ・マウス</button>
+      <button type="button" id="modeKeyboard" aria-pressed="false">キーボード</button>
     </div>
     <p id="inputHelp">スティックの領域をドラッグします。ボタンは押している間だけ動きます。指を離すと止まります。</p>
   </div>
@@ -527,8 +622,9 @@
 </div>
 
 <div id="help" hidden>
-  <div class="sheet" role="dialog" aria-labelledby="helpTitle">
+  <div class="sheet" id="helpSheet" role="dialog" aria-modal="true" aria-labelledby="helpTitle" tabindex="-1">
     <div class="top"><h2 id="helpTitle">操作ガイド</h2><button class="icon" id="helpClose">閉じる</button></div>
+    <section aria-labelledby="statusTitle"><h3 id="statusTitle">今の状態</h3><p id="statusDetail"></p><div id="statusActions"></div></section>
     <div class="grid">
       <section>
         <h3>タッチ・マウス</h3>
@@ -555,7 +651,7 @@
         <ul>
           <li><b>ロボット名</b>: 左上。操作したいロボットの名前か確かめてください（違うときは Wi-Fi を確認）。</li>
           <li><b>接続</b>: 「操作中」はこの端末で操作できる状態、「閲覧のみ」はほかの端末が操作している状態です。切れると自動で再接続します。</li>
-          <li><b>非常停止</b>: ロボット側の非常停止の状態。押されている間は入力しても動きません。</li>
+          <li><b>非常停止</b>: ロボット側の非常停止の状態。「押されています」「解除」「不明」を表示します。押下中と不明の間はこの画面の入力を受け付けません。先生と周りを確かめてください。</li>
           <li><b>教材から走らせています</b>: QUESTiX LAB の教材からロボットを動かしている間に出ます。スティックを動かすとこの画面の操作に切り替わります。</li>
           <li><b>カメラ</b>: ロボットのカメラ映像が届くと中央に表示します（ノード側で <code>camera_topic</code> を設定したときだけ）。</li>
           <li>下部のメーターはロボットに送っている値です（前後・左右・旋回）。</li>
@@ -612,10 +708,21 @@
   const LAB_STOP_TIMEOUT_MS = 2500;
   const NOTICE_MS = 6000, REQUEST_NOTICE_MS = 20000;
   const CLOSE_AUTH_FAILED = 4401;
+  // Display freshness matches Robot Manager (1.5 s). This is a page input guard,
+  // independent of the actuators' emergency_stop_timeout_sec and #220's node latch.
+  const ESTOP_FRESH_MS = 1500;
+  // The node truncates estop_age_ms to whole milliseconds, so the true age is up to 1 ms
+  // more than reported. Add that 1 ms so the guard errs towards "unknown", never towards fresh.
+  const ESTOP_AGE_RESOLUTION_MS = 1;
+  const now = () => performance.now();
 
   const axes = new Array(NUM_AXES).fill(0);
   const buttons = new Array(NUM_BUTTONS).fill(0);
   const heldKeys = new Set();
+  const physicalKeys = new Set();
+  // Display-only fallback for peers that do not report #220's stopped field.
+  // These sets never grant input or clear the node's latch.
+  const waitingPointers = new Set(), waitingKeys = new Set();
   let focused = document.hasFocus();
   const $ = (id) => document.getElementById(id);
   const params = new URLSearchParams(location.search);
@@ -647,10 +754,10 @@
     you: null,             // this connection {id, label, address}
     robot: "",
     labPort: DEFAULT_LAB_PORT,
-    estop: null, estopReason: "",
+    estop: null, estopReason: "", estopAge: null, estopAt: null,
     arbiter: null,         // command_arbiter drive status {active, reason, lab_locked} or null
     lagging: false,
-    stopped: false,
+    stopped: false, latchReported: false,
     wantControl: true,     // (re)connect asking for the operator role
     reclaim: false,        // the role was given up only because the page was hidden
     notice: null,          // {cls, text, sub, until, actions}
@@ -663,7 +770,25 @@
   let dirty = false, rafPending = false;
   const isOpen = () => !!ws && ws.readyState === WebSocket.OPEN;
   function canInput() {
-    return focused && !document.hidden && isOpen() && state.controller;
+    return focused && !document.hidden && isOpen() && state.controller && estopView().value === false && $("help").hidden;
+  }
+  function estopView() {
+    if (!isOpen() || state.phase !== "open") return { value: null, reason: "接続が切れているため、非常停止の状態を確認できません" };
+    if (state.estop === null || state.estopAge === null || state.estopAt === null) {
+      return { value: null, reason: "非常停止の信号がまだ届いていません" };
+    }
+    if (state.estopAge + ESTOP_AGE_RESOLUTION_MS + Math.max(0, now() - state.estopAt) > ESTOP_FRESH_MS) {
+      return { value: null, reason: "非常停止の信号が途絶えています" };
+    }
+    return { value: state.estop, reason: state.estopReason };
+  }
+  let inputEnabled = false;
+  function syncInput(sendFrame = true) {
+    const enabled = canInput();
+    const wasEnabled = inputEnabled;
+    inputEnabled = enabled;
+    if (wasEnabled && !enabled) resetAll(sendFrame);
+    for (const el of [$("leftZone"), $("rightZone"), ...buttonEls]) attr(el, "aria-disabled", String(!enabled));
   }
   function send(payload) {
     if (!isOpen()) return false;
@@ -680,6 +805,7 @@
     return `${proto}://${location.host}/ws?${q.join("&")}`;
   }
   function sendNow() {
+    syncInput(false);  // A frame must not carry held input past local E-stop expiry.
     dirty = false;
     send({ type: "joy", axes, buttons });
   }
@@ -696,6 +822,7 @@
     resetAll();
     if (ws) ws.close();
     state.phase = "connecting"; state.controller = false;
+    state.estop = null; state.estopAge = null; state.estopAt = null;
     const socket = new WebSocket(wsUrl());
     socket.binaryType = "arraybuffer";
     ws = socket;
@@ -728,7 +855,11 @@
   const manualReconnect = () => { clearTimeout(reconnectTimer); connect(); };
   $("reconnect").addEventListener("click", manualReconnect);
   $("overlayReconnect").addEventListener("click", manualReconnect);
-  setInterval(() => { if (isOpen() && state.controller) sendNow(); }, HEARTBEAT_MS);
+  setInterval(() => {
+    // Expire the page's last sample even if status frames stop while WS stays open.
+    render();
+    if (isOpen() && state.controller) sendNow();
+  }, HEARTBEAT_MS);
 
   function setRole(controller) {
     const was = state.controller;
@@ -752,9 +883,9 @@
         if (mine) return;  // our own button already said so
         if (state.controller) {
           resetAll();
-          notice("warn", `${who(msg.by)} で「止める」が押されました`, "もう一度動かすには、指を離してから触れ直してください");
+          notice("warn", "ほかの端末で止められました", `${who(msg.by)} で「止める」が押されました。もう一度動かすには、指を離してから触れ直してください`);
         } else {
-          notice("info", `${who(msg.by)} で「止める」が押されました`, "");
+          notice("info", "ほかの端末で止められました", `${who(msg.by)} で「止める」が押されました`);
         }
         return;
       }
@@ -764,11 +895,11 @@
         return;
       case "request_sent":
         notice("info", msg.repeat ? "もう伝えてあります" : "操作中の端末に伝えました",
-          `${who(msg.owner)} で「譲る」が押されると、この端末で操作できます`);
+          `${who(msg.owner)} で「譲る」が押されると、この端末から入力できます`);
         return;
       case "handover_request":
         if (!state.controller || !msg.from) return;
-        notice("info", `${who(msg.from)} が操作したいと言っています`, "譲ると、この端末では操作できなくなります", REQUEST_NOTICE_MS, [
+        notice("info", "操作を代わりたい端末があります", `${who(msg.from)} が操作したいと言っています。譲ると、この端末では操作できなくなります`, REQUEST_NOTICE_MS, [
           { label: "譲る", run: () => { resetAll(); state.wantControl = false; send({ type: "release", to: msg.from.id }); clearNotice(); } },
           { label: "あとで", quiet: true, run: () => clearNotice() },
         ]);
@@ -781,10 +912,13 @@
   function onStatus(s) {
     state.estop = s.estop === true ? true : s.estop === false ? false : null;
     state.estopReason = s.estop_reason || "";
+    state.estopAge = Number.isFinite(s.estop_age_ms) && s.estop_age_ms >= 0 ? s.estop_age_ms : null;
+    state.estopAt = now();
     state.arbiter = s.arbiter && typeof s.arbiter === "object" ? s.arbiter : null;
     state.owner = s.owner || null;
     state.clients = s.clients || 0;
     setRole(s.controller);
+    state.latchReported = typeof s.stopped === "boolean";
     const stopped = s.stopped === true && state.controller;
     const enteredStop = stopped && !state.stopped;
     state.stopped = stopped;
@@ -793,7 +927,7 @@
     camera.status(s);
     const hold = { active: "送信中", timeout: "タイムアウト→ニュートラル", released: "フレーム未受信" }[s.hold] || s.hold;
     const age = s.rx_age_ms == null ? "-" : Math.round(s.rx_age_ms);
-    $("dbgStat").textContent = `${hold} · 遅延 ${age}ms · 接続 ${s.clients}${s.controller ? "" : " · 閲覧のみ"}`;
+    $("dbgStat").textContent = `${hold} · 受信からの経過時間 ${age}ms · 接続 ${s.clients}${s.controller ? "" : " · 閲覧のみ"}`;
     // A viewer's meters show what the operator is sending.
     if (!state.controller && Array.isArray(s.axes)) renderMeters(s.axes.map(Number));
     render();
@@ -810,39 +944,43 @@
   function clearNotice() { state.notice = null; clearTimeout(noticeTimer); render(); }
 
   function setChip(cls, text) { const el = $("conn"); el.className = "chip " + cls; el.textContent = text; }
+  let bannerKey = "";
   function setBanner(b) {
-    const el = $("banner");
-    el.textContent = "";
-    if (!b) { el.className = ""; return; }
-    el.className = b.cls; el.textContent = b.text;
-    if (b.sub) { const s = document.createElement("span"); s.className = "sub"; s.textContent = b.sub; el.appendChild(s); }
-    if (b.actions) {
-      const row = document.createElement("div"); row.className = "acts";
-      for (const a of b.actions) {
-        const btn = document.createElement("button");
-        btn.type = "button"; btn.textContent = a.label; if (a.quiet) btn.className = "quiet";
-        btn.addEventListener("click", a.run);
-        row.appendChild(btn);
-      }
-      el.appendChild(row);
+    const text = b.text.length > 28 ? "操作の通知があります" : b.text;
+    const next = b.next || "詳しく確認してください";
+    const detail = [b.text, b.sub, b.next].filter(Boolean).join("。 ");
+    const key = JSON.stringify([b.cls, text, next, detail, b.actions?.map(a => a.label)]);
+    if (key === bannerKey) return;  // Do not rebuild focused buttons on each heartbeat.
+    bannerKey = key;
+    $("banner").className = b.cls;
+    $("bannerTitle").textContent = text;
+    $("bannerNext").textContent = next;
+    $("statusDetail").textContent = detail;
+    const row = $("statusActions"); row.textContent = "";
+    for (const a of b.actions || []) {
+      const btn = document.createElement("button");
+      btn.type = "button"; btn.className = "icon"; btn.textContent = a.label;
+      btn.addEventListener("click", () => { a.run(); closeHelp(); });
+      row.appendChild(btn);
     }
   }
   function banner() {
-    if (state.estop === true) return { cls: "bad", text: "非常停止中", sub: state.estopReason };
-    if (state.phase === "open" && state.controller && state.stopped) {
-      return { cls: "warn", text: "スティックとボタンから手を離してください",
-        sub: "入力を中立に戻してから、もう一度操作してください。教材を止めるときは「止める」" };
-    }
+    const e = estopView();
+    if (e.value === true) return { cls: "bad", text: "非常停止：押されています", sub: e.reason, next: "先生と周りを確かめてください" };
+    if (e.value === null) return { cls: "warn", text: "非常停止：不明", sub: e.reason, next: "先生と周りを確かめてください" };
+    if (state.phase !== "open") return { cls: "warn", text: "接続を確認してください", next: "接続後、指を離して操作し直してください" };
+    if (!state.controller) return { cls: "info", text: state.owner ? "ほかの端末が操作中です" : "いまは誰も操作していません",
+      sub: state.notice && Date.now() < state.notice.until ? [state.notice.text, state.notice.sub].filter(Boolean).join("。") : "", next: state.owner ? "操作を代わるときは詳しく確認してください" : "操作する端末を選んでください" };
+    // /motion_permission is not relayed by this node. Do not infer permission
+    // from the owner, hold or arbiter: unknown permission remains the node's job.
+    if (state.stopped || (!state.latchReported && (waitingPointers.size || waitingKeys.size))) return { cls: "warn", text: "スティックとボタンから手を離してください",
+      next: "離してから、もう一度操作してください" };
     const n = state.notice;
     if (n && Date.now() < n.until) return n;
-    if (state.phase === "open" && state.arbiter && state.arbiter.active === "lab") {
-      return { cls: "info", text: "教材から走らせています",
-        sub: state.controller ? "スティックを動かすとこの画面の操作に切り替わります。止めるときは「止める」"
-          : "QUESTiX LAB の実験でロボットが動いています。止めるときは「止める」" };
-    }
-    if (state.phase === "closed") return { cls: "warn", text: "ロボットとの接続が切れました", sub: "ロボット側は自動でニュートラルに戻ります" };
-    if (state.phase === "auth") return { cls: "bad", text: "トークンが違います", sub: "" };
-    return null;
+    if (state.arbiter && state.arbiter.active === "lab") return { cls: "info", text: "教材から走らせています",
+      next: "止めるときは「止める」を押してください",
+      sub: "スティックを動かすとこの画面の操作に切り替わります" };
+    return { cls: "ok", text: "この端末から入力できます", next: "止めるときは「止める」を押してください" };
   }
   function overlay() {
     switch (state.phase) {
@@ -861,7 +999,7 @@
         who: me, request: true };
     }
     return { cls: "free", viewer: true, title: "いまは誰も操作していません",
-      sub: "「操作する」を押すと、この端末で操作できます。", who: me, claim: true };
+      sub: "「操作する」を押すと、この端末から入力できます。", who: me, claim: true };
   }
   function render() {
     // header
@@ -870,13 +1008,16 @@
     $("robotName").textContent = state.robot;
     document.title = state.robot ? `${state.robot} · ブラウザ・スマホで操作` : "ブラウザ・スマホで操作 · QUESTiX";
     const e = $("estop");
-    if (state.estop === true) { e.className = "chip bad"; e.textContent = "非常停止：押されています"; }
-    else if (state.estop === false) { e.className = "chip ok"; e.textContent = "非常停止：解除されています"; }
-    else { e.className = "chip"; e.textContent = state.phase === "open" ? "非常停止：情報なし" : "非常停止：--"; }
+    const view = estopView();
+    const label = view.value === true ? "押されています" : view.value === false ? "解除" : "不明";
+    e.className = "chip " + (view.value === true ? "bad" : view.value === false ? "ok" : "warn");
+    if (e.textContent !== "非常停止：" + label) e.textContent = "非常停止：" + label;
+    attr(e, "aria-label", e.textContent + (view.value === null ? "。" + view.reason : ""));
+    syncInput();
     if (state.phase === "connecting") setChip("warn", "接続中…");
     else if (state.phase === "auth") setChip("bad", "認証エラー");
     else if (state.phase === "closed") setChip("bad", "切断");
-    else if (state.controller) setChip(state.lagging ? "warn" : "ok", state.lagging ? "操作中（遅延）" : "操作中");
+    else if (state.controller) setChip(state.lagging ? "warn" : "ok", state.lagging ? "操作中（待機）" : "操作中");
     else setChip("", "閲覧のみ");
     $("reconnect").hidden = state.phase !== "auth";
     $("releaseBtn").hidden = !(state.phase === "open" && state.controller);
@@ -936,7 +1077,7 @@
       else notice("ok", "止めました", sent ? "この画面の操作を止めました（教材の中継は動いていません）" : "ロボットとの接続が切れています。ロボット側は自動でニュートラルに戻ります");
     });
   }
-  $("stop").addEventListener("click", () => { stopAll(); $("stop").blur(); });
+  $("stop").addEventListener("click", () => { stopAll(); if ($("help").hidden) $("stop").blur(); });
   $("releaseBtn").addEventListener("click", () => {
     resetAll(); state.wantControl = false; state.reclaim = false; send({ type: "release" }); $("releaseBtn").blur();
   });
@@ -1021,13 +1162,17 @@
       axes[map.y] = +(-dy / STICK_RADIUS).toFixed(3);
       markDirty();
     }
-    function release() {
+    function release(waitForUp = false) {
+      if (waitForUp && pointerId !== null) waitingPointers.add(pointerId);
       pointerId = null; stickEl.classList.remove("on"); zoneEl.classList.remove("active"); knob.style.transform = "";
       stickEl.style.left = ""; stickEl.style.top = "";  // back to the CSS home position
       axes[map.x] = 0; axes[map.y] = 0; markDirty();
     }
     zoneEl.addEventListener("pointerdown", (ev) => {
-      if (!canInput() || $("inputMode").value !== "pointer" || ev.button !== 0) return;
+      if (!canInput() || $("inputMode").value !== "pointer" || ev.button !== 0) {
+        if (ev.button === 0) waitingPointers.add(ev.pointerId);
+        return;
+      }
       if (pointerId !== null) return;
       pointerId = ev.pointerId;
       zoneEl.setPointerCapture(ev.pointerId);
@@ -1046,14 +1191,15 @@
     });
     zoneEl.addEventListener("pointermove", (ev) => {
       if (ev.pointerId !== pointerId) return;
+      if (!canInput()) { release(); return; }
       const r = zoneRect();
       set(ev.clientX - r.left - ox, ev.clientY - r.top - oy);
       ev.preventDefault();
     });
     for (const t of ["pointerup", "pointercancel", "lostpointercapture"]) {
-      zoneEl.addEventListener(t, (ev) => { if (ev.pointerId === pointerId) release(); });
+      zoneEl.addEventListener(t, (ev) => { waitingPointers.delete(ev.pointerId); if (ev.pointerId === pointerId) release(); render(); });
     }
-    return { release };
+    return { release, held: () => pointerId !== null };
   }
   const sticks = [
     makeStick($("leftZone"), $("leftStick"), LAYOUT.leftStick),
@@ -1081,14 +1227,18 @@
     let pointerId = null;
     const press = (on) => { buttons[b.index] = on ? 1 : 0; el.classList.toggle("active", on); markDirty(); };
     el.addEventListener("pointerdown", (ev) => {
-      if (!canInput() || $("inputMode").value !== "pointer" || ev.button !== 0) return;
+      if (!canInput() || $("inputMode").value !== "pointer" || ev.button !== 0) {
+        if (ev.button === 0) waitingPointers.add(ev.pointerId);
+        return;
+      }
       if (pointerId !== null) return;
       pointerId = ev.pointerId; el.setPointerCapture(ev.pointerId); press(true); haptic(12); ev.preventDefault();
     });
     for (const t of ["pointerup", "pointercancel", "lostpointercapture"]) {
-      el.addEventListener(t, (ev) => { if (ev.pointerId === pointerId) { pointerId = null; press(false); } });
+      el.addEventListener(t, (ev) => { waitingPointers.delete(ev.pointerId); if (ev.pointerId === pointerId) { pointerId = null; press(false); } render(); });
     }
-    el.release = () => { pointerId = null; press(false); };
+    el.held = () => pointerId !== null;
+    el.release = (waitForUp = false) => { if (waitForUp && pointerId !== null) waitingPointers.add(pointerId); pointerId = null; press(false); };
     $("buttons").appendChild(el);
     buttonEls.push(el);
   }
@@ -1147,18 +1297,24 @@
     markDirty();
   }
   document.addEventListener("keydown", (ev) => {
+    const alreadyDown = physicalKeys.has(ev.code);
+    if (CONTROL_KEYS.has(ev.code)) {
+      physicalKeys.add(ev.code);
+      if (!canInput()) waitingKeys.add(ev.code);
+    }
     if (ev.code === "Escape") { resetAll(); closeHelp(); return; }
     if (ev.ctrlKey || ev.altKey || ev.metaKey) { resetAll(); return; }
     if (ev.isComposing || !canInput() || $("inputMode").value !== "keyboard") return;
     if (ev.target.closest("input, select, textarea, button, a, [contenteditable]")) return;
     if (!CONTROL_KEYS.has(ev.code)) return;
     ev.preventDefault();
-    if (ev.repeat || (ev.code !== "Space" && !heldKeys.has("Space"))) return;
+    if (ev.repeat || alreadyDown || (ev.code !== "Space" && !heldKeys.has("Space"))) return;
     heldKeys.add(ev.code);
     renderKeyboard();
   });
   document.addEventListener("keyup", (ev) => {
-    if (!heldKeys.has(ev.code)) return;
+    physicalKeys.delete(ev.code); waitingKeys.delete(ev.code);
+    if (!heldKeys.has(ev.code)) { render(); return; }
     ev.preventDefault();
     if (ev.code === "Space") { resetAll(); return; }
     heldKeys.delete(ev.code);
@@ -1196,20 +1352,56 @@
   if (params.get("mode") === "keyboard" && keyboardCapable) { $("inputMode").value = "keyboard"; applyMode(); }
 
   // ---------------------------------------------------------------- help sheet
-  function closeHelp() { $("help").hidden = true; }
-  $("helpBtn").addEventListener("click", () => { resetAll(); $("help").hidden = false; $("helpBtn").blur(); });
+  let helpOpener = null;
+  function positionHelp() {
+    const header = document.querySelector("header");
+    document.documentElement.style.setProperty("--header-bottom", header.getBoundingClientRect().bottom + "px");
+  }
+  function openHelp(opener) {
+    helpOpener = opener;
+    resetAll(); positionHelp(); $("help").hidden = false;
+    // Own the header's stop only while the sheet is shown: a static aria-owns would move
+    // the stop under the hidden sheet and drop it from the accessibility tree.
+    $("helpSheet").setAttribute("aria-owns", "stop");
+    render(); $("helpSheet").focus();
+  }
+  function closeHelp() {
+    if ($("help").hidden) return;
+    $("help").hidden = true; $("helpSheet").removeAttribute("aria-owns"); render();
+    if (helpOpener) helpOpener.focus();
+  }
+  $("helpBtn").addEventListener("click", () => openHelp($("helpBtn")));
+  $("bannerDetails").addEventListener("click", () => openHelp($("bannerDetails")));
   $("helpClose").addEventListener("click", closeHelp);
-  if (location.hash === "#help") $("help").hidden = false;
+  if (location.hash === "#help") openHelp($("helpBtn"));
   $("help").addEventListener("pointerdown", (ev) => { if (ev.target === $("help")) closeHelp(); });
+  // Keep modal tab navigation within the sheet plus the always available stop.
+  document.addEventListener("keydown", (ev) => {
+    if ($("help").hidden || ev.code !== "Tab") return;
+    const targets = [$("stop"), $("helpClose"), ...$("statusActions").querySelectorAll("button")];
+    const i = targets.indexOf(document.activeElement);
+    const next = ev.shiftKey ? (i <= 0 ? targets.length - 1 : i - 1) : (i + 1) % targets.length;
+    ev.preventDefault(); targets[next].focus();
+  });
+  function onViewportChange() {
+    // Reflow/scroll changes the pointer's reference rectangle. Discard a hold
+    // rather than interpreting that movement as a new stick displacement.
+    if (heldKeys.size || sticks.some(s => s.held()) || buttonEls.some(el => el.held())) resetAll();
+    positionHelp();
+  }
+  window.addEventListener("resize", onViewportChange);
+  window.addEventListener("scroll", onViewportChange, { capture: true, passive: true });
+  if (typeof ResizeObserver !== "undefined") new ResizeObserver(positionHelp).observe(document.querySelector("header"));
 
   // ---------------------------------------------------------------- safety
-  function resetAll() {
+  function resetAll(sendFrame = true) {
+    for (const code of physicalKeys) waitingKeys.add(code);
     heldKeys.clear();
-    for (const s of sticks) s.release();
-    for (const el of buttonEls) el.release();
+    for (const s of sticks) s.release(true);
+    for (const el of buttonEls) el.release(true);
     axes.fill(0); buttons.fill(0);
     renderKeys();
-    sendNow();
+    if (sendFrame) sendNow();
   }
   // Hidden page: let go of everything and of the operator role, so another
   // device may take over; coming back takes the role again if it is still free.
@@ -1230,6 +1422,9 @@
   window.addEventListener("blur", () => { focused = false; resetAll(); });
   window.addEventListener("focus", () => { focused = true; resetAll(); });
   document.addEventListener("contextmenu", (ev) => ev.preventDefault());
+  for (const type of ["pointerup", "pointercancel"]) {
+    document.addEventListener(type, (ev) => { if (waitingPointers.delete(ev.pointerId)) render(); });
+  }
 
   // ---------------------------------------------------------------- misc
   let wakeLock = null;

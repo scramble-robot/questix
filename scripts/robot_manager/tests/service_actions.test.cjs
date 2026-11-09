@@ -7,6 +7,7 @@ const OperatorGuide = require('../static/operator-guide.js');
 const ControlLabels = require('../static/control-labels.js');
 const StatusView = require('../static/status-view.js');
 const PermissionView = require('../static/permission-view.js');
+const ElapsedView = require('../static/elapsed-view.js');
 
 function fixture(fetch, extra = {}) {
   const elements = new Map();
@@ -32,7 +33,7 @@ function fixture(fetch, extra = {}) {
     addEventListener() {},
   };
   const toasts = [];
-  const context = vm.createContext({ document, OperatorGuide, ControlLabels, StatusView, PermissionView, fetch,
+  const context = vm.createContext({ document, ElapsedView, OperatorGuide, ControlLabels, StatusView, PermissionView, fetch,
     performance, AbortSignal,
     confirm: () => true, setTimeout() {}, setInterval() {}, location: { href: 'http://127.0.0.1:8888/' },
     WebJoyConnection: { defaultUrl: () => '', suggest() {} }, qrSvg: () => ({}), wifiQrText: () => '',
@@ -81,7 +82,7 @@ test('older services without readiness still show saved settings without a globa
   });
   await vm.runInContext('refreshReadiness()', f.context);
   assert.equal(f.document.getElementById('operation-issue').hidden, true);
-  assert.equal(f.document.getElementById('ready-controller').textContent, 'UART / Switch');
+  assert.equal(f.document.getElementById('ready-controller').textContent, '大会用コントローラー');
   assert.match(f.document.getElementById('ready-profile').textContent, /読み込みました/);
   assert.match(f.document.getElementById('ready-workspace').textContent, /更新・再起動が必要/);
   assert.equal(f.document.getElementById('readiness-refresh').disabled, false);

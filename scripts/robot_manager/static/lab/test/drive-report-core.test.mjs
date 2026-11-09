@@ -72,6 +72,7 @@ test('the summary gives distance, peak speed and how the robot stopped', () => {
   assert.ok(Math.abs(summary.stop.at - 3) < 0.05, `stop at ${summary.stop.at}`);
   assert.ok(summary.stop.delay > 0.2 && summary.stop.delay < 0.5, `delay ${summary.stop.delay}`);
   assert.ok(summary.stop.distance > 0.01 && summary.stop.distance < 0.05);
+  assert.equal(summary.stopReason, null);
 });
 
 test('a run that never commanded motion has no stop, and missing streams leave gaps', () => {
@@ -80,6 +81,7 @@ test('a run that never commanded motion has no stop, and missing streams leave g
     streams: { twist: [{ stamp: 1, linear: 0, angular: 0 }], drive: [], odom: [] },
   });
   assert.equal(report.summary.stop, null);
+  assert.equal(report.summary.stopReason, 'noMotion');
   assert.equal(report.summary.forward, null);
   assert.deepEqual(report.series.path, []);
 });
@@ -87,7 +89,17 @@ test('a run that never commanded motion has no stop, and missing streams leave g
 test('a robot still moving at the end of the recording has not stopped', () => {
   const recording = straightRun();
   recording.streams.drive = recording.streams.drive.map((message) => ({ ...message, v: 0.2 }));
-  assert.equal(driveReport(recording).summary.stop, null);
+  const { summary } = driveReport(recording);
+  assert.equal(summary.stop, null);
+  assert.equal(summary.stopReason, 'notStill');
+});
+
+test('a recording ending before the zero command has no stopping time, even with still feedback', () => {
+  const recording = straightRun();
+  recording.streams.twist = recording.streams.twist.filter((message) => message.stamp < 104);
+  const { summary } = driveReport(recording);
+  assert.equal(summary.stop, null);
+  assert.equal(summary.stopReason, 'noZero');
 });
 
 test('turns are unwrapped across ±180°', () => {
