@@ -1,3 +1,4 @@
+import { benchSentence } from './bench-copy.js';
 import { html, nothing, unsafeHTML } from '../vendor/lit-html.js';
 import { formatNumber } from '../core/dom.js';
 import { fillSentence } from '../core/content.js';
@@ -867,18 +868,6 @@ function measuredRows(rows, text) {
         <td class="motor-bench-value">${formatNumber(row.right, 1)}</td>
       </tr>`,
   );
-}
-
-function benchSentence(bench, text) {
-  if (!bench.summary) return text.summaryStill;
-  const { fastest, meanGap, wheelGap } = bench.summary;
-  return fillSentence(text.summary, {
-    command: formatNumber(fastest.command, 1),
-    left: formatNumber(fastest.left, 1),
-    right: formatNumber(fastest.right, 1),
-    gap: formatNumber(meanGap, 1),
-    wheelGap: formatNumber(wheelGap, 1),
-  });
 }
 
 // Under an empty table: what fills it. Without a robot the start button is not on the page, so the

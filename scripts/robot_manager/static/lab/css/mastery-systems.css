@@ -933,8 +933,16 @@ html {
   color: white;
   border-color: #a14f3c;
 }
+/* Preserve the existing disabled hover appearance, too. */
 .sys-stop-link:hover {
   background: #863d2d;
+}
+@media (hover: hover) {
+  .sys-stop-link:hover:not(:disabled) {
+    background: #863d2d;
+    border-color: #863d2d;
+    color: white;
+  }
 }
 @media (max-width: 1050px) {
   .sys-workspace {
@@ -1115,7 +1123,7 @@ html {
   display: block;
   font-size: 12px;
   line-height: 1.7;
-  color: #657c84;
+  color: var(--muted);
   margin-top: 6px;
 }
 .sys-forecast-check .sys-timing-equation {

@@ -153,7 +153,7 @@ tilt, at})` gets each of this page's discs and returns whether the lesson kept a
   to put the robot), `conditions()` a few words for the run history, and `confirmLabel` replaces
   the safety tick's sentence when the robot is not on the floor (the motor bench: wheels lifted). The shared block shows one
   learner reason at a time, folds the teacher's details, and puts the result under the button.
-  A run's own stop is scoped to the page (`scope: 'mine'`); only the stop bar stops any run. Never bypass the bridge's checks from the
+  A run's own stop is scoped to the page (`scope: 'mine'`); only the shared header/dialog stop control stops any run. Never bypass the bridge's checks from the
   page, and give a closed-loop controller its own guards (stale sensor → stand still, minimum
   distance → throw an Error with the learner's sentence). Declare the topic's `drive` run mode in
   `content/shell/run-modes.json` and put `runModeBadgeHtml('drive')` in the block's heading.

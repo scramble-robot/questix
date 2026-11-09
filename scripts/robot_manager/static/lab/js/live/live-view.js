@@ -286,7 +286,7 @@ function liveCaptureControls(model, actions) {
 /**
  * Press → see, the same in every course: once a run or a recording starts, the block's button and
  * the live strip under it (`[data-live-run]` of the block of `slot`) are brought on screen, clear
- * of the header and of the stop bar at the bottom. Nothing moves when they are already in view.
+ * of the header. Nothing moves when they are already in view.
  */
 function revealLiveRun(slot) {
   requestAnimationFrame(() => {
@@ -296,8 +296,7 @@ function revealLiveRun(slot) {
     const box = run.getBoundingClientRect();
     const header = document.querySelector('.site-header');
     const headerBottom = header ? Math.max(0, header.getBoundingClientRect().bottom) : 0;
-    const bar = document.getElementById('liveStopBar');
-    const bottom = bar && !bar.hidden ? bar.getBoundingClientRect().top : window.innerHeight;
+    const bottom = window.innerHeight;
     if (box.top >= headerBottom && box.bottom <= bottom) return;
     revealElement(run);
   });

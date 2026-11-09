@@ -49,15 +49,24 @@ function courseLink(lesson, model, actions) {
 
 // Grouped like the catalogue page, so both lists read in the same order under the same headings.
 function courseNavigation(model, actions) {
-  return model.groups.map(
-    (group) =>
-      html`<section class="course-nav-group">
-        <h2>${group.title}</h2>
-        <div class="course-nav-links">
-          ${group.lessons.map((lesson) => courseLink(lesson, model, actions))}
-        </div>
-      </section>`,
-  );
+  return html`${model.groups.map(
+      (group) =>
+        html`<section class="course-nav-group">
+          <h2>${group.title}</h2>
+          <div class="course-nav-links">
+            ${group.lessons.map((lesson) => courseLink(lesson, model, actions))}
+          </div>
+        </section>`,
+    )}
+    <a
+      class="course-nav-records"
+      href="#records"
+      aria-current=${model.course === 'records' ? 'page' : 'false'}
+      @click=${actions.followRecordsLink}
+    >
+      <strong>${model.copy.header.recordsTitle}</strong>
+      <span class="course-nav-records-description">${model.copy.header.recordsDescription}</span>
+    </a>`;
 }
 
 // --- Catalogue page ----------------------------------------------------------------------------

@@ -11,8 +11,8 @@ import {
   refusalSentence,
 } from './shoot-core.js';
 
-// The block a lesson shows where the learner operates the real launcher, and the stop bar every
-// page shows while a roller turns. Pure templates of shoot-link.js's `shootModel()` plus the
+// The block a lesson shows where the learner operates the real launcher, and the shared header/dialog stop control every
+// page keeps after a connection. Pure templates of shoot-link.js's `shootModel()` plus the
 // panel's own view state (`view`: the tilt being dragged, the record note, whether the last shot
 // got a row); shoot-ui.js renders them. Sentences live in content/live/shoot.json.
 //

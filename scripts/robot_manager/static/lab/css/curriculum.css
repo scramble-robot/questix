@@ -77,7 +77,7 @@
 }
 .series-robot dd {
   margin: 4px 0 0;
-  color: #637d84;
+  color: var(--muted);
   font-size: 14px;
 }
 .slam-mode {

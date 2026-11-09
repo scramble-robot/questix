@@ -7,7 +7,7 @@ import { driveReadiness, limitCommand, DriveCommandWatch } from './drive-core.js
 // lets this page drive, and sends "stop" whenever the run ends for any reason: finished, the
 // learner's stop, the page hidden or closed, Esc, the link lost. A run that ends on this page sends
 // a stop scoped to this page (`scope: 'mine'`), so a refused request can never end another pupil's
-// run; the stop bar (`stopDrive`) is the one deliberate way to stop any run, which is why every
+// run; the shared header/dialog stop control (`stopDrive`) is the one deliberate way to stop any run, which is why every
 // connected page shows it while the robot drives.
 
 const HEARTBEAT_MS = 100;
@@ -50,7 +50,7 @@ function confirmDriveSafety(value) {
   notify();
 }
 
-// Stop the robot, whichever page drives it (the stop bar). Always allowed.
+// Stop the robot, whichever page drives it (the shared header/dialog stop control). Always allowed.
 function stopDrive() {
   sendRobot({ type: 'stop' });
   current?.finish('stopped');

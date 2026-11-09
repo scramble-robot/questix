@@ -1,8 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { liveStatusModel, DISPLAY_STALE_MS } from '../js/live/live-status-core.js';
+import {
+  liveStatusModel as timingStatusModel,
+  DISPLAY_STALE_MS,
+} from '../js/live/live-status-core.js';
 
+// Legacy receive-expiry cases below assume an already verified connection.
+const liveStatusModel = (...args) =>
+  timingStatusModel(...args, { mode: 'ready', readyAt: -Infinity });
 const open = { phase: 'open' };
 const frame = (message, at = 100) => ({ message, at });
 test('an unheard E-stop never becomes released from another stream', () => {
@@ -34,8 +40,9 @@ test('drive and launcher permissions are independent, unknown and fail-closed as
     estop: 'unknown',
     drive: 'on',
     shoot: 'off',
+    permissionReason: '',
   });
-  assert.equal(liveStatusModel(open, received, 1101).drive, 'unknown');
+  assert.equal(liveStatusModel(open, received, 100 + DISPLAY_STALE_MS + 1).drive, 'unknown');
   assert.equal(liveStatusModel(open, { drive_state: frame({}) }, 100).drive, 'unknown');
 });
 test('header has three E-stop words and separate accessible explanations for silence', () => {
@@ -57,4 +64,32 @@ test('teacher permission and lesson permission have separate reasons and imperat
     for (const pair of Array.isArray(value) ? [value] : Object.values(value))
       assert(pair[1].endsWith('ください'), pair[1]);
   }
+});
+
+test('display freshness allows jitter beyond the bridge period but expires after 2.5 seconds', () => {
+  const bridge = fs.readFileSync(
+    new URL('../../../../../questix_lab_bridge/questix_lab_bridge/bridge_node.py', import.meta.url),
+    'utf8',
+  );
+  const period = Number(bridge.match(/_DRIVE_STATE_PERIOD_SEC\s*=\s*([\d.]+)/)[1]);
+  assert.equal(DISPLAY_STALE_MS, 2500);
+  assert(DISPLAY_STALE_MS > period * 1000);
+  let at = 100;
+  const received = {
+    drive_state: frame({ allowed: false }, at),
+    shoot_state: frame({ allowed: false }, at),
+    estop: frame({ active: false }, at),
+  };
+  for (const interval of [1050, 1200, 1400, 2050, 2400, 1050]) {
+    assert.equal(liveStatusModel(open, received, at + interval - 1).drive, 'off');
+    assert.equal(liveStatusModel(open, received, at + interval - 1).estop, 'released');
+    at += interval;
+    for (const name of Object.keys(received)) received[name].at = at;
+    assert.equal(liveStatusModel(open, received, at).drive, 'off');
+  }
+  assert.equal(liveStatusModel(open, received, at + 2500).drive, 'off');
+  assert.equal(liveStatusModel(open, received, at + 2501).drive, 'unknown');
+  assert.equal(liveStatusModel(open, received, at + 2501).estop, 'stale');
+  received.drive_state = frame({ allowed: true }, at);
+  assert.equal(liveStatusModel(open, received, at).drive, 'on');
 });
