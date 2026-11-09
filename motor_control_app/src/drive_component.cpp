@@ -220,6 +220,8 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
         current_kp_, current_ki_, max_current_amp_, integral_limit_amp_);
     RCLCPP_INFO(this->get_logger(), "  current_zero_deadband_rpm: %d  current_invert_measured: %s",
                 current_zero_deadband_rpm_, current_invert_measured_ ? "true" : "false");
+    RCLCPP_INFO(this->get_logger(), "  current_measured_source: %s",
+                current_measured_source_.c_str());
     RCLCPP_INFO(this->get_logger(),
                 "  current_ff_static_amp: %.3f  current_ff_viscous_amp_per_rpm: %.5f",
                 current_ff_static_amp_, current_ff_viscous_amp_per_rpm_);
@@ -227,6 +229,10 @@ DriveComponent::CallbackReturn DriveComponent::on_configure(const rclcpp_lifecyc
         this->get_logger(),
         "  current_guard_overspeed_margin_rpm: %.1f  current_guard_overspeed_time_sec: %.2f",
         current_guard_overspeed_margin_rpm_, current_guard_overspeed_time_sec_);
+  } else {
+    RCLCPP_INFO(this->get_logger(),
+                "  current_measured_source: %s (ignored: current mode only, control_mode is %s)",
+                current_measured_source_.c_str(), control_mode_.c_str());
   }
   RCLCPP_INFO(this->get_logger(), "  max_linear_accel: %.3f  max_angular_accel: %.3f",
               max_linear_accel_, max_angular_accel_);

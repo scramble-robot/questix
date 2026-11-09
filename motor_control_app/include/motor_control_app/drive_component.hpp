@@ -361,6 +361,8 @@ private:
   double integral_limit_amp_{0.3};        // [A]
   int current_zero_deadband_rpm_{5};      // [RPM]
   bool current_invert_measured_{false};
+  // PI と暴走ガードの帰還: "position"（角度から求めた速さ）| "reported"（報告回転数、比較用）
+  std::string current_measured_source_{"position"};
   double current_ff_static_amp_{0.0};                // [A] 摩擦補償（静止摩擦分）
   double current_ff_viscous_amp_per_rpm_{0.0};       // [A/rpm] 摩擦補償（粘性摩擦分）
   double current_guard_overspeed_margin_rpm_{50.0};  // [RPM] 暴走ガード: 目標超過の幅

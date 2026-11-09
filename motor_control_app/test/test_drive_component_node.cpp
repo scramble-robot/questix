@@ -88,6 +88,9 @@ struct DriveOdomTestAccess {
   static bool refresh(DriveComponent& n) { return n.diff_drive_->stopNow(); }
   static bool currentHistory(DriveComponent& n) {
     using motor_control_lib::ControlMode;
+    // This negative odometry-log case injects RPM, not position motion. Select the explicit
+    // comparison source to retain its zero-target/nonzero-current history under #225.
+    n.motor_lib_->setCurrentMeasuredSource(motor_control_lib::CurrentMeasuredSource::Reported);
     bool ok = true;
     for (int id : {n.left_motor_id_, n.right_motor_id_}) {
       ok &= n.motor_lib_->initializeMotor(id, ControlMode::Current);
