@@ -1,7 +1,6 @@
 // Run with: node --test scripts/robot_manager/static/lab/test/*.test.mjs
 //
-// The key-mapping course follows the robot's nodes (joy_controller, esc_motor_control,
-// shot_component) and Robot Manager's 調整 tab; these tests pin those rules.
+// The key-mapping course follows the robot's nodes (joy_controller, joy_launcher) and Robot Manager's 調整 tab; these tests pin those rules.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -52,11 +51,15 @@ test('the dead zone zeroes small inputs and stretches the rest back to the full 
 
 test('drive follows joy_controller: axis value × ratio, with the sign of the ratio', () => {
   const input = idle();
-  input.axes[1] = -1; // browser: stick up
-  input.axes[2] = -1; // browser: stick left
+  input.axes[1] = -1; // robot-oriented backward input
+  input.axes[2] = -1; // robot-oriented right input
   const { drive } = commandFromInput(input, MAPPING);
-  assert.equal(drive.linear, 0.5, 'up with a negative ratio drives forwards');
-  assert.equal(drive.angular, 2, 'left with a negative ratio turns left (counter-clockwise)');
+  assert.equal(drive.linear, 0.5, 'negative input with a negative ratio drives forwards');
+  assert.equal(
+    drive.angular,
+    2,
+    'negative input with a negative ratio turns left (counter-clockwise)',
+  );
   const reversed = commandFromInput(input, { ...MAPPING, forwardScale: 0.5, turnScale: 2 });
   assert.equal(reversed.drive.linear, -0.5);
   assert.equal(reversed.drive.angular, -2);
@@ -108,7 +111,8 @@ test('the model accelerates towards the command and fires on the press only', ()
   input.axes[1] = -1;
   for (let i = 0; i < 20; i += 1) robot = stepRobot(robot, commandFromInput(input, MAPPING), 0.02);
   assert.ok(robot.speed > 0 && robot.speed <= 0.5, `speed ${robot.speed}`);
-  assert.ok(robot.x > newRobot().x, 'it moved forwards (+x at heading 0)');
+  assert.ok(robot.y > newRobot().y, 'forward moves towards screen-up (+y)');
+  assert.ok(Math.abs(robot.x - newRobot().x) < 1e-9, 'forward keeps its horizontal position');
   const fire = idle();
   fire.buttons[5] = true;
   robot = stepRobot(robot, commandFromInput(fire, MAPPING), 0.02);
@@ -181,8 +185,10 @@ test('the Robot Manager table names every parameter the 調整 tab edits', () =>
       'angular_input_ratio',
       'full_speed_button',
       'fire_button',
-      'tilt_up_button_index',
-      'tilt_down_button_index',
+      'tilt_up_axis',
+      'tilt_up_axis_sign',
+      'tilt_down_axis',
+      'tilt_down_axis_sign',
       'deadzone',
     ],
   );
