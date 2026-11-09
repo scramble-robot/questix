@@ -180,7 +180,7 @@ def test_the_kept_tilt_is_sent_once_while_the_session_runs(node):
 @pytest.mark.parametrize('end', [
     lambda node: node._on_leave(1),  # the page left
     lambda node: node._on_shoot_request(1, ('roller_stop',)),  # its own stop
-    lambda node: node._on_shoot_request(2, ('roller_stop',)),  # another page's stop bar
+    lambda node: node._on_shoot_request(2, ('roller_stop',)),  # another page's header stop control
     lambda node: node._stop_all(),  # Robot Manager 「すべて止める」 / destroy_node
     lambda node: node._on_shoot_request(1, ('roller', float('nan'))),  # invalid: ends it
     lambda node: node._on_estop(_estop_message(True)),  # E-stop pressed

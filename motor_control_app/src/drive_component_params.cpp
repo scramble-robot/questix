@@ -370,6 +370,8 @@ control_core::Config DriveComponent::makeControlCoreConfig() const {
   config.slew_taper_band_angular = slew_taper_band_angular_;
   config.wheel_radius = wheel_radius_;
   config.wheel_separation = wheel_separation_;
+  // Use the library's effective limit (including its existing 475 rpm cap).
+  config.max_motor_rpm = motor_lib_ ? motor_lib_->getMaxRpm() : 0;
   config.min_command_rpm = min_command_rpm_;
   config.run_enter_rpm = drive_fsm_run_enter_rpm_;
   config.run_exit_rpm = drive_fsm_run_exit_rpm_;

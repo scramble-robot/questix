@@ -95,8 +95,8 @@ TEST(RollerStatus, JsonHasOnlyTheMechanismsState) {
   status.max_power = 1.0;
   const std::string json = esc_motor_control_cpp::rollerStatusJson(status);
   EXPECT_EQ(json,
-            "{\"command\": 0.500, \"source\": \"lab\", \"estop\": false, \"permission\": true, "
-            "\"max_power\": 1.000, \"pwm_fault\": false, \"applied_pulse_us\": -1, "
+            "{\"command\": 0.5, \"source\": \"lab\", \"estop\": false, \"permission\": true, "
+            "\"max_power\": 1, \"pwm_fault\": false, \"applied_pulse_us\": -1, "
             "\"pwm_backend\": \"none\", \"pwm_output_state\": \"UNKNOWN\", \"pwm_error\": 0}");
   EXPECT_STREQ(esc_motor_control_cpp::rollerSourceName("\"evil"), "other");
 }
@@ -113,4 +113,34 @@ TEST(RollerStatus, ReportsPwmFailureWithoutRemovingMechanismFields) {
   EXPECT_NE(json.find("\"applied_pulse_us\": 0"), std::string::npos);
   EXPECT_NE(json.find("\"pwm_output_state\": \"FAULT_LOW\""), std::string::npos);
   EXPECT_NE(json.find("\"permission\": true"), std::string::npos);
+}
+
+TEST(RollerStatus, JsonPreservesPowerForThresholdComparisons) {
+  for (const double power :
+       {static_cast<double>(0.2f), static_cast<double>(0.21f), static_cast<double>(0.7f),
+        static_cast<double>(0.20049f), static_cast<double>(0.20051f), 0.20051}) {
+    esc_motor_control_cpp::RollerStatus status;
+    status.command = power;
+    status.max_power = power;
+    const auto json = esc_motor_control_cpp::rollerStatusJson(status);
+    for (const std::string key : {"command", "max_power"}) {
+      const std::string prefix = "\"" + key + "\": ";
+      const auto start = json.find(prefix);
+      ASSERT_NE(start, std::string::npos);
+      EXPECT_EQ(std::stod(json.substr(start + prefix.size())), power);
+    }
+  }
+}
+
+TEST(RollerStatus, NonFinitePowerStillProducesFiniteJson) {
+  for (const double power :
+       {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity(),
+        -std::numeric_limits<double>::infinity()}) {
+    esc_motor_control_cpp::RollerStatus status;
+    status.command = power;
+    status.max_power = power;
+    const auto json = esc_motor_control_cpp::rollerStatusJson(status);
+    EXPECT_NE(json.find("\"command\": 0,"), std::string::npos);
+    EXPECT_NE(json.find("\"max_power\": 0,"), std::string::npos);
+  }
 }

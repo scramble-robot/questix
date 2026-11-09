@@ -11,8 +11,8 @@ permission ``/lab_permission``, QUESTiX LAB's speed caps, the controller always 
 drive_component itself (``/emergency_stop``, ``/motion_permission``). The bridge shows those
 decisions to the pages and ends a run they refuse, never guesses them:
 
-* One page drives at a time (the owner). Any page may stop it (the stop bar); a page ending its
-  own run asks with ``only_own`` so it never ends another pupil's run.
+* One page drives at a time (the owner). Any page may stop it (the header stop control); a page
+  ending its own run asks with ``only_own`` so it never ends another pupil's run.
 * The owner repeats its command at least every ``deadman_sec``; silence stops the robot, so a
   closed laptop or a lost Wi-Fi link cannot leave it running. So does the owner disconnecting,
   and a run longer than ``max_run_sec``. A non-finite value is refused and ends the owner's run.

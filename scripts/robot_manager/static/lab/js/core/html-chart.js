@@ -1,3 +1,4 @@
+import { CHART_ROLE_COLORS } from './palette.js';
 import { html, svg, nothing } from '../vendor/lit-html.js';
 import { formatTick } from './chart-scale.js';
 
@@ -10,6 +11,14 @@ const PLOT = 1000; // SVG units along each axis of the stretched plot
 const LABEL_GAP = 9; // percent of the plot height kept between two direct labels
 const LABEL_FLIP_AT = 75; // percent: a marker label further right than this goes on its left
 const HLINE_LABEL_SPAN = 40; // percent of the plot width a threshold's label may cover from the left
+
+// Keep stroke colours intact; body labels need the text palette's stronger contrast.
+function textInk(color) {
+  const role = ['actual', 'measured', 'target', 'previous'].find(
+    (name) => CHART_ROLE_COLORS[name] === color,
+  );
+  return role ? `var(--role-${role}-text, ${color})` : color;
+}
 
 const percentX = (scale, value) => ((value - scale.min) / (scale.max - scale.min || 1)) * 100;
 const percentY = (scale, value) => 100 - ((value - scale.min) / (scale.max - scale.min || 1)) * 100;
@@ -70,7 +79,7 @@ function lineLabels(series, x, y, thresholds = []) {
     ({ line, left, top }) =>
       html`<span
         class="html-chart-line-label"
-        style=${`left:${Math.min(left, 100)}%;top:${Math.min(top, 100)}%;color:${line.labelColor || line.color}`}
+        style=${`left:${Math.min(left, 100)}%;top:${Math.min(top, 100)}%;color:${line.labelColor || textInk(line.color)}`}
         >${line.label}</span
       >`,
   );
@@ -133,7 +142,7 @@ function htmlChart(spec) {
         (line) =>
           html`<span
             class="html-chart-hline-label"
-            style=${`top:${percentY(y, line.y)}%;color:${line.color}`}
+            style=${`top:${percentY(y, line.y)}%;color:${textInk(line.color)}`}
             >${line.label}</span
           >`,
       )}
@@ -141,7 +150,7 @@ function htmlChart(spec) {
         (line) =>
           html`<span
             class=${percentX(x, line.x) > LABEL_FLIP_AT ? 'html-chart-vline-label flip' : 'html-chart-vline-label'}
-            style=${`left:${percentX(x, line.x)}%;color:${line.color}`}
+            style=${`left:${percentX(x, line.x)}%;color:${textInk(line.color)}`}
             >${line.label}</span
           >`,
       )}

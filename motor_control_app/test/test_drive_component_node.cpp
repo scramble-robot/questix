@@ -605,6 +605,7 @@ protected:
         if (send_twist_) {
           geometry_msgs::msg::Twist twist;
           twist.linear.x = twist_linear_;
+          twist.angular.z = twist_angular_;
           twist_pub_->publish(twist);
         }
         if (send_permission_) {
@@ -779,6 +780,7 @@ protected:
   }
   bool send_twist_{false};
   double twist_linear_{0.5};
+  double twist_angular_{0.0};
   bool send_estop_{false};
   bool estop_active_{false};
   int estop_tick_{0};
@@ -1783,6 +1785,45 @@ TEST_F(DriveComponentNode, CurrentModeOneWheelGoingSilentFaultStopsBothWheels) {
 
 class DriveRearmModes : public DriveComponentNode,
                         public ::testing::WithParamInterface<std::string> {};
+
+TEST_P(DriveRearmModes, SaturatedCombinedTargetReachesTheLibraryAndControlSample) {
+  start(GetParam());
+  operationManagerWithoutGpio();
+  neutral();
+  twist_linear_ = 2.0;
+  twist_angular_ = 6.0;
+  ASSERT_TRUE(spinUntil(
+      [this] {
+        return last_sample_.left.ref_rpm == 68 && last_sample_.right.ref_rpm == -475 &&
+               have_status_ && last_status_.left.target_rpm == 68 &&
+               last_status_.right.target_rpm == -475 &&
+               std::abs(last_sample_.shaped_angular - 4.263590029871862) < 1e-6;
+      },
+      5s));
+  EXPECT_NEAR(last_sample_.shaped_linear, 1.421196676623954, 0.001);
+  EXPECT_NEAR(last_sample_.shaped_angular, 4.263590029871862, 0.001);
+  EXPECT_EQ(last_sample_.left.command_rpm, 68);
+  EXPECT_EQ(last_sample_.right.command_rpm, -475);
+  EXPECT_FALSE(last_sample_.lqr_active);
+  const auto saturation_logs = std::count_if(logs_.begin(), logs_.end(), [](const auto& line) {
+    return line.find("Drive wheel saturation: target_scale=0.710598338") == 0;
+  });
+  EXPECT_GT(saturation_logs, 0);
+  EXPECT_LE(saturation_logs, 5);  // held for <5 s, diagnostic throttle is 1 s
+  if (GetParam() == "current") {
+    // On the fake wheel (measured 0), the PI's reference has the scaled native signs.
+    EXPECT_GT(last_sample_.left.command_current_raw, 0);
+    EXPECT_LT(last_sample_.right.command_current_raw, 0);
+  }
+  twist_linear_ = 0;
+  twist_angular_ = 0;
+  ASSERT_TRUE(spinUntil(
+      [this] {
+        return std::abs(last_sample_.left.ref_rpm) < 475 &&
+               std::abs(last_sample_.right.ref_rpm) < 475;
+      },
+      200ms));
+}
 
 TEST_P(DriveRearmModes, HeldInputAcrossEveryStopNeedsNeutral) {
   start(GetParam());
