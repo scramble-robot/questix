@@ -1163,6 +1163,7 @@ function groupNav(model, actions) {
         html`<button
           data-control-group=${index}
           aria-pressed=${String(model.topic.group === index)}
+          aria-current=${String(model.topic.group === index)}
           @click=${() => actions.openGroup(index)}
         >
           ${group}
@@ -1181,6 +1182,7 @@ function topicNav(model, copy, actions) {
       return html`<button
         data-control-topic=${topic.id}
         aria-pressed=${String(model.topicId === topic.id)}
+        aria-current=${String(model.topicId === topic.id)}
         @click=${() => actions.openTopic(topic.id)}
       >
         <span class="control-topic-number">${CONTROL_TOPICS.indexOf(topic) + 1}</span

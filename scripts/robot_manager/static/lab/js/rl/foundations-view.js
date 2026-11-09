@@ -93,6 +93,7 @@ function groupsNav(model, copy, actions) {
       html`<button
         data-rl-group=${index}
         aria-pressed=${String(index === model.group)}
+        aria-current=${String(index === model.group)}
         .disabled=${model.busy}
         @click=${() => actions.openGroup(index)}
       >
@@ -107,6 +108,7 @@ function topicsNav(model, actions) {
       html`<button
         data-rl-topic=${topic.id}
         aria-pressed=${String(topic.id === model.topic)}
+        aria-current=${String(topic.id === model.topic)}
         .disabled=${model.busy}
         @click=${() => actions.openTopic(topic.id)}
       >
