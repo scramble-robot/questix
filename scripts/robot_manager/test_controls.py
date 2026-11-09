@@ -19,6 +19,14 @@ import yaml
 from robot_manager import app as backend, controls
 
 
+def test_angular_range_warning_uses_the_tuning_field_name():
+    """Keep the API warning's name aligned without changing the teaching range."""
+    message = controls.speed_range_message('angular_input_ratio', -10.0, 6.0)
+    assert message.startswith('旋回速度 10.0 rad/s（方向の反転あり）')
+    assert '6.0 rad/s 以下' in message
+    assert '旋回の速さ' not in message
+
+
 class HttpClient:
     """Exercise real HTTP validation using only the manager's installed dependencies."""
 

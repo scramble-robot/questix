@@ -69,7 +69,7 @@ GROUPS = {
 SPEED_FIELDS = {
     'longitudinal_input_ratio': ('走行速度', 'm/s'),
     'lateral_input_ratio': ('左右の速さ', 'm/s'),
-    'angular_input_ratio': ('旋回の速さ', 'rad/s'),
+    'angular_input_ratio': ('旋回速度', 'rad/s'),
 }
 
 
