@@ -66,7 +66,7 @@ function derivativeResult(outcome) {
   return html`${row(
       copy.rows.dChange,
       `${num(outcome.measured, 2)} − ${num(outcome.previousDistance, 2)} = ${change} m`,
-    )}${row(copy.rows.dRate, `${change} ÷ 1秒 = ${change} m/秒`)}${row(
+    )}${row(copy.rows.dRate, `${change} ÷ 1秒 = ${change} m/s`)}${row(
       copy.rows.dOutput,
       `${signed(outcome.correction)}%`,
     )}

@@ -1009,7 +1009,7 @@ function resultsBody(model, run, copy, actions) {
     ${
       topicId === 'reference'
         ? html`<p class="control-result-note">
-            ${copy.results.peakAccelerationLabel}<strong>${formatValue(metrics.peakAcceleration) + ' rpm/秒'}</strong>${copy.results.peakAccelerationNote}
+            ${copy.results.peakAccelerationLabel}<strong>${formatValue(metrics.peakAcceleration) + ' rpm/s'}</strong>${copy.results.peakAccelerationNote}
           </p>`
         : nothing
     }

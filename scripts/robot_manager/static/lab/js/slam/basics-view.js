@@ -252,7 +252,7 @@ function imuControls(imu, copy, actions) {
       max: 45,
       step: 15,
       value: imu.rate,
-      text: `${imu.rate} °/秒`,
+      text: `${imu.rate} °/s`,
       onInput: onInput(actions.setTurnRate),
     })}${slider({
       id: 'basicsSeconds',

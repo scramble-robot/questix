@@ -158,14 +158,14 @@ function motionCard(model, text) {
       <p class="rs-label">${text.motion.speed}</p>
       <p class="rs-big" data-rs-speed>
         <span class="rs-number">${motion ? signed(motion.speed, 2) : '—'}</span
-        ><span class="rs-unit">m/秒</span>
+        ><span class="rs-unit">m/s</span>
       </p>
     </div>
     <div>
       <p class="rs-label">${text.motion.turn}</p>
       <p class="rs-big" data-rs-turn>
         <span class="rs-number">${motion ? signed(motion.turn, 2) : '—'}</span
-        ><span class="rs-unit">rad/秒</span>
+        ><span class="rs-unit">rad/s</span>
       </p>
       <p class="rs-sub">
         ${Number.isFinite(degrees) ? fill(text.motion.turnDegrees, { degrees }) : nothing}
@@ -452,7 +452,7 @@ function stripView(strip, text, status = '') {
         </div>
         <div>
           <dt>${words.speed}</dt>
-          <dd data-rs-strip-speed>${speed}<small>m/秒</small></dd>
+          <dd data-rs-strip-speed>${speed}<small>m/s</small></dd>
         </div>
       </dl>
       ${sparkline(strip, text)}

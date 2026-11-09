@@ -86,6 +86,7 @@
  <form id="robotForm" class="robot-form"><label for="robotUrl">ロボットのアドレス</label><div><input id="robotUrl" type="text" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="http://10.42.0.1:8897/" aria-describedby="robotStatus"><button id="robotConnect" class="primary" type="submit">接続する</button><button id="robotDisconnect" type="button" hidden>切断する</button></div></form>
  <div id="robotStatus" class="robot-status" role="status"></div>
  <section id="robotMonitor" class="robot-monitor" tabindex="-1" hidden>
+  <p id="robotMonitorConnection" role="status"></p>
   <div class="robot-panels">
    <figure><figcaption><strong>LiDAR</strong><span>上が前、中央がロボット</span></figcaption><canvas id="robotScan" role="img" aria-label="LiDARが測った周囲の点"></canvas><p id="robotScanNote"></p></figure>
    <figure><figcaption><strong>カメラ</strong><span>視覚の教材で「実機カメラの画像を使う」から取り込めます</span></figcaption><img id="robotCamera" alt="ロボットのカメラ画像" hidden><p id="robotCameraNote"></p></figure>

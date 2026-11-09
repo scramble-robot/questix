@@ -646,7 +646,7 @@ function gearGoals(model, copy) {
   const text = copy.gear;
   const values = model.gear.values;
   const force = formatNumber(values.force, 1) + ' N';
-  const speed = formatNumber(values.speed, 2) + ' m/秒';
+  const speed = formatNumber(values.speed, 2) + ' m/s';
   return html`<div class="motor-metrics">
       <div><span>${text.wheelRpm}</span><strong>${formatNumber(values.rpm, 0)} rpm</strong></div>
       <div>
@@ -953,7 +953,11 @@ function benchCard(model, copy, actions) {
     <h2>
       ${unsafeHTML(runModeBadgeHtml('live'))}${unsafeHTML(runModeBadgeHtml('drive'))} ${text.title}
     </h2>
-    <p>${capture.link.connected ? text.intro : text.introOffline}</p>
+    <p class="live-text-slot">
+      <span class="live-text-reserve" aria-hidden="true">${text.intro}</span>
+      <span class="live-text-reserve" aria-hidden="true">${text.introOffline}</span>
+      <span>${capture.link.connected ? text.intro : text.introOffline}</span>
+    </p>
     <div class="motor-bench-layout">
       <div class="motor-bench-controls">
         ${liveCaptureControls(capture, actions.bench)} ${benchNote(capture, text)}

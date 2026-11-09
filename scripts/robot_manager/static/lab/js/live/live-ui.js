@@ -15,6 +15,7 @@ import { scrollBehavior } from '../core/dom.js';
 import { html, render, nothing } from '../vendor/lit-html.js';
 
 import { liveStatus, onLiveStatus } from './live-status.js';
+import { renderLive, resetLiveLayout } from './live-layout.js';
 
 const copy = await loadJson('content/live/link.json');
 
@@ -52,6 +53,8 @@ let history = [];
 let cameraUrl = '';
 let frameRequested = false;
 let addressProblem = ''; // the sentence normalizeRobotUrl threw for the typed address
+let previousPhase = 'idle';
+let monitorHello = null; // keep the monitor's occupied area after its first connection
 
 function prepare(canvas) {
   const ratio = window.devicePixelRatio || 1;
@@ -225,7 +228,16 @@ function estopText() {
 }
 
 function drawEstop() {
-  $('robotEstop').textContent = estopText();
+  render(
+    html`<span class="live-text-slot">
+      ${['estopPressed', 'estopReleased', 'estopUnknown', 'estopStale'].map(
+        (key) =>
+          html`<span class="live-text-reserve" aria-hidden="true">${copy.monitor[key]}</span>`,
+      )}
+      <span>${estopText()}</span>
+    </span>`,
+    $('robotEstop'),
+  );
 }
 function readings() {
   const odom = latestRobot('odom');
@@ -320,13 +332,23 @@ function rateText(topic, hz) {
   if (!(hz > 0)) return copy.monitor.streamMissing;
   return fillSentence(copy.monitor.streamRate, { hz: hz.toFixed(1) });
 }
-function streamRows(state) {
+function streamRows(state, connected = true) {
   return Object.entries(state.hello.streams).map(
     ([name, topic]) =>
       html`<tr>
         <th>${STREAM_LABEL[name] || name}</th>
         <td>${topic ? html`<code>${topic}</code>` : copy.monitor.streamUnused}</td>
-        <td>${rateText(topic, state.rates[name])}</td>
+        <td>
+          <span class="live-text-slot">
+            <span class="live-text-reserve" aria-hidden="true">${copy.monitor.streamMissing}</span>
+            <span class="live-text-reserve" aria-hidden="true"
+              >${copy.monitor.disconnectedRate}</span
+            >
+            <span
+              >${connected ? rateText(topic, state.rates[name]) : copy.monitor.disconnectedRate}</span
+            >
+          </span>
+        </td>
       </tr>`,
   );
 }
@@ -367,14 +389,26 @@ function resetMonitor() {
 }
 
 function showState(state) {
+  const restarting = state.phase === 'connecting' && previousPhase !== 'connecting';
+  if (restarting) resetLiveLayout(document);
+  previousPhase = state.phase;
   const stage = linkStage(state);
   const open = state.phase === 'open';
   showHeader(state, liveStatus().stage);
   showForm(state, stage);
   $('robotStatus').dataset.stage = stage;
-  render(statusView(state, stage), $('robotStatus'));
-  $('robotMonitor').hidden = !open;
-  render(open ? streamRows(state) : nothing, $('robotStreams'));
+  renderLive(statusView(state, stage), $('robotStatus'), { preserve: !restarting });
+  if (open && state.hello) monitorHello = state.hello;
+  $('robotMonitor').hidden = !monitorHello;
+  $('robotMonitor').dataset.connected = String(open);
+  $('robotMonitorConnection').textContent = open
+    ? copy.monitor.connected
+    : copy.monitor.disconnected;
+  renderLive(
+    monitorHello ? streamRows({ ...state, hello: monitorHello }, open) : nothing,
+    $('robotStreams'),
+    { preserve: !restarting },
+  );
   if (!open) {
     resetMonitor();
   }

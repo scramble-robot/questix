@@ -24,9 +24,9 @@ def test_default_split_is_used_by_api_command_and_form(monkeypatch, tmp_path):
     monkeypatch.setattr(recorder, 'ROSBAG_ENV_FILE', tmp_path / 'absent.env')
     monkeypatch.setattr(recorder, 'LAUNCH_ENV_FILE', tmp_path / 'launch.env')
     config = recorder.get_config()
-    assert config['MAX_SPLIT_MB'] == '200'
+    assert config['MAX_SPLIT_MB'] == recorder._DEFAULT_CONFIG['MAX_SPLIT_MB']
     command = recorder._build_record_command(config, tmp_path / 'robot_run')
-    assert '--max-bag-size 200000000' in command
+    assert f"--max-bag-size {int(recorder._DEFAULT_CONFIG['MAX_SPLIT_MB']) * 1000**2}" in command
     field = SplitInput()
     field.feed((Path(__file__).parent / 'static/index.html').read_text())
     assert field.value == config['MAX_SPLIT_MB']
