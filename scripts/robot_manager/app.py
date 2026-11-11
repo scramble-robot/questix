@@ -472,9 +472,18 @@ def get_readiness():
             # A legacy profile is ignored and the defaults apply: usable, but say so.
             profile = {'ok': True,
                        'message': current['legacy_warning'] or '読み込み・入力値の確認済み'}
-            if current.get('out_of_range'):
-                profile['message'] = ('保存済みの速さに、現在保存できる範囲の外の値があります。'
-                                      '起動には現在の保存値を使います。調整画面で確認してください。')
+            issues = current.get('out_of_range', [])
+            if issues:
+                warnings = []
+                if any(issue['key'] in controls.SPEED_FIELDS for issue in issues):
+                    warnings.append('保存済みの速さに、現在保存できる範囲の外の値があります。')
+                if any(issue['key'] == 'deadzone' for issue in issues):
+                    warnings.append('保存済みのスティックの遊びが、保存できる範囲'
+                                    '（5% 以上、99% 以下）の外です。'
+                                    '手を離しても動き出さないことがあります。')
+                profile['message'] = (''.join(warnings)
+                                      + '起動には現在の保存値を使います。'
+                                      '調整画面で確認してください。')
         except HTTPException as exc:
             profile = {'ok': False, 'message': str(exc.detail)}
     try:
