@@ -160,12 +160,13 @@ bool DifferentialDrive::isHealthy() const {
   bool left_ok = motor_lib_->getMotorStatus(left_motor_id_, velocity, temp, fault_left);
   bool right_ok = motor_lib_->getMotorStatus(right_motor_id_, velocity, temp, fault_right);
 
-  // current モードの暴走ガード・応答の途切れのラッチ（ホスト側の判定）が立っていれば異常として
+  // current の暴走ガード、両モードの応答欠落ラッチ、速度モードの応答待ちを不健全として
   // 扱い、drive_component の制御 tick にフォールト停止させる（"Motor not healthy" → safetyStop）。
   const bool guard_ok =
       motor_lib_->currentGuardTrip(left_motor_id_) == ddt_current_pi::GuardTrip::kNone &&
       motor_lib_->currentGuardTrip(right_motor_id_) == ddt_current_pi::GuardTrip::kNone &&
-      !motor_lib_->currentLinkLatched();
+      !motor_lib_->currentLinkLatched() && !motor_lib_->velocityLinkLatched() &&
+      !motor_lib_->velocityFeedbackWaiting();
 
   return left_ok && right_ok && (fault_left == 0) && (fault_right == 0) && guard_ok;
 }

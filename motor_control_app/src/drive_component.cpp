@@ -321,6 +321,8 @@ DriveComponent::CallbackReturn DriveComponent::on_activate(const rclcpp_lifecycl
   // LifecyclePublisher を有効化（ステータスタイマー作成より先に呼ぶ）
   rclcpp_lifecycle::LifecycleNode::on_activate(state);
 
+  // 新しい操作セッションは速度モータの応答を取り直す。current の状態には触れない。
+  motor_lib_->resetVelocityFeedbackGate();
   // inactive 中の残留指令でスルーレートクランプが誤動作しないようリセット
   resetCommandState();
 
