@@ -589,13 +589,14 @@ TEST_F(DdtCurrentGuard, RebootJustBeforeTheSendLatchesBothWheelsOnTheNextCommand
   EXPECT_EQ(nonzeroCurrentsSince(kLeft, from), 0);
 }
 
-// Velocity mode is unchanged: lost answers neither latch nor stop the velocity frames.
-TEST_F(DdtCurrentGuard, VelocityModeIsNotLatchedByLostAnswers) {
+// Velocity mode has its own link latch; it must not set the current-mode latch.
+TEST_F(DdtCurrentGuard, VelocityModeLostAnswersUseOnlyTheVelocityLatch) {
   ASSERT_TRUE(lib_->initializeMotor(kLeft, ControlMode::Velocity));
   lib_->answer = false;
   for (int i = 0; i < 10; ++i) EXPECT_TRUE(lib_->setMotorVelocity(kLeft, 100));
   EXPECT_FALSE(lib_->currentLinkLatched());
-  EXPECT_TRUE(lib_->isHealthy());
+  EXPECT_TRUE(lib_->velocityLinkLatched());
+  EXPECT_FALSE(lib_->isHealthy());
 }
 
 // G1 (Issue #222): with the reported speed 100 ms (5 ticks) behind the wheel, as on the robot,

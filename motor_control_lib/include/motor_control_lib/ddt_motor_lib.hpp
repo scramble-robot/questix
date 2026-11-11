@@ -78,6 +78,15 @@ public:
   // （mode=1・fault=0）の連続回数（すべての current モードのモータそれぞれに）。
   static constexpr int kCurrentLinkRecoveryResponses = 3;
 
+  // velocity モード: 欠落・回復とも current と同じ回数。別の定数でモードの契約を明示する。
+  // 非ゼロ目標の送受信だけを数える。停止・IDLE の欠落は連続回数に含めない。
+  static constexpr int kVelocityMaxConsecutiveTimeouts = 3;
+  static constexpr int kVelocityLinkRecoveryResponses = 3;
+  // velocity モード: 停止中の約 0.32 s ごとの再送応答が 1〜2 回欠けた後の再発進を通すため
+  // 1.0 s を採用する（経過時間は 1 回欠落で約 0.64 s、2 回欠落で約 0.96 s）。
+  // 非ゼロ目標の前に mode=2・fault=0 の新しい応答が必要。current の 50 ms 門とは独立。
+  static constexpr double kVelocityFeedbackMaxAgeSec = 1.0;
+
   explicit DdtMotorLib(const std::string& serial_port = "/dev/ttyACM0", int baud_rate = 57600);
   virtual ~DdtMotorLib();
 
@@ -185,6 +194,26 @@ public:
    *  velocity モードのモータには関係しない。
    */
   bool currentLinkLatched() const;
+
+  /**
+   * @brief 速度モード全体の応答欠落ラッチ。非ゼロ目標の送受信で 3 回連続の無効応答で作動。
+   * 全速度モータへ目標 0 を送り、非ゼロを拒否し、isHealthy() を false にする。
+   * 停止指令だけの間に全速度モータが mode=2・fault=0 の新しい有効応答を 3 回連続で返すと解除。
+   * 非ゼロ目標は全回復カウントを消す。再初期化では解除せず、shutdown で消える。
+   * 通信断のモータへ停止が届く保証はない。ファーム側の停止は未確認で、最後の頼りは非常停止と電源。
+   */
+  bool velocityLinkLatched() const;
+
+  /**
+   * @brief 速度モードの応答待ち（ラッチとは別）。非ゼロ目標の前の応答が未受信・不正・
+   * kVelocityFeedbackMaxAgeSec より古いと閉じ、不健全とする。停止中の欠落だけでは閉じない。
+   * 閉じた送受信の応答だけでは開かず、次の停止・IDLE で有効応答を得ると開く。
+   * 既存のフォールト停止が門を観測して武装解除する前に、保持入力で再始動させないため。
+   */
+  bool velocityFeedbackWaiting() const;
+  // activate 等の新しい操作セッションで、非ゼロ送信の根拠となる応答を無効にする。
+  // フレームは送らず、current の状態・ラッチ・応答統計には触れない。
+  void resetVelocityFeedbackGate();
 
   /**
    * @brief Current モードの PI と暴走ガードの帰還を選ぶ（current モードだけで効く）。
@@ -450,6 +479,18 @@ private:
   std::map<int, ddt_current_pi::GuardTrip> current_guard_trips_;
   // current モードの応答の途切れのラッチ（ライブラリ全体で 1 つ。currentLinkLatched を参照）
   bool current_link_latched_{false};
+  // velocity モード全体の独立ラッチ。current モードの状態・解除条件には触れない。
+  bool velocity_link_latched_{false};
+  bool suppress_velocity_link_recovery_{false};
+  bool suppress_velocity_gate_recovery_{false};
+  struct VelocityFeedbackState {
+    int drive_timeouts{0};
+    bool waiting{false};
+    bool has_valid_feedback{false};
+    std::chrono::steady_clock::time_point last_valid_feedback{};
+  };
+  std::map<int, VelocityFeedbackState> velocity_feedback_states_;
+  std::map<int, int> velocity_link_recovery_;
   // 非ゼロ目標の送受信中は、その応答をラッチ解除の回復カウントに入れない。
   bool suppress_current_link_recovery_{false};
   // motor_id -> 前周期の目標が非ゼロか（PI 出力が偶然 0 でも走行継続と判断する）。
@@ -506,11 +547,15 @@ private:
   bool stopOtherCurrentMotors(int motor_id);
   // ラッチ中の応答 1 回を数え、解除の条件がそろえば解除する。
   void noteCurrentLinkResponse(int motor_id, bool valid);
+  void waitForVelocityFeedback(int motor_id);
+  void latchVelocityLink(int motor_id, const char* why);
+  bool stopVelocityMotors();
+  void noteVelocityLinkResponse(int motor_id, bool valid);
   // 最新の応答の経過時間 [s]（controlNow() 基準）。
   double currentFeedbackAgeSec(const MotorFeedback& fb) const;
-  // 送受信 1 回の結果で、有効な応答が続けて無かった回数を更新する（current モードでは、
-  // 応答の途切れのラッチの立ち上げと解除の数えもここで行う）。
-  void countResponse(int motor_id, bool valid);
+  // 送受信 1 回の結果で、有効な応答が続けて無かった回数を更新する。
+  // 両モードの応答欠落ラッチの立ち上げと解除の数えもここで行う。
+  void countResponse(int motor_id, bool valid, bool velocity_nonzero_sent);
   void recordSerialRoundtrip(double roundtrip_ms);  // 往復レイテンシ統計の更新
   bool readFeedbackFrame(int expected_motor_id, std::vector<uint8_t>& out_frame, int timeout_ms);
   bool parseFeedback(int expected_motor_id, const std::vector<uint8_t>& frame);

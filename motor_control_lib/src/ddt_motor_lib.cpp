@@ -81,6 +81,11 @@ void DdtMotorLib::shutdown() {
     current_guard_trips_.clear();
     current_link_latched_ = false;
     current_link_recovery_.clear();
+    velocity_link_latched_ = false;
+    suppress_velocity_link_recovery_ = false;
+    velocity_link_recovery_.clear();
+    suppress_velocity_gate_recovery_ = false;
+    velocity_feedback_states_.clear();
     speed_estimators_.clear();
     last_sent_frames_.clear();
     transaction_stats_.clear();
@@ -101,9 +106,10 @@ bool DdtMotorLib::isHealthy() const {
       return false;
     }
   }
-  // current モードの暴走ガード・応答の途切れのラッチが立っていれば異常（ホスト側の判定。故障
-  // コードは偽装しない）
-  return current_guard_trips_.empty() && !current_link_latched_;
+  // current モードの暴走ガード、またはどちらかのモードの応答欠落ラッチで異常
+  // （ホスト側の判定。故障コードは偽装しない）。
+  return current_guard_trips_.empty() && !current_link_latched_ && !velocity_link_latched_ &&
+         !velocityFeedbackWaiting();
 }
 
 void DdtMotorLib::resetCurrentPiStateForStop(int motor_id) {
@@ -131,6 +137,73 @@ void DdtMotorLib::clearCurrentGuardTrips(const char* why) {
 bool DdtMotorLib::currentLinkLatched() const {
   std::lock_guard<std::recursive_mutex> lock(state_mutex_);
   return current_link_latched_;
+}
+
+bool DdtMotorLib::velocityLinkLatched() const {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+  return velocity_link_latched_;
+}
+
+bool DdtMotorLib::velocityFeedbackWaiting() const {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+  for (const auto& [id, state] : velocity_feedback_states_) {
+    if (state.waiting) return true;
+  }
+  return false;
+}
+
+void DdtMotorLib::resetVelocityFeedbackGate() {
+  std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+  for (auto& [id, state] : velocity_feedback_states_) {
+    state.has_valid_feedback = false;
+    state.drive_timeouts = 0;
+  }
+}
+
+void DdtMotorLib::waitForVelocityFeedback(int motor_id) {
+  auto& state = velocity_feedback_states_[motor_id];
+  if (state.waiting) return;
+  state.waiting = true;
+  RCLCPP_WARN(logger_,
+              "モーター %d: モーターの応答待ち（速度モードの新しさの門）。"
+              "全速度モーターの応答がそろうまで目標 0 を送ります（故障ラッチではありません）",
+              motor_id);
+}
+
+void DdtMotorLib::latchVelocityLink(int motor_id, const char* why) {
+  for (auto& [id, count] : velocity_link_recovery_) count = 0;
+  if (velocity_link_latched_) return;  // WARN は状態の変化のときだけ
+  velocity_link_latched_ = true;
+  RCLCPP_WARN(logger_,
+              "モーター %d: %s（連続欠落 %d 回）。速度モードの応答欠落をラッチし、全速度モータへ"
+              "目標 0 を送ります。解除には停止指令だけの間に全速度モータの有効応答が %d 回必要です",
+              motor_id, why, velocity_feedback_states_[motor_id].drive_timeouts,
+              kVelocityLinkRecoveryResponses);
+}
+
+bool DdtMotorLib::stopVelocityMotors() {
+  // 通信断のモータには停止が届かない。ファーム側の停止は未確認で、最後の頼りは非常停止と電源。
+  bool sent = true;
+  for (const auto& [id, mode] : motor_modes_) {
+    if (mode == ControlMode::Velocity) sent = stopMotorNow(id) && sent;
+  }
+  return sent;
+}
+
+void DdtMotorLib::noteVelocityLinkResponse(int motor_id, bool valid) {
+  int& count = velocity_link_recovery_[motor_id];
+  count = valid ? std::min(count + 1, kVelocityLinkRecoveryResponses) : 0;
+  for (const auto& [id, mode] : motor_modes_) {
+    if (mode != ControlMode::Velocity) continue;
+    auto it = velocity_link_recovery_.find(id);
+    if (it == velocity_link_recovery_.end() || it->second < kVelocityLinkRecoveryResponses) return;
+  }
+  velocity_link_latched_ = false;
+  velocity_link_recovery_.clear();
+  RCLCPP_INFO(logger_,
+              "速度モードの応答欠落ラッチを解除しました（停止指令だけで全速度モータの"
+              "有効応答が %d 回連続）",
+              kVelocityLinkRecoveryResponses);
 }
 
 bool DdtMotorLib::isCurrentModeMotor(int motor_id) const {
@@ -539,6 +612,11 @@ bool DdtMotorLib::initializeMotor(int motor_id, ControlMode mode) {
   motor_modes_[motor_id] = mode;
   motor_velocities_[motor_id] = 0;
   motor_feedbacks_[motor_id] = MotorFeedback{};
+  if (mode == ControlMode::Velocity) {
+    velocity_feedback_states_[motor_id] = VelocityFeedbackState{};
+  } else {
+    velocity_feedback_states_.erase(motor_id);
+  }
   speed_estimators_[motor_id].reset();
   pi_states_[motor_id] = PiState{};
   current_previous_nonzero_target_[motor_id] = false;
@@ -927,6 +1005,41 @@ int DdtMotorLib::measuredRpmForReport(const MotorFeedback& fb) const {
 
 bool DdtMotorLib::sendMotorVelocity(int motor_id, int velocity_rpm, bool brake) {
   int velocity_int = std::clamp(velocity_rpm, -max_motor_rpm_, max_motor_rpm_);
+  const bool was_latched = velocity_link_latched_;
+  const bool nonzero_target = velocity_int != 0;
+  if (!velocity_link_latched_ && nonzero_target) {
+    // 両輪の送信順で先の輪だけ動かさないよう、登録された全速度モータを確認する。
+    for (const auto& [id, mode] : motor_modes_) {
+      if (mode != ControlMode::Velocity) continue;
+      auto& state = velocity_feedback_states_[id];
+      const double age =
+          std::chrono::duration<double>(controlNow() - state.last_valid_feedback).count();
+      if (!state.has_valid_feedback || age > kVelocityFeedbackMaxAgeSec || age < 0.0) {
+        waitForVelocityFeedback(id);
+      }
+    }
+    // 片輪がゼロ目標なら、その応答が同じ setWheelRpm 内で他方の門を開け得る。
+    // 非ゼロを遮断した自身にも待ちを残し、次 tick の既存の停止・武装解除に必ず観測させる。
+    if (velocityFeedbackWaiting()) waitForVelocityFeedback(motor_id);
+  }
+  if (velocity_link_latched_) {
+    if (nonzero_target) {
+      for (auto& [id, count] : velocity_link_recovery_) count = 0;
+    }
+  }
+  if (velocity_link_latched_ || velocityFeedbackWaiting()) {
+    velocity_int = 0;
+    brake = brake_on_stop_;
+  }
+  // 拒否した非ゼロ目標へのゼロ応答は回復に数えない。ラッチを立てた送信の後の停止にも適用する。
+  const bool previous_suppression = suppress_velocity_link_recovery_;
+  suppress_velocity_link_recovery_ =
+      previous_suppression || (velocity_link_latched_ && nonzero_target);
+
+  // 門を閉じた非ゼロ要求への応答では門を開けない。次 tick が不健全を観測して武装解除し、
+  // その停止指令か IDLE 再取得で有効応答が届けば開ける（保持入力での急発進を防ぐ）。
+  const bool previous_gate_suppression = suppress_velocity_gate_recovery_;
+  suppress_velocity_gate_recovery_ = previous_gate_suppression || nonzero_target;
 
   // フレーム組み立ては ddt_protocol::packVelocityFrame に集約。
   std::vector<uint8_t> data_fields = ddt_protocol::packVelocityFrame(
@@ -945,6 +1058,13 @@ bool DdtMotorLib::sendMotorVelocity(int motor_id, int velocity_rpm, bool brake) 
     RCLCPP_ERROR(logger_, "モーター %d の速度設定に失敗しました (目標: %d RPM)", motor_id,
                  velocity_int);
   }
+  // countResponse は送受信中に状態だけを変える。キャッシュ更新後に停止を送り、最後の成功
+  // フレームを非ゼロで上書きしない。初回ラッチの停止は再送スロットルを通さない。
+  if (!was_latched && velocity_link_latched_) {
+    success = stopVelocityMotors() && success;
+  }
+  suppress_velocity_link_recovery_ = previous_suppression;
+  suppress_velocity_gate_recovery_ = previous_gate_suppression;
   return success;
 }
 
@@ -1011,7 +1131,7 @@ bool DdtMotorLib::sendFrameWithFeedback(int motor_id, const std::vector<uint8_t>
         ++tx.response_timeouts;
         ++serial_latency_stats_.timeouts;
       }
-      countResponse(motor_id, parsed);
+      countResponse(motor_id, parsed, !ddt_protocol::isZeroCommandFrame(frame));
     } else {
       RCLCPP_DEBUG(logger_, "モーター %d フィードバック未受信 (%dms timeout)", motor_id,
                    response_timeout_ms_);
@@ -1019,7 +1139,7 @@ bool DdtMotorLib::sendFrameWithFeedback(int motor_id, const std::vector<uint8_t>
       ++tx.response_timeouts;
       tx.last_response_timeout = true;
       tx.last_roundtrip_ms = std::nan("");
-      countResponse(motor_id, false);
+      countResponse(motor_id, false, !ddt_protocol::isZeroCommandFrame(frame));
     }
     // 実機の最小コマンド間隔要件が判明した場合の保険（既定 0 = 待機なし）。
     if (command_wait_ms_ > 0) {
@@ -1030,16 +1150,45 @@ bool DdtMotorLib::sendFrameWithFeedback(int motor_id, const std::vector<uint8_t>
   return false;
 }
 
-void DdtMotorLib::countResponse(int motor_id, bool valid) {
+void DdtMotorLib::countResponse(int motor_id, bool valid, bool velocity_nonzero_sent) {
   auto it = motor_feedbacks_.find(motor_id);
   if (it == motor_feedbacks_.end()) {
     return;  // 未登録のモータ（モード設定前など）は数えない
   }
   MotorFeedback& fb = it->second;
-  fb.consecutive_timeouts = valid ? 0 : fb.consecutive_timeouts + 1;
   if (!isCurrentModeMotor(motor_id)) {
-    return;  // velocity モードは従来どおり
+    const auto mode = motor_modes_.find(motor_id);
+    if (mode == motor_modes_.end() || mode->second != ControlMode::Velocity) return;
+    auto& state = velocity_feedback_states_[motor_id];
+    const bool healthy_response = valid && fb.mode == 0x02 && fb.fault_code == 0;
+    if (valid) {
+      state.has_valid_feedback = healthy_response;
+      if (healthy_response) state.last_valid_feedback = controlNow();
+    }
+    if (state.waiting && healthy_response && !suppress_velocity_gate_recovery_) {
+      state.waiting = false;
+      RCLCPP_INFO(logger_,
+                  "モーター %d: モーターの応答待ちを終了しました（速度モードの門が開きました）",
+                  motor_id);
+    }
+    // 停止・IDLE の欠落は加算も消去もしない。有効応答で履歴を消し、非ゼロ送信の欠落だけを加算。
+    if (valid) {
+      state.drive_timeouts = 0;
+    } else if (velocity_nonzero_sent) {
+      ++state.drive_timeouts;
+    }
+    if (velocity_link_latched_) {
+      if (!suppress_velocity_link_recovery_) {
+        noteVelocityLinkResponse(motor_id, healthy_response);
+      }
+    } else if (state.drive_timeouts >= kVelocityMaxConsecutiveTimeouts) {
+      // 50 Hz の走行中は 3 回で約 60 ms。停止中の約 0.32 s ごとの再送は数えない。
+      latchVelocityLink(motor_id, "走行中の有効な応答が続けて無い");
+    }
+    return;
   }
+  // current の既存カウントは全送受信が対象。velocity の走行カウントとは独立。
+  fb.consecutive_timeouts = valid ? 0 : fb.consecutive_timeouts + 1;
   if (current_link_latched_) {
     // 解除に数えるのは、新しい有効な応答（parse に成功 = feedback_count が進んだ）で、電流ループ
     // を報告し、fault が無いものだけ。
