@@ -46,10 +46,10 @@ GROUPS = {
         ('full_speed_button', 'ローラーの回転ボタン番号', 'int', 0, 63),
         ('full_speed_value', 'ローラーの回転出力（0〜1）', 'float', 0, 1),
     ]),
-    'joy_node': ('ゲームパッドの入力', [('deadzone', 'スティック不感帯', 'float', 0, 0.99)]),
-    'uart_joy_driver': ('UART 入力', [('deadzone', 'スティック不感帯', 'float', 0, 0.99)]),
+    'joy_node': ('ゲームパッドの入力', [('deadzone', 'スティック不感帯', 'float', 0.05, 0.99)]),
+    'uart_joy_driver': ('UART 入力', [('deadzone', 'スティック不感帯', 'float', 0.05, 0.99)]),
     'web_joy_driver': ('Web（ブラウザ・スマホ）入力', [
-        ('deadzone', 'スティック不感帯', 'float', 0, 0.99)]),
+        ('deadzone', 'スティック不感帯', 'float', 0.05, 0.99)]),
     'joy_controller_dual_stick': ('左右独立スティック（単体起動時のみ）', [
         ('left_stick_vertical_axis', '左車輪の軸番号', 'int', 0, 63),
         ('right_stick_vertical_axis', '右車輪の軸番号', 'int', 0, 63),
@@ -91,6 +91,23 @@ def speed_out_of_range(values):
              'min': low, 'max': high}
             for key, _, _, low, high in GROUPS['joy_controller'][1]
             if key in SPEED_FIELDS and not low <= values['joy_controller'][key] <= high]
+
+
+def deadzone_range_message(value):
+    """Describe the percent range without changing the saved input value."""
+    return (f'スティックの遊び {value * 100:g}% は、保存できる範囲の外です。'
+            '5% 以上、99% 以下にしてください。')
+
+
+def deadzone_out_of_range(values):
+    """List finite saved deadzones outside the editor range, including undo values."""
+    if values is None:
+        return []
+    return [{'node': node, 'key': 'deadzone', 'value': values[node]['deadzone'],
+             'min': low, 'max': high}
+            for node in _DRIVER_NODES if node in values
+            for _, _, _, low, high in GROUPS[node][1]
+            if not low <= values[node]['deadzone'] <= high]
 
 
 # Controller profiles: questix_control_config/config/controls.<controller>.yaml.
@@ -155,8 +172,8 @@ def schema(controller):
     ]
 
 
-def validate(values, controller, *, allow_saved_speeds=False):
-    """Validate strictly on writes; allow finite old speeds only on profile/history reads."""
+def validate(values, controller, *, allow_saved_speeds=False, allow_saved_deadzones=False):
+    """Validate strictly on writes; allow finite saved speeds/deadzones on reads only."""
     groups = profile_groups(controller)
     if not isinstance(values, dict) or set(values) != set(groups):
         raise ValueError('設定のノード一覧が一致しません。再読み込みしてください。')
@@ -178,10 +195,14 @@ def validate(values, controller, *, allow_saved_speeds=False):
                 except OverflowError:
                     finite = False
                 speed = node == 'joy_controller' and key in SPEED_FIELDS
+                deadzone = node in _DRIVER_NODES and key == 'deadzone'
                 in_range = finite and low <= value <= high
                 if finite and speed and not in_range and not allow_saved_speeds:
                     raise ValueError(speed_range_message(key, value, high))
-                valid = finite and (in_range or allow_saved_speeds and speed)
+                if finite and deadzone and not in_range and not allow_saved_deadzones:
+                    raise ValueError(deadzone_range_message(value))
+                valid = finite and (in_range or allow_saved_speeds and speed
+                                    or allow_saved_deadzones and deadzone)
             if not valid:
                 raise ValueError(f'{label}: {kind} 型、範囲 {low}〜{high} で入力してください。')
             clean[node][key] = float(value) if kind == 'float' else value
@@ -269,7 +290,7 @@ def _migrate_launcher_layout(values):
     return result
 
 
-def _decode(raw, controller, *, allow_saved_speeds=False):
+def _decode(raw, controller, *, allow_saved_speeds=False, allow_saved_deadzones=False):
     document = yaml.safe_load(raw)
     if not isinstance(document, dict):
         raise ValueError('設定ファイルが ROS パラメータの YAML 形式ではありません。')
@@ -290,7 +311,8 @@ def _decode(raw, controller, *, allow_saved_speeds=False):
         for direction, sign in (('up', 1), ('down', -1)):
             shot[f'tilt_{direction}_axis'] = axis
             shot[f'tilt_{direction}_axis_sign'] = sign
-    return validate(values, controller, allow_saved_speeds=allow_saved_speeds)
+    return validate(values, controller, allow_saved_speeds=allow_saved_speeds,
+                    allow_saved_deadzones=allow_saved_deadzones)
 
 
 def _units_generation(raw):
@@ -306,9 +328,11 @@ def read_profile(config_dir, controller, env):
     try:
         default_raw = default_file.read_bytes()
         saved_raw = saved_file.read_bytes() if saved_file.exists() and not fixed else None
-        defaults = _decode(default_raw, controller, allow_saved_speeds=True)
+        defaults = _decode(default_raw, controller, allow_saved_speeds=True,
+                           allow_saved_deadzones=True)
         # A broken saved file stays an error even when it is also legacy.
-        values = (_decode(saved_raw, controller, allow_saved_speeds=True)
+        values = (_decode(saved_raw, controller, allow_saved_speeds=True,
+                          allow_saved_deadzones=True)
                   if saved_raw is not None else defaults)
         legacy = saved_raw is not None and _units_generation(saved_raw) != UNITS_GENERATION
         if legacy:
@@ -327,14 +351,14 @@ def read_profile(config_dir, controller, env):
                 (config_dir / f'controls.{controller}.history.json').read_text())
             if revision in history:
                 previous = validate(_migrate_launcher_layout(history[revision]), controller,
-                                    allow_saved_speeds=True)
+                                    allow_saved_speeds=True, allow_saved_deadzones=True)
     except FileNotFoundError:
         pass
     except (OSError, ValueError, TypeError):
         history_warning = '前の設定を読み込めません。現在の設定は使用できます。'
     return {'controller': controller, 'revision': revision, 'values': values,
-            'out_of_range': speed_out_of_range(values),
-            'previous_out_of_range': speed_out_of_range(previous),
+            'out_of_range': speed_out_of_range(values) + deadzone_out_of_range(values),
+            'previous_out_of_range': speed_out_of_range(previous) + deadzone_out_of_range(previous),
             'previous_values': previous, 'history_warning': history_warning,
             'legacy_warning': LEGACY_WARNING if legacy else None,
             'defaults': defaults, 'groups': schema(controller), 'apply_on_restart': True,
