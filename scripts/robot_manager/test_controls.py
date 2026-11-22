@@ -659,3 +659,87 @@ def test_readiness_warns_about_legacy_speed_without_preventing_start(client, tmp
     assert response['ok'] is True
     assert '範囲の外' in response['message']
     assert '入力値の確認済み' not in response['message']
+
+
+@pytest.mark.parametrize('controller,node', [('dualshock', 'joy_node'),
+                                           ('uart', 'uart_joy_driver'),
+                                           ('uart', 'joy_node')])
+def test_saved_deadzone_read_repair_and_undo(client, tmp_path, controller, node):
+    """Keep old zero values on read and undo; require explicit repair before saving."""
+    url = f'/api/control-config/{controller}'
+    original = client.get(url).json()
+    values = deepcopy(original['values'])
+    values[node]['deadzone'] = 0.0
+    path = tmp_path / f'controls.{controller}.yaml'
+    raw = controls.UNITS_MARKER + '\n' + yaml.safe_dump({
+        key: {'ros__parameters': params} for key, params in values.items()})
+    path.write_text(raw)
+    loaded = client.get(url).json()
+    assert loaded['values'] == values
+    assert path.read_text() == raw
+    assert loaded['out_of_range'] == [dict(node=node, key='deadzone', value=0.0,
+                                          min=0.05, max=0.99)]
+    for bad in (0.0, 0.049):
+        candidate = deepcopy(values)
+        candidate[node]['deadzone'] = bad
+        response = client.put(url, json={'revision': loaded['revision'], 'values': candidate})
+        assert response.status_code == 422
+        assert '5%' in response.json()['detail']
+        assert path.read_text() == raw
+    repaired = deepcopy(values)
+    repaired[node]['deadzone'] = 0.05
+    response = client.put(url, json={'revision': loaded['revision'], 'values': repaired})
+    assert response.status_code == 200
+    fixed = response.json()
+    assert fixed['values'] == repaired
+    assert fixed['out_of_range'] == []
+    assert fixed['previous_values'] == values
+    assert fixed['previous_out_of_range'] == loaded['out_of_range']
+    assert client.get(url).json()['previous_values'] == values
+    assert client.put(url, json={'revision': fixed['revision'], 'values': values}).status_code == 422
+
+
+@pytest.mark.parametrize('controller,node', [('dualshock', 'joy_node'),
+                                           ('uart', 'uart_joy_driver'),
+                                           ('web', 'web_joy_driver')])
+def test_deadzone_strict_bounds_and_defaults(controller, node):
+    """Validate every input driver's bounds, including the uneditable web defaults."""
+    root = Path(__file__).resolve().parents[2]
+    values = controls._decode(
+        (root / f'questix_control_config/config/controls.{controller}.yaml').read_bytes(), controller)
+    assert controls.deadzone_out_of_range(values) == []
+    assert values[node]['deadzone'] == (0.1 if controller == 'dualshock' else 0.05)
+    for value in (0.05, 0.99):
+        values[node]['deadzone'] = value
+        assert controls.validate(values, controller)[node]['deadzone'] == value
+    for value in (0.049, 0.0, 1.0, True, '0.05', float('inf'), float('nan'), 10**400):
+        values[node]['deadzone'] = value
+        with pytest.raises(ValueError):
+            controls.validate(values, controller)
+    for value in (True, '0.05', float('inf'), float('nan'), 10**400):
+        values[node]['deadzone'] = value
+        with pytest.raises(ValueError):
+            controls.validate(values, controller, allow_saved_deadzones=True)
+
+
+@pytest.mark.parametrize('speed,deadzone', [(False, True), (True, False), (True, True)])
+def test_readiness_distinguishes_saved_ranges_without_blocking_start(
+        client, tmp_path, monkeypatch, speed, deadzone):
+    """Describe only the affected settings while retaining the current launch values."""
+    values = profile(client)['values']
+    if speed:
+        values['joy_controller']['longitudinal_input_ratio'] = 10.0
+    if deadzone:
+        values['uart_joy_driver']['deadzone'] = 0.049
+    raw = controls.UNITS_MARKER + '\n' + yaml.safe_dump({
+        node: {'ros__parameters': params} for node, params in values.items()})
+    path = tmp_path / 'controls.uart.yaml'
+    path.write_text(raw)
+    monkeypatch.setattr(backend, '_read_env', lambda: {'CONTROLLER_TYPE': 'uart'})
+    monkeypatch.setattr(backend.control_runtime, '_ros_paths', lambda config: ('ros', 'workspace'))
+    response = client.get('/api/readiness').json()['profile']
+    assert response['ok'] is True
+    assert ('速さ' in response['message']) is speed
+    assert ('スティックの遊び' in response['message']) is deadzone
+    assert '起動には現在の保存値を使います' in response['message']
+    assert path.read_text() == raw

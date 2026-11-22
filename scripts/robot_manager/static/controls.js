@@ -18,18 +18,26 @@ let rangeRepairLateral = false;
 
 function tuningRangeIssues(values) {
   const speeds = ["longitudinal_input_ratio", "lateral_input_ratio", "angular_input_ratio"];
-  return controlProfile.groups.filter((group) => group.node === "joy_controller")
-    .flatMap((group) => group.fields.filter((field) => speeds.includes(field.key)
+  return controlProfile.groups
+    .flatMap((group) => group.fields.filter((field) => ((group.node === "joy_controller" && speeds.includes(field.key))
+      || (Object.values(controllerDrivers).includes(group.node) && field.key === "deadzone"))
       && (!TuningModel.finite(values[group.node][field.key])
         || values[group.node][field.key] < field.min || values[group.node][field.key] > field.max))
       .map((field) => ({ node: group.node, key: field.key,
         value: values[group.node][field.key], min: field.min, max: field.max })));
 }
 
+function tuningRangeMessage(issue, retained = false) {
+  if (!TuningModel.finite(issue.value)) return "読み込んだ値を確認してください。";
+  return issue.key === "deadzone"
+    ? `スティックの遊び ${TuningModel.number(issue.value * 100)}% は、保存できる範囲の外です。5% 以上、99% 以下にしてください。`
+    : TuningModel.speedWarning(issue.key, issue.value, issue.max, retained);
+}
+
 function createRangeWarning() {
   const host = document.getElementById("controls-range-warning");
   const issues = [...tuningRangeIssues(controlProfile.values), ...tuningRangeIssues(controlDraft)];
-  const unique = [...new Map(issues.map((issue) => [issue.key, issue])).values()];
+  const unique = [...new Map(issues.map((issue) => [`${issue.node}.${issue.key}`, issue])).values()];
   rangeWarningActive = unique.length > 0;
   rangeRepairLateral = unique.some((issue) => issue.key === "lateral_input_ratio");
   host.hidden = !rangeWarningActive;
@@ -37,10 +45,28 @@ function createRangeWarning() {
   host.replaceChildren();
   for (const issue of unique) {
     const warning = document.createElement("p");
-    warning.textContent = TuningModel.finite(issue.value)
-      ? TuningModel.speedWarning(issue.key, issue.value, issue.max, true)
-      : "読み込んだ速さを確認してください。";
+    warning.textContent = tuningRangeMessage(issue, true);
     host.appendChild(warning);
+  }
+  for (const issue of unique.filter((item) => item.key === "deadzone"
+      && item.node !== controllerDrivers[controlProfile.controller])) {
+    const label = document.createElement("label");
+    const group = controlProfile.groups.find((item) => item.node === issue.node);
+    label.textContent = `${group.label}：スティックの遊び（保存値の修正、%）`;
+    const input = document.createElement("input");
+    input.type = "number";
+    input.min = issue.min * 100;
+    input.max = issue.max * 100;
+    input.step = "any";
+    input.required = true;
+    input.value = TuningModel.number(controlDraft[issue.node].deadzone * 100);
+    input.addEventListener("input", () => {
+      if (controlsBusy) return;
+      controlDraft[issue.node].deadzone = input.value === "" ? null : Number(input.value) / 100;
+      refreshControlChanges(input);
+    });
+    label.appendChild(input);
+    host.appendChild(label);
   }
   const status = document.createElement("p");
   status.id = "controls-range-state";
@@ -78,7 +104,7 @@ function refreshRangeWarning() {
   const issues = tuningRangeIssues(controlDraft);
   document.getElementById("controls-range-state").textContent = issues.length
     ? "範囲の外の値が残っています。編集していない項目も含め、範囲内にしてから保存してください。"
-    : "速さは範囲内に修正されました。まだ保存されていません。「操作設定を保存」で確定します。";
+    : "値は範囲内に修正されました。まだ保存されていません。「操作設定を保存」で確定します。";
   if (rangeRepairLateral) {
     const input = document.getElementById("control-lateral-repair");
     input.disabled = controlsBusy;
@@ -106,9 +132,9 @@ const tuningFields = {
       help: "回転ボタンを押したときの出力。0% で停止、100% で最大出力です。" },
   },
   joy_node: { deadzone: { title: "スティックの遊び", unit: "%", scale: 100,
-    help: "中心付近の小さな傾きを無視する幅。触っていないのに動くときは大きくします。" } },
+    help: "中心付近の小さな傾きを無視する幅。触っていないのに動く、手を離しても止まらない・動き出さないときは大きくします。下限は5%。ゲームパッドは配布の10%を勧めます。" } },
   uart_joy_driver: { deadzone: { title: "スティックの遊び", unit: "%", scale: 100,
-    help: "中心付近の小さな傾きを無視する幅。触っていないのに動くときは大きくします。" } },
+    help: "中心付近の小さな傾きを無視する幅。触っていないのに動く、手を離しても止まらない・動き出さないときは大きくします。下限は5%。ゲームパッドは配布の10%を勧めます。" } },
 };
 
 // Stick dead zone of the input driver each controller type actually starts.
@@ -986,7 +1012,7 @@ function controlsSetBusy(busy) {
   document.getElementById("controls-reload").disabled = busy;
   document.getElementById("controls-save").disabled = busy || !controlProfile || !controlsDirty;
   document.getElementById("controls-reset").disabled = busy || !controlProfile;
-  for (const input of document.querySelectorAll("#controls-fields input, #controls-fields select, #controls-fields button")) {
+  for (const input of document.querySelectorAll("#controls-fields input, #controls-fields select, #controls-fields button, #controls-range-warning input")) {
     input.disabled = busy;
   }
   if (controlProfile) refreshTuningFields();
@@ -1044,9 +1070,7 @@ async function saveControls(event) {
   if (controlsBusy || !controlProfile) return;
   const rangeIssue = tuningRangeIssues(controlDraft)[0];
   if (rangeIssue) {
-    controlMessage(TuningModel.finite(rangeIssue.value)
-      ? TuningModel.speedWarning(rangeIssue.key, rangeIssue.value, rangeIssue.max)
-      : "速さを入力してください。");
+    controlMessage(tuningRangeMessage(rangeIssue));
     return;
   }
   // Check constraints without the browser scrolling to a field below the diagram.
