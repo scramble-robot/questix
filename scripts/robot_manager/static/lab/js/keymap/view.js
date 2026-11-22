@@ -1,3 +1,5 @@
+import { questixTopSvg } from '../core/questix-art.js';
+import { fixed, signed, degreesText, angularParts, rowValue, rowNote } from './format.js';
 import { html, nothing, svg, unsafeHTML } from '../vendor/lit-html.js';
 import { fillSentence as fill } from '../core/content.js';
 import { lessonLabel } from '../shell/lesson-ui.js';
@@ -5,17 +7,20 @@ import { schoolTips } from '../shell/school-tips.js';
 import { lessonBrief } from '../shell/lesson-brief.js';
 import {
   KEYMAP_FUNCTIONS,
+  discPosition,
   KEYMAP_SCALES,
   KEYMAP_DEADZONE,
   KEYMAP_TOPICS,
   SIM,
   robotManagerRows,
+  robotManagerWarnings,
 } from './core.js';
 
 // Templates of the controller key-mapping course. Every function is pure: it turns the model
 // built by ui.js into markup. Learner-facing sentences come from content/keymap.json (`copy`).
 
 const PX_PER_M = 150; // scale of the top-down field
+const ROBOT_SIZE = SIM.robotSize * PX_PER_M; // 0.5 m × 150 px/m = 75 px
 const FIELD_W = SIM.field.width * PX_PER_M;
 const FIELD_H = SIM.field.height * PX_PER_M;
 const STICK_RADIUS = 26; // px of the virtual controller's stick circles
@@ -42,13 +47,6 @@ const PAD_STICKS = [
   { id: 'left', x: 130, y: 172, axes: [0, 1], label: '左スティック' },
   { id: 'right', x: 230, y: 172, axes: [2, 3], label: '右スティック' },
 ];
-
-const fixed = (value, digits = 2) => {
-  const number = Number(value);
-  const rounded = Math.abs(number) < 0.5 * 10 ** -digits ? 0 : number;
-  return rounded.toFixed(digits);
-};
-const signed = (value, digits = 2) => (Number(value) > 0 ? '+' : '') + fixed(value, digits);
 
 function topicNav(model, actions) {
   return html`<nav class="keymap-topics" aria-label="コントローラーの割り当ての学習順序">
@@ -94,14 +92,14 @@ function padButton([index, x, y, label], model, actions) {
 
 function padStick(stick, model, actions) {
   const [ax, ay] = stick.axes;
-  const dx = (model.input.axes[ax] || 0) * STICK_RADIUS;
-  const dy = (model.input.axes[ay] || 0) * STICK_RADIUS;
+  const dx = (model.rawInput.axes[ax] || 0) * STICK_RADIUS;
+  const dy = (model.rawInput.axes[ay] || 0) * STICK_RADIUS;
   return svg`<g
     class="keymap-pad-stick"
     role="slider"
     tabindex="0"
     aria-label=${`${stick.label}（軸${ax}・軸${ay}）。矢印キーで倒す`}
-    aria-valuetext=${`軸${ax} ${fixed(model.input.axes[ax] || 0)}、軸${ay} ${fixed(model.input.axes[ay] || 0)}`}
+    aria-valuetext=${`ロボットと同じ向き：軸${ax} ${fixed(model.input.axes[ax] || 0)}、軸${ay} ${fixed(model.input.axes[ay] || 0)}`}
     @pointerdown=${(event) => actions.grabStick(event, stick)}
     @pointermove=${(event) => actions.moveStick(event, stick)}
     @pointerup=${(event) => actions.dropStick(event, stick)}
@@ -189,6 +187,7 @@ function readoutPanel(model, copy) {
       )}
     </ol>
     <h3>${text.axes}</h3>
+    <p class="helper">${text.orientation}</p>
     <ul class="keymap-axes">
       ${model.input.axes.map(
         (value, index) =>
@@ -199,7 +198,12 @@ function readoutPanel(model, copy) {
                 style=${`left:${50 + Math.min(0, value) * 50}%;width:${Math.abs(value) * 50}%`}
               ></i>
             </span>
-            <strong>${signed(value)}</strong>
+            <span class="keymap-axis-values"
+              ><strong>${signed(value)}</strong>
+              <small
+                >${fill(text.rawAxis, { value: signed(model.rawInput.axes[index]) })}</small
+              ></span
+            >
           </li>`,
       )}
     </ul>
@@ -252,10 +256,19 @@ function mappingPanel(model, copy, actions) {
         ([id, scale]) =>
           html`<label class="keymap-field" data-flagged=${flagged.has(id) ? 'true' : 'false'}>
             <span
-              >${copy.scales[id].label}<small>${scale.unit}・${copy.scales[id].hint}</small></span
+              >${copy.scales[id].label}<small>${scale.unit}・${copy.scales[id].hint}</small
+              ><small
+                >${fill(copy.scales[id].range, {
+                  min: scale.min.toFixed(1),
+                  max: scale.max.toFixed(1),
+                  minDegrees: degreesText(scale.min),
+                  maxDegrees: degreesText(scale.max),
+                })}</small
+              ></span
             >
             <input
               type="number"
+              data-keymap-scale=${id}
               step="0.1"
               min=${scale.min}
               max=${scale.max}
@@ -322,21 +335,25 @@ function simField(model) {
     <g class="keymap-grid">${grid}</g>
     ${trail ? svg`<polyline class="keymap-trail" points=${trail}></polyline>` : nothing}
     ${robot.discs.map((disc) => {
-      const [dx, dy] = toScreen(
-        disc.x + Math.cos(disc.heading) * (0.18 + disc.flown),
-        disc.y + Math.sin(disc.heading) * (0.18 + disc.flown),
-      );
+      const position = discPosition(disc);
+      const [dx, dy] = toScreen(position.x, position.y);
       return svg`<circle class="keymap-disc" data-weak=${disc.weak ? 'true' : 'false'} cx=${dx} cy=${dy} r="7"></circle>`;
     })}
-    <g transform=${`translate(${rx} ${ry}) rotate(${degrees})`}>
-      <rect class="keymap-robot-body" x="-27" y="-24" width="54" height="48" rx="8"></rect>
-      <path class="keymap-robot-nose" d="M8 -14 L28 0 L8 14 Z"></path>
+    <g class="keymap-model" transform=${`translate(${rx} ${ry}) rotate(${degrees})`}>
+      <rect
+        class="keymap-footprint"
+        x=${-ROBOT_SIZE / 2}
+        y=${-ROBOT_SIZE / 2}
+        width=${ROBOT_SIZE}
+        height=${ROBOT_SIZE}
+      ></rect>
+      ${questixTopSvg(0, 0, 0, ROBOT_SIZE)}
       <circle
         class="keymap-roller"
         data-on=${robot.roller ? 'true' : 'false'}
-        cx="-10"
+        cx="0"
         cy="0"
-        r="8"
+        r="5"
       ></circle>
     </g>
   </svg>`;
@@ -351,7 +368,7 @@ function simPanel(model, copy, actions) {
       <button class="small" @click=${actions.resetRobot}>${text.reset}</button>
     </div>
     ${simField(model)}
-    <p class="helper">${fill(text.caption, { spinUp: SIM.spinUp })}</p>
+    <p class="helper">${fill(text.caption, { spinUp: SIM.spinUp, size: SIM.robotSize })}</p>
     <dl class="keymap-command">
       <div>
         <dt>${text.command}</dt>
@@ -359,7 +376,7 @@ function simPanel(model, copy, actions) {
           ${
             command.drive
               ? html`${fill(text.linear, { value: signed(command.drive.linear) })} ·
-                ${fill(text.angular, { value: signed(command.drive.angular) })}`
+                ${fill(text.angular, angularParts(command.drive.angular, true))}`
               : text.noDrive
           }
         </dd>
@@ -376,7 +393,9 @@ function simPanel(model, copy, actions) {
         <dd>${fill(text.shots, { shots: model.robot.shots, weak: model.robot.weakShots })}</dd>
       </div>
     </dl>
-    <p class="helper">${fill(text.limit, { speed: SIM.maxSpeed, turn: SIM.maxTurn })}</p>
+    <p class="helper">
+      ${fill(text.limit, { speed: SIM.maxSpeed.toFixed(1), turn: SIM.maxTurn.toFixed(1), degrees: degreesText(SIM.maxTurn) })}
+    </p>
   </section>`;
 }
 
@@ -432,8 +451,9 @@ function applyTable(model, copy, actions) {
       <button class="small" @click=${actions.copyTable}>${text.copy}</button>
     </div>
     <p class=${model.refused.length ? 'keymap-refused' : 'helper'} role="status">
-      ${model.refused.length ? text.refused : text.ready}
+      ${model.refused.length ? text.refused : rows.some((r) => r.value === null) ? text.unresolved : text.ready}
     </p>
+    ${robotManagerWarnings(model.mapping).map((key) => html`<p class="keymap-export-warning" role="status">${text[key]}</p>`)}
     <div class="keymap-table-scroll" tabindex="0" role="region" aria-label=${text.heading}>
       <table>
         <thead>
@@ -448,7 +468,7 @@ function applyTable(model, copy, actions) {
                 <td><code>${row.node}</code></td>
                 <td><code>${row.param}</code></td>
                 <td>
-                  ${typeof row.value === 'number' && !Number.isInteger(row.value) ? fixed(row.value) : row.value}
+                  ${rowValue(row, copy)}${row.note ? html`<small class="keymap-row-note">${rowNote(row, copy)}</small>` : nothing}
                 </td>
               </tr>`,
           )}
@@ -457,6 +477,12 @@ function applyTable(model, copy, actions) {
     </div>
     ${model.copyNotice ? html`<p class="helper" role="status">${model.copyNotice}</p>` : nothing}
     <p class="helper">${text.numbersNote}</p>
+    <details class="keymap-input-differences">
+      <summary>${text.differencesHeading}</summary>
+      <ul>
+        ${text.differences.map((item) => html`<li>${item}</li>`)}
+      </ul>
+    </details>
     <h3>${text.stepsHeading}</h3>
     <ol class="keymap-steps">
       ${text.steps.map((step) => html`<li>${step}</li>`)}
@@ -488,14 +514,12 @@ function keymapPage(model, copy, actions) {
     ${topicNav(model, actions)}
     ${unsafeHTML(lessonBrief(lessonKey, topicCopy.brief) + schoolTips(lessonKey))}
     <div class="keymap-layout">
-      <div class="keymap-column">
-        ${sourcePanel(model, copy, actions)} ${readoutPanel(model, copy)}
-      </div>
+      ${sourcePanel(model, copy, actions)} ${simPanel(model, copy, actions)}
+      ${readoutPanel(model, copy)}
       <div class="keymap-column">
         ${model.topic === 'read' ? findTable(model, copy, actions) : nothing}
         ${model.topic === 'apply' ? applyTable(model, copy, actions) : nothing}
         ${model.topic === 'read' ? nothing : mappingPanel(model, copy, actions)}
-        ${simPanel(model, copy, actions)}
       </div>
     </div>
     ${reflection(topicCopy, copy)}
