@@ -8,8 +8,8 @@ import {
   connectRobot,
   disconnectRobot,
 } from './robot-link.js';
-import { wheelRpm } from './slam-recorder.js';
-import { scanMount, wheelAuthority } from './capture-core.js';
+import { scanMount } from './capture-core.js';
+import { wheelMonitorSample } from './wheel-monitor-core.js';
 import { loadJson, fillSentence } from '../core/content.js';
 import { scrollBehavior } from '../core/dom.js';
 import { html, render, nothing } from '../vendor/lit-html.js';
@@ -39,7 +39,6 @@ const DIALOG_SECTIONS = [
   ['drive', 'robotDrive'],
 ];
 const HISTORY_SECONDS = 10;
-const TWIST_FRESH_SECONDS = 1; // an older command no longer describes what the robot was asked to do
 const COLORS = {
   left: '#1c756b',
   right: '#a65a32',
@@ -157,7 +156,14 @@ function drawWheels() {
   const peak = Math.max(
     10,
     ...history
-      .flatMap((h) => [h.left, h.right, h.targetLeft, h.targetRight])
+      .flatMap((h) => [
+        h.left,
+        h.right,
+        h.filteredLeft,
+        h.filteredRight,
+        h.targetLeft,
+        h.targetRight,
+      ])
       .filter(Number.isFinite)
       .map(Math.abs),
   );
@@ -176,14 +182,17 @@ function drawWheels() {
     c.stroke();
     c.fillText(String(v), 4, Math.min(height - 2, y(v) + 4));
   }
-  for (const [key, side, dashed] of [
-    ['targetLeft', 'left', true],
-    ['targetRight', 'right', true],
-    ['left', 'left', false],
-    ['right', 'right', false],
+  for (const [key, side, dashed, lineWidth, opacity] of [
+    ['filteredLeft', 'left', false, 1.25, 0.55],
+    ['filteredRight', 'right', false, 1.25, 0.55],
+    ['left', 'left', false, 3, 1],
+    ['right', 'right', false, 3, 1],
+    ['targetLeft', 'left', true, 1.5, 1],
+    ['targetRight', 'right', true, 1.5, 1],
   ]) {
     c.strokeStyle = COLORS[side];
-    c.lineWidth = dashed ? 1.5 : 2;
+    c.lineWidth = lineWidth;
+    c.globalAlpha = opacity;
     c.setLineDash(dashed ? [5, 4] : []);
     c.beginPath();
     let pen = false;
@@ -198,6 +207,7 @@ function drawWheels() {
     }
     c.stroke();
   }
+  c.globalAlpha = 1;
   c.setLineDash([]);
   wheelEndLabels(c, y, width, pad);
 }
@@ -469,37 +479,10 @@ function clearAddressProblem() {
 }
 
 function recordWheels(drive) {
-  const config = robotState().hello?.config;
-  const none = { left: NaN, right: NaN };
-  // Each wheel's own values when the bridge sends them (filtered measurement and the generated
-  // target, made forward-positive by capture-core; invalid feedback is no measurement); an older
-  // bridge falls back to the chassis velocity and the fresh command through the kinematics.
-  const direct = wheelAuthority(drive);
-  let rpm;
-  let target;
-  if (direct) {
-    rpm = direct.filtered ?? none;
-    target = direct.target ?? none;
-  } else {
-    if (!config || !Number.isFinite(drive.v) || !Number.isFinite(drive.w)) return;
-    rpm = wheelRpm(drive, config);
-    const twist = latestRobot('twist');
-    target =
-      twist &&
-      drive.stamp - twist.stamp < TWIST_FRESH_SECONDS &&
-      Number.isFinite(twist.linear) &&
-      Number.isFinite(twist.angular)
-        ? wheelRpm({ v: twist.linear, w: twist.angular }, config)
-        : none;
-  }
+  const sample = wheelMonitorSample(drive, robotState().hello?.config, latestRobot('twist'));
+  if (!sample) return;
   const at = performance.now();
-  history.push({
-    at,
-    left: rpm.left,
-    right: rpm.right,
-    targetLeft: target.left,
-    targetRight: target.right,
-  });
+  history.push({ at, ...sample });
   while (history.length && at - history[0].at > HISTORY_SECONDS * 1000) history.shift();
   requestRedraw();
 }
