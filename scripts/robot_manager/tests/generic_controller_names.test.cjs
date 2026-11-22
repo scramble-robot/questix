@@ -10,7 +10,7 @@ test('visible Manager strings use generic names while persisted controller value
   assert.equal(labels.controllerName('dualshock'), 'ゲームパッド');
   assert.equal(labels.controllerName('uart'), '大会用コントローラー');
   assert.equal(labels.controllerName('web'), 'Web（ブラウザ・スマホ）');
-  assert.deepEqual(labels.controllers, ['uart', 'dualshock', 'web']);
+  assert.deepEqual(labels.controllers, ['uart', 'dualshock', 'web', 'udp']);
   for (const file of fs.readdirSync(root).filter(name => /\.(?:js|html)$/.test(name))) {
     const source = fs.readFileSync(path.join(root, file), 'utf8')
       .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/<!--[\s\S]*?-->/g, '');

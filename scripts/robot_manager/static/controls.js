@@ -137,8 +137,10 @@ const tuningFields = {
     help: "中心付近の小さな傾きを無視する幅。触っていないのに動く、手を離しても止まらない・動き出さないときは大きくします。下限は5%。ゲームパッドは配布の10%を勧めます。" } },
 };
 
+tuningFields.udp_joy_driver = tuningFields.uart_joy_driver;
+
 // Stick dead zone of the input driver each controller type actually starts.
-const controllerDrivers = { dualshock: "joy_node", uart: "uart_joy_driver" };
+const controllerDrivers = { dualshock: "joy_node", uart: "uart_joy_driver", udp: "udp_joy_driver" };
 
 function tuningSpec(node, key) {
   if (Object.values(controllerDrivers).includes(node)
@@ -453,7 +455,7 @@ function reserveTuningLayout() {
     OperatorGuide.application(controlProfile, controlProfile.values, snapshot, controlProfile.controller));
   states.push(OperatorGuide.application(controlProfile, changed, null, controlProfile.controller),
     OperatorGuide.application(controlProfile, controlProfile.values, null,
-      controlProfile.controller === "uart" ? "dualshock" : "uart"));
+      ["uart", "udp"].includes(controlProfile.controller) ? "dualshock" : "uart"));
   reserveTuningText(box, states.map(state => copy => {
     copy.querySelector("#controls-application-title").textContent = state.title;
     copy.querySelector("#controls-application-note").textContent = state.note;

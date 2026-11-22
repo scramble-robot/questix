@@ -301,7 +301,7 @@ function updateLaunchConfig(config) {
       input.checked = config[key] === "true";
     }
   }
-  // Controller type select: uart / dualshock / web
+  // Controller type select: uart / dualshock / web / udp
   const ctrlSelect = document.getElementById("controller-type");
   if (ctrlSelect && config.CONTROLLER_TYPE !== undefined) {
     ctrlSelect.value = config.CONTROLLER_TYPE;

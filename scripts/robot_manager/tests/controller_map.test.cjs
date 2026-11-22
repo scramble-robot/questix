@@ -116,3 +116,16 @@ test('function numbers stay stable when tilt changes inputs', () => {
   assert.deepEqual(map.bindings('uart', values, values).map((a) => [a.key, a.number]), before);
   assert.deepEqual(before.map((a) => a[1]), [3, 5, 5]);
 });
+
+test('UDP preserves the UART physical input locations', () => {
+  const labels = require('../static/control-labels.js');
+  assert.equal(labels.controllerName('udp'), '大会用（有線 LAN）');
+  for (let button = 0; button < 14; button++) {
+    assert.equal(labels.valueLabel('udp', 'fire_button', button),
+      labels.valueLabel('uart', 'fire_button', button));
+  }
+  for (const axis of [0, 1, 3, 4, 6, 7]) {
+    assert.equal(labels.valueLabel('udp', 'linear_x_axis', axis),
+      labels.valueLabel('uart', 'linear_x_axis', axis));
+  }
+});

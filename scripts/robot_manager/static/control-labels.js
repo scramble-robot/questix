@@ -17,7 +17,9 @@ const ControlLabels = (() => {
       3: "右スティック 左右", 4: "右スティック 上下", 5: "R2 トリガー",
       6: "十字キー 左右", 7: "十字キー 上下" },
   };
-  const controllerNames = { uart: "大会用コントローラー", dualshock: "ゲームパッド", web: "Web（ブラウザ・スマホ）" };
+  buttons.udp = buttons.uart;
+  axes.udp = axes.uart;
+  const controllerNames = { uart: "大会用コントローラー", dualshock: "ゲームパッド", web: "Web（ブラウザ・スマホ）", udp: "大会用（有線 LAN）" };
   const buttonKeys = new Set([
     "fire_button", "tilt_up_button_index", "tilt_down_button_index", "full_speed_button",
   ]);
@@ -65,7 +67,7 @@ const ControlLabels = (() => {
   // buttons fixed by its own page, so its profile (controls.web.yaml) is not editable.
   return {
     kind, valueLabel, options, changedCount, controllerName,
-    controllers: Object.keys(controllerNames), editable: ["uart", "dualshock"],
+    controllers: Object.keys(controllerNames), editable: ["uart", "dualshock", "udp"],
   };
 })();
 

@@ -23,7 +23,11 @@
        The actuators are the same in every mode: they obey /emergency_stop and /motion_permission.
        Not read from the environment. -->
   <arg name="robot_mode" default="practice" description="lesson, practice or competition"/>
-  <arg name="controller_type" default="$(env CONTROLLER_TYPE dualshock)" description="Controller type: dualshock, uart, or web (smartphone browser)"/>
+  <arg name="controller_type" default="$(env CONTROLLER_TYPE dualshock)" description="Controller type: dualshock, uart, udp, or web (smartphone browser)"/>
+  <!-- Empty overrides preserve the single defaults in UDP YAML. -->
+  <arg name="udp_local_address" default=""/>
+  <arg name="udp_peer_address" default=""/>
+  <arg name="udp_port" default=""/>
   <arg name="enable_rviz" default="$(env ENABLE_RVIZ false)" description="Enable RViz visualization"/>
   <!-- Replaced by robot_mode. Declared only so that a launch still passing one is refused below
        instead of silently running another mode (e.g. enable_autoreferee:=true as practice). -->
@@ -64,6 +68,9 @@
   <!-- All child processes stay disabled while the invalid branch reports and exits. -->
   <group unless="$(var invalid_configuration)">
     <include file="$(find-pkg-share questix_control_config)/launch/control_profile.launch.py" />
+    <!-- A failure aborts here, before any child process can start without its UDP vote. -->
+    <include file="$(find-pkg-share questix_control_config)/launch/permission_profile.launch.py" />
+    <let name="udp_allow_rearm_after_stop" value="$(not $(var is_competition))" />
     <group if="$(var enable_shot)">
       <include file="$(find-pkg-share questix_launcher)/launch/shot_component.launch.xml">
         <arg name="esc_config_file" value="$(var esc_config_file)"/>
@@ -104,6 +111,7 @@
       <arg name="robot_mode" value="$(var robot_mode)"/>
       <arg name="enable_gpio_safety" value="$(var enable_gpio_ref)"/>
       <arg name="enable_referee" value="$(var is_competition)"/>
+      <arg name="permission_config_file" value="$(var permission_config_file)"/>
     </include>
     <!-- RViz Visualization -->
     <node pkg="rviz2" exec="rviz2" name="rviz2" output="screen" if="$(var enable_rviz)" args="-d $(find-pkg-share ydlidar_ros2_driver)/config/ydlidar.rviz">

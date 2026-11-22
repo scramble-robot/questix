@@ -214,7 +214,7 @@ class LaunchConfig(BaseModel):
     def validate_controller_type(cls, v: str | None) -> str | None:
         """Restrict profiles to supported controller types."""
         if v is not None and v not in _CONTROLLER_TYPES:
-            raise ValueError("CONTROLLER_TYPE must be one of: uart, dualshock, web")
+            raise ValueError("CONTROLLER_TYPE must be one of: uart, dualshock, web, udp")
         return v
 
 

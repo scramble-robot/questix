@@ -14,7 +14,7 @@ from launch.substitutions import EnvironmentVariable, LaunchConfiguration
 import yaml
 
 # One packaged profile per controller: config/controls.<controller>.yaml.
-CONTROLLER_TYPES = ('uart', 'dualshock', 'web')
+CONTROLLER_TYPES = ('uart', 'dualshock', 'web', 'udp')
 # The browser controller's buttons are fixed by its page, so it always uses the packaged profile
 # (a saved file of the same name in QUESTIX_CONFIG_DIR is ignored; Robot Manager never writes one).
 FIXED_CONTROLLERS = ('web',)

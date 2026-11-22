@@ -19,7 +19,7 @@ robot_manager の「調整」タブでコントローラーを選び、値を編
 編集対象の選択と、Launch 設定の `CONTROLLER_TYPE`（実際に使用するコントローラー）は
 別です。UART 用・DualShock 用の調整は互いに上書きされません。Web 用は固定です（下の「Web（ブラウザ・スマホ）用の設定」）。
 
-`controller_type` は `uart` / `dualshock` / `web` のいずれかです（それ以外は起動前にエラー）。
+`controller_type` は `uart` / `dualshock` / `web` / `udp` のいずれかです（それ以外は起動前にエラー）。
 
 起動時の選択優先順位:
 
@@ -125,3 +125,5 @@ Web はブラウザの操作画面でボタンの役割が決まっているた�
 
 `QUESTIX_CONFIG_DIR` を変更する開発環境では、robot_manager と ROS launch の両方に
 同じ値を指定してください。通常のサービス起動は双方とも `/etc/questix_robot` を使用します。
+
+`controls.udp.yaml` は UDP の Switch2 配列を使う大会用入力です。HOME/BACK は入力ドライバー専用で、既定の操作には割り当てません。詳細は `udp_joy_driver/README.md` を参照してください。

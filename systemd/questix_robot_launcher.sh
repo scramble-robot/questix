@@ -180,6 +180,54 @@ LAUNCH_ARGS="${LAUNCH_ARGS} robot_mode:=${MODE}"
 LAUNCH_ARGS="${LAUNCH_ARGS} enable_rviz:=${ENABLE_RVIZ:-false}"
 LAUNCH_ARGS="${LAUNCH_ARGS} controller_type:=${CONTROLLER_TYPE:-dualshock}"
 
+# UDP configuration is data, never shell code. A malformed/disabled file fails before ROS starts.
+if [ "${CONTROLLER_TYPE:-dualshock}" = udp ]; then
+  if ! UDP_LINK_ARGS=$(python3 - "${CONFIG_DIR}/control_link.env" <<'PY'
+import ipaddress
+from pathlib import Path
+import re
+import sys
+
+try:
+    values = {}
+    for line in Path(sys.argv[1]).read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        key, sep, value = line.partition('=')
+        if not sep or key in values or not value:
+            raise ValueError('duplicate key, empty value, or malformed line')
+        values[key] = value
+    if set(values) != {'ENABLED', 'INTERFACE', 'ROBOT_ADDRESS', 'PEER_ADDRESS', 'PORT'}:
+        raise ValueError('missing or unknown control_link.env key')
+    if values['ENABLED'] != 'true':
+        raise ValueError('ENABLED must be true for udp')
+    if not re.fullmatch(r'[a-zA-Z0-9_.-]{1,15}', values['INTERFACE']):
+        raise ValueError('invalid interface')
+    if not re.fullmatch(r'[0-9.]+/[0-9]{1,2}', values['ROBOT_ADDRESS']):
+        raise ValueError('ROBOT_ADDRESS must be IPv4/CIDR')
+    local = ipaddress.IPv4Interface(values['ROBOT_ADDRESS'])
+    peer = ipaddress.IPv4Address(values['PEER_ADDRESS'])
+    if not re.fullmatch(r'500[0-9]', values['PORT']):
+        raise ValueError('PORT must be 5000..5009')
+    for address in (local.ip, peer):
+        if address.is_unspecified or address.is_multicast or address in (
+                local.network.network_address, local.network.broadcast_address):
+            raise ValueError('address must be a unicast host')
+    if peer not in local.network or local.ip == peer:
+        raise ValueError('peer must be a different host in the robot subnet')
+    print(f'udp_local_address:={local.ip} udp_peer_address:={peer} udp_port:={values["PORT"]}')
+except (OSError, UnicodeError, ValueError) as exc:
+    print(f'control_link.env: {exc}', file=sys.stderr)
+    sys.exit(1)
+PY
+  ); then
+    log "ERROR: udp controller configuration rejected; see control_link.env error above"
+    exit 1
+  fi
+  LAUNCH_ARGS="${LAUNCH_ARGS} ${UDP_LINK_ARGS}"
+fi
+
 # QUESTiX's ROS_DOMAIN_ID policy (scripts/robot_manager/ros_domain.py; kitting and Robot Manager
 # refuse anything else). A value outside it is only warned about here, never refused or changed:
 # a robot that already runs in such a domain keeps running in it until someone re-kits it.
