@@ -63,6 +63,25 @@ using namespace std::chrono_literals;
 namespace motor_control_app {
 // Observe the log-only state, and isolate internal negative cases after cancelling the tick.
 struct DriveOdomTestAccess {
+  static uint64_t leftTransactions(const DriveComponent& n) {
+    motor_control_lib::DdtMotorLib::MotorTransactionStats stats;
+    n.motor_lib_->getMotorTransactionStats(n.left_motor_id_, stats);
+    return stats.transactions;
+  }
+  static bool velocityFeedbackOlderThan(const DriveComponent& n, double min_age_sec) {
+    motor_control_lib::DdtMotorLib::MotorFeedbackData left, right;
+    return n.motor_lib_->getMotorFeedbackData(n.left_motor_id_, left) &&
+           n.motor_lib_->getMotorFeedbackData(n.right_motor_id_, right) && left.has_feedback &&
+           right.has_feedback && left.feedback_age_sec > min_age_sec &&
+           right.feedback_age_sec > min_age_sec;
+  }
+  static bool velocityLatched(const DriveComponent& n) {
+    return n.motor_lib_->velocityLinkLatched();
+  }
+  static bool velocityWaiting(const DriveComponent& n) {
+    return n.motor_lib_->velocityFeedbackWaiting();
+  }
+  static bool healthy(const DriveComponent& n) { return n.diff_drive_->isHealthy(); }
   static bool pending(const DriveComponent& n) { return n.odom_estop_release_pending_; }
   static void pause(DriveComponent& n) { n.control_timer_->cancel(); }
   static void update(DriveComponent& n) { n.integrateOdometry(); }
@@ -111,7 +130,8 @@ struct DriveOdomTestAccess {
         stale ? actuation_gate::Block::kEstopStale : actuation_gate::Block::kEstopUnknown;
   }
   static bool nonzeroRpm(DriveComponent& n) {
-    return n.motor_lib_->setMotorVelocity(n.left_motor_id_, 1);
+    return n.motor_lib_->setMotorVelocity(n.left_motor_id_, 1) &&
+           !n.motor_lib_->lastSentFrameIsZero(n.left_motor_id_);
   }
   static bool unknownHistory(DriveComponent& n) {
     n.motor_lib_->shutdown();
@@ -633,6 +653,46 @@ protected:
     spinUntil([]() { return false; }, duration);
   }
 
+  void expectVelocityBootWait(bool prior_feedback) {
+    if (prior_feedback) {
+      ASSERT_NO_FATAL_FAILURE(startRepressedEstop());
+      motor_.answerBoth(false);
+      // Wait while the E-stop remains pressed: both retained replies must exceed the 1.0 s gate.
+      ASSERT_TRUE(
+          spinUntil([this]() { return Access::velocityFeedbackOlderThan(*drive_, 1.1); }, 1s));
+      ASSERT_TRUE(Access::velocityFeedbackOlderThan(*drive_, 1.0));
+    } else {
+      operationManagerWithoutGpio();
+      estop_active_ = true;
+      motor_.answerBoth(false);  // this initialization has never received a valid answer
+      start();
+      ASSERT_TRUE(spinUntil([this]() { return !odom_estop_infos_.empty(); }, 2s));
+    }
+    motor_.clear();
+    motor_.repliesAfter(1300ms, 1300ms);
+    motor_.answerBoth(true);
+    estop_active_ = false;
+    publishEstop(false, kNoGpioReason);
+    twist_linear_ = 0;
+    send_twist_ = true;
+    spinFor(200ms);  // neutral before the controller is held fully forward
+    twist_linear_ = 1.0;
+    spinFor(900ms);  // still before either motor can answer
+    EXPECT_FALSE(motor_.drove(kLeftId));
+    EXPECT_FALSE(motor_.drove(kRightId));
+    EXPECT_FALSE(motor_control_app::DriveOdomTestAccess::velocityLatched(*drive_));
+    EXPECT_TRUE(motor_control_app::DriveOdomTestAccess::velocityWaiting(*drive_));
+    ASSERT_TRUE(spinUntil(
+        [this]() { return motor_control_app::DriveOdomTestAccess::healthy(*drive_); }, 2s));
+    spinFor(400ms);
+    EXPECT_FALSE(motor_.drove(kLeftId));
+    EXPECT_FALSE(motor_.drove(kRightId));
+    EXPECT_FALSE(motor_control_app::DriveOdomTestAccess::velocityLatched(*drive_));
+    for (const auto& command : motor_.commands()) EXPECT_TRUE(ddt::isZeroCommandFrame(command));
+    neutral();
+    EXPECT_TRUE(spinUntil([this]() { return droveBothWheels(); }, 3s));
+  }
+
   void neutral() {
     twist_linear_ = 0.0;
     send_twist_ = true;
@@ -884,7 +944,7 @@ TEST_P(DriveOdomM1Negative, KeepsWarningForUnsafeOrUncertainInputs) {
   spinFor(1100ms);  // isolate WARN throttle from the previous stage
   odom_warnings_.clear();
   const int kind = GetParam();
-  if (kind == 5 || kind == 6 || kind == 7 || kind == 10) {
+  if (kind == 5 || kind == 6 || kind == 7 || kind == 10 || kind == 11) {
     motor_.answerBoth(true);
     if (kind == 5) {
       motor_.feedbackMode(1);
@@ -897,10 +957,16 @@ TEST_P(DriveOdomM1Negative, KeepsWarningForUnsafeOrUncertainInputs) {
       if (kind == 6) motor_.positions(32768, 0);
       if (kind == 7) motor_.fault(1);
       ASSERT_TRUE(Access::refresh(*drive_));
+      if (kind == 11) {
+        // Make the unsafe nonzero history while feedback is fresh, then let it become stale.
+        // A new nonzero request on already-stale feedback is now correctly gated to zero.
+        ASSERT_TRUE(Access::nonzeroRpm(*drive_));
+        motor_.answerBoth(false);
+      }
     }
   }
   // Stale, retained feedback is the otherwise quiet release condition.
-  if (kind == 5) spinFor(550ms);
+  if (kind == 5 || kind == 11) spinFor(550ms);
   Access::window(*drive_);
   switch (kind) {
     case 0:
@@ -928,8 +994,8 @@ TEST_P(DriveOdomM1Negative, KeepsWarningForUnsafeOrUncertainInputs) {
       Access::rollbackAnchor(*drive_);
       break;
     case 11:
-      ASSERT_TRUE(Access::nonzeroRpm(*drive_));
-      break;
+      break;  // verified nonzero history was prepared above before the feedback aged
+
     case 12:
       ASSERT_TRUE(Access::unknownHistory(*drive_));
       break;
@@ -1556,6 +1622,14 @@ TEST_F(DriveComponentNode, MissingWheelDoesNotIntegrateUnpairedMotionOrRecoveryJ
   motor_.answerRight(true);
   spinFor(700ms);
   EXPECT_NEAR(last_odom_.pose.pose.position.x, 0, 1e-9);
+  // Link loss now fault-stops the drive. Restore healthy, high-rate motion feedback through
+  // a fresh neutral before checking the next paired increment (never replay the recovery jump).
+  ASSERT_TRUE(
+      spinUntil([this]() { return motor_control_app::DriveOdomTestAccess::healthy(*drive_); }, 3s));
+  neutral();
+  motor_.clear();
+  ASSERT_TRUE(spinUntil([this]() { return droveBothWheels(); }, 2s));
+  EXPECT_NEAR(last_odom_.pose.pose.position.x, 0, 1e-9);
   motor_.positions(8500, ddt::kPositionRawPerTurn - 8500);
   ASSERT_TRUE(spinUntil([this]() { return last_odom_.pose.pose.position.x > .002; }, 2s));
   EXPECT_NEAR(last_odom_.pose.pose.position.x,
@@ -1750,6 +1824,57 @@ TEST_F(DriveComponentNode, PermissionGatesTheDriveButIsNotAnEstop) {
   have_status_ = false;
   ASSERT_TRUE(spinUntil([this]() { return have_status_; }, 2s));
   EXPECT_FALSE(last_status_.emergency_stop);
+}
+
+// Synthetic shape of the reported ID14 release intervals, not a replay of the real bags.
+TEST_F(DriveComponentNode, VelocityEstopReleaseWaitsThirteenTenthsThenNeedsFreshNeutral) {
+  expectVelocityBootWait(false);
+}
+
+TEST_F(DriveComponentNode, VelocityEstopReleaseWithOldFeedbackAlsoWaitsForFreshNeutral) {
+  expectVelocityBootWait(true);
+}
+
+TEST_F(DriveComponentNode, VelocityIdleFourMissingReplyRoundsRemainHealthyAndUnlatched) {
+  start();
+  operationManagerWithoutGpio();
+  spinFor(400ms);
+  motor_.clear();
+  const auto before = motor_control_app::DriveOdomTestAccess::leftTransactions(*drive_);
+  motor_.answerBoth(false);
+  spinFor(1350ms);
+  EXPECT_GE(motor_control_app::DriveOdomTestAccess::leftTransactions(*drive_) - before, 4u);
+  EXPECT_FALSE(motor_control_app::DriveOdomTestAccess::velocityLatched(*drive_));
+  EXPECT_FALSE(motor_control_app::DriveOdomTestAccess::velocityWaiting(*drive_));
+  EXPECT_TRUE(motor_control_app::DriveOdomTestAccess::healthy(*drive_));
+  for (const auto& command : motor_.commands()) EXPECT_TRUE(ddt::isZeroCommandFrame(command));
+}
+
+// Velocity mode uses the existing fault-stop and healthy-neutral rearming path too.
+TEST_F(DriveComponentNode, VelocityModeOneWheelGoingSilentFaultStopsBothWheels) {
+  start();
+  operationManagerWithoutGpio();
+  neutral();
+  send_twist_ = true;
+  ASSERT_TRUE(spinUntil([this]() { return droveBothWheels(); }, 5s));
+  fault_stop_ticks_ = 0;
+  const auto ticks_before = last_sample_.seq;
+  motor_.setSilent(kRightId, true);
+  ASSERT_TRUE(spinUntil([this]() { return fault_stop_ticks_ > 0 && lastCommandsAreZero(); }, 1s));
+  EXPECT_LE(last_sample_.seq - ticks_before, 8u);
+  motor_.clear();
+  spinFor(500ms);
+  EXPECT_FALSE(motor_.drove(kLeftId));
+  EXPECT_FALSE(motor_.drove(kRightId));
+  motor_.setSilent(kRightId, false);
+  ASSERT_TRUE(
+      spinUntil([this]() { return motor_control_app::DriveOdomTestAccess::healthy(*drive_); }, 3s));
+  spinFor(400ms);  // held nonzero input after recovery must still be rejected
+  EXPECT_FALSE(motor_.drove(kLeftId));
+  EXPECT_FALSE(motor_.drove(kRightId));
+  EXPECT_FALSE(last_status_.emergency_stop);
+  neutral();
+  EXPECT_TRUE(spinUntil([this]() { return droveBothWheels(); }, 3s));
 }
 
 // Current mode (experimental, Issue #222 P0-2): one wheel's answers stop while driving. The
