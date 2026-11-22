@@ -1377,9 +1377,14 @@ TEST_P(DriveStopGap, StopRepliesRecoverOnlyWhenEnabledAndKeepFrameBytesAndCadenc
   spinFor(800ms);  // full pre-anchor .5 s ref/raw history
   twist_linear_ = 0;
   ASSERT_TRUE(spinUntil([this]() { return last_sample_.stop_frame && lastCommandsAreZero(); }, 2s));
-  // Wait for the first stop's reply pair, then change only its next endpoint.
-  const auto count = last_sample_.left.feedback_count;
-  ASSERT_TRUE(spinUntil([&]() { return last_sample_.left.feedback_count > count; }, 1s));
+  // Wait for a complete stop reply pair, then change only the next pair's endpoints. Each tick
+  // sends left before right, so a pair is complete once the right wheel answers after the left.
+  // Under load the right reply can arrive in a later tick than the left: changing the positions
+  // between them splits the step over two pairs and moves its end by 1.6e-6..3.6e-5 m here.
+  const auto left_count = last_sample_.left.feedback_count;
+  ASSERT_TRUE(spinUntil([&]() { return last_sample_.left.feedback_count > left_count; }, 1s));
+  const auto right_count = last_sample_.right.feedback_count;
+  ASSERT_TRUE(spinUntil([&]() { return last_sample_.right.feedback_count > right_count; }, 1s));
   const double before_x = last_odom_.pose.pose.position.x;
   motor_.feedbackRpm(0, 0);
   const int lc[] = {3377, 2550, -3929};
@@ -1388,12 +1393,14 @@ TEST_P(DriveStopGap, StopRepliesRecoverOnlyWhenEnabledAndKeepFrameBytesAndCadenc
     return static_cast<uint16_t>(counts < 0 ? ddt::kPositionRawPerTurn + counts : counts);
   };
   const auto commands_before = motor_.timedCommands().size();
-  const auto next = last_sample_.left.feedback_count;
+  const auto left_next = last_sample_.left.feedback_count;
+  const auto right_next = last_sample_.right.feedback_count;
   odom_warnings_.clear();
   motor_.positions(position(lc[scenario]), position(rc[scenario]));
   ASSERT_TRUE(spinUntil(
       [&]() {
-        return last_sample_.left.feedback_count > next && last_sample_.right.feedback_count > next;
+        return last_sample_.left.feedback_count > left_next &&
+               last_sample_.right.feedback_count > right_next;
       },
       1s));
   spinFor(60ms);  // status publish follows integration
