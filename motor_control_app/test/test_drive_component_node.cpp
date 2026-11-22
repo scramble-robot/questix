@@ -1382,9 +1382,11 @@ TEST_P(DriveStopGap, StopRepliesRecoverOnlyWhenEnabledAndKeepFrameBytesAndCadenc
   // Under load the right reply can arrive in a later tick than the left: changing the positions
   // between them splits the step over two pairs and moves its end by 1.6e-6..3.6e-5 m here.
   const auto left_count = last_sample_.left.feedback_count;
-  ASSERT_TRUE(spinUntil([&]() { return last_sample_.left.feedback_count > left_count; }, 1s));
+  // Stop frames are resent about every 320 ms, so one or two missed replies under load can push
+  // a wait to 0.64..0.96 s: allow 2 s.
+  ASSERT_TRUE(spinUntil([&]() { return last_sample_.left.feedback_count > left_count; }, 2s));
   const auto right_count = last_sample_.right.feedback_count;
-  ASSERT_TRUE(spinUntil([&]() { return last_sample_.right.feedback_count > right_count; }, 1s));
+  ASSERT_TRUE(spinUntil([&]() { return last_sample_.right.feedback_count > right_count; }, 2s));
   const double before_x = last_odom_.pose.pose.position.x;
   motor_.feedbackRpm(0, 0);
   const int lc[] = {3377, 2550, -3929};
@@ -1402,7 +1404,7 @@ TEST_P(DriveStopGap, StopRepliesRecoverOnlyWhenEnabledAndKeepFrameBytesAndCadenc
         return last_sample_.left.feedback_count > left_next &&
                last_sample_.right.feedback_count > right_next;
       },
-      1s));
+      2s));
   spinFor(60ms);  // status publish follows integration
   const double distance =
       .05 * 6.283185307179586 * (lc[scenario] - rc[scenario]) / ddt::kPositionRawPerTurn / 2;
