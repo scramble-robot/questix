@@ -249,3 +249,59 @@ def test_manager_writes_a_lesson_request_the_launcher_accepts(robot, monkeypatch
     app._write_start_request("lesson")
     _, launched = robot.run()
     assert len(launched) == 1 and "robot_mode:=lesson" in launched[0].split()
+
+
+UDP_CONFIG = ('ENABLED=true\nINTERFACE=eth0\nROBOT_ADDRESS=192.168.3.100/24\n'
+              'PEER_ADDRESS=192.168.3.50\nPORT=5000\n')
+
+
+@pytest.mark.parametrize('content', [None, '', UDP_CONFIG.replace('true', 'false'),
+    UDP_CONFIG + 'PORT=5001\n', UDP_CONFIG + 'EXTRA=yes\n', UDP_CONFIG.replace('5000', '5010'),
+    UDP_CONFIG.replace('192.168.3.100/24', 'not-an-address'),
+    UDP_CONFIG.replace('192.168.3.50', '192.168.4.50'),
+    UDP_CONFIG.replace('eth0', '$(touch /tmp/udp-must-not-execute)')])
+def test_udp_rejects_invalid_link_before_ros(robot, content):
+    (robot.dir / 'launch.env').write_text('CONTROLLER_TYPE=udp\n')
+    (robot.dir / 'mode').write_text('competition\n')
+    if content is not None:
+        (robot.dir / 'control_link.env').write_text(content)
+    result, launched = robot.run()
+    assert result.returncode != 0
+    assert not launched
+    assert 'control_link.env' in result.stdout + result.stderr
+
+
+def test_udp_passes_only_validated_link_values(robot):
+    (robot.dir / 'launch.env').write_text('CONTROLLER_TYPE=udp\n')
+    (robot.dir / 'mode').write_text('competition\n')
+    (robot.dir / 'control_link.env').write_text(UDP_CONFIG)
+    result, launched = robot.run()
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert len(launched) == 1
+    for expected in ('udp_local_address:=192.168.3.100', 'udp_peer_address:=192.168.3.50',
+                     'udp_port:=5000', 'robot_mode:=competition'):
+        assert expected in launched[0]
+
+
+@pytest.mark.parametrize('bad', [UDP_CONFIG + 'PORT=5001\n', UDP_CONFIG + 'UNKNOWN=x\n',
+    UDP_CONFIG.replace('ENABLED=true', 'ENABLED=false'), UDP_CONFIG.replace('PORT=5000', 'PORT='),
+    UDP_CONFIG.replace('PORT=5000', 'PORT=5010'), UDP_CONFIG.replace('/24', '/99'),
+    UDP_CONFIG.replace('192.168.3.50', '192.168.3.100'),
+    UDP_CONFIG.replace('192.168.3.50', '192.168.3.255'),
+    UDP_CONFIG.replace('192.168.3.50', '192.168.3.0'),
+    UDP_CONFIG.replace('192.168.3.50', '127.0.0.1')])
+def test_udp_link_file_is_strict_data(robot, bad):
+    (robot.dir / 'launch.env').write_text('CONTROLLER_TYPE=udp\n')
+    robot.mode('competition')
+    (robot.dir / 'control_link.env').write_text(bad)
+    result, launched = robot.run()
+    assert result.returncode != 0 and not launched
+
+
+def test_udp_file_cannot_execute_shell(robot, tmp_path):
+    marker = tmp_path / 'must-not-exist'
+    (robot.dir / 'launch.env').write_text('CONTROLLER_TYPE=udp\n')
+    robot.mode('competition')
+    (robot.dir / 'control_link.env').write_text(UDP_CONFIG.replace('eth0', f'$(touch {marker})'))
+    result, launched = robot.run()
+    assert result.returncode != 0 and not launched and not marker.exists()

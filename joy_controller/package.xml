@@ -19,6 +19,7 @@
 
     <exec_depend>uart_joy_driver</exec_depend>
     <exec_depend>web_joy_driver</exec_depend>
+    <exec_depend>udp_joy_driver</exec_depend>
 
     <test_depend>ament_cmake_gtest</test_depend>
     <test_depend>ament_cmake_pytest</test_depend>

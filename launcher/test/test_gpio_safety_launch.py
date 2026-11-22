@@ -152,7 +152,8 @@ def test_core_always_owns_exactly_one_operation_manager():
     values = {arg.get('name'): arg.get('value') for arg in manager_includes[0].findall('./arg')}
     assert values == {'robot_mode': '$(var robot_mode)',
                       'enable_gpio_safety': '$(var enable_gpio_ref)',
-                      'enable_referee': '$(var is_competition)'}
+                      'enable_referee': '$(var is_competition)',
+                      'permission_config_file': '$(var permission_config_file)'}
     manager_group = next(
         group for group in core.findall('.//group')
         if manager_includes[0] in list(group)
@@ -475,7 +476,10 @@ def test_core_always_publishes_the_motion_permission_for_the_running_mode():
     # The modes Robot Manager and the robot launcher know (scripts/robot_manager/modes.py).
     assert permission['modes'] == ['lesson', 'practice', 'competition']
     assert permission['required'] == {'lesson': ['teacher'], 'competition': ['referee']}
-    assert permission['votes'] == {'referee': '/motion_vote/referee',
+    assert permission['controller_votes'] == {
+        'udp': {'practice': ['controller'], 'competition': ['controller']}}
+    assert permission['votes'] == {'controller': '/motion_vote/controller',
+                                   'referee': '/motion_vote/referee',
                                    'teacher': '/actuation_authority'}
     assert permission['topic'] == '/motion_permission'
     referee = load_yaml('operation_manager/config/referee_monitor.yaml')[

@@ -48,6 +48,8 @@ GROUPS = {
     ]),
     'joy_node': ('ゲームパッドの入力', [('deadzone', 'スティック不感帯', 'float', 0.05, 0.99)]),
     'uart_joy_driver': ('UART 入力', [('deadzone', 'スティック不感帯', 'float', 0.05, 0.99)]),
+    'udp_joy_driver': ('大会用（有線 LAN）入力', [
+        ('deadzone', 'スティック不感帯', 'float', 0.05, 0.99)]),
     'web_joy_driver': ('Web（ブラウザ・スマホ）入力', [
         ('deadzone', 'スティック不感帯', 'float', 0.05, 0.99)]),
     'joy_controller_dual_stick': ('左右独立スティック（単体起動時のみ）', [
@@ -111,7 +113,7 @@ def deadzone_out_of_range(values):
 
 
 # Controller profiles: questix_control_config/config/controls.<controller>.yaml.
-Controller = Literal['uart', 'dualshock', 'web']
+Controller = Literal['uart', 'dualshock', 'web', 'udp']
 CONTROLLERS = get_args(Controller)
 # The browser controller's buttons are fixed by its own page (web_joy_driver/static/index.html), so
 # its profile is the packaged controls.web.yaml only: never edited here, never overridden by a file
@@ -119,7 +121,7 @@ CONTROLLERS = get_args(Controller)
 FIXED_CONTROLLERS = ('web',)
 # Input-driver sections each profile carries. The UART and DualShock files have always
 # held both joy_node and uart_joy_driver; the browser profile holds only web_joy_driver.
-_DRIVER_NODES = ('joy_node', 'uart_joy_driver', 'web_joy_driver')
+_DRIVER_NODES = ('joy_node', 'uart_joy_driver', 'web_joy_driver', 'udp_joy_driver')
 # Unit generation of the m/s and rad/s values (questix_control_config UNITS_GENERATION, kept
 # identical by test_controls.py). Generation 2 reads them with the real wheel_radius 0.05 m
 # (#179). A saved profile without the marker holds values meant for the old 0.1 m: the robot
@@ -145,6 +147,7 @@ _PROFILE_DRIVERS = {
     'uart': ('joy_node', 'uart_joy_driver'),
     'dualshock': ('joy_node', 'uart_joy_driver'),
     'web': ('web_joy_driver',),
+    'udp': ('udp_joy_driver',),
 }
 
 

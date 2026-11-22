@@ -49,6 +49,7 @@ def expand(monkeypatch, source_packages):
 
     def run(relative_path, **arguments):
         nodes = {}
+        run.started = nodes
 
         def capture(node, context):
             node._perform_substitutions(context)

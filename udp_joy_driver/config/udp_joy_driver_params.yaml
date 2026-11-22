@@ -1,0 +1,13 @@
+udp_joy_driver:
+  ros__parameters:
+    local_address: ""  # Required; never bind all interfaces.
+    peer_address: ""  # Required; source IP filter is not authentication.
+    port: 5000
+    publish_rate: 50.0
+    # Requires Sender S4 (100 ms heartbeat). Use 1.2 with the original 500 ms Sender.
+    message_timeout_sec: 0.5
+    input_stale_sec: 1.0  # HID only; ignored for XInput (also logged at startup).
+    # deadzone comes from controls.udp.yaml, not a second copy here.
+    arm_button: 10
+    stop_button: 8
+    allow_rearm_after_stop: false  # Standalone default; questix_core selects by robot_mode.

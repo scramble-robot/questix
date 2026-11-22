@@ -213,6 +213,7 @@
           <label for="controls-profile" class="tuning-sr-only">編集するコントローラー</label>
           <select id="controls-profile">
             <option value="uart">大会用コントローラー</option>
+            <option value="udp">大会用（有線 LAN）</option>
             <option value="dualshock">ゲームパッド</option>
           </select>
           <button type="button" class="btn btn-small" id="controls-reload">保存した設定を読み直す</button>
@@ -703,6 +704,7 @@
           <label for="controller-type">コントローラー</label>
           <select id="controller-type" data-config="CONTROLLER_TYPE">
             <option value="uart">大会用コントローラー</option>
+            <option value="udp">大会用（有線 LAN）</option>
             <option value="dualshock">ゲームパッド</option>
             <option value="web">Web（ブラウザ・スマホ）</option>
           </select>
@@ -833,17 +835,17 @@
   <script src="/static/qr-svg.js?v=1"></script>
   <script src="/static/web-joy-connection.js?v=4"></script>
   <script src="/static/operator-guide.js?v=5"></script>
-  <script src="/static/control-labels.js?v=5"></script>
+  <script src="/static/control-labels.js?v=6"></script>
   <script src="/static/status-view.js?v=5"></script>
   <script src="/static/network-view.js?v=1"></script>
   <script src="/static/trial-view.js?v=2"></script>
   <script src="/static/permission-view.js?v=1"></script>
   <script src="/static/elapsed-view.js?v=2"></script>
   <script src="/static/app.js?v=32"></script>
-  <script src="/static/controller-map.js?v=15"></script>
+  <script src="/static/controller-map.js?v=16"></script>
   <script src="/static/tuning-model.js?v=3"></script>
   <script src="/static/tuning-chart.js?v=3"></script>
-  <script src="/static/controls.js?v=33"></script>
+  <script src="/static/controls.js?v=34"></script>
 </body>
 
 </html>

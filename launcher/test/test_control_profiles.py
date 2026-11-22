@@ -15,7 +15,8 @@ import yaml
 ROOT = Path(os.environ['QUESTIX_SOURCE_ROOT'])
 
 
-DRIVERS = {'uart': 'uart_joy_driver', 'dualshock': 'joy_node', 'web': 'web_joy_driver'}
+DRIVERS = {'uart': 'uart_joy_driver', 'dualshock': 'joy_node', 'web': 'web_joy_driver',
+           'udp': 'udp_joy_driver'}
 # A saved profile is used only with the current unit generation (wheel_radius 0.05 m, #179).
 UNITS_MARKER = f'# questix_controls_units: {questix_control_config.UNITS_GENERATION}\n'
 
@@ -129,7 +130,7 @@ def test_unknown_controller_type_fails_before_nodes(expand):
                enable_lidar='false', enable_rviz='false')
 
 
-@pytest.mark.parametrize('controller', ['uart', 'dualshock', 'web'])
+@pytest.mark.parametrize('controller', ['uart', 'dualshock', 'web', 'udp'])
 def test_dual_stick_drives_like_3_2_0(expand, controller):
     """A full dual-stick deflection leaves the stop gate at 3.2.0's wheel speed."""
     # 3.2.0 started the dual-stick node as /joy_controller with 2.0 m/s and 6.0 at wheel_radius
@@ -279,3 +280,39 @@ def test_overridden_keys_cover_wildcard_sections():
         '/**': ['deadzone'], 'joy_launcher': ['tilt_axis'],
         'esc_motor_control': ['full_speed_button']}
     assert questix_control_config.overridden_keys(None, profile) == {}
+
+
+@pytest.mark.parametrize('controller', ['uart', 'dualshock', 'web', 'udp'])
+@pytest.mark.parametrize('mode,base', [
+    ('lesson', ['teacher']), ('practice', []), ('competition', ['referee'])])
+def test_controller_permission_wiring(expand, controller, mode, base):
+    nodes = expand(
+        'launcher/launch/questix_core.launch.xml', controller_type=controller,
+        robot_mode=mode, enable_gpio_ref='true', enable_lidar='false', enable_rviz='false',
+        udp_local_address='127.0.0.1', udp_peer_address='127.0.0.2', udp_port='5000')
+    manager = nodes['/motion_permission_manager']
+    expected = base + (['controller'] if controller == 'udp' and mode != 'lesson' else [])
+    assert manager.get('required', {}).get(mode, []) == expected
+    assert manager['mode'] == mode
+    if controller == 'udp':
+        assert '/udp_joy_driver' in nodes
+        assert '/joy_node' not in nodes and '/uart_joy_driver' not in nodes
+        assert nodes['/udp_joy_driver']['allow_rearm_after_stop'] == (mode != 'competition')
+        assert nodes['/udp_joy_driver']['local_address'] == '127.0.0.1'
+        assert nodes['/udp_joy_driver']['deadzone'] == .1
+    else:
+        assert '/udp_joy_driver' not in nodes
+
+
+@pytest.mark.parametrize('failure', ['missing', 'yaml', 'rules', 'controller'])
+def test_permission_profile_failure_starts_no_nodes(expand, tmp_path, failure):
+    source = tmp_path / 'invalid-permission.yaml'
+    if failure != 'missing':
+        source.write_text('[' if failure == 'yaml' else '{}')
+    arguments = {'controller_type': 'udp', 'robot_mode': 'practice',
+                 'permission_source_file': str(source), 'enable_gpio_ref': 'false'}
+    if failure == 'controller':
+        arguments['controller_type'] = 'bad'
+    with pytest.raises((OSError, KeyError, ValueError, yaml.YAMLError)):
+        expand('launcher/launch/questix_core.launch.xml', **arguments)
+    assert expand.started == {}

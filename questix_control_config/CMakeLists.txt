@@ -8,6 +8,7 @@ install(FILES README.md DESTINATION share/${PROJECT_NAME})
 
 if(BUILD_TESTING)
   find_package(ament_cmake_pytest REQUIRED)
+  ament_add_pytest_test(test_permission_profile test/test_permission_profile.py)
   ament_add_pytest_test(test_launcher_layout test/test_launcher_layout.py)
 endif()
 ament_auto_package(INSTALL_TO_SHARE config launch)

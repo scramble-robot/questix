@@ -663,7 +663,8 @@ def test_readiness_warns_about_legacy_speed_without_preventing_start(client, tmp
 
 @pytest.mark.parametrize('controller,node', [('dualshock', 'joy_node'),
                                            ('uart', 'uart_joy_driver'),
-                                           ('uart', 'joy_node')])
+                                           ('uart', 'joy_node'),
+                                           ('udp', 'udp_joy_driver')])
 def test_saved_deadzone_read_repair_and_undo(client, tmp_path, controller, node):
     """Keep old zero values on read and undo; require explicit repair before saving."""
     url = f'/api/control-config/{controller}'
@@ -701,14 +702,15 @@ def test_saved_deadzone_read_repair_and_undo(client, tmp_path, controller, node)
 
 @pytest.mark.parametrize('controller,node', [('dualshock', 'joy_node'),
                                            ('uart', 'uart_joy_driver'),
-                                           ('web', 'web_joy_driver')])
+                                           ('web', 'web_joy_driver'),
+                                           ('udp', 'udp_joy_driver')])
 def test_deadzone_strict_bounds_and_defaults(controller, node):
     """Validate every input driver's bounds, including the uneditable web defaults."""
     root = Path(__file__).resolve().parents[2]
     values = controls._decode(
         (root / f'questix_control_config/config/controls.{controller}.yaml').read_bytes(), controller)
     assert controls.deadzone_out_of_range(values) == []
-    assert values[node]['deadzone'] == (0.1 if controller == 'dualshock' else 0.05)
+    assert values[node]['deadzone'] == (0.1 if controller in ('dualshock', 'udp') else 0.05)
     for value in (0.05, 0.99):
         values[node]['deadzone'] = value
         assert controls.validate(values, controller)[node]['deadzone'] == value

@@ -36,12 +36,12 @@ const ControllerMap = (() => {
     }
     const common = { 4: "left-shoulder", 5: "right-shoulder", 6: "left-trigger",
       7: "right-trigger", 8: "menu-left", 9: "menu-right", 10: "home" };
-    const face = controller === "uart"
+    const face = (controller === "uart" || controller === "udp")
       ? ["face-right", "face-bottom", "face-top", "face-left"]
       : ["face-bottom", "face-right", "face-top", "face-left"];
     if (value < 4) return face[value];
     if (common[value]) return common[value];
-    const extra = controller === "uart"
+    const extra = (controller === "uart" || controller === "udp")
       ? { 11: "capture", 12: "left-stick", 13: "right-stick" }
       : { 11: "left-stick", 12: "right-stick" };
     return extra[value] || null;

@@ -103,16 +103,16 @@ test('the browser controller is named in readiness and selected in the admin con
   assert.equal(f.document.getElementById('ready-controller').textContent, 'Web（ブラウザ・スマホ）');
   await vm.runInContext('refreshStatus()', f.context);
   assert.equal(f.document.getElementById('ready-controller').textContent, 'Web（ブラウザ・スマホ）');
-  // The admin choice is a three-way select whose value is saved as CONTROLLER_TYPE.
+  // The admin choice is a four-way select whose value is saved as CONTROLLER_TYPE.
   assert.equal(f.document.getElementById('controller-type').value, 'web');
   const html = fs.readFileSync(path.join(__dirname, '../static/index.html'), 'utf8');
   const options = (id) => {
     const select = html.slice(html.indexOf(`<select id="${id}"`));
     return [...select.slice(0, select.indexOf('</select>')).matchAll(/value="([^"]+)"/g)].map((m) => m[1]);
   };
-  assert.deepEqual(options('controller-type'), ['uart', 'dualshock', 'web']);
+  assert.deepEqual(options('controller-type'), ['uart', 'udp', 'dualshock', 'web']);
   // The browser controller's buttons are fixed by its page: the tuning tab does not edit it.
-  assert.deepEqual(options('controls-profile'), ['uart', 'dualshock']);
+  assert.deepEqual(options('controls-profile'), ['uart', 'udp', 'dualshock']);
   assert.doesNotMatch(html, /controller-type-toggle/);
 });
 

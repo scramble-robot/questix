@@ -13,7 +13,14 @@ motion_permission_manager:
     lease_sec: 1.0
     publish_rate_hz: 20.0
     topic: "/motion_permission"
+    # Read by permission_profile.launch.py, removed before the manager sees this map.
+    controller_votes:
+      # In lesson, teacher permission also covers LAB; controller OFF is input-local only.
+      udp:
+        practice: ["controller"]
+        competition: ["controller"]
     votes:
+      controller: "/motion_vote/controller"
       # RefereeMonitor: the AutoReferee's GPIO27 (competition launches only).
       referee: "/motion_vote/referee"
       # Robot Manager's 操作 tab: the teacher's permission (a heartbeat while switched on).

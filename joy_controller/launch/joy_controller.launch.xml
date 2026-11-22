@@ -25,11 +25,11 @@ joy_launcher は発射機構のボタン（射出・角度・ローラー）を 
     <arg name="web_config_file"
          default="$(find-pkg-share web_joy_driver)/config/web_joy_driver_params.yaml"
          description="Path to the web (smartphone/browser) joy driver configuration YAML" />
-    <arg name="controller_type" default="uart" description="Controller type: dualshock, uart, or web" />
+    <arg name="controller_type" default="uart" description="Controller type: dualshock, uart, web, or udp" />
     <include file="$(find-pkg-share questix_control_config)/launch/control_profile.launch.py" />
 
     <!-- Joy node (from joy package) - DualShock mode (also the fallback for unknown types) -->
-    <group unless="$(or $(equals '$(var controller_type)' 'uart') $(equals '$(var controller_type)' 'web'))">
+    <group unless="$(or $(equals '$(var controller_type)' 'udp') $(or $(equals '$(var controller_type)' 'uart') $(equals '$(var controller_type)' 'web')))">
         <node pkg="joy" exec="joy_node" name="joy_node" output="screen">
             <param from="$(var joy_node_config_file)" />
             <param from="$(var control_config_file)" />
@@ -42,6 +42,10 @@ joy_launcher は発射機構のボタン（射出・角度・ローラー）を 
             <param from="$(var uart_config_file)" />
             <param from="$(var control_config_file)" />
         </node>
+    </group>
+
+    <group if="$(equals '$(var controller_type)' 'udp')">
+        <include file="$(find-pkg-share udp_joy_driver)/launch/udp_joy_driver.launch.py" />
     </group>
 
     <!-- Web Joy Driver node - smartphone/browser mode (Switch2-native indices; profile controls.web.yaml) -->

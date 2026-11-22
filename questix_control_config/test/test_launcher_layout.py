@@ -19,7 +19,7 @@ OLD = {
 
 def test_packaged_profiles_use_the_joy_launcher_section():
     keys = {key for names in LAUNCHER_LEGACY_SECTIONS.values() for key in names} - {'tilt_axis'}
-    for controller in ('uart', 'dualshock', 'web'):
+    for controller in ('uart', 'dualshock', 'web', 'udp'):
         document = yaml.safe_load((CONFIG / f'controls.{controller}.yaml').read_text())
         assert 'shot_component' not in document and 'esc_motor_control' not in document
         assert set(document[LAUNCHER_NODE]['ros__parameters']) == keys

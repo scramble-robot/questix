@@ -645,18 +645,19 @@ test('a stale tilt API explains the required manager update without showing inco
   assert.match(document.getElementById('controls-load-error').textContent, /担当者.*管理画面.*再起動/);
 });
 
-for (const controller of ['uart', 'dualshock']) {
+for (const controller of ['uart', 'dualshock', 'udp']) {
   test(`${controller}: only six understandable tuning fields are rendered`, async () => {
     const { document, context } = editorFixture({
       drive_component: { max_motor_rpm: 475, max_linear_accel: 3, slew_taper_band_linear: 0.2 },
       joy_controller: { lateral_input_ratio: 0.3 },
       joy_controller_dual_stick: { longitudinal_input_ratio: 0.05 },
       joy_axis_drive: { max_motor_rpm: 100 },
+      ...(controller === 'udp' ? { udp_joy_driver: { deadzone: 0.1 } } : {}),
     }, controller);
     await vm.runInContext(`loadControls("${controller}")`, context);
     assert.deepEqual(document.querySelectorAll('.control-field').map((row) => `${row.dataset.node}.${row.dataset.key}`).sort(),
       ['drive_component.max_linear_accel', 'drive_component.max_angular_accel', 'joy_controller.longitudinal_input_ratio', 'joy_controller.angular_input_ratio',
-        'joy_launcher.full_speed_value', `${controller === 'uart' ? 'uart_joy_driver' : 'joy_node'}.deadzone`].sort());
+        'joy_launcher.full_speed_value', `${{ uart: 'uart_joy_driver', dualshock: 'joy_node', udp: 'udp_joy_driver' }[controller]}.deadzone`].sort());
   });
 }
 

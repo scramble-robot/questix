@@ -1,6 +1,6 @@
 <launch>
   <!-- Launch Arguments -->
-  <arg name="controller_type" default="dualshock" description="Controller type: dualshock, uart, or web" />
+  <arg name="controller_type" default="dualshock" description="Controller type: dualshock, uart, web, or udp" />
   <arg name="use_sim_time" default="false" description="Use simulation time" />
 
   <!-- Hardware configuration. Both nodes obey /launcher_command only (joy_launcher, or
