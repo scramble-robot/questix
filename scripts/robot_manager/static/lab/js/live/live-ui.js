@@ -259,19 +259,19 @@ function readings() {
     ? fillSentence(unitWords.maintenancePose, {
         x: f(odom.x),
         y: f(odom.y),
-        heading: formatHeading(odom.theta, { short: true }),
+        heading: formatHeading(odom.theta, { short: true, signed: true }),
       })
     : '—';
   $('robotSpeed').textContent = drive
     ? fillSentence(unitWords.maintenanceMotion, {
         speed: f(drive.v),
-        turn: formatTurnRate(drive.w),
+        turn: formatTurnRate(drive.w, { signed: true }),
       })
     : '—';
   $('robotCommand').textContent = twist
     ? fillSentence(unitWords.maintenanceMotion, {
         speed: f(twist.linear),
-        turn: formatTurnRate(twist.angular),
+        turn: formatTurnRate(twist.angular, { signed: true }),
       })
     : '—';
   drawEstop();

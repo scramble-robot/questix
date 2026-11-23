@@ -12,6 +12,10 @@ const fixed = (value, digits = 2) => {
   const text = Number(value).toFixed(digits);
   return Number(text) === 0 ? (0).toFixed(digits) : text;
 };
+const signedFixed = (value, digits, signed) => {
+  const text = fixed(value, digits);
+  return signed && Number(text) > 0 ? `+${text}` : text;
+};
 // Preserve the controller lesson's existing precision rule.
 function degreesText(value) {
   const degrees = toDegrees(value);
@@ -22,25 +26,28 @@ function wrapHeading(radians) {
   const wrapped = Math.atan2(Math.sin(radians), Math.cos(radians));
   return Object.is(wrapped, -0) ? 0 : wrapped;
 }
-function angleParts(radians, digits = 0) {
+function angleParts(radians, digits = 0, signed = false) {
   return {
-    degrees: fixed(toDegrees(radians), digits),
-    pi: fixed(radians / Math.PI),
-    rad: fixed(radians),
+    degrees: signedFixed(toDegrees(radians), digits, signed),
+    pi: signedFixed(radians / Math.PI, 2, signed),
+    rad: signedFixed(radians, 2, signed),
   };
 }
 const unitWords = await loadJson('content/angle-units.json');
-function formatChange(radians, { short = false, digits = 0 } = {}) {
+function formatChange(radians, { short = false, digits = 0, signed = false } = {}) {
   if (!Number.isFinite(radians)) return '—';
   return fillSentence(
     short ? unitWords.headingShort : unitWords.headingLong,
-    angleParts(radians, digits),
+    angleParts(radians, digits, signed),
   );
 }
 const formatHeading = (radians, options) => formatChange(wrapHeading(radians), options);
-const formatTurnRate = (rate) =>
+const formatTurnRate = (rate, { signed = false } = {}) =>
   Number.isFinite(rate)
-    ? fillSentence(unitWords.turnRate, { rate: fixed(rate), degrees: fixed(toDegrees(rate), 0) })
+    ? fillSentence(unitWords.turnRate, {
+        rate: signedFixed(rate, 2, signed),
+        degrees: signedFixed(toDegrees(rate), 0, signed),
+      })
     : '—';
 const formatWheelRate = (rate) =>
   Number.isFinite(rate)

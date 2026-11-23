@@ -474,8 +474,8 @@ function snapshotLine(model, date, text) {
     left: wheels ? wheels.left.toFixed(1) : unknown,
     right: wheels ? wheels.right.toFixed(1) : unknown,
     speed: motion ? signed(motion.speed, 2) : unknown,
-    turn: motion ? formatTurnRate(motion.turn) : unknown,
-    heading: pose ? formatHeading(pose.heading, { short: true }) : unknown,
+    turn: motion ? formatTurnRate(motion.turn, { signed: true }) : unknown,
+    heading: pose ? formatHeading(pose.heading, { short: true, signed: true }) : unknown,
     front: front && front.distance !== null ? front.distance.toFixed(2) : unknown,
     estop,
   });

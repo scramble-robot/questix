@@ -64,11 +64,7 @@
     "titleBusy": "試した経験から、走り方を更新中",
     "titleDone": "学習で、走り方はどう変わった？",
     "progressNote": "さまざまな車輪の動かし方を試し、合計点の高い走り方を探しています。",
-    "checkpointFigureNames": [
-      "学習前",
-      "学習途中",
-      "学習後"
-    ],
+    "checkpointFigureNames": ["学習前", "学習途中", "学習後"],
     "pending": "これから",
     "pendingButton": "学習後に表示",
     "metrics": {

@@ -45,7 +45,7 @@
   "motion": {
     "speed": "前後の速さ",
     "turn": "ロボットの旋回の角速度",
-    "turnDegrees": "{@turnRate}・左回りが＋",
+    "turnDegrees": "{value}・左回りが＋",
     "unitNote": "{@radRate}。{@turnConversion}。"
   },
   "pose": {

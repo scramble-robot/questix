@@ -72,6 +72,31 @@ test('heading change stays unwrapped and signed beyond a full turn', () => {
   assert.equal(formatHeading(toRadians(400)), '40°（0.22π rad ≒ 0.70 rad）');
 });
 
+test('optional signs follow each rounded heading and turn-rate value', () => {
+  const signed = { signed: true };
+  const short = { signed: true, short: true };
+  for (const [degrees, longText, shortText] of [
+    [45, '+45°（+0.25π rad ≒ +0.79 rad）', '+45°（+0.25π rad）'],
+    [0, '0°（0.00π rad ≒ 0.00 rad）', '0°（0.00π rad）'],
+    [-45, '-45°（-0.25π rad ≒ -0.79 rad）', '-45°（-0.25π rad）'],
+    [-0.3, '0°（0.00π rad ≒ -0.01 rad）', '0°（0.00π rad）'],
+    [0.3, '0°（0.00π rad ≒ +0.01 rad）', '0°（0.00π rad）'],
+  ]) {
+    assert.equal(formatHeading(toRadians(degrees), signed), longText);
+    assert.equal(formatHeading(toRadians(degrees), short), shortText);
+  }
+  for (const [rate, expected] of [
+    [0.5, '+0.50 rad/s（約+29°/s）'],
+    [0, '0.00 rad/s（約0°/s）'],
+    [-0.5, '-0.50 rad/s（約-29°/s）'],
+    [0.004, '0.00 rad/s（約0°/s）'],
+    [-0.004, '0.00 rad/s（約0°/s）'],
+  ])
+    assert.equal(formatTurnRate(rate, signed), expected);
+  assert.equal(formatHeading(toRadians(45)), '45°（0.25π rad ≒ 0.79 rad）');
+  assert.equal(formatTurnRate(0.5), '0.50 rad/s（約29°/s）');
+});
+
 test('shared first-use words and rad explanation resolve in each content consumer', async () => {
   const basics = await loadAngleJson('content/slam/basics.json');
   const help = await loadAngleText('content/slam/basics-wheels-help.html');

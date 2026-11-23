@@ -1,4 +1,4 @@
-import { formatHeading, fromRpm, fixed as unitFixed } from '../core/angle-units.js';
+import { formatHeading, formatTurnRate, fromRpm, fixed as unitFixed } from '../core/angle-units.js';
 import { html, svg, nothing } from '../vendor/lit-html.js';
 import { fillSentence as fill } from '../core/content.js';
 import { roleStyle } from '../core/palette.js';
@@ -161,7 +161,6 @@ function wheelCard(model, side, text) {
 function motionCard(model, text) {
   const motion = model.motion;
   const stale = !motion || motion.stale;
-  const degrees = motion ? Math.round(motion.turn * DEGREES_PER_RADIAN) : NaN;
   return html`<div class=${stale ? 'rs-card rs-motion is-stale' : 'rs-card rs-motion'}>
     <div>
       <p class="rs-label">${text.motion.speed}</p>
@@ -174,7 +173,7 @@ function motionCard(model, text) {
       <p class="rs-label">${text.motion.turn}</p>
       <p class="rs-sub">${text.motion.unitNote}</p>
       <p class="rs-angular-value" data-rs-turn>
-        ${Number.isFinite(degrees) ? fill(text.motion.turnDegrees, { rate: unitFixed(motion.turn), degrees }) : '—'}
+        ${motion && Number.isFinite(motion.turn) ? fill(text.motion.turnDegrees, { value: formatTurnRate(motion.turn, { signed: true }) }) : '—'}
       </p>
     </div>
   </div>`;
@@ -238,7 +237,9 @@ function poseCard(model, text, actions) {
       ${poseFigure(pose, text)}
       <div class="rs-pose-readout">
         <p class="rs-sub">${words.heading}</p>
-        <p class="rs-angular-value" data-rs-heading>${formatHeading(pose.heading)}</p>
+        <p class="rs-angular-value" data-rs-heading>
+          ${formatHeading(pose.heading, { signed: true })}
+        </p>
         <p class="rs-sub">${words.headingNote}</p>
         <p class="rs-sub" data-rs-moved>
           ${fill(words.moved, { forward: signed(pose.forward, 2), left: signed(pose.left, 2) })}
