@@ -1,5 +1,9 @@
 import { rpmToSpeed, speedToRpm } from './engine/maths.js';
 
+// REP-103 body frame: axle midpoint at the origin, +x forward, +y left, +z up.
+// World poses use +y up and counterclockwise-positive yaw. For the canvas-based world.js
+// integration in #274, keep x and negate y and theta (the current simulator uses y down).
+
 const TAU = 2 * Math.PI;
 
 /** QUESTiX LAB model in metres, seconds and radians, with a separate motor ceiling in RPM. */
@@ -7,9 +11,13 @@ export const ROBOT_DIMENSIONS = Object.freeze({
   // launcher/config/drive_component.yaml and questix_lab_bridge/config/lab_bridge.yaml
   wheelRadius: 0.05,
   wheelSeparation: 0.5,
-  // questix.dae assembly bounds relative to the axle midpoint. CAD -Y is forward.
+  // CAD -Y is forward. The LiDAR was confirmed at the rear on the physical robot (2026-11-23).
+  // The front edge marked in the LAB top view faces this same direction.
+  // questix.dae assembly bounds relative to the axle midpoint.
   // Use the measured tyre gaps (475 mm inside, 537 mm outside). CAD tyres are 39 mm wide.
   footprint: Object.freeze({ front: 0.245, rear: 0.4119, left: 0.32, right: 0.32 }),
+  // Centre of the CAD T-mini Plus body bounds. Its offset to the optical scan centre is unverified.
+  lidarBodyCenter: Object.freeze({ x: -0.3215, y: 0, z: 0.06845 }),
   // Provisional lesson speeds, pending the course owner's decision.
   maxLinear: 0.5,
   maxAngular: 1.5,

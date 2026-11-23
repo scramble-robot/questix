@@ -20,6 +20,7 @@ function near(actual, expected) {
 }
 
 test('QUESTiX dimensions are frozen and use the CAD envelope relative to the axle', () => {
+  // CAD -Y is forward, confirmed by the rear LiDAR on the physical robot (2026-11-23).
   assert.ok(Object.isFrozen(ROBOT_DIMENSIONS));
   assert.ok(Object.isFrozen(ROBOT_DIMENSIONS.footprint));
   const { front, rear, left, right } = ROBOT_DIMENSIONS.footprint;
@@ -28,6 +29,16 @@ test('QUESTiX dimensions are frozen and use the CAD envelope relative to the axl
   near(left + right, 0.64);
   assert.ok(Math.min(left, right) > 0.537 / 2); // Measured outer tyre span.
   assert.ok(Math.min(left, right) > 0.277); // CAD outer tyre edge.
+});
+
+test('the frozen CAD LiDAR body centre is behind the axle and inside the footprint', () => {
+  const { footprint, lidarBodyCenter } = ROBOT_DIMENSIONS;
+  assert.ok(Object.isFrozen(lidarBodyCenter));
+  const { x, y, z } = lidarBodyCenter;
+  assert.deepEqual([x, y, z], [-0.3215, 0, 0.06845]);
+  assert.ok(x > -footprint.rear && x < 0);
+  assert.ok(y > -footprint.right && y < footprint.left);
+  assert.ok(z > 0);
 });
 
 for (const config of [
@@ -99,6 +110,7 @@ test('footprint corners rotate around the axle and keep the local front and left
 });
 
 test('top image bounds land on the collision corners at 0, 45 and 90 degrees', () => {
+  // The top artwork marks its right edge as forward, matching the confirmed CAD -Y.
   const [left, top, right, bottom] = QUESTIX_VIEWS.top.bounds;
   const alternate = { footprint: { front: 0.6, rear: 0.2, left: 0.5, right: 0.3 } };
   const scale = 177;

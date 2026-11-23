@@ -1,5 +1,10 @@
 import { footprintCorners, ROBOT_DIMENSIONS } from './robot-dimensions.js';
 
+// REP-103 body frame: axle midpoint at the origin, +x forward, +y left.
+// Poses and obstacle bounds share a world frame with +y up and counterclockwise-positive yaw.
+// For #274, reflect the world.js canvas coordinates: negate pose y and theta, and use
+// [-maxY, -minY] for obstacle y bounds. Keep x unchanged.
+
 const TAU = 2 * Math.PI;
 const CONTACT_EPSILON = 1e-12; // metres, for roundoff at inclusive contact
 const AXIS_ALIGNED = [
