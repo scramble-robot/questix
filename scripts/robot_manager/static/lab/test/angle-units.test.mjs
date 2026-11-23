@@ -18,7 +18,7 @@ import {
   loadAngleJson,
   loadAngleText,
 } from '../js/core/angle-units.js';
-import { wheelExample } from '../js/slam/basics-core.js';
+import { WHEEL_DIAMETER, wheelExample } from '../js/slam/basics-core.js';
 import { graphReadings, graphSpec } from '../js/rl/sensors.js';
 
 const near = (a, b, tolerance = 1e-12) => assert.ok(Math.abs(a - b) < tolerance, `${a} ≠ ${b}`);
@@ -156,7 +156,7 @@ test('SLAM rad/s presets retain straight, left curve and left spin with the same
   const { wheels } = await loadAngleJson('content/slam/basics.json');
   assert.deepEqual(wheels.slider, { min: -3, max: 6, step: 1.5 });
   const result = (key) => wheelExample(...wheels.presets[key].map(toRpm));
-  near(result('straight').x, 0.065 * 3 * 2);
+  near(result('straight').x, (WHEEL_DIAMETER / 2) * 3 * 2);
   near(result('straight').angle, 0);
   assert(result('curve').angle > 0);
   assert(result('curve').distance > 0);

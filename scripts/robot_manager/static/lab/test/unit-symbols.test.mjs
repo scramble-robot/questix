@@ -133,7 +133,7 @@ test('standalone s is reserved for unit-bearing equations, never prose or playba
     for (const line of lines) {
       if (/['"`] s['"`]/.test(line)) assert.fail(path.pathname + ': ' + line);
       if (/[0-9}] s(?:[ 。'"`<]|$)/.test(line))
-        assert(/[×÷=]/.test(line) && /(?:rad|m)\/s/.test(line), path.pathname + ': ' + line);
+        assert(/[×÷=]/.test(line) && /(?:rad|m|°)\/s/.test(line), path.pathname + ': ' + line);
     }
   }
 });

@@ -5,13 +5,12 @@ import {
   toDegrees,
   formatHeading,
   formatChange,
-  formatTurnRate,
   formatWheelRate,
   fixed,
 } from '../core/angle-units.js';
 import { html, svg, nothing, unsafeHTML, ifDefined } from '../vendor/lit-html.js';
 import { formatNumber } from '../core/dom.js';
-import { snapToZero, fillText } from './basics-core.js';
+import { WHEEL_DIAMETER, WHEEL_TRACK, snapToZero, fillText } from './basics-core.js';
 import { questixTopSvg } from '../core/questix-art.js';
 
 // Templates of the introductory SLAM chapters. Every function is pure: it turns the model built
@@ -152,27 +151,46 @@ function wheelsFigure({ estimate, actual, slipping }, copy) {
   );
 }
 
-function wheelsCalculation({ leftRpm, rightRpm, estimate }, copy) {
-  const radians = (rpm) => fixed(fromRpm(rpm) * EXAMPLE_SECONDS);
+function wheelsCalculation({ leftRpm, rightRpm, estimate }, copy, radius = WHEEL_DIAMETER / 2) {
   const travel = (metres) => quantity(metres * 100, 1);
-  return html`${metric(copy.perTurn, copy.perTurnValue)}${metric(
-    copy.travel,
-    html`${fillText(copy.travelLeft, { rate: fixed(fromRpm(leftRpm), 1), radians: radians(leftRpm), centimetres: travel(estimate.left) })}<br />${fillText(
-        copy.travelRight,
-        {
-          rate: fixed(fromRpm(rightRpm), 1),
-          radians: radians(rightRpm),
-          centimetres: travel(estimate.right),
-        },
-      )}`,
-  )}${positionMetric(
-    copy.pose,
-    fillText(copy.poseValue, {
-      forward: travel(estimate.x),
-      left: travel(estimate.y),
-      heading: formatHeading(estimate.angle, { digits: 1 }),
-    }),
-  )}`;
+  const radiusText = String(radius);
+  const distanceValues = (rpm, metres) => {
+    const radians = fromRpm(rpm) * EXAMPLE_SECONDS;
+    const turns = fixed(radians / (2 * Math.PI));
+    return {
+      rate: fixed(fromRpm(rpm), 1),
+      radians: fixed(radians, 1),
+      piRelation: radians === 0 ? '' : copy.approximately,
+      pi: fixed(radians / Math.PI),
+      turnRelation: radians === 0 ? '' : copy.about,
+      turns: Number(turns) === 0 ? '0' : turns,
+      radius: radiusText,
+      metres: fixed(metres),
+      centimetres: travel(metres),
+    };
+  };
+  return html`${metric(
+      copy.perTurn,
+      fillText(copy.perTurnValue, {
+        radius: radiusText,
+        diameter: String(Number(fixed(radius * 200, 6))),
+        circumference: fixed(2 * Math.PI * radius),
+      }),
+    )}${metric(
+      copy.travel,
+      html`${fillText(copy.travelLeft, distanceValues(leftRpm, estimate.left))}<br />${fillText(
+          copy.travelRight,
+          distanceValues(rightRpm, estimate.right),
+        )}`,
+    )}${positionMetric(
+      copy.pose,
+      fillText(copy.poseValue, {
+        forward: travel(estimate.x),
+        left: travel(estimate.y),
+        heading: formatHeading(estimate.angle, { digits: 1 }),
+      }),
+    )}
+    <p class="basics-position">${copy.radianMeaning}</p>`;
 }
 
 function wheelsObservation({ leftRpm, rightRpm, slipping }, copy) {
@@ -219,7 +237,12 @@ function wheelsControls(wheels, copy, helpHtml, actions) {
     >
     <details data-help-dialog>
       <summary>${copy.helpSummary}</summary>
-      ${unsafeHTML(helpHtml)}
+      ${unsafeHTML(
+        fillText(helpHtml, {
+          diameter: String(Number(fixed(WHEEL_DIAMETER * 100, 6))),
+          track: String(Number(fixed(WHEEL_TRACK * 100, 6))),
+        }),
+      )}
     </details>`;
 }
 
@@ -256,10 +279,9 @@ function imuCalculation({ rate, seconds, distance, result }, copy) {
   return html`${metric(
     copy.heading,
     fillText(copy.headingValue, {
-      rate: fixed(toRadians(rate)),
-      seconds: fixed(seconds, 1),
-      rad: fixed(toRadians(rate * seconds)),
-      degrees: rate * seconds,
+      degreesPerSecond: fixed(rate, 0),
+      seconds: fixed(seconds, 0),
+      change: formatChange(toRadians(rate * seconds)),
     }),
   )}${metric(copy.distance, fillText(copy.distanceValue, { distance: quantity(distance) }))}${positionMetric(
     copy.pose,
@@ -278,11 +300,14 @@ function imuControls(imu, copy, actions) {
       max: 45,
       step: 15,
       value: imu.rate,
-      text: formatTurnRate(toRadians(imu.rate)),
+      text: fillText(copy.rateValue, {
+        degrees: fixed(imu.rate, 0),
+        radians: fixed(toRadians(imu.rate)),
+      }),
       onInput: onInput(actions.setTurnRate),
     })}${slider({
       id: 'basicsSeconds',
-      title: '回転を続ける時間',
+      title: copy.secondsTitle,
       min: 1,
       max: 4,
       step: 1,
@@ -547,4 +572,4 @@ function basicsPage(model, copy, helpHtml, actions) {
     <div class="basics-footer">${slots.summary}</div>`;
 }
 
-export { basicsPage, figureArt, metric, helpDialog };
+export { basicsPage, figureArt, metric, helpDialog, wheelsCalculation };
