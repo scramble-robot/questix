@@ -43,7 +43,12 @@ export function footprintIntersectsRect(pose, rectangle, dimensions = ROBOT_DIME
   });
 }
 
-/** Test the closed swept rectangle from start to end {x, y}, keeping start.theta fixed. */
+/**
+ * Test the closed swept rectangle from start to end {x, y}, keeping start.theta fixed.
+ * A differential-drive robot translates along its heading. Callers in #274 must keep the
+ * displacement along start.theta, either forward or backward. Check motion along a curve
+ * by splitting it into short straight segments and in-place turns.
+ */
 export function footprintIntersectsDuringTranslation(
   start,
   end,

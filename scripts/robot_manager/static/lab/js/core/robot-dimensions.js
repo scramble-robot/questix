@@ -10,13 +10,19 @@ const TAU = 2 * Math.PI;
 export const ROBOT_DIMENSIONS = Object.freeze({
   // launcher/config/drive_component.yaml and questix_lab_bridge/config/lab_bridge.yaml
   wheelRadius: 0.05,
+  // The 0.5 m wheel separation follows the robot's config. The measured tyre centre gap is
+  // 506 mm (475 mm inside, 537 mm outside). The 1.2% difference is within the mounting
+  // tolerance (#227 section 5-1).
   wheelSeparation: 0.5,
   // CAD -Y is forward. The LiDAR was confirmed at the rear on the physical robot (2026-11-23).
   // The front edge marked in the LAB top view faces this same direction.
   // questix.dae assembly bounds relative to the axle midpoint.
-  // Use the measured tyre gaps (475 mm inside, 537 mm outside). CAD tyres are 39 mm wide.
+  // The CAD envelope extends past the outer tyre edges in both the measurements and the CAD
+  // model, where the tyres are 39 mm wide.
   footprint: Object.freeze({ front: 0.245, rear: 0.4119, left: 0.32, right: 0.32 }),
   // Centre of the CAD T-mini Plus body bounds. Its offset to the optical scan centre is unverified.
+  // z is relative to the axle midpoint, about 0.05 m above the CAD floor. The floor and ROS
+  // base_link are separate references.
   lidarBodyCenter: Object.freeze({ x: -0.3215, y: 0, z: 0.06845 }),
   // Provisional lesson speeds, pending the course owner's decision.
   maxLinear: 0.5,
