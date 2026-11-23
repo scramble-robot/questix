@@ -5,6 +5,7 @@ import {
   FRONT_CUE_INNER,
   questixImageUrl,
   questixSideLayout,
+  questixTopFootprintLayout,
 } from './questix-views.js';
 
 // SVG versions of the QUESTiX views (lit templates). Canvas drawing, placement and the image URLs
@@ -28,6 +29,20 @@ function questixTopSvg(x, y, heading = 0, size = 60, opacity = 1) {
   </g>`;
 }
 
+/** SVG top view at the axle pose using the model's physical footprint. */
+function questixTopFootprintSvg(pose, pixelsPerMetre, dimensions, opacity = 1) {
+  const place = questixTopFootprintLayout(pose, pixelsPerMetre, dimensions);
+  const { x, y, size } = place.cue;
+  const heading = (place.theta * 180) / Math.PI;
+  const cue = `M${x + size * 0.48} ${y - size * 0.12}V${y + size * 0.12}`;
+  return svg`<g data-questix-view="top" transform=${`translate(${place.x} ${place.y}) rotate(${heading})`} opacity=${opacity}>
+    <image href=${questixImageUrl('top')} x=${place.image.x} y=${place.image.y}
+      width=${place.image.width} height=${place.image.height} preserveAspectRatio="none" />
+    <path d=${cue} stroke=${FRONT_CUE_OUTER} stroke-width=${Math.max(3, size * 0.08)} stroke-linecap="round" />
+    <path d=${cue} stroke=${FRONT_CUE_INNER} stroke-width=${Math.max(2, size * 0.05)} stroke-linecap="round" />
+  </g>`;
+}
+
 /** SVG side view (lit template); see questixSideLayout for the placement. */
 function questixSideSvg(x, bottom, width, view = 'side', opacity = 1) {
   const place = questixSideLayout(x, bottom, width, view);
@@ -36,4 +51,4 @@ function questixSideSvg(x, bottom, width, view = 'side', opacity = 1) {
 }
 
 export * from './questix-views.js';
-export { questixTopSvg, questixSideSvg };
+export { questixTopSvg, questixTopFootprintSvg, questixSideSvg };

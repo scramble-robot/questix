@@ -1,4 +1,5 @@
 import { contentUrl } from './content.js';
+import { ROBOT_DIMENSIONS } from './robot-dimensions.js';
 
 // The QUESTiX robot as every figure shows it (DOM-free part: canvas drawing and placement; the lit SVG
 // helpers are in questix-art.js, which re-exports this module): views rendered from the robot's assembly CAD
@@ -106,6 +107,54 @@ function drawQuestixTop(context, x, y, theta = 0, size = 60) {
 }
 
 /**
+ * Place the top image in axle-local pixels with its painted bounds on the footprint.
+ * Pose uses metres, +y up and counterclockwise radians. Rendering uses +y down,
+ * with the world origin at the drawing origin.
+ */
+function questixTopFootprintLayout({ x, y, theta }, pixelsPerMetre, dimensions = ROBOT_DIMENSIONS) {
+  const { front, rear, left, right } = dimensions.footprint;
+  const [imageLeft, imageTop, imageRight, imageBottom] = VIEWS.top.bounds;
+  const length = (front + rear) * pixelsPerMetre;
+  const width = length / (imageRight - imageLeft);
+  const height = ((left + right) * pixelsPerMetre) / (imageBottom - imageTop);
+  return {
+    x: x * pixelsPerMetre,
+    y: -y * pixelsPerMetre,
+    theta: -theta,
+    image: {
+      x: -rear * pixelsPerMetre - imageLeft * width,
+      y: -left * pixelsPerMetre - imageTop * height,
+      width,
+      height,
+    },
+    cue: {
+      x: ((front - rear) * pixelsPerMetre) / 2,
+      y: ((right - left) * pixelsPerMetre) / 2,
+      size: length,
+    },
+  };
+}
+
+/** Draw the top view at the axle pose using the model's physical footprint. */
+function drawQuestixTopFootprint(context, pose, pixelsPerMetre, dimensions) {
+  const image = images.top;
+  if (!image) return;
+  const place = questixTopFootprintLayout(pose, pixelsPerMetre, dimensions);
+  context.save();
+  context.translate(place.x, place.y);
+  context.rotate(place.theta);
+  context.shadowColor = 'rgba(214, 238, 244, 0.45)';
+  context.shadowBlur = Math.max(4, place.cue.size * 0.1);
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = 'high';
+  context.drawImage(image, place.image.x, place.image.y, place.image.width, place.image.height);
+  context.shadowBlur = 0;
+  context.translate(place.cue.x, place.cue.y);
+  frontCue(context, place.cue.size);
+  context.restore();
+}
+
+/**
  * Where a side view lands: `width` pixels between the robot's front and rear, centred on `x`, its
  * wheels on `bottom`. Returns the image rectangle and, for the full side view, the disc outlet.
  */
@@ -143,6 +192,8 @@ export {
   FRONT_CUE_INNER,
   questixImageUrl,
   drawQuestixTop,
+  questixTopFootprintLayout,
+  drawQuestixTopFootprint,
   drawQuestixSide,
   questixSideLayout,
 };
