@@ -1,5 +1,5 @@
+import { loadAngleJson } from '../core/angle-units.js';
 import { render } from '../vendor/lit-html.js';
-import { loadJson } from '../core/content.js';
 import { IntroLearner, introRandom, introRollout } from './intro.js';
 import {
   ACTION_LABELS,
@@ -26,7 +26,7 @@ import { reportLessonProgress } from '../shell/lesson-progress.js';
 // the containers (#rlGroups, #rlControls, #rlFigure, …) that the chapters render into, so
 // `update()` renders one template per container instead of one page template.
 
-const copy = await loadJson('content/rl/foundations.json');
+const copy = await loadAngleJson('content/rl/foundations.json');
 
 const TOPICS = copy.topics;
 const FIRST_TOPIC = 'experience';

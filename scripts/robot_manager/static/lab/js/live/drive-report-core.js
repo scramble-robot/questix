@@ -1,3 +1,4 @@
+import { toDegrees, angleParts, fixed } from '../core/angle-units.js';
 // What one driving run did, from its recording: the numbers and the curves the run report draws,
 // plus the small wording helpers of the report. No DOM: test/drive-report-core.test.mjs checks it
 // with made-up recordings.
@@ -306,14 +307,14 @@ function benchMove(left, right) {
   return direction + (turn > 0 ? 'Left' : 'Right');
 }
 
-const degreesOf = (radians) => (radians * 180) / Math.PI;
+const degreesOf = toDegrees;
 
 /** 「左へ43°」 / 「右へ12°」 / 「0°」 from a heading change in rad (+ = left, REP-103). */
 function describeTurn(radians, copy) {
   if (!Number.isFinite(radians)) return copy.none;
   const degrees = Math.round(Math.abs(degreesOf(radians)));
-  if (degrees === 0) return copy.turnNone;
-  return fill(radians > 0 ? copy.turnLeft : copy.turnRight, { degrees });
+  if (degrees === 0) return fill(copy.turnNone, angleParts(0));
+  return fill(radians > 0 ? copy.turnLeft : copy.turnRight, angleParts(Math.abs(radians)));
 }
 
 // One axis of the end position: the word follows the sign, the number is always positive.
@@ -336,8 +337,8 @@ function describeOffset(forward, left, copy) {
 function describeTurnRate(radiansPerSecond, copy) {
   if (!Number.isFinite(radiansPerSecond)) return copy.none;
   return fill(copy.turnRateValue, {
-    rate: radiansPerSecond.toFixed(2),
-    degrees: Math.round(degreesOf(radiansPerSecond)),
+    rate: fixed(radiansPerSecond),
+    degrees: fixed(degreesOf(radiansPerSecond), 0),
   });
 }
 

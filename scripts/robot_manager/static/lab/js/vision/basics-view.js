@@ -1,3 +1,4 @@
+import { formatWheelRate } from '../core/angle-units.js';
 import { html, svg, nothing } from '../vendor/lit-html.js';
 import { formatNumber } from '../core/dom.js';
 import { fillSentence } from '../core/content.js';
@@ -21,10 +22,7 @@ const GEOMETRY_DIAGRAM = {
 };
 const WHEEL_DIAMETER = 0.13; // metres
 const STRAIGHT_AHEAD_DEGREES = 0.05; // below this the direction reads 「正面」
-const SECONDS_PER_MINUTE = 60;
-
-const wheelRpm = (metresPerSecond) =>
-  formatNumber((metresPerSecond / (Math.PI * WHEEL_DIAMETER)) * SECONDS_PER_MINUTE);
+const wheelRate = (metresPerSecond) => formatWheelRate(metresPerSecond / (WHEEL_DIAMETER / 2));
 
 // Rows shown from the tail of a history list, numbered from the first run.
 function recentRuns(history, rows = HISTORY_ROWS) {
@@ -544,7 +542,7 @@ function followMotion(model, copy, actions) {
   return html`<div class="vision-motion-top">
       <strong>${copy.follow.motionTitle}</strong
       ><span id="vfWheels"
-        >左車輪 ${wheelRpm(command.left)} rpm　／　右車輪 ${wheelRpm(command.right)} rpm</span
+        >${fillSentence(copy.follow.wheelReadings, { left: wheelRate(command.left), right: wheelRate(command.right) })}</span
       >
     </div>
     ${model.trial ? playbackPlayer(model, actions) : nothing}

@@ -1,4 +1,5 @@
 import { loadJson } from '../core/content.js';
+import { loadAngleJson } from '../core/angle-units.js';
 import { SYSTEM_TOPICS } from '../systems/data.js';
 import { escapeHtml } from './html-escape.js';
 
@@ -10,7 +11,7 @@ import { escapeHtml } from './html-escape.js';
 // The tip card is an HTML string because course modules embed it in their own markup; the
 // grade-by-grade overview on the catalogue page is rendered by series-view.js.
 
-const { SCHOOL_TIPS, SCHOOL_GRADES } = await loadJson('content/school-tips.json');
+const { SCHOOL_TIPS, SCHOOL_GRADES } = await loadAngleJson('content/school-tips.json');
 const copy = await loadJson('content/shell/school-tips.json');
 
 for (const [course, topics] of Object.entries(SYSTEM_TOPICS))

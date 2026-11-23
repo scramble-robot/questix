@@ -1,3 +1,5 @@
+import { fromRpm, formatWheelRate } from '../core/angle-units.js';
+import { fillSentence } from '../core/content.js';
 import { html, nothing, unsafeHTML } from '../vendor/lit-html.js';
 import { formatNumber } from '../core/dom.js';
 import { lessonLabel } from '../shell/lesson-ui.js';
@@ -57,7 +59,11 @@ function timeLabel({ sample, playing, finished }) {
 
 function readings(sample, copy) {
   if (!sample) return copy.playback.readingsIdle;
-  return `左の車輪 ${formatNumber(sample.left, 0)} rpm　右の車輪 ${formatNumber(sample.right, 0)} rpm　移動 ${formatNumber(sample.travel, 2)} m`;
+  return fillSentence(copy.playback.wheelReadings, {
+    left: formatWheelRate(fromRpm(sample.left)),
+    right: formatWheelRate(fromRpm(sample.right)),
+    travel: formatNumber(sample.travel, 2),
+  });
 }
 
 function mapIntro(model) {

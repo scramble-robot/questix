@@ -344,25 +344,25 @@
         }
       },
       {
-        "title": "車輪の回転数",
-        "axis": "回転数",
-        "unit": "rpm",
+        "title": "車輪の角速度",
+        "axis": "車輪の角速度",
+        "unit": "rad/s",
         "lines": [
           {
-            "key": "left",
+            "key": "leftRate",
             "label": "左車輪",
             "short": "左",
             "role": "actual"
           },
           {
-            "key": "right",
+            "key": "rightRate",
             "label": "右車輪",
             "short": "右",
             "role": "measured"
           }
         ],
         "note": {
-          "all": "まっすぐ進むとき左右は同じ値で、線が重なります。向きを変えるときは左右が違い、負の値は車輪が後ろ向きに回っていることを表します。"
+          "all": "{@radRate}。{@rpm}。{@wheelConversion}。まっすぐ進むとき左右は同じ値で、線が重なります。向きを変えるときは左右が違い、負の値は車輪が後ろ向きに回っていることを表します。"
         }
       },
       {

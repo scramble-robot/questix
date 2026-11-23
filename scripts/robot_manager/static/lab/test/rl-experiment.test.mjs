@@ -39,9 +39,21 @@ const batch = (arrivals, contacts) =>
     return outcome({ collision: index < arrivals + contacts });
   });
 
-test('the reward table is exactly the one the original shipped', { skip: !baseline }, () => {
-  assert.deepEqual(REWARDS, baseline.REWARDS);
-});
+test(
+  'reward definitions retain every original value except the shared rad explanation',
+  { skip: !baseline },
+  () => {
+    const withoutDescription = ({ description, ...definition }) => definition;
+    assert.deepEqual(REWARDS.map(withoutDescription), baseline.REWARDS.map(withoutDescription));
+    for (const reward of REWARDS) {
+      if (reward.key !== 'heading')
+        assert.equal(
+          reward.description,
+          baseline.REWARDS.find((old) => old.key === reward.key).description,
+        );
+    }
+  },
+);
 
 test('only the docking mission adds its own reward', () => {
   const dockOnly = REWARDS.filter((reward) => reward.dock).map((reward) => reward.key);

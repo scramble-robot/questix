@@ -1,3 +1,4 @@
+import { fromRpm, formatWheelRate } from '../core/angle-units.js';
 import { html, nothing, unsafeHTML } from '../vendor/lit-html.js';
 import { formatNumber } from '../core/dom.js';
 import { lessonGuide, figureGuide } from '../shell/lesson-guide.js';
@@ -320,8 +321,8 @@ function experienceExtra(chapter, copy) {
     caption: action === event.action ? text.updatedAction : text.unchangedAction,
   }));
   const wheels = fillSentence(text.wheels, {
-    left: format(event.rpm[0], 0),
-    right: format(event.rpm[1], 0),
+    left: formatWheelRate(fromRpm(event.rpm[0])),
+    right: formatWheelRate(fromRpm(event.rpm[1])),
   });
   // Open from the start: the estimates are what the robot learned from this step.
   return html`<details open>
@@ -927,4 +928,4 @@ function chapterPanels(model, copy, actions) {
   };
 }
 
-export { groupsNav, topicsNav, lessonGuides, chapterPanels };
+export { groupsNav, topicsNav, lessonGuides, chapterPanels, experienceExtra };

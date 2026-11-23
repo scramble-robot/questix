@@ -1,3 +1,14 @@
+import {
+  fromRpm,
+  toRpm,
+  toRadians,
+  toDegrees,
+  formatHeading,
+  formatChange,
+  formatTurnRate,
+  formatWheelRate,
+  fixed,
+} from '../core/angle-units.js';
 import { html, svg, nothing, unsafeHTML, ifDefined } from '../vendor/lit-html.js';
 import { formatNumber } from '../core/dom.js';
 import { snapToZero, fillText } from './basics-core.js';
@@ -28,7 +39,6 @@ const LIDAR_PLOT = { originX: 240, originY: 220, scale: 100 };
 const TURN_ARC_RADIUS = 0.4; // metres, drawn around the turning robot
 const TURN_ARC_SEGMENTS = 30;
 const EXAMPLE_SECONDS = 2; // the wheel example always runs for two seconds
-const SECONDS_PER_MINUTE = 60;
 const ALIGNED_ERROR = 0.035; // metres: below this the scans read as overlapping
 
 const quantity = (value, digits = 2) => formatNumber(snapToZero(value), digits);
@@ -55,7 +65,7 @@ function angleMark(centre, radius, from, to, text, colour) {
   };
   return svg`<polyline points=${points.join(' ')} fill="none" stroke=${colour} stroke-width="2"/>${label(at.x - 18, at.y + 5, text, `fill:${colour}`)}`;
 }
-const degrees = (radians) => (radians * 180) / Math.PI;
+const degrees = toDegrees;
 
 // --- figure toolkit -------------------------------------------------------------------------
 
@@ -143,20 +153,24 @@ function wheelsFigure({ estimate, actual, slipping }, copy) {
 }
 
 function wheelsCalculation({ leftRpm, rightRpm, estimate }, copy) {
-  const turns = (rpm) => quantity((rpm * EXAMPLE_SECONDS) / SECONDS_PER_MINUTE, 1);
+  const radians = (rpm) => fixed(fromRpm(rpm) * EXAMPLE_SECONDS);
   const travel = (metres) => quantity(metres * 100, 1);
   return html`${metric(copy.perTurn, copy.perTurnValue)}${metric(
     copy.travel,
-    html`${fillText(copy.travelLeft, { turns: turns(leftRpm), centimetres: travel(estimate.left) })}<br />${fillText(
+    html`${fillText(copy.travelLeft, { rate: fixed(fromRpm(leftRpm), 1), radians: radians(leftRpm), centimetres: travel(estimate.left) })}<br />${fillText(
         copy.travelRight,
-        { turns: turns(rightRpm), centimetres: travel(estimate.right) },
+        {
+          rate: fixed(fromRpm(rightRpm), 1),
+          radians: radians(rightRpm),
+          centimetres: travel(estimate.right),
+        },
       )}`,
   )}${positionMetric(
     copy.pose,
     fillText(copy.poseValue, {
       forward: travel(estimate.x),
       left: travel(estimate.y),
-      degrees: quantity(degrees(estimate.angle), 1),
+      heading: formatHeading(estimate.angle, { digits: 1 }),
     }),
   )}`;
 }
@@ -170,7 +184,14 @@ function wheelsObservation({ leftRpm, rightRpm, slipping }, copy) {
 
 function wheelsControls(wheels, copy, helpHtml, actions) {
   const rpmSlider = (id, title, value, onInput) =>
-    slider({ id, title, min: -30, max: 60, step: 15, value, text: `${value} rpm`, onInput });
+    slider({
+      id,
+      title,
+      ...copy.slider,
+      value: fromRpm(value),
+      text: formatWheelRate(fromRpm(value)),
+      onInput,
+    });
   return html`<h2>${copy.controlsTitle}</h2>
     <p>${copy.controlsIntro}</p>
     <div class="basics-presets">
@@ -183,9 +204,9 @@ function wheelsControls(wheels, copy, helpHtml, actions) {
       </button>
     </div>
     ${rpmSlider('basicsLeft', '左の車輪', wheels.leftRpm, (event) =>
-      actions.setLeftRpm(Number(event.target.value)),
+      actions.setLeftRpm(toRpm(Number(event.target.value))),
     )}${rpmSlider('basicsRight', '右の車輪', wheels.rightRpm, (event) =>
-      actions.setRightRpm(Number(event.target.value)),
+      actions.setRightRpm(toRpm(Number(event.target.value))),
     )}
     <p class="helper">${copy.rpmNote}</p>
     <label class="basics-check"
@@ -234,7 +255,12 @@ function imuFigure({ result }, copy) {
 function imuCalculation({ rate, seconds, distance, result }, copy) {
   return html`${metric(
     copy.heading,
-    fillText(copy.headingValue, { rate, seconds, degrees: rate * seconds }),
+    fillText(copy.headingValue, {
+      rate: fixed(toRadians(rate)),
+      seconds: fixed(seconds, 1),
+      rad: fixed(toRadians(rate * seconds)),
+      degrees: rate * seconds,
+    }),
   )}${metric(copy.distance, fillText(copy.distanceValue, { distance: quantity(distance) }))}${positionMetric(
     copy.pose,
     fillText(copy.poseValue, { forward: quantity(result.x), left: quantity(result.y) }),
@@ -247,12 +273,12 @@ function imuControls(imu, copy, actions) {
     <p>${copy.controlsIntro}</p>
     ${slider({
       id: 'basicsRate',
-      title: '回転の速さ',
+      title: copy.rateTitle,
       min: -45,
       max: 45,
       step: 15,
       value: imu.rate,
-      text: `${imu.rate} °/s`,
+      text: formatTurnRate(toRadians(imu.rate)),
       onInput: onInput(actions.setTurnRate),
     })}${slider({
       id: 'basicsSeconds',
@@ -286,7 +312,7 @@ function imuParts(model, copy, actions) {
     figure: imuFigure(imu, copy),
     calculation: imuCalculation(imu, copy.calculation),
     observation: fillText(copy.observation, {
-      degrees: imu.rate * imu.seconds,
+      angle: formatChange(toRadians(imu.rate * imu.seconds)),
       distance: quantity(imu.distance),
     }),
     controls: imuControls(imu, copy, actions),

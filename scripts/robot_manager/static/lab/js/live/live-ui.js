@@ -1,3 +1,4 @@
+import { loadAngleJson, formatHeading, formatTurnRate, unitWords } from '../core/angle-units.js';
 import {
   DEFAULT_PORT,
   onRobot,
@@ -10,14 +11,14 @@ import {
 } from './robot-link.js';
 import { scanMount } from './capture-core.js';
 import { wheelMonitorSample } from './wheel-monitor-core.js';
-import { loadJson, fillSentence } from '../core/content.js';
+import { fillSentence } from '../core/content.js';
 import { scrollBehavior } from '../core/dom.js';
 import { html, render, nothing } from '../vendor/lit-html.js';
 
 import { liveStatus, onLiveStatus } from './live-status.js';
 import { renderLive, resetLiveLayout } from './live-layout.js';
 
-const copy = await loadJson('content/live/link.json');
+const copy = await loadAngleJson('content/live/link.json');
 
 // Header button and "実機" dialog. Drawing only happens while the dialog is open.
 const $ = (id) => document.getElementById(id);
@@ -255,11 +256,23 @@ function readings() {
   const twist = latestRobot('twist');
   const f = (v, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : '—');
   $('robotPose').textContent = odom
-    ? `x ${f(odom.x)} m · y ${f(odom.y)} m · 向き ${f((odom.theta * 180) / Math.PI, 0)}°`
+    ? fillSentence(unitWords.maintenancePose, {
+        x: f(odom.x),
+        y: f(odom.y),
+        heading: formatHeading(odom.theta, { short: true }),
+      })
     : '—';
-  $('robotSpeed').textContent = drive ? `前後 ${f(drive.v)} m/s · 回転 ${f(drive.w)} rad/s` : '—';
+  $('robotSpeed').textContent = drive
+    ? fillSentence(unitWords.maintenanceMotion, {
+        speed: f(drive.v),
+        turn: formatTurnRate(drive.w),
+      })
+    : '—';
   $('robotCommand').textContent = twist
-    ? `前後 ${f(twist.linear)} m/s · 回転 ${f(twist.angular)} rad/s`
+    ? fillSentence(unitWords.maintenanceMotion, {
+        speed: f(twist.linear),
+        turn: formatTurnRate(twist.angular),
+      })
     : '—';
   drawEstop();
 }

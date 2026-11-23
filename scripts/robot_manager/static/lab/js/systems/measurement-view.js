@@ -1,3 +1,4 @@
+import { formatChange, toRadians } from '../core/angle-units.js';
 import { html, svg, nothing, live, unsafeHTML, ref } from '../vendor/lit-html.js';
 import { fillSentence as fill } from '../core/content.js';
 import { formatTick } from '../core/chart-scale.js';
@@ -363,7 +364,7 @@ function pendingDrives(model, copy, actions) {
               <tr>
                 <td>${drive.number}</td>
                 <td>${drive.wheel.toFixed(1)}</td>
-                <td>${drive.turn + '°'}</td>
+                <td>${formatChange(toRadians(drive.turn))}</td>
                 <td>
                   <input
                     data-drive-floor=${index}

@@ -1,3 +1,4 @@
+import { DEGREES_PER_RADIAN } from '../core/angle-units.js';
 import { renderLive, resetLiveLayout } from '../live/live-layout.js';
 import { render } from '../vendor/lit-html.js';
 import { loadJson, fillSentence as fill } from '../core/content.js';
@@ -52,7 +53,6 @@ const MIN_HOLD_SECONDS = CAPTURE_DEFAULTS.minHoldSeconds;
 const VALUE_DIGITS = 3;
 const CM_PER_M = 100;
 const DRIVE_DIGITS = 1; // cm: a tape measure is read to the millimetre at best
-const DEGREES_PER_RADIAN = 180 / Math.PI;
 
 const states = new Map();
 let shown = null; // scenario currently in the panel, or null when no course offers one

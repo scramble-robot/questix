@@ -1,11 +1,18 @@
-import { loadJson } from '../core/content.js';
+import {
+  fromRpm,
+  toRadians,
+  formatHeading,
+  formatTurnRate,
+  formatWheelRate,
+} from '../core/angle-units.js';
+import { loadAngleJson } from '../core/angle-units.js';
 import { drawQuestixTop } from '../core/questix-views.js';
 
 // Sensor figures of the reinforcement-learning lab: the LiDAR sweep and the time plot behind the
 // "センサーの値を見る" panel. Both draw from plain data handed in by lab.js and hold no state.
 // What each figure means is written in content/rl/lab-sensors.json.
 
-const copy = await loadJson('content/rl/lab-sensors.json');
+const copy = await loadAngleJson('content/rl/lab-sensors.json');
 
 const SERIES_COLORS = ['#087f75', '#6760bd', '#c07626'];
 
@@ -51,12 +58,26 @@ function graphSpec(mode, view = 'tilt') {
   return copy.graphs.tilt;
 }
 
+// Raw sensor history remains unchanged (rpm, gyro degrees/s). Convert only the view.
+function sensorValue(key, value) {
+  if (key === 'left' || key === 'right') return fromRpm(value);
+  if (key === 'gyro') return toRadians(value);
+  return value;
+}
+
 // The numbers printed beside the plot: the latest sample of every series it draws.
 function graphReadings(history, spec) {
   return spec.keys.map((key, index) => ({
     label: spec.labels[index],
     color: SERIES_COLORS[index],
-    value: (history.at(-1)?.[key] || 0).toFixed(1),
+    value:
+      key === 'yaw'
+        ? formatHeading(toRadians(history.at(-1)?.[key] || 0))
+        : key === 'gyro'
+          ? formatTurnRate(toRadians(history.at(-1)?.[key] || 0))
+          : key === 'left' || key === 'right'
+            ? formatWheelRate(fromRpm(history.at(-1)?.[key] || 0))
+            : (history.at(-1)?.[key] || 0).toFixed(1),
   }));
 }
 
@@ -133,11 +154,11 @@ function plotRange(spec, observed, threshold) {
       max: Math.max(spec.max, threshold * 1.15, ...observed.map((value) => value * 1.08)),
     };
   if (spec.keys[0] === 'gyro') {
-    const top = Math.ceil(Math.max(180, ...observed.map(Math.abs)) / 90) * 90;
+    const top = Math.ceil(Math.max(Math.PI, ...observed.map(Math.abs)));
     return { min: -top, max: top };
   }
   if (spec.keys[0] === 'left') {
-    const top = Math.max(80, ...observed.map(Math.abs));
+    const top = Math.max(fromRpm(80), ...observed.map(Math.abs));
     return { min: -top, max: top };
   }
   return { min: spec.min, max: spec.max };
@@ -231,7 +252,12 @@ function drawGraph(canvas, history, spec, threshold, markers) {
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   const end = Math.max(PLOT.window, history.at(-1)?.t || 0);
   const start = end - PLOT.window;
-  const samples = history.filter((sample) => sample.t >= start);
+  const samples = history
+    .filter((sample) => sample.t >= start)
+    .map((sample) => ({
+      ...sample,
+      ...Object.fromEntries(spec.keys.map((key) => [key, sensorValue(key, sample[key])])),
+    }));
   const observed = samples.flatMap((sample) => spec.keys.map((key) => sample[key] || 0));
   const { min, max } = plotRange(spec, observed, threshold);
   const axis = {

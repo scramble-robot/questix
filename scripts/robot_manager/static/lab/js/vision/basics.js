@@ -1,5 +1,6 @@
+import { loadAngleJson } from '../core/angle-units.js';
 import { render } from '../vendor/lit-html.js';
-import { loadJson, fillSentence as fill } from '../core/content.js';
+import { fillSentence as fill } from '../core/content.js';
 import { formatNumber } from '../core/dom.js';
 import { DEPTH_CONTENT, depthSource, renderDepth } from './depth-ui.js';
 import {
@@ -51,7 +52,7 @@ import {
 // basics-view.js and draws overlays through basics-render.js. Texts live in
 // content/vision/basics.json.
 
-const copy = await loadJson('content/vision/basics.json');
+const copy = await loadAngleJson('content/vision/basics.json');
 
 const VISION_CHAPTERS = [
   ['capture', '撮り方を変える', 0],

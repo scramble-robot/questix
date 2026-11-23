@@ -38,18 +38,21 @@
     "raw": "生の値",
     "filtered": "なめらか",
     "filteredValue": "なめらかにした値 {rpm} rpm",
-    "target": "送った指令"
+    "target": "送った指令",
+    "unitNote": "{@rpm}。{@wheelConversion}。",
+    "angularValue": "{@rpmAux}"
   },
   "motion": {
     "speed": "前後の速さ",
-    "turn": "回転の速さ",
-    "turnDegrees": "約{degrees}°/s・左回りが＋"
+    "turn": "ロボットの旋回の角速度",
+    "turnDegrees": "{@turnRate}・左回りが＋",
+    "unitNote": "{@radRate}。{@turnConversion}。"
   },
   "pose": {
     "title": "表示を始めてからの動き",
     "label": "上から見た図。上が表示を始めたときの前向き。青い線が車輪から求めた通り道、○が始めた位置。",
     "heading": "向き",
-    "headingValue": "{degrees}°",
+    "headingValue": "{@headingLong}",
     "headingNote": "左回りが＋",
     "moved": "前へ {forward} m・左へ {left} m",
     "grid": "1マス {cm} cm",
@@ -89,7 +92,7 @@
     "kept": "メモはこの端末のブラウザに残ります。大事なメモは保存してください。",
     "fileName": "QUESTiX-LAB-測定メモ-{place}.txt",
     "fileHeading": "QUESTiX LAB 測定メモ（{place}）",
-    "line": "{time} 左 {left} rpm・右 {right} rpm／前後 {speed} m/s・回転 {turn} rad/s／向き {heading}°／前 {front} m／非常停止：{estop}",
+    "line": "{time} 左 {left} rpm・右 {right} rpm／前後 {speed} m/s・旋回 {turn}／向き {heading}／前 {front} m／非常停止：{estop}",
     "estopPressed": "押されています",
     "estopReleased": "解除されています",
     "unknown": "—"

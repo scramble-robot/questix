@@ -1,4 +1,5 @@
 import { renderLive } from './live-layout.js';
+import { formatTurnRate, unitWords } from '../core/angle-units.js';
 import { controlStatus, hardBlocked } from './control-status.js';
 import { html, nothing, render, unsafeHTML } from '../vendor/lit-html.js';
 import { fillSentence as fill } from '../core/content.js';
@@ -198,7 +199,7 @@ function speedSlider(model, key, label) {
       }}
     />
     <output
-      >${shown === null ? '—' : shown.toFixed(2)} ${key === 'linear' ? 'm/s' : 'rad/s'}</output
+      >${key === 'linear' ? `${shown === null ? '—' : shown.toFixed(2)} m/s` : shown === null ? unitWords.turnRateUnknown : formatTurnRate(shown)}</output
     >
   </label>`;
 }

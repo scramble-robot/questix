@@ -124,6 +124,7 @@ test('attached hidden panels and strips use the shared snapshot before their fir
     onRobot() {},
     openRobotDialog() {},
     loadJson: async () => ({}),
+    loadAngleJson: async () => ({}),
     localStorage: { getItem: () => null },
     document: { hidden: false, createElement: element },
     performance: { now: () => 100 },

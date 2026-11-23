@@ -1,3 +1,4 @@
+import { formatHeading, fromRpm, fixed as unitFixed } from '../core/angle-units.js';
 import { html, svg, nothing } from '../vendor/lit-html.js';
 import { fillSentence as fill } from '../core/content.js';
 import { roleStyle } from '../core/palette.js';
@@ -136,6 +137,13 @@ function wheelCard(model, side, text) {
       ><span class="rs-unit">rpm</span>
     </p>
     ${
+      Number.isFinite(hasRaw ? raw : filtered)
+        ? html`<p class="rs-sub">
+            ${fill(words.angularValue, { rate: unitFixed(fromRpm(hasRaw ? raw : filtered), 1) })}
+          </p>`
+        : nothing
+    }
+    ${
       hasRaw
         ? html`<p class="rs-sub" data-rs-wheel-filtered=${side}>
             ${fill(words.filteredValue, { rpm: fixed(filtered, 1) })}
@@ -146,6 +154,7 @@ function wheelCard(model, side, text) {
       ${Number.isFinite(command) ? fill(words.command, { rpm: command.toFixed(1) }) : words.noCommand}
     </p>
     ${wheelChart(model, side, text)}
+    ${side === 'left' ? html`<p class="rs-sub">${words.unitNote}</p>` : nothing}
   </div>`;
 }
 
@@ -163,12 +172,9 @@ function motionCard(model, text) {
     </div>
     <div>
       <p class="rs-label">${text.motion.turn}</p>
-      <p class="rs-big" data-rs-turn>
-        <span class="rs-number">${motion ? signed(motion.turn, 2) : '—'}</span
-        ><span class="rs-unit">rad/s</span>
-      </p>
-      <p class="rs-sub">
-        ${Number.isFinite(degrees) ? fill(text.motion.turnDegrees, { degrees }) : nothing}
+      <p class="rs-sub">${text.motion.unitNote}</p>
+      <p class="rs-angular-value" data-rs-turn>
+        ${Number.isFinite(degrees) ? fill(text.motion.turnDegrees, { rate: unitFixed(motion.turn), degrees }) : '—'}
       </p>
     </div>
   </div>`;
@@ -232,10 +238,7 @@ function poseCard(model, text, actions) {
       ${poseFigure(pose, text)}
       <div class="rs-pose-readout">
         <p class="rs-sub">${words.heading}</p>
-        <p class="rs-big" data-rs-heading>
-          <span class="rs-number">${signed(pose.heading * DEGREES_PER_RADIAN, 0)}</span
-          ><span class="rs-unit">°</span>
-        </p>
+        <p class="rs-angular-value" data-rs-heading>${formatHeading(pose.heading)}</p>
         <p class="rs-sub">${words.headingNote}</p>
         <p class="rs-sub" data-rs-moved>
           ${fill(words.moved, { forward: signed(pose.forward, 2), left: signed(pose.left, 2) })}

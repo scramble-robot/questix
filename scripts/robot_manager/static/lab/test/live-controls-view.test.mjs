@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import { fillSentence as fill } from '../js/core/content.js';
+import { formatTurnRate, unitWords } from '../js/core/angle-units.js';
 import {
   shootControls,
   powerRange,
@@ -100,6 +101,30 @@ test('bench slider leaves an unreceived wheel limit unknown', () => {
     );
     assert.match(markup, /\?disabled=true/);
   }
+});
+
+test('bench angular slider retains both units when the limit is missing', () => {
+  const source = fs.readFileSync(new URL('../js/live/drive-ui.js', import.meta.url), 'utf8');
+  const body = source.slice(
+    source.indexOf('function speedSlider('),
+    source.indexOf('\nfunction benchPanel('),
+  );
+  const slider = vm.runInNewContext(`(${body})`, {
+    html,
+    bench: { linear: 0.1, angular: 0.5, held: null },
+    BENCH_MIN: { linear: 0.06, angular: 0.3 },
+    BENCH_STEP: { linear: 0.02, angular: 0.1 },
+    limitOf: (model, key) => model.limits[key],
+    hardBlocked: () => true,
+    formatTurnRate,
+    unitWords,
+  });
+  for (const value of [null, undefined, NaN, Infinity, '0.5']) {
+    const markup = slider({ limits: { angular: value } }, 'angular', '旋回');
+    assert.match(markup, /<output\s*>\s*— rad\/s（約 — °\/s）/);
+    assert.match(markup, /\?disabled=true/);
+  }
+  assert.match(slider({ limits: { angular: 0.8 } }, 'angular', '旋回'), /0\.50 rad\/s（約29°\/s）/);
 });
 
 test('motor program uses the unknown-limit copy until a finite speed arrives', () => {

@@ -496,3 +496,16 @@
 .rs-drive-estop-notice[aria-hidden='true'] {
   visibility: hidden;
 }
+
+/* Keep the degree/radian equivalence readable when the card wraps at 200% zoom. */
+.rs-angular-value {
+  margin: 4px 0;
+  color: var(--dark);
+  font-size: 18px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.rs-card.is-stale .rs-angular-value {
+  color: var(--muted);
+}
