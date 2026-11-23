@@ -2157,8 +2157,8 @@ const TRANSITION_KINDS = [
 ];
 const DERIVED = {
   deliveryDistance,
-  leftRate: (sample) => fromRpm(sample.left),
-  rightRate: (sample) => fromRpm(sample.right),
+  leftRate: (sample) => (Number.isFinite(sample.left) ? fromRpm(sample.left) : null),
+  rightRate: (sample) => (Number.isFinite(sample.right) ? fromRpm(sample.right) : null),
 };
 
 const valueOf = (sample, key) => {
