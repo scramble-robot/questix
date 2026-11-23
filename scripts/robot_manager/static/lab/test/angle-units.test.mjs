@@ -79,8 +79,8 @@ test('optional signs follow each rounded heading and turn-rate value', () => {
     [45, '+45°（+0.25π rad ≒ +0.79 rad）', '+45°（+0.25π rad）'],
     [0, '0°（0.00π rad ≒ 0.00 rad）', '0°（0.00π rad）'],
     [-45, '-45°（-0.25π rad ≒ -0.79 rad）', '-45°（-0.25π rad）'],
-    [-0.3, '0°（0.00π rad ≒ -0.01 rad）', '0°（0.00π rad）'],
-    [0.3, '0°（0.00π rad ≒ +0.01 rad）', '0°（0.00π rad）'],
+    [-0.3, '0°（0.00π rad ≒ 0.00 rad）', '0°（0.00π rad）'],
+    [0.3, '0°（0.00π rad ≒ 0.00 rad）', '0°（0.00π rad）'],
   ]) {
     assert.equal(formatHeading(toRadians(degrees), signed), longText);
     assert.equal(formatHeading(toRadians(degrees), short), shortText);
@@ -95,6 +95,22 @@ test('optional signs follow each rounded heading and turn-rate value', () => {
     assert.equal(formatTurnRate(rate, signed), expected);
   assert.equal(formatHeading(toRadians(45)), '45°（0.25π rad ≒ 0.79 rad）');
   assert.equal(formatTurnRate(0.5), '0.50 rad/s（約29°/s）');
+});
+
+test('auxiliary angles derive from displayed rounded degrees', () => {
+  for (const [degrees, expected] of [
+    [44.6, '45°（0.25π rad ≒ 0.79 rad）'],
+    [-44.6, '-45°（-0.25π rad ≒ -0.79 rad）'],
+    [0.5, '1°（0.01π rad ≒ 0.02 rad）'],
+    [0.49, '0°（0.00π rad ≒ 0.00 rad）'],
+    [-0.5, '-1°（-0.01π rad ≒ -0.02 rad）'],
+    [179.6, '180°（1.00π rad ≒ 3.14 rad）'],
+    [-179.6, '-180°（-1.00π rad ≒ -3.14 rad）'],
+  ])
+    assert.equal(formatHeading(toRadians(degrees)), expected);
+  assert.equal(formatHeading(toRadians(44.6), { signed: true }), '+45°（+0.25π rad ≒ +0.79 rad）');
+  assert.equal(formatHeading(toRadians(12.34), { digits: 1 }), '12.3°（0.07π rad ≒ 0.21 rad）');
+  assert.equal(formatChange(toRadians(400.6)), '401°（2.23π rad ≒ 7.00 rad）');
 });
 
 test('shared first-use words and rad explanation resolve in each content consumer', async () => {

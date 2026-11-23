@@ -1,7 +1,7 @@
 import { loadJson, loadText, fillSentence } from './content.js';
 
-// Presentation only. Never round before converting or feed formatted values back to physics,
-// commands, grading or recording serialization. Angular accelerations use the same scale.
+// Presentation only. Do not feed formatted values back to physics, commands, grading or recording.
+// Angular accelerations use the same scale.
 const DEGREES_PER_RADIAN = 180 / Math.PI;
 const RPM_PER_RADIAN_PER_SECOND = 60 / (2 * Math.PI);
 const toDegrees = (radians) => radians * DEGREES_PER_RADIAN;
@@ -27,10 +27,12 @@ function wrapHeading(radians) {
   return Object.is(wrapped, -0) ? 0 : wrapped;
 }
 function angleParts(radians, digits = 0, signed = false) {
+  const degrees = Number(fixed(toDegrees(radians), digits));
+  const displayedRadians = toRadians(degrees);
   return {
-    degrees: signedFixed(toDegrees(radians), digits, signed),
-    pi: signedFixed(radians / Math.PI, 2, signed),
-    rad: signedFixed(radians, 2, signed),
+    degrees: signedFixed(degrees, digits, signed),
+    pi: signedFixed(degrees / 180, 2, signed),
+    rad: signedFixed(displayedRadians, 2, signed),
   };
 }
 const unitWords = await loadJson('content/angle-units.json');
