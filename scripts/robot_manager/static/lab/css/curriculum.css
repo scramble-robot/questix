@@ -1089,6 +1089,13 @@ html {
 .basics-calculation .basics-position strong {
   font-size: 15px;
 }
+.basics-calculation .basics-calculation-note {
+  grid-column: 1/-1;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--muted);
+}
 .basics-observation {
   padding: 18px 26px;
   background: #edf5f2;

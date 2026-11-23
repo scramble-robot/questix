@@ -190,7 +190,7 @@ function wheelsCalculation({ leftRpm, rightRpm, estimate }, copy, radius = WHEEL
         heading: formatHeading(estimate.angle, { digits: 1 }),
       }),
     )}
-    <p class="basics-position">${copy.radianMeaning}</p>`;
+    <p class="basics-calculation-note">${copy.radianMeaning}</p>`;
 }
 
 function wheelsObservation({ leftRpm, rightRpm, slipping }, copy) {
