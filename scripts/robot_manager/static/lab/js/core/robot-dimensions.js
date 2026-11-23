@@ -20,10 +20,24 @@ export const ROBOT_DIMENSIONS = Object.freeze({
   // The CAD envelope extends past the outer tyre edges in both the measurements and the CAD
   // model, where the tyres are 39 mm wide.
   footprint: Object.freeze({ front: 0.245, rear: 0.4119, left: 0.32, right: 0.32 }),
-  // Centre of the CAD T-mini Plus body bounds. Its offset to the optical scan centre is unverified.
-  // z is relative to the axle midpoint, about 0.05 m above the CAD floor. The floor and ROS
-  // base_link are separate references.
-  lidarBodyCenter: Object.freeze({ x: -0.3215, y: 0, z: 0.06845 }),
+  // Defaults for simulators and disconnected views. Live robot views use the bridge's
+  // mount from the runtime transform. Add the next robot's front and rear LiDARs once specified.
+  lidars: Object.freeze([
+    Object.freeze({
+      name: 'rear',
+      // Match the live robot's transform frame. Use distinct frame names for the next two units.
+      frame: 'laser_frame',
+      // Centre of the CAD T-mini Plus body bounds. The offset to the optical scan centre is unverified.
+      // z is relative to the axle midpoint, about 0.05 m above the CAD floor. The floor and ROS
+      // base_link are separate references.
+      x: -0.3215,
+      y: 0,
+      z: 0.06845,
+      // Heading of the scan's zero angle is unverified. Set it after checking the physical robot
+      // as part of the LiDAR transform issue.
+      yaw: null,
+    }),
+  ]),
   // Provisional lesson speeds, pending the course owner's decision.
   maxLinear: 0.5,
   maxAngular: 1.5,
@@ -32,6 +46,16 @@ export const ROBOT_DIMENSIONS = Object.freeze({
   angularAccel: 1.5,
   motorMaxRpm: 475, // Profile ceiling for verification.
 });
+
+/** Return the model's list of LiDAR mounts. */
+export function lidarMounts(dimensions = ROBOT_DIMENSIONS) {
+  return dimensions.lidars;
+}
+
+/** Find a LiDAR mount by its lesson name. Returns undefined for an unknown name. */
+export function lidarMount(name, dimensions = ROBOT_DIMENSIONS) {
+  return lidarMounts(dimensions).find((mount) => mount.name === name);
+}
 
 export const linearToWheelAngular = (linear, dimensions = ROBOT_DIMENSIONS) =>
   linear / dimensions.wheelRadius;

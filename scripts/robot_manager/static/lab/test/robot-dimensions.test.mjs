@@ -4,6 +4,8 @@ import test from 'node:test';
 import {
   ROBOT_DIMENSIONS,
   footprintCorners,
+  lidarMount,
+  lidarMounts,
   linearToWheelAngular,
   linearToWheelRpm,
   rpmToWheelAngular,
@@ -31,14 +33,34 @@ test('QUESTiX dimensions are frozen and use the CAD envelope relative to the axl
   assert.ok(Math.min(left, right) > 0.277); // CAD outer tyre edge.
 });
 
-test('the frozen CAD LiDAR body centre is behind the axle and inside the footprint', () => {
-  const { footprint, lidarBodyCenter } = ROBOT_DIMENSIONS;
-  assert.ok(Object.isFrozen(lidarBodyCenter));
-  const { x, y, z } = lidarBodyCenter;
+test('the default LiDAR list is nonempty, frozen and has unique lesson names', () => {
+  const mounts = lidarMounts();
+  assert.equal(mounts, ROBOT_DIMENSIONS.lidars);
+  assert.ok(mounts.length >= 1);
+  assert.ok(Object.isFrozen(mounts));
+  assert.ok(mounts.every(Object.isFrozen));
+  assert.equal(new Set(mounts.map(({ name }) => name)).size, mounts.length);
+});
+
+test('the rear CAD LiDAR centre is behind the axle and inside the footprint', () => {
+  const { footprint } = ROBOT_DIMENSIONS;
+  const { frame, x, y, z, yaw } = lidarMount('rear');
+  assert.equal(frame, 'laser_frame');
   assert.deepEqual([x, y, z], [-0.3215, 0, 0.06845]);
+  assert.equal(yaw, null);
   assert.ok(x > -footprint.rear && x < 0);
   assert.ok(y > -footprint.right && y < footprint.left);
   assert.ok(z > 0);
+});
+
+test('LiDAR helpers accept an alternate model and return undefined for an unknown name', () => {
+  const front = { name: 'front' };
+  const rear = { name: 'rear' };
+  const dimensions = { lidars: [front, rear] };
+  assert.equal(lidarMounts(dimensions), dimensions.lidars);
+  assert.equal(lidarMount('front', dimensions), front);
+  assert.equal(lidarMount('rear', dimensions), rear);
+  assert.equal(lidarMount('missing', dimensions), undefined);
 });
 
 for (const config of [
