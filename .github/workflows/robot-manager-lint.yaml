@@ -7,6 +7,7 @@ name: Robot Manager Checks
 # These jobs fill that gap: the same flake8/pydocstyle configuration as the ROS
 # workflow's static-analysis job scoped to scripts/, robot_manager's pytest
 # suite, and the QUESTiX LAB teaching site's Node tests and Prettier check.
+# The LAB tests check that js/core/robot-dimensions.js matches the two wheel configuration YAML files below.
 # None of them needs ROS, hardware or systemd.
 on:
   workflow_dispatch:
@@ -16,6 +17,8 @@ on:
       - "scripts/**"
       - "questix_control_config/**"
       - "uart_joy_driver/src/joy_line_parser.cpp"
+      - "launcher/config/drive_component.yaml"
+      - "questix_lab_bridge/config/lab_bridge.yaml"
       - ".github/workflows/robot-manager-lint.yaml"
   pull_request:
     branches: [main]
@@ -23,6 +26,8 @@ on:
       - "scripts/**"
       - "questix_control_config/**"
       - "uart_joy_driver/src/joy_line_parser.cpp"
+      - "launcher/config/drive_component.yaml"
+      - "questix_lab_bridge/config/lab_bridge.yaml"
       - ".github/workflows/robot-manager-lint.yaml"
 
 permissions:
