@@ -1,3 +1,4 @@
+import { fromRpm, formatWheelChange } from '../core/angle-units.js';
 import { html, nothing, live, classMap, repeat, unsafeHTML } from '../vendor/lit-html.js';
 import { formatNumber } from '../core/dom.js';
 import { EXPERIMENT_STEPS } from '../shell/lesson-ui.js';
@@ -247,13 +248,20 @@ function learningChart(model, copy) {
   const metric = training.metric;
   const points = training.history.map((point) => ({
     x: point.episodes,
-    y: point[training.metricKey],
+    y:
+      training.metricKey === 'commandRate' && point.commandRate !== null
+        ? fromRpm(point.commandRate)
+        : point[training.metricKey],
   }));
   const rate = training.metricKey === 'rate';
   const layout = curveLayout({
     series: [{ role: 'actual', label: metric.name, points }],
     xMax: TOTAL_EPISODES,
-    yRange: rate ? [0, PERCENT] : training.yRange,
+    yRange: rate
+      ? [0, PERCENT]
+      : training.metricKey === 'commandRate'
+        ? training.yRange.map(fromRpm)
+        : training.yRange,
     yMax: rate ? PERCENT : undefined,
     yPadding: rate ? 0 : undefined,
   });
@@ -356,14 +364,11 @@ function resultsDetails(model, copy, actions) {
   return html`<details class="results-more">
     <summary>${copy.results.moreSummary}</summary>
     <p>
-      ${copy.results.commandRatePrefix}${orDash(results.commandRate)}${
-        copy.results.commandRateUnit
-      }${
+      ${copy.results.commandRatePrefix}${formatWheelChange(results.commandRate)}${
         results.previous
           ? '（' +
             copy.results.previousPrefix +
-            orDash(results.previous.commandRate) +
-            copy.results.commandRateUnit +
+            formatWheelChange(results.previous.commandRate) +
             '）'
           : ''
       }${copy.results.commandRateNote}
@@ -472,7 +477,9 @@ function sensorReading(model, copy) {
     (value) =>
       html`<div class="sensor-value">
         <i style=${'background:' + value.color}></i><span>${value.label}</span><b>${value.value}</b
-        ><small>${model.sensor.unit}</small>
+        ><small
+          >${['yaw', 'gyro', 'left'].includes(model.sensor.spec?.keys[0]) ? '' : model.sensor.unit}</small
+        >
       </div>`,
   );
 }

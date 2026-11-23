@@ -1,3 +1,4 @@
+import { formatMotorRate } from '../core/angle-units.js';
 import { benchSentence } from './bench-copy.js';
 import { html, nothing, unsafeHTML } from '../vendor/lit-html.js';
 import { formatNumber } from '../core/dom.js';
@@ -299,11 +300,11 @@ function metricItems(model, copy) {
     ];
   if (model.topic === 'esc')
     return [
-      [text.rpm, formatNumber(sample.rpm, 0) + ' rpm'],
+      [text.rpm, formatMotorRate(sample.rpm)],
       [text.loadCondition, shown.loaded ? text.loaded : text.unloaded],
     ];
   return [
-    [text.rpm, formatNumber(sample.rpm, 0) + ' rpm'],
+    [text.rpm, formatMotorRate(sample.rpm)],
     [text.current, formatNumber(sample.current, 2) + ' A'],
     [text.heating, formatNumber(sample.heating, 2) + ' W'],
   ];
@@ -648,7 +649,7 @@ function gearGoals(model, copy) {
   const force = formatNumber(values.force, 1) + ' N';
   const speed = formatNumber(values.speed, 2) + ' m/s';
   return html`<div class="motor-metrics">
-      <div><span>${text.wheelRpm}</span><strong>${formatNumber(values.rpm, 0)} rpm</strong></div>
+      <div><span>${text.wheelRpm}</span><strong>${formatMotorRate(values.rpm)}</strong></div>
       <div>
         <span>${text.wheelTorque}</span><strong>${formatNumber(values.torque, 3)} N·m</strong>
       </div>

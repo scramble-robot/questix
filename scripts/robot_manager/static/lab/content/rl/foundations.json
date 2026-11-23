@@ -89,7 +89,7 @@
     "valueChanged": "この状況での行動の見積もりは {before} から {after} に変わりました。",
     "valueUnchanged": "この状況での行動の見積もりは {before} のままで、変わりませんでした。",
     "wheelsTitle": "行動ごとの見積もり（今回の経験で更新）",
-    "wheels": "左右の車輪：{left} / {right} rpm。左右の回る速さを変えて向きを変えます。",
+    "wheels": "左右の車輪の角速度：{left} / {right}。{@radRate}。{@rpm}。{@wheelConversion}。左右の角速度を変えて向きを変えます。",
     "updatedAction": "今回更新した行動",
     "unchangedAction": "今回は変更なし",
     "valuesNote": "棒は、今回動く前の状況で、それぞれの行動から先に得られそうな点数の見積もりです。最初はすべて0で、経験した行動の値だけが変わります。受け取った今回の報酬とは別の値です。",

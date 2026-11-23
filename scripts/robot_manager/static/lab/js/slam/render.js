@@ -1,3 +1,4 @@
+import { fromRpm, RPM_PER_RADIAN_PER_SECOND, unitWords } from '../core/angle-units.js';
 import { drawRobot } from '../core/renderer.js';
 import { drawQuestixSide } from '../core/questix-views.js';
 import { drawSlamCamera } from './camera.js';
@@ -317,10 +318,14 @@ const CHART_ZERO_Y = 154;
 const CHART_HALF_HEIGHT = 100; // canvas units from zero to the axis maximum
 const CHART_TITLE_Y = 28;
 const CHART_TIME_LABEL_Y = 287;
-const DEGREES_PER_RADIAN = 180 / Math.PI;
 const SERIES = {
-  wheels: { keys: ['leftRpm', 'rightRpm'], scale: 1, floor: 50, axisLabel: '縦軸：rpm' },
-  imu: { keys: ['gyroZ'], scale: DEGREES_PER_RADIAN, floor: 5, axisLabel: '縦軸：°/s' },
+  wheels: {
+    keys: ['leftRpm', 'rightRpm'],
+    scale: 1 / RPM_PER_RADIAN_PER_SECOND,
+    floor: fromRpm(50),
+    axisLabel: unitWords.sensorAxis,
+  },
+  imu: { keys: ['gyroZ'], scale: 1, floor: 0.1, axisLabel: unitWords.sensorAxis },
 };
 
 // The axis maximum stays fixed while replaying so the curve does not rescale under the learner.
@@ -337,12 +342,6 @@ function seriesAxisMaximum(frames, { keys, scale, floor }) {
 function chartLabelSize(canvas) {
   const displayedWidth = canvas.getBoundingClientRect().width || SENSOR_WIDTH;
   return Math.max(18, Math.min(32, (12 * SENSOR_WIDTH) / displayedWidth));
-}
-
-function currentReading(frame, kind) {
-  if (kind === 'wheels')
-    return '左 ' + frame.leftRpm.toFixed(1) + ' rpm / 右 ' + frame.rightRpm.toFixed(1) + ' rpm';
-  return '回転の速さ ' + (frame.gyroZ * DEGREES_PER_RADIAN).toFixed(2) + ' °/s';
 }
 
 function drawTimeSeries(context, canvas, log, cursor, kind) {
@@ -382,7 +381,6 @@ function drawTimeSeries(context, canvas, log, cursor, kind) {
   });
   context.fillStyle = '#2e505c';
   context.textAlign = 'left';
-  context.fillText(currentReading(log.frames[cursor], kind), CHART_LEFT, CHART_TITLE_Y);
   context.textAlign = 'right';
   context.fillText(series.axisLabel, CHART_RIGHT, CHART_TITLE_Y);
   context.textAlign = 'left';

@@ -1,5 +1,6 @@
+import { loadAngleJson } from '../core/angle-units.js';
 import { render } from '../vendor/lit-html.js';
-import { loadJson, loadText } from '../core/content.js';
+import { loadText } from '../core/content.js';
 import { downloadFile } from '../core/dom.js';
 import {
   PLAN_TOPICS,
@@ -20,7 +21,7 @@ import { reportLessonProgress } from '../shell/lesson-progress.js';
 // Path-planning course: state and behaviour. view.js turns the model into markup, render.js draws
 // the map, core.js plans and simulates. Texts live in content/planning.json.
 
-const copy = await loadJson('content/planning.json');
+const copy = await loadAngleJson('content/planning.json');
 const hardwareHtml = await loadText('content/planning/hardware.html');
 
 const SAMPLE_PERIOD = 0.04; // seconds of simulated time between recorded samples

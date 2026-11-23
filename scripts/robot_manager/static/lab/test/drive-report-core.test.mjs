@@ -14,7 +14,7 @@ import {
   describeOffset,
   describeTurnRate,
 } from '../js/live/drive-report-core.js';
-import { loadJson } from '../js/core/content.js';
+import { loadAngleJson as loadJson } from '../js/core/angle-units.js';
 
 const copy = await loadJson('content/live/drive-report.json');
 
@@ -174,9 +174,9 @@ test('a commanded run counts as moved even when the wheels did not turn', () => 
 });
 
 test('turns and end positions are worded by their sign', () => {
-  assert.equal(describeTurn((43 * Math.PI) / 180, copy), '左へ43°');
-  assert.equal(describeTurn((-12.4 * Math.PI) / 180, copy), '右へ12°');
-  assert.equal(describeTurn(0.001, copy), '0°');
+  assert.equal(describeTurn((43 * Math.PI) / 180, copy), '左へ43°（0.24π rad ≒ 0.75 rad）');
+  assert.equal(describeTurn((-12.4 * Math.PI) / 180, copy), '右へ12°（0.07π rad ≒ 0.21 rad）');
+  assert.equal(describeTurn(0.001, copy), '0°（0.00π rad ≒ 0.00 rad）');
   assert.equal(describeTurn(null, copy), '—');
   assert.equal(describeOffset(0.6, -0.012, copy), '前へ 60.0 cm・右へ 1.2 cm');
   assert.equal(describeOffset(-0.283, 0.087, copy), '後ろへ 28.3 cm・左へ 8.7 cm');

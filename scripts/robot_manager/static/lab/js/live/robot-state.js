@@ -1,5 +1,6 @@
+import { loadAngleJson } from '../core/angle-units.js';
 import { html, render, nothing, ref } from '../vendor/lit-html.js';
-import { loadJson, fillSentence as fill } from '../core/content.js';
+import { fillSentence as fill } from '../core/content.js';
 import { downloadFile } from '../core/dom.js';
 import { onRobot, robotState, latestRobot } from './robot-link.js';
 import { liveLink } from './capture.js';
@@ -29,7 +30,7 @@ import { robotStateView, memoView, stripView } from './robot-state-view.js';
 // The same tracker feeds the compact strip (`liveStateStrip`) a live block shows right under its
 // start button: the few values to watch while the robot runs, where the button was pressed.
 
-const text = await loadJson('content/live/robot-state.json');
+const text = await loadAngleJson('content/live/robot-state.json');
 
 const REDRAW_MS = 100; // about 10 redraws a second
 const MEMO_PREFIX = 'questix-lab-state-memo:';

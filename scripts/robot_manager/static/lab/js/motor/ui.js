@@ -1,6 +1,7 @@
+import { loadAngleJson } from '../core/angle-units.js';
 import { renderLive, resetLiveLayout } from '../live/live-layout.js';
 import { render } from '../vendor/lit-html.js';
-import { loadJson, loadText, fillSentence as fill } from '../core/content.js';
+import { loadText, fillSentence as fill } from '../core/content.js';
 import { downloadFile } from '../core/dom.js';
 import { revealElement, revealIfHidden } from '../core/reveal.js';
 import { createLiveSession } from '../live/live-session.js';
@@ -49,7 +50,7 @@ import { reportLessonProgress } from '../shell/lesson-progress.js';
 // table to the shared measurement lab (js/systems/measurement-lab.js) without retyping; without a
 // robot, an example table can be analysed the same way.
 
-const copy = await loadJson('content/motor.json');
+const copy = await loadAngleJson('content/motor.json');
 const fragments = {
   hardware: await loadText('content/motor/hardware.html'),
   loadHelp: await loadText('content/motor/load-help.html'),

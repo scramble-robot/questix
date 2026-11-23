@@ -1,5 +1,6 @@
+import { loadAngleJson } from '../core/angle-units.js';
 import { html, svg, nothing, styleMap } from '../vendor/lit-html.js';
-import { loadJson, fillSentence as fill } from '../core/content.js';
+import { fillSentence as fill } from '../core/content.js';
 import {
   describeOffset,
   describeTurn,
@@ -56,7 +57,7 @@ const REPORT_METRICS = [
   'closest',
 ];
 
-const reportCopy = await loadJson('content/live/drive-report.json');
+const reportCopy = await loadAngleJson('content/live/drive-report.json');
 const text = () => reportCopy;
 
 const fixed = (value, digits) => (Number.isFinite(value) ? value.toFixed(digits) : '—');
@@ -639,6 +640,7 @@ function driveReportView(run, { compact = false, metrics = null, saveRun, compar
   const path = pathPart(run.report.summary, run.report.series.path);
   return html`<section class="drive-report ${compact ? 'compact' : ''}" data-drive-report=${run.id}>
     ${reportHeader(run)}
+    <p class="drive-note">${text().unitNote}</p>
     ${
       compact
         ? compactBody(run, [...charts, { name: 'path', view: path }], metrics)

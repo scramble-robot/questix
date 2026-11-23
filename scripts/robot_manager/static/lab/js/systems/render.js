@@ -1,4 +1,5 @@
 import { html, svg, nothing } from '../vendor/lit-html.js';
+import { fromRpm, loadAngleJson } from '../core/angle-units.js';
 import { loadJson, fillSentence as fill } from '../core/content.js';
 import { roleStyle } from '../core/palette.js';
 import { niceScale, formatTick, scaleTo } from '../core/chart-scale.js';
@@ -22,7 +23,7 @@ import {
 // than 12 px on a 390 px phone. Colours come from roles (js/core/palette.js), never from the
 // order of lines, and every line also has a dash pattern or a direct label.
 
-const copy = await loadJson('content/systems/render.json');
+const copy = await loadAngleJson('content/systems/render.json');
 const { status: STATUS } = await loadJson('content/systems/core.json');
 
 const SCENE_BACKGROUND = '#1b303b';
@@ -2154,7 +2155,11 @@ const TRANSITION_KINDS = [
   'stop-command',
   'target-move',
 ];
-const DERIVED = { deliveryDistance };
+const DERIVED = {
+  deliveryDistance,
+  leftRate: (sample) => (Number.isFinite(sample.left) ? fromRpm(sample.left) : null),
+  rightRate: (sample) => (Number.isFinite(sample.right) ? fromRpm(sample.right) : null),
+};
 
 const valueOf = (sample, key) => {
   const value = DERIVED[key] ? DERIVED[key](sample) : sample[key];

@@ -1,3 +1,4 @@
+import { degreesText } from '../core/angle-units.js';
 import { fillSentence as fill } from '../core/content.js';
 
 // Presentation only: keep rad/s as the parameter's value. Compute degrees from the unrounded
@@ -8,13 +9,6 @@ const fixed = (value, digits = 2) => {
   return rounded.toFixed(digits);
 };
 const signed = (value, digits = 2) => (Number(value) > 0 ? '+' : '') + fixed(value, digits);
-function degreesText(value) {
-  const degrees = (value * 180) / Math.PI;
-  if (!Number.isFinite(degrees)) return '—';
-  if (Math.abs(degrees) >= 10) return String(Math.round(degrees));
-  const text = degrees.toFixed(1);
-  return Number(text) === 0 ? '0.0' : text;
-}
 const angularParts = (value, sign = false) => ({
   value: sign ? signed(value) : fixed(value),
   degrees: degreesText(value),

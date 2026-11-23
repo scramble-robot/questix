@@ -9,7 +9,7 @@
   },
   "scales": {
     "forwardScale": { "label": "前後速度（倒し切ったとき）", "hint": "負の値で向きが逆になります", "range": "範囲 {min}〜{max} m/s" },
-    "turnScale": { "label": "旋回速度（倒し切ったとき）", "hint": "負の値で向きが逆になります", "range": "範囲 {min}〜{max} rad/s（約 {minDegrees}〜{maxDegrees}°/s）" }
+    "turnScale": { "label": "旋回速度（倒し切ったとき）", "hint": "{@radRate}。負の値で向きが逆になります", "range": "範囲 {min}〜{max} rad/s（約 {minDegrees}〜{maxDegrees}°/s）" }
   },
   "deadzone": { "label": "不感帯", "hint": "中心からこの大きさまでの入力を0とみなします（0〜0.99）" },
   "problems": {

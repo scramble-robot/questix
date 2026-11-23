@@ -122,3 +122,18 @@ test('mastery questions containing units retain correct and wrong grading', () =
     }
   assert(questions > 0);
 });
+
+test('standalone s is reserved for unit-bearing equations, never prose or playback time', () => {
+  for (const path of [...files(new URL('content/', root)), ...files(new URL('js/', root))]) {
+    const text = fs.readFileSync(path, 'utf8');
+    const lines = text
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .split('\n')
+      .map((line) => line.split('//')[0]);
+    for (const line of lines) {
+      if (/['"`] s['"`]/.test(line)) assert.fail(path.pathname + ': ' + line);
+      if (/[0-9}] s(?:[ 。'"`<]|$)/.test(line))
+        assert(/[×÷=]/.test(line) && /(?:rad|m|°)\/s/.test(line), path.pathname + ': ' + line);
+    }
+  }
+});

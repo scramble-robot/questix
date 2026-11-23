@@ -1,5 +1,5 @@
+import { loadAngleJson } from '../core/angle-units.js';
 import { render } from '../vendor/lit-html.js';
-import { loadJson } from '../core/content.js';
 import { reportLessonProgress } from '../shell/lesson-progress.js';
 import {
   KEYMAP_TOPICS,
@@ -28,7 +28,7 @@ import { tableText } from './format.js';
 // the on-screen controller. Nothing here talks to the robot: the learner's mapping reaches the
 // robot only when the teacher enters it in Robot Manager (the 実機に反映する topic says how).
 
-const copy = await loadJson('content/keymap.json');
+const copy = await loadAngleJson('content/keymap.json');
 
 // Topic mappings use the robot-oriented drive defaults; copies below remain per experiment.
 // Where the on-screen sticks come to rest in the dead-zone experiment (a worn stick).

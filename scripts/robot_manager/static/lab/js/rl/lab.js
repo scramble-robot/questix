@@ -1,5 +1,6 @@
+import { fillSentence } from '../core/content.js';
+import { unitWords, loadAngleJson } from '../core/angle-units.js';
 import { render } from '../vendor/lit-html.js';
-import { loadJson } from '../core/content.js';
 import { downloadFile, formatNumber } from '../core/dom.js';
 import { lessonGuide, figureGuide } from '../shell/lesson-guide.js';
 import { SENSOR_COPY } from '../shell/lesson-ui.js';
@@ -25,7 +26,7 @@ import { stickyRange } from './curve-core.js';
 // core/renderer.js and sensors.js draw the figures, experiment.js runs the training and the test
 // batch. Texts live in content/rl/lab.json.
 
-const copy = await loadJson('content/rl/lab.json');
+const copy = await loadAngleJson('content/rl/lab.json');
 
 const CONTROL_PERIOD = 0.1; // seconds of simulated time per manual drive command
 const MAX_FRAME = 0.1; // seconds; a long browser stall must not teleport the robot
@@ -446,7 +447,10 @@ function buildModel() {
     speed,
     runRewards: runRewardsModel(),
     sceneTitle: sceneTitle(),
-    sceneTime: playback || manual ? formatNumber(displayFrame.state.t) + ' s' : '',
+    sceneTime:
+      playback || manual
+        ? fillSentence(unitWords.seconds, { value: formatNumber(displayFrame.state.t) })
+        : '',
     sceneCaption: sceneCaption(),
     sceneNextHidden: !displayFrame || !playback || manual || playback.cursor < playback.result.time,
     sceneNextLabel: sceneNextLabel(),

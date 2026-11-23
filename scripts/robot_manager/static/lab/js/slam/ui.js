@@ -1,5 +1,6 @@
+import { loadAngleJson } from '../core/angle-units.js';
 import { render } from '../vendor/lit-html.js';
-import { loadJson, loadText } from '../core/content.js';
+import { loadText } from '../core/content.js';
 import { downloadFile } from '../core/dom.js';
 import { lessonGuide, figureGuide } from '../shell/lesson-guide.js';
 import { generateSlamLog, estimateSlam, slamMetrics, validateSlamLog } from './engine.js';
@@ -22,7 +23,7 @@ import { fillSentence as fill } from '../core/content.js';
 // render.js draws the canvases, engine.js simulates and estimates, basics.js owns the
 // "仕組みを知る" part. Learner-facing sentences live in content/slam/ui.json.
 
-const copy = await loadJson('content/slam/ui.json');
+const copy = await loadAngleJson('content/slam/ui.json');
 const methodNoteHtml = await loadText('content/slam/method-note.html');
 const basicsHtml = basicsTemplate();
 

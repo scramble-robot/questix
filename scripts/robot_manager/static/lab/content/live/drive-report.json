@@ -11,13 +11,13 @@
   "thisRun": "（この走行）",
   "lidar": "LiDAR",
   "speedChart": "前後の速さ",
-  "turnChart": "回転の速さ",
+  "turnChart": "ロボットの旋回の角速度",
   "frontChart": "正面の壁までの距離（LiDAR、正面±5°の中央値）",
   "path": "走った道すじ（上から見た図・スタートで前が上）",
   "chartSources": "指令は /target_twist、実測の速さは /drive_status、走った距離と道すじは /odom（車輪の回転から求めた位置）、壁までの距離は /scan（LiDAR）の値です。時間は、最初に走る指令が出た時刻を0秒として数えています。",
   "chartNames": {
     "speed": "前後の速さ",
-    "turn": "回転の速さ",
+    "turn": "旋回の角速度",
     "front": "壁までの距離",
     "path": "道すじ"
   },
@@ -35,7 +35,7 @@
   "turn": "向きの変化",
   "maxSpeed": "最高速度（実測）",
   "maxSpeedValue": "{speed} m/s（指令 {command} m/s）",
-  "maxTurnRate": "最高の回転の速さ（実測）",
+  "maxTurnRate": "最高のロボットの旋回の角速度（実測）",
   "turnRateValue": "{rate} rad/s（約{degrees}°/s）",
   "stop": "速さ0の指令から止まるまで",
   "stopValue": "{delay}秒・{distance} cm",
@@ -51,9 +51,9 @@
   "emergencyStop": "非常停止",
   "emergencyStopYes": "記録の間に押されていました",
   "none": "—",
-  "turnLeft": "左へ{degrees}°",
-  "turnRight": "右へ{degrees}°",
-  "turnNone": "0°",
+  "turnLeft": "左へ{@headingLong}",
+  "turnRight": "右へ{@headingLong}",
+  "turnNone": "{@headingLong}",
   "offsetForward": "前へ {cm} cm",
   "offsetBackward": "後ろへ {cm} cm",
   "offsetNoForward": "前後 0 cm",
@@ -87,5 +87,6 @@
   "openFailed": "「{name}」を開けませんでした：{reason}",
   "fileLesson": "記録ファイル",
   "historyLink": "この端末で走らせた記録（{count}件）は、ロボットに残った記録と一緒に「記録の一覧」にまとめてあります。グラフを見る・比べる・保存する・記録ファイルを加えることも、そこでできます。",
-  "historyLinkEmpty": "走らせた記録は、ロボットに残った記録と一緒に「記録の一覧」にまとまります。"
+  "historyLinkEmpty": "走らせた記録は、ロボットに残った記録と一緒に「記録の一覧」にまとまります。",
+  "unitNote": "{@radRate}。{@turnConversion}。"
 }

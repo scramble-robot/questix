@@ -1,3 +1,4 @@
+import { withAngleUnits } from '../js/core/angle-units.js';
 // Run with: node --test scripts/robot_manager/static/lab/test/*.test.mjs
 //
 // The 「実機の状態」 panel's arithmetic (js/live/robot-state-core.js): what it says about the robot
@@ -29,8 +30,8 @@ import {
 // Legacy receive-expiry cases below assume an already verified connection.
 const liveStatusModel = (...args) =>
   timingStatusModel(...args, { mode: 'ready', readyAt: -Infinity });
-const text = JSON.parse(
-  fs.readFileSync(new URL('../content/live/robot-state.json', import.meta.url), 'utf8'),
+const text = withAngleUnits(
+  JSON.parse(fs.readFileSync(new URL('../content/live/robot-state.json', import.meta.url), 'utf8')),
 );
 const config = { wheel_radius: 0.1, wheel_separation: 0.5 };
 const streams = { drive: '/drive_status', odom: '/odom', scan: '/scan', twist: '/target_twist' };
@@ -190,22 +191,21 @@ test('freshness: seconds ago, grey once stale, and a command that is simply not 
 
 test('a memo line carries the state of that moment, and dashes for stale values', () => {
   const tracker = createStateTracker();
-  ingest(tracker, 'drive', drive(0.2, 0), 0, config);
+  ingest(tracker, 'drive', drive(0.2, 0.5), 0, config);
   ingest(tracker, 'estop', estop(false), 0, config);
   ingest(tracker, 'odom', odom(0, 0, 0), 0, config);
   ingest(tracker, 'odom', odom(0.1, 0, 0.05), 50, config);
   ingest(tracker, 'scan', scanAhead(1.2), 50, config);
   const date = new Date(2026, 8, 25, 14, 3, 7);
   const model = robotStateModel(tracker, { link, now: 100 });
-  const rpm = (0.2 * RPM_PER_MPS).toFixed(1);
   assert.equal(
     snapshotLine(model, date, text.memo),
-    `14:03:07 左 ${rpm} rpm・右 ${rpm} rpm／前後 +0.20 m/s・回転 0.00 rad/s／向き +3°／前 1.20 m／非常停止：解除されています`,
+    `14:03:07 左 ${(0.075 * RPM_PER_MPS).toFixed(1)} rpm・右 ${(0.325 * RPM_PER_MPS).toFixed(1)} rpm／前後 +0.20 m/s・旋回 +0.50 rad/s（約+29°/s）／向き +3°（+0.02π rad）／前 1.20 m／非常停止：解除されています`,
   );
   const later = robotStateModel(tracker, { link, now: 5000 });
   assert.equal(
     snapshotLine(later, date, text.memo),
-    '14:03:07 左 — rpm・右 — rpm／前後 — m/s・回転 — rad/s／向き —°／前 — m／非常停止：—',
+    '14:03:07 左 — rpm・右 — rpm／前後 — m/s・旋回 —／向き —／前 — m／非常停止：—',
   );
 });
 

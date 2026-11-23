@@ -94,10 +94,11 @@
   "playback": {
     "hintPlaying": "地図上の動きと軌跡を見てください。",
     "hintPaused": "走行を一時停止しています。上のボタンで再開できます。",
-    "readingsIdle": "左右の車輪を動かして予定した道をたどります。rpmは1分間あたりの回転数です。",
+    "readingsIdle": "左右の車輪の角速度を変えて予定した道をたどります。{@radRate}。{@rpm}。{@wheelConversion}。",
     "keyboardHelp": "キーボードでも描けます。地図にフォーカスし、矢印キーで十字カーソルを10 cmずつ動かし、Enterで通過点を追加します。Backspaceで一つ戻せます。",
     "seek": "再生位置",
-    "seekTimeBefore": "— / — 秒"
+    "seekTimeBefore": "— / — 秒",
+    "wheelReadings": "左の車輪 {left}　右の車輪 {right}　移動 {travel} m"
   },
   "status": {
     "running": "ピンクの一点鎖線（予定した道）に沿って走っています。緑の実線が実際に走った軌跡です。",

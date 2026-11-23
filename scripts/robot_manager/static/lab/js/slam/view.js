@@ -1,3 +1,5 @@
+import { unitWords, fromRpm, formatWheelRate, formatTurnRate } from '../core/angle-units.js';
+import { fillSentence } from '../core/content.js';
 import { html, nothing, unsafeHTML, ref } from '../vendor/lit-html.js';
 import { formatNumber } from '../core/dom.js';
 import { lessonLabel, EXPERIMENT_STEPS, SENSOR_COPY } from '../shell/lesson-ui.js';
@@ -207,7 +209,10 @@ function stepNav(model, actions) {
 
 function timeLabel(model, copy) {
   if (!model.ready) return copy.scene.timeIdle;
-  return formatNumber(model.frame.t, 1) + ' / ' + formatNumber(model.endTime, 1) + ' s';
+  return fillSentence(unitWords.playbackSeconds, {
+    time: formatNumber(model.frame.t, 1),
+    end: formatNumber(model.endTime, 1),
+  });
 }
 
 function caption(model, copy) {
@@ -499,6 +504,19 @@ function sensorTabs(model, actions) {
   </div>`;
 }
 
+function sensorReading(model) {
+  const { frame } = model;
+  if (!frame) return '';
+  if (model.sensors.sensor === 'wheels')
+    return fillSentence(unitWords.slamWheels, {
+      left: formatWheelRate(fromRpm(frame.leftRpm)),
+      right: formatWheelRate(fromRpm(frame.rightRpm)),
+    });
+  if (model.sensors.sensor === 'imu')
+    return fillSentence(unitWords.slamTurn, { value: formatTurnRate(frame.gyroZ) });
+  return '';
+}
+
 function sensorSection(model, copy, actions) {
   const text = copy.sensors;
   const { open, sensor, cameraMode } = model.sensors;
@@ -538,6 +556,7 @@ function sensorSection(model, copy, actions) {
               <option value="depth">奥行き画像（デプス）</option>
             </select></label
           >
+          <p id="slamSensorReading">${sensorReading(model)}</p>
           <p id="slamSensorText">${sensorText(model, copy)}</p>
         </div>
       </div>

@@ -1,3 +1,4 @@
+import { loadAngleJson } from '../core/angle-units.js';
 import {
   World,
   Trainer,
@@ -6,14 +7,13 @@ import {
   DEFAULT_PHYSICS,
   summarizeEvaluation,
 } from '../core/engine.js';
-import { loadJson } from '../core/content.js';
 
 // Reinforcement-learning lab, maths only: one Experiment owns the settings a learner chose, the
 // policy trained from them, the fixed test batch that follows and the log of earlier revisions.
 // No DOM and no window here, so the whole file can be exercised from Node (test/rl-experiment.
 // test.mjs). Learner-facing wording lives in content/rl/lab-experiment.json.
 
-const copy = await loadJson('content/rl/lab-experiment.json');
+const copy = await loadAngleJson('content/rl/lab-experiment.json');
 
 const TEST_PLACES = 20; // start positions in one test batch
 const CLEARED_ARRIVALS = 16; // arrivals out of TEST_PLACES needed to clear the mission

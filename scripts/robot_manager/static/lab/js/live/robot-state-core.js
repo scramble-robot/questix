@@ -1,3 +1,4 @@
+import { DEGREES_PER_RADIAN, formatHeading, formatTurnRate } from '../core/angle-units.js';
 import { wheelRpm, wheelAuthority, forwardRpm, frontDistance, scanMount } from './capture-core.js';
 import { fillSentence as fill } from '../core/content.js';
 
@@ -50,7 +51,6 @@ const SPEED_AXIS_TOPS = [0.1, 0.2, 0.3, 0.5, 1, 2, 3]; // m/s
 const SPARK_WIDTH = 120; // SVG user units across the sparkline (= HISTORY_SECONDS)
 const SPARK_HEIGHT = 32; // SVG user units down
 const TIME_AXIS = { min: -HISTORY_SECONDS, max: 0, step: 5, ticks: [-10, -5, 0] };
-const DEGREES_PER_RADIAN = 180 / Math.PI;
 
 const wrapAngle = (angle) => Math.atan2(Math.sin(angle), Math.cos(angle));
 const finite = (...values) => values.every(Number.isFinite);
@@ -474,8 +474,8 @@ function snapshotLine(model, date, text) {
     left: wheels ? wheels.left.toFixed(1) : unknown,
     right: wheels ? wheels.right.toFixed(1) : unknown,
     speed: motion ? signed(motion.speed, 2) : unknown,
-    turn: motion ? signed(motion.turn, 2) : unknown,
-    heading: pose ? signed(pose.heading * DEGREES_PER_RADIAN, 0) : unknown,
+    turn: motion ? formatTurnRate(motion.turn, { signed: true }) : unknown,
+    heading: pose ? formatHeading(pose.heading, { short: true, signed: true }) : unknown,
     front: front && front.distance !== null ? front.distance.toFixed(2) : unknown,
     estop,
   });
